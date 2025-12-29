@@ -1,40 +1,28 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
-    <title>SCARLETT ESTATE: TITAN ELITE</title>
-    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-physics-system@v4.2.2/dist/aframe-physics-system.min.js"></script>
-    <style>
-        body { background: #000; margin: 0; overflow: hidden; }
-        #overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: radial-gradient(circle, #1a1a1a, #000);
-            display: flex; flex-direction: column; justify-content: center;
-            align-items: center; z-index: 10000; border: 15px solid #d4af37;
-        }
-        .title { color: gold; font-family: serif; font-size: 3.5rem; text-shadow: 0 0 20px gold; margin: 0; letter-spacing: 8px; text-align: center; }
-        .btn { margin-top: 40px; padding: 20px 80px; background: gold; color: black; font-weight: bold; font-size: 1.5rem; border: none; cursor: pointer; border-radius: 50px; box-shadow: 0 0 30px gold; }
-    </style>
+<meta charset="UTF-8">
+<title>SCARLETT VR POKER</title>
+<link rel="stylesheet" href="css/scarlett-theme.css">
+</head>
 
-    <script>
-        function start() {
-            document.getElementById('overlay').style.display = 'none';
-            // Resume audio context to fix sound issues in browsers
-            const scene = document.querySelector('a-scene');
-            if (scene.audioListener) scene.audioListener.context.resume();
-        }
+<body class="portal">
 
-        // Logic for the Betting System
-        AFRAME.registerComponent('poker-engine', {
-            init: function() {
-                this.pot = 0;
-                this.el.addEventListener('bet', (e) => {
-                    this.pot += e.detail.amount;
-                    document.querySelector('#pot-text').setAttribute('value', "TOTAL POT: $" + this.pot);
-                    // Update Wrist HUD
-                    document.querySelector('#wrist-cash').setAttribute('value', "BANK: $" + (50000 - this.pot));
+<h1>SCARLETT VR</h1>
+<p class="subtitle">PRIVATE POKER ESTATE</p>
+
+<div class="menu">
+  <a href="scenes/lobby-floor.html">ENTER THE FLOOR</a>
+  <a href="scenes/lobby-chamber.html">THE CHAMBER</a>
+  <a href="scenes/lobby-crown.html">THE CROWN ROOM</a>
+</div>
+
+<footer>
+<p>Virtual entertainment only. No real money gambling.</p>
+</footer>
+
+</body>
+</html>                    document.querySelector('#wrist-cash').setAttribute('value', "BANK: $" + (50000 - this.pot));
                 });
             }
         });

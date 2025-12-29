@@ -1,25 +1,107 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>SCARLETT VR POKER</title>
-<link rel="stylesheet" href="css/scarlett-theme.css">
+    <meta charset="utf-8">
+    <title>SCARLETT ESTATE | POKER PROTOCOL</title>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
+    
+    <style>
+        body { background: #000; margin: 0; overflow: hidden; font-family: 'Garamond', serif; }
+        #splash-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle, #1a1a1a, #000);
+            display: flex; flex-direction: column; justify-content: center;
+            align-items: center; z-index: 10000; border: 15px solid #d4af37;
+        }
+        .logo-box { width: 300px; height: 300px; border-radius: 50%; border: 4px solid #d4af37; 
+                    box-shadow: 0 0 50px gold; margin-bottom: 20px; overflow: hidden; }
+        .logo-box img { width: 100%; height: 100%; object-fit: cover; }
+        .btn { padding: 20px 60px; background: #d4af37; color: #000; font-weight: bold; 
+               border: none; cursor: pointer; letter-spacing: 5px; box-shadow: 0 0 20px gold; }
+    </style>
+
+    <script>
+        // POKER ENGINE & ROOM SWITCHER
+        AFRAME.registerComponent('estate-manager', {
+            init: function() {
+                this.bank = 50000; this.pot = 0;
+                this.currentRoom = 'lobby';
+                
+                // Event Listeners for VR Interactions
+                window.addEventListener('bet-placed', (e) => {
+                    this.bank -= e.detail.amount;
+                    this.pot += e.detail.amount;
+                    this.updateHUD();
+                });
+            },
+            updateHUD: function() {
+                const hud = document.querySelector('#wrist-text');
+                if(hud) hud.setAttribute('value', `BANK: $${this.bank}\nPOT: $${this.pot}`);
+            }
+        });
+
+        function enterEstate() {
+            document.getElementById('splash-screen').style.display = 'none';
+        }
+    </script>
 </head>
+<body>
 
-<body class="portal">
+    <div id="splash-screen">
+        <div class="logo-box">
+            <img src="https://output.googleusercontent.com/static/image_generation_content/0/generated_image.webp" alt="Scarlett Estate Logo">
+        </div>
+        <h1 style="color: gold; letter-spacing: 8px;">SCARLETT ESTATE</h1>
+        <button class="btn" onclick="enterEstate()">INITIALIZE VR</button>
+    </div>
 
-<h1>SCARLETT VR</h1>
-<p class="subtitle">PRIVATE POKER ESTATE</p>
+    <a-scene estate-manager>
+        <a-assets>
+            <img id="floor-tex" src="https://i.imgur.com/8975YtX.jpg">
+            <a-asset-item id="avatar" src="https://cdn.readyplayer.me/64b54e0b0e5132204a9e530a.glb"></a-asset-item>
+        </a-assets>
 
-<div class="menu">
-  <a href="scenes/lobby-floor.html">ENTER THE FLOOR</a>
-  <a href="scenes/lobby-chamber.html">THE CHAMBER</a>
-  <a href="scenes/lobby-crown.html">THE CROWN ROOM</a>
-</div>
+        <a-sky color="#050505"></a-sky>
+        <a-entity position="0 5 -5" particle-system="color: #d4af37; particleCount: 1000"></a-entity>
 
-<footer>
-<p>Virtual entertainment only. No real money gambling.</p>
-</footer>
+        <a-entity id="lobby-zone">
+            <a-plane rotation="-90 0 0" width="30" height="30" src="#floor-tex" repeat="5 5"></a-plane>
+            <a-text value="WELCOME TO THE ESTATE" position="0 4 -8" align="center" color="gold" width="10"></a-text>
+            
+            <a-entity position="0 1.5 -12">
+                <a-torus radius="2" radius-tubular="0.05" color="gold" animation="property: rotation; to: 0 360 0; loop: true; dur: 5000"></a-torus>
+                <a-text value="WALK THROUGH TO PLAY" align="center" position="0 0 0" color="white"></a-text>
+            </a-entity>
+        </a-entity>
+
+        <a-entity id="table-zone" position="0 0 -25">
+            <a-cylinder radius="3.5" height="1.1" color="#1a110a">
+                <a-cylinder position="0 0.6 0" radius="3.2" height="0.1" color="#043314"></a-cylinder>
+            </a-cylinder>
+            
+            <a-box class="clickable" onclick="this.emit('bet-placed', {amount: 1000})" position="0 1.3 1" width="0.5" height="0.2" depth="0.3" color="gold">
+                <a-text value="BET $1k" align="center" rotation="-90 0 0" position="0 0.11 0" width="3" color="black"></a-text>
+            </a-box>
+        </a-entity>
+
+        <a-entity id="rig" movement-controls="speed: 0.2">
+            <a-camera look-controls>
+                <a-cursor raycaster="objects: .clickable" color="gold"></a-cursor>
+            </a-camera>
+
+            <a-entity oculus-touch-controls="hand: left">
+                <a-plane position="0 0.05 0.1" rotation="-90 0 0" width="0.3" height="0.2" color="#000">
+                    <a-text id="wrist-text" value="BANK: $50,000\nPOT: $0" align="center" color="gold" width="1.5"></a-text>
+                </a-plane>
+            </a-entity>
+            
+            <a-entity oculus-touch-controls="hand: right" laser-controls="hand: right"></a-entity>
+        </a-entity>
+
+        <a-light type="ambient" intensity="0.5"></a-light>
+        <a-light type="point" position="0 5 -5" intensity="1.5" color="gold"></a-light>
+    </a-scene>
 
 </body>
 </html>

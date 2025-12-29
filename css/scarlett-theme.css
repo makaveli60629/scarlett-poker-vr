@@ -1,0 +1,19 @@
+body {
+  background:black;
+  color:gold;
+  font-family:serif;
+  text-align:center;
+}
+
+.portal h1 {
+  font-size:4rem;
+  letter-spacing:8px;
+}
+
+.menu a {
+  display:block;
+  margin:20px;
+  font-size:1.5rem;
+  color:gold;
+  text-decoration:none;
+}

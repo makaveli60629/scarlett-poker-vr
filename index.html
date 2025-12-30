@@ -2,23 +2,41 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>TITAN ESTATE | PHASE A</title>
+    <title>TITAN ESTATE | PHASE B</title>
     <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/aframe-teleport-controls@0.3.1/dist/aframe-teleport-controls.min.js"></script>
     <script>
-      // 1. SPLASH SCREEN LOGIC
+      let wallet = 20000;
+      let dailyClaimed = false;
+
+      // 1. SPLASH SCREEN TIMER
       window.onload = function() {
         setTimeout(() => {
           document.getElementById('splash-screen').setAttribute('visible', 'false');
           document.getElementById('world-content').setAttribute('visible', 'true');
-          // Start Ambient Sound or welcome logic here
-        }, 5000); // 5 Seconds
+        }, 4000);
       };
 
-      // 2. WALLET & MOVEMENT LOGIC
-      let wallet = 20000;
-      function quickWarp(pos) {
-        document.getElementById('rig').setAttribute('position', pos);
+      // 2. BLUE'S DAILY LOGIC
+      function claimDaily(id, amount) {
+        if (!dailyClaimed) {
+          wallet += amount;
+          dailyClaimed = true;
+          document.getElementById('watch-text').setAttribute('value', '$' + wallet);
+          document.getElementById(id).setAttribute('color', 'gold');
+          document.getElementById(id + '-val').setAttribute('value', '$' + amount);
+          document.getElementById('blue-status').setAttribute('value', 'WOOF! ENJOY THE CHIPS!');
+        }
+      }
+
+      function joinTable(tablePos, buyIn) {
+        if (wallet >= buyIn) {
+          wallet -= buyIn;
+          document.getElementById('watch-text').setAttribute('value', '$' + wallet);
+          document.getElementById('rig').setAttribute('position', tablePos);
+        } else {
+          alert("Visit the Boutique or Blue for chips!");
+        }
       }
     </script>
   </head>
@@ -27,48 +45,67 @@
       
       <a-assets>
         <img id="carpet" src="https://st3.depositphotos.com/3047333/12914/i/450/depositphotos_129147552-stock-photo-red-carpet-texture.jpg">
+        <img id="bricks" src="https://st2.depositphotos.com/1053631/6122/i/450/depositphotos_61223945-stock-photo-white-brick-wall-background.jpg">
       </a-assets>
 
-      <a-entity id="rig" position="0 0 10">
+      <a-entity id="rig" position="0 0 12">
         <a-camera id="head" position="0 1.6 0" look-controls>
           <a-cursor color="gold"></a-cursor>
         </a-camera>
         <a-entity oculus-touch-controls="hand: left" teleport-controls="cameraRig: #rig; teleportOrigin: #head; button: trigger; curveHitColor: gold; type: parabolic;"></a-entity>
         <a-entity oculus-touch-controls="hand: right" teleport-controls="cameraRig: #rig; teleportOrigin: #head; button: trigger; curveHitColor: gold; type: parabolic;"></a-entity>
-        
-        <a-entity position="0 0.05 0.1" rotation="-90 0 0" oculus-touch-controls="hand: left">
-            <a-box width="0.12" height="0.12" depth="0.02" color="#111"></a-box>
-            <a-text id="watch-text" value="$20000" color="gold" align="center" position="0 0 0.015" width="1"></a-text>
+        <a-entity oculus-touch-controls="hand: left">
+            <a-box position="0 0.05 0.1" rotation="-90 0 0" width="0.12" height="0.12" depth="0.02" color="#111">
+                <a-text id="watch-text" value="$20000" color="gold" align="center" position="0 0 0.015" width="1"></a-text>
+            </a-box>
         </a-entity>
       </a-entity>
 
-      <a-entity id="splash-screen" position="0 1.6 8">
-        <a-plane width="4" height="2" color="black" position="0 0 -1"></a-plane>
-        <a-text value="TEAM NOVA" color="gold" align="center" position="0 0.4 -0.9" width="6"></a-text>
-        <a-text value="SCARLET VR" color="white" align="center" position="0 0 -0.9" width="4"></a-text>
-        <a-cone color="gold" radius-bottom="0.2" height="0.3" position="0 0.7 -0.9" rotation="180 0 0"></a-cone> <a-text value="Loading Estate..." color="#555" align="center" position="0 -0.4 -0.9" width="3"></a-text>
+      <a-entity id="splash-screen" position="0 1.6 10">
+        <a-text value="TEAM NOVA\nSCARLET VR" color="gold" align="center" width="6"></a-text>
       </a-entity>
 
       <a-entity id="world-content" visible="false">
-        <a-plane src="#carpet" repeat="15 15" rotation="-90 0 0" width="40" height="40" class="clickable"></a-plane>
-        
-        <a-entity id="blue-npc" position="0 0 5">
-          <a-box width="3" height="1" depth="1" color="#111"></a-box> <a-text value="BLUE: CONCIERGE" position="0 2.2 0" align="center" color="gold" width="5"></a-text>
-          <a-entity position="0 0 -0.7">
-            <a-box width="0.5" height="0.8" depth="0.5" color="white"></a-box>
-            <a-box width="0.4" height="0.4" depth="0.4" position="0 0.6 0" color="#666"></a-box>
-            <a-sphere radius="0.03" color="blue" position="0.1 0.7 0.2"></a-sphere>
-            <a-sphere radius="0.03" color="blue" position="-0.1 0.7 0.2"></a-sphere>
+        <a-plane src="#carpet" repeat="20 20" rotation="-90 0 0" width="60" height="60" class="clickable"></a-plane>
+
+        <a-box src="#bricks" repeat="10 2" position="-15 2.5 0" width="0.2" height="5" depth="40"></a-box>
+        <a-box src="#bricks" repeat="10 2" position="15 2.5 0" width="0.2" height="5" depth="40"></a-box>
+
+        <a-entity id="lobby" position="0 0 8">
+          <a-box width="4" height="1" depth="1.5" color="#111"></a-box> <a-text id="blue-status" value="TALK TO BLUE FOR DAILY CHIPS" position="0 2.5 0" align="center" color="gold" width="5"></a-text>
+          <a-entity position="0 0 -1">
+            <a-box width="0.6" height="0.9" color="white"></a-box>
+            <a-box width="0.4" height="0.4" position="0 0.6 0" color="grey"></a-sphere>
+            <a-sphere radius="0.03" color="cyan" position="0.1 0.7 0.2"></a-sphere>
+            <a-sphere radius="0.03" color="cyan" position="-0.1 0.7 0.2"></a-sphere>
+          </a-entity>
+          <a-entity position="0 1.5 0.8">
+            <a-box class="clickable" width="0.3" height="0.45" color="white" position="-0.5 0 0" onclick="claimDaily('c1', 5000)"><a-text id="c1-val" value="?" align="center" color="black" position="0 0 0.06" width="2"></a-text></a-box>
+            <a-box class="clickable" width="0.3" height="0.45" color="white" position="0.5 0 0" onclick="claimDaily('c2', 10000)"><a-text id="c2-val" value="?" align="center" color="black" position="0 0 0.06" width="2"></a-text></a-box>
           </a-entity>
         </a-entity>
 
-        <a-entity position="-10 0 4">
-          <a-box width="4" height="3" depth="0.5" color="#111" position="0 1.5 -1"></a-box>
-          <a-text value="TITAN BOUTIQUE" position="0 2.5 0" align="center" color="gold" width="6"></a-text>
-        </a-box>
+        <a-entity id="room1" position="-8 0 -5">
+          <a-box src="#bricks" position="0 2.5 -3" width="6" height="5" depth="0.2"></a-box>
+          <a-cylinder color="#004d00" radius="2" height="0.1" position="0 0.9 0">
+              <a-text value="TITAN ROOKIE" align="center" position="0 0.06 0" rotation="-90 0 0" color="gold" width="4"></a-text>
+          </a-cylinder>
+          <a-box class="clickable" color="gold" width="1" height="0.1" depth="0.5" position="0 0.1 1.2" onclick="joinTable('-8 0 -4.2', 1000)"></a-box>
+        </a-entity>
 
-        <a-light type="ambient" color="#444"></a-light>
-        <a-light type="point" position="0 5 5" intensity="1.5" color="gold"></a-light>
+        <a-entity id="room2" position="0 0 -10">
+            <a-cylinder color="#000033" radius="2.5" height="0.1" position="0 0.9 0">
+                <a-text value="SCARLET ELITE" align="center" position="0 0.06 0" rotation="-90 0 0" color="gold" width="5"></a-text>
+            </a-cylinder>
+            <a-entity position="0 1.05 0.5">
+                <a-box color="white" width="0.2" height="0.01" depth="0.3" position="-0.15 0 0"><a-text value="A" color="red" align="center" position="0 0.01 0" rotation="-90 0 0" width="1.5"></a-text></a-box>
+                <a-box color="white" width="0.2" height="0.01" depth="0.3" position="0.15 0 0"><a-text value="K" color="black" align="center" position="0 0.01 0" rotation="-90 0 0" width="1.5"></a-text></a-box>
+            </a-entity>
+            <a-box class="clickable" color="gold" width="1" height="0.1" depth="0.5" position="0 0.1 1.5" onclick="joinTable('0 0 -9.2', 10000)"></a-box>
+        </a-entity>
+
+        <a-light type="ambient" color="#555"></a-light>
+        <a-light type="point" position="0 5 0" intensity="1.5" color="gold"></a-light>
       </a-entity>
 
     </a-scene>

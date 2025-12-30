@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Brick Club 111 - VR Poker</title>
+    <style>
+        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
+        #ui-overlay {
+            position: absolute; width: 100%; height: 100%; display: flex;
+            flex-direction: column; justify-content: center; align-items: center;
+            background: #111; z-index: 10;
+        }
+        button {
+            padding: 20px 50px; font-size: 24px; background: #b22222;
+            color: white; border: none; border-radius: 10px; cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-overlay">
+        <h1>BRICK CLUB VR</h1>
+        <button id="start-vr">PLAY VR (AUTO-SIT)</button>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+        import { VRButton } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/webxr/VRButton.js';
+
+        let scene, camera, renderer, menu;
+        let isMenuOpen = false;
+
+        function init() {
+            // 1. SETUP SCENE
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            document.body.appendChild(renderer.domElement);
+            document.body.appendChild(VRButton.createButton(renderer));
+
+            // 2. BRICK WALLS (The 4 Zones)
+            const loader = new THREE.TextureLoader();
+            const brickTex = loader.load('https://threejs.org/examples/textures/brick_diffuse.jpg');
+            const brickMat = new THREE.MeshStandardMaterial({ map: brickTex, side: THREE.DoubleSide });
+            
+            for(let i=0; i<4; i++) {
+                const room = new THREE.Mesh(new THREE.BoxGeometry(10, 5, 10), brickMat);
+                room.position.z = -(i * 11);
+                scene.add(room);
+            }
+
+            // 3. BRANDED TABLE
+            const table = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 0.2), new THREE.MeshStandardMaterial({color: 0x076324}));
+            table.position.set(0, 0, -4);
+            scene.add(table);
+
+            // 4. THE MENU & LEAVE BUTTON
+            menu = new THREE.Group();
+            const leaveBtn = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.1), new THREE.MeshBasicMaterial({color: 0xff0000}));
+            leaveBtn.name = "LEAVE";
+            menu.add(leaveBtn);
+            menu.visible = false;
+            scene.add(menu);
+
+            // 5. LIGHTING
+            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+
+            setupControllers();
+            
+            // This is the "EXACT LOOP" from your screenshot, now working properly:
+            renderer.setAnimationLoop(render);
+        }
+
+        function setupControllers() {
+            const controllerLeft = renderer.xr.getController(0);
+            controllerLeft.addEventListener('selectstart', () => {
+                if (isMenuOpen) exitVR(); 
+                else toggleMenu();
+            });
+            scene.add(controllerLeft);
+
+            const controllerRight = renderer.xr.getController(1);
+            controllerRight.addEventListener('selectstart', spawnBlueChips);
+            scene.add(controllerRight);
+        }
+
+        function toggleMenu() {
+            isMenuOpen = !isMenuOpen;
+            menu.visible = isMenuOpen;
+            menu.position.set(camera.position.x, camera.position.y, camera.position.z - 0.5);
+        }
+
+        function spawnBlueChips() {
+            const chip = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.01), new THREE.MeshBasicMaterial({color: 0x0000ff}));
+            chip.position.set(0, 1, -3.5);
+            scene.add(chip);
+        }
+
+        function exitVR() {
+            renderer.xr.getSession().end().then(() => {
+                window.location.reload(); // Restarts to lobby, no white screen
+            });
+        }
+
+        function render() {
+            renderer.render(scene, camera);
+        }
+
+        document.getElementById('start-vr').addEventListener('click', () => {
+            // AUTO-SIT
+            camera.position.set(0, 1.2, -3.5);
+            document.getElementById('ui-overlay').style.display = 'none';
+        });
+
+        init();
+    </script>
+</body>
+</html>

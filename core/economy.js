@@ -1,95 +1,132 @@
-AFRAME.registerSystem('economy', {
-    schema: {},
+// ==========================
+// SCARLETT VR POKER ECONOMY MODULE
+// Handles: chips, bank, tournaments, achievements, inventory, wrist HUD
+// ==========================
 
-    init: function () {
-        // Initialize pots and daily events
-        this.pots = {}; // key = tableID, value = total pot
-        this.dailyRewardClaimed = {};
-        this.tournaments = {}; // key = tournamentID
+AFRAME.registerComponent('economy-system', {
+    schema: {
+        startingBank: {type: 'int', default: 50000}, // Default starting bank
     },
 
-    createTable: function(tableID) {
-        this.pots[tableID] = 0;
+    init: function() {
+        this.bank = this.data.startingBank;
+        this.chips = 0;
+        this.achievements = {};
+        this.inventory = [];
+        this.tournamentEntries = {};
+        this.updateHUD();
+
+        // Listen to game events
+        this.el.addEventListener('bet', e => this.betChips(e.detail.amount));
+        this.el.addEventListener('win', e => this.addWinnings(e.detail.amount));
+        this.el.addEventListener('achievement', e => this.unlockAchievement(e.detail.name));
+        this.el.addEventListener('buy-item', e => this.buyItem(e.detail.item, e.detail.price));
+        this.el.addEventListener('tournament-entry', e => this.enterTournament(e.detail.tournamentName));
     },
 
-    placeBet: function(tableID, playerID, amount) {
-        const inv = this.el.sceneEl.systems['inventory'];
-        inv.subtractChips(playerID, amount);
-        this.pots[tableID] += amount;
-
-        // Update HUD
-        const wrist = document.querySelector('[wrist-hud]');
-        if (wrist) wrist.components['wrist-hud'].chipText.setAttribute('value', 'CHIPS: $' + inv.getChips(playerID));
-        console.log(`Player ${playerID} bet $${amount} on table ${tableID}. Total pot: $${this.pots[tableID]}`);
-    },
-
-    getPot: function(tableID) {
-        return this.pots[tableID] || 0;
-    },
-
-    distributePot: function(tableID, winners) {
-        const inv = this.el.sceneEl.systems['inventory'];
-        const totalPot = this.getPot(tableID);
-        if (winners.length === 0) return;
-
-        const winAmount = Math.floor(totalPot / winners.length);
-        winners.forEach(playerID => {
-            inv.addChips(playerID, winAmount);
-        });
-
-        this.pots[tableID] = 0;
-        console.log(`Distributed $${totalPot} among winners: ${winners.join(', ')}`);
-    },
-
-    giveDailyReward: function(playerID) {
-        const today = new Date().toDateString();
-        if (this.dailyRewardClaimed[playerID] === today) {
-            console.log(`Player ${playerID} already claimed daily reward.`);
-            return;
+    // -------------------------
+    // Chip & Bank Management
+    // -------------------------
+    betChips: function(amount) {
+        if(this.bank >= amount) {
+            this.bank -= amount;
+            this.chips += amount;
+            this.updateHUD();
+        } else {
+            console.warn('Not enough funds to bet!');
         }
-        const inv = this.el.sceneEl.systems['inventory'];
-        inv.addChips(playerID, 1000); // daily free chips
-        this.dailyRewardClaimed[playerID] = today;
-        console.log(`Daily reward given to player ${playerID}.`);
     },
 
-    createTournament: function(tournamentID, entryCost, prizeAmount, startTime) {
-        this.tournaments[tournamentID] = {
-            entryCost: entryCost,
-            prize: prizeAmount,
-            startTime: startTime,
-            players: []
-        };
-        console.log(`Tournament ${tournamentID} created. Entry: $${entryCost}, Prize: $${prizeAmount}`);
+    addWinnings: function(amount) {
+        this.bank += amount;
+        this.updateHUD();
+        this.showNotification(`You won $${amount} chips!`);
     },
 
-    joinTournament: function(tournamentID, playerID) {
-        const inv = this.el.sceneEl.systems['inventory'];
-        const tour = this.tournaments[tournamentID];
-        if (!tour) return console.log(`Tournament ${tournamentID} does not exist.`);
-        if (inv.getChips(playerID) < tour.entryCost) return console.log(`Player ${playerID} cannot afford entry.`);
-        
-        inv.subtractChips(playerID, tour.entryCost);
-        tour.players.push(playerID);
-        console.log(`Player ${playerID} joined tournament ${tournamentID}.`);
+    // -------------------------
+    // Achievements
+    // -------------------------
+    unlockAchievement: function(name) {
+        if(!this.achievements[name]) {
+            this.achievements[name] = true;
+            this.showNotification(`Achievement unlocked: ${name}`);
+        }
     },
 
-    awardTournamentWinner: function(tournamentID, winnerID) {
-        const inv = this.el.sceneEl.systems['inventory'];
-        const tour = this.tournaments[tournamentID];
-        if (!tour) return console.log(`Tournament ${tournamentID} not found.`);
-
-        inv.addChips(winnerID, tour.prize);
-        console.log(`Tournament ${tournamentID} winner: ${winnerID}, prize: $${tour.prize}`);
-        delete this.tournaments[tournamentID];
+    // -------------------------
+    // Inventory Management
+    // -------------------------
+    buyItem: function(item, price) {
+        if(this.bank >= price) {
+            this.bank -= price;
+            this.inventory.push(item);
+            this.updateHUD();
+            this.showNotification(`Purchased: ${item}`);
+        } else {
+            this.showNotification('Not enough chips to purchase this item.');
+        }
     },
 
-    // AI bot betting for tables
-    botBet: function(tableID, botID) {
-        const inv = this.el.sceneEl.systems['inventory'];
-        const betAmount = Math.floor(Math.random() * 500) + 100; // random bot bet 100-600
-        if (inv.getChips(botID) < betAmount) return;
-        this.placeBet(tableID, botID, betAmount);
-        console.log(`Bot ${botID} bet $${betAmount} on table ${tableID}.`);
+    // -------------------------
+    // Tournament Entries & Events
+    // -------------------------
+    enterTournament: function(name) {
+        if(!this.tournamentEntries[name]) {
+            this.tournamentEntries[name] = true;
+            this.showNotification(`Entered tournament: ${name}`);
+        } else {
+            this.showNotification(`Already entered: ${name}`);
+        }
+    },
+
+    // -------------------------
+    // HUD Updates
+    // -------------------------
+    updateHUD: function() {
+        const wristCash = document.querySelector('#wrist-cash');
+        if(wristCash) {
+            wristCash.setAttribute('value', `BANK: $${this.bank} | CHIPS: $${this.chips}`);
+        }
+    },
+
+    // -------------------------
+    // Notifications
+    // -------------------------
+    showNotification: function(message, duration = 2500) {
+        let notification = document.createElement('a-text');
+        notification.setAttribute('value', message);
+        notification.setAttribute('color', 'gold');
+        notification.setAttribute('align', 'center');
+        notification.setAttribute('position', '0 2 -1'); // Fixed in front of player
+        notification.setAttribute('width', '4');
+        this.el.sceneEl.appendChild(notification);
+
+        setTimeout(() => {
+            notification.parentNode.removeChild(notification);
+        }, duration);
+    },
+
+    // -------------------------
+    // Free Cash App Giveaway Ticket
+    // -------------------------
+    awardFreeTicket: function(eventName, amount = 5) {
+        this.showNotification(`Free $${amount} Cash App ticket awarded for ${eventName}!`);
+        // Logic: store ticket in inventory for tournament entry
+        this.inventory.push({type: 'cashAppTicket', event: eventName, value: amount});
+    },
+
+    // -------------------------
+    // Tip Chips to Friend
+    // -------------------------
+    tipFriend: function(friendName, amount) {
+        if(amount > 2000) amount = 2000; // Max tip limit
+        if(this.chips >= amount) {
+            this.chips -= amount;
+            // In a full multiplayer system, you would send this to friend account
+            this.showNotification(`You tipped ${friendName} ${amount} chips!`);
+            this.updateHUD();
+        } else {
+            this.showNotification(`Not enough chips to tip ${friendName}`);
+        }
     }
 });

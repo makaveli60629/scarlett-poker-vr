@@ -2,50 +2,63 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>TITAN ESTATE | THE EXECUTIVE VAULT</title>
+    <title>TITAN ESTATE | POKER ONE</title>
     <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
   </head>
   <body>
-    <a-scene>
+    <a-scene cursor="rayOrigin: mouse; fuse: true; fuseTimeout: 1500">
       
-      <a-plane rotation="-90 0 0" width="100" height="100" color="#0a0a0a"></a-plane>
+      <a-sky color="#050505"></a-sky>
+      <a-plane rotation="-90 0 0" width="20" height="20" color="#111"></a-plane>
+      
+      <a-entity id="walls">
+        <a-plane position="0 2.5 -8" width="16" height="5" color="#1a1a1a"></a-plane>
+        <a-box position="0 4.8 -7.9" width="16" height="0.1" depth="0.2" color="gold"></a-box>
+        <a-plane position="-8 2.5 0" rotation="0 90 0" width="16" height="5" color="#1a1a1a"></a-plane>
+        <a-plane position="8 2.5 0" rotation="0 -90 0" width="16" height="5" color="#1a1a1a"></a-plane>
+      </a-entity>
 
-      <a-entity id="poker-table" position="0 0 -5">
-        
-        <a-cylinder color="#111" radius="0.6" height="1" position="-2.5 0 0"></a-cylinder>
-        <a-cylinder color="#111" radius="0.6" height="1" position="2.5 0 0"></a-cylinder>
+      <a-entity id="table-group" position="0 0 -3">
+        <a-cylinder color="#111" radius="0.8" height="0.9" position="0 0.45 0"></a-cylinder>
+        <a-cylinder color="#3d2b1f" radius="3" height="0.1" scale="1.4 1 0.7" position="0 0.9 0"></a-cylinder>
+        <a-cylinder color="#004d00" radius="2.8" height="0.12" scale="1.4 1 0.7" position="0 0.91 0"></a-cylinder>
+        <a-torus color="#050505" radius="2.8" radius-tubular="0.15" rotation="90 0 0" scale="1.4 0.7 1" position="0 1.0 0"></a-torus>
 
-        <a-cylinder color="#3d2b1f" radius="4" height="0.1" scale="1.8 1 0.7" position="0 0.9 0"></a-cylinder>
+        <a-box id="deal-button" position="0 1.1 0.5" width="0.4" height="0.1" depth="0.2" color="gold" class="clickable"
+               animation__click="property: scale; from: 1 1 1; to: 0.8 0.8 0.8; dur: 150; startEvents: click">
+            <a-text value="DEAL" align="center" position="0 0.06 0" rotation="-90 0 0" width="2" color="black"></a-text>
+        </a-box>
 
-        <a-cylinder color="#004d00" radius="3.8" height="0.12" scale="1.8 1 0.7" position="0 0.91 0"></a-cylinder>
-
-        <a-torus color="#050505" radius="3.8" radius-tubular="0.18" rotation="90 0 0" scale="1.8 0.7 1" position="0 1.05 0"></a-torus>
-
-        <a-entity id="table-details">
-          <a-cylinder color="red" radius="0.06" height="0.2" position="-2 1.05 1.5"></a-cylinder>
-          <a-cylinder color="white" radius="0.06" height="0.3" position="0 1.05 1.8"></a-cylinder>
-          <a-cylinder color="blue" radius="0.06" height="0.25" position="2 1.05 1.5"></a-cylinder>
-          <a-cylinder color="red" radius="0.06" height="0.2" position="-2 1.05 -1.5"></a-cylinder>
-          <a-cylinder color="white" radius="0.06" height="0.3" position="0 1.05 -1.8"></a-cylinder>
-          <a-cylinder color="blue" radius="0.06" height="0.25" position="2 1.05 -1.5"></a-cylinder>
+        <a-entity id="cards-layout">
+            <a-box color="white" width="0.15" height="0.01" depth="0.22" position="-0.4 0.93 0" rotation="0 15 0"></a-box>
+            <a-box color="white" width="0.15" height="0.01" depth="0.22" position="0 0.93 0"></a-box>
+            <a-box color="white" width="0.15" height="0.01" depth="0.22" position="0.4 0.93 0" rotation="0 -15 0"></a-box>
         </a-entity>
       </a-entity>
 
-      <a-entity id="seating">
-        <a-cylinder position="-3.5 0.4 -3" radius="0.4" height="0.8" color="#222"></a-cylinder> <a-cylinder position="0 0.4 -2" radius="0.4" height="0.8" color="#222"></a-cylinder>    <a-cylinder position="3.5 0.4 -3" radius="0.4" height="0.8" color="#222"></a-cylinder>  <a-cylinder position="-3.5 0.4 -7" radius="0.4" height="0.8" color="#222"></a-cylinder> <a-cylinder position="0 0.4 -8" radius="0.4" height="0.8" color="#222"></a-cylinder>    <a-cylinder position="3.5 0.4 -7" radius="0.4" height="0.8" color="#222"></a-cylinder>  </a-entity>
+      <a-entity id="opponents">
+        <a-entity position="-2.5 0 -4.5" rotation="0 45 0">
+            <a-cylinder radius="0.4" height="1.2" color="#2c3e50"></a-cylinder>
+            <a-sphere radius="0.3" position="0 1.5 0" color="#dbac8d"></a-sphere>
+        </a-entity>
+        <a-entity position="2.5 0 -4.5" rotation="0 -45 0">
+            <a-cylinder radius="0.4" height="1.2" color="#2c3e50"></a-cylinder>
+            <a-sphere radius="0.3" position="0 1.5 0" color="#dbac8d"></a-sphere>
+        </a-entity>
+      </a-entity>
 
-      <a-plane position="0 2.5 -15" width="30" height="10" color="#1a1a1a"></a-plane>
-      <a-box position="0 4.9 -14.9" width="30" height="0.3" depth="0.1" color="gold"></a-box>
+      <a-ring color="gold" radius-inner="0.2" radius-outer="0.3" rotation="-90 0 0" position="0 0.01 0" class="clickable"
+              onclick="document.getElementById('camera-rig').setAttribute('position', '0 0 0')"></a-ring>
+      
+      <a-ring color="gold" radius-inner="0.2" radius-outer="0.3" rotation="-90 0 0" position="-3 0.01 -3" class="clickable"
+              onclick="document.getElementById('camera-rig').setAttribute('position', '-3 0 -3')"></a-ring>
 
-      <a-light type="ambient" color="#333"></a-light>
-      <a-light type="point" position="0 5 -5" intensity="1.5" distance="20" color="white"></a-light>
-      <a-light type="spot" position="0 8 -10" target="0 0 -15" intensity="0.5" color="gold"></a-light>
+      <a-light type="ambient" color="#222"></a-light>
+      <a-light type="point" position="0 4 -3" intensity="1.2" color="white"></a-light>
 
-      <a-sky color="#000"></a-sky>
-
-      <a-entity id="rig" position="0 0 -1.5">
-        <a-camera look-controls wasd-controls>
-          <a-cursor color="gold"></a-cursor>
+      <a-entity id="camera-rig" position="0 0 0">
+        <a-camera position="0 1.6 0" look-controls wasd-controls>
+          <a-cursor color="gold" scale="0.5 0.5 0.5"></a-cursor>
         </a-camera>
       </a-entity>
 

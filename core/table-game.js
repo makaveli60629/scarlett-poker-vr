@@ -1,115 +1,138 @@
-// table-game.js
+// File: core/table-game.js
+
 AFRAME.registerComponent('table-game', {
     schema: {
         players: { type: 'int', default: 6 },
-        humanIndex: { type: 'int', default: 0 }
+        startingChips: { type: 'int', default: 5000 }
     },
 
     init: function () {
         this.pot = 0;
-        this.deck = this.createDeck();
-        this.players = [];
-        this.tableCards = [];
-        this.dealCards();
-        this.createPlayers();
-        this.renderTable();
-        this.bindEvents();
+        this.playerHands = [];
+        this.aiHands = [];
+        this.middleCards = [];
+        this.setupPlayers();
+        this.setupAI();
+        this.setupInventoryHUD();
+        this.setupTableInteraction();
+        console.log("Table game initialized!");
     },
 
-    createDeck: function () {
-        const suits = ['H', 'D', 'C', 'S'];
-        const values = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
-        let deck = [];
-        suits.forEach(suit => {
-            values.forEach(value => deck.push({suit, value}));
-        });
-        return deck.sort(() => Math.random() - 0.5); // shuffle
-    },
-
-    dealCards: function () {
-        this.playersHands = [];
-        for (let i=0; i<this.data.players; i++) {
-            this.playersHands.push([this.deck.pop(), this.deck.pop()]);
-        }
-        this.tableCards = [];
-    },
-
-    createPlayers: function () {
-        const table = document.querySelector('a-scene');
+    setupPlayers: function() {
         for (let i = 0; i < this.data.players; i++) {
-            let seat = document.createElement('a-entity');
-            seat.setAttribute('id', 'player-'+i);
-            seat.setAttribute('position', this.getSeatPosition(i));
-            seat.setAttribute('rotation', '0 '+(i*60)+' 0');
-
-            // Chips
-            let chips = document.createElement('a-cylinder');
-            chips.setAttribute('color', i===this.data.humanIndex ? 'gold':'silver');
-            chips.setAttribute('height', 0.2);
-            chips.setAttribute('radius', 0.5);
-            chips.setAttribute('position', '0 0.1 0');
-            seat.appendChild(chips);
-
-            table.appendChild(seat);
-            this.players.push(seat);
+            let hand = this.createHand("player" + i);
+            if (i === 0) {
+                this.playerHands.push(hand);
+            } else {
+                this.aiHands.push(hand);
+            }
         }
     },
 
-    getSeatPosition: function (index) {
-        const radius = 4;
-        const angle = (index/this.data.players) * 2 * Math.PI;
-        return {
-            x: radius*Math.sin(angle),
-            y: 0,
-            z: radius*Math.cos(angle)
+    createHand: function(id) {
+        let hand = {
+            id: id,
+            cards: [],
+            chips: this.data.startingChips
         };
+        return hand;
     },
 
-    renderTable: function () {
-        const tableEntity = document.querySelector('a-entity[table-game]');
-        // Flop, turn, river cards
-        const cardY = 1;
-        const cardZStart = 0;
-        for (let i=0;i<5;i++) {
-            let card = document.createElement('a-box');
-            card.setAttribute('width', 0.3);
-            card.setAttribute('height', 0.02);
-            card.setAttribute('depth', 0.4);
-            card.setAttribute('color', '#ffffff');
-            card.setAttribute('position', `${-0.6+i*0.3} ${cardY} ${cardZStart}`);
-            card.setAttribute('class', 'table-card');
-            tableEntity.appendChild(card);
-            this.tableCards.push(card);
+    setupAI: function() {
+        this.aiHands.forEach((ai, idx) => {
+            ai.cards = this.dealCards();
+        });
+    },
+
+    dealCards: function() {
+        // Each hand gets 2 cards
+        let cards = [];
+        for (let i = 0; i < 2; i++) {
+            cards.push(this.randomCard());
         }
-
-        // Deal animation
-        this.dealAnimation();
+        return cards;
     },
 
-    dealAnimation: function () {
-        const duration = 600;
-        for (let i=0;i<this.data.players;i++) {
-            let hand = this.playersHands[i];
-            hand.forEach((card, idx) => {
-                let cardEl = document.createElement('a-box');
-                cardEl.setAttribute('width', 0.3);
-                cardEl.setAttribute('height', 0.02);
-                cardEl.setAttribute('depth', 0.4);
-                cardEl.setAttribute('color', i===this.data.humanIndex ? 'gold':'silver');
-                cardEl.setAttribute('position', '0 2 -5'); // start position
-                cardEl.setAttribute('animation__move', `property: position; to: ${this.getSeatPosition(i).x} 1.1 ${this.getSeatPosition(i).z}; dur: ${duration}; easing: easeOutQuad; delay: ${idx*150}`);
-                cardEl.setAttribute('hoverable', 'true');
-                document.querySelector('a-scene').appendChild(cardEl);
+    randomCard: function() {
+        const suits = ['hearts','diamonds','clubs','spades'];
+        const ranks = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+        let suit = suits[Math.floor(Math.random()*suits.length)];
+        let rank = ranks[Math.floor(Math.random()*ranks.length)];
+        return {suit: suit, rank: rank};
+    },
+
+    setupInventoryHUD: function() {
+        const inventoryPanel = document.querySelector('#inventory-panel');
+        const leftHandButton = document.querySelector('#leftHand-button');
+
+        if(leftHandButton) {
+            leftHandButton.addEventListener('click', () => {
+                const isVisible = inventoryPanel.getAttribute('visible');
+                inventoryPanel.setAttribute('visible', !isVisible);
             });
         }
     },
 
-    bindEvents: function () {
-        const scene = document.querySelector('a-scene');
-        scene.addEventListener('bet', (e) => {
-            this.pot += e.detail.amount;
-            const potText = document.querySelector('#pot-text');
-            if (potText) potText.setAttribute('value', `TOTAL POT: $${this.pot}`);
+    setupTableInteraction: function() {
+        const sceneEl = this.el;
+        const self = this;
+
+        // Betting box example
+        const betBoxes = document.querySelectorAll('.bet-box');
+        betBoxes.forEach(box => {
+            box.addEventListener('click', function() {
+                const amount = parseInt(this.getAttribute('data-bet') || "0");
+                self.addBet(amount);
+            });
+        });
+    },
+
+    addBet: function(amount) {
+        this.pot += amount;
+        document.querySelector('#pot-text').setAttribute('value', "TOTAL POT: $" + this.pot);
+        document.querySelector('#wrist-cash').setAttribute('value', "BANK: $" + (this.playerHands[0].chips - this.pot));
+    },
+
+    // Render middle table cards
+    revealMiddleCards: function(count) {
+        this.middleCards = [];
+        for (let i=0; i<count; i++) {
+            this.middleCards.push(this.randomCard());
+        }
+        // Update 3D cards in scene
+        this.renderMiddleCards();
+    },
+
+    renderMiddleCards: function() {
+        const tableEl = document.querySelector('#table');
+        if(!tableEl) return;
+
+        // Clear old cards
+        const oldCards = tableEl.querySelectorAll('.middle-card');
+        oldCards.forEach(c => c.parentNode.removeChild(c));
+
+        // Render new cards
+        this.middleCards.forEach((card, idx) => {
+            const cardEl = document.createElement('a-box');
+            cardEl.setAttribute('class','middle-card');
+            cardEl.setAttribute('depth','0.01');
+            cardEl.setAttribute('height','0.7');
+            cardEl.setAttribute('width','0.5');
+            cardEl.setAttribute('color','#ffffff');
+            cardEl.setAttribute('position', {x: idx*0.6 - 1, y:1, z:0});
+            tableEl.appendChild(cardEl);
+        });
+    },
+
+    // Reveal player hand cards on hover
+    showPlayerHand: function(playerIndex=0) {
+        const hand = this.playerHands[playerIndex];
+        hand.cards.forEach((card, idx) => {
+            const cardEl = document.querySelector(`#player-card-${idx}`);
+            if(cardEl) {
+                cardEl.setAttribute('color','#fff');
+                cardEl.setAttribute('value', `${card.rank} of ${card.suit}`);
+            }
         });
     }
 });

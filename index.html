@@ -2,14 +2,13 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Brick Club Casino VR</title>
+    <title>Brick Club VR - Portal Edition</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
-        #loading-overlay {
+        #overlay {
             position: absolute; width: 100%; height: 100%; display: flex;
             flex-direction: column; justify-content: center; align-items: center;
-            background: #111; z-index: 100; color: #ffd700;
+            background: #000; z-index: 100; color: #ffd700;
         }
         button {
             padding: 25px 70px; font-size: 28px; background: #8B0000;
@@ -18,22 +17,21 @@
     </style>
 </head>
 <body>
-    <div id="loading-overlay">
+    <div id="overlay">
         <h1>BRICK CLUB CASINO</h1>
-        <button id="start-vr">PLAY VR (AUTO-SIT)</button>
+        <button id="start-btn">ENTER VR (AUTO-SIT)</button>
     </div>
 
     <script type="module">
         import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
         import { VRButton } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/webxr/VRButton.js';
 
-        let scene, camera, renderer, userRig, menu, backDoor;
-        let isMenuOpen = false, isDoorOpen = false;
+        let scene, camera, renderer, userRig, portal;
+        let canTurn = true;
+        const walls = []; // Collision boundaries
 
         function init() {
             scene = new THREE.Scene();
-            
-            // USER RIG (Enables Locomotion/Walking)
             userRig = new THREE.Group();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             userRig.add(camera);
@@ -45,137 +43,132 @@
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
-            // ENVIRONMENT DESIGN
-            buildLuxuryCasino();
-            createPremiumTable();
-            createStores();
-            setupControls();
+            scene.add(new THREE.AmbientLight(0xffffff, 1)); // Bright open-air lighting
 
-            // Lighting for Illuminated Ceiling
-            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-            const ceilingLight = new THREE.PointLight(0xffffff, 1);
-            ceilingLight.position.set(0, 7, -5);
-            scene.add(ceilingLight);
+            buildSolidCasino();
+            createPortals();
+            createBrandedTable();
+            setupOculusControls();
 
-            renderer.setAnimationLoop(render);
+            renderer.setAnimationLoop(renderLoop);
         }
 
-        function buildLuxuryCasino() {
+        function buildSolidCasino() {
             const loader = new THREE.TextureLoader();
             const brickTex = loader.load('https://threejs.org/examples/textures/brick_diffuse.jpg');
 
-            // 1. ILLUMINATED WHITE CEILING
-            const ceil = new THREE.Mesh(new THREE.PlaneGeometry(40, 100), new THREE.MeshBasicMaterial({color: 0xffffff}));
-            ceil.rotation.x = Math.PI / 2;
-            ceil.position.y = 8;
-            scene.add(ceil);
-
-            // 2. RED CARPET
-            const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 100), new THREE.MeshStandardMaterial({color: 0x8B0000}));
+            // 1. FLOOR (Red Carpet)
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({color: 0x800000}));
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
 
-            // 3. HYBRID WALLS (Brick Top / White Bottom)
-            const wallGroup = new THREE.Group();
-            const brickWall = new THREE.Mesh(new THREE.BoxGeometry(20, 5, 80), new THREE.MeshStandardMaterial({map: brickTex}));
-            brickWall.position.y = 5.5;
-            const whitePanel = new THREE.Mesh(new THREE.BoxGeometry(20.1, 3, 80), new THREE.MeshStandardMaterial({color: 0xeeeeee}));
-            whitePanel.position.y = 1.5;
-            wallGroup.add(brickWall, whitePanel);
-            scene.add(wallGroup);
+            // 2. SOLID WALLS (Boundary Box)
+            const wallMat = new THREE.MeshStandardMaterial({map: brickTex});
+            
+            // Left Wall
+            const leftWall = new THREE.Mesh(new THREE.BoxGeometry(1, 10, 100), wallMat);
+            leftWall.position.set(-15, 5, 0);
+            scene.add(leftWall);
+            walls.push(new THREE.Box3().setFromObject(leftWall));
 
-            // 4. BACK DOOR
-            backDoor = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 0.2), new THREE.MeshStandardMaterial({color: 0x3d0c02}));
-            backDoor.position.set(-9.8, 2, 0);
-            scene.add(backDoor);
+            // Right Wall
+            const rightWall = new THREE.Mesh(new THREE.BoxGeometry(1, 10, 100), wallMat);
+            rightWall.position.set(15, 5, 0);
+            scene.add(rightWall);
+            walls.push(new THREE.Box3().setFromObject(rightWall));
+            
+            // Back Wall
+            const backWall = new THREE.Mesh(new THREE.BoxGeometry(30, 10, 1), wallMat);
+            backWall.position.set(0, 5, -50);
+            scene.add(backWall);
+            walls.push(new THREE.Box3().setFromObject(backWall));
         }
 
-        function createPremiumTable() {
+        function createPortals() {
+            // Portal to Store/Lobby
+            const portalGeo = new THREE.TorusGeometry(1.5, 0.05, 16, 100);
+            const portalMat = new THREE.MeshBasicMaterial({color: 0x00ffff}); // Neon Cyan
+            portal = new THREE.Mesh(portalGeo, portalMat);
+            portal.position.set(0, 1.5, 5); // Portal behind the player
+            scene.add(portal);
+        }
+
+        function createBrandedTable() {
             const table = new THREE.Group();
             const felt = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 0.2, 64), new THREE.MeshStandardMaterial({color: 0x076324}));
-            const rim = new THREE.Mesh(new THREE.TorusGeometry(2.5, 0.15, 16, 100), new THREE.MeshStandardMaterial({color: 0x3d0c02}));
-            rim.rotation.x = Math.PI / 2;
-            rim.position.y = 0.1;
+            const mahogonyRim = new THREE.Mesh(new THREE.TorusGeometry(2.5, 0.15, 16, 100), new THREE.MeshStandardMaterial({color: 0x3d0c02}));
+            mahogonyRim.rotation.x = Math.PI / 2;
+            mahogonyRim.position.y = 0.1;
             
-            // Branding
-            const brand = new THREE.Mesh(new THREE.CircleGeometry(0.7, 32), new THREE.MeshBasicMaterial({color: 0xffffff, transparent: true, opacity: 0.3}));
-            brand.rotation.x = -Math.PI / 2;
-            brand.position.y = 0.12;
+            // LOW POLY REALISTIC CARDS
+            const card = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.001, 0.09), new THREE.MeshStandardMaterial({color: 0xffffff}));
+            card.position.set(0.2, 0.2, 0.5);
+            table.add(felt, mahogonyRim, card);
             
-            table.add(felt, rim, brand);
             table.position.set(0, 0, -6);
             scene.add(table);
         }
 
-        function createStores() {
-            // Lobby/Store Area
-            const store = new THREE.Mesh(new THREE.BoxGeometry(6, 4, 1), new THREE.MeshStandardMaterial({color: 0x222222}));
-            store.position.set(6, 2, 5); 
-            scene.add(store);
-        }
-
-        function setupControls() {
-            const controllerLeft = renderer.xr.getController(0);
-            const controllerRight = renderer.xr.getController(1);
-
-            // Menu/Exit Interaction
-            controllerLeft.addEventListener('selectstart', () => {
-                if(isMenuOpen) exitVR(); else toggleMenu();
+        function setupOculusControls() {
+            const cRight = renderer.xr.getController(1);
+            cRight.addEventListener('selectstart', () => {
+                // Blue giveaway spawns exactly at hand
+                const chip = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.02), new THREE.MeshBasicMaterial({color: 0x0000ff}));
+                chip.position.copy(cRight.position);
+                scene.add(chip);
             });
-
-            // Back Door (Y Button Mapping)
-            controllerLeft.addEventListener('squeezestart', () => {
-                isDoorOpen = !isDoorOpen;
-                backDoor.rotation.y = isDoorOpen ? Math.PI / 2 : 0;
-            });
-
-            // Blue Chip Giveaway
-            controllerRight.addEventListener('selectstart', spawnBlueChips);
-            
-            scene.add(controllerLeft, controllerRight);
+            scene.add(cRight);
         }
 
-        function spawnBlueChips() {
-            const chip = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.02), new THREE.MeshBasicMaterial({color: 0x0000ff}));
-            chip.position.set(userRig.position.x, 1.1, userRig.position.z - 0.5);
-            scene.add(chip);
-        }
-
-        function toggleMenu() {
-            if(!menu) buildMenu();
-            isMenuOpen = !isMenuOpen;
-            menu.visible = isMenuOpen;
-            menu.position.set(camera.position.x, camera.position.y, camera.position.z - 0.5);
-        }
-
-        function buildMenu() {
-            menu = new THREE.Group();
-            const btn = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.1), new THREE.MeshBasicMaterial({color: 0xff0000}));
-            menu.add(btn);
-            scene.add(menu);
-        }
-
-        function exitVR() {
-            renderer.xr.getSession().end().then(() => { window.location.reload(); });
-        }
-
-        function render() {
-            // Smooth Locomotion Logic
+        function renderLoop() {
             const session = renderer.xr.getSession();
             if (session) {
                 for (const source of session.inputSources) {
+                    // LEFT STICK: Smooth Walking with Collision
                     if (source.gamepad && source.handedness === 'left') {
                         const axes = source.gamepad.axes;
-                        userRig.position.x += axes[2] * 0.05; // Left/Right
-                        userRig.position.z += axes[3] * 0.05; // Forward/Back
+                        const nextX = userRig.position.x + axes[2] * 0.08;
+                        const nextZ = userRig.position.z + axes[3] * 0.08;
+                        
+                        // Check if next position is inside walls
+                        let collision = false;
+                        const playerBox = new THREE.Box3().setFromCenterAndSize(
+                            new THREE.Vector3(nextX, 1, nextZ), 
+                            new THREE.Vector3(1, 2, 1)
+                        );
+                        
+                        for(let wall of walls) {
+                            if(playerBox.intersectsBox(wall)) collision = true;
+                        }
+
+                        if(!collision) {
+                            userRig.position.x = nextX;
+                            userRig.position.z = nextZ;
+                        }
+                    }
+                    
+                    // RIGHT STICK: Snap Turning
+                    if (source.gamepad && source.handedness === 'right') {
+                        const axes = source.gamepad.axes;
+                        if (canTurn && Math.abs(axes[2]) > 0.8) {
+                            userRig.rotation.y -= Math.sign(axes[2]) * (Math.PI / 4);
+                            canTurn = false;
+                            setTimeout(() => { canTurn = true; }, 300);
+                        }
                     }
                 }
             }
+            
+            // PORTAL LOGIC (If walk into portal, go to lobby)
+            if(userRig.position.distanceTo(portal.position) < 1.5) {
+                userRig.position.set(0, 0, 20); // Teleport to Lobby Zone
+            }
+
             renderer.render(scene, camera);
         }
 
-        document.getElementById('start-vr').onclick = () => {
-            document.getElementById('loading-overlay').style.display = 'none';
+        document.getElementById('start-btn').onclick = () => {
+            document.getElementById('overlay').style.display = 'none';
             userRig.position.set(0, 1.2, -5); // AUTO-SIT
         };
 

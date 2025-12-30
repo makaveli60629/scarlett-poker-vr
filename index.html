@@ -1,68 +1,58 @@
-<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>TITAN ESTATE | FULL HOUSE</title>
-    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
-  </head>
-  <body>
-    <a-scene cursor="rayOrigin: mouse">
-      
-      <a-assets>
-        <audio id="jazz" src="https://cdn.aframe.io/basic-guide/audio/backgroundnoise.wav" preload="auto" loop="true"></audio>
-      </a-assets>
+<a-scene
+  vr-mode-ui="enabled: true"
+  renderer="colorManagement: true"
+  webxr="optionalFeatures: hit-test, local-floor"
+  background="color: #111">
 
-      <a-entity id="rig" position="0 0 0.5">
-        <a-camera position="0 1.5 0">
-          <a-text value="TITAN BANK: $100,000" position="0.6 0.8 -1" color="gold" width="1.5" align="center"></a-text>
-          <a-cursor color="gold"></a-cursor>
-          <a-entity sound="src: #jazz; autoplay: true; volume: 0.5; loop: true"></a-entity>
-        </a-camera>
-      </a-entity>
+  <!-- LIGHTING -->
+  <a-entity light="type: ambient; intensity: 0.5"></a-entity>
+  <a-entity light="type: directional; intensity: 0.8" position="1 4 2"></a-entity>
 
-      <a-entity position="0 0 -2.5">
-        <a-cylinder color="#111" radius="0.7" height="0.9" position="0 0.45 0"></a-cylinder>
-        <a-cylinder color="#3d2b1f" radius="2.5" height="0.1" scale="1.4 1 0.7" position="0 0.9 0"></a-cylinder>
-        <a-cylinder color="#004d00" radius="2.3" height="0.12" scale="1.4 1 0.7" position="0 0.91 0"></a-cylinder>
-        <a-torus color="#050505" radius="2.3" radius-tubular="0.12" rotation="90 0 0" scale="1.4 0.7 1" position="0 1.0 0"></a-torus>
+  <!-- PLAYER RIG -->
+  <a-entity
+    id="rig"
+    position="0 1.6 4"
+    movement-controls="speed: 0.15">
 
-        <a-box id="deal-btn" class="clickable" color="gold" width="0.4" height="0.1" depth="0.3" position="0 1.05 0.5"
-               onclick="document.getElementById('card1').setAttribute('visible', 'true'); document.getElementById('card2').setAttribute('visible', 'true'); document.getElementById('card3').setAttribute('visible', 'true');">
-            <a-text value="DEAL" align="center" position="0 0.06 0" rotation="-90 0 0" width="2" color="black"></a-text>
-        </a-box>
+    <!-- CAMERA -->
+    <a-camera
+      wasd-controls="enabled: false"
+      look-controls="pointerLockEnabled: false">
+    </a-camera>
 
-        <a-box id="card1" visible="false" color="white" width="0.2" height="0.01" depth="0.3" position="-0.4 0.95 0"></a-box>
-        <a-box id="card2" visible="false" color="white" width="0.2" height="0.01" depth="0.3" position="0 0.95 0"></a-box>
-        <a-box id="card3" visible="false" color="white" width="0.2" height="0.01" depth="0.3" position="0.4 0.95 0"></a-box>
+    <!-- LEFT HAND -->
+    <a-entity
+      laser-controls="hand: left"
+      raycaster="objects: .teleportable"
+      teleport-controls="cameraRig: #rig; teleportOrigin: #camera;">
+    </a-entity>
 
-        <a-box class="clickable" color="#FFD700" width="0.3" height="0.1" depth="0.3" position="0.8 1.0 0.5"
-               onclick="document.getElementById('vault-door').emit('openDoor'); document.getElementById('dealer-head').setAttribute('color', 'gold');">
-            <a-text value="WIN" align="center" position="0 0.06 0" rotation="-90 0 0" width="2" color="black"></a-text>
-        </a-box>
-      </a-entity>
+    <!-- RIGHT HAND -->
+    <a-entity
+      laser-controls="hand: right">
+    </a-entity>
 
-      <a-entity id="avatars">
-        <a-entity position="0 0 -4.5">
-            <a-cylinder radius="0.3" height="1.4" color="#1a1a1a" position="0 0.7 0"></a-cylinder>
-            <a-sphere id="dealer-head" radius="0.25" color="#dbac8d" position="0 1.6 0"></a-sphere>
-            <a-text value="DEALER" position="0 2.2 0" align="center" color="gold" width="3"></a-text>
-        </a-entity>
-        <a-entity position="-2.2 0 -2.5" rotation="0 90 0"><a-cylinder radius="0.25" height="1.3" color="#2c3e50" position="0 0.65 0"></a-cylinder><a-sphere radius="0.22" color="#dbac8d" position="0 1.45 0"></a-sphere></a-entity>
-        <a-entity position="2.2 0 -2.5" rotation="0 -90 0"><a-cylinder radius="0.25" height="1.3" color="#2c3e50" position="0 0.65 0"></a-cylinder><a-sphere radius="0.22" color="#dbac8d" position="0 1.45 0"></a-sphere></a-entity>
-        <a-entity position="-1.5 0 -4" rotation="0 45 0"><a-cylinder radius="0.25" height="1.3" color="#2c3e50" position="0 0.65 0"></a-cylinder><a-sphere radius="0.22" color="#dbac8d" position="0 1.45 0"></a-sphere></a-entity>
-        <a-entity position="1.5 0 -4" rotation="0 -45 0"><a-cylinder radius="0.25" height="1.3" color="#2c3e50" position="0 0.65 0"></a-cylinder><a-sphere radius="0.22" color="#dbac8d" position="0 1.45 0"></a-sphere></a-entity>
-        <a-entity position="0 0 -1" rotation="0 180 0"><a-cylinder radius="0.25" height="1.3" color="#2c3e50" position="0 0.65 0"></a-cylinder><a-sphere radius="0.22" color="#dbac8d" position="0 1.45 0"></a-sphere></a-entity>
-      </a-entity>
+  </a-entity>
 
-      <a-box id="vault-door" position="0 2.5 -6" width="4" height="5" depth="0.3" color="#222"
-             animation__open="property: position; to: 0 7 -6; dur: 2000; startEvents: openDoor">
-        <a-torus color="gold" radius="0.7" radius-tubular="0.05" position="0 0 0.2"></a-torus>
-      </a-box>
+  <!-- FLOOR (TELEPORTABLE) -->
+  <a-plane
+    class="teleportable"
+    rotation="-90 0 0"
+    width="30"
+    height="30"
+    color="#222">
+  </a-plane>
 
-      <a-sky color="#050505"></a-sky>
-      <a-plane rotation="-90 0 0" width="30" height="30" color="#0a0a0a"></a-plane>
-      <a-light type="point" position="0 4 -2.5" intensity="1.5" color="white"></a-light>
+  <!-- TABLE -->
+  <a-box
+    position="0 0.75 0"
+    width="2"
+    height="0.1"
+    depth="1"
+    color="#1a5">
+  </a-box>
 
-    </a-scene>
-  </body>
-</html>
+  <!-- DEALER -->
+  <a-sphere position="0 1.4 -0.4" radius="0.25" color="#222"></a-sphere>
+
+</a-scene>

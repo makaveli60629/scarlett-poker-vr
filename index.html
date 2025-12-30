@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>TITAN ESTATE | DUAL GAME EDITION</title>
+    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/aframe-teleport-controls@0.3.1/dist/aframe-teleport-controls.min.js"></script>
+    <script>
+      let wallet = parseInt(localStorage.getItem('titan_wallet')) || 25000;
+      let lastClaim = localStorage.getItem('titan_last_claim') || "";
+
+      window.onload = function() {
+        updateHUD();
+        setTimeout(() => {
+          document.getElementById('splash').setAttribute('visible', 'false');
+          document.getElementById('world').setAttribute('visible', 'true');
+        }, 4000);
+      };
+
+      function updateHUD() {
+        localStorage.setItem('titan_wallet', wallet);
+        document.querySelectorAll('.watch-val').forEach(el => el.setAttribute('value', '$' + wallet));
+      }
+
+      function claimDaily(id, amount) {
+        let today = new Date().toDateString();
+        if (lastClaim === today) {
+            document.getElementById('blue-msg').setAttribute('value', "SEE YOU TOMORROW!");
+            return;
+        }
+        wallet += amount;
+        lastClaim = today;
+        localStorage.setItem('titan_last_claim', lastClaim);
+        updateHUD();
+        document.getElementById('blue-msg').setAttribute('value', "COLLECTED $" + amount);
+      }
+
+      // NEW GAME: BLACKJACK LOGIC
+      function playBlackjack(bet) {
+        if (wallet >= bet) {
+          wallet -= bet;
+          let playerHand = Math.floor(Math.random() * 10) + 12; // 12-21
+          let dealerHand = Math.floor(Math.random() * 10) + 12; // 12-21
+          
+          let msg = "";
+          if (playerHand > dealerHand) {
+            wallet += (bet * 2);
+            msg = "WIN! YOU: " + playerHand + " VS DLR: " + dealerHand;
+          } else {
+            msg = "LOSE! YOU: " + playerHand + " VS DLR: " + dealerHand;
+          }
+          document.getElementById('bj-msg').setAttribute('value', msg);
+          updateHUD();
+          // Auto-Sit in Vault
+          document.getElementById('rig').setAttribute('position', '15 0 -5');
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <a-scene renderer="antialias: true;">
+      <a-assets>
+        <img id="tex-bricks" src="https://i.imgur.com/89SBy0Y.jpg">
+        <img id="tex-carpet" src="https://i.imgur.com/2R7W5r6.jpg">
+        <img id="tex-felt" src="https://i.imgur.com/vH9vT7U.jpg">
+      </a-assets>
+
+      <a-entity id="rig" position="0 0 12">
+        <a-camera id="head" look-controls><a-cursor color="gold"></a-cursor></a-camera>
+        <a-entity oculus-touch-controls="hand: left" teleport-controls="cameraRig: #rig; teleportOrigin: #head; button: trigger; curveHitColor: gold; type: parabolic;">
+            <a-box position="0 0.05 0.1" rotation="-90 0 0" width="0.12" height="0.12" depth="0.03" color="#111">
+                <a-text class="watch-val" value="$25000" color="gold" align="center" position="0 0 0.017" width="0.9"></a-text>
+            </a-box>
+        </a-entity>
+        <a-entity oculus-touch-controls="hand: right" teleport-controls="cameraRig: #rig; teleportOrigin: #head; button: trigger; curveHitColor: gold; type: parabolic;"></a-entity>
+      </a-entity>
+
+      <a-entity id="world" visible="false">
+        <a-sky color="#050505"></a-sky>
+        <a-plane src="#tex-carpet" repeat="40 40" rotation="-90 0 0" width="100" height="100"></a-plane>
+
+        <a-box src="#tex-bricks" position="0 2.5 -20" width="50" height="5" depth="0.5"></a-box>
+        <a-box src="#tex-bricks" position="-25 2.5 0" width="0.5" height="5" depth="50"></a-box>
+        <a-box src="#tex-bricks" position="25 2.5 0" width="0.5" height="5" depth="50"></a-box>
+
+        <a-entity position="0 0 6">
+          <a-box width="3" height="1" depth="1" color="#111"><a-text id="blue-msg" value="TITAN GIVEAWAY" position="0 0.6 0.51" align="center" color="gold" width="3"></a-text></a-box>
+          <a-box class="clickable" width="0.3" height="0.4" position="0 1.5 0.5" color="gold" onclick="claimDaily('c1', 5000)"></a-box>
+        </a-entity>
+
+        <a-entity position="-10 0 -5">
+          <a-text value="TITAN POKER" position="0 3 0" align="center" color="gold" width="6"></a-text>
+          <a-cylinder src="#tex-felt" radius="2" height="0.1" position="0 0.9 0"></a-cylinder>
+          <a-box class="clickable" position="0 0.1 1.5" width="1.2" height="0.2" depth="0.5" color="gold" onclick="document.getElementById('rig').setAttribute('position', '-10 0 -4')">
+            <a-text value="SIT TO PLAY" align="center" rotation="-90 0 0" position="0 0.11 0" color="black"></a-text>
+          </a-box>
+        </a-entity>
+
+        <a-entity position="10 0 -5">
+          <a-text id="bj-msg" value="TITAN BLACKJACK" position="0 3 0" align="center" color="gold" width="6"></a-text>
+          <a-cylinder color="#004400" radius="2" height="0.1" position="0 0.9 0" segments-radial="32">
+             <a-ring color="gold" radius-inner="1.9" radius-outer="2" position="0 0.051 0" rotation="-90 0 0"></a-ring>
+          </a-cylinder>
+          <a-box class="clickable" position="-0.8 1 0.5" width="0.4" height="0.1" depth="0.4" color="#FFD700" onclick="playBlackjack(1000)"><a-text value="BET 1K" rotation="-90 0 0" align="center" position="0 0.06 0" width="2"></a-text></a-box>
+          <a-box class="clickable" position="0.8 1 0.5" width="0.4" height="0.1" depth="0.4" color="#FFD700" onclick="playBlackjack(5000)"><a-text value="BET 5K" rotation="-90 0 0" align="center" position="0 0.06 0" width="2"></a-text></a-box>
+        </a-entity>
+
+      </a-entity>
+
+      <a-entity id="splash" position="0 1.6 10">
+        <a-text value="TITAN ESTATE\nDUAL GAMES" color="gold" align="center"></a-text>
+      </a-entity>
+    </a-scene>
+  </body>
+</html>

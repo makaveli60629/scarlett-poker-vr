@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Scarlet VR Poker</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+
+  <!-- A-Frame (VR Engine) -->
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    /* LOADING SCREEN */
+    #loader {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(circle at center, #1b0000, #000);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      color: white;
+      text-align: center;
+    }
+
+    #loader h1 {
+      font-size: 3rem;
+      color: #d40000;
+      margin-bottom: 10px;
+      font-family: "Georgia", serif;
+      letter-spacing: 2px;
+    }
+
+    #loader p {
+      opacity: 0.8;
+      margin-bottom: 30px;
+    }
+
+    #startBtn {
+      padding: 15px 30px;
+      font-size: 1.2rem;
+      border: none;
+      border-radius: 6px;
+      background: linear-gradient(135deg, #ff0000, #8b0000);
+      color: white;
+      cursor: pointer;
+      box-shadow: 0 0 20px rgba(255,0,0,0.6);
+    }
+
+    #startBtn:active {
+      transform: scale(0.95);
+    }
+
+    /* Hide scene until started */
+    a-scene {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- LOADER -->
+  <div id="loader">
+    <h1>Scarlet VR</h1>
+    <p>Luxury Poker Experience</p>
+    <button id="startBtn">ENTER</button>
+  </div>
+
+  <!-- VR SCENE -->
+  <a-scene
+    vr-mode-ui="enabled: true"
+    embedded
+    background="color: #202020"
+  >
+    <!-- CAMERA -->
+    <a-entity position="0 1.6 3">
+      <a-camera wasd-controls-enabled="false"></a-camera>
+    </a-entity>
+
+    <!-- LIGHTS -->
+    <a-light type="ambient" intensity="0.6"></a-light>
+    <a-light type="directional" intensity="0.8" position="1 3 2"></a-light>
+
+    <!-- FLOOR -->
+    <a-plane
+      rotation="-90 0 0"
+      width="30"
+      height="30"
+      color="#2b2b2b"
+    ></a-plane>
+
+    <!-- TEST OBJECT (YOU MUST SEE THIS) -->
+    <a-box
+      position="0 1 -3"
+      rotation="0 45 0"
+      color="#d40000"
+      depth="1"
+      height="1"
+      width="1"
+      animation="property: rotation; to: 0 405 0; loop: true; dur: 6000"
+    ></a-box>
+
+    <!-- SKY -->
+    <a-sky color="#111"></a-sky>
+  </a-scene>
+
+  <script>
+    const loader = document.getElementById("loader");
+    const startBtn = document.getElementById("startBtn");
+    const scene = document.querySelector("a-scene");
+
+    startBtn.addEventListener("click", () => {
+      loader.style.display = "none";
+      scene.style.display = "block";
+
+      // Required for mobile audio + VR interaction unlock
+      scene.emit("enter-vr");
+    });
+  </script>
+
+</body>
+</html>

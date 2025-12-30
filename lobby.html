@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Scarlett VR Poker Lobby</title>
+  <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-physics-system@v4.2.2/dist/aframe-physics-system.min.js"></script>
+  <script src="js/table-game.js"></script>
+  <script src="js/economy.js"></script>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- VR Overlay -->
+  <div id="overlay">
+    <h1 class="title">SCARLETT VR POKER</h1>
+    <p style="color: gold; letter-spacing: 4px;">LOBBY</p>
+    <button class="btn" onclick="startLobby()">ENTER LOBBY</button>
+  </div>
+
+  <a-scene physics="debug: false">
+    <a-assets>
+      <!-- Sample assets: statues, crowns, tables -->
+      <a-asset-item id="statue-glb" src="https://cdn.readyplayer.me/64b54e0b0e5132204a9e530a.glb"></a-asset-item>
+      <a-asset-item id="crown-glb" src="https://cdn.glitch.global/crown.glb"></a-asset-item>
+    </a-assets>
+
+    <!-- Sky & Environment -->
+    <a-sky color="#111111"></a-sky>
+    <a-entity position="0 5 -5" particle-system="preset: dust; color: #d4af37; particleCount: 1000; size: 0.1"></a-entity>
+
+    <!-- Floor -->
+    <a-plane static-body rotation="-90 0 0" width="100" height="100" color="#080808"></a-plane>
+
+    <!-- Tables -->
+    <a-entity id="table1" position="0 0 -5">
+      <a-cylinder static-body radius="3.5" height="1.1" color="#1a110a" material="metalness: 0.4"></a-cylinder>
+      <a-cylinder position="0 1.15 0" radius="3.2" height="0.1" color="#043314"></a-cylinder>
+      <a-text value="Table 1" position="0 2.5 0" align="center" width="8" color="gold"></a-text>
+    </a-entity>
+
+    <a-entity id="table2" position="10 0 -5">
+      <a-cylinder static-body radius="3.5" height="1.1" color="#1a110a" material="metalness: 0.4"></a-cylinder>
+      <a-cylinder position="0 1.15 0" radius="3.2" height="0.1" color="#043314"></a-cylinder>
+      <a-text value="Table 2" position="0 2.5 0" align="center" width="8" color="gold"></a-text>
+    </a-entity>
+
+    <!-- Locker Room -->
+    <a-entity id="lockerRoom" position="-10 0 -10">
+      <a-box width="5" height="3" depth="5" color="#222" material="metalness:0.5"></a-box>
+      <a-text value="Locker Room" position="0 2 0" align="center" width="6" color="gold"></a-text>
+    </a-entity>
+
+    <!-- Event Room -->
+    <a-entity id="eventRoom" position="10 0 -10">
+      <a-box width="5" height="3" depth="5" color="#222" material="metalness:0.5"></a-box>
+      <a-text value="Event Room" position="0 2 0" align="center" width="6" color="gold"></a-text>
+    </a-entity>
+
+    <!-- Player Rig -->
+    <a-entity id="rig" position="0 0 12" movement-controls="controls: touch, keyboard; speed:0.2" kinematic-body>
+      <a-camera look-controls="pointerLockEnabled:false">
+        <a-cursor color="gold" raycaster="objects: .clickable"></a-cursor>
+      </a-camera>
+
+      <!-- Left Hand HUD -->
+      <a-entity id="leftHand" oculus-touch-controls="hand: left">
+        <a-box position="0 0.02 0.05" scale="0.12 0.04 0.15" color="#111">
+          <a-plane position="0 0.51 0" rotation="-90 0 0" width="1.2" height="0.8" color="#000">
+            <a-text id="wrist-cash" value="BANK: $50,000" position="0 0.1 0.01" align="center" width="2.5" color="gold"></a-text>
+            <a-text value="SCARLETT OS" position="0 -0.2 0.01" align="center" width="1.5" color="#444"></a-text>
+          </a-plane>
+        </a-box>
+      </a-entity>
+
+      <!-- Right Hand -->
+      <a-entity id="rightHand" oculus-touch-controls="hand: right" laser-controls="hand: right" raycaster="objects: .clickable;"></a-entity>
+    </a-entity>
+
+    <!-- Lights -->
+    <a-light type="ambient" intensity="0.5"></a-light>
+    <a-light type="point" position="0 10 -5" intensity="1.5" color="gold"></a-light>
+  </a-scene>
+
+  <script>
+    function startLobby(){
+      document.getElementById('overlay').style.display='none';
+      const scene = document.querySelector('a-scene');
+      if(scene.audioListener) scene.audioListener.context.resume();
+      // Initialize economy
+      const rig = document.querySelector('#rig');
+      rig.setAttribute('economy','');
+    }
+  </script>
+</body>
+</html>

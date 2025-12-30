@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Brick Club Casino - Luxury Edition</title>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; }
+        #overlay {
+            position: absolute; width: 100%; height: 100%; display: flex;
+            flex-direction: column; justify-content: center; align-items: center;
+            background: #050505; z-index: 20; color: #ffd700; font-family: sans-serif;
+        }
+        button {
+            padding: 20px 60px; font-size: 24px; background: #8B0000;
+            color: white; border: 2px solid #ffd700; border-radius: 50px; cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="overlay">
+        <h1>BRICK CLUB CASINO</h1>
+        <button id="enter-btn">ENTER CASINO</button>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+        import { VRButton } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/webxr/VRButton.js';
+
+        let scene, camera, renderer, menu, backDoor, userGroup;
+        let isMenuOpen = false;
+
+        function init() {
+            scene = new THREE.Scene();
+            
+            // USER RIG FOR LOCOMOTION
+            userGroup = new THREE.Group();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            userGroup.add(camera);
+            scene.add(userGroup);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            document.body.appendChild(renderer.domElement);
+            document.body.appendChild(VRButton.createButton(renderer));
+
+            // LIGHTING (Ceiling Illumination)
+            scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+            const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+            sun.position.set(5, 10, 5);
+            scene.add(sun);
+
+            buildCasino();
+            createRoundTable();
+            setupControllers();
+
+            renderer.setAnimationLoop(render);
+        }
+
+        function buildCasino() {
+            const loader = new THREE.TextureLoader();
+            const brickTex = loader.load('https://threejs.org/examples/textures/brick_diffuse.jpg');
+
+            // 1. HIGH ILLUMINATED CEILING
+            const ceilGeo = new THREE.PlaneGeometry(30, 100);
+            const ceilMat = new THREE.MeshBasicMaterial({color: 0xffffff});
+            const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
+            ceiling.rotation.x = Math.PI / 2;
+            ceiling.position.y = 8; // Moved higher
+            scene.add(ceiling);
+
+            // 2. RED CARPET FLOOR
+            const floorGeo = new THREE.PlaneGeometry(30, 100);
+            const floorMat = new THREE.MeshStandardMaterial({color: 0x990000}); 
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            // 3. WALLS (Brick + White Lower Panel)
+            const walls = new THREE.Group();
+            const upper = new THREE.Mesh(new THREE.BoxGeometry(15, 6, 60), new THREE.MeshStandardMaterial({map: brickTex}));
+            upper.position.y = 5;
+            const lower = new THREE.Mesh(new THREE.BoxGeometry(15.1, 2, 60), new THREE.MeshStandardMaterial({color: 0xffffff}));
+            lower.position.y = 1;
+            walls.add(upper, lower);
+            scene.add(walls);
+
+            // 4. THE STORE AREA
+            const store = new THREE.Mesh(new THREE.BoxGeometry(5, 4, 5), new THREE.MeshStandardMaterial({color: 0x333333}));
+            store.position.set(4, 2, 10); // Store located in the lobby/entrance area
+            scene.add(store);
+        }
+
+        function createRoundTable() {
+            const table = new THREE.Group();
+            // Rounder Table Design
+            const top = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 0.2, 64), new THREE.MeshStandardMaterial({color: 0x076324}));
+            const rim = new THREE.Mesh(new THREE.TorusGeometry(2.5, 0.1, 16, 100), new THREE.MeshStandardMaterial({color: 0x3d0c02}));
+            rim.rotation.x = Math.PI / 2;
+            rim.position.y = 0.1;
+            
+            table.add(top, rim);
+            table.position.set(0, 0.8, -5);
+            scene.add(table);
+        }
+
+        function setupControllers() {
+            // LEFT CONTROLLER (Locomotion & Menu)
+            const cLeft = renderer.xr.getController(0);
+            cLeft.addEventListener('selectstart', () => {
+                // Teleport Logic: Move userGroup to controller's pointed position
+                userGroup.position.z -= 2; // Simple forward locomotion for now
+            });
+            scene.add(cLeft);
+
+            // RIGHT CONTROLLER (Blue Giveaway)
+            const cRight = renderer.xr.getController(1);
+            cRight.addEventListener('selectstart', () => {
+                spawnBlueChips();
+            });
+            scene.add(cRight);
+        }
+
+        function spawnBlueChips() {
+            const chip = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.01), new THREE.MeshBasicMaterial({color: 0x0000ff}));
+            chip.position.set(0, 1.2, userGroup.position.z - 5);
+            scene.add(chip);
+        }
+
+        function render() {
+            renderer.render(scene, camera);
+        }
+
+        document.getElementById('enter-btn').onclick = () => {
+            document.getElementById('overlay').style.display = 'none';
+            userGroup.position.set(0, 0, -4.5); // AUTO-SIT AT TABLE
+        };
+
+        init();
+    </script>
+</body>
+</html>

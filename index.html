@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Scarlet VR - Poker</title>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <script src="https://unpkg.com/aframe-teleport-controls@0.2.x/dist/aframe-teleport-controls.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
+  </head>
+  <body>
+    <a-scene>
+      <a-assets>
+        <img id="brick-wall" src="https://i.imgur.com/8X8X8X8.jpg" crossorigin="anonymous"> <img id="poker-felt" src="https://i.imgur.com/ScarletLogo.png" crossorigin="anonymous"> <img id="card-texture" src="https://i.imgur.com/RealCard.jpg" crossorigin="anonymous"> </a-assets>
+
+      <a-entity id="rig" movement-controls="controls: checkpoint" checkpoint-controls="mode: teleport">
+        <a-entity camera position="0 1.6 0" look-controls></a-entity>
+        
+        <a-entity oculus-touch-controls="hand: left" teleport-controls="button: trigger; collisionEntities: .nav-mesh"></a-entity>
+        
+        <a-entity oculus-touch-controls="hand: right" laser-controls="hand: right" raycaster="objects: .clickable"></a-entity>
+      </a-entity>
+
+      <a-box id="lobby" position="0 2 -10" width="10" height="4" depth="10" 
+             material="src: #brick-wall; repeat: 4 2" side="double">
+        <a-entity id="back-door" position="0 -1 4.9" animation__open="property: rotation; to: 0 90 0; startEvents: click">
+           <a-box width="1.5" height="2.5" depth="0.1" color="#442200" class="clickable"></a-box>
+        </a-entity>
+      </a-box>
+
+      <a-entity id="room1" position="-15 0 -10">
+        <a-box width="8" height="4" depth="8" material="src: #brick-wall" side="double"></a-box>
+        <a-entity class="poker-table" position="0 0.8 0" 
+                  geometry="primitive: cylinder; radius: 1.5; height: 0.1" 
+                  material="src: #poker-felt">
+            <a-cylinder class="play-trigger" position="0 0 2" radius="0.5" height="0.1" color="green"
+                        onclick="this.emit('sit-down')"></a-cylinder>
+        </a-entity>
+      </a-entity>
+
+      <a-entity id="daily-giveaway" position="3 1 -8">
+        <a-text value="Claim Daily Chips" align="center" position="0 1 0"></a-text>
+        <a-sphere id="blue-chip" radius="0.2" color="blue" class="clickable"
+                  onclick="alert('1000 Chips Added!')"></a-sphere>
+      </a-entity>
+
+      <a-entity light="type: ambient; intensity: 0.5; color: #BBB"></a-entity>
+      <a-entity light="type: directional; intensity: 0.6" position="-1 1 0"></a-entity>
+    </a-scene>
+
+    <script>
+      // LOGIC: Automatic Seat/Card Deal
+      AFRAME.registerComponent('sit-down', {
+        init: function () {
+          this.el.addEventListener('click', function () {
+            let player = document.querySelector('#rig');
+            player.setAttribute('position', {x: -15, y: 0, z: -8}); // Move player to chair
+            console.log("Player seated. Dealing low-poly realistic cards...");
+            // Trigger card deal logic here
+          });
+        }
+      });
+    </script>
+  </body>
+</html>

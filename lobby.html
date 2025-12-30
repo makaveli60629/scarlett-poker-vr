@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Scarlet VR Poker — Lobby</title>
+
+  <!-- A-Frame -->
+  <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+
+  <!-- Teleport Controls -->
+  <script src="https://cdn.jsdelivr.net/npm/aframe-extras@6.1.1/dist/aframe-extras.min.js"></script>
+
+  <style>
+    body { margin: 0; background: black; }
+    .portalText {
+      color: #fff;
+      align: center;
+      width: 6;
+    }
+  </style>
+</head>
+
+<body>
+
+<a-scene
+  renderer="antialias: true; colorManagement: true"
+  vr-mode-ui="enabled: true"
+  device-orientation-permission-ui="enabled: true">
+
+  <!-- SKY -->
+  <a-sky color="#120015"></a-sky>
+
+  <!-- LIGHTING -->
+  <a-entity light="type: ambient; intensity: 0.5"></a-entity>
+  <a-entity light="type: point; intensity: 1.2; color: #ff4d6d" position="0 6 0"></a-entity>
+
+  <!-- FLOOR -->
+  <a-plane
+    rotation="-90 0 0"
+    width="40"
+    height="40"
+    color="#1a001f"
+    shadow>
+  </a-plane>
+
+  <!-- WALLS (BOUNDARY) -->
+  <a-box position="0 2 -20" width="40" height="4" depth="1" color="#2b002f"></a-box>
+  <a-box position="0 2 20" width="40" height="4" depth="1" color="#2b002f"></a-box>
+  <a-box position="-20 2 0" width="1" height="4" depth="40" color="#2b002f"></a-box>
+  <a-box position="20 2 0" width="1" height="4" depth="40" color="#2b002f"></a-box>
+
+  <!-- TITLE -->
+  <a-text
+    value="SCARLET VR POKER"
+    position="0 4 -6"
+    align="center"
+    width="10"
+    color="#ff4d6d">
+  </a-text>
+
+  <!-- CASH GAMES PORTAL -->
+  <a-cylinder
+    position="-6 1.5 -6"
+    radius="1.2"
+    height="3"
+    color="#00ffcc"
+    animation="property: rotation; to: 0 360 0; loop: true; dur: 6000">
+  </a-cylinder>
+
+  <a-text
+    value="CASH GAMES"
+    position="-6 3.5 -6"
+    class="portalText">
+  </a-text>
+
+  <!-- HIGH ROLLERS PORTAL -->
+  <a-cylinder
+    position="0 1.5 -8"
+    radius="1.2"
+    height="3"
+    color="#ffd700"
+    animation="property: rotation; to: 0 -360 0; loop: true; dur: 6000">
+  </a-cylinder>
+
+  <a-text
+    value="HIGH ROLLERS"
+    position="0 3.5 -8"
+    class="portalText">
+  </a-text>
+
+  <!-- EVENTS PORTAL -->
+  <a-cylinder
+    position="6 1.5 -6"
+    radius="1.2"
+    height="3"
+    color="#ff2a6d"
+    animation="property: rotation; to: 0 360 0; loop: true; dur: 6000">
+  </a-cylinder>
+
+  <a-text
+    value="EVENTS"
+    position="6 3.5 -6"
+    class="portalText">
+  </a-text>
+
+  <!-- PLAYER RIG -->
+  <a-entity
+    id="rig"
+    position="0 1.6 6"
+    movement-controls="speed: 0.15">
+
+    <a-camera
+      look-controls
+      wasd-controls="enabled: false">
+
+      <a-cursor
+        fuse="true"
+        fuse-timeout="1200"
+        color="#ff4d6d">
+      </a-cursor>
+
+    </a-camera>
+  </a-entity>
+
+</a-scene>
+
+</body>
+</html>

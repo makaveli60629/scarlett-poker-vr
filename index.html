@@ -1,0 +1,19 @@
+// USE THIS EXACT LOOP
+function enterVR() {
+    navigator.xr.requestSession('immersive-vr', {
+        requiredFeatures: ['local-floor']
+    }).then((session) => {
+        renderer.xr.setSession(session);
+        
+        // IMPORTANT: The Animation Loop must be set AFTER the session starts
+        renderer.setAnimationLoop(render); 
+        
+        // Trigger the Auto-Sit and Cards
+        onPlayGame();
+    });
+}
+
+function render() {
+    // This loop keeps the screen active
+    renderer.render(scene, camera);
+}

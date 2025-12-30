@@ -1,85 +1,88 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Scarlet VR - Poker</title>
+    <title>Scarlet VR - Poker World</title>
     <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
     <script src="https://unpkg.com/aframe-teleport-controls@0.2.x/dist/aframe-teleport-controls.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
   </head>
   <body>
-    <a-scene>
+    <a-scene shadow="type: pcfsoft">
+      
       <a-assets>
-        <img id="brick-wall" src="https://i.imgur.com/8X8X8X8.jpg" crossorigin="anonymous">
-        <img id="scarlet-felt" src="https://i.imgur.com/ScarletLogo.png" crossorigin="anonymous">
-        <a-asset-item id="card-model" src="card.glb"></a-asset-item>
+        <img id="brick" src="https://i.imgur.com/8X8X8X8.jpg" crossorigin="anonymous">
+        <img id="felt" src="https://i.imgur.com/ScarletLogo.png" crossorigin="anonymous">
+        <img id="floor" src="https://i.imgur.com/25P6YBa.jpg" crossorigin="anonymous">
+        <a-asset-item id="avatar" src="https://cdn.aframe.io/test-models/models/glTF-2.0/virtualcity/VC.gltf"></a-asset-item>
       </a-assets>
 
-      <a-entity id="rig" movement-controls="controls: checkpoint" position="0 0 0">
-        <a-entity camera position="0 1.6 0" look-controls></a-entity>
+      <a-entity id="rig" position="0 0 5">
+        <a-entity id="camera" camera look-controls position="0 1.6 0"></a-entity>
         <a-entity oculus-touch-controls="hand: left" teleport-controls="button: trigger; collisionEntities: .nav-mesh"></a-entity>
         <a-entity oculus-touch-controls="hand: right" laser-controls="hand: right" raycaster="objects: .clickable"></a-entity>
       </a-entity>
 
-      <a-box id="lobby" position="0 2 0" width="12" height="4" depth="12" material="src: #brick-wall" side="double">
-        <a-text value="CLAIM DAILY CHIPS" position="0 1 -5.5" align="center" color="cyan"></a-text>
-        <a-cylinder id="daily-chip" position="0 -1.9 -5.5" radius="0.3" height="0.05" color="blue" class="clickable" 
-                    animation="property: rotation; to: 0 360 0; loop: true; dur: 3000"></a-cylinder>
+      <a-entity id="main-lobby">
+        <a-sky color="#87CEEB"></a-sky> <a-plane rotation="-90 0 0" width="50" height="50" material="src: #floor; repeat: 10 10" class="nav-mesh"></a-plane>
+        
+        <a-box position="0 2.5 -6" width="12" height="5" depth="0.5" material="src: #brick; repeat: 3 1"></a-box> <a-box position="-6 2.5 0" width="0.5" height="5" depth="12" material="src: #brick; repeat: 3 1"></a-box> <a-box position="6 2.5 0" width="0.5" height="5" depth="12" material="src: #brick; repeat: 3 1"></a-box> <a-box id="back-door" position="0 1.25 -5.8" width="1.5" height="2.5" depth="0.2" color="#442200" class="clickable"
+               animation__open="property: rotation; to: 0 90 0; startEvents: click">
+        </a-box>
 
-        <a-entity id="back-door-frame" position="0 -0.5 5.9">
-            <a-box id="door-mesh" width="1.5" height="3" depth="0.1" color="#3d2b1f" class="clickable"
-                   animation__open="property: rotation; to: 0 90 0; startEvents: click">
+        <a-entity id="store-area" position="-4 0 -4">
+            <a-text value="SCARLET STORE" align="center" position="0 2.5 0" color="yellow"></a-text>
+            <a-box width="3" height="0.5" depth="1" position="0 0.25 0" color="#222"></a-box> <a-sphere position="0 1 0" radius="0.2" color="blue" class="clickable" onclick="alert('Store Opened')"></a-sphere>
+        </a-entity>
+
+        <a-entity id="elevator" position="4 0 -4">
+            <a-box width="2" height="4" depth="2" color="#555" material="metalness: 0.8">
+                <a-text value="ELEVATOR" align="center" position="0 1.5 1.01"></a-text>
+                <a-box width="0.2" height="0.2" depth="0.1" position="0.5 0 1.01" color="green" class="clickable"></a-box>
             </a-box>
         </a-entity>
-      </a-box>
+      </a-entity>
 
-      <a-entity id="room-1" position="-15 2 0">
-        <a-box width="10" height="4" depth="10" material="src: #brick-wall" side="double"></a-box>
-        <a-cylinder id="table-1" position="0 -1.2 0" radius="2" height="0.1" material="src: #scarlet-felt">
-            <a-box class="clickable" position="0 0.2 1.5" width="0.8" height="0.1" depth="0.8" color="green"
-                   onclick="sitPlayer(-15, 0, 1.5)">
-                <a-text value="PLAY GAME" align="center" position="0 0.1 0" rotation="-90 0 0" scale="0.5 0.5 0.5"></a-text>
+      <a-entity id="poker-room-1" position="15 0 -5">
+        <a-box width="8" height="5" depth="8" material="src: #brick; repeat: 2 1" side="double"></a-box>
+        <a-cylinder position="0 0.8 0" radius="1.8" height="0.1" material="src: #felt">
+            <a-text value="SCARLET POKER" align="center" position="0 0.1 0" rotation="-90 0 0"></a-text>
+            <a-box class="clickable" position="0 0.1 1.2" width="0.5" height="0.1" depth="0.5" color="green"
+                   onclick="sitDown(15, 0, -3.8)">
+                   <a-text value="SIT" align="center" position="0 0.1 0" rotation="-90 0 0" scale="0.4 0.4 0.4"></a-text>
             </a-box>
         </a-cylinder>
       </a-entity>
 
-      <a-entity id="room-2" position="0 2 -20">
-        <a-box width="10" height="4" depth="10" material="src: #brick-wall" side="double"></a-box>
-        <a-cylinder id="table-2" position="0 -1.2 0" radius="2" height="0.1" material="src: #scarlet-felt">
-            <a-box class="clickable" position="0 0.2 1.5" width="0.8" height="0.1" depth="0.8" color="green"
-                   onclick="sitPlayer(0, 0, -18.5)">
-                <a-text value="PLAY GAME" align="center" position="0 0.1 0" rotation="-90 0 0" scale="0.5 0.5 0.5"></a-text>
-            </a-box>
-        </a-cylinder>
+      <a-entity id="poker-room-2" position="-15 0 -5" rotation="0 90 0">
+          <a-box width="8" height="5" depth="8" material="src: #brick" side="double"></a-box>
       </a-entity>
 
-      <a-entity id="room-3" position="15 2 0">
-        <a-box width="10" height="4" depth="10" material="src: #brick-wall" side="double"></a-box>
-        <a-cylinder id="table-3" position="0 -1.2 0" radius="2" height="0.1" material="src: #scarlet-felt">
-            <a-box class="clickable" position="0 0.2 1.5" width="0.8" height="0.1" depth="0.8" color="green"
-                   onclick="sitPlayer(15, 0, 1.5)">
-                <a-text value="PLAY GAME" align="center" position="0 0.1 0" rotation="-90 0 0" scale="0.5 0.5 0.5"></a-text>
-            </a-box>
-        </a-cylinder>
+      <a-entity position="0 1 0">
+          <a-octahedron color="blue" radius="0.3" class="clickable" animation="property: rotation; to: 0 360 0; loop: true; dur: 2000"></a-octahedron>
+          <a-text value="FREE CHIPS" position="0 0.6 0" align="center" scale="0.5 0.5 0.5"></a-text>
       </a-entity>
 
-      <a-entity light="type: ambient; intensity: 0.4"></a-entity>
-      <a-entity light="type: point; intensity: 0.8; distance: 50" position="0 5 0"></a-entity>
+      <a-entity id="npc-1" position="-3 0 -2" animation="property: position; to: 3 0 -2; dir: alternate; dur: 5000; loop: true">
+          <a-capsule radius="0.25" height="1.5" color="#f00"></a-capsule>
+          <a-text value="Player 2" position="0 1.8 0" align="center" scale="0.5 0.5 0.5"></a-text>
+      </a-entity>
+
+      <a-light type="ambient" color="#fff" intensity="0.7"></a-light>
+      <a-light type="directional" position="1 4 2" intensity="0.5"></a-light>
 
     </a-scene>
 
     <script>
-      // SITTING LOGIC: Teleport to seat and spawn cards
-      function sitPlayer(x, y, z) {
+      function sitDown(x, y, z) {
         const rig = document.querySelector('#rig');
         rig.setAttribute('position', {x: x, y: y, z: z});
-        console.log("Player seated at coordinates:", x, y, z);
-        dealCards(x, z);
+        // Auto-deal logic
+        console.log("Seated. Dealing real-look cards...");
+        dealLowPolyCards(x, z);
       }
 
-      // CARD LOGIC: Spawn low-poly realistic cards
-      function dealCards(x, z) {
-        // This function will trigger the card spawns on the table in front of the player
-        console.log("Dealing low-poly realistic cards...");
+      function dealLowPolyCards(x, z) {
+        // Function to spawn card entities with textures in front of player
       }
     </script>
   </body>

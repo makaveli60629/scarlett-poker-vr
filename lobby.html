@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Scarlett VR Poker Lobby</title>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-physics-system@v4.2.2/dist/aframe-physics-system.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/aframe-particle-system-component@1.0.1/dist/aframe-particle-system-component.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; }
+    </style>
+</head>
+<body>
+
+<a-scene physics="debug: false">
+
+    <!-- Sky -->
+    <a-sky color="#111"></a-sky>
+
+    <!-- Lighting -->
+    <a-light type="ambient" intensity="0.6"></a-light>
+    <a-light type="point" intensity="1" position="0 10 0"></a-light>
+
+    <!-- Floor -->
+    <a-plane rotation="-90 0 0" width="30" height="30" color="#222" material="roughness: 0.8"></a-plane>
+
+    <!-- Particle system for ambiance -->
+    <a-entity particle-system="preset: dust; color: #d4af37; particleCount: 1000; size: 0.05;"></a-entity>
+
+    <!-- Tables and seats (3 tables for demo) -->
+    <a-entity id="tables">
+
+        <!-- Table 1 -->
+        <a-box position="-5 0.25 -5" width="4" height="0.5" depth="2" color="#444"></a-box>
+        <a-box position="-6 0.5 -5" width="0.5" height="0.5" depth="0.5" color="#999"></a-box>
+        <a-box position="-4 0.5 -5" width="0.5" height="0.5" depth="0.5" color="#999"></a-box>
+
+        <!-- Table 2 -->
+        <a-box position="0 0.25 -5" width="4" height="0.5" depth="2" color="#444"></a-box>
+        <a-box position="-1 0.5 -5" width="0.5" height="0.5" depth="0.5" color="#999"></a-box>
+        <a-box position="1 0.5 -5" width="0.5" height="0.5" depth="0.5" color="#999"></a-box>
+
+        <!-- Table 3 -->
+        <a-box position="5 0.25 -5" width="4" height="0.5" depth="2" color="#444"></a-box>
+        <a-box position="4 0.5 -5" width="0.5" height="0.5" depth="0.5" color="#999"></a-box>
+        <a-box position="6 0.5 -5" width="0.5" height="0.5" depth="0.5" color="#999"></a-box>
+
+    </a-entity>
+
+    <!-- Placeholder avatars / bots -->
+    <a-entity id="bots">
+        <a-sphere position="-5 1 -4" radius="0.25" color="#ff4444"></a-sphere>
+        <a-sphere position="0 1 -4" radius="0.25" color="#44ff44"></a-sphere>
+        <a-sphere position="5 1 -4" radius="0.25" color="#4444ff"></a-sphere>
+    </a-entity>
+
+    <!-- Player rig -->
+    <a-entity id="rig" position="0 1.6 5" movement-controls>
+        <a-camera>
+            <a-cursor color="gold" raycaster="objects: .clickable"></a-cursor>
+        </a-camera>
+    </a-entity>
+
+    <!-- Sample clickable chip (demo) -->
+    <a-cylinder class="clickable" position="0 0.5 -2" radius="0.1" height="0.05" color="gold">
+        <a-text value="CLICK ME" align="center" color="#000" position="0 0.2 0" width="2"></a-text>
+    </a-cylinder>
+
+</a-scene>
+
+</body>
+</html>

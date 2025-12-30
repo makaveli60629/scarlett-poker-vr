@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>TITAN ESTATE | VR MASTER</title>
+    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+    <script src="https://unpkg.com/aframe-teleport-controls@0.3.1/dist/aframe-teleport-controls.min.js"></script>
+  </head>
+  <body>
+    <a-scene cursor="rayOrigin: mouse" raycaster="objects: .clickable">
+      
+      <a-entity id="rig">
+        <a-camera position="0 1.6 0" look-controls>
+          <a-cursor color="gold"></a-cursor>
+        </a-camera>
+        <a-entity teleport-controls="cameraRig: #rig; teleportOrigin: #camera; button: trigger;" vive-controls="hand: left" oculus-touch-controls="hand: left"></a-entity>
+        <a-entity teleport-controls="cameraRig: #rig; teleportOrigin: #camera; button: trigger;" vive-controls="hand: right" oculus-touch-controls="hand: right"></a-entity>
+      </a-entity>
+
+      <a-entity position="0 0 -3">
+        <a-cylinder color="#111" radius="0.7" height="0.9" position="0 0.45 0"></a-cylinder>
+        <a-cylinder color="#3d2b1f" radius="2.5" height="0.1" scale="1.4 1 0.7" position="0 0.9 0"></a-cylinder>
+        <a-cylinder color="#004d00" radius="2.3" height="0.12" scale="1.4 1 0.7" position="0 0.91 0"></a-cylinder>
+        <a-torus color="#050505" radius="2.3" radius-tubular="0.12" rotation="90 0 0" scale="1.4 0.7 1" position="0 1.0 0"></a-torus>
+        
+        <a-box class="clickable" color="gold" width="0.4" height="0.1" depth="0.4" position="0.8 1.05 0.5"
+               onclick="document.getElementById('vault-door').emit('openDoor');">
+            <a-text value="WIN" align="center" position="0 0.06 0" rotation="-90 0 0" width="2" color="black"></a-text>
+        </a-box>
+      </a-entity>
+
+      <a-entity id="luxury-bar" position="-8 0 -5" rotation="0 45 0">
+        <a-box width="4" height="1.2" depth="1" color="#111"></a-box> <a-box width="3.8" height="0.1" depth="0.9" position="0 1.2 0" color="#3d2b1f"></a-box> <a-cylinder radius="0.05" height="0.3" color="gold" position="-1 1.4 0"></a-cylinder>
+        <a-cylinder radius="0.05" height="0.3" color="#00ff00" position="-0.5 1.4 0" opacity="0.5"></a-cylinder>
+        <a-text value="TITAN LOUNGE" position="0 2 0" align="center" color="gold" width="6"></a-text>
+      </a-entity>
+
+      <a-entity id="art-gallery" position="8 0 -5" rotation="0 -45 0">
+        <a-plane width="3" height="4" color="#222" position="0 2.5 0"></a-plane> <a-plane width="2.8" height="3.8" color="#004d00" position="0 2.5 0.01"></a-plane> <a-text value="THE TITAN COLLECTION" position="0 0.5 0.5" align="center" color="gold" width="4"></a-text>
+        <a-light type="spot" color="white" position="0 5 2" target="#art-gallery"></a-light>
+      </a-entity>
+
+      <a-box id="vault-door" position="0 2.5 -7" width="5" height="5" depth="0.4" color="#222"
+             animation__open="property: position; to: 0 7 -7; dur: 2000; startEvents: openDoor">
+        <a-torus color="gold" radius="0.8" radius-tubular="0.05" position="0 0 0.3"></a-torus>
+      </a-box>
+
+      <a-sky color="#020202"></a-sky>
+      <a-plane rotation="-90 0 0" width="50" height="50" color="#0a0a0a" class="clickable"></a-plane>
+      <a-light type="ambient" color="#444"></a-light>
+      <a-light type="point" position="0 5 -3" intensity="1.5"></a-light>
+
+    </a-scene>
+  </body>
+</html>

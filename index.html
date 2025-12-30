@@ -2,36 +2,35 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Brick Club 111 - VR Poker</title>
+    <title>Brick Club VR - Luxury Edition</title>
     <style>
-        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
-        #ui-overlay {
+        body { margin: 0; background: #000; overflow: hidden; }
+        #overlay {
             position: absolute; width: 100%; height: 100%; display: flex;
             flex-direction: column; justify-content: center; align-items: center;
-            background: #111; z-index: 10;
+            background: #1a1a1a; z-index: 20; color: white; font-family: sans-serif;
         }
         button {
-            padding: 20px 50px; font-size: 24px; background: #b22222;
-            color: white; border: none; border-radius: 10px; cursor: pointer;
+            padding: 20px 60px; font-size: 24px; background: #8B0000;
+            color: white; border: 2px solid #ffd700; border-radius: 50px; cursor: pointer;
         }
     </style>
 </head>
 <body>
-
-    <div id="ui-overlay">
-        <h1>BRICK CLUB VR</h1>
-        <button id="start-vr">PLAY VR (AUTO-SIT)</button>
+    <div id="overlay">
+        <h1 style="letter-spacing: 5px;">BRICK CLUB VR</h1>
+        <p>LUXURY EDITION</p>
+        <button id="enter-btn">ENTER CLUB</button>
     </div>
 
     <script type="module">
         import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
         import { VRButton } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/webxr/VRButton.js';
 
-        let scene, camera, renderer, menu;
+        let scene, camera, renderer, menu, backDoor;
         let isMenuOpen = false;
 
         function init() {
-            // 1. SETUP SCENE
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             
@@ -41,79 +40,108 @@
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
-            // 2. BRICK WALLS (The 4 Zones)
-            const loader = new THREE.TextureLoader();
-            const brickTex = loader.load('https://threejs.org/examples/textures/brick_diffuse.jpg');
-            const brickMat = new THREE.MeshStandardMaterial({ map: brickTex, side: THREE.DoubleSide });
-            
-            for(let i=0; i<4; i++) {
-                const room = new THREE.Mesh(new THREE.BoxGeometry(10, 5, 10), brickMat);
-                room.position.z = -(i * 11);
-                scene.add(room);
+            // LIGHTING (Recessed Ceiling Lights)
+            const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambient);
+            for(let i=0; i<3; i++) {
+                const light = new THREE.PointLight(0xffffff, 1, 10);
+                light.position.set(0, 4.8, -(i * 12));
+                scene.add(light);
             }
 
-            // 3. BRANDED TABLE
-            const table = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 0.2), new THREE.MeshStandardMaterial({color: 0x076324}));
-            table.position.set(0, 0, -4);
-            scene.add(table);
-
-            // 4. THE MENU & LEAVE BUTTON
-            menu = new THREE.Group();
-            const leaveBtn = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.1), new THREE.MeshBasicMaterial({color: 0xff0000}));
-            leaveBtn.name = "LEAVE";
-            menu.add(leaveBtn);
-            menu.visible = false;
-            scene.add(menu);
-
-            // 5. LIGHTING
-            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-
+            buildLuxuryRoom();
+            createPremiumTable();
+            createAvatar();
+            createVRMenu();
             setupControllers();
-            
-            // This is the "EXACT LOOP" from your screenshot, now working properly:
+
             renderer.setAnimationLoop(render);
         }
 
+        function buildLuxuryRoom() {
+            const loader = new THREE.TextureLoader();
+            const brickTex = loader.load('https://threejs.org/examples/textures/brick_diffuse.jpg');
+            
+            // 1. CEILING (White)
+            const ceilGeo = new THREE.PlaneGeometry(20, 100);
+            const ceilMat = new THREE.MeshStandardMaterial({color: 0xffffff});
+            const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
+            ceiling.rotation.x = Math.PI / 2;
+            ceiling.position.y = 5;
+            scene.add(ceiling);
+
+            // 2. FLOOR (Red Carpet)
+            const floorGeo = new THREE.PlaneGeometry(20, 100);
+            const floorMat = new THREE.MeshStandardMaterial({color: 0x8B0000}); // Deep Red
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            // 3. WALLS (Brick Top, White Panel Bottom)
+            const wallGroup = new THREE.Group();
+            // Brick Upper
+            const upperWall = new THREE.Mesh(new THREE.BoxGeometry(10, 3, 40), new THREE.MeshStandardMaterial({map: brickTex}));
+            upperWall.position.y = 3.5;
+            // White Lower Panel
+            const lowerWall = new THREE.Mesh(new THREE.BoxGeometry(10.1, 2, 40), new THREE.MeshStandardMaterial({color: 0xeeeeee}));
+            lowerWall.position.y = 1;
+            
+            wallGroup.add(upperWall, lowerWall);
+            scene.add(wallGroup);
+        }
+
+        function createPremiumTable() {
+            const table = new THREE.Group();
+            // Mahogany Base
+            const base = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.1, 0.3), new THREE.MeshStandardMaterial({color: 0x3d0c02}));
+            // Felt Top
+            const felt = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 0.31), new THREE.MeshStandardMaterial({color: 0x076324}));
+            // Branding
+            const logo = new THREE.Mesh(new THREE.CircleGeometry(0.6, 32), new THREE.MeshBasicMaterial({color: 0xffffff, transparent: true, opacity: 0.4}));
+            logo.rotation.x = -Math.PI / 2;
+            logo.position.y = 0.17;
+            
+            table.add(base, felt, logo);
+            table.position.set(0, 0.8, -5);
+            scene.add(table);
+        }
+
+        function createAvatar() {
+            // Placeholder for your Avatars
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.15), new THREE.MeshStandardMaterial({color: 0xffdbac}));
+            head.position.set(0, 1.2, -6.5);
+            scene.add(head);
+        }
+
+        function createVRMenu() {
+            menu = new THREE.Group();
+            const bg = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.25), new THREE.MeshBasicMaterial({color: 0x000000, transparent: true, opacity: 0.8}));
+            const exitBtn = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 0.1), new THREE.MeshBasicMaterial({color: 0xaa0000}));
+            exitBtn.position.z = 0.01;
+            menu.add(bg, exitBtn);
+            menu.visible = false;
+            scene.add(menu);
+        }
+
         function setupControllers() {
-            const controllerLeft = renderer.xr.getController(0);
-            controllerLeft.addEventListener('selectstart', () => {
-                if (isMenuOpen) exitVR(); 
-                else toggleMenu();
+            const cLeft = renderer.xr.getController(0);
+            cLeft.addEventListener('selectstart', () => {
+                if(isMenuOpen) { window.location.reload(); }
+                else { 
+                    isMenuOpen = !isMenuOpen;
+                    menu.visible = isMenuOpen;
+                    menu.position.set(camera.position.x, camera.position.y, camera.position.z - 0.5);
+                }
             });
-            scene.add(controllerLeft);
-
-            const controllerRight = renderer.xr.getController(1);
-            controllerRight.addEventListener('selectstart', spawnBlueChips);
-            scene.add(controllerRight);
+            scene.add(cLeft);
         }
 
-        function toggleMenu() {
-            isMenuOpen = !isMenuOpen;
-            menu.visible = isMenuOpen;
-            menu.position.set(camera.position.x, camera.position.y, camera.position.z - 0.5);
-        }
+        function render() { renderer.render(scene, camera); }
 
-        function spawnBlueChips() {
-            const chip = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.01), new THREE.MeshBasicMaterial({color: 0x0000ff}));
-            chip.position.set(0, 1, -3.5);
-            scene.add(chip);
-        }
-
-        function exitVR() {
-            renderer.xr.getSession().end().then(() => {
-                window.location.reload(); // Restarts to lobby, no white screen
-            });
-        }
-
-        function render() {
-            renderer.render(scene, camera);
-        }
-
-        document.getElementById('start-vr').addEventListener('click', () => {
-            // AUTO-SIT
-            camera.position.set(0, 1.2, -3.5);
-            document.getElementById('ui-overlay').style.display = 'none';
-        });
+        document.getElementById('enter-btn').onclick = () => {
+            document.getElementById('overlay').style.display = 'none';
+            camera.position.set(0, 1.2, -4.5); // AUTO-SIT
+        };
 
         init();
     </script>

@@ -1,83 +1,59 @@
+<!-- File: table.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Scarlett VR Poker Table</title>
-<script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-physics-system@v4.2.2/dist/aframe-physics-system.min.js"></script>
-<style>
-    body { margin:0; overflow:hidden; background:#111; }
-</style>
-<script>
-AFRAME.registerComponent('poker-engine', {
-    init: function() {
-        this.pot = 0;
-        this.el.addEventListener('bet', (e) => {
-            this.pot += e.detail.amount;
-            document.querySelector('#pot-text').setAttribute('value', "POT: $" + this.pot);
-            document.querySelector('#wrist-bank').setAttribute('value', "BANK: $" + (50000 - this.pot));
-        });
-    }
-});
-</script>
+  <meta charset="UTF-8">
+  <title>Scarlett VR Poker - Table</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+  <script src="core/economy.js"></script>
+  <script src="core/table-game.js"></script>
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<a-scene poker-engine physics="debug: false">
+  <a-scene background="color: #1e1e1e">
+    
+    <!-- Table -->
+    <a-box id="table" position="0 0 -2" depth="1.5" height="0.2" width="3" color="#4B2E2E"></a-box>
 
-    <!-- Sky -->
-    <a-sky color="#111"></a-sky>
+    <!-- Player hand cards placeholders -->
+    <a-box id="player-card-0" class="player-card" depth="0.01" height="0.7" width="0.5" color="#ff0000" position="-0.3 1 -1.8"></a-box>
+    <a-box id="player-card-1" class="player-card" depth="0.01" height="0.7" width="0.5" color="#ff0000" position="0.3 1 -1.8"></a-box>
 
-    <!-- Lights -->
-    <a-light type="ambient" intensity="0.5"></a-light>
-    <a-light type="point" position="0 10 0" intensity="1" color="gold"></a-light>
+    <!-- Pot Display -->
+    <a-text id="pot-text" value="TOTAL POT: $0" color="#FFF" position="-0.5 2 -1.5" width="3"></a-text>
 
-    <!-- Floor -->
-    <a-plane rotation="-90 0 0" width="20" height="20" color="#222" material="roughness:0.8"></a-plane>
-
-    <!-- Poker Table -->
-    <a-cylinder position="0 0.5 0" radius="3" height="0.3" color="#333" rotation="0 0 0" material="metalness:0.4; roughness:0.3"></a-cylinder>
-
-    <!-- Center Cards (river/flop/turn) -->
-    <a-box position="0 0.65 0" width="2" height="0.01" depth="0.5" color="#222"></a-box>
-    <a-box class="card" position="-0.6 0.66 0" width="0.3" height="0.01" depth="0.5" color="#111"></a-box>
-    <a-box class="card" position="-0.2 0.66 0" width="0.3" height="0.01" depth="0.5" color="#111"></a-box>
-    <a-box class="card" position="0.2 0.66 0" width="0.3" height="0.01" depth="0.5" color="#111"></a-box>
-    <a-box class="card" position="0.6 0.66 0" width="0.3" height="0.01" depth="0.5" color="#111"></a-box>
-    <a-box class="card" position="1.0 0.66 0" width="0.3" height="0.01" depth="0.5" color="#111"></a-box>
-
-    <!-- Players Seats -->
-    <a-entity id="players">
-        <a-sphere position="0 1.1 3" radius="0.25" color="#ff4444"></a-sphere>
-        <a-sphere position="-2 1.1 2" radius="0.25" color="#44ff44"></a-sphere>
-        <a-sphere position="2 1.1 2" radius="0.25" color="#4444ff"></a-sphere>
-        <a-sphere position="-3 1.1 0" radius="0.25" color="#ff44ff"></a-sphere>
-        <a-sphere position="3 1.1 0" radius="0.25" color="#44ffff"></a-sphere>
-        <a-sphere position="0 1.1 -3" radius="0.25" color="#ffff44"></a-sphere>
+    <!-- Wrist HUD -->
+    <a-entity id="inventory-panel" visible="false" position="0 1.5 -1.5">
+      <a-plane height="1" width="1.5" color="#333"></a-plane>
+      <a-text id="wrist-cash" value="BANK: $5000" color="#FFF" position="-0.65 0.3 0" width="2"></a-text>
     </a-entity>
 
-    <!-- Chips for each player -->
-    <a-cylinder position="0 0.51 3.3" radius="0.2" height="0.05" color="gold"></a-cylinder>
-    <a-cylinder position="-2 0.51 2.3" radius="0.2" height="0.05" color="gold"></a-cylinder>
-    <a-cylinder position="2 0.51 2.3" radius="0.2" height="0.05" color="gold"></a-cylinder>
-    <a-cylinder position="-3 0.51 0.3" radius="0.2" height="0.05" color="gold"></a-cylinder>
-    <a-cylinder position="3 0.51 0.3" radius="0.2" height="0.05" color="gold"></a-cylinder>
-    <a-cylinder position="0 0.51 -2.7" radius="0.2" height="0.05" color="gold"></a-cylinder>
+    <!-- Left-hand button to toggle HUD -->
+    <a-box id="leftHand-button" position="-0.8 1 -1.2" depth="0.1" height="0.2" width="0.4" color="#ff9900">
+      <a-text value="Inventory" color="#000" position="-0.17 0 0.06" width="2"></a-text>
+    </a-box>
 
-    <!-- Pot text -->
-    <a-text id="pot-text" value="POT: $0" position="0 1.4 0" align="center" color="gold" width="4"></a-text>
+    <!-- Bet buttons -->
+    <a-box class="bet-box" data-bet="100" position="-1 1 -1" depth="0.1" height="0.2" width="0.4" color="#0f0">
+      <a-text value="$100" color="#000" position="-0.1 0 0.06" width="2"></a-text>
+    </a-box>
+    <a-box class="bet-box" data-bet="500" position="0 1 -1" depth="0.1" height="0.2" width="0.4" color="#0f0">
+      <a-text value="$500" color="#000" position="-0.1 0 0.06" width="2"></a-text>
+    </a-box>
+    <a-box class="bet-box" data-bet="1000" position="1 1 -1" depth="0.1" height="0.2" width="0.4" color="#0f0">
+      <a-text value="$1000" color="#000" position="-0.15 0 0.06" width="2"></a-text>
+    </a-box>
 
-    <!-- Player rig -->
-    <a-entity id="rig" position="0 1.6 5" movement-controls>
-        <a-camera>
-            <a-cursor color="gold" raycaster="objects: .clickable"></a-cursor>
-        </a-camera>
-        <!-- Wrist HUD -->
-        <a-box position="0 -0.2 -0.5" scale="0.3 0.2 0.02" color="#111">
-            <a-text id="wrist-bank" value="BANK: $50,000" position="0 0.05 0.01" align="center" width="2" color="gold"></a-text>
-        </a-box>
+    <!-- Camera & Controls -->
+    <a-entity camera look-controls wasd-controls position="0 1.6 0">
+      <a-entity laser-controls="hand: right"></a-entity>
+      <a-entity laser-controls="hand: left"></a-entity>
     </a-entity>
 
-</a-scene>
+    <!-- Table game component -->
+    <a-entity table-game></a-entity>
+
+  </a-scene>
 </body>
 </html>

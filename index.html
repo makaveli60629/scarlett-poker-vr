@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Brick Club VR - Full Control Edition</title>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
+        #overlay {
+            position: absolute; width: 100%; height: 100%; display: flex;
+            flex-direction: column; justify-content: center; align-items: center;
+            background: #000; z-index: 100; color: #ffd700;
+        }
+        button {
+            padding: 25px 70px; font-size: 28px; background: #8B0000;
+            color: white; border: 3px solid #ffd700; border-radius: 50px; cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="overlay">
+        <h1>BRICK CLUB CASINO</h1>
+        <button id="start-btn">ENTER VR (AUTO-SIT)</button>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+        import { VRButton } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/webxr/VRButton.js';
+
+        let scene, camera, renderer, userRig, moveHighlight;
+        let canTurn = true;
+        const walls = [];
+
+        function init() {
+            scene = new THREE.Scene();
+            userRig = new THREE.Group();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            userRig.add(camera);
+            scene.add(userRig);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            document.body.appendChild(renderer.domElement);
+            document.body.appendChild(VRButton.createButton(renderer));
+
+            scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+
+            buildEnvironment();
+            createMoveHighlight();
+            createBrandedTable();
+            setupOculusButtons();
+
+            renderer.setAnimationLoop(renderLoop);
+        }
+
+        function buildEnvironment() {
+            // FLOOR
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({color: 0x800000}));
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            // SOLID BRICK WALLS
+            const wallMat = new THREE.MeshStandardMaterial({color: 0x552222});
+            const loader = new THREE.TextureLoader();
+            loader.load('https://threejs.org/examples/textures/brick_diffuse.jpg', (t) => { wallMat.map = t; wallMat.needsUpdate = true; });
+
+            const lWall = new THREE.Mesh(new THREE.BoxGeometry(1, 10, 100), wallMat);
+            lWall.position.set(-20, 5, 0);
+            scene.add(lWall);
+            walls.push(new THREE.Box3().setFromObject(lWall));
+
+            const rWall = new THREE.Mesh(new THREE.BoxGeometry(1, 10, 100), wallMat);
+            rWall.position.set(20, 5, 0);
+            scene.add(rWall);
+            walls.push(new THREE.Box3().setFromObject(rWall));
+        }
+
+        function createMoveHighlight() {
+            // Blue Ring Highlight to show where you are moving
+            const ringGeo = new THREE.RingGeometry(0.4, 0.5, 32);
+            const ringMat = new THREE.MeshBasicMaterial({color: 0x00ffff, side: THREE.DoubleSide});
+            moveHighlight = new THREE.Mesh(ringGeo, ringMat);
+            moveHighlight.rotation.x = -Math.PI / 2;
+            moveHighlight.position.y = 0.02;
+            moveHighlight.visible = false;
+            scene.add(moveHighlight);
+        }
+
+        function createBrandedTable() {
+            const table = new THREE.Group();
+            const top = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 0.2, 64), new THREE.MeshStandardMaterial({color: 0x076324}));
+            const rim = new THREE.Mesh(new THREE.TorusGeometry(2.5, 0.15, 16, 100), new THREE.MeshStandardMaterial({color: 0x3d0c02}));
+            rim.rotation.x = Math.PI / 2;
+            rim.position.y = 0.1;
+            
+            // CARD PLACEHOLDER
+            const card = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.001, 0.09), new THREE.MeshStandardMaterial({color: 0xffffff}));
+            card.position.set(0.2, 0.2, 0.5);
+            table.add(top, rim, card);
+            table.position.set(0, 0, -6);
+            scene.add(table);
+        }
+
+        function setupOculusButtons() {
+            const cRight = renderer.xr.getController(1);
+            cRight.addEventListener('selectstart', () => {
+                const chip = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.02), new THREE.MeshBasicMaterial({color: 0x0000ff}));
+                chip.position.copy(cRight.position);
+                scene.add(chip);
+            });
+            scene.add(cRight);
+        }
+
+        function renderLoop() {
+            const session = renderer.xr.getSession();
+            if (session) {
+                for (const source of session.inputSources) {
+                    // LEFT HAND: Movement & Strafe
+                    if (source.gamepad && source.handedness === 'left') {
+                        const axes = source.gamepad.axes;
+                        const speed = 0.1;
+                        const nextX = userRig.position.x + axes[2] * speed;
+                        const nextZ = userRig.position.z + axes[3] * speed;
+
+                        // COLLISION
+                        let hit = false;
+                        const pBox = new THREE.Box3().setFromCenterAndSize(new THREE.Vector3(nextX, 1, nextZ), new THREE.Vector3(1, 2, 1));
+                        for(let w of walls) { if(pBox.intersectsBox(w)) hit = true; }
+                        
+                        if(!hit) {
+                            userRig.position.x = nextX;
+                            userRig.position.z = nextZ;
+                        }
+
+                        // Update Move Highlight Position
+                        if(Math.abs(axes[2]) > 0.1 || Math.abs(axes[3]) > 0.1) {
+                            moveHighlight.visible = true;
+                            moveHighlight.position.set(userRig.position.x, 0.02, userRig.position.z);
+                        } else {
+                            moveHighlight.visible = false;
+                        }
+                    }
+
+                    // RIGHT HAND: Snap Turn & Height
+                    if (source.gamepad && source.handedness === 'right') {
+                        const axes = source.gamepad.axes;
+                        // Turn Left/Right
+                        if (canTurn && Math.abs(axes[2]) > 0.8) {
+                            userRig.rotation.y -= Math.sign(axes[2]) * (Math.PI / 4);
+                            canTurn = false;
+                            setTimeout(() => { canTurn = true; }, 300);
+                        }
+                        // Up/Down Height Adjustment (Oculus Request)
+                        if (Math.abs(axes[3]) > 0.5) {
+                            userRig.position.y -= axes[3] * 0.05;
+                        }
+                    }
+                }
+            }
+            renderer.render(scene, camera);
+        }
+
+        document.getElementById('start-btn').onclick = () => {
+            document.getElementById('overlay').style.display = 'none';
+            userRig.position.set(0, 1.2, -5); 
+        };
+
+        init();
+    </script>
+</body>
+</html>

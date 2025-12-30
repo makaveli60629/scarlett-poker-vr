@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Scarlett VR Lobby</title>
+  <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-physics-system@v4.2.2/dist/aframe-physics-system.min.js"></script>
+  <script>
+    // Simple teleport logic for testing
+    AFRAME.registerComponent('teleport', {
+      init: function () {
+        this.el.addEventListener('click', evt => {
+          const rig = document.querySelector('#rig');
+          rig.setAttribute('position', evt.detail.intersection.point);
+        });
+      }
+    });
+  </script>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; }
+    #overlay {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: radial-gradient(circle, #1a1a1a, #000);
+      display: flex; justify-content: center; align-items: center;
+      z-index: 1000;
+    }
+    #overlay button {
+      padding: 20px 40px;
+      font-size: 1.5rem;
+      background: gold;
+      color: black;
+      border: none;
+      border-radius: 25px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<div id="overlay">
+  <button onclick="document.getElementById('overlay').style.display='none'">ENTER LOBBY</button>
+</div>
+
+<a-scene physics="debug: false">
+
+  <!-- Floor and walls -->
+  <a-plane rotation="-90 0 0" width="50" height="50" color="#111" material="roughness:0.2; metalness:0.3"></a-plane>
+  <a-box position="-25 2.5 0" width="0.1" height="5" depth="50" color="#333"></a-box>
+  <a-box position="25 2.5 0" width="0.1" height="5" depth="50" color="#333"></a-box>
+  <a-box position="0 2.5 -25" width="50" height="5" depth="0.1" color="#333"></a-box>
+  <a-box position="0 2.5 25" width="50" height="5" depth="0.1" color="#333"></a-box>
+
+  <!-- Tables with 6 seats each -->
+  <a-entity id="tables">
+    <!-- Table 1 -->
+    <a-cylinder position="-5 0.5 -5" radius="2" height="0.5" color="#222"></a-cylinder>
+    <a-box position="-6 0.25 -6" width="0.5" height="0.5" depth="0.5" color="red"></a-box>
+    <a-box position="-4 0.25 -6" width="0.5" height="0.5" depth="0.5" color="red"></a-box>
+    <a-box position="-6 0.25 -4" width="0.5" height="0.5" depth="0.5" color="red"></a-box>
+    <a-box position="-4 0.25 -4" width="0.5" height="0.5" depth="0.5" color="red"></a-box>
+    <a-box position="-5 0.25 -3" width="0.5" height="0.5" depth="0.5" color="red"></a-box>
+    <a-box position="-5 0.25 -7" width="0.5" height="0.5" depth="0.5" color="red"></a-box>
+
+    <!-- Table 2 -->
+    <a-cylinder position="5 0.5 -5" radius="2" height="0.5" color="#222"></a-cylinder>
+    <a-box position="4 0.25 -6" width="0.5" height="0.5" depth="0.5" color="blue"></a-box>
+    <a-box position="6 0.25 -6" width="0.5" height="0.5" depth="0.5" color="blue"></a-box>
+    <a-box position="4 0.25 -4" width="0.5" height="0.5" depth="0.5" color="blue"></a-box>
+    <a-box position="6 0.25 -4" width="0.5" height="0.5" depth="0.5" color="blue"></a-box>
+    <a-box position="5 0.25 -3" width="0.5" height="0.5" depth="0.5" color="blue"></a-box>
+    <a-box position="5 0.25 -7" width="0.5" height="0.5" depth="0.5" color="blue"></a-box>
+  </a-entity>
+
+  <!-- Statues / Decorations -->
+  <a-sphere position="0 1 -10" radius="1" color="gold"></a-sphere>
+  <a-sphere position="10 1 -10" radius="1" color="purple"></a-sphere>
+  <a-sphere position="-10 1 -10" radius="1" color="green"></a-sphere>
+
+  <!-- Portal area -->
+  <a-box position="0 0.5 15" width="3" height="1" depth="3" color="#ff00ff" teleport></a-box>
+  <a-text value="Portal to Event Room" position="0 2 15" align="center" color="white"></a-text>
+
+  <!-- Lighting -->
+  <a-light type="ambient" color="#888" intensity="0.6"></a-light>
+  <a-light type="point" position="0 10 0" color="white" intensity="1.5"></a-light>
+
+  <!-- Camera rig -->
+  <a-entity id="rig" position="0 1.6 5">
+    <a-camera wasd-controls look-controls>
+      <a-cursor color="gold" raycaster="objects: [teleport]"></a-cursor>
+    </a-camera>
+  </a-entity>
+
+</a-scene>

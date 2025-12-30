@@ -2,44 +2,48 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>TITAN ESTATE | PRO VAULT</title>
+    <title>TITAN ESTATE | THE EXECUTIVE VAULT</title>
     <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
   </head>
   <body>
-    <a-scene cursor="rayOrigin: mouse">
+    <a-scene>
       
-      <a-plane rotation="-90 0 0" width="50" height="50" color="#111"></a-plane>
+      <a-plane rotation="-90 0 0" width="100" height="100" color="#0a0a0a"></a-plane>
 
       <a-entity id="poker-table" position="0 0 -5">
         
-        <a-cylinder color="#222" radius="0.5" height="1" position="-2 0 0"></a-cylinder>
-        <a-cylinder color="#222" radius="0.5" height="1" position="2 0 0"></a-cylinder>
+        <a-cylinder color="#111" radius="0.6" height="1" position="-2.5 0 0"></a-cylinder>
+        <a-cylinder color="#111" radius="0.6" height="1" position="2.5 0 0"></a-cylinder>
 
-        <a-cylinder color="#3d2b1f" radius="3" height="0.1" scale="1.5 1 0.8" position="0 0.9 0"></a-cylinder>
+        <a-cylinder color="#3d2b1f" radius="4" height="0.1" scale="1.8 1 0.7" position="0 0.9 0"></a-cylinder>
 
-        <a-cylinder color="#004d00" radius="2.8" height="0.12" scale="1.5 1 0.8" position="0 0.91 0"></a-cylinder>
+        <a-cylinder color="#004d00" radius="3.8" height="0.12" scale="1.8 1 0.7" position="0 0.91 0"></a-cylinder>
 
-        <a-torus color="#111" radius="2.8" radius-tubular="0.15" rotation="90 0 0" scale="1.5 0.8 1" position="0 1.05 0"></a-torus>
+        <a-torus color="#050505" radius="3.8" radius-tubular="0.18" rotation="90 0 0" scale="1.8 0.7 1" position="0 1.05 0"></a-torus>
 
-        <a-entity id="chips">
-           <a-cylinder color="red" radius="0.05" height="0.2" position="-2 1.05 1"></a-cylinder>
-           <a-cylinder color="white" radius="0.05" height="0.2" position="0 1.05 1.2"></a-cylinder>
-           <a-cylinder color="blue" radius="0.05" height="0.2" position="2 1.05 1"></a-cylinder>
-           <a-cylinder color="red" radius="0.05" height="0.2" position="-2 1.05 -1"></a-cylinder>
-           <a-cylinder color="white" radius="0.05" height="0.2" position="0 1.05 -1.2"></a-cylinder>
-           <a-cylinder color="blue" radius="0.05" height="0.2" position="2 1.05 -1"></a-cylinder>
+        <a-entity id="table-details">
+          <a-cylinder color="red" radius="0.06" height="0.2" position="-2 1.05 1.5"></a-cylinder>
+          <a-cylinder color="white" radius="0.06" height="0.3" position="0 1.05 1.8"></a-cylinder>
+          <a-cylinder color="blue" radius="0.06" height="0.25" position="2 1.05 1.5"></a-cylinder>
+          <a-cylinder color="red" radius="0.06" height="0.2" position="-2 1.05 -1.5"></a-cylinder>
+          <a-cylinder color="white" radius="0.06" height="0.3" position="0 1.05 -1.8"></a-cylinder>
+          <a-cylinder color="blue" radius="0.06" height="0.25" position="2 1.05 -1.5"></a-cylinder>
         </a-entity>
       </a-entity>
 
-      <a-plane position="0 2.5 -12" width="25" height="5" color="#2c3e50"></a-plane>
-      <a-box position="0 4.9 -11.9" width="25" height="0.2" depth="0.1" color="gold"></a-box>
+      <a-entity id="seating">
+        <a-cylinder position="-3.5 0.4 -3" radius="0.4" height="0.8" color="#222"></a-cylinder> <a-cylinder position="0 0.4 -2" radius="0.4" height="0.8" color="#222"></a-cylinder>    <a-cylinder position="3.5 0.4 -3" radius="0.4" height="0.8" color="#222"></a-cylinder>  <a-cylinder position="-3.5 0.4 -7" radius="0.4" height="0.8" color="#222"></a-cylinder> <a-cylinder position="0 0.4 -8" radius="0.4" height="0.8" color="#222"></a-cylinder>    <a-cylinder position="3.5 0.4 -7" radius="0.4" height="0.8" color="#222"></a-cylinder>  </a-entity>
 
-      <a-light type="ambient" color="#444"></a-light>
-      <a-light type="point" position="0 5 -5" intensity="1.2" distance="20" color="white"></a-light>
+      <a-plane position="0 2.5 -15" width="30" height="10" color="#1a1a1a"></a-plane>
+      <a-box position="0 4.9 -14.9" width="30" height="0.3" depth="0.1" color="gold"></a-box>
+
+      <a-light type="ambient" color="#333"></a-light>
+      <a-light type="point" position="0 5 -5" intensity="1.5" distance="20" color="white"></a-light>
+      <a-light type="spot" position="0 8 -10" target="0 0 -15" intensity="0.5" color="gold"></a-light>
 
       <a-sky color="#000"></a-sky>
 
-      <a-entity id="rig" position="0 0 2">
+      <a-entity id="rig" position="0 0 -1.5">
         <a-camera look-controls wasd-controls>
           <a-cursor color="gold"></a-cursor>
         </a-camera>

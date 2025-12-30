@@ -2,57 +2,100 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>TITAN ESTATE | FULL MOVEMENT</title>
+    <title>TITAN ESTATE | MASTER EDITION</title>
     <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/aframe-teleport-controls@0.3.1/dist/aframe-teleport-controls.min.js"></script>
+    <script>
+      // PROJECT LOGIC & WALLET
+      let wallet = 20000;
+      let dailyClaimed = false;
+
+      function updateHUD() {
+        document.getElementById('hud').setAttribute('value', 'WALLET: $' + wallet);
+      }
+
+      function claimBonus(id, amount) {
+        if (!dailyClaimed) {
+          wallet += amount;
+          dailyClaimed = true;
+          document.getElementById(id).setAttribute('color', 'gold');
+          document.getElementById(id + '-text').setAttribute('value', '$' + amount);
+          updateHUD();
+          document.getElementById('blue-msg').setAttribute('value', 'Woof! Nice pick. See you tomorrow!');
+          setTimeout(() => { document.getElementById('daily-cards').setAttribute('visible', 'false'); }, 3000);
+        }
+      }
+
+      function sitAndPlay() {
+        if (wallet >= 10000) {
+          wallet -= 10000;
+          updateHUD();
+          document.getElementById('rig').setAttribute('position', '0 0 -3.2'); // Snap to seat
+          document.getElementById('table-cards').setAttribute('visible', 'true');
+        } else {
+          alert("Go see Blue or the Boutique for more chips!");
+        }
+      }
+    </script>
   </head>
   <body>
     <a-scene cursor="rayOrigin: mouse">
       
-      <a-entity id="rig" position="0 0 8">
-        <a-camera id="head" position="0 1.6 0" look-controls wasd-controls="acceleration: 20">
+      <a-entity id="rig" position="0 0 10">
+        <a-camera id="head" position="0 1.6 0" look-controls>
           <a-cursor color="gold"></a-cursor>
+          <a-text id="hud" value="WALLET: $20000" position="0.6 0.8 -1" color="gold" width="1.5" align="center"></a-text>
         </a-camera>
-        
-        <a-entity oculus-touch-controls="hand: left" 
-                  teleport-controls="cameraRig: #rig; teleportOrigin: #head; button: trigger; curveHitColor: #FFD700; type: parbolic;"></a-entity>
-        
-        <a-entity oculus-touch-controls="hand: right" 
-                  teleport-controls="cameraRig: #rig; teleportOrigin: #head; button: trigger; curveHitColor: #FFD700; type: parabolic;"></a-entity>
-      </a-entity>
-
-      <a-entity id="lobby">
-        <a-plane id="floor" rotation="-90 0 0" width="50" height="50" color="#0a0a0a" class="clickable"></a-plane>
-        <a-grid width="50" height="50" position="0 0.01 0" color="gold" opacity="0.1"></a-grid>
-
-        <a-text value="TITAN ESTATE" position="0 4 3" align="center" color="gold" width="10"></a-text>
-
-        <a-entity position="-5 0 5">
-          <a-cylinder radius="0.1" height="2" color="#3d2b1f"></a-cylinder>
-          <a-cone position="0 1.5 0" radius-bottom="0.8" height="1.5" color="#004d00"></a-cone>
-        </a-entity>
-        <a-entity position="5 0 5">
-          <a-cylinder radius="0.1" height="2" color="#3d2b1f"></a-cylinder>
-          <a-cone position="0 1.5 0" radius-bottom="0.8" height="1.5" color="#004d00"></a-cone>
-        </a-entity>
-      </a-entity>
-
-      <a-entity id="poker-area" position="0 0 -5">
-        <a-cylinder color="#3d2b1f" radius="2.5" height="0.1" scale="1.4 1 0.7" position="0 0.9 0"></a-cylinder>
-        <a-cylinder color="#004d00" radius="2.3" height="0.12" scale="1.4 1 0.7" position="0 0.91 0"></a-cylinder>
-        
-        <a-entity position="0 0 -1.5">
-            <a-cylinder radius="0.3" height="1.4" color="#1a1a1a"></a-cylinder>
-            <a-sphere radius="0.25" color="#dbac8d" position="0 1.5 0">
-                <a-sphere radius="0.03" color="blue" position="0.1 0.05 0.2"></a-sphere>
-                <a-sphere radius="0.03" color="blue" position="-0.1 0.05 0.2"></a-sphere>
-            </a-sphere>
-        </a-entity>
+        <a-entity oculus-touch-controls="hand: left" teleport-controls="cameraRig: #rig; teleportOrigin: #head; button: trigger; curveHitColor: gold; type: parabolic;"></a-entity>
+        <a-entity oculus-touch-controls="hand: right" teleport-controls="cameraRig: #rig; teleportOrigin: #head; button: trigger; curveHitColor: gold; type: parabolic;"></a-entity>
       </a-entity>
 
       <a-sky color="#050505"></a-sky>
-      <a-light type="ambient" color="#888"></a-light>
-      <a-light type="point" position="0 5 5" intensity="2" color="gold"></a-light>
+      <a-plane rotation="-90 0 0" width="50" height="50" color="#0a0a0a" class="clickable"></a-plane>
+      <a-grid width="50" height="50" position="0 0.01 0" color="gold" opacity="0.2"></a-grid>
+
+      <a-box position="-12 2.5 0" width="0.2" height="5" depth="25" color="#111"></a-box>
+      <a-box position="12 2.5 0" width="0.2" height="5" depth="25" color="#111"></a-box>
+      <a-box position="0 2.5 -12" width="24" height="5" depth="0.2" color="#111"></a-box>
+
+      <a-entity id="blue-concierge" position="0 0 6">
+        <a-box width="3" height="1" depth="1" color="#222"></a-box> <a-text id="blue-msg" value="BLUE'S DAILY PICK" position="0 2.2 0" align="center" color="gold" width="5"></a-text>
+        
+        <a-entity position="0 0 -0.8">
+          <a-box width="0.5" height="0.8" depth="0.5" color="white"></a-box> <a-box width="0.4" height="0.4" depth="0.4" position="0 0.6 0" color="grey"></a-box> <a-cone radius-bottom="0.1" height="0.2" position="-0.15 0.8 0" color="grey"></a-cone> <a-cone radius-bottom="0.1" height="0.2" position="0.15 0.8 0" color="grey"></a-cone> <a-sphere radius="0.03" color="blue" position="0.1 0.65 0.2"></a-sphere> <a-sphere radius="0.03" color="blue" position="-0.1 0.65 0.2"></a-sphere>
+        </a-entity>
+
+        <a-entity id="daily-cards" position="0 1.3 0.6">
+          <a-box class="clickable" width="0.3" height="0.5" depth="0.05" position="-0.8 0 0" color="white" onclick="claimBonus('c1', 1000)"><a-text id="c1-text" value="?" align="center" position="0 0 0.06" color="black" width="2"></a-text></a-box>
+          <a-box class="clickable" width="0.3" height="0.5" depth="0.05" position="-0.3 0 0" color="white" onclick="claimBonus('c2', 5000)"><a-text id="c2-text" value="?" align="center" position="0 0 0.06" color="black" width="2"></a-text></a-box>
+          <a-box class="clickable" width="0.3" height="0.5" depth="0.05" position="0.3 0 0" color="white" onclick="claimBonus('c3', 2500)"><a-text id="c3-text" value="?" align="center" position="0 0 0.06" color="black" width="2"></a-text></a-box>
+          <a-box class="clickable" width="0.3" height="0.5" depth="0.05" position="0.8 0 0" color="white" onclick="claimBonus('c4', 10000)"><a-text id="c4-text" value="?" align="center" position="0 0 0.06" color="black" width="2"></a-text></a-box>
+        </a-entity>
+      </a-entity>
+
+      <a-entity position="-9 0 3" rotation="0 45 0">
+        <a-text value="TITAN BOUTIQUE" position="0 3 0" align="center" color="gold" width="6"></a-text>
+        <a-box class="clickable" width="3" height="1.5" depth="1.5" color="#111" onclick="wallet += 5000; updateHUD();">
+          <a-text value="CASHIER\nCLICK FOR $5K" position="0 0 0.8" align="center" color="gold" width="4"></a-text>
+        </a-box>
+      </a-entity>
+
+      <a-entity id="poker-room" position="0 0 -5">
+        <a-cylinder color="#3d2b1f" radius="2.5" height="0.1" scale="1.4 1 0.7"></a-cylinder>
+        <a-cylinder color="#004d00" radius="2.3" height="0.12" scale="1.4 1 0.7" position="0 0.01 0"></a-cylinder>
+        
+        <a-box class="clickable" position="0 0.1 1.5" width="2" height="0.2" depth="1" color="gold" opacity="0.4" onclick="sitAndPlay()">
+          <a-text value="PLAY GAME ($10K)" position="0 0.2 0" rotation="-90 0 0" align="center" width="4"></a-text>
+        </a-box>
+
+        <a-entity id="table-cards" visible="false" position="0 1.05 0.5">
+          <a-box color="white" width="0.2" height="0.01" depth="0.3" position="-0.2 0 0"></a-box>
+          <a-box color="white" width="0.2" height="0.01" depth="0.3" position="0.2 0 0"></a-box>
+        </a-entity>
+      </a-entity>
+
+      <a-light type="ambient" color="#666"></a-light>
+      <a-light type="point" position="0 5 5" intensity="1" color="gold"></a-light>
 
     </a-scene>
   </body>

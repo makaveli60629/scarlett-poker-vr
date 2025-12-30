@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>TITAN ESTATE | RECOVERY MASTER</title>
+    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/aframe-teleport-controls@0.3.1/dist/aframe-teleport-controls.min.js"></script>
+    <script>
+      // PERSISTENT WALLET
+      let wallet = parseInt(localStorage.getItem('titan_wallet')) || 25000;
+      let lastClaim = localStorage.getItem('titan_last_claim') || "";
+
+      window.onload = function() {
+        updateHUD();
+        setTimeout(() => {
+          document.getElementById('splash').setAttribute('visible', 'false');
+          document.getElementById('world').setAttribute('visible', 'true');
+        }, 3000);
+      };
+
+      function updateHUD() {
+        localStorage.setItem('titan_wallet', wallet);
+        document.querySelectorAll('.watch-val').forEach(el => el.setAttribute('value', '$' + wallet));
+      }
+
+      function claimDaily(amount) {
+        let today = new Date().toDateString();
+        if (lastClaim === today) {
+            document.getElementById('blue-msg').setAttribute('value', "BACK TOMORROW!");
+            return;
+        }
+        wallet += amount;
+        lastClaim = today;
+        localStorage.setItem('titan_last_claim', lastClaim);
+        updateHUD();
+        document.getElementById('blue-msg').setAttribute('value', "COLLECTED $" + amount);
+      }
+
+      // BACK DOOR LOGIC
+      function toggleBackDoor() {
+        let door = document.getElementById('back-door');
+        door.setAttribute('animation', 'property: rotation; to: 0 90 0; dur: 1000');
+      }
+    </script>
+  </head>
+  <body>
+    <a-scene renderer="antialias: true; colorManagement: true;">
+      <a-assets>
+        <img id="tex-bricks" src="https://cdn.aframe.io/examples/ar/poker/poker-table.jpg" crossorigin="anonymous">
+        <img id="tex-floor" src="https://cdn.aframe.io/a-painter/images/floor.jpg" crossorigin="anonymous">
+      </a-assets>
+
+      <a-entity id="rig" position="0 0 10">
+        <a-camera id="head" look-controls><a-cursor color="gold"></a-cursor></a-camera>
+        <a-entity oculus-touch-controls="hand: left" teleport-controls="cameraRig: #rig; teleportOrigin: #head; button: trigger; curveHitColor: gold; type: parabolic;">
+            <a-box position="0 0.05 0.1" rotation="-90 0 0" width="0.12" height="0.12" depth="0.03" color="#111">
+                <a-text class="watch-val" value="$25000" color="gold" align="center" position="0 0 0.017" width="0.9"></a-text>
+            </a-box>
+        </a-entity>
+        <a-entity oculus-touch-controls="hand: right" teleport-controls="cameraRig: #rig; teleportOrigin: #head; button: trigger; curveHitColor: gold; type: parabolic;"></a-entity>
+      </a-entity>
+
+      <a-entity id="splash" position="0 1.6 8">
+        <a-text value="TITAN ESTATE\nSTABLE VERSION" color="gold" align="center"></a-text>
+      </a-entity>
+
+      <a-entity id="world" visible="false">
+        <a-sky color="#050505"></a-sky>
+        <a-plane src="#tex-floor" repeat="20 20" rotation="-90 0 0" width="100" height="100"></a-plane>
+
+        <a-box src="#tex-bricks" repeat="10 2" position="0 2.5 -15" width="40" height="5" depth="0.5"></a-box>
+        <a-box src="#tex-bricks" repeat="10 5" position="-20 2.5 0" width="0.5" height="5" depth="40"></a-box>
+        <a-box src="#tex-bricks" repeat="10 5" position="20 2.5 0" width="0.5" height="5" depth="40"></a-box>
+
+        <a-box id="back-door" class="clickable" position="0 1.5 -14.8" width="2" height="3" depth="0.1" color="#331a00" onclick="toggleBackDoor()">
+            <a-text value="BACK DOOR" position="0 0 0.06" align="center" color="gold" width="3"></a-text>
+        </a-box>
+
+        <a-entity position="0 0 5">
+          <a-box width="3.5" height="1" depth="1.2" color="#1a1a1a">
+             <a-text id="blue-msg" value="BLUE'S DAILY GIVEAWAY" position="0 0.6 0.61" align="center" color="gold" width="3"></a-text>
+          </a-box>
+          <a-entity position="0 0.6 -0.5">
+            <a-box width="0.4" height="0.6" color="white"></a-box>
+            <a-box width="0.3" height="0.3" position="0 0.5 0" color="#555"><a-sphere radius="0.02" color="cyan" position="0.08 0.05 0.15"></a-sphere></a-box>
+          </a-entity>
+          <a-box class="clickable" width="0.4" height="0.6" position="-0.6 1.5 0.5" color="gold" onclick="claimDaily(5000)"></a-box>
+          <a-box class="clickable" width="0.4" height="0.6" position="0.6 1.5 0.5" color="#00FFFF" onclick="claimDaily(10000)"></a-box>
+        </a-entity>
+
+        <a-entity position="0 0 -5">
+          <a-cylinder color="#003300" radius="2.5" height="0.1" position="0 0.9 0">
+            <a-text value="TITAN ESTATE" align="center" rotation="-90 0 0" position="0 0.06 0" color="gold" width="6"></a-text>
+          </a-cylinder>
+          <a-box class="clickable" position="0 0.1 1.8" width="1.6" height="0.3" depth="0.6" color="gold" onclick="document.getElementById('rig').setAttribute('position', '0 0 -4.2')">
+             <a-text value="PLAY GAME" align="center" rotation="-90 0 0" position="0 0.12 0" color="black" width="4"></a-text>
+          </a-box>
+        </a-entity>
+
+        <a-light type="ambient" color="#FFF"></a-light>
+      </a-entity>
+    </a-scene>
+  </body>
+</html>

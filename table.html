@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scarlett VR Poker Table</title>
+<link rel="stylesheet" href="css/style.css">
+<script type="module" src="core/three.min.js"></script>
+<script type="module" src="core/table-game.js"></script>
+<script type="module" src="core/wrist-hud.js"></script>
+</head>
+<body>
+
+<!-- VR Scene Container -->
+<a-scene embedded vr-mode-ui="enabled: true">
+  
+  <!-- Table -->
+  <a-entity id="pokerTable" gltf-model="assets/table.glb" position="0 0 0" rotation="0 0 0"></a-entity>
+  
+  <!-- Player Seats -->
+  <a-entity id="player1" gltf-model="assets/humanoid.glb" position="-1 0 1" rotation="0 180 0"></a-entity>
+  <a-entity id="player2" gltf-model="assets/humanoid.glb" position="1 0 1" rotation="0 180 0"></a-entity>
+  <a-entity id="player3" gltf-model="assets/humanoid.glb" position="-1 0 -1" rotation="0 0 0"></a-entity>
+  <a-entity id="player4" gltf-model="assets/humanoid.glb" position="1 0 -1" rotation="0 0 0"></a-entity>
+  <a-entity id="player5" gltf-model="assets/humanoid.glb" position="0 0 -1.5" rotation="0 0 0"></a-entity>
+  <a-entity id="player6" gltf-model="assets/humanoid.glb" position="0 0 1.5" rotation="0 180 0"></a-entity>
+
+  <!-- Deck of Cards -->
+  <a-entity id="deck" gltf-model="assets/cards.glb" position="0 0.1 0"></a-entity>
+
+  <!-- Chip Stack -->
+  <a-entity id="chipStack" gltf-model="assets/chips.glb" position="0 0.05 0"></a-entity>
+
+  <!-- Camera Rig -->
+  <a-entity id="cameraRig" position="0 1.6 3">
+    <a-entity camera look-controls wasd-controls></a-entity>
+  </a-entity>
+
+</a-scene>
+
+</body>
+</html>

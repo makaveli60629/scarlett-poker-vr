@@ -1,0 +1,158 @@
+/**
+ * VR POKER MASTER SCRIPT 
+ * Includes: Brick Walls, Branded Tables, Blue Logic, 
+ * Auto-Sit, and Menu-Integrated Leave Button.
+ */
+
+const POKER_CONFIG = {
+    roomCount: 4, // Lobby + 3 Rooms
+    brickTexture: 'textures/brick_red.jpg',
+    tableLogo: 'textures/poker_brand.png',
+    chipColor: 0x0000FF, // Blue logic
+    seatHeight: 1.1,
+    tablePos: new THREE.Vector3(0, 0, -3)
+};
+
+let scene, camera, renderer, menuPanel;
+let isMenuOpen = false;
+
+function initProject() {
+    // 1. ENGINE SETUP
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.xr.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    // 2. THE 4 BRICK ROOMS
+    const loader = new THREE.TextureLoader();
+    const brickMat = new THREE.MeshStandardMaterial({ 
+        map: loader.load(POKER_CONFIG.brickTexture),
+        side: THREE.DoubleSide 
+    });
+
+    for (let i = 0; i < POKER_CONFIG.roomCount; i++) {
+        const room = new THREE.Mesh(new THREE.BoxGeometry(10, 6, 10), brickMat);
+        room.position.z = -(i * 12); // Space rooms out
+        scene.add(room);
+    }
+
+    // 3. BRANDED TABLES & AUTO-SIT SETUP
+    createBrandedTable(POKER_CONFIG.tablePos);
+
+    // 4. VR MENU WITH LEAVE BUTTON
+    createVRMenu();
+
+    // 5. BACK DOOR LOGIC
+    setupBackDoor();
+
+    // 6. CONTROLLER SETUP
+    setupOculusControllers();
+}
+
+function createBrandedTable(pos) {
+    const tableGroup = new THREE.Group();
+    // Table Top
+    const felt = new THREE.Mesh(
+        new THREE.CylinderGeometry(2, 2, 0.2, 32),
+        new THREE.MeshStandardMaterial({ color: 0x076324 })
+    );
+    
+    // Logo Branding
+    const logo = new THREE.Mesh(
+        new THREE.CircleGeometry(0.6, 32),
+        new THREE.MeshBasicMaterial({ 
+            map: new THREE.TextureLoader().load(POKER_CONFIG.tableLogo), 
+            transparent: true 
+        })
+    );
+    logo.rotation.x = -Math.PI / 2;
+    logo.position.y = 0.11;
+    
+    tableGroup.add(felt, logo);
+    tableGroup.position.copy(pos);
+    scene.add(tableGroup);
+}
+
+function setupOculusControllers() {
+    // Left Controller
+    const controllerLeft = renderer.xr.getController(0);
+    controllerLeft.addEventListener('selectstart', () => {
+        // If menu is open, check for "Leave" interaction
+        if (isMenuOpen) handleMenuClick();
+    });
+    
+    // Menu Toggle (Oculus Menu Button)
+    controllerLeft.addEventListener('menubuttonstart', () => {
+        toggleMenu();
+    });
+
+    // Right Controller (Blue Chip Logic)
+    const controllerRight = renderer.xr.getController(1);
+    controllerRight.addEventListener('squeezestart', () => {
+        giveDailyBlueChips();
+    });
+}
+
+function createVRMenu() {
+    menuPanel = new THREE.Group();
+    const bg = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.5, 0.5),
+        new THREE.MeshBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.9 })
+    );
+
+    // Leave Button inside the Menu
+    const leaveBtn = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.4, 0.1),
+        new THREE.MeshBasicMaterial({ color: 0xFF0000 })
+    );
+    leaveBtn.position.z = 0.02;
+    leaveBtn.name = "LEAVE_ACTION";
+
+    menuPanel.add(bg, leaveBtn);
+    menuPanel.visible = false;
+    scene.add(menuPanel);
+}
+
+function toggleMenu() {
+    isMenuOpen = !isMenuOpen;
+    menuPanel.visible = isMenuOpen;
+    
+    // Position menu in front of user's current view
+    const head = renderer.xr.getCamera(camera);
+    menuPanel.position.set(head.position.x, head.position.y, head.position.z - 0.8);
+    menuPanel.quaternion.copy(head.quaternion);
+}
+
+function leaveGame() {
+    const session = renderer.xr.getSession();
+    if (session) {
+        session.end().then(() => {
+            // Hard reset to index to clear white screen
+            window.location.href = "index.html"; 
+        });
+    }
+}
+
+function giveDailyBlueChips() {
+    // Logic for Blue Giveaway
+    const chip = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.05, 0.02),
+        new THREE.MeshStandardMaterial({ color: POKER_CONFIG.chipColor })
+    );
+    scene.add(chip);
+}
+
+// AUTO-SIT LOGIC
+function onPlayGameClick() {
+    // Transition user to table coordinates
+    camera.position.set(POKER_CONFIG.tablePos.x, POKER_CONFIG.seatHeight, POKER_CONFIG.tablePos.z + 1);
+    dealRealisticCards();
+}
+
+function dealRealisticCards() {
+    // Instantiate low-poly card geometry with high-res face textures
+    console.log("Realistic cards dealt at seat.");
+}
+
+initProject();

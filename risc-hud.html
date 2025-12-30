@@ -1,0 +1,66 @@
+<!-- ui/risc-hud.html -->
+<a-entity id="risc-hud" position="0 -0.5 -1" rotation="0 0 0">
+  <!-- Background Panel -->
+  <a-plane color="#222222" width="1.2" height="0.6" radius="0.05" position="0 0 0">
+  </a-plane>
+
+  <!-- Player Bank -->
+  <a-text id="player-bank" value="Chips: 0" color="#FFD700" width="1.1" align="center" position="0 0.22 0.01"></a-text>
+
+  <!-- Event Tickets -->
+  <a-text id="event-tickets" value="Tickets: 0" color="#00FFFF" width="1.1" align="center" position="0 0.1 0.01"></a-text>
+
+  <!-- Inventory Button -->
+  <a-plane id="inventory-btn" width="0.35" height="0.08" color="#4444FF" position="-0.4 -0.15 0.01" class="clickable">
+    <a-text value="Inventory" color="#FFFFFF" width="0.3" align="center" position="0 0 0.01"></a-text>
+  </a-plane>
+
+  <!-- Bet Button -->
+  <a-plane id="bet-btn" width="0.35" height="0.08" color="#FF4444" position="0.4 -0.15 0.01" class="clickable">
+    <a-text value="Bet" color="#FFFFFF" width="0.3" align="center" position="0 0 0.01"></a-text>
+  </a-plane>
+
+  <!-- Notifications -->
+  <a-plane id="hud-notice" width="1.1" height="0.1" color="#FFFF00" position="0 -0.25 0.01" visible="false">
+    <a-text id="notice-text" value="" color="#000000" width="1" align="center" position="0 0 0.01"></a-text>
+  </a-plane>
+</a-entity>
+
+<script>
+  // Example HUD logic
+  const bankText = document.querySelector('#player-bank');
+  const ticketsText = document.querySelector('#event-tickets');
+  const noticePanel = document.querySelector('#hud-notice');
+  const noticeText = document.querySelector('#notice-text');
+
+  // Update bank and tickets dynamically
+  function updateBank(amount) {
+      bankText.setAttribute('value', `Chips: ${amount}`);
+  }
+
+  function updateTickets(amount) {
+      ticketsText.setAttribute('value', `Tickets: ${amount}`);
+  }
+
+  // Show notifications for 3 seconds
+  function showNotification(msg) {
+      noticeText.setAttribute('value', msg);
+      noticePanel.setAttribute('visible', true);
+      setTimeout(() => noticePanel.setAttribute('visible', false), 3000);
+  }
+
+  // Example click events for VR hands/controllers
+  document.querySelector('#inventory-btn').addEventListener('click', () => {
+      showNotification('Opening Inventory...');
+      // trigger inventory panel logic here
+  });
+
+  document.querySelector('#bet-btn').addEventListener('click', () => {
+      showNotification('Place your bet!');
+      // trigger betting modal here
+  });
+
+  // Initialize HUD with default values
+  updateBank(5000);
+  updateTickets(2);
+</script>

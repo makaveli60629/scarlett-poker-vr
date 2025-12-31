@@ -1,39 +1,21 @@
 import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
 
 let canTurn = true;
-let blueBalance = parseInt(localStorage.getItem('blue_balance')) || 0;
+let moveHighlight;
 
 export function setupOculus(renderer, scene, userRig) {
-    // Left Controller (Movement / Menu)
-    const controller0 = renderer.xr.getController(0);
+    const controller0 = renderer.xr.getController(0); // Left
+    const controller1 = renderer.xr.getController(1); // Right
     scene.add(controller0);
-
-    // Right Controller (Turning / Blue Chips)
-    const controller1 = renderer.xr.getController(1);
-    
-    // BLUE CHIP GIVEAWAY: Triggered by the 'A' Button (Select)
-    controller1.addEventListener('selectstart', () => {
-        spawnBlueChip(scene, controller1);
-    });
-    
     scene.add(controller1);
-}
 
-function spawnBlueChip(scene, controller) {
-    // Update Balance
-    blueBalance += 10;
-    localStorage.setItem('blue_balance', blueBalance);
-
-    // Physical Chip Effect
-    const chipGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.02, 32);
-    const chipMat = new THREE.MeshStandardMaterial({ color: 0x0000ff, metalness: 0.5 });
-    const chip = new THREE.Mesh(chipGeo, chipMat);
-    
-    // Spawn at controller tip
-    chip.position.copy(controller.position);
-    scene.add(chip);
-    
-    console.log("Blue Chips Collected:", blueBalance);
+    // Create the Movement Highlight Ring
+    const ringGeo = new THREE.RingGeometry(0.3, 0.4, 32);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, side: THREE.DoubleSide });
+    moveHighlight = new THREE.Mesh(ringGeo, ringMat);
+    moveHighlight.rotation.x = -Math.PI / 2;
+    moveHighlight.visible = false;
+    scene.add(moveHighlight);
 }
 
 export function updateLocomotion(renderer, userRig) {
@@ -42,26 +24,40 @@ export function updateLocomotion(renderer, userRig) {
 
     for (const source of session.inputSources) {
         if (!source.gamepad) continue;
+        const axes = source.gamepad.axes; 
 
-        // LEFT THUMBSTICK: Smooth Walking
+        // LEFT STICK - Walking (Axes 2 & 3 for Oculus Quest)
         if (source.handedness === 'left') {
-            const axes = source.gamepad.axes; // [x, y, stickX, stickY]
-            const moveX = axes[2] * 0.08;
-            const moveZ = axes[3] * 0.08;
-            
-            userRig.position.x += moveX;
-            userRig.position.z += moveZ;
+            const speed = 0.05;
+            const deadzone = 0.1;
+
+            if (Math.abs(axes[2]) > deadzone || Math.abs(axes[3]) > deadzone) {
+                // Move relative to where you are LOOKING
+                const direction = new THREE.Vector3(axes[2], 0, axes[3]);
+                direction.applyQuaternion(userRig.quaternion);
+                
+                userRig.position.x += direction.x * speed;
+                userRig.position.z += direction.z * speed;
+
+                // Show Highlight where you are
+                moveHighlight.visible = true;
+                moveHighlight.position.set(userRig.position.x, 0.05, userRig.position.z);
+            } else {
+                moveHighlight.visible = false;
+            }
         }
 
-        // RIGHT THUMBSTICK: Snap Turning (360 Fix)
+        // RIGHT STICK - Snap Turn & Height
         if (source.handedness === 'right') {
-            const axes = source.gamepad.axes;
+            // Snap Turning
             if (canTurn && Math.abs(axes[2]) > 0.8) {
-                // Rotate 45 degrees
                 userRig.rotation.y -= Math.sign(axes[2]) * (Math.PI / 4);
                 canTurn = false;
-                // Cooldown to prevent spinning too fast
                 setTimeout(() => { canTurn = true; }, 300);
+            }
+            // Move Up/Down (Y-axis)
+            if (Math.abs(axes[3]) > 0.5) {
+                userRig.position.y -= axes[3] * 0.05;
             }
         }
     }

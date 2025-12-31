@@ -1,67 +1,59 @@
-<script type="module">
-    import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
-    import { VRButton } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/webxr/VRButton.js';
-    import { initEngine } from './core/engine.js';
-    import { buildPermanentLobby } from './world/lobby.js';
-    import { buildStoreRoom } from './world/store-room.js';
-    import { updateLocomotion } from './core/controls.js';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ultimate VR Poker World</title>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    
+    <script src="js/logic.js"></script>
+    <script src="js/store.js"></script>
+    <script src="js/poker_rooms.js"></script>
+    <script src="js/daily_giveaway.js"></script>
+</head>
+<body>
 
-    let scene, camera, renderer, userRig, portals = [];
-    let currentRoom = 'LOBBY';
+    <a-scene>
+        <a-assets id="permanent-assets">
+            <img id="brick-wall" src="assets/brick_texture.jpg">
+            <img id="poker-branding" src="assets/table_logo.png">
+            <a-asset-item id="low-poly-card" src="assets/card_model.glb"></a-asset-item>
+            <div id="blue-chip-logic"></div>
+        </a-assets>
 
-    async function start() {
-        const engine = initEngine();
-        scene = engine.scene; renderer = engine.renderer; userRig = engine.userRig;
-        
-        document.body.appendChild(VRButton.createButton(renderer));
-        loadLevel('LOBBY');
+        <a-entity id="lobby-structure">
+            <a-box position="0 2 -5" width="10" height="4" depth="0.1" src="#brick-wall"></a-box> <a-box position="-5 2 0" rotation="0 90 0" width="10" height="4" depth="0.1" src="#brick-wall"></a-box> <a-box position="5 2 0" rotation="0 -90 0" width="10" height="4" depth="0.1" src="#brick-wall"></a-box> <a-plane position="0 0 0" rotation="-90 0 0" width="20" height="20" color="#222"></a-plane> </a-entity>
 
-        renderer.setAnimationLoop(() => {
-            updateLocomotion(renderer, userRig);
-            
-            // 1. SOLID WALL LOGIC (Keep player inside 12x20 area)
-            if (currentRoom === 'LOBBY') {
-                userRig.position.x = Math.max(-5.5, Math.min(5.5, userRig.position.x));
-                userRig.position.z = Math.max(-9.5, Math.min(9.5, userRig.position.z));
-            } else {
-                userRig.position.x = Math.max(-3.5, Math.min(3.5, userRig.position.x));
-                userRig.position.z = Math.max(-3.5, Math.min(3.5, userRig.position.z));
-            }
+        <a-entity id="portals" position="0 1.5 -4">
+            <a-sphere id="portal-store" position="-2 0 0" radius="0.5" color="gold" 
+                      animation="property: scale; to: 1.2 1.2 1.2; dir: alternate; loop: true">
+                <a-text value="STORE" align="center" position="0 1 0"></a-text>
+            </a-sphere>
 
-            // 2. PORTAL TELEPORT LOGIC
-            portals.forEach(p => {
-                const dist = userRig.position.distanceTo(p.position);
-                if (dist < 0.8) { // If you are within 1 meter of the circle
-                    if (p.userData.dest && p.userData.dest !== currentRoom) {
-                        loadLevel(p.userData.dest);
-                    }
-                }
-            });
+            <a-sphere id="portal-tables" position="0 0 0" radius="0.5" color="blue">
+                <a-text value="FIND TABLE" align="center" position="0 1 0"></a-text>
+            </a-sphere>
 
-            renderer.render(scene, engine.camera);
-        });
-        document.getElementById('overlay').style.display = 'none';
-    }
+            <a-sphere id="portal-tournament" position="2 0 0" radius="0.5" color="red">
+                <a-text value="TOURNAMENT\n(TICKET REQUIRED)" align="center" position="0 1 0"></a-text>
+            </a-sphere>
+        </a-entity>
 
-    function loadLevel(level) {
-        // Clear old level
-        while(scene.children.length > 0){ 
-            if(scene.children[0].type === 'Group') scene.remove(scene.children[0]);
-            else break; 
-        }
-        
-        if (level === 'LOBBY') {
-            const data = buildPermanentLobby(scene);
-            portals = data.portals;
-            currentRoom = 'LOBBY';
-            userRig.position.set(0, 1.6, 5); // Reset position in lobby
-        } else if (level === 'STORE') {
-            const data = buildStoreRoom(scene);
-            portals = data.portals;
-            currentRoom = 'STORE';
-            userRig.position.set(0, 1.6, 2); // Reset position in store
-        }
-    }
+        <a-entity id="poker-world-container"></a-entity>
 
-    document.getElementById('start-btn').onclick = start;
-</script>
+        <a-entity id="rig">
+            <a-camera id="camera" position="0 1.6 0"></a-camera>
+            <a-entity id="left-controller" oculus-touch-controls="hand: left" 
+                      teleport-controls="button: trigger; collisionEntities: #floor"></a-entity>
+            <a-entity id="right-controller" oculus-touch-controls="hand: right" 
+                      laser-controls="hand: right"></a-entity>
+        </a-entity>
+
+        <a-box id="back-door" position="0 1.5 4.5" width="1.5" height="2.5" depth="0.1" color="brown"
+               animation__open="property: rotation; to: 0 90 0; startEvents: click">
+        </a-box>
+
+    </a-scene>
+
+</body>
+</html>

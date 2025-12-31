@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Poker Club - 1.1 Lobby</title>
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@7.2.0/dist/aframe-extras.min.js"></script>
+    <script src="mechanics.js"></script>
+    <script src="avatar.js"></script>
+    <script src="items.js"></script>
+  </head>
+  <body>
+    <a-scene renderer="colorManagement: true; foveationLevel: 3; xrCompatible: true" physics="debug: false">
+      
+      <a-assets>
+        <img id="brick" src="https://cdn.aframe.io/a-painter/images/floor.jpg">
+        <audio id="lobby-music" src="sounds/lobby_ambient.mp3" preload="auto"></audio>
+      </a-assets>
+
+      <a-entity id="rig" movement-controls="speed: 0.3">
+        <a-entity id="head" camera position="0 1.6 0" look-controls avatar-loader></a-entity>
+        
+        <a-entity hand-tracking-controls="hand: left" pinch-to-move wrist-watch></a-entity>
+        <a-entity oculus-touch-controls="hand: left" hand-controls="hand: left; handModelStyle: highPoly" wrist-watch></a-entity>
+        
+        <a-entity hand-tracking-controls="hand: right" pinch-to-move laser-controls="hand: right"></a-entity>
+        <a-entity oculus-touch-controls="hand: right" hand-controls="hand: right; handModelStyle: highPoly" laser-controls="hand: right"></a-entity>
+      </a-entity>
+
+      <a-entity sound="src: #lobby-music; autoplay: true; loop: true; volume: 0.5"></a-entity>
+
+      <a-entity position="0 2.5 6">
+        <a-box width="4" height="1" depth="0.2" color="#2c3e50">
+          <a-text value="POKER CLUB ENTRANCE" align="center" position="0 0 0.12" width="5" color="gold"></a-text>
+        </a-box>
+      </a-entity>
+
+      <a-entity position="-5 2.5 -4.5" rotation="0 20 0">
+        <a-plane width="3" height="4" material="color: #111; opacity: 0.9"></a-plane>
+        <a-text value="TOP ROLLERS" align="center" position="0 1.7 0.05" width="6" color="gold"></a-text>
+        <a-text value="1. PLAYER_1...$1.2M\n2. SHARK_VR...$900K\n3. ACE_HIGH...$500K" align="left" position="-1.2 0.5 0.05" width="4"></a-text>
+      </a-entity>
+
+      <a-entity position="0 0 -8">
+        <a-cylinder radius="2.5" height="0.1" material="color: #076324" scale="1.5 1 1" segments-radial="12"></a-cylinder>
+        <a-box auto-sit data-sit-pos="0 0.6 -6.5" position="0 0.05 2.8" width="1" height="0.1" depth="0.8" color="#00fbff" opacity="0.6">
+           <a-text value="SIT & BUY-IN" align="center" position="0 0.15 0" rotation="-90 0 0" width="4" color="black"></a-text>
+        </a-box>
+      </a-entity>
+
+      <a-entity position="4 0.01 4" teleport-logic data-dest="store.html">
+        <a-ring color="#00fbff" radius-inner="0.8" radius-outer="1" rotation="-90 0 0" material="emissive: #00fbff; emissiveIntensity: 2">
+            <a-light type="point" intensity="0.8" color="#00fbff" position="0 0.5 0"></a-light>
+        </a-ring>
+        <a-text value="STORE" align="center" position="0 2 0" width="5" color="#00fbff"></a-text>
+      </a-entity>
+
+      <a-box solid-wall position="0 2 -5.2" width="14" height="5" depth="0.2" src="#brick" color="#633128"></a-box>
+      <a-box solid-wall position="-7 2 0" rotation="0 90 0" width="12" height="5" depth="0.2" src="#brick" color="#4a261f"></a-box>
+      <a-box solid-wall position="7 2 0" rotation="0 90 0" width="12" height="5" depth="0.2" src="#brick" color="#4a261f"></a-box>
+
+      <a-plane rotation="-90 0 0" width="100" height="100" color="#1a1a1a" src="#brick" repeat="20 20"></a-plane>
+    </a-scene>
+  </body>
+</html>

@@ -2,45 +2,40 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Permanent Master Shell</title>
+    <title>Master Poker Shell</title>
     <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@7.2.0/dist/aframe-extras.min.js"></script>
+    
     <script src="js/logic.js"></script>
     <script src="js/store.js"></script>
     <script src="js/poker_rooms.js"></script>
 </head>
 <body>
-    <a-scene background="color: #111">
+    <a-scene background="color: #111" renderer="antialias: true">
         <a-assets timeout="2000">
             <canvas id="fallback-brick" width="128" height="128"></canvas>
-            <canvas id="fallback-table" width="128" height="128"></canvas>
         </a-assets>
 
         <a-entity id="poker-world-container"></a-entity>
 
         <a-entity id="lobby">
-            <a-box position="0 2 -5" width="10" height="4" depth="0.1" color="#442222"></a-box> <a-box position="-5 2 0" rotation="0 90 0" width="10" height="4" depth="0.1" color="#442222"></a-box>
+            <a-box position="0 2 -5" width="10" height="4" depth="0.1" color="#442222"></a-box> 
+            <a-box position="-5 2 0" rotation="0 90 0" width="10" height="4" depth="0.1" color="#442222"></a-box>
             <a-box position="5 2 0" rotation="0 -90 0" width="10" height="4" depth="0.1" color="#442222"></a-box>
-            <a-plane position="0 0 0" rotation="-90 0 0" width="20" height="20" color="#222"></a-plane>
+            <a-plane position="0 0 0" rotation="-90 0 0" width="20" height="20" color="#222" static-body></a-plane>
         </a-entity>
 
         <a-entity id="portals" position="0 1.2 -4">
-            <a-sphere id="portal-store" position="-2 0 0" radius="0.5" color="gold"></a-sphere>
-            <a-sphere id="portal-tables" position="0 0 0" radius="0.5" color="blue"></a-sphere>
-            <a-sphere id="portal-tournament" position="2 0 0" radius="0.5" color="red"></a-sphere>
+            <a-sphere id="portal-store" class="interactable" position="-2 0 0" radius="0.5" color="gold"></a-sphere>
+            <a-sphere id="portal-tables" class="interactable" position="0 0 0" radius="0.5" color="blue"></a-sphere>
+            <a-sphere id="portal-tournament" class="interactable" position="2 0 0" radius="0.5" color="red"></a-sphere>
         </a-entity>
 
-        <a-entity id="rig" position="0 0 0">
-            <a-camera id="camera" wasd-controls look-controls></a-camera>
-            <a-entity id="left-hand" oculus-touch-controls="hand: left"></a-entity>
-            <a-entity id="right-hand" oculus-touch-controls="hand: right" laser-controls="hand: right" raycaster="objects: .interactable; far: 5"></a-entity>
+        <a-entity id="rig" movement-controls="controls: gamepad, keyboard; speed: 0.2" position="0 0 0">
+            <a-entity camera position="0 1.6 0" look-controls="pointerLockEnabled: true"></a-entity>
+            <a-entity oculus-touch-controls="hand: left"></a-entity>
+            <a-entity oculus-touch-controls="hand: right" laser-controls="hand: right" raycaster="objects: .interactable; far: 5"></a-entity>
         </a-entity>
     </a-scene>
-
-    <script>
-        const canvas = document.getElementById('fallback-brick');
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#5a2a2a'; ctx.fillRect(0,0,128,128);
-        ctx.strokeStyle = '#333'; ctx.strokeRect(5,5,118,118);
-    </script>
 </body>
 </html>

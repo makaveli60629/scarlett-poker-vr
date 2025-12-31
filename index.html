@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Poker VR - v1.4 Structural Master</title>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-cursor-teleport@1.5.0/dist/aframe-cursor-teleport-component.min.js"></script>
+</head>
+<body>
+    <a-scene renderer="antialias: true; colorManagement: true;" shadow="type: pcfsoft">
+        
+        <a-assets>
+            <img id="tex-brick" src="brick.jpg">
+            <img id="tex-felt" src="felt.jpg">
+            
+            <a-mixin id="brick-wall" geometry="primitive: box; width: 20; height: 5; depth: 0.5" material="src: #tex-brick; repeat: 4 1; roughness: 1"></a-mixin>
+            <a-mixin id="scorpion-table-part" geometry="primitive: cylinder; segmentsRadial: 6; radius: 2; height: 0.1" material="src: #tex-felt; roughness: 0.9"></a-mixin>
+        </a-assets>
+
+        <a-entity light="type: ambient; intensity: 0.6; color: #FFF"></a-entity>
+        <a-entity light="type: directional; intensity: 0.8; position: -5 10 5; castShadow: true"></a-entity>
+
+        <a-entity id="rig" position="0 0 5" movement-controls="speed: 0.2;">
+            <a-camera id="camera" look-controls wasd-controls>
+                <a-cursor color="yellow"></a-cursor>
+            </a-camera>
+            <a-entity id="leftHand" oculus-touch-controls="hand: left" teleport-controls="button: trigger; collisionEntities: .nav-mesh; cameraRig: #rig; teleportOrigin: #camera;"></a-entity>
+            <a-entity id="rightHand" oculus-touch-controls="hand: right" teleport-controls="button: trigger; collisionEntities: .nav-mesh; cameraRig: #rig; teleportOrigin: #camera;"></a-entity>
+        </a-entity>
+
+        <a-entity id="lobby">
+            <a-plane class="nav-mesh" rotation="-90 0 0" width="30" height="30" material="color: #222; roughness: 1" shadow="receive: true"></a-plane>
+            
+            <a-entity mixin="brick-wall" position="0 2.5 -10" shadow></a-entity> <a-entity mixin="brick-wall" position="0 2.5 10" shadow></a-entity>  <a-entity mixin="brick-wall" position="-10 2.5 0" rotation="0 90 0" shadow></a-entity> <a-entity mixin="brick-wall" position="10 2.5 0" rotation="0 -90 0" shadow></a-entity> <a-text value="ELITE LOBBY & STORE" align="center" position="0 4 -9.7" color="gold" width="10"></a-text>
+
+            <a-entity id="daily-reward-area" position="-4 1 -6">
+                <a-cylinder radius="1.5" height="0.1" material="src: #tex-felt"></a-cylinder> <a-cylinder radius="0.2" height="1" position="0 -0.5 0" color="#111"></a-cylinder> <a-text value="DAILY CASH" align="center" position="0 1.2 0" color="cyan" width="4"></a-text>
+                <a-cylinder id="blue-chip" class="clickable" position="0 0.1 0" radius="0.2" height="0.08" color="blue" 
+                            animation="property: rotation; to: 0 360 0; loop: true; dur: 4000" onclick="claimDailyReward()"></a-cylinder>
+            </a-entity>
+
+            <a-entity position="5 1.8 -7">
+                <a-text id="wallet-display" value="WALLET: $2500" align="center" color="white" width="6"></a-text>
+                <a-box class="clickable" position="0 -1.3 1" width="2.5" height="0.1" depth="2.5" color="#FF4500" onclick="enterScorpionRoom()">
+                    <a-text value="SCORPION ROOM" align="center" position="0 0.1 0" rotation="-90 0 0" width="5"></a-text>
+                </a-box>
+            </a-entity>
+        </a-entity>
+
+        <a-entity id="scorpion-room" position="150 0 0">
+            <a-plane class="nav-mesh" rotation="-90 0 0" width="30" height="30" material="color: #050505; roughness: 1"></a-plane>
+            <a-entity mixin="brick-wall" position="0 2.5 -10"></a-entity>
+            <a-text value="SCORPION HIGH STAKES" align="center" position="0 4.5 -9.5" color="#FF4500" width="12"></a-text>
+
+            <a-entity id="scorpion-poker-table" position="0 1 -4">
+                <a-entity mixin="scorpion-table-part" shadow></a-entity>
+                <a-cylinder radius="0.4" height="1" position="0 -0.5 0" color="#222"></a-cylinder>
+                <a-text value="VIP SCORPION" align="center" position="0 0.1 0" rotation="-90 0 0" color="gold" width="6"></a-text>
+                
+                <a-entity id="win-display" visible="false" position="0 2.2 0">
+                    <a-text id="win-banner" value="" align="center" color="yellow" width="10" font="exo2bold"></a-text>
+                </a-entity>
+            </a-entity>
+
+            <a-box class="clickable" position="0 0.5 -1.5" width="1" height="0.1" depth="1" color="green" onclick="autoSit()">
+                <a-text value="SIT & PLAY" align="center" position="0 0.1 0" rotation="-90 0 0"></a-text>
+            </a-box>
+
+            <a-box class="clickable" position="-7 1 -8" width="1.5" height="2.5" depth="0.2" color="red" onclick="returnToLobby()">
+                <a-text value="EXIT LOBBY" align="center" position="0 0 0.15" width="4"></a-text>
+            </a-box>
+        </a-entity>
+
+    </a-scene>
+
+    <script>
+        let playerWallet = 2500;
+
+        function claimDailyReward() {
+            let winAmount = Math.floor(Math.random() * (5000 - 500 + 1)) + 500;
+            playerWallet += winAmount;
+            document.querySelector('#wallet-display').setAttribute('value', 'WALLET: $' + playerWallet);
+            console.log("Reward Claimed: $" + winAmount);
+        }
+
+        function enterScorpionRoom() {
+            document.querySelector('#rig').setAttribute('position', '150 0 5');
+        }
+
+        function returnToLobby() {
+            document.querySelector('#rig').setAttribute('position', '0 0 5');
+        }
+
+        function autoSit() {
+            const rig = document.querySelector('#rig');
+            rig.setAttribute('position', '150 0 -2.2'); // Position player at table
+            rig.setAttribute('rotation', '0 0 0');
+            startDealing();
+        }
+
+        function startDealing() {
+            const table = document.querySelector('#scorpion-poker-table');
+            // Deal Low-Poly structural cards
+            for(let i=0; i<2; i++) {
+                let card = document.createElement('a-box');
+                card.setAttribute('width', '0.15'); card.setAttribute('height', '0.01'); card.setAttribute('depth', '0.22');
+                card.setAttribute('position', `${-0.2 + (i*0.4)} 0.08 -0.45`);
+                card.setAttribute('color', 'white');
+                table.appendChild(card);
+            }
+            // Trigger the 10-second Win sequence
+            setTimeout(() => { triggerWin("PLAYER 1", 5000); }, 3000);
+        }
+
+        function triggerWin(name, amount) {
+            const ui = document.querySelector('#win-display');
+            const txt = document.querySelector('#win-banner');
+            txt.setAttribute('value', name + " WINS THE POT\n$" + amount);
+            ui.setAttribute('visible', 'true');
+            
+            // Highlight player and wait 10 seconds
+            setTimeout(() => {
+                ui.setAttribute('visible', 'false');
+            }, 10000);
+        }
+    </script>
+</body>
+</html>

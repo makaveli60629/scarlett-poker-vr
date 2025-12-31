@@ -1,56 +1,38 @@
 import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
 
 export function buildPermanentLobby(scene) {
-    const brickMat = new THREE.MeshStandardMaterial({ color: 0x441111 });
-    const goldMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.8, roughness: 0.2 });
-    const carpetMat = new THREE.MeshStandardMaterial({ color: 0x880000 });
+    const portals = [];
+    const goldMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.9, emissive: 0x332200 });
+    const brickMat = new THREE.MeshStandardMaterial({ color: 0x442222 });
 
+    // 1. SOLID ENCLOSURE
     const lobbyGroup = new THREE.Group();
+    const box = new THREE.Mesh(new THREE.BoxGeometry(12, 6, 20), brickMat);
+    box.geometry.scale(-1, 1, 1); // Walls on inside
+    box.position.y = 3;
+    lobbyGroup.add(box);
+
+    // 2. SCARLET VR LOGO (Floating on the Back Wall)
+    const logoGroup = new THREE.Group();
+    const logoPanel = new THREE.Mesh(new THREE.PlaneGeometry(4, 1), goldMat);
+    logoPanel.position.set(0, 3.5, -9.8);
+    // Note: In a full build, we would map a "Scarlet VR" texture here
+    lobbyGroup.add(logoPanel);
+
+    // 3. LABELED STORE PORTAL (Blue Glow)
+    const storePortal = new THREE.Group();
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1, 0.05, 16, 100), new THREE.MeshBasicMaterial({color: 0x0000ff}));
+    const label = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.3), new THREE.MeshBasicMaterial({color: 0x0000ff, transparent: true, opacity: 0.8}));
+    label.position.y = 1.3; // Floating label above portal
     
-    // Solid Box (12x6x20)
-    const floor = new THREE.Mesh(new THREE.BoxGeometry(12, 0.1, 22), carpetMat);
-    const ceil = new THREE.Mesh(new THREE.BoxGeometry(12, 0.1, 22), brickMat);
-    ceil.position.y = 6;
-    lobbyGroup.add(floor, ceil);
-
-    // Wall Builder with Trim
-    const walls = [
-        { w: 22, h: 6, pos: [-6, 3, 0], rot: [0, Math.PI/2, 0] }, // Left
-        { w: 22, h: 6, pos: [6, 3, 0], rot: [0, -Math.PI/2, 0] }, // Right
-        { w: 12, h: 6, pos: [0, 3, -11], rot: [0, 0, 0] },        // Front
-        { w: 12, h: 6, pos: [0, 3, 11], rot: [0, Math.PI, 0] }   // Back
-    ];
-
-    walls.forEach(data => {
-        const wGroup = new THREE.Group();
-        const wall = new THREE.Mesh(new THREE.PlaneGeometry(data.w, data.h), brickMat);
-        
-        const topTrim = new THREE.Mesh(new THREE.BoxGeometry(data.w, 0.2, 0.1), goldMat);
-        topTrim.position.y = 2.9;
-        
-        const botTrim = new THREE.Mesh(new THREE.BoxGeometry(data.w, 0.2, 0.1), goldMat);
-        botTrim.position.y = -2.9;
-
-        wGroup.add(wall, topTrim, botTrim);
-        wGroup.position.set(...data.pos);
-        wGroup.rotation.set(...data.rot);
-        lobbyGroup.add(wGroup);
-    });
+    storePortal.add(ring, label);
+    storePortal.position.set(5.8, 1.8, 0);
+    storePortal.rotation.y = -Math.PI / 2;
+    storePortal.userData = { dest: 'STORE' };
+    
+    lobbyGroup.add(storePortal);
+    portals.push(storePortal);
 
     scene.add(lobbyGroup);
-
-    // Glowing Portals
-    const portals = [];
-    [0x00ff00, 0xff00ff, 0x00ffff].forEach((col, i) => {
-        const p = new THREE.Group();
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(1, 0.05, 16, 100), goldMat);
-        const glow = new THREE.Mesh(new THREE.CircleGeometry(0.95, 32), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.5 }));
-        p.add(ring, glow);
-        p.position.set(5.8, 1.8, (i * 6) - 6);
-        p.rotation.y = -Math.PI/2;
-        scene.add(p);
-        portals.push(p);
-    });
-
-    return { portals };
+    return { portals, lobbyGroup };
 }

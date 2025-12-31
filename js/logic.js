@@ -1,39 +1,28 @@
-// js/poker-logic.js
-window.walletBalance = 2500;
+function initGame() {
+    const savedWallet = localStorage.getItem('poker_wallet');
+    if (savedWallet) GAME_CONFIG.player.wallet = parseInt(savedWallet);
+    updateWalletUI();
+}
 
-window.claimDaily = function() {
-    let win = Math.floor(Math.random() * 4500) + 500;
-    window.walletBalance += win;
+function updateWalletUI() {
     const display = document.querySelector('#wallet-display');
-    if(display) display.setAttribute('value', 'WALLET: $' + window.walletBalance);
-    console.log("Daily Picked: " + win);
-};
+    if(display) display.setAttribute('value', `WALLET: $${GAME_CONFIG.player.wallet}`);
+}
 
-window.enterZone = function() {
+function autoSitScorpion() {
     const rig = document.querySelector('#rig');
-    rig.setAttribute('position', '100 0 5');
-};
+    // Teleport directly to the seat
+    rig.setAttribute('position', GAME_CONFIG.player.scorpionSeat);
+    
+    // Show winning hand logic (10 seconds)
+    const winUI = document.querySelector('#win-popup');
+    winUI.setAttribute('visible', 'true');
+    setTimeout(() => { winUI.setAttribute('visible', 'false'); }, 10000);
+}
 
-window.sitAndPlay = function() {
-    const rig = document.querySelector('#rig');
-    // Automically sit down
-    rig.setAttribute('position', '100 0 -2.5');
-    // Simulate a win
-    setTimeout(() => {
-        window.showWinner("PLAYER 1", 1500);
-    }, 2000);
-};
-
-window.showWinner = function(name, pot) {
-    const ui = document.querySelector('#win-ui');
-    const banner = document.querySelector('#win-banner');
-    
-    banner.setAttribute('value', name + " WINS THE POT\n$" + pot);
-    ui.setAttribute('visible', 'true');
-    
-    // Highlight table or cards here
-    
-    setTimeout(() => {
-        ui.setAttribute('visible', 'false');
-    }, 10000); // 10 Second rule
-};
+function claimDaily() {
+    const win = (Math.floor(Math.random() * 10) + 1) * 500;
+    GAME_CONFIG.player.wallet += win;
+    localStorage.setItem('poker_wallet', GAME_CONFIG.player.wallet);
+    updateWalletUI();
+}

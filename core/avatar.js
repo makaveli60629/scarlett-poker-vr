@@ -1,49 +1,60 @@
-import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+AFRAME.registerComponent('avatar-loader', {
+  init: function () {
+    if (!localStorage.getItem('avatar_init')) { this.randomize(); }
+    this.buildAvatar();
+    this.el.addEventListener('refreshAvatar', () => {
+      while (this.el.firstChild) { this.el.removeChild(this.el.firstChild); }
+      this.buildAvatar();
+      this.updateHandColor();
+    });
+    this.updateHandColor();
+  },
+  randomize: function() {
+    const skins = ['#ffccaa', '#8d5524', '#c58c85'];
+    localStorage.setItem('skin', skins[Math.floor(Math.random()*skins.length)]);
+    localStorage.setItem('gender', Math.random() > 0.5 ? 'male' : 'female');
+    localStorage.setItem('avatar_init', 'true');
+  },
+  updateHandColor: function() {
+    const skin = localStorage.getItem('skin');
+    document.querySelectorAll('[hand-controls]').forEach(h => h.setAttribute('material', 'color', skin));
+  },
+  buildAvatar: function () {
+    const skin = localStorage.getItem('skin');
+    const face = document.createElement('a-sphere');
+    face.setAttribute('radius', '0.2');
+    face.setAttribute('color', skin);
+    this.el.appendChild(face);
+  }
+});
 
-export function initAvatarStore(scene, camera) {
-    // 1. THE LOCKER ROOM AREA
-    const lockerRoom = new THREE.Group();
-    lockerRoom.position.set(10, 0, 10); // Located off to the side of the lobby
+AFRAME.registerComponent('wrist-watch', {
+  init: function () {
+    this.menu = document.createElement('a-entity');
+    this.menu.setAttribute('visible', 'false');
+    this.menu.setAttribute('position', '0 0.1 0');
     
-    // Luxury mirror (a reflective-looking plane)
-    const mirror = new THREE.Mesh(
-        new THREE.PlaneGeometry(2, 3),
-        new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.9, roughness: 0.1 })
-    );
-    mirror.position.set(0, 1.5, -2);
-    lockerRoom.add(mirror);
-    scene.add(lockerRoom);
-
-    // 2. THE STORE SHELVES (Holographic Displays)
-    const shelfGeo = new THREE.BoxGeometry(1, 0.1, 1);
-    const shelfMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.3 });
+    const bg = document.createElement('a-plane');
+    bg.setAttribute('width', '0.4'); bg.setAttribute('height', '0.5');
+    bg.setAttribute('color', '#111'); bg.setAttribute('opacity', '0.9');
     
-    for (let i = 0; i < 3; i++) {
-        const shelf = new THREE.Mesh(shelfGeo, shelfMat);
-        shelf.position.set(8, 1, 8 + (i * 2));
-        scene.add(shelf);
-        
-        // Add a "Magnetic Item" on each shelf
-        createStoreItem(scene, shelf.position);
-    }
-}
+    this.text = document.createElement('a-text');
+    this.text.setAttribute('align', 'center');
+    this.text.setAttribute('position', '0 0.1 0.01');
+    this.text.setAttribute('width', '1');
+    
+    const exitBtn = document.createElement('a-box');
+    exitBtn.setAttribute('width', '0.3'); exitBtn.setAttribute('height', '0.08');
+    exitBtn.setAttribute('position', '0 -0.15 0.01'); exitBtn.setAttribute('color', 'red');
+    exitBtn.addEventListener('click', () => { window.location.href = 'index.html'; });
 
-function createStoreItem(scene, position) {
-    // Example: A Golden Crown
-    const item = new THREE.Mesh(
-        new THREE.TorusGeometry(0.15, 0.05, 16, 100),
-        new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 1 })
-    );
-    item.position.copy(position);
-    item.position.y += 0.3;
-    item.name = "Store_Item_Crown";
-    scene.add(item);
-}
+    this.menu.appendChild(bg); this.menu.appendChild(this.text); this.menu.appendChild(exitBtn);
+    this.el.appendChild(this.menu);
 
-// 3. MAGNETIC SNAP LOGIC
-export function snapToAvatar(item, camera) {
-    // This logic "parents" the item to the VR camera (your head)
-    const offset = new THREE.Vector3(0, 0.2, 0); // Sit on top of head
-    item.position.copy(offset);
-    camera.add(item); 
-}
+    window.addEventListener('xbuttondown', () => {
+      const v = !this.menu.getAttribute('visible');
+      this.menu.setAttribute('visible', v);
+      if(v) this.text.setAttribute('value', `CHIPS: $${localStorage.getItem('chips') || 1000}`);
+    });
+  }
+});

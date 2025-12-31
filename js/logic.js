@@ -1,3 +1,17 @@
+// --- MOVEMENT STICK LOGIC ---
+document.querySelector('a-scene').addEventListener('loaded', () => {
+    const rig = document.querySelector('#rig');
+    
+    // Ensure the player is standing on the ground
+    rig.setAttribute('movement-controls', {
+        speed: 0.2,
+        fly: false
+    });
+
+    console.log("Movement logic initialized. Joysticks should now be active.");
+});
+
+
 // --- GLOBAL USER DATA ---
 const playerState = {
     chips: 1000,

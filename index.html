@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Brick Club VR - DNA Master</title>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
+        #overlay { position: absolute; width: 100%; height: 100%; display: flex; 
+                   flex-direction: column; justify-content: center; align-items: center; 
+                   background: #000; z-index: 1000; color: #ffd700; }
+        button { padding: 25px 50px; font-size: 24px; background: #8B0000; color: white; 
+                 border-radius: 50px; border: 2px solid gold; cursor: pointer; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div id="overlay">
+        <h1>BRICK CLUB VR</h1>
+        <button id="start-btn">ENTER CLUB</button>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+        import { VRButton } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/webxr/VRButton.js';
+        
+        // Importing our DNA files
+        import { initEngine } from './core/engine.js';
+        import { buildPermanentLobby } from './world/lobby.js';
+        import { buildStoreRoom } from './world/store-room.js';
+        import { updateLocomotion } from './core/controls.js';
+
+        let scene, camera, renderer, userRig;
+        let currentRoomGroup = new THREE.Group();
+        let portals = [];
+
+        async function start() {
+            try {
+                const engine = initEngine();
+                scene = engine.scene; 
+                camera = engine.camera;
+                renderer = engine.renderer; 
+                userRig = engine.userRig;
+                
+                scene.add(currentRoomGroup);
+
+                // Add the official VR button
+                const vrButton = VRButton.createButton(renderer);
+                document.body.appendChild(vrButton);
+
+                // Start in the Lobby
+                loadRoom('LOBBY');
+
+                renderer.setAnimationLoop(() => {
+                    updateLocomotion(renderer, userRig);
+                    checkTeleports();
+                    renderer.render(scene, camera);
+                });
+
+                console.log("Engine Started Successfully");
+            } catch (error) {
+                console.error("Critical Start Error:", error);
+                alert("Game failed to load. Check if your folder names (core, world) are correct!");
+            }
+        }
+
+        function loadRoom(roomType) {
+            // Clear current objects
+            while(currentRoomGroup.children.length > 0) currentRoomGroup.remove(currentRoomGroup.children[0]);
+            portals = [];
+
+            if(roomType === 'LOBBY') {
+                const data = buildPermanentLobby(currentRoomGroup);
+                portals = data.portals || [];
+                userRig.position.set(0, 1.6, 5);
+            } else if(roomType === 'STORE') {
+                const data = buildStoreRoom(currentRoomGroup);
+                portals = data.portals || [];
+                userRig.position.set(0, 1.6, 2);
+            }
+        }
+
+        function checkTeleports() {
+            if (!portals) return;
+            portals.forEach(p => {
+                if(userRig.position.distanceTo(p.position) < 1.0) {
+                    if(p.userData.dest === 'STORE') loadRoom('STORE');
+                    if(p.userData.dest === 'LOBBY') loadRoom('LOBBY');
+                }
+            });
+        }
+
+        document.getElementById('start-btn').onclick = () => {
+            document.getElementById('overlay').style.display = 'none';
+            start();
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+<scene>
+  <entity id="lobby" position="0 0 0">
+    <box class="wall" color="#1a1a1a" scale="10 5 0.2" position="0 2.5 -5"></box> <entity id="backDoor" position="0 1 -4.9" interaction="openDoor"></entity>
+  </entity>
+
+  <entity id="room1" position="20 0 0"> </entity>
+  <entity id="room2" position="40 0 0"> </entity>
+  <entity id="room3" position="60 0 0"> </entity>
+
+  <entity id="store" position="-10 0 0">
+     <box id="blueGiveaway" color="#0000ff" interaction="claimChips"></box>
+  </entity>
+
+  <entity id="player" camera oculus-controls>
+    <cursor raycaster="objects: .teleport-point"></cursor>
+  </entity>
+</scene>

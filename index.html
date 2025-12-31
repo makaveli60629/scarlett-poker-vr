@@ -1,20 +1,27 @@
-{
-  "Index_State": "INITIALIZING",
-  "Loading_Sequence": {
-    "Step_1": "Disable_Splash_Screen_Fade",
-    "Step_2": "Force_Load_Environment [Lobby_Brick_Walls]",
-    "Step_3": "Initialize_Blue_Neon_Materials",
-    "Step_4": "Spawn_Player_At_Lobby_Ring"
-  },
-  "Room_Manifest": {
-    "Lobby": { "Walls": "Brick", "Lighting": "Blue_Neon", "Back_Door": "Interactive_Slide" },
-    "Room_1_Poker": { "Walls": "Brick", "Table": "Branded_Felt", "Logic": "Auto_Sit" },
-    "Room_2_Poker": { "Walls": "Brick", "Table": "Branded_Felt", "Logic": "Auto_Sit" },
-    "Room_3_Poker": { "Walls": "Brick", "Table": "Branded_Felt", "Logic": "Auto_Sit" }
-  },
-  "Global_Logic": {
-    "Daily_Giveaway": "Blue_Logic_Active",
-    "Card_Visuals": "Real_Look_Low_Poly",
-    "Collision_Event": "On_Move_PlayGame -> Sit_Down + Deal_Cards"
-  }
+// --- Game Entry Logic ---
+function startVRPoker() {
+    console.log("Loading VR Poker Hub...");
+    
+    // 1. Force hide the Blue Loading Screen
+    document.getElementById('loading-screen').style.display = 'none';
+    
+    // 2. Initialize the 3 Brick Rooms + Lobby
+    initEnvironment('Lobby', 'Brick_Texture');
+    initEnvironment('Room1', 'Brick_Texture');
+    initEnvironment('Room2', 'Brick_Texture');
+    initEnvironment('Room3', 'Brick_Texture');
+
+    // 3. Load Branding & Back Door
+    loadTableBranding();
+    setupBackDoor(); 
+
+    console.log("Lobby Ready. Blue Logic Daily Giveaway Active.");
+}
+
+// --- Auto-Sit Logic ---
+function onPlayerMove(location) {
+    if (location === "Play Game") {
+        sitPlayerDown();
+        dealRealLookCards(); // Low-poly models with high-res textures
+    }
 }

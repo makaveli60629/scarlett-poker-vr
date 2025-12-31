@@ -1,13 +1,12 @@
-AFRAME.registerComponent('wallet-hologram-display', {
+AFRAME.registerComponent('chip-stack-logic', {
   init: function () {
-    this.update();
-    window.addEventListener('walletUpdated', () => this.update());
-  },
-  update: function () {
-    let balance = localStorage.getItem('poker_wallet') || 1000;
-    this.el.setAttribute('text', {
-      value: "MAKAVELI 60629\nBANK: $" + balance,
-      align: 'center', color: '#00FFFF', width: 4
-    });
+    for (let i = 0; i < 5; i++) {
+        let chip = document.createElement('a-cylinder');
+        chip.setAttribute('radius', '0.08');
+        chip.setAttribute('height', '0.02');
+        chip.setAttribute('position', `0 ${i * 0.025} 0`);
+        chip.setAttribute('color', i % 2 === 0 ? 'red' : 'white');
+        this.el.appendChild(chip);
+    }
   }
 });

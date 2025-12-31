@@ -1,41 +1,21 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Poker Club - Store</title>
+    <title>Poker Store</title>
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@7.2.0/dist/aframe-extras.min.js"></script>
     <script src="mechanics.js"></script>
-    <script src="items.js"></script>
+    <script src="avatar.js"></script>
   </head>
   <body>
-    <a-scene renderer="colorManagement: true; foveationLevel: 3; xrCompatible: true">
-      <a-assets><img id="brick-wall" src="https://cdn.aframe.io/a-painter/images/floor.jpg"></a-assets>
-
-      <a-entity id="rig" movement-controls="controls: gamepad, keyboard; speed: 0.3">
-        <a-entity camera position="0 1.6 0" look-controls></a-entity>
-        <a-entity oculus-touch-controls="hand: left" hand-controls="hand: left"></a-entity>
-        <a-entity oculus-touch-controls="hand: right" hand-controls="hand: right" laser-controls="hand: right"></a-entity>
-      </a-entity>
-
-      <a-box position="0 2 -5" width="10" height="4" depth="0.2" src="#brick-wall" color="#633128"></a-box>
-      <a-box position="-5 2 0" rotation="0 90 0" width="10" height="4" depth="0.2" src="#brick-wall" color="#4a261f"></a-box>
-      <a-box position="5 2 0" rotation="0 90 0" width="10" height="4" depth="0.2" src="#brick-wall" color="#4a261f"></a-box>
-
-      <a-entity position="-3 1.5 -4.3">
-        <a-entity class="tshirt" item-display buy-logic data-item="BlueShirt" data-color="blue"></a-entity>
-        <a-text value="500c" position="0 -0.5 0" align="center" width="3"></a-text>
-      </a-entity>
-
-      <a-text value="YOUR CLOSET" position="3 3.5 -4.3" align="center" width="5"></a-text>
-      <a-entity position="3 1.5 -4.3">
-        <a-entity class="tshirt" item-display equip-logic data-item="BlueShirt" data-color="blue"></a-entity>
-      </a-entity>
-
-      <a-box position="0 0.1 4" width="2" height="0.1" depth="1" color="#633128" onclick="window.location.href='index.html'">
-        <a-text value="LOBBY" align="center" position="0 0.2 0" rotation="-90 0 0" width="5"></a-text>
+    <a-scene>
+      <a-entity id="rig"><a-entity id="head" camera avatar-loader></a-entity></a-entity>
+      <a-box position="0 2 -3" width="4" height="3" color="#633128">
+        <a-sphere position="-1 0 0.6" radius="0.2" color="#ffccaa" onclick="localStorage.setItem('skin', '#ffccaa'); location.reload();"></a-sphere>
+        <a-sphere position="1 0 0.6" radius="0.2" color="#8d5524" onclick="localStorage.setItem('skin', '#8d5524'); location.reload();"></a-sphere>
       </a-box>
-
-      <a-plane rotation="-90 0 0" width="100" height="100" color="#1a1a1a"></a-plane>
+      <a-box position="0 0.1 2" width="1" height="0.1" depth="0.5" color="red" onclick="window.location.href='index.html'">
+        <a-text value="EXIT" align="center" position="0 0.2 0" rotation="-90 0 0"></a-text>
+      </a-box>
     </a-scene>
   </body>
 </html>

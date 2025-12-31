@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>VR Poker Club - Brick & Blue Edition</title>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
+    
+    <script>
+      // LOGIC: Auto-Sit when entering "Play Game" zone
+      AFRAME.registerComponent('play-game-zone', {
+        init: function () {
+          this.el.addEventListener('player-entered', () => {
+            const rig = document.querySelector('#rig');
+            const camera = document.querySelector('#camera');
+            // Move player to sit position at table
+            rig.setAttribute('position', '0 0.5 -10'); 
+            console.log("Player is now sitting at the branded table.");
+          });
+        }
+      });
+
+      // LOGIC: Blue Daily Giveaway
+      AFRAME.registerComponent('daily-giveaway', {
+        init: function () {
+          this.el.addEventListener('click', () => {
+            alert("Daily Chips Claimed!");
+            this.el.setAttribute('visible', 'false'); // Hide after claim
+          });
+        }
+      });
+
+      // LOGIC: Back Door Animation
+      AFRAME.registerComponent('back-door', {
+        init: function () {
+          this.el.addEventListener('click', () => {
+            this.el.setAttribute('animation', 'property: rotation; to: 0 90 0; dur: 1000');
+          });
+        }
+      });
+    </script>
+  </head>
+  <body>
+    <a-scene background="color: #121212"> <a-assets>
+        <img id="brick-wall" src="https://i.imgur.com/3p89D0p.jpg"> <img id="poker-brand" src="https://via.placeholder.com/512x512.png?text=POKER+BRAND">
+      </a-assets>
+
+      <a-entity id="rig" movement-controls="fly: false; speed: 0.3">
+        <a-entity id="camera" camera position="0 1.6 0" look-controls>
+          <a-cursor color="#00fbff"></a-cursor>
+        </a-entity>
+        
+        <a-entity oculus-touch-controls="hand: left"></a-entity>
+        <a-entity oculus-touch-controls="hand: right"></a-entity>
+      </a-entity>
+
+      <a-box position="0 2 -5" width="20" height="4" depth="0.5" src="#brick-wall" repeat="4 1"></a-box> <a-box position="-10 2 0" rotation="0 90 0" width="10" height="4" depth="0.5" src="#brick-wall"></a-box> <a-box position="10 2 0" rotation="0 90 0" width="10" height="4" depth="0.5" src="#brick-wall"></a-box> <a-entity id="backdoor" back-door position="0 1.5 -4.8" geometry="primitive: box; width: 1.5; height: 3; depth: 0.1" material="color: #4e342e" cursor-listener></a-entity>
+
+      <a-cylinder id="table" position="0 0.7 -10" radius="2" height="0.1" color="#076324">
+         <a-image src="#poker-brand" rotation="-90 0 0" position="0 0.06 0" width="1.5" height="1.5"></a-image>
+      </a-cylinder>
+
+      <a-box play-game-zone position="0 0.1 -8" width="2" height="0.2" depth="2" color="#444" opacity="0.5">
+        <a-text value="PLAY GAME" align="center" position="0 0.5 0" rotation="-90 0 0"></a-text>
+      </a-box>
+
+      <a-sphere daily-giveaway position="3 1 -2" radius="0.3" color="#00fbff" material="emissive: #00fbff; emissiveIntensity: 0.8">
+        <a-light type="point" color="#00fbff" intensity="0.5"></a-light>
+      </a-sphere>
+
+      <a-plane rotation="-90 0 0" width="50" height="50" color="#222"></a-plane>
+
+    </a-scene>
+  </body>
+</html>

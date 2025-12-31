@@ -1,81 +1,56 @@
 import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
 
 export function buildPermanentLobby(scene) {
-    // 1. THE LUXURY MATERIALS
-    const brickMat = new THREE.MeshStandardMaterial({ color: 0x331111, roughness: 0.8 });
-    const goldMat = new THREE.MeshStandardMaterial({ 
-        color: 0xffd700, metalness: 1.0, roughness: 0.2, emissive: 0x332200 
-    });
-    const carpetMat = new THREE.MeshStandardMaterial({ color: 0x660000 });
+    const brickMat = new THREE.MeshStandardMaterial({ color: 0x441111 });
+    const goldMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.8, roughness: 0.2 });
+    const carpetMat = new THREE.MeshStandardMaterial({ color: 0x880000 });
 
-    // 2. THE MAIN BOX (Solid Walls)
     const lobbyGroup = new THREE.Group();
     
-    // Floor & Ceiling
-    createBox(lobbyGroup, 12, 0.2, 22, 0, 0, 0, carpetMat); // Floor
-    createBox(lobbyGroup, 12, 0.2, 22, 0, 6, 0, brickMat);  // Ceiling
+    // Solid Box (12x6x20)
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(12, 0.1, 22), carpetMat);
+    const ceil = new THREE.Mesh(new THREE.BoxGeometry(12, 0.1, 22), brickMat);
+    ceil.position.y = 6;
+    lobbyGroup.add(floor, ceil);
 
-    // 4 Walls with Gold Trim
-    addTrimmedWall(lobbyGroup, 22, 6, new THREE.Vector3(-6, 3, 0), Math.PI/2, brickMat, goldMat); // Left
-    addTrimmedWall(lobbyGroup, 22, 6, new THREE.Vector3(6, 3, 0), -Math.PI/2, brickMat, goldMat); // Right
-    addTrimmedWall(lobbyGroup, 12, 6, new THREE.Vector3(0, 3, -11), 0, brickMat, goldMat);        // Front
-    addTrimmedWall(lobbyGroup, 12, 6, new THREE.Vector3(0, 3, 11), Math.PI, brickMat, goldMat);   // Back
+    // Wall Builder with Trim
+    const walls = [
+        { w: 22, h: 6, pos: [-6, 3, 0], rot: [0, Math.PI/2, 0] }, // Left
+        { w: 22, h: 6, pos: [6, 3, 0], rot: [0, -Math.PI/2, 0] }, // Right
+        { w: 12, h: 6, pos: [0, 3, -11], rot: [0, 0, 0] },        // Front
+        { w: 12, h: 6, pos: [0, 3, 11], rot: [0, Math.PI, 0] }   // Back
+    ];
+
+    walls.forEach(data => {
+        const wGroup = new THREE.Group();
+        const wall = new THREE.Mesh(new THREE.PlaneGeometry(data.w, data.h), brickMat);
+        
+        const topTrim = new THREE.Mesh(new THREE.BoxGeometry(data.w, 0.2, 0.1), goldMat);
+        topTrim.position.y = 2.9;
+        
+        const botTrim = new THREE.Mesh(new THREE.BoxGeometry(data.w, 0.2, 0.1), goldMat);
+        botTrim.position.y = -2.9;
+
+        wGroup.add(wall, topTrim, botTrim);
+        wGroup.position.set(...data.pos);
+        wGroup.rotation.set(...data.rot);
+        lobbyGroup.add(wGroup);
+    });
 
     scene.add(lobbyGroup);
 
-    // 3. THE GLOWING PORTALS (Interactive Points)
+    // Glowing Portals
     const portals = [];
-    const colors = [0x00ff00, 0xff00ff, 0x00ffff]; // Green, Pink, Cyan
-    
-    for(let i = 0; i < 3; i++) {
-        const portalGroup = new THREE.Group();
-        
-        // The Frame (Solid Gold)
-        const frame = new THREE.Mesh(new THREE.TorusGeometry(1, 0.05, 16, 100), goldMat);
-        
-        // The Glowing Inner (Emissive)
-        const glowInner = new THREE.Mesh(
-            new THREE.CircleGeometry(0.95, 32),
-            new THREE.MeshBasicMaterial({ 
-                color: colors[i], 
-                transparent: true, 
-                opacity: 0.5,
-                side: THREE.DoubleSide
-            })
-        );
+    [0x00ff00, 0xff00ff, 0x00ffff].forEach((col, i) => {
+        const p = new THREE.Group();
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(1, 0.05, 16, 100), goldMat);
+        const glow = new THREE.Mesh(new THREE.CircleGeometry(0.95, 32), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.5 }));
+        p.add(ring, glow);
+        p.position.set(5.8, 1.8, (i * 6) - 6);
+        p.rotation.y = -Math.PI/2;
+        scene.add(p);
+        portals.push(p);
+    });
 
-        portalGroup.add(frame, glowInner);
-        portalGroup.position.set(5.8, 2, (i * 6) - 6);
-        portalGroup.rotation.y = -Math.PI / 2;
-        portalGroup.userData = { roomID: i + 1, originalOpacity: 0.5 };
-        
-        scene.add(portalGroup);
-        portals.push(portalGroup);
-    }
-
-    return { portals, lobbyGroup };
-}
-
-function addTrimmedWall(parent, w, h, pos, rotY, wallMat, goldMat) {
-    const wall = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat);
-    
-    // Gold Trim Top
-    const trimTop = new THREE.Mesh(new THREE.BoxGeometry(w, 0.2, 0.1), goldMat);
-    trimTop.position.y = h/2 - 0.1;
-    
-    // Gold Trim Bottom
-    const trimBot = new THREE.Mesh(new THREE.BoxGeometry(w, 0.2, 0.1), goldMat);
-    trimBot.position.y = -h/2 + 0.1;
-
-    const group = new THREE.Group();
-    group.add(wall, trimTop, trimBot);
-    group.position.copy(pos);
-    group.rotation.y = rotY;
-    parent.add(group);
-}
-
-function createBox(parent, w, h, d, x, y, z, mat) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-    mesh.position.set(x, y, z);
-    parent.add(mesh);
+    return { portals };
 }

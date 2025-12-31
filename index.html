@@ -1,0 +1,20 @@
+{
+  "Index_State": "INITIALIZING",
+  "Loading_Sequence": {
+    "Step_1": "Disable_Splash_Screen_Fade",
+    "Step_2": "Force_Load_Environment [Lobby_Brick_Walls]",
+    "Step_3": "Initialize_Blue_Neon_Materials",
+    "Step_4": "Spawn_Player_At_Lobby_Ring"
+  },
+  "Room_Manifest": {
+    "Lobby": { "Walls": "Brick", "Lighting": "Blue_Neon", "Back_Door": "Interactive_Slide" },
+    "Room_1_Poker": { "Walls": "Brick", "Table": "Branded_Felt", "Logic": "Auto_Sit" },
+    "Room_2_Poker": { "Walls": "Brick", "Table": "Branded_Felt", "Logic": "Auto_Sit" },
+    "Room_3_Poker": { "Walls": "Brick", "Table": "Branded_Felt", "Logic": "Auto_Sit" }
+  },
+  "Global_Logic": {
+    "Daily_Giveaway": "Blue_Logic_Active",
+    "Card_Visuals": "Real_Look_Low_Poly",
+    "Collision_Event": "On_Move_PlayGame -> Sit_Down + Deal_Cards"
+  }
+}

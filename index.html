@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Scarlett VR Poker - Master Index</title>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+</head>
+<body>
+
+    <a-assets>
+        <img id="brickWall" src="assets/textures/1767151860440~2.jpg">
+        <img id="cardSkins" src="assets/textures/1767151685907.jpg">
+        <img id="mainLogo" src="assets/textures/1767153958433.jpg">
+        <img id="dailyClaimUI" src="assets/textures/1767154515372.jpg">
+        <img id="neonCarpet" src="assets/textures/1767154747836.jpg">
+    </a-assets>
+
+    <a-sky color="#000000"></a-sky>
+    <a-box position="0 2 -5" width="10" height="4" depth="0.1" src="#brickWall"></a-box>
+
+    <a-ring position="0 0.01 -3" rotation="-90 0 0" radius-inner="0.8" radius-outer="1" src="#neonCarpet"></a-ring>
+    <a-entity position="0 0.5 -3" particle-system="color: #00FFFF,#FF00FF; count: 100; velocityValue: 0 1 0"></a-entity>
+
+    <a-cylinder position="3 0.7 -3" radius="1.5" height="0.1" src="#neonCarpet">
+        <a-image src="#mainLogo" position="0 0.06 0" rotation="-90 0 0" width="1" height="1"></a-image>
+    </a-cylinder>
+
+    <a-entity oculus-touch-controls="hand: left"></a-entity>
+    <a-entity oculus-touch-controls="hand: right"></a-entity>
+    <a-entity camera look-controls wasd-controls position="0 1.6 0"></a-entity>
+
+    <script>
+        // CORE LOGIC: Auto-Seat & Deal
+        // Triggers when user enters Poodle Portal
+        function autoSeatLogic() {
+            console.log("Stepping into Poodle Portal... Auto-seating player.");
+            // Logic: Snap camera to table position + Deal cards from #cardSkins
+        }
+
+        // CORE LOGIC: Daily Claim Timer
+        function checkDailyClaim() {
+            // Checks 24-hour logic for Blue Chips
+        }
+        
+        // CORE LOGIC: Back Door Animation
+        // Opens the hidden exit in the brick-walled lobby
+    </script>
+
+</body>
+</html>

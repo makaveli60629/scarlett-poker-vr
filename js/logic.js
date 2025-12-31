@@ -1,77 +1,77 @@
-// 1. AUTO-SIT & DEALER RECOGNITION
-AFRAME.registerComponent('auto-sit-logic', {
-  tick: function () {
-    var playerEl = document.querySelector('#rig');
-    var playerPos = playerEl.getAttribute('position');
-    var zonePos = {x: 0, y: 0, z: -6.2}; 
+let turnInterval;
+let timeLeft = 30;
+
+function showHUD(msg) {
+    const hud = document.querySelector('#hud-msg');
+    const text = document.querySelector('#hud-text');
+    text.setAttribute('value', msg);
+    hud.setAttribute('visible', 'true');
+    setTimeout(() => { hud.setAttribute('visible', 'false'); }, 4000);
+}
+
+function startTurnTimer() {
+    timeLeft = 30;
+    const timerDisplay = document.querySelector('#turn-timer-display');
+    timerDisplay.setAttribute('visible', 'true');
     
-    var distance = Math.sqrt(Math.pow(playerPos.x - zonePos.x, 2) + Math.pow(playerPos.z - zonePos.z, 2));
+    if(turnInterval) clearInterval(turnInterval);
+    
+    turnInterval = setInterval(() => {
+        timeLeft--;
+        timerDisplay.setAttribute('value', "YOUR TURN: " + timeLeft + "s");
+        
+        if(timeLeft <= 0) {
+            clearInterval(turnInterval);
+            timerDisplay.setAttribute('visible', 'false');
+            showHUD("Time Out! Makaveli Checked.");
+        }
+    }, 1000);
+}
 
-    if (distance < 1.0 && !this.isSeated) {
-      this.isSeated = true;
-      this.sitDown();
-    }
-  },
-  sitDown: function () {
-    document.querySelector('#rig').setAttribute('position', '0 0 -6.2');
-    // Scarlett Dealer "speaks"
-    alert("Scarlett: Welcome back, Makaveli 62629. Dealing your hand.");
-    this.el.sceneEl.emit('dealCards');
-  }
-});
+function announceWinner() {
+    const winDisp = document.querySelector('#winner-display');
+    winDisp.setAttribute('visible', 'true');
+    showHUD("MAKAVELI 60629 WINS THE POT!");
+    
+    // Reward Logic
+    let wallet = parseInt(localStorage.getItem('poker_wallet')) || 1000;
+    wallet += 2500;
+    localStorage.setItem('poker_wallet', wallet);
+    window.dispatchEvent(new Event('walletUpdated'));
 
-// 2. VIP DOOR WITH "WHOOSH" SOUND LOGIC
-AFRAME.registerComponent('vip-door-logic', {
-  tick: function () {
-    var playerPos = document.querySelector('#rig').getAttribute('position');
-    var doorPos = this.el.object3D.position;
-    var distance = playerPos.distanceTo(doorPos);
-    var wallet = parseInt(localStorage.getItem('poker_wallet')) || 0;
+    setTimeout(() => { winDisp.setAttribute('visible', 'false'); }, 6000);
+}
 
-    if (distance < 2.5) {
-      if (wallet >= 5000) {
-        this.el.setAttribute('position', {x: 4, y: 1.5, z: -6}); // Slide open
-        this.el.setAttribute('material', 'emissive', '#00FF00');
-      } else {
-        this.el.setAttribute('material', 'color', '#FF0000');
-      }
-    } else {
-      this.el.setAttribute('position', {x: 4, y: 1.5, z: -4.9}); // Slide shut
-    }
-  }
-});
-
-// 3. DYNAMIC CHIP STACK (Visually represents your wallet)
-AFRAME.registerComponent('chip-stack-logic', {
-  init: function () {
-    this.updateStacks();
-    window.addEventListener('walletUpdated', () => this.updateStacks());
-  },
-  updateStacks: function () {
-    this.el.innerHTML = ''; // Clear old stacks
-    let wallet = parseInt(localStorage.getItem('poker_wallet')) || 0;
-    let numChips = Math.min(Math.floor(wallet / 500), 10); // 1 chip per $500
-
-    for (let i = 0; i < numChips; i++) {
-      let chip = document.createElement('a-cylinder');
-      chip.setAttribute('radius', '0.1');
-      chip.setAttribute('height', '0.02');
-      chip.setAttribute('position', `0 ${i * 0.025} 0`);
-      chip.setAttribute('color', i % 2 === 0 ? 'red' : 'white');
-      this.el.appendChild(chip);
-    }
-  }
-});
-
-// 4. GIVEAWAY LOGIC
-AFRAME.registerComponent('daily-giveaway-box', {
-  init: function () {
-    this.el.addEventListener('click', () => {
-      let balance = parseInt(localStorage.getItem('poker_wallet')) || 1000;
-      balance += 500;
-      localStorage.setItem('poker_wallet', balance);
-      window.dispatchEvent(new Event('walletUpdated'));
-      alert("Makaveli 62629: +500 Chips Added. Check your hologram!");
+function dealCard() {
+    let card = document.createElement('a-box');
+    card.setAttribute('width', '0.15'); card.setAttribute('height', '0.01'); card.setAttribute('depth', '0.22');
+    card.setAttribute('position', '0 1 -11.5');
+    card.setAttribute('animation', {
+        property: 'position', to: '0 0.8 -8.5', dur: 800, easing: 'easeOutQuad'
     });
+    document.querySelector('a-scene').appendChild(card);
+}
+
+AFRAME.registerComponent('auto-sit-logic', {
+  init: function() {
+    this.el.addEventListener('click', () => {
+      document.querySelector('#rig').setAttribute('position', '0 -0.4 -8.2'); 
+      showHUD("Seated. Dealing 1.3 Cards...");
+      dealCard();
+      setTimeout(dealCard, 400);
+      setTimeout(startTurnTimer, 1200);
+      
+      // Demo: Show a winner after 10 seconds
+      setTimeout(announceWinner, 10000);
+    });
+  }
+});
+
+AFRAME.registerComponent('boundary-check', {
+  tick: function () {
+    var pos = this.el.getAttribute('position');
+    if (pos.y < -1 || Math.abs(pos.x) > 20) {
+      this.el.setAttribute('position', '0 0 0');
+    }
   }
 });

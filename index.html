@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Poker Club - 1.1 Fix</title>
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@7.2.0/dist/aframe-extras.min.js"></script>
+    <script src="mechanics.js"></script>
+    <script src="avatar.js"></script>
+  </head>
+  <body>
+    <a-scene renderer="colorManagement: true; foveationLevel: 3; xrCompatible: true">
+      
+      <a-assets>
+        <img id="brick" src="https://cdn.aframe.io/a-painter/images/floor.jpg">
+      </a-assets>
+
+      <a-entity id="rig" position="0 0 4" movement-controls="speed: 0.3">
+        <a-entity id="head" camera position="0 1.6 0" look-controls avatar-loader></a-entity>
+        
+        <a-entity id="leftHand" hand-tracking-controls="hand: left" oculus-touch-controls="hand: left" hand-controls="hand: left; handModelStyle: highPoly" wrist-watch></a-entity>
+        <a-entity id="rightHand" hand-tracking-controls="hand: right" oculus-touch-controls="hand: right" hand-controls="hand: right; handModelStyle: highPoly" laser-controls="hand: right"></a-entity>
+      </a-entity>
+
+      <a-light type="ambient" color="#fff" intensity="0.8"></a-light>
+      <a-light type="directional" position="1 4 2" intensity="0.5"></a-light>
+
+      <a-box position="0 2 -5" width="10" height="4" depth="0.2" src="#brick" color="#633128"></a-box>
+      
+      <a-plane rotation="-90 0 0" width="100" height="100" color="#222"></a-plane>
+
+    </a-scene>
+  </body>
+</html>

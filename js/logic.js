@@ -1,3 +1,24 @@
+// WINNER CELEBRATION
+function showWinner(name, handType) {
+    const text = document.createElement('a-entity');
+    text.setAttribute('position', '100 2.5 100');
+    text.setAttribute('text', {
+        value: name + " WINS WITH A " + handType,
+        align: 'center',
+        width: 6,
+        color: 'gold'
+    });
+    
+    // Highlight winning player
+    document.querySelector('#rig').setAttribute('animation', 'property: light.intensity; to: 3; dur: 500; dir: alternate; loop: 4');
+    
+    document.querySelector('a-scene').appendChild(text);
+    
+    // Remove after 10 seconds
+    setTimeout(() => { if(text.parentNode) text.parentNode.removeChild(text); }, 10000);
+}
+
+// MAGNETIC GRABBER
 AFRAME.registerComponent('magnetic-grabber', {
   init: function () {
     this.el.addEventListener('click', (evt) => {
@@ -10,28 +31,7 @@ AFRAME.registerComponent('magnetic-grabber', {
   }
 });
 
-AFRAME.registerComponent('poker-card-physics', {
-  init: function () {
-    let timer;
-    this.el.addEventListener('mouseenter', () => {
-      timer = setTimeout(() => {
-        this.el.setAttribute('animation', {property: 'position', to: '0 1.5 -1', dur: 1000});
-        this.el.setAttribute('animation__rot', {property: 'rotation', to: '0 0 180', dur: 1000});
-      }, 2000);
-    });
-    this.el.addEventListener('mouseleave', () => clearTimeout(timer));
-  }
-});
-
-AFRAME.registerComponent('teleport-logic', {
-  schema: { target: {type: 'vec3'} },
-  init: function () {
-    this.el.addEventListener('click', () => {
-      document.querySelector('#rig').setAttribute('position', this.data.target);
-    });
-  }
-});
-
+// DAILY PICK
 AFRAME.registerComponent('daily-pick-logic', {
   init: function () {
     this.el.addEventListener('click', () => {
@@ -39,8 +39,7 @@ AFRAME.registerComponent('daily-pick-logic', {
       let wallet = parseInt(localStorage.getItem('poker_wallet')) || 1000;
       wallet += win;
       localStorage.setItem('poker_wallet', wallet);
-      window.dispatchEvent(new Event('walletUpdated'));
-      alert("CASHED OUT: $" + win);
+      alert("WIN: $" + win);
       this.el.setAttribute('visible', 'false');
     });
   }

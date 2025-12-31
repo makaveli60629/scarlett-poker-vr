@@ -1,73 +1,67 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Brick Club VR - Debug Mode</title>
-    <style>
-        body { margin: 0; background: #111; overflow: hidden; font-family: sans-serif; color: white; }
-        #overlay { position: absolute; width: 100%; height: 100%; display: flex; 
-                   flex-direction: column; justify-content: center; align-items: center; 
-                   background: #000; z-index: 1000; }
-        button { padding: 20px 50px; font-size: 22px; background: #8B0000; color: white; 
-                 border: 2px solid #ffd700; border-radius: 50px; cursor: pointer; }
-        #log { margin-top: 20px; color: #ff3333; font-family: monospace; max-width: 80%; text-align: center; }
-    </style>
-</head>
-<body>
-    <div id="overlay">
-        <h1>BRICK CLUB VR</h1>
-        <button id="start-btn">START ENGINE</button>
-        <div id="log">Status: Ready</div>
-    </div>
+<script type="module">
+    import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+    import { VRButton } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/webxr/VRButton.js';
+    import { initEngine } from './core/engine.js';
+    import { buildPermanentLobby } from './world/lobby.js';
+    import { buildStoreRoom } from './world/store-room.js';
+    import { updateLocomotion } from './core/controls.js';
 
-    <script type="module">
-        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
-        import { VRButton } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/webxr/VRButton.js';
+    let scene, camera, renderer, userRig, portals = [];
+    let currentRoom = 'LOBBY';
 
-        const log = document.getElementById('log');
+    async function start() {
+        const engine = initEngine();
+        scene = engine.scene; renderer = engine.renderer; userRig = engine.userRig;
+        
+        document.body.appendChild(VRButton.createButton(renderer));
+        loadLevel('LOBBY');
 
-        async function start() {
-            log.innerText = "Checking DNA files...";
-            log.style.color = "#ffd700";
-
-            try {
-                // 1. IMPORT TEST
-                log.innerText = "Importing core/engine.js...";
-                const { initEngine } = await import('./core/engine.js');
-                
-                log.innerText = "Importing world/lobby.js...";
-                const { buildPermanentLobby } = await import('./world/lobby.js');
-                
-                log.innerText = "Importing core/controls.js...";
-                const { updateLocomotion } = await import('./core/controls.js');
-
-                // 2. INITIALIZE
-                log.innerText = "Setting up Renderer...";
-                const engine = initEngine();
-                const { scene, camera, renderer, userRig } = engine;
-
-                document.body.appendChild(VRButton.createButton(renderer));
-
-                log.innerText = "Building Lobby...";
-                const lobbyData = buildPermanentLobby(scene);
-                const portals = lobbyData.portals;
-
-                // 3. START
-                renderer.setAnimationLoop(() => {
-                    updateLocomotion(renderer, userRig);
-                    renderer.render(scene, camera);
-                });
-
-                document.getElementById('overlay').style.display = 'none';
-
-            } catch (err) {
-                log.style.color = "#ff3333";
-                log.innerText = "CRITICAL ERROR: " + err.message + "\n\nVerify that your folder names are lowercase and files exist!";
-                console.error(err);
+        renderer.setAnimationLoop(() => {
+            updateLocomotion(renderer, userRig);
+            
+            // 1. SOLID WALL LOGIC (Keep player inside 12x20 area)
+            if (currentRoom === 'LOBBY') {
+                userRig.position.x = Math.max(-5.5, Math.min(5.5, userRig.position.x));
+                userRig.position.z = Math.max(-9.5, Math.min(9.5, userRig.position.z));
+            } else {
+                userRig.position.x = Math.max(-3.5, Math.min(3.5, userRig.position.x));
+                userRig.position.z = Math.max(-3.5, Math.min(3.5, userRig.position.z));
             }
-        }
 
-        document.getElementById('start-btn').onclick = start;
-    </script>
-</body>
-</html>
+            // 2. PORTAL TELEPORT LOGIC
+            portals.forEach(p => {
+                const dist = userRig.position.distanceTo(p.position);
+                if (dist < 0.8) { // If you are within 1 meter of the circle
+                    if (p.userData.dest && p.userData.dest !== currentRoom) {
+                        loadLevel(p.userData.dest);
+                    }
+                }
+            });
+
+            renderer.render(scene, engine.camera);
+        });
+        document.getElementById('overlay').style.display = 'none';
+    }
+
+    function loadLevel(level) {
+        // Clear old level
+        while(scene.children.length > 0){ 
+            if(scene.children[0].type === 'Group') scene.remove(scene.children[0]);
+            else break; 
+        }
+        
+        if (level === 'LOBBY') {
+            const data = buildPermanentLobby(scene);
+            portals = data.portals;
+            currentRoom = 'LOBBY';
+            userRig.position.set(0, 1.6, 5); // Reset position in lobby
+        } else if (level === 'STORE') {
+            const data = buildStoreRoom(scene);
+            portals = data.portals;
+            currentRoom = 'STORE';
+            userRig.position.set(0, 1.6, 2); // Reset position in store
+        }
+    }
+
+    document.getElementById('start-btn').onclick = start;
+</script>

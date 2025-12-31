@@ -1,93 +1,61 @@
-// --- MOVEMENT STICK LOGIC ---
-document.querySelector('a-scene').addEventListener('loaded', () => {
-    const rig = document.querySelector('#rig');
-    
-    // Ensure the player is standing on the ground
-    rig.setAttribute('movement-controls', {
-        speed: 0.2,
-        fly: false
-    });
-
-    console.log("Movement logic initialized. Joysticks should now be active.");
-});
-
-
-// --- GLOBAL USER DATA ---
+// --- PLAYER DATA ---
 const playerState = {
     chips: 1000,
     hasTournamentTicket: false,
-    dailyClaimed: false,
-    currentRoom: 'Lobby'
+    dailyClaimed: false
 };
 
-// --- INITIALIZATION ---
+// --- INITIALIZE ---
 window.addEventListener('load', () => {
-    setupPortalListeners();
-    checkDailyStatus();
+    const sceneEl = document.querySelector('a-scene');
+    
+    if (sceneEl.hasLoaded) {
+        initLogic();
+    } else {
+        sceneEl.addEventListener('loaded', initLogic);
+    }
 });
 
-// --- PORTAL & TICKET LOGIC ---
-function setupPortalListeners() {
-    // Tournament Portal Logic
-    const tournamentPortal = document.querySelector('#portal-tournament');
-    if (tournamentPortal) {
-        tournamentPortal.addEventListener('click', () => {
-            if (playerState.hasTournamentTicket) {
-                teleportToRoom('MainEvent');
-            } else {
-                alert("ACCESS DENIED: You need a Special Ticket for the Main Event!");
-                // Optionally redirect them to the Store portal
-            }
-        });
-    }
-
-    // Stakes Portals
-    const tablePortal = document.querySelector('#portal-tables');
-    if (tablePortal) {
-        tablePortal.addEventListener('click', () => {
-            // Logic to open a UI menu for Low, Med, High selection
-            console.log("Opening Stakes Selector...");
-        });
-    }
+function initLogic() {
+    console.log("Logic System Active.");
+    setupPortals();
+    
+    // Add the Blue Daily Giveaway to the Lobby automatically
+    createDailyGiveawayStation();
 }
 
-// --- BLUE DAILY GIVEAWAY LOGIC ---
-function checkDailyStatus() {
-    // Look for the blue giveaway interaction point in the Lobby
-    const giveawayZone = document.querySelector('#blue-chip-logic');
-    
-    // logic for awarding blue chips
-    window.claimDailyChips = function() {
-        if (!playerState.dailyClaimed) {
-            playerState.chips += 500; // Award chips
-            playerState.dailyClaimed = true;
-            updateUI("You received 500 Blue Chips!");
-            // Visual feedback: Change giveaway color to grey/inactive
+function setupPortals() {
+    // Tournament Logic
+    document.querySelector('#portal-tournament').addEventListener('click', () => {
+        if (playerState.hasTournamentTicket) {
+            console.log("Entering Tournament...");
+            // Teleport logic here
         } else {
-            updateUI("Already claimed! Come back tomorrow.");
+            alert("Special Ticket Required! Visit the Store.");
         }
-    };
+    });
+
+    // Store Logic
+    document.querySelector('#portal-store').addEventListener('click', () => {
+        console.log("Opening Store UI...");
+    });
 }
 
-// --- TICKET SYSTEM ---
-function awardSpecialTicket() {
-    playerState.hasTournamentTicket = true;
-    console.log("Special Ticket Added to Inventory.");
-    updateUI("Ticket Earned! Tournament Portal Unlocked.");
-}
-
-// --- UTILITIES ---
-function teleportToRoom(roomName) {
-    const rig = document.querySelector('#rig');
-    playerState.currentRoom = roomName;
+function createDailyGiveawayStation() {
+    const lobby = document.querySelector('#lobby');
+    const station = document.createElement('a-box');
+    station.setAttribute('position', '-4 1 -4');
+    station.setAttribute('color', 'blue');
+    station.setAttribute('class', 'interactable');
+    station.innerHTML = '<a-text value="DAILY CHIPS" align="center" position="0 0.6 0" scale="0.5 0.5 0.5"></a-text>';
     
-    if(roomName === 'MainEvent') {
-        rig.setAttribute('position', '100 1.6 100'); // Send to isolated event room
-    }
-    // Fade effect logic can be added here
-}
-
-function updateUI(message) {
-    // If you have a VR HUD, update text here
-    console.log("HUD Update:", message);
+    station.addEventListener('click', () => {
+        if(!playerState.dailyClaimed) {
+            playerState.chips += 500;
+            playerState.dailyClaimed = true;
+            console.log("500 Blue Chips Added! Total: " + playerState.chips);
+        }
+    });
+    
+    lobby.appendChild(station);
 }

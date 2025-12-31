@@ -1,34 +1,37 @@
-// mechanics.js - Engineering & Logic Only
+// mechanics.js - The Logic Engine
 
-// 1. SIT LOGIC
+// 1. AUTO-SIT LOGIC
 AFRAME.registerComponent('auto-sit', {
   init: function () {
     this.el.addEventListener('click', () => {
       const rig = document.querySelector('#rig');
-      // Set sitting position
-      rig.setAttribute('position', this.el.getAttribute('data-sit-pos'));
-      // Stop walking while sitting
+      const sitPos = this.el.getAttribute('data-sit-pos');
+      rig.setAttribute('position', sitPos);
       rig.setAttribute('movement-controls', 'enabled: false');
-      console.log("VR Sit Active");
     });
   }
 });
 
-// 2. BACK DOOR LOGIC (Modular)
+// 2. DOOR LOGIC (Lobby to Store)
 AFRAME.registerComponent('door-logic', {
   init: function () {
     this.el.addEventListener('click', () => {
+      // Open animation
       this.el.setAttribute('animation', 'property: rotation; to: 0 90 0; dur: 1000');
+      // Teleport to store after 1 second
+      setTimeout(() => {
+        window.location.href = 'store.html';
+      }, 1000);
     });
   }
 });
 
-// 3. DAILY GIVEAWAY LOGIC
+// 3. GIVEAWAY LOGIC
 AFRAME.registerComponent('giveaway-logic', {
   init: function () {
     this.el.addEventListener('click', () => {
       this.el.setAttribute('visible', 'false');
-      // We will add the Chip Counter logic here next!
+      console.log("Chips Claimed");
     });
   }
 });

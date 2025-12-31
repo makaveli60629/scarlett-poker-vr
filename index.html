@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Brick Club VR - Modular Master</title>
+    <title>Brick Club VR - DNA COMPLETE</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
         #overlay {
@@ -12,43 +12,52 @@
         }
         button {
             padding: 20px 60px; font-size: 24px; background: #8B0000;
-            color: white; border: 3px solid #ffd700; border-radius: 50px; cursor: pointer;
+            color: white; border: 2px solid #ffd700; border-radius: 50px; cursor: pointer;
+            box-shadow: 0 0 15px rgba(255, 215, 0, 0.3);
         }
     </style>
 </head>
 <body>
     <div id="overlay">
-        <h1>BRICK CLUB VR</h1>
-        <button id="start-btn">ENTER CLUB (VR)</button>
+        <h1>BRICK CLUB CASINO</h1>
+        <button id="start-btn">ENTER VR</button>
     </div>
 
     <script type="module">
         import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
         import { VRButton } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/webxr/VRButton.js';
         
-        // --- CATEGORY CONNECTORS ---
+        // --- ALL DNA CATEGORIES LOADED ---
         import { initEngine, userRig } from './core/engine.js';
         import { buildLobby } from './world/lobby.js';
         import { setupOculus, updateLocomotion } from './core/controls.js';
+        import { initAvatarStore } from './features/avatar.js';
+        import { initPokerGame, checkTableProximity } from './features/poker-logic.js';
 
         let scene, camera, renderer;
+        const tablePos = new THREE.Vector3(0, 0.8, -5); // The "Play Game" target
 
         async function start() {
-            // Initialize the "Heart"
             const engine = initEngine();
             scene = engine.scene;
             camera = engine.camera;
             renderer = engine.renderer;
 
-            // Initialize the "World" (Brick Walls, Red Carpet)
+            // Build the World & Features
             buildLobby(scene);
-
-            // Initialize the "Input" (Oculus Remotes)
+            initAvatarStore(scene, camera);
+            initPokerGame(scene);
             setupOculus(renderer, scene, userRig);
 
-            // Start the Loop
+            // THE MASTER LOOP
             renderer.setAnimationLoop(() => {
+                // 1. Move the user
                 updateLocomotion(renderer, userRig);
+                
+                // 2. Check if user walked to the poker table (Auto-Sit)
+                checkTableProximity(userRig, tablePos, camera);
+                
+                // 3. Render the frame
                 renderer.render(scene, camera);
             });
         }

@@ -1,62 +1,47 @@
-// --- STORE INVENTORY CONFIG ---
-const STORE_ITEMS = {
-    TICKETS: [
-        { id: 'main_event_pass', name: 'Main Event Special Ticket', price: 1000, type: 'access' }
-    ],
-    CHIPS: [
-        { id: 'starter_pack', name: '5k Blue Chips', price: 5.00, amount: 5000, type: 'currency' },
-        { id: 'pro_pack', name: '50k Blue Chips', price: 20.00, amount: 50000, type: 'currency' }
-    ],
-    SKINS: [
-        { id: 'gold_card_back', name: 'Gold Skin Cards', price: 2500, type: 'visual' }
-    ]
-};
+// --- STORE SYSTEM (Permanent) ---
+const StoreSystem = {
+    // Inventory definition
+    items: {
+        ticket: { id: 'special_ticket', price: 1000, name: 'Tournament Entry' },
+        chips: { id: 'chip_pack', price: 0, name: 'Starter Pack', amount: 5000 }
+    },
 
-// --- STORE CORE LOGIC ---
-const StoreManager = {
     init() {
-        console.log("Store Engine Online: Permanent Structure Loaded.");
-        this.createStoreUI();
+        console.log("Store System Online.");
+        this.setupListeners();
     },
 
-    // Function to handle purchases
-    buyItem(itemID) {
-        // 1. Find the item in our inventory categories
-        let item = [...STORE_ITEMS.TICKETS, ...STORE_ITEMS.CHIPS, ...STORE_ITEMS.SKINS]
-                   .find(i => i.id === itemID);
-
-        if (!item) return;
-
-        // 2. Logic for Tickets
-        if (item.type === 'access') {
-            if (playerState.chips >= item.price) {
-                playerState.chips -= item.price;
-                playerState.hasTournamentTicket = true;
-                this.notifyPlayer(`Purchased: ${item.name}. Tournament Portal Unlocked!`);
-            } else {
-                this.notifyPlayer("Not enough Blue Chips!");
-            }
-        }
-
-        // 3. Logic for Chip Packs (Real currency or exchange)
-        if (item.type === 'currency') {
-            playerState.chips += item.amount;
-            this.notifyPlayer(`Added ${item.amount} chips to your account.`);
+    setupListeners() {
+        const storePortal = document.querySelector('#portal-store');
+        if (storePortal) {
+            storePortal.addEventListener('click', () => {
+                this.openStoreMenu();
+            });
         }
     },
 
-    createStoreUI() {
-        // This generates the 3D buttons inside the Store Portal area
-        const storeArea = document.querySelector('#portal-store');
-        
-        // Add interactive buttons for the items (Low-poly UI)
-        // Note: These buttons use the Oculus Trigger via logic.js
+    openStoreMenu() {
+        // Logic to show a VR UI menu
+        // For now, we will use a prompt for testing
+        const choice = confirm("Buy Special Ticket for 1000 Blue Chips?");
+        if (choice) {
+            this.purchaseTicket();
+        }
     },
 
-    notifyPlayer(msg) {
-        console.log("STORE NOTIFICATION: " + msg);
-        // This hooks into your HUD system
+    purchaseTicket() {
+        if (playerState.chips >= this.items.ticket.price) {
+            playerState.chips -= this.items.ticket.price;
+            playerState.hasTournamentTicket = true;
+            console.log("Purchase Successful: Special Ticket Added.");
+            alert("You now have a Special Ticket for the Tournament!");
+        } else {
+            alert("Not enough chips! Claim your daily blue chips first.");
+        }
     }
 };
 
-window.addEventListener('load', () => StoreManager.init());
+// Initialize when the logic file is ready
+window.addEventListener('load', () => {
+    StoreSystem.init();
+});

@@ -2,94 +2,92 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Brick Club VR - DNA Master</title>
+    <title>Brick Club VR - Emergency Fix</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
         #overlay { position: absolute; width: 100%; height: 100%; display: flex; 
                    flex-direction: column; justify-content: center; align-items: center; 
                    background: #000; z-index: 1000; color: #ffd700; }
-        button { padding: 25px 50px; font-size: 24px; background: #8B0000; color: white; 
-                 border-radius: 50px; border: 2px solid gold; cursor: pointer; margin-top: 20px; }
+        button { padding: 25px 60px; font-size: 28px; background: #8B0000; color: white; 
+                 border: 3px solid #ffd700; border-radius: 50px; cursor: pointer; }
     </style>
 </head>
 <body>
     <div id="overlay">
         <h1>BRICK CLUB VR</h1>
         <button id="start-btn">ENTER CLUB</button>
+        <p id="status" style="color: white; margin-top: 20px;">Waiting for click...</p>
     </div>
 
     <script type="module">
         import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
         import { VRButton } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/webxr/VRButton.js';
-        
-        // Importing our DNA files
-        import { initEngine } from './core/engine.js';
-        import { buildPermanentLobby } from './world/lobby.js';
-        import { buildStoreRoom } from './world/store-room.js';
-        import { updateLocomotion } from './core/controls.js';
 
         let scene, camera, renderer, userRig;
-        let currentRoomGroup = new THREE.Group();
-        let portals = [];
 
         async function start() {
+            const status = document.getElementById('status');
+            status.innerText = "Initializing Engine...";
+
             try {
-                const engine = initEngine();
-                scene = engine.scene; 
-                camera = engine.camera;
-                renderer = engine.renderer; 
-                userRig = engine.userRig;
+                // 1. BASIC ENGINE SETUP (No external files needed)
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color(0x111111);
                 
-                scene.add(currentRoomGroup);
+                camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                userRig = new THREE.Group();
+                userRig.add(camera);
+                userRig.position.set(0, 1.6, 3);
+                scene.add(userRig);
 
-                // Add the official VR button
-                const vrButton = VRButton.createButton(renderer);
-                document.body.appendChild(vrButton);
+                renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.xr.enabled = true;
+                document.body.appendChild(renderer.domElement);
+                document.body.appendChild(VRButton.createButton(renderer));
 
-                // Start in the Lobby
-                loadRoom('LOBBY');
+                // 2. LIGHTING
+                const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+                scene.add(ambient);
 
+                // 3. EMERGENCY FLOOR (So you aren't in a void)
+                const floor = new THREE.Mesh(
+                    new THREE.PlaneGeometry(20, 20),
+                    new THREE.MeshStandardMaterial({ color: 0x800000 })
+                );
+                floor.rotation.x = -Math.PI / 2;
+                scene.add(floor);
+
+                // 4. TRY TO LOAD EXTERNAL DNA (The "Risky" Part)
+                status.innerText = "Attempting to load Lobby DNA...";
+                
+                try {
+                    const { buildPermanentLobby } = await import('./world/lobby.js');
+                    buildPermanentLobby(scene);
+                    status.innerText = "Lobby Loaded!";
+                } catch (e) {
+                    console.warn("Could not load world/lobby.js - Using emergency walls.");
+                    const wall = new THREE.Mesh(new THREE.BoxGeometry(10, 5, 0.5), new THREE.MeshStandardMaterial({color: 0x442222}));
+                    wall.position.z = -5;
+                    scene.add(wall);
+                    status.innerText = "Error in lobby.js file. Check console.";
+                }
+
+                // 5. START RENDER LOOP
                 renderer.setAnimationLoop(() => {
-                    updateLocomotion(renderer, userRig);
-                    checkTeleports();
                     renderer.render(scene, camera);
                 });
 
-                console.log("Engine Started Successfully");
-            } catch (error) {
-                console.error("Critical Start Error:", error);
-                alert("Game failed to load. Check if your folder names (core, world) are correct!");
+                document.getElementById('overlay').style.display = 'none';
+
+            } catch (err) {
+                status.style.color = "red";
+                status.innerText = "FATAL ERROR: " + err.message;
+                console.error(err);
             }
-        }
-
-        function loadRoom(roomType) {
-            // Clear current objects
-            while(currentRoomGroup.children.length > 0) currentRoomGroup.remove(currentRoomGroup.children[0]);
-            portals = [];
-
-            if(roomType === 'LOBBY') {
-                const data = buildPermanentLobby(currentRoomGroup);
-                portals = data.portals || [];
-                userRig.position.set(0, 1.6, 5);
-            } else if(roomType === 'STORE') {
-                const data = buildStoreRoom(currentRoomGroup);
-                portals = data.portals || [];
-                userRig.position.set(0, 1.6, 2);
-            }
-        }
-
-        function checkTeleports() {
-            if (!portals) return;
-            portals.forEach(p => {
-                if(userRig.position.distanceTo(p.position) < 1.0) {
-                    if(p.userData.dest === 'STORE') loadRoom('STORE');
-                    if(p.userData.dest === 'LOBBY') loadRoom('LOBBY');
-                }
-            });
         }
 
         document.getElementById('start-btn').onclick = () => {
-            document.getElementById('overlay').style.display = 'none';
             start();
         };
     </script>

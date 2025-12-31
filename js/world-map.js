@@ -10,7 +10,7 @@ const WORLD_MAP = {
                 {"pos": "10 2.5 0", "rot": "0 -90 0", "w": 20, "h": 5, "tex": "#brick-wall"}, 
                 {"pos": "0 5 0", "rot": "90 0 0", "w": 20, "h": 20, "tex": "#brick-wall"} 
             ],
-            "floor": {"size": "20 20", "tex": "#checker-floor"}
+            "floor": {"size": "20 20", "tex": "#lobby-carpet"} 
         },
         {
             "id": "ScorpionRoom",
@@ -18,9 +18,10 @@ const WORLD_MAP = {
             "walls": [
                 {"pos": "0 2.5 -10", "rot": "0 0 0", "w": 20, "h": 5, "tex": "#brick-wall"},
                 {"pos": "10 2.5 0", "rot": "0 -90 0", "w": 20, "h": 5, "tex": "#brick-wall"},
+                {"pos": "-10 2.5 0", "rot": "0 90 0", "w": 20, "h": 5, "tex": "#brick-wall"},
                 {"pos": "0 5 0", "rot": "90 0 0", "w": 20, "h": 20, "tex": "#brick-wall"}
             ],
-            "floor": {"size": "20 20", "tex": "#checker-floor"}
+            "floor": {"size": "20 20", "tex": "#checker-floor"} 
         }
     ]
 };

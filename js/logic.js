@@ -1,31 +1,71 @@
+let currentRoom = 'lobby';
+
 function updateWalletUI() {
     const el = document.querySelector('#wallet-hologram');
-    if(el) el.setAttribute('value', `WALLET: ${GAME_CONFIG.settings.currencySymbol}${walletBalance}`);
+    if(el) el.setAttribute('value', `WALLET: $${walletBalance}`);
     localStorage.setItem('poker_wallet', walletBalance);
 }
 
-function sitDown(room) {
-    const rig = document.querySelector('#rig');
-    const pos = (room === 'scorpion') ? GAME_CONFIG.player.seatScorpion : GAME_CONFIG.player.seatLobby;
-    rig.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
-    
-    // Trigger Win Display for 10 seconds if sitting at a table
-    if(room === 'scorpion') {
-        const winUI = document.querySelector('#win-letters');
-        winUI.setAttribute('visible', 'true');
-        setTimeout(() => { winUI.setAttribute('visible', 'false'); }, GAME_CONFIG.settings.winDisplayTime);
+function updateClock() {
+    const clockEl = document.querySelector('#menu-clock');
+    if(clockEl) {
+        const now = new Date();
+        clockEl.setAttribute('value', now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     }
 }
+setInterval(updateClock, 1000);
 
-function claimDaily() {
-    const win = Math.floor(Math.random() * 10 + 1) * GAME_CONFIG.rooms.lobby.increment;
-    walletBalance += win;
+function showNotification(text) {
+    const note = document.querySelector('#vr-notification');
+    const noteText = document.querySelector('#notif-text');
+    noteText.setAttribute('value', text);
+    note.setAttribute('visible', 'true');
+}
+
+function dismissNotification() {
+    document.querySelector('#vr-notification').setAttribute('visible', 'false');
+}
+
+function claimDailyReward() {
+    walletBalance += APP_DATA.economy.dailyReward;
     updateWalletUI();
-    alert(`You claimed ${win}!`);
+    showNotification(`REWARD CLAIMED!\n\n+$${APP_DATA.economy.dailyReward}\nADDED TO WALLET`);
 }
 
 function toggleMenu() {
     const menu = document.querySelector('#player-menu');
-    const isVisible = menu.getAttribute('visible');
-    menu.setAttribute('visible', !isVisible);
+    const isVisible = !menu.getAttribute('visible');
+    menu.setAttribute('visible', isVisible);
+
+    if (isVisible) {
+        const toScorpionBtn = document.querySelector('#btn-to-scorpion');
+        const toLobbyBtn = document.querySelector('#btn-to-lobby');
+
+        if (currentRoom === 'lobby') {
+            toScorpionBtn.setAttribute('visible', 'true');
+            toScorpionBtn.setAttribute('scale', '1 1 1');
+            toLobbyBtn.setAttribute('visible', 'false');
+            toLobbyBtn.setAttribute('scale', '0.001 0.001 0.001');
+        } else {
+            toScorpionBtn.setAttribute('visible', 'false');
+            toScorpionBtn.setAttribute('scale', '0.001 0.001 0.001');
+            toLobbyBtn.setAttribute('visible', 'true');
+            toLobbyBtn.setAttribute('scale', '1 1 1');
+        }
+    }
+}
+
+function teleport(zone) {
+    const rig = document.querySelector('#rig');
+    const spawn = APP_DATA.rooms[zone].spawn;
+    
+    rig.setAttribute('position', `${spawn.x} ${spawn.y} ${spawn.z}`);
+    currentRoom = zone;
+
+    if (zone === 'scorpion') {
+        const winUI = document.querySelector('#win-display');
+        winUI.setAttribute('visible', 'true');
+        setTimeout(() => { winUI.setAttribute('visible', 'false'); }, APP_DATA.rooms.scorpion.winDisplayTime);
+    }
+    document.querySelector('#player-menu').setAttribute('visible', 'false');
 }

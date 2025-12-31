@@ -1,37 +1,33 @@
-// mechanics.js - The Logic Engine
+// mechanics.js - The Permanent Brain
+// Handles: Movement, Sitting, and Scene Transitions
 
-// 1. AUTO-SIT LOGIC
 AFRAME.registerComponent('auto-sit', {
   init: function () {
     this.el.addEventListener('click', () => {
       const rig = document.querySelector('#rig');
-      const sitPos = this.el.getAttribute('data-sit-pos');
-      rig.setAttribute('position', sitPos);
+      rig.setAttribute('position', this.el.getAttribute('data-sit-pos'));
       rig.setAttribute('movement-controls', 'enabled: false');
     });
   }
 });
 
-// 2. DOOR LOGIC (Lobby to Store)
 AFRAME.registerComponent('door-logic', {
   init: function () {
     this.el.addEventListener('click', () => {
-      // Open animation
       this.el.setAttribute('animation', 'property: rotation; to: 0 90 0; dur: 1000');
-      // Teleport to store after 1 second
-      setTimeout(() => {
-        window.location.href = 'store.html';
-      }, 1000);
+      setTimeout(() => { window.location.href = 'store.html'; }, 1000);
     });
   }
 });
 
-// 3. GIVEAWAY LOGIC
-AFRAME.registerComponent('giveaway-logic', {
+AFRAME.registerComponent('buy-logic', {
   init: function () {
     this.el.addEventListener('click', () => {
-      this.el.setAttribute('visible', 'false');
-      console.log("Chips Claimed");
+      const itemName = this.el.getAttribute('data-item');
+      alert("You bought: " + itemName);
+      // Logic to save item to player memory
+      localStorage.setItem(itemName, "owned");
+      this.el.setAttribute('color', 'gold');
     });
   }
 });

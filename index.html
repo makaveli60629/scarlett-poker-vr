@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Poker VR 1.2 - Master Index</title>
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
+    <script src="https://unpkg.com/aframe-look-at-component@0.8.0/dist/aframe-look-at-component.min.js"></script>
+
+    <script src="js/locomotion.js"></script>
+    <script src="js/ui-holograms.js"></script>
+    <script src="js/game-logic.js"></script>
+  </head>
+  <body>
+    <a-scene shadow="type: pcfsoft" renderer="antialias: true">
+      
+      <a-assets>
+        <img id="brick-wall" src="https://i.imgur.com/3p9S2X5.jpg"> 
+        <img id="poker-felt" src="https://i.imgur.com/your-brand-felt.png">
+        <img id="globe-tex" src="https://i.imgur.com/vH9p4B7.jpg">
+      </a-assets>
+
+      <a-entity id="rig" movement-controls="speed: 0.25" position="0 0 5">
+        <a-entity camera position="0 1.6 0" look-controls>
+          <a-entity id="watch-container"></a-entity> <a-cursor color="cyan" radius="0.01"></a-cursor>
+        </a-entity>
+        <a-entity oculus-touch-controls="hand: left" hand-controls="hand: left; handModelStyle: lowPoly; color: #ffcc99"></a-entity>
+        <a-entity oculus-touch-controls="hand: right" hand-controls="hand: right; handModelStyle: lowPoly; color: #ffcc99"></a-entity>
+      </a-entity>
+
+      <a-plane rotation="-90 0 0" width="100" height="100" color="#111"></a-plane>
+      
+      <a-entity id="lobby-area">
+        <a-box position="0 2.5 -8" width="16" height="5" material="src: #brick-wall; repeat: 4 1"></a-box>
+        <a-entity id="teleport-globe" position="0 1.2 -4"></a-entity>
+      </a-entity>
+
+      <a-entity id="room-zone-1" position="20 0 -20"></a-entity>
+      <a-entity id="room-zone-2" position="-20 0 -20"></a-entity>
+      <a-entity id="room-zone-3" position="0 0 -40"></a-entity>
+
+    </a-scene>
+  </body>
+</html>

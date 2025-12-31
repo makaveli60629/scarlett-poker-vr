@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Brick Club VR - Emergency Recovery</title>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; }
+        #overlay { position: absolute; width: 100%; height: 100%; display: flex; 
+                   justify-content: center; align-items: center; background: #000; z-index: 100; color: #ffd700; }
+        button { padding: 25px 50px; font-size: 24px; background: #8B0000; color: white; border-radius: 50px; border: 2px solid gold; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div id="overlay"><button id="start-btn">FIX BLACK SCREEN & ENTER</button></div>
+
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+        import { VRButton } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/webxr/VRButton.js';
+
+        let scene, camera, renderer, userRig;
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111111); // Dark grey so you can see if you're in a void
+
+            // 1. THE RIG
+            userRig = new THREE.Group();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            userRig.add(camera);
+            userRig.position.set(0, 1.6, 5); // Start back so you see the table
+            scene.add(userRig);
+
+            // 2. THE RENDERER
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            document.body.appendChild(renderer.domElement);
+            document.body.appendChild(VRButton.createButton(renderer));
+
+            // 3. LIGHTS
+            scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+            const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+            sun.position.set(5, 10, 5);
+            scene.add(sun);
+
+            // 4. TEST FLOOR & WALLS
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), new THREE.MeshStandardMaterial({color: 0x800000}));
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(20, 10, 1), new THREE.MeshStandardMaterial({color: 0x552222}));
+            wall.position.set(0, 5, -5); // Wall in front of you
+            scene.add(wall);
+
+            renderer.setAnimationLoop(() => {
+                renderer.render(scene, camera);
+            });
+        }
+
+        document.getElementById('start-btn').onclick = () => {
+            document.getElementById('overlay').style.display = 'none';
+            init();
+        };
+    </script>
+</body>
+</html>

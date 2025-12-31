@@ -1,25 +1,24 @@
 {
+  "project": "Scarlett Poker VR",
+  "version": "1.3.11",
   "rooms": {
     "lobby": {
-      "id": "lobby-room",
-      "spawn": "0 0 5",
-      "lighting": "1.5",
-      "themeColor": "#a020f0"
+      "name": "The Grand Lobby",
+      "spawn": {"x": 0, "y": 0, "z": 5},
+      "brickRepeat": "10 3"
     },
     "scorpion": {
-      "id": "scorpion-room",
-      "spawn": "-50 0 -48",
-      "buyIn": 1000,
-      "tableColor": "green"
+      "name": "Scorpion Room",
+      "spawn": {"x": -50, "y": 0, "z": -48},
+      "winDisplayTime": 10000
     },
     "store": {
-      "id": "store-room",
-      "spawn": "50 0 50",
-      "packPrice": 5000
+      "name": "Chip Store",
+      "spawn": {"x": 50, "y": 0, "z": 50}
     }
   },
-  "rewards": {
-    "dailyAmount": 50000,
-    "claimCooldown": 86400
+  "economy": {
+    "dailyReward": 50000,
+    "startingBalance": 1000
   }
 }

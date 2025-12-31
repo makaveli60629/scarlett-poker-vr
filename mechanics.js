@@ -1,49 +1,34 @@
-// mechanics.js - The Permanent Engine
-// Handles: Oculus Locomotion, Hand Structure, and Global Logics
+// mechanics.js - Engineering & Logic Only
 
-document.write('<script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>');
-
-// 1. Permanent Sit Logic
+// 1. SIT LOGIC
 AFRAME.registerComponent('auto-sit', {
   init: function () {
     this.el.addEventListener('click', () => {
       const rig = document.querySelector('#rig');
+      // Set sitting position
       rig.setAttribute('position', this.el.getAttribute('data-sit-pos'));
-      rig.setAttribute('movement-controls', 'enabled: false'); // Lock movement while sitting
+      // Stop walking while sitting
+      rig.setAttribute('movement-controls', 'enabled: false');
+      console.log("VR Sit Active");
     });
   }
 });
 
-// 2. Global Hand & Control Setup
-window.onload = () => {
-  const scene = document.querySelector('a-scene');
-  const rig = document.createElement('a-entity');
-  rig.setAttribute('id', 'rig');
-  rig.setAttribute('movement-controls', 'controls: checkpoint, gamepad, keyboard, touch; speed: 0.3');
-  
-  // Camera / Head
-  const camera = document.createElement('a-entity');
-  camera.setAttribute('id', 'camera');
-  camera.setAttribute('camera', '');
-  camera.setAttribute('look-controls', '');
-  camera.setAttribute('position', '0 1.6 0');
-  
-  const cursor = document.createElement('a-cursor');
-  cursor.setAttribute('color', '#00fbff');
-  camera.appendChild(cursor);
-  rig.appendChild(camera);
+// 2. BACK DOOR LOGIC (Modular)
+AFRAME.registerComponent('door-logic', {
+  init: function () {
+    this.el.addEventListener('click', () => {
+      this.el.setAttribute('animation', 'property: rotation; to: 0 90 0; dur: 1000');
+    });
+  }
+});
 
-  // LEFT HAND - Structure for Movement
-  const leftHand = document.createElement('a-entity');
-  leftHand.setAttribute('oculus-touch-controls', 'hand: left');
-  leftHand.setAttribute('smooth-locomotion', '');
-  rig.appendChild(leftHand);
-
-  // RIGHT HAND - Structure for Interaction
-  const rightHand = document.createElement('a-entity');
-  rightHand.setAttribute('oculus-touch-controls', 'hand: right');
-  rightHand.setAttribute('laser-controls', 'hand: right');
-  rig.appendChild(rightHand);
-
-  scene.appendChild(rig);
-};
+// 3. DAILY GIVEAWAY LOGIC
+AFRAME.registerComponent('giveaway-logic', {
+  init: function () {
+    this.el.addEventListener('click', () => {
+      this.el.setAttribute('visible', 'false');
+      // We will add the Chip Counter logic here next!
+    });
+  }
+});

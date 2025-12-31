@@ -1,42 +1,45 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Poker VR 1.2 - Master Index</title>
-    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
-    <script src="https://unpkg.com/aframe-look-at-component@0.8.0/dist/aframe-look-at-component.min.js"></script>
-
-    <script src="js/locomotion.js"></script>
+    <title>Scarlett Poker VR - Version 1.2</title>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <script src="js/logic.js"></script>
+    <script src="js/poker_rooms.js"></script>
+    <script src="js/store.js"></script>
     <script src="js/ui-holograms.js"></script>
-    <script src="js/game-logic.js"></script>
   </head>
   <body>
-    <a-scene shadow="type: pcfsoft" renderer="antialias: true">
-      
+    <a-scene>
       <a-assets>
-        <img id="brick-wall" src="https://i.imgur.com/3p9S2X5.jpg"> 
-        <img id="poker-felt" src="https://i.imgur.com/your-brand-felt.png">
-        <img id="globe-tex" src="https://i.imgur.com/vH9p4B7.jpg">
+        <img id="brick-wall" src="https://cdn.glitch.global/brick_texture.jpg">
+        <img id="table-brand" src="https://cdn.glitch.global/scarlett_logo.png">
+        <img id="card-front" src="https://cdn.glitch.global/real_card_face.png">
       </a-assets>
 
-      <a-entity id="rig" movement-controls="speed: 0.25" position="0 0 5">
-        <a-entity camera position="0 1.6 0" look-controls>
-          <a-entity id="watch-container"></a-entity> <a-cursor color="cyan" radius="0.01"></a-cursor>
+      <a-entity oculus-touch-controls="hand: left"></a-entity>
+      <a-entity oculus-touch-controls="hand: right"></a-entity>
+      <a-entity id="rig" movement-controls position="0 0 0">
+        <a-entity camera look-controls wasd-controls position="0 1.6 0">
+          <a-cursor></a-cursor>
         </a-entity>
-        <a-entity oculus-touch-controls="hand: left" hand-controls="hand: left; handModelStyle: lowPoly; color: #ffcc99"></a-entity>
-        <a-entity oculus-touch-controls="hand: right" hand-controls="hand: right; handModelStyle: lowPoly; color: #ffcc99"></a-entity>
       </a-entity>
 
-      <a-plane rotation="-90 0 0" width="100" height="100" color="#111"></a-plane>
-      
-      <a-entity id="lobby-area">
-        <a-box position="0 2.5 -8" width="16" height="5" material="src: #brick-wall; repeat: 4 1"></a-box>
-        <a-entity id="teleport-globe" position="0 1.2 -4"></a-entity>
+      <a-box position="0 2 -5" width="10" height="4" depth="0.1" src="#brick-wall"></a-box> <a-box position="-10 2 -15" width="10" height="4" depth="0.1" src="#brick-wall"></a-box> <a-box position="0 2 -15" width="10" height="4" depth="0.1" src="#brick-wall"></a-box> <a-box position="10 2 -15" width="10" height="4" depth="0.1" src="#brick-wall"></a-box> <a-entity position="0 3 -4">
+        <a-text value="TABLES ZONE ROOM" align="center" color="#00FFFF" width="6"></a-text>
+        <a-entity wallet-hologram-display position="0 -0.6 0"></a-entity>
       </a-entity>
 
-      <a-entity id="room-zone-1" position="20 0 -20"></a-entity>
-      <a-entity id="room-zone-2" position="-20 0 -20"></a-entity>
-      <a-entity id="room-zone-3" position="0 0 -40"></a-entity>
+      <a-entity position="0 0 -8">
+        <a-cylinder radius="2" height="0.1" src="#table-brand"></a-cylinder> <a-entity class="play-zone" geometry="primitive: circle; radius: 1" position="0 0.05 1.5" rotation="-90 0 0" 
+                  material="color: #00FF00; opacity: 0.3" auto-sit-logic>
+          <a-text value="PLAY GAME" align="center" position="0 0 0.1"></a-text>
+        </a-entity>
+      </a-entity>
+
+      <a-entity daily-giveaway-box position="-3 0.5 -2">
+        <a-box color="blue" depth="0.5" height="0.5" width="0.5"></a-box>
+        <a-text value="FREE CHIPS" align="center" position="0 0.6 0"></a-text>
+      </a-entity>
 
     </a-scene>
   </body>

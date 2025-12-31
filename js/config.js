@@ -1,34 +1,19 @@
-// This is your Consolidated Project Brain
 const GAME_CONFIG = {
-    version: "1.3.3",
+    version: "1.3.4",
+    settings: {
+        winDisplayTime: 10000,
+        currencySymbol: "$"
+    },
     player: {
-        startPos: "0 0 5",
-        scorpionSeat: "-20 0 -19", // Exact seat for auto-sit
-        initialWallet: 1000
+        seatScorpion: { x: -20, y: 0, z: -19 },
+        seatLobby: { x: 0, y: 0, z: 5 }
     },
     rooms: {
-        lobby: { 
-            position: "0 0 0", 
-            wallTexture: "assets/textures/brickwall.jpg",
-            floorTexture: "assets/textures/lobby_carpet.jpg"
-        },
-        scorpion: { 
-            position: "-20 0 -20", 
-            tableTexture: "assets/textures/table_atlas.jpg" 
-        },
-        store: { 
-            position: "20 0 0", 
-            chipsPack: 5000 
-        }
-    },
-    ui: {
-        winDisplayDuration: 10000, // 10 seconds
-        menuColor: "#111",
-        accentColor: "#00d2ff"
+        lobby: { id: "lobby", limit: 5000, increment: 500 },
+        scorpion: { id: "scorpion_room", buyIn: 1000 },
+        store: { id: "store_room", packValue: 5000 }
     }
 };
 
-// Logic to ensure wallet stays permanent
-let currentWallet = localStorage.getItem('poker_wallet') 
-    ? parseInt(localStorage.getItem('poker_wallet')) 
-    : GAME_CONFIG.player.initialWallet;
+// Initializing the permanent wallet
+let walletBalance = localStorage.getItem('poker_wallet') ? parseInt(localStorage.getItem('poker_wallet')) : 1000;

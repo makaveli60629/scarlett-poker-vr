@@ -1,0 +1,25 @@
+{
+  "rooms": {
+    "lobby": {
+      "id": "lobby-room",
+      "spawn": "0 0 5",
+      "lighting": "1.5",
+      "themeColor": "#a020f0"
+    },
+    "scorpion": {
+      "id": "scorpion-room",
+      "spawn": "-50 0 -48",
+      "buyIn": 1000,
+      "tableColor": "green"
+    },
+    "store": {
+      "id": "store-room",
+      "spawn": "50 0 50",
+      "packPrice": 5000
+    }
+  },
+  "rewards": {
+    "dailyAmount": 50000,
+    "claimCooldown": 86400
+  }
+}

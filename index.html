@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Scarlett Poker - Reset Test</title>
+    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+  </head>
+  <body>
+    <a-scene background="color: #1a1a1a">
+      
+      <a-entity id="rig" position="0 1.6 4">
+        <a-camera look-controls wasd-controls></a-camera>
+        <a-entity oculus-touch-controls="hand: left"></a-entity>
+        <a-entity oculus-touch-controls="hand: right"></a-entity>
+      </a-entity>
+
+      <a-plane position="0 0 0" rotation="-90 0 0" width="20" height="20" color="#333"></a-plane>
+
+      <a-box position="0 2 -5" width="10" height="4" depth="0.5" color="#FF0000"></a-box> <a-box position="-5 2 0" rotation="0 90 0" width="10" height="4" depth="0.5" color="#00FF00"></a-box> <a-box position="5 2 0" rotation="0 90 0" width="10" height="4" depth="0.5" color="#0000FF"></a-box> <a-light type="ambient" color="#fff"></a-light>
+      <a-light type="point" intensity="2" position="2 4 4"></a-light>
+
+    </a-scene>
+  </body>
+</html>

@@ -6,11 +6,11 @@ AFRAME.registerComponent('wallet-hologram-display', {
   updateDisplay: function () {
     let balance = localStorage.getItem('poker_wallet') || 1000;
     this.el.setAttribute('text', {
-      value: "WALLET: $" + balance,
+      value: "$" + balance,
       align: 'center',
-      color: '#00FF00',
-      width: 5,
-      shader: 'msdf'
+      color: '#00FFFF',
+      width: 6,
+      font: 'exo2bold'
     });
   }
 });

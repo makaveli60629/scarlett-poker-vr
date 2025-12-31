@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Scarlett Poker VR - v1.3</title>
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@7.2.0/dist/aframe-extras.min.js"></script>
+    <script src="js/logic.js"></script>
+  </head>
+  <body>
+    <a-scene webxr="requiredFeatures: local-floor" background="color: #050505">
+      <a-assets>
+        <img id="felt-tex" src="poker_felt_scarlett.jpg">
+        <img id="table-atlas" src="table_atlas.jpg">
+        <img id="casino-art" src="casino_art.jpg">
+        <img id="brand-logo" src="brand_logo.jpg">
+        <img id="brick-wall" src="brickwall.jpg">
+        <img id="checker-floor" src="Checker floor.jpg">
+      </a-assets>
+
+      <a-light type="ambient" color="#888"></a-light>
+      <a-light type="point" position="0 5 0" intensity="1.5"></a-light>
+
+      <a-entity id="rig" position="0 0 0" movement-controls="controls: gamepad; speed: 0.2">
+        <a-entity camera look-controls position="0 1.6 0">
+          <a-cursor color="magenta" raycaster="objects: .clickable"></a-cursor>
+        </a-entity>
+        <a-entity oculus-touch-controls="hand: left" hand-controls="hand: left"></a-entity>
+        <a-entity oculus-touch-controls="hand: right" hand-controls="hand: right"></a-entity>
+      </a-entity>
+
+      <a-entity id="lobby">
+        <a-plane rotation="-90 0 0" width="20" height="20" src="#brick-wall" repeat="5 5"></a-plane>
+        
+        <a-entity id="daily-table" position="0 0 -4">
+          <a-cylinder radius="1" height="0.8" src="#table-atlas"></a-cylinder>
+          <a-text value="DAILY PICK - UP TO $5000" position="0 1.1 0" align="center" color="gold" width="4"></a-text>
+          <a-box class="clickable" position="0 0.85 0" width="0.4" height="0.05" depth="0.3" color="#0000ff" daily-pick-logic></a-box>
+        </a-entity>
+      </a-entity>
+
+      <a-entity position="100 0 100">
+        <a-plane rotation="-90 0 0" width="30" height="30" src="#checker-floor" repeat="15 15"></a-plane>
+        
+        <a-text value="WALLET: $10,000" position="-5 2.5 -5" color="#00ff00" width="10"></a-text>
+
+        <a-entity id="scarlett-table" position="0 0 0">
+          <a-cylinder radius="2.2" height="0.1" scale="1.7 1 1" src="#felt-tex">
+            <a-image src="#brand-logo" rotation="-90 0 0" position="0 0.06 0" width="1.8" height="1.8"></a-image>
+          </a-cylinder>
+          
+          <a-torus radius="2.2" radius-tubular="0.1" rotation="90 0 0" scale="1.7 1 1" position="0 0.05 0" src="#table-atlas"></a-torus>
+          
+          <a-cylinder radius="0.8" height="0.9" position="0 -0.45 0" src="#table-atlas"></a-cylinder>
+
+          <a-entity position="0 0 2.8" class="clickable" snap-sit="pos: 100 0.8 102.5">
+            <a-box width="0.6" height="0.8" depth="0.1" position="0 0.9 0" src="#table-atlas"></a-box>
+            <a-box width="0.6" height="0.1" depth="0.6" position="0 0.5 0" src="#table-atlas"></a-box>
+          </a-entity>
+          </a-entity>
+
+        <a-entity position="0 3 -14.8">
+            <a-plane width="8" height="5" src="#casino-art"></a-plane>
+            <a-box width="8.2" height="5.2" depth="0.1" position="0 0 -0.1" color="gold"></a-box>
+        </a-entity>
+      </a-entity>
+    </a-scene>
+  </body>
+</html>

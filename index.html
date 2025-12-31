@@ -1,53 +1,96 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <title>Scarlett Poker VR - 1.3.6 Solid</title>
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
-    <script src="https://unpkg.com/aframe-environment-component@1.3.2/dist/aframe-environment-component.min.js"></script>
+    <script src="https://unpkg.com/aframe-environment-component@1.3.2/dist/dist/aframe-environment-component.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/aframe-blink-controls/dist/aframe-blink-controls.min.js"></script>
-    
     <script src="js/config.js"></script>
     <script src="js/logic.js"></script>
 </head>
 <body>
-    <a-scene renderer="antialias: true;">
+    <a-scene renderer="antialias: true; colorManagement: true;">
+        
         <a-assets>
-            <img id="brick" src="assets/textures/brickwall.jpg">
-            <img id="menu-frame" src="assets/ui/menu_frame.png"> <img id="atlas" src="assets/textures/table_atlas.jpg">
+            <img id="brick-wall" src="assets/textures/brickwall.jpg">
+            <img id="menu-bg" src="assets/ui/quantum_menu.png">
+            <img id="teleport-tex" src="assets/ui/teleport_pad.png">
+            <img id="floor-tex" src="assets/textures/lobby_carpet.jpg">
         </a-assets>
 
         <a-entity id="rig" position="0 0 5">
-            <a-camera look-controls>
-                <a-entity id="player-menu" position="0 0 -0.7" visible="false">
-                    <a-image src="#menu-frame" width="1" height="0.8">
-                        <a-text value="LEAVE ROOM" class="clickable" position="0 0.1 0.01" align="center" scale="0.2 0.2 0.2" onclick="sitDown('lobby')"></a-text>
-                        <a-text value="BUY CHIPS" class="clickable" position="0 -0.1 0.01" align="center" scale="0.2 0.2 0.2" onclick="walletBalance += 5000; updateWalletUI();"></a-text>
+            <a-camera id="camera" look-controls>
+                <a-entity id="player-menu" position="0 0 -0.8" visible="false">
+                    <a-image src="#menu-bg" width="1.2" height="0.9">
+                        <a-text value="RETURN TO LOBBY" position="0 0.1 0.01" align="center" scale="0.2 0.2 0.2" class="clickable" onclick="sitDown('lobby')"></a-text>
+                        <a-text value="BUY $5000 CHIPS" position="0 -0.1 0.01" align="center" scale="0.2 0.2 0.2" class="clickable" onclick="walletBalance += 5000; updateWalletUI();"></a-text>
                     </a-image>
                 </a-entity>
             </a-camera>
-            <a-entity id="left-hand" oculus-touch-controls="hand: left" blink-controls="cameraRig: #rig; teleportOrigin: #camera; button: trigger;"></a-entity>
-            <a-entity id="right-hand" oculus-touch-controls="hand: right" laser-controls raycaster="objects: .clickable;"></a-entity>
+            <a-entity id="left-hand" oculus-touch-controls="hand: left" blink-controls="cameraRig: #rig; teleportOrigin: #camera; collisionEntities: .nav-floor;"></a-entity>
+            <a-entity id="right-hand" oculus-touch-controls="hand: right" laser-controls raycaster="objects: .clickable; far: 10;"></a-entity>
         </a-entity>
 
-        <a-entity id="lobby">
-            <a-plane rotation="-90 0 0" width="16" height="16" color="#222" class="nav-floor"></a-plane>
-            <a-box position="0 2.5 -8" width="16" height="5" depth="0.1" src="#brick"></a-box> <a-box position="0 2.5 8" width="16" height="5" depth="0.1" src="#brick"></a-box> <a-text id="wallet-hologram" value="WALLET: $1000" position="0 2.5 -4" align="center" color="#0FF"></a-text>
-            <a-cylinder class="clickable" position="0 0.5 -3" radius="0.5" height="1" color="blue" onclick="claimDaily()"></a-text>
+        <a-entity light="type: ambient; intensity: 0.8;"></a-entity>
+        <a-entity light="type: point; intensity: 1.2; distance: 20;" position="0 4 0"></a-entity>
+
+        <a-entity id="lobby-zone">
+            <a-plane class="nav-floor" rotation="-90 0 0" width="16" height="16" src="#floor-tex" repeat="4 4"></a-plane>
+            
+            <a-box position="0 2.5 -8" width="16" height="5" depth="0.2" src="#brick-wall" repeat="8 2"></a-box>
+            <a-box position="0 2.5 8" width="16" height="5" depth="0.2" src="#brick-wall" repeat="8 2"></a-box>
+            <a-box position="-8 2.5 0" rotation="0 90 0" width="16" height="5" depth="0.2" src="#brick-wall" repeat="8 2"></a-box>
+            <a-box position="8 2.5 0" rotation="0 90 0" width="16" height="5" depth="0.2" src="#brick-wall" repeat="8 2"></a-box>
+            
+            <a-plane rotation="90 0 0" position="0 5 0" width="16" height="16" color="#333"></a-plane>
+
+            <a-text id="wallet-hologram" value="WALLET: $1000" position="0 3 -4" align="center" color="#00f2ff" scale="1.2 1.2 1.2"></a-text>
+
+            <a-entity position="-5 0.02 -5">
+                <a-image src="#teleport-tex" rotation="-90 0 0" width="1.5" height="1.5" class="clickable" onclick="sitDown('scorpion')"></a-image>
+                <a-text value="SCORPION ROOM" position="0 1.5 0" align="center" scale="0.5 0.5 0.5"></a-text>
+            </a-entity>
+
+            <a-entity position="5 0.02 -5">
+                <a-image src="#teleport-tex" rotation="-90 0 0" width="1.5" height="1.5" class="clickable" onclick="sitDown('plane')"></a-image>
+                <a-text value="PLANE TABLES" position="0 1.5 0" align="center" scale="0.5 0.5 0.5"></a-text>
+            </a-entity>
         </a-entity>
 
-        <a-entity id="scorpion-room" position="-20 0 -20">
-            <a-cylinder src="#atlas" radius="2" height="0.1" class="clickable" onclick="sitDown('scorpion')"></a-cylinder>
-            <a-entity id="win-letters" position="0 2 0" visible="false">
-                <a-text value="USER WINS!" align="center" color="gold"></a-text>
+        <a-entity id="scorpion-room" position="-50 0 -50">
+            <a-plane rotation="-90 0 0" width="10" height="10" color="#111" class="nav-floor"></a-plane>
+            <a-cylinder color="green" radius="1.5" height="0.8" position="0 0.4 0"></a-cylinder>
+            <a-light type="point" intensity="1" position="0 3 0"></a-light>
+            <a-entity id="win-display" position="0 2.5 -1" visible="false">
+                <a-text value="SCORPION WINS!" align="center" color="gold" scale="2 2 2"></a-text>
             </a-entity>
         </a-entity>
 
     </a-scene>
 
     <script>
-        // Listen for Y-Button
-        document.querySelector('#left-hand').addEventListener('ybuttondown', toggleMenu);
-        // Initialize UI
-        window.onload = updateWalletUI;
+        // Y-Button Menu Toggle
+        document.querySelector('#left-hand').addEventListener('ybuttondown', () => {
+            const menu = document.querySelector('#player-menu');
+            menu.setAttribute('visible', !menu.getAttribute('visible'));
+        });
+
+        function sitDown(zone) {
+            const rig = document.querySelector('#rig');
+            const winUI = document.querySelector('#win-display');
+            
+            if(zone === 'scorpion') {
+                rig.setAttribute('position', "-50 0 -48");
+                winUI.setAttribute('visible', 'true');
+                setTimeout(() => { winUI.setAttribute('visible', 'false'); }, 10000);
+            } else if (zone === 'plane') {
+                rig.setAttribute('position', "50 0 -48");
+            } else {
+                // Back to Lobby
+                rig.setAttribute('position', "0 0 5");
+                document.querySelector('#player-menu').setAttribute('visible', 'false');
+            }
+        }
     </script>
 </body>
 </html>

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Brick Club VR</title>
+    <title>Brick Club VR - Master</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
         #overlay { position: absolute; width: 100%; height: 100%; display: flex; 
@@ -11,42 +11,64 @@
     </style>
 </head>
 <body>
-    <div id="overlay"><button id="start-btn">LOAD BRICK CLUB</button></div>
+    <div id="overlay"><button id="start-btn">ENTER BRICK CLUB</button></div>
 
     <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+        import { VRButton } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/webxr/VRButton.js';
         import { initEngine } from './core/engine.js';
         import { buildPermanentLobby } from './world/lobby.js';
-        import { setupOculus, updateLocomotion } from './core/controls.js';
-        import { setupPermanentStore } from './features/store.js';
-        import { VRButton } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/webxr/VRButton.js';
+        import { buildStoreRoom } from './world/store-room.js';
+        import { updateLocomotion } from './core/controls.js';
 
-        let scene, camera, renderer, userRig, portals, storeItem;
+        let scene, camera, renderer, userRig;
+        let currentRoomGroup = new THREE.Group();
+        let portals = [];
 
         async function start() {
             const engine = initEngine();
             scene = engine.scene; camera = engine.camera;
             renderer = engine.renderer; userRig = engine.userRig;
+            scene.add(currentRoomGroup);
 
-            // FORCE VR BUTTON TO APPEAR
-            const vrBtn = VRButton.createButton(renderer);
-            vrBtn.style.zIndex = "1000";
-            document.body.appendChild(vrBtn);
+            // FORCE VR BUTTON
+            document.body.appendChild(VRButton.createButton(renderer));
 
-            // Load Modules
-            const lobbyData = buildPermanentLobby(scene);
-            portals = lobbyData.portals;
-            storeItem = setupPermanentStore(scene);
-            setupOculus(renderer, scene, userRig);
+            loadRoom('LOBBY');
 
             renderer.setAnimationLoop(() => {
-                const time = Date.now() * 0.005;
                 updateLocomotion(renderer, userRig);
-                
-                // Animate Glowing Assets
-                if(portals) portals.forEach(p => p.children[1].material.opacity = 0.2 + Math.abs(Math.sin(time)) * 0.4);
-                if(storeItem) storeItem.material.emissiveIntensity = 1 + Math.abs(Math.sin(time)) * 2;
-
+                checkTeleports();
                 renderer.render(scene, camera);
+            });
+        }
+
+        function loadRoom(roomType) {
+            // 1. Clear current room
+            while(currentRoomGroup.children.length > 0){ 
+                currentRoomGroup.remove(currentRoomGroup.children[0]); 
+            }
+            portals = [];
+
+            // 2. Load New DNA
+            if(roomType === 'LOBBY') {
+                const data = buildPermanentLobby(currentRoomGroup);
+                portals = data.portals; 
+                userRig.position.set(0, 1.6, 5); // Starting position
+            } 
+            else if(roomType === 'STORE') {
+                const data = buildStoreRoom(currentRoomGroup);
+                portals = data.portals;
+                userRig.position.set(0, 1.6, 2); // Inside store
+            }
+        }
+
+        function checkTeleports() {
+            portals.forEach(p => {
+                if(userRig.position.distanceTo(p.position) < 1.2) {
+                    if(p.userData.dest === 'STORE') loadRoom('STORE');
+                    if(p.userData.dest === 'LOBBY') loadRoom('LOBBY');
+                }
             });
         }
 

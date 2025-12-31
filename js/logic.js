@@ -1,77 +1,68 @@
-let turnInterval;
-let timeLeft = 30;
+// MAGNETIC SNAP: Holds card when you click it
+AFRAME.registerComponent('magnetic-grabber', {
+  init: function () {
+    this.el.addEventListener('click', (evt) => {
+      let target = evt.detail.intersection.object.el;
+      if (target.classList.contains('community-card')) {
+        target.setAttribute('position', '0.2 -0.2 -0.5'); // Snap to hand view
+        this.el.appendChild(target); 
+        showHUD("CARD GRABBED");
+      }
+    });
+  }
+});
+
+// HOVER PEEK: 2 seconds looking at cards makes them fly up
+AFRAME.registerComponent('hover-peek', {
+  init: function () {
+    let timer;
+    this.el.addEventListener('mouseenter', () => {
+      timer = setTimeout(() => {
+        this.el.setAttribute('animation', {
+          property: 'position',
+          to: `${this.el.object3D.position.x} 1.5 ${this.el.object3D.position.z}`,
+          dur: 1000,
+          easing: 'easeOutElastic'
+        });
+        showHUD("PEEKING AT CARDS");
+      }, 2000); // 2 Seconds
+    });
+    this.el.addEventListener('mouseleave', () => {
+      clearTimeout(timer);
+    });
+  }
+});
+
+// SHIRT SWAPPER
+AFRAME.registerComponent('shirt-swap', {
+  schema: { color: {type: 'string'} },
+  init: function () {
+    this.el.addEventListener('click', () => {
+      document.querySelector('#my-worn-shirt').setAttribute('color', this.data.color);
+      showHUD("SHIRT CHANGED TO " + this.data.color.toUpperCase());
+    });
+  }
+});
+
+// REWARD SYSTEM (Repeated Logic)
+AFRAME.registerComponent('daily-pick-logic', {
+  init: function () {
+    this.el.addEventListener('click', () => {
+      const amounts = [500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000];
+      const win = amounts[Math.floor(Math.random() * amounts.length)];
+      let wallet = parseInt(localStorage.getItem('poker_wallet')) || 1000;
+      wallet += win;
+      localStorage.setItem('poker_wallet', wallet);
+      window.dispatchEvent(new Event('walletUpdated'));
+      showHUD("WON $" + win + " FROM DAILY PICK!");
+    });
+  }
+});
 
 function showHUD(msg) {
     const hud = document.querySelector('#hud-msg');
     const text = document.querySelector('#hud-text');
     text.setAttribute('value', msg);
     hud.setAttribute('visible', 'true');
-    setTimeout(() => { hud.setAttribute('visible', 'false'); }, 4000);
+    setTimeout(() => { hud.setAttribute('visible', 'false'); }, 3000);
 }
-
-function startTurnTimer() {
-    timeLeft = 30;
-    const timerDisplay = document.querySelector('#turn-timer-display');
-    timerDisplay.setAttribute('visible', 'true');
-    
-    if(turnInterval) clearInterval(turnInterval);
-    
-    turnInterval = setInterval(() => {
-        timeLeft--;
-        timerDisplay.setAttribute('value', "YOUR TURN: " + timeLeft + "s");
-        
-        if(timeLeft <= 0) {
-            clearInterval(turnInterval);
-            timerDisplay.setAttribute('visible', 'false');
-            showHUD("Time Out! Makaveli Checked.");
-        }
-    }, 1000);
-}
-
-function announceWinner() {
-    const winDisp = document.querySelector('#winner-display');
-    winDisp.setAttribute('visible', 'true');
-    showHUD("MAKAVELI 60629 WINS THE POT!");
-    
-    // Reward Logic
-    let wallet = parseInt(localStorage.getItem('poker_wallet')) || 1000;
-    wallet += 2500;
-    localStorage.setItem('poker_wallet', wallet);
-    window.dispatchEvent(new Event('walletUpdated'));
-
-    setTimeout(() => { winDisp.setAttribute('visible', 'false'); }, 6000);
-}
-
-function dealCard() {
-    let card = document.createElement('a-box');
-    card.setAttribute('width', '0.15'); card.setAttribute('height', '0.01'); card.setAttribute('depth', '0.22');
-    card.setAttribute('position', '0 1 -11.5');
-    card.setAttribute('animation', {
-        property: 'position', to: '0 0.8 -8.5', dur: 800, easing: 'easeOutQuad'
-    });
-    document.querySelector('a-scene').appendChild(card);
-}
-
-AFRAME.registerComponent('auto-sit-logic', {
-  init: function() {
-    this.el.addEventListener('click', () => {
-      document.querySelector('#rig').setAttribute('position', '0 -0.4 -8.2'); 
-      showHUD("Seated. Dealing 1.3 Cards...");
-      dealCard();
-      setTimeout(dealCard, 400);
-      setTimeout(startTurnTimer, 1200);
-      
-      // Demo: Show a winner after 10 seconds
-      setTimeout(announceWinner, 10000);
-    });
-  }
-});
-
-AFRAME.registerComponent('boundary-check', {
-  tick: function () {
-    var pos = this.el.getAttribute('position');
-    if (pos.y < -1 || Math.abs(pos.x) > 20) {
-      this.el.setAttribute('position', '0 0 0');
-    }
-  }
-});

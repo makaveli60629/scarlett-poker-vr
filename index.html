@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Poker Club - Lobby Fix</title>
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@7.2.0/dist/aframe-extras.min.js"></script>
+    <script src="mechanics.js"></script>
+  </head>
+  <body>
+    <a-scene renderer="antialias: true; foveationLevel: 3; xrCompatible: true">
+      
+      <a-assets>
+        <img id="brick-wall" src="https://i.imgur.com/3p89D0p.jpg">
+      </a-assets>
+
+      <a-entity id="rig" movement-controls="fly: false; speed: 0.3" position="0 0 0">
+        <a-entity id="camera" 
+                  camera 
+                  position="0 1.6 0" 
+                  look-controls="pointerLockEnabled: true">
+            <a-cursor color="#00fbff" scale="0.5 0.5 0.5"></a-cursor>
+        </a-entity>
+
+        <a-entity oculus-touch-controls="hand: left"></a-entity>
+        <a-entity oculus-touch-controls="hand: right" laser-controls="hand: right"></a-entity>
+      </a-entity>
+
+      <a-box position="0 2 -5" width="12" height="4" depth="0.2" src="#brick-wall" repeat="4 1"></a-box>
+      <a-box position="-6 2 0" rotation="0 90 0" width="10" height="4" depth="0.2" src="#brick-wall"></a-box>
+      <a-box position="6 2 0" rotation="0 90 0" width="10" height="4" depth="0.2" src="#brick-wall"></a-box>
+
+      <a-cylinder position="0 0.7 -8" radius="2" height="0.1" color="#076324">
+        <a-text value="POKER CLUB" align="center" position="0 0.1 0" rotation="-90 0 0" width="6"></a-text>
+      </a-cylinder>
+
+      <a-sphere giveaway-logic position="2 1 -4" radius="0.2" color="#00fbff"></a-sphere>
+
+      <a-plane rotation="-90 0 0" width="50" height="50" color="#1a1a1a"></a-plane>
+
+    </a-scene>
+  </body>
+</html>

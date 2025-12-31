@@ -9,9 +9,7 @@
   </head>
   <body>
     <a-scene renderer="colorManagement: true; foveationLevel: 3; xrCompatible: true">
-      <a-assets>
-        <img id="brick-wall" src="https://cdn.aframe.io/a-painter/images/floor.jpg">
-      </a-assets>
+      <a-assets><img id="brick-wall" src="https://cdn.aframe.io/a-painter/images/floor.jpg"></a-assets>
 
       <a-entity id="rig" movement-controls="controls: gamepad, keyboard; speed: 0.3">
         <a-entity camera position="0 1.6 0" look-controls></a-entity>
@@ -20,22 +18,18 @@
       </a-entity>
 
       <a-box position="0 2 -5" width="10" height="4" depth="0.2" src="#brick-wall" color="#633128"></a-box>
+      <a-box position="-5 2 0" rotation="0 90 0" width="10" height="4" depth="0.2" src="#brick-wall" color="#4a261f"></a-box>
+      <a-box position="5 2 0" rotation="0 90 0" width="10" height="4" depth="0.2" src="#brick-wall" color="#4a261f"></a-box>
 
-      <a-entity position="-2 1 -4">
-        <a-entity class="tshirt" item-display buy-logic data-item="Blue-Tshirt"></a-entity>
-        <a-text value="BLUE SHIRT" position="0 1 0" align="center" width="3"></a-text>
-        <a-text value="500 Chips" position="0 -0.5 0" align="center" width="2" color="#00fbff"></a-text>
+      <a-entity position="-3 1.5 -4.3">
+        <a-entity class="tshirt" item-display buy-logic data-item="BlueShirt" data-color="blue"></a-entity>
+        <a-text value="500c" position="0 -0.5 0" align="center" width="3"></a-text>
       </a-entity>
 
-      <a-entity position="2 1 -4">
-        <a-entity class="guitar" item-display buy-logic data-item="Guitar"></a-entity>
-        <a-text value="GUITAR" position="0 1 0" align="center" width="3"></a-text>
-        <a-text value="1000 Chips" position="0 -0.5 0" align="center" width="2" color="#00fbff"></a-text>
+      <a-text value="YOUR CLOSET" position="3 3.5 -4.3" align="center" width="5"></a-text>
+      <a-entity position="3 1.5 -4.3">
+        <a-entity class="tshirt" item-display equip-logic data-item="BlueShirt" data-color="blue"></a-entity>
       </a-entity>
-
-      <a-box position="4 1 0" width="2" height="3" depth="0.1" color="purple" opacity="0.3">
-        <a-text value="DRESSING ROOM" position="0 1.6 0.1" align="center" width="4"></a-text>
-      </a-box>
 
       <a-box position="0 0.1 4" width="2" height="0.1" depth="1" color="#633128" onclick="window.location.href='index.html'">
         <a-text value="LOBBY" align="center" position="0 0.2 0" rotation="-90 0 0" width="5"></a-text>

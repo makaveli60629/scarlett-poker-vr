@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>VR Poker Hub - Index</title>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+    </style>
+</head>
+<body>
+
+    <a-scene>
+        <a-assets>
+            <img id="brick-wall" src="assets/textures/red_brick.jpg">
+            <img id="table-branding" src="assets/textures/poker_logo.png">
+            <img id="card-skin" src="assets/textures/real_card_faces.jpg">
+            <a-asset-item id="card-model" src="assets/models/low_poly_card.glb"></a-asset-item>
+        </a-assets>
+
+        <a-entity id="rig">
+            <a-camera position="0 1.6 0"></a-camera>
+            <a-entity oculus-touch-controls="hand: left" laser-controls="hand: left" raycaster="objects: .interactable"></a-entity>
+            <a-entity oculus-touch-controls="hand: right" laser-controls="hand: right" raycaster="objects: .interactable"></a-entity>
+        </a-entity>
+
+        <a-entity id="environment">
+            <a-box position="0 2 -5" width="10" height="4" depth="0.1" material="src: #brick-wall; repeat: 4 2"></a-box>
+            
+            <a-entity id="room1" position="-15 0 0">
+                <a-box position="0 2 -5" width="10" height="4" depth="0.1" material="src: #brick-wall"></a-box>
+            </a-entity>
+
+            <a-entity id="room2" position="15 0 0">
+                <a-box position="0 2 -5" width="10" height="4" depth="0.1" material="src: #brick-wall"></a-box>
+            </a-entity>
+
+            <a-entity id="room3" position="0 0 15">
+                <a-box position="0 2 5" width="10" height="4" depth="0.1" material="src: #brick-wall"></a-box>
+            </a-entity>
+        </a-entity>
+
+        <a-cylinder id="pokerTable" position="0 0.8 -3" radius="1.5" height="0.1" color="#076324">
+            <a-image src="#table-branding" rotation="-90 0 0" position="0 0.06 0" width="1" height="1"></a-image>
+            
+            <a-entity id="play-game-trigger" 
+                      geometry="primitive: box; width: 1; height: 0.1; depth: 1" 
+                      position="0 0 1.5" 
+                      material="color: blue; opacity: 0.5"
+                      class="interactable"
+                      onclick="autoSitPlayer()">
+                <a-text value="PLAY GAME" align="center" position="0 0.2 0" scale="0.5 0.5 0.5"></a-text>
+            </a-entity>
+        </a-cylinder>
+
+        <a-box id="backDoor" position="5 1.5 -4.8" width="1.5" height="3" depth="0.1" color="#4a2a00"
+               animation__open="property: rotation; to: 0 90 0; startEvents: click">
+        </a-box>
+
+    </a-scene>
+
+    <script>
+        // BLUE DAILY GIVEAWAY LOGIC
+        const dailyGiveaway = {
+            color: "blue",
+            amount: 500,
+            claim: function() {
+                console.log("Daily chips added to inventory.");
+            }
+        };
+
+        // AUTO-SIT & CARD LOGIC
+        function autoSitPlayer() {
+            const playerRig = document.querySelector('#rig');
+            // Move player to sitting position
+            playerRig.setAttribute('position', '0 0.5 -1.5');
+            console.log("Player Seated. Dealing low-poly (high-fidelity) cards...");
+            spawnCards();
+        }
+
+        function spawnCards() {
+            // Logic to instantiate the low-poly models with real card textures
+        }
+
+        // OCULUS MAPPING LOGIC
+        window.addEventListener('axismove', (e) => {
+            // Handle thumbstick movements for smooth navigation
+        });
+    </script>
+</body>
+</html>

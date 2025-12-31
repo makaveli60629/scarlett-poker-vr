@@ -1,0 +1,55 @@
+<script type="module">
+    import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+    import { VRButton } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/webxr/VRButton.js';
+    
+    // Import your permanent DNA
+    import { initEngine } from './core/engine.js';
+    import { buildPermanentLobby } from './world/lobby.js';
+    import { updateLocomotion } from './core/controls.js';
+
+    let scene, camera, renderer, userRig, portals;
+
+    async function start() {
+        try {
+            // 1. Load the Engine (Creates the UserRig/Body)
+            const engine = initEngine();
+            scene = engine.scene;
+            camera = engine.camera;
+            renderer = engine.renderer;
+            userRig = engine.userRig;
+
+            // 2. Add VR Button for Oculus
+            document.body.appendChild(VRButton.createButton(renderer));
+
+            // 3. Load the Permanent Lobby
+            const lobbyData = buildPermanentLobby(scene);
+            portals = lobbyData.portals;
+
+            // 4. THE MASTER LOOP (Now with Movement)
+            renderer.setAnimationLoop(() => {
+                // Check thumbsticks for movement
+                updateLocomotion(renderer, userRig);
+                
+                // Keep the glowing animations running
+                const time = Date.now() * 0.005;
+                if(portals) {
+                    portals.forEach(p => {
+                        if(p.children[1]) p.children[1].material.opacity = 0.2 + Math.abs(Math.sin(time)) * 0.4;
+                    });
+                }
+
+                renderer.render(scene, camera);
+            });
+
+            document.getElementById('overlay').style.display = 'none';
+
+        } catch (err) {
+            console.error("Initialization Failed:", err);
+            document.getElementById('status').innerText = "ERROR: " + err.message;
+        }
+    }
+
+    document.getElementById('start-btn').onclick = () => {
+        start();
+    };
+</script>

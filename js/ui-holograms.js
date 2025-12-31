@@ -1,16 +1,13 @@
 AFRAME.registerComponent('wallet-hologram-display', {
   init: function () {
-    this.updateDisplay();
-    window.addEventListener('walletUpdated', () => this.updateDisplay());
+    this.update();
+    window.addEventListener('walletUpdated', () => this.update());
   },
-  updateDisplay: function () {
+  update: function () {
     let balance = localStorage.getItem('poker_wallet') || 1000;
     this.el.setAttribute('text', {
-      value: "$" + balance,
-      align: 'center',
-      color: '#00FFFF',
-      width: 6,
-      font: 'exo2bold'
+      value: "MAKAVELI 60629\nBANK: $" + balance,
+      align: 'center', color: '#00FFFF', width: 4
     });
   }
 });

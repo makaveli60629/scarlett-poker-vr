@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Poker VR - v1.3.2 Master Build</title>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-cursor-teleport@1.5.0/dist/aframe-cursor-teleport-component.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
+</head>
+<body>
+    <a-scene renderer="antialias: true; colorManagement: true;" shadow="type: pcfsoft">
+        
+        <a-assets>
+            <a-mixin id="brick-wall" geometry="primitive: box" material="color: #5c2a2a; roughness: 1; metalness: 0;"></a-mixin>
+            <a-mixin id="poker-table" geometry="primitive: cylinder; radius: 1.8; height: 0.15;" material="color: #074a07; roughness: 0.5;"></a-mixin>
+            <a-mixin id="floor-logic" geometry="primitive: plane; width: 100; height: 100" rotation="-90 0 0" material="color: #111; roughness: 1;"></a-mixin>
+        </a-assets>
+
+        <a-entity id="lighting-rig">
+            <a-entity light="type: ambient; intensity: 0.5; color: #bbb"></a-entity>
+            <a-entity light="type: directional; intensity: 0.8; castShadow: true; position: -5 10 5" target="#directionaltarget"></a-entity>
+            <a-entity id="directionaltarget" position="0 0 0"></a-entity>
+            <a-entity light="type: point; intensity: 1; distance: 10; color: #00ffff" position="15 3 -5"></a-entity>
+        </a-entity>
+
+        <a-entity id="rig" position="0 0 5" movement-controls="fly: false; speed: 0.2">
+            <a-camera id="camera" look-controls="pointerLockEnabled: true">
+                <a-cursor color="yellow"></a-cursor>
+            </a-camera>
+            <a-entity id="leftHand" oculus-touch-controls="hand: left" teleport-controls="button: trigger; collisionEntities: .nav-mesh; cameraRig: #rig; teleportOrigin: #camera;"></a-entity>
+            <a-entity id="rightHand" oculus-touch-controls="hand: right" teleport-controls="button: trigger; collisionEntities: .nav-mesh; cameraRig: #rig; teleportOrigin: #camera;"></a-entity>
+        </a-entity>
+
+        <a-entity id="lobby">
+            <a-entity class="nav-mesh" mixin="floor-logic" shadow="receive: true"></a-entity>
+            
+            <a-box position="0 2.5 -10" width="20" height="5" depth="0.5" mixin="brick-wall" shadow></a-box>
+            <a-box position="-10 2.5 0" rotation="0 90 0" width="20" height="5" depth="0.5" mixin="brick-wall" shadow></a-box>
+            <a-box position="10 2.5 0" rotation="0 -90 0" width="20" height="5" depth="0.5" mixin="brick-wall" shadow></a-box>
+
+            <a-text value="ELITE LOBBY" align="center" position="0 4 -9.5" color="#FFD700" width="10"></a-text>
+
+            <a-entity id="daily-pick-area" position="-4 1 -5">
+                <a-entity mixin="poker-table" shadow></a-entity>
+                <a-cylinder radius="0.2" height="1" position="0 -0.5 0" color="#222"></a-cylinder>
+                <a-text value="DAILY PICK" align="center" position="0 1.5 0" color="cyan" width="5"></a-text>
+                <a-cylinder id="blue-chip" class="clickable" position="0 0.15 0" radius="0.2" height="0.08" color="blue"
+                            animation="property: rotation; to: 0 360 0; loop: true; dur: 5000"
+                            onclick="claimDaily()"></a-cylinder>
+            </a-entity>
+
+            <a-entity position="6 0 -6">
+                <a-text value="THE ZONE" align="center" position="0 3 0" color="#00ffff"></a-text>
+                <a-entity id="wallet-hologram" position="0 1.8 0">
+                    <a-text id="wallet-val" value="WALLET: $2500" align="center" color="white" width="6"></a-text>
+                    <a-plane width="1.5" height="0.5" material="color: #00ffff; opacity: 0.1; transparent: true"></a-plane>
+                </a-entity>
+                <a-box class="clickable" position="0 0.5 0" width="1.5" height="0.2" depth="1.5" color="#00ff00" opacity="0.6"
+                       onclick="moveToZone()">
+                    <a-text value="GO TO TABLES" align="center" position="0 0.6 0"></a-text>
+                </a-box>
+            </a-entity>
+        </a-entity>
+
+        <a-entity id="tables-room" position="100 0 0">
+            <a-entity class="nav-mesh" mixin="floor-logic" material="color: #050505"></a-entity>
+            <a-box position="0 2.5 -10" width="20" height="5" depth="0.5" mixin="brick-wall" shadow></a-box>
+            
+            <a-text value="PLANE TABLES ZONE" align="center" position="0 4.5 -9" color="#00ffff" width="12"></a-text>
+
+            <a-entity id="poker-table-main" position="0 1 -4">
+                <a-entity mixin="poker-table" shadow></a-entity>
+                <a-cylinder radius="0.4" height="1" position="0 -0.5 0" color="#111"></a-cylinder>
+                <a-text value="V I P  P O K E R" align="center" position="0 0.08 0" rotation="-90 0 0" color="gold" width="6"></a-text>
+
+                <a-entity id="win-popup" visible="false" position="0 2 0">
+                    <a-text id="win-message" value="PLAYER 1 WINS" align="center" color="yellow" width="12"></a-text>
+                    <a-light type="spot" color="white" intensity="2" position="0 2 0"></a-light>
+                </a-entity>
+            </a-entity>
+
+            <a-box id="play-btn" class="clickable" position="0 0.5 -1.5" width="1" height="0.1" depth="1" color="green"
+                   onclick="sitDownPlayer()">
+                <a-text value="PLAY GAME" align="center" position="0 0.6 0"></a-text>
+            </a-box>
+
+            <a-box class="clickable" position="-7 1 -8" width="1.5" height="2" depth="0.2" color="red" onclick="moveToLobby()">
+                <a-text value="EXIT" align="center" position="0 0 0.15"></a-text>
+            </a-box>
+        </a-entity>
+
+    </a-scene>
+
+    <script>
+        let wallet = 2500;
+
+        function claimDaily() {
+            let amount = Math.floor(Math.random() * (5000 - 500 + 1)) + 500;
+            wallet += amount;
+            document.querySelector('#wallet-val').setAttribute('value', 'WALLET: $' + wallet);
+            console.log("Collected Daily: $" + amount);
+        }
+
+        function moveToZone() {
+            document.querySelector('#rig').setAttribute('position', '100 0 5');
+        }
+
+        function moveToLobby() {
+            document.querySelector('#rig').setAttribute('position', '0 0 5');
+        }
+
+        function sitDownPlayer() {
+            // Auto-sit logic: moves rig to the table edge
+            document.querySelector('#rig').setAttribute('position', '100 0 -2.5');
+            
+            // Show a test win after 3 seconds
+            setTimeout(() => {
+                announceWinner("YOU", 3500);
+            }, 3000);
+        }
+
+        function announceWinner(player, pot) {
+            const winEl = document.querySelector('#win-popup');
+            const winTxt = document.querySelector('#win-message');
+            winTxt.setAttribute('value', player + " WON THE POT\n$" + pot);
+            winEl.setAttribute('visible', 'true');
+            
+            setTimeout(() => {
+                winEl.setAttribute('visible', 'false');
+            }, 10000);
+        }
+    </script>
+</body>
+</html>

@@ -1,28 +1,31 @@
-function initGame() {
-    const savedWallet = localStorage.getItem('poker_wallet');
-    if (savedWallet) GAME_CONFIG.player.wallet = parseInt(savedWallet);
-    updateWalletUI();
-}
-
 function updateWalletUI() {
-    const display = document.querySelector('#wallet-display');
-    if(display) display.setAttribute('value', `WALLET: $${GAME_CONFIG.player.wallet}`);
+    const el = document.querySelector('#wallet-hologram');
+    if(el) el.setAttribute('value', `WALLET: ${GAME_CONFIG.settings.currencySymbol}${walletBalance}`);
+    localStorage.setItem('poker_wallet', walletBalance);
 }
 
-function autoSitScorpion() {
+function sitDown(room) {
     const rig = document.querySelector('#rig');
-    // Teleport directly to the seat
-    rig.setAttribute('position', GAME_CONFIG.player.scorpionSeat);
+    const pos = (room === 'scorpion') ? GAME_CONFIG.player.seatScorpion : GAME_CONFIG.player.seatLobby;
+    rig.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
     
-    // Show winning hand logic (10 seconds)
-    const winUI = document.querySelector('#win-popup');
-    winUI.setAttribute('visible', 'true');
-    setTimeout(() => { winUI.setAttribute('visible', 'false'); }, 10000);
+    // Trigger Win Display for 10 seconds if sitting at a table
+    if(room === 'scorpion') {
+        const winUI = document.querySelector('#win-letters');
+        winUI.setAttribute('visible', 'true');
+        setTimeout(() => { winUI.setAttribute('visible', 'false'); }, GAME_CONFIG.settings.winDisplayTime);
+    }
 }
 
 function claimDaily() {
-    const win = (Math.floor(Math.random() * 10) + 1) * 500;
-    GAME_CONFIG.player.wallet += win;
-    localStorage.setItem('poker_wallet', GAME_CONFIG.player.wallet);
+    const win = Math.floor(Math.random() * 10 + 1) * GAME_CONFIG.rooms.lobby.increment;
+    walletBalance += win;
     updateWalletUI();
+    alert(`You claimed ${win}!`);
+}
+
+function toggleMenu() {
+    const menu = document.querySelector('#player-menu');
+    const isVisible = menu.getAttribute('visible');
+    menu.setAttribute('visible', !isVisible);
 }

@@ -1,90 +1,109 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Poker VR - Update 1.3 Store & Logic</title>
+    <title>Poker VR - Update 1.3 Final Build</title>
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <script src="https://unpkg.com/aframe-environment-component@1.3.2/dist/aframe-environment-component.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/n5ro/aframe-physics-system@v4.0.1/dist/aframe-physics-system.min.js"></script>
   </head>
   <body>
     <a-scene physics="debug: false">
       <a-assets>
-        <img id="casinoArt1" src="https://i.imgur.com/your-casino-art-1.jpg" crossorigin="anonymous">
-        <img id="brickTexture" src="https://i.imgur.com/8X8hIqB.jpg" crossorigin="anonymous">
-        <img id="tableLogo" src="https://i.imgur.com/your-logo.png" crossorigin="anonymous">
+        <img id="feltTexture" src="table_felt.jpg" crossorigin="anonymous">
+        <img id="woodTexture" src="wood_grain.jpg" crossorigin="anonymous">
+        <img id="leatherTexture" src="leather_armrest.jpg" crossorigin="anonymous">
+        <img id="metalTexture" src="brushed_metal.jpg" crossorigin="anonymous">
+        
+        <img id="brickWall" src="https://i.imgur.com/8X8hIqB.jpg" crossorigin="anonymous">
+        <img id="casinoArt" src="https://i.imgur.com/v8p0O8N.jpg" crossorigin="anonymous">
+        
+        <audio id="lobbyMusic" src="lobby_ambience.mp3" preload="auto"></audio>
       </a-assets>
 
-      <a-entity environment="preset: moonlight; groundColor: #1a1a1a; grid: none"></a-entity>
-      <a-light type="ambient" intensity="0.5"></a-light>
-      <a-light type="directional" position="1 5 1" intensity="0.8"></a-light>
+      <a-entity environment="preset: midnight; groundColor: #1a1a1a; grid: none"></a-entity>
+      <a-entity sound="src: #lobbyMusic; autoplay: true; loop: true; volume: 0.3"></a-entity>
 
-      <a-entity id="store-building" position="0 0 -10">
-        <a-plane rotation="-90 0 0" width="20" height="20" color="#222" static-body></a-plane>
-        
-        <a-box position="0 2.5 -10" width="20" height="5" depth="0.5" color="#5c2a2a" static-body>
-            <a-image src="#casinoArt1" position="0 0 0.26" width="4" height="3"></a-image>
+      <a-entity id="building-core">
+        <a-plane rotation="-90 0 0" width="40" height="40" color="#222" static-body></a-plane>
+        <a-box position="0 5 0" width="40" height="0.1" depth="40" color="#111" static-body></a-box>
+
+        <a-box position="0 2.5 -10" width="20" height="5" depth="0.5" src="#brickWall" repeat="5 2" static-body>
+            <a-image src="#casinoArt" position="0 0.5 0.31" width="6" height="3.5"></a-image>
         </a-box>
+        <a-box position="0 2.5 10" width="20" height="5" depth="0.5" src="#brickWall" repeat="5 2" static-body></a-box>
+        <a-box position="-10 2.5 0" rotation="0 90 0" width="20" height="5" depth="0.5" src="#brickWall" repeat="5 2" static-body></a-box>
+        <a-box position="10 2.5 0" rotation="0 90 0" width="20" height="5" depth="0.5" src="#brickWall" repeat="5 2" static-body></a-box>
 
-        <a-box position="0 2.5 10" width="20" height="5" depth="0.5" color="#5c2a2a" static-body></a-box>
-
-        <a-box position="-10 2.5 0" rotation="0 90 0" width="20" height="5" depth="0.5" color="#5c2a2a" static-body></a-box>
-
-        <a-box position="10 2.5 0" rotation="0 90 0" width="20" height="5" depth="0.5" color="#5c2a2a" static-body></a-box>
-
-        <a-box position="0 5 0" width="20" height="0.2" depth="20" color="#111" static-body></a-box>
-
-        <a-entity id="crown-display" position="0 0 0">
-            <a-cylinder position="0 0.5 0" radius="0.5" height="1" color="#333" static-body></a-cylinder>
-            
-            <a-entity id="crown-item" position="0 1.3 0" animation="property: rotation; to: 0 360 0; loop: true; dur: 5000; easing: linear">
-                <a-torus radius="0.2" tube="0.02" color="gold" material="transparent: true; opacity: 0.8; metalness: 1; roughness: 0.1"></a-torus>
-                <a-cone position="0.15 0.1 0" radius-bottom="0.02" height="0.2" color="gold" material="transparent: true; opacity: 0.7"></a-cone>
-                <a-cone position="-0.15 0.1 0" radius-bottom="0.02" height="0.2" color="gold" material="transparent: true; opacity: 0.7"></a-cone>
-                <a-cone position="0 0.1 0.15" radius-bottom="0.02" height="0.2" color="gold" material="transparent: true; opacity: 0.7"></a-cone>
-                <a-cone position="0 0.1 -0.15" radius-bottom="0.02" height="0.2" color="gold" material="transparent: true; opacity: 0.7"></a-cone>
-                
-                <a-text value="CROWN: $2500" align="center" position="0 0.5 0" width="2" color="yellow"></a-text>
+        <a-entity id="crown-display" position="-6 0 -6">
+            <a-cylinder height="1" radius="0.4" color="#111" static-body></a-cylinder>
+            <a-entity position="0 1.3 0" animation="property: rotation; to: 0 360 0; loop: true; dur: 8000">
+                <a-torus radius="0.2" tube="0.015" color="gold" material="transparent: true; opacity: 0.6; metalness: 1"></a-torus>
+                <a-cone position="0.15 0.12 0" radius-bottom="0.02" height="0.25" color="gold" material="transparent: true; opacity: 0.5"></a-cone>
+                <a-cone position="-0.15 0.12 0" radius-bottom="0.02" height="0.25" color="gold" material="transparent: true; opacity: 0.5"></a-cone>
+                <a-text value="ELITE CROWN" align="center" position="0 0.5 0" width="2" color="gold"></a-text>
             </a-entity>
         </a-entity>
 
-        <a-entity id="daily-pick-zone" position="5 0 -5">
-            <a-box width="2" height="1" depth="1" color="#004dcf">
-                <a-text value="DAILY GIVEAWAY" align="center" position="0 0.6 0" width="3"></a-text>
-                <a-text id="daily-amount" value="PICK: $500 - $5000" align="center" position="0 0.4 0" width="2"></a-text>
+        <a-entity id="daily-pick" position="6 0 -6">
+            <a-box width="2" height="1" depth="1.2" color="#004dcf" static-body>
+                <a-text value="DAILY PICK" align="center" position="0 0.6 0" width="4"></a-text>
+                <a-text value="$500 - $5000" align="center" position="0 0.3 0" width="3"></a-text>
             </a-box>
         </a-entity>
       </a-entity>
 
-      <a-entity id="wallet-hologram" position="0 2.5 -5">
-          <a-text value="TABLES ZONE ROOM" align="center" position="0 0.5 0" color="#00ffff"></a-text>
-          <a-text id="wallet-display" value="WALLET: $1500" align="center" color="#00ff00" scale="1.5 1.5 1.5"></a-text>
+      <a-entity position="0 0 -12">
+          <a-text value="TABLES ZONE ROOM" position="0 3.5 0" align="center" color="cyan" width="8"></a-text>
+          <a-text id="wallet-hologram" value="WALLET: $1500" position="0 2.8 0" align="center" color="#00FF00" width="6" scale="1.2 1.2 1.2"></a-text>
       </a-entity>
 
-      <a-entity id="rig" movement-controls position="0 0 0">
-        <a-camera position="0 1.6 0">
-            <a-cursor color="#FF0000"></a-cursor>
-        </a-camera>
+      <a-entity id="poker-table" position="0 0 -22">
+          <a-cylinder id="poker-felt" radius="1.5" height="0.1" scale="1.8 1 1" src="#feltTexture" static-body></a-cylinder>
+          <a-cylinder id="poker-frame" position="0 -0.05 0" radius="1.6" height="0.1" scale="1.8 1 1" src="#woodTexture"></a-cylinder>
+          <a-torus id="poker-rim" rotation="90 0 0" position="0 0.05 0" radius="1.5" tube="0.12" scale="1.8 1 1" src="#leatherTexture"></a-torus>
+          <a-plane position="1.8 0.06 0" rotation="-90 0 0" width="0.5" height="0.5" src="#metalTexture"></a-plane>
+          
+          <a-entity id="win-display" position="0 2.5 0" visible="false">
+              <a-text id="win-name" value="" align="center" color="yellow" width="10" scale="1.5 1.5 1.5"></a-text>
+              <a-text id="win-cards" value="" align="center" position="0 -0.7 0" color="white" width="6"></a-text>
+          </a-entity>
+      </a-entity>
+
+      <a-entity id="rig" movement-controls position="0 0 5">
+        <a-camera position="0 1.6 0"><a-cursor></a-cursor></a-camera>
         <a-entity oculus-touch-controls="hand: left"></a-entity>
         <a-entity oculus-touch-controls="hand: right"></a-entity>
       </a-entity>
     </a-scene>
 
     <script>
-      // LOGIC FOR DAILY GIVEAWAY & STORE
-      const walletDisplay = document.querySelector('#wallet-display');
-      let currentWallet = 1500;
+      // Automatic Seating / Play Game Trigger
+      setInterval(() => {
+        let rig = document.querySelector('#rig');
+        let tablePos = new THREE.Vector3(0, 0, -22);
+        if (rig.getAttribute('position').distanceTo(tablePos) < 4) {
+          rig.setAttribute('position', {x: 0, y: -0.4, z: -20}); // Move to seated position
+          console.log("Joined Table: Dealing Cards...");
+        }
+      }, 1000);
 
-      function updateWallet(amount) {
-          currentWallet += amount;
-          walletDisplay.setAttribute('value', `WALLET: $${currentWallet}`);
+      // Winning Hand Logic (10 Second Display)
+      function onWin(winner, handType) {
+        const winEl = document.querySelector('#win-display');
+        document.querySelector('#win-name').setAttribute('value', winner + " WINS!");
+        document.querySelector('#win-cards').setAttribute('value', handType);
+        
+        winEl.setAttribute('visible', 'true');
+        setTimeout(() => {
+          winEl.setAttribute('visible', 'false');
+        }, 10000); // 10 second timer [cite: 2025-12-31]
       }
 
-      // Logic for the Daily Pick increments ($500 - $5000)
-      document.querySelector('#daily-pick-zone').addEventListener('click', () => {
-          let win = Math.floor(Math.random() * 10) + 1;
-          let prize = win * 500;
-          alert("You won the Daily Pick: $" + prize);
-          updateWallet(prize);
+      // Daily Pick Logic
+      document.querySelector('#daily-pick').addEventListener('click', () => {
+        let winAmount = (Math.floor(Math.random() * 10) + 1) * 500;
+        alert("Daily Pick Success! You received: $" + winAmount);
       });
     </script>
   </body>

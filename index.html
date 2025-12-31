@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Brick Club VR - Master Lobby</title>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
+        #overlay { position: absolute; width: 100%; height: 100%; display: flex; 
+                   justify-content: center; align-items: center; background: #000; z-index: 100; color: #ffd700; }
+        button { padding: 25px 50px; font-size: 24px; background: #8B0000; color: white; border-radius: 50px; border: 2px solid gold; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div id="overlay"><button id="start-btn">ENTER PERMANENT LOBBY</button></div>
+
+    <script type="module">
+        import { initEngine } from './core/engine.js';
+        import { buildPermanentLobby } from './world/lobby.js';
+        import { setupOculus, updateLocomotion } from './core/controls.js';
+        import { setupPermanentStore } from './features/store.js';
+
+        let scene, camera, renderer, userRig, portals, storeItem;
+
+        async function start() {
+            // 1. Start Engine (The Heart)
+            const engine = initEngine();
+            scene = engine.scene; camera = engine.camera;
+            renderer = engine.renderer; userRig = engine.userRig;
+
+            // 2. Load Permanent DNA (The Layout)
+            const lobbyData = buildPermanentLobby(scene);
+            portals = lobbyData.portals;
+            storeItem = setupPermanentStore(scene);
+            setupOculus(renderer, scene, userRig);
+
+            // 3. The Master Loop (The Animation)
+            renderer.setAnimationLoop(() => {
+                const time = Date.now() * 0.005;
+
+                // Update Movement
+                updateLocomotion(renderer, userRig);
+                
+                // Pulse Portals & Store Glow
+                portals.forEach(p => p.children[1].material.opacity = 0.2 + Math.abs(Math.sin(time)) * 0.4);
+                if(storeItem) storeItem.material.emissiveIntensity = 0.5 + Math.abs(Math.sin(time)) * 1.5;
+
+                renderer.render(scene, camera);
+            });
+        }
+
+        document.getElementById('start-btn').onclick = () => {
+            document.getElementById('overlay').style.display = 'none';
+            start();
+        };
+    </script>
+</body>
+</html>

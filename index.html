@@ -2,48 +2,56 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Poker VR Final 1.6.5</title>
+    <title>Poker VR 1.7.2 - Full Control Update</title>
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
     <script src="https://unpkg.com/aframe-environment-component@1.3.2/dist/aframe-environment-component.min.js"></script>
     <script src="logic.js"></script>
     <script src="particles.js"></script>
 </head>
 <body>
-    <a-scene renderer="antialias: true; colorManagement: true;" shadow="type: pcfsoft">
+    <a-scene renderer="antialias: true; colorManagement: true;">
         
         <a-assets timeout="10000">
             <img id="tex-wall" src="assets/textures/brick_wall.jpg">
             <img id="tex-felt" src="assets/textures/poker_table_brand.jpg">
-            <img id="tex-floor" src="assets/textures/floor_wood.jpg">
+            <img id="tex-carpet" src="assets/textures/lobby_carpet.jpg">
         </a-assets>
 
-        <a-sky color="#87CEEB"></a-sky> <a-entity environment="preset: goldmine; lighting: point; shadow: true; dressingAmount: 0"></a-entity>
+        <a-entity environment="preset: starry; ground: none; lighting: point;"></a-entity>
+        <a-light type="ambient" intensity="0.7"></a-light>
 
-        <a-entity id="room">
-            <a-plane position="0 0 0" rotation="-90 0 0" width="50" height="50" src="#tex-floor" repeat="10 10"></a-plane>
-            <a-box position="0 2.5 -15" width="30" height="10" depth="0.5" src="#tex-wall"></a-box>
-        </a-entity>
+        <a-plane id="game-floor" 
+                 position="0 -0.01 0" 
+                 rotation="-90 0 0" 
+                 width="20" height="20" 
+                 src="#tex-carpet" 
+                 repeat="5 5"
+                 material="roughness: 1; metalness: 0">
+        </a-plane>
 
-        <a-entity id="poker-table" position="0 0 -8">
-            <a-cylinder radius="2.5" height="0.8" src="#tex-felt" shadow></a-cylinder>
-            <a-entity id="win-ui" position="0 2.5 0" visible="false">
-                <a-text id="win-text" value="WINNER" align="center" color="gold" width="8"></a-text>
+        <a-box position="0 2.5 -10" width="20" height="5" depth="0.1" visible="false" static-body></a-box>
+        <a-box position="0 2.5 10" width="20" height="5" depth="0.1" visible="false" static-body></a-box>
+        <a-box position="10 2.5 0" rotation="0 90 0" width="20" height="5" depth="0.1" visible="false" static-body></a-box>
+        <a-box position="-10 2.5 0" rotation="0 90 0" width="20" height="5" depth="0.1" visible="false" static-body></a-box>
+
+        <a-entity id="poker-table" position="0 0.8 -4">
+            <a-cylinder radius="2" height="0.1" src="#tex-felt" material="emissive: #fff; emissiveIntensity: 0.1"></a-cylinder>
+            
+            <a-entity id="win-ui" position="0 2 0" visible="false">
+                <a-text id="win-text" value="WINNER" align="center" color="gold" width="6"></a-text>
             </a-entity>
         </a-entity>
 
-        <a-box id="play-zone" position="0 0.01 -4" width="2" height="0.1" depth="2" color="cyan" opacity="0.5">
-            <a-text value="WALK HERE TO PLAY" align="center" position="0 1.5 0" color="#fff"></a-text>
-        </a-box>
-
-        <a-entity id="rig" position="0 0 5"> <a-camera id="player-cam" look-controls wasd-controls>
+        <a-entity id="rig" movement-controls="speed: 0.2; fly: false;" position="0 0 5">
+            <a-camera id="player-cam" look-controls wasd-controls position="0 1.6 0">
                 <a-cursor color="yellow"></a-cursor>
             </a-camera>
             
-            <a-entity id="leftHand" oculus-touch-controls="hand: left" raycaster="objects: .interactable" line="color: red"></a-entity>
-            <a-entity id="rightHand" oculus-touch-controls="hand: right" raycaster="objects: .interactable" line="color: red"></a-entity>
+            <a-entity oculus-touch-controls="hand: left"></a-entity>
+            <a-entity oculus-touch-controls="hand: right"></a-entity>
         </a-entity>
 
-        <a-entity mega-particles position="0 8 -8"></a-entity>
     </a-scene>
 </body>
 </html>

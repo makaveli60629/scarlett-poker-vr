@@ -1,34 +1,36 @@
-body { margin: 0; background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+body { margin: 0; background: #000; overflow: hidden; font-family: 'Orbitron', sans-serif; }
 
-/* 1.5.1 MEGA Win Announcement */
-#win-announcement {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    text-align: center;
-    color: #ffd700;
-    text-shadow: 0 0 30px #ffaa00, 0 0 60px #fff;
-    display: none;
-    z-index: 1000;
-    pointer-events: none;
-}
-
-#win-announcement h1 { font-size: 8rem; margin: 0; animation: megaPulse 1s infinite alternate; }
-
-/* Improved Hologram (Analysis) */
 #lobby-hologram {
     position: absolute;
-    bottom: 50px;
-    right: 50px;
-    padding: 20px;
-    border-right: 4px solid #00ffcc;
-    background: linear-gradient(to left, rgba(0, 255, 204, 0.2), transparent);
-    color: #00ffcc;
-    text-align: right;
+    bottom: 5%;
+    right: 5%;
+    z-index: 10;
 }
 
-@keyframes megaPulse {
-    from { transform: translate(-50%, -50%) scale(1); opacity: 0.8; }
-    to { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
+.glass-panel {
+    background: rgba(0, 255, 204, 0.05);
+    border: 1px solid rgba(0, 255, 204, 0.3);
+    padding: 30px;
+    border-radius: 15px;
+    backdrop-filter: blur(10px);
+    color: #00ffcc;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 0 20px rgba(0, 255, 204, 0.2);
+}
+
+.scan-line {
+    position: absolute;
+    top: -100%;
+    left: 0;
+    width: 100%;
+    height: 10px;
+    background: linear-gradient(to bottom, transparent, #00ffcc, transparent);
+    opacity: 0.5;
+    animation: scan 4s linear infinite;
+}
+
+@keyframes scan {
+    0% { top: -100%; }
+    100% { top: 200%; }
 }

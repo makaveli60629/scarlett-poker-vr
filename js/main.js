@@ -1,106 +1,79 @@
 import * as THREE from 'three';
-import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
+import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerModelFactory.js';
 
-const App = {
-    scene: null,
-    camera: null,
-    renderer: null,
-    player: new THREE.Group(),
-    controllers: [],
-    isSeated: false,
+let scene, camera, renderer, playerRig;
+let controller1, controller2;
 
-    init() {
-        this.setupScene();
-        this.createEnvironment(); 
-        this.setupControls();
-        this.animate();
-        
-        // Ensure VR Button is available for Oculus
-        document.body.appendChild(VRButton.createButton(this.renderer));
-    },
+init().catch(err => {
+    document.getElementById('status').innerText = "Error: " + err.message;
+});
 
-    setupScene() {
-        this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x0a0a0a); // Deep dark lobby
+async function init() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0a1a);
 
-        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        
-        // FIX: Spawning you at Z: 5 so you aren't inside the wall or the gray disc
-        this.player.position.set(0, 1.6, 5); 
-        this.player.add(this.camera);
-        this.scene.add(this.player);
+    // RIG SETUP: Moves you AWAY from the table center to avoid the "inside table" black screen
+    playerRig = new THREE.Group();
+    camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
+    playerRig.add(camera);
+    playerRig.position.set(0, 0, 2); // 2 meters back
+    scene.add(playerRig);
 
-        this.renderer = new THREE.WebGLRenderer({ antialias: true });
-        this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.xr.enabled = true;
-        document.getElementById('canvas-container').appendChild(this.renderer.domElement);
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    document.body.appendChild(renderer.domElement);
 
-        // Lighting to see the "Lively" background
-        const sun = new THREE.DirectionalLight(0xffffff, 1);
-        sun.position.set(5, 10, 7.5);
-        this.scene.add(sun);
-        this.scene.add(new THREE.AmbientLight(0x404040, 2));
-    },
+    // ADD VR BUTTON
+    const vrButton = VRButton.createButton(renderer);
+    document.body.appendChild(vrButton);
+    document.getElementById('status').innerText = "Ready for VR";
 
-    createEnvironment() {
-        // The Lobby - Brick Texture logic from 1.4 will be applied here
-        const roomGeo = new THREE.BoxGeometry(30, 15, 60);
-        const roomMat = new THREE.MeshStandardMaterial({ color: 0x333333, side: THREE.BackSide });
-        const lobby = new THREE.Mesh(roomGeo, roomMat);
-        this.scene.add(lobby);
+    // LIGHTING
+    scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
-        // THE POKER TABLE (The gray disc)
-        const tableGeo = new THREE.CylinderGeometry(2.5, 2.5, 0.2, 32);
-        const tableMat = new THREE.MeshStandardMaterial({ color: 0x1a4a1a }); // Green Felt
-        const table = new THREE.Mesh(tableGeo, tableMat);
-        table.position.set(0, 0.9, -5); // Positioned in front of spawn
-        this.scene.add(table);
-    },
+    // CARPET (Solid Red for Stability)
+    const floor = new THREE.Mesh(
+        new THREE.PlaneGeometry(20, 20),
+        new THREE.MeshStandardMaterial({ color: 0x800000 })
+    );
+    floor.rotation.x = -Math.PI / 2;
+    scene.add(floor);
 
-    setupControls() {
-        // 1. OCULUS CONTROLS (Always kept in history)
-        for (let i = 0; i < 2; i++) {
-            const controller = this.renderer.xr.getController(i);
-            this.player.add(controller);
-            this.controllers.push(controller);
-            
-            // Hand Mesh Placeholders
-            const hand = new THREE.Mesh(
-                new THREE.BoxGeometry(0.1, 0.1, 0.15),
-                new THREE.MeshBasicMaterial({ color: 0x00ffff })
-            );
-            controller.add(hand);
-        }
+    // POKER TABLE
+    const table = new THREE.Mesh(
+        new THREE.CylinderGeometry(1.2, 1.2, 0.2, 32),
+        new THREE.MeshStandardMaterial({ color: 0x004400 })
+    );
+    table.position.y = 0.7;
+    scene.add(table);
 
-        // 2. FLAT SCREEN FIX: WASD & Mouse Look logic
-        window.addEventListener('keydown', (e) => {
-            if (this.isSeated) return;
-            const speed = 0.3;
-            if (e.key.toLowerCase() === 'w') this.player.position.z -= speed;
-            if (e.key.toLowerCase() === 's') this.player.position.z += speed;
-            if (e.key.toLowerCase() === 'a') this.player.position.x -= speed;
-            if (e.key.toLowerCase() === 'd') this.player.position.x += speed;
+    setupControllers();
+    renderer.setAnimationLoop(render);
+}
 
-            // Trigger "Play Game" Auto-Seat
-            if (this.player.position.distanceTo(new THREE.Vector3(0, 1.6, -5)) < 3) {
-                this.sitDown();
-            }
-        });
-    },
+function setupControllers() {
+    const factory = new XRControllerModelFactory();
+    
+    controller1 = renderer.xr.getController(0);
+    playerRig.add(controller1);
+    const grip1 = renderer.xr.getControllerGrip(0);
+    grip1.add(factory.createControllerModel(grip1));
+    playerRig.add(grip1);
 
-    sitDown() {
-        if (this.isSeated) return;
-        this.isSeated = true;
-        // Snap to table position
-        this.player.position.set(0, 1.1, -3.5); 
-        console.log("Automatically seated. Initializing winning hand logic...");
-    },
+    controller2 = renderer.xr.getController(1);
+    playerRig.add(controller2);
+    const grip2 = renderer.xr.getControllerGrip(1);
+    grip2.add(factory.createControllerModel(grip2));
+    playerRig.add(grip2);
+}
 
-    animate() {
-        this.renderer.setAnimationLoop(() => {
-            this.renderer.render(this.scene, this.camera);
-        });
+function render() {
+    // Auto-Sit Logic (If you walk to the table, you sit)
+    if (playerRig.position.z < 1.3) {
+        playerRig.position.y = -0.4;
     }
-};
-
-App.init();
+    renderer.render(scene, camera);
+}

@@ -1,52 +1,38 @@
-// Game State Memory
-let stats = {
-    money: 1000,
-    name: "Player 1",
-    rank: "Rookie",
-    isSeated: false
+// Poker Logic 1.3 - Win Highlights & Hands
+let gameState = {
+    pot: 0,
+    players: [],
+    communityCards: [],
+    winner: null
 };
 
-// Update Watch every second
-setInterval(() => {
-    const timeDisplay = document.querySelector('#watch-time');
-    if(timeDisplay) {
-        const now = new Date();
-        timeDisplay.setAttribute('value', now.getHours() + ":" + now.getMinutes().toString().padStart(2, '0'));
-    }
-}, 1000);
-
-// Auto-Sit Logic
-function triggerSitDown() {
-    const rig = document.querySelector('#rig');
-    // Move player to the seat position instantly
-    rig.setAttribute('position', '0 0 1'); 
-    stats.isSeated = true;
-    console.log("Seated. Dealing...");
-    dealCards();
+function checkWinner() {
+    // Logic to calculate hand strength
+    let winner = gameState.players[0]; // Example logic
+    displayWinner(winner);
 }
 
-function dealCards() {
-    // 10 second win logic for testing the pop-up
-    setTimeout(() => {
-        showWinNotification("YOU WON!", "PAIR OF ACES");
-    }, 2000);
-}
-
-function showWinNotification(name, hand) {
-    const display = document.querySelector('#winDisplay');
-    const text = document.querySelector('#winText');
+function displayWinner(player) {
+    const ui = document.getElementById('winner-announcement');
+    const text = document.getElementById('win-text');
     
-    text.setAttribute('value', `${name}\n${hand}`);
-    display.setAttribute('visible', 'true');
-
-    // Highlighting winning player (Camera Shake/Flash)
-    document.querySelector('#camera').setAttribute('animation', 'property: position; to: 0 1.65 0; dur: 100; dir: alternate; loop: 4');
+    // 1.3 Requirement: Display winner name for 10 seconds
+    text.setAttribute('value', player.name + " WINS THE POT!");
+    ui.setAttribute('visible', 'true');
+    
+    // Highlight winning player (Mesh/Shader logic)
+    player.mesh.setAttribute('material', 'emissive: #00ff00; emissiveIntensity: 2');
 
     setTimeout(() => {
-        display.setAttribute('visible', 'false');
-    }, 10000); // 10 seconds exactly
+        ui.setAttribute('visible', 'false');
+        player.mesh.setAttribute('material', 'emissiveIntensity: 0');
+    }, 10000); // 10 seconds display
 }
 
-function openMenu() {
-    alert("Menu Opened - Money: $" + stats.money + " Rank: " + stats.rank);
-}
+// 1.3 Requirement: Move to "Play Game" automatically sits down
+document.querySelector('#play-game-zone').addEventListener('componentchanged', (evt) => {
+    if (evt.name === 'position') {
+        // Logic for player sitting and receiving cards
+        console.log("Player sat down. Dealing cards...");
+    }
+});

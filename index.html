@@ -1,21 +1,30 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Scarlett Poker VR 1.6 - Master Build</title>
-    <style>body { margin: 0; overflow: hidden; background: #000; }</style>
-</head>
-<body>
-    <div id="canvas-container"></div>
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-            }
-        }
-    </script>
-    <script type="module" src="./js/app.js"></script>
-</body>
+<html>
+  <head>
+    <title>Scarlett Poker VR - Update 1.5.2</title>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <script src="js/world-builder.js"></script>
+    <script src="js/poker-logic.js"></script>
+    <script src="js/oculus-controls.js"></script>
+  </head>
+  <body>
+    <a-scene renderer="antialias: true; colorManagement: true;">
+      <a-assets>
+        <img id="floorTex" src="assets/textures/Checker floor.jpg">
+        <img id="wallTex" src="assets/textures/brick_wall.jpg"> </a-assets>
+
+      <a-sky color="#87CEEB"></a-sky> 
+      <a-entity light="type: ambient; intensity: 0.7"></a-entity>
+      <a-entity light="type: directional; intensity: 0.6; castShadow: true" position="-1 4 3"></a-entity>
+
+      <a-entity id="rig" position="0 0 0" oculus-height-fix>
+        <a-camera id="playerCamera" look-controls wasd-controls position="0 1.6 0"></a-camera>
+        <a-entity oculus-touch-controls="hand: left"></a-entity>
+        <a-entity oculus-touch-controls="hand: right" oculus-interaction-handler></a-entity>
+      </a-entity>
+
+      <a-entity world-builder></a-entity>
+
+    </a-scene>
+  </body>
 </html>

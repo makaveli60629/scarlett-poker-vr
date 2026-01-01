@@ -10,8 +10,6 @@ const App = {
     init() {
         this.scene = new THREE.Scene();
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        
-        // Spawn Point
         this.player.position.set(0, 1.6, 8); 
         this.player.add(this.camera);
         this.scene.add(this.player);
@@ -19,8 +17,6 @@ const App = {
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.xr.enabled = true;
-        this.renderer.setPixelRatio(window.devicePixelRatio);
-        
         document.getElementById('canvas-container').appendChild(this.renderer.domElement);
         document.body.appendChild(VRButton.createButton(this.renderer));
 
@@ -33,15 +29,9 @@ const App = {
         for (let i = 0; i < 2; i++) {
             const controller = this.renderer.xr.getController(i);
             this.player.add(controller);
-            
-            // Hand Meshes
-            const hand = new THREE.Mesh(
-                new THREE.BoxGeometry(0.1, 0.1, 0.1),
-                new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true })
-            );
+            const hand = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true }));
             controller.add(hand);
 
-            // Oculus Trigger Movement
             controller.addEventListener('selectstart', () => {
                 if(!this.isSeated) {
                     const dir = new THREE.Vector3();
@@ -62,15 +52,13 @@ const App = {
 
     showWinner(name, hand) {
         const div = document.createElement('div');
-        div.style.cssText = "position:fixed; top:20%; width:100%; text-align:center; color:#00FF00; font-size:40px; font-family:Arial; text-shadow: 2px 2px #000; z-index:999;";
+        div.style.cssText = "position:fixed; top:20%; width:100%; text-align:center; color:#00FF00; font-size:40px; font-family:Arial; z-index:999;";
         div.innerHTML = `WINNER: ${name}<br>${hand}`;
         document.body.appendChild(div);
-        setTimeout(() => div.remove(), 10000); // 10-Second rule
+        setTimeout(() => div.remove(), 10000); //
     },
 
-    render() {
-        this.renderer.render(this.scene, this.camera);
-    }
+    render() { this.renderer.render(this.scene, this.camera); }
 };
 
 App.init();

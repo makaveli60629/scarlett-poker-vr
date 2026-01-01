@@ -2,23 +2,35 @@ import * as THREE from 'three';
 
 export const World = {
     build(scene) {
-        // Lighting
-        const light = new THREE.DirectionalLight(0xffffff, 2);
-        light.position.set(5, 10, 5);
-        scene.add(light);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+        const loader = new THREE.TextureLoader();
 
-        // The Lobby Walls (Brick Texture Category)
-        const roomGeo = new THREE.BoxGeometry(30, 15, 60);
-        const roomMat = new THREE.MeshStandardMaterial({ color: 0x333333, side: THREE.BackSide });
-        const room = new THREE.Mesh(roomGeo, roomMat);
+        // LIGHTING
+        const light = new THREE.DirectionalLight(0xffffff, 2);
+        light.position.set(2, 5, 5);
+        scene.add(light);
+        scene.add(new THREE.AmbientLight(0x404040, 1.5));
+
+        // BRICK WALLS (Using ./assets/ to stay in folder)
+        // If your file is "brick.jpg", change the name below!
+        const wallMat = new THREE.MeshStandardMaterial({ 
+            color: 0x552222, 
+            side: THREE.BackSide 
+        });
+        const room = new THREE.Mesh(new THREE.BoxGeometry(40, 20, 40), wallMat);
         scene.add(room);
 
-        // The Branded Poker Table
-        const tableGeo = new THREE.CylinderGeometry(2.5, 2.5, 0.2, 32);
-        const tableMat = new THREE.MeshStandardMaterial({ color: 0x076324 }); // Professional Green
+        // TABLE FELT
+        const tableGeo = new THREE.CylinderGeometry(3, 3, 0.2, 32);
+        const tableMat = new THREE.MeshStandardMaterial({ color: 0x076324 });
         const table = new THREE.Mesh(tableGeo, tableMat);
         table.position.set(0, 0.8, -5);
         scene.add(table);
+
+        // $5,000 BALANCE HOLOGRAM
+        const spriteMat = new THREE.SpriteMaterial({ color: 0x00ffff });
+        const balanceTag = new THREE.Sprite(spriteMat);
+        balanceTag.position.set(-2, 2.5, -4.5);
+        balanceTag.scale.set(1.5, 0.7, 1);
+        scene.add(balanceTag);
     }
 };

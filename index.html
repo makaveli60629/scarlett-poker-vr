@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Scarlett Poker VR - Update 1.3.5</title>
+    <title>Scarlett Poker VR - 1.3.7 Multi-Room</title>
     <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
+    <script src="https://rawgit.com/fernandojsg/aframe-teleport-controls/master/dist/aframe-teleport-controls.min.js"></script>
     <script src="js/world-builder.js"></script>
     <script src="js/oculus-controls.js"></script>
   </head>
@@ -13,21 +14,25 @@
       <a-assets>
         <img id="carpetTex" src="assets/textures/lobby_carpet.jpg">
         <img id="brickTex" src="assets/textures/brickwall.jpg">
+        <img id="logoTex" src="assets/textures/brand_logo.jpg">
         <img id="artTex" src="assets/textures/casino_art.jpg">
         <img id="feltTex" src="assets/textures/table_felt_green.jpg">
+        <img id="stoneTex" src="assets/textures/wall_stone_runes.jpg">
       </a-assets>
 
       <a-sky color="#87CEEB"></a-sky>
       <a-entity light="type: hemisphere; intensity: 1.2"></a-entity>
-      <a-entity light="type: directional; intensity: 0.5" position="1 4 3"></a-entity>
 
-      <a-entity id="rig" position="2 0 4" movement-controls="speed: 0.2;">
-        <a-camera id="playerCamera" look-controls position="0 1.6 0">
-            <a-entity text="value: WALLET: $5,000; align: center; color: #00FFFF; width: 3;" 
-                      position="0 -0.5 -1.2" rotation="-15 0 0"></a-entity>
-        </a-camera>
-        <a-entity oculus-touch-controls="hand: left"></a-entity>
-        <a-entity oculus-touch-controls="hand: right" oculus-interaction-handler></a-entity>
+      <a-entity id="rig" position="0 0 4">
+        <a-camera id="playerCamera" look-controls position="0 1.6 0"></a-camera>
+        
+        <a-entity id="leftHand" oculus-touch-controls="hand: left" teleport-controls="cameraRig: #rig; teleportOrigin: #playerCamera; button: trigger; type: parabolic; collisionEntities: .nav-mesh, .floor">
+            <a-box position="0 0.05 0.1" scale="0.1 0.02 0.1" color="#333">
+                <a-entity text="value: $5,000; color: #00FFFF; align: center; width: 1.5;" position="0 0.02 0" rotation="-90 0 0"></a-entity>
+            </a-box>
+        </a-entity>
+
+        <a-entity id="rightHand" oculus-touch-controls="hand: right" oculus-interaction-handler></a-entity>
       </a-entity>
 
       <a-entity world-builder></a-entity>

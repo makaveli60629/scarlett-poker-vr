@@ -6,22 +6,24 @@
     <title>Poker VR 1.38 Stability</title>
     <style>
         body { margin: 0; padding: 0; overflow: hidden; background-color: #000; }
-        #win-display {
+        /* Win Popup: 10 second duration requirement */
+        #win-popup {
             position: absolute;
-            top: 20%;
+            top: 25%;
             width: 100%;
             text-align: center;
-            color: gold;
-            font-family: 'Arial', sans-serif;
-            font-size: 4rem;
+            color: #FFD700;
+            font-family: 'Arial Black', sans-serif;
+            font-size: 5vw;
             display: none;
-            z-index: 100;
+            z-index: 1000;
             pointer-events: none;
+            text-shadow: 4px 4px 15px rgba(0,0,0,1);
         }
     </style>
 </head>
 <body>
-    <div id="win-display">WINNER!</div>
+    <div id="win-popup">WINNER!</div>
     <script type="importmap">
         {
             "imports": {

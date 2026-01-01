@@ -3,24 +3,29 @@ import * as THREE from 'three';
 export const World = {
     build(scene) {
         const loader = new THREE.TextureLoader();
-        const path = '../assets/textures/'; // Correctly jumps out of js/ folder
+        const path = '../assets/textures/'; // Direct pathing from assets
 
-        // 1. LIGHTING
-        scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-        const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-        sun.position.set(0, 10, 5);
-        scene.add(sun);
+        // 1. PERMANENT STADIUM LIGHTING (5 High-Altitude Points)
+        const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
+        scene.add(hemi);
+
+        const lightPositions = [[18, 18, 18], [-18, 18, 18], [18, 18, -18], [-18, 18, -18], [0, 18, -5]];
+        lightPositions.forEach(pos => {
+            const light = new THREE.PointLight(0xffffff, 500, 100);
+            light.position.set(pos[0], pos[1], pos[2]);
+            scene.add(light);
+        });
 
         // 2. THE LOBBY CARPET (lobby_carpet.jpg)
         const carpetTex = loader.load(`${path}lobby_carpet.jpg`);
         carpetTex.wrapS = carpetTex.wrapT = THREE.RepeatWrapping;
-        carpetTex.repeat.set(1, 4);
+        carpetTex.repeat.set(2, 6);
         const carpet = new THREE.Mesh(
-            new THREE.PlaneGeometry(8, 20),
+            new THREE.PlaneGeometry(10, 30),
             new THREE.MeshStandardMaterial({ map: carpetTex })
         );
         carpet.rotation.x = -Math.PI / 2;
-        carpet.position.set(0, 0.01, 5);
+        carpet.position.set(0, 0.02, 5);
         scene.add(carpet);
 
         // 3. BRICK WALLS (brickwall.jpg)
@@ -34,31 +39,30 @@ export const World = {
         walls.position.y = 10;
         scene.add(walls);
 
-        // 4. THE POKER TABLE (table_felt_green.jpg)
+        // 4. THE POKER STORE TABLE (table_felt_green.jpg)
         const tableTex = loader.load(`${path}table_felt_green.jpg`);
         const table = new THREE.Mesh(
-            new THREE.CylinderGeometry(3, 3, 0.4, 32),
+            new THREE.CylinderGeometry(3.5, 3.5, 0.5, 32),
             new THREE.MeshStandardMaterial({ map: tableTex })
         );
         table.position.set(0, 0.8, -5);
         scene.add(table);
 
-        // 5. BRAND LOGO (brand_logo.jpg)
+        // 5. STORE OPTIONS LOBBY (Branding)
         const logoTex = loader.load(`${path}brand_logo.jpg`);
         const logo = new THREE.Mesh(
-            new THREE.CircleGeometry(0.7, 32),
+            new THREE.CircleGeometry(0.8, 32),
             new THREE.MeshBasicMaterial({ map: logoTex, transparent: true })
         );
-        logo.rotation.x = -Math.PI / 2;
-        logo.position.set(0, 0.821, -5);
+        logo.rotation.x = -Math.PI/2;
+        logo.position.set(0, 0.83, -5);
         scene.add(logo);
-        
-        // 6. WALLET HOLOGRAM UI
+
+        // 6. WALLET UI (ui_winner_hologram.jpg)
         const holoTex = loader.load(`${path}ui_winner_hologram.jpg`);
-        const spriteMat = new THREE.SpriteMaterial({ map: holoTex, color: 0x00ffff });
-        const balanceTag = new THREE.Sprite(spriteMat);
-        balanceTag.position.set(-2.5, 2.5, -4.5);
-        balanceTag.scale.set(1.5, 0.7, 1);
-        scene.add(balanceTag);
+        const holo = new THREE.Sprite(new THREE.SpriteMaterial({ map: holoTex, color: 0x00ffff }));
+        holo.position.set(-2.5, 2.2, -4.5);
+        holo.scale.set(1.5, 0.7, 1);
+        scene.add(holo);
     }
 };

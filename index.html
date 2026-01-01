@@ -2,31 +2,69 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Scorpion VR 1.5 Billion</title>
-    <style>body { margin: 0; overflow: hidden; background: #000; }</style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poker VR - Update 1.5 Official</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        
+        /* Zone Room Wallet Hologram UI */
+        #vr-ui-overlay {
+            position: absolute;
+            top: 50px;
+            left: 50px;
+            color: #00ffcc;
+            pointer-events: none;
+            text-shadow: 0 0 15px #00ffcc;
+            background: rgba(0, 255, 204, 0.1);
+            padding: 20px;
+            border-left: 5px solid #00ffcc;
+            display: block;
+        }
+
+        /* Update 1.5: 10-Second Win Display */
+        #win-announcement {
+            position: absolute;
+            top: 40%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 60px;
+            font-weight: bold;
+            color: #ffd700;
+            text-align: center;
+            display: none;
+            z-index: 100;
+            text-shadow: 0 0 30px rgba(255, 215, 0, 0.8);
+            pointer-events: none;
+        }
+
+        #win-hand-details {
+            font-size: 24px;
+            color: #fff;
+            display: block;
+            margin-top: 10px;
+        }
+    </style>
 </head>
 <body>
+    <div id="vr-ui-overlay">
+        <h2 style="margin:0;">LOBBY ZONE</h2>
+        <div style="font-size: 1.5em;">WALLET: $<span id="balance">5000.00</span></div>
+        <p>Walk to Table to Start</p>
+    </div>
+
+    <div id="win-announcement">
+        <div id="winner-name">PLAYER 1 WINS</div>
+        <div id="win-hand-details">FULL HOUSE (ACES OVER EIGHTS)</div>
+    </div>
+    
     <script type="importmap">
-        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
-    </script>
-    <script type="module">
-        import { initEngine } from './engine.js';
-        import { buildArena } from './world.js';
-        import { createCards } from './cards.js';
-        import { setupControls } from './controls.js';
-
-        async function start() {
-            const engine = initEngine();
-            const world = buildArena(engine.scene);
-            const cards = createCards(engine.scene);
-            const controls = setupControls(engine, world, cards);
-
-            engine.renderer.setAnimationLoop(() => {
-                controls.update();
-                engine.renderer.render(engine.scene, engine.camera);
-            });
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
         }
-        start().catch(err => console.error("VR Boot Failed:", err));
     </script>
+    <script type="module" src="main.js"></script>
 </body>
 </html>

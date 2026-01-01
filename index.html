@@ -1,32 +1,30 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Scarlett Poker VR - Stable Update 1.5.2</title>
+    <title>Scarlett Poker VR - Update 1.3.5</title>
     <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
     <script src="js/world-builder.js"></script>
     <script src="js/oculus-controls.js"></script>
   </head>
   <body>
-    <a-scene renderer="antialias: true; colorManagement: true; exposure: 1.2;">
+    <a-scene renderer="antialias: true; colorManagement: true;">
       
       <a-assets>
-        <img id="floorTex" src="assets/textures/Checker floor.jpg">
-        <img id="wallTex" src="assets/textures/brick_wall.jpg">
-        <a-mixin id="hologramFont" text="align: center; color: #00FFFF; width: 4;"></a-mixin>
+        <img id="carpetTex" src="assets/textures/lobby_carpet.jpg">
+        <img id="brickTex" src="assets/textures/brickwall.jpg">
+        <img id="artTex" src="assets/textures/casino_art.jpg">
+        <img id="feltTex" src="assets/textures/table_felt_green.jpg">
       </a-assets>
 
-      <a-sky color="#87CEEB"></a-sky> 
-      <a-entity light="type: hemisphere; color: #FFF; groundColor: #444; intensity: 1.5"></a-entity>
-      <a-entity light="type: directional; intensity: 0.8; castShadow: true" position="-1 10 3"></a-entity>
+      <a-sky color="#87CEEB"></a-sky>
+      <a-entity light="type: hemisphere; intensity: 1.2"></a-entity>
+      <a-entity light="type: directional; intensity: 0.5" position="1 4 3"></a-entity>
 
-      <a-entity id="rig" position="2 0 3" oculus-height-fix>
-        <a-camera id="playerCamera" look-controls wasd-controls position="0 1.6 0">
-            <a-entity id="wallet-display" 
-                      mixin="hologramFont" 
-                      text="value: WALLET: $5,000" 
-                      position="0 -0.5 -1.5" 
-                      rotation="-20 0 0">
-            </a-entity>
+      <a-entity id="rig" position="2 0 4" movement-controls="speed: 0.2;">
+        <a-camera id="playerCamera" look-controls position="0 1.6 0">
+            <a-entity text="value: WALLET: $5,000; align: center; color: #00FFFF; width: 3;" 
+                      position="0 -0.5 -1.2" rotation="-15 0 0"></a-entity>
         </a-camera>
         <a-entity oculus-touch-controls="hand: left"></a-entity>
         <a-entity oculus-touch-controls="hand: right" oculus-interaction-handler></a-entity>

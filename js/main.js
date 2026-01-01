@@ -1,18 +1,18 @@
 // =========================================================
-// SCARLETT POKER VR - MAIN LOGIC (UPDATE 1.5.1)
+// SCARLETT POKER VR - MASTER LOGIC (UPDATE 1.5.1)
 // =========================================================
 
-// --- 1. GLOBAL ASSETS & TEXTURE LOADING ---
+// --- 1. ASSET & TEXTURE INITIALIZATION ---
 const textureLoader = new THREE.TextureLoader();
-const path = 'assets/textures/'; // Based on your GitHub folder structure
+const path = 'assets/textures/';
 
 const textures = {
-    // Chips (From your Asset Folder)
-    chip1000: textureLoader.load(path + 'chip_1000.jpg'),
-    chip5000: textureLoader.load(path + 'chip_5000.jpg'),
-    chip10000: textureLoader.load(path + 'chip_10000.jpg'),
+    // Poker Chips
+    chip1k: textureLoader.load(path + 'chip_1000.jpg'),
+    chip5k: textureLoader.load(path + 'chip_5000.jpg'),
+    chip10k: textureLoader.load(path + 'chip_10000.jpg'),
     
-    // Environment & Table Surfaces
+    // Environment & Table
     felt: textureLoader.load(path + 'table_felt_green.jpg'),
     stoneWall: textureLoader.load(path + 'wall_stone_runes.jpg'),
     brickWall: textureLoader.load(path + 'brickwall.jpg'),
@@ -29,62 +29,81 @@ const textures = {
 };
 
 // --- 2. OCULUS VR CONTROLLER SETUP ---
-// Integrated to ensure Quest/Oculus compatibility
-const controller1 = renderer.xr.getController(0);
-const controller2 = renderer.xr.getController(1);
+const controller1 = renderer.xr.getController(0); // Left
+const controller2 = renderer.xr.getController(1); // Right
 scene.add(controller1, controller2);
 
-// --- 3. AUTO-SEATING & CARD DEALING LOGIC ---
-// Triggered when player moves to the 'Play Game' zone
-function checkZoneInteraction(playerVector) {
-    const playTriggerZone = new THREE.Vector3(0, 0, -3); 
-    
-    if (playerVector.distanceTo(playTriggerZone) < 1.5) {
-        autoSitPlayer();
+// --- 3. AUTO-SEATING & ZONE LOGIC ---
+function checkPlayerMovement(playerPos) {
+    const seatZone = new THREE.Vector3(0, 0, -2); // The "Play Game" spot
+    if (playerPos.distanceTo(seatZone) < 1.2) {
+        playerSitAndDeal();
     }
 }
 
-function autoSitPlayer() {
-    console.log("Player seated: Dispensing cards...");
-    // Logic for card meshes appearing in front of player
+function playerSitAndDeal() {
+    console.log("Automatic Seating Triggered. Dealing cards...");
+    // Seat height adjustment for VR
+    camera.position.y = 1.1; 
 }
 
-// --- 4. WINNER NOTIFICATION (10-SECOND LOGIC) ---
-// Highlighting player and showing the win indicator
-function displayWinnerSequence(winningMesh) {
-    // A. Highlight Player (Update 1.3 Requirement)
-    winningMesh.material.emissive.setHex(0x00ff00); 
+// --- 4. WINNER DISPLAY (STRICT 10-SECOND RULE) ---
+function handleWinnerSequence(playerMesh) {
+    // 1. Highlight Winning Player
+    playerMesh.material.emissive.setHex(0x00ff00); 
 
-    // B. Create Winner UI Hologram
-    const spriteMaterial = new THREE.SpriteMaterial({ 
+    // 2. Floating Winner Sprite
+    const spriteMat = new THREE.SpriteMaterial({ 
         map: textures.winnerUI, 
-        transparent: true,
+        transparent: true, 
         blending: THREE.AdditiveBlending 
     });
-    const winnerSprite = new THREE.Sprite(spriteMaterial);
-    
-    // Position 1.8 units above winning player
-    winnerSprite.position.set(winningMesh.position.x, 1.8, winningMesh.position.z);
+    const winnerSprite = new THREE.Sprite(spriteMat);
+    winnerSprite.position.set(playerMesh.position.x, 2.0, playerMesh.position.z);
     winnerSprite.scale.set(2, 1, 1);
     scene.add(winnerSprite);
 
-    // C. 10-Second Countdown to Removal
+    // 3. 10-Second Timer
     setTimeout(() => {
         scene.remove(winnerSprite);
-        winningMesh.material.emissive.setHex(0x000000); // Remove highlight
+        playerMesh.material.emissive.setHex(0x000000);
     }, 10000);
 }
 
-// --- 5. INITIALIZE WORLD MATERIALS ---
-function applyWorldTextures() {
-    // Apply Stone Runes to the high-stakes room
-    const stoneRoomMat = new THREE.MeshStandardMaterial({ map: textures.stoneWall });
-    
-    // Apply Brick to the Lobby
-    const lobbyWallMat = new THREE.MeshStandardMaterial({ map: textures.brickWall });
-    
-    // Apply Green Felt to the main table
-    const tableSurfaceMat = new THREE.MeshStandardMaterial({ map: textures.felt });
+// --- 5. LOBBY STORE & DAILY PICK ($500 - $5000) ---
+let currentDailyReward = 500;
+
+function claimDailyPick() {
+    if (currentDailyReward <= 5000) {
+        console.log(`Reward Claimed: $${currentDailyReward}`);
+        showCrownEffect();
+        currentDailyReward += 500; // Increment for next visit
+    }
 }
 
-// --- END OF MAIN.JS ---
+function showCrownEffect() {
+    const crownMat = new THREE.SpriteMaterial({ map: textures.crown, transparent: true });
+    const crown = new THREE.Sprite(crownMat);
+    crown.position.set(0, 2.5, -4);
+    scene.add(crown);
+    setTimeout(() => scene.remove(crown), 3000);
+}
+
+// --- 6. UPDATE 1.5 CONFIGURATION (The 20 Variables) ---
+// Use these to tune the game feel manually
+const gameConfig = {
+    cardFriction: 0.05,
+    cardGravity: -9.8,
+    chipStackHeight: 0.02,
+    dealSpeed: 1.5,
+    lightingIntensity: 1.2,
+    bloomStrength: 0.5,
+    tableReflection: 0.1,
+    // ... add your remaining 13 config points here
+};
+
+// --- 7. RENDER LOOP INTERACTION ---
+function update() {
+    // Raycaster for Oculus interaction with Daily Claim
+    // (Logic for trigger presses goes here)
+}

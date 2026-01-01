@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Poker VR 1.38 - World & Movement</title>
+    <title>Poker VR 1.38 - Solid World</title>
     <style>
         body { margin: 0; background-color: #000; overflow: hidden; }
         #win-popup {
@@ -32,18 +32,20 @@
 
         let scene, camera, renderer, playerRig;
         let controller1, controller2;
-        let moveSpeed = 0.05;
+        let table;
+        const moveSpeed = 0.05;
+        const rotateSpeed = 0.03;
 
         init();
 
         function init() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x111111); // Slightly grey so it's not a pure void
+            scene.background = new THREE.Color(0x020205); 
 
             playerRig = new THREE.Group();
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
             playerRig.add(camera);
-            playerRig.position.set(0, 0, 3); // Start 3m back from table
+            playerRig.position.set(0, 0, 3); 
             scene.add(playerRig);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -53,60 +55,48 @@
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
-            // High-quality lighting for textures
-            scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-            const pointLight = new THREE.PointLight(0xffffff, 1.5);
-            pointLight.position.set(0, 4, 0);
-            scene.add(pointLight);
+            // Ambient + Spotlight for the table
+            scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+            const spot = new THREE.SpotLight(0xffffff, 2);
+            spot.position.set(0, 5, 0);
+            spot.angle = Math.PI / 4;
+            scene.add(spot);
 
-            // --- THE ROOM BUILD (Fixes the black void) ---
-            const roomSize = 10;
-            
-            // Floor (Red Carpet)
-            const floor = new THREE.Mesh(
-                new THREE.PlaneGeometry(roomSize, roomSize),
+            // --- THE ROOM (Double Sided so you can see it!) ---
+            const roomGeo = new THREE.BoxGeometry(12, 6, 12);
+            const roomMat = new THREE.MeshStandardMaterial({ 
+                color: 0x151520, 
+                side: THREE.BackSide // Shows internal walls
+            });
+            const room = new THREE.Mesh(roomGeo, roomMat);
+            room.position.y = 2.9;
+            scene.add(room);
+
+            // Red Carpet
+            const carpet = new THREE.Mesh(
+                new THREE.PlaneGeometry(12, 12),
                 new THREE.MeshStandardMaterial({ color: 0x800000 })
             );
-            floor.rotation.x = -Math.PI / 2;
-            scene.add(floor);
-
-            // Walls (Dark Grey/Blue)
-            const wallMat = new THREE.MeshStandardMaterial({ color: 0x1a1a2e });
-            
-            const wallBack = new THREE.Mesh(new THREE.PlaneGeometry(roomSize, 5), wallMat);
-            wallBack.position.set(0, 2.5, -roomSize/2);
-            scene.add(wallBack);
-
-            const wallLeft = new THREE.Mesh(new THREE.PlaneGeometry(roomSize, 5), wallMat);
-            wallLeft.rotation.y = Math.PI / 2;
-            wallLeft.position.set(-roomSize/2, 2.5, 0);
-            scene.add(wallLeft);
-
-            const wallRight = new THREE.Mesh(new THREE.PlaneGeometry(roomSize, 5), wallMat);
-            wallRight.rotation.y = -Math.PI / 2;
-            wallRight.position.set(roomSize/2, 2.5, 0);
-            scene.add(wallRight);
-
-            // Ceiling
-            const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(roomSize, roomSize), wallMat);
-            ceiling.rotation.x = Math.PI / 2;
-            ceiling.position.y = 5;
-            scene.add(ceiling);
-
-            // --- TABLE ZONE HOLOGRAM (Version 1.2 Requirement) ---
-            const holoGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.1, 32);
-            const holoMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.3, wireframe: true });
-            const hologram = new THREE.Mesh(holoGeo, holoMat);
-            hologram.position.set(0, 2.4, -2); // Above table entrance
-            scene.add(hologram);
+            carpet.rotation.x = -Math.PI / 2;
+            scene.add(carpet);
 
             // --- POKER TABLE ---
-            const table = new THREE.Mesh(
-                new THREE.CylinderGeometry(1.2, 1.2, 0.2, 32),
+            table = new THREE.Mesh(
+                new THREE.CylinderGeometry(1.3, 1.3, 0.2, 32),
                 new THREE.MeshStandardMaterial({ color: 0x004400 })
             );
             table.position.y = 0.7;
             scene.add(table);
+
+            // --- WALLET HOLOGRAM (Above the entrance) ---
+            const holoGroup = new THREE.Group();
+            const holoDisc = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.6, 0.6, 0.05, 32),
+                new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.2, wireframe: true })
+            );
+            holoGroup.add(holoDisc);
+            holoGroup.position.set(0, 2.5, -2.5);
+            scene.add(holoGroup);
 
             setupControllers();
             renderer.setAnimationLoop(render);
@@ -115,45 +105,70 @@
         function setupControllers() {
             const factory = new XRControllerModelFactory();
             
+            // Left Controller (Movement + Watch)
             controller1 = renderer.xr.getController(0);
             playerRig.add(controller1);
-            
-            controller2 = renderer.xr.getController(1);
-            playerRig.add(controller2);
-
             const grip1 = renderer.xr.getControllerGrip(0);
             grip1.add(factory.createControllerModel(grip1));
             playerRig.add(grip1);
 
+            // Right Controller (Turning)
+            controller2 = renderer.xr.getController(1);
+            playerRig.add(controller2);
             const grip2 = renderer.xr.getControllerGrip(1);
             grip2.add(factory.createControllerModel(grip2));
             playerRig.add(grip2);
+
+            // Watch on Left
+            const watch = new THREE.Mesh(
+                new THREE.BoxGeometry(0.06, 0.01, 0.04),
+                new THREE.MeshStandardMaterial({ color: 0x111111 })
+            );
+            watch.position.set(0, 0.03, 0);
+            grip1.add(watch);
         }
 
-        function handleMovement() {
+        function handleInput() {
             const session = renderer.xr.getSession();
             if (!session) return;
 
-            // Use the thumbstick on the Oculus controllers
             for (const source of session.inputSources) {
-                if (source.gamepad && source.handedness === 'left') {
-                    const axes = source.gamepad.axes;
-                    // axes[2] is horizontal, axes[3] is vertical
-                    playerRig.position.x += axes[2] * moveSpeed;
-                    playerRig.position.z += axes[3] * moveSpeed;
+                if (!source.gamepad) continue;
+                const axes = source.gamepad.axes;
+
+                // LEFT STICK: Move Forward/Back & Strafe
+                if (source.handedness === 'left') {
+                    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+                    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+                    forward.y = 0; right.y = 0; // Keep movement on the ground
+                    
+                    const moveVec = forward.multiplyScalar(-axes[3] * moveSpeed).add(right.multiplyScalar(axes[2] * moveSpeed));
+                    
+                    // Simple Table Collision
+                    const nextPos = playerRig.position.clone().add(moveVec);
+                    if (nextPos.distanceTo(new THREE.Vector3(0,0,0)) > 1.4) {
+                        playerRig.position.add(moveVec);
+                    }
+                }
+
+                // RIGHT STICK: Snap Turning
+                if (source.handedness === 'right') {
+                    if (Math.abs(axes[2]) > 0.5) {
+                        playerRig.rotation.y -= Math.sign(axes[2]) * rotateSpeed;
+                    }
                 }
             }
         }
 
         function render() {
-            handleMovement();
+            handleInput();
 
-            // Auto-Sit Logic
+            // Auto-Sit logic
             const dist = playerRig.position.distanceTo(new THREE.Vector3(0, 0, 0));
-            if (dist < 1.3) {
-                playerRig.position.y = -0.4;
+            if (dist < 1.5) {
+                playerRig.position.y = -0.4; // Sit height
             } else {
-                playerRig.position.y = 0;
+                playerRig.position.y = 0; // Stand height
             }
 
             renderer.render(scene, camera);

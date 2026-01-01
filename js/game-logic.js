@@ -1,78 +1,40 @@
-// --- Poker Game Logic Update 1.3 ---
+window.pokerLogic = {
+    startDeal: function() {
+        // Logic for Update 1.3 low-poly cards
+        console.log("Cards Dealt to Player");
+    },
+    triggerWin: function(winnerID, handDescription) {
+        // Winning player highlight logic
+        const winner = document.querySelector(winnerID);
+        winner.setAttribute('material', 'emissive: #00FF00; emissiveIntensity: 0.5');
 
-const gameState = {
-    isPlayerSeated: false,
-    pot: 0,
-    deck: [],
-    playerHand: [],
-    communityCards: [],
-    winningMessage: ""
-};
+        // 10 Second Pop-up UI
+        const potLabel = document.createElement('a-entity');
+        potLabel.setAttribute('geometry', 'primitive: plane; width: 3; height: 1');
+        potLabel.setAttribute('material', 'color: black; opacity: 0.8');
+        potLabel.setAttribute('text', {
+            value: "WINNER: " + handDescription,
+            align: 'center',
+            width: 6,
+            color: '#00FF00'
+        });
+        potLabel.setAttribute('position', '0 2.5 -3');
+        document.querySelector('a-scene').appendChild(potLabel);
 
-// 1. Oculus Control Mapping
-document.addEventListener('DOMContentLoaded', () => {
-    const rig = document.querySelector('#rig');
-    const playTrigger = document.querySelector('#play-trigger');
-    const winDisplay = document.querySelector('#win-display');
-    const winText = document.querySelector('#win-text');
-
-    // Check for "Play Game" proximity
-    setInterval(() => {
-        const playerPos = rig.getAttribute('position');
-        const triggerPos = playTrigger.getAttribute('position');
-        
-        const dist = Math.sqrt(
-            Math.pow(playerPos.x - triggerPos.x, 2) + 
-            Math.pow(playerPos.z - triggerPos.z, 2)
-        );
-
-        if (dist < 1 && !gameState.isPlayerSeated) {
-            sitDownAndStart();
-        }
-    }, 500);
-
-    function sitDownAndStart() {
-        gameState.isPlayerSeated = true;
-        // Snap player to table position
-        rig.setAttribute('position', '0 0 -2.5');
-        console.log("Player seated. Dealing cards...");
-        dealInitialHand();
-    }
-
-    // 2. Win Display Logic (10 Second Rule)
-    window.displayWinner = function(winnerName, handDescription) {
-        winText.setAttribute('value', `${winnerName} WINS!\n${handDescription}`);
-        winDisplay.setAttribute('scale', '1 1 1'); // Make visible
-        
-        // Highlight logic (Visual change to player position)
-        // In 1.4 this will trigger a shader glow
-        
+        // Remove after 10 seconds exactly
         setTimeout(() => {
-            winDisplay.setAttribute('scale', '0 0 0'); // Hide after 10 seconds
+            potLabel.remove();
+            winner.setAttribute('material', 'emissiveIntensity: 0');
         }, 10000);
-    };
-
-    // 3. Controller Input Handlers
-    const rightHand = document.querySelector('#rightHand');
-    rightHand.addEventListener('abuttondown', () => {
-        console.log("A Button Pressed: Call/Check");
-    });
-    
-    rightHand.addEventListener('bbuttondown', () => {
-        console.log("B Button Pressed: Fold");
-    });
-});
-
-function dealInitialHand() {
-    // Basic logic for Update 1.3
-    gameState.playerHand = ["As", "Ks"]; // Example: Ace/King of Spades
-    console.log("Hand Dealt: ", gameState.playerHand);
-}
-
-// Module for Hand Evaluation (to be expanded)
-const PokerEngine = {
-    evaluate: (hand, community) => {
-        // Logic for identifying winning hands
-        return "Royal Flush"; 
     }
 };
+
+AFRAME.registerComponent('daily-pick-logic', {
+    init: function() {
+        this.el.addEventListener('click', () => {
+            let rewards = [500, 1000, 2500, 5000];
+            let win = rewards[Math.floor(Math.random() * rewards.length)];
+            alert("Daily Reward: $" + win + " added to chips!");
+        });
+    }
+});

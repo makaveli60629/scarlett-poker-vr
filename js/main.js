@@ -2,16 +2,17 @@ import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 
-class PokerMegaUpdate {
+class PokerFidelity16 {
     constructor() {
         this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(0x010103);
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         this.clock = new THREE.Clock();
         
-        // 1.5.1 Mega Particles Group
-        this.particleGroup = new THREE.Group();
-        this.scene.add(this.particleGroup);
+        this.userGroup = new THREE.Group();
+        this.scene.add(this.userGroup);
+        this.userGroup.add(this.camera);
 
         this.init();
     }
@@ -20,106 +21,81 @@ class PokerMegaUpdate {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.xr.enabled = true;
         document.body.appendChild(this.renderer.domElement);
-        
-        // Ensure VR Button is Visible and Functional
-        const vrBtn = VRButton.createButton(this.renderer);
-        vrBtn.style.background = "#00ffcc";
-        vrBtn.style.color = "#000";
-        document.body.appendChild(vrBtn);
+        document.body.appendChild(VRButton.createButton(this.renderer));
 
-        // Position Camera so you aren't inside a wall (Fixes Black Screen)
-        this.camera.position.set(0, 1.6, 3); 
+        // --- 1000x LIGHTING UPDATE ---
+        this.scene.add(new THREE.AmbientLight(0x404040, 2)); // High fill light
+        const spot = new THREE.SpotLight(0xffffff, 10);
+        spot.position.set(0, 5, -4);
+        spot.castShadow = true;
+        this.scene.add(spot);
 
-        this.createEnvironment();
-        this.setupOculusControls();
-        this.createMegaParticles(); // Update 1.5.1 Feature
-
+        this.setupEnvironment();
+        this.setupOculusHaptics();
         this.renderer.setAnimationLoop(() => this.update());
     }
 
-    createEnvironment() {
-        // Lights
-        const sun = new THREE.DirectionalLight(0xffffff, 1);
-        sun.position.set(5, 10, 7.5);
-        this.scene.add(sun, new THREE.AmbientLight(0x404040, 2));
-
-        // Use your assets: Checker floor.jpg
+    setupEnvironment() {
         const loader = new THREE.TextureLoader();
-        const floorTex = loader.load('../Checker floor.jpg');
+        
+        // Floor (Checker)
         const floor = new THREE.Mesh(
-            new THREE.PlaneGeometry(50, 50),
-            new THREE.MeshStandardMaterial({ map: floorTex })
+            new THREE.PlaneGeometry(40, 40),
+            new THREE.MeshStandardMaterial({ map: loader.load('../Checker floor.jpg') })
         );
         floor.rotation.x = -Math.PI / 2;
         this.scene.add(floor);
 
-        // Poker Table with your Felt asset
-        const feltTex = loader.load('../poker_felt_scarlett.jpg');
+        // Poker Table (Felt)
         const table = new THREE.Mesh(
             new THREE.CylinderGeometry(2, 2, 0.2, 64),
-            new THREE.MeshStandardMaterial({ map: feltTex })
+            new THREE.MeshStandardMaterial({ map: loader.load('../poker_felt_scarlett.jpg') })
         );
-        table.position.set(0, 0.8, -4);
+        table.position.set(0, 0.9, -4);
         this.scene.add(table);
+
+        this.userGroup.position.set(0, 0, 1.5); // Move player out of table
     }
 
-    createMegaParticles() {
-        // Update 1.5.1: High-performance particle system for wins
-        const geometry = new THREE.SphereGeometry(0.02, 8, 8);
-        const material = new THREE.MeshBasicMaterial({ color: 0xffd700 });
-
-        for (let i = 0; i < 500; i++) {
-            const p = new THREE.Mesh(geometry, material);
-            p.position.set(
-                (Math.random() - 0.5) * 10,
-                Math.random() * 5,
-                (Math.random() - 0.5) * 10 - 4
-            );
-            p.userData.velocity = Math.random() * 0.02;
-            p.visible = false; // Hidden until win
-            this.particleGroup.add(p);
-        }
-    }
-
-    setupOculusControls() {
+    setupOculusHaptics() {
         this.controller1 = this.renderer.xr.getController(0); // Left
         this.controller2 = this.renderer.xr.getController(1); // Right
-        this.scene.add(this.controller1, this.controller2);
+        this.userGroup.add(this.controller1, this.controller2);
 
-        // Mappings: Right=Bet, Left=Fold
-        this.controller2.addEventListener('selectstart', () => this.triggerWinSequence());
-        this.controller1.addEventListener('selectstart', () => console.log("Fold Action"));
+        const factory = new XRControllerModelFactory();
+        this.controller1.add(factory.createControllerModel(this.controller1));
+        this.controller2.add(factory.createControllerModel(this.controller2));
+
+        // Haptic pulse on Trigger
+        this.controller2.addEventListener('selectstart', (e) => this.vibrate(e, 0.8, 100));
+        this.controller1.addEventListener('selectstart', (e) => this.vibrate(e, 0.3, 50));
     }
 
-    triggerWinSequence() {
-        // Update 1.5: 10-second silent win
-        const ui = document.getElementById('win-announcement');
-        document.getElementById('winner-name').innerText = "YOU WIN!";
-        document.getElementById('winning-hand').innerText = "ROYAL FLUSH";
-        ui.style.display = 'block';
-
-        // Update 1.5.1: Activate Mega Particles
-        this.particleGroup.children.forEach(p => p.visible = true);
-
-        setTimeout(() => {
-            ui.style.display = 'none';
-            this.particleGroup.children.forEach(p => p.visible = false);
-        }, 10000);
+    vibrate(event, intensity, duration) {
+        const session = this.renderer.xr.getSession();
+        if (session) {
+            const inputSource = session.inputSources[event.target === this.controller1 ? 0 : 1];
+            if (inputSource && inputSource.gamepad && inputSource.gamepad.hapticActuators) {
+                inputSource.gamepad.hapticActuators[0].pulse(intensity, duration);
+            }
+        }
+        console.log("Haptic Pulse Triggered");
     }
 
     update() {
-        const time = this.clock.getElapsedTime();
-        
-        // Animate Mega Particles
-        this.particleGroup.children.forEach(p => {
-            if(p.visible) {
-                p.position.y += p.userData.velocity;
-                if(p.position.y > 4) p.position.y = 0;
+        const session = this.renderer.xr.getSession();
+        if (session) {
+            // Smooth Locomotion (Left Stick)
+            for (const source of session.inputSources) {
+                if (source.gamepad && source.handedness === 'left') {
+                    const axes = source.gamepad.axes;
+                    this.userGroup.position.x += axes[2] * 0.05;
+                    this.userGroup.position.z += axes[3] * 0.05;
+                }
             }
-        });
-
+        }
         this.renderer.render(this.scene, this.camera);
     }
 }
 
-new PokerMegaUpdate();
+new PokerFidelity16();

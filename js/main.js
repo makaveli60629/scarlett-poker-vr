@@ -1,109 +1,106 @@
-// =========================================================
-// SCARLETT POKER VR - MASTER LOGIC (UPDATE 1.5.1)
-// =========================================================
+import * as THREE from 'three';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
 
-// --- 1. ASSET & TEXTURE INITIALIZATION ---
-const textureLoader = new THREE.TextureLoader();
-const path = 'assets/textures/';
+const App = {
+    scene: null,
+    camera: null,
+    renderer: null,
+    player: new THREE.Group(),
+    controllers: [],
+    isSeated: false,
 
-const textures = {
-    // Poker Chips
-    chip1k: textureLoader.load(path + 'chip_1000.jpg'),
-    chip5k: textureLoader.load(path + 'chip_5000.jpg'),
-    chip10k: textureLoader.load(path + 'chip_10000.jpg'),
-    
-    // Environment & Table
-    felt: textureLoader.load(path + 'table_felt_green.jpg'),
-    stoneWall: textureLoader.load(path + 'wall_stone_runes.jpg'),
-    brickWall: textureLoader.load(path + 'brickwall.jpg'),
-    ceiling: textureLoader.load(path + 'ceiling_dome_main.jpg'),
-    carpet: textureLoader.load(path + 'lobby_carpet.jpg'),
-    atlas: textureLoader.load(path + 'table_atlas.jpg'),
-    
-    // UI, Rewards & Branding
-    winnerUI: textureLoader.load(path + 'ui_winner_hologram.jpg'),
-    daily: textureLoader.load(path + 'dailyclaim.jpg'),
-    crown: textureLoader.load(path + 'Crown.jpg'),
-    logo: textureLoader.load(path + 'brand_logo.jpg'),
-    casinoArt: textureLoader.load(path + 'casino_art.jpg')
+    init() {
+        this.setupScene();
+        this.createEnvironment(); 
+        this.setupControls();
+        this.animate();
+        
+        // Ensure VR Button is available for Oculus
+        document.body.appendChild(VRButton.createButton(this.renderer));
+    },
+
+    setupScene() {
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(0x0a0a0a); // Deep dark lobby
+
+        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        // FIX: Spawning you at Z: 5 so you aren't inside the wall or the gray disc
+        this.player.position.set(0, 1.6, 5); 
+        this.player.add(this.camera);
+        this.scene.add(this.player);
+
+        this.renderer = new THREE.WebGLRenderer({ antialias: true });
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.xr.enabled = true;
+        document.getElementById('canvas-container').appendChild(this.renderer.domElement);
+
+        // Lighting to see the "Lively" background
+        const sun = new THREE.DirectionalLight(0xffffff, 1);
+        sun.position.set(5, 10, 7.5);
+        this.scene.add(sun);
+        this.scene.add(new THREE.AmbientLight(0x404040, 2));
+    },
+
+    createEnvironment() {
+        // The Lobby - Brick Texture logic from 1.4 will be applied here
+        const roomGeo = new THREE.BoxGeometry(30, 15, 60);
+        const roomMat = new THREE.MeshStandardMaterial({ color: 0x333333, side: THREE.BackSide });
+        const lobby = new THREE.Mesh(roomGeo, roomMat);
+        this.scene.add(lobby);
+
+        // THE POKER TABLE (The gray disc)
+        const tableGeo = new THREE.CylinderGeometry(2.5, 2.5, 0.2, 32);
+        const tableMat = new THREE.MeshStandardMaterial({ color: 0x1a4a1a }); // Green Felt
+        const table = new THREE.Mesh(tableGeo, tableMat);
+        table.position.set(0, 0.9, -5); // Positioned in front of spawn
+        this.scene.add(table);
+    },
+
+    setupControls() {
+        // 1. OCULUS CONTROLS (Always kept in history)
+        for (let i = 0; i < 2; i++) {
+            const controller = this.renderer.xr.getController(i);
+            this.player.add(controller);
+            this.controllers.push(controller);
+            
+            // Hand Mesh Placeholders
+            const hand = new THREE.Mesh(
+                new THREE.BoxGeometry(0.1, 0.1, 0.15),
+                new THREE.MeshBasicMaterial({ color: 0x00ffff })
+            );
+            controller.add(hand);
+        }
+
+        // 2. FLAT SCREEN FIX: WASD & Mouse Look logic
+        window.addEventListener('keydown', (e) => {
+            if (this.isSeated) return;
+            const speed = 0.3;
+            if (e.key.toLowerCase() === 'w') this.player.position.z -= speed;
+            if (e.key.toLowerCase() === 's') this.player.position.z += speed;
+            if (e.key.toLowerCase() === 'a') this.player.position.x -= speed;
+            if (e.key.toLowerCase() === 'd') this.player.position.x += speed;
+
+            // Trigger "Play Game" Auto-Seat
+            if (this.player.position.distanceTo(new THREE.Vector3(0, 1.6, -5)) < 3) {
+                this.sitDown();
+            }
+        });
+    },
+
+    sitDown() {
+        if (this.isSeated) return;
+        this.isSeated = true;
+        // Snap to table position
+        this.player.position.set(0, 1.1, -3.5); 
+        console.log("Automatically seated. Initializing winning hand logic...");
+    },
+
+    animate() {
+        this.renderer.setAnimationLoop(() => {
+            this.renderer.render(this.scene, this.camera);
+        });
+    }
 };
 
-// --- 2. OCULUS VR CONTROLLER SETUP ---
-const controller1 = renderer.xr.getController(0); // Left
-const controller2 = renderer.xr.getController(1); // Right
-scene.add(controller1, controller2);
-
-// --- 3. AUTO-SEATING & ZONE LOGIC ---
-function checkPlayerMovement(playerPos) {
-    const seatZone = new THREE.Vector3(0, 0, -2); // The "Play Game" spot
-    if (playerPos.distanceTo(seatZone) < 1.2) {
-        playerSitAndDeal();
-    }
-}
-
-function playerSitAndDeal() {
-    console.log("Automatic Seating Triggered. Dealing cards...");
-    // Seat height adjustment for VR
-    camera.position.y = 1.1; 
-}
-
-// --- 4. WINNER DISPLAY (STRICT 10-SECOND RULE) ---
-function handleWinnerSequence(playerMesh) {
-    // 1. Highlight Winning Player
-    playerMesh.material.emissive.setHex(0x00ff00); 
-
-    // 2. Floating Winner Sprite
-    const spriteMat = new THREE.SpriteMaterial({ 
-        map: textures.winnerUI, 
-        transparent: true, 
-        blending: THREE.AdditiveBlending 
-    });
-    const winnerSprite = new THREE.Sprite(spriteMat);
-    winnerSprite.position.set(playerMesh.position.x, 2.0, playerMesh.position.z);
-    winnerSprite.scale.set(2, 1, 1);
-    scene.add(winnerSprite);
-
-    // 3. 10-Second Timer
-    setTimeout(() => {
-        scene.remove(winnerSprite);
-        playerMesh.material.emissive.setHex(0x000000);
-    }, 10000);
-}
-
-// --- 5. LOBBY STORE & DAILY PICK ($500 - $5000) ---
-let currentDailyReward = 500;
-
-function claimDailyPick() {
-    if (currentDailyReward <= 5000) {
-        console.log(`Reward Claimed: $${currentDailyReward}`);
-        showCrownEffect();
-        currentDailyReward += 500; // Increment for next visit
-    }
-}
-
-function showCrownEffect() {
-    const crownMat = new THREE.SpriteMaterial({ map: textures.crown, transparent: true });
-    const crown = new THREE.Sprite(crownMat);
-    crown.position.set(0, 2.5, -4);
-    scene.add(crown);
-    setTimeout(() => scene.remove(crown), 3000);
-}
-
-// --- 6. UPDATE 1.5 CONFIGURATION (The 20 Variables) ---
-// Use these to tune the game feel manually
-const gameConfig = {
-    cardFriction: 0.05,
-    cardGravity: -9.8,
-    chipStackHeight: 0.02,
-    dealSpeed: 1.5,
-    lightingIntensity: 1.2,
-    bloomStrength: 0.5,
-    tableReflection: 0.1,
-    // ... add your remaining 13 config points here
-};
-
-// --- 7. RENDER LOOP INTERACTION ---
-function update() {
-    // Raycaster for Oculus interaction with Daily Claim
-    // (Logic for trigger presses goes here)
-}
+App.init();

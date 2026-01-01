@@ -1,6 +1,9 @@
+/* SCARLETT POKER VR - UPDATE 1.3.40 (SOLID GOLD)
+   Logic: Haptics, Compact Menu, & Multi-Room Navigation
+*/
+
 let walletBalance = localStorage.getItem('poker_wallet') ? parseInt(localStorage.getItem('poker_wallet')) : 1000;
 let dailyRewardLevel = 500;
-let currentRoom = 'lobby';
 let APP_DATA = null;
 
 async function initGame() {
@@ -9,20 +12,43 @@ async function initGame() {
     updateWalletUI();
 }
 
+function triggerHaptic(hand, intensity = 0.5, duration = 100) {
+    const controller = document.querySelector(hand === 'left' ? '#left-hand' : '#right-hand');
+    if (controller && controller.components['oculus-touch-controls']) {
+        const gamepad = controller.components['oculus-touch-controls'].gamepad;
+        if (gamepad && gamepad.hapticActuators && gamepad.hapticActuators[0]) {
+            gamepad.hapticActuators[0].pulse(intensity, duration);
+        }
+    }
+}
+
 function updateWalletUI() {
-    const displays = ['#wallet-hologram', '#side-wallet', '#mirror-wallet'];
+    const displays = ['#wallet-hologram', '#menu-wallet'];
     displays.forEach(id => {
         const el = document.querySelector(id);
-        if (el) el.setAttribute('value', `WALLET: $${walletBalance.toLocaleString()}`);
+        if (el) el.setAttribute('value', `$${walletBalance.toLocaleString()}`);
     });
     localStorage.setItem('poker_wallet', walletBalance);
 }
 
-function claimDailyReward() {
-    walletBalance += dailyRewardLevel;
-    showNotification(`CLAIMED $${dailyRewardLevel}!\nNext: $${Math.min(dailyRewardLevel + 500, 5000)}`);
-    if (dailyRewardLevel < 5000) dailyRewardLevel += 500;
-    updateWalletUI();
+function teleport(zone) {
+    if (APP_DATA.rooms[zone].status === "locked") {
+        showNotification("LOCKED: EVENT COMING SOON");
+        triggerHaptic('right', 0.8, 300);
+        return;
+    }
+    const rig = document.querySelector('#rig');
+    const spawn = APP_DATA.rooms[zone].spawn;
+    rig.setAttribute('position', `${spawn.x} ${spawn.y} ${spawn.z}`);
+    triggerHaptic('left', 0.4, 150);
+    if(document.querySelector('#player-menu').getAttribute('visible')) toggleMenu();
+}
+
+function toggleMenu() {
+    const menu = document.querySelector('#player-menu');
+    const isVisible = menu.getAttribute('visible');
+    menu.setAttribute('visible', !isVisible);
+    triggerHaptic('left', 0.3, 50);
 }
 
 function buyCrown() {
@@ -30,40 +56,18 @@ function buyCrown() {
         walletBalance -= 10000;
         updateWalletUI();
         document.querySelector('#player-crown').setAttribute('visible', 'true');
-        document.querySelector('#mirror-crown').setAttribute('visible', 'true');
-        document.querySelector('#crown-shop-item').setAttribute('visible', 'false');
         showNotification("CROWN EQUIPPED");
-    } else { showNotification("INSUFFICIENT FUNDS"); }
-}
-
-function teleport(zone) {
-    const rig = document.querySelector('#rig');
-    const spawn = APP_DATA.rooms[zone].spawn;
-    rig.setAttribute('position', `${spawn.x} ${spawn.y} ${spawn.z}`);
-    currentRoom = zone;
-    document.querySelector('#player-menu').setAttribute('visible', 'false');
-    
-    if (zone === 'scorpion') {
-        const winUI = document.querySelector('#win-display');
-        winUI.setAttribute('visible', 'true');
-        setTimeout(() => winUI.setAttribute('visible', 'false'), 10000);
+        triggerHaptic('right', 1.0, 500);
+    } else {
+        showNotification("NEED $10,000");
     }
 }
 
-function toggleMenu() {
-    const menu = document.querySelector('#player-menu');
-    const isVisible = !menu.getAttribute('visible');
-    menu.setAttribute('visible', isVisible);
-}
-
-function showNotification(text) {
+function showNotification(msg) {
     const note = document.querySelector('#vr-notification');
-    document.querySelector('#notif-text').setAttribute('value', text);
+    document.querySelector('#notif-text').setAttribute('value', msg);
     note.setAttribute('visible', 'true');
-}
-
-function dismissNotification() {
-    document.querySelector('#vr-notification').setAttribute('visible', 'false');
+    setTimeout(() => note.setAttribute('visible', 'false'), 3000);
 }
 
 initGame();

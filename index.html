@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scorpion Poker VR 1.4</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
+        #hud { position: fixed; top: 20px; left: 20px; color: #00f2ff; font-size: 24px; font-weight: bold; z-index: 100; text-shadow: 2px 2px #000; }
+        #win-popup { position: fixed; top: 30%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.85); color: gold; padding: 40px; border: 4px solid gold; border-radius: 20px; display: none; text-align: center; z-index: 200; font-size: 32px; }
+    </style>
+</head>
+<body>
+    <div id="hud">CASH: $<span id="balance">5000</span></div>
+    <div id="win-popup"><h1 id="win-player">PLAYER WINS</h1><p id="win-hand">FULL HOUSE</p></div>
+
+    <script type="importmap">
+        { "imports": { 
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" 
+        } }
+    </script>
+
+    <script type="module">
+        import { initEngine } from './engine.js';
+        import { buildWorld } from './world.js';
+        import { setupControls } from './controls.js';
+        import { initPoker } from './poker.js';
+
+        async function start() {
+            const engine = initEngine();
+            const world = buildWorld(engine.scene);
+            const poker = initPoker(engine.scene, engine.playerRig);
+            const controls = setupControls(engine, world.floors, poker);
+
+            engine.renderer.setAnimationLoop(() => {
+                controls.update();
+                poker.update();
+                engine.renderer.render(engine.scene, engine.camera);
+            });
+        }
+        start();
+    </script>
+</body>
+</html>

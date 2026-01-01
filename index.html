@@ -3,15 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Poker VR 1.38 Stability - Full Restore</title>
+    <title>Poker VR 1.38 Stability</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; }
-        #win-display {
-            position: absolute; top: 15%; width: 100%; text-align: center;
-            color: #FFD700; font-family: 'Arial Black', sans-serif; font-size: 4rem;
-            display: none; z-index: 100; pointer-events: none;
-            text-shadow: 0 0 20px rgba(0,0,0,1);
-        }
+        body { margin: 0; background-color: #000; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; }
+        #overlay { position: absolute; top: 20px; text-align: center; width: 100%; z-index: 10; pointer-events: none; }
     </style>
     <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
     <script type="importmap">
@@ -24,90 +19,10 @@
     </script>
 </head>
 <body>
-    <div id="win-display">WINNER!</div>
-
-    <script type="module">
-        import * as THREE from 'three';
-        import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
-        import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerModelFactory.js';
-
-        let scene, camera, renderer, playerRig;
-        let controller1, controller2;
-        let table, carpet, watch;
-        const loader = new THREE.TextureLoader();
-
-        // 1.38 Memory State
-        const assets = {
-            carpetTex: null, // Ready for your JPG list
-            tableTex: null
-        };
-
-        init();
-
-        function init() {
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x050510); // Deep Space Blue
-
-            // --- PLAYER SETUP (The Fix for spawning inside the table) ---
-            playerRig = new THREE.Group();
-            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
-            playerRig.add(camera);
-            
-            // SPAWN POSITION: 2 meters back from center (0,0,0)
-            playerRig.position.set(0, 0, 2); 
-            scene.add(playerRig);
-
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-            renderer.setPixelRatio(window.devicePixelRatio);
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.xr.enabled = true;
-            document.body.appendChild(renderer.domElement);
-            document.body.appendChild(VRButton.createButton(renderer));
-
-            // High Intensity Lighting to see textures
-            scene.add(new THREE.AmbientLight(0xffffff, 1.5));
-
-            // --- WORLD BUILDING (Update 1.3 Memory) ---
-
-            // Red Carpet Floor
-            const carpetGeo = new THREE.PlaneGeometry(15, 15);
-            const carpetMat = new THREE.MeshStandardMaterial({ 
-                color: 0x7a0000, 
-                side: THREE.DoubleSide 
-            });
-            carpet = new THREE.Mesh(carpetGeo, carpetMat);
-            carpet.rotation.x = -Math.PI / 2;
-            scene.add(carpet);
-
-            // Poker Table (Center Point 0,0,0)
-            const tableGeo = new THREE.CylinderGeometry(1.2, 1.2, 0.15, 40);
-            const tableMat = new THREE.MeshStandardMaterial({ color: 0x004400 });
-            table = new THREE.Mesh(tableGeo, tableMat);
-            table.position.y = 0.75;
-            scene.add(table);
-
-            setupOculusControls();
-            renderer.setAnimationLoop(render);
-        }
-
-        function setupOculusControls() {
-            const factory = new XRControllerModelFactory();
-
-            // Left Hand (Watch Hand)
-            controller1 = renderer.xr.getController(0);
-            playerRig.add(controller1);
-            const grip1 = renderer.xr.getControllerGrip(0);
-            grip1.add(factory.createControllerModel(grip1));
-            playerRig.add(grip1);
-
-            // Right Hand
-            controller2 = renderer.xr.getController(0); // Fixed for Oculus pairing
-            playerRig.add(controller2);
-            const grip2 = renderer.xr.getControllerGrip(1);
-            grip2.add(factory.createControllerModel(grip2));
-            playerRig.add(grip2);
-
-            // Wrist Watch (1.3 Logic)
-            const watchGeo = new THREE.BoxGeometry(0.06, 0.015, 0.04);
-            const watchMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
-            watch = new THREE.Mesh(
+    <div id="overlay">
+        <h1 id="status">Loading Poker VR...</h1>
+        <div id="win-popup" style="display:none; color:gold; font-size: 2rem;">WINNER!</div>
+    </div>
+    <script type="module" src="main.js"></script>
+</body>
+</html>

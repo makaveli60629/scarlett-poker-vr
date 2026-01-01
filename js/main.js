@@ -1,120 +1,170 @@
 import * as THREE from 'three';
-import { Physics } from './Physics.js';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 
-// --- INITIALIZATION ---
-const physics = new Physics();
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x050505);
-scene.fog = new THREE.FogExp2(0x050505, 0.05);
+// Update 1.4: Hologram Shader with Noise
+const HologramShader = {
+    uniforms: {
+        "time": { value: 1.0 },
+        "color": { value: new THREE.Color(0x00ffcc) }
+    },
+    vertexShader: `
+        varying vec2 vUv;
+        uniform float time;
+        void main() {
+            vUv = uv;
+            vec3 pos = position;
+            pos.y += sin(pos.x * 5.0 + time) * 0.02; // Noise jitter
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+        }
+    `,
+    fragmentShader: `
+        varying vec2 vUv;
+        uniform float time;
+        uniform vec3 color;
+        void main() {
+            float scanline = sin(vUv.y * 100.0 + time * 5.0) * 0.1;
+            float alpha = 0.3 + scanline;
+            gl_FragColor = vec4(color, alpha);
+        }
+    `
+};
 
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.xr.enabled = true;
-document.body.appendChild(renderer.domElement);
+class PokerVR {
+    constructor() {
+        this.scene = new THREE.Scene();
+        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        this.renderer = new THREE.WebGLRenderer({ antialias: true });
+        this.gameState = 'ZONE'; // ZONE or AT_TABLE
+        this.wallet = 5000.00;
 
-// --- LIGHTING ---
-const ambient = new THREE.AmbientLight(0xffffff, 0.4);
-scene.add(ambient);
+        this.init();
+    }
 
-// --- LUXURY ROOM BUILDER (4m Ceilings & Brick Walls) ---
-const brickMat = new THREE.MeshStandardMaterial({ color: 0x4d1a1a, roughness: 0.9 });
-const goldMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.8, roughness: 0.2 });
+    init() {
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.xr.enabled = true;
+        document.body.appendChild(this.renderer.domElement);
+        document.body.appendChild(VRButton.createButton(this.renderer));
 
-function buildLuxuryRoom(name, x, z, size, lightColor) {
-    const room = new THREE.Group();
+        // Environment
+        const grid = new THREE.GridHelper(20, 20, 0x00ffcc, 0x222222);
+        this.scene.add(grid);
+        
+        this.createZoneHologram();
+        this.createPokerTable();
+        this.setupOculusControls();
 
-    // Floor
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({color: 0x111111}));
-    floor.rotation.x = -Math.PI / 2;
-    room.add(floor);
+        this.renderer.setAnimationLoop((t) => this.render(t));
+    }
 
-    // Ceiling (4 Meters High)
-    const ceil = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({color: 0x050505}));
-    ceil.position.y = 4;
-    ceil.rotation.x = Math.PI / 2;
-    room.add(ceil);
+    createZoneHologram() {
+        // Floating platform for Wallet display in Zone
+        const geo = new THREE.CylinderGeometry(0.8, 0.8, 0.05, 32);
+        this.hologramMat = new THREE.ShaderMaterial({
+            uniforms: THREE.UniformsUtils.clone(HologramShader.uniforms),
+            vertexShader: HologramShader.vertexShader,
+            fragmentShader: HologramShader.fragmentShader,
+            transparent: true
+        });
+        const platform = new THREE.Mesh(geo, this.hologramMat);
+        platform.position.set(0, 0.01, -2);
+        this.scene.add(platform);
+    }
 
-    // Walls (Brick)
-    const wallGeo = new THREE.BoxGeometry(size, 4, 0.5);
-    const backWall = new THREE.Mesh(wallGeo, brickMat);
-    backWall.position.set(0, 2, -size/2);
-    room.add(backWall);
-    physics.addCollider(backWall);
+    createPokerTable() {
+        // Table at z = -5
+        const tableGeo = new THREE.CylinderGeometry(1.5, 1.5, 0.1, 64);
+        const tableMat = new THREE.MeshStandardMaterial({ color: 0x076324 });
+        this.table = new THREE.Mesh(tableGeo, tableMat);
+        this.table.position.set(0, 0.8, -6);
+        this.scene.add(this.table);
 
-    // Luxury Pillars
-    const pillarGeo = new THREE.CylinderGeometry(0.2, 0.2, 4, 16);
-    const p1 = new THREE.Mesh(pillarGeo, goldMat);
-    p1.position.set(-size/2 + 0.5, 2, -size/2 + 0.5);
-    room.add(p1);
+        // Invisible trigger for "Play Game" spot
+        const triggerGeo = new THREE.BoxGeometry(2, 2, 2);
+        const triggerMat = new THREE.MeshBasicMaterial({ visible: false });
+        this.seatTrigger = new THREE.Mesh(triggerGeo, triggerMat);
+        this.seatTrigger.position.set(0, 1, -4.5);
+        this.scene.add(this.seatTrigger);
+    }
 
-    // Room Atmosphere Light
-    const pointLight = new THREE.PointLight(lightColor, 2, 15);
-    pointLight.position.set(0, 3.5, 0);
-    room.add(pointLight);
+    setupOculusControls() {
+        // PERMANENT MEMORY: OCULUS CONFIGURATIONS
+        // Right Controller: Bet / Raise (Trigger)
+        // Left Controller: Fold / Check (Trigger)
+        // A Button: Call
+        // X Button: Menu
+        
+        this.controller1 = this.renderer.xr.getController(0);
+        this.controller2 = this.renderer.xr.getController(1);
+        
+        const factory = new XRControllerModelFactory();
+        
+        const model1 = factory.createControllerModel(this.controller1);
+        this.controller1.add(model1);
+        this.scene.add(this.controller1);
 
-    room.position.set(x, 0, z);
-    scene.add(room);
+        const model2 = factory.createControllerModel(this.controller2);
+        this.controller2.add(model2);
+        this.scene.add(this.controller2);
+
+        // Trigger Events
+        this.controller1.addEventListener('selectstart', () => this.onInteraction('RIGHT'));
+        this.controller2.addEventListener('selectstart', () => this.onInteraction('LEFT'));
+    }
+
+    onInteraction(side) {
+        if (this.gameState === 'ZONE') {
+            // Auto-sit logic (v1.3)
+            this.sitAtTable();
+        } else {
+            console.log(`${side} Trigger Pressed: Poker Action Taken`);
+        }
+    }
+
+    sitAtTable() {
+        this.gameState = 'AT_TABLE';
+        document.getElementById('vr-ui-overlay').style.display = 'none';
+        
+        // Move Camera/Player to Table Position
+        this.camera.position.set(0, 1.2, -4.5); 
+        console.log("Player Seated. Dealing Cards...");
+        
+        // Simulate a win for testing 1.5 Reveal
+        setTimeout(() => this.triggerWin("Player 1", "Full House"), 3000);
+    }
+
+    triggerWin(name, hand) {
+        // Update 1.5: Silent Win Display
+        const winUI = document.getElementById('win-announcement');
+        document.getElementById('winner-name').innerText = `${name.toUpperCase()} WINS THE POT`;
+        document.getElementById('win-hand-details').innerText = hand;
+        
+        winUI.style.display = 'block';
+        
+        // Highlight winning player/cards logic
+        this.table.material.emissive.setHex(0xffd700);
+        this.table.material.emissiveIntensity = 0.5;
+
+        setTimeout(() => {
+            winUI.style.display = 'none';
+            this.table.material.emissiveIntensity = 0;
+        }, 10000); // 10 second duration
+    }
+
+    render(time) {
+        time *= 0.001;
+        this.hologramMat.uniforms.time.value = time;
+        
+        // Logic to detect if player is standing in the "Play Game" zone
+        if (this.gameState === 'ZONE') {
+            const dist = this.camera.position.distanceTo(this.seatTrigger.position);
+            if (dist < 1.2) this.sitAtTable();
+        }
+
+        this.renderer.render(this.scene, this.camera);
+    }
 }
 
-// Create Rooms
-buildLuxuryRoom("Lobby", 0, 0, 20, 0x00f2ff);   // Daily Pick Table Here
-buildLuxuryRoom("Store", -22, 0, 15, 0xff00ff); // Item Shop
-buildLuxuryRoom("Poker", 22, 0, 15, 0x00ff00);  // High Stakes Room
-buildLuxuryRoom("Vault", 0, 22, 15, 0xffd700);  // The Dark Vault Fix
-
-// --- DAILY PICK TABLE (Lobby - $500 Increments) ---
-const dailyTable = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.8), goldMat);
-dailyTable.position.set(0, 0.4, -5);
-scene.add(dailyTable);
-physics.addCollider(dailyTable);
-
-// --- BRANDED POKER TABLE ---
-const tableGroup = new THREE.Group();
-const pokerTable = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 0.2), new THREE.MeshStandardMaterial({color: 0x076324}));
-pokerTable.position.y = 0.8;
-tableGroup.add(pokerTable);
-
-// Branding Logo Placeholder
-const logo = new THREE.Mesh(new THREE.CircleGeometry(0.5, 32), new THREE.MeshBasicMaterial({color: 0xffffff}));
-logo.rotation.x = -Math.PI / 2;
-logo.position.y = 0.91; 
-tableGroup.add(logo);
-
-tableGroup.position.set(22, 0, 0);
-scene.add(tableGroup);
-
-// --- OCULUS CONTROLS: RIGHT TRIGGER = OK ---
-const controller1 = renderer.xr.getController(0); // Right
-scene.add(controller1);
-
-controller1.addEventListener('selectstart', () => {
-    console.log("Right Trigger: OK Activated");
-    
-    // Check if looking at Daily Pick Table
-    if (camera.position.distanceTo(dailyTable.position) < 2) {
-        claimDailyPick();
-    }
-});
-
-// --- WALLET & WINNER UI ---
-let wallet = 5000;
-function claimDailyPick() {
-    if (wallet < 5000) {
-        wallet += 500;
-        console.log("Claimed $500! Total: $" + wallet);
-        updateWalletHologram();
-    }
-}
-
-function updateWalletHologram() {
-    // Wallet Hologram logic (Canvas Texture)
-}
-
-renderer.setAnimationLoop(() => {
-    // Prevent walking through walls
-    if (physics.isColliding(camera.position)) {
-        // Simple kickback logic to stop player
-    }
-    renderer.render(scene, camera);
-});
+// Start Game
+const app = new PokerVR();

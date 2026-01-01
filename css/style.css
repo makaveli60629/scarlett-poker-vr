@@ -1,36 +1,50 @@
-body { margin: 0; background: #000; overflow: hidden; font-family: 'Orbitron', sans-serif; }
+body { margin: 0; background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+
+#win-announcement {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: #ffd700;
+    text-shadow: 0 0 30px #ffaa00;
+    display: none;
+    z-index: 1000;
+}
+
+#win-announcement h1 { font-size: 6rem; margin: 0; animation: glow 1.5s infinite alternate; }
 
 #lobby-hologram {
     position: absolute;
-    bottom: 5%;
-    right: 5%;
+    bottom: 5%; right: 5%;
     z-index: 10;
 }
 
 .glass-panel {
-    background: rgba(0, 255, 204, 0.05);
-    border: 1px solid rgba(0, 255, 204, 0.3);
-    padding: 30px;
+    background: rgba(0, 255, 204, 0.1);
+    border: 1px solid rgba(0, 255, 204, 0.4);
+    padding: 20px;
     border-radius: 15px;
     backdrop-filter: blur(10px);
     color: #00ffcc;
     position: relative;
     overflow: hidden;
-    box-shadow: 0 0 20px rgba(0, 255, 204, 0.2);
 }
 
 .scan-line {
     position: absolute;
-    top: -100%;
-    left: 0;
-    width: 100%;
-    height: 10px;
-    background: linear-gradient(to bottom, transparent, #00ffcc, transparent);
-    opacity: 0.5;
-    animation: scan 4s linear infinite;
+    top: -100%; left: 0;
+    width: 100%; height: 5px;
+    background: #00ffcc;
+    box-shadow: 0 0 15px #00ffcc;
+    animation: scan 3s linear infinite;
 }
 
 @keyframes scan {
     0% { top: -100%; }
     100% { top: 200%; }
+}
+
+@keyframes glow {
+    from { text-shadow: 0 0 20px #ffaa00; }
+    to { text-shadow: 0 0 50px #fff; }
 }

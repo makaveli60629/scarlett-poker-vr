@@ -1,43 +1,38 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>VR Poker - Update 1.3</title>
-    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
-    <script src="https://unpkg.com/aframe-environment-component@1.3.2/dist/aframe-environment-component.min.js"></script>
-    <script src="game-logic.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poker VR - Update 1.5.2 Stability</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; }
+        #win-display {
+            position: absolute;
+            top: 20%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #00F0FF;
+            font-family: 'Arial', sans-serif;
+            font-size: 48px;
+            text-align: center;
+            pointer-events: none;
+            text-shadow: 0 0 20px #00F0FF;
+            display: none;
+            z-index: 10;
+        }
+    </style>
 </head>
 <body>
-    <a-scene>
-        <a-assets>
-            </a-assets>
-
-        <a-entity environment="preset: midnight; dressingAmount: 0"></a-entity>
-
-        <a-entity id="poker-table" geometry="primitive: cylinder; radius: 2; height: 0.1" position="0 0.8 -3" material="color: #0b5345">
-            <a-entity id="win-display" position="0 1.5 0" scale="0 0 0">
-                <a-text id="win-text" value="" align="center" color="#FFD700" width="4"></a-text>
-            </a-entity>
-        </a-entity>
-
-        <a-entity id="lobby-zone" position="5 0 0">
-            <a-box position="0 0.5 0" width="2" depth="2" height="0.1" color="#444"></a-box>
-            <a-text value="Lobby Area" position="0 1.5 0" align="center"></a-text>
-        </a-entity>
-
-        <a-entity id="play-trigger" position="0 0 -1.5" geometry="primitive: box; width: 1; height: 0.1; depth: 1" material="color: #27ae60; opacity: 0.5">
-            <a-text value="WALK HERE TO PLAY" position="0 0.5 0" align="center" scale="0.5 0.5 0.5"></a-text>
-        </a-entity>
-
-        <a-entity id="rig" movement-controls position="0 0 0">
-            <a-entity camera look-controls position="0 1.6 0"></a-entity>
-            
-            <a-entity oculus-touch-controls="hand: left" id="leftHand">
-                </a-entity>
-            
-            <a-entity oculus-touch-controls="hand: right" id="rightHand">
-                </a-entity>
-        </a-entity>
-    </a-scene>
+    <div id="win-display"></div>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/examples/jsm/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module" src="main.js"></script>
 </body>
 </html>
-

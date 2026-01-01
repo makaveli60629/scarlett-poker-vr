@@ -1,89 +1,79 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
 
-// --- SCENE SETUP ---
+// --- INITIALIZATION ---
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87CEEB); // Sky Blue (Ceiling is missing/open)
+scene.background = new THREE.Color(0x87CEEB); // Sky Blue Fallback
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 
-// --- LIGHTING (CRITICAL) ---
-const ambient = new THREE.AmbientLight(0xffffff, 1.5); // Brightest setting
+// --- LIGHTING ---
+const ambient = new THREE.AmbientLight(0xffffff, 1.2);
 scene.add(ambient);
 
-// --- TEXTURE LOADER ---
+// --- TEXTURE REPOSITORY (FROM YOUR LIST) ---
 const texLoader = new THREE.TextureLoader();
-const brickTex = texLoader.load('assets/texture/brick.jpg');
-const feltTex = texLoader.load('assets/texture/felt.jpg');
+const textures = {
+    brick: texLoader.load('assets/textures/brickwall.jpg'),
+    felt: texLoader.load('assets/textures/table_felt_green.jpg'),
+    crown: texLoader.load('assets/textures/Crown.jpg'),
+    logo: texLoader.load('assets/textures/brand_logo.jpg')
+};
 
-// --- THE ROOM (4 WALLS + TABLE) ---
+// --- ENVIRONMENT BUILDER ---
+// 4 Walls
 const wallGeo = new THREE.PlaneGeometry(20, 10);
-const wallMat = new THREE.MeshStandardMaterial({ map: brickTex, color: 0x8B4513 });
+const wallMat = new THREE.MeshStandardMaterial({ map: textures.brick });
 
-// Back Wall
-const wall1 = new THREE.Mesh(wallGeo, wallMat);
-wall1.position.set(0, 5, -10);
-scene.add(wall1);
+for(let i=0; i<4; i++) {
+    const wall = new THREE.Mesh(wallGeo, wallMat);
+    wall.position.y = 5;
+    if(i === 0) wall.position.z = -10;
+    if(i === 1) { wall.position.z = 10; wall.rotation.y = Math.PI; }
+    if(i === 2) { wall.position.x = -10; wall.rotation.y = Math.PI / 2; }
+    if(i === 3) { wall.position.x = 10; wall.rotation.y = -Math.PI / 2; }
+    scene.add(wall);
+}
 
-// Front Wall
-const wall2 = new THREE.Mesh(wallGeo, wallMat);
-wall2.position.set(0, 5, 10);
-wall2.rotation.y = Math.PI;
-scene.add(wall2);
-
-// Left Wall
-const wall3 = new THREE.Mesh(wallGeo, wallMat);
-wall3.position.set(-10, 5, 0);
-wall3.rotation.y = Math.PI / 2;
-scene.add(wall3);
-
-// Right Wall
-const wall4 = new THREE.Mesh(wallGeo, wallMat);
-wall4.position.set(10, 5, 0);
-wall4.rotation.y = -Math.PI / 2;
-scene.add(wall4);
-
-// The Poker Table
+// Table
 const table = new THREE.Mesh(
     new THREE.CylinderGeometry(1.5, 1.5, 0.2, 32),
-    new THREE.MeshStandardMaterial({ map: feltTex, color: 0x004d00 })
+    new THREE.MeshStandardMaterial({ map: textures.felt })
 );
 table.position.set(0, 0.8, -4);
 scene.add(table);
 
-// --- PLAYER & WATCH HUD ---
+// --- PLAYER RIG & WATCH (OCULUS CONTROLS) ---
 const playerGroup = new THREE.Group();
 playerGroup.add(camera);
 scene.add(playerGroup);
 
-// Create the Watch on the Left Controller
-const leftController = renderer.xr.getController(0);
-scene.add(leftController);
+const leftHand = renderer.xr.getController(0);
+scene.add(leftHand);
 
+// The Wrist Watch (Wallet)
 function createWatch() {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     canvas.width = 256; canvas.height = 128;
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, 256, 128);
-    ctx.fillStyle = '#89CFF0'; // Baby Blue
-    ctx.font = 'Bold 50px Arial';
-    ctx.fillText('$5,000', 45, 85);
-
-    const watchTex = new THREE.CanvasTexture(canvas);
-    const watchSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: watchTex }));
-    watchSprite.scale.set(0.15, 0.07, 1);
-    watchSprite.position.set(0, 0.03, 0); 
-    leftController.add(watchSprite);
+    ctx.fillStyle = '#000'; ctx.fillRect(0,0,256,128);
+    ctx.fillStyle = '#89CFF0'; ctx.font = 'Bold 40px Arial';
+    ctx.fillText('$5,000', 50, 80);
+    
+    const watchSprite = new THREE.Sprite(new THREE.SpriteMaterial({ 
+        map: new THREE.CanvasTexture(canvas) 
+    }));
+    watchSprite.scale.set(0.15, 0.08, 1);
+    leftHand.add(watchSprite);
 }
 createWatch();
 
-// --- MOVEMENT LOOP ---
+// --- MOVEMENT & AUTO-SIT LOGIC ---
 renderer.setAnimationLoop(() => {
     const session = renderer.xr.getSession();
     if (session) {
@@ -92,6 +82,11 @@ renderer.setAnimationLoop(() => {
                 const axes = source.gamepad.axes;
                 playerGroup.position.z += axes[3] * 0.05;
                 playerGroup.position.x += axes[2] * 0.05;
+                
+                // Auto-Sit trigger
+                if (playerGroup.position.distanceTo(table.position) < 2) {
+                    playerGroup.position.set(0, 0, -3.2); // Snaps you to seat
+                }
             }
         }
     }

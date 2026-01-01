@@ -1,50 +1,33 @@
-// Update 1.6.5 - Master Logic
-document.addEventListener('DOMContentLoaded', () => {
-    console.log("System Online. Final 1.6.5 Stability check...");
-});
+// Logic 1.7.2 - Movement & Boundaries
+let isPlayerSeated = false;
 
-// 1.3/1.6 Movement Logic
-let isPlaying = false;
-
-function checkPosition() {
+function controlLoop() {
     const rig = document.querySelector('#rig');
-    const camPos = document.querySelector('#player-cam').object3D.position;
-    const triggerPos = document.querySelector('#play-zone').object3D.position;
-    
-    // Check if player is near the blue square
-    let distance = new THREE.Vector3(rig.position.x + camPos.x, 0, rig.position.z + camPos.z)
-                    .distanceTo(new THREE.Vector3(triggerPos.x, 0, triggerPos.z));
+    const pos = rig.object3D.position;
 
-    if (distance < 1.5 && !isPlaying) {
-        sitPlayer();
+    // BOUNDARY LOCK: Prevent player from leaving the 20x20 area
+    const limit = 9.5; // Slightly inside the 10m half-width
+    if (pos.x > limit) pos.x = limit;
+    if (pos.x < -limit) pos.x = -limit;
+    if (pos.z > limit) pos.z = limit;
+    if (pos.z < -limit) pos.z = -limit;
+
+    // AUTO-SIT LOGIC: Detect table proximity
+    const table = document.querySelector('#poker-table').object3D.position;
+    let distance = pos.distanceTo(table);
+
+    if (distance < 2.5 && !isPlayerSeated) {
+        isPlayerSeated = true;
+        // Animation to move player into the seat
+        rig.setAttribute('animation', {
+            property: 'position',
+            to: '0 0 -2.2',
+            dur: 1500,
+            easing: 'easeInOutQuad'
+        });
+        console.log("Player Seated. Ready for Update 1.3 Poker Logic.");
     }
 }
 
-function sitPlayer() {
-    isPlaying = true;
-    const rig = document.querySelector('#rig');
-    // Animate move to the table seat
-    rig.setAttribute('animation', {
-        property: 'position',
-        to: '0 0 -5',
-        dur: 1000,
-        easing: 'easeInOutQuad'
-    });
-    console.log("Player Seated. Update 1.3 Dealer Logic Active.");
-}
-
-// Win Display Logic
-function handleWin(winnerName) {
-    const ui = document.querySelector('#win-ui');
-    const text = document.querySelector('#win-text');
-    text.setAttribute('value', winnerName.toUpperCase() + " WINS!");
-    ui.setAttribute('visible', 'true');
-    
-    // 10 Second rule
-    setTimeout(() => {
-        ui.setAttribute('visible', 'false');
-    }, 10000);
-}
-
-// Run position check every 300ms
-setInterval(checkPosition, 300);
+// Check every 30ms for 100% responsiveness
+setInterval(controlLoop, 30);

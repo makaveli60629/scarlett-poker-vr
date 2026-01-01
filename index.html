@@ -1,10 +1,43 @@
-<div id="vr-interface">
-    <div id="winner-overlay" style="display:none; position:absolute; top:20%; width:100%; text-align:center; color:gold; font-family:Arial; font-size:3em; text-shadow: 2px 2px #000;">
-    </div>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>VR Poker - Update 1.3</title>
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://unpkg.com/aframe-environment-component@1.3.2/dist/aframe-environment-component.min.js"></script>
+    <script src="game-logic.js"></script>
+</head>
+<body>
+    <a-scene>
+        <a-assets>
+            </a-assets>
 
-    <div id="wallet-hologram" style="opacity:0; position:fixed; top:10%; right:10%; color:#00ffff; font-weight:bold;">
-        WALLET: $0
-    </div>
+        <a-entity environment="preset: midnight; dressingAmount: 0"></a-entity>
 
-    <button id="vr-start-btn" onclick="startVR()">START VR SESSION</button>
-</div>
+        <a-entity id="poker-table" geometry="primitive: cylinder; radius: 2; height: 0.1" position="0 0.8 -3" material="color: #0b5345">
+            <a-entity id="win-display" position="0 1.5 0" scale="0 0 0">
+                <a-text id="win-text" value="" align="center" color="#FFD700" width="4"></a-text>
+            </a-entity>
+        </a-entity>
+
+        <a-entity id="lobby-zone" position="5 0 0">
+            <a-box position="0 0.5 0" width="2" depth="2" height="0.1" color="#444"></a-box>
+            <a-text value="Lobby Area" position="0 1.5 0" align="center"></a-text>
+        </a-entity>
+
+        <a-entity id="play-trigger" position="0 0 -1.5" geometry="primitive: box; width: 1; height: 0.1; depth: 1" material="color: #27ae60; opacity: 0.5">
+            <a-text value="WALK HERE TO PLAY" position="0 0.5 0" align="center" scale="0.5 0.5 0.5"></a-text>
+        </a-entity>
+
+        <a-entity id="rig" movement-controls position="0 0 0">
+            <a-entity camera look-controls position="0 1.6 0"></a-entity>
+            
+            <a-entity oculus-touch-controls="hand: left" id="leftHand">
+                </a-entity>
+            
+            <a-entity oculus-touch-controls="hand: right" id="rightHand">
+                </a-entity>
+        </a-entity>
+    </a-scene>
+</body>
+</html>
+

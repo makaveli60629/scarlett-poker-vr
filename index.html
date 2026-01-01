@@ -2,99 +2,27 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Scarlett Poker VR v1.4</title>
-    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/aframe-blink-controls/dist/aframe-blink-controls.min.js"></script>
-    <script src="js/logic.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poker VR - Update 1.3</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
+        #win-notification {
+            position: fixed; top: 15%; left: 50%; transform: translateX(-50%);
+            background: rgba(0, 50, 100, 0.9); border: 3px solid #00f2ff;
+            color: white; padding: 30px; border-radius: 20px; display: none;
+            text-align: center; z-index: 1000; box-shadow: 0 0 20px #00f2ff;
+        }
+        #win-notification h1 { color: gold; margin: 0; font-size: 3em; }
+    </style>
 </head>
 <body>
-    <a-scene renderer="antialias: true; colorManagement: true; exposure: 1.2;">
-        
-        <a-assets>
-            <img id="tex-brick" src="assets/textures/brickwall.jpg">
-            <img id="tex-floor" src="assets/textures/lobby_carpet.jpg">
-            <img id="tex-logo" src="assets/textures/brand_logo.jpg">
-            <img id="tex-crown" src="assets/textures/Crown.jpg">
-        </a-assets>
-
-        <a-entity id="rig" position="0 0 5">
-            <a-camera id="camera" look-controls wasd-controls="enabled: false">
-                <a-entity id="player-menu" position="0 0 -0.4" visible="false">
-                    <a-plane width="0.3" height="0.4" material="color: #050010; opacity: 0.95; shader: flat">
-                        <a-text value="SCARLETT OS" position="0 0.16 0.01" align="center" width="1" color="#00f2ff"></a-text>
-                        <a-text class="wallet-ui" value="$0" position="0 0.12 0.01" align="center" width="0.8" color="#ffaa00"></a-text>
-                        
-                        <a-plane class="clickable" position="0 -0.1 0.01" width="0.2" height="0.05" color="#ff0055" onclick="SCARLETT.toggleSitting(false)">
-                            <a-text value="STAND UP" align="center" width="0.8"></a-text>
-                        </a-plane>
-                    </a-plane>
-                </a-entity>
-
-                <a-entity id="notif-panel" position="0 0.15 -0.5" visible="false">
-                    <a-plane color="#111" width="0.4" height="0.1" material="opacity: 0.8">
-                        <a-text id="notif-text" align="center" width="1" color="#fff"></a-text>
-                    </a-plane>
-                </a-entity>
-            </a-camera>
-
-            <a-entity id="left-hand" oculus-touch-controls="hand: left" blink-controls="cameraRig: #rig; teleportableEntities: .clickable;"></a-entity>
-            <a-entity id="right-hand" oculus-touch-controls="hand: right" laser-controls raycaster="objects: .clickable; far: 10;"></a-entity>
-        </a-entity>
-
-        <a-entity id="zone-lobby">
-            <a-plane rotation="-90 0 0" width="16" height="16" src="#tex-floor" repeat="4 4"></a-plane>
-            <a-box position="0 2.5 -8" width="16" height="5" depth="0.8" src="#tex-brick"></a-box>
-            <a-box position="0 2.5 8" width="16" height="5" depth="0.8" src="#tex-brick"></a-box>
-            <a-box position="-8 2.5 0" rotation="0 90 0" width="16" height="5" depth="0.8" src="#tex-brick"></a-box>
-            <a-box position="8 2.5 0" rotation="0 90 0" width="16" height="5" depth="0.8" src="#tex-brick"></a-box>
-            <a-plane position="0 5 0" rotation="90 0 0" width="16" height="16" color="#111"></a-plane>
-
-            <a-entity position="-4 0.05 -4">
-                <a-ring color="#a020f0" radius-inner="0.8" radius-outer="1.1" rotation="-90 0 0"
-                        animation="property: scale; from: 1 1 1; to: 1.2 1.2 1.2; dur: 1500; loop: true; dir: alternate"></a-ring>
-                <a-light type="point" color="#a020f0" intensity="1.5" distance="4"></a-light>
-                <a-cylinder class="clickable" radius="1" height="0.2" opacity="0.1" onclick="SCARLETT.teleport('store')"></a-cylinder>
-                <a-text value="THE VAULT" position="0 1.5 0" align="center" width="4" color="#a020f0"></a-text>
-            </a-entity>
-        </a-entity>
-
-        <a-entity id="zone-vault" position="50 0 50">
-            <a-plane rotation="-90 0 0" width="12" height="12" color="#050010"></a-plane>
-            <a-box position="0 2.5 -6" width="12" height="5" depth="0.8" src="#tex-brick"></a-box>
-            <a-box position="0 2.5 6" width="12" height="5" depth="0.8" src="#tex-brick"></a-box>
-            <a-box position="-6 2.5 0" rotation="0 90 0" width="12" height="5" depth="0.8" src="#tex-brick"></a-box>
-            <a-box position="6 2.5 0" rotation="0 90 0" width="12" height="5" depth="0.8" src="#tex-brick"></a-box>
-            
-            <a-light type="ambient" color="#333"></a-light>
-            <a-light type="point" position="0 4 0" intensity="2" color="#a020f0"></a-light>
-            <a-light type="spot" position="0 4 -4" intensity="3" color="#fff" angle="30"></a-light>
-
-            <a-entity position="0 1.2 -4">
-                <a-cylinder radius="0.4" height="1" color="#111"></a-cylinder>
-                <a-entity animation="property: rotation; to: 0 360 0; loop: true; dur: 8000">
-                    <a-torus radius="0.2" radius-tubular="0.02" src="#tex-crown" rotation="90 0 0"></a-torus>
-                </a-entity>
-            </a-entity>
-            <a-text value="RETURN" position="0 2 5" align="center" color="#ff0055" class="clickable" onclick="SCARLETT.teleport('lobby')"></a-text>
-        </a-entity>
-
-        <a-entity id="zone-scorpion" position="-50 0 -50">
-            <a-plane rotation="-90 0 0" width="12" height="12" color="#050505"></a-plane>
-            <a-box position="0 2.5 -6" width="12" height="5" depth="0.8" src="#tex-brick"></a-box>
-            
-            <a-entity position="0 0.8 0">
-                <a-cylinder radius="2" height="0.1" scale="1.5 1 1" src="#tex-logo" class="clickable" onclick="SCARLETT.toggleSitting(true)"></a-cylinder>
-            </a-entity>
-        </a-entity>
-
-    </a-scene>
-
-    <script>
-        // Oculus 'Y' Button to open Menu
-        document.querySelector('#left-hand').addEventListener('ybuttondown', () => {
-            const menu = document.querySelector('#player-menu');
-            menu.setAttribute('visible', !menu.getAttribute('visible'));
-        });
+    <div id="win-notification">
+        <h1 id="winner-name">PLAYER 1 WINS</h1>
+        <p id="winner-hand">FULL HOUSE (ACES OVER KINGS)</p>
+    </div>
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
     </script>
+    <script type="module" src="main.js"></script>
 </body>
 </html>

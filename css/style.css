@@ -1,20 +1,34 @@
-body { background-color: #000; margin: 0; overflow: hidden; }
+body { margin: 0; background-color: #000; overflow: hidden; font-family: sans-serif; }
 
-/* The Glass Messenger Box */
-#notification-ui {
+/* The 10-Second Win Popup */
+#win-announcement {
     position: absolute;
-    top: 20%;
+    top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    width: 300px;
-    padding: 20px;
-    background: rgba(0, 150, 255, 0.15);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 15px;
-    color: white;
-    font-family: Arial, sans-serif;
     text-align: center;
-    display: none; /* Hidden until triggered */
-    z-index: 9999;
+    color: #ffd700;
+    text-shadow: 0 0 20px #ffaa00;
+    display: none;
+    z-index: 1000;
+    pointer-events: none;
+}
+
+#win-announcement h1 { font-size: 5rem; margin: 0; }
+
+/* The Lobby Wallet Hologram */
+#zone-ui {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    z-index: 10;
+}
+
+.hologram-card {
+    background: rgba(0, 255, 204, 0.1);
+    border: 2px solid #00ffcc;
+    padding: 15px;
+    color: #00ffcc;
+    box-shadow: 0 0 15px #00ffcc;
+    border-radius: 10px;
 }

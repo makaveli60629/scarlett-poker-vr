@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Poker VR - Update 1.3 (Lobby & Walls)</title>
+    <title>Poker VR - Update 1.3 (Solid Room Build)</title>
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
     <script src="./game-logic.js"></script>
@@ -9,53 +9,51 @@
     <script src="./shaders.js"></script>
   </head>
   <body>
-    <div id="blue-screen" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #0000FF; color: white; display: flex; align-items: center; justify-content: center; z-index: 9999; font-family: monospace;">
-        <h1>INITIALIZING POKER VR 1.3...<br>HOLD TRIGGER TO START</h1>
+    <div id="blue-screen" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #0000FF; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; font-family: monospace;">
+        <h1 style="font-size: 3em;">UPDATE 1.3: SOLID ROOM</h1>
+        <button onclick="document.getElementById('blue-screen').style.display='none'" style="padding: 20px; font-size: 20px; cursor: pointer; background: white; border: none; color: blue;">START GAME</button>
     </div>
 
-    <a-scene gltf-model="dracoDecoderPath: https://www.gstatic.com/draco/v1/decoders/;">
-      
+    <a-scene>
       <a-assets>
         <img id="carpet-texture" src="textures/lobby_carpet.jpg">
         <img id="brick-texture" src="textures/brick_wall.jpg">
         <img id="table-branding" src="textures/table_logo.jpg">
-        </a-assets>
+      </a-assets>
 
-      <a-entity id="rig" movement-controls="controls: checkpoint, gamepad, keyboard, touch" checkpoint-controls="mode: animate">
+      <a-entity id="rig" movement-controls="fly: false; speed: 0.3">
         <a-entity camera position="0 1.6 0" look-controls></a-entity>
-        <a-entity oculus-touch-controls="hand: left" laser-controls="hand: left" raycaster="objects: .clickable; far: 2"></a-entity>
-        <a-entity oculus-touch-controls="hand: right" laser-controls="hand: right" raycaster="objects: .clickable; far: 2"></a-entity>
+        <a-entity oculus-touch-controls="hand: left" laser-controls="hand: left"></a-entity>
+        <a-entity oculus-touch-controls="hand: right" laser-controls="hand: right"></a-entity>
       </a-entity>
 
-      <a-plane position="0 0 0" rotation="-90 0 0" width="20" height="20" src="#carpet-texture" repeat="4 4"></a-plane>
+      <a-light type="ambient" color="#FFF" intensity="0.7"></a-light>
+      <a-light type="point" position="0 4 0" intensity="1.2" distance="30"></a-light>
+
+      <a-plane position="0 0 0" rotation="-90 0 0" width="20" height="20" src="#carpet-texture" repeat="10 10" material="roughness: 1"></a-plane>
       
-      <a-box position="0 2.5 -10" width="20" height="5" depth="0.2" src="#brick-texture" repeat="4 1"></a-box>
-      <a-box position="-10 2.5 0" rotation="0 90 0" width="20" height="5" depth="0.2" src="#brick-texture" repeat="4 1"></a-box>
+      <a-plane position="0 5 0" rotation="90 0 0" width="20" height="20" color="#333"></a-plane>
+
+      <a-box position="0 2.5 -10" width="20" height="5" depth="0.5" src="#brick-texture" repeat="12 3" material="roughness: 1"></a-box>
       
-      <a-entity position="0 0 -15">
-          <a-plane rotation="-90 0 0" width="10" height="10" src="#carpet-texture"></a-plane>
-          <a-box position="0 2.5 -5" width="10" height="5" depth="0.1" src="#brick-texture"></a-box>
-          <a-cylinder id="poker-table" position="0 0.8 0" radius="2" height="0.1" color="#006400" play-game-zone>
-              <a-image src="#table-branding" rotation="-90 0 0" position="0 0.06 0" width="1" height="1"></a-image>
+      <a-box position="0 2.5 10" width="20" height="5" depth="0.5" src="#brick-texture" repeat="12 3" material="roughness: 1"></a-box>
+      
+      <a-box position="-10 2.5 0" rotation="0 90 0" width="20" height="5" depth="0.5" src="#brick-texture" repeat="12 3" material="roughness: 1"></a-box>
+      
+      <a-box position="10 2.5 0" rotation="0 -90 0" width="20" height="5" depth="0.5" src="#brick-texture" repeat="12 3" material="roughness: 1"></a-box>
+
+      <a-entity position="0 0 -5">
+          <a-cylinder position="0 0.8 0" radius="2.5" height="0.1" color="#076324" play-game-zone>
+              <a-image src="#table-branding" rotation="-90 0 0" position="0 0.06 0" width="1.8" height="1.8"></a-image>
           </a-cylinder>
       </a-entity>
 
-      <a-entity position="5 0 2">
-          <a-box position="0 0.5 0" width="1" height="1" depth="1" color="#0000FF" daily-pick-logic>
-              <a-text value="DAILY GIVEAWAY" align="center" position="0 0.6 0" scale="0.5 0.5 0.5"></a-text>
+      <a-entity position="6 0 6">
+          <a-box width="1.2" height="1" depth="1.2" color="#0000FF" daily-pick-logic>
+              <a-text value="DAILY CHIPS" position="0 0.6 0" align="center" width="4"></a-text>
           </a-box>
       </a-entity>
 
-      <a-light type="ambient" intensity="0.5"></a-light>
-      <a-light type="point" position="0 4 0" intensity="0.8"></a-light>
-
     </a-scene>
-
-    <script>
-      // Remove Blue Screen on Interaction
-      window.addEventListener('click', () => {
-        document.getElementById('blue-screen').style.display = 'none';
-      });
-    </script>
   </body>
 </html>

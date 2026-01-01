@@ -1,23 +1,33 @@
 import * as THREE from 'three';
-import { scene, pokerRoom } from './world.js';
+import { createBot } from './avatar.js';
 
-const table = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 0.2), new THREE.MeshStandardMaterial({color: 0x076324}));
-table.position.set(0, 0.8, 0);
-pokerRoom.add(table);
+export function initPoker(scene, playerRig) {
+    const pokerArea = new THREE.Group();
+    pokerArea.position.set(25, 0, 0);
+    scene.add(pokerArea);
 
-// Sitting Trigger
-export function autoSit(playerRig) {
-    const dist = playerRig.position.distanceTo(new THREE.Vector3(25, 0, 0));
-    if (dist < 3) {
-        playerRig.position.set(25, 0, 1.5); // Snap to table
-        announceWinner("PLAYER 1", "FULL HOUSE"); // Test 10s popup
+    // Table
+    const table = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 0.2, 32), new THREE.MeshStandardMaterial({color: 0x076324}));
+    table.position.y = 0.8;
+    pokerArea.add(table);
+
+    // Dealer
+    const dealer = createBot(pokerArea, 0, -2.8);
+    dealer.lookAt(0, 1.6, 0);
+
+    function showWinner(name, hand) {
+        const popup = document.getElementById('win-popup');
+        document.getElementById('win-player').innerText = name;
+        document.getElementById('win-hand').innerText = hand;
+        popup.style.display = 'block';
+        setTimeout(() => popup.style.display = 'none', 10000);
     }
-}
 
-function announceWinner(name, hand) {
-    const ui = document.getElementById('win-tag');
-    document.getElementById('winner-name').innerText = name + " WINS!";
-    document.getElementById('winner-hand').innerText = hand;
-    ui.style.display = 'block';
-    setTimeout(() => { ui.style.display = 'none'; }, 10000);
+    return {
+        update: () => {
+            const dist = playerRig.position.distanceTo(new THREE.Vector3(25, 0, 0));
+            if (dist < 3) dealer.lookAt(playerRig.position.x - 25, 1.6, playerRig.position.z);
+        },
+        triggerWin: (name, hand) => showWinner(name, hand)
+    };
 }

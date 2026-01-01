@@ -1,18 +1,66 @@
-<a-assets timeout="10000">
-  <img id="lobby-carpet" src="./assets/textures/lobby_carpet.jpg" crossorigin="anonymous">
-  <img id="lobby-wall" src="./assets/textures/lobby_wall_brick.jpg" crossorigin="anonymous">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scarlett Poker VR - Update 1.5.2</title>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <style>
+        /* Hidden UI for Win Display logic */
+        #win-display {
+            display: none;
+            position: absolute;
+            top: 20%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #FFD700;
+            font-size: 50px;
+            font-weight: bold;
+            text-shadow: 2px 2px #000;
+            z-index: 999;
+        }
+    </style>
+</head>
+<body>
+    <div id="win-display">WINNER!</div>
 
-  <img id="scorp-carpet" src="./assets/textures/scorpion_carpet.jpg" crossorigin="anonymous">
-  <img id="scorp-wall" src="./assets/textures/scorpion_wall_dark.jpg" crossorigin="anonymous">
+    <a-scene loading-screen="enabled: false; dotsColor: white; backgroundColor: #24CAFF">
+        
+        <a-assets timeout="3000"> <img id="tex-lobby-carpet" src="./assets/textures/lobby_carpet.jpg" crossorigin="anonymous">
+            <img id="tex-lobby-wall" src="./assets/textures/lobby_wall_brick.jpg" crossorigin="anonymous">
+            
+            <img id="tex-scorp-wall" src="./assets/textures/scorpion_wall_dark.jpg" crossorigin="anonymous">
+            <img id="tex-scorp-carpet" src="./assets/textures/scorpion_carpet.jpg" crossorigin="anonymous">
+        </a-assets>
 
-  <img id="felt-main" src="./assets/textures/table_felt_scarlett.jpg" crossorigin="anonymous">
-  <img id="felt-scorp" src="./assets/textures/table_felt_scorpion.jpg" crossorigin="anonymous">
-</a-assets>
+        <a-plane 
+            id="floor"
+            src="#tex-lobby-carpet" 
+            position="0 0 0" 
+            rotation="-90 0 0" 
+            width="50" 
+            height="50" 
+            repeat="15 15"
+            material="roughness: 1; metalness: 0">
+        </a-plane>
 
-<a-plane 
-  src="#lobby-carpet" 
-  repeat="8 8" 
-  rotation="-90 0 0" 
-  width="30" 
-  height="30">
-</a-plane>
+        <a-box 
+            src="#tex-lobby-wall" 
+            position="0 2.5 -10" 
+            width="20" height="5" depth="0.5"
+            repeat="4 1">
+        </a-box>
+
+        <a-entity id="rig" position="0 1.6 0">
+            <a-camera id="camera" look-controls wasd-controls></a-camera>
+            <a-entity oculus-touch-controls="hand: left"></a-entity>
+            <a-entity oculus-touch-controls="hand: right"></a-entity>
+        </a-entity>
+
+        <a-sky color="#87CEEB"></a-sky> <a-light type="ambient" intensity="0.7"></a-light>
+        <a-light type="directional" position="1 1 1" intensity="0.5"></a-light>
+    </a-scene>
+
+    <script type="module" src="index.js"></script>
+</body>
+</html>

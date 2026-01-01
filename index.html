@@ -1,42 +1,136 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Scarlett Poker VR</title>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Scarlett Poker VR – Lobby Build</title>
 
-    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+  <!-- A-Frame -->
+  <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
 
-    <!-- LOCK: module loading -->
-    <script type="module" src="./index.js"></script>
-  </head>
+  <!-- Your existing logic files (DO NOT REMOVE) -->
+  <script src="js/config.js"></script>
+  <script src="js/controls.js"></script>
+  <script src="js/environment-master.js"></script>
+  <script src="js/poker-logic.js"></script>
+</head>
 
-  <body>
-    <a-scene
-      renderer="colorManagement: true"
-      vr-mode-ui="enabled: true"
-      background="color: #0b0b0b"
-    >
+<body>
+<a-scene
+  renderer="antialias: true; colorManagement: true;"
+  shadow="type: pcfsoft"
+  vr-mode-ui="enabled: true">
 
-      <a-assets>
-        <!-- empty on purpose during reboot -->
-      </a-assets>
+  <!-- ================= ASSETS ================= -->
+  <a-assets timeout="15000">
 
-      <!-- PLAYER -->
-      <a-entity id="rig" position="0 1.6 4">
-        <a-camera></a-camera>
+    <!-- Branding -->
+    <img id="brandLogo" src="brand_logo.jpg">
+    <img id="crownLogo" src="Crown.jpg">
+    <img id="casinoArt" src="casino_art.jpg">
 
-        <a-entity laser-controls="hand: left"></a-entity>
-        <a-entity laser-controls="hand: right"></a-entity>
-      </a-entity>
+    <!-- Environment -->
+    <img id="brickWall" src="brickwall.jpg">
+    <img id="stoneRunes" src="wall_stone_runes.jpg">
+    <img id="lobbyCarpet" src="lobby_carpet.jpg">
+    <img id="ceilingDome" src="ceiling_dome_main.jpg">
 
-      <!-- FLOOR (proves rendering works) -->
-      <a-plane
-        rotation="-90 0 0"
-        width="20"
-        height="20"
-        color="#222">
-      </a-plane>
+    <!-- Table -->
+    <img id="tableFelt" src="table_felt_green.jpg">
+    <img id="tableAtlas" src="table_atlas.jpg">
 
-    </a-scene>
-  </body>
+    <!-- UI -->
+    <img id="dailyClaim" src="dailyclaim.jpg">
+    <img id="winnerUI" src="ui_winner_hologram.jpg">
+
+    <!-- Chips -->
+    <img id="chip1k" src="chip_1000.jpg">
+    <img id="chip5k" src="chip_5000.jpg">
+    <img id="chip10k" src="chip_10000.jpg">
+
+  </a-assets>
+
+  <!-- ================= LIGHTING ================= -->
+  <a-entity light="type: ambient; intensity: 0.55"></a-entity>
+
+  <a-entity light="type: point; intensity: 1.6; distance: 50"
+            position="0 8 0" cast-shadow="true"></a-entity>
+
+  <a-entity light="type: spot; intensity: 1.2; angle: 50"
+            position="0 6 -9"></a-entity>
+
+  <a-entity light="type: spot; intensity: 1.2; angle: 50"
+            position="0 6 9"></a-entity>
+
+  <!-- ================= PLAYER ================= -->
+  <a-entity id="rig" position="0 0 6" movement-controls>
+    <a-camera></a-camera>
+    <a-entity oculus-touch-controls="hand: left"></a-entity>
+    <a-entity oculus-touch-controls="hand: right"></a-entity>
+  </a-entity>
+
+  <!-- ================= FLOOR ================= -->
+  <a-plane class="nav-mesh"
+           rotation="-90 0 0"
+           width="22" height="22"
+           material="src: #lobbyCarpet; repeat: 4 4"
+           static-body></a-plane>
+
+  <!-- ================= WALLS (SOLID) ================= -->
+  <a-box position="0 3 -11" width="22" height="6" depth="0.5"
+         material="src: #brickWall; repeat: 4 2"
+         static-body></a-box>
+
+  <a-box position="0 3 11" width="22" height="6" depth="0.5"
+         material="src: #stoneRunes; repeat: 4 2"
+         static-body></a-box>
+
+  <a-box position="-11 3 0" width="0.5" height="6" depth="22"
+         material="src: #brickWall; repeat: 4 2"
+         static-body></a-box>
+
+  <a-box position="11 3 0" width="0.5" height="6" depth="22"
+         material="src: #brickWall; repeat: 4 2"
+         static-body></a-box>
+
+  <!-- ================= CEILING ================= -->
+  <a-sphere radius="15"
+            position="0 8 0"
+            material="src: #ceilingDome; side: back"></a-sphere>
+
+  <!-- ================= BRANDING ================= -->
+  <a-plane position="0 4 -10.8" width="4" height="2"
+           material="src: #brandLogo; transparent: true"></a-plane>
+
+  <a-plane position="-6 4 -10.8" width="2" height="2"
+           material="src: #crownLogo; transparent: true"></a-plane>
+
+  <!-- ================= POKER TABLE ================= -->
+  <a-cylinder id="pokerTable"
+              position="0 1 -2"
+              radius="1.9"
+              height="0.3"
+              segments-radial="6"
+              material="src: #tableFelt"
+              static-body></a-cylinder>
+
+  <!-- ================= DAILY CLAIM ================= -->
+  <a-plane id="dailyClaimBoard"
+           position="5 2 -5"
+           width="2.5" height="2.5"
+           material="src: #dailyClaim; transparent: true"></a-plane>
+
+  <!-- ================= WINNER UI ================= -->
+  <a-plane id="winnerUI"
+           position="0 3 -2"
+           width="3" height="1"
+           material="src: #winnerUI; transparent: true"
+           visible="false"></a-plane>
+
+  <!-- ================= CHIP DISPLAY ================= -->
+  <a-plane position="-5 1.2 -3" width="0.6" height="0.6" material="src: #chip1k"></a-plane>
+  <a-plane position="-4.2 1.2 -3" width="0.6" height="0.6" material="src: #chip5k"></a-plane>
+  <a-plane position="-3.4 1.2 -3" width="0.6" height="0.6" material="src: #chip10k"></a-plane>
+
+</a-scene>
+</body>
 </html>

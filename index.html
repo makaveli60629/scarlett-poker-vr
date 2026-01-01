@@ -1,28 +1,16 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Poker VR 1.5.2 - Stability Fix</title>
-    <style>
-        body { margin: 0; overflow: hidden; background-color: #111; }
-        canvas { display: block; }
-    </style>
+    <title>Poker VR 1.5.2 Stable</title>
+    <style> body { margin: 0; background: #000; } </style>
     <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
-
     <script type="importmap">
     {
-        "imports": {
-            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-            "three/examples/jsm/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-        }
+        "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" }
     }
     </script>
 </head>
 <body>
-    <script type="module">
-        console.log("System Check: Loading main.js from /js folder...");
-    </script>
     <script type="module" src="./js/main.js"></script>
 </body>
 </html>

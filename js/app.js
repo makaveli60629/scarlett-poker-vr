@@ -2,26 +2,23 @@ import * as THREE from 'three';
 import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
 import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerModelFactory.js';
 
-let camera, scene, renderer, controller1, controller2;
+let scene, camera, renderer, controller1, controller2;
 let controllerGrip1, controllerGrip2;
-let raycaster = new THREE.Raycaster();
-let intersectPoint = new THREE.Vector3();
+let watchMesh, watchText;
 
-// Stability 1.38 Assets
-let floor, table, chair;
-const winOverlay = document.getElementById('win-overlay');
+// Game State
+let userStats = { name: "Player", money: 5000, rank: "Rookie" };
 
 init();
 
 function init() {
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x020210); // Deep Space Blue
-    
-    // Camera Setup
-    camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(0, 1.6, 3);
+    scene.background = new THREE.Color(0x050505);
 
-    // Renderer & VR
+    camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
+    // Move camera back and up so we aren't inside the floor (prevents black screen)
+    camera.position.set(0, 1.6, 2); 
+
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -29,62 +26,55 @@ function init() {
     document.body.appendChild(renderer.domElement);
     document.body.appendChild(VRButton.createButton(renderer));
 
-    // Lighting
-    const light = new THREE.DirectionalLight(0xffffff, 1);
-    light.position.set(1, 1, 1).castShadow = true;
-    scene.add(light);
-    scene.add(new THREE.AmbientLight(0x404040, 2));
+    // Lights
+    const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambient);
+    const sun = new THREE.PointLight(0xffffff, 1);
+    sun.position.set(0, 5, 0);
+    scene.add(sun);
 
-    // --- BUILD ENVIRONMENT ---
-
-    // 1. The Carpet (Red/Patterned Shader Placeholder)
-    const floorGeo = new THREE.PlaneGeometry(20, 20);
-    const floorMat = new THREE.MeshStandardMaterial({ 
-        color: 0x800000, // Deep Red Carpet
-        roughness: 0.8,
-        metalness: 0.2
-    });
-    floor = new THREE.Mesh(floorGeo, floorMat);
+    // --- WORLD OBJECTS ---
+    
+    // The Carpet (Update 1.3 Stability)
+    const floorGeo = new THREE.PlaneGeometry(10, 10);
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x440000 }); // Red Carpet
+    const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
-    floor.name = "Floor_Carpet";
     scene.add(floor);
 
-    // 2. The Poker Table
-    const tableGeo = new THREE.CylinderGeometry(1.5, 1.5, 0.1, 40);
-    const tableMat = new THREE.MeshStandardMaterial({ color: 0x004400 });
-    table = new THREE.Mesh(tableGeo, tableMat);
+    // The Poker Table
+    const tableGeo = new THREE.CylinderGeometry(1.2, 1.2, 0.1, 32);
+    const tableMat = new THREE.MeshStandardMaterial({ color: 0x003300 });
+    const table = new THREE.Mesh(tableGeo, tableMat);
     table.position.y = 0.8;
     scene.add(table);
 
-    // 3. "Play Game" Trigger / Chair
-    const chairGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
-    const chairMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
-    chair = new THREE.Mesh(chairGeo, chairMat);
-    chair.position.set(0, 0.4, 1.8);
-    chair.name = "play_game"; // Looking for this for auto-sit
-    scene.add(chair);
+    // Play Game / Seat Trigger
+    const seatGeo = new THREE.BoxGeometry(0.4, 0.1, 0.4);
+    const seatMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });
+    const seatTrigger = new THREE.Mesh(seatGeo, seatMat);
+    seatTrigger.position.set(0, 0.1, 1.5);
+    seatTrigger.name = "PlayGameTrigger";
+    scene.add(seatTrigger);
 
-    // Oculus Controllers
-    setupVRControllers();
+    // Oculus Controllers & Watch
+    setupControllers();
 
-    // Start Animation
+    // Start Loop
     renderer.setAnimationLoop(render);
 }
 
-function setupVRControllers() {
+function setupControllers() {
     const controllerModelFactory = new XRControllerModelFactory();
 
-    // Controller 1
+    // Controllers
     controller1 = renderer.xr.getController(0);
-    controller1.addEventListener('selectstart', onTeleportStart);
     scene.add(controller1);
 
-    // Controller 2
     controller2 = renderer.xr.getController(1);
-    controller2.addEventListener('selectstart', triggerWinState); // Map to one button for testing
     scene.add(controller2);
 
-    // Grips (Models)
+    // Controller Grips (The Models)
     controllerGrip1 = renderer.xr.getControllerGrip(0);
     controllerGrip1.add(controllerModelFactory.createControllerModel(controllerGrip1));
     scene.add(controllerGrip1);
@@ -92,48 +82,45 @@ function setupVRControllers() {
     controllerGrip2 = renderer.xr.getControllerGrip(1);
     controllerGrip2.add(controllerModelFactory.createControllerModel(controllerGrip2));
     scene.add(controllerGrip2);
+
+    // THE WRIST WATCH (On Left Hand - Grip 1)
+    const watchGeo = new THREE.BoxGeometry(0.08, 0.02, 0.05);
+    const watchMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+    watchMesh = new THREE.Mesh(watchGeo, watchMat);
+    watchMesh.position.set(0, 0.03, 0); // Position on top of wrist
+    controllerGrip1.add(watchMesh);
 }
 
-// Logic: Move to "Play Game" = Auto Sit
-function onTeleportStart() {
-    // Check if looking at the play game area
-    // Simplified: If you trigger near the chair, you snap to it
-    const playerPos = new THREE.Vector3();
-    camera.getWorldPosition(playerPos);
-
-    if (playerPos.distanceTo(chair.position) < 2.0) {
-        // Snaps camera to chair height and position
-        const baseReference = renderer.xr.getReferenceSpace();
-        if (baseReference) {
-            // Logic to offset the XR space so you are "sitting"
-            console.log("Auto-sitting initiated...");
-            snapToSeat();
-        }
-    }
-}
-
-function snapToSeat() {
-    // Teleport logic for VR Camera offset
-    const offsetPosition = { x: 0, y: -0.8, z: -1.8 }; // Adjust to fit table
-    // Apply offset to camera group
-}
-
-// Requirement: Win State Popup for 10 Seconds
-export function triggerWinState(playerName, handRank) {
-    winOverlay.innerText = `${playerName} WINS WITH ${handRank}!`;
-    winOverlay.style.display = "block";
+// Logic for Win Display (10 Seconds)
+export function handleWin(winnerName, hand) {
+    const el = document.getElementById('win-display');
+    el.innerText = `${winnerName} WINS WITH ${hand}!`;
+    el.style.display = 'block';
     
-    // Highlight table/player
-    table.material.emissive.setHex(0x00ff00);
+    // Highlight winning player (placeholder logic)
+    console.log("Highlighting Winner...");
 
     setTimeout(() => {
-        winOverlay.style.display = "none";
-        table.material.emissive.setHex(0x000000);
+        el.style.display = 'none';
     }, 10000);
 }
 
+function updateWatch() {
+    // This updates every frame for the time
+    const now = new Date();
+    const timeStr = now.getHours() + ":" + now.getMinutes().toString().padStart(2, '0');
+    // Future update: Draw this to a CanvasTexture for the watch screen
+}
+
 function render() {
-    // Mega Particle Logic (Placeholder for 1.5.1)
+    updateWatch();
+
+    // Auto-Sit Logic: Check if camera is near "Play Game" trigger
+    if (camera.position.distanceTo(new THREE.Vector3(0, 1.6, 1.5)) < 0.5) {
+        // Automatic seat logic
+        camera.position.y = 1.2; // Sit down height
+    }
+
     renderer.render(scene, camera);
 }
 

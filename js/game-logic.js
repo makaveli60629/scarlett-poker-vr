@@ -1,30 +1,26 @@
 window.pokerLogic = {
     startDeal: function() {
-        // Logic for Update 1.3 low-poly cards
-        console.log("Cards Dealt to Player");
+        console.log("Dealing low-poly cards...");
     },
-    triggerWin: function(winnerID, handDescription) {
-        // Winning player highlight logic
-        const winner = document.querySelector(winnerID);
-        winner.setAttribute('material', 'emissive: #00FF00; emissiveIntensity: 0.5');
+    showWinner: function(playerEl, handType) {
+        // Highlight the player
+        playerEl.setAttribute('material', 'emissive: #00FF00; emissiveIntensity: 0.8');
 
-        // 10 Second Pop-up UI
-        const potLabel = document.createElement('a-entity');
-        potLabel.setAttribute('geometry', 'primitive: plane; width: 3; height: 1');
-        potLabel.setAttribute('material', 'color: black; opacity: 0.8');
-        potLabel.setAttribute('text', {
-            value: "WINNER: " + handDescription,
+        // Create the 10-second pop-up
+        let winNotice = document.createElement('a-entity');
+        winNotice.setAttribute('text', {
+            value: "WINNER: " + handType,
             align: 'center',
-            width: 6,
-            color: '#00FF00'
+            width: 5,
+            color: '#FFD700'
         });
-        potLabel.setAttribute('position', '0 2.5 -3');
-        document.querySelector('a-scene').appendChild(potLabel);
+        winNotice.setAttribute('position', '0 2.5 -2');
+        document.querySelector('a-scene').appendChild(winNotice);
 
-        // Remove after 10 seconds exactly
+        // Auto-remove after 10 seconds
         setTimeout(() => {
-            potLabel.remove();
-            winner.setAttribute('material', 'emissiveIntensity: 0');
+            winNotice.remove();
+            playerEl.setAttribute('material', 'emissiveIntensity: 0');
         }, 10000);
     }
 };
@@ -32,9 +28,8 @@ window.pokerLogic = {
 AFRAME.registerComponent('daily-pick-logic', {
     init: function() {
         this.el.addEventListener('click', () => {
-            let rewards = [500, 1000, 2500, 5000];
-            let win = rewards[Math.floor(Math.random() * rewards.length)];
-            alert("Daily Reward: $" + win + " added to chips!");
+            let win = Math.floor(Math.random() * 4501) + 500;
+            alert("Reward: $" + win);
         });
     }
 });

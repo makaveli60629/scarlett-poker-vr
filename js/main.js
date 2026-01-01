@@ -2,78 +2,94 @@ import * as THREE from 'three';
 import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
 import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerModelFactory.js';
 
-let scene, camera, renderer, playerRig;
-let controller1, controller2;
+// --- SCENE SETUP ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x050505); // Very dark grey instead of pure black
 
-init().catch(err => {
-    document.getElementById('status').innerText = "Error: " + err.message;
-});
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(0, 1.6, 3); // Default standing height
 
-async function init() {
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0a1a);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+document.body.appendChild(VRButton.createButton(renderer));
 
-    // RIG SETUP: Moves you AWAY from the table center to avoid the "inside table" black screen
-    playerRig = new THREE.Group();
-    camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
-    playerRig.add(camera);
-    playerRig.position.set(0, 0, 2); // 2 meters back
-    scene.add(playerRig);
+// --- LIGHTING (FIXES THE "BLACK SCREEN" ISSUE) ---
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.6); // Base light for visibility
+scene.add(ambientLight);
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.xr.enabled = true;
-    document.body.appendChild(renderer.domElement);
+const tableLight = new THREE.PointLight(0x00F0FF, 2, 10); // Neon Blue highlight
+tableLight.position.set(0, 3, -2);
+scene.add(tableLight);
 
-    // ADD VR BUTTON
-    const vrButton = VRButton.createButton(renderer);
-    document.body.appendChild(vrButton);
-    document.getElementById('status').innerText = "Ready for VR";
+// --- ENVIRONMENT & ASSETS ---
+// Floor
+const floorGeo = new THREE.PlaneGeometry(20, 20);
+const floorMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+const floor = new THREE.Mesh(floorGeo, floorMat);
+floor.rotation.x = -Math.PI / 2;
+scene.add(floor);
 
-    // LIGHTING
-    scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+// The Table (Play Game Area)
+const tableGeo = new THREE.CylinderGeometry(1.5, 1.5, 0.1, 32);
+const tableMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+const table = new THREE.Mesh(tableGeo, tableMat);
+table.position.set(0, 0.8, -2);
+scene.add(table);
 
-    // CARPET (Solid Red for Stability)
-    const floor = new THREE.Mesh(
-        new THREE.PlaneGeometry(20, 20),
-        new THREE.MeshStandardMaterial({ color: 0x800000 })
-    );
-    floor.rotation.x = -Math.PI / 2;
-    scene.add(floor);
-
-    // POKER TABLE
-    const table = new THREE.Mesh(
-        new THREE.CylinderGeometry(1.2, 1.2, 0.2, 32),
-        new THREE.MeshStandardMaterial({ color: 0x004400 })
-    );
-    table.position.y = 0.7;
-    scene.add(table);
-
-    setupControllers();
-    renderer.setAnimationLoop(render);
+// Wallet Hologram Display
+function createHologram() {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#00F0FF';
+    ctx.font = '40px Arial';
+    ctx.fillText('WALLET: $5,000', 10, 50);
+    const tex = new THREE.CanvasTexture(canvas);
+    const spriteMat = new THREE.SpriteMaterial({ map: tex });
+    const sprite = new THREE.Sprite(spriteMat);
+    sprite.position.set(0, 2, -4);
+    sprite.scale.set(2, 1, 1);
+    scene.add(sprite);
 }
+createHologram();
 
-function setupControllers() {
-    const factory = new XRControllerModelFactory();
-    
-    controller1 = renderer.xr.getController(0);
-    playerRig.add(controller1);
-    const grip1 = renderer.xr.getControllerGrip(0);
-    grip1.add(factory.createControllerModel(grip1));
-    playerRig.add(grip1);
+// --- OCULUS CONTROLLERS & MOVEMENT ---
+const controllerModelFactory = new XRControllerModelFactory();
 
-    controller2 = renderer.xr.getController(1);
-    playerRig.add(controller2);
-    const grip2 = renderer.xr.getControllerGrip(1);
-    grip2.add(factory.createControllerModel(grip2));
-    playerRig.add(grip2);
-}
+// Right Controller (Movement/Interaction)
+const controller1 = renderer.xr.getController(0);
+scene.add(controller1);
 
-function render() {
-    // Auto-Sit Logic (If you walk to the table, you sit)
-    if (playerRig.position.z < 1.3) {
-        playerRig.position.y = -0.4;
+// Left Controller (Movement/Interaction)
+const controller2 = renderer.xr.getController(1);
+scene.add(controller2);
+
+// Logic to check if player "Walks" to the table
+function updateMovement() {
+    const session = renderer.xr.getSession();
+    if (session) {
+        for (const source of session.inputSources) {
+            if (source.gamepad) {
+                const axes = source.gamepad.axes; 
+                // Thumbstick Movement
+                camera.position.z += axes[3] * 0.05;
+                camera.position.x += axes[2] * 0.05;
+
+                // Auto-Sit Trigger
+                const distToTable = camera.position.distanceTo(table.position);
+                if (distToTable < 1.2) {
+                    camera.position.set(0, 1.1, -1.2); // Force "Sit" position
+                    console.log("Player Seated - Dealing Cards...");
+                }
+            }
+        }
     }
-    renderer.render(scene, camera);
 }
+
+// --- ANIMATION LOOP ---
+renderer.setAnimationLoop(() => {
+    updateMovement();
+    renderer.render(scene, camera);
+});

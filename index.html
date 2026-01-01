@@ -4,6 +4,14 @@
     <meta charset="UTF-8">
     <title>Scarlett Poker VR - 1.7 Stable</title>
     <style> 
+        <a-entity id="rig" teleport-manager>
+  <a-camera id="player"></a-camera>
+
+  <a-entity
+    id="left-controller"
+    laser-controls="hand: left">
+  </a-entity>
+</a-entity>
         body { margin: 0; background-color: #87CEEB; overflow: hidden; } 
         canvas { display: block; }
     </style>

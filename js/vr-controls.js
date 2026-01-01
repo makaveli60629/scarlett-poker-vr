@@ -1,22 +1,24 @@
 AFRAME.registerComponent('play-game-zone', {
-  init: function () {
-    this.el.addEventListener('raycaster-intersected', evt => {
-      this.raycaster = evt.detail.el;
-    });
-  },
-  tick: function () {
-    const rig = document.querySelector('#rig');
-    const playerPos = rig.getAttribute('position');
-    const tablePos = this.el.getAttribute('position');
-    
-    // Auto-Sit Logic: Distance Check
-    let dist = playerPos.distanceTo(tablePos);
-    if (dist < 2) {
-        // Move rig to seated position
-        rig.setAttribute('position', {x: tablePos.x, y: 0, z: tablePos.z + 1});
-        console.log("Player Seated - Dealing Cards...");
-        // Trigger card deal logic from game-logic.js
-        if(window.gameEngine) window.gameEngine.dealHand();
+    init: function () {
+        this.el.classList.add('clickable');
+    },
+    tick: function () {
+        const rig = document.querySelector('#rig');
+        const playerPos = rig.object3D.position;
+        const tablePos = new THREE.Vector3();
+        this.el.object3D.getWorldPosition(tablePos);
+        
+        // If player walks within 2 meters of table, they automatically sit
+        let dist = playerPos.distanceTo(tablePos);
+        if (dist < 2.5) {
+            // Anchor to table: 1.2m away from center
+            rig.setAttribute('position', {
+                x: tablePos.x, 
+                y: 0, 
+                z: tablePos.z + 1.2
+            });
+            console.log("System: Player seated. Preparing deck...");
+            if(window.pokerLogic) window.pokerLogic.startDeal();
+        }
     }
-  }
 });

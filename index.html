@@ -2,58 +2,31 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Gemini Elite Poker - 1.3.9 Movement Fix</title>
+    <title>Poker VR - Update 1.5.1</title>
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
-    <script src="game-logic.js"></script>
+    <script src="logic.js"></script>
+    <script src="particles.js"></script>
 </head>
 <body>
-    <a-scene renderer="antialias: true; colorManagement: true;">
-        <a-assets>
-            <img id="brick-wall" src="https://i.imgur.com/3p9S0I9.jpg" crossorigin="anonymous">
-        </a-assets>
-
-        <a-entity id="rig" position="0 0.1 6" movement-controls="speed: 0.15; fly: false">
-            <a-camera id="camera" look-controls="pointerLockEnabled: true" position="0 1.6 0">
-                <a-cursor color="yellow" raycaster="objects: .clickable"></a-cursor>
-            </a-camera>
-            
-            <a-entity id="leftHand" oculus-touch-controls="hand: left" laser-controls="hand: left" raycaster="objects: .clickable"></a-entity>
-            <a-entity id="rightHand" oculus-touch-controls="hand: right" laser-controls="hand: right" raycaster="objects: .clickable"></a-entity>
-
-            <a-entity id="watchContainer" position="-0.2 -0.1 -0.3" rotation="0 45 0">
-                <a-plane width="0.25" height="0.12" color="#111">
-                    <a-text id="watch-time" value="00:00" position="-0.1 0.02 0.01" scale="0.2 0.2 0.2" color="white"></a-text>
-                    <a-text id="watch-money" value="$1,000" position="-0.1 -0.02 0.01" scale="0.15 0.15 0.15" color="#00FF00"></a-text>
-                </a-plane>
-            </a-entity>
+    <a-scene>
+        <a-entity id="lobby" position="0 0 0">
+            <a-box position="0 0.5 -5" color="#4CC3D9" id="play-game-zone"></a-box>
+            <a-text value="WALK HERE TO PLAY" position="-1 2 -5"></a-text>
         </a-entity>
 
-        <a-sky color="#0a0a0a"></a-sky>
-        <a-light type="ambient" color="#FFF" intensity="0.5"></a-light>
-        <a-light type="point" position="0 4 0" intensity="1"></a-light>
+        <a-gui-button id="startVR" value="START GAME" position="0 1.5 -2" 
+                      onclick="initGameLogic()"></a-gui-button>
 
-        <a-box position="0 2.5 -6" width="16" height="5" depth="0.5" src="#brick-wall" repeat="4 2"></a-box>
-        <a-box position="-8 2.5 0" rotation="0 90 0" width="16" height="5" depth="0.5" src="#brick-wall" repeat="4 2"></a-box>
-        <a-box position="8 2.5 0" rotation="0 90 0" width="16" height="5" depth="0.5" src="#brick-wall" repeat="4 2"></a-box>
-        <a-plane position="0 0 0" rotation="-90 0 0" width="40" height="40" color="#111"></a-plane>
+        <a-entity oculus-touch-controls="hand: left"></a-entity>
+        <a-entity oculus-touch-controls="hand: right"></a-entity>
 
-        <a-entity id="pokerTable" position="0 0 0">
-            <a-cylinder radius="2" height="0.1" color="#076324">
-                <a-text value="GEMINI ELITE" position="0 0.06 0" rotation="-90 0 0" align="center" width="5" color="gold"></a-text>
-            </a-cylinder>
-
-            <a-box id="sitButton" position="0 0.8 1.8" width="0.8" height="0.2" depth="0.4" color="blue" class="clickable" onclick="triggerSitDown()">
-                <a-text value="SIT & PLAY" position="0 0.12 0" rotation="-90 0 0" align="center" scale="0.7 0.7 0.7"></a-text>
-            </a-box>
+        <a-entity id="winner-announcement" position="0 2.5 -3" visible="false">
+            <a-text id="win-text" value="WINNER" align="center" color="gold" scale="2 2 2"></a-text>
         </a-entity>
 
-        <a-entity id="winDisplay" position="0 3 -3" visible="false">
-            <a-plane width="3" height="1" color="black">
-                <a-text id="winText" value="" align="center" color="gold" width="6"></a-text>
-            </a-plane>
-        </a-entity>
-
+        <a-camera id="main-cam">
+            <a-cursor></a-cursor>
+        </a-camera>
     </a-scene>
 </body>
 </html>

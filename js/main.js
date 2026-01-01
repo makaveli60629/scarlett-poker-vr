@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
 
-// --- SCENE & CAMERA SETUP ---
+// --- SCENE SETUP ---
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87CEEB); // Sky Blue Background
+scene.background = new THREE.Color(0x87CEEB); // Sky Blue
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -12,24 +12,32 @@ renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 
-// --- PLAYER RIG (For Movement) ---
-const playerGroup = new THREE.Group();
-playerGroup.add(camera);
-scene.add(playerGroup); 
-// We move the playerGroup, NOT the camera directly.
+// Lighting
+const ambient = new THREE.AmbientLight(0xffffff, 1.2);
+scene.add(ambient);
 
-// --- FULL STRENGTH LIGHTING ---
-const ambientLight = new THREE.AmbientLight(0xffffff, 1.5); // Strong overall light
-scene.add(ambientLight);
+// --- FAIL-SAFE TEXTURE LOADING ---
+const texLoader = new THREE.TextureLoader();
 
-const overheadLight = new THREE.PointLight(0xffffff, 2.0);
-overheadLight.position.set(0, 5, -2);
-scene.add(overheadLight);
+const loadTexture = (path, fallbackColor) => {
+    return texLoader.load(
+        path, 
+        (texture) => { console.log(`Loaded: ${path}`); },
+        undefined, 
+        (err) => { 
+            console.warn(`Error loading ${path}, using color ${fallbackColor}`);
+        }
+    );
+};
 
-// --- UPDATE 1.4 TEXTURE PREP: GEOMETRY ---
-const textureLoader = new THREE.TextureLoader();
+// Update 1.4 Textures from your folder
+const brickTex = loadTexture('assets/texture/brick.jpg', '#8B4513');
+const feltTex = loadTexture('assets/texture/felt.jpg', '#004d00');
 
-// Floor
+brickTex.wrapS = brickTex.wrapT = THREE.RepeatWrapping;
+brickTex.repeat.set(4, 2);
+
+// --- THE ROOM ---
 const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(20, 20),
     new THREE.MeshStandardMaterial({ color: 0x222222 })
@@ -37,62 +45,58 @@ const floor = new THREE.Mesh(
 floor.rotation.x = -Math.PI / 2;
 scene.add(floor);
 
-// Walls (The Room)
-const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 }); // Brick Brown
-const wallFront = new THREE.Mesh(new THREE.PlaneGeometry(20, 10), wallMaterial);
-wallFront.position.set(0, 5, -10);
-scene.add(wallFront);
+// Bricked Walls (Will show brick.jpg or solid brown if file missing)
+const backWall = new THREE.Mesh(
+    new THREE.PlaneGeometry(20, 10),
+    new THREE.MeshStandardMaterial({ map: brickTex, color: 0x8B4513 }) 
+);
+backWall.position.set(0, 5, -10);
+scene.add(backWall);
 
-// The Table (The "Play Game" target)
+// The Table (Will show felt.jpg or solid green if file missing)
 const table = new THREE.Mesh(
     new THREE.CylinderGeometry(1.5, 1.5, 0.2, 32),
-    new THREE.MeshStandardMaterial({ color: 0x006400 }) // Poker Green
+    new THREE.MeshStandardMaterial({ map: feltTex, color: 0x004d00 })
 );
 table.position.set(0, 0.8, -4);
 scene.add(table);
 
-// --- FIXED WALLET (World Space) ---
-function createFixedWallet() {
+// --- PLAYER & WATCH ---
+const playerGroup = new THREE.Group();
+playerGroup.add(camera);
+scene.add(playerGroup);
+
+const leftController = renderer.xr.getController(0);
+scene.add(leftController);
+
+function createWatch() {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
+    canvas.width = 256; canvas.height = 128;
+    ctx.fillStyle = '#111111';
+    ctx.fillRect(0, 0, 256, 128);
     ctx.fillStyle = '#89CFF0'; // Baby Blue
     ctx.font = 'Bold 40px Arial';
-    ctx.fillText('WALLET: $5,000', 10, 50);
-    
-    const texture = new THREE.CanvasTexture(canvas);
-    const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
-    const walletSprite = new THREE.Sprite(spriteMaterial);
-    
-    // Position it in the "Zone" (World Space)
-    walletSprite.position.set(0, 2, -2); 
-    walletSprite.scale.set(2, 1, 1);
-    
-    scene.add(walletSprite); // Adding to SCENE, not CAMERA
-}
-createFixedWallet();
+    ctx.fillText('$5,000', 60, 80);
 
-// --- MOVEMENT CONTROLS ---
-function handleXRInput() {
+    const watchTex = new THREE.CanvasTexture(canvas);
+    const watchSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: watchTex }));
+    watchSprite.scale.set(0.15, 0.08, 1);
+    leftController.add(watchSprite);
+}
+createWatch();
+
+// --- ANIMATION LOOP ---
+renderer.setAnimationLoop(() => {
     const session = renderer.xr.getSession();
     if (session) {
         for (const source of session.inputSources) {
             if (source.gamepad && source.handedness === 'left') {
                 const axes = source.gamepad.axes;
-                // Move the whole playerGroup through the room
                 playerGroup.position.z += axes[3] * 0.05;
                 playerGroup.position.x += axes[2] * 0.05;
-                
-                // Auto-Sit detection
-                const dist = playerGroup.position.distanceTo(new THREE.Vector3(0, 0, -4));
-                if (dist < 1.5) {
-                    playerGroup.position.set(0, 0, -3.2); // Snap to table
-                }
             }
         }
     }
-}
-
-renderer.setAnimationLoop(() => {
-    handleXRInput();
     renderer.render(scene, camera);
 });

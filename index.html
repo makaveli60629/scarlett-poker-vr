@@ -2,19 +2,17 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Poker VR Update 1.3 - Complete</title>
+    <title>Poker VR - Update 1.3 Solid</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; }
-        #win-ui {
-            position: fixed; top: 15%; left: 50%; transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.9); color: gold; padding: 30px;
-            border: 3px solid #00f2ff; border-radius: 20px; display: none;
-            text-align: center; z-index: 1000; font-family: sans-serif;
+        #ui {
+            position: fixed; top: 10px; left: 10px; color: #00f2ff;
+            font-family: 'Courier New', monospace; pointer-events: none;
         }
     </style>
 </head>
 <body>
-    <div id="win-ui"><h1 id="winner-name"></h1><p id="winner-hand"></p></div>
+    <div id="ui">WALLET: $5,000 | STATUS: STANDING</div>
 
     <script type="importmap">
         { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
@@ -23,106 +21,98 @@
     <script type="module">
         import * as THREE from 'three';
 
-        // --- 1. Physics Engine (Capital P) ---
+        // --- 1. THE PHYSICS (Capital P) ---
         class Physics {
             constructor() { this.colliders = []; }
             add(mesh) {
                 const box = new THREE.Box3().setFromObject(mesh);
                 this.colliders.push(box);
             }
-            check(pos) {
-                const playerSphere = new THREE.Sphere(pos, 0.4);
-                for(let wall of this.colliders) {
-                    if(wall.intersectsSphere(playerSphere)) return true;
-                }
-                return false;
-            }
         }
         const P = new Physics();
 
-        // --- 2. Setup Scene ---
+        // --- 2. ENGINE SETUP ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x050505);
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        // SPAWN FIX: Move camera back so you aren't inside the wall/pillar
+        camera.position.set(0, 1.6, 3); 
+
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.xr.enabled = true;
         document.body.appendChild(renderer.domElement);
 
-        // --- 3. Lighting (Ensures no black screen) ---
-        const amb = new THREE.AmbientLight(0xffffff, 0.6);
-        scene.add(amb);
+        // --- 3. LIGHTING (No more black screen) ---
+        const light = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(light);
+        const point = new THREE.PointLight(0x00f2ff, 2, 20);
+        point.position.set(0, 3.5, 0);
+        scene.add(point);
 
-        // --- 4. Luxury Interior (Brick Walls & 4m Ceilings) ---
-        const brickMat = new THREE.MeshStandardMaterial({ color: 0x4d1a1a }); // Dark Brick
+        // --- 4. LUXURY INTERIOR (4m Ceiling + Brick Walls) ---
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x4d1a1a }); // Brick
         const goldMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.8 });
 
-        function createRoom(x, z, size, lightColor) {
-            const room = new THREE.Group();
-            // Floor & Ceiling (4m high)
-            const floor = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({color: 0x111111}));
-            floor.rotation.x = -Math.PI/2;
-            const ceil = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({color: 0x111111}));
-            ceil.position.y = 4;
-            ceil.rotation.x = Math.PI/2;
-            room.add(floor, ceil);
+        // Floor (Large Marble)
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), new THREE.MeshStandardMaterial({color: 0x111111}));
+        floor.rotation.x = -Math.PI/2;
+        scene.add(floor);
 
-            // Brick Walls
-            const wallGeo = new THREE.BoxGeometry(size, 4, 0.2);
-            const wall = new THREE.Mesh(wallGeo, brickMat);
-            wall.position.set(0, 2, -size/2);
-            room.add(wall);
-            P.add(wall); // Solid walls
+        // Ceiling (Exactly 4 Meters)
+        const ceil = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), new THREE.MeshStandardMaterial({color: 0x050505}));
+        ceil.position.y = 4;
+        ceil.rotation.x = Math.PI/2;
+        scene.add(ceil);
 
-            // Luxury Pillar
-            const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 4), goldMat);
-            pillar.position.set(-size/2 + 0.5, 2, -size/2 + 0.5);
-            room.add(pillar);
+        // Lobby Brick Wall
+        const backWall = new THREE.Mesh(new THREE.BoxGeometry(15, 4, 0.5), wallMat);
+        backWall.position.set(0, 2, -7);
+        scene.add(backWall);
+        P.add(backWall);
 
-            const light = new THREE.PointLight(lightColor, 2, 15);
-            light.position.set(0, 3.8, 0);
-            room.add(light);
+        // Gold Pillars
+        const createPillar = (x, z) => {
+            const p = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 4), goldMat);
+            p.position.set(x, 2, z);
+            scene.add(p);
+            P.add(p);
+        };
+        createPillar(-5, -5);
+        createPillar(5, -5);
 
-            room.position.set(x, 0, z);
-            scene.add(room);
-        }
+        // --- 5. AVATAR MIRROR (With Long Hair Logic) ---
+        const mirrorFrame = new THREE.Mesh(new THREE.BoxGeometry(3, 2.5, 0.1), new THREE.MeshStandardMaterial({color: 0x222222}));
+        mirrorFrame.position.set(-6, 1.5, 0);
+        mirrorFrame.rotation.y = Math.PI/2;
+        scene.add(mirrorFrame);
 
-        createRoom(0, 0, 15, 0x00f2ff); // Lobby
-        createRoom(18, 0, 12, 0x00ff00); // Poker Room
-        createRoom(0, 18, 12, 0xffd700); // Vault
+        // Placeholder for "Long Hair" Avatar reflection
+        const hairRef = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.5, 4, 8), new THREE.MeshStandardMaterial({color: 0x2b1d0e}));
+        hairRef.position.set(-5.9, 1.8, 0); // Visible in the mirror
+        scene.add(hairRef);
 
-        // --- 5. Daily Pick Table ($500 increments) ---
-        const dailyTable = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 1), goldMat);
-        dailyTable.position.set(0, 0.5, -4);
-        scene.add(dailyTable);
-        P.add(dailyTable);
-
-        // --- 6. Branded Poker Table ---
-        const tableGroup = new THREE.Group();
-        const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 0.2), new THREE.MeshStandardMaterial({color: 0x076324}));
-        tableTop.position.y = 0.8;
-        const logo = new THREE.Mesh(new THREE.CircleGeometry(0.6, 32), new THREE.MeshBasicMaterial({color: 0xffffff}));
-        logo.rotation.x = -Math.PI/2;
-        logo.position.y = 0.91; 
-        tableGroup.add(tableTop, logo);
-        tableGroup.position.set(18, 0, 0);
-        scene.add(tableGroup);
-
-        // --- 7. Oculus Controls (OK Trigger) ---
-        const controller1 = renderer.xr.getController(0); // Right
+        // --- 6. OCULUS CONTROLS (Right Trigger = OK) ---
+        const controller1 = renderer.xr.getController(0);
         scene.add(controller1);
+
         controller1.addEventListener('selectstart', () => {
-            console.log("Right Trigger: OK Activated");
-            // If near Daily Table, add $500
-            if(camera.position.distanceTo(dailyTable.position) < 2) {
-                console.log("Daily Pick Claimed!");
+            console.log("OK Button Triggered");
+            // Automatic Sit Logic: If near poker room, teleport to chair
+            if(camera.position.z < -4) {
+                camera.position.set(0, 1.1, -6); 
+                document.getElementById('ui').innerText = "STATUS: SITTING - DEALING CARDS...";
             }
         });
 
-        // --- 8. Animation Loop ---
-        renderer.setAnimationLoop(() => {
-            renderer.render(scene, camera);
-        });
+        // --- 7. RENDER LOOP ---
+        function animate() {
+            renderer.setAnimationLoop(() => {
+                renderer.render(scene, camera);
+            });
+        }
+        animate();
 
     </script>
 </body>

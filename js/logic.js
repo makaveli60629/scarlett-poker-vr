@@ -1,38 +1,50 @@
-// Poker Logic 1.3 - Win Highlights & Hands
-let gameState = {
-    pot: 0,
-    players: [],
-    communityCards: [],
-    winner: null
-};
+// Update 1.6.5 - Master Logic
+document.addEventListener('DOMContentLoaded', () => {
+    console.log("System Online. Final 1.6.5 Stability check...");
+});
 
-function checkWinner() {
-    // Logic to calculate hand strength
-    let winner = gameState.players[0]; // Example logic
-    displayWinner(winner);
+// 1.3/1.6 Movement Logic
+let isPlaying = false;
+
+function checkPosition() {
+    const rig = document.querySelector('#rig');
+    const camPos = document.querySelector('#player-cam').object3D.position;
+    const triggerPos = document.querySelector('#play-zone').object3D.position;
+    
+    // Check if player is near the blue square
+    let distance = new THREE.Vector3(rig.position.x + camPos.x, 0, rig.position.z + camPos.z)
+                    .distanceTo(new THREE.Vector3(triggerPos.x, 0, triggerPos.z));
+
+    if (distance < 1.5 && !isPlaying) {
+        sitPlayer();
+    }
 }
 
-function displayWinner(player) {
-    const ui = document.getElementById('winner-announcement');
-    const text = document.getElementById('win-text');
-    
-    // 1.3 Requirement: Display winner name for 10 seconds
-    text.setAttribute('value', player.name + " WINS THE POT!");
+function sitPlayer() {
+    isPlaying = true;
+    const rig = document.querySelector('#rig');
+    // Animate move to the table seat
+    rig.setAttribute('animation', {
+        property: 'position',
+        to: '0 0 -5',
+        dur: 1000,
+        easing: 'easeInOutQuad'
+    });
+    console.log("Player Seated. Update 1.3 Dealer Logic Active.");
+}
+
+// Win Display Logic
+function handleWin(winnerName) {
+    const ui = document.querySelector('#win-ui');
+    const text = document.querySelector('#win-text');
+    text.setAttribute('value', winnerName.toUpperCase() + " WINS!");
     ui.setAttribute('visible', 'true');
     
-    // Highlight winning player (Mesh/Shader logic)
-    player.mesh.setAttribute('material', 'emissive: #00ff00; emissiveIntensity: 2');
-
+    // 10 Second rule
     setTimeout(() => {
         ui.setAttribute('visible', 'false');
-        player.mesh.setAttribute('material', 'emissiveIntensity: 0');
-    }, 10000); // 10 seconds display
+    }, 10000);
 }
 
-// 1.3 Requirement: Move to "Play Game" automatically sits down
-document.querySelector('#play-game-zone').addEventListener('componentchanged', (evt) => {
-    if (evt.name === 'position') {
-        // Logic for player sitting and receiving cards
-        console.log("Player sat down. Dealing cards...");
-    }
-});
+// Run position check every 300ms
+setInterval(checkPosition, 300);

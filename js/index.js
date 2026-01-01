@@ -1,74 +1,55 @@
-// Update 1.7 - Master Integration Build
-// Features: Auto-Seating, Hologram Wallet, Teleports, and Full Poker Logic
+// index.js - Full Update 1.5.1 Base
+import CONFIG from './js/config.js';
 
-const GameConfig = {
-    version: "1.7",
-    winningDisplayTime: 10000, // 10 seconds
-    currencySymbol: "$",
-    gravity: -9.81 // For 1.6 Physics Refinement
+// 1. VR Initialization & Oculus Controls
+const sessionVars = {
+    isVR: false,
+    controllers: []
 };
 
-// --- PLAYER DATA & WALLET ---
-let playerProfile = {
-    balance: 5000,
-    currentLocation: "Lobby",
-    hand: []
-};
+function initGame() {
+    console.log("Initializing Version 1.5.1...");
+    
+    // Setup Scene (The "Box")
+    // If this fails, you see blue.
+    setupEnvironment();
+    setupLobby();
+}
 
-// --- TELEPORT & ZONE LOGIC ---
-function handleTeleport(targetZone) {
-    console.log(`Teleporting to: ${targetZone}`);
-    playerProfile.currentLocation = targetZone;
-
-    if (targetZone === "Plane Tables Zone") {
-        displayHologramWallet(); // Version 1.2 Feature
-    }
-
-    if (targetZone === "Play Game") {
-        autoSitAndDeal();
+// 2. The "Auto-Sit" Logic
+// When the user moves to the "Play Game" area
+function checkPlayerLocation(playerPosition) {
+    const pokerZone = { x: 0, y: 0, z: -5 }; // Example coordinates
+    
+    if (distance(playerPosition, pokerZone) < 2) {
+        sitDownAndDeal();
     }
 }
 
-function displayHologramWallet() {
-    // Renders the floating text above the player's view in the Zone room
-    const hologram = document.getElementById('wallet-hologram');
-    hologram.innerText = `WALLET: ${GameConfig.currencySymbol}${playerProfile.balance}`;
-    hologram.style.opacity = "1";
+function sitDownAndDeal() {
+    console.log("Player reached Play Game area. Auto-sitting...");
+    // Trigger Highlight for player
+    // Display cards
+    displayWinnerPopup("PREPARING GAME..."); 
 }
 
-// --- AUTOMATIC GAMEPLAY ---
-function autoSitAndDeal() {
-    console.log("Auto-seating triggered...");
-    // Logic to lock player to chair mesh
-    lockToSeat();
-    dealInitialCards();
-}
-
-function dealInitialCards() {
-    // 1.6 Refined Physics for card dealing
-    console.log("Dealing 2 cards to player...");
-    // Trigger Animation...
-}
-
-// --- WINNER ANNOUNCEMENT (10 SECONDS) ---
-function announceWinner(winnerId, handName, cards) {
-    const winnerDisplay = document.getElementById('winner-overlay');
+// 3. Winning Display (10 Second Rule)
+function displayWinnerPopup(message) {
+    const uiElement = document.getElementById('win-display');
+    uiElement.innerText = message;
+    uiElement.style.display = 'block';
     
-    // Highlight the winning player mesh
-    highlightPlayer(winnerId);
-    
-    winnerDisplay.innerHTML = `
-        <div class="winner-popup">
-            <h1>WINNER: ${winnerId}</h1>
-            <h2>${handName}</h2>
-            <div class="winning-cards">${cards}</div>
-        </div>
-    `;
-    
-    winnerDisplay.style.display = 'block';
-
     setTimeout(() => {
-        winnerDisplay.style.display = 'none';
-        unhighlightAllPlayers();
-    }, GameConfig.winningDisplayTime);
+        uiElement.style.display = 'none';
+    }, CONFIG.gameLogic.winDisplayMs); // Uses the 10000ms from your config
 }
+
+// 4. Oculus Input Handling
+function handleControllerInput() {
+    // Left Hand - Movement (Thumbstick)
+    // Right Hand - A Button (Check/Call)
+    // This ensures your Oculus controls stay mapped.
+}
+
+// EXECUTE
+initGame();

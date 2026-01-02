@@ -1,4 +1,4 @@
-// Environment Setup - Update 1.5.2 (Texture Integrated)
+    // Environment Setup - Update 1.5.2 (Texture Integrated)
 import * as THREE from 'three';
 
 export function createEnvironment(scene, playerWalletBalance) {

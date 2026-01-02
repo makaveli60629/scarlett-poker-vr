@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>POKER VR - 2.1.15 PERMANENT MASTER</title>
+    <title>POKER VR - 2.1.21 PERMANENT FINAL</title>
     <style> body { margin: 0; background-color: #000; overflow: hidden; } </style>
 </head>
 <body>
@@ -10,8 +10,12 @@
         import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
         import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-        // 1. DATA & SETUP
-        let stats = JSON.parse(localStorage.getItem('poker_master_save')) || { chips: 5000, rank: "ROOKIE" };
+        // --- 1. MASTER BRAIN (DATA) ---
+        const MASTER = {
+            stats: JSON.parse(localStorage.getItem('poker_stats_v2')) || { chips: 15000, rank: "LEGEND" },
+            save() { localStorage.setItem('poker_stats_v2', JSON.stringify(this.stats)); }
+        };
+
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x01020a);
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
@@ -21,145 +25,89 @@
         document.body.appendChild(renderer.domElement);
         document.body.appendChild(VRButton.createButton(renderer));
 
-        const cameraRig = new THREE.Group();
-        cameraRig.position.set(0, 0, 25);
-        cameraRig.add(camera);
-        scene.add(cameraRig);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.8), new THREE.DirectionalLight(0xffffff, 2));
+        const rig = new THREE.Group();
+        rig.add(camera);
+        scene.add(rig);
 
         const texLoader = new THREE.TextureLoader();
         const path = 'assets/textures/';
-        const carpet = texLoader.load(path + 'lobby_carpet.jpg');
         const brick = texLoader.load(path + 'brickwall.jpg');
-        const runeWall = texLoader.load(path + 'wall_stone_runes.jpg');
-        const dailyTex = texLoader.load(path + 'dailyclaim.jpg');
-        [carpet, brick, runeWall].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(10, 10); });
+        const carpet = texLoader.load(path + 'lobby_carpet.jpg');
+        const crownTex = texLoader.load(path + 'Crown.jpg');
+        const watchTex = texLoader.load(path + 'watch_gold.jpg');
+        [brick, carpet].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(10, 10); });
 
-        // 2. MODULAR ROOM GENERATOR
-        function createFullRoom(name, x, z, size, wallTex, trimColor) {
-            const roomGroup = new THREE.Group();
-            roomGroup.position.set(x, 0, z);
-            
-            // Floor
+        // --- 2. ARCHITECTURE & STORE ---
+        function createRoom(name, x, z, size, color, doors={n:false, s:false}) {
+            const g = new THREE.Group(); g.position.set(x, 0, z);
             const f = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({map: carpet}));
-            f.rotation.x = -Math.PI/2; roomGroup.add(f);
-
-            // Walls + Pillars
-            const trimMat = new THREE.MeshStandardMaterial({color: trimColor, emissive: trimColor, emissiveIntensity: 0.5});
-            for(let i=0; i<4; i++) {
+            f.rotation.x = -Math.PI/2; f.userData.isFloor = true; g.add(f);
+            
+            const wallH = 15;
+            [['n',0,-size/2,0], ['s',0,size/2,Math.PI], ['e',size/2,0,-Math.PI/2], ['w',-size/2,0,Math.PI/2]].forEach(p => {
                 const wG = new THREE.Group();
-                const w = new THREE.Mesh(new THREE.BoxGeometry(size, 20, 1), new THREE.MeshStandardMaterial({map: wallTex}));
-                const t1 = new THREE.Mesh(new THREE.BoxGeometry(size, 0.5, 1.2), trimMat); t1.position.y = -9.7;
-                const t2 = new THREE.Mesh(new THREE.BoxGeometry(size, 0.5, 1.2), trimMat); t2.position.y = 9.7;
-                wG.add(w, t1, t2);
-                const a = (Math.PI/2)*i; wG.position.set(Math.sin(a)*(size/2), 10, Math.cos(a)*(size/2)); wG.rotation.y = a;
-                roomGroup.add(wG);
-                
-                const p = new THREE.Mesh(new THREE.BoxGeometry(2, 20, 2), new THREE.MeshStandardMaterial({color: 0x111111}));
-                p.position.set((i%2==0?1:-1)*(size/2), 10, (i<2?1:-1)*(size/2)); roomGroup.add(p);
-            }
-            scene.add(roomGroup);
-            return roomGroup;
-        }
-
-        const lobby = createFullRoom("Lobby", 0, 0, 60, brick, 0x00ffff);
-        const pokerRoom = createFullRoom("Poker", 0, -100, 50, brick, 0xff00ff);
-        const storeRoom = createFullRoom("Store", 0, 100, 50, brick, 0x00ff00);
-        const scorpionRoom = createFullRoom("Scorpion", -100, 0, 50, runeWall, 0xff0000);
-
-        // 3. DAILY TABLE & HALOS
-        const dailyTable = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 1, 32), new THREE.MeshStandardMaterial({color: 0x222222}));
-        dailyTable.position.set(-10, 0.5, 10); scene.add(dailyTable);
-
-        const claimBtn = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.1, 32), new THREE.MeshStandardMaterial({color: 0xff0000}));
-        claimBtn.position.set(-10, 1.1, 10); scene.add(claimBtn);
-
-        function createHalo(x, z, color) {
-            const h = new THREE.Mesh(new THREE.TorusGeometry(3, 0.05, 16, 100), new THREE.MeshBasicMaterial({color, transparent:true, opacity:0.6}));
-            h.rotation.x = Math.PI/2; h.position.set(x, 0.1, z); scene.add(h); return h;
-        }
-        const hPoker = createHalo(0, -10, 0xff00ff);
-        const hStore = createHalo(0, 10, 0x00ff00);
-
-        // 4. OCULUS MASTER CONTROLS
-        const controllerL = renderer.xr.getController(1);
-        const controllerR = renderer.xr.getController(0);
-        
-        // LEFT WRIST MENU (Y-Toggle)
-        const wristMenu = new THREE.Group();
-        wristMenu.visible = false;
-        wristMenu.rotation.x = -Math.PI/2; wristMenu.position.set(0, 0.05, 0);
-        controllerL.add(wristMenu);
-
-        const menuBG = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.3), new THREE.MeshBasicMaterial({color: 0x000000, transparent:true, opacity:0.9}));
-        wristMenu.add(menuBG);
-
-        const createBtn = (txt, y, action) => {
-            const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 64;
-            const ctx = canvas.getContext('2d'); ctx.fillStyle = "#333"; ctx.fillRect(0,0,256,64);
-            ctx.fillStyle = "white"; ctx.font = "bold 30px Arial"; ctx.textAlign = "center"; ctx.fillText(txt, 128, 42);
-            const b = new THREE.Mesh(new THREE.PlaneGeometry(0.18, 0.06), new THREE.MeshBasicMaterial({map: new THREE.CanvasTexture(canvas)}));
-            b.position.y = y; b.userData = { action }; wristMenu.add(b); return b;
-        };
-        const btnLobby = createBtn("LOBBY", 0.1, "lobby");
-        const btnPoker = createBtn("POKER", 0, "poker");
-        const btnStore = createBtn("STORE", -0.1, "store");
-
-        // Lasers
-        const laserL = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-50)]), new THREE.LineBasicMaterial({color: 0x00ffff}));
-        controllerL.add(laserL);
-        const laserR = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-2)]), new THREE.LineBasicMaterial({color: 0xffffff}));
-        controllerR.add(laserR);
-
-        cameraRig.add(controllerL, controllerR);
-        const rayL = new THREE.Raycaster();
-        const rayR = new THREE.Raycaster();
-        let menuCD = false;
-
-        renderer.setAnimationLoop(() => {
-            hPoker.rotation.z += 0.01; hStore.rotation.z += 0.01;
-            const session = renderer.xr.getSession();
-            if (session) {
-                for (const source of session.inputSources) {
-                    const b = source.gamepad.buttons;
-                    if (source.handedness === 'left') {
-                        // Teleport (Trigger)
-                        const m = new THREE.Matrix4().extractRotation(controllerL.matrixWorld);
-                        rayL.ray.origin.setFromMatrixPosition(controllerL.matrixWorld);
-                        rayL.ray.direction.set(0, 0, -1).applyMatrix4(m);
-                        const hits = rayL.intersectObjects(scene.children, true);
-                        const fHit = hits.find(h => h.object.geometry.type === "PlaneGeometry" && h.object.parent === scene);
-                        if (fHit && b[0].pressed) cameraRig.position.set(fHit.point.x, 0, fHit.point.z);
-                        // Toggle Menu (Y Button / Button 4 or 5)
-                        if ((b[4].pressed || b[5].pressed) && !menuCD) {
-                            wristMenu.visible = !wristMenu.visible; menuCD = true; setTimeout(() => menuCD = false, 500);
-                        }
-                    }
-                    if (source.handedness === 'right') {
-                        // Interact (Trigger)
-                        rayR.ray.origin.setFromMatrixPosition(controllerR.matrixWorld);
-                        const mR = new THREE.Matrix4().extractRotation(controllerR.matrixWorld);
-                        rayR.ray.direction.set(0, 0, -1).applyMatrix4(mR);
-                        
-                        const menuHits = rayR.intersectObjects(wristMenu.children);
-                        if (menuHits.length > 0 && b[0].pressed && !menuCD) {
-                            const act = menuHits[0].object.userData.action;
-                            if (act === "lobby") cameraRig.position.set(0,0,25);
-                            if (act === "poker") cameraRig.position.set(0,0,-100);
-                            if (act === "store") cameraRig.position.set(0,0,100);
-                            menuCD = true; setTimeout(() => menuCD = false, 500);
-                        }
-                        
-                        const stickX = source.gamepad.axes[2] || source.gamepad.axes[3] || 0;
-                        if (Math.abs(stickX) > 0.7 && !menuCD) {
-                            cameraRig.rotation.y -= Math.sign(stickX) * (Math.PI/4);
-                            menuCD = true; setTimeout(() => menuCD = false, 300);
-                        }
-                    }
+                if(doors[p[0]]) {
+                    const sw = (size-8)/2;
+                    const l = new THREE.Mesh(new THREE.BoxGeometry(sw, wallH, 0.5), new THREE.MeshStandardMaterial({map: brick}));
+                    l.position.x = -size/2 + sw/2;
+                    const r = new THREE.Mesh(new THREE.BoxGeometry(sw, wallH, 0.5), new THREE.MeshStandardMaterial({map: brick}));
+                    r.position.x = size/2 - sw/2;
+                    wG.add(l, r);
+                    [l, r].forEach(m => { m.userData.isWall = true; });
+                } else {
+                    const solid = new THREE.Mesh(new THREE.BoxGeometry(size, wallH, 0.5), new THREE.MeshStandardMaterial({map: brick}));
+                    solid.userData.isWall = true; wG.add(solid);
                 }
-            }
-            renderer.render(scene, camera);
+                wG.position.set(p[1], wallH/2, p[2]); wG.rotation.y = p[3]; g.add(wG);
+            });
+            scene.add(g); return g;
+        }
+
+        const lobby = createRoom("Lobby", 0, 0, 50, 0x00ffff, {n:true, s:true});
+        const store = createRoom("Store", 0, 80, 40, 0x00ff00, {n:true});
+        const poker = createRoom("Poker", 0, -80, 40, 0xff00ff, {s:true});
+
+        // Store Pedestals & Assets
+        const items = [crownTex, watchTex, crownTex]; // Assets for display
+        items.forEach((tex, i) => {
+            const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 1, 16), new THREE.MeshStandardMaterial({color: 0x222222}));
+            ped.position.set(-6 + (i*6), 0.5, 90);
+            const display = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), new THREE.MeshStandardMaterial({map: tex}));
+            display.position.y = 1; ped.add(display);
+            scene.add(ped);
         });
-    </script>
-</body>
-</html>
+
+        // --- 3. SLEEK WRIST HUD ---
+        const conL = renderer.xr.getController(1);
+        const conR = renderer.xr.getController(0);
+        rig.add(conL, conR);
+
+        const wrist = new THREE.Group();
+        wrist.visible = false; 
+        wrist.position.set(0.02, 0.05, 0); 
+        wrist.rotation.x = -Math.PI/2;
+        conL.add(wrist);
+
+        const menuCanvas = document.createElement('canvas'); menuCanvas.width = 256; menuCanvas.height = 256;
+        const ctx = menuCanvas.getContext('2d');
+        const menuTex = new THREE.CanvasTexture(menuCanvas);
+        const menuMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.12), new THREE.MeshBasicMaterial({map: menuTex, transparent: true}));
+        wrist.add(menuMesh);
+
+        function updateHUD() {
+            ctx.clearRect(0,0,256,256);
+            ctx.fillStyle = "rgba(0,10,20,0.95)"; ctx.roundRect(0,0,256,256, 20); ctx.fill();
+            ctx.strokeStyle = "cyan"; ctx.lineWidth = 5; ctx.strokeRect(5,5,246,246);
+            ctx.fillStyle = "white"; ctx.font = "bold 24px Arial"; ctx.fillText(`$${MASTER.stats.chips}`, 30, 60);
+            ctx.font = "16px Arial"; ctx.fillText(MASTER.stats.rank, 30, 95);
+            ctx.fillStyle = "cyan"; ctx.fillText(new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), 30, 130);
+            menuTex.needsUpdate = true;
+        }
+
+        // --- 4. CONTROL SYSTEMS ---
+        const marker = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.4, 32), new THREE.MeshBasicMaterial({color: 0x00ffff, side: THREE.DoubleSide}));
+        marker.rotation.x = -Math.PI/2; scene.add(marker);
+        const laserL = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]), new THREE.LineBasicMaterial({color: 0x00ffff}));
+        conL.add(laserL);
+
+        const rayL = new THREE.

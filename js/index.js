@@ -1,161 +1,201 @@
-import * as THREE from 'three';
-import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+/**
+ * SCARLET VR POKER - UPDATE 1.8 MASTER ENGINE
+ * Includes: Scorpion Room, Store, Daily Claims, Oculus Controls, & VR Notifications
+ */
 
-let scene, camera, renderer, playerGroup;
-let controllerLeft, controllerRight;
-let watchMesh, watchMenu;
-let playerSatDown = false;
-let moveSpeed = 0.05;
+let scene, camera, renderer, clock;
+let controller1, controller2, raycaster;
+let notificationGroup, scarletLogo;
+let playerMoney = 10000;
+let isSeated = false;
 
-init();
-animate();
+const TEXTURE_PATH = 'assets/textures/';
 
+// --- INITIALIZATION ---
 function init() {
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x050505);
+    scene.background = new THREE.Color(0x020202); 
+    scene.fog = new THREE.FogExp2(0x020202, 0.05);
 
-    playerGroup = new THREE.Group();
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 1.6, 0);
-    playerGroup.add(camera);
-    scene.add(playerGroup);
+    camera.position.set(0, 1.6, 5); // Default standing height
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.xr.enabled = true;
+    renderer.shadowMap.enabled = true;
     document.body.appendChild(renderer.domElement);
-    document.getElementById('vr-button-container').appendChild(VRButton.createButton(renderer));
 
-    // Lobby & Table (One Big Room, No Arches)
-    createLobby();
-    createPokerTable();
+    clock = new THREE.Clock();
+    raycaster = new THREE.Raycaster();
 
-    // VR Setup
-    setupControllers();
+    setupLights();
+    setupOculusControllers();
+    
+    // Create the Environments
+    createScorpionRoom();
+    createScarletStore();
+    createNotificationSystem();
 
-    // Lighting
-    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-    const sun = new THREE.DirectionalLight(0xffffff, 1);
-    sun.position.set(5, 10, 5);
-    scene.add(sun);
+    // Start Animation
+    renderer.setAnimationLoop(render);
+
+    // Initial Notification: Daily Claim
+    setTimeout(() => {
+        triggerNotification("DAILY CLAIM", "You received $5,000 Luxury Bonus!", "CLAIM");
+    }, 2000);
 }
 
-function setupControllers() {
-    const modelFactory = new XRControllerModelFactory();
+// --- LIGHTING SYSTEM ---
+function setupLights() {
+    const ambient = new THREE.AmbientLight(0xffffff, 0.2);
+    scene.add(ambient);
 
-    // LEFT CONTROLLER (Movement + Y Button)
-    controllerLeft = renderer.xr.getController(0);
-    playerGroup.add(controllerLeft);
-    const gripLeft = renderer.xr.getControllerGrip(0);
-    gripLeft.add(modelFactory.createControllerModel(gripLeft));
-    playerGroup.add(gripLeft);
-
-    // RIGHT CONTROLLER (Trigger Interaction)
-    controllerRight = renderer.xr.getController(1);
-    controllerRight.addEventListener('selectstart', onRightTrigger);
-    playerGroup.add(controllerRight);
-    const gripRight = renderer.xr.getControllerGrip(1);
-    gripRight.add(modelFactory.createControllerModel(gripRight));
-    playerGroup.add(gripRight);
-
-    // Attach Wrist Watch to Left Grip
-    createWristWatch(gripLeft);
+    const stingerLight = new THREE.PointLight(0xff4500, 2, 20); // Scorpion Orange
+    stingerLight.position.set(0, 5, -5);
+    scene.add(stingerLight);
 }
 
-function createWristWatch(parent) {
-    // Watch Face
-    const watchGeom = new THREE.BoxGeometry(0.08, 0.02, 0.08);
-    const watchMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
-    watchMesh = new THREE.Mesh(watchGeom, watchMat);
-    watchMesh.position.set(0, 0.03, 0.05);
-    parent.add(watchMesh);
+// --- OCULUS CONTROLS & SEATING LOGIC ---
+function setupOculusControllers() {
+    controller1 = renderer.xr.getController(0);
+    controller1.addEventListener('selectstart', onSelect);
+    scene.add(controller1);
 
-    // The Menu (Attached to watch, hidden by default)
-    const menuGeom = new THREE.PlaneGeometry(0.2, 0.2);
-    const menuMat = new THREE.MeshBasicMaterial({ color: 0x222222, side: THREE.DoubleSide });
-    watchMenu = new THREE.Mesh(menuGeom, menuMat);
-    watchMenu.position.set(0, 0.15, 0); // Floats above watch
-    watchMenu.rotation.x = -Math.PI / 4;
-    watchMenu.visible = false;
-    watchMesh.add(watchMenu);
+    controller2 = renderer.xr.getController(1);
+    controller2.addEventListener('selectstart', onSelect);
+    scene.add(controller2);
+
+    // Laser Line for UI
+    const lineGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-2)]);
+    const line = new THREE.Line(lineGeom);
+    controller1.add(line.clone());
+    controller2.add(line.clone());
 }
 
-function handleInputs() {
-    const session = renderer.xr.getSession();
-    if (!session) return;
+function onSelect(event) {
+    const controller = event.target;
+    const intersections = getIntersections(controller);
 
-    for (const source of session.inputSources) {
-        if (!source.gamepad) continue;
+    if (intersections.length > 0) {
+        const object = intersections[0].object;
 
-        const axes = source.gamepad.axes; // Sticks
-        const buttons = source.gamepad.buttons; // A, B, X, Y
+        // Notification OK Button
+        if (object.name === "ui_ok_btn") {
+            dismissNotification();
+            playerMoney += 5000;
+        }
 
-        // LEFT CONTROLLER LOGIC (source 0 usually)
-        if (source.handedness === 'left') {
-            // 1. Walking with Stick (Axes 2 and 3)
-            const forward = axes[3];
-            const side = axes[2];
-            
-            // Movement direction based on camera orientation
-            const moveVec = new THREE.Vector3(side, 0, forward);
-            moveVec.applyQuaternion(camera.quaternion);
-            moveVec.y = 0; // Keep on ground
-            playerGroup.position.add(moveVec.multiplyScalar(moveSpeed));
-
-            // 2. Y-Button Toggle (Button Index 5 on Quest)
-            if (buttons[5].pressed) {
-                watchMenu.visible = true;
-            } else {
-                // Keep menu visible logic can be added here if you want it to stay
-            }
+        // Seating Logic (Move to Play Game)
+        if (object.name === "poker_table_felt" && !isSeated) {
+            sitDownAtTable();
         }
     }
 }
 
-function onRightTrigger() {
-    console.log("Right Trigger Pressed - Interaction Active");
-    // This is where you will select cards or menu buttons
-}
+// --- THE SCORPION ROOM (Felt, Art, Sconces) ---
+function createScorpionRoom() {
+    const loader = new THREE.TextureLoader();
 
-function createLobby() {
-    const floor = new THREE.Mesh(
-        new THREE.PlaneGeometry(30, 30),
-        new THREE.MeshStandardMaterial({ color: 0x111111 })
-    );
-    floor.rotation.x = -Math.PI / 2;
-    scene.add(floor);
-
-    const walls = new THREE.Mesh(
-        new THREE.BoxGeometry(30, 10, 30),
-        new THREE.MeshStandardMaterial({ color: 0x1a1a1a, side: THREE.BackSide })
-    );
-    walls.position.y = 5;
-    scene.add(walls);
-}
-
-function createPokerTable() {
-    const table = new THREE.Mesh(
-        new THREE.CylinderGeometry(1.5, 1.5, 0.2, 32),
-        new THREE.MeshStandardMaterial({ color: 0x076324 })
-    );
-    table.position.set(0, 0.9, -5);
-    scene.add(table);
-}
-
-function checkAutoSit() {
-    const dist = playerGroup.position.distanceTo(new THREE.Vector3(0, 0, -5));
-    if (dist < 1.3 && !playerSatDown) {
-        playerSatDown = true;
-        playerGroup.position.set(0, 0, -4); // Sit position
-        console.log("Player Seated");
-    }
-}
-
-function animate() {
-    renderer.setAnimationLoop(() => {
-        handleInputs();
-        checkAutoSit();
-        renderer.render(scene, camera);
+    // 1. Black Felt Table
+    const tableGroup = new THREE.Group();
+    const feltGeom = new THREE.CylinderGeometry(2, 2, 0.2, 64);
+    const feltMat = new THREE.MeshStandardMaterial({ 
+        color: 0x0a0a0a, 
+        roughness: 0.9,
+        map: loader.load(TEXTURE_PATH + 'black_felt_grain.jpg') // Texture update 1.4 placeholder
     });
+    const felt = new THREE.Mesh(feltGeom, feltMat);
+    felt.name = "poker_table_felt";
+    felt.position.y = 1;
+    tableGroup.add(felt);
+
+    // 2. Dogs Playing Poker / Scorpion Art Frames
+    const artGeom = new THREE.PlaneGeometry(2, 1.5);
+    const artMat = new THREE.MeshStandardMaterial({ map: loader.load(TEXTURE_PATH + 'scorpion_art.jpg') });
+    const frame = new THREE.Mesh(artGeom, artMat);
+    frame.position.set(0, 3, -8);
+    scene.add(frame);
+
+    scene.add(tableGroup);
 }
+
+// --- SCARLET VR STORE & LOGO ---
+function createScarletStore() {
+    const loader = new THREE.TextureLoader();
+    
+    // Floating Logo
+    const logoGeom = new THREE.PlaneGeometry(1, 1);
+    const logoMat = new THREE.MeshBasicMaterial({ 
+        map: loader.load(TEXTURE_PATH + 'scarlet_logo_png.png'),
+        transparent: true,
+        emissive: 0xff0000,
+        emissiveIntensity: 0.5
+    });
+    scarletLogo = new THREE.Mesh(logoGeom, logoMat);
+    scarletLogo.position.set(-5, 2.5, -5);
+    scarletLogo.name = "scarletLogo";
+    scene.add(scarletLogo);
+}
+
+// --- VR NOTIFICATION SYSTEM ---
+function createNotificationSystem() {
+    notificationGroup = new THREE.Group();
+    notificationGroup.visible = false;
+
+    const panel = new THREE.Mesh(
+        new THREE.PlaneGeometry(1.5, 0.8),
+        new THREE.MeshStandardMaterial({ color: 0x111111, transparent: true, opacity: 0.9 })
+    );
+
+    const okBtn = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.5, 0.2),
+        new THREE.MeshStandardMaterial({ color: 0xffd700 })
+    );
+    okBtn.name = "ui_ok_btn";
+    okBtn.position.set(0, -0.2, 0.02);
+
+    notificationGroup.add(panel, okBtn);
+    scene.add(notificationGroup);
+}
+
+function triggerNotification(title, msg, btnText) {
+    notificationGroup.visible = true;
+    notificationGroup.position.set(camera.position.x, camera.position.y, camera.position.z - 2);
+    notificationGroup.lookAt(camera.position);
+}
+
+function dismissNotification() {
+    notificationGroup.visible = false;
+}
+
+function sitDownAtTable() {
+    isSeated = true;
+    // Smoothly animate camera to table position
+    camera.position.set(0, 1.2, -1.8);
+    camera.lookAt(0, 1, 0);
+    console.log("Player Seated. Dealing Cards...");
+}
+
+// --- CORE RENDER LOOP ---
+function render() {
+    const delta = clock.getDelta();
+
+    // Rotate the Scarlet Logo
+    if (scarletLogo) {
+        scarletLogo.rotation.y += 0.01;
+        scarletLogo.position.y += Math.sin(clock.elapsedTime) * 0.001; // Hover effect
+    }
+
+    renderer.render(scene, camera);
+}
+
+function getIntersections(controller) {
+    const tempMatrix = new THREE.Matrix4();
+    tempMatrix.identity().extractRotation(controller.matrixWorld);
+    raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+    raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+    return raycaster.intersectObjects(scene.children, true);
+}
+
+init();

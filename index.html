@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VR Poker - Permanent Foundation 1.3</title>
+    <title>VR Poker - Permanent Master 1.3</title>
     <style>
-        body { margin: 0; padding: 0; overflow: hidden; background-color: #111; }
+        body { margin: 0; padding: 0; overflow: hidden; background-color: #000; }
         #canvas-container { width: 100vw; height: 100vh; }
     </style>
 </head>
@@ -26,25 +26,31 @@
         import { VRButton } from 'three/addons/webxr/VRButton.js';
         import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
+        // --- GLOBAL MEMORY & STATE ---
         let scene, camera, renderer, userGroup;
-        const handModels = [];
+        const hands = [];
+        const texturePath = 'assets/textures/';
+        
+        // Setup for Update 1.3 Logic
+        let potValue = 0;
+        let communityCards = [];
 
         init();
 
         function init() {
-            // 1. SCENE & CAMERA SETUP
+            // 1. SCENE SETUP
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x050505); // Dark background
+            scene.background = new THREE.Color(0x020202); 
 
-            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
-            
-            // SPAWN POSITION: Moved back 1.2m and up 1.6m (eye level)
+            // 2. CAMERA & SPAWN LOCK
+            // Spawning 1.2m back from center, eye level. No walls.
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             userGroup = new THREE.Group();
-            userGroup.position.set(0, 0, 1.2); 
+            userGroup.position.set(0, 0, 1.5); 
             scene.add(userGroup);
             userGroup.add(camera);
 
-            // 2. RENDERER SETUP
+            // 3. RENDERER
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -52,66 +58,95 @@
             document.getElementById('canvas-container').appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
-            // 3. LIGHTING (Ensures no black screen)
-            const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+            // 4. LIGHTING
+            const ambient = new THREE.AmbientLight(0xffffff, 0.5);
             scene.add(ambient);
-            const spotLight = new THREE.PointLight(0xffffff, 1.5);
-            spotLight.position.set(0, 3, 0);
-            scene.add(spotLight);
+            const topLight = new THREE.PointLight(0xffffff, 1.5);
+            topLight.position.set(0, 4, 0);
+            scene.add(topLight);
 
-            // 4. WORLD ELEMENTS (The Table)
-            createTable();
-            createFloor();
-
-            // 5. HAND TRACKING (Locked-in: Hands only, no controllers)
+            // 5. HAND TRACKING (LOCKED)
             const handModelFactory = new XRHandModelFactory();
-            
             for (let i = 0; i < 2; i++) {
                 const hand = renderer.xr.getHand(i);
                 hand.add(handModelFactory.createHandModel(hand, "mesh"));
                 scene.add(hand);
-                handModels.push(hand);
+                hands.push(hand);
             }
+
+            // 6. BUILD WORLD (Oval Table & Empty Space)
+            createOvalTable();
+            createEnvironment();
 
             window.addEventListener('resize', onWindowResize);
             renderer.setAnimationLoop(render);
         }
 
-        function createTable() {
-            const tableGeo = new THREE.CylinderGeometry(1, 1, 0.05, 64);
-            const tableMat = new THREE.MeshStandardMaterial({ color: 0x0a4d26, roughness: 0.8 });
-            const table = new THREE.Mesh(tableGeo, tableMat);
-            table.position.y = 0.9; 
-            scene.add(table);
+        function createOvalTable() {
+            // Creating an Oval by scaling a Cylinder
+            const tableGroup = new THREE.Group();
+            const tableGeo = new THREE.CylinderGeometry(1, 1, 0.1, 64);
+            const tableMat = new THREE.MeshStandardMaterial({ 
+                color: 0x076324, 
+                roughness: 0.8,
+                name: 'poker_felt' 
+            });
+            const tableTop = new THREE.Mesh(tableGeo, tableMat);
+            
+            // Scaling to Oval: X is longer than Z
+            tableTop.scale.set(1.8, 1, 1); 
+            tableTop.position.y = 0.9;
+            tableGroup.add(tableTop);
+
+            // Table Leg (Single Pedestal to keep space clean)
+            const legGeo = new THREE.CylinderGeometry(0.3, 0.4, 0.9, 32);
+            const legMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+            const leg = new THREE.Mesh(legGeo, legMat);
+            leg.position.y = 0.45;
+            tableGroup.add(leg);
+
+            scene.add(tableGroup);
         }
 
-        function createFloor() {
-            const grid = new THREE.GridHelper(20, 40, 0x444444, 0x222222);
+        function createEnvironment() {
+            // Infinite Grid for spatial reference, no walls as requested
+            const grid = new THREE.GridHelper(50, 100, 0x222222, 0x111111);
             scene.add(grid);
         }
 
-        /** * PERMANENT WIN LOGIC (Update 1.3)
-         * Call this to show the winner for 10 seconds.
+        /**
+         * UPDATE 1.3 WIN LOGIC
+         * Handles the 10-second banner, highlighting, and community cards
          */
-        window.showWinnerBanner = function(name, hand) {
+        window.declareWinner = function(winnerObj, handDesc, cards) {
+            // 1. Highlight Winning Player (Assumes player has a mesh/marker)
+            if (winnerObj.mesh) {
+                winnerObj.mesh.material.emissive.setHex(0x00ff00);
+                setTimeout(() => { winnerObj.mesh.material.emissive.setHex(0x000000); }, 10000);
+            }
+
+            // 2. 10-Second Text Popup
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
-            canvas.width = 512; canvas.height = 128;
-            ctx.fillStyle = 'gold';
-            ctx.font = 'bold 40px Arial';
-            ctx.fillText(name + " WINS!", 50, 60);
-            ctx.font = '25px Arial';
-            ctx.fillText(hand, 50, 100);
+            canvas.width = 1024; canvas.height = 256;
+            ctx.fillStyle = '#FFD700'; // Gold
+            ctx.font = 'bold 80px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${winnerObj.name} WINS THE POT`, 512, 100);
+            ctx.font = '50px Arial';
+            ctx.fillText(`Hand: ${handDesc}`, 512, 180);
 
             const tex = new THREE.CanvasTexture(canvas);
-            const mat = new THREE.SpriteMaterial({ map: tex });
-            const sprite = new THREE.Sprite(mat);
-            sprite.position.set(0, 1.7, -0.5);
-            sprite.scale.set(1, 0.25, 1);
-            scene.add(sprite);
+            const bannerMat = new THREE.SpriteMaterial({ map: tex });
+            const banner = new THREE.Sprite(bannerMat);
+            banner.position.set(0, 2, -0.5); // Floating above the table
+            banner.scale.set(2, 0.5, 1);
+            scene.add(banner);
 
-            // AUTO-REMOVE AFTER 10 SECONDS
-            setTimeout(() => { scene.remove(sprite); }, 10000);
+            // 3. Auto-Cleanup
+            setTimeout(() => {
+                scene.remove(banner);
+            }, 10000);
         };
 
         function onWindowResize() {
@@ -120,7 +155,8 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        function render() {
+        function render(time) {
+            // Reserved for Update 1.4: Shaders and Noise logic
             renderer.render(scene, camera);
         }
     </script>

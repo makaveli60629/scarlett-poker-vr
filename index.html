@@ -3,16 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VR Poker - Update 1.3 Permanent</title>
+    <title>VR Poker - Permanent Update 1.3</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
-        #vr-button-container { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 100; }
-        #overlay { position: absolute; top: 10px; left: 10px; color: white; pointer-events: none; }
+        body { 
+            margin: 0; 
+            padding: 0; 
+            overflow: hidden; 
+            background-color: #000000; 
+            user-select: none;
+        }
+        #vr-button-container { 
+            position: absolute; 
+            bottom: 20px; 
+            left: 50%; 
+            transform: translateX(-50%); 
+            z-index: 1000; 
+        }
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #00ff00;
+            font-family: monospace;
+            pointer-events: none;
+            text-shadow: 1px 1px 2px black;
+        }
     </style>
 </head>
 <body>
+    <div id="ui-layer">SYSTEM: ONLINE<br>MODE: VR POKER v1.3</div>
     <div id="vr-button-container"></div>
-    <div id="overlay">VR Poker v1.3 - Logic Complete</div>
 
     <script type="importmap">
         {
@@ -22,6 +42,7 @@
             }
         }
     </script>
+
     <script type="module" src="js/index.js"></script>
 </body>
 </html>

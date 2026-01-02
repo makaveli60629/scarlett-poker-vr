@@ -2,22 +2,12 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Poker Update 1.3 - VR Fix</title>
+    <title>Poker Update 1.3 - Height Fix</title>
     <style>
-        body { margin: 0; background-color: #000; color: white; font-family: sans-serif; }
-        #info-overlay {
-            position: absolute;
-            top: 10px;
-            width: 100%;
-            text-align: center;
-            z-index: 100;
-            pointer-events: none;
-        }
+        body { margin: 0; background-color: #000; overflow: hidden; }
     </style>
 </head>
 <body>
-    <div id="info-overlay">Update 1.3: Initializing VR...</div>
-
     <script type="importmap">
         {
             "imports": {
@@ -32,91 +22,75 @@
         import { VRButton } from 'three/addons/webxr/VRButton.js';
         import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 
-        let scene, camera, renderer, controller1, controller2;
-        let isSeated = false;
+        let scene, camera, renderer, playerRig;
+        let controller1, controller2;
 
         init();
 
         function init() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x050505); // Dark background
+            scene.background = new THREE.Color(0x111111);
 
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
             
-            // LIGHTING
-            const mainLight = new THREE.DirectionalLight(0xffffff, 1);
-            mainLight.position.set(0, 5, 0);
-            scene.add(mainLight);
-            scene.add(new THREE.AmbientLight(0x404040));
+            // --- PLAYER RIG (The Fix for being under the floor) ---
+            playerRig = new THREE.Group();
+            playerRig.add(camera);
+            scene.add(playerRig);
+            
+            // Lift the player up to standing height (approx 1.6 meters)
+            playerRig.position.y = 1.6; 
+            // ------------------------------------------------------
 
-            // RENDERER
             renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
-            
-            // Fix for Black Screen: Use 'local' if floor isn't detected
-            renderer.xr.setReferenceSpaceType('local'); 
+            renderer.xr.setReferenceSpaceType('local'); // Bypasses floor-tracking bugs
             
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
-            // CONTROLLERS (Oculus Touch)
+            // Setup Lights
+            const light = new THREE.DirectionalLight(0xffffff, 1);
+            light.position.set(1, 1, 1).normalize();
+            scene.add(light);
+            scene.add(new THREE.AmbientLight(0x404040));
+
+            // Oculus Controllers
             const controllerModelFactory = new XRControllerModelFactory();
 
-            // Right Controller
             controller1 = renderer.xr.getController(0);
-            scene.add(controller1);
+            playerRig.add(controller1); // Add to rig so they move with you
+
+            controller2 = renderer.xr.getController(1);
+            playerRig.add(controller2);
+
             const grip1 = renderer.xr.getControllerGrip(0);
             grip1.add(controllerModelFactory.createControllerModel(grip1));
-            scene.add(grip1);
+            playerRig.add(grip1);
 
-            // Left Controller
-            controller2 = renderer.xr.getController(1);
-            scene.add(controller2);
             const grip2 = renderer.xr.getControllerGrip(1);
             grip2.add(controllerModelFactory.createControllerModel(grip2));
-            scene.add(grip2);
+            playerRig.add(grip2);
 
             createWorld();
             renderer.setAnimationLoop(render);
         }
 
         function createWorld() {
-            // Poker Table
+            // Table
             const tableGeo = new THREE.CylinderGeometry(1.5, 1.5, 0.2, 32);
             const tableMat = new THREE.MeshStandardMaterial({ color: 0x004400 });
             const table = new THREE.Mesh(tableGeo, tableMat);
-            table.position.set(0, 0.8, -2); // Positioned in front of start
+            table.position.set(0, 0.8, -3); // Table is at waist height
             scene.add(table);
 
-            // "Play Game" Zone
-            const zoneGeo = new THREE.CircleGeometry(1, 32);
-            const zoneMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });
-            const playZone = new THREE.Mesh(zoneGeo, zoneMat);
-            playZone.rotation.x = -Math.PI / 2;
-            playZone.position.set(0, 0.01, -2);
-            playZone.name = "PlayGameTrigger";
-            scene.add(playZone);
-
-            // Floor
-            const grid = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
+            // Floor Grid (to verify your height)
+            const grid = new THREE.GridHelper(20, 20, 0xffffff, 0x444444);
             scene.add(grid);
         }
 
-        function checkTrigger() {
-            // Automatic Sit Down Logic
-            // If the camera (player) gets close to the table (z = -2)
-            if (!isSeated && camera.position.z < -1.5) {
-                isSeated = true;
-                console.log("Player seated - Dealing cards...");
-                // Add card dealing logic here
-                document.getElementById('info-overlay').innerText = "SEATED: GAME START";
-            }
-        }
-
         function render() {
-            checkTrigger();
             renderer.render(scene, camera);
         }
     </script>

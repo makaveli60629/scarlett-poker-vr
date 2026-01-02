@@ -1,56 +1,79 @@
-// js/environment-master.js
-window.initEnvironment = function() {
-    const root = document.querySelector('#world-root');
+// Environment Setup - Update 1.5.5 Stability Build
+import * as THREE from 'three';
 
-    // --- LOBBY ROOM ---
-    const lobby = document.createElement('a-entity');
-    lobby.id = "room-lobby";
-    lobby.innerHTML = `
-        <a-plane class="nav-mesh" rotation="-90 0 0" width="50" height="50" material="color: #1a1a1a; roughness: 1" shadow="receive: true"></a-plane>
-        
-        <a-box position="0 2.5 -10" width="20" height="5" depth="0.5" mixin="brick-texture" shadow></a-box>
-        <a-box position="-10 2.5 0" rotation="0 90 0" width="20" height="5" depth="0.5" mixin="brick-texture" shadow></a-box>
-        <a-box position="10 2.5 0" rotation="0 -90 0" width="20" height="5" depth="0.5" mixin="brick-texture" shadow></a-box>
+export function createEnvironment(scene, playerWalletBalance) {
+    const loader = new THREE.TextureLoader();
+    const texturePath = 'assets/textures/'; 
 
-        <a-entity position="-3 1 -4">
-            <a-entity mixin="felt-texture" shadow></a-entity>
-            <a-cylinder radius="0.2" height="1" position="0 -0.5 0" color="#222"></a-cylinder>
-            <a-text value="DAILY PICK" align="center" position="0 1.2 0" color="cyan" width="4"></a-text>
-            <a-cylinder id="blue-chip" class="clickable" position="0 0.1 0" radius="0.2" height="0.08" color="blue" 
-                        animation="property: rotation; to: 0 360 0; loop: true; dur: 3000" onclick="window.claimDaily()"></a-cylinder>
-        </a-entity>
+    // 1. REGULAR SKY (Standard Blue)
+    scene.background = new THREE.Color(0x87CEEB); 
 
-        <a-entity position="6 1.8 -6">
-            <a-text id="wallet-display" value="WALLET: $2500" align="center" color="white" width="6"></a-text>
-            <a-light type="point" color="cyan" intensity="0.5" position="0 -0.5 0"></a-light>
-            <a-box class="clickable" position="0 -1.3 1" width="2" height="0.1" depth="2" color="green" onclick="window.enterZone()">
-                <a-text value="ENTER PLANE TABLES" align="center" position="0 0.1 0" rotation="-90 0 0" width="4"></a-text>
-            </a-box>
-        </a-entity>
-    `;
+    // 2. THE FLOOR (Centered and Solid)
+    const floorGeo = new THREE.PlaneGeometry(100, 100);
+    const floorMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
 
-    // --- POKER ROOM ---
-    const pokerRoom = document.createElement('a-entity');
-    pokerRoom.id = "room-poker";
-    pokerRoom.setAttribute('position', '100 0 0');
-    pokerRoom.innerHTML = `
-        <a-plane class="nav-mesh" rotation="-90 0 0" width="50" height="50" material="color: #0a0a0a" shadow="receive: true"></a-plane>
-        <a-box position="0 2.5 -10" width="20" height="5" depth="0.5" mixin="brick-texture"></a-box>
-        
-        <a-entity id="main-table" position="0 1 -4">
-            <a-entity mixin="felt-texture" shadow></a-entity>
-            <a-text value="ELITE POKER" align="center" position="0 0.1 0" rotation="-90 0 0" color="gold" width="6"></a-text>
-            
-            <a-entity id="win-ui" visible="false" position="0 2 0">
-                <a-text id="win-banner" value="" align="center" color="yellow" width="10"></a-text>
-            </a-entity>
-        </a-entity>
+    loader.load(texturePath + 'poker_felt.jpg', (tex) => {
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(10, 10);
+        floorMat.map = tex;
+        floorMat.needsUpdate = true;
+    });
 
-        <a-box class="clickable" position="0 0.5 -1.5" width="1" height="0.1" depth="1" color="green" onclick="window.sitAndPlay()">
-            <a-text value="SIT DOWN" align="center" position="0 0.1 0" rotation="-90 0 0"></a-text>
-        </a-box>
-    `;
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = 0; // The Ground
+    scene.add(floor);
 
-    root.appendChild(lobby);
-    root.appendChild(pokerRoom);
-};
+    // 3. THE WALLS (Perfectly Attached to Floor)
+    const wallHeight = 20;
+    const wallGeo = new THREE.PlaneGeometry(100, wallHeight);
+    const wallMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+
+    loader.load(texturePath + 'brick_wall.jpg', (tex) => {
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(5, 1);
+        wallMat.map = tex;
+        wallMat.needsUpdate = true;
+    });
+
+    // Wall logic: Position Y is exactly half of height to touch the floor (0)
+    const wallSpecs = [
+        { p: [0, wallHeight/2, -50], r: [0, 0, 0] },    // Back
+        { p: [0, wallHeight/2, 50], r: [0, Math.PI, 0] }, // Front
+        { p: [-50, wallHeight/2, 0], r: [0, Math.PI / 2, 0] }, // Left
+        { p: [50, wallHeight/2, 0], r: [0, -Math.PI / 2, 0] }  // Right
+    ];
+
+    wallSpecs.forEach(spec => {
+        const wall = new THREE.Mesh(wallGeo, wallMat);
+        wall.position.set(...spec.p);
+        wall.rotation.set(...spec.r);
+        scene.add(wall);
+    });
+
+    // 4. THE CEILING (Closing the box)
+    const ceiling = new THREE.Mesh(
+        new THREE.PlaneGeometry(100, 100),
+        new THREE.MeshBasicMaterial({ color: 0x333333 })
+    );
+    ceiling.position.y = wallHeight;
+    ceiling.rotation.x = Math.PI / 2;
+    scene.add(ceiling);
+
+    // 5. CENTERED HOLOGRAM WALLET
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = 512; canvas.height = 256;
+    ctx.fillStyle = '#00ffff';
+    ctx.font = 'bold 45px Arial';
+    ctx.textAlign = "center";
+    ctx.fillText("POKER LOBBY", 256, 80);
+    ctx.fillText(`WALLET: $${playerWalletBalance}`, 256, 160);
+    
+    const holoMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(6, 3),
+        new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, side: THREE.DoubleSide })
+    );
+    holoMesh.position.set(0, 5, -10); // Centered in front of spawn
+    scene.add(holoMesh);
+}

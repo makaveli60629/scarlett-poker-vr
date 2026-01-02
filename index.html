@@ -2,8 +2,15 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Poker VR 1.7.2 - Stable</title>
-    <link rel="stylesheet" href="css/style.css">
+    <title>Poker VR 1.7.2 - Master Fix</title>
+    <style>
+        body { margin: 0; background-color: #87CEEB; overflow: hidden; font-family: sans-serif; }
+        #VRButton { 
+            background: rgba(0,0,0,0.8) !important; 
+            color: #00ff00 !important; 
+            border: 2px solid #00ff00 !important; 
+        }
+    </style>
 </head>
 <body>
     <script type="importmap">
@@ -14,23 +21,38 @@
             }
         }
     </script>
+
     <script type="module">
         import * as THREE from 'three';
         import { VRButton } from 'three/addons/webxr/VRButton.js';
-        import { VRCore } from './js/core.js';
+        import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 
-        let renderer, scene, camera, core;
+        let scene, camera, renderer, playerRig;
+        let controller1, controller2;
+        let raycaster = new THREE.Raycaster();
+        let tempMatrix = new THREE.Matrix4();
+        let teleportTarget = null;
+        let isSeated = false;
 
+        const loader = new THREE.TextureLoader();
+
+        // Start the Game
         init();
 
-        async function init() {
+        function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x87CEEB);
-            scene.fog = new THREE.Fog(0x87CEEB, 1, 100);
+            scene.fog = new THREE.Fog(0x87CEEB, 1, 50);
 
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            // --- PLAYER RIG (Fixed Height & Movement Base) ---
+            playerRig = new THREE.Group();
+            playerRig.add(camera);
+            scene.add(playerRig);
+            playerRig.position.set(0, 1.6, 0); 
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
@@ -39,13 +61,134 @@
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
-            // Boot the core engine
-            core = new VRCore(scene, camera, renderer);
+            // LIGHTING
+            scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+            const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+            sun.position.set(5, 10, 5);
+            scene.add(sun);
+
+            setupControllers();
+            createEnvironment();
             
-            renderer.setAnimationLoop(() => {
-                core.update();
-                renderer.render(scene, camera);
+            renderer.setAnimationLoop(render);
+        }
+
+        function setupControllers() {
+            const factory = new XRControllerModelFactory();
+
+            // Setup Right and Left Controllers
+            const setupHand = (id) => {
+                const controller = renderer.xr.getController(id);
+                const grip = renderer.xr.getControllerGrip(id);
+                grip.add(factory.createControllerModel(grip));
+                playerRig.add(controller, grip);
+
+                // Teleport Beam Visual
+                const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
+                const line = new THREE.Line(lineGeo);
+                line.name = 'beam';
+                line.scale.z = 0; // Hidden initially
+                controller.add(line);
+
+                controller.addEventListener('selectstart', () => { 
+                    controller.userData.isSelecting = true; 
+                    line.scale.z = 10;
+                });
+                controller.addEventListener('selectend', () => { 
+                    controller.userData.isSelecting = false; 
+                    line.scale.z = 0;
+                    if (teleportTarget) {
+                        playerRig.position.set(teleportTarget.x, 1.6, teleportTarget.z);
+                    }
+                });
+            };
+
+            setupHand(0); // Right
+            setupHand(1); // Left
+        }
+
+        function createEnvironment() {
+            // FLOOR (With Texture)
+            const floorTex = loader.load('assets/textures/floor.jpg', 
+                (tex) => { tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(10,10); },
+                undefined, 
+                () => console.warn("Floor texture not found in assets/textures/")
+            );
+            const floor = new THREE.Mesh(
+                new THREE.PlaneGeometry(100, 100), 
+                new THREE.MeshStandardMaterial({ map: floorTex, color: 0x555555 })
+            );
+            floor.rotation.x = -Math.PI / 2;
+            floor.name = "Floor";
+            scene.add(floor);
+
+            // THE POKER TABLE
+            const feltTex = loader.load('assets/textures/table_felt.jpg');
+            const table = new THREE.Mesh(
+                new THREE.CylinderGeometry(1.5, 1.5, 0.2, 32),
+                new THREE.MeshStandardMaterial({ map: feltTex, color: 0x006400 })
+            );
+            table.position.set(0, 0.8, -3);
+            scene.add(table);
+
+            // THE NEON RING (Seating Area)
+            const ringGeo = new THREE.RingGeometry(1.2, 1.3, 64);
+            const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide });
+            const ring = new THREE.Mesh(ringGeo, ringMat);
+            ring.rotation.x = -Math.PI / 2;
+            ring.position.set(0, 0.05, -3);
+            scene.add(ring);
+
+            // STORE & REWARDS (The Blue and Yellow Cubes)
+            const rewardCube = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), new THREE.MeshStandardMaterial({ color: 0xffd700 }));
+            rewardCube.position.set(-3, 0.3, -5);
+            scene.add(rewardCube);
+
+            const storeKiosk = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.5, 0.2), new THREE.MeshStandardMaterial({ color: 0x0000ff }));
+            storeKiosk.position.set(3, 0.75, -5);
+            scene.add(storeKiosk);
+        }
+
+        function showWinner(msg) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 512; canvas.height = 128;
+            ctx.fillStyle = '#00ff00';
+            ctx.font = 'bold 44px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(msg, 256, 80);
+
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas) }));
+            sprite.position.set(0, 2.2, -3);
+            sprite.scale.set(3, 0.75, 1);
+            scene.add(sprite);
+
+            setTimeout(() => { scene.remove(sprite); isSeated = false; }, 10000);
+        }
+
+        function render() {
+            teleportTarget = null;
+            // Handle Teleport Raycasting
+            [0, 1].forEach(id => {
+                const controller = renderer.xr.getController(id);
+                if (controller.userData.isSelecting) {
+                    tempMatrix.identity().extractRotation(controller.matrixWorld);
+                    raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+                    raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+                    const intersects = raycaster.intersectObjects(scene.children);
+                    const hit = intersects.find(i => i.object.name === "Floor");
+                    if (hit) teleportTarget = hit.point;
+                }
             });
+
+            // Seating Logic
+            const dist = camera.position.distanceTo(new THREE.Vector3(0, 1.6, -3));
+            if (!isSeated && dist < 1.4) {
+                isSeated = true;
+                showWinner("WINNER: PLAYER 1");
+            }
+
+            renderer.render(scene, camera);
         }
     </script>
 </body>

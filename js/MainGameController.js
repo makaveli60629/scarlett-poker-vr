@@ -1,122 +1,106 @@
 /**
- * PROJECT: POKER VR
- * VERSION: 1.5.1
- * FILE: MainGameController.js
- * DESCRIPTION: Master logic including VR controls, Auto-sit, 10s Win Display, and 1000x Particles.
+ * POKER VR - PERMANENT MASTER LOGIC
+ * Update: 1.5.1
+ * Location: JS/MainGameController.js
  */
-
 import * as THREE from 'three';
 import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
 
 class PokerGame {
     constructor() {
+        // Core Engine Components
         this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         
-        // Settings from Memory
-        this.textureFolder = "assets/textures/";
-        this.winDisplayDuration = 10000; // 10 Seconds
-        
+        // Memory-Stored Variables
+        this.texturePath = "assets/textures/";
+        this.winDisplayTime = 10000; // 10 seconds for winner popup
+
         this.init();
     }
 
     init() {
-        // 1. Setup Renderer & VR
+        // Renderer Setup
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.xr.enabled = true;
+        this.renderer.setClearColor(0x050505); // Very dark grey, not pure black
         document.body.appendChild(this.renderer.domElement);
         
-        // Add the VR Button for Oculus
+        // Add Oculus VR Button
         document.body.appendChild(VRButton.createButton(this.renderer));
 
-        // 2. Lighting & Environment
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-        this.scene.add(ambientLight);
-        const pointLight = new THREE.PointLight(0xffffff, 1);
-        pointLight.position.set(5, 5, 5);
-        this.scene.add(pointLight);
+        // Lighting (Permanent Setup)
+        const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+        this.scene.add(ambient);
+        const sun = new THREE.DirectionalLight(0xffffff, 1);
+        sun.position.set(5, 10, 7);
+        this.scene.add(sun);
 
-        // 3. Initialize Features
+        // Grid/Floor so you aren't lost in the dark
+        const floorGrid = new THREE.GridHelper(20, 20, 0x00ffcc, 0x222222);
+        this.scene.add(floorGrid);
+
+        // Start Systems
         this.setupOculusControls();
-        this.create1000xParticles();
-        this.startAnimationLoop();
-        
-        console.log("Update 1.5.1: Systems Initialized. Textures path set to " + this.textureFolder);
+        this.initMegaParticles();
+        this.animate();
+
+        console.log("Poker VR 1.5.1: Permanent Logic Loaded.");
     }
 
-    // --- OCULUS VR CONTROLS ---
+    // --- OCULUS CONTROLS (ALWAYS INCLUDED) ---
     setupOculusControls() {
         this.controller1 = this.renderer.xr.getController(0);
         this.controller2 = this.renderer.xr.getController(1);
         this.scene.add(this.controller1);
         this.scene.add(this.controller2);
-
-        // Interaction for "Play Game" or selecting buttons
+        
+        // Trigger interaction
         this.controller1.addEventListener('selectstart', () => {
-            console.log("Controller Trigger Pressed");
-            // Add interaction logic here
+            console.log("Trigger Pressed - Checking for 'Play Game' zone...");
+            this.handlePlayerSitting();
         });
     }
 
-    // --- AUTO-SIT & POKER LOGIC ---
-    // Triggered when player enters the "Play Game" zone
-    playerEnteredPlayZone() {
-        console.log("Player is in zone. Automatically sitting down...");
-        this.camera.position.set(0, 1.2, 0); // Move camera to seated poker height
-        this.dealInitialCards();
+    // --- LOBBY & PLAY LOGIC ---
+    handlePlayerSitting() {
+        // Logic: When moving to "Play Game" area, cards are dealt automatically.
+        console.log("Player is now seated. Dealing cards...");
+        // (Next update will add specific card mesh logic here)
     }
 
-    dealInitialCards() {
-        console.log("Cards dealt to player and AI.");
-    }
+    // --- WINNER DISPLAY (10 SECONDS - NO VOICE) ---
+    showWinner(name, handDetails) {
+        const ui = document.getElementById('winner-ui');
+        ui.innerHTML = `<h1>${name} WINS</h1><p>${handDetails}</p>`;
+        ui.style.display = 'block';
 
-    // --- WINNER ANNOUNCEMENT (NO VOICE - 10 SECONDS) ---
-    showWinnerPopup(winnerName, handDescription) {
-        // Create the popup letters
-        const winDiv = document.createElement('div');
-        winDiv.id = "winner-ui";
-        winDiv.style.cssText = `
-            position: fixed; top: 30%; left: 50%; transform: translate(-50%, -50%);
-            color: #ccac00; font-size: 50px; font-weight: bold; text-align: center;
-            text-shadow: 3px 3px 5px #000; z-index: 100; pointer-events: none;
-        `;
-        winDiv.innerHTML = `WINNER: ${winnerName}<br><span style="font-size:30px">${handDescription}</span>`;
-        document.body.appendChild(winDiv);
-
-        // Highlight the winning player (Logic for Mesh/Shader)
-        console.log(`Highlighting player: ${winnerName}`);
-
-        // Auto-remove after 10 seconds per requirements
+        // Winning hand highlight logic would go here
+        
         setTimeout(() => {
-            const existing = document.getElementById("winner-ui");
-            if (existing) existing.remove();
-        }, this.winDisplayDuration);
+            ui.style.display = 'none';
+        }, this.winDisplayTime);
     }
 
-    // --- ENHANCED VISUALS (PARTICLES) ---
-    create1000xParticles() {
-        const partGeometry = new THREE.BufferGeometry();
-        const count = 15000; 
-        const positions = new Float32Array(count * 3);
-
-        for (let i = 0; i < count * 3; i++) {
-            positions[i] = (Math.random() - 0.5) * 50;
+    // --- VISUALS: 1000x PARTICLE ANALYSIS ---
+    initMegaParticles() {
+        const geo = new THREE.BufferGeometry();
+        const pos = [];
+        for (let i = 0; i < 15000; i++) {
+            pos.push((Math.random() - 0.5) * 40, Math.random() * 20, (Math.random() - 0.5) * 40);
         }
-
-        partGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        const partMaterial = new THREE.PointsMaterial({ color: 0x00ffff, size: 0.05 });
-        const particleSystem = new THREE.Points(partGeometry, partMaterial);
-        this.scene.add(particleSystem);
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        const mat = new THREE.PointsMaterial({ color: 0x00ffff, size: 0.03 });
+        this.scene.add(new THREE.Points(geo, mat));
     }
 
-    startAnimationLoop() {
+    animate() {
         this.renderer.setAnimationLoop(() => {
-            // Update particles or animations here
             this.renderer.render(this.scene, this.camera);
         });
     }
 }
 
-// Instantiate the game
-const game = new PokerGame();
+// Start Game
+new PokerGame();

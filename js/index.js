@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+    import * as THREE from 'three';
 import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
 import { createEnvironment } from './environment.js';
 import { setupControllers, handleMovement } from './controls.js';
@@ -13,17 +13,22 @@ function init() {
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 2000);
     
-    // SPAWN FIX: Move back so you aren't inside the table
-    camera.position.set(0, 1.6, 40); 
+    // NEW SPAWN: Centered X, 1.6m Height, far back at 80m from table center
+    camera.position.set(0, 1.6, 80); 
 
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer = new THREE.WebGLRenderer({ 
+        antialias: true, 
+        alpha: true,
+        preserveDrawingBuffer: true // Helps fix Oculus browser black screens
+    });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.xr.enabled = true;
+    
     document.body.appendChild(renderer.domElement);
     document.body.appendChild(VRButton.createButton(renderer));
 
-    scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+    scene.add(new THREE.AmbientLight(0xffffff, 1.5)); // Brightness boost
 
     createEnvironment(scene, userWallet);
     controls = setupControllers(renderer, scene);
@@ -33,15 +38,14 @@ function init() {
 }
 
 function render() {
-    // Thumbstick movement logic
     handleMovement(renderer, camera, controls);
 
-    // Auto-Sit logic (Lowers height when near table)
-    const relativeZ = Math.abs(camera.position.z % 110);
-    if (relativeZ < 6) { 
-        camera.position.y = 1.1; 
+    // Auto-Sit logic for 200x200 room
+    const dist = Math.sqrt(camera.position.x**2 + (camera.position.z % 200)**2);
+    if (dist < 10) { 
+        camera.position.y = 1.1; // Sits down near table
     } else { 
-        camera.position.y = 1.6; 
+        camera.position.y = 1.6; // Stands up
     }
 
     renderer.render(scene, camera);

@@ -3,13 +3,16 @@ import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
 import { createEnvironment } from './environment.js';
 
 let scene, camera, renderer, controller1, controller2;
-let currentWallet = 2500;
+let wallet = 2500;
 
 function init() {
     scene = new THREE.Scene();
     
+    // Character Rig & Camera Setup
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 1.6, 20); // View from a distance
+    
+    // SPAWN POINT: Centered (x=0), Standing Height (y=1.6), Away from table (z=25)
+    camera.position.set(0, 1.6, 25);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -17,41 +20,52 @@ function init() {
     document.body.appendChild(renderer.domElement);
     document.body.appendChild(VRButton.createButton(renderer));
 
-    // Load Environment with assets/textures/ pathing
-    createEnvironment(scene, currentWallet);
+    // Build centered environment
+    createEnvironment(scene, wallet);
 
-    // OCULUS CONTROLS
+    // OCULUS CONTROLLERS
+    setupControllers();
+
+    renderer.setAnimationLoop(render);
+}
+
+function setupControllers() {
     controller1 = renderer.xr.getController(0);
     scene.add(controller1);
     controller2 = renderer.xr.getController(1);
     scene.add(controller2);
 
-    // Red Laser Pointers for VR
-    const laserMat = new THREE.LineBasicMaterial({ color: 0xff0000 });
-    const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]);
-    const line = new THREE.Line(laserGeo, laserMat);
-    controller1.add(line.clone());
-    controller2.add(line.clone());
-
-    renderer.setAnimationLoop(update);
+    const laserLine = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]),
+        new THREE.LineBasicMaterial({ color: 0x00ffff })
+    );
+    controller1.add(laserLine.clone());
+    controller2.add(laserLine.clone());
 }
 
-// WINNER UI - 10 SECOND HIGHLIGHT
-export function announceWinner(name, hand) {
-    const winBox = document.createElement('div');
-    winBox.style.cssText = `
-        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-        background: rgba(0,0,0,0.8); border: 4px solid #00FF00;
-        padding: 60px; color: gold; font-family: 'Arial Black'; font-size: 40px;
-        text-align: center; z-index: 1000;
+// WINNER UI (10 SECONDS)
+export function showWinner(name, hand) {
+    const winUI = document.createElement('div');
+    winUI.style.cssText = `
+        position: fixed; top: 40%; left: 50%; transform: translate(-50%, -50%);
+        background: rgba(0,0,0,0.85); border: 5px solid #00FF00;
+        padding: 50px; color: gold; font-family: sans-serif; text-align: center;
     `;
-    winBox.innerHTML = `WINNER: ${name}<br><small>${hand}</small>`;
-    document.body.appendChild(winBox);
+    winUI.innerHTML = `<h1>${name} WINS!</h1><h2>${hand}</h2>`;
+    document.body.appendChild(winUI);
 
-    // 10 second timeout per instructions
-    setTimeout(() => {
-        winBox.remove();
-    }, 10000);
+    setTimeout(() => winUI.remove(), 10000);
 }
 
-function update
+function render() {
+    // AUTO-SIT LOGIC: When player approaches the table area
+    if (camera.position.z < 5) {
+        camera.position.y = 1.1; // Seated height
+    } else {
+        camera.position.y = 1.6; // Standing height
+    }
+    
+    renderer.render(scene, camera);
+}
+
+init();

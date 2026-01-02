@@ -2,16 +2,15 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Ultimate VR Poker - Locked Audit Build</title>
+    <title>Ultimate VR Poker - Audit Build 1.5</title>
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v7.0.0/dist/aframe-extras.min.js"></script>
     <script src="https://unpkg.com/aframe-teleport-controls@0.3.1/dist/aframe-teleport-controls.min.js"></script>
     
     <script src="world.js"></script>
-    <script src="logic.js"></script>
 </head>
 <body>
-    <a-scene renderer="antialias: true; colorManagement: true; exposure: 1.2;">
+    <a-scene renderer="antialias: true; colorManagement: true; exposure: 1.2;" world-logic>
         
         <a-assets>
             <img id="brickWall" src="assets/textures/brick_wall.jpg" crossorigin="anonymous">
@@ -20,58 +19,31 @@
             <img id="pokerFelt" src="assets/textures/poker_felt.jpg" crossorigin="anonymous">
         </a-assets>
 
-        <a-entity id="rig" movement-controls="fly: false; speed: 0.3" position="0 0 8">
+        <a-entity id="rig" movement-controls="fly: false; speed: 0.3" position="0 0 15">
             <a-entity camera position="0 1.6 0" look-controls></a-entity>
             
             <a-entity id="leftHand" 
-                      hand-tracking-controls="hand: left;"
-                      hand-controls="hand: left; handModelStyle: highPoly;"
-                      poker-logic="hand: left">
+                      hand-controls="hand: left; handModelStyle: highPoly; color: #ffcccc"
+                      teleport-controls="cameraRig: #rig; teleportOrigin: [camera]; button: trigger;">
                 <a-entity id="wristWatch" position="0 0.05 0.1" rotation="-90 0 0">
                     <a-cylinder radius="0.03" height="0.01" color="#333"></a-cylinder>
                     <a-text id="watchTime" value="00:00" position="-0.02 0.01 0" scale="0.1 0.1 0.1" color="cyan"></a-text>
-                    <a-entity id="wristMenu" visible="false">
-                        <a-plane width="0.2" height="0.3" color="#222" position="0 0.1 0" opacity="0.9">
-                            <a-text value="POKER MENU" align="center" scale="0.1 0.1 0.1" position="0 0.1 0.01"></a-text>
+                    <a-entity id="wristMenu" visible="false" position="0 0.1 0">
+                        <a-plane width="0.2" height="0.3" color="#222" opacity="0.9">
+                            <a-text value="STORE\nLEADERBOARD\nEXIT" align="center" scale="0.15 0.15 0.15"></a-text>
                         </a-plane>
                     </a-entity>
                 </a-entity>
-                <a-entity teleport-controls="cameraRig: #rig; teleportOrigin: [camera]; button: trigger; curveType: parabolic;"></a-entity>
             </a-entity>
 
             <a-entity id="rightHand" 
-                      hand-tracking-controls="hand: right;"
-                      hand-controls="hand: right; handModelStyle: highPoly;"
-                      poker-logic="hand: right">
+                      hand-controls="hand: right; handModelStyle: highPoly; color: #ffcccc">
             </a-entity>
         </a-entity>
 
-        <a-entity id="lighting">
-            <a-light type="ambient" intensity="0.6" color="#ffffff"></a-light>
-            <a-light type="directional" position="2 5 2" intensity="1" castShadow="true"></a-light>
-            <a-light type="point" position="0 3 0" intensity="0.8" color="#00ffff"></a-light>
-        </a-entity>
-
-        <a-entity id="environment-group">
-            <a-plane class="teleport-surface" rotation="-90 0 0" width="30" height="30" material="src: #carpetTex; repeat: 10 10;"></a-plane>
-            
-            <a-box position="0 2.5 -5" width="12" height="5" depth="0.2" material="src: #brickWall; repeat: 3 1.5;">
-                <a-box id="neonLeft" position="-5.9 0 0.15" width="0.1" height="5" depth="0.1" material="emissive: #00ffff; emissiveIntensity: 5;"></a-box>
-                <a-box id="neonRight" position="5.9 0 0.15" width="0.1" height="5" depth="0.1" material="emissive: #00ffff; emissiveIntensity: 5;"></a-box>
-            </a-box>
-
-            <a-box position="-6 2.5 0" rotation="0 90 0" width="10" height="5" depth="0.2" material="src: #brickWall;"></a-box>
-            <a-box position="6 2.5 0" rotation="0 -90 0" width="10" height="5" depth="0.2" material="src: #brickWall;"></a-box>
-        </a-entity>
-
-        <a-entity id="pokerTable" position="0 0.9 0">
-            <a-capsule radius="0.8" height="1.4" rotation="90 0 0" scale="1 1 0.1" material="src: #pokerFelt; color: #076324;"></a-capsule>
-            <a-capsule radius="0.88" height="1.48" rotation="90 0 0" scale="1 1 0.08" position="0 -0.02 0" material="src: #leatherTex; color: #2b1d0e;"></a-capsule>
-        </a-entity>
-
-        <a-plane id="leaderboard" position="3 2 -4" rotation="0 -25 0" width="2.5" height="1.8" color="#111" opacity="0.85">
-            <a-text value="TOP PLAYERS" align="center" position="0 0.7 0.01" width="4"></a-text>
-        </a-plane>
+        <a-light type="ambient" intensity="0.4"></a-light>
+        <a-light type="point" id="moon" position="10 20 -10" intensity="1.5" color="#ccddee"></a-light>
+        <a-light type="point" position="0 4 0" intensity="0.8" color="#00ffff"></a-light>
 
     </a-scene>
 </body>

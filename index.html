@@ -3,19 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Poker VR - Update 1.5.1</title>
+    <title>Poker VR Master Build</title>
     <style>
-        body {
-            margin: 0;
-            background-color: #000;
-            color: #fff;
-            font-family: Arial, sans-serif;
-            overflow: hidden;
-        }
-        /* Style for the Winner Popup UI */
+        body { margin: 0; background-color: #000; overflow: hidden; font-family: sans-serif; }
         #winner-ui {
-            pointer-events: none;
-            user-select: none;
+            position: fixed; top: 30%; left: 50%; transform: translate(-50%, -50%);
+            color: #FFD700; font-size: 40px; font-weight: bold; text-align: center;
+            text-shadow: 2px 2px 10px #000; z-index: 100; display: none; pointer-events: none;
         }
     </style>
     <script type="importmap">
@@ -28,13 +22,8 @@
     </script>
 </head>
 <body>
+    <div id="winner-ui"></div>
 
     <script type="module" src="JS/MainGameController.js"></script>
-
-    <script>
-        // Emergency Fallback: Ensure textures folder is recognized
-        console.log("System: Checking assets/textures/ folder... Ready.");
-        console.log("Status: Update 1.5.1 Active. Oculus Controls Initialized.");
-    </script>
 </body>
 </html>

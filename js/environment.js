@@ -1,84 +1,72 @@
-// Environment & Texture Setup - Update 1.5.2
+// Environment & Texture Setup - Update 1.5.4
 import * as THREE from 'three';
 
 export function createEnvironment(scene, playerWalletBalance) {
     const loader = new THREE.TextureLoader();
-    const texturePath = 'assets/textures/'; // Your specific folder path
+    const texturePath = 'assets/textures/'; // Enforced folder path
 
-    // 1. THE FLOOR (Branded Poker Felt)
+    // 1. THE REGULAR SKY
+    // Creates a giant blue sphere around the world
+    const skyGeo = new THREE.SphereGeometry(500, 32, 32);
+    const skyMat = new THREE.MeshBasicMaterial({ color: 0x87CEEB, side: THREE.BackSide });
+    const sky = new THREE.Mesh(skyGeo, skyMat);
+    scene.add(sky);
+
+    // 2. THE FLOOR (Branded Poker Felt)
+    // Using MeshBasicMaterial so it is bright and visible without lights
     const floorGeo = new THREE.PlaneGeometry(100, 100);
-    const floorMat = new THREE.MeshStandardMaterial({ 
-        color: 0xffffff, 
-        side: THREE.DoubleSide 
-    });
+    const floorMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
 
     loader.load(texturePath + 'poker_felt.jpg', (tex) => {
         tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-        tex.repeat.set(10, 10);
+        tex.repeat.set(5, 5);
         floorMat.map = tex;
         floorMat.needsUpdate = true;
-    }, undefined, (err) => console.error("Floor Texture Missing at: " + texturePath));
+    });
 
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
     scene.add(floor);
 
-    // 2. THE BRICK WALLS (The "Zone" Room)
-    const wallGeo = new THREE.PlaneGeometry(100, 20);
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+    // 3. THE BRICK WALLS (Lobby + 3 Rooms)
+    const wallGeo = new THREE.PlaneGeometry(100, 25);
+    const wallMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
 
     loader.load(texturePath + 'brick_wall.jpg', (tex) => {
         tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-        tex.repeat.set(5, 1);
+        tex.repeat.set(4, 1);
         wallMat.map = tex;
         wallMat.needsUpdate = true;
-    }, undefined, (err) => console.error("Wall Texture Missing at: " + texturePath));
-
-    // Placing 4 Walls
-    const wallSpecs = [
-        { pos: [0, 10, -50], rot: [0, 0, 0] },
-        { pos: [0, 10, 50], rot: [0, Math.PI, 0] },
-        { pos: [-50, 10, 0], rot: [0, Math.PI / 2, 0] },
-        { pos: [50, 10, 0], rot: [0, -Math.PI / 2, 0] }
-    ];
-
-    wallSpecs.forEach(spec => {
-        const wall = new THREE.Mesh(wallGeo, wallMat);
-        wall.position.set(...spec.pos);
-        wall.rotation.set(...spec.rot);
-        scene.add(wall);
     });
 
-    // 3. THE CEILING (Fixing the Black Gap)
-    const ceilGeo = new THREE.PlaneGeometry(100, 100);
-    const ceilMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
-    const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
-    ceiling.position.y = 20;
+    // Defining 4 walls to enclose the space
+    const walls = [
+        { p: [0, 12.5, -50], r: [0, 0, 0] },    // Back
+        { p: [0, 12.5, 50], r: [0, Math.PI, 0] }, // Front
+        { p: [-50, 12.5, 0], r: [0, Math.PI / 2, 0] }, // Left
+        { p: [50, 12.5, 0], r: [0, -Math.PI / 2, 0] }  // Right
+    ];
+
+    walls.forEach(w => {
+        const wallMesh = new THREE.Mesh(wallGeo, wallMat);
+        wallMesh.position.set(...w.p);
+        wallMesh.rotation.set(...w.r);
+        scene.add(wallMesh);
+    });
+
+    // 4. THE CEILING (Light Grey)
+    const ceiling = new THREE.Mesh(
+        new THREE.PlaneGeometry(100, 100),
+        new THREE.MeshBasicMaterial({ color: 0xdddddd, side: THREE.DoubleSide })
+    );
+    ceiling.position.y = 25;
     ceiling.rotation.x = Math.PI / 2;
     scene.add(ceiling);
-
-    // 4. MEGA BRIGHT LIGHTING (For Oculus Clarity)
-    const ambient = new THREE.AmbientLight(0xffffff, 1.8); 
-    scene.add(ambient);
-
-    const pointLight = new THREE.PointLight(0xffffff, 2, 100);
-    pointLight.position.set(0, 15, 0);
-    scene.add(pointLight);
 
     // 5. HOLOGRAM WALLET (Update 1.2)
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     canvas.width = 512; canvas.height = 256;
     ctx.fillStyle = '#00ffff';
-    ctx.font = 'bold 50px Arial';
-    ctx.fillText("WALLET", 150, 100);
-    ctx.fillText(`$${playerWalletBalance}`, 150, 180);
-    
-    const holoTex = new THREE.CanvasTexture(canvas);
-    const holoMesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(4, 2),
-        new THREE.MeshBasicMaterial({ map: holoTex, transparent: true, side: THREE.DoubleSide })
-    );
-    holoMesh.position.set(0, 3, -10);
-    scene.add(holoMesh);
-}
+    ctx.font = 'bold 50px Courier';
+    ctx.fillText("LOBBY WALLET", 1

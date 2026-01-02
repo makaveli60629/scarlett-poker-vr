@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Scarlett Poker VR – Permanent Core</title>
+<style>
+body { margin:0; overflow:hidden; background:#000; }
+#VRButton {
+  position:absolute;
+  bottom:20px;
+  left:50%;
+  transform:translateX(-50%);
+  padding:14px 28px;
+  background:#111;
+  color:#00ffff;
+  border:2px solid #00ffff;
+  border-radius:12px;
+  font-weight:bold;
+  z-index:1000;
+}
+</style>
+</head>
+
+<body>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+
+let scene, camera, renderer, player;
+let handL, handR, wristMenu;
+let teleportMarker, teleportLabel;
+const raycaster = new THREE.Raycaster();
+const tempMatrix = new THREE.Matrix4();
+
+init();
+animate();
+
+function init() {
+
+  scene = new THREE.Scene();
+
+  // SKY (no ceiling)
+  scene.background = new THREE.Color(0x0a1020);
+
+  // PLAYER RIG
+  player = new THREE.Group();
+  player.position.set(0, 0, 6);
+  scene.add(player);
+
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+  player.add(camera);
+
+  renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
+  document.body.appendChild(VRButton.createButton(renderer, { optionalFeatures:['hand-tracking'] }));
+
+  // LIGHTING (Quest safe)
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x333333, 2));
+  const dir = new THREE.DirectionalLight(0xffffff, 1.5);
+  dir.position.set(5,10,5);
+  scene.add(dir);
+
+  buildLobby();
+  buildScorpionRoom();
+  buildStoreRoom();
+  buildTeleportSystem();
+  setupHands();
+
+  window.addEventListener('resize', onResize);
+}
+
+function buildLobby() {
+  const floorMat = new THREE.MeshStandardMaterial({ color:0x111111 });
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(30,30), floorMat);
+  floor.rotation.x = -Math.PI/2;
+  floor.name = "TeleportFloor";
+  scene.add(floor);
+
+  // Floor grid glow
+  const grid = new THREE.GridHelper(30, 30, 0x00ffff, 0x004444);
+  grid.position.y = 0.01;
+  scene.add(grid);
+
+  // Walls
+  const wallMat = new THREE.MeshStandardMaterial({ color:0x220000 });
+  const walls = [
+    [0,2.5,-15,0],
+    [0,2.5,15,0],
+    [-15,2.5,0,Math.PI/2],
+    [15,2.5,0,Math.PI/2]
+  ];
+  walls.forEach(w=>{
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(30,5,0.3), wallMat);
+    wall.position.set(w[0],w[1],w[2]);
+    wall.rotation.y = w[3];
+    scene.add(wall);
+  });
+}
+
+function buildScorpionRoom() {
+  const room = new THREE.Group();
+  room.position.set(-25,0,0);
+  scene.add(room);
+
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(14,14),
+    new THREE.MeshStandardMaterial({ color:0x331100 })
+  );
+  floor.rotation.x = -Math.PI/2;
+  floor.name = "TeleportFloor";
+  room.add(floor);
+
+  createTeleportPad(room, "SCORPION ROOM", new THREE.Vector3(0,0.01,0));
+}
+
+function buildStoreRoom() {
+  const room = new THREE.Group();
+  room.position.set(25,0,0);
+  scene.add(room);
+
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(14,14),
+    new THREE.MeshStandardMaterial({ color:0x001122 })
+  );
+  floor.rotation.x = -Math.PI/2;
+  floor.name = "TeleportFloor";
+  room.add(floor);
+
+  createTeleportPad(room, "STORE", new THREE.Vector3(0,0.01,0));
+}
+
+function createTeleportPad(parent, label, pos) {
+  const pad = new THREE.Mesh(
+    new THREE.CircleGeometry(1,32),
+    new THREE.MeshBasicMaterial({ color:0x00ffff, transparent:true, opacity:0.6 })
+  );
+  pad.rotation.x = -Math.PI/2;
+  pad.position.copy(pos);
+  parent.add(pad);
+
+  const text = makeText(label);
+  text.position.set(0,2,0);
+  parent.add(text);
+}
+
+function makeText(msg) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512; canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#00ffff';
+  ctx.font = '48px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(msg,256,80);
+  const tex = new THREE.CanvasTexture(canvas);
+  return new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, transparent:true }));
+}
+
+function buildTeleportSystem() {
+  teleportMarker = new THREE.Mesh(
+    new THREE.RingGeometry(0.3,0.4,32),
+    new THREE.MeshBasicMaterial({ color:0x00ffff })
+  );
+  teleportMarker.rotation.x = -Math.PI/2;
+  teleportMarker.visible = false;
+  scene.add(teleportMarker);
+}
+
+function setupHands() {
+  const factory = new XRHandModelFactory();
+  handR = renderer.xr.getHand(0);
+  handL = renderer.xr.getHand(1);
+
+  handR.add(factory.createHandModel(handR,'mesh'));
+  handL.add(factory.createHandModel(handL,'mesh'));
+
+  player.add(handR);
+  player.add(handL);
+
+  wristMenu = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.4,0.25),
+    new THREE.MeshBasicMaterial({ color:0x002244, transparent:true, opacity:0.9 })
+  );
+  wristMenu.rotation.x = -Math.PI/2;
+  wristMenu.position.set(0,0.1,0);
+  wristMenu.visible = false;
+  handL.add(wristMenu);
+}
+
+function pinch(hand) {
+  const t = hand.joints?.['thumb-tip'];
+  const i = hand.joints?.['index-finger-tip'];
+  return (t && i) ? t.position.distanceTo(i.position) : 1;
+}
+
+function animate() {
+  renderer.setAnimationLoop(render);
+}
+
+function render() {
+
+  // TELEPORT (RIGHT HAND)
+  if (pinch(handR) < 0.02) {
+    tempMatrix.identity().extractRotation(handR.matrixWorld);
+    raycaster.ray.origin.setFromMatrixPosition(handR.matrixWorld);
+    raycaster.ray.direction.set(0,0,-1).applyMatrix4(tempMatrix);
+    const hits = raycaster.intersectObjects(scene.children,true);
+    for (const h of hits) {
+      if (h.object.name === "TeleportFloor") {
+        teleportMarker.position.copy(h.point);
+        teleportMarker.visible = true;
+        break;
+      }
+    }
+  } else if (teleportMarker.visible) {
+    player.position.set(teleportMarker.position.x,0,teleportMarker.position.z);
+    teleportMarker.visible = false;
+  }
+
+  // WRIST MENU (LEFT HAND)
+  wristMenu.visible = pinch(handL) < 0.02;
+
+  renderer.render(scene,camera);
+}
+
+function onResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+</script>
+</body>
+</html>

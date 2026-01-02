@@ -3,83 +3,62 @@ import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 import { World } from './world.js';
 
-class PokerGame {
-    constructor() {
-        this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x050505);
-        
-        this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
-        this.renderer = new THREE.WebGLRenderer({ antialias: true });
-        
-        this.init();
-        this.world = new World(this.scene);
-        this.setupHands();
-        this.gameLoop();
-    }
+let scene, camera, renderer, world, userGroup;
 
-    init() {
-        this.renderer.setPixelRatio(window.devicePixelRatio);
-        this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.xr.enabled = true;
-        this.renderer.shadowMap.enabled = true;
-        document.body.appendChild(this.renderer.domElement);
-        document.body.appendChild(VRButton.createButton(this.renderer));
+init();
 
-        window.addEventListener('resize', () => {
-            this.camera.aspect = window.innerWidth / window.innerHeight;
-            this.camera.updateProjectionMatrix();
-            this.renderer.setSize(window.innerWidth, window.innerHeight);
-        });
-    }
+function init() {
+    // 1. Core Scene Setup
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x050505); // Deep dark grey, not pure black
 
-    setupHands() {
-        const handFactory = new XRHandModelFactory();
+    camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
+    
+    // 2. User/Camera Group (The "Spawn" point)
+    userGroup = new THREE.Group();
+    userGroup.position.set(0, 0, 1.5); // Start 1.5m back from center
+    scene.add(userGroup);
+    userGroup.add(camera);
 
-        // Left Hand
-        this.hand1 = this.renderer.xr.getHand(0);
-        this.hand1.add(handFactory.createHandModel(this.hand1, "mesh"));
-        this.scene.add(this.hand1);
+    // 3. Renderer & VR
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    document.getElementById('canvas-container').appendChild(renderer.domElement);
+    document.body.appendChild(VRButton.createButton(renderer));
 
-        // Right Hand
-        this.hand2 = this.renderer.xr.getHand(1);
-        this.hand2.add(handFactory.createHandModel(this.hand2, "mesh"));
-        this.scene.add(this.hand2);
-        
-        // Audit Check: Controllers are intentionally omitted. Only hands are added.
-    }
+    // 4. Global Lighting (Ensures visibility)
+    const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+    scene.add(ambient);
+    const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+    sun.position.set(2, 5, 2);
+    scene.add(sun);
 
-    /**
-     * Triggered when a player wins the pot.
-     * @param {string} player - Name of the winner
-     * @param {string} handDescription - e.g., "Royal Flush"
-     */
-    triggerWinSequence(player, handDescription) {
-        const display = document.getElementById('win-display');
-        const pText = document.getElementById('player-text');
-        const hText = document.getElementById('hand-text');
+    // 5. Hand Tracking Integration (NO CONTROLLERS)
+    const handModelFactory = new XRHandModelFactory();
+    const hand1 = renderer.xr.getHand(0);
+    hand1.add(handModelFactory.createHandModel(hand1, "mesh"));
+    scene.add(hand1);
 
-        pText.innerText = `${player} WINS THE POT`;
-        hText.innerText = handDescription;
-        display.style.display = 'block';
+    const hand2 = renderer.xr.getHand(1);
+    hand2.add(handModelFactory.createHandModel(hand2, "mesh"));
+    scene.add(hand2);
 
-        // Winning hand highlight logic (Event Chip)
-        console.log(`Audit: Highlighting winning hand: ${handDescription}`);
+    // 6. Load World Logic
+    world = new World(scene);
 
-        // Stay for 10 seconds per requirements
-        setTimeout(() => {
-            display.style.display = 'none';
-        }, 10000);
-    }
-
-    gameLoop() {
-        this.renderer.setAnimationLoop(() => {
-            this.renderer.render(this.scene, this.camera);
-        });
-    }
+    window.addEventListener('resize', onWindowResize);
+    renderer.setAnimationLoop(render);
 }
 
-// Start Game
-const game = new PokerGame();
+function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
 
-// Global access for testing win sequence (e.g., game.triggerWinSequence('Player 1', 'Full House'))
-window.pokerGame = game;
+function render(time) {
+    world.update(time);
+    renderer.render(scene, camera);
+}

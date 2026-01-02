@@ -3,126 +3,137 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VR Poker - Permanent Update 1.4</title>
+    <title>VR Poker - GitHub Permanent v1.4.1</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/webxr/VRButton.js"></script>
-    <style>body { margin: 0; overflow: hidden; background-color: #000; }</style>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        #vr-button { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); }
+    </style>
 </head>
 <body>
 <script>
-    // --- PERSISTENT MEMORY & CONFIG ---
+    // --- MEMORY BANK: PERSISTENT VARIABLES ---
     let scene, camera, renderer, userGroup;
     let handLeft, handRight;
-    let menuVisible = false, menuGroup;
+    let menuGroup, leaderboard;
+    let isMenuOpen = false;
     let lastPinchTime = 0;
-    const TEXTURE_PATH = 'assets/textures/';
 
     // --- INITIALIZATION ---
     function init() {
+        // 1. Create Scene
         scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x020202);
+        scene.background = new THREE.Color(0x0a0a0a); // Dark grey, not black, to confirm loading
 
-        // Player Group (To prevent spawning inside objects)
+        // 2. Camera & User Group (The 'Rig')
+        camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
         userGroup = new THREE.Group();
-        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         userGroup.add(camera);
         scene.add(userGroup);
-        
-        // Spawn Location (Safe Zone)
-        userGroup.position.set(0, 0, 2); 
 
-        renderer = new THREE.WebGLRenderer({ antialias: true });
+        // SAFE SPAWN: Position user at origin, looking toward the table
+        userGroup.position.set(0, 1.6, 3); 
+
+        // 3. Renderer Setup
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.xr.enabled = true;
         document.body.appendChild(renderer.domElement);
-        document.body.appendChild(VRButton.createButton(renderer));
 
-        setupLights();
+        // 4. Lights (Crucial to see objects)
+        const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambient);
+        const directional = new THREE.DirectionalLight(0xffffff, 0.8);
+        directional.position.set(0, 10, 5);
+        scene.add(directional);
+
+        // 5. Build the World
         setupEnvironment();
         setupHands();
-        createHoveringLeaderboard();
         createVRMenu();
-        
+        createLeaderboard();
+
+        // 6. Enter VR Button
+        importVRButton();
+
+        // 7. Start Loop
         animate();
     }
 
-    function setupLights() {
-        const ambient = new THREE.AmbientLight(0xffffff, 0.4);
-        scene.add(ambient);
-        const spot = new THREE.SpotLight(0xffffff, 0.8);
-        spot.position.set(0, 10, 0);
-        scene.add(spot);
+    function importVRButton() {
+        // Manually creating the VR Button logic to ensure no loading errors
+        const button = document.createElement('button');
+        button.id = "vr-button";
+        button.innerHTML = "ENTER VR";
+        button.style.padding = "12px 24px";
+        button.onclick = () => {
+            navigator.xr.requestSession('immersive-vr', {
+                optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
+            }).then(session => renderer.xr.setSession(session));
+        };
+        document.body.appendChild(button);
     }
 
-    // --- WORLD BUILDING (Lobby, Store, Poker Room) ---
+    // --- WORLD ELEMENTS ---
     function setupEnvironment() {
-        // Floor - Texture Placeholder for Update 1.4
-        const floorGeo = new THREE.PlaneGeometry(100, 100);
-        const floorMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
-        const floor = new THREE.Mesh(floorGeo, floorMat);
+        // Floor
+        const floor = new THREE.Mesh(
+            new THREE.PlaneGeometry(50, 50),
+            new THREE.MeshStandardMaterial({ color: 0x151515 })
+        );
         floor.rotation.x = -Math.PI / 2;
         scene.add(floor);
 
-        // --- POKER ROOM (Centered at 0, 0, -6 for safe distance) ---
-        const tableGroup = new THREE.Group();
-        tableGroup.position.set(0, 0, -6);
-
-        const tableTop = new THREE.Mesh(
-            new THREE.CylinderGeometry(2.5, 2.5, 0.2, 64),
-            new THREE.MeshStandardMaterial({ color: 0x0a5c2f }) // Green felt
+        // POKER TABLE (Moved to -5 to be clearly visible from spawn)
+        const table = new THREE.Group();
+        table.position.set(0, 0, -5);
+        
+        const top = new THREE.Mesh(
+            new THREE.CylinderGeometry(2, 2, 0.2, 32),
+            new THREE.MeshStandardMaterial({ color: 0x004400 })
         );
-        tableTop.position.y = 1;
-        tableGroup.add(tableTop);
+        top.position.y = 1;
+        table.add(top);
 
-        // Perfectly Aligned Seats (Update 1.3/1.4 Polish)
+        // Chairs (Aligned)
         for(let i=0; i<6; i++) {
             const angle = (i/6) * Math.PI * 2;
-            const chair = new THREE.Group();
-            
-            const seat = new THREE.Mesh(
-                new THREE.BoxGeometry(0.6, 0.1, 0.6),
+            const chair = new THREE.Mesh(
+                new THREE.BoxGeometry(0.5, 0.5, 0.5),
                 new THREE.MeshStandardMaterial({ color: 0x222222 })
             );
-            const back = new THREE.Mesh(
-                new THREE.BoxGeometry(0.6, 0.8, 0.1),
-                new THREE.MeshStandardMaterial({ color: 0x222222 })
-            );
-            back.position.set(0, 0.4, 0.3);
-            chair.add(seat, back);
-            
-            chair.position.set(Math.cos(angle)*3.2, 0.5, Math.sin(angle)*3.2);
-            chair.lookAt(0, 0.5, -6);
-            tableGroup.add(chair);
+            chair.position.set(Math.cos(angle)*2.5, 0.25, Math.sin(angle)*2.5);
+            chair.lookAt(0, 0.25, 0);
+            table.add(chair);
         }
-        scene.add(tableGroup);
+        scene.add(table);
 
-        // --- THE STORE ---
-        const store = new THREE.Group();
-        store.position.set(10, 0, 0);
-        const shelf = new THREE.Mesh(new THREE.BoxGeometry(0.5, 3, 5), new THREE.MeshStandardMaterial({color: 0x3d2b1f}));
-        shelf.position.y = 1.5;
-        store.add(shelf);
+        // THE STORE (Off to the right)
+        const store = new THREE.Mesh(
+            new THREE.BoxGeometry(3, 2, 0.5),
+            new THREE.MeshStandardMaterial({ color: 0x3d2b1f })
+        );
+        store.position.set(6, 1, -2);
         scene.add(store);
     }
 
-    // --- HOVERING LEADERSHIP BOARD ---
-    function createHoveringLeaderboard() {
+    function createLeaderboard() {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         canvas.width = 512; canvas.height = 256;
-        ctx.fillStyle = '#000'; ctx.fillRect(0,0,512,256);
-        ctx.strokeStyle = '#gold'; ctx.lineWidth = 10; ctx.strokeRect(0,0,512,256);
-        ctx.fillStyle = 'gold'; ctx.font = 'bold 40px Arial'; ctx.fillText('LEADERBOARD', 120, 60);
-        ctx.fillStyle = 'white'; ctx.font = '30px Arial';
-        ctx.fillText('1. Player_1: $2.5M', 50, 130);
-        ctx.fillText('2. HighRoller: $1.8M', 50, 180);
+        ctx.fillStyle = '#111'; ctx.fillRect(0,0,512,256);
+        ctx.fillStyle = 'gold'; ctx.font = '40px Arial';
+        ctx.fillText('LEADERBOARD', 120, 60);
+        ctx.fillStyle = 'white'; ctx.font = '24px Arial';
+        ctx.fillText('1. YOU: $1,000,000', 50, 120);
 
-        const board = new THREE.Mesh(
-            new THREE.PlaneGeometry(4, 2),
-            new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true })
+        leaderboard = new THREE.Mesh(
+            new THREE.PlaneGeometry(3, 1.5),
+            new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas) })
         );
-        board.position.set(0, 4, -9); // Floating high in the Poker Room
-        scene.add(board);
+        leaderboard.position.set(0, 3, -8);
+        scene.add(leaderboard);
     }
 
     // --- HANDS & INTERACTION ---
@@ -130,16 +141,13 @@
         handLeft = renderer.xr.getHand(0);
         handRight = renderer.xr.getHand(1);
 
-        // Hand Models (Ensuring Hands Only)
-        const controllerModelFactory = { /* Standard VR Hand Factory */ };
-        
-        // Left Pinch = Menu Toggle
+        // HAND TRACKING ONLY (No Controllers)
         handLeft.addEventListener('pinchstart', () => {
             const now = Date.now();
             if(now - lastPinchTime > 500) {
-                menuVisible = !menuVisible;
-                menuGroup.visible = menuVisible;
-                if(menuVisible) {
+                isMenuOpen = !isMenuOpen;
+                menuGroup.visible = isMenuOpen;
+                if(isMenuOpen) {
                     const pos = new THREE.Vector3();
                     handLeft.getWorldPosition(pos);
                     menuGroup.position.set(pos.x, pos.y + 0.1, pos.z - 0.2);
@@ -153,21 +161,21 @@
         scene.add(handRight);
     }
 
-    // --- MENU & TELEPORTER BUTTONS ---
     function createVRMenu() {
         menuGroup = new THREE.Group();
         const locations = [
-            { name: 'Lobby', target: [0, 0, 2] },
-            { name: 'Poker Room', target: [0, 0, -3] },
-            { name: 'Store', target: [8, 0, 0] }
+            { name: 'Lobby', pos: [0, 1.6, 3] },
+            { name: 'Poker', pos: [0, 1.6, -2] },
+            { name: 'Store', pos: [5, 1.6, -1] }
         ];
 
         locations.forEach((loc, i) => {
-            const btnGeo = new THREE.BoxGeometry(0.3, 0.1, 0.05);
-            const btnMat = new THREE.MeshStandardMaterial({ color: 0x0000ff });
-            const btn = new THREE.Mesh(btnGeo, btnMat);
-            btn.position.y = 0.2 - (i * 0.15);
-            btn.userData = { target: loc.target };
+            const btn = new THREE.Mesh(
+                new THREE.BoxGeometry(0.2, 0.08, 0.02),
+                new THREE.MeshStandardMaterial({ color: 0x0000ff })
+            );
+            btn.position.y = 0.2 - (i * 0.1);
+            btn.userData = { target: loc.pos };
             menuGroup.add(btn);
         });
 
@@ -175,36 +183,32 @@
         scene.add(menuGroup);
     }
 
-    function checkMenuCollision() {
-        if (!menuVisible) return;
+    function checkInteraction() {
+        if (!isMenuOpen) return;
         
-        // Use Right Index Tip to press
-        const indexTip = handRight.joints ? handRight.joints['index-finger-tip'] : null;
-        if (!indexTip || !indexTip.visible) return;
+        // Right Hand Index Tip (Joint 9)
+        const tip = handRight.joints ? handRight.joints['index-finger-tip'] : null;
+        if (!tip || !tip.visible) return;
 
         menuGroup.children.forEach(btn => {
-            const btnWorldPos = new THREE.Vector3();
-            btn.getWorldPosition(btnWorldPos);
-            if (indexTip.position.distanceTo(btnWorldPos) < 0.04) {
-                teleport(btn.userData.target);
+            const btnPos = new THREE.Vector3();
+            btn.getWorldPosition(btnPos);
+            if (tip.position.distanceTo(btnPos) < 0.04) {
+                userGroup.position.set(...btn.userData.target);
+                isMenuOpen = false;
+                menuGroup.visible = false;
             }
         });
     }
 
-    function teleport(pos) {
-        userGroup.position.set(pos[0], pos[1], pos[2]);
-        menuVisible = false;
-        menuGroup.visible = false;
-    }
-
     function animate() {
         renderer.setAnimationLoop(() => {
-            checkMenuCollision();
+            checkInteraction();
             renderer.render(scene, camera);
         });
     }
 
-    init();
+    window.onload = init; // Ensures script runs after page loads
 </script>
 </body>
 </html>

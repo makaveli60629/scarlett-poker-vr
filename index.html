@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>POKER VR MASTER - 1.5.7</title>
+    <title>POKER VR MASTER - 1.6.1</title>
     <style>
         body { margin: 0; background-color: #000; overflow: hidden; font-family: sans-serif; }
     </style>
@@ -13,11 +13,14 @@
         import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
         import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-        // 1. ENGINE & VR SETUP
+        // 1. ENGINE & PERSISTENT DATA
+        let stats = JSON.parse(localStorage.getItem('poker_master_save')) || { chips: 500, lastDaily: 0 };
+        const save = () => localStorage.setItem('poker_master_save', JSON.stringify(stats));
+
         const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setPixelRatio(window.devicePixelRatio);
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setPixelRatio(1.5);
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.xr.enabled = true;
         document.body.appendChild(renderer.domElement);
@@ -27,93 +30,118 @@
         cameraRig.add(camera);
         scene.add(cameraRig);
 
-        // 2. LIGHTING & GRID
+        // 2. WORLD ASSETS (Tables & Walls)
         scene.add(new THREE.AmbientLight(0xffffff, 1.2));
         scene.add(new THREE.GridHelper(200, 100, 0x00ffcc, 0x111111));
 
-        // --- UTILITY FUNCTIONS ---
-        function createTable(x, z, color = 0x006400) {
+        function createPokerRoom(x, z, color, size, isLobby=false) {
             const group = new THREE.Group();
-            const top = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 0.2, 32), new THREE.MeshStandardMaterial({ color: color }));
-            top.position.y = 0.8;
-            group.add(top);
-            
-            // Purple Glow Pill
-            const ring = new THREE.Mesh(
-                new THREE.RingGeometry(2.8, 3.0, 64),
-                new THREE.MeshBasicMaterial({ color: 0x800080, transparent: true, opacity: 0.6, side: THREE.DoubleSide })
-            );
-            ring.rotation.x = -Math.PI / 2;
-            ring.position.y = 0.02;
-            group.add(ring);
-            
+            const table = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 0.2, 32), new THREE.MeshStandardMaterial({color}));
+            table.position.y = 0.8;
+            const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 1.2, 0.7, 16), new THREE.MeshBasicMaterial({color: 0x800080, transparent: true, opacity: 0.6}));
+            leg.position.y = 0.35;
+            group.add(table, leg);
+
+            if(!isLobby) {
+                const wallGeo = new THREE.BoxGeometry(size, 5, 0.2);
+                const wallMat = new THREE.MeshStandardMaterial({color: 0x050505});
+                for(let i=0; i<4; i++){
+                    const wall = new THREE.Mesh(wallGeo, wallMat);
+                    wall.rotation.y = (Math.PI/2) * i;
+                    wall.position.set(Math.sin(wall.rotation.y)*size/2, 2.5, Math.cos(wall.rotation.y)*size/2);
+                    group.add(wall);
+                }
+            }
             group.position.set(x, 0, z);
             scene.add(group);
             return group;
         }
 
-        // 3. THE CASINO FLOOR LAYOUT
-        // Room 1: Lobby Table (Current)
-        createTable(0, -5); 
+        createPokerRoom(0, -5, 0x006400, 0, true); // Lobby
+        createPokerRoom(0, -35, 0x440000, 18);    // High Stakes
+        createPokerRoom(30, -15, 0x000044, 18);   // Low Stakes
 
-        // Room 2: High Stakes (Forward North)
-        createTable(0, -25, 0x440000); // Dark Red Table
+        // 3. DAILY REWARD CHAIR
+        const chair = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({color: 0x222222}));
+        chair.position.set(-8, 0.5, -8);
+        scene.add(chair);
 
-        // Room 3: Mid Stakes (To the Right)
-        createTable(20, -15, 0x000044); // Dark Blue Table
+        // 4. WRIST CONSOLE (Left Hand)
+        const wristUI = new THREE.Group();
+        const panel = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.15), new THREE.MeshBasicMaterial({color: 0x000000, transparent: true, opacity: 0.8, side: THREE.DoubleSide}));
+        panel.rotation.x = -Math.PI/2;
+        wristUI.add(panel);
 
-        // Room 4: Private Room (To the Left)
-        createTable(-20, -15, 0x1a1a1a); // Black Table
+        // Daily Button on Wrist
+        const claimBtn = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.05), new THREE.MeshBasicMaterial({color: 0x800080}));
+        claimBtn.position.set(0, 0.01, 0.03);
+        claimBtn.rotation.x = -Math.PI/2;
+        wristUI.add(claimBtn);
 
-        // --- THE LEADERBOARD ---
-        const boardGeo = new THREE.BoxGeometry(8, 5, 0.1);
-        const boardMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
-        const leaderboard = new THREE.Mesh(boardGeo, boardMat);
-        leaderboard.position.set(0, 4, -12);
-        scene.add(leaderboard);
-        
-        // Visual indicator for Daily Pick Area
-        const dailyChair = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1, 0.8), new THREE.MeshStandardMaterial({ color: 0x222222 }));
-        dailyChair.position.set(-5, 0.5, -4);
-        scene.add(dailyChair);
+        const controller2 = renderer.xr.getController(1); // Left
+        controller2.add(wristUI);
+        cameraRig.add(controller2);
 
-        // 4. VR CONTROLS (SNAP TURN & TELEPORT)
-        const marker = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.35, 32), new THREE.MeshBasicMaterial({ color: 0x00ffcc }));
-        marker.rotation.x = -Math.PI / 2;
-        scene.add(marker);
-
-        const controller1 = renderer.xr.getController(0); // Right (Laser/Teleport)
-        const laser = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-10)]), new THREE.LineBasicMaterial({color: 0x00ffcc}));
+        // 5. RIGHT HAND (Laser & Interaction)
+        const controller1 = renderer.xr.getController(0); 
+        const laser = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]), new THREE.LineBasicMaterial({color: 0x00ffcc}));
+        laser.scale.z = 50;
         controller1.add(laser);
         cameraRig.add(controller1);
 
-        const controller2 = renderer.xr.getController(1); // Left (Movement/UI)
-        cameraRig.add(controller2);
+        const marker = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.4, 32), new THREE.MeshBasicMaterial({color: 0x00ffcc}));
+        marker.rotation.x = -Math.PI/2;
+        scene.add(marker);
 
-        let canTurn = true;
+        // 6. LOGIC: TELEPORT & DAILY CLAIM
+        const raycaster = new THREE.Raycaster();
+        
         controller1.addEventListener('selectstart', () => {
-            if (marker.visible) cameraRig.position.set(marker.position.x, 0, marker.position.z);
+            // Check for Button Hit
+            const tempMatrix = new THREE.Matrix4().extractRotation(controller1.matrixWorld);
+            raycaster.ray.origin.setFromMatrixPosition(controller1.matrixWorld);
+            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+
+            const hits = raycaster.intersectObject(claimBtn);
+            if(hits.length > 0) {
+                handleDailyClaim();
+            } else if (marker.visible) {
+                cameraRig.position.set(marker.position.x, 0, marker.position.z);
+            }
         });
 
-        // 5. ANIMATION LOOP
+        function handleDailyClaim() {
+            const now = Date.now();
+            if (now - stats.lastDaily < 86400000) {
+                alert("Wait 24h for next reward!");
+                return;
+            }
+            const reward = (Math.floor(Math.random() * 10) + 1) * 500;
+            stats.chips += reward;
+            stats.lastDaily = now;
+            save();
+            alert("Claimed: $" + reward);
+        }
+
+        // 7. MAIN LOOP
+        let canTurn = true;
         renderer.setAnimationLoop(() => {
             const session = renderer.xr.getSession();
             if (session) {
                 for (const source of session.inputSources) {
-                    if (source.gamepad && source.handedness === 'right') {
+                    if (source.handedness === 'right' && source.gamepad) {
                         const axes = source.gamepad.axes;
                         if (Math.abs(axes[2]) > 0.8 && canTurn) {
-                            cameraRig.rotation.y -= Math.sign(axes[2]) * (Math.PI / 4);
-                            canTurn = false;
-                            setTimeout(() => { canTurn = true; }, 300);
+                            cameraRig.rotation.y -= Math.sign(axes[2]) * (Math.PI/4);
+                            canTurn = false; setTimeout(() => canTurn = true, 300);
                         }
                     }
                 }
             }
 
-            // Raycast Teleport
-            const matrix = new THREE.Matrix4().makeRotationFromQuaternion(controller1.quaternion);
-            const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(matrix);
+            // Raycast for Teleport Marker
+            const m = new THREE.Matrix4().makeRotationFromQuaternion(controller1.quaternion);
+            const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(m);
             if (dir.y < -0.1) {
                 const ratio = -controller1.position.y / dir.y;
                 marker.position.set(controller1.position.x + dir.x * ratio + cameraRig.position.x, 0.01, controller1.position.z + dir.z * ratio + cameraRig.position.z);

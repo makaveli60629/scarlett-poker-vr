@@ -3,19 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>POKER VR MASTER - 1.5.2</title>
+    <title>POKER VR MASTER - 1.5.4</title>
     <style>
-        body { margin: 0; background-color: #000; overflow: hidden; font-family: sans-serif; }
-        #winner-ui { 
-            position: fixed; top: 10%; width: 100%; text-align: center; 
-            color: gold; font-size: 50px; font-weight: bold; 
-            text-shadow: 2px 2px 10px #000; display: none; z-index: 100;
-        }
+        body { margin: 0; background-color: #000; overflow: hidden; }
     </style>
 </head>
 <body>
-    <div id="winner-ui">WINNER REVEALED</div>
-
     <script type="module">
         import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
         import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
@@ -29,91 +22,92 @@
         document.body.appendChild(renderer.domElement);
         document.body.appendChild(VRButton.createButton(renderer));
 
-        // 2. CAMERA RIG (The User)
         const cameraRig = new THREE.Group();
         cameraRig.add(camera);
         scene.add(cameraRig);
 
-        // 3. ENVIRONMENT (Grid & Lights)
+        // 2. ENVIRONMENT
         scene.add(new THREE.AmbientLight(0xffffff, 1.2));
         const grid = new THREE.GridHelper(100, 100, 0x00ffcc, 0x222222);
         scene.add(grid);
 
-        // --- ADDING ITEM 1: THE POKER TABLE ---
-        const tableGroup = new THREE.Group();
-        const tableTopGeo = new THREE.CylinderGeometry(2.5, 2.5, 0.2, 40);
-        const tableTopMat = new THREE.MeshStandardMaterial({ color: 0x006400 }); // Classic Poker Green
-        const tableTop = new THREE.Mesh(tableTopGeo, tableTopMat);
-        tableTop.position.y = 0.8;
-        
-        const tableLeg = new THREE.CylinderGeometry(0.5, 0.8, 0.8, 16);
-        const tableLegMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a });
-        const leg = new THREE.Mesh(tableLeg, tableLegMat);
-        leg.position.y = 0.4;
+        // --- POKER TABLE ---
+        const table = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 0.2, 32), new THREE.MeshStandardMaterial({ color: 0x006400 }));
+        table.position.set(0, 0.8, -5);
+        scene.add(table);
 
-        tableGroup.add(tableTop, leg);
-        tableGroup.position.set(0, 0, -5); // 5 units in front of player
-        scene.add(tableGroup);
+        // --- STORE & DAILY PICK CHAIR ---
+        // Store Wall
+        const store = new THREE.Mesh(new THREE.BoxGeometry(4, 3, 0.2), new THREE.MeshStandardMaterial({ color: 0x440000 }));
+        store.position.set(-7, 1.5, -2);
+        store.rotation.y = Math.PI / 4;
+        scene.add(store);
 
-        // --- ADDING ITEM 2: THE STORE LOBBY ---
-        const storeGroup = new THREE.Group();
-        const storeWallGeo = new THREE.BoxGeometry(4, 3, 0.2);
-        const storeWallMat = new THREE.MeshStandardMaterial({ color: 0x440000 }); // Store Red
-        const storeWall = new THREE.Mesh(storeWallGeo, storeWallMat);
-        
-        // Add a "Counter" for the store
-        const counterGeo = new THREE.BoxGeometry(4, 1, 1);
-        const counterMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
-        const counter = new THREE.Mesh(counterGeo, counterMat);
-        counter.position.set(0, -1, 0.5);
+        // Daily Pick Chair (The Daily Reward Station)
+        const chairGroup = new THREE.Group();
+        const seat = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.8), new THREE.MeshStandardMaterial({ color: 0x222222 }));
+        const back = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1, 0.1), new THREE.MeshStandardMaterial({ color: 0x222222 }));
+        back.position.set(0, 0.5, -0.4);
+        chairGroup.add(seat, back);
+        chairGroup.position.set(-5, 0.4, -4); // Positioned near the store
+        scene.add(chairGroup);
 
-        storeGroup.add(storeWall, counter);
-        storeGroup.position.set(-7, 1.5, -2); // To the left
-        storeGroup.rotation.y = Math.PI / 4; // Angled toward player
-        scene.add(storeGroup);
+        // --- TELEPORT VISUALS ---
+        // The Laser
+        const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
+        const line = new THREE.Line(lineGeo);
+        line.scale.z = 10;
 
-        // 4. CONTROLLER TRACKING
-        const controller1 = renderer.xr.getController(0);
-        const controller2 = renderer.xr.getController(1);
-        cameraRig.add(controller1, controller2);
+        // The Land Spot (Teleport Marker)
+        const markerGeo = new THREE.RingGeometry(0.3, 0.35, 32);
+        const markerMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, side: THREE.DoubleSide });
+        const marker = new THREE.Mesh(markerGeo, markerMat);
+        marker.rotation.x = -Math.PI / 2;
+        marker.visible = false;
+        scene.add(marker);
 
-        // 5. PERMANENT JOYSTICK MOVEMENT & PROXIMITY LOGIC
-        function handleSystems() {
-            const session = renderer.xr.getSession();
-            if (session) {
-                for (const source of session.inputSources) {
-                    if (source.gamepad) {
-                        const axes = source.gamepad.axes;
-                        // Movement (Left Stick)
-                        if (source.handedness === 'left') {
-                            cameraRig.position.x += axes[2] * 0.08;
-                            cameraRig.position.z += axes[3] * 0.08;
-                        }
-                        // Rotation (Right Stick)
-                        if (source.handedness === 'right') {
-                            if (Math.abs(axes[2]) > 0.5) cameraRig.rotation.y -= axes[2] * 0.04;
-                        }
-                    }
-                }
+        // Controllers
+        const controller1 = renderer.xr.getController(0); // Right - Teleport
+        controller1.add(line);
+        cameraRig.add(controller1);
+
+        const controller2 = renderer.xr.getController(1); // Left - Watch/Hand
+        cameraRig.add(controller2);
+
+        // Simple Hand Meshes
+        const handMesh = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.15), new THREE.MeshStandardMaterial({ color: 0x00ffcc }));
+        controller1.add(handMesh.clone());
+        controller2.add(handMesh.clone());
+
+        // --- LOGIC ---
+        controller1.addEventListener('selectstart', () => {
+            if (marker.visible) {
+                cameraRig.position.set(marker.position.x, 0, marker.position.z);
             }
-
-            // --- AUTO-SIT LOGIC ---
-            const distToTable = cameraRig.position.distanceTo(tableGroup.position);
-            if (distToTable < 2.8) {
-                // Adjust camera to perfect sitting height if player gets close
-                camera.position.y = -0.2; 
-            } else {
-                camera.position.y = 0; // Standing height
-            }
-        }
-
-        // 6. MAIN LOOP
-        renderer.setAnimationLoop(() => {
-            handleSystems();
-            renderer.render(scene, camera);
         });
 
-        console.log("Update 1.5.2: Poker Table and Store Lobby placed.");
+        renderer.setAnimationLoop(() => {
+            // Update Teleport Marker Position
+            const matrix = new THREE.Matrix4().makeRotationFromQuaternion(controller1.quaternion);
+            const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(matrix);
+            
+            // Raycast to floor (y=0)
+            if (dir.y < -0.1) {
+                const ratio = -controller1.position.y / dir.y;
+                const hitX = controller1.position.x + dir.x * ratio + cameraRig.position.x;
+                const hitZ = controller1.position.z + dir.z * ratio + cameraRig.position.z;
+                marker.position.set(hitX, 0.01, hitZ);
+                marker.visible = true;
+            } else {
+                marker.visible = false;
+            }
+
+            // Sitting Height at Poker Table
+            const distToTable = cameraRig.position.distanceTo(table.position);
+            camera.position.y = (distToTable < 2.8) ? -0.2 : 0;
+            
+            renderer.render(scene, camera);
+        });
     </script>
 </body>
 </html>

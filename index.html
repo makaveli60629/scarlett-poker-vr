@@ -2,222 +2,98 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>High-Stakes VR - Master Bone Structure 1.7</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <style>
-        body { margin: 0; overflow: hidden; background: #000; }
-        #vr-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; z-index: 10; }
-        button { padding: 25px 50px; font-size: 1.5rem; background: #0080ff; color: white; border: none; border-radius: 12px; cursor: pointer; }
-    </style>
+    <title>High-Stakes VR Poker - Version 1.4 Audit Build</title>
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://unpkg.com/aframe-environment-component@1.3.2/dist/aframe-environment-component.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v7.0.0/dist/aframe-extras.min.js"></script>
+    <script>
+        AFRAME.registerComponent('poker-logic', {
+            init: function () {
+                console.log("Poker Logic Initialized");
+                this.setupMenuBinding();
+            },
+            setupMenuBinding: function() {
+                const leftHand = document.querySelector('#leftHand');
+                const menu = document.querySelector('#wristMenu');
+                
+                leftHand.addEventListener('abuttondown', () => {
+                    menu.setAttribute('visible', !menu.getAttribute('visible'));
+                });
+            }
+        });
+
+        // Teleportation Laser Logic
+        AFRAME.registerComponent('teleport-controls-custom', {
+            init: function () {
+                this.el.addEventListener('teleport-start', () => { /* Handle visual feedback */ });
+            }
+        });
+    </script>
 </head>
 <body>
-    <div id="vr-overlay">
-        <h1 style="color:white; font-family:sans-serif;">VR POKER MASTER CORE</h1>
-        <button id="enter-button">START PERMANENT SESSION</button>
-    </div>
-
-<script>
-    // --- CORE GLOBAL STATE ---
-    let scene, camera, renderer, userGroup;
-    let handL, handR, controllerL, controllerR;
-    let menuGroup, laserLine, isMenuOpen = false;
-    let raycaster = new THREE.Raycaster();
-
-    const TEXTURE_PATH = 'assets/textures/';
-
-    function init() {
-        scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x010103);
-
-        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        userGroup = new THREE.Group();
-        userGroup.add(camera);
-        scene.add(userGroup);
-
-        // SAFE SPAWN (Lobby Zone)
-        userGroup.position.set(0, 0, 15);
-
-        renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.xr.enabled = true;
-        document.body.appendChild(renderer.domElement);
-
-        document.getElementById('enter-button').onclick = () => {
-            navigator.xr.requestSession('immersive-vr', {
-                optionalFeatures: ['local-floor', 'hand-tracking']
-            }).then(session => {
-                renderer.xr.setSession(session);
-                document.getElementById('vr-overlay').style.display = 'none';
-            });
-        };
-
-        setupLighting();
-        buildMasterEnvironment();
-        setupInputSystem();
-        createPermanentMenu();
-        animate();
-    }
-
-    // --- 1. LIGHTING RIG (Audit: More Light in Store) ---
-    function setupLighting() {
-        scene.add(new THREE.AmbientLight(0xffffff, 0.3));
-
-        // Moon Directional Light
-        const moonLight = new THREE.DirectionalLight(0x5555ff, 0.5);
-        moonLight.position.set(-15, 30, -25);
-        scene.add(moonLight);
-
-        // Poker Table Spot
-        const pokerSpot = new THREE.SpotLight(0xffffff, 2);
-        pokerSpot.position.set(0, 10, -5);
-        scene.add(pokerSpot);
-
-        // STORE LIGHTING (Enhanced)
-        const storeLight = new THREE.PointLight(0xffaa00, 1.5, 15);
-        storeLight.position.set(12, 4, 5);
-        scene.add(storeLight);
-    }
-
-    // --- 2. THE WORLD (Big Walls, No Ceiling, Textures Ready) ---
-    function buildMasterEnvironment() {
-        const loader = new THREE.TextureLoader();
+    <a-scene poker-logic renderer="antialias: true; colorManagement: true; exposure: 1.2;" shadow="type: pcfsoft">
         
-        // Massive Walls (15m Tall)
-        const wallMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a }); // Add loader.load(TEXTURE_PATH + 'wall.jpg') here
-        const wallGeo = new THREE.PlaneGeometry(60, 15);
-        
-        const wallPositions = [
-            { pos: [0, 7.5, -30], rot: [0, 0, 0] },
-            { pos: [0, 7.5, 30], rot: [0, Math.PI, 0] },
-            { pos: [-30, 7.5, 0], rot: [0, Math.PI/2, 0] },
-            { pos: [30, 7.5, 0], rot: [0, -Math.PI/2, 0] }
-        ];
+        <a-assets>
+            <img id="brickWall" src="assets/textures/brick_wall.jpg">
+            <img id="carpetTex" src="assets/textures/carpet.jpg">
+            <img id="leatherTex" src="assets/textures/leather_trim.jpg">
+            <canvas id="pokerFeltCanvas"></canvas>
+        </a-assets>
 
-        wallPositions.forEach(wp => {
-            const wall = new THREE.Mesh(wallGeo, wallMat);
-            wall.position.set(...wp.pos);
-            wall.rotation.set(...wp.rot);
-            scene.add(wall);
+        <a-entity id="rig" movement-controls="fly: false; speed: 0.3" position="0 0 5">
+            <a-entity camera position="0 1.6 0" look-controls></a-entity>
             
-            // Neon Trims on every corner
-            const neon = new THREE.Mesh(new THREE.BoxGeometry(60, 0.1, 0.1), new THREE.MeshBasicMaterial({color: 0x00ffff}));
-            neon.position.set(wp.pos[0], 0.1, wp.pos[2]);
-            neon.rotation.set(...wp.rot);
-            scene.add(neon);
-        });
+            <a-entity id="leftHand" 
+                      hand-tracking-controls="hand: left;"
+                      hand-controls="hand: left; handModelStyle: highPoly; color: #ffcccc">
+                <a-entity id="wristWatch" position="0 0.05 0.1" rotation="-90 0 0">
+                    <a-cylinder radius="0.03" height="0.01" color="#333"></a-cylinder>
+                    <a-text value="12:00" position="-0.02 0.01 0" scale="0.1 0.1 0.1" color="cyan"></a-text>
+                    <a-entity id="wristMenu" visible="false" position="0 0.1 0">
+                        <a-plane width="0.2" height="0.3" color="#222" opacity="0.9">
+                            <a-text value="MENU\n- Lobby\n- Store\n- Quit" align="center" scale="0.2 0.2 0.2" position="0 0 0.01"></a-text>
+                        </a-plane>
+                    </a-entity>
+                </a-entity>
+                <a-entity laser-controls="hand: left" raycaster="objects: .teleport-surface; far: 10; showLine: true"></a-entity>
+            </a-entity>
 
-        // Floor
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({color: 0x050505}));
-        floor.rotation.x = -Math.PI / 2;
-        scene.add(floor);
+            <a-entity id="rightHand" 
+                      hand-tracking-controls="hand: right;"
+                      hand-controls="hand: right; handModelStyle: highPoly; color: #ffcccc">
+            </a-entity>
+        </a-entity>
 
-        // MOON
-        const moon = new THREE.Mesh(new THREE.SphereGeometry(3, 32, 32), new THREE.MeshBasicMaterial({color: 0xffffff}));
-        moon.position.set(-20, 40, -40);
-        scene.add(moon);
+        <a-light type="ambient" intensity="0.4" color="#fff"></a-light>
+        <a-light type="directional" position="1 5 1" intensity="0.8" castShadow="true"></a-light>
+        <a-light type="point" position="0 3 0" intensity="0.5" color="#00ffff"></a-light>
 
-        // TABLE & CHAIRS
-        const table = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 0.2, 64), new THREE.MeshStandardMaterial({color: 0x076324}));
-        table.position.set(0, 1, -5);
-        scene.add(table);
+        <a-entity id="pokerTable" position="0 0.9 0">
+            <a-capsule radius="0.8" height="1.5" rotation="90 0 0" scale="1 1 0.1" material="color: #076324; roughness: 0.8;"></a-capsule>
+            <a-capsule radius="0.85" height="1.55" rotation="90 0 0" scale="1 1 0.08" material="src: #leatherTex; color: #221100;" position="0 -0.02 0"></a-capsule>
+            <a-cylinder radius="0.05" height="0.9" position="0.5 -0.45 0" color="#111"></a-cylinder>
+            <a-cylinder radius="0.05" height="0.9" position="-0.5 -0.45 0" color="#111"></a-cylinder>
+        </a-entity>
 
-        for(let i=0; i<6; i++) {
-            const a = (i/6) * Math.PI * 2;
-            const seat = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), new THREE.MeshStandardMaterial({color: 0x222222}));
-            seat.position.set(Math.cos(a)*3.8, 0.35, Math.sin(a)*3.8 - 5);
-            seat.lookAt(0, 0.35, -5);
-            scene.add(seat);
-        }
-    }
-
-    // --- 3. INPUT SYSTEM (Hands + Laser Pointers) ---
-    function setupInputSystem() {
-        handL = renderer.xr.getHand(0);
-        handR = renderer.xr.getHand(1);
+        <a-box id="floor" class="teleport-surface" static-body width="20" height="0.1" depth="20" material="src: #carpetTex; repeat: 10 10;"></a-box>
         
-        // Hand Visuals
-        const hGeo = new THREE.SphereGeometry(0.04, 16, 16);
-        const hMat = new THREE.MeshBasicMaterial({color: 0x00ff00});
-        handL.add(new THREE.Mesh(hGeo, hMat));
-        handR.add(new THREE.Mesh(hGeo, hMat));
+        <a-entity id="walls">
+            <a-box position="0 2.5 -10" width="20" height="5" depth="0.2" material="src: #brickWall; repeat: 4 2;">
+                <a-box position="-9.9 0 0.2" width="0.05" height="5" depth="0.05" material="emissive: #00ffff; emissiveIntensity: 2;"></a-box>
+                <a-box position="9.9 0 0.2" width="0.05" height="5" depth="0.05" material="emissive: #00ffff; emissiveIntensity: 2;"></a-box>
+            </a-box>
+            <a-box position="-10 2.5 0" rotation="0 90 0" width="20" height="5" depth="0.2" material="src: #brickWall; repeat: 4 2;"></a-box>
+            <a-box position="10 2.5 0" rotation="0 -90 0" width="20" height="5" depth="0.2" material="src: #brickWall; repeat: 4 2;"></a-box>
+        </a-entity>
 
-        // Laser Pointer for Right Hand
-        const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]);
-        laserLine = new THREE.Line(laserGeo, new THREE.LineBasicMaterial({color: 0xff0000}));
-        handR.add(laserLine);
+        <a-entity id="leaderboard" position="3 2 -4" rotation="0 -30 0">
+            <a-plane width="2" height="1.5" color="#000" opacity="0.8">
+                <a-text value="TOP PLAYERS" align="center" position="0 0.6 0.01" width="4"></a-text>
+                <a-text value="1. User123 - $50,000\n2. AI_Dealer - $25,000\n3. Guest - $10,000" 
+                        align="left" position="-0.8 0 0.01" width="3"></a-text>
+            </a-plane>
+        </a-entity>
 
-        // Event: Left Pinch = Menu
-        handL.addEventListener('pinchstart', () => {
-            isMenuOpen = !isMenuOpen;
-            menuGroup.visible = isMenuOpen;
-        });
-
-        scene.add(handL, handR);
-    }
-
-    function createPermanentMenu() {
-        menuGroup = new THREE.Group();
-        const locations = [
-            { name: 'Lobby', target: [0, 0, 12] },
-            { name: 'Poker', target: [0, 0, -1] },
-            { name: 'Store', target: [12, 0, 5] }
-        ];
-
-        locations.forEach((loc, i) => {
-            const btn = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.12, 0.05), new THREE.MeshBasicMaterial({color: 0x0000ff}));
-            btn.position.y = 0.3 - (i * 0.18);
-            btn.userData = { target: loc.target };
-            menuGroup.add(btn);
-        });
-        menuGroup.visible = false;
-        scene.add(menuGroup);
-    }
-
-    function handleInteraction() {
-        if(!isMenuOpen) {
-            laserLine.visible = false;
-            return;
-        }
-        laserLine.visible = true;
-
-        // Position Menu
-        const lPos = new THREE.Vector3();
-        handL.getWorldPosition(lPos);
-        menuGroup.position.lerp(new THREE.Vector3(lPos.x, lPos.y + 0.3, lPos.z - 0.3), 0.2);
-        menuGroup.lookAt(camera.position);
-
-        // Laser Collision
-        const tempMatrix = new THREE.Matrix4().extractRotation(handR.matrixWorld);
-        raycaster.ray.origin.setFromMatrixPosition(handR.matrixWorld);
-        raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
-
-        const intersects = raycaster.intersectObjects(menuGroup.children);
-        if(intersects.length > 0) {
-            const target = intersects[0].object.userData.target;
-            // Highlight button
-            intersects[0].object.material.color.set(0x00ff00);
-            
-            // Trigger on "Pinch" or proximity
-            const tipR = handR.joints ? handR.joints['index-finger-tip'] : null;
-            if(tipR && tipR.position.distanceTo(intersects[0].object.getWorldPosition(new THREE.Vector3())) < 0.08) {
-                userGroup.position.set(...target);
-                isMenuOpen = false;
-                menuGroup.visible = false;
-            }
-        } else {
-            menuGroup.children.forEach(b => b.material.color.set(0x0000ff));
-        }
-    }
-
-    function animate() {
-        renderer.setAnimationLoop(() => {
-            handleInteraction();
-            renderer.render(scene, camera);
-        });
-    }
-
-    init();
-</script>
+    </a-scene>
 </body>
 </html>

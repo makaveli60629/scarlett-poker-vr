@@ -1,36 +1,66 @@
-/** * world.js - The Physical Laws & Environment
- */
-document.addEventListener('DOMContentLoaded', () => {
-    const world = document.querySelector('#game-world');
+AFRAME.registerComponent('world-setup', {
+    init: function () {
+        const sceneEl = this.el;
 
-    // BUILD ROOMS & WALLS
-    world.innerHTML = `
-        <a-box position="0 2.5 -6" width="12" height="5" depth="0.2" material="src: #brick-wall; repeat: 4 2">
-            <a-plane src="#brand-logo" position="0 0 0.12" width="4" height="2" transparent="true"></a-plane>
-        </a-box>
-        <a-box position="0 2.5 15" width="12" height="5" depth="0.2" material="src: #brick-wall; repeat: 4 2"></a-box>
+        // 1. OVAL TABLE WITH LEATHER TRIM
+        let table = document.createElement('a-entity');
+        table.setAttribute('id', 'pokerTable');
+        table.setAttribute('position', '0 0.9 0');
         
-        <a-plane rotation="-90 0 0" width="30" height="30" color="#222"></a-plane>
+        // Felt Surface
+        let felt = document.createElement('a-capsule');
+        felt.setAttribute('radius', '0.8');
+        felt.setAttribute('height', '1.5');
+        felt.setAttribute('rotation', '90 0 0');
+        felt.setAttribute('scale', '1 1 0.1');
+        felt.setAttribute('material', 'color: #076324; roughness: 0.8;');
+        
+        // Leather Trim
+        let trim = document.createElement('a-capsule');
+        trim.setAttribute('radius', '0.85');
+        trim.setAttribute('height', '1.55');
+        trim.setAttribute('rotation', '90 0 0');
+        trim.setAttribute('scale', '1 1 0.08');
+        trim.setAttribute('material', 'src: #leatherTex; color: #221100;');
+        trim.setAttribute('position', '0 -0.02 0');
 
-        <a-box position="-5.9 2.5 -5.9" width="0.6" height="5" depth="0.6" color="#111"></a-box>
-        <a-box position="5.9 2.5 -5.9" width="0.6" height="5" depth="0.6" color="#111"></a-box>
-        <a-box mixin="neon-blue" position="0 0.1 -5.9" width="12" height="0.05" depth="0.05"></a-box>
-        <a-box mixin="neon-blue" position="0 4.9 -5.9" width="12" height="0.05" depth="0.05"></a-box>
+        table.appendChild(felt);
+        table.appendChild(trim);
+        sceneEl.appendChild(table);
 
-        <a-entity position="0 0.8 -2">
-            <a-cylinder radius="2" height="0.1" material="src: #table-felt"></a-cylinder>
-            <a-entity mixin="checkpoint-disk" position="0 -0.79 1.5" id="poker-sit-trigger"></a-entity>
-            <a-plane id="scoreboard" position="0 2.5 0" width="3" height="1.2" color="black" opacity="0.8">
-                <a-text value="POT: $0" align="center" color="#00FFFF"></a-text>
-            </a-plane>
-        </a-entity>
+        // 2. FLOOR (Carpet)
+        let floor = document.createElement('a-box');
+        floor.setAttribute('class', 'teleport-surface');
+        floor.setAttribute('width', '20');
+        floor.setAttribute('height', '0.1');
+        floor.setAttribute('depth', '20');
+        floor.setAttribute('material', 'src: #carpetTex; repeat: 10 10;');
+        sceneEl.appendChild(floor);
 
-        <a-entity id="lobby-room" position="0 0 12">
-            <a-text value="LOBBY" position="0 3 -2" align="center" scale="2 2 2"></a-text>
-            <a-box id="daily-grab-box" position="-2 0.5 -1" width="1" height="1" color="#FFD700">
-                <a-text value="DAILY GRAB" align="center" position="0 0.6 0" scale="0.5 0.5 0.5"></a-text>
-            </a-box>
-            <a-entity mixin="checkpoint-disk" position="0 0.01 0" id="lobby-trigger"></a-entity>
-        </a-entity>
-    `;
+        // 3. WALLS (Brick + Neon Corners)
+        this.createWall(sceneEl, "0 2.5 -10", "0 0 0");   // Back
+        this.createWall(sceneEl, "-10 2.5 0", "0 90 0");  // Left
+        this.createWall(sceneEl, "10 2.5 0", "0 -90 0");  // Right
+    },
+
+    createWall: function(scene, pos, rot) {
+        let wall = document.createElement('a-box');
+        wall.setAttribute('position', pos);
+        wall.setAttribute('rotation', rot);
+        wall.setAttribute('width', '20');
+        wall.setAttribute('height', '5');
+        wall.setAttribute('depth', '0.2');
+        wall.setAttribute('material', 'src: #brickWall; repeat: 4 2;');
+
+        // Neon Trim on each corner
+        let neon = document.createElement('a-box');
+        neon.setAttribute('position', '-9.9 0 0.2');
+        neon.setAttribute('width', '0.05');
+        neon.setAttribute('height', '5');
+        neon.setAttribute('depth', '0.05');
+        neon.setAttribute('material', 'emissive: #00ffff; emissiveIntensity: 2;');
+        
+        wall.appendChild(neon);
+        scene.appendChild(wall);
+    }
 });

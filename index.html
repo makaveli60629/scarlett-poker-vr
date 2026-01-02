@@ -3,61 +3,89 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>POKER VR MASTER - 1.6.7</title>
-    <style> body { margin: 0; background-color: #000; overflow: hidden; } </style>
+    <title>POKER VR MASTER - 1.6.9</title>
+    <style> body { margin: 0; background-color: #111; overflow: hidden; } </style>
 </head>
 <body>
     <script type="module">
         import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
         import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-        // 1. ENGINE & TEXTURE LOADER
+        // 1. DATA & ASSETS
         const stats = JSON.parse(localStorage.getItem('poker_master_save')) || { chips: 500 };
         const textureLoader = new THREE.TextureLoader();
-        
-        // --- PATH TO YOUR LOGO ---
         const logoTex = textureLoader.load('assets/textures/logo.jpg'); 
 
         const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222); // Light grey background instead of black
+
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.xr.enabled = true;
         document.body.appendChild(renderer.domElement);
         document.body.appendChild(VRButton.createButton(renderer));
 
-        scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 2.2));
+        // 2. ULTIMATE LIGHTING SYSTEM
+        // Ambient light (Basics)
+        const ambient = new THREE.AmbientLight(0xffffff, 1.5); 
+        scene.add(ambient);
+
+        // Hemisphere light (Sky)
+        const hemi = new THREE.HemisphereLight(0xffffff, 0xbbbbbb, 2.0);
+        scene.add(hemi);
+
+        // Directional Light (The "Sun")
+        const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+        sun.position.set(10, 20, 10);
+        scene.add(sun);
+
         const cameraRig = new THREE.Group();
         cameraRig.add(camera);
         scene.add(cameraRig);
 
-        // 2. WORLD BUILDER WITH BRANDING
+        // 3. THE WORLD (Lighter materials)
+        const floor = new THREE.Mesh(
+            new THREE.PlaneGeometry(200, 200),
+            new THREE.MeshStandardMaterial({ color: 0x333333 }) // Lighter grey floor
+        );
+        floor.rotation.x = -Math.PI / 2;
+        scene.add(floor);
+        scene.add(new THREE.GridHelper(200, 100, 0x888888, 0x444444)); // Visible grid
+
         function createRoom(x, z, color, size, isLobby=false) {
             const group = new THREE.Group();
             
-            // Table with Logo Branding
-            const tableGeo = new THREE.CylinderGeometry(2.5, 2.5, 0.2, 32);
-            const tableMat = new THREE.MeshStandardMaterial({color: color});
-            const table = new THREE.Mesh(tableGeo, tableMat);
+            // Table (Brightened)
+            const table = new THREE.Mesh(
+                new THREE.CylinderGeometry(2.5, 2.5, 0.4, 32), 
+                new THREE.MeshStandardMaterial({color: color, roughness: 0.3})
+            );
             table.position.y = 0.8;
             group.add(table);
 
-            // The Logo Overlay on Table
-            const logoGeo = new THREE.CircleGeometry(0.8, 32);
-            const logoMat = new THREE.MeshBasicMaterial({ map: logoTex, transparent: true });
-            const tableLogo = new THREE.Mesh(logoGeo, logoMat);
-            tableLogo.rotation.x = -Math.PI / 2;
-            tableLogo.position.y = 0.91; // Just above table surface
-            group.add(tableLogo);
+            // Table Glow Base
+            const pLight = new THREE.PointLight(0xffffff, 5, 10);
+            pLight.position.y = 2;
+            group.add(pLight);
+
+            // Logo
+            const logo = new THREE.Mesh(
+                new THREE.CircleGeometry(0.8, 32), 
+                new THREE.MeshBasicMaterial({ map: logoTex, transparent: true })
+            );
+            logo.rotation.x = -Math.PI/2;
+            logo.position.y = 1.01;
+            group.add(logo);
 
             if(!isLobby) {
-                const wallGeo = new THREE.BoxGeometry(size, 5, 0.2);
-                const wallMat = new THREE.MeshStandardMaterial({color: 0x050505, side: THREE.DoubleSide});
+                const wallGeo = new THREE.BoxGeometry(size, 6, 0.5);
+                const wallMat = new THREE.MeshStandardMaterial({color: 0x2a2a2a}); // Grey walls, not black
                 for(let i=0; i<4; i++){
                     const wall = new THREE.Mesh(wallGeo, wallMat);
                     wall.rotation.y = (Math.PI/2) * i;
-                    wall.position.set(Math.sin(wall.rotation.y)*size/2, 2.5, Math.cos(wall.rotation.y)*size/2);
+                    wall.position.set(Math.sin(wall.rotation.y)*size/2, 3, Math.cos(wall.rotation.y)*size/2);
                     group.add(wall);
                 }
             }
@@ -65,27 +93,17 @@
             scene.add(group);
         }
 
-        // Initialize Rooms
-        createRoom(0, -5, 0x006400, 0, true);   // Lobby
-        createRoom(0, -35, 0x440000, 18);      // High Stakes
-        createRoom(30, -15, 0x000044, 18);     // Low Stakes
+        createRoom(0, -5, 0x00aa00, 0, true);   // Lobby (Bright Green)
+        createRoom(0, -35, 0xaa0000, 18);      // High Stakes (Bright Red)
+        createRoom(30, -15, 0x0000aa, 18);     // Low Stakes (Bright Blue)
 
-        // 3. BRANDED LEADERBOARD
-        const lbBase = new THREE.Mesh(new THREE.BoxGeometry(8, 5, 0.1), new THREE.MeshStandardMaterial({color: 0x111111}));
-        lbBase.position.set(0, 4, -15);
-        scene.add(lbBase);
-        
-        const lbLogo = new THREE.Mesh(new THREE.PlaneGeometry(2, 1), new THREE.MeshBasicMaterial({ map: logoTex, transparent: true }));
-        lbLogo.position.set(0, 5.5, -14.85); // Header of leaderboard
-        scene.add(lbLogo);
-
-        // 4. TELEPORTER & CONTROLS
-        const marker = new THREE.Mesh(new THREE.RingGeometry(0.35, 0.45, 32), new THREE.MeshBasicMaterial({ color: 0x800080 }));
+        // 4. TELEPORTER
+        const marker = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.5, 32), new THREE.MeshBasicMaterial({ color: 0xffffff }));
         marker.rotation.x = -Math.PI / 2;
         scene.add(marker);
 
         const controller1 = renderer.xr.getController(0); 
-        const laser = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]), new THREE.LineBasicMaterial({ color: 0x00ffcc }));
+        const laser = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]), new THREE.LineBasicMaterial({ color: 0xffffff }));
         laser.scale.z = 100;
         controller1.add(laser);
         cameraRig.add(controller1);
@@ -94,19 +112,16 @@
             if (marker.visible) cameraRig.position.set(marker.position.x, 0, marker.position.z);
         });
 
-        // 5. RENDER LOOP
+        // 5. LOOP
         const raycaster = new THREE.Raycaster();
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({visible: false}));
-        floor.rotation.x = -Math.PI/2; scene.add(floor);
-
         renderer.setAnimationLoop(() => {
-            // Raycast Teleport
             const m = new THREE.Matrix4().extractRotation(controller1.matrixWorld);
             raycaster.ray.origin.setFromMatrixPosition(controller1.matrixWorld);
             raycaster.ray.direction.set(0, 0, -1).applyMatrix4(m);
-            const hit = raycaster.intersectObject(floor);
-            if(hit.length > 0) {
-                marker.position.copy(hit[0].point);
+            const hits = raycaster.intersectObject(floor);
+            if (hits.length > 0) {
+                marker.position.copy(hits[0].point);
+                marker.position.y = 0.05;
                 marker.visible = true;
             }
             renderer.render(scene, camera);

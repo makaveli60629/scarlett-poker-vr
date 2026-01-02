@@ -2,131 +2,103 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Scorpion Poker VR — Master 3.1.0 Fix</title>
+  <title>SCORPION POKER — OCULUS TEST BUILD 3.6.0</title>
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-  
+  <script src="https://cdn.jsdelivr.net/npm/aframe-blink-controls/dist/aframe-blink-controls.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-physics-system@v4.2.2/dist/aframe-physics-system.min.js"></script>
+
   <script>
-    // CORE SYSTEM: Handles Time, Cash, and Teleportation Logic
-    AFRAME.registerComponent('scorpion-master', {
-      init: function() {
-        this.rig = document.querySelector('#rig');
-        this.cursor = document.querySelector('#teleportCursor');
-        this.laser = document.querySelector('#honeyLaser');
-        this.isPinching = false;
-        this.targetPos = new THREE.Vector3();
-      },
-      tick: function () {
-        // Update Time
-        const now = new Date();
-        const timeStr = now.getHours().toString().padStart(2,'0') + ":" + now.getMinutes().toString().padStart(2,'0');
-        document.querySelector('#timeDisplay').setAttribute('text', 'value', 'TIME: ' + timeStr);
-      }
-    });
-
-    // HAND TRACKING & PINCH TELEPORT
-    AFRAME.registerComponent('hand-teleport', {
-      init: function() {
-        this.el.addEventListener('pinchstart', (evt) => {
-          if(this.el.id === 'rightHand') {
-            this.isTeleporting = true;
-            document.querySelector('#honeyLaser').setAttribute('visible', true);
-          }
-          if(this.el.id === 'leftHand') {
-            const m = document.querySelector('#menuPanel');
-            m.setAttribute('visible', !m.getAttribute('visible'));
-          }
-        });
-
-        this.el.addEventListener('pinchend', (evt) => {
-          if(this.el.id === 'rightHand') {
-            this.isTeleporting = false;
-            const laser = document.querySelector('#honeyLaser');
-            const intersection = laser.components.raycaster.getIntersection(document.querySelector('#floor'));
-            if (intersection) {
-              const newPos = intersection.point;
-              document.querySelector('#rig').setAttribute('position', {x: newPos.x, y: 0, z: newPos.z});
-            }
-            laser.setAttribute('visible', false);
-          }
-        });
-
-        // Apply Skin Complexion
+    AFRAME.registerComponent('scorpion-controls', {
+      init: function () {
         this.el.addEventListener('model-loaded', () => {
           const mesh = this.el.getObject3D('mesh');
           if (mesh) {
-            mesh.traverse(node => { if (node.isMesh) node.material.color.set('#d2b48c'); });
+            mesh.traverse(node => {
+              if (node.isMesh) {
+                node.material.color.set('#d2b48c'); // Skin Complexion
+                node.material.roughness = 0.8;
+              }
+            });
           }
         });
+      }
+    });
+
+    AFRAME.registerComponent('hud-logic', {
+      tick: function () {
+        const now = new Date();
+        const timeStr = now.getHours().toString().padStart(2,'0') + ":" + now.getMinutes().toString().padStart(2,'0');
+        document.querySelector('#timeDisplay').setAttribute('text', 'value', 'TIME: ' + timeStr);
       }
     });
   </script>
 </head>
 
 <body>
-<a-scene scorpion-master renderer="antialias: true">
+<a-scene hud-logic physics="gravity: 0">
   
-  <a-sky color="#2a004f"></a-sky>
-  <a-light type="ambient" intensity="1.2"></a-light>
-  <a-light type="point" position="0 5 0" intensity="1"></a-light>
+  <a-sky color="#1a0033"></a-sky>
+  <a-light type="ambient" intensity="1"></a-light>
+  <a-light type="directional" position="1 4 1" intensity="0.6"></a-light>
 
-  <a-plane id="floor" rotation="-90 0 0" width="50" height="50" color="#222" 
-           material="src: https://cdn.aframe.io/a-blast/assets/img/grid.png; repeat: 25 25"></a-plane>
+  <a-plane id="floor" rotation="-90 0 0" width="50" height="50" color="#111" 
+           material="src: https://cdn.aframe.io/a-blast/assets/img/grid.png; repeat: 50 50; roughness: 1" 
+           static-body class="nav-mesh"></a-plane>
 
-  <a-entity id="LobbyShell">
-    <a-box position="0 2.5 -12.5" width="25" height="5" depth="0.5" color="#8B0000">
-      <a-box position="0 -2.4 0.3" width="25.1" height="0.2" depth="0.1" color="#000"></a-box> <a-box position="0 2.4 0.3" width="25.1" height="0.2" depth="0.1" color="#000"></a-box> </a-box>
-    <a-box position="0 2.5 12.5"  width="25" height="5" depth="0.5" color="#8B0000"></a-box>
-    <a-box position="-12.5 2.5 0" width="0.5" height="5" depth="25" color="#8B0000"></a-box>
-    <a-box position="12.5 2.5 0"  width="0.5" height="5" depth="25" color="#8B0000"></a-box>
+  <a-entity id="Environment">
+    <a-box position="0 2.5 -12.5" width="25" height="5" depth="0.5" color="#8B0000" static-body>
+        <a-box position="0 -2.4 0.3" width="25.1" height="0.2" depth="0.1" color="#000"></a-box>
+        <a-box position="0 2.4 0.3" width="25.1" height="0.2" depth="0.1" color="#000"></a-box>
+    </a-box>
+    <a-box position="0 2.5 12.5"  width="25" height="5" depth="0.5" color="#8B0000" static-body></a-box>
+    <a-box position="-12.5 2.5 0" width="0.5" height="5" depth="25" color="#8B0000" static-body></a-box>
+    <a-box position="12.5 2.5 0"  width="0.5" height="5" depth="25" color="#8B0000" static-body></a-box>
     
     <a-box position="-12.3 2.5 -12.3" width="0.8" height="5" depth="0.8" color="#000"></a-box>
     <a-box position="12.3 2.5 -12.3" width="0.8" height="5" depth="0.8" color="#000"></a-box>
-    <a-box position="-12.3 2.5 12.3" width="0.8" height="5" depth="0.8" color="#000"></a-box>
-    <a-box position="12.3 2.5 12.3" width="0.8" height="5" depth="0.8" color="#000"></a-box>
+  </a-entity>
+
+  <a-cylinder position="0 0.8 -4" radius="1.8" height="0.4" color="#004422" static-body></a-cylinder>
+
+  <a-entity position="-7 0 -5">
+    <a-cylinder radius="1.2" height="0.2" color="#002266" position="0 0.8 0" static-body></a-cylinder>
+    <a-text value="DAILY PICK" align="center" position="0 1.8 0" color="#00ffff" width="5"></a-text>
+    <a-sphere position="0 0.9 0" radius="0.1" color="#FFD700"></a-sphere>
   </a-entity>
 
   <a-entity position="0 4 -12.1">
-    <a-plane width="6" height="3" color="#000" opacity="0.8"></a-plane>
-    <a-text value="SCORPION LEADERBOARD" align="center" position="0 1.2 0.1" color="#FFD700" width="10"></a-text>
-    <a-text value="1. QUEEN AURELIUS - $1.2M\n2. NOVA ACE - $900K\n3. SCORPION - $500K" align="center" position="0 0 0.1" color="#00ffff" width="6"></a-text>
+    <a-plane width="6" height="3" color="#000"></a-plane>
+    <a-text value="LEADERBOARD" align="center" position="0 1 0.1" color="#FFD700" width="10"></a-text>
+    <a-text value="QUEEN AURELIUS - $1.2M\nNOVA ACE - $900K" align="center" position="0 -0.2 0.1" color="#00ffff" width="6"></a-text>
   </a-entity>
 
-  <a-entity position="-6 0 -5">
-    <a-cylinder radius="1.2" height="0.2" color="#002266" position="0 0.8 0"></a-cylinder>
-    <a-text value="DAILY PICK TABLE" align="center" position="0 1.8 0" color="#00ffff" width="5"></a-text>
-    <a-box position="-0.4 0.9 0" width="0.1" height="0.05" depth="0.1" color="#FFD700"></a-box>
-    <a-box position="0 0.9 0" width="0.1" height="0.05" depth="0.1" color="#FFD700"></a-box>
-    <a-box position="0.4 0.9 0" width="0.1" height="0.05" depth="0.1" color="#FFD700"></a-box>
-  </a-entity>
-
-  <a-cylinder position="0 0.8 -3" radius="1.8" height="0.4" color="#004422"></a-cylinder>
-
-  <a-entity position="12.3 1.5 0" rotation="0 -90 0">
-    <a-box width="2.5" height="3.5" depth="0.1" color="#000"></a-box>
-    <a-text value="STORE" align="center" position="0 2 0.1" color="#ff00ff" width="8"></a-text>
-  </a-entity>
-
-  <a-entity id="rig" position="0 0 8">
+  <a-entity id="rig" position="0 0 8" movement-controls="fly: false; speed: 0.3">
     <a-entity id="camera" camera look-controls position="0 1.6 0">
-      <a-entity position="0 0 -1.2">
-         <a-text id="cashDisplay" value="CASH: $5,000" color="#00ff00" scale="0.2 0.2 0.2" position="-0.8 0.5 0"></a-text>
-         <a-text id="timeDisplay" value="TIME: 00:00" color="#00ffff" scale="0.2 0.2 0.2" position="0.5 0.5 0"></a-text>
+      <a-entity position="0 -0.4 -1">
+         <a-text id="cashDisplay" value="CASH: $5,000" color="#00ff00" scale="0.15 0.15 0.15" position="-0.6 0 0"></a-text>
+         <a-text id="timeDisplay" value="TIME: 00:00" color="#00ffff" scale="0.15 0.15 0.15" position="0.4 0 0"></a-text>
       </a-entity>
     </a-entity>
 
-    <a-entity id="leftHand" hand-tracking-controls="hand: left" hand-teleport>
-      <a-entity id="menuPanel" visible="false" position="0 0.2 -0.2" rotation="-40 0 0">
-        <a-plane width="0.4" height="0.5" color="#001a33" opacity="0.95">
-          <a-text value="MENU" align="center" position="0 0.1 0" width="1"></a-text>
-        </a-plane>
-      </a-entity>
-      <a-box width="0.06" height="0.02" depth="0.06" position="0 0.02 0.05" color="#111"></a-box>
+    <a-entity id="leftHand"
+              hand-tracking-controls="hand: left"
+              hand-controls="hand: left"
+              oculus-touch-controls="hand: left"
+              scorpion-controls>
     </a-entity>
 
-    <a-entity id="rightHand" hand-tracking-controls="hand: right" hand-teleport>
-      <a-entity id="honeyLaser" visible="false" 
-                raycaster="objects: #floor; showLine: true; far: 20" 
-                line="color: #FFD700; opacity: 0.8"></a-entity>
+    <a-entity id="rightHand"
+              hand-tracking-controls="hand: right"
+              hand-controls="hand: right"
+              oculus-touch-controls="hand: right"
+              scorpion-controls
+              blink-controls="cameraRig: #rig; 
+                              teleportOrigin: #camera; 
+                              collisionEntities: #floor; 
+                              type: line; 
+                              button: trigger; 
+                              lineColor: #FFD700; 
+                              cursorColor: #FFD700">
     </a-entity>
   </a-entity>
 

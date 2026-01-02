@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Poker VR 1.7 - Infinite Horizon</title>
+    <title>Poker VR 1.7.2 - Stable</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -14,7 +14,6 @@
             }
         }
     </script>
-
     <script type="module">
         import * as THREE from 'three';
         import { VRButton } from 'three/addons/webxr/VRButton.js';
@@ -31,29 +30,22 @@
 
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             
-            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             renderer.xr.setReferenceSpaceType('local');
+
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
-            // Initialize the VR Core (Hands, Movement, World)
+            // Boot the core engine
             core = new VRCore(scene, camera, renderer);
             
-            window.addEventListener('resize', onWindowResize);
-            renderer.setAnimationLoop(render);
-        }
-
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
-
-        function render() {
-            core.update();
-            renderer.render(scene, camera);
+            renderer.setAnimationLoop(() => {
+                core.update();
+                renderer.render(scene, camera);
+            });
         }
     </script>
 </body>

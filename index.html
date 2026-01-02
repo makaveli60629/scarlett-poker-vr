@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SCORIPON ELITE - FINAL PERMANENT MASTER</title>
+    <title>SCORIPON ELITE - FINAL MASTER</title>
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/aframe-blink-controls/dist/aframe-blink-controls.min.js"></script>
     
     <script>
-        // --- HIGH-END FELT SHADER ---
+        // FELT SHADER
         AFRAME.registerShader('poker-felt-shader', {
             schema: { color: {type: 'color', is: 'uniform', default: '#076324'} },
             vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
@@ -18,7 +18,7 @@
                 void main() { float n = noise(vUv * 500.0); gl_FragColor = vec4(color + (n * 0.05), 1.0); }`
         });
 
-        // --- MASTER ENGINE LOGIC ---
+        // MASTER ENGINE
         AFRAME.registerComponent('poker-master', {
             init: function () {
                 this.balance = 5000;
@@ -50,7 +50,7 @@
                 setTimeout(() => { 
                     this.winUI.setAttribute('visible', false);
                     this.playerEl.setAttribute('scale', "1 1 1");
-                }, 10000); // 10-Second Winner Rule
+                }, 10000); 
             }
         });
     </script>
@@ -69,12 +69,12 @@
             <img id="sky-tex" src="assets/textures/casino_sky.jpg">
         </a-assets>
 
+        <a-light type="ambient" intensity="1.5" color="#FFF"></a-light>
+        <a-light type="point" position="0 10 0" intensity="2.0"></a-light>
+
         <a-entity id="player">
             <a-camera id="cam" look-controls><a-cursor color="red" fuse="false"></a-cursor></a-camera>
-            
-            <a-entity id="leftHand" 
-                      hand-tracking-controls="hand: left; modelColor: #e0ac69;"
-                      oculus-touch-controls="hand: left"
+            <a-entity id="leftHand" hand-tracking-controls="hand: left; modelColor: #e0ac69;" oculus-touch-controls="hand: left"
                       blink-controls="cameraRig: #player; teleportOrigin: #cam; collisionEntities: .nav-mesh; snapImage: #teleport-glow;">
                 <a-entity id="watch" position="0 0.06 0.1" rotation="-90 0 0">
                     <a-box width="0.1" height="0.12" depth="0.02" color="#111">
@@ -83,29 +83,16 @@
                     </a-box>
                 </a-entity>
             </a-entity>
-
-            <a-entity id="rightHand" 
-                      hand-tracking-controls="hand: right; modelColor: #e0ac69;"
-                      oculus-touch-controls="hand: right">
-            </a-entity>
+            <a-entity id="rightHand" hand-tracking-controls="hand: right; modelColor: #e0ac69;" oculus-touch-controls="hand: right"></a-entity>
         </a-entity>
 
-        <a-light type="ambient" intensity="1.5" color="#FFF"></a-light>
-        <a-light type="point" position="0 10 0" intensity="2.0" distance="100"></a-light>
-        <a-light type="directional" position="-2 4 2" intensity="0.8"></a-light>
-
-        <a-entity position="0 9 -10" rotation="20 0 0">
-            <a-plane width="8" height="4" color="#000" opacity="0.9"></a-plane>
-            <a-text id="leaderboard-text" value="" align="center" color="#FFD700" scale="3 3 3" position="0 0 0.1"></a-text>
-        </a-entity>
-
-        <a-sky src="#sky-tex" color="#FFF"></a-sky>
+        <a-sky src="#sky-tex"></a-sky>
         <a-plane class="nav-mesh" position="0 0 0" rotation="-90 0 0" width="50" height="50" src="#marble-gold-floor" repeat="8 8"></a-plane>
         
         <a-entity id="room-walls">
             <a-box position="0 4.5 -18" width="36" height="10" src="#room-brand">
-                <a-box position="0 4.9 0.2" width="36" height="0.2" color="#FFD700"></a-box>
-                <a-box position="0 -4.9 0.2" width="36" height="0.2" color="#FFD700"></a-box>
+                <a-box position="0 3.9 0.2" width="36" height="0.2" color="#FFD700"></a-box>
+                <a-box position="0 -3.9 0.2" width="36" height="0.2" color="#FFD700"></a-box>
                 <a-entity position="0 0.5 0.3">
                     <a-box width="6.2" height="4.2" color="#FFD700"></a-box>
                     <a-plane width="6" height="4" position="0 0 0.08" src="#casino-art-2"></a-plane>
@@ -118,11 +105,16 @@
 
         <a-entity id="poker-table" position="0 0.7 -4">
             <a-cylinder radius="1.8" height="0.1" material="shader: poker-felt-shader; color: #076324;"></a-cylinder>
-            <a-torus radius="1.85" radius-tubular="0.1" rotation="90 0 0" src="#table-trim" segments-tubular="128"></a-torus>
+            <a-torus radius="1.85" radius-tubular="0.1" rotation="90 0 0" src="#table-trim"></a-torus>
             <a-box onclick="document.querySelector('[poker-master]').components['poker-master'].sitPlayer()" 
                    position="0 0.5 2.5" width="1.5" height="0.4" depth="0.8" color="#FFD700">
                 <a-text value="SIT TO PLAY" align="center" position="0 0.5 0" scale="1 1 1" color="black"></a-text>
             </a-box>
+        </a-entity>
+
+        <a-entity position="0 9 -10" rotation="20 0 0">
+            <a-plane width="8" height="4" color="#000" opacity="0.9"></a-plane>
+            <a-text id="leaderboard-text" value="" align="center" color="#FFD700" scale="3 3 3" position="0 0 0.1"></a-text>
         </a-entity>
 
         <a-entity id="winner-overlay" position="0 3 -4" visible="false">

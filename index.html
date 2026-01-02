@@ -2,9 +2,16 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Poker VR - Update 1.4 (Movement & Walls)</title>
+    <title>Poker VR - Update 1.4.1</title>
     <style>
-        body { margin: 0; background-color: #87CEEB; overflow: hidden; }
+        body { margin: 0; background-color: #87CEEB; overflow: hidden; font-family: sans-serif; }
+        /* Emergency VR Button Style if the native one fails to render */
+        #VRButton { 
+            border: 2px solid white !important; 
+            background: rgba(0,0,0,0.5) !important; 
+            border-radius: 10px !important;
+            font-weight: bold !important;
+        }
     </style>
 </head>
 <body>
@@ -38,30 +45,33 @@
 
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
             
+            // --- PLAYER RIG ---
             playerRig = new THREE.Group();
             playerRig.add(camera);
             scene.add(playerRig);
-            playerRig.position.y = 1.6; 
+            playerRig.position.set(0, 1.6, 0); 
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             renderer.xr.setReferenceSpaceType('local'); 
             
             document.body.appendChild(renderer.domElement);
+            // CRITICAL: This adds the "Enter VR" button back to the screen
             document.body.appendChild(VRButton.createButton(renderer));
 
             // LIGHTING
             const hemiLight = new THREE.HemisphereLight(0xffffff, 0x888888, 2);
             scene.add(hemiLight);
-            const tableLight = new THREE.PointLight(0xffffff, 20, 10);
+            const tableLight = new THREE.PointLight(0xffffff, 25, 15);
             tableLight.position.set(0, 4, -3);
             scene.add(tableLight);
 
             // TELEPORT MARKER
             marker = new THREE.Mesh(
                 new THREE.CircleGeometry(0.25, 32),
-                new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.5 })
+                new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.7 })
             );
             marker.rotation.x = -Math.PI / 2;
             marker.visible = false;
@@ -69,68 +79,35 @@
 
             raycaster = new THREE.Raycaster();
 
-            // CONTROLLERS
+            // OCULUS CONTROLLERS
             const controllerModelFactory = new XRControllerModelFactory();
             
-            // Controller 1 (Right - Teleport)
+            // Right Hand (Teleport)
             controller1 = renderer.xr.getController(0);
-            controller1.addEventListener('selectstart', onSelectStart);
-            controller1.addEventListener('selectend', onSelectEnd);
+            controller1.addEventListener('selectstart', () => { controller1.userData.isSelecting = true; });
+            controller1.addEventListener('selectend', () => {
+                controller1.userData.isSelecting = false;
+                if (marker.visible) {
+                    playerRig.position.set(marker.position.x, 1.6, marker.position.z);
+                }
+            });
             playerRig.add(controller1);
             
             const grip1 = renderer.xr.getControllerGrip(0);
             grip1.add(controllerModelFactory.createControllerModel(grip1));
             playerRig.add(grip1);
 
-            // Controller 2 (Left)
+            // Left Hand
             controller2 = renderer.xr.getController(1);
             playerRig.add(controller2);
             const grip2 = renderer.xr.getControllerGrip(1);
             grip2.add(controllerModelFactory.createControllerModel(grip2));
             playerRig.add(grip2);
 
-            // Visual Ray for Teleporting
-            const lineGen = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
-            const line = new THREE.Line(lineGen);
-            line.name = 'line';
-            line.scale.z = 5;
-            controller1.add(line.clone());
+            // Teleport Ray Visual
+            const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
+            const line = new THREE.Line(lineGeo);
+            line.scale.z = 10;
+            controller1.add(line);
 
-            createEnvironment();
-            renderer.setAnimationLoop(render);
-        }
-
-        function createEnvironment() {
-            // FLOOR
-            const floorTex = texLoader.load('assets/textures/floor.jpg');
-            floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
-            floorTex.repeat.set(10, 10);
-            const floor = new THREE.Mesh(
-                new THREE.PlaneGeometry(60, 60),
-                new THREE.MeshStandardMaterial({ map: floorTex })
-            );
-            floor.rotation.x = -Math.PI / 2;
-            floor.name = "Floor"; // Target for teleport
-            scene.add(floor);
-
-            // WALLS (The Room)
-            const wallMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
-            const wallGeo = new THREE.PlaneGeometry(20, 10);
-            
-            const backWall = new THREE.Mesh(wallGeo, wallMat);
-            backWall.position.set(0, 5, -10);
-            scene.add(backWall);
-
-            const leftWall = new THREE.Mesh(wallGeo, wallMat);
-            leftWall.rotation.y = Math.PI / 2;
-            leftWall.position.set(-10, 5, 0);
-            scene.add(leftWall);
-
-            const rightWall = new THREE.Mesh(wallGeo, wallMat);
-            rightWall.rotation.y = -Math.PI / 2;
-            rightWall.position.set(10, 5, 0);
-            scene.add(rightWall);
-
-            // THE TABLE
-            const feltTex = texLoader.load('assets/textures/table_felt.jpg');
-            const tableTop =
+            createEnvironment

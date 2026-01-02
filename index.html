@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>POKER VR - 2.1.21 PERMANENT FINAL</title>
+    <title>POKER VR - 2.1.22 RECOVERY MASTER</title>
     <style> body { margin: 0; background-color: #000; overflow: hidden; } </style>
 </head>
 <body>
@@ -10,15 +10,15 @@
         import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
         import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-        // --- 1. MASTER BRAIN (DATA) ---
+        // --- 1. MASTER PERSISTENCE ---
         const MASTER = {
             stats: JSON.parse(localStorage.getItem('poker_stats_v2')) || { chips: 15000, rank: "LEGEND" },
             save() { localStorage.setItem('poker_stats_v2', JSON.stringify(this.stats)); }
         };
 
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x01020a);
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        scene.background = new THREE.Color(0x020205);
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.xr.enabled = true;
@@ -29,85 +29,147 @@
         rig.add(camera);
         scene.add(rig);
 
+        // --- 2. FAIL-SAFE ASSET LOADING ---
         const texLoader = new THREE.TextureLoader();
         const path = 'assets/textures/';
-        const brick = texLoader.load(path + 'brickwall.jpg');
-        const carpet = texLoader.load(path + 'lobby_carpet.jpg');
-        const crownTex = texLoader.load(path + 'Crown.jpg');
-        const watchTex = texLoader.load(path + 'watch_gold.jpg');
-        [brick, carpet].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(10, 10); });
+        const loadTex = (file) => {
+            const t = texLoader.load(path + file, undefined, undefined, () => console.warn("Missing: " + file));
+            t.wrapS = t.wrapT = THREE.RepeatWrapping;
+            t.repeat.set(5, 5);
+            return t;
+        };
 
-        // --- 2. ARCHITECTURE & STORE ---
-        function createRoom(name, x, z, size, color, doors={n:false, s:false}) {
-            const g = new THREE.Group(); g.position.set(x, 0, z);
-            const f = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({map: carpet}));
-            f.rotation.x = -Math.PI/2; f.userData.isFloor = true; g.add(f);
+        const brick = loadTex('brickwall.jpg');
+        const carpet = loadTex('lobby_carpet.jpg');
+        const goldMarble = loadTex('gold_marble.jpg');
+        const crownTex = loadTex('Crown.jpg');
+        const watchTex = loadTex('watch_gold.jpg');
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+        const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+        sun.position.set(5, 15, 5);
+        scene.add(sun);
+
+        // --- 3. ARCHITECTURE (LOBBY, POKER, STORE) ---
+        function createRoom(name, x, z, size, color, texture, doors={n:false, s:false}) {
+            const group = new THREE.Group(); group.position.set(x, 0, z);
+            
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({map: carpet}));
+            floor.rotation.x = -Math.PI/2; floor.userData.isFloor = true; group.add(floor);
             
             const wallH = 15;
-            [['n',0,-size/2,0], ['s',0,size/2,Math.PI], ['e',size/2,0,-Math.PI/2], ['w',-size/2,0,Math.PI/2]].forEach(p => {
+            const wallMat = new THREE.MeshStandardMaterial({
+                map: texture, 
+                color: texture ? 0xffffff : color, // Use color if texture fails
+                roughness: name === "Store" ? 0.1 : 0.7,
+                metalness: name === "Store" ? 0.2 : 0
+            });
+
+            const wallConfig = [
+                {d:'n', p:[0, 7.5, -size/2], r:0}, {d:'s', p:[0, 7.5, size/2], r:Math.PI},
+                {d:'e', p:[size/2, 7.5, 0], r:-Math.PI/2}, {d:'w', p:[-size/2, 7.5, 0], r:Math.PI/2}
+            ];
+
+            wallConfig.forEach(cfg => {
                 const wG = new THREE.Group();
-                if(doors[p[0]]) {
-                    const sw = (size-8)/2;
-                    const l = new THREE.Mesh(new THREE.BoxGeometry(sw, wallH, 0.5), new THREE.MeshStandardMaterial({map: brick}));
-                    l.position.x = -size/2 + sw/2;
-                    const r = new THREE.Mesh(new THREE.BoxGeometry(sw, wallH, 0.5), new THREE.MeshStandardMaterial({map: brick}));
-                    r.position.x = size/2 - sw/2;
-                    wG.add(l, r);
-                    [l, r].forEach(m => { m.userData.isWall = true; });
+                if(doors[cfg.d]) {
+                    const sideW = (size-8)/2;
+                    const l = new THREE.Mesh(new THREE.BoxGeometry(sideW, wallH, 0.6), wallMat);
+                    l.position.x = -size/2 + sideW/2;
+                    const r = new THREE.Mesh(new THREE.BoxGeometry(sideW, wallH, 0.6), wallMat);
+                    r.position.x = size/2 - sideW/2;
+                    wG.add(l, r); [l, r].forEach(m => m.userData.isWall = true);
                 } else {
-                    const solid = new THREE.Mesh(new THREE.BoxGeometry(size, wallH, 0.5), new THREE.MeshStandardMaterial({map: brick}));
+                    const solid = new THREE.Mesh(new THREE.BoxGeometry(size, wallH, 0.6), wallMat);
                     solid.userData.isWall = true; wG.add(solid);
                 }
-                wG.position.set(p[1], wallH/2, p[2]); wG.rotation.y = p[3]; g.add(wG);
+                wG.position.set(...cfg.p); wG.rotation.y = cfg.r; group.add(wG);
             });
-            scene.add(g); return g;
+            scene.add(group); return group;
         }
 
-        const lobby = createRoom("Lobby", 0, 0, 50, 0x00ffff, {n:true, s:true});
-        const store = createRoom("Store", 0, 80, 40, 0x00ff00, {n:true});
-        const poker = createRoom("Poker", 0, -80, 40, 0xff00ff, {s:true});
+        createRoom("Lobby", 0, 0, 50, 0x444444, brick, {n:true, s:true});
+        createRoom("Store", 0, 80, 40, 0xd4af37, goldMarble, {n:true});
+        createRoom("Poker", 0, -80, 40, 0x220022, brick, {s:true});
 
-        // Store Pedestals & Assets
-        const items = [crownTex, watchTex, crownTex]; // Assets for display
-        items.forEach((tex, i) => {
-            const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 1, 16), new THREE.MeshStandardMaterial({color: 0x222222}));
-            ped.position.set(-6 + (i*6), 0.5, 90);
-            const display = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), new THREE.MeshStandardMaterial({map: tex}));
-            display.position.y = 1; ped.add(display);
-            scene.add(ped);
+        // Store Pedestals
+        [crownTex, watchTex, crownTex].forEach((tex, i) => {
+            const p = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 1, 16), new THREE.MeshStandardMaterial({color: 0x111111}));
+            p.position.set(-8 + (i*8), 0.5, 90);
+            const item = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), new THREE.MeshStandardMaterial({map: tex}));
+            item.position.y = 1.1; p.add(item); scene.add(p);
         });
 
-        // --- 3. SLEEK WRIST HUD ---
+        // --- 4. ULTIMATE CONTROLS ---
         const conL = renderer.xr.getController(1);
         const conR = renderer.xr.getController(0);
         rig.add(conL, conR);
 
+        // Wrist HUD
         const wrist = new THREE.Group();
-        wrist.visible = false; 
-        wrist.position.set(0.02, 0.05, 0); 
-        wrist.rotation.x = -Math.PI/2;
+        wrist.visible = false; wrist.position.set(0.02, 0.05, 0); wrist.rotation.x = -Math.PI/2;
         conL.add(wrist);
 
-        const menuCanvas = document.createElement('canvas'); menuCanvas.width = 256; menuCanvas.height = 256;
-        const ctx = menuCanvas.getContext('2d');
-        const menuTex = new THREE.CanvasTexture(menuCanvas);
-        const menuMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.12), new THREE.MeshBasicMaterial({map: menuTex, transparent: true}));
-        wrist.add(menuMesh);
+        const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        const hudTex = new THREE.CanvasTexture(canvas);
+        wrist.add(new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.12), new THREE.MeshBasicMaterial({map: hudTex, transparent: true})));
 
-        function updateHUD() {
+        function drawHUD() {
             ctx.clearRect(0,0,256,256);
-            ctx.fillStyle = "rgba(0,10,20,0.95)"; ctx.roundRect(0,0,256,256, 20); ctx.fill();
-            ctx.strokeStyle = "cyan"; ctx.lineWidth = 5; ctx.strokeRect(5,5,246,246);
-            ctx.fillStyle = "white"; ctx.font = "bold 24px Arial"; ctx.fillText(`$${MASTER.stats.chips}`, 30, 60);
-            ctx.font = "16px Arial"; ctx.fillText(MASTER.stats.rank, 30, 95);
-            ctx.fillStyle = "cyan"; ctx.fillText(new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), 30, 130);
-            menuTex.needsUpdate = true;
+            ctx.fillStyle = "rgba(0,15,30,0.9)"; ctx.fillRect(0,0,256,256);
+            ctx.fillStyle = "cyan"; ctx.font = "bold 26px Arial"; ctx.fillText(`$${MASTER.stats.chips}`, 30, 60);
+            ctx.fillStyle = "white"; ctx.font = "16px Arial"; ctx.fillText(MASTER.stats.rank, 30, 95);
+            ctx.fillStyle = "gold"; ctx.fillText(new Date().toLocaleTimeString(), 30, 140);
+            hudTex.needsUpdate = true;
         }
 
-        // --- 4. CONTROL SYSTEMS ---
-        const marker = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.4, 32), new THREE.MeshBasicMaterial({color: 0x00ffff, side: THREE.DoubleSide}));
+        const marker = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.4, 32), new THREE.MeshBasicMaterial({color: 0x00ffff}));
         marker.rotation.x = -Math.PI/2; scene.add(marker);
-        const laserL = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]), new THREE.LineBasicMaterial({color: 0x00ffff}));
-        conL.add(laserL);
+        const laser = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]), new THREE.LineBasicMaterial({color: 0x00ffff}));
+        conL.add(laser);
 
-        const rayL = new THREE.
+        const rayL = new THREE.Raycaster();
+        let cool = false;
+
+        renderer.setAnimationLoop(() => {
+            drawHUD();
+            const session = renderer.xr.getSession();
+            if (session) {
+                for (const source of session.inputSources) {
+                    const b = source.gamepad.buttons;
+                    const axes = source.gamepad.axes;
+
+                    if (source.handedness === 'left') {
+                        // Leap / Teleport
+                        rayL.ray.origin.setFromMatrixPosition(conL.matrixWorld);
+                        const m = new THREE.Matrix4().extractRotation(conL.matrixWorld);
+                        rayL.ray.direction.set(0, 0, -1).applyMatrix4(m);
+                        const hits = rayL.intersectObjects(scene.children, true);
+                        if (hits.length > 0) {
+                            laser.scale.z = hits[0].distance;
+                            if (hits[0].object.userData.isFloor) {
+                                marker.visible = true; marker.position.copy(hits[0].point);
+                                if (b[0].pressed) rig.position.set(hits[0].point.x, 0, hits[0].point.z);
+                            } else { marker.visible = false; }
+                        }
+                        // Smooth Walk
+                        rig.position.x += (axes[0] || 0) * 0.15; rig.position.z += (axes[1] || 0) * 0.15;
+                        // Wrist Toggle (Y)
+                        if ((b[4]?.pressed || b[5]?.pressed) && !cool) { wrist.visible = !wrist.visible; cool=true; setTimeout(()=>cool=false, 500); }
+                    }
+                    if (source.handedness === 'right') {
+                        // Snap Turn
+                        const turn = axes[2] || axes[3] || 0;
+                        if (Math.abs(turn) > 0.8 && !cool) {
+                            rig.rotation.y -= Math.sign(turn) * (Math.PI/4);
+                            cool=true; setTimeout(()=>cool=false, 300);
+                        }
+                    }
+                }
+            }
+            renderer.render(scene, camera);
+        });
+    </script>
+</body>
+</html>

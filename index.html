@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VR Poker - Neon Executive Suite</title>
+    <title>VR Poker - Professional Master Build 1.3</title>
     <style>
         body { margin: 0; padding: 0; overflow: hidden; background-color: #000; }
         #canvas-container { width: 100vw; height: 100vh; }
@@ -27,187 +27,201 @@
         import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
         import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 
+        // --- GLOBAL PERMANENT STATE ---
         let scene, camera, renderer, userGroup;
-        let raycaster, tempMatrix = new THREE.Matrix4();
-        let teleportTarget = null, teleportMarker;
+        let raycaster = new THREE.Raycaster();
+        let teleportMarker, teleportTarget;
         const controllers = [];
-        
+        const textureLoader = new THREE.TextureLoader();
+        const texPath = 'assets/textures/';
+
         init();
 
         function init() {
+            // 1. ENGINE & SCENE
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x020205);
 
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             userGroup = new THREE.Group();
-            userGroup.position.set(0, 0, 2); 
+            userGroup.position.set(0, 0, 2); // Locked spawn point
             scene.add(userGroup);
             userGroup.add(camera);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
+            renderer.shadowMap.enabled = true;
             document.getElementById('canvas-container').appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
-            // LIGHTING
-            const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+            // 2. PROFESSIONAL LIGHTING AUDIT
+            const ambient = new THREE.AmbientLight(0xffffff, 0.3);
             scene.add(ambient);
-            const tableLight = new THREE.PointLight(0x00ffff, 2, 10);
-            tableLight.position.set(0, 3, 0);
-            scene.add(tableLight);
 
-            // INPUT: HANDS + CONTROLLERS
-            const handModelFactory = new XRHandModelFactory();
-            const controllerModelFactory = new XRControllerModelFactory();
+            // Overhead Table Light (Cyan Neon Tint)
+            const topLight = new THREE.SpotLight(0x00ffff, 3);
+            topLight.position.set(0, 4, 0);
+            topLight.castShadow = true;
+            scene.add(topLight);
+
+            // Back Fill Light (Magenta Tint)
+            const fillLight = new THREE.PointLight(0xff00ff, 1.5);
+            fillLight.position.set(0, 3, -4);
+            scene.add(fillLight);
+
+            // 3. INPUTS (HANDS + CONTROLLERS)
+            const handFactory = new XRHandModelFactory();
+            const controllerFactory = new XRControllerModelFactory();
 
             for (let i = 0; i < 2; i++) {
-                // Hand Setup
+                // Hand Setup (Locked as permanent priority)
                 const hand = renderer.xr.getHand(i);
-                hand.add(handModelFactory.createHandModel(hand, "mesh"));
+                hand.add(handFactory.createHandModel(hand, "mesh"));
                 scene.add(hand);
 
-                // Controller Setup
+                // Controller Setup (For teleportation movement)
                 const controller = renderer.xr.getController(i);
-                controller.addEventListener('selectstart', onSelectStart);
-                controller.addEventListener('selectend', onSelectEnd);
+                controller.addEventListener('selectstart', () => { controller.userData.isSelecting = true; });
+                controller.addEventListener('selectend', () => { 
+                    controller.userData.isSelecting = false;
+                    if (teleportTarget) userGroup.position.set(teleportTarget.x, 0, teleportTarget.z);
+                });
                 scene.add(controller);
-                
-                const model = controllerModelFactory.createControllerModel(controller);
-                controller.add(model);
+                controller.add(controllerFactory.createControllerModel(controller));
                 controllers.push(controller);
 
-                // Teleport Ray Visual
-                const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
-                const line = new THREE.Line(lineGeo);
-                line.name = 'line';
-                line.scale.z = 5;
-                controller.add(line);
+                // Laser Pointer
+                const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
+                const laser = new THREE.Line(laserGeo, new THREE.LineBasicMaterial({ color: 0x00ffff }));
+                laser.scale.z = 5;
+                controller.add(laser);
             }
 
-            // TELEPORT MARKER (The Jumping Glow)
-            const markerGeo = new THREE.RingGeometry(0.15, 0.2, 32);
-            const markerMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, side: THREE.DoubleSide });
-            teleportMarker = new THREE.Mesh(markerGeo, markerMat);
-            teleportMarker.rotation.x = -Math.PI / 2;
+            // 4. TELEPORTATION MARKER
+            const markerGeo = new THREE.TorusGeometry(0.2, 0.02, 16, 32);
+            teleportMarker = new THREE.Mesh(markerGeo, new THREE.MeshBasicMaterial({ color: 0x00ffff }));
+            teleportMarker.rotation.x = Math.PI / 2;
             teleportMarker.visible = false;
             scene.add(teleportMarker);
 
-            raycaster = new THREE.Raycaster();
+            // 5. THE WORLD (Audit Features)
+            createNeonSuite();
+            createProfessionalOvalTable();
+            createUIComponents();
 
-            // WORLD ASSETS
-            createNeonRoom();
-            createProfessionalTable();
-            createFloatingUI();
-
+            window.addEventListener('resize', onWindowResize);
             renderer.setAnimationLoop(render);
         }
 
-        function createNeonRoom() {
-            // All 4 Walls with Neon Trims
-            const wallMat = new THREE.MeshStandardMaterial({ color: 0x050505 });
-            const neonMat = new THREE.MeshBasicMaterial({ color: 0xff00ff });
+        function createNeonSuite() {
+            // Walls with Neon Trims
+            const wallGeo = new THREE.PlaneGeometry(12, 6);
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x080808 });
+            const neonMat = new THREE.MeshBasicMaterial({ color: 0xff00ff }); // Magenta Neon
 
-            const wallData = [
-                { pos: [0, 2.5, -5], rot: [0, 0, 0] },     // North
-                { pos: [0, 2.5, 5], rot: [0, Math.PI, 0] }, // South
-                { pos: [5, 2.5, 0], rot: [0, -Math.PI/2, 0] }, // East
-                { pos: [-5, 2.5, 0], rot: [0, Math.PI/2, 0] }  // West
+            const directions = [
+                { pos: [0, 3, -6], rot: [0, 0, 0] },
+                { pos: [0, 3, 6], rot: [0, Math.PI, 0] },
+                { pos: [6, 3, 0], rot: [0, -Math.PI/2, 0] },
+                { pos: [-6, 3, 0], rot: [0, Math.PI/2, 0] }
             ];
 
-            wallData.forEach(data => {
-                const wall = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), wallMat);
-                wall.position.set(...data.pos);
-                wall.rotation.set(...data.rot);
+            directions.forEach(d => {
+                const wall = new THREE.Mesh(wallGeo, wallMat);
+                wall.position.set(...d.pos);
+                wall.rotation.set(...d.rot);
                 scene.add(wall);
 
-                // Neon Trim Line
-                const trim = new THREE.Mesh(new THREE.BoxGeometry(10, 0.05, 0.05), neonMat);
-                trim.position.set(data.pos[0], 4.8, data.pos[2]);
-                trim.rotation.set(...data.rot);
+                const trim = new THREE.Mesh(new THREE.BoxGeometry(12, 0.05, 0.05), neonMat);
+                trim.position.set(d.pos[0], 5.8, d.pos[2]);
+                trim.rotation.set(...d.rot);
                 scene.add(trim);
             });
 
-            // Floor Grid
-            const grid = new THREE.GridHelper(20, 20, 0xff00ff, 0x222222);
-            scene.add(grid);
+            scene.add(new THREE.GridHelper(20, 40, 0x444444, 0x111111));
         }
 
-        function createProfessionalTable() {
-            const tableGroup = new THREE.Group();
+        function createProfessionalOvalTable() {
+            const table = new THREE.Group();
             
-            // 1. Felt Oval
+            // Green Felt (Oval Scaling)
             const felt = new THREE.Mesh(
                 new THREE.CylinderGeometry(1, 1, 0.1, 64),
                 new THREE.MeshStandardMaterial({ color: 0x076324 })
             );
-            felt.scale.set(2, 1, 1.2);
-            felt.position.y = 0.95;
-            tableGroup.add(felt);
+            felt.scale.set(2.4, 1, 1.3);
+            felt.position.y = 1;
+            table.add(felt);
 
-            // 2. Leather Trim (The Bumper)
-            const trim = new THREE.Mesh(
+            // Leather Trim (Audit: Double-layered bumper)
+            const bumper = new THREE.Mesh(
                 new THREE.TorusGeometry(1, 0.08, 16, 100),
-                new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 })
+                new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.3 })
             );
-            trim.rotation.x = Math.PI / 2;
-            trim.scale.set(2, 1.2, 1);
-            trim.position.y = 1.02;
-            tableGroup.add(trim);
+            bumper.rotation.x = Math.PI/2;
+            bumper.scale.set(2.4, 1.3, 1);
+            bumper.position.y = 1.05;
+            table.add(bumper);
 
-            scene.add(tableGroup);
+            scene.add(table);
         }
 
-        function createFloatingUI() {
-            // Hovering Leaderboard
-            const board = new THREE.Mesh(
-                new THREE.PlaneGeometry(1.5, 2),
-                new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.8 })
-            );
-            board.position.set(-3, 2, -4);
-            scene.add(board);
+        function createUIComponents() {
+            // Hovering Leaderboard & Store
+            const boardMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.7 });
+            const leaderboard = new THREE.Mesh(new THREE.PlaneGeometry(2, 3), boardMat);
+            leaderboard.position.set(-4, 2.5, -5.5);
+            scene.add(leaderboard);
 
-            // Store Interface
-            const store = new THREE.Mesh(
-                new THREE.PlaneGeometry(1.5, 2),
-                new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.8 })
-            );
-            store.position.set(3, 2, -4);
+            const store = new THREE.Mesh(new THREE.PlaneGeometry(2, 3), boardMat);
+            store.position.set(4, 2.5, -5.5);
             scene.add(store);
         }
 
-        function onSelectStart(event) {
-            this.userData.isSelecting = true;
-        }
+        // PERMANENT WIN BANNER (Audit: 10 Seconds Gold Letters)
+        window.showWinBanner = function(player, hand) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 1024; canvas.height = 256;
+            ctx.fillStyle = '#FFD700';
+            ctx.font = 'bold 80px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(player + " WINS!", 512, 100);
+            ctx.font = '50px Arial';
+            ctx.fillText(hand, 512, 200);
 
-        function onSelectEnd(event) {
-            this.userData.isSelecting = false;
-            if (teleportMarker.visible) {
-                userGroup.position.set(teleportTarget.x, 0, teleportTarget.z);
-            }
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas) }));
+            sprite.position.set(0, 2.5, -1);
+            sprite.scale.set(2, 0.5, 1);
+            scene.add(sprite);
+            setTimeout(() => scene.remove(sprite), 10000);
+        };
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
         function render() {
-            // Handle Teleportation Logic
             teleportMarker.visible = false;
-            controllers.forEach(controller => {
-                if (controller.userData.isSelecting) {
-                    tempMatrix.identity().extractRotation(controller.matrixWorld);
-                    raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-                    raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+            teleportTarget = null;
 
-                    const intersects = raycaster.intersectObjects(scene.children);
-                    if (intersects.length > 0) {
-                        const hit = intersects[0];
-                        if (hit.object instanceof THREE.GridHelper || hit.point.y < 0.1) {
-                            teleportTarget = hit.point;
-                            teleportMarker.position.copy(teleportTarget);
-                            teleportMarker.visible = true;
-                        }
+            controllers.forEach(c => {
+                if (c.userData.isSelecting) {
+                    const matrix = new THREE.Matrix4().extractRotation(c.matrixWorld);
+                    raycaster.ray.origin.setFromMatrixPosition(c.matrixWorld);
+                    raycaster.ray.direction.set(0, 0, -1).applyMatrix4(matrix);
+                    const hits = raycaster.intersectObjects(scene.children);
+                    if (hits.length > 0 && hits[0].point.y < 0.2) {
+                        teleportTarget = hits[0].point;
+                        teleportMarker.position.copy(teleportTarget);
+                        teleportMarker.visible = true;
                     }
                 }
             });
-
             renderer.render(scene, camera);
         }
     </script>

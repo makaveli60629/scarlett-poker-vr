@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>POKER VR MASTER - 1.8.8</title>
+    <title>POKER VR MASTER - 1.9.0</title>
     <style> body { margin: 0; background-color: #000; overflow: hidden; } </style>
 </head>
 <body>
@@ -11,8 +11,8 @@
         import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
         import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-        // 1. DATA & PERMANENT ASSETS
-        let stats = JSON.parse(localStorage.getItem('poker_master_save')) || { chips: 500, lastDaily: 0, rank: "Rookie" };
+        // 1. PERSISTENT DATA & TEXTURE LOADING
+        let stats = JSON.parse(localStorage.getItem('poker_master_save')) || { chips: 500, rank: "Rookie", name: "Player 1" };
         const save = () => localStorage.setItem('poker_master_save', JSON.stringify(stats));
         
         const texLoader = new THREE.TextureLoader();
@@ -24,11 +24,10 @@
             felt: texLoader.load(path + 'table_felt_green.jpg'),
             claim: texLoader.load(path + 'dailyclaim.jpg')
         };
-        // Tile the brick and carpet for the larger scale
-        tex.brick.wrapS = tex.brick.wrapT = THREE.RepeatWrapping;
+        // Set tiling for the 4x Grand Hall scale
+        [tex.brick, tex.carpet].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; });
         tex.brick.repeat.set(12, 3);
-        tex.carpet.wrapS = tex.carpet.wrapT = THREE.RepeatWrapping;
-        tex.carpet.repeat.set(15, 15);
+        tex.carpet.repeat.set(20, 20);
 
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x020205);
@@ -39,22 +38,22 @@
         document.body.appendChild(renderer.domElement);
         document.body.appendChild(VRButton.createButton(renderer));
 
-        // --- SPAWN FIX: Move Rig back from 0,0 ---
+        // 2. CAMERA RIG & LIGHTING
         const cameraRig = new THREE.Group();
-        cameraRig.position.set(0, 0, 10); // Start 10 meters back from the center table
+        cameraRig.position.set(0, 0, 12); // Start back from the table
         cameraRig.add(camera);
         scene.add(cameraRig);
         scene.add(new THREE.HemisphereLight(0xffffff, 0x222222, 2.5));
 
-        // 2. THE GRAND HALL (4X SCALE)
-        const lobbySize = 70; // Massive scale
+        // 3. WORLD: THE GRAND HALL (70m SCALE)
+        const lobbySize = 70;
         const floor = new THREE.Mesh(new THREE.PlaneGeometry(lobbySize, lobbySize), new THREE.MeshStandardMaterial({ map: tex.carpet }));
         floor.rotation.x = -Math.PI/2; scene.add(floor);
 
         const wallObjects = [];
         const wallMat = new THREE.MeshStandardMaterial({ map: tex.brick });
         for(let i=0; i<4; i++) {
-            const wall = new THREE.Mesh(new THREE.BoxGeometry(lobbySize, 15, 1), wallMat);
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(lobbySize, 15, 1.5), wallMat);
             const angle = (Math.PI/2) * i;
             wall.position.set(Math.sin(angle)*(lobbySize/2), 7.5, Math.cos(angle)*(lobbySize/2));
             wall.rotation.y = angle;
@@ -62,11 +61,10 @@
             wallObjects.push(wall);
         }
 
-        // 3. CENTRAL TABLE & CORNER STATIONS
+        // 4. LOBBY STATIONS
         const table = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.6, 32), new THREE.MeshStandardMaterial({ map: tex.felt }));
         table.position.set(0, 0.8, 0); scene.add(table);
 
-        // Store (Corner 1)
         const storeGroup = new THREE.Group();
         const storeWall = new THREE.Mesh(new THREE.BoxGeometry(8, 6, 0.2), new THREE.MeshStandardMaterial({color: 0x111111}));
         const storeSign = new THREE.Mesh(new THREE.PlaneGeometry(6, 2.5), new THREE.MeshBasicMaterial({ map: tex.logo }));
@@ -75,7 +73,6 @@
         storeGroup.position.set(-25, 3, -25); storeGroup.rotation.y = Math.PI/4;
         scene.add(storeGroup);
 
-        // Daily Claim (Corner 2)
         const claimKiosk = new THREE.Group();
         const pillar = new THREE.Mesh(new THREE.BoxGeometry(1.5, 3, 1.5), new THREE.MeshStandardMaterial({ map: tex.claim }));
         const claimBtn = new THREE.Mesh(new THREE.SphereGeometry(0.3), new THREE.MeshBasicMaterial({ color: 0x00ffff }));
@@ -83,53 +80,40 @@
         claimKiosk.position.set(25, 1.5, -25);
         scene.add(claimKiosk);
 
-        // 4. JUMBOTRON (Sky Stats)
-        const jumbCanvas = document.createElement('canvas');
-        jumbCanvas.width = 1024; jumbCanvas.height = 512;
-        const jumbCtx = jumbCanvas.getContext('2d');
-        const jumbTex = new THREE.CanvasTexture(jumbCanvas);
-        const jumb = new THREE.Mesh(new THREE.PlaneGeometry(15, 7.5), new THREE.MeshBasicMaterial({ map: jumbTex, transparent: true }));
-        jumb.position.set(0, 12, -30); scene.add(jumb);
-
-        function updateUI() {
-            jumbCtx.clearRect(0,0,1024,512);
-            jumbCtx.fillStyle = "rgba(0,0,0,0.85)"; jumbCtx.fillRect(0,0,1024,512);
-            jumbCtx.strokeStyle = "#800080"; jumbCtx.lineWidth = 20; jumbCtx.strokeRect(10,10,1004,492);
-            jumbCtx.fillStyle = "#fff"; jumbCtx.font = "bold 90px Arial";
-            jumbCtx.fillText(`WALLET: $${stats.chips}`, 100, 200);
-            jumbCtx.fillText(`RANK: ${stats.rank}`, 100, 320);
-            jumbCtx.fillText(new Date().toLocaleTimeString(), 100, 440);
-            jumbTex.needsUpdate = true;
-        }
-        setInterval(updateUI, 1000);
-
-        // 5. WRIST WATCH (Left Hand)
+        // 5. WRIST WATCH MENU (LEFT HAND)
         const watchGroup = new THREE.Group();
         const watchCanvas = document.createElement('canvas');
         watchCanvas.width = 512; watchCanvas.height = 512;
         const wCtx = watchCanvas.getContext('2d');
         const watchTex = new THREE.CanvasTexture(watchCanvas);
-        const watchMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), new THREE.MeshBasicMaterial({ map: watchTex, transparent: true }));
-        watchMesh.position.set(0, 0.05, 0); watchMesh.rotation.x = -Math.PI / 2;
+        const watchMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.28), new THREE.MeshBasicMaterial({ map: watchTex, transparent: true }));
+        watchMesh.position.set(0, 0.06, 0.05); watchMesh.rotation.x = -Math.PI / 2;
         watchGroup.add(watchMesh); watchGroup.visible = false;
 
         function updateWatchUI() {
             wCtx.clearRect(0,0,512,512);
-            wCtx.fillStyle = "rgba(0,0,0,0.95)"; wCtx.roundRect(10, 10, 492, 492, 50); wCtx.fill();
+            wCtx.fillStyle = "rgba(0, 0, 0, 0.95)";
+            wCtx.beginPath(); wCtx.roundRect(10, 10, 492, 492, 60); wCtx.fill();
             wCtx.strokeStyle = "#00ffff"; wCtx.lineWidth = 15; wCtx.stroke();
-            wCtx.fillStyle = "#fff"; wCtx.font = "bold 50px Arial";
-            wCtx.fillText(`$${stats.chips}`, 50, 100);
-            wCtx.fillStyle = "#ff00ff"; wCtx.fillRect(50, 350, 412, 100);
-            wCtx.fillStyle = "#fff"; wCtx.font = "bold 35px Arial";
+            wCtx.fillStyle = "#fff"; wCtx.font = "bold 60px Arial";
+            wCtx.fillText(stats.name, 60, 100);
+            wCtx.fillStyle = "#00ff00"; wCtx.font = "bold 50px Arial";
+            wCtx.fillText(`$${stats.chips}`, 60, 200);
+            wCtx.fillStyle = "#800080"; wCtx.roundRect(50, 350, 412, 100, 20); wCtx.fill();
+            wCtx.fillStyle = "#fff"; wCtx.font = "bold 32px Arial";
             wCtx.fillText("RETURN TO TABLE", 85, 415);
             watchTex.needsUpdate = true;
         }
 
-        // 6. CONTROLS
-        const controllerR = renderer.xr.getController(0);
+        // 6. VR CONTROL SYSTEM
         const controllerL = renderer.xr.getController(1);
-        cameraRig.add(controllerR, controllerL);
-        controllerL.add(watchGroup);
+        const laserL = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]), new THREE.LineBasicMaterial({color: 0x00ffcc}));
+        laserL.scale.z = 100;
+        controllerL.add(laserL, watchGroup);
+        cameraRig.add(controllerL);
+
+        const controllerR = renderer.xr.getController(0);
+        cameraRig.add(controllerR);
 
         const marker = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.6, 32), new THREE.MeshBasicMaterial({ color: 0x00ffcc }));
         marker.rotation.x = -Math.PI/2; scene.add(marker);
@@ -144,45 +128,40 @@
                     const buttons = source.gamepad.buttons;
                     const axes = source.gamepad.axes;
 
+                    // LEFT HAND: NAV & MENU
+                    if (source.handedness === 'left') {
+                        const m = new THREE.Matrix4().extractRotation(controllerL.matrixWorld);
+                        raycaster.ray.origin.setFromMatrixPosition(controllerL.matrixWorld);
+                        raycaster.ray.direction.set(0, 0, -1).applyMatrix4(m);
+                        const fHits = raycaster.intersectObject(floor);
+                        const wHits = raycaster.intersectObjects(wallObjects);
+
+                        if (fHits.length > 0 && !(wHits.length > 0 && wHits[0].distance < fHits[0].distance)) {
+                            marker.position.copy(fHits[0].point);
+                            marker.visible = true;
+                        } else { marker.visible = false; }
+
+                        // Trigger (0) - Teleport
+                        if (buttons[0].pressed && marker.visible) {
+                            cameraRig.position.set(marker.position.x, 0, marker.position.z);
+                        }
+                        // Y Button (5) - Watch
+                        if (buttons[5].pressed) {
+                            watchGroup.visible = true; updateWatchUI();
+                        } else { watchGroup.visible = false; }
+                        // Left Trigger Return (While Menu open)
+                        if (watchGroup.visible && buttons[0].pressed) {
+                            cameraRig.position.set(0, 0, 10); cameraRig.rotation.y = 0;
+                        }
+                    }
+
+                    // RIGHT HAND: SNAP TURN
                     if (source.handedness === 'right') {
-                        // Snap Turn 45°
                         if (Math.abs(axes[2]) > 0.8 && !turnCooldown) {
                             cameraRig.rotation.y -= Math.sign(axes[2]) * (Math.PI/4);
                             turnCooldown = true; setTimeout(() => turnCooldown = false, 300);
                         }
-                        // A Button (Button 4) - Teleport
-                        if (buttons[4] && buttons[4].pressed && marker.visible) {
-                            cameraRig.position.set(marker.position.x, 0, marker.position.z);
-                        }
                     }
-
-                    if (source.handedness === 'left') {
-                        // Y Button (Button 5) - Menu
-                        if (buttons[5] && buttons[5].pressed) {
-                            watchGroup.visible = true; updateWatchUI();
-                        } else { watchGroup.visible = false; }
-                        
-                        // Left Trigger Return
-                        if (watchGroup.visible && buttons[0] && buttons[0].pressed) {
-                            cameraRig.position.set(0, 0, 8); cameraRig.rotation.y = 0;
-                        }
-                    }
-                }
-            }
-
-            // Raycast for teleport marker
-            const m = new THREE.Matrix4().extractRotation(controllerR.matrixWorld);
-            raycaster.ray.origin.setFromMatrixPosition(controllerR.matrixWorld);
-            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(m);
-            const fHits = raycaster.intersectObject(floor);
-            const wHits = raycaster.intersectObjects(wallObjects);
-
-            if (fHits.length > 0) {
-                if (wHits.length > 0 && wHits[0].distance < fHits[0].distance) {
-                    marker.visible = false;
-                } else {
-                    marker.position.copy(fHits[0].point);
-                    marker.visible = true;
                 }
             }
             renderer.render(scene, camera);

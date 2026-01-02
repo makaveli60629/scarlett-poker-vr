@@ -3,87 +3,70 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>POKER VR MASTER 1.5.1</title>
+    <title>POKER VR MASTER</title>
     <style>
-        body { margin: 0; background-color: #050505; color: white; overflow: hidden; font-family: sans-serif; }
-        #loading-screen {
-            position: absolute; width: 100%; height: 100%; background: black;
-            display: flex; align-items: center; justify-content: center; z-index: 10;
-        }
+        body { margin: 0; background-color: #000; color: #00ffcc; overflow: hidden; font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        #ui-layer { position: absolute; z-index: 20; text-align: center; }
+        button { padding: 20px 40px; font-size: 20px; background: #00ffcc; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; }
+        #winner-ui { position: fixed; top: 20%; width: 100%; text-align: center; font-size: 40px; display: none; pointer-events: none; }
     </style>
 </head>
 <body>
-    <div id="loading-screen"><h1>LOADING POKER VR...</h1></div>
+
+    <div id="ui-layer">
+        <h1>POKER VR 1.5.1</h1>
+        <p id="status">Connecting to Engine...</p>
+        <button id="retry-btn" style="display:none;" onclick="location.reload()">RETRY CONNECTION</button>
+    </div>
+
+    <div id="winner-ui"></div>
 
     <script type="module">
-        import * as THREE from 'https://cdn.skypack.dev/three@0.160.0';
-        import { VRButton } from 'https://cdn.skypack.dev/three@0.160.0/examples/jsm/webxr/VRButton.js';
+        // Using a high-compatibility ES Module link for Oculus Browser
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+        import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-        // --- GAME ENGINE ---
-        class PokerGame {
-            constructor() {
-                this.scene = new THREE.Scene();
-                this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
-                this.renderer = new THREE.WebGLRenderer({ antialias: true });
-                this.init();
-            }
+        const status = document.getElementById('status');
 
-            init() {
-                try {
-                    this.renderer.setSize(window.innerWidth, window.innerHeight);
-                    this.renderer.xr.enabled = true;
-                    document.body.appendChild(this.renderer.domElement);
-                    document.body.appendChild(VRButton.createButton(this.renderer));
+        try {
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            document.body.appendChild(renderer.domElement);
+            document.body.appendChild(VRButton.createButton(renderer));
 
-                    // Remove loading screen
-                    document.getElementById('loading-screen').style.display = 'none';
+            // SUCCESS - Remove UI
+            document.getElementById('ui-layer').style.display = 'none';
 
-                    // 1. LIGHTING (Ensures visibility)
-                    const light = new THREE.DirectionalLight(0xffffff, 2);
-                    light.position.set(1, 1, 1);
-                    this.scene.add(light);
-                    this.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+            // --- LOBBY SETUP ---
+            scene.add(new THREE.AmbientLight(0xffffff, 1));
+            const grid = new THREE.GridHelper(100, 100, 0x00ffcc, 0x222222);
+            scene.add(grid);
 
-                    // 2. THE GRID (If you see this, the game is working!)
-                    const grid = new THREE.GridHelper(50, 50, 0x00ffcc, 0x444444);
-                    this.scene.add(grid);
+            // --- MEGA PARTICLES ---
+            const count = 10000;
+            const geo = new THREE.BufferGeometry();
+            const pos = new Float32Array(count * 3);
+            for(let i=0; i<count*3; i++) pos[i] = (Math.random()-0.5) * 100;
+            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            const points = new THREE.Points(geo, new THREE.PointsMaterial({color: 0x00ffff, size: 0.1}));
+            scene.add(points);
 
-                    // 3. MEGA PARTICLES (1000x Analysis)
-                    this.createParticles();
+            // --- OCULUS CONTROLS ---
+            const c1 = renderer.xr.getController(0);
+            scene.add(c1);
 
-                    // 4. OCULUS CONTROLLERS
-                    this.controller1 = this.renderer.xr.getController(0);
-                    this.scene.add(this.controller1);
+            renderer.setAnimationLoop(() => {
+                renderer.render(scene, camera);
+            });
 
-                    this.animate();
-                    console.log("SUCCESS: Game Loaded");
-                } catch (e) {
-                    document.getElementById('loading-screen').innerHTML = "<h1>ERROR: " + e.message + "</h1>";
-                }
-            }
-
-            createParticles() {
-                const geometry = new THREE.BufferGeometry();
-                const vertices = [];
-                for (let i = 0; i < 5000; i++) {
-                    vertices.push((Math.random() - 0.5) * 100);
-                    vertices.push(Math.random() * 50);
-                    vertices.push((Math.random() - 0.5) * 100);
-                }
-                geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-                const material = new THREE.PointsMaterial({ color: 0x00ffff, size: 0.1 });
-                this.scene.add(new THREE.Points(geometry, material));
-            }
-
-            animate() {
-                this.renderer.setAnimationLoop(() => {
-                    this.renderer.render(this.scene, this.camera);
-                });
-            }
+        } catch (err) {
+            status.innerHTML = "CONNECTION BLOCKED: " + err.message;
+            document.getElementById('retry-btn').style.display = 'block';
         }
-
-        // Start the game
-        new PokerGame();
     </script>
 </body>
 </html>

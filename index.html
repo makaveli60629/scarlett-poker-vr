@@ -3,27 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SCORIPON ELITE - FINAL MASTER</title>
+    <title>SCORIPON ELITE - PURPLE GRADIENT AUDIT</title>
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/aframe-blink-controls/dist/aframe-blink-controls.min.js"></script>
     
     <script>
-        // FELT SHADER
-        AFRAME.registerShader('poker-felt-shader', {
-            schema: { color: {type: 'color', is: 'uniform', default: '#076324'} },
-            vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        // --- PURPLE GRADIENT SHADER FOR TRIMS & PILLARS ---
+        AFRAME.registerShader('purple-gradient', {
+            vertexShader: `
+                varying vec2 vUv;
+                void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+            `,
             fragmentShader: `
-                varying vec2 vUv; uniform vec3 color;
-                float noise(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
-                void main() { float n = noise(vUv * 500.0); gl_FragColor = vec4(color + (n * 0.05), 1.0); }`
+                varying vec2 vUv;
+                void main() {
+                    vec3 color1 = vec3(0.5, 0.0, 0.5); // Deep Purple
+                    vec3 color2 = vec3(0.8, 0.4, 1.0); // Bright Purple
+                    gl_FragColor = vec4(mix(color1, color2, vUv.y), 1.0);
+                }
+            `
         });
 
-        // MASTER ENGINE
+        // --- MASTER SYSTEM LOGIC ---
         AFRAME.registerComponent('poker-master', {
             init: function () {
                 this.balance = 5000;
                 this.rank = "SCORIPON ELITE";
-                this.startTime = Date.now();
                 this.playerEl = document.querySelector('#player');
                 this.watchText = document.querySelector('#watch-stats');
                 this.boardText = document.querySelector('#leaderboard-text');
@@ -35,8 +40,7 @@
             updateGlobalUIs: function() {
                 const now = new Date();
                 const timeStr = now.getHours() + ":" + now.getMinutes().toString().padStart(2, '0');
-                const sessionData = `${timeStr}\n$${this.balance}\n${this.rank}`;
-                this.watchText.setAttribute('value', sessionData);
+                this.watchText.setAttribute('value', `${timeStr}\n$${this.balance}\n${this.rank}`);
                 this.boardText.setAttribute('value', `SCORIPON LEADERBOARD\nBANK: $${this.balance}\nRANK: ${this.rank}`);
             },
             sitPlayer: function() {
@@ -46,11 +50,7 @@
             triggerWinEffect: function(msg, hand) {
                 this.winUI.setAttribute('visible', true);
                 document.querySelector('#win-text').setAttribute('value', `${msg}\n${hand}`);
-                this.playerEl.setAttribute('animation', "property: scale; to: 1.05 1.05 1.05; dur: 300; loop: 4; dir: alternate");
-                setTimeout(() => { 
-                    this.winUI.setAttribute('visible', false);
-                    this.playerEl.setAttribute('scale', "1 1 1");
-                }, 10000); 
+                setTimeout(() => { this.winUI.setAttribute('visible', false); }, 10000);
             }
         });
     </script>
@@ -66,14 +66,14 @@
             <img id="table-trim" src="assets/textures/Table leather trim.jpg">
             <img id="teleport-glow" src="assets/textures/Teleport glow.jpg">
             <img id="winner-tex" src="assets/textures/Winner.jpg">
-            <img id="sky-tex" src="assets/textures/casino_sky.jpg">
         </a-assets>
 
-        <a-light type="ambient" intensity="1.5" color="#FFF"></a-light>
-        <a-light type="point" position="0 10 0" intensity="2.0"></a-light>
+        <a-sky color="#87CEEB"></a-sky> 
+        <a-light type="ambient" intensity="2.0" color="#FFF"></a-light>
+        <a-light type="directional" position="-5 10 5" intensity="1.5"></a-light>
 
         <a-entity id="player">
-            <a-camera id="cam" look-controls><a-cursor color="red" fuse="false"></a-cursor></a-camera>
+            <a-camera id="cam" look-controls><a-cursor color="red"></a-cursor></a-camera>
             <a-entity id="leftHand" hand-tracking-controls="hand: left; modelColor: #e0ac69;" oculus-touch-controls="hand: left"
                       blink-controls="cameraRig: #player; teleportOrigin: #cam; collisionEntities: .nav-mesh; snapImage: #teleport-glow;">
                 <a-entity id="watch" position="0 0.06 0.1" rotation="-90 0 0">
@@ -86,21 +86,34 @@
             <a-entity id="rightHand" hand-tracking-controls="hand: right; modelColor: #e0ac69;" oculus-touch-controls="hand: right"></a-entity>
         </a-entity>
 
-        <a-sky src="#sky-tex"></a-sky>
         <a-plane class="nav-mesh" position="0 0 0" rotation="-90 0 0" width="50" height="50" src="#marble-gold-floor" repeat="8 8"></a-plane>
         
-        <a-entity id="room-walls">
-            <a-box position="0 4.5 -18" width="36" height="10" src="#room-brand">
-                <a-box position="0 3.9 0.2" width="36" height="0.2" color="#FFD700"></a-box>
-                <a-box position="0 -3.9 0.2" width="36" height="0.2" color="#FFD700"></a-box>
-                <a-entity position="0 0.5 0.3">
-                    <a-box width="6.2" height="4.2" color="#FFD700"></a-box>
-                    <a-plane width="6" height="4" position="0 0 0.08" src="#casino-art-2"></a-plane>
-                </a-entity>
-            </a-box>
-            <a-box position="-18 4.5 0" rotation="0 90 0" width="36" height="10" src="#room-brand"></a-box>
-            <a-box position="18 4.5 0" rotation="0 90 0" width="36" height="10" src="#room-brand"></a-box>
-            <a-box position="0 4.5 18" rotation="0 0 0" width="36" height="10" src="#room-brand"></a-box>
+        <a-entity id="room-structure">
+            <a-entity id="wall-north" position="0 4.5 -18">
+                <a-box width="36" height="9" src="#room-brand"></a-box>
+                <a-box position="0 4.4 0.2" width="36" height="0.2" depth="0.1" material="shader: purple-gradient;"></a-box>
+                <a-box position="0 -4.4 0.2" width="36" height="0.2" depth="0.1" material="shader: purple-gradient;"></a-box>
+            </a-entity>
+            <a-entity id="wall-south" position="0 4.5 18">
+                <a-box width="36" height="9" src="#room-brand"></a-box>
+                <a-box position="0 4.4 -0.2" width="36" height="0.2" depth="0.1" material="shader: purple-gradient;"></a-box>
+                <a-box position="0 -4.4 -0.2" width="36" height="0.2" depth="0.1" material="shader: purple-gradient;"></a-box>
+            </a-entity>
+            <a-entity id="wall-east" position="18 4.5 0" rotation="0 -90 0">
+                <a-box width="36" height="9" src="#room-brand"></a-box>
+                <a-box position="0 4.4 0.2" width="36" height="0.2" depth="0.1" material="shader: purple-gradient;"></a-box>
+                <a-box position="0 -4.4 0.2" width="36" height="0.2" depth="0.1" material="shader: purple-gradient;"></a-box>
+            </a-entity>
+            <a-entity id="wall-west" position="-18 4.5 0" rotation="0 90 0">
+                <a-box width="36" height="9" src="#room-brand"></a-box>
+                <a-box position="0 4.4 0.2" width="36" height="0.2" depth="0.1" material="shader: purple-gradient;"></a-box>
+                <a-box position="0 -4.4 0.2" width="36" height="0.2" depth="0.1" material="shader: purple-gradient;"></a-box>
+            </a-entity>
+
+            <a-box position="-17.8 4.5 -17.8" width="0.8" height="9" depth="0.8" material="shader: purple-gradient;"></a-box>
+            <a-box position="17.8 4.5 -17.8" width="0.8" height="9" depth="0.8" material="shader: purple-gradient;"></a-box>
+            <a-box position="-17.8 4.5 17.8" width="0.8" height="9" depth="0.8" material="shader: purple-gradient;"></a-box>
+            <a-box position="17.8 4.5 17.8" width="0.8" height="9" depth="0.8" material="shader: purple-gradient;"></a-box>
         </a-entity>
 
         <a-entity id="poker-table" position="0 0.7 -4">
@@ -112,14 +125,9 @@
             </a-box>
         </a-entity>
 
-        <a-entity position="0 9 -10" rotation="20 0 0">
+        <a-entity position="0 9 -12" rotation="20 0 0">
             <a-plane width="8" height="4" color="#000" opacity="0.9"></a-plane>
             <a-text id="leaderboard-text" value="" align="center" color="#FFD700" scale="3 3 3" position="0 0 0.1"></a-text>
-        </a-entity>
-
-        <a-entity id="winner-overlay" position="0 3 -4" visible="false">
-            <a-plane src="#winner-tex" width="4" height="2" transparent="true"></a-plane>
-            <a-text id="win-text" value="" align="center" color="white" scale="2 2 2" position="0 0 0.1"></a-text>
         </a-entity>
 
     </a-scene>

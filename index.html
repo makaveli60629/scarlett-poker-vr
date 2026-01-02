@@ -3,97 +3,85 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>POKER VR MASTER - 1.6.2</title>
-    <style>
-        body { margin: 0; background-color: #000; overflow: hidden; font-family: sans-serif; }
-    </style>
+    <title>POKER VR MASTER - 1.6.4</title>
+    <style> body { margin: 0; background-color: #000; overflow: hidden; } </style>
 </head>
 <body>
     <script type="module">
         import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
         import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-        // 1. DATA & PERSISTENCE
+        // 1. PERSISTENT DATA
         let stats = JSON.parse(localStorage.getItem('poker_master_save')) || { chips: 500, lastDaily: 0 };
         const save = () => localStorage.setItem('poker_master_save', JSON.stringify(stats));
 
-        const getRank = (c) => {
-            if (c < 2000) return "ROOKIE";
-            if (c < 10000) return "PRO";
-            if (c < 50000) return "HIGH ROLLER";
-            return "WHALE";
-        };
-
-        // 2. SCENE & LIGHTING (Skylight Added)
+        // 2. ENGINE SETUP
         const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 1000);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-        renderer.setPixelRatio(1.5);
+        renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.xr.enabled = true;
         document.body.appendChild(renderer.domElement);
         document.body.appendChild(VRButton.createButton(renderer));
 
-        // Skylight (HemisphereLight) - Illuminates everything from above
-        const skyLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5);
-        scene.add(skyLight);
+        // --- FULL LIGHTING SYSTEM ---
+        // A. Global Sky Light (Makes everything visible)
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 2.0); // High Intensity
+        scene.add(hemiLight);
+
+        // B. Main Directional Light (Adds shadows/depth)
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        dirLight.position.set(5, 10, 7.5);
+        scene.add(dirLight);
 
         const cameraRig = new THREE.Group();
         cameraRig.add(camera);
         scene.add(cameraRig);
 
-        // 3. JUMBOTRON SYSTEM (Floating UI)
+        // 3. JUMBOTRON & RANK SYSTEM
         function createJumbotron(x, z) {
             const group = new THREE.Group();
-            
-            // Background Board
-            const board = new THREE.Mesh(
-                new THREE.PlaneGeometry(4, 2),
-                new THREE.MeshBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.9, side: THREE.DoubleSide })
-            );
-            board.position.y = 6; // High above table
-            group.add(board);
-
-            // Text Canvas Helper
             const canvas = document.createElement('canvas');
             canvas.width = 512; canvas.height = 256;
             const ctx = canvas.getContext('2d');
             const texture = new THREE.CanvasTexture(canvas);
-            const textMesh = new THREE.Mesh(new THREE.PlaneGeometry(3.8, 1.8), new THREE.MeshBasicMaterial({ map: texture, transparent: true }));
-            textMesh.position.y = 6.01;
-            group.add(textMesh);
+            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(4, 2), new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide }));
+            mesh.position.y = 6;
+            group.add(mesh);
 
-            function updateDisplay() {
+            function update() {
                 ctx.clearRect(0,0,512,256);
-                ctx.fillStyle = "#800080"; // Purple Theme
-                ctx.font = "bold 40px Arial";
-                ctx.fillText(`CASH: $${stats.chips}`, 20, 60);
-                ctx.fillStyle = "#ffffff";
-                ctx.font = "30px Arial";
-                ctx.fillText(`RANK: ${getRank(stats.chips)}`, 20, 120);
-                ctx.fillText(`TIME: ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`, 20, 180);
+                ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(0,0,512,256);
+                ctx.fillStyle = "#800080"; ctx.font = "bold 50px Arial";
+                ctx.fillText(`CASH: $${stats.chips}`, 20, 80);
+                ctx.fillStyle = "#ffffff"; ctx.font = "40px Arial";
+                ctx.fillText(`TIME: ${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`, 20, 160);
                 texture.needsUpdate = true;
             }
-
-            setInterval(updateDisplay, 1000);
-            updateDisplay();
-
+            setInterval(update, 1000); update();
             group.position.set(x, 0, z);
             scene.add(group);
         }
 
-        // 4. ROOMS & TABLES
+        // 4. THE ROOMS (With Table Point Lights)
         function createPokerRoom(x, z, color, size, isLobby=false) {
             const group = new THREE.Group();
+            
+            // Table Point Light (Makes the table pop!)
+            const pLight = new THREE.PointLight(0x800080, 10, 10);
+            pLight.position.set(0, 3, 0);
+            group.add(pLight);
+
+            // Table
             const table = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 0.2, 32), new THREE.MeshStandardMaterial({color}));
             table.position.y = 0.8;
-            const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 1.2, 0.7, 16), new THREE.MeshBasicMaterial({color: 0x800080, transparent: true, opacity: 0.8}));
-            leg.position.y = 0.35;
-            group.add(table, leg);
+            group.add(table);
 
+            // Walls
             if(!isLobby) {
                 const wallGeo = new THREE.BoxGeometry(size, 5, 0.2);
-                const wallMat = new THREE.MeshStandardMaterial({color: 0x0a0a0a});
+                const wallMat = new THREE.MeshStandardMaterial({color: 0x111111});
                 for(let i=0; i<4; i++){
                     const wall = new THREE.Mesh(wallGeo, wallMat);
                     wall.rotation.y = (Math.PI/2) * i;
@@ -104,44 +92,42 @@
             group.position.set(x, 0, z);
             scene.add(group);
             createJumbotron(x, z);
-            return group;
         }
 
-        createPokerRoom(0, -5, 0x006400, 0, true); // Lobby
-        createPokerRoom(0, -35, 0x440000, 18);    // High Stakes
-        createPokerRoom(30, -15, 0x000044, 18);   // Low Stakes
+        createPokerRoom(0, -5, 0x006400, 0, true);   // Lobby
+        createPokerRoom(0, -35, 0x440000, 18);      // High Stakes
+        createPokerRoom(30, -15, 0x000044, 18);     // Low Stakes
 
-        // 5. VR CONTROLS (Laser & Teleport)
-        const marker = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.4, 32), new THREE.MeshBasicMaterial({color: 0x00ffcc}));
-        marker.rotation.x = -Math.PI/2;
-        scene.add(marker);
-
-        const controller1 = renderer.xr.getController(0); // Right
-        const laser = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]), new THREE.LineBasicMaterial({color: 0x800080}));
+        // 5. CONTROLS
+        const controller1 = renderer.xr.getController(0);
+        const laser = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]), new THREE.LineBasicMaterial({color: 0x00ffcc}));
         laser.scale.z = 50;
         controller1.add(laser);
         cameraRig.add(controller1);
+
+        const marker = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.4, 32), new THREE.MeshBasicMaterial({color: 0x00ffcc}));
+        marker.rotation.x = -Math.PI/2;
+        scene.add(marker);
 
         controller1.addEventListener('selectstart', () => {
             if (marker.visible) cameraRig.position.set(marker.position.x, 0, marker.position.z);
         });
 
-        // 6. MAIN LOOP
-        let canTurn = true;
+        // 6. LOOP
+        let turnCooldown = false;
         renderer.setAnimationLoop(() => {
             const session = renderer.xr.getSession();
             if (session) {
                 for (const source of session.inputSources) {
                     if (source.handedness === 'right' && source.gamepad) {
                         const axes = source.gamepad.axes;
-                        if (Math.abs(axes[2]) > 0.8 && canTurn) {
+                        if (Math.abs(axes[2]) > 0.8 && !turnCooldown) {
                             cameraRig.rotation.y -= Math.sign(axes[2]) * (Math.PI/4);
-                            canTurn = false; setTimeout(() => canTurn = true, 300);
+                            turnCooldown = true; setTimeout(() => turnCooldown = false, 300);
                         }
                     }
                 }
             }
-
             const m = new THREE.Matrix4().makeRotationFromQuaternion(controller1.quaternion);
             const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(m);
             if (dir.y < -0.1) {
@@ -149,7 +135,6 @@
                 marker.position.set(controller1.position.x + dir.x * ratio + cameraRig.position.x, 0.01, controller1.position.z + dir.z * ratio + cameraRig.position.z);
                 marker.visible = true;
             } else { marker.visible = false; }
-
             renderer.render(scene, camera);
         });
     </script>

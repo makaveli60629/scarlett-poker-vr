@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Poker VR 1.8.6 - Full Room & Hand Jump</title>
+    <title>Poker VR 1.8.8 - Daily Pick & Hand Jump</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; }
         #VRButton { 
             position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-            padding: 15px 30px !important; background: #222 !important; color: #00ff00 !important;
-            border: 2px solid #00ff00 !important; z-index: 1000; border-radius: 8px;
+            padding: 15px 30px !important; background: #1a1a1a !important; color: #00ecff !important;
+            border: 2px solid #00ecff !important; z-index: 1000; border-radius: 10px; font-weight: bold;
         }
     </style>
 </head>
@@ -30,23 +30,25 @@
         import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
         let scene, camera, renderer, playerGroup;
-        let controller1, controller2, hand1, hand2;
+        let hand1, hand2;
         let teleportMarker, teleportLine;
         let raycaster = new THREE.Raycaster();
         const tempMatrix = new THREE.Matrix4();
+
+        // Game Logic State
+        const dailyPickState = {
+            lastPickTime: null,
+            available: true
+        };
 
         init();
 
         function init() {
             scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0a1a); // Deep Night Blue
             
-            // 1. NICER SKY (Gradient-style atmosphere)
-            scene.background = new THREE.Color(0x1a0a2e); // Deep Midnight Purple
-            scene.fog = new THREE.Fog(0x1a0a2e, 2, 20);
-
-            // 2. PLAYER GROUP (SPAWN IN FRONT OF TABLE)
             playerGroup = new THREE.Group();
-            playerGroup.position.set(0, 0, 4); // Move player 4 meters back from center
+            playerGroup.position.set(0, 0, 8); // Spawn further back in the bigger room
             scene.add(playerGroup);
 
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -61,120 +63,124 @@
             const ambient = new THREE.HemisphereLight(0xffffff, 0x444444, 2.5);
             scene.add(ambient);
 
-            buildRoom();
+            buildEnlargedRoom();
+            createDailyPickTable();
             createTeleportAssets();
-            setupInputs();
+            setupHands();
 
             renderer.setAnimationLoop(render);
         }
 
-        function buildRoom() {
-            // FLOOR
-            const floor = new THREE.Mesh(
-                new THREE.PlaneGeometry(20, 20),
-                new THREE.MeshStandardMaterial({ color: 0x222222 })
-            );
+        function buildEnlargedRoom() {
+            // FLOOR (Expanded to 100x100)
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({ color: 0x151515 }));
             floor.rotation.x = -Math.PI / 2;
             floor.name = "Floor";
             scene.add(floor);
 
-            // WALLS (All 4 Walls)
-            const wallMat = new THREE.MeshStandardMaterial({ color: 0x8B0000 });
-            const wallGeo = new THREE.BoxGeometry(10, 4, 0.2);
+            // 4 WALLS (Larger perimeter)
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x660000 });
+            const box = new THREE.BoxGeometry(30, 6, 0.5);
             
-            const backWall = new THREE.Mesh(wallGeo, wallMat); backWall.position.set(0, 2, -5);
-            const frontWall = new THREE.Mesh(wallGeo, wallMat); frontWall.position.set(0, 2, 5);
-            const leftWall = new THREE.Mesh(wallGeo, wallMat); leftWall.position.set(-5, 2, 0); leftWall.rotation.y = Math.PI/2;
-            const rightWall = new THREE.Mesh(wallGeo, wallMat); rightWall.position.set(5, 2, 0); rightWall.rotation.y = Math.PI/2;
-            scene.add(backWall, frontWall, leftWall, rightWall);
+            const back = new THREE.Mesh(box, wallMat); back.position.set(0, 3, -15);
+            const left = new THREE.Mesh(box, wallMat); left.position.set(-15, 3, 0); left.rotation.y = Math.PI/2;
+            const right = new THREE.Mesh(box, wallMat); right.position.set(15, 3, 0); right.rotation.y = Math.PI/2;
+            scene.add(back, left, right);
 
-            // TRIMS (Floor & Ceiling)
+            // TRIMS
             const trimMat = new THREE.MeshStandardMaterial({ color: 0x000000 });
-            const floorTrim = new THREE.Mesh(new THREE.BoxGeometry(10.2, 0.15, 0.3), trimMat);
-            floorTrim.position.set(0, 0.075, -4.9);
-            scene.add(floorTrim);
+            const tGeo = new THREE.BoxGeometry(30.2, 0.2, 0.4);
+            const bTrim = new THREE.Mesh(tGeo, trimMat); bTrim.position.set(0, 0.1, -14.8);
+            scene.add(bTrim);
+        }
 
-            // TABLE & CHIP
-            const table = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.2, 32), new THREE.MeshStandardMaterial({ color: 0x004400 }));
-            table.position.set(0, 0.8, 0);
-            scene.add(table);
+        function createDailyPickTable() {
+            // Small Blackjack-style Table
+            const tableGroup = new THREE.Group();
+            tableGroup.position.set(-4, 0, -5);
+            scene.add(tableGroup);
 
-            const goldChip = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.02, 32), new THREE.MeshStandardMaterial({ color: 0xFFD700 }));
-            goldChip.position.set(0, 0.92, -0.4);
-            scene.add(goldChip);
+            const topGeo = new THREE.CylinderGeometry(1, 1, 0.1, 32, 1, false, 0, Math.PI); // Semi-circle
+            const topMat = new THREE.MeshStandardMaterial({ color: 0x003366 }); // Blue for Daily Pick
+            const tableTop = new THREE.Mesh(topGeo, topMat);
+            tableTop.position.y = 0.9;
+            tableTop.rotation.y = Math.PI;
+            tableGroup.add(tableTop);
+
+            // Add 5 Choice Buttons
+            const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff];
+            const increments = ["$500", "$1000", "$1500", "$2000", "$2500"];
+            
+            for(let i=0; i<5; i++) {
+                const btn = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.15, 0.05, 0.15),
+                    new THREE.MeshStandardMaterial({ color: colors[i] })
+                );
+                btn.position.set(-0.6 + (i * 0.3), 0.95, -0.2);
+                btn.name = "Pick_" + increments[i];
+                tableGroup.add(btn);
+            }
         }
 
         function createTeleportAssets() {
-            // Glowing Circle for Jump point
-            const ringGeo = new THREE.RingGeometry(0.25, 0.3, 32);
-            const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide });
-            teleportMarker = new THREE.Mesh(ringGeo, ringMat);
-            teleportMarker.rotation.x = -Math.PI / 2;
+            teleportMarker = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.04, 16, 32), new THREE.MeshBasicMaterial({ color: 0x00ff00 }));
+            teleportMarker.rotation.x = -Math.PI/2;
             teleportMarker.visible = false;
             scene.add(teleportMarker);
 
-            // Laser Line
             const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
-            teleportLine = new THREE.Line(lineGeo, new THREE.MeshBasicMaterial({ color: 0x00ff00 }));
+            teleportLine = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0x00ff00 }));
             teleportLine.visible = false;
             scene.add(teleportLine);
         }
 
-        function setupInputs() {
+        function setupHands() {
             const hFactory = new XRHandModelFactory();
-            const cFactory = new XRControllerModelFactory();
-
-            // Right Hand
-            hand1 = renderer.xr.getHand(0);
+            hand1 = renderer.xr.getHand(0); // Right
             hand1.add(hFactory.createHandModel(hand1, "mesh"));
             playerGroup.add(hand1);
 
-            controller1 = renderer.xr.getController(0);
-            controller1.addEventListener('selectstart', () => { teleportLine.visible = true; teleportMarker.visible = true; });
-            controller1.addEventListener('selectend', teleportPlayer);
-            playerGroup.add(controller1);
-
-            // Left Hand (Menu Holder)
-            hand2 = renderer.xr.getHand(1);
+            hand2 = renderer.xr.getHand(1); // Left
             hand2.add(hFactory.createHandModel(hand2, "mesh"));
             playerGroup.add(hand2);
-
-            // Floating Menu
-            const menu = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.3), new THREE.MeshBasicMaterial({color: 0x0000ff, transparent: true, opacity: 0.8}));
-            menu.position.set(0, 0.1, 0);
-            menu.rotation.x = -Math.PI/2;
-            hand2.add(menu);
         }
 
-        function teleportPlayer() {
-            if (teleportMarker.visible) {
-                playerGroup.position.set(teleportMarker.position.x, 0, teleportMarker.position.z);
+        function isPinching(hand) {
+            if (!hand || !hand.joints) return false;
+            const thumb = hand.joints['thumb-tip'];
+            const index = hand.joints['index-finger-tip'];
+            if (thumb && index) {
+                return thumb.position.distanceTo(index.position) < 0.015;
             }
-            teleportLine.visible = false;
-            teleportMarker.visible = false;
+            return false;
         }
 
         function render() {
-            if (teleportLine.visible) {
-                tempMatrix.identity().extractRotation(controller1.matrixWorld);
-                raycaster.ray.origin.setFromMatrixPosition(controller1.matrixWorld);
+            // Right Hand Teleport Logic
+            if (isPinching(hand1)) {
+                tempMatrix.identity().extractRotation(hand1.matrixWorld);
+                raycaster.ray.origin.setFromMatrixPosition(hand1.matrixWorld);
                 raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
 
-                const intersects = raycaster.intersectObjects(scene.children);
-                for (let i = 0; i < intersects.length; i++) {
-                    if (intersects[i].object.name === "Floor") {
-                        teleportMarker.position.copy(intersects[i].point);
-                        teleportMarker.position.y = 0.01;
+                const hits = raycaster.intersectObjects(scene.children);
+                for (let hit of hits) {
+                    if (hit.object.name === "Floor") {
+                        teleportMarker.position.copy(hit.point);
                         teleportMarker.visible = true;
-                        
-                        // Update line to point to marker
-                        teleportLine.position.setFromMatrixPosition(controller1.matrixWorld);
-                        teleportLine.lookAt(intersects[i].point);
-                        teleportLine.scale.z = controller1.position.distanceTo(intersects[i].point);
+                        teleportLine.visible = true;
+                        teleportLine.position.setFromMatrixPosition(hand1.matrixWorld);
+                        teleportLine.lookAt(hit.point);
+                        teleportLine.scale.z = hand1.position.distanceTo(hit.point);
                         break;
                     }
                 }
+            } else if (teleportMarker.visible) {
+                // Execute Jump
+                playerGroup.position.set(teleportMarker.position.x, 0, teleportMarker.position.z);
+                teleportMarker.visible = false;
+                teleportLine.visible = false;
             }
+
             renderer.render(scene, camera);
         }
     </script>

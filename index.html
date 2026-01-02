@@ -3,31 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VR Poker Master - Update 1.3</title>
+    <title>VR Poker - Update 1.3</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
-        
-        /* Win Announcement UI */
-        #win-display {
-            position: absolute;
-            top: 25%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-            pointer-events: none;
-            display: none;
-            z-index: 100;
-        }
-        .winner-name { color: #ffd700; font-size: 5rem; font-weight: bold; text-shadow: 0 0 20px rgba(255, 215, 0, 0.8); }
-        .hand-type { color: #ffffff; font-size: 2.5rem; margin-top: 10px; }
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        #game-container { width: 100vw; height: 100vh; }
     </style>
 </head>
 <body>
-    <div id="win-display">
-        <div id="player-text" class="winner-name"></div>
-        <div id="hand-text" class="hand-type"></div>
-    </div>
-
+    <div id="game-container"></div>
     <script type="importmap">
         {
             "imports": {

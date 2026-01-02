@@ -3,130 +3,237 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SCORIPON ELITE - MASTER 2.3.0</title>
-    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/aframe-blink-controls/dist/aframe-blink-controls.min.js"></script>
-    
-    <script>
-        AFRAME.registerShader('purple-glow', {
-            vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-            fragmentShader: `varying vec2 vUv; void main() { gl_FragColor = vec4(0.7, 0.2, 1.0, 1.0); }`
-        });
-
-        AFRAME.registerComponent('poker-master-engine', {
-            init: function () {
-                this.balance = 5000;
-                this.rank = "ELITE";
-                this.playerEl = document.querySelector('#player');
-            },
-            tick: function() {
-                const now = new Date();
-                let hours = now.getHours();
-                const ampm = hours >= 12 ? 'PM' : 'AM';
-                hours = hours % 12 || 12;
-                const mins = now.getMinutes().toString().padStart(2, '0');
-                const timeStr = `${hours}:${mins}${ampm}`;
-
-                // Update Watch
-                document.querySelector('#w-time').setAttribute('value', timeStr);
-                document.querySelector('#w-money').setAttribute('value', `$${this.balance}`);
-                document.querySelector('#w-rank').setAttribute('value', this.rank);
-                
-                // Update Hover Board
-                document.querySelector('#world-leaderboard-text').setAttribute('value', `BANK: $${this.balance}\nRANK: ${this.rank}`);
-
-                // AUTO-SIT
-                let playerPos = this.playerEl.getAttribute('position');
-                let distToTable = Math.sqrt(Math.pow(playerPos.x - 0, 2) + Math.pow(playerPos.z - (-4), 2));
-                if (distToTable < 1.7) {
-                    this.playerEl.setAttribute('position', "0 0.8 -3.5");
-                }
-            }
-        });
-    </script>
+    <title>High-Stakes VR Poker - Update 1.4 Core</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; }
+    </style>
 </head>
 <body>
-    <a-scene poker-master-engine renderer="antialias: true; colorManagement: true;">
+<script>
+    // --- CORE VARIABLES ---
+    let scene, camera, renderer, hands = { left: null, right: null };
+    let menuVisible = false, menuMesh;
+    let currentArea = 'lobby';
+    let playerSitting = false;
+
+    // --- INITIALIZATION ---
+    function init() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050505);
+
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         
-        <a-assets>
-            <img id="tex-floor" src="assets/textures/Marblegold floors.jpg">
-            <img id="tex-brick" src="assets/textures/brick wall.jpg">
-            <img id="tex-trim" src="assets/textures/Table leather trim.jpg">
-            <img id="tex-glow" src="assets/textures/Teleport glow.jpg">
-            <img id="tex-art" src="assets/textures/Casinoart2.jpg">
-            <img id="tex-brand" src="assets/textures/Scoripon room brand.jpg">
-        </a-assets>
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
 
-        <a-sky color="#000"></a-sky> 
-        <a-light type="ambient" intensity="1.2"></a-light>
-        <a-light type="point" position="0 10 20" intensity="1.5"></a-light>
+        document.body.appendChild(THREE.WEBXR.createButton(renderer));
 
-        <a-entity id="player" position="0 0 20">
-            <a-camera id="cam"><a-cursor visible="false"></a-cursor></a-camera>
-            <a-entity id="leftHand" hand-tracking-controls="hand: left; modelColor: #5c4033;" oculus-touch-controls="hand: left"
-                      blink-controls="cameraRig: #player; teleportOrigin: #cam; snapImage: #tex-glow; startEvents: pinchstarted, triggerdown; endEvents: pinchended, triggerup;">
-                <a-entity position="0 0.03 0.05" rotation="-90 0 0">
-                    <a-box width="0.04" height="0.035" depth="0.01" color="#000">
-                        <a-text id="w-time" color="red" scale="0.04 0.04 0.04" position="0 0.01 0.006" align="center"></a-text>
-                        <a-text id="w-money" color="#A020F0" scale="0.03 0.03 0.03" position="0 0 0.006" align="center"></a-text>
-                        <a-text id="w-rank" color="blue" scale="0.03 0.03 0.03" position="0 -0.01 0.006" align="center"></a-text>
-                    </a-box>
-                </a-entity>
-            </a-entity>
-            <a-entity id="rightHand" hand-tracking-controls="hand: right; modelColor: #5c4033;" oculus-touch-controls="hand: right"></a-entity>
-        </a-entity>
+        // Lighting
+        const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambient);
+        const sun = new THREE.PointLight(0xffffff, 1);
+        sun.position.set(5, 10, 5);
+        scene.add(sun);
 
-        <a-plane rotation="-90 0 0" width="200" height="200" src="#tex-floor" repeat="40 40"></a-plane>
+        setupWorld();
+        setupHands();
+        createVRMenu();
+        
+        window.addEventListener('resize', onWindowResize);
+    }
 
-        <a-entity id="lobby" position="0 0 25">
-            <a-box position="0 4.5 -10" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
-            <a-box position="0 4.5 10" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
-            <a-box position="-10 4.5 0" rotation="0 90 0" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
-            <a-box position="10 4.5 0" rotation="0 -90 0" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
-            <a-plane position="0 9 0" rotation="90 0 0" width="20" height="20" color="#111"></a-plane>
-            
-            <a-box id="daily-table" position="0 0.5 -5" width="3" height="1" depth="1.5" src="#tex-trim">
-                <a-text value="DAILY REWARD" position="0 1.2 0" align="center" color="#FFD700" scale="2 2 2"></a-text>
-                <a-box width="3.1" height="0.1" depth="1.6" position="0 0.5 0" material="shader: purple-glow;"></a-box>
-            </a-box>
+    // --- WORLD BUILDING (Lobby, Store, Poker Room) ---
+    function setupWorld() {
+        // Floor
+        const floorGeo = new THREE.PlaneGeometry(50, 50);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        scene.add(floor);
 
-            <a-box position="-6 0.4 0" width="3" height="0.8" depth="1.5" src="#tex-trim"></a-box>
-            <a-box position="6 0.4 0" width="3" height="0.8" depth="1.5" src="#tex-trim"></a-box>
-        </a-entity>
+        // Poker Table (The "Poker Room" Area)
+        createPokerTable(new THREE.Vector3(0, 0, -5));
 
-        <a-entity id="poker-room" position="0 0 -5">
-            <a-box position="0 4.5 -15" width="30" height="9" depth="0.2" src="#tex-brick" repeat="6 3">
-                <a-plane position="0 0.5 0.21" width="12" height="6" src="#tex-art"></a-plane> <a-box position="0 4.4 0.22" width="30.1" height="0.15" material="shader: purple-glow;"></a-box>
-            </a-box>
-            <a-box position="0 4.5 15" width="30" height="9" depth="0.2" src="#tex-brick" repeat="6 3"></a-box>
-            <a-box position="-15 4.5 0" rotation="0 90 0" width="30" height="9" depth="0.2" src="#tex-brick" repeat="6 3"></a-box>
-            <a-box position="15 4.5 0" rotation="0 -90 0" width="30" height="9" depth="0.2" src="#tex-brick" repeat="6 3"></a-box>
-            <a-plane position="0 9 0" rotation="90 0 0" width="30" height="30" color="#050505"></a-plane>
+        // The Store Area
+        const storeShelf = new THREE.Mesh(
+            new THREE.BoxGeometry(4, 3, 0.5),
+            new THREE.MeshStandardMaterial({ color: 0x4a3728 })
+        );
+        storeShelf.position.set(10, 1.5, -5);
+        scene.add(storeShelf);
 
-            <a-entity position="0 9 -8" rotation="20 0 0">
-                <a-plane width="9" height="3" color="#000" opacity="0.9">
-                    <a-text id="world-leaderboard-text" align="center" color="#FFD700" scale="3 3 3"></a-text>
-                </a-plane>
-            </a-entity>
+        // Leadership Board (Hovering)
+        createLeaderboard(new THREE.Vector3(0, 4, -8));
+    }
 
-            <a-entity id="poker-table" position="0 0.7 -4">
-                <a-cylinder radius="1.8" height="0.1" scale="1 1 2.5" color="#076324"></a-cylinder>
-                <a-torus radius="1.8" radius-tubular="0.1" rotation="90 0 0" scale="1 2.5 1" src="#tex-trim"></a-torus>
-                <a-cylinder position="0.5 0.1 0" radius="0.1" height="0.3" color="red"></a-cylinder>
-                <a-cylinder position="0.7 0.1 0.2" radius="0.1" height="0.2" color="blue"></a-cylinder>
-            </a-entity>
-        </a-entity>
+    function createPokerTable(pos) {
+        const tableGroup = new THREE.Group();
+        
+        // Table Top
+        const top = new THREE.Mesh(
+            new THREE.CylinderGeometry(2, 2, 0.1, 32),
+            new THREE.MeshStandardMaterial({ color: 0x006400 })
+        );
+        tableGroup.add(top);
 
-        <a-entity id="store-room" position="35 0 0">
-            <a-box position="0 4.5 -10" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
-            <a-box position="0 4.5 10" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
-            <a-box position="-10 4.5 0" rotation="0 90 0" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
-            <a-box position="10 4.5 0" rotation="0 -90 0" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
-            <a-box position="0 0.5 0" width="1.2" height="1.2" depth="1.2" src="#tex-trim">
-                <a-text value="PREMIUM DECK" position="0 1 0" align="center" color="white"></a-text>
-            </a-box>
-        </a-entity>
+        // Seats (Aligned Nicely)
+        for (let i = 0; i < 6; i++) {
+            const angle = (i / 6) * Math.PI * 2;
+            const chair = new THREE.Mesh(
+                new THREE.BoxGeometry(0.5, 0.5, 0.5),
+                new THREE.MeshStandardMaterial({ color: 0x333333 })
+            );
+            chair.position.set(Math.cos(angle) * 2.5, 0.25, Math.sin(angle) * 2.5);
+            chair.lookAt(0, 0.25, 0);
+            tableGroup.add(chair);
+        }
 
-    </a-scene>
+        tableGroup.position.copy(pos);
+        scene.add(tableGroup);
+    }
+
+    function createLeaderboard(pos) {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 512; canvas.height = 256;
+        ctx.fillStyle = '#111';
+        ctx.fillRect(0, 0, 512, 256);
+        ctx.fillStyle = '#gold';
+        ctx.font = '40px Arial';
+        ctx.fillText('LEADERBOARD', 120, 50);
+        ctx.font = '24px Arial';
+        ctx.fillStyle = 'white';
+        ctx.fillText('1. Player One - $50,000', 50, 100);
+        ctx.fillText('2. Shark_VR - $42,500', 50, 140);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        const board = new THREE.Mesh(
+            new THREE.PlaneGeometry(4, 2),
+            new THREE.MeshBasicMaterial({ map: texture, transparent: true })
+        );
+        board.position.copy(pos);
+        scene.add(board);
+    }
+
+    // --- VR MENU & TELEPORTATION ---
+    function createVRMenu() {
+        menuMesh = new THREE.Group();
+        
+        const bg = new THREE.Mesh(
+            new THREE.PlaneGeometry(0.6, 0.8),
+            new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide, opacity: 0.8, transparent: true })
+        );
+        menuMesh.add(bg);
+
+        const buttons = ['Lobby', 'Poker Room', 'Store'];
+        buttons.forEach((text, i) => {
+            const btn = createMenuButton(text);
+            btn.position.y = 0.2 - (i * 0.2);
+            btn.name = "btn_" + text.replace(" ", "").toLowerCase();
+            menuMesh.add(btn);
+        });
+
+        menuMesh.visible = false;
+        scene.add(menuMesh);
+    }
+
+    function createMenuButton(text) {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 256; canvas.height = 128;
+        ctx.fillStyle = '#444'; ctx.fillRect(0,0,256,128);
+        ctx.fillStyle = 'white'; ctx.font = '40px Arial';
+        ctx.fillText(text, 20, 80);
+        
+        const mesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(0.4, 0.15),
+            new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas) })
+        );
+        return mesh;
+    }
+
+    // --- HANDS & INTERACTION ---
+    function setupHands() {
+        // We only use hand models, no controllers as per instructions
+        hands.left = renderer.xr.getHand(0);
+        hands.right = renderer.xr.getHand(1);
+
+        // Add hand models to scene
+        const handModelFactory = { /* Standard hand loader would go here */ };
+        // For brevity in this script, we assume hand tracking is active via XR
+        scene.add(hands.left);
+        scene.add(hands.right);
+
+        // Hand Events
+        hands.left.addEventListener('pinchstart', () => {
+            menuVisible = !menuVisible;
+            menuMesh.visible = menuVisible;
+            if(menuVisible) {
+                // Position menu in front of left hand
+                const matrix = new THREE.Matrix4().extractRotation(hands.left.matrixWorld);
+                menuMesh.position.setFromMatrixPosition(hands.left.matrixWorld);
+                menuMesh.translateZ(-0.2);
+                menuMesh.lookAt(camera.position);
+            }
+        });
+    }
+
+    function handleInteractions() {
+        if (!menuVisible) return;
+
+        // Simple collision check for Right Index Finger tip
+        // In WebXR Hand Tracking, Joint 9 is typically index tip
+        const rightIndex = hands.right.joints ? hands.right.joints['index-finger-tip'] : null;
+        
+        if (rightIndex && rightIndex.visible) {
+            menuMesh.children.forEach(btn => {
+                if (btn.name.startsWith('btn_')) {
+                    const dist = rightIndex.position.distanceTo(btn.getWorldPosition(new THREE.Vector3()));
+                    if (dist < 0.05) {
+                        teleport(btn.name);
+                    }
+                }
+            });
+        }
+    }
+
+    function teleport(dest) {
+        menuVisible = false;
+        menuMesh.visible = false;
+        
+        const xrSession = renderer.xr.getSession();
+        if(!xrSession) return;
+
+        // Teleport Logic
+        if (dest === 'btn_lobby') {
+            camera.position.set(0, 1.6, 5);
+        } else if (dest === 'btn_pokerroom') {
+            camera.position.set(0, 1.6, -3); // Sit at table
+        } else if (dest === 'btn_store') {
+            camera.position.set(8, 1.6, -5);
+        }
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+        renderer.setAnimationLoop(() => {
+            handleInteractions();
+            renderer.render(scene, camera);
+        });
+    }
+
+    init();
+    animate();
+
+</script>
 </body>
 </html>

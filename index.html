@@ -3,93 +3,104 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>POKER VR MASTER - 1.7.0</title>
-    <style> body { margin: 0; background-color: #111; overflow: hidden; font-family: sans-serif; } </style>
+    <title>POKER VR MASTER - 1.7.3</title>
+    <style> body { margin: 0; background-color: #050505; overflow: hidden; font-family: sans-serif; } </style>
 </head>
 <body>
     <script type="module">
         import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
         import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-        // 1. PERSISTENT DATA & TEXTURES
-        let stats = JSON.parse(localStorage.getItem('poker_master_save')) || { chips: 500, lastDaily: 0 };
-        const textureLoader = new THREE.TextureLoader();
-        const logoTex = textureLoader.load('assets/textures/logo.jpg'); 
+        // 1. DATA & TEXTURE LOADING (Mapped to your provided list)
+        let stats = JSON.parse(localStorage.getItem('poker_master_save')) || { chips: 500 };
+        const texLoader = new THREE.TextureLoader();
+        const path = 'assets/textures/';
+
+        const textures = {
+            logo: texLoader.load(path + 'brand_logo.jpg'),
+            brick: texLoader.load(path + 'brickwall.jpg'),
+            carpet: texLoader.load(path + 'lobby_carpet.jpg'),
+            felt: texLoader.load(path + 'table_felt_green.jpg'),
+            daily: texLoader.load(path + 'dailyclaim.jpg')
+        };
+
+        // Standardize textures
+        textures.brick.wrapS = textures.brick.wrapT = THREE.RepeatWrapping;
+        textures.brick.repeat.set(4, 1);
+        textures.carpet.wrapS = textures.carpet.wrapT = THREE.RepeatWrapping;
+        textures.carpet.repeat.set(10, 10);
 
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x1a1a1a);
+        scene.background = new THREE.Color(0x0a0a0a);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.xr.enabled = true;
         document.body.appendChild(renderer.domElement);
         document.body.appendChild(VRButton.createButton(renderer));
 
-        // 2. FULL LIGHTING
         scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 2.0));
-        const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-        sun.position.set(5, 15, 5);
-        scene.add(sun);
-
         const cameraRig = new THREE.Group();
         cameraRig.add(camera);
         scene.add(cameraRig);
 
-        // 3. THE BRANDED LEADERBOARD (Money & Time)
-        const lbGroup = new THREE.Group();
-        const lbBase = new THREE.Mesh(new THREE.BoxGeometry(6, 4, 0.2), new THREE.MeshStandardMaterial({color: 0x000000}));
-        lbGroup.add(lbBase);
-
-        const canvas = document.createElement('canvas');
-        canvas.width = 512; canvas.height = 256;
-        const ctx = canvas.getContext('2d');
-        const lbTexture = new THREE.CanvasTexture(canvas);
-        const lbDisplay = new THREE.Mesh(new THREE.PlaneGeometry(5.5, 3.5), new THREE.MeshBasicMaterial({ map: lbTexture }));
-        lbDisplay.position.z = 0.11;
-        lbGroup.add(lbDisplay);
-
-        function updateLeaderboard() {
-            ctx.fillStyle = "#000"; ctx.fillRect(0,0,512,256);
-            ctx.fillStyle = "#800080"; ctx.font = "bold 45px Arial";
-            ctx.fillText("CASINO STATS", 120, 60);
-            ctx.fillStyle = "#ffffff"; ctx.font = "35px Arial";
-            ctx.fillText(`WALLET: $${stats.chips}`, 50, 130);
-            ctx.fillText(`TIME: ${new Date().toLocaleTimeString()}`, 50, 190);
-            lbTexture.needsUpdate = true;
-        }
-        setInterval(updateLeaderboard, 1000);
-        lbGroup.position.set(0, 3, -12);
-        scene.add(lbGroup);
-
-        // 4. MAIN LOGO WALL (In front of Table)
-        const logoWall = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), new THREE.MeshBasicMaterial({ map: logoTex, side: THREE.DoubleSide }));
-        logoWall.position.set(0, 2, -11.9); // Right in front of Leaderboard
-        scene.add(logoWall);
-
-        // 5. ROOMS & TELEPORTER
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: 0x222222 }));
+        // 2. TEXTURED ENVIRONMENT
+        // Floor with lobby_carpet.jpg
+        const floor = new THREE.Mesh(
+            new THREE.PlaneGeometry(100, 100),
+            new THREE.MeshStandardMaterial({ map: textures.carpet })
+        );
         floor.rotation.x = -Math.PI / 2;
         scene.add(floor);
 
-        function createRoom(x, z, color, size, isLobby=false) {
+        // 3. JUMBOTRON (High Stats)
+        const canvas = document.createElement('canvas');
+        canvas.width = 1024; canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+        const jumbTexture = new THREE.CanvasTexture(canvas);
+        const jumbMesh = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), new THREE.MeshBasicMaterial({ map: jumbTexture, transparent: true }));
+        jumbMesh.position.set(0, 8, -15);
+        scene.add(jumbMesh);
+
+        function updateJumbotron() {
+            ctx.clearRect(0, 0, 1024, 512);
+            ctx.fillStyle = "rgba(0, 0, 0, 0.8)"; ctx.fillRect(0, 0, 1024, 512);
+            ctx.strokeStyle = "#800080"; ctx.lineWidth = 20; ctx.strokeRect(10, 10, 1004, 492);
+            ctx.fillStyle = "#ffffff"; ctx.font = "bold 80px Arial";
+            ctx.fillText(`CASH: $${stats.chips}`, 100, 200);
+            ctx.fillText(`TIME: ${new Date().toLocaleTimeString()}`, 100, 350);
+            jumbTexture.needsUpdate = true;
+        }
+        setInterval(updateJumbotron, 1000);
+
+        // 4. ROOMS & TABLES (Applying brand_logo.jpg)
+        function createBrandedRoom(x, z, color, size, isLobby=false) {
             const group = new THREE.Group();
-            const table = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 0.3, 32), new THREE.MeshStandardMaterial({color}));
-            table.position.y = 0.8;
-            group.add(table);
             
-            // Logo on table
-            const tLogo = new THREE.Mesh(new THREE.CircleGeometry(0.8, 32), new THREE.MeshBasicMaterial({map: logoTex}));
-            tLogo.rotation.x = -Math.PI/2; tLogo.position.y = 0.96;
-            group.add(tLogo);
+            // Table with Felt
+            const table = new THREE.Mesh(
+                new THREE.CylinderGeometry(2.5, 2.5, 0.3, 32),
+                new THREE.MeshStandardMaterial({ color: isLobby ? 0xffffff : color, map: isLobby ? textures.felt : null })
+            );
+            table.position.y = 0.8;
+            
+            // Logo overlay
+            const logo = new THREE.Mesh(
+                new THREE.CircleGeometry(0.8, 32),
+                new THREE.MeshBasicMaterial({ map: textures.logo, transparent: true })
+            );
+            logo.rotation.x = -Math.PI/2; logo.position.y = 0.96;
+            
+            group.add(table, logo);
 
             if(!isLobby) {
-                const wallMat = new THREE.MeshStandardMaterial({color: 0x0a0a0a});
+                const wallMat = new THREE.MeshStandardMaterial({ map: textures.brick });
                 for(let i=0; i<4; i++){
-                    const wall = new THREE.Mesh(new THREE.BoxGeometry(size, 5, 0.2), wallMat);
+                    const wall = new THREE.Mesh(new THREE.BoxGeometry(size, 6, 0.2), wallMat);
                     wall.rotation.y = (Math.PI/2) * i;
-                    wall.position.set(Math.sin(wall.rotation.y)*size/2, 2.5, Math.cos(wall.rotation.y)*size/2);
+                    wall.position.set(Math.sin(wall.rotation.y)*size/2, 3, Math.cos(wall.rotation.y)*size/2);
                     group.add(wall);
                 }
             }
@@ -97,26 +108,34 @@
             scene.add(group);
         }
 
-        createRoom(0, -5, 0x006400, 0, true);   // Lobby
-        createRoom(0, -30, 0x440000, 15);      // High Stakes
-        createRoom(20, -15, 0x000044, 15);     // Low Stakes
+        createBrandedRoom(0, -5, 0x004400, 0, true);
+        createBrandedRoom(0, -30, 0x440000, 15);
+        createBrandedRoom(20, -15, 0x000044, 15);
 
-        // 6. TELEPORT LOGIC
+        // 5. STORE & TELEPORTER (Branded)
+        const store = new THREE.Mesh(new THREE.BoxGeometry(4, 3, 0.2), new THREE.MeshStandardMaterial({color: 0x111111}));
+        const sign = new THREE.Mesh(new THREE.PlaneGeometry(3, 1), new THREE.MeshBasicMaterial({ map: textures.logo }));
+        sign.position.set(0, 1.2, 0.11);
+        const storeGroup = new THREE.Group(); storeGroup.add(store, sign);
+        storeGroup.position.set(-8, 1.5, -5); storeGroup.rotation.y = Math.PI/4;
+        scene.add(storeGroup);
+
+        const pad = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.1, 32), new THREE.MeshBasicMaterial({color: 0x00ffff, transparent: true, opacity: 0.5}));
+        pad.position.set(4, 0.05, -4);
+        scene.add(pad);
+
+        // 6. CONTROLS
         const marker = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.4, 32), new THREE.MeshBasicMaterial({ color: 0x00ffcc }));
-        marker.rotation.x = -Math.PI/2;
-        scene.add(marker);
-
-        const controller1 = renderer.xr.getController(0); // Right
+        marker.rotation.x = -Math.PI/2; scene.add(marker);
+        const controller1 = renderer.xr.getController(0); 
         const laser = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]), new THREE.LineBasicMaterial({color: 0x00ffcc}));
         laser.scale.z = 100;
-        controller1.add(laser);
-        cameraRig.add(controller1);
+        controller1.add(laser); cameraRig.add(controller1);
 
         controller1.addEventListener('selectstart', () => {
             if(marker.visible) cameraRig.position.set(marker.position.x, 0, marker.position.z);
         });
 
-        // 7. LOOP
         const raycaster = new THREE.Raycaster();
         renderer.setAnimationLoop(() => {
             const m = new THREE.Matrix4().extractRotation(controller1.matrixWorld);

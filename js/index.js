@@ -3,14 +3,10 @@ import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 
 let scene, camera, renderer, playerGroup;
-let controller1, controller2;
-let raycaster, marker;
+let controllerLeft, controllerRight;
+let watchMesh, watchMenu;
 let playerSatDown = false;
-
-// Wrist Watch & Menu Variables
-let watchMesh, watchCanvas, watchTexture;
-let mainMenuVisible = false;
-let mainMenuMesh;
+let moveSpeed = 0.05;
 
 init();
 animate();
@@ -21,6 +17,7 @@ function init() {
 
     playerGroup = new THREE.Group();
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 1.6, 0);
     playerGroup.add(camera);
     scene.add(playerGroup);
 
@@ -30,144 +27,110 @@ function init() {
     document.body.appendChild(renderer.domElement);
     document.getElementById('vr-button-container').appendChild(VRButton.createButton(renderer));
 
-    // 1. LOBBY & TABLE
+    // Lobby & Table (One Big Room, No Arches)
     createLobby();
     createPokerTable();
 
-    // 2. VR CONTROLLERS
-    setupVR();
+    // VR Setup
+    setupControllers();
 
-    // 3. WRIST WATCH (On Left Controller Grip)
-    createWristWatch();
-
-    // 4. MAIN MENU (Hidden by default)
-    createMainMenu();
-
-    scene.add(new THREE.AmbientLight(0x404040, 0.8));
+    // Lighting
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
     const sun = new THREE.DirectionalLight(0xffffff, 1);
     sun.position.set(5, 10, 5);
     scene.add(sun);
 }
 
-function setupVR() {
+function setupControllers() {
     const modelFactory = new XRControllerModelFactory();
 
-    // Left Controller
-    controller1 = renderer.xr.getController(0);
-    controller1.addEventListener('selectstart', () => { marker.visible = true; });
-    controller1.addEventListener('selectend', teleportPlayer);
-    playerGroup.add(controller1);
+    // LEFT CONTROLLER (Movement + Y Button)
+    controllerLeft = renderer.xr.getController(0);
+    playerGroup.add(controllerLeft);
+    const gripLeft = renderer.xr.getControllerGrip(0);
+    gripLeft.add(modelFactory.createControllerModel(gripLeft));
+    playerGroup.add(gripLeft);
 
-    const grip1 = renderer.xr.getControllerGrip(0);
-    grip1.add(modelFactory.createControllerModel(grip1));
-    playerGroup.add(grip1);
+    // RIGHT CONTROLLER (Trigger Interaction)
+    controllerRight = renderer.xr.getController(1);
+    controllerRight.addEventListener('selectstart', onRightTrigger);
+    playerGroup.add(controllerRight);
+    const gripRight = renderer.xr.getControllerGrip(1);
+    gripRight.add(modelFactory.createControllerModel(gripRight));
+    playerGroup.add(gripRight);
 
-    // Right Controller
-    controller2 = renderer.xr.getController(1);
-    // "White Button" Mapping (A/X buttons usually trigger 'squeeze' or custom mapping)
-    controller2.addEventListener('squeezestart', toggleMenu); 
-    playerGroup.add(controller2);
-
-    const grip2 = renderer.xr.getControllerGrip(1);
-    grip2.add(modelFactory.createControllerModel(grip2));
-    playerGroup.add(grip2);
-
-    raycaster = new THREE.Raycaster();
-    createTeleportMarker();
+    // Attach Wrist Watch to Left Grip
+    createWristWatch(gripLeft);
 }
 
-function createWristWatch() {
-    // Create Watch Face
-    watchCanvas = document.createElement('canvas');
-    watchCanvas.width = 256;
-    watchCanvas.height = 256;
-    watchTexture = new THREE.CanvasTexture(watchCanvas);
-
+function createWristWatch(parent) {
+    // Watch Face
     const watchGeom = new THREE.BoxGeometry(0.08, 0.02, 0.08);
-    const watchMat = new THREE.MeshStandardMaterial({ map: watchTexture });
+    const watchMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
     watchMesh = new THREE.Mesh(watchGeom, watchMat);
-
-    // Position on the Left Grip (Wrist area)
-    const leftGrip = renderer.xr.getControllerGrip(0);
     watchMesh.position.set(0, 0.03, 0.05);
-    watchMesh.rotation.x = Math.PI / 2;
-    leftGrip.add(watchMesh);
+    parent.add(watchMesh);
+
+    // The Menu (Attached to watch, hidden by default)
+    const menuGeom = new THREE.PlaneGeometry(0.2, 0.2);
+    const menuMat = new THREE.MeshBasicMaterial({ color: 0x222222, side: THREE.DoubleSide });
+    watchMenu = new THREE.Mesh(menuGeom, menuMat);
+    watchMenu.position.set(0, 0.15, 0); // Floats above watch
+    watchMenu.rotation.x = -Math.PI / 4;
+    watchMenu.visible = false;
+    watchMesh.add(watchMenu);
 }
 
-function updateWatchFace() {
-    const ctx = watchCanvas.getContext('2d');
-    ctx.fillStyle = '#111';
-    ctx.fillRect(0, 0, 256, 256);
-    
-    ctx.fillStyle = 'gold';
-    ctx.font = 'bold 30px Arial';
-    ctx.textAlign = 'center';
-    
-    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    ctx.fillText(time, 128, 50);
-    
-    ctx.fillStyle = 'white';
-    ctx.font = '22px Arial';
-    ctx.fillText('Cash: $50,000', 128, 110);
-    ctx.fillText('Rank: Pro', 128, 160);
-    ctx.fillText('Player: You', 128, 210);
-    
-    watchTexture.needsUpdate = true;
+function handleInputs() {
+    const session = renderer.xr.getSession();
+    if (!session) return;
+
+    for (const source of session.inputSources) {
+        if (!source.gamepad) continue;
+
+        const axes = source.gamepad.axes; // Sticks
+        const buttons = source.gamepad.buttons; // A, B, X, Y
+
+        // LEFT CONTROLLER LOGIC (source 0 usually)
+        if (source.handedness === 'left') {
+            // 1. Walking with Stick (Axes 2 and 3)
+            const forward = axes[3];
+            const side = axes[2];
+            
+            // Movement direction based on camera orientation
+            const moveVec = new THREE.Vector3(side, 0, forward);
+            moveVec.applyQuaternion(camera.quaternion);
+            moveVec.y = 0; // Keep on ground
+            playerGroup.position.add(moveVec.multiplyScalar(moveSpeed));
+
+            // 2. Y-Button Toggle (Button Index 5 on Quest)
+            if (buttons[5].pressed) {
+                watchMenu.visible = true;
+            } else {
+                // Keep menu visible logic can be added here if you want it to stay
+            }
+        }
+    }
 }
 
-function createMainMenu() {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = 512; canvas.height = 512;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
-    ctx.fillRect(0, 0, 512, 512);
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 10;
-    ctx.strokeRect(5, 5, 502, 502);
-    
-    ctx.fillStyle = 'white';
-    ctx.font = 'bold 50px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText('MAIN MENU', 256, 100);
-    ctx.font = '30px Arial';
-    ctx.fillText('1. Resume', 256, 200);
-    ctx.fillText('2. Settings', 256, 280);
-    ctx.fillText('3. Exit Game', 256, 360);
-
-    const tex = new THREE.CanvasTexture(canvas);
-    mainMenuMesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(1, 1),
-        new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide })
-    );
-    mainMenuMesh.visible = false;
-    scene.add(mainMenuMesh);
-}
-
-function toggleMenu() {
-    mainMenuVisible = !mainMenuVisible;
-    mainMenuMesh.visible = mainMenuVisible;
-    
-    // Place menu in front of user
-    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-    const pos = camera.getWorldPosition(new THREE.Vector3()).add(dir.multiplyScalar(1.5));
-    mainMenuMesh.position.copy(pos);
-    mainMenuMesh.lookAt(camera.position);
+function onRightTrigger() {
+    console.log("Right Trigger Pressed - Interaction Active");
+    // This is where you will select cards or menu buttons
 }
 
 function createLobby() {
     const floor = new THREE.Mesh(
-        new THREE.PlaneGeometry(20, 20),
+        new THREE.PlaneGeometry(30, 30),
         new THREE.MeshStandardMaterial({ color: 0x111111 })
     );
     floor.rotation.x = -Math.PI / 2;
-    floor.name = "Floor";
     scene.add(floor);
 
     const walls = new THREE.Mesh(
-        new THREE.BoxGeometry(20, 8, 20),
-        new THREE.MeshStandardMaterial({ color: 0x222222, side: THREE.BackSide })
+        new THREE.BoxGeometry(30, 10, 30),
+        new THREE.MeshStandardMaterial({ color: 0x1a1a1a, side: THREE.BackSide })
     );
-    walls.position.y = 4;
+    walls.position.y = 5;
     scene.add(walls);
 }
 
@@ -180,51 +143,18 @@ function createPokerTable() {
     scene.add(table);
 }
 
-function createTeleportMarker() {
-    marker = new THREE.Mesh(
-        new THREE.RingGeometry(0.1, 0.15, 32),
-        new THREE.MeshBasicMaterial({ color: 0x00ffff, side: THREE.DoubleSide })
-    );
-    marker.rotation.x = -Math.PI / 2;
-    marker.visible = false;
-    scene.add(marker);
-}
-
-function teleportPlayer() {
-    if (marker.visible) {
-        playerGroup.position.set(marker.position.x, 0, marker.position.z);
-    }
-    marker.visible = false;
-}
-
-function updateTeleportRay() {
-    if (marker.visible) {
-        const tempMatrix = new THREE.Matrix4();
-        tempMatrix.extractRotation(controller1.matrixWorld);
-        raycaster.ray.origin.setFromMatrixPosition(controller1.matrixWorld);
-        raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
-
-        const intersects = raycaster.intersectObjects(scene.children);
-        const floorIntersect = intersects.find(i => i.object.name === "Floor");
-        if (floorIntersect) {
-            marker.position.copy(floorIntersect.point);
-        }
-    }
-}
-
 function checkAutoSit() {
     const dist = playerGroup.position.distanceTo(new THREE.Vector3(0, 0, -5));
-    if (dist < 1.2 && !playerSatDown) {
+    if (dist < 1.3 && !playerSatDown) {
         playerSatDown = true;
-        playerGroup.position.set(0, 0, -4); 
-        console.log("Seated at table.");
+        playerGroup.position.set(0, 0, -4); // Sit position
+        console.log("Player Seated");
     }
 }
 
 function animate() {
     renderer.setAnimationLoop(() => {
-        updateWatchFace();
-        updateTeleportRay();
+        handleInputs();
         checkAutoSit();
         renderer.render(scene, camera);
     });

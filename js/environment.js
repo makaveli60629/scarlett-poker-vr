@@ -1,68 +1,56 @@
+// Environment & Zone Room Setup - Update 1.5.2
 import * as THREE from 'three';
 
-export const World = {
-    build(scene) {
-        const loader = new THREE.TextureLoader();
-        const path = '../assets/textures/'; // Direct pathing from assets
+export function createEnvironment(scene, playerWalletBalance) {
+    // 1. The Floor (The Green Tabletop/Ground)
+    const floorGeo = new THREE.PlaneGeometry(100, 100);
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a472a }); // Poker Green
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    scene.add(floor);
 
-        // 1. PERMANENT STADIUM LIGHTING (5 High-Altitude Points)
-        const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
-        scene.add(hemi);
+    // 2. The Walls (Fixing the "No Walls" issue)
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x222222, side: THREE.DoubleSide });
+    const wallGeo = new THREE.PlaneGeometry(100, 20);
+    
+    // Back Wall
+    const backWall = new THREE.Mesh(wallGeo, wallMat);
+    backWall.position.z = -50;
+    backWall.position.y = 10;
+    scene.add(backWall);
 
-        const lightPositions = [[18, 18, 18], [-18, 18, 18], [18, 18, -18], [-18, 18, -18], [0, 18, -5]];
-        lightPositions.forEach(pos => {
-            const light = new THREE.PointLight(0xffffff, 500, 100);
-            light.position.set(pos[0], pos[1], pos[2]);
-            scene.add(light);
-        });
+    // 3. The Hologram Wallet (Update 1.2 Feature)
+    // Positioned before the "Plane Tables Zone"
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = 512;
+    canvas.height = 256;
+    ctx.fillStyle = 'rgba(0, 255, 255, 0.5)';
+    ctx.font = 'Bold 40px Arial';
+    ctx.fillText("TABLES ZONE", 50, 50);
+    ctx.font = '30px Arial';
+    ctx.fillText(`WALLET: $${playerWalletBalance}`, 50, 120);
 
-        // 2. THE LOBBY CARPET (lobby_carpet.jpg)
-        const carpetTex = loader.load(`${path}lobby_carpet.jpg`);
-        carpetTex.wrapS = carpetTex.wrapT = THREE.RepeatWrapping;
-        carpetTex.repeat.set(2, 6);
-        const carpet = new THREE.Mesh(
-            new THREE.PlaneGeometry(10, 30),
-            new THREE.MeshStandardMaterial({ map: carpetTex })
-        );
-        carpet.rotation.x = -Math.PI / 2;
-        carpet.position.set(0, 0.02, 5);
-        scene.add(carpet);
+    const texture = new THREE.CanvasTexture(canvas);
+    const holoGeo = new THREE.PlaneGeometry(4, 2);
+    const holoMat = new THREE.MeshBasicMaterial({ 
+        map: texture, 
+        transparent: true, 
+        opacity: 0.8,
+        side: THREE.DoubleSide 
+    });
+    const hologram = new THREE.Mesh(holoGeo, holoMat);
+    hologram.position.set(0, 5, -10); // Floating in front of entrance
+    scene.add(hologram);
 
-        // 3. BRICK WALLS (brickwall.jpg)
-        const wallTex = loader.load(`${path}brickwall.jpg`);
-        wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping;
-        wallTex.repeat.set(4, 2);
-        const walls = new THREE.Mesh(
-            new THREE.BoxGeometry(40, 20, 40),
-            new THREE.MeshStandardMaterial({ map: wallTex, side: THREE.BackSide })
-        );
-        walls.position.y = 10;
-        scene.add(walls);
+    // 4. Lighting (Fixing the "Not Bright Enough" issue)
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+    scene.add(ambientLight);
 
-        // 4. THE POKER STORE TABLE (table_felt_green.jpg)
-        const tableTex = loader.load(`${path}table_felt_green.jpg`);
-        const table = new THREE.Mesh(
-            new THREE.CylinderGeometry(3.5, 3.5, 0.5, 32),
-            new THREE.MeshStandardMaterial({ map: tableTex })
-        );
-        table.position.set(0, 0.8, -5);
-        scene.add(table);
+    const pointLight = new THREE.PointLight(0xffffff, 1.2);
+    pointLight.position.set(0, 15, 0);
+    scene.add(pointLight);
 
-        // 5. STORE OPTIONS LOBBY (Branding)
-        const logoTex = loader.load(`${path}brand_logo.jpg`);
-        const logo = new THREE.Mesh(
-            new THREE.CircleGeometry(0.8, 32),
-            new THREE.MeshBasicMaterial({ map: logoTex, transparent: true })
-        );
-        logo.rotation.x = -Math.PI/2;
-        logo.position.set(0, 0.83, -5);
-        scene.add(logo);
-
-        // 6. WALLET UI (ui_winner_hologram.jpg)
-        const holoTex = loader.load(`${path}ui_winner_hologram.jpg`);
-        const holo = new THREE.Sprite(new THREE.SpriteMaterial({ map: holoTex, color: 0x00ffff }));
-        holo.position.set(-2.5, 2.2, -4.5);
-        holo.scale.set(1.5, 0.7, 1);
-        scene.add(holo);
-    }
-};
+    // 5. Sky/Ceiling (The "Black" fix)
+    scene.background = new THREE.Color(0x050505); // Dark space-like ceiling
+}

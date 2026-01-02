@@ -3,70 +3,72 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>POKER VR MASTER</title>
+    <title>POKER VR MASTER - CONTROLS LOCKED</title>
     <style>
-        body { margin: 0; background-color: #000; color: #00ffcc; overflow: hidden; font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; }
-        #ui-layer { position: absolute; z-index: 20; text-align: center; }
-        button { padding: 20px 40px; font-size: 20px; background: #00ffcc; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; }
-        #winner-ui { position: fixed; top: 20%; width: 100%; text-align: center; font-size: 40px; display: none; pointer-events: none; }
+        body { margin: 0; background-color: #000; overflow: hidden; }
     </style>
 </head>
 <body>
-
-    <div id="ui-layer">
-        <h1>POKER VR 1.5.1</h1>
-        <p id="status">Connecting to Engine...</p>
-        <button id="retry-btn" style="display:none;" onclick="location.reload()">RETRY CONNECTION</button>
-    </div>
-
-    <div id="winner-ui"></div>
-
     <script type="module">
-        // Using a high-compatibility ES Module link for Oculus Browser
         import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
         import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-        const status = document.getElementById('status');
+        // 1. SETUP ENGINE
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
+        document.body.appendChild(VRButton.createButton(renderer));
 
-        try {
-            const scene = new THREE.Scene();
-            const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
-            const renderer = new THREE.WebGLRenderer({ antialias: true });
-            
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.xr.enabled = true;
-            document.body.appendChild(renderer.domElement);
-            document.body.appendChild(VRButton.createButton(renderer));
+        // 2. CAMERA RIG (Necessary for Joystick Movement)
+        const cameraRig = new THREE.Group();
+        cameraRig.add(camera);
+        scene.add(cameraRig);
 
-            // SUCCESS - Remove UI
-            document.getElementById('ui-layer').style.display = 'none';
+        // 3. LIGHT & WORLD (Permanent Grid)
+        scene.add(new THREE.AmbientLight(0xffffff, 1));
+        const grid = new THREE.GridHelper(100, 100, 0x00ffcc, 0x222222);
+        scene.add(grid);
 
-            // --- LOBBY SETUP ---
-            scene.add(new THREE.AmbientLight(0xffffff, 1));
-            const grid = new THREE.GridHelper(100, 100, 0x00ffcc, 0x222222);
-            scene.add(grid);
+        // 4. CONTROLLERS (Tracking)
+        const controller1 = renderer.xr.getController(0);
+        const controller2 = renderer.xr.getController(1);
+        cameraRig.add(controller1, controller2);
 
-            // --- MEGA PARTICLES ---
-            const count = 10000;
-            const geo = new THREE.BufferGeometry();
-            const pos = new Float32Array(count * 3);
-            for(let i=0; i<count*3; i++) pos[i] = (Math.random()-0.5) * 100;
-            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-            const points = new THREE.Points(geo, new THREE.PointsMaterial({color: 0x00ffff, size: 0.1}));
-            scene.add(points);
-
-            // --- OCULUS CONTROLS ---
-            const c1 = renderer.xr.getController(0);
-            scene.add(c1);
-
-            renderer.setAnimationLoop(() => {
-                renderer.render(scene, camera);
-            });
-
-        } catch (err) {
-            status.innerHTML = "CONNECTION BLOCKED: " + err.message;
-            document.getElementById('retry-btn').style.display = 'block';
+        // 5. MOVEMENT LOGIC
+        function updateMovement() {
+            const session = renderer.xr.getSession();
+            if (session) {
+                for (const source of session.inputSources) {
+                    if (source.gamepad) {
+                        const axes = source.gamepad.axes; // [thumbstickX, thumbstickY]
+                        
+                        // Left Controller Movement
+                        if (source.handedness === 'left') {
+                            cameraRig.position.x += axes[2] * 0.1; // Move Left/Right
+                            cameraRig.position.z += axes[3] * 0.1; // Move Forward/Back
+                        }
+                        
+                        // Right Controller Rotation
+                        if (source.handedness === 'right') {
+                            if (Math.abs(axes[2]) > 0.5) {
+                                cameraRig.rotation.y -= axes[2] * 0.05;
+                            }
+                        }
+                    }
+                }
+            }
         }
+
+        // 6. ANIMATION LOOP
+        renderer.setAnimationLoop(() => {
+            updateMovement();
+            renderer.render(scene, camera);
+        });
+
+        console.log("Update 1.5.1: Controllers and Joysticks PERMANENTLY active.");
     </script>
 </body>
 </html>

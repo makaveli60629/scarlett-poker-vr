@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>POKER VR - 2.1.7 TOTAL COMPLIANCE</title>
+    <title>POKER VR - 2.1.11 ASSET LOCK</title>
     <style> body { margin: 0; background-color: #000; overflow: hidden; } </style>
 </head>
 <body>
@@ -11,14 +11,10 @@
         import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
         import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-        // 1. PERSISTENT DATA
-        let stats = JSON.parse(localStorage.getItem('poker_master_save')) || { 
-            chips: 5000, rank: "ROOKIE", wallet: 5000 
-        };
+        let stats = JSON.parse(localStorage.getItem('poker_master_save')) || { chips: 5000, rank: "ROOKIE" };
 
-        // 2. SCENE SETUP
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x020205);
+        scene.background = new THREE.Color(0x01020a);
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -27,131 +23,93 @@
         document.body.appendChild(VRButton.createButton(renderer));
 
         const cameraRig = new THREE.Group();
-        cameraRig.position.set(0, 0, 15); 
+        cameraRig.position.set(0, 0, 20); 
         cameraRig.add(camera);
         scene.add(cameraRig);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.8), new THREE.DirectionalLight(0xffffff, 2.5));
 
-        // POWERFUL LIGHTING
-        scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-        const sun = new THREE.DirectionalLight(0xffffff, 3);
-        sun.position.set(0, 20, 0);
-        scene.add(sun);
-
-        // 3. ARCHITECTURE (70M HALL)
-        const texLoader = new THREE.TextureLoader();
+        // 1. ASSET MAPPING (From your Github List)
         const path = 'assets/textures/';
-        const carpet = texLoader.load(path + 'lobby_carpet.jpg');
-        const brick = texLoader.load(path + 'brickwall.jpg');
-        [carpet, brick].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; });
-        carpet.repeat.set(20, 20); brick.repeat.set(10, 2);
-
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(70, 70), new THREE.MeshStandardMaterial({map: carpet}));
-        floor.rotation.x = -Math.PI/2; scene.add(floor);
-
-        // Solid Walls + Trim
-        for(let i=0; i<4; i++) {
-            const wallG = new THREE.Group();
-            const wall = new THREE.Mesh(new THREE.BoxGeometry(70, 20, 1), new THREE.MeshStandardMaterial({map: brick}));
-            const trim = new THREE.Mesh(new THREE.BoxGeometry(70, 0.6, 1.2), new THREE.MeshStandardMaterial({color: 0x00ffff, emissive: 0x00ffff}));
-            trim.position.y = -9.7;
-            wallG.add(wall, trim);
-            const angle = (Math.PI/2) * i;
-            wallG.position.set(Math.sin(angle)*35, 10, Math.cos(angle)*35);
-            wallG.rotation.y = angle;
-            scene.add(wallG);
-        }
-
-        // 4. THE POKER HUB (Table at 0.8m Height)
-        const table = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.8, 32), new THREE.MeshStandardMaterial({color: 0x004400}));
-        table.position.y = 0.4; // Top of table is now at 0.8m (waist height)
-        scene.add(table);
-
-        // Leaderboard Pillar
-        const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.2, 5, 0.2), new THREE.MeshStandardMaterial({color: 0x111111}));
-        pillar.position.set(0, 2.5, 0); scene.add(pillar);
-
-        // HOVERING MONEY / LEADERBOARD
-        const hudCanvas = document.createElement('canvas'); hudCanvas.width = 512; hudCanvas.height = 256;
-        const hCtx = hudCanvas.getContext('2d');
-        const hudTex = new THREE.CanvasTexture(hudCanvas);
-        const hudMesh = new THREE.Mesh(new THREE.PlaneGeometry(4, 2), new THREE.MeshBasicMaterial({map: hudTex, transparent: true, side: THREE.DoubleSide}));
-        hudMesh.position.set(0, 5, 0); // Floats above table
-        scene.add(hudMesh);
-
-        function updateHUD() {
-            hCtx.clearRect(0,0,512,256);
-            hCtx.fillStyle = "rgba(0, 40, 40, 0.9)"; hCtx.fillRect(0,0,512,256);
-            hCtx.strokeStyle = "#00ffff"; hCtx.lineWidth = 10; hCtx.strokeRect(5,5,502,246);
-            hCtx.fillStyle = "#fff"; hCtx.font = "bold 50px Arial";
-            hCtx.fillText(`BANK: $${stats.chips}`, 50, 100);
-            hCtx.font = "30px Arial"; hCtx.fillText(`LEVEL: ${stats.rank}`, 50, 180);
-            hudTex.needsUpdate = true;
-        }
-
-        // 5. GATES
-        const storeGate = new THREE.Mesh(new THREE.TorusGeometry(2, 0.1, 16, 100), new THREE.MeshBasicMaterial({color: 0x00ffff}));
-        storeGate.rotation.x = Math.PI/2; storeGate.position.set(-20, 0.1, -20);
-        scene.add(storeGate);
-
-        const playGate = new THREE.Mesh(new THREE.TorusGeometry(2, 0.1, 16, 100), new THREE.MeshBasicMaterial({color: 0xff00ff}));
-        playGate.rotation.x = Math.PI/2; playGate.position.set(20, 0.1, -20);
-        scene.add(playGate);
-
-        // 6. CONTROLS (OCULUS COMPLIANT)
-        const controllerL = renderer.xr.getController(1); // Left Pilot
-        const controllerR = renderer.xr.getController(0); // Right Assist
+        const texLoader = new THREE.TextureLoader();
         
+        const lobbyCarpet = texLoader.load(path + 'lobby_carpet.jpg');
+        const mainBrick = texLoader.load(path + 'brickwall.jpg');
+        const runeWall = texLoader.load(path + 'wall_stone_runes.jpg'); // For Scorpion Room
+        const dailyTex = texLoader.load(path + 'dailyclaim.jpg'); // Fixed filename
+        const feltTex = texLoader.load(path + 'table_felt_green.jpg');
+        const logoTex = texLoader.load(path + 'brand_logo.jpg');
+
+        [lobbyCarpet, mainBrick, runeWall].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; });
+        lobbyCarpet.repeat.set(15, 15); mainBrick.repeat.set(8, 2); runeWall.repeat.set(6, 2);
+
+        // 2. ROOM GENERATOR
+        function createRoom(name, x, z, size, wallTexture) {
+            const group = new THREE.Group();
+            const f = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({map: lobbyCarpet}));
+            f.rotation.x = -Math.PI/2; group.add(f);
+            
+            const trimMat = new THREE.MeshStandardMaterial({color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.5});
+            for(let i=0; i<4; i++){
+                const wG = new THREE.Group();
+                const w = new THREE.Mesh(new THREE.BoxGeometry(size, 20, 1), new THREE.MeshStandardMaterial({map: wallTexture}));
+                const t1 = new THREE.Mesh(new THREE.BoxGeometry(size, 0.5, 1.1), trimMat); t1.position.y = -9.7;
+                const t2 = new THREE.Mesh(new THREE.BoxGeometry(size, 0.5, 1.1), trimMat); t2.position.y = 9.7;
+                wG.add(w, t1, t2);
+                const a = (Math.PI/2)*i; wG.position.set(Math.sin(a)*(size/2), 10, Math.cos(a)*(size/2)); wG.rotation.y = a;
+                group.add(wG);
+                const p = new THREE.Mesh(new THREE.BoxGeometry(2, 20, 2), new THREE.MeshStandardMaterial({color: 0x111111}));
+                p.position.set((i%2==0?1:-1)*(size/2), 10, (i<2?1:-1)*(size/2)); group.add(p);
+            }
+            group.position.set(x, 0, z); scene.add(group); return group;
+        }
+
+        createRoom("Lobby", 0, 0, 70, mainBrick);
+        createRoom("Scorpion", -80, 0, 50, runeWall); // Uses Stone Runes
+        createRoom("Event", 80, 0, 50, mainBrick);
+        createRoom("Store", 0, -80, 50, mainBrick);
+
+        // 3. TABLES & DAILY CLAIM
+        const mainTable = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.8, 32), new THREE.MeshStandardMaterial({map: feltTex}));
+        mainTable.position.y = 0.4; scene.add(mainTable);
+
+        // Daily Table with floating "dailyclaim.jpg"
+        const dailyTable = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 0.8, 32), new THREE.MeshStandardMaterial({color: 0x222222}));
+        dailyTable.position.set(-15, 0.4, 15); scene.add(dailyTable);
+
+        const dailyLabel = new THREE.Mesh(new THREE.PlaneGeometry(3, 1.5), new THREE.MeshBasicMaterial({map: dailyTex, transparent: true}));
+        dailyLabel.position.set(-15, 3, 15); scene.add(dailyLabel);
+
+        // 4. CONTROLS (LEFT-HAND PILOT)
+        const controllerL = renderer.xr.getController(1);
+        const controllerR = renderer.xr.getController(0);
         const laser = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]), new THREE.LineBasicMaterial({color: 0x00ffff}));
-        laser.scale.z = 10; controllerL.add(laser);
-        
-        // Watch on Left Wrist
-        const watchMesh = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.05, 0.15), new THREE.MeshStandardMaterial({color: 0x111111}));
-        watchMesh.position.set(0, 0.05, 0); controllerL.add(watchMesh);
-
+        laser.scale.z = 100; controllerL.add(laser);
         cameraRig.add(controllerL, controllerR);
 
         const marker = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.5, 32), new THREE.MeshBasicMaterial({color: 0x00ffff}));
         marker.rotation.x = -Math.PI/2; scene.add(marker);
-
         const raycaster = new THREE.Raycaster();
-        let turnCooldown = false;
 
         renderer.setAnimationLoop(() => {
-            updateHUD();
             const session = renderer.xr.getSession();
             if (session) {
-                // Zone Logic: Play Game
-                if (cameraRig.position.distanceTo(playGate.position) < 2) {
-                    cameraRig.position.set(0, 0, 6); // Snap to table
-                }
-
                 for (const source of session.inputSources) {
                     const b = source.gamepad.buttons;
-                    const a = source.gamepad.axes;
-
                     if (source.handedness === 'left') {
                         const m = new THREE.Matrix4().extractRotation(controllerL.matrixWorld);
                         raycaster.ray.origin.setFromMatrixPosition(controllerL.matrixWorld);
                         raycaster.ray.direction.set(0, 0, -1).applyMatrix4(m);
-                        const hits = raycaster.intersectObject(floor);
-                        if (hits.length > 0) {
-                            marker.position.copy(hits[0].point); marker.visible = true;
-                            if (b[0].pressed) cameraRig.position.copy(hits[0].point);
+                        const hits = raycaster.intersectObjects(scene.children, true);
+                        const floorHit = hits.find(h => h.object.geometry.type === "PlaneGeometry");
+                        if (floorHit) {
+                            marker.position.copy(floorHit.point); marker.visible = true;
+                            if (b[0].pressed) cameraRig.position.copy(floorHit.point);
                         }
                     }
-
-                    if (source.handedness === 'right') {
-                        // Snap Turn 45
-                        const sX = a[2] || a[3] || 0;
-                        if (!turnCooldown && Math.abs(sX) > 0.7) {
-                            cameraRig.rotation.y -= Math.sign(sX) * (Math.PI/4);
-                            turnCooldown = true; setTimeout(() => turnCooldown = false, 300);
-                        }
-                        // Return to Lobby
-                        if (b[4].pressed || b[5].pressed) cameraRig.position.set(0, 0, 15);
-                    }
+                    if (source.handedness === 'right' && (b[4].pressed || b[5].pressed)) cameraRig.position.set(0, 0, 20);
                 }
             }
+            dailyLabel.rotation.y += 0.01;
             renderer.render(scene, camera);
         });
     </script>

@@ -1,39 +1,36 @@
-import * as THREE from 'three';
+/** * world.js - The Physical Laws & Environment
+ */
+document.addEventListener('DOMContentLoaded', () => {
+    const world = document.querySelector('#game-world');
 
-export function buildWorld(scene) {
-    const floors = [];
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x8b2222, side: THREE.BackSide });
-
-    function createRoom(x, z, size, lightCol, name) {
-        const room = new THREE.Group();
-        const box = new THREE.Mesh(new THREE.BoxGeometry(size, 4, size), wallMat);
-        box.position.y = 2;
+    // BUILD ROOMS & WALLS
+    world.innerHTML = `
+        <a-box position="0 2.5 -6" width="12" height="5" depth="0.2" material="src: #brick-wall; repeat: 4 2">
+            <a-plane src="#brand-logo" position="0 0 0.12" width="4" height="2" transparent="true"></a-plane>
+        </a-box>
+        <a-box position="0 2.5 15" width="12" height="5" depth="0.2" material="src: #brick-wall; repeat: 4 2"></a-box>
         
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({color: 0x111111}));
-        floor.rotation.x = -Math.PI/2;
-        floor.name = name;
-        floors.push(floor);
+        <a-plane rotation="-90 0 0" width="30" height="30" color="#222"></a-plane>
 
-        // Decorative Pillars
-        const pillarGeo = new THREE.CylinderGeometry(0.15, 0.15, 4);
-        const pillarMat = new THREE.MeshStandardMaterial({color: 0xffd700, metalness: 0.8});
-        [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(p => {
-            const pillar = new THREE.Mesh(pillarGeo, pillarMat);
-            pillar.position.set(p[0]*(size/2-0.2), 2, p[1]*(size/2-0.2));
-            room.add(pillar);
-        });
+        <a-box position="-5.9 2.5 -5.9" width="0.6" height="5" depth="0.6" color="#111"></a-box>
+        <a-box position="5.9 2.5 -5.9" width="0.6" height="5" depth="0.6" color="#111"></a-box>
+        <a-box mixin="neon-blue" position="0 0.1 -5.9" width="12" height="0.05" depth="0.05"></a-box>
+        <a-box mixin="neon-blue" position="0 4.9 -5.9" width="12" height="0.05" depth="0.05"></a-box>
 
-        const light = new THREE.PointLight(lightCol, 2, 20);
-        light.position.set(0, 3.8, 0);
-        
-        room.add(box, floor, light);
-        room.position.set(x, 0, z);
-        scene.add(room);
-    }
+        <a-entity position="0 0.8 -2">
+            <a-cylinder radius="2" height="0.1" material="src: #table-felt"></a-cylinder>
+            <a-entity mixin="checkpoint-disk" position="0 -0.79 1.5" id="poker-sit-trigger"></a-entity>
+            <a-plane id="scoreboard" position="0 2.5 0" width="3" height="1.2" color="black" opacity="0.8">
+                <a-text value="POT: $0" align="center" color="#00FFFF"></a-text>
+            </a-plane>
+        </a-entity>
 
-    createRoom(0, 0, 20, 0x00f2ff, "Lobby");
-    createRoom(25, 0, 15, 0x00ff00, "Scorpion Room");
-    createRoom(-25, 0, 15, 0xff00ff, "The Store");
-
-    return { floors };
-}
+        <a-entity id="lobby-room" position="0 0 12">
+            <a-text value="LOBBY" position="0 3 -2" align="center" scale="2 2 2"></a-text>
+            <a-box id="daily-grab-box" position="-2 0.5 -1" width="1" height="1" color="#FFD700">
+                <a-text value="DAILY GRAB" align="center" position="0 0.6 0" scale="0.5 0.5 0.5"></a-text>
+            </a-box>
+            <a-entity mixin="checkpoint-disk" position="0 0.01 0" id="lobby-trigger"></a-entity>
+        </a-entity>
+    `;
+});

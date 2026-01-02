@@ -2,114 +2,146 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Scorpion Poker VR — 2.0.1 PERMANENT HANDS</title>
+  <title>Scorpion Poker VR — Master 3.0.0</title>
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/aframe-blink-controls/dist/aframe-blink-controls.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-physics-system@v4.2.2/dist/aframe-physics-system.min.js"></script>
 
   <script>
-    AFRAME.registerComponent('scorpion-logic', {
+    // CORE SYSTEM LOGIC
+    AFRAME.registerComponent('scorpion-core', {
+      init: function() {
+        this.cash = 5000;
+        this.rank = "SCORPION NOVICE";
+      },
       tick: function () {
-        // Clock Update
+        // 1. Real-time Clock
         const timeDisplay = document.querySelector('#timeDisplay');
         const now = new Date();
         const timeStr = now.getHours().toString().padStart(2,'0') + ":" + now.getMinutes().toString().padStart(2,'0');
         if(timeDisplay) timeDisplay.setAttribute('text', 'value', 'TIME: ' + timeStr);
         
-        // Store Portal Logic
-        const rigPos = document.querySelector('#rig').object3D.position;
-        if (rigPos.x > 11 && Math.abs(rigPos.z) < 2) {
-           document.querySelector('#rig').setAttribute('position', '25 0 0');
+        // 2. Portal Logic (Move between Lobby and Store)
+        const rig = document.querySelector('#rig');
+        const pos = rig.object3D.position;
+        if (pos.x > 11.8 && pos.x < 15 && Math.abs(pos.z) < 2) {
+           rig.setAttribute('position', '35 0 0'); // Jump to Store
+        } else if (pos.x < 28 && pos.x > 20) {
+           rig.setAttribute('position', '10 0 0'); // Jump back to Lobby
         }
       }
     });
 
-    // FORCE HANDS ONLY COMPONENT
-    AFRAME.registerComponent('force-hands', {
+    // PERMANENT HANDS & SKIN COMPLEXION
+    AFRAME.registerComponent('permanent-hands', {
       init: function () {
-        const el = this.el;
-        // Listen for either hand tracking or controller connection
-        el.addEventListener('model-loaded', () => {
-          this.applySkin();
+        this.el.addEventListener('model-loaded', () => {
+          const mesh = this.el.getObject3D('mesh');
+          if (mesh) {
+            mesh.traverse(node => {
+              if (node.isMesh) {
+                node.material.color.set('#d2b48c'); // Complexion
+                node.material.roughness = 0.8;
+              }
+            });
+          }
         });
-      },
-      applySkin: function() {
-        const mesh = this.el.getObject3D('mesh');
-        if (mesh) {
-          mesh.traverse(node => {
-            if (node.isMesh) {
-              node.material.color.set('#d2b48c');
-              node.visible = true; // Ensure hand is always visible
-            }
-          });
-        }
-      },
-      tick: function() {
-        // Double check visibility to ensure controllers don't override
-        const controllerModel = this.el.getObject3D('controller-bundle');
-        if (controllerModel) controllerModel.visible = false;
+        // Hidden controller models
+        this.el.addEventListener('controllerconnected', () => {
+          this.el.setAttribute('visible', true); 
+        });
       }
     });
 
-    // Menu Toggle Logic
+    // LEFT HAND MENU LOGIC
     window.addEventListener('pinchstart', (evt) => {
-        if(evt.detail.hand === 'left') {
-            const m = document.querySelector('#menuPanel');
-            m.setAttribute('visible', !m.getAttribute('visible'));
-        }
+      if(evt.detail.hand === 'left') {
+        const m = document.querySelector('#menuPanel');
+        m.setAttribute('visible', !m.getAttribute('visible'));
+      }
     });
   </script>
 </head>
 
 <body>
-<a-scene scorpion-logic physics="gravity: 0">
+<a-scene scorpion-core physics="gravity: 0; debug: false">
   
-  <a-sky color="#05000a"></a-sky>
-  <a-light type="ambient" intensity="1"></a-light>
+  <a-sky color="#3a006f"></a-sky>
+  <a-light type="ambient" intensity="1.2"></a-light>
+  <a-light type="point" position="0 5 0" intensity="0.8"></a-light>
 
-  <a-plane id="floor" rotation="-90 0 0" width="100" height="100" color="#111" static-body></a-plane>
+  <a-entity id="PokerLobby">
+    <a-plane rotation="-90 0 0" width="30" height="30" color="#111" static-body 
+             material="src: https://cdn.aframe.io/a-blast/assets/img/grid.png; repeat: 15 15"></a-plane>
+    
+    <a-entity id="LobbyWalls">
+      <a-box position="0 2.5 -12.5" width="25" height="5" depth="0.5" color="#8B0000" static-body>
+          <a-box position="0 -2.4 0.3" width="25.1" height="0.2" depth="0.1" color="#000"></a-box> <a-box position="0 2.4 0.3" width="25.1" height="0.2" depth="0.1" color="#000"></a-box> </a-box>
+      <a-box position="0 2.5 12.5"  width="25" height="5" depth="0.5" color="#8B0000" static-body>
+          <a-box position="0 -2.4 -0.3" width="25.1" height="0.2" depth="0.1" color="#000"></a-box>
+      </a-box>
+      <a-box position="-12.5 2.5 0" width="0.5" height="5" depth="25" color="#8B0000" static-body></a-box>
+      <a-box position="12.5 2.5 0"  width="0.5" height="5" depth="25" color="#8B0000" static-body></a-box>
 
-  <a-box position="0 2.5 -12" width="24" height="5" depth="0.5" color="#8B0000" static-body>
-    <a-box position="0 -2.4 0.3" width="24.1" height="0.2" depth="0.1" color="#000"></a-box>
-  </a-box>
-  <a-box position="0 2.5 12" width="24" height="5" depth="0.5" color="#8B0000" static-body></a-box>
-  <a-box position="-12 2.5 0" width="0.5" height="5" depth="24" color="#8B0000" static-body></a-box>
-  <a-box position="12 2.5 0" width="0.5" height="5" depth="24" color="#8B0000" static-body></a-box>
+      <a-box position="-12.2 2.5 -12.2" width="0.7" height="5" depth="0.7" color="#000"></a-box>
+      <a-box position="12.2 2.5 -12.2" width="0.7" height="5" depth="0.7" color="#000"></a-box>
+      <a-box position="-12.2 2.5 12.2" width="0.7" height="5" depth="0.7" color="#000"></a-box>
+      <a-box position="12.2 2.5 12.2" width="0.7" height="5" depth="0.7" color="#000"></a-box>
+    </a-entity>
 
-  <a-entity position="0 4 -11.4">
-    <a-plane width="5" height="2.5" color="#000"></a-plane>
-    <a-text value="TOP SCORPIONS" align="center" position="0 1 0.1" color="#FFD700" width="8"></a-text>
-    <a-text value="QUEEN AURELIUS - $1.2M\nSCORPION ACE - $850K" align="center" position="0 -0.2 0.1" color="#00ffff" width="5"></a-text>
+    <a-cylinder position="0 0.8 -4" radius="1.8" height="0.4" color="#004422" static-body></a-cylinder>
+    
+    <a-entity position="12.3 1.5 0" rotation="0 -90 0">
+      <a-box width="2" height="3" depth="0.1" color="#000"></a-box>
+      <a-text value="STORE" align="center" position="0 2 0.2" color="#ff00ff" width="8"></a-text>
+    </a-entity>
   </a-entity>
 
-  <a-cylinder position="0 0.8 -3" radius="1.5" height="0.4" color="#004422" static-body></a-cylinder>
+  <a-entity id="StoreRoom" position="40 0 0">
+    <a-plane rotation="-90 0 0" width="15" height="15" color="#050505" static-body></a-plane>
+    <a-box position="0 2.5 -7.5" width="15" height="5" depth="0.5" color="#111" static-body></a-box>
+    <a-text value="SCORPION STORE" align="center" position="0 3.5 -7" color="#ff00ff" width="10"></a-text>
+    
+    <a-entity position="-7.3 1.5 0" rotation="0 90 0">
+      <a-box width="2" height="3" depth="0.1" color="#000"></a-box>
+      <a-text value="EXIT" align="center" position="0 2 0.2" color="#00ffff" width="6"></a-text>
+    </a-entity>
+  </a-entity>
 
-  <a-entity id="rig" position="0 0 7" kinematic-body>
+  <a-entity id="rig" position="0 0 10" kinematic-body>
     <a-entity id="camera" camera look-controls position="0 1.6 0">
-      <a-entity position="0 0 -1">
-         <a-text id="cashDisplay" value="CASH: $5,000" color="#00ff00" scale="0.15 0.15 0.15" position="-0.6 0.4 0"></a-text>
-         <a-text id="timeDisplay" value="TIME: 00:00" color="#00ffff" scale="0.15 0.15 0.15" position="0.4 0.4 0"></a-text>
+      <a-entity position="0 0 -1.2">
+         <a-text id="cashDisplay" value="CASH: $5,000" color="#00ff00" scale="0.2 0.2 0.2" position="-0.8 0.5 0"></a-text>
+         <a-text id="rankDisplay" value="RANK: NOVICE" color="#ffffff" scale="0.15 0.15 0.15" position="-0.8 0.43 0"></a-text>
+         <a-text id="timeDisplay" value="TIME: 00:00" color="#00ffff" scale="0.2 0.2 0.2" position="0.5 0.5 0"></a-text>
       </a-entity>
     </a-entity>
 
     <a-entity id="leftHand" 
               hand-tracking-controls="hand: left" 
-              hand-controls="hand: left; handModelStyle: highPoly; color: #d2b48c"
-              force-hands>
+              hand-controls="hand: left" 
+              permanent-hands>
       <a-entity id="menuPanel" visible="false" position="0 0.2 -0.2" rotation="-40 0 0">
-        <a-plane width="0.4" height="0.5" color="#001a33" opacity="0.9">
-          <a-text value="SCORPION MENU" align="center" position="0 0.2 0" width="1"></a-text>
-          <a-text value="CLAIM $500" align="center" position="0 0.05 0" width="0.8" color="#FFD700"></a-text>
-          <a-text value="STATS" align="center" position="0 -0.1 0" width="0.8"></a-text>
+        <a-plane width="0.4" height="0.6" color="#001a33" opacity="0.95">
+          <a-text value="SCORPION MENU" align="center" position="0 0.25 0" width="1"></a-text>
+          <a-text value="CLAIM $500" align="center" position="0 0.1 0" width="0.8" color="#FFD700"></a-text>
+          <a-text value="CLAIM $5000" align="center" position="0 -0.05 0" width="0.8" color="#FFD700"></a-text>
         </a-plane>
       </a-entity>
+      <a-box width="0.06" height="0.02" depth="0.06" position="0 0.02 0.05" color="#111"></a-box>
     </a-entity>
 
     <a-entity id="rightHand" 
               hand-tracking-controls="hand: right" 
-              hand-controls="hand: right; handModelStyle: highPoly; color: #d2b48c"
-              force-hands
-              blink-controls="cameraRig: #rig; teleportOrigin: #camera; collisionEntities: #floor; type: line; lineColor: #FFD700; cursorColor: #FFD700">
+              hand-controls="hand: right"
+              permanent-hands
+              blink-controls="cameraRig: #rig; 
+                              teleportOrigin: #camera; 
+                              collisionEntities: [static-body]; 
+                              type: line; 
+                              button: pinch; 
+                              lineColor: #FFD700; 
+                              cursorColor: #FFD700">
     </a-entity>
   </a-entity>
 

@@ -3,16 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>High-Stakes VR - Night Sky v1.6</title>
+    <title>VR Poker - Neon Moon v1.6.5</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         body { margin: 0; overflow: hidden; background: #000; }
         #overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 10; }
-        button { padding: 20px; font-size: 20px; background: #076324; color: white; border: none; border-radius: 8px; cursor: pointer; }
+        button { padding: 20px 40px; font-size: 20px; background: #0080ff; color: white; border: none; border-radius: 8px; cursor: pointer; font-family: sans-serif; }
     </style>
 </head>
 <body>
-    <div id="overlay"><button id="btn">ENTER VR NIGHT</button></div>
+    <div id="overlay"><button id="start-vr">ENTER NEON ROOFTOP</button></div>
 <script>
     let scene, camera, renderer, userGroup;
     let handL, handR, menuGroup;
@@ -20,20 +20,20 @@
 
     function init() {
         scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x020205); // Deep night
+        scene.background = new THREE.Color(0x010103); // Near black for sky contrast
         
         camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
         userGroup = new THREE.Group();
         userGroup.add(camera);
         scene.add(userGroup);
-        userGroup.position.set(0, 0, 5); // Safe spawn
+        userGroup.position.set(0, 0, 5); // Start in Lobby
 
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.xr.enabled = true;
         document.body.appendChild(renderer.domElement);
 
-        document.getElementById('btn').onclick = () => {
+        document.getElementById('start-vr').onclick = () => {
             navigator.xr.requestSession('immersive-vr', {
                 optionalFeatures: ['local-floor', 'hand-tracking']
             }).then(s => {
@@ -49,55 +49,80 @@
     }
 
     function createEnvironment() {
-        // Floor
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(50,50), new THREE.MeshStandardMaterial({color: 0x111111}));
+        // --- FLOOR ---
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(60,60), new THREE.MeshStandardMaterial({color: 0x0a0a0a}));
         floor.rotation.x = -Math.PI/2;
         scene.add(floor);
 
-        // THE MOON (Locking it in)
-        const moon = new THREE.Mesh(
-            new THREE.SphereGeometry(2, 32, 32),
-            new THREE.MeshBasicMaterial({ color: 0xffffaa })
-        );
-        moon.position.set(-10, 25, -20);
+        // --- THE MOON (Locked) ---
+        const moonGeo = new THREE.SphereGeometry(2, 32, 32);
+        const moonMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        const moon = new THREE.Mesh(moonGeo, moonMat);
+        moon.position.set(-15, 30, -25);
         scene.add(moon);
         
-        // Moon Glow (Light)
-        const moonLight = new THREE.DirectionalLight(0xaaaaff, 0.5);
+        const moonLight = new THREE.DirectionalLight(0x5555ff, 0.4);
         moonLight.position.copy(moon.position);
         scene.add(moonLight);
 
-        // Poker Table
+        // --- NEON WALL TRIMS (Lighting Audit) ---
+        const wallHeight = 4;
+        const roomSize = 25;
+        const neonColor = 0x00ffff; // Cyan Neon
+
+        function createNeonStrip(x, y, z, w, h, d) {
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mat = new THREE.MeshBasicMaterial({ color: neonColor });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(x, y, z);
+            scene.add(mesh);
+            
+            // Add actual light to the strip
+            const pLight = new THREE.PointLight(neonColor, 0.5, 10);
+            pLight.position.set(x, y, z);
+            scene.add(pLight);
+        }
+
+        // Horizontal Neon Strips (Base and Top of Walls)
+        for (let yPos of [0.1, wallHeight]) {
+            createNeonStrip(0, yPos, -roomSize, roomSize*2, 0.05, 0.05); // Back
+            createNeonStrip(0, yPos, roomSize, roomSize*2, 0.05, 0.05);  // Front
+            createNeonStrip(-roomSize, yPos, 0, 0.05, 0.05, roomSize*2); // Left
+            createNeonStrip(roomSize, yPos, 0, 0.05, 0.05, roomSize*2);  // Right
+        }
+
+        // --- CENTRAL TABLE LIGHT ---
+        const tableLight = new THREE.SpotLight(0xffffff, 1.5);
+        tableLight.position.set(0, 8, -5);
+        tableLight.target.position.set(0, 0, -5);
+        scene.add(tableLight);
+        scene.add(tableLight.target);
+
+        // --- POKER TABLE ---
         const table = new THREE.Mesh(
-            new THREE.CylinderGeometry(2.5, 2.5, 0.2, 32),
-            new THREE.MeshStandardMaterial({ color: 0x076324 })
+            new THREE.CylinderGeometry(2.5, 2.5, 0.2, 64),
+            new THREE.MeshStandardMaterial({ color: 0x076324, roughness: 0.8 })
         );
         table.position.set(0, 1, -5);
         scene.add(table);
 
-        // 6 Seats
+        // --- 6 SEATS (Aligned) ---
         for(let i=0; i<6; i++) {
             const a = (i/6) * Math.PI * 2;
-            const s = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({color: 0x222222}));
-            s.position.set(Math.cos(a)*3.5, 0.25, Math.sin(a)*3.5 - 5);
+            const s = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), new THREE.MeshStandardMaterial({color: 0x222222}));
+            s.position.set(Math.cos(a)*3.5, 0.3, Math.sin(a)*3.5 - 5);
+            s.lookAt(0, 0.3, -5);
             scene.add(s);
         }
-
-        // Walls (Wait, you said no ceiling - keeping walls low for "rooftop" feel)
-        const wall = new THREE.Mesh(new THREE.BoxGeometry(50, 2, 0.5), new THREE.MeshStandardMaterial({color: 0x1a1a1a}));
-        wall.position.set(0, 1, -25);
-        scene.add(wall);
     }
 
     function setupHands() {
-        // Visual Fallback for hands
-        const handGeo = new THREE.SphereGeometry(0.05, 8, 8);
-        const handMat = new THREE.MeshBasicMaterial({color: 0xffffff});
+        const handGeo = new THREE.SphereGeometry(0.04, 16, 16);
+        const handMat = new THREE.MeshBasicMaterial({color: 0x00ff00}); // Green hand indicators
 
         handL = renderer.xr.getHand(0);
         handR = renderer.xr.getHand(1);
 
-        // Add visible spheres so you can ALWAYS see your hands
         handL.add(new THREE.Mesh(handGeo, handMat));
         handR.add(new THREE.Mesh(handGeo, handMat));
 
@@ -111,7 +136,7 @@
 
     function createVRMenu() {
         menuGroup = new THREE.Group();
-        const nav = ['Lobby', 'Poker', 'Store'];
+        const nav = ['Lobby', 'Poker Room', 'Store'];
         nav.forEach((name, i) => {
             const btn = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 0.05), new THREE.MeshBasicMaterial({color: 0x0000ff}));
             btn.position.y = 0.2 - (i * 0.15);
@@ -124,25 +149,25 @@
 
     function updateMenuPosition() {
         if(isMenuOpen) {
-            // Anchor menu to Left Hand position
             const pos = new THREE.Vector3();
             handL.getWorldPosition(pos);
-            menuGroup.position.lerp(new THREE.Vector3(pos.x, pos.y + 0.2, pos.z - 0.2), 0.1);
+            // Positions menu 20cm above and 20cm in front of hand
+            menuGroup.position.lerp(new THREE.Vector3(pos.x, pos.y + 0.2, pos.z - 0.2), 0.2);
             menuGroup.lookAt(camera.position);
         }
     }
 
     function checkInteraction() {
         const tip = handR.joints ? handR.joints['index-finger-tip'] : null;
-        if (!tip || !isMenuOpen) return;
+        if (!tip || !isMenuOpen || !tip.visible) return;
 
         menuGroup.children.forEach(btn => {
             const bPos = new THREE.Vector3();
             btn.getWorldPosition(bPos);
-            if(tip.position.distanceTo(bPos) < 0.05) {
-                // Teleport Logic
-                if(btn.userData.name === 'Poker') userGroup.position.set(0, 0, -2);
+            if(tip.position.distanceTo(bPos) < 0.06) {
+                if(btn.userData.name === 'Poker Room') userGroup.position.set(0, 0, -2);
                 if(btn.userData.name === 'Lobby') userGroup.position.set(0, 0, 5);
+                if(btn.userData.name === 'Store') userGroup.position.set(10, 0, 0);
                 isMenuOpen = false;
                 menuGroup.visible = false;
             }

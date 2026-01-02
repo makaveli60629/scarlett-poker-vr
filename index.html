@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Poker VR 1.8.5 - Hand Tracking & Teleport</title>
+    <title>Poker VR 1.8.6 - Full Room & Hand Jump</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; }
         #VRButton { 
             position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-            padding: 15px 30px !important; background: #111 !important; color: #fff !important;
-            border: 2px solid #00ff00 !important; z-index: 1000; cursor: pointer;
+            padding: 15px 30px !important; background: #222 !important; color: #00ff00 !important;
+            border: 2px solid #00ff00 !important; z-index: 1000; border-radius: 8px;
         }
     </style>
 </head>
@@ -29,8 +29,9 @@
         import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
         import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
-        let scene, camera, renderer, baseGroup;
+        let scene, camera, renderer, playerGroup;
         let controller1, controller2, hand1, hand2;
+        let teleportMarker, teleportLine;
         let raycaster = new THREE.Raycaster();
         const tempMatrix = new THREE.Matrix4();
 
@@ -38,114 +39,142 @@
 
         function init() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87CEEB); // Sky Blue
+            
+            // 1. NICER SKY (Gradient-style atmosphere)
+            scene.background = new THREE.Color(0x1a0a2e); // Deep Midnight Purple
+            scene.fog = new THREE.Fog(0x1a0a2e, 2, 20);
+
+            // 2. PLAYER GROUP (SPAWN IN FRONT OF TABLE)
+            playerGroup = new THREE.Group();
+            playerGroup.position.set(0, 0, 4); // Move player 4 meters back from center
+            scene.add(playerGroup);
 
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            
-            // baseGroup allows us to move the player (teleport)
-            baseGroup = new THREE.Group();
-            baseGroup.add(camera);
-            scene.add(baseGroup);
+            playerGroup.add(camera);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
-
-            // Force Hand Tracking support in the session
             document.body.appendChild(VRButton.createButton(renderer, { 'optionalFeatures': ['hand-tracking'] }));
 
-            // LIGHTING
-            const ambient = new THREE.HemisphereLight(0xffffff, 0x444444, 3);
+            const ambient = new THREE.HemisphereLight(0xffffff, 0x444444, 2.5);
             scene.add(ambient);
 
-            buildWorld();
+            buildRoom();
+            createTeleportAssets();
             setupInputs();
 
             renderer.setAnimationLoop(render);
         }
 
-        function buildWorld() {
+        function buildRoom() {
             // FLOOR
             const floor = new THREE.Mesh(
-                new THREE.PlaneGeometry(50, 50),
-                new THREE.MeshStandardMaterial({ color: 0x333333 })
+                new THREE.PlaneGeometry(20, 20),
+                new THREE.MeshStandardMaterial({ color: 0x222222 })
             );
             floor.rotation.x = -Math.PI / 2;
             floor.name = "Floor";
             scene.add(floor);
 
-            // WALLS (Brick Red)
+            // WALLS (All 4 Walls)
             const wallMat = new THREE.MeshStandardMaterial({ color: 0x8B0000 });
-            const wall = new THREE.Mesh(new THREE.BoxGeometry(10, 3, 0.2), wallMat);
-            wall.position.set(0, 1.5, -5);
-            scene.add(wall);
+            const wallGeo = new THREE.BoxGeometry(10, 4, 0.2);
+            
+            const backWall = new THREE.Mesh(wallGeo, wallMat); backWall.position.set(0, 2, -5);
+            const frontWall = new THREE.Mesh(wallGeo, wallMat); frontWall.position.set(0, 2, 5);
+            const leftWall = new THREE.Mesh(wallGeo, wallMat); leftWall.position.set(-5, 2, 0); leftWall.rotation.y = Math.PI/2;
+            const rightWall = new THREE.Mesh(wallGeo, wallMat); rightWall.position.set(5, 2, 0); rightWall.rotation.y = Math.PI/2;
+            scene.add(backWall, frontWall, leftWall, rightWall);
 
-            // BLACK TRIM
-            const trim = new THREE.Mesh(new THREE.BoxGeometry(10.1, 0.1, 0.1), new THREE.MeshStandardMaterial({color:0x000000}));
-            trim.position.set(0, 0.05, -4.9);
-            scene.add(trim);
+            // TRIMS (Floor & Ceiling)
+            const trimMat = new THREE.MeshStandardMaterial({ color: 0x000000 });
+            const floorTrim = new THREE.Mesh(new THREE.BoxGeometry(10.2, 0.15, 0.3), trimMat);
+            floorTrim.position.set(0, 0.075, -4.9);
+            scene.add(floorTrim);
 
-            // POKER TABLE
-            const table = new THREE.Mesh(
-                new THREE.CylinderGeometry(1.2, 1.2, 0.2, 32),
-                new THREE.MeshStandardMaterial({ color: 0x006400 })
-            );
+            // TABLE & CHIP
+            const table = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.2, 32), new THREE.MeshStandardMaterial({ color: 0x004400 }));
             table.position.set(0, 0.8, 0);
             scene.add(table);
 
-            // EVENT CHIP ($5 Gold)
-            const chip = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.04, 0.04, 0.02, 32),
-                new THREE.MeshStandardMaterial({ color: 0xFFD700 })
-            );
-            chip.position.set(0, 0.92, -0.4);
-            scene.add(chip);
+            const goldChip = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.02, 32), new THREE.MeshStandardMaterial({ color: 0xFFD700 }));
+            goldChip.position.set(0, 0.92, -0.4);
+            scene.add(goldChip);
+        }
+
+        function createTeleportAssets() {
+            // Glowing Circle for Jump point
+            const ringGeo = new THREE.RingGeometry(0.25, 0.3, 32);
+            const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide });
+            teleportMarker = new THREE.Mesh(ringGeo, ringMat);
+            teleportMarker.rotation.x = -Math.PI / 2;
+            teleportMarker.visible = false;
+            scene.add(teleportMarker);
+
+            // Laser Line
+            const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
+            teleportLine = new THREE.Line(lineGeo, new THREE.MeshBasicMaterial({ color: 0x00ff00 }));
+            teleportLine.visible = false;
+            scene.add(teleportLine);
         }
 
         function setupInputs() {
-            const controllerModelFactory = new XRControllerModelFactory();
-            const handModelFactory = new XRHandModelFactory();
+            const hFactory = new XRHandModelFactory();
+            const cFactory = new XRControllerModelFactory();
 
-            // Right Input (Controller + Hand)
-            controller1 = renderer.xr.getController(0);
-            controller1.addEventListener('selectstart', onSelectStart);
-            baseGroup.add(controller1);
-
+            // Right Hand
             hand1 = renderer.xr.getHand(0);
-            hand1.add(handModelFactory.createHandModel(hand1, "mesh"));
-            baseGroup.add(hand1);
+            hand1.add(hFactory.createHandModel(hand1, "mesh"));
+            playerGroup.add(hand1);
 
-            // Left Input (Controller + Hand)
-            controller2 = renderer.xr.getController(1);
-            baseGroup.add(controller2);
+            controller1 = renderer.xr.getController(0);
+            controller1.addEventListener('selectstart', () => { teleportLine.visible = true; teleportMarker.visible = true; });
+            controller1.addEventListener('selectend', teleportPlayer);
+            playerGroup.add(controller1);
 
+            // Left Hand (Menu Holder)
             hand2 = renderer.xr.getHand(1);
-            hand2.add(handModelFactory.createHandModel(hand2, "mesh"));
-            baseGroup.add(hand2);
+            hand2.add(hFactory.createHandModel(hand2, "mesh"));
+            playerGroup.add(hand2);
 
-            // Add Laser Pointer for Teleport
-            const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]));
-            line.scale.z = 10;
-            controller1.add(line);
+            // Floating Menu
+            const menu = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.3), new THREE.MeshBasicMaterial({color: 0x0000ff, transparent: true, opacity: 0.8}));
+            menu.position.set(0, 0.1, 0);
+            menu.rotation.x = -Math.PI/2;
+            hand2.add(menu);
         }
 
-        function onSelectStart() {
-            // TELEPORT LOGIC
-            tempMatrix.identity().extractRotation(controller1.matrixWorld);
-            raycaster.ray.origin.setFromMatrixPosition(controller1.matrixWorld);
-            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
-
-            const intersects = raycaster.intersectObjects(scene.children);
-            for (let i = 0; i < intersects.length; i++) {
-                if (intersects[i].object.name === "Floor") {
-                    baseGroup.position.set(intersects[i].point.x, 0, intersects[i].point.z);
-                    break;
-                }
+        function teleportPlayer() {
+            if (teleportMarker.visible) {
+                playerGroup.position.set(teleportMarker.position.x, 0, teleportMarker.position.z);
             }
+            teleportLine.visible = false;
+            teleportMarker.visible = false;
         }
 
         function render() {
+            if (teleportLine.visible) {
+                tempMatrix.identity().extractRotation(controller1.matrixWorld);
+                raycaster.ray.origin.setFromMatrixPosition(controller1.matrixWorld);
+                raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+
+                const intersects = raycaster.intersectObjects(scene.children);
+                for (let i = 0; i < intersects.length; i++) {
+                    if (intersects[i].object.name === "Floor") {
+                        teleportMarker.position.copy(intersects[i].point);
+                        teleportMarker.position.y = 0.01;
+                        teleportMarker.visible = true;
+                        
+                        // Update line to point to marker
+                        teleportLine.position.setFromMatrixPosition(controller1.matrixWorld);
+                        teleportLine.lookAt(intersects[i].point);
+                        teleportLine.scale.z = controller1.position.distanceTo(intersects[i].point);
+                        break;
+                    }
+                }
+            }
             renderer.render(scene, camera);
         }
     </script>

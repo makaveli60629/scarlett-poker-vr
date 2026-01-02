@@ -2,17 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Poker VR - Update 1.4.1</title>
-    <style>
-        body { margin: 0; background-color: #87CEEB; overflow: hidden; font-family: sans-serif; }
-        /* Emergency VR Button Style if the native one fails to render */
-        #VRButton { 
-            border: 2px solid white !important; 
-            background: rgba(0,0,0,0.5) !important; 
-            border-radius: 10px !important;
-            font-weight: bold !important;
-        }
-    </style>
+    <title>Poker VR 1.7 - Infinite Horizon</title>
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <script type="importmap">
@@ -27,87 +18,43 @@
     <script type="module">
         import * as THREE from 'three';
         import { VRButton } from 'three/addons/webxr/VRButton.js';
-        import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+        import { VRCore } from './js/core.js';
 
-        let scene, camera, renderer, playerRig;
-        let controller1, controller2;
-        let raycaster, marker, tempMatrix = new THREE.Matrix4();
-        let isSeated = false;
-
-        const texLoader = new THREE.TextureLoader();
+        let renderer, scene, camera, core;
 
         init();
 
-        function init() {
+        async function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x87CEEB);
-            scene.fog = new THREE.Fog(0x87CEEB, 1, 50);
+            scene.fog = new THREE.Fog(0x87CEEB, 1, 100);
 
-            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             
-            // --- PLAYER RIG ---
-            playerRig = new THREE.Group();
-            playerRig.add(camera);
-            scene.add(playerRig);
-            playerRig.position.set(0, 1.6, 0); 
-
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
-            renderer.xr.setReferenceSpaceType('local'); 
-            
+            renderer.xr.setReferenceSpaceType('local');
             document.body.appendChild(renderer.domElement);
-            // CRITICAL: This adds the "Enter VR" button back to the screen
             document.body.appendChild(VRButton.createButton(renderer));
 
-            // LIGHTING
-            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x888888, 2);
-            scene.add(hemiLight);
-            const tableLight = new THREE.PointLight(0xffffff, 25, 15);
-            tableLight.position.set(0, 4, -3);
-            scene.add(tableLight);
-
-            // TELEPORT MARKER
-            marker = new THREE.Mesh(
-                new THREE.CircleGeometry(0.25, 32),
-                new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.7 })
-            );
-            marker.rotation.x = -Math.PI / 2;
-            marker.visible = false;
-            scene.add(marker);
-
-            raycaster = new THREE.Raycaster();
-
-            // OCULUS CONTROLLERS
-            const controllerModelFactory = new XRControllerModelFactory();
+            // Initialize the VR Core (Hands, Movement, World)
+            core = new VRCore(scene, camera, renderer);
             
-            // Right Hand (Teleport)
-            controller1 = renderer.xr.getController(0);
-            controller1.addEventListener('selectstart', () => { controller1.userData.isSelecting = true; });
-            controller1.addEventListener('selectend', () => {
-                controller1.userData.isSelecting = false;
-                if (marker.visible) {
-                    playerRig.position.set(marker.position.x, 1.6, marker.position.z);
-                }
-            });
-            playerRig.add(controller1);
-            
-            const grip1 = renderer.xr.getControllerGrip(0);
-            grip1.add(controllerModelFactory.createControllerModel(grip1));
-            playerRig.add(grip1);
+            window.addEventListener('resize', onWindowResize);
+            renderer.setAnimationLoop(render);
+        }
 
-            // Left Hand
-            controller2 = renderer.xr.getController(1);
-            playerRig.add(controller2);
-            const grip2 = renderer.xr.getControllerGrip(1);
-            grip2.add(controllerModelFactory.createControllerModel(grip2));
-            playerRig.add(grip2);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
 
-            // Teleport Ray Visual
-            const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
-            const line = new THREE.Line(lineGeo);
-            line.scale.z = 10;
-            controller1.add(line);
-
-            createEnvironment
+        function render() {
+            core.update();
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>

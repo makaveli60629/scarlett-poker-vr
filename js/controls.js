@@ -21,18 +21,12 @@ export function handleMovement(renderer, camera, controls) {
     const session = renderer.xr.getSession();
     if (!session) return;
 
-    // Iterate through input sources (Oculus Touch)
     for (const source of session.inputSources) {
         if (source.gamepad) {
             const axes = source.gamepad.axes;
-            // Thumbstick Forward/Backward (Axis 3 on Oculus)
-            if (Math.abs(axes[3]) > 0.1) {
-                camera.position.z += axes[3] * 0.2;
-            }
-            // Thumbstick Left/Right (Axis 2 on Oculus)
-            if (Math.abs(axes[2]) > 0.1) {
-                camera.position.x += axes[2] * 0.2;
-            }
+            // Axis 2 & 3 are Thumbsticks on Oculus
+            if (Math.abs(axes[3]) > 0.1) camera.position.z += axes[3] * 0.4;
+            if (Math.abs(axes[2]) > 0.1) camera.position.x += axes[2] * 0.4;
         }
     }
 }

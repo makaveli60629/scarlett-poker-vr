@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>POKER VR MASTER - 1.5.4</title>
+    <title>POKER VR MASTER - 1.5.6</title>
     <style>
-        body { margin: 0; background-color: #000; overflow: hidden; }
+        body { margin: 0; background-color: #000; overflow: hidden; font-family: sans-serif; }
     </style>
 </head>
 <body>
@@ -13,10 +13,11 @@
         import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
         import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-        // 1. CORE SETUP
+        // 1. ENGINE SETUP
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.xr.enabled = true;
         document.body.appendChild(renderer.domElement);
@@ -26,86 +27,97 @@
         cameraRig.add(camera);
         scene.add(cameraRig);
 
-        // 2. ENVIRONMENT
+        // 2. ENVIRONMENT & LIGHTS
         scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-        const grid = new THREE.GridHelper(100, 100, 0x00ffcc, 0x222222);
-        scene.add(grid);
+        scene.add(new THREE.GridHelper(100, 100, 0x00ffcc, 0x111111));
 
-        // --- POKER TABLE ---
+        // --- GLOW RING CREATOR FUNCTION ---
+        function createGlowRing(radius, color, x, z) {
+            const geo = new THREE.RingGeometry(radius, radius + 0.15, 64);
+            const mat = new THREE.MeshBasicMaterial({ 
+                color: color, 
+                transparent: true, 
+                opacity: 0.8, 
+                side: THREE.DoubleSide,
+                blending: THREE.AdditiveBlending 
+            });
+            const ring = new THREE.Mesh(geo, mat);
+            ring.rotation.x = -Math.PI / 2;
+            ring.position.set(x, 0.02, z); // Slightly above grid to prevent flickering
+            scene.add(ring);
+            return ring;
+        }
+
+        // --- WORLD OBJECTS ---
+        // Poker Table
         const table = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 0.2, 32), new THREE.MeshStandardMaterial({ color: 0x006400 }));
         table.position.set(0, 0.8, -5);
         scene.add(table);
+        createGlowRing(2.8, 0x800080, 0, -5); // Purple Glow for Table
 
-        // --- STORE & DAILY PICK CHAIR ---
-        // Store Wall
+        // Store
         const store = new THREE.Mesh(new THREE.BoxGeometry(4, 3, 0.2), new THREE.MeshStandardMaterial({ color: 0x440000 }));
         store.position.set(-7, 1.5, -2);
         store.rotation.y = Math.PI / 4;
         scene.add(store);
+        createGlowRing(3.0, 0x800080, -7, -2); // Purple Glow for Store
 
-        // Daily Pick Chair (The Daily Reward Station)
-        const chairGroup = new THREE.Group();
-        const seat = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.8), new THREE.MeshStandardMaterial({ color: 0x222222 }));
-        const back = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1, 0.1), new THREE.MeshStandardMaterial({ color: 0x222222 }));
-        back.position.set(0, 0.5, -0.4);
-        chairGroup.add(seat, back);
-        chairGroup.position.set(-5, 0.4, -4); // Positioned near the store
-        scene.add(chairGroup);
+        // Daily Pick Chair
+        const dailyChair = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1, 0.8), new THREE.MeshStandardMaterial({ color: 0x222222 }));
+        dailyChair.position.set(-5, 0.5, -4);
+        scene.add(dailyChair);
+        createGlowRing(1.0, 0x800080, -5, -4); // Purple Glow for Chair
 
-        // --- TELEPORT VISUALS ---
-        // The Laser
-        const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
-        const line = new THREE.Line(lineGeo);
-        line.scale.z = 10;
-
-        // The Land Spot (Teleport Marker)
-        const markerGeo = new THREE.RingGeometry(0.3, 0.35, 32);
-        const markerMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, side: THREE.DoubleSide });
-        const marker = new THREE.Mesh(markerGeo, markerMat);
+        // 3. CONTROLLERS & TELEPORT
+        const marker = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.35, 32), new THREE.MeshBasicMaterial({ color: 0x00ffcc }));
         marker.rotation.x = -Math.PI / 2;
-        marker.visible = false;
         scene.add(marker);
 
-        // Controllers
-        const controller1 = renderer.xr.getController(0); // Right - Teleport
-        controller1.add(line);
-        cameraRig.add(controller1);
+        const controller1 = renderer.xr.getController(0); // Right
+        const controller2 = renderer.xr.getController(1); // Left
+        cameraRig.add(controller1, controller2);
 
-        const controller2 = renderer.xr.getController(1); // Left - Watch/Hand
-        cameraRig.add(controller2);
+        const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -5)]);
+        const laser = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0x00ffcc }));
+        controller1.add(laser);
 
-        // Simple Hand Meshes
-        const handMesh = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.15), new THREE.MeshStandardMaterial({ color: 0x00ffcc }));
-        controller1.add(handMesh.clone());
-        controller2.add(handMesh.clone());
-
-        // --- LOGIC ---
-        controller1.addEventListener('selectstart', () => {
-            if (marker.visible) {
-                cameraRig.position.set(marker.position.x, 0, marker.position.z);
+        // 4. MOVEMENT & SNAP TURN
+        let canTurn = true;
+        function handleInput() {
+            const session = renderer.xr.getSession();
+            if (!session) return;
+            for (const source of session.inputSources) {
+                if (source.gamepad && source.handedness === 'right') {
+                    const axes = source.gamepad.axes;
+                    if (Math.abs(axes[2]) > 0.8 && canTurn) {
+                        cameraRig.rotation.y -= Math.sign(axes[2]) * (Math.PI / 4);
+                        canTurn = false;
+                        setTimeout(() => { canTurn = true; }, 300); 
+                    }
+                }
             }
+        }
+
+        controller1.addEventListener('selectstart', () => {
+            if (marker.visible) cameraRig.position.set(marker.position.x, 0, marker.position.z);
         });
 
+        // 5. ANIMATION LOOP
         renderer.setAnimationLoop(() => {
-            // Update Teleport Marker Position
-            const matrix = new THREE.Matrix4().makeRotationFromQuaternion(controller1.quaternion);
-            const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(matrix);
-            
-            // Raycast to floor (y=0)
+            handleInput();
+            const tempMatrix = new THREE.Matrix4().makeRotationFromQuaternion(controller1.quaternion);
+            const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(tempMatrix);
             if (dir.y < -0.1) {
                 const ratio = -controller1.position.y / dir.y;
-                const hitX = controller1.position.x + dir.x * ratio + cameraRig.position.x;
-                const hitZ = controller1.position.z + dir.z * ratio + cameraRig.position.z;
-                marker.position.set(hitX, 0.01, hitZ);
+                marker.position.set(
+                    controller1.position.x + dir.x * ratio + cameraRig.position.x,
+                    0.01,
+                    controller1.position.z + dir.z * ratio + cameraRig.position.z
+                );
                 marker.visible = true;
             } else {
                 marker.visible = false;
             }
-
-            // Sitting Height at Poker Table
-            const distToTable = cameraRig.position.distanceTo(table.position);
-            camera.position.y = (distToTable < 2.8) ? -0.2 : 0;
-            
             renderer.render(scene, camera);
         });
     </script>

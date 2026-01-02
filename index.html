@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>POKER VR MASTER - 1.5.6</title>
+    <title>POKER VR MASTER - 1.5.7</title>
     <style>
         body { margin: 0; background-color: #000; overflow: hidden; font-family: sans-serif; }
     </style>
@@ -13,7 +13,7 @@
         import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
         import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-        // 1. ENGINE SETUP
+        // 1. ENGINE & VR SETUP
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -27,97 +27,99 @@
         cameraRig.add(camera);
         scene.add(cameraRig);
 
-        // 2. ENVIRONMENT & LIGHTS
+        // 2. LIGHTING & GRID
         scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-        scene.add(new THREE.GridHelper(100, 100, 0x00ffcc, 0x111111));
+        scene.add(new THREE.GridHelper(200, 100, 0x00ffcc, 0x111111));
 
-        // --- GLOW RING CREATOR FUNCTION ---
-        function createGlowRing(radius, color, x, z) {
-            const geo = new THREE.RingGeometry(radius, radius + 0.15, 64);
-            const mat = new THREE.MeshBasicMaterial({ 
-                color: color, 
-                transparent: true, 
-                opacity: 0.8, 
-                side: THREE.DoubleSide,
-                blending: THREE.AdditiveBlending 
-            });
-            const ring = new THREE.Mesh(geo, mat);
+        // --- UTILITY FUNCTIONS ---
+        function createTable(x, z, color = 0x006400) {
+            const group = new THREE.Group();
+            const top = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 0.2, 32), new THREE.MeshStandardMaterial({ color: color }));
+            top.position.y = 0.8;
+            group.add(top);
+            
+            // Purple Glow Pill
+            const ring = new THREE.Mesh(
+                new THREE.RingGeometry(2.8, 3.0, 64),
+                new THREE.MeshBasicMaterial({ color: 0x800080, transparent: true, opacity: 0.6, side: THREE.DoubleSide })
+            );
             ring.rotation.x = -Math.PI / 2;
-            ring.position.set(x, 0.02, z); // Slightly above grid to prevent flickering
-            scene.add(ring);
-            return ring;
+            ring.position.y = 0.02;
+            group.add(ring);
+            
+            group.position.set(x, 0, z);
+            scene.add(group);
+            return group;
         }
 
-        // --- WORLD OBJECTS ---
-        // Poker Table
-        const table = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 0.2, 32), new THREE.MeshStandardMaterial({ color: 0x006400 }));
-        table.position.set(0, 0.8, -5);
-        scene.add(table);
-        createGlowRing(2.8, 0x800080, 0, -5); // Purple Glow for Table
+        // 3. THE CASINO FLOOR LAYOUT
+        // Room 1: Lobby Table (Current)
+        createTable(0, -5); 
 
-        // Store
-        const store = new THREE.Mesh(new THREE.BoxGeometry(4, 3, 0.2), new THREE.MeshStandardMaterial({ color: 0x440000 }));
-        store.position.set(-7, 1.5, -2);
-        store.rotation.y = Math.PI / 4;
-        scene.add(store);
-        createGlowRing(3.0, 0x800080, -7, -2); // Purple Glow for Store
+        // Room 2: High Stakes (Forward North)
+        createTable(0, -25, 0x440000); // Dark Red Table
 
-        // Daily Pick Chair
+        // Room 3: Mid Stakes (To the Right)
+        createTable(20, -15, 0x000044); // Dark Blue Table
+
+        // Room 4: Private Room (To the Left)
+        createTable(-20, -15, 0x1a1a1a); // Black Table
+
+        // --- THE LEADERBOARD ---
+        const boardGeo = new THREE.BoxGeometry(8, 5, 0.1);
+        const boardMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+        const leaderboard = new THREE.Mesh(boardGeo, boardMat);
+        leaderboard.position.set(0, 4, -12);
+        scene.add(leaderboard);
+        
+        // Visual indicator for Daily Pick Area
         const dailyChair = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1, 0.8), new THREE.MeshStandardMaterial({ color: 0x222222 }));
         dailyChair.position.set(-5, 0.5, -4);
         scene.add(dailyChair);
-        createGlowRing(1.0, 0x800080, -5, -4); // Purple Glow for Chair
 
-        // 3. CONTROLLERS & TELEPORT
+        // 4. VR CONTROLS (SNAP TURN & TELEPORT)
         const marker = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.35, 32), new THREE.MeshBasicMaterial({ color: 0x00ffcc }));
         marker.rotation.x = -Math.PI / 2;
         scene.add(marker);
 
-        const controller1 = renderer.xr.getController(0); // Right
-        const controller2 = renderer.xr.getController(1); // Left
-        cameraRig.add(controller1, controller2);
-
-        const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -5)]);
-        const laser = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0x00ffcc }));
+        const controller1 = renderer.xr.getController(0); // Right (Laser/Teleport)
+        const laser = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-10)]), new THREE.LineBasicMaterial({color: 0x00ffcc}));
         controller1.add(laser);
+        cameraRig.add(controller1);
 
-        // 4. MOVEMENT & SNAP TURN
+        const controller2 = renderer.xr.getController(1); // Left (Movement/UI)
+        cameraRig.add(controller2);
+
         let canTurn = true;
-        function handleInput() {
-            const session = renderer.xr.getSession();
-            if (!session) return;
-            for (const source of session.inputSources) {
-                if (source.gamepad && source.handedness === 'right') {
-                    const axes = source.gamepad.axes;
-                    if (Math.abs(axes[2]) > 0.8 && canTurn) {
-                        cameraRig.rotation.y -= Math.sign(axes[2]) * (Math.PI / 4);
-                        canTurn = false;
-                        setTimeout(() => { canTurn = true; }, 300); 
-                    }
-                }
-            }
-        }
-
         controller1.addEventListener('selectstart', () => {
             if (marker.visible) cameraRig.position.set(marker.position.x, 0, marker.position.z);
         });
 
         // 5. ANIMATION LOOP
         renderer.setAnimationLoop(() => {
-            handleInput();
-            const tempMatrix = new THREE.Matrix4().makeRotationFromQuaternion(controller1.quaternion);
-            const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(tempMatrix);
+            const session = renderer.xr.getSession();
+            if (session) {
+                for (const source of session.inputSources) {
+                    if (source.gamepad && source.handedness === 'right') {
+                        const axes = source.gamepad.axes;
+                        if (Math.abs(axes[2]) > 0.8 && canTurn) {
+                            cameraRig.rotation.y -= Math.sign(axes[2]) * (Math.PI / 4);
+                            canTurn = false;
+                            setTimeout(() => { canTurn = true; }, 300);
+                        }
+                    }
+                }
+            }
+
+            // Raycast Teleport
+            const matrix = new THREE.Matrix4().makeRotationFromQuaternion(controller1.quaternion);
+            const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(matrix);
             if (dir.y < -0.1) {
                 const ratio = -controller1.position.y / dir.y;
-                marker.position.set(
-                    controller1.position.x + dir.x * ratio + cameraRig.position.x,
-                    0.01,
-                    controller1.position.z + dir.z * ratio + cameraRig.position.z
-                );
+                marker.position.set(controller1.position.x + dir.x * ratio + cameraRig.position.x, 0.01, controller1.position.z + dir.z * ratio + cameraRig.position.z);
                 marker.visible = true;
-            } else {
-                marker.visible = false;
-            }
+            } else { marker.visible = false; }
+
             renderer.render(scene, camera);
         });
     </script>

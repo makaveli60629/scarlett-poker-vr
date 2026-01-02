@@ -1,48 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VR Poker - Permanent Update 1.3</title>
+    <title>Scarlet VR Poker | Scorpion Luxury 1.8</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
-        body { 
-            margin: 0; 
-            padding: 0; 
-            overflow: hidden; 
-            background-color: #000000; 
-            user-select: none;
-        }
-        #vr-button-container { 
-            position: absolute; 
-            bottom: 20px; 
-            left: 50%; 
-            transform: translateX(-50%); 
-            z-index: 1000; 
-        }
-        #ui-layer {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            color: #00ff00;
-            font-family: monospace;
-            pointer-events: none;
-            text-shadow: 1px 1px 2px black;
-        }
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Segoe UI', sans-serif; }
+        #vr-ui-overlay { position: absolute; display: none; } /* Hidden, all UI is in 3D */
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/BufferGeometryUtils.js"></script>
 </head>
 <body>
-    <div id="ui-layer">SYSTEM: ONLINE<br>MODE: VR POKER v1.3</div>
-    <div id="vr-button-container"></div>
-
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-            }
-        }
-    </script>
-
-    <script type="module" src="js/index.js"></script>
+    <div id="canvas-container"></div>
+    <script src="js/index.js"></script>
 </body>
 </html>

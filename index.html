@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>POKER VR - 2.1.2 FINAL PERMANENT</title>
+    <style> body { margin: 0; background-color: #000; overflow: hidden; } </style>
+</head>
+<body>
+    <script type="module">
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+        import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
+
+        // 1. DATA & CORE SETUP
+        let stats = JSON.parse(localStorage.getItem('poker_master_save')) || { chips: 500, rank: "ROOKIE" };
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x010102);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
+        document.body.appendChild(VRButton.createButton(renderer));
+
+        const cameraRig = new THREE.Group();
+        cameraRig.position.set(0, 0, 15);
+        cameraRig.add(camera);
+        scene.add(cameraRig);
+
+        // 2. SKYLIGHT LIGHTING
+        const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+        const skyLight = new THREE.DirectionalLight(0xffffff, 2.5);
+        skyLight.position.set(0, 20, 0); 
+        scene.add(ambient, skyLight);
+
+        // 3. ARCHITECTURE (70m LOCKDOWN)
+        const lobbySize = 70;
+        const limit = (lobbySize / 2) - 2; // Hard wall boundary
+        
+        const texLoader = new THREE.TextureLoader();
+        const path = 'assets/textures/';
+        const carpet = texLoader.load(path + 'lobby_carpet.jpg');
+        carpet.wrapS = carpet.wrapT = THREE.RepeatWrapping; carpet.repeat.set(25, 25);
+        
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(lobbySize, lobbySize), new THREE.MeshStandardMaterial({map: carpet}));
+        floor.rotation.x = -Math.PI/2; scene.add(floor);
+
+        // Walls with Glowing Baseboard Trim
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a });
+        const trimMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 1 });
+
+        for(let i=0; i<4; i++) {
+            const wallG = new THREE.Group();
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(lobbySize, 20, 1), wallMat);
+            const trim = new THREE.Mesh(new THREE.BoxGeometry(lobbySize, 0.4, 1.2), trimMat);
+            trim.position.y = -9.8; 
+            wallG.add(wall, trim);
+            const angle = (Math.PI/2) * i;
+            wallG.position.set(Math.sin(angle)*(lobbySize/2), 10, Math.cos(angle)*(lobbySize/2));
+            wallG.rotation.y = angle;
+            scene.add(wallG);
+        }
+
+        // 4. DESTINATIONS
+        const createSign = (text, color) => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 512; canvas.height = 128;
+            ctx.fillStyle = color; ctx.font = "bold 60px Arial"; ctx.textAlign = "center";
+            ctx.fillText(text, 256, 80);
+            const tex = new THREE.CanvasTexture(canvas);
+            return new THREE.Mesh(new THREE.PlaneGeometry(6, 1.5), new THREE.MeshBasicMaterial({map: tex, transparent: true}));
+        };
+
+        const store = createSign("MALL STORE", "#00ffff");
+        store.position.set(-25, 4, -25); store.rotation.y = Math.PI/4;
+        scene.add(store);
+
+        const tele = createSign("PLAY GAME", "#ff00ff");
+        tele.position.set(25, 4, -25); tele.rotation.y = -Math.PI/4;
+        scene.add(tele);
+
+        // 5. LEFT-HAND MASTER LOCOMOTION
+        const controllerL = renderer.xr.getController(1);
+        const laser = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]), new THREE.LineBasicMaterial({color: 0x00ffff}));
+        laser.scale.z = 100;
+        controllerL.add(laser);
+        cameraRig.add(controllerL);
+
+        const marker = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.5, 32), new THREE.MeshBasicMaterial({ color: 0x00ffff }));
+        marker.rotation.x = -Math.PI/2; scene.add(marker);
+
+        const raycaster = new THREE.Raycaster();
+        let turnCooldown = false;
+
+        renderer.setAnimationLoop(() => {
+            const session = renderer.xr.getSession();
+            if (session) {
+                for (const source of session.inputSources) {
+                    if (source.handedness === 'left') {
+                        const axes = source.gamepad.axes;
+                        const buttons = source.gamepad.buttons;
+
+                        const m = new THREE.Matrix4().extractRotation(controllerL.matrixWorld);
+                        raycaster.ray.origin.setFromMatrixPosition(controllerL.matrixWorld);
+                        raycaster.ray.direction.set(0, 0, -1).applyMatrix4(m);
+                        
+                        const hits = raycaster.intersectObject(floor);
+                        if (hits.length > 0) {
+                            // Boundary Lockdown Logic
+                            const cX = Math.max(-limit, Math.min(limit, hits[0].point.x));
+                            const cZ = Math.max(-limit, Math.min(limit, hits[0].point.z));
+                            marker.position.set(cX, 0.05, cZ);
+                            marker.visible = true;
+
+                            if (buttons[0].pressed) cameraRig.position.set(cX, 0, cZ);
+                        }
+
+                        // Snap Turn
+                        const stickX = axes[2] || axes[3] || 0;
+                        if (!turnCooldown && Math.abs(stickX) > 0.7) {
+                            cameraRig.rotation.y -= Math.sign(stickX) * (Math.PI/4);
+                            turnCooldown = true; setTimeout(() => turnCooldown = false, 300);
+                        }
+                    }
+                }
+            }
+            renderer.render(scene, camera);
+        });
+    </script>
+</body>
+</html>

@@ -5,30 +5,36 @@ export function createEnvironment(scene, walletBalance) {
     const texturePath = 'assets/textures/';
 
     const floorTex = loader.load(texturePath + 'table_felt_green.jpg');
+    floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+    floorTex.repeat.set(20, 20); // Scaled for 200x200
+
     const wallTex = loader.load(texturePath + 'brickwall.jpg');
+    wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping;
+    wallTex.repeat.set(10, 1);
+
     const portalTex = loader.load(texturePath + 'wall_stone_runes.jpg');
     const rewardTex = loader.load(texturePath + 'dailyclaim.jpg');
 
-    const roomOffsets = [0, -110, -220, -330]; 
-    const roomNames = ["LOBBY & STORE", "POKER ZONE A", "POKER ZONE B", "VIP ZONE"];
+    const roomOffsets = [0, -220, -440, -660]; 
 
     roomOffsets.forEach((offset, i) => {
         const roomGroup = new THREE.Group();
         roomGroup.position.z = offset;
 
-        // Floor & Walls
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshLambertMaterial({ map: floorTex }));
+        // Expanded 200x200 Floor
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshLambertMaterial({ map: floorTex }));
         floor.rotation.x = -Math.PI / 2;
         roomGroup.add(floor);
 
-        const backWall = new THREE.Mesh(new THREE.PlaneGeometry(100, 25), new THREE.MeshLambertMaterial({ map: portalTex }));
-        backWall.position.set(0, 12.5, -50);
+        // Huge Portal Wall (Z: -100)
+        const backWall = new THREE.Mesh(new THREE.PlaneGeometry(200, 40), new THREE.MeshLambertMaterial({ map: portalTex }));
+        backWall.position.set(0, 20, -100);
         roomGroup.add(backWall);
 
-        // Daily Reward Logic for Room 0 (Store)
+        // Daily Reward Sign (Only in Lobby/Store Room 0)
         if (i === 0) {
-            const rewardSign = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), new THREE.MeshBasicMaterial({ map: rewardTex }));
-            rewardSign.position.set(0, 8, -20);
+            const rewardSign = new THREE.Mesh(new THREE.PlaneGeometry(20, 10), new THREE.MeshBasicMaterial({ map: rewardTex }));
+            rewardSign.position.set(0, 15, -40);
             roomGroup.add(rewardSign);
         }
 

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>POKER VR - 2.1.11 ASSET LOCK</title>
+    <title>POKER VR - 2.1.12 TOTAL RESET</title>
     <style> body { margin: 0; background-color: #000; overflow: hidden; } </style>
 </head>
 <body>
@@ -11,6 +11,7 @@
         import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
         import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
+        // 1. DATA PERSISTENCE
         let stats = JSON.parse(localStorage.getItem('poker_master_save')) || { chips: 5000, rank: "ROOKIE" };
 
         const scene = new THREE.Scene();
@@ -26,62 +27,82 @@
         cameraRig.position.set(0, 0, 20); 
         cameraRig.add(camera);
         scene.add(cameraRig);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.8), new THREE.DirectionalLight(0xffffff, 2.5));
+        scene.add(new THREE.AmbientLight(0xffffff, 1.0), new THREE.DirectionalLight(0xffffff, 2));
 
-        // 1. ASSET MAPPING (From your Github List)
+        // 2. TEXTURES & ROOMS
         const path = 'assets/textures/';
         const texLoader = new THREE.TextureLoader();
-        
-        const lobbyCarpet = texLoader.load(path + 'lobby_carpet.jpg');
-        const mainBrick = texLoader.load(path + 'brickwall.jpg');
-        const runeWall = texLoader.load(path + 'wall_stone_runes.jpg'); // For Scorpion Room
-        const dailyTex = texLoader.load(path + 'dailyclaim.jpg'); // Fixed filename
-        const feltTex = texLoader.load(path + 'table_felt_green.jpg');
-        const logoTex = texLoader.load(path + 'brand_logo.jpg');
+        const carpet = texLoader.load(path + 'lobby_carpet.jpg');
+        const brick = texLoader.load(path + 'brickwall.jpg');
+        const dailyTex = texLoader.load(path + 'dailyclaim.jpg');
+        const runeWall = texLoader.load(path + 'wall_stone_runes.jpg');
+        [carpet, brick, runeWall].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; });
+        carpet.repeat.set(15, 15); brick.repeat.set(8, 2);
 
-        [lobbyCarpet, mainBrick, runeWall].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; });
-        lobbyCarpet.repeat.set(15, 15); mainBrick.repeat.set(8, 2); runeWall.repeat.set(6, 2);
-
-        // 2. ROOM GENERATOR
-        function createRoom(name, x, z, size, wallTexture) {
+        function createRoom(x, z, size, tex, labelText, labelColor) {
             const group = new THREE.Group();
-            const f = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({map: lobbyCarpet}));
+            const f = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({map: carpet}));
             f.rotation.x = -Math.PI/2; group.add(f);
             
-            const trimMat = new THREE.MeshStandardMaterial({color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.5});
+            // Walls with Top/Bottom Trim
+            const trimMat = new THREE.MeshStandardMaterial({color: labelColor, emissive: labelColor});
             for(let i=0; i<4; i++){
                 const wG = new THREE.Group();
-                const w = new THREE.Mesh(new THREE.BoxGeometry(size, 20, 1), new THREE.MeshStandardMaterial({map: wallTexture}));
-                const t1 = new THREE.Mesh(new THREE.BoxGeometry(size, 0.5, 1.1), trimMat); t1.position.y = -9.7;
-                const t2 = new THREE.Mesh(new THREE.BoxGeometry(size, 0.5, 1.1), trimMat); t2.position.y = 9.7;
+                const w = new THREE.Mesh(new THREE.BoxGeometry(size, 20, 1), new THREE.MeshStandardMaterial({map: tex}));
+                const t1 = new THREE.Mesh(new THREE.BoxGeometry(size, 0.4, 1.1), trimMat); t1.position.y = -9.8;
+                const t2 = new THREE.Mesh(new THREE.BoxGeometry(size, 0.4, 1.1), trimMat); t2.position.y = 9.8;
                 wG.add(w, t1, t2);
                 const a = (Math.PI/2)*i; wG.position.set(Math.sin(a)*(size/2), 10, Math.cos(a)*(size/2)); wG.rotation.y = a;
                 group.add(wG);
-                const p = new THREE.Mesh(new THREE.BoxGeometry(2, 20, 2), new THREE.MeshStandardMaterial({color: 0x111111}));
-                p.position.set((i%2==0?1:-1)*(size/2), 10, (i<2?1:-1)*(size/2)); group.add(p);
             }
+            // Floating Label
+            const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
+            canvas.width = 512; canvas.height = 128; ctx.fillStyle = "white"; ctx.font = "bold 60px Arial";
+            ctx.textAlign = "center"; ctx.fillText(labelText, 256, 80);
+            const lMesh = new THREE.Mesh(new THREE.PlaneGeometry(8, 2), new THREE.MeshBasicMaterial({map: new THREE.CanvasTexture(canvas), transparent: true}));
+            lMesh.position.set(0, 12, -(size/2)+2); group.add(lMesh);
+
             group.position.set(x, 0, z); scene.add(group); return group;
         }
 
-        createRoom("Lobby", 0, 0, 70, mainBrick);
-        createRoom("Scorpion", -80, 0, 50, runeWall); // Uses Stone Runes
-        createRoom("Event", 80, 0, 50, mainBrick);
-        createRoom("Store", 0, -80, 50, mainBrick);
+        createRoom(0, 0, 70, brick, "GRAND LOBBY", 0x00ffff);
+        createRoom(-80, 0, 50, runeWall, "SCORPION ROOM", 0xff0000);
+        createRoom(80, 0, 50, brick, "EVENT ROOM", 0xffff00);
+        createRoom(0, -80, 50, brick, "MALL STORE", 0x00ff00);
 
-        // 3. TABLES & DAILY CLAIM
-        const mainTable = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.8, 32), new THREE.MeshStandardMaterial({map: feltTex}));
-        mainTable.position.y = 0.4; scene.add(mainTable);
+        // 3. HOVERING LEADERBOARD
+        const lbCanvas = document.createElement('canvas'); lbCanvas.width = 512; lbCanvas.height = 256;
+        const lbCtx = lbCanvas.getContext('2d');
+        const lbTex = new THREE.CanvasTexture(lbCanvas);
+        const lbMesh = new THREE.Mesh(new THREE.PlaneGeometry(6, 3), new THREE.MeshBasicMaterial({map: lbTex, transparent: true, side: THREE.DoubleSide}));
+        lbMesh.position.set(0, 7, 0); scene.add(lbMesh);
 
-        // Daily Table with floating "dailyclaim.jpg"
-        const dailyTable = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 0.8, 32), new THREE.MeshStandardMaterial({color: 0x222222}));
-        dailyTable.position.set(-15, 0.4, 15); scene.add(dailyTable);
+        function updateLB() {
+            lbCtx.clearRect(0,0,512,256); lbCtx.fillStyle = "rgba(0,40,60,0.8)"; lbCtx.fillRect(0,0,512,256);
+            lbCtx.strokeStyle = "#00ffff"; lbCtx.lineWidth = 10; lbCtx.strokeRect(5,5,502,246);
+            lbCtx.fillStyle = "white"; lbCtx.font = "bold 50px Arial";
+            lbCtx.fillText(`BANK: $${stats.chips}`, 50, 100);
+            lbCtx.font = "30px Arial"; lbCtx.fillText(`RANK: ${stats.rank}`, 50, 180); lbTex.needsUpdate = true;
+        }
+
+        // 4. DAILY REWARD & TABLE
+        const table = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.8, 32), new THREE.MeshStandardMaterial({color: 0x004400}));
+        table.position.y = 0.4; scene.add(table);
 
         const dailyLabel = new THREE.Mesh(new THREE.PlaneGeometry(3, 1.5), new THREE.MeshBasicMaterial({map: dailyTex, transparent: true}));
         dailyLabel.position.set(-15, 3, 15); scene.add(dailyLabel);
 
-        // 4. CONTROLS (LEFT-HAND PILOT)
+        // 5. OCULUS CONTROLS RESET
         const controllerL = renderer.xr.getController(1);
         const controllerR = renderer.xr.getController(0);
+        
+        // Menu on Left Wrist
+        const menuGroup = new THREE.Group();
+        const menuBack = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), new THREE.MeshBasicMaterial({color: 0x000000, transparent: true, opacity: 0.8}));
+        menuBack.position.set(0, 0.05, 0); menuBack.rotation.x = -Math.PI/2;
+        menuGroup.add(menuBack); menuGroup.visible = false;
+        controllerL.add(menuGroup);
+
         const laser = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]), new THREE.LineBasicMaterial({color: 0x00ffff}));
         laser.scale.z = 100; controllerL.add(laser);
         cameraRig.add(controllerL, controllerR);
@@ -89,13 +110,18 @@
         const marker = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.5, 32), new THREE.MeshBasicMaterial({color: 0x00ffff}));
         marker.rotation.x = -Math.PI/2; scene.add(marker);
         const raycaster = new THREE.Raycaster();
+        let turnCooldown = false;
 
         renderer.setAnimationLoop(() => {
+            updateLB();
             const session = renderer.xr.getSession();
             if (session) {
                 for (const source of session.inputSources) {
                     const b = source.gamepad.buttons;
+                    const a = source.gamepad.axes;
+
                     if (source.handedness === 'left') {
+                        // Movement (Trigger)
                         const m = new THREE.Matrix4().extractRotation(controllerL.matrixWorld);
                         raycaster.ray.origin.setFromMatrixPosition(controllerL.matrixWorld);
                         raycaster.ray.direction.set(0, 0, -1).applyMatrix4(m);
@@ -105,8 +131,19 @@
                             marker.position.copy(floorHit.point); marker.visible = true;
                             if (b[0].pressed) cameraRig.position.copy(floorHit.point);
                         }
+                        // Left "Y" Button (Button Index 4 or 5)
+                        if (b[4].pressed || b[5].pressed) {
+                            if (!turnCooldown) { menuGroup.visible = !menuGroup.visible; turnCooldown = true; setTimeout(() => turnCooldown = false, 500); }
+                        }
                     }
-                    if (source.handedness === 'right' && (b[4].pressed || b[5].pressed)) cameraRig.position.set(0, 0, 20);
+                    if (source.handedness === 'right') {
+                        // Snap Turn (Stick)
+                        const sX = a[2] || a[3] || 0;
+                        if (!turnCooldown && Math.abs(sX) > 0.7) {
+                            cameraRig.rotation.y -= Math.sign(sX) * (Math.PI/4);
+                            turnCooldown = true; setTimeout(() => turnCooldown = false, 300);
+                        }
+                    }
                 }
             }
             dailyLabel.rotation.y += 0.01;

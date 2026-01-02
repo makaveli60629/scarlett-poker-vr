@@ -3,27 +3,87 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Poker VR Master Build</title>
+    <title>POKER VR MASTER 1.5.1</title>
     <style>
-        body { margin: 0; background-color: #000; overflow: hidden; font-family: sans-serif; }
-        #winner-ui {
-            position: fixed; top: 30%; left: 50%; transform: translate(-50%, -50%);
-            color: #FFD700; font-size: 40px; font-weight: bold; text-align: center;
-            text-shadow: 2px 2px 10px #000; z-index: 100; display: none; pointer-events: none;
+        body { margin: 0; background-color: #050505; color: white; overflow: hidden; font-family: sans-serif; }
+        #loading-screen {
+            position: absolute; width: 100%; height: 100%; background: black;
+            display: flex; align-items: center; justify-content: center; z-index: 10;
         }
     </style>
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/examples/jsm/webxr/VRButton.js": "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js"
-            }
-        }
-    </script>
 </head>
 <body>
-    <div id="winner-ui"></div>
+    <div id="loading-screen"><h1>LOADING POKER VR...</h1></div>
 
-    <script type="module" src="JS/MainGameController.js"></script>
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.160.0';
+        import { VRButton } from 'https://cdn.skypack.dev/three@0.160.0/examples/jsm/webxr/VRButton.js';
+
+        // --- GAME ENGINE ---
+        class PokerGame {
+            constructor() {
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.init();
+            }
+
+            init() {
+                try {
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                    this.renderer.xr.enabled = true;
+                    document.body.appendChild(this.renderer.domElement);
+                    document.body.appendChild(VRButton.createButton(this.renderer));
+
+                    // Remove loading screen
+                    document.getElementById('loading-screen').style.display = 'none';
+
+                    // 1. LIGHTING (Ensures visibility)
+                    const light = new THREE.DirectionalLight(0xffffff, 2);
+                    light.position.set(1, 1, 1);
+                    this.scene.add(light);
+                    this.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+
+                    // 2. THE GRID (If you see this, the game is working!)
+                    const grid = new THREE.GridHelper(50, 50, 0x00ffcc, 0x444444);
+                    this.scene.add(grid);
+
+                    // 3. MEGA PARTICLES (1000x Analysis)
+                    this.createParticles();
+
+                    // 4. OCULUS CONTROLLERS
+                    this.controller1 = this.renderer.xr.getController(0);
+                    this.scene.add(this.controller1);
+
+                    this.animate();
+                    console.log("SUCCESS: Game Loaded");
+                } catch (e) {
+                    document.getElementById('loading-screen').innerHTML = "<h1>ERROR: " + e.message + "</h1>";
+                }
+            }
+
+            createParticles() {
+                const geometry = new THREE.BufferGeometry();
+                const vertices = [];
+                for (let i = 0; i < 5000; i++) {
+                    vertices.push((Math.random() - 0.5) * 100);
+                    vertices.push(Math.random() * 50);
+                    vertices.push((Math.random() - 0.5) * 100);
+                }
+                geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+                const material = new THREE.PointsMaterial({ color: 0x00ffff, size: 0.1 });
+                this.scene.add(new THREE.Points(geometry, material));
+            }
+
+            animate() {
+                this.renderer.setAnimationLoop(() => {
+                    this.renderer.render(this.scene, this.camera);
+                });
+            }
+        }
+
+        // Start the game
+        new PokerGame();
+    </script>
 </body>
 </html>

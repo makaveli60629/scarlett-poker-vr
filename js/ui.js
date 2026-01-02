@@ -1,23 +1,20 @@
 import * as THREE from 'three';
 
 export class WorldUI {
-    constructor(scene, rig) {
+    constructor(scene) {
         this.scene = scene;
-        this.rig = rig;
-        this.createDailyReward();
-        this.createStore();
+        this.createKiosks();
     }
 
-    createDailyReward() {
-        const board = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.5), new THREE.MeshBasicMaterial({ color: 0xffd700 }));
-        board.position.set(-2, 1.5, -5);
-        this.scene.add(board);
-        // Logic for clicking Daily Reward
-    }
+    createKiosks() {
+        // Daily Reward Cube
+        const reward = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), new THREE.MeshStandardMaterial({ color: 0xffd700 }));
+        reward.position.set(-3, 1, -5);
+        this.scene.add(reward);
 
-    createStore() {
-        const storeSign = new THREE.Mesh(new THREE.PlaneGeometry(2, 1), new THREE.MeshBasicMaterial({ color: 0x0000ff }));
-        storeSign.position.set(2, 2, -5);
-        this.scene.add(storeSign);
+        // Store Kiosk
+        const store = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.5, 0.1), new THREE.MeshStandardMaterial({ color: 0x0000ff }));
+        store.position.set(3, 0.75, -5);
+        this.scene.add(store);
     }
 }

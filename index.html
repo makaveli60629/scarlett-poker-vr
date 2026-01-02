@@ -3,40 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SCORIPON ELITE - FINAL MASTER 2.1.0</title>
+    <title>SCORIPON ELITE - MASTER 2.3.0</title>
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/aframe-blink-controls/dist/aframe-blink-controls.min.js"></script>
     
     <script>
-        // MASTER SHADERS
         AFRAME.registerShader('purple-glow', {
             vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
             fragmentShader: `varying vec2 vUv; void main() { gl_FragColor = vec4(0.7, 0.2, 1.0, 1.0); }`
         });
 
-        // CONSOLIDATED GAME ENGINE
         AFRAME.registerComponent('poker-master-engine', {
             init: function () {
                 this.balance = 5000;
                 this.rank = "ELITE";
-                this.menuOpen = false;
                 this.playerEl = document.querySelector('#player');
-                this.menuEl = document.querySelector('#hand-menu');
-                this.boardText = document.querySelector('#world-leaderboard-text');
-                
-                // Watch Elements
-                this.timeText = document.querySelector('#w-time');
-                this.moneyText = document.querySelector('#w-money');
-                this.rankText = document.querySelector('#w-rank');
-
-                // Controller Listeners
-                window.addEventListener('ybuttondown', () => {
-                    this.menuOpen = !this.menuOpen;
-                    this.menuEl.setAttribute('visible', this.menuOpen);
-                });
             },
             tick: function() {
-                // 12-HOUR STANDARD TIME
                 const now = new Date();
                 let hours = now.getHours();
                 const ampm = hours >= 12 ? 'PM' : 'AM';
@@ -44,19 +27,19 @@
                 const mins = now.getMinutes().toString().padStart(2, '0');
                 const timeStr = `${hours}:${mins}${ampm}`;
 
-                // Update UI Colors (Red Time, Purple Money, Blue Rank)
-                if(this.timeText) this.timeText.setAttribute('value', timeStr);
-                if(this.moneyText) this.moneyText.setAttribute('value', `$${this.balance}`);
-                if(this.rankText) this.rankText.setAttribute('value', this.rank);
-
+                // Update Watch
+                document.querySelector('#w-time').setAttribute('value', timeStr);
+                document.querySelector('#w-money').setAttribute('value', `$${this.balance}`);
+                document.querySelector('#w-rank').setAttribute('value', this.rank);
+                
                 // Update Hover Board
-                if(this.boardText) this.boardText.setAttribute('value', `BANK: $${this.balance}\nRANK: ${this.rank}`);
+                document.querySelector('#world-leaderboard-text').setAttribute('value', `BANK: $${this.balance}\nRANK: ${this.rank}`);
 
-                // AUTO-SIT LOGIC
+                // AUTO-SIT
                 let playerPos = this.playerEl.getAttribute('position');
                 let distToTable = Math.sqrt(Math.pow(playerPos.x - 0, 2) + Math.pow(playerPos.z - (-4), 2));
                 if (distToTable < 1.7) {
-                    this.playerEl.setAttribute('position', "0 0.6 -3");
+                    this.playerEl.setAttribute('position', "0 0.8 -3.5");
                 }
             }
         });
@@ -74,61 +57,51 @@
             <img id="tex-brand" src="assets/textures/Scoripon room brand.jpg">
         </a-assets>
 
-        <a-sky color="#87CEEB"></a-sky> 
+        <a-sky color="#000"></a-sky> 
         <a-light type="ambient" intensity="1.2"></a-light>
-        <a-light type="point" position="0 10 0" intensity="1.5"></a-light>
+        <a-light type="point" position="0 10 20" intensity="1.5"></a-light>
 
         <a-entity id="player" position="0 0 20">
             <a-camera id="cam"><a-cursor visible="false"></a-cursor></a-camera>
-            
-            <a-entity id="leftHand" 
-                      hand-tracking-controls="hand: left; modelColor: #5c4033;" 
-                      oculus-touch-controls="hand: left"
+            <a-entity id="leftHand" hand-tracking-controls="hand: left; modelColor: #5c4033;" oculus-touch-controls="hand: left"
                       blink-controls="cameraRig: #player; teleportOrigin: #cam; snapImage: #tex-glow; startEvents: pinchstarted, triggerdown; endEvents: pinchended, triggerup;">
-                
-                <a-entity id="watch-mesh" position="0 0.03 0.05" rotation="-90 0 0">
+                <a-entity position="0 0.03 0.05" rotation="-90 0 0">
                     <a-box width="0.04" height="0.035" depth="0.01" color="#000">
                         <a-text id="w-time" color="red" scale="0.04 0.04 0.04" position="0 0.01 0.006" align="center"></a-text>
                         <a-text id="w-money" color="#A020F0" scale="0.03 0.03 0.03" position="0 0 0.006" align="center"></a-text>
                         <a-text id="w-rank" color="blue" scale="0.03 0.03 0.03" position="0 -0.01 0.006" align="center"></a-text>
                     </a-box>
-                    <a-torus radius="0.022" radius-tubular="0.002" color="#111" rotation="90 0 0"></a-torus>
                 </a-entity>
-
-                <a-plane id="hand-menu" position="0 0.2 0" width="0.15" height="0.15" color="#111" visible="false">
-                    <a-text value="STORE\nLOBBY\nPOKER" align="center" scale="0.08 0.08 0.08" position="0 0 0.01" color="white"></a-text>
-                </a-plane>
             </a-entity>
-
             <a-entity id="rightHand" hand-tracking-controls="hand: right; modelColor: #5c4033;" oculus-touch-controls="hand: right"></a-entity>
         </a-entity>
 
         <a-plane rotation="-90 0 0" width="200" height="200" src="#tex-floor" repeat="40 40"></a-plane>
 
-        <a-entity id="lobby-room" position="0 0 25">
+        <a-entity id="lobby" position="0 0 25">
             <a-box position="0 4.5 -10" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
             <a-box position="0 4.5 10" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
             <a-box position="-10 4.5 0" rotation="0 90 0" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
             <a-box position="10 4.5 0" rotation="0 -90 0" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
-            <a-plane position="0 9 0" rotation="90 0 0" width="20" height="20" color="#050505"></a-plane>
+            <a-plane position="0 9 0" rotation="90 0 0" width="20" height="20" color="#111"></a-plane>
+            
+            <a-box id="daily-table" position="0 0.5 -5" width="3" height="1" depth="1.5" src="#tex-trim">
+                <a-text value="DAILY REWARD" position="0 1.2 0" align="center" color="#FFD700" scale="2 2 2"></a-text>
+                <a-box width="3.1" height="0.1" depth="1.6" position="0 0.5 0" material="shader: purple-glow;"></a-box>
+            </a-box>
 
-            <a-box position="-6 0.4 0" width="3" height="0.8" depth="1.5" src="#tex-trim">
-                <a-box width="3.1" height="0.1" depth="1.6" position="0 0.4 0" material="shader: purple-glow;"></a-box>
-            </a-box>
-            <a-box position="6 0.4 0" width="3" height="0.8" depth="1.5" src="#tex-trim">
-                <a-box width="3.1" height="0.1" depth="1.6" position="0 0.4 0" material="shader: purple-glow;"></a-box>
-            </a-box>
+            <a-box position="-6 0.4 0" width="3" height="0.8" depth="1.5" src="#tex-trim"></a-box>
+            <a-box position="6 0.4 0" width="3" height="0.8" depth="1.5" src="#tex-trim"></a-box>
         </a-entity>
 
         <a-entity id="poker-room" position="0 0 -5">
             <a-box position="0 4.5 -15" width="30" height="9" depth="0.2" src="#tex-brick" repeat="6 3">
-                <a-plane position="0 0.5 0.21" width="12" height="6" src="#tex-art"></a-plane>
-                <a-box position="0 4.4 0.22" width="30.1" height="0.15" material="shader: purple-glow;"></a-box>
-                <a-box position="0 -4.4 0.22" width="30.1" height="0.15" material="shader: purple-glow;"></a-box>
+                <a-plane position="0 0.5 0.21" width="12" height="6" src="#tex-art"></a-plane> <a-box position="0 4.4 0.22" width="30.1" height="0.15" material="shader: purple-glow;"></a-box>
             </a-box>
             <a-box position="0 4.5 15" width="30" height="9" depth="0.2" src="#tex-brick" repeat="6 3"></a-box>
             <a-box position="-15 4.5 0" rotation="0 90 0" width="30" height="9" depth="0.2" src="#tex-brick" repeat="6 3"></a-box>
             <a-box position="15 4.5 0" rotation="0 -90 0" width="30" height="9" depth="0.2" src="#tex-brick" repeat="6 3"></a-box>
+            <a-plane position="0 9 0" rotation="90 0 0" width="30" height="30" color="#050505"></a-plane>
 
             <a-entity position="0 9 -8" rotation="20 0 0">
                 <a-plane width="9" height="3" color="#000" opacity="0.9">
@@ -139,7 +112,8 @@
             <a-entity id="poker-table" position="0 0.7 -4">
                 <a-cylinder radius="1.8" height="0.1" scale="1 1 2.5" color="#076324"></a-cylinder>
                 <a-torus radius="1.8" radius-tubular="0.1" rotation="90 0 0" scale="1 2.5 1" src="#tex-trim"></a-torus>
-                <a-text value="POT WINNER" position="0 1.5 0" align="center" color="#FFD700" visible="false"></a-text>
+                <a-cylinder position="0.5 0.1 0" radius="0.1" height="0.3" color="red"></a-cylinder>
+                <a-cylinder position="0.7 0.1 0.2" radius="0.1" height="0.2" color="blue"></a-cylinder>
             </a-entity>
         </a-entity>
 
@@ -148,8 +122,8 @@
             <a-box position="0 4.5 10" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
             <a-box position="-10 4.5 0" rotation="0 90 0" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
             <a-box position="10 4.5 0" rotation="0 -90 0" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
-            <a-box position="0 0.5 0" width="1" height="1" depth="1" src="#tex-trim">
-                <a-text value="PREMIUM DECK" position="0 1.2 0" align="center" color="white"></a-text>
+            <a-box position="0 0.5 0" width="1.2" height="1.2" depth="1.2" src="#tex-trim">
+                <a-text value="PREMIUM DECK" position="0 1 0" align="center" color="white"></a-text>
             </a-box>
         </a-entity>
 

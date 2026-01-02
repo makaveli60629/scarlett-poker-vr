@@ -1,74 +1,87 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
+import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerModelFactory.js';
 
-// --- INITIALIZE ---
+// --- INITIALIZATION ---
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87CEEB); // Sky Blue
+scene.background = new THREE.Color(0x111111); // Dark grey, not pure black
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-renderer.setPixelRatio(window.devicePixelRatio);
+const cameraGroup = new THREE.Group(); 
+scene.add(cameraGroup);
+cameraGroup.add(camera);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 
-// --- PLAYER RIG (Your Logic) ---
-const playerGroup = new THREE.Group();
-playerGroup.add(camera);
-scene.add(playerGroup);
+// --- 1. FLOOR & ENVIRONMENT ---
+// This creates a solid ground so you know where you are.
+const floorGeo = new THREE.PlaneGeometry(100, 100);
+const floorMat = new THREE.MeshStandardMaterial({ color: 0x222222 }); 
+const floor = new THREE.Mesh(floorGeo, floorMat);
+floor.rotation.x = -Math.PI / 2; 
+scene.add(floor);
 
-// --- LIGHTING ---
-const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5);
-scene.add(light);
+// A simple grid to help with depth perception
+const grid = new THREE.GridHelper(100, 100, 0x00ff00, 0x444444);
+scene.add(grid);
 
-// --- THE 4 WALLS (No Table Yet) ---
-// Using Basic Material so it cannot crash the renderer
-const wallMat = new THREE.MeshBasicMaterial({ color: 0x8B4513 }); // Fallback Brown
+// --- 2. THE CAMERA (SET TO FLOOR) ---
+// Per your request: Camera is back at 0, 0, 0 (The Floor)
+cameraGroup.position.set(0, 0, 0); 
 
-// Texture Injection Logic
-const loader = new THREE.TextureLoader();
-loader.load('assets/texture/brick.jpg', (tex) => {
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(4, 2);
-    wallMat.map = tex;
-    wallMat.needsUpdate = true;
-});
+// --- 3. LOCOMOTION (Oculus Thumbstick) ---
+let controller1, controller2;
+const speed = 0.05;
 
-const wallGeo = new THREE.PlaneGeometry(20, 10);
-const createWall = (x, z, ry) => {
-    const w = new THREE.Mesh(wallGeo, wallMat);
-    w.position.set(x, 5, z);
-    w.rotation.y = ry;
-    scene.add(w);
-};
-
-// Layout: 4 Walls
-createWall(0, -10, 0);          // Back
-createWall(0, 10, Math.PI);     // Front
-createWall(-10, 0, Math.PI/2);  // Left
-createWall(10, 0, -Math.PI/2); // Right
-
-// --- WATCH LOGIC (Saved for next step) ---
-const leftController = renderer.xr.getController(0);
-playerGroup.add(leftController);
-
-// --- MOVEMENT LOOP ---
-function update() {
-    const session = renderer.xr.getSession();
-    if (session) {
-        for (const source of session.inputSources) {
-            if (source.gamepad && source.handedness === 'left') {
-                const axes = source.gamepad.axes;
-                // Move based on stick input (X: Axis 2, Y: Axis 3)
-                playerGroup.position.z += axes[3] * 0.05;
-                playerGroup.position.x += axes[2] * 0.05;
-            }
+function handleLocomotion() {
+    if (renderer.xr.isPresenting) {
+        const session = renderer.xr.getSession();
+        if (session && session.inputSources) {
+            session.inputSources.forEach((source) => {
+                if (source.gamepad && source.handedness === 'left') {
+                    // Left Stick for Movement
+                    const axes = source.gamepad.axes; // [0]=x, [1]=y
+                    cameraGroup.position.x += axes[2] * speed;
+                    cameraGroup.position.z += axes[3] * speed;
+                }
+            });
         }
     }
 }
 
+// --- 4. OCULUS CONTROLLERS ---
+const controllerModelFactory = new XRControllerModelFactory();
+controller1 = renderer.xr.getController(0);
+controller2 = renderer.xr.getController(1);
+cameraGroup.add(controller1, controller2);
+
+const grip1 = renderer.xr.getControllerGrip(0);
+grip1.add(controllerModelFactory.createControllerModel(grip1));
+cameraGroup.add(grip1);
+
+const grip2 = renderer.xr.getControllerGrip(1);
+grip2.add(controllerModelFactory.createControllerModel(grip2));
+cameraGroup.add(grip2);
+
+// --- 5. LIGHTING ---
+const light = new THREE.DirectionalLight(0xffffff, 1);
+light.position.set(5, 10, 7.5);
+scene.add(light);
+scene.add(new THREE.AmbientLight(0x404040, 2));
+
+// --- RENDER LOOP ---
 renderer.setAnimationLoop(() => {
-    update();
+    handleLocomotion(); // Run movement every frame
     renderer.render(scene, camera);
 });
+
+// SPEECH CONFIRMATION
+function announce(text) {
+    const msg = new SpeechSynthesisUtterance(text);
+    window.speechSynthesis.speak(msg);
+}
+announce("Locomotion active. Camera reset to floor level.");

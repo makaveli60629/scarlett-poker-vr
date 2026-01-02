@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Poker VR - Update 1.4 (Textures)</title>
+    <title>Poker VR - Update 1.4 (Bright Sky)</title>
     <style>
-        body { margin: 0; background-color: #000; overflow: hidden; }
+        body { margin: 0; background-color: #87CEEB; overflow: hidden; }
     </style>
 </head>
 <body>
@@ -26,36 +26,47 @@
         let controller1, controller2;
         let isSeated = false;
 
-        // Texture Loader
         const texLoader = new THREE.TextureLoader();
 
         init();
 
         function init() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x050505);
+            
+            // --- ADDING THE SKY (No more dark ceiling) ---
+            scene.background = new THREE.Color(0x87CEEB); // Sky Blue
+            const fog = new THREE.Fog(0x87CEEB, 1, 50);
+            scene.fog = fog;
 
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
             
-            // --- PERMANENT PLAYER RIG ---
+            // PERMANENT PLAYER RIG
             playerRig = new THREE.Group();
             playerRig.add(camera);
             scene.add(playerRig);
-            playerRig.position.y = 1.6; // Permanent height fix
+            playerRig.position.y = 1.6; 
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
-            renderer.xr.setReferenceSpaceType('local'); // Final fix for black screen
+            renderer.xr.setReferenceSpaceType('local'); 
             
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
-            // Lighting
-            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-            const spotLight = new THREE.PointLight(0xffffff, 1);
-            spotLight.position.set(0, 5, -3);
-            scene.add(spotLight);
+            // --- INTENSE LIGHTING ---
+            // 1. Hemisphere Light (Overall brightness from sky/ground)
+            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5);
+            scene.add(hemiLight);
+
+            // 2. Table Spotlight (Directly over the center of the table)
+            const tableLight = new THREE.SpotLight(0xffffff, 10);
+            tableLight.position.set(0, 4, -3);
+            tableLight.angle = Math.PI / 4;
+            tableLight.penumbra = 0.1;
+            tableLight.decay = 2;
+            tableLight.distance = 10;
+            scene.add(tableLight);
 
             // Oculus Controllers
             const controllerModelFactory = new XRControllerModelFactory();
@@ -77,37 +88,37 @@
         }
 
         function createTexturedWorld() {
-            // 1. FLOOR
+            // FLOOR
             const floorTex = texLoader.load('assets/textures/floor.jpg');
             floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
-            floorTex.repeat.set(8, 8);
+            floorTex.repeat.set(15, 15);
             const floor = new THREE.Mesh(
-                new THREE.PlaneGeometry(20, 20),
+                new THREE.PlaneGeometry(50, 50),
                 new THREE.MeshStandardMaterial({ map: floorTex })
             );
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
 
-            // 2. POKER TABLE (Felt top)
+            // POKER TABLE (Felt top)
             const feltTex = texLoader.load('assets/textures/table_felt.jpg');
             const tableTop = new THREE.Mesh(
-                new THREE.CylinderGeometry(1.5, 1.5, 0.1, 32),
-                new THREE.MeshStandardMaterial({ map: feltTex })
+                new THREE.CylinderGeometry(1.5, 1.5, 0.15, 32),
+                new THREE.MeshStandardMaterial({ map: feltTex, roughness: 0.8 })
             );
             tableTop.position.set(0, 0.9, -3);
             scene.add(tableTop);
 
-            // 3. TABLE BASE (Wood/Metal)
+            // TABLE BASE
             const tableBase = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.5, 0.8, 0.9, 32),
-                new THREE.MeshStandardMaterial({ color: 0x221100 }) // Deep wood
+                new THREE.CylinderGeometry(0.5, 0.7, 0.9, 32),
+                new THREE.MeshStandardMaterial({ color: 0x331a00 })
             );
             tableBase.position.set(0, 0.45, -3);
             scene.add(tableBase);
 
-            // 4. "PLAY GAME" ZONE (The Automatic Seat)
-            const zoneGeo = new THREE.RingGeometry(1.1, 1.3, 32);
-            const zoneMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide, transparent: true, opacity: 0.5 });
+            // SEATING RING (The green marker)
+            const zoneGeo = new THREE.RingGeometry(1.1, 1.2, 32);
+            const zoneMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide });
             const playZone = new THREE.Mesh(zoneGeo, zoneMat);
             playZone.rotation.x = -Math.PI / 2;
             playZone.position.set(0, 0.05, -3);
@@ -115,20 +126,11 @@
         }
 
         function checkGameLogic() {
-            // Player distance to table
             const dist = camera.position.distanceTo(new THREE.Vector3(0, 1.6, -3));
-            
-            // Automatic Sit Down
             if (!isSeated && dist < 1.4) {
                 isSeated = true;
-                console.log("Player is sitting at the table. Dealing cards...");
-                triggerWinDisplay("GOOD LUCK!"); // Initial greeting
+                console.log("Seated! Logic engaged.");
             }
-        }
-
-        function triggerWinDisplay(text) {
-            // Placeholder for the 10-second winner letters
-            console.log("UI POPUP: " + text);
         }
 
         function render() {

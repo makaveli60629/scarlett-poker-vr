@@ -3,45 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SCORIPON ELITE - FINAL PERMANENT 1.6.5</title>
+    <title>SCORIPON ELITE - MASTER 1.7.0</title>
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/aframe-blink-controls/dist/aframe-blink-controls.min.js"></script>
     
     <script>
-        // PURPLE SQUARE GLOW SHADER
         AFRAME.registerShader('purple-glow', {
             vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
             fragmentShader: `varying vec2 vUv; void main() { gl_FragColor = vec4(0.6, 0.1, 1.0, 1.0); }`
         });
 
-        // GLOBAL GAME LOGIC
         AFRAME.registerComponent('poker-engine', {
             init: function () {
                 this.balance = 5000;
                 this.rank = "SCORIPON ELITE";
                 this.watchText = document.querySelector('#watch-stats');
-                this.hudText = document.querySelector('#global-hud-text');
-                this.menuPanel = document.querySelector('#left-hand-menu');
-            },
-            toggleMenu: function() {
-                const vis = this.menuPanel.getAttribute('visible');
-                this.menuPanel.setAttribute('visible', !vis);
+                this.boardText = document.querySelector('#world-leaderboard-text');
             },
             tick: function() {
-                // REAL-TIME CLOCK LOGIC
                 const now = new Date();
-                const hours = now.getHours().toString().padStart(2, '0');
-                const mins = now.getMinutes().toString().padStart(2, '0');
-                const timeStr = `${hours}:${mins}`;
-
-                // Update Watch
+                const timeStr = now.getHours() + ":" + now.getMinutes().toString().padStart(2, '0');
                 if(this.watchText) this.watchText.setAttribute('value', timeStr);
-                
-                // Update Global Leaderboard HUD
-                if(this.hudText) {
-                    this.hudText.setAttribute('value', 
-                        `RANK: ${this.rank}\nBANK: $${this.balance}\nTIME: ${timeStr}`
-                    );
+                if(this.boardText) {
+                    this.boardText.setAttribute('value', `SCORIPON ELITE\nRANK: ${this.rank}\nBANK: $${this.balance}\nTIME: ${timeStr}`);
                 }
             }
         });
@@ -59,43 +43,66 @@
         </a-assets>
 
         <a-sky color="#87CEEB"></a-sky> 
-        <a-light type="ambient" intensity="1.8"></a-light>
-        <a-light type="point" position="0 15 0" intensity="2"></a-light>
+        <a-light type="ambient" intensity="1.5"></a-light>
+        <a-light type="directional" position="-1 10 1" intensity="1.2"></a-light>
 
-        <a-entity id="player" position="0 0 20">
-            <a-camera id="cam">
-                <a-entity position="0 0.8 -1.5">
-                    <a-plane width="1.2" height="0.4" color="#000" opacity="0.6">
-                        <a-text id="global-hud-text" value="" align="center" color="#FFD700" scale="0.4 0.4 0.4"></a-text>
-                    </a-plane>
-                </a-entity>
-            </a-camera>
+        <a-entity id="player" position="0 0 10">
+            <a-camera id="cam"><a-cursor visible="false"></a-cursor></a-camera>
             
             <a-entity id="leftHand" 
                       hand-tracking-controls="hand: left; modelColor: #5c4033;" 
-                      blink-controls="cameraRig: #player; teleportOrigin: #cam; snapImage: #tex-glow; startEvents: pinchstarted; endEvents: pinchended; curveShootingSpeed: 15;">
-                
-                <a-entity id="watch-wrapper" position="0 0.02 0.06" rotation="-90 0 0">
-                    <a-box width="0.04" height="0.025" depth="0.005" color="#111">
-                        <a-text id="watch-stats" color="#0FF" scale="0.06 0.06 0.06" position="0 0 0.006" align="center"></a-text>
+                      blink-controls="cameraRig: #player; teleportOrigin: #cam; snapImage: #tex-glow; startEvents: pinchstarted; endEvents: pinchended; collisionEntities: .nav-mesh;">
+                <a-entity id="watch" position="0 0.02 0.05" rotation="-90 0 0">
+                    <a-box width="0.05" height="0.03" depth="0.005" color="#111">
+                        <a-text id="watch-stats" color="#0FF" scale="0.07 0.07 0.07" position="0 0 0.006" align="center"></a-text>
                     </a-box>
-                    <a-circle radius="0.015" color="white" position="0 -0.04 0" onclick="document.querySelector('[poker-engine]').components['poker-engine'].toggleMenu()"></a-circle>
                 </a-entity>
-
-                <a-plane id="left-hand-menu" position="0 0.15 0" width="0.2" height="0.3" color="#222" visible="false">
-                    <a-text value="LOBBY\nSTORE\nPOKER" align="center" scale="0.15 0.15 0.15" position="0 0 0.01"></a-text>
-                </a-plane>
             </a-entity>
-
             <a-entity id="rightHand" hand-tracking-controls="hand: right; modelColor: #5c4033;"></a-entity>
         </a-entity>
 
-        <a-plane class="nav-mesh" rotation="-90 0 0" width="100" height="100" src="#tex-floor" repeat="20 20"></a-plane>
+        <a-plane class="nav-mesh" rotation="-90 0 0" width="150" height="150" src="#tex-floor" repeat="30 30"></a-plane>
 
-        <a-entity id="lobby" position="0 0 25">
-            <a-box width="15" height="9" depth="20" src="#tex-brand" repeat="2 1" open-ended="true">
-                <a-box position="0 4.4 0" width="15.1" height="0.1" depth="20.1" material="shader: purple-glow;"></a-box>
-                <a-box position="0 -4.4 0" width="15.1" height="0.1" depth="20.1" material="shader: purple-glow;"></a-box>
+        <a-entity id="lobby-room" position="0 0 25">
+            <a-box width="20" height="9" depth="20" src="#tex-brand" repeat="2 1" open-ended="true">
+                <a-box position="0 4.45 0" width="20.1" height="0.1" depth="20.1" material="shader: purple-glow;"></a-box>
+                <a-box position="0 -4.45 0" width="20.1" height="0.1" depth="20.1" material="shader: purple-glow;"></a-box>
             </a-box>
-            <a-entity position="-4 0 -5">
-                <a-box width="
+            
+            <a-entity id="giveaway-area" position="0 0 -5">
+                <a-box width="3" height="1" depth="1.5" src="#tex-trim">
+                    <a-text value="DAILY PICK: $500 - $5000" position="0 1.2 0" align="center" color="#FFD700" scale="2 2 2"></a-text>
+                    <a-cylinder position="0 0.6 0" radius="0.2" height="0.1" color="blue"></a-cylinder>
+                </a-box>
+            </a-entity>
+        </a-entity>
+
+        <a-entity id="poker-room" position="0 0 0">
+            <a-box position="0 4.5 -15" width="30" height="9" src="#tex-brand" repeat="4 2">
+                <a-plane position="0 0.5 0.51" width="12" height="6" src="#tex-art"></a-plane>
+                <a-box position="0 4.45 0.52" width="30.1" height="0.1" material="shader: purple-glow;"></a-box>
+            </a-box>
+
+            <a-entity id="world-leaderboard" position="0 10 -4" rotation="30 0 0">
+                <a-plane width="8" height="4" color="#222" opacity="0.9">
+                    <a-text id="world-leaderboard-text" value="" align="center" color="#FFD700" scale="4 4 4" position="0 0 0.1"></a-text>
+                    <a-box position="0 2 0" width="8.2" height="0.2" material="shader: purple-glow;"></a-box>
+                </a-plane>
+            </a-entity>
+
+            <a-entity id="poker-table" position="0 0.7 -4">
+                <a-cylinder radius="1.8" height="0.1" scale="1 1 2.5" color="#076324"></a-cylinder>
+                <a-torus radius="1.8" radius-tubular="0.1" rotation="90 0 0" scale="1 2.5 1" src="#tex-trim"></a-torus>
+            </a-entity>
+        </a-entity>
+
+        <a-entity id="store-room" position="30 0 0">
+            <a-box width="20" height="9" depth="20" src="#tex-brand">
+                <a-text value="SCORIPON STORE" position="0 5 -9.9" align="center" scale="5 5 5" color="purple"></a-text>
+                <a-box position="0 4.45 0" width="20.1" height="0.1" depth="20.1" material="shader: purple-glow;"></a-box>
+            </a-box>
+        </a-entity>
+
+    </a-scene>
+</body>
+</html>

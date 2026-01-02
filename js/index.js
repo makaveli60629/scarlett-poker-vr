@@ -1,58 +1,41 @@
-/** * Poker VR Update 1.3 Core Logic
- * Handles: Hand Menus, Auto-Sitting, and Winner Displays
+/** * index.js - The Logic & Interactions
  */
-
-AFRAME.registerComponent('play-game-logic', {
+AFRAME.registerComponent('poker-logic', {
     init: function () {
-        this.el.addEventListener('navigation-start', () => {
-            console.log("Sitting down at table...");
-            // Lock player into position
-            const rig = document.querySelector('#rig');
-            rig.setAttribute('movement-controls', 'enabled: false');
-            rig.setAttribute('position', '0 0 -1.2');
-            
-            // Trigger UI
-            this.showWinner("SYSTEM", "READY TO DEAL");
-        });
+        // Winner Display Logic
+        this.winnerUI = document.createElement('a-entity');
+        this.winnerUI.setAttribute('position', '0 3 -5.7');
+        this.winnerUI.setAttribute('text', {align: 'center', width: 6, color: '#39FF14'});
+        this.el.sceneEl.appendChild(this.winnerUI);
     },
 
-    showWinner: function(name, hand) {
-        // Winner UI Logic (10 second rule)
-        let ui = document.querySelector('#winner-ui');
-        if (!ui) {
-            ui = document.createElement('a-entity');
-            ui.setAttribute('id', 'winner-ui');
-            ui.setAttribute('position', '0 2 -3.5');
-            document.querySelector('a-scene').appendChild(ui);
-        }
-        ui.setAttribute('text', {
-            value: `${name} WINS WITH ${hand}`,
-            align: 'center',
-            width: 4,
-            color: '#FFD700'
-        });
-
+    announceWinner: function(msg) {
+        this.winnerUI.setAttribute('text', 'value', msg);
         setTimeout(() => {
-            ui.setAttribute('text', 'value: ');
-        }, 10000);
+            this.winnerUI.setAttribute('text', 'value', '');
+        }, 10000); // 10 Second Rule
     }
 });
 
-// Hand Menu Interaction Logic
+// Initializing the "Brain"
 document.addEventListener('DOMContentLoaded', () => {
-    const btnLobby = document.querySelector('#btn-lobby');
-    const btnStore = document.querySelector('#btn-store');
     const rig = document.querySelector('#rig');
+    const scene = document.querySelector('a-scene');
+    scene.setAttribute('poker-logic', '');
 
-    if(btnLobby) {
-        btnLobby.addEventListener('click', () => {
-            rig.setAttribute('position', '0 0 10');
-        });
-    }
+    // Setup Interaction for Sitting
+    scene.addEventListener('navigation-start', (e) => {
+        if (e.target.id === 'poker-sit-trigger') {
+            rig.setAttribute('position', '0 0 -0.8');
+            scene.components['poker-logic'].announceWinner('YOU WON THE HAND!');
+        }
+    });
 
-    if(btnStore) {
-        btnStore.addEventListener('click', () => {
-            rig.setAttribute('position', '-10 0 0');
-        });
-    }
+    // Daily Grab interaction
+    document.addEventListener('click', (e) => {
+        if (e.target.id === 'daily-grab-box') {
+            e.target.setAttribute('color', '#444');
+            console.log("Chips Claimed!");
+        }
+    });
 });

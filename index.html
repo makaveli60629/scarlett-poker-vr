@@ -3,14 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VR Poker - Permanent Foundation</title>
+    <title>VR Poker - Update 1.3</title>
     <style>
-        body { margin: 0; padding: 0; overflow: hidden; background-color: #000; }
-        #canvas-container { width: 100vw; height: 100vh; }
+        /* This ensures the browser window is never black/empty */
+        body { 
+            margin: 0; 
+            padding: 0; 
+            overflow: hidden; 
+            background-color: #111; /* Dark grey so you know it loaded */
+            font-family: sans-serif;
+        }
+        #canvas-container { 
+            width: 100vw; 
+            height: 100vh; 
+            display: block;
+        }
     </style>
 </head>
 <body>
     <div id="canvas-container"></div>
+
     <script type="importmap">
         {
             "imports": {
@@ -19,6 +31,9 @@
             }
         }
     </script>
-    <script type="module" src="index.js"></script>
+
+    <script type="module">
+        import './index.js';
+    </script>
 </body>
 </html>

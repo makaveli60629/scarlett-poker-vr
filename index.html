@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Poker Master 1.9.5 - True Hand Build</title>
+    <title>Poker Master 1.9.6 - Physical & Menu Sync</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; }
         #VRButton { 
             position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-            padding: 15px 30px !important; background: #1a1a1a !important; color: #00ecff !important;
-            border: 2px solid #00ecff !important; z-index: 1000; border-radius: 12px;
+            padding: 15px 30px !important; background: #111 !important; color: #00ecff !important;
+            border: 2px solid #00ecff !important; z-index: 1000; border-radius: 12px; font-weight: bold;
         }
     </style>
 </head>
@@ -30,15 +30,18 @@
         import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
         let scene, camera, renderer, playerGroup;
-        let hand1, hand2, teleportMarker, teleportLine, handMenu;
+        let hand1, hand2, teleportMarker, teleportLine, wristMenu;
         let raycaster = new THREE.Raycaster();
         const tempMatrix = new THREE.Matrix4();
+
+        // 24-Hour Logic (Placeholder for future persistence)
+        let lastClaimTime = 0;
 
         init();
 
         function init() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x050515);
+            scene.background = new THREE.Color(0x050510);
 
             playerGroup = new THREE.Group();
             playerGroup.position.set(0, 0, 7); 
@@ -48,75 +51,89 @@
             playerGroup.add(camera);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer, { 'optionalFeatures': ['hand-tracking'] }));
 
-            const ambient = new THREE.HemisphereLight(0xffffff, 0x444444, 3);
+            const ambient = new THREE.HemisphereLight(0xffffff, 0x444444, 2);
             scene.add(ambient);
 
-            buildSolidLobby();
-            createStoreEntrance();
+            buildLobby();
+            createDailyTable();
             createTeleportAssets();
-            setupHands();
+            setupComplexionHands();
 
             renderer.setAnimationLoop(render);
         }
 
-        function buildSolidLobby() {
+        function buildLobby() {
+            // FLOOR
             const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({ color: 0x111111 }));
             floor.rotation.x = -Math.PI / 2;
             floor.name = "Floor";
             scene.add(floor);
 
+            // SEALED RED WALLS
             const wallMat = new THREE.MeshStandardMaterial({ color: 0x8B0000 });
             const configs = [
-                { pos: [0, 2.5, -8], rot: 0 }, { pos: [0, 2.5, 8], rot: 0 },
-                { pos: [-8, 2.5, 0], rot: Math.PI/2 }, { pos: [8, 2.5, 0], rot: Math.PI/2 }
+                { pos: [0, 2.5, -8.5], rot: 0 }, { pos: [0, 2.5, 8.5], rot: 0 },
+                { pos: [-8.5, 2.5, 0], rot: Math.PI/2 }, { pos: [8.5, 2.5, 0], rot: Math.PI/2 }
             ];
 
             configs.forEach(cfg => {
-                const wall = new THREE.Mesh(new THREE.BoxGeometry(16, 5, 0.2), wallMat);
+                const wall = new THREE.Mesh(new THREE.BoxGeometry(17, 5, 0.2), wallMat);
                 wall.position.set(...cfg.pos); wall.rotation.y = cfg.rot;
                 scene.add(wall);
-                const trim = new THREE.Mesh(new THREE.BoxGeometry(16.1, 0.2, 0.4), new THREE.MeshStandardMaterial({color: 0x000000}));
+                const trim = new THREE.Mesh(new THREE.BoxGeometry(17.1, 0.2, 0.4), new THREE.MeshStandardMaterial({color: 0x000000}));
                 trim.position.set(cfg.pos[0], 0.1, cfg.pos[2]); trim.rotation.y = cfg.rot;
                 scene.add(trim);
             });
 
-            const table = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.2, 32), new THREE.MeshStandardMaterial({ color: 0x004400 }));
+            // MAIN TABLE
+            const table = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 0.2, 32), new THREE.MeshStandardMaterial({ color: 0x004400 }));
             table.position.set(0, 0.8, 0);
             scene.add(table);
         }
 
-        function createStoreEntrance() {
-            const frame = new THREE.Mesh(new THREE.BoxGeometry(0.1, 3, 2), new THREE.MeshStandardMaterial({color: 0x000000}));
-            frame.position.set(7.9, 1.5, 0);
-            scene.add(frame);
-            const neon = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.3), new THREE.MeshBasicMaterial({color: 0xff00ff, transparent: true, opacity: 0.8}));
-            neon.position.set(7.8, 3.2, 0); neon.rotation.y = -Math.PI/2;
-            scene.add(neon);
+        function createDailyTable() {
+            const tableGroup = new THREE.Group();
+            tableGroup.position.set(-5, 0, -4);
+            scene.add(tableGroup);
+
+            // Table Surface
+            const surf = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 0.1, 32, 1, false, 0, Math.PI), new THREE.MeshStandardMaterial({color: 0x002244}));
+            surf.position.y = 0.85; surf.rotation.y = Math.PI;
+            tableGroup.add(surf);
+
+            // Physical Buttons ($500 - $5000)
+            for(let i=0; i<5; i++) {
+                const btn = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.05, 0.12), new THREE.MeshStandardMaterial({color: 0x00ffcc}));
+                btn.position.set(-0.5 + (i * 0.25), 0.9, -0.1);
+                tableGroup.add(btn);
+            }
         }
 
         function createTeleportAssets() {
             teleportMarker = new THREE.Group();
-            const ring = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.03, 16, 32), new THREE.MeshBasicMaterial({color: 0x00ffcc}));
+            const ring = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.02, 16, 32), new THREE.MeshBasicMaterial({color: 0x00ffcc}));
             ring.rotation.x = -Math.PI/2;
             teleportMarker.add(ring);
             teleportMarker.visible = false;
             scene.add(teleportMarker);
 
-            const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
+            const points = [new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)];
+            const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
             teleportLine = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({color: 0x00ffcc}));
             teleportLine.visible = false;
             scene.add(teleportLine);
         }
 
-        function setupHands() {
+        function setupComplexionHands() {
             const hFactory = new XRHandModelFactory();
-            // Complexion Material
-            const skinMat = new THREE.MeshStandardMaterial({ color: 0xd2b48c, roughness: 0.8 }); 
+            // Complexion: Tan/Skin tone
+            const skinColor = new THREE.Color(0xd2b48c);
 
             hand1 = renderer.xr.getHand(0); // Right
             hand1.add(hFactory.createHandModel(hand1, "mesh"));
@@ -126,44 +143,53 @@
             hand2.add(hFactory.createHandModel(hand2, "mesh"));
             playerGroup.add(hand2);
 
-            // Menu Display (Starts hidden)
-            const menuGeo = new THREE.PlaneGeometry(0.4, 0.3);
-            const menuMat = new THREE.MeshBasicMaterial({ color: 0x001122, transparent: true, opacity: 0.9 });
-            handMenu = new THREE.Mesh(menuGeo, menuMat);
-            handMenu.position.set(0, 0.1, 0);
-            handMenu.rotation.x = -Math.PI/2;
-            handMenu.visible = false;
-            hand2.add(handMenu);
+            // Apply skin tone to meshes once they load
+            hand1.addEventListener('connected', (e) => applySkin(hand1));
+            hand2.addEventListener('connected', (e) => applySkin(hand2));
 
-            // Wrist Watch
-            const watch = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.06), new THREE.MeshStandardMaterial({color: 0x222222}));
-            watch.position.set(0, 0.02, 0.05);
+            // WRIST MENU
+            const menuGeo = new THREE.PlaneGeometry(0.4, 0.25);
+            const menuMat = new THREE.MeshBasicMaterial({ color: 0x001a33, transparent: true, opacity: 0.85 });
+            wristMenu = new THREE.Mesh(menuGeo, menuMat);
+            wristMenu.position.set(0, 0.1, 0);
+            wristMenu.rotation.x = -Math.PI/2;
+            wristMenu.visible = false;
+            hand2.add(wristMenu);
+
+            // WATCH
+            const watch = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.06), new THREE.MeshStandardMaterial({color: 0x111111}));
+            watch.position.set(0, 0.02, 0.04);
             hand2.add(watch);
         }
 
-        function getPinchDist(hand) {
-            if (!hand || !hand.joints) return 10;
-            const thumb = hand.joints['thumb-tip'];
-            const index = hand.joints['index-finger-tip'];
-            if (thumb && index) return thumb.position.distanceTo(index.position);
-            return 10;
+        function applySkin(hand) {
+            hand.traverse(child => {
+                if(child.isMesh) child.material.color.set(0xd2b48c);
+            });
         }
 
-        function render() {
-            // RIGHT HAND PINCH (Movement)
-            if (getPinchDist(hand1) < 0.02) {
+        function getPinch(hand) {
+            if (!hand || !hand.joints) return 10;
+            const t = hand.joints['thumb-tip'];
+            const i = hand.joints['index-finger-tip'];
+            return (t && i) ? t.position.distanceTo(i.position) : 10;
+        }
+
+        function render(time) {
+            // RIGHT HAND TELEPORT
+            if (getPinch(hand1) < 0.015) {
                 tempMatrix.identity().extractRotation(hand1.matrixWorld);
                 raycaster.ray.origin.setFromMatrixPosition(hand1.matrixWorld);
                 raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
                 const hits = raycaster.intersectObjects(scene.children);
-                for (let hit of hits) {
-                    if (hit.object.name === "Floor") {
-                        teleportMarker.position.copy(hit.point);
+                for (let h of hits) {
+                    if (h.object.name === "Floor") {
+                        teleportMarker.position.copy(h.point);
                         teleportMarker.visible = true;
                         teleportLine.visible = true;
                         teleportLine.position.setFromMatrixPosition(hand1.matrixWorld);
-                        teleportLine.lookAt(hit.point);
-                        teleportLine.scale.z = hand1.position.distanceTo(hit.point);
+                        teleportLine.lookAt(h.point);
+                        teleportLine.scale.z = hand1.position.distanceTo(h.point);
                         break;
                     }
                 }
@@ -172,12 +198,8 @@
                 teleportMarker.visible = false; teleportLine.visible = false;
             }
 
-            // LEFT HAND PINCH (Menu Toggle)
-            if (getPinchDist(hand2) < 0.02) {
-                handMenu.visible = true;
-            } else {
-                handMenu.visible = false;
-            }
+            // LEFT HAND WRIST MENU TOGGLE
+            wristMenu.visible = (getPinch(hand2) < 0.015);
 
             renderer.render(scene, camera);
         }

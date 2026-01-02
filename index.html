@@ -1,175 +1,188 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>POKER VR - 2.1.22 RECOVERY MASTER</title>
-    <style> body { margin: 0; background-color: #000; overflow: hidden; } </style>
-</head>
-<body>
-    <script type="module">
-        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
-        import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
+import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+import { VRButton } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/webxr/VRButton.js';
+import { XRControllerModelFactory } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/webxr/XRControllerModelFactory.js';
 
-        // --- 1. MASTER PERSISTENCE ---
-        const MASTER = {
-            stats: JSON.parse(localStorage.getItem('poker_stats_v2')) || { chips: 15000, rank: "LEGEND" },
-            save() { localStorage.setItem('poker_stats_v2', JSON.stringify(this.stats)); }
-        };
+let scene, camera, renderer, controllers = [];
+let playerSatDown = false;
 
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x020205);
-        const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.xr.enabled = true;
-        document.body.appendChild(renderer.domElement);
-        document.body.appendChild(VRButton.createButton(renderer));
+// Assets Path Constant (Ready for 1.4)
+const TEXTURE_PATH = 'assets/textures/';
 
-        const rig = new THREE.Group();
-        rig.add(camera);
-        scene.add(rig);
+init();
+animate();
 
-        // --- 2. FAIL-SAFE ASSET LOADING ---
-        const texLoader = new THREE.TextureLoader();
-        const path = 'assets/textures/';
-        const loadTex = (file) => {
-            const t = texLoader.load(path + file, undefined, undefined, () => console.warn("Missing: " + file));
-            t.wrapS = t.wrapT = THREE.RepeatWrapping;
-            t.repeat.set(5, 5);
-            return t;
-        };
+function init() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x050505); // Dark, high-end atmosphere
 
-        const brick = loadTex('brickwall.jpg');
-        const carpet = loadTex('lobby_carpet.jpg');
-        const goldMarble = loadTex('gold_marble.jpg');
-        const crownTex = loadTex('Crown.jpg');
-        const watchTex = loadTex('watch_gold.jpg');
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 1.6, 5);
 
-        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-        const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-        sun.position.set(5, 15, 5);
-        scene.add(sun);
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    document.body.appendChild(renderer.domElement);
+    document.body.appendChild(VRButton.createButton(renderer));
 
-        // --- 3. ARCHITECTURE (LOBBY, POKER, STORE) ---
-        function createRoom(name, x, z, size, color, texture, doors={n:false, s:false}) {
-            const group = new THREE.Group(); group.position.set(x, 0, z);
-            
-            const floor = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({map: carpet}));
-            floor.rotation.x = -Math.PI/2; floor.userData.isFloor = true; group.add(floor);
-            
-            const wallH = 15;
-            const wallMat = new THREE.MeshStandardMaterial({
-                map: texture, 
-                color: texture ? 0xffffff : color, // Use color if texture fails
-                roughness: name === "Store" ? 0.1 : 0.7,
-                metalness: name === "Store" ? 0.2 : 0
-            });
+    // 1. LIGHTING
+    const mainLight = new THREE.PointLight(0xffffff, 1, 100);
+    mainLight.position.set(0, 5, 0);
+    scene.add(mainLight);
+    scene.add(new THREE.AmbientLight(0x404040, 0.5));
 
-            const wallConfig = [
-                {d:'n', p:[0, 7.5, -size/2], r:0}, {d:'s', p:[0, 7.5, size/2], r:Math.PI},
-                {d:'e', p:[size/2, 7.5, 0], r:-Math.PI/2}, {d:'w', p:[-size/2, 7.5, 0], r:Math.PI/2}
-            ];
+    // 2. THE BIG LOBBY (Removed Arches/Doorways)
+    const lobbySize = 20;
+    const lobbyGeom = new THREE.BoxGeometry(lobbySize, 8, lobbySize);
+    const lobbyMat = new THREE.MeshStandardMaterial({ 
+        color: 0x222222, 
+        side: THREE.BackSide 
+    });
+    const lobby = new THREE.Mesh(lobbyGeom, lobbyMat);
+    scene.add(lobby);
 
-            wallConfig.forEach(cfg => {
-                const wG = new THREE.Group();
-                if(doors[cfg.d]) {
-                    const sideW = (size-8)/2;
-                    const l = new THREE.Mesh(new THREE.BoxGeometry(sideW, wallH, 0.6), wallMat);
-                    l.position.x = -size/2 + sideW/2;
-                    const r = new THREE.Mesh(new THREE.BoxGeometry(sideW, wallH, 0.6), wallMat);
-                    r.position.x = size/2 - sideW/2;
-                    wG.add(l, r); [l, r].forEach(m => m.userData.isWall = true);
-                } else {
-                    const solid = new THREE.Mesh(new THREE.BoxGeometry(size, wallH, 0.6), wallMat);
-                    solid.userData.isWall = true; wG.add(solid);
-                }
-                wG.position.set(...cfg.p); wG.rotation.y = cfg.r; group.add(wG);
-            });
-            scene.add(group); return group;
-        }
+    // Add Top Trim (Matching Bottom Trim)
+    createWallTrim(lobbySize, 8);
+    // Add Pillars at the 4 corners
+    createCornerPillars(lobbySize, 8);
 
-        createRoom("Lobby", 0, 0, 50, 0x444444, brick, {n:true, s:true});
-        createRoom("Store", 0, 80, 40, 0xd4af37, goldMarble, {n:true});
-        createRoom("Poker", 0, -80, 40, 0x220022, brick, {s:true});
+    // 3. VR CONTROLLERS (Oculus Mapping)
+    setupVR();
 
-        // Store Pedestals
-        [crownTex, watchTex, crownTex].forEach((tex, i) => {
-            const p = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 1, 16), new THREE.MeshStandardMaterial({color: 0x111111}));
-            p.position.set(-8 + (i*8), 0.5, 90);
-            const item = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), new THREE.MeshStandardMaterial({map: tex}));
-            item.position.y = 1.1; p.add(item); scene.add(p);
-        });
+    // 4. THE POKER TABLE & HOVER MENU
+    createPokerTable();
+    createHoveringMenu();
 
-        // --- 4. ULTIMATE CONTROLS ---
-        const conL = renderer.xr.getController(1);
-        const conR = renderer.xr.getController(0);
-        rig.add(conL, conR);
+    // 5. "PLAY GAME" AUTOMATIC ZONE
+    createPlayZone();
 
-        // Wrist HUD
-        const wrist = new THREE.Group();
-        wrist.visible = false; wrist.position.set(0.02, 0.05, 0); wrist.rotation.x = -Math.PI/2;
-        conL.add(wrist);
+    window.addEventListener('resize', onWindowResize, false);
+}
 
-        const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 256;
-        const ctx = canvas.getContext('2d');
-        const hudTex = new THREE.CanvasTexture(canvas);
-        wrist.add(new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.12), new THREE.MeshBasicMaterial({map: hudTex, transparent: true})));
+function createWallTrim(size, height) {
+    const trimGeom = new THREE.BoxGeometry(size, 0.2, size);
+    const trimMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
+    
+    const topTrim = new THREE.Mesh(trimGeom, trimMat);
+    topTrim.position.y = height / 2 - 0.1;
+    scene.add(topTrim);
 
-        function drawHUD() {
-            ctx.clearRect(0,0,256,256);
-            ctx.fillStyle = "rgba(0,15,30,0.9)"; ctx.fillRect(0,0,256,256);
-            ctx.fillStyle = "cyan"; ctx.font = "bold 26px Arial"; ctx.fillText(`$${MASTER.stats.chips}`, 30, 60);
-            ctx.fillStyle = "white"; ctx.font = "16px Arial"; ctx.fillText(MASTER.stats.rank, 30, 95);
-            ctx.fillStyle = "gold"; ctx.fillText(new Date().toLocaleTimeString(), 30, 140);
-            hudTex.needsUpdate = true;
-        }
+    const bottomTrim = new THREE.Mesh(trimGeom, trimMat);
+    bottomTrim.position.y = -height / 2 + 0.1;
+    scene.add(bottomTrim);
+}
 
-        const marker = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.4, 32), new THREE.MeshBasicMaterial({color: 0x00ffff}));
-        marker.rotation.x = -Math.PI/2; scene.add(marker);
-        const laser = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]), new THREE.LineBasicMaterial({color: 0x00ffff}));
-        conL.add(laser);
+function createCornerPillars(size, height) {
+    const pillarGeom = new THREE.CylinderGeometry(0.3, 0.3, height, 32);
+    const pillarMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+    const offset = size / 2 - 0.3;
 
-        const rayL = new THREE.Raycaster();
-        let cool = false;
+    const positions = [
+        [offset, 0, offset], [offset, 0, -offset],
+        [-offset, 0, offset], [-offset, 0, -offset]
+    ];
 
-        renderer.setAnimationLoop(() => {
-            drawHUD();
-            const session = renderer.xr.getSession();
-            if (session) {
-                for (const source of session.inputSources) {
-                    const b = source.gamepad.buttons;
-                    const axes = source.gamepad.axes;
+    positions.forEach(pos => {
+        const pillar = new THREE.Mesh(pillarGeom, pillarMat);
+        pillar.position.set(...pos);
+        scene.add(pillar);
+    });
+}
 
-                    if (source.handedness === 'left') {
-                        // Leap / Teleport
-                        rayL.ray.origin.setFromMatrixPosition(conL.matrixWorld);
-                        const m = new THREE.Matrix4().extractRotation(conL.matrixWorld);
-                        rayL.ray.direction.set(0, 0, -1).applyMatrix4(m);
-                        const hits = rayL.intersectObjects(scene.children, true);
-                        if (hits.length > 0) {
-                            laser.scale.z = hits[0].distance;
-                            if (hits[0].object.userData.isFloor) {
-                                marker.visible = true; marker.position.copy(hits[0].point);
-                                if (b[0].pressed) rig.position.set(hits[0].point.x, 0, hits[0].point.z);
-                            } else { marker.visible = false; }
-                        }
-                        // Smooth Walk
-                        rig.position.x += (axes[0] || 0) * 0.15; rig.position.z += (axes[1] || 0) * 0.15;
-                        // Wrist Toggle (Y)
-                        if ((b[4]?.pressed || b[5]?.pressed) && !cool) { wrist.visible = !wrist.visible; cool=true; setTimeout(()=>cool=false, 500); }
-                    }
-                    if (source.handedness === 'right') {
-                        // Snap Turn
-                        const turn = axes[2] || axes[3] || 0;
-                        if (Math.abs(turn) > 0.8 && !cool) {
-                            rig.rotation.y -= Math.sign(turn) * (Math.PI/4);
-                            cool=true; setTimeout(()=>cool=false, 300);
-                        }
-                    }
-                }
-            }
-            renderer.render(scene, camera);
-        });
-    </script>
-</body>
-</html>
+function createHoveringMenu() {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = 256; canvas.height = 128;
+    ctx.fillStyle = 'white';
+    ctx.font = '24px Arial';
+    ctx.fillText('LOBBY MENU', 50, 60);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    const plane = new THREE.Mesh(
+        new THREE.PlaneGeometry(1, 0.5),
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true })
+    );
+    plane.position.set(-2, 2, -2);
+    scene.add(plane);
+}
+
+function createPokerTable() {
+    const table = new THREE.Mesh(
+        new THREE.CylinderGeometry(1.5, 1.5, 0.1, 32),
+        new THREE.MeshStandardMaterial({ color: 0x076324 })
+    );
+    table.position.set(0, 0.8, -2);
+    scene.add(table);
+}
+
+function createPlayZone() {
+    const zone = new THREE.Mesh(
+        new THREE.CircleGeometry(0.8, 32),
+        new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.2 })
+    );
+    zone.rotation.x = -Math.PI / 2;
+    zone.position.set(0, 0.05, -2);
+    zone.name = "PlayZone";
+    scene.add(zone);
+}
+
+function setupVR() {
+    const modelFactory = new XRControllerModelFactory();
+    for (let i = 0; i < 2; i++) {
+        const controller = renderer.xr.getController(i);
+        scene.add(controller);
+        const grip = renderer.xr.getControllerGrip(i);
+        grip.add(modelFactory.createControllerModel(grip));
+        scene.add(grip);
+        controllers.push(controller);
+    }
+}
+
+function checkAutoSit() {
+    const dist = camera.position.distanceTo(new THREE.Vector3(0, 1.6, -2));
+    if (dist < 1.0 && !playerSatDown) {
+        playerSatDown = true;
+        triggerWinNotification("PLAYER SEATED");
+    }
+}
+
+function triggerWinNotification(msg) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = 512; canvas.height = 128;
+    ctx.fillStyle = 'yellow';
+    ctx.font = 'bold 50px Arial';
+    ctx.fillText(msg, 100, 70);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex }));
+    sprite.position.set(0, 2.5, -2);
+    sprite.scale.set(2, 0.5, 1);
+    scene.add(sprite);
+
+    // Highlight player
+    const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.7, 0.8, 32),
+        new THREE.MeshBasicMaterial({ color: 0xffff00, side: THREE.DoubleSide })
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(0, 0.1, -2);
+    scene.add(ring);
+
+    setTimeout(() => {
+        scene.remove(sprite);
+        scene.remove(ring);
+    }, 10000);
+}
+
+function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function animate() {
+    renderer.setAnimationLoop(() => {
+        checkAutoSit();
+        renderer.render(scene, camera);
+    });
+}

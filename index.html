@@ -3,32 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SCORIPON ELITE - MASTER 1.8.6</title>
+    <title>SCORIPON ELITE - MASTER 2.0.0</title>
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/aframe-blink-controls/dist/aframe-blink-controls.min.js"></script>
     
     <script>
-        // MASTER NEON GLOW SHADER
+        // NEON GLOW SHADERS
         AFRAME.registerShader('purple-glow', {
             vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-            fragmentShader: `varying vec2 vUv; void main() { gl_FragColor = vec4(0.6, 0.1, 1.0, 1.0); }`
+            fragmentShader: `varying vec2 vUv; void main() { gl_FragColor = vec4(0.7, 0.2, 1.0, 1.0); }`
         });
 
-        // PERMANENT POKER ENGINE
         AFRAME.registerComponent('poker-master-engine', {
             init: function () {
                 this.balance = 5000;
-                this.rank = "SCORIPON ELITE";
+                this.rank = "ELITE";
+                this.menuOpen = false;
+                this.menuEl = document.querySelector('#hand-menu');
                 this.boardText = document.querySelector('#world-leaderboard-text');
-                this.watchText = document.querySelector('#watch-stats');
+                
+                // Watch Elements
+                this.timeText = document.querySelector('#w-time');
+                this.moneyText = document.querySelector('#w-money');
+                this.rankText = document.querySelector('#w-rank');
+
+                window.addEventListener('ybuttondown', () => {
+                    this.menuOpen = !this.menuOpen;
+                    this.menuEl.setAttribute('visible', this.menuOpen);
+                });
             },
             tick: function() {
                 const now = new Date();
-                const timeStr = now.getHours() + ":" + now.getMinutes().toString().padStart(2, '0');
-                if(this.boardText) {
-                    this.boardText.setAttribute('value', `SCORIPON ELITE\nBANK: $${this.balance}\nRANK: ${this.rank}\nTIME: ${timeStr}`);
-                }
-                if(this.watchText) this.watchText.setAttribute('value', timeStr);
+                let hours = now.getHours();
+                const ampm = hours >= 12 ? 'PM' : 'AM';
+                hours = hours % 12 || 12;
+                const mins = now.getMinutes().toString().padStart(2, '0');
+                const timeStr = `${hours}:${mins}${ampm}`;
+
+                // Update World Board
+                if(this.boardText) this.boardText.setAttribute('value', `BANK: $${this.balance} | RANK: ${this.rank}`);
+                
+                // Update Tiny Watch (Color Coded)
+                if(this.timeText) this.timeText.setAttribute('value', timeStr);
+                if(this.moneyText) this.moneyText.setAttribute('value', `$${this.balance}`);
+                if(this.rankText) this.rankText.setAttribute('value', this.rank);
             }
         });
     </script>
@@ -38,56 +56,72 @@
         
         <a-assets>
             <img id="tex-floor" src="assets/textures/Marblegold floors.jpg">
-            <img id="tex-brick" src="assets/textures/brick wall.jpg"> <img id="tex-trim" src="assets/textures/Table leather trim.jpg">
+            <img id="tex-brick" src="assets/textures/brick wall.jpg">
+            <img id="tex-trim" src="assets/textures/Table leather trim.jpg">
             <img id="tex-glow" src="assets/textures/Teleport glow.jpg">
             <img id="tex-art" src="assets/textures/Casinoart2.jpg">
-            <img id="tex-brand" src="assets/textures/Scoripon room brand.jpg">
         </a-assets>
 
         <a-sky color="#87CEEB"></a-sky> 
         <a-light type="ambient" intensity="1.5"></a-light>
-        <a-light type="point" position="0 10 0" intensity="2"></a-light>
 
-        <a-entity id="player" position="0 0 22">
+        <a-entity id="player" position="0 0 20">
             <a-camera id="cam"><a-cursor visible="false"></a-cursor></a-camera>
             
             <a-entity id="leftHand" 
                       hand-tracking-controls="hand: left; modelColor: #5c4033;" 
                       oculus-touch-controls="hand: left"
-                      blink-controls="cameraRig: #player; teleportOrigin: #cam; snapImage: #tex-glow; startEvents: pinchstarted, triggerdown; endEvents: pinchended, triggerup; collisionEntities: .nav-mesh;">
-                <a-entity id="watch" position="0 0.02 0.05" rotation="-90 0 0">
-                    <a-box width="0.05" height="0.03" depth="0.005" color="#111">
-                        <a-text id="watch-stats" color="#0FF" scale="0.07 0.07 0.07" position="0 0 0.006" align="center"></a-text>
+                      blink-controls="cameraRig: #player; teleportOrigin: #cam; snapImage: #tex-glow; startEvents: pinchstarted, triggerdown; endEvents: pinchended, triggerup;">
+                
+                <a-entity id="watch-mesh" position="0 0.03 0.05" rotation="-90 0 0">
+                    <a-box width="0.04" height="0.035" depth="0.01" color="#000">
+                        <a-text id="w-time" color="#FF0000" scale="0.04 0.04 0.04" position="0 0.01 0.006" align="center"></a-text>
+                        <a-text id="w-money" color="#A020F0" scale="0.03 0.03 0.03" position="0 0 0.006" align="center"></a-text>
+                        <a-text id="w-rank" color="#0000FF" scale="0.03 0.03 0.03" position="0 -0.01 0.006" align="center"></a-text>
                     </a-box>
+                    <a-torus radius="0.022" radius-tubular="0.002" color="#111" rotation="90 0 0"></a-torus>
                 </a-entity>
+
+                <a-plane id="hand-menu" position="0 0.2 0" width="0.15" height="0.15" color="#111" visible="false">
+                    <a-text value="STORE\nEXIT" align="center" scale="0.08 0.08 0.08" position="0 0 0.01"></a-text>
+                </a-plane>
             </a-entity>
 
             <a-entity id="rightHand" hand-tracking-controls="hand: right; modelColor: #5c4033;" oculus-touch-controls="hand: right"></a-entity>
         </a-entity>
 
-        <a-plane class="nav-mesh" rotation="-90 0 0" width="100" height="100" src="#tex-floor" repeat="20 20"></a-plane>
+        <a-plane rotation="-90 0 0" width="200" height="200" src="#tex-floor" repeat="40 40"></a-plane>
 
         <a-entity id="lobby" position="0 0 25">
-            <a-box position="0 4.5 -10" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box> <a-box position="0 4.5 10" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box> <a-box position="-10 4.5 0" rotation="0 90 0" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box> <a-box position="10 4.5 0" rotation="0 -90 0" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box> <a-plane position="0 9 0" rotation="90 0 0" width="20" height="20" color="#111"></a-plane> <a-box position="0 0.5 -5" width="3" height="1" depth="1.5" src="#tex-trim">
-                <a-text value="DAILY GIVEAWAY" position="0 1.2 0" align="center" color="#FFD700" scale="2 2 2"></a-text>
-            </a-box>
+            <a-box position="0 4.5 -10" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
+            <a-box position="0 4.5 10" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
+            <a-box position="-10 4.5 0" rotation="0 90 0" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
+            <a-box position="10 4.5 0" rotation="0 -90 0" width="20" height="9" depth="0.2" src="#tex-brick" repeat="4 2"></a-box>
+            <a-plane position="0 9 0" rotation="90 0 0" width="20" height="20" color="#111"></a-plane>
+
+            <a-entity id="lounge-area" position="0 0 0">
+                <a-box position="-6 0.4 0" width="3" height="0.8" depth="1.5" src="#tex-trim">
+                    <a-box width="3.1" height="0.1" depth="1.6" position="0 0.4 0" material="shader: purple-glow;"></a-box>
+                </a-box>
+                <a-box position="6 0.4 0" width="3" height="0.8" depth="1.5" src="#tex-trim">
+                    <a-box width="3.1" height="0.1" depth="1.6" position="0 0.4 0" material="shader: purple-glow;"></a-box>
+                </a-box>
+            </a-entity>
         </a-entity>
 
         <a-entity id="poker-room" position="0 0 -5">
             <a-box position="0 4.5 -15" width="30" height="9" depth="0.2" src="#tex-brick" repeat="6 3">
                 <a-plane position="0 0.5 0.21" width="12" height="6" src="#tex-art"></a-plane>
-                <a-box position="0 4.4 0.22" width="30" height="0.1" material="shader: purple-glow;"></a-box>
-                <a-box position="0 -4.4 0.22" width="30" height="0.1" material="shader: purple-glow;"></a-box>
+                <a-box position="0 4.4 0.22" width="30.1" height="0.15" material="shader: purple-glow;"></a-box>
+                <a-box position="0 -4.4 0.22" width="30.1" height="0.15" material="shader: purple-glow;"></a-box>
             </a-box>
             <a-box position="0 4.5 15" width="30" height="9" depth="0.2" src="#tex-brick" repeat="6 3"></a-box>
             <a-box position="-15 4.5 0" rotation="0 90 0" width="30" height="9" depth="0.2" src="#tex-brick" repeat="6 3"></a-box>
             <a-box position="15 4.5 0" rotation="0 -90 0" width="30" height="9" depth="0.2" src="#tex-brick" repeat="6 3"></a-box>
-            <a-plane position="0 9 0" rotation="90 0 0" width="30" height="30" color="#050505"></a-plane>
 
-            <a-entity id="leaderboard-3d" position="0 8 -6" rotation="25 0 0">
-                <a-plane width="8" height="3.5" color="#111" opacity="0.9">
-                    <a-text id="world-leaderboard-text" align="center" color="#FFD700" scale="3.5 3.5 3.5" position="0 0 0.1"></a-text>
-                    <a-box position="0 -1.7 0" width="8.2" height="0.1" material="shader: purple-glow;"></a-box>
+            <a-entity position="0 9 -8" rotation="20 0 0">
+                <a-plane width="9" height="3" color="#000" opacity="0.9">
+                    <a-text id="world-leaderboard-text" align="center" color="#FFD700" scale="3 3 3"></a-text>
                 </a-plane>
             </a-entity>
 

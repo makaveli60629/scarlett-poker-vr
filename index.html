@@ -1,107 +1,65 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>SCORPION POKER — OCULUS TEST BUILD 3.6.0</title>
-  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/aframe-blink-controls/dist/aframe-blink-controls.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-physics-system@v4.2.2/dist/aframe-physics-system.min.js"></script>
+<html>
+  <head>
+    <title>Poker VR - Update 1.3 Stable</title>
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://unpkg.com/aframe-environment-component@1.3.2/dist/aframe-environment-component.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
+    <script src="index.js"></script>
+  </head>
+  <body>
+    <a-scene>
+      <a-assets>
+        <img id="brick-wall" src="assets/textures/brick_diffuse.jpg">
+        <img id="table-felt" src="assets/textures/table_brand.jpg">
+        <img id="brand-logo" src="logo.jpg">
+        <a-mixin id="checkpoint" geometry="primitive: cylinder; radius: 0.5; height: 0.1" material="color: #39FF14; opacity: 0.5"></a-mixin>
+      </a-assets>
 
-  <script>
-    AFRAME.registerComponent('scorpion-controls', {
-      init: function () {
-        this.el.addEventListener('model-loaded', () => {
-          const mesh = this.el.getObject3D('mesh');
-          if (mesh) {
-            mesh.traverse(node => {
-              if (node.isMesh) {
-                node.material.color.set('#d2b48c'); // Skin Complexion
-                node.material.roughness = 0.8;
-              }
-            });
-          }
-        });
-      }
-    });
+      <a-entity id="rig" movement-controls="controls: checkpoint" checkpoint-controls="mode: animate">
+        <a-camera id="camera" look-controls position="0 1.6 0">
+            <a-cursor color="#FF0000" fuse="false"></a-cursor>
+        </a-camera>
+        
+        <a-entity id="leftHand" hand-tracking-controls="hand: left; modelStyle: mesh;">
+            <a-entity id="hand-menu" position="0 0.1 0" rotation="-90 0 0" visible="true">
+                <a-plane width="0.2" height="0.3" material="color: #333; opacity: 0.8">
+                    <a-text value="MENU" align="center" position="0 0.1 0.01" scale="0.1 0.1 0.1"></a-text>
+                    <a-box id="btn-lobby" position="0 0.02 0.01" width="0.15" height="0.04" depth="0.01" material="color: #444">
+                        <a-text value="LOBBY" align="center" scale="0.08 0.08 0.08"></a-text>
+                    </a-box>
+                    <a-box id="btn-store" position="0 -0.05 0.01" width="0.15" height="0.04" depth="0.01" material="color: #444">
+                        <a-text value="STORE" align="center" scale="0.08 0.08 0.08"></a-text>
+                    </a-box>
+                </a-plane>
+            </a-entity>
+        </a-entity>
 
-    AFRAME.registerComponent('hud-logic', {
-      tick: function () {
-        const now = new Date();
-        const timeStr = now.getHours().toString().padStart(2,'0') + ":" + now.getMinutes().toString().padStart(2,'0');
-        document.querySelector('#timeDisplay').setAttribute('text', 'value', 'TIME: ' + timeStr);
-      }
-    });
-  </script>
-</head>
-
-<body>
-<a-scene hud-logic physics="gravity: 0">
-  
-  <a-sky color="#1a0033"></a-sky>
-  <a-light type="ambient" intensity="1"></a-light>
-  <a-light type="directional" position="1 4 1" intensity="0.6"></a-light>
-
-  <a-plane id="floor" rotation="-90 0 0" width="50" height="50" color="#111" 
-           material="src: https://cdn.aframe.io/a-blast/assets/img/grid.png; repeat: 50 50; roughness: 1" 
-           static-body class="nav-mesh"></a-plane>
-
-  <a-entity id="Environment">
-    <a-box position="0 2.5 -12.5" width="25" height="5" depth="0.5" color="#8B0000" static-body>
-        <a-box position="0 -2.4 0.3" width="25.1" height="0.2" depth="0.1" color="#000"></a-box>
-        <a-box position="0 2.4 0.3" width="25.1" height="0.2" depth="0.1" color="#000"></a-box>
-    </a-box>
-    <a-box position="0 2.5 12.5"  width="25" height="5" depth="0.5" color="#8B0000" static-body></a-box>
-    <a-box position="-12.5 2.5 0" width="0.5" height="5" depth="25" color="#8B0000" static-body></a-box>
-    <a-box position="12.5 2.5 0"  width="0.5" height="5" depth="25" color="#8B0000" static-body></a-box>
-    
-    <a-box position="-12.3 2.5 -12.3" width="0.8" height="5" depth="0.8" color="#000"></a-box>
-    <a-box position="12.3 2.5 -12.3" width="0.8" height="5" depth="0.8" color="#000"></a-box>
-  </a-entity>
-
-  <a-cylinder position="0 0.8 -4" radius="1.8" height="0.4" color="#004422" static-body></a-cylinder>
-
-  <a-entity position="-7 0 -5">
-    <a-cylinder radius="1.2" height="0.2" color="#002266" position="0 0.8 0" static-body></a-cylinder>
-    <a-text value="DAILY PICK" align="center" position="0 1.8 0" color="#00ffff" width="5"></a-text>
-    <a-sphere position="0 0.9 0" radius="0.1" color="#FFD700"></a-sphere>
-  </a-entity>
-
-  <a-entity position="0 4 -12.1">
-    <a-plane width="6" height="3" color="#000"></a-plane>
-    <a-text value="LEADERBOARD" align="center" position="0 1 0.1" color="#FFD700" width="10"></a-text>
-    <a-text value="QUEEN AURELIUS - $1.2M\nNOVA ACE - $900K" align="center" position="0 -0.2 0.1" color="#00ffff" width="6"></a-text>
-  </a-entity>
-
-  <a-entity id="rig" position="0 0 8" movement-controls="fly: false; speed: 0.3">
-    <a-entity id="camera" camera look-controls position="0 1.6 0">
-      <a-entity position="0 -0.4 -1">
-         <a-text id="cashDisplay" value="CASH: $5,000" color="#00ff00" scale="0.15 0.15 0.15" position="-0.6 0 0"></a-text>
-         <a-text id="timeDisplay" value="TIME: 00:00" color="#00ffff" scale="0.15 0.15 0.15" position="0.4 0 0"></a-text>
+        <a-entity id="rightHand" hand-tracking-controls="hand: right; modelStyle: mesh;"></a-entity>
       </a-entity>
-    </a-entity>
 
-    <a-entity id="leftHand"
-              hand-tracking-controls="hand: left"
-              hand-controls="hand: left"
-              oculus-touch-controls="hand: left"
-              scorpion-controls>
-    </a-entity>
+      <a-entity id="world">
+        <a-box position="0 2.5 -5" width="10" height="5" depth="0.2" material="src: #brick-wall;">
+            <a-plane src="#brand-logo" position="0 0 0.12" width="3" height="1.5" transparent="true"></a-plane>
+        </a-box>
 
-    <a-entity id="rightHand"
-              hand-tracking-controls="hand: right"
-              hand-controls="hand: right"
-              oculus-touch-controls="hand: right"
-              scorpion-controls
-              blink-controls="cameraRig: #rig; 
-                              teleportOrigin: #camera; 
-                              collisionEntities: #floor; 
-                              type: line; 
-                              button: trigger; 
-                              lineColor: #FFD700; 
-                              cursorColor: #FFD700">
-    </a-entity>
-  </a-entity>
+        <a-entity id="poker-table" position="0 0 -2">
+          <a-cylinder radius="2" height="0.1" material="src: #table-felt"></a-cylinder>
+          <a-entity mixin="checkpoint" position="0 0.1 1.5" play-game-logic></a-entity>
+        </a-entity>
 
-</a-scene>
-</body>
+        <a-entity id="lobby-zone" position="0 0 10">
+            <a-box width="5" height="0.1" depth="5" material="color: #111"></a-box>
+            <a-entity mixin="checkpoint" position="0 0.1 -1" event-set__click="_target: #rig; position: 0 0 0"></a-entity>
+        </a-entity>
+
+        <a-entity id="store-zone" position="-10 0 0">
+            <a-box width="5" height="0.1" depth="5" material="color: #111"></a-box>
+            <a-entity mixin="checkpoint" position="1 0.1 0" event-set__click="_target: #rig; position: 0 0 0"></a-entity>
+        </a-entity>
+      </a-entity>
+
+      <a-light type="ambient" intensity="0.6"></a-light>
+    </a-scene>
+  </body>
 </html>

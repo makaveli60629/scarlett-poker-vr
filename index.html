@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>High-Stakes VR - Master Bone Structure 1.7</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; }
+        #vr-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; z-index: 10; }
+        button { padding: 25px 50px; font-size: 1.5rem; background: #0080ff; color: white; border: none; border-radius: 12px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div id="vr-overlay">
+        <h1 style="color:white; font-family:sans-serif;">VR POKER MASTER CORE</h1>
+        <button id="enter-button">START PERMANENT SESSION</button>
+    </div>
+
+<script>
+    // --- CORE GLOBAL STATE ---
+    let scene, camera, renderer, userGroup;
+    let handL, handR, controllerL, controllerR;
+    let menuGroup, laserLine, isMenuOpen = false;
+    let raycaster = new THREE.Raycaster();
+
+    const TEXTURE_PATH = 'assets/textures/';
+
+    function init() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x010103);
+
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        userGroup = new THREE.Group();
+        userGroup.add(camera);
+        scene.add(userGroup);
+
+        // SAFE SPAWN (Lobby Zone)
+        userGroup.position.set(0, 0, 15);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        document.getElementById('enter-button').onclick = () => {
+            navigator.xr.requestSession('immersive-vr', {
+                optionalFeatures: ['local-floor', 'hand-tracking']
+            }).then(session => {
+                renderer.xr.setSession(session);
+                document.getElementById('vr-overlay').style.display = 'none';
+            });
+        };
+
+        setupLighting();
+        buildMasterEnvironment();
+        setupInputSystem();
+        createPermanentMenu();
+        animate();
+    }
+
+    // --- 1. LIGHTING RIG (Audit: More Light in Store) ---
+    function setupLighting() {
+        scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+
+        // Moon Directional Light
+        const moonLight = new THREE.DirectionalLight(0x5555ff, 0.5);
+        moonLight.position.set(-15, 30, -25);
+        scene.add(moonLight);
+
+        // Poker Table Spot
+        const pokerSpot = new THREE.SpotLight(0xffffff, 2);
+        pokerSpot.position.set(0, 10, -5);
+        scene.add(pokerSpot);
+
+        // STORE LIGHTING (Enhanced)
+        const storeLight = new THREE.PointLight(0xffaa00, 1.5, 15);
+        storeLight.position.set(12, 4, 5);
+        scene.add(storeLight);
+    }
+
+    // --- 2. THE WORLD (Big Walls, No Ceiling, Textures Ready) ---
+    function buildMasterEnvironment() {
+        const loader = new THREE.TextureLoader();
+        
+        // Massive Walls (15m Tall)
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a }); // Add loader.load(TEXTURE_PATH + 'wall.jpg') here
+        const wallGeo = new THREE.PlaneGeometry(60, 15);
+        
+        const wallPositions = [
+            { pos: [0, 7.5, -30], rot: [0, 0, 0] },
+            { pos: [0, 7.5, 30], rot: [0, Math.PI, 0] },
+            { pos: [-30, 7.5, 0], rot: [0, Math.PI/2, 0] },
+            { pos: [30, 7.5, 0], rot: [0, -Math.PI/2, 0] }
+        ];
+
+        wallPositions.forEach(wp => {
+            const wall = new THREE.Mesh(wallGeo, wallMat);
+            wall.position.set(...wp.pos);
+            wall.rotation.set(...wp.rot);
+            scene.add(wall);
+            
+            // Neon Trims on every corner
+            const neon = new THREE.Mesh(new THREE.BoxGeometry(60, 0.1, 0.1), new THREE.MeshBasicMaterial({color: 0x00ffff}));
+            neon.position.set(wp.pos[0], 0.1, wp.pos[2]);
+            neon.rotation.set(...wp.rot);
+            scene.add(neon);
+        });
+
+        // Floor
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({color: 0x050505}));
+        floor.rotation.x = -Math.PI / 2;
+        scene.add(floor);
+
+        // MOON
+        const moon = new THREE.Mesh(new THREE.SphereGeometry(3, 32, 32), new THREE.MeshBasicMaterial({color: 0xffffff}));
+        moon.position.set(-20, 40, -40);
+        scene.add(moon);
+
+        // TABLE & CHAIRS
+        const table = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 0.2, 64), new THREE.MeshStandardMaterial({color: 0x076324}));
+        table.position.set(0, 1, -5);
+        scene.add(table);
+
+        for(let i=0; i<6; i++) {
+            const a = (i/6) * Math.PI * 2;
+            const seat = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), new THREE.MeshStandardMaterial({color: 0x222222}));
+            seat.position.set(Math.cos(a)*3.8, 0.35, Math.sin(a)*3.8 - 5);
+            seat.lookAt(0, 0.35, -5);
+            scene.add(seat);
+        }
+    }
+
+    // --- 3. INPUT SYSTEM (Hands + Laser Pointers) ---
+    function setupInputSystem() {
+        handL = renderer.xr.getHand(0);
+        handR = renderer.xr.getHand(1);
+        
+        // Hand Visuals
+        const hGeo = new THREE.SphereGeometry(0.04, 16, 16);
+        const hMat = new THREE.MeshBasicMaterial({color: 0x00ff00});
+        handL.add(new THREE.Mesh(hGeo, hMat));
+        handR.add(new THREE.Mesh(hGeo, hMat));
+
+        // Laser Pointer for Right Hand
+        const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]);
+        laserLine = new THREE.Line(laserGeo, new THREE.LineBasicMaterial({color: 0xff0000}));
+        handR.add(laserLine);
+
+        // Event: Left Pinch = Menu
+        handL.addEventListener('pinchstart', () => {
+            isMenuOpen = !isMenuOpen;
+            menuGroup.visible = isMenuOpen;
+        });
+
+        scene.add(handL, handR);
+    }
+
+    function createPermanentMenu() {
+        menuGroup = new THREE.Group();
+        const locations = [
+            { name: 'Lobby', target: [0, 0, 12] },
+            { name: 'Poker', target: [0, 0, -1] },
+            { name: 'Store', target: [12, 0, 5] }
+        ];
+
+        locations.forEach((loc, i) => {
+            const btn = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.12, 0.05), new THREE.MeshBasicMaterial({color: 0x0000ff}));
+            btn.position.y = 0.3 - (i * 0.18);
+            btn.userData = { target: loc.target };
+            menuGroup.add(btn);
+        });
+        menuGroup.visible = false;
+        scene.add(menuGroup);
+    }
+
+    function handleInteraction() {
+        if(!isMenuOpen) {
+            laserLine.visible = false;
+            return;
+        }
+        laserLine.visible = true;
+
+        // Position Menu
+        const lPos = new THREE.Vector3();
+        handL.getWorldPosition(lPos);
+        menuGroup.position.lerp(new THREE.Vector3(lPos.x, lPos.y + 0.3, lPos.z - 0.3), 0.2);
+        menuGroup.lookAt(camera.position);
+
+        // Laser Collision
+        const tempMatrix = new THREE.Matrix4().extractRotation(handR.matrixWorld);
+        raycaster.ray.origin.setFromMatrixPosition(handR.matrixWorld);
+        raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+
+        const intersects = raycaster.intersectObjects(menuGroup.children);
+        if(intersects.length > 0) {
+            const target = intersects[0].object.userData.target;
+            // Highlight button
+            intersects[0].object.material.color.set(0x00ff00);
+            
+            // Trigger on "Pinch" or proximity
+            const tipR = handR.joints ? handR.joints['index-finger-tip'] : null;
+            if(tipR && tipR.position.distanceTo(intersects[0].object.getWorldPosition(new THREE.Vector3())) < 0.08) {
+                userGroup.position.set(...target);
+                isMenuOpen = false;
+                menuGroup.visible = false;
+            }
+        } else {
+            menuGroup.children.forEach(b => b.material.color.set(0x0000ff));
+        }
+    }
+
+    function animate() {
+        renderer.setAnimationLoop(() => {
+            handleInteraction();
+            renderer.render(scene, camera);
+        });
+    }
+
+    init();
+</script>
+</body>
+</html>

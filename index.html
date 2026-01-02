@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>POKER VR - 2.1.2 FINAL PERMANENT</title>
+    <title>POKER VR - 2.1.3 RESET</title>
     <style> body { margin: 0; background-color: #000; overflow: hidden; } </style>
 </head>
 <body>
@@ -11,10 +11,12 @@
         import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
         import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-        // 1. DATA & CORE SETUP
+        // 1. DATA
         let stats = JSON.parse(localStorage.getItem('poker_master_save')) || { chips: 500, rank: "ROOKIE" };
+
+        // 2. SCENE & LIGHTING (BRIGHTER)
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x010102);
+        scene.background = new THREE.Color(0x050508);
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -23,64 +25,84 @@
         document.body.appendChild(VRButton.createButton(renderer));
 
         const cameraRig = new THREE.Group();
-        cameraRig.position.set(0, 0, 15);
+        cameraRig.position.set(0, 0, 10);
         cameraRig.add(camera);
         scene.add(cameraRig);
 
-        // 2. SKYLIGHT LIGHTING
-        const ambient = new THREE.AmbientLight(0xffffff, 0.5);
-        const skyLight = new THREE.DirectionalLight(0xffffff, 2.5);
-        skyLight.position.set(0, 20, 0); 
-        scene.add(ambient, skyLight);
+        // High Intensity Lights
+        scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+        const sun = new THREE.DirectionalLight(0xffffff, 2.5);
+        sun.position.set(5, 20, 5);
+        scene.add(sun);
 
-        // 3. ARCHITECTURE (70m LOCKDOWN)
-        const lobbySize = 70;
-        const limit = (lobbySize / 2) - 2; // Hard wall boundary
-        
+        // 3. TEXTURES
         const texLoader = new THREE.TextureLoader();
         const path = 'assets/textures/';
         const carpet = texLoader.load(path + 'lobby_carpet.jpg');
-        carpet.wrapS = carpet.wrapT = THREE.RepeatWrapping; carpet.repeat.set(25, 25);
-        
+        const brick = texLoader.load(path + 'brickwall.jpg');
+        [carpet, brick].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; });
+        carpet.repeat.set(20,20); brick.repeat.set(10,2);
+
+        // 4. ARCHITECTURE
+        const lobbySize = 70;
         const floor = new THREE.Mesh(new THREE.PlaneGeometry(lobbySize, lobbySize), new THREE.MeshStandardMaterial({map: carpet}));
         floor.rotation.x = -Math.PI/2; scene.add(floor);
 
-        // Walls with Glowing Baseboard Trim
-        const wallMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a });
-        const trimMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 1 });
-
+        // Solid Walls with Trim
         for(let i=0; i<4; i++) {
-            const wallG = new THREE.Group();
-            const wall = new THREE.Mesh(new THREE.BoxGeometry(lobbySize, 20, 1), wallMat);
-            const trim = new THREE.Mesh(new THREE.BoxGeometry(lobbySize, 0.4, 1.2), trimMat);
-            trim.position.y = -9.8; 
-            wallG.add(wall, trim);
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(lobbySize, 20, 1), new THREE.MeshStandardMaterial({map: brick}));
+            const trim = new THREE.Mesh(new THREE.BoxGeometry(lobbySize, 0.5, 1.1), new THREE.MeshStandardMaterial({color: 0x00ffff, emissive: 0x00ffff}));
+            trim.position.y = -9.75;
+            const wallGroup = new THREE.Group();
+            wallGroup.add(wall, trim);
             const angle = (Math.PI/2) * i;
-            wallG.position.set(Math.sin(angle)*(lobbySize/2), 10, Math.cos(angle)*(lobbySize/2));
-            wallG.rotation.y = angle;
-            scene.add(wallG);
+            wallGroup.position.set(Math.sin(angle)*35, 10, Math.cos(angle)*35);
+            wallGroup.rotation.y = angle;
+            scene.add(wallGroup);
         }
 
-        // 4. DESTINATIONS
-        const createSign = (text, color) => {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            canvas.width = 512; canvas.height = 128;
-            ctx.fillStyle = color; ctx.font = "bold 60px Arial"; ctx.textAlign = "center";
-            ctx.fillText(text, 256, 80);
-            const tex = new THREE.CanvasTexture(canvas);
-            return new THREE.Mesh(new THREE.PlaneGeometry(6, 1.5), new THREE.MeshBasicMaterial({map: tex, transparent: true}));
+        // 5. CENTER TABLE & LEADERBOARD
+        const table = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.8, 32), new THREE.MeshStandardMaterial({color: 0x004400}));
+        table.position.y = 0.4;
+        scene.add(table);
+
+        const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.3, 6, 0.3), new THREE.MeshStandardMaterial({color: 0x222222}));
+        pillar.position.y = 3;
+        scene.add(pillar);
+
+        const hudCanvas = document.createElement('canvas'); hudCanvas.width = 512; hudCanvas.height = 256;
+        const hCtx = hudCanvas.getContext('2d');
+        const hudTex = new THREE.CanvasTexture(hudCanvas);
+        const hudMesh = new THREE.Mesh(new THREE.PlaneGeometry(4, 2), new THREE.MeshBasicMaterial({map: hudTex, transparent: true, side: THREE.DoubleSide}));
+        hudMesh.position.y = 5.5;
+        scene.add(hudMesh);
+
+        function updateHUD() {
+            hCtx.clearRect(0,0,512,256);
+            hCtx.fillStyle = "rgba(0, 50, 50, 0.9)"; hCtx.fillRect(0,0,512,256);
+            hCtx.strokeStyle = "#00ffff"; hCtx.lineWidth = 10; hCtx.strokeRect(5,5,502,246);
+            hCtx.fillStyle = "#fff"; hCtx.font = "bold 50px Arial";
+            hCtx.fillText(`CHIPS: $${stats.chips}`, 50, 100);
+            hCtx.font = "30px Arial"; hCtx.fillText(`RANK: ${stats.rank}`, 50, 180);
+            hudTex.needsUpdate = true;
+        }
+
+        // 6. HOLOGRAM GATES
+        const createGate = (x, z, color, label) => {
+            const gate = new THREE.Group();
+            const ring = new THREE.Mesh(new THREE.TorusGeometry(2, 0.05, 16, 100), new THREE.MeshBasicMaterial({color: color}));
+            ring.rotation.x = Math.PI/2;
+            const beam = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 8, 32, 1, true), new THREE.MeshBasicMaterial({color: color, transparent: true, opacity: 0.2}));
+            beam.position.y = 4;
+            gate.add(ring, beam);
+            gate.position.set(x, 0.1, z);
+            scene.add(gate);
+            return gate;
         };
+        const storeGate = createGate(-20, -20, 0x00ffff);
+        const gameGate = createGate(20, -20, 0xff00ff);
 
-        const store = createSign("MALL STORE", "#00ffff");
-        store.position.set(-25, 4, -25); store.rotation.y = Math.PI/4;
-        scene.add(store);
-
-        const tele = createSign("PLAY GAME", "#ff00ff");
-        tele.position.set(25, 4, -25); tele.rotation.y = -Math.PI/4;
-        scene.add(tele);
-
-        // 5. LEFT-HAND MASTER LOCOMOTION
+        // 7. CONTROLS (LEFT HAND MASTER)
         const controllerL = renderer.xr.getController(1);
         const laser = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]), new THREE.LineBasicMaterial({color: 0x00ffff}));
         laser.scale.z = 100;
@@ -94,6 +116,7 @@
         let turnCooldown = false;
 
         renderer.setAnimationLoop(() => {
+            updateHUD();
             const session = renderer.xr.getSession();
             if (session) {
                 for (const source of session.inputSources) {
@@ -107,16 +130,10 @@
                         
                         const hits = raycaster.intersectObject(floor);
                         if (hits.length > 0) {
-                            // Boundary Lockdown Logic
-                            const cX = Math.max(-limit, Math.min(limit, hits[0].point.x));
-                            const cZ = Math.max(-limit, Math.min(limit, hits[0].point.z));
-                            marker.position.set(cX, 0.05, cZ);
-                            marker.visible = true;
-
-                            if (buttons[0].pressed) cameraRig.position.set(cX, 0, cZ);
+                            marker.position.copy(hits[0].point); marker.visible = true;
+                            if (buttons[0].pressed) cameraRig.position.copy(marker.position);
                         }
 
-                        // Snap Turn
                         const stickX = axes[2] || axes[3] || 0;
                         if (!turnCooldown && Math.abs(stickX) > 0.7) {
                             cameraRig.rotation.y -= Math.sign(stickX) * (Math.PI/4);

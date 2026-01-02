@@ -2,106 +2,114 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Scorpion Poker VR — Update 1.9.8</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scorpion Poker VR — 2.0.1 PERMANENT HANDS</title>
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/aframe-blink-controls/dist/aframe-blink-controls.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-physics-system@v4.2.2/dist/aframe-physics-system.min.js"></script>
 
   <script>
-    // Component to update the Clock and Stats in real-time
-    AFRAME.registerComponent('player-hud', {
+    AFRAME.registerComponent('scorpion-logic', {
       tick: function () {
+        // Clock Update
         const timeDisplay = document.querySelector('#timeDisplay');
         const now = new Date();
-        const timeString = now.getHours() + ":" + now.getMinutes().toString().padStart(2, '0');
-        if(timeDisplay) timeDisplay.setAttribute('text', 'value', 'TIME: ' + timeString);
+        const timeStr = now.getHours().toString().padStart(2,'0') + ":" + now.getMinutes().toString().padStart(2,'0');
+        if(timeDisplay) timeDisplay.setAttribute('text', 'value', 'TIME: ' + timeStr);
+        
+        // Store Portal Logic
+        const rigPos = document.querySelector('#rig').object3D.position;
+        if (rigPos.x > 11 && Math.abs(rigPos.z) < 2) {
+           document.querySelector('#rig').setAttribute('position', '25 0 0');
+        }
       }
     });
 
-    // Hand Color & Pinch Menu Logic
-    AFRAME.registerComponent('scorp-hands', {
+    // FORCE HANDS ONLY COMPONENT
+    AFRAME.registerComponent('force-hands', {
       init: function () {
-        const menu = document.querySelector('#menuPanel');
-        this.el.addEventListener('pinchstart', evt => {
-          if(this.el.id === 'leftHand') {
-            menu.setAttribute('visible', !menu.getAttribute('visible'));
-          }
+        const el = this.el;
+        // Listen for either hand tracking or controller connection
+        el.addEventListener('model-loaded', () => {
+          this.applySkin();
         });
-        // Apply Tan Complexion to hand meshes
-        this.el.addEventListener('model-loaded', () => {
-          const mesh = this.el.getObject3D('mesh');
-          if (mesh) {
-            mesh.traverse(node => {
-              if (node.isMesh) node.material.color.set('#d2b48c');
-            });
-          }
-        });
+      },
+      applySkin: function() {
+        const mesh = this.el.getObject3D('mesh');
+        if (mesh) {
+          mesh.traverse(node => {
+            if (node.isMesh) {
+              node.material.color.set('#d2b48c');
+              node.visible = true; // Ensure hand is always visible
+            }
+          });
+        }
+      },
+      tick: function() {
+        // Double check visibility to ensure controllers don't override
+        const controllerModel = this.el.getObject3D('controller-bundle');
+        if (controllerModel) controllerModel.visible = false;
       }
+    });
+
+    // Menu Toggle Logic
+    window.addEventListener('pinchstart', (evt) => {
+        if(evt.detail.hand === 'left') {
+            const m = document.querySelector('#menuPanel');
+            m.setAttribute('visible', !m.getAttribute('visible'));
+        }
     });
   </script>
 </head>
 
 <body>
-<a-scene
-  player-hud
-  renderer="antialias: true; colorManagement: true"
-  background="color: #050510"
-  webxr="optionalFeatures: hand-tracking">
-
-  <a-sky color="#0a051a"></a-sky>
+<a-scene scorpion-logic physics="gravity: 0">
+  
+  <a-sky color="#05000a"></a-sky>
   <a-light type="ambient" intensity="1"></a-light>
-  <a-light type="point" position="0 4 0" intensity="0.6"></a-light>
 
-  <a-plane id="floor" rotation="-90 0 0" width="50" height="50" color="#111" class="nav-mesh"></a-plane>
+  <a-plane id="floor" rotation="-90 0 0" width="100" height="100" color="#111" static-body></a-plane>
 
-  <a-box position="0 2.5 -10" width="20" height="5" depth="0.2" color="#8B0000">
-    <a-box position="0 -2.4 0.1" width="20.1" height="0.2" depth="0.1" color="#000"></a-box>
+  <a-box position="0 2.5 -12" width="24" height="5" depth="0.5" color="#8B0000" static-body>
+    <a-box position="0 -2.4 0.3" width="24.1" height="0.2" depth="0.1" color="#000"></a-box>
   </a-box>
-  <a-box position="0 2.5 10"  width="20" height="5" depth="0.2" color="#8B0000"></a-box>
-  <a-box position="-10 2.5 0" width="0.2" height="5" depth="20" color="#8B0000"></a-box>
-  <a-box position="10 2.5 0"  width="0.2" height="5" depth="20" color="#8B0000"></a-box>
+  <a-box position="0 2.5 12" width="24" height="5" depth="0.5" color="#8B0000" static-body></a-box>
+  <a-box position="-12 2.5 0" width="0.5" height="5" depth="24" color="#8B0000" static-body></a-box>
+  <a-box position="12 2.5 0" width="0.5" height="5" depth="24" color="#8B0000" static-body></a-box>
 
-  <a-cylinder position="0 0.8 -3" radius="1.5" height="0.2" color="#004422"></a-cylinder>
-
-  <a-entity position="-6 0 -4">
-    <a-cylinder radius="1" height="0.1" color="#002266" position="0 0.8 0"></a-cylinder>
-    <a-entity position="0 1.8 0" 
-              geometry="primitive: plane; width: 1; height: 0.5" 
-              material="color: #00ffff; opacity: 0.4; transparent: true; side: double"
-              text="value: DAILY PICK\nCLAIM NOW; align: center; width: 3"></a-entity>
+  <a-entity position="0 4 -11.4">
+    <a-plane width="5" height="2.5" color="#000"></a-plane>
+    <a-text value="TOP SCORPIONS" align="center" position="0 1 0.1" color="#FFD700" width="8"></a-text>
+    <a-text value="QUEEN AURELIUS - $1.2M\nSCORPION ACE - $850K" align="center" position="0 -0.2 0.1" color="#00ffff" width="5"></a-text>
   </a-entity>
 
-  <a-entity position="9.8 1.5 0" rotation="0 -90 0">
-    <a-box width="2" height="3" depth="0.1" color="#000"></a-box>
-    <a-entity position="0 1.8 0.1" text="value: STORE; color: #ff00ff; align: center; width: 5"></a-entity>
-  </a-entity>
+  <a-cylinder position="0 0.8 -3" radius="1.5" height="0.4" color="#004422" static-body></a-cylinder>
 
-  <a-entity id="rig" position="0 0 5">
-    <a-entity id="camera" camera look-controls position="0 1.6 0"></a-entity>
-
-    <a-entity id="leftHand" hand-tracking-controls="hand: left" scorp-hands>
-      <a-entity position="0 0.15 0" rotation="-20 0 0">
-         <a-entity id="cashDisplay" text="value: CASH: $5,000; color: #00ff00; width: 0.6" position="0 0.05 0"></a-entity>
-         <a-entity id="rankDisplay" text="value: RANK: NOVICE; color: #ffffff; width: 0.6" position="0 0 0"></a-entity>
-         <a-entity id="timeDisplay" text="value: TIME: 00:00; color: #00ffff; width: 0.6" position="0 -0.05 0"></a-entity>
+  <a-entity id="rig" position="0 0 7" kinematic-body>
+    <a-entity id="camera" camera look-controls position="0 1.6 0">
+      <a-entity position="0 0 -1">
+         <a-text id="cashDisplay" value="CASH: $5,000" color="#00ff00" scale="0.15 0.15 0.15" position="-0.6 0.4 0"></a-text>
+         <a-text id="timeDisplay" value="TIME: 00:00" color="#00ffff" scale="0.15 0.15 0.15" position="0.4 0.4 0"></a-text>
       </a-entity>
+    </a-entity>
 
-      <a-box width="0.06" height="0.02" depth="0.06" position="0 0.02 0.04" color="#111"></a-box>
-
-      <a-entity id="menuPanel" visible="false" position="0 0.1 -0.2" rotation="-40 0 0">
+    <a-entity id="leftHand" 
+              hand-tracking-controls="hand: left" 
+              hand-controls="hand: left; handModelStyle: highPoly; color: #d2b48c"
+              force-hands>
+      <a-entity id="menuPanel" visible="false" position="0 0.2 -0.2" rotation="-40 0 0">
         <a-plane width="0.4" height="0.5" color="#001a33" opacity="0.9">
-          <a-text value="MENU" align="center" position="0 0.2 0" width="1"></a-text>
-          <a-text value="Claim $500" align="center" position="0 0.1 0" width="0.8" color="#00ffcc"></a-text>
-          <a-text value="Claim $1000" align="center" position="0 0 0" width="0.8" color="#00ffcc"></a-text>
-          <a-text value="Claim $2500" align="center" position="0 -0.1 0" width="0.8" color="#00ffcc"></a-text>
+          <a-text value="SCORPION MENU" align="center" position="0 0.2 0" width="1"></a-text>
+          <a-text value="CLAIM $500" align="center" position="0 0.05 0" width="0.8" color="#FFD700"></a-text>
+          <a-text value="STATS" align="center" position="0 -0.1 0" width="0.8"></a-text>
         </a-plane>
       </a-entity>
     </a-entity>
 
     <a-entity id="rightHand" 
               hand-tracking-controls="hand: right" 
-              scorp-hands
-              blink-controls="cameraRig: #rig; teleportOrigin: #camera; collisionEntities: #floor; curveShootingSpeed: 12; hitGraphicVisible: true">
+              hand-controls="hand: right; handModelStyle: highPoly; color: #d2b48c"
+              force-hands
+              blink-controls="cameraRig: #rig; teleportOrigin: #camera; collisionEntities: #floor; type: line; lineColor: #FFD700; cursorColor: #FFD700">
     </a-entity>
   </a-entity>
 

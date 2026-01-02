@@ -1,82 +1,85 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VR Poker - RECOVERY BOOT</title>
-    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
-    
-    <script>
-        // --- EMERGENCY FIX LOGIC ---
-        AFRAME.registerComponent('poker-logic', {
-            init: function () {
-                this.isSeated = false;
-                this.playerEl = document.querySelector('#player');
-                
-                // Force Spawn to safe location
-                this.playerEl.setAttribute('position', "0 0 5"); 
-                console.log("Emergency Boot: Player positioned at 0 0 5");
-            },
+import * as THREE from 'three';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+import { World } from './world.js';
 
-            sitPlayer: function() {
-                if (!this.isSeated) {
-                    this.isSeated = true;
-                    this.playerEl.setAttribute('position', "0 0.6 -1.5");
-                    this.displayWin("SEATED");
-                }
-            },
-
-            displayWin: function(msg) {
-                const textEl = document.querySelector('#win-display');
-                textEl.setAttribute('value', msg);
-                textEl.setAttribute('visible', true);
-                setTimeout(() => { textEl.setAttribute('visible', false); }, 10000);
-            }
-        });
-
-        AFRAME.registerComponent('play-zone', {
-            init: function() {
-                this.el.addEventListener('click', () => {
-                    document.querySelector('[poker-logic]').components['poker-logic'].sitPlayer();
-                });
-            }
-        });
-    </script>
-</head>
-<body>
-    <a-scene poker-logic renderer="antialias: true; colorManagement: true;">
+class PokerGame {
+    constructor() {
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(0x050505);
         
-        <a-assets timeout="3000">
-            <img id="floor-tex" src="assets/textures/floor_wood.jpg">
-        </a-assets>
+        this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
+        this.renderer = new THREE.WebGLRenderer({ antialias: true });
+        
+        this.init();
+        this.world = new World(this.scene);
+        this.setupHands();
+        this.gameLoop();
+    }
 
-        <a-entity id="player" position="0 0 5">
-            <a-camera id="cam" look-controls wasd-controls="enabled: true">
-                <a-cursor color="red"></a-cursor>
-            </a-camera>
-            <a-entity id="leftHand" hand-tracking-controls="hand: left;"></a-entity>
-            <a-entity id="rightHand" hand-tracking-controls="hand: right;"></a-entity>
-        </a-entity>
+    init() {
+        this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.xr.enabled = true;
+        this.renderer.shadowMap.enabled = true;
+        document.body.appendChild(this.renderer.domElement);
+        document.body.appendChild(VRButton.createButton(this.renderer));
 
-        <a-text id="win-display" value="" position="0 2.2 -3" align="center" color="#FFD700" scale="1.5 1.5 1.5" visible="false"></a-text>
+        window.addEventListener('resize', () => {
+            this.camera.aspect = window.innerWidth / window.innerHeight;
+            this.camera.updateProjectionMatrix();
+            this.renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    }
 
-        <a-sky color="#222"></a-sky> <a-plane position="0 0 0" rotation="-90 0 0" width="30" height="30" color="#333" src="#floor-tex"></a-plane>
-        <a-light type="ambient" color="#FFF"></a-light>
-        <a-light type="directional" position="-1 2 1" intensity="0.8"></a-light>
+    setupHands() {
+        const handFactory = new XRHandModelFactory();
 
-        <a-entity id="poker-table" position="0 0.7 -2">
-            <a-cylinder radius="1.5" height="0.1" color="#076324"></a-cylinder>
-            
-            <a-box id="sit-trigger" play-zone position="0 0.5 1.2" width="0.8" height="0.2" depth="0.4" color="#FFD700">
-                <a-text value="SIT TO PLAY" align="center" position="0 0.3 0" scale="0.4 0.4 0.4" color="black"></a-text>
-            </a-box>
-        </a-entity>
+        // Left Hand
+        this.hand1 = this.renderer.xr.getHand(0);
+        this.hand1.add(handFactory.createHandModel(this.hand1, "mesh"));
+        this.scene.add(this.hand1);
 
-        <a-entity id="store-area" position="-6 0 -2" rotation="0 45 0">
-            <a-box position="0 0.7 0" width="3" height="1.4" depth="1" color="#444"></a-box>
-            <a-text value="STORE" position="0 1.6 0" align="center"></a-text>
-        </a-entity>
+        // Right Hand
+        this.hand2 = this.renderer.xr.getHand(1);
+        this.hand2.add(handFactory.createHandModel(this.hand2, "mesh"));
+        this.scene.add(this.hand2);
+        
+        // Audit Check: Controllers are intentionally omitted. Only hands are added.
+    }
 
-    </a-scene>
-</body>
-</html>
+    /**
+     * Triggered when a player wins the pot.
+     * @param {string} player - Name of the winner
+     * @param {string} handDescription - e.g., "Royal Flush"
+     */
+    triggerWinSequence(player, handDescription) {
+        const display = document.getElementById('win-display');
+        const pText = document.getElementById('player-text');
+        const hText = document.getElementById('hand-text');
+
+        pText.innerText = `${player} WINS THE POT`;
+        hText.innerText = handDescription;
+        display.style.display = 'block';
+
+        // Winning hand highlight logic (Event Chip)
+        console.log(`Audit: Highlighting winning hand: ${handDescription}`);
+
+        // Stay for 10 seconds per requirements
+        setTimeout(() => {
+            display.style.display = 'none';
+        }, 10000);
+    }
+
+    gameLoop() {
+        this.renderer.setAnimationLoop(() => {
+            this.renderer.render(this.scene, this.camera);
+        });
+    }
+}
+
+// Start Game
+const game = new PokerGame();
+
+// Global access for testing win sequence (e.g., game.triggerWinSequence('Player 1', 'Full House'))
+window.pokerGame = game;

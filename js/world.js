@@ -1,85 +1,72 @@
 import * as THREE from 'three';
-import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
-import { World } from './world.js';
 
-class PokerGame {
-    constructor() {
-        this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x050505);
+export class World {
+    constructor(scene) {
+        this.scene = scene;
+        this.textureLoader = new THREE.TextureLoader();
+        this.assetsPath = 'assets/textures/';
         
-        this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
-        this.renderer = new THREE.WebGLRenderer({ antialias: true });
-        
-        this.init();
-        this.world = new World(this.scene);
-        this.setupHands();
-        this.gameLoop();
+        this.initLights();
+        this.createTable();
+        this.createRoom();
     }
 
-    init() {
-        this.renderer.setPixelRatio(window.devicePixelRatio);
-        this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.xr.enabled = true;
-        this.renderer.shadowMap.enabled = true;
-        document.body.appendChild(this.renderer.domElement);
-        document.body.appendChild(VRButton.createButton(this.renderer));
+    initLights() {
+        const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+        this.scene.add(ambient);
 
-        window.addEventListener('resize', () => {
-            this.camera.aspect = window.innerWidth / window.innerHeight;
-            this.camera.updateProjectionMatrix();
-            this.renderer.setSize(window.innerWidth, window.innerHeight);
+        const tableLight = new THREE.SpotLight(0xffffff, 1.5);
+        tableLight.position.set(0, 4, 0);
+        tableLight.angle = Math.PI / 4;
+        tableLight.penumbra = 0.3;
+        tableLight.castShadow = true;
+        this.scene.add(tableLight);
+    }
+
+    createTable() {
+        // Table Top with custom noise shader for felt texture
+        const tableGeo = new THREE.CylinderGeometry(1.2, 1.2, 0.1, 64);
+        const tableMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uColor: { value: new THREE.Color(0x1a4a32) }, // Dark Casino Green
+                uTime: { value: 0 }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                varying vec2 vUv;
+                uniform vec3 uColor;
+                float random (vec2 st) {
+                    return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
+                }
+                void main() {
+                    float noise = random(vUv * 500.0);
+                    vec3 finalColor = uColor - (noise * 0.08);
+                    gl_FragColor = vec4(finalColor, 1.0);
+                }
+            `
         });
+
+        const table = new THREE.Mesh(tableGeo, tableMat);
+        table.position.y = 0.9;
+        table.receiveShadow = true;
+        this.scene.add(table);
     }
 
-    setupHands() {
-        const handFactory = new XRHandModelFactory();
-
-        // Left Hand
-        this.hand1 = this.renderer.xr.getHand(0);
-        this.hand1.add(handFactory.createHandModel(this.hand1, "mesh"));
-        this.scene.add(this.hand1);
-
-        // Right Hand
-        this.hand2 = this.renderer.xr.getHand(1);
-        this.hand2.add(handFactory.createHandModel(this.hand2, "mesh"));
-        this.scene.add(this.hand2);
-        
-        // Audit Check: Controllers are intentionally omitted. Only hands are added.
-    }
-
-    /**
-     * Triggered when a player wins the pot.
-     * @param {string} player - Name of the winner
-     * @param {string} handDescription - e.g., "Royal Flush"
-     */
-    triggerWinSequence(player, handDescription) {
-        const display = document.getElementById('win-display');
-        const pText = document.getElementById('player-text');
-        const hText = document.getElementById('hand-text');
-
-        pText.innerText = `${player} WINS THE POT`;
-        hText.innerText = handDescription;
-        display.style.display = 'block';
-
-        // Winning hand highlight logic (Event Chip)
-        console.log(`Audit: Highlighting winning hand: ${handDescription}`);
-
-        // Stay for 10 seconds per requirements
-        setTimeout(() => {
-            display.style.display = 'none';
-        }, 10000);
-    }
-
-    gameLoop() {
-        this.renderer.setAnimationLoop(() => {
-            this.renderer.render(this.scene, this.camera);
+    createRoom() {
+        // Floor using local texture assets
+        const floorGeo = new THREE.PlaneGeometry(10, 10);
+        const floorMat = new THREE.MeshStandardMaterial({ 
+            color: 0x222222,
+            roughness: 0.8 
         });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        this.scene.add(floor);
     }
 }
-
-// Start Game
-const game = new PokerGame();
-
-// Global access for testing win sequence (e.g., game.triggerWinSequence('Player 1', 'Full House'))
-window.pokerGame = game;

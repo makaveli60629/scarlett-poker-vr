@@ -3,240 +3,156 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>High-Stakes VR - Master Permanent Update</title>
+    <title>High-Stakes VR - Night Sky v1.6</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
-        #vr-overlay {
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            color: white; text-align: center; z-index: 10;
-        }
-        button { padding: 20px 40px; font-size: 1.5rem; background: #076324; color: white; border: none; border-radius: 10px; cursor: pointer; }
+        body { margin: 0; overflow: hidden; background: #000; }
+        #overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 10; }
+        button { padding: 20px; font-size: 20px; background: #076324; color: white; border: none; border-radius: 8px; cursor: pointer; }
     </style>
 </head>
 <body>
-    <div id="vr-overlay">
-        <h1>POKER ROOM VR</h1>
-        <button id="start-button">ENTER GAME</button>
-    </div>
-
+    <div id="overlay"><button id="btn">ENTER VR NIGHT</button></div>
 <script>
-    // --- PERSISTENT CORE VARIABLES ---
     let scene, camera, renderer, userGroup;
-    let hands = { left: null, right: null };
-    let menuGroup, leaderboard, winText;
+    let handL, handR, menuGroup;
     let isMenuOpen = false;
-    let playerSitting = false;
 
-    const TEXTURE_PATH = 'assets/textures/';
-
-    // --- INITIALIZATION ---
     function init() {
         scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x050505);
-
-        // User Setup (The Rig)
-        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        scene.background = new THREE.Color(0x020205); // Deep night
+        
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
         userGroup = new THREE.Group();
         userGroup.add(camera);
         scene.add(userGroup);
-
-        // MASTER SPAWN: Start in the Lobby, far from obstructions
-        userGroup.position.set(0, 0, 12); 
+        userGroup.position.set(0, 0, 5); // Safe spawn
 
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
         renderer.xr.enabled = true;
         document.body.appendChild(renderer.domElement);
 
-        document.getElementById('start-button').addEventListener('click', () => {
+        document.getElementById('btn').onclick = () => {
             navigator.xr.requestSession('immersive-vr', {
-                optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
-            }).then(onSessionStarted);
-        });
+                optionalFeatures: ['local-floor', 'hand-tracking']
+            }).then(s => {
+                renderer.xr.setSession(s);
+                document.getElementById('overlay').style.display = 'none';
+            });
+        };
 
-        setupLighting();
-        buildArchitecture();
-        createPokerRoom();
-        createStore();
-        setupInput();
+        createEnvironment();
+        setupHands();
         createVRMenu();
-        
         animate();
     }
 
-    function onSessionStarted(session) {
-        renderer.xr.setSession(session);
-        document.getElementById('vr-overlay').style.display = 'none';
-    }
-
-    // --- LIGHTING RIG ---
-    function setupLighting() {
-        scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-        
-        const centerLight = new THREE.PointLight(0xffffff, 1, 20);
-        centerLight.position.set(0, 5, -5);
-        scene.add(centerLight);
-
-        const storeLight = new THREE.SpotLight(0xffaa00, 0.7);
-        storeLight.position.set(10, 4, 2);
-        scene.add(storeLight);
-    }
-
-    // --- ARCHITECTURE (Room Walls) ---
-    function buildArchitecture() {
-        const wallMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a });
-        
-        // Floor & Ceiling
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({color: 0x0a0a0a}));
-        floor.rotation.x = -Math.PI / 2;
+    function createEnvironment() {
+        // Floor
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(50,50), new THREE.MeshStandardMaterial({color: 0x111111}));
+        floor.rotation.x = -Math.PI/2;
         scene.add(floor);
 
-        const ceiling = floor.clone();
-        ceiling.position.y = 8;
-        ceiling.rotation.x = Math.PI / 2;
-        scene.add(ceiling);
+        // THE MOON (Locking it in)
+        const moon = new THREE.Mesh(
+            new THREE.SphereGeometry(2, 32, 32),
+            new THREE.MeshBasicMaterial({ color: 0xffffaa })
+        );
+        moon.position.set(-10, 25, -20);
+        scene.add(moon);
+        
+        // Moon Glow (Light)
+        const moonLight = new THREE.DirectionalLight(0xaaaaff, 0.5);
+        moonLight.position.copy(moon.position);
+        scene.add(moonLight);
 
-        // Walls
-        const walls = new THREE.Group();
-        const backWall = new THREE.Mesh(new THREE.PlaneGeometry(40, 8), wallMat);
-        backWall.position.set(0, 4, -20);
-        walls.add(backWall);
-
-        const sideWall = new THREE.Mesh(new THREE.PlaneGeometry(40, 8), wallMat);
-        sideWall.rotation.y = Math.PI / 2;
-        sideWall.position.set(-20, 4, 0);
-        walls.add(sideWall);
-
-        const sideWallR = sideWall.clone();
-        sideWallR.position.set(20, 4, 0);
-        walls.add(sideWallR);
-
-        scene.add(walls);
-    }
-
-    // --- POKER ROOM & LEADERSHIP ---
-    function createPokerRoom() {
-        const pokerGroup = new THREE.Group();
-        pokerGroup.position.set(0, 0, -5);
-
-        // Table
+        // Poker Table
         const table = new THREE.Mesh(
-            new THREE.CylinderGeometry(2.5, 2.5, 0.2, 64),
+            new THREE.CylinderGeometry(2.5, 2.5, 0.2, 32),
             new THREE.MeshStandardMaterial({ color: 0x076324 })
         );
-        table.position.y = 1;
-        pokerGroup.add(table);
+        table.position.set(0, 1, -5);
+        scene.add(table);
 
-        // Aligned Seats
+        // 6 Seats
         for(let i=0; i<6; i++) {
-            const angle = (i/6) * Math.PI * 2;
-            const seat = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), new THREE.MeshStandardMaterial({color: 0x222222}));
-            seat.position.set(Math.cos(angle)*3.5, 0.3, Math.sin(angle)*3.5);
-            seat.lookAt(0, 0.3, -5);
-            pokerGroup.add(seat);
+            const a = (i/6) * Math.PI * 2;
+            const s = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({color: 0x222222}));
+            s.position.set(Math.cos(a)*3.5, 0.25, Math.sin(a)*3.5 - 5);
+            scene.add(s);
         }
 
-        // Leaderboard
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        canvas.width = 512; canvas.height = 256;
-        ctx.fillStyle = 'black'; ctx.fillRect(0,0,512,256);
-        ctx.fillStyle = 'gold'; ctx.font = 'bold 30px Arial'; ctx.fillText('TOP PLAYERS', 150, 50);
-        leaderboard = new THREE.Mesh(new THREE.PlaneGeometry(4, 2), new THREE.MeshBasicMaterial({map: new THREE.CanvasTexture(canvas)}));
-        leaderboard.position.set(0, 4, -4);
-        pokerGroup.add(leaderboard);
-
-        scene.add(pokerGroup);
+        // Walls (Wait, you said no ceiling - keeping walls low for "rooftop" feel)
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(50, 2, 0.5), new THREE.MeshStandardMaterial({color: 0x1a1a1a}));
+        wall.position.set(0, 1, -25);
+        scene.add(wall);
     }
 
-    // --- STORE ---
-    function createStore() {
-        const store = new THREE.Group();
-        store.position.set(12, 0, 5);
-        const counter = new THREE.Mesh(new THREE.BoxGeometry(4, 1, 1.5), new THREE.MeshStandardMaterial({color: 0x3d2b1f}));
-        counter.position.y = 0.5;
-        store.add(counter);
-        scene.add(store);
-    }
+    function setupHands() {
+        // Visual Fallback for hands
+        const handGeo = new THREE.SphereGeometry(0.05, 8, 8);
+        const handMat = new THREE.MeshBasicMaterial({color: 0xffffff});
 
-    // --- HANDS & INPUT (Controllers + Wrist Tracking) ---
-    function setupInput() {
-        // Support for Hand Tracking
-        hands.left = renderer.xr.getHand(0);
-        hands.right = renderer.xr.getHand(1);
+        handL = renderer.xr.getHand(0);
+        handR = renderer.xr.getHand(1);
 
-        // Left Pinch to Toggle Menu
-        hands.left.addEventListener('pinchstart', toggleMenu);
+        // Add visible spheres so you can ALWAYS see your hands
+        handL.add(new THREE.Mesh(handGeo, handMat));
+        handR.add(new THREE.Mesh(handGeo, handMat));
 
-        // Support for Controllers (rendered as hands)
-        const controller1 = renderer.xr.getController(0);
-        const controller2 = renderer.xr.getController(1);
-        
-        scene.add(hands.left, hands.right, controller1, controller2);
+        handL.addEventListener('pinchstart', () => {
+            isMenuOpen = !isMenuOpen;
+            menuGroup.visible = isMenuOpen;
+        });
+
+        scene.add(handL, handR);
     }
 
     function createVRMenu() {
         menuGroup = new THREE.Group();
-        const nav = [
-            { name: 'Lobby', t: [0, 0, 10] },
-            { name: 'Play Poker', t: [0, 0, -1.5] },
-            { name: 'Store', t: [10, 0, 5] }
-        ];
-
-        nav.forEach((loc, i) => {
-            const btn = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.1, 0.05), new THREE.MeshStandardMaterial({color: 0x0000ff}));
-            btn.position.y = 0.3 - (i * 0.15);
-            btn.userData = { target: loc.t };
+        const nav = ['Lobby', 'Poker', 'Store'];
+        nav.forEach((name, i) => {
+            const btn = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 0.05), new THREE.MeshBasicMaterial({color: 0x0000ff}));
+            btn.position.y = 0.2 - (i * 0.15);
+            btn.userData = { name: name };
             menuGroup.add(btn);
         });
         menuGroup.visible = false;
         scene.add(menuGroup);
     }
 
-    function toggleMenu() {
-        isMenuOpen = !isMenuOpen;
-        menuGroup.visible = isMenuOpen;
+    function updateMenuPosition() {
         if(isMenuOpen) {
+            // Anchor menu to Left Hand position
             const pos = new THREE.Vector3();
-            hands.left.getWorldPosition(pos);
-            menuGroup.position.set(pos.x, pos.y + 0.3, pos.z - 0.4);
+            handL.getWorldPosition(pos);
+            menuGroup.position.lerp(new THREE.Vector3(pos.x, pos.y + 0.2, pos.z - 0.2), 0.1);
             menuGroup.lookAt(camera.position);
         }
     }
 
-    // --- INTERACTION ENGINE ---
-    function checkCollisions() {
-        if (!isMenuOpen) return;
-        
-        // Right Hand Index Tip
-        const tip = hands.right.joints ? hands.right.joints['index-finger-tip'] : null;
-        if (!tip || !tip.visible) return;
+    function checkInteraction() {
+        const tip = handR.joints ? handR.joints['index-finger-tip'] : null;
+        if (!tip || !isMenuOpen) return;
 
         menuGroup.children.forEach(btn => {
             const bPos = new THREE.Vector3();
             btn.getWorldPosition(bPos);
-            if (tip.position.distanceTo(bPos) < 0.05) {
-                userGroup.position.set(...btn.userData.target);
+            if(tip.position.distanceTo(bPos) < 0.05) {
+                // Teleport Logic
+                if(btn.userData.name === 'Poker') userGroup.position.set(0, 0, -2);
+                if(btn.userData.name === 'Lobby') userGroup.position.set(0, 0, 5);
                 isMenuOpen = false;
                 menuGroup.visible = false;
             }
         });
     }
 
-    // --- WIN SEQUENCE LOGIC ---
-    function triggerWin(name) {
-        // This is your requested Win logic
-        const winPlane = new THREE.Group();
-        // (Text creation logic...)
-        scene.add(winPlane);
-        setTimeout(() => scene.remove(winPlane), 10000); // 10 second duration
-    }
-
     function animate() {
         renderer.setAnimationLoop(() => {
-            checkCollisions();
+            updateMenuPosition();
+            checkInteraction();
             renderer.render(scene, camera);
         });
     }

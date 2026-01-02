@@ -1,109 +1,70 @@
 import * as THREE from 'three';
-import { VRButton } from 'three/examples/jsm/webxr/VRButton';
+import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
+import { createEnvironment } from './environment.js';
 
-class PokerWorld {
-    constructor() {
-        this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x050505); // Dark but not pitch black
-        this.renderer = new THREE.WebGLRenderer({ antialias: true });
-        this.renderer.xr.enabled = true;
-        document.body.appendChild(this.renderer.domElement);
-        document.body.appendChild(VRButton.createButton(this.renderer));
+let scene, camera, renderer, controller1, controller2;
+let wallet = 2500;
 
-        this.init();
-    }
+function init() {
+    scene = new THREE.Scene();
+    
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 1.6, 10);
 
-    init() {
-        this.setupLighting();
-        this.createRooms();
-        this.createPokerTable();
-        this.setupHologram();
-        this.animate();
-    }
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    document.body.appendChild(renderer.domElement);
+    document.body.appendChild(VRButton.createButton(renderer));
 
-    setupLighting() {
-        // Main room light
-        const ambient = new THREE.AmbientLight(0xffffff, 0.4);
-        this.scene.add(ambient);
+    createEnvironment(scene, wallet);
 
-        // Spotlight for the table to make the "Play Zone" pop
-        const tableLight = new THREE.SpotLight(0xffffff, 1.5);
-        tableLight.position.set(0, 10, -5);
-        tableLight.angle = Math.PI / 4;
-        this.scene.add(tableLight);
-    }
+    // OCULUS CONTROLLERS
+    controller1 = renderer.xr.getController(0);
+    scene.add(controller1);
+    controller2 = renderer.xr.getController(1);
+    scene.add(controller2);
 
-    createRooms() {
-        // Red Floor (as you mentioned it's currently showing)
-        const floorGeo = new THREE.PlaneGeometry(100, 100);
-        const floorMat = new THREE.MeshStandardMaterial({ color: 0x8b0000 }); // Deep Red
-        const floor = new THREE.Mesh(floorGeo, floorMat);
-        floor.rotation.x = -Math.PI / 2;
-        this.scene.add(floor);
+    // CONTROLLER VISUALS
+    const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
+    const laserLine = new THREE.Line(laserGeo, new THREE.LineBasicMaterial({ color: 0x00ffff }));
+    laserLine.scale.z = 5;
+    controller1.add(laserLine.clone());
+    controller2.add(laserLine.clone());
 
-        // Brick Walls (3 Rooms + Lobby)
-        // Using a standard box for the room layouts
-        const wallMat = new THREE.MeshStandardMaterial({ color: 0x552222 }); // Placeholder for Brick Texture
-        
-        // Creating the main lobby and the 3 side rooms
-        const createWall = (w, h, d, x, y, z) => {
-            const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
-            mesh.position.set(x, y, z);
-            this.scene.add(mesh);
-        };
+    renderer.setAnimationLoop(render);
+}
 
-        // Back Wall (Lobby)
-        createWall(40, 10, 1, 0, 5, -20);
-        // Left/Right Walls
-        createWall(1, 10, 40, -20, 5, 0);
-        createWall(1, 10, 40, 20, 5, 0);
-    }
+// WIN POPUP LOGIC (10 SECONDS)
+export function showWinNotification(winnerName, handType) {
+    const ui = document.createElement('div');
+    ui.id = "win-popup";
+    ui.style.cssText = `
+        position: fixed; top: 20%; left: 50%; transform: translate(-50%, -50%);
+        background: rgba(0,255,0,0.2); border: 2px solid #00ff00;
+        padding: 40px; color: white; font-family: 'Courier New';
+        text-align: center; font-size: 30px; z-index: 999;
+    `;
+    ui.innerHTML = `<h1>${winnerName} WINS!</h1><h3>${handType}</h3>`;
+    document.body.appendChild(ui);
 
-    createPokerTable() {
-        // The Green Table
-        const tableGeo = new THREE.CylinderGeometry(5, 5, 0.5, 32);
-        const tableMat = new THREE.MeshStandardMaterial({ color: 0x076324 });
-        const table = new THREE.Mesh(tableGeo, tableMat);
-        table.position.set(0, 1, -5);
-        this.scene.add(table);
+    // Auto-remove after 10 seconds per requirements
+    setTimeout(() => {
+        ui.remove();
+    }, 10000);
+}
 
-        // Table Branding (Logo)
-        const logoGeo = new THREE.PlaneGeometry(2, 2);
-        const logoMat = new THREE.MeshBasicMaterial({ 
-            color: 0xffffff, 
-            transparent: true,
-            opacity: 0.8
-            // map: new THREE.TextureLoader().load('your_logo_here.jpg') <- Ready for your file list
-        });
-        const logo = new THREE.Mesh(logoGeo, logoMat);
-        logo.rotation.x = -Math.PI / 2;
-        logo.position.set(0, 1.26, -5); // Sitting right on the felt
-        this.scene.add(logo);
-    }
-
-    setupHologram() {
-        // Wallet Hologram near Plane Tables Zone
-        const hologramGeo = new THREE.BoxGeometry(1, 0.5, 0.1);
-        const hologramMat = new THREE.MeshBasicMaterial({ 
-            color: 0x00ffff, 
-            wireframe: true, 
-            transparent: true, 
-            opacity: 0.5 
-        });
-        const hologram = new THREE.Mesh(hologramGeo, hologramMat);
-        hologram.position.set(-5, 3, -10);
-        this.scene.add(hologram);
-    }
-
-    animate() {
-        this.renderer.setAnimationLoop(() => {
-            this.renderer.render(this.scene, this.camera);
-        });
+// OCULUS AUTO-SIT LOGIC
+function updateLogic() {
+    // If player walks close to the table (Z-axis -5)
+    if (camera.position.z < -5) {
+        camera.position.y = 1.2; // Sit the player down
     }
 }
 
-// Oculus Control Reminder
-// Left Stick: Teleport to Table
-// Right Stick: Turn
-// A Button: Sit Down
-// Trigger: Interact
+function render() {
+    updateLogic();
+    renderer.render(scene, camera);
+}
+
+init();

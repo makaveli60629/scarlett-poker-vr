@@ -6,30 +6,30 @@ export class World {
         this.scene = scene;
         this.renderer = renderer;
         this.playerGroup = playerGroup;
-        this.moveSpeed = 0.05;
-
+        this.handFactory = new XRHandModelFactory();
+        
         this.setupLights();
         this.setupEnvironment();
         this.setupHands();
     }
 
     setupLights() {
-        // Ambient light for general visibility
-        const ambient = new THREE.AmbientLight(0xffffff, 1.0);
+        // Boosted lighting to ensure visibility
+        const ambient = new THREE.AmbientLight(0xffffff, 1.5);
         this.scene.add(ambient);
 
-        // Directional light for depth and shadows
-        const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-        sun.position.set(5, 10, 5);
-        this.scene.add(sun);
+        const pointLight = new THREE.PointLight(0xffffff, 2);
+        pointLight.position.set(0, 3, 0); // Directly over the table
+        this.scene.add(pointLight);
     }
 
     setupEnvironment() {
-        // Floor Grid
-        const grid = new THREE.GridHelper(20, 20, 0x888888, 0x444444);
+        // Floor Grid for spatial reference
+        const grid = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
         this.scene.add(grid);
 
-        // Poker Table (Center of the room)
+        // Poker Table (Positioned at 0,0,0)
+        // Since player is at 0,0,2, you are safely 2 meters away.
         const tableGeo = new THREE.CylinderGeometry(1.2, 1.2, 0.1, 32);
         const tableMat = new THREE.MeshStandardMaterial({ color: 0x076324 });
         const table = new THREE.Mesh(tableGeo, tableMat);
@@ -38,12 +38,11 @@ export class World {
     }
 
     setupHands() {
-        this.handFactory = new XRHandModelFactory();
-
-        // Initialize Hands and add them to the playerGroup (so they move with you)
+        // Left & Right Hands only (No Controllers)
         for (let i = 0; i < 2; i++) {
             const hand = this.renderer.xr.getHand(i);
-            hand.add(this.handFactory.createHandModel(hand, 'mesh'));
+            const handModel = this.handFactory.createHandModel(hand, 'mesh');
+            hand.add(handModel);
             this.playerGroup.add(hand);
         }
     }
@@ -52,17 +51,16 @@ export class World {
         const session = this.renderer.xr.getSession();
         if (!session) return;
 
-        // Check each input source (Left/Right controllers)
         for (const source of session.inputSources) {
             if (source.gamepad) {
-                const axes = source.gamepad.axes;
-                // axes[2] is horizontal, axes[3] is vertical on most thumbsticks
+                const axes = source.gamepad.axes; 
+                // Thumbstick movement (Axes 2 and 3)
                 const x = axes[2] || 0;
                 const z = axes[3] || 0;
-
+                
                 if (Math.abs(x) > 0.1 || Math.abs(z) > 0.1) {
-                    this.playerGroup.position.x += x * this.moveSpeed;
-                    this.playerGroup.position.z += z * this.moveSpeed;
+                    this.playerGroup.position.x += x * 0.05;
+                    this.playerGroup.position.z += z * 0.05;
                 }
             }
         }

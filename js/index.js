@@ -1,55 +1,60 @@
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.158/build/three.module.js';
-import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.158/examples/jsm/webxr/VRButton.js';
-import { setupWorld } from './world.js';
+import * as THREE from 'three';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { PokerWorld } from './world.js';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
-let camera, scene, renderer;
-let moveForward = false;
-
-init();
-animate();
+let scene, camera, renderer, world;
 
 function init() {
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x101010); // fallback color
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x111111);
 
-  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
-  camera.position.set(0, 1.6, 6); // Official spawn area
-  camera.lookAt(0, 1.6, 0);
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 1.6, 2); // Average eye height
 
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.xr.enabled = true;
-  document.body.appendChild(renderer.domElement);
-  document.body.appendChild(VRButton.createButton(renderer));
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    document.getElementById('canvas-container').appendChild(renderer.domElement);
+    document.body.appendChild(VRButton.createButton(renderer));
 
-  // Setup world with safe spawn
-  setupWorld(scene, camera);
+    // Initialize World logic
+    world = new PokerWorld(scene);
 
-  // Controller for forward movement
-  const controller1 = renderer.xr.getController(0);
-  controller1.addEventListener('selectstart', () => moveForward = true);
-  controller1.addEventListener('selectend', () => moveForward = false);
-  scene.add(controller1);
+    // Setup Hands (No Controllers)
+    const handModels = new XRHandModelFactory();
+    
+    // Left Hand
+    const hand1 = renderer.xr.getHand(0);
+    hand1.add(handModels.createHandModel(hand1, 'mesh'));
+    scene.add(hand1);
 
-  window.addEventListener('resize', onWindowResize);
+    // Right Hand
+    const hand2 = renderer.xr.getHand(1);
+    hand2.add(handModels.createHandModel(hand2, 'mesh'));
+    scene.add(hand2);
+
+    animate();
 }
 
 function animate() {
-  renderer.setAnimationLoop(render);
+    renderer.setAnimationLoop(() => {
+        renderer.render(scene, camera);
+    });
 }
 
-function render() {
-  if (moveForward) {
-    const dir = new THREE.Vector3();
-    camera.getWorldDirection(dir);
-    dir.y = 0;
-    camera.position.add(dir.multiplyScalar(0.03));
-  }
-  renderer.render(scene, camera);
+// Win Display Logic (Requirement from 2025-12-31)
+export function showWinner(name) {
+    const el = document.getElementById('winner-display');
+    el.innerText = `${name} WINS THE POT!`;
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 10000);
 }
 
-function onWindowResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-}
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+init();

@@ -1,70 +1,104 @@
 import * as THREE from 'three';
-import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
-import { createEnvironment } from './environment.js';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+import { World } from './world.js';
 
-let scene, camera, renderer, controller1, controller2;
-let wallet = 2500;
+export const Core = {
+    scene: new THREE.Scene(),
+    camera: new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000),
+    renderer: new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" }),
+    playerGroup: new THREE.Group(),
+    userData: { money: 2500, rank: "Gold" }, // Stats for Watch HUD
 
-function init() {
-    scene = new THREE.Scene();
-    
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 1.6, 10);
+    async init() {
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.xr.enabled = true;
+        document.body.appendChild(this.renderer.domElement);
+        document.body.appendChild(VRButton.createButton(this.renderer));
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.xr.enabled = true;
-    document.body.appendChild(renderer.domElement);
-    document.body.appendChild(VRButton.createButton(renderer));
+        // Spawn Fix (1.6m Height)
+        this.playerGroup.position.set(0, 1.6, 0);
+        this.scene.add(this.playerGroup);
+        this.playerGroup.add(this.camera);
 
-    createEnvironment(scene, wallet);
+        this.setupHands();
+        World.build(this.scene);
+        this.renderer.setAnimationLoop(() => this.update());
+    },
 
-    // OCULUS CONTROLLERS
-    controller1 = renderer.xr.getController(0);
-    scene.add(controller1);
-    controller2 = renderer.xr.getController(1);
-    scene.add(controller2);
+    setupHands() {
+        const handFactory = new XRHandModelFactory();
+        for (let i = 0; i < 2; i++) {
+            const hand = this.renderer.xr.getHand(i);
+            hand.add(handFactory.createHandModel(hand, 'mesh'));
+            this.playerGroup.add(hand);
 
-    // CONTROLLER VISUALS
-    const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
-    const laserLine = new THREE.Line(laserGeo, new THREE.LineBasicMaterial({ color: 0x00ffff }));
-    laserLine.scale.z = 5;
-    controller1.add(laserLine.clone());
-    controller2.add(laserLine.clone());
+            // Attach Watch HUD to Left Hand
+            if (i === 0) { this.attachWatch(hand); }
+        }
+    },
 
-    renderer.setAnimationLoop(render);
-}
+    attachWatch(hand) {
+        const watchGeo = new THREE.BoxGeometry(0.08, 0.02, 0.06);
+        const watchMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+        const watch = new THREE.Mesh(watchGeo, watchMat);
+        
+        // Canvas-based Screen for Real-time Stats
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 256; canvas.height = 128;
+        ctx.fillStyle = '#000'; ctx.fillRect(0,0,256,128);
+        ctx.fillStyle = '#00f2ff'; ctx.font = 'bold 30px Arial';
+        ctx.fillText(`$${this.userData.money}`, 10, 50);
+        ctx.fillText(`RANK: ${this.userData.rank}`, 10, 100);
 
-// WIN POPUP LOGIC (10 SECONDS)
-export function showWinNotification(winnerName, handType) {
-    const ui = document.createElement('div');
-    ui.id = "win-popup";
-    ui.style.cssText = `
-        position: fixed; top: 20%; left: 50%; transform: translate(-50%, -50%);
-        background: rgba(0,255,0,0.2); border: 2px solid #00ff00;
-        padding: 40px; color: white; font-family: 'Courier New';
-        text-align: center; font-size: 30px; z-index: 999;
-    `;
-    ui.innerHTML = `<h1>${winnerName} WINS!</h1><h3>${handType}</h3>`;
-    document.body.appendChild(ui);
+        const screenGeo = new THREE.PlaneGeometry(0.07, 0.05);
+        const screenMat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas) });
+        const screen = new THREE.Mesh(screenGeo, screenMat);
+        screen.position.y = 0.011;
+        screen.rotation.x = -Math.PI / 2;
+        
+        watch.add(screen);
+        watch.position.set(0, 0.03, 0.05);
+        hand.add(watch);
+    },
 
-    // Auto-remove after 10 seconds per requirements
-    setTimeout(() => {
-        ui.remove();
-    }, 10000);
-}
+    update() {
+        const session = this.renderer.xr.getSession();
+        if (session) {
+            for (const source of session.inputSources) {
+                if (source.gamepad) {
+                    const axes = source.gamepad.axes;
+                    const buttons = source.gamepad.buttons;
 
-// OCULUS AUTO-SIT LOGIC
-function updateLogic() {
-    // If player walks close to the table (Z-axis -5)
-    if (camera.position.z < -5) {
-        camera.position.y = 1.2; // Sit the player down
+                    // LEFT HAND CONTROLS
+                    if (source.handedness === 'left') {
+                        // Smooth Movement
+                        this.playerGroup.position.x += (axes[2] || 0) * 0.08;
+                        this.playerGroup.position.z += (axes[3] || 0) * 0.08;
+
+                        // X Button (Button 4) - Open Store
+                        if (buttons[4] && buttons[4].pressed) {
+                            console.log("Store Menu Opened");
+                        }
+                        // Y Button (Button 5) - Toggle HUD
+                        if (buttons[5] && buttons[5].pressed) {
+                            console.log("HUD Toggled");
+                        }
+                    }
+
+                    // RIGHT HAND CONTROLS
+                    if (source.handedness === 'right') {
+                        // A Button (Button 0) - Check/Call
+                        if (buttons[0] && buttons[0].pressed) {
+                            console.log("Action: Check/Call");
+                        }
+                    }
+                }
+            }
+        }
+        this.renderer.render(this.scene, this.camera);
     }
-}
+};
 
-function render() {
-    updateLogic();
-    renderer.render(scene, camera);
-}
-
-init();
+Core.init();

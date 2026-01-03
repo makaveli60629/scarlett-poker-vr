@@ -2,25 +2,27 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Poker VR - Master Build</title>
+    <title>Poker VR - Oculus Build</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
-        #winner-ui {
-            position: fixed; top: 15%; left: 50%; transform: translate(-50%, -50%);
-            background: rgba(0,0,0,0.9); color: gold; padding: 30px;
-            border: 3px solid #00f2ff; border-radius: 20px;
-            display: none; text-align: center; z-index: 1000;
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        #win-ui {
+            position: fixed; top: 20%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9); color: gold; padding: 20px;
+            border: 2px solid #00f2ff; display: none; z-index: 1000;
         }
     </style>
 </head>
 <body>
-    <div id="winner-ui"></div>
+    <div id="win-ui"><h1 id="winner-name"></h1><p id="winner-hand"></p></div>
     <script type="importmap">
-        { "imports": { 
-            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" 
-        } }
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
     </script>
-    <script type="module" src="main.js"></script>
+    <script type="module" src="index.js"></script>
 </body>
 </html>

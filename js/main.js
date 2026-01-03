@@ -1,46 +1,45 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { World } from './js/world.js';
-import { Controls } from './js/controls.js';
+import { World } from './world.js';
+import { Controls } from './controls.js';
+import { Dealer } from './dealer.js';
 
-const Core = {
+export const Core = {
     scene: new THREE.Scene(),
-    camera: new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000),
-    renderer: new THREE.WebGLRenderer({ 
-        antialias: true, 
-        alpha: false, 
-        powerPreference: "high-performance" // Critical for Quest
-    }),
+    camera: new THREE.PerspectiveCamera(
+        75,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        1000
+    ),
+    renderer: new THREE.WebGLRenderer({ antialias: true }),
     playerGroup: new THREE.Group(),
 
-    async init() {
-        // 1. Force XR Compatibility for Oculus
-        const gl = this.renderer.getContext();
-        if (gl.makeXRCompatible) await gl.makeXRCompatible();
+    init() {
+        // VISUAL PROOF OF LIFE
+        this.scene.background = new THREE.Color(0xffffff);
 
+        // RENDERER SETUP (QUEST SAFE)
         this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.xr.enabled = true;
-        
-        // Use a dark grey instead of pure black to verify the screen is "on"
-        this.scene.background = new THREE.Color(0x050505);
 
         document.body.appendChild(this.renderer.domElement);
-        
-        // Create the button with specific Oculus requirements
-        const vrButton = VRButton.createButton(this.renderer, {
-            requiredFeatures: ['local-floor'],
-            optionalFeatures: ['hand-tracking']
-        });
-        document.body.appendChild(vrButton);
+        document.body.appendChild(VRButton.createButton(this.renderer));
 
+        // CAMERA + PLAYER
+        this.camera.position.set(0, 1.6, 0);
+        this.playerGroup.position.set(0, 1.6, 5);
         this.playerGroup.add(this.camera);
         this.scene.add(this.playerGroup);
 
+        // WORLD SYSTEMS
         World.build(this.scene);
         Controls.init(this.renderer, this.scene, this.playerGroup);
+        Dealer.init(this.scene);
 
-        this.renderer.setAnimationLoop(this.render.bind(this));
+        // RENDER LOOP
+        this.renderer.setAnimationLoop(() => this.render());
     },
 
     render() {

@@ -3,10 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Poker VR - 9.4 Full Visibility</title>
-    <style>
-        body { margin: 0; background: #111; overflow: hidden; font-family: sans-serif; }
-    </style>
+    <title>Poker VR Master - Update 9.6</title>
+    <style>body { margin: 0; background: #000; overflow: hidden; }</style>
 </head>
 <body>
     <script type="importmap">
@@ -23,65 +21,68 @@
         import { VRButton } from 'three/addons/webxr/VRButton.js';
         import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
-        let scene, camera, renderer, cameraRig, hand1, hand2;
+        let scene, camera, renderer, cameraRig, hand1, hand2, laser, marker;
         let snapTurned = false;
 
-        // --- 1. THE LOBBY (Walls, Floor, Lights) ---
+        // --- 1. ARCHITECTURE: PILLARS & NEON TRIM ---
+        function createPillar(x, z) {
+            const group = new THREE.Group();
+            const col = new THREE.Mesh(new THREE.BoxGeometry(0.8, 8, 0.8), new THREE.MeshStandardMaterial({color: 0x050505}));
+            // Neon Trim (Top & Bottom)
+            const neonMat = new THREE.MeshBasicMaterial({color: 0xf1c40f}); // Golden Neon
+            const topTrim = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.1, 0.9), neonMat);
+            const botTrim = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.1, 0.9), neonMat);
+            topTrim.position.y = 4; botTrim.position.y = -4;
+            group.add(col, topTrim, botTrim);
+            group.position.set(x, 4, z);
+            scene.add(group);
+        }
+
         function buildLobby() {
-            // SKY / BACKGROUND
-            scene.background = new THREE.Color(0x1a0a00); // Sunset Warmth
+            scene.background = new THREE.Color(0x0a0a0a);
+            scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 4.0)); // BRIGHT BRIGHT
 
-            // LIGHTS (Critical Fix)
-            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5); // Bright Sky Light
-            scene.add(hemiLight);
-
-            const sun = new THREE.DirectionalLight(0xffaa00, 1.0);
-            sun.position.set(5, 10, 5);
-            scene.add(sun);
-
-            // WALLS (Brighter Gray for Visibility)
-            const wallMat = new THREE.MeshPhongMaterial({ color: 0x333333 });
-            const createWall = (x, z, ry) => {
-                const wall = new THREE.Mesh(new THREE.PlaneGeometry(20, 10), wallMat);
-                wall.position.set(x, 5, z);
-                wall.rotation.y = ry;
-                scene.add(wall);
-            };
-            createWall(0, -10, 0);          // Front
-            createWall(0, 10, Math.PI);      // Back
-            createWall(-10, 0, Math.PI/2);   // Left
-            createWall(10, 0, -Math.PI/2);  // Right
-
-            // FLOOR (Polished Wood style)
-            const floor = new THREE.Mesh(
-                new THREE.PlaneGeometry(20, 20),
-                new THREE.MeshStandardMaterial({ color: 0x1a0f00, metalness: 0.5, roughness: 0.2 })
-            );
+            // MARBLE GOLD FLOOR (3-Room Layout)
+            const floorGeo = new THREE.PlaneGeometry(60, 60);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.1, metalness: 0.5 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
 
-            // THE POKER TABLE
-            const table = new THREE.Group();
-            const felt = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 0.1, 32), new THREE.MeshPhongMaterial({color: 0x07331a}));
-            table.add(felt);
-            table.position.y = 0.8;
-            scene.add(table);
+            // WALLS & ROOMS (Four Corners)
+            [[-10,-10], [10,-10], [10,10], [-10,10]].forEach(pos => createPillar(pos[0], pos[1]));
 
-            // NEON STRIPS (Cyan)
-            [[-9.9, -9.9], [9.9, -9.9], [9.9, 9.9], [-9.9, 9.9]].forEach(pos => {
-                const neon = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 10), new THREE.MeshBasicMaterial({color: 0x00ffff}));
-                neon.position.set(pos[0], 5, pos[1]);
-                scene.add(neon);
-            });
+            // OVAL POKER TABLE
+            const tableGroup = new THREE.Group();
+            const felt = new THREE.Mesh(new THREE.CapsuleGeometry(1.2, 2.5, 20, 32), new THREE.MeshStandardMaterial({color: 0x07331a}));
+            felt.rotation.x = Math.PI / 2;
+            const leather = new THREE.Mesh(new THREE.TorusGeometry(1.6, 0.15, 16, 100), new THREE.MeshStandardMaterial({color: 0x000000}));
+            leather.rotation.x = Math.PI / 2; leather.scale.y = 1.8;
+            tableGroup.add(felt, leather);
+            tableGroup.position.y = 0.8;
+            scene.add(tableGroup);
+
+            // THE SCORPION (Procedural Mascots)
+            const scorpion = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.3, 10, 10), new THREE.MeshStandardMaterial({color: 0x000000}));
+            const tail = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.03, 10, 10, Math.PI), new THREE.MeshBasicMaterial({color: 0xf1c40f}));
+            tail.position.set(0, 0.2, 0.2); tail.rotation.x = Math.PI/2;
+            scorpion.add(body, tail);
+            scorpion.position.set(-7, 1.2, -7); // On Store Counter
+            scene.add(scorpion);
+
+            // STORE & FURNITURE
+            const counter = new THREE.Mesh(new THREE.BoxGeometry(3, 1.2, 1), new THREE.MeshStandardMaterial({color: 0x111111}));
+            counter.position.set(-7, 0.6, -7);
+            scene.add(counter);
         }
 
-        // --- 2. ENGINE INIT ---
+        // --- 2. LASER MOVEMENT ---
         function init() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-            
             cameraRig = new THREE.Group();
-            cameraRig.position.set(0, 0, 4); // Spawns you away from the table
+            cameraRig.position.set(0, 0, 5);
             cameraRig.add(camera);
             scene.add(cameraRig);
 
@@ -91,50 +92,48 @@
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
-            // Hand Models
             const handFactory = new XRHandModelFactory();
             hand1 = renderer.xr.getHand(0); hand1.add(handFactory.createHandModel(hand1, "mesh")); cameraRig.add(hand1);
             hand2 = renderer.xr.getHand(1); hand2.add(handFactory.createHandModel(hand2, "mesh")); cameraRig.add(hand2);
+
+            // Laser Setup
+            const lGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-10)]);
+            laser = new THREE.Line(lGeo, new THREE.LineBasicMaterial({color: 0xf1c40f}));
+            hand2.add(laser);
+
+            marker = new THREE.Mesh(new THREE.RingGeometry(0.15, 0.2, 32), new THREE.MeshBasicMaterial({color: 0xf1c40f}));
+            marker.rotation.x = -Math.PI/2;
+            scene.add(marker);
 
             buildLobby();
             renderer.setAnimationLoop(render);
         }
 
-        // --- 3. MOVEMENT LOGIC ---
         function render() {
             const session = renderer.xr.getSession();
             if (session) {
+                // Pointing Logic
+                const headDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+                marker.position.set(cameraRig.position.x + headDir.x*4, 0.02, cameraRig.position.z + headDir.z*4);
+
                 for (const source of session.inputSources) {
                     if (source.gamepad) {
-                        const axes = source.gamepad.axes; // [lx, ly, rx, ry]
+                        const axes = source.gamepad.axes;
+                        // Move with Left Stick
+                        const move = new THREE.Vector3(axes[0], 0, axes[1]).applyQuaternion(camera.quaternion);
+                        cameraRig.position.x += move.x * 0.05;
+                        cameraRig.position.z += move.z * 0.05;
                         
-                        // LEFT STICK: Move in head direction
-                        const moveX = axes[0] || 0;
-                        const moveZ = axes[1] || 0;
-                        if (Math.abs(moveX) > 0.1 || Math.abs(moveZ) > 0.1) {
-                            const speed = 0.04;
-                            const headRotation = new THREE.Quaternion();
-                            camera.getWorldQuaternion(headRotation);
-                            
-                            const direction = new THREE.Vector3(moveX, 0, moveZ).applyQuaternion(headRotation);
-                            direction.y = 0; // Keep on ground
-                            cameraRig.position.add(direction.multiplyScalar(speed));
-                        }
-
-                        // RIGHT STICK: Snap Turn
-                        const rotateX = axes[2] || 0;
-                        if (Math.abs(rotateX) > 0.8 && !snapTurned) {
-                            cameraRig.rotation.y -= Math.sign(rotateX) * (Math.PI / 4);
+                        // Snap Turn (Right Stick)
+                        if (Math.abs(axes[2]) > 0.8 && !snapTurned) {
+                            cameraRig.rotation.y -= Math.sign(axes[2]) * (Math.PI / 4);
                             snapTurned = true;
-                        } else if (Math.abs(rotateX) < 0.1) {
-                            snapTurned = false;
-                        }
+                        } else if (Math.abs(axes[2]) < 0.1) { snapTurned = false; }
                     }
                 }
             }
             renderer.render(scene, camera);
         }
-
         init();
     </script>
 </body>

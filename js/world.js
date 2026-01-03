@@ -4,33 +4,75 @@ const loader = new THREE.TextureLoader();
 
 export const World = {
     build(scene) {
-        // High Intensity Lights
-        [span_12](start_span)const ambient = new THREE.AmbientLight(0xffffff, 1.5)[span_12](end_span);
-        scene.add(ambient);
+        this.addUltraBrightLights(scene);
+        
+        // 4 Rooms: Twice the size (40m each), 4 walls, Neon Edges
+        this.createMegaRoom(scene, "Lobby", 0, 0, 0x111111);
+        this.createMegaRoom(scene, "Poker", 60, 0, 0x050505);
+        this.createMegaRoom(scene, "Store", -60, 0, 0x050505);
+        this.createMegaRoom(scene, "Vault", 0, 60, 0x050505);
+    },
 
-        const topLight = new THREE.PointLight(0xffffff, 2);
-        topLight.position.set(0, 4, 0);
-        scene.add(topLight);
+    addUltraBrightLights(scene) {
+        scene.add(new THREE.AmbientLight(0xffffff, 2.5)); // Extreme brightness
+        const sun = new THREE.DirectionalLight(0xffffff, 2);
+        sun.position.set(10, 20, 10);
+        scene.add(sun);
+    },
 
-        // Floor (Lobby Carpet)
-        [span_13](start_span)const floorTex = loader.load('assets/textures/lobby_carpet.jpg')[span_13](end_span);
-        const floor = new THREE.Mesh(
-            new THREE.PlaneGeometry(30, 30),
-            new THREE.MeshStandardMaterial({ map: floorTex })
-        );
-        floor.rotation.x = -Math.PI / 2;
-        scene.add(floor);
+    createMegaRoom(scene, name, x, z, floorCol) {
+        const size = 40; // Doubled Size
+        const height = 6; // High ceilings
+        const group = new THREE.Group();
+        group.position.set(x, 0, z);
 
-        // Poker Table
-        const table = new THREE.Mesh(
-            new THREE.CylinderGeometry(1.5, 1.5, 0.1, 32),
-            new THREE.MeshStandardMaterial({ color: 0x076324 }) // Permanent Green Felt
-        );
-        table.position.y = 0.8;
-        scene.add(table);
+        // Floor & Ceiling
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({color: floorCol, map: loader.load('assets/textures/lobby_carpet.jpg')}));
+        floor.rotation.x = -Math.PI/2;
+        
+        const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({color: 0x222222}));
+        ceiling.position.y = height;
+        ceiling.rotation.x = Math.PI/2;
+        group.add(floor, ceiling);
 
-        // Grid (Emergency visual guide if textures fail)
-        [span_14](start_span)[span_15](start_span)const grid = new THREE.GridHelper(30, 30, 0x00f2ff, 0x444444)[span_14](end_span)[span_15](end_span);
-        scene.add(grid);
+        // Walls
+        const wallMat = new THREE.MeshStandardMaterial({ map: loader.load('assets/textures/brickwall.jpg') });
+        const wallData = [
+            { pos: [0, height/2, -size/2], rot: [0, 0, 0] },
+            { pos: [0, height/2, size/2], rot: [0, Math.PI, 0] },
+            { pos: [-size/2, height/2, 0], rot: [0, Math.PI/2, 0] },
+            { pos: [size/2, height/2, 0], rot: [0, -Math.PI/2, 0] }
+        ];
+
+        wallData.forEach(d => {
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(size, height, 0.5), wallMat);
+            wall.position.set(...d.pos);
+            wall.rotation.set(...d.rot);
+            group.add(wall);
+
+            // PURPLE NEON TRIM (Top, Bottom, and Sides)
+            this.addNeonTrim(wall, size, height);
+        });
+
+        scene.add(group);
+    },
+
+    addNeonTrim(wall, w, h) {
+        const neonMat = new THREE.MeshBasicMaterial({ color: 0xa020f0 }); // Purple Neon
+        const thickness = 0.1;
+
+        // Top & Bottom Trim
+        const top = new THREE.Mesh(new THREE.BoxGeometry(w, thickness, thickness), neonMat);
+        top.position.y = h/2;
+        const bottom = new THREE.Mesh(new THREE.BoxGeometry(w, thickness, thickness), neonMat);
+        bottom.position.y = -h/2;
+
+        // Left & Right Trim
+        const left = new THREE.Mesh(new THREE.BoxGeometry(thickness, h, thickness), neonMat);
+        left.position.x = -w/2;
+        const right = new THREE.Mesh(new THREE.BoxGeometry(thickness, h, thickness), neonMat);
+        right.position.x = w/2;
+
+        wall.add(top, bottom, left, right);
     }
 };

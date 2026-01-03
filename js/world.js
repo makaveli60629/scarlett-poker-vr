@@ -1,52 +1,36 @@
 import * as THREE from 'three';
 
-export const WorldControl = {
-    init(scene) {
-        this.addLighting(scene);
-        this.buildRoom(scene);
-        this.addTable(scene);
-    },
+const loader = new THREE.TextureLoader();
 
-    addLighting(scene) {
-        // High intensity ambient light to ensure visibility
-        const ambient = new THREE.AmbientLight(0xffffff, 1.5);
+export const World = {
+    build(scene) {
+        // High Intensity Lights
+        [span_12](start_span)const ambient = new THREE.AmbientLight(0xffffff, 1.5)[span_12](end_span);
         scene.add(ambient);
 
-        const pointLight = new THREE.PointLight(0xffffff, 2);
-        pointLight.position.set(0, 4, 0);
-        scene.add(pointLight);
-    },
+        const topLight = new THREE.PointLight(0xffffff, 2);
+        topLight.position.set(0, 4, 0);
+        scene.add(topLight);
 
-    buildRoom(scene) {
-        // Floor Grid (Visible ground so you aren't floating in void)
-        const grid = new THREE.GridHelper(20, 20, 0x00f2ff, 0x444444);
-        scene.add(grid);
+        // Floor (Lobby Carpet)
+        [span_13](start_span)const floorTex = loader.load('assets/textures/lobby_carpet.jpg')[span_13](end_span);
+        const floor = new THREE.Mesh(
+            new THREE.PlaneGeometry(30, 30),
+            new THREE.MeshStandardMaterial({ map: floorTex })
+        );
+        floor.rotation.x = -Math.PI / 2;
+        scene.add(floor);
 
-        // Brick Walls (as per your assets/textures folder request)
-        const wallGeo = new THREE.BoxGeometry(20, 4, 0.5);
-        const wallMat = new THREE.MeshStandardMaterial({ color: 0x8b4513 }); // Brick-ish
-        
-        const backWall = new THREE.Mesh(wallGeo, wallMat);
-        backWall.position.set(0, 2, -10);
-        scene.add(backWall);
-    },
-
-    addTable(scene) {
+        // Poker Table
         const table = new THREE.Mesh(
             new THREE.CylinderGeometry(1.5, 1.5, 0.1, 32),
-            new THREE.MeshStandardMaterial({ color: 0x006400 }) // Green felt
+            new THREE.MeshStandardMaterial({ color: 0x076324 }) // Permanent Green Felt
         );
         table.position.y = 0.8;
         scene.add(table);
-    },
 
-    showWinText(player, hand) {
-        const ui = document.getElementById('win-ui');
-        document.getElementById('winner-name').innerText = player + " WINS";
-        document.getElementById('winner-hand').innerText = hand;
-        ui.style.display = 'block';
-        
-        // 10 second timer as requested
-        setTimeout(() => { ui.style.display = 'none'; }, 10000);
+        // Grid (Emergency visual guide if textures fail)
+        [span_14](start_span)[span_15](start_span)const grid = new THREE.GridHelper(30, 30, 0x00f2ff, 0x444444)[span_14](end_span)[span_15](end_span);
+        scene.add(grid);
     }
 };

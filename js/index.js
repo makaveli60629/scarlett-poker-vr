@@ -1,51 +1,61 @@
 import * as THREE from 'three';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+import { World } from './world.js';
+import { Logic } from './logic.js';
 
-export const World = {
-    build(scene) {
-        // Add massive light as a backup
-        const light = new THREE.HemisphereLight(0xffffff, 0x444444, 3.0);
-        scene.add(light);
+const Core = {
+    scene: new THREE.Scene(),
+    camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
+    renderer: new THREE.WebGLRenderer({ antialias: true }),
+    playerGroup: new THREE.Group(),
 
-        // THE LOBBY (Center)
-        this.createFloor(scene, 0, 0, 0x111111);
-        
-        // NEON PURPLE PILLARS (Now using "Basic" so they glow)
-        const neonPurple = new THREE.MeshBasicMaterial({ color: 0xbc13fe });
-        const locations = [[-10, -10], [10, -10], [-10, 10], [10, 10]];
-        locations.forEach(loc => {
-            const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 8), neonPurple);
-            pillar.position.set(loc[0], 4, loc[1]);
-            scene.add(pillar);
-        });
+    async init() {
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.xr.enabled = true;
+        this.renderer.xr.setReferenceSpaceType('local-floor');
+        document.body.appendChild(this.renderer.domElement);
+        document.body.appendChild(VRButton.createButton(this.renderer, { 
+            optionalFeatures: ['local-floor', 'hand-tracking'] 
+        }));
 
-        // POKER TABLE (Right side of lobby for easy finding)
-        const pokerGroup = new THREE.Group();
-        pokerGroup.position.set(15, 0, 0); 
-        
-        const table = new THREE.Mesh(
-            new THREE.CylinderGeometry(2.5, 2.5, 0.5, 32),
-            new THREE.MeshStandardMaterial({ color: 0x006400, emissive: 0x002200 })
-        );
-        table.position.y = 0.9;
-        pokerGroup.add(table);
-        
-        // 6 Dealer Chairs
-        for(let i=0; i<6; i++) {
-            const chair = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.2, 0.6), new THREE.MeshStandardMaterial({color: 0x222222}));
-            const angle = (i/6) * Math.PI * 2;
-            chair.position.set(Math.cos(angle)*3.5, 0.6, Math.sin(angle)*3.5);
-            pokerGroup.add(chair);
-        }
-        scene.add(pokerGroup);
+        this.scene.add(this.playerGroup);
+        this.playerGroup.add(this.camera);
+
+        this.setupHands();
+        World.build(this.scene);
+        this.renderer.setAnimationLoop(() => this.update());
     },
 
-    createFloor(scene, x, z, color) {
-        const floor = new THREE.Mesh(
-            new THREE.PlaneGeometry(100, 100),
-            new THREE.MeshStandardMaterial({ color: color })
-        );
-        floor.rotation.x = -Math.PI / 2;
-        floor.position.set(x, 0, z);
-        scene.add(floor);
+    setupHands() {
+        const factory = new XRHandModelFactory();
+        const skinMat = new THREE.MeshStandardMaterial({ color: Logic.stats.complexion });
+
+        for (let i = 0; i < 2; i++) {
+            const hand = this.renderer.xr.getHand(i);
+            const model = factory.createHandModel(hand, 'mesh');
+            hand.add(model);
+            
+            hand.addEventListener('connected', () => {
+                model.traverse(c => { if(c.isMesh) c.material = skinMat; });
+            });
+            this.playerGroup.add(hand);
+        }
+    },
+
+    update() {
+        const session = this.renderer.xr.getSession();
+        if (session) {
+            for (const source of session.inputSources) {
+                if (source.gamepad && source.handedness === 'left') {
+                    const axes = source.gamepad.axes;
+                    // Move based on stick - restricted to X/Z plane (floor)
+                    this.playerGroup.position.x += (axes[2] || 0) * 0.08;
+                    this.playerGroup.position.z += (axes[3] || 0) * 0.08;
+                }
+            }
+        }
+        this.renderer.render(this.scene, this.camera);
     }
 };
+Core.init();

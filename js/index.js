@@ -18,7 +18,7 @@ async function init(){
     document.body.appendChild(VRButton.createButton(renderer));
 
     // Load World
-    try { const module = await import('./world.js'); world = new module.PokerWorld(scene); }
+    try { const module = await import('./js/world.js'); world = new module.PokerWorld(scene); }
     catch(e){ console.warn("World module failed:", e); }
 
     // Hands
@@ -31,7 +31,7 @@ async function init(){
     });
 
     // Teleport
-    try{ const module = await import('./teleport.js'); teleport = new module.TeleportSystem(renderer,camera,scene,world); }
+    try{ const module = await import('./js/teleport.js'); teleport = new module.TeleportSystem(renderer,camera,scene,world); }
     catch(e){ console.warn("Teleport module failed:",e); }
 
     renderer.setAnimationLoop(render);

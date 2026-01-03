@@ -2,31 +2,38 @@ import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { World } from './world.js';
 import { Controls } from './controls.js';
-import { Dealer } from './dealer.js';
 
 const Core = {
     scene: new THREE.Scene(),
-    camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
-    renderer: new THREE.WebGLRenderer({ antialias: true, precision: "highp" }),
+    camera: new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000),
+    renderer: new THREE.WebGLRenderer({ antialias: true, alpha: false }),
     playerGroup: new THREE.Group(),
 
-    async init() {
+    init() {
+        this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.xr.enabled = true;
-        this.renderer.xr.setReferenceSpaceType('local-floor');
-        document.body.appendChild(this.renderer.domElement);
-        document.body.appendChild(VRButton.createButton(this.renderer, { optionalFeatures: ['local-floor', 'hand-tracking'] }));
+        
+        // Force a bright background so we know it's not a black screen crash
+        this.scene.background = new THREE.Color(0xffffff);
 
-        // Start in the Lobby
-        this.playerGroup.position.set(0, 0, 5); 
+        document.body.appendChild(this.renderer.domElement);
+        
+        // Setup VR Button with full permissions
+        const vrButton = VRButton.createButton(this.renderer, {
+            requiredFeatures: ['local-floor'],
+            optionalFeatures: ['hand-tracking']
+        });
+        document.body.appendChild(vrButton);
+
         this.playerGroup.add(this.camera);
         this.scene.add(this.playerGroup);
 
+        // Load Modules
         World.build(this.scene);
         Controls.init(this.renderer, this.scene, this.playerGroup);
-        Dealer.init(this.scene);
 
-        this.renderer.setAnimationLoop(() => this.render());
+        this.renderer.setAnimationLoop(this.render.bind(this));
     },
 
     render() {
@@ -34,4 +41,6 @@ const Core = {
         this.renderer.render(this.scene, this.camera);
     }
 };
+
+// Start the core
 Core.init();

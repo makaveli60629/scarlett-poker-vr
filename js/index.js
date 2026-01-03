@@ -7,13 +7,11 @@ import { Logic } from './logic.js';
 const Core = {
     scene: new THREE.Scene(),
     camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
-    renderer: new THREE.WebGLRenderer({ antialias: true, precision: "highp" }),
+    renderer: new THREE.WebGLRenderer({ antialias: true }),
     playerGroup: new THREE.Group(),
     canSnapTurn: true,
-    movementSpeed: 0.08,
 
     async init() {
-        // Renderer Setup
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.xr.enabled = true;
         this.renderer.xr.setReferenceSpaceType('local-floor');
@@ -23,32 +21,24 @@ const Core = {
             optionalFeatures: ['local-floor', 'hand-tracking'] 
         }));
 
-        // --- SPAWN AUDIT ---
-        // Placing you in the corner of the Lobby (0,0 room)
+        // SPAWN AUDIT: Start in the corner of the Lobby
         this.playerGroup.position.set(-15, 0, -15);
-        this.playerGroup.rotation.y = Math.PI / 4; // Face the center
+        this.camera.position.y = 1.6; // Eye Level
+        this.playerGroup.add(this.camera);
         this.scene.add(this.playerGroup);
 
-        // --- CAMERA AUDIT (Eye Level) ---
-        this.camera.position.y = 1.6; 
-        this.playerGroup.add(this.camera);
-
-        // Initialize World & Hands
         this.setupHands();
         World.build(this.scene);
-
         this.renderer.setAnimationLoop(() => this.update());
     },
 
     setupHands() {
         const factory = new XRHandModelFactory();
         const skinMat = new THREE.MeshPhongMaterial({ color: Logic.stats.complexion });
-
         for (let i = 0; i < 2; i++) {
             const hand = this.renderer.xr.getHand(i);
             const model = factory.createHandModel(hand, 'mesh');
             hand.add(model);
-            
             hand.addEventListener('connected', () => {
                 model.traverse(c => { if(c.isMesh) c.material = skinMat; });
             });
@@ -58,73 +48,44 @@ const Core = {
 
     update() {
         const session = this.renderer.xr.getSession();
-        if (!session) return;
-
-        for (const source of session.inputSources) {
-            // --- CONTROLLER MOVEMENT ---
-            if (source.gamepad) {
-                const axes = source.gamepad.axes;
-
-                // Left Stick: Move
-                if (source.handedness === 'left') {
-                    const dir = new THREE.Vector3();
-                    this.camera.getWorldDirection(dir);
-                    dir.y = 0; dir.normalize();
-                    const side = new THREE.Vector3().crossVectors(this.camera.up, dir).normalize();
-
-                    const moveX = (dir.x * -axes[3] + side.x * axes[2]) * this.movementSpeed;
-                    const moveZ = (dir.z * -axes[3] + side.z * axes[2]) * this.movementSpeed;
-
-                    this.attemptMove(moveX, moveZ);
+        if (session) {
+            for (const source of session.inputSources) {
+                if (source.gamepad) {
+                    const axes = source.gamepad.axes;
+                    if (source.handedness === 'left') this.move(axes[2] * 0.08, axes[3] * 0.08);
+                    if (source.handedness === 'right') this.handleTurn(axes[2]);
                 }
-
-                // Right Stick: Snap Turn
-                if (source.handedness === 'right') {
-                    if (Math.abs(axes[2]) > 0.8 && this.canSnapTurn) {
-                        this.playerGroup.rotation.y += (axes[2] > 0 ? -Math.PI/4 : Math.PI/4);
-                        this.canSnapTurn = false;
-                    } else if (Math.abs(axes[2]) < 0.1) {
-                        this.canSnapTurn = true;
+                // Pinch to move
+                if (source.hand) {
+                    const index = source.hand.get(8);
+                    const thumb = source.hand.get(4);
+                    if (index && thumb && index.position.distanceTo(thumb.position) < 0.02) {
+                        const dir = new THREE.Vector3();
+                        this.camera.getWorldDirection(dir);
+                        dir.y = 0;
+                        this.move(dir.x * 0.05, dir.z * 0.05);
                     }
-                }
-            }
-
-            // --- HAND TRACKING MOVEMENT (Pinch) ---
-            if (source.hand) {
-                const index = source.hand.get(8); // Index Tip
-                const thumb = source.hand.get(4); // Thumb Tip
-                if (index && thumb && index.position.distanceTo(thumb.position) < 0.02) {
-                    const dir = new THREE.Vector3();
-                    this.camera.getWorldDirection(dir);
-                    dir.y = 0; dir.normalize();
-                    this.attemptMove(dir.x * 0.05, dir.z * 0.05);
                 }
             }
         }
         this.renderer.render(this.scene, this.camera);
     },
 
-    attemptMove(dx, dz) {
-        // Collision Audit: Check if the new position hits a wall/table
-        const nextPos = this.playerGroup.position.clone();
-        nextPos.x += dx;
-        nextPos.z += dz;
-
-        // Player bounding sphere (0.5m radius)
-        const playerSphere = new THREE.Sphere(nextPos, 0.5);
-        
-        let collision = false;
-        for (const box of World.colliders) {
-            if (box.intersectsSphere(playerSphere)) {
-                collision = true;
-                break;
-            }
+    move(dx, dz) {
+        const next = this.playerGroup.position.clone().add(new THREE.Vector3(dx, 0, dz));
+        const sphere = new THREE.Sphere(next, 0.4);
+        if (!World.colliders.some(c => c.intersectsSphere(sphere))) {
+            this.playerGroup.position.add(new THREE.Vector3(dx, 0, dz));
         }
+    },
 
-        if (!collision) {
-            this.playerGroup.position.copy(nextPos);
+    handleTurn(val) {
+        if (Math.abs(val) > 0.8 && this.canSnapTurn) {
+            this.playerGroup.rotation.y += (val > 0 ? -Math.PI/4 : Math.PI/4);
+            this.canSnapTurn = false;
+        } else if (Math.abs(val) < 0.1) {
+            this.canSnapTurn = true;
         }
     }
 };
-
 Core.init();

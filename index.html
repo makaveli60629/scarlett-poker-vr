@@ -3,26 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Poker VR - Update 4.0 (Holographic Master)</title>
+    <title>Poker VR Master - Update 4.4 (Spawn Fixed)</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
-        #winner-ui {
+        #win-overlay {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.95); padding: 50px; border: 6px solid #f1c40f;
-            border-radius: 50px; text-align: center; display: none; z-index: 1000;
+            background: rgba(0, 0, 0, 0.95); padding: 50px; border: 5px solid #f1c40f;
+            border-radius: 40px; text-align: center; display: none; z-index: 2000;
+            box-shadow: 0 0 100px #f1c40f; color: white;
         }
-        .win-name { font-size: 6rem; font-weight: 900; color: #fff; }
-        #holo-hud { position: absolute; top: 20px; right: 20px; color: #00ffff; font-family: monospace; text-shadow: 0 0 10px #00ffff; }
     </style>
 </head>
 <body>
 
-    <div id="winner-ui">
-        <div id="win-player" class="win-name">PLAYER 1</div>
-        <div id="win-hand" style="font-size: 3rem; color: #f1c40f;">STRAIGHT FLUSH</div>
+    <div id="win-overlay">
+        <h1 id="win-name" style="font-size: 4rem; margin: 0;">YOU WIN</h1>
+        <h2 id="win-hand" style="font-size: 2rem; color: #f1c40f;">THREE OF A KIND</h2>
     </div>
-    
-    <div id="holo-hud">HOLOGRAM: READY | REPLAY: STANDBY</div>
 
     <script type="importmap">
         {
@@ -38,71 +35,89 @@
         import { VRButton } from 'three/addons/webxr/VRButton.js';
         import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
-        let scene, camera, renderer, hand1, hand2;
-        let table, holoTable;
+        let scene, camera, renderer, hand1, hand2, cameraRig;
+        let table, holoTable = null;
 
-        // --- 1. THE PERMANENT 1.4 SHADER ---
+        // --- 1. AUDITED FELT SHADER ---
         const FeltShader = {
             uniforms: { uTime: { value: 0 } },
             vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
             fragmentShader: `
                 uniform float uTime; varying vec2 vUv;
+                float noise(vec2 p) { return fract(sin(dot(p, vec2(12.7, 7.2))) * 43758.5); }
                 void main() {
-                    vec3 col = vec3(0.01, 0.12, 0.04);
-                    col += sin(uTime + vUv.x * 10.0) * 0.01;
-                    gl_FragColor = vec4(col, 1.0);
+                    float n = noise(vUv * 800.0);
+                    vec3 col = vec3(0.01, 0.15, 0.04);
+                    col += sin(uTime * 0.4) * 0.008; 
+                    gl_FragColor = vec4(col + n * 0.04, 1.0);
                 }
             `
         };
 
-        // --- 2. HOLOGRAPHIC REPLAY LOGIC ---
-        function spawnHologram() {
-            if (holoTable) scene.remove(holoTable);
-            holoTable = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.5, 0.5, 0.05, 32),
-                new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.3, wireframe: true })
+        // --- 2. MASTER WORLD & LIGHTING ---
+        function buildWorld() {
+            // Room Enclosure (No more void)
+            const room = new THREE.Mesh(
+                new THREE.BoxGeometry(12, 8, 12),
+                new THREE.MeshStandardMaterial({ color: 0x050505, side: THREE.BackSide })
             );
-            holoTable.position.set(0, 1.5, 0); // Floats above center
-            scene.add(holoTable);
-            document.getElementById('holo-hud').innerText = "HOLOGRAM: PLAYING REPLAY";
-            setTimeout(() => { scene.remove(holoTable); holoTable = null; }, 5000);
+            room.position.y = 3.5;
+            scene.add(room);
+
+            // Table Spotlight
+            const spot = new THREE.SpotLight(0xffffff, 200);
+            spot.position.set(0, 5, 0);
+            spot.angle = Math.PI / 5;
+            scene.add(spot);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.1));
+
+            // Poker Table
+            table = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 0.1, 64), new THREE.ShaderMaterial(FeltShader));
+            table.position.y = 0.8;
+            scene.add(table);
         }
 
-        // --- 3. 10-SECOND WINNER PERMANENCE ---
-        window.triggerWin = function(player, hand) {
-            const ui = document.getElementById('winner-ui');
-            document.getElementById('win-player').innerText = player;
-            document.getElementById('win-hand').innerText = hand;
+        // --- 3. MASTER LOGIC ---
+        window.triggerWin = (player, hand) => {
+            const ui = document.getElementById('win-overlay');
+            document.getElementById('win-name').innerText = player.toUpperCase() + " WINS";
+            document.getElementById('win-hand').innerText = hand.toUpperCase();
             ui.style.display = 'block';
-            spawnHologram();
+
+            const utter = new SpeechSynthesisUtterance(`${player} wins with ${hand}`);
+            utter.pitch = 0.75; window.speechSynthesis.speak(utter);
+
             setTimeout(() => { ui.style.display = 'none'; }, 10000);
         };
 
-        // --- 4. CORE INITIALIZATION ---
+        // --- 4. CORE INITIALIZATION & SPAWN FIX ---
         function init() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
-            
+
+            // CAMERA RIG: This is the key to fixing your spawn
+            cameraRig = new THREE.Group();
+            cameraRig.position.set(0, 0, 1.2); // Moves your body back from the table center
+            cameraRig.add(camera);
+            scene.add(cameraRig);
+
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
+            // VR Hands Only
             const handFactory = new XRHandModelFactory();
-            hand1 = renderer.xr.getHand(0); hand1.add(handFactory.createHandModel(hand1, "mesh")); scene.add(hand1);
-            hand2 = renderer.xr.getHand(1); hand2.add(handFactory.createHandModel(hand2, "mesh")); scene.add(hand2);
+            hand1 = renderer.xr.getHand(0); hand1.add(handFactory.createHandModel(hand1, "mesh")); cameraRig.add(hand1);
+            hand2 = renderer.xr.getHand(1); hand2.add(handFactory.createHandModel(hand2, "mesh")); cameraRig.add(hand2);
 
-            table = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 0.1, 64), new THREE.ShaderMaterial(FeltShader));
-            table.position.y = 0.8; scene.add(table);
-
-            scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+            buildWorld();
             renderer.setAnimationLoop(render);
         }
 
         function render(time) {
             FeltShader.uniforms.uTime.value = time * 0.001;
-            if (holoTable) holoTable.rotation.y += 0.01;
             renderer.render(scene, camera);
         }
 

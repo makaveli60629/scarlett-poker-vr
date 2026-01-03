@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { World } from './world.js';
-import { Controls } from './controls.js';
+import { World } from './js/world.js';
+import { Controls } from './js/controls.js';
 
 const Core = {
     scene: new THREE.Scene(),

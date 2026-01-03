@@ -1,72 +1,35 @@
 import * as THREE from 'three';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
-export class World {
-    constructor(scene, renderer, playerGroup) {
-        this.scene = scene;
-        this.renderer = renderer;
-        this.playerGroup = playerGroup;
-        this.handFactory = new XRHandModelFactory();
-        
-        this.setupLights();
-        this.setupEnvironment();
-        this.setupHands();
+class Physics {
+    constructor() { this.colliders = []; }
+    add(mesh) {
+        const box = new THREE.Box3().setFromObject(mesh);
+        this.colliders.push(box);
     }
-
-    setupLights() {
-        // Boosted lighting to ensure visibility
-        const ambient = new THREE.AmbientLight(0xffffff, 1.5);
-        this.scene.add(ambient);
-
-        const pointLight = new THREE.PointLight(0xffffff, 2);
-        pointLight.position.set(0, 3, 0); // Directly over the table
-        this.scene.add(pointLight);
-    }
-
-    setupEnvironment() {
-        // Floor Grid for spatial reference
-        const grid = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
-        this.scene.add(grid);
-
-        // Poker Table (Positioned at 0,0,0)
-        // Since player is at 0,0,2, you are safely 2 meters away.
-        const tableGeo = new THREE.CylinderGeometry(1.2, 1.2, 0.1, 32);
-        const tableMat = new THREE.MeshStandardMaterial({ color: 0x076324 });
-        const table = new THREE.Mesh(tableGeo, tableMat);
-        table.position.set(0, 0.8, 0); 
-        this.scene.add(table);
-    }
-
-    setupHands() {
-        // Left & Right Hands only (No Controllers)
-        for (let i = 0; i < 2; i++) {
-            const hand = this.renderer.xr.getHand(i);
-            const handModel = this.handFactory.createHandModel(hand, 'mesh');
-            hand.add(handModel);
-            this.playerGroup.add(hand);
+    check(pos) {
+        const playerSphere = new THREE.Sphere(pos, 0.5);
+        for(let wall of this.colliders) {
+            if(wall.intersectsSphere(playerSphere)) return true;
         }
-    }
-
-    handleMovement() {
-        const session = this.renderer.xr.getSession();
-        if (!session) return;
-
-        for (const source of session.inputSources) {
-            if (source.gamepad) {
-                const axes = source.gamepad.axes; 
-                // Thumbstick movement (Axes 2 and 3)
-                const x = axes[2] || 0;
-                const z = axes[3] || 0;
-                
-                if (Math.abs(x) > 0.1 || Math.abs(z) > 0.1) {
-                    this.playerGroup.position.x += x * 0.05;
-                    this.playerGroup.position.z += z * 0.05;
-                }
-            }
-        }
-    }
-
-    update() {
-        this.handleMovement();
+        return false;
     }
 }
+
+export const World = {
+    P: new Physics(),
+    buildRoom(scene, name, x, z, size, color) {
+        const group = new THREE.Group();
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({color: 0x111111}));
+        floor.rotation.x = -Math.PI/2;
+        group.add(floor);
+        
+        // Solid Back Wall for Physics
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(size, 4, 0.5), new THREE.MeshStandardMaterial({color: 0x8b2222}));
+        wall.position.set(0, 2, -size/2);
+        group.add(wall);
+        this.P.add(wall); 
+
+        group.position.set(x, 0, z);
+        scene.add(group);
+    }
+};

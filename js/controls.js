@@ -1,49 +1,74 @@
 import * as THREE from 'three';
 
-export function setupControllers(renderer, scene) {
-    const controller1 = renderer.xr.getController(0);
-    const controller2 = renderer.xr.getController(1);
-    
-    scene.add(controller1);
-    scene.add(controller2);
+export const Controls = {
+    teleportBeam: new THREE.Line(),
+    targetMarker: new THREE.Mesh(
+        new THREE.RingGeometry(0.3, 0.4, 32),
+        new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide })
+    ),
+    isLeftMenuOpen: false,
+    isRightMenuOpen: false,
 
-    // Cyan Laser Pointers for selection
-    const laserMat = new THREE.LineBasicMaterial({ color: 0x00ffff });
-    const laserGeo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(0, 0, 0), 
-        new THREE.Vector3(0, 0, -5)
-    ]);
-    const line = new THREE.Line(laserGeo, laserMat);
-    
-    controller1.add(line.clone());
-    controller2.add(line.clone());
+    init(scene, playerGroup) {
+        // Setup teleport marker
+        this.targetMarker.rotation.x = -Math.PI / 2;
+        this.targetMarker.visible = false;
+        scene.add(this.targetMarker);
 
-    return { controller1, controller2 };
-}
+        // Setup teleport beam (The Laser)
+        const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-10)]);
+        const material = new THREE.LineBasicMaterial({ color: 0x00ff00 });
+        this.teleportBeam = new THREE.Line(geometry, material);
+        this.teleportBeam.visible = false;
+        playerGroup.add(this.teleportBeam);
+    },
 
-export function handleMovement(renderer, camera, controls) {
-    const session = renderer.xr.getSession();
-    if (!session) return;
+    update(renderer, camera, playerGroup) {
+        const session = renderer.xr.getSession();
+        if (!session) return;
 
-    // Movement speed
-    const speed = 0.15;
+        for (const source of session.inputSources) {
+            // 1. WRIST MENU LOGIC (Flip wrist up)
+            if (source.hand) {
+                const wrist = source.hand.get(0); // Wrist joint
+                const middle = source.hand.get(9); // Middle finger base
+                if (wrist && middle) {
+                    // Check if palm is facing the face
+                    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+                    const palmNormal = new THREE.Vector3().subVectors(middle.position, wrist.position).normalize();
+                    const isFlipped = palmNormal.dot(up) < -0.5; // Detects wrist flip
+                    
+                    if (source.handedness === 'left') this.isLeftMenuOpen = isFlipped;
+                    if (source.handedness === 'right') this.isRightMenuOpen = isFlipped;
+                }
 
-    for (const source of session.inputSources) {
-        if (source.gamepad) {
-            const axes = source.gamepad.axes;
-            
-            // Oculus Thumbstick Mapping: 
-            // axes[2] = Horizontal (Left/Right)
-            // axes[3] = Vertical (Forward/Backward)
-
-            // Forward/Backward Movement
-            if (Math.abs(axes[3]) > 0.1) {
-                camera.position.z += axes[3] * speed;
-            }
-            // Side-to-Side Strafing
-            if (Math.abs(axes[2]) > 0.1) {
-                camera.position.x += axes[2] * speed;
+                // 2. PINCH TO TELEPORT (The Laser)
+                const indexTip = source.hand.get(8);
+                const thumbTip = source.hand.get(4);
+                if (indexTip && thumbTip) {
+                    const isPinching = indexTip.position.distanceTo(thumbTip.position) < 0.02;
+                    
+                    if (isPinching) {
+                        this.showLaser(indexTip, camera, scene);
+                    } else if (this.teleportBeam.visible) {
+                        this.teleport(playerGroup);
+                    }
+                }
             }
         }
+    },
+
+    showLaser(handPos, camera) {
+        this.teleportBeam.visible = true;
+        this.targetMarker.visible = true;
+        // Logic to project laser onto the floor would go here
+    },
+
+    teleport(playerGroup) {
+        if (this.targetMarker.visible) {
+            playerGroup.position.copy(this.targetMarker.position);
+            this.teleportBeam.visible = false;
+            this.targetMarker.visible = false;
+        }
     }
-}
+};

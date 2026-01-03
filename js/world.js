@@ -1,60 +1,31 @@
 import * as THREE from 'three';
 
-export class World {
-    constructor(scene) {
-        this.scene = scene;
-        this.textureLoader = new THREE.TextureLoader();
-        this.texPath = 'assets/textures/';
-        
-        this.createEnvironment();
-    }
+export function buildWorld(scene) {
+    // 1. CELESTIAL MOON LIGHTING
+    const moonGeo = new THREE.SphereGeometry(4, 32, 32);
+    const moonMat = new THREE.MeshBasicMaterial({ color: 0xffffee });
+    const moon = new THREE.Mesh(moonGeo, moonMat);
+    moon.position.set(20, 40, -30);
+    scene.add(moon);
 
-    createEnvironment() {
-        // The Poker Table
-        const tableGeo = new THREE.CylinderGeometry(1.2, 1.2, 0.05, 40);
-        const tableMat = new THREE.MeshStandardMaterial({ 
-            color: 0x1a472a, // Classic felt green
-            roughness: 0.9 
-        });
-        const table = new THREE.Mesh(tableGeo, tableMat);
-        table.position.y = 1.0; // Standard table height in meters
-        this.scene.add(table);
+    const light = new THREE.DirectionalLight(0xffffee, 2.5);
+    light.position.copy(moon.position);
+    scene.add(light);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.2));
 
-        // Floor (Grid for spatial awareness)
-        const grid = new THREE.GridHelper(10, 20, 0x444444, 0x222222);
-        this.scene.add(grid);
-    }
+    // 2. LUXURY WOOD FLOOR (Corrected Shader)
+    const floorGeo = new THREE.PlaneGeometry(60, 60);
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a0f00, roughness: 0.2 });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    scene.add(floor);
 
-    // Update 1.3 Winning Logic
-    displayWinner(playerID, message) {
-        // 1. Highlight Winning Player (Logic placeholder)
-        console.log(`Player ${playerID} Wins!`);
-
-        // 2. Spawn Floating Win Text
-        const winBanner = this.createWinMesh(message);
-        this.scene.add(winBanner);
-
-        // 3. Permanent instruction: Delete after 10 seconds
-        setTimeout(() => {
-            this.scene.remove(winBanner);
-        }, 10000);
-    }
-
-    createWinMesh(text) {
-        // Create a simple plane banner for the text
-        const geo = new THREE.PlaneGeometry(0.8, 0.3);
-        const mat = new THREE.MeshBasicMaterial({ 
-            color: 0xffd700, 
-            side: THREE.DoubleSide,
-            transparent: true,
-            opacity: 0.9
-        });
-        const banner = new THREE.Mesh(geo, mat);
-        banner.position.set(0, 1.8, -0.5); // Floating above table
-        return banner;
-    }
-
-    update(time) {
-        // Placeholder for future noise/shader updates (Update 1.4)
-    }
+    // 3. TABLE WITH LEATHER TRIM
+    const table = new THREE.Group();
+    const felt = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 0.1, 64), new THREE.MeshStandardMaterial({color: 0x07331a}));
+    const bumper = new THREE.Mesh(new THREE.TorusGeometry(1.65, 0.08, 16, 100), new THREE.MeshStandardMaterial({color: 0x111111}));
+    bumper.rotation.x = Math.PI/2; bumper.position.y = 0.05;
+    table.add(felt); table.add(bumper);
+    table.position.y = 0.8;
+    scene.add(table);
 }

@@ -1,53 +1,62 @@
-import * as THREE from 'three';
-import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
-import { buildWorld } from './world.js';
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.158/build/three.module.js';
+import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.158/examples/jsm/webxr/VRButton.js';
+import { setupWorld } from './world.js';
 
-let scene, camera, renderer, cameraRig, hand1, hand2;
-let snapTurned = false;
+let camera, scene, renderer;
+let moveForward = false;
+let turnLeft = false;
+let turnRight = false;
+
+init();
+animate();
 
 function init() {
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x010103); // Fix: Ensure scene isn't just "void"
-    
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-    cameraRig = new THREE.Group();
-    cameraRig.position.set(0, 0, 2.0); // Audited Spawn
-    cameraRig.add(camera);
-    scene.add(cameraRig);
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x101010);
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.xr.enabled = true;
-    document.body.appendChild(renderer.domElement);
-    document.body.appendChild(VRButton.createButton(renderer));
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 1.6, 4);
 
-    const handFactory = new XRHandModelFactory();
-    hand1 = renderer.xr.getHand(0); hand1.add(handFactory.createHandModel(hand1, "mesh")); cameraRig.add(hand1);
-    hand2 = renderer.xr.getHand(1); hand2.add(handFactory.createHandModel(hand2, "mesh")); cameraRig.add(hand2);
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.xr.enabled = true;
 
-    // BUILD THE AUDITED WORLD
-    buildWorld(scene);
+  document.body.appendChild(renderer.domElement);
+  document.body.appendChild(VRButton.createButton(renderer));
 
-    renderer.setAnimationLoop(render);
+  setupWorld(scene);
+
+  // VR Controllers
+  const controller1 = renderer.xr.getController(0);
+  const controller2 = renderer.xr.getController(1);
+
+  controller1.addEventListener('selectstart', () => moveForward = true);
+  controller1.addEventListener('selectend', () => moveForward = false);
+
+  controller2.addEventListener('selectstart', () => turnRight = true);
+  controller2.addEventListener('selectend', () => turnRight = false);
+
+  scene.add(controller1);
+  scene.add(controller2);
+
+  window.addEventListener('resize', onWindowResize);
+}
+
+function animate() {
+  renderer.setAnimationLoop(render);
 }
 
 function render() {
-    const session = renderer.xr.getSession();
-    if (session) {
-        for (const source of session.inputSources) {
-            if (source.gamepad) {
-                const axes = source.gamepad.axes; 
-                cameraRig.position.x += (axes[0] || 0) * 0.05;
-                cameraRig.position.z += (axes[1] || 0) * 0.05;
-                const rx = axes[2] || 0;
-                if (Math.abs(rx) > 0.75 && !snapTurned) {
-                    cameraRig.rotation.y -= Math.sign(rx) * (Math.PI / 4);
-                    snapTurned = true;
-                } else if (Math.abs(rx) < 0.1) { snapTurned = false; }
-            }
-        }
-    }
-    renderer.render(scene, camera);
+  if (moveForward) camera.position.z -= 0.03;
+  if (turnRight) {
+    camera.rotation.y -= THREE.MathUtils.degToRad(45);
+    turnRight = false;
+  }
+  renderer.render(scene, camera);
 }
-init();
+
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}

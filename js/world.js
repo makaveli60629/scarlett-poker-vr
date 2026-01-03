@@ -1,39 +1,44 @@
 import * as THREE from 'three';
-const loader = new THREE.TextureLoader();
 
 export const World = {
     build(scene) {
-        // 1. FORCE THE BACKGROUND TO GREY (So you aren't in a black void)
-        scene.background = new THREE.Color(0x444444);
+        // Lighting Audit: Pure white ambient + directional for shadows
+        scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+        const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+        sun.position.set(5, 10, 5);
+        scene.add(sun);
 
-        // 2. THE FLOOR (Self-Lit)
-        const floorGeo = new THREE.PlaneGeometry(100, 100);
-        const floorMat = new THREE.MeshBasicMaterial({ 
-            color: 0x222222, 
-            side: THREE.DoubleSide 
-        });
-        const floor = new THREE.Mesh(floorGeo, floorMat);
+        // Floor: Large Grey Carpet
+        const floor = new THREE.Mesh(
+            new THREE.PlaneGeometry(40, 40),
+            new THREE.MeshPhongMaterial({ color: 0x444444 })
+        );
         floor.rotation.x = -Math.PI / 2;
         scene.add(floor);
 
-        // 3. THE GRID (Visual reference for movement)
-        const grid = new THREE.GridHelper(100, 50, 0xffffff, 0x888888);
+        // Visual Grid: Helps you see if you are moving
+        const grid = new THREE.GridHelper(40, 20, 0xffffff, 0x555555);
+        grid.position.y = 0.01;
         scene.add(grid);
 
-        // 4. NEON PURPLE PILLARS (The pillars you mentioned seeing before)
+        // Walls: 4 Solid Walls (Height 6m)
+        const wallMat = new THREE.MeshPhongMaterial({ color: 0x333333 });
+        const wallGeoH = new THREE.BoxGeometry(40, 6, 0.5); // Horizontal
+        const wallGeoV = new THREE.BoxGeometry(0.5, 6, 40); // Vertical
+
+        const wallN = new THREE.Mesh(wallGeoH, wallMat); wallN.position.set(0, 3, -20);
+        const wallS = new THREE.Mesh(wallGeoH, wallMat); wallS.position.set(0, 3, 20);
+        const wallE = new THREE.Mesh(wallGeoV, wallMat); wallE.position.set(20, 3, 0);
+        const wallW = new THREE.Mesh(wallGeoV, wallMat); wallW.position.set(-20, 3, 0);
+
+        scene.add(wallN, wallS, wallE, wallW);
+
+        // Neon Purple Pillars (Moved slightly so they don't block the spawn)
         const neonMat = new THREE.MeshBasicMaterial({ color: 0xbc13fe });
-        [[-8,-8], [8,-8], [-8,8], [8,8]].forEach(loc => {
-            const p = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 10), neonMat);
+        [[-10,-10], [10,-10], [-10,10], [10,10]].forEach(loc => {
+            const p = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 10), neonMat);
             p.position.set(loc[0], 5, loc[1]);
             scene.add(p);
         });
-
-        // 5. THE POKER TABLE (Forced Visibility)
-        const table = new THREE.Mesh(
-            new THREE.CylinderGeometry(2, 2, 0.5),
-            new THREE.MeshBasicMaterial({ color: 0x076324 })
-        );
-        table.position.set(0, 0.8, -5); // 5 meters in front of you
-        scene.add(table);
     }
 };

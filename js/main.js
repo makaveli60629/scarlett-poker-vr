@@ -17,12 +17,13 @@ const Core = {
         document.body.appendChild(this.renderer.domElement);
         document.body.appendChild(VRButton.createButton(this.renderer, { optionalFeatures: ['local-floor', 'hand-tracking'] }));
 
+        // Start in the Lobby
         this.playerGroup.position.set(0, 0, 5); 
         this.playerGroup.add(this.camera);
         this.scene.add(this.playerGroup);
 
         World.build(this.scene);
-        Controls.init(this.renderer, this.scene, this.playerGroup, this.camera);
+        Controls.init(this.renderer, this.scene, this.playerGroup);
         Dealer.init(this.scene);
 
         this.renderer.setAnimationLoop(() => this.render());

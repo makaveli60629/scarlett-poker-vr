@@ -3,22 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Poker VR Master - Update 4.4 (Spawn Fixed)</title>
+    <title>Poker VR Master - Update 7.1</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
         #win-overlay {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.95); padding: 50px; border: 5px solid #f1c40f;
+            background: rgba(0, 0, 0, 0.95); padding: 50px; border: 6px solid #f1c40f;
             border-radius: 40px; text-align: center; display: none; z-index: 2000;
-            box-shadow: 0 0 100px #f1c40f; color: white;
+            box-shadow: 0 0 120px #f1c40f; color: white;
         }
     </style>
 </head>
 <body>
 
     <div id="win-overlay">
-        <h1 id="win-name" style="font-size: 4rem; margin: 0;">YOU WIN</h1>
-        <h2 id="win-hand" style="font-size: 2rem; color: #f1c40f;">THREE OF A KIND</h2>
+        <h1 id="win-name" style="font-size: 5rem; margin: 0;">YOU WIN</h1>
+        <h2 id="win-hand" style="font-size: 2rem; color: #f1c40f;">ROYAL FLUSH</h2>
     </div>
 
     <script type="importmap">
@@ -35,69 +35,69 @@
         import { VRButton } from 'three/addons/webxr/VRButton.js';
         import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
-        let scene, camera, renderer, hand1, hand2, cameraRig;
-        let table, holoTable = null;
+        let scene, camera, renderer, cameraRig, hand1, hand2;
+        let floor, table, cityView, leaderBoard;
 
-        // --- 1. AUDITED FELT SHADER ---
-        const FeltShader = {
+        // --- 1. AUDITED LUXURY SHADERS ---
+        const MarbleShader = {
             uniforms: { uTime: { value: 0 } },
             vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
             fragmentShader: `
-                uniform float uTime; varying vec2 vUv;
+                varying vec2 vUv;
                 float noise(vec2 p) { return fract(sin(dot(p, vec2(12.7, 7.2))) * 43758.5); }
                 void main() {
-                    float n = noise(vUv * 800.0);
-                    vec3 col = vec3(0.01, 0.15, 0.04);
-                    col += sin(uTime * 0.4) * 0.008; 
-                    gl_FragColor = vec4(col + n * 0.04, 1.0);
+                    vec2 uv = vUv * 15.0;
+                    float n = noise(floor(uv));
+                    vec3 col = vec3(0.95, 0.95, 0.98); // Polished White Marble
+                    if(sin(uv.x * 0.5 + uv.y * 0.8 + n * 5.0) > 0.85) col = vec3(0.1, 0.1, 0.15); // Veins
+                    gl_FragColor = vec4(col, 1.0);
                 }
             `
         };
 
-        // --- 2. MASTER WORLD & LIGHTING ---
+        // --- 2. THE HIGH ROLLER ESTATE CONSTRUCTION ---
         function buildWorld() {
-            // Room Enclosure (No more void)
-            const room = new THREE.Mesh(
-                new THREE.BoxGeometry(12, 8, 12),
-                new THREE.MeshStandardMaterial({ color: 0x050505, side: THREE.BackSide })
-            );
-            room.position.y = 3.5;
-            scene.add(room);
+            // SKYBOX
+            const skyGeo = new THREE.SphereGeometry(60, 32, 32);
+            const skyMat = new THREE.ShaderMaterial({
+                uniforms: { top: { value: new THREE.Color(0x000511) }, bot: { value: new THREE.Color(0x221100) } },
+                vertexShader: `varying vec3 vP; void main() { vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+                fragmentShader: `varying vec3 vP; uniform vec3 top; uniform vec3 bot; void main() { float h = normalize(vP).y; gl_FragColor = vec4(mix(bot, top, max(h, 0.0)), 1.0); }`,
+                side: THREE.BackSide
+            });
+            scene.add(new THREE.Mesh(skyGeo, skyMat));
 
-            // Table Spotlight
-            const spot = new THREE.SpotLight(0xffffff, 200);
-            spot.position.set(0, 5, 0);
-            spot.angle = Math.PI / 5;
-            scene.add(spot);
-            scene.add(new THREE.AmbientLight(0xffffff, 0.1));
+            // MARBLE FLOOR
+            floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.ShaderMaterial(MarbleShader));
+            floor.rotation.x = -Math.PI/2; scene.add(floor);
 
-            // Poker Table
-            table = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 0.1, 64), new THREE.ShaderMaterial(FeltShader));
-            table.position.y = 0.8;
-            scene.add(table);
+            // THE TABLE (LEATHER & FELT)
+            const tableGroup = new THREE.Group();
+            const felt = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 0.1, 64), new THREE.MeshStandardMaterial({color: 0x054d1f}));
+            const bumper = new THREE.Mesh(new THREE.TorusGeometry(1.65, 0.08, 16, 100), new THREE.MeshStandardMaterial({color: 0x111111, roughness: 0.1, metalness: 0.2}));
+            bumper.rotation.x = Math.PI/2; bumper.position.y = 0.05;
+            tableGroup.add(felt); tableGroup.add(bumper);
+            tableGroup.position.y = 0.8; scene.add(tableGroup);
+
+            // STORE & LEADERBOARD
+            leaderBoard = new THREE.Mesh(new THREE.PlaneGeometry(4, 2.5), new THREE.MeshBasicMaterial({color: 0x000000, transparent: true, opacity: 0.85}));
+            leaderBoard.position.set(0, 3, -8); scene.add(leaderBoard);
+
+            const store = new THREE.Mesh(new THREE.BoxGeometry(1.5, 2.5, 0.5), new THREE.MeshStandardMaterial({color: 0x222222}));
+            store.position.set(-6, 1.25, -6); scene.add(store);
+
+            // LIGHTING
+            const sun = new THREE.DirectionalLight(0xffffff, 1.5); sun.position.set(5, 10, 5); scene.add(sun);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.3));
         }
 
-        // --- 3. MASTER LOGIC ---
-        window.triggerWin = (player, hand) => {
-            const ui = document.getElementById('win-overlay');
-            document.getElementById('win-name').innerText = player.toUpperCase() + " WINS";
-            document.getElementById('win-hand').innerText = hand.toUpperCase();
-            ui.style.display = 'block';
-
-            const utter = new SpeechSynthesisUtterance(`${player} wins with ${hand}`);
-            utter.pitch = 0.75; window.speechSynthesis.speak(utter);
-
-            setTimeout(() => { ui.style.display = 'none'; }, 10000);
-        };
-
-        // --- 4. CORE INITIALIZATION & SPAWN FIX ---
+        // --- 3. MASTER VR ENGINE ---
         function init() {
             scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
-
-            // CAMERA RIG: This is the key to fixing your spawn
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+            
             cameraRig = new THREE.Group();
-            cameraRig.position.set(0, 0, 1.2); // Moves your body back from the table center
+            cameraRig.position.set(0, 0, 2.0); // Perfect High Roller Spawn
             cameraRig.add(camera);
             scene.add(cameraRig);
 
@@ -107,7 +107,7 @@
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
-            // VR Hands Only
+            // Hands Factory
             const handFactory = new XRHandModelFactory();
             hand1 = renderer.xr.getHand(0); hand1.add(handFactory.createHandModel(hand1, "mesh")); cameraRig.add(hand1);
             hand2 = renderer.xr.getHand(1); hand2.add(handFactory.createHandModel(hand2, "mesh")); cameraRig.add(hand2);
@@ -117,7 +117,17 @@
         }
 
         function render(time) {
-            FeltShader.uniforms.uTime.value = time * 0.001;
+            // Smooth Thumbstick Locomotion
+            const session = renderer.xr.getSession();
+            if (session) {
+                for (const source of session.inputSources) {
+                    if (source.gamepad) {
+                        const axes = source.gamepad.axes;
+                        cameraRig.position.x += (axes[2] || 0) * 0.04;
+                        cameraRig.position.z += (axes[3] || 0) * 0.04;
+                    }
+                }
+            }
             renderer.render(scene, camera);
         }
 

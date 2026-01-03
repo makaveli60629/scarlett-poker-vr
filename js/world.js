@@ -4,7 +4,6 @@ export const World = {
 
     textureLoader: new THREE.TextureLoader(),
 
-    // SAFE texture loader (never crashes)
     loadTexture(path, fallbackColor = 0xff00ff) {
         let mat;
         try {
@@ -23,28 +22,32 @@ export const World = {
         return mat;
     },
 
-    build(scene) {
+    build(scene, playerGroup) {
+
+        /* ======================
+           PLAYER SPAWN
+        ======================= */
+        playerGroup.position.set(0, 1.6, 0); // Spawn in lobby center at eye height
 
         /* ======================
            ENVIRONMENT
         ======================= */
-        scene.background = new THREE.Color(0x101010); // dark gray background
+        scene.background = new THREE.Color(0x101010);
         scene.fog = new THREE.Fog(0x101010, 10, 100);
 
-        // Ambient Light
         scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
-        // Ceiling grid lights (VR safe)
+        // Ceiling point lights grid
         for (let x = -20; x <= 20; x += 5) {
             for (let z = -20; z <= 20; z += 5) {
-                const light = new THREE.PointLight(0xffffff, 0.7, 20);
+                const light = new THREE.PointLight(0xffffff, 0.8, 30);
                 light.position.set(x, 7.5, z);
                 scene.add(light);
             }
         }
 
         /* ======================
-           MATERIALS (SAFE)
+           MATERIALS
         ======================= */
         const carpetRed = this.loadTexture('./assets/textures/carpet_red.jpg', 0x550000);
         const brickWall = this.loadTexture('./assets/textures/brick_wall.jpg', 0x333333);
@@ -55,25 +58,25 @@ export const World = {
         /* ======================
            ROOMS
         ======================= */
-        this.createRoom(scene, 0, 0, 40, carpetRed, brickWall);   // Lobby
-        this.createRoom(scene, 40, 0, 30, feltGreen, brickWall);  // Poker
-        this.createRoom(scene, -40, 0, 25, feltBlack, brickWall); // Store
-        this.createRoom(scene, 0, 40, 25, carpetRed, brickWall);  // Vault
+        this.createRoom(scene, 0, 0, 20, carpetRed, brickWall);   // Lobby (spawn area)
+        this.createRoom(scene, 25, 0, 15, feltGreen, brickWall);  // Poker
+        this.createRoom(scene, -25, 0, 15, feltBlack, brickWall); // Store
+        this.createRoom(scene, 0, 25, 15, carpetRed, brickWall);  // Vault
 
         /* ======================
            CEILING PANELS
         ======================= */
-        this.createCeilingPanels(scene, 0, 0, 40);
-        this.createCeilingPanels(scene, 40, 0, 30);
-        this.createCeilingPanels(scene, -40, 0, 25);
-        this.createCeilingPanels(scene, 0, 40, 25);
+        this.createCeilingPanels(scene, 0, 0, 20);
+        this.createCeilingPanels(scene, 25, 0, 15);
+        this.createCeilingPanels(scene, -25, 0, 15);
+        this.createCeilingPanels(scene, 0, 25, 15);
 
         /* ======================
-           TABLES
+           TABLES (spawn area clear)
         ======================= */
-        this.createPokerTable(scene, 40, 0, feltGreen);   // Poker Table
-        this.createPokerTable(scene, 45, -5, feltBlack);  // High Roller
-        this.createLobbyTable(scene, 0, 0);              // Daily Reward Table
+        this.createPokerTable(scene, 25, 0, feltGreen);  // Poker Table
+        this.createPokerTable(scene, 27, -4, feltBlack); // High Roller
+        this.createLobbyTable(scene, 0, 0);             // Daily Reward Table in center
 
         /* ======================
            VAULT SAFE
@@ -82,29 +85,33 @@ export const World = {
             new THREE.BoxGeometry(2, 3, 2),
             goldTrim
         );
-        safe.position.set(0, 1.5, 45);
+        safe.position.set(0, 1.5, 25);
         scene.add(safe);
 
-        // Optional vault glow
         const vaultLight = new THREE.PointLight(0xffd700, 1.5, 15);
-        vaultLight.position.set(0, 4, 45);
+        vaultLight.position.set(0, 4, 25);
         scene.add(vaultLight);
+
+        /* ======================
+           ADDITIONAL OBJECTS (Casino style)
+           - Optional extras can be added later
+        ======================= */
+        // Example: Low-poly chairs around poker table
+        this.createChair(scene, 24, 0, 2);
+        this.createChair(scene, 26, 0, 2);
+        this.createChair(scene, 25, 0, -2);
+        this.createChair(scene, 25, 0, 2);
     },
 
     /* ======================
        ROOM BUILDER
     ======================= */
     createRoom(scene, x, z, size, floorMat, wallMat) {
-        // Floor
-        const floor = new THREE.Mesh(
-            new THREE.PlaneGeometry(size, size),
-            floorMat
-        );
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(size, size), floorMat);
         floor.rotation.x = -Math.PI / 2;
         floor.position.set(x, 0, z);
         scene.add(floor);
 
-        // Ceiling
         const ceiling = floor.clone();
         ceiling.position.y = 8;
         ceiling.rotation.x = Math.PI / 2;
@@ -112,7 +119,6 @@ export const World = {
 
         // Walls
         const wallGeo = new THREE.BoxGeometry(size, 8, 1);
-
         const wall1 = new THREE.Mesh(wallGeo, wallMat);
         wall1.position.set(x, 4, z - size / 2);
         scene.add(wall1);
@@ -121,10 +127,7 @@ export const World = {
         wall2.position.z = z + size / 2;
         scene.add(wall2);
 
-        const wall3 = new THREE.Mesh(
-            new THREE.BoxGeometry(1, 8, size),
-            wallMat
-        );
+        const wall3 = new THREE.Mesh(new THREE.BoxGeometry(1, 8, size), wallMat);
         wall3.position.set(x - size / 2, 4, z);
         scene.add(wall3);
 
@@ -142,9 +145,7 @@ export const World = {
             emissive: 0x222222,
             emissiveIntensity: 0.8
         });
-
         const panelGeo = new THREE.PlaneGeometry(4, 4);
-
         for (let i = -size / 2; i < size / 2; i += 5) {
             for (let j = -size / 2; j < size / 2; j += 5) {
                 const panel = new THREE.Mesh(panelGeo, panelMat);
@@ -156,21 +157,19 @@ export const World = {
     },
 
     /* ======================
-       POKER TABLES (OVAL)
+       POKER TABLES
     ======================= */
     createPokerTable(scene, x, z, feltMat) {
         const tableGroup = new THREE.Group();
 
-        // Table top
         const top = new THREE.Mesh(
             new THREE.CylinderGeometry(3.5, 3.5, 0.3, 32),
             feltMat
         );
-        top.scale.z = 1.6; // oval shape
+        top.scale.z = 1.6;
         top.position.y = 1;
         tableGroup.add(top);
 
-        // Leather trim
         const trim = new THREE.Mesh(
             new THREE.TorusGeometry(3.6, 0.15, 16, 32),
             new THREE.MeshStandardMaterial({ color: 0x3b2f2f })
@@ -180,14 +179,11 @@ export const World = {
         trim.position.y = 1.05;
         tableGroup.add(trim);
 
-        // Legs
         const leg = new THREE.Mesh(
             new THREE.CylinderGeometry(0.2, 0.2, 1),
             new THREE.MeshStandardMaterial({ color: 0x222222 })
         );
-        leg.position.y = 0.5;
-        leg.position.x = 2;
-        leg.position.z = 0;
+        leg.position.set(2, 0.5, 0);
         tableGroup.add(leg);
 
         tableGroup.position.set(x, 0, z);
@@ -211,5 +207,24 @@ export const World = {
         );
         base.position.set(x, 0.5, z);
         scene.add(base);
+    },
+
+    /* ======================
+       SIMPLE CHAIRS
+    ======================= */
+    createChair(scene, x, y, z) {
+        const seat = new THREE.Mesh(
+            new THREE.BoxGeometry(0.5, 0.2, 0.5),
+            new THREE.MeshStandardMaterial({ color: 0x333333 })
+        );
+        seat.position.set(x, y + 0.6, z);
+        scene.add(seat);
+
+        const back = new THREE.Mesh(
+            new THREE.BoxGeometry(0.5, 0.5, 0.1),
+            new THREE.MeshStandardMaterial({ color: 0x222222 })
+        );
+        back.position.set(x, y + 0.95, z - 0.2);
+        scene.add(back);
     }
 };

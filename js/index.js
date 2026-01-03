@@ -1,64 +1,80 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
-import { World } from './world.js';
 
-let scene, camera, renderer, world, userGroup;
+let scene, camera, renderer, cameraRig, hand1, hand2;
+let snapTurned = false;
 
-init();
-
+// --- INITIALIZE ENGINE ---
 function init() {
-    // 1. Core Scene Setup
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x050505); // Deep dark grey, not pure black
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
 
-    camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
-    
-    // 2. User/Camera Group (The "Spawn" point)
-    userGroup = new THREE.Group();
-    userGroup.position.set(0, 0, 1.5); // Start 1.5m back from center
-    scene.add(userGroup);
-    userGroup.add(camera);
+    cameraRig = new THREE.Group();
+    cameraRig.position.set(0, 0, 2.0); // Audited Spawn Position
+    cameraRig.add(camera);
+    scene.add(cameraRig);
 
-    // 3. Renderer & VR
     renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.xr.enabled = true;
-    document.getElementById('canvas-container').appendChild(renderer.domElement);
+    document.body.appendChild(renderer.domElement);
     document.body.appendChild(VRButton.createButton(renderer));
 
-    // 4. Global Lighting (Ensures visibility)
-    const ambient = new THREE.AmbientLight(0xffffff, 0.7);
-    scene.add(ambient);
-    const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-    sun.position.set(2, 5, 2);
-    scene.add(sun);
+    // Hands Setup
+    const handFactory = new XRHandModelFactory();
+    hand1 = renderer.xr.getHand(0); 
+    hand1.add(handFactory.createHandModel(hand1, "mesh")); 
+    cameraRig.add(hand1);
 
-    // 5. Hand Tracking Integration (NO CONTROLLERS)
-    const handModelFactory = new XRHandModelFactory();
-    const hand1 = renderer.xr.getHand(0);
-    hand1.add(handModelFactory.createHandModel(hand1, "mesh"));
-    scene.add(hand1);
+    hand2 = renderer.xr.getHand(1); 
+    hand2.add(handFactory.createHandModel(hand2, "mesh")); 
+    cameraRig.add(hand2);
 
-    const hand2 = renderer.xr.getHand(1);
-    hand2.add(handModelFactory.createHandModel(hand2, "mesh"));
-    scene.add(hand2);
+    // Load External World Logic (Coming in world.js)
+    setupWorld();
 
-    // 6. Load World Logic
-    world = new World(scene);
-
-    window.addEventListener('resize', onWindowResize);
     renderer.setAnimationLoop(render);
 }
 
-function onWindowResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
+function setupWorld() {
+    // Moonlight & Sky
+    const moonLight = new THREE.DirectionalLight(0xffffee, 3.0);
+    moonLight.position.set(30, 50, -40);
+    scene.add(moonLight);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.1));
+
+    // Luxury Floor (Placeholder for Wood/Gold logic)
+    const floorGeo = new THREE.PlaneGeometry(60, 60);
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a0f00 });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    scene.add(floor);
 }
 
 function render(time) {
-    world.update(time);
+    const session = renderer.xr.getSession();
+    if (session) {
+        for (const source of session.inputSources) {
+            if (source.gamepad) {
+                const axes = source.gamepad.axes; 
+                
+                // Movement Logic
+                cameraRig.position.x += (axes[0] || 0) * 0.05;
+                cameraRig.position.z += (axes[1] || 0) * 0.05;
+
+                // 45° Snap Turn (Critique Fix)
+                const rx = axes[2] || 0;
+                if (Math.abs(rx) > 0.75 && !snapTurned) {
+                    cameraRig.rotation.y -= Math.sign(rx) * (Math.PI / 4);
+                    snapTurned = true;
+                } else if (Math.abs(rx) < 0.1) {
+                    snapTurned = false;
+                }
+            }
+        }
+    }
     renderer.render(scene, camera);
 }
+
+init();

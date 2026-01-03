@@ -1,25 +1,26 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.158/build/three.module.js';
 
-export function setupWorld(scene, camera) {
+export function setupWorld(scene, camera){
   const loader = new THREE.TextureLoader();
 
-  // ---------------- LIGHTING ----------------
+  // ---------- LIGHTS ----------
   scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-  const pLight = new THREE.PointLight(0xffffff, 1);
-  pLight.position.set(0, 5, 0);
-  scene.add(pLight);
+  const pointLight = new THREE.PointLight(0xffffff, 1);
+  pointLight.position.set(0,5,0);
+  scene.add(pointLight);
 
-  // ---------------- FLOOR ----------------
+  // ---------- FLOOR ----------
   const floorMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
   loader.load('assets/textures/lobby_carpet.jpg', tex=>{
-    tex.wrapS=tex.wrapT=THREE.RepeatWrapping; tex.repeat.set(4,4);
-    floorMat.map = tex; floorMat.needsUpdate = true;
-  }, undefined, ()=>console.warn('Floor texture missing, fallback color used'));
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(4,4);
+    floorMat.map = tex; floorMat.needsUpdate=true;
+  }, undefined, ()=>console.warn('Floor texture missing, using fallback color'));
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(20,20), floorMat);
   floor.rotation.x=-Math.PI/2; floor.position.y=0; floor.receiveShadow=true;
   scene.add(floor);
 
-  // ---------------- WALLS ----------------
+  // ---------- WALLS ----------
   const wallMat = new THREE.MeshStandardMaterial({ color:0x2b2b2b });
   const wallGeo = new THREE.BoxGeometry(20,4,0.5);
   const walls = [
@@ -27,16 +28,16 @@ export function setupWorld(scene, camera) {
     {x:-10,y:2,z:0,rotY:Math.PI/2},{x:10,y:2,z:0,rotY:Math.PI/2}
   ];
   walls.forEach(pos=>{
-    const wall = new THREE.Mesh(wallGeo,wallMat);
+    const wall = new THREE.Mesh(wallGeo, wallMat);
     wall.position.set(pos.x,pos.y,pos.z);
     if(pos.rotY) wall.rotation.y=pos.rotY;
     scene.add(wall);
   });
 
-  // ---------------- TABLE ----------------
+  // ---------- TABLE ----------
   const tableFelt = new THREE.MeshStandardMaterial({ color:0x145a32 });
   loader.load('assets/textures/table_felt_green.jpg', tex=>{ tableFelt.map=tex; tableFelt.needsUpdate=true; },
-    undefined, ()=>console.warn('Table felt missing, fallback color used'));
+    undefined, ()=>console.warn('Table felt missing'));
   const table = new THREE.Mesh(new THREE.CylinderGeometry(1.8,1.8,0.2,32), tableFelt);
   table.position.set(0,1,0); scene.add(table);
 
@@ -46,7 +47,7 @@ export function setupWorld(scene, camera) {
   const tableTrim = new THREE.Mesh(new THREE.TorusGeometry(1.9,0.15,16,100), trimMat);
   tableTrim.rotation.x=Math.PI/2; tableTrim.position.y=1.1; scene.add(tableTrim);
 
-  // ---------------- LEADERBOARD ----------------
+  // ---------- LEADERBOARD ----------
   const canvas = document.createElement('canvas'); canvas.width=512; canvas.height=256;
   const ctx = canvas.getContext('2d');
   ctx.fillStyle='#111'; ctx.fillRect(0,0,512,256);
@@ -58,32 +59,29 @@ export function setupWorld(scene, camera) {
   const board = new THREE.Mesh(new THREE.PlaneGeometry(3,1.5), new THREE.MeshBasicMaterial({ map:boardTex }));
   board.position.set(0,2.5,-3); scene.add(board);
 
-  // ---------------- HANDS ----------------
+  // ---------- HANDS ----------
   const handMat = new THREE.MeshStandardMaterial({ color:0xffccaa });
   const leftHand = new THREE.Mesh(new THREE.SphereGeometry(0.08,16,16), handMat);
-  leftHand.position.set(-0.3,1.4,-0.5); scene.add(leftHand);
+  leftHand.position.set(-0.3,1.4,7.5); scene.add(leftHand);
   const rightHand = leftHand.clone(); rightHand.position.x=0.3; scene.add(rightHand);
 
-  // ---------------- TELEPORT LASER ----------------
+  // ---------- TELEPORT LASER ----------
   loader.load('assets/textures/Teleport glow.jpg', tex=>{
     const laserMat = new THREE.MeshBasicMaterial({ map:tex, transparent:true });
     const laserGeom = new THREE.CylinderGeometry(0.02,0.02,5,8);
     const laser = new THREE.Mesh(laserGeom, laserMat);
-    laser.position.set(-0.3,1.4,-2); laser.rotation.x=-Math.PI/2;
+    laser.position.set(-0.3,1.4,6.5); laser.rotation.x=-Math.PI/2;
     scene.add(laser);
   }, undefined, ()=>console.warn('Teleport glow missing'));
 
-  // ---------------- VISUAL ENHANCEMENTS ----------------
-  // Neon corner trim (glow)
+  // ---------- VISUAL ENHANCEMENTS ----------
+  // Neon corners
   const neonMat = new THREE.MeshStandardMaterial({ color:0x9b59b6, emissive:0x9b59b6, emissiveIntensity:0.7 });
   const neonGeo = new THREE.BoxGeometry(0.2,4,0.2);
-  const corners = [
-    [-10,2,-10], [10,2,-10], [-10,2,10], [10,2,10]
-  ];
+  const corners = [[-10,2,-10],[10,2,-10],[-10,2,10],[10,2,10]];
   corners.forEach(c=>{
     const neon = new THREE.Mesh(neonGeo, neonMat);
-    neon.position.set(c[0],c[1],c[2]);
-    scene.add(neon);
+    neon.position.set(c[0],c[1],c[2]); scene.add(neon);
   });
 
   // Floating art

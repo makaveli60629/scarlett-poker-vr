@@ -2,15 +2,16 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>VR Poker 4.0 - Modular</title>
+    <title>VR Poker 4.1 - Teleport Update</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
         body { margin: 0; background-color: #000; overflow: hidden; font-family: sans-serif; }
         #overlay { position: absolute; top: 10px; width: 100%; text-align: center; color: #00ff00; z-index: 100; pointer-events: none; }
+        #VRButton { bottom: 50px !important; border: 1px solid #00ff00 !important; background: rgba(0,0,0,0.8) !important; color: #00ff00 !important; }
     </style>
 </head>
 <body>
-    <div id="overlay">System: All Modules Loaded</div>
+    <div id="overlay">System: Teleport Modules Active</div>
     <script type="importmap">
         {
             "imports": {
@@ -19,7 +20,6 @@
             }
         }
     </script>
-    <script type="module" src="textures.js"></script>
     <script type="module" src="basic.js"></script>
 </body>
 </html>

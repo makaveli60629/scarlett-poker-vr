@@ -8,13 +8,14 @@ export class PokerWorld {
         this.buildWorld();
     }
 
+    // Load texture safely with fallback color
     safeMaterial(texturePath, fallbackColor){
         const mat = new THREE.MeshStandardMaterial({ color: fallbackColor });
         this.loader.load(
             texturePath,
             tex => { mat.map = tex; mat.needsUpdate = true; },
             undefined,
-            () => console.warn("Texture failed:", texturePath)
+            () => { console.warn("Failed to load texture:", texturePath); mat.color.set(fallbackColor); }
         );
         return mat;
     }
@@ -28,13 +29,16 @@ export class PokerWorld {
     }
 
     buildLights(){
-        this.scene.add(new THREE.AmbientLight(0xffffff,0.7));
-        const light = new THREE.PointLight(0xffffff,1.2);
-        light.position.set(0,5,0);
-        this.scene.add(light);
+        const ambient = new THREE.AmbientLight(0xffffff, 1.0);
+        this.scene.add(ambient);
 
-        // Neon corner accents
-        const neonMat = new THREE.MeshStandardMaterial({ color:0xff00ff, emissive:0xff00ff, emissiveIntensity:1 });
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        dirLight.position.set(10,20,10);
+        dirLight.castShadow = true;
+        this.scene.add(dirLight);
+
+        // Neon corners
+        const neonMat = new THREE.MeshStandardMaterial({ color:0xff00ff, emissive:0xff00ff, emissiveIntensity:2 });
         const neonGeo = new THREE.BoxGeometry(0.1,4,0.1);
         [[-15,2,-15],[15,2,-15],[15,2,15],[-15,2,15]].forEach(p=>{
             const neon = new THREE.Mesh(neonGeo, neonMat);
@@ -72,14 +76,32 @@ export class PokerWorld {
         trim.rotation.x=Math.PI/2; trim.position.y=0.88;
         this.scene.add(trim);
 
-        // Spawn marker
-        const spawn = new THREE.Mesh(new THREE.SphereGeometry(0.12,12,12), new THREE.MeshBasicMaterial({color:0xff0000}));
+        // Spawn
+        const spawn = new THREE.Mesh(new THREE.SphereGeometry(0.15,16,16), new THREE.MeshBasicMaterial({color:0xff0000}));
         spawn.position.set(0,1.6,10);
         this.scene.add(spawn);
-        this.rooms.lobby={spawn};
+        this.rooms.lobby={spawn:spawn.position};
     }
 
     buildStoreRoom(){
         const mat = this.safeMaterial('assets/textures/brickwall.jpg',0x333333);
         const floor = new THREE.Mesh(new THREE.PlaneGeometry(15,15), mat);
-        floor.rotation.x=-Math.PI/2;
+        floor.rotation.x=-Math.PI/2; floor.position.set(0,0,25);
+        this.scene.add(floor);
+        this.rooms.store={spawn:{x:0,y:1.6,z:25}};
+    }
+
+    buildPokerRoom(){
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(15,15), new THREE.MeshStandardMaterial({color:0x003300}));
+        floor.rotation.x=-Math.PI/2; floor.position.set(25,0,0);
+        this.scene.add(floor);
+        this.rooms.poker={spawn:{x:25,y:1.6,z:0}};
+    }
+
+    buildScorpionRoom(){
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(15,15), new THREE.MeshStandardMaterial({color:0x330000}));
+        floor.rotation.x=-Math.PI/2; floor.position.set(-25,0,0);
+        this.scene.add(floor);
+        this.rooms.scorpion={spawn:{x:-25,y:1.6,z:0}};
+    }
+            }

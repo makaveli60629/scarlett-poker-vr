@@ -1,49 +1,53 @@
 import * as THREE from 'three';
 
-export const World = {
-    build(scene) {
-        // Add massive light as a backup
-        const light = new THREE.HemisphereLight(0xffffff, 0x444444, 3.0);
-        scene.add(light);
+const loader = new THREE.TextureLoader();
 
-        // THE LOBBY (Center)
-        this.createFloor(scene, 0, 0, 0x111111);
+export const World = {
+    colliders: [],
+
+    build(scene) {
+        // Light the whole scene
+        scene.add(new THREE.AmbientLight(0xffffff, 2.0));
+
+        // Create the Lobby
+        this.createRoom(scene, 0, 0, 0x111111, 'lobby_carpet.jpg');
         
-        // NEON PURPLE PILLARS (Now using "Basic" so they glow)
+        // Neon Purple Pillars (4 Pillars in the Lobby)
         const neonPurple = new THREE.MeshBasicMaterial({ color: 0xbc13fe });
-        const locations = [[-10, -10], [10, -10], [-10, 10], [10, 10]];
-        locations.forEach(loc => {
-            const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 8), neonPurple);
-            pillar.position.set(loc[0], 4, loc[1]);
-            scene.add(pillar);
+        const pLocs = [[-8, -8], [8, -8], [-8, 8], [8, 8]];
+        pLocs.forEach(loc => {
+            const p = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 6), neonPurple);
+            p.position.set(loc[0], 3, loc[1]);
+            scene.add(p);
         });
 
-        // POKER TABLE (Right side of lobby for easy finding)
-        const pokerGroup = new THREE.Group();
-        pokerGroup.position.set(15, 0, 0); 
-        
-        const table = new THREE.Mesh(
-            new THREE.CylinderGeometry(2.5, 2.5, 0.5, 32),
-            new THREE.MeshStandardMaterial({ color: 0x006400, emissive: 0x002200 })
-        );
-        table.position.y = 0.9;
-        pokerGroup.add(table);
-        
-        // 6 Dealer Chairs
-        for(let i=0; i<6; i++) {
-            const chair = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.2, 0.6), new THREE.MeshStandardMaterial({color: 0x222222}));
-            const angle = (i/6) * Math.PI * 2;
-            chair.position.set(Math.cos(angle)*3.5, 0.6, Math.sin(angle)*3.5);
-            pokerGroup.add(chair);
-        }
-        scene.add(pokerGroup);
+        // Poker Table - Moved to X=10 so you see it immediately
+        this.addTable(scene, 10, 0);
     },
 
-    createFloor(scene, x, z, color) {
-        const floor = new THREE.Mesh(
-            new THREE.PlaneGeometry(100, 100),
-            new THREE.MeshStandardMaterial({ color: color })
+    addTable(scene, x, z) {
+        const table = new THREE.Group();
+        table.position.set(x, 0, z);
+
+        const felt = new THREE.Mesh(
+            new THREE.CylinderGeometry(2.5, 2.5, 0.3, 32),
+            new THREE.MeshStandardMaterial({ color: 0x076324 })
         );
+        felt.position.y = 0.8;
+
+        const trim = new THREE.Mesh(
+            new THREE.TorusGeometry(2.5, 0.1, 16, 100),
+            new THREE.MeshStandardMaterial({ color: 0x1a1a1a }) // Leather
+        );
+        trim.rotation.x = Math.PI/2;
+        trim.position.y = 0.95;
+
+        table.add(felt, trim);
+        scene.add(table);
+    },
+
+    createRoom(scene, x, z, col, tex) {
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.MeshStandardMaterial({ color: col }));
         floor.rotation.x = -Math.PI / 2;
         floor.position.set(x, 0, z);
         scene.add(floor);

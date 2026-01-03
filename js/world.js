@@ -1,51 +1,52 @@
 import * as THREE from 'three';
 
-class Physics {
-    constructor() { this.colliders = []; }
-    add(mesh) {
-        const box = new THREE.Box3().setFromObject(mesh);
-        this.colliders.push(box);
-    }
-    check(pos) {
-        const playerSphere = new THREE.Sphere(pos, 0.5);
-        for(let wall of this.colliders) {
-            if(wall.intersectsSphere(playerSphere)) return true;
-        }
-        return false;
-    }
-}
+export const WorldControl = {
+    init(scene) {
+        this.addLighting(scene);
+        this.buildRoom(scene);
+        this.addTable(scene);
+    },
 
-export const World = {
-    P: new Physics(),
-    buildRoom(scene, name, x, z, size, color) {
-        const group = new THREE.Group();
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({color: 0x111111}));
-        floor.rotation.x = -Math.PI/2;
-        group.add(floor);
+    addLighting(scene) {
+        // High intensity ambient light to ensure visibility
+        const ambient = new THREE.AmbientLight(0xffffff, 1.5);
+        scene.add(ambient);
 
-        setupLights() {
-    // Base room visibility (Increased to 1.0 for maximum brightness)
-    const ambient = new THREE.AmbientLight(0xffffff, 1.0); 
-    this.scene.add(ambient);
+        const pointLight = new THREE.PointLight(0xffffff, 2);
+        pointLight.position.set(0, 4, 0);
+        scene.add(pointLight);
+    },
 
-    // Focused table light
-    const spot = new THREE.SpotLight(0xffffff, 2.5);
-    spot.position.set(0, 5, 0);
-    this.scene.add(spot);
-    
-    // Directional "Sun" light to create depth
-    const sun = new THREE.DirectionalLight(0xffffff, 1);
-    sun.position.set(5, 10, 7);
-    this.scene.add(sun);
-}
+    buildRoom(scene) {
+        // Floor Grid (Visible ground so you aren't floating in void)
+        const grid = new THREE.GridHelper(20, 20, 0x00f2ff, 0x444444);
+        scene.add(grid);
 
-        // Solid Back Wall for Physics
-        const wall = new THREE.Mesh(new THREE.BoxGeometry(size, 4, 0.5), new THREE.MeshStandardMaterial({color: 0x8b2222}));
-        wall.position.set(0, 2, -size/2);
-        group.add(wall);
-        this.P.add(wall); 
+        // Brick Walls (as per your assets/textures folder request)
+        const wallGeo = new THREE.BoxGeometry(20, 4, 0.5);
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x8b4513 }); // Brick-ish
+        
+        const backWall = new THREE.Mesh(wallGeo, wallMat);
+        backWall.position.set(0, 2, -10);
+        scene.add(backWall);
+    },
 
-        group.position.set(x, 0, z);
-        scene.add(group);
+    addTable(scene) {
+        const table = new THREE.Mesh(
+            new THREE.CylinderGeometry(1.5, 1.5, 0.1, 32),
+            new THREE.MeshStandardMaterial({ color: 0x006400 }) // Green felt
+        );
+        table.position.y = 0.8;
+        scene.add(table);
+    },
+
+    showWinText(player, hand) {
+        const ui = document.getElementById('win-ui');
+        document.getElementById('winner-name').innerText = player + " WINS";
+        document.getElementById('winner-hand').innerText = hand;
+        ui.style.display = 'block';
+        
+        // 10 second timer as requested
+        setTimeout(() => { ui.style.display = 'none'; }, 10000);
     }
 };

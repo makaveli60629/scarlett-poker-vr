@@ -1,53 +1,36 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
-import CONFIG from './config.js';
+import { World } from './world.js';
+import { Controls } from './controls.js';
+import { Dealer } from './dealer.js';
 
-class PokerGame {
-    constructor() {
-        this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
-        this.renderer = new THREE.WebGLRenderer({ antialias: true });
-        this.playerGroup = new THREE.Group();
-        this.init();
-    }
+const Core = {
+    scene: new THREE.Scene(),
+    camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
+    renderer: new THREE.WebGLRenderer({ antialias: true, precision: "highp" }),
+    playerGroup: new THREE.Group(),
 
-    init() {
+    async init() {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.xr.enabled = true;
+        this.renderer.xr.setReferenceSpaceType('local-floor');
         document.body.appendChild(this.renderer.domElement);
-        document.body.appendChild(VRButton.createButton(this.renderer));
+        document.body.appendChild(VRButton.createButton(this.renderer, { optionalFeatures: ['local-floor', 'hand-tracking'] }));
 
+        this.playerGroup.position.set(0, 0, 5); 
         this.playerGroup.add(this.camera);
         this.scene.add(this.playerGroup);
-        
-        this.setupHands();
-        this.initMegaParticles();
+
+        World.build(this.scene);
+        Controls.init(this.renderer, this.scene, this.playerGroup, this.camera);
+        Dealer.init(this.scene);
+
         this.renderer.setAnimationLoop(() => this.render());
-    }
-
-    setupHands() {
-        const handFactory = new XRHandModelFactory();
-        for (let i = 0; i < 2; i++) {
-            const hand = this.renderer.xr.getHand(i);
-            hand.add(handFactory.createHandModel(hand, 'mesh'));
-            this.playerGroup.add(hand);
-        }
-    }
-
-    initMegaParticles() {
-        const geo = new THREE.BufferGeometry();
-        const pos = [];
-        for (let i = 0; i < 15000; i++) {
-            pos.push((Math.random() - 0.5) * 40, Math.random() * 20, (Math.random() - 0.5) * 40);
-        }
-        geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-        const mat = new THREE.PointsMaterial({ color: 0x00ffff, size: 0.03 });
-        this.scene.add(new THREE.Points(geo, mat));
-    }
+    },
 
     render() {
+        Controls.update(this.renderer, this.camera, this.playerGroup);
         this.renderer.render(this.scene, this.camera);
     }
-}
-new PokerGame();
+};
+Core.init();

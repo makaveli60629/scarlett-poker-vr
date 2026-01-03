@@ -3,22 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Poker VR Master - Update 8.1 (Modular)</title>
+    <title>Poker VR Master - Update 8.2</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
         #win-overlay {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.95); padding: 60px; border: 6px solid #f1c40f;
-            border-radius: 50px; text-align: center; display: none; z-index: 2000;
-            box-shadow: 0 0 150px #f1c40f; color: white; pointer-events: none;
+            background: rgba(0, 0, 0, 0.95); padding: 50px; border: 6px solid #f1c40f;
+            border-radius: 40px; text-align: center; display: none; z-index: 2000;
+            box-shadow: 0 0 100px #f1c40f; color: white; pointer-events: none;
         }
     </style>
 </head>
 <body>
-
     <div id="win-overlay">
         <h1 id="win-p">YOU WIN</h1>
-        <h2 id="win-h">ROYAL FLUSH</h2>
+        <h2 id="win-h">CELESTIAL FLUSH</h2>
     </div>
 
     <script type="importmap">
@@ -29,7 +28,6 @@
             }
         }
     </script>
-
-    <script type="module" src="index.js"></script>
+    <script type="module" src="./index.js"></script>
 </body>
 </html>

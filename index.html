@@ -2,30 +2,15 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VR Poker 8.0</title>
+    <title>VR Poker 8.0 - Movement & Visibility</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
-        body { margin: 0; padding: 0; background-color: #222; overflow: hidden; }
-        /* This ensures the VR Button is visible even if the scene is black */
-        #VRButton { 
-            bottom: 20px !important; 
-            background: rgba(0,0,0,0.5) !important; 
-            border: 1px solid white !important;
-            z-index: 9999 !important;
-        }
-        #overlay {
-            position: absolute;
-            top: 10px;
-            width: 100%;
-            text-align: center;
-            color: white;
-            font-family: sans-serif;
-            z-index: 10;
-        }
+        body { margin: 0; background-color: #111; color: white; font-family: sans-serif; overflow: hidden; }
+        #status { position: absolute; top: 20px; width: 100%; text-align: center; z-index: 100; pointer-events: none; }
     </style>
 </head>
 <body>
-    <div id="overlay">VR Poker 8.0 - If screen is black, check HTTPS</div>
+    <div id="status">System Initializing...</div>
     <script type="importmap">
         {
             "imports": {

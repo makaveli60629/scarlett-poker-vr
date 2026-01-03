@@ -4,8 +4,8 @@ import { setupWorld } from './world.js';
 
 let camera, scene, renderer;
 let moveForward = false;
-let turnLeft = false;
-let turnRight = false;
+let snapTurnLeft = false;
+let snapTurnRight = false;
 
 init();
 animate();
@@ -20,21 +20,20 @@ function init() {
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
-
   document.body.appendChild(renderer.domElement);
   document.body.appendChild(VRButton.createButton(renderer));
 
-  setupWorld(scene);
+  setupWorld(scene, camera);
 
-  // VR Controllers
+  // Controllers
   const controller1 = renderer.xr.getController(0);
   const controller2 = renderer.xr.getController(1);
 
   controller1.addEventListener('selectstart', () => moveForward = true);
   controller1.addEventListener('selectend', () => moveForward = false);
 
-  controller2.addEventListener('selectstart', () => turnRight = true);
-  controller2.addEventListener('selectend', () => turnRight = false);
+  controller2.addEventListener('selectstart', () => snapTurnRight = true);
+  controller2.addEventListener('selectend', () => snapTurnRight = false);
 
   scene.add(controller1);
   scene.add(controller2);
@@ -48,10 +47,12 @@ function animate() {
 
 function render() {
   if (moveForward) camera.position.z -= 0.03;
-  if (turnRight) {
+
+  if (snapTurnRight) {
     camera.rotation.y -= THREE.MathUtils.degToRad(45);
-    turnRight = false;
+    snapTurnRight = false;
   }
+
   renderer.render(scene, camera);
 }
 

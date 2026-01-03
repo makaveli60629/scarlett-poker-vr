@@ -1,107 +1,53 @@
 import * as THREE from 'three';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+import { PokerWorld } from './world.js';
 
-export class PokerWorld {
-    constructor(scene){
-        this.scene = scene;
-        this.loader = new THREE.TextureLoader();
-        this.rooms = {};
-        this.buildWorld();
+let scene, camera, renderer, world;
+
+async function init() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x111111); // Dark grey, not pure black
+
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    
+    // SPAWN FIX: Move back 4 meters and up to eye level
+    camera.position.set(0, 1.6, 4); 
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    
+    // Fix for newer Three.js lighting
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+
+    document.getElementById('canvas-container').appendChild(renderer.domElement);
+    document.body.appendChild(VRButton.createButton(renderer));
+
+    // Initialize World
+    world = new PokerWorld(scene);
+
+    // Hands Setup (Strictly Hands - No Controllers)
+    const handModels = new XRHandModelFactory();
+    for (let i = 0; i < 2; i++) {
+        const hand = renderer.xr.getHand(i);
+        hand.add(handModels.createHandModel(hand, 'mesh'));
+        scene.add(hand);
     }
 
-    // Load texture safely with fallback color
-    safeMaterial(texturePath, fallbackColor){
-        const mat = new THREE.MeshStandardMaterial({ color: fallbackColor });
-        this.loader.load(
-            texturePath,
-            tex => { mat.map = tex; mat.needsUpdate = true; },
-            undefined,
-            () => { console.warn("Failed to load texture:", texturePath); mat.color.set(fallbackColor); }
-        );
-        return mat;
-    }
+    renderer.setAnimationLoop(render);
+    document.getElementById('status').innerText = 'Scarlet VR: Vision Restored';
+}
 
-    buildWorld(){
-        this.buildLights();
-        this.buildLobby();
-        this.buildStoreRoom();
-        this.buildPokerRoom();
-        this.buildScorpionRoom();
-    }
+function render() {
+    renderer.render(scene, camera);
+}
 
-    buildLights(){
-        const ambient = new THREE.AmbientLight(0xffffff, 1.0);
-        this.scene.add(ambient);
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
 
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
-        dirLight.position.set(10,20,10);
-        dirLight.castShadow = true;
-        this.scene.add(dirLight);
-
-        // Neon corners
-        const neonMat = new THREE.MeshStandardMaterial({ color:0xff00ff, emissive:0xff00ff, emissiveIntensity:2 });
-        const neonGeo = new THREE.BoxGeometry(0.1,4,0.1);
-        [[-15,2,-15],[15,2,-15],[15,2,15],[-15,2,15]].forEach(p=>{
-            const neon = new THREE.Mesh(neonGeo, neonMat);
-            neon.position.set(...p);
-            this.scene.add(neon);
-        });
-    }
-
-    buildLobby(){
-        const floorMat = this.safeMaterial('assets/textures/lobby_carpet.jpg',0x444444);
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(30,30), floorMat);
-        floor.rotation.x=-Math.PI/2; floor.position.y=0;
-        this.scene.add(floor);
-
-        // Walls
-        const wallMat = this.safeMaterial('assets/textures/brickwall.jpg',0x222222);
-        const wallGeo = new THREE.BoxGeometry(30,4,0.5);
-        [[0,2,-15,0],[0,2,15,0],[-15,2,0,Math.PI/2],[15,2,0,Math.PI/2]].forEach(p=>{
-            const wall = new THREE.Mesh(wallGeo, wallMat);
-            wall.position.set(p[0],p[1],p[2]);
-            wall.rotation.y=p[3];
-            wall.userData.solid=true;
-            this.scene.add(wall);
-        });
-
-        // Poker table
-        const feltMat = this.safeMaterial('assets/textures/table_felt_green.jpg',0x006600);
-        const table = new THREE.Mesh(new THREE.CylinderGeometry(1.6,1.4,0.15,32), feltMat);
-        table.position.set(0,0.8,0);
-        table.userData.solid=true;
-        this.scene.add(table);
-
-        const trimMat = this.safeMaterial('assets/textures/Table leather trim.jpg',0x4a2a18);
-        const trim = new THREE.Mesh(new THREE.TorusGeometry(1.7,0.12,16,64),trimMat);
-        trim.rotation.x=Math.PI/2; trim.position.y=0.88;
-        this.scene.add(trim);
-
-        // Spawn
-        const spawn = new THREE.Mesh(new THREE.SphereGeometry(0.15,16,16), new THREE.MeshBasicMaterial({color:0xff0000}));
-        spawn.position.set(0,1.6,10);
-        this.scene.add(spawn);
-        this.rooms.lobby={spawn:spawn.position};
-    }
-
-    buildStoreRoom(){
-        const mat = this.safeMaterial('assets/textures/brickwall.jpg',0x333333);
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(15,15), mat);
-        floor.rotation.x=-Math.PI/2; floor.position.set(0,0,25);
-        this.scene.add(floor);
-        this.rooms.store={spawn:{x:0,y:1.6,z:25}};
-    }
-
-    buildPokerRoom(){
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(15,15), new THREE.MeshStandardMaterial({color:0x003300}));
-        floor.rotation.x=-Math.PI/2; floor.position.set(25,0,0);
-        this.scene.add(floor);
-        this.rooms.poker={spawn:{x:25,y:1.6,z:0}};
-    }
-
-    buildScorpionRoom(){
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(15,15), new THREE.MeshStandardMaterial({color:0x330000}));
-        floor.rotation.x=-Math.PI/2; floor.position.set(-25,0,0);
-        this.scene.add(floor);
-        this.rooms.scorpion={spawn:{x:-25,y:1.6,z:0}};
-    }
-            }
+init();

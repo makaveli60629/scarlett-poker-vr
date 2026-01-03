@@ -2,28 +2,21 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Poker VR - Permanent Master Build</title>
+    <title>Poker VR - Update 4.7 Mega-Build</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
-        body { margin: 0; background-color: #000; overflow: hidden; font-family: sans-serif; }
-        /* Winner letters popup - 10 second display rule */
+        body { margin: 0; background-color: #111; overflow: hidden; font-family: sans-serif; }
         #win-ui {
             position: fixed; top: 15%; left: 50%; transform: translate(-50%, -50%);
-            background: rgba(0,0,0,0.95); color: #00f2ff; padding: 30px;
-            border: 3px solid #00f2ff; border-radius: 20px; display: none;
-            text-align: center; z-index: 1000;
+            background: rgba(0,0,0,0.95); color: #00f2ff; padding: 40px;
+            border: 4px solid #a020f0; border-radius: 25px; display: none;
+            text-align: center; z-index: 1000; box-shadow: 0 0 20px #a020f0;
         }
-        #VRButton { 
-            bottom: 50px !important; 
-            background: rgba(0,0,0,0.8) !important; 
-            color: #00f2ff !important; 
-            border: 2px solid #00f2ff !important; 
-        }
+        #VRButton { bottom: 50px !important; border: 2px solid #a020f0 !important; background: #000 !important; color: #a020f0 !important; }
     </style>
 </head>
 <body>
-    <div id="win-ui"><h1 id="winner-name"></h1><p id="winner-hand"></p></div>
-
+    <div id="win-ui"><h1 id="win-name"></h1><p id="win-hand"></p></div>
     <script type="importmap">
         {
             "imports": {
@@ -32,136 +25,6 @@
             }
         }
     </script>
-
-    <script type="module">
-        import * as THREE from 'three';
-        import { VRButton } from 'three/addons/webxr/VRButton.js';
-        import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
-
-        // --- 1. CORE ENGINE & PHYSICS ---
-        class PhysicsEngine {
-            constructor() { this.colliders = []; }
-            add(mesh) {
-                const box = new THREE.Box3().setFromObject(mesh);
-                this.colliders.push(box);
-            }
-            checkCollision(position) {
-                const playerSphere = new THREE.Sphere(position, 0.4);
-                for (let box of this.colliders) {
-                    if (box.intersectsSphere(playerSphere)) return true;
-                }
-                return false;
-            }
-        }
-        const P = new PhysicsEngine();
-
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x050505);
-        
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.xr.enabled = true;
-        document.body.appendChild(renderer.domElement);
-        document.body.appendChild(VRButton.createButton(renderer));
-
-        // Player Rig & Spawn Point
-        const playerGroup = new THREE.Group();
-        playerGroup.position.set(0, 1.6, 5); // Spawns in Lobby center
-        scene.add(playerGroup);
-        playerGroup.add(camera);
-
-        // --- 2. LIGHTING & ENVIRONMENT ---
-        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
-        scene.add(hemiLight);
-
-        const loader = new THREE.TextureLoader();
-        const brickMat = new THREE.MeshStandardMaterial({ 
-            map: loader.load('assets/textures/brickwall.jpg'),
-            color: 0x8b2222 
-        });
-
-        function buildRoom(name, x, z, size, lightColor) {
-            const room = new THREE.Group();
-            
-            // Floor & 4m Ceiling
-            const floor = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({ color: 0x111111 }));
-            floor.rotation.x = -Math.PI / 2;
-            const ceil = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({ color: 0x050505 }));
-            ceil.position.y = 4;
-            ceil.rotation.x = Math.PI / 2;
-            room.add(floor, ceil);
-
-            // Back Wall (Solid Physics)
-            const wall = new THREE.Mesh(new THREE.BoxGeometry(size, 4, 0.5), brickMat);
-            wall.position.set(0, 2, -size / 2);
-            room.add(wall);
-            P.add(wall);
-
-            const light = new THREE.PointLight(lightColor, 2, 15);
-            light.position.set(0, 3.8, 0);
-            room.add(light);
-
-            room.position.set(x, 0, z);
-            scene.add(room);
-        }
-
-        // Initialize 4-Room Layout
-        buildRoom("Lobby", 0, 0, 15, 0x00f2ff);
-        buildRoom("Store", -18, 0, 12, 0xff00ff);
-        buildRoom("Poker", 18, 0, 12, 0x00ff00);
-        buildRoom("Vault", 0, 18, 12, 0xffd700);
-
-        // --- 3. POKER TABLE & HANDS ---
-        const table = new THREE.Mesh(
-            new THREE.CylinderGeometry(1.5, 1.5, 0.1, 32),
-            new THREE.MeshStandardMaterial({ color: 0x076324 })
-        );
-        table.position.set(18, 0.8, 0); // Placed in Poker Room
-        scene.add(table);
-
-        // Hand Tracking Setup (No Controllers)
-        const handFactory = new XRHandModelFactory();
-        for (let i = 0; i < 2; i++) {
-            const hand = renderer.xr.getHand(i);
-            hand.add(handFactory.createHandModel(hand, 'mesh'));
-            playerGroup.add(hand);
-        }
-
-        // --- 4. WINNER UI LOGIC (10 Seconds) ---
-        window.triggerWin = function(name, hand) {
-            const ui = document.getElementById('win-ui');
-            document.getElementById('winner-name').innerText = name + " WINS!";
-            document.getElementById('winner-hand').innerText = hand;
-            ui.style.display = 'block';
-            setTimeout(() => { ui.style.display = 'none'; }, 10000);
-        };
-
-        // --- 5. ANIMATION & MOVEMENT ---
-        renderer.setAnimationLoop(() => {
-            const session = renderer.xr.getSession();
-            if (session) {
-                for (const source of session.inputSources) {
-                    if (source.gamepad && source.handedness === 'left') {
-                        const axes = source.gamepad.axes;
-                        const nextPos = playerGroup.position.clone();
-                        
-                        // Movement direction based on camera view
-                        const dir = new THREE.Vector3(axes[2] || 0, 0, axes[3] || 0).applyQuaternion(camera.quaternion);
-                        dir.y = 0;
-                        nextPos.addScaledVector(dir, 0.05);
-
-                        // Physics Collision Check
-                        if (!P.checkCollision(nextPos)) {
-                            playerGroup.position.copy(nextPos);
-                        }
-                    }
-                }
-            }
-            renderer.render(scene, camera);
-        });
-
-        console.log("Permanent Master Update 4.6 Active.");
-    </script>
+    <script type="module" src="index.js"></script>
 </body>
 </html>

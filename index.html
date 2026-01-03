@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Poker VR Master - Update 9.3 (Restoration)</title>
+    <title>Poker VR - 9.4 Full Visibility</title>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+        body { margin: 0; background: #111; overflow: hidden; font-family: sans-serif; }
     </style>
 </head>
 <body>
@@ -24,21 +24,26 @@
         import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
         let scene, camera, renderer, cameraRig, hand1, hand2;
-        let watch, watchText, laser;
         let snapTurned = false;
 
-        // --- 1. LOBBY ARCHITECTURE (Four Walls & Sunset) ---
+        // --- 1. THE LOBBY (Walls, Floor, Lights) ---
         function buildLobby() {
-            // SUNSET SKY
-            const skyGeo = new THREE.SphereGeometry(100, 32, 32);
-            const skyMat = new THREE.MeshBasicMaterial({ color: 0x1a0a00, side: THREE.BackSide }); // Warm Sunset Glow
-            scene.add(new THREE.Mesh(skyGeo, skyMat));
+            // SKY / BACKGROUND
+            scene.background = new THREE.Color(0x1a0a00); // Sunset Warmth
 
-            // THE WALLS (20x20 Enclosure)
-            const wallMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.7 });
+            // LIGHTS (Critical Fix)
+            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5); // Bright Sky Light
+            scene.add(hemiLight);
+
+            const sun = new THREE.DirectionalLight(0xffaa00, 1.0);
+            sun.position.set(5, 10, 5);
+            scene.add(sun);
+
+            // WALLS (Brighter Gray for Visibility)
+            const wallMat = new THREE.MeshPhongMaterial({ color: 0x333333 });
             const createWall = (x, z, ry) => {
-                const wall = new THREE.Mesh(new THREE.PlaneGeometry(20, 8), wallMat);
-                wall.position.set(x, 4, z);
+                const wall = new THREE.Mesh(new THREE.PlaneGeometry(20, 10), wallMat);
+                wall.position.set(x, 5, z);
                 wall.rotation.y = ry;
                 scene.add(wall);
             };
@@ -47,64 +52,36 @@
             createWall(-10, 0, Math.PI/2);   // Left
             createWall(10, 0, -Math.PI/2);  // Right
 
-            // HERRINGBONE MIRROR FLOOR
-            const floorGeo = new THREE.PlaneGeometry(20, 20);
-            const floorMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.6, roughness: 0.1 });
-            const floor = new THREE.Mesh(floorGeo, floorMat);
+            // FLOOR (Polished Wood style)
+            const floor = new THREE.Mesh(
+                new THREE.PlaneGeometry(20, 20),
+                new THREE.MeshStandardMaterial({ color: 0x1a0f00, metalness: 0.5, roughness: 0.2 })
+            );
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
 
-            // NEON CORNER LIGHTS (Cyan Glow)
-            [[-9.9, -9.9], [9.9, -9.9], [9.9, 9.9], [-9.9, 9.9]].forEach(pos => {
-                const neon = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 8), new THREE.MeshBasicMaterial({color: 0x00ffff}));
-                neon.position.set(pos[0], 4, pos[1]);
-                scene.add(neon);
-                const light = new THREE.PointLight(0x00ffff, 5, 12);
-                light.position.set(pos[0], 3, pos[1]);
-                scene.add(light);
-            });
-
             // THE POKER TABLE
             const table = new THREE.Group();
-            table.add(new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 0.1, 64), new THREE.MeshStandardMaterial({color: 0x07331a})));
+            const felt = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 0.1, 32), new THREE.MeshPhongMaterial({color: 0x07331a}));
+            table.add(felt);
             table.position.y = 0.8;
             scene.add(table);
 
-            // THE STORE KIOSK
-            const kiosk = new THREE.Mesh(new THREE.BoxGeometry(3, 1.2, 1), new THREE.MeshStandardMaterial({color: 0x222222}));
-            kiosk.position.set(-7, 0.6, -7);
-            kiosk.rotation.y = Math.PI / 4;
-            scene.add(kiosk);
-
-            // GLOBAL LIGHTING
-            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            // NEON STRIPS (Cyan)
+            [[-9.9, -9.9], [9.9, -9.9], [9.9, 9.9], [-9.9, 9.9]].forEach(pos => {
+                const neon = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 10), new THREE.MeshBasicMaterial({color: 0x00ffff}));
+                neon.position.set(pos[0], 5, pos[1]);
+                scene.add(neon);
+            });
         }
 
-        // --- 2. WRIST WATCH HUD ---
-        function createWatch() {
-            const group = new THREE.Group();
-            const face = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.01, 32), new THREE.MeshStandardMaterial({color: 0x111111}));
-            face.rotation.x = Math.PI / 2;
-            
-            const canvas = document.createElement('canvas');
-            canvas.width = 128; canvas.height = 64;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#00ffff'; ctx.font = '24px Arial';
-            ctx.fillText('$10,000', 10, 40);
-            const tex = new THREE.CanvasTexture(canvas);
-            const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.03), new THREE.MeshBasicMaterial({map: tex, transparent: true}));
-            screen.position.z = 0.01;
-            
-            group.add(face, screen);
-            return group;
-        }
-
-        // --- 3. MASTER INIT ---
+        // --- 2. ENGINE INIT ---
         function init() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+            
             cameraRig = new THREE.Group();
-            cameraRig.position.set(0, 0, 4); // Starting point
+            cameraRig.position.set(0, 0, 4); // Spawns you away from the table
             cameraRig.add(camera);
             scene.add(cameraRig);
 
@@ -114,48 +91,50 @@
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
-            // Hands & Laser
+            // Hand Models
             const handFactory = new XRHandModelFactory();
             hand1 = renderer.xr.getHand(0); hand1.add(handFactory.createHandModel(hand1, "mesh")); cameraRig.add(hand1);
             hand2 = renderer.xr.getHand(1); hand2.add(handFactory.createHandModel(hand2, "mesh")); cameraRig.add(hand2);
-
-            // Attach Watch to Left Wrist
-            watch = createWatch();
-            hand1.add(watch); 
-
-            // Add Laser to Right Hand
-            const lGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]);
-            laser = new THREE.Line(lGeo, new THREE.LineBasicMaterial({color: 0x00ffff}));
-            hand2.add(laser);
 
             buildLobby();
             renderer.setAnimationLoop(render);
         }
 
-        // --- 4. FLUID LOCOMOTION ---
+        // --- 3. MOVEMENT LOGIC ---
         function render() {
             const session = renderer.xr.getSession();
             if (session) {
                 for (const source of session.inputSources) {
                     if (source.gamepad) {
-                        const axes = source.gamepad.axes;
-                        // Left Stick: Move
-                        const speed = 0.05;
-                        const dir = new THREE.Vector3(axes[0], 0, axes[1]).applyQuaternion(camera.quaternion);
-                        cameraRig.position.x += dir.x * speed;
-                        cameraRig.position.z += dir.z * speed;
-                        cameraRig.position.y = 0; // Lock to floor
+                        const axes = source.gamepad.axes; // [lx, ly, rx, ry]
+                        
+                        // LEFT STICK: Move in head direction
+                        const moveX = axes[0] || 0;
+                        const moveZ = axes[1] || 0;
+                        if (Math.abs(moveX) > 0.1 || Math.abs(moveZ) > 0.1) {
+                            const speed = 0.04;
+                            const headRotation = new THREE.Quaternion();
+                            camera.getWorldQuaternion(headRotation);
+                            
+                            const direction = new THREE.Vector3(moveX, 0, moveZ).applyQuaternion(headRotation);
+                            direction.y = 0; // Keep on ground
+                            cameraRig.position.add(direction.multiplyScalar(speed));
+                        }
 
-                        // Right Stick: Snap Turn
-                        if (Math.abs(axes[2]) > 0.8 && !snapTurned) {
-                            cameraRig.rotation.y -= Math.sign(axes[2]) * (Math.PI / 4);
+                        // RIGHT STICK: Snap Turn
+                        const rotateX = axes[2] || 0;
+                        if (Math.abs(rotateX) > 0.8 && !snapTurned) {
+                            cameraRig.rotation.y -= Math.sign(rotateX) * (Math.PI / 4);
                             snapTurned = true;
-                        } else if (Math.abs(axes[2]) < 0.1) { snapTurned = false; }
+                        } else if (Math.abs(rotateX) < 0.1) {
+                            snapTurned = false;
+                        }
                     }
                 }
             }
             renderer.render(scene, camera);
         }
+
         init();
     </script>
 </body>

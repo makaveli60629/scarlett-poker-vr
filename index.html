@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Poker VR Master - Update 9.2</title>
+    <title>Poker VR Master - Update 9.3 (Restoration)</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
     </style>
@@ -22,66 +22,81 @@
         import * as THREE from 'three';
         import { VRButton } from 'three/addons/webxr/VRButton.js';
         import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
-        import { Reflector } from 'three/addons/objects/Reflector.js';
 
         let scene, camera, renderer, cameraRig, hand1, hand2;
         let watch, watchText, laser;
         let snapTurned = false;
 
-        // --- 1. THE WATCH & HUD ---
-        function createWatch() {
-            const watchGroup = new THREE.Group();
-            const face = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.01, 32), new THREE.MeshStandardMaterial({color: 0x111111}));
-            face.rotation.x = Math.PI/2;
-            
-            // Holographic Display
-            const canvas = document.createElement('canvas');
-            canvas.width = 256; canvas.height = 128;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#00ffff'; ctx.font = '40px Arial';
-            ctx.fillText('12:00', 50, 50);
-            
-            const tex = new THREE.CanvasTexture(canvas);
-            const display = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.03), new THREE.MeshBasicMaterial({map: tex, transparent: true}));
-            display.position.z = 0.01;
-            
-            watchGroup.add(face, display);
-            return watchGroup;
-        }
-
-        // --- 2. LOBBY & STORE BUILD ---
+        // --- 1. LOBBY ARCHITECTURE (Four Walls & Sunset) ---
         function buildLobby() {
-            // Sunset Sky
-            const sky = new THREE.Mesh(new THREE.SphereGeometry(100, 32, 32), new THREE.MeshBasicMaterial({color: 0x1a0a00, side: THREE.BackSide}));
-            scene.add(sky);
+            // SUNSET SKY
+            const skyGeo = new THREE.SphereGeometry(100, 32, 32);
+            const skyMat = new THREE.MeshBasicMaterial({ color: 0x1a0a00, side: THREE.BackSide }); // Warm Sunset Glow
+            scene.add(new THREE.Mesh(skyGeo, skyMat));
 
-            // Reflective Floor
-            const floor = new Reflector(new THREE.PlaneGeometry(20, 20), { textureWidth: 1024, textureHeight: 1024, color: 0x444444 });
+            // THE WALLS (20x20 Enclosure)
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.7 });
+            const createWall = (x, z, ry) => {
+                const wall = new THREE.Mesh(new THREE.PlaneGeometry(20, 8), wallMat);
+                wall.position.set(x, 4, z);
+                wall.rotation.y = ry;
+                scene.add(wall);
+            };
+            createWall(0, -10, 0);          // Front
+            createWall(0, 10, Math.PI);      // Back
+            createWall(-10, 0, Math.PI/2);   // Left
+            createWall(10, 0, -Math.PI/2);  // Right
+
+            // HERRINGBONE MIRROR FLOOR
+            const floorGeo = new THREE.PlaneGeometry(20, 20);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.6, roughness: 0.1 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
 
-            // Walls & Neon (Cyan strips)
-            const wallMat = new THREE.MeshStandardMaterial({color: 0x0a0a0a});
-            for(let i=0; i<4; i++) {
-                const w = new THREE.Mesh(new THREE.PlaneGeometry(20, 6), wallMat);
-                w.position.set(i%2==0?0:(i==1?10:-10), 3, i%2!=0?0:(i==0?-10:10));
-                w.rotation.y = (Math.PI/2) * i;
-                scene.add(w);
-            }
+            // NEON CORNER LIGHTS (Cyan Glow)
+            [[-9.9, -9.9], [9.9, -9.9], [9.9, 9.9], [-9.9, 9.9]].forEach(pos => {
+                const neon = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 8), new THREE.MeshBasicMaterial({color: 0x00ffff}));
+                neon.position.set(pos[0], 4, pos[1]);
+                scene.add(neon);
+                const light = new THREE.PointLight(0x00ffff, 5, 12);
+                light.position.set(pos[0], 3, pos[1]);
+                scene.add(light);
+            });
+
+            // THE POKER TABLE
+            const table = new THREE.Group();
+            table.add(new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 0.1, 64), new THREE.MeshStandardMaterial({color: 0x07331a})));
+            table.position.y = 0.8;
+            scene.add(table);
 
             // THE STORE KIOSK
-            const kiosk = new THREE.Group();
-            const counter = new THREE.Mesh(new THREE.BoxGeometry(3, 1.2, 1), new THREE.MeshStandardMaterial({color: 0x222222}));
-            kiosk.add(counter);
+            const kiosk = new THREE.Mesh(new THREE.BoxGeometry(3, 1.2, 1), new THREE.MeshStandardMaterial({color: 0x222222}));
             kiosk.position.set(-7, 0.6, -7);
             kiosk.rotation.y = Math.PI / 4;
             scene.add(kiosk);
 
-            // Lights
-            scene.add(new THREE.AmbientLight(0xffffff, 0.3));
-            const sun = new THREE.DirectionalLight(0xffaa00, 1.5);
-            sun.position.set(5, 10, -10);
-            scene.add(sun);
+            // GLOBAL LIGHTING
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        }
+
+        // --- 2. WRIST WATCH HUD ---
+        function createWatch() {
+            const group = new THREE.Group();
+            const face = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.01, 32), new THREE.MeshStandardMaterial({color: 0x111111}));
+            face.rotation.x = Math.PI / 2;
+            
+            const canvas = document.createElement('canvas');
+            canvas.width = 128; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#00ffff'; ctx.font = '24px Arial';
+            ctx.fillText('$10,000', 10, 40);
+            const tex = new THREE.CanvasTexture(canvas);
+            const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.03), new THREE.MeshBasicMaterial({map: tex, transparent: true}));
+            screen.position.z = 0.01;
+            
+            group.add(face, screen);
+            return group;
         }
 
         // --- 3. MASTER INIT ---
@@ -89,7 +104,7 @@
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
             cameraRig = new THREE.Group();
-            cameraRig.position.set(0, 0, 4);
+            cameraRig.position.set(0, 0, 4); // Starting point
             cameraRig.add(camera);
             scene.add(cameraRig);
 
@@ -99,46 +114,39 @@
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
+            // Hands & Laser
             const handFactory = new XRHandModelFactory();
-            
-            // Left Hand (Watch)
-            hand1 = renderer.xr.getHand(0);
-            hand1.add(handFactory.createHandModel(hand1, "mesh"));
-            watch = createWatch();
-            // Attach to wrist joint (joint 0 is wrist)
-            hand1.addEventListener('connected', () => {
-                const wrist = hand1.joints['wrist'] || hand1;
-                wrist.add(watch);
-            });
-            cameraRig.add(hand1);
+            hand1 = renderer.xr.getHand(0); hand1.add(handFactory.createHandModel(hand1, "mesh")); cameraRig.add(hand1);
+            hand2 = renderer.xr.getHand(1); hand2.add(handFactory.createHandModel(hand2, "mesh")); cameraRig.add(hand2);
 
-            // Right Hand (Laser)
-            hand2 = renderer.xr.getHand(1);
-            hand2.add(handFactory.createHandModel(hand2, "mesh"));
-            const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]);
-            laser = new THREE.Line(laserGeo, new THREE.LineBasicMaterial({color: 0x00ffff}));
+            // Attach Watch to Left Wrist
+            watch = createWatch();
+            hand1.add(watch); 
+
+            // Add Laser to Right Hand
+            const lGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]);
+            laser = new THREE.Line(lGeo, new THREE.LineBasicMaterial({color: 0x00ffff}));
             hand2.add(laser);
-            cameraRig.add(hand2);
 
             buildLobby();
             renderer.setAnimationLoop(render);
         }
 
+        // --- 4. FLUID LOCOMOTION ---
         function render() {
             const session = renderer.xr.getSession();
             if (session) {
                 for (const source of session.inputSources) {
                     if (source.gamepad) {
                         const axes = source.gamepad.axes;
-                        // Corrected Locomotion (Left Stick)
+                        // Left Stick: Move
                         const speed = 0.05;
-                        const direction = new THREE.Vector3(axes[0], 0, axes[1]);
-                        direction.applyQuaternion(camera.quaternion);
-                        cameraRig.position.x += direction.x * speed;
-                        cameraRig.position.z += direction.z * speed;
-                        cameraRig.position.y = 0; // Stick to floor
+                        const dir = new THREE.Vector3(axes[0], 0, axes[1]).applyQuaternion(camera.quaternion);
+                        cameraRig.position.x += dir.x * speed;
+                        cameraRig.position.z += dir.z * speed;
+                        cameraRig.position.y = 0; // Lock to floor
 
-                        // Snap Turn (Right Stick)
+                        // Right Stick: Snap Turn
                         if (Math.abs(axes[2]) > 0.8 && !snapTurned) {
                             cameraRig.rotation.y -= Math.sign(axes[2]) * (Math.PI / 4);
                             snapTurned = true;

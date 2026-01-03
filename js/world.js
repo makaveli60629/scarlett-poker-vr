@@ -6,61 +6,68 @@ export const World = {
     loadTex(file, fallbackColor) {
         const path = `assets/textures/${file}`;
         const texture = this.textureLoader.load(path, 
-            (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2, 2); },
-            undefined, 
-            () => {} 
+            (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(5, 5); },
+            undefined, () => {} 
         );
         return new THREE.MeshStandardMaterial({
             map: texture.image ? texture : null,
             color: texture.image ? 0xffffff : fallbackColor,
-            roughness: 0.8
+            roughness: 0.7,
+            metalness: 0.2
         });
     },
 
     build(scene) {
-        // 1. CRITICAL LIGHTING: If this is too low, everything is black.
-        scene.background = new THREE.Color(0x020205);
-        scene.add(new THREE.AmbientLight(0xffffff, 1.0)); // Boosted for visibility
+        // MEGA LIGHTING (Stadium Style - No Ceiling)
+        scene.background = new THREE.Color(0x111122);
+        scene.add(new THREE.AmbientLight(0xffffff, 1.5)); // Bright base light
         
-        const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-        sun.position.set(5, 10, 5);
+        const sun = new THREE.DirectionalLight(0xffffff, 2.0);
+        sun.position.set(10, 20, 10);
         scene.add(sun);
 
-        // 2. MATERIALS
+        // EXTRA LIGHTS FOR OBJECTS
+        const pointLight = new THREE.PointLight(0xffffff, 2, 50);
+        pointLight.position.set(0, 10, 0);
+        scene.add(pointLight);
+
         const mats = {
-            carpet: this.loadTex('carpet_red.jpg', 0x660000),
-            brick: this.loadTex('brick_wall.jpg', 0x444444), // Lighter grey fallback
+            carpet: this.loadTex('carpet_red.jpg', 0x990000),
+            brick: this.loadTex('brick_wall.jpg', 0x777777),
             felt: this.loadTex('felt_green.jpg', 0x076324),
             gold: this.loadTex('gold_trim.jpg', 0xffd700)
         };
 
-        // 3. THE FLOOR (Lowered to -0.1 to avoid flickering)
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), mats.carpet);
+        // THE FLOOR
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), mats.carpet);
         floor.rotation.x = -Math.PI / 2;
-        floor.position.y = -0.1; 
+        floor.position.y = 0; 
         scene.add(floor);
 
-        // 4. THE ROOMS (Moved back so they don't spawn on top of you)
-        this.createRoom(scene, 0, 0, 20, mats.brick);    // Main Lobby
-        this.createRoom(scene, 25, 0, 15, mats.brick);   // Poker Room
+        // THE ROOMS (Low Poly Walls - No Ceiling)
+        this.createArea(scene, 0, 0, 30, mats.brick, "Lobby");
+        this.createArea(scene, 40, 0, 20, mats.brick, "Poker Room");
+        this.createArea(scene, -40, 0, 20, mats.brick, "Vault");
 
-        // 5. PROPS
-        this.createTable(scene, 0, -2, mats.felt); // Table right in front of spawn
+        // OBJECTS
+        this.createTable(scene, 0, -5, mats.felt); // Table 1
+        this.createTable(scene, 40, 0, mats.felt); // Table 2
         
-        const safe = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 1), mats.gold);
-        safe.position.set(-3, 1, -3); // Safe in the corner
+        // THE GOLD SAFE (Low Poly)
+        const safe = new THREE.Mesh(new THREE.BoxGeometry(2, 3, 2), mats.gold);
+        safe.position.set(-40, 1.5, 0);
         scene.add(safe);
     },
 
-    createRoom(scene, x, z, size, mat) {
-        const wallGeo = new THREE.BoxGeometry(size, 5, 0.2);
-        // We only build 3 walls so the rooms feel connected and open
+    createArea(scene, x, z, size, mat) {
+        const wallGeo = new THREE.BoxGeometry(size, 4, 0.5);
+        // Build a U-Shape so you don't get trapped
         const north = new THREE.Mesh(wallGeo, mat);
-        north.position.set(x, 2.5, z - size/2);
+        north.position.set(x, 2, z - size/2);
         scene.add(north);
 
-        const east = new THREE.Mesh(new THREE.BoxGeometry(0.2, 5, size), mat);
-        east.position.set(x + size/2, 2.5, z);
+        const east = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4, size), mat);
+        east.position.set(x + size/2, 2, z);
         scene.add(east);
 
         const west = east.clone();
@@ -69,10 +76,10 @@ export const World = {
     },
 
     createTable(scene, x, z, mat) {
-        const table = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 0.2, 16), mat);
-        table.position.set(x, 1, z);
-        scene.add(table);
-        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 1, 8), new THREE.MeshStandardMaterial({color:0x000000}));
+        const top = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.3, 16), mat);
+        top.position.set(x, 1, z);
+        scene.add(top);
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.8, 1, 8), new THREE.MeshStandardMaterial({color:0x111111}));
         leg.position.set(x, 0.5, z);
         scene.add(leg);
     }

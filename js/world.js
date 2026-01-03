@@ -3,112 +3,77 @@ import * as THREE from 'three';
 export const World = {
     textureLoader: new THREE.TextureLoader(),
 
-    // Texture guard: loads texture or fallback color
     loadTex(file, fallbackColor) {
         const path = `assets/textures/${file}`;
-        const texture = this.textureLoader.load(
-            path,
-            (t) => {
-                t.wrapS = t.wrapT = THREE.RepeatWrapping;
-                t.repeat.set(2, 2);
-                t.anisotropy = 4;
-            },
-            undefined,
-            () => console.warn(`Fallback: ${file} missing.`)
+        const texture = this.textureLoader.load(path, 
+            (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2, 2); },
+            undefined, 
+            () => {} 
         );
         return new THREE.MeshStandardMaterial({
             map: texture.image ? texture : null,
             color: texture.image ? 0xffffff : fallbackColor,
-            roughness: 0.9
+            roughness: 0.8
         });
     },
 
-    build(scene, playerGroup) {
-        // Player spawn
-        playerGroup.position.set(0, 0, 5);
-
-        // Sky & Fog
+    build(scene) {
+        // 1. CRITICAL LIGHTING: If this is too low, everything is black.
         scene.background = new THREE.Color(0x020205);
-        scene.fog = new THREE.Fog(0x020205, 1, 50);
-
-        // Lights
-        scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-        const sun = new THREE.DirectionalLight(0xffffff, 1);
+        scene.add(new THREE.AmbientLight(0xffffff, 1.0)); // Boosted for visibility
+        
+        const sun = new THREE.DirectionalLight(0xffffff, 1.5);
         sun.position.set(5, 10, 5);
         scene.add(sun);
 
-        // Materials
+        // 2. MATERIALS
         const mats = {
             carpet: this.loadTex('carpet_red.jpg', 0x660000),
-            brick: this.loadTex('brick_wall.jpg', 0x222222),
-            feltGreen: this.loadTex('felt_green.jpg', 0x076324),
-            feltBlack: this.loadTex('felt_black.jpg', 0x000000),
-            gold: this.loadTex('gold_trim.jpg', 0xffd700),
-            ceiling: this.loadTex('ceiling_tile.jpg', 0x111111),
+            brick: this.loadTex('brick_wall.jpg', 0x444444), // Lighter grey fallback
+            felt: this.loadTex('felt_green.jpg', 0x076324),
+            gold: this.loadTex('gold_trim.jpg', 0xffd700)
         };
 
-        // FLOOR (single large mesh)
+        // 3. THE FLOOR (Lowered to -0.1 to avoid flickering)
         const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), mats.carpet);
         floor.rotation.x = -Math.PI / 2;
-        floor.position.y = -0.05;
+        floor.position.y = -0.1; 
         scene.add(floor);
 
-        // Rooms (merged groups)
-        this.createRoom(scene, 0, 0, 15, mats.brick, mats.ceiling, "Lobby");
-        this.createRoom(scene, 20, 0, 12, mats.brick, mats.ceiling, "Poker");
-        this.createRoom(scene, -20, 0, 12, mats.brick, mats.ceiling, "Store");
-        this.createRoom(scene, 0, 20, 12, mats.brick, mats.ceiling, "Vault");
+        // 4. THE ROOMS (Moved back so they don't spawn on top of you)
+        this.createRoom(scene, 0, 0, 20, mats.brick);    // Main Lobby
+        this.createRoom(scene, 25, 0, 15, mats.brick);   // Poker Room
 
-        // Safe (optimized)
-        const safe = new THREE.Mesh(new THREE.BoxGeometry(1.5, 2.5, 1.5), mats.gold);
-        safe.position.set(0, 1.25, 20);
+        // 5. PROPS
+        this.createTable(scene, 0, -2, mats.felt); // Table right in front of spawn
+        
+        const safe = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 1), mats.gold);
+        safe.position.set(-3, 1, -3); // Safe in the corner
         scene.add(safe);
-
-        // Poker Table (optimized low-poly)
-        this.createTable(scene, 20, 0, mats.feltGreen);
     },
 
-    createRoom(scene, x, z, size, wallMat, ceilingMat, name) {
-        const room = new THREE.Group();
+    createRoom(scene, x, z, size, mat) {
+        const wallGeo = new THREE.BoxGeometry(size, 5, 0.2);
+        // We only build 3 walls so the rooms feel connected and open
+        const north = new THREE.Mesh(wallGeo, mat);
+        north.position.set(x, 2.5, z - size/2);
+        scene.add(north);
 
-        // Walls
-        const wallThickness = 0.2;
-        const wallHeight = 5;
+        const east = new THREE.Mesh(new THREE.BoxGeometry(0.2, 5, size), mat);
+        east.position.set(x + size/2, 2.5, z);
+        scene.add(east);
 
-        const north = new THREE.Mesh(new THREE.BoxGeometry(size, wallHeight, wallThickness), wallMat);
-        north.position.set(0, wallHeight/2, -size/2);
-        room.add(north);
-
-        const south = new THREE.Mesh(new THREE.BoxGeometry(size, wallHeight, wallThickness), wallMat);
-        south.position.set(0, wallHeight/2, size/2);
-        room.add(south);
-
-        const east = new THREE.Mesh(new THREE.BoxGeometry(wallThickness, wallHeight, size), wallMat);
-        east.position.set(size/2, wallHeight/2, 0);
-        room.add(east);
-
-        const west = new THREE.Mesh(new THREE.BoxGeometry(wallThickness, wallHeight, size), wallMat);
-        west.position.set(-size/2, wallHeight/2, 0);
-        room.add(west);
-
-        // Ceiling
-        const ceil = new THREE.Mesh(new THREE.PlaneGeometry(size, size), ceilingMat);
-        ceil.rotation.x = Math.PI / 2;
-        ceil.position.y = wallHeight;
-        room.add(ceil);
-
-        // Position the room
-        room.position.set(x, 0, z);
-        scene.add(room);
+        const west = east.clone();
+        west.position.x = x - size/2;
+        scene.add(west);
     },
 
     createTable(scene, x, z, mat) {
-        const top = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 0.2, 16), mat);
-        top.position.set(x, 1, z);
-        scene.add(top);
-
-        const base = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.8, 1, 12), new THREE.MeshStandardMaterial({color:0x000000}));
-        base.position.set(x, 0.5, z);
-        scene.add(base);
+        const table = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 0.2, 16), mat);
+        table.position.set(x, 1, z);
+        scene.add(table);
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 1, 8), new THREE.MeshStandardMaterial({color:0x000000}));
+        leg.position.set(x, 0.5, z);
+        scene.add(leg);
     }
 };

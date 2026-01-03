@@ -7,13 +7,19 @@ import { Logic } from './logic.js';
 const Core = {
     scene: new THREE.Scene(),
     camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
-    renderer: new THREE.WebGLRenderer({ antialias: true }),
+    // FIXED: Added highp precision and powerPreference for Quest stability
+    renderer: new THREE.WebGLRenderer({ 
+        antialias: true, 
+        precision: "highp", 
+        powerPreference: "high-performance" 
+    }),
     playerGroup: new THREE.Group(),
 
     async init() {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.xr.enabled = true;
         this.renderer.xr.setReferenceSpaceType('local-floor');
+        
         document.body.appendChild(this.renderer.domElement);
         document.body.appendChild(VRButton.createButton(this.renderer, { 
             optionalFeatures: ['local-floor', 'hand-tracking'] 
@@ -24,12 +30,12 @@ const Core = {
 
         this.setupHands();
         World.build(this.scene);
-        this.renderer.setAnimationLoop(() => this.update());
+        this.renderer.setAnimationLoop(() => this.render());
     },
 
     setupHands() {
         const factory = new XRHandModelFactory();
-        const skinMat = new THREE.MeshStandardMaterial({ color: Logic.stats.complexion });
+        const skinMat = new THREE.MeshPhongMaterial({ color: Logic.stats.complexion });
 
         for (let i = 0; i < 2; i++) {
             const hand = this.renderer.xr.getHand(i);
@@ -43,13 +49,12 @@ const Core = {
         }
     },
 
-    update() {
+    render() {
         const session = this.renderer.xr.getSession();
         if (session) {
             for (const source of session.inputSources) {
                 if (source.gamepad && source.handedness === 'left') {
                     const axes = source.gamepad.axes;
-                    // Move based on stick - restricted to X/Z plane (floor)
                     this.playerGroup.position.x += (axes[2] || 0) * 0.08;
                     this.playerGroup.position.z += (axes[3] || 0) * 0.08;
                 }

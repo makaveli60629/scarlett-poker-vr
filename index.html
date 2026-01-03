@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Poker VR Master - Update 8.3 (RECOVERY)</title>
+    <title>Poker VR - Full Suite 8.4</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
         #win-ui {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             background: rgba(0, 0, 0, 0.9); padding: 50px; border: 5px solid #f1c40f;
             border-radius: 40px; text-align: center; display: none; z-index: 2000;
-            box-shadow: 0 0 100px #f1c40f; color: white; pointer-events: none;
+            box-shadow: 0 0 100px #f1c40f; color: white;
         }
     </style>
 </head>
@@ -18,7 +18,7 @@
 
     <div id="win-ui">
         <h1 id="win-p">YOU WIN</h1>
-        <h2 id="win-h">RECOVERY FLUSH</h2>
+        <h2 id="win-h">ESTATE FLUSH</h2>
     </div>
 
     <script type="importmap">
@@ -38,48 +38,76 @@
         let scene, camera, renderer, cameraRig, hand1, hand2;
         let snapTurned = false;
 
-        // --- 1. AUDITED WORLD BUILDER ---
-        function buildWorld() {
-            // High-Contrast Sky
-            scene.background = new THREE.Color(0x020205);
+        // --- 1. REFLECTIVE & PROCEDURAL WORLD ---
+        function buildSuite() {
+            // SKY: Nebula & Stars
+            const skyGeo = new THREE.SphereGeometry(90, 32, 32);
+            const skyMat = new THREE.ShaderMaterial({
+                uniforms: { uTime: { value: 0 } },
+                vertexShader: `varying vec3 vPos; void main() { vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+                fragmentShader: `
+                    varying vec3 vPos;
+                    float noise(vec3 p) { return fract(sin(dot(p, vec3(12.3, 45.6, 78.9))) * 43758.5); }
+                    void main() {
+                        vec3 dir = normalize(vPos);
+                        float s = noise(dir * 100.0);
+                        vec3 col = vec3(0.01, 0.0, 0.05); // Deep space
+                        if (s > 0.99) col += vec3(0.8, 0.8, 1.0); // Stars
+                        col += vec3(0.1, 0.0, 0.2) * max(0.0, dir.y); // Nebula glow
+                        gl_FragColor = vec4(col, 1.0);
+                    }
+                `,
+                side: THREE.BackSide
+            });
+            scene.add(new THREE.Mesh(skyGeo, skyMat));
 
-            // Celestial Moon (Key Light)
-            const moonGeo = new THREE.SphereGeometry(3, 32, 32);
-            const moonMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-            const moon = new THREE.Mesh(moonGeo, moonMat);
-            moon.position.set(15, 30, -25);
+            // THE MOON (Celestial Light)
+            const moon = new THREE.Mesh(new THREE.SphereGeometry(4, 32, 32), new THREE.MeshBasicMaterial({color: 0xffffff}));
+            moon.position.set(20, 45, -35);
             scene.add(moon);
-
-            const sun = new THREE.DirectionalLight(0xffffff, 2.0);
+            const sun = new THREE.DirectionalLight(0xffffff, 2.5);
             sun.position.copy(moon.position);
             scene.add(sun);
-            scene.add(new THREE.AmbientLight(0xffffff, 0.4)); // Global visibility boost
+            scene.add(new THREE.AmbientLight(0xffffff, 0.3));
 
-            // Wood Floor with Gold Inlay
-            const floorGeo = new THREE.PlaneGeometry(100, 100);
-            const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a0f00, roughness: 0.1 });
+            // REFLECTABLE WOOD FLOOR
+            const floorGeo = new THREE.PlaneGeometry(60, 60);
+            const floorMat = new THREE.MeshStandardMaterial({ 
+                color: 0x1a0f00, 
+                roughness: 0.05, // High shine for reflection
+                metalness: 0.2
+            });
             const floor = new THREE.Mesh(floorGeo, floorMat);
-            floor.rotation.x = -Math.PI / 2;
+            floor.rotation.x = -Math.PI/2;
             scene.add(floor);
 
-            // The Table (Leather Trim)
-            const tableGroup = new THREE.Group();
-            const felt = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 0.1, 64), new THREE.MeshStandardMaterial({color: 0x054d1f}));
+            // THE TABLE
+            const table = new THREE.Group();
+            const felt = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 0.1, 64), new THREE.MeshStandardMaterial({color: 0x07331a}));
             const leather = new THREE.Mesh(new THREE.TorusGeometry(1.65, 0.08, 16, 100), new THREE.MeshStandardMaterial({color: 0x111111}));
-            leather.rotation.x = Math.PI/2; 
-            leather.position.y = 0.05;
-            tableGroup.add(felt); tableGroup.add(leather);
-            tableGroup.position.set(0, 0.8, 0);
-            scene.add(tableGroup);
+            leather.rotation.x = Math.PI/2; leather.position.y = 0.05;
+            table.add(felt); table.add(leather);
+            table.position.y = 0.8;
+            scene.add(table);
+
+            // THE STORE KIOSK
+            const kiosk = new THREE.Mesh(new THREE.BoxGeometry(2, 2.5, 0.8), new THREE.MeshStandardMaterial({color: 0x222222}));
+            kiosk.position.set(-6, 1.25, -6);
+            scene.add(kiosk);
+
+            // LEADERBOARD SCREEN
+            const lb = new THREE.Mesh(new THREE.PlaneGeometry(5, 3), new THREE.MeshBasicMaterial({color: 0x000000, transparent: true, opacity: 0.7}));
+            lb.position.set(0, 3, -8);
+            scene.add(lb);
         }
 
-        // --- 2. ENGINE INIT ---
+        // --- 2. VR ENGINE & LOCOMOTION ---
         function init() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
             
             cameraRig = new THREE.Group();
-            cameraRig.position.set(0, 0, 3.5); // Safe spawn away from table
+            cameraRig.position.set(0, 0, 3.5); 
             cameraRig.add(camera);
             scene.add(cameraRig);
 
@@ -93,38 +121,28 @@
             hand1 = renderer.xr.getHand(0); hand1.add(handFactory.createHandModel(hand1, "mesh")); cameraRig.add(hand1);
             hand2 = renderer.xr.getHand(1); hand2.add(handFactory.createHandModel(hand2, "mesh")); cameraRig.add(hand2);
 
-            buildWorld();
+            buildSuite();
             renderer.setAnimationLoop(render);
         }
 
-        // --- 3. LOCOMOTION & SNAP TURN ---
         function render() {
             const session = renderer.xr.getSession();
             if (session) {
                 for (const source of session.inputSources) {
                     if (source.gamepad) {
-                        const axes = source.gamepad.axes; // [lx, ly, rx, ry]
-                        
-                        // Left Stick Move
+                        const axes = source.gamepad.axes;
                         cameraRig.position.x += (axes[0] || 0) * 0.05;
                         cameraRig.position.z += (axes[1] || 0) * 0.05;
-
-                        // Right Stick 45° Snap Turn
                         const rx = axes[2] || 0;
-                        if (Math.abs(rx) > 0.8) {
-                            if (!snapTurned) {
-                                cameraRig.rotation.y -= Math.sign(rx) * (Math.PI / 4);
-                                snapTurned = true;
-                            }
-                        } else {
-                            snapTurned = false;
-                        }
+                        if (Math.abs(rx) > 0.8 && !snapTurned) {
+                            cameraRig.rotation.y -= Math.sign(rx) * (Math.PI / 4);
+                            snapTurned = true;
+                        } else if (Math.abs(rx) < 0.1) { snapTurned = false; }
                     }
                 }
             }
             renderer.render(scene, camera);
         }
-
         init();
     </script>
 </body>

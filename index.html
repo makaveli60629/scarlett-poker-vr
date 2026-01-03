@@ -2,15 +2,18 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>VR Poker 8.0 - Movement & Visibility</title>
+    <title>VR Poker 8.0 - Final Build</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
-        body { margin: 0; background-color: #111; color: white; font-family: sans-serif; overflow: hidden; }
-        #status { position: absolute; top: 20px; width: 100%; text-align: center; z-index: 100; pointer-events: none; }
+        body { margin: 0; background-color: #1a1a1a; overflow: hidden; color: white; font-family: sans-serif; }
+        #debug-log { 
+            position: absolute; top: 10px; width: 100%; text-align: center; 
+            z-index: 1000; pointer-events: none; font-size: 14px; color: #00ff00;
+        }
     </style>
 </head>
 <body>
-    <div id="status">System Initializing...</div>
+    <div id="debug-log">System: Initializing Update 8.0...</div>
     <script type="importmap">
         {
             "imports": {

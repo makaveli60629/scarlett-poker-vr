@@ -1,156 +1,99 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Scarlet Poker VR</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-  <!-- A-Frame -->
-  <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/aframe-extras@6.1.1/dist/aframe-extras.min.js"></script>
-
-  <!-- Physics -->
-  <script src="https://cdn.jsdelivr.net/npm/aframe-physics-system@4.0.1/dist/aframe-physics-system.min.js"></script>
-
-  <!-- Hand Tracking / Controllers -->
-  <script src="https://cdn.jsdelivr.net/npm/aframe-super-hands-component@5.0.2/dist/aframe-super-hands.min.js"></script>
-
-  <style>
-    body { margin: 0; overflow: hidden; background: black; }
-  </style>
+  <meta charset="UTF-8">
+  <title>Scarlett Poker VR</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="js/main.js"></script>
+  <script src="js/scene.js"></script>
+  <script src="js/teleport.js"></script>
 </head>
 
 <body>
+  <a-scene background="color: #101010" vr-mode-ui="enabled: true">
 
-<a-scene
-  renderer="colorManagement: true; physicallyCorrectLights: true"
-  vr-mode-ui="enabled: true"
-  physics="gravity: -9.8"
-  background="color: #050505">
+    <!-- ASSETS (textures later) -->
+    <a-assets>
+      <!-- Texture placeholders go here later -->
+    </a-assets>
 
-  <!-- ========================= -->
-  <!-- ASSETS (TEXTURES LATER) -->
-  <!-- ========================= -->
-  <a-assets>
-    <!-- assets/textures hooks go here -->
-  </a-assets>
+    <!-- CAMERA + CONTROLLERS -->
+    <a-entity id="rig" position="0 1.6 6">
+      <a-camera wasd-controls="enabled: false"></a-camera>
 
-  <!-- ========================= -->
-  <!-- LIGHTING -->
-  <!-- ========================= -->
-  <a-entity light="type: ambient; intensity: 0.4"></a-entity>
-  <a-entity light="type: directional; intensity: 1.2" position="0 10 5"></a-entity>
-
-  <!-- Skylight effect (no ceiling) -->
-  <a-entity light="type: hemisphere; intensity: 0.8; groundColor: #111"></a-entity>
-
-  <!-- ========================= -->
-  <!-- PLAYER / CAMERA RIG -->
-  <!-- ========================= -->
-  <a-entity id="playerRig" position="0 1.6 6">
-    
-    <!-- Camera -->
-    <a-camera wasd-controls="enabled: false"></a-camera>
-
-    <!-- LEFT HAND (Teleport + Laser) -->
-    <a-entity
-      id="leftHand"
-      hand-controls="hand: left"
-      laser-controls="hand: left"
-      raycaster="objects: .teleportable"
-      line="color: #ff0044; opacity: 0.85"
-      teleport-controls="cameraRig: #playerRig; teleportOrigin: #leftHand; button: trigger"
-      super-hands>
+      <a-entity
+        laser-controls="hand: right"
+        raycaster="objects: .teleportable"
+        teleport-controls>
+      </a-entity>
     </a-entity>
 
-    <!-- RIGHT HAND (UI Interaction) -->
-    <a-entity
-      id="rightHand"
-      hand-controls="hand: right"
-      super-hands>
+    <!-- LIGHTING -->
+    <a-entity light="type: ambient; intensity: 0.6"></a-entity>
+
+    <a-entity light="type: point; intensity: 1.2; distance: 40"
+              position="0 10 0"></a-entity>
+
+    <a-entity light="type: point; intensity: 1; distance: 30"
+              position="15 6 0"></a-entity>
+
+    <a-entity light="type: point; intensity: 1; distance: 30"
+              position="-15 6 0"></a-entity>
+
+    <!-- LOBBY -->
+    <a-entity id="lobby" position="0 0 0">
+      <a-box width="30" height="10" depth="30"
+             color="#2a2a2a"
+             position="0 5 0"
+             material="side: back"></a-box>
+
+      <a-plane class="teleportable"
+               width="30" height="30"
+               rotation="-90 0 0"
+               color="#3b3b3b"></a-plane>
     </a-entity>
 
-    <!-- LEFT WRIST WATCH -->
-    <a-entity position="0.05 -0.05 -0.1" rotation="0 0 0" parent="#leftHand">
-      <a-plane width="0.18" height="0.08" color="#000" opacity="0.85"></a-plane>
-      <a-text value="💰 10,000\nRANK: 1\n12:00"
-              color="red"
-              width="0.5"
-              align="center"
-              position="0 0 0.01">
-      </a-text>
+    <!-- GAME ROOM -->
+    <a-entity id="gameRoom" position="60 0 0">
+      <a-box width="25" height="10" depth="25"
+             color="#1f1f1f"
+             position="0 5 0"
+             material="side: back"></a-box>
+
+      <a-plane class="teleportable"
+               width="25" height="25"
+               rotation="-90 0 0"
+               color="#2d2d2d"></a-plane>
+
+      <!-- OVAL POKER TABLE -->
+      <a-entity position="0 1 0">
+        <!-- Table top -->
+        <a-entity geometry="primitive: cylinder; radius: 4; height: 0.4"
+                  rotation="0 0 0"
+                  scale="1.5 1 1"
+                  material="color: #145a32"></a-entity>
+
+        <!-- Leather trim -->
+        <a-entity geometry="primitive: torus; radius: 6; radiusTubular: 0.25"
+                  rotation="90 0 0"
+                  material="color: #4b2e1e"></a-entity>
+      </a-entity>
     </a-entity>
 
-  </a-entity>
+    <!-- STORE (TELEPORT ONLY) -->
+    <a-entity id="storeRoom" position="-60 0 0">
+      <a-box width="20" height="10" depth="20"
+             color="#202020"
+             position="0 5 0"
+             material="side: back"></a-box>
 
-  <!-- ========================= -->
-  <!-- FLOOR -->
-  <!-- ========================= -->
-  <a-box
-    class="teleportable"
-    position="0 0 0"
-    rotation="0 0 0"
-    width="40"
-    height="0.2"
-    depth="40"
-    static-body
-    color="#1a1a1a">
-  </a-box>
+      <a-plane class="teleportable"
+               width="20" height="20"
+               rotation="-90 0 0"
+               color="#333"></a-plane>
+    </a-entity>
 
-  <!-- ========================= -->
-  <!-- WALLS (NEON TRIM LOOK) -->
-  <!-- ========================= -->
-  <a-box position="0 5 -20" width="40" height="10" depth="0.5" static-body color="#111"></a-box>
-  <a-box position="0 5 20" width="40" height="10" depth="0.5" static-body color="#111"></a-box>
-  <a-box position="-20 5 0" width="0.5" height="10" depth="40" static-body color="#111"></a-box>
-  <a-box position="20 5 0" width="0.5" height="10" depth="40" static-body color="#111"></a-box>
-
-  <!-- Neon Trim -->
-  <a-ring position="0 9.8 0" rotation="90 0 0" radius-inner="19.7" radius-outer="19.9" color="#a020f0"></a-ring>
-
-  <!-- ========================= -->
-  <!-- MAIN POKER TABLE (LOBBY) -->
-  <!-- ========================= -->
-  <a-cylinder position="0 1 -2"
-              radius="2.5"
-              height="0.3"
-              static-body
-              color="#0b3d2e">
-  </a-cylinder>
-
-  <!-- ========================= -->
-  <!-- DAILY REWARD TABLE -->
-  <!-- ========================= -->
-  <a-box position="5 1 -2" width="1.5" height="1" depth="1" static-body color="#222"></a-box>
-  <a-text value="Daily Rewards" position="5 2.2 -2" align="center"></a-text>
-
-  <!-- ========================= -->
-  <!-- STORE ROOM -->
-  <!-- ========================= -->
-  <a-box position="-12 5 0" width="12" height="10" depth="12" static-body color="#101010"></a-box>
-  <a-box position="-12 1 0" width="3" height="0.2" depth="1" static-body color="#333"></a-box>
-  <a-plane position="-10 2 0" width="1.5" height="2.5" color="#222"></a-plane>
-
-  <!-- ========================= -->
-  <!-- SCORPION ROOM -->
-  <!-- ========================= -->
-  <a-box position="12 5 0" width="12" height="10" depth="12" static-body color="#0a0a0a"></a-box>
-
-  <!-- Scorpion Table -->
-  <a-cylinder position="12 1 0"
-              radius="2"
-              height="0.3"
-              static-body
-              color="#2a0000">
-  </a-cylinder>
-
-  <a-text value="SCORPION TABLE"
-          position="12 2.3 0"
-          align="center"
-          color="red">
-  </a-text>
-
-</a-scene>
-
+  </a-scene>
 </body>
 </html>

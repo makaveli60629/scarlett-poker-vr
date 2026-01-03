@@ -1,46 +1,62 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { World } from './world.js';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+import { WorldControl } from './world.js';
 
-const log = document.getElementById('debug-log');
+const Core = {
+    scene: new THREE.Scene(),
+    camera: new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000),
+    renderer: new THREE.WebGLRenderer({ antialias: true }),
+    playerGroup: new THREE.Group(),
 
-let scene, camera, renderer, world, playerGroup;
+    init() {
+        // Fix for "Black Screen": Set background to a visible dark grey
+        this.scene.background = new THREE.Color(0x222222);
+        
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.xr.enabled = true;
+        document.body.appendChild(this.renderer.domElement);
+        
+        // Oculus specific VR Button initialization
+        const vrButton = VRButton.createButton(this.renderer);
+        document.body.appendChild(vrButton);
 
-try {
-    init();
-} catch (error) {
-    log.innerHTML = `<span style="color:red">CRASH: ${error.message}</span>`;
-    console.error(error);
-}
+        // PLAYER SPAWN: Height at 1.6m (eye level), 5m back from center
+        this.playerGroup.position.set(0, 1.6, 5);
+        this.scene.add(this.playerGroup);
+        this.playerGroup.add(this.camera);
 
-function init() {
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x050505); // Near black, but slightly grey
+        this.setupHands();
+        WorldControl.init(this.scene);
+        
+        this.renderer.setAnimationLoop(() => this.render());
+    },
 
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    
-    // POSITIONING: Create a Rig so we don't spawn inside the table
-    playerGroup = new THREE.Group();
-    playerGroup.position.set(0, 0, 2); // 2 meters back from center
-    scene.add(playerGroup);
-    playerGroup.add(camera);
+    setupHands() {
+        const handFactory = new XRHandModelFactory();
+        // Hand 0 (Left), Hand 1 (Right) - Using Mesh only per request
+        for (let i = 0; i < 2; i++) {
+            const hand = this.renderer.xr.getHand(i);
+            hand.add(handFactory.createHandModel(hand, 'mesh'));
+            this.playerGroup.add(hand);
+        }
+    },
 
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.xr.enabled = true;
-    
-    document.body.appendChild(renderer.domElement);
-    document.body.appendChild(VRButton.createButton(renderer));
+    render() {
+        const session = this.renderer.xr.getSession();
+        if (session) {
+            for (const source of session.inputSources) {
+                // Smooth Movement (Left Thumbstick)
+                if (source.gamepad && source.handedness === 'left') {
+                    const axes = source.gamepad.axes;
+                    const speed = 0.05;
+                    this.playerGroup.position.x += axes[2] * speed;
+                    this.playerGroup.position.z += axes[3] * speed;
+                }
+            }
+        }
+        this.renderer.render(this.scene, this.camera);
+    }
+};
 
-    world = new World(scene, renderer, playerGroup);
-
-    log.innerText = "Update 8.0 Active - Ready for VR";
-    renderer.setAnimationLoop(render);
-}
-
-function render() {
-    world.update();
-    renderer.render(scene, camera);
-}
-
+Core.init();

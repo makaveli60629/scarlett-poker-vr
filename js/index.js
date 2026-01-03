@@ -6,64 +6,80 @@ import { World } from './world.js';
 const Core = {
     scene: new THREE.Scene(),
     camera: new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000),
-    // FORCE high-performance power preference for Oculus Browser
-    renderer: new THREE.WebGLRenderer({ 
-        antialias: true, 
-        powerPreference: "high-performance" 
-    }),
+    renderer: new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" }),
     playerGroup: new THREE.Group(),
+    teleportMarker: new THREE.Mesh(
+        new THREE.RingGeometry(0.3, 0.35, 32),
+        new THREE.MeshBasicMaterial({ color: 0xa020f0, side: THREE.DoubleSide })
+    ),
 
     async init() {
-        // Fix: Force XR Compatibility before doing anything else
-        const gl = this.renderer.getContext();
-        if (gl.makeXRCompatible) {
-            await gl.makeXRCompatible();
-        }
-
-        // Fix: Set a visible background color immediately (Dark Blue/Grey)
-        this.scene.background = new THREE.Color(0x020205);
-        
-        this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.xr.enabled = true;
-        
+        this.renderer.toneMapping = THREE.ReinhardToneMapping;
+        this.renderer.toneMappingExposure = 2.0; // SUPER BRIGHT
         document.body.appendChild(this.renderer.domElement);
         document.body.appendChild(VRButton.createButton(this.renderer));
 
-        // SPAWN SAFETY: Moves you 5 meters away from the origin
-        this.playerGroup.position.set(0, 1.6, 5);
+        // Spawn: Eye level, in the center of the giant Lobby
+        this.playerGroup.position.set(0, 1.6, 0);
         this.scene.add(this.playerGroup);
         this.playerGroup.add(this.camera);
 
-        this.setupHands();
-        World.build(this.scene); // Build the room and lights
+        // Teleport Marker
+        this.teleportMarker.rotation.x = -Math.PI/2;
+        this.teleportMarker.visible = false;
+        this.scene.add(this.teleportMarker);
 
+        this.setupHands();
+        World.build(this.scene);
         this.renderer.setAnimationLoop(() => this.update());
-        console.log("Core Initialized: Black Screen Fix Applied.");
     },
 
     setupHands() {
         const handFactory = new XRHandModelFactory();
         for (let i = 0; i < 2; i++) {
             const hand = this.renderer.xr.getHand(i);
-            hand.add(handFactory.createHandModel(hand, 'mesh'));
+            hand.add(handFactory.createHandModel(hand, 'mesh')); // PERMANENT: Hands Only
             this.playerGroup.add(hand);
         }
     },
 
     update() {
-        // Smooth Movement Logic
         const session = this.renderer.xr.getSession();
         if (session) {
             for (const source of session.inputSources) {
-                if (source.gamepad && source.handedness === 'left') {
-                    const axes = source.gamepad.axes;
-                    this.playerGroup.position.x += (axes[2] || 0) * 0.05;
-                    this.playerGroup.position.z += (axes[3] || 0) * 0.05;
+                if (source.gamepad) {
+                    const axes = source.gamepad.axes; // [x, y, thumb_x, thumb_y]
+                    
+                    // LEFT THUMBSTICK: Smooth Walk
+                    if (source.handedness === 'left') {
+                        this.playerGroup.position.x += (axes[2] || 0) * 0.1;
+                        this.playerGroup.position.z += (axes[3] || 0) * 0.1;
+                    }
+
+                    // RIGHT THUMBSTICK UP: Teleport Target
+                    if (source.handedness === 'right') {
+                        if (axes[3] < -0.5) { // Pushing forward
+                            this.showTeleportRay(source);
+                        } else if (this.teleportMarker.visible) {
+                            // Release to Teleport
+                            this.playerGroup.position.set(this.teleportMarker.position.x, 1.6, this.teleportMarker.position.z);
+                            this.teleportMarker.visible = false;
+                        }
+                    }
                 }
             }
         }
         this.renderer.render(this.scene, this.camera);
+    },
+
+    showTeleportRay(source) {
+        // Simple logic: Project marker 5 meters ahead of player direction
+        const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+        this.teleportMarker.position.copy(this.playerGroup.position).addScaledVector(dir, 5);
+        this.teleportMarker.position.y = 0.01; // Snap to floor
+        this.teleportMarker.visible = true;
     }
 };
 

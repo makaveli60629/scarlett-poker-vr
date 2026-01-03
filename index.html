@@ -2,15 +2,27 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VR Poker - Professional Master Build 1.3</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Poker VR - Update 4.0 (Holographic Master)</title>
     <style>
-        body { margin: 0; padding: 0; overflow: hidden; background-color: #000; }
-        #canvas-container { width: 100vw; height: 100vh; }
+        body { margin: 0; background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+        #winner-ui {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.95); padding: 50px; border: 6px solid #f1c40f;
+            border-radius: 50px; text-align: center; display: none; z-index: 1000;
+        }
+        .win-name { font-size: 6rem; font-weight: 900; color: #fff; }
+        #holo-hud { position: absolute; top: 20px; right: 20px; color: #00ffff; font-family: monospace; text-shadow: 0 0 10px #00ffff; }
     </style>
 </head>
 <body>
-    <div id="canvas-container"></div>
+
+    <div id="winner-ui">
+        <div id="win-player" class="win-name">PLAYER 1</div>
+        <div id="win-hand" style="font-size: 3rem; color: #f1c40f;">STRAIGHT FLUSH</div>
+    </div>
+    
+    <div id="holo-hud">HOLOGRAM: READY | REPLAY: STANDBY</div>
 
     <script type="importmap">
         {
@@ -25,205 +37,76 @@
         import * as THREE from 'three';
         import { VRButton } from 'three/addons/webxr/VRButton.js';
         import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
-        import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 
-        // --- GLOBAL PERMANENT STATE ---
-        let scene, camera, renderer, userGroup;
-        let raycaster = new THREE.Raycaster();
-        let teleportMarker, teleportTarget;
-        const controllers = [];
-        const textureLoader = new THREE.TextureLoader();
-        const texPath = 'assets/textures/';
+        let scene, camera, renderer, hand1, hand2;
+        let table, holoTable;
 
-        init();
+        // --- 1. THE PERMANENT 1.4 SHADER ---
+        const FeltShader = {
+            uniforms: { uTime: { value: 0 } },
+            vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+            fragmentShader: `
+                uniform float uTime; varying vec2 vUv;
+                void main() {
+                    vec3 col = vec3(0.01, 0.12, 0.04);
+                    col += sin(uTime + vUv.x * 10.0) * 0.01;
+                    gl_FragColor = vec4(col, 1.0);
+                }
+            `
+        };
 
+        // --- 2. HOLOGRAPHIC REPLAY LOGIC ---
+        function spawnHologram() {
+            if (holoTable) scene.remove(holoTable);
+            holoTable = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.5, 0.5, 0.05, 32),
+                new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.3, wireframe: true })
+            );
+            holoTable.position.set(0, 1.5, 0); // Floats above center
+            scene.add(holoTable);
+            document.getElementById('holo-hud').innerText = "HOLOGRAM: PLAYING REPLAY";
+            setTimeout(() => { scene.remove(holoTable); holoTable = null; }, 5000);
+        }
+
+        // --- 3. 10-SECOND WINNER PERMANENCE ---
+        window.triggerWin = function(player, hand) {
+            const ui = document.getElementById('winner-ui');
+            document.getElementById('win-player').innerText = player;
+            document.getElementById('win-hand').innerText = hand;
+            ui.style.display = 'block';
+            spawnHologram();
+            setTimeout(() => { ui.style.display = 'none'; }, 10000);
+        };
+
+        // --- 4. CORE INITIALIZATION ---
         function init() {
-            // 1. ENGINE & SCENE
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x020205);
-
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            userGroup = new THREE.Group();
-            userGroup.position.set(0, 0, 2); // Locked spawn point
-            scene.add(userGroup);
-            userGroup.add(camera);
-
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
+            
             renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
-            renderer.shadowMap.enabled = true;
-            document.getElementById('canvas-container').appendChild(renderer.domElement);
+            document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
-            // 2. PROFESSIONAL LIGHTING AUDIT
-            const ambient = new THREE.AmbientLight(0xffffff, 0.3);
-            scene.add(ambient);
-
-            // Overhead Table Light (Cyan Neon Tint)
-            const topLight = new THREE.SpotLight(0x00ffff, 3);
-            topLight.position.set(0, 4, 0);
-            topLight.castShadow = true;
-            scene.add(topLight);
-
-            // Back Fill Light (Magenta Tint)
-            const fillLight = new THREE.PointLight(0xff00ff, 1.5);
-            fillLight.position.set(0, 3, -4);
-            scene.add(fillLight);
-
-            // 3. INPUTS (HANDS + CONTROLLERS)
             const handFactory = new XRHandModelFactory();
-            const controllerFactory = new XRControllerModelFactory();
+            hand1 = renderer.xr.getHand(0); hand1.add(handFactory.createHandModel(hand1, "mesh")); scene.add(hand1);
+            hand2 = renderer.xr.getHand(1); hand2.add(handFactory.createHandModel(hand2, "mesh")); scene.add(hand2);
 
-            for (let i = 0; i < 2; i++) {
-                // Hand Setup (Locked as permanent priority)
-                const hand = renderer.xr.getHand(i);
-                hand.add(handFactory.createHandModel(hand, "mesh"));
-                scene.add(hand);
+            table = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 0.1, 64), new THREE.ShaderMaterial(FeltShader));
+            table.position.y = 0.8; scene.add(table);
 
-                // Controller Setup (For teleportation movement)
-                const controller = renderer.xr.getController(i);
-                controller.addEventListener('selectstart', () => { controller.userData.isSelecting = true; });
-                controller.addEventListener('selectend', () => { 
-                    controller.userData.isSelecting = false;
-                    if (teleportTarget) userGroup.position.set(teleportTarget.x, 0, teleportTarget.z);
-                });
-                scene.add(controller);
-                controller.add(controllerFactory.createControllerModel(controller));
-                controllers.push(controller);
-
-                // Laser Pointer
-                const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
-                const laser = new THREE.Line(laserGeo, new THREE.LineBasicMaterial({ color: 0x00ffff }));
-                laser.scale.z = 5;
-                controller.add(laser);
-            }
-
-            // 4. TELEPORTATION MARKER
-            const markerGeo = new THREE.TorusGeometry(0.2, 0.02, 16, 32);
-            teleportMarker = new THREE.Mesh(markerGeo, new THREE.MeshBasicMaterial({ color: 0x00ffff }));
-            teleportMarker.rotation.x = Math.PI / 2;
-            teleportMarker.visible = false;
-            scene.add(teleportMarker);
-
-            // 5. THE WORLD (Audit Features)
-            createNeonSuite();
-            createProfessionalOvalTable();
-            createUIComponents();
-
-            window.addEventListener('resize', onWindowResize);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.5));
             renderer.setAnimationLoop(render);
         }
 
-        function createNeonSuite() {
-            // Walls with Neon Trims
-            const wallGeo = new THREE.PlaneGeometry(12, 6);
-            const wallMat = new THREE.MeshStandardMaterial({ color: 0x080808 });
-            const neonMat = new THREE.MeshBasicMaterial({ color: 0xff00ff }); // Magenta Neon
-
-            const directions = [
-                { pos: [0, 3, -6], rot: [0, 0, 0] },
-                { pos: [0, 3, 6], rot: [0, Math.PI, 0] },
-                { pos: [6, 3, 0], rot: [0, -Math.PI/2, 0] },
-                { pos: [-6, 3, 0], rot: [0, Math.PI/2, 0] }
-            ];
-
-            directions.forEach(d => {
-                const wall = new THREE.Mesh(wallGeo, wallMat);
-                wall.position.set(...d.pos);
-                wall.rotation.set(...d.rot);
-                scene.add(wall);
-
-                const trim = new THREE.Mesh(new THREE.BoxGeometry(12, 0.05, 0.05), neonMat);
-                trim.position.set(d.pos[0], 5.8, d.pos[2]);
-                trim.rotation.set(...d.rot);
-                scene.add(trim);
-            });
-
-            scene.add(new THREE.GridHelper(20, 40, 0x444444, 0x111111));
-        }
-
-        function createProfessionalOvalTable() {
-            const table = new THREE.Group();
-            
-            // Green Felt (Oval Scaling)
-            const felt = new THREE.Mesh(
-                new THREE.CylinderGeometry(1, 1, 0.1, 64),
-                new THREE.MeshStandardMaterial({ color: 0x076324 })
-            );
-            felt.scale.set(2.4, 1, 1.3);
-            felt.position.y = 1;
-            table.add(felt);
-
-            // Leather Trim (Audit: Double-layered bumper)
-            const bumper = new THREE.Mesh(
-                new THREE.TorusGeometry(1, 0.08, 16, 100),
-                new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.3 })
-            );
-            bumper.rotation.x = Math.PI/2;
-            bumper.scale.set(2.4, 1.3, 1);
-            bumper.position.y = 1.05;
-            table.add(bumper);
-
-            scene.add(table);
-        }
-
-        function createUIComponents() {
-            // Hovering Leaderboard & Store
-            const boardMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.7 });
-            const leaderboard = new THREE.Mesh(new THREE.PlaneGeometry(2, 3), boardMat);
-            leaderboard.position.set(-4, 2.5, -5.5);
-            scene.add(leaderboard);
-
-            const store = new THREE.Mesh(new THREE.PlaneGeometry(2, 3), boardMat);
-            store.position.set(4, 2.5, -5.5);
-            scene.add(store);
-        }
-
-        // PERMANENT WIN BANNER (Audit: 10 Seconds Gold Letters)
-        window.showWinBanner = function(player, hand) {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            canvas.width = 1024; canvas.height = 256;
-            ctx.fillStyle = '#FFD700';
-            ctx.font = 'bold 80px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText(player + " WINS!", 512, 100);
-            ctx.font = '50px Arial';
-            ctx.fillText(hand, 512, 200);
-
-            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas) }));
-            sprite.position.set(0, 2.5, -1);
-            sprite.scale.set(2, 0.5, 1);
-            scene.add(sprite);
-            setTimeout(() => scene.remove(sprite), 10000);
-        };
-
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
-
-        function render() {
-            teleportMarker.visible = false;
-            teleportTarget = null;
-
-            controllers.forEach(c => {
-                if (c.userData.isSelecting) {
-                    const matrix = new THREE.Matrix4().extractRotation(c.matrixWorld);
-                    raycaster.ray.origin.setFromMatrixPosition(c.matrixWorld);
-                    raycaster.ray.direction.set(0, 0, -1).applyMatrix4(matrix);
-                    const hits = raycaster.intersectObjects(scene.children);
-                    if (hits.length > 0 && hits[0].point.y < 0.2) {
-                        teleportTarget = hits[0].point;
-                        teleportMarker.position.copy(teleportTarget);
-                        teleportMarker.visible = true;
-                    }
-                }
-            });
+        function render(time) {
+            FeltShader.uniforms.uTime.value = time * 0.001;
+            if (holoTable) holoTable.rotation.y += 0.01;
             renderer.render(scene, camera);
         }
+
+        init();
     </script>
 </body>
 </html>

@@ -3,21 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Poker VR Master - Update 8.2</title>
+    <title>Poker VR Master - Update 8.3 (RECOVERY)</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
-        #win-overlay {
+        #win-ui {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.95); padding: 50px; border: 6px solid #f1c40f;
+            background: rgba(0, 0, 0, 0.9); padding: 50px; border: 5px solid #f1c40f;
             border-radius: 40px; text-align: center; display: none; z-index: 2000;
             box-shadow: 0 0 100px #f1c40f; color: white; pointer-events: none;
         }
     </style>
 </head>
 <body>
-    <div id="win-overlay">
+
+    <div id="win-ui">
         <h1 id="win-p">YOU WIN</h1>
-        <h2 id="win-h">CELESTIAL FLUSH</h2>
+        <h2 id="win-h">RECOVERY FLUSH</h2>
     </div>
 
     <script type="importmap">
@@ -28,6 +29,103 @@
             }
         }
     </script>
-    <script type="module" src="./index.js"></script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
+        import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+
+        let scene, camera, renderer, cameraRig, hand1, hand2;
+        let snapTurned = false;
+
+        // --- 1. AUDITED WORLD BUILDER ---
+        function buildWorld() {
+            // High-Contrast Sky
+            scene.background = new THREE.Color(0x020205);
+
+            // Celestial Moon (Key Light)
+            const moonGeo = new THREE.SphereGeometry(3, 32, 32);
+            const moonMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const moon = new THREE.Mesh(moonGeo, moonMat);
+            moon.position.set(15, 30, -25);
+            scene.add(moon);
+
+            const sun = new THREE.DirectionalLight(0xffffff, 2.0);
+            sun.position.copy(moon.position);
+            scene.add(sun);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.4)); // Global visibility boost
+
+            // Wood Floor with Gold Inlay
+            const floorGeo = new THREE.PlaneGeometry(100, 100);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a0f00, roughness: 0.1 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            // The Table (Leather Trim)
+            const tableGroup = new THREE.Group();
+            const felt = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 0.1, 64), new THREE.MeshStandardMaterial({color: 0x054d1f}));
+            const leather = new THREE.Mesh(new THREE.TorusGeometry(1.65, 0.08, 16, 100), new THREE.MeshStandardMaterial({color: 0x111111}));
+            leather.rotation.x = Math.PI/2; 
+            leather.position.y = 0.05;
+            tableGroup.add(felt); tableGroup.add(leather);
+            tableGroup.position.set(0, 0.8, 0);
+            scene.add(tableGroup);
+        }
+
+        // --- 2. ENGINE INIT ---
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+            
+            cameraRig = new THREE.Group();
+            cameraRig.position.set(0, 0, 3.5); // Safe spawn away from table
+            cameraRig.add(camera);
+            scene.add(cameraRig);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            document.body.appendChild(renderer.domElement);
+            document.body.appendChild(VRButton.createButton(renderer));
+
+            const handFactory = new XRHandModelFactory();
+            hand1 = renderer.xr.getHand(0); hand1.add(handFactory.createHandModel(hand1, "mesh")); cameraRig.add(hand1);
+            hand2 = renderer.xr.getHand(1); hand2.add(handFactory.createHandModel(hand2, "mesh")); cameraRig.add(hand2);
+
+            buildWorld();
+            renderer.setAnimationLoop(render);
+        }
+
+        // --- 3. LOCOMOTION & SNAP TURN ---
+        function render() {
+            const session = renderer.xr.getSession();
+            if (session) {
+                for (const source of session.inputSources) {
+                    if (source.gamepad) {
+                        const axes = source.gamepad.axes; // [lx, ly, rx, ry]
+                        
+                        // Left Stick Move
+                        cameraRig.position.x += (axes[0] || 0) * 0.05;
+                        cameraRig.position.z += (axes[1] || 0) * 0.05;
+
+                        // Right Stick 45° Snap Turn
+                        const rx = axes[2] || 0;
+                        if (Math.abs(rx) > 0.8) {
+                            if (!snapTurned) {
+                                cameraRig.rotation.y -= Math.sign(rx) * (Math.PI / 4);
+                                snapTurned = true;
+                            }
+                        } else {
+                            snapTurned = false;
+                        }
+                    }
+                }
+            }
+            renderer.render(scene, camera);
+        }
+
+        init();
+    </script>
 </body>
 </html>

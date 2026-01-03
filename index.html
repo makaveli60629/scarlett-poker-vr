@@ -2,25 +2,25 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>VR Poker 4.2 - Dealer Active</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Poker VR - Master Build</title>
     <style>
-        body { margin: 0; background-color: #000; overflow: hidden; font-family: sans-serif; }
-        #overlay { position: absolute; top: 10px; width: 100%; text-align: center; color: #00ff00; z-index: 100; pointer-events: none; }
-        #VRButton { bottom: 50px !important; border: 1px solid #00ff00 !important; background: rgba(0,0,0,0.8) !important; color: #00ff00 !important; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        #winner-ui {
+            position: fixed; top: 15%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9); color: gold; padding: 30px;
+            border: 3px solid #00f2ff; border-radius: 20px;
+            display: none; text-align: center; z-index: 1000;
+        }
     </style>
 </head>
 <body>
-    <div id="overlay">System: Dealer Initialized</div>
+    <div id="winner-ui"></div>
     <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-            }
-        }
+        { "imports": { 
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" 
+        } }
     </script>
-    <script type="module" src="dealer.js"></script>
-    <script type="module" src="basic.js"></script>
+    <script type="module" src="main.js"></script>
 </body>
 </html>

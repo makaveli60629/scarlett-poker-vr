@@ -1,99 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Scarlett Poker VR</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-  <script src="js/main.js"></script>
-  <script src="js/scene.js"></script>
-  <script src="js/teleport.js"></script>
+  <meta charset="UTF-8" />
+  <title>Scarlett VR Poker</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; }
+    canvas { display: block; }
+  </style>
 </head>
-
 <body>
-  <a-scene background="color: #101010" vr-mode-ui="enabled: true">
-
-    <!-- ASSETS (textures later) -->
-    <a-assets>
-      <!-- Texture placeholders go here later -->
-    </a-assets>
-
-    <!-- CAMERA + CONTROLLERS -->
-    <a-entity id="rig" position="0 1.6 6">
-      <a-camera wasd-controls="enabled: false"></a-camera>
-
-      <a-entity
-        laser-controls="hand: right"
-        raycaster="objects: .teleportable"
-        teleport-controls>
-      </a-entity>
-    </a-entity>
-
-    <!-- LIGHTING -->
-    <a-entity light="type: ambient; intensity: 0.6"></a-entity>
-
-    <a-entity light="type: point; intensity: 1.2; distance: 40"
-              position="0 10 0"></a-entity>
-
-    <a-entity light="type: point; intensity: 1; distance: 30"
-              position="15 6 0"></a-entity>
-
-    <a-entity light="type: point; intensity: 1; distance: 30"
-              position="-15 6 0"></a-entity>
-
-    <!-- LOBBY -->
-    <a-entity id="lobby" position="0 0 0">
-      <a-box width="30" height="10" depth="30"
-             color="#2a2a2a"
-             position="0 5 0"
-             material="side: back"></a-box>
-
-      <a-plane class="teleportable"
-               width="30" height="30"
-               rotation="-90 0 0"
-               color="#3b3b3b"></a-plane>
-    </a-entity>
-
-    <!-- GAME ROOM -->
-    <a-entity id="gameRoom" position="60 0 0">
-      <a-box width="25" height="10" depth="25"
-             color="#1f1f1f"
-             position="0 5 0"
-             material="side: back"></a-box>
-
-      <a-plane class="teleportable"
-               width="25" height="25"
-               rotation="-90 0 0"
-               color="#2d2d2d"></a-plane>
-
-      <!-- OVAL POKER TABLE -->
-      <a-entity position="0 1 0">
-        <!-- Table top -->
-        <a-entity geometry="primitive: cylinder; radius: 4; height: 0.4"
-                  rotation="0 0 0"
-                  scale="1.5 1 1"
-                  material="color: #145a32"></a-entity>
-
-        <!-- Leather trim -->
-        <a-entity geometry="primitive: torus; radius: 6; radiusTubular: 0.25"
-                  rotation="90 0 0"
-                  material="color: #4b2e1e"></a-entity>
-      </a-entity>
-    </a-entity>
-
-    <!-- STORE (TELEPORT ONLY) -->
-    <a-entity id="storeRoom" position="-60 0 0">
-      <a-box width="20" height="10" depth="20"
-             color="#202020"
-             position="0 5 0"
-             material="side: back"></a-box>
-
-      <a-plane class="teleportable"
-               width="20" height="20"
-               rotation="-90 0 0"
-               color="#333"></a-plane>
-    </a-entity>
-
-  </a-scene>
+  <script type="module" src="./index.js"></script>
 </body>
 </html>

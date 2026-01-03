@@ -16,67 +16,80 @@ const Core = {
         this.renderer.xr.enabled = true;
         this.renderer.xr.setReferenceSpaceType('local-floor');
         
-        // Studio environment background
-        this.scene.background = new THREE.Color(0x11111b);
+        // Safety Background (Dark Blue) so "Black" never happens
+        this.scene.background = new THREE.Color(0x050510);
         
         document.body.appendChild(this.renderer.domElement);
         document.body.appendChild(VRButton.createButton(this.renderer, { 
             optionalFeatures: ['local-floor', 'hand-tracking'] 
         }));
 
-        // SPAWN: Corner of Lobby, 1.6m eye level
+        // SPAWN AUDIT
         this.playerGroup.position.set(-15, 0, -15); 
-        this.playerGroup.rotation.y = Math.PI / 4; 
-        this.camera.position.y = 1.6;
-
+        this.camera.position.y = 1.6; 
         this.playerGroup.add(this.camera);
         this.scene.add(this.playerGroup);
 
         this.setupHands();
         World.build(this.scene);
-        this.renderer.setAnimationLoop(() => this.update());
+        this.renderer.setAnimationLoop(() => this.render());
     },
 
     setupHands() {
-        const factory = new XRHandModelFactory();
-        const skinMat = new THREE.MeshStandardMaterial({ color: Logic.stats.complexion });
+        this.handFactory = new XRHandModelFactory();
+        this.skinMat = new THREE.MeshStandardMaterial({ color: Logic.stats.complexion });
+
         for (let i = 0; i < 2; i++) {
             const hand = this.renderer.xr.getHand(i);
-            const model = factory.createHandModel(hand, 'mesh');
+            const model = this.handFactory.createHandModel(hand, 'mesh');
             hand.add(model);
             hand.addEventListener('connected', () => {
-                model.traverse(c => { if(c.isMesh) c.material = skinMat; });
+                model.traverse(c => { if(c.isMesh) c.material = this.skinMat; });
             });
             this.playerGroup.add(hand);
         }
     },
 
-    update() {
+    render() {
         const session = this.renderer.xr.getSession();
         if (session) {
             for (const source of session.inputSources) {
-                if (!source.gamepad) continue;
-                const axes = source.gamepad.axes;
-
-                // MOVEMENT (Left Stick) - Corrected Inversion
-                if (source.handedness === 'left') {
-                    const dir = new THREE.Vector3();
-                    this.camera.getWorldDirection(dir);
-                    dir.y = 0; dir.normalize();
-                    const side = new THREE.Vector3().crossVectors(this.camera.up, dir).normalize();
-
-                    // axes[3] = forward/back, axes[2] = left/right
-                    this.playerGroup.position.addScaledVector(dir, -axes[3] * 0.1); 
-                    this.playerGroup.position.addScaledVector(side, axes[2] * 0.1);
+                // 1. CONTROLLER LOGIC
+                if (source.gamepad) {
+                    const axes = source.gamepad.axes;
+                    if (source.handedness === 'left') {
+                        // Forward/Back is axes[3], Left/Right is axes[2]
+                        const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+                        dir.y = 0; dir.normalize();
+                        const side = new THREE.Vector3().crossVectors(this.camera.up, dir).normalize();
+                        
+                        this.playerGroup.position.addScaledVector(dir, -axes[3] * 0.1);
+                        this.playerGroup.position.addScaledVector(side, axes[2] * 0.1);
+                    }
+                    if (source.handedness === 'right') {
+                        // Snap Turn Logic
+                        if (Math.abs(axes[2]) > 0.8 && this.canSnapTurn) {
+                            this.playerGroup.rotation.y -= (axes[2] > 0 ? Math.PI/4 : -Math.PI/4);
+                            this.canSnapTurn = false;
+                        } else if (Math.abs(axes[2]) < 0.1) {
+                            this.canSnapTurn = true;
+                        }
+                    }
                 }
-
-                // SNAP TURN (Right Stick) - Corrected Inversion
-                if (source.handedness === 'right' && Math.abs(axes[2]) > 0.7 && this.canSnapTurn) {
-                    // Pushing right (positive axes[2]) now turns you right (negative rotation)
-                    this.playerGroup.rotation.y -= (axes[2] > 0 ? Math.PI/4 : -Math.PI/4);
-                    this.canSnapTurn = false;
-                } else if (source.handedness === 'right' && Math.abs(axes[2]) < 0.1) {
-                    this.canSnapTurn = true;
+                
+                // 2. HAND TRACKING SAFETY (The switch fix)
+                if (source.hand) {
+                    const indexTip = source.hand.get(8);
+                    const thumbTip = source.hand.get(4);
+                    // Only run if both joints are tracked (prevents black screen crash)
+                    if (indexTip && thumbTip) {
+                        const dist = indexTip.position.distanceTo(thumbTip.position);
+                        if (dist < 0.02) { // Pinching
+                            const moveDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+                            moveDir.y = 0;
+                            this.playerGroup.position.addScaledVector(moveDir.normalize(), 0.05);
+                        }
+                    }
                 }
             }
         }

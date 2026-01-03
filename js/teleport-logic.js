@@ -1,114 +1,40 @@
-// js/teleport-logic.js
-// Scarlett Poker VR – Update 1.5.2
-// Teleportation & Zone Transition Logic (Lobby ⇄ Scorpion Room)
+import * as THREE from 'three';
 
-import CONFIG from './config.js';
-
-AFRAME.registerComponent('teleport-manager', {
-  schema: {},
-
-  init() {
-    this.player = document.querySelector('#player');
-    this.rig = document.querySelector('#rig');
-    this.leftController = document.querySelector('#left-controller');
-
-    this.currentZone = 'lobby';
-    this.teleportTarget = null;
-
-    this._bindEvents();
-  },
-
-  _bindEvents() {
-    this.leftController.addEventListener('triggerdown', () => {
-      this._aimTeleport();
-    });
-
-    this.leftController.addEventListener('triggerup', () => {
-      if (this.teleportTarget) {
-        this._executeTeleport(this.teleportTarget);
-        this.teleportTarget = null;
-      }
-    });
-  },
-
-  _aimTeleport() {
-    // Simple ray-based teleport (Quest safe, no spline cost)
-    const direction = new THREE.Vector3();
-    this.leftController.object3D.getWorldDirection(direction);
-
-    const origin = this.leftController.object3D.position.clone();
-    const distance = CONFIG.TELEPORT.MAX_DISTANCE;
-
-    const target = origin.add(direction.multiplyScalar(distance));
-
-    if (this._isValidTeleportTarget(target)) {
-      this.teleportTarget = target;
-    }
-  },
-
-  _isValidTeleportTarget(target) {
-    const zones = CONFIG.ZONES;
-
-    // Prevent wall clipping
-    if (target.y < 0 || target.y > 3) return false;
-
-    if (this._insideZone(target, zones.SCOPRION_ROOM)) {
-      this.currentZone = 'scorpion';
-      return true;
+export class TeleportSystem {
+    constructor(renderer,camera,scene,world){
+        this.renderer=renderer;
+        this.camera=camera;
+        this.scene=scene;
+        this.world=world;
+        this.raycaster=new THREE.Raycaster();
+        this.laser=null;
+        this.initLaser();
+        this.setupController();
     }
 
-    if (this._insideZone(target, zones.LOBBY)) {
-      this.currentZone = 'lobby';
-      return true;
+    initLaser(){
+        const mat = new THREE.LineBasicMaterial({color:0x00ff00});
+        const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
+        this.laser=new THREE.Line(geo,mat);
+        this.laser.scale.z=10;
+        this.scene.add(this.laser);
     }
 
-    return false;
-  },
-
-  _insideZone(pos, zone) {
-    return (
-      pos.x > zone.min.x &&
-      pos.x < zone.max.x &&
-      pos.z > zone.min.z &&
-      pos.z < zone.max.z
-    );
-  },
-
-  _executeTeleport(target) {
-    this.rig.setAttribute('position', {
-      x: target.x,
-      y: CONFIG.PLAYER.HEIGHT,
-      z: target.z
-    });
-
-    this._checkTableAutoSit(target);
-  },
-
-  _checkTableAutoSit(position) {
-    const tableZone = CONFIG.ZONES.TABLE;
-
-    const dx = position.x - tableZone.center.x;
-    const dz = position.z - tableZone.center.z;
-    const distance = Math.sqrt(dx * dx + dz * dz);
-
-    if (distance <= tableZone.radius) {
-      this._triggerAutoSit();
+    setupController(){
+        const controller = this.renderer.xr.getController(0);
+        controller.addEventListener('selectstart',()=>this.teleport());
+        this.scene.add(controller);
+        controller.add(this.laser);
     }
-  },
 
-  _triggerAutoSit() {
-    if (this.player.dataset.seated === 'true') return;
-
-    this.player.dataset.seated = 'true';
-
-    this.rig.setAttribute('position', CONFIG.TABLE.SEAT_POSITION);
-    this.rig.setAttribute('rotation', CONFIG.TABLE.SEAT_ROTATION);
-
-    // Fire Auto-Deal event
-    document.dispatchEvent(
-      new CustomEvent('scarlett:auto-deal', {
-        detail: { room: this.currentZone }
-      })
-    );
-  }
-});
+    teleport(){
+        const dir=new THREE.Vector3(0,0,-1).applyQuaternion(this.laser.quaternion);
+        const origin=this.laser.getWorldPosition(new THREE.Vector3());
+        this.raycaster.set(origin,dir);
+        const intersects=this.raycaster.intersectObjects(this.scene.children,true);
+        if(intersects.length>0){
+            const point=intersects[0].point;
+            this.camera.position.set(point.x,1.6,point.z);
+        }
+    }
+}

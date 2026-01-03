@@ -17,11 +17,9 @@ async function init(){
     document.getElementById('canvas-container').appendChild(renderer.domElement);
     document.body.appendChild(VRButton.createButton(renderer));
 
-    // Load World safely
-    try {
-        const module = await import('./world.js');
-        world = new module.PokerWorld(scene);
-    } catch(e){ console.warn("World module failed:", e); }
+    // Load World
+    try { const module = await import('./world.js'); world = new module.PokerWorld(scene); }
+    catch(e){ console.warn("World module failed:", e); }
 
     // Hands
     const factory = new XRHandModelFactory();
@@ -32,11 +30,9 @@ async function init(){
         scene.add(hand);
     });
 
-    // Teleport fallback
-    try{
-        const module = await import('./teleport.js');
-        teleport = new module.TeleportSystem(renderer,camera,scene,world);
-    }catch(e){ console.warn("Teleport module failed:",e); }
+    // Teleport
+    try{ const module = await import('./teleport.js'); teleport = new module.TeleportSystem(renderer,camera,scene,world); }
+    catch(e){ console.warn("Teleport module failed:",e); }
 
     renderer.setAnimationLoop(render);
     document.getElementById('status').innerText='Scarlet VR Loaded';

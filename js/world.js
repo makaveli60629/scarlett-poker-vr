@@ -1,107 +1,83 @@
 import * as THREE from 'three';
 import { Reflector } from 'three/addons/objects/Reflector.js';
 
-const loader = new THREE.TextureLoader();
-
 export const World = {
-    colliders: [], // Array for index.js to check for movement blocks
+    colliders: [],
 
     build(scene) {
-        // --- 1. LIGHTING AUDIT (High Visibility) ---
+        // High-Intensity Lighting Audit
         scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-        const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-        sun.position.set(10, 20, 10);
+        const sun = new THREE.PointLight(0xffffff, 2);
+        sun.position.set(0, 10, 0);
         scene.add(sun);
 
-        // --- 2. ROOM CREATION (Audit: Lobby, Poker, Store, Vault) ---
-        this.createRoom(scene, 0, 0, 0x222222, "Lobby", 'lobby_carpet.jpg');    
-        this.createRoom(scene, 40, 0, 0x076324, "Poker Room", 'poker_felt.jpg'); 
-        this.createRoom(scene, -40, 0, 0x111111, "Store", 'brickwall.jpg');    
-        this.createRoom(scene, 0, 40, 0x050505, "Vault", 'concrete.jpg');      
+        // 1. CREATE THE 4 ROOMS
+        this.createRoom(scene, 0, 0, 0x222222, "Lobby");      // Center
+        this.createRoom(scene, 40, 0, 0x076324, "Poker Room"); // East
+        this.createRoom(scene, -40, 0, 0x111111, "Store");    // West
+        this.createRoom(scene, 0, 40, 0x050505, "Vault");     // North
 
-        // --- 3. THE LOBBY PILLARS (Audit: Neon Purple) ---
+        // 2. NEON PILLARS (Lobby)
         const neonMat = new THREE.MeshBasicMaterial({ color: 0xbc13fe });
         [[-8,-8], [8,-8], [-8,8], [8,8]].forEach(loc => {
-            const p = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 10), neonMat);
+            const p = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 10), neonMat);
             p.position.set(loc[0], 5, loc[1]);
             scene.add(p);
         });
 
-        // --- 4. POKER ROOM ASSETS (Audit: Leather Trim & Interaction) ---
-        this.addPokerTable(scene, 40, 0);
-        this.addPokerTable(scene, 45, 10); // Second table as requested
+        // 3. POKER TABLES
+        this.addTable(scene, 40, 0); // Table 1
+        this.addTable(scene, 45, 8); // Table 2
 
-        // --- 5. STORE ROOM ASSETS (Audit: Mirror) ---
-        this.addMirror(scene, -59.5, 3, 0); 
+        // 4. THE MIRROR (Store Room)
+        this.addMirror(scene, -59.5, 3, 0);
     },
 
-    createRoom(scene, x, z, col, label, tex) {
+    createRoom(scene, x, z, col, name) {
         const size = 40;
-        const height = 8;
-
-        // Floor with Texture Audit
-        const floorGeo = new THREE.PlaneGeometry(size, size);
-        const floorMat = new THREE.MeshPhongMaterial({ 
-            color: col, 
-            map: tex ? loader.load(`assets/textures/${tex}`) : null 
-        });
-        const floor = new THREE.Mesh(floorGeo, floorMat);
+        // Floor
+        const floor = new THREE.Mesh(
+            new THREE.PlaneGeometry(size, size),
+            new THREE.MeshPhongMaterial({ color: col })
+        );
         floor.rotation.x = -Math.PI / 2;
         floor.position.set(x, 0, z);
         scene.add(floor);
 
-        // Solid Walls (Audit: No-clip prevention)
-        const wallMat = new THREE.MeshPhongMaterial({ color: 0x333333 });
-        const wallData = [
-            { s: [size, height, 1], p: [x, height/2, z - size/2] }, // North
-            { s: [size, height, 1], p: [x, height/2, z + size/2] }, // South
-            { s: [1, height, size], p: [x - size/2, height/2, z] }, // West
-            { s: [1, height, size], p: [x + size/2, height/2, z] }  // East
-        ];
+        // Grid for movement reference
+        const grid = new THREE.GridHelper(size, 20, 0x555555, 0x333333);
+        grid.position.set(x, 0.01, z);
+        scene.add(grid);
 
-        wallData.forEach(data => {
-            // Create visible wall
-            const wall = new THREE.Mesh(new THREE.BoxGeometry(...data.s), wallMat);
-            wall.position.set(...data.p);
+        // Solid Walls (Audit: No walking through these)
+        const wallMat = new THREE.MeshPhongMaterial({ color: 0x333333 });
+        const walls = [
+            { s: [size, 8, 0.5], p: [x, 4, z - 20] }, // North
+            { s: [size, 8, 0.5], p: [x, 4, z + 20] }, // South
+            { s: [0.5, 8, size], p: [x - 20, 4, z] }, // West
+            { s: [0.5, 8, size], p: [x + 20, 4, z] }  // East
+        ];
+        walls.forEach(w => {
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(...w.s), wallMat);
+            wall.position.set(...w.p);
             scene.add(wall);
-            // Create physical collider
-            const box = new THREE.Box3().setFromObject(wall);
-            this.colliders.push(box);
+            this.colliders.push(new THREE.Box3().setFromObject(wall));
         });
     },
 
-    addPokerTable(scene, x, z) {
-        const group = new THREE.Group();
-        group.position.set(x, 0, z);
-
-        // Main Table (Felt)
-        const felt = new THREE.Mesh(
-            new THREE.CylinderGeometry(2.5, 2.5, 0.4, 32),
+    addTable(scene, x, z) {
+        const table = new THREE.Mesh(
+            new THREE.CylinderGeometry(2.5, 2.5, 0.4),
             new THREE.MeshPhongMaterial({ color: 0x076324 })
         );
-        felt.position.y = 0.8;
-
-        // Leather Trim Audit
-        const trim = new THREE.Mesh(
-            new THREE.TorusGeometry(2.5, 0.15, 16, 100),
-            new THREE.MeshPhongMaterial({ color: 0x1a1a1a })
-        );
-        trim.rotation.x = Math.PI/2;
-        trim.position.y = 1.0;
-
-        group.add(felt, trim);
-        scene.add(group);
-
-        // Add table to colliders so you can't walk through it
-        this.colliders.push(new THREE.Box3().setFromObject(felt));
+        table.position.set(x, 0.8, z);
+        scene.add(table);
+        this.colliders.push(new THREE.Box3().setFromObject(table));
     },
 
     addMirror(scene, x, y, z) {
         const mirror = new Reflector(new THREE.PlaneGeometry(6, 8), {
-            clipBias: 0.003,
-            textureWidth: window.innerWidth * window.devicePixelRatio,
-            textureHeight: window.innerHeight * window.devicePixelRatio,
-            color: 0x888888
+            clipBias: 0.003, color: 0x888888
         });
         mirror.position.set(x, y, z);
         mirror.rotation.y = Math.PI / 2;

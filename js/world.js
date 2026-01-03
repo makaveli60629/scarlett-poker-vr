@@ -1,42 +1,54 @@
 import * as THREE from 'three';
+const loader = new THREE.TextureLoader();
 
 export const World = {
     colliders: [],
 
     build(scene) {
-        // AMBIENT LIGHTING: Boosted to 2.0 to force colors to pop
-        scene.add(new THREE.AmbientLight(0xffffff, 2.0));
-        
-        const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-        sun.position.set(0, 10, 0);
+        // High-Intensity Lighting
+        scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+        const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+        sun.position.set(5, 15, 5);
         scene.add(sun);
 
-        // THE FLOOR: Solid Blue (Lobby) so you can't miss it
-        const floorGeo = new THREE.PlaneGeometry(50, 50);
-        const floorMat = new THREE.MeshStandardMaterial({ color: 0x112244 });
+        // TEXTURED FLOOR (Lobby)
+        const floorGeo = new THREE.PlaneGeometry(60, 60);
+        const floorMat = new THREE.MeshStandardMaterial({ 
+            color: 0x222222,
+            map: loader.load('assets/textures/lobby_carpet.jpg') 
+        });
         const floor = new THREE.Mesh(floorGeo, floorMat);
         floor.rotation.x = -Math.PI / 2;
         scene.add(floor);
 
-        // THE GRID: Bright Red (Matches what you saw)
-        const grid = new THREE.GridHelper(50, 25, 0xff0000, 0x000000);
-        grid.position.y = 0.05;
-        scene.add(grid);
+        // PHYSICAL CEILING (To fix the black void)
+        const ceil = new THREE.Mesh(floorGeo, new THREE.MeshStandardMaterial({ color: 0x1a1a1a }));
+        ceil.position.y = 10;
+        ceil.rotation.x = Math.PI / 2;
+        scene.add(ceil);
 
-        // THE NEON PILLARS: High-Intensity Purple
+        // NEON PURPLE PILLARS
         const neonMat = new THREE.MeshBasicMaterial({ color: 0xbc13fe });
-        [[-10,-10], [10,-10], [-10,10], [10,10]].forEach(loc => {
-            const p = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 12), neonMat);
-            p.position.set(loc[0], 6, loc[1]);
+        [[-12,-12], [12,-12], [-12,12], [12,12]].forEach(loc => {
+            const p = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 10, 0.4), neonMat);
+            p.position.set(loc[0], 5, loc[1]);
             scene.add(p);
         });
 
-        // POKER TABLE: Vivid Green
+        // POKER TABLE
+        this.addTable(scene, 10, 0);
+    },
+
+    addTable(scene, x, z) {
         const table = new THREE.Mesh(
-            new THREE.CylinderGeometry(3, 3, 0.5),
-            new THREE.MeshStandardMaterial({ color: 0x00ff00 })
+            new THREE.CylinderGeometry(2.5, 2.5, 0.4, 32),
+            new THREE.MeshStandardMaterial({ 
+                color: 0x076324, 
+                map: loader.load('assets/textures/poker_felt.jpg') 
+            })
         );
-        table.position.set(0, 1, -5); // Right in front of your new spawn
+        table.position.set(x, 0.9, z);
         scene.add(table);
+        this.colliders.push(new THREE.Box3().setFromObject(table));
     }
 };

@@ -3,14 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VR Poker - Update 8.0</title>
+    <title>VR Poker 8.0</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; }
-        #overlay { position: absolute; top: 10px; left: 10px; color: white; font-family: sans-serif; pointer-events: none; }
+        body { margin: 0; padding: 0; background-color: #222; overflow: hidden; }
+        /* This ensures the VR Button is visible even if the scene is black */
+        #VRButton { 
+            bottom: 20px !important; 
+            background: rgba(0,0,0,0.5) !important; 
+            border: 1px solid white !important;
+            z-index: 9999 !important;
+        }
+        #overlay {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-family: sans-serif;
+            z-index: 10;
+        }
     </style>
 </head>
 <body>
-    <div id="overlay">VR Poker 8.0 | Hands Active</div>
+    <div id="overlay">VR Poker 8.0 - If screen is black, check HTTPS</div>
     <script type="importmap">
         {
             "imports": {

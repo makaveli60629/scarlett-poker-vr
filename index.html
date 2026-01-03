@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Poker VR - Full Suite 8.4</title>
+    <title>Poker VR Master - Update 9.0 (Grand Lobby)</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
         #win-ui {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.9); padding: 50px; border: 5px solid #f1c40f;
-            border-radius: 40px; text-align: center; display: none; z-index: 2000;
-            box-shadow: 0 0 100px #f1c40f; color: white;
+            background: rgba(0, 0, 0, 0.95); padding: 50px; border: 6px solid #f1c40f;
+            border-radius: 50px; text-align: center; display: none; z-index: 2000;
+            box-shadow: 0 0 100px #f1c40f; color: white; pointer-events: none;
         }
     </style>
 </head>
@@ -18,7 +18,7 @@
 
     <div id="win-ui">
         <h1 id="win-p">YOU WIN</h1>
-        <h2 id="win-h">ESTATE FLUSH</h2>
+        <h2 id="win-h">LOBBY ROYAL</h2>
     </div>
 
     <script type="importmap">
@@ -34,80 +34,100 @@
         import * as THREE from 'three';
         import { VRButton } from 'three/addons/webxr/VRButton.js';
         import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+        import { Reflector } from 'three/addons/objects/Reflector.js';
 
         let scene, camera, renderer, cameraRig, hand1, hand2;
         let snapTurned = false;
 
-        // --- 1. REFLECTIVE & PROCEDURAL WORLD ---
-        function buildSuite() {
-            // SKY: Nebula & Stars
-            const skyGeo = new THREE.SphereGeometry(90, 32, 32);
-            const skyMat = new THREE.ShaderMaterial({
-                uniforms: { uTime: { value: 0 } },
-                vertexShader: `varying vec3 vPos; void main() { vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-                fragmentShader: `
-                    varying vec3 vPos;
-                    float noise(vec3 p) { return fract(sin(dot(p, vec3(12.3, 45.6, 78.9))) * 43758.5); }
-                    void main() {
-                        vec3 dir = normalize(vPos);
-                        float s = noise(dir * 100.0);
-                        vec3 col = vec3(0.01, 0.0, 0.05); // Deep space
-                        if (s > 0.99) col += vec3(0.8, 0.8, 1.0); // Stars
-                        col += vec3(0.1, 0.0, 0.2) * max(0.0, dir.y); // Nebula glow
-                        gl_FragColor = vec4(col, 1.0);
-                    }
-                `,
-                side: THREE.BackSide
+        // --- 1. THE SUNSET SKY SHADER ---
+        const SkyShader = {
+            uniforms: {},
+            vertexShader: `varying vec3 vPos; void main() { vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+            fragmentShader: `
+                varying vec3 vPos;
+                void main() {
+                    vec3 dir = normalize(vPos);
+                    vec3 top = vec3(0.05, 0.1, 0.3); // Deep Night Blue
+                    vec3 mid = vec3(1.0, 0.4, 0.1); // Golden Orange
+                    vec3 bot = vec3(0.2, 0.05, 0.0); // Dark Horizon
+                    float h = dir.y * 0.5 + 0.5;
+                    vec3 sky = mix(mid, top, pow(h, 0.5));
+                    if(h < 0.5) sky = mix(bot, mid, pow(h*2.0, 2.0));
+                    gl_FragColor = vec4(sky, 1.0);
+                }
+            `
+        };
+
+        // --- 2. LOBBY ARCHITECTURE ---
+        function buildLobby() {
+            // SKYBOX
+            const sky = new THREE.Mesh(new THREE.SphereGeometry(100, 32, 32), new THREE.ShaderMaterial(SkyShader));
+            sky.material.side = THREE.BackSide;
+            scene.add(sky);
+
+            // REFLECTIVE MIRROR FLOOR
+            const floorGeo = new THREE.PlaneGeometry(20, 20);
+            const reflector = new Reflector(floorGeo, {
+                clipBias: 0.003,
+                textureWidth: window.innerWidth * window.devicePixelRatio,
+                textureHeight: window.innerHeight * window.devicePixelRatio,
+                color: 0x444444
             });
-            scene.add(new THREE.Mesh(skyGeo, skyMat));
+            reflector.rotation.x = -Math.PI / 2;
+            scene.add(reflector);
 
-            // THE MOON (Celestial Light)
-            const moon = new THREE.Mesh(new THREE.SphereGeometry(4, 32, 32), new THREE.MeshBasicMaterial({color: 0xffffff}));
-            moon.position.set(20, 45, -35);
-            scene.add(moon);
-            const sun = new THREE.DirectionalLight(0xffffff, 2.5);
-            sun.position.copy(moon.position);
-            scene.add(sun);
-            scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+            // THE FOUR WALLS
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 });
+            const wallH = 6, wallW = 20;
 
-            // REFLECTABLE WOOD FLOOR
-            const floorGeo = new THREE.PlaneGeometry(60, 60);
-            const floorMat = new THREE.MeshStandardMaterial({ 
-                color: 0x1a0f00, 
-                roughness: 0.05, // High shine for reflection
-                metalness: 0.2
+            const createWall = (x, z, ry) => {
+                const wall = new THREE.Mesh(new THREE.PlaneGeometry(wallW, wallH), wallMat);
+                wall.position.set(x, wallH/2, z);
+                wall.rotation.y = ry;
+                scene.add(wall);
+            };
+
+            createWall(0, -10, 0);          // Front
+            createWall(0, 10, Math.PI);      // Back
+            createWall(-10, 0, Math.PI/2);   // Left
+            createWall(10, 0, -Math.PI/2);  // Right
+
+            // NEON CORNER LIGHTS
+            const neonMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+            const corners = [[-9.9, -9.9], [9.9, -9.9], [9.9, 9.9], [-9.9, 9.9]];
+            corners.forEach(pos => {
+                const neon = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, wallH, 8), neonMat);
+                neon.position.set(pos[0], wallH/2, pos[1]);
+                scene.add(neon);
+                const pLight = new THREE.PointLight(0x00ffff, 5, 10);
+                pLight.position.copy(neon.position);
+                scene.add(pLight);
             });
-            const floor = new THREE.Mesh(floorGeo, floorMat);
-            floor.rotation.x = -Math.PI/2;
-            scene.add(floor);
 
-            // THE TABLE
+            // TABLE & ASSETS (Memory Recall)
             const table = new THREE.Group();
             const felt = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 0.1, 64), new THREE.MeshStandardMaterial({color: 0x07331a}));
-            const leather = new THREE.Mesh(new THREE.TorusGeometry(1.65, 0.08, 16, 100), new THREE.MeshStandardMaterial({color: 0x111111}));
-            leather.rotation.x = Math.PI/2; leather.position.y = 0.05;
-            table.add(felt); table.add(leather);
+            const bumper = new THREE.Mesh(new THREE.TorusGeometry(1.65, 0.08, 16, 100), new THREE.MeshStandardMaterial({color: 0x111111}));
+            bumper.rotation.x = Math.PI/2; bumper.position.y = 0.05;
+            table.add(felt); table.add(bumper);
             table.position.y = 0.8;
             scene.add(table);
 
-            // THE STORE KIOSK
-            const kiosk = new THREE.Mesh(new THREE.BoxGeometry(2, 2.5, 0.8), new THREE.MeshStandardMaterial({color: 0x222222}));
-            kiosk.position.set(-6, 1.25, -6);
-            scene.add(kiosk);
-
-            // LEADERBOARD SCREEN
-            const lb = new THREE.Mesh(new THREE.PlaneGeometry(5, 3), new THREE.MeshBasicMaterial({color: 0x000000, transparent: true, opacity: 0.7}));
-            lb.position.set(0, 3, -8);
-            scene.add(lb);
+            // LOBBY LIGHTING
+            const spot = new THREE.SpotLight(0xffffff, 50);
+            spot.position.set(0, 5, 0);
+            spot.target = table;
+            scene.add(spot);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.2));
         }
 
-        // --- 2. VR ENGINE & LOCOMOTION ---
+        // --- 3. MASTER ENGINE ---
         function init() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
             
             cameraRig = new THREE.Group();
-            cameraRig.position.set(0, 0, 3.5); 
+            cameraRig.position.set(0, 0, 4); // Safe lobby spawn
             cameraRig.add(camera);
             scene.add(cameraRig);
 
@@ -121,7 +141,7 @@
             hand1 = renderer.xr.getHand(0); hand1.add(handFactory.createHandModel(hand1, "mesh")); cameraRig.add(hand1);
             hand2 = renderer.xr.getHand(1); hand2.add(handFactory.createHandModel(hand2, "mesh")); cameraRig.add(hand2);
 
-            buildSuite();
+            buildLobby();
             renderer.setAnimationLoop(render);
         }
 
@@ -131,8 +151,8 @@
                 for (const source of session.inputSources) {
                     if (source.gamepad) {
                         const axes = source.gamepad.axes;
-                        cameraRig.position.x += (axes[0] || 0) * 0.05;
-                        cameraRig.position.z += (axes[1] || 0) * 0.05;
+                        cameraRig.position.x += (axes[0] || 0) * 0.04;
+                        cameraRig.position.z += (axes[1] || 0) * 0.04;
                         const rx = axes[2] || 0;
                         if (Math.abs(rx) > 0.8 && !snapTurned) {
                             cameraRig.rotation.y -= Math.sign(rx) * (Math.PI / 4);

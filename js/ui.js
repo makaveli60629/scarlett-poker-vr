@@ -1,20 +1,35 @@
 import * as THREE from 'three';
 
-export class WorldUI {
-    constructor(scene) {
+export const UI = {
+    scene: null,
+    playerGroup: null,
+    watch: null,
+    menu: null,
+
+    init(scene, playerGroup){
         this.scene = scene;
-        this.createKiosks();
-    }
+        this.playerGroup = playerGroup;
 
-    createKiosks() {
-        // Daily Reward Cube
-        const reward = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), new THREE.MeshStandardMaterial({ color: 0xffd700 }));
-        reward.position.set(-3, 1, -5);
-        this.scene.add(reward);
+        // Watch (small panel attached to right wrist/controller)
+        this.watch = new THREE.Mesh(new THREE.BoxGeometry(0.15,0.1,0.02), new THREE.MeshStandardMaterial({color:0x222222}));
+        this.watch.position.set(0.2, -0.2, -0.1);
+        this.playerGroup.add(this.watch);
 
-        // Store Kiosk
-        const store = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.5, 0.1), new THREE.MeshStandardMaterial({ color: 0x0000ff }));
-        store.position.set(3, 0.75, -5);
-        this.scene.add(store);
+        // Menu Panel (toggleable)
+        this.menu = new THREE.Mesh(new THREE.PlaneGeometry(0.4,0.6), new THREE.MeshStandardMaterial({color:0x111111, side:THREE.DoubleSide}));
+        this.menu.position.set(0,1,-0.5);
+        this.menu.visible = false;
+        this.playerGroup.add(this.menu);
+    },
+
+    toggleMenu(){
+        this.menu.visible = !this.menu.visible;
+    },
+
+    update(){
+        // Optional: rotate watch panel to follow camera
+        if(this.watch){
+            this.watch.lookAt(this.playerGroup.children[0].position);
+        }
     }
-}
+};

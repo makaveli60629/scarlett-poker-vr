@@ -16,10 +16,10 @@ function init() {
   scene.background = new THREE.Color(0x101010); // fallback background
 
   // ---------- Camera ----------
-  camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 1000);
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
 
-  // ---------- SPAWN AREA ----------
-  camera.position.set(0, 1.6, 8); // safe spawn, away from walls/tables
+  // Safe spawn area
+  camera.position.set(0, 1.6, 8); // clear area, not inside walls/floor
   camera.lookAt(0, 1.6, 0);
 
   // ---------- Renderer ----------
@@ -30,21 +30,29 @@ function init() {
   document.body.appendChild(VRButton.createButton(renderer));
 
   // ---------- World Setup ----------
-  setupWorld(scene, camera);
+  try {
+    setupWorld(scene, camera);
+  } catch (err) {
+    console.error("Error initializing world.js:", err);
+  }
 
-  // ---------- Controllers ----------
+  // ---------- VR Controllers ----------
   const controller1 = renderer.xr.getController(0);
   const controller2 = renderer.xr.getController(1);
 
+  // Controller1 triggers forward movement
   controller1.addEventListener('selectstart', () => moveForward = true);
   controller1.addEventListener('selectend', () => moveForward = false);
 
+  // Controller2 triggers snap turn right (45 deg)
   controller2.addEventListener('selectstart', () => snapTurnRight = true);
   controller2.addEventListener('selectend', () => snapTurnRight = false);
 
+  // Add controllers to scene
   scene.add(controller1);
   scene.add(controller2);
 
+  // ---------- Window Resize ----------
   window.addEventListener('resize', onWindowResize);
 }
 
@@ -53,18 +61,30 @@ function animate() {
 }
 
 function render() {
-  // ---------- Movement ----------
-  if(moveForward) camera.position.z -= 0.03;
-  if(snapTurnRight){
-    camera.rotation.y -= THREE.MathUtils.degToRad(45);
-    snapTurnRight=false;
+  // ---------- VR Movement ----------
+  if (moveForward) {
+    const direction = new THREE.Vector3();
+    camera.getWorldDirection(direction);
+    direction.y = 0; // prevent flying
+    camera.position.add(direction.multiplyScalar(0.03)); // move forward slowly
+  }
+
+  if (snapTurnRight) {
+    camera.rotation.y -= THREE.MathUtils.degToRad(45); // snap 45 deg
+    snapTurnRight = false;
+  }
+
+  if (snapTurnLeft) {
+    camera.rotation.y += THREE.MathUtils.degToRad(45); // snap 45 deg
+    snapTurnLeft = false;
   }
 
   renderer.render(scene, camera);
 }
 
-function onWindowResize(){
-  camera.aspect = window.innerWidth/window.innerHeight;
+// ---------- Handle Window Resize ----------
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-}
+      }

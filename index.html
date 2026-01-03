@@ -2,28 +2,15 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <title>VR Poker 4.0 - Modular</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>VR POKER MASTER 8.1</title>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
-        #vr-ui-layer {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            pointer-events: none; display: flex; flex-direction: column; align-items: center;
-        }
-        #winner-text {
-            margin-top: 20%; color: #00ff00; font-size: 5vw; font-weight: 900;
-            text-shadow: 0 0 20px #00ff00; display: none; transition: opacity 0.5s;
-        }
-        #status-log { color: #555; font-size: 12px; position: absolute; bottom: 10px; }
+        body { margin: 0; background-color: #000; overflow: hidden; font-family: sans-serif; }
+        #overlay { position: absolute; top: 10px; width: 100%; text-align: center; color: #00ff00; z-index: 100; pointer-events: none; }
     </style>
 </head>
 <body>
-
-    <div id="vr-ui-layer">
-        <div id="winner-text">WINNER: PLAYER 1</div>
-        <div id="status-log">System: Update 8.1 | Hands Active | Spawn Safe</div>
-    </div>
-
+    <div id="overlay">System: All Modules Loaded</div>
     <script type="importmap">
         {
             "imports": {
@@ -32,146 +19,7 @@
             }
         }
     </script>
-
-    <script type="module">
-        import * as THREE from 'three';
-        import { VRButton } from 'three/addons/webxr/VRButton.js';
-        import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
-
-        // --- GAME ENGINE OPTIONS (1000 Feature Foundation) ---
-        const POKER_CONFIG = {
-            tableColor: 0x076324,
-            spawnPos: { x: 0, y: 0, z: 2 },
-            chipValues: [1, 5, 25, 100, 500],
-            deckPath: 'assets/textures/cards/', // Path defined in memory
-            handsOnly: true,
-            winDisplayTime: 10000 // 10 seconds
-        };
-
-        let scene, camera, renderer, playerGroup, hands = [];
-        let deck = [], tableChips = [];
-
-        // --- INITIALIZATION ---
-        function init() {
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x0a0a0a);
-            scene.fog = new THREE.Fog(0x0a0a0a, 2, 10);
-
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            
-            // Player Rig Setup
-            playerGroup = new THREE.Group();
-            playerGroup.position.set(POKER_CONFIG.spawnPos.x, POKER_CONFIG.spawnPos.y, POKER_CONFIG.spawnPos.z);
-            scene.add(playerGroup);
-            playerGroup.add(camera);
-
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.xr.enabled = true;
-            document.body.appendChild(renderer.domElement);
-            document.body.appendChild(VRButton.createButton(renderer));
-
-            setupLighting();
-            buildWorld();
-            setupHandTracking();
-            createDeck();
-
-            renderer.setAnimationLoop(gameLoop);
-        }
-
-        // --- 1. LIGHTING ---
-        function setupLighting() {
-            const ambient = new THREE.AmbientLight(0xffffff, 0.8);
-            scene.add(ambient);
-
-            const tableSpot = new THREE.SpotLight(0xffffff, 2);
-            tableSpot.position.set(0, 4, 0);
-            tableSpot.castShadow = true;
-            scene.add(tableSpot);
-        }
-
-        // --- 2. ENVIRONMENT ---
-        function buildWorld() {
-            // Poker Table
-            const tableGeo = new THREE.CylinderGeometry(1.4, 1.4, 0.15, 40);
-            const tableMat = new THREE.MeshStandardMaterial({ color: POKER_CONFIG.tableColor });
-            const table = new THREE.Mesh(tableGeo, tableMat);
-            table.position.y = 0.8;
-            scene.add(table);
-
-            // Floor
-            const grid = new THREE.GridHelper(20, 20, 0x222222, 0x111111);
-            scene.add(grid);
-        }
-
-        // --- 3. HANDS-ONLY TRACKING ---
-        function setupHandTracking() {
-            const handFactory = new XRHandModelFactory();
-            for (let i = 0; i < 2; i++) {
-                const hand = renderer.xr.getHand(i);
-                hand.add(handFactory.createHandModel(hand, 'mesh'));
-                playerGroup.add(hand);
-                hands.push(hand);
-            }
-        }
-
-        // --- 4. CARD LOGIC ---
-        function createDeck() {
-            const suits = ['H', 'D', 'C', 'S'];
-            const values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-            for (let s of suits) {
-                for (let v of values) {
-                    deck.push({ val: v, suit: s });
-                }
-            }
-            shuffle(deck);
-        }
-
-        function shuffle(array) {
-            for (let i = array.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [array[i], array[array[j]]] = [array[j], array[i]];
-            }
-        }
-
-        // --- 5. MOVEMENT & INTERACTION ---
-        function handleInput() {
-            const session = renderer.xr.getSession();
-            if (!session) return;
-
-            for (const source of session.inputSources) {
-                if (source.gamepad) {
-                    const axes = source.gamepad.axes;
-                    // Left Stick Move
-                    if (source.handedness === 'left') {
-                        playerGroup.position.x += (axes[2] || 0) * 0.04;
-                        playerGroup.position.z += (axes[3] || 0) * 0.04;
-                    }
-                }
-            }
-        }
-
-        // --- 6. WINNER DISPLAY (10s Timer) ---
-        window.declareWinner = function(name) {
-            const el = document.getElementById('winner-text');
-            el.innerText = `WINNER: ${name}`;
-            el.style.display = 'block';
-            setTimeout(() => { el.style.display = 'none'; }, POKER_CONFIG.winDisplayTime);
-        };
-
-        // --- LOOP ---
-        function gameLoop() {
-            handleInput();
-            renderer.render(scene, camera);
-        }
-
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
-
-        init();
-    </script>
+    <script type="module" src="textures.js"></script>
+    <script type="module" src="basic.js"></script>
 </body>
 </html>

@@ -1,12 +1,10 @@
 import * as THREE from 'three';
 
-const loader = new THREE.TextureLoader();
-
 export const World = {
     build(scene) {
         this.addUltraBrightLights(scene);
         
-        // 4 Rooms: Twice the size (40m each), 4 walls, Neon Edges
+        // 4 Rooms: 40m x 40m (Twice the size), Ceiling at 6m
         this.createMegaRoom(scene, "Lobby", 0, 0, 0x111111);
         this.createMegaRoom(scene, "Poker", 60, 0, 0x050505);
         this.createMegaRoom(scene, "Store", -60, 0, 0x050505);
@@ -14,29 +12,28 @@ export const World = {
     },
 
     addUltraBrightLights(scene) {
-        scene.add(new THREE.AmbientLight(0xffffff, 2.5)); // Extreme brightness
-        const sun = new THREE.DirectionalLight(0xffffff, 2);
+        // High-Intensity lighting to kill shadows
+        scene.add(new THREE.AmbientLight(0xffffff, 2.5)); 
+        const sun = new THREE.DirectionalLight(0xffffff, 2.0);
         sun.position.set(10, 20, 10);
         scene.add(sun);
     },
 
     createMegaRoom(scene, name, x, z, floorCol) {
-        const size = 40; // Doubled Size
-        const height = 6; // High ceilings
+        const size = 40;
+        const height = 6;
         const group = new THREE.Group();
         group.position.set(x, 0, z);
 
-        // Floor & Ceiling
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({color: floorCol, map: loader.load('assets/textures/lobby_carpet.jpg')}));
+        // Floor and Ceiling
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({color: floorCol}));
         floor.rotation.x = -Math.PI/2;
-        
         const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({color: 0x222222}));
         ceiling.position.y = height;
         ceiling.rotation.x = Math.PI/2;
         group.add(floor, ceiling);
 
-        // Walls
-        const wallMat = new THREE.MeshStandardMaterial({ map: loader.load('assets/textures/brickwall.jpg') });
+        // 4 Walls with Neon Purple Trim
         const wallData = [
             { pos: [0, height/2, -size/2], rot: [0, 0, 0] },
             { pos: [0, height/2, size/2], rot: [0, Math.PI, 0] },
@@ -45,33 +42,28 @@ export const World = {
         ];
 
         wallData.forEach(d => {
-            const wall = new THREE.Mesh(new THREE.BoxGeometry(size, height, 0.5), wallMat);
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(size, height, 0.5), new THREE.MeshStandardMaterial({color: 0x333333}));
             wall.position.set(...d.pos);
             wall.rotation.set(...d.rot);
             group.add(wall);
-
-            // PURPLE NEON TRIM (Top, Bottom, and Sides)
-            this.addNeonTrim(wall, size, height);
+            this.addPurpleNeon(wall, size, height);
         });
 
         scene.add(group);
     },
 
-    addNeonTrim(wall, w, h) {
+    addPurpleNeon(wall, w, h) {
         const neonMat = new THREE.MeshBasicMaterial({ color: 0xa020f0 }); // Purple Neon
-        const thickness = 0.1;
+        const thickness = 0.15;
 
-        // Top & Bottom Trim
         const top = new THREE.Mesh(new THREE.BoxGeometry(w, thickness, thickness), neonMat);
-        top.position.y = h/2;
+        top.position.set(0, h/2, 0.3);
         const bottom = new THREE.Mesh(new THREE.BoxGeometry(w, thickness, thickness), neonMat);
-        bottom.position.y = -h/2;
-
-        // Left & Right Trim
+        bottom.position.set(0, -h/2, 0.3);
         const left = new THREE.Mesh(new THREE.BoxGeometry(thickness, h, thickness), neonMat);
-        left.position.x = -w/2;
+        left.position.set(-w/2, 0, 0.3);
         const right = new THREE.Mesh(new THREE.BoxGeometry(thickness, h, thickness), neonMat);
-        right.position.x = w/2;
+        right.position.set(w/2, 0, 0.3);
 
         wall.add(top, bottom, left, right);
     }

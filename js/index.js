@@ -14,7 +14,7 @@ function init() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x101010);
 
-  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 1000);
   camera.position.set(0, 1.6, 4);
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -23,17 +23,18 @@ function init() {
   document.body.appendChild(renderer.domElement);
   document.body.appendChild(VRButton.createButton(renderer));
 
+  // Pass scene and camera to world setup
   setupWorld(scene, camera);
 
   // Controllers
   const controller1 = renderer.xr.getController(0);
   const controller2 = renderer.xr.getController(1);
 
-  controller1.addEventListener('selectstart', () => moveForward = true);
-  controller1.addEventListener('selectend', () => moveForward = false);
+  controller1.addEventListener('selectstart', ()=> moveForward=true);
+  controller1.addEventListener('selectend', ()=> moveForward=false);
 
-  controller2.addEventListener('selectstart', () => snapTurnRight = true);
-  controller2.addEventListener('selectend', () => snapTurnRight = false);
+  controller2.addEventListener('selectstart', ()=> snapTurnRight=true);
+  controller2.addEventListener('selectend', ()=> snapTurnRight=false);
 
   scene.add(controller1);
   scene.add(controller2);
@@ -46,18 +47,16 @@ function animate() {
 }
 
 function render() {
-  if (moveForward) camera.position.z -= 0.03;
-
-  if (snapTurnRight) {
+  if(moveForward) camera.position.z -= 0.03;
+  if(snapTurnRight){
     camera.rotation.y -= THREE.MathUtils.degToRad(45);
-    snapTurnRight = false;
+    snapTurnRight=false;
   }
-
   renderer.render(scene, camera);
 }
 
-function onWindowResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
+function onWindowResize(){
+  camera.aspect=window.innerWidth/window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 }

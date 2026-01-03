@@ -14,19 +14,21 @@ const Core = {
     ),
 
     async init() {
+        // BLACK SCREEN FIX: Force XR Compatibility
+        const gl = this.renderer.getContext();
+        if (gl.makeXRCompatible) await gl.makeXRCompatible();
+
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.xr.enabled = true;
         this.renderer.toneMapping = THREE.ReinhardToneMapping;
-        this.renderer.toneMappingExposure = 2.0; // SUPER BRIGHT
+        this.renderer.toneMappingExposure = 2.0; // Boosted for VR brightness
         document.body.appendChild(this.renderer.domElement);
         document.body.appendChild(VRButton.createButton(this.renderer));
 
-        // Spawn: Eye level, in the center of the giant Lobby
         this.playerGroup.position.set(0, 1.6, 0);
         this.scene.add(this.playerGroup);
         this.playerGroup.add(this.camera);
 
-        // Teleport Marker
         this.teleportMarker.rotation.x = -Math.PI/2;
         this.teleportMarker.visible = false;
         this.scene.add(this.teleportMarker);
@@ -50,20 +52,19 @@ const Core = {
         if (session) {
             for (const source of session.inputSources) {
                 if (source.gamepad) {
-                    const axes = source.gamepad.axes; // [x, y, thumb_x, thumb_y]
+                    const axes = source.gamepad.axes;
                     
-                    // LEFT THUMBSTICK: Smooth Walk
+                    // LEFT STICK: Smooth Movement
                     if (source.handedness === 'left') {
                         this.playerGroup.position.x += (axes[2] || 0) * 0.1;
                         this.playerGroup.position.z += (axes[3] || 0) * 0.1;
                     }
 
-                    // RIGHT THUMBSTICK UP: Teleport Target
+                    // RIGHT STICK UP: Teleport Aim
                     if (source.handedness === 'right') {
-                        if (axes[3] < -0.5) { // Pushing forward
-                            this.showTeleportRay(source);
+                        if (axes[3] < -0.5) { // Forward push
+                            this.showTeleportRay();
                         } else if (this.teleportMarker.visible) {
-                            // Release to Teleport
                             this.playerGroup.position.set(this.teleportMarker.position.x, 1.6, this.teleportMarker.position.z);
                             this.teleportMarker.visible = false;
                         }
@@ -74,13 +75,11 @@ const Core = {
         this.renderer.render(this.scene, this.camera);
     },
 
-    showTeleportRay(source) {
-        // Simple logic: Project marker 5 meters ahead of player direction
+    showTeleportRay() {
         const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
-        this.teleportMarker.position.copy(this.playerGroup.position).addScaledVector(dir, 5);
-        this.teleportMarker.position.y = 0.01; // Snap to floor
+        this.teleportMarker.position.copy(this.playerGroup.position).addScaledVector(dir, 8);
+        this.teleportMarker.position.y = 0.01;
         this.teleportMarker.visible = true;
     }
 };
-
 Core.init();

@@ -3,121 +3,120 @@ import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFa
 import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
 export const Controls = {
-
-    leftController: null,
-    rightController: null,
-    leftHand: null,
-    rightHand: null,
-    laser: null,
-    teleportMarker: null,
+    controllers: [],
+    hands: [],
+    teleportLaser: null,
+    teleportTarget: new THREE.Vector3(),
     raycaster: new THREE.Raycaster(),
-    tempMatrix: new THREE.Matrix4(),
 
     init(renderer, scene, playerGroup) {
 
-        // ======================
-        // CONTROLLERS
-        // ======================
-        this.leftController = renderer.xr.getController(0);
-        this.rightController = renderer.xr.getController(1);
-        scene.add(this.leftController);
-        scene.add(this.rightController);
+        this.scene = scene;
+        this.playerGroup = playerGroup;
 
-        // XR Controller Models
-        const controllerFactory = new XRControllerModelFactory();
+        renderer.xr.enabled = true;
 
-        const leftGrip = renderer.xr.getControllerGrip(0);
-        leftGrip.add(controllerFactory.createControllerModel(leftGrip));
-        scene.add(leftGrip);
+        /* ======================
+           CONTROLLERS SETUP
+        ======================= */
+        for (let i = 0; i < 2; i++) {
+            const controller = renderer.xr.getController(i);
+            controller.userData.index = i;
+            controller.addEventListener('selectstart', (e) => this.onSelectStart(e));
+            controller.addEventListener('selectend', (e) => this.onSelectEnd(e));
+            scene.add(controller);
+            this.controllers.push(controller);
 
-        const rightGrip = renderer.xr.getControllerGrip(1);
-        rightGrip.add(controllerFactory.createControllerModel(rightGrip));
-        scene.add(rightGrip);
+            // Controller Model
+            const factory = new XRControllerModelFactory();
+            const grip = renderer.xr.getControllerGrip(i);
+            grip.add(factory.createControllerModel(grip));
+            scene.add(grip);
+        }
 
-        // ======================
-        // HANDS
-        // ======================
+        /* ======================
+           HANDS SETUP
+        ======================= */
         const handFactory = new XRHandModelFactory();
-        this.leftHand = renderer.xr.getHand(0);
-        this.leftHand.add(handFactory.createHandModel(this.leftHand, 'mesh'));
-        scene.add(this.leftHand);
+        for (let i = 0; i < 2; i++) {
+            const hand = renderer.xr.getHand(i);
+            hand.add(handFactory.createHandModel(hand, 'mesh'));
+            scene.add(hand);
+            this.hands.push(hand);
 
-        this.rightHand = renderer.xr.getHand(1);
-        this.rightHand.add(handFactory.createHandModel(this.rightHand, 'mesh'));
-        scene.add(this.rightHand);
+            // Color the hand mesh
+            hand.traverse((child) => {
+                if (child.isMesh) child.material.color.set(i === 0 ? 0xffd1b3 : 0xffd1b3);
+            });
+        }
 
-        // Add basic skin tone coloring
-        this.leftHand.traverse((c) => { if (c.isMesh) c.material.color.set(0xffd1b5); });
-        this.rightHand.traverse((c) => { if (c.isMesh) c.material.color.set(0xffd1b5); });
+        /* ======================
+           TELEPORT LASER
+        ======================= */
+        const laserGeom = new THREE.CylinderGeometry(0.01, 0.01, 1, 8);
+        const laserMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+        this.teleportLaser = new THREE.Mesh(laserGeom, laserMat);
+        this.teleportLaser.rotation.x = -Math.PI / 2;
+        this.teleportLaser.visible = false;
+        scene.add(this.teleportLaser);
 
-        // ======================
-        // LASER POINTER
-        // ======================
-        const laserGeom = new THREE.CylinderGeometry(0.01, 0.01, 5, 8);
-        const laserMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.7 });
-        this.laser = new THREE.Mesh(laserGeom, laserMat);
-        this.laser.rotation.x = -Math.PI / 2;
-        scene.add(this.laser);
-        this.laser.visible = false;
-
-        // ======================
-        // TELEPORT MARKER
-        // ======================
-        this.teleportMarker = new THREE.Mesh(
-            new THREE.CircleGeometry(0.4, 32),
-            new THREE.MeshBasicMaterial({ color: 0x00ffff, opacity: 0.5, transparent: true })
-        );
-        this.teleportMarker.rotation.x = -Math.PI / 2;
-        this.teleportMarker.visible = false;
-        scene.add(this.teleportMarker);
-
-        // ======================
-        // EVENT LISTENERS
-        // ======================
-        this.leftController.addEventListener('selectstart', () => this.onSelectStart(playerGroup));
-        this.leftController.addEventListener('selectend', () => this.onSelectEnd(playerGroup));
+        this.tempMatrix = new THREE.Matrix4();
     },
 
     update(renderer, camera, playerGroup) {
+        // For each hand/controller, cast a ray for teleport
+        for (let i = 0; i < this.controllers.length; i++) {
+            const controller = this.controllers[i];
 
-        // Laser always points forward from right hand
-        const rightPos = new THREE.Vector3();
-        const rightDir = new THREE.Vector3(0, 0, -1);
-        this.rightHand.getWorldPosition(rightPos);
-        this.rightHand.getWorldDirection(rightDir);
+            // Pinch / trigger pressed
+            const session = renderer.xr.getSession();
+            if (!session) return;
 
-        // Cast ray to floor
-        this.raycaster.set(rightPos, rightDir);
-        const intersects = this.raycaster.intersectObjects(renderer.scene.children, true);
+            const inputSource = session.inputSources[i];
+            if (inputSource && inputSource.gamepad) {
+                const buttons = inputSource.gamepad.buttons;
+                const pressed = buttons[0].pressed;
 
+                if (pressed) {
+                    this.showTeleportLaser(controller);
+                } else {
+                    if (this.teleportLaser.visible) this.teleportPlayer();
+                    this.teleportLaser.visible = false;
+                }
+            }
+        }
+    },
+
+    showTeleportLaser(controller) {
+        // Position laser from hand forward
+        controller.updateMatrixWorld();
+        const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(controller.matrixWorld).sub(controller.position).normalize();
+        this.raycaster.set(controller.position, dir);
+
+        const intersects = this.raycaster.intersectObjects(this.scene.children, true);
         if (intersects.length > 0) {
             const point = intersects[0].point;
-            this.laser.visible = true;
-            this.laser.position.copy(rightPos.clone().lerp(point, 0.5));
-            const distance = rightPos.distanceTo(point);
-            this.laser.scale.set(1, distance / 2.5, 1);
-
-            // Show teleport marker
-            this.teleportMarker.position.set(point.x, 0.01, point.z);
-            this.teleportMarker.visible = true;
-        } else {
-            this.laser.visible = false;
-            this.teleportMarker.visible = false;
+            this.teleportTarget.copy(point);
+            this.teleportLaser.position.copy(controller.position).lerp(point, 0.5);
+            const distance = controller.position.distanceTo(point);
+            this.teleportLaser.scale.set(1, distance, 1);
+            this.teleportLaser.lookAt(point);
+            this.teleportLaser.visible = true;
         }
     },
 
-    onSelectStart(playerGroup) {
-        // Teleport if marker is visible
-        if (this.teleportMarker.visible) {
-            playerGroup.position.set(
-                this.teleportMarker.position.x,
-                playerGroup.position.y,
-                this.teleportMarker.position.z
-            );
-        }
+    teleportPlayer() {
+        this.playerGroup.position.set(this.teleportTarget.x, 1.6, this.teleportTarget.z);
+        this.teleportLaser.visible = false;
     },
 
-    onSelectEnd(playerGroup) {
-        // Could add smooth transition later
+    onSelectStart(event) {
+        // Pinch/trigger start
+        // Placeholder for future grab logic
+    },
+
+    onSelectEnd(event) {
+        // Pinch/trigger release
+        // Placeholder for future release logic
     }
 };

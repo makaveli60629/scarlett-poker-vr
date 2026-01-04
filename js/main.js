@@ -10,12 +10,23 @@
   const audioBtn = document.getElementById("audioBtn");
   const resetBtn = document.getElementById("resetBtn");
 
+  const touchUI     = document.getElementById("touchUI");
+  const joyBase     = document.getElementById("joyBase");
+  const joyStick    = document.getElementById("joyStick");
+  const interactBtn = document.getElementById("interactBtn");
+  const teleportBtn = document.getElementById("teleportBtn");
+
   const setStatus = (m) => { if (statusEl) statusEl.textContent = m; };
 
   // ---- Save ----
-  const SAVE_KEY = "scarlett_vr_save_v1";
-  const defaultSave = { chips: 10000, pot: 0, owned: [], seatIndex: -1 };
-
+  const SAVE_KEY = "scarlett_vr_save_v2";
+  const defaultSave = {
+    chips: 10000,
+    pot: 0,
+    owned: [],          // item ids
+    equipped: { head:null, eyes:null, neck:null, top:null },
+    seatIndex: -1
+  };
   let save = loadSave();
 
   // ---- Three state ----
@@ -27,13 +38,20 @@
 
   // ---- Android look/move ----
   let yaw = 0, pitch = 0;
-  let touchMode = "look";
-  let lastX = 0, lastY = 0, lastTouchDist = null;
+  let lookActive = false;
+  let lastLookX = 0, lastLookY = 0;
+
+  // joystick state
+  let joyActive = false;
+  let joyCenter = { x: 0, y: 0 };
+  let joyVec = { x: 0, y: 0 }; // -1..1
+  const moveSpeed = 2.2; // units/sec
+
+  // teleport mode for android
+  let androidTeleportMode = false;
 
   // ---- Audio ----
   let listener, bgm, audioReady = false;
-  let clickSfx, clickReady = false;
-  let slotSfx, slotReady = false;
 
   // ---- Controllers + Laser UI ----
   let controller0 = null, controller1 = null;
@@ -44,44 +62,37 @@
   const interactables = [];
   let hovered = null;
 
-  // ---- Store ----
-  let storePage = 0;
-  const storePages = [
-    [
-      { label: "+500 CHIPS", type: "chips", amount: 500, cost: 0 },
-      { label: "HAT  -1000", type: "item", name: "Hat", cost: 1000 },
-      { label: "HOODIE -2500", type: "item", name: "Hoodie", cost: 2500 },
-      { label: "SHADES -1500", type: "item", name: "Shades", cost: 1500 },
-    ],
-    [
-      { label: "BET +10", type: "bet", amount: 10 },
-      { label: "BET +100", type: "bet", amount: 100 },
-      { label: "PLACE BET", type: "placebet" },
-      { label: "RESET COSMETICS", type: "resetcos" },
-    ]
-  ];
-  let betAmount = 0;
+  // ---- Casino props ----
+  let neonPulseT = 0;
 
   // ---- Poker ----
-  let tableGroup;
-  const seats = []; // {pos, lookAt, hotspotMesh}
-  const chipStacks = []; // interactable
+  const seats = [];
   let seatIndex = save.seatIndex ?? -1;
 
-  // ---- Casino props ----
-  let slotMachine;
+  // ---- Avatar mannequin & cosmetics meshes ----
+  let mannequin = null;
+  const cosmeticMeshes = { head:{}, eyes:{}, neck:{}, top:{} };
+
+  // ---- Store ----
+  let storePage = 0;
+  let storePanel = null;
+  let betAmount = 0;
+
+  // 40-item catalog (slots: head/eyes/neck/top + misc)
+  const CATALOG = buildCatalog40();
 
   // ---- Boot ----
   try {
     boot();
     animate();
-    setStatus("Loaded ✅ Casino + Store + Poker (Android + Quest)");
+    setStatus("Loaded ✅ Android + Quest unified (Avatar + Store + Casino)");
     updateHUD();
     setupVRButton();
-    setupAndroidControls();
-    setupTapInteractions();
+    setupAndroidUI();
     setupAudio();
+
     if (resetBtn) resetBtn.addEventListener("click", () => resetSave());
+    if (audioBtn) audioBtn.addEventListener("click", () => tryStartAudio(true));
   } catch (e) {
     console.error(e);
     setStatus("BOOT FAILED ❌\n" + (e?.message || String(e)));
@@ -133,15 +144,15 @@
     buildSignage();
     buildLounge();
     buildPokerTableAndSeats();
-    buildChipStacks();
-    buildStorePanel();
-    buildSlotMachine();
+    buildStoreKiosk();
+    buildMannequinAndMirror();
     buildTeleportHelpers();
 
-    // If player had a seat saved, snap them near it (Android dev friendly)
-    if (seatIndex >= 0 && seatIndex < seats.length) {
-      snapToSeat(seatIndex);
-    }
+    // Apply saved equipment visuals
+    applyEquippedVisuals();
+
+    // If seat saved, snap
+    if (seatIndex >= 0 && seatIndex < seats.length) snapToSeat(seatIndex);
 
     window.addEventListener("resize", onResize);
   }
@@ -164,12 +175,10 @@
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x14141a, roughness: 0.95 });
     const trimMat = new THREE.MeshStandardMaterial({ color: 0x0b0b0e, roughness: 0.85 });
 
-    // Main walls
     addBox(roomW, roomH, 0.4, 0, roomH/2, -roomD/2, wallMat, true);
     addBox(0.4, roomH, roomD, -roomW/2, roomH/2, 0, wallMat, true);
     addBox(0.4, roomH, roomD, roomW/2, roomH/2, 0, wallMat, true);
 
-    // Front wall w doorway
     const doorW = 6.0, doorH = 3.4;
     const sideW = (roomW - doorW) / 2;
     const topH  = roomH - doorH;
@@ -178,10 +187,8 @@
     addBox(sideW, roomH, 0.4,  (doorW/2 + sideW/2), roomH/2, roomD/2, wallMat, true);
     addBox(doorW, topH, 0.4, 0, doorH + topH/2, roomD/2, wallMat, true);
 
-    // Ceiling
     addBox(roomW, 0.4, roomD, 0, roomH, 0, trimMat, true);
 
-    // Base trim ring
     const baseTrim = new THREE.Mesh(new THREE.BoxGeometry(roomW - 0.2, 0.25, roomD - 0.2), trimMat);
     baseTrim.position.set(0, 0.12, 0);
     baseTrim.receiveShadow = true;
@@ -189,7 +196,6 @@
   }
 
   function buildFloorCarpet() {
-    // Main floor
     floorMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(110, 110),
       new THREE.MeshStandardMaterial({ color: 0x232329, roughness: 1.0 })
@@ -199,18 +205,11 @@
     floorMesh.receiveShadow = true;
     scene.add(floorMesh);
 
-    // Carpet pattern (procedural)
     const carpetTex = makeCarpetTexture();
     carpetTex.wrapS = carpetTex.wrapT = THREE.RepeatWrapping;
     carpetTex.repeat.set(3, 3);
 
-    const carpetMat = new THREE.MeshStandardMaterial({
-      map: carpetTex,
-      color: 0xffffff,
-      roughness: 1.0,
-      metalness: 0.0
-    });
-
+    const carpetMat = new THREE.MeshStandardMaterial({ map: carpetTex, color: 0xffffff, roughness: 1.0 });
     const carpet = new THREE.Mesh(new THREE.CircleGeometry(8.0, 96), carpetMat);
     carpet.rotation.x = -Math.PI / 2;
     carpet.position.y = 0.01;
@@ -223,11 +222,9 @@
     c.width = 512; c.height = 512;
     const ctx = c.getContext("2d");
 
-    // base
     ctx.fillStyle = "#16161b";
     ctx.fillRect(0, 0, 512, 512);
 
-    // pattern
     for (let i = 0; i < 1200; i++) {
       const x = Math.random() * 512;
       const y = Math.random() * 512;
@@ -239,7 +236,6 @@
       ctx.fill();
     }
 
-    // subtle diamonds
     ctx.strokeStyle = "rgba(255,255,255,0.06)";
     ctx.lineWidth = 2;
     for (let y = -64; y < 576; y += 64) {
@@ -261,24 +257,25 @@
   }
 
   function buildNeonTrim() {
-    // Emissive strips around edges (cheap but effective)
+    // Pulsing neon (we'll animate emissiveIntensity)
     const neonMat = new THREE.MeshStandardMaterial({
       color: 0x111114,
       emissive: 0x7a2cff,
-      emissiveIntensity: 1.25,
-      roughness: 0.5
+      emissiveIntensity: 1.2,
+      roughness: 0.45
     });
 
     const y = 3.1;
     const strips = [
-      { w: 23.2, h: 0.12, d: 0.12, x: 0,   z: -11.8 },
-      { w: 23.2, h: 0.12, d: 0.12, x: 0,   z:  11.8 },
+      { w: 23.2, h: 0.12, d: 0.12, x: 0,    z: -11.8 },
+      { w: 23.2, h: 0.12, d: 0.12, x: 0,    z:  11.8 },
       { w: 0.12, h: 0.12, d: 23.2, x: -11.8, z: 0 },
       { w: 0.12, h: 0.12, d: 23.2, x:  11.8, z: 0 }
     ];
     strips.forEach(s => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(s.w, s.h, s.d), neonMat);
       m.position.set(s.x, y, s.z);
+      m.userData.neon = true;
       scene.add(m);
     });
   }
@@ -301,7 +298,6 @@
     ctx.fillStyle = "#08080c";
     ctx.fillRect(0, 0, cnv.width, cnv.height);
 
-    // glow border
     ctx.strokeStyle = "rgba(122,44,255,0.55)";
     ctx.lineWidth = 18;
     ctx.strokeRect(28, 28, cnv.width - 56, cnv.height - 56);
@@ -326,27 +322,23 @@
   }
 
   function buildLounge() {
-    // Simple lounge corner (right side)
     const group = new THREE.Group();
     group.position.set(7.5, 0, -6.0);
 
     const sofaMat = new THREE.MeshStandardMaterial({ color: 0x2b2b33, roughness: 0.95 });
     const cushionMat = new THREE.MeshStandardMaterial({ color: 0x3b3b48, roughness: 0.98 });
 
-    // sofa base
     const base = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.5, 1.2), sofaMat);
     base.position.set(0, 0.25, 0);
     base.castShadow = true;
     base.receiveShadow = true;
     group.add(base);
 
-    // backrest
     const back = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.9, 0.25), sofaMat);
     back.position.set(0, 0.95, -0.48);
     back.castShadow = true;
     group.add(back);
 
-    // cushions
     for (let i = -1; i <= 1; i++) {
       const c = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.22, 0.9), cushionMat);
       c.position.set(i * 1.05, 0.58, 0.1);
@@ -354,7 +346,6 @@
       group.add(c);
     }
 
-    // coffee table
     const tbl = new THREE.Mesh(
       new THREE.CylinderGeometry(0.6, 0.7, 0.12, 28),
       new THREE.MeshStandardMaterial({ color: 0x101014, roughness: 0.85 })
@@ -368,7 +359,7 @@
   }
 
   function buildPokerTableAndSeats() {
-    tableGroup = new THREE.Group();
+    const tableGroup = new THREE.Group();
 
     const top = new THREE.Mesh(
       new THREE.CylinderGeometry(3.3, 3.3, 0.25, 48),
@@ -408,7 +399,6 @@
 
     scene.add(tableGroup);
 
-    // Chairs + seat hotspots
     const chairFrame = new THREE.MeshStandardMaterial({ color: 0x5a5a5f, roughness: 0.95 });
     const chairSeat = new THREE.MeshStandardMaterial({ color: 0x3a3a3f, roughness: 0.98 });
 
@@ -424,24 +414,21 @@
       chair.rotateY(Math.PI);
       scene.add(chair);
 
-      // seat position a bit closer to table
       const seatPos = new THREE.Vector3(Math.sin(a) * (radius - 1.3), 0, Math.cos(a) * (radius - 1.3));
-
       const hotspot = new THREE.Mesh(
         new THREE.CircleGeometry(0.45, 24),
-        new THREE.MeshBasicMaterial({ color: 0x00ff88, transparent: true, opacity: 0.18, side: THREE.DoubleSide })
+        new THREE.MeshBasicMaterial({ color: 0x00ff88, transparent: true, opacity: 0.15, side: THREE.DoubleSide })
       );
       hotspot.rotation.x = -Math.PI / 2;
       hotspot.position.set(seatPos.x, 0.02, seatPos.z);
       hotspot.userData.onInteract = () => {
         snapToSeat(i);
-        playClick();
-        hapticPulse();
         setStatus(`Seated ✅ Seat ${i + 1}`);
       };
       hotspot.userData.hoverable = true;
-      scene.add(hotspot);
+      hotspot.userData.baseEmissive = 0.12;
 
+      scene.add(hotspot);
       seats.push({ pos: seatPos, hotspotMesh: hotspot });
       interactables.push(hotspot);
     }
@@ -472,325 +459,371 @@
     return g;
   }
 
-  function snapToSeat(i) {
-    seatIndex = i;
-    save.seatIndex = i;
-    saveSave();
+  // =========================
+  // STORE KIOSK (Buy/Equip)
+  // =========================
+  function buildStoreKiosk() {
+    storePanel = new THREE.Group();
+    storePanel.position.set(-8.8, 0, -4.6);
+    storePanel.rotation.y = Math.PI * 0.15;
 
-    const p = seats[i].pos.clone();
-    camera.position.set(p.x, camera.position.y, p.z);
-
-    // face toward table center
-    const look = new THREE.Vector3(0, 1.4, 0);
-    camera.lookAt(look);
-
-    // sync 2D yaw/pitch for Android
-    const dir = new THREE.Vector3().subVectors(look, camera.position).normalize();
-    yaw = Math.atan2(dir.x, dir.z);
-    pitch = 0;
-    updateHUD();
-  }
-
-  function buildChipStacks() {
-    // 4 chip stacks on table (interactable)
-    const positions = [
-      new THREE.Vector3(1.2, 1.18, 0.6),
-      new THREE.Vector3(-1.2, 1.18, 0.6),
-      new THREE.Vector3(1.2, 1.18, -0.6),
-      new THREE.Vector3(-1.2, 1.18, -0.6)
-    ];
-
-    positions.forEach((p, idx) => {
-      const stack = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.18, 0.18, 0.22, 24),
-        new THREE.MeshStandardMaterial({ color: 0x8a2be2, roughness: 0.45, metalness: 0.05, emissive: 0x200020, emissiveIntensity: 0.15 })
-      );
-      stack.position.copy(p);
-      stack.castShadow = true;
-      stack.userData.onInteract = () => {
-        // quick “take chips” for now
-        addChips(100);
-        playClick();
-        hapticPulse();
-        setStatus("Picked up chips ✅ (+100)");
-      };
-      stack.userData.hoverable = true;
-      scene.add(stack);
-      chipStacks.push(stack);
-      interactables.push(stack);
-    });
-  }
-
-  function buildStorePanel() {
-    const panel = new THREE.Group();
-    panel.position.set(-8.8, 1.6, -4.6);
-    panel.rotation.y = Math.PI * 0.15;
-
-    const bgTex = makePanelTexture("TEAM NOVA STORE", "Hover to highlight", "Trigger/Tap to select");
-    const bg = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.6, 1.55),
-      new THREE.MeshStandardMaterial({ map: bgTex, emissive: 0xffffff, emissiveIntensity: 0.35 })
+    // kiosk booth frame
+    const booth = new THREE.Mesh(
+      new THREE.BoxGeometry(3.2, 2.2, 1.3),
+      new THREE.MeshStandardMaterial({ color: 0x0b0b10, roughness: 0.7, metalness: 0.05, emissive: 0x140020, emissiveIntensity: 0.25 })
     );
-    panel.add(bg);
+    booth.position.set(0, 1.1, -0.35);
+    booth.castShadow = true;
+    booth.receiveShadow = true;
+    storePanel.add(booth);
 
-    const btnPositions = [0.35, 0.05, -0.25, -0.55];
+    const headerTex = makePanelTexture("TEAM NOVA STORE", "Buy or Equip Items", "Pages • Prices • Slots");
+    const header = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.6, 1.55),
+      new THREE.MeshStandardMaterial({ map: headerTex, emissive: 0xffffff, emissiveIntensity: 0.35, transparent: true })
+    );
+    header.position.set(0, 1.35, 0.35);
+    storePanel.add(header);
+
+    // 4 item buttons
+    const ys = [0.95, 0.70, 0.45, 0.20];
     for (let i = 0; i < 4; i++) {
-      const btn = makeUIButton(0, btnPositions[i], `BTN${i+1}`, () => onStoreAction(i));
-      panel.add(btn);
+      const btn = makeUIButton(0, ys[i], `ITEM${i+1}`, () => onStoreSelect(i));
+      btn.position.z = 0.36;
+      btn.userData.storeIdx = i;
+      storePanel.add(btn);
       interactables.push(btn);
     }
 
-    // nav buttons
-    const prev = makeUIButton(-0.72, -0.82, "PREV", () => { storePage = (storePage + storePages.length - 1) % storePages.length; refreshStoreButtons(panel); playClick(); });
-    const next = makeUIButton(0.72, -0.82, "NEXT", () => { storePage = (storePage + 1) % storePages.length; refreshStoreButtons(panel); playClick(); });
-    panel.add(prev); panel.add(next);
+    // nav
+    const prev = makeUIButton(-0.72, -0.05, "PREV", () => { storePage = (storePage + getStorePageCount() - 1) % getStorePageCount(); refreshStore(); });
+    const next = makeUIButton(0.72, -0.05, "NEXT", () => { storePage = (storePage + 1) % getStorePageCount(); refreshStore(); });
+    prev.position.z = 0.36; next.position.z = 0.36;
+    storePanel.add(prev); storePanel.add(next);
     interactables.push(prev, next);
 
     // page label
-    const pageTex = makeSmallLabelTexture(() => `PAGE ${storePage + 1}/${storePages.length}`);
     const pageLabel = new THREE.Mesh(
       new THREE.PlaneGeometry(1.2, 0.18),
-      new THREE.MeshStandardMaterial({ map: pageTex, emissive: 0xffffff, emissiveIntensity: 0.25, transparent: true })
+      new THREE.MeshStandardMaterial({ map: makeSmallLabelTexture(`PAGE ${storePage + 1}/${getStorePageCount()}`), emissive: 0xffffff, emissiveIntensity: 0.25, transparent: true })
     );
-    pageLabel.position.set(0, -0.82, 0.02);
-    panel.add(pageLabel);
+    pageLabel.position.set(0, -0.05, 0.36);
+    storePanel.add(pageLabel);
+    storePanel.userData.pageLabel = pageLabel;
 
-    panel.userData.pageLabel = pageLabel;
-    panel.userData.pageTex = pageTex;
-
-    scene.add(panel);
-    panel.userData.buttonsRoot = panel;
-
-    refreshStoreButtons(panel);
+    scene.add(storePanel);
+    refreshStore();
   }
 
-  function refreshStoreButtons(panel) {
-    // Update 4 main buttons by walking children that are marked storeButtonIndex
-    const page = storePages[storePage];
-    let btns = panel.children.filter(o => o.userData && typeof o.userData.storeButtonIndex === "number");
-    btns.sort((a,b) => a.userData.storeButtonIndex - b.userData.storeButtonIndex);
+  function getStorePageCount() {
+    // 4 items per page
+    return Math.max(1, Math.ceil(CATALOG.length / 4));
+  }
 
-    for (let i = 0; i < btns.length; i++) {
-      const def = page[i];
-      const label = def ? def.label : "—";
-      btns[i].userData.label = label;
-      btns[i].userData.storeDef = def || null;
+  function getPageItems(page) {
+    const start = page * 4;
+    return CATALOG.slice(start, start + 4);
+  }
 
-      // update texture
-      btns[i].material.map = makeButtonTexture(label);
-      btns[i].material.needsUpdate = true;
+  function refreshStore() {
+    const items = getPageItems(storePage);
+
+    // Update the 4 item buttons
+    storePanel.children.forEach(o => {
+      if (o.userData && typeof o.userData.storeIdx === "number") {
+        const idx = o.userData.storeIdx;
+        const it = items[idx];
+        if (!it) {
+          o.material.map = makeButtonTexture("—");
+          o.material.needsUpdate = true;
+          o.userData.itemId = null;
+          return;
+        }
+        const owned = isOwned(it.id);
+        const eq = isEquipped(it);
+        const action = owned ? (eq ? "EQUIPPED" : "EQUIP") : "BUY";
+        const priceTxt = owned ? "" : `-${it.price}`;
+        const label = `${it.name}  ${action} ${priceTxt}`.trim();
+        o.material.map = makeButtonTexture(label);
+        o.material.needsUpdate = true;
+        o.userData.itemId = it.id;
+      }
+    });
+
+    // Update page label texture
+    if (storePanel.userData.pageLabel) {
+      storePanel.userData.pageLabel.material.map = makeSmallLabelTexture(`PAGE ${storePage + 1}/${getStorePageCount()}`);
+      storePanel.userData.pageLabel.material.needsUpdate = true;
     }
 
-    // update page label
-    if (panel.userData.pageTex && panel.userData.pageLabel) {
-      panel.userData.pageTex.userData._updateText = `PAGE ${storePage + 1}/${storePages.length}`;
-      panel.userData.pageLabel.material.map = panel.userData.pageTex;
-      panel.userData.pageLabel.material.needsUpdate = true;
-    }
-
-    updateHUD();
     setStatus(`Store page ${storePage + 1} ✅`);
+    updateHUD();
   }
 
-  function onStoreAction(index) {
-    const page = storePages[storePage];
-    const def = page[index];
-    if (!def) return;
+  function onStoreSelect(buttonIdx) {
+    const items = getPageItems(storePage);
+    const it = items[buttonIdx];
+    if (!it) return;
 
-    if (def.type === "chips") {
-      addChips(def.amount);
-      setStatus(`Chips +${def.amount} ✅`);
-      return;
-    }
-
-    if (def.type === "item") {
-      buyItem(def.name, def.cost);
-      return;
-    }
-
-    if (def.type === "resetcos") {
-      save.owned = [];
+    if (!isOwned(it.id)) {
+      if (save.chips < it.price) { setStatus(`Not enough chips ❌ Need ${it.price}`); return; }
+      save.chips -= it.price;
+      save.owned.push(it.id);
       saveSave();
-      updateHUD();
-      setStatus("Cosmetics reset ✅");
-      return;
+      setStatus(`Purchased ${it.name} ✅`);
     }
 
-    if (def.type === "bet") {
-      betAmount += def.amount;
-      setStatus(`Bet queued: ${betAmount.toLocaleString()} ✅`);
-      updateHUD();
-      return;
-    }
-
-    if (def.type === "placebet") {
-      if (betAmount <= 0) { setStatus("Bet is 0 ❌"); return; }
-      if (save.chips < betAmount) { setStatus("Not enough chips for bet ❌"); return; }
-      save.chips -= betAmount;
-      save.pot += betAmount;
-      betAmount = 0;
+    // Equip
+    if (it.slot) {
+      save.equipped[it.slot] = it.id;
       saveSave();
-      updateHUD();
-      playClick();
-      hapticPulse();
-      setStatus("Bet placed ✅");
-      return;
+      applyEquippedVisuals();
+      setStatus(`Equipped ${it.name} ✅`);
+    } else {
+      // misc item just exists in inventory
+      setStatus(`Owned ${it.name} ✅`);
     }
+
+    refreshStore();
   }
 
-  function makePanelTexture(line1, line2, line3) {
+  // =========================
+  // MANNEQUIN + MIRROR
+  // =========================
+  function buildMannequinAndMirror() {
+    // Area near store to preview cosmetics
+    const baseX = -5.8, baseZ = -6.0;
+
+    // mirror panel
+    const mirror = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.0, 2.6),
+      new THREE.MeshStandardMaterial({
+        color: 0x0b0b10,
+        roughness: 0.25,
+        metalness: 0.85,
+        emissive: 0x140020,
+        emissiveIntensity: 0.25
+      })
+    );
+    mirror.position.set(baseX - 1.2, 1.4, baseZ);
+    mirror.rotation.y = Math.PI / 2;
+    scene.add(mirror);
+
+    // mannequin body
+    mannequin = new THREE.Group();
+    mannequin.position.set(baseX, 0, baseZ);
+    mannequin.rotation.y = Math.PI * 0.15;
+
+    const skinMat = new THREE.MeshStandardMaterial({ color: 0x7a7a7f, roughness: 0.9 });
+    const torsoMat = new THREE.MeshStandardMaterial({ color: 0x2b2b33, roughness: 0.9 });
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.18, 24, 24), skinMat);
+    head.position.set(0, 1.55, 0);
+    head.castShadow = true;
+    mannequin.add(head);
+
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.10, 16), skinMat);
+    neck.position.set(0, 1.40, 0);
+    neck.castShadow = true;
+    mannequin.add(neck);
+
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.48, 6, 16), torsoMat);
+    torso.position.set(0, 1.05, 0);
+    torso.castShadow = true;
+    mannequin.add(torso);
+
+    const hip = new THREE.Mesh(new THREE.CylinderGeometry(0.20, 0.22, 0.18, 16), torsoMat);
+    hip.position.set(0, 0.70, 0);
+    hip.castShadow = true;
+    mannequin.add(hip);
+
+    const pedestal = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.45, 0.55, 0.14, 24),
+      new THREE.MeshStandardMaterial({ color: 0x0b0b10, roughness: 0.85 })
+    );
+    pedestal.position.set(0, 0.07, 0);
+    pedestal.receiveShadow = true;
+    mannequin.add(pedestal);
+
+    // Cosmetic anchors (empty groups)
+    const headAnchor = new THREE.Group(); headAnchor.position.set(0, 1.62, 0);
+    const eyesAnchor = new THREE.Group(); eyesAnchor.position.set(0, 1.55, 0.14);
+    const neckAnchor = new THREE.Group(); neckAnchor.position.set(0, 1.36, 0.12);
+    const topAnchor  = new THREE.Group(); topAnchor.position.set(0, 1.05, 0);
+
+    mannequin.add(headAnchor); mannequin.add(eyesAnchor); mannequin.add(neckAnchor); mannequin.add(topAnchor);
+    mannequin.userData.anchors = { head: headAnchor, eyes: eyesAnchor, neck: neckAnchor, top: topAnchor };
+
+    scene.add(mannequin);
+
+    // Build all cosmetic meshes (hidden by default)
+    buildCosmeticMeshes();
+
+    // Interactable "Rotate mannequin" pad
+    const rotPad = new THREE.Mesh(
+      new THREE.CircleGeometry(0.55, 28),
+      new THREE.MeshBasicMaterial({ color: 0x7a2cff, transparent: true, opacity: 0.18, side: THREE.DoubleSide })
+    );
+    rotPad.rotation.x = -Math.PI / 2;
+    rotPad.position.set(baseX, 0.02, baseZ + 1.1);
+    rotPad.userData.onInteract = () => {
+      mannequin.rotation.y += 0.35;
+      setStatus("Mannequin rotated ✅");
+    };
+    rotPad.userData.hoverable = true;
+    rotPad.userData.baseEmissive = 0.12;
+    scene.add(rotPad);
+    interactables.push(rotPad);
+
+    // A label sign for the preview area
+    const labelTex = makeSignTexture("AVATAR", "PREVIEW", "Buy • Equip • See it");
+    const label = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.5, 0.7),
+      new THREE.MeshStandardMaterial({ map: labelTex, emissive: 0xffffff, emissiveIntensity: 0.4 })
+    );
+    label.position.set(baseX - 0.2, 2.25, baseZ);
+    label.rotation.y = Math.PI * 0.15;
+    scene.add(label);
+  }
+
+  function buildCosmeticMeshes() {
+    // Materials
+    const black = new THREE.MeshStandardMaterial({ color: 0x0b0b10, roughness: 0.6, metalness: 0.1 });
+    const gold  = new THREE.MeshStandardMaterial({ color: 0xd6b15f, roughness: 0.35, metalness: 0.75, emissive: 0x221500, emissiveIntensity: 0.12 });
+    const neon  = new THREE.MeshStandardMaterial({ color: 0x7a2cff, roughness: 0.45, metalness: 0.1, emissive: 0x7a2cff, emissiveIntensity: 0.35 });
+    const cloth = new THREE.MeshStandardMaterial({ color: 0x2b2b33, roughness: 0.95 });
+    const teeMat= new THREE.MeshStandardMaterial({ map: makeTeeTexture("TEAM NOVA"), color: 0xffffff, roughness: 0.95 });
+
+    // Head: Cap
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.21, 0.12, 20), black);
+    cap.position.set(0, 0.02, 0);
+    const brim = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.03, 0.12), black);
+    brim.position.set(0, -0.04, 0.18);
+    const capG = new THREE.Group(); capG.add(cap); capG.add(brim);
+    capG.visible = false;
+    mannequin.userData.anchors.head.add(capG);
+    cosmeticMeshes.head["head_cap"] = capG;
+
+    // Head: Crown
+    const crown = new THREE.Mesh(new THREE.TorusGeometry(0.20, 0.04, 10, 24), gold);
+    crown.rotation.x = Math.PI / 2;
+    crown.position.set(0, 0.02, 0);
+    crown.visible = false;
+    mannequin.userData.anchors.head.add(crown);
+    cosmeticMeshes.head["head_crown"] = crown;
+
+    // Eyes: Shades
+    const shades = new THREE.Group();
+    const lensL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.05, 0.02), black);
+    const lensR = lensL.clone();
+    lensL.position.set(-0.08, 0, 0);
+    lensR.position.set( 0.08, 0, 0);
+    const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.02, 0.02), black);
+    bridge.position.set(0, 0, 0);
+    shades.add(lensL, lensR, bridge);
+    shades.visible = false;
+    mannequin.userData.anchors.eyes.add(shades);
+    cosmeticMeshes.eyes["eyes_shades"] = shades;
+
+    // Neck: Chain
+    const chain = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.01, 10, 24), gold);
+    chain.rotation.x = Math.PI / 2;
+    chain.visible = false;
+    mannequin.userData.anchors.neck.add(chain);
+    cosmeticMeshes.neck["neck_chain"] = chain;
+
+    // Top: Hoodie (overlay)
+    const hoodie = new THREE.Mesh(new THREE.CapsuleGeometry(0.245, 0.50, 6, 16), cloth);
+    hoodie.position.set(0, 0, 0);
+    hoodie.visible = false;
+    mannequin.userData.anchors.top.add(hoodie);
+    cosmeticMeshes.top["top_hoodie"] = hoodie;
+
+    // Top: Tee (overlay)
+    const tee = new THREE.Mesh(new THREE.CapsuleGeometry(0.24, 0.48, 6, 16), teeMat);
+    tee.position.set(0, 0, 0);
+    tee.visible = false;
+    mannequin.userData.anchors.top.add(tee);
+    cosmeticMeshes.top["top_tee"] = tee;
+
+    // Neon scarf as neck cosmetic
+    const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.02, 10, 24), neon);
+    scarf.rotation.x = Math.PI / 2;
+    scarf.position.set(0, 0.02, 0);
+    scarf.visible = false;
+    mannequin.userData.anchors.neck.add(scarf);
+    cosmeticMeshes.neck["neck_scarf"] = scarf;
+  }
+
+  function makeTeeTexture(text) {
+    // Procedural t-shirt texture: no files needed
     const c = document.createElement("canvas");
-    c.width = 1024; c.height = 512;
+    c.width = 512; c.height = 512;
     const ctx = c.getContext("2d");
 
-    ctx.fillStyle = "#0b0b10";
-    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.fillStyle = "#101016";
+    ctx.fillRect(0,0,512,512);
 
-    ctx.strokeStyle = "rgba(122,44,255,0.55)";
-    ctx.lineWidth = 12;
-    ctx.strokeRect(18, 18, c.width - 36, c.height - 36);
+    // stripes
+    ctx.fillStyle = "rgba(122,44,255,0.18)";
+    for (let i=0;i<8;i++){
+      ctx.fillRect(0, i*64 + 10, 512, 10);
+    }
 
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 72px Arial";
-    ctx.textAlign = "center";
-    ctx.fillText(line1, c.width / 2, 160);
+    // logo block
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(90, 170, 332, 170);
 
-    ctx.fillStyle = "rgba(255,255,255,0.85)";
-    ctx.font = "bold 38px Arial";
-    ctx.fillText(line2, c.width / 2, 260);
-
-    ctx.fillStyle = "rgba(255,255,255,0.70)";
-    ctx.font = "32px Arial";
-    ctx.fillText(line3, c.width / 2, 320);
-
-    const tex = new THREE.CanvasTexture(c);
-    tex.anisotropy = 4;
-    tex.needsUpdate = true;
-    return tex;
-  }
-
-  function makeButtonTexture(label) {
-    const c = document.createElement("canvas");
-    c.width = 1024; c.height = 128;
-    const ctx = c.getContext("2d");
-
-    ctx.fillStyle = "#141418";
-    ctx.fillRect(0, 0, c.width, c.height);
-
-    const g = ctx.createLinearGradient(0, 0, 0, c.height);
-    g.addColorStop(0, "rgba(255,255,255,0.10)");
-    g.addColorStop(1, "rgba(255,255,255,0.02)");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, c.width, c.height);
-
-    ctx.strokeStyle = "rgba(255,255,255,0.25)";
-    ctx.lineWidth = 8;
-    ctx.strokeRect(10, 10, c.width - 20, c.height - 20);
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.lineWidth = 6;
+    ctx.strokeRect(96, 176, 320, 158);
 
     ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 56px Arial";
+    ctx.font = "bold 54px Arial";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(label, c.width / 2, c.height / 2);
+    ctx.fillText(text, 256, 250);
+
+    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    ctx.font = "28px Arial";
+    ctx.fillText("Scarlett Poker VR", 256, 300);
 
     const tex = new THREE.CanvasTexture(c);
     tex.needsUpdate = true;
+    tex.anisotropy = 4;
     return tex;
   }
 
-  function makeSmallLabelTexture(getTextFn) {
-    const c = document.createElement("canvas");
-    c.width = 512; c.height = 96;
-    const ctx = c.getContext("2d");
+  function applyEquippedVisuals() {
+    if (!mannequin || !mannequin.userData.anchors) return;
 
-    const tex = new THREE.CanvasTexture(c);
-    tex.userData._updateText = getTextFn();
+    // hide all
+    Object.values(cosmeticMeshes.head).forEach(m => m.visible = false);
+    Object.values(cosmeticMeshes.eyes).forEach(m => m.visible = false);
+    Object.values(cosmeticMeshes.neck).forEach(m => m.visible = false);
+    Object.values(cosmeticMeshes.top).forEach(m => m.visible = false);
 
-    // store updater text on texture
-    tex.userData._render = function () {
-      const text = tex.userData._updateText || getTextFn();
-      ctx.clearRect(0, 0, c.width, c.height);
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
-      ctx.fillRect(0, 0, c.width, c.height);
-      ctx.strokeStyle = "rgba(255,255,255,0.18)";
-      ctx.lineWidth = 6;
-      ctx.strokeRect(10, 10, c.width - 20, c.height - 20);
-      ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.font = "bold 44px Arial";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(text, c.width/2, c.height/2);
-      tex.needsUpdate = true;
+    // show equipped by mapping item -> mesh id
+    const eq = save.equipped || {};
+    const map = {
+      head_cap:    "head_cap",
+      head_crown:  "head_crown",
+      eyes_shades: "eyes_shades",
+      neck_chain:  "neck_chain",
+      neck_scarf:  "neck_scarf",
+      top_hoodie:  "top_hoodie",
+      top_tee:     "top_tee"
     };
 
-    // initial render
-    tex.userData._render();
-    return tex;
+    if (eq.head && map[eq.head] && cosmeticMeshes.head[map[eq.head]]) cosmeticMeshes.head[map[eq.head]].visible = true;
+    if (eq.eyes && map[eq.eyes] && cosmeticMeshes.eyes[map[eq.eyes]]) cosmeticMeshes.eyes[map[eq.eyes]].visible = true;
+    if (eq.neck && map[eq.neck] && cosmeticMeshes.neck[map[eq.neck]]) cosmeticMeshes.neck[map[eq.neck]].visible = true;
+    if (eq.top  && map[eq.top]  && cosmeticMeshes.top[map[eq.top]])   cosmeticMeshes.top[map[eq.top]].visible  = true;
   }
 
-  function makeUIButton(x, y, label, onInteract) {
-    const mesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.05, 0.18),
-      new THREE.MeshStandardMaterial({ map: makeButtonTexture(label), emissive: 0xffffff, emissiveIntensity: 0.12, transparent: true })
-    );
-    mesh.position.set(x, y, 0.02);
-    mesh.userData.onInteract = () => { pulse(mesh); playClick(); hapticPulse(); onInteract && onInteract(); };
-    mesh.userData.hoverable = true;
-    mesh.userData.baseEmissive = 0.12;
-    mesh.userData.storeButtonIndex = (label.startsWith("BTN") ? (parseInt(label.replace("BTN",""),10)-1) : undefined);
-    return mesh;
-  }
-
-  function buildSlotMachine() {
-    // Left-front corner slot machine
-    const g = new THREE.Group();
-    g.position.set(-8.3, 0, 5.4);
-    g.rotation.y = -0.25;
-
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(0.9, 1.6, 0.7),
-      new THREE.MeshStandardMaterial({ color: 0x0f0f14, roughness: 0.7, metalness: 0.1 })
-    );
-    body.position.set(0, 0.8, 0);
-    body.castShadow = true;
-    g.add(body);
-
-    const screenTex = makeSignTexture("SLOT", "SPIN", "+CHIPS?");
-    const screen = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.7, 0.45),
-      new THREE.MeshStandardMaterial({ map: screenTex, emissive: 0xffffff, emissiveIntensity: 0.45 })
-    );
-    screen.position.set(0, 1.25, 0.36);
-    g.add(screen);
-
-    const btn = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.12, 0.12, 0.06, 20),
-      new THREE.MeshStandardMaterial({ color: 0xff7a00, roughness: 0.4, emissive: 0x552200, emissiveIntensity: 0.35 })
-    );
-    btn.rotation.x = Math.PI / 2;
-    btn.position.set(0, 0.65, 0.36);
-    btn.castShadow = true;
-    btn.userData.onInteract = () => spinSlot();
-    btn.userData.hoverable = true;
-
-    g.add(btn);
-    scene.add(g);
-
-    slotMachine = { group: g, button: btn };
-    interactables.push(btn, screen, body);
-  }
-
-  function spinSlot() {
-    playSlot();
-    hapticPulse();
-    // simple RNG reward
-    const roll = Math.random();
-    if (roll < 0.05) { addChips(2000); setStatus("JACKPOT ✅ +2000"); return; }
-    if (roll < 0.20) { addChips(500);  setStatus("WIN ✅ +500"); return; }
-    if (roll < 0.60) { addChips(100);  setStatus("SMALL WIN ✅ +100"); return; }
-    setStatus("No win this time ❌");
-  }
-
+  // =========================
+  // TELEPORT HELPERS
+  // =========================
   function buildTeleportHelpers() {
     teleportMarker = new THREE.Mesh(
       new THREE.RingGeometry(0.2, 0.28, 32),
@@ -853,7 +886,12 @@
             vrBtn.disabled = false;
             hideTeleport();
             hideLaser();
+            // re-enable touch UI after VR ends
+            setTouchUIVisible(true);
           });
+
+          // In VR, hide touch UI overlay
+          setTouchUIVisible(false);
 
           setStatus("VR ✅ Laser UI + Teleport active");
           tryStartAudio();
@@ -920,8 +958,6 @@
       hit.object.userData.onInteract();
       return;
     }
-
-    // teleport if not pointing at UI/props
     if (lastTeleportValid) {
       camera.position.set(teleportPoint.x, camera.position.y, teleportPoint.z);
       setStatus("Teleported ✅");
@@ -929,82 +965,163 @@
   }
 
   // =========================
-  // ANDROID CONTROLS + TAP
+  // ANDROID TOUCH UI (Joystick + Look + Interact + Teleport)
   // =========================
-  function setupAndroidControls() {
-    const canvas = renderer.domElement;
+  function setupAndroidUI() {
+    // Touch UI is for non-VR mode only
+    setTouchUIVisible(true);
 
-    canvas.addEventListener("touchstart", (ev) => {
-      if (!ev.touches || ev.touches.length === 0) return;
-      if (ev.touches.length === 1) {
-        touchMode = "look";
-        lastX = ev.touches[0].clientX;
-        lastY = ev.touches[0].clientY;
-      } else if (ev.touches.length === 2) {
-        touchMode = "move";
-        lastTouchDist = touchDistance(ev.touches[0], ev.touches[1]);
-        lastX = (ev.touches[0].clientX + ev.touches[1].clientX) * 0.5;
-        lastY = (ev.touches[0].clientY + ev.touches[1].clientY) * 0.5;
-      }
-    }, { passive: true });
-
-    canvas.addEventListener("touchmove", (ev) => {
-      if (!ev.touches || ev.touches.length === 0) return;
+    // Look: drag anywhere not on joystick/buttons
+    renderer.domElement.addEventListener("touchstart", (ev) => {
       if (renderer.xr.isPresenting) return;
+      if (!ev.touches || ev.touches.length !== 1) return;
 
-      if (touchMode === "look" && ev.touches.length === 1) {
-        const x = ev.touches[0].clientX;
-        const y = ev.touches[0].clientY;
-        const dx = x - lastX;
-        const dy = y - lastY;
-        lastX = x; lastY = y;
-
-        yaw -= dx * 0.005;
-        pitch -= dy * 0.005;
-        pitch = Math.max(-1.15, Math.min(1.15, pitch));
+      // ignore if touching joystick area or button column
+      const t = ev.touches[0];
+      if (isInsideElement(t.clientX, t.clientY, joyBase) || isInsideElement(t.clientX, t.clientY, interactBtn) || isInsideElement(t.clientX, t.clientY, teleportBtn)) {
+        return;
       }
 
-      if (touchMode === "move" && ev.touches.length === 2) {
-        const cx = (ev.touches[0].clientX + ev.touches[1].clientX) * 0.5;
-        const cy = (ev.touches[0].clientY + ev.touches[1].clientY) * 0.5;
-
-        const dx = cx - lastX;
-        const dy = cy - lastY;
-        lastX = cx; lastY = cy;
-
-        const forward = -dy * 0.01;
-        const strafe = dx * 0.01;
-
-        const dir = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-        const right = new THREE.Vector3(Math.sin(yaw + Math.PI / 2), 0, Math.cos(yaw + Math.PI / 2));
-
-        camera.position.addScaledVector(dir, forward);
-        camera.position.addScaledVector(right, strafe);
-
-        const dist = touchDistance(ev.touches[0], ev.touches[1]);
-        if (lastTouchDist != null) {
-          const pinch = (dist - lastTouchDist) * 0.002;
-          camera.position.addScaledVector(dir, -pinch);
-        }
-        lastTouchDist = dist;
-      }
+      lookActive = true;
+      lastLookX = t.clientX;
+      lastLookY = t.clientY;
     }, { passive: true });
-  }
 
-  function setupTapInteractions() {
-    // Android tap/click ray from center screen
+    renderer.domElement.addEventListener("touchmove", (ev) => {
+      if (renderer.xr.isPresenting) return;
+      if (!lookActive) return;
+      if (!ev.touches || ev.touches.length !== 1) return;
+
+      const t = ev.touches[0];
+      const dx = t.clientX - lastLookX;
+      const dy = t.clientY - lastLookY;
+      lastLookX = t.clientX;
+      lastLookY = t.clientY;
+
+      yaw   -= dx * 0.005;
+      pitch -= dy * 0.005;
+      pitch = Math.max(-1.15, Math.min(1.15, pitch));
+    }, { passive: true });
+
+    renderer.domElement.addEventListener("touchend", () => {
+      lookActive = false;
+    }, { passive: true });
+
+    // Joystick
+    if (joyBase) {
+      joyBase.addEventListener("touchstart", (ev) => {
+        if (renderer.xr.isPresenting) return;
+        joyActive = true;
+        androidTeleportMode = false; // moving cancels teleport mode
+
+        const r = joyBase.getBoundingClientRect();
+        joyCenter.x = r.left + r.width / 2;
+        joyCenter.y = r.top + r.height / 2;
+
+        setJoyFromTouch(ev.touches[0]);
+      }, { passive: true });
+
+      joyBase.addEventListener("touchmove", (ev) => {
+        if (renderer.xr.isPresenting) return;
+        if (!joyActive) return;
+        setJoyFromTouch(ev.touches[0]);
+      }, { passive: true });
+
+      joyBase.addEventListener("touchend", () => {
+        joyActive = false;
+        joyVec.x = 0; joyVec.y = 0;
+        resetJoystickVisual();
+      }, { passive: true });
+    }
+
+    // Interact button
+    if (interactBtn) {
+      interactBtn.addEventListener("touchstart", (ev) => {
+        if (renderer.xr.isPresenting) return;
+        ev.preventDefault?.();
+        androidTeleportMode = false;
+        doCenterInteract();
+      }, { passive: false });
+    }
+
+    // Teleport button toggles teleport mode
+    if (teleportBtn) {
+      teleportBtn.addEventListener("touchstart", (ev) => {
+        if (renderer.xr.isPresenting) return;
+        ev.preventDefault?.();
+        androidTeleportMode = !androidTeleportMode;
+        setStatus(androidTeleportMode ? "Teleport mode ✅ Tap screen to place" : "Teleport mode off");
+      }, { passive: false });
+    }
+
+    // Tap screen to place teleport (when teleport mode on)
     renderer.domElement.addEventListener("click", () => {
       if (renderer.xr.isPresenting) return;
-      tryStartAudio();
+      if (!androidTeleportMode) return;
+
+      // ray to floor
       raycaster.setFromCamera({ x: 0, y: 0 }, camera);
-      const hits = raycaster.intersectObjects(interactables, true);
-      if (hits.length) {
-        const obj = hits[0].object;
-        if (obj.userData && typeof obj.userData.onInteract === "function") obj.userData.onInteract();
+      const hit = raycaster.intersectObject(floorMesh, true);
+      if (hit && hit.length) {
+        teleportPoint.copy(hit[0].point);
+        teleportPoint.y = 0;
+        camera.position.set(teleportPoint.x, camera.position.y, teleportPoint.z);
+        setStatus("Teleported ✅");
       }
     }, { passive: true });
 
-    if (audioBtn) audioBtn.addEventListener("click", () => tryStartAudio(true));
+    // Hide touchUI if desktop (optional) — keep it for you anyway since you’re Android
+  }
+
+  function setTouchUIVisible(on) {
+    if (!touchUI) return;
+    // if VR is presenting, always hide
+    if (renderer && renderer.xr && renderer.xr.isPresenting) {
+      touchUI.style.display = "none";
+      return;
+    }
+    touchUI.style.display = on ? "block" : "none";
+  }
+
+  function setJoyFromTouch(t) {
+    const max = 55; // joystick max radius
+    const dx = t.clientX - joyCenter.x;
+    const dy = t.clientY - joyCenter.y;
+    const len = Math.sqrt(dx*dx + dy*dy);
+    const nx = (len > 0) ? dx / len : 0;
+    const ny = (len > 0) ? dy / len : 0;
+    const clamped = Math.min(max, len);
+
+    const px = nx * clamped;
+    const py = ny * clamped;
+
+    joyVec.x = px / max;
+    joyVec.y = py / max;
+
+    // move knob
+    if (joyStick) {
+      joyStick.style.transform = `translate(calc(-50% + ${px}px), calc(-50% + ${py}px))`;
+    }
+  }
+
+  function resetJoystickVisual() {
+    if (joyStick) joyStick.style.transform = "translate(-50%,-50%)";
+  }
+
+  function doCenterInteract() {
+    tryStartAudio();
+    raycaster.setFromCamera({ x: 0, y: 0 }, camera);
+    const hits = raycaster.intersectObjects(interactables, true);
+    if (hits.length) {
+      const obj = hits[0].object;
+      if (obj.userData && typeof obj.userData.onInteract === "function") obj.userData.onInteract();
+    }
+  }
+
+  function isInsideElement(x, y, el) {
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
   }
 
   // =========================
@@ -1015,8 +1132,8 @@
     camera.add(listener);
 
     const loader = new THREE.AudioLoader();
-
     bgm = new THREE.Audio(listener);
+
     loader.load(
       "assets/audio/lobby_ambience.mp3",
       (buffer) => {
@@ -1029,14 +1146,6 @@
       undefined,
       () => setStatus("Audio missing ❌ Put file at assets/audio/lobby_ambience.mp3")
     );
-
-    // Optional: if you later add these, they’ll auto-work:
-    // assets/audio/click.mp3
-    // assets/audio/slot.mp3
-    clickSfx = new THREE.Audio(listener);
-    loader.load("assets/audio/click.mp3", (b) => { clickSfx.setBuffer(b); clickSfx.setVolume(0.5); clickReady = true; }, undefined, () => {});
-    slotSfx  = new THREE.Audio(listener);
-    loader.load("assets/audio/slot.mp3",  (b) => { slotSfx.setBuffer(b);  slotSfx.setVolume(0.55); slotReady = true; }, undefined, () => {});
   }
 
   function tryStartAudio(force) {
@@ -1051,34 +1160,52 @@
     }
   }
 
-  function playClick() {
-    if (clickReady && clickSfx) { try { clickSfx.stop(); clickSfx.play(); } catch(e){} }
-  }
-  function playSlot() {
-    if (slotReady && slotSfx) { try { slotSfx.stop(); slotSfx.play(); } catch(e){} }
-  }
-
   // =========================
-  // GAME LOOP + HOVER HIGHLIGHT
+  // GAME LOOP (movement + hover + neon pulse)
   // =========================
+  let lastTime = performance.now();
   function animate() {
     renderer.setAnimationLoop(() => {
-      // 2D camera orientation
+      const now = performance.now();
+      const dt = Math.min(0.05, (now - lastTime) / 1000);
+      lastTime = now;
+
+      // Non-VR: apply yaw/pitch + joystick movement
       if (!renderer.xr.isPresenting) {
         camera.rotation.order = "YXZ";
         camera.rotation.y = yaw;
         camera.rotation.x = pitch;
-      }
 
-      // Hover highlight:
-      // - VR: from each controller
-      // - Android: from center screen
-      if (renderer.xr.isPresenting) {
+        // move in camera-yaw direction
+        if (Math.abs(joyVec.x) > 0.02 || Math.abs(joyVec.y) > 0.02) {
+          const forward = -joyVec.y * moveSpeed * dt;
+          const strafe  =  joyVec.x * moveSpeed * dt;
+
+          const dir = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+          const right = new THREE.Vector3(Math.sin(yaw + Math.PI/2), 0, Math.cos(yaw + Math.PI/2));
+
+          camera.position.addScaledVector(dir, forward);
+          camera.position.addScaledVector(right, strafe);
+        }
+
+        // Center hover highlight for Android
+        updateCenterHover();
+        setTouchUIVisible(true);
+      } else {
+        // VR: update controller rays and hide touch UI
         updateControllerRay(controller0, laser0, reticle0);
         updateControllerRay(controller1, laser1, reticle1);
-      } else {
-        updateCenterHover();
+        setTouchUIVisible(false);
       }
+
+      // Neon pulse
+      neonPulseT += dt;
+      const pulse = 1.0 + Math.sin(neonPulseT * 1.5) * 0.25;
+      scene.traverse((o) => {
+        if (o.userData && o.userData.neon && o.material && o.material.emissiveIntensity != null) {
+          o.material.emissiveIntensity = 1.1 * pulse;
+        }
+      });
 
       renderer.render(scene, camera);
     });
@@ -1096,10 +1223,8 @@
 
     const origin = new THREE.Vector3().setFromMatrixPosition(ctrl.matrixWorld);
     const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(ctrl.quaternion).normalize();
-
     raycaster.set(origin, direction);
 
-    // UI/prop hit
     const hits = raycaster.intersectObjects(interactables, true);
     if (hits.length) {
       const p = hits[0].point;
@@ -1111,7 +1236,6 @@
       }
 
       setHovered(hits[0].object);
-
       hideTeleport();
       return;
     } else {
@@ -1119,7 +1243,6 @@
       setHovered(null);
     }
 
-    // Teleport on floor
     const floorHit = raycaster.intersectObject(floorMesh, true);
     if (floorHit.length) {
       teleportPoint.copy(floorHit[0].point);
@@ -1138,15 +1261,13 @@
   function setHovered(obj) {
     if (hovered === obj) return;
 
-    // unhover old
     if (hovered && hovered.material && hovered.userData && hovered.userData.hoverable) {
       hovered.material.emissiveIntensity = hovered.userData.baseEmissive ?? 0.12;
-      hovered.scale.copy(hovered.userData._baseScale || hovered.scale);
+      if (hovered.userData._baseScale) hovered.scale.copy(hovered.userData._baseScale);
     }
 
     hovered = (obj && obj.userData && obj.userData.hoverable) ? obj : null;
 
-    // hover new
     if (hovered && hovered.material) {
       hovered.userData._baseScale = hovered.userData._baseScale || hovered.scale.clone();
       hovered.material.emissiveIntensity = (hovered.userData.baseEmissive ?? 0.12) + 0.35;
@@ -1157,7 +1278,6 @@
   function showTeleport(origin, hitPoint) {
     teleportMarker.visible = true;
     teleportMarker.position.set(teleportPoint.x, 0.02, teleportPoint.z);
-
     teleportLine.visible = true;
     teleportLine.geometry.setFromPoints([origin.clone(), hitPoint.clone()]);
   }
@@ -1176,26 +1296,198 @@
   }
 
   // =========================
-  // ECONOMY / INVENTORY
+  // SEATS
   // =========================
-  function addChips(amount) {
-    save.chips += amount;
+  function snapToSeat(i) {
+    seatIndex = i;
+    save.seatIndex = i;
     saveSave();
+
+    const p = seats[i].pos.clone();
+    camera.position.set(p.x, camera.position.y, p.z);
+
+    const look = new THREE.Vector3(0, 1.4, 0);
+    camera.lookAt(look);
+
+    const dir = new THREE.Vector3().subVectors(look, camera.position).normalize();
+    yaw = Math.atan2(dir.x, dir.z);
+    pitch = 0;
+
     updateHUD();
   }
 
-  function buyItem(name, cost) {
-    const ownedSet = new Set(save.owned || []);
-    if (ownedSet.has(name)) { setStatus(`${name} already owned ✅`); return; }
-    if (save.chips < cost) { setStatus(`Not enough chips ❌ Need ${cost.toLocaleString()}`); return; }
-    save.chips -= cost;
-    ownedSet.add(name);
-    save.owned = Array.from(ownedSet);
-    saveSave();
-    updateHUD();
-    setStatus(`Purchased ${name} ✅`);
+  // =========================
+  // STORE TEXTURES
+  // =========================
+  function makePanelTexture(line1, line2, line3) {
+    const c = document.createElement("canvas");
+    c.width = 1024; c.height = 512;
+    const ctx = c.getContext("2d");
+
+    ctx.fillStyle = "#0b0b10";
+    ctx.fillRect(0, 0, c.width, c.height);
+
+    ctx.strokeStyle = "rgba(122,44,255,0.55)";
+    ctx.lineWidth = 12;
+    ctx.strokeRect(18, 18, c.width - 36, c.height - 36);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 72px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(line1, c.width / 2, 160);
+
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.font = "bold 38px Arial";
+    ctx.fillText(line2, c.width / 2, 260);
+
+    ctx.fillStyle = "rgba(255,255,255,0.70)";
+    ctx.font = "32px Arial";
+    ctx.fillText(line3, c.width / 2, 320);
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.anisotropy = 4;
+    tex.needsUpdate = true;
+    return tex;
   }
 
+  function makeButtonTexture(label) {
+    const c = document.createElement("canvas");
+    c.width = 1024; c.height = 128;
+    const ctx = c.getContext("2d");
+
+    ctx.fillStyle = "#141418";
+    ctx.fillRect(0, 0, c.width, c.height);
+
+    const g = ctx.createLinearGradient(0, 0, 0, c.height);
+    g.addColorStop(0, "rgba(255,255,255,0.10)");
+    g.addColorStop(1, "rgba(255,255,255,0.02)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, c.width, c.height);
+
+    ctx.strokeStyle = "rgba(255,255,255,0.25)";
+    ctx.lineWidth = 8;
+    ctx.strokeRect(10, 10, c.width - 20, c.height - 20);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 48px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, c.width / 2, c.height / 2);
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  function makeSmallLabelTexture(text) {
+    const c = document.createElement("canvas");
+    c.width = 512; c.height = 96;
+    const ctx = c.getContext("2d");
+
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(0, 0, c.width, c.height);
+
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.lineWidth = 6;
+    ctx.strokeRect(10, 10, c.width - 20, c.height - 20);
+
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.font = "bold 44px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, c.width/2, c.height/2);
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  function makeUIButton(x, y, label, onInteract) {
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.15, 0.20),
+      new THREE.MeshStandardMaterial({ map: makeButtonTexture(label), emissive: 0xffffff, emissiveIntensity: 0.12, transparent: true })
+    );
+    mesh.position.set(x, y, 0.02);
+    mesh.userData.onInteract = () => { pulse(mesh); onInteract && onInteract(); };
+    mesh.userData.hoverable = true;
+    mesh.userData.baseEmissive = 0.12;
+    return mesh;
+  }
+
+  // =========================
+  // CATALOG + OWN/EQUIP HELPERS
+  // =========================
+  function buildCatalog40() {
+    // Prices in chips
+    const items = [
+      // head (10)
+      { id:"head_cap", name:"Nova Cap", slot:"head", price:1000 },
+      { id:"head_crown", name:"Nova Crown", slot:"head", price:3500 },
+      { id:"head_beanie", name:"Beanie", slot:"head", price:1200 },
+      { id:"head_bucket", name:"Bucket Hat", slot:"head", price:1400 },
+      { id:"head_fedora", name:"Fedora", slot:"head", price:1800 },
+      { id:"head_cowboy", name:"Cowboy Hat", slot:"head", price:1800 },
+      { id:"head_headphones", name:"Headphones", slot:"head", price:2200 },
+      { id:"head_halo", name:"Halo", slot:"head", price:5000 },
+      { id:"head_visor", name:"Cyber Visor", slot:"head", price:2600 },
+      { id:"head_flatbrim", name:"Flat Brim", slot:"head", price:1500 },
+
+      // eyes (8)
+      { id:"eyes_shades", name:"Shades", slot:"eyes", price:1500 },
+      { id:"eyes_aviators", name:"Aviators", slot:"eyes", price:1700 },
+      { id:"eyes_neon", name:"Neon Glasses", slot:"eyes", price:2200 },
+      { id:"eyes_goggles", name:"Goggles", slot:"eyes", price:2300 },
+      { id:"eyes_monocle", name:"Monocle", slot:"eyes", price:2600 },
+      { id:"eyes_heart", name:"Heart Glasses", slot:"eyes", price:2000 },
+      { id:"eyes_reader", name:"Readers", slot:"eyes", price:900 },
+      { id:"eyes_cyber", name:"Cyber Shades", slot:"eyes", price:2800 },
+
+      // neck (8)
+      { id:"neck_chain", name:"Gold Chain", slot:"neck", price:2500 },
+      { id:"neck_silver", name:"Silver Chain", slot:"neck", price:2200 },
+      { id:"neck_pendant", name:"Nova Pendant", slot:"neck", price:3200 },
+      { id:"neck_cross", name:"Cross Pendant", slot:"neck", price:2600 },
+      { id:"neck_dogtags", name:"Dog Tags", slot:"neck", price:1800 },
+      { id:"neck_beads", name:"Beads", slot:"neck", price:1400 },
+      { id:"neck_diamond", name:"Diamond Chain", slot:"neck", price:6000 },
+      { id:"neck_scarf", name:"Neon Scarf", slot:"neck", price:2000 },
+
+      // top (10)
+      { id:"top_tee", name:"Team Nova Tee", slot:"top", price:1200 },
+      { id:"top_scarlett", name:"Scarlett Tee", slot:"top", price:1300 },
+      { id:"top_hoodie", name:"Hoodie Black", slot:"top", price:2500 },
+      { id:"top_hoodie_neon", name:"Hoodie Neon", slot:"top", price:3200 },
+      { id:"top_leather", name:"Leather Jacket", slot:"top", price:4200 },
+      { id:"top_bomber", name:"Bomber Jacket", slot:"top", price:3800 },
+      { id:"top_vest", name:"Vest", slot:"top", price:2200 },
+      { id:"top_suit", name:"Suit Top", slot:"top", price:4800 },
+      { id:"top_longsleeve", name:"Long Sleeve", slot:"top", price:1600 },
+      { id:"top_tank", name:"Tank Top", slot:"top", price:900 },
+
+      // misc/effects (4)
+      { id:"misc_eventchip", name:"Event Chip (Founders)", slot:null, price:5000 },
+      { id:"misc_vipbadge", name:"VIP Badge", slot:null, price:7500 },
+      { id:"misc_adminband", name:"Wristband (Admin)", slot:null, price:9000 },
+      { id:"misc_confetti", name:"Confetti Aura", slot:null, price:12000 },
+    ];
+
+    // Total should be 40
+    return items.slice(0, 40);
+  }
+
+  function isOwned(id) {
+    return (save.owned || []).includes(id);
+  }
+
+  function isEquipped(item) {
+    if (!item.slot) return false;
+    return save.equipped && save.equipped[item.slot] === item.id;
+  }
+
+  // =========================
+  // SAVE / HUD
+  // =========================
   function updateHUD() {
     if (chipsEl) chipsEl.textContent = "Chips: " + (save.chips || 0).toLocaleString();
     if (potEl) potEl.textContent = "Pot: " + (save.pot || 0).toLocaleString() + (betAmount ? `  (bet queued: ${betAmount})` : "");
@@ -1209,8 +1501,11 @@
     betAmount = 0;
     seatIndex = -1;
     saveSave();
+    applyEquippedVisuals();
     updateHUD();
     setStatus("Save reset ✅");
+    // refresh store label if exists
+    if (storePanel) refreshStore();
   }
 
   function loadSave() {
@@ -1226,22 +1521,7 @@
 
   function saveSave() {
     try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch {}
-  }
-
-  // Simple haptics (Quest) if available
-  function hapticPulse() {
-    // Only works inside XR session; best effort.
-    try {
-      const s = renderer.xr.getSession && renderer.xr.getSession();
-      if (!s) return;
-      const sources = s.inputSources || [];
-      for (const src of sources) {
-        const gp = src.gamepad;
-        if (gp && gp.hapticActuators && gp.hapticActuators.length) {
-          gp.hapticActuators[0].pulse(0.6, 60);
-        }
-      }
-    } catch {}
+    updateHUD();
   }
 
   // =========================
@@ -1269,9 +1549,4 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
-  function touchDistance(t1, t2) {
-    const dx = t1.clientX - t2.clientX;
-    const dy = t1.clientY - t2.clientY;
-    return Math.sqrt(dx * dx + dy * dy);
-  }
 })();

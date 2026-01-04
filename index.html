@@ -15,27 +15,24 @@
   </style>
 </head>
 <body>
-  <div id="hud">Loading…</div>
-
-  <!-- Import map makes Quest happy (no mixed CDN paths) -->
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.150.1/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.150.1/examples/jsm/"
-    }
-  }
-  </script>
+  <div id="hud">Loading… (index.html loaded)</div>
 
   <script>
     const hud = document.getElementById('hud');
-    window.addEventListener('error', (e)=> hud.textContent = "ERROR:\\n" + (e?.message||e));
-    window.addEventListener('unhandledrejection', (e)=> hud.textContent = "PROMISE ERROR:\\n" + (e?.reason?.message||e?.reason||e));
+    window.addEventListener('error', (e)=> hud.textContent = "ERROR:\n" + (e?.message||e));
+    window.addEventListener('unhandledrejection', (e)=> hud.textContent = "PROMISE ERROR:\n" + (e?.reason?.message||e?.reason||e));
   </script>
 
   <script type="module">
-    import './js/main.js';
-    document.getElementById('hud').textContent = "Loaded main.js (if you still see black, an import/model/texture failed—HUD will show it).";
+    const hud = document.getElementById('hud');
+    hud.textContent = "Starting module import: ./js/main.js";
+
+    try {
+      await import('./js/main.js');
+      hud.textContent = "✅ main.js imported. If you still see black, HUD will show why.";
+    } catch (err) {
+      hud.textContent = "❌ Failed to import ./js/main.js\n\n" + (err?.message || String(err));
+    }
   </script>
 </body>
 </html>

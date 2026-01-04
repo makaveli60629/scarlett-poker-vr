@@ -1,12 +1,12 @@
-import * as THREE from "three";
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 
 /**
  * WORLD
  * - Lobby + Poker Room
- * - Visible teleport pads (raised above floor)
- * - Neon trim on wall corners + ceiling edges
- * - Store kiosk mesh (visible)
- * - Colliders list for player collision
+ * - Visible teleport pads (raised)
+ * - Neon trim corners + ceiling edges
+ * - Store kiosk visible
+ * - Colliders list for "solid"
  */
 export const World = {
   colliders: [],
@@ -30,7 +30,7 @@ export const World = {
     group.name = name;
     group.position.copy(center);
 
-    // FLOOR (teleportable)
+    // FLOOR
     const floor = new THREE.Mesh(
       new THREE.BoxGeometry(size.w, 0.2, size.d),
       new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.95 })
@@ -41,7 +41,7 @@ export const World = {
     this.addCollider(floor);
     this.addTeleportSurface(floor);
 
-    // WALLS (solid)
+    // WALLS
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x202026, roughness: 0.9 });
     const t = 0.35;
 
@@ -61,7 +61,7 @@ export const World = {
       this.addCollider(w);
     }
 
-    // NEON TRIM (corners + ceiling rectangle)
+    // NEON TRIM
     const neonMat = new THREE.MeshStandardMaterial({
       color: 0x00ffff,
       emissive: 0x00ffff,
@@ -73,35 +73,31 @@ export const World = {
     const trimW = 0.06;
 
     // corner posts
-    const cornerPositions = [
+    const corners = [
       new THREE.Vector3(-size.w / 2 + trimW, size.h / 2, -size.d / 2 + trimW),
       new THREE.Vector3(size.w / 2 - trimW, size.h / 2, -size.d / 2 + trimW),
       new THREE.Vector3(-size.w / 2 + trimW, size.h / 2, size.d / 2 - trimW),
       new THREE.Vector3(size.w / 2 - trimW, size.h / 2, size.d / 2 - trimW)
     ];
-
-    for (const p of cornerPositions) {
+    for (const p of corners) {
       const post = new THREE.Mesh(new THREE.BoxGeometry(trimW, size.h, trimW), neonMat);
       post.position.copy(p);
       group.add(post);
     }
 
-    // ceiling rectangle trim
+    // ceiling rectangle
     const yTop = size.h - 0.06;
-
     const topNorth = new THREE.Mesh(new THREE.BoxGeometry(size.w, trimW, trimW), neonMat);
     topNorth.position.set(0, yTop, -size.d / 2 + trimW);
     const topSouth = new THREE.Mesh(new THREE.BoxGeometry(size.w, trimW, trimW), neonMat);
     topSouth.position.set(0, yTop, size.d / 2 - trimW);
-
     const topWest = new THREE.Mesh(new THREE.BoxGeometry(trimW, trimW, size.d), neonMat);
     topWest.position.set(-size.w / 2 + trimW, yTop, 0);
     const topEast = new THREE.Mesh(new THREE.BoxGeometry(trimW, trimW, size.d), neonMat);
     topEast.position.set(size.w / 2 - trimW, yTop, 0);
-
     group.add(topNorth, topSouth, topWest, topEast);
 
-    // LIGHTING (brighter)
+    // LIGHTS
     const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 0.95);
     group.add(hemi);
 
@@ -119,8 +115,7 @@ export const World = {
   },
 
   makeTeleportPad({ scene, position, label }) {
-    // IMPORTANT: raise above floor so it doesn't disappear
-    const y = 0.03;
+    const y = 0.03; // raised so it won't disappear into floor
 
     const padMat = new THREE.MeshStandardMaterial({
       color: 0x2f7dff,
@@ -131,7 +126,6 @@ export const World = {
 
     const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 0.07, 28), padMat);
     pad.position.set(position.x, y, position.z);
-    pad.receiveShadow = true;
     pad.userData.teleportable = true;
     pad.userData.teleportTarget = label;
     scene.add(pad);
@@ -189,7 +183,7 @@ export const World = {
 
     scene.add(kiosk);
 
-    // teleportable “store zone” glow
+    // teleportable store zone glow
     const pad = new THREE.Mesh(
       new THREE.CircleGeometry(1.1, 32),
       new THREE.MeshStandardMaterial({
@@ -212,10 +206,10 @@ export const World = {
     scene.background = new THREE.Color(0x07080d);
     scene.fog = new THREE.Fog(0x07080d, 3, 80);
 
-    // spawn safe
+    // safe spawn
     playerGroup.position.set(0, 0, 5);
 
-    // lobby + poker room
+    // rooms
     this.buildRoom({
       scene,
       name: "Lobby",
@@ -230,11 +224,11 @@ export const World = {
       size: { w: 22, h: 4.6, d: 22 }
     });
 
-    // pads
+    // teleport pads
     this.makeTeleportPad({ scene, position: new THREE.Vector3(0, 0, 2), label: "Lobby" });
     this.makeTeleportPad({ scene, position: new THREE.Vector3(0, 0, -30), label: "PokerRoom" });
 
-    // store kiosk
+    // store kiosk in lobby
     this.makeStoreKiosk({ scene, position: new THREE.Vector3(-5.5, 0, 5.5) });
 
     // poker table placeholder (solid)

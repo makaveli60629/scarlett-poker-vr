@@ -3,66 +3,35 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <title>Team Nova Poker VR</title>
+  <title>Scarlett Poker VR</title>
   <style>
-    html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#05060a; font-family: system-ui, Arial; }
-    #hudHint {
+    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#05070d; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; touch-action: none; }
+    canvas { display:block; width:100%; height:100%; }
+
+    #hint {
       position: fixed;
-      left: 12px; bottom: 12px;
+      left: 10px; bottom: 10px;
+      z-index: 50;
       padding: 10px 12px;
-      border-radius: 12px;
+      border-radius: 14px;
       background: rgba(0,0,0,0.45);
       color: rgba(255,255,255,0.85);
-      font-size: 13px;
-      z-index: 10;
-      user-select: none;
-      pointer-events: none;
+      font-size: 12px;
       max-width: 72vw;
-      line-height: 1.25;
+      user-select: none;
+      backdrop-filter: blur(6px);
     }
-    #startOverlay {
-      position: fixed; inset: 0;
-      display:flex; align-items:center; justify-content:center;
-      background: radial-gradient(circle at 50% 40%, rgba(40,50,80,0.55), rgba(0,0,0,0.85));
-      z-index: 20;
-    }
-    #startBtn {
-      border: 0;
-      border-radius: 16px;
-      padding: 14px 18px;
-      font-size: 16px;
-      color: white;
-      background: rgba(110, 80, 255, 0.85);
-      box-shadow: 0 14px 40px rgba(0,0,0,0.45);
-    }
-    #startSub { margin-top: 10px; color: rgba(255,255,255,0.75); font-size: 13px; text-align:center; }
   </style>
 </head>
 <body>
-  <div id="startOverlay">
-    <div style="text-align:center; padding: 18px;">
-      <div style="font-size:22px; font-weight:700; color: rgba(255,255,255,0.92);">Team Nova Poker VR</div>
-      <div id="startSub">Android + Quest ready • GitHub Pages build</div>
-      <div style="height:14px"></div>
-      <button id="startBtn">Start</button>
-      <div style="height:10px"></div>
-      <div style="color: rgba(255,255,255,0.65); font-size: 12px;">
-        Tip: In VR, use controller laser to interact (next update hooks store/tournaments).
-      </div>
-    </div>
+  <div id="hint">
+    Android: left joystick to move, drag screen to look. <br/>
+    Quest: Enter VR, left thumbstick moves, right laser clicks menus.
   </div>
-
-  <div id="hudHint">Look at a player for <b>5 seconds</b> to reveal their Gamer Tag.</div>
 
   <script type="module">
     import { boot } from './js/main.js';
-    const btn = document.getElementById('startBtn');
-    const overlay = document.getElementById('startOverlay');
-
-    btn.addEventListener('click', async () => {
-      overlay.style.display = 'none';
-      await boot();
-    }, { passive:true });
+    boot();
   </script>
 </body>
 </html>

@@ -3,79 +3,43 @@ import { World } from './world.js';
 
 export const Controls = {
     controllers: [],
-    hands: [],
     raycaster: new THREE.Raycaster(),
-    tempMatrix: new THREE.Matrix4(),
+    tempVec: new THREE.Vector3(),
 
-    init(renderer, scene, playerGroup, camera) {
-        for(let i=0; i<2; i++){
+    init(renderer, scene, playerGroup) {
+        for(let i=0;i<2;i++){
             const controller = renderer.xr.getController(i);
 
             // Laser
-            const geometry = new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(0,0,0),
-                new THREE.Vector3(0,0,-1)
-            ]);
-            const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0x00ff00 }));
-            line.scale.z = 5;
+            const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-10)]);
+            const line = new THREE.Line(geometry,new THREE.LineBasicMaterial({color:0x00ff00}));
             controller.add(line);
-            controller.userData.line = line;
 
             playerGroup.add(controller);
             this.controllers.push(controller);
 
-            // Simple hand sphere
-            const hand = new THREE.Mesh(new THREE.SphereGeometry(0.05,8,8),
-                new THREE.MeshStandardMaterial({color:0x00ff00}));
-            controller.add(hand);
-            hand.controller = controller;
-            hand.userData.isSelecting = false;
-            this.hands.push(hand);
-
-            controller.addEventListener('selectstart', () => { hand.userData.isSelecting = true; });
-            controller.addEventListener('selectend', () => { hand.userData.isSelecting = false; });
-
-            // Grab objects
-            controller.addEventListener('squeezestart', ()=>{
-                this.tempMatrix.identity().extractRotation(controller.matrixWorld);
-                this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-                this.raycaster.ray.direction.set(0,0,-1).applyMatrix4(this.tempMatrix);
-
-                const intersects = this.raycaster.intersectObjects(World.grabbableObjects,true);
-                if(intersects.length > 0){
-                    const obj = intersects[0].object;
-                    controller.userData.grabbed = obj;
-                    obj.material.emissive = new THREE.Color(0x2222ff);
-                }
-            });
-
-            controller.addEventListener('squeezeend', ()=>{
-                if(controller.userData.grabbed){
-                    controller.userData.grabbed.material.emissive = new THREE.Color(0x000000);
-                    controller.userData.grabbed = null;
+            // Teleport
+            controller.addEventListener('selectstart',()=>{
+                const dir = new THREE.Vector3(0,0,-1).applyQuaternion(controller.quaternion);
+                const origin = controller.getWorldPosition(new THREE.Vector3());
+                this.raycaster.set(origin, dir);
+                const intersects = this.raycaster.intersectObjects(World.collisionObjects,true);
+                if(intersects.length>0){
+                    const p = intersects[0].point;
+                    playerGroup.position.set(p.x,1.6,p.z);
                 }
             });
         }
     },
 
-    update(renderer){
-        // Update laser lines
+    update(playerGroup){
+        // Optional: hover highlight on grabbables
         this.controllers.forEach(controller=>{
-            const line = controller.userData.line;
-            line.material.color.set(0x00ff00);
-            this.tempMatrix.identity().extractRotation(controller.matrixWorld);
-            this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-            this.raycaster.ray.direction.set(0,0,-1).applyMatrix4(this.tempMatrix);
-
+            const origin = controller.getWorldPosition(new THREE.Vector3());
+            const dir = new THREE.Vector3(0,0,-1).applyQuaternion(controller.quaternion);
+            this.raycaster.set(origin, dir);
             const intersects = this.raycaster.intersectObjects(World.grabbableObjects,true);
-            if(intersects.length>0){
-                line.material.color.set(0xff0000);
-            }
-
-            // Move grabbed objects
-            if(controller.userData.grabbed){
-                controller.userData.grabbed.position.setFromMatrixPosition(controller.matrixWorld);
-            }
+            controller.children[0].material.color.set(intersects.length>0?0xff0000:0x00ff00);
         });
     }
 };

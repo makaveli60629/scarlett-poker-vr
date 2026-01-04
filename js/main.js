@@ -12,19 +12,18 @@ const Core = {
     playerGroup: new THREE.Group(),
 
     init(){
-        // Renderer + VR
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.xr.enabled = true;
         this.renderer.xr.setReferenceSpaceType('local-floor');
         document.body.appendChild(this.renderer.domElement);
         document.body.appendChild(VRButton.createButton(this.renderer));
 
-        // Player Group
+        // Player group + camera
         this.scene.add(this.playerGroup);
         this.playerGroup.add(this.camera);
         this.playerGroup.position.set(0,0,10);
 
-        // Build World
+        // Build world
         World.build(this.scene);
 
         // Controls
@@ -33,10 +32,10 @@ const Core = {
         // UI
         UI.init(this.scene,this.playerGroup);
 
-        // Poker Table
+        // Poker table
         PokerTable.init(this.scene);
 
-        // Animation Loop
+        // Animation loop
         this.renderer.setAnimationLoop(()=>{
             Controls.update(this.renderer);
             PokerTable.updateHandsInteraction(Controls.hands);

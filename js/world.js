@@ -3,10 +3,10 @@ import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 /**
  * WORLD
  * - Lobby + Poker Room
- * - Visible teleport pads (raised)
+ * - Visible teleport pads (raised above floor so they show)
  * - Neon trim corners + ceiling edges
- * - Store kiosk visible
- * - Colliders list for "solid"
+ * - Store kiosk (visible object)
+ * - Colliders list for "solid" walls/table/kiosk
  */
 export const World = {
   colliders: [],
@@ -30,7 +30,7 @@ export const World = {
     group.name = name;
     group.position.copy(center);
 
-    // FLOOR
+    // FLOOR (teleportable)
     const floor = new THREE.Mesh(
       new THREE.BoxGeometry(size.w, 0.2, size.d),
       new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.95 })
@@ -41,7 +41,7 @@ export const World = {
     this.addCollider(floor);
     this.addTeleportSurface(floor);
 
-    // WALLS
+    // WALLS (solid)
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x202026, roughness: 0.9 });
     const t = 0.35;
 
@@ -49,6 +49,7 @@ export const World = {
     north.position.set(0, size.h / 2, -size.d / 2);
     const south = new THREE.Mesh(new THREE.BoxGeometry(size.w, size.h, t), wallMat);
     south.position.set(0, size.h / 2, size.d / 2);
+
     const west = new THREE.Mesh(new THREE.BoxGeometry(t, size.h, size.d), wallMat);
     west.position.set(-size.w / 2, size.h / 2, 0);
     const east = new THREE.Mesh(new THREE.BoxGeometry(t, size.h, size.d), wallMat);
@@ -61,7 +62,7 @@ export const World = {
       this.addCollider(w);
     }
 
-    // NEON TRIM
+    // NEON TRIM (corners + ceiling edges)
     const neonMat = new THREE.MeshStandardMaterial({
       color: 0x00ffff,
       emissive: 0x00ffff,
@@ -69,10 +70,9 @@ export const World = {
       roughness: 0.15,
       metalness: 0.1
     });
-
     const trimW = 0.06;
 
-    // corner posts
+    // Corner posts
     const corners = [
       new THREE.Vector3(-size.w / 2 + trimW, size.h / 2, -size.d / 2 + trimW),
       new THREE.Vector3(size.w / 2 - trimW, size.h / 2, -size.d / 2 + trimW),
@@ -85,7 +85,7 @@ export const World = {
       group.add(post);
     }
 
-    // ceiling rectangle
+    // Ceiling rectangle edges
     const yTop = size.h - 0.06;
     const topNorth = new THREE.Mesh(new THREE.BoxGeometry(size.w, trimW, trimW), neonMat);
     topNorth.position.set(0, yTop, -size.d / 2 + trimW);
@@ -97,9 +97,8 @@ export const World = {
     topEast.position.set(size.w / 2 - trimW, yTop, 0);
     group.add(topNorth, topSouth, topWest, topEast);
 
-    // LIGHTS
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 0.95);
-    group.add(hemi);
+    // LIGHTS (bright enough to see everything)
+    group.add(new THREE.HemisphereLight(0xffffff, 0x222233, 0.95));
 
     const key = new THREE.DirectionalLight(0xffffff, 1.1);
     key.position.set(8, 12, 6);
@@ -115,7 +114,8 @@ export const World = {
   },
 
   makeTeleportPad({ scene, position, label }) {
-    const y = 0.03; // raised so it won't disappear into floor
+    // raised above floor so it doesn't z-fight/disappear
+    const y = 0.03;
 
     const padMat = new THREE.MeshStandardMaterial({
       color: 0x2f7dff,
@@ -183,7 +183,7 @@ export const World = {
 
     scene.add(kiosk);
 
-    // teleportable store zone glow
+    // Store zone glow (teleportable)
     const pad = new THREE.Mesh(
       new THREE.CircleGeometry(1.1, 32),
       new THREE.MeshStandardMaterial({
@@ -228,7 +228,7 @@ export const World = {
     this.makeTeleportPad({ scene, position: new THREE.Vector3(0, 0, 2), label: "Lobby" });
     this.makeTeleportPad({ scene, position: new THREE.Vector3(0, 0, -30), label: "PokerRoom" });
 
-    // store kiosk in lobby
+    // store kiosk (Lobby)
     this.makeStoreKiosk({ scene, position: new THREE.Vector3(-5.5, 0, 5.5) });
 
     // poker table placeholder (solid)

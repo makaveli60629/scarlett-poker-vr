@@ -4,92 +4,53 @@ import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js
 import { World } from "./world.js";
 import { initControls } from "./controls.js";
 import { initUI } from "./ui.js";
+import { initAudio } from "./audio.js"; // ✅ NEW
 
 const logEl = document.getElementById("log");
-const fallbackEl = document.getElementById("fallback");
 function log(msg) {
+  console.log(msg);
   if (!logEl) return;
-  logEl.textContent += `\n${msg}`;
-  logEl.scrollTop = logEl.scrollHeight;
-}
-function showFallback() {
-  if (fallbackEl) fallbackEl.style.display = "grid";
+  logEl.textContent = (logEl.textContent + "\n" + msg).slice(-2000);
 }
 
-window.addEventListener("error", (e) => {
-  log(`ERROR: ${e.message}`);
-  log(`AT: ${e.filename}:${e.lineno}:${e.colno}`);
-  showFallback();
-});
-window.addEventListener("unhandledrejection", (e) => {
-  log(`PROMISE REJECTION: ${e.reason?.message || e.reason || "unknown"}`);
-  showFallback();
-});
+let renderer, scene, camera, playerGroup, controls, ui, audio;
 
-let scene, camera, renderer, playerGroup;
-let controls, ui;
-
-boot();
+boot().catch((e) => {
+  console.error(e);
+  log("FATAL: " + (e?.message || e));
+});
 
 async function boot() {
-  try {
-    log("Loading…");
-    log("Booting…");
+  log("Booting…");
 
-    // WebGL test
-    const c = document.createElement("canvas");
-    const gl = c.getContext("webgl2") || c.getContext("webgl");
-    if (!gl) {
-      log("WEBGL CONTEXT FAILED.");
-      showFallback();
-      return;
-    }
-    log(`WebGL OK: ${gl.getParameter(gl.VERSION)}`);
-
-    initThree();
-    animate();
-
-    setTimeout(() => {
-      const rect = renderer.domElement.getBoundingClientRect();
-      log(`Canvas size: ${Math.round(rect.width)}x${Math.round(rect.height)}`);
-    }, 500);
-  } catch (err) {
-    log(`FATAL: ${err?.message || err}`);
-    showFallback();
-    console.error(err);
-  }
-}
-
-function initThree() {
+  // ---------- Scene ----------
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x05060a);
 
-  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
-  camera.position.set(0, 1.6, 0);
-
-  renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.shadowMap.enabled = false; // safer for Quest/mobile
-  renderer.xr.enabled = true;
-
-  document.body.appendChild(renderer.domElement);
-  log("Renderer attached.");
-
-  // Player rig
+  // ---------- Camera + player group ----------
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
   playerGroup = new THREE.Group();
   playerGroup.add(camera);
   scene.add(playerGroup);
 
-  // Build your world
+  // ---------- Renderer ----------
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
+
+  // Base light (world adds more)
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 0.65));
+
+  // ---------- Build world ----------
   World.build(scene, playerGroup);
   log("World.build OK.");
 
-  // UI (includes wrist menu in VR + phone HUD)
+  // ---------- UI ----------
   ui = initUI({ scene, camera, renderer, world: World, playerGroup });
   log("UI OK.");
 
-  // Controls (VR teleport + phone joystick/look)
+  // ---------- Controls ----------
   controls = initControls({
     renderer,
     scene,
@@ -97,37 +58,66 @@ function initThree() {
     playerGroup,
     world: World,
     ui,
-    onTeleport: (where) => log(`Teleport: ${where}`)
+    onTeleport: (where) => log("Teleport: " + where)
   });
   log("Controls OK.");
 
-  // VR Button
-  try {
-    const vrBtn = VRButton.createButton(renderer);
-    vrBtn.style.position = "fixed";
-    vrBtn.style.bottom = "16px";
-    vrBtn.style.right = "16px";
-    vrBtn.style.zIndex = "99999";
-    document.body.appendChild(vrBtn);
-    log("VRButton added (ENTER VR in headset).");
-  } catch (e) {
-    log(`VRButton failed (non-fatal): ${e?.message || e}`);
-  }
+  // ---------- VR Button ----------
+  document.body.appendChild(VRButton.createButton(renderer));
+  log("VRButton added.");
 
-  window.addEventListener("resize", onResize);
-}
-
-function animate() {
-  renderer.setAnimationLoop(() => {
-    controls?.update();
-    ui?.update();
-    renderer.render(scene, camera);
+  // =========================================================
+  // ✅ BACKGROUND MUSIC (YOUR FILE: assets/lobby_ambience.mp3)
+  // =========================================================
+  audio = initAudio({
+    url: "./assets/lobby_ambience.mp3",
+    volume: 0.35,
+    loop: true
   });
+  log("Audio ready — tap/click once to start (browser rule).");
+
+  // Browsers require a user gesture to start audio:
+  const tryEnableAudio = async () => {
+    const ok = await audio.enable();
+    log(ok ? "Audio started." : "Audio blocked — tap again.");
+    if (ok) {
+      window.removeEventListener("pointerdown", tryEnableAudio);
+      window.removeEventListener("touchstart", tryEnableAudio);
+    }
+  };
+
+  window.addEventListener("pointerdown", tryEnableAudio, { passive: true });
+  window.addEventListener("touchstart", tryEnableAudio, { passive: true });
+
+  // Quest: entering VR often counts as a gesture; try again on XR start
+  renderer.xr.addEventListener("sessionstart", () => {
+    audio.enable().then((ok) => log(ok ? "Audio started in VR." : "Audio blocked in VR — pull trigger once."));
+  });
+
+  // ---------- Resize ----------
+  window.addEventListener("resize", onResize);
+  onResize();
+
+  // ---------- Render loop ----------
+  renderer.setAnimationLoop(() => {
+    try {
+      controls?.update?.();
+      ui?.update?.();
+      renderer.render(scene, camera);
+    } catch (e) {
+      console.error(e);
+      log("Loop error: " + (e?.message || e));
+    }
+  });
+
+  log("Running.");
 }
 
 function onResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  log("Resized.");
+  renderer.setSize(w, h);
+  log(`Resized ${w}x${h}`);
 }

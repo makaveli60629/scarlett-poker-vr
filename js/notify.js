@@ -5,7 +5,6 @@ export const Notify = {
   panel: null,
   okBtn: null,
   visible: false,
-  currentText: "Hello",
   _hitTargets: [],
 
   build(scene) {
@@ -19,30 +18,40 @@ export const Notify = {
     const ctx = canvas.getContext("2d");
 
     const tex = new THREE.CanvasTexture(canvas);
-    const mat = new THREE.MeshStandardMaterial({ map: tex, transparent: true });
+    tex.colorSpace = THREE.SRGBColorSpace;
 
-    this.panel = new THREE.Mesh(new THREE.PlaneGeometry(1.35, 0.70), mat);
-    this.panel.position.set(0, 1.6, -1.6);
+    const mat = new THREE.MeshStandardMaterial({ map: tex, transparent: true });
+    // BIGGER panel (was 1.35x0.70)
+    this.panel = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.95), mat);
     this.panel.castShadow = true;
     this.group.add(this.panel);
 
-    // OK button (3D)
-    const btnMat = new THREE.MeshStandardMaterial({ color: 0xC9A24D, metalness: 0.7, roughness: 0.25 });
-    this.okBtn = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.10, 0.04), btnMat);
-    this.okBtn.position.set(0, 1.25, -1.55);
+    // OK button (bigger + closer)
+    const btnMat = new THREE.MeshStandardMaterial({
+      color: 0xC9A24D, metalness: 0.8, roughness: 0.25,
+      emissive: 0x5a3f0a, emissiveIntensity: 0.8
+    });
+    this.okBtn = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.13, 0.05), btnMat);
     this.okBtn.userData.ui = "notify_ok";
     this.group.add(this.okBtn);
+
     this._hitTargets = [this.okBtn];
 
     this._canvas = canvas;
     this._ctx = ctx;
     this._tex = tex;
 
+    this._layout();
     this._draw("Ready.");
   },
 
+  _layout() {
+    // Place OK button relative to panel (local)
+    this.panel.position.set(0, 0.10, 0);
+    this.okBtn.position.set(0, -0.42, 0.02);
+  },
+
   show(text) {
-    this.currentText = text;
     this._draw(text);
     this.group.visible = true;
     this.visible = true;
@@ -53,18 +62,26 @@ export const Notify = {
     this.visible = false;
   },
 
-  // attach in front of camera each frame
+  // Bring it closer to face + stable
   face(camera) {
     if (!this.visible) return;
+
     const p = new THREE.Vector3();
     camera.getWorldPosition(p);
+
     const f = new THREE.Vector3();
     camera.getWorldDirection(f);
-    f.y = 0; f.normalize();
+    f.normalize();
 
-    this.group.position.copy(p).add(f.multiplyScalar(1.6));
-    this.group.position.y = p.y; // keep it level
-    this.group.lookAt(p.x, p.y, p.z);
+    // CLOSER (was ~1.6 away), now ~1.15
+    const front = p.clone().add(f.multiplyScalar(1.15));
+    this.group.position.copy(front);
+
+    // keep at a comfortable eye height
+    this.group.position.y = p.y - 0.05;
+
+    // look at camera
+    this.group.lookAt(p.x, p.y - 0.05, p.z);
   },
 
   hitTest(origin, dir) {
@@ -80,25 +97,32 @@ export const Notify = {
 
     ctx.clearRect(0,0,c.width,c.height);
 
-    ctx.fillStyle = "rgba(0,0,0,0.72)";
+    // Dark glass panel
+    ctx.fillStyle = "rgba(5,6,10,0.80)";
     ctx.fillRect(0,0,c.width,c.height);
 
-    ctx.strokeStyle = "rgba(201,162,77,0.9)";
+    // Neon border
+    ctx.strokeStyle = "rgba(0,255,170,0.85)";
     ctx.lineWidth = 10;
-    ctx.strokeRect(24,24,c.width-48,c.height-48);
+    ctx.strokeRect(22,22,c.width-44,c.height-44);
 
-    ctx.fillStyle = "rgba(255,255,255,0.95)";
-    ctx.font = "bold 64px system-ui";
+    // Gold inner border
+    ctx.strokeStyle = "rgba(201,162,77,0.85)";
+    ctx.lineWidth = 6;
+    ctx.strokeRect(44,44,c.width-88,c.height-88);
+
+    ctx.fillStyle = "rgba(255,255,255,0.96)";
+    ctx.font = "bold 62px system-ui";
     ctx.textAlign = "center";
-    ctx.fillText("NOTICE", c.width/2, 110);
+    ctx.fillText("CONFIRM ACTION", c.width/2, 110);
 
-    ctx.font = "42px system-ui";
+    ctx.font = "46px system-ui";
     ctx.fillStyle = "rgba(255,90,90,0.95)";
-    wrapText(ctx, text, c.width/2, 210, 860, 54);
+    wrapText(ctx, String(text), c.width/2, 210, 880, 56);
 
     ctx.font = "bold 44px system-ui";
-    ctx.fillStyle = "rgba(255,255,255,0.90)";
-    ctx.fillText("Press OK", c.width/2, 440);
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.fillText("Press OK", c.width/2, 455);
 
     this._tex.needsUpdate = true;
   }

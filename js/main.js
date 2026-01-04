@@ -1,5 +1,5 @@
-import * as THREE from "three";
-import { VRButton } from "three/addons/webxr/VRButton.js";
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
 
 import { World } from "./world.js";
 import { initControls } from "./controls.js";
@@ -28,14 +28,18 @@ function init() {
   document.body.appendChild(renderer.domElement);
   document.body.appendChild(VRButton.createButton(renderer));
 
+  // Player group (teleport/collision moves this)
   playerGroup = new THREE.Group();
   playerGroup.add(camera);
   scene.add(playerGroup);
 
+  // baseline light
   scene.add(new THREE.AmbientLight(0xffffff, 0.45));
 
+  // build world
   World.build(scene, playerGroup);
 
+  // ui + teleport controls
   ui = initUI({ scene, camera, renderer, world: World, playerGroup });
 
   controls = initControls({
@@ -61,8 +65,9 @@ function render() {
 }
 
 function resolveCollisions() {
-  const p = playerGroup.position.clone();
-  const px = p.x, pz = p.z;
+  // simple sphere vs expanded AABB in XZ plane
+  const px = playerGroup.position.x;
+  const pz = playerGroup.position.z;
 
   for (const m of World.colliders) {
     if (!m.geometry?.boundingBox) continue;
@@ -73,17 +78,13 @@ function resolveCollisions() {
     bb.min.x -= playerRadius; bb.min.z -= playerRadius;
     bb.max.x += playerRadius; bb.max.z += playerRadius;
 
-    const inside =
-      px > bb.min.x && px < bb.max.x &&
-      pz > bb.min.z && pz < bb.max.z;
-
+    const inside = (px > bb.min.x && px < bb.max.x && pz > bb.min.z && pz < bb.max.z);
     if (!inside) continue;
 
     const dxMin = Math.abs(px - bb.min.x);
     const dxMax = Math.abs(bb.max.x - px);
     const dzMin = Math.abs(pz - bb.min.z);
     const dzMax = Math.abs(bb.max.z - pz);
-
     const min = Math.min(dxMin, dxMax, dzMin, dzMax);
 
     if (min === dxMin) playerGroup.position.x = bb.min.x;

@@ -1,14 +1,15 @@
-// js/main.js
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 
 import { World } from "./world.js";
+import { Table } from "./table.js";
+import { Chair } from "./chair.js";
 import { Controls } from "./controls.js";
 import { UI } from "./ui.js";
 import { Interactions } from "./interactions.js";
 
 /* ================================
-   GLOBAL ACTION STATE (CRITICAL FIX)
+   GLOBAL STATE (NO CRASH GUARANTEE)
 ================================== */
 window.actionId = null;
 window.setActionId = function (v) {
@@ -16,7 +17,7 @@ window.setActionId = function (v) {
 };
 
 /* ================================
-   SIMPLE ON-SCREEN CONSOLE
+   ON-SCREEN CONSOLE (PHONE FRIENDLY)
 ================================== */
 function makeConsole() {
   const el = document.createElement("pre");
@@ -24,7 +25,7 @@ function makeConsole() {
   el.style.left = "10px";
   el.style.bottom = "10px";
   el.style.width = "calc(100% - 20px)";
-  el.style.maxHeight = "170px";
+  el.style.maxHeight = "180px";
   el.style.overflow = "auto";
   el.style.padding = "10px";
   el.style.margin = "0";
@@ -37,34 +38,19 @@ function makeConsole() {
   el.textContent = "";
   document.body.appendChild(el);
 
-  function log() {
-    const msg = Array.prototype.slice.call(arguments).map(function (a) {
+  function _line(prefix, args) {
+    const msg = Array.prototype.slice.call(args).map(function (a) {
       return (typeof a === "string") ? a : JSON.stringify(a);
     }).join(" ");
-    el.textContent += msg + "\n";
+    el.textContent += prefix + msg + "\n";
     el.scrollTop = el.scrollHeight;
-    console.log.apply(console, arguments);
   }
 
-  function warn() {
-    const msg = Array.prototype.slice.call(arguments).map(function (a) {
-      return (typeof a === "string") ? a : JSON.stringify(a);
-    }).join(" ");
-    el.textContent += "WARN: " + msg + "\n";
-    el.scrollTop = el.scrollHeight;
-    console.warn.apply(console, arguments);
-  }
-
-  function fatal() {
-    const msg = Array.prototype.slice.call(arguments).map(function (a) {
-      return (typeof a === "string") ? a : JSON.stringify(a);
-    }).join(" ");
-    el.textContent += "FATAL ERROR: " + msg + "\n";
-    el.scrollTop = el.scrollHeight;
-    console.error.apply(console, arguments);
-  }
-
-  return { el: el, log: log, warn: warn, fatal: fatal };
+  return {
+    log: function () { _line("", arguments); console.log.apply(console, arguments); },
+    warn: function () { _line("WARN: ", arguments); console.warn.apply(console, arguments); },
+    fatal: function () { _line("FATAL ERROR: ", arguments); console.error.apply(console, arguments); }
+  };
 }
 
 const HUD = makeConsole();
@@ -72,18 +58,18 @@ HUD.log("Loading...");
 HUD.log("Booting Scarlett Poker VR...");
 
 /* ================================
-   GLOBAL ERROR TRAP (SO YOU SEE IT)
+   ERROR TRAPS
 ================================== */
 window.addEventListener("error", function (e) {
   HUD.fatal(e && e.message ? e.message : "Unknown error");
 });
 window.addEventListener("unhandledrejection", function (e) {
-  const reason = e && e.reason ? e.reason : "Unhandled promise rejection";
-  HUD.fatal(reason && reason.message ? reason.message : String(reason));
+  const r = e && e.reason ? e.reason : "Unhandled promise rejection";
+  HUD.fatal(r && r.message ? r.message : String(r));
 });
 
 /* ================================
-   THREE.JS CORE SETUP
+   THREE CORE
 ================================== */
 const scene = new THREE.Scene();
 
@@ -91,7 +77,7 @@ const camera = new THREE.PerspectiveCamera(
   70,
   window.innerWidth / window.innerHeight,
   0.05,
-  200
+  250
 );
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -106,28 +92,29 @@ document.body.appendChild(VRButton.createButton(renderer));
    PLAYER RIG
 ================================== */
 const playerGroup = new THREE.Group();
+playerGroup.name = "playerGroup";
 playerGroup.add(camera);
 scene.add(playerGroup);
 
 /* ================================
-   LIGHTS (SAFE DEFAULTS)
+   LIGHTS (ALWAYS VISIBLE)
 ================================== */
-const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 1.0);
-scene.add(hemi);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 1.0));
 
-const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+const dir = new THREE.DirectionalLight(0xffffff, 1.0);
 dir.position.set(6, 10, 4);
 scene.add(dir);
 
 /* ================================
-   AUDIO (GESTURE REQUIRED)
+   AUDIO (GESTURE SAFE)
 ================================== */
 let bgAudio = null;
-let audioReady = false;
+let audioInitialized = false;
+let audioWarned = false;
 
 function initAudioOnGesture() {
-  if (audioReady) return;
-  audioReady = true;
+  if (audioInitialized) return;
+  audioInitialized = true;
 
   try {
     const listener = new THREE.AudioListener();
@@ -148,8 +135,11 @@ function initAudioOnGesture() {
           bgAudio.play();
           HUD.log("Audio started.");
         } catch (e) {
-          HUD.warn("Audio blocked - try again.");
-          audioReady = false;
+          audioInitialized = false;
+          if (!audioWarned) {
+            audioWarned = true;
+            HUD.warn("Audio blocked — tap again to allow.");
+          }
         }
       },
       undefined,
@@ -169,8 +159,9 @@ renderer.xr.addEventListener("sessionstart", initAudioOnGesture);
 /* ================================
    BUILD WORLD
 ================================== */
+let worldRefs = null;
 try {
-  World.build(scene, playerGroup);
+  worldRefs = World.build(scene, playerGroup);
   HUD.log("World loaded.");
   HUD.log("Audio ready (tap/click or trigger to start).");
 } catch (e) {
@@ -178,7 +169,33 @@ try {
 }
 
 /* ================================
-   INIT SYSTEMS
+   TABLE + CHAIRS
+================================== */
+try {
+  const table = Table.create();
+  table.position.set(0, 0, 0);
+  scene.add(table);
+
+  // 6 chairs around table (nice spacing)
+  const radius = 1.55;
+  for (let i = 0; i < 6; i++) {
+    const angle = (i / 6) * Math.PI * 2;
+    const x = Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+
+    const ch = Chair.create();
+    ch.position.set(x, 0, z);
+    ch.lookAt(0, 0, 0);
+    scene.add(ch);
+  }
+
+  HUD.log("Table + chairs loaded.");
+} catch (e) {
+  HUD.warn("Table/chair build failed:", e && e.message ? e.message : e);
+}
+
+/* ================================
+   INIT UI + CONTROLS + INTERACTIONS
 ================================== */
 let ui = null;
 let controls = null;
@@ -197,7 +214,6 @@ try {
 }
 
 try {
-  // Pass uiClickable so interactions can raycast UI buttons
   interactions = Interactions.init({
     scene: scene,
     camera: camera,
@@ -220,20 +236,17 @@ window.addEventListener("resize", function () {
 });
 
 /* ================================
-   MAIN LOOP
+   LOOP
 ================================== */
 renderer.setAnimationLoop(function () {
-  // Never allow undefined to crash
   if (typeof window.actionId === "undefined") window.actionId = null;
 
   if (controls && controls.update) {
     try { controls.update(); } catch (e) { HUD.warn("Controls update error:", e && e.message ? e.message : e); }
   }
-
   if (ui && ui.update) {
     try { ui.update(); } catch (e) { HUD.warn("UI update error:", e && e.message ? e.message : e); }
   }
-
   if (interactions && interactions.update) {
     try { interactions.update(); } catch (e) { HUD.warn("Interactions update error:", e && e.message ? e.message : e); }
   }

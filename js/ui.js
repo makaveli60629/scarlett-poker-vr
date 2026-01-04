@@ -1,27 +1,29 @@
 import * as THREE from 'three';
+import { World } from './world.js';
 
 export const UI = {
-    watch: null,
-
-    init(scene, playerGroup){
-        this.watch = new THREE.Mesh(
-            new THREE.BoxGeometry(0.12,0.12,0.02),
-            new THREE.MeshStandardMaterial({color:0x222222})
-        );
-        this.watch.position.set(-0.2,1.4,-0.3); // Left wrist
-        playerGroup.add(this.watch);
-
-        // Sample buttons on watch
-        const btn = new THREE.Mesh(
-            new THREE.BoxGeometry(0.05,0.03,0.01),
-            new THREE.MeshStandardMaterial({color:0x00ffff})
-        );
-        btn.position.set(0,0,0.03);
-        btn.userData.action = 'Test';
-        this.watch.add(btn);
+    createLeaderboard(scene){
+        if(!World.leaderboard) return;
+        // Add simple text mesh (placeholder)
+        const loader = new THREE.FontLoader();
+        loader.load('assets/fonts/helvetiker_regular.typeface.json', font=>{
+            const textGeo = new THREE.TextGeometry('Leaderboard\nPlayer1 100\nPlayer2 90', {font:font,size:0.2,height:0.05});
+            const textMat = new THREE.MeshBasicMaterial({color:0xffffff});
+            const textMesh = new THREE.Mesh(textGeo,textMat);
+            textMesh.position.set(-0.9,1.5,0.05);
+            World.leaderboard.add(textMesh);
+        });
     },
 
-    update(){
-        // Could animate hover/interaction effects
+    createStore(scene){
+        if(!World.storePanel) return;
+        const loader = new THREE.FontLoader();
+        loader.load('assets/fonts/helvetiker_regular.typeface.json', font=>{
+            const textGeo = new THREE.TextGeometry('Store\nItem1\nItem2', {font:font,size:0.2,height:0.05});
+            const textMat = new THREE.MeshBasicMaterial({color:0xffffff});
+            const textMesh = new THREE.Mesh(textGeo,textMat);
+            textMesh.position.set(-0.9,1.5,0.05);
+            World.storePanel.add(textMesh);
+        });
     }
 };

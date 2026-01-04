@@ -1,55 +1,48 @@
-// js/audio.js
-// Quest + Mobile safe background audio helper (user gesture required)
+export const AudioSys = {
+  ctx: null,
+  gain: null,
+  source: null,
+  isOn: false,
+  url: "./assets/audio/lobby_ambience.mp3",
 
-export function initAudio({
-  url = "./assets/lobby_ambience.mp3",
-  volume = 0.35,
-  loop = true
-} = {}) {
-  const music = new Audio(url);
-  music.loop = loop;
-  music.preload = "auto";
-  music.crossOrigin = "anonymous";
-  music.volume = clamp01(volume);
+  async init() {
+    if (this.ctx) return;
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    this.gain = this.ctx.createGain();
+    this.gain.gain.value = 0.35;
+    this.gain.connect(this.ctx.destination);
+  },
 
-  let enabled = false;
-
-  async function enable() {
-    if (enabled) return true;
+  async toggle(statusLineEl) {
     try {
-      await music.play(); // must be called after user gesture / XR session start
-      enabled = true;
-      return true;
+      await this.init();
+
+      if (!this.isOn) {
+        // Must be called from user gesture (button press) — which we do.
+        if (this.ctx.state === "suspended") await this.ctx.resume();
+
+        const res = await fetch(this.url);
+        if (!res.ok) throw new Error(`Audio missing: ${this.url}`);
+        const buf = await res.arrayBuffer();
+        const audioBuffer = await this.ctx.decodeAudioData(buf);
+
+        this.source = this.ctx.createBufferSource();
+        this.source.buffer = audioBuffer;
+        this.source.loop = true;
+        this.source.connect(this.gain);
+        this.source.start(0);
+
+        this.isOn = true;
+        if (statusLineEl) statusLineEl.textContent = "Status: Audio ON ✅";
+      } else {
+        if (this.source) this.source.stop();
+        this.source = null;
+        this.isOn = false;
+        if (statusLineEl) statusLineEl.textContent = "Status: Audio OFF ✅";
+      }
     } catch (e) {
-      return false;
+      console.warn(e);
+      if (statusLineEl) statusLineEl.textContent = `Status: Audio error ⚠️ (${e.message})`;
     }
   }
-
-  function setVolume(v) {
-    music.volume = clamp01(v);
-  }
-
-  function mute() {
-    music.muted = true;
-  }
-
-  function unmute() {
-    music.muted = false;
-  }
-
-  function stop() {
-    music.pause();
-    music.currentTime = 0;
-    enabled = false;
-  }
-
-  function isEnabled() {
-    return enabled;
-  }
-
-  return { enable, setVolume, mute, unmute, stop, isEnabled, music };
-}
-
-function clamp01(v) {
-  return Math.max(0, Math.min(1, Number(v) || 0));
-                              }
+};

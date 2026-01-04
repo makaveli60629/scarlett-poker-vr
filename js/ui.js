@@ -1,91 +1,217 @@
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
-import { State } from "./state.js";
 
 export const UI = {
-  menuOpen: false,
-  overlay: null,
-  buttons: [],
-  raycaster: new THREE.Raycaster(),
-  tmpVec: new THREE.Vector3(),
+  group: null,
+  board: null,
+  canvas: null,
+  ctx: null,
+  tex: null,
+
+  visible: true,
+  lastDrawKey: "",
+
+  // position near table
+  anchor: new THREE.Vector3(0, 1.55, -3.9),
 
   build(scene) {
-    // Simple 3D menu board (in-world)
-    const group = new THREE.Group();
-    group.visible = false;
-    group.position.set(0, 1.4, 2.2);
+    this.group = new THREE.Group();
+    scene.add(this.group);
 
-    const panel = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.8, 0.45),
-      new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9, metalness: 0.1 })
+    this.canvas = document.createElement("canvas");
+    this.canvas.width = 1024;
+    this.canvas.height = 1024;
+    this.ctx = this.canvas.getContext("2d");
+
+    this.tex = new THREE.CanvasTexture(this.canvas);
+    this.tex.colorSpace = THREE.SRGBColorSpace;
+
+    const mat = new THREE.MeshStandardMaterial({
+      map: this.tex,
+      transparent: true,
+      roughness: 0.85,
+      emissive: 0x101018,
+      emissiveIntensity: 0.55
+    });
+
+    this.board = new THREE.Mesh(new THREE.PlaneGeometry(1.35, 1.35), mat);
+    this.board.position.copy(this.anchor);
+    this.board.renderOrder = 20;
+
+    // subtle backing plate for readability
+    const back = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.42, 1.42),
+      new THREE.MeshStandardMaterial({
+        color: 0x07080f,
+        roughness: 1.0,
+        transparent: true,
+        opacity: 0.65
+      })
     );
-    panel.name = "menuPanel";
-    group.add(panel);
+    back.position.copy(this.board.position);
+    back.position.z -= 0.01;
 
-    const mkBtn = (label, x, y, action) => {
-      const btn = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.35, 0.09),
-        new THREE.MeshStandardMaterial({ color: 0x1b1b1b })
-      );
-      btn.position.set(x, y, 0.01);
-      btn.userData.action = action;
-      btn.userData.label = label;
-      btn.name = "menuButton";
-      group.add(btn);
+    this.group.add(back);
+    this.group.add(this.board);
 
-      // crude label using canvas texture
-      const c = document.createElement("canvas");
-      c.width = 512; c.height = 128;
-      const ctx = c.getContext("2d");
-      ctx.fillStyle = "#000"; ctx.fillRect(0,0,c.width,c.height);
-      ctx.fillStyle = "#fff"; ctx.font = "bold 54px system-ui";
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(label, c.width/2, c.height/2);
-      const tex = new THREE.CanvasTexture(c);
-      btn.material.map = tex;
-      btn.material.needsUpdate = true;
-
-      this.buttons.push(btn);
-    };
-
-    mkBtn("Lobby", -0.2, 0.12, "goLobby");
-    mkBtn("Store",  0.2, 0.12, "goStore");
-    mkBtn("Table", -0.2, -0.02, "goTable");
-    mkBtn("Audio",  0.2, -0.02, "toggleAudio");
-    mkBtn("Close",  0.0, -0.16, "closeMenu");
-
-    this.overlay = group;
-    scene.add(group);
+    this._drawEmpty();
   },
 
-  toggle(rig) {
-    this.menuOpen = !this.menuOpen;
-    if (this.overlay) {
-      this.overlay.visible = this.menuOpen;
-      if (this.menuOpen && rig) {
-        // stick menu in front of player
-        this.overlay.position.set(rig.position.x, rig.position.y + 1.4, rig.position.z - 0.5);
-      }
+  setVisible(v) {
+    this.visible = v;
+    if (this.group) this.group.visible = v;
+  },
+
+  update(dt, camera, data) {
+    if (!this.group) return;
+
+    // face camera with yaw only (never tilt)
+    if (camera) {
+      const cp = new THREE.Vector3();
+      camera.getWorldPosition(cp);
+      const p = this.board.position.clone();
+      const dx = cp.x - p.x;
+      const dz = cp.z - p.z;
+      const yaw = Math.atan2(dx, dz);
+      this.group.rotation.set(0, yaw, 0);
     }
+
+    if (!data) return;
+
+    // draw only when changed (cheap on Quest)
+    const key = JSON.stringify({
+      h: data.handId,
+      pot: data.pot,
+      ph: data.phase,
+      win: data.lastWinnerText,
+      rows: data.rows.map(r => [r.name, r.chips, r.status])
+    });
+
+    if (key === this.lastDrawKey) return;
+    this.lastDrawKey = key;
+
+    this._drawLeaderboard(data);
+    this.tex.needsUpdate = true;
   },
 
-  close() {
-    this.menuOpen = false;
-    if (this.overlay) this.overlay.visible = false;
+  _drawEmpty() {
+    const ctx = this.ctx;
+    ctx.clearRect(0, 0, 1024, 1024);
+    ctx.fillStyle = "rgba(0,0,0,0.60)";
+    ctx.fillRect(0,0,1024,1024);
+
+    ctx.lineWidth = 18;
+    ctx.strokeStyle = "rgba(255,60,120,0.9)";
+    ctx.strokeRect(22, 22, 980, 980);
+
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = "rgba(0,255,170,0.75)";
+    ctx.strokeRect(64, 64, 896, 896);
+
+    ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(255,255,255,0.94)";
+    ctx.font = "bold 70px system-ui";
+    ctx.fillText("LEADERBOARD", 512, 150);
+
+    ctx.font = "bold 44px system-ui";
+    ctx.fillStyle = "rgba(201,162,77,0.92)";
+    ctx.fillText("Waiting for table data…", 512, 240);
   },
 
-  // Intersect controller ray or tap ray with menu buttons
-  hitTest(pointerOrigin, pointerDir) {
-    this.raycaster.set(pointerOrigin, pointerDir);
-    const hits = this.raycaster.intersectObjects(this.buttons, false);
-    return hits.length ? hits[0].object : null;
-  },
+  _drawLeaderboard(data) {
+    const ctx = this.ctx;
+    ctx.clearRect(0, 0, 1024, 1024);
 
-  doAction(action, hooks) {
-    if (!action) return;
-    if (action === "closeMenu") this.close();
-    if (action === "goLobby") hooks.goAnchor("lobby");
-    if (action === "goStore") hooks.goAnchor("store");
-    if (action === "goTable") hooks.goAnchor("table");
-    if (action === "toggleAudio") hooks.toggleAudio();
+    // Glass background
+    ctx.fillStyle = "rgba(7,8,15,0.70)";
+    ctx.fillRect(0,0,1024,1024);
+
+    // Borders (neon + gold)
+    ctx.lineWidth = 18;
+    ctx.strokeStyle = "rgba(255,60,120,0.92)";
+    ctx.strokeRect(22, 22, 980, 980);
+
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = "rgba(0,255,170,0.78)";
+    ctx.strokeRect(64, 64, 896, 896);
+
+    // Header
+    ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(255,255,255,0.96)";
+    ctx.font = "bold 74px system-ui";
+    ctx.fillText("LEADERBOARD", 512, 150);
+
+    ctx.font = "bold 40px system-ui";
+    ctx.fillStyle = "rgba(201,162,77,0.95)";
+    ctx.fillText(`HAND #${data.handId}  •  POT ${data.pot}`, 512, 210);
+
+    // Phase
+    ctx.font = "bold 44px system-ui";
+    ctx.fillStyle = "rgba(255,60,120,0.95)";
+    ctx.fillText(data.phase, 512, 275);
+
+    // Winner banner
+    if (data.lastWinnerText) {
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fillRect(90, 310, 844, 92);
+      ctx.lineWidth = 8;
+      ctx.strokeStyle = "rgba(0,255,170,0.65)";
+      ctx.strokeRect(90, 310, 844, 92);
+
+      ctx.font = "bold 34px system-ui";
+      ctx.fillStyle = "rgba(255,255,255,0.95)";
+      ctx.fillText(data.lastWinnerText, 512, 370);
+    }
+
+    // Columns
+    const startY = 430;
+    ctx.textAlign = "left";
+    ctx.font = "bold 36px system-ui";
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.fillText("NAME", 110, startY);
+    ctx.fillText("CHIPS", 620, startY);
+    ctx.fillText("STATE", 820, startY);
+
+    ctx.fillStyle = "rgba(0,255,170,0.35)";
+    ctx.fillRect(100, startY + 18, 824, 6);
+
+    // Rows
+    let y = startY + 70;
+    const rowH = 70;
+
+    const rows = data.rows.slice(0, 8);
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+
+      // alternating row shading
+      ctx.fillStyle = i % 2 === 0 ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.18)";
+      ctx.fillRect(92, y - 46, 840, rowH);
+
+      // highlight YOU
+      if (r.name === "YOU") {
+        ctx.fillStyle = "rgba(201,162,77,0.22)";
+        ctx.fillRect(92, y - 46, 840, rowH);
+      }
+
+      // text
+      ctx.font = "bold 36px system-ui";
+      ctx.fillStyle = "rgba(255,255,255,0.95)";
+      ctx.fillText(r.name, 110, y);
+
+      // chips in “red elegance” like you asked
+      ctx.fillStyle = "rgba(255,60,120,0.95)";
+      ctx.fillText(String(r.chips), 620, y);
+
+      ctx.fillStyle = "rgba(0,255,170,0.85)";
+      ctx.fillText(r.status, 820, y);
+
+      y += rowH;
+      if (y > 980) break;
+    }
+
+    // Footer hint
+    ctx.textAlign = "center";
+    ctx.font = "bold 28px system-ui";
+    ctx.fillStyle = "rgba(255,255,255,0.65)";
+    ctx.fillText("Spectate mode: leaderboard stays visible • Play mode: we can auto-hide later", 512, 990);
   }
 };

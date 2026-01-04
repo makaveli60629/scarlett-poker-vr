@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Scarlett Poker VR</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      color: #fff;
+      font-family: Arial, sans-serif;
+    }
+    #overlay {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+      background: rgba(0,0,0,0.65);
+      padding: 10px 12px;
+      border-radius: 8px;
+      max-width: 92vw;
+    }
+    #status {
+      margin-top: 8px;
+      font-size: 14px;
+      opacity: 0.9;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="overlay">
+    <div style="font-size:20px;font-weight:700;">Scarlett Poker VR</div>
+    <div style="margin-top:6px;">
+      Desktop: <b>M</b> toggles menu; click buttons to teleport.<br/>
+      VR: point controller at floor for reticle; pull trigger to teleport.
+    </div>
+    <div id="status">Loading...</div>
+  </div>
+
+  <!-- CRITICAL: module + relative path -->
+  <script type="module" src="./js/main.js"></script>
+
+  <!-- If JS fails, this will still show a clue -->
+  <script>
+    window.addEventListener("error", (e) => {
+      const el = document.getElementById("status");
+      if (el) el.textContent = "JS Error: " + (e?.message || "unknown");
+    });
+  </script>
+</body>
+</html>

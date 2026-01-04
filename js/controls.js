@@ -1,16 +1,15 @@
-import * as THREE from "three";
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 
 /**
  * VR TELEPORT
  * - laser line
- * - floor reticle ring
- * - trigger teleport (selectstart) + backup (squeezestart)
+ * - floor reticle ring (what you asked for)
+ * - teleport on trigger (selectstart) + backup (squeeze)
  */
 export function initControls({ renderer, scene, playerGroup, world, onTeleport }) {
   const raycaster = new THREE.Raycaster();
   const tempMatrix = new THREE.Matrix4();
 
-  // floor reticle
   const reticle = new THREE.Mesh(
     new THREE.RingGeometry(0.22, 0.30, 28),
     new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.95, side: THREE.DoubleSide })
@@ -64,7 +63,7 @@ export function initControls({ renderer, scene, playerGroup, world, onTeleport }
       lastHit = hits[0];
 
       reticle.position.copy(lastHit.point);
-      reticle.position.y = 0.02; // float above floor
+      reticle.position.y = 0.02;
       reticle.visible = true;
 
       const d = lastHit.distance;

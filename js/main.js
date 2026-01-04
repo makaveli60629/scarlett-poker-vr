@@ -26,13 +26,10 @@ class Game {
     this.scene.add(this.playerGroup);
     this.playerGroup.add(this.camera);
 
-    // Safe spawn (desktop view)
-    this.playerGroup.position.set(0, 1.6, 8);
+    // ✅ Spawn X/Z only; local-floor handles height
+    this.playerGroup.position.set(0, 0, 10);
 
-    // Build world
     World.build(this.scene);
-
-    // Controls
     Controls.init(this.renderer, this.scene, this.playerGroup);
 
     window.addEventListener('resize', () => this.onResize(), { passive: true });

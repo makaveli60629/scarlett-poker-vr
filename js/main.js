@@ -3,62 +3,44 @@ import { VRButton } from 'https://unpkg.com/three@0.150.1/examples/jsm/webxr/VRB
 
 import { World } from './world.js';
 import { Controls } from './controls.js';
-import { Hands } from './hands.js';
-import { UI } from './ui.js';
 
-const hud = document.getElementById('hud');
-if (hud) hud.textContent = "main.js running…";
+let scene, camera, renderer, player;
 
-class Game {
-  constructor() {
-    this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+init();
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    this.renderer.xr.enabled = true;
-    this.renderer.xr.setReferenceSpaceType('local-floor');
+function init() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x050508);
 
-    document.body.appendChild(this.renderer.domElement);
-    document.body.appendChild(VRButton.createButton(this.renderer));
+  camera = new THREE.PerspectiveCamera(
+    75,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    2000
+  );
 
-    // Rig
-    this.playerGroup = new THREE.Group();
-    this.scene.add(this.playerGroup);
-    this.playerGroup.add(this.camera);
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.xr.enabled = true;
+  renderer.xr.setReferenceSpaceType('local-floor');
 
-    // Spawn: X/Z only (floor height is handled by local-floor)
-    this.playerGroup.position.set(0, 0, 10);
+  document.body.appendChild(renderer.domElement);
+  document.body.appendChild(VRButton.createButton(renderer));
 
-    // Build world and register colliders/teleportables
-    World.build(this.scene);
+  player = new THREE.Group();
+  scene.add(player);
+  player.add(camera);
 
-    // Input + movement + collision + teleport
-    Controls.init(this.renderer, this.scene, this.playerGroup, World.getRuntime());
+  // Correct VR spawn height (prevents floating / black screen)
+  player.position.set(0, 0, 6);
 
-    // Hands/controllers auto-detect (visuals)
-    Hands.init(this.renderer, this.playerGroup);
+  World.build(scene);
+  Controls.init(renderer, scene, player);
 
-    // UI (watch + leaderboard)
-    UI.init(this.scene, this.playerGroup);
-
-    window.addEventListener('resize', () => this.onResize(), { passive: true });
-
-    if (hud) hud.textContent = "✅ Scene built. Enter VR.";
-    this.renderer.setAnimationLoop(() => {
-      Hands.update();
-      Controls.update();
-      UI.update();
-      this.renderer.render(this.scene, this.camera);
-    });
-  }
-
-  onResize() {
-    this.camera.aspect = window.innerWidth / window.innerHeight;
-    this.camera.updateProjectionMatrix();
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-  }
+  renderer.setAnimationLoop(render);
 }
 
-new Game();
+function render() {
+  Controls.update();
+  renderer.render(scene, camera);
+}

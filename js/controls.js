@@ -2,8 +2,8 @@ import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 
 /**
  * VR TELEPORT
- * - laser line
- * - floor reticle ring (what you asked for)
+ * - always-visible laser
+ * - floor reticle ring
  * - teleport on trigger (selectstart) + backup (squeeze)
  */
 export function initControls({ renderer, scene, playerGroup, world, onTeleport }) {
@@ -82,6 +82,7 @@ export function initControls({ renderer, scene, playerGroup, world, onTeleport }
 
     const obj = lastHit.object;
 
+    // Snap to marker if it's a named pad
     if (obj?.userData?.teleportTarget && world.markers[obj.userData.teleportTarget]) {
       const t = world.markers[obj.userData.teleportTarget];
       playerGroup.position.set(t.x, 0, t.z);
@@ -89,6 +90,7 @@ export function initControls({ renderer, scene, playerGroup, world, onTeleport }
       return;
     }
 
+    // Free teleport
     const p = lastHit.point.clone();
     playerGroup.position.set(p.x, 0, p.z);
     onTeleport?.("FreeTeleport");
@@ -104,4 +106,4 @@ export function initControls({ renderer, scene, playerGroup, world, onTeleport }
       updateAim();
     }
   };
-}
+  }

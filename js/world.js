@@ -1,93 +1,38 @@
 import * as THREE from 'three';
 import { Table } from './table.js';
-import { GLTFLoader } from 'https://unpkg.com/three@0.150.1/examples/jsm/loaders/GLTFLoader.js';
 
 export const World = {
-    textureLoader: new THREE.TextureLoader(),
+  build(scene) {
+    // Bright + safe
+    scene.background = new THREE.Color(0x0b0b12);
 
-    build(scene) {
-        // Lighting and background
-        scene.background = new THREE.Color(0x050508);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-        const sun = new THREE.DirectionalLight(0xffffff, 2);
-        sun.position.set(5, 15, 5);
-        scene.add(sun);
+    scene.add(new THREE.AmbientLight(0xffffff, 1.2));
 
-        // Floors
-        const floorMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), floorMat);
-        floor.rotation.x = -Math.PI / 2;
-        floor.receiveShadow = true;
-        scene.add(floor);
+    const sun = new THREE.DirectionalLight(0xffffff, 2.0);
+    sun.position.set(8, 16, 6);
+    scene.add(sun);
 
-        // Walls (simple room)
-        const wallMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
-        const backWall = new THREE.Mesh(new THREE.PlaneGeometry(100, 20), wallMat);
-        backWall.position.set(0, 10, -50);
-        scene.add(backWall);
+    const point = new THREE.PointLight(0xffffff, 1.5, 80);
+    point.position.set(0, 8, 0);
+    scene.add(point);
 
-        const frontWall = backWall.clone();
-        frontWall.position.set(0, 10, 50);
-        frontWall.rotation.y = Math.PI;
-        scene.add(frontWall);
+    // Floor (big, always visible)
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(120, 120),
+      new THREE.MeshStandardMaterial({ color: 0x2c2c2c, roughness: 1 })
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = 0;
+    scene.add(floor);
 
-        const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(100, 20), wallMat);
-        leftWall.position.set(-50, 10, 0);
-        leftWall.rotation.y = Math.PI / 2;
-        scene.add(leftWall);
+    // Simple walls so you can orient
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x444455, roughness: 1 });
+    const back = new THREE.Mesh(new THREE.BoxGeometry(60, 8, 1), wallMat);
+    back.position.set(0, 4, -20);
+    scene.add(back);
 
-        const rightWall = leftWall.clone();
-        rightWall.position.set(50, 10, 0);
-        rightWall.rotation.y = -Math.PI / 2;
-        scene.add(rightWall);
-
-        // Tables
-        Table.createTable(scene, 0, 0); // Oval table in center
-        Table.createChairs(scene, 0, 0); // 6 chairs around table
-
-        // Testing Sofa/Chair
-        this.loadSofa(scene);
-
-        console.log("World built successfully.");
-    },
-
-    generateDefaultTexture(color = 0x888888) {
-        const tex = new THREE.Texture();
-        tex.image = document.createElement('canvas');
-        tex.image.width = tex.image.height = 16;
-        const ctx = tex.image.getContext('2d');
-        ctx.fillStyle = '#' + color.toString(16);
-        ctx.fillRect(0, 0, 16, 16);
-        tex.needsUpdate = true;
-        return tex;
-    },
-
-    loadSofa(scene) {
-        const loader = new GLTFLoader();
-        const textureLoader = new THREE.TextureLoader();
-
-        // Try to load sofa texture, fallback if missing
-        let sofaTex;
-        try {
-            sofaTex = textureLoader.load('assets/textures/sofa_02_diff_4k.jpg');
-            sofaTex.flipY = false;
-        } catch {
-            sofaTex = new THREE.MeshStandardMaterial({ color: 0x666666 });
-        }
-
-        loader.load('models/sofa_02_4k.gltf', (gltf) => {
-            const model = gltf.scene;
-            model.traverse((child) => {
-                if (child.isMesh) {
-                    child.material.map = sofaTex;
-                    child.castShadow = true;
-                    child.receiveShadow = true;
-                }
-            });
-            model.position.set(3, 0, -2);
-            model.scale.set(1, 1, 1);
-            scene.add(model);
-            console.log("Sofa/Chair added for testing.");
-        });
-    }
+    // Table (separate module)
+    Table.createTable(scene, 0, 0);
+    Table.createChairs(scene, 0, 0); // 6 simple chairs for now (we’ll swap to your model after baseline passes)
+  }
 };

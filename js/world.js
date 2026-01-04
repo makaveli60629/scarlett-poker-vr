@@ -1,18 +1,13 @@
 import * as THREE from 'https://unpkg.com/three@0.150.1/build/three.module.js';
 import { Table } from './table.js';
+import { Store } from './store.js';
 
 export const World = {
   textureLoader: new THREE.TextureLoader(),
 
-  // runtime registry
-  R: {
-    teleportables: [],
-    colliders: []
-  },
+  R: { teleportables: [], colliders: [], interactables: [] },
 
-  getRuntime() {
-    return this.R;
-  },
+  getRuntime() { return this.R; },
 
   safeTexture(path, repeatX = 1, repeatY = 1) {
     const tex = this.textureLoader.load(
@@ -38,12 +33,27 @@ export const World = {
     return new THREE.MeshBasicMaterial({ map, color: fallbackColor, transparent, opacity });
   },
 
+  // Precise AABB helper (NO boundingBox math bugs)
+  aabbFromBox(centerX, centerY, centerZ, sizeX, sizeY, sizeZ) {
+    return {
+      type: 'aabb',
+      min: new THREE.Vector3(centerX - sizeX/2, centerY - sizeY/2, centerZ - sizeZ/2),
+      max: new THREE.Vector3(centerX + sizeX/2, centerY + sizeY/2, centerZ + sizeZ/2)
+    };
+  },
+
+  addInteractable(mesh, onClick) {
+    mesh.userData.interactable = true;
+    mesh.userData.onClick = onClick;
+    this.R.interactables.push(mesh);
+  },
+
   build(scene) {
-    // reset runtime
     this.R.teleportables = [];
     this.R.colliders = [];
+    this.R.interactables = [];
 
-    // lighting
+    // Lighting
     scene.background = new THREE.Color(0x0b0b12);
     scene.add(new THREE.AmbientLight(0xffffff, 1.10));
 
@@ -51,11 +61,11 @@ export const World = {
     sun.position.set(10, 18, 8);
     scene.add(sun);
 
-    const fill = new THREE.PointLight(0xffffff, 1.15, 160);
+    const fill = new THREE.PointLight(0xffffff, 1.15, 180);
     fill.position.set(0, 10, 0);
     scene.add(fill);
 
-    // materials
+    // Materials from your folder
     const M = {
       lobbyCarpet: this.matStd('assets/textures/lobby_carpet.jpg', 0x552222, 6, 6, 1.0, 0.0),
       marbleGold: this.matStd('assets/textures/Marblegold floors.jpg', 0x3a3a3a, 4, 4, 0.35, 0.35),
@@ -70,22 +80,27 @@ export const World = {
       teleport: this.matBasic('assets/textures/Teleport glow.jpg', 0xffffff, true, 0.9)
     };
 
-    // Floors (teleportable)
-    const mainFloor = this.addTeleportFloor(scene, 0, 0, 70, 70, M.marbleGold);
-    const lobbyFloor = this.addTeleportFloor(scene, 0, 42, 52, 38, M.lobbyCarpet);
-    const sideFloor = this.addTeleportFloor(scene, -48, 6, 36, 36, M.marbleGold);
+    // Main floor (teleportable)
+    this.addTeleportFloor(scene, 0, 0, 90, 90, M.marbleGold);
 
-    // Rooms with walls (colliders)
-    this.makeRoom(scene, 0, 0, 70, 10, M.brick);
-    this.makeRoom(scene, 0, 42, 52, 10, M.brick);
-    this.makeRoom(scene, -48, 6, 36, 10, M.brick);
+    // Lobby carpet area (visual + teleportable)
+    this.addTeleportFloor(scene, 0, 42, 54, 38, M.lobbyCarpet);
 
-    // Rune feature wall behind table
+    // Vault/side area (teleportable)
+    this.addTeleportFloor(scene, -48, 6, 38, 38, M.marbleGold);
+
+    // ---- SOLID WALL SYSTEM (THICK BOX WALLS + PERFECT COLLIDERS) ----
+    // We build 3 rooms as closed rectangles (no accidental gaps).
+    this.buildSolidRoom(scene, 0, 0, 70, 10, 1.0, M.brick);      // Main
+    this.buildSolidRoom(scene, 0, 42, 52, 10, 1.0, M.brick);     // Lobby
+    this.buildSolidRoom(scene, -48, 6, 36, 10, 1.0, M.brick);    // Vault
+
+    // Rune wall accent
     const runeWall = new THREE.Mesh(new THREE.PlaneGeometry(26, 8), M.runes);
     runeWall.position.set(0, 4, -18);
     scene.add(runeWall);
 
-    // Ceiling dome (visual)
+    // Dome ceiling (visual only)
     const dome = new THREE.Mesh(
       new THREE.SphereGeometry(45, 48, 32, 0, Math.PI * 2, 0, Math.PI / 2),
       M.dome
@@ -99,7 +114,7 @@ export const World = {
     this.addPoster(scene,  12, 4.6, 50.8, M.art2, 9, 5);
     this.addPoster(scene, 0, 4.6, -24.5, M.scorpion, 11, 6);
 
-    // Teleport pads (extra valid spots)
+    // Teleport pads
     this.addTeleportPad(scene, 0, 10, M.teleport);
     this.addTeleportPad(scene, 0, 42, M.teleport);
     this.addTeleportPad(scene, -48, 6, M.teleport);
@@ -109,10 +124,10 @@ export const World = {
     this.R.colliders.push(t.collider);
     Table.createChairs(scene, 0, 0);
 
-    // Store kiosk (visual placeholder)
+    // Store kiosk with clickable chip buttons
     this.addStoreKiosk(scene, 18, 42);
 
-    // Spawn ring (visual)
+    // Spawn ring
     const spawnRing = new THREE.Mesh(
       new THREE.RingGeometry(0.8, 1.05, 32),
       new THREE.MeshBasicMaterial({ color: 0x00ff88, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
@@ -120,6 +135,36 @@ export const World = {
     spawnRing.rotation.x = -Math.PI / 2;
     spawnRing.position.set(0, 0.02, 10);
     scene.add(spawnRing);
+  },
+
+  // Builds a thick, solid box-room with colliders that match exactly.
+  buildSolidRoom(scene, cx, cz, size, height, thickness, mat) {
+    const half = size / 2;
+    const h = height;
+
+    // North wall
+    const n = new THREE.Mesh(new THREE.BoxGeometry(size, h, thickness), mat);
+    n.position.set(cx, h/2, cz - half);
+    scene.add(n);
+    this.R.colliders.push(this.aabbFromBox(n.position.x, n.position.y, n.position.z, size, h, thickness));
+
+    // South wall
+    const s = n.clone();
+    s.position.set(cx, h/2, cz + half);
+    scene.add(s);
+    this.R.colliders.push(this.aabbFromBox(s.position.x, s.position.y, s.position.z, size, h, thickness));
+
+    // West wall
+    const w = new THREE.Mesh(new THREE.BoxGeometry(thickness, h, size), mat);
+    w.position.set(cx - half, h/2, cz);
+    scene.add(w);
+    this.R.colliders.push(this.aabbFromBox(w.position.x, w.position.y, w.position.z, thickness, h, size));
+
+    // East wall
+    const e = w.clone();
+    e.position.set(cx + half, h/2, cz);
+    scene.add(e);
+    this.R.colliders.push(this.aabbFromBox(e.position.x, e.position.y, e.position.z, thickness, h, size));
   },
 
   addTeleportFloor(scene, x, z, w, d, mat) {
@@ -142,40 +187,6 @@ export const World = {
     return pad;
   },
 
-  makeRoom(scene, cx, cz, size, height, mat) {
-    const t = 1.0;
-    const half = size / 2;
-
-    const back = new THREE.Mesh(new THREE.BoxGeometry(size, height, t), mat);
-    back.position.set(cx, height / 2, cz - half);
-    scene.add(back);
-    this.R.colliders.push(this.boxColliderFromMesh(back));
-
-    const front = back.clone();
-    front.position.set(cx, height / 2, cz + half);
-    scene.add(front);
-    this.R.colliders.push(this.boxColliderFromMesh(front));
-
-    const left = new THREE.Mesh(new THREE.BoxGeometry(t, height, size), mat);
-    left.position.set(cx - half, height / 2, cz);
-    scene.add(left);
-    this.R.colliders.push(this.boxColliderFromMesh(left));
-
-    const right = left.clone();
-    right.position.set(cx + half, height / 2, cz);
-    scene.add(right);
-    this.R.colliders.push(this.boxColliderFromMesh(right));
-  },
-
-  boxColliderFromMesh(mesh) {
-    mesh.geometry.computeBoundingBox();
-    const bb = mesh.geometry.boundingBox.clone();
-    // Convert local bb to world-space min/max (mesh is axis-aligned, so this is OK)
-    const min = bb.min.clone().add(mesh.position);
-    const max = bb.max.clone().add(mesh.position);
-    return { type: "aabb", min, max };
-  },
-
   addPoster(scene, x, y, z, mat, w = 6, h = 4) {
     const poster = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
     poster.position.set(x, y, z);
@@ -185,7 +196,7 @@ export const World = {
 
   addStoreKiosk(scene, x, z) {
     const stand = new THREE.Mesh(
-      new THREE.BoxGeometry(2.3, 1.2, 1.2),
+      new THREE.BoxGeometry(2.4, 1.2, 1.4),
       new THREE.MeshStandardMaterial({ color: 0x15151b, roughness: 0.9 })
     );
     stand.position.set(x, 0.6, z);
@@ -195,8 +206,24 @@ export const World = {
       new THREE.PlaneGeometry(3.0, 1.4),
       new THREE.MeshBasicMaterial({ color: 0x00ffd5, transparent: true, opacity: 0.85 })
     );
-    sign.position.set(x, 2.1, z + 0.62);
-    sign.rotation.y = -Math.PI / 2;
+    sign.position.set(x, 2.1, z + 0.72);
     scene.add(sign);
+
+    const chip1000  = this.matBasic('assets/textures/chip_1000.jpg', 0xffffff, true, 0.95);
+    const chip5000  = this.matBasic('assets/textures/chip_5000.jpg', 0xffffff, true, 0.95);
+    const chip10000 = this.matBasic('assets/textures/chip_10000.jpg', 0xffffff, true, 0.95);
+
+    const mkButton = (mat, bx, by, bz, id) => {
+      const btn = new THREE.Mesh(new THREE.PlaneGeometry(0.65, 0.65), mat);
+      btn.position.set(bx, by, bz);
+      btn.rotation.y = Math.PI;
+      scene.add(btn);
+      this.addInteractable(btn, () => Store.buy(id));
+      return btn;
+    };
+
+    mkButton(chip1000,  x - 0.75, 1.25, z + 0.75, "chips_1000");
+    mkButton(chip5000,  x,        1.25, z + 0.75, "chips_5000");
+    mkButton(chip10000, x + 0.75, 1.25, z + 0.75, "chips_10000");
   }
 };

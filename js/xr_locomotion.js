@@ -42,11 +42,9 @@ export function makeXRLoco(renderer, camera) {
     const session = renderer.xr.getSession();
     if (!session) return false;
 
-    // Force correct, stable floor-based reference space
     try {
       baseRefSpace = await session.requestReferenceSpace("local-floor");
     } catch {
-      // fallback
       baseRefSpace = await session.requestReferenceSpace("local");
     }
 
@@ -61,7 +59,6 @@ export function makeXRLoco(renderer, camera) {
     const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), xrYaw);
     const rot = { x: q.x, y: q.y, z: q.z, w: q.w };
 
-    // Negative means "move world opposite of desired player movement"
     const pos = { x: -xrOffset.x, y: 0, z: -xrOffset.z };
     const t = new XRRigidTransform(pos, rot);
 
@@ -76,9 +73,7 @@ export function makeXRLoco(renderer, camera) {
   }
 
   function safeSpawn(anchor, roomBounds) {
-    // anchor: {x,z,yawDeg}
-    // roomBounds: {minX,maxX,minZ,maxZ}
-    const pad = 0.8; // keep you away from walls
+    const pad = 0.9;
     const x = clamp(anchor.x, roomBounds.minX + pad, roomBounds.maxX - pad);
     const z = clamp(anchor.z, roomBounds.minZ + pad, roomBounds.maxZ - pad);
     setSpawn(x, z, anchor.yawDeg || 0);
@@ -98,7 +93,7 @@ export function makeXRLoco(renderer, camera) {
     return origin.clone().add(dir.clone().multiplyScalar(t));
   }
 
-  // Right stick snap turn
+  // ✅ FIXED SNAP TURN DIRECTION
   let snapCooldown = 0;
   function snapTurn(dt, session, rightGamepad) {
     if (!session || !rightGamepad) return;
@@ -108,8 +103,11 @@ export function makeXRLoco(renderer, camera) {
     const axes = rightGamepad.axes || [];
     const rx = axes[2] ?? axes[0] ?? 0;
 
-    if (rx > 0.7) { xrYaw -= THREE.MathUtils.degToRad(45); snapCooldown = 0.18; applyOffset(); }
-    if (rx < -0.7) { xrYaw += THREE.MathUtils.degToRad(45); snapCooldown = 0.18; applyOffset(); }
+    // Normal feel:
+    // stick RIGHT => turn RIGHT (yaw +)
+    // stick LEFT  => turn LEFT  (yaw -)
+    if (rx > 0.7) { xrYaw += THREE.MathUtils.degToRad(45); snapCooldown = 0.18; applyOffset(); }
+    if (rx < -0.7) { xrYaw -= THREE.MathUtils.degToRad(45); snapCooldown = 0.18; applyOffset(); }
   }
 
   function updateTeleportPreview(leftController) {
@@ -123,15 +121,12 @@ export function makeXRLoco(renderer, camera) {
       return { point: null };
     }
 
-    // Player position in world
     const cp = new THREE.Vector3();
     camera.getWorldPosition(cp);
 
-    // show preview halo
     halo.visible = true;
     halo.position.set(p.x, 0.02, p.z);
 
-    // show range ring around player
     rangeRing.visible = true;
     rangeRing.position.set(cp.x, 0.02, cp.z);
 
@@ -168,6 +163,4 @@ export function makeXRLoco(renderer, camera) {
   };
 }
 
-function clamp(v, a, b) {
-  return Math.max(a, Math.min(b, v));
-}
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }

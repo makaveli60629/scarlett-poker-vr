@@ -1,4 +1,3 @@
-// js/ui.js
 import * as THREE from "three";
 
 function panelMesh(w, h, color, opacity) {
@@ -7,8 +6,7 @@ function panelMesh(w, h, color, opacity) {
     color: color,
     transparent: true,
     opacity: opacity,
-    side: THREE.DoubleSide,
-    depthTest: true
+    side: THREE.DoubleSide
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = "ui_panel";
@@ -50,7 +48,6 @@ function makeButton(label, x, y, w, h, action) {
     })
   );
 
-  // IMPORTANT: Interactions raycasts these
   bg.name = "ui_button_bg";
   bg.userData.isUIButton = true;
   bg.userData.action = action;
@@ -80,7 +77,6 @@ export const UI = {
     const playerGroup = opts.playerGroup;
     const HUD = opts.HUD;
 
-    // Root group
     const uiRoot = new THREE.Group();
     uiRoot.name = "ui_root";
     scene.add(uiRoot);
@@ -90,15 +86,12 @@ export const UI = {
     menu.name = "ui_menu";
     menu.visible = true;
 
-    const menuPanel = panelMesh(1.35, 0.85, 0x0c0c0f, 0.85);
-    menu.add(menuPanel);
-
+    menu.add(panelMesh(1.35, 0.85, 0x0c0c0f, 0.85));
     menu.add(makeButton("TELEPORT A", -0.35, 0.22, 0.46, 0.14, "teleport_point_A"));
     menu.add(makeButton("TELEPORT B",  0.35, 0.22, 0.46, 0.14, "teleport_point_B"));
     menu.add(makeButton("TELEPORT C", -0.35, 0.02, 0.46, 0.14, "teleport_point_C"));
     menu.add(makeButton("STORE",       0.35, 0.02, 0.46, 0.14, "open_store"));
     menu.add(makeButton("REAL CHIPS",  0.00, -0.28, 0.96, 0.14, "spawn_chips"));
-
     uiRoot.add(menu);
 
     // STORE
@@ -106,18 +99,12 @@ export const UI = {
     store.name = "ui_store";
     store.visible = false;
 
-    const storePanel = panelMesh(1.35, 0.85, 0x120b16, 0.88);
-    store.add(storePanel);
-
+    store.add(panelMesh(1.35, 0.85, 0x120b16, 0.88));
     store.add(makeButton("BACK", 0.0, 0.30, 0.96, 0.14, "close_store"));
     store.add(makeButton("BUY: TABLE THEME", -0.35, 0.06, 0.46, 0.14, "buy_theme_table"));
     store.add(makeButton("BUY: SOFA",         0.35, 0.06, 0.46, 0.14, "buy_sofa"));
     store.add(makeButton("BUY: EMOTE PACK",   0.00, -0.20, 0.96, 0.14, "buy_emotes"));
-
     uiRoot.add(store);
-
-    // Initial placement
-    uiRoot.position.set(0, 1.55, 3.0);
 
     // Gather clickable meshes
     const clickable = [];
@@ -126,7 +113,7 @@ export const UI = {
     });
 
     function update() {
-      // Follow player (in front of camera)
+      // UI floats in front of player
       const forward = new THREE.Vector3(0, 0, -1);
       forward.applyQuaternion(camera.quaternion);
       forward.y = 0;
@@ -142,7 +129,7 @@ export const UI = {
       const lookAt = new THREE.Vector3(playerGroup.position.x, playerGroup.position.y + 1.55, playerGroup.position.z);
       uiRoot.lookAt(lookAt);
 
-      // Toggle menu on action
+      // Toggle menu
       if (window.actionId === "menu") {
         menu.visible = !menu.visible;
         store.visible = false;
@@ -150,12 +137,7 @@ export const UI = {
       }
     }
 
-    if (HUD && HUD.log) HUD.log("UI ready (GitHub-safe).");
-
-    return {
-      update: update,
-      uiRoot: uiRoot,
-      clickable: clickable
-    };
+    if (HUD && HUD.log) HUD.log("UI ready.");
+    return { update: update, clickable: clickable, uiRoot: uiRoot };
   }
 };

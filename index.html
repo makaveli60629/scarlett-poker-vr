@@ -3,17 +3,17 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-  <title>Scarlett Poker VR</title>
+  <title>PokerVR</title>
   <style>
     html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:system-ui,Arial;}
     #hud{
       position:fixed; left:12px; top:12px; z-index:9999;
       background:rgba(0,0,0,0.55); color:#dff;
       padding:10px 12px; border:1px solid rgba(255,255,255,0.18);
-      border-radius:10px; max-width:72vw; font-size:14px;
+      border-radius:10px; max-width:88vw; font-size:14px;
     }
     #hud b{color:#fff}
-    #log{margin-top:8px; max-height:34vh; overflow:auto; font-size:12px; color:#bfe}
+    #log{margin-top:8px; max-height:40vh; overflow:auto; font-size:12px; color:#bfe}
     #mobileBar{
       position:fixed; left:12px; bottom:12px; z-index:9999;
       display:flex; gap:10px; align-items:center;
@@ -35,7 +35,6 @@
       position:absolute; left:50%; top:50%;
       transform:translate(-50%,-50%);
     }
-    /* Force VRButton visible + top-right */
     #VRButton{
       position:fixed !important;
       top:12px !important;
@@ -49,7 +48,7 @@
 <body>
 
   <div id="hud">
-    <div><b>Scarlett Poker VR</b> — If you see this text, HTML loaded ✅</div>
+    <div><b>PokerVR</b> — If you see this text, HTML loaded ✅</div>
     <div id="status">Status: loading…</div>
     <div id="log"></div>
   </div>
@@ -61,7 +60,49 @@
     <button class="btn" id="btnMenu">Menu</button>
   </div>
 
-  <!-- IMPORTANT: must be module -->
-  <script type="module" src="./js/main.js"></script>
+  <script>
+    // BASIC ERROR HOOKS (works even if modules fail)
+    const log = (t)=>{ const el=document.getElementById('log'); if(el) el.innerHTML = t+"<br>"+el.innerHTML; };
+    window.addEventListener('error', (e)=> log("❌ window.error: " + (e.message || e)));
+    window.addEventListener('unhandledrejection', (e)=> log("❌ promise: " + (e.reason?.message || e.reason || e)));
+  </script>
+
+  <!-- MODULE LOADER DIAGNOSTIC -->
+  <script type="module">
+    const status = (t)=>{ const el=document.getElementById('status'); if(el) el.textContent="Status: "+t; };
+    const log = (t)=>{ const el=document.getElementById('log'); if(el) el.innerHTML = t+"<br>"+el.innerHTML; };
+
+    // This is the path your game MUST have:
+    const url = new URL('./js/main.js', location.href).toString();
+
+    status("attempting import…");
+    log("ℹ️ Trying to import: " + url);
+
+    try {
+      // Add a cache-buster so GitHub Pages won't serve an old file
+      const mod = await import(url + "?v=" + Date.now());
+      status("main.js imported ✅");
+
+      // If main.js exports boot(), call it; otherwise it may self-run.
+      if (mod && typeof mod.boot === "function") {
+        log("ℹ️ boot() found — calling it…");
+        await mod.boot();
+        status("boot() complete ✅");
+      } else {
+        log("ℹ️ No boot() export — main.js must self-run.");
+        status("waiting (main.js self-run) …");
+      }
+    } catch (err) {
+      status("IMPORT FAILED ❌");
+      log("❌ Import error: " + (err?.message || err));
+      if (err?.stack) log(err.stack);
+      log("✅ Fix: confirm you have EXACT path js/main.js (lowercase) committed.");
+    }
+  </script>
+
+  <noscript>
+    <div style="color:white;padding:20px">JavaScript is disabled.</div>
+  </noscript>
+
 </body>
 </html>

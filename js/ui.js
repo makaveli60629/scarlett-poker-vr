@@ -1,10 +1,10 @@
-import * as THREE from "three";
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 
 /**
  * UI
- * - Canvas menu panel attached to camera
- * - Leaderboard floating in lobby
- * - Store button teleports to kiosk marker
+ * - menu panel (desktop clickable)
+ * - includes "Teleport: Store"
+ * - leaderboard hover (desktop)
  */
 export function initUI({ scene, camera, renderer, world, playerGroup }) {
   const canvas = document.createElement("canvas");
@@ -136,7 +136,7 @@ export function initUI({ scene, camera, renderer, world, playerGroup }) {
   drawPanel();
   drawLeaderboard();
 
-  // Desktop mouse hover/click (VR clicking can be added next)
+  // desktop hover/click
   const raycaster = new THREE.Raycaster();
   const mouse = new THREE.Vector2();
   let hoveredBtn = null;
@@ -147,7 +147,6 @@ export function initUI({ scene, camera, renderer, world, playerGroup }) {
     const y = (1 - uv.y) * canvas.height;
 
     const bx = 40, bw = 520, bh = 68, by0 = 140, step = 82;
-
     if (x < bx || x > bx + bw) return null;
 
     for (let i = 0; i < buttons.length; i++) {
@@ -195,18 +194,12 @@ export function initUI({ scene, camera, renderer, world, playerGroup }) {
 
       if (menuVisible) {
         const menuHits = raycaster.intersectObject(panel, true);
-        if (menuHits.length) {
-          const uv = menuHits[0].uv;
-          hoveredBtn = getMenuButtonAtUV(uv);
-        }
+        if (menuHits.length) hoveredBtn = getMenuButtonAtUV(menuHits[0].uv);
       }
 
       if (leaderboardVisible) {
         const lbHits = raycaster.intersectObject(leaderboard, true);
-        if (lbHits.length) {
-          const uv = lbHits[0].uv;
-          hoveredLBRow = getLeaderboardRowAtUV(uv);
-        }
+        if (lbHits.length) hoveredLBRow = getLeaderboardRowAtUV(lbHits[0].uv);
       }
 
       drawPanel(hoveredBtn?.id ?? null);

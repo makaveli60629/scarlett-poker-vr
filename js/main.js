@@ -28,20 +28,21 @@ function init() {
   document.body.appendChild(renderer.domElement);
   document.body.appendChild(VRButton.createButton(renderer));
 
-  // Player group (teleport/collision moves this)
+  // Player group moves (teleport/collision)
   playerGroup = new THREE.Group();
   playerGroup.add(camera);
   scene.add(playerGroup);
 
-  // baseline light
+  // baseline ambient so it's always visible
   scene.add(new THREE.AmbientLight(0xffffff, 0.45));
 
-  // build world
+  // Build world
   World.build(scene, playerGroup);
 
-  // ui + teleport controls
+  // UI
   ui = initUI({ scene, camera, renderer, world: World, playerGroup });
 
+  // Teleport controls (laser + floor reticle)
   controls = initControls({
     renderer,
     scene,
@@ -65,7 +66,7 @@ function render() {
 }
 
 function resolveCollisions() {
-  // simple sphere vs expanded AABB in XZ plane
+  // simple sphere vs expanded AABB (XZ plane)
   const px = playerGroup.position.x;
   const pz = playerGroup.position.z;
 
@@ -89,13 +90,4 @@ function resolveCollisions() {
 
     if (min === dxMin) playerGroup.position.x = bb.min.x;
     else if (min === dxMax) playerGroup.position.x = bb.max.x;
-    else if (min === dzMin) playerGroup.position.z = bb.min.z;
-    else if (min === dzMax) playerGroup.position.z = bb.max.z;
-  }
-}
-
-function onWindowResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-}
+    else if (min === dzMin) playerGroup.position.z =

@@ -1,217 +1,193 @@
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+// js/ui.js
+
+/**
+ * UI: Works on Android + Quest (DOM overlay).
+ * - Notifications queue with OK
+ * - Menu buttons: Lobby / Store / Poker / Audio / Spawn Chip
+ * - No fullscreen blockers (all pointer-events controlled)
+ */
 
 export const UI = {
-  group: null,
-  board: null,
-  canvas: null,
-  ctx: null,
-  tex: null,
+  root: null,
+  toastEl: null,
+  notifWrap: null,
+  notifText: null,
+  notifOk: null,
+  menuWrap: null,
+  menuOpen: false,
 
-  visible: true,
-  lastDrawKey: "",
+  init({ onTeleport, onToggleAudio, onSpawnChip }) {
+    // Root overlay
+    const root = document.createElement("div");
+    root.style.position = "fixed";
+    root.style.left = "0";
+    root.style.top = "0";
+    root.style.width = "100%";
+    root.style.height = "100%";
+    root.style.pointerEvents = "none";
+    root.style.zIndex = "99999";
+    document.body.appendChild(root);
+    this.root = root;
 
-  // position near table
-  anchor: new THREE.Vector3(0, 1.55, -3.9),
+    // Toast (bottom)
+    const toast = document.createElement("div");
+    toast.style.position = "fixed";
+    toast.style.left = "50%";
+    toast.style.bottom = "18px";
+    toast.style.transform = "translateX(-50%)";
+    toast.style.padding = "10px 14px";
+    toast.style.background = "rgba(0,0,0,0.65)";
+    toast.style.border = "1px solid rgba(0,255,170,0.6)";
+    toast.style.borderRadius = "12px";
+    toast.style.color = "white";
+    toast.style.fontWeight = "800";
+    toast.style.fontFamily = "system-ui, sans-serif";
+    toast.style.pointerEvents = "none";
+    root.appendChild(toast);
+    this.toastEl = toast;
 
-  build(scene) {
-    this.group = new THREE.Group();
-    scene.add(this.group);
+    // Notification modal (big, in-your-face but not fullscreen)
+    const nw = document.createElement("div");
+    nw.style.position = "fixed";
+    nw.style.left = "50%";
+    nw.style.top = "18%";
+    nw.style.transform = "translateX(-50%)";
+    nw.style.width = "min(520px, 88vw)";
+    nw.style.background = "rgba(0,0,0,0.78)";
+    nw.style.border = "2px solid rgba(255,60,120,0.85)";
+    nw.style.borderRadius = "18px";
+    nw.style.padding = "14px";
+    nw.style.boxShadow = "0 0 24px rgba(255,60,120,0.18)";
+    nw.style.display = "none";
+    nw.style.pointerEvents = "auto";
 
-    this.canvas = document.createElement("canvas");
-    this.canvas.width = 1024;
-    this.canvas.height = 1024;
-    this.ctx = this.canvas.getContext("2d");
+    const nt = document.createElement("div");
+    nt.style.color = "white";
+    nt.style.fontFamily = "system-ui, sans-serif";
+    nt.style.fontWeight = "800";
+    nt.style.fontSize = "18px";
+    nt.style.lineHeight = "1.3";
+    nt.style.marginBottom = "12px";
+    nw.appendChild(nt);
 
-    this.tex = new THREE.CanvasTexture(this.canvas);
-    this.tex.colorSpace = THREE.SRGBColorSpace;
+    const ok = document.createElement("button");
+    ok.textContent = "OK";
+    ok.style.width = "100%";
+    ok.style.padding = "12px 12px";
+    ok.style.borderRadius = "14px";
+    ok.style.border = "1px solid rgba(0,255,170,0.6)";
+    ok.style.background = "rgba(0,0,0,0.55)";
+    ok.style.color = "white";
+    ok.style.fontWeight = "900";
+    ok.style.letterSpacing = "0.5px";
+    ok.style.cursor = "pointer";
+    nw.appendChild(ok);
 
-    const mat = new THREE.MeshStandardMaterial({
-      map: this.tex,
-      transparent: true,
-      roughness: 0.85,
-      emissive: 0x101018,
-      emissiveIntensity: 0.55
+    root.appendChild(nw);
+
+    this.notifWrap = nw;
+    this.notifText = nt;
+    this.notifOk = ok;
+
+    ok.addEventListener("click", (e) => {
+      e.preventDefault();
+      this.hideNotification();
     });
 
-    this.board = new THREE.Mesh(new THREE.PlaneGeometry(1.35, 1.35), mat);
-    this.board.position.copy(this.anchor);
-    this.board.renderOrder = 20;
+    // Right-side quick buttons
+    const makeBtn = (text, topPx) => {
+      const b = document.createElement("button");
+      b.textContent = text;
+      b.style.position = "fixed";
+      b.style.right = "14px";
+      b.style.top = `${topPx}px`;
+      b.style.padding = "10px 12px";
+      b.style.borderRadius = "12px";
+      b.style.border = "1px solid rgba(0,255,170,0.55)";
+      b.style.background = "rgba(0,0,0,0.45)";
+      b.style.color = "white";
+      b.style.fontWeight = "900";
+      b.style.fontFamily = "system-ui, sans-serif";
+      b.style.pointerEvents = "auto";
+      b.style.boxShadow = "0 0 14px rgba(0,255,170,0.15)";
+      b.style.cursor = "pointer";
+      return b;
+    };
 
-    // subtle backing plate for readability
-    const back = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.42, 1.42),
-      new THREE.MeshStandardMaterial({
-        color: 0x07080f,
-        roughness: 1.0,
-        transparent: true,
-        opacity: 0.65
-      })
-    );
-    back.position.copy(this.board.position);
-    back.position.z -= 0.01;
+    const btnMenu = makeBtn("MENU", 14);
+    const btnAudio = makeBtn("AUDIO", 64);
+    const btnChip = makeBtn("SPAWN CHIP", 114);
 
-    this.group.add(back);
-    this.group.add(this.board);
+    root.appendChild(btnMenu);
+    root.appendChild(btnAudio);
+    root.appendChild(btnChip);
 
-    this._drawEmpty();
-  },
+    btnAudio.addEventListener("click", (e) => { e.preventDefault(); onToggleAudio?.(); });
+    btnChip.addEventListener("click", (e) => { e.preventDefault(); onSpawnChip?.(); });
 
-  setVisible(v) {
-    this.visible = v;
-    if (this.group) this.group.visible = v;
-  },
+    // Menu panel
+    const mw = document.createElement("div");
+    mw.style.position = "fixed";
+    mw.style.right = "14px";
+    mw.style.top = "164px";
+    mw.style.width = "200px";
+    mw.style.padding = "10px";
+    mw.style.borderRadius = "14px";
+    mw.style.border = "1px solid rgba(255,60,120,0.75)";
+    mw.style.background = "rgba(0,0,0,0.58)";
+    mw.style.display = "none";
+    mw.style.pointerEvents = "auto";
 
-  update(dt, camera, data) {
-    if (!this.group) return;
+    const addMenuBtn = (label, fn) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.style.width = "100%";
+      b.style.marginBottom = "8px";
+      b.style.padding = "10px 10px";
+      b.style.borderRadius = "12px";
+      b.style.border = "1px solid rgba(0,255,170,0.45)";
+      b.style.background = "rgba(0,0,0,0.45)";
+      b.style.color = "white";
+      b.style.fontWeight = "900";
+      b.style.cursor = "pointer";
+      b.addEventListener("click", (e) => { e.preventDefault(); fn?.(); });
+      mw.appendChild(b);
+    };
 
-    // face camera with yaw only (never tilt)
-    if (camera) {
-      const cp = new THREE.Vector3();
-      camera.getWorldPosition(cp);
-      const p = this.board.position.clone();
-      const dx = cp.x - p.x;
-      const dz = cp.z - p.z;
-      const yaw = Math.atan2(dx, dz);
-      this.group.rotation.set(0, yaw, 0);
-    }
+    addMenuBtn("LOBBY", () => onTeleport?.("lobby"));
+    addMenuBtn("STORE", () => onTeleport?.("store"));
+    addMenuBtn("POKER ROOM", () => onTeleport?.("poker"));
+    addMenuBtn("CLOSE MENU", () => this.setMenu(false));
 
-    if (!data) return;
+    root.appendChild(mw);
+    this.menuWrap = mw;
 
-    // draw only when changed (cheap on Quest)
-    const key = JSON.stringify({
-      h: data.handId,
-      pot: data.pot,
-      ph: data.phase,
-      win: data.lastWinnerText,
-      rows: data.rows.map(r => [r.name, r.chips, r.status])
+    btnMenu.addEventListener("click", (e) => {
+      e.preventDefault();
+      this.setMenu(!this.menuOpen);
     });
-
-    if (key === this.lastDrawKey) return;
-    this.lastDrawKey = key;
-
-    this._drawLeaderboard(data);
-    this.tex.needsUpdate = true;
   },
 
-  _drawEmpty() {
-    const ctx = this.ctx;
-    ctx.clearRect(0, 0, 1024, 1024);
-    ctx.fillStyle = "rgba(0,0,0,0.60)";
-    ctx.fillRect(0,0,1024,1024);
-
-    ctx.lineWidth = 18;
-    ctx.strokeStyle = "rgba(255,60,120,0.9)";
-    ctx.strokeRect(22, 22, 980, 980);
-
-    ctx.lineWidth = 10;
-    ctx.strokeStyle = "rgba(0,255,170,0.75)";
-    ctx.strokeRect(64, 64, 896, 896);
-
-    ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(255,255,255,0.94)";
-    ctx.font = "bold 70px system-ui";
-    ctx.fillText("LEADERBOARD", 512, 150);
-
-    ctx.font = "bold 44px system-ui";
-    ctx.fillStyle = "rgba(201,162,77,0.92)";
-    ctx.fillText("Waiting for table data…", 512, 240);
+  toast(msg) {
+    if (!this.toastEl) return;
+    this.toastEl.textContent = msg || "";
+    clearTimeout(this._t);
+    this._t = setTimeout(() => { if (this.toastEl) this.toastEl.textContent = ""; }, 1600);
   },
 
-  _drawLeaderboard(data) {
-    const ctx = this.ctx;
-    ctx.clearRect(0, 0, 1024, 1024);
+  notify(msg) {
+    if (!this.notifWrap) return;
+    this.notifText.textContent = msg || "";
+    this.notifWrap.style.display = "block";
+  },
 
-    // Glass background
-    ctx.fillStyle = "rgba(7,8,15,0.70)";
-    ctx.fillRect(0,0,1024,1024);
+  hideNotification() {
+    if (!this.notifWrap) return;
+    this.notifWrap.style.display = "none";
+  },
 
-    // Borders (neon + gold)
-    ctx.lineWidth = 18;
-    ctx.strokeStyle = "rgba(255,60,120,0.92)";
-    ctx.strokeRect(22, 22, 980, 980);
-
-    ctx.lineWidth = 10;
-    ctx.strokeStyle = "rgba(0,255,170,0.78)";
-    ctx.strokeRect(64, 64, 896, 896);
-
-    // Header
-    ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(255,255,255,0.96)";
-    ctx.font = "bold 74px system-ui";
-    ctx.fillText("LEADERBOARD", 512, 150);
-
-    ctx.font = "bold 40px system-ui";
-    ctx.fillStyle = "rgba(201,162,77,0.95)";
-    ctx.fillText(`HAND #${data.handId}  •  POT ${data.pot}`, 512, 210);
-
-    // Phase
-    ctx.font = "bold 44px system-ui";
-    ctx.fillStyle = "rgba(255,60,120,0.95)";
-    ctx.fillText(data.phase, 512, 275);
-
-    // Winner banner
-    if (data.lastWinnerText) {
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
-      ctx.fillRect(90, 310, 844, 92);
-      ctx.lineWidth = 8;
-      ctx.strokeStyle = "rgba(0,255,170,0.65)";
-      ctx.strokeRect(90, 310, 844, 92);
-
-      ctx.font = "bold 34px system-ui";
-      ctx.fillStyle = "rgba(255,255,255,0.95)";
-      ctx.fillText(data.lastWinnerText, 512, 370);
-    }
-
-    // Columns
-    const startY = 430;
-    ctx.textAlign = "left";
-    ctx.font = "bold 36px system-ui";
-    ctx.fillStyle = "rgba(255,255,255,0.92)";
-    ctx.fillText("NAME", 110, startY);
-    ctx.fillText("CHIPS", 620, startY);
-    ctx.fillText("STATE", 820, startY);
-
-    ctx.fillStyle = "rgba(0,255,170,0.35)";
-    ctx.fillRect(100, startY + 18, 824, 6);
-
-    // Rows
-    let y = startY + 70;
-    const rowH = 70;
-
-    const rows = data.rows.slice(0, 8);
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i];
-
-      // alternating row shading
-      ctx.fillStyle = i % 2 === 0 ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.18)";
-      ctx.fillRect(92, y - 46, 840, rowH);
-
-      // highlight YOU
-      if (r.name === "YOU") {
-        ctx.fillStyle = "rgba(201,162,77,0.22)";
-        ctx.fillRect(92, y - 46, 840, rowH);
-      }
-
-      // text
-      ctx.font = "bold 36px system-ui";
-      ctx.fillStyle = "rgba(255,255,255,0.95)";
-      ctx.fillText(r.name, 110, y);
-
-      // chips in “red elegance” like you asked
-      ctx.fillStyle = "rgba(255,60,120,0.95)";
-      ctx.fillText(String(r.chips), 620, y);
-
-      ctx.fillStyle = "rgba(0,255,170,0.85)";
-      ctx.fillText(r.status, 820, y);
-
-      y += rowH;
-      if (y > 980) break;
-    }
-
-    // Footer hint
-    ctx.textAlign = "center";
-    ctx.font = "bold 28px system-ui";
-    ctx.fillStyle = "rgba(255,255,255,0.65)";
-    ctx.fillText("Spectate mode: leaderboard stays visible • Play mode: we can auto-hide later", 512, 990);
-  }
+  setMenu(v) {
+    this.menuOpen = !!v;
+    if (this.menuWrap) this.menuWrap.style.display = this.menuOpen ? "block" : "none";
+  },
 };

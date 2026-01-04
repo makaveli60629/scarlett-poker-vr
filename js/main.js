@@ -1,46 +1,71 @@
-import * as THREE from 'https://unpkg.com/three@0.150.1/build/three.module.js';
-import { VRButton } from 'https://unpkg.com/three@0.150.1/examples/jsm/webxr/VRButton.js';
+import * as THREE from "three";
+import { VRButton } from "three/addons/webxr/VRButton.js";
 
-import { World } from './world.js';
-import { Controls } from './controls.js';
+import { World } from "./world.js";
+import { initControls } from "./controls.js";
+import { initUI } from "./ui.js";
 
-let scene, camera, renderer, player;
+let scene, camera, renderer, playerGroup;
+let controls, ui;
 
 init();
+animate();
 
 function init() {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x050508);
 
-  camera = new THREE.PerspectiveCamera(
-    75,
-    window.innerWidth / window.innerHeight,
-    0.1,
-    2000
-  );
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
+  camera.position.set(0, 1.6, 0);
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
   renderer.xr.enabled = true;
-  renderer.xr.setReferenceSpaceType('local-floor');
 
   document.body.appendChild(renderer.domElement);
   document.body.appendChild(VRButton.createButton(renderer));
 
-  player = new THREE.Group();
-  scene.add(player);
-  player.add(camera);
+  // Player group (move this for teleport)
+  playerGroup = new THREE.Group();
+  playerGroup.add(camera);
+  scene.add(playerGroup);
 
-  // Correct VR spawn height (prevents floating / black screen)
-  player.position.set(0, 0, 6);
+  // Basic ambient
+  const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+  scene.add(ambient);
 
-  World.build(scene);
-  Controls.init(renderer, scene, player);
+  // Build world
+  World.build(scene, playerGroup);
 
+  // UI
+  ui = initUI({ scene, camera, renderer, world: World, playerGroup });
+
+  // Controls (Teleport + laser)
+  controls = initControls({
+    renderer,
+    scene,
+    playerGroup,
+    camera,
+    world: World,
+    onTeleport: (where) => console.log("Teleported:", where)
+  });
+
+  window.addEventListener("resize", onWindowResize);
+}
+
+function animate() {
   renderer.setAnimationLoop(render);
 }
 
 function render() {
-  Controls.update();
+  controls?.update();
+  ui?.update();
   renderer.render(scene, camera);
+}
+
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
 }

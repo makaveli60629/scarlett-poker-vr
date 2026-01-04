@@ -1,670 +1,505 @@
+// js/table.js
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+
+/**
+ * Table:
+ * - Oval poker table (nice + clean)
+ * - 6 seats (bots sit + one open for player)
+ * - Runs poker loop: deal -> flop -> turn -> river -> showdown -> reset
+ * - Community cards hover when you look at them
+ * - Bot walkers roam the lobby
+ */
 
 export const Table = {
   group: null,
   tableTop: null,
   seats: [],
-  players: [],
-  communityCards: [],
-  deck: [],
-  pot: 0,
+  bots: [],
+  walkers: [],
+  cards: {
+    community: [],
+    playerHole: [],
+    deckPos: new THREE.Vector3(0.2, 0.86, -0.2),
+    phase: "idle",
+    t: 0,
+    communityReveal: 0, // 0..5 cards revealed
+  },
 
-  // game loop
-  phase: "idle",
-  phaseTimer: 0,
-  handId: 0,
-  lastWinnerText: "",
-  lastWinnerAt: 0,
+  // simple scoreboard data (teams)
+  showdown: {
+    teams: [
+      { name: "Spades", points: 0 },
+      { name: "Hearts", points: 0 },
+      { name: "Clubs", points: 0 },
+      { name: "Diamonds", points: 0 },
+    ]
+  },
 
-  // view helpers
-  _tmpV3: new THREE.Vector3(),
-  _tmpV3b: new THREE.Vector3(),
-  _up: new THREE.Vector3(0, 1, 0),
-
-  // settings
-  seatCount: 6,
-  tableCenter: new THREE.Vector3(0, 0, -6.0),
-  tableYaw: 0,
-  tableHeight: 0.78,
-
+  // Public API
   build(scene) {
     this.group = new THREE.Group();
+    this.group.name = "poker_table_group";
     scene.add(this.group);
+    this.group.position.set(0, 0, -5.2);
 
-    // --- OVAL TABLE TOP (clean + solid)
-    const topMat = new THREE.MeshStandardMaterial({
-      color: 0x145a38,
-      roughness: 0.85,
-      metalness: 0.05
-    });
+    // table materials
+    const felt = new THREE.MeshStandardMaterial({ color: 0x0f6a3e, roughness: 0.95, metalness: 0.0 });
+    const trim = new THREE.MeshStandardMaterial({ color: 0x141018, roughness: 0.65, metalness: 0.12 });
+    const wood = new THREE.MeshStandardMaterial({ color: 0x2a1b10, roughness: 0.85, metalness: 0.06 });
 
-    // Oval via scaled cylinder (looks like oval poker table)
-    const topGeo = new THREE.CylinderGeometry(1.35, 1.35, 0.10, 48);
-    this.tableTop = new THREE.Mesh(topGeo, topMat);
-    this.tableTop.scale.set(1.9, 1.0, 1.22); // oval
-    this.tableTop.position.copy(this.tableCenter);
-    this.tableTop.position.y = this.tableHeight;
-    this.tableTop.rotation.y = this.tableYaw;
-    this.tableTop.castShadow = true;
-    this.tableTop.receiveShadow = true;
-    this.group.add(this.tableTop);
+    // oval top: use scaled cylinder
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 0.14, 48), felt);
+    top.scale.set(1.45, 1, 1.0); // elongated oval
+    top.position.set(0, 0.86, 0);
+    top.castShadow = true;
+    top.receiveShadow = true;
+    top.name = "table_top";
+    this.group.add(top);
+    this.tableTop = top;
 
-    // Trim ring
-    const trimMat = new THREE.MeshStandardMaterial({
-      color: 0xC9A24D,
-      metalness: 0.9,
-      roughness: 0.22,
-      emissive: 0x221100,
-      emissiveIntensity: 0.25
-    });
-    const trimGeo = new THREE.TorusGeometry(1.35, 0.055, 16, 80);
-    const trim = new THREE.Mesh(trimGeo, trimMat);
-    trim.scale.set(1.9, 1.0, 1.22);
-    trim.position.copy(this.tableTop.position);
-    trim.position.y += 0.06;
-    trim.rotation.x = Math.PI / 2;
-    trim.castShadow = true;
-    this.group.add(trim);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(1.6, 0.12, 18, 64), trim);
+    rim.scale.set(1.45, 1.0, 1.0);
+    rim.position.set(0, 0.93, 0);
+    rim.rotation.x = Math.PI / 2;
+    rim.castShadow = true;
+    this.group.add(rim);
 
-    // Felt rail
-    const railMat = new THREE.MeshStandardMaterial({
-      color: 0x0e0f14,
-      roughness: 0.95
-    });
-    const railGeo = new THREE.TorusGeometry(1.45, 0.085, 16, 90);
-    const rail = new THREE.Mesh(railGeo, railMat);
-    rail.scale.set(1.9, 1.0, 1.22);
-    rail.position.copy(this.tableTop.position);
-    rail.position.y += 0.03;
-    rail.rotation.x = Math.PI / 2;
-    rail.castShadow = true;
-    this.group.add(rail);
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.6, 0.75, 22), wood);
+    base.position.set(0, 0.38, 0);
+    base.castShadow = true;
+    base.receiveShadow = true;
+    this.group.add(base);
 
-    // --- Seats positions (6 only)
-    this.seats = this._computeSeats();
+    // chairs (6)
+    this._makeSeats(scene);
 
-    // --- Players: Seat 0 reserved for player (open), bots on 1..5
-    this.players = [];
-    const botNames = ["NovaBot_1", "NovaBot_2", "NovaBot_3", "NovaBot_4", "NovaBot_5"];
-    for (let i = 0; i < this.seatCount; i++) {
-      const isBot = i !== 0;
-      const name = isBot ? botNames[i - 1] : "YOU";
-      const p = this._makePlayer(i, name, isBot);
-      this.players.push(p);
+    // bots: 5 seated + 1 open seat for player
+    this._spawnBots(scene);
 
-      // simple “avatar marker” above seat (no textures required)
-      if (isBot) {
-        const marker = this._makeBotMarker();
-        marker.position.copy(this.seats[i].pos).add(new THREE.Vector3(0, 1.28, 0));
-        this.group.add(marker);
-        p.marker = marker;
+    // walkers: 2 roamers
+    this._spawnWalkers(scene);
 
-        const tag = this._makeNameTag(name);
-        tag.position.copy(this.seats[i].pos).add(new THREE.Vector3(0, 1.55, 0));
-        this.group.add(tag);
-        p.tag = tag;
-      }
-    }
+    // cards
+    this._initCards(scene);
 
-    // --- Community cards (5)
-    this.communityCards = [];
-    for (let k = 0; k < 5; k++) {
-      const card = this._makeCardMesh({ faceUp: false, label: "??" });
-      card.position.copy(this.tableTop.position);
-      card.position.y += 0.055;
-      // spacing
-      card.position.x += (k - 2) * 0.23;
-      card.rotation.x = -Math.PI / 2;
-      this.group.add(card);
-      this.communityCards.push(card);
-    }
+    // start loop
+    this._startNewHand();
 
-    // start game loop
-    this._newHand();
+    return this.group;
   },
 
-  // Called from main.js each frame
   update(dt, camera) {
-    // phase machine
-    this.phaseTimer -= dt;
+    if (!this.group) return;
 
-    if (this.phaseTimer <= 0) {
-      if (this.phase === "preflop") this._toFlop();
-      else if (this.phase === "flop") this._toTurn();
-      else if (this.phase === "turn") this._toRiver();
-      else if (this.phase === "river") this._toShowdown();
-      else if (this.phase === "showdown") this._newHand();
+    // walkers roam
+    for (const w of this.walkers) {
+      w.t += dt;
+      const p = w.mesh.position;
+      p.x += Math.cos(w.t * 0.7 + w.seed) * 0.15 * dt;
+      p.z += Math.sin(w.t * 0.6 + w.seed) * 0.15 * dt;
+      // keep in bounds
+      p.x = THREE.MathUtils.clamp(p.x, -10, 10);
+      p.z = THREE.MathUtils.clamp(p.z, -10, 10);
+      w.mesh.rotation.y = Math.atan2(w.vx, w.vz);
     }
 
-    // stable name tags: only yaw-billboard (never tilt/roll)
-    if (camera) {
-      const camPos = this._tmpV3;
-      camera.getWorldPosition(camPos);
+    // poker loop timing
+    this.cards.t += dt;
+    this._advancePhases(dt);
 
-      for (const p of this.players) {
-        if (p.tag) {
-          const tp = this._tmpV3b;
-          p.tag.getWorldPosition(tp);
-          const dx = camPos.x - tp.x;
-          const dz = camPos.z - tp.z;
-          const yaw = Math.atan2(dx, dz);
-          p.tag.rotation.set(0, yaw, 0);
-        }
+    // hover community cards if you look at them
+    this._hoverCommunityOnGaze(camera);
+
+    // keep name tags upright (no tilt)
+    for (const b of this.bots) {
+      if (b.tag) {
+        b.tag.rotation.set(0, 0, 0);
+        b.tag.lookAt(camera.position.x, b.tag.position.y, camera.position.z);
+        // do NOT tilt with bot body
       }
     }
   },
 
-  // Seat join hook
-  sitPlayer() {
-    // Seat 0 reserved for player; later we’ll lock player to seat.
-    this.players[0].seated = true;
-    this.players[0].inHand = true;
-  },
-  standPlayer() {
-    this.players[0].seated = false;
-    this.players[0].inHand = false;
-  },
-
-  // Leaderboard snapshot
   getLeaderboardData() {
-    // sort: bots + player by chips desc
-    const rows = this.players.map(p => ({
-      name: p.name,
-      chips: Math.floor(p.chips),
-      status: p.seated ? "SEATED" : (p.inHand ? "IN HAND" : "SPECTATE"),
-      isBot: p.isBot,
-      seat: p.seatIndex
-    }));
-
-    rows.sort((a, b) => b.chips - a.chips);
     return {
-      handId: this.handId,
-      pot: Math.floor(this.pot),
-      phase: this.phase.toUpperCase(),
-      lastWinnerText: this.lastWinnerText,
-      rows
+      title: "SHOWDOWN LEADERBOARD",
+      rows: this.showdown.teams.map(t => ({ name: t.name, points: t.points })),
+      footer: "Top 10 paid Sunday night • Event Chips awarded"
     };
   },
 
-  // ---------- internals ----------
-  _makePlayer(seatIndex, name, isBot) {
-    return {
-      seatIndex,
-      name,
-      isBot,
-      chips: isBot ? 25000 + Math.random() * 15000 : 50000,
-      seated: isBot,     // bots are seated
-      inHand: isBot,     // bots always play; player seat becomes active when you join
-      hole: [],          // {rank,suit}
-      holeMeshes: [],    // meshes
-      marker: null,
-      tag: null
-    };
+  // Placeholder seat action called by main.js
+  sitPlayer() {
+    // You can connect your player rig seat locking later.
+    // For now this signals seat open.
+    // (In this prototype, the player spectates.)
   },
 
-  _computeSeats() {
+  /* ---------------- Seats / Bots ---------------- */
+
+  _makeSeats(scene) {
+    const seatMat = new THREE.MeshStandardMaterial({ color: 0x0a0b10, roughness: 1.0 });
+    const seatAccent = new THREE.MeshStandardMaterial({ color: 0x202332, roughness: 0.9, metalness: 0.05 });
+
     const seats = [];
-    const cx = this.tableTop.position.x;
-    const cz = this.tableTop.position.z;
-    const y = 0;
+    const radiusX = 2.3 * 1.25;
+    const radiusZ = 2.0 * 1.0;
 
-    // elliptical ring around table
-    const a = 2.45; // x radius
-    const b = 1.70; // z radius
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const x = Math.cos(a) * radiusX;
+      const z = Math.sin(a) * radiusZ;
 
-    for (let i = 0; i < this.seatCount; i++) {
-      const t = (i / this.seatCount) * Math.PI * 2;
-      const x = cx + Math.cos(t) * a;
-      const z = cz + Math.sin(t) * b;
-      const pos = new THREE.Vector3(x, y, z);
-      seats.push({ pos, angle: t });
+      const g = new THREE.Group();
+      g.position.set(x, 0, z);
+      g.rotation.y = Math.atan2(x, z) + Math.PI; // face table
+
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.1, 0.55), seatMat);
+      seat.position.y = 0.5;
+      seat.castShadow = true;
+      seat.receiveShadow = true;
+      g.add(seat);
+
+      const back = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 0.12), seatAccent);
+      back.position.set(0, 0.82, -0.22);
+      back.castShadow = true;
+      g.add(back);
+
+      g.name = `chair_${i}`;
+      // Make one join seat interactive (seat 0)
+      if (i === 0) {
+        g.name = "chair_join_0";
+        seat.userData.interactive = true;
+        seat.userData.joinSeat = true;
+        seat.name = "chair_join_0_hit";
+      }
+
+      this.group.add(g);
+      seats.push({ group: g, seatMesh: seat });
     }
 
-    // rotate so Seat 0 is near front (toward camera/lobby direction)
-    // bring seat 0 closer to z+ side:
-    seats.sort((s1, s2) => s2.pos.z - s1.pos.z);
-
-    // keep stable ordering
-    return seats;
+    this.seats = seats;
   },
 
-  _makeBotMarker() {
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x11141d,
-      roughness: 0.95,
-      emissive: 0x001122,
-      emissiveIntensity: 0.4
-    });
-    const geo = new THREE.CylinderGeometry(0.14, 0.14, 0.06, 22);
-    const m = new THREE.Mesh(geo, mat);
-    m.castShadow = true;
-    return m;
+  _spawnBots(scene) {
+    this.bots = [];
+    const botColors = [0x5da8ff, 0xff6bc6, 0x55ffb2, 0xffb84d, 0xbda6ff];
+
+    for (let i = 1; i < 6; i++) { // seat 0 left open
+      const seat = this.seats[i];
+      const bot = this._makeBot(`Bot_${i}`, botColors[i - 1]);
+      bot.group.position.copy(seat.group.position);
+      bot.group.rotation.copy(seat.group.rotation);
+      this.group.add(bot.group);
+      this.bots.push(bot);
+    }
   },
 
-  _makeNameTag(name) {
+  _spawnWalkers(scene) {
+    this.walkers = [];
+    for (let i = 0; i < 2; i++) {
+      const bot = this._makeBot(`Walker_${i+1}`, 0x00ffaa);
+      bot.group.position.set(-6 + i * 3, 0, 6);
+      bot.group.rotation.y = Math.PI;
+      this.walkers.push({ mesh: bot.group, t: 0, seed: Math.random() * 10, vx: 0, vz: 1 });
+      scene.add(bot.group);
+    }
+  },
+
+  _makeBot(name, color) {
+    const g = new THREE.Group();
+    g.name = name;
+
+    const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.75, metalness: 0.05 });
+
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.55, 6, 14), bodyMat);
+    body.position.y = 0.75;
+    body.castShadow = true;
+    g.add(body);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 18, 18), bodyMat);
+    head.position.y = 1.25;
+    head.castShadow = true;
+    g.add(head);
+
+    // Name tag (upright)
+    const tag = this._makeNameTag(name);
+    tag.position.set(0, 1.55, 0);
+    g.add(tag);
+
+    return { group: g, tag };
+  },
+
+  _makeNameTag(text) {
     const canvas = document.createElement("canvas");
-    canvas.width = 1024;
-    canvas.height = 256;
+    canvas.width = 512;
+    canvas.height = 128;
     const ctx = canvas.getContext("2d");
 
-    // background
-    ctx.fillStyle = "rgba(10,10,16,0.78)";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "rgba(0,0,0,0.65)";
+    ctx.fillRect(0, 0, 512, 128);
 
-    // border
-    ctx.lineWidth = 18;
-    ctx.strokeStyle = "rgba(255,60,120,0.90)";
-    ctx.strokeRect(16, 16, canvas.width - 32, canvas.height - 32);
+    ctx.strokeStyle = "rgba(0,255,170,0.85)";
+    ctx.lineWidth = 6;
+    ctx.strokeRect(10, 10, 492, 108);
 
-    ctx.lineWidth = 10;
-    ctx.strokeStyle = "rgba(0,255,170,0.75)";
-    ctx.strokeRect(44, 44, canvas.width - 88, canvas.height - 88);
-
+    ctx.fillStyle = "rgba(255,255,255,0.95)";
+    ctx.font = "bold 54px system-ui";
     ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(255,255,255,0.96)";
-    ctx.font = "bold 92px system-ui";
-    ctx.fillText(name, canvas.width / 2, 160);
+    ctx.fillText(text, 256, 80);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+
+    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false });
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.95, 0.24), mat);
+    plane.renderOrder = 900;
+    plane.name = "name_tag";
+    return plane;
+  },
+
+  /* ---------------- Poker Cards ---------------- */
+
+  _initCards(scene) {
+    this.cards.community = [];
+    this.cards.playerHole = [];
+
+    // Community card positions on felt
+    const startX = -0.55;
+    for (let i = 0; i < 5; i++) {
+      const card = this._makeCardMesh("??");
+      card.position.set(startX + i * 0.275, 0.93, 0.02);
+      card.rotation.x = -Math.PI / 2;
+      card.userData.isCommunityCard = true;
+      card.userData.cardIndex = i;
+      this.group.add(card);
+      this.cards.community.push(card);
+    }
+
+    // Player hole cards area (in front of join seat)
+    for (let i = 0; i < 2; i++) {
+      const card = this._makeCardMesh("P?");
+      card.position.set(-0.12 + i * 0.28, 0.93, 0.55);
+      card.rotation.x = -Math.PI / 2;
+      card.userData.isPlayerCard = true;
+      card.userData.canFlip = true; // action can flip later
+      // start face down
+      card.userData.faceUp = false;
+      this._setCardFace(card, "BACK");
+      this.group.add(card);
+      this.cards.playerHole.push(card);
+    }
+  },
+
+  _makeCardMesh(label) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 356;
+    const ctx = canvas.getContext("2d");
 
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
 
     const mat = new THREE.MeshStandardMaterial({
       map: tex,
-      transparent: true,
-      roughness: 0.9,
+      roughness: 0.85,
+      metalness: 0.0,
       emissive: 0x101018,
-      emissiveIntensity: 0.35
+      emissiveIntensity: 0.25
     });
 
-    const plane = new THREE.Mesh(new THREE.PlaneGeometry(1.05, 0.28), mat);
-    plane.renderOrder = 10;
-    return plane;
+    const geo = new THREE.PlaneGeometry(0.24, 0.33);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
+    mesh.userData.canvas = canvas;
+    mesh.userData.ctx = ctx;
+    mesh.userData.tex = tex;
+
+    this._drawCardCanvas(mesh, label, false);
+    return mesh;
   },
 
-  _makeCardMesh({ faceUp, label }) {
-    const geo = new THREE.PlaneGeometry(0.16, 0.23);
+  _drawCardCanvas(mesh, label, isRed) {
+    const ctx = mesh.userData.ctx;
+    ctx.clearRect(0, 0, 256, 356);
 
-    const front = this._cardFaceTexture(label);
-    const back = this._cardBackTexture();
+    // card base (high contrast)
+    ctx.fillStyle = "rgba(255,255,255,0.98)";
+    ctx.fillRect(0, 0, 256, 356);
 
-    const mat = new THREE.MeshStandardMaterial({
-      map: faceUp ? front : back,
-      roughness: 0.8,
-      metalness: 0.0
-    });
+    // border
+    ctx.strokeStyle = "rgba(0,0,0,0.85)";
+    ctx.lineWidth = 8;
+    ctx.strokeRect(10, 10, 236, 336);
 
-    const m = new THREE.Mesh(geo, mat);
-    m.castShadow = true;
-    m.userData.isCard = true;
-    m.userData.faceUp = faceUp;
-    m.userData.label = label;
-    m.userData.frontTex = front;
-    m.userData.backTex = back;
-    return m;
-  },
-
-  _cardFaceTexture(label) {
-    const canvas = document.createElement("canvas");
-    canvas.width = 512;
-    canvas.height = 768;
-    const ctx = canvas.getContext("2d");
-
-    // high contrast
-    ctx.fillStyle = "#f7f7f7";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    ctx.lineWidth = 22;
-    ctx.strokeStyle = "#111";
-    ctx.strokeRect(24, 24, canvas.width - 48, canvas.height - 48);
-
-    ctx.lineWidth = 10;
-    ctx.strokeStyle = "#ff2d7a";
-    ctx.strokeRect(54, 54, canvas.width - 108, canvas.height - 108);
-
-    ctx.fillStyle = "#111";
-    ctx.font = "bold 110px system-ui";
+    // label
+    ctx.fillStyle = isRed ? "rgba(255,30,70,0.95)" : "rgba(0,0,0,0.92)";
+    ctx.font = "bold 64px system-ui";
     ctx.textAlign = "left";
-    ctx.fillText(label, 72, 150);
+    ctx.fillText(label, 24, 80);
 
+    // center icon
     ctx.textAlign = "center";
-    ctx.font = "bold 220px system-ui";
-    ctx.fillText(label, canvas.width / 2, 460);
+    ctx.font = "bold 140px system-ui";
+    ctx.fillText(label.includes("♦") ? "♦" : label.includes("♥") ? "♥" : label.includes("♣") ? "♣" : label.includes("♠") ? "♠" : "?", 128, 230);
 
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    return tex;
+    mesh.userData.tex.needsUpdate = true;
   },
 
-  _cardBackTexture() {
-    const canvas = document.createElement("canvas");
-    canvas.width = 512;
-    canvas.height = 768;
-    const ctx = canvas.getContext("2d");
+  _setCardFace(mesh, face) {
+    // Face could be "BACK" or e.g. "A♠"
+    if (face === "BACK") {
+      const ctx = mesh.userData.ctx;
+      ctx.clearRect(0, 0, 256, 356);
+      ctx.fillStyle = "rgba(10,10,18,0.95)";
+      ctx.fillRect(0, 0, 256, 356);
+      ctx.strokeStyle = "rgba(0,255,170,0.85)";
+      ctx.lineWidth = 10;
+      ctx.strokeRect(10, 10, 236, 336);
+      ctx.fillStyle = "rgba(255,60,120,0.9)";
+      ctx.font = "bold 54px system-ui";
+      ctx.textAlign = "center";
+      ctx.fillText("TEAM NOVA", 128, 150);
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.font = "bold 44px system-ui";
+      ctx.fillText("SCARLETT POKER VR", 128, 220);
+      mesh.userData.tex.needsUpdate = true;
+      return;
+    }
 
-    ctx.fillStyle = "#0b0c12";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    ctx.lineWidth = 20;
-    ctx.strokeStyle = "#00ffaa";
-    ctx.strokeRect(26, 26, canvas.width - 52, canvas.height - 52);
-
-    ctx.lineWidth = 12;
-    ctx.strokeStyle = "#c9a24d";
-    ctx.strokeRect(56, 56, canvas.width - 112, canvas.height - 112);
-
-    ctx.fillStyle = "rgba(255,255,255,0.92)";
-    ctx.font = "bold 88px system-ui";
-    ctx.textAlign = "center";
-    ctx.fillText("SCARLETT", canvas.width / 2, 360);
-    ctx.fillText("POKER VR", canvas.width / 2, 460);
-
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    return tex;
+    const isRed = face.includes("♦") || face.includes("♥");
+    this._drawCardCanvas(mesh, face, isRed);
   },
 
-  _newHand() {
-    this.handId += 1;
-    this.pot = 0;
+  _advancePhases(dt) {
+    const c = this.cards;
 
-    // reset community
+    // Timing (simple)
+    // deal (2s) -> flop (3s) -> turn (3s) -> river (3s) -> showdown (4s) -> reset
+    if (c.phase === "deal" && c.t > 2.0) {
+      c.phase = "flop";
+      c.t = 0;
+      c.communityReveal = 3;
+      this._revealCommunity();
+    } else if (c.phase === "flop" && c.t > 3.0) {
+      c.phase = "turn";
+      c.t = 0;
+      c.communityReveal = 4;
+      this._revealCommunity();
+    } else if (c.phase === "turn" && c.t > 3.0) {
+      c.phase = "river";
+      c.t = 0;
+      c.communityReveal = 5;
+      this._revealCommunity();
+    } else if (c.phase === "river" && c.t > 3.0) {
+      c.phase = "showdown";
+      c.t = 0;
+      this._showdown();
+    } else if (c.phase === "showdown" && c.t > 4.0) {
+      this._startNewHand();
+    }
+  },
+
+  _startNewHand() {
+    const c = this.cards;
+    c.phase = "deal";
+    c.t = 0;
+    c.communityReveal = 0;
+
+    // reset community to back
+    for (let i = 0; i < 5; i++) this._setCardFace(this.cards.community[i], "BACK");
+
+    // give a random player hand (two cards) face down
+    for (const pc of this.cards.playerHole) {
+      pc.userData.faceUp = false;
+      this._setCardFace(pc, "BACK");
+    }
+
+    // pre-generate “deck” results
+    this._deck = this._makeDeck();
+    this._deckIndex = 0;
+
+    // burn + assign player hole
+    const p1 = this._draw(); const p2 = this._draw();
+    this.cards.playerHole[0].userData.cardFace = p1;
+    this.cards.playerHole[1].userData.cardFace = p2;
+
+    // assign community faces
+    const community = [];
+    for (let i = 0; i < 5; i++) community.push(this._draw());
+    this._communityFaces = community;
+  },
+
+  _revealCommunity() {
     for (let i = 0; i < 5; i++) {
-      this._setCard(this.communityCards[i], false, "??");
-      this.communityCards[i].visible = false;
-    }
-
-    // reset hole
-    for (const p of this.players) {
-      p.hole = [];
-      p.inHand = p.isBot || p.seated; // bots always; player if seated
-      // remove old meshes
-      for (const m of (p.holeMeshes || [])) {
-        this.group.remove(m);
-        m.geometry.dispose();
-        // textures are canvas textures; ok to let GC handle
-      }
-      p.holeMeshes = [];
-    }
-
-    // build deck
-    this.deck = this._makeDeck();
-    this._shuffle(this.deck);
-
-    // deal hole cards
-    for (let r = 0; r < 2; r++) {
-      for (const p of this.players) {
-        if (!p.inHand) continue;
-        p.hole.push(this.deck.pop());
-      }
-    }
-
-    // place hole cards on table in front of each seat (face down for bots)
-    for (const p of this.players) {
-      if (!p.inHand) continue;
-
-      const seat = this.seats[p.seatIndex];
-      const base = seat.pos.clone();
-
-      // move toward table center
-      const toward = this.tableTop.position.clone().sub(base).normalize();
-      const spot = base.clone().add(toward.multiplyScalar(0.45));
-      spot.y = this.tableHeight + 0.056;
-
-      for (let k = 0; k < 2; k++) {
-        const card = this._makeCardMesh({ faceUp: false, label: "??" });
-        card.position.copy(spot);
-        card.position.x += (k === 0 ? -0.09 : 0.09);
-        card.rotation.x = -Math.PI / 2;
-
-        // For player: cards face down initially; later we’ll allow “peek”
-        // For bots: always face down to you
-        this.group.add(card);
-        p.holeMeshes.push(card);
-      }
-    }
-
-    // blinds/antes (simple)
-    const ante = 200;
-    for (const p of this.players) {
-      if (!p.inHand) continue;
-      const pay = Math.min(p.chips, ante);
-      p.chips -= pay;
-      this.pot += pay;
-    }
-
-    this.phase = "preflop";
-    this.phaseTimer = 2.6; // time to see deal
-    this.lastWinnerText = "";
-  },
-
-  _toFlop() {
-    this.phase = "flop";
-    this.phaseTimer = 3.0;
-
-    for (let i = 0; i < 3; i++) {
-      const c = this.deck.pop();
-      const label = this._cardLabel(c);
-      this._setCard(this.communityCards[i], true, label);
-      this.communityCards[i].visible = true;
+      if (i < this.cards.communityReveal) this._setCardFace(this.cards.community[i], this._communityFaces[i]);
+      else this._setCardFace(this.cards.community[i], "BACK");
     }
   },
 
-  _toTurn() {
-    this.phase = "turn";
-    this.phaseTimer = 3.0;
+  _showdown() {
+    // Award random points to a random team (placeholder for your real showdown system)
+    const idx = Math.floor(Math.random() * this.showdown.teams.length);
+    const pts = Math.floor(500 + Math.random() * 5000);
+    this.showdown.teams[idx].points += pts;
 
-    const c = this.deck.pop();
-    this._setCard(this.communityCards[3], true, this._cardLabel(c));
-    this.communityCards[3].visible = true;
+    // Visual: lift all community cards briefly
+    for (const card of this.cards.community) card.userData._hoverBoost = 0.08;
   },
 
-  _toRiver() {
-    this.phase = "river";
-    this.phaseTimer = 3.0;
+  _hoverCommunityOnGaze(camera) {
+    if (!camera) return;
 
-    const c = this.deck.pop();
-    this._setCard(this.communityCards[4], true, this._cardLabel(c));
-    this.communityCards[4].visible = true;
-  },
+    // ray from camera forward
+    const origin = new THREE.Vector3();
+    const dir = new THREE.Vector3();
+    camera.getWorldPosition(origin);
+    camera.getWorldDirection(dir);
 
-  _toShowdown() {
-    this.phase = "showdown";
-    this.phaseTimer = 3.0;
+    // For each community card, see if it's near the ray (cheap gaze test)
+    for (const card of this.cards.community) {
+      const p = new THREE.Vector3();
+      card.getWorldPosition(p);
 
-    // Evaluate winner among in-hand players
-    const board = [];
-    for (let i = 0; i < 5; i++) {
-      const lbl = this.communityCards[i].userData.label;
-      if (lbl !== "??") board.push(this._parseLabel(lbl));
-    }
+      const v = p.clone().sub(origin);
+      const proj = v.dot(dir);
+      const closest = origin.clone().add(dir.clone().multiplyScalar(Math.max(0, proj)));
+      const dist = p.distanceTo(closest);
 
-    const contenders = this.players.filter(p => p.inHand);
-    let best = null;
-    let winners = [];
+      const looking = proj > 0.5 && proj < 8.0 && dist < 0.22;
+      const baseY = 0.93;
+      const targetY = looking ? 1.02 : baseY;
+      card.position.y += (targetY - card.position.y) * 0.12;
 
-    for (const p of contenders) {
-      const hole = p.hole;
-      const score = this._bestHandScore([...hole, ...board]);
-      if (!best || this._compareScore(score, best) > 0) {
-        best = score;
-        winners = [p];
-      } else if (this._compareScore(score, best) === 0) {
-        winners.push(p);
-      }
-    }
-
-    const split = Math.floor(this.pot / Math.max(1, winners.length));
-    for (const w of winners) w.chips += split;
-
-    const winNames = winners.map(w => w.name).join(", ");
-    this.lastWinnerText = `Winner: ${winNames} — ${best?.name || "HAND"}`;
-    this.lastWinnerAt = performance.now();
-
-    // Reveal winners’ hole cards (face up) for SHOWDOWN
-    for (const w of winners) {
-      // show their real labels
-      for (let k = 0; k < 2; k++) {
-        const label = this._cardLabel(w.hole[k]);
-        this._setCard(w.holeMeshes[k], true, label);
+      // decay showdown hover boost
+      if (card.userData._hoverBoost) {
+        card.position.y += card.userData._hoverBoost;
+        card.userData._hoverBoost *= 0.86;
+        if (card.userData._hoverBoost < 0.002) card.userData._hoverBoost = 0;
       }
     }
   },
 
-  _setCard(mesh, faceUp, label) {
-    mesh.userData.faceUp = faceUp;
-    mesh.userData.label = label;
-    mesh.material.map = faceUp ? mesh.userData.frontTex : mesh.userData.backTex;
-
-    if (faceUp) {
-      // replace front texture with correct label
-      const tex = this._cardFaceTexture(label);
-      mesh.userData.frontTex = tex;
-      mesh.material.map = tex;
-    }
-    mesh.material.needsUpdate = true;
-  },
-
+  // simple deck
   _makeDeck() {
-    const suits = ["S", "H", "D", "C"];
-    const ranks = ["2","3","4","5","6","7","8","9","T","J","Q","K","A"];
+    const ranks = ["A","K","Q","J","10","9","8","7","6","5","4","3","2"];
+    const suits = ["♠","♥","♦","♣"];
     const deck = [];
-    for (const s of suits) for (const r of ranks) deck.push({ r, s });
+    for (const r of ranks) for (const s of suits) deck.push(`${r}${s}`);
+
+    // shuffle
+    for (let i = deck.length - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      [deck[i], deck[j]] = [deck[j], deck[i]];
+    }
     return deck;
   },
 
-  _shuffle(a) {
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = (Math.random() * (i + 1)) | 0;
-      [a[i], a[j]] = [a[j], a[i]];
-    }
+  _draw() {
+    const card = this._deck[this._deckIndex % this._deck.length];
+    this._deckIndex++;
+    return card;
   },
-
-  _cardLabel(c) {
-    return `${c.r}${c.s}`;
-  },
-
-  _parseLabel(lbl) {
-    // lbl "AS" etc
-    return { r: lbl[0], s: lbl[1] };
-  },
-
-  // -------- Hand evaluation (Texas Hold’em best of 7) --------
-  // returns {rank: number, kickers: number[], name: string}
-  _bestHandScore(cards7) {
-    // map ranks to values
-    const rv = r => ("23456789TJQKA".indexOf(r) + 2);
-    const values = cards7.map(c => rv(c.r)).sort((a,b)=>b-a);
-    const suits = cards7.map(c => c.s);
-
-    // counts
-    const count = new Map();
-    for (const v of values) count.set(v, (count.get(v)||0)+1);
-
-    const suitCount = new Map();
-    for (const s of suits) suitCount.set(s, (suitCount.get(s)||0)+1);
-
-    const isFlush = [...suitCount.values()].some(n => n >= 5);
-    let flushSuit = null;
-    if (isFlush) {
-      for (const [s,n] of suitCount.entries()) if (n >= 5) flushSuit = s;
-    }
-
-    // unique values for straight checking (Ace low)
-    const uniq = [...new Set(values)].sort((a,b)=>b-a);
-    const uniqAceLow = uniq.includes(14) ? [...uniq, 1] : uniq;
-
-    const straightHigh = this._straightHigh(uniqAceLow);
-    const flushValues = flushSuit
-      ? cards7.filter(c => c.s === flushSuit).map(c => rv(c.r)).sort((a,b)=>b-a)
-      : [];
-
-    const flushUniq = [...new Set(flushValues)];
-    const flushUniqAceLow = flushUniq.includes(14) ? [...flushUniq, 1] : flushUniq;
-    const straightFlushHigh = flushSuit ? this._straightHigh(flushUniqAceLow) : 0;
-
-    // group ranks
-    const groups = [...count.entries()]
-      .map(([v,n]) => ({ v, n }))
-      .sort((a,b)=> (b.n - a.n) || (b.v - a.v));
-
-    // Straight flush
-    if (straightFlushHigh) {
-      const name = straightFlushHigh === 14 ? "ROYAL FLUSH" : "STRAIGHT FLUSH";
-      return { rank: 9, kickers: [straightFlushHigh], name };
-    }
-
-    // Four
-    if (groups[0].n === 4) {
-      const quad = groups[0].v;
-      const kicker = groups.find(g => g.v !== quad).v;
-      return { rank: 8, kickers: [quad, kicker], name: "FOUR OF A KIND" };
-    }
-
-    // Full house
-    if (groups[0].n === 3 && groups[1]?.n >= 2) {
-      return { rank: 7, kickers: [groups[0].v, groups[1].v], name: "FULL HOUSE" };
-    }
-
-    // Flush
-    if (isFlush) {
-      const top5 = flushValues.slice(0,5);
-      return { rank: 6, kickers: top5, name: "FLUSH" };
-    }
-
-    // Straight
-    if (straightHigh) {
-      return { rank: 5, kickers: [straightHigh], name: "STRAIGHT" };
-    }
-
-    // Three
-    if (groups[0].n === 3) {
-      const trips = groups[0].v;
-      const kickers = groups.filter(g => g.v !== trips).map(g=>g.v).sort((a,b)=>b-a).slice(0,2);
-      return { rank: 4, kickers: [trips, ...kickers], name: "THREE OF A KIND" };
-    }
-
-    // Two pair
-    if (groups[0].n === 2 && groups[1]?.n === 2) {
-      const p1 = Math.max(groups[0].v, groups[1].v);
-      const p2 = Math.min(groups[0].v, groups[1].v);
-      const kicker = groups.find(g => g.n === 1).v;
-      return { rank: 3, kickers: [p1, p2, kicker], name: "TWO PAIR" };
-    }
-
-    // One pair
-    if (groups[0].n === 2) {
-      const pair = groups[0].v;
-      const kickers = groups.filter(g => g.v !== pair).map(g=>g.v).sort((a,b)=>b-a).slice(0,3);
-      return { rank: 2, kickers: [pair, ...kickers], name: "ONE PAIR" };
-    }
-
-    // High card
-    return { rank: 1, kickers: values.slice(0,5), name: "HIGH CARD" };
-  },
-
-  _straightHigh(uniqDescAceLow) {
-    // expects list like [A,K,Q,...,2,1] possibly
-    let run = 1;
-    for (let i = 1; i < uniqDescAceLow.length; i++) {
-      if (uniqDescAceLow[i] === uniqDescAceLow[i-1] - 1) run++;
-      else run = 1;
-
-      if (run >= 5) {
-        // high card is the first in the run
-        return uniqDescAceLow[i-4];
-      }
-    }
-    return 0;
-  },
-
-  _compareScore(a, b) {
-    if (a.rank !== b.rank) return a.rank - b.rank;
-    const n = Math.max(a.kickers.length, b.kickers.length);
-    for (let i = 0; i < n; i++) {
-      const av = a.kickers[i] || 0;
-      const bv = b.kickers[i] || 0;
-      if (av !== bv) return av - bv;
-    }
-    return 0;
-  }
 };

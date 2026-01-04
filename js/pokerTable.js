@@ -8,8 +8,6 @@ export const PokerTable = {
     chips: [],
     buttons: [],
     textures: ['card_red.jpg','card_blue.jpg','chip_red.jpg','chip_blue.jpg','chip_green.jpg'],
-    cardGeo: new THREE.BoxGeometry(0.5,0.01,0.75),
-    chipGeo: new THREE.CylinderGeometry(0.2,0.2,0.05,16),
 
     init(scene){
         this.scene = scene;
@@ -19,7 +17,7 @@ export const PokerTable = {
         this.dealCards();
     },
 
-    randomMat(type='card'){
+    randomMat(){
         const idx = Math.floor(Math.random()*this.textures.length);
         const tex = new THREE.TextureLoader().load(`assets/textures/${this.textures[idx]}`);
         return new THREE.MeshStandardMaterial({ map: tex, roughness:0.7, metalness:0.2 });
@@ -30,7 +28,6 @@ export const PokerTable = {
             new THREE.MeshStandardMaterial({color:0x006600}));
         top.position.copy(this.tableCenter);
         this.scene.add(top);
-
         const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.8,1,8),
             new THREE.MeshStandardMaterial({color:0x111111}));
         leg.position.set(this.tableCenter.x,0.5,this.tableCenter.z);
@@ -52,10 +49,8 @@ export const PokerTable = {
 
     spawnChips(){
         for(let i=0;i<10;i++){
-            const chip = new THREE.Mesh(this.chipGeo,this.randomMat('chip'));
-            chip.position.set(this.tableCenter.x+(Math.random()-0.5)*2,
-                              1.05,
-                              this.tableCenter.z+(Math.random()-0.5)*2);
+            const chip = new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.2,0.05,16), this.randomMat());
+            chip.position.set(this.tableCenter.x+(Math.random()-0.5)*2,1.05,this.tableCenter.z+(Math.random()-0.5)*2);
             chip.userData.grabbable=true;
             this.scene.add(chip);
             World.grabbableObjects.push(chip);
@@ -69,16 +64,17 @@ export const PokerTable = {
             new THREE.Vector3(this.tableCenter.x,1.05,this.tableCenter.z-1),
             new THREE.Vector3(this.tableCenter.x+2,1.05,this.tableCenter.z-1)
         ];
-        for(let i=0;i<3;i++){
-            const card = new THREE.Mesh(this.cardGeo,this.randomMat('card'));
+
+        positions.forEach(pos=>{
+            const card = new THREE.Mesh(new THREE.BoxGeometry(0.5,0.01,0.75), this.randomMat());
             card.position.set(this.tableCenter.x,1.5,this.tableCenter.z);
             card.userData.grabbable=true;
             this.scene.add(card);
             World.grabbableObjects.push(card);
             this.cards.push(card);
 
-            // Animate to positions
-            const target = positions[i];
+            // Animate card to target
+            const target = pos.clone();
             let frame=0;
             const duration=60;
             const animate = ()=>{
@@ -88,7 +84,7 @@ export const PokerTable = {
                 requestAnimationFrame(animate);
             };
             animate();
-        }
+        });
     },
 
     updateHandsInteraction(hands){

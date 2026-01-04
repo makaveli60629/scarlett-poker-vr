@@ -29,6 +29,50 @@
     #pot { margin-top:6px; font-weight: 900; opacity: 0.95; }
     #owned { margin-top:6px; font-size: 13px; opacity: 0.9; }
     #seat { margin-top:6px; font-size: 13px; opacity: 0.9; }
+
+    /* Android Touch Controls */
+    #touchUI {
+      position: fixed; inset: 0;
+      pointer-events: none;
+      z-index: 20;
+      display: none; /* auto-enabled in JS when not in VR */
+    }
+    #joyBase {
+      position: absolute; left: 18px; bottom: 18px;
+      width: 160px; height: 160px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.18);
+      pointer-events: auto;
+      touch-action: none;
+      backdrop-filter: blur(2px);
+    }
+    #joyStick {
+      position: absolute; left: 50%; top: 50%;
+      width: 70px; height: 70px;
+      transform: translate(-50%,-50%);
+      border-radius: 999px;
+      background: rgba(122,44,255,0.35);
+      border: 1px solid rgba(255,255,255,0.22);
+    }
+
+    #btnCol {
+      position: absolute; right: 18px; bottom: 18px;
+      display: flex; flex-direction: column; gap: 12px;
+      pointer-events: auto;
+    }
+    .bigBtn{
+      width: 150px;
+      padding: 14px 12px;
+      border-radius: 14px;
+      background: rgba(0,0,0,0.6);
+      border: 1px solid rgba(255,255,255,0.22);
+      font-weight: 900;
+      text-align: center;
+      touch-action: none;
+      user-select: none;
+    }
+    .bigBtn:active { transform: scale(0.98); }
   </style>
 </head>
 
@@ -36,8 +80,8 @@
   <div id="hud">
     <div id="title">Scarlett Poker VR</div>
     <div id="help">
-      <b>Quest:</b> laser hover highlights → trigger (UI/seat/teleport).<br/>
-      <b>Android:</b> 1-finger drag = look • 2-finger drag = move • tap = interact (center aim).
+      <b>Quest:</b> laser hover highlights → trigger interact + teleport.<br/>
+      <b>Android:</b> joystick moves • drag screen looks • INTERACT clicks • TELEPORT places marker.
     </div>
 
     <div id="status">Loading…</div>
@@ -52,6 +96,15 @@
     <div id="pot">Pot: 0</div>
     <div id="seat">Seat: (not seated)</div>
     <div id="owned">Owned: (none)</div>
+  </div>
+
+  <!-- Touch UI overlay -->
+  <div id="touchUI">
+    <div id="joyBase"><div id="joyStick"></div></div>
+    <div id="btnCol">
+      <div id="interactBtn" class="bigBtn">INTERACT</div>
+      <div id="teleportBtn" class="bigBtn">TELEPORT</div>
+    </div>
   </div>
 
   <!-- THREE classic build (non-module for Android reliability) -->

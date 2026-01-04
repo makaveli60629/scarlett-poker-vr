@@ -1,200 +1,234 @@
+// js/world.js
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
-import { TeleportMachine } from "./teleport_machine.js";
+
+/**
+ * World: builds lobby + store zone + poker zone look.
+ * - Solid walls: collisions handled in main clamp + box blockers list
+ * - Textures safe loader (falls back to colors if missing)
+ * - Adds plants, couches, frames, ceiling, trims, neon strips
+ */
 
 export const World = {
-  group: null,
-  colliders: [],
-  interactables: [],
   textureLoader: new THREE.TextureLoader(),
+  blockers: [], // axis-aligned boxes { min, max }
 
-  safeMat(file, fallbackColor = 0x333344) {
-    try {
-      const tex = this.textureLoader.load(`./assets/textures/${file}`);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-      tex.repeat.set(2,2);
-      return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 });
-    } catch {
-      return new THREE.MeshStandardMaterial({ color: fallbackColor, roughness: 0.95 });
-    }
-  },
-
-  build(scene) {
-    this.group = new THREE.Group();
-    scene.add(this.group);
-
-    scene.background = new THREE.Color(0x07080b);
-    scene.fog = new THREE.Fog(0x07080b, 6, 70);
-
-    // FLOOR
-    const floorMat = this.safeMat("carpet_red.jpg", 0x240a12);
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(36, 26), floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
-    this.group.add(floor);
-
-    // WALLS
-    const wallMat = this.safeMat("wall_purple.jpg", 0x2a2a3b);
-    const mkWall = (w, h, d, x, z, ry) => {
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
-      wall.position.set(x, h/2, z);
-      wall.rotation.y = ry;
-      wall.castShadow = true;
-      wall.receiveShadow = true;
-      this.group.add(wall);
-      this.colliders.push(wall);
-      return wall;
-    };
-
-    // Outer box
-    mkWall(36.6, 3.4, 0.7, 0, -13.25, 0);
-    mkWall(36.6, 3.4, 0.7, 0,  13.25, 0);
-    mkWall(26.6, 3.4, 0.7, -18.25, 0, Math.PI/2);
-    mkWall(26.6, 3.4, 0.7,  18.25, 0, Math.PI/2);
-
-    // ✅ STORE DIVIDER (moved forward to make store area deeper + safer spawn)
-    // Divider line moved from z=6.5 -> z=4.8 so store area (z>4.8) is bigger and cleaner.
-    const dividerH = 3.0;
-    const dividerD = 0.65;
-    const dividerZ = 4.8;
-
-    // doorway gap centered near x=13 (store entry)
-    const gapCenterX = 13.0;
-    const gapWidth = 3.2;
-
-    // left segment
-    const leftWidth = (gapCenterX - gapWidth/2) - (-18.0);
-    const leftCenterX = (-18.0 + (gapCenterX - gapWidth/2)) / 2;
-    const d1 = new THREE.Mesh(new THREE.BoxGeometry(leftWidth, dividerH, dividerD), wallMat);
-    d1.position.set(leftCenterX, dividerH/2, dividerZ);
-    d1.castShadow = true; d1.receiveShadow = true;
-    this.group.add(d1); this.colliders.push(d1);
-
-    // right segment
-    const rightWidth = (18.0) - (gapCenterX + gapWidth/2);
-    const rightCenterX = ((gapCenterX + gapWidth/2) + 18.0) / 2;
-    const d2 = new THREE.Mesh(new THREE.BoxGeometry(rightWidth, dividerH, dividerD), wallMat);
-    d2.position.set(rightCenterX, dividerH/2, dividerZ);
-    d2.castShadow = true; d2.receiveShadow = true;
-    this.group.add(d2); this.colliders.push(d2);
-
-    // doorway caps (stop seam slipping)
-    const capMat = new THREE.MeshStandardMaterial({ color: 0x0f1018, roughness: 0.95 });
-    const cap1 = new THREE.Mesh(new THREE.BoxGeometry(0.85, dividerH, 1.4), capMat);
-    cap1.position.set(gapCenterX - gapWidth/2, dividerH/2, dividerZ);
-    this.group.add(cap1); this.colliders.push(cap1);
-
-    const cap2 = new THREE.Mesh(new THREE.BoxGeometry(0.85, dividerH, 1.4), capMat);
-    cap2.position.set(gapCenterX + gapWidth/2, dividerH/2, dividerZ);
-    this.group.add(cap2); this.colliders.push(cap2);
-
-    // TRIM / PILLARS
-    const goldMat = new THREE.MeshStandardMaterial({ color: 0xC9A24D, metalness: 0.85, roughness: 0.22 });
-    const pillarGeo = new THREE.BoxGeometry(0.6, 3.4, 0.6);
-    const corners = [[-17.9,-12.8],[17.9,-12.8],[-17.9,12.8],[17.9,12.8]];
-    for (const [x,z] of corners) {
-      const p = new THREE.Mesh(pillarGeo, goldMat);
-      p.position.set(x, 1.7, z);
-      p.castShadow = true;
-      this.group.add(p);
-      this.colliders.push(p);
-    }
-
-    // CEILING
-    const ceiling = new THREE.Mesh(
-      new THREE.PlaneGeometry(36, 26),
-      new THREE.MeshStandardMaterial({ color: 0x0b0c12, roughness: 1.0, side: THREE.DoubleSide })
-    );
-    ceiling.rotation.x = Math.PI/2;
-    ceiling.position.y = 3.45;
-    this.group.add(ceiling);
-
-    // LIGHTING
-    scene.add(new THREE.AmbientLight(0xffffff, 0.72));
-
-    const dir = new THREE.DirectionalLight(0xffffff, 1.55);
-    dir.position.set(8, 10, 6);
-    dir.castShadow = true;
-    scene.add(dir);
-
-    // Lobby spotlights
-    const spots = [
-      [-12, 3.1, -8], [12, 3.1, -8],
-      [-12, 3.1,  0], [12, 3.1,  0],
-    ];
-    for (const [x,y,z] of spots) {
-      const s = new THREE.SpotLight(0xfff2cc, 1.35, 32, Math.PI/5, 0.25, 1.0);
-      s.position.set(x,y,z);
-      s.target.position.set(0,0,0);
-      s.castShadow = true;
-      scene.add(s);
-      scene.add(s.target);
-    }
-
-    // ✅ Extra STORE lighting (brighter store)
-    const storeLights = [
-      [13.5, 2.9, 10.5],
-      [16.0, 2.9,  9.0],
-      [11.0, 2.9,  9.0],
-    ];
-    for (const [x,y,z] of storeLights) {
-      const p = new THREE.PointLight(0xffffff, 1.35, 18);
-      p.position.set(x,y,z);
-      scene.add(p);
-    }
-
-    // Teleport pads
-    this.interactables.push(TeleportMachine.build(scene, -12, 0));
-    this.interactables.push(TeleportMachine.build(scene,  13.5, 9.5));
-    this.interactables.push(TeleportMachine.build(scene,  0, -6));
-
-    // Simple logo wall
-    const logo = this._makeLogoSign();
-    logo.position.set(0, 1.9, -12.85);
-    logo.rotation.y = Math.PI;
-    this.group.add(logo);
-
-    return this.group;
-  },
-
-  _makeLogoSign() {
-    const canvas = document.createElement("canvas");
-    canvas.width = 2048;
-    canvas.height = 512;
-    const ctx = canvas.getContext("2d");
-
-    ctx.fillStyle = "rgba(0,0,0,0.65)";
-    ctx.fillRect(0,0,canvas.width,canvas.height);
-
-    ctx.strokeStyle = "rgba(0,255,170,0.85)";
-    ctx.lineWidth = 20;
-    ctx.strokeRect(30,30,canvas.width-60,canvas.height-60);
-
-    ctx.strokeStyle = "rgba(201,162,77,0.85)";
-    ctx.lineWidth = 12;
-    ctx.strokeRect(70,70,canvas.width-140,canvas.height-140);
-
-    ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(255,255,255,0.96)";
-    ctx.font = "bold 140px system-ui";
-    ctx.fillText("SCARLETT POKER VR", canvas.width/2, 220);
-
-    ctx.fillStyle = "rgba(255,80,200,0.92)";
-    ctx.font = "bold 96px system-ui";
-    ctx.fillText("TEAM NOVA", canvas.width/2, 355);
-
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
-
+  // Safe texture material: if missing, you still see color
+  safeMat(texFile, fallbackColor, opts = {}) {
     const mat = new THREE.MeshStandardMaterial({
-      map: tex,
-      emissive: 0x101018,
-      emissiveIntensity: 0.65,
-      transparent: true
+      color: fallbackColor ?? 0x777777,
+      roughness: opts.roughness ?? 0.9,
+      metalness: opts.metalness ?? 0.05,
+      emissive: opts.emissive ?? 0x000000,
+      emissiveIntensity: opts.emissiveIntensity ?? 0.0,
     });
 
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(11.2, 2.7), mat);
-    mesh.castShadow = true;
-    return mesh;
-  }
+    if (!texFile) return mat;
+
+    const path = `assets/textures/${texFile}`;
+    try {
+      const t = this.textureLoader.load(
+        path,
+        (tt) => {
+          tt.wrapS = tt.wrapT = THREE.RepeatWrapping;
+          tt.repeat.set(opts.repeatX ?? 2, opts.repeatY ?? 2);
+          mat.map = tt;
+          mat.color.set(0xffffff);
+          mat.needsUpdate = true;
+        },
+        undefined,
+        () => {
+          // missing texture -> keep fallback
+          console.warn("Texture missing:", path);
+        }
+      );
+      // allow load to swap in later
+      void t;
+    } catch (e) {
+      console.warn("Texture load failed:", path, e);
+    }
+    return mat;
+  },
+
+  addBlockerFromMesh(mesh) {
+    mesh.updateWorldMatrix(true, true);
+    const box = new THREE.Box3().setFromObject(mesh);
+    this.blockers.push({ min: box.min.clone(), max: box.max.clone() });
+  },
+
+  build(scene, playerGroup) {
+    // Spawn position (safe open area)
+    playerGroup.position.set(0, 0, 4);
+    playerGroup.rotation.set(0, Math.PI, 0);
+
+    // Background + fog
+    scene.background = new THREE.Color(0x05060c);
+    scene.fog = new THREE.Fog(0x05060c, 8, 55);
+
+    // Floor (lobby)
+    const floorMat = this.safeMat(null, 0x5b1017, { roughness: 0.95 });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    floor.name = "floor_lobby";
+    scene.add(floor);
+
+    // Carpet strip near poker
+    const carpetMat = this.safeMat(null, 0x141018, { roughness: 1.0 });
+    const carpet = new THREE.Mesh(new THREE.PlaneGeometry(16, 14), carpetMat);
+    carpet.rotation.x = -Math.PI / 2;
+    carpet.position.set(0, 0.002, -3);
+    carpet.receiveShadow = true;
+    scene.add(carpet);
+
+    // Walls (solid)
+    const wallMat = this.safeMat(null, 0x2b2d3b, { roughness: 0.95 });
+    const wallH = 3.1;
+    const thick = 0.25;
+
+    const makeWall = (w, h, d, x, y, z, name) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+      m.position.set(x, y, z);
+      m.castShadow = false;
+      m.receiveShadow = true;
+      m.name = name;
+      scene.add(m);
+      this.addBlockerFromMesh(m);
+      return m;
+    };
+
+    // outer box
+    makeWall(30, wallH, thick, 0, wallH/2, -15, "wall_north");
+    makeWall(30, wallH, thick, 0, wallH/2,  15, "wall_south");
+    makeWall(thick, wallH, 30, -15, wallH/2, 0, "wall_west");
+    makeWall(thick, wallH, 30,  15, wallH/2, 0, "wall_east");
+
+    // Ceiling
+    const ceilMat = this.safeMat(null, 0x0b0c12, { roughness: 1.0 });
+    const ceil = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), ceilMat);
+    ceil.rotation.x = Math.PI / 2;
+    ceil.position.set(0, 3.15, 0);
+    scene.add(ceil);
+
+    // Neon strip lights
+    const stripMatA = new THREE.MeshBasicMaterial({ color: 0x00ffaa, transparent: true, opacity: 0.85 });
+    const stripMatB = new THREE.MeshBasicMaterial({ color: 0xff3c78, transparent: true, opacity: 0.85 });
+
+    const strip = (x, y, z, w, d, mat) => {
+      const s = new THREE.Mesh(new THREE.BoxGeometry(w, 0.04, d), mat);
+      s.position.set(x, y, z);
+      scene.add(s);
+    };
+
+    strip(0, 2.95, 0, 26, 0.08, stripMatA);
+    strip(0, 2.95, -10, 26, 0.08, stripMatB);
+    strip(-10, 2.95, 0, 0.08, 26, stripMatB);
+    strip(10, 2.95, 0, 0.08, 26, stripMatA);
+
+    // Pillars / trims
+    const pillarMat = this.safeMat(null, 0x1b1c26, { roughness: 0.9, metalness: 0.1 });
+    const pillar = (x, z) => {
+      const p = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.42, 3.1, 16), pillarMat);
+      p.position.set(x, 1.55, z);
+      p.castShadow = true;
+      p.receiveShadow = true;
+      scene.add(p);
+      this.addBlockerFromMesh(p);
+    };
+    pillar(-13, -13); pillar(13, -13); pillar(-13, 13); pillar(13, 13);
+
+    // Simple couches
+    const couchMat = this.safeMat(null, 0x131418, { roughness: 1.0 });
+    const makeCouch = (x, z, rotY) => {
+      const g = new THREE.Group();
+      const base = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.35, 0.75), couchMat);
+      base.position.y = 0.175;
+      base.castShadow = true; base.receiveShadow = true;
+      g.add(base);
+
+      const back = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.6, 0.2), couchMat);
+      back.position.set(0, 0.62, -0.28);
+      back.castShadow = true; back.receiveShadow = true;
+      g.add(back);
+
+      g.position.set(x, 0, z);
+      g.rotation.y = rotY;
+      g.name = "couch";
+      scene.add(g);
+
+      // block
+      this.addBlockerFromMesh(base);
+      return g;
+    };
+    makeCouch(-6.2, 8.8, Math.PI);
+    makeCouch( 6.2, 8.8, Math.PI);
+
+    // Plants
+    const plantPotMat = this.safeMat(null, 0x2a2b33, { roughness: 0.9 });
+    const plantLeafMat = new THREE.MeshStandardMaterial({ color: 0x1fa155, roughness: 0.9, metalness: 0.0 });
+    const plant = (x, z) => {
+      const g = new THREE.Group();
+      const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.32, 0.42, 14), plantPotMat);
+      pot.position.y = 0.21;
+      pot.castShadow = true; pot.receiveShadow = true;
+      g.add(pot);
+
+      for (let i = 0; i < 10; i++) {
+        const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.5, 8), plantLeafMat);
+        leaf.position.set((Math.random()-0.5)*0.18, 0.55 + Math.random()*0.2, (Math.random()-0.5)*0.18);
+        leaf.rotation.y = Math.random() * Math.PI * 2;
+        leaf.castShadow = true;
+        g.add(leaf);
+      }
+
+      g.position.set(x, 0, z);
+      g.name = "plant";
+      scene.add(g);
+      this.addBlockerFromMesh(pot);
+    };
+    plant(-10.5, -8.5);
+    plant(10.5, -8.5);
+    plant(-10.5,  8.5);
+    plant(10.5,  8.5);
+
+    // Picture frames (use your casino_art_1 / casino_art_2 if present)
+    const frameMat = this.safeMat(null, 0x101018, { roughness: 0.8, metalness: 0.15 });
+    const makeFrame = (x, y, z, rotY, tex) => {
+      const g = new THREE.Group();
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.2, 0.08), frameMat);
+      frame.position.set(0, 0, 0);
+      g.add(frame);
+
+      const artMat = this.safeMat(tex, 0x2b2b2b, { roughness: 0.95, repeatX: 1, repeatY: 1 });
+      const art = new THREE.Mesh(new THREE.PlaneGeometry(2.05, 1.05), artMat);
+      art.position.set(0, 0, 0.05);
+      g.add(art);
+
+      g.position.set(x, y, z);
+      g.rotation.y = rotY;
+      g.name = "frame_art";
+      scene.add(g);
+    };
+    makeFrame(0, 1.7, -14.7, 0, "casino_art_1.jpg");
+    makeFrame(-8, 1.7, -14.7, 0, "casino_art_2.jpg");
+
+    // Store "room" hint area (bigger)
+    const storeFloor = new THREE.Mesh(new THREE.PlaneGeometry(10, 10), this.safeMat(null, 0x0f1016, { roughness: 1.0 }));
+    storeFloor.rotation.x = -Math.PI/2;
+    storeFloor.position.set(9.2, 0.003, 4.0);
+    storeFloor.receiveShadow = true;
+    storeFloor.name = "floor_store";
+    scene.add(storeFloor);
+
+    // Store walls (blockers)
+    makeWall(10, wallH, thick, 9.2, wallH/2, -1.0, "store_wall_n");
+    makeWall(10, wallH, thick, 9.2, wallH/2,  9.0, "store_wall_s");
+    makeWall(thick, wallH, 10, 4.2, wallH/2, 4.0, "store_wall_w");
+    makeWall(thick, wallH, 10, 14.2, wallH/2, 4.0, "store_wall_e");
+
+    // Return useful info for main.js
+    return {
+      floorY: 0.0,
+      blockers: this.blockers
+    };
+  },
 };

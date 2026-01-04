@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>Scarlett Poker VR</title>
+  <style>
+    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#070a12; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; touch-action:none; }
+    canvas { display:block; width:100%; height:100%; }
+
+    #hud {
+      position: fixed; inset: 0; z-index: 9999;
+      pointer-events: none;
+    }
+
+    #joy {
+      position: absolute; left: 16px; bottom: 18px;
+      width: 120px; height: 120px; border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      backdrop-filter: blur(6px);
+      pointer-events: auto;
+    }
+    #nub {
+      position: absolute; left: 50%; top: 50%;
+      width: 52px; height: 52px; border-radius: 999px;
+      transform: translate(-50%,-50%);
+      background: rgba(255,255,255,0.18);
+      border: 1px solid rgba(255,255,255,0.20);
+    }
+
+    #bar {
+      position: absolute; left: 50%; bottom: 14px;
+      transform: translateX(-50%);
+      width: min(660px, 92vw);
+      display: flex; gap: 10px;
+      pointer-events: auto;
+    }
+    .btn{
+      flex:1; border:0; border-radius:14px;
+      padding: 12px 14px;
+      background: rgba(0,0,0,0.55);
+      color: rgba(255,255,255,0.92);
+      font-size: 14px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      backdrop-filter: blur(6px);
+    }
+
+    #log {
+      position: absolute; right: 12px; top: 12px;
+      width: min(420px, 54vw);
+      max-height: 36vh;
+      overflow: auto;
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(0,0,0,0.55);
+      color: rgba(255,255,255,0.9);
+      font-size: 12px;
+      line-height: 1.25;
+      pointer-events: auto;
+      user-select: text;
+      backdrop-filter: blur(6px);
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <div id="joy"><div id="nub"></div></div>
+
+    <div id="bar">
+      <button id="btnReset" class="btn">Reset</button>
+      <button id="btnSit" class="btn">Sit</button>
+      <button id="btnStand" class="btn">Stand</button>
+      <button id="btnNext" class="btn">Next Hand</button>
+      <button id="btnStore" class="btn">Store</button>
+    </div>
+
+    <div id="log">Booting…</div>
+  </div>
+
+  <script type="module">
+    import { boot } from './js/main.js';
+    boot();
+  </script>
+</body>
+</html>

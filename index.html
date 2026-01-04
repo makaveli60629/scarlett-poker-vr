@@ -8,7 +8,6 @@
     html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#070a12; touch-action:none; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
     canvas { display:block; width:100%; height:100%; }
 
-    /* Force VRButton to TOP RIGHT (no overlap) */
     #VRButton {
       position: fixed !important;
       top: 12px !important;
@@ -19,11 +18,7 @@
       transform: scale(1.05);
     }
 
-    #hud {
-      position: fixed; inset: 0;
-      z-index: 9999;
-      pointer-events: none;
-    }
+    #hud { position: fixed; inset: 0; z-index: 9999; pointer-events: none; }
 
     #log {
       position: absolute; right: 12px; top: 58px;
@@ -44,13 +39,15 @@
     #bar {
       position: absolute; left: 50%; bottom: 14px;
       transform: translateX(-50%);
-      width: min(660px, 94vw);
+      width: min(760px, 96vw);
       display: flex; gap: 10px;
       pointer-events: auto;
+      flex-wrap: wrap;
     }
 
     .btn{
-      flex:1; border:0; border-radius:14px;
+      flex: 1 1 120px;
+      border:0; border-radius:14px;
       padding: 12px 14px;
       background: rgba(0,0,0,0.55);
       color: rgba(255,255,255,0.92);
@@ -86,6 +83,7 @@
       <button id="btnFree" class="btn">Free Move</button>
       <button id="btnSit" class="btn">Sit</button>
       <button id="btnTeleport" class="btn">Teleport On</button>
+      <button id="btnLights" class="btn">Lighting+</button>
       <button id="btnDeal" class="btn">Deal</button>
     </div>
 

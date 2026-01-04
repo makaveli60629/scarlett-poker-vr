@@ -1,6 +1,10 @@
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
 export function initUI({ scene, camera, renderer, world, playerGroup, audio }) {
+ if (actionId === "SPAWN_CHIPS") {
+  world.spawnChips?.(scene);
+  return;
+ }
   // ---------- State ----------
   const state = {
     chips: 10000,

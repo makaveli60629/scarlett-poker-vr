@@ -7,10 +7,8 @@
 
   <style>
     html, body {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
+      margin: 0; padding: 0;
+      width: 100%; height: 100%;
       overflow: hidden;
       background: #000;
       color: #fff;
@@ -18,8 +16,7 @@
     }
     #overlay {
       position: fixed;
-      top: 10px;
-      left: 10px;
+      top: 10px; left: 10px;
       z-index: 10;
       background: rgba(0,0,0,0.65);
       padding: 10px 12px;
@@ -32,24 +29,46 @@
       opacity: 0.9;
       white-space: pre-wrap;
     }
+    #vrBtn {
+      margin-top: 10px;
+      display: inline-block;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #1f1f1f;
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+      user-select: none;
+    }
+    #vrBtn[disabled] {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
   </style>
 </head>
 
 <body>
   <div id="overlay">
-    <div style="font-size:20px;font-weight:700;">Scarlett Poker VR</div>
-    <div style="margin-top:6px;">
+    <div style="font-size:20px;font-weight:800;">Scarlett Poker VR</div>
+    <div style="margin-top:6px; line-height: 1.35;">
       Desktop: <b>M</b> toggles menu; click buttons to teleport.<br/>
-      VR: point controller at floor for reticle; pull trigger to teleport.
+      VR: point controller at floor for reticle; pull trigger to teleport.<br/>
+      <b>Android:</b> drag to look; two-finger drag to move.
     </div>
-    <div id="status">Loading...</div>
+
+    <div id="status">Loading…</div>
+    <button id="vrBtn" disabled>Checking VR…</button>
   </div>
 
-  <!-- CRITICAL: module + relative path -->
-  <script type="module" src="./js/main.js"></script>
+  <!-- THREE (classic non-module build) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
 
-  <!-- If JS fails, this will still show a clue -->
+  <!-- Your game boot (classic script, NO modules) -->
+  <script src="./js/main.js"></script>
+
   <script>
+    // If anything throws, show it right on the overlay
     window.addEventListener("error", (e) => {
       const el = document.getElementById("status");
       if (el) el.textContent = "JS Error: " + (e?.message || "unknown");

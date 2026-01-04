@@ -1,108 +1,121 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-  <title>PokerVR</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+  <title>Scarlett Poker VR</title>
+
+  <!-- ✅ IMPORT MAP: makes `import "three"` work on GitHub Pages -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
   <style>
-    html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:system-ui,Arial;}
-    #hud{
-      position:fixed; left:12px; top:12px; z-index:9999;
-      background:rgba(0,0,0,0.55); color:#dff;
-      padding:10px 12px; border:1px solid rgba(255,255,255,0.18);
-      border-radius:10px; max-width:88vw; font-size:14px;
+    html, body { margin:0; padding:0; background:#000; color:#eaf2ff; overflow:hidden; font-family: system-ui, Arial; }
+    #hud {
+      position: fixed; top: 12px; left: 12px; right: 12px;
+      z-index: 9999; pointer-events: none;
+      background: rgba(10,12,18,0.65);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      padding: 12px 14px;
+      max-width: 720px;
     }
-    #hud b{color:#fff}
-    #log{margin-top:8px; max-height:40vh; overflow:auto; font-size:12px; color:#bfe}
-    #mobileBar{
-      position:fixed; left:12px; bottom:12px; z-index:9999;
-      display:flex; gap:10px; align-items:center;
+    #hud h1 { margin: 0 0 6px 0; font-size: 18px; }
+    #status { opacity: 0.95; margin-bottom: 6px; }
+    #log { font-size: 12px; line-height: 1.25; opacity: 0.9; max-height: 180px; overflow:auto; }
+
+    /* mobile controls */
+    #mobile {
+      position: fixed; left: 0; right: 0; bottom: 0;
+      padding: 12px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 12px;
+      z-index: 9999;
+      pointer-events: none;
     }
-    .btn{
-      padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.18);
-      background:rgba(10,12,18,0.72); color:#eaf2ff; font-weight:700;
+    #joy {
+      width: 140px; height: 140px; border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      position: relative;
+      pointer-events: auto;
+      touch-action: none;
     }
-    #joy{
-      width:120px;height:120px;border-radius:60px;
-      border:1px solid rgba(255,255,255,0.18);
-      background:rgba(10,12,18,0.55);
-      position:relative; touch-action:none;
+    #nub {
+      width: 58px; height: 58px; border-radius: 999px;
+      background: rgba(0,212,255,0.25);
+      border: 1px solid rgba(0,212,255,0.35);
+      position: absolute;
+      left: 50%; top: 50%;
+      transform: translate(-50%, -50%);
     }
-    #nub{
-      width:54px;height:54px;border-radius:27px;
-      background:rgba(0,212,255,0.25);
-      border:1px solid rgba(0,212,255,0.45);
-      position:absolute; left:50%; top:50%;
-      transform:translate(-50%,-50%);
+    .btns { display: flex; gap: 10px; pointer-events: auto; }
+    button {
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(20,22,30,0.75);
+      color: #eaf2ff;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-weight: 700;
     }
-    #VRButton{
-      position:fixed !important;
-      top:12px !important;
-      right:12px !important;
-      left:auto !important;
-      bottom:auto !important;
-      z-index:10000 !important;
-    }
+
+    /* VR button position fix */
+    #VRButton { position: fixed !important; top: 12px !important; right: 12px !important; left: auto !important; bottom: auto !important; z-index: 10000 !important; }
   </style>
 </head>
-<body>
 
+<body>
   <div id="hud">
-    <div><b>PokerVR</b> — If you see this text, HTML loaded ✅</div>
+    <h1>PokerVR — If you see this text, HTML loaded ✅</h1>
     <div id="status">Status: loading…</div>
     <div id="log"></div>
   </div>
 
-  <div id="mobileBar">
+  <div id="mobile">
     <div id="joy"><div id="nub"></div></div>
-    <button class="btn" id="btnReset">Reset</button>
-    <button class="btn" id="btnAudio">Audio</button>
-    <button class="btn" id="btnMenu">Menu</button>
+    <div class="btns">
+      <button id="btnReset">Reset</button>
+      <button id="btnAudio">Audio</button>
+      <button id="btnMenu">Menu</button>
+    </div>
   </div>
 
-  <script>
-    // BASIC ERROR HOOKS (works even if modules fail)
-    const log = (t)=>{ const el=document.getElementById('log'); if(el) el.innerHTML = t+"<br>"+el.innerHTML; };
-    window.addEventListener('error', (e)=> log("❌ window.error: " + (e.message || e)));
-    window.addEventListener('unhandledrejection', (e)=> log("❌ promise: " + (e.reason?.message || e.reason || e)));
-  </script>
-
-  <!-- MODULE LOADER DIAGNOSTIC -->
+  <!-- ✅ Load your game -->
   <script type="module">
-    const status = (t)=>{ const el=document.getElementById('status'); if(el) el.textContent="Status: "+t; };
-    const log = (t)=>{ const el=document.getElementById('log'); if(el) el.innerHTML = t+"<br>"+el.innerHTML; };
-
-    // This is the path your game MUST have:
-    const url = new URL('./js/main.js', location.href).toString();
-
-    status("attempting import…");
-    log("ℹ️ Trying to import: " + url);
+    const status = document.getElementById('status');
+    const log = document.getElementById('log');
+    const line = (t)=>{ log.innerHTML = `${t}<br>` + log.innerHTML; console.log(t); };
 
     try {
-      // Add a cache-buster so GitHub Pages won't serve an old file
-      const mod = await import(url + "?v=" + Date.now());
-      status("main.js imported ✅");
+      status.textContent = "Status: importing main.js…";
+      line("ℹ️ Trying to import: ./js/main.js");
 
-      // If main.js exports boot(), call it; otherwise it may self-run.
+      const mod = await import("./js/main.js");
+      status.textContent = "Status: main.js imported ✅";
+
+      // If main.js exports boot(), call it:
       if (mod && typeof mod.boot === "function") {
-        log("ℹ️ boot() found — calling it…");
+        status.textContent = "Status: booting…";
         await mod.boot();
-        status("boot() complete ✅");
+        status.textContent = "Status: running ✅";
       } else {
-        log("ℹ️ No boot() export — main.js must self-run.");
-        status("waiting (main.js self-run) …");
+        line("ℹ️ main.js has no boot() export — it must self-run.");
+        status.textContent = "Status: running (self-run) ✅";
       }
-    } catch (err) {
-      status("IMPORT FAILED ❌");
-      log("❌ Import error: " + (err?.message || err));
-      if (err?.stack) log(err.stack);
-      log("✅ Fix: confirm you have EXACT path js/main.js (lowercase) committed.");
+    } catch (e) {
+      status.textContent = "Status: IMPORT FAILED ❌";
+      line("❌ Import error: " + (e?.message || e));
+      line("✅ Fix: confirm you have EXACT path js/main.js (lowercase) committed.");
+      line("✅ Fix: make sure you replaced lobby.html/index.html with the importmap version.");
     }
   </script>
-
-  <noscript>
-    <div style="color:white;padding:20px">JavaScript is disabled.</div>
-  </noscript>
-
 </body>
 </html>

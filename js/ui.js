@@ -2,9 +2,9 @@ import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 
 /**
  * UI
- * - menu panel (desktop clickable)
- * - includes "Teleport: Store"
- * - leaderboard hover (desktop)
+ * - menu panel (desktop click)
+ * - includes teleport to Store marker
+ * - floating leaderboard (desktop hover)
  */
 export function initUI({ scene, camera, renderer, world, playerGroup }) {
   const canvas = document.createElement("canvas");
@@ -20,7 +20,6 @@ export function initUI({ scene, camera, renderer, world, playerGroup }) {
   panel.position.set(0, -0.15, -1.05);
   camera.add(panel);
 
-  // leaderboard
   const lbCanvas = document.createElement("canvas");
   lbCanvas.width = 512;
   lbCanvas.height = 512;
@@ -136,7 +135,7 @@ export function initUI({ scene, camera, renderer, world, playerGroup }) {
   drawPanel();
   drawLeaderboard();
 
-  // desktop hover/click
+  // Desktop hover/click
   const raycaster = new THREE.Raycaster();
   const mouse = new THREE.Vector2();
   let hoveredBtn = null;

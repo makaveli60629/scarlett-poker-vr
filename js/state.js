@@ -1,9 +1,43 @@
 export const State = {
-  playerName: "Ron",
-  rank: 7,
-  money: 10000,
+  create(){
+    return {
+      // Global
+      mode: "SPECTATE", // SPECTATE | SEATED
+      audioOn: false,
 
-  addMoney(amount) {
-    this.money = Math.max(0, (this.money || 0) + amount);
+      // Economy
+      chips: 10000,
+      eventChips: 0,
+      membershipActive: false,
+
+      // UI
+      menuOpen: false,
+      toast: "",
+
+      // Movement / seating
+      seatedSeatIndex: -1,
+      canMove: true,
+
+      // Table config
+      maxSeats: 6,
+
+      // Poker state
+      handId: 0,
+      street: "PREFLOP", // PREFLOP FLOP TURN RIVER SHOWDOWN
+      pot: 0,
+      currentBet: 0,
+
+      // Players
+      players: [], // {id,name,isBot,seatIndex,stack,inHand,folded,hand:[c1,c2],rankLabel}
+      leaderboard: [],
+
+      // Feature flags (so we can turn on/off safely)
+      flags: {
+        snapTurnDegrees: 45,
+        teleportFadeMs: 220,
+        showNameTagsSpectate: true,
+        hideNameTagsSeated: true
+      }
+    };
   }
 };

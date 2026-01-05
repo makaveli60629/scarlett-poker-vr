@@ -1,74 +1,46 @@
-// js/state.js
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+// js/state.js — Minimal shared state + zones (8.0)
+const _store = new Map();
 
-const _state = {
-  camera: null,
-  currentRoom: "vip_room",
-  zones: [],
+const _zones = []; // {name, center, radius, yMin, yMax, mode, message, strength}
+
+export const State = {
+  get(key, fallback = null) {
+    return _store.has(key) ? _store.get(key) : fallback;
+  },
+  set(key, value) {
+    _store.set(key, value);
+    return value;
+  },
+  has(key) {
+    return _store.has(key);
+  },
+  del(key) {
+    _store.delete(key);
+  },
+  dump() {
+    return Object.fromEntries(_store.entries());
+  }
 };
 
-export function setCamera(cam) {
-  _state.camera = cam || null;
-}
-
-export function getCamera() {
-  return _state.camera;
-}
-
+// --- Room manager compatibility ---
 export function setCurrentRoom(name) {
-  _state.currentRoom = String(name || "vip_room");
+  State.set("current_room", name);
 }
-
 export function getCurrentRoom() {
-  return _state.currentRoom;
+  return State.get("current_room", "vip_room");
 }
 
-/**
- * Zones: { name, center: THREE.Vector3, radius, yMin, yMax, mode:"block", message, strength }
- */
-export function registerZone(z) {
-  if (!z) return;
-  const zone = {
-    name: z.name || `zone_${_state.zones.length}`,
-    center: (z.center instanceof THREE.Vector3) ? z.center.clone() : new THREE.Vector3(),
-    radius: Number.isFinite(z.radius) ? z.radius : 1.0,
-    yMin: Number.isFinite(z.yMin) ? z.yMin : -999,
-    yMax: Number.isFinite(z.yMax) ? z.yMax : 999,
-    mode: z.mode || "block",
-    message: z.message || "",
-    strength: Number.isFinite(z.strength) ? z.strength : 0.25,
-  };
-  _state.zones.push(zone);
+// --- Zone system compatibility ---
+export function registerZone(zone) {
+  if (!zone?.name) zone.name = `zone_${_zones.length}`;
+  _zones.push(zone);
+  return zone;
+}
+
+export function getZones() {
+  return _zones.slice();
 }
 
 export function clearZones() {
-  _state.zones.length = 0;
-}
-
-/**
- * Push player out of "block" zones
- */
-export function applyZonesToPlayer(playerPos) {
-  if (!playerPos) return;
-
-  for (const z of _state.zones) {
-    const y = playerPos.y;
-    if (y < z.yMin || y > z.yMax) continue;
-
-    const dx = playerPos.x - z.center.x;
-    const dz = playerPos.z - z.center.z;
-    const d2 = dx * dx + dz * dz;
-    const r = z.radius;
-
-    if (d2 < r * r) {
-      // push out
-      const d = Math.max(Math.sqrt(d2), 0.0001);
-      const nx = dx / d;
-      const nz = dz / d;
-      const target = r + 0.03;
-
-      playerPos.x = z.center.x + nx * target;
-      playerPos.z = z.center.z + nz * target;
-    }
-  }
+  _zones.length = 0;
 }

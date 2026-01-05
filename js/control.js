@@ -1,124 +1,114 @@
 import * as THREE from "three";
-import { VRButton } from "three/addons/webxr/VRButton.js";
 
-import { World } from "./world.js";
-import { PokerTable } from "./table.js";
-import { Controls } from "./controls.js";
-import { UI } from "./ui.js";
+/**
+ * Controls.js — XR + Desktop locomotion for Quest + Android
+ * - Left stick: move (forward/back/strafe)
+ * - Right stick: snap turn 45°
+ * - Keeps controllers attached to rig
+ */
+export const Controls = {
+  rig: null,
+  camera: null,
+  renderer: null,
 
-export async function boot({ statusEl, errEl, vrCorner } = {}) {
-  const say = (m) => { if (statusEl) statusEl.innerHTML += `<br/>${m}`; };
+  // movement tuning
+  moveSpeed: 2.2,      // meters/sec
+  snapAngle: THREE.MathUtils.degToRad(45),
+  snapCooldown: 0.18,
+  _snapTimer: 0,
 
-  try {
-    say("main.js loaded ✅");
+  // controller refs
+  c0: null,
+  c1: null,
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.xr.enabled = true;
-    renderer.xr.setReferenceSpaceType("local-floor");
-    document.body.appendChild(renderer.domElement);
+  // helpers
+  _tmpVec: new THREE.Vector3(),
+  _tmpRight: new THREE.Vector3(),
+  _tmpForward: new THREE.Vector3(),
 
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x05070c);
+  init({ rig, camera, renderer }) {
+    this.rig = rig;
+    this.camera = camera;
+    this.renderer = renderer;
 
-    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
+    // XR controllers (laser pointers you already see)
+    this.c0 = renderer.xr.getController(0);
+    this.c1 = renderer.xr.getController(1);
 
-    // Player Rig (ALL controllers must be parented to rig)
-    const rig = new THREE.Group();
-    rig.name = "PlayerRig";
-    scene.add(rig);
+    // Important: controllers must be inside the rig
+    if (this.c0.parent !== rig) rig.add(this.c0);
+    if (this.c1.parent !== rig) rig.add(this.c1);
 
-    // Non-XR camera offset (browser)
-    const viewer = new THREE.Group();
-    viewer.name = "Viewer";
-    viewer.position.set(0, 1.65, 0);
-    viewer.add(camera);
-    rig.add(viewer);
+    // safety: reset snap timer
+    this._snapTimer = 0;
+  },
 
-    // Lighting baseline
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.0));
-    const key = new THREE.DirectionalLight(0xffffff, 1.2);
-    key.position.set(7, 10, 6);
-    scene.add(key);
+  // read axes from either controller gamepad
+  _getGamepadAxes() {
+    const s = this.renderer.xr.getSession?.();
+    if (!s) return null;
 
-    // VR Button top-right
-    const vrBtn = VRButton.createButton(renderer);
-    if (vrCorner) vrCorner.appendChild(vrBtn); else document.body.appendChild(vrBtn);
-    say("VR button created ✅");
+    // Search input sources for gamepads
+    const sources = s.inputSources || [];
+    for (const src of sources) {
+      if (src && src.gamepad && src.gamepad.axes && src.gamepad.axes.length >= 2) {
+        return src.gamepad.axes; // typically [lx, ly, rx, ry] (Quest)
+      }
+    }
+    return null;
+  },
 
-    // Build world & table
-    const world = World.build(scene);
-    PokerTable.build(scene);
+  update(dt) {
+    if (!this.rig || !this.camera || !this.renderer) return;
 
-    // UI
-    const ui = UI.create({ scene, rig, camera });
-    ui.toast("Skylark Poker", "Booted ✅");
+    // XR locomotion (Quest)
+    if (this.renderer.xr.isPresenting) {
+      const axes = this._getGamepadAxes();
+      if (axes) {
+        // Quest typical: axes[0]=LX, axes[1]=LY, axes[2]=RX, axes[3]=RY
+        const lx = axes[0] || 0;
+        const ly = axes[1] || 0;
+        const rx = axes[2] || 0;
 
-    // Spawn points (never on table)
-    const spawns = {
-      lobby: new THREE.Vector3(0, 0, 7.5),
-      poker: new THREE.Vector3(0, 0, 8.5),
-      store: new THREE.Vector3(12, 0, 7.0),
-    };
+        // deadzone
+        const dead = 0.14;
+        const mx = Math.abs(lx) > dead ? lx : 0;
+        const my = Math.abs(ly) > dead ? ly : 0;
 
-    // Colliders + floors
-    const colliders = [...world.colliders, ...PokerTable.colliders];
-    const floors = [...world.floorPlanes];
+        // Move relative to where camera is looking (yaw only)
+        // forward vector from camera
+        this.camera.getWorldDirection(this._tmpForward);
+        this._tmpForward.y = 0;
+        this._tmpForward.normalize();
 
-    // Controls (XR + Android)
-    const controls = Controls.create({
-      renderer, scene, camera, rig, viewer,
-      floors, colliders,
-      ui,
-      noTeleportZone: (p) => PokerTable.isPointInNoTeleportZone(p)
-    });
+        // right vector
+        this._tmpRight.copy(this._tmpForward).cross(new THREE.Vector3(0, 1, 0)).normalize().multiplyScalar(-1);
 
-    function setRoom(roomName) {
-      controls.setRoomSpawn(spawns[roomName] || spawns.lobby);
-      ui.toast("Teleport", `Moved to ${roomName}`);
+        // movement: forward/back = -ly (up on stick is negative)
+        const speed = this.moveSpeed * dt;
+        this._tmpVec.set(0, 0, 0);
+        this._tmpVec.addScaledVector(this._tmpForward, (-my) * speed);
+        this._tmpVec.addScaledVector(this._tmpRight, (mx) * speed);
+
+        this.rig.position.add(this._tmpVec);
+
+        // Snap turn with right stick (45 degrees)
+        this._snapTimer -= dt;
+        if (this._snapTimer <= 0) {
+          const turnDead = 0.55;
+          if (rx > turnDead) {
+            this.rig.rotation.y -= this.snapAngle;
+            this._snapTimer = this.snapCooldown;
+          } else if (rx < -turnDead) {
+            this.rig.rotation.y += this.snapAngle;
+            this._snapTimer = this.snapCooldown;
+          }
+        }
+      }
+      return;
     }
 
-    // Default start
-    setRoom("lobby");
-
-    // Hook page buttons
-    window.addEventListener("toggle-audio", () => ui.toggleAudio());
-    window.addEventListener("toggle-menu", () => ui.toggleMenu(setRoom));
-    window.addEventListener("reset-player", () => controls.setRoomSpawn(spawns.lobby));
-
-    // XR session events
-    renderer.xr.addEventListener("sessionstart", () => {
-      viewer.position.set(0, 0, 0);     // XR controls camera height
-      controls.reapplySpawn();
-      ui.toast("XR", "Entered VR ✅");
-    });
-
-    renderer.xr.addEventListener("sessionend", () => {
-      viewer.position.set(0, 1.65, 0);  // restore browser height
-      ui.toast("XR", "Exited VR");
-    });
-
-    // Resize
-    window.addEventListener("resize", () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-
-    // Render loop
-    const clock = new THREE.Clock();
-    renderer.setAnimationLoop(() => {
-      const dt = Math.min(clock.getDelta(), 0.05);
-      controls.update(dt);
-      ui.update(dt);
-      renderer.render(scene, camera);
-    });
-
-    say("Boot complete ✅");
-  } catch (e) {
-    const msg = e?.stack || String(e);
-    if (errEl) { errEl.style.display = "block"; errEl.textContent = msg; }
-    throw e;
+    // Desktop/Android fallback (touch-only: no movement)
+    // (You said Android is mostly for viewing; movement there is handled by your UI joystick)
   }
-}
+};

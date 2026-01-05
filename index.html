@@ -50,7 +50,7 @@
   <div id="hud">
     <div id="title">Skylark Poker VR — Debug HUD</div>
     <div id="status">
-      <span id="htmlPill" class="pill ok">✅ HTML loaded</span>
+      <span class="pill ok">✅ HTML loaded</span>
       <span id="jsPill" class="pill bad">⏳ JS booting…</span>
       <span id="xrPill" class="pill bad">XR: unknown</span>
       <span id="verPill" class="pill ok">v: -</span>
@@ -79,7 +79,7 @@
 
     window.addEventListener("unhandledrejection", (e) => {
       jsPill.classList.remove("ok"); jsPill.classList.add("bad");
-      jsPill.textContent = "❌ IMPORT FAILED";
+      jsPill.textContent = "❌ PROMISE";
       log("PROMISE REJECTION:");
       log(String(e.reason?.stack || e.reason || e));
     });
@@ -87,6 +87,7 @@
 
   <script type="module">
     const { log, jsPill, xrPill, V } = window.__HUD__;
+
     try {
       const mod = await import("./js/main.js?v=" + V);
       await mod.boot();
@@ -95,20 +96,17 @@
       jsPill.textContent = "✅ boot() ok";
       log("boot() finished");
 
-      // LIVE XR status poll (doesn't rely on events)
+      // ✅ Live XR session status (reliable on Quest)
       setInterval(() => {
-        try {
-          const presenting = !!window.__SKYLARK__?.renderer?.xr?.isPresenting;
-          if (presenting) {
-            xrPill.classList.remove("bad"); xrPill.classList.add("ok");
-            xrPill.textContent = "XR: presenting ✅";
-          } else {
-            xrPill.classList.remove("ok"); xrPill.classList.add("bad");
-            xrPill.textContent = "XR: not presenting";
-          }
-        } catch {
+        const r = window.__SKYLARK__?.renderer;
+        const session = r?.xr?.getSession?.() || null;
+
+        if (session) {
+          xrPill.classList.remove("bad"); xrPill.classList.add("ok");
+          xrPill.textContent = "XR: session ✅";
+        } else {
           xrPill.classList.remove("ok"); xrPill.classList.add("bad");
-          xrPill.textContent = "XR: unknown";
+          xrPill.textContent = "XR: no session";
         }
       }, 500);
 

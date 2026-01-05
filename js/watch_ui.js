@@ -1,74 +1,63 @@
+import * as THREE from "three";
+import { TextureBank, Textures } from "./textures.js";
+
 export const WatchUI = {
-  init(ctx) {
-    this.ctx = ctx;
-    this.create(ctx);
-    return this;
+  renderer: null,
+  left: null,
+  root: null,
+  t: 0,
+  _latch: false,
+  _pulse: 0,
+
+  init(renderer, scene) {
+    this.renderer = renderer;
+
+    this.left = renderer.xr.getController(0);
+    scene.add(this.left);
+
+    this.root = new THREE.Group();
+    this.root.position.set(0.04, 0.02, -0.08);
+    this.root.rotation.set(-0.6, 0.2, 0.1);
+
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(0.085, 0.055, 0.012),
+      TextureBank.standard({ color: 0x222222, roughness: 0.6 })
+    );
+
+    const screen = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.078, 0.048),
+      TextureBank.standard({ mapFile: Textures.BRAND, color: 0x0a0a0a, roughness: 1.0 })
+    );
+    screen.position.z = 0.007;
+
+    this.root.add(frame, screen);
+    this.left.add(this.root);
+
+    window.addEventListener("notify", () => { this._pulse = 0.3; });
   },
 
-  create(ctx) {
-    let w = document.getElementById("watchPanel");
-    if (!w) {
-      w = document.createElement("div");
-      w.id = "watchPanel";
-      w.style.position = "fixed";
-      w.style.right = "12px";
-      w.style.bottom = "12px";
-      w.style.zIndex = "99998";
-      w.style.padding = "12px";
-      w.style.borderRadius = "14px";
-      w.style.border = "1px solid rgba(0,255,255,0.25)";
-      w.style.background = "rgba(0,0,0,0.72)";
-      w.style.color = "#fff";
-      w.style.fontFamily = "system-ui,Segoe UI,Roboto,Arial";
-      w.style.width = "min(320px, 86vw)";
-      w.style.display = "none";
+  update(dt) {
+    this.t += dt;
+    if (this._pulse > 0) this._pulse = Math.max(0, this._pulse - dt);
 
-      const btn = (id, label) =>
-        `<button id="${id}" style="width:100%;padding:12px;border-radius:12px;border:0;font-weight:900;margin:6px 0">${label}</button>`;
+    const s = 1 + Math.sin(this.t * 2.0) * 0.02 + (this._pulse * 0.2);
+    this.root.scale.setScalar(s);
 
-      w.innerHTML = `
-        <div style="font-weight:1000;margin-bottom:8px">Watch</div>
-        ${btn("wLobby","Go Lobby")}
-        ${btn("wPoker","Go Poker")}
-        ${btn("wStore","Go Store")}
-        ${btn("wAudio","Toggle Audio")}
-        ${btn("wClose","Close")}
-        <div style="opacity:.85;font-size:12px;margin-top:8px">
-          Action = GRIP (squeeze)
-        </div>
-      `;
+    // Best-effort: toggle menu using any common left button mapping
+    const session = this.renderer.xr.getSession?.();
+    if (!session) return;
 
-      document.body.appendChild(w);
-    }
+    for (const src of session.inputSources) {
+      if (src.handedness !== "left" || !src.gamepad) continue;
+      const gp = src.gamepad;
 
-    this.panel = w;
-
-    const go = (room) => {
-      const sp = ctx.spawns3D?.[room] || ctx.spawns?.[room];
-      if (sp) {
-        ctx.rig.position.set(sp.x ?? 0, 0, sp.z ?? 0);
-        ctx.rig.rotation.set(0, 0, 0);
+      // Try X or Menu-ish buttons (varies by browser)
+      const pressed = (gp.buttons?.[4]?.pressed) || (gp.buttons?.[3]?.pressed);
+      if (pressed && !this._latch) {
+        this._latch = true;
+        window.dispatchEvent(new Event("nova_toggle_menu"));
       }
-    };
-
-    w.querySelector("#wLobby").onclick = () => go("lobby");
-    w.querySelector("#wPoker").onclick = () => go("poker");
-    w.querySelector("#wStore").onclick = () => go("store");
-    w.querySelector("#wAudio").onclick = () => {
-      try {
-        if (ctx.api?.audio?.toggle) ctx.api.audio.toggle(ctx);
-      } catch {}
-    };
-    w.querySelector("#wClose").onclick = () => this.toggle(false);
-
-    return this;
-  },
-
-  toggle(force) {
-    if (!this.panel) return;
-    const show = (typeof force === "boolean") ? force : (this.panel.style.display === "none");
-    this.panel.style.display = show ? "block" : "none";
-  },
+      if (!pressed) this._latch = false;
+    }
+  }
 };
-
-export default WatchUI;

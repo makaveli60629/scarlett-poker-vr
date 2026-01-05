@@ -1,85 +1,75 @@
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 
-function makePad(color = 0x44ccff) {
+function pad(color) {
   const g = new THREE.Group();
 
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.7, 1.7, 0.08, 40),
+    new THREE.MeshStandardMaterial({ color: 0x111217, roughness: 0.95 })
+  );
+  base.position.y = 0.04;
+  g.add(base);
+
   const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(0.8, 0.12, 18, 64),
+    new THREE.TorusGeometry(1.2, 0.08, 12, 48),
     new THREE.MeshBasicMaterial({ color })
   );
   ring.rotation.x = Math.PI / 2;
-  ring.position.y = 0.03;
+  ring.position.y = 0.09;
   g.add(ring);
 
-  const core = new THREE.Mesh(
-    new THREE.CircleGeometry(0.62, 48),
-    new THREE.MeshBasicMaterial({ color: 0x00ff99, transparent: true, opacity: 0.16 })
+  const glow = new THREE.Mesh(
+    new THREE.CircleGeometry(1.15, 48),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.25 })
   );
-  core.rotation.x = -Math.PI / 2;
-  core.position.y = 0.02;
-  g.add(core);
+  glow.rotation.x = -Math.PI / 2;
+  glow.position.y = 0.095;
+  g.add(glow);
 
-  g.userData.isTeleportPad = true;
+  g.userData = { type: "teleportPad", target: "lobby" };
   return g;
 }
 
 export const TeleportMachine = {
   build(scene, rig, ctx) {
-    // Ensure interactables list exists
-    ctx.interactables = ctx.interactables || [];
-    ctx.addInteractable = ctx.addInteractable || ((m) => (ctx.interactables.push(m), m));
+    // Pads in the lobby
+    const toPoker = pad(0x44ccff);
+    toPoker.position.set(0, 0, -18);
+    toPoker.userData.target = "poker";
 
-    const lobbyPos = ctx.rooms?.lobby?.pos || new THREE.Vector3(0, 0, 0);
-    const pokerPos = ctx.rooms?.poker?.pos || new THREE.Vector3(0, 0, -34);
-    const storePos = ctx.rooms?.store?.pos || new THREE.Vector3(34, 0, 0);
+    const toStore = pad(0xffcc44);
+    toStore.position.set(-18, 0, 0);
+    toStore.userData.target = "store";
 
-    const pads = [];
+    scene.add(toPoker, toStore);
 
-    // Lobby pads -> Poker / Store
-    const p1 = makePad(0x44ccff);
-    p1.position.set(lobbyPos.x - 5, 0, lobbyPos.z - 4);
-    p1.userData.room = "poker";
-    ctx.addInteractable(p1);
-    scene.add(p1);
-    pads.push(p1);
+    ctx.teleportPads = [toPoker, toStore];
 
-    const p2 = makePad(0xff44cc);
-    p2.position.set(lobbyPos.x + 5, 0, lobbyPos.z - 4);
-    p2.userData.room = "store";
-    ctx.addInteractable(p2);
-    scene.add(p2);
-    pads.push(p2);
+    // Make them interactable by simple distance check
+    this.ctx = ctx;
+    return this;
+  },
 
-    // Poker return -> Lobby
-    const p3 = makePad(0x00ff99);
-    p3.position.set(pokerPos.x - 6, 0, pokerPos.z + 8);
-    p3.userData.room = "lobby";
-    ctx.addInteractable(p3);
-    scene.add(p3);
-    pads.push(p3);
+  update(dt, ctx) {
+    if (!ctx?.teleportPads?.length) return;
 
-    // Store return -> Lobby
-    const p4 = makePad(0x00ff99);
-    p4.position.set(storePos.x - 6, 0, storePos.z + 8);
-    p4.userData.room = "lobby";
-    ctx.addInteractable(p4);
-    scene.add(p4);
-    pads.push(p4);
-
-    // Hook interaction event
-    if (ctx.on) {
-      ctx.on("interact", ({ hit }) => {
-        const root = hit?.object?.parent;
-        const pad = root?.userData?.isTeleportPad ? root : hit?.object;
-        const room = pad?.userData?.room;
-        if (room && typeof ctx.setRoom === "function") {
-          ctx.setRoom(room);
+    // If player stands near pad, auto “hint” (no menu needed)
+    const p = ctx.rig.position;
+    for (const pad of ctx.teleportPads) {
+      const d = p.distanceTo(pad.position);
+      if (d < 1.25) {
+        const target = pad.userData.target;
+        const sp = ctx.spawns3D?.[target];
+        if (sp) {
+          // Auto move only if user presses trigger soon? keep it gentle:
+          // We'll just pulse ring; actual teleport is still done by teleport walk.
+          // (This avoids surprise motion.)
+          pad.children[1].scale.setScalar(1.0 + 0.15 * Math.sin(performance.now() * 0.01));
         }
-      });
+      } else {
+        pad.children[1].scale.setScalar(1.0);
+      }
     }
-
-    ctx.teleportPads = pads;
-    return pads;
   },
 };
 

@@ -1,4 +1,5 @@
-// js/boss_table.js — Boss Table + VIP Spectator Rail (Spectator Only)
+// js/boss_table.js — Boss Table + rail + no-entry zone config
+
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { registerZone } from "./state.js";
 import { SpectatorRail } from "./spectator_rail.js";
@@ -13,7 +14,6 @@ export const BossTable = {
     this.group.name = "BossTableArea";
     this.group.position.copy(this.center);
 
-    // Table base + top
     const base = new THREE.Mesh(
       new THREE.CylinderGeometry(0.75, 1.05, 0.6, 28),
       new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.9 })
@@ -38,7 +38,6 @@ export const BossTable = {
     rim.rotation.x = Math.PI / 2;
     rim.position.y = 1.0;
 
-    // Crown pedestal placeholder
     const pedestal = new THREE.Mesh(
       new THREE.CylinderGeometry(0.22, 0.28, 0.22, 18),
       new THREE.MeshStandardMaterial({
@@ -50,9 +49,6 @@ export const BossTable = {
     );
     pedestal.position.set(0, 1.05, 0);
 
-    this.group.add(base, top, rim, pedestal);
-
-    // Inner ring (visual cue)
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(this.zoneRadius, 0.06, 10, 90),
       new THREE.MeshStandardMaterial({
@@ -64,26 +60,21 @@ export const BossTable = {
     );
     ring.rotation.x = Math.PI / 2;
     ring.position.y = 0.03;
-    this.group.add(ring);
 
-    // Lighting around boss table
     const a = new THREE.PointLight(0x00ffaa, 0.55, 14);
     a.position.set(0, 2.4, 0);
-    this.group.add(a);
 
     const b = new THREE.PointLight(0xff3366, 0.35, 14);
     b.position.set(2.5, 2.0, 2.5);
-    this.group.add(b);
 
+    this.group.add(base, top, rim, pedestal, ring, a, b);
     scene.add(this.group);
 
-    // VIP Spectator rail around the zone
     SpectatorRail.build(scene, this.center, this.zoneRadius + 0.35, { postCount: 20 });
 
-    // No-entry zone
     registerZone({
       name: "boss_table_zone",
-      center: this.center,
+      center: { x: this.center.x, y: this.center.y, z: this.center.z },
       radius: this.zoneRadius,
       yMin: -2,
       yMax: 4,

@@ -1,41 +1,37 @@
-import * as THREE from "three";
-import { TextureBank, Textures } from "./textures.js";
-import { registerCollider } from "./state.js";
+// js/chair.js — GitHub Pages SAFE
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
 export const Chair = {
-  buildSet(scene, centerX = 0, centerZ = 0) {
-    const chairMat = TextureBank.standard({
-      mapFile: Textures.SOFA_DIFF,
-      normalMapFile: Textures.SOFA_NORM,
-      color: 0x666666,
-      roughness: 0.95
-    });
+  buildSet(scene, center = { x: 0, z: 0 }, count = 6) {
+    const chairs = [];
+    const radius = 3.7;
 
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2;
-      const x = centerX + Math.cos(a) * 4.2;
-      const z = centerZ + Math.sin(a) * 4.2;
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2;
 
       const chair = new THREE.Group();
-      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.08, 0.6), chairMat);
-      seat.position.y = 0.45;
+      chair.name = `Chair_${i}`;
 
-      const back = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.55, 0.08), chairMat);
-      back.position.set(0, 0.75, -0.26);
+      chair.position.set(center.x + Math.sin(a) * radius, 0, center.z + Math.cos(a) * radius);
+      chair.rotation.y = a + Math.PI;
 
-      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.22, 0.45, 16), chairMat);
-      base.position.y = 0.22;
+      const mat = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.95 });
 
-      chair.add(seat, back, base);
-      chair.position.set(x, 0, z);
-      chair.lookAt(centerX, 0.5, centerZ);
-      chair.traverse(o => { o.castShadow = true; o.receiveShadow = true; });
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.1, 0.62), mat);
+      seat.position.y = 0.46;
+
+      const back = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.7, 0.12), mat);
+      back.position.set(0, 0.82, -0.28);
+
+      const legMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.9 });
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.45, 10), legMat);
+      leg.position.y = 0.22;
+
+      chair.add(seat, back, leg);
       scene.add(chair);
-
-      registerCollider(chair, {
-        min: { x: x - 0.35, y: 0, z: z - 0.35 },
-        max: { x: x + 0.35, y: 1.3, z: z + 0.35 }
-      });
+      chairs.push(chair);
     }
+
+    return chairs;
   }
 };

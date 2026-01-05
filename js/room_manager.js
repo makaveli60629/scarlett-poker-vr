@@ -1,16 +1,9 @@
-// js/room_manager.js — Patch 7.0 FULL
-// Adds: Room anchors + spawn pads in every room + clear zones
-// Usage:
-// - RoomManager.init(scene)
-// - RoomManager.getRooms()
-// - RoomManager.getRoom(name)
-// - RoomManager.getSpawnPad(name)
-// - RoomManager.teleportToRoom(name, playerRig) (uses TeleportMachine authority)
+// js/room_manager.js — Patch 7.0A FULL
+// Rooms reduced to: Lobby + VIP Poker Room
+// Keeps: spawn pads in every room + transforms
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { setCurrentRoom } from "./state.js";
-
-function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
 export const RoomManager = {
   scene: null,
@@ -20,12 +13,9 @@ export const RoomManager = {
     this.scene = scene;
     this.rooms.clear();
 
-    // Layout: 4 rooms separated in world space (safe for GitHub no streaming)
-    // Lobby is origin-ish; other rooms around it.
-    this._createRoom("Lobby",      new THREE.Vector3(0, 0, 0),     0);
-    this._createRoom("Penthouse",  new THREE.Vector3(34, 0, 0),    Math.PI);
-    this._createRoom("Nightclub",  new THREE.Vector3(0, 0, -34),   0);
-    this._createRoom("VIP Hall",   new THREE.Vector3(34, 0, -34),  Math.PI);
+    // Only TWO rooms now:
+    this._createRoom("Lobby", new THREE.Vector3(0, 0, 0), 0);
+    this._createRoom("VIP Poker Room", new THREE.Vector3(34, 0, 0), Math.PI);
 
     setCurrentRoom("Lobby");
   },
@@ -36,11 +26,13 @@ export const RoomManager = {
     g.position.copy(position);
     g.rotation.y = rotY;
 
-    // optional faint floor marker so you “feel” different zones (no textures)
+    // subtle floor tint per room
+    const floorColor = name === "Lobby" ? 0x121621 : 0x16121f;
+
     const floor = new THREE.Mesh(
       new THREE.CircleGeometry(14, 48),
       new THREE.MeshStandardMaterial({
-        color: name === "Lobby" ? 0x121621 : name === "Penthouse" ? 0x1a1622 : name === "Nightclub" ? 0x161a22 : 0x1a1a1a,
+        color: floorColor,
         roughness: 1.0,
         metalness: 0.0,
         transparent: true,
@@ -51,12 +43,11 @@ export const RoomManager = {
     floor.position.y = 0.001;
     g.add(floor);
 
-    // Spawn pad (teleport authority)
+    // Spawn pad (authoritative)
     const pad = this._createSpawnPad(name);
-    pad.position.set(0, 0.01, 8.2); // front-ish safe spot
+    pad.position.set(0, 0.01, 8.2);
     g.add(pad);
 
-    // Anchor (room center reference)
     const anchor = new THREE.Object3D();
     anchor.name = `Anchor_${name}`;
     anchor.position.set(0, 0, 0);
@@ -122,7 +113,6 @@ export const RoomManager = {
 
     group.add(base, ring, ring2, light);
 
-    // handy metadata
     group.userData.isSpawnPad = true;
     group.userData.roomName = name;
 
@@ -142,7 +132,6 @@ export const RoomManager = {
     return r?.pad || null;
   },
 
-  // Used by TeleportMachine as “authoritative spawn”
   getSpawnTransform(name) {
     const r = this.getRoom(name);
     if (!r) return null;
@@ -151,7 +140,7 @@ export const RoomManager = {
     const p = new THREE.Vector3();
     pad.getWorldPosition(p);
 
-    // face toward room center (anchor)
+    // face toward center
     const a = new THREE.Vector3();
     r.anchor.getWorldPosition(a);
     const dx = a.x - p.x;

@@ -1,73 +1,68 @@
-// js/state.js — unified, no-missing-export state hub
+// js/state.js — Shared State + Zones (STABLE EXPORTS)
 
-let _scene = null;
-let _camera = null;
-let _playerRig = null;
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
-let _currentRoom = "VIP";
-
-const _zones = new Map();        // name -> zoneConfig
-const _colliders = new Set();    // Object3D
-const _interactables = new Map();// id -> { obj, onActivate }
-
-function _sid(obj) {
-  if (!obj) return null;
-  if (!obj.userData) obj.userData = {};
-  if (!obj.userData.__sid) obj.userData.__sid = "sid_" + Math.random().toString(36).slice(2);
-  return obj.userData.__sid;
-}
-
-// Scene / Camera / Player
-export function setScene(s) { _scene = s; }
-export function getScene() { return _scene; }
-
-export function setCamera(c) { _camera = c; }
-export function getCamera() { return _camera; }
-
-export function setPlayerRig(r) { _playerRig = r; }
-export function getPlayerRig() { return _playerRig; }
-
-// Rooms
-export function setCurrentRoom(name) { _currentRoom = String(name || "VIP"); }
-export function getCurrentRoom() { return _currentRoom; }
-
-// Zones (config-object style)
-export function registerZone(cfg) {
-  if (!cfg || !cfg.name) return null;
-  _zones.set(cfg.name, cfg);
-  return cfg.name;
-}
-export function unregisterZone(name) { return _zones.delete(name); }
-export function getZonesArray() { return Array.from(_zones.values()); }
-
-// Colliders
-export function registerCollider(obj) { if (obj) _colliders.add(obj); return obj || null; }
-export function unregisterCollider(obj) { return _colliders.delete(obj); }
-export function getCollidersArray() { return Array.from(_colliders); }
-
-// Interactables
-export function registerInteractable(obj, onActivate) {
-  const id = _sid(obj);
-  if (!id) return null;
-  _interactables.set(id, { obj, onActivate: typeof onActivate === "function" ? onActivate : null });
-  return id;
-}
-export function unregisterInteractable(obj) { return _interactables.delete(_sid(obj)); }
-export function getInteractablesArray() { return Array.from(_interactables.values()).map(v => v.obj); }
-export function activateObject(obj, payload = {}) {
-  const id = _sid(obj);
-  const entry = id ? _interactables.get(id) : null;
-  if (entry?.onActivate) { try { entry.onActivate(obj, payload); } catch {} return true; }
-  return false;
-}
-
-// Convenience export some modules like
-export const State = {
-  setScene, getScene,
-  setCamera, getCamera,
-  setPlayerRig, getPlayerRig,
-  setCurrentRoom, getCurrentRoom,
-  registerZone, unregisterZone, getZonesArray,
-  registerCollider, unregisterCollider, getCollidersArray,
-  registerInteractable, unregisterInteractable, getInteractablesArray, activateObject,
+const S = {
+  camera: null,
+  currentRoom: "VIP_ROOM",
+  zones: [], // { name, center, radius, yMin, yMax, mode, message, strength }
 };
+
+export function setCamera(cam) {
+  S.camera = cam;
+}
+
+export function getCamera() {
+  return S.camera;
+}
+
+export function setCurrentRoom(name) {
+  S.currentRoom = String(name || "VIP_ROOM");
+}
+
+export function getCurrentRoom() {
+  return S.currentRoom;
+}
+
+// Used by BossTable (and future room blockers)
+export function registerZone(zone) {
+  if (!zone || !zone.center) return;
+  S.zones.push({
+    name: zone.name || `zone_${S.zones.length}`,
+    center: zone.center.clone ? zone.center.clone() : new THREE.Vector3(zone.center.x, zone.center.y, zone.center.z),
+    radius: zone.radius ?? 2,
+    yMin: zone.yMin ?? -10,
+    yMax: zone.yMax ?? 10,
+    mode: zone.mode || "block", // "block" for now
+    message: zone.message || "",
+    strength: zone.strength ?? 0.25,
+  });
+}
+
+export function clearZones() {
+  S.zones.length = 0;
+}
+
+// Pushes player OUT of restricted circles
+export function applyZonesToPosition(pos) {
+  if (!pos) return null;
+
+  const out = new THREE.Vector3(0, 0, 0);
+  for (const z of S.zones) {
+    if (pos.y < z.yMin || pos.y > z.yMax) continue;
+
+    const dx = pos.x - z.center.x;
+    const dz = pos.z - z.center.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+
+    if (dist < z.radius) {
+      // push outward
+      const nx = dist === 0 ? 1 : dx / dist;
+      const nz = dist === 0 ? 0 : dz / dist;
+      const push = (z.radius - dist) + 0.08;
+      out.x += nx * push;
+      out.z += nz * push;
+    }
+  }
+  return out.lengthSq() > 0 ? out : null;
+}

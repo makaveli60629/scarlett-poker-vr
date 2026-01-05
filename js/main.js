@@ -70,7 +70,7 @@ export async function boot() {
     TeleportMachine.update(dt);
     Interactions.update(dt);
 
-    BossBots.update(dt);
+    BossBots.update(dt, camera);
     Tournament.update(dt);
 
     UI.update();

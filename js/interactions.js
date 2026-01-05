@@ -1,178 +1,294 @@
-import * as THREE from "three";
-import { getInteractablesArray, activateObject } from "./state.js";
+// js/interactions.js — Patch 6.5
+// Grip-based raycast interactions + pickup/drop + kiosk buy interaction.
+// Works in VR + phone (uses camera forward ray).
+//
+// Integrates with:
+// - Input.gripPressed()
+// - Inventory
+// - ShopUI
+// - EventChip (must expose group or mesh via EventChip.group / EventChip.getObject())
+// - StoreKiosk (must expose group/mesh via StoreKiosk.group / StoreKiosk.getObject())
+//
+// If your chip/kiosk modules don't expose objects, this file still works if you pass
+// explicit objects into Interactions.setTargets() from main.js.
+
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+import { Inventory } from "./inventory.js";
+import { ShopUI } from "./shop_ui.js";
+
+const _raycaster = new THREE.Raycaster();
+const _tmpVec = new THREE.Vector3();
+const _tmpVec2 = new THREE.Vector3();
+const _tmpQuat = new THREE.Quaternion();
+
+function getWorldForward(obj, out = new THREE.Vector3()) {
+  obj.getWorldQuaternion(_tmpQuat);
+  out.set(0, 0, -1).applyQuaternion(_tmpQuat).normalize();
+  return out;
+}
+
+function tryGetObject(mod) {
+  if (!mod) return null;
+  if (mod.getObject) return mod.getObject();
+  if (mod.object) return mod.object;
+  if (mod.group) return mod.group;
+  if (mod.mesh) return mod.mesh;
+  return null;
+}
 
 export const Interactions = {
-  renderer: null,
   scene: null,
   camera: null,
-  ctrlL: null,
+  playerRig: null,
 
-  raycaster: new THREE.Raycaster(),
-  _tmpMatrix: new THREE.Matrix4(),
+  // interaction targets
+  kioskObj: null,
+  chipObj: null,
+  extraTargets: [],
 
-  pointerDot: null,
-  hovered: null,
+  // held item
+  held: null,
+  heldOffset: new THREE.Vector3(0.18, -0.12, -0.38), // in camera space
+  holdSmoothing: 0.18,
 
-  _prevGrip: false,
-  _prevTrigger: false,
+  // hover indicator
+  hover: null,
+  hoverMat: null,
 
-  // We keep a short-time janitor active to delete any old leftover rays
-  _janitorTime: 6.0,
+  // options
+  maxDistance: 5.0,
+  enabled: true,
 
-  init(renderer, scene, camera) {
-    this.renderer = renderer;
+  init(scene, camera, playerRig, { kioskObj, chipObj, targets = [] } = {}) {
     this.scene = scene;
     this.camera = camera;
+    this.playerRig = playerRig;
 
-    // Create pointer dot
-    this.pointerDot = new THREE.Mesh(
-      new THREE.SphereGeometry(0.03, 14, 14),
-      new THREE.MeshStandardMaterial({
-        color: 0x00ffff,
-        emissive: 0x00ffff,
-        emissiveIntensity: 1.0,
-        roughness: 0.3
-      })
-    );
-    this.pointerDot.visible = false;
-    this.pointerDot.frustumCulled = false;
-    scene.add(this.pointerDot);
+    this.kioskObj = kioskObj || null;
+    this.chipObj = chipObj || null;
+    this.extraTargets = Array.isArray(targets) ? targets : [];
 
-    // Start cleanup immediately
-    this.purgeStrayRays(true);
-
-    renderer.xr.addEventListener("sessionstart", () => {
-      this.ctrlL = renderer.xr.getController(0);
-      if (this.ctrlL) {
-        this.ctrlL.userData.isController = true;
-        this.ensureRay(this.ctrlL);
-      }
-      this._janitorTime = 6.0;
-      this.purgeStrayRays(true);
+    // Hover ring
+    this.hoverMat = new THREE.MeshStandardMaterial({
+      color: 0x00ffaa,
+      emissive: 0x00ffaa,
+      emissiveIntensity: 1.6,
+      roughness: 0.35,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false
     });
 
-    renderer.xr.addEventListener("sessionend", () => {
-      this.pointerDot.visible = false;
-      this.hovered = null;
-    });
+    this.hover = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.03, 10, 22), this.hoverMat);
+    this.hover.rotation.x = Math.PI / 2;
+    this.hover.visible = false;
+    this.scene.add(this.hover);
   },
 
-  ensureRay(controller) {
-    // Remove any previous ray under this controller
-    const old = controller.getObjectByName("pointer-ray");
-    if (old) controller.remove(old);
-
-    const geo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, -2.6)
-    ]);
-    const mat = new THREE.LineBasicMaterial({ color: 0x00ff55 });
-    const line = new THREE.Line(geo, mat);
-    line.name = "pointer-ray";
-    line.frustumCulled = false;
-    controller.add(line);
+  setTargets({ kioskObj, chipObj, targets = [] } = {}) {
+    if (kioskObj) this.kioskObj = kioskObj;
+    if (chipObj) this.chipObj = chipObj;
+    if (Array.isArray(targets)) this.extraTargets = targets;
   },
 
-  // Strong purge:
-  // - Removes any Line objects not attached to controllers
-  // - Also removes any line sitting near table area (|x|<8 && |z|<8) as "leftover"
-  purgeStrayRays(aggressive = false) {
-    const toRemove = [];
-    this.scene.traverse((o) => {
-      if (!o) return;
+  _rayFromCamera() {
+    const origin = new THREE.Vector3();
+    this.camera.getWorldPosition(origin);
 
-      // Only care about Line objects (laser leftovers)
-      if (o.type !== "Line") return;
+    const dir = getWorldForward(this.camera, new THREE.Vector3());
 
-      // Keep our legitimate controller ray
-      if (o.name === "pointer-ray") return;
+    _raycaster.set(origin, dir);
+    _raycaster.far = this.maxDistance;
+  },
 
-      // If attached to a controller, keep it
-      const p = o.parent;
-      const isUnderController = !!(p && p.userData && p.userData.isController);
-      if (isUnderController) return;
-
-      // If it's directly in the world and near the table center, remove it
-      const wp = new THREE.Vector3();
-      o.getWorldPosition(wp);
-
-      const nearTable = Math.abs(wp.x) < 8 && Math.abs(wp.z) < 8 && wp.y < 3.0;
-      if (nearTable || aggressive) toRemove.push(o);
+  _collectMeshes(root, out = []) {
+    if (!root) return out;
+    root.traverse?.((o) => {
+      if (o && o.isMesh) out.push(o);
     });
+    return out;
+  },
 
-    for (const o of toRemove) {
-      try { o.parent?.remove(o); } catch {}
-      try { this.scene.remove(o); } catch {}
+  _getInteractables() {
+    const list = [];
+
+    if (this.kioskObj) list.push({ type: "kiosk", obj: this.kioskObj });
+    if (this.chipObj) list.push({ type: "chip", obj: this.chipObj });
+
+    for (const t of this.extraTargets) {
+      if (!t) continue;
+      list.push({ type: t.userData?.kind || "prop", obj: t });
     }
+
+    return list;
   },
 
-  update(dt) {
-    const session = this.renderer.xr.getSession();
-    if (!session) {
-      this.pointerDot.visible = false;
+  _pickHit() {
+    this._rayFromCamera();
+
+    const candidates = this._getInteractables();
+    const meshes = [];
+    const meshToType = new Map();
+
+    for (const c of candidates) {
+      const localMeshes = [];
+      this._collectMeshes(c.obj, localMeshes);
+      for (const m of localMeshes) {
+        meshes.push(m);
+        meshToType.set(m, c.type);
+      }
+    }
+
+    if (meshes.length === 0) return null;
+
+    const hits = _raycaster.intersectObjects(meshes, true);
+    if (!hits || hits.length === 0) return null;
+
+    const hit = hits[0];
+    const type = meshToType.get(hit.object) || "prop";
+
+    // find root object that we registered (kioskObj/chipObj/etc.)
+    let root = hit.object;
+    while (root && root.parent && root.parent !== this.scene) {
+      // stop if this matches our known target root
+      if (this.kioskObj && root === this.kioskObj) break;
+      if (this.chipObj && root === this.chipObj) break;
+      root = root.parent;
+    }
+
+    // try to resolve to correct root
+    const resolveRoot = (obj) => {
+      if (!obj) return obj;
+      // if hit belongs under kiosk root, return kiosk root
+      if (this.kioskObj && (this.kioskObj === obj || this.kioskObj.children?.includes(obj))) return this.kioskObj;
+      if (this.chipObj && (this.chipObj === obj || this.chipObj.children?.includes(obj))) return this.chipObj;
+
+      // check ancestry
+      let p = hit.object;
+      while (p) {
+        if (this.kioskObj && p === this.kioskObj) return this.kioskObj;
+        if (this.chipObj && p === this.chipObj) return this.chipObj;
+        p = p.parent;
+      }
+      return obj;
+    };
+
+    const rootObj = resolveRoot(root);
+
+    return { type, root: rootObj, point: hit.point, distance: hit.distance };
+  },
+
+  _setHover(hit) {
+    if (!this.hover) return;
+
+    if (!hit) {
+      this.hover.visible = false;
       return;
     }
 
-    // Keep deleting leftovers for a few seconds (catches cached/old objects)
-    if (this._janitorTime > 0) {
-      this._janitorTime -= dt;
-      this.purgeStrayRays(false);
-    }
+    this.hover.visible = true;
+    this.hover.position.copy(hit.point);
+    this.hover.position.y += 0.03;
 
-    // Ensure controller & ray exist
-    if (!this.ctrlL) this.ctrlL = this.renderer.xr.getController(0);
-    if (!this.ctrlL) return;
-
-    this.ctrlL.userData.isController = true;
-    if (!this.ctrlL.getObjectByName("pointer-ray")) this.ensureRay(this.ctrlL);
-
-    // Ray from controller
-    this._tmpMatrix.identity().extractRotation(this.ctrlL.matrixWorld);
-    const origin = new THREE.Vector3().setFromMatrixPosition(this.ctrlL.matrixWorld);
-    const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(this._tmpMatrix).normalize();
-
-    this.raycaster.ray.origin.copy(origin);
-    this.raycaster.ray.direction.copy(dir);
-
-    const targets = getInteractablesArray();
-    const hits = this.raycaster.intersectObjects(targets, true);
-
-    if (hits.length) {
-      const hit = hits[0];
-      this.pointerDot.visible = true;
-      this.pointerDot.position.copy(hit.point);
-
-      let root = hit.object;
-      while (root && !root.userData.__interactable && root.parent) root = root.parent;
-      this.hovered = root || hit.object;
-    } else {
-      this.pointerDot.visible = false;
-      this.hovered = null;
-    }
-
-    // Click with grip or trigger (left hand)
-    this.handleClick(session);
+    // size hover based on type
+    const s = hit.type === "kiosk" ? 1.2 : hit.type === "chip" ? 0.9 : 1.0;
+    this.hover.scale.setScalar(s);
   },
 
-  handleClick(session) {
-    const srcs = session.inputSources || [];
-    let leftGp = null;
-    for (const s of srcs) {
-      if (s.handedness === "left" && s.gamepad) leftGp = s.gamepad;
+  _holdAttach(obj) {
+    if (!obj || !this.camera) return;
+
+    // Detach from current parent but keep world transform
+    obj.updateMatrixWorld(true);
+    obj.getWorldPosition(_tmpVec);
+    obj.getWorldQuaternion(_tmpQuat);
+
+    this.scene.attach(obj);
+    obj.position.copy(_tmpVec);
+    obj.quaternion.copy(_tmpQuat);
+
+    this.held = obj;
+
+    // mark
+    if (!this.held.userData) this.held.userData = {};
+    this.held.userData.__held = true;
+  },
+
+  _holdRelease() {
+    if (!this.held) return;
+    if (this.held.userData) this.held.userData.__held = false;
+    this.held = null;
+  },
+
+  _updateHeld(dt) {
+    if (!this.held || !this.camera) return;
+
+    // Desired hold position in front of camera
+    const camPos = new THREE.Vector3();
+    this.camera.getWorldPosition(camPos);
+
+    const forward = getWorldForward(this.camera, new THREE.Vector3());
+    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+    const up = new THREE.Vector3(0, 1, 0);
+
+    const desired = new THREE.Vector3()
+      .copy(camPos)
+      .addScaledVector(right, this.heldOffset.x)
+      .addScaledVector(up, this.heldOffset.y)
+      .addScaledVector(forward, this.heldOffset.z);
+
+    // Smooth
+    this.held.position.lerp(desired, 1 - Math.pow(1 - this.holdSmoothing, dt * 60));
+
+    // Make it face camera slightly
+    const yaw = Math.atan2(forward.x, forward.z) + Math.PI;
+    this.held.rotation.set(0, yaw, 0);
+  },
+
+  // Called from main.js when grip pressed
+  onGrip(toast) {
+    if (!this.enabled) return;
+
+    // If holding something, drop it
+    if (this.held) {
+      toast?.("Dropped");
+      this._holdRelease();
+      return;
     }
-    if (!leftGp) return;
 
-    const grip = !!leftGp.buttons?.[1]?.pressed;
-    const trigger = !!leftGp.buttons?.[0]?.pressed;
+    // Otherwise pick from ray
+    const hit = this._pickHit();
+    if (!hit) return toast?.("Nothing to interact with");
 
-    const gripDown = grip && !this._prevGrip;
-    const trigDown = trigger && !this._prevTrigger;
-
-    this._prevGrip = grip;
-    this._prevTrigger = trigger;
-
-    if ((gripDown || trigDown) && this.hovered) {
-      activateObject(this.hovered);
+    if (hit.type === "kiosk") {
+      ShopUI.toggle();
+      return toast?.(ShopUI.open ? "Store opened" : "Store closed");
     }
+
+    if (hit.type === "chip") {
+      this._holdAttach(hit.root);
+      // reward a tiny amount for picking up (optional feel-good)
+      Inventory.addChips(25);
+      ShopUI.render?.();
+      return toast?.("Picked up Event Chip (+25 chips)");
+    }
+
+    // generic interact
+    toast?.("Interacted");
+  },
+
+  update(dt) {
+    if (!this.enabled) return;
+
+    // Hover feedback (not while holding)
+    if (!this.held) {
+      const hit = this._pickHit();
+      this._setHover(hit);
+    } else {
+      this.hover.visible = false;
+    }
+
+    // Update held item follow
+    this._updateHeld(dt);
   }
 };

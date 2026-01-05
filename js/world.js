@@ -1,96 +1,97 @@
+// js/world.js — VIP room look (trim, glow edges, floor, walls)
+
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
-import { registerCollider } from "./state.js";
+import { BossTable } from "./boss_table.js";
+import { TeleportMachine } from "./teleport_machine.js";
 
 export const World = {
-  build(scene) {
-    scene.fog = new THREE.Fog(0x05060a, 6, 45);
+  build(scene, playerRig) {
+    // Background + fog for stability
+    scene.background = new THREE.Color(0x05060a);
+    scene.fog = new THREE.Fog(0x05060a, 5, 45);
 
-    // Lights (so it’s NEVER black)
-    scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+    // Lights
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x202030, 0.9);
+    scene.add(hemi);
 
-    const key = new THREE.DirectionalLight(0xffffff, 1.15);
-    key.position.set(6, 10, 5);
-    scene.add(key);
-
-    const accent = new THREE.PointLight(0x00ffaa, 0.5, 25);
-    accent.position.set(0, 3, 0);
-    scene.add(accent);
+    const dir = new THREE.DirectionalLight(0xffffff, 0.85);
+    dir.position.set(6, 10, 4);
+    scene.add(dir);
 
     // Floor
     const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(26, 26),
-      new THREE.MeshStandardMaterial({ color: 0x1f1f1f, roughness: 1.0 })
+      new THREE.PlaneGeometry(30, 30),
+      new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 1.0 })
     );
     floor.rotation.x = -Math.PI / 2;
+    floor.position.y = 0;
     scene.add(floor);
-    try { registerCollider(floor); } catch {}
 
-    // Solid walls
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.95 });
-    const w = 26, h = 4.2, t = 0.25;
+    // Room box (walls)
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x0f121c, roughness: 0.95 });
+    const wallH = 4.2;
+    const half = 14;
 
-    const wallN = new THREE.Mesh(new THREE.BoxGeometry(w, h, t), wallMat);
-    wallN.position.set(0, h/2, -w/2);
-    scene.add(wallN); try { registerCollider(wallN); } catch {}
-
-    const wallS = wallN.clone(); wallS.position.z = w/2; scene.add(wallS); try { registerCollider(wallS); } catch {}
-
-    const wallE = new THREE.Mesh(new THREE.BoxGeometry(t, h, w), wallMat);
-    wallE.position.set(w/2, h/2, 0);
-    scene.add(wallE); try { registerCollider(wallE); } catch {}
-
-    const wallW = wallE.clone(); wallW.position.x = -w/2; scene.add(wallW); try { registerCollider(wallW); } catch {}
-
-    // Glow edge strips (premium)
-    const glowMat = new THREE.MeshStandardMaterial({
-      color: 0x00ffaa,
-      emissive: 0x00ffaa,
-      emissiveIntensity: 1.2,
-      roughness: 0.35
-    });
-
-    const edgeY = h - 0.12;
-    const stripN = new THREE.Mesh(new THREE.BoxGeometry(w, 0.08, 0.08), glowMat);
-    stripN.position.set(0, edgeY, -w/2 + 0.12);
-    scene.add(stripN);
-
-    const stripS = stripN.clone(); stripS.position.z = w/2 - 0.12; scene.add(stripS);
-
-    const stripE = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, w), glowMat);
-    stripE.position.set(w/2 - 0.12, edgeY, 0);
-    scene.add(stripE);
-
-    const stripW = stripE.clone(); stripW.position.x = -w/2 + 0.12; scene.add(stripW);
-
-    // Simple decor: fountain
-    const stone = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.9 });
-    const water = new THREE.MeshStandardMaterial({ color: 0x2266ff, transparent: true, opacity: 0.55, roughness: 0.25 });
-
-    const bowl = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.25, 0.4, 24), stone);
-    bowl.position.set(4.5, 0.2, 0.5);
-    scene.add(bowl); try { registerCollider(bowl); } catch {}
-
-    const waterMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.95, 0.18, 24), water);
-    waterMesh.position.set(4.5, 0.32, 0.5);
-    scene.add(waterMesh);
-
-    // Plants
-    const potMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.95 });
-    const leafMat = new THREE.MeshStandardMaterial({ color: 0x2e7d32, roughness: 0.9 });
-
-    const addPlant = (x,z) => {
-      const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.28,0.34,0.35,16), potMat);
-      pot.position.set(x,0.18,z);
-      scene.add(pot); try { registerCollider(pot); } catch {}
-
-      const leaves = new THREE.Mesh(new THREE.SphereGeometry(0.55,16,12), leafMat);
-      leaves.position.set(x,0.9,z);
-      scene.add(leaves);
+    const mkWall = (w, h, d, x, y, z) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+      m.position.set(x, y, z);
+      scene.add(m);
+      return m;
     };
 
-    addPlant(11, 11);
-    addPlant(-11, 11);
-    addPlant(11, -11);
-    addPlant(-11, -11);
+    // 4 walls
+    mkWall(28.5, wallH, 0.35, 0, wallH/2, -half);
+    mkWall(28.5, wallH, 0.35, 0, wallH/2,  half);
+    mkWall(0.35, wallH, 28.5, -half, wallH/2, 0);
+    mkWall(0.35, wallH, 28.5,  half, wallH/2, 0);
+
+    // Ceiling (optional dark)
+    const ceil = new THREE.Mesh(
+      new THREE.PlaneGeometry(30, 30),
+      new THREE.MeshStandardMaterial({ color: 0x07080e, roughness: 1.0 })
+    );
+    ceil.rotation.x = Math.PI / 2;
+    ceil.position.y = wallH;
+    scene.add(ceil);
+
+    // Glow trim (edges)
+    const trimMat = new THREE.MeshStandardMaterial({
+      color: 0x00ffaa,
+      emissive: 0x00ffaa,
+      emissiveIntensity: 0.55,
+      roughness: 0.4,
+      metalness: 0.3
+    });
+
+    const mkTrim = (w, h, d, x, y, z) => {
+      const t = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), trimMat);
+      t.position.set(x, y, z);
+      scene.add(t);
+      return t;
+    };
+
+    // Floor-level trim
+    mkTrim(28.8, 0.06, 0.08, 0, 0.03, -half + 0.12);
+    mkTrim(28.8, 0.06, 0.08, 0, 0.03,  half - 0.12);
+    mkTrim(0.08, 0.06, 28.8, -half + 0.12, 0.03, 0);
+    mkTrim(0.08, 0.06, 28.8,  half - 0.12, 0.03, 0);
+
+    // Top trim
+    mkTrim(28.8, 0.06, 0.08, 0, wallH - 0.03, -half + 0.12);
+    mkTrim(28.8, 0.06, 0.08, 0, wallH - 0.03,  half - 0.12);
+    mkTrim(0.08, 0.06, 28.8, -half + 0.12, wallH - 0.03, 0);
+    mkTrim(0.08, 0.06, 28.8,  half - 0.12, wallH - 0.03, 0);
+
+    // Boss table + rail
+    BossTable.build(scene);
+
+    // Teleport pads + spawn pad
+    TeleportMachine.build(scene);
+
+    // Safe spawn (ALWAYS ON SPAWN PAD)
+    const s = TeleportMachine.getSafeSpawn();
+    playerRig.position.copy(s.position);
+    playerRig.position.y = 0;
+    playerRig.rotation.set(0, s.yaw, 0);
   }
 };

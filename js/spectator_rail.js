@@ -1,62 +1,83 @@
-// js/spectator_rail.js — stable rail ring
-
+// js/spectator_rail.js
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
 export const SpectatorRail = {
   group: null,
+  enabled: true,
 
   build(scene, center, radius, opts = {}) {
-    if (!scene) return null;
-    if (this.group) { try { scene.remove(this.group); } catch {} this.group = null; }
+    const postCount = opts.postCount ?? 20;
 
-    const postCount = Math.max(10, opts.postCount ?? 20);
-    const postH = opts.postHeight ?? 1.1;
-
-    const g = new THREE.Group();
-    g.name = "SpectatorRail";
-    g.position.copy(center);
-
-    const postMat = new THREE.MeshStandardMaterial({
-      color: 0x141420,
-      roughness: 0.9,
-      metalness: 0.2,
-      emissive: 0x05060a,
-      emissiveIntensity: 0.35
-    });
+    this.group = new THREE.Group();
+    this.group.name = "SpectatorRail";
+    scene.add(this.group);
 
     const railMat = new THREE.MeshStandardMaterial({
-      color: 0x00ffaa,
-      roughness: 0.35,
-      metalness: 0.35,
-      emissive: 0x00ffaa,
-      emissiveIntensity: 0.85
+      color: 0x0b0c12,
+      roughness: 0.9,
+      metalness: 0.1,
+      emissive: 0x001611,
+      emissiveIntensity: 0.25,
     });
 
+    const glowMat = new THREE.MeshStandardMaterial({
+      color: 0x00ffaa,
+      emissive: 0x00ffaa,
+      emissiveIntensity: 1.3,
+      roughness: 0.35,
+    });
+
+    // top ring glow
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(radius, 0.03, 10, 120),
+      glowMat
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(center.x, 0.95, center.z);
+    this.group.add(ring);
+
+    // posts + mid rails
     for (let i = 0; i < postCount; i++) {
-      const a = (i / postCount) * Math.PI * 2;
-      const x = Math.cos(a) * radius;
-      const z = Math.sin(a) * radius;
+      const t = (i / postCount) * Math.PI * 2;
+      const x = center.x + Math.cos(t) * radius;
+      const z = center.z + Math.sin(t) * radius;
 
       const post = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.035, 0.035, postH, 12),
-        postMat
+        new THREE.CylinderGeometry(0.03, 0.03, 0.95, 12),
+        railMat
       );
-      post.position.set(x, postH / 2, z);
-      g.add(post);
+      post.position.set(x, 0.47, z);
+
+      const cap = new THREE.Mesh(
+        new THREE.SphereGeometry(0.045, 12, 12),
+        glowMat
+      );
+      cap.position.set(x, 0.96, z);
+
+      this.group.add(post, cap);
     }
 
-    const ring1 = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.02, 10, 120), railMat);
-    ring1.rotation.x = Math.PI / 2;
-    ring1.position.y = postH * 0.72;
+    // low ring (dark)
+    const low = new THREE.Mesh(
+      new THREE.TorusGeometry(radius, 0.02, 8, 120),
+      railMat
+    );
+    low.rotation.x = Math.PI / 2;
+    low.position.set(center.x, 0.45, center.z);
+    this.group.add(low);
 
-    const ring2 = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.02, 10, 120), railMat);
-    ring2.rotation.x = Math.PI / 2;
-    ring2.position.y = postH * 0.42;
+    return this.group;
+  },
 
-    g.add(ring1, ring2);
-    scene.add(g);
+  update() {},
 
-    this.group = g;
-    return g;
-  }
+  setEnabled(v) {
+    this.enabled = !!v;
+    if (this.group) this.group.visible = this.enabled;
+  },
+
+  dispose() {
+    if (this.group?.parent) this.group.parent.remove(this.group);
+    this.group = null;
+  },
 };

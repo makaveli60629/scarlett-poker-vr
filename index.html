@@ -110,7 +110,7 @@
 
     // Import main + boot
     try {
-      statusEl.innerHTML += "<br/>Trying to import: <code>./js/main.js</code>";
+      statusEl.innerHTML += "<br/>Trying to import: <code> /js/main.js</code>";
       const mod = await import("./js/main.js");
 
       if (!mod || typeof mod.boot !== "function") {

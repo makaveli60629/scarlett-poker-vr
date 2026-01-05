@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>Skylark Poker VR</title>
+  <style>
+    html,body{margin:0;padding:0;overflow:hidden;background:#000;font-family:system-ui,Segoe UI,Roboto,Arial}
+    #hud{
+      position:fixed; left:12px; top:12px; z-index:9999;
+      background:rgba(0,0,0,.75); color:#fff; padding:12px 14px; border-radius:12px;
+      max-width:min(92vw,560px); font-size:14px; line-height:1.25;
+      border:1px solid rgba(255,255,255,.15);
+    }
+    #err{display:none; margin-top:10px; padding:10px; border-radius:10px; background:rgba(255,0,0,.15); border:1px solid rgba(255,0,0,.35); white-space:pre-wrap}
+    #ok{display:block; margin-top:10px; padding:10px; border-radius:10px; background:rgba(0,255,160,.12); border:1px solid rgba(0,255,160,.25)}
+  </style>
+
+  <!-- THREE import map: fixes “Failed to resolve module specifier 'three'” on GitHub Pages -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+
+<body>
+  <div id="hud">
+    <b>Skylark Poker VR</b><br>
+    ✅ HTML loaded<br>
+    <span id="status">Status: loading…</span>
+    <div id="ok"></div>
+    <div id="err"></div>
+    <div style="margin-top:8px; opacity:.85">
+      If you still see old behavior: open in Incognito (Quest/Android), or clear site data.
+    </div>
+  </div>
+
+  <script type="module">
+    const status = document.getElementById("status");
+    const errBox = document.getElementById("err");
+    const okBox = document.getElementById("ok");
+
+    // Hard cache-bust for GitHub Pages / Quest browser
+    const BUILD_ID = Date.now();
+    status.textContent = "Status: importing ./js/main.js…";
+
+    try {
+      const mod = await import(`./js/main.js?v=${BUILD_ID}`);
+      if (!mod.boot) throw new Error("main.js loaded but did not export boot()");
+      okBox.innerHTML = `✅ main.js imported<br>BUILD_ID: <b>${BUILD_ID}</b>`;
+      status.textContent = "Status: running ✅ (VR button should appear)";
+      await mod.boot(status, okBox);
+    } catch (e) {
+      errBox.style.display = "block";
+      errBox.textContent = String(e && (e.stack || e.message || e));
+      status.textContent = "Status: IMPORT FAILED ❌";
+      console.error(e);
+    }
+  </script>
+</body>
+</html>

@@ -1,17 +1,17 @@
 // js/state.js
-// Single source of truth for shared runtime state + registries
-// IMPORTANT: This file must export the functions other modules import by name.
+// Single source of truth for shared runtime state + registries.
+// Supports BOTH registerZone(configObject) and registerZone(name, box3, onEnter?, onExit?, meta?)
 
 const _interactables = new Map(); // id -> { object3D, onActivate }
 const _colliders = new Map();     // id -> object3D
-const _zones = new Map();         // id -> { name, box3, onEnter, onExit, meta }
+const _zones = new Map();         // id -> zoneRecord
 
 let _camera = null;
 let _renderer = null;
 let _scene = null;
 let _playerRig = null;
 
-let _lastZoneHits = new Set();
+let _zonePrevInside = new Set();
 
 // ---------- Helpers ----------
 function _idFor(objOrId) {
@@ -19,6 +19,26 @@ function _idFor(objOrId) {
   if (typeof objOrId === "string") return objOrId;
   if (objOrId.uuid) return objOrId.uuid;
   if (objOrId.id != null) return String(objOrId.id);
+  return null;
+}
+
+function _randId(prefix="id") {
+  return `${prefix}_${Math.random().toString(16).slice(2)}`;
+}
+
+function _getWorldPosFallback(camOrRig) {
+  try {
+    if (!camOrRig) return null;
+    if (camOrRig.getWorldPosition) {
+      const p = { x:0, y:0, z:0 };
+      // use THREE.Vector3 if available
+      if (typeof THREE !== "undefined" && THREE.Vector3) {
+        const v = new THREE.Vector3();
+        camOrRig.getWorldPosition(v);
+        return v;
+      }
+    }
+  } catch {}
   return null;
 }
 
@@ -53,7 +73,6 @@ export function getInteractablesArray() {
   return Array.from(_interactables.values()).map(v => v.object3D);
 }
 
-// Optional helper some modules use:
 export function activateObject(object3D) {
   const id = _idFor(object3D);
   if (!id) return false;
@@ -81,81 +100,133 @@ export function getCollidersArray() {
   return Array.from(_colliders.values());
 }
 
-// ---------- Zones (THIS FIXES YOUR ERROR) ----------
+// ---------- Zones ----------
 /**
- * registerZone(name, box3, onEnter?, onExit?, meta?)
- * - name: string label
- * - box3: THREE.Box3 (or any object with containsPoint(vec3))
+ * STYLE A (your project uses this):
+ *   registerZone({
+ *     name, center, radius, yMin, yMax,
+ *     mode: "block"|"info"|"trigger",
+ *     message, strength
+ *   })
+ *
+ * STYLE B (Box3 style):
+ *   registerZone(name, box3, onEnter?, onExit?, meta?)
  */
-export function registerZone(name, box3, onEnter, onExit, meta = {}) {
-  const id = `${name || "zone"}_${Math.random().toString(16).slice(2)}`;
-  _zones.set(id, { name, box3, onEnter, onExit, meta });
+export function registerZone(a, b, c, d, e) {
+  // Style A: config object
+  if (a && typeof a === "object" && !b) {
+    const cfg = a;
+    const id = _randId(cfg.name || "zone");
+    _zones.set(id, {
+      id,
+      type: "sphere",
+      name: cfg.name || id,
+      center: cfg.center || { x:0, y:0, z:0 },
+      radius: cfg.radius ?? 1.0,
+      yMin: cfg.yMin ?? -Infinity,
+      yMax: cfg.yMax ?? Infinity,
+      mode: cfg.mode || "trigger",
+      message: cfg.message || "",
+      strength: cfg.strength ?? 0.25,
+      onEnter: cfg.onEnter || null,
+      onExit: cfg.onExit || null,
+      meta: cfg.meta || {}
+    });
+    return id;
+  }
+
+  // Style B: name + box3
+  const name = a;
+  const box3 = b;
+  const onEnter = c;
+  const onExit = d;
+  const meta = e || {};
+
+  const id = _randId(name || "zone");
+  _zones.set(id, {
+    id,
+    type: "box3",
+    name: name || id,
+    box3,
+    onEnter: typeof onEnter === "function" ? onEnter : null,
+    onExit: typeof onExit === "function" ? onExit : null,
+    meta
+  });
   return id;
 }
 
 export function unregisterZone(zoneId) {
   if (!zoneId) return false;
   _zones.delete(zoneId);
-  // also clean tracking
-  _lastZoneHits.delete(zoneId);
+  _zonePrevInside.delete(zoneId);
   return true;
 }
 
 export function getZonesArray() {
-  return Array.from(_zones.entries()).map(([id, z]) => ({ id, ...z }));
+  return Array.from(_zones.values());
 }
 
 /**
- * Optional: zone tick utility if any module wants it.
- * Call this each frame with player/camera world position.
+ * tickZones(worldPos)
+ * - Call every frame from main/update loop if you want zone behavior.
+ * - For now it only tracks enter/exit and provides data to callers.
  */
 export function tickZones(worldPos) {
   if (!worldPos) return;
 
-  const nowHits = new Set();
+  const nowInside = new Set();
 
-  for (const [id, z] of _zones.entries()) {
-    if (!z?.box3 || typeof z.box3.containsPoint !== "function") continue;
+  for (const z of _zones.values()) {
+    let inside = false;
 
-    const inside = z.box3.containsPoint(worldPos);
-    if (inside) nowHits.add(id);
+    if (z.type === "sphere") {
+      // support THREE.Vector3 or plain {x,y,z}
+      const dx = (worldPos.x - z.center.x);
+      const dz = (worldPos.z - z.center.z);
+      const dy = (worldPos.y - (z.center.y ?? worldPos.y));
 
-    const wasInside = _lastZoneHits.has(id);
-
-    if (inside && !wasInside && typeof z.onEnter === "function") {
-      try { z.onEnter({ id, ...z }); } catch (e) { console.warn("zone onEnter error", e); }
+      const horiz = Math.sqrt(dx*dx + dz*dz);
+      const withinY = worldPos.y >= z.yMin && worldPos.y <= z.yMax;
+      inside = withinY && (horiz <= z.radius);
+    } else if (z.type === "box3") {
+      if (z.box3 && typeof z.box3.containsPoint === "function") {
+        inside = z.box3.containsPoint(worldPos);
+      }
     }
 
+    if (inside) nowInside.add(z.id);
+
+    const wasInside = _zonePrevInside.has(z.id);
+
+    if (inside && !wasInside && typeof z.onEnter === "function") {
+      try { z.onEnter(z); } catch (e) { console.warn("zone onEnter error", e); }
+    }
     if (!inside && wasInside && typeof z.onExit === "function") {
-      try { z.onExit({ id, ...z }); } catch (e) { console.warn("zone onExit error", e); }
+      try { z.onExit(z); } catch (e) { console.warn("zone onExit error", e); }
     }
   }
 
-  _lastZoneHits = nowHits;
+  _zonePrevInside = nowInside;
 }
 
-// ---------- Convenience aggregate (optional) ----------
+// ---------- Convenience aggregate ----------
 export const State = {
-  // core
   setCamera, getCamera,
   setRenderer, getRenderer,
   setScene, getScene,
   setPlayerRig, getPlayerRig,
 
-  // interactables
   registerInteractable,
   unregisterInteractable,
   getInteractablesArray,
   activateObject,
 
-  // colliders
   registerCollider,
   unregisterCollider,
   getCollidersArray,
 
-  // zones
   registerZone,
   unregisterZone,
   getZonesArray,
-  tickZones,
+  tickZones
 };

@@ -1,10 +1,11 @@
-// js/boss_table.js — Boss Table (Spectator Only)
+// js/boss_table.js — Boss Table + VIP Spectator Rail (Spectator Only)
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { registerZone } from "./state.js";
+import { SpectatorRail } from "./spectator_rail.js";
 
 export const BossTable = {
   group: null,
-  center: new THREE.Vector3(0, 0, -6.5), // Boss zone location (away from spawn)
+  center: new THREE.Vector3(0, 0, -6.5),
   zoneRadius: 4.1,
 
   build(scene) {
@@ -12,7 +13,7 @@ export const BossTable = {
     this.group.name = "BossTableArea";
     this.group.position.copy(this.center);
 
-    // --- Table ---
+    // Table base + top
     const base = new THREE.Mesh(
       new THREE.CylinderGeometry(0.75, 1.05, 0.6, 28),
       new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.9 })
@@ -22,7 +23,7 @@ export const BossTable = {
     const top = new THREE.Mesh(
       new THREE.CylinderGeometry(2.75, 2.9, 0.2, 44),
       new THREE.MeshStandardMaterial({
-        color: 0x5a0b0b, // boss felt (deep red)
+        color: 0x5a0b0b,
         roughness: 0.65,
         emissive: 0x120000,
         emissiveIntensity: 0.35
@@ -37,7 +38,7 @@ export const BossTable = {
     rim.rotation.x = Math.PI / 2;
     rim.position.y = 1.0;
 
-    // Crown pedestal (placeholder for your crown-drop logic later)
+    // Crown pedestal placeholder
     const pedestal = new THREE.Mesh(
       new THREE.CylinderGeometry(0.22, 0.28, 0.22, 18),
       new THREE.MeshStandardMaterial({
@@ -51,7 +52,7 @@ export const BossTable = {
 
     this.group.add(base, top, rim, pedestal);
 
-    // --- Spectator Only boundary ring ---
+    // Inner ring (visual cue)
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(this.zoneRadius, 0.06, 10, 90),
       new THREE.MeshStandardMaterial({
@@ -65,8 +66,8 @@ export const BossTable = {
     ring.position.y = 0.03;
     this.group.add(ring);
 
-    // --- Subtle warning lights ---
-    const a = new THREE.PointLight(0x00ffaa, 0.5, 14);
+    // Lighting around boss table
+    const a = new THREE.PointLight(0x00ffaa, 0.55, 14);
     a.position.set(0, 2.4, 0);
     this.group.add(a);
 
@@ -76,7 +77,10 @@ export const BossTable = {
 
     scene.add(this.group);
 
-    // Register no-entry zone (push player back)
+    // VIP Spectator rail around the zone
+    SpectatorRail.build(scene, this.center, this.zoneRadius + 0.35, { postCount: 20 });
+
+    // No-entry zone
     registerZone({
       name: "boss_table_zone",
       center: this.center,

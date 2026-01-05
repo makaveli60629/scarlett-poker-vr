@@ -33,3 +33,6 @@ export function activateObject(object3D) {
   }
   return false;
 }
+export function registerCollider() { /* stub */ }
+export function unregisterCollider() { /* stub */ }
+export function getCollidersArray() { return []; }

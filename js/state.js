@@ -1,93 +1,73 @@
-// js/state.js — Unified State Hub (prevents export-mismatch crashes)
+// js/state.js — unified, no-missing-export state hub
 
-const _interactables = new Map(); // id -> { obj, onActivate }
-const _colliders = new Map();     // id -> obj
-const _zones = new Map();         // name -> zone
+let _scene = null;
 let _camera = null;
-let _currentRoom = "lobby";
+let _playerRig = null;
 
-function _idFor(obj) {
+let _currentRoom = "VIP";
+
+const _zones = new Map();        // name -> zoneConfig
+const _colliders = new Set();    // Object3D
+const _interactables = new Map();// id -> { obj, onActivate }
+
+function _sid(obj) {
   if (!obj) return null;
   if (!obj.userData) obj.userData = {};
   if (!obj.userData.__sid) obj.userData.__sid = "sid_" + Math.random().toString(36).slice(2);
   return obj.userData.__sid;
 }
 
-// ---- Camera ----
-export function setCamera(cam) { _camera = cam; }
+// Scene / Camera / Player
+export function setScene(s) { _scene = s; }
+export function getScene() { return _scene; }
+
+export function setCamera(c) { _camera = c; }
 export function getCamera() { return _camera; }
 
-// ---- Rooms ----
-export function setCurrentRoom(name) { _currentRoom = String(name || "lobby"); }
+export function setPlayerRig(r) { _playerRig = r; }
+export function getPlayerRig() { return _playerRig; }
+
+// Rooms
+export function setCurrentRoom(name) { _currentRoom = String(name || "VIP"); }
 export function getCurrentRoom() { return _currentRoom; }
 
-// ---- Interactables ----
-export function registerInteractable(object3D, onActivate) {
-  const id = _idFor(object3D);
+// Zones (config-object style)
+export function registerZone(cfg) {
+  if (!cfg || !cfg.name) return null;
+  _zones.set(cfg.name, cfg);
+  return cfg.name;
+}
+export function unregisterZone(name) { return _zones.delete(name); }
+export function getZonesArray() { return Array.from(_zones.values()); }
+
+// Colliders
+export function registerCollider(obj) { if (obj) _colliders.add(obj); return obj || null; }
+export function unregisterCollider(obj) { return _colliders.delete(obj); }
+export function getCollidersArray() { return Array.from(_colliders); }
+
+// Interactables
+export function registerInteractable(obj, onActivate) {
+  const id = _sid(obj);
   if (!id) return null;
-  _interactables.set(id, { obj: object3D, onActivate: typeof onActivate === "function" ? onActivate : null });
+  _interactables.set(id, { obj, onActivate: typeof onActivate === "function" ? onActivate : null });
   return id;
 }
-
-export function unregisterInteractable(object3D) {
-  const id = _idFor(object3D);
-  if (!id) return false;
-  return _interactables.delete(id);
-}
-
-export function getInteractablesArray() {
-  return Array.from(_interactables.values()).map(v => v.obj).filter(Boolean);
-}
-
-export function activateObject(object3D, payload = {}) {
-  const id = _idFor(object3D);
+export function unregisterInteractable(obj) { return _interactables.delete(_sid(obj)); }
+export function getInteractablesArray() { return Array.from(_interactables.values()).map(v => v.obj); }
+export function activateObject(obj, payload = {}) {
+  const id = _sid(obj);
   const entry = id ? _interactables.get(id) : null;
-  if (entry?.onActivate) {
-    try { entry.onActivate(object3D, payload); }
-    catch (e) { console.warn("activateObject error:", e); }
-    return true;
-  }
+  if (entry?.onActivate) { try { entry.onActivate(obj, payload); } catch {} return true; }
   return false;
 }
 
-// ---- Colliders ----
-export function registerCollider(object3D) {
-  const id = _idFor(object3D);
-  if (!id) return null;
-  _colliders.set(id, object3D);
-  return id;
-}
-
-export function unregisterCollider(object3D) {
-  const id = _idFor(object3D);
-  if (!id) return false;
-  return _colliders.delete(id);
-}
-
-export function getCollidersArray() {
-  return Array.from(_colliders.values()).filter(Boolean);
-}
-
-// ---- Zones (for VIP rail / no-entry areas etc.) ----
-export function registerZone(zone) {
-  if (!zone || !zone.name) return null;
-  _zones.set(zone.name, zone);
-  return zone.name;
-}
-
-export function unregisterZone(name) {
-  return _zones.delete(name);
-}
-
-export function getZonesArray() {
-  return Array.from(_zones.values());
-}
-
-// Optional convenience object exports (some files import { State }).
+// Convenience export some modules like
 export const State = {
+  setScene, getScene,
   setCamera, getCamera,
+  setPlayerRig, getPlayerRig,
   setCurrentRoom, getCurrentRoom,
-  registerInteractable, unregisterInteractable, getInteractablesArray, activateObject,
-  registerCollider, unregisterCollider, getCollidersArray,
   registerZone, unregisterZone, getZonesArray,
+  registerCollider, unregisterCollider, getCollidersArray,
+  registerInteractable, unregisterInteractable, getInteractablesArray, activateObject,
 };

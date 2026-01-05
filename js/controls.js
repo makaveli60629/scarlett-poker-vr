@@ -1,10 +1,10 @@
-// js/controls.js — Movement Core v2 (ROBUST)
+// js/controls.js — Movement Core v2 (ROBUST) — STRAFE FIXED
 // Export name must be: Controls
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { applyZonesToPosition } from "./state.js";
 
-export const CONTROLS_VERSION = "Controls v2.2";
+export const CONTROLS_VERSION = "Controls v2.3 (strafe fixed)";
 
 export const Controls = {
   renderer: null,
@@ -91,22 +91,19 @@ export const Controls = {
     this._forward.copy(this._tmpDir);
     this._right.set(this._tmpDir.z, 0, -this._tmpDir.x).normalize();
 
-    // Inputs
     let moveX = 0,
       moveY = 0,
       turnX = 0;
 
     const dead = (v) => (Math.abs(v) < 0.15 ? 0 : v);
 
-    // --- VR GAMEPAD (Quest) ---
     const vr = !!this.renderer?.xr?.isPresenting;
 
+    // --- VR GAMEPAD (Quest) ---
     if (vr) {
       const session = this.renderer.xr.getSession();
       const sources = session?.inputSources || [];
 
-      // We will pick the best movement vector from ANY controller
-      // (because Quest sometimes reports handedness "none" for both)
       let bestMove = { x: 0, y: 0, mag: 0 };
       let bestTurn = { x: 0, mag: 0 };
 
@@ -115,13 +112,11 @@ export const Controls = {
         if (!gp) continue;
         const ax = gp.axes || [];
 
-        // Candidate axis pairs (Quest often uses 2/3, some use 0/1)
         const candidates = [
           { x: ax[2] ?? 0, y: ax[3] ?? 0 }, // common Quest
           { x: ax[0] ?? 0, y: ax[1] ?? 0 }, // fallback
         ];
 
-        // Choose the movement pair with highest magnitude
         let localBest = candidates[0];
         const mag0 = Math.abs(candidates[0].x) + Math.abs(candidates[0].y);
         const mag1 = Math.abs(candidates[1].x) + Math.abs(candidates[1].y);
@@ -133,7 +128,6 @@ export const Controls = {
 
         if (mmag > bestMove.mag) bestMove = { x: mx, y: my, mag: mmag };
 
-        // Turn: use strongest horizontal axis we can find
         const tx = dead(ax[0] ?? ax[2] ?? 0);
         const tmag = Math.abs(tx);
         if (tmag > bestTurn.mag) bestTurn = { x: tx, mag: tmag };
@@ -167,7 +161,9 @@ export const Controls = {
 
     // Apply movement (stick forward is usually -Y)
     const forwardAmt = (-moveY) * this.moveSpeed * dt;
-    const strafeAmt = (moveX) * this.strafeSpeed * dt;
+
+    // ✅ STRAFE FIX: invert X so right = right on your hardware
+    const strafeAmt = (-moveX) * this.strafeSpeed * dt;
 
     this.player.position.addScaledVector(this._forward, forwardAmt);
     this.player.position.addScaledVector(this._right, strafeAmt);

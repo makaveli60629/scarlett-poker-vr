@@ -12,95 +12,95 @@ export const World = {
     this.built = true;
 
     // Background
-    scene.background = new THREE.Color(0x05060a);
-    scene.fog = new THREE.Fog(0x05060a, 6, 55);
+    scene.background = new THREE.Color(0x070812);
 
-    // Lights (VIP room vibe)
-    scene.add(new THREE.HemisphereLight(0x8899ff, 0x090a0f, 0.35));
+    // Fog lighter + farther so it doesn’t swallow everything
+    scene.fog = new THREE.Fog(0x070812, 10, 90);
 
-    const key = new THREE.DirectionalLight(0xffffff, 0.65);
-    key.position.set(6, 8, 4);
+    // --- LIGHTING (Quest-friendly) ---
+    // Strong ambient so you never get “all black”
+    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+    scene.add(ambient);
+
+    const hemi = new THREE.HemisphereLight(0xaabaff, 0x111018, 0.55);
+    scene.add(hemi);
+
+    const key = new THREE.DirectionalLight(0xffffff, 1.05);
+    key.position.set(8, 10, 6);
     scene.add(key);
 
-    const rim = new THREE.PointLight(0x00ffaa, 0.55, 25);
-    rim.position.set(0, 3.2, -2);
-    scene.add(rim);
+    const fill = new THREE.PointLight(0x66ccff, 0.55, 35);
+    fill.position.set(-6, 3.2, 2);
+    scene.add(fill);
+
+    const neon = new THREE.PointLight(0x00ffaa, 0.7, 28);
+    neon.position.set(0, 3.2, -4);
+    scene.add(neon);
 
     // Floor
     const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(40, 40),
-      new THREE.MeshStandardMaterial({ color: 0x0d0f18, roughness: 0.98 })
+      new THREE.PlaneGeometry(44, 44),
+      new THREE.MeshStandardMaterial({ color: 0x0f1220, roughness: 0.95, metalness: 0.0 })
     );
     floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
+    floor.position.y = 0;
     scene.add(floor);
 
-    // Room box (walls + trim look)
+    // Room box (BackSide so you are inside it)
     const room = new THREE.Mesh(
-      new THREE.BoxGeometry(24, 8, 24),
+      new THREE.BoxGeometry(26, 9, 26),
       new THREE.MeshStandardMaterial({
         color: 0x0b0c12,
         roughness: 0.95,
         side: THREE.BackSide,
       })
     );
-    room.position.set(0, 4, -2);
+    room.position.set(0, 4.5, -2);
     scene.add(room);
 
-    // Simple “trim” rings
-    const trimMat = new THREE.MeshStandardMaterial({ color: 0x12131a, roughness: 0.9 });
-    const trim1 = new THREE.Mesh(new THREE.TorusGeometry(10.0, 0.05, 10, 160), trimMat);
-    trim1.rotation.x = Math.PI / 2;
-    trim1.position.set(0, 1.2, -2);
-    scene.add(trim1);
-
-    const trim2 = new THREE.Mesh(new THREE.TorusGeometry(10.0, 0.05, 10, 160), trimMat);
-    trim2.rotation.x = Math.PI / 2;
-    trim2.position.set(0, 0.06, -2);
-    scene.add(trim2);
-
-    // Corner orbs (your 4 green balls)
+    // Corner orbs (bright anchors)
     const orbMat = new THREE.MeshStandardMaterial({
       color: 0x00ffaa,
       emissive: 0x00ffaa,
-      emissiveIntensity: 1.1,
+      emissiveIntensity: 1.6,
       roughness: 0.35,
     });
-    const orbPos = [
-      new THREE.Vector3(-10, 1.0, 8),
-      new THREE.Vector3(10, 1.0, 8),
-      new THREE.Vector3(-10, 1.0, -12),
-      new THREE.Vector3(10, 1.0, -12),
-    ];
-    for (const p of orbPos) {
-      const s = new THREE.Mesh(new THREE.SphereGeometry(0.22, 18, 18), orbMat);
-      s.position.copy(p);
-      scene.add(s);
 
-      const l = new THREE.PointLight(0x00ffaa, 0.35, 10);
-      l.position.copy(p);
-      scene.add(l);
+    const corners = [
+      new THREE.Vector3(-10.5, 1.0, 8.5),
+      new THREE.Vector3(10.5, 1.0, 8.5),
+      new THREE.Vector3(-10.5, 1.0, -12.5),
+      new THREE.Vector3(10.5, 1.0, -12.5),
+    ];
+
+    for (const p of corners) {
+      const orb = new THREE.Mesh(new THREE.SphereGeometry(0.24, 18, 18), orbMat);
+      orb.position.copy(p);
+      scene.add(orb);
+
+      const pl = new THREE.PointLight(0x00ffaa, 0.55, 14);
+      pl.position.copy(p);
+      scene.add(pl);
     }
 
-    // Build centerpiece boss table + rail
+    // Centerpiece table + rail
     BossTable.build(scene);
 
-    // Teleport machine (also provides safe spawn)
+    // Teleport machine (spawn)
     TeleportMachine.build(scene);
 
     // Chairs
     Chairs.build(scene, BossTable.center);
 
-    // SAFE SPAWN (fix “spawn on table”)
+    // Spawn at pad (never on table)
     const spawn = TeleportMachine.getSafeSpawn();
     player.position.set(spawn.x, 0, spawn.z);
-    player.rotation.y = Math.PI; // face into room
+    player.rotation.y = Math.PI;
 
     return scene;
   },
 
   update(dt, camera, player) {
-    // reserved hooks
     TeleportMachine.update?.(dt, player, camera);
   },
 };

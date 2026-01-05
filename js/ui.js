@@ -1,90 +1,45 @@
+import * as THREE from "three";
+import { TextureBank, Textures } from "./textures.js";
+
 export const UI = {
-  init(ctx) {
-    // Always boot
-    this.ctx = ctx;
-    this.create(ctx);
-    return this;
-  },
+  panel: null,
+  visible: false,
+  camera: null,
 
-  create(ctx) {
-    let panel = document.getElementById("vrMenuPanel");
-    if (!panel) {
-      panel = document.createElement("div");
-      panel.id = "vrMenuPanel";
-      panel.style.position = "fixed";
-      panel.style.left = "12px";
-      panel.style.bottom = "12px";
-      panel.style.zIndex = "99999";
-      panel.style.padding = "14px";
-      panel.style.borderRadius = "16px";
-      panel.style.border = "1px solid rgba(0,255,255,0.25)";
-      panel.style.background = "rgba(0,0,0,0.78)";
-      panel.style.color = "#fff";
-      panel.style.fontFamily = "system-ui,Segoe UI,Roboto,Arial";
-      panel.style.width = "min(420px, 92vw)";
-      panel.style.display = "none";
+  init(scene, camera) {
+    this.camera = camera;
 
-      const btnStyle = `
-        width:100%;
-        padding:14px;
-        border-radius:14px;
-        border:0;
-        font-weight:900;
-        font-size:14px;
-      `;
+    const geo = new THREE.PlaneGeometry(1.35, 0.7);
+    const mat = TextureBank.standard({ color: 0x111111, roughness: 1.0 });
+    mat.transparent = true;
+    mat.opacity = 0.92;
 
-      panel.innerHTML = `
-        <div style="font-weight:1000;font-size:15px;margin-bottom:10px">Skylark Menu</div>
+    this.panel = new THREE.Mesh(geo, mat);
+    this.panel.position.set(0, 1.6, -2);
+    this.panel.visible = false;
+    scene.add(this.panel);
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-          <button id="btnLobby" style="${btnStyle}">Lobby</button>
-          <button id="btnPoker" style="${btnStyle}">Poker</button>
-          <button id="btnStore" style="${btnStyle}">Store</button>
-          <button id="btnClose" style="${btnStyle}">Close</button>
-        </div>
+    const holo = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.2, 0.55),
+      TextureBank.standard({ mapFile: Textures.UI_WINNER, color: 0x222222, roughness: 1.0 })
+    );
+    holo.position.set(0, 0, 0.01);
+    this.panel.add(holo);
 
-        <div style="opacity:.9;margin-top:10px;font-size:12px;line-height:1.4">
-          <div><b>Action:</b> GRIP (squeeze)</div>
-          <div><b>Menu:</b> Left Menu button (fallback X/Y)</div>
-        </div>
-      `;
-
-      document.body.appendChild(panel);
-    }
-
-    this.panel = panel;
-
-    const go = (room) => {
-      const sp = ctx.spawns3D?.[room] || ctx.spawns?.[room];
-      if (sp) {
-        ctx.rig.position.set(sp.x ?? 0, 0, sp.z ?? 0);
-        ctx.rig.rotation.set(0, 0, 0);
-      }
-    };
-
-    panel.querySelector("#btnLobby").onclick = () => go("lobby");
-    panel.querySelector("#btnPoker").onclick = () => go("poker");
-    panel.querySelector("#btnStore").onclick = () => go("store");
-    panel.querySelector("#btnClose").onclick = () => this.toggleMenu(false);
-
-    // Desktop fallback
     window.addEventListener("keydown", (e) => {
-      if (e.key.toLowerCase() === "m") this.toggleMenu();
+      if (e.key.toLowerCase() === "m") this.toggle();
     });
 
-    return this;
+    window.addEventListener("nova_toggle_menu", () => this.toggle());
   },
 
-  toggleMenu(force) {
-    if (!this.panel) return;
-    const show = (typeof force === "boolean") ? force : (this.panel.style.display === "none");
-    this.panel.style.display = show ? "block" : "none";
+  toggle() {
+    this.visible = !this.visible;
+    if (this.panel) this.panel.visible = this.visible;
   },
 
-  toast(msg) {
-    const hud = document.getElementById("hudLog");
-    if (hud) hud.innerHTML += `<div style="opacity:.85">ℹ️ ${msg}</div>`;
-  },
+  update() {
+    if (!this.panel || !this.panel.visible) return;
+    this.panel.lookAt(this.camera.position);
+  }
 };
-
-export default UI;

@@ -1,7 +1,4 @@
-// js/state.js — single source of truth for runtime state (6.2)
-// This file exports BOTH:
-// 1) named functions (for files that do: import { registerCollider } from "./state.js")
-// 2) a State object (for files that do: import { State } from "./state.js")
+// js/state.js — single source of truth (6.2)
 
 import {
   registerInteractable,
@@ -23,7 +20,6 @@ export {
   getCollidersArray,
 };
 
-// Optional convenience object
 export const State = {
   registerInteractable,
   unregisterInteractable,

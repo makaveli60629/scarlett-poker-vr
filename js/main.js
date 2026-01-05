@@ -85,7 +85,18 @@ function onResize() {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
-
+// extra cleanup for first seconds (if any cached rays exist)
+if (spawnGuardTime > 0 && scene) {
+  scene.traverse((o) => {
+    if (o?.type === "Line" && o.name !== "pointer-ray") {
+      const p = o.parent;
+      const isUnderController = !!(p && p.userData && p.userData.isController);
+      if (!isUnderController) {
+        try { p?.remove(o); } catch {}
+      }
+    }
+  });
+}
 // If your index.html imports boot, it will call it.
 // If someone runs main.js directly, we also auto-boot:
 if (!window.__SKYLARK_BOOTED__) {

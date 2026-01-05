@@ -1,7 +1,5 @@
-// js/main.js — Patch 7.0 FULL
-// Integrates RoomManager spawn pads + TeleportMachine authoritative spawn.
-// Result: you ALWAYS spawn on the pad (per room), never on table.
-// Adds: XR session start hook -> dispatch "webxr-session-start" (Ray Fix Lock trigger)
+// js/main.js — Patch 7.0A FULL
+// Updates CrownSystem getRooms() to use the new two-room list.
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -79,7 +77,6 @@ export async function boot() {
   document.body.appendChild(renderer.domElement);
   document.body.appendChild(VRButton.createButton(renderer));
 
-  // XR session start hook (Ray Fix Lock trigger)
   renderer.xr.addEventListener("sessionstart", () => {
     window.dispatchEvent(new Event("webxr-session-start"));
   });
@@ -101,7 +98,6 @@ export async function boot() {
   SolidWalls.build(scene, { halfX: 14, halfZ: 14, height: 4.2, thickness: 0.35, y: 0 });
   LightsPack.build(scene);
 
-  // Build content (in Lobby area). Other rooms currently only have pads/floors.
   Table.build(scene, { x: 0, y: 0, z: 0 });
   Chair.buildSet(scene, { x: 0, z: 0 }, 6);
 
@@ -119,7 +115,7 @@ export async function boot() {
 
   TeleportMachine.init(scene, playerRig);
 
-  // Authoritative spawn: ALWAYS use pad
+  // Spawn on Lobby pad
   const spawn = TeleportMachine.getSafeSpawn();
   playerRig.position.copy(spawn.position);
   playerRig.position.y = 0;
@@ -146,7 +142,7 @@ export async function boot() {
 
   CrownSystem.init(scene, camera, {
     toast: (m) => toast(m),
-    getRooms: () => RoomManager.getRooms(),
+    getRooms: () => RoomManager.getRooms(), // now: Lobby + VIP Poker Room
     getBossBots: () => BossBots,
     getBossHeads: () => BossBots.getHeads(),
     onCrownChange: (name) => toast(`👑 Crown Holder: ${name}`)
@@ -154,7 +150,7 @@ export async function boot() {
 
   PokerSimulation.init(scene, camera, BossBots, Leaderboard, (m) => toast(m), CrownSystem);
 
-  overlay("Loaded ✅\nPatch 7.0: Spawn Pads (All Rooms) + Teleport Authority\nYou will always spawn on a pad.");
+  overlay("Loaded ✅\nPatch 7.0A: Only Lobby + VIP Poker Room\nSpawn pads still authoritative.");
 
   const clock = new THREE.Clock();
 
@@ -170,19 +166,12 @@ export async function boot() {
 
     Input.update();
 
-    if (Input.menuPressed()) {
-      VRUIPanel.toggle();
-    }
-
-    if (Input.gripPressed()) {
-      Interactions.onGrip((m) => toast(m));
-    }
+    if (Input.menuPressed()) VRUIPanel.toggle();
+    if (Input.gripPressed()) Interactions.onGrip((m) => toast(m));
 
     Controls.update(dt);
 
-    // rescue check (kept mild; collision handles most)
     TeleportMachine.rescueIfBadSpawn(playerRig);
-
     Collision.update(dt, playerRig, () => TeleportMachine.getSafeSpawn(), (m) => toast(m));
 
     VRUIPanel.update(dt);
@@ -208,4 +197,4 @@ if (!window.__SCARLETT_BOOTED__) {
     console.error(e);
     overlay(`IMPORT FAILED ❌\n${String(e?.message || e)}`);
   });
-               }
+}

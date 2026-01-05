@@ -1,7 +1,12 @@
 export const UI = {
-  create(ctx) {
+  init(ctx) {
+    // Always boot
     this.ctx = ctx;
+    this.create(ctx);
+    return this;
+  },
 
+  create(ctx) {
     let panel = document.getElementById("vrMenuPanel");
     if (!panel) {
       panel = document.createElement("div");
@@ -13,10 +18,10 @@ export const UI = {
       panel.style.padding = "14px";
       panel.style.borderRadius = "16px";
       panel.style.border = "1px solid rgba(0,255,255,0.25)";
-      panel.style.background = "rgba(0,0,0,0.75)";
+      panel.style.background = "rgba(0,0,0,0.78)";
       panel.style.color = "#fff";
       panel.style.fontFamily = "system-ui,Segoe UI,Roboto,Arial";
-      panel.style.width = "min(380px, 92vw)";
+      panel.style.width = "min(420px, 92vw)";
       panel.style.display = "none";
 
       const btnStyle = `
@@ -39,9 +44,8 @@ export const UI = {
         </div>
 
         <div style="opacity:.9;margin-top:10px;font-size:12px;line-height:1.4">
-          <div><b>Teleport:</b> aim with <b>LEFT</b> controller, press <b>LEFT trigger</b></div>
-          <div><b>Snap Turn:</b> use <b>RIGHT stick</b> (45°)</div>
-          <div><b>Menu:</b> press <b>LEFT X</b> button</div>
+          <div><b>Action:</b> GRIP (squeeze)</div>
+          <div><b>Menu:</b> Left Menu button (fallback X/Y)</div>
         </div>
       `;
 
@@ -51,8 +55,11 @@ export const UI = {
     this.panel = panel;
 
     const go = (room) => {
-      const sp = ctx.spawns3D?.[room];
-      if (sp) ctx.rig.position.set(sp.x, 0, sp.z);
+      const sp = ctx.spawns3D?.[room] || ctx.spawns?.[room];
+      if (sp) {
+        ctx.rig.position.set(sp.x ?? 0, 0, sp.z ?? 0);
+        ctx.rig.rotation.set(0, 0, 0);
+      }
     };
 
     panel.querySelector("#btnLobby").onclick = () => go("lobby");
@@ -60,6 +67,7 @@ export const UI = {
     panel.querySelector("#btnStore").onclick = () => go("store");
     panel.querySelector("#btnClose").onclick = () => this.toggleMenu(false);
 
+    // Desktop fallback
     window.addEventListener("keydown", (e) => {
       if (e.key.toLowerCase() === "m") this.toggleMenu();
     });

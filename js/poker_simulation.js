@@ -1,114 +1,112 @@
-// js/poker_simulation.js — Demo dealing loop (8.0.3)
+// js/poker_simulation.js — Minimal Auto-Deal Loop (8.0.5)
 import * as THREE from "./three.js";
 
 export const PokerSim = {
-  group: null,
-  tableCenter: new THREE.Vector3(0, 0, -6.5),
   seats: [],
-  cardsBySeat: [],
+  center: new THREE.Vector3(),
+  bots: [],
+  cards: [],
   timer: 0,
-  roundEvery: 7.0,
-  dealing: false,
+  step: 0,
+  running: false,
 
-  build(scene, seats, tableCenter = new THREE.Vector3(0, 0, -6.5)) {
-    this.tableCenter = tableCenter.clone();
+  build(scene, seats, center, bots = []) {
     this.seats = seats || [];
-    this.group = new THREE.Group();
-    this.group.name = "PokerSim";
-    scene.add(this.group);
-
-    this.cardsBySeat = this.seats.map(() => []);
+    this.center = center ? center.clone() : new THREE.Vector3(0, 0, 0);
+    this.bots = bots || [];
+    this.cards = [];
     this.timer = 0;
-    this.dealing = false;
+    this.step = 0;
+    this.running = true;
 
-    // Start with a first round
-    this.startRound();
-    return this.group;
+    // Make a small “deck” indicator on the table (visual anchor)
+    const deck = new THREE.Mesh(
+      new THREE.BoxGeometry(0.22, 0.06, 0.32),
+      new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.6 })
+    );
+    deck.position.set(this.center.x, 1.08, this.center.z); // near table top height
+    deck.name = "DeckBlock";
+    scene.add(deck);
+
+    this._scene = scene;
   },
 
-  makeCardMesh() {
-    const geo = new THREE.PlaneGeometry(0.16, 0.22);
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.55,
-      metalness: 0.05,
-      emissive: 0x111111,
-      emissiveIntensity: 0.2,
-      side: THREE.DoubleSide,
-    });
-
-    const m = new THREE.Mesh(geo, mat);
-    m.rotation.x = -Math.PI / 2; // lay flat
-    m.position.y = 0.86; // float above table
-    return m;
+  makeCard() {
+    const card = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.12, 0.18),
+      new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        roughness: 0.6,
+        metalness: 0.0,
+        emissive: 0x111111,
+        emissiveIntensity: 0.15,
+        side: THREE.DoubleSide,
+      })
+    );
+    card.rotation.x = -Math.PI / 2; // lie flat while moving
+    card.position.set(this.center.x, 1.12, this.center.z); // start at deck
+    card.userData = { t: 0, start: card.position.clone(), end: card.position.clone() };
+    return card;
   },
 
-  clearCards() {
-    for (const arr of this.cardsBySeat) {
-      for (const c of arr) this.group.remove(c);
-      arr.length = 0;
-    }
-  },
+  dealToSeat(seat) {
+    const card = this.makeCard();
 
-  startRound() {
-    if (!this.seats?.length) return;
-    this.clearCards();
-    this.dealing = true;
+    // End position: in front of the bot, closer to table
+    const dirToCenter = new THREE.Vector3().subVectors(this.center, seat.position).normalize();
+    const end = seat.position.clone()
+      .add(dirToCenter.multiplyScalar(0.55)); // push toward table
 
-    // Deal 2 cards per seat, one-by-one
-    let step = 0;
-    const totalSteps = this.seats.length * 2;
+    end.y = 1.08;
 
-    const dealOne = () => {
-      const seatIndex = step % this.seats.length;
-      const cardIndex = Math.floor(step / this.seats.length);
+    card.userData.start = card.position.clone();
+    card.userData.end = end.clone();
+    card.userData.t = 0;
 
-      const seat = this.seats[seatIndex];
-
-      // Position cards near each seat, slightly offset
-      const offsetX = (cardIndex === 0 ? -0.07 : 0.07);
-      const offsetZ = 0.10;
-
-      const card = this.makeCardMesh();
-
-      // Face the table center
-      card.position.x = seat.x;
-      card.position.z = seat.z;
-      card.lookAt(this.tableCenter.x, 0.86, this.tableCenter.z);
-
-      // Move inward slightly so it appears "on the rail/table edge"
-      const dir = new THREE.Vector3().subVectors(this.tableCenter, seat).normalize();
-      card.position.addScaledVector(dir, 0.55);
-
-      // Card offset in local right direction
-      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(card.quaternion);
-      card.position.addScaledVector(right, offsetX);
-      card.position.addScaledVector(dir, offsetZ);
-
-      // Slight random angle
-      card.rotation.z += (Math.random() - 0.5) * 0.25;
-
-      this.group.add(card);
-      this.cardsBySeat[seatIndex].push(card);
-
-      step++;
-      if (step < totalSteps) {
-        setTimeout(dealOne, 140);
-      } else {
-        this.dealing = false;
-      }
-    };
-
-    dealOne();
+    this._scene.add(card);
+    this.cards.push(card);
   },
 
   update(dt) {
-    if (!this.group) return;
+    if (!this.running) return;
+
+    // Animate existing cards
+    for (let i = this.cards.length - 1; i >= 0; i--) {
+      const c = this.cards[i];
+      c.userData.t += dt * 1.8;
+      const t = Math.min(c.userData.t, 1);
+
+      c.position.lerpVectors(c.userData.start, c.userData.end, t);
+      c.rotation.y += dt * 0.4;
+
+      if (t >= 1) {
+        // leave card there for a bit, then remove later
+        c.userData.life = (c.userData.life ?? 0) + dt;
+        if (c.userData.life > 4.5) {
+          this._scene.remove(c);
+          this.cards.splice(i, 1);
+        }
+      }
+    }
+
+    // Deal loop
     this.timer += dt;
 
-    if (!this.dealing && this.timer >= this.roundEvery) {
+    // every ~0.6 sec, deal one card to the next seat
+    if (this.timer > 0.6) {
       this.timer = 0;
-      this.startRound();
+
+      if (!this.seats.length) return;
+
+      const seat = this.seats[this.step % this.seats.length];
+      this.dealToSeat(seat);
+
+      this.step++;
+
+      // after full round, pause slightly
+      if (this.step % this.seats.length === 0) {
+        this.timer = -0.9; // small pause
+      }
     }
   },
 };

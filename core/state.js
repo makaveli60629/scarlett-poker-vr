@@ -8,3 +8,11 @@ export * from "../js/state.js";
 export function registerCollider() { /* stub */ }
 export function unregisterCollider() { /* stub */ }
 export function getCollidersArray() { return []; }
+export const State = {
+  registerCollider,
+  unregisterCollider,
+  getCollidersArray,
+  registerInteractable,
+  getInteractablesArray,
+  activateObject
+};

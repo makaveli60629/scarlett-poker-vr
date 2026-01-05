@@ -1,112 +1,68 @@
-import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+import * as THREE from "three";
+import { TextureBank, Textures } from "./textures.js";
+import { registerCollider, registerInteractable } from "./state.js";
 
-function safeTex(url, repeat = [1, 1]) {
-  const loader = new THREE.TextureLoader();
-  const tex = loader.load(url, (t) => {
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.repeat.set(repeat[0], repeat[1]);
-    t.colorSpace = THREE.SRGBColorSpace;
-  });
-  return tex;
-}
-
-function matTex(url, fallback, rough = 0.9, repeat = [1, 1]) {
-  const m = new THREE.MeshStandardMaterial({ color: fallback, roughness: rough });
-  try {
-    m.map = safeTex(url, repeat);
-    m.color.set(0xffffff);
-  } catch {}
-  return m;
-}
-
-export const PokerTable = {
-  build(scene, rig, ctx) {
-    const TEX = "assets/textures/";
-
-    // Place table in POKER room center
-    const pokerCenter = ctx?.rooms?.poker?.pos || new THREE.Vector3(0, 0, -34);
-
-    const group = new THREE.Group();
-    group.name = "PokerTable";
-    group.position.set(pokerCenter.x, 0, pokerCenter.z);
-    scene.add(group);
-
-    // Table dimensions (oval)
-    const topY = 0.82;
-    const a = 3.0;   // x radius
-    const b = 2.05;  // z radius
-
-    // Felt top (oval)
+export const Table = {
+  build(scene) {
+    // Table felt
     const felt = new THREE.Mesh(
-      new THREE.CylinderGeometry(a, a, 0.12, 48, 1, false),
-      matTex(`${TEX}table_felt_green.jpg`, 0x0f5a35, 0.85, [1, 1])
+      new THREE.CylinderGeometry(3.0, 3.0, 0.32, 64),
+      TextureBank.standard({ mapFile: Textures.TABLE_FELT, color: 0x004411, roughness: 0.7, repeat: 2 })
     );
-    felt.scale.z = b / a; // make it oval
-    felt.position.y = topY;
+    felt.position.set(0, 0.78, 0);
     felt.castShadow = true;
     felt.receiveShadow = true;
-    group.add(felt);
+    felt.name = "bossTable";
+    felt.userData.spectatorOnly = true;
+    scene.add(felt);
 
-    // Leather trim ring (slightly larger oval)
-    const trim = new THREE.Mesh(
-      new THREE.CylinderGeometry(a + 0.22, a + 0.22, 0.18, 48, 1, false),
-      matTex(`${TEX}Table leather trim.jpg`, 0x2b1b10, 0.75, [1, 1])
+    // Rim
+    const rim = new THREE.Mesh(
+      new THREE.TorusGeometry(3.05, 0.12, 18, 72),
+      TextureBank.standard({ mapFile: Textures.TABLE_TRIM, color: 0x2b1b10, roughness: 0.75, repeat: 2 })
     );
-    trim.scale.z = (b + 0.16) / (a + 0.22);
-    trim.position.y = topY - 0.04;
-    trim.castShadow = true;
-    trim.receiveShadow = true;
-    group.add(trim);
+    rim.position.set(0, 0.92, 0);
+    rim.rotation.x = Math.PI / 2;
+    rim.castShadow = true;
+    rim.receiveShadow = true;
+    scene.add(rim);
 
-    // Table base
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.55, 0.8, 0.72, 28),
-      new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 0.6, metalness: 0.2 })
+    // Table collider footprint
+    registerCollider(felt, { min: { x: -3.1, y: 0, z: -3.1 }, max: { x: 3.1, y: 1.2, z: 3.1 } });
+
+    // SAFETY ESSENTIAL #1: spectator safety ring collider (invisible)
+    // Prevents player stepping into seats / clipping into boss space
+    const ringCollider = new THREE.Object3D();
+    ringCollider.position.set(0, 0, 0);
+    ringCollider.name = "bossTableSpectatorRing";
+    scene.add(ringCollider);
+    registerCollider(ringCollider, { min: { x: -4.25, y: 0, z: -4.25 }, max: { x: 4.25, y: 2.0, z: 4.25 } });
+
+    // Click gives spectator message (no seat joining)
+    registerInteractable(felt, () => {
+      window.dispatchEvent(new CustomEvent("notify", { detail: { text: "Boss Table: Spectator Only. Watch the bosses play." } }));
+    });
+
+    // Store kiosk placeholder
+    const kiosk = new THREE.Mesh(
+      new THREE.BoxGeometry(0.5, 1.2, 0.5),
+      TextureBank.standard({ color: 0x222244, roughness: 0.8 })
     );
-    base.position.y = 0.36;
-    base.castShadow = true;
-    base.receiveShadow = true;
-    group.add(base);
+    kiosk.position.set(-8, 0.6, 0);
+    kiosk.castShadow = true;
+    kiosk.receiveShadow = true;
+    scene.add(kiosk);
+    registerCollider(kiosk, { min: { x: -8.25, y: 0, z: -0.25 }, max: { x: -7.75, y: 1.2, z: 0.25 } });
 
-    // Outer pedestal
-    const pedestal = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.15, 1.25, 0.25, 28),
-      new THREE.MeshStandardMaterial({ color: 0x0d0f14, roughness: 0.65, metalness: 0.25 })
+    const button = new THREE.Mesh(
+      new THREE.BoxGeometry(0.18, 0.08, 0.03),
+      TextureBank.standard({ color: 0x00aa66, roughness: 0.6, emissive: 0x003311 })
     );
-    pedestal.position.y = 0.12;
-    pedestal.castShadow = true;
-    pedestal.receiveShadow = true;
-    group.add(pedestal);
+    button.position.set(0, 0.15, 0.27);
+    kiosk.add(button);
 
-    // Seat anchors (6 seats around oval)
-    const seats = [];
-    const seatCount = 6;
-    for (let i = 0; i < seatCount; i++) {
-      const ang = (i / seatCount) * Math.PI * 2;
-      const x = Math.cos(ang) * (a + 1.05);
-      const z = Math.sin(ang) * (b + 0.85);
-
-      const seat = new THREE.Object3D();
-      seat.position.set(x, 0, z);
-      seat.lookAt(0, 0, 0);
-      seats.push(seat);
-      group.add(seat);
-    }
-
-    // Provide seats to bots/chairs modules
-    ctx.table = ctx.table || {};
-    ctx.table.group = group;
-    ctx.table.seats = seats.map((s) => ({
-      position: s.getWorldPosition(new THREE.Vector3()),
-      rotationY: s.rotation.y,
-    }));
-
-    // Also provide a “safe player spawn” in poker room (in front of table)
-    ctx.spawns = ctx.spawns || {};
-    ctx.spawns.poker = { x: pokerCenter.x, z: pokerCenter.z + 7.0 };
-
-    return group;
-  },
+    registerInteractable(button, () => {
+      window.dispatchEvent(new CustomEvent("notify", { detail: { text: "Store: coming next (chips + clothing + premium tables)." } }));
+    });
+  }
 };
-
-export default PokerTable;

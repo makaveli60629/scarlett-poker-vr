@@ -1,173 +1,136 @@
-import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+import * as THREE from "three";
+import { State } from "./state.js";
 
 export const XrLocomotion = {
-  init(ctx) {
-    this.ctx = ctx;
-    this.enabled = true;
+  renderer: null,
+  player: null,
+  camera: null,
 
-    // Teleport-only (no motion sickness)
-    this.snapTurnDeg = 45;
+  moveSpeed: 2.1,
+  snapAngle: THREE.MathUtils.degToRad(45),
+  snapCooldown: 0.25,
+  snapTimer: 0,
 
-    // Controllers
-    this.left = ctx.renderer.xr.getController(0);
-    this.right = ctx.renderer.xr.getController(1);
+  init(renderer, player, camera) {
+    this.renderer = renderer;
+    this.player = player;
+    this.camera = camera;
 
-    // Visuals
-    this.arcLine = new THREE.Line(
-      new THREE.BufferGeometry(),
-      new THREE.LineBasicMaterial({ color: 0x44ccff })
-    );
-    this.arcLine.frustumCulled = false;
-    ctx.scene.add(this.arcLine);
-
-    this.ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.25, 0.34, 40),
-      new THREE.MeshBasicMaterial({ color: 0x44ccff, transparent: true, opacity: 0.95 })
-    );
-    this.ring.rotation.x = -Math.PI / 2;
-    this.ring.visible = false;
-    ctx.scene.add(this.ring);
-
-    // Raycast helpers
-    this.ray = new THREE.Raycaster();
-    this.tmpMat = new THREE.Matrix4();
-    this.tmpDir = new THREE.Vector3();
-    this.tmpPos = new THREE.Vector3();
-
-    // Arc sampling
-    this.arcPoints = Array.from({ length: 26 }, () => new THREE.Vector3());
-    this.arcGeom = new THREE.BufferGeometry().setFromPoints(this.arcPoints);
-    this.arcLine.geometry = this.arcGeom;
-
-    // State
-    this.lastHit = null;
-    this.lastTurn = 0;
-
-    // Events: LEFT trigger teleport (select)
-    const onSelectEnd = () => this.tryTeleport();
-    this.left?.addEventListener("selectend", onSelectEnd);
-
-    // Floors/colliders
-    ctx.floorPlanes = ctx.floorPlanes || [];
-    ctx.colliders = ctx.colliders || [];
-
-    return this;
+    this.spawnAtBestPad();
+    this.resolveCollisions(this.player.position);
   },
 
-  update(dt, ctx) {
-    if (!this.enabled) return;
+  update(dt) {
+    this.snapTimer = Math.max(0, this.snapTimer - dt);
 
-    // Teleport aim always from LEFT controller
-    const hit = this.computeTeleportHit();
-    if (hit) {
-      this.ring.visible = true;
-      this.ring.position.copy(hit);
-      this.ring.position.y += 0.02;
-    } else {
-      this.ring.visible = false;
+    const move = this.getStick("left");
+    const turn = this.getStick("right");
+
+    if (this.snapTimer === 0 && Math.abs(turn.x) > 0.8) {
+      const dir = Math.sign(turn.x);
+      this.player.rotation.y -= dir * this.snapAngle;
+      this.snapTimer = this.snapCooldown;
     }
 
-    // Snap turn from RIGHT stick
-    this.handleSnapTurn();
+    const dead = 0.15;
+    const f = (Math.abs(move.y) < dead) ? 0 : -move.y;
+    const s = (Math.abs(move.x) < dead) ? 0 : move.x;
+
+    if (f !== 0 || s !== 0) {
+      const yaw = this.getHeadsetYaw();
+      const sin = Math.sin(yaw), cos = Math.cos(yaw);
+
+      const dx = (s * cos - f * sin) * this.moveSpeed * dt;
+      const dz = (s * sin + f * cos) * this.moveSpeed * dt;
+
+      this.player.position.x += dx;
+      this.player.position.z += dz;
+      this.resolveCollisions(this.player.position);
+    }
+
+    this.player.position.y = State.player.height;
   },
 
-  computeTeleportHit() {
-    const ctx = this.ctx;
-    const ctrl = this.left;
-    if (!ctrl) return null;
-
-    this.tmpMat.extractRotation(ctrl.matrixWorld);
-    this.tmpDir.set(0, 0, -1).applyMatrix4(this.tmpMat).normalize();
-    ctrl.getWorldPosition(this.tmpPos);
-
-    this.ray.set(this.tmpPos, this.tmpDir);
-
-    const floors = ctx.floorPlanes?.length ? ctx.floorPlanes : (ctx.colliders || []);
-    if (!floors.length) {
-      this.drawArc(null);
-      return null;
+  spawnAtBestPad() {
+    const pads = State.world.spawnPads || [];
+    if (!pads.length) {
+      this.player.position.set(0, State.player.height, 6);
+      return;
     }
-
-    const hits = this.ray.intersectObjects(floors, true);
-    if (hits && hits.length) {
-      const p = hits[0].point.clone();
-      this.drawArc(p);
-      this.lastHit = p;
-      return p;
-    }
-
-    this.drawArc(null);
-    this.lastHit = null;
-    return null;
-  },
-
-  drawArc(hitPoint) {
-    const ctrl = this.left;
-    if (!ctrl) return;
-
-    const start = new THREE.Vector3();
-    ctrl.getWorldPosition(start);
-
-    this.tmpMat.extractRotation(ctrl.matrixWorld);
-    const fwd = new THREE.Vector3(0, 0, -1).applyMatrix4(this.tmpMat).normalize();
-
-    // Tighter arc (feels more responsive)
-    const steps = this.arcPoints.length;
-    const maxT = 0.9;
-    const gravity = 7.5;
-    const speed = 11.5;
-
-    for (let i = 0; i < steps; i++) {
-      const t = (i / (steps - 1)) * maxT;
-      const p = this.arcPoints[i];
-      p.copy(start)
-        .addScaledVector(fwd, speed * t)
-        .add(new THREE.Vector3(0, 1, 0).multiplyScalar((1.05 * t) - (0.5 * gravity * t * t)));
-
-      if (hitPoint && i === steps - 1) p.copy(hitPoint).add(new THREE.Vector3(0, 0.02, 0));
-    }
-
-    this.arcGeom.setFromPoints(this.arcPoints);
-    this.arcGeom.attributes.position.needsUpdate = true;
-  },
-
-  tryTeleport() {
-    const ctx = this.ctx;
-    if (!this.lastHit) return;
-
-    const p = this.lastHit;
-    ctx.rig.position.set(p.x, 0, p.z);
-
-    if (ctx.api?.ui?.toast) ctx.api.ui.toast("Teleported");
-  },
-
-  handleSnapTurn() {
-    const ctx = this.ctx;
-    const session = ctx.renderer.xr.getSession?.();
-    if (!session) return;
-
-    let gp = null;
-    for (const src of session.inputSources) {
-      // prefer right-hand gamepad if available
-      if (src.handedness === "right" && src.gamepad) { gp = src.gamepad; break; }
-    }
-    if (!gp) {
-      for (const src of session.inputSources) {
-        if (src.gamepad) { gp = src.gamepad; break; }
+    for (let i = 0; i < pads.length; i++) {
+      const p = new THREE.Vector3();
+      pads[i].getWorldPosition(p);
+      if (!this.isPointBlocked(p.x, p.z)) {
+        State.world.activePadIndex = i;
+        this.player.position.set(p.x, State.player.height, p.z);
+        this.player.rotation.y = pads[i].rotation.y || 0;
+        return;
       }
     }
-    if (!gp) return;
-
-    const ax = gp.axes?.[2] ?? gp.axes?.[0] ?? 0; // right stick x or left stick x
-    const now = performance.now();
-
-    if (Math.abs(ax) < 0.65) return;
-    if (now - this.lastTurn < 250) return;
-    this.lastTurn = now;
-
-    const dir = ax > 0 ? -1 : 1;
-    ctx.rig.rotation.y += THREE.MathUtils.degToRad(this.snapTurnDeg * dir);
+    const p0 = new THREE.Vector3();
+    pads[0].getWorldPosition(p0);
+    this.player.position.set(p0.x, State.player.height, p0.z);
   },
-};
 
-export default XrLocomotion;
+  isPointBlocked(x, z) {
+    const r = State.player.radius + 0.05;
+    for (const obj of State.world.colliders) {
+      const aabb = obj.userData?.aabb;
+      if (!aabb) continue;
+      if (x > aabb.min.x - r && x < aabb.max.x + r && z > aabb.min.z - r && z < aabb.max.z + r) return true;
+    }
+    return false;
+  },
+
+  resolveCollisions(pos) {
+    const r = State.player.radius;
+
+    for (const obj of State.world.colliders) {
+      const aabb = obj.userData?.aabb;
+      if (!aabb) continue;
+
+      const minX = aabb.min.x - r, maxX = aabb.max.x + r;
+      const minZ = aabb.min.z - r, maxZ = aabb.max.z + r;
+
+      const inside = (pos.x > minX && pos.x < maxX && pos.z > minZ && pos.z < maxZ);
+      if (!inside) continue;
+
+      const pushLeft = Math.abs(pos.x - minX);
+      const pushRight = Math.abs(maxX - pos.x);
+      const pushBack = Math.abs(pos.z - minZ);
+      const pushFwd = Math.abs(maxZ - pos.z);
+
+      const m = Math.min(pushLeft, pushRight, pushBack, pushFwd);
+
+      if (m === pushLeft) pos.x = minX;
+      if (m === pushRight) pos.x = maxX;
+      if (m === pushBack) pos.z = minZ;
+      if (m === pushFwd) pos.z = maxZ;
+    }
+
+    // Room clamp (prevents drift outside)
+    pos.x = Math.max(-15.2, Math.min(15.2, pos.x));
+    pos.z = Math.max(-15.2, Math.min(15.2, pos.z));
+  },
+
+  getHeadsetYaw() {
+    const dir = new THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+    dir.y = 0;
+    dir.normalize();
+    return Math.atan2(dir.x, dir.z);
+  },
+
+  getStick(hand) {
+    const session = this.renderer.xr.getSession?.();
+    if (!session) return { x: 0, y: 0 };
+
+    for (const src of session.inputSources) {
+      if (src.handedness === hand && src.gamepad) {
+        const axes = src.gamepad.axes || [];
+        return { x: axes[2] ?? axes[0] ?? 0, y: axes[3] ?? axes[1] ?? 0 };
+      }
+    }
+    return { x: 0, y: 0 };
+  }
+};

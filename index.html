@@ -52,7 +52,8 @@
     <div id="status">
       <span id="htmlPill" class="pill ok">✅ HTML loaded</span>
       <span id="jsPill" class="pill bad">⏳ JS booting…</span>
-      <span id="xrPill" class="pill bad">XR: not started</span>
+      <span id="xrPill" class="pill bad">XR: unknown</span>
+      <span id="verPill" class="pill ok">v: -</span>
     </div>
     <pre id="log">Waiting for main.js…</pre>
   </div>
@@ -61,9 +62,13 @@
     const logEl = document.getElementById("log");
     const jsPill = document.getElementById("jsPill");
     const xrPill = document.getElementById("xrPill");
+    const verPill = document.getElementById("verPill");
     const log = (line) => { logEl.textContent += (logEl.textContent ? "\n" : "") + line; };
 
-    window.__HUD__ = { log, jsPill, xrPill };
+    const V = Date.now().toString();
+    verPill.textContent = "v: " + V;
+
+    window.__HUD__ = { log, jsPill, xrPill, V };
 
     window.addEventListener("error", (e) => {
       jsPill.classList.remove("ok"); jsPill.classList.add("bad");
@@ -81,14 +86,32 @@
   </script>
 
   <script type="module">
-    const { log, jsPill } = window.__HUD__;
+    const { log, jsPill, xrPill, V } = window.__HUD__;
     try {
-      // cache bust so Quest never runs old code
-      const mod = await import("./js/main.js?v=" + Date.now());
+      const mod = await import("./js/main.js?v=" + V);
       await mod.boot();
+
       jsPill.classList.remove("bad"); jsPill.classList.add("ok");
       jsPill.textContent = "✅ boot() ok";
       log("boot() finished");
+
+      // LIVE XR status poll (doesn't rely on events)
+      setInterval(() => {
+        try {
+          const presenting = !!window.__SKYLARK__?.renderer?.xr?.isPresenting;
+          if (presenting) {
+            xrPill.classList.remove("bad"); xrPill.classList.add("ok");
+            xrPill.textContent = "XR: presenting ✅";
+          } else {
+            xrPill.classList.remove("ok"); xrPill.classList.add("bad");
+            xrPill.textContent = "XR: not presenting";
+          }
+        } catch {
+          xrPill.classList.remove("ok"); xrPill.classList.add("bad");
+          xrPill.textContent = "XR: unknown";
+        }
+      }, 500);
+
     } catch (err) {
       jsPill.classList.remove("ok"); jsPill.classList.add("bad");
       jsPill.textContent = "❌ IMPORT FAILED";

@@ -1,68 +1,74 @@
-// js/state.js — Shared State + Zones (STABLE EXPORTS)
-
+// js/state.js
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
-const S = {
+const _state = {
   camera: null,
-  currentRoom: "VIP_ROOM",
-  zones: [], // { name, center, radius, yMin, yMax, mode, message, strength }
+  currentRoom: "vip_room",
+  zones: [],
 };
 
 export function setCamera(cam) {
-  S.camera = cam;
+  _state.camera = cam || null;
 }
 
 export function getCamera() {
-  return S.camera;
+  return _state.camera;
 }
 
 export function setCurrentRoom(name) {
-  S.currentRoom = String(name || "VIP_ROOM");
+  _state.currentRoom = String(name || "vip_room");
 }
 
 export function getCurrentRoom() {
-  return S.currentRoom;
+  return _state.currentRoom;
 }
 
-// Used by BossTable (and future room blockers)
-export function registerZone(zone) {
-  if (!zone || !zone.center) return;
-  S.zones.push({
-    name: zone.name || `zone_${S.zones.length}`,
-    center: zone.center.clone ? zone.center.clone() : new THREE.Vector3(zone.center.x, zone.center.y, zone.center.z),
-    radius: zone.radius ?? 2,
-    yMin: zone.yMin ?? -10,
-    yMax: zone.yMax ?? 10,
-    mode: zone.mode || "block", // "block" for now
-    message: zone.message || "",
-    strength: zone.strength ?? 0.25,
-  });
+/**
+ * Zones: { name, center: THREE.Vector3, radius, yMin, yMax, mode:"block", message, strength }
+ */
+export function registerZone(z) {
+  if (!z) return;
+  const zone = {
+    name: z.name || `zone_${_state.zones.length}`,
+    center: (z.center instanceof THREE.Vector3) ? z.center.clone() : new THREE.Vector3(),
+    radius: Number.isFinite(z.radius) ? z.radius : 1.0,
+    yMin: Number.isFinite(z.yMin) ? z.yMin : -999,
+    yMax: Number.isFinite(z.yMax) ? z.yMax : 999,
+    mode: z.mode || "block",
+    message: z.message || "",
+    strength: Number.isFinite(z.strength) ? z.strength : 0.25,
+  };
+  _state.zones.push(zone);
 }
 
 export function clearZones() {
-  S.zones.length = 0;
+  _state.zones.length = 0;
 }
 
-// Pushes player OUT of restricted circles
-export function applyZonesToPosition(pos) {
-  if (!pos) return null;
+/**
+ * Push player out of "block" zones
+ */
+export function applyZonesToPlayer(playerPos) {
+  if (!playerPos) return;
 
-  const out = new THREE.Vector3(0, 0, 0);
-  for (const z of S.zones) {
-    if (pos.y < z.yMin || pos.y > z.yMax) continue;
+  for (const z of _state.zones) {
+    const y = playerPos.y;
+    if (y < z.yMin || y > z.yMax) continue;
 
-    const dx = pos.x - z.center.x;
-    const dz = pos.z - z.center.z;
-    const dist = Math.sqrt(dx * dx + dz * dz);
+    const dx = playerPos.x - z.center.x;
+    const dz = playerPos.z - z.center.z;
+    const d2 = dx * dx + dz * dz;
+    const r = z.radius;
 
-    if (dist < z.radius) {
-      // push outward
-      const nx = dist === 0 ? 1 : dx / dist;
-      const nz = dist === 0 ? 0 : dz / dist;
-      const push = (z.radius - dist) + 0.08;
-      out.x += nx * push;
-      out.z += nz * push;
+    if (d2 < r * r) {
+      // push out
+      const d = Math.max(Math.sqrt(d2), 0.0001);
+      const nx = dx / d;
+      const nz = dz / d;
+      const target = r + 0.03;
+
+      playerPos.x = z.center.x + nx * target;
+      playerPos.z = z.center.z + nz * target;
     }
   }
-  return out.lengthSq() > 0 ? out : null;
 }

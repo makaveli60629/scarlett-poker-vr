@@ -1,146 +1,112 @@
-import * as THREE from "three";
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 
-function safeTexture(url) {
+function safeTex(url, repeat = [1, 1]) {
   const loader = new THREE.TextureLoader();
-  try {
-    const tex = loader.load(
-      url,
-      (t) => {
-        t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
-        t.colorSpace = THREE.SRGBColorSpace;
-      },
-      undefined,
-      () => {}
-    );
-    return tex;
-  } catch {
-    return null;
-  }
-}
-
-function makeMaterialWithFallback(texturePath, fallbackColor, opts = {}) {
-  const tex = texturePath ? safeTexture(texturePath) : null;
-  const mat = new THREE.MeshStandardMaterial({
-    color: tex ? 0xffffff : fallbackColor,
-    map: tex || null,
-    roughness: opts.roughness ?? 0.9,
-    metalness: opts.metalness ?? 0.05,
+  const tex = loader.load(url, (t) => {
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(repeat[0], repeat[1]);
+    t.colorSpace = THREE.SRGBColorSpace;
   });
-  return mat;
+  return tex;
 }
 
-/**
- * Named export expected by main.js:
- *   import { PokerTable } from "./table.js";
- */
+function matTex(url, fallback, rough = 0.9, repeat = [1, 1]) {
+  const m = new THREE.MeshStandardMaterial({ color: fallback, roughness: rough });
+  try {
+    m.map = safeTex(url, repeat);
+    m.color.set(0xffffff);
+  } catch {}
+  return m;
+}
+
 export const PokerTable = {
-  colliders: [],
-  tableMesh: null,
-  tableTopY: 0.78,      // height of tabletop
-  noTeleportRadius: 2.2, // keep teleport away from center
+  build(scene, rig, ctx) {
+    const TEX = "assets/textures/";
 
-  build(scene) {
-    this.colliders = [];
+    // Place table in POKER room center
+    const pokerCenter = ctx?.rooms?.poker?.pos || new THREE.Vector3(0, 0, -34);
 
-    // --- Table group
-    const g = new THREE.Group();
-    g.name = "PokerTableGroup";
-    g.position.set(0, 0, 0);
+    const group = new THREE.Group();
+    group.name = "PokerTable";
+    group.position.set(pokerCenter.x, 0, pokerCenter.z);
+    scene.add(group);
 
-    // --- Oval table top (nice & smooth)
-    const topGeo = new THREE.CylinderGeometry(2.1, 2.1, 0.14, 64);
-    const feltMat = makeMaterialWithFallback(
-      "assets/textures/table_felt_green.jpg",
-      0x1b6b3a,
-      { roughness: 0.95, metalness: 0.02 }
+    // Table dimensions (oval)
+    const topY = 0.82;
+    const a = 3.0;   // x radius
+    const b = 2.05;  // z radius
+
+    // Felt top (oval)
+    const felt = new THREE.Mesh(
+      new THREE.CylinderGeometry(a, a, 0.12, 48, 1, false),
+      matTex(`${TEX}table_felt_green.jpg`, 0x0f5a35, 0.85, [1, 1])
     );
-    const top = new THREE.Mesh(topGeo, feltMat);
-    top.name = "TableTop";
-    top.position.set(0, this.tableTopY, 0);
-    top.scale.set(1.35, 1, 1.0); // makes it an oval
-    top.castShadow = true;
-    top.receiveShadow = true;
-    g.add(top);
+    felt.scale.z = b / a; // make it oval
+    felt.position.y = topY;
+    felt.castShadow = true;
+    felt.receiveShadow = true;
+    group.add(felt);
 
-    // --- Trim ring
-    const ringGeo = new THREE.TorusGeometry(2.08, 0.08, 18, 84);
-    const trimMat = makeMaterialWithFallback(
-      "assets/textures/Table_leather_trim.jpg",
-      0x1a1410,
-      { roughness: 0.65, metalness: 0.08 }
+    // Leather trim ring (slightly larger oval)
+    const trim = new THREE.Mesh(
+      new THREE.CylinderGeometry(a + 0.22, a + 0.22, 0.18, 48, 1, false),
+      matTex(`${TEX}Table leather trim.jpg`, 0x2b1b10, 0.75, [1, 1])
     );
-    const ring = new THREE.Mesh(ringGeo, trimMat);
-    ring.name = "TableTrim";
-    ring.position.set(0, this.tableTopY + 0.02, 0);
-    ring.scale.set(1.35, 1.0, 1.0);
-    ring.rotation.x = Math.PI / 2;
-    ring.castShadow = true;
-    ring.receiveShadow = true;
-    g.add(ring);
+    trim.scale.z = (b + 0.16) / (a + 0.22);
+    trim.position.y = topY - 0.04;
+    trim.castShadow = true;
+    trim.receiveShadow = true;
+    group.add(trim);
 
-    // --- Base pedestal
-    const baseGeo = new THREE.CylinderGeometry(0.65, 0.95, 0.75, 40);
-    const baseMat = new THREE.MeshStandardMaterial({
-      color: 0x1a1a1a,
-      roughness: 0.9,
-      metalness: 0.05,
-    });
-    const base = new THREE.Mesh(baseGeo, baseMat);
-    base.name = "TableBase";
-    base.position.set(0, 0.38, 0);
+    // Table base
+    const base = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.55, 0.8, 0.72, 28),
+      new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 0.6, metalness: 0.2 })
+    );
+    base.position.y = 0.36;
     base.castShadow = true;
     base.receiveShadow = true;
-    g.add(base);
+    group.add(base);
 
-    // --- Collision volume (so you don't walk through)
-    // big invisible collider box around table
-    const colGeo = new THREE.BoxGeometry(4.5, 1.2, 3.8);
-    const colMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.0 });
-    const collider = new THREE.Mesh(colGeo, colMat);
-    collider.name = "TableCollider";
-    collider.position.set(0, 0.6, 0);
-    g.add(collider);
-    this.colliders.push(collider);
+    // Outer pedestal
+    const pedestal = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.15, 1.25, 0.25, 28),
+      new THREE.MeshStandardMaterial({ color: 0x0d0f14, roughness: 0.65, metalness: 0.25 })
+    );
+    pedestal.position.y = 0.12;
+    pedestal.castShadow = true;
+    pedestal.receiveShadow = true;
+    group.add(pedestal);
 
-    // --- Seat markers (6 players, not 8)
-    // (later you can attach chairs exactly here)
-    const seatY = this.tableTopY;
-    const seatR = 2.5;
-    const seatAngles = [
-      0, Math.PI / 3, (2 * Math.PI) / 3,
-      Math.PI, (4 * Math.PI) / 3, (5 * Math.PI) / 3
-    ];
+    // Seat anchors (6 seats around oval)
+    const seats = [];
+    const seatCount = 6;
+    for (let i = 0; i < seatCount; i++) {
+      const ang = (i / seatCount) * Math.PI * 2;
+      const x = Math.cos(ang) * (a + 1.05);
+      const z = Math.sin(ang) * (b + 0.85);
 
-    const seatDots = new THREE.Group();
-    seatDots.name = "SeatMarkers";
-
-    const dotGeo = new THREE.CircleGeometry(0.14, 24);
-    const dotMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.18 });
-    for (let i = 0; i < seatAngles.length; i++) {
-      const a = seatAngles[i];
-      const d = new THREE.Mesh(dotGeo, dotMat);
-      d.name = `Seat_${i}`;
-      d.rotation.x = -Math.PI / 2;
-      d.position.set(Math.cos(a) * seatR, seatY + 0.01, Math.sin(a) * seatR);
-      seatDots.add(d);
+      const seat = new THREE.Object3D();
+      seat.position.set(x, 0, z);
+      seat.lookAt(0, 0, 0);
+      seats.push(seat);
+      group.add(seat);
     }
-    g.add(seatDots);
 
-    scene.add(g);
-    this.tableMesh = g;
+    // Provide seats to bots/chairs modules
+    ctx.table = ctx.table || {};
+    ctx.table.group = group;
+    ctx.table.seats = seats.map((s) => ({
+      position: s.getWorldPosition(new THREE.Vector3()),
+      rotationY: s.rotation.y,
+    }));
 
-    return this;
+    // Also provide a “safe player spawn” in poker room (in front of table)
+    ctx.spawns = ctx.spawns || {};
+    ctx.spawns.poker = { x: pokerCenter.x, z: pokerCenter.z + 7.0 };
+
+    return group;
   },
-
-  // Prevent teleport landing in table center area
-  isPointInNoTeleportZone(p) {
-    const dx = p.x - (this.tableMesh?.position.x || 0);
-    const dz = p.z - (this.tableMesh?.position.z || 0);
-    const d = Math.sqrt(dx * dx + dz * dz);
-    return d < this.noTeleportRadius;
-  },
-
-  update() {
-    // placeholder for later (cards hover, winner reveal, etc.)
-  }
 };
+
+export default PokerTable;

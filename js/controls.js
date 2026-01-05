@@ -1,25 +1,45 @@
 export const Controls = {
   init(ctx) {
     this.ctx = ctx;
+
+    // Controllers
     this.left = ctx.renderer.xr.getController(0);
     this.right = ctx.renderer.xr.getController(1);
 
-    // Hooks that main.js already assigns if present
+    // Hooks set by main.js (we’ll call them if present)
     this.onMenuToggle = null;
     this.onAction = null;
 
-    // Action = left trigger selectstart
+    // ---------- ACTION = GRIP (squeeze) ----------
+    const fireAction = () => {
+      try {
+        if (typeof this.onAction === "function") this.onAction(ctx);
+      } catch {}
+      // fallback: interactions module if present
+      try {
+        if (ctx.api?.interactions?.action) ctx.api.interactions.action(ctx);
+      } catch {}
+    };
+
+    // Prefer squeeze events (best in XR)
+    this.left?.addEventListener("squeezestart", fireAction);
+    this.right?.addEventListener("squeezestart", fireAction);
+
+    // ---------- MENU TOGGLE ----------
+    const fireMenu = () => {
+      try {
+        if (typeof this.onMenuToggle === "function") this.onMenuToggle();
+      } catch {}
+    };
+
+    // Some browsers expose "select" for certain buttons; keep as backup
     this.left?.addEventListener("selectstart", () => {
-      if (typeof this.onAction === "function") this.onAction();
-      // fallback: tell interactions system if it exists
-      if (ctx.api?.interactions?.action) {
-        try { ctx.api.interactions.action(ctx); } catch {}
-      }
+      // do nothing here; you wanted GRIP for action
     });
 
-    // MENU toggle: map to button "X" (Quest left controller button)
-    // We poll gamepad buttons in update()
-    this.lastMenuPress = false;
+    // Polling fallback (reliable on Quest)
+    this.lastMenuPressed = false;
+    this.fireMenu = fireMenu;
 
     return this;
   },
@@ -28,24 +48,38 @@ export const Controls = {
     const session = ctx.renderer.xr.getSession?.();
     if (!session) return;
 
-    // Find left-hand gamepad
+    // Find LEFT gamepad
     let leftGP = null;
     for (const src of session.inputSources) {
-      if (src.handedness === "left" && src.gamepad) { leftGP = src.gamepad; break; }
+      if (src.handedness === "left" && src.gamepad) {
+        leftGP = src.gamepad;
+        break;
+      }
+    }
+    if (!leftGP) {
+      // fallback: any gamepad
+      for (const src of session.inputSources) {
+        if (src.gamepad) { leftGP = src.gamepad; break; }
+      }
     }
     if (!leftGP) return;
 
-    // On Quest: X is usually buttons[4] or [3] depending on mapping
-    const b3 = !!leftGP.buttons?.[3]?.pressed;
-    const b4 = !!leftGP.buttons?.[4]?.pressed;
-    const menuPressed = b3 || b4;
+    // Quest mappings differ by browser. We check several:
+    // - "menu/hamburger" often buttons[6] or [7]
+    // - X/Y often [3]/[4] (varies)
+    // We treat ANY of these as menu toggle.
+    const b = leftGP.buttons || [];
+    const pressed = (i) => !!(b[i] && b[i].pressed);
 
-    if (menuPressed && !this.lastMenuPress) {
-      if (typeof this.onMenuToggle === "function") {
-        try { this.onMenuToggle(); } catch {}
-      }
+    const menuPressed =
+      pressed(6) || pressed(7) ||   // menu/system-ish if exposed
+      pressed(3) || pressed(4) ||   // X/Y on some mappings
+      pressed(1);                   // fallback mapping
+
+    if (menuPressed && !this.lastMenuPressed) {
+      if (typeof this.fireMenu === "function") this.fireMenu();
     }
-    this.lastMenuPress = menuPressed;
+    this.lastMenuPressed = menuPressed;
   },
 };
 

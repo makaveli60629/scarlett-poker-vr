@@ -1,140 +1,188 @@
 // ===============================
-// Skylark Poker VR — main.js (6.2 STABLE)
+// Skylark Poker VR — js/main.js (RESILIENT BOOT)
+// Exports: boot()
 // ===============================
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
 
-// Core systems
-import { State } from "./state.js";
-import { Controls } from "./controls.js";
-import { Interactions } from "./interactions.js";
-import { RoomManager } from "./room_manager.js";
-import { TeleportMachine } from "./teleport_machine.js";
-import { UI } from "./ui.js";
+import { State, setRenderer, setScene, setCamera, setPlayerRig } from "./state.js";
 import { Audio } from "./audio.js";
-import { BossBots } from "./boss_bots.js";
 
-// ===============================
-// SPAWN SAFETY (FIXES YOUR ERROR)
-// ===============================
-let spawnGuardTime = 0;
-const SPAWN_GUARD_DELAY = 1200; // ms
+// Change this when you need to force refresh everywhere
+const BUILD = "v63";
 
-// ===============================
-// THREE CORE
-// ===============================
-let scene, camera, renderer;
-let playerRig;
-
-// ===============================
-// INIT
-// ===============================
-init();
-animate();
-
-// ===============================
-function init() {
-  // Scene
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x050505);
-
-  // Camera
-  camera = new THREE.PerspectiveCamera(
-    70,
-    window.innerWidth / window.innerHeight,
-    0.05,
-    100
-  );
-
-  // Player Rig
-  playerRig = new THREE.Group();
-  playerRig.add(camera);
-  scene.add(playerRig);
-
-  // Renderer
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.xr.enabled = true;
-  document.body.appendChild(renderer.domElement);
-  document.body.appendChild(VRButton.createButton(renderer));
-
-  // Lighting (BASE)
-  addLighting();
-
-  // Systems
-  Controls.init(renderer, camera, playerRig);
-  Interactions.init(renderer, scene, camera);
-  UI.init(scene, camera);
-  Audio.init(scene);
-
-  // Rooms & Teleport
-  RoomManager.init(scene);
-  TeleportMachine.init(scene, playerRig);
-
-  // Boss Bots (visual only table)
-  BossBots.init(scene);
-
-  // SAFE SPAWN
-  forceSafeSpawn();
-
-  window.addEventListener("resize", onWindowResize);
-}
-
-// ===============================
-// SAFE SPAWN — TELEPORT PAD ONLY
-// ===============================
-function forceSafeSpawn() {
-  const now = performance.now();
-  if (now - spawnGuardTime < SPAWN_GUARD_DELAY) return;
-  spawnGuardTime = now;
-
-  const spawn = TeleportMachine.getSafeSpawn();
-  if (!spawn) {
-    console.warn("⚠ No teleport pad found — using fallback");
-    playerRig.position.set(0, 0, 4);
-    return;
+// ---------- helper: safe dynamic import ----------
+async function safeImport(path) {
+  try {
+    // cache buster
+    return await import(`${path}?${BUILD}`);
+  } catch (e) {
+    console.warn(`Module failed: ${path}`, e);
+    return null;
   }
-
-  playerRig.position.copy(spawn.position);
-  playerRig.rotation.y = spawn.rotationY || 0;
 }
 
-// ===============================
-// LIGHTING
-// ===============================
-function addLighting() {
-  const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-  scene.add(ambient);
+function makeStatusOverlay() {
+  const el = document.getElementById("status");
+  if (el) return el;
 
-  const main = new THREE.DirectionalLight(0xffffff, 0.9);
-  main.position.set(5, 10, 5);
-  scene.add(main);
-
-  // Edge glow effect (subtle)
-  const glow = new THREE.PointLight(0x00ffaa, 0.4, 20);
-  glow.position.set(0, 3, 0);
-  scene.add(glow);
+  const d = document.createElement("div");
+  d.id = "status";
+  d.style.position = "fixed";
+  d.style.left = "12px";
+  d.style.top = "12px";
+  d.style.padding = "10px 12px";
+  d.style.background = "rgba(0,0,0,0.55)";
+  d.style.color = "#fff";
+  d.style.fontFamily = "system-ui, sans-serif";
+  d.style.fontSize = "14px";
+  d.style.borderRadius = "10px";
+  d.style.zIndex = "9999";
+  d.innerHTML = `Skylark Poker VR<br>✅ HTML loaded<br>Status: BOOTING...`;
+  document.body.appendChild(d);
+  return d;
 }
 
-// ===============================
-// ANIMATE
-// ===============================
-function animate() {
-  renderer.setAnimationLoop(render);
+function statusText(text) {
+  const s = makeStatusOverlay();
+  s.innerHTML = `Skylark Poker VR<br>✅ HTML loaded<br>Status: ${text}`;
 }
 
-function render() {
-  Controls.update();
-  Interactions.update();
-  renderer.render(scene, camera);
+function addBasicLights(scene) {
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 1.0);
+  scene.add(hemi);
+
+  const key = new THREE.DirectionalLight(0xffffff, 1.15);
+  key.position.set(6, 10, 6);
+  key.castShadow = true;
+  scene.add(key);
+
+  const fill = new THREE.PointLight(0xffffff, 0.8, 40);
+  fill.position.set(-6, 6, -6);
+  scene.add(fill);
 }
 
-// ===============================
-// RESIZE
-// ===============================
-function onWindowResize() {
+function addFloor(scene) {
+  const g = new THREE.PlaneGeometry(60, 60);
+  const m = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 1.0 });
+  const floor = new THREE.Mesh(g, m);
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
+  floor.name = "floor";
+  scene.add(floor);
+  return floor;
+}
+
+function createRig(scene) {
+  const rig = new THREE.Group();
+  rig.name = "playerRig";
+
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
+  camera.position.set(0, 1.65, 3.5);
+  rig.add(camera);
+
+  scene.add(rig);
+  return { rig, camera };
+}
+
+function setupRenderer() {
+  const r = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  r.setPixelRatio(window.devicePixelRatio);
+  r.setSize(window.innerWidth, window.innerHeight);
+  r.shadowMap.enabled = true;
+  r.xr.enabled = true;
+
+  document.body.style.margin = "0";
+  document.body.style.overflow = "hidden";
+  document.body.appendChild(r.domElement);
+  document.body.appendChild(VRButton.createButton(r));
+
+  return r;
+}
+
+function onResize(renderer, camera) {
+  renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
 }
+
+// ---------- BOOT ----------
+export async function boot() {
+  statusText("BOOTING...");
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x05060a);
+
+  addBasicLights(scene);
+  addFloor(scene);
+
+  const renderer = setupRenderer();
+  const { rig, camera } = createRig(scene);
+
+  // register references
+  setRenderer(renderer);
+  setScene(scene);
+  setCamera(camera);
+  setPlayerRig(rig);
+
+  // audio
+  Audio.init(camera);
+
+  window.addEventListener("resize", () => onResize(renderer, camera));
+
+  // ---- Optional modules (won’t crash if missing) ----
+  // If these exist and export correctly, they’ll run.
+  const uiMod = await safeImport("./ui.js");
+  const controlsMod = await safeImport("./controls.js");
+  const interactionsMod = await safeImport("./interactions.js");
+  const roomMod = await safeImport("./room_manager.js");
+  const tableMod = await safeImport("./table.js");
+  const chairMod = await safeImport("./chair.js");
+  const botsMod = await safeImport("./bots.js");
+  const bossBotsMod = await safeImport("./boss_bots.js");
+  const leaderboardMod = await safeImport("./leaderboard.js");
+  const teleportMod = await safeImport("./teleport_machine.js");
+  const storeMod = await safeImport("./store.js");
+  const tournamentMod = await safeImport("./tournament.js");
+
+  try { uiMod?.UI?.init?.({ scene, renderer, camera, rig, State }); } catch (e) { console.warn(e); }
+  try { controlsMod?.Controls?.init?.({ scene, renderer, camera, rig, State }); } catch (e) { console.warn(e); }
+  try { interactionsMod?.Interactions?.init?.({ scene, renderer, camera, rig, State }); } catch (e) { console.warn(e); }
+
+  // Build world content (if modules support it)
+  try { roomMod?.RoomManager?.build?.(scene, rig); } catch (e) { console.warn(e); }
+  try { tableMod?.Table?.build?.(scene); } catch (e) { console.warn(e); }
+  try { chairMod?.Chair?.buildSet?.(scene, 0, 0); } catch (e) { console.warn(e); }
+
+  try { teleportMod?.TeleportMachine?.build?.(scene, rig); } catch (e) { console.warn(e); }
+  try { storeMod?.Store?.build?.(scene); } catch (e) { console.warn(e); }
+
+  try { leaderboardMod?.Leaderboard?.build?.(scene); } catch (e) { console.warn(e); }
+  try { tournamentMod?.Tournament?.init?.(scene); } catch (e) { console.warn(e); }
+
+  try { botsMod?.Bots?.spawn?.(scene); } catch (e) { console.warn(e); }
+  try { bossBotsMod?.BossBots?.spawn?.(scene); } catch (e) { console.warn(e); }
+
+  statusText("OK ✅");
+
+  // ---- Render loop ----
+  renderer.setAnimationLoop(() => {
+    try { controlsMod?.Controls?.update?.(renderer, scene, camera, rig); } catch {}
+    try { interactionsMod?.Interactions?.update?.(); } catch {}
+    try { uiMod?.UI?.update?.(); } catch {}
+    try { leaderboardMod?.Leaderboard?.update?.(); } catch {}
+    try { botsMod?.Bots?.update?.(); } catch {}
+    try { bossBotsMod?.BossBots?.update?.(); } catch {}
+    renderer.render(scene, camera);
+  });
+
+  // Optional: auto-play ambience if you have assets/audio/lobby_ambience.mp3
+  // Audio.playUrl("assets/audio/lobby_ambience.mp3", { loop: true, volume: 0.25 });
+}
+
+// Auto-run boot when loaded
+boot().catch((e) => {
+  console.error(e);
+  statusText("IMPORT FAILED ❌ (see console)");
+});

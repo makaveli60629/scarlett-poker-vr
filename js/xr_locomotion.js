@@ -6,12 +6,11 @@ export const XrLocomotion = {
   camera: null,
   left: null,
   right: null,
-  _tmpVec: new THREE.Vector3(),
-  _tmpQuat: new THREE.Quaternion(),
+
   _snapReady: true,
-  _moveSpeed: 1.2,     // keep low
-  _snapAngle: THREE.MathUtils.degToRad(45),
   _deadzone: 0.18,
+  _moveSpeed: 1.35, // mild speed to reduce nausea
+  _snapAngle: THREE.MathUtils.degToRad(45),
 
   init(renderer, player, camera) {
     this.renderer = renderer;
@@ -23,29 +22,32 @@ export const XrLocomotion = {
     player.add(this.left);
     player.add(this.right);
 
-    // Pointer ray on LEFT controller (comfort + consistent)
-    this.addRay(this.left);
-    this.addRay(this.right, true); // shorter on right
+    // Ensure controller rays exist and are correctly parented
+    this.ensureRay(this.left, false);
+    this.ensureRay(this.right, true);
 
-    // Add simple controller grips (optional visuals)
     const gripL = renderer.xr.getControllerGrip(0);
     const gripR = renderer.xr.getControllerGrip(1);
     player.add(gripL, gripR);
   },
 
-  addRay(controller, short = false) {
+  ensureRay(controller, short = false) {
+    // Remove any old rays (prevents "laser stuck on table")
+    const old = controller.getObjectByName("xr-ray");
+    if (old) controller.remove(old);
+
     const geo = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, short ? -0.5 : -2.0)
+      new THREE.Vector3(0, 0, short ? -0.6 : -2.2)
     ]);
     const mat = new THREE.LineBasicMaterial({ color: 0x00ff55 });
     const line = new THREE.Line(geo, mat);
     line.name = "xr-ray";
+    line.frustumCulled = false;
     controller.add(line);
   },
 
   update(dt) {
-    // Comfort movement: only move when LEFT GRIP is held
     const session = this.renderer.xr.getSession();
     if (!session) return;
 
@@ -59,23 +61,20 @@ export const XrLocomotion = {
       if (s.handedness === "right") rightGp = s.gamepad;
     }
 
-    // --- SNAP TURN (Right stick) ---
+    // --- SNAP TURN (Right stick X) ---
     if (rightGp) {
       const axX = rightGp.axes?.[2] ?? rightGp.axes?.[0] ?? 0;
-      // snap left/right
+
       if (Math.abs(axX) > 0.65 && this._snapReady) {
         this._snapReady = false;
-        const dir = axX > 0 ? -1 : 1; // invert feels better in VR
+        const dir = axX > 0 ? -1 : 1; // invert feels better for many players
         this.player.rotation.y += dir * this._snapAngle;
       }
       if (Math.abs(axX) < 0.35) this._snapReady = true;
     }
 
-    // --- COMFORT MOVE (Left stick, only while holding grip) ---
+    // --- MOVE (Left stick) ALWAYS ON ---
     if (leftGp) {
-      const gripHeld = (leftGp.buttons?.[1]?.pressed) || false; // grip on many controllers
-      if (!gripHeld) return;
-
       const axX = leftGp.axes?.[0] ?? 0;
       const axY = leftGp.axes?.[1] ?? 0;
 
@@ -84,17 +83,20 @@ export const XrLocomotion = {
 
       if (x === 0 && y === 0) return;
 
-      // Move relative to headset yaw
+      // Move relative to headset yaw only
       const yaw = this.camera.rotation.y;
       const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
       const right = new THREE.Vector3(forward.z, 0, -forward.x);
 
-      // forward/back is -y
       const move = new THREE.Vector3();
       move.addScaledVector(forward, -y);
       move.addScaledVector(right, x);
-      move.normalize().multiplyScalar(this._moveSpeed * dt);
 
+      // Normalize so diagonals aren't faster
+      if (move.lengthSq() > 0) move.normalize();
+
+      // Speed cap + dt
+      move.multiplyScalar(this._moveSpeed * dt);
       this.player.position.add(move);
     }
   }

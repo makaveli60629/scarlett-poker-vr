@@ -1,115 +1,194 @@
-// js/controls.js — VR + Desktop movement (Left stick) + fixed axis direction
+// js/controls.js
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+import { applyZonesToPlayer } from "./state.js";
 
 export const Controls = {
-  xr: null,
+  renderer: null,
+  scene: null,
   camera: null,
   player: null,
 
-  // speed tuning
-  walkSpeed: 2.2,
-  strafeSpeed: 2.0,
+  // XR controllers
+  c0: null,
+  c1: null,
 
-  // internal
-  _tmpVec3: new THREE.Vector3(),
-  _tmpQuat: new THREE.Quaternion(),
-  _dir: new THREE.Vector3(),
-  _right: new THREE.Vector3(),
-  _fwd: new THREE.Vector3(),
+  // Desktop fallback
+  keys: { w: false, a: false, s: false, d: false, q: false, e: false },
+  yaw: 0,
 
-  init({ renderer, camera, playerGroup }) {
-    this.xr = renderer?.xr || null;
+  // Tuning
+  moveSpeed: 2.2,     // meters/sec
+  turnSpeed: 1.9,     // radians/sec (smooth turn)
+  deadzone: 0.15,
+
+  init({ renderer, scene, camera, player }) {
+    this.renderer = renderer;
+    this.scene = scene;
     this.camera = camera;
-    this.player = playerGroup;
+    this.player = player;
 
-    // Keyboard fallback (desktop/mobile)
-    this.keys = { w: false, a: false, s: false, d: false };
-    window.addEventListener("keydown", (e) => {
-      const k = e.key.toLowerCase();
-      if (k in this.keys) this.keys[k] = true;
-    });
-    window.addEventListener("keyup", (e) => {
-      const k = e.key.toLowerCase();
-      if (k in this.keys) this.keys[k] = false;
-    });
-  },
+    // Desktop keys
+    window.addEventListener("keydown", (e) => this._onKey(e, true));
+    window.addEventListener("keyup", (e) => this._onKey(e, false));
 
-  // Read left stick on Quest controllers
-  _readLeftStick() {
-    const xr = this.xr;
-    if (!xr || !xr.isPresenting) return { x: 0, y: 0 };
+    // XR controllers
+    this.c0 = renderer.xr.getController(0);
+    this.c1 = renderer.xr.getController(1);
 
-    // controller(0) is usually left; if not, we scan both
-    const s = this._stickFromController(0);
-    if (Math.abs(s.x) + Math.abs(s.y) > 0.01) return s;
+    this.c0.name = "controller0";
+    this.c1.name = "controller1";
 
-    const s2 = this._stickFromController(1);
-    return s2;
-  },
+    scene.add(this.c0);
+    scene.add(this.c1);
 
-  _stickFromController(index) {
-    try {
-      const c = this.xr.getController(index);
-      const gp = c?.gamepad;
-      if (!gp || !gp.axes) return { x: 0, y: 0 };
+    // Tiny rays (visual)
+    this._addLaser(this.c0);
+    this._addLaser(this.c1);
 
-      // Most Quest controllers: axes[2], axes[3] is thumbstick
-      // Some setups: axes[0], axes[1]
-      let axX = gp.axes[2] ?? gp.axes[0] ?? 0;
-      let axY = gp.axes[3] ?? gp.axes[1] ?? 0;
-
-      // DEADZONE
-      const dead = 0.12;
-      if (Math.abs(axX) < dead) axX = 0;
-      if (Math.abs(axY) < dead) axY = 0;
-
-      // FIX “reverse”: pushing right should move right (positive X strafe)
-      // FIX forward: pushing up should move forward (negative Y -> forward)
-      // Many sticks return up as -1, down as +1
-      return { x: axX, y: axY };
-    } catch {
-      return { x: 0, y: 0 };
-    }
+    // initialize yaw from player
+    this.yaw = this.player.rotation.y;
   },
 
   update(dt) {
-    if (!this.player || !this.camera) return;
+    const xr = this.renderer.xr.isPresenting;
 
-    // VR stick movement
-    const stick = this._readLeftStick();
+    if (xr) {
+      this._updateXR(dt);
+    } else {
+      this._updateDesktop(dt);
+    }
 
-    // Keyboard fallback
-    let kx = 0, ky = 0;
-    if (this.keys?.a) kx -= 1;
-    if (this.keys?.d) kx += 1;
-    if (this.keys?.w) ky -= 1;
-    if (this.keys?.s) ky += 1;
+    // Apply zone blockers after movement
+    applyZonesToPlayer(this.player.position);
+  },
 
-    const moveX = stick.x || kx; // strafe
-    const moveY = stick.y || ky; // forward/back
+  _onKey(e, down) {
+    const k = e.key.toLowerCase();
+    if (k in this.keys) this.keys[k] = down;
+  },
 
-    if (Math.abs(moveX) < 0.001 && Math.abs(moveY) < 0.001) return;
+  _updateDesktop(dt) {
+    // WASD movement relative to camera yaw
+    const dir = new THREE.Vector3();
+    const camYaw = this._getHeadYaw();
 
-    // Use camera yaw for direction
-    this.camera.getWorldQuaternion(this._tmpQuat);
+    const forward = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw) * -1).normalize();
+    const right = new THREE.Vector3(forward.z * -1, 0, forward.x).normalize();
 
-    // forward vector from camera
-    this._fwd.set(0, 0, -1).applyQuaternion(this._tmpQuat);
-    this._fwd.y = 0;
-    this._fwd.normalize();
+    if (this.keys.w) dir.add(forward);
+    if (this.keys.s) dir.sub(forward);
+    if (this.keys.d) dir.add(right);
+    if (this.keys.a) dir.sub(right);
 
-    // right vector
-    this._right.copy(this._fwd).cross(new THREE.Vector3(0, 1, 0)).normalize();
+    if (dir.lengthSq() > 0) {
+      dir.normalize().multiplyScalar(this.moveSpeed * dt);
+      this.player.position.add(dir);
+    }
 
-    // IMPORTANT:
-    // moveY: up is negative => we invert so pushing up moves forward
-    const forwardAmt = (-moveY) * this.walkSpeed * dt;
-    const strafeAmt = (moveX) * this.strafeSpeed * dt;
+    // Q/E turn
+    if (this.keys.q) this.player.rotation.y += this.turnSpeed * dt;
+    if (this.keys.e) this.player.rotation.y -= this.turnSpeed * dt;
+  },
 
-    this._dir.set(0, 0, 0);
-    this._dir.addScaledVector(this._fwd, forwardAmt);
-    this._dir.addScaledVector(this._right, strafeAmt);
+  _updateXR(dt) {
+    // We prefer LEFT controller stick for movement (common VR standard)
+    // Oculus/Meta mapping: axes[2], axes[3] often left stick; varies by browser, so we probe both controllers.
+    const gpL = this._getGamepadByHand("left") || this._getAnyGamepad(this.c0);
+    const gpR = this._getGamepadByHand("right") || this._getAnyGamepad(this.c1);
 
-    this.player.position.add(this._dir);
+    const moveAxes = this._getStickAxes(gpL) || this._getStickAxes(gpR);
+    const turnAxes = this._getStickAxes(gpR) || this._getStickAxes(gpL);
+
+    // Movement (left stick)
+    if (moveAxes) {
+      // IMPORTANT: user said L/R is reversed — so we keep standard:
+      // x>0 means move RIGHT, x<0 means move LEFT.
+      // If your build had it reversed, that was a sign flip somewhere else.
+      const x = this._dz(moveAxes.x);
+      const y = this._dz(moveAxes.y);
+
+      // y is usually forward/back (up is -1), we convert to forward positive:
+      const forwardAmt = -y;
+      const rightAmt = x;
+
+      const camYaw = this._getHeadYaw();
+      const forward = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw) * -1).normalize();
+      const right = new THREE.Vector3(forward.z * -1, 0, forward.x).normalize();
+
+      const move = new THREE.Vector3()
+        .addScaledVector(forward, forwardAmt)
+        .addScaledVector(right, rightAmt);
+
+      if (move.lengthSq() > 0) {
+        move.normalize().multiplyScalar(this.moveSpeed * dt);
+        this.player.position.add(move);
+      }
+    }
+
+    // Turning (right stick X)
+    if (turnAxes) {
+      const tx = this._dz(turnAxes.x);
+      if (Math.abs(tx) > 0) {
+        // tx>0 should turn RIGHT (clockwise), which in three.js is negative Y rotation
+        this.player.rotation.y -= tx * this.turnSpeed * dt;
+      }
+    }
+  },
+
+  _getHeadYaw() {
+    // derive yaw from camera world direction
+    const dir = new THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+    // yaw around Y: atan2(x, z)
+    return Math.atan2(dir.x, dir.z);
+  },
+
+  _dz(v) {
+    if (!Number.isFinite(v)) return 0;
+    return Math.abs(v) < this.deadzone ? 0 : v;
+  },
+
+  _getAnyGamepad(controller) {
+    const src = controller?.inputSource;
+    return src?.gamepad || null;
+  },
+
+  _getGamepadByHand(handedness) {
+    const session = this.renderer.xr.getSession?.();
+    if (!session) return null;
+
+    for (const src of session.inputSources) {
+      if (src?.handedness === handedness && src?.gamepad) return src.gamepad;
+    }
+    return null;
+  },
+
+  _getStickAxes(gamepad) {
+    if (!gamepad || !Array.isArray(gamepad.axes)) return null;
+
+    const a = gamepad.axes;
+    // Common layouts:
+    // - Some browsers use [0,1] for left stick
+    // - Others use [2,3]
+    // We'll choose whichever pair has larger magnitude right now.
+    const p01 = { x: a[0] ?? 0, y: a[1] ?? 0 };
+    const p23 = { x: a[2] ?? 0, y: a[3] ?? 0 };
+
+    const m01 = p01.x * p01.x + p01.y * p01.y;
+    const m23 = p23.x * p23.x + p23.y * p23.y;
+
+    const pick = m23 > m01 ? p23 : p01;
+    return { x: pick.x, y: pick.y };
+  },
+
+  _addLaser(controller) {
+    const geom = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 0, -1),
+    ]);
+    const mat = new THREE.LineBasicMaterial({ color: 0x00ffaa });
+    const line = new THREE.Line(geom, mat);
+    line.scale.z = 4;
+    controller.add(line);
   },
 };

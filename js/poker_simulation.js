@@ -1,115 +1,114 @@
-// js/poker_simulation.js — Patch 6.7 FULL (Boss-only Crown integration)
-// If you already have poker_simulation.js, REPLACE IT with this version.
-// This drives:
-// - BossBots-only play
-// - Leaderboard updates
-// - CrownSystem winner declarations
+// js/poker_simulation.js — Demo dealing loop (8.0.3)
+import * as THREE from "./three.js";
 
-export const PokerSimulation = {
-  t: 0,
-  nextHandIn: 6.0,
-  minHand: 4.5,
-  maxHand: 8.5,
+export const PokerSim = {
+  group: null,
+  tableCenter: new THREE.Vector3(0, 0, -6.5),
+  seats: [],
+  cardsBySeat: [],
+  timer: 0,
+  roundEvery: 7.0,
+  dealing: false,
 
-  bossBots: null,
-  leaderboard: null,
-  crown: null,
-  toast: null,
+  build(scene, seats, tableCenter = new THREE.Vector3(0, 0, -6.5)) {
+    this.tableCenter = tableCenter.clone();
+    this.seats = seats || [];
+    this.group = new THREE.Group();
+    this.group.name = "PokerSim";
+    scene.add(this.group);
 
-  // simple scoreboard
-  scores: {},
+    this.cardsBySeat = this.seats.map(() => []);
+    this.timer = 0;
+    this.dealing = false;
 
-  init(scene, camera, BossBots, Leaderboard, toast, CrownSystem) {
-    this.bossBots = BossBots || null;
-    this.leaderboard = Leaderboard || null;
-    this.crown = CrownSystem || null;
-    this.toast = toast || null;
-
-    // Seed boss roster if exists
-    const list = this._bossList();
-    for (const b of list) this.scores[b.name] = this.scores[b.name] || 0;
-
-    this._pushBoard();
+    // Start with a first round
+    this.startRound();
+    return this.group;
   },
 
-  _bossList() {
-    if (Array.isArray(this.bossBots)) return this.bossBots;
-    if (this.bossBots?.list) return this.bossBots.list();
-    if (Array.isArray(this.bossBots?.bots)) return this.bossBots.bots;
-
-    // fallback
-    return [
-      { id: "boss_0", name: "Boss Alpha" },
-      { id: "boss_1", name: "Boss Beta" },
-      { id: "boss_2", name: "Boss Gamma" },
-      { id: "boss_3", name: "Boss Delta" },
-      { id: "boss_4", name: "Boss Omega" }
-    ];
-  },
-
-  _pickWinner() {
-    const list = this._bossList();
-    if (list.length === 0) return null;
-
-    // Weighted aggressiveness: Omega/Gamma more likely
-    const weights = list.map((b) => {
-      const n = (b.name || "").toLowerCase();
-      if (n.includes("omega")) return 1.8;
-      if (n.includes("gamma")) return 1.35;
-      if (n.includes("alpha")) return 1.15;
-      return 1.0;
+  makeCardMesh() {
+    const geo = new THREE.PlaneGeometry(0.16, 0.22);
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.55,
+      metalness: 0.05,
+      emissive: 0x111111,
+      emissiveIntensity: 0.2,
+      side: THREE.DoubleSide,
     });
 
-    const sum = weights.reduce((a, b) => a + b, 0);
-    let r = Math.random() * sum;
-    for (let i = 0; i < list.length; i++) {
-      r -= weights[i];
-      if (r <= 0) return list[i];
+    const m = new THREE.Mesh(geo, mat);
+    m.rotation.x = -Math.PI / 2; // lay flat
+    m.position.y = 0.86; // float above table
+    return m;
+  },
+
+  clearCards() {
+    for (const arr of this.cardsBySeat) {
+      for (const c of arr) this.group.remove(c);
+      arr.length = 0;
     }
-    return list[list.length - 1];
   },
 
-  _pushBoard() {
-    if (!this.leaderboard) return;
+  startRound() {
+    if (!this.seats?.length) return;
+    this.clearCards();
+    this.dealing = true;
 
-    // Top 8 bosses by points
-    const rows = Object.entries(this.scores)
-      .map(([name, points]) => ({ name, points }))
-      .sort((a, b) => b.points - a.points)
-      .slice(0, 8);
+    // Deal 2 cards per seat, one-by-one
+    let step = 0;
+    const totalSteps = this.seats.length * 2;
 
-    const holder = this.crown?.data?.holder?.name || "None";
+    const dealOne = () => {
+      const seatIndex = step % this.seats.length;
+      const cardIndex = Math.floor(step / this.seats.length);
 
-    this.leaderboard.update(0, null, {
-      title: "BOSS SHOWDOWN",
-      rows,
-      footer: `Crown Holder: ${holder} • Boss table is spectator-only`
-    });
+      const seat = this.seats[seatIndex];
+
+      // Position cards near each seat, slightly offset
+      const offsetX = (cardIndex === 0 ? -0.07 : 0.07);
+      const offsetZ = 0.10;
+
+      const card = this.makeCardMesh();
+
+      // Face the table center
+      card.position.x = seat.x;
+      card.position.z = seat.z;
+      card.lookAt(this.tableCenter.x, 0.86, this.tableCenter.z);
+
+      // Move inward slightly so it appears "on the rail/table edge"
+      const dir = new THREE.Vector3().subVectors(this.tableCenter, seat).normalize();
+      card.position.addScaledVector(dir, 0.55);
+
+      // Card offset in local right direction
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(card.quaternion);
+      card.position.addScaledVector(right, offsetX);
+      card.position.addScaledVector(dir, offsetZ);
+
+      // Slight random angle
+      card.rotation.z += (Math.random() - 0.5) * 0.25;
+
+      this.group.add(card);
+      this.cardsBySeat[seatIndex].push(card);
+
+      step++;
+      if (step < totalSteps) {
+        setTimeout(dealOne, 140);
+      } else {
+        this.dealing = false;
+      }
+    };
+
+    dealOne();
   },
 
   update(dt) {
-    this.t += dt;
-    this.nextHandIn -= dt;
+    if (!this.group) return;
+    this.timer += dt;
 
-    if (this.nextHandIn <= 0) {
-      this.nextHandIn = this.minHand + Math.random() * (this.maxHand - this.minHand);
-
-      const winner = this._pickWinner();
-      if (!winner) return;
-
-      // add points
-      const gain = 50 + Math.floor(Math.random() * 140);
-      this.scores[winner.name] = (this.scores[winner.name] || 0) + gain;
-
-      // Sometimes award crown from boss-only hands (rare-ish)
-      if (this.crown && Math.random() < 0.18) {
-        this.crown.declareWinner(winner, "Boss Table");
-        this.toast?.(`Crown taken by ${winner.name}!`);
-      } else {
-        this.toast?.(`${winner.name} wins +${gain}`);
-      }
-
-      this._pushBoard();
+    if (!this.dealing && this.timer >= this.roundEvery) {
+      this.timer = 0;
+      this.startRound();
     }
-  }
+  },
 };

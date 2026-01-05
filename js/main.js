@@ -1,10 +1,6 @@
-// js/main.js — Patch 6.8 FULL (Boss Bodies + Upright Name Tags wired + Crown follows heads)
-// Replace your main.js with this.
-//
-// What changed vs 6.7:
-// - BossBots is now REQUIRED (no more balls).
-// - CrownSystem uses BossBots.list() and BossBots.getHeads() so crown attaches to heads.
-// - PokerSimulation now receives BossBots + CrownSystem (boss-only wins + crown takes)
+// js/main.js — Patch 6.9 FULL
+// Wires new Controls + Input comfort fixes.
+// Everything else stays as in 6.8 (Boss bodies + Crown + VR shop + Interactions).
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -128,10 +124,12 @@ export async function boot() {
   Collision.maxPushPerFrame = 0.34;
   Collision.rescueEnabled = true;
 
-  Controls.init(renderer, camera, playerRig);
-
+  // NEW: Input before Controls
   Input.init(renderer);
   Inventory.init();
+
+  // NEW: comfort Controls
+  Controls.init(renderer, camera, playerRig);
 
   AvatarShop.build(scene, { x: -6.5, y: 0, z: 4.0 });
 
@@ -142,10 +140,8 @@ export async function boot() {
     onToast: (msg) => toast(msg)
   });
 
-  // Boss bodies
   BossBots.init(scene, camera, { count: 5 });
 
-  // Crown System attaches to Boss heads now
   CrownSystem.init(scene, camera, {
     toast: (m) => toast(m),
     getRooms: () => ["Lobby", "Penthouse", "Nightclub", "VIP Hall"],
@@ -154,10 +150,9 @@ export async function boot() {
     onCrownChange: (name) => toast(`👑 Crown Holder: ${name}`)
   });
 
-  // Poker simulation uses BossBots + CrownSystem
   PokerSimulation.init(scene, camera, BossBots, Leaderboard, (m) => toast(m), CrownSystem);
 
-  overlay("Loaded ✅\nPatch 6.8: Boss Bodies + Upright Name Tags\nCrown follows boss heads");
+  overlay("Loaded ✅\nPatch 6.9: Comfort Movement Pack\nT=snap/smooth turn, L=swap move hand, V=vignette");
 
   const clock = new THREE.Clock();
 
@@ -181,6 +176,7 @@ export async function boot() {
       Interactions.onGrip((m) => toast(m));
     }
 
+    // Comfort locomotion
     Controls.update(dt);
 
     updateZones(playerRig, (msg) => toast(msg));
@@ -189,7 +185,6 @@ export async function boot() {
     VRUIPanel.update(dt);
     Interactions.update(dt);
 
-    // Bosses + Crown + Poker
     BossBots.update(dt);
     CrownSystem.update(dt);
     PokerSimulation.update(dt);

@@ -1,127 +1,143 @@
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 
+function labelSprite(text) {
+  const c = document.createElement("canvas");
+  c.width = 512;
+  c.height = 256;
+  const g = c.getContext("2d");
+  g.fillStyle = "rgba(0,0,0,0)";
+  g.fillRect(0, 0, c.width, c.height);
+
+  g.fillStyle = "rgba(0,0,0,0.65)";
+  g.fillRect(18, 18, c.width - 36, c.height - 36);
+
+  g.strokeStyle = "rgba(0,255,255,0.25)";
+  g.lineWidth = 8;
+  g.strokeRect(18, 18, c.width - 36, c.height - 36);
+
+  g.fillStyle = "white";
+  g.font = "bold 64px system-ui, Arial";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.fillText(text, c.width / 2, c.height / 2);
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+  const s = new THREE.Sprite(mat);
+  s.scale.set(0.6, 0.3, 1);
+  return s;
+}
+
+function makeButton(name, text, action) {
+  const g = new THREE.Group();
+  g.name = name;
+
+  const bg = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.75, 0.22),
+    new THREE.MeshBasicMaterial({ color: 0x071018, transparent: true, opacity: 0.85 })
+  );
+  bg.userData.action = action;
+  bg.userData.isUIButton = true;
+  g.add(bg);
+
+  const label = labelSprite(text);
+  label.position.z = 0.01;
+  g.add(label);
+
+  // IMPORTANT: we add interactable on the BG plane (easy ray hit)
+  g.userData.hit = bg;
+  return g;
+}
+
 export const UI = {
-  create({ scene, rig, camera }) {
-    let audioOn = false;
-    let audio;
+  create(ctx) {
+    ctx.ui = ctx.ui || {};
+    ctx.interactables = ctx.interactables || [];
+    ctx.addInteractable = ctx.addInteractable || ((m) => (ctx.interactables.push(m), m));
 
-    // Simple in-VR “toast” panel (always in front of you)
-    const canvas = document.createElement("canvas");
-    canvas.width = 1024;
-    canvas.height = 512;
-    const ctx = canvas.getContext("2d");
-
-    const tex = new THREE.CanvasTexture(canvas);
-    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
-    const panel = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.6), mat);
+    const panel = new THREE.Group();
+    panel.name = "VRMenuPanel";
     panel.visible = false;
-    scene.add(panel);
 
-    let toastTimer = 0;
+    // Attach to camera so it’s always accessible
+    ctx.camera.add(panel);
+    panel.position.set(0, 0.05, -0.9);
 
-    function drawToast(title, body) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "rgba(10,12,16,0.85)";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Background plate
+    const plate = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.9, 1.25),
+      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35 })
+    );
+    plate.position.set(0, 0, -0.02);
+    panel.add(plate);
 
-      ctx.strokeStyle = "rgba(80,200,255,0.75)";
-      ctx.lineWidth = 8;
-      ctx.strokeRect(18, 18, canvas.width - 36, canvas.height - 36);
+    const title = labelSprite("SKYLARK MENU");
+    title.scale.set(1.1, 0.35, 1);
+    title.position.set(0, 0.48, 0.02);
+    panel.add(title);
 
-      ctx.fillStyle = "#eaf6ff";
-      ctx.font = "bold 54px Arial";
-      ctx.fillText(title, 60, 120);
+    const bLobby = makeButton("btnLobby", "GO LOBBY", "room:lobby");
+    bLobby.position.set(0, 0.18, 0.02);
+    panel.add(bLobby);
 
-      ctx.fillStyle = "#cfe9ff";
-      ctx.font = "36px Arial";
-      wrapText(ctx, body, 60, 200, canvas.width - 120, 46);
+    const bPoker = makeButton("btnPoker", "GO POKER", "room:poker");
+    bPoker.position.set(0, -0.05, 0.02);
+    panel.add(bPoker);
 
-      ctx.fillStyle = "rgba(255,255,255,0.75)";
-      ctx.font = "28px Arial";
-      ctx.fillText("Press OK in menu to close", 60, 460);
+    const bStore = makeButton("btnStore", "GO STORE", "room:store");
+    bStore.position.set(0, -0.28, 0.02);
+    panel.add(bStore);
 
-      tex.needsUpdate = true;
-    }
+    const bChips = makeButton("btnChips", "SPAWN CHIPS", "chips:spawn");
+    bChips.position.set(0, -0.51, 0.02);
+    panel.add(bChips);
 
-    function toast(title, body, seconds = 2.5) {
-      drawToast(title, body);
-      panel.visible = true;
-      toastTimer = seconds;
-    }
+    // Register interactables (the hit planes)
+    [bLobby, bPoker, bStore, bChips].forEach((b) => ctx.addInteractable(b.userData.hit || b.children[0]));
+    // Also store mapping from hit object -> action
+    ctx.uiHitActions = new Map();
+    [bLobby, bPoker, bStore, bChips].forEach((b) => {
+      const hit = b.children[0];
+      ctx.uiHitActions.set(hit.uuid, hit.userData.action);
+    });
 
-    function update(dt) {
-      // keep panel in front of camera
-      if (panel.visible) {
-        const camPos = new THREE.Vector3();
-        camera.getWorldPosition(camPos);
+    // Interaction hook
+    if (ctx.on) {
+      ctx.on("interact", ({ hit }) => {
+        if (!panel.visible) return;
+        const obj = hit?.object;
+        if (!obj) return;
+        const action = obj.userData.action || ctx.uiHitActions.get(obj.uuid);
+        if (!action) return;
 
-        const camDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
-        panel.position.copy(camPos).addScaledVector(camDir, 1.25);
-        panel.quaternion.copy(camera.quaternion);
-        panel.rotation.x += 0.06; // slight tilt down (nice)
-        panel.position.y -= 0.12;
-
-        toastTimer -= dt;
-        if (toastTimer <= 0) panel.visible = false;
-      }
-    }
-
-    function toggleAudio() {
-      audioOn = !audioOn;
-      if (audioOn) {
-        if (!audio) {
-          audio = new Audio("assets/audio/lobby_ambience.mp3");
-          audio.loop = true;
-          audio.volume = 0.65;
+        if (action.startsWith("room:")) {
+          const room = action.split(":")[1];
+          if (typeof ctx.setRoom === "function") ctx.setRoom(room);
         }
-        audio.play().catch(() => {});
-        toast("Audio", "Music ON");
-      } else {
-        if (audio) audio.pause();
-        toast("Audio", "Music OFF");
-      }
+        if (action === "chips:spawn") {
+          const fn = ctx.api?.eventChips?.spawnChips || ctx.api?.eventChips?.spawn;
+          if (typeof fn === "function") fn(ctx);
+        }
+      });
     }
 
-    // Menu overlay (simple HTML alert-style via toast for now)
-    let menuOpen = false;
-    function toggleMenu(setRoom) {
-      menuOpen = !menuOpen;
-      if (!menuOpen) {
-        toast("Menu", "Closed");
-        return;
-      }
-      toast("Menu", "Lobby (1) • Poker (2) • Store (3) • Audio (A)");
-      // Keyboard shortcuts for testing (Quest can ignore)
-      const onKey = (e) => {
-        const k = e.key.toLowerCase();
-        if (k === "1") setRoom("lobby");
-        if (k === "2") setRoom("poker");
-        if (k === "3") setRoom("store");
-        if (k === "a") toggleAudio();
-        if (k === "escape") { menuOpen = false; window.removeEventListener("keydown", onKey); }
-      };
-      window.addEventListener("keydown", onKey, { once: false });
-      // auto-remove listener when menu closes (simple)
-      setTimeout(() => window.removeEventListener("keydown", onKey), 12000);
-    }
+    ctx.ui.panel = panel;
+    ctx.api = ctx.api || {};
+    ctx.api.ui = this;
 
-    return { toast, update, toggleAudio, toggleMenu };
-  }
+    return this;
+  },
+
+  toggleMenu(ctx) {
+    const p = ctx?.ui?.panel;
+    if (!p) return;
+    p.visible = !p.visible;
+  },
+
+  update(dt, ctx) {
+    // keep the menu plate facing forward (camera-attached already)
+  },
 };
 
-function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
-  const words = String(text).split(" ");
-  let line = "";
-  for (let n = 0; n < words.length; n++) {
-    const testLine = line + words[n] + " ";
-    const w = ctx.measureText(testLine).width;
-    if (w > maxWidth && n > 0) {
-      ctx.fillText(line, x, y);
-      line = words[n] + " ";
-      y += lineHeight;
-    } else {
-      line = testLine;
-    }
-  }
-  ctx.fillText(line, x, y);
-}
+export default UI;

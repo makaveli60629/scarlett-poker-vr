@@ -1,52 +1,40 @@
-export const AudioSys = {
-  audio: null,
-  enabled: false,
-  loaded: false,
+// ===============================
+// Skylark Poker VR — audio.js (6.2 SAFE)
+// ===============================
 
-  async init() {
-    if (this.loaded) return true;
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
+export const Audio = {
+  listener: null,
+  ambient: null,
+
+  init(scene) {
     try {
-      this.audio = new Audio("./assets/audio/lobby_ambience.mp3");
-      this.audio.loop = true;
-      this.audio.volume = 0.55;
+      this.listener = new THREE.AudioListener();
 
-      // try warm load
-      this.audio.load();
-      this.loaded = true;
-      return true;
+      // Attach listener safely later (camera may not exist yet)
+      setTimeout(() => {
+        const cam = scene.children.find(o => o.isCamera);
+        if (cam) cam.add(this.listener);
+      }, 100);
+
+      this.ambient = new THREE.Audio(this.listener);
+
+      console.log("🔊 Audio system initialized");
     } catch (e) {
-      console.warn("Audio init failed:", e);
-      return false;
+      console.warn("Audio init skipped:", e);
     }
   },
 
-  async on() {
-    await this.init();
-    if (!this.audio) return { ok:false, msg:"Audio object missing." };
-
-    try {
-      // browsers require user gesture — call from button/trigger
-      await this.audio.play();
-      this.enabled = true;
-      return { ok:true, msg:"Music ON ✅" };
-    } catch (e) {
-      console.warn("Audio play blocked:", e);
-      this.enabled = false;
-      return { ok:false, msg:"Music blocked — press again after interacting." };
-    }
+  playAmbient(buffer) {
+    if (!this.ambient || !buffer) return;
+    this.ambient.setBuffer(buffer);
+    this.ambient.setLoop(true);
+    this.ambient.setVolume(0.4);
+    this.ambient.play();
   },
 
-  off() {
-    if (!this.audio) return { ok:false, msg:"No audio loaded." };
-    this.audio.pause();
-    this.enabled = false;
-    return { ok:true, msg:"Music OFF ✅" };
-  },
-
-  async toggle() {
-    if (!this.loaded) await this.init();
-    if (!this.audio) return { ok:false, msg:"Audio missing." };
-    return this.enabled ? this.off() : await this.on();
+  stopAmbient() {
+    if (this.ambient?.isPlaying) this.ambient.stop();
   }
 };

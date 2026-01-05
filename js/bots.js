@@ -1,80 +1,69 @@
-import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
-
-function makeBot(i) {
-  const g = new THREE.Group();
-  g.name = `bot_${i}`;
-
-  const body = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.18, 0.42, 6, 12),
-    new THREE.MeshStandardMaterial({ color: 0x2b2f3a, roughness: 0.9 })
-  );
-  body.position.y = 0.75;
-  g.add(body);
-
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.14, 16, 16),
-    new THREE.MeshStandardMaterial({ color: 0x6a6f7c, roughness: 0.85 })
-  );
-  head.position.y = 1.25;
-  g.add(head);
-
-  // Small “badge”
-  const badge = new THREE.Mesh(
-    new THREE.CircleGeometry(0.07, 18),
-    new THREE.MeshBasicMaterial({ color: 0x44ccff })
-  );
-  badge.position.set(0.0, 0.95, 0.19);
-  g.add(badge);
-
-  return g;
-}
+// js/bots.js — Simple seated bot placeholders (8.0.3)
+import * as THREE from "./three.js";
 
 export const Bots = {
-  build(scene, rig, ctx) {
-    const bots = [];
-    const seats = ctx?.table?.seats || [];
-    const center = ctx?.rooms?.poker?.pos || new THREE.Vector3(0, 0, -34);
+  group: null,
+  seats: [],
+  bots: [],
 
-    const count = Math.max(6, seats.length || 6);
+  build(scene, tableCenter = new THREE.Vector3(0, 0, -6.5), radius = 2.35) {
+    this.group = new THREE.Group();
+    this.group.name = "Bots";
+    scene.add(this.group);
 
-    for (let i = 0; i < count; i++) {
-      const b = makeBot(i);
-
-      if (seats[i]) {
-        // HARD SNAP to seat anchor (same source chairs use)
-        b.position.copy(seats[i].position);
-        b.position.y = 0; // feet on floor
-        b.rotation.set(0, seats[i].rotationY, 0);
-
-        // Push them back away from rim so they never intersect the table
-        const back = new THREE.Vector3(0, 0, 1).applyAxisAngle(
-          new THREE.Vector3(0, 1, 0),
-          b.rotation.y
-        );
-        b.position.addScaledVector(back, 0.55);
-
-        // Face table center
-        b.lookAt(center.x, 1.1, center.z);
-
-        // Lock upright (kills “leaning”)
-        b.rotation.x = 0;
-        b.rotation.z = 0;
-      } else {
-        // Fallback ring
-        const ang = (i / count) * Math.PI * 2;
-        b.position.set(center.x + Math.cos(ang) * 5.2, 0, center.z + Math.sin(ang) * 4.6);
-        b.lookAt(center.x, 1.1, center.z);
-        b.rotation.x = 0;
-        b.rotation.z = 0;
-      }
-
-      scene.add(b);
-      bots.push(b);
+    // 6 seats around a circle
+    this.seats = [];
+    for (let i = 0; i < 6; i++) {
+      const t = (i / 6) * Math.PI * 2;
+      const x = tableCenter.x + Math.cos(t) * radius;
+      const z = tableCenter.z + Math.sin(t) * radius;
+      this.seats.push(new THREE.Vector3(x, 0, z));
     }
 
-    ctx.bots = bots;
-    return bots;
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.85 });
+    const headMat = new THREE.MeshStandardMaterial({
+      color: 0x00ffaa,
+      emissive: 0x00ffaa,
+      emissiveIntensity: 0.35,
+      roughness: 0.35,
+    });
+
+    const bodyGeo = new THREE.CylinderGeometry(0.18, 0.22, 0.55, 16);
+    const headGeo = new THREE.SphereGeometry(0.16, 18, 14);
+
+    this.bots = [];
+    for (let i = 0; i < this.seats.length; i++) {
+      const p = this.seats[i];
+
+      const bot = new THREE.Group();
+      bot.name = `Bot_${i}`;
+
+      const body = new THREE.Mesh(bodyGeo, bodyMat);
+      body.position.y = 0.28;
+
+      const head = new THREE.Mesh(headGeo, headMat);
+      head.position.y = 0.65;
+
+      bot.add(body, head);
+
+      // Face the table center
+      bot.position.set(p.x, 0, p.z);
+      bot.lookAt(tableCenter.x, 0.5, tableCenter.z);
+
+      this.group.add(bot);
+      this.bots.push(bot);
+    }
+
+    return { group: this.group, seats: this.seats, bots: this.bots };
+  },
+
+  update(dt) {
+    // subtle idle motion
+    if (!this.bots?.length) return;
+    const t = performance.now() * 0.001;
+    for (let i = 0; i < this.bots.length; i++) {
+      const b = this.bots[i];
+      b.rotation.y += Math.sin(t + i) * 0.0006;
+    }
   },
 };
-
-export default Bots;

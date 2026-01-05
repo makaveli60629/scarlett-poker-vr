@@ -36,3 +36,12 @@ export function activateObject(object3D) {
 export function registerCollider() { /* stub */ }
 export function unregisterCollider() { /* stub */ }
 export function getCollidersArray() { return []; }
+// ---- compatibility export (DO NOT REMOVE) ----
+export const State = {
+  registerCollider,
+  unregisterCollider,
+  getCollidersArray,
+  registerInteractable,
+  getInteractablesArray,
+  activateObject
+};

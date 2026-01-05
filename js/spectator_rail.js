@@ -1,39 +1,52 @@
-// js/spectator_rail.js — VIP rope + posts + rail around a circle
+// js/spectator_rail.js
+// Stable spectator rail (safe fallback)
+// Prevents syntax errors and white screens
+
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
 export const SpectatorRail = {
   group: null,
+  enabled: true,
 
-  build(scene, center, radius = 4.1, opts = {}) {
-    const {
-      postCount = 18,
-      postHeight = 1.1,
-      ropeHeight = 0.85,
-      railHeight = 0.35,
-    } = opts;
+  build(scene) {
+    if (!scene) return;
 
     this.group = new THREE.Group();
-    this.group.name = "SpectatorRail";
-    this.group.position.set(0, 0, 0);
+    this.group.name = "spectator_rail";
 
-    const postMat = new THREE.MeshStandardMaterial({
-      color: 0x101010,
-      roughness: 0.75,
-      metalness: 0.2,
-      emissive: 0x001a12,
-      emissiveIntensity: 0.25
+    // Simple invisible boundary rail (placeholder)
+    const railMat = new THREE.MeshBasicMaterial({
+      color: 0x00ffaa,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.15,
+      visible: false, // keep invisible in production
     });
 
-    const capMat = new THREE.MeshStandardMaterial({
-      color: 0xffd04a,
-      roughness: 0.35,
-      metalness: 0.35,
-      emissive: 0x2a1a00,
-      emissiveIntensity: 0.35
-    });
+    const railGeo = new THREE.RingGeometry(4.5, 5.0, 48);
+    const rail = new THREE.Mesh(railGeo, railMat);
+    rail.rotation.x = -Math.PI / 2;
+    rail.position.y = 0.01;
 
-    const ropeMat = new THREE.MeshStandardMaterial({
-      color: 0x7a001e,
-      roughness: 0.85,
-      metalness: 0.05,
-      emissive: 0x220
+    this.group.add(rail);
+    scene.add(this.group);
+  },
+
+  update(dt, camera) {
+    if (!this.enabled || !camera || !this.group) return;
+
+    // Optional future: keep spectators within bounds
+    // Currently passive (safe)
+  },
+
+  setEnabled(v) {
+    this.enabled = !!v;
+    if (this.group) this.group.visible = this.enabled;
+  },
+
+  dispose(scene) {
+    if (!this.group) return;
+    if (scene) scene.remove(this.group);
+    this.group = null;
+  },
+};

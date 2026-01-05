@@ -1,8 +1,8 @@
-// js/main.js — VIP Room Core Boot (8.0.6)
+// js/main.js — VIP Room Core Boot (8.0.7)
 // FIXES:
-// - Controllers/grips are parented to the PLAYER RIG (so they stay "in your hands" when you move)
-// - Rays point down+forward and follow grip pose on Quest
-// - Boot guard to prevent double-boot errors
+// - Controllers/grips parented to rig (keeps them with you)
+// - Ray is forced DOWN + forward (Quest grip often points upward)
+// - Boot guard prevents double-boot errors
 // - Brighter lighting
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
@@ -22,7 +22,7 @@ const snapCooldown = 0.28;
 const snapAngle = THREE.MathUtils.degToRad(45);
 
 const MOVE_SPEED = 2.2;
-const STRAFE_RIGHT_IS_RIGHT = 1; // if ever reversed set to -1
+const STRAFE_RIGHT_IS_RIGHT = 1;
 
 function $(id) { return document.getElementById(id); }
 function logLine(s) {
@@ -59,7 +59,7 @@ function buildScene() {
   rig.add(camera);
   scene.add(rig);
 
-  // Brighter light pack for Quest
+  // Brighter light pack
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.35));
 
   const dir = new THREE.DirectionalLight(0xffffff, 1.2);
@@ -80,23 +80,36 @@ function buildScene() {
 }
 
 function makeRayLine() {
-  // Down + forward ray (Quest grip often points slightly upward otherwise)
-  const p0 = new THREE.Vector3(0, 0, 0);
-  const p1 = new THREE.Vector3(0, -0.12, -1).normalize(); // key: slight down
-  const geom = new THREE.BufferGeometry().setFromPoints([p0, p1]);
+  // Ray points forward in its own local space; we force it DOWN by rotating the line
+  const geom = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0, 0, -1),
+  ]);
 
   const mat = new THREE.LineBasicMaterial();
   const line = new THREE.Line(geom, mat);
   line.name = "ray";
   line.scale.z = 10;
   line.visible = false;
+
+  // Force ray to aim downward a bit (fix "laser up")
+  line.rotation.x = -0.55; // ~31.5 degrees downward
+  line.position.set(0, -0.01, -0.02);
+
+  // Small tip dot (helps visually confirm direction)
+  const dot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.01, 12, 12),
+    new THREE.MeshStandardMaterial({ emissive: 0x00ffaa, emissiveIntensity: 1.2, color: 0x00ffaa })
+  );
+  dot.position.set(0, 0, -1);
+  line.add(dot);
+
   return line;
 }
 
 function buildControllers() {
   const modelFactory = new XRControllerModelFactory();
 
-  // IMPORTANT: Parent controllers/grips to rig (NOT scene)
   controller0 = renderer.xr.getController(0);
   controller1 = renderer.xr.getController(1);
   rig.add(controller0);
@@ -142,7 +155,6 @@ function getAxes(handedness) {
     if (!gp?.axes || gp.axes.length < 2) continue;
 
     const ax = gp.axes;
-    // Most Quest controllers: left uses axes[2,3], right uses axes[2,3]
     const idx = ax.length >= 4 ? 2 : 0;
     return { x: ax[idx] || 0, y: ax[idx + 1] || 0 };
   }
@@ -160,12 +172,9 @@ function applyLocomotion(dt) {
   const ly = Math.abs(left.y) > dz ? left.y : 0;
   const rx = Math.abs(right.x) > dz ? right.x : 0;
 
-  // Forward/back fix: on many controllers forward is negative Y on stick
-  // We want: push forward = move forward
-  const forward = -ly; // ✅ correct direction
+  const forward = -ly;
   const strafe = lx * STRAFE_RIGHT_IS_RIGHT;
 
-  // headset yaw (use camera's world yaw)
   const yaw = camera.rotation.y;
   const sin = Math.sin(yaw);
   const cos = Math.cos(yaw);
@@ -175,11 +184,8 @@ function applyLocomotion(dt) {
 
   rig.position.x += vx;
   rig.position.z += vz;
-
-  // keep rig on floor
   rig.position.y = 0;
 
-  // 45° snap turn
   const now = clock.getElapsedTime();
   if (rx > 0.72 && (now - lastTurnTime) > snapCooldown) {
     rig.rotation.y -= snapAngle;
@@ -191,7 +197,6 @@ function applyLocomotion(dt) {
 }
 
 export async function boot() {
-  // Boot guard (prevents "called more than once")
   if (window.__VIP_BOOTED__) {
     logLine("ℹ️ boot() skipped (already running)");
     return;
@@ -208,7 +213,6 @@ export async function boot() {
   logLine("VIP boot running…");
   await World.build(scene, rig);
 
-  // safe clamp
   rig.position.y = 0;
 
   logLine("boot() finished");
@@ -223,4 +227,4 @@ export async function boot() {
     World.update(dt, camera);
     renderer.render(scene, camera);
   });
-                 }
+}

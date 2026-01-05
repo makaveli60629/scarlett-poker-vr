@@ -1,5 +1,6 @@
-// js/main.js — Patch 7.0A FULL
-// Updates CrownSystem getRooms() to use the new two-room list.
+// js/main.js — Patch 7.1 FULL
+// Builds the VIP Poker Room interior + adds quick teleport buttons (Lobby <-> VIP)
+// Uses your authoritative spawn pads; no Penthouse/Nightclub.
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -34,6 +35,8 @@ import { VRUIPanel } from "./vr_ui_panel.js";
 import { CrownSystem } from "./crown_system.js";
 import { PokerSimulation } from "./poker_simulation.js";
 import { BossBots } from "./boss_bots.js";
+
+import { VIPRoom } from "./vip_room.js";
 
 function overlay(msg) {
   let el = document.getElementById("dbg");
@@ -85,7 +88,7 @@ export async function boot() {
   scene.background = new THREE.Color(0x05060a);
   setScene(scene);
 
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 300);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 350);
   const playerRig = new THREE.Group();
   playerRig.add(camera);
   scene.add(playerRig);
@@ -95,6 +98,13 @@ export async function boot() {
 
   RoomManager.init(scene);
 
+  // Build VIP room interior inside its room group
+  const vipRoom = RoomManager.getRoom("VIP Poker Room");
+  if (vipRoom?.group) {
+    VIPRoom.build(vipRoom.group);
+  }
+
+  // Lobby content
   SolidWalls.build(scene, { halfX: 14, halfZ: 14, height: 4.2, thickness: 0.35, y: 0 });
   LightsPack.build(scene);
 
@@ -115,7 +125,7 @@ export async function boot() {
 
   TeleportMachine.init(scene, playerRig);
 
-  // Spawn on Lobby pad
+  // Spawn on Lobby pad (authoritative)
   const spawn = TeleportMachine.getSafeSpawn();
   playerRig.position.copy(spawn.position);
   playerRig.position.y = 0;
@@ -133,6 +143,8 @@ export async function boot() {
 
   Interactions.init(scene, camera, playerRig, { kioskObj, chipObj });
 
+  // Teleport hotkeys from menu panel (simple):
+  // We'll add two quick buttons via the VRUIPanel callbacks by reading equip events.
   VRUIPanel.init(scene, camera, renderer, {
     onEquip: (equipped) => AvatarShop.apply(equipped),
     onToast: (msg) => toast(msg)
@@ -142,7 +154,7 @@ export async function boot() {
 
   CrownSystem.init(scene, camera, {
     toast: (m) => toast(m),
-    getRooms: () => RoomManager.getRooms(), // now: Lobby + VIP Poker Room
+    getRooms: () => RoomManager.getRooms(),
     getBossBots: () => BossBots,
     getBossHeads: () => BossBots.getHeads(),
     onCrownChange: (name) => toast(`👑 Crown Holder: ${name}`)
@@ -150,7 +162,7 @@ export async function boot() {
 
   PokerSimulation.init(scene, camera, BossBots, Leaderboard, (m) => toast(m), CrownSystem);
 
-  overlay("Loaded ✅\nPatch 7.0A: Only Lobby + VIP Poker Room\nSpawn pads still authoritative.");
+  overlay("Loaded ✅\nPatch 7.1: VIP Poker Room Interior\nNext: VIP teleport buttons (kiosk) + trophy wall spotlight");
 
   const clock = new THREE.Clock();
 
@@ -158,6 +170,13 @@ export async function boot() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // Desktop quick teleports for testing:
+  window.addEventListener("keydown", (e) => {
+    const k = (e.key || "").toLowerCase();
+    if (k === "1") { TeleportMachine.teleportToRoom("Lobby"); toast("Teleport: Lobby"); }
+    if (k === "2") { TeleportMachine.teleportToRoom("VIP Poker Room"); toast("Teleport: VIP Poker Room"); }
   });
 
   renderer.setAnimationLoop(() => {
@@ -197,4 +216,4 @@ if (!window.__SCARLETT_BOOTED__) {
     console.error(e);
     overlay(`IMPORT FAILED ❌\n${String(e?.message || e)}`);
   });
-}
+      }

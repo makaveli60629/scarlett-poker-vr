@@ -1,69 +1,64 @@
-// js/main.js — VIP Room Core boot (stable + GitHub safe)
+// js/main.js — VIP Room Core Boot (exports boot())
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
 
-import { setScene, setCamera, setPlayerRig } from "./state.js";
 import { World } from "./world.js";
 import { Controls } from "./controls.js";
+import { setCamera } from "./state.js";
 
-let renderer, scene, camera, rig, clock;
+let renderer, scene, camera, playerGroup, clock;
 
-function ensureApp() {
-  let el = document.getElementById("app");
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "app";
-    document.body.appendChild(el);
-  }
-  return el;
+function getAppRoot() {
+  return document.getElementById("app") || document.body;
 }
 
 export async function boot() {
-  if (window.__VIP_CORE_BOOTED__) return;
-  window.__VIP_CORE_BOOTED__ = true;
+  // Scene
+  scene = new THREE.Scene();
 
-  const app = ensureApp();
-
+  // Renderer
   renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
   renderer.xr.enabled = true;
-  app.appendChild(renderer.domElement);
+
+  getAppRoot().appendChild(renderer.domElement);
   document.body.appendChild(VRButton.createButton(renderer));
 
-  scene = new THREE.Scene();
-  setScene(scene);
+  // Player rig
+  playerGroup = new THREE.Group();
+  playerGroup.name = "PlayerGroup";
+  scene.add(playerGroup);
 
-  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
+  // Camera
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 120);
+  camera.position.set(0, 1.6, 0);
+  playerGroup.add(camera);
   setCamera(camera);
 
-  rig = new THREE.Group();
-  rig.add(camera);
-  scene.add(rig);
-  setPlayerRig(rig);
+  // Build world (spawns playerGroup safely)
+  World.build(scene, playerGroup);
 
-  World.build(scene, rig);
+  // Controls
+  Controls.init(renderer, camera, playerGroup, scene);
 
-  Controls.init(renderer, camera, rig);
-
-  clock = new THREE.Clock();
-
+  // Resize
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
+  // Loop
+  clock = new THREE.Clock();
   renderer.setAnimationLoop(() => {
-    const dt = clock.getDelta();
+    const dt = Math.min(0.05, clock.getDelta());
     Controls.update(dt);
     renderer.render(scene, camera);
   });
-}
 
-// Auto-run
-boot().catch((e) => {
-  console.error("boot failed:", e);
-  throw e;
-});
+  return true;
+    }

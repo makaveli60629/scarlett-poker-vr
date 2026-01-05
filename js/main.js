@@ -4,7 +4,7 @@ import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.m
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
 
 import { World } from "./world.js";
-import { Controls } from "./controls.js";
+import { Controls, CONTROLS_VERSION } from "./controls.js";
 import { setCamera } from "./state.js";
 
 let renderer, scene, camera, playerGroup, clock;
@@ -13,11 +13,15 @@ function getAppRoot() {
   return document.getElementById("app") || document.body;
 }
 
+function hudLog(line) {
+  const el = document.getElementById("log");
+  if (!el) return;
+  el.textContent = (el.textContent ? el.textContent + "\n" : "") + line;
+}
+
 export async function boot() {
-  // Scene
   scene = new THREE.Scene();
 
-  // Renderer
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -28,31 +32,29 @@ export async function boot() {
   getAppRoot().appendChild(renderer.domElement);
   document.body.appendChild(VRButton.createButton(renderer));
 
-  // Player rig
   playerGroup = new THREE.Group();
   playerGroup.name = "PlayerGroup";
   scene.add(playerGroup);
 
-  // Camera
-  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 120);
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 140);
   camera.position.set(0, 1.6, 0);
   playerGroup.add(camera);
   setCamera(camera);
 
-  // Build world (spawns playerGroup safely)
   World.build(scene, playerGroup);
 
-  // Controls
-  Controls.init(renderer, camera, playerGroup, scene);
+  Controls.init(renderer, camera, playerGroup);
 
-  // Resize
+  hudLog("✅ " + CONTROLS_VERSION + " loaded");
+  hudLog("Tip: Quest = Enter VR then Left stick move, Right stick snap turn.");
+  hudLog("Tip: Phone = touch + drag to move.");
+
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // Loop
   clock = new THREE.Clock();
   renderer.setAnimationLoop(() => {
     const dt = Math.min(0.05, clock.getDelta());
@@ -61,4 +63,4 @@ export async function boot() {
   });
 
   return true;
-    }
+}

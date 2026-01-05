@@ -1,11 +1,7 @@
-// js/main.js — Patch 6.6 FULL
-// Adds: In-world VR Shop Panel + Controller Laser + Trigger click
-// Keeps: Patch 6.5 Interactions + Patch 6.4 Inventory + Patch 6.3 Collision/Walls
-//
-// Controls:
-// - Menu (Input.menuPressed) toggles VR panel
-// - Trigger clicks panel buttons in VR
-// - Grip still picks up chip / toggles kiosk store (Interactions)
+// js/main.js — Patch 6.7 FULL
+// Adds CrownSystem + Trophy Wall + Crown events + poker_sim winner integration
+// Requires NEW: js/crown_system.js
+// Replaces/updates: js/poker_simulation.js (above) OR uses it if you import correctly
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -37,6 +33,9 @@ import { AvatarShop } from "./avatar_shop.js";
 import { Interactions } from "./interactions.js";
 import { VRUIPanel } from "./vr_ui_panel.js";
 
+import { CrownSystem } from "./crown_system.js";
+import { PokerSimulation } from "./poker_simulation.js";
+
 function overlay(msg) {
   let el = document.getElementById("dbg");
   if (!el) {
@@ -64,16 +63,6 @@ function toast(msg) {
   if (_toastT > 0) return;
   overlay(`Loaded ✅\n${msg}`);
   _toastT = 1.1;
-}
-
-async function safeImport(path) {
-  try {
-    return await import(`${path}?v=${Date.now()}`);
-  } catch (e) {
-    console.warn("Optional module failed:", path, e);
-    overlay(`Loaded ✅ (optional module failed)\n${path}\n${String(e?.message || e)}`);
-    return null;
-  }
 }
 
 export async function boot() {
@@ -142,27 +131,29 @@ export async function boot() {
 
   AvatarShop.build(scene, { x: -6.5, y: 0, z: 4.0 });
 
-  // Interactions (grip)
   Interactions.init(scene, camera, playerRig, { kioskObj, chipObj });
 
-  // VR Panel (laser + trigger)
   VRUIPanel.init(scene, camera, renderer, {
     onEquip: (equipped) => AvatarShop.apply(equipped),
     onToast: (msg) => toast(msg)
   });
 
-  // Optional BossBots
-  const botMod = await safeImport("./boss_bots.js");
-  const BossBots = botMod?.BossBots || null;
-  try { BossBots?.init?.(scene, camera, { count: 5 }); } catch {}
+  // Crown System (Boss-only crown)
+  CrownSystem.init(scene, camera, {
+    toast: (m) => toast(m),
+    // Rooms (you can replace with real RoomManager rooms later)
+    getRooms: () => ["Lobby", "Penthouse", "Nightclub", "VIP Hall"],
+    // Boss list from BossBots if present later; for now simulation fallback is fine:
+    getBossBots: () => null,
+    // Boss head anchors can be wired once BossBots exposes them; fallback uses table center
+    getBossHeads: () => null,
+    onCrownChange: (name) => toast(`👑 Crown Holder: ${name}`)
+  });
 
-  // Optional Poker Simulation
-  let PokerSimulation = null;
-  const simMod = await safeImport("./poker_simulation.js");
-  PokerSimulation = simMod?.PokerSimulation || null;
-  try { PokerSimulation?.init?.(scene, camera, BossBots, Leaderboard, (msg) => toast(msg)); } catch {}
+  // Poker Simulation (boss-only) wired to CrownSystem
+  PokerSimulation.init(scene, camera, null, Leaderboard, (m) => toast(m), CrownSystem);
 
-  overlay("Loaded ✅\nPatch 6.6: VR Shop Panel + Laser + Trigger\nMenu toggles VR Shop");
+  overlay("Loaded ✅\nPatch 6.7: Crown System + Trophy Wall\nBoss-only crown/tourney simulation running");
 
   const clock = new THREE.Clock();
 
@@ -178,14 +169,13 @@ export async function boot() {
 
     Input.update();
 
-    // Menu toggles VR panel
+    // Menu toggles VR shop panel
     if (Input.menuPressed()) {
       VRUIPanel.toggle();
     }
 
-    // Grip interactions (chip/kiosk)
+    // Grip interactions
     if (Input.gripPressed()) {
-      // If VR panel is open, we keep grip for pickup/drop still.
       Interactions.onGrip((m) => toast(m));
     }
 
@@ -194,15 +184,12 @@ export async function boot() {
     updateZones(playerRig, (msg) => toast(msg));
     Collision.update(dt, playerRig, () => TeleportMachine.getSafeSpawn?.(), (m) => toast(m));
 
-    // Update VR panel hover + trigger clicks (trigger comes from controller events inside VRUIPanel)
     VRUIPanel.update(dt);
-
-    // Hover/held follow for pickup
     Interactions.update(dt);
 
-    try { BossBots?.update?.(dt); } catch {}
-    try { PokerSimulation?.update?.(dt); } catch {}
-    if (!PokerSimulation) Leaderboard.update(dt, camera, null);
+    // Crown + Boss simulation
+    CrownSystem.update(dt);
+    PokerSimulation.update(dt);
 
     EventChip.update(dt);
     WaterFountain.update(dt);

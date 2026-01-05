@@ -1,91 +1,74 @@
-// js/main.js — VIP Boot with versioned imports + XR status hooks
+// js/main.js — Skylark Poker VR 8.0 Core Boot (single-boot guard)
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
 
-if (!window.__SKYLARK__) window.__SKYLARK__ = {};
-const S = window.__SKYLARK__;
+import { State } from "./state.js";
+import { World } from "./world.js";
+import { Controls } from "./controls.js";
+import { XRLocomotion } from "./xr_locomotion.js";
 
-const V = (window.__HUD__?.V) ? window.__HUD__.V : String(Date.now());
-
-function hudLog(msg) {
-  try { window.__HUD__?.log?.(msg); } catch {}
-  console.log(msg);
-}
+let __booted = false;
 
 export async function boot() {
-  if (S.bootPromise) return S.bootPromise;
+  if (__booted) {
+    console.warn("boot() already ran; skipping.");
+    return;
+  }
+  __booted = true;
 
-  S.bootPromise = (async () => {
-    if (S.renderer) return;
+  // Renderer
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.25; // brighter for Quest
+  renderer.xr.enabled = true;
 
-    const app = document.getElementById("app") || document.body;
+  // Mount
+  const mount = document.getElementById("app") || document.body;
+  mount.innerHTML = "";
+  mount.appendChild(renderer.domElement);
+  document.body.appendChild(VRButton.createButton(renderer));
 
-    // Versioned imports defeat Quest caching
-    const { World } = await import("./world.js?v=" + V);
-    const { Controls } = await import("./controls.js?v=" + V);
+  // Scene / Camera / Rig
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x05060a);
 
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 300);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 120);
+  const rig = new THREE.Group();
+  rig.name = "player_rig";
+  rig.add(camera);
+  scene.add(rig);
 
-    const player = new THREE.Group();
-    player.name = "playerRig";
-    player.add(camera);
-    scene.add(player);
+  // Build world
+  World.build(scene, rig);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  // Controls & locomotion
+  Controls.init(renderer, scene, rig, camera);
+  XRLocomotion.init(renderer, scene, rig, camera);
+
+  // Resize
+  window.addEventListener("resize", () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMappingExposure = 1.45;
-    renderer.xr.enabled = true;
+  });
 
-    app.appendChild(renderer.domElement);
-    document.body.appendChild(VRButton.createButton(renderer));
+  // Render loop
+  let last = performance.now();
+  renderer.setAnimationLoop((t) => {
+    const dt = Math.min(0.05, (t - last) / 1000);
+    last = t;
 
-    S.scene = scene;
-    S.camera = camera;
-    S.player = player;
-    S.renderer = renderer;
+    Controls.update(dt);
+    XRLocomotion.update(dt);
 
-    // XR hooks (updates HUD immediately when VR starts)
-    renderer.xr.addEventListener("sessionstart", () => {
-      hudLog("XR sessionstart fired ✅");
-      const pill = window.__HUD__?.xrPill;
-      if (pill) {
-        pill.classList.remove("bad"); pill.classList.add("ok");
-        pill.textContent = "XR: sessionstart ✅";
-      }
-    });
+    World.update(dt, camera);
 
-    renderer.xr.addEventListener("sessionend", () => {
-      hudLog("XR sessionend fired");
-      const pill = window.__HUD__?.xrPill;
-      if (pill) {
-        pill.classList.remove("ok"); pill.classList.add("bad");
-        pill.textContent = "XR: ended";
-      }
-    });
+    renderer.render(scene, camera);
+  });
 
-    // Build + controls
-    World.build(scene, player);
-    Controls.init(renderer, camera, player, scene);
-
-    window.addEventListener("resize", () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-
-    const clock = new THREE.Clock();
-    renderer.setAnimationLoop(() => {
-      const dt = Math.min(clock.getDelta(), 0.033);
-      Controls.update(dt);
-      World.update?.(dt, camera, player);
-      renderer.render(scene, camera);
-    });
-
-    hudLog("VIP boot running (v=" + V + ").");
-  })();
-
-  return S.bootPromise;
+  State.set("boot_ok", true);
+  console.log("Skylark Poker VR 8.0 boot finished.");
 }

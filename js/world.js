@@ -1,10 +1,14 @@
-// js/world.js — VIP Room World (8.0.2 Stable)
+// js/world.js — VIP Room World (8.0.3 Stable + Bots + Deal Loop)
 import * as THREE from "./three.js";
 import { BossTable } from "./boss_table.js";
+import { Bots } from "./bots.js";
+import { PokerSim } from "./poker_simulation.js";
 
 export const World = {
   group: null,
   floorY: 0,
+  _botsReady: false,
+  _pokerReady: false,
 
   async build(scene, rig) {
     this.group = new THREE.Group();
@@ -18,10 +22,9 @@ export const World = {
     );
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = this.floorY;
-    floor.receiveShadow = false;
     this.group.add(floor);
 
-    // Room box (walls)
+    // Walls
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x0c0f15, roughness: 0.95 });
     const trimMat = new THREE.MeshStandardMaterial({
       color: 0x00ffaa,
@@ -53,7 +56,7 @@ export const World = {
     right.position.set(half, wallH / 2, 0);
     this.group.add(right);
 
-    // Trim line around the floor perimeter
+    // Trim ring
     const trim = new THREE.Mesh(
       new THREE.TorusGeometry(half - 0.55, 0.06, 10, 120),
       trimMat
@@ -62,7 +65,7 @@ export const World = {
     trim.position.y = this.floorY + 0.02;
     this.group.add(trim);
 
-    // Corner orbs (fixed to floor, no floating)
+    // Corner orbs
     const orbGeo = new THREE.SphereGeometry(0.18, 18, 14);
     const orbMat = new THREE.MeshStandardMaterial({
       color: 0x00ffaa,
@@ -87,7 +90,7 @@ export const World = {
       this.group.add(pl);
     }
 
-    // Spawn pad (so you DON'T spawn on the boss table)
+    // Spawn pad
     const pad = new THREE.Mesh(
       new THREE.CylinderGeometry(0.6, 0.6, 0.06, 26),
       new THREE.MeshStandardMaterial({
@@ -100,7 +103,7 @@ export const World = {
     pad.position.set(0, this.floorY + 0.03, 6.5);
     this.group.add(pad);
 
-    // Set spawn
+    // Spawn rig
     if (rig) {
       rig.position.set(0, 0, 6.5);
       rig.rotation.set(0, 0, 0);
@@ -109,10 +112,19 @@ export const World = {
     // Boss table centerpiece
     BossTable.build(scene);
 
+    // Bots + Poker loop (seat ring)
+    const tableCenter = new THREE.Vector3(0, 0, -6.5);
+    const { seats } = Bots.build(scene, tableCenter, 2.35);
+    PokerSim.build(scene, seats, tableCenter);
+
+    this._botsReady = true;
+    this._pokerReady = true;
+
     return this.group;
   },
 
   update(dt, camera) {
-    // (optional later) animate subtle pulse / fog, etc.
+    if (this._botsReady) Bots.update(dt);
+    if (this._pokerReady) PokerSim.update(dt);
   },
 };

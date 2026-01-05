@@ -1,48 +1,59 @@
-// ===============================
-// Skylark Poker VR — js/audio.js (EXPORT SAFE)
-// ===============================
-
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
-
+// js/audio.js — Safe Audio module
 export const Audio = {
-  listener: null,
-  ambient: null,
+  ctx: null,
+  gain: null,
+  el: null,
+  enabled: false,
 
-  init(cameraOrScene) {
+  async init(url = "assets/lobby_ambience.mp3", volume = 0.35) {
     try {
-      this.listener = new THREE.AudioListener();
-      if (cameraOrScene?.isCamera) cameraOrScene.add(this.listener);
-      this.ambient = new THREE.Audio(this.listener);
-      console.log("🔊 Audio ready");
+      // Create HTML audio element
+      this.el = new window.Audio(url);
+      this.el.loop = true;
+      this.el.crossOrigin = "anonymous";
+      this.el.volume = Math.max(0, Math.min(1, volume));
+
+      // WebAudio bridge (optional, safer on Quest)
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) {
+        this.ctx = new AC();
+        const source = this.ctx.createMediaElementSource(this.el);
+        this.gain = this.ctx.createGain();
+        this.gain.gain.value = this.el.volume;
+        source.connect(this.gain).connect(this.ctx.destination);
+      }
+
+      this.enabled = true;
+      return true;
     } catch (e) {
-      console.warn("Audio init failed:", e);
+      console.warn("Audio.init failed:", e);
+      this.enabled = false;
+      return false;
     }
   },
 
-  playUrl(url, { loop = true, volume = 0.35 } = {}) {
+  async play() {
     try {
-      if (!this.listener) return;
-      const loader = new THREE.AudioLoader();
-      loader.load(
-        url,
-        (buffer) => {
-          if (!this.ambient) this.ambient = new THREE.Audio(this.listener);
-          this.ambient.setBuffer(buffer);
-          this.ambient.setLoop(loop);
-          this.ambient.setVolume(volume);
-          this.ambient.play();
-        },
-        undefined,
-        (err) => console.warn("Audio load error:", err)
-      );
+      if (!this.enabled || !this.el) return false;
+      if (this.ctx && this.ctx.state === "suspended") await this.ctx.resume();
+      await this.el.play();
+      return true;
     } catch (e) {
-      console.warn("Audio playUrl failed:", e);
+      // Usually blocked until a user gesture
+      console.warn("Audio.play blocked:", e);
+      return false;
     }
   },
 
   stop() {
     try {
-      if (this.ambient?.isPlaying) this.ambient.stop();
+      if (this.el) this.el.pause();
     } catch {}
+  },
+
+  setVolume(v) {
+    const vol = Math.max(0, Math.min(1, v));
+    if (this.el) this.el.volume = vol;
+    if (this.gain) this.gain.gain.value = vol;
   }
 };

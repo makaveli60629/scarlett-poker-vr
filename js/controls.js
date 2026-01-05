@@ -1,194 +1,174 @@
 // js/controls.js
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
-import { applyZonesToPlayer } from "./state.js";
 
 export const Controls = {
   renderer: null,
-  scene: null,
   camera: null,
   player: null,
 
   // XR controllers
-  c0: null,
-  c1: null,
+  left: null,
+  right: null,
 
-  // Desktop fallback
-  keys: { w: false, a: false, s: false, d: false, q: false, e: false },
-  yaw: 0,
+  // stick state
+  axesL: { x: 0, y: 0 },
+  axesR: { x: 0, y: 0 },
 
-  // Tuning
-  moveSpeed: 2.2,     // meters/sec
-  turnSpeed: 1.9,     // radians/sec (smooth turn)
-  deadzone: 0.15,
+  // tuning
+  moveSpeed: 2.0,      // meters/sec
+  deadzone: 0.18,
+  strafeInvert: false, // keep false so right = right
 
-  init({ renderer, scene, camera, player }) {
+  // laser
+  rayGroup: null,
+  rayLine: null,
+  rayEnd: new THREE.Vector3(),
+
+  init(renderer, camera, playerGroup, scene) {
     this.renderer = renderer;
-    this.scene = scene;
     this.camera = camera;
-    this.player = player;
+    this.player = playerGroup;
 
-    // Desktop keys
-    window.addEventListener("keydown", (e) => this._onKey(e, true));
-    window.addEventListener("keyup", (e) => this._onKey(e, false));
+    // Controllers
+    this.left = renderer.xr.getController(0);
+    this.right = renderer.xr.getController(1);
 
-    // XR controllers
-    this.c0 = renderer.xr.getController(0);
-    this.c1 = renderer.xr.getController(1);
+    this.left.name = "XR_Left";
+    this.right.name = "XR_Right";
 
-    this.c0.name = "controller0";
-    this.c1.name = "controller1";
+    // Input events
+    const onConnected = (e) => {
+      const gp = e.data?.gamepad;
+      // Optional log:
+      // console.log("Controller connected:", e.data?.handedness, gp);
+    };
 
-    scene.add(this.c0);
-    scene.add(this.c1);
+    const onDisconnected = () => {};
 
-    // Tiny rays (visual)
-    this._addLaser(this.c0);
-    this._addLaser(this.c1);
+    this.left.addEventListener("connected", onConnected);
+    this.right.addEventListener("connected", onConnected);
+    this.left.addEventListener("disconnected", onDisconnected);
+    this.right.addEventListener("disconnected", onDisconnected);
 
-    // initialize yaw from player
-    this.yaw = this.player.rotation.y;
-  },
+    // Build a laser that we can attach to whichever controller is active
+    this.rayGroup = new THREE.Group();
+    this.rayGroup.name = "controls_ray_group";
 
-  update(dt) {
-    const xr = this.renderer.xr.isPresenting;
-
-    if (xr) {
-      this._updateXR(dt);
-    } else {
-      this._updateDesktop(dt);
-    }
-
-    // Apply zone blockers after movement
-    applyZonesToPlayer(this.player.position);
-  },
-
-  _onKey(e, down) {
-    const k = e.key.toLowerCase();
-    if (k in this.keys) this.keys[k] = down;
-  },
-
-  _updateDesktop(dt) {
-    // WASD movement relative to camera yaw
-    const dir = new THREE.Vector3();
-    const camYaw = this._getHeadYaw();
-
-    const forward = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw) * -1).normalize();
-    const right = new THREE.Vector3(forward.z * -1, 0, forward.x).normalize();
-
-    if (this.keys.w) dir.add(forward);
-    if (this.keys.s) dir.sub(forward);
-    if (this.keys.d) dir.add(right);
-    if (this.keys.a) dir.sub(right);
-
-    if (dir.lengthSq() > 0) {
-      dir.normalize().multiplyScalar(this.moveSpeed * dt);
-      this.player.position.add(dir);
-    }
-
-    // Q/E turn
-    if (this.keys.q) this.player.rotation.y += this.turnSpeed * dt;
-    if (this.keys.e) this.player.rotation.y -= this.turnSpeed * dt;
-  },
-
-  _updateXR(dt) {
-    // We prefer LEFT controller stick for movement (common VR standard)
-    // Oculus/Meta mapping: axes[2], axes[3] often left stick; varies by browser, so we probe both controllers.
-    const gpL = this._getGamepadByHand("left") || this._getAnyGamepad(this.c0);
-    const gpR = this._getGamepadByHand("right") || this._getAnyGamepad(this.c1);
-
-    const moveAxes = this._getStickAxes(gpL) || this._getStickAxes(gpR);
-    const turnAxes = this._getStickAxes(gpR) || this._getStickAxes(gpL);
-
-    // Movement (left stick)
-    if (moveAxes) {
-      // IMPORTANT: user said L/R is reversed — so we keep standard:
-      // x>0 means move RIGHT, x<0 means move LEFT.
-      // If your build had it reversed, that was a sign flip somewhere else.
-      const x = this._dz(moveAxes.x);
-      const y = this._dz(moveAxes.y);
-
-      // y is usually forward/back (up is -1), we convert to forward positive:
-      const forwardAmt = -y;
-      const rightAmt = x;
-
-      const camYaw = this._getHeadYaw();
-      const forward = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw) * -1).normalize();
-      const right = new THREE.Vector3(forward.z * -1, 0, forward.x).normalize();
-
-      const move = new THREE.Vector3()
-        .addScaledVector(forward, forwardAmt)
-        .addScaledVector(right, rightAmt);
-
-      if (move.lengthSq() > 0) {
-        move.normalize().multiplyScalar(this.moveSpeed * dt);
-        this.player.position.add(move);
-      }
-    }
-
-    // Turning (right stick X)
-    if (turnAxes) {
-      const tx = this._dz(turnAxes.x);
-      if (Math.abs(tx) > 0) {
-        // tx>0 should turn RIGHT (clockwise), which in three.js is negative Y rotation
-        this.player.rotation.y -= tx * this.turnSpeed * dt;
-      }
-    }
-  },
-
-  _getHeadYaw() {
-    // derive yaw from camera world direction
-    const dir = new THREE.Vector3();
-    this.camera.getWorldDirection(dir);
-    // yaw around Y: atan2(x, z)
-    return Math.atan2(dir.x, dir.z);
-  },
-
-  _dz(v) {
-    if (!Number.isFinite(v)) return 0;
-    return Math.abs(v) < this.deadzone ? 0 : v;
-  },
-
-  _getAnyGamepad(controller) {
-    const src = controller?.inputSource;
-    return src?.gamepad || null;
-  },
-
-  _getGamepadByHand(handedness) {
-    const session = this.renderer.xr.getSession?.();
-    if (!session) return null;
-
-    for (const src of session.inputSources) {
-      if (src?.handedness === handedness && src?.gamepad) return src.gamepad;
-    }
-    return null;
-  },
-
-  _getStickAxes(gamepad) {
-    if (!gamepad || !Array.isArray(gamepad.axes)) return null;
-
-    const a = gamepad.axes;
-    // Common layouts:
-    // - Some browsers use [0,1] for left stick
-    // - Others use [2,3]
-    // We'll choose whichever pair has larger magnitude right now.
-    const p01 = { x: a[0] ?? 0, y: a[1] ?? 0 };
-    const p23 = { x: a[2] ?? 0, y: a[3] ?? 0 };
-
-    const m01 = p01.x * p01.x + p01.y * p01.y;
-    const m23 = p23.x * p23.x + p23.y * p23.y;
-
-    const pick = m23 > m01 ? p23 : p01;
-    return { x: pick.x, y: pick.y };
-  },
-
-  _addLaser(controller) {
     const geom = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(0, 0, 0),
       new THREE.Vector3(0, 0, -1),
     ]);
-    const mat = new THREE.LineBasicMaterial({ color: 0x00ffaa });
-    const line = new THREE.Line(geom, mat);
-    line.scale.z = 4;
-    controller.add(line);
+
+    const mat = new THREE.LineBasicMaterial({ color: 0x00ff66 });
+    this.rayLine = new THREE.Line(geom, mat);
+    this.rayLine.frustumCulled = false;
+    this.rayLine.renderOrder = 999;
+
+    this.rayGroup.add(this.rayLine);
+
+    // Attach to LEFT by default (your preference)
+    this.left.add(this.rayGroup);
+
+    if (scene) {
+      scene.add(this.left);
+      scene.add(this.right);
+    }
+  },
+
+  _readGamepads() {
+    // Read axes safely (Quest gamepads)
+    const s = this.renderer?.xr?.getSession?.();
+    if (!s) return;
+
+    const sources = s.inputSources || [];
+    for (const src of sources) {
+      const gp = src.gamepad;
+      if (!gp || !gp.axes) continue;
+
+      // Quest: axes usually [x,y] for thumbstick
+      const x = gp.axes[2] ?? gp.axes[0] ?? 0;
+      const y = gp.axes[3] ?? gp.axes[1] ?? 0;
+
+      if (src.handedness === "left") {
+        this.axesL.x = x;
+        this.axesL.y = y;
+      } else if (src.handedness === "right") {
+        this.axesR.x = x;
+        this.axesR.y = y;
+      }
+    }
+  },
+
+  _applyDeadzone(v) {
+    return Math.abs(v) < this.deadzone ? 0 : v;
+  },
+
+  update(dt) {
+    if (!this.renderer || !this.camera || !this.player) return;
+    this._readGamepads();
+
+    // Use LEFT stick primarily
+    let x = this._applyDeadzone(this.axesL.x);
+    let y = this._applyDeadzone(this.axesL.y);
+
+    // fallback to right stick if left has no input
+    if (x === 0 && y === 0) {
+      x = this._applyDeadzone(this.axesR.x);
+      y = this._applyDeadzone(this.axesR.y);
+    }
+
+    // FIX REVERSE:
+    // Strafe should be +x = move right
+    // Some setups feel inverted; keep as toggle:
+    if (this.strafeInvert) x *= -1;
+
+    // Forward should be -y on most controllers (push up gives negative y)
+    // We want push up = move forward, so use (-y)
+    const forwardAmt = -y;
+    const strafeAmt = x;
+
+    // Direction relative to headset yaw
+    const camWorldDir = new THREE.Vector3();
+    this.camera.getWorldDirection(camWorldDir);
+
+    // flatten to XZ
+    camWorldDir.y = 0;
+    camWorldDir.normalize();
+
+    const rightDir = new THREE.Vector3().crossVectors(camWorldDir, new THREE.Vector3(0, 1, 0)).normalize().multiplyScalar(-1);
+
+    const move = new THREE.Vector3();
+    move.addScaledVector(camWorldDir, forwardAmt);
+    move.addScaledVector(rightDir, strafeAmt);
+
+    if (move.lengthSq() > 0) {
+      move.normalize().multiplyScalar(this.moveSpeed * dt);
+      this.player.position.add(move);
+    }
+
+    // Laser update (prevents “stuck” ray)
+    this._updateLaser();
+  },
+
+  _updateLaser() {
+    // Prefer left controller for laser
+    const controller = this.left || this.right;
+    if (!controller || !this.rayLine) return;
+
+    // Ensure rayGroup is attached to left (if not already)
+    if (this.rayGroup && this.rayGroup.parent !== controller) {
+      controller.add(this.rayGroup);
+    }
+
+    // Update the line length each frame
+    // We'll just draw a 10m ray forward
+    this.rayEnd.set(0, 0, -10);
+
+    const posAttr = this.rayLine.geometry.getAttribute("position");
+    posAttr.setXYZ(0, 0, 0, 0);
+    posAttr.setXYZ(1, this.rayEnd.x, this.rayEnd.y, this.rayEnd.z);
+    posAttr.needsUpdate = true;
+
+    this.rayLine.visible = true;
   },
 };

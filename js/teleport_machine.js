@@ -1,75 +1,94 @@
 import * as THREE from "three";
-import { State } from "./state.js";
+import { RoomManager } from "./room_manager.js";
 
 export const TeleportMachine = {
   renderer: null,
   scene: null,
   player: null,
-
-  controller: null,
-  ray: new THREE.Raycaster(),
-  marker: null,
-  lastPoint: null,
+  pads: [],
 
   init(renderer, scene, player) {
     this.renderer = renderer;
     this.scene = scene;
     this.player = player;
 
-    // LEFT controller
-    this.controller = renderer.xr.getController(0);
-    scene.add(this.controller);
+    // Pads are handled by World.build in some setups.
+    // But if you want TeleportMachine to build them, keep this:
+    if (RoomManager.getRooms) this.buildPads();
 
-    this.marker = new THREE.Mesh(
-      new THREE.CircleGeometry(0.25, 32),
-      new THREE.MeshBasicMaterial({ color: 0x00ff66 })
-    );
-    this.marker.rotation.x = -Math.PI / 2;
-    this.marker.visible = false;
-    scene.add(this.marker);
+    // ✅ Force spawn on pad immediately
+    const spawn = this.getBestSpawn();
+    this.applySpawn(spawn);
 
-    this.controller.addEventListener("selectend", () => {
-      if (!this.marker.visible || !this.lastPoint) return;
-      const { x, z } = this.lastPoint;
-      if (this.isPointBlocked(x, z)) return;
-      this.player.position.set(x, State.player.height, z);
+    // Also expose a "safe respawn" event
+    window.addEventListener("force_safe_spawn", () => {
+      const s = this.getBestSpawn();
+      this.applySpawn(s);
     });
   },
 
-  update() {
-    const floor = this.scene.children.find(o => o.name === "floor");
-    if (!floor) return;
-
-    const origin = new THREE.Vector3();
-    const dir = new THREE.Vector3(0, 0, -1);
-
-    this.controller.getWorldPosition(origin);
-    dir.applyQuaternion(this.controller.getWorldQuaternion(new THREE.Quaternion())).normalize();
-
-    this.ray.set(origin, dir);
-    const hits = this.ray.intersectObject(floor, false);
-
-    if (!hits.length) {
-      this.marker.visible = false;
-      this.lastPoint = null;
-      return;
+  buildPads() {
+    // Optional: if you already build pads in World, you can remove this.
+    // We keep it light: just register pad locations.
+    this.pads = [];
+    const rooms = RoomManager.getRooms();
+    for (const r of rooms) {
+      this.pads.push({
+        id: r.id,
+        pos: new THREE.Vector3(r.center.x, 0, r.center.z),
+        yaw: 0
+      });
     }
-
-    const p = hits[0].point;
-    const blocked = this.isPointBlocked(p.x, p.z);
-
-    this.lastPoint = p;
-    this.marker.visible = !blocked;
-    if (!blocked) this.marker.position.set(p.x, 0.02, p.z);
   },
 
-  isPointBlocked(x, z) {
-    const r = State.player.radius + 0.05;
-    for (const obj of State.world.colliders) {
-      const aabb = obj.userData?.aabb;
-      if (!aabb) continue;
-      if (x > aabb.min.x - r && x < aabb.max.x + r && z > aabb.min.z - r && z < aabb.max.z + r) return true;
-    }
-    return false;
+  getBestSpawn() {
+    // Prefer explicitly placed pads (from World.spawnPads if you use that),
+    // else use our pad list, else hard fallback.
+    const pads = this.pads?.length ? this.pads : null;
+
+    // Hard fallback: lobby safe corner (never table center)
+    const fallback = { pos: new THREE.Vector3(0, 0, 10), yaw: Math.PI };
+
+    if (!pads) return fallback;
+
+    // ✅ Choose a pad that is NOT near the boss table (0,0)
+    // (table radius ~4.25, so keep > 6.0)
+    const safePads = pads.filter(p => {
+      const dx = p.pos.x - 0;
+      const dz = p.pos.z - 0;
+      const dist = Math.sqrt(dx*dx + dz*dz);
+      return dist > 6.0;
+    });
+
+    // Prefer lobby if it exists
+    const lobby = safePads.find(p => p.id === "lobby");
+    if (lobby) return lobby;
+
+    // Otherwise any safe pad
+    if (safePads.length) return safePads[Math.floor(Math.random() * safePads.length)];
+
+    // If all pads are too close, shove to fallback
+    return fallback;
+  },
+
+  applySpawn(spawn) {
+    if (!spawn?.pos) return;
+
+    // ✅ Final safety: never spawn inside the table zone
+    const x = spawn.pos.x;
+    const z = spawn.pos.z;
+    const dist = Math.sqrt(x*x + z*z);
+
+    // If somehow inside, force to lobby offset
+    const safe = (dist < 6.0)
+      ? new THREE.Vector3(0, 0, 10)
+      : new THREE.Vector3(x, 0, z);
+
+    this.player.position.set(safe.x, 0, safe.z);
+    this.player.rotation.y = spawn.yaw || 0;
+  },
+
+  update(dt) {
+    // If you animate pads, do it here; otherwise keep empty.
   }
 };

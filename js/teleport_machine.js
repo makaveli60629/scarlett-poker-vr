@@ -1,47 +1,50 @@
 // js/teleport_machine.js
-// STABLE TELEPORT + SAFE SPAWN SYSTEM (NO CRASH GUARANTEE)
-
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
 export const TeleportMachine = {
-  pads: [],
-  fallbackSpawn: new THREE.Vector3(0, 0, 3),
+  group: null,
+  padCenter: new THREE.Vector3(0, 0.01, 3.4),
 
   build(scene) {
-    this.pads = [];
+    this.group = new THREE.Group();
+    this.group.name = "TeleportMachine";
 
-    const positions = [
-      new THREE.Vector3(0, 0, 3),
-      new THREE.Vector3(6, 0, 0),
-      new THREE.Vector3(-6, 0, 0),
-      new THREE.Vector3(0, 0, -6),
-    ];
+    // Pad (spawn target)
+    const pad = new THREE.Mesh(
+      new THREE.RingGeometry(0.45, 0.75, 48),
+      new THREE.MeshStandardMaterial({
+        color: 0x00ffaa,
+        emissive: 0x00ffaa,
+        emissiveIntensity: 1.1,
+        roughness: 0.35,
+        side: THREE.DoubleSide,
+      })
+    );
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.copy(this.padCenter);
 
-    positions.forEach((pos, i) => {
-      const pad = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.45, 0.45, 0.08, 24),
-        new THREE.MeshStandardMaterial({
-          color: 0x00ffaa,
-          emissive: 0x00ffaa,
-          emissiveIntensity: 0.9,
-          roughness: 0.35
-        })
-      );
+    const core = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.16, 0.25, 18),
+      new THREE.MeshStandardMaterial({ color: 0x121218, roughness: 0.8, emissive: 0x003322, emissiveIntensity: 0.7 })
+    );
+    core.position.copy(this.padCenter).add(new THREE.Vector3(0, 0.18, 0));
 
-      pad.position.copy(pos);
-      pad.position.y = 0.04;
-      pad.name = `TeleportPad_${i}`;
+    const light = new THREE.PointLight(0x00ffaa, 0.55, 6);
+    light.position.copy(core.position).add(new THREE.Vector3(0, 0.35, 0));
 
-      scene.add(pad);
-      this.pads.push(pad);
-    });
+    this.group.add(pad, core, light);
+    scene.add(this.group);
+
+    return this.group;
   },
 
-  // 🔒 SAFE SPAWN — this is what was missing before
+  // World calls this to place player safely
   getSafeSpawn() {
-    if (this.pads.length > 0) {
-      return this.pads[0].position.clone().add(new THREE.Vector3(0, 0, 0.8));
-    }
-    return this.fallbackSpawn.clone();
-  }
+    // Spawn slightly behind the pad facing into the room
+    return this.padCenter.clone().add(new THREE.Vector3(0, 0, 1.0));
+  },
+
+  update() {
+    // (reserved for later teleport arc logic)
+  },
 };

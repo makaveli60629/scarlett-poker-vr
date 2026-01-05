@@ -94,3 +94,13 @@ export const State = {
   interactables,
   colliders,
 };
+// ---- REQUIRED COMPAT EXPORT ----
+export const State = {
+  registerInteractable,
+  unregisterInteractable,
+  getInteractablesArray,
+  activateObject,
+  registerCollider,
+  unregisterCollider,
+  getCollidersArray
+};

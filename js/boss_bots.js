@@ -1,40 +1,38 @@
 import * as THREE from "three";
 import { TextureBank } from "./textures.js";
 import { RoomManager } from "./room_manager.js";
-import { Crown } from "./crown.js";
+import { CoreBridge } from "./core_bridge.js";
 
 export const BossBots = {
   bosses: [],
   scene: null,
   _travelClock: 0,
   _nextTravel: 35,
+  _thinkClock: 0,
+  _thinkEvery: 1.2, // seconds between decisions
 
   init(scene) {
     this.scene = scene;
 
     this.bosses = [
-      this.makeBoss("BOSS_1", "King Jericho", 0x7755ff),
-      this.makeBoss("BOSS_2", "Lady Nova",    0x55ffaa),
-      this.makeBoss("BOSS_3", "Maka V",       0xffaa55),
-      this.makeBoss("BOSS_4", "Shadow Ace",   0x55aaff),
-      this.makeBoss("BOSS_5", "Crimson",      0xff5566),
-      this.makeBoss("BOSS_6", "Dealer Zero",  0xaaaaaa),
+      this.makeBoss("BOSS_1", "King DaDa 420", 0x7755ff, "calculating"),
+      this.makeBoss("BOSS_2", "Lady Nova",    0x55ffaa, "aggressive"),
+      this.makeBoss("BOSS_3", "Makaveli 420",       0xffaa55, "chaotic"),
+      this.makeBoss("BOSS_4", "Shadow",   0x55aaff, "silent"),
+      this.makeBoss("BOSS_5", "Queen Scarlett 420",      0xff5566, "aggressive"),
+      this.makeBoss("BOSS_6", "KoolVibez420",  0xaaaaaa, "calculating"),
     ];
 
-    // All start at lobby table
     this.bosses.forEach((b, i) => {
       b.roomId = "lobby";
       b.mode = "TABLE";
-      b.aggression = 1.0;
-      b.stack = 10000;
       b.seatIndex = i;
       this.placeAtSeat(b);
     });
 
-    Crown.holder = this.bosses[0].name;
-
     this._travelClock = 0;
     this._nextTravel = this.randRange(25, 55);
+    this._thinkClock = 0;
   },
 
   update(dt) {
@@ -44,7 +42,6 @@ export const BossBots = {
       this._travelClock = 0;
       this._nextTravel = this.randRange(25, 55);
 
-      // pick 1-2 bosses to roam
       const roamCount = Math.random() < 0.5 ? 1 : 2;
       for (let i = 0; i < roamCount; i++) {
         const b = this.bosses[Math.floor(Math.random() * this.bosses.length)];
@@ -53,22 +50,39 @@ export const BossBots = {
       }
     }
 
-    // simple “play” animation at table
+    // Decision loop: core-driven when available
+    this._thinkClock += dt;
+    if (this._thinkClock >= this._thinkEvery) {
+      this._thinkClock = 0;
+
+      const tableState = CoreBridge.getTableState();
+      if (CoreBridge.api?.hasPoker && CoreBridge.api?.hasTable && tableState) {
+        // Ask core for a move per boss (only if boss is "at table")
+        for (const b of this.bosses) {
+          if (b.mode !== "TABLE") continue;
+
+          const ctx = {
+            actorId: b.id,
+            actorName: b.name,
+            personality: b.personality,
+            aggression: b.aggression,
+            roomId: b.roomId,
+            tableState
+          };
+
+          const action = CoreBridge.decideBossAction(ctx);
+          if (action) CoreBridge.applyAction(action);
+        }
+      }
+    }
+
+    // idle animation
     for (const b of this.bosses) {
       b.mesh.position.y = 1.0 + Math.sin(performance.now() * 0.002 + b.seatIndex) * 0.02;
     }
-
-    // Crown indicator: small pulsing emissive if holder
-    for (const b of this.bosses) {
-      const isHolder = (b.name === Crown.holder);
-      const mat = b.mesh.material;
-      if (mat && mat.emissive) {
-        mat.emissive.setHex(isHolder ? 0x553300 : 0x000000);
-      }
-    }
   },
 
-  makeBoss(id, name, color) {
+  makeBoss(id, name, color, personality) {
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.22, 18, 18),
       TextureBank.standard({ color, roughness: 0.55, metalness: 0.05 })
@@ -78,7 +92,7 @@ export const BossBots = {
     mesh.userData.bossId = id;
     this.scene.add(mesh);
 
-    return { id, name, mesh, roomId: "lobby", mode: "TABLE", aggression: 1.0, stack: 10000, seatIndex: 0 };
+    return { id, name, personality, mesh, roomId: "lobby", mode: "TABLE", aggression: 1.0, seatIndex: 0 };
   },
 
   placeAtSeat(b) {
@@ -112,7 +126,5 @@ export const BossBots = {
     }));
   },
 
-  randRange(a, b) {
-    return a + Math.random() * (b - a);
-  }
+  randRange(a, b) { return a + Math.random() * (b - a); }
 };

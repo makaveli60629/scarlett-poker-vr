@@ -1,98 +1,68 @@
-import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
-
-/**
- * interactions.js (GitHub Pages safe)
- * - Exports Interactions object with init(ctx) + update(dt, ctx)
- * - Raycaster-based "laser pointer" interaction
- * - Provides ctx.api.interactions.pick() and basic click events
- */
+import * as THREE from "three";
+import { State } from "./state.js";
 
 export const Interactions = {
-  init(ctx) {
-    this.ctx = ctx;
+  renderer: null,
+  scene: null,
+  camera: null,
+  controller: null,
+  ray: new THREE.Raycaster(),
+  laser: null,
+  active: false,
 
-    this.raycaster = new THREE.Raycaster();
-    this.tmpMat = new THREE.Matrix4();
+  init(renderer, scene, camera) {
+    this.renderer = renderer;
+    this.scene = scene;
+    this.camera = camera;
 
-    // targets array (you can push meshes into this from table/store/etc)
-    ctx.interactables = ctx.interactables || [];
+    // LEFT controller
+    this.controller = renderer.xr.getController(0);
+    scene.add(this.controller);
 
-    // Simple event bus
-    ctx.events = ctx.events || {};
-    ctx.on = (name, fn) => {
-      ctx.events[name] = ctx.events[name] || [];
-      ctx.events[name].push(fn);
-    };
-    ctx.emit = (name, data) => {
-      (ctx.events[name] || []).forEach((fn) => {
-        try { fn(data); } catch {}
-      });
-    };
+    const points = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -5)];
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    this.laser = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x00ff00 }));
+    this.laser.visible = false;
+    this.controller.add(this.laser);
 
-    // Helper: add interactable
-    ctx.addInteractable = (mesh, meta = {}) => {
-      mesh.userData.__interactable = true;
-      mesh.userData.__meta = meta;
-      ctx.interactables.push(mesh);
-      return mesh;
-    };
+    // Grip = enable pointer
+    this.controller.addEventListener("squeezestart", () => {
+      this.active = true;
+      this.laser.visible = true;
+    });
+    this.controller.addEventListener("squeezeend", () => {
+      this.active = false;
+      this.laser.visible = false;
+    });
 
-    // Helper: remove interactable
-    ctx.removeInteractable = (mesh) => {
-      ctx.interactables = (ctx.interactables || []).filter((m) => m !== mesh);
-    };
-
-    // Pick function
-    ctx.api = ctx.api || {};
-    ctx.api.interactions = ctx.api.interactions || {};
-    ctx.api.interactions.pick = (controller) => this.pick(controller);
-
-    // Controller trigger "select"
-    const c0 = ctx.renderer.xr.getController(0);
-    const c1 = ctx.renderer.xr.getController(1);
-
-    const onSelect = (e) => {
-      const controller = e.target;
-      const hit = this.pick(controller);
-      if (hit) {
-        ctx.emit("interact", { hit, controller });
-        // Also emit by type if provided
-        const t = hit.object?.userData?.__meta?.type;
-        if (t) ctx.emit(`interact:${t}`, { hit, controller });
-      }
-    };
-
-    c0.addEventListener("select", onSelect);
-    c1.addEventListener("select", onSelect);
-
-    // Status
-    ctx.api.interactions.ready = true;
-    return this;
+    // Trigger click when pointer active
+    this.controller.addEventListener("selectstart", () => {
+      if (!this.active) return;
+      const hit = this.getHit();
+      if (hit?.object?.userData?.onClick) hit.object.userData.onClick();
+    });
   },
 
-  pick(controller) {
-    const ctx = this.ctx;
-    if (!ctx || !controller) return null;
-
-    // controller matrixWorld -> ray origin + direction
-    this.tmpMat.identity().extractRotation(controller.matrixWorld);
-
-    const origin = new THREE.Vector3().setFromMatrixPosition(controller.matrixWorld);
-    const direction = new THREE.Vector3(0, 0, -1).applyMatrix4(this.tmpMat).normalize();
-
-    this.raycaster.set(origin, direction);
-    this.raycaster.far = 12;
-
-    const targets = (ctx.interactables || []).filter(Boolean);
-    if (!targets.length) return null;
-
-    const hits = this.raycaster.intersectObjects(targets, true);
-    return hits && hits.length ? hits[0] : null;
+  update() {
+    if (!this.active) return;
+    const hit = this.getHit();
+    const dist = hit ? hit.distance : 5;
+    this.laser.geometry.attributes.position.setZ(1, -dist);
+    this.laser.geometry.attributes.position.needsUpdate = true;
   },
 
-  update(dt, ctx) {
-    // nothing heavy here yet (laser visuals handled in hands.js)
-  },
+  getHit() {
+    const interactables = State.world.interactables || [];
+    if (!interactables.length) return null;
+
+    const origin = new THREE.Vector3();
+    const dir = new THREE.Vector3(0, 0, -1);
+
+    this.controller.getWorldPosition(origin);
+    dir.applyQuaternion(this.controller.getWorldQuaternion(new THREE.Quaternion())).normalize();
+
+    this.ray.set(origin, dir);
+    const hits = this.ray.intersectObjects(interactables, true);
+    return hits.length ? hits[0] : null;
+  }
 };
-
-export default Interactions;

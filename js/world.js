@@ -1,175 +1,198 @@
 import * as THREE from "three";
 import { TextureBank, Textures } from "./textures.js";
-import { registerCollider, registerSpawnPad } from "./state.js";
 
 export const World = {
   build(scene) {
-    scene.background = new THREE.Color(0x060607);
-    scene.fog = new THREE.Fog(0x060607, 8, 60);
+    scene.background = new THREE.Color(0x05060a);
+    scene.fog = new THREE.Fog(0x05060a, 8, 65);
 
-    // Lighting
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x222222, 1.25));
+    // Lights (brighter + softer)
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 0.85);
+    scene.add(hemi);
 
-    const dir = new THREE.DirectionalLight(0xffffff, 1.15);
-    dir.position.set(7, 12, 7);
-    dir.castShadow = true;
-    dir.shadow.mapSize.set(1024, 1024);
-    scene.add(dir);
+    const key = new THREE.DirectionalLight(0xffffff, 1.15);
+    key.position.set(10, 16, 6);
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    scene.add(key);
 
-    // FLOOR
+    const fill = new THREE.PointLight(0x66ccff, 0.75, 30);
+    fill.position.set(-8, 3.5, -2);
+    scene.add(fill);
+
+    const warm = new THREE.PointLight(0xffcc88, 0.8, 28);
+    warm.position.set(8, 3.5, 2);
+    scene.add(warm);
+
+    // Floor (marble fallback)
     const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(32, 32),
-      TextureBank.standard({ mapFile: Textures.FLOOR_LOBBY, color: 0x2a2a2a, roughness: 0.95, repeat: 5 })
+      new THREE.PlaneGeometry(60, 60),
+      TextureBank.standard({
+        mapFile: Textures.FLOOR_MARBLE || null,
+        color: 0x2c2c2c,
+        roughness: 0.95,
+        repeat: 2
+      })
     );
-    floor.name = "floor";
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // WALLS (solid)
-    const wallMat = TextureBank.standard({ mapFile: Textures.WALL_BRICK, color: 0x3a3a3a, roughness: 0.95, repeat: 3 });
-    const wallGeo = new THREE.BoxGeometry(32, 6, 0.8);
-
-    const mkWall = (x, y, z, ry = 0) => {
-      const w = new THREE.Mesh(wallGeo, wallMat);
-      w.position.set(x, y, z);
-      w.rotation.y = ry;
-      w.castShadow = w.receiveShadow = true;
-      scene.add(w);
-
-      const halfX = 16, halfY = 3, halfZ = 0.4;
-      let min, max;
-      if (Math.abs(ry) < 0.01) {
-        min = { x: x - halfX, y: y - halfY, z: z - halfZ };
-        max = { x: x + halfX, y: y + halfY, z: z + halfZ };
-      } else {
-        min = { x: x - halfZ, y: y - halfY, z: z - halfX };
-        max = { x: x + halfZ, y: y + halfY, z: z + halfX };
-      }
-      registerCollider(w, { min, max });
-    };
-
-    mkWall(0, 3, -16, 0);
-    mkWall(0, 3,  16, 0);
-    mkWall(-16, 3, 0, Math.PI / 2);
-    mkWall( 16, 3, 0, Math.PI / 2);
-
-    // CEILING
-    const ceiling = new THREE.Mesh(
-      new THREE.PlaneGeometry(32, 32),
-      TextureBank.standard({ mapFile: Textures.CEILING_DOME, color: 0x101010, roughness: 1.0, emissive: 0x050505 })
+    // Lobby carpet zone
+    const carpet = new THREE.Mesh(
+      new THREE.PlaneGeometry(18, 18),
+      TextureBank.standard({
+        mapFile: Textures.FLOOR_LOBBY || null,
+        color: 0x1b2b1b,
+        roughness: 1.0,
+        repeat: 2
+      })
     );
-    ceiling.position.set(0, 6.05, 0);
-    ceiling.rotation.x = Math.PI / 2;
-    scene.add(ceiling);
+    carpet.rotation.x = -Math.PI / 2;
+    carpet.position.y = 0.01;
+    scene.add(carpet);
 
-    // WALL ART
-    this.addWallArt(scene, 0, 3, -15.55, 0, Textures.CASINO_ART);
-    this.addWallArt(scene, -15.55, 3, 0, Math.PI/2, Textures.CASINO_ART_2);
+    // Walls
+    const wallMat = TextureBank.standard({
+      mapFile: Textures.WALL_BRICK || null,
+      color: 0x3b3b3b,
+      roughness: 0.95,
+      repeat: 2
+    });
 
-    // PROPS
-    this.addProps(scene);
+    const wallH = 4.0;
+    const w1 = this.makeWall(0, wallH / 2, -30, 60, wallH, wallMat);
+    const w2 = this.makeWall(0, wallH / 2, 30, 60, wallH, wallMat);
+    const w3 = this.makeWall(-30, wallH / 2, 0, 60, wallH, wallMat, true);
+    const w4 = this.makeWall(30, wallH / 2, 0, 60, wallH, wallMat, true);
+    scene.add(w1, w2, w3, w4);
 
-    // SPAWN PADS IN ALL ROOMS
-    this.addSpawnPads(scene);
+    // Picture frames with glowing edges
+    this.addGlowingArt(scene, new THREE.Vector3(-22, 2.2, -29.8), 3.2, 1.8, Textures.CASINO_ART);
+    this.addGlowingArt(scene, new THREE.Vector3( 22, 2.2, -29.8), 3.2, 1.8, Textures.CASINO_ART_2);
+    this.addGlowingArt(scene, new THREE.Vector3(-22, 2.2,  29.8), 3.2, 1.8, Textures.BRAND);
+    this.addGlowingArt(scene, new THREE.Vector3( 22, 2.2,  29.8), 3.2, 1.8, Textures.UI_WINNER);
+
+    // Fountain (simple + classy)
+    this.addFountain(scene, 0, 0, 0);
+
+    // Some plants (simple)
+    this.addPlant(scene, -6, 0, -6);
+    this.addPlant(scene,  6, 0, -6);
+    this.addPlant(scene, -6, 0,  6);
+    this.addPlant(scene,  6, 0,  6);
   },
 
-  addWallArt(scene, x, y, z, ry, file) {
+  makeWall(x, y, z, w, h, mat, rotate = false) {
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+    mesh.position.set(x, y, z);
+    if (rotate) mesh.rotation.y = Math.PI / 2;
+    mesh.receiveShadow = true;
+    return mesh;
+  },
+
+  addGlowingArt(scene, pos, w, h, texFile) {
+    const frame = new THREE.Group();
+    frame.position.copy(pos);
+
+    // art plane
     const art = new THREE.Mesh(
-      new THREE.PlaneGeometry(4.2, 2.4),
-      TextureBank.standard({ mapFile: file, color: 0x222222, roughness: 0.9 })
+      new THREE.PlaneGeometry(w, h),
+      TextureBank.standard({
+        mapFile: texFile || null,
+        color: 0x111111,
+        roughness: 0.85,
+        repeat: 1
+      })
     );
-    art.position.set(x, y, z);
-    art.rotation.y = ry;
-    scene.add(art);
+    art.position.z = 0;
+    frame.add(art);
+
+    // glow border (thin box)
+    const border = new THREE.Mesh(
+      new THREE.BoxGeometry(w + 0.12, h + 0.12, 0.06),
+      new THREE.MeshStandardMaterial({
+        color: 0x00ffff,
+        emissive: 0x00ffff,
+        emissiveIntensity: 1.0,
+        roughness: 0.4,
+        metalness: 0.0
+      })
+    );
+    border.position.z = -0.04;
+    frame.add(border);
+
+    scene.add(frame);
+
+    // tiny accent light near frame
+    const p = new THREE.PointLight(0x00ffff, 0.45, 6);
+    p.position.copy(pos).add(new THREE.Vector3(0, 0, 1.2));
+    scene.add(p);
   },
 
-  addSpawnPads(scene) {
-    // Lobby pads
-    this.addTeleportPad(scene, 0, 10, "LOBBY_ENTRY");
-    this.addTeleportPad(scene, -12, 10, "LOBBY_SOFA");
-    this.addTeleportPad(scene, 12, -10, "LOBBY_PLANT");
-
-    // Future room anchors (pads exist now = safe spawn always)
-    this.addTeleportPad(scene, 40, 10, "VIP_ENTRY");
-    this.addTeleportPad(scene, 0, 50, "PENTHOUSE_ENTRY");
-    this.addTeleportPad(scene, -40, -10, "NIGHTCLUB_ENTRY");
-  },
-
-  addTeleportPad(scene, x, z, label) {
-    const group = new THREE.Group();
-    group.position.set(x, 0.01, z);
+  addFountain(scene, x, y, z) {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
 
     const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.6, 0.6, 0.03, 36),
-      TextureBank.standard({ color: 0x0b2a18, roughness: 0.9, emissive: 0x002211 })
+      new THREE.CylinderGeometry(1.5, 1.7, 0.45, 32),
+      TextureBank.standard({ color: 0x1e1e1e, roughness: 0.9 })
     );
+    base.castShadow = true;
     base.receiveShadow = true;
-    group.add(base);
+    base.position.y = 0.22;
+    g.add(base);
 
-    const ringMat = TextureBank.standard({
-      mapFile: Textures.TELEPORT_GLOW,
-      color: 0x00ff66,
-      roughness: 0.35,
-      metalness: 0.1,
-      emissive: 0x00aa44,
-      emissiveMapFile: Textures.TELEPORT_GLOW
-    });
+    const bowl = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.15, 1.25, 0.35, 32, 1, true),
+      TextureBank.standard({ color: 0x2a2a2a, roughness: 0.8 })
+    );
+    bowl.position.y = 0.62;
+    g.add(bowl);
 
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.055, 12, 64), ringMat);
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = 0.03;
-    group.add(ring);
+    // water disc
+    const water = new THREE.Mesh(
+      new THREE.CircleGeometry(1.08, 32),
+      new THREE.MeshStandardMaterial({
+        color: 0x113344,
+        roughness: 0.1,
+        metalness: 0.0,
+        transparent: true,
+        opacity: 0.85,
+        emissive: 0x113344,
+        emissiveIntensity: 0.35
+      })
+    );
+    water.rotation.x = -Math.PI / 2;
+    water.position.y = 0.81;
+    g.add(water);
 
-    group.name = `spawnPad_${label}`;
-    scene.add(group);
-    registerSpawnPad(group);
+    // bubble light
+    const wl = new THREE.PointLight(0x66ccff, 0.9, 10);
+    wl.position.set(0, 1.1, 0);
+    g.add(wl);
+
+    scene.add(g);
   },
 
-  addProps(scene) {
-    // Sofa
-    const sofaMat = TextureBank.standard({
-      mapFile: Textures.SOFA_DIFF,
-      normalMapFile: Textures.SOFA_NORM,
-      color: 0x2b2b2b,
-      roughness: 0.95
-    });
+  addPlant(scene, x, y, z) {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
 
-    const couch = new THREE.Mesh(new THREE.BoxGeometry(3.0, 1.0, 1.1), sofaMat);
-    couch.position.set(-10, 0.5, 10);
-    couch.castShadow = couch.receiveShadow = true;
-    scene.add(couch);
-    registerCollider(couch, {
-      min: { x: -11.5, y: 0, z: 9.45 },
-      max: { x: -8.5,  y: 1.0, z: 10.55 }
-    });
+    const pot = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.35, 0.45, 0.45, 16),
+      TextureBank.standard({ color: 0x2b1b12, roughness: 0.95 })
+    );
+    pot.position.y = 0.22;
+    g.add(pot);
 
-    // Plants
-    const plant = (x, z) => {
-      const pot = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.25, 0.30, 0.35, 14),
-        TextureBank.standard({ color: 0x3a2a20, roughness: 1 })
-      );
-      pot.position.set(x, 0.175, z);
-      pot.castShadow = pot.receiveShadow = true;
-      scene.add(pot);
+    const leafMat = new THREE.MeshStandardMaterial({ color: 0x1e7a3a, roughness: 0.85 });
+    for (let i = 0; i < 10; i++) {
+      const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 10), leafMat);
+      leaf.position.set((Math.random() - 0.5) * 0.6, 0.65 + Math.random() * 0.6, (Math.random() - 0.5) * 0.6);
+      g.add(leaf);
+    }
 
-      const leaves = new THREE.Mesh(
-        new THREE.SphereGeometry(0.55, 16, 16),
-        TextureBank.standard({ color: 0x1f6b3a, roughness: 0.9 })
-      );
-      leaves.position.set(x, 0.75, z);
-      leaves.castShadow = true;
-      scene.add(leaves);
-
-      registerCollider(pot, {
-        min: { x: x - 0.35, y: 0, z: z - 0.35 },
-        max: { x: x + 0.35, y: 1.3, z: z + 0.35 }
-      });
-    };
-
-    plant(10, 10);
-    plant(10, -10);
-    plant(-10, -10);
+    scene.add(g);
   }
 };

@@ -1,80 +1,70 @@
-// js/boss_bots.js — VIP walkers (8.0)
+// js/boss_bots.js — Simple Boss Bots (8.0)
+// Lightweight, Quest-friendly. Builds 6 bot figures around the boss table.
+// Later we will swap these for real avatars.
+
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
 export const BossBots = {
   group: null,
-  bots: [],
+  _t: 0,
 
   build(scene) {
+    if (this.group) scene.remove(this.group);
+
     this.group = new THREE.Group();
     this.group.name = "BossBots";
-    scene.add(this.group);
 
-    this.bots = [];
-    const positions = [
-      new THREE.Vector3(-4, 0, -2),
-      new THREE.Vector3(4, 0, -2),
-      new THREE.Vector3(-4, 0, 2),
-      new THREE.Vector3(4, 0, 2),
-    ];
+    const center = new THREE.Vector3(0, 0, -6.5);
+    const radius = 4.9;
 
-    for (let i = 0; i < positions.length; i++) {
-      const bot = this._makeBot(`Bot_${i + 1}`);
-      bot.position.copy(positions[i]);
-      bot.userData.phase = Math.random() * Math.PI * 2;
-      bot.userData.base = positions[i].clone();
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1a1f2a, roughness: 0.85 });
+    const headMat = new THREE.MeshStandardMaterial({ color: 0x2a3344, roughness: 0.7 });
+
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+
+      const bot = new THREE.Group();
+      bot.name = `bot_${i}`;
+
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.38, 6, 12), bodyMat);
+      body.position.y = 0.75;
+
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.18, 18, 18), headMat);
+      head.position.y = 1.18;
+
+      const glow = new THREE.PointLight(0x00ffaa, 0.12, 4);
+      glow.position.set(0, 1.1, 0);
+
+      bot.add(body, head, glow);
+
+      bot.position.set(
+        center.x + Math.cos(a) * radius,
+        0,
+        center.z + Math.sin(a) * radius
+      );
+
+      // Face the table
+      bot.lookAt(center.x, 0.9, center.z);
+
+      // Store original angle for animation
+      bot.userData.baseAngle = a;
+
       this.group.add(bot);
-      this.bots.push(bot);
     }
+
+    scene.add(this.group);
+    return this.group;
   },
 
   update(dt) {
-    for (const bot of this.bots) {
-      bot.userData.phase += dt * 0.9;
-      const p = bot.userData.phase;
+    if (!this.group) return;
+    this._t += dt;
 
-      // Simple back/forth pacing
-      bot.position.x = bot.userData.base.x + Math.sin(p) * 1.4;
-      bot.position.z = bot.userData.base.z + Math.cos(p) * 0.7;
-
-      // face direction
-      bot.rotation.y = Math.atan2(
-        bot.position.x - bot.userData.base.x,
-        bot.position.z - bot.userData.base.z
-      );
+    // Subtle idle animation
+    for (const bot of this.group.children) {
+      const wob = Math.sin(this._t * 1.8 + bot.userData.baseAngle) * 0.03;
+      bot.position.y = wob;
+      bot.rotation.y += Math.sin(this._t * 0.6 + bot.userData.baseAngle) * 0.0008;
     }
-  },
-
-  _makeBot(name) {
-    const g = new THREE.Group();
-    g.name = name;
-
-    const body = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.18, 0.5, 6, 10),
-      new THREE.MeshStandardMaterial({ color: 0x2b2b30, roughness: 0.9 })
-    );
-    body.position.y = 0.85;
-
-    const head = new THREE.Mesh(
-      new THREE.SphereGeometry(0.16, 18, 18),
-      new THREE.MeshStandardMaterial({ color: 0x404050, roughness: 0.75 })
-    );
-    head.position.y = 1.32;
-
-    const tag = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.5, 0.14),
-      new THREE.MeshStandardMaterial({
-        color: 0x00ffaa,
-        emissive: 0x00ffaa,
-        emissiveIntensity: 0.55,
-        transparent: true,
-        opacity: 0.8
-      })
-    );
-    tag.position.set(0, 1.55, 0);
-    tag.rotation.y = Math.PI;
-
-    g.add(body, head, tag);
-    return g;
   }
 };

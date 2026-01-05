@@ -1,84 +1,101 @@
-// Scarlett Poker VR — Core Bridge (6.2)
-// VR Layer -> /core layer connector with safe fallbacks.
+// Scarlett Poker VR — Core Bridge (6.2 NEXT STEP)
+// VR Layer -> /core layer connector with safe fallbacks + API probing.
 
 export const CoreBridge = {
-  core: {
-    Engine: null,
-    PokerEngine: null,
-    TableGame: null,
-    Economy: null,
-    Inventory: null,
-    Prestige: null,
-    Controls: null,
-    Avatar: null,
-    WristHUD: null,
-    Store: null,
-    Currency: null,
-    VrChip: null,
-    LobbyEngine: null,
+  core: {},
+  ready: false,
+  api: {
+    hasPoker: false,
+    hasTable: false,
+    hasEconomy: false,
+    tickFn: null,
+    decideFn: null,
+    tableGetFn: null,
+    tableApplyFn: null,
   },
 
-  ready: false,
-
   async init() {
-    // GitHub pages: use relative imports from /js to /core
-    // If any import fails, keep the game running (VR layer still works).
     const safe = async (path) => {
       try { return await import(path); }
-      catch (e) { console.warn(`[CoreBridge] Missing or failed import: ${path}`, e); return null; }
+      catch (e) { console.warn(`[CoreBridge] Missing import: ${path}`, e); return null; }
     };
 
+    // Import what you have
     const Engine      = await safe("../core/engine.js");
     const PokerEngine = await safe("../core/poker-engine.js");
     const TableGame   = await safe("../core/table-game.js");
     const Economy     = await safe("../core/economy.js");
-    const Inventory   = await safe("../core/inventory.js");
-    const Prestige    = await safe("../core/prestige-engine.js");
-    const Controls    = await safe("../core/controls.js");
-    const Avatar      = await safe("../core/avatar.js");
-    const WristHUD    = await safe("../core/wrist-hud.js");
-    const Store       = await safe("../core/store.js");
-    const Currency    = await safe("../core/currency.js");
-    const VrChip      = await safe("../core/vr-chip.js");
-    const LobbyEngine = await safe("../core/lobby-engine.js");
 
-    // Some modules may export default or named exports — support both
-    this.core.Engine      = Engine?.default      ?? Engine;
+    // Store modules (support default or named)
+    this.core.Engine      = Engine?.default ?? Engine;
     this.core.PokerEngine = PokerEngine?.default ?? PokerEngine;
-    this.core.TableGame   = TableGame?.default   ?? TableGame;
-    this.core.Economy     = Economy?.default     ?? Economy;
-    this.core.Inventory   = Inventory?.default   ?? Inventory;
-    this.core.Prestige    = Prestige?.default    ?? Prestige;
-    this.core.Controls    = Controls?.default    ?? Controls;
-    this.core.Avatar      = Avatar?.default      ?? Avatar;
-    this.core.WristHUD    = WristHUD?.default    ?? WristHUD;
-    this.core.Store       = Store?.default       ?? Store;
-    this.core.Currency    = Currency?.default    ?? Currency;
-    this.core.VrChip      = VrChip?.default      ?? VrChip;
-    this.core.LobbyEngine = LobbyEngine?.default ?? LobbyEngine;
+    this.core.TableGame   = TableGame?.default ?? TableGame;
+    this.core.Economy     = Economy?.default ?? Economy;
 
+    this.probeAPI();
     this.ready = true;
-    console.log("[CoreBridge] READY", Object.keys(this.core).filter(k => !!this.core[k]));
+
+    console.log("[CoreBridge] READY api:", this.api);
   },
 
-  // Convenience wrappers (do not assume your core API yet)
-  tick(dt) {
-    // If your engine exposes update/tick, call it.
+  probeAPI() {
+    // ENGINE tick
     const e = this.core.Engine;
+    this.api.tickFn =
+      (typeof e?.update === "function" && ((dt) => e.update(dt))) ||
+      (typeof e?.tick === "function"   && ((dt) => e.tick(dt))) ||
+      null;
+
+    // TABLE
+    const t = this.core.TableGame;
+    this.api.tableGetFn =
+      (typeof t?.getState === "function" && (() => t.getState())) ||
+      (typeof t?.state === "object" && (() => t.state)) ||
+      null;
+
+    this.api.tableApplyFn =
+      (typeof t?.applyAction === "function" && ((action) => t.applyAction(action))) ||
+      (typeof t?.dispatch === "function" && ((action) => t.dispatch(action))) ||
+      null;
+
+    // POKER decision
+    const p = this.core.PokerEngine;
+    this.api.decideFn =
+      (typeof p?.decideAction === "function" && ((ctx) => p.decideAction(ctx))) ||
+      (typeof p?.decide === "function" && ((ctx) => p.decide(ctx))) ||
+      null;
+
+    this.api.hasPoker = !!this.api.decideFn;
+    this.api.hasTable = !!this.api.tableGetFn && !!this.api.tableApplyFn;
+
+    // Economy optional
+    const eco = this.core.Economy;
+    this.api.hasEconomy = !!eco;
+  },
+
+  tick(dt) {
+    try { this.api.tickFn?.(dt); } catch (e) { console.warn("[CoreBridge] tick error", e); }
+  },
+
+  // Called by BossBots when they need a move
+  getTableState() {
+    try { return this.api.tableGetFn?.() ?? null; } catch { return null; }
+  },
+
+  decideBossAction(ctx) {
     try {
-      if (e?.update) e.update(dt);
-      else if (e?.tick) e.tick(dt);
-    } catch (err) {
-      console.warn("[CoreBridge] Engine tick error", err);
+      if (!this.api.decideFn) return null;
+      return this.api.decideFn(ctx);
+    } catch (e) {
+      console.warn("[CoreBridge] decide error", e);
+      return null;
     }
   },
 
-  onCrownTaken(payload) {
-    // Push into inventory/prestige later if those APIs exist
-    try {
-      const inv = this.core.Inventory;
-      if (inv?.addTrophy) inv.addTrophy(payload);
-      if (inv?.awardCrown) inv.awardCrown(payload.to, payload.title);
-    } catch (e) {}
+  applyAction(action) {
+    try { return this.api.tableApplyFn?.(action); } catch (e) {
+      console.warn("[CoreBridge] applyAction error", e);
+      return null;
+    }
   }
 };

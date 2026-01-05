@@ -1,131 +1,124 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
-  <title>Skylark Poker</title>
-  <style>
-    html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:Arial,Helvetica,sans-serif}
-    #hud{
-      position:fixed;left:12px;top:12px;z-index:10;
-      color:#eaf6ff;background:rgba(10,12,16,.78);
-      border:2px solid rgba(90,210,255,.6);
-      border-radius:14px;padding:12px 14px;max-width:min(92vw,760px)
-    }
-    #hud .title{font-size:18px;font-weight:700;margin-bottom:4px}
-    #hud .line{font-size:14px;opacity:.95;line-height:1.25}
-    #err{white-space:pre-wrap;color:#ffb3b3;margin-top:8px;display:none}
-    #vrCorner{position:fixed;top:14px;right:14px;z-index:20}
-    #bar{
-      position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:10;
-      display:flex;gap:10px;align-items:center
-    }
-    .btn{
-      border:1px solid rgba(255,255,255,.28);
-      background:rgba(18,22,28,.78);
-      color:#eaf6ff;border-radius:12px;padding:10px 14px;font-size:14px
-    }
-    .stick{
-      width:86px;height:86px;border-radius:50%;
-      background:rgba(18,22,28,.78);
-      border:1px solid rgba(255,255,255,.25);
-      position:relative;touch-action:none
-    }
-    .nub{
-      width:36px;height:36px;border-radius:50%;
-      background:rgba(90,210,255,.55);
-      position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)
-    }
-  </style>
+import * as THREE from "three";
+import { VRButton } from "three/addons/webxr/VRButton.js";
 
-  <!-- ✅ IMPORT MAP FIXES: "three" + "three/addons/" -->
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+import { World } from "./world.js";
+import { PokerTable } from "./table.js";
+import { Controls } from "./controls.js";
+import { UI } from "./ui.js";
+
+export async function boot({ statusEl, errEl, vrCorner } = {}) {
+  const say = (m) => { if (statusEl) statusEl.innerHTML += `<br/>${m}`; };
+
+  try {
+    say("main.js loaded ✅");
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    renderer.xr.setReferenceSpaceType("local-floor");
+    document.body.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x05070c);
+
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
+
+    // Player Rig (ALL controllers must be parented to rig)
+    const rig = new THREE.Group();
+    rig.name = "PlayerRig";
+    scene.add(rig);
+
+    // Non-XR camera offset (browser)
+    const viewer = new THREE.Group();
+    viewer.name = "Viewer";
+    viewer.position.set(0, 1.65, 0);
+    viewer.add(camera);
+    rig.add(viewer);
+
+    // Lighting baseline
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.0));
+    const key = new THREE.DirectionalLight(0xffffff, 1.2);
+    key.position.set(7, 10, 6);
+    scene.add(key);
+
+    // VR Button top-right
+    const vrBtn = VRButton.createButton(renderer);
+    if (vrCorner) vrCorner.appendChild(vrBtn); else document.body.appendChild(vrBtn);
+    say("VR button created ✅");
+
+    // Build world & table
+    const world = World.build(scene);
+    PokerTable.build(scene);
+
+    // UI
+    const ui = UI.create({ scene, rig, camera });
+    ui.toast("Skylark Poker", "Booted ✅");
+
+    // Spawn points (never on table)
+    const spawns = {
+      lobby: new THREE.Vector3(0, 0, 7.5),
+      poker: new THREE.Vector3(0, 0, 8.5),
+      store: new THREE.Vector3(12, 0, 7.0),
+    };
+
+    // Colliders + floors
+    const colliders = [...world.colliders, ...PokerTable.colliders];
+    const floors = [...world.floorPlanes];
+
+    // Controls (XR + Android)
+    const controls = Controls.create({
+      renderer, scene, camera, rig, viewer,
+      floors, colliders,
+      ui,
+      noTeleportZone: (p) => PokerTable.isPointInNoTeleportZone(p)
+    });
+
+    function setRoom(roomName) {
+      controls.setRoomSpawn(spawns[roomName] || spawns.lobby);
+      ui.toast("Teleport", `Moved to ${roomName}`);
     }
+
+    // Default start
+    setRoom("lobby");
+
+    // Hook page buttons
+    window.addEventListener("toggle-audio", () => ui.toggleAudio());
+    window.addEventListener("toggle-menu", () => ui.toggleMenu(setRoom));
+    window.addEventListener("reset-player", () => controls.setRoomSpawn(spawns.lobby));
+
+    // XR session events
+    renderer.xr.addEventListener("sessionstart", () => {
+      viewer.position.set(0, 0, 0);     // XR controls camera height
+      controls.reapplySpawn();
+      ui.toast("XR", "Entered VR ✅");
+    });
+
+    renderer.xr.addEventListener("sessionend", () => {
+      viewer.position.set(0, 1.65, 0);  // restore browser height
+      ui.toast("XR", "Exited VR");
+    });
+
+    // Resize
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Render loop
+    const clock = new THREE.Clock();
+    renderer.setAnimationLoop(() => {
+      const dt = Math.min(clock.getDelta(), 0.05);
+      controls.update(dt);
+      ui.update(dt);
+      renderer.render(scene, camera);
+    });
+
+    say("Boot complete ✅");
+  } catch (e) {
+    const msg = e?.stack || String(e);
+    if (errEl) { errEl.style.display = "block"; errEl.textContent = msg; }
+    throw e;
   }
-  </script>
-</head>
-<body>
-  <div id="hud">
-    <div class="title">Skylark Poker — If you see this text, HTML loaded ✅</div>
-    <div class="line" id="status">Status: loading…</div>
-    <div class="line" id="trying"></div>
-    <div id="err"></div>
-  </div>
-
-  <!-- VR button goes here (top-right) -->
-  <div id="vrCorner"></div>
-
-  <!-- Mobile controls -->
-  <div id="bar">
-    <div class="stick" id="stick"><div class="nub" id="nub"></div></div>
-    <button class="btn" id="reset">Reset</button>
-    <button class="btn" id="audio">Audio</button>
-    <button class="btn" id="menu">Menu</button>
-  </div>
-
-  <script type="module">
-    const statusEl = document.getElementById("status");
-    const tryingEl = document.getElementById("trying");
-    const errEl = document.getElementById("err");
-    const vrCorner = document.getElementById("vrCorner");
-
-    tryingEl.textContent = "Trying to import: ./js/main.js";
-
-    try {
-      const mod = await import("./js/main.js");
-      statusEl.textContent = "Status: main.js imported ✅";
-      await mod.boot({ statusEl, errEl, vrCorner });
-      statusEl.textContent = "Status: running ✅";
-    } catch (e) {
-      statusEl.textContent = "Status: IMPORT FAILED ❌";
-      errEl.style.display = "block";
-      errEl.textContent = (e?.stack || String(e));
-      console.error(e);
-    }
-
-    // Mobile thumbstick -> sends window event "mobile-move"
-    const stick = document.getElementById("stick");
-    const nub = document.getElementById("nub");
-    let active = false;
-    let base = null;
-
-    function send(x,y){
-      window.dispatchEvent(new CustomEvent("mobile-move",{detail:{x,y}}));
-    }
-
-    stick.addEventListener("pointerdown",(e)=>{
-      active = true;
-      base = {x:e.clientX,y:e.clientY};
-      stick.setPointerCapture(e.pointerId);
-    });
-
-    stick.addEventListener("pointermove",(e)=>{
-      if(!active || !base) return;
-      const dx = e.clientX - base.x;
-      const dy = e.clientY - base.y;
-      const r = 28;
-      const cx = Math.max(-r, Math.min(r, dx));
-      const cy = Math.max(-r, Math.min(r, dy));
-      nub.style.transform = `translate(${cx - 18}px, ${cy - 18}px)`;
-      send(cx / r, cy / r);
-    });
-
-    function end(){
-      active=false;base=null;
-      nub.style.transform = "translate(-50%,-50%)";
-      send(0,0);
-    }
-    stick.addEventListener("pointerup",end);
-    stick.addEventListener("pointercancel",end);
-
-    // Buttons
-    document.getElementById("audio").addEventListener("click", ()=>window.dispatchEvent(new Event("toggle-audio")));
-    document.getElementById("menu").addEventListener("click",  ()=>window.dispatchEvent(new Event("toggle-menu")));
-    document.getElementById("reset").addEventListener("click", ()=>window.dispatchEvent(new Event("reset-player")));
-  </script>
-</body>
-</html>
+}

@@ -1,5 +1,5 @@
-// textures.js — Scarlett Poker VR (6.2)
-// SAFE EXPORTS — GitHub Pages compatible
+// textures.js — Skylark Poker VR (6.2)
+// MUST export: TextureBank + Textures (named exports)
 
 import * as THREE from "three";
 
@@ -53,17 +53,18 @@ export const TextureBank = {
     });
 
     if (mapFile) mat.map = this.load(mapFile, { repeat });
+
     if (emissiveMapFile) {
       mat.emissiveMap = this.load(emissiveMapFile, { repeat });
       mat.emissive = new THREE.Color(0xffffff);
     }
+
     if (normalMapFile) mat.normalMap = this.load(normalMapFile, { repeat });
 
     return mat;
   }
 };
 
-// ✅ ALSO EXPORT Textures (named export)
 export const Textures = {
   WALL_BRICK: "brickwall.jpg",
   WALL_RUNES: "wall_stone_runes.jpg",

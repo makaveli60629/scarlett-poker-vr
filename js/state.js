@@ -1,49 +1,30 @@
-// Scarlett Poker VR — Update 6.2
-// CORE LOCKED — DO NOT MODIFY WITHOUT VERSION BUMP
+// js/state.js — Scarlett Poker VR (6.2)
+// Simple global registry for interactable objects (click/grip actions)
 
-export const State = {
-  version: "6.2-core",
-  features: {
-    crowns: true,
-    tournaments: true,
-    roamingBosses: true,
-    spectatorOnlyBossTable: true,
-  },
+const _interactables = new Map(); // object3D.uuid -> { object, onActivate }
 
-  player: {
-    height: 1.6,
-    radius: 0.22,
-  },
+export function registerInteractable(object3D, onActivate) {
+  if (!object3D) return;
+  _interactables.set(object3D.uuid, { object: object3D, onActivate });
+  object3D.userData.__interactable = true;
+}
 
-  world: {
-    colliders: [],
-    interactables: [],
-    spawnPads: [],
-    activePadIndex: 0,
-  },
+export function unregisterInteractable(object3D) {
+  if (!object3D) return;
+  _interactables.delete(object3D.uuid);
+  object3D.userData.__interactable = false;
+}
 
-  ui: { menuOpen: false },
+export function getInteractablesArray() {
+  return Array.from(_interactables.values()).map(x => x.object);
+}
 
-  game: {
-    chipsStart: 10000,
-    // Boss table is show-only
-    bossTableLocked: true,
+export function activateObject(object3D) {
+  if (!object3D) return false;
+  const entry = _interactables.get(object3D.uuid);
+  if (entry?.onActivate) {
+    try { entry.onActivate(object3D); } catch (e) { console.warn("[state] onActivate error", e); }
+    return true;
   }
-};
-
-export function registerCollider(obj, aabb) {
-  obj.userData.collider = true;
-  obj.userData.aabb = aabb;
-  State.world.colliders.push(obj);
-}
-
-export function registerInteractable(obj, onClick) {
-  obj.userData.interactable = true;
-  obj.userData.onClick = onClick;
-  State.world.interactables.push(obj);
-}
-
-export function registerSpawnPad(obj) {
-  obj.userData.isSpawnPad = true;
-  State.world.spawnPads.push(obj);
+  return false;
 }

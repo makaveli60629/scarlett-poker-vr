@@ -1,50 +1,86 @@
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+
+function makePad(color = 0x44ccff) {
+  const g = new THREE.Group();
+
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(0.8, 0.12, 18, 64),
+    new THREE.MeshBasicMaterial({ color })
+  );
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = 0.03;
+  g.add(ring);
+
+  const core = new THREE.Mesh(
+    new THREE.CircleGeometry(0.62, 48),
+    new THREE.MeshBasicMaterial({ color: 0x00ff99, transparent: true, opacity: 0.16 })
+  );
+  core.rotation.x = -Math.PI / 2;
+  core.position.y = 0.02;
+  g.add(core);
+
+  g.userData.isTeleportPad = true;
+  return g;
+}
 
 export const TeleportMachine = {
-  mesh: null,
+  build(scene, rig, ctx) {
+    // Ensure interactables list exists
+    ctx.interactables = ctx.interactables || [];
+    ctx.addInteractable = ctx.addInteractable || ((m) => (ctx.interactables.push(m), m));
 
-  build(scene, x, z) {
-    const g = new THREE.Group();
-    g.position.set(x, 0, z);
+    const lobbyPos = ctx.rooms?.lobby?.pos || new THREE.Vector3(0, 0, 0);
+    const pokerPos = ctx.rooms?.poker?.pos || new THREE.Vector3(0, 0, -34);
+    const storePos = ctx.rooms?.store?.pos || new THREE.Vector3(34, 0, 0);
 
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.55, 0.65, 0.25, 22),
-      new THREE.MeshStandardMaterial({ color: 0x101018, roughness: 0.85 })
-    );
-    base.position.y = 0.125;
-    base.castShadow = true;
-    base.receiveShadow = true;
-    g.add(base);
+    const pads = [];
 
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.46, 0.05, 18, 36),
-      new THREE.MeshStandardMaterial({ color: 0x00aaff, emissive: 0x0066aa, emissiveIntensity: 1.6, roughness: 0.35 })
-    );
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = 0.34;
-    g.add(ring);
+    // Lobby pads -> Poker / Store
+    const p1 = makePad(0x44ccff);
+    p1.position.set(lobbyPos.x - 5, 0, lobbyPos.z - 4);
+    p1.userData.room = "poker";
+    ctx.addInteractable(p1);
+    scene.add(p1);
+    pads.push(p1);
 
-    const pillar = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.10, 0.12, 1.15, 16),
-      new THREE.MeshStandardMaterial({ color: 0x1b1c2a, roughness: 0.7, metalness: 0.2 })
-    );
-    pillar.position.y = 0.85;
-    pillar.castShadow = true;
-    g.add(pillar);
+    const p2 = makePad(0xff44cc);
+    p2.position.set(lobbyPos.x + 5, 0, lobbyPos.z - 4);
+    p2.userData.room = "store";
+    ctx.addInteractable(p2);
+    scene.add(p2);
+    pads.push(p2);
 
-    const beacon = new THREE.Mesh(
-      new THREE.SphereGeometry(0.16, 16, 16),
-      new THREE.MeshStandardMaterial({ color: 0xC9A24D, emissive: 0x7a5b15, emissiveIntensity: 1.4 })
-    );
-    beacon.position.y = 1.48;
-    g.add(beacon);
+    // Poker return -> Lobby
+    const p3 = makePad(0x00ff99);
+    p3.position.set(pokerPos.x - 6, 0, pokerPos.z + 8);
+    p3.userData.room = "lobby";
+    ctx.addInteractable(p3);
+    scene.add(p3);
+    pads.push(p3);
 
-    // Click zone (your right trigger action can hit this)
-    base.userData.action = "teleport_machine";
-    g.userData.action = "teleport_machine";
+    // Store return -> Lobby
+    const p4 = makePad(0x00ff99);
+    p4.position.set(storePos.x - 6, 0, storePos.z + 8);
+    p4.userData.room = "lobby";
+    ctx.addInteractable(p4);
+    scene.add(p4);
+    pads.push(p4);
 
-    scene.add(g);
-    this.mesh = g;
-    return g;
-  }
+    // Hook interaction event
+    if (ctx.on) {
+      ctx.on("interact", ({ hit }) => {
+        const root = hit?.object?.parent;
+        const pad = root?.userData?.isTeleportPad ? root : hit?.object;
+        const room = pad?.userData?.room;
+        if (room && typeof ctx.setRoom === "function") {
+          ctx.setRoom(room);
+        }
+      });
+    }
+
+    ctx.teleportPads = pads;
+    return pads;
+  },
 };
+
+export default TeleportMachine;

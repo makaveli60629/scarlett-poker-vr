@@ -1,26 +1,101 @@
-<script type="module">
-  const jsPill = document.getElementById("jsPill");
-  const logEl = document.getElementById("log");
-  const log = (line) => {
-    logEl.textContent += (logEl.textContent ? "\n" : "") + line;
-  };
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Skylark Poker VR</title>
+  <style>
+    html, body { margin:0; padding:0; height:100%; background:#05060a; color:#e9eefc; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    #app { position: fixed; inset: 0; }
+    canvas { display:block; width:100%; height:100%; }
 
-  try {
-    const mod = await import("./js/main.js?v=" + Date.now());
+    #hud {
+      position: fixed; inset: 12px auto auto 12px; z-index: 999999;
+      width: min(92vw, 760px);
+      background: rgba(10,12,18,.86);
+      border: 1px solid rgba(0,255,170,.35);
+      border-radius: 12px;
+      padding: 12px 14px;
+      backdrop-filter: blur(6px);
+    }
+    #title { font-weight:800; letter-spacing:.2px; font-size: 16px; margin:0 0 6px; }
+    #status { display:flex; gap:10px; align-items:center; margin: 0 0 8px; flex-wrap: wrap; }
+    .pill {
+      display:inline-flex; align-items:center; gap:8px;
+      padding: 6px 10px; border-radius: 999px;
+      background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.10);
+      font-size: 12px;
+    }
+    .ok { border-color: rgba(0,255,170,.35); }
+    .bad { border-color: rgba(255,60,120,.35); }
+    #log {
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      line-height: 1.35;
+      margin: 0;
+      max-height: 45vh;
+      overflow:auto;
+      padding: 10px;
+      border-radius: 10px;
+      background: rgba(0,0,0,.35);
+      border: 1px solid rgba(255,255,255,.10);
+    }
+  </style>
+</head>
 
-    // CALL BOOT EXACTLY ONCE
-    await mod.boot();
+<body>
+  <div id="app"></div>
 
-    jsPill.classList.remove("bad");
-    jsPill.classList.add("ok");
-    jsPill.textContent = "✅ boot() ok";
-    log("boot() finished");
-  } catch (err) {
-    jsPill.classList.remove("ok");
-    jsPill.classList.add("bad");
-    jsPill.textContent = "❌ IMPORT FAILED";
-    log("IMPORT ERROR:");
-    log(String(err?.stack || err));
-    throw err;
-  }
-</script>
+  <div id="hud">
+    <div id="title">Skylark Poker VR — Debug HUD</div>
+    <div id="status">
+      <span id="htmlPill" class="pill ok">✅ HTML loaded</span>
+      <span id="jsPill" class="pill bad">⏳ JS booting…</span>
+      <span id="xrPill" class="pill bad">XR: not started</span>
+    </div>
+    <pre id="log">Waiting for main.js…</pre>
+  </div>
+
+  <script>
+    const logEl = document.getElementById("log");
+    const jsPill = document.getElementById("jsPill");
+    const xrPill = document.getElementById("xrPill");
+    const log = (line) => { logEl.textContent += (logEl.textContent ? "\n" : "") + line; };
+
+    window.__HUD__ = { log, jsPill, xrPill };
+
+    window.addEventListener("error", (e) => {
+      jsPill.classList.remove("ok"); jsPill.classList.add("bad");
+      jsPill.textContent = "❌ ERROR";
+      log("ERROR: " + (e.message || "Unknown"));
+      if (e.filename) log("FILE: " + e.filename + ":" + e.lineno + ":" + e.colno);
+    });
+
+    window.addEventListener("unhandledrejection", (e) => {
+      jsPill.classList.remove("ok"); jsPill.classList.add("bad");
+      jsPill.textContent = "❌ IMPORT FAILED";
+      log("PROMISE REJECTION:");
+      log(String(e.reason?.stack || e.reason || e));
+    });
+  </script>
+
+  <script type="module">
+    const { log, jsPill } = window.__HUD__;
+    try {
+      // cache bust so Quest never runs old code
+      const mod = await import("./js/main.js?v=" + Date.now());
+      await mod.boot();
+      jsPill.classList.remove("bad"); jsPill.classList.add("ok");
+      jsPill.textContent = "✅ boot() ok";
+      log("boot() finished");
+    } catch (err) {
+      jsPill.classList.remove("ok"); jsPill.classList.add("bad");
+      jsPill.textContent = "❌ IMPORT FAILED";
+      log("IMPORT ERROR:");
+      log(String(err?.stack || err));
+      throw err;
+    }
+  </script>
+</body>
+</html>

@@ -1,255 +1,121 @@
-// js/controls.js — Patch 6.9 FULL (Comfort Movement Pack)
-// Anti-nausea movement + snap/smooth turn toggle + deadzones + accel smoothing
-// Left/Right dominant locomotion switch + fixes for "ray stuck on table" feel issues.
-//
-// Default:
-// - MOVE: Left thumbstick (Quest standard)
-// - TURN: Right thumbstick (snap 45°)
-// - ACTION/GRIP: handled elsewhere
-//
-// You can toggle settings at runtime via keyboard on phone/desktop:
-// - T = toggle snap/smooth turn
-// - L = toggle locomotion hand (left/right)
-// - V = toggle comfort vignette
-//
-// If your Input module already provides axes/buttons, this uses it.
-// If not, it reads directly from XR gamepads when available.
+// js/controls.js — stable VR locomotion + snap turn + phone fallback
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
-import { Input } from "./input.js";
-
-function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-function lerp(a, b, t) { return a + (b - a) * t; }
-
-function applyDeadzone(v, dz) {
-  const av = Math.abs(v);
-  if (av < dz) return 0;
-  // rescale (so you don't lose range)
-  const sign = Math.sign(v);
-  const t = (av - dz) / (1 - dz);
-  return sign * clamp(t, 0, 1);
-}
-
-function getYawFromQuat(q) {
-  const e = new THREE.Euler().setFromQuaternion(q, "YXZ");
-  return e.y;
-}
-
-function setYaw(obj, yaw) {
-  obj.rotation.set(0, yaw, 0);
-}
 
 export const Controls = {
   renderer: null,
   camera: null,
   rig: null,
 
-  // movement state
-  vel: new THREE.Vector3(),
-  moveWorld: new THREE.Vector3(),
-  _tmp: new THREE.Vector3(),
-  _tmp2: new THREE.Vector3(),
-  _camYaw: 0,
-
-  // settings (comfort defaults)
-  settings: {
-    locomotionHand: "left", // "left" or "right"
-    turnHand: "right",      // "left" or "right"
-    snapTurn: true,
-    snapAngleDeg: 45,
-    snapCooldown: 0.22,
-    smoothTurnSpeed: 2.35,  // rad/sec
-    moveSpeed: 2.0,         // m/s max
-    sprintMultiplier: 1.35,
-    accel: 9.0,             // higher = snappier acceleration
-    decel: 10.5,
-    deadzone: 0.18,
-    strafe: true,
-    comfortVignette: true,
-    vignetteStrength: 0.55, // 0..1
-    vignetteMax: 0.70,      // cap alpha
-    heightLock: true,       // keep player at y=0 (prevents nausea drift)
-  },
-
-  // internal snap
+  moveSpeed: 2.0,
+  snapAngle: THREE.MathUtils.degToRad(45),
+  snapCooldown: 0.22,
   _snapT: 0,
 
-  // vignette mesh
-  vignette: null,
-  vignetteMat: null,
+  keys: { w:0,a:0,s:0,d:0, left:0,right:0, up:0, down:0 },
 
   init(renderer, camera, rig) {
     this.renderer = renderer;
     this.camera = camera;
     this.rig = rig;
 
-    this._snapT = 0;
-    this.vel.set(0, 0, 0);
-
-    this._buildVignette();
-
-    // keyboard toggles for phone/desktop testing
     window.addEventListener("keydown", (e) => {
       const k = (e.key || "").toLowerCase();
-      if (k === "t") this.settings.snapTurn = !this.settings.snapTurn;
-      if (k === "l") this.settings.locomotionHand = (this.settings.locomotionHand === "left" ? "right" : "left");
-      if (k === "v") this.settings.comfortVignette = !this.settings.comfortVignette;
+      if (k === "w") this.keys.w = 1;
+      if (k === "a") this.keys.a = 1;
+      if (k === "s") this.keys.s = 1;
+      if (k === "d") this.keys.d = 1;
+      if (k === "arrowleft") this.keys.left = 1;
+      if (k === "arrowright") this.keys.right = 1;
+      if (k === "arrowup") this.keys.up = 1;
+      if (k === "arrowdown") this.keys.down = 1;
+    });
+
+    window.addEventListener("keyup", (e) => {
+      const k = (e.key || "").toLowerCase();
+      if (k === "w") this.keys.w = 0;
+      if (k === "a") this.keys.a = 0;
+      if (k === "s") this.keys.s = 0;
+      if (k === "d") this.keys.d = 0;
+      if (k === "arrowleft") this.keys.left = 0;
+      if (k === "arrowright") this.keys.right = 0;
+      if (k === "arrowup") this.keys.up = 0;
+      if (k === "arrowdown") this.keys.down = 0;
     });
   },
 
-  _buildVignette() {
-    // A large black ring in front of camera (fade in while moving)
-    const geo = new THREE.RingGeometry(0.55, 1.1, 48);
-    this.vignetteMat = new THREE.MeshBasicMaterial({
-      color: 0x000000,
-      transparent: true,
-      opacity: 0.0,
-      depthTest: false,
-      depthWrite: false
-    });
-    this.vignette = new THREE.Mesh(geo, this.vignetteMat);
-    this.vignette.renderOrder = 999999;
-
-    // Place it as child of camera so it stays fixed in view
-    this.vignette.position.set(0, 0, -0.75);
-    this.camera.add(this.vignette);
-  },
-
-  // --- XR axes helpers ---
-  _getXRPad(index) {
-    try {
-      const s = this.renderer?.xr?.getSession?.();
-      if (!s) return null;
-      const src = s.inputSources?.[index];
-      const gp = src?.gamepad;
-      return gp || null;
-    } catch {
-      return null;
-    }
-  },
-
-  _readAxesFromXR(hand /*"left"|"right"*/) {
-    // We don't reliably know ordering across devices, but Quest uses:
-    // controller0 = left, controller1 = right in most cases.
-    const gp = hand === "left" ? this._getXRPad(0) : this._getXRPad(1);
-    if (!gp || !gp.axes) return null;
-
-    // Common: axes[2], axes[3] are thumbstick on some browsers, but Quest often uses [2,3] or [0,1].
-    // We'll pick the pair with the largest magnitude.
-    const ax = gp.axes;
-    const pairs = [
-      { x: ax[0] ?? 0, y: ax[1] ?? 0 },
-      { x: ax[2] ?? 0, y: ax[3] ?? 0 }
-    ];
-    pairs.sort((a, b) => (b.x*b.x + b.y*b.y) - (a.x*a.x + a.y*a.y));
-    return pairs[0];
-  },
-
-  _getMoveAxes() {
-    // Prefer Input module if it provides axes (if not, XR fallback)
-    if (Input?.getMoveAxes) return Input.getMoveAxes(this.settings.locomotionHand);
-    const a = this._readAxesFromXR(this.settings.locomotionHand);
-    if (!a) return { x: 0, y: 0 };
-    return { x: a.x, y: a.y };
-  },
-
-  _getTurnAxes() {
-    if (Input?.getTurnAxes) return Input.getTurnAxes(this.settings.turnHand);
-    const a = this._readAxesFromXR(this.settings.turnHand);
-    if (!a) return { x: 0, y: 0 };
-    return { x: a.x, y: a.y };
-  },
-
-  _isSprinting() {
-    // Optional: if Input provides sprint, use it. Otherwise false.
-    if (Input?.sprintHeld) return !!Input.sprintHeld();
-    return false;
-  },
-
-  // --- Update ---
   update(dt) {
-    if (!this.rig || !this.camera) return;
-    dt = clamp(dt, 0.001, 0.05);
+    if (!this.camera || !this.rig) return;
 
-    // 1) Turning (snap or smooth)
-    const turn = this._getTurnAxes();
-    let turnX = applyDeadzone(turn.x || 0, this.settings.deadzone);
+    this._snapT = Math.max(0, this._snapT - dt);
 
-    if (this._snapT > 0) this._snapT -= dt;
+    // --- VR controller axes (if present) ---
+    const session = this.renderer?.xr?.getSession?.();
+    let moveX = 0, moveY = 0, turnX = 0;
 
-    if (this.settings.snapTurn) {
-      if (this._snapT <= 0) {
-        const threshold = 0.55; // intentional
-        if (turnX > threshold) {
-          this.rig.rotation.y -= THREE.MathUtils.degToRad(this.settings.snapAngleDeg);
-          this._snapT = this.settings.snapCooldown;
-        } else if (turnX < -threshold) {
-          this.rig.rotation.y += THREE.MathUtils.degToRad(this.settings.snapAngleDeg);
-          this._snapT = this.settings.snapCooldown;
+    if (session && session.inputSources) {
+      for (const src of session.inputSources) {
+        const gp = src.gamepad;
+        if (!gp || !gp.axes) continue;
+
+        // Heuristic: left stick often axes[2,3] or [0,1] depending
+        // We'll read both and pick the one with more magnitude.
+        const ax0 = gp.axes[0] || 0, ax1 = gp.axes[1] || 0;
+        const ax2 = gp.axes[2] || 0, ax3 = gp.axes[3] || 0;
+
+        const mag01 = Math.abs(ax0) + Math.abs(ax1);
+        const mag23 = Math.abs(ax2) + Math.abs(ax3);
+
+        // movement candidate
+        if (mag23 > mag01) { moveX = ax2; moveY = ax3; }
+        else { moveX = ax0; moveY = ax1; }
+
+        // snap turn candidate: if we have 4 axes, use the other pair
+        if (gp.axes.length >= 4) {
+          // whichever pair wasn't used for movement
+          if (mag23 > mag01) turnX = ax0;
+          else turnX = ax2;
         }
+        break;
       }
-    } else {
-      // smooth turn
-      this.rig.rotation.y -= turnX * this.settings.smoothTurnSpeed * dt;
     }
 
-    // 2) Movement (camera yaw-relative)
-    const mv = this._getMoveAxes();
-    const mx = applyDeadzone(mv.x || 0, this.settings.deadzone);
-    const my = applyDeadzone(mv.y || 0, this.settings.deadzone);
+    // Deadzone
+    const dz = 0.18;
+    if (Math.abs(moveX) < dz) moveX = 0;
+    if (Math.abs(moveY) < dz) moveY = 0;
+    if (Math.abs(turnX) < dz) turnX = 0;
 
-    const sprint = this._isSprinting();
-    const speed = this.settings.moveSpeed * (sprint ? this.settings.sprintMultiplier : 1);
-
-    // Determine facing yaw based on camera (so you move where you look, reduces nausea)
-    this.camera.getWorldQuaternion(_tmpQuat);
-    this._camYaw = getYawFromQuat(_tmpQuat);
-
-    // forward/right vectors on ground plane
-    const forward = this._tmp.set(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this._camYaw).normalize();
-    const right = this._tmp2.set(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), this._camYaw).normalize();
-
-    // desired velocity in world
-    const desired = this.moveWorld.set(0, 0, 0);
-    desired.addScaledVector(forward, my * speed);
-    if (this.settings.strafe) desired.addScaledVector(right, mx * speed);
-
-    // acceleration smoothing
-    const accel = (desired.lengthSq() > 0.0001) ? this.settings.accel : this.settings.decel;
-    const k = 1 - Math.exp(-accel * dt);
-    this.vel.lerp(desired, k);
-
-    // apply move
-    this.rig.position.addScaledVector(this.vel, dt);
-
-    // 3) Height lock
-    if (this.settings.heightLock) this.rig.position.y = 0;
-
-    // 4) Comfort vignette (fade in while moving/turning)
-    this._updateVignette(dt, mx, my, turnX);
-  },
-
-  _updateVignette(dt, mx, my, turnX) {
-    if (!this.vignetteMat) return;
-
-    if (!this.settings.comfortVignette) {
-      this.vignetteMat.opacity = lerp(this.vignetteMat.opacity, 0, 1 - Math.exp(-10 * dt));
-      return;
+    // Phone fallback keys
+    if (!session) {
+      moveY = (this.keys.w || this.keys.up) ? -1 : (this.keys.s || this.keys.down) ? 1 : 0;
+      moveX = (this.keys.d) ? 1 : (this.keys.a) ? -1 : 0;
+      turnX = (this.keys.right) ? 1 : (this.keys.left) ? -1 : 0;
     }
 
-    const moveMag = clamp(Math.sqrt(mx*mx + my*my), 0, 1);
-    const turnMag = clamp(Math.abs(turnX), 0, 1);
+    // --- Move ---
+    if (moveX !== 0 || moveY !== 0) {
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+      forward.y = 0;
+      forward.normalize();
 
-    // Vignette stronger during movement + a bit during turning
-    const target = clamp(
-      moveMag * this.settings.vignetteStrength + turnMag * (this.settings.vignetteStrength * 0.55),
-      0,
-      this.settings.vignetteMax
-    );
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+      right.y = 0;
+      right.normalize();
 
-    const k = 1 - Math.exp(-9 * dt);
-    this.vignetteMat.opacity = lerp(this.vignetteMat.opacity, target, k);
+      const v = new THREE.Vector3();
+      v.addScaledVector(forward, -moveY);
+      v.addScaledVector(right, moveX);
+      v.normalize();
+
+      this.rig.position.addScaledVector(v, this.moveSpeed * dt);
+    }
+
+    // --- Snap turn ---
+    if (turnX !== 0 && this._snapT <= 0) {
+      if (turnX > 0) this.rig.rotation.y -= this.snapAngle;
+      else this.rig.rotation.y += this.snapAngle;
+      this._snapT = this.snapCooldown;
+    }
   }
 };
-
-const _tmpQuat = new THREE.Quaternion();

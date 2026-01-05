@@ -1,289 +1,146 @@
-// js/boss_bots.js — Scarlett Poker VR (6.2)
-// Boss avatars with bodies + upright name tags (yaw-only) + roaming behavior
-// NOTE: This file does NOT seat real poker yet — it drives visuals + future hooks.
-
+// js/boss_bots.js
 import * as THREE from "three";
-import { TextureBank } from "./textures.js";
-import { RoomManager } from "./room_manager.js";
 
-function makeNameSprite(text) {
+function makeNameTag(text) {
   const canvas = document.createElement("canvas");
-  canvas.width = 512;
-  canvas.height = 256;
+  canvas.width = 256;
+  canvas.height = 64;
   const ctx = canvas.getContext("2d");
 
-  // background
-  ctx.fillStyle = "rgba(0,0,0,0.45)";
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // border
-  ctx.strokeStyle = "rgba(0,255,255,0.65)";
-  ctx.lineWidth = 6;
-  ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
-
-  // text
   ctx.fillStyle = "white";
-  ctx.font = "bold 54px Arial";
+  ctx.font = "bold 28px Arial";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(text, canvas.width / 2, canvas.height / 2);
 
   const tex = new THREE.CanvasTexture(canvas);
-  tex.anisotropy = 2;
-  tex.needsUpdate = true;
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+  const geo = new THREE.PlaneGeometry(0.7, 0.18);
+  const plane = new THREE.Mesh(geo, mat);
+  plane.renderOrder = 999;
 
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
-  const spr = new THREE.Sprite(mat);
-  spr.scale.set(1.25, 0.65, 1.0);
-
-  // we will force yaw-only rotation ourselves; don't let Sprite auto-billboard
-  spr.material.depthTest = true;
-  spr.material.depthWrite = false;
-
-  return spr;
+  // Make it always upright: we will manually orient each frame to camera yaw only.
+  plane.userData.isNameTag = true;
+  return plane;
 }
 
-function makeBossAvatar(primaryColor = 0xffffff) {
+function makeBotMesh(color = 0x66aaff) {
   const group = new THREE.Group();
-  group.name = "BossAvatar";
 
-  // Body
   const body = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.22, 0.55, 6, 12),
-    TextureBank.standard({ color: primaryColor, roughness: 0.55, metalness: 0.05 })
+    new THREE.CapsuleGeometry(0.18, 0.35, 6, 12),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.65 })
   );
-  body.castShadow = true;
-  body.receiveShadow = true;
-  body.position.y = 0.95;
-  group.add(body);
+  body.position.y = 0.55;
 
-  // Head (lighter tone)
   const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.20, 18, 18),
-    TextureBank.standard({ color: 0xf2f2f2, roughness: 0.35, metalness: 0.0 })
+    new THREE.SphereGeometry(0.16, 16, 12),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 })
   );
-  head.castShadow = true;
-  head.receiveShadow = true;
-  head.position.y = 1.45;
+  head.position.y = 0.92;
+
+  group.add(body);
   group.add(head);
-
-  // Shoulders
-  const shoulderMat = TextureBank.standard({ color: primaryColor, roughness: 0.6, metalness: 0.02 });
-  const shL = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 16), shoulderMat);
-  const shR = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 16), shoulderMat);
-  shL.position.set(-0.22, 1.15, 0);
-  shR.position.set( 0.22, 1.15, 0);
-  shL.castShadow = shR.castShadow = true;
-  group.add(shL, shR);
-
-  // Accent ring (feet glow)
-  const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(0.32, 0.02, 10, 24),
-    new THREE.MeshStandardMaterial({
-      color: 0x00ffff,
-      emissive: 0x00ffff,
-      emissiveIntensity: 0.8,
-      roughness: 0.8
-    })
-  );
-  ring.position.y = 0.2;
-  ring.rotation.x = Math.PI / 2;
-  group.add(ring);
-
-  // Small crown placeholder (optional, off by default)
-  const crown = new THREE.Mesh(
-    new THREE.ConeGeometry(0.10, 0.16, 10),
-    new THREE.MeshStandardMaterial({
-      color: 0xffd700,
-      emissive: 0x553300,
-      emissiveIntensity: 0.25,
-      roughness: 0.4,
-      metalness: 0.2
-    })
-  );
-  crown.position.y = 1.75;
-  crown.visible = false;
-  crown.name = "crown";
-  group.add(crown);
 
   return group;
 }
 
 export const BossBots = {
-  bosses: [],
+  bots: [],
   scene: null,
+  camera: null,
 
-  // roaming timers
-  _travelClock: 0,
-  _nextTravel: 35,
+  // patrol points (set by main/world)
+  spawnPoints: [
+    new THREE.Vector3(0, 0, 6),
+    new THREE.Vector3(2, 0, 6),
+    new THREE.Vector3(-2, 0, 6),
+  ],
 
-  init(scene) {
+  init(scene, camera, opts = {}) {
     this.scene = scene;
+    this.camera = camera;
 
-    // Ensure RoomManager exists
-    if (RoomManager?.init) RoomManager.init();
+    const count = opts.count ?? 4;
+    this.spawnPoints = opts.spawnPoints ?? this.spawnPoints;
 
-    const defs = [
-      ["BOSS_1", "King Jericho", 0x7755ff, "calculating"],
-      ["BOSS_2", "Lady Nova",    0x55ffaa, "aggressive"],
-      ["BOSS_3", "Maka V",       0xffaa55, "chaotic"],
-      ["BOSS_4", "Shadow Ace",   0x55aaff, "silent"],
-      ["BOSS_5", "Crimson",      0xff5566, "aggressive"],
-      ["BOSS_6", "Dealer Zero",  0xaaaaaa, "calculating"],
-    ];
+    this.clear();
 
-    this.bosses = defs.map((d, i) => this.makeBoss(d[0], d[1], d[2], d[3], i));
-
-    // Start all bosses at lobby table seats
-    this.bosses.forEach((b) => {
-      b.roomId = "lobby";
-      b.mode = "TABLE";
-      this.placeAtSeat(b);
-    });
-
-    this._travelClock = 0;
-    this._nextTravel = this.randRange(25, 55);
+    for (let i = 0; i < count; i++) {
+      const bot = this._spawnBot(i);
+      this.bots.push(bot);
+      scene.add(bot.group);
+    }
   },
 
-  makeBoss(id, name, color, personality, seatIndex) {
-    const avatar = makeBossAvatar(color);
-    avatar.userData.isBoss = true;
-    avatar.userData.bossId = id;
+  clear() {
+    for (const b of this.bots) {
+      if (b.group?.parent) b.group.parent.remove(b.group);
+    }
+    this.bots = [];
+  },
 
-    // Name tag (upright yaw-only in update())
-    const tag = makeNameSprite(name);
-    tag.position.y = 2.05;
-    tag.name = "nameTag";
-    avatar.add(tag);
+  _spawnBot(i) {
+    const colors = [0xff7777, 0x77ff99, 0x77aaff, 0xffcc66, 0xcc77ff];
+    const group = new THREE.Group();
+    group.name = `BOT_${i}`;
 
-    this.scene.add(avatar);
+    const mesh = makeBotMesh(colors[i % colors.length]);
+    group.add(mesh);
+
+    const tag = makeNameTag(`BOT ${i + 1}`);
+    tag.position.set(0, 1.18, 0);
+    group.add(tag);
+
+    const p = this.spawnPoints[i % this.spawnPoints.length]?.clone() ?? new THREE.Vector3(0, 0, 6);
+    group.position.copy(p);
 
     return {
-      id,
-      name,
-      color,
-      personality,
-      group: avatar,
+      group,
       tag,
-      roomId: "lobby",
-      mode: "TABLE",
-      aggression: 1.0,
-      seatIndex,
-      // future stats
-      handsPlayed: 0,
-      stack: 10000,
-      crowns: 0
+      target: p.clone(),
+      t: Math.random() * 10
     };
   },
 
-  update(dt, camera) {
-    // Roam schedule: occasionally 1-2 bosses leave to a random room
-    this._travelClock += dt;
-    if (this._travelClock > this._nextTravel) {
-      this._travelClock = 0;
-      this._nextTravel = this.randRange(25, 55);
+  update(dt) {
+    if (!this.scene || !this.camera) return;
 
-      const roamCount = Math.random() < 0.55 ? 1 : 2;
-      for (let i = 0; i < roamCount; i++) {
-        const b = this.bosses[Math.floor(Math.random() * this.bosses.length)];
-        const roomId = RoomManager?.randomAggroRoom ? RoomManager.randomAggroRoom() : "lobby";
-        this.sendToRoom(b, roomId);
+    // Camera yaw for name tags (upright)
+    const camDir = new THREE.Vector3();
+    this.camera.getWorldDirection(camDir);
+    camDir.y = 0;
+    camDir.normalize();
+
+    const yaw = Math.atan2(camDir.x, camDir.z); // face camera direction
+    for (const b of this.bots) {
+      // simple wandering
+      b.t += dt;
+
+      if (b.t > 3.5) {
+        b.t = 0;
+        const sp = this.spawnPoints[Math.floor(Math.random() * this.spawnPoints.length)];
+        if (sp) b.target.copy(sp);
+      }
+
+      const pos = b.group.position;
+      const dir = new THREE.Vector3().subVectors(b.target, pos);
+      dir.y = 0;
+      const dist = dir.length();
+      if (dist > 0.05) {
+        dir.normalize();
+        pos.addScaledVector(dir, dt * 0.45);
+        b.group.rotation.y = Math.atan2(dir.x, dir.z);
+      }
+
+      // keep tag upright and facing camera
+      if (b.tag) {
+        b.tag.rotation.set(0, yaw + Math.PI, 0);
       }
     }
-
-    // Idle bob + keep avatar facing table center if seated
-    const t = performance.now() * 0.002;
-    for (const b of this.bosses) {
-      b.group.position.y = Math.sin(t + b.seatIndex) * 0.02;
-
-      if (b.mode === "TABLE") {
-        const room = RoomManager?.getRoom ? RoomManager.getRoom(b.roomId) : { center: { x: 0, z: 0 } };
-        b.group.lookAt(room.center.x, 0.9, room.center.z);
-      }
-    }
-
-    // ✅ Upright name tags: yaw-only (no pitch/roll from head tilt)
-    if (camera) {
-      const camPos = new THREE.Vector3();
-      camera.getWorldPosition(camPos);
-
-      for (const b of this.bosses) {
-        const tag = b.tag;
-        if (!tag) continue;
-
-        const bossPos = new THREE.Vector3();
-        b.group.getWorldPosition(bossPos);
-
-        // Ignore vertical difference so tag doesn't tilt up/down
-        const dx = camPos.x - bossPos.x;
-        const dz = camPos.z - bossPos.z;
-        const yaw = Math.atan2(dx, dz);
-
-        tag.rotation.set(0, yaw, 0);
-      }
-    }
-
-    // Optional: publish stats to leaderboard if you want
-    window.dispatchEvent(new CustomEvent("boss_stats", {
-      detail: this.bosses.map((b, i) => ({
-        rank: i + 1,
-        name: b.name,
-        hands: b.handsPlayed || 0,
-        chips: b.stack || 10000,
-        crowns: b.crowns || 0
-      }))
-    }));
-  },
-
-  placeAtSeat(b) {
-    const room = RoomManager?.getRoom ? RoomManager.getRoom(b.roomId) : { center: { x: 0, z: 0 }, aggression: 1.0 };
-    const cx = room.center.x, cz = room.center.z;
-
-    // 6 seats around the table center (0,0) in lobby
-    const seats = [
-      [ 3.8, 0.0,  0.0],
-      [ 1.9, 0.0,  3.3],
-      [-1.9, 0.0,  3.3],
-      [-3.8, 0.0,  0.0],
-      [-1.9, 0.0, -3.3],
-      [ 1.9, 0.0, -3.3],
-    ];
-
-    const [sx, sy, sz] = seats[b.seatIndex % 6];
-    b.group.position.set(cx + sx, sy, cz + sz);
-    b.group.lookAt(cx, 0.9, cz);
-
-    b.aggression = room.aggression;
-    b.mode = "TABLE";
-  },
-
-  sendToRoom(b, roomId) {
-    b.roomId = roomId;
-    const room = RoomManager?.getRoom ? RoomManager.getRoom(roomId) : { name: roomId, center: { x: 0, z: 0 }, aggression: 1.0 };
-
-    b.group.position.set(
-      room.center.x + this.randRange(-3, 3),
-      0,
-      room.center.z + this.randRange(-3, 3)
-    );
-
-    b.aggression = room.aggression;
-    b.mode = "ROAM";
-
-    window.dispatchEvent(new CustomEvent("notify", {
-      detail: { text: `${b.name} moved to ${room.name} (aggro ${b.aggression.toFixed(2)})` }
-    }));
-  },
-
-  // Helper: show crown on a specific boss (for future crown logic)
-  setCrownHolder(name) {
-    for (const b of this.bosses) {
-      const crown = b.group.getObjectByName("crown");
-      if (crown) crown.visible = (b.name === name);
-    }
-  },
-
-  randRange(a, b) {
-    return a + Math.random() * (b - a);
   }
 };

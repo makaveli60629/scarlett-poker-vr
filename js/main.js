@@ -1,6 +1,7 @@
-// js/main.js — Patch 7.1 FULL
-// Builds the VIP Poker Room interior + adds quick teleport buttons (Lobby <-> VIP)
-// Uses your authoritative spawn pads; no Penthouse/Nightclub.
+// js/main.js — Patch 7.2 FULL
+// Wires VIP teleport buttons in VR menu.
+// Menu buttons now actually teleport between Lobby <-> VIP Poker Room.
+// Also keeps 1/2 keyboard quick teleport for phone testing.
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -80,10 +81,6 @@ export async function boot() {
   document.body.appendChild(renderer.domElement);
   document.body.appendChild(VRButton.createButton(renderer));
 
-  renderer.xr.addEventListener("sessionstart", () => {
-    window.dispatchEvent(new Event("webxr-session-start"));
-  });
-
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
   setScene(scene);
@@ -98,11 +95,9 @@ export async function boot() {
 
   RoomManager.init(scene);
 
-  // Build VIP room interior inside its room group
+  // Build VIP interior inside VIP room group
   const vipRoom = RoomManager.getRoom("VIP Poker Room");
-  if (vipRoom?.group) {
-    VIPRoom.build(vipRoom.group);
-  }
+  if (vipRoom?.group) VIPRoom.build(vipRoom.group);
 
   // Lobby content
   SolidWalls.build(scene, { halfX: 14, halfZ: 14, height: 4.2, thickness: 0.35, y: 0 });
@@ -125,7 +120,7 @@ export async function boot() {
 
   TeleportMachine.init(scene, playerRig);
 
-  // Spawn on Lobby pad (authoritative)
+  // spawn Lobby pad
   const spawn = TeleportMachine.getSafeSpawn();
   playerRig.position.copy(spawn.position);
   playerRig.position.y = 0;
@@ -143,11 +138,21 @@ export async function boot() {
 
   Interactions.init(scene, camera, playerRig, { kioskObj, chipObj });
 
-  // Teleport hotkeys from menu panel (simple):
-  // We'll add two quick buttons via the VRUIPanel callbacks by reading equip events.
   VRUIPanel.init(scene, camera, renderer, {
     onEquip: (equipped) => AvatarShop.apply(equipped),
     onToast: (msg) => toast(msg)
+  });
+
+  // Wire teleport buttons
+  VRUIPanel.setTeleportHandlers({
+    goLobby: () => {
+      TeleportMachine.teleportToRoom("Lobby");
+      toast("Teleport: Lobby");
+    },
+    goVIP: () => {
+      TeleportMachine.teleportToRoom("VIP Poker Room");
+      toast("Teleport: VIP Poker Room");
+    }
   });
 
   BossBots.init(scene, camera, { count: 5 });
@@ -162,7 +167,7 @@ export async function boot() {
 
   PokerSimulation.init(scene, camera, BossBots, Leaderboard, (m) => toast(m), CrownSystem);
 
-  overlay("Loaded ✅\nPatch 7.1: VIP Poker Room Interior\nNext: VIP teleport buttons (kiosk) + trophy wall spotlight");
+  overlay("Loaded ✅\nPatch 7.2: VR Menu Teleport Buttons\nOpen menu → Grip to click VIP/Lobby");
 
   const clock = new THREE.Clock();
 
@@ -172,7 +177,7 @@ export async function boot() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // Desktop quick teleports for testing:
+  // Phone/desktop hotkeys
   window.addEventListener("keydown", (e) => {
     const k = (e.key || "").toLowerCase();
     if (k === "1") { TeleportMachine.teleportToRoom("Lobby"); toast("Teleport: Lobby"); }
@@ -216,4 +221,4 @@ if (!window.__SCARLETT_BOOTED__) {
     console.error(e);
     overlay(`IMPORT FAILED ❌\n${String(e?.message || e)}`);
   });
-      }
+}

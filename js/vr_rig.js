@@ -1,19 +1,6 @@
-// js/vr_rig.js — Scarlett Poker VR — Permanent XR Rig (Quest/GitHub safe)
-// One file owns ALL VR control wiring so nothing drifts to center.
-//
-// Features:
-// - XRFrame-driven RIGHT ray pose (laser/teleport never stuck at origin)
-// - Left stick: smooth move (strafe corrected)
-// - Right stick: 45° snap turn
-// - Right trigger: teleport to disc
-// - Height lock: keeps consistent eye height even if sitting/standing
-//
-// Usage (from main.js):
-//   import { VRRig } from "./vr_rig.js";
-//   const rig = VRRig.create({ THREE, renderer, scene, camera, player, hub });
-//   rig.setBounds({ minX, maxX, minZ, maxZ });
-//   rig.setHeightLock(1.78); // optional
-//   rig.update(dt);
+// js/vr_rig.js — Scarlett Poker VR — Permanent XR Rig (FIXED HEIGHT LOCK)
+// Quest/GitHub safe. XRFrame-driven ray pose.
+// Fix: Height lock is now ABSOLUTE (no more adding every frame).
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
@@ -23,27 +10,24 @@ export const VRRig = {
     const ok = (m) => log(`✅ ${m}`);
     const warn = (m) => log(`⚠️ ${m}`);
 
-    // ---------- internal state ----------
     const state = {
       renderer, scene, camera, player,
 
-      // bounds
       bounds: { minX: -15.5, maxX: 15.5, minZ: -15.5, maxZ: 15.5 },
 
-      // movement
       moveSpeed: 2.25,
       snapAngle: Math.PI / 4,
       snapCooldown: 0.28,
       snapCD: 0,
 
-      // height lock
-      targetEyeHeight: 1.75,  // you can change
+      // Height lock (FIXED)
+      targetEyeHeight: 1.80,
       heightLockEnabled: true,
+      baseY: player.position.y,      // <-- store once
+      _lastPresenting: false,
 
-      // teleport
       teleportPressed: false,
 
-      // XR pose
       refSpace: null,
       poseMatrix: new THREE.Matrix4(),
       posePos: new THREE.Vector3(),
@@ -51,18 +35,14 @@ export const VRRig = {
       poseDir: new THREE.Vector3(),
       mode: "fallback-camera",
 
-      // raycast
       raycaster: new THREE.Raycaster(),
       floorPlane: new THREE.Plane(new THREE.Vector3(0, 1, 0), 0),
       hit: new THREE.Vector3(),
 
-      // visuals
       beam: null,
       tpDisc: null,
       tpRing: null,
 
-      // temps
-      tmpRot: new THREE.Matrix4(),
       tmpV: new THREE.Vector3(),
       tmpV2: new THREE.Vector3(),
     };
@@ -70,16 +50,17 @@ export const VRRig = {
     function clampToBounds(vec3) {
       vec3.x = THREE.MathUtils.clamp(vec3.x, state.bounds.minX, state.bounds.maxX);
       vec3.z = THREE.MathUtils.clamp(vec3.z, state.bounds.minZ, state.bounds.maxZ);
+      // failsafe clamp Y so we never fly away
+      vec3.y = THREE.MathUtils.clamp(vec3.y, -0.25, 3.0);
     }
 
-    // ---------- XR session events ----------
     renderer.xr.addEventListener("sessionstart", () => {
       try {
         state.refSpace = renderer.xr.getReferenceSpace?.() || null;
         ok("VRRig: XR session started");
       } catch {
         state.refSpace = null;
-        warn("VRRig: referenceSpace unavailable (will still run)");
+        warn("VRRig: referenceSpace unavailable (still ok)");
       }
     });
 
@@ -89,7 +70,7 @@ export const VRRig = {
       warn("VRRig: XR session ended");
     });
 
-    // ---------- visuals ----------
+    // visuals
     function makeBeam() {
       const geo = new THREE.CylinderGeometry(0.006, 0.010, 1.2, 10, 1, true);
       const mat = new THREE.MeshStandardMaterial({
@@ -105,7 +86,7 @@ export const VRRig = {
       });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.renderOrder = 9999;
-      mesh.rotation.x = Math.PI / 2; // align with -Z
+      mesh.rotation.x = Math.PI / 2;
       return mesh;
     }
 
@@ -128,9 +109,9 @@ export const VRRig = {
     state.tpRing.renderOrder = 9999;
     scene.add(state.tpRing);
 
-    ok("VRRig: visuals ready (beam + teleport marker)");
+    ok("VRRig: visuals ready");
 
-    // ---------- input helpers ----------
+    // input helpers
     function getGamepads() {
       const session = renderer.xr.getSession?.();
       if (!session) return { left: null, right: null };
@@ -167,7 +148,7 @@ export const VRRig = {
       return Math.max(v0, v1);
     }
 
-    // ---------- XRFrame pose (RIGHT ray) ----------
+    // XRFrame pose (right ray)
     function selectSource(session) {
       const srcs = session?.inputSources || [];
       if (!srcs.length) return { src: null, mode: "fallback-camera" };
@@ -191,7 +172,6 @@ export const VRRig = {
       const refSpace = state.refSpace || renderer.xr.getReferenceSpace?.();
 
       if (!session || !frame || !refSpace) {
-        // fallback camera
         state.poseMatrix.copy(camera.matrixWorld);
         state.posePos.setFromMatrixPosition(state.poseMatrix);
         state.poseQuat.setFromRotationMatrix(state.poseMatrix);
@@ -201,16 +181,8 @@ export const VRRig = {
       }
 
       const { src, mode } = selectSource(session);
-      if (!src) {
-        state.poseMatrix.copy(camera.matrixWorld);
-        state.posePos.setFromMatrixPosition(state.poseMatrix);
-        state.poseQuat.setFromRotationMatrix(state.poseMatrix);
-        state.poseDir.set(0, 0, -1).applyQuaternion(state.poseQuat).normalize();
-        state.mode = "fallback-camera";
-        return;
-      }
+      const pose = src ? frame.getPose(src.targetRaySpace, refSpace) : null;
 
-      const pose = frame.getPose(src.targetRaySpace, refSpace);
       if (pose?.transform?.matrix) {
         state.poseMatrix.fromArray(pose.transform.matrix);
         state.posePos.setFromMatrixPosition(state.poseMatrix);
@@ -220,7 +192,6 @@ export const VRRig = {
         return;
       }
 
-      // fallback camera if pose missing
       state.poseMatrix.copy(camera.matrixWorld);
       state.posePos.setFromMatrixPosition(state.poseMatrix);
       state.poseQuat.setFromRotationMatrix(state.poseMatrix);
@@ -228,10 +199,8 @@ export const VRRig = {
       state.mode = "fallback-camera";
     }
 
-    // ---------- public API ----------
     return {
       setBounds(b) {
-        // expects {minX,maxX,minZ,maxZ}
         state.bounds = { ...state.bounds, ...b };
         ok("VRRig: bounds set");
       },
@@ -239,26 +208,31 @@ export const VRRig = {
       setHeightLock(targetEyeHeight, enabled = true) {
         state.targetEyeHeight = targetEyeHeight;
         state.heightLockEnabled = enabled;
+        // Reset baseY to current player position when you change settings
+        state.baseY = player.position.y;
         ok(`VRRig: heightLock ${enabled ? "ON" : "OFF"} @ ${targetEyeHeight.toFixed(2)}m`);
       },
 
-      setMoveSpeed(speed) {
-        state.moveSpeed = speed;
-      },
-
       update(dt) {
-        // 1) height lock
-        if (state.heightLockEnabled) {
-          // keep eye height constant by offsetting player Y
-          const camLocalY = camera.position.y;
-          const dy = state.targetEyeHeight - camLocalY;
-          player.position.y += dy;
+        const presenting = !!renderer.xr.getSession?.();
+
+        // If we just entered VR, “freeze” baseY so it doesn’t drift
+        if (presenting && !state._lastPresenting) {
+          state.baseY = player.position.y;
+          ok("VRRig: entering VR (baseY locked)");
+        }
+        state._lastPresenting = presenting;
+
+        // Height lock (ABSOLUTE, not +=)
+        if (presenting && state.heightLockEnabled) {
+          const camLocalY = camera.position.y || 0;
+          player.position.y = state.baseY + (state.targetEyeHeight - camLocalY);
+          clampToBounds(player.position);
         }
 
-        // 2) movement + snap turn
+        // Movement + snap
         const { left, right } = getGamepads();
 
-        // smooth move on left stick (strafe corrected)
         if (left) {
           const { x, y } = readAxes(left);
           const dead = 0.14;
@@ -266,7 +240,7 @@ export const VRRig = {
           let mx = Math.abs(x) < dead ? 0 : x;
           let my = Math.abs(y) < dead ? 0 : y;
 
-          // Your strafe inversion fix:
+          // strafe inversion fix
           mx = -mx;
 
           if (mx || my) {
@@ -284,7 +258,6 @@ export const VRRig = {
           }
         }
 
-        // snap turn on right stick
         state.snapCD = Math.max(0, state.snapCD - dt);
         if (right && state.snapCD <= 0) {
           const { x } = readAxes(right);
@@ -294,19 +267,15 @@ export const VRRig = {
           }
         }
 
-        // 3) update ray pose from XRFrame (laser can’t stick to center)
+        // Ray pose + visuals
         updateRayPose();
 
-        // 4) draw beam (world space)
         state.beam.quaternion.copy(state.poseQuat);
-
-        // put beam in front of controller tip
         state.beam.position.copy(state.posePos);
         const tip = new THREE.Vector3(0, 0, -0.08).applyQuaternion(state.poseQuat);
         const push = new THREE.Vector3(0, 0, -0.60).applyQuaternion(state.poseQuat);
         state.beam.position.add(tip).add(push);
 
-        // 5) teleport marker via raycast to floor
         state.raycaster.set(state.posePos, state.poseDir);
         const hitPoint = state.raycaster.ray.intersectPlane(state.floorPlane, state.hit);
 
@@ -319,7 +288,7 @@ export const VRRig = {
           state.tpRing.position.copy(state.tpDisc.position);
         }
 
-        // 6) teleport on right trigger press
+        // Teleport
         const trig = readRightTrigger();
         const down = trig > 0.75;
 

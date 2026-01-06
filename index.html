@@ -1,44 +1,20 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Scarlett Poker VR — Diagnose</title>
+  <title>Scarlett Poker VR</title>
   <style>
-    html,body{margin:0;height:100%;background:#000;color:#00ff66;font-family:ui-monospace,Menlo,Consolas,monospace}
-    #out{padding:14px;white-space:pre-wrap;line-height:1.35;font-size:13px}
+    html,body{margin:0;height:100%;background:#000;overflow:hidden}
+    #overlay{
+      position:fixed;inset:0;padding:14px;color:#00ff66;
+      font-family:ui-monospace,Menlo,Consolas,monospace;
+      white-space:pre-wrap;line-height:1.35;font-size:13px
+    }
   </style>
 </head>
 <body>
-<pre id="out">Diagnosing…</pre>
-<script type="module">
-  const out = document.getElementById("out");
-
-  async function peek(url){
-    try{
-      const r = await fetch(url, { cache:"no-store" });
-      const t = await r.text();
-      const head = t.slice(0, 120).replace(/\n/g,"\\n");
-      return { url, ok:r.ok, status:r.status, head };
-    }catch(e){
-      return { url, ok:false, status:"fetch-failed", head:String(e) };
-    }
-  }
-
-  const targets = [
-    "./js/main.js",
-    "./js/world.js",
-    "./js/controls.js",
-    "./js/ui.js"
-  ];
-
-  let text = "Scarlett Poker VR — Diagnose\\n\\n";
-  for (const u of targets){
-    const p = await peek(u);
-    text += `${p.ok ? "✅" : "❌"} ${p.url} (HTTP ${p.status})\\n`;
-    text += `   head: ${p.head}\\n\\n`;
-  }
-  out.textContent = text;
-</script>
+  <div id="overlay">Scarlett Poker VR — booting…</div>
+  <script type="module" src="./js/main.js"></script>
 </body>
 </html>

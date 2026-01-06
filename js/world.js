@@ -1,9 +1,5 @@
-// /js/world.js — Scarlett Poker VR — Aligned World (table unchanged)
-// - Fix chair legs/feet
-// - Keep table height as-is
-// - Pads aligned and visible
-// - Adds extra fill lights (world-level)
-// Returns: { spawn, colliders, bounds, pads, padById }
+// /js/world.js — Scarlett Poker VR — WORLD v10 (GitHub Safe + Bright + No Blink)
+// Returns: { spawn, colliders, bounds, pads, padById, floorY }
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
@@ -14,6 +10,7 @@ export const World = {
     if (!this._tex) this._tex = new THREE.TextureLoader();
     const url = `assets/textures/${file}`;
 
+    // placeholder texture object that becomes real if loaded
     const t = new THREE.Texture();
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(repeat[0], repeat[1]);
@@ -38,29 +35,40 @@ export const World = {
 
   _mat({ file = null, color = 0x666666, roughness = 0.92, metalness = 0.05, repeat = [6, 6] }) {
     const map = file ? this._safeTexture(file, { repeat }) : null;
-    return new THREE.MeshStandardMaterial({ color, roughness, metalness, map });
+    const m = new THREE.MeshStandardMaterial({ color, roughness, metalness, map });
+    if (map) m.map.colorSpace = THREE.SRGBColorSpace;
+    return m;
   },
 
   build(scene, playerGroup) {
-    // ----- ROOM -----
+    // ======================
+    // ROOM
+    // ======================
     const ROOM_W = 34;
     const ROOM_D = 34;
     const WALL_H = 9.5;
+    const floorY = 0;
 
-    // Extra world fill lights (safe, helps dark corners)
-    const fillA = new THREE.PointLight(0xffffff, 0.55, 70);
-    fillA.position.set(-10, 6, 10);
-    scene.add(fillA);
+    // BRIGHT SAFE LIGHTING (world-level)
+    // (Even if your main adds lights, this ensures the room is never black)
+    const amb = new THREE.AmbientLight(0xffffff, 0.55);
+    scene.add(amb);
 
-    const fillB = new THREE.PointLight(0xffffff, 0.55, 70);
-    fillB.position.set(10, 6, -10);
-    scene.add(fillB);
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 0.85);
+    hemi.position.set(0, 20, 0);
+    scene.add(hemi);
 
+    const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+    sun.position.set(14, 24, 10);
+    sun.castShadow = false;
+    scene.add(sun);
+
+    // Materials
     const floorMat = this._mat({
       file: "Marblegold Floors.jpg",
-      color: 0x15161a,
-      repeat: [7, 7],
-      roughness: 0.98,
+      color: 0x2b2f38,
+      repeat: [6, 6],
+      roughness: 0.95,
       metalness: 0.02,
     });
 
@@ -76,39 +84,34 @@ export const World = {
       color: 0xffd27a,
       roughness: 0.35,
       metalness: 0.55,
-      emissive: 0x1a1206,
-      emissiveIntensity: 0.25,
+      emissive: 0x2a1a08,
+      emissiveIntensity: 0.45,
     });
 
-    // Floor
+    // Floor — IMPORTANT: lift by tiny amount to avoid z-fighting with grid/helpers
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), floorMat);
     floor.rotation.x = -Math.PI / 2;
+    floor.position.y = floorY + 0.0015; // anti-blink
+    floor.userData.isFloor = true;
     scene.add(floor);
 
-    // Walls (aligned)
-    const wallN = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, WALL_H), wallMat);
-    wallN.position.set(0, WALL_H / 2, -ROOM_D / 2);
-    scene.add(wallN);
+    // Walls
+    const mkWall = (w, h, x, y, z, ry) => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat);
+      m.position.set(x, y, z);
+      m.rotation.y = ry;
+      scene.add(m);
+      return m;
+    };
 
-    const wallS = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, WALL_H), wallMat);
-    wallS.position.set(0, WALL_H / 2, ROOM_D / 2);
-    wallS.rotation.y = Math.PI;
-    scene.add(wallS);
-
-    const wallE = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_D, WALL_H), wallMat);
-    wallE.position.set(ROOM_W / 2, WALL_H / 2, 0);
-    wallE.rotation.y = -Math.PI / 2;
-    scene.add(wallE);
-
-    const wallW = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_D, WALL_H), wallMat);
-    wallW.position.set(-ROOM_W / 2, WALL_H / 2, 0);
-    wallW.rotation.y = Math.PI / 2;
-    scene.add(wallW);
+    mkWall(ROOM_W, WALL_H, 0, WALL_H / 2, -ROOM_D / 2, 0);
+    mkWall(ROOM_W, WALL_H, 0, WALL_H / 2, ROOM_D / 2, Math.PI);
+    mkWall(ROOM_D, WALL_H, ROOM_W / 2, WALL_H / 2, 0, -Math.PI / 2);
+    mkWall(ROOM_D, WALL_H, -ROOM_W / 2, WALL_H / 2, 0, Math.PI / 2);
 
     // Trim
     const trimH = 0.22;
-    const trimY = trimH / 2;
-
+    const trimY = floorY + trimH / 2 + 0.001;
     const t1 = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W, trimH, 0.22), trimMat);
     t1.position.set(0, trimY, -ROOM_D / 2 + 0.11);
     scene.add(t1);
@@ -125,14 +128,15 @@ export const World = {
     t4.position.set(-ROOM_W / 2 + 0.11, trimY, 0);
     scene.add(t4);
 
-    // ----- TABLE (UNCHANGED HEIGHT) -----
+    // ======================
+    // TABLE (center) + CHAIRS
+    // ======================
     const tableGroup = new THREE.Group();
     tableGroup.position.set(0, 0, 0);
 
     const feltMat = new THREE.MeshStandardMaterial({ color: 0x0b3a2a, roughness: 0.9, metalness: 0.02 });
     const railMat = new THREE.MeshStandardMaterial({ color: 0x121212, roughness: 0.55, metalness: 0.1 });
 
-    // Keep exactly as your current build (do not raise)
     const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(2.35, 2.35, 0.18, 48), feltMat);
     tableTop.position.y = 0.95;
     tableGroup.add(tableTop);
@@ -146,59 +150,62 @@ export const World = {
     pedestal.position.y = 0.45;
     tableGroup.add(pedestal);
 
+    // add a subtle table light so it’s always readable
+    const tableLight = new THREE.PointLight(0xffffff, 0.9, 12);
+    tableLight.position.set(0, 2.8, 0);
+    tableGroup.add(tableLight);
+
     scene.add(tableGroup);
 
-    // ----- CHAIRS (add legs + feet) -----
+    // Chairs (with legs)
     const chairMat = new THREE.MeshStandardMaterial({ color: 0x3b3b3b, roughness: 0.85, metalness: 0.05 });
     const chairRadius = 3.1;
 
-    const legGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.48, 10);
-    const footGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.02, 12);
+    const mkChair = () => {
+      const g = new THREE.Group();
+
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.08, 0.55), chairMat);
+      seat.position.y = 0.45;
+      g.add(seat);
+
+      const back = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 0.08), chairMat);
+      back.position.set(0, 0.75, -0.23);
+      g.add(back);
+
+      // legs
+      const legGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.42, 10);
+      const offsets = [
+        [-0.23, 0.22], [0.23, 0.22],
+        [-0.23, -0.22], [0.23, -0.22],
+      ];
+      for (const [lx, lz] of offsets) {
+        const leg = new THREE.Mesh(legGeo, chairMat);
+        leg.position.set(lx, 0.22, lz);
+        g.add(leg);
+      }
+      return g;
+    };
 
     for (let i = 0; i < 6; i++) {
       const a = (i / 6) * Math.PI * 2;
       const cx = Math.cos(a) * chairRadius;
       const cz = Math.sin(a) * chairRadius;
 
-      const chair = new THREE.Group();
+      const chair = mkChair();
       chair.position.set(cx, 0, cz);
       chair.rotation.y = -a + Math.PI / 2;
-
-      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.08, 0.55), chairMat);
-      seat.position.y = 0.45;
-      chair.add(seat);
-
-      const back = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 0.08), chairMat);
-      back.position.set(0, 0.75, -0.23);
-      chair.add(back);
-
-      // legs
-      const legPositions = [
-        [ 0.22, 0.24,  0.22],
-        [-0.22, 0.24,  0.22],
-        [ 0.22, 0.24, -0.22],
-        [-0.22, 0.24, -0.22],
-      ];
-      for (const [lx, ly, lz] of legPositions) {
-        const leg = new THREE.Mesh(legGeo, chairMat);
-        leg.position.set(lx, ly, lz);
-        chair.add(leg);
-
-        const foot = new THREE.Mesh(footGeo, chairMat);
-        foot.position.set(lx, 0.01, lz);
-        chair.add(foot);
-      }
-
       scene.add(chair);
     }
 
-    // ----- TELEPORT PADS -----
+    // ======================
+    // TELEPORT PADS (spawn here)
+    // ======================
     const pads = [];
     const padById = {};
 
-    const mkPad = (id, label, x, z, color) => {
+    const mkPad = (id, x, z, color) => {
       const g = new THREE.Group();
-      g.position.set(x, 0, z);
+      g.position.set(x, floorY, z);
 
       const base = new THREE.Mesh(
         new THREE.CylinderGeometry(0.9, 0.9, 0.04, 40),
@@ -209,7 +216,7 @@ export const World = {
 
       const ring1 = new THREE.Mesh(
         new THREE.TorusGeometry(0.72, 0.04, 12, 64),
-        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.8, roughness: 0.2, metalness: 0.2 })
+        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 2.0, roughness: 0.2, metalness: 0.2 })
       );
       ring1.rotation.x = Math.PI / 2;
       ring1.position.y = 0.06;
@@ -217,61 +224,70 @@ export const World = {
 
       const ring2 = new THREE.Mesh(
         new THREE.TorusGeometry(0.52, 0.03, 12, 64),
-        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.2, roughness: 0.2, metalness: 0.2, transparent: true, opacity: 0.9 })
+        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.5, roughness: 0.2, metalness: 0.2, transparent: true, opacity: 0.9 })
       );
       ring2.rotation.x = Math.PI / 2;
       ring2.position.y = 0.065;
       g.add(ring2);
 
-      const pad = {
-        id,
-        label,
-        position: new THREE.Vector3(x, 0, z),
-        yaw: 0,
-        radius: 0.95,
-        object: g
-      };
-      g.userData.teleportPad = pad;
+      // a tiny “beacon” so you can always see where it is
+      const beacon = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.06, 0.06, 1.0, 12),
+        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.1 })
+      );
+      beacon.position.y = 0.55;
+      g.add(beacon);
 
       scene.add(g);
+
+      const pad = {
+        id,
+        position: new THREE.Vector3(x, floorY, z),
+        radius: 0.95,
+        object: g,
+      };
       pads.push(pad);
       padById[id] = pad;
       return pad;
     };
 
-    mkPad("lobby", "Lobby", 0, 11.5, 0x00ffaa);
-    mkPad("vip", "VIP Room", -11.5, 0, 0xff2bd6);
-    mkPad("store", "Store", 11.5, 0, 0x2bd7ff);
-    mkPad("tournament", "Tournament", 0, -11.5, 0xffd27a);
+    mkPad("lobby", 0, 11.5, 0x00ffaa);
+    mkPad("vip", -11.5, 0, 0xff2bd6);
+    mkPad("store", 11.5, 0, 0x2bd7ff);
+    mkPad("tournament", 0, -11.5, 0xffd27a);
 
-    // ----- COLLIDERS + BOUNDS -----
+    // ======================
+    // COLLIDERS + BOUNDS
+    // ======================
     const colliders = [];
-    const wallThick = 0.4;
+    const wallThick = 0.5;
 
     const addBoxCollider = (w, h, d, x, y, z) => {
       const m = new THREE.MeshBasicMaterial({ visible: false });
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
       mesh.position.set(x, y, z);
-      mesh.userData.box = new THREE.Box3().setFromObject(mesh);
       scene.add(mesh);
       colliders.push(mesh);
       return mesh;
     };
 
+    // Walls colliders
     addBoxCollider(ROOM_W, WALL_H, wallThick, 0, WALL_H / 2, -ROOM_D / 2);
     addBoxCollider(ROOM_W, WALL_H, wallThick, 0, WALL_H / 2, ROOM_D / 2);
     addBoxCollider(wallThick, WALL_H, ROOM_D, ROOM_W / 2, WALL_H / 2, 0);
     addBoxCollider(wallThick, WALL_H, ROOM_D, -ROOM_W / 2, WALL_H / 2, 0);
 
-    // Table collider unchanged
+    // Table collider (prevents walking through table, but NOT trapping spawn)
     addBoxCollider(6.4, 2.6, 6.4, 0, 1.0, 0);
 
     const bounds = {
-      min: new THREE.Vector3(-ROOM_W / 2 + 1.2, 0, -ROOM_D / 2 + 1.2),
-      max: new THREE.Vector3(ROOM_W / 2 - 1.2, 0, ROOM_D / 2 - 1.2),
+      min: new THREE.Vector3(-ROOM_W / 2 + 1.2, floorY, -ROOM_D / 2 + 1.2),
+      max: new THREE.Vector3(ROOM_W / 2 - 1.2, floorY, ROOM_D / 2 - 1.2),
     };
 
+    // Default spawn = lobby pad (always safe)
     const spawn = padById.lobby.position.clone();
-    return { spawn, colliders, bounds, pads, padById };
+
+    return { spawn, colliders, bounds, pads, padById, floorY };
   },
 };

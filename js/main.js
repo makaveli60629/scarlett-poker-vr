@@ -10,7 +10,7 @@ try {
   const m = await import("https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js");
   VRButton = m.VRButton;
 } catch (e) { /* ok */ }
-
+const mod = await import("./world.js?v=1");
 const overlay = document.getElementById("overlay");
 const enterVrBtn = document.getElementById("enterVrBtn");
 

@@ -1,26 +1,21 @@
-// js/boss_table.js — Boss Table + Chairs + Spectator Rail (8.2.5)
-// FIX:
-// - Removed center pedestal (your "dealer object") so table center is clear
-// - Added chairs around table so seat placement is obvious
+// /js/boss_table.js — Boss Table + VIP Spectator Rail (Spectator Only)
 
-import * as THREE from "./three.js";
+import * as T from "./three.js";
+const THREE = T;
+
 import { registerZone } from "./state.js";
 import { SpectatorRail } from "./spectator_rail.js";
 
 export const BossTable = {
   group: null,
-  center: new THREE.Vector3(0, 0, -6.5),
+  center: new THREE.Vector3(0, 0, -8.0),
   zoneRadius: 4.1,
-
-  chairCount: 5,
-  chairRadius: 3.05,
 
   build(scene) {
     this.group = new THREE.Group();
     this.group.name = "BossTableArea";
     this.group.position.copy(this.center);
 
-    // Table base + top
     const base = new THREE.Mesh(
       new THREE.CylinderGeometry(0.75, 1.05, 0.6, 28),
       new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.9 })
@@ -45,16 +40,14 @@ export const BossTable = {
     rim.rotation.x = Math.PI / 2;
     rim.position.y = 1.0;
 
-    // REMOVED: pedestal (dealer object)
     this.group.add(base, top, rim);
 
-    // Visual inner ring (cue)
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(this.zoneRadius, 0.06, 10, 90),
       new THREE.MeshStandardMaterial({
         color: 0x00ffaa,
         emissive: 0x00ffaa,
-        emissiveIntensity: 1.35,
+        emissiveIntensity: 1.4,
         roughness: 0.35,
       })
     );
@@ -62,47 +55,14 @@ export const BossTable = {
     ring.position.y = 0.03;
     this.group.add(ring);
 
-    // Lights
     const a = new THREE.PointLight(0x00ffaa, 0.65, 18);
     a.position.set(0, 2.6, 0);
     this.group.add(a);
 
-    const b = new THREE.PointLight(0xff3366, 0.45, 18);
-    b.position.set(2.5, 2.1, 2.5);
-    this.group.add(b);
-
-    // Chairs (simple elegant)
-    const chairMat = new THREE.MeshStandardMaterial({ color: 0x2a2c33, roughness: 0.9 });
-    const seatMat  = new THREE.MeshStandardMaterial({ color: 0x111216, roughness: 0.95 });
-
-    for (let i=0;i<this.chairCount;i++){
-      const ang = (i/this.chairCount)*Math.PI*2;
-      const x = Math.cos(ang)*this.chairRadius;
-      const z = Math.sin(ang)*this.chairRadius;
-
-      const chair = new THREE.Group();
-      chair.position.set(x, 0, z);
-      chair.lookAt(new THREE.Vector3(0, 0, 0));
-
-      const legs = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.5, 12), chairMat);
-      legs.position.y = 0.25;
-
-      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.10, 0.55), seatMat);
-      seat.position.y = 0.55;
-
-      const back = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 0.10), seatMat);
-      back.position.set(0, 0.88, -0.22);
-
-      chair.add(legs, seat, back);
-      this.group.add(chair);
-    }
-
     scene.add(this.group);
 
-    // VIP Spectator rail
     SpectatorRail.build(scene, this.center, this.zoneRadius + 0.35, { postCount: 20 });
 
-    // No-entry zone
     registerZone({
       name: "boss_table_zone",
       center: this.center,

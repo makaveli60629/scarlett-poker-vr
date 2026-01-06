@@ -1,225 +1,196 @@
-// /js/world.js — Skylark Poker VR World (Update 9.0)
-// Goal: one clean room, correct floor alignment, bright lighting, textures,
-// teleport machine at spawn, rails, gold trim + pillars.
-// SAFE: imports only from local ./three.js and your local modules.
+// /js/world.js — Skylark Poker VR World (Update 9.0 Fix Pack)
+// Fixes: textures actually load (safe loader), bigger room + taller walls,
+// centerpiece table + rails, back-wall leaderboard, framed art, plants, chairs.
 
 import * as THREE from "./three.js";
 
-// Optional texture system (if your textures.js is correct). If it fails, we fallback.
-let TextureBank = null;
-let Textures = null;
-
-async function safeImportTextures() {
-  try {
-    const mod = await import("./textures.js");
-    TextureBank = mod.TextureBank || null;
-    Textures = mod.Textures || null;
-  } catch (e) {
-    console.warn("textures.js not loaded, using fallback materials.", e);
-    TextureBank = null;
-    Textures = null;
-  }
-}
-
-function matStandard(opts = {}) {
-  // If you have TextureBank.standard, use it; else fallback to MeshStandardMaterial.
-  if (TextureBank && typeof TextureBank.standard === "function") {
-    return TextureBank.standard(opts);
-  }
-  return new THREE.MeshStandardMaterial({
-    color: opts.color ?? 0x777777,
-    roughness: opts.roughness ?? 0.9,
-    metalness: opts.metalness ?? 0.05,
-  });
-}
-
 export const World = {
-  bounds: null,       // for clamping movement
-  lookTarget: null,   // camera yaw target after teleport
+  bounds: null,
+  lookTarget: null,
 
-  // references
   scene: null,
   player: null,
   camera: null,
 
-  // key anchors
-  roomCenter: new THREE.Vector3(0, 0, -4.5),
+  env: null,
+
+  roomCenter: new THREE.Vector3(0, 0, -6.0),
   spawnPad: null,
 
-  // groups
-  env: null,
+  // texture loader
+  _tl: null,
 
   async build(scene, player, camera) {
     this.scene = scene;
     this.player = player;
     this.camera = camera;
 
-    await safeImportTextures();
-
     this.env = new THREE.Group();
     this.env.name = "WorldEnv";
     scene.add(this.env);
 
-    // Build environment
-    this.buildLighting();
-    this.buildRoom();
-    this.buildTeleportMachine();
-    await this.buildRails();
-    await this.buildPokerSimOneTable(); // will place ONE table + bots
+    this._tl = new THREE.TextureLoader();
 
-    // movement bounds (inside room)
+    this.buildLighting();
+    this.buildRoomBig();
+    this.buildTeleportMachine();
+    this.buildRailsFallback();
+    this.buildDecor();
+
+    // Poker sim (ONE table, spectator-only)
+    await this.buildPokerSim();
+
+    // Bounds (simple solid)
     this.bounds = {
-      minX: -8.2,
-      maxX:  8.2,
-      minZ: -14.2,
-      maxZ:  6.2,
+      minX: -12,
+      maxX:  12,
+      minZ: -26,
+      maxZ:  10,
     };
 
-    // yaw target = table center
     this.lookTarget = this.roomCenter.clone();
 
-    // spawn at teleport pad every time
     this.resetSpawn();
   },
 
   resetSpawn() {
     if (!this.spawnPad) {
-      this.player.position.set(0, 0, 3.8);
+      this.player.position.set(0, 0, 6);
       return;
     }
     const p = this.spawnPad.position.clone();
-    // Spawn slightly behind pad, facing inward
-    this.player.position.set(p.x, 0, p.z + 1.2);
+    this.player.position.set(p.x, 0, p.z + 1.4);
   },
 
   buildLighting() {
-    // BRIGHTER (you said art is too dark)
-    const amb = new THREE.AmbientLight(0xffffff, 0.75);
-    this.env.add(amb);
+    // MUCH brighter (your art was too dark)
+    this.env.add(new THREE.AmbientLight(0xffffff, 0.85));
 
-    const key = new THREE.DirectionalLight(0xffffff, 0.9);
-    key.position.set(6, 10, 5);
-    key.castShadow = false;
+    const key = new THREE.DirectionalLight(0xffffff, 1.05);
+    key.position.set(10, 14, 8);
     this.env.add(key);
 
-    const fill = new THREE.PointLight(0x66bbff, 0.5, 30);
-    fill.position.set(-5, 3.2, -6);
-    this.env.add(fill);
-
-    const warm = new THREE.PointLight(0xffcc88, 0.6, 30);
-    warm.position.set(5, 3.0, -6);
+    const warm = new THREE.PointLight(0xffcc88, 0.9, 60);
+    warm.position.set(7, 4.5, -8);
     this.env.add(warm);
 
-    // ceiling glow
-    const ceiling = new THREE.PointLight(0xffffff, 0.65, 40);
-    ceiling.position.set(0, 5.2, -6);
+    const cool = new THREE.PointLight(0x66bbff, 0.65, 60);
+    cool.position.set(-7, 4.5, -8);
+    this.env.add(cool);
+
+    const ceiling = new THREE.PointLight(0xffffff, 0.85, 80);
+    ceiling.position.set(0, 7.5, -10);
     this.env.add(ceiling);
   },
 
-  buildRoom() {
-    // Room dimensions
-    const W = 18;
-    const H = 6.2;
-    const D = 22;
+  // safe texture helper (NEVER crashes)
+  safeTex(file, repeatX = 2, repeatY = 2) {
+    const path = `assets/textures/${file}`;
+    const tex = this._tl.load(
+      path,
+      (t) => {
+        t.wrapS = t.wrapT = THREE.RepeatWrapping;
+        t.repeat.set(repeatX, repeatY);
+        t.anisotropy = 4;
+      },
+      undefined,
+      () => console.warn("Missing texture:", path)
+    );
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  },
 
-    const floorMat = matStandard({
-      mapFile: Textures?.MARBLE_GOLD_FLOOR || "Marblegold floors.jpg",
-      color: 0xffffff,
-      roughness: 0.85,
-      metalness: 0.08,
+  matWithTex(file, fallbackColor, repeatX = 2, repeatY = 2, roughness = 0.95, metalness = 0.05) {
+    const tex = this.safeTex(file, repeatX, repeatY);
+    return new THREE.MeshStandardMaterial({
+      map: tex,
+      color: fallbackColor,
+      roughness,
+      metalness
     });
+  },
 
-    // Floor at y=0
+  buildRoomBig() {
+    // You asked: walls twice as big + room bigger
+    const W = 26;
+    const H = 11.5; // taller
+    const D = 36;
+
+    // Floor texture
+    const floorMat = this.matWithTex("Marblegold floors.jpg", 0xffffff, 6, 6, 0.9, 0.08);
+
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), floorMat);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.set(0, 0, -4);
-    floor.receiveShadow = false;
+    floor.position.set(0, 0, -8);
     floor.name = "Floor";
     this.env.add(floor);
 
-    const wallMat = matStandard({
-      mapFile: Textures?.BRICKWALL || "brickwall.jpg",
-      color: 0xffffff,
-      roughness: 0.95,
-    });
-
-    const wallMatAlt = matStandard({
-      mapFile: Textures?.WALL_RUNES || "wall_stone_runes.jpg",
-      color: 0xffffff,
-      roughness: 0.95,
-    });
-
     // Walls
-    const wallGeo = new THREE.PlaneGeometry(W, H);
+    const wallMatA = this.matWithTex("brickwall.jpg", 0xffffff, 4, 2, 0.98, 0.02);
+    const wallMatB = this.matWithTex("wall_stone_runes.jpg", 0xffffff, 3, 2, 0.98, 0.02);
 
-    const back = new THREE.Mesh(wallGeo, wallMat);
-    back.position.set(0, H / 2, -4 - D / 2);
-    back.name = "WallBack";
+    const back = new THREE.Mesh(new THREE.PlaneGeometry(W, H), wallMatA);
+    back.position.set(0, H / 2, -8 - D / 2);
     this.env.add(back);
 
-    const front = new THREE.Mesh(wallGeo, wallMatAlt);
+    const front = new THREE.Mesh(new THREE.PlaneGeometry(W, H), wallMatB);
     front.rotation.y = Math.PI;
-    front.position.set(0, H / 2, -4 + D / 2);
-    front.name = "WallFront";
+    front.position.set(0, H / 2, -8 + D / 2);
     this.env.add(front);
 
     const sideGeo = new THREE.PlaneGeometry(D, H);
 
-    const left = new THREE.Mesh(sideGeo, wallMat);
+    const left = new THREE.Mesh(sideGeo, wallMatA);
     left.rotation.y = Math.PI / 2;
-    left.position.set(-W / 2, H / 2, -4);
-    left.name = "WallLeft";
+    left.position.set(-W / 2, H / 2, -8);
     this.env.add(left);
 
-    const right = new THREE.Mesh(sideGeo, wallMatAlt);
+    const right = new THREE.Mesh(sideGeo, wallMatB);
     right.rotation.y = -Math.PI / 2;
-    right.position.set(W / 2, H / 2, -4);
-    right.name = "WallRight";
+    right.position.set(W / 2, H / 2, -8);
     this.env.add(right);
 
-    // Gold trim around bottom walls
+    // Gold trim near floor
     const trimMat = new THREE.MeshStandardMaterial({
       color: 0xffd27a,
       emissive: 0x332200,
       emissiveIntensity: 0.25,
-      roughness: 0.35,
-      metalness: 0.55,
+      roughness: 0.32,
+      metalness: 0.6
     });
 
-    const trimH = 0.18;
-    const trimT = 0.10;
+    const trimH = 0.22;
+    const trimT = 0.12;
 
     const trimBack = new THREE.Mesh(new THREE.BoxGeometry(W, trimH, trimT), trimMat);
-    trimBack.position.set(0, trimH / 2, -4 - D / 2 + 0.05);
+    trimBack.position.set(0, trimH / 2, -8 - D / 2 + 0.06);
     this.env.add(trimBack);
 
     const trimFront = new THREE.Mesh(new THREE.BoxGeometry(W, trimH, trimT), trimMat);
-    trimFront.position.set(0, trimH / 2, -4 + D / 2 - 0.05);
+    trimFront.position.set(0, trimH / 2, -8 + D / 2 - 0.06);
     this.env.add(trimFront);
 
     const trimLeft = new THREE.Mesh(new THREE.BoxGeometry(trimT, trimH, D), trimMat);
-    trimLeft.position.set(-W / 2 + 0.05, trimH / 2, -4);
+    trimLeft.position.set(-W / 2 + 0.06, trimH / 2, -8);
     this.env.add(trimLeft);
 
     const trimRight = new THREE.Mesh(new THREE.BoxGeometry(trimT, trimH, D), trimMat);
-    trimRight.position.set(W / 2 - 0.05, trimH / 2, -4);
+    trimRight.position.set(W / 2 - 0.06, trimH / 2, -8);
     this.env.add(trimRight);
 
-    // Pillars on corners
+    // Corner pillars
     const pillarMat = new THREE.MeshStandardMaterial({
-      color: 0x111111,
+      color: 0x141416,
       roughness: 0.55,
-      metalness: 0.3,
-      emissive: 0x000000,
+      metalness: 0.25
     });
 
-    const pillarGeo = new THREE.CylinderGeometry(0.18, 0.24, H, 18);
-
+    const pillarGeo = new THREE.CylinderGeometry(0.25, 0.32, H, 18);
     const corners = [
-      new THREE.Vector3(-W / 2 + 0.3, H / 2, -4 - D / 2 + 0.3),
-      new THREE.Vector3(W / 2 - 0.3, H / 2, -4 - D / 2 + 0.3),
-      new THREE.Vector3(-W / 2 + 0.3, H / 2, -4 + D / 2 - 0.3),
-      new THREE.Vector3(W / 2 - 0.3, H / 2, -4 + D / 2 - 0.3),
+      new THREE.Vector3(-W / 2 + 0.35, H / 2, -8 - D / 2 + 0.35),
+      new THREE.Vector3( W / 2 - 0.35, H / 2, -8 - D / 2 + 0.35),
+      new THREE.Vector3(-W / 2 + 0.35, H / 2, -8 + D / 2 - 0.35),
+      new THREE.Vector3( W / 2 - 0.35, H / 2, -8 + D / 2 - 0.35),
     ];
 
     corners.forEach((p) => {
@@ -227,58 +198,94 @@ export const World = {
       pil.position.copy(p);
       this.env.add(pil);
 
-      const cap = new THREE.PointLight(0xffd27a, 0.25, 6);
-      cap.position.set(p.x, H - 0.25, p.z);
+      const cap = new THREE.PointLight(0xffd27a, 0.35, 10);
+      cap.position.set(p.x, H - 0.35, p.z);
       this.env.add(cap);
     });
 
-    // Casino art on walls (bright + glow)
-    const artMat = matStandard({
-      mapFile: Textures?.CASINO_ART || "casino_art.jpg",
-      color: 0xffffff,
-      roughness: 1.0,
-    });
+    // Back-wall leaderboard (high)
+    this.buildLeaderboard(new THREE.Vector3(0, 7.8, -8 - D / 2 + 0.09));
+  },
 
-    const art = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 2.3), artMat);
-    art.position.set(0, 2.9, -4 - D / 2 + 0.06);
-    this.env.add(art);
+  buildLeaderboard(pos) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1024;
+    canvas.height = 512;
+    const ctx = canvas.getContext("2d");
 
-    const artGlow = new THREE.PointLight(0x66bbff, 0.35, 10);
-    artGlow.position.set(0, 2.9, -4 - D / 2 + 1.2);
-    this.env.add(artGlow);
+    // render function
+    const paint = (lines) => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // NOTE: collision is enforced by clamping movement in main.js bounds,
-    // (simple + stable). If you want physical collision later, we can add it in 9.1.
+      // glassy black
+      ctx.fillStyle = "rgba(0,0,0,0.62)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // border
+      ctx.strokeStyle = "rgba(255,210,122,0.85)";
+      ctx.lineWidth = 12;
+      ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
+
+      // title
+      ctx.font = "bold 64px Arial";
+      ctx.fillStyle = "#ffd27a";
+      ctx.fillText("Skylark Boss Leaderboard", 50, 90);
+
+      // lines
+      ctx.font = "bold 54px Arial";
+      const colors = ["#00ffaa", "#2bd7ff", "#ff2bd6", "#ffffff", "#ffffff"];
+      lines.forEach((t, i) => {
+        ctx.fillStyle = colors[i] || "#ffffff";
+        ctx.fillText(t, 70, 170 + i * 70);
+      });
+    };
+
+    paint([
+      "1) King of Spades — $20000",
+      "2) Queen of Spades — $20000",
+      "3) Jack of Spades — $20000",
+      "4) Ace of Spades — $20000",
+    ]);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+
+    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+    const board = new THREE.Mesh(new THREE.PlaneGeometry(8.2, 4.0), mat);
+    board.position.copy(pos);
+
+    this.env.add(board);
+
+    // store so poker sim can update it
+    this._leaderboard = { board, canvas, ctx, tex, paint };
   },
 
   buildTeleportMachine() {
-    // Teleport machine must be where you spawn
-    const padCenter = new THREE.Vector3(0, 0, 3.6);
+    const padCenter = new THREE.Vector3(0, 0, 7.0);
 
     const g = new THREE.Group();
-    g.name = "TeleportMachine";
     g.position.copy(padCenter);
 
     const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.55, 0.65, 0.12, 28),
+      new THREE.CylinderGeometry(0.65, 0.78, 0.14, 28),
       new THREE.MeshStandardMaterial({ color: 0x101018, roughness: 0.9 })
     );
-    base.position.y = 0.06;
+    base.position.y = 0.07;
 
     const glow = new THREE.Mesh(
-      new THREE.TorusGeometry(0.48, 0.04, 12, 48),
+      new THREE.TorusGeometry(0.56, 0.05, 12, 56),
       new THREE.MeshStandardMaterial({
         color: 0x00ffaa,
         emissive: 0x00ffaa,
-        emissiveIntensity: 2.2,
-        roughness: 0.35,
+        emissiveIntensity: 2.4,
+        roughness: 0.35
       })
     );
     glow.rotation.x = Math.PI / 2;
-    glow.position.y = 0.12;
+    glow.position.y = 0.14;
 
-    const beacon = new THREE.PointLight(0x00ffaa, 0.7, 12);
-    beacon.position.set(0, 1.6, 0);
+    const beacon = new THREE.PointLight(0x00ffaa, 0.9, 14);
+    beacon.position.set(0, 1.8, 0);
 
     g.add(base, glow, beacon);
     this.env.add(g);
@@ -286,39 +293,28 @@ export const World = {
     this.spawnPad = g;
   },
 
-  async buildRails() {
-    // If spectator_rail.js exists, use it. If not, do a stable fallback rail.
-    try {
-      const mod = await import("./spectator_rail.js");
-      if (mod?.SpectatorRail?.build) {
-        // Put rail around poker area
-        mod.SpectatorRail.build(this.scene, this.roomCenter, 4.9, { postCount: 26 });
-        return;
-      }
-    } catch (e) {
-      // fallback below
-    }
-
-    // Fallback: low poly rail ring
+  buildRailsFallback() {
+    // Centerpiece rail around main table area
     const ring = new THREE.Group();
-    ring.name = "FallbackRail";
+    ring.name = "Rail";
 
-    const r = 5.0;
-    const posts = 28;
-    const postMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8, metalness: 0.25 });
-    const barMat = new THREE.MeshStandardMaterial({ color: 0xffd27a, roughness: 0.35, metalness: 0.55 });
+    const r = 6.5;
+    const posts = 30;
+
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x151518, roughness: 0.8, metalness: 0.25 });
+    const barMat = new THREE.MeshStandardMaterial({ color: 0xffd27a, roughness: 0.35, metalness: 0.6 });
 
     for (let i = 0; i < posts; i++) {
       const a = (i / posts) * Math.PI * 2;
       const x = this.roomCenter.x + Math.cos(a) * r;
       const z = this.roomCenter.z + Math.sin(a) * r;
 
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 1.1, 10), postMat);
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.075, 1.1, 10), postMat);
       post.position.set(x, 0.55, z);
       ring.add(post);
     }
 
-    const bar = new THREE.Mesh(new THREE.TorusGeometry(r, 0.035, 12, 90), barMat);
+    const bar = new THREE.Mesh(new THREE.TorusGeometry(r, 0.045, 12, 90), barMat);
     bar.rotation.x = Math.PI / 2;
     bar.position.set(this.roomCenter.x, 1.05, this.roomCenter.z);
     ring.add(bar);
@@ -326,44 +322,92 @@ export const World = {
     this.env.add(ring);
   },
 
-  async buildPokerSimOneTable() {
-    // Your poker_simulation.js already exists. Use it as the ONE table source.
+  buildDecor() {
+    // Art frames (bright)
+    const artMat = new THREE.MeshStandardMaterial({
+      map: this.safeTex("casino_art.jpg", 1, 1),
+      color: 0xffffff,
+      roughness: 1.0
+    });
+
+    const frameMat = new THREE.MeshStandardMaterial({
+      color: 0xffd27a, roughness: 0.35, metalness: 0.55
+    });
+
+    const makeFrame = (x, y, z, rotY = 0) => {
+      const group = new THREE.Group();
+      const art = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 2.6), artMat);
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(4.75, 2.75, 0.08), frameMat);
+      frame.position.z = -0.03;
+
+      group.add(frame, art);
+      group.position.set(x, y, z);
+      group.rotation.y = rotY;
+
+      const glow = new THREE.PointLight(0x66bbff, 0.5, 10);
+      glow.position.set(0, 0, 1.2);
+      group.add(glow);
+
+      this.env.add(group);
+    };
+
+    // two frames along side walls
+    makeFrame(-12.9 + 0.15, 4.2, -12, Math.PI / 2);
+    makeFrame( 12.9 - 0.15, 4.2, -12, -Math.PI / 2);
+
+    // Plants (low poly)
+    const plant = (x, z) => {
+      const g = new THREE.Group();
+
+      const pot = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.25, 0.3, 0.35, 14),
+        new THREE.MeshStandardMaterial({ color: 0x2a1b14, roughness: 0.9 })
+      );
+      pot.position.y = 0.175;
+
+      const bush = new THREE.Mesh(
+        new THREE.SphereGeometry(0.42, 12, 12),
+        new THREE.MeshStandardMaterial({ color: 0x1f6f3a, roughness: 0.95 })
+      );
+      bush.position.y = 0.75;
+
+      g.add(pot, bush);
+      g.position.set(x, 0, z);
+      this.env.add(g);
+    };
+
+    plant(-9, -4);
+    plant( 9, -4);
+    plant(-9, -18);
+    plant( 9, -18);
+  },
+
+  async buildPokerSim() {
     try {
       const mod = await import("./poker_simulation.js");
       const PokerSimulation = mod.PokerSimulation;
 
-      // Create sim instance with camera for facing billboards
       this.sim = new PokerSimulation({
         camera: this.camera,
         tableCenter: this.roomCenter.clone(),
+        spectatorOnly: true,
         onLeaderboard: (lines) => {
-          // If you have a leaderboard module later, hook it here.
-          // For now, we just log to console.
-          // console.log(lines.join("\n"));
-        },
+          // Update our wall leaderboard
+          if (this._leaderboard) {
+            this._leaderboard.paint(lines);
+            this._leaderboard.tex.needsUpdate = true;
+          }
+        }
       });
 
-      // IMPORTANT: build adds its tableGroup + uiGroup once
       await this.sim.build(this.scene);
 
-      return;
     } catch (e) {
-      console.warn("PokerSimulation could not load, using placeholder table.", e);
+      console.warn("PokerSimulation failed to load:", e);
     }
-
-    // Fallback placeholder (won't crash)
-    const table = new THREE.Mesh(
-      new THREE.CylinderGeometry(3.0, 3.15, 0.22, 48),
-      new THREE.MeshStandardMaterial({ color: 0x145c3a, roughness: 0.95 })
-    );
-    table.position.set(this.roomCenter.x, 1.05, this.roomCenter.z);
-    this.env.add(table);
   },
 
   update(dt) {
-    // keep sim running
-    if (this.sim && typeof this.sim.update === "function") {
-      this.sim.update(dt);
-    }
-  },
+    if (this.sim?.update) this.sim.update(dt);
+  }
 };

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Scarlett Poker VR</title>
+  <style>
+    html,body{margin:0;height:100%;background:#000;overflow:hidden}
+    #overlay{
+      position:fixed; inset:0;
+      padding:14px;
+      color:#00ff66;
+      font-family:ui-monospace, Menlo, Consolas, monospace;
+      white-space:pre-wrap;
+      line-height:1.35;
+      font-size:13px;
+      pointer-events:none;
+      background: radial-gradient(1200px 700px at 50% 0%, rgba(0,255,102,.08), rgba(0,0,0,0));
+      text-shadow: 0 0 10px rgba(0,255,102,.15);
+    }
+    #hud{
+      position:fixed; left:10px; top:10px;
+      display:flex; gap:10px; align-items:center;
+      pointer-events:auto;
+    }
+    .btn{
+      background:#101010cc;
+      border:1px solid #00ff66aa;
+      color:#00ff66;
+      padding:10px 12px;
+      border-radius:12px;
+      font-family:ui-monospace, Menlo, Consolas, monospace;
+      font-size:13px;
+      cursor:pointer;
+    }
+    .btn:active{transform:scale(.98)}
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <button class="btn" id="reloadBtn">Reload + CacheBust</button>
+  </div>
+  <pre id="overlay">Scarlett Poker VR — booting…</pre>
+
+  <script type="module">
+    const overlay = document.getElementById("overlay");
+    const log = (t) => overlay.textContent += "\n" + t;
+
+    // Cache-bust reload button
+    document.getElementById("reloadBtn").onclick = () => {
+      const u = new URL(location.href);
+      u.searchParams.set("v", String(Date.now()));
+      location.href = u.toString();
+    };
+
+    // Hard error capture
+    window.addEventListener("error", (e) => {
+      log("❌ window.error: " + (e?.message || e));
+    });
+    window.addEventListener("unhandledrejection", (e) => {
+      log("❌ unhandledrejection: " + (e?.reason?.message || e?.reason || e));
+    });
+
+    // Load main.js with same cache-bust parameter
+    const v = new URL(location.href).searchParams.get("v") || String(Date.now());
+    log("ℹ️ v=" + v);
+    log("…loading /js/main.js");
+
+    try{
+      await import(`./js/main.js?v=${v}`);
+      log("✅ main.js imported");
+    }catch(err){
+      log("❌ main.js failed");
+      log(String(err?.stack || err));
+      log("");
+      log("If this says 404, your file path/case is wrong.");
+      log("Check: /js/main.js exists (lowercase js, lowercase main.js).");
+    }
+  </script>
+</body>
+</html>

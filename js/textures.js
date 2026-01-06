@@ -1,111 +1,55 @@
-// js/textures.js — TextureBank (GitHub-safe, fallback colors)
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+// /js/textures.js — Skylark Poker VR
+// Centralized texture registry + safe loader
+// GitHub Pages friendly (relative paths only)
 
+import * as THREE from "./three.js";
+
+const loader = new THREE.TextureLoader();
+
+function load(file, repeatX = 1, repeatY = 1) {
+  const tex = loader.load(`assets/textures/${file}`);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeatX, repeatY);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/**
+ * TEXTURE REGISTRY
+ * Use these names everywhere else
+ */
+export const Textures = {
+  FLOOR_MARBLE: load("Marblegold floors.jpg", 4, 4),
+  WALL_BRICK: load("brickwall.jpg", 6, 3),
+  WALL_ART: load("casino_art.jpg", 2, 1),
+  CEILING: load("ceiling_dome_main.jpg", 1, 1),
+
+  TABLE_FELT: load("table_felt_green.jpg", 1, 1),
+  TABLE_LEATHER: load("Table leather trim.jpg", 1, 1),
+
+  CHIP_1000: load("chip_1000.jpg"),
+  CHIP_5000: load("chip_5000.jpg"),
+  CHIP_10000: load("chip_10000.jpg"),
+
+  TELEPORT_GLOW: load("Teleport glow.jpg"),
+  CROWN: load("Crown.jpg"),
+
+  UI_WINNER: load("ui_winner_hologram.jpg"),
+  BRAND_LOGO: load("brand_logo.jpg")
+};
+
+/**
+ * MATERIAL FACTORY
+ */
 export const TextureBank = {
-  loader: new THREE.TextureLoader(),
-  cache: new Map(),
-
-  /**
-   * Returns a MeshStandardMaterial:
-   * - tries to load texture from assets/textures/<file>
-   * - if it fails, uses fallback color
-   */
-  matFromTexture(file, fallbackColor = 0x777777, opts = {}) {
-    const key = `TEX:${file}`;
-    if (this.cache.has(key)) return this.cache.get(key);
-
-    const {
-      repeatX = 1,
-      repeatY = 1,
-      roughness = 0.9,
-      metalness = 0.05,
-      emissive = 0x000000,
-      emissiveIntensity = 0.0
-    } = opts;
-
-    const mat = new THREE.MeshStandardMaterial({
-      color: fallbackColor,
-      roughness,
-      metalness,
-      emissive,
-      emissiveIntensity
+  standard(opts = {}) {
+    return new THREE.MeshStandardMaterial({
+      map: opts.map || null,
+      color: opts.color ?? 0xffffff,
+      roughness: opts.roughness ?? 0.9,
+      metalness: opts.metalness ?? 0.05,
+      emissive: opts.emissive ?? 0x000000,
+      emissiveIntensity: opts.emissiveIntensity ?? 0
     });
-
-    const path = `assets/textures/${file}`;
-
-    try {
-      const tex = this.loader.load(
-        path,
-        (t) => {
-          t.colorSpace = THREE.SRGBColorSpace;
-          t.wrapS = t.wrapT = THREE.RepeatWrapping;
-          t.repeat.set(repeatX, repeatY);
-          mat.map = t;
-          mat.color.set(0xffffff);
-          mat.needsUpdate = true;
-        },
-        undefined,
-        () => {
-          // Missing texture = stay fallback color
-          console.warn("Missing texture:", path);
-        }
-      );
-      // keep reference so GC doesn't drop it
-      mat.userData._tex = tex;
-    } catch (e) {
-      console.warn("Texture load failed:", path, e);
-    }
-
-    this.cache.set(key, mat);
-    return mat;
-  },
-
-  /**
-   * Loads an image as a map from any path (like assets/chips/event_chip.png)
-   */
-  matFromImage(path, fallbackColor = 0xaaaaaa, opts = {}) {
-    const key = `IMG:${path}`;
-    if (this.cache.has(key)) return this.cache.get(key);
-
-    const {
-      roughness = 0.55,
-      metalness = 0.15,
-      transparent = true,
-      alphaTest = 0.02,
-      emissive = 0x000000,
-      emissiveIntensity = 0.0
-    } = opts;
-
-    const mat = new THREE.MeshStandardMaterial({
-      color: fallbackColor,
-      roughness,
-      metalness,
-      transparent,
-      alphaTest,
-      emissive,
-      emissiveIntensity
-    });
-
-    try {
-      const tex = this.loader.load(
-        path,
-        (t) => {
-          t.colorSpace = THREE.SRGBColorSpace;
-          mat.map = t;
-          mat.color.set(0xffffff);
-          mat.needsUpdate = true;
-        },
-        undefined,
-        () => {
-          console.warn("Missing image:", path);
-        }
-      );
-      mat.userData._tex = tex;
-    } catch (e) {
-      console.warn("Image load failed:", path, e);
-    }
-
-    this.cache.set(key, mat);
-    return mat;
   }
 };

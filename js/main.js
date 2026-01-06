@@ -1,5 +1,5 @@
-// js/main.js — Scarlett Poker VR — Stable movement + snap + laser + teleport
-// Uses dedicated vrcontroller.js to stop "laser stuck at center".
+// js/main.js — Scarlett Poker VR — WebXR-frame driven laser (never stuck at center)
+// GitHub Pages safe. Uses vrcontroller.js for ray pose.
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -33,15 +33,16 @@ document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 ok("VRButton added");
 
-// Player rig (move this)
+// Player rig
 const rig = new THREE.Group();
 rig.add(camera);
 scene.add(rig);
 
-// Spawn away from table center
+// Spawn away from origin/center
 rig.position.set(0, 0, 10);
+ok("Spawn set");
 
-// ---------- Lighting (prevent black void) ----------
+// ---------- Lighting ----------
 scene.add(new THREE.AmbientLight(0xffffff, 0.45));
 scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.15));
 
@@ -53,7 +54,7 @@ const headlamp = new THREE.PointLight(0xffffff, 2.4, 70);
 camera.add(headlamp);
 ok("Lights ready");
 
-// ---------- World (simple stable base) ----------
+// ---------- Simple world ----------
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(40, 40),
   new THREE.MeshStandardMaterial({ color: 0x2d2f35, roughness: 0.98, metalness: 0.0 })
@@ -65,28 +66,27 @@ const grid = new THREE.GridHelper(40, 40, 0x00ff66, 0x1b2636);
 grid.position.y = 0.02;
 scene.add(grid);
 
-// Minimal table marker so you see orientation (optional)
+// Marker for center table (optional)
 const tableMarker = new THREE.Mesh(
   new THREE.CylinderGeometry(2.35, 2.35, 0.10, 48),
   new THREE.MeshStandardMaterial({ color: 0x0b3a2a, roughness: 0.9 })
 );
 tableMarker.position.set(0, 0.95, 0);
 scene.add(tableMarker);
-ok("World base ready");
 
-// ---------- VR Controller Manager ----------
-VRController.init({ renderer, scene, camera, hub });
-ok("VRController initialized");
+// ---------- VRController (XRFrame pose) ----------
+VRController.init({ renderer, camera, hub });
+ok("VRController ready");
 
-// ---------- Laser beam (world-followed, NOT parented) ----------
+// ---------- Beam (world-space, follows XRFrame pose) ----------
 function makeBeam() {
   const geo = new THREE.CylinderGeometry(0.006, 0.010, 1.2, 10, 1, true);
   const mat = new THREE.MeshStandardMaterial({
     color: 0x00ff66,
     emissive: 0x00ff66,
-    emissiveIntensity: 2.6,
+    emissiveIntensity: 2.8,
     transparent: true,
-    opacity: 0.9,
+    opacity: 0.92,
     depthTest: false,
     depthWrite: false,
     roughness: 0.1,
@@ -94,15 +94,14 @@ function makeBeam() {
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.renderOrder = 9999;
-  // orient along -Z
-  mesh.rotation.x = Math.PI / 2;
+  mesh.rotation.x = Math.PI / 2; // align with -Z
   return mesh;
 }
 
 const beam = makeBeam();
 scene.add(beam);
 
-// Teleport marker (disc + ring)
+// Teleport marker
 const tpDisc = new THREE.Mesh(
   new THREE.CircleGeometry(0.28, 44),
   new THREE.MeshBasicMaterial({ color: 0x00ff66, transparent: true, opacity: 0.85, depthTest: false, depthWrite: false })
@@ -119,20 +118,20 @@ tpRing.rotation.x = -Math.PI / 2;
 tpRing.renderOrder = 9999;
 scene.add(tpRing);
 
-// ---------- Raycast to floor ----------
+// ---------- Raycast ----------
 const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const raycaster = new THREE.Raycaster();
-const tmpRot = new THREE.Matrix4();
 const origin = new THREE.Vector3();
-const direction = new THREE.Vector3();
+const dir = new THREE.Vector3();
 const hit = new THREE.Vector3();
+const q = new THREE.Quaternion();
 
 function clampToRoom(v) {
   v.x = THREE.MathUtils.clamp(v.x, -15.5, 15.5);
   v.z = THREE.MathUtils.clamp(v.z, -15.5, 15.5);
 }
 
-// ---------- Inputs ----------
+// ---------- Input helpers ----------
 const snapAngle = Math.PI / 4;
 let snapCD = 0;
 const moveSpeed = 2.25;
@@ -182,12 +181,12 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min(0.05, (now - lastT) / 1000);
   lastT = now;
 
-  // Update controller resolver (prevents “center stuck”)
+  // Update XRFrame pose (this is the fix)
   VRController.update();
 
   const { left, right } = getGamepads();
 
-  // Move (left stick) — FIXED strafe inversion (left is left, right is right)
+  // Movement (left stick) with corrected strafe inversion
   if (left) {
     const { x, y } = readAxes(left);
     const dead = 0.14;
@@ -195,7 +194,7 @@ renderer.setAnimationLoop(() => {
     let mx = Math.abs(x) < dead ? 0 : x;
     let my = Math.abs(y) < dead ? 0 : y;
 
-    // Your device reports reversed strafe, so invert:
+    // Fix: your strafe was reversed
     mx = -mx;
 
     if (mx || my) {
@@ -226,38 +225,29 @@ renderer.setAnimationLoop(() => {
     }
   }
 
-  // Laser + teleport ray always come from resolved RaySpace (right controller if valid)
-  const srcObj = VRController.getRaySpace();
-  srcObj.updateMatrixWorld(true);
+  // Ray origin/direction from XRFrame pose
+  VRController.getRayOrigin(origin);
+  VRController.getRayDirection(dir);
+  VRController.getQuat(q);
 
-  // World origin of ray
-  origin.setFromMatrixPosition(srcObj.matrixWorld);
+  // Beam follows pose (world space)
+  beam.quaternion.copy(q);
 
-  // Forward direction (-Z in controller space)
-  tmpRot.identity().extractRotation(srcObj.matrixWorld);
-  direction.set(0, 0, -1).applyMatrix4(tmpRot).normalize();
-
-  // Draw beam in world so it NEVER gets “stuck”
-  // Place beam in front of controller tip
+  // Put beam forward from controller so it doesn't sit inside your body
   beam.position.copy(origin);
-  beam.quaternion.setFromRotationMatrix(tmpRot);
-
-  // Tip offset forward so it starts at your hand, not center
-  const tip = new THREE.Vector3(0, 0, -0.08).applyQuaternion(beam.quaternion);
-  const push = new THREE.Vector3(0, 0, -0.60).applyQuaternion(beam.quaternion);
+  const tip = new THREE.Vector3(0, 0, -0.08).applyQuaternion(q);
+  const push = new THREE.Vector3(0, 0, -0.60).applyQuaternion(q);
   beam.position.add(tip).add(push);
 
-  // Raycast to floor and place teleport marker
-  raycaster.set(origin, direction);
-  const ray = raycaster.ray;
-  const hitPoint = ray.intersectPlane(floorPlane, hit);
+  // Raycast to floor
+  raycaster.set(origin, dir);
+  const hitPoint = raycaster.ray.intersectPlane(floorPlane, hit);
 
   if (hitPoint) {
     clampToRoom(hit);
     tpDisc.position.set(hit.x, 0.02, hit.z);
     tpRing.position.copy(tpDisc.position);
   } else {
-    // keep marker near you if no hit
     tpDisc.position.set(rig.position.x, 0.02, rig.position.z);
     tpRing.position.copy(tpDisc.position);
   }
@@ -283,4 +273,4 @@ addEventListener("resize", () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-ok("Running (vrcontroller.js active)");
+ok("Running (XRFrame laser)");

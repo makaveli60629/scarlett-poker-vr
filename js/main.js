@@ -1,5 +1,5 @@
-// /js/main.js — Scarlett Poker VR — BLACK-VOID KILLER (Quest/GitHub Safe)
-// Guarantees: visible sky + floor (even if lights fail), headlamp light, VR entry, stick move, snap turn, trigger teleport.
+// /js/main.js — Scarlett Poker VR — PERMA SAFE (GitHub/Quest)
+// Fixes: teleport-to-void, missing floor, missing VR button, rescue spawn.
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
@@ -12,10 +12,14 @@ try {
 const overlay = document.getElementById("overlay");
 const enterVrBtn = document.getElementById("enterVrBtn");
 
-const log = (s) => { overlay.textContent += `\n${s}`; console.log(s); };
-const ok  = (s) => log(`✅ ${s}`);
-const warn= (s) => log(`⚠️ ${s}`);
-const fail= (s) => log(`❌ ${s}`);
+function logLine(prefix, s){
+  const line = `${prefix} ${s}`;
+  overlay.textContent += `\n${line}`;
+  console.log(line);
+}
+const ok = (s)=>logLine("✅", s);
+const warn=(s)=>logLine("⚠️", s);
+const fail=(s)=>logLine("❌", s);
 
 overlay.textContent = "Scarlett Poker VR — booting…";
 
@@ -23,9 +27,9 @@ overlay.textContent = "Scarlett Poker VR — booting…";
 // Scene / Camera / Renderer
 // --------------------
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x07090d);
+scene.background = new THREE.Color(0x05070b);
 
-const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 1200);
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 2000);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
@@ -33,133 +37,96 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 3.0; // brighter
+renderer.toneMappingExposure = 2.4;
 document.body.appendChild(renderer.domElement);
-
 ok("Renderer ready");
+
 try { renderer.xr.setReferenceSpaceType("local-floor"); ok("Reference space: local-floor"); }
 catch { warn("Reference space set failed (ok)"); }
 
 // --------------------
-// Player Rig (move this)
+// Player Rig
 // --------------------
 const playerRig = new THREE.Group();
 playerRig.add(camera);
 scene.add(playerRig);
 
-// Height lock feel: raise rig so sitting feels taller
-// (local-floor already sets your floor; this is a consistent offset)
-playerRig.position.y = 0.35;
+// Height “lock feel” (small consistent lift)
+playerRig.position.y = 0.25;
 
 // World root
 const worldRoot = new THREE.Group();
 scene.add(worldRoot);
 
 // --------------------
-// SKY DOME (MeshBasic = visible no matter what)
+// Unbreakable SKY + FLOOR (MeshBasic = never black)
 // --------------------
 const sky = new THREE.Mesh(
-  new THREE.SphereGeometry(500, 24, 16),
-  new THREE.MeshBasicMaterial({ color: 0x0a0f18, side: THREE.BackSide })
+  new THREE.SphereGeometry(600, 24, 16),
+  new THREE.MeshBasicMaterial({ color: 0x0b1220, side: THREE.BackSide })
 );
 worldRoot.add(sky);
-ok("Sky dome added (cannot be black)");
 
-// --------------------
-// Headlamp (attached to camera so you ALWAYS see the room)
-// --------------------
-const headlamp = new THREE.PointLight(0xffffff, 4.0, 40);
-headlamp.position.set(0, 0, 0);
-camera.add(headlamp);
-
-const headFill = new THREE.SpotLight(0xffffff, 5.0, 55, Math.PI / 4, 0.4, 1.0);
-headFill.position.set(0, 0.1, 0.05);
-headFill.target.position.set(0, 0, -1);
-camera.add(headFill);
-camera.add(headFill.target);
-
-ok("Headlamp + spotlight added");
-
-// --------------------
-// Global lights (helps, but sky+headlamp already guarantee visibility)
-// --------------------
-worldRoot.add(new THREE.AmbientLight(0xffffff, 0.8));
-worldRoot.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.2));
-
-const sun = new THREE.DirectionalLight(0xffffff, 2.0);
-sun.position.set(15, 25, 10);
-worldRoot.add(sun);
-
-ok("Global lighting added");
-
-// --------------------
-// ALWAYS visible marker (the lime square you saw)
-// --------------------
-const marker = new THREE.Mesh(
-  new THREE.BoxGeometry(0.4, 0.4, 0.4),
-  new THREE.MeshStandardMaterial({ color: 0x00ff66, emissive: 0x00ff66, emissiveIntensity: 0.6 })
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(80, 80),
+  new THREE.MeshBasicMaterial({ color: 0x2b2f38 })
 );
-marker.position.set(0, 1.4, -1.8);
-worldRoot.add(marker);
-ok("Marker added");
-
-// --------------------
-// Floor (emissive so it never goes black)
-// --------------------
-const floorMat = new THREE.MeshStandardMaterial({
-  color: 0x6e7682,
-  roughness: 0.9,
-  metalness: 0.05,
-  emissive: 0x111111,
-  emissiveIntensity: 1.25
-});
-const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), floorMat);
 floor.rotation.x = -Math.PI / 2;
-floor.position.y = 0.0;
+floor.position.y = 0;
 floor.userData.isFloor = true;
 worldRoot.add(floor);
 
-// Grid sits slightly above to prevent blinking
-const grid = new THREE.GridHelper(60, 60, 0x00ff66, 0x223344);
-grid.position.y = 0.015;
+// Safety platform (so even if world floor is missed, you still see something)
+const safety = new THREE.Mesh(
+  new THREE.CircleGeometry(3.5, 48),
+  new THREE.MeshBasicMaterial({ color: 0x10141c })
+);
+safety.rotation.x = -Math.PI/2;
+safety.position.set(0, 0.01, 8);
+worldRoot.add(safety);
+
+// Grid slightly above floor (prevents blinking/z-fight)
+const grid = new THREE.GridHelper(80, 80, 0x00ff66, 0x1f2a3a);
+grid.position.y = 0.02;
 worldRoot.add(grid);
 
-ok("Bright floor + grid added");
+ok("Sky + floor + grid added (cannot be black)");
 
 // --------------------
-// Simple walls (visible now thanks to headlamp)
+// Helpful lights (not required now, but nice)
 // --------------------
-const wallMat = new THREE.MeshStandardMaterial({
-  color: 0x1b2028,
-  roughness: 0.95,
-  metalness: 0.02,
-  emissive: 0x050607,
-  emissiveIntensity: 0.2
-});
-const H = 10, W = 40, D = 40;
+worldRoot.add(new THREE.AmbientLight(0xffffff, 0.4));
+worldRoot.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.7));
 
-function wallPlane(w, h, x, y, z, ry) {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat);
-  m.position.set(x, y, z);
-  m.rotation.y = ry;
-  worldRoot.add(m);
-}
-wallPlane(W, H, 0, H/2, -D/2, 0);
-wallPlane(W, H, 0, H/2,  D/2, Math.PI);
-wallPlane(D, H,  W/2, H/2, 0, -Math.PI/2);
-wallPlane(D, H, -W/2, H/2, 0,  Math.PI/2);
+const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+sun.position.set(15, 25, 10);
+worldRoot.add(sun);
 
-ok("Walls added");
+// Headlamp to camera (helps your table/chairs)
+const headlamp = new THREE.PointLight(0xffffff, 2.0, 40);
+camera.add(headlamp);
+ok("Lighting added");
 
 // --------------------
-// Spawn: ALWAYS away from the table area
+// Marker cube (debug)
 // --------------------
-playerRig.position.x = 0;
-playerRig.position.z = 8;
-ok("Spawn set (safe)");
+const marker = new THREE.Mesh(
+  new THREE.BoxGeometry(0.35, 0.35, 0.35),
+  new THREE.MeshStandardMaterial({ color: 0x00ff66, emissive: 0x00ff66, emissiveIntensity: 0.7 })
+);
+marker.position.set(0, 1.35, 6.8);
+worldRoot.add(marker);
 
 // --------------------
-// VR buttons (keep BOTH)
+// SAFE SPAWN (telepad area)
+// --------------------
+const SAFE_SPAWN = new THREE.Vector3(0, 0, 8);
+playerRig.position.x = SAFE_SPAWN.x;
+playerRig.position.z = SAFE_SPAWN.z;
+ok("Spawn set to safe pad zone");
+
+// --------------------
+// VR Buttons (ALWAYS keep both)
 // --------------------
 if (VRButton) {
   try {
@@ -170,11 +137,11 @@ if (VRButton) {
     btn.style.zIndex = "2147483647";
     document.body.appendChild(btn);
     ok("VRButton injected");
-  } catch {
-    warn("VRButton inject failed (manual Enter VR still works)");
+  } catch (e) {
+    warn("VRButton inject failed (manual ENTER VR still works)");
   }
 } else {
-  warn("VRButton module blocked (manual Enter VR only)");
+  warn("VRButton module blocked (manual ENTER VR only)");
 }
 
 async function manualEnterVR() {
@@ -194,35 +161,81 @@ async function manualEnterVR() {
 enterVrBtn?.addEventListener("click", () => { ok("ENTER VR clicked"); manualEnterVR(); });
 
 // --------------------
-// Locomotion + Laser + Teleport
+// Locomotion + Teleport (ANTI-VOID)
 // --------------------
 const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const tempDir = new THREE.Vector3();
 const tempHit = new THREE.Vector3();
+const tempCamPos = new THREE.Vector3();
 
-const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0,0,-1)]);
-const laserMat = new THREE.LineBasicMaterial({ color: 0x00ff66 });
-const laser = new THREE.Line(laserGeo, laserMat);
-laser.scale.z = 10;
-laser.visible = false;
+const laser = new THREE.Line(
+  new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0,0,-1)]),
+  new THREE.LineBasicMaterial({ color: 0x00ff66 })
+);
+laser.scale.z = 12;
+laser.visible = true;
 playerRig.add(laser);
 
 const ring = new THREE.Mesh(
-  new THREE.RingGeometry(0.25, 0.34, 32),
-  new THREE.MeshStandardMaterial({ color: 0x00ff66, emissive: 0x00ff66, emissiveIntensity: 1.5, side: THREE.DoubleSide })
+  new THREE.RingGeometry(0.25, 0.34, 36),
+  new THREE.MeshBasicMaterial({ color: 0x00ff66, side: THREE.DoubleSide })
 );
 ring.rotation.x = -Math.PI/2;
-ring.visible = false;
+ring.visible = true;
 worldRoot.add(ring);
 
+let lastGoodHit = SAFE_SPAWN.clone();
 let wantTeleport = false;
 let lastSnap = 0;
+
+const BOUNDS = {
+  minX: -32, maxX: 32,
+  minZ: -32, maxZ: 32
+};
+
+function clampToBounds(v){
+  v.x = Math.max(BOUNDS.minX, Math.min(BOUNDS.maxX, v.x));
+  v.z = Math.max(BOUNDS.minZ, Math.min(BOUNDS.maxZ, v.z));
+  return v;
+}
+
+function isBadNumber(n){ return !Number.isFinite(n); }
+function rigIsInvalid(){
+  return isBadNumber(playerRig.position.x) || isBadNumber(playerRig.position.z) ||
+         Math.abs(playerRig.position.x) > 5000 || Math.abs(playerRig.position.z) > 5000;
+}
+
+function rescueIfVoid(){
+  if (rigIsInvalid()){
+    warn("VOID detected — rescuing to SAFE SPAWN");
+    playerRig.position.x = SAFE_SPAWN.x;
+    playerRig.position.z = SAFE_SPAWN.z;
+  }
+}
+
+function getAimDirectionSafe(){
+  // Use camera forward but avoid the “vertical = zero xz” bug.
+  camera.getWorldDirection(tempDir);
+
+  // flatten to XZ so teleport is on floor plane
+  tempDir.y = 0;
+
+  const len = tempDir.length();
+  if (len < 0.0005 || !Number.isFinite(len)) {
+    // fallback direction: camera -Z in world space
+    tempDir.set(0, 0, -1);
+    tempDir.applyQuaternion(camera.quaternion);
+    tempDir.y = 0;
+    if (tempDir.length() < 0.0005) tempDir.set(0,0,-1);
+  }
+  tempDir.normalize();
+  return tempDir;
+}
 
 function getPrimaryGamepad() {
   const session = renderer.xr.getSession?.();
   if (!session) return null;
 
-  // Prefer left-handed for movement
   let best = null;
   for (const src of session.inputSources) {
     if (!src?.gamepad) continue;
@@ -232,37 +245,51 @@ function getPrimaryGamepad() {
   return best;
 }
 
-function updateLaserAndTeleport() {
-  // Aim using camera forward (safe even if controller model not showing)
-  camera.getWorldDirection(tempDir);
-  tempDir.y = 0;
-  tempDir.normalize();
+function updateLaserAndTeleport(){
+  // Laser starts at camera position, points forward
+  camera.getWorldPosition(tempCamPos);
+  const dir = getAimDirectionSafe();
 
-  const camPos = new THREE.Vector3();
-  camera.getWorldPosition(camPos);
-
-  laser.position.copy(camPos);
+  laser.position.copy(tempCamPos);
   laser.position.y -= 0.05;
-  laser.lookAt(camPos.clone().add(tempDir));
-  laser.visible = true;
+  laser.lookAt(tempCamPos.clone().add(dir));
 
-  const ray = new THREE.Ray(laser.position.clone(), tempDir.clone());
+  // Raycast to floor plane
+  const ray = new THREE.Ray(laser.position.clone(), dir.clone());
   if (ray.intersectPlane(floorPlane, tempHit)) {
+    clampToBounds(tempHit);
     ring.position.set(tempHit.x, 0.02, tempHit.z);
     ring.visible = true;
 
+    lastGoodHit.copy(tempHit);
+
     if (wantTeleport) {
-      playerRig.position.x = tempHit.x;
-      playerRig.position.z = tempHit.z;
+      // Always teleport to LAST VALID hit (never NaN)
+      const dest = lastGoodHit.clone();
+      clampToBounds(dest);
+
+      if (!Number.isFinite(dest.x) || !Number.isFinite(dest.z)) {
+        warn("Teleport blocked (invalid destination) — staying put");
+      } else {
+        playerRig.position.x = dest.x;
+        playerRig.position.z = dest.z;
+        ok(`Teleport: ${dest.x.toFixed(2)}, ${dest.z.toFixed(2)}`);
+      }
       wantTeleport = false;
-      ok(`Teleport: (${tempHit.x.toFixed(2)}, ${tempHit.z.toFixed(2)})`);
     }
   } else {
-    ring.visible = false;
+    // No hit: keep ring at last good position (prevents “click to void”)
+    ring.position.set(lastGoodHit.x, 0.02, lastGoodHit.z);
+    ring.visible = true;
+
+    if (wantTeleport) {
+      warn("Teleport blocked (no floor hit)");
+      wantTeleport = false;
+    }
   }
 }
 
-function updateStickLocomotion(dt) {
+function updateStickLocomotion(dt){
   const gp = getPrimaryGamepad();
   if (!gp) return;
 
@@ -284,6 +311,8 @@ function updateStickLocomotion(dt) {
 
     playerRig.position.addScaledVector(right, mx * speed * dt);
     playerRig.position.addScaledVector(fwd, -mz * speed * dt);
+    playerRig.position.x = Math.max(BOUNDS.minX, Math.min(BOUNDS.maxX, playerRig.position.x));
+    playerRig.position.z = Math.max(BOUNDS.minZ, Math.min(BOUNDS.maxZ, playerRig.position.z));
   }
 
   const now = performance.now() / 1000;
@@ -293,14 +322,16 @@ function updateStickLocomotion(dt) {
     lastSnap = now;
   }
 
+  // trigger = teleport
   const trigger =
     gp.buttons?.[0]?.pressed ||
     gp.buttons?.[1]?.pressed ||
     gp.buttons?.[3]?.pressed;
+
   if (trigger) wantTeleport = true;
 }
 
-ok("Locomotion + teleport ready");
+ok("Locomotion + teleport (anti-void) ready");
 
 // --------------------
 // Resize + Loop
@@ -317,10 +348,11 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min(0.05, (t - lastT) / 1000);
   lastT = t;
 
+  rescueIfVoid();
   updateStickLocomotion(dt);
   updateLaserAndTeleport();
 
   renderer.render(scene, camera);
 });
 
-ok("Boot complete — you should NOT see black void anymore.");
+ok("Boot complete — floor should ALWAYS be visible. Teleport cannot send you to void now.");

@@ -1,14 +1,8 @@
-// /js/world.js — Skylark Poker VR — World Builder (9.0 FULL)
-// - Big room, brighter lighting
-// - Marble floor, brick walls w/ SMALLER repeat (smaller bricks)
-// - Gold trim + corner pillars
-// - Circular rail WITH bars (prevents walking into table area)
-// - Teleport machine spawn point (always spawns from pad)
-// - Solid colliders: walls + rail ring
-// - Safe texture fallback if missing files (no crashes)
-
+// /js/world.js — FULL (9.0) with Table + Chairs + Interactables
 import * as THREE from "./three.js";
 import { TeleportMachine } from "./teleport_machine.js";
+import { buildPokerTable } from "./table.js";
+import { buildChair } from "./chair.js";
 
 export const World = {
   _tex: null,
@@ -16,51 +10,36 @@ export const World = {
   build(scene) {
     this._tex = new THREE.TextureLoader();
 
-    // -----------------------------
-    // Scene baseline
-    // -----------------------------
     scene.background = new THREE.Color(0x07070a);
-    scene.fog = new THREE.Fog(0x07070a, 10, 45);
+    scene.fog = new THREE.Fog(0x07070a, 10, 50);
 
-    // -----------------------------
-    // Lighting (brighter)
-    // -----------------------------
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x222244, 0.85);
-    scene.add(hemi);
-
-    const key = new THREE.DirectionalLight(0xffffff, 1.05);
+    // Lights (brighter)
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x222244, 0.95));
+    const key = new THREE.DirectionalLight(0xffffff, 1.15);
     key.position.set(6, 10, 6);
-    key.castShadow = false;
     scene.add(key);
-
-    const fill = new THREE.DirectionalLight(0x9bd7ff, 0.55);
+    const fill = new THREE.DirectionalLight(0x9bd7ff, 0.6);
     fill.position.set(-7, 6, -4);
     scene.add(fill);
-
-    const warm = new THREE.PointLight(0xffd27a, 0.8, 22);
-    warm.position.set(0, 6.5, -6);
+    const warm = new THREE.PointLight(0xffd27a, 0.9, 26);
+    warm.position.set(0, 7, -7);
     scene.add(warm);
 
-    // -----------------------------
-    // Room sizes (bigger)
-    // -----------------------------
-    const ROOM_W = 30;
-    const ROOM_D = 30;
-    const WALL_H = 8.5;
+    // Room
+    const ROOM_W = 34;
+    const ROOM_D = 34;
+    const WALL_H = 9.5;
 
-    // bounds (for controls clamp + teleport clamp)
     const bounds = {
-      min: new THREE.Vector3(-ROOM_W / 2 + 1.0, 0, -ROOM_D / 2 + 1.0),
-      max: new THREE.Vector3( ROOM_W / 2 - 1.0, 0,  ROOM_D / 2 - 1.0)
+      min: new THREE.Vector3(-ROOM_W / 2 + 1.2, 0, -ROOM_D / 2 + 1.2),
+      max: new THREE.Vector3( ROOM_W / 2 - 1.2, 0,  ROOM_D / 2 - 1.2)
     };
 
-    // -----------------------------
-    // Materials (safe textures)
-    // -----------------------------
+    // Materials
     const floorMat = this._safeMat({
       file: "Marblegold floors.jpg",
       color: 0xffffff,
-      repeat: [6, 6],
+      repeat: [7, 7],
       roughness: 0.9,
       metalness: 0.1
     });
@@ -68,15 +47,7 @@ export const World = {
     const wallMat = this._safeMat({
       file: "brickwall.jpg",
       color: 0xf2f2f2,
-      repeat: [10, 3], // ✅ smaller bricks
-      roughness: 0.95,
-      metalness: 0.0
-    });
-
-    const wallAccentMat = this._safeMat({
-      file: "wall_stone_runes.jpg",
-      color: 0xe9e9ef,
-      repeat: [8, 2.6],
+      repeat: [12, 3], // smaller bricks look
       roughness: 0.95,
       metalness: 0.0
     });
@@ -89,173 +60,123 @@ export const World = {
       emissiveIntensity: 0.25
     });
 
-    // -----------------------------
     // Floor
-    // -----------------------------
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(ROOM_W, ROOM_D),
-      floorMat
-    );
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), floorMat);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.y = 0;
     scene.add(floor);
 
-    // -----------------------------
-    // Walls (4) + trim
-    // -----------------------------
-    const walls = new THREE.Group();
-    walls.name = "Walls";
-
+    // Walls
     const wallGeo = new THREE.PlaneGeometry(ROOM_W, WALL_H);
-
     const wallN = new THREE.Mesh(wallGeo, wallMat);
     wallN.position.set(0, WALL_H / 2, -ROOM_D / 2);
-    wallN.rotation.y = 0;
-    walls.add(wallN);
+    scene.add(wallN);
 
     const wallS = new THREE.Mesh(wallGeo, wallMat);
     wallS.position.set(0, WALL_H / 2, ROOM_D / 2);
     wallS.rotation.y = Math.PI;
-    walls.add(wallS);
+    scene.add(wallS);
 
-    const wallE = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_D, WALL_H), wallAccentMat);
+    const wallE = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_D, WALL_H), wallMat);
     wallE.position.set(ROOM_W / 2, WALL_H / 2, 0);
     wallE.rotation.y = -Math.PI / 2;
-    walls.add(wallE);
+    scene.add(wallE);
 
-    const wallW = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_D, WALL_H), wallAccentMat);
+    const wallW = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_D, WALL_H), wallMat);
     wallW.position.set(-ROOM_W / 2, WALL_H / 2, 0);
     wallW.rotation.y = Math.PI / 2;
-    walls.add(wallW);
+    scene.add(wallW);
 
-    scene.add(walls);
-
-    // Gold trim around bottom of walls
+    // Gold bottom trim
     const trimH = 0.22;
     const trimY = trimH / 2;
-
-    const trimN = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W, trimH, 0.22), goldMat);
-    trimN.position.set(0, trimY, -ROOM_D / 2 + 0.11);
-    scene.add(trimN);
-
-    const trimS = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W, trimH, 0.22), goldMat);
-    trimS.position.set(0, trimY, ROOM_D / 2 - 0.11);
-    scene.add(trimS);
-
-    const trimE = new THREE.Mesh(new THREE.BoxGeometry(0.22, trimH, ROOM_D), goldMat);
-    trimE.position.set(ROOM_W / 2 - 0.11, trimY, 0);
-    scene.add(trimE);
-
-    const trimW = new THREE.Mesh(new THREE.BoxGeometry(0.22, trimH, ROOM_D), goldMat);
-    trimW.position.set(-ROOM_W / 2 + 0.11, trimY, 0);
-    scene.add(trimW);
+    scene.add(new THREE.Mesh(new THREE.BoxGeometry(ROOM_W, trimH, 0.22), goldMat)).position.set(0, trimY, -ROOM_D / 2 + 0.11);
+    scene.add(new THREE.Mesh(new THREE.BoxGeometry(ROOM_W, trimH, 0.22), goldMat)).position.set(0, trimY,  ROOM_D / 2 - 0.11);
+    scene.add(new THREE.Mesh(new THREE.BoxGeometry(0.22, trimH, ROOM_D), goldMat)).position.set( ROOM_W / 2 - 0.11, trimY, 0);
+    scene.add(new THREE.Mesh(new THREE.BoxGeometry(0.22, trimH, ROOM_D), goldMat)).position.set(-ROOM_W / 2 + 0.11, trimY, 0);
 
     // Corner pillars
     const pillarGeo = new THREE.CylinderGeometry(0.28, 0.34, WALL_H, 22);
-    const pillarPos = [
-      [ ROOM_W / 2 - 0.6, WALL_H / 2,  ROOM_D / 2 - 0.6],
-      [-ROOM_W / 2 + 0.6, WALL_H / 2,  ROOM_D / 2 - 0.6],
-      [ ROOM_W / 2 - 0.6, WALL_H / 2, -ROOM_D / 2 + 0.6],
-      [-ROOM_W / 2 + 0.6, WALL_H / 2, -ROOM_D / 2 + 0.6]
-    ];
-
-    for (const p of pillarPos) {
-      const pil = new THREE.Mesh(pillarGeo, goldMat);
-      pil.position.set(p[0], p[1], p[2]);
-      scene.add(pil);
+    for (const [x, z] of [
+      [ ROOM_W / 2 - 0.7,  ROOM_D / 2 - 0.7],
+      [-ROOM_W / 2 + 0.7,  ROOM_D / 2 - 0.7],
+      [ ROOM_W / 2 - 0.7, -ROOM_D / 2 + 0.7],
+      [-ROOM_W / 2 + 0.7, -ROOM_D / 2 + 0.7]
+    ]) {
+      const p = new THREE.Mesh(pillarGeo, goldMat);
+      p.position.set(x, WALL_H / 2, z);
+      scene.add(p);
     }
 
-    // -----------------------------
-    // Table center (single centerpiece)
-    // -----------------------------
-    const tableCenter = new THREE.Vector3(0, 0, -5.0);
+    // Table center (one table)
+    const tableCenter = new THREE.Vector3(0, 0, -6.0);
 
-    // subtle “stage” circle
+    // Stage
     const stage = new THREE.Mesh(
-      new THREE.CylinderGeometry(6.6, 6.9, 0.08, 64),
+      new THREE.CylinderGeometry(7.0, 7.3, 0.08, 64),
       new THREE.MeshStandardMaterial({ color: 0x0f0f14, roughness: 0.95, metalness: 0.15 })
     );
     stage.position.set(tableCenter.x, 0.04, tableCenter.z);
     scene.add(stage);
 
-    // -----------------------------
-    // Circular rail WITH bars (solid)
-    // -----------------------------
-    const rail = this._buildRailRing(tableCenter, 6.0, goldMat);
-    scene.add(rail.group);
+    // Build table
+    const table = buildPokerTable({ tex: this._tex, center: tableCenter });
+    scene.add(table.group);
 
-    // -----------------------------
-    // Art frames (brighter + visible)
-    // -----------------------------
-    const artGroup = new THREE.Group();
-    artGroup.name = "ArtFrames";
-    scene.add(artGroup);
+    // Chairs (8 seats around table)
+    const seats = [];
+    const interactables = [];
+    const chairRingR = 3.25;
+    const seatCount = 8;
 
-    // Back wall big brand frame
-    artGroup.add(this._makeFrame(
-      "brand_logo.jpg",
-      new THREE.Vector3(0, 4.6, -ROOM_D / 2 + 0.06),
-      new THREE.Euler(0, 0, 0),
-      6.6, 3.2
-    ));
+    for (let i = 0; i < seatCount; i++) {
+      const a = (i / seatCount) * Math.PI * 2;
 
-    // Side frames
-    artGroup.add(this._makeFrame(
-      "casino_art.jpg",
-      new THREE.Vector3(-ROOM_W / 2 + 0.06, 3.2, -6),
-      new THREE.Euler(0, Math.PI / 2, 0),
-      3.8, 2.2
-    ));
+      const x = tableCenter.x + Math.cos(a) * chairRingR;
+      const z = tableCenter.z + Math.sin(a) * chairRingR;
 
-    artGroup.add(this._makeFrame(
-      "Casinoart2.jpg",
-      new THREE.Vector3(ROOM_W / 2 - 0.06, 3.2, -6),
-      new THREE.Euler(0, -Math.PI / 2, 0),
-      3.8, 2.2
-    ));
+      // face toward table
+      const rotY = -a + Math.PI;
 
-    // -----------------------------
-    // Teleport machine + spawn
-    // -----------------------------
+      const chair = buildChair({ tex: this._tex, position: new THREE.Vector3(x, 0, z), rotationY: rotY });
+      chair.userData.seatIndex = i; // IMPORTANT
+      chair.userData.hit.userData.type = "chair"; // raycast anchor
+      chair.userData.hit.userData.seatIndex = i;
+      chair.userData.type = "chair";
+
+      // also set on root for traversal
+      chair.userData.sitTarget = chair.userData.sitTarget;
+
+      scene.add(chair);
+
+      seats.push({
+        index: i,
+        chair,
+        sitTarget: chair.userData.sitTarget
+      });
+
+      interactables.push(chair.userData.hit);
+    }
+
+    // Teleport machine (spawn in front of table)
     const teleport = TeleportMachine.build(scene, this._tex);
-    teleport.position.set(0, 0, tableCenter.z + 8.5); // in front of table
-
-    // Update pad center so getSafeSpawn is correct
+    teleport.position.set(0, 0, tableCenter.z + 9.5);
     TeleportMachine.padCenter.set(teleport.position.x, 0, teleport.position.z);
-
     const spawn = TeleportMachine.getSafeSpawn();
 
-    // -----------------------------
-    // Colliders (walls + rail ring)
-    // -----------------------------
+    // Colliders (walls only here; your Controls already clamps)
     const colliders = [];
+    const wallThickness = 0.9;
 
-    // Wall collider boxes (thick invisible)
-    const wallThickness = 0.8;
+    colliders.push(this._boxCollider(new THREE.Vector3(0, WALL_H / 2, -ROOM_D / 2), new THREE.Vector3(ROOM_W, WALL_H, wallThickness)));
+    colliders.push(this._boxCollider(new THREE.Vector3(0, WALL_H / 2,  ROOM_D / 2), new THREE.Vector3(ROOM_W, WALL_H, wallThickness)));
+    colliders.push(this._boxCollider(new THREE.Vector3( ROOM_W / 2, WALL_H / 2, 0), new THREE.Vector3(wallThickness, WALL_H, ROOM_D)));
+    colliders.push(this._boxCollider(new THREE.Vector3(-ROOM_W / 2, WALL_H / 2, 0), new THREE.Vector3(wallThickness, WALL_H, ROOM_D)));
 
-    colliders.push(this._boxCollider(
-      new THREE.Vector3(0, WALL_H / 2, -ROOM_D / 2),
-      new THREE.Vector3(ROOM_W, WALL_H, wallThickness)
-    ));
-    colliders.push(this._boxCollider(
-      new THREE.Vector3(0, WALL_H / 2, ROOM_D / 2),
-      new THREE.Vector3(ROOM_W, WALL_H, wallThickness)
-    ));
-    colliders.push(this._boxCollider(
-      new THREE.Vector3(ROOM_W / 2, WALL_H / 2, 0),
-      new THREE.Vector3(wallThickness, WALL_H, ROOM_D)
-    ));
-    colliders.push(this._boxCollider(
-      new THREE.Vector3(-ROOM_W / 2, WALL_H / 2, 0),
-      new THREE.Vector3(wallThickness, WALL_H, ROOM_D)
-    ));
-
-    // Rail collider ring segments (prevents entering table area)
-    colliders.push(...rail.colliders);
-
-    // Return world data consumed by main.js + controls.js
     return {
       tableCenter,
+      tableAnchors: table.anchors,
+      seats,
+      interactables,
       bounds,
       colliders,
       teleport,
@@ -263,9 +184,6 @@ export const World = {
     };
   },
 
-  // -----------------------------
-  // Helpers
-  // -----------------------------
   _safeMat({ file, color = 0xffffff, repeat = [1, 1], roughness = 0.9, metalness = 0.0 }) {
     const mat = new THREE.MeshStandardMaterial({ color, roughness, metalness });
     try {
@@ -282,125 +200,12 @@ export const World = {
       mat.map = tex;
       mat.color.set(0xffffff);
       mat.needsUpdate = true;
-    } catch (e) {
-      // fallback color only
-    }
+    } catch (e) {}
     return mat;
   },
 
-  _makeFrame(file, pos, rot, w, h) {
-    const g = new THREE.Group();
-    g.position.copy(pos);
-    g.rotation.copy(rot);
-
-    const frame = new THREE.Mesh(
-      new THREE.BoxGeometry(w + 0.22, h + 0.22, 0.12),
-      new THREE.MeshStandardMaterial({ color: 0xffd27a, roughness: 0.35, metalness: 0.5 })
-    );
-    frame.position.z = -0.05;
-
-    const artMat = this._safeMat({ file, color: 0x222222, repeat: [1, 1], roughness: 0.85, metalness: 0.0 });
-    // make art self-lit slightly so it isn't dark
-    artMat.emissive = new THREE.Color(0x222222);
-    artMat.emissiveIntensity = 0.55;
-
-    const art = new THREE.Mesh(
-      new THREE.PlaneGeometry(w, h),
-      artMat
-    );
-
-    // light for art
-    const l = new THREE.PointLight(0xffffff, 0.6, 8);
-    l.position.set(0, 0, 1.2);
-
-    g.add(art, frame, l);
-    return g;
-  },
-
   _boxCollider(center, size) {
-    // store Box3 only; Controls supports Box3 directly
     const half = new THREE.Vector3(size.x / 2, size.y / 2, size.z / 2);
-    const box = new THREE.Box3(center.clone().sub(half), center.clone().add(half));
-    return box;
-  },
-
-  _buildRailRing(center, radius, goldMat) {
-    const group = new THREE.Group();
-    group.name = "RailRing";
-
-    const height = 1.05;
-    const postH = 1.05;
-    const barCount = 28;
-
-    // Top rail torus
-    const topRail = new THREE.Mesh(
-      new THREE.TorusGeometry(radius, 0.06, 12, 120),
-      goldMat
-    );
-    topRail.rotation.x = Math.PI / 2;
-    topRail.position.set(center.x, height, center.z);
-    group.add(topRail);
-
-    // Bottom ring
-    const baseRing = new THREE.Mesh(
-      new THREE.TorusGeometry(radius, 0.045, 10, 120),
-      new THREE.MeshStandardMaterial({ color: 0x2a2a33, roughness: 0.9, metalness: 0.15 })
-    );
-    baseRing.rotation.x = Math.PI / 2;
-    baseRing.position.set(center.x, 0.15, center.z);
-    group.add(baseRing);
-
-    // Posts + bars
-    for (let i = 0; i < barCount; i++) {
-      const a = (i / barCount) * Math.PI * 2;
-      const x = center.x + Math.cos(a) * radius;
-      const z = center.z + Math.sin(a) * radius;
-
-      const post = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.04, 0.05, postH, 10),
-        goldMat
-      );
-      post.position.set(x, postH / 2, z);
-
-      group.add(post);
-
-      // mid bar segment (little vertical bar look)
-      const bar = new THREE.Mesh(
-        new THREE.BoxGeometry(0.06, 0.62, 0.06),
-        new THREE.MeshStandardMaterial({ color: 0x1a1a22, roughness: 0.85 })
-      );
-      bar.position.set(x, 0.62 / 2 + 0.25, z);
-      group.add(bar);
-    }
-
-    // Colliders for rail: approximate with 16 boxes around the ring
-    const colliders = [];
-    const segs = 16;
-    const thickness = 0.55;
-    const segW = (2 * Math.PI * radius) / segs;
-
-    for (let i = 0; i < segs; i++) {
-      const a = (i / segs) * Math.PI * 2;
-      const x = center.x + Math.cos(a) * radius;
-      const z = center.z + Math.sin(a) * radius;
-
-      const dir = new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
-      const tangent = new THREE.Vector3(-dir.z, 0, dir.x);
-
-      // box center is on ring, box elongated along tangent
-      const boxCenter = new THREE.Vector3(x, 0.8, z);
-
-      // We'll approximate AABB by making box axis-aligned in world:
-      // Create a slightly larger collider AABB around the segment.
-      const size = new THREE.Vector3(
-        Math.abs(tangent.x) > 0.7 ? segW * 0.65 : thickness,
-        1.6,
-        Math.abs(tangent.z) > 0.7 ? segW * 0.65 : thickness
-      );
-
-      colliders.push(this._boxCollider(boxCenter, size));
-    }
-
-    return { group, colliders };
+    return new THREE.Box3(center.clone().sub(half), center.clone().add(half));
   }
 };

@@ -5,8 +5,7 @@
 // - Release trigger: teleport
 // - Height lock: keeps player at consistent standing height
 // - Collision: uses world bounds + collider boxes
-
-import * as THREE from "./three.js";
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
 export const Controls = {
   renderer: null,

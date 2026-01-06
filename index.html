@@ -6,31 +6,39 @@
   <title>Scarlett Poker VR</title>
   <style>
     html,body{margin:0;height:100%;background:#000;overflow:hidden}
+    canvas{display:block}
+
     #overlay{
       position:fixed;inset:0;padding:14px;color:#00ff66;
       font-family:ui-monospace,Menlo,Consolas,monospace;
       white-space:pre-wrap;line-height:1.35;font-size:13px;
-      z-index:9998; pointer-events:none;
+      z-index:9998;
+      pointer-events:none;
     }
+
+    /* ALWAYS SHOW this (works even when VRButton fails) */
     #enterVrBtn{
-      position:fixed; right:18px; bottom:18px;
-      z-index:999999;
+      position:fixed;
+      right:18px; bottom:18px;
+      z-index:2147483647;
       padding:14px 18px;
-      font:600 14px/1.1 system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      background:#00ff66; color:#000;
-      border:none; border-radius:10px;
-      box-shadow:0 8px 24px rgba(0,0,0,.45);
+      font:700 14px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      background:#00ff66;
+      color:#000;
+      border:none;
+      border-radius:12px;
+      box-shadow:0 10px 26px rgba(0,0,0,.55);
       cursor:pointer;
-      display:none;
+      display:block;
     }
     #enterVrBtn:active{transform:translateY(1px)}
   </style>
 </head>
 <body>
-  <div id="overlay">Scarlett Poker VR — loading main.js…</div>
+  <div id="overlay">Scarlett Poker VR — loading…</div>
   <button id="enterVrBtn">ENTER VR</button>
 
-  <!-- cache-bust main.js so Oculus browser doesn’t keep old broken versions -->
-  <script type="module" src="./js/main.js?v=100"></script>
+  <!-- cache-bust: change the number if needed -->
+  <script type="module" src="./js/main.js?v=200"></script>
 </body>
 </html>

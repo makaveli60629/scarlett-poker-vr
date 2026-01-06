@@ -1,12 +1,10 @@
-// /js/world.js — Update 9.0 Fix Pack A
-// - Higher room, marble floor texture, brick walls tiled smaller
-// - Gold pillars + gold base trim
-// - Circular rail WITH bars
-// - Teleport machine = spawn anchor
-// - Colliders for walls + rail ring (keeps you inside)
+// /js/world.js — Update 9.0 Fix Pack A (Textures Import Fix)
+// IMPORTANT: This version does NOT import `Textures` (your textures.js doesn't export it).
+// It uses direct filenames from /assets/textures/ with TextureBank.standard({ mapFile: "name.jpg" })
+// If a file is missing, TextureBank should still fall back to color.
 
 import * as THREE from "./three.js";
-import { TextureBank, Textures } from "./textures.js";
+import { TextureBank } from "./textures.js";
 import { TeleportMachine } from "./teleport_machine.js";
 
 export const World = {
@@ -16,6 +14,9 @@ export const World = {
 
   teleport: null,
   spawn: { position: new THREE.Vector3(0, 0, 5), yaw: Math.PI },
+
+  // small helper so we don't repeat ourselves
+  T(file) { return file; },
 
   build(scene) {
     this.colliders = [];
@@ -29,7 +30,6 @@ export const World = {
 
     const key = new THREE.DirectionalLight(0xffffff, 1.25);
     key.position.set(6, 10, 8);
-    key.castShadow = false;
     scene.add(key);
 
     const fill = new THREE.DirectionalLight(0xfff0d0, 0.65);
@@ -46,7 +46,7 @@ export const World = {
 
     // ---------- FLOOR ----------
     const floorMat = TextureBank.standard({
-      mapFile: Textures.MARBLE_GOLD_FLOOR || "Marblegold floors.jpg",
+      mapFile: this.T("Marblegold floors.jpg"),
       color: 0xffffff,
       roughness: 0.95,
       metalness: 0.05,
@@ -65,7 +65,7 @@ export const World = {
 
     // tile bricks smaller via repeat
     const wallMat = TextureBank.standard({
-      mapFile: Textures.BRICKWALL || "brickwall.jpg",
+      mapFile: this.T("brickwall.jpg"),
       color: 0xffffff,
       roughness: 1.0,
       metalness: 0.0,
@@ -78,7 +78,6 @@ export const World = {
       metalness: 0.45,
     });
 
-    // walls
     const walls = new THREE.Group();
     walls.name = "Walls";
 
@@ -111,7 +110,6 @@ export const World = {
       trimGold
     );
     trim.position.set(0, 0.11, 0);
-    trim.scale.set(1.0, 1.0, 1.0);
     trim.material.transparent = true;
     trim.material.opacity = 0.95;
     scene.add(trim);
@@ -130,9 +128,7 @@ export const World = {
       scene.add(p);
     }
 
-    // ---------- TABLE PLATFORM (lowered a bit) ----------
-    // We move the centerpiece table zone down slightly by lowering only table build in PokerSim,
-    // but we also provide a subtle platform visual here.
+    // ---------- TABLE PLATFORM ----------
     const platform = new THREE.Mesh(
       new THREE.CylinderGeometry(6.1, 6.1, 0.08, 64),
       new THREE.MeshStandardMaterial({ color: 0x0f0f14, roughness: 0.95 })
@@ -143,7 +139,7 @@ export const World = {
     // ---------- CIRCULAR RAIL WITH BARS ----------
     this.buildRail(scene, this.tableCenter);
 
-    // ---------- WALL ART (bright) ----------
+    // ---------- WALL ART ----------
     this.addWallArt(scene, roomW, roomD, wallH);
 
     // ---------- TELEPORT MACHINE (spawn anchor) ----------
@@ -159,9 +155,7 @@ export const World = {
     this.addBoxCollider(-roomW / 2 + 0.02, wallH / 2, 0, 0.2, wallH, roomD); // left
     this.addBoxCollider( roomW / 2 - 0.02, wallH / 2, 0, 0.2, wallH, roomD); // right
 
-    // rail ring collider band (prevents walking into table zone unless you enter through gap later)
-    // We'll leave a small opening at +Z side near teleport pad by NOT colliding a wedge (handled in Controls bounds)
-    // For now: approximate with 8 box segments.
+    // rail ring collider band
     this.addRailColliders(this.tableCenter);
 
     return {
@@ -221,7 +215,6 @@ export const World = {
       g.add(bar);
     }
 
-    // subtle neon underglow
     const glow = new THREE.PointLight(0x2bd7ff, 0.35, 16);
     glow.position.set(center.x, 1.8, center.z);
     g.add(glow);
@@ -231,7 +224,7 @@ export const World = {
 
   addWallArt(scene, roomW, roomD, wallH) {
     const artMat = TextureBank.standard({
-      mapFile: Textures.CASINO_ART || "casino_art.jpg",
+      mapFile: this.T("casino_art.jpg"),
       color: 0xffffff,
       roughness: 0.9,
       metalness: 0.05,
@@ -251,7 +244,6 @@ export const World = {
       frame.position.z = -0.05;
       g.add(art, frame);
 
-      // add light so art is never too dark
       const l = new THREE.PointLight(0xffd27a, 0.4, 8);
       l.position.set(0, 0, 1.2);
       g.add(l);
@@ -288,14 +280,11 @@ export const World = {
     const h = 1.6;
     const t = 0.4;
 
-    // 8 segments
     const segs = 8;
     for (let i = 0; i < segs; i++) {
       const a = (i / segs) * Math.PI * 2;
       const x = center.x + Math.cos(a) * r;
       const z = center.z + Math.sin(a) * r;
-
-      // thin boxes arranged around ring
       this.addBoxCollider(x, y, z, 2.0, h, t);
     }
   }

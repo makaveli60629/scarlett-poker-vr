@@ -39,18 +39,10 @@
   </style>
 </head>
 <body>
-  <!-- Debug HUD (your scripts write status here) -->
   <pre id="hub">Scarlett Poker VR — loading…</pre>
+  <div id="hint">If Quest shows old code, hard refresh and wait for GitHub Pages deploy.</div>
 
-  <!-- Small hint (optional) -->
-  <div id="hint">
-    If you don’t see the VR button on Quest, hard refresh and make sure GitHub Pages finished deploying.
-  </div>
-
-  <!-- IMPORTANT:
-       - Keep type="module"
-       - Cache-buster prevents Quest Browser using old JS
-  -->
-  <script type="module" src="./js/main.js?v=1007"></script>
+  <!-- Cache-buster: IMPORTANT for Quest Browser -->
+  <script type="module" src="./js/main.js?v=1009"></script>
 </body>
 </html>

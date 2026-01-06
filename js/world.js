@@ -1,233 +1,354 @@
-// /js/world.js — Skylark Poker VR — World v9.0
-// PURPOSE: Stable physical world, correct alignment, no sinking/floating
-// IMPORTANT: Uses LOCAL ./three.js ONLY (GitHub Pages safe)
+// /js/world.js — Skylark Poker VR World (9.0)
+// World + Room + Lighting + Leaderboard + Poker Sim Hook
+// Texture-safe: will NOT crash if images are missing.
 
 import * as THREE from "./three.js";
+import { BossTable } from "./boss_table.js";
+import { PokerSimulation } from "./poker_simulation.js";
 
 export const World = {
-  async build(scene, playerRig, opts = {}) {
-    const texturesPath = opts.texturesPath || "assets/textures/";
-    const onLeaderboardReady = opts.onLeaderboardReady || (() => {});
+  group: null,
+  texLoader: null,
 
-    // -----------------------------
-    // FLOOR (Y = 0 IS LAW)
-    // -----------------------------
-    const floorTex = new THREE.TextureLoader().load(
-      texturesPath + "Marblegold floors.jpg",
-      t => {
+  // ===== Texture guard =====
+  _tex(path, repeat = [1, 1]) {
+    // returns { map, ok } but never throws
+    const tex = this.texLoader.load(
+      path,
+      (t) => {
         t.wrapS = t.wrapT = THREE.RepeatWrapping;
-        t.repeat.set(6, 6);
+        t.repeat.set(repeat[0], repeat[1]);
+        t.anisotropy = 4;
+        t.needsUpdate = true;
+      },
+      undefined,
+      () => {
+        // keep silent (do not spam)
       }
     );
+    return tex;
+  },
 
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(60, 60),
-      new THREE.MeshStandardMaterial({
-        map: floorTex,
-        roughness: 0.85,
-        metalness: 0.15,
-      })
-    );
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = 0;
-    floor.receiveShadow = true;
-    scene.add(floor);
+  matFromTexture(file, fallbackColor = 0x222222, opts = {}) {
+    const {
+      repeat = [1, 1],
+      roughness = 0.9,
+      metalness = 0.05,
+      emissive = 0x000000,
+      emissiveIntensity = 0.0,
+    } = opts;
 
-    // -----------------------------
-    // WALLS (simple, solid, centered)
-    // -----------------------------
-    const wallMat = new THREE.MeshStandardMaterial({
-      color: 0x0e0f14,
-      roughness: 0.9,
+    const path = `assets/textures/${file}`;
+    let map = null;
+
+    try {
+      map = this._tex(path, repeat);
+    } catch {
+      map = null;
+    }
+
+    const mat = new THREE.MeshStandardMaterial({
+      color: fallbackColor,
+      roughness,
+      metalness,
+      emissive,
+      emissiveIntensity,
+      map: map || null,
     });
 
-    const wallHeight = 6;
-    const wallDepth = 0.4;
-    const roomSize = 26;
+    return mat;
+  },
 
-    function makeWall(w, h, d, x, y, z) {
-      const wall = new THREE.Mesh(
-        new THREE.BoxGeometry(w, h, d),
-        wallMat
-      );
-      wall.position.set(x, y, z);
-      scene.add(wall);
+  // ===== Build =====
+  async build(scene, playerRig, camera) {
+    // params are intentionally flexible:
+    // - playerRig: your XR rig / player group (spawn will be set here)
+    // - camera: used for facing UI (optional)
+
+    this.group = new THREE.Group();
+    this.group.name = "SkylarkWorld";
+    this.texLoader = new THREE.TextureLoader();
+
+    // Strongly define "floor at y=0"
+    // Player should stand above it
+    if (playerRig) {
+      playerRig.position.set(0, 0, 5);
     }
 
-    makeWall(roomSize, wallHeight, wallDepth, 0, wallHeight / 2, -roomSize / 2);
-    makeWall(roomSize, wallHeight, wallDepth, 0, wallHeight / 2,  roomSize / 2);
-    makeWall(wallDepth, wallHeight, roomSize, -roomSize / 2, wallHeight / 2, 0);
-    makeWall(wallDepth, wallHeight, roomSize,  roomSize / 2, wallHeight / 2, 0);
+    // Background + fog to keep it stable and not “scary”
+    scene.background = new THREE.Color(0x05070a);
+    scene.fog = new THREE.Fog(0x05070a, 10, 45);
 
-    // -----------------------------
-    // LIGHTING (no darkness)
-    // -----------------------------
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x222244, 0.75);
-    scene.add(hemi);
+    // Lighting (balanced, elegant)
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x1a1a1a, 0.85);
+    hemi.position.set(0, 15, 0);
+    this.group.add(hemi);
 
-    const ceilingLight = new THREE.PointLight(0xffffff, 0.9, 60);
-    ceilingLight.position.set(0, 7, 0);
-    scene.add(ceilingLight);
+    const key = new THREE.DirectionalLight(0xffffff, 1.15);
+    key.position.set(7, 12, 5);
+    key.castShadow = false;
+    this.group.add(key);
 
-    // Accent lights
-    const accentA = new THREE.PointLight(0x00ffaa, 0.45, 25);
-    accentA.position.set(-6, 3, -6);
-    scene.add(accentA);
+    const fill = new THREE.PointLight(0x66ccff, 0.55, 30);
+    fill.position.set(-7, 6, 2);
+    this.group.add(fill);
 
-    const accentB = new THREE.PointLight(0xff2bd6, 0.45, 25);
-    accentB.position.set(6, 3, -6);
-    scene.add(accentB);
+    const warm = new THREE.PointLight(0xffcc77, 0.45, 30);
+    warm.position.set(6, 6, -6);
+    this.group.add(warm);
 
-    // -----------------------------
-    // TABLE (CENTERED, ABOVE FLOOR)
-    // -----------------------------
-    const tableGroup = new THREE.Group();
-    tableGroup.position.set(0, 0, -4.5);
-    scene.add(tableGroup);
+    // Room dimensions
+    const roomW = 26;
+    const roomD = 30;
+    const wallH = 6.2;
 
-    const tableBase = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.0, 1.2, 0.7, 32),
-      new THREE.MeshStandardMaterial({
-        color: 0x111111,
-        roughness: 0.9,
-      })
+    // ===== Floor (use Marblegold floors.jpg if present) =====
+    const floorMat = this.matFromTexture("Marblegold floors.jpg", 0x1b1e22, {
+      repeat: [3, 4],
+      roughness: 0.65,
+      metalness: 0.15,
+    });
+
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(roomW, roomD),
+      floorMat
     );
-    tableBase.position.y = 0.35;
-    tableGroup.add(tableBase);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(0, 0, -3);
+    floor.receiveShadow = true;
+    floor.name = "Floor";
+    this.group.add(floor);
 
-    const tableTop = new THREE.Mesh(
-      new THREE.CylinderGeometry(3.0, 3.15, 0.22, 48),
-      new THREE.MeshStandardMaterial({
-        map: new THREE.TextureLoader().load(
-          texturesPath + "table_felt_green.jpg"
-        ),
-        roughness: 0.8,
-      })
+    // ===== Walls (stone runes or brick fallback) =====
+    const wallMat = this.matFromTexture("wall_stone_runes.jpg", 0x2a2a2a, {
+      repeat: [3, 1.5],
+      roughness: 0.95,
+      metalness: 0.02,
+    });
+
+    const wallGeo = new THREE.BoxGeometry(roomW, wallH, 0.45);
+
+    const backWall = new THREE.Mesh(wallGeo, wallMat);
+    backWall.position.set(0, wallH / 2, -3 - roomD / 2);
+    this.group.add(backWall);
+
+    const frontWall = new THREE.Mesh(wallGeo, wallMat);
+    frontWall.position.set(0, wallH / 2, -3 + roomD / 2);
+    this.group.add(frontWall);
+
+    const sideGeo = new THREE.BoxGeometry(0.45, wallH, roomD);
+
+    const leftWall = new THREE.Mesh(sideGeo, wallMat);
+    leftWall.position.set(-roomW / 2, wallH / 2, -3);
+    this.group.add(leftWall);
+
+    const rightWall = new THREE.Mesh(sideGeo, wallMat);
+    rightWall.position.set(roomW / 2, wallH / 2, -3);
+    this.group.add(rightWall);
+
+    // ===== Ceiling dome (optional texture) =====
+    const ceilMat = this.matFromTexture("ceiling_dome_main.jpg", 0x0d0f12, {
+      repeat: [1, 1],
+      roughness: 0.95,
+      metalness: 0.0,
+      emissive: 0x080808,
+      emissiveIntensity: 0.2,
+    });
+
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(18, 32, 18, 0, Math.PI * 2, 0, Math.PI / 2),
+      ceilMat
     );
-    tableTop.position.y = 1.05;
-    tableGroup.add(tableTop);
+    dome.position.set(0, wallH + 7.0, -3);
+    this.group.add(dome);
 
-    // -----------------------------
-    // CHAIRS + BOT ANCHORS
-    // -----------------------------
-    const seatCount = 8;
-    const seatRadius = 3.8;
-    const seatHeight = 0.45; // TOP of seat
-    const botBottomOffset = 0.55; // body height above seat
+    // ===== Decorative glowing wall frames (placeholders for art) =====
+    // You asked: “frames that glow where pictures will be mounted”
+    const frames = new THREE.Group();
+    frames.name = "WallFrames";
 
-    const seats = [];
+    const makeFrame = (x, y, z, rotY, texName) => {
+      const frame = new THREE.Group();
+      frame.position.set(x, y, z);
+      frame.rotation.y = rotY;
 
-    for (let i = 0; i < seatCount; i++) {
-      const angle = (i / seatCount) * Math.PI * 2;
+      const plateMat = this.matFromTexture(texName, 0x111111, {
+        repeat: [1, 1],
+        roughness: 0.85,
+        metalness: 0.15,
+        emissive: 0x050505,
+        emissiveIntensity: 0.35,
+      });
 
-      const x = Math.cos(angle) * seatRadius;
-      const z = Math.sin(angle) * seatRadius;
+      const plate = new THREE.Mesh(
+        new THREE.PlaneGeometry(3.2, 1.8),
+        plateMat
+      );
 
-      // Chair
-      const chair = new THREE.Mesh(
-        new THREE.BoxGeometry(0.6, 0.45, 0.6),
+      const border = new THREE.Mesh(
+        new THREE.BoxGeometry(3.35, 1.95, 0.08),
         new THREE.MeshStandardMaterial({
-          color: 0x2a2a30,
-          roughness: 0.9,
+          color: 0xffd27a,
+          roughness: 0.35,
+          metalness: 0.35,
+          emissive: 0xffd27a,
+          emissiveIntensity: 0.55,
         })
       );
-      chair.position.set(x, seatHeight / 2, z);
-      chair.lookAt(0, seatHeight / 2, 0);
-      scene.add(chair);
+      border.position.z = -0.05;
 
-      // Bot placeholder anchor (NOT mesh logic here)
-      const botAnchor = new THREE.Group();
-      botAnchor.position.set(
-        x,
-        seatHeight + botBottomOffset,
-        z
-      );
-      botAnchor.lookAt(0, botAnchor.position.y, 0);
-      scene.add(botAnchor);
+      const glow = new THREE.PointLight(0xffd27a, 0.35, 6);
+      glow.position.set(0, 0, 0.8);
 
-      seats.push({ chair, botAnchor });
-    }
+      frame.add(plate, border, glow);
+      frames.add(frame);
+    };
 
-    // -----------------------------
-    // LEADERBOARD (HIGH, CLEAR VIEW)
-    // -----------------------------
-    const boardGroup = new THREE.Group();
-    boardGroup.position.set(0, 3.8, -11);
-    scene.add(boardGroup);
+    // back wall frames
+    makeFrame(-7, 3.2, -3 - roomD / 2 + 0.28, 0, "casino_art.jpg");
+    makeFrame( 0, 3.2, -3 - roomD / 2 + 0.28, 0, "casino_art.jpg");
+    makeFrame( 7, 3.2, -3 - roomD / 2 + 0.28, 0, "casino_art.jpg");
 
-    const boardBG = new THREE.Mesh(
-      new THREE.PlaneGeometry(7.5, 3.2),
+    // side wall frames
+    makeFrame(-roomW / 2 + 0.28, 3.2, -8, Math.PI / 2, "casino_art.jpg");
+    makeFrame( roomW / 2 - 0.28, 3.2, -8, -Math.PI / 2, "casino_art.jpg");
+
+    this.group.add(frames);
+
+    // ===== Leaderboard (glassy black screen, high, visible) =====
+    const leaderboard = this._makeLeaderboardPanel();
+    leaderboard.position.set(0, 4.4, -3 - roomD / 2 + 1.2); // high & on back wall
+    this.group.add(leaderboard);
+
+    const setLeaderboard = (lines) => this._setLeaderboardLines(leaderboard, lines);
+
+    // ===== Boss Table zone + rail =====
+    // Center it safely away from walls:
+    // floor center is z=-3, back wall is at z=-3-roomD/2
+    // so table z should be around -7 to -9
+    BossTable.center.set(0, 0, -8.0);
+    BossTable.build(scene);
+
+    // ===== Poker Simulation table center MUST match BossTable center =====
+    const sim = new PokerSimulation({
+      camera: camera || null,
+      tableCenter: new THREE.Vector3(0, 0, -8.0),
+      onLeaderboard: setLeaderboard,
+    });
+
+    await sim.build(scene);
+
+    // Keep references
+    this.sim = sim;
+    this.leaderboard = leaderboard;
+
+    // Add world group last
+    scene.add(this.group);
+
+    // Provide an update function to main.js
+    return {
+      world: this.group,
+      sim,
+      update: (dt) => {
+        // keep UI facing camera and sim moving
+        if (this.sim) this.sim.update(dt);
+      },
+    };
+  },
+
+  // ===== Leaderboard panel =====
+  _makeLeaderboardPanel() {
+    const group = new THREE.Group();
+    group.name = "LeaderboardPanel";
+
+    // frame
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(7.2, 3.2, 0.12),
       new THREE.MeshStandardMaterial({
-        color: 0x05060a,
-        emissive: 0x111122,
-        emissiveIntensity: 0.6,
-        roughness: 0.85,
+        color: 0xffd27a,
+        roughness: 0.3,
+        metalness: 0.35,
+        emissive: 0xffd27a,
+        emissiveIntensity: 0.55,
       })
     );
-    boardGroup.add(boardBG);
+    group.add(frame);
 
+    // screen
     const canvas = document.createElement("canvas");
     canvas.width = 1024;
     canvas.height = 512;
     const ctx = canvas.getContext("2d");
 
-    const boardTex = new THREE.CanvasTexture(canvas);
-    boardTex.colorSpace = THREE.SRGBColorSpace;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
 
-    const boardText = new THREE.Mesh(
-      new THREE.PlaneGeometry(7.3, 3.0),
+    const screen = new THREE.Mesh(
+      new THREE.PlaneGeometry(6.8, 2.8),
       new THREE.MeshBasicMaterial({
-        map: boardTex,
+        map: tex,
         transparent: true,
       })
     );
-    boardText.position.z = 0.01;
-    boardGroup.add(boardText);
+    screen.position.z = 0.07;
+    group.add(screen);
 
-    function drawLeaderboard(lines) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "#000000cc";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // store
+    group.userData.canvas = canvas;
+    group.userData.ctx = ctx;
+    group.userData.tex = tex;
+    group.userData.screen = screen;
 
-      ctx.fillStyle = "#ffd27a";
-      ctx.font = "bold 54px Arial";
-      ctx.fillText("Boss Tournament", 40, 70);
-
-      ctx.font = "bold 40px Arial";
-      ctx.fillStyle = "#00ffaa";
-
-      lines.forEach((l, i) => {
-        ctx.fillText(l, 40, 140 + i * 60);
-      });
-
-      boardTex.needsUpdate = true;
-    }
-
-    drawLeaderboard([
-      "Waiting for game...",
-      "",
-      "",
+    // initial
+    this._drawLeaderboard(ctx, [
+      "Boss Tournament — Top 10",
+      "1) —",
+      "2) —",
+      "3) —",
+      "4) —",
     ]);
+    tex.needsUpdate = true;
 
-    onLeaderboardReady(drawLeaderboard);
+    // glow
+    const glow = new THREE.PointLight(0x00ffaa, 0.45, 10);
+    glow.position.set(0, 0, 2);
+    group.add(glow);
 
-    // -----------------------------
-    // SPAWN SAFETY (never inside floor)
-    // -----------------------------
-    playerRig.position.y = 0;
-    if (playerRig.children.length) {
-      playerRig.children.forEach(c => {
-        if (c.position) c.position.y = Math.max(c.position.y, 1.6);
-      });
+    return group;
+  },
+
+  _setLeaderboardLines(panel, lines) {
+    if (!panel?.userData?.ctx) return;
+    this._drawLeaderboard(panel.userData.ctx, lines);
+    panel.userData.tex.needsUpdate = true;
+  },
+
+  _drawLeaderboard(ctx, lines) {
+    ctx.clearRect(0, 0, 1024, 512);
+
+    // glassy black
+    ctx.fillStyle = "rgba(0,0,0,0.72)";
+    ctx.fillRect(0, 0, 1024, 512);
+
+    // header
+    ctx.font = "bold 56px Arial";
+    ctx.fillStyle = "#ffd27a";
+    ctx.fillText("Skylark — Boss Tournament", 40, 80);
+
+    // lines
+    ctx.font = "bold 44px Arial";
+    const colors = ["#00ffaa", "#2bd7ff", "#ff2bd6", "#ffffff", "#ffffff", "#ffffff"];
+    let y = 160;
+
+    for (let i = 0; i < Math.min(lines.length, 10); i++) {
+      ctx.fillStyle = colors[i] || "#ffffff";
+      ctx.fillText(lines[i], 60, y);
+      y += 56;
     }
 
-    // -----------------------------
-    // RETURN WORLD API
-    // -----------------------------
-    return {
-      tableGroup,
-      seats,
-      updateLeaderboard: drawLeaderboard,
-    };
+    // footer
+    ctx.font = "28px Arial";
+    ctx.fillStyle = "rgba(255,255,255,0.55)";
+    ctx.fillText("Best of 10 hands — crown held 60s — bots walk away when busted", 40, 480);
   },
 };

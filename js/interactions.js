@@ -1,79 +1,107 @@
-// js/interactions.js — Patch 7.2 FULL
-// Now: Grip will click the VR menu when it's open (VIP buttons work).
-// Also keeps: pickup/drop chip and kiosk toast.
+// /js/interactions.js — Seat Join System (GRIP) (9.0)
+// - Aim at chair -> press GRIP -> sit
+// - Press GRIP again -> stand (returns to teleport pad safe spawn)
 
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
-import { VRUIPanel } from "./vr_ui_panel.js";
+import * as THREE from "./three.js";
 
 export const Interactions = {
-  scene: null,
+  renderer: null,
   camera: null,
-  rig: null,
+  player: null,
+  world: null,
+  pokerSim: null,
 
-  kioskObj: null,
-  chipObj: null,
+  ray: new THREE.Raycaster(),
+  tmpMat: new THREE.Matrix4(),
 
-  held: null,
+  seated: false,
+  seatedSeatIndex: -1,
+  cooldown: 0,
 
-  init(scene, camera, playerRig, { kioskObj, chipObj } = {}) {
-    this.scene = scene;
+  init({ renderer, camera, player, world, pokerSim }) {
+    this.renderer = renderer;
     this.camera = camera;
-    this.rig = playerRig;
-    this.kioskObj = kioskObj || null;
-    this.chipObj = chipObj || null;
-    this.held = null;
-  },
-
-  onGrip(toast) {
-    // 1) If menu open, click it
-    if (VRUIPanel?.visible) {
-      const clicked = VRUIPanel.click();
-      if (clicked) return;
-    }
-
-    // 2) pickup/drop chip
-    if (!this.rig) return;
-
-    const rigPos = new THREE.Vector3();
-    this.rig.getWorldPosition(rigPos);
-
-    if (!this.held && this.chipObj) {
-      const chipPos = new THREE.Vector3();
-      this.chipObj.getWorldPosition(chipPos);
-
-      if (chipPos.distanceTo(rigPos) < 1.25) {
-        this.held = this.chipObj;
-        toast?.("Picked up Event Chip");
-        return;
-      }
-    }
-
-    if (this.held) {
-      this.held = null;
-      toast?.("Dropped");
-      return;
-    }
-
-    // 3) kiosk hint
-    if (this.kioskObj) {
-      const kPos = new THREE.Vector3();
-      this.kioskObj.getWorldPosition(kPos);
-      if (kPos.distanceTo(rigPos) < 1.8) {
-        toast?.("Kiosk: Open VR Menu (Menu button)");
-      }
-    }
+    this.player = player;
+    this.world = world;
+    this.pokerSim = pokerSim;
   },
 
   update(dt) {
-    if (!this.held || !this.camera) return;
+    this.cooldown = Math.max(0, this.cooldown - dt);
 
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
-    const camPos = new THREE.Vector3();
-    this.camera.getWorldPosition(camPos);
+    const session = this.renderer.xr?.getSession?.();
+    if (!session) return;
 
-    const target = camPos.clone().add(forward.multiplyScalar(0.55));
-    target.y -= 0.15;
+    const left = findSource(session, "left");
+    const right = findSource(session, "right");
 
-    this.held.position.copy(target);
+    // GRIP is usually buttons[1]
+    const gripL = left?.gamepad?.buttons?.[1]?.value ?? 0;
+    const gripR = right?.gamepad?.buttons?.[1]?.value ?? 0;
+
+    if ((gripL > 0.85 || gripR > 0.85) && this.cooldown <= 0) {
+      this.cooldown = 0.35;
+      if (!this.seated) this.trySit();
+      else this.stand();
+    }
+  },
+
+  trySit() {
+    // Cast from camera forward (simple + reliable)
+    const origin = new THREE.Vector3();
+    const dir = new THREE.Vector3();
+    this.camera.getWorldPosition(origin);
+    this.camera.getWorldDirection(dir);
+
+    this.ray.set(origin, dir);
+    this.ray.far = 4.0;
+
+    const hits = this.ray.intersectObjects(this.world.interactables, true);
+    if (!hits.length) return;
+
+    // find chair root
+    let obj = hits[0].object;
+    while (obj && obj.parent && !obj.userData?.type) obj = obj.parent;
+
+    if (!obj || obj.userData?.type !== "chair") return;
+
+    const seatIndex = obj.userData.seatIndex;
+    if (typeof seatIndex !== "number") return;
+
+    // Sit the player on chair
+    const sitTarget = obj.userData.sitTarget;
+    const targetWorld = new THREE.Vector3();
+    sitTarget.getWorldPosition(targetWorld);
+
+    // Align player rig: set XZ to target, and raise camera height a bit
+    this.player.position.set(targetWorld.x, 0, targetWorld.z);
+
+    this.seated = true;
+    this.seatedSeatIndex = seatIndex;
+
+    // Tell poker sim: player joined seatIndex
+    this.pokerSim?.setPlayerSeat(seatIndex);
+
+    // Optional: lock movement if your controls supports it
+    window.dispatchEvent(new CustomEvent("nova_player_seated", { detail: { seated: true } }));
+  },
+
+  stand() {
+    this.seated = false;
+    const spawn = this.world.spawn;
+    if (spawn?.position) {
+      this.player.position.set(spawn.position.x, 0, spawn.position.z);
+    }
+    this.seatedSeatIndex = -1;
+    this.pokerSim?.setPlayerSeat(-1);
+
+    window.dispatchEvent(new CustomEvent("nova_player_seated", { detail: { seated: false } }));
   }
 };
+
+function findSource(session, handedness) {
+  for (const src of session.inputSources || []) {
+    if (src && src.handedness === handedness && src.gamepad) return src;
+  }
+  return null;
+      }

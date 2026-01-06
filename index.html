@@ -12,12 +12,18 @@
       font-size:12px;line-height:1.35;white-space:pre-wrap;
       background:rgba(0,0,0,.45);padding:10px;border-radius:10px;
       max-height:42vh;overflow:auto;z-index:99999;
+      pointer-events:none;
     }
   </style>
 </head>
 <body>
   <div id="hub">Loading Scarlett Poker VR…</div>
-  <!-- Version bump helps GitHub/Oculus cache -->
-  <script type="module" src="./js/main.js?v=1001"></script>
+
+  <!-- Cache buster: change v= number anytime Oculus/GitHub shows old code -->
+  <script type="module" src="./js/main.js?v=1003"></script>
+
+  <noscript style="color:#fff;padding:12px;display:block">
+    This app requires JavaScript enabled.
+  </noscript>
 </body>
 </html>

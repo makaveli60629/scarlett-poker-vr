@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Scarlett Poker VR</title>
+  <style>
+    html,body{margin:0;height:100%;background:#000;overflow:hidden}
+    #overlay{
+      position:fixed;inset:0;padding:14px;color:#00ff66;
+      font-family:ui-monospace,Menlo,Consolas,monospace;
+      white-space:pre-wrap;line-height:1.35;font-size:13px;
+      pointer-events:none;text-shadow:0 0 10px rgba(0,255,102,.25);
+      z-index:1;
+    }
+    #forceBtn{
+      position:fixed;top:10px;left:10px;z-index:9999;
+      background:#001a0a;border:1px solid #00ff66;color:#00ff66;
+      padding:10px 14px;border-radius:14px;
+      font-family:ui-monospace,Menlo,Consolas,monospace;
+    }
+  </style>
+</head>
+<body>
+  <button id="forceBtn">Reload (No Cache)</button>
+  <div id="overlay">Scarlett Poker VR — loading…</div>
+
+  <script>
+    // Always load latest main.js (Quest cache killer)
+    const v = Date.now();
+    document.getElementById("forceBtn").onclick = () => {
+      location.href = location.pathname + "?v=" + Date.now();
+    };
+
+    const s = document.createElement("script");
+    s.type = "module";
+    s.src = "./js/main.js?v=" + v;
+    s.onerror = () => {
+      document.getElementById("overlay").textContent += "\n❌ main.js failed to load (module fetch error).";
+    };
+    document.head.appendChild(s);
+  </script>
+</body>
+</html>

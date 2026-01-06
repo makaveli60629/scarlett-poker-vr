@@ -1,258 +1,257 @@
-// js/controls.js
-// XR Controls + Laser + Smooth Locomotion + Optional 45° stick
-// Requires importmap for "three" OR use CDN import in your project.
-
-import * as THREE from "three";
-import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
-import { XRHandModelFactory } from "three/addons/webxr/XRHandModelFactory.js";
+// /js/controls.js — Update 9.0
+// Quest-friendly locomotion + snap turn + collision + trigger-hold teleport (NO lasers)
+//
+// Imports local three.js wrapper for GitHub Pages stability.
+import * as THREE from "./three.js";
 
 export const Controls = {
-  // public config
-  moveSpeed: 2.25,          // meters/sec
-  rotateSpeed: 1.6,         // radians/sec (for smooth yaw)
-  deadZone: 0.14,
-  snap45: true,             // <— your “45-degree angle” preference
-  invertStrafe: false,      // if you still feel reversed, flip this true
-
-  // internals
   renderer: null,
-  scene: null,
   camera: null,
+  player: null,        // THREE.Group (your player rig)
+  colliders: [],       // array of AABB boxes { min: Vector3, max: Vector3 }
+  bounds: null,        // { minX,maxX,minZ,maxZ } for quick clamp
+  teleport: null,      // { group, ring } built by World
+  teleportTarget: null,
 
-  rig: null,            // group that moves (player root)
-  head: null,           // camera inside rig
+  // tuning
+  eyeHeight: 1.65,
+  playerRadius: 0.28,
+  moveSpeed: 2.25,
+  sprintMult: 1.65,
+  snapAngle: THREE.MathUtils.degToRad(45),
+  snapCooldown: 0.22,
 
-  c0: null, c1: null,   // controllers
-  g0: null, g1: null,   // controller grips (models)
-  h0: null, h1: null,   // hands
-  rays: [],
+  // state
+  _yaw: 0,
+  _snapT: 0,
+  _tpHolding: false,
+  _tpHoldValue: 0,
+  _tmpV3: new THREE.Vector3(),
+  _tmpV3b: new THREE.Vector3(),
 
-  tmpVec: new THREE.Vector3(),
-  tmpQuat: new THREE.Quaternion(),
-  tmpMat: new THREE.Matrix4(),
-
-  // stick values per controller
-  axes: [
-    { x: 0, y: 0, yaw: 0 },
-    { x: 0, y: 0, yaw: 0 },
-  ],
-
-  init({ renderer, scene, camera }) {
+  init({ renderer, camera, player, colliders = [], bounds = null, teleport = null, spawn = null }) {
     this.renderer = renderer;
-    this.scene = scene;
     this.camera = camera;
+    this.player = player;
+    this.colliders = colliders;
+    this.bounds = bounds;
+    this.teleport = teleport;
 
-    // Build the rig that will move around the world
-    this.rig = new THREE.Group();
-    this.rig.name = "PlayerRig";
-    this.rig.position.set(0, 0, 0);
+    // hard lock player y (standing always)
+    this.player.position.y = 0;
 
-    this.head = new THREE.Group();
-    this.head.name = "HeadAnchor";
-    this.head.add(camera);
+    // initial yaw
+    this._yaw = 0;
+    this.player.rotation.set(0, this._yaw, 0);
 
-    this.rig.add(this.head);
-    scene.add(this.rig);
-
-    // Controllers
-    this.c0 = renderer.xr.getController(0);
-    this.c1 = renderer.xr.getController(1);
-    this.c0.name = "XRController0";
-    this.c1.name = "XRController1";
-
-    // Grips (controller models)
-    const cmf = new XRControllerModelFactory();
-    this.g0 = renderer.xr.getControllerGrip(0);
-    this.g1 = renderer.xr.getControllerGrip(1);
-    this.g0.add(cmf.createControllerModel(this.g0));
-    this.g1.add(cmf.createControllerModel(this.g1));
-    this.g0.name = "XRGrip0";
-    this.g1.name = "XRGrip1";
-
-    // Hands (hand tracking)
-    const hmf = new XRHandModelFactory();
-    this.h0 = renderer.xr.getHand(0);
-    this.h1 = renderer.xr.getHand(1);
-    this.h0.name = "XRHand0";
-    this.h1.name = "XRHand1";
-    this.h0.add(hmf.createHandModel(this.h0, "mesh"));
-    this.h1.add(hmf.createHandModel(this.h1, "mesh"));
-
-    // ✅ CRITICAL: parent everything to the rig (NOT the scene)
-    this.rig.add(this.c0, this.c1, this.g0, this.g1, this.h0, this.h1);
-
-    // Lasers (rays)
-    this.rays = [
-      this._makeRay("Ray0"),
-      this._makeRay("Ray1"),
-    ];
-    this.c0.add(this.rays[0]);
-    this.c1.add(this.rays[1]);
-
-    // Event hookup
-    this._bindController(this.c0, 0);
-    this._bindController(this.c1, 1);
-
-    // Make sure rays are visible on start
-    this._setRayVisible(0, true);
-    this._setRayVisible(1, true);
+    // spawn
+    if (spawn && spawn.position) {
+      this.player.position.set(spawn.position.x, 0, spawn.position.z);
+      this._yaw = spawn.yaw || 0;
+      this.player.rotation.y = this._yaw;
+    }
   },
 
-  // Create a simple laser line in controller local space
-  _makeRay(name) {
-    const geom = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, -1),
-    ]);
-    const mat = new THREE.LineBasicMaterial({ color: 0x00ffaa });
-    const line = new THREE.Line(geom, mat);
-    line.name = name;
-    line.scale.z = 8; // length
-    line.frustumCulled = false;
-    return line;
-  },
-
-  _setRayVisible(i, on) {
-    if (!this.rays[i]) return;
-    this.rays[i].visible = !!on;
-  },
-
-  _bindController(ctrl, index) {
-    ctrl.addEventListener("connected", (e) => {
-      // e.data.gamepad exists on controllers
-      // Helpful for debugging:
-      // console.log("Controller connected", index, e.data);
-    });
-
-    ctrl.addEventListener("disconnected", () => {
-      this.axes[index] = { x: 0, y: 0, yaw: 0 };
-    });
-  },
-
-  // Call every frame
+  // Call every frame with dt seconds
   update(dt) {
-    if (!this.renderer?.xr?.isPresenting) return;
+    // lock standing height (prevents sit/stand changing game height)
+    // We do NOT move the headset; we keep the RIG at stable ground Y.
+    this.player.position.y = 0;
 
-    // Read gamepad axes from XR session inputSources
-    this._pollGamepads();
+    const session = this.renderer.xr?.getSession?.();
+    if (!session) return; // desktop can be handled separately if you want
 
-    // Apply locomotion using LEFT stick by default.
-    // If you want “everything on left controller”, keep it this way.
-    this._applyMovement(dt, /*controllerIndex=*/0);
-
-    // Optional: allow yaw from right stick X (controller 1)
-    this._applyYaw(dt, /*controllerIndex=*/1);
-  },
-
-  _pollGamepads() {
-    const session = this.renderer.xr.getSession?.();
-    if (!session) return;
-
-    // Reset
-    for (let i = 0; i < 2; i++) this.axes[i] = { x: 0, y: 0, yaw: 0 };
-
-    // Find up to 2 input sources with gamepads
-    let found = 0;
-    for (const src of session.inputSources) {
-      if (!src || !src.gamepad) continue;
+    // Find gamepads
+    const sources = session.inputSources || [];
+    let leftGP = null, rightGP = null;
+    for (const src of sources) {
       const gp = src.gamepad;
+      if (!gp) continue;
+      // Heuristic: left hand has handedness "left"
+      if (src.handedness === "left") leftGP = gp;
+      if (src.handedness === "right") rightGP = gp;
+    }
 
-      // Heuristic: map first two we find into index 0/1
-      const idx = found;
-      found++;
-      if (idx > 1) break;
+    // If missing, just bail
+    if (!leftGP && !rightGP) return;
 
-      // Most Oculus/Quest controllers: axes[2], axes[3] are thumbstick
-      const axX = gp.axes?.[2] ?? gp.axes?.[0] ?? 0;
-      const axY = gp.axes?.[3] ?? gp.axes?.[1] ?? 0;
+    // Axis mapping (Quest usually):
+    // left stick = axes[2], axes[3]
+    // right stick = axes[2], axes[3] on right controller
+    const lx = leftGP ? (leftGP.axes[2] || 0) : 0;
+    const ly = leftGP ? (leftGP.axes[3] || 0) : 0;
 
-      // Save: x = strafe, y = forward/back (note: many devices use -Y forward)
-      this.axes[idx].x = axX;
-      this.axes[idx].y = axY;
+    const rx = rightGP ? (rightGP.axes[2] || 0) : 0;
+
+    // Buttons:
+    // trigger = buttons[0].value, grip = buttons[1].value (common Quest mapping)
+    const lTrigger = leftGP ? (leftGP.buttons[0]?.value || 0) : 0;
+    const lGrip = leftGP ? (leftGP.buttons[1]?.value || 0) : 0;
+
+    // --- TELEPORT: hold LEFT trigger, aim with LEFT stick, release to jump ---
+    this._handleTeleport(dt, lTrigger, lx, ly);
+
+    // If teleport is active, do not locomote
+    if (this._tpHolding) {
+      // snap turn still allowed while holding teleport? (I keep it allowed)
+      this._handleSnapTurn(dt, rx);
+      return;
+    }
+
+    // --- SNAP TURN: right stick left/right => 45 deg ---
+    this._handleSnapTurn(dt, rx);
+
+    // --- MOVE: left stick ---
+    const dead = 0.15;
+    let mx = Math.abs(lx) > dead ? lx : 0;
+    let mz = Math.abs(ly) > dead ? ly : 0;
+
+    // In VR, forward is -Z on stick (ly negative)
+    // We'll treat ly as forward/back directly.
+    const inputLen = Math.hypot(mx, mz);
+    if (inputLen > 1) {
+      mx /= inputLen;
+      mz /= inputLen;
+    }
+
+    // Sprint if grip held a bit
+    const sprint = lGrip > 0.35 ? this.sprintMult : 1.0;
+
+    // Convert stick move into world direction using yaw
+    const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0,1,0), this._yaw);
+    const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0,1,0), this._yaw);
+
+    // forward/back uses mz (ly)
+    const move = new THREE.Vector3()
+      .addScaledVector(right, mx)
+      .addScaledVector(forward, mz);
+
+    if (move.lengthSq() > 0.0001) {
+      move.normalize().multiplyScalar(this.moveSpeed * sprint * dt);
+      this._moveWithCollision(move);
     }
   },
 
-  _applyMovement(dt, controllerIndex = 0) {
-    const a = this.axes[controllerIndex];
-    if (!a) return;
+  _handleSnapTurn(dt, rx) {
+    this._snapT -= dt;
+    if (this._snapT > 0) return;
 
-    // Deadzone
-    let x = a.x;
-    let y = a.y;
+    const dead = 0.55;
+    if (rx > dead) {
+      this._yaw -= this.snapAngle;
+      this.player.rotation.y = this._yaw;
+      this._snapT = this.snapCooldown;
+    } else if (rx < -dead) {
+      this._yaw += this.snapAngle;
+      this.player.rotation.y = this._yaw;
+      this._snapT = this.snapCooldown;
+    }
+  },
 
-    if (Math.abs(x) < this.deadZone) x = 0;
-    if (Math.abs(y) < this.deadZone) y = 0;
+  _handleTeleport(dt, triggerValue, lx, ly) {
+    if (!this.teleport || !this.teleport.rings) return;
 
-    // If both zero, nothing to do
-    if (!x && !y) return;
+    const startHold = triggerValue > 0.20;
+    const releasing = this._tpHolding && triggerValue < 0.12;
 
-    // Convert stick to desired direction (Quest typically: forward = -y)
-    // So "forward" magnitude:
-    let forward = -y;
-    let strafe = x;
+    if (startHold && !this._tpHolding) {
+      this._tpHolding = true;
+      this._tpHoldValue = triggerValue;
+      this.teleport.rings.visible = true;
 
-    // Fix reverse left/right (your request)
-    // If you still feel reversed after this update, flip invertStrafe=true.
-    if (!this.invertStrafe) {
-      // normal: strafe right is +x
-      // keep as is
-    } else {
-      strafe *= -1;
+      // initial target: forward a bit
+      this.teleportTarget = this.player.position.clone().add(new THREE.Vector3(0,0,-1).applyAxisAngle(new THREE.Vector3(0,1,0), this._yaw).multiplyScalar(2.0));
     }
 
-    // Optional: snap to 45° increments
-    if (this.snap45) {
-      const angle = Math.atan2(strafe, forward); // radians
-      const mag = Math.min(1, Math.sqrt(strafe * strafe + forward * forward));
-      const step = Math.PI / 4; // 45°
-      const snapped = Math.round(angle / step) * step;
-      forward = Math.cos(snapped) * mag;
-      strafe = Math.sin(snapped) * mag;
+    if (this._tpHolding) {
+      // aim with stick: target around player within radius
+      const dead = 0.12;
+      const ax = Math.abs(lx) > dead ? lx : 0;
+      const az = Math.abs(ly) > dead ? ly : 0;
+
+      const aim = new THREE.Vector3(ax, 0, az);
+      if (aim.lengthSq() > 0.0001) {
+        // stick "forward" is negative ly, but here we want it intuitive for target,
+        // so we invert z
+        aim.z *= 1;
+        aim.normalize();
+
+        // rotate by yaw so it matches your facing direction
+        aim.applyAxisAngle(new THREE.Vector3(0,1,0), this._yaw);
+
+        const dist = 4.5; // teleport range
+        this.teleportTarget = this.player.position.clone().add(aim.multiplyScalar(dist));
+      }
+
+      // clamp to room bounds
+      if (this.bounds && this.teleportTarget) {
+        this.teleportTarget.x = THREE.MathUtils.clamp(this.teleportTarget.x, this.bounds.minX, this.bounds.maxX);
+        this.teleportTarget.z = THREE.MathUtils.clamp(this.teleportTarget.z, this.bounds.minZ, this.bounds.maxZ);
+      }
+
+      // keep target out of colliders
+      if (this.teleportTarget) {
+        this._pushOutOfColliders(this.teleportTarget);
+      }
+
+      // update rings position
+      this.teleport.rings.position.set(this.teleportTarget.x, 0.01, this.teleportTarget.z);
+
+      // release to teleport
+      if (releasing) {
+        this.player.position.set(this.teleportTarget.x, 0, this.teleportTarget.z);
+        this._tpHolding = false;
+        this.teleport.rings.visible = false;
+      }
     }
-
-    // Movement direction relative to headset yaw (feels natural)
-    // Get headset yaw only
-    this.camera.getWorldQuaternion(this.tmpQuat);
-    const e = new THREE.Euler().setFromQuaternion(this.tmpQuat, "YXZ");
-    const yaw = e.y;
-
-    const dir = this.tmpVec.set(strafe, 0, forward);
-    dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-    dir.normalize();
-
-    const speed = this.moveSpeed;
-    this.rig.position.addScaledVector(dir, speed * dt);
   },
 
-  _applyYaw(dt, controllerIndex = 1) {
-    const a = this.axes[controllerIndex];
-    if (!a) return;
+  _moveWithCollision(delta) {
+    // step X then Z for stable collision
+    const p = this.player.position;
 
-    // Use right stick X for yaw, if present
-    let x = a.x;
-    if (Math.abs(x) < this.deadZone) x = 0;
-    if (!x) return;
+    const nextX = this._tmpV3.copy(p).add(new THREE.Vector3(delta.x, 0, 0));
+    this._resolveCollisions(nextX);
+    p.x = nextX.x;
 
-    // Smooth yaw rotate rig around Y
-    this.rig.rotation.y -= x * this.rotateSpeed * dt;
+    const nextZ = this._tmpV3.copy(p).add(new THREE.Vector3(0, 0, delta.z));
+    this._resolveCollisions(nextZ);
+    p.z = nextZ.z;
+
+    // bounds clamp
+    if (this.bounds) {
+      p.x = THREE.MathUtils.clamp(p.x, this.bounds.minX, this.bounds.maxX);
+      p.z = THREE.MathUtils.clamp(p.z, this.bounds.minZ, this.bounds.maxZ);
+    }
   },
 
-  // Helper you can call from world.js to set spawn safely
-  setSpawn(x, y, z) {
-    if (!this.rig) return;
-    this.rig.position.set(x, y, z);
+  _resolveCollisions(pos) {
+    // push player circle out of AABBs
+    for (const b of this.colliders) {
+      if (!b || !b.min || !b.max) continue;
+
+      const nearestX = THREE.MathUtils.clamp(pos.x, b.min.x, b.max.x);
+      const nearestZ = THREE.MathUtils.clamp(pos.z, b.min.z, b.max.z);
+
+      const dx = pos.x - nearestX;
+      const dz = pos.z - nearestZ;
+      const d2 = dx*dx + dz*dz;
+
+      const r = this.playerRadius;
+      if (d2 < r*r) {
+        const d = Math.max(0.0001, Math.sqrt(d2));
+        const push = (r - d) + 0.001;
+        pos.x += (dx / d) * push;
+        pos.z += (dz / d) * push;
+      }
+    }
   },
 
-  // Call this once you confirm you want hands visible/hidden
-  setHandsEnabled(on) {
-    if (this.h0) this.h0.visible = !!on;
-    if (this.h1) this.h1.visible = !!on;
-  },
-
-  setControllersEnabled(on) {
-    if (this.g0) this.g0.visible = !!on;
-    if (this.g1) this.g1.visible = !!on;
-    if (this.c0) this.c0.visible = !!on;
-    if (this.c1) this.c1.visible = !!on;
-  },
+  _pushOutOfColliders(pos) {
+    // Same as resolve but for teleport target (small radius)
+    const savedRadius = this.playerRadius;
+    this.playerRadius = 0.30;
+    this._resolveCollisions(pos);
+    this.playerRadius = savedRadius;
+  }
 };

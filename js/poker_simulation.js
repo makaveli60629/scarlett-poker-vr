@@ -1,651 +1,528 @@
-// /js/poker_simulation.js — Skylark Poker VR — Update 9.0
-// 16 bots total:
-// - 8 seated at table (active match)
-// - 8 roaming lobby bots (crowd)
-// Rules:
-// - Active bots play hands slowly
-// - When a seated bot busts (stack <= 0): leave seat -> join lobby roam
-// - Replace seat with a lobby bot (always keep 8 seated)
-// - When match ends: winner wears crown and walks around for 60 seconds,
-//   THEN a new match begins.
+// /js/poker_simulation.js — Watchable Poker Sim (9.0)
+// - 8 bots by default
+// - Player joins a seat by Interactions.setPlayerSeat(seatIndex)
+// - If player not seated => no player cards
+// - Slow step timing so you can SEE dealing + actions
 
 import * as THREE from "./three.js";
 
 export class PokerSimulation {
-  constructor(opts = {}) {
-    this.scene = null;
-    this.camera = opts.camera || null;
+  constructor({ camera, tableCenter, tableAnchors, seats, onLeaderboard }) {
+    this.camera = camera;
+    this.tableCenter = tableCenter;
+    this.anchors = tableAnchors;
+    this.seats = seats;
+    this.onLeaderboard = onLeaderboard;
 
-    this.tableCenter = opts.tableCenter || new THREE.Vector3(0, 0, -4.5);
-    this.onLeaderboard = opts.onLeaderboard || (() => {});
+    this.players = [];
+    this.playerSeat = -1;
 
-    // pacing (slow + watchable)
-    this.stepDelay = 1.25;
-    this._stateTimer = 0;
+    this.t = 0;
+    this.stepTimer = 0;
+    this.step = 0;
 
-    // match config
-    this.handsPerMatch = 10;
-    this.handIndex = 0;
-
-    // chips
-    this.startingStack = 1000; // per your latest request
-    this.smallBlind = 25;
-    this.bigBlind = 50;
-
-    // 16 bots
-    this.totalBots = 16;
-    this.seatedCount = 8;
-
-    this.bots = [];       // all bots
-    this.seated = [];     // references to bots at table
-    this.roamers = [];    // lobby walkers
+    this.pot = 0;
+    this.phase = "idle";
 
     this.community = [];
-    this.pot = 0;
+    this.turnIndex = 0;
 
-    this.tableGroup = new THREE.Group();
-    this.uiGroup = new THREE.Group();
-    this.lobbyGroup = new THREE.Group();
-
-    // visuals
-    this.cardSize = { w: 0.34, h: 0.48 };
-    this.nameHoverY = 1.75;
-    this.cardsOverHeadY = 2.25;
-
-    // crown + victory lap
-    this._crown = null;
-    this._victory = null; // { bot, t, duration }
-
-    this._rng = Math.random;
+    this.visual = {
+      labels: [],
+      cards: [],
+      commCards: [],
+      potLabel: null,
+      banner: null
+    };
   }
 
-  async build(scene) {
+  build(scene) {
     this.scene = scene;
 
-    this.buildTable();
-    this.buildBots();
-    this.buildUI();
+    // Create bots positioned at seats
+    this.players = [];
+    for (let i = 0; i < this.seats.length; i++) {
+      const p = makeBot(i);
+      p.seatIndex = i;
+      p.chips = 1000;
+      p.inHand = true;
+      p.isPlayer = false;
+      this.players.push(p);
 
-    this.scene.add(this.tableGroup);
-    this.scene.add(this.uiGroup);
-    this.scene.add(this.lobbyGroup);
+      // Bot mesh (pill w/ color)
+      const mesh = botMesh(i);
+      this.scene.add(mesh);
+      p.mesh = mesh;
 
-    // assign initial seating + roaming
-    this.assignInitialRoles();
+      // Put bot on chair seat target
+      const pos = new THREE.Vector3();
+      this.seats[i].sitTarget.getWorldPosition(pos);
+      mesh.position.set(pos.x, 0, pos.z);
+      mesh.position.y = 0.0; // stands on floor
+      mesh.lookAt(this.tableCenter.x, 0.0, this.tableCenter.z);
 
-    // start match
-    this.startNewHand(true);
-  }
-
-  buildTable() {
-    const g = this.tableGroup;
-    g.position.copy(this.tableCenter);
-
-    // table base/top
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.0, 1.25, 0.7, 32),
-      new THREE.MeshStandardMaterial({ color: 0x101010, roughness: 0.9 })
-    );
-    base.position.y = 0.35;
-
-    const top = new THREE.Mesh(
-      new THREE.CylinderGeometry(3.0, 3.15, 0.22, 48),
-      new THREE.MeshStandardMaterial({ color: 0x145c3a, roughness: 0.95 })
-    );
-    top.position.y = 1.05;
-
-    // betting ring
-    const line = new THREE.Mesh(
-      new THREE.TorusGeometry(2.15, 0.045, 12, 90),
-      new THREE.MeshStandardMaterial({
-        color: 0xffd27a,
-        emissive: 0xffd27a,
-        emissiveIntensity: 0.7,
-        roughness: 0.35
-      })
-    );
-    line.rotation.x = Math.PI / 2;
-    line.position.y = 1.09;
-
-    g.add(base, top, line);
-  }
-
-  buildBots() {
-    const names = [
-      "♠ King of Spades","♠ Queen of Spades","♠ Jack of Spades","♠ Ace of Spades",
-      "♥ King of Hearts","♥ Queen of Hearts","♥ Jack of Hearts","♥ Ace of Hearts",
-      "♦ King of Diamonds","♦ Queen of Diamonds","♦ Jack of Diamonds","♦ Ace of Diamonds",
-      "♣ King of Clubs","♣ Queen of Clubs","♣ Jack of Clubs","♣ Ace of Clubs"
-    ];
-
-    // bot visuals (pill + color bands)
-    const colors = [
-      0x9aa1ab, 0xff2bd6, 0x2bd7ff, 0x00ffaa,
-      0xffd27a, 0xa98cff, 0xff6b2b, 0x55ff99
-    ];
-
-    for (let i = 0; i < this.totalBots; i++) {
-      const bot = new THREE.Mesh(
-        new THREE.CapsuleGeometry(0.18, 0.55, 6, 12),
-        new THREE.MeshStandardMaterial({ color: colors[i % colors.length], roughness: 0.6, metalness: 0.1 })
-      );
-
-      // shirt band
-      const band = new THREE.Mesh(
-        new THREE.TorusGeometry(0.17, 0.03, 10, 24),
-        new THREE.MeshStandardMaterial({ color: 0x121218, roughness: 0.85 })
-      );
-      band.rotation.x = Math.PI / 2;
-      band.position.y = 0.12;
-      bot.add(band);
-
-      // data
-      const tag = this.makeTextTag(names[i], 0.45, "#00ffaa");
-      const stackTag = this.makeTextTag(`$${this.startingStack}`, 0.34, "#ffd27a");
-
-      const handGroup = new THREE.Group();
-      handGroup.visible = true;
-
-      const chips = new THREE.Group(); // chips shown near seat on table
-
-      this.bots.push({
-        id: i,
-        name: names[i],
-        mesh: bot,
-        tag,
-        stackTag,
-        handGroup,
-        chips,
-        stack: this.startingStack,
-        seated: false,
-        inHand: false,
-        busted: false,
-        seatIndex: -1,
-        seatPos: new THREE.Vector3(),
-        roamTarget: new THREE.Vector3(),
-        roamT: 0
-      });
-
-      // add to lobby by default (we assign later)
-      this.lobbyGroup.add(bot, tag, stackTag, handGroup);
+      // Label above head
+      const label = makeTag(`Bot ${i + 1}\n$${p.chips}`, 0.55);
+      label.position.set(0, 1.55, 0);
+      mesh.add(label);
+      p.label = label;
     }
+
+    // Pot label (above community)
+    this.visual.potLabel = makeBillboardText("POT: $0", 0.55, 0.2);
+    this.visual.potLabel.position.copy(this.anchors.pot.position);
+    this.scene.add(this.visual.potLabel);
+
+    // Banner (phase / whose turn)
+    this.visual.banner = makeBillboardText("WAITING FOR PLAYER…", 0.9, 0.25);
+    this.visual.banner.position.copy(this.anchors.banner.position);
+    this.scene.add(this.visual.banner);
+
+    // Start loop but stay idle until player sits
+    this.resetHand();
   }
 
-  assignInitialRoles() {
-    // first 8 seated, rest roam
-    this.seated = [];
-    this.roamers = [];
+  setPlayerSeat(seatIndex) {
+    this.playerSeat = seatIndex;
 
-    for (let i = 0; i < this.bots.length; i++) {
-      const b = this.bots[i];
-      b.stack = this.startingStack;
-      b.busted = false;
+    // If player joins, mark that seat as player and remove bot visually from that seat.
+    // We’ll “park” the replaced bot in lobby later; for now just hide it.
+    for (const p of this.players) p.isPlayer = false;
 
-      if (i < this.seatedCount) {
-        this.setBotSeated(b, i);
-        this.seated.push(b);
-      } else {
-        this.setBotRoaming(b);
-        this.roamers.push(b);
+    if (seatIndex >= 0) {
+      const botAtSeat = this.players.find(p => p.seatIndex === seatIndex);
+      if (botAtSeat) {
+        botAtSeat.hiddenForPlayer = true;
+        botAtSeat.mesh.visible = false; // player takes that seat
       }
+      // The player is not a mesh (you are the camera) — so we just flag seat
+      this.visual.banner.userData.setText("READY — STARTING HAND…");
+      this.resetHand(true);
+    } else {
+      // player left
+      for (const p of this.players) {
+        p.hiddenForPlayer = false;
+        p.mesh.visible = true;
+      }
+      this.visual.banner.userData.setText("WAITING FOR PLAYER…");
+      this.resetHand(false);
     }
   }
 
-  setBotSeated(bot, seatIndex) {
-    bot.seated = true;
-    bot.seatIndex = seatIndex;
+  resetHand(startIfPlayer = false) {
+    this.phase = startIfPlayer ? "predeal" : "idle";
+    this.step = 0;
+    this.stepTimer = 0;
 
-    const radius = 3.55;
-    const angle = (seatIndex / this.seatedCount) * Math.PI * 2;
-
-    bot.seatPos.set(
-      this.tableCenter.x + Math.cos(angle) * radius,
-      0,
-      this.tableCenter.z + Math.sin(angle) * radius
-    );
-
-    // position bot so feet are on floor (no sinking)
-    bot.mesh.position.copy(bot.seatPos);
-    bot.mesh.position.y = 0.95; // tuned for standing near chair height look
-
-    // face table
-    bot.mesh.lookAt(new THREE.Vector3(this.tableCenter.x, bot.mesh.position.y, this.tableCenter.z));
-
-    // tag positions (combined readable stack)
-    bot.tag.position.set(bot.seatPos.x, this.nameHoverY, bot.seatPos.z);
-    bot.stackTag.position.set(bot.seatPos.x, this.nameHoverY - 0.35, bot.seatPos.z);
-
-    // cards over head (offset so it doesn’t block tags)
-    bot.handGroup.position.set(bot.seatPos.x, this.cardsOverHeadY, bot.seatPos.z);
-
-    // chips area (ON TABLE near community, not floating in air)
-    bot.chips.position.set(
-      bot.seatPos.x * 0.55 + this.tableCenter.x * 0.45,
-      1.10,
-      bot.seatPos.z * 0.55 + this.tableCenter.z * 0.45
-    );
-
-    // ensure groups are in table group
-    this.tableGroup.add(bot.mesh, bot.tag, bot.stackTag, bot.handGroup, bot.chips);
-  }
-
-  setBotRoaming(bot) {
-    bot.seated = false;
-    bot.seatIndex = -1;
-
-    // random roam start around lobby
-    const r = 7 + Math.random() * 4;
-    const a = Math.random() * Math.PI * 2;
-
-    bot.mesh.position.set(this.tableCenter.x + Math.cos(a) * r, 0.95, this.tableCenter.z + Math.sin(a) * r);
-    bot.roamTarget.copy(bot.mesh.position);
-    bot.roamT = 0;
-
-    bot.tag.position.set(bot.mesh.position.x, this.nameHoverY, bot.mesh.position.z);
-    bot.stackTag.position.set(bot.mesh.position.x, this.nameHoverY - 0.35, bot.mesh.position.z);
-    bot.handGroup.position.set(bot.mesh.position.x, this.cardsOverHeadY, bot.mesh.position.z);
-
-    // hide hand for roamers (so it’s not visual noise)
-    bot.handGroup.visible = false;
-
-    this.lobbyGroup.add(bot.mesh, bot.tag, bot.stackTag, bot.handGroup);
-  }
-
-  buildUI() {
-    // Combined center HUD above community area (NOT blocking players)
-    this.hud = this.makeTextTag("POT: $0  |  PREFLOP", 0.62, "#2bd7ff");
-    this.hud.position.set(this.tableCenter.x, 2.25, this.tableCenter.z);
-    this.uiGroup.add(this.hud);
-  }
-
-  makeTextTag(text, scale = 0.4, color = "#ffffff") {
-    const canvas = document.createElement("canvas");
-    canvas.width = 1024;
-    canvas.height = 256;
-    const ctx = canvas.getContext("2d");
-
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    ctx.font = "bold 84px Arial";
-    ctx.fillStyle = color;
-    ctx.fillText(text, 40, 160);
-
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
-
-    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2.9 * scale, 0.7 * scale), mat);
-    mesh.userData = { canvas, ctx, tex };
-    return mesh;
-  }
-
-  setTag(mesh, text, color = "#ffffff") {
-    const { canvas, ctx, tex } = mesh.userData;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    ctx.font = "bold 84px Arial";
-    ctx.fillStyle = color;
-    ctx.fillText(text, 40, 160);
-
-    tex.needsUpdate = true;
-  }
-
-  startNewHand(resetMatch = false) {
-    if (this._victory) return; // pause during crown walk
-
-    if (resetMatch) this.handIndex = 0;
-
-    this.clearCrown();
     this.pot = 0;
     this.community = [];
-    this._phase = "PREFLOP";
-    this._stateTimer = 0;
+    this.turnIndex = 0;
 
-    // reset everyone currently seated
-    for (const p of this.seated) {
-      p.inHand = !p.busted && p.stack > 0;
+    for (const p of this.players) {
+      p.inHand = true;
       p.bet = 0;
-      p.hole = this.dealHole();
-      this.renderHoleOverHead(p, true);
-      this.refreshChips(p);
-      this.updateStackTag(p);
+      p.hand = [];
     }
 
-    this.postBlinds();
-
-    this.setTag(this.hud, `POT: $${this.pot}  |  HAND ${this.handIndex + 1}/${this.handsPerMatch}`, "#2bd7ff");
-
-    // leaderboard callback
-    const standings = [...this.seated].sort((a, b) => b.stack - a.stack);
-    this.onLeaderboard([
-      `Boss Tournament — Hand ${this.handIndex + 1}/${this.handsPerMatch}`,
-      `1) ${standings[0].name} — $${standings[0].stack}`,
-      `2) ${standings[1].name} — $${standings[1].stack}`,
-      `3) ${standings[2].name} — $${standings[2].stack}`,
-      `4) ${standings[3].name} — $${standings[3].stack}`,
-    ]);
-  }
-
-  dealHole() {
-    const ranks = ["A","K","Q","J","10","9","8","7","6","5","4","3","2"];
-    const suits = ["♠","♥","♦","♣"];
-    const pick = () => ({ r: ranks[(Math.random()*ranks.length)|0], s: suits[(Math.random()*suits.length)|0] });
-    return [pick(), pick()];
-  }
-
-  renderHoleOverHead(player, visible) {
-    while (player.handGroup.children.length) player.handGroup.remove(player.handGroup.children[0]);
-    player.handGroup.visible = !!visible;
-
-    const makeCard = (c) => {
-      const canvas = document.createElement("canvas");
-      canvas.width = 256;
-      canvas.height = 384;
-      const ctx = canvas.getContext("2d");
-
-      ctx.fillStyle = "#f5f5f5";
-      ctx.fillRect(0, 0, 256, 384);
-
-      const isRed = (c.s === "♥" || c.s === "♦");
-      const suitColor = isRed ? "#d01818" : "#111111";
-
-      ctx.font = "bold 84px Arial";
-      ctx.fillStyle = suitColor;
-      ctx.fillText(c.r, 18, 92);
-
-      ctx.font = "bold 92px Arial";
-      ctx.fillText(c.s, 18, 175);
-
-      ctx.font = "bold 140px Arial";
-      ctx.globalAlpha = 0.85;
-      ctx.fillText(c.s, 82, 260);
-      ctx.globalAlpha = 1;
-
-      const tex = new THREE.CanvasTexture(canvas);
-      tex.colorSpace = THREE.SRGBColorSpace;
-
-      return new THREE.Mesh(
-        new THREE.PlaneGeometry(this.cardSize.w, this.cardSize.h),
-        new THREE.MeshBasicMaterial({ map: tex })
-      );
-    };
-
-    const c0 = makeCard(player.hole[0]);
-    const c1 = makeCard(player.hole[1]);
-
-    // offset so it doesn’t cover tags
-    c0.position.set(-0.22, 0, 0);
-    c1.position.set( 0.22, 0, 0);
-
-    player.handGroup.add(c0, c1);
-  }
-
-  updateStackTag(p) {
-    this.setTag(p.stackTag, `$${p.stack}`, "#ffd27a");
-  }
-
-  postBlinds() {
-    const sb = this.seated[this.handIndex % this.seated.length];
-    const bb = this.seated[(this.handIndex + 1) % this.seated.length];
-    this.takeBet(sb, this.smallBlind);
-    this.takeBet(bb, this.bigBlind);
-  }
-
-  takeBet(p, amount) {
-    if (!p.inHand) return;
-    const bet = Math.min(amount, p.stack);
-    p.stack -= bet;
-    p.bet = (p.bet || 0) + bet;
-    this.pot += bet;
-    this.updateStackTag(p);
-    this.refreshChips(p);
-  }
-
-  refreshChips(p) {
-    while (p.chips.children.length) p.chips.remove(p.chips.children[0]);
-
-    const denoms = [
-      { v: 25,  c: 0xffffff },
-      { v: 100, c: 0xff2bd6 },
-      { v: 250, c: 0x2bd7ff },
-      { v: 500, c: 0xffd27a },
-    ];
-
-    let remaining = p.stack;
-    let stackIndex = 0;
-
-    for (const d of denoms.reverse()) {
-      const count = Math.min(10, Math.floor(remaining / d.v));
-      if (count <= 0) continue;
-      remaining -= count * d.v;
-
-      for (let i = 0; i < count; i++) {
-        const chip = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.07, 0.07, 0.02, 18),
-          new THREE.MeshStandardMaterial({ color: d.c, roughness: 0.5, metalness: 0.2 })
-        );
-        chip.position.set(stackIndex * 0.10, 0.02 + i * 0.022, 0);
-        p.chips.add(chip);
-      }
-      stackIndex += 1.0;
-    }
-  }
-
-  awardWinner(winner) {
-    winner.stack += this.pot;
-    this.pot = 0;
-    this.updateStackTag(winner);
-    this.refreshChips(winner);
-    this.showCrown(winner);
-    this.setTag(this.hud, `${winner.name} wins!  |  POT PAID`, "#00ffaa");
-  }
-
-  showCrown(bot) {
-    this.clearCrown();
-
-    const crown = new THREE.Mesh(
-      new THREE.ConeGeometry(0.14, 0.22, 12),
-      new THREE.MeshStandardMaterial({
-        color: 0xffd27a,
-        emissive: 0xffd27a,
-        emissiveIntensity: 1.35,
-        roughness: 0.3,
-        metalness: 0.4,
-      })
-    );
-
-    const glow = new THREE.PointLight(0xffd27a, 0.9, 6);
-
-    crown.position.copy(bot.mesh.position);
-    crown.position.y = bot.mesh.position.y + 0.75;
-    glow.position.copy(crown.position);
-
-    this.tableGroup.add(crown, glow);
-    this._crown = { crown, glow, bot };
-  }
-
-  clearCrown() {
-    if (!this._crown) return;
-    this.tableGroup.remove(this._crown.crown);
-    this.tableGroup.remove(this._crown.glow);
-    this._crown = null;
-  }
-
-  // Bust: move to lobby, pull a roamer into seat
-  handleBustsAndReplace() {
-    for (let i = 0; i < this.seated.length; i++) {
-      const p = this.seated[i];
-      if (p.stack > 0) continue;
-
-      p.busted = true;
-      p.inHand = false;
-
-      // Move busted to roamer crowd
-      this.setBotRoaming(p);
-      this.roamers.push(p);
-
-      // Replace with roamer (if any)
-      const replacement = this.roamers.shift();
-      if (replacement) {
-        replacement.stack = this.startingStack;
-        replacement.busted = false;
-        replacement.inHand = true;
-
-        this.setBotSeated(replacement, i);
-        this.seated[i] = replacement;
-      }
-    }
-  }
-
-  startVictoryLap(winner) {
-    // Winner walks in lobby with crown for 60 seconds
-    this._victory = { bot: winner, t: 0, duration: 60 };
-
-    // Move winner out of seat into lobby
-    this.setBotRoaming(winner);
-    if (!this.roamers.includes(winner)) this.roamers.push(winner);
-
-    // Pull a roamer into winner’s empty seat to keep table full
-    // (so table always has 8 “playing” bots even during lap)
-    const seatIdx = 0; // pick seat 0 as the “King seat” for consistency
-    const replacement = this.roamers.shift();
-    if (replacement && replacement !== winner) {
-      replacement.stack = this.startingStack;
-      replacement.busted = false;
-      this.setBotSeated(replacement, seatIdx);
-      this.seated[seatIdx] = replacement;
-    }
-
-    // Crown will follow the winner during lap
+    this._clearVisualCards();
+    this._updateTags();
+    this._updatePot();
   }
 
   update(dt) {
-    // Face tags to camera
-    if (this.camera) {
-      for (const b of this.bots) {
-        b.tag.lookAt(this.camera.position);
-        b.stackTag.lookAt(this.camera.position);
-        if (b.handGroup.visible) b.handGroup.lookAt(this.camera.position);
-      }
-      this.hud.lookAt(this.camera.position);
-    }
+    this.t += dt;
 
-    // Crown follow
-    if (this._crown) {
-      const p = this._crown.bot;
-      this._crown.crown.position.copy(p.mesh.position);
-      this._crown.crown.position.y = p.mesh.position.y + 0.75;
-      this._crown.glow.position.copy(this._crown.crown.position);
-      this._crown.glow.intensity = 0.8 + Math.sin(performance.now() * 0.006) * 0.2;
-    }
+    // billboard labels face camera
+    this.visual.potLabel?.lookAt(this.camera.position);
+    this.visual.banner?.lookAt(this.camera.position);
 
-    // Roamer wander
-    this.updateRoamers(dt);
+    // idle until player is seated
+    if (this.phase === "idle") return;
 
-    // Victory lap logic
-    if (this._victory) {
-      this._victory.t += dt;
+    this.stepTimer += dt;
 
-      // Keep winner crown for full duration
-      this.setTag(this.hud, `MATCH WINNER WALKING: ${this._victory.bot.name}`, "#ffd27a");
+    // SLOW timing so you can watch it
+    const WAIT = 0.85;
+    if (this.stepTimer < WAIT) return;
+    this.stepTimer = 0;
 
-      if (this._victory.t >= this._victory.duration) {
-        // end lap, start fresh match
-        this._victory = null;
-
-        // re-seat first 8 non-busted bots (fresh stacks)
-        this.assignInitialRoles();
-        this.startNewHand(true);
-      }
+    // State machine
+    if (this.phase === "predeal") {
+      this.visual.banner.userData.setText("DEALING HOLE CARDS…");
+      this._dealHoleCards();
+      this.phase = "bet1";
       return;
     }
 
-    // Sim pacing
-    this._stateTimer += dt;
-    if (this._stateTimer < this.stepDelay) return;
-    this._stateTimer = 0;
+    if (this.phase === "bet1") {
+      this.visual.banner.userData.setText("BETTING ROUND 1…");
+      this._betRound();
+      this.phase = "flop";
+      return;
+    }
 
-    this.tick();
+    if (this.phase === "flop") {
+      this.visual.banner.userData.setText("FLOP");
+      this._dealCommunity(3);
+      this.phase = "bet2";
+      return;
+    }
+
+    if (this.phase === "bet2") {
+      this.visual.banner.userData.setText("BETTING ROUND 2…");
+      this._betRound();
+      this.phase = "turn";
+      return;
+    }
+
+    if (this.phase === "turn") {
+      this.visual.banner.userData.setText("TURN");
+      this._dealCommunity(1);
+      this.phase = "bet3";
+      return;
+    }
+
+    if (this.phase === "bet3") {
+      this.visual.banner.userData.setText("BETTING ROUND 3…");
+      this._betRound();
+      this.phase = "river";
+      return;
+    }
+
+    if (this.phase === "river") {
+      this.visual.banner.userData.setText("RIVER");
+      this._dealCommunity(1);
+      this.phase = "bet4";
+      return;
+    }
+
+    if (this.phase === "bet4") {
+      this.visual.banner.userData.setText("FINAL BETTING…");
+      this._betRound();
+      this.phase = "showdown";
+      return;
+    }
+
+    if (this.phase === "showdown") {
+      this._showdown();
+      this.phase = "winner_walk";
+      this.winnerWalkTimer = 0;
+      return;
+    }
+
+    if (this.phase === "winner_walk") {
+      this.winnerWalkTimer += WAIT;
+      if (this.winnerWalkTimer >= 60) {
+        // After 1 minute, start next hand
+        this.resetHand(true);
+      }
+      return;
+    }
   }
 
-  updateRoamers(dt) {
-    for (const r of this.roamers) {
-      r.roamT += dt;
-      if (r.roamT > 3.5) {
-        r.roamT = 0;
-        const rr = 7 + Math.random() * 4;
-        const aa = Math.random() * Math.PI * 2;
-        r.roamTarget.set(this.tableCenter.x + Math.cos(aa) * rr, 0.95, this.tableCenter.z + Math.sin(aa) * rr);
+  // -----------------------------
+  // Core actions
+  // -----------------------------
+  _dealHoleCards() {
+    // Deal to bots at table, and to player seat IF seated
+    const seated = this.playerSeat >= 0;
+
+    for (let round = 0; round < 2; round++) {
+      for (const p of this.players) {
+        if (p.hiddenForPlayer) continue; // replaced by player
+        if (!p.inHand) continue;
+        p.hand.push(drawCard());
+        this._spawnCardAbove(p);
       }
 
-      r.mesh.position.lerp(r.roamTarget, 0.01);
-
-      r.tag.position.set(r.mesh.position.x, this.nameHoverY, r.mesh.position.z);
-      r.stackTag.position.set(r.mesh.position.x, this.nameHoverY - 0.35, r.mesh.position.z);
-      r.mesh.lookAt(new THREE.Vector3(this.tableCenter.x, r.mesh.position.y, this.tableCenter.z));
+      if (seated) {
+        // player "hand" exists only as data; visuals can be optional later
+        // we store it but do NOT place random cards in front of you anymore unless seated
+        const playerP = this._getPlayerProxy();
+        playerP.hand.push(drawCard());
+      }
     }
   }
 
-  tick() {
-    if (this._phase === "PREFLOP") {
-      // betting round (slow, readable)
-      for (const p of this.seated) {
-        if (!p.inHand || p.stack <= 0) continue;
-        const roll = this._rng();
+  _betRound() {
+    // simple slow visible betting
+    for (const p of this.players) {
+      if (p.hiddenForPlayer) continue;
+      if (!p.inHand) continue;
 
-        if (roll < 0.12) {
-          p.inHand = false; // fold
-        } else if (roll < 0.28) {
-          this.takeBet(p, 100); // raise
-        } else {
-          this.takeBet(p, 50); // call
-        }
+      const action = Math.random();
+      if (action < 0.18) {
+        p.inHand = false;
+        this._setTag(p, `${nameOf(p)}\nFOLDED\n$${p.chips}`);
+      } else {
+        const bet = Math.min(p.chips, 25 + Math.floor(Math.random() * 75));
+        p.chips -= bet;
+        p.bet += bet;
+        this.pot += bet;
+        this._setTag(p, `${nameOf(p)}\nBET $${bet}\n$${p.chips}`);
+        this._spawnChipStack(p, bet);
       }
+    }
 
-      this._phase = "FLOP";
-      this.setTag(this.hud, `POT: $${this.pot}  |  FLOP`, "#2bd7ff");
+    // player proxy betting later (when you’re ready to play)
+    this._updatePot();
+    this._updateLeaderboard();
+  }
+
+  _dealCommunity(n) {
+    for (let i = 0; i < n; i++) this.community.push(drawCard());
+    this._renderCommunityCards();
+  }
+
+  _showdown() {
+    // pick random winner among those still in hand (including player seat logically)
+    const alive = this.players.filter(p => !p.hiddenForPlayer && p.inHand);
+    if (!alive.length) {
+      this.resetHand(true);
       return;
     }
 
-    if (this._phase === "FLOP") {
-      this._phase = "TURN";
-      this.setTag(this.hud, `POT: $${this.pot}  |  TURN`, "#2bd7ff");
-      return;
-    }
+    const winner = alive[Math.floor(Math.random() * alive.length)];
+    winner.chips += this.pot;
 
-    if (this._phase === "TURN") {
-      this._phase = "RIVER";
-      this.setTag(this.hud, `POT: $${this.pot}  |  RIVER`, "#2bd7ff");
-      return;
-    }
+    this.visual.banner.userData.setText(`WINNER: ${nameOf(winner)}  (+$${this.pot})`);
+    this.pot = 0;
+    this._updatePot();
 
-    if (this._phase === "RIVER") {
-      this._phase = "SHOWDOWN";
-
-      const alive = this.seated.filter(p => p.inHand && p.stack > 0 && !p.busted);
-      const winner = alive.length ? alive[(Math.random() * alive.length) | 0] : this.seated[0];
-
-      this.awardWinner(winner);
-
-      // bust + replacements
-      this.handleBustsAndReplace();
-
-      // next hand count
-      this.handIndex++;
-
-      // match end -> winner victory lap for 60 seconds
-      if (this.handIndex >= this.handsPerMatch) {
-        this.startVictoryLap(winner);
-        return;
+    // crown texture later — for now we just glow the winner
+    winner.mesh.traverse(o => {
+      if (o.material && o.material.emissive) {
+        o.material.emissive.set(0xffd27a);
+        o.material.emissiveIntensity = 0.7;
       }
+    });
 
-      // continue match
-      this.startNewHand(false);
-      return;
+    // "winner walk" begins
+    this._updateLeaderboard();
+  }
+
+  // -----------------------------
+  // Visual helpers
+  // -----------------------------
+  _spawnCardAbove(p) {
+    // small card billboard above head, slightly to side (won’t block tags)
+    const card = makeCardBillboard();
+    card.position.set(0.35, 1.25, 0.1);
+    p.mesh.add(card);
+    this.visual.cards.push(card);
+  }
+
+  _spawnChipStack(p, bet) {
+    const chip = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.06, 0.02, 18),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.1 })
+    );
+    chip.position.set(0.25, 0.78, 0.2);
+    chip.rotation.x = Math.PI / 2;
+    this.scene.add(chip);
+
+    // place near player position around table center
+    const wp = new THREE.Vector3();
+    p.mesh.getWorldPosition(wp);
+    const dir = wp.clone().sub(this.tableCenter).normalize();
+    const place = this.tableCenter.clone().add(dir.multiplyScalar(1.25));
+    chip.position.set(place.x, 0.78, place.z);
+
+    this.visual.cards.push(chip);
+  }
+
+  _renderCommunityCards() {
+    // clear old
+    for (const c of this.visual.commCards) this.scene.remove(c);
+    this.visual.commCards = [];
+
+    // layout facing the player/camera
+    const base = this.anchors.community.getWorldPosition(new THREE.Vector3());
+    const startX = -0.55;
+    for (let i = 0; i < this.community.length; i++) {
+      const m = makeCommunityCard();
+      m.position.set(base.x + startX + i * 0.28, base.y, base.z);
+      m.lookAt(this.camera.position);
+      this.scene.add(m);
+      this.visual.commCards.push(m);
     }
+  }
+
+  _updatePot() {
+    this.visual.potLabel.userData.setText(`POT: $${this.pot}`);
+  }
+
+  _updateTags() {
+    for (const p of this.players) {
+      if (p.hiddenForPlayer) continue;
+      this._setTag(p, `${nameOf(p)}\n$${p.chips}`);
+    }
+  }
+
+  _setTag(p, txt) {
+    p.label.userData.setText(txt);
+  }
+
+  _updateLeaderboard() {
+    if (!this.onLeaderboard) return;
+
+    const sorted = [...this.players]
+      .filter(p => !p.hiddenForPlayer)
+      .sort((a, b) => b.chips - a.chips);
+
+    const lines = [
+      "Boss Tournament",
+      `1) ${nameOf(sorted[0])} — $${sorted[0]?.chips ?? 0}`,
+      `2) ${nameOf(sorted[1])} — $${sorted[1]?.chips ?? 0}`,
+      `3) ${nameOf(sorted[2])} — $${sorted[2]?.chips ?? 0}`,
+      `4) ${nameOf(sorted[3])} — $${sorted[3]?.chips ?? 0}`,
+      `5) ${nameOf(sorted[4])} — $${sorted[4]?.chips ?? 0}`
+    ];
+    this.onLeaderboard(lines);
+  }
+
+  _clearVisualCards() {
+    for (const c of this.visual.cards) {
+      if (c.parent) c.parent.remove(c);
+      else this.scene.remove(c);
+    }
+    this.visual.cards = [];
+
+    for (const c of this.visual.commCards) this.scene.remove(c);
+    this.visual.commCards = [];
+  }
+
+  _getPlayerProxy() {
+    // data-only “player” slot
+    if (!this._playerProxy) this._playerProxy = { hand: [] };
+    return this._playerProxy;
   }
 }
+
+// -----------------------------
+// small utilities
+// -----------------------------
+function makeBot(i) {
+  return { id: i, chips: 1000, bet: 0, inHand: true, hand: [] };
+}
+
+function nameOf(p) {
+  return `Bot ${p.id + 1}`;
+}
+
+function drawCard() {
+  const ranks = ["A","K","Q","J","10","9","8","7","6","5","4","3","2"];
+  const suits = ["♠","♥","♦","♣"];
+  return ranks[Math.floor(Math.random() * ranks.length)] + suits[Math.floor(Math.random() * suits.length)];
+}
+
+function botMesh(i) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.22, 0.65, 6, 12),
+    new THREE.MeshStandardMaterial({
+      color: pickBotColor(i),
+      roughness: 0.45,
+      metalness: 0.08,
+      emissive: 0x000000,
+      emissiveIntensity: 0.0
+    })
+  );
+  body.position.y = 0.95;
+  g.add(body);
+
+  return g;
+}
+
+function pickBotColor(i) {
+  const colors = [0x00ffaa,0xff2bd6,0x2bd7ff,0xffd27a,0x9b7bff,0x6ef7a4,0xff6b6b,0x55aaff];
+  return colors[i % colors.length];
+}
+
+function makeTag(text, w = 0.6) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, w * 0.5), mat);
+  mesh.userData = {
+    canvas, ctx, tex,
+    setText: (t) => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = "rgba(255,210,122,0.9)";
+      ctx.lineWidth = 8;
+      ctx.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 44px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      const lines = String(t).split("\n");
+      const mid = canvas.height / 2;
+      const gap = 52;
+      const start = mid - ((lines.length - 1) * gap) / 2;
+
+      lines.forEach((ln, idx) => ctx.fillText(ln, canvas.width / 2, start + idx * gap));
+      tex.needsUpdate = true;
+    }
+  };
+  mesh.userData.setText(text);
+  return mesh;
+}
+
+function makeBillboardText(text, w = 0.8, h = 0.25) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1024;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+
+  mesh.userData = {
+    canvas, ctx, tex,
+    setText: (t) => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "rgba(0,0,0,0.70)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = "rgba(0,255,170,0.8)";
+      ctx.lineWidth = 10;
+      ctx.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 68px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(t), canvas.width / 2, canvas.height / 2);
+      tex.needsUpdate = true;
+    }
+  };
+
+  mesh.userData.setText(text);
+  return mesh;
+}
+
+function makeCardBillboard() {
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.16, 0.22),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, metalness: 0.0, emissive: 0x111111, emissiveIntensity: 0.3 })
+  );
+  return m;
+}
+
+function makeCommunityCard() {
+  return new THREE.Mesh(
+    new THREE.PlaneGeometry(0.18, 0.26),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.75, metalness: 0.0, emissive: 0x111111, emissiveIntensity: 0.25 })
+  );
+  }

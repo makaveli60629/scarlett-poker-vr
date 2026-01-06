@@ -8,41 +8,28 @@
   <meta name="theme-color" content="#000000" />
   <style>
     html, body { margin:0; height:100%; background:#000; overflow:hidden; }
-    #hub {
-      position: fixed;
-      left: 12px;
-      top: 10px;
-      right: 12px;
-      max-width: 980px;
-      color: #00ff66;
-      font-family: ui-monospace, Menlo, Consolas, monospace;
-      font-size: 13px;
-      line-height: 1.35;
-      white-space: pre-wrap;
-      pointer-events: none;
-      text-shadow: 0 0 8px rgba(0,255,102,0.25);
-      opacity: 0.98;
-      z-index: 9999;
+    #hub{
+      position:fixed; left:12px; top:10px; right:12px; max-width:980px;
+      color:#00ff66; font-family:ui-monospace,Menlo,Consolas,monospace;
+      font-size:13px; line-height:1.35; white-space:pre-wrap;
+      pointer-events:none; z-index:9999;
+      text-shadow:0 0 8px rgba(0,255,102,0.25);
+      opacity:0.98;
     }
-    #hint {
-      position: fixed;
-      left: 12px;
-      bottom: 12px;
-      right: 12px;
-      color: rgba(255,255,255,0.85);
-      font-family: ui-monospace, Menlo, Consolas, monospace;
-      font-size: 12px;
-      line-height: 1.35;
-      pointer-events: none;
-      z-index: 9999;
+    #hint{
+      position:fixed; left:12px; bottom:12px; right:12px;
+      color:rgba(255,255,255,0.85);
+      font-family:ui-monospace,Menlo,Consolas,monospace;
+      font-size:12px; line-height:1.35;
+      pointer-events:none; z-index:9999;
     }
   </style>
 </head>
 <body>
   <pre id="hub">Scarlett Poker VR — loading…</pre>
-  <div id="hint">If Quest shows old code, hard refresh and wait for GitHub Pages deploy.</div>
+  <div id="hint">If Quest shows old code: hard refresh + wait for GitHub Pages deploy.</div>
 
-  <!-- Cache-buster: IMPORTANT for Quest Browser -->
-  <script type="module" src="./js/main.js?v=1009"></script>
+  <!-- cache-buster -->
+  <script type="module" src="./js/main.js?v=1010"></script>
 </body>
 </html>

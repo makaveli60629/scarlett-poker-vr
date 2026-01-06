@@ -1,35 +1,61 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Skylark Poker VR — Emergency</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Skylark Poker VR</title>
   <style>
-    html,body{margin:0;height:100%;background:#000;color:#0f0;font-family:system-ui,Arial}
-    .box{padding:16px}
-    a{color:#6cf}
-    pre{white-space:pre-wrap;color:#fff;background:#111;padding:12px;border-radius:12px;border:1px solid #333}
-    button{padding:10px 14px;border-radius:12px;border:1px solid #333;background:#111;color:#fff;font-weight:700}
+    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
+    canvas { display:block; }
+    #bootHud{
+      position:fixed; left:12px; top:12px; z-index:99999; max-width:92vw;
+      background:rgba(0,0,0,0.60); color:#fff; border:1px solid rgba(255,255,255,0.15);
+      border-radius:14px; padding:12px; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      backdrop-filter: blur(8px);
+    }
+    #bootHud .title{ font-weight:800; font-size:16px; margin-bottom:8px; }
+    #bootHud .row{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
+    #bootHud .pill{ padding:6px 10px; border-radius:999px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.06); font-weight:700; }
+    #bootHud pre{ margin:0; white-space:pre-wrap; font-size:12px; line-height:1.25; max-height:40vh; overflow:auto; opacity:0.95; }
+    #bootHud button{
+      cursor:pointer; border-radius:12px; padding:10px 14px;
+      border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.06);
+      color:#fff; font-weight:700;
+    }
   </style>
 </head>
 <body>
-  <div class="box">
-    <h2>✅ Emergency Index Loaded</h2>
-    <p>If you can see this, GitHub Pages is serving your <b>root index.html</b>.</p>
-    <button onclick="location.href='./?v=' + Date.now()">Reload + CacheBust</button>
-    <p><a href="./js/main.js">Open main.js</a> (should show code, not 404)</p>
-    <p><a href="./js/world.js">Open world.js</a></p>
-    <p><a href="./js/controls.js">Open controls.js</a></p>
-    <p><a href="./js/ui.js">Open ui.js</a></p>
-    <p><a href="./js/poker_simulation.js">Open poker_simulation.js</a></p>
-    <pre id="info"></pre>
+  <div id="bootHud">
+    <div class="title">Skylark Poker VR — Boot</div>
+    <div class="row">
+      <span id="bootOk" class="pill">⏳ Loading…</span>
+      <span id="bootErr" class="pill">—</span>
+    </div>
+    <div class="row">
+      <button id="reloadBtn">Reload + CacheBust</button>
+    </div>
+    <pre id="bootLog">If something fails, the real error will show here.</pre>
   </div>
 
-  <script>
-    document.getElementById('info').textContent =
-      "URL: " + location.href + "\n" +
-      "Time: " + new Date().toString() + "\n" +
-      "If this page is black too, Pages is not serving your root index.html.";
+  <script type="module">
+    const ok = document.getElementById("bootOk");
+    const err = document.getElementById("bootErr");
+    const log = document.getElementById("bootLog");
+    const reloadBtn = document.getElementById("reloadBtn");
+
+    reloadBtn.onclick = () => location.href = location.pathname + "?v=" + Date.now();
+
+    function setOK(text){ ok.textContent = text; }
+    function setERR(text){ err.textContent = text; }
+    function add(line){ log.textContent = (log.textContent + "\n" + line).trim(); }
+
+    const v = Date.now();
+    setOK("⏳ Importing main.js…");
+    add("Tip: open with ?v=" + v + " if cache acts weird.");
+
+    import(`./js/main.js?v=${v}`)
+      .then(() => { setOK("✅ main.js loaded"); setERR("✅ OK"); add("main.js import succeeded."); })
+      .catch((e) => { setOK("⚠️ main.js failed"); setERR("❌ ERROR"); add(String(e?.stack || e)); console.error(e); });
   </script>
 </body>
 </html>

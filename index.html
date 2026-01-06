@@ -6,24 +6,18 @@
   <title>Scarlett Poker VR</title>
   <style>
     html,body{margin:0;height:100%;background:#000;overflow:hidden}
-    #overlay{
-      position:fixed;left:10px;top:10px;right:10px;max-width:92vw;
+    #hub{
+      position:fixed;left:12px;top:12px;right:12px;
       color:#00ff66;font-family:ui-monospace,Menlo,Consolas,monospace;
-      white-space:pre-wrap;line-height:1.35;font-size:13px;z-index:999999;
-      text-shadow:0 0 10px rgba(0,255,102,0.25);
-      pointer-events:none;
-    }
-    #enterVrBtn{
-      position:fixed;right:18px;bottom:18px;z-index:2147483647;
-      background:rgba(0,0,0,0.55);color:#00ff66;border:2px solid #00ff66;
-      padding:14px 18px;border-radius:14px;font-weight:700;
-      font-family:ui-monospace,Menlo,Consolas,monospace;
+      font-size:12px;line-height:1.35;white-space:pre-wrap;
+      background:rgba(0,0,0,.45);padding:10px;border-radius:10px;
+      max-height:42vh;overflow:auto;z-index:99999;
     }
   </style>
 </head>
 <body>
-  <div id="overlay">Scarlett Poker VR — loading…</div>
-  <button id="enterVrBtn">ENTER VR</button>
-  <script type="module" src="./js/main.js"></script>
+  <div id="hub">Loading Scarlett Poker VR…</div>
+  <!-- Version bump helps GitHub/Oculus cache -->
+  <script type="module" src="./js/main.js?v=1001"></script>
 </body>
 </html>

@@ -4,42 +4,47 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Scarlett Poker VR</title>
+
   <style>
-    html,body{margin:0;height:100%;background:#000;overflow:hidden}
-    #overlay{
-      position:fixed;inset:0;padding:14px;color:#00ff66;
-      font-family:ui-monospace,Menlo,Consolas,monospace;
-      white-space:pre-wrap;line-height:1.35;font-size:13px;
-      pointer-events:none;z-index:1;
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
     }
-    #forceBtn{
-      position:fixed;top:10px;left:10px;z-index:9999;
-      background:#001a0a;border:1px solid #00ff66;color:#00ff66;
-      padding:10px 14px;border-radius:14px;
-      font-family:ui-monospace,Menlo,Consolas,monospace;
+
+    #hub {
+      position: fixed;
+      inset: 0;
+      padding: 14px;
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.35;
+      color: #00ff66;
+      white-space: pre-wrap;
+      pointer-events: none;
+      background: radial-gradient(ellipse at center, #06150c 0%, #000 70%);
+    }
+
+    .btn {
+      position: fixed;
+      bottom: 18px;
+      right: 18px;
+      padding: 12px 18px;
+      border-radius: 10px;
+      border: 1px solid #00ff66;
+      color: #00ff66;
+      background: rgba(0,0,0,0.6);
+      font-family: inherit;
+      font-size: 14px;
+      display: none;
     }
   </style>
 </head>
+
 <body>
-  <button id="forceBtn">Reload (No Cache)</button>
-  <div id="overlay">Scarlett Poker VR — loading…</div>
+  <div id="hub">Scarlett Poker VR — loading…</div>
 
-  <script>
-    // Always stay inside the repo path on GitHub Pages
-    const BASE = "/scarlett-poker-vr/";
-    const v = Date.now();
-
-    document.getElementById("forceBtn").onclick = () => {
-      location.href = BASE + "?v=" + Date.now();
-    };
-
-    const s = document.createElement("script");
-    s.type = "module";
-    s.src = BASE + "js/main.js?v=" + v;
-    s.onerror = () => {
-      document.getElementById("overlay").textContent += "\n❌ main.js failed to load (module fetch error).";
-    };
-    document.head.appendChild(s);
-  </script>
+  <script type="module" src="./js/main.js"></script>
 </body>
 </html>

@@ -1,12 +1,9 @@
-// /js/main.js — Scarlett Poker VR — Permanent Core (GitHub + Quest Safe)
-// - VRButton ALWAYS visible
-// - Safe module loader + hub logs
-// - World spawn uses padById[room] or lobby
-// - Passes colliders/bounds into Controls
-// - Brighter lighting + exposure for Quest
+// /js/main.js — Scarlett Poker VR — Permanent Core + Controllers + No-ZFighting Floor
+// GitHub Pages + Oculus Browser SAFE
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
+import { XRControllerModelFactory } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/XRControllerModelFactory.js";
 
 const overlay = document.getElementById("overlay");
 const println = (t) => { overlay.textContent += `\n${t}`; console.log(t); };
@@ -17,9 +14,6 @@ const fail = (t) => println(`❌ ${t}`);
 overlay.textContent = "Scarlett Poker VR — booting…";
 ok("Three.js CDN loaded");
 
-// -------------------------
-// URL helpers
-// -------------------------
 function qs(name, fallback) {
   try {
     const u = new URL(location.href);
@@ -43,15 +37,14 @@ function roomFromURL() {
 // Scene / Player / Camera
 // -------------------------
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1a1d22);
-scene.fog = new THREE.Fog(0x1a1d22, 6, 90);
+scene.background = new THREE.Color(0x1b2028);
+scene.fog = new THREE.Fog(0x1b2028, 6, 90);
 
 const player = new THREE.Group();
 scene.add(player);
 
-// XR camera is driven by headset; keep local at origin in rig
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 350);
-camera.position.set(0, 0, 0);
+camera.position.set(0, 0, 0); // XR drives camera
 player.add(camera);
 
 // -------------------------
@@ -65,12 +58,11 @@ renderer.xr.enabled = true;
 // Quest brightness helpers
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.8;
+renderer.toneMappingExposure = 1.9;
 
-renderer.setClearColor(0x1a1d22, 1);
+renderer.setClearColor(0x1b2028, 1);
 document.body.appendChild(renderer.domElement);
 
-// Prefer floor reference space (Quest)
 try { renderer.xr.setReferenceSpaceType("local-floor"); } catch {}
 
 const vrButton = VRButton.createButton(renderer);
@@ -82,70 +74,82 @@ vrButton.style.display = "block";
 vrButton.style.opacity = "1";
 vrButton.style.pointerEvents = "auto";
 document.body.appendChild(vrButton);
-
 ok("Renderer + VRButton mounted/locked");
 
-// Oculus warm-up gesture safety
+// Oculus warm-up
 document.body.addEventListener("click", () => {
   renderer.xr.enabled = true;
 }, { once: true });
 
 // -------------------------
-// Lighting (BRIGHTER + NICER)
+// Lighting (BRIGHTER)
 // -------------------------
-const ambient = new THREE.AmbientLight(0xffffff, 0.85);
+const ambient = new THREE.AmbientLight(0xffffff, 0.9);
 scene.add(ambient);
 
-const hemi = new THREE.HemisphereLight(0xffffff, 0x404060, 2.2);
+const hemi = new THREE.HemisphereLight(0xffffff, 0x404060, 2.4);
 scene.add(hemi);
 
-const key = new THREE.DirectionalLight(0xffffff, 1.9);
+const key = new THREE.DirectionalLight(0xffffff, 2.0);
 key.position.set(8, 14, 6);
 scene.add(key);
 
-// Ceiling ring lights around table area (adds “casino” feel)
-const ceilingLights = [];
-function addCeilingLight(x, z, intensity = 1.15) {
-  const p = new THREE.PointLight(0xffffff, intensity, 60);
-  p.position.set(x, 7.2, z);
-  scene.add(p);
-  ceilingLights.push(p);
-}
-addCeilingLight(0, 0, 1.35);
-addCeilingLight(8, 0, 1.1);
-addCeilingLight(-8, 0, 1.1);
-addCeilingLight(0, 8, 1.1);
-addCeilingLight(0, -8, 1.1);
+const fillA = new THREE.PointLight(0xffffff, 1.3, 80);
+fillA.position.set(-10, 7, 10);
+scene.add(fillA);
 
-// Player headlight (guarantees visibility)
-const headLight = new THREE.PointLight(0xffffff, 2.0, 22);
+const fillB = new THREE.PointLight(0xffffff, 1.2, 80);
+fillB.position.set(10, 7, -10);
+scene.add(fillB);
+
+// Headlight on player (guaranteed visibility)
+const headLight = new THREE.PointLight(0xffffff, 2.2, 22);
 headLight.position.set(0, 1.6, 0);
 player.add(headLight);
 
 ok("Lighting applied");
 
-// Safety floor (in case any world floor fails)
-const safetyFloor = new THREE.Mesh(
-  new THREE.PlaneGeometry(160, 160),
-  new THREE.MeshStandardMaterial({ color: 0x101217, roughness: 1 })
-);
-safetyFloor.rotation.x = -Math.PI / 2;
-safetyFloor.position.y = 0;
-scene.add(safetyFloor);
-
-// Boost on XR start (Quest sometimes dims on sessionstart)
-renderer.xr.addEventListener("sessionstart", () => {
-  ok("XR session started — boost");
-  renderer.toneMappingExposure = 1.95;
-  ambient.intensity = 0.95;
-  hemi.intensity = 2.5;
-  key.intensity = 2.1;
-  headLight.intensity = 2.3;
-  ceilingLights.forEach(l => l.intensity *= 1.08);
+// -------------------------
+// Safety floor (ANTI BLINK / ANTI Z-FIGHT)
+// Put it slightly BELOW the real floor and use polygonOffset.
+// -------------------------
+const safetyFloorMat = new THREE.MeshStandardMaterial({
+  color: 0x151820,
+  roughness: 1,
+  metalness: 0,
+  polygonOffset: true,
+  polygonOffsetFactor: 1,
+  polygonOffsetUnits: 1,
 });
+const safetyFloor = new THREE.Mesh(new THREE.PlaneGeometry(180, 180), safetyFloorMat);
+safetyFloor.rotation.x = -Math.PI / 2;
+safetyFloor.position.y = -0.06; // below world floor => no flicker
+scene.add(safetyFloor);
+ok("Safety floor placed below world floor");
 
 // -------------------------
-// SAFE MODULE LOADER
+// Controllers (VISIBLE MODELS)
+// -------------------------
+const controllerModelFactory = new XRControllerModelFactory();
+
+// controller 0/1 = left/right (usually)
+const controller0 = renderer.xr.getController(0);
+const controller1 = renderer.xr.getController(1);
+scene.add(controller0);
+scene.add(controller1);
+
+const grip0 = renderer.xr.getControllerGrip(0);
+grip0.add(controllerModelFactory.createControllerModel(grip0));
+scene.add(grip0);
+
+const grip1 = renderer.xr.getControllerGrip(1);
+grip1.add(controllerModelFactory.createControllerModel(grip1));
+scene.add(grip1);
+
+ok("Controller models attached");
+
+// -------------------------
+// Safe module loader (HUB)
 // -------------------------
 const modules = {};
 async function safeImport(label, relPath) {
@@ -162,7 +166,7 @@ async function safeImport(label, relPath) {
   }
 }
 
-// Core modules you actually rely on
+// Core
 const WorldMod = await safeImport("world.js", "./world.js");
 const ControlsMod = await safeImport("controls.js", "./controls.js");
 await safeImport("ui.js", "./ui.js");
@@ -176,7 +180,7 @@ await safeImport("store.js", "./store.js");
 await safeImport("watch_ui.js", "./watch_ui.js");
 
 // -------------------------
-// BUILD WORLD + SPAWN ON PAD
+// Build World + Spawn
 // -------------------------
 let worldData = null;
 let spawn = new THREE.Vector3(0, 0, 11.5);
@@ -192,33 +196,37 @@ try {
     if (pad?.position) spawn.copy(pad.position);
     else if (worldData?.spawn) spawn.copy(worldData.spawn);
   } else {
-    warn("World build missing — using fallback spawn");
+    warn("World build missing — fallback spawn used");
   }
 } catch (e) {
   fail(`World build failed: ${e?.message || e}`);
 }
 
-// Spawn XZ; Y will be controlled by Controls height-lock
 player.position.set(spawn.x, 0.01, spawn.z);
 ok("Spawned on teleport pad");
 
 // -------------------------
-// CONTROLS (height locked here permanently)
+// Controls (height lock + laser-teleport targeting)
 // -------------------------
-const lockedEye = Number(qs("eye", 1.72)); // lock in-game eye height (standing/sitting same)
+const lockedEye = Number(qs("eye", 1.72)); // your desired permanent seated eye height
 try {
   if (ControlsMod?.Controls?.init) {
     ControlsMod.Controls.init({
       renderer,
       camera,
       player,
+      // pass controllers + grips so you can see / raycast
+      controllers: { left: controller0, right: controller1 },
+      grips: { left: grip0, right: grip1 },
+      // collision
       colliders: worldData?.colliders || [],
       bounds: worldData?.bounds || null,
-      spawn: { position: spawn, yaw: 0 },
-      // 🔒 Height lock settings
+      // height lock
       lockHeight: true,
       targetEyeHeight: lockedEye,
-      baseY: 0.01
+      baseY: 0.01,
+      // floor plane for raycast
+      floorY: 0.0,
     });
     ok(`Controls.init OK (eye locked @ ${lockedEye.toFixed(2)}m)`);
   } else {
@@ -228,18 +236,23 @@ try {
   fail(`Controls init failed: ${e?.message || e}`);
 }
 
-// -------------------------
-// RESIZE
-// -------------------------
+// Boost on XR start (Quest dims sometimes)
+renderer.xr.addEventListener("sessionstart", () => {
+  ok("XR session started — boost");
+  renderer.toneMappingExposure = 2.05;
+  ambient.intensity = 1.0;
+  hemi.intensity = 2.7;
+  key.intensity = 2.2;
+  headLight.intensity = 2.5;
+});
+
 addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
 
-// -------------------------
-// LOOP
-// -------------------------
+// Loop
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
@@ -248,4 +261,3 @@ renderer.setAnimationLoop(() => {
 });
 
 ok("Boot complete — press ENTER VR");
-ok("Tip: adjust eye height later with ?eye=1.80");

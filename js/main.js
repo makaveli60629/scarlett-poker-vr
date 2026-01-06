@@ -1,4 +1,4 @@
-// js/main.js — Scarlett Poker VR — FIXED: Right-hand beam follows YOU + strafe inversion fixed
+// js/main.js — Scarlett Poker VR — FIX: Laser follows RIGHT controller (no more stuck at center)
 // GitHub Pages safe. No local imports. CDN three + VRButton only.
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
@@ -27,24 +27,26 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
 renderer.xr.enabled = true;
+
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 ok("VRButton added");
 
-// Rig (move this)
+// Rig (move this, not camera)
 const rig = new THREE.Group();
 rig.add(camera);
 scene.add(rig);
 
 // ---------- Lights ----------
-scene.add(new THREE.AmbientLight(0xffffff, 0.42));
-scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.1));
+scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.15));
 
-const sun = new THREE.DirectionalLight(0xffffff, 1.25);
+const sun = new THREE.DirectionalLight(0xffffff, 1.35);
 sun.position.set(10, 18, 8);
 scene.add(sun);
 
-const headlamp = new THREE.PointLight(0xffffff, 2.2, 60);
+// Headlamp so never black void
+const headlamp = new THREE.PointLight(0xffffff, 2.4, 70);
 camera.add(headlamp);
 
 // ---------- Simple world ----------
@@ -63,38 +65,49 @@ scene.add(grid);
 rig.position.set(0, 0, 10);
 ok("Spawn set");
 
-// ---------- Controllers (targetRay spaces) ----------
-const controllers = [renderer.xr.getController(0), renderer.xr.getController(1)];
-scene.add(controllers[0], controllers[1]);
+// ---------- Controllers + grips ----------
+const controller0 = renderer.xr.getController(0);
+const controller1 = renderer.xr.getController(1);
+scene.add(controller0, controller1);
 
-// ---------- Thick Beam (always visible) ----------
+const grip0 = renderer.xr.getControllerGrip(0);
+const grip1 = renderer.xr.getControllerGrip(1);
+scene.add(grip0, grip1);
+
+// ---------- Thick beam (mesh, always visible) ----------
 function makeBeam() {
   const geo = new THREE.CylinderGeometry(0.006, 0.010, 1.2, 10, 1, true);
   const mat = new THREE.MeshStandardMaterial({
     color: 0x00ff66,
     emissive: 0x00ff66,
-    emissiveIntensity: 2.4,
+    emissiveIntensity: 2.6,
     transparent: true,
     opacity: 0.9,
     depthTest: false,
     depthWrite: false,
     roughness: 0.1,
-    metalness: 0.0
+    metalness: 0.0,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.renderOrder = 9999;
-  mesh.rotation.x = Math.PI / 2;     // point down -Z
-  mesh.position.set(0, 0, -0.6);     // start at “tip”, not inside you
+  // beam points forward down -Z: rotate cylinder axis to match
+  mesh.rotation.x = Math.PI / 2;
   return mesh;
 }
 
 const beam = makeBeam();
-let beamParent = null;
+scene.add(beam);
 
-// ---------- Teleport disc + ring ----------
+// Teleport disc + ring (always visible)
 const tpDisc = new THREE.Mesh(
   new THREE.CircleGeometry(0.28, 44),
-  new THREE.MeshBasicMaterial({ color: 0x00ff66, transparent: true, opacity: 0.85, depthTest: false, depthWrite: false })
+  new THREE.MeshBasicMaterial({
+    color: 0x00ff66,
+    transparent: true,
+    opacity: 0.85,
+    depthTest: false,
+    depthWrite: false,
+  })
 );
 tpDisc.rotation.x = -Math.PI / 2;
 tpDisc.position.set(rig.position.x, 0.02, rig.position.z);
@@ -103,7 +116,13 @@ scene.add(tpDisc);
 
 const tpRing = new THREE.Mesh(
   new THREE.RingGeometry(0.30, 0.36, 44),
-  new THREE.MeshBasicMaterial({ color: 0x00ff66, transparent: true, opacity: 0.95, depthTest: false, depthWrite: false })
+  new THREE.MeshBasicMaterial({
+    color: 0x00ff66,
+    transparent: true,
+    opacity: 0.95,
+    depthTest: false,
+    depthWrite: false,
+  })
 );
 tpRing.rotation.x = -Math.PI / 2;
 tpRing.position.copy(tpDisc.position);
@@ -111,48 +130,36 @@ tpRing.renderOrder = 9999;
 scene.add(tpRing);
 
 // ---------- XR helpers ----------
-function getRightControllerObject() {
+function getRightIndex() {
   const session = renderer.xr.getSession?.();
-  if (!session) return null;
+  if (!session) return 0;
 
-  // Map handedness -> controller index by inputSources order (common on Quest)
   const srcs = session.inputSources || [];
-  let rightIndex = -1;
+  let idx = 0;
 
   for (let i = 0; i < srcs.length; i++) {
-    if (srcs[i]?.handedness === "right") { rightIndex = i; break; }
+    if (srcs[i]?.handedness === "right") {
+      idx = i;
+      break;
+    }
   }
-
-  // If not found, use controller 0 as fallback
-  if (rightIndex < 0) rightIndex = 0;
-
-  // Only support 0/1
-  if (rightIndex > 1) rightIndex = 1;
-
-  return controllers[rightIndex] || controllers[0];
+  // Clamp to 0/1
+  return idx > 1 ? 1 : idx;
 }
 
-function attachBeamTo(obj, label) {
-  if (!obj) return;
-  if (beamParent === obj) return;
+function getRightPoseObject() {
+  // Prefer grip (best on Quest), fallback to controller, fallback to camera
+  const idx = getRightIndex();
+  const g = idx === 1 ? grip1 : grip0;
+  const c = idx === 1 ? controller1 : controller0;
 
-  if (beamParent) beamParent.remove(beam);
-  obj.add(beam);
-  beamParent = obj;
-  ok(`Beam attached to ${label}`);
+  // If grip is still at origin/no update, controller may still work (or vice versa).
+  // We'll just return grip first; if XR not running, return camera.
+  return renderer.xr.getSession?.() ? (g || c || camera) : camera;
 }
 
-renderer.xr.addEventListener("sessionstart", () => {
-  const rightObj = getRightControllerObject();
-  if (rightObj) attachBeamTo(rightObj, "RIGHT controller");
-  else attachBeamTo(camera, "CAMERA (fallback)");
-});
-
-renderer.xr.addEventListener("sessionend", () => {
-  if (beamParent) beamParent.remove(beam);
-  beamParent = null;
-  warn("XR ended");
-});
+renderer.xr.addEventListener("sessionstart", () => ok("XR session started"));
+renderer.xr.addEventListener("sessionend", () => warn("XR session ended"));
 
 // ---------- Ray to floor ----------
 const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -176,7 +183,8 @@ function getGamepads() {
   const session = renderer.xr.getSession?.();
   if (!session) return { left: null, right: null };
 
-  let left = null, right = null;
+  let left = null,
+    right = null;
   for (const src of session.inputSources || []) {
     if (!src?.gamepad) continue;
     if (src.handedness === "left") left = src.gamepad;
@@ -198,7 +206,10 @@ function readRightTrigger() {
 
   let gp = null;
   for (const s of session.inputSources || []) {
-    if (s?.handedness === "right" && s?.gamepad) { gp = s.gamepad; break; }
+    if (s?.handedness === "right" && s?.gamepad) {
+      gp = s.gamepad;
+      break;
+    }
   }
   if (!gp) return 0;
 
@@ -219,14 +230,14 @@ renderer.setAnimationLoop(() => {
 
   const { left, right } = getGamepads();
 
-  // Move with LEFT stick (FIXED strafe inversion)
+  // Move (left stick) — strafe corrected (left is left, right is right)
   if (left) {
     const { x, y } = readAxes(left);
     const dead = 0.14;
     let mx = Math.abs(x) < dead ? 0 : x;
     let my = Math.abs(y) < dead ? 0 : y;
 
-    // FIX: invert strafe so stick left goes left, stick right goes right
+    // IMPORTANT: invert mx if your device reports swapped strafe
     mx = -mx;
 
     if (mx || my) {
@@ -235,7 +246,6 @@ renderer.setAnimationLoop(() => {
       fwd.y = 0;
       fwd.normalize();
 
-      // rightDir (true right)
       const rightDir = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
 
       const next = rig.position.clone();
@@ -248,7 +258,7 @@ renderer.setAnimationLoop(() => {
     }
   }
 
-  // Snap turn with RIGHT stick
+  // Snap turn (right stick)
   snapCD = Math.max(0, snapCD - dt);
   if (right) {
     const { x } = readAxes(right);
@@ -258,19 +268,30 @@ renderer.setAnimationLoop(() => {
     }
   }
 
-  // Make sure beam is on the actual right controller (not stuck in world center)
-  const rightObj = getRightControllerObject();
-  if (renderer.xr.getSession?.()) {
-    if (rightObj) attachBeamTo(rightObj, "RIGHT controller");
-    else attachBeamTo(camera, "CAMERA (fallback)");
-  }
-
-  // Raycast from right controller forward to floor
-  const srcObj = beamParent || rightObj || camera;
+  // === LASER/TELEPORT POSE FIX ===
+  // Force beam to follow RIGHT controller pose every frame (world-space)
+  const srcObj = getRightPoseObject();
   srcObj.updateMatrixWorld(true);
 
+  // Copy pose (world) into beam (world)
+  srcObj.getWorldPosition(origin);
+  beam.position.copy(origin);
+
+  // Copy rotation (world) into beam
+  beam.quaternion.setFromRotationMatrix(new THREE.Matrix4().extractRotation(srcObj.matrixWorld));
+
+  // Push beam forward so it starts at controller tip instead of inside it
+  // Beam is oriented along -Z after rotation.x set earlier, so we offset along -Z in local space:
+  const tipOffset = new THREE.Vector3(0, 0, -0.08).applyQuaternion(beam.quaternion);
+  beam.position.add(tipOffset);
+
+  // Keep beam centered and extend forward
+  // Beam mesh length is 1.2m; we keep it in front of tip:
+  const beamForward = new THREE.Vector3(0, 0, -0.6).applyQuaternion(beam.quaternion);
+  beam.position.add(beamForward);
+
+  // Raycast from controller forward to floor to place teleport marker
   tmpRot.identity().extractRotation(srcObj.matrixWorld);
-  origin.setFromMatrixPosition(srcObj.matrixWorld);
   direction.set(0, 0, -1).applyMatrix4(tmpRot).normalize();
 
   raycaster.set(origin, direction);
@@ -304,4 +325,4 @@ addEventListener("resize", () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-ok("Running");
+ok("Running (beam follows right-hand pose)");

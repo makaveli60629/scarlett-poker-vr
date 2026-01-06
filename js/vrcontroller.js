@@ -1,140 +1,147 @@
-// js/vrcontroller.js — Scarlett Poker VR — Quest-safe controller resolver
-// Purpose: always return a valid RIGHT-hand ray space that is NOT stuck at world origin.
-//
-// Exports:
-// - VRController.init({ renderer, scene, camera, hub })
-// - VRController.update()
-// - VRController.getRaySpace()   -> Object3D to raycast from (right-hand preferred)
-// - VRController.getHandedness() -> "right"|"left"|"fallback-camera"
+// js/vrcontroller.js — Scarlett Poker VR — WebXR-frame pose (Quest Browser safe)
+// NO reliance on THREE controller objects (which can stick at origin on Quest).
+// We pull the right-hand targetRay pose directly from XRFrame each tick.
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
 export const VRController = {
   renderer: null,
-  scene: null,
   camera: null,
   hub: null,
 
-  controller0: null,
-  controller1: null,
-  grip0: null,
-  grip1: null,
+  _refSpace: null,
+  _lastMode: "fallback-camera",
 
-  _raySpace: null,
-  _mode: "fallback-camera",
-  _lastIdx: 0,
+  // outputs (updated each tick)
+  poseMatrix: new THREE.Matrix4(),
+  poseQuat: new THREE.Quaternion(),
+  posePos: new THREE.Vector3(),
+  poseValid: false,
+  mode: "fallback-camera", // "right" | "left" | "fallback-camera"
 
-  _tmpPos: new THREE.Vector3(),
-  _tmpPos2: new THREE.Vector3(),
-
-  init({ renderer, scene, camera, hub }) {
+  init({ renderer, camera, hub }) {
     this.renderer = renderer;
-    this.scene = scene;
     this.camera = camera;
     this.hub = hub || (() => {});
+    this.poseValid = false;
 
-    this.controller0 = renderer.xr.getController(0);
-    this.controller1 = renderer.xr.getController(1);
-    this.grip0 = renderer.xr.getControllerGrip(0);
-    this.grip1 = renderer.xr.getControllerGrip(1);
+    renderer.xr.addEventListener("sessionstart", async () => {
+      try {
+        const session = renderer.xr.getSession();
+        // Reference space provided by Three (works across browsers)
+        this._refSpace = renderer.xr.getReferenceSpace?.() || null;
 
-    scene.add(this.controller0, this.controller1, this.grip0, this.grip1);
-
-    // Default to camera until XR session begins
-    this._raySpace = camera;
-    this._mode = "fallback-camera";
-
-    renderer.xr.addEventListener("sessionstart", () => {
-      this.hub("✅ XR session start (VRController)");
-      this.update(true);
+        this.hub("✅ VRController: XR session started");
+      } catch (e) {
+        this._refSpace = null;
+        this.hub("⚠️ VRController: sessionstart refspace failed");
+      }
     });
 
     renderer.xr.addEventListener("sessionend", () => {
-      this.hub("⚠️ XR session end (VRController)");
-      this._raySpace = camera;
-      this._mode = "fallback-camera";
+      this._refSpace = null;
+      this.poseValid = false;
+      this.mode = "fallback-camera";
+      this.hub("⚠️ VRController: XR session ended");
     });
   },
 
-  // Controller pose is "valid" only if it isn't sitting at world origin
-  // (Quest sometimes reports origin pose temporarily)
-  _isPoseValid(obj) {
-    if (!obj) return false;
-    obj.updateMatrixWorld(true);
-    obj.getWorldPosition(this._tmpPos);
-    // If it's basically at origin, it's probably not tracking yet
-    return this._tmpPos.length() > 0.15; // > 15cm away from (0,0,0)
-  },
+  _selectSource(session) {
+    const srcs = session?.inputSources || [];
+    if (!srcs.length) return { src: null, mode: "fallback-camera" };
 
-  _getRightIndexByHandedness() {
-    const session = this.renderer?.xr?.getSession?.();
-    if (!session) return null;
-
-    const srcs = session.inputSources || [];
-    for (let i = 0; i < srcs.length; i++) {
-      if (srcs[i]?.handedness === "right") return Math.min(i, 1);
+    // Prefer RIGHT
+    let right = null;
+    let left = null;
+    for (const s of srcs) {
+      if (!s?.targetRaySpace) continue;
+      if (s.handedness === "right") right = s;
+      if (s.handedness === "left") left = s;
     }
-    return null;
+    if (right) return { src: right, mode: "right" };
+    if (left) return { src: left, mode: "left" };
+
+    // Fallback: first usable
+    for (const s of srcs) {
+      if (s?.targetRaySpace) return { src: s, mode: "left" };
+    }
+    return { src: null, mode: "fallback-camera" };
   },
 
-  update(forceLog = false) {
+  update() {
     const session = this.renderer?.xr?.getSession?.();
-    if (!session) {
-      this._raySpace = this.camera;
-      this._mode = "fallback-camera";
+    const frame = this.renderer?.xr?.getFrame?.(); // <- key
+    const refSpace = this._refSpace || this.renderer?.xr?.getReferenceSpace?.();
+
+    this.poseValid = false;
+
+    if (!session || !frame || !refSpace) {
+      // camera fallback
+      this.poseMatrix.copy(this.camera.matrixWorld);
+      this.posePos.setFromMatrixPosition(this.poseMatrix);
+      this.poseQuat.setFromRotationMatrix(this.poseMatrix);
+      this.mode = "fallback-camera";
+      this.poseValid = true;
+      this._logModeIfChanged();
       return;
     }
 
-    // 1) Prefer handedness if available
-    const idxH = this._getRightIndexByHandedness();
-
-    const c0 = this.controller0;
-    const c1 = this.controller1;
-
-    let chosen = null;
-    let mode = "fallback-camera";
-
-    const candidates = [];
-
-    // If we know right index, try it first
-    if (idxH === 0) candidates.push({ obj: c0, mode: "right" });
-    if (idxH === 1) candidates.push({ obj: c1, mode: "right" });
-
-    // Then try the other controller
-    candidates.push({ obj: c0, mode: "left" });
-    candidates.push({ obj: c1, mode: "left" });
-
-    // 2) Pick first controller that has a non-origin pose
-    for (const cand of candidates) {
-      if (this._isPoseValid(cand.obj)) {
-        chosen = cand.obj;
-        mode = cand.mode;
-        break;
-      }
+    const { src, mode } = this._selectSource(session);
+    if (!src) {
+      // camera fallback
+      this.poseMatrix.copy(this.camera.matrixWorld);
+      this.posePos.setFromMatrixPosition(this.poseMatrix);
+      this.poseQuat.setFromRotationMatrix(this.poseMatrix);
+      this.mode = "fallback-camera";
+      this.poseValid = true;
+      this._logModeIfChanged();
+      return;
     }
 
-    // 3) Final fallback: camera (never “center stuck”)
-    if (!chosen) {
-      chosen = this.camera;
-      mode = "fallback-camera";
+    // Get actual pose from XRFrame
+    const pose = frame.getPose(src.targetRaySpace, refSpace);
+
+    if (pose && pose.transform && pose.transform.matrix) {
+      // pose.transform.matrix is Float32Array(16)
+      this.poseMatrix.fromArray(pose.transform.matrix);
+      this.posePos.setFromMatrixPosition(this.poseMatrix);
+      this.poseQuat.setFromRotationMatrix(this.poseMatrix);
+      this.mode = mode;
+      this.poseValid = true;
+      this._logModeIfChanged();
+      return;
     }
 
-    const changed = chosen !== this._raySpace;
-    this._raySpace = chosen;
-    this._mode = mode;
-
-    if (forceLog || changed) {
-      if (mode === "right") this.hub("✅ RaySpace = RIGHT controller (tracked)");
-      else if (mode === "left") this.hub("⚠️ RaySpace = LEFT controller (fallback)");
-      else this.hub("⚠️ RaySpace = CAMERA (fallback — controller pose not ready)");
-    }
+    // If pose missing this frame, fallback to camera
+    this.poseMatrix.copy(this.camera.matrixWorld);
+    this.posePos.setFromMatrixPosition(this.poseMatrix);
+    this.poseQuat.setFromRotationMatrix(this.poseMatrix);
+    this.mode = "fallback-camera";
+    this.poseValid = true;
+    this._logModeIfChanged();
   },
 
-  getRaySpace() {
-    return this._raySpace || this.camera;
+  _logModeIfChanged() {
+    if (this.mode === this._lastMode) return;
+    this._lastMode = this.mode;
+
+    if (this.mode === "right") this.hub("✅ Ray pose = RIGHT (XRFrame)");
+    else if (this.mode === "left") this.hub("⚠️ Ray pose = LEFT (XRFrame fallback)");
+    else this.hub("⚠️ Ray pose = CAMERA (fallback)");
   },
 
-  getHandedness() {
-    return this._mode;
+  // Convenience getters
+  getRayOrigin(outVec3) {
+    return outVec3.copy(this.posePos);
+  },
+
+  getRayDirection(outVec3) {
+    // -Z in the pose space
+    outVec3.set(0, 0, -1).applyQuaternion(this.poseQuat).normalize();
+    return outVec3;
+  },
+
+  getQuat(outQuat) {
+    return outQuat.copy(this.poseQuat);
   },
 };

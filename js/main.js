@@ -1,5 +1,5 @@
-// /js/main.js — Scarlett Poker VR — Permanent Core + Controllers + No-ZFighting Floor
-// GitHub Pages + Oculus Browser SAFE
+// /js/main.js — Scarlett Poker VR — PERMANENT XR RIG + TELEPORT FLOOR + TILE FLOOR
+// GitHub Pages + Quest/Oculus Browser SAFE
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -44,7 +44,7 @@ const player = new THREE.Group();
 scene.add(player);
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 350);
-camera.position.set(0, 0, 0); // XR drives camera
+camera.position.set(0, 0, 0);
 player.add(camera);
 
 // -------------------------
@@ -58,7 +58,7 @@ renderer.xr.enabled = true;
 // Quest brightness helpers
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.9;
+renderer.toneMappingExposure = 2.0;
 
 renderer.setClearColor(0x1b2028, 1);
 document.body.appendChild(renderer.domElement);
@@ -76,63 +76,98 @@ vrButton.style.pointerEvents = "auto";
 document.body.appendChild(vrButton);
 ok("Renderer + VRButton mounted/locked");
 
-// Oculus warm-up
-document.body.addEventListener("click", () => {
-  renderer.xr.enabled = true;
-}, { once: true });
+// Warm-up
+document.body.addEventListener("click", () => { renderer.xr.enabled = true; }, { once: true });
 
 // -------------------------
 // Lighting (BRIGHTER)
 // -------------------------
-const ambient = new THREE.AmbientLight(0xffffff, 0.9);
+const ambient = new THREE.AmbientLight(0xffffff, 1.0);
 scene.add(ambient);
 
-const hemi = new THREE.HemisphereLight(0xffffff, 0x404060, 2.4);
+const hemi = new THREE.HemisphereLight(0xffffff, 0x404060, 2.8);
 scene.add(hemi);
 
-const key = new THREE.DirectionalLight(0xffffff, 2.0);
+const key = new THREE.DirectionalLight(0xffffff, 2.4);
 key.position.set(8, 14, 6);
 scene.add(key);
 
-const fillA = new THREE.PointLight(0xffffff, 1.3, 80);
+const fillA = new THREE.PointLight(0xffffff, 1.4, 90);
 fillA.position.set(-10, 7, 10);
 scene.add(fillA);
 
-const fillB = new THREE.PointLight(0xffffff, 1.2, 80);
+const fillB = new THREE.PointLight(0xffffff, 1.3, 90);
 fillB.position.set(10, 7, -10);
 scene.add(fillB);
 
-// Headlight on player (guaranteed visibility)
-const headLight = new THREE.PointLight(0xffffff, 2.2, 22);
+// Headlight (helps in dark corners)
+const headLight = new THREE.PointLight(0xffffff, 2.0, 24);
 headLight.position.set(0, 1.6, 0);
 player.add(headLight);
 
 ok("Lighting applied");
 
 // -------------------------
-// Safety floor (ANTI BLINK / ANTI Z-FIGHT)
-// Put it slightly BELOW the real floor and use polygonOffset.
+// Tile/Marble debug floor (VISIBLE, HIGH-CONTRAST)
+// This is ONLY a visual helper. Teleport uses a separate invisible plane.
 // -------------------------
-const safetyFloorMat = new THREE.MeshStandardMaterial({
-  color: 0x151820,
-  roughness: 1,
-  metalness: 0,
+const texLoader = new THREE.TextureLoader();
+function safeTex(file, repeatX = 10, repeatY = 10) {
+  const url = `assets/textures/${file}`;
+  const t = new THREE.Texture();
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(repeatX, repeatY);
+  texLoader.load(
+    url,
+    (loaded) => {
+      loaded.wrapS = loaded.wrapT = THREE.RepeatWrapping;
+      loaded.repeat.set(repeatX, repeatY);
+      t.image = loaded.image;
+      t.needsUpdate = true;
+      ok(`Floor texture loaded: ${file}`);
+    },
+    undefined,
+    () => warn(`Missing floor texture: ${file} (using fallback colors)`)
+  );
+  return t;
+}
+
+// Try your existing floor file first, fallback is still visible even if missing
+const floorMat = new THREE.MeshStandardMaterial({
+  color: 0x2a2f3a,
+  roughness: 0.95,
+  metalness: 0.05,
+  map: safeTex("Marblegold Floors.jpg", 8, 8),
   polygonOffset: true,
-  polygonOffsetFactor: 1,
-  polygonOffsetUnits: 1,
+  polygonOffsetFactor: -1,
+  polygonOffsetUnits: -1,
 });
-const safetyFloor = new THREE.Mesh(new THREE.PlaneGeometry(180, 180), safetyFloorMat);
-safetyFloor.rotation.x = -Math.PI / 2;
-safetyFloor.position.y = -0.06; // below world floor => no flicker
-scene.add(safetyFloor);
-ok("Safety floor placed below world floor");
+
+const debugFloor = new THREE.Mesh(new THREE.PlaneGeometry(180, 180), floorMat);
+debugFloor.rotation.x = -Math.PI / 2;
+debugFloor.position.y = 0.0;
+scene.add(debugFloor);
+ok("Visible tile/marble floor placed at y=0");
+
+// -------------------------
+// TeleportFloor (INVISIBLE, used ONLY for ray hits)
+// Put it slightly above visual floor to eliminate z-fighting in ray hits.
+// -------------------------
+const teleportFloor = new THREE.Mesh(
+  new THREE.PlaneGeometry(200, 200),
+  new THREE.MeshBasicMaterial({ visible: false })
+);
+teleportFloor.rotation.x = -Math.PI / 2;
+teleportFloor.position.y = 0.01; // critical: separate surface
+teleportFloor.name = "TeleportFloor";
+scene.add(teleportFloor);
+ok("TeleportFloor created at y=0.01 (raycast target)");
 
 // -------------------------
 // Controllers (VISIBLE MODELS)
 // -------------------------
 const controllerModelFactory = new XRControllerModelFactory();
 
-// controller 0/1 = left/right (usually)
 const controller0 = renderer.xr.getController(0);
 const controller1 = renderer.xr.getController(1);
 scene.add(controller0);
@@ -149,30 +184,27 @@ scene.add(grip1);
 ok("Controller models attached");
 
 // -------------------------
-// Safe module loader (HUB)
+// Safe module loader
 // -------------------------
-const modules = {};
 async function safeImport(label, relPath) {
   try {
     const m = await import(`${relPath}?v=${Date.now()}`);
-    modules[label] = m;
     ok(`Loaded ${label}`);
     return m;
   } catch (e) {
-    modules[label] = null;
     warn(`Skipped ${label}`);
     console.warn(`Failed import: ${label} -> ${relPath}`, e);
     return null;
   }
 }
 
-// Core
+// Core modules
 const WorldMod = await safeImport("world.js", "./world.js");
 const ControlsMod = await safeImport("controls.js", "./controls.js");
 await safeImport("ui.js", "./ui.js");
 await safeImport("poker_simulation.js", "./poker_simulation.js");
 
-// Optional (non-fatal)
+// Optional modules (non-fatal)
 await safeImport("interactions.js", "./interactions.js");
 await safeImport("table.js", "./table.js");
 await safeImport("chair.js", "./chair.js");
@@ -192,7 +224,6 @@ try {
 
     const room = roomFromURL();
     const pad = worldData?.padById?.[room] || worldData?.padById?.lobby;
-
     if (pad?.position) spawn.copy(pad.position);
     else if (worldData?.spawn) spawn.copy(worldData.spawn);
   } else {
@@ -206,27 +237,29 @@ player.position.set(spawn.x, 0.01, spawn.z);
 ok("Spawned on teleport pad");
 
 // -------------------------
-// Controls (height lock + laser-teleport targeting)
+// Controls init
+// IMPORTANT: laser should attach to RIGHT GRIP (stable)
 // -------------------------
-const lockedEye = Number(qs("eye", 1.72)); // your desired permanent seated eye height
+const lockedEye = Number(qs("eye", 1.72));
+
 try {
   if (ControlsMod?.Controls?.init) {
     ControlsMod.Controls.init({
       renderer,
       camera,
       player,
-      // pass controllers + grips so you can see / raycast
       controllers: { left: controller0, right: controller1 },
       grips: { left: grip0, right: grip1 },
-      // collision
       colliders: worldData?.colliders || [],
       bounds: worldData?.bounds || null,
-      // height lock
+
       lockHeight: true,
       targetEyeHeight: lockedEye,
       baseY: 0.01,
-      // floor plane for raycast
-      floorY: 0.0,
+
+      // Pass teleport floor for raycast
+      teleportFloor,
+      floorY: 0.01
     });
     ok(`Controls.init OK (eye locked @ ${lockedEye.toFixed(2)}m)`);
   } else {
@@ -236,14 +269,13 @@ try {
   fail(`Controls init failed: ${e?.message || e}`);
 }
 
-// Boost on XR start (Quest dims sometimes)
 renderer.xr.addEventListener("sessionstart", () => {
   ok("XR session started — boost");
-  renderer.toneMappingExposure = 2.05;
-  ambient.intensity = 1.0;
-  hemi.intensity = 2.7;
-  key.intensity = 2.2;
-  headLight.intensity = 2.5;
+  renderer.toneMappingExposure = 2.15;
+  ambient.intensity = 1.05;
+  hemi.intensity = 3.0;
+  key.intensity = 2.6;
+  headLight.intensity = 2.2;
 });
 
 addEventListener("resize", () => {
@@ -252,7 +284,6 @@ addEventListener("resize", () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-// Loop
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
@@ -261,3 +292,4 @@ renderer.setAnimationLoop(() => {
 });
 
 ok("Boot complete — press ENTER VR");
+ok("If floor still blinks: we’ll remove world floor or offset it next.");

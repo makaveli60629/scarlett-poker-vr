@@ -1,34 +1,43 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Scarlett Poker VR</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    html,body {
-      margin:0;
-      padding:0;
-      width:100%;
-      height:100%;
-      background:#000;
-      overflow:hidden;
-      font-family: ui-monospace, Menlo, Consolas, monospace;
-    }
-    #overlay {
-      position:fixed;
-      inset:0;
-      padding:14px;
-      color:#00ff66;
-      background:radial-gradient(circle at center, #05130a, #000);
-      white-space:pre-wrap;
-      line-height:1.35;
-      font-size:13px;
-      pointer-events:none;
-    }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no" />
+<title>Scarlett Poker VR</title>
+
+<style>
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #000;
+  font-family: monospace;
+}
+
+canvas {
+  display: block;
+}
+
+/* STATUS OVERLAY */
+#overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  padding: 10px;
+  color: #00ff99;
+  background: rgba(0,0,0,0.65);
+  z-index: 1000;
+  pointer-events: none;
+  font-size: 13px;
+  line-height: 1.4em;
+}
+</style>
 </head>
+
 <body>
-  <div id="overlay">Scarlett Poker VR — loading…</div>
-  <script type="module" src="./js/main.js"></script>
+<div id="overlay">Scarlett Poker VR — loading…</div>
+
+<script type="module" src="./js/main.js"></script>
 </body>
 </html>

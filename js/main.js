@@ -1,178 +1,169 @@
-// /js/main.js — Skylark Poker VR (Oculus-safe entrypoint)
-// No dynamic import(). No query-string cache busting. Single module entry.
+// /js/main.js — Skylark Poker VR — Stable Boot (No Cube)
+// Goals:
+// - No debug cube
+// - Always clears "booting..." overlay once render starts
+// - Minimal dependency chain (only world.js)
+// - Works in Oculus Browser + GitHub Pages
 
-const overlay = document.getElementById("overlay");
-const log = (...a) => { if (overlay) overlay.textContent = a.join(" "); console.log(...a); };
-const warn = (...a) => { if (overlay) overlay.textContent = "⚠ " + a.join(" "); console.warn(...a); };
-const err = (...a) => { if (overlay) overlay.textContent = "❌ " + a.join(" "); console.error(...a); };
-
-// ---- Load THREE (prefer local wrapper for GitHub Pages stability) ----
-import * as THREE_LOCAL from "./three.js";
-
-let THREE = THREE_LOCAL;
-
-try {
-  if (!THREE || !THREE.WebGLRenderer) throw new Error("Local ./three.js missing WebGLRenderer export");
-  log("✅ THREE loaded (local ./js/three.js)");
-} catch (e) {
-  // Fallback path (rare): CDN
-  warn("Local THREE failed, falling back to CDN…");
-  // NOTE: Still not dynamic-importing main.js — only an internal fallback attempt.
-  // If Oculus blocks CDN, you still get a readable error message.
-  try {
-    // eslint-disable-next-line no-undef
-    THREE = await import("https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js");
-    log("✅ THREE loaded (CDN fallback)");
-  } catch (e2) {
-    err("THREE failed to load. Check ./js/three.js exists and is committed.");
-    throw e2;
-  }
-}
-
-// ---- Optional modules (safe-import as static imports) ----
-import { World } from "./world.js";
-import { Controls } from "./controls.js";
-import { UI } from "./ui.js";
-import { PokerSimulation } from "./poker_simulation.js";
-
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
+import { World } from "./world.js";
 
-// ---- App ----
 const APP = {
   scene: null,
   camera: null,
   renderer: null,
   clock: null,
-  playerGroup: null,
+  player: null,
   colliders: [],
-  bounds: null,
+  spawn: null,
+
+  bootEl: null,
+  bootMsgEl: null,
+  _bootCleared: false,
 
   init() {
+    // Boot UI hooks (safe even if missing)
+    this.bootEl = document.getElementById("boot") || null;
+    this.bootMsgEl = document.getElementById("bootlog") || null;
+
+    this._boot("Starting renderer…");
+
     // Scene
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x05060a);
-    this.scene.fog = new THREE.Fog(0x05060a, 2, 60);
+    this.scene.background = new THREE.Color(0x070a0f);
+    this.scene.fog = new THREE.Fog(0x070a0f, 5, 65);
 
-    // Player rig
-    this.playerGroup = new THREE.Group();
-    this.scene.add(this.playerGroup);
+    // Player rig (group you move around)
+    this.player = new THREE.Group();
+    this.scene.add(this.player);
 
     // Camera
-    this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
-    this.camera.position.set(0, 1.65, 3);
-    this.playerGroup.add(this.camera);
+    this.camera = new THREE.PerspectiveCamera(
+      70,
+      window.innerWidth / window.innerHeight,
+      0.05,
+      250
+    );
+    this.camera.position.set(0, 1.65, 0);
+    this.player.add(this.camera);
 
     // Renderer
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.xr.enabled = true;
+
     document.body.appendChild(this.renderer.domElement);
     document.body.appendChild(VRButton.createButton(this.renderer));
 
     this.clock = new THREE.Clock();
 
-    this._addLights();
-    this._addFloor(); // always visible baseline (not a cube)
+    // Guaranteed lighting (prevents black screens)
+    this._addGuaranteedLighting();
 
     // Build world (safe)
     try {
-      const out = World?.build?.(this.scene, this.playerGroup) || null;
-      if (out && Array.isArray(out.colliders)) this.colliders = out.colliders;
-      if (out && out.bounds) this.bounds = out.bounds;
-      log("✅ World built.");
+      this._boot("Building world…");
+      const result = World.build(this.scene, this.player) || {};
+      this.colliders = Array.isArray(result.colliders) ? result.colliders : [];
+      this.spawn = result.spawn || null;
+
+      if (this.spawn && this.spawn.isVector3) {
+        this.player.position.copy(this.spawn);
+      } else {
+        // Default spawn (safe)
+        this.player.position.set(0, 0, 6);
+      }
     } catch (e) {
-      warn("World build failed (still running baseline floor).");
-      console.warn(e);
+      console.error("World build error:", e);
+      this._bootError("World failed to build. Check console.");
+      // Still place player somewhere sane
+      this.player.position.set(0, 0, 6);
     }
 
-    // Controls (safe)
-    try {
-      Controls?.init?.({
-        renderer: this.renderer,
-        camera: this.camera,
-        player: this.playerGroup,
-        colliders: this.colliders,
-        bounds: this.bounds,
-      });
-      log("✅ Controls ready.");
-    } catch (e) {
-      warn("Controls init failed.");
-      console.warn(e);
-    }
+    // Start render loop
+    window.addEventListener("resize", () => this._onResize());
+    this.renderer.setAnimationLoop(() => this.animate());
 
-    // UI (safe)
-    try {
-      UI?.init?.(this.scene, this.camera, {
-        onResetSpawn: () => this._resetSpawn(),
-      });
-      log("✅ UI ready.");
-    } catch (e) {
-      warn("UI init failed.");
-      console.warn(e);
-    }
-
-    // Poker sim (safe)
-    try {
-      PokerSimulation?.build?.({ players: [], bots: [] });
-      log("✅ PokerSimulation ready.");
-    } catch (e) {
-      // This is not fatal; simulation can be wired later
-      warn("PokerSimulation init skipped.");
-      console.warn(e);
-    }
-
-    window.addEventListener("resize", () => this._resize());
-    this.renderer.setAnimationLoop(() => this._animate());
-
-    // Clear overlay after success (keep a tiny hint)
-    if (overlay) overlay.textContent = "✅ Loaded. Press VR to enter.";
+    // Clear boot once we confirm at least one frame ran
+    // (Oculus sometimes needs a tick before DOM updates)
+    requestAnimationFrame(() => this._clearBoot());
   },
 
-  _addLights() {
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x222244, 1.05);
+  animate() {
+    const dt = this.clock.getDelta();
+
+    // Optional tiny idle bob so you can see it's alive (very subtle)
+    // (does nothing in VR; only helps 2D mode confirm animation loop)
+    if (!this.renderer.xr.isPresenting) {
+      this.camera.position.y = 1.65 + Math.sin(performance.now() * 0.001) * 0.002;
+    }
+
+    // Render
+    this.renderer.render(this.scene, this.camera);
+
+    // If boot wasn’t cleared for any reason, clear after first real render
+    if (!this._bootCleared) this._clearBoot();
+  },
+
+  _addGuaranteedLighting() {
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x222244, 1.1);
     this.scene.add(hemi);
 
-    const key = new THREE.DirectionalLight(0xffffff, 1.15);
-    key.position.set(6, 10, 6);
+    const key = new THREE.DirectionalLight(0xffffff, 1.2);
+    key.position.set(6, 10, 4);
+    key.castShadow = false;
     this.scene.add(key);
 
-    const fill = new THREE.DirectionalLight(0xffffff, 0.55);
-    fill.position.set(-6, 6, -4);
+    const fill = new THREE.DirectionalLight(0x9bd7ff, 0.45);
+    fill.position.set(-7, 4, -6);
     this.scene.add(fill);
 
-    const warm = new THREE.PointLight(0xffd27a, 0.7, 20);
-    warm.position.set(0, 3.5, 0);
+    const warm = new THREE.PointLight(0xffd2a0, 0.6, 18);
+    warm.position.set(0, 3.2, 0);
     this.scene.add(warm);
   },
 
-  _addFloor() {
-    const g = new THREE.PlaneGeometry(30, 30);
-    const m = new THREE.MeshStandardMaterial({ color: 0x111217, roughness: 0.95, metalness: 0.0 });
-    const floor = new THREE.Mesh(g, m);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = 0;
-    floor.receiveShadow = false;
-    this.scene.add(floor);
-  },
-
-  _resetSpawn() {
-    this.playerGroup.position.set(0, 0, 3);
-    this.playerGroup.rotation.set(0, 0, 0);
-  },
-
-  _resize() {
+  _onResize() {
+    if (!this.camera || !this.renderer) return;
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
   },
 
-  _animate() {
-    const dt = this.clock.getDelta();
-    try { Controls?.update?.(dt); } catch {}
-    try { UI?.update?.(dt); } catch {}
-    this.renderer.render(this.scene, this.camera);
-  }
+  _boot(msg) {
+    if (this.bootMsgEl) this.bootMsgEl.textContent = msg;
+  },
+
+  _bootError(msg) {
+    if (this.bootMsgEl) this.bootMsgEl.textContent = "ERROR: " + msg;
+    if (this.bootEl) this.bootEl.style.borderColor = "#ff4d4d";
+  },
+
+  _clearBoot() {
+    if (this._bootCleared) return;
+    this._bootCleared = true;
+
+    // Hide overlay if present
+    if (this.bootEl) this.bootEl.style.display = "none";
+    // Also clear any leftover “booting…” text if you used a simple <pre>
+    const legacy = document.getElementById("status");
+    if (legacy) legacy.textContent = "";
+  },
 };
 
+window.addEventListener("error", (e) => {
+  console.error("Window error:", e?.error || e);
+  const boot = document.getElementById("bootlog");
+  if (boot) boot.textContent = "ERROR: " + (e?.message || "Unknown error");
+});
+
+window.addEventListener("unhandledrejection", (e) => {
+  console.error("Unhandled rejection:", e?.reason || e);
+  const boot = document.getElementById("bootlog");
+  if (boot) boot.textContent = "ERROR: " + (e?.reason?.message || e?.reason || "Promise error");
+});
+
+// Start
 APP.init();

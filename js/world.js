@@ -1,291 +1,406 @@
-// /js/world.js — Update 9.0 Fix Pack A (Textures Import Fix)
-// IMPORTANT: This version does NOT import `Textures` (your textures.js doesn't export it).
-// It uses direct filenames from /assets/textures/ with TextureBank.standard({ mapFile: "name.jpg" })
-// If a file is missing, TextureBank should still fall back to color.
+// /js/world.js — Skylark Poker VR — World Builder (9.0 FULL)
+// - Big room, brighter lighting
+// - Marble floor, brick walls w/ SMALLER repeat (smaller bricks)
+// - Gold trim + corner pillars
+// - Circular rail WITH bars (prevents walking into table area)
+// - Teleport machine spawn point (always spawns from pad)
+// - Solid colliders: walls + rail ring
+// - Safe texture fallback if missing files (no crashes)
 
 import * as THREE from "./three.js";
-import { TextureBank } from "./textures.js";
 import { TeleportMachine } from "./teleport_machine.js";
 
 export const World = {
-  colliders: [],
-  bounds: { minX: -14, maxX: 14, minZ: -14, maxZ: 10 },
-  tableCenter: new THREE.Vector3(0, 0, -4.8),
-
-  teleport: null,
-  spawn: { position: new THREE.Vector3(0, 0, 5), yaw: Math.PI },
-
-  // small helper so we don't repeat ourselves
-  T(file) { return file; },
+  _tex: null,
 
   build(scene) {
-    this.colliders = [];
+    this._tex = new THREE.TextureLoader();
 
-    // ---------- LIGHTING ----------
-    scene.background = new THREE.Color(0x07070c);
-    scene.fog = new THREE.Fog(0x07070c, 8, 55);
+    // -----------------------------
+    // Scene baseline
+    // -----------------------------
+    scene.background = new THREE.Color(0x07070a);
+    scene.fog = new THREE.Fog(0x07070a, 10, 45);
 
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 0.95);
+    // -----------------------------
+    // Lighting (brighter)
+    // -----------------------------
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x222244, 0.85);
     scene.add(hemi);
 
-    const key = new THREE.DirectionalLight(0xffffff, 1.25);
-    key.position.set(6, 10, 8);
+    const key = new THREE.DirectionalLight(0xffffff, 1.05);
+    key.position.set(6, 10, 6);
+    key.castShadow = false;
     scene.add(key);
 
-    const fill = new THREE.DirectionalLight(0xfff0d0, 0.65);
-    fill.position.set(-8, 6, -6);
+    const fill = new THREE.DirectionalLight(0x9bd7ff, 0.55);
+    fill.position.set(-7, 6, -4);
     scene.add(fill);
 
-    const glowA = new THREE.PointLight(0x2bd7ff, 0.55, 22);
-    glowA.position.set(0, 4.8, -6);
-    scene.add(glowA);
+    const warm = new THREE.PointLight(0xffd27a, 0.8, 22);
+    warm.position.set(0, 6.5, -6);
+    scene.add(warm);
 
-    const glowB = new THREE.PointLight(0xffd27a, 0.55, 22);
-    glowB.position.set(0, 4.2, 2);
-    scene.add(glowB);
+    // -----------------------------
+    // Room sizes (bigger)
+    // -----------------------------
+    const ROOM_W = 30;
+    const ROOM_D = 30;
+    const WALL_H = 8.5;
 
-    // ---------- FLOOR ----------
-    const floorMat = TextureBank.standard({
-      mapFile: this.T("Marblegold floors.jpg"),
+    // bounds (for controls clamp + teleport clamp)
+    const bounds = {
+      min: new THREE.Vector3(-ROOM_W / 2 + 1.0, 0, -ROOM_D / 2 + 1.0),
+      max: new THREE.Vector3( ROOM_W / 2 - 1.0, 0,  ROOM_D / 2 - 1.0)
+    };
+
+    // -----------------------------
+    // Materials (safe textures)
+    // -----------------------------
+    const floorMat = this._safeMat({
+      file: "Marblegold floors.jpg",
       color: 0xffffff,
-      roughness: 0.95,
-      metalness: 0.05,
       repeat: [6, 6],
+      roughness: 0.9,
+      metalness: 0.1
     });
 
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(34, 34), floorMat);
+    const wallMat = this._safeMat({
+      file: "brickwall.jpg",
+      color: 0xf2f2f2,
+      repeat: [10, 3], // ✅ smaller bricks
+      roughness: 0.95,
+      metalness: 0.0
+    });
+
+    const wallAccentMat = this._safeMat({
+      file: "wall_stone_runes.jpg",
+      color: 0xe9e9ef,
+      repeat: [8, 2.6],
+      roughness: 0.95,
+      metalness: 0.0
+    });
+
+    const goldMat = new THREE.MeshStandardMaterial({
+      color: 0xffd27a,
+      roughness: 0.35,
+      metalness: 0.5,
+      emissive: 0x1a1206,
+      emissiveIntensity: 0.25
+    });
+
+    // -----------------------------
+    // Floor
+    // -----------------------------
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(ROOM_W, ROOM_D),
+      floorMat
+    );
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = 0;
     scene.add(floor);
 
-    // ---------- ROOM (bigger + higher walls) ----------
-    const roomW = 30;
-    const roomD = 26;
-    const wallH = 9.2;
-
-    // tile bricks smaller via repeat
-    const wallMat = TextureBank.standard({
-      mapFile: this.T("brickwall.jpg"),
-      color: 0xffffff,
-      roughness: 1.0,
-      metalness: 0.0,
-      repeat: [10, 3], // smaller bricks
-    });
-
-    const trimGold = new THREE.MeshStandardMaterial({
-      color: 0xffd27a,
-      roughness: 0.35,
-      metalness: 0.45,
-    });
-
+    // -----------------------------
+    // Walls (4) + trim
+    // -----------------------------
     const walls = new THREE.Group();
     walls.name = "Walls";
 
-    const mkWall = (w, h, mat) => new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+    const wallGeo = new THREE.PlaneGeometry(ROOM_W, WALL_H);
 
-    const back = mkWall(roomW, wallH, wallMat);
-    back.position.set(0, wallH / 2, -roomD / 2);
-    back.rotation.y = Math.PI;
-    walls.add(back);
+    const wallN = new THREE.Mesh(wallGeo, wallMat);
+    wallN.position.set(0, WALL_H / 2, -ROOM_D / 2);
+    wallN.rotation.y = 0;
+    walls.add(wallN);
 
-    const front = mkWall(roomW, wallH, wallMat);
-    front.position.set(0, wallH / 2, roomD / 2);
-    walls.add(front);
+    const wallS = new THREE.Mesh(wallGeo, wallMat);
+    wallS.position.set(0, WALL_H / 2, ROOM_D / 2);
+    wallS.rotation.y = Math.PI;
+    walls.add(wallS);
 
-    const left = mkWall(roomD, wallH, wallMat);
-    left.position.set(-roomW / 2, wallH / 2, 0);
-    left.rotation.y = Math.PI / 2;
-    walls.add(left);
+    const wallE = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_D, WALL_H), wallAccentMat);
+    wallE.position.set(ROOM_W / 2, WALL_H / 2, 0);
+    wallE.rotation.y = -Math.PI / 2;
+    walls.add(wallE);
 
-    const right = mkWall(roomD, wallH, wallMat);
-    right.position.set(roomW / 2, wallH / 2, 0);
-    right.rotation.y = -Math.PI / 2;
-    walls.add(right);
+    const wallW = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_D, WALL_H), wallAccentMat);
+    wallW.position.set(-ROOM_W / 2, WALL_H / 2, 0);
+    wallW.rotation.y = Math.PI / 2;
+    walls.add(wallW);
 
     scene.add(walls);
 
-    // gold base trim (around bottom)
-    const trim = new THREE.Mesh(
-      new THREE.BoxGeometry(roomW, 0.22, roomD),
-      trimGold
-    );
-    trim.position.set(0, 0.11, 0);
-    trim.material.transparent = true;
-    trim.material.opacity = 0.95;
-    scene.add(trim);
+    // Gold trim around bottom of walls
+    const trimH = 0.22;
+    const trimY = trimH / 2;
 
-    // corner pillars (gold)
-    const pillarGeo = new THREE.CylinderGeometry(0.28, 0.28, wallH, 18);
-    const corners = [
-      [-roomW / 2 + 0.25, wallH / 2, -roomD / 2 + 0.25],
-      [ roomW / 2 - 0.25, wallH / 2, -roomD / 2 + 0.25],
-      [-roomW / 2 + 0.25, wallH / 2,  roomD / 2 - 0.25],
-      [ roomW / 2 - 0.25, wallH / 2,  roomD / 2 - 0.25],
+    const trimN = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W, trimH, 0.22), goldMat);
+    trimN.position.set(0, trimY, -ROOM_D / 2 + 0.11);
+    scene.add(trimN);
+
+    const trimS = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W, trimH, 0.22), goldMat);
+    trimS.position.set(0, trimY, ROOM_D / 2 - 0.11);
+    scene.add(trimS);
+
+    const trimE = new THREE.Mesh(new THREE.BoxGeometry(0.22, trimH, ROOM_D), goldMat);
+    trimE.position.set(ROOM_W / 2 - 0.11, trimY, 0);
+    scene.add(trimE);
+
+    const trimW = new THREE.Mesh(new THREE.BoxGeometry(0.22, trimH, ROOM_D), goldMat);
+    trimW.position.set(-ROOM_W / 2 + 0.11, trimY, 0);
+    scene.add(trimW);
+
+    // Corner pillars
+    const pillarGeo = new THREE.CylinderGeometry(0.28, 0.34, WALL_H, 22);
+    const pillarPos = [
+      [ ROOM_W / 2 - 0.6, WALL_H / 2,  ROOM_D / 2 - 0.6],
+      [-ROOM_W / 2 + 0.6, WALL_H / 2,  ROOM_D / 2 - 0.6],
+      [ ROOM_W / 2 - 0.6, WALL_H / 2, -ROOM_D / 2 + 0.6],
+      [-ROOM_W / 2 + 0.6, WALL_H / 2, -ROOM_D / 2 + 0.6]
     ];
-    for (const c of corners) {
-      const p = new THREE.Mesh(pillarGeo, trimGold);
-      p.position.set(c[0], c[1], c[2]);
-      scene.add(p);
+
+    for (const p of pillarPos) {
+      const pil = new THREE.Mesh(pillarGeo, goldMat);
+      pil.position.set(p[0], p[1], p[2]);
+      scene.add(pil);
     }
 
-    // ---------- TABLE PLATFORM ----------
-    const platform = new THREE.Mesh(
-      new THREE.CylinderGeometry(6.1, 6.1, 0.08, 64),
-      new THREE.MeshStandardMaterial({ color: 0x0f0f14, roughness: 0.95 })
+    // -----------------------------
+    // Table center (single centerpiece)
+    // -----------------------------
+    const tableCenter = new THREE.Vector3(0, 0, -5.0);
+
+    // subtle “stage” circle
+    const stage = new THREE.Mesh(
+      new THREE.CylinderGeometry(6.6, 6.9, 0.08, 64),
+      new THREE.MeshStandardMaterial({ color: 0x0f0f14, roughness: 0.95, metalness: 0.15 })
     );
-    platform.position.set(this.tableCenter.x, 0.04, this.tableCenter.z);
-    scene.add(platform);
+    stage.position.set(tableCenter.x, 0.04, tableCenter.z);
+    scene.add(stage);
 
-    // ---------- CIRCULAR RAIL WITH BARS ----------
-    this.buildRail(scene, this.tableCenter);
+    // -----------------------------
+    // Circular rail WITH bars (solid)
+    // -----------------------------
+    const rail = this._buildRailRing(tableCenter, 6.0, goldMat);
+    scene.add(rail.group);
 
-    // ---------- WALL ART ----------
-    this.addWallArt(scene, roomW, roomD, wallH);
+    // -----------------------------
+    // Art frames (brighter + visible)
+    // -----------------------------
+    const artGroup = new THREE.Group();
+    artGroup.name = "ArtFrames";
+    scene.add(artGroup);
 
-    // ---------- TELEPORT MACHINE (spawn anchor) ----------
-    this.teleport = TeleportMachine.build(scene);
+    // Back wall big brand frame
+    artGroup.add(this._makeFrame(
+      "brand_logo.jpg",
+      new THREE.Vector3(0, 4.6, -ROOM_D / 2 + 0.06),
+      new THREE.Euler(0, 0, 0),
+      6.6, 3.2
+    ));
 
-    const s = TeleportMachine.getSafeSpawn();
-    this.spawn = { position: s.position.clone(), yaw: s.yaw };
+    // Side frames
+    artGroup.add(this._makeFrame(
+      "casino_art.jpg",
+      new THREE.Vector3(-ROOM_W / 2 + 0.06, 3.2, -6),
+      new THREE.Euler(0, Math.PI / 2, 0),
+      3.8, 2.2
+    ));
 
-    // ---------- COLLIDERS ----------
-    // walls AABB
-    this.addBoxCollider(0, wallH / 2, -roomD / 2 + 0.02, roomW, wallH, 0.2); // back
-    this.addBoxCollider(0, wallH / 2,  roomD / 2 - 0.02, roomW, wallH, 0.2); // front
-    this.addBoxCollider(-roomW / 2 + 0.02, wallH / 2, 0, 0.2, wallH, roomD); // left
-    this.addBoxCollider( roomW / 2 - 0.02, wallH / 2, 0, 0.2, wallH, roomD); // right
+    artGroup.add(this._makeFrame(
+      "Casinoart2.jpg",
+      new THREE.Vector3(ROOM_W / 2 - 0.06, 3.2, -6),
+      new THREE.Euler(0, -Math.PI / 2, 0),
+      3.8, 2.2
+    ));
 
-    // rail ring collider band
-    this.addRailColliders(this.tableCenter);
+    // -----------------------------
+    // Teleport machine + spawn
+    // -----------------------------
+    const teleport = TeleportMachine.build(scene, this._tex);
+    teleport.position.set(0, 0, tableCenter.z + 8.5); // in front of table
 
+    // Update pad center so getSafeSpawn is correct
+    TeleportMachine.padCenter.set(teleport.position.x, 0, teleport.position.z);
+
+    const spawn = TeleportMachine.getSafeSpawn();
+
+    // -----------------------------
+    // Colliders (walls + rail ring)
+    // -----------------------------
+    const colliders = [];
+
+    // Wall collider boxes (thick invisible)
+    const wallThickness = 0.8;
+
+    colliders.push(this._boxCollider(
+      new THREE.Vector3(0, WALL_H / 2, -ROOM_D / 2),
+      new THREE.Vector3(ROOM_W, WALL_H, wallThickness)
+    ));
+    colliders.push(this._boxCollider(
+      new THREE.Vector3(0, WALL_H / 2, ROOM_D / 2),
+      new THREE.Vector3(ROOM_W, WALL_H, wallThickness)
+    ));
+    colliders.push(this._boxCollider(
+      new THREE.Vector3(ROOM_W / 2, WALL_H / 2, 0),
+      new THREE.Vector3(wallThickness, WALL_H, ROOM_D)
+    ));
+    colliders.push(this._boxCollider(
+      new THREE.Vector3(-ROOM_W / 2, WALL_H / 2, 0),
+      new THREE.Vector3(wallThickness, WALL_H, ROOM_D)
+    ));
+
+    // Rail collider ring segments (prevents entering table area)
+    colliders.push(...rail.colliders);
+
+    // Return world data consumed by main.js + controls.js
     return {
-      colliders: this.colliders,
-      bounds: this.bounds,
-      teleport: this.teleport,
-      spawn: this.spawn,
-      tableCenter: this.tableCenter.clone(),
+      tableCenter,
+      bounds,
+      colliders,
+      teleport,
+      spawn
     };
   },
 
-  buildRail(scene, center) {
+  // -----------------------------
+  // Helpers
+  // -----------------------------
+  _safeMat({ file, color = 0xffffff, repeat = [1, 1], roughness = 0.9, metalness = 0.0 }) {
+    const mat = new THREE.MeshStandardMaterial({ color, roughness, metalness });
+    try {
+      const tex = this._tex.load(
+        `assets/textures/${file}`,
+        (t) => {
+          t.wrapS = t.wrapT = THREE.RepeatWrapping;
+          t.repeat.set(repeat[0], repeat[1]);
+          t.colorSpace = THREE.SRGBColorSpace;
+        },
+        undefined,
+        () => {}
+      );
+      mat.map = tex;
+      mat.color.set(0xffffff);
+      mat.needsUpdate = true;
+    } catch (e) {
+      // fallback color only
+    }
+    return mat;
+  },
+
+  _makeFrame(file, pos, rot, w, h) {
     const g = new THREE.Group();
-    g.name = "Rail";
+    g.position.copy(pos);
+    g.rotation.copy(rot);
 
-    const railRadius = 6.0;
-    const ringMat = new THREE.MeshStandardMaterial({
-      color: 0x1c1c24,
-      roughness: 0.65,
-      metalness: 0.1
-    });
-
-    const gold = new THREE.MeshStandardMaterial({
-      color: 0xffd27a,
-      roughness: 0.35,
-      metalness: 0.45
-    });
-
-    // top ring
-    const top = new THREE.Mesh(
-      new THREE.TorusGeometry(railRadius, 0.08, 14, 120),
-      ringMat
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(w + 0.22, h + 0.22, 0.12),
+      new THREE.MeshStandardMaterial({ color: 0xffd27a, roughness: 0.35, metalness: 0.5 })
     );
-    top.rotation.x = Math.PI / 2;
-    top.position.set(center.x, 1.05, center.z);
-    g.add(top);
+    frame.position.z = -0.05;
 
-    // bottom ring
-    const bot = new THREE.Mesh(
-      new THREE.TorusGeometry(railRadius, 0.06, 12, 120),
-      ringMat
+    const artMat = this._safeMat({ file, color: 0x222222, repeat: [1, 1], roughness: 0.85, metalness: 0.0 });
+    // make art self-lit slightly so it isn't dark
+    artMat.emissive = new THREE.Color(0x222222);
+    artMat.emissiveIntensity = 0.55;
+
+    const art = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      artMat
     );
-    bot.rotation.x = Math.PI / 2;
-    bot.position.set(center.x, 0.55, center.z);
-    g.add(bot);
 
-    // bars
-    const barGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.55, 10);
-    const bars = 56;
-    for (let i = 0; i < bars; i++) {
-      const a = (i / bars) * Math.PI * 2;
-      const x = center.x + Math.cos(a) * railRadius;
-      const z = center.z + Math.sin(a) * railRadius;
+    // light for art
+    const l = new THREE.PointLight(0xffffff, 0.6, 8);
+    l.position.set(0, 0, 1.2);
 
-      const bar = new THREE.Mesh(barGeo, gold);
-      bar.position.set(x, 0.78, z);
-      g.add(bar);
+    g.add(art, frame, l);
+    return g;
+  },
+
+  _boxCollider(center, size) {
+    // store Box3 only; Controls supports Box3 directly
+    const half = new THREE.Vector3(size.x / 2, size.y / 2, size.z / 2);
+    const box = new THREE.Box3(center.clone().sub(half), center.clone().add(half));
+    return box;
+  },
+
+  _buildRailRing(center, radius, goldMat) {
+    const group = new THREE.Group();
+    group.name = "RailRing";
+
+    const height = 1.05;
+    const postH = 1.05;
+    const barCount = 28;
+
+    // Top rail torus
+    const topRail = new THREE.Mesh(
+      new THREE.TorusGeometry(radius, 0.06, 12, 120),
+      goldMat
+    );
+    topRail.rotation.x = Math.PI / 2;
+    topRail.position.set(center.x, height, center.z);
+    group.add(topRail);
+
+    // Bottom ring
+    const baseRing = new THREE.Mesh(
+      new THREE.TorusGeometry(radius, 0.045, 10, 120),
+      new THREE.MeshStandardMaterial({ color: 0x2a2a33, roughness: 0.9, metalness: 0.15 })
+    );
+    baseRing.rotation.x = Math.PI / 2;
+    baseRing.position.set(center.x, 0.15, center.z);
+    group.add(baseRing);
+
+    // Posts + bars
+    for (let i = 0; i < barCount; i++) {
+      const a = (i / barCount) * Math.PI * 2;
+      const x = center.x + Math.cos(a) * radius;
+      const z = center.z + Math.sin(a) * radius;
+
+      const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.04, 0.05, postH, 10),
+        goldMat
+      );
+      post.position.set(x, postH / 2, z);
+
+      group.add(post);
+
+      // mid bar segment (little vertical bar look)
+      const bar = new THREE.Mesh(
+        new THREE.BoxGeometry(0.06, 0.62, 0.06),
+        new THREE.MeshStandardMaterial({ color: 0x1a1a22, roughness: 0.85 })
+      );
+      bar.position.set(x, 0.62 / 2 + 0.25, z);
+      group.add(bar);
     }
 
-    const glow = new THREE.PointLight(0x2bd7ff, 0.35, 16);
-    glow.position.set(center.x, 1.8, center.z);
-    g.add(glow);
+    // Colliders for rail: approximate with 16 boxes around the ring
+    const colliders = [];
+    const segs = 16;
+    const thickness = 0.55;
+    const segW = (2 * Math.PI * radius) / segs;
 
-    scene.add(g);
-  },
-
-  addWallArt(scene, roomW, roomD, wallH) {
-    const artMat = TextureBank.standard({
-      mapFile: this.T("casino_art.jpg"),
-      color: 0xffffff,
-      roughness: 0.9,
-      metalness: 0.05,
-      repeat: [1, 1]
-    });
-
-    const frameMat = new THREE.MeshStandardMaterial({
-      color: 0xffd27a,
-      roughness: 0.35,
-      metalness: 0.45
-    });
-
-    const makeFramed = (w, h) => {
-      const g = new THREE.Group();
-      const art = new THREE.Mesh(new THREE.PlaneGeometry(w, h), artMat);
-      const frame = new THREE.Mesh(new THREE.BoxGeometry(w + 0.16, h + 0.16, 0.08), frameMat);
-      frame.position.z = -0.05;
-      g.add(art, frame);
-
-      const l = new THREE.PointLight(0xffd27a, 0.4, 8);
-      l.position.set(0, 0, 1.2);
-      g.add(l);
-      return g;
-    };
-
-    const art1 = makeFramed(4.2, 2.4);
-    art1.position.set(0, 4.2, -roomD / 2 + 0.12);
-    art1.rotation.y = Math.PI;
-    scene.add(art1);
-
-    const art2 = makeFramed(3.6, 2.1);
-    art2.position.set(-roomW / 2 + 0.12, 4.0, -2);
-    art2.rotation.y = Math.PI / 2;
-    scene.add(art2);
-
-    const art3 = makeFramed(3.6, 2.1);
-    art3.position.set(roomW / 2 - 0.12, 4.0, -2);
-    art3.rotation.y = -Math.PI / 2;
-    scene.add(art3);
-  },
-
-  addBoxCollider(x, y, z, sx, sy, sz) {
-    const box = new THREE.Box3().setFromCenterAndSize(
-      new THREE.Vector3(x, y, z),
-      new THREE.Vector3(sx, sy, sz)
-    );
-    this.colliders.push(box);
-  },
-
-  addRailColliders(center) {
-    const r = 6.0;
-    const y = 0.9;
-    const h = 1.6;
-    const t = 0.4;
-
-    const segs = 8;
     for (let i = 0; i < segs; i++) {
       const a = (i / segs) * Math.PI * 2;
-      const x = center.x + Math.cos(a) * r;
-      const z = center.z + Math.sin(a) * r;
-      this.addBoxCollider(x, y, z, 2.0, h, t);
+      const x = center.x + Math.cos(a) * radius;
+      const z = center.z + Math.sin(a) * radius;
+
+      const dir = new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
+      const tangent = new THREE.Vector3(-dir.z, 0, dir.x);
+
+      // box center is on ring, box elongated along tangent
+      const boxCenter = new THREE.Vector3(x, 0.8, z);
+
+      // We'll approximate AABB by making box axis-aligned in world:
+      // Create a slightly larger collider AABB around the segment.
+      const size = new THREE.Vector3(
+        Math.abs(tangent.x) > 0.7 ? segW * 0.65 : thickness,
+        1.6,
+        Math.abs(tangent.z) > 0.7 ? segW * 0.65 : thickness
+      );
+
+      colliders.push(this._boxCollider(boxCenter, size));
     }
+
+    return { group, colliders };
   }
 };

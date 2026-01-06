@@ -10,8 +10,8 @@
 //
 // NOTE: If your local wrapper paths differ, adjust the imports below to match your repo.
 
-import * as THREE from "../three.js";
-import { VRButton } from "../examples/jsm/webxr/VRButton.js";
+import * as THREE from "../three/build/three.module.js";
+import { VRButton } from "../three/examples/jsm/webxr/VRButton.js";
 
 import { World } from "./world.js";
 import { Controls } from "./controls.js";

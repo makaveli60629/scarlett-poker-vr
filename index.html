@@ -1,39 +1,31 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>Skylark Poker VR</title>
-
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <meta http-equiv="Cache-Control" content="no-store" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      background: #000;
-      color: #0f0;
-      font-family: monospace;
-    }
-    #boot {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      z-index: 10;
+    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
+    #overlay {
+      position: fixed; inset: 0; display:flex; align-items:flex-start; justify-content:flex-start;
+      padding: 14px; color:#00ff66; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 14px; line-height: 1.35;
+      pointer-events:none;
+      text-shadow: 0 0 8px rgba(0,255,120,.35);
+      white-space: pre-wrap;
     }
   </style>
 </head>
-
 <body>
-  <div id="boot">
-    Skylark Poker VR — booting…
-  </div>
+  <div id="overlay">Skylark Poker VR — loading…</div>
 
-  <!-- 🔑 THIS IS THE KEY LINE -->
+  <!-- IMPORTANT:
+       - NO dynamic import()
+       - NO cachebust query strings
+       - Just a single module entrypoint -->
   <script type="module" src="./js/main.js"></script>
 </body>
 </html>

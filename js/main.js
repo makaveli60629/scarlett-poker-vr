@@ -1,124 +1,73 @@
-// /js/main.js — Scarlett Poker VR 1.0 (CDN-only, Oculus-safe)
+// /js/main.js — Scarlett Poker VR — Boot (CDN-only)
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
 
-// Local modules (these MUST exist)
 import { World } from "./world.js";
 import { Controls } from "./controls.js";
-import { UI } from "./ui.js";
 import { PokerSimulation } from "./poker_simulation.js";
 
-// --- Boot overlay ---
+// overlay exists in index.html
 const overlay = document.getElementById("overlay");
-const setText = (t) => overlay && (overlay.textContent = t);
+const setText = (t) => { if (overlay) overlay.textContent = t; };
 
-setText("Scarlett Poker VR — booting…");
+setText("Scarlett Poker VR — loading scene…");
 
-// --- App ---
-const App = {
-  scene: null,
-  camera: null,
-  renderer: null,
-  clock: null,
-  player: null,
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05060a);
+scene.fog = new THREE.Fog(0x05060a, 2, 60);
 
-  init() {
-    this.clock = new THREE.Clock();
+const player = new THREE.Group();
+scene.add(player);
 
-    this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x05060a);
-    this.scene.fog = new THREE.Fog(0x05060a, 2, 60);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
+camera.position.set(0, 1.65, 3);
+player.add(camera);
 
-    this.player = new THREE.Group();
-    this.scene.add(this.player);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+document.body.appendChild(VRButton.createButton(renderer));
 
-    this.camera = new THREE.PerspectiveCamera(
-      70,
-      window.innerWidth / window.innerHeight,
-      0.05,
-      200
-    );
-    this.camera.position.set(0, 1.65, 3);
-    this.player.add(this.camera);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x222244, 1.1));
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.xr.enabled = true;
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(40, 40),
+  new THREE.MeshStandardMaterial({ color: 0x111217, roughness: 1 })
+);
+floor.rotation.x = -Math.PI / 2;
+scene.add(floor);
 
-    document.body.appendChild(this.renderer.domElement);
-    document.body.appendChild(VRButton.createButton(this.renderer));
+// Build world + controls safely
+let colliders = [];
+try {
+  const out = World.build(scene, player) || {};
+  colliders = Array.isArray(out.colliders) ? out.colliders : [];
+  if (out.spawn?.isVector3) player.position.copy(out.spawn);
+  setText("Scarlett Poker VR — world loaded ✅");
+} catch (e) {
+  console.warn("World build failed:", e);
+  setText("Scarlett Poker VR — world failed (baseline running)");
+}
 
-    this.addLights();
-    this.addFloor();
+try {
+  Controls.init({ renderer, camera, player, colliders });
+} catch (e) {
+  console.warn("Controls init failed:", e);
+}
 
-    // --- World ---
-    try {
-      World?.build?.(this.scene, this.player);
-    } catch (e) {
-      console.warn("World build skipped:", e);
-    }
+try {
+  PokerSimulation.build({ players: [], bots: [] });
+} catch (e) {
+  console.warn("PokerSimulation skipped:", e);
+}
 
-    // --- Controls ---
-    try {
-      Controls?.init?.({
-        renderer: this.renderer,
-        camera: this.camera,
-        player: this.player,
-      });
-    } catch (e) {
-      console.warn("Controls skipped:", e);
-    }
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
 
-    // --- UI ---
-    try {
-      UI?.init?.(this.scene, this.camera);
-    } catch (e) {
-      console.warn("UI skipped:", e);
-    }
-
-    // --- Poker ---
-    try {
-      PokerSimulation?.build?.({});
-    } catch (e) {
-      console.warn("PokerSimulation skipped:", e);
-    }
-
-    window.addEventListener("resize", () => this.resize());
-    this.renderer.setAnimationLoop(() => this.animate());
-
-    setText("✅ Loaded — press Enter VR");
-  },
-
-  addLights() {
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x222244, 1.1));
-
-    const key = new THREE.DirectionalLight(0xffffff, 1.1);
-    key.position.set(6, 10, 6);
-    this.scene.add(key);
-  },
-
-  addFloor() {
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(40, 40),
-      new THREE.MeshStandardMaterial({ color: 0x111217 })
-    );
-    floor.rotation.x = -Math.PI / 2;
-    this.scene.add(floor);
-  },
-
-  resize() {
-    this.camera.aspect = window.innerWidth / window.innerHeight;
-    this.camera.updateProjectionMatrix();
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-  },
-
-  animate() {
-    const dt = this.clock.getDelta();
-    Controls?.update?.(dt);
-    UI?.update?.(dt);
-    this.renderer.render(this.scene, this.camera);
-  },
-};
-
-App.init();
+renderer.setAnimationLoop(() => renderer.render(scene, camera));
+setTimeout(() => setText("✅ Loaded — press Enter VR"), 200);

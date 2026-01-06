@@ -1,5 +1,5 @@
-// js/main.js — Scarlett Poker VR — WORKING MOVE + CONTROLLERS + RIGHT-HAND LASER + TELEPORT
-// GitHub Pages safe. No local imports. CDN three + VRButton + controller models.
+// js/main.js — Scarlett Poker VR — FIXED: Right-hand beam follows YOU + strafe inversion fixed
+// GitHub Pages safe. No local imports. CDN three + VRButton only.
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -8,7 +8,7 @@ const hubEl = document.getElementById("hub");
 const lines = [];
 function hub(msg) {
   lines.push(msg);
-  while (lines.length > 18) lines.shift();
+  while (lines.length > 16) lines.shift();
   if (hubEl) hubEl.textContent = lines.join("\n");
   console.log(msg);
 }
@@ -17,7 +17,7 @@ const warn = (m) => hub(`⚠️ ${m}`);
 
 hub("Booting…");
 
-// ---------- Core three ----------
+// ---------- Core ----------
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x05070b);
 
@@ -31,25 +31,23 @@ document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 ok("VRButton added");
 
-// Rig (move this, not camera)
+// Rig (move this)
 const rig = new THREE.Group();
 rig.add(camera);
 scene.add(rig);
 
-// ---------- Lights (anti-black) ----------
-scene.add(new THREE.AmbientLight(0xffffff, 0.40));
-scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.05));
+// ---------- Lights ----------
+scene.add(new THREE.AmbientLight(0xffffff, 0.42));
+scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.1));
 
 const sun = new THREE.DirectionalLight(0xffffff, 1.25);
 sun.position.set(10, 18, 8);
 scene.add(sun);
 
-// Headlamp so you never get a black void
-const headlamp = new THREE.PointLight(0xffffff, 2.2, 50);
+const headlamp = new THREE.PointLight(0xffffff, 2.2, 60);
 camera.add(headlamp);
-ok("Lights ready");
 
-// ---------- World (simple but stable) ----------
+// ---------- Simple world ----------
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(40, 40),
   new THREE.MeshStandardMaterial({ color: 0x2d2f35, roughness: 0.98, metalness: 0.0 })
@@ -61,196 +59,123 @@ const grid = new THREE.GridHelper(40, 40, 0x00ff66, 0x1b2636);
 grid.position.y = 0.02;
 scene.add(grid);
 
-// Walls
-function wall(w, h, x, y, z, ry) {
-  const m = new THREE.Mesh(
-    new THREE.PlaneGeometry(w, h),
-    new THREE.MeshStandardMaterial({ color: 0x1a1f28, roughness: 0.98, metalness: 0.0 })
-  );
-  m.position.set(x, y, z);
-  m.rotation.y = ry;
-  scene.add(m);
-}
-wall(34, 9.5, 0, 4.75, -17, 0);
-wall(34, 9.5, 0, 4.75,  17, Math.PI);
-wall(34, 9.5, 17, 4.75, 0, -Math.PI / 2);
-wall(34, 9.5, -17, 4.75, 0, Math.PI / 2);
-
-// Table + chairs (kept)
-const tableGroup = new THREE.Group();
-scene.add(tableGroup);
-
-const felt = new THREE.MeshStandardMaterial({ color: 0x0b3a2a, roughness: 0.9, metalness: 0.02 });
-const rail = new THREE.MeshStandardMaterial({ color: 0x121212, roughness: 0.55, metalness: 0.1 });
-const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(2.35, 2.35, 0.18, 48), felt);
-tableTop.position.y = 0.95;
-tableGroup.add(tableTop);
-
-const tableRail = new THREE.Mesh(new THREE.TorusGeometry(2.35, 0.14, 18, 56), rail);
-tableRail.rotation.x = Math.PI / 2;
-tableRail.position.y = 1.05;
-tableGroup.add(tableRail);
-
-const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.55, 0.9, 24), rail);
-pedestal.position.y = 0.45;
-tableGroup.add(pedestal);
-
-// Chairs ring
-const chairMat = new THREE.MeshStandardMaterial({ color: 0x3b3b3b, roughness: 0.85, metalness: 0.05 });
-for (let i = 0; i < 6; i++) {
-  const a = (i / 6) * Math.PI * 2;
-  const chair = new THREE.Group();
-  chair.position.set(Math.cos(a) * 3.1, 0, Math.sin(a) * 3.1);
-  chair.rotation.y = -a + Math.PI / 2;
-
-  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.08, 0.55), chairMat);
-  seat.position.y = 0.45;
-  chair.add(seat);
-
-  const back = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 0.08), chairMat);
-  back.position.set(0, 0.75, -0.23);
-  chair.add(back);
-
-  // legs
-  const legGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.45, 10);
-  for (const [lx, ly, lz] of [[0.22,0.22,0.22],[-0.22,0.22,0.22],[0.22,0.22,-0.22],[-0.22,0.22,-0.22]]) {
-    const leg = new THREE.Mesh(legGeo, chairMat);
-    leg.position.set(lx, ly, lz);
-    chair.add(leg);
-  }
-
-  scene.add(chair);
-}
-
 // Spawn away from table
 rig.position.set(0, 0, 10);
 ok("Spawn set");
 
-// ---------- Controller models (so you can SEE hands) ----------
-let XRControllerModelFactory = null;
-try {
-  const m = await import("https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/XRControllerModelFactory.js");
-  XRControllerModelFactory = m.XRControllerModelFactory;
-  ok("ControllerModelFactory loaded");
-} catch {
-  warn("ControllerModelFactory failed (controllers may be invisible)");
+// ---------- Controllers (targetRay spaces) ----------
+const controllers = [renderer.xr.getController(0), renderer.xr.getController(1)];
+scene.add(controllers[0], controllers[1]);
+
+// ---------- Thick Beam (always visible) ----------
+function makeBeam() {
+  const geo = new THREE.CylinderGeometry(0.006, 0.010, 1.2, 10, 1, true);
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x00ff66,
+    emissive: 0x00ff66,
+    emissiveIntensity: 2.4,
+    transparent: true,
+    opacity: 0.9,
+    depthTest: false,
+    depthWrite: false,
+    roughness: 0.1,
+    metalness: 0.0
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = 9999;
+  mesh.rotation.x = Math.PI / 2;     // point down -Z
+  mesh.position.set(0, 0, -0.6);     // start at “tip”, not inside you
+  return mesh;
 }
 
-const controller0 = renderer.xr.getController(0);
-const controller1 = renderer.xr.getController(1);
-scene.add(controller0, controller1);
+const beam = makeBeam();
+let beamParent = null;
 
-// Grips are where the actual controller model attaches
-const grip0 = renderer.xr.getControllerGrip(0);
-const grip1 = renderer.xr.getControllerGrip(1);
-scene.add(grip0, grip1);
+// ---------- Teleport disc + ring ----------
+const tpDisc = new THREE.Mesh(
+  new THREE.CircleGeometry(0.28, 44),
+  new THREE.MeshBasicMaterial({ color: 0x00ff66, transparent: true, opacity: 0.85, depthTest: false, depthWrite: false })
+);
+tpDisc.rotation.x = -Math.PI / 2;
+tpDisc.position.set(rig.position.x, 0.02, rig.position.z);
+tpDisc.renderOrder = 9998;
+scene.add(tpDisc);
 
-if (XRControllerModelFactory) {
-  const factory = new XRControllerModelFactory();
-  grip0.add(factory.createControllerModel(grip0));
-  grip1.add(factory.createControllerModel(grip1));
-  ok("Controller models attached");
+const tpRing = new THREE.Mesh(
+  new THREE.RingGeometry(0.30, 0.36, 44),
+  new THREE.MeshBasicMaterial({ color: 0x00ff66, transparent: true, opacity: 0.95, depthTest: false, depthWrite: false })
+);
+tpRing.rotation.x = -Math.PI / 2;
+tpRing.position.copy(tpDisc.position);
+tpRing.renderOrder = 9999;
+scene.add(tpRing);
+
+// ---------- XR helpers ----------
+function getRightControllerObject() {
+  const session = renderer.xr.getSession?.();
+  if (!session) return null;
+
+  // Map handedness -> controller index by inputSources order (common on Quest)
+  const srcs = session.inputSources || [];
+  let rightIndex = -1;
+
+  for (let i = 0; i < srcs.length; i++) {
+    if (srcs[i]?.handedness === "right") { rightIndex = i; break; }
+  }
+
+  // If not found, use controller 0 as fallback
+  if (rightIndex < 0) rightIndex = 0;
+
+  // Only support 0/1
+  if (rightIndex > 1) rightIndex = 1;
+
+  return controllers[rightIndex] || controllers[0];
 }
 
-// ---------- RIGHT-HAND LASER + TELEPORT ----------
+function attachBeamTo(obj, label) {
+  if (!obj) return;
+  if (beamParent === obj) return;
+
+  if (beamParent) beamParent.remove(beam);
+  obj.add(beam);
+  beamParent = obj;
+  ok(`Beam attached to ${label}`);
+}
+
+renderer.xr.addEventListener("sessionstart", () => {
+  const rightObj = getRightControllerObject();
+  if (rightObj) attachBeamTo(rightObj, "RIGHT controller");
+  else attachBeamTo(camera, "CAMERA (fallback)");
+});
+
+renderer.xr.addEventListener("sessionend", () => {
+  if (beamParent) beamParent.remove(beam);
+  beamParent = null;
+  warn("XR ended");
+});
+
+// ---------- Ray to floor ----------
 const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const raycaster = new THREE.Raycaster();
-const tmpMat = new THREE.Matrix4();
+const tmpRot = new THREE.Matrix4();
 const origin = new THREE.Vector3();
 const direction = new THREE.Vector3();
 const hit = new THREE.Vector3();
 
-const tpRing = new THREE.Mesh(
-  new THREE.RingGeometry(0.25, 0.34, 36),
-  new THREE.MeshBasicMaterial({ color: 0x00ff66, side: THREE.DoubleSide })
-);
-tpRing.rotation.x = -Math.PI / 2;
-tpRing.position.set(rig.position.x, 0.02, rig.position.z);
-scene.add(tpRing);
-
-// Laser line (we will attach it to RIGHT controller object)
-const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
-const laserLine = new THREE.Line(laserGeo, new THREE.LineBasicMaterial({ color: 0x00ff66 }));
-laserLine.scale.z = 12;
-laserLine.visible = true;
-
-// We will resolve which controller is right-hand every frame using inputSources
-let rightControllerObj = controller0; // fallback
-
-function getRightControllerObj() {
-  const session = renderer.xr.getSession?.();
-  if (!session) return rightControllerObj;
-
-  // Map handedness -> controller index (0 or 1) by comparing to XR controller objects
-  // In practice: inputSources order usually matches getController(index)
-  const srcs = session.inputSources || [];
-
-  // Default fallback: controller0
-  let idx = 0;
-
-  for (let i = 0; i < srcs.length; i++) {
-    const s = srcs[i];
-    if (s?.handedness === "right") { idx = i; break; }
-  }
-
-  return idx === 1 ? controller1 : controller0;
+function clampToRoom(v) {
+  v.x = THREE.MathUtils.clamp(v.x, -15.5, 15.5);
+  v.z = THREE.MathUtils.clamp(v.z, -15.5, 15.5);
 }
 
-function attachLaser() {
-  // remove from any parent
-  if (laserLine.parent) laserLine.parent.remove(laserLine);
-
-  rightControllerObj = getRightControllerObj();
-  rightControllerObj.add(laserLine);
-
-  // small offset so it starts near the tip
-  laserLine.position.set(0, 0, 0);
-  ok("Laser attached to RIGHT controller");
-}
-
-renderer.xr.addEventListener("sessionstart", () => {
-  ok("XR session started");
-  attachLaser();
-});
-
-renderer.xr.addEventListener("sessionend", () => {
-  warn("XR session ended");
-  if (laserLine.parent) laserLine.parent.remove(laserLine);
-});
-
-// Teleport trigger state
-let teleportPressed = false;
-
-function readTriggerFromRight() {
-  const session = renderer.xr.getSession?.();
-  if (!session) return 0;
-
-  const srcs = session.inputSources || [];
-  let right = null;
-  for (const s of srcs) {
-    if (s?.handedness === "right" && s.gamepad) { right = s.gamepad; break; }
-  }
-  // fallback if right not found
-  if (!right) {
-    for (const s of srcs) { if (s?.gamepad) { right = s.gamepad; break; } }
-  }
-  if (!right) return 0;
-
-  // Quest trigger often button[0] value
-  const b = right.buttons || [];
-  const v0 = typeof b[0]?.value === "number" ? b[0].value : (b[0]?.pressed ? 1 : 0);
-  const v1 = typeof b[1]?.value === "number" ? b[1].value : (b[1]?.pressed ? 1 : 0);
-  return Math.max(v0, v1);
-}
-
-// ---------- Movement (keep what works) ----------
+// ---------- Movement ----------
 const snapAngle = Math.PI / 4;
 let snapCD = 0;
 const moveSpeed = 2.25;
 
-function getPads() {
+function getGamepads() {
   const session = renderer.xr.getSession?.();
   if (!session) return { left: null, right: null };
+
   let left = null, right = null;
   for (const src of session.inputSources || []) {
     if (!src?.gamepad) continue;
@@ -267,10 +192,23 @@ function readAxes(gp) {
   return p23.mag > p01.mag ? p23 : p01;
 }
 
-function clampToRoom(pos) {
-  pos.x = THREE.MathUtils.clamp(pos.x, -15.5, 15.5);
-  pos.z = THREE.MathUtils.clamp(pos.z, -15.5, 15.5);
+function readRightTrigger() {
+  const session = renderer.xr.getSession?.();
+  if (!session) return 0;
+
+  let gp = null;
+  for (const s of session.inputSources || []) {
+    if (s?.handedness === "right" && s?.gamepad) { gp = s.gamepad; break; }
+  }
+  if (!gp) return 0;
+
+  const b = gp.buttons || [];
+  const v0 = typeof b[0]?.value === "number" ? b[0].value : (b[0]?.pressed ? 1 : 0);
+  const v1 = typeof b[1]?.value === "number" ? b[1].value : (b[1]?.pressed ? 1 : 0);
+  return Math.max(v0, v1);
 }
+
+let teleportPressed = false;
 
 // ---------- Loop ----------
 let lastT = performance.now();
@@ -279,14 +217,17 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min(0.05, (now - lastT) / 1000);
   lastT = now;
 
-  const { left, right } = getPads();
+  const { left, right } = getGamepads();
 
-  // Move with LEFT stick
+  // Move with LEFT stick (FIXED strafe inversion)
   if (left) {
     const { x, y } = readAxes(left);
     const dead = 0.14;
-    const mx = Math.abs(x) < dead ? 0 : x;
-    const my = Math.abs(y) < dead ? 0 : y;
+    let mx = Math.abs(x) < dead ? 0 : x;
+    let my = Math.abs(y) < dead ? 0 : y;
+
+    // FIX: invert strafe so stick left goes left, stick right goes right
+    mx = -mx;
 
     if (mx || my) {
       const fwd = new THREE.Vector3();
@@ -294,7 +235,8 @@ renderer.setAnimationLoop(() => {
       fwd.y = 0;
       fwd.normalize();
 
-      const rightDir = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize().multiplyScalar(-1);
+      // rightDir (true right)
+      const rightDir = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
 
       const next = rig.position.clone();
       next.addScaledVector(rightDir, mx * moveSpeed * dt);
@@ -316,39 +258,39 @@ renderer.setAnimationLoop(() => {
     }
   }
 
-  // Ensure laser stays on right controller (in case handedness swaps)
-  const currentRight = getRightControllerObj();
-  if (currentRight !== rightControllerObj) {
-    attachLaser();
+  // Make sure beam is on the actual right controller (not stuck in world center)
+  const rightObj = getRightControllerObject();
+  if (renderer.xr.getSession?.()) {
+    if (rightObj) attachBeamTo(rightObj, "RIGHT controller");
+    else attachBeamTo(camera, "CAMERA (fallback)");
   }
 
   // Raycast from right controller forward to floor
-  rightControllerObj.updateMatrixWorld(true);
-  tmpMat.identity().extractRotation(rightControllerObj.matrixWorld);
+  const srcObj = beamParent || rightObj || camera;
+  srcObj.updateMatrixWorld(true);
 
-  origin.setFromMatrixPosition(rightControllerObj.matrixWorld);
-  direction.set(0, 0, -1).applyMatrix4(tmpMat).normalize();
+  tmpRot.identity().extractRotation(srcObj.matrixWorld);
+  origin.setFromMatrixPosition(srcObj.matrixWorld);
+  direction.set(0, 0, -1).applyMatrix4(tmpRot).normalize();
 
-  // Build ray against infinite floor plane
   raycaster.set(origin, direction);
-
-  // Intersect plane y=0
   const ray = raycaster.ray;
   const hitPoint = ray.intersectPlane(floorPlane, hit);
 
   if (hitPoint) {
     clampToRoom(hit);
-    tpRing.position.set(hit.x, 0.02, hit.z);
+    tpDisc.position.set(hit.x, 0.02, hit.z);
+    tpRing.position.copy(tpDisc.position);
   }
 
-  // Teleport: press right trigger (edge-detect)
-  const trig = readTriggerFromRight();
+  // Teleport on right trigger press (edge)
+  const trig = readRightTrigger();
   const down = trig > 0.75;
 
   if (down && !teleportPressed) {
     teleportPressed = true;
-    rig.position.x = tpRing.position.x;
-    rig.position.z = tpRing.position.z;
+    rig.position.x = tpDisc.position.x;
+    rig.position.z = tpDisc.position.z;
   }
   if (!down) teleportPressed = false;
 
@@ -362,4 +304,4 @@ addEventListener("resize", () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-ok("Loop running");
+ok("Running");

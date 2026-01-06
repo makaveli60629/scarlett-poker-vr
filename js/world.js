@@ -1,5 +1,5 @@
 // /js/world.js — FULL (9.0) with Table + Chairs + Interactables
-import * as THREE from "./three.js";
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { TeleportMachine } from "./teleport_machine.js";
 import { buildPokerTable } from "./table.js";
 import { buildChair } from "./chair.js";

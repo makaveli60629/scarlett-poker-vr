@@ -1,22 +1,26 @@
-// js/main.js — Scarlett Poker VR — Permanent Boot (GitHub Pages safe)
-// - Always shows VR button
-// - Always builds visible world (so no black void)
-// - Uses VRRig for movement + laser + teleport + height lock
+// js/main.js — Scarlett Poker VR — WORLD+RIG BOOT v10 (GitHub Pages safe)
+// - Always shows VRButton
+// - Loads world.js FIRST and uses its returned spawn/bounds
+// - No double-floors (prevents blinking / void issues)
+// - Adds a headlamp for extra visibility in VR
+// - Uses VRRig for movement/laser/teleport/height lock
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
 import { VRRig } from "./vr_rig.js";
+import { World } from "./world.js";
 
 const hubEl = document.getElementById("hub");
 const logs = [];
 function hub(msg) {
   logs.push(msg);
-  while (logs.length > 18) logs.shift();
+  while (logs.length > 22) logs.shift();
   if (hubEl) hubEl.textContent = logs.join("\n");
   console.log(msg);
 }
 const ok = (m) => hub(`✅ ${m}`);
 const warn = (m) => hub(`⚠️ ${m}`);
+const fail = (m) => hub(`❌ ${m}`);
 
 hub("Scarlett Poker VR — booting…");
 
@@ -36,100 +40,70 @@ document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 ok("VRButton added");
 
-// Player rig
+// Player rig group
 const player = new THREE.Group();
 player.add(camera);
 scene.add(player);
 
-// Safe spawn (NOT center)
-player.position.set(0, 0, 10);
-player.rotation.y = Math.PI; // face toward the table area
-ok("Spawn set");
-
-// ---------- Lighting (prevents black VR) ----------
-scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.25));
-
-const sun = new THREE.DirectionalLight(0xffffff, 1.55);
-sun.position.set(10, 18, 8);
-scene.add(sun);
-
-// Headlamp attached to camera (helps in VR)
-const headlamp = new THREE.PointLight(0xffffff, 2.8, 80);
+// Headlamp (insurance against “black world”)
+const headlamp = new THREE.PointLight(0xffffff, 2.8, 90);
 camera.add(headlamp);
-ok("Lights ready");
+ok("Headlamp on camera");
 
-// ---------- World base (so you ALWAYS see something) ----------
-const floorMat = new THREE.MeshStandardMaterial({
-  color: 0x2d2f35,
-  roughness: 0.98,
-  metalness: 0.0,
-});
-const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), floorMat);
-floor.rotation.x = -Math.PI / 2;
-floor.position.y = 0;
-scene.add(floor);
+// ---------- Build WORLD (your v10 file) ----------
+let worldData = null;
 
-const grid = new THREE.GridHelper(40, 40, 0x00ff66, 0x1b2636);
-grid.position.y = 0.02;
-scene.add(grid);
+try {
+  worldData = World.build(scene, player);
+  ok("world.js built");
+} catch (e) {
+  fail("world.js build crashed — check console");
+  console.error(e);
+}
 
-// Simple table marker (visual target)
-const tableTop = new THREE.Mesh(
-  new THREE.CylinderGeometry(2.35, 2.35, 0.18, 48),
-  new THREE.MeshStandardMaterial({ color: 0x0b3a2a, roughness: 0.9, metalness: 0.02 })
-);
-tableTop.position.set(0, 0.95, 0);
-scene.add(tableTop);
+// Apply spawn (NEVER center table)
+if (worldData?.spawn) {
+  player.position.set(worldData.spawn.x, 0, worldData.spawn.z);
+  ok(`Spawn set to pad (${worldData.spawn.x.toFixed(2)}, ${worldData.spawn.z.toFixed(2)})`);
+} else {
+  // safe fallback spawn
+  player.position.set(0, 0, 10);
+  warn("Spawn fallback used");
+}
 
-ok("World base ready");
+// Face toward center/table
+player.rotation.y = Math.PI;
 
-// ---------- VR Rig (your permanent controller system) ----------
+// ---------- VR RIG ----------
 const rig = VRRig.create({ renderer, scene, camera, player, hub });
+ok("VRRig created");
 
-// Bounds (match your room)
-rig.setBounds({ minX: -15.5, maxX: 15.5, minZ: -15.5, maxZ: 15.5 });
+// Apply bounds from world (correct room limits)
+if (worldData?.bounds?.min && worldData?.bounds?.max) {
+  rig.setBounds({
+    minX: worldData.bounds.min.x,
+    maxX: worldData.bounds.max.x,
+    minZ: worldData.bounds.min.z,
+    maxZ: worldData.bounds.max.z,
+  });
+  ok("Bounds applied from world");
+} else {
+  rig.setBounds({ minX: -15.5, maxX: 15.5, minZ: -15.5, maxZ: 15.5 });
+  warn("Bounds fallback used");
+}
 
-// Height lock (stable now)
-// If you want taller later: set to 1.85 or 1.90
+// Height lock: keeps “standing view” even if you sit
+// Adjust this number anytime (1.78–1.90 typical)
 rig.setHeightLock(1.80, true);
+ok("Height lock enabled");
 
-ok("VRRig online");
+// ---------- Diagnostics summary ----------
+hub("");
+ok(`Pads: ${worldData?.pads?.length ?? 0}`);
+ok(`Colliders: ${worldData?.colliders?.length ?? 0}`);
+ok("Enter VR");
 
-// ---------- Optional: safely try to load your full world.js ----------
-(async () => {
-  try {
-    const mod = await import("./world.js?v=1009");
-    if (mod?.World?.build) {
-      const res = mod.World.build(scene, player);
-
-      if (res?.bounds) {
-        rig.setBounds({
-          minX: res.bounds.min.x,
-          maxX: res.bounds.max.x,
-          minZ: res.bounds.min.z,
-          maxZ: res.bounds.max.z,
-        });
-        ok("World bounds applied");
-      }
-
-      if (res?.spawn) {
-        player.position.x = res.spawn.x;
-        player.position.z = res.spawn.z;
-        ok("Spawn moved to world spawn");
-      }
-
-      ok("world.js loaded");
-    } else {
-      warn("world.js missing World.build — skipped");
-    }
-  } catch (e) {
-    warn("world.js failed — using base world");
-    console.warn(e);
-  }
-})();
-
-// ---------- Loop ----------
+// ---------- Render loop ----------
 let lastT = performance.now();
 renderer.setAnimationLoop(() => {
   const now = performance.now();
@@ -140,7 +114,6 @@ renderer.setAnimationLoop(() => {
   renderer.render(scene, camera);
 });
 
-// Resize
 addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();

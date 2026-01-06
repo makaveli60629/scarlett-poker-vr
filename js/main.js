@@ -29,7 +29,7 @@ try {
 
 const overlay = document.getElementById("overlay");
 const enterVrBtn = document.getElementById("enterVrBtn");
-
+const { Alignment } = await import("./alignment.js");
 // -------------------- Basic log (for non-VR) --------------------
 const logLines = [];
 function log(prefix, msg) {

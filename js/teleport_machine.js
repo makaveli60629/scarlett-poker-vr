@@ -36,6 +36,11 @@ export const TeleportMachine = {
 
     return this.group;
   },
+  // in getSafeSpawn()
+return {
+  position: new THREE.Vector3(this.padCenter.x, 0, this.padCenter.z + 1.2),
+  yaw: 0 // ✅ face inward correctly (not Math.PI)
+};
 
   // World calls this to avoid spawning on top of the table
   getSafeSpawn() {

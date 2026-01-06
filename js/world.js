@@ -1,9 +1,9 @@
-// js/world.js — VIP Lobby / Boss Arena World (8.2.4 Straighten Pass)
-// Fixes:
-// - Room expanded so Boss Table at z=-6.5 never intersects walls
-// - Better floor color (casino carpet vibe)
-// - Leaderboard mounted high, centered, readable
-// - Hooks PokerSimulation + BossTable safely
+// js/world.js — VIP Lobby World (8.2.5 Permanent Pass)
+// FIX:
+// - Marble/gold floor texture (safe fallback color if missing)
+// - Leaderboard moved + facing spawn
+// - Furniture added (couches + fountain placeholder)
+// - BossTable + PokerSimulation wired clean
 
 import * as THREE from "./three.js";
 import { BossTable } from "./boss_table.js";
@@ -14,34 +14,65 @@ export const World = {
   root: null,
   floor: null,
 
+  _texLoader: new THREE.TextureLoader(),
+
+  safeFloorMaterial() {
+    // If you have a marble+gold texture, put it here:
+    // assets/textures/marble_gold.jpg  (rename yours to match if needed)
+    const path = "assets/textures/marble_gold.jpg";
+
+    const fallback = new THREE.MeshStandardMaterial({
+      color: 0x151419,
+      roughness: 0.95,
+      metalness: 0.02,
+      emissive: 0x040408,
+      emissiveIntensity: 0.06,
+    });
+
+    try {
+      const tex = this._texLoader.load(
+        path,
+        (t) => {
+          t.wrapS = t.wrapT = THREE.RepeatWrapping;
+          t.repeat.set(4, 4);
+        },
+        undefined,
+        () => { /* silent fallback */ }
+      );
+
+      return new THREE.MeshStandardMaterial({
+        map: tex,
+        color: 0xffffff,
+        roughness: 0.85,
+        metalness: 0.05,
+      });
+    } catch {
+      return fallback;
+    }
+  },
+
   async build(scene, rig) {
     this.root = new THREE.Group();
     this.root.name = "WorldRoot";
     scene.add(this.root);
 
-    // Spawn safety (front of room, away from table zone)
+    // Safe spawn (front of room, clear)
     if (rig) rig.position.set(0, 0, 6.2);
 
-    // ---------- FLOOR (better color) ----------
-    const floorMat = new THREE.MeshStandardMaterial({
-      color: 0x141016,      // deep casino carpet tone
-      roughness: 0.95,
-      metalness: 0.02,
-      emissive: 0x050408,
-      emissiveIntensity: 0.07,
-    });
+    // Room (bigger so table never hits wall)
+    const roomW = 20;
+    const roomD = 26;
+    const wallH = 4.5;
 
+    // FLOOR
+    const floorMat = this.safeFloorMaterial();
     this.floor = new THREE.Mesh(new THREE.PlaneGeometry(28, 28), floorMat);
     this.floor.name = "Floor";
     this.floor.rotation.x = -Math.PI / 2;
     this.floor.position.y = 0;
     this.root.add(this.floor);
 
-    // ---------- ROOM (expanded depth so table never clips) ----------
-    const roomW = 20;
-    const roomD = 26; // KEY FIX: deeper room
-    const wallH = 4.5;
-
+    // WALLS
     const wallMat = new THREE.MeshStandardMaterial({
       color: 0x0b0d13,
       roughness: 0.97,
@@ -64,58 +95,96 @@ export const World = {
     right.position.set(roomW / 2, wallH / 2, 0);
     this.root.add(right);
 
-    // ---------- GLOW TRIM ----------
-    const trimMat = new THREE.MeshStandardMaterial({
+    // GLOW FRAMES (picture placeholders on back wall)
+    const frameMat = new THREE.MeshStandardMaterial({
       color: 0x00ffaa,
       emissive: 0x00ffaa,
-      emissiveIntensity: 0.55,
-      roughness: 0.25,
+      emissiveIntensity: 0.65,
+      roughness: 0.35,
       transparent: true,
-      opacity: 0.60,
+      opacity: 0.75,
     });
 
-    const trim = new THREE.Mesh(new THREE.BoxGeometry(roomW - 0.3, 0.06, roomD - 0.3), trimMat);
-    trim.position.set(0, 0.05, 0);
-    this.root.add(trim);
+    for (let i=0;i<3;i++){
+      const frame = new THREE.Mesh(new THREE.PlaneGeometry(2.3, 1.2), frameMat);
+      frame.position.set(-5 + i*5, 2.2, -roomD/2 + 0.14);
+      frame.rotation.y = Math.PI; // face inward
+      this.root.add(frame);
+    }
 
-    // ---------- LIGHTING (brighter + elegant) ----------
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x1f2a3a, 1.15);
+    // LIGHTING (bright/elegant)
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x1f2a3a, 1.25);
     this.root.add(hemi);
 
-    const key = new THREE.DirectionalLight(0xffffff, 1.05);
+    const key = new THREE.DirectionalLight(0xffffff, 1.10);
     key.position.set(5, 10, 6);
     this.root.add(key);
 
-    const ceilingGlow = new THREE.PointLight(0x66aaff, 0.6, 34);
-    ceilingGlow.position.set(0, 3.8, 0);
-    this.root.add(ceilingGlow);
+    const ceiling = new THREE.PointLight(0x66aaff, 0.6, 34);
+    ceiling.position.set(0, 3.8, 0);
+    this.root.add(ceiling);
 
-    const neon1 = new THREE.PointLight(0x00ffaa, 0.4, 28);
+    const neon1 = new THREE.PointLight(0x00ffaa, 0.45, 28);
     neon1.position.set(-6.5, 2.6, -6.0);
     this.root.add(neon1);
 
-    const neon2 = new THREE.PointLight(0xff3366, 0.32, 28);
+    const neon2 = new THREE.PointLight(0xff3366, 0.38, 28);
     neon2.position.set(6.5, 2.6, -6.0);
     this.root.add(neon2);
 
-    // ---------- BOSS TABLE ----------
-    // Boss table is centered at z=-6.5; room depth now supports it safely.
+    // BOSS TABLE + CHAIRS
     BossTable.build(this.root);
 
-    // ---------- LEADERBOARD ----------
+    // LEADERBOARD (now visible from spawn)
     Leaderboard.build(this.root);
     if (Leaderboard.group) {
-      // High enough to be readable from anywhere, but not absurdly high
-      Leaderboard.group.position.set(0, 2.95, -11.3);
-      Leaderboard.group.rotation.y = Math.PI;
-      Leaderboard.group.scale.setScalar(1.25);
+      Leaderboard.group.position.set(0, 3.2, -11.7);
+      Leaderboard.group.rotation.y = 0; // Plane faces +Z by default, so this faces the player at +Z
+      Leaderboard.group.scale.setScalar(1.35);
     }
 
-    // ---------- POKER SIM ----------
-    // Table center must match BossTable center (0,1.02,-6.5)
+    // FURNITURE (simple placeholders)
+    const sofaMat = new THREE.MeshStandardMaterial({ color: 0x1b1d24, roughness: 0.95 });
+    const sofa = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.9, 1.1), sofaMat);
+    sofa.position.set(-6.0, 0.45, 5.0);
+    this.root.add(sofa);
+
+    const sofa2 = sofa.clone();
+    sofa2.position.set(6.0, 0.45, 5.0);
+    this.root.add(sofa2);
+
+    // Water fountain placeholder (corner)
+    const fountain = new THREE.Group();
+    fountain.position.set(8.0, 0, -9.5);
+
+    const bowl = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.65, 0.85, 0.35, 24),
+      new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 })
+    );
+    bowl.position.y = 0.18;
+
+    const water = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.55, 0.55, 0.05, 24),
+      new THREE.MeshStandardMaterial({
+        color: 0x1177ff,
+        roughness: 0.25,
+        transparent: true,
+        opacity: 0.55,
+        emissive: 0x1144aa,
+        emissiveIntensity: 0.35
+      })
+    );
+    water.position.y = 0.33;
+
+    const splashLight = new THREE.PointLight(0x1177ff, 0.5, 6);
+    splashLight.position.set(0, 1.2, 0);
+
+    fountain.add(bowl, water, splashLight);
+    this.root.add(fountain);
+
+    // POKER SIM
     PokerSimulation.build(this.root, new THREE.Vector3(0, 1.02, -6.5));
 
-    // Default LB text (you can wire real results later)
     Leaderboard._drawData?.({
       title: "BOSS TOURNAMENT • TOP 10",
       rows: [

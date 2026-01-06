@@ -1,169 +1,211 @@
-// /js/main.js — Skylark Poker VR — Stable Boot (No Cube)
-// Goals:
-// - No debug cube
-// - Always clears "booting..." overlay once render starts
-// - Minimal dependency chain (only world.js)
-// - Works in Oculus Browser + GitHub Pages
+// /js/main.js — Scarlett Poker VR — Core Boot (Oculus-safe)
+// - No debug cube on table
+// - Uses local ./three.js wrapper
+// - Loads World/Controls/UI safely, but never blacks out
 
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
-import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
+import * as THREE from "./three.js";
+
 import { World } from "./world.js";
+import { Controls } from "./controls.js";
+import { UI } from "./ui.js";
+
+import { buildBasicAvatar } from "./avatar_basic.js";
+import { ShopCatalog } from "./shop_catalog.js";
 
 const APP = {
+  name: "Scarlett Poker VR",
   scene: null,
   camera: null,
   renderer: null,
   clock: null,
   player: null,
   colliders: [],
-  spawn: null,
-
-  bootEl: null,
-  bootMsgEl: null,
-  _bootCleared: false,
-
-  init() {
-    // Boot UI hooks (safe even if missing)
-    this.bootEl = document.getElementById("boot") || null;
-    this.bootMsgEl = document.getElementById("bootlog") || null;
-
-    this._boot("Starting renderer…");
-
-    // Scene
-    this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x070a0f);
-    this.scene.fog = new THREE.Fog(0x070a0f, 5, 65);
-
-    // Player rig (group you move around)
-    this.player = new THREE.Group();
-    this.scene.add(this.player);
-
-    // Camera
-    this.camera = new THREE.PerspectiveCamera(
-      70,
-      window.innerWidth / window.innerHeight,
-      0.05,
-      250
-    );
-    this.camera.position.set(0, 1.65, 0);
-    this.player.add(this.camera);
-
-    // Renderer
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.xr.enabled = true;
-
-    document.body.appendChild(this.renderer.domElement);
-    document.body.appendChild(VRButton.createButton(this.renderer));
-
-    this.clock = new THREE.Clock();
-
-    // Guaranteed lighting (prevents black screens)
-    this._addGuaranteedLighting();
-
-    // Build world (safe)
-    try {
-      this._boot("Building world…");
-      const result = World.build(this.scene, this.player) || {};
-      this.colliders = Array.isArray(result.colliders) ? result.colliders : [];
-      this.spawn = result.spawn || null;
-
-      if (this.spawn && this.spawn.isVector3) {
-        this.player.position.copy(this.spawn);
-      } else {
-        // Default spawn (safe)
-        this.player.position.set(0, 0, 6);
-      }
-    } catch (e) {
-      console.error("World build error:", e);
-      this._bootError("World failed to build. Check console.");
-      // Still place player somewhere sane
-      this.player.position.set(0, 0, 6);
-    }
-
-    // Start render loop
-    window.addEventListener("resize", () => this._onResize());
-    this.renderer.setAnimationLoop(() => this.animate());
-
-    // Clear boot once we confirm at least one frame ran
-    // (Oculus sometimes needs a tick before DOM updates)
-    requestAnimationFrame(() => this._clearBoot());
-  },
-
-  animate() {
-    const dt = this.clock.getDelta();
-
-    // Optional tiny idle bob so you can see it's alive (very subtle)
-    // (does nothing in VR; only helps 2D mode confirm animation loop)
-    if (!this.renderer.xr.isPresenting) {
-      this.camera.position.y = 1.65 + Math.sin(performance.now() * 0.001) * 0.002;
-    }
-
-    // Render
-    this.renderer.render(this.scene, this.camera);
-
-    // If boot wasn’t cleared for any reason, clear after first real render
-    if (!this._bootCleared) this._clearBoot();
-  },
-
-  _addGuaranteedLighting() {
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x222244, 1.1);
-    this.scene.add(hemi);
-
-    const key = new THREE.DirectionalLight(0xffffff, 1.2);
-    key.position.set(6, 10, 4);
-    key.castShadow = false;
-    this.scene.add(key);
-
-    const fill = new THREE.DirectionalLight(0x9bd7ff, 0.45);
-    fill.position.set(-7, 4, -6);
-    this.scene.add(fill);
-
-    const warm = new THREE.PointLight(0xffd2a0, 0.6, 18);
-    warm.position.set(0, 3.2, 0);
-    this.scene.add(warm);
-  },
-
-  _onResize() {
-    if (!this.camera || !this.renderer) return;
-    this.camera.aspect = window.innerWidth / window.innerHeight;
-    this.camera.updateProjectionMatrix();
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-  },
-
-  _boot(msg) {
-    if (this.bootMsgEl) this.bootMsgEl.textContent = msg;
-  },
-
-  _bootError(msg) {
-    if (this.bootMsgEl) this.bootMsgEl.textContent = "ERROR: " + msg;
-    if (this.bootEl) this.bootEl.style.borderColor = "#ff4d4d";
-  },
-
-  _clearBoot() {
-    if (this._bootCleared) return;
-    this._bootCleared = true;
-
-    // Hide overlay if present
-    if (this.bootEl) this.bootEl.style.display = "none";
-    // Also clear any leftover “booting…” text if you used a simple <pre>
-    const legacy = document.getElementById("status");
-    if (legacy) legacy.textContent = "";
-  },
+  controllers: { left: null, right: null },
 };
 
-window.addEventListener("error", (e) => {
-  console.error("Window error:", e?.error || e);
-  const boot = document.getElementById("bootlog");
-  if (boot) boot.textContent = "ERROR: " + (e?.message || "Unknown error");
-});
+function addBaseLighting(scene) {
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.1));
+  const key = new THREE.DirectionalLight(0xffffff, 1.15);
+  key.position.set(6, 10, 6);
+  scene.add(key);
 
-window.addEventListener("unhandledrejection", (e) => {
-  console.error("Unhandled rejection:", e?.reason || e);
-  const boot = document.getElementById("bootlog");
-  if (boot) boot.textContent = "ERROR: " + (e?.reason?.message || e?.reason || "Promise error");
-});
+  const fill = new THREE.DirectionalLight(0xb0d7ff, 0.55);
+  fill.position.set(-7, 6, -4);
+  scene.add(fill);
 
-// Start
-APP.init();
+  const warm = new THREE.PointLight(0xffd27a, 0.9, 28);
+  warm.position.set(0, 7, -7);
+  scene.add(warm);
+}
+
+function addAlwaysVisibleFloor(scene) {
+  const mat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 1 });
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), mat);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = 0;
+  scene.add(floor);
+}
+
+function createRenderer() {
+  const r = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  r.setSize(window.innerWidth, window.innerHeight);
+  r.xr.enabled = true;
+  r.shadowMap.enabled = true;
+  document.body.appendChild(r.domElement);
+  return r;
+}
+
+// Minimal VR button (no external VRButton import needed)
+function addVRButton(renderer) {
+  const btn = document.createElement("button");
+  btn.textContent = "ENTER VR";
+  btn.style.position = "fixed";
+  btn.style.right = "14px";
+  btn.style.bottom = "14px";
+  btn.style.padding = "12px 14px";
+  btn.style.borderRadius = "14px";
+  btn.style.border = "1px solid #333";
+  btn.style.background = "#111";
+  btn.style.color = "#fff";
+  btn.style.zIndex = 9999;
+
+  btn.onclick = async () => {
+    if (!navigator.xr) {
+      alert("WebXR not available in this browser.");
+      return;
+    }
+    const supported = await navigator.xr.isSessionSupported("immersive-vr");
+    if (!supported) {
+      alert("Immersive VR not supported on this device/browser.");
+      return;
+    }
+    const session = await navigator.xr.requestSession("immersive-vr", {
+      optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking", "layers"],
+    });
+    renderer.xr.setSession(session);
+  };
+
+  document.body.appendChild(btn);
+}
+
+function createPlayerRig(scene) {
+  const player = new THREE.Group();
+  player.position.set(0, 0, 5);
+  scene.add(player);
+  return player;
+}
+
+function createCamera(player) {
+  const cam = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
+  cam.position.set(0, 1.65, 0);
+  player.add(cam);
+  return cam;
+}
+
+function onResize() {
+  if (!APP.camera || !APP.renderer) return;
+  APP.camera.aspect = window.innerWidth / window.innerHeight;
+  APP.camera.updateProjectionMatrix();
+  APP.renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function buildControllers(renderer) {
+  const left = renderer.xr.getController(0);
+  const right = renderer.xr.getController(1);
+  left.name = "leftController";
+  right.name = "rightController";
+  APP.player.add(left);
+  APP.player.add(right);
+  APP.controllers.left = left;
+  APP.controllers.right = right;
+
+  // In-VR menu toggle (left controller select)
+  left.addEventListener("selectstart", () => UI.toggle());
+
+  return { left, right };
+}
+
+function buildStarterAvatar(scene) {
+  // Place a mannequin in the lobby as a “shop preview”
+  const mannequin = buildBasicAvatar({
+    shirtLabel: "SCARLETT",
+    shirtColor: 0x111111,
+    accentColor: 0xff2d7a,
+  });
+  mannequin.position.set(6.5, 0, -3.5);
+  mannequin.rotation.y = -Math.PI * 0.75;
+  scene.add(mannequin);
+}
+
+function init() {
+  APP.scene = new THREE.Scene();
+  APP.scene.background = new THREE.Color(0x040506);
+  APP.scene.fog = new THREE.Fog(0x040506, 2, 90);
+
+  APP.renderer = createRenderer();
+  addVRButton(APP.renderer);
+
+  APP.player = createPlayerRig(APP.scene);
+  APP.camera = createCamera(APP.player);
+
+  APP.clock = new THREE.Clock();
+
+  // Always visible baseline (prevents “black void”)
+  addBaseLighting(APP.scene);
+  addAlwaysVisibleFloor(APP.scene);
+
+  // World build (safe)
+  try {
+    const result = World.build(APP.scene, APP.player);
+    APP.colliders = Array.isArray(result?.colliders) ? result.colliders : [];
+    if (result?.spawn?.isVector3) APP.player.position.copy(result.spawn);
+  } catch (e) {
+    console.warn("World.build failed — staying with baseline floor/lighting.", e);
+  }
+
+  // Controls init (safe)
+  try {
+    Controls.init({
+      renderer: APP.renderer,
+      camera: APP.camera,
+      player: APP.player,
+      colliders: APP.colliders,
+      // IMPORTANT: face forward by default
+      spawn: { position: APP.player.position.clone(), yaw: 0 },
+    });
+  } catch (e) {
+    console.warn("Controls.init failed", e);
+  }
+
+  // UI init (safe) — make sure branding is Scarlett
+  try {
+    UI.init(APP.scene, APP.camera, { title: APP.name });
+  } catch (e) {
+    console.warn("UI.init failed", e);
+  }
+
+  // Build controllers AFTER renderer XR is enabled
+  buildControllers(APP.renderer);
+
+  // Starter shop content (catalog exists even if you haven’t wired purchases yet)
+  console.log("🛒 ShopCatalog items:", ShopCatalog.items.length);
+
+  // Temporary mannequin avatar preview (t-shirt + face)
+  buildStarterAvatar(APP.scene);
+
+  window.addEventListener("resize", onResize);
+  APP.renderer.setAnimationLoop(animate);
+}
+
+function animate() {
+  const dt = APP.clock.getDelta();
+
+  try { Controls.update(dt); } catch {}
+  try { UI.update(dt, APP.controllers); } catch {}
+
+  APP.renderer.render(APP.scene, APP.camera);
+}
+
+// Boot
+init();

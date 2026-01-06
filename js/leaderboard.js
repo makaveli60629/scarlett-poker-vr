@@ -1,5 +1,7 @@
-// js/leaderboard.js
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+// /js/leaderboard.js — glassy neon board
+
+import * as T from "./three.js";
+const THREE = T;
 
 export const Leaderboard = {
   group: null,
@@ -7,8 +9,6 @@ export const Leaderboard = {
   tex: null,
   ctx: null,
   canvas: null,
-
-  anchor: new THREE.Vector3(0, 1.55, -3.9),
   visible: true,
 
   build(parent) {
@@ -24,120 +24,81 @@ export const Leaderboard = {
     this.tex = new THREE.CanvasTexture(this.canvas);
     this.tex.colorSpace = THREE.SRGBColorSpace;
 
-    const mat = new THREE.MeshStandardMaterial({
+    const glass = new THREE.MeshStandardMaterial({
+      color: 0x05060a,
+      transparent: true,
+      opacity: 0.85,
+      roughness: 0.25,
+      metalness: 0.2,
+      emissive: 0x06070f,
+      emissiveIntensity: 0.5
+    });
+
+    const face = new THREE.MeshStandardMaterial({
       map: this.tex,
       transparent: true,
-      opacity: 0.95,
-      roughness: 0.9,
-      emissive: 0x111018,
-      emissiveIntensity: 0.7,
+      opacity: 0.98,
+      roughness: 0.35,
+      emissive: 0x0b1220,
+      emissiveIntensity: 0.6,
       depthTest: false,
       depthWrite: false,
     });
 
-    const backMat = new THREE.MeshStandardMaterial({
-      color: 0x06070c,
-      transparent: true,
-      opacity: 0.35,
-      roughness: 1.0,
-      depthTest: false,
-      depthWrite: false,
-    });
-
-    const back = new THREE.Mesh(new THREE.PlaneGeometry(2.05, 1.02), backMat);
+    const back = new THREE.Mesh(new THREE.PlaneGeometry(2.30, 1.12), glass);
     back.renderOrder = 998;
 
-    this.board = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 1.0), mat);
+    this.board = new THREE.Mesh(new THREE.PlaneGeometry(2.20, 1.06), face);
     this.board.position.z = 0.01;
     this.board.renderOrder = 999;
 
-    this.group.add(back);
-    this.group.add(this.board);
+    this.group.add(back, this.board);
 
-    this.group.position.copy(this.anchor);
-    this.group.rotation.y = Math.PI;
-
-    this._drawDefault();
+    this._draw([
+      "Boss Tournament — Top 10",
+      "1) —",
+      "2) —",
+      "3) —",
+      "4) —",
+      "5) —",
+    ]);
   },
 
-  update(dt, camera, data) {
-    if (!this.group || !camera) return;
-
-    // camera safety: keep away if too close
-    const camPos = new THREE.Vector3();
-    camera.getWorldPosition(camPos);
-
-    const boardPos = new THREE.Vector3();
-    this.group.getWorldPosition(boardPos);
-
-    if (camPos.distanceTo(boardPos) < 1.25) {
-      this.group.position.copy(this.anchor);
-      this.group.rotation.y = Math.PI;
-    }
-
-    if (data) this._drawData(data);
+  update(dt, camera, lines) {
+    if (!this.group) return;
+    if (lines) this._draw(lines);
   },
 
-  _drawDefault() {
-    this._drawData({
-      title: "SHOWDOWN LEADERBOARD",
-      rows: [
-        { name: "Spades", points: 0 },
-        { name: "Hearts", points: 0 },
-        { name: "Clubs", points: 0 },
-        { name: "Diamonds", points: 0 },
-      ],
-      footer: "Top 10 paid Sunday night • Event Chips awarded",
-    });
-  },
-
-  _drawData(data) {
+  _draw(lines = []) {
     const ctx = this.ctx;
     if (!ctx) return;
 
     ctx.clearRect(0, 0, 1024, 512);
 
-    ctx.fillStyle = "rgba(8,10,16,0.92)";
+    ctx.fillStyle = "rgba(5,6,10,0.85)";
     ctx.fillRect(0, 0, 1024, 512);
 
+    // neon border
     ctx.strokeStyle = "rgba(0,255,170,0.85)";
     ctx.lineWidth = 10;
-    ctx.strokeRect(16, 16, 992, 480);
+    ctx.strokeRect(18, 18, 988, 476);
 
-    ctx.strokeStyle = "rgba(255,60,120,0.8)";
+    ctx.strokeStyle = "rgba(255,43,214,0.75)";
     ctx.lineWidth = 6;
-    ctx.strokeRect(26, 26, 972, 460);
+    ctx.strokeRect(30, 30, 964, 452);
 
-    ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(255,60,120,0.95)";
-    ctx.font = "bold 58px system-ui";
-    ctx.fillText(data.title || "LEADERBOARD", 512, 90);
+    // title
+    ctx.font = "900 58px system-ui";
+    ctx.fillStyle = "rgba(255,210,122,0.95)";
+    ctx.fillText(lines[0] || "Boss Tournament", 54, 92);
 
-    ctx.textAlign = "left";
-    ctx.fillStyle = "rgba(255,255,255,0.92)";
-    ctx.font = "bold 38px system-ui";
-    ctx.fillText("TEAM", 110, 160);
-
-    ctx.textAlign = "right";
-    ctx.fillText("POINTS", 910, 160);
-
-    ctx.font = "700 42px system-ui";
-    const rows = data.rows || [];
-    for (let i = 0; i < Math.min(rows.length, 8); i++) {
-      const y = 230 + i * 54;
-      ctx.textAlign = "left";
-      ctx.fillStyle = "rgba(0,255,170,0.92)";
-      ctx.fillText(rows[i].name, 110, y);
-
-      ctx.textAlign = "right";
-      ctx.fillStyle = "rgba(255,255,255,0.95)";
-      ctx.fillText(String(rows[i].points ?? 0), 910, y);
+    ctx.font = "800 44px system-ui";
+    let y = 170;
+    for (let i = 1; i < Math.min(lines.length, 10); i++) {
+      ctx.fillStyle = (i === 1) ? "rgba(0,255,170,0.95)" : "rgba(233,238,252,0.92)";
+      ctx.fillText(lines[i], 54, y);
+      y += 56;
     }
-
-    ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(255,255,255,0.70)";
-    ctx.font = "600 28px system-ui";
-    ctx.fillText(data.footer || "", 512, 470);
 
     this.tex.needsUpdate = true;
   },

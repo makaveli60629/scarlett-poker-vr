@@ -1,4 +1,4 @@
-// /js/world.js — Scarlett Poker VR — WORLD v10 (GitHub Safe + Bright + No Blink)
+// /js/world.js — Scarlett Poker VR — WORLD v10 (Bright, Pads, Colliders, GitHub Safe)
 // Returns: { spawn, colliders, bounds, pads, padById, floorY }
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
@@ -10,7 +10,7 @@ export const World = {
     if (!this._tex) this._tex = new THREE.TextureLoader();
     const url = `assets/textures/${file}`;
 
-    // placeholder texture object that becomes real if loaded
+    // placeholder that becomes real texture if loaded
     const t = new THREE.Texture();
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(repeat[0], repeat[1]);
@@ -41,26 +41,21 @@ export const World = {
   },
 
   build(scene, playerGroup) {
-    // ======================
-    // ROOM
-    // ======================
     const ROOM_W = 34;
     const ROOM_D = 34;
     const WALL_H = 9.5;
     const floorY = 0;
 
-    // BRIGHT SAFE LIGHTING (world-level)
-    // (Even if your main adds lights, this ensures the room is never black)
+    // Bright baseline lights (world-level)
     const amb = new THREE.AmbientLight(0xffffff, 0.55);
     scene.add(amb);
 
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 0.85);
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 0.9);
     hemi.position.set(0, 20, 0);
     scene.add(hemi);
 
     const sun = new THREE.DirectionalLight(0xffffff, 1.4);
     sun.position.set(14, 24, 10);
-    sun.castShadow = false;
     scene.add(sun);
 
     // Materials
@@ -88,10 +83,10 @@ export const World = {
       emissiveIntensity: 0.45,
     });
 
-    // Floor — IMPORTANT: lift by tiny amount to avoid z-fighting with grid/helpers
+    // Floor (tiny lift to avoid blinking vs grid)
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), floorMat);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.y = floorY + 0.0015; // anti-blink
+    floor.position.y = floorY + 0.0015;
     floor.userData.isFloor = true;
     scene.add(floor);
 
@@ -128,9 +123,7 @@ export const World = {
     t4.position.set(-ROOM_W / 2 + 0.11, trimY, 0);
     scene.add(t4);
 
-    // ======================
-    // TABLE (center) + CHAIRS
-    // ======================
+    // Table
     const tableGroup = new THREE.Group();
     tableGroup.position.set(0, 0, 0);
 
@@ -150,20 +143,18 @@ export const World = {
     pedestal.position.y = 0.45;
     tableGroup.add(pedestal);
 
-    // add a subtle table light so it’s always readable
     const tableLight = new THREE.PointLight(0xffffff, 0.9, 12);
     tableLight.position.set(0, 2.8, 0);
     tableGroup.add(tableLight);
 
     scene.add(tableGroup);
 
-    // Chairs (with legs)
+    // Chairs
     const chairMat = new THREE.MeshStandardMaterial({ color: 0x3b3b3b, roughness: 0.85, metalness: 0.05 });
     const chairRadius = 3.1;
 
     const mkChair = () => {
       const g = new THREE.Group();
-
       const seat = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.08, 0.55), chairMat);
       seat.position.y = 0.45;
       g.add(seat);
@@ -172,7 +163,6 @@ export const World = {
       back.position.set(0, 0.75, -0.23);
       g.add(back);
 
-      // legs
       const legGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.42, 10);
       const offsets = [
         [-0.23, 0.22], [0.23, 0.22],
@@ -197,9 +187,7 @@ export const World = {
       scene.add(chair);
     }
 
-    // ======================
-    // TELEPORT PADS (spawn here)
-    // ======================
+    // Teleport pads
     const pads = [];
     const padById = {};
 
@@ -230,7 +218,6 @@ export const World = {
       ring2.position.y = 0.065;
       g.add(ring2);
 
-      // a tiny “beacon” so you can always see where it is
       const beacon = new THREE.Mesh(
         new THREE.CylinderGeometry(0.06, 0.06, 1.0, 12),
         new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.1 })
@@ -240,12 +227,7 @@ export const World = {
 
       scene.add(g);
 
-      const pad = {
-        id,
-        position: new THREE.Vector3(x, floorY, z),
-        radius: 0.95,
-        object: g,
-      };
+      const pad = { id, position: new THREE.Vector3(x, floorY, z), radius: 0.95, object: g };
       pads.push(pad);
       padById[id] = pad;
       return pad;
@@ -256,28 +238,27 @@ export const World = {
     mkPad("store", 11.5, 0, 0x2bd7ff);
     mkPad("tournament", 0, -11.5, 0xffd27a);
 
-    // ======================
-    // COLLIDERS + BOUNDS
-    // ======================
+    // Colliders + bounds
     const colliders = [];
     const wallThick = 0.5;
 
     const addBoxCollider = (w, h, d, x, y, z) => {
-      const m = new THREE.MeshBasicMaterial({ visible: false });
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(w, h, d),
+        new THREE.MeshBasicMaterial({ visible: false })
+      );
       mesh.position.set(x, y, z);
       scene.add(mesh);
       colliders.push(mesh);
       return mesh;
     };
 
-    // Walls colliders
     addBoxCollider(ROOM_W, WALL_H, wallThick, 0, WALL_H / 2, -ROOM_D / 2);
     addBoxCollider(ROOM_W, WALL_H, wallThick, 0, WALL_H / 2, ROOM_D / 2);
     addBoxCollider(wallThick, WALL_H, ROOM_D, ROOM_W / 2, WALL_H / 2, 0);
     addBoxCollider(wallThick, WALL_H, ROOM_D, -ROOM_W / 2, WALL_H / 2, 0);
 
-    // Table collider (prevents walking through table, but NOT trapping spawn)
+    // Table collider
     addBoxCollider(6.4, 2.6, 6.4, 0, 1.0, 0);
 
     const bounds = {
@@ -285,7 +266,7 @@ export const World = {
       max: new THREE.Vector3(ROOM_W / 2 - 1.2, floorY, ROOM_D / 2 - 1.2),
     };
 
-    // Default spawn = lobby pad (always safe)
+    // Default spawn = lobby pad
     const spawn = padById.lobby.position.clone();
 
     return { spawn, colliders, bounds, pads, padById, floorY };

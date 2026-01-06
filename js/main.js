@@ -1,80 +1,308 @@
-// /js/main.js — Skylark Poker VR (Update 9.0 Fix Pack)
-// Fixes: Quest thumbstick mapping, 45° snap turn, teleport circle visibility,
-// spectator mode (no player-cards spawned here), stable floor height.
+// /js/main.js — Skylark Poker VR — Update 9.0 (FULL)
+// GitHub Pages safe: uses local ./three.js wrapper (NOT "three").
+//
+// What this does:
+// - Builds World (walls/floor/rails/teleport machine/colliders)
+// - Initializes Controls (move + snap turn + teleport + collision)
+// - Initializes UI (toggle via keyboard M + VR button mapping)
+// - Runs PokerSimulation (8 bots, slow watchable hands, crown, bust walk-out)
+// - Adds a simple "wrist watch" button area on the LEFT controller (trigger tap toggles menu)
+//
+// REQUIREMENTS (files expected):
+// /js/three.js
+// /js/world.js
+// /js/controls.js
+// /js/ui.js
+// /js/poker_simulation.js
+//
+// /assets/textures/… your jpgs
 
 import * as THREE from "./three.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
+
 import { World } from "./world.js";
+import { Controls } from "./controls.js";
+import { UI } from "./ui.js";
+import { PokerSimulation } from "./poker_simulation.js";
 
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-
-let renderer, scene, camera;
-let player, dolly;
+let scene, camera, renderer;
+let playerGroup;
 let clock;
 
-let c0, c1; // controllers
+let pokerSim;
 
-// Input
-const input = {
-  triggerHeld: false,
-  activeHand: 0, // 0 = right, 1 = left
-  snapCooldown: 0,
-  lx: 0, ly: 0,
-  rx: 0, ry: 0,
-};
+// Controller refs
+let cLeft = null;
+let cRight = null;
+let gLeft = null;   // controller grip
+let gRight = null;
 
-// Teleport visuals
-let tpLine, tpRing;
-let tpHit = new THREE.Vector3();
-let tpValid = false;
+// Wrist watch (simple mesh on left grip)
+let watch = null;
+let watchCooldown = 0;
 
-const WALK_SPEED = 2.4;
-const SNAP_DEG = 45;
-const SNAP_COOLDOWN = 0.22;
-const FLOOR_Y = 0;
+// Leaderboard (simple 3D canvas sign)
+let leaderboardMesh = null;
 
-boot();
+init();
+animate();
 
-async function boot() {
-  clock = new THREE.Clock();
-
+function init() {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x05060a);
 
-  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
-
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.xr.enabled = true;
-
-  // IMPORTANT: standing/floor stable
-  renderer.xr.setReferenceSpaceType("local-floor");
-
   document.body.appendChild(renderer.domElement);
   document.body.appendChild(VRButton.createButton(renderer));
 
-  // Rig: player -> dolly(yaw) -> camera
-  player = new THREE.Group();
-  player.position.set(0, FLOOR_Y, 0);
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
 
-  dolly = new THREE.Group();
-  player.add(dolly);
+  // Player rig (we move THIS; camera sits inside XR)
+  playerGroup = new THREE.Group();
+  playerGroup.name = "PlayerRig";
+  scene.add(playerGroup);
+  playerGroup.add(camera);
 
-  // Fallback non-xr camera height (XR will override pose)
-  camera.position.set(0, 1.65, 0);
-  dolly.add(camera);
+  clock = new THREE.Clock();
 
-  scene.add(player);
+  // --- Build World ---
+  const w = World.build(scene);
 
-  await World.build(scene, player, camera);
+  // --- UI ---
+  UI.init(scene, camera);
 
-  setupControllers();
-  buildTeleportVisuals(scene);
+  // --- Leaderboard sign (high up, back wall area) ---
+  leaderboardMesh = createLeaderboardSign();
+  // place near back wall, high up, centered
+  leaderboardMesh.position.set(0, 4.9, -11.5);
+  scene.add(leaderboardMesh);
+
+  // --- Poker Simulation ---
+  pokerSim = new PokerSimulation({
+    camera,
+    tableCenter: w.tableCenter,
+    onLeaderboard: (lines) => setLeaderboard(lines)
+  });
+  pokerSim.build(scene);
+
+  // --- Controls (movement + collisions + teleport) ---
+  Controls.init({
+    renderer,
+    camera,
+    player: playerGroup,
+    colliders: w.colliders,
+    bounds: w.bounds,
+    teleport: w.teleport,
+    spawn: w.spawn
+  });
+
+  // --- XR Controllers ---
+  setupXRControllers();
 
   window.addEventListener("resize", onResize);
-  renderer.setAnimationLoop(tick);
+
+  // Helpful: click/tap toggles menu on mobile/desktop too
+  window.addEventListener("pointerdown", () => {
+    window.dispatchEvent(new Event("nova_toggle_menu"));
+  });
+}
+
+function setupXRControllers() {
+  // Controllers (ray origin)
+  cLeft = renderer.xr.getController(0);
+  cRight = renderer.xr.getController(1);
+
+  // Controller grips (actual tracked controller models)
+  const grip1 = renderer.xr.getControllerGrip(0);
+  const grip2 = renderer.xr.getControllerGrip(1);
+
+  // Make small visible markers so you can see hands
+  const handMarkerGeo = new THREE.SphereGeometry(0.02, 10, 10);
+  const leftMat = new THREE.MeshStandardMaterial({ color: 0xff2bd6, roughness: 0.35, metalness: 0.1 });
+  const rightMat = new THREE.MeshStandardMaterial({ color: 0x00ffaa, roughness: 0.35, metalness: 0.1 });
+
+  const m1 = new THREE.Mesh(handMarkerGeo, leftMat);
+  const m2 = new THREE.Mesh(handMarkerGeo, rightMat);
+
+  cLeft.add(m1);
+  cRight.add(m2);
+
+  // Add to player rig (so they move with teleport/locomotion)
+  playerGroup.add(cLeft);
+  playerGroup.add(cRight);
+  playerGroup.add(grip1);
+  playerGroup.add(grip2);
+
+  gLeft = grip1;
+  gRight = grip2;
+
+  // Build a simple wrist watch on LEFT grip
+  watch = buildWristWatch();
+  gLeft.add(watch);
+
+  // --- Button mapping for menu ---
+  // IMPORTANT: Quest "menu" button often isn't exposed in WebXR.
+  // So we do: LEFT trigger quick tap => toggle UI (watch teleport menu)
+  // You can change this mapping later.
+}
+
+function buildWristWatch() {
+  const group = new THREE.Group();
+  group.name = "WristWatch";
+  group.position.set(0.04, 0.03, -0.06);  // near wrist
+  group.rotation.set(-0.6, 0.2, 0.2);
+
+  // watch body
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(0.06, 0.04, 0.01),
+    new THREE.MeshStandardMaterial({ color: 0x121218, roughness: 0.65, metalness: 0.15 })
+  );
+
+  // glowing face
+  const face = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.055, 0.035),
+    new THREE.MeshStandardMaterial({
+      color: 0x1b1b22,
+      emissive: 0x2bd7ff,
+      emissiveIntensity: 0.75,
+      roughness: 0.35,
+      metalness: 0.1
+    })
+  );
+  face.position.z = 0.006;
+
+  // tiny “MENU” label texture (canvas)
+  const label = makeSmallLabel("MENU");
+  label.position.set(0, 0, 0.0065);
+
+  group.add(body, face, label);
+  group.userData = { face };
+  return group;
+}
+
+function makeSmallLabel(text) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d");
+
+  ctx.fillStyle = "rgba(0,0,0,0.0)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(12, 18, canvas.width - 24, canvas.height - 36);
+
+  ctx.strokeStyle = "rgba(255,210,122,0.9)";
+  ctx.lineWidth = 6;
+  ctx.strokeRect(12, 18, canvas.width - 24, canvas.height - 36);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 52px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+  return new THREE.Mesh(new THREE.PlaneGeometry(0.055, 0.028), mat);
+}
+
+function createLeaderboardSign() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1024;
+  canvas.height = 512;
+  const ctx = canvas.getContext("2d");
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+
+  const mat = new THREE.MeshStandardMaterial({
+    map: tex,
+    transparent: true,
+    roughness: 0.65,
+    metalness: 0.1,
+    emissive: 0x111111,
+    emissiveIntensity: 0.2
+  });
+
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 2.2), mat);
+  mesh.userData = { canvas, ctx, tex };
+
+  // frame
+  const frame = new THREE.Mesh(
+    new THREE.BoxGeometry(4.65, 2.45, 0.08),
+    new THREE.MeshStandardMaterial({ color: 0xffd27a, roughness: 0.35, metalness: 0.45 })
+  );
+  frame.position.z = -0.05;
+
+  const g = new THREE.Group();
+  g.add(mesh, frame);
+  g.userData = { screen: mesh };
+
+  // initial text
+  setLeaderboard([
+    "Boss Tournament",
+    "1) —",
+    "2) —",
+    "3) —",
+    "4) —",
+    "5) —"
+  ]);
+
+  // make it face into room
+  g.rotation.y = Math.PI;
+
+  // attach a light for readability
+  const light = new THREE.PointLight(0x2bd7ff, 0.6, 12);
+  light.position.set(0, 0, 1.2);
+  g.add(light);
+
+  return g;
+}
+
+function setLeaderboard(lines) {
+  if (!leaderboardMesh) return;
+  const screen = leaderboardMesh.userData.screen;
+  if (!screen) return;
+
+  const { canvas, ctx, tex } = screen.userData;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // background
+  ctx.fillStyle = "rgba(0,0,0,0.72)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // border
+  ctx.strokeStyle = "rgba(255,210,122,0.9)";
+  ctx.lineWidth = 10;
+  ctx.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
+
+  // header
+  ctx.fillStyle = "#00ffaa";
+  ctx.font = "bold 58px Arial";
+  ctx.fillText(lines[0] || "Boss Tournament", 40, 80);
+
+  // entries
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 46px Arial";
+
+  let y = 160;
+  for (let i = 1; i < Math.min(lines.length, 7); i++) {
+    ctx.fillText(lines[i], 40, y);
+    y += 66;
+  }
+
+  // footer
+  ctx.fillStyle = "rgba(255,255,255,0.75)";
+  ctx.font = "bold 32px Arial";
+  ctx.fillText("Skylark Poker VR — Update 9.0", 40, canvas.height - 50);
+
+  tex.needsUpdate = true;
 }
 
 function onResize() {
@@ -83,203 +311,54 @@ function onResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-function setupControllers() {
-  // NOTE: On Quest, controller index order can vary.
-  // We treat c0 as "right-ish" and c1 as "left-ish", but we also robustly read axes.
-  c0 = renderer.xr.getController(0);
-  c1 = renderer.xr.getController(1);
-  dolly.add(c0, c1);
-
-  // Trigger-hold teleport
-  c0.addEventListener("selectstart", () => { input.triggerHeld = true; input.activeHand = 0; });
-  c0.addEventListener("selectend", () => { input.triggerHeld = false; if (tpValid) doTeleport(); });
-
-  c1.addEventListener("selectstart", () => { input.triggerHeld = true; input.activeHand = 1; });
-  c1.addEventListener("selectend", () => { input.triggerHeld = false; if (tpValid) doTeleport(); });
+function animate() {
+  renderer.setAnimationLoop(render);
 }
 
-function getActiveController() {
-  return input.activeHand === 0 ? c0 : c1;
-}
+function render() {
+  const dt = Math.min(clock.getDelta(), 0.05);
 
-function readStickAxes(gamepad) {
-  if (!gamepad || !gamepad.axes) return [0, 0];
+  // Toggle UI via LEFT trigger quick-tap (watch button surrogate)
+  handleWatchToggle(dt);
 
-  // Most Quest Touch controllers report stick on axes[2,3] OR [0,1] depending on browser.
-  // We pick the pair with the largest magnitude.
-  const a = gamepad.axes;
-
-  const p01 = [a[0] ?? 0, a[1] ?? 0];
-  const p23 = [a[2] ?? 0, a[3] ?? 0];
-
-  const m01 = Math.abs(p01[0]) + Math.abs(p01[1]);
-  const m23 = Math.abs(p23[0]) + Math.abs(p23[1]);
-
-  return m23 > m01 ? p23 : p01;
-}
-
-function pollInput() {
-  // Left stick should come from "left controller" if possible
-  const left = c1?.gamepad ? readStickAxes(c1.gamepad) : [0, 0];
-  const right = c0?.gamepad ? readStickAxes(c0.gamepad) : [0, 0];
-
-  input.lx = left[0];
-  input.ly = left[1];
-  input.rx = right[0];
-  input.ry = right[1];
-}
-
-function tick() {
-  const dt = clamp(clock.getDelta(), 0, 0.05);
-
-  // Lock rig to floor baseline to prevent sinking
-  player.position.y = FLOOR_Y;
-
-  pollInput();
-  applyWalk(dt);
-  applySnapTurn(dt);
-  updateTeleportVisuals();
-
-  World.update(dt);
+  // Core updates
+  Controls.update(dt);
+  pokerSim?.update(dt);
+  UI.update(dt);
 
   renderer.render(scene, camera);
 }
 
-function applyWalk(dt) {
-  const dead = 0.12;
-  const lx = Math.abs(input.lx) < dead ? 0 : input.lx;
-  const ly = Math.abs(input.ly) < dead ? 0 : input.ly;
+function handleWatchToggle(dt) {
+  watchCooldown = Math.max(0, watchCooldown - dt);
 
-  if (!lx && !ly) return;
+  const session = renderer.xr?.getSession?.();
+  if (!session) return;
 
-  // Forward is usually -Y on thumbstick
-  const fwd = -ly;
-  const strafe = lx;
+  let leftSource = null;
+  for (const src of session.inputSources || []) {
+    if (src && src.handedness === "left" && src.gamepad) {
+      leftSource = src;
+      break;
+    }
+  }
+  if (!leftSource) return;
 
-  const yaw = dolly.rotation.y;
-  const dirF = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-  const dirR = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+  const gp = leftSource.gamepad;
+  const trigger = gp.buttons?.[0]?.value || 0;
 
-  const move = new THREE.Vector3();
-  move.addScaledVector(dirF, fwd);
-  move.addScaledVector(dirR, strafe);
+  // quick tap detection
+  // if trigger pressed past threshold and cooldown elapsed, toggle menu
+  if (trigger > 0.85 && watchCooldown <= 0) {
+    watchCooldown = 0.35;
+    window.dispatchEvent(new Event("nova_toggle_menu"));
 
-  const len = move.length();
-  if (len > 0.0001) move.multiplyScalar(1 / len);
-
-  const mag = clamp(Math.sqrt(fwd * fwd + strafe * strafe), 0, 1);
-  player.position.addScaledVector(move, WALK_SPEED * mag * dt);
-
-  // Clamp inside bounds (solid-ish)
-  if (World.bounds) {
-    player.position.x = clamp(player.position.x, World.bounds.minX, World.bounds.maxX);
-    player.position.z = clamp(player.position.z, World.bounds.minZ, World.bounds.maxZ);
+    // flash watch face
+    if (watch && watch.userData && watch.userData.face) {
+      watch.userData.face.material.emissiveIntensity = 1.35;
+      setTimeout(() => {
+        if (watch?.userData?.face?.material) watch.userData.face.material.emissiveIntensity = 0.75;
+      }, 120);
+    }
   }
 }
-
-function applySnapTurn(dt) {
-  input.snapCooldown = Math.max(0, input.snapCooldown - dt);
-
-  const dead = 0.35;
-  const rx = input.rx;
-
-  if (input.snapCooldown > 0) return;
-  if (Math.abs(rx) < dead) return;
-
-  // Right stick right -> turn right
-  const dir = rx > 0 ? -1 : 1;
-  dolly.rotation.y += THREE.MathUtils.degToRad(SNAP_DEG) * dir;
-  input.snapCooldown = SNAP_COOLDOWN;
-}
-
-function buildTeleportVisuals(scene) {
-  // line
-  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, -1, -2)]);
-  const mat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
-  tpLine = new THREE.Line(geo, mat);
-  tpLine.visible = false;
-  scene.add(tpLine);
-
-  // triple neon ring
-  tpRing = new THREE.Group();
-  tpRing.visible = false;
-
-  const mats = [
-    new THREE.MeshStandardMaterial({ color: 0xff2bd6, emissive: 0xff2bd6, emissiveIntensity: 1.7, roughness: 0.25 }),
-    new THREE.MeshStandardMaterial({ color: 0x2bd7ff, emissive: 0x2bd7ff, emissiveIntensity: 1.7, roughness: 0.25 }),
-    new THREE.MeshStandardMaterial({ color: 0xffd27a, emissive: 0xffd27a, emissiveIntensity: 1.7, roughness: 0.25 }),
-  ];
-
-  for (let i = 0; i < 3; i++) {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.22 + i * 0.06, 0.012, 10, 64), mats[i]);
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = 0.01 + i * 0.004;
-    tpRing.add(ring);
-  }
-
-  const glow = new THREE.PointLight(0x00ffaa, 0.8, 7);
-  glow.position.set(0, 1.3, 0);
-  tpRing.add(glow);
-
-  scene.add(tpRing);
-}
-
-function updateTeleportVisuals() {
-  const ctrl = getActiveController();
-
-  if (!input.triggerHeld || !ctrl) {
-    tpLine.visible = false;
-    tpRing.visible = false;
-    tpValid = false;
-    return;
-  }
-
-  const origin = new THREE.Vector3();
-  ctrl.getWorldPosition(origin);
-
-  const q = new THREE.Quaternion();
-  ctrl.getWorldQuaternion(q);
-
-  const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
-
-  // Bias slightly downward so you never have to point straight down
-  dir.y -= 0.35;
-  dir.normalize();
-
-  const t = (FLOOR_Y - origin.y) / (dir.y || -0.00001);
-  tpValid = t > 0.05 && t < 30;
-
-  const end = tpValid ? tpHit.copy(origin).addScaledVector(dir, t) : origin.clone().addScaledVector(dir, 4);
-
-  // Update line
-  const pos = tpLine.geometry.attributes.position;
-  pos.setXYZ(0, origin.x, origin.y, origin.z);
-  pos.setXYZ(1, end.x, end.y, end.z);
-  pos.needsUpdate = true;
-
-  tpLine.visible = true;
-
-  if (!tpValid) {
-    tpRing.visible = false;
-    return;
-  }
-
-  tpRing.visible = true;
-  tpRing.position.set(tpHit.x, FLOOR_Y + 0.001, tpHit.z);
-
-  // pulse
-  const pulse = 1.0 + Math.sin(performance.now() * 0.008) * 0.35;
-  tpRing.children.forEach((ch) => {
-    if (ch.material?.emissiveIntensity != null) ch.material.emissiveIntensity = 1.35 * pulse;
-  });
-}
-
-function doTeleport() {
-  player.position.set(tpHit.x, FLOOR_Y, tpHit.z);
-
-  if (World.lookTarget) {
-    const to = new THREE.Vector3().subVectors(World.lookTarget, player.position);
-    to.y = 0;
-    if (to.lengthSq() > 0.001) dolly.rotation.y = Math.atan2(to.x, to.z);
-  }
-                                }

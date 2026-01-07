@@ -1,221 +1,234 @@
-// /js/main.js — Scarlett Poker VR — MAIN v14 (World v11 + Bots seated + VR laser + Android touch)
+// /js/main.js — Scarlett Poker VR — MAIN v15 (All systems: World + Controls + VR Ray + Android + Store + Bots + Poker)
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
 
 import { World } from "./world.js";
+import { Controls } from "./controls.js";
+import { VRController } from "./vrcontroller.js";
+import { MobileTouch } from "./mobile_touch.js";
 import { UI } from "./ui.js";
-import { PokerSimulation } from "./poker_simulation.js";
-
 import { Store } from "./store.js";
 import { AvatarItems } from "./avatar_items.js";
 import { createAvatar } from "./avatar.js";
-import { MobileTouch } from "./mobile_touch.js";
-
-import { VRController } from "./vrcontroller.js";
 import { BotManager } from "./bot.js";
-
-let Controls = null;
+import { PokerSimulation } from "./poker_simulation.js";
 
 const overlay = document.getElementById("overlay");
+const btnStore = document.getElementById("btnStore");
+const btnCal = document.getElementById("btnCal");
+const btnMusic = document.getElementById("btnMusic");
 
+function hubReset(){
+  if (!overlay) return;
+  overlay.textContent = "Scarlett Poker VR — hub\n";
+}
 function hubLine(s){
   if (!overlay) return;
-  const lines = (overlay.textContent || "").split("\n");
-  lines.push(s);
-  overlay.textContent = lines.slice(-24).join("\n");
+  overlay.textContent += s + "\n";
 }
 
-async function safeImport(path, label){
-  try{
-    const mod = await import(path);
-    hubLine(`✅ ${label}`);
-    return mod;
-  }catch(e){
-    hubLine(`⚠️ ${label} (skipped)`);
-    console.warn("Import failed:", path, e);
-    return null;
-  }
-}
-
-hubLine("Scarlett Poker VR — booting…");
+hubReset();
+hubLine("Booting…");
 
 const App = {
   scene: null,
   camera: null,
   renderer: null,
   clock: null,
-  playerRig: null,
-  worldData: null,
+
+  rig: null,
+  world: null,
   localAvatar: null,
+
+  music: null,
+  musicOn: false,
 
   async init() {
     this.clock = new THREE.Clock();
-    this.scene = new THREE.Scene();
 
-    this.playerRig = new THREE.Group();
-    this.scene.add(this.playerRig);
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x07080c);
+    this.scene.fog = new THREE.Fog(0x07080c, 2, 85);
+
+    this.rig = new THREE.Group();
+    this.scene.add(this.rig);
 
     this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 220);
     this.camera.position.set(0, 1.65, 3);
-    this.playerRig.add(this.camera);
+    this.rig.add(this.camera);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.xr.enabled = true;
     document.body.appendChild(this.renderer.domElement);
 
-    // VR button ALWAYS
+    // ✅ VR button ALWAYS
     document.body.appendChild(VRButton.createButton(this.renderer));
-    hubLine("✅ VRButton ready");
+    hubLine("✅ VRButton");
 
-    // Optional VR controls
-    const cmod = await safeImport("./controls.js", "controls.js");
-    Controls = cmod?.Controls || null;
-
-    // Build World
+    // World
     try {
-      this.worldData = World.build(this.scene, this.playerRig);
-      hubLine("✅ world.js loaded");
+      this.world = World.build(this.scene, this.rig);
+      hubLine("✅ world.js");
     } catch (e) {
-      hubLine("❌ world.js failed");
+      hubLine("❌ world.js FAILED");
       console.error(e);
-      this.worldData = null;
+      this.world = null;
     }
 
     // Spawn on lobby pad ALWAYS
-    if (this.worldData?.spawn) {
-      this.playerRig.position.set(this.worldData.spawn.x, 0, this.worldData.spawn.z);
+    if (this.world?.spawn) {
+      this.rig.position.set(this.world.spawn.x, 0, this.world.spawn.z);
       hubLine("✅ Spawn on telepad");
     } else {
-      this.playerRig.position.set(0, 0, 10);
+      this.rig.position.set(0, 0, 10);
       hubLine("⚠️ Spawn fallback");
     }
 
-    // UI
+    // Controls (VR locomotion + teleport + height lock)
     try {
-      UI.init({ scene: this.scene, camera: this.camera, renderer: this.renderer, overlay });
-      hubLine("✅ ui.js loaded");
+      Controls.init({
+        renderer: this.renderer,
+        camera: this.camera,
+        player: this.rig,
+        colliders: this.world?.colliders || [],
+        bounds: this.world?.bounds || null,
+        floorY: this.world?.floorY ?? 0,
+      });
+      hubLine("✅ controls.js");
     } catch (e) {
-      hubLine("⚠️ ui.js failed");
-      console.warn(e);
+      hubLine("❌ controls.js FAILED");
+      console.error(e);
     }
 
-    // Poker sim (safe)
+    // Android touch
     try {
-      PokerSimulation.init?.({ scene: this.scene, world: this.worldData });
-      hubLine("✅ poker_simulation.js loaded");
-    } catch (e) {
-      hubLine("⚠️ poker_simulation.js failed");
-      console.warn(e);
-    }
-
-    // Local avatar preview (for store cosmetics)
-    this.localAvatar = createAvatar({ name:"YOU", height:1.78, shirt:0x00ffaa, accent:0x00ffaa });
-    this.localAvatar.group.position.set(this.playerRig.position.x + 1.2, this.worldData?.floorY ?? 0, this.playerRig.position.z + 0.6);
-    this.scene.add(this.localAvatar.group);
-
-    // Store
-    try {
-      Store.init({ scene: this.scene, camera: this.camera, overlay });
-      hubLine("✅ store.js loaded");
-
-      Store.onProfileChanged = (profile) => {
-        this.applyProfileToAvatar(this.localAvatar, profile);
-      };
-
-      this.applyProfileToAvatar(this.localAvatar, AvatarItems.loadState());
-    } catch (e) {
-      hubLine("⚠️ store.js failed");
-      console.warn(e);
-    }
-
-    // Android touch controls
-    try {
-      MobileTouch.init({ renderer: this.renderer, camera: this.camera, player: this.playerRig, overlay });
-      hubLine("✅ mobile_touch.js loaded");
+      MobileTouch.init({
+        camera: this.camera,
+        rig: this.rig,
+        padLookId: "padLook",
+        padMoveId: "padMove",
+      });
+      hubLine("✅ mobile_touch.js");
     } catch (e) {
       hubLine("⚠️ mobile_touch.js failed");
       console.warn(e);
     }
 
-    // VR Controller ray (laser + ring) that follows hand
+    // UI
     try {
-      const floorY = this.worldData?.floorY ?? 0;
-      const kioskTargets = () => {
-        const k = this.worldData?.kiosk;
-        if (!k) return [];
-        return k.userData?.rayTargets?.length ? k.userData.rayTargets : [k];
-      };
+      UI.init({ overlay });
+      hubLine("✅ ui.js");
+    } catch (e) {
+      hubLine("⚠️ ui.js failed");
+    }
 
+    // Store + items
+    try {
+      AvatarItems.ensureDefaults();
+      Store.init({
+        onEquip: (state) => {
+          AvatarItems.saveState(state);
+          this.applyAvatarState(this.localAvatar, state);
+        },
+        onRequestState: () => AvatarItems.loadState(),
+      });
+      hubLine("✅ store.js + avatar_items.js");
+    } catch (e) {
+      hubLine("⚠️ store.js / avatar_items.js failed");
+      console.warn(e);
+    }
+
+    // Local avatar preview by kiosk
+    try {
+      this.localAvatar = createAvatar({ name: "YOU", height: 1.78 });
+      const k = this.world?.kioskPos || new THREE.Vector3(11.5, 0, 2.8);
+      this.localAvatar.group.position.set(k.x - 1.6, this.world?.floorY ?? 0, k.z);
+      this.scene.add(this.localAvatar.group);
+      this.applyAvatarState(this.localAvatar, AvatarItems.loadState());
+      hubLine("✅ avatar.js preview");
+    } catch (e) {
+      hubLine("⚠️ avatar.js failed");
+      console.warn(e);
+    }
+
+    // VR controller ray (laser + ring follows HAND)
+    try {
       VRController.init({
         renderer: this.renderer,
         scene: this.scene,
         camera: this.camera,
-        floorY,
-        getRayTargets: kioskTargets,
-        onKioskActivate: () => {
-          Store?.toggle?.();
-          hubLine("🛍️ Store toggled (VR ray)");
+        floorY: this.world?.floorY ?? 0,
+        getRayTargets: () => (this.world?.rayTargets || []),
+        onPrimaryAction: (hit) => {
+          // If hit kiosk => toggle store
+          if (hit?.object?.userData?.isKioskPart || hit?.object?.parent?.userData?.isKioskPart) {
+            Store.toggle();
+            hubLine("🛍️ Store toggled (VR)");
+          }
         }
       });
-      hubLine("✅ vrcontroller.js loaded");
+      hubLine("✅ vrcontroller.js");
     } catch (e) {
       hubLine("⚠️ vrcontroller.js failed");
       console.warn(e);
     }
 
-    // Bots seated + tournament demo
+    // Bots + tournament behavior
     try {
-      BotManager.init({ scene: this.scene, world: this.worldData });
+      BotManager.init({ scene: this.scene, world: this.world });
       BotManager.spawnBots({ count: 8 });
-      hubLine("✅ bot.js loaded (bots seated)");
+      hubLine("✅ bot.js");
     } catch (e) {
       hubLine("⚠️ bot.js failed");
       console.warn(e);
     }
 
-    // VR Controls init (if present)
-    if (Controls?.init) {
-      try {
-        Controls.init({
-          renderer: this.renderer,
-          camera: this.camera,
-          player: this.playerRig,
-          colliders: this.worldData?.colliders || [],
-          bounds: this.worldData?.bounds || null,
-          spawn: { position: this.worldData?.spawn || new THREE.Vector3(0,0,10), yaw: 0 }
-        });
-        hubLine("✅ Controls init OK");
-      } catch (e) {
-        hubLine("⚠️ Controls init failed");
-        console.warn(e);
-      }
-    } else {
-      hubLine("⚠️ VR Controls missing (VR move may not work)");
+    // Poker simulation (wires to bots)
+    try {
+      PokerSimulation.init({ bots: BotManager, world: this.world });
+      hubLine("✅ poker_simulation.js");
+    } catch (e) {
+      hubLine("⚠️ poker_simulation.js failed");
+      console.warn(e);
     }
 
-    window.addEventListener("resize", () => this.resize());
-    this.renderer.setAnimationLoop(() => this.animate());
+    // Buttons (Android)
+    if (btnStore) btnStore.onclick = () => Store.toggle();
+    if (btnCal) btnCal.onclick = () => {
+      Controls.calibrateHeight();
+      hubLine("📏 Height calibrated");
+    };
+    if (btnMusic) btnMusic.onclick = () => this.toggleMusic();
 
-    hubLine("✅ Loaded — Android: 2 thumbs • Oculus: Enter VR");
+    window.addEventListener("resize", () => this.resize());
+
+    this.renderer.setAnimationLoop(() => this.animate());
+    hubLine("✅ Loaded. Android: pads. Oculus: Enter VR.");
   },
 
-  applyProfileToAvatar(avatarApi, profile) {
-    if (!avatarApi || !profile) return;
+  applyAvatarState(avatarApi, state) {
+    if (!avatarApi || !state) return;
+    avatarApi.clearGear();
 
-    const equipped = profile.equipped || {};
-    const shirtItem = equipped.shirt ? AvatarItems.getItem(equipped.shirt) : null;
-    const auraItem  = equipped.aura  ? AvatarItems.getItem(equipped.aura)  : null;
-    const hatItem   = equipped.hat   ? AvatarItems.getItem(equipped.hat)   : null;
-    const gItem     = equipped.glasses ? AvatarItems.getItem(equipped.glasses) : null;
+    const shirt = AvatarItems.getItem(state.equipped.shirt);
+    const hat = AvatarItems.getItem(state.equipped.hat);
+    const glasses = AvatarItems.getItem(state.equipped.glasses);
+    const aura = AvatarItems.getItem(state.equipped.aura);
+    const face = AvatarItems.getItem(state.equipped.face);
 
-    avatarApi.clearGear?.();
+    if (shirt?.data?.color) avatarApi.setShirtColor(shirt.data.color);
+    if (face?.data?.type) avatarApi.setFace(face.data.type);
+    if (hat?.data?.type) avatarApi.equipHat(hat.data);
+    if (glasses?.data?.type) avatarApi.equipGlasses(glasses.data);
+    if (aura?.data?.type) avatarApi.setAura(aura.data);
+  },
 
-    if (shirtItem?.data?.shirt) avatarApi.setShirtColor(shirtItem.data.shirt);
-    if (auraItem?.data?.aura) avatarApi.setAura(auraItem.data.aura); else avatarApi.setAura(null);
-    if (hatItem?.data?.hat === "cap") avatarApi.equipHat({ color: hatItem.data.color || 0x111111 });
-    if (gItem?.data?.glasses === "basic") avatarApi.equipGlasses({ color: gItem.data.color || 0x111111 });
+  toggleMusic() {
+    // Simple: no external assets needed. If you add assets/audio/lobby_ambience.mp3 later, we can wire it.
+    this.musicOn = !this.musicOn;
+    hubLine(this.musicOn ? "🎵 Music ON (placeholder)" : "🔇 Music OFF");
   },
 
   resize() {
@@ -227,22 +240,20 @@ const App = {
   animate() {
     const dt = this.clock.getDelta();
 
-    // Android touch when NOT in VR
-    try { MobileTouch.update(dt); } catch {}
+    // Android touch always available
+    MobileTouch.update(dt);
 
-    // VR controls when in VR
-    try { Controls?.update?.(dt); } catch {}
+    // VR controls only when XR session active
+    Controls.update(dt);
 
-    // VR ray follows controller
-    try { VRController.update(); } catch {}
+    // VR ray follows controller when in VR
+    VRController.update(dt);
 
-    // bots
-    try { BotManager.update(dt); } catch {}
+    // bots + poker sim
+    BotManager.update(dt);
+    PokerSimulation.update(dt);
 
-    // ui + poker sim
-    try { UI?.update?.(dt); } catch {}
-    try { PokerSimulation?.update?.(dt); } catch {}
-
+    UI.update(dt);
     this.renderer.render(this.scene, this.camera);
   }
 };

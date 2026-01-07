@@ -4,35 +4,52 @@
   <meta charset="utf-8" />
   <title>Scarlet VR Poker</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+
   <style>
-    :root{
+    :root {
       --bg:#000; --panel:rgba(0,0,0,.62); --panel2:rgba(0,0,0,.82);
-      --text:#fff; --muted:rgba(255,255,255,.75);
+      --text:#fff; --muted:rgba(255,255,255,.75); --accent:#33ff66;
       --border:rgba(255,255,255,.14); --shadow:0 10px 24px rgba(0,0,0,.55);
       --radius:14px;
     }
     html,body{margin:0;padding:0;height:100%;background:var(--bg);overflow:hidden;
       font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;color:var(--text);}
     canvas{display:block;}
-    #hud{
-      position:fixed;left:14px;top:14px;z-index:5000;max-width:520px;
-      background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
-      padding:12px 14px;box-shadow:var(--shadow);user-select:none;backdrop-filter:blur(6px);
-    }
+    #hud{position:fixed;left:14px;top:14px;z-index:5000;max-width:520px;background:var(--panel);
+      border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;box-shadow:var(--shadow);
+      user-select:none;backdrop-filter:blur(6px);}
     #hud h1{margin:0 0 6px 0;font-size:16px;letter-spacing:.3px;}
     #hud .sub{font-size:12px;color:var(--muted);line-height:1.35;}
+
     #debug{
       position:fixed;left:14px;right:14px;bottom:14px;z-index:6000;
-      max-height:35vh;overflow:auto;background:var(--panel2);border:1px solid var(--border);
-      border-radius:var(--radius);padding:12px;font-size:12px;color:#9ef;
-      white-space:pre-wrap;display:block;box-shadow:var(--shadow);
+      max-height:34vh;overflow:auto;background:var(--panel2);border:1px solid var(--border);
+      border-radius:var(--radius);padding:12px;font-size:12px;color:#9ef;white-space:pre-wrap;
+      box-shadow:var(--shadow);pointer-events:auto;
     }
+
+    /* Keep VRButton clickable above all UI */
     #VRButton{
-      position:fixed !important;right:14px !important;bottom:14px !important;
-      z-index:99999 !important;pointer-events:auto !important;
+      position:fixed !important;
+      right:14px !important;
+      bottom:14px !important;
+      z-index:99999 !important;
+      pointer-events:auto !important;
     }
   </style>
+
+  <!-- ✅ IMPORT MAP FIX: makes bare imports like "three" work on GitHub Pages -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.159.0/build/three.module.js",
+      "three/examples/jsm/": "https://unpkg.com/three@0.159.0/examples/jsm/",
+      "three/addons/": "https://unpkg.com/three@0.159.0/examples/jsm/"
+    }
+  }
+  </script>
 </head>
+
 <body>
   <div id="hud">
     <h1>Scarlet VR Poker</h1>
@@ -46,34 +63,39 @@
 
   <script>
     const debugEl = document.getElementById("debug");
-    function log(m){ debugEl.textContent += "\n" + m; debugEl.scrollTop = debugEl.scrollHeight; }
-    window.__hubLog = (m)=>log(String(m));
+    function log(msg){ debugEl.textContent += "\n" + msg; debugEl.scrollTop = debugEl.scrollHeight; }
+    window.__hubLog = log;
 
-    window.addEventListener("error", (e) => {
+    log("URL: " + location.href);
+
+    window.addEventListener("error", (e)=>{
       log("❌ window.error: " + (e.message || e.error || "unknown"));
       if (e.filename) log("   at " + e.filename + ":" + e.lineno + ":" + e.colno);
     });
 
-    window.addEventListener("unhandledrejection", (e) => {
+    window.addEventListener("unhandledrejection", (e)=>{
       log("❌ unhandledrejection: " + (e.reason?.message || e.reason || "unknown"));
     });
 
-    log("URL: " + location.href);
-
-    fetch("./js/main.js", { cache: "no-store" })
-      .then(r => log("main.js fetch: " + r.status + " " + r.statusText))
+    // Preflight fetch (proves correct path + kills caching confusion)
+    fetch("./js/main.js?v=9.0_IMPORTMAP_FIX", { cache: "no-store" })
+      .then(r => log("main.js fetch: " + r.status))
       .catch(err => log("main.js fetch failed: " + err.message));
+
+    if (navigator.xr) {
+      navigator.xr.isSessionSupported("immersive-vr")
+        .then(ok => log("XR: immersive-vr " + (ok ? "supported" : "NOT supported")))
+        .catch(() => log("XR: isSessionSupported failed"));
+    } else {
+      log("XR: navigator.xr missing");
+    }
   </script>
 
+  <!-- ✅ Load your game AFTER importmap -->
   <script type="module">
-    try {
-      window.__hubLog("Importing ./js/main.js ...");
-      await import("./js/main.js");
-      window.__hubLog("✅ main.js import OK");
-    } catch (e) {
-      window.__hubLog("❌ main.js import FAILED: " + (e?.message || e));
-      window.__hubLog(e?.stack || "");
-    }
+    log("Importing ./js/main.js ...");
+    import "./js/main.js?v=9.0_IMPORTMAP_FIX";
+    log("✅ main.js import OK");
   </script>
 </body>
 </html>

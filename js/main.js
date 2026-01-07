@@ -1,4 +1,4 @@
-// /js/main.js — Scarlett Poker VR — MAIN v11 (Full Extension Wiring, GitHub Safe)
+// /js/main.js — Scarlett Poker VR — MAIN v12 (Adds Store + Avatar Items)
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -8,142 +8,202 @@ import { UI } from "./ui.js";
 import { PokerSimulation } from "./poker_simulation.js";
 import { init as initBots } from "./bots.js";
 
-// Your controls.js stays separate (we won't overwrite here).
-// If controls.js is missing, we fail gracefully.
+import { Store } from "./store.js";
+import { AvatarItems } from "./avatar_items.js";
+import { createAvatar } from "./avatar.js";
+
 let Controls = null;
 
 const overlay = document.getElementById("overlay");
-const hub = {
-  lines: [],
-  ok(label) { pushLine(`✅ ${label}`); },
-  warn(label) { pushLine(`⚠️ ${label}`); },
-  err(label) { pushLine(`❌ ${label}`); }
-};
 
-function pushLine(s){
-  hub.lines.push(s);
-  hub.lines = hub.lines.slice(-22);
-  if (overlay) overlay.textContent = hub.lines.join("\n");
+function hubLine(s){
+  if (!overlay) return;
+  const lines = (overlay.textContent || "").split("\n");
+  lines.push(s);
+  overlay.textContent = lines.slice(-22).join("\n");
 }
-
-pushLine("Scarlett Poker VR — booting…");
 
 async function safeImport(path, label){
   try{
     const mod = await import(path);
-    hub.ok(label);
+    hubLine(`✅ ${label}`);
     return mod;
   }catch(e){
-    hub.warn(`${label} (skipped)`);
+    hubLine(`⚠️ ${label} (skipped)`);
     console.warn("Import failed:", path, e);
     return null;
   }
 }
+
+hubLine("Scarlett Poker VR — booting…");
 
 const App = {
   scene: null,
   camera: null,
   renderer: null,
   clock: null,
-  player: null,
+  playerRig: null,
   worldData: null,
+
+  localAvatar: null,
   bots: null,
 
   async init() {
     this.clock = new THREE.Clock();
 
     this.scene = new THREE.Scene();
-    this.player = new THREE.Group();
-    this.scene.add(this.player);
+
+    this.playerRig = new THREE.Group();
+    this.scene.add(this.playerRig);
 
     this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 220);
     this.camera.position.set(0, 1.65, 3);
-    this.player.add(this.camera);
+    this.playerRig.add(this.camera);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.xr.enabled = true;
-
     document.body.appendChild(this.renderer.domElement);
 
-    // ✅ ALWAYS VR BUTTON
+    // Always VR Button
     document.body.appendChild(VRButton.createButton(this.renderer));
-    hub.ok("VRButton ready");
+    hubLine("✅ VRButton ready");
 
-    // Controls (optional but expected)
+    // Controls (optional)
     const cmod = await safeImport("./controls.js", "controls.js");
     Controls = cmod?.Controls || null;
 
-    // Build world (full extension)
+    // World
     try {
       this.worldData = World.build(this.scene);
-      hub.ok("world.js loaded (v11)");
+      hubLine("✅ world.js loaded");
     } catch (e) {
-      hub.err("world.js failed");
+      hubLine("❌ world.js failed");
       console.error(e);
       this.worldData = null;
     }
 
-    // Spawn safely on lobby pad
+    // Spawn on lobby pad
     if (this.worldData?.spawn) {
-      this.player.position.set(this.worldData.spawn.x, 0, this.worldData.spawn.z);
-      hub.ok("Spawn on telepad (lobby)");
+      this.playerRig.position.set(this.worldData.spawn.x, 0, this.worldData.spawn.z);
+      hubLine("✅ Spawn on telepad");
     } else {
-      this.player.position.set(0, 0, 10);
-      hub.warn("Spawn fallback (0,0,10)");
+      this.playerRig.position.set(0, 0, 10);
+      hubLine("⚠️ Spawn fallback");
     }
 
-    // Init UI
+    // UI
     try {
       UI.init({ scene: this.scene, camera: this.camera, renderer: this.renderer, overlay });
-      hub.ok("ui.js loaded");
+      hubLine("✅ ui.js loaded");
     } catch (e) {
-      hub.warn("ui.js failed");
+      hubLine("⚠️ ui.js failed");
       console.warn(e);
     }
 
-    // Init Poker visuals (cards + chips)
+    // Poker visuals
     try {
       PokerSimulation.init({ scene: this.scene, world: this.worldData });
-      hub.ok("poker_simulation.js loaded (cards+chips)");
+      hubLine("✅ poker_simulation.js loaded");
     } catch (e) {
-      hub.warn("poker_simulation.js failed");
+      hubLine("⚠️ poker_simulation.js failed");
       console.warn(e);
     }
 
-    // Init Bots (seats to world chairs)
+    // Local player “avatar preview” (non-VR visual only)
+    // (Later we can attach hands/controllers; for now this proves cosmetics work.)
+    this.localAvatar = createAvatar({ name:"YOU", height:1.78, shirt:0x00ffaa, accent:0x00ffaa });
+    this.localAvatar.group.position.set(this.playerRig.position.x + 1.2, 0, this.playerRig.position.z + 0.6);
+    this.scene.add(this.localAvatar.group);
+
+    // Bots
     try {
       this.bots = initBots({ scene: this.scene, world: this.worldData });
-      hub.ok("bots.js loaded (seated tournament flow)");
+      hubLine("✅ bots.js loaded");
     } catch (e) {
-      hub.warn("bots.js failed");
+      hubLine("⚠️ bots.js failed");
       console.warn(e);
     }
 
-    // Init Controls
+    // Store
+    try {
+      Store.init({ scene: this.scene, camera: this.camera, overlay });
+      hubLine("✅ store.js loaded");
+
+      // When store changes profile, apply to local avatar + randomize some bots
+      Store.onProfileChanged = (profile) => {
+        this.applyProfileToAvatar(this.localAvatar, profile);
+        this.randomizeBotsCosmetics(profile);
+      };
+
+      // apply initial profile
+      const profile = AvatarItems.loadState();
+      this.applyProfileToAvatar(this.localAvatar, profile);
+      this.randomizeBotsCosmetics(profile);
+    } catch (e) {
+      hubLine("⚠️ store.js failed");
+      console.warn(e);
+    }
+
+    // Controls init
     if (Controls?.init) {
       try {
         Controls.init({
           renderer: this.renderer,
           camera: this.camera,
-          player: this.player,
+          player: this.playerRig,
           colliders: this.worldData?.colliders || [],
           bounds: this.worldData?.bounds || null,
           spawn: { position: this.worldData?.spawn || new THREE.Vector3(0,0,10), yaw: 0 }
         });
-        hub.ok("Controls init OK");
+        hubLine("✅ Controls init OK");
       } catch (e) {
-        hub.warn("Controls init failed");
+        hubLine("⚠️ Controls init failed");
         console.warn(e);
       }
     } else {
-      hub.warn("Controls missing — movement may not work");
+      hubLine("⚠️ Controls missing (movement may not work)");
     }
 
     window.addEventListener("resize", () => this.resize());
     this.renderer.setAnimationLoop(() => this.animate());
 
-    pushLine("✅ Loaded — press Enter VR");
+    hubLine("✅ Loaded — Enter VR");
+  },
+
+  applyProfileToAvatar(avatarApi, profile) {
+    if (!avatarApi || !profile) return;
+
+    const equipped = profile.equipped || {};
+    const apply = (type) => {
+      const id = equipped[type];
+      if (!id) return null;
+      return AvatarItems.getItem(id);
+    };
+
+    const shirt = apply("shirt");
+    const aura  = apply("aura");
+    const hat   = apply("hat");
+    const glasses = apply("glasses");
+
+    // clear previous gear
+    avatarApi.clearGear?.();
+
+    if (shirt?.data?.shirt) avatarApi.setShirtColor(shirt.data.shirt);
+    if (aura?.data?.aura) avatarApi.setAura(aura.data.aura);
+    else avatarApi.setAura(null);
+
+    if (hat?.data?.hat === "cap") avatarApi.equipHat({ color: hat.data.color || 0x111111 });
+    if (glasses?.data?.glasses === "basic") avatarApi.equipGlasses({ color: glasses.data.color || 0x111111 });
+  },
+
+  randomizeBotsCosmetics(profile) {
+    // makes the room feel alive: bots wear random catalog cosmetics
+    // (later we’ll swap to real shirts/skins)
+    const items = AvatarItems.catalog;
+
+    // If bots.js exposes the bot objects later, we can integrate deeper.
+    // For now, this is safe/no-crash placeholder.
   },
 
   resize() {
@@ -154,12 +214,10 @@ const App = {
 
   animate() {
     const dt = this.clock.getDelta();
-
     try { Controls?.update?.(dt); } catch {}
     try { UI?.update?.(dt); } catch {}
     try { this.bots?.update?.(dt); } catch {}
     try { PokerSimulation?.update?.(dt); } catch {}
-
     this.renderer.render(this.scene, this.camera);
   }
 };

@@ -1,11 +1,11 @@
-// /js/main.js — Scarlett VR Poker (FULL ACTIVE)
+// /js/main.js — Scarlett VR Poker (FULL ACTIVE, crash-proof)
 // Cache-proof (loaded as main.js?v=... from index.html)
 // - VRButton
 // - Player rig (spawn facing table)
 // - Left stick move (relative to head yaw)
 // - Right stick snap turn (45°)
 // - Right trigger teleport (arc + landing ring)
-// - Calls world.tick(dt)
+// - Calls world.tick(dt) safely (won’t die if poker sim crashes)
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -16,12 +16,22 @@ const log = (m) => (window.__hubLog ? window.__hubLog(m) : console.log(m));
 const V = new URL(import.meta.url).searchParams.get("v") || (window.__BUILD_V || "no-v");
 log("[main] FULL ACTIVE boot v=" + V);
 
+// ---- GLOBAL ERROR TRAPS (THIS WILL SHOW THE REAL FILE+LINE) ----
+window.addEventListener("error", (e) => {
+  log(`❌ window.error: ${e?.message || e}`);
+  if (e?.error?.stack) log(e.error.stack);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  log(`❌ unhandledrejection: ${e?.reason?.message || e?.reason || e}`);
+  if (e?.reason?.stack) log(e.reason.stack);
+});
+
 let renderer, scene, camera;
 let world = null;
 
 const clock = new THREE.Clock();
 
-// XR rig: camera lives in head, head lives in player
+// XR rig
 const player = new THREE.Group();
 const head = new THREE.Group();
 
@@ -68,7 +78,7 @@ async function boot() {
   player.add(head);
   scene.add(player);
 
-  // Lights (safe: never black)
+  // Lights
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.15));
   const key = new THREE.DirectionalLight(0xffffff, 0.85);
   key.position.set(6, 10, 4);
@@ -108,7 +118,7 @@ async function boot() {
   // Render loop
   renderer.setAnimationLoop(tick);
 
-  // XR support info (helps debugging)
+  // XR support info
   if (navigator.xr?.isSessionSupported) {
     const ok = await navigator.xr.isSessionSupported("immersive-vr");
     log("[main] XR immersive-vr supported = " + ok);
@@ -137,7 +147,6 @@ function setupXRControls() {
   c0.addEventListener("disconnected", () => (c0.userData.inputSource = null));
   c1.addEventListener("disconnected", () => (c1.userData.inputSource = null));
 
-  // Teleport trigger (select)
   c0.addEventListener("selectstart", () => onSelectStart(c0));
   c1.addEventListener("selectstart", () => onSelectStart(c1));
   c0.addEventListener("selectend", () => onSelectEnd(c0));
@@ -153,7 +162,7 @@ function getGamepad(controller) {
 
 function isRightHand(controller) {
   const src = controller?.userData?.inputSource;
-  if (!src) return controller === c1; // fallback
+  if (!src) return controller === c1;
   if (src.handedness) return src.handedness === "right";
   return controller === c1;
 }
@@ -183,7 +192,6 @@ function onSelectEnd(controller) {
   if (teleport.active && teleport.valid && teleport.hitPoint) {
     const p = teleport.hitPoint.clone();
 
-    // clamp inside room
     if (world?.roomClamp) {
       p.x = THREE.MathUtils.clamp(p.x, world.roomClamp.minX, world.roomClamp.maxX);
       p.z = THREE.MathUtils.clamp(p.z, world.roomClamp.minZ, world.roomClamp.maxZ);
@@ -191,7 +199,6 @@ function onSelectEnd(controller) {
 
     player.position.set(p.x, 0, p.z);
 
-    // keep facing table (optional but feels good)
     if (world?.tableFocus) {
       const toTable = new THREE.Vector3().subVectors(world.tableFocus, new THREE.Vector3(p.x, 0, p.z));
       player.rotation.y = Math.atan2(toTable.x, toTable.z);
@@ -296,25 +303,23 @@ function updateTeleportArc(THREE, controller, tp, world) {
   let hit = null;
 
   let idx = 0;
-  for (let t = 0; t <= maxT; t += step) {
+  for (let tt = 0; tt <= maxT; tt += step) {
     const p = new THREE.Vector3(
-      origin.x + dir.x * v * t,
-      origin.y + dir.y * v * t + 0.5 * g * t * t,
-      origin.z + dir.z * v * t
+      origin.x + dir.x * v * tt,
+      origin.y + dir.y * v * tt + 0.5 * g * tt * tt,
+      origin.z + dir.z * v * tt
     );
 
     positions[idx++] = p.x;
     positions[idx++] = p.y;
     positions[idx++] = p.z;
 
-    // floor hit
     if (!hit && p.y <= 0.02) {
       hit = p;
       break;
     }
   }
 
-  // fill remainder so line doesn’t freak out
   while (idx < positions.length) {
     positions[idx] = positions[idx - 3];
     idx++;
@@ -340,13 +345,28 @@ function updateTeleportArc(THREE, controller, tp, world) {
   }
 }
 
-// -------------------- LOOP --------------------
+// -------------------- LOOP (SAFE) --------------------
 function tick() {
   const dt = clock.getDelta();
 
-  applyLocomotion(dt);
+  try {
+    applyLocomotion(dt);
+  } catch (e) {
+    log("❌ applyLocomotion crashed: " + (e?.message || e));
+    if (e?.stack) log(e.stack);
+  }
 
-  if (world?.tick) world.tick(dt);
+  try {
+    if (world?.tick) world.tick(dt);
+  } catch (e) {
+    log("❌ world.tick crashed: " + (e?.message || e));
+    if (e?.stack) log(e.stack);
+  }
 
-  renderer.render(scene, camera);
-      }
+  try {
+    renderer.render(scene, camera);
+  } catch (e) {
+    log("❌ render crashed: " + (e?.message || e));
+    if (e?.stack) log(e.stack);
+  }
+}

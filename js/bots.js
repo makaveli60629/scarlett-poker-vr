@@ -1,6 +1,7 @@
-// js/bots.js — Tournament Bots + Lobby Wandering + Auto Shirt Fit
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+// /js/bots.js — Tournament Bots + Lobby Wandering + Shirt Atlas
+import * as THREE from "./three.js";
 import { Avatar } from "./avatar.js";
+import { BODY_DIMS } from "./body_dims.js";
 
 export const Bots = {
   scene: null,
@@ -11,14 +12,10 @@ export const Bots = {
   bots: [],
   state: "seating",
   timer: 0,
-  activeCount: 6, // seated
   winnerIndex: -1,
 
-  // === Shirt settings (edit these) ===
-  SHIRT_TEXTURE_URL: "assets/textures/shirt_diffuse.png",
-  SHIRT_MODE: "wrap", // "wrap" (3D wrapper) or "off"
-  SHIRT_FIT: "normal", // "tight" | "normal" | "loose"
   _shirtTex: null,
+  _shirtMat: null,
 
   init({ scene, rig, getSeats, getLobbyZone }) {
     this.scene = scene;
@@ -27,25 +24,21 @@ export const Bots = {
     this.getLobbyZone = getLobbyZone;
 
     const seats = this.getSeats?.() || [];
-    if (!seats.length) return;
+    if (!seats.length) {
+      console.warn("[Bots] No seats provided. Bots not spawned.");
+      return;
+    }
 
-    // Preload shirt texture once
-    this._preloadShirtTexture();
+    this._ensureShirtMaterial();
 
     // Create 8 bots total (6 seats + 2 lobby)
     this.bots = [];
     for (let i = 0; i < 8; i++) {
-      const a = Avatar.create({ color: i % 2 ? 0x2bd7ff : 0xff2bd6 });
-      a.userData.bot = {
-        id: i,
-        seated: false,
-        eliminated: false,
-        target: null,
-        crown: false,
-      };
+      const a = Avatar.create({ color: i % 2 ? 0x2bd7ff : 0xff2bd6 }); // <-- this is your “blue/pink”
+      a.userData.bot = { id: i, seated: false, eliminated: false, target: null, crown: false };
 
-      // Auto-fit shirt to this avatar instance (math-based)
-      this._applyShirtToAvatar(a);
+      // add shirt using your atlas texture
+      this._addShirt(a);
 
       this.scene.add(a);
       this.bots.push(a);
@@ -54,16 +47,45 @@ export const Bots = {
     this._seatBots();
     this.state = "playing";
     this.timer = 0;
+
+    console.log("[Bots] Spawned", this.bots.length, "bots.");
   },
 
-  _preloadShirtTexture() {
-    if (this._shirtTex) return;
+  _ensureShirtMaterial() {
+    if (this._shirtMat) return;
+
     const loader = new THREE.TextureLoader();
-    this._shirtTex = loader.load(this.SHIRT_TEXTURE_URL);
+    this._shirtTex = loader.load(BODY_DIMS.shirt.textureUrl);
     this._shirtTex.colorSpace = THREE.SRGBColorSpace;
     this._shirtTex.anisotropy = 4;
-    this._shirtTex.wrapS = THREE.RepeatWrapping;
-    this._shirtTex.wrapT = THREE.RepeatWrapping;
+    this._shirtTex.wrapS = THREE.ClampToEdgeWrapping;
+    this._shirtTex.wrapT = THREE.ClampToEdgeWrapping;
+
+    this._shirtMat = new THREE.MeshStandardMaterial({
+      map: this._shirtTex,
+      roughness: 0.95,
+      metalness: 0.0,
+      transparent: true,
+      opacity: 1.0,
+    });
+  },
+
+  _addShirt(bot) {
+    // remove old
+    const old = bot.getObjectByName("bot_shirt");
+    if (old) old.parent?.remove(old);
+
+    const shirtGeo = new THREE.BoxGeometry(
+      BODY_DIMS.shirt.width,
+      BODY_DIMS.shirt.height,
+      BODY_DIMS.shirt.depth
+    );
+
+    const shirt = new THREE.Mesh(shirtGeo, this._shirtMat);
+    shirt.name = "bot_shirt";
+    shirt.position.set(0, BODY_DIMS.shirt.centerY, BODY_DIMS.shirt.zOffset);
+
+    bot.add(shirt);
   },
 
   _seatBots() {
@@ -71,6 +93,7 @@ export const Bots = {
     for (let i = 0; i < this.bots.length; i++) {
       const b = this.bots[i];
       const d = b.userData.bot;
+
       d.crown = false;
       d.eliminated = false;
 
@@ -109,13 +132,13 @@ export const Bots = {
       new THREE.MeshStandardMaterial({
         color: 0xffd27a,
         emissive: 0xffd27a,
-        emissiveIntensity: 0.35,
+        emissiveIntensity: 0.45,
         roughness: 0.35,
         metalness: 0.55
       })
     );
     crown.rotation.x = Math.PI / 2;
-    crown.position.y = 1.45;
+    crown.position.y = 1.55;
     crown.name = "crown";
     bot.add(crown);
   },
@@ -126,99 +149,12 @@ export const Bots = {
     bot.userData.bot.crown = false;
   },
 
-  // ============================================================
-  // Shirt fit logic for Avatar.create() bots (no avatar.js needed)
-  // ============================================================
-
-  _applyShirtToAvatar(avatarRoot) {
-    if (this.SHIRT_MODE === "off") return;
-    this._preloadShirtTexture();
-
-    // Remove old shirt if any
-    const old = avatarRoot.getObjectByName("bot_shirt");
-    if (old) old.parent?.remove(old);
-
-    // Try to find an explicit torso mesh first (best case)
-    const torso =
-      avatarRoot.getObjectByName("torso") ||
-      avatarRoot.getObjectByName("body") ||
-      avatarRoot.getObjectByName("chest") ||
-      null;
-
-    let shirtAnchor = torso || avatarRoot;
-
-    // Compute sizing reference using bounding box
-    const box = new THREE.Box3().setFromObject(shirtAnchor);
-    if (!isFinite(box.min.x) || !isFinite(box.max.x)) return;
-
-    const size = new THREE.Vector3();
-    box.getSize(size);
-
-    // If we anchored to the full avatar, focus on mid-body “torso band”
-    // (this makes it work even if the avatar is just a single group)
-    let torsoHeight = size.y * 0.38;
-    let torsoY = box.min.y + size.y * 0.55;
-
-    // If we found torso explicitly, trust it more
-    if (torso) {
-      torsoHeight = size.y;
-      torsoY = (box.min.y + box.max.y) * 0.5;
-    }
-
-    // Fit multipliers
-    const fitMul =
-      this.SHIRT_FIT === "tight" ? 1.03 :
-      this.SHIRT_FIT === "loose" ? 1.12 : 1.07;
-
-    const w = Math.max(0.22, size.x * fitMul);
-    const d = Math.max(0.16, size.z * fitMul);
-    const h = Math.max(0.28, torsoHeight * 1.02);
-
-    // Build a lightweight “shirt wrapper”
-    const geo = new THREE.BoxGeometry(w, h, d, 1, 1, 1);
-    const mat = new THREE.MeshStandardMaterial({
-      map: this._shirtTex,
-      transparent: true,
-      opacity: 1.0,
-      roughness: 0.9,
-      metalness: 0.0,
-    });
-
-    // Help texture not smear badly on box faces
-    if (mat.map) {
-      mat.map.repeat.set(1, 1);
-      mat.map.offset.set(0, 0);
-      mat.map.needsUpdate = true;
-    }
-
-    const shirt = new THREE.Mesh(geo, mat);
-    shirt.name = "bot_shirt";
-
-    // Position shirt centered on torso band (world -> local)
-    // We compute target in world, then convert to avatar local.
-    const worldPos = new THREE.Vector3(
-      (box.min.x + box.max.x) * 0.5,
-      torsoY,
-      (box.min.z + box.max.z) * 0.5
-    );
-
-    avatarRoot.updateMatrixWorld(true);
-    avatarRoot.worldToLocal(worldPos);
-    shirt.position.copy(worldPos);
-
-    // Slight forward offset so it doesn’t Z-fight with torso
-    shirt.position.z += d * 0.03;
-
-    // Parent under avatar root so it moves with them
-    avatarRoot.add(shirt);
-  },
-
   update(dt) {
     if (!this.bots.length) return;
 
     this.timer += dt;
 
-    // Every 12 seconds, eliminate one seated bot until 2 remain.
+    // Demo tournament: eliminate one seated bot every 12s until 2 remain
     if (this.state === "playing") {
       if (this.timer > 12) {
         this.timer = 0;

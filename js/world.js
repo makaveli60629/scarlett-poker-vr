@@ -1,12 +1,10 @@
-// /js/world.js — Scarlett VR Poker — Update 9.0 (PATCH A)
-// Bigger lobby, brighter, chairs, name tags, shirt on one bot, crown winner, kiosks.
-// No imports here. main.js passes THREE.
+// /js/world.js — Scarlett VR Poker — Update 9.0 (PATCH B)
+// Exports tableFocus so main.js can face it. Keeps big room + pads + chairs + bots + kiosk.
 
 export async function initWorld(ctx) {
   const { THREE, scene, hubLog } = ctx;
   const log = (m) => { try { hubLog?.(String(m)); } catch {} };
 
-  // ---------- Texture helpers ----------
   const loader = new THREE.TextureLoader();
   const loadTex = (url, rx=1, ry=1) => new Promise((resolve) => {
     loader.load(url, (t) => {
@@ -17,20 +15,16 @@ export async function initWorld(ctx) {
     }, undefined, () => resolve(null));
   });
 
-  // Your known textures (safe fallback)
   const texCarpet  = await loadTex("./assets/textures/lobby_carpet.jpg", 6, 6);
-  const texRosewood= await loadTex("./assets/textures/rosewood_veneer1_4k.jpg", 2, 2); // OK if missing
+  const texRosewood= await loadTex("./assets/textures/rosewood_veneer1_4k.jpg", 2, 2);
   const texShirt   = await loadTex("./assets/textures/shirt_diffuse.png", 1, 1);
   const texCrown   = await loadTex("./assets/textures/crown_diffuse.png", 1, 1);
 
-  // ---------- Room ----------
-  const ROOM = 34;            // bigger
+  const ROOM = 34;
   const wallH = 3.8;
   const wallT = 0.45;
 
-  const WALL_COLOR = 0x171717; // one solid matching color
-  const wallMat = new THREE.MeshStandardMaterial({ color: WALL_COLOR, roughness: 0.95, metalness: 0.0 });
-
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x171717, roughness: 0.95, metalness: 0 });
   const floorMat = new THREE.MeshStandardMaterial({
     color: texCarpet ? 0xffffff : 0x111111,
     map: texCarpet || null,
@@ -40,16 +34,13 @@ export async function initWorld(ctx) {
 
   const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(ROOM*2, ROOM*2), floorMat);
   floorMesh.rotation.x = -Math.PI/2;
-  floorMesh.position.y = 0;
   scene.add(floorMesh);
 
-  // Walls
   addWall(0, wallH/2,  ROOM, ROOM*2, wallH, wallT);
   addWall(0, wallH/2, -ROOM, ROOM*2, wallH, wallT);
   addWall( ROOM, wallH/2, 0, wallT, wallH, ROOM*2);
   addWall(-ROOM, wallH/2, 0, wallT, wallH, ROOM*2);
 
-  // Ceiling
   const ceil = new THREE.Mesh(
     new THREE.PlaneGeometry(ROOM*2, ROOM*2),
     new THREE.MeshStandardMaterial({ color: 0x0e0e0e, roughness: 1 })
@@ -58,23 +49,15 @@ export async function initWorld(ctx) {
   ceil.position.y = wallH;
   scene.add(ceil);
 
-  // ---------- Teleport pads ----------
+  // Pads
   const teleportPads = [];
   const spawnPads = [];
 
-  const padMat = new THREE.MeshStandardMaterial({
-    color: 0x0a2a18, roughness: 0.8, metalness: 0.1,
-    emissive: new THREE.Color(0x062010), emissiveIntensity: 0.25
-  });
-  const padSpawnMat = new THREE.MeshStandardMaterial({
-    color: 0x113018, roughness: 0.6, metalness: 0.1,
-    emissive: new THREE.Color(0x22ff55), emissiveIntensity: 0.25
-  });
+  const padMat = new THREE.MeshStandardMaterial({ color: 0x0a2a18, roughness: 0.8, emissive: new THREE.Color(0x062010), emissiveIntensity: 0.25 });
+  const padSpawnMat = new THREE.MeshStandardMaterial({ color: 0x113018, roughness: 0.6, emissive: new THREE.Color(0x22ff55), emissiveIntensity: 0.25 });
 
   function makePad(x, z, isSpawn=false) {
-    const g = new THREE.CylinderGeometry(0.62, 0.62, 0.09, 32);
-    const m = isSpawn ? padSpawnMat : padMat;
-    const pad = new THREE.Mesh(g, m);
+    const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.09, 32), isSpawn ? padSpawnMat : padMat);
     pad.position.set(x, 0.045, z);
     scene.add(pad);
     teleportPads.push(pad);
@@ -87,16 +70,15 @@ export async function initWorld(ctx) {
     ring.rotation.x = -Math.PI/2;
     ring.position.set(x, 0.10, z);
     scene.add(ring);
-
     return pad;
   }
 
-  // Spawn pads INSIDE room, with clear space
+  // Spawn pads
   makePad(0,  18, true);
   makePad(-2.6, 18, true);
   makePad( 2.6, 18, true);
 
-  // Extra pads
+  // Extras
   makePad(0, 10, false);
   makePad(-10, 8, false);
   makePad( 10, 8, false);
@@ -111,9 +93,8 @@ export async function initWorld(ctx) {
   });
 
   const machine = new THREE.Group();
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 1.05, 0.26, 32), woodMat);
-  base.position.set(0, 0.13, 22);
-  machine.add(base);
+  machine.add(new THREE.Mesh(new THREE.CylinderGeometry(0.85, 1.05, 0.26, 32), woodMat));
+  machine.children[0].position.set(0, 0.13, 22);
 
   const core = new THREE.Mesh(
     new THREE.CylinderGeometry(0.38, 0.38, 0.95, 24),
@@ -132,33 +113,18 @@ export async function initWorld(ctx) {
 
   scene.add(machine);
 
-  // ---------- Poker Table ----------
+  // TABLE moved slightly toward spawn so it’s obvious
+  const tableFocus = new THREE.Vector3(0, 0, 6);
+
   const table = new THREE.Group();
-  table.position.set(0, 0, 0);
+  table.position.copy(tableFocus);
   scene.add(table);
 
-  const rim = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.35, 2.35, 0.16, 64),
-    woodMat
-  );
-  rim.position.y = 0.88;
-  table.add(rim);
+  table.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(2.35, 2.35, 0.16, 64), woodMat), { position: new THREE.Vector3(0,0.88,0) }));
+  table.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(2.10, 2.10, 0.11, 64), new THREE.MeshStandardMaterial({ color: 0x0b4b2e, roughness: 1.0 })), { position: new THREE.Vector3(0,0.88,0) }));
+  table.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.75, 0.88, 24), new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9 })), { position: new THREE.Vector3(0,0.44,0) }));
 
-  const felt = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.10, 2.10, 0.11, 64),
-    new THREE.MeshStandardMaterial({ color: 0x0b4b2e, roughness: 1.0 })
-  );
-  felt.position.y = 0.88;
-  table.add(felt);
-
-  const pedestal = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.42, 0.75, 0.88, 24),
-    new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9 })
-  );
-  pedestal.position.y = 0.44;
-  table.add(pedestal);
-
-  // ---------- Chairs + Bots ----------
+  // Chairs + bots
   const bots = [];
   const seatCount = 8;
   const radius = 3.05;
@@ -172,26 +138,21 @@ export async function initWorld(ctx) {
     roughness: 0.9
   });
 
-  // crown mesh (winner)
   const crown = makeCrown(THREE, texCrown);
   crown.visible = false;
   scene.add(crown);
 
   for (let i = 0; i < seatCount; i++) {
     const a = (i / seatCount) * Math.PI * 2;
-    const x = Math.cos(a) * radius;
-    const z = Math.sin(a) * radius;
+    const x = table.position.x + Math.cos(a) * radius;
+    const z = table.position.z + Math.sin(a) * radius;
 
-    // Chair
     const chair = makeChair(THREE, woodMat);
     chair.position.set(x, 0, z);
-    chair.lookAt(0, 1.0, 0);
+    chair.lookAt(table.position.x, 1.0, table.position.z);
     scene.add(chair);
 
-    // Bot
     const bot = new THREE.Group();
-
-    // Body (one bot with your shirt)
     const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.55, 6, 12), i === 0 ? shirtMat : botMat);
     body.position.y = 1.02;
     bot.add(body);
@@ -201,10 +162,9 @@ export async function initWorld(ctx) {
     bot.add(head);
 
     bot.position.set(x, 0, z);
-    bot.lookAt(0, 1.2, 0);
+    bot.lookAt(table.position.x, 1.2, table.position.z);
     scene.add(bot);
 
-    // Name tag + money
     const tag = makeNameTag(THREE, `BOT ${i+1}\n$${(1000 + i*250).toLocaleString()}`);
     tag.position.set(0, 1.88, 0);
     bot.add(tag);
@@ -212,28 +172,13 @@ export async function initWorld(ctx) {
     bots.push({ bot, tag, bankroll: 1000 + i*250 });
   }
 
-  // ---------- Pot + Cards ----------
   const pot = new THREE.Mesh(
     new THREE.CylinderGeometry(0.20, 0.20, 0.09, 24),
     new THREE.MeshStandardMaterial({ color: 0xffd36a, roughness: 0.35, metalness: 0.4 })
   );
-  pot.position.set(0, 0.97, 0);
+  pot.position.set(table.position.x, 0.97, table.position.z);
   scene.add(pot);
 
-  const cardMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
-  const cardGeo = new THREE.PlaneGeometry(0.22, 0.32);
-
-  const dealCards = [];
-  for (let i=0;i<5;i++){
-    const c = new THREE.Mesh(cardGeo, cardMat);
-    c.rotation.x = -Math.PI/2;
-    c.position.set((i-2)*0.26, 0.94, 0);
-    c.visible = false;
-    scene.add(c);
-    dealCards.push(c);
-  }
-
-  // ---------- Leaderboard & Store kiosk ----------
   const board = makeBillboard(THREE, "LEADERBOARD\n1) Player\n2) Bot King\n3) Bot Queen\n\n(placeholder)");
   board.position.set(-12.5, 1.7, 9);
   board.rotation.y = Math.PI/2.3;
@@ -244,11 +189,9 @@ export async function initWorld(ctx) {
   store.rotation.y = -Math.PI/2.3;
   scene.add(store);
 
-  // ---------- Hand loop + crown winner ----------
+  // Hand loop + crown
   let t = 0;
   let dealTimer = 0;
-  let dealIndex = 0;
-  let phase = 0; // 0=wait,1=deal,2=show,3=reset
   let winnerIndex = 0;
 
   function setWinner(idx) {
@@ -257,20 +200,17 @@ export async function initWorld(ctx) {
     crown.visible = true;
     crown.position.set(w.position.x, 1.78, w.position.z);
   }
-
   setWinner(0);
 
   function tick(dt) {
     t += dt;
 
-    // Bot idle
     for (let i=0;i<bots.length;i++){
       const b = bots[i].bot;
       b.position.y = Math.sin(t*1.2 + i)*0.01;
       b.rotation.y += Math.sin(t*0.6 + i)*0.0008;
     }
 
-    // Crown follow + spin
     if (crown.visible) {
       const w = bots[winnerIndex].bot;
       crown.position.x = w.position.x;
@@ -278,47 +218,24 @@ export async function initWorld(ctx) {
       crown.rotation.y += dt * 1.2;
     }
 
-    // Pot pulse
     pot.scale.setScalar(1 + Math.sin(t*2.2)*0.05);
 
-    // Simple “hand”
     dealTimer += dt;
-    if (phase === 0 && dealTimer > 1.1) {
-      dealTimer = 0; dealIndex = 0; phase = 1;
-      for (const c of dealCards) c.visible = false;
-    } else if (phase === 1 && dealTimer > 0.32) {
+    if (dealTimer > 4.0) {
       dealTimer = 0;
-      if (dealIndex < dealCards.length) {
-        dealCards[dealIndex].visible = true;
-        dealIndex++;
-      } else {
-        phase = 2; dealTimer = 0;
-      }
-    } else if (phase === 2 && dealTimer > 2.0) {
-      phase = 3; dealTimer = 0;
-
-      // Rotate winner + update one bankroll to show “gameplay”
       winnerIndex = (winnerIndex + 1) % bots.length;
       setWinner(winnerIndex);
-      bots[winnerIndex].bankroll += 250;
-      bots[winnerIndex].tag.material.map = makeNameTagTexture(
-        THREE,
-        `BOT ${winnerIndex+1}\n$${bots[winnerIndex].bankroll.toLocaleString()}`
-      );
-      bots[winnerIndex].tag.material.map.needsUpdate = true;
-    } else if (phase === 3 && dealTimer > 0.6) {
-      for (const c of dealCards) c.visible = false;
-      phase = 0; dealTimer = 0;
     }
   }
 
-  log("✅ World 9.0 Patch A built (big lobby, pads, chairs, bots, tags, crown, kiosks)");
+  log("✅ World Patch B built");
 
   return {
     floorMesh,
     teleportPads,
     spawnPads,
     roomClamp: { minX: -ROOM+1.2, maxX: ROOM-1.2, minZ: -ROOM+1.2, maxZ: ROOM-1.2 },
+    tableFocus,
     tick
   };
 
@@ -375,14 +292,6 @@ function makeCrown(THREE, texCrown) {
 }
 
 function makeNameTag(THREE, text) {
-  const tex = makeNameTagTexture(THREE, text);
-  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.75, 0.38), mat);
-  mesh.renderOrder = 9999;
-  return mesh;
-}
-
-function makeNameTagTexture(THREE, text) {
   const canvas = document.createElement("canvas");
   canvas.width = 512;
   canvas.height = 256;
@@ -405,7 +314,11 @@ function makeNameTagTexture(THREE, text) {
     y += 52;
   }
 
-  return new THREE.CanvasTexture(canvas);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.75, 0.38), mat);
+  mesh.renderOrder = 9999;
+  return mesh;
 }
 
 function makeBillboard(THREE, text) {
@@ -450,4 +363,4 @@ function makeKiosk(THREE, woodMat, label) {
   g.add(sign);
 
   return g;
-         }
+}

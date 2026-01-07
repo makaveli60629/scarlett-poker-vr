@@ -4,214 +4,78 @@
   <meta charset="utf-8" />
   <title>Scarlet VR Poker</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-
   <style>
-    :root {
-      --bg: #000;
-      --panel: rgba(0,0,0,0.62);
-      --panel2: rgba(0,0,0,0.82);
-      --text: #fff;
-      --muted: rgba(255,255,255,0.75);
-      --accent: #33ff66;
-      --border: rgba(255,255,255,0.14);
-      --shadow: 0 10px 24px rgba(0,0,0,0.55);
-      --radius: 14px;
+    :root{
+      --bg:#000; --panel:rgba(0,0,0,.62); --panel2:rgba(0,0,0,.82);
+      --text:#fff; --muted:rgba(255,255,255,.75); --accent:#33ff66;
+      --border:rgba(255,255,255,.14); --shadow:0 10px 24px rgba(0,0,0,.55);
+      --radius:14px;
     }
-
-    html, body {
-      margin: 0; padding: 0; height: 100%;
-      background: var(--bg);
-      overflow: hidden;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      color: var(--text);
+    html,body{margin:0;padding:0;height:100%;background:var(--bg);overflow:hidden;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;color:var(--text);}
+    canvas{display:block;}
+    #hud{
+      position:fixed;left:14px;top:14px;z-index:5000;max-width:520px;
+      background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+      padding:12px 14px;box-shadow:var(--shadow);user-select:none;backdrop-filter:blur(6px);
     }
-
-    /* Canvas fills the screen under UI */
-    canvas { display:block; }
-
-    /* Top-left Title HUD */
-    #hud {
-      position: fixed;
-      left: 14px;
-      top: 14px;
-      z-index: 5000;
-      max-width: 520px;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 12px 14px;
-      box-shadow: var(--shadow);
-      user-select: none;
-      backdrop-filter: blur(6px);
+    #hud h1{margin:0 0 6px 0;font-size:16px;letter-spacing:.3px;}
+    #hud .sub{font-size:12px;color:var(--muted);line-height:1.35;}
+    #hub{
+      position:fixed;left:14px;right:14px;top:96px;z-index:5000;
+      display:grid;grid-template-columns:1fr;gap:12px;pointer-events:auto;
     }
-
-    #hud h1 {
-      margin: 0 0 6px 0;
-      font-size: 16px;
-      letter-spacing: 0.3px;
+    @media (min-width:820px){
+      #hub{grid-template-columns:420px 1fr;align-items:start;}
     }
-    #hud .sub {
-      font-size: 12px;
-      color: var(--muted);
-      line-height: 1.35;
+    .card{
+      background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+      padding:14px;box-shadow:var(--shadow);backdrop-filter:blur(6px);
     }
-
-    /* Main Hub Panel */
-    #hub {
-      position: fixed;
-      left: 14px;
-      right: 14px;
-      top: 96px;
-      z-index: 5000;
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 12px;
-      pointer-events: auto;
+    .card h2{margin:0 0 10px 0;font-size:14px;letter-spacing:.2px;}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+    .btn{
+      appearance:none;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.08);
+      color:var(--text);border-radius:12px;padding:12px;text-align:left;cursor:pointer;
+      transition:transform .06s ease,background .15s ease,border .15s ease;min-height:56px;
     }
-
-    @media (min-width: 820px) {
-      #hub {
-        grid-template-columns: 420px 1fr;
-        align-items: start;
-      }
+    .btn:hover{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.26);}
+    .btn:active{transform:translateY(1px);}
+    .btn .title{font-weight:650;font-size:13px;}
+    .btn .desc{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.25;}
+    .btn.primary{border-color:rgba(51,255,102,.55);background:rgba(51,255,102,.12);}
+    .btn.primary:hover{background:rgba(51,255,102,.18);}
+    .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;}
+    .pill{
+      font-size:12px;color:var(--muted);padding:7px 10px;border-radius:999px;
+      border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);
     }
-
-    .card {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 14px;
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(6px);
+    #debug{
+      position:fixed;left:14px;right:14px;bottom:84px;z-index:6000;
+      max-height:30vh;overflow:auto;background:var(--panel2);border:1px solid var(--border);
+      border-radius:var(--radius);padding:12px;font-size:12px;color:#9ef;
+      white-space:pre-wrap;display:none;box-shadow:var(--shadow);pointer-events:auto;
     }
-
-    .card h2 {
-      margin: 0 0 10px 0;
-      font-size: 14px;
-      letter-spacing: 0.2px;
+    #footer{
+      position:fixed;left:14px;right:14px;bottom:14px;z-index:5000;
+      display:flex;gap:10px;align-items:center;justify-content:space-between;pointer-events:auto;
     }
-
-    .grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
+    #footer .left,#footer .right{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+    .mini{
+      appearance:none;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.08);
+      color:var(--text);border-radius:999px;padding:10px 12px;cursor:pointer;font-size:12px;
     }
-
-    .btn {
-      appearance: none;
-      border: 1px solid rgba(255,255,255,0.18);
-      background: rgba(255,255,255,0.08);
-      color: var(--text);
-      border-radius: 12px;
-      padding: 12px 12px;
-      text-align: left;
-      cursor: pointer;
-      transition: transform 0.06s ease, background 0.15s ease, border 0.15s ease;
-      min-height: 56px;
+    .mini:hover{background:rgba(255,255,255,.12);}
+    #VRButton{
+      position:fixed !important;right:14px !important;bottom:14px !important;
+      z-index:99999 !important;pointer-events:auto !important;
     }
-    .btn:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.26); }
-    .btn:active { transform: translateY(1px); }
-    .btn .title { font-weight: 650; font-size: 13px; }
-    .btn .desc { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.25; }
-
-    .btn.primary {
-      border-color: rgba(51,255,102,0.55);
-      background: rgba(51,255,102,0.12);
-    }
-    .btn.primary:hover { background: rgba(51,255,102,0.18); }
-
-    .row {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-top: 10px;
-    }
-
-    .pill {
-      font-size: 12px;
-      color: var(--muted);
-      padding: 7px 10px;
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.16);
-      background: rgba(255,255,255,0.06);
-    }
-
-    /* Debug console (toggle) */
-    #debug {
-      position: fixed;
-      left: 14px;
-      right: 14px;
-      bottom: 84px;               /* leaves space for VR button */
-      z-index: 6000;
-      max-height: 30vh;
-      overflow: auto;
-      background: var(--panel2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 12px;
-      font-size: 12px;
-      color: #9ef;
-      white-space: pre-wrap;
-      display: none;
-      box-shadow: var(--shadow);
-      pointer-events: auto;
-    }
-
-    /* Footer bar */
-    #footer {
-      position: fixed;
-      left: 14px;
-      right: 14px;
-      bottom: 14px;
-      z-index: 5000;
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      justify-content: space-between;
-      pointer-events: auto;
-    }
-
-    #footer .left,
-    #footer .right {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-
-    .mini {
-      appearance: none;
-      border: 1px solid rgba(255,255,255,0.18);
-      background: rgba(255,255,255,0.08);
-      color: var(--text);
-      border-radius: 999px;
-      padding: 10px 12px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    .mini:hover { background: rgba(255,255,255,0.12); }
-
-    /* Make VRButton ALWAYS clickable and on top */
-    #VRButton {
-      position: fixed !important;
-      right: 14px !important;
-      bottom: 14px !important;
-      z-index: 99999 !important;
-      pointer-events: auto !important;
-    }
-
-    /* A subtle vignette */
-    #vignette {
-      position: fixed;
-      inset: 0;
-      z-index: 1;
-      pointer-events: none;
-      background: radial-gradient(transparent 45%, rgba(0,0,0,0.55));
-      opacity: 0.22;
+    #vignette{
+      position:fixed;inset:0;z-index:1;pointer-events:none;
+      background:radial-gradient(transparent 45%, rgba(0,0,0,.55));opacity:.22;
     }
   </style>
 </head>
-
 <body>
   <div id="vignette"></div>
 
@@ -219,7 +83,7 @@
     <h1>Scarlet VR Poker</h1>
     <div class="sub">
       Quest: tap <b>ENTER VR</b> (bottom-right).<br/>
-      If VR fails, enable Debug and we’ll see the exact error on-screen.
+      If VR fails, enable Debug (D) to see the exact error.
     </div>
   </div>
 
@@ -227,53 +91,27 @@
     <div class="card">
       <h2>Hub</h2>
       <div class="grid">
-        <button class="btn primary" id="btnPlay">
-          <div class="title">Play Poker</div>
-          <div class="desc">Enter the main table & start a session.</div>
-        </button>
-
-        <button class="btn" id="btnVIP">
-          <div class="title">VIP Room</div>
-          <div class="desc">Private room + lounge items.</div>
-        </button>
-
-        <button class="btn" id="btnStore">
-          <div class="title">Store</div>
-          <div class="desc">Browse hats, shirts, items.</div>
-        </button>
-
-        <button class="btn" id="btnAvatar">
-          <div class="title">Avatar</div>
-          <div class="desc">Customize your look.</div>
-        </button>
-
-        <button class="btn" id="btnTournament">
-          <div class="title">Tournament</div>
-          <div class="desc">Bracket / leaderboard mode.</div>
-        </button>
-
-        <button class="btn" id="btnSettings">
-          <div class="title">Settings</div>
-          <div class="desc">Comfort, snap turn, audio.</div>
-        </button>
+        <button class="btn primary" id="btnPlay"><div class="title">Play Poker</div><div class="desc">Enter the main table & watch hands.</div></button>
+        <button class="btn" id="btnVIP"><div class="title">VIP Room</div><div class="desc">Private room + lounge.</div></button>
+        <button class="btn" id="btnStore"><div class="title">Store</div><div class="desc">Hats, shirts, items.</div></button>
+        <button class="btn" id="btnAvatar"><div class="title">Avatar</div><div class="desc">Customize your look.</div></button>
+        <button class="btn" id="btnTournament"><div class="title">Tournament</div><div class="desc">Bracket / leaderboard mode.</div></button>
+        <button class="btn" id="btnSettings"><div class="title">Settings</div><div class="desc">Comfort, snap turn, audio.</div></button>
       </div>
-
       <div class="row">
         <span class="pill" id="statusLine">Status: booting…</span>
         <span class="pill" id="xrLine">XR: unknown</span>
       </div>
+      <div class="row">
+        <span class="pill" id="urlLine">URL: …</span>
+      </div>
     </div>
 
     <div class="card">
-      <h2>What’s in this build</h2>
-      <div class="sub" style="line-height: 1.45;">
-        This page is a permanent hub shell that keeps WebXR stable and clickable.
-        Next we’ll wire your real modules back in (world, tables, poker sim, avatar shop),
-        but only after you confirm VR is entering reliably.
-      </div>
-      <div class="sub" style="margin-top:10px; line-height:1.45;">
-        Tip: If the VR button appears but won’t click, it’s usually being covered by UI.
-        This index forces VRButton above everything.
+      <h2>Build Notes</h2>
+      <div class="sub" style="line-height:1.45;">
+        This hub is permanent. It loads <b>./js/main.js</b> as a module and shows real errors on Quest.
+        VRButton is forced above all UI so it stays clickable.
       </div>
     </div>
   </div>
@@ -292,19 +130,20 @@
   </div>
 
   <script>
-    // Minimal on-screen logging (works even on Quest without devtools)
     const statusLine = document.getElementById("statusLine");
     const xrLine = document.getElementById("xrLine");
+    const urlLine = document.getElementById("urlLine");
     const debugEl = document.getElementById("debug");
     const hubEl = document.getElementById("hub");
 
-    function setStatus(msg) { statusLine.textContent = "Status: " + msg; }
-    function setXR(msg) { xrLine.textContent = "XR: " + msg; }
+    urlLine.textContent = "URL: " + location.href;
 
-    function log(msg) {
-      debugEl.textContent += "\n" + msg;
-      debugEl.scrollTop = debugEl.scrollHeight;
-    }
+    function setStatus(msg){ statusLine.textContent = "Status: " + msg; }
+    function setXR(msg){ xrLine.textContent = "XR: " + msg; }
+    function log(msg){ debugEl.textContent += "\n" + msg; debugEl.scrollTop = debugEl.scrollHeight; }
+
+    // Expose logger BEFORE loading main.js
+    window.__hubLog = (m) => log(String(m));
 
     // Error hooks
     window.addEventListener("error", (e) => {
@@ -312,42 +151,31 @@
       if (e.filename) log("   at " + e.filename + ":" + e.lineno + ":" + e.colno);
       setStatus("error (see debug)");
     });
-
     window.addEventListener("unhandledrejection", (e) => {
       log("❌ unhandledrejection: " + (e.reason?.message || e.reason || "unknown"));
       setStatus("promise error (see debug)");
     });
 
-    // UI controls
-    function toggleDebug() {
+    function toggleDebug(){
       const on = debugEl.style.display !== "block";
       debugEl.style.display = on ? "block" : "none";
       if (on) log("✅ Debug enabled");
     }
-
-    function toggleHub() {
+    function toggleHub(){
       const on = hubEl.style.display !== "none";
       hubEl.style.display = on ? "none" : "grid";
     }
-
     document.getElementById("btnToggleDebug").onclick = toggleDebug;
     document.getElementById("btnToggleHub").onclick = toggleHub;
     document.getElementById("btnReload").onclick = () => location.reload();
+    window.addEventListener("keydown",(e)=>{ if(e.code==="KeyD")toggleDebug(); if(e.code==="KeyH")toggleHub(); });
 
-    window.addEventListener("keydown", (e) => {
-      if (e.code === "KeyD") toggleDebug();
-      if (e.code === "KeyH") toggleHub();
-    });
-
-    // Preflight: ensure main.js exists (catches wrong URL/path instantly)
+    // Preflight check (catches wrong path)
     fetch("./js/main.js", { cache: "no-store" })
-      .then(r => {
-        log("main.js fetch: " + r.status + " " + r.statusText);
-        if (!r.ok) log("➡️ If this is 404, URL/path is wrong.");
-      })
+      .then(r => log("main.js fetch: " + r.status + " " + r.statusText))
       .catch(err => log("main.js fetch failed: " + err.message));
 
-    // XR capability line (not a guarantee, just a hint)
+    // XR capability hint
     if (navigator.xr) {
       setXR("navigator.xr available");
       navigator.xr.isSessionSupported("immersive-vr")
@@ -357,31 +185,31 @@
       setXR("navigator.xr missing");
     }
 
-    // Hub button stubs (we’ll wire these to your real modules later)
-    const stub = (name) => () => {
-      setStatus(name + " (stub)");
-      log("▶ Hub action: " + name);
-    };
-    document.getElementById("btnPlay").onclick = stub("Play Poker");
-    document.getElementById("btnVIP").onclick = stub("VIP Room");
-    document.getElementById("btnStore").onclick = stub("Store");
-    document.getElementById("btnAvatar").onclick = stub("Avatar");
-    document.getElementById("btnTournament").onclick = stub("Tournament");
-    document.getElementById("btnSettings").onclick = stub("Settings");
+    // Hub button stubs
+    const stub = (name)=>()=>{ setStatus(name+" (stub)"); log("▶ Hub action: " + name); };
+    btnPlay.onclick = stub("Play Poker");
+    btnVIP.onclick = stub("VIP Room");
+    btnStore.onclick = stub("Store");
+    btnAvatar.onclick = stub("Avatar");
+    btnTournament.onclick = stub("Tournament");
+    btnSettings.onclick = stub("Settings");
 
-    setStatus("loading scripts…");
+    setStatus("loading main.js…");
   </script>
 
-  <!-- Load the game entry -->
+  <!-- Load game entry with explicit error capture -->
   <script type="module">
-    import "./js/main.js";
-    setStatus("ready (tap ENTER VR)");
-    // expose logger so main.js can log into the hub if it wants
-    window.__hubLog = (m) => {
-      const debugEl = document.getElementById("debug");
-      debugEl.textContent += "\n" + m;
-      debugEl.scrollTop = debugEl.scrollHeight;
-    };
+    try {
+      await import("./js/main.js");
+      setStatus("ready (tap ENTER VR)");
+      window.__hubLog("✅ main.js imported successfully");
+    } catch (e) {
+      window.__hubLog("❌ main.js import failed: " + (e?.message || e));
+      window.__hubLog(e?.stack || "");
+      setStatus("main.js import failed (see debug)");
+      // Force show debug if import failed
+      document.getElementById("debug").style.display = "block";
+    }
   </script>
 </body>
 </html>

@@ -1,5 +1,6 @@
 // /js/vrcontroller.js — Scarlett Poker VR — VRRig (controllers + laser + ring + teleport)
 // Grip-based teleport: hold grip = aim, release grip = teleport
+// Upgrade: pads fast-travel (aim a pad -> release grip -> teleport to pad center)
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { XRControllerModelFactory } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/XRControllerModelFactory.js";
@@ -10,27 +11,21 @@ export function createVRRig(renderer, scene, camera, opts = {}) {
     swapMoveXFn: opts.swapMoveX ?? (() => false),
     getWorld: opts.getWorld ?? (() => null),
 
-    // active controller for aiming
     activeController: null,
     activeGrip: null,
 
-    // input caches
-    leftAxes: [0, 0],
-    rightAxes: [0, 0],
     lastSnapT: 0,
 
-    // teleport
     aiming: false,
-    aimHit: null,
+    aimHit: null, // { point, object, type, padId }
   };
 
   const raycaster = new THREE.Raycaster();
   const tmpMat = new THREE.Matrix4();
   const tmpDir = new THREE.Vector3();
   const tmpPos = new THREE.Vector3();
-  const up = new THREE.Vector3(0,1,0);
+  const up = new THREE.Vector3(0, 1, 0);
 
-  // Controller models
   const modelFactory = new XRControllerModelFactory();
 
   // Controllers
@@ -46,7 +41,7 @@ export function createVRRig(renderer, scene, camera, opts = {}) {
   g1.add(modelFactory.createControllerModel(g1));
   scene.add(g0, g1);
 
-  // Fallback visible “wand” if model doesn’t show up
+  // Fallback “wand” so you ALWAYS see something
   const wandGeo = new THREE.CylinderGeometry(0.01, 0.02, 0.16, 10);
   const wandMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.6, metalness: 0.2 });
   const wand0 = new THREE.Mesh(wandGeo, wandMat);
@@ -56,12 +51,9 @@ export function createVRRig(renderer, scene, camera, opts = {}) {
   c0.add(wand0);
   c1.add(wand1);
 
-  // Laser line (green)
+  // Laser lines
   const laserMat = new THREE.LineBasicMaterial({ color: 0x00ffaa });
-  const laserGeom = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, 0, -8),
-  ]);
+  const laserGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-10)]);
   const laserLine0 = new THREE.Line(laserGeom, laserMat);
   const laserLine1 = new THREE.Line(laserGeom, laserMat);
   laserLine0.visible = false;
@@ -69,51 +61,25 @@ export function createVRRig(renderer, scene, camera, opts = {}) {
   c0.add(laserLine0);
   c1.add(laserLine1);
 
-  // Floor ring (destination)
+  // Destination ring
   const ring = new THREE.Mesh(
     new THREE.TorusGeometry(0.35, 0.03, 10, 40),
-    new THREE.MeshStandardMaterial({ color: 0x00ffaa, emissive: 0x00ffaa, emissiveIntensity: 1.25 })
+    new THREE.MeshStandardMaterial({ color: 0x00ffaa, emissive: 0x00ffaa, emissiveIntensity: 1.4 })
   );
   ring.rotation.x = Math.PI / 2;
   ring.visible = false;
   scene.add(ring);
 
-  // Controller events
-  function onSelectStart(e) {
-    // trigger start - not used for teleport here (we use grip), but can be extended
-  }
-  function onSelectEnd(e) {}
-
-  function onSqueezeStart(e) {
-    // GRIP pressed => aim + show laser + ring
-    state.aiming = true;
-    setActiveFromEvent(e);
-    setLaserVisible(true);
-  }
-  function onSqueezeEnd(e) {
-    // GRIP released => teleport if valid
-    setActiveFromEvent(e);
-    if (state.aimHit) {
-      teleportTo(state.aimHit.point);
-    }
-    state.aiming = false;
-    state.aimHit = null;
-    ring.visible = false;
-    setLaserVisible(false);
-  }
-
-  c0.addEventListener("selectstart", onSelectStart);
-  c0.addEventListener("selectend", onSelectEnd);
-  c0.addEventListener("squeezestart", onSqueezeStart);
-  c0.addEventListener("squeezeend", onSqueezeEnd);
-
-  c1.addEventListener("selectstart", onSelectStart);
-  c1.addEventListener("selectend", onSelectEnd);
-  c1.addEventListener("squeezestart", onSqueezeStart);
-  c1.addEventListener("squeezeend", onSqueezeEnd);
+  // “Pad highlight ring” (bigger when you hover pads)
+  const padRing = new THREE.Mesh(
+    new THREE.TorusGeometry(0.62, 0.04, 10, 44),
+    new THREE.MeshStandardMaterial({ color: 0xffd27a, emissive: 0xffd27a, emissiveIntensity: 1.1, transparent: true, opacity: 0.85 })
+  );
+  padRing.rotation.x = Math.PI / 2;
+  padRing.visible = false;
+  scene.add(padRing);
 
   function setActiveFromEvent(e) {
-    // e.target is controller
     const ctrl = e?.target;
     if (!ctrl) return;
     state.activeController = ctrl;
@@ -123,73 +89,45 @@ export function createVRRig(renderer, scene, camera, opts = {}) {
   function setLaserVisible(v) {
     laserLine0.visible = v && (state.activeController === c0);
     laserLine1.visible = v && (state.activeController === c1);
-    if (!v) {
-      laserLine0.visible = false;
-      laserLine1.visible = false;
-    }
+    if (!v) { laserLine0.visible = false; laserLine1.visible = false; }
   }
 
-  // Movement (XR)
-  function applyXRLocomotion(dt) {
-    const session = renderer.xr.getSession();
-    if (!session) return;
+  function onSqueezeStart(e) {
+    state.aiming = true;
+    setActiveFromEvent(e);
+    setLaserVisible(true);
+  }
 
-    // Find gamepads
-    const sources = session.inputSources || [];
-    let left = null, right = null;
-    for (const s of sources) {
-      if (!s?.gamepad) continue;
-      const handed = s.handedness;
-      if (handed === "left") left = s.gamepad;
-      if (handed === "right") right = s.gamepad;
-    }
+  function onSqueezeEnd(e) {
+    setActiveFromEvent(e);
 
-    // Axes mapping
-    const la = left?.axes?.length >= 2 ? left.axes : [0,0];
-    const ra = right?.axes?.length >= 2 ? right.axes : [0,0];
-
-    // Many Quest controllers: axes[2]/[3] exist; but safest is take first pair
-    const lx = la[0] ?? 0;
-    const ly = la[1] ?? 0;
-    const rx = ra[0] ?? 0;
-
-    // Move (left stick)
-    const swapX = !!state.swapMoveXFn();
-    const mx = swapX ? -lx : lx;
-    const mz = ly;
-
-    const dead = 0.14;
-    const mv = new THREE.Vector3(
-      Math.abs(mx) < dead ? 0 : mx,
-      0,
-      Math.abs(mz) < dead ? 0 : mz
-    );
-
-    if (mv.lengthSq() > 0.0001) {
-      mv.normalize();
-      // forward is -Z
-      const speed = 2.0;
-      // Convert controller space -> world yaw (camera yaw)
-      const yaw = getCameraYaw();
-      const move = new THREE.Vector3(mv.x, 0, mv.z).multiplyScalar(speed * dt);
-      move.applyAxisAngle(up, yaw);
-      attemptMove(move);
-    }
-
-    // Snap turn (right stick X)
-    const snapDead = 0.45;
-    if (Math.abs(rx) > snapDead) {
-      const now = performance.now() / 1000;
-      if (now - state.lastSnapT > 0.28) {
-        const amt = (rx > 0 ? -1 : 1) * (Math.PI / 4); // 45°
-        rotatePlayer(amt);
-        state.lastSnapT = now;
+    if (state.aimHit) {
+      if (state.aimHit.type === "pad" && state.aimHit.padId) {
+        const world = state.getWorld();
+        const pad = world?.padById?.[state.aimHit.padId];
+        if (pad?.position) teleportTo(pad.position);
+      } else {
+        teleportTo(state.aimHit.point);
       }
     }
+
+    state.aiming = false;
+    state.aimHit = null;
+    ring.visible = false;
+    padRing.visible = false;
+    setLaserVisible(false);
+  }
+
+  c0.addEventListener("squeezestart", onSqueezeStart);
+  c0.addEventListener("squeezeend", onSqueezeEnd);
+  c1.addEventListener("squeezestart", onSqueezeStart);
+  c1.addEventListener("squeezeend", onSqueezeEnd);
+
+  function lockHeight() {
+    camera.position.y = state.heightLockM;
   }
 
   function getCameraYaw() {
-    // camera world direction projected on XZ
     const fwd = new THREE.Vector3();
     camera.getWorldDirection(fwd);
     fwd.y = 0;
@@ -198,21 +136,10 @@ export function createVRRig(renderer, scene, camera, opts = {}) {
   }
 
   function rotatePlayer(rad) {
-    // rotate around camera position to keep you anchored
-    const p = camera.getWorldPosition(new THREE.Vector3());
-    // scene root is external; we rotate by manipulating parent of camera? Here camera is in playerGroup in main.
-    // So rotate camera.parent (playerGroup)
     const root = camera.parent;
     if (!root) return;
     root.rotation.y += rad;
-    // keep height lock
     lockHeight();
-  }
-
-  function lockHeight() {
-    // Force camera local Y by shifting parent if needed
-    // (We keep height by using camera local Y)
-    camera.position.y = state.heightLockM;
   }
 
   function attemptMove(delta) {
@@ -252,7 +179,7 @@ export function createVRRig(renderer, scene, camera, opts = {}) {
       next.z = THREE.MathUtils.clamp(next.z, b.min.z, b.max.z);
     }
 
-    // don’t teleport inside table box
+    // don’t teleport inside table
     const keepOut = new THREE.Box3(
       new THREE.Vector3(-3.2, 0, -3.2),
       new THREE.Vector3( 3.2, 3,  3.2)
@@ -266,51 +193,131 @@ export function createVRRig(renderer, scene, camera, opts = {}) {
   function updateAim() {
     if (!state.aiming || !state.activeController) return;
 
-    // Build ray from controller forward (-Z)
+    // Ray from controller forward (-Z)
     tmpMat.identity().extractRotation(state.activeController.matrixWorld);
     tmpDir.set(0, 0, -1).applyMatrix4(tmpMat).normalize();
     tmpPos.setFromMatrixPosition(state.activeController.matrixWorld);
-
     raycaster.set(tmpPos, tmpDir);
 
-    // Only hit the floor (world marks it as isFloor)
+    // Gather targets: pads (their objects) + floor
     const world = state.getWorld();
-    const floor = scene.children.find(o => o?.userData?.isFloor);
-    if (!floor) {
-      // fallback: intersect any mesh
-      const hits = raycaster.intersectObjects(scene.children, true);
-      state.aimHit = hits[0] || null;
-    } else {
-      const hits = raycaster.intersectObject(floor, true);
-      state.aimHit = hits[0] || null;
+    const targets = [];
+
+    if (world?.pads?.length) {
+      for (const p of world.pads) {
+        if (p?.object) targets.push(p.object);
+      }
     }
 
-    if (state.aimHit) {
-      ring.position.set(state.aimHit.point.x, (world?.floorY ?? 0) + 0.03, state.aimHit.point.z);
-      ring.visible = true;
-    } else {
+    // Find floor flagged as isFloor
+    let floor = null;
+    for (const o of scene.children) {
+      if (o?.userData?.isFloor) { floor = o; break; }
+    }
+    if (floor) targets.push(floor);
+
+    // Raycast
+    const hits = raycaster.intersectObjects(targets, true);
+    if (!hits?.length) {
+      state.aimHit = null;
       ring.visible = false;
+      padRing.visible = false;
+      return;
+    }
+
+    const hit = hits[0];
+    state.aimHit = { point: hit.point.clone(), object: hit.object, type: "floor", padId: null };
+
+    // If hit pad object (walk up parents until we find userData.padId)
+    let obj = hit.object;
+    let padId = null;
+    while (obj) {
+      if (obj.userData?.padId) { padId = obj.userData.padId; break; }
+      obj = obj.parent;
+    }
+
+    if (padId) {
+      state.aimHit.type = "pad";
+      state.aimHit.padId = padId;
+
+      // Snap highlight to pad center
+      const pad = world?.padById?.[padId];
+      if (pad?.position) {
+        padRing.position.set(pad.position.x, (world.floorY ?? 0) + 0.07, pad.position.z);
+        padRing.visible = true;
+      } else padRing.visible = false;
+
+      ring.visible = false;
+    } else {
+      // Floor target
+      ring.position.set(hit.point.x, (world?.floorY ?? 0) + 0.03, hit.point.z);
+      ring.visible = true;
+      padRing.visible = false;
+    }
+  }
+
+  function applyXRLocomotion(dt) {
+    const session = renderer.xr.getSession();
+    if (!session) return;
+
+    let left = null, right = null;
+    for (const s of session.inputSources || []) {
+      if (!s?.gamepad) continue;
+      if (s.handedness === "left") left = s.gamepad;
+      if (s.handedness === "right") right = s.gamepad;
+    }
+
+    const la = left?.axes?.length >= 2 ? left.axes : [0,0];
+    const ra = right?.axes?.length >= 2 ? right.axes : [0,0];
+
+    const lx = la[0] ?? 0;
+    const ly = la[1] ?? 0;
+    const rx = ra[0] ?? 0;
+
+    const swapX = !!state.swapMoveXFn();
+    const mx = swapX ? -lx : lx;
+    const mz = ly;
+
+    const dead = 0.14;
+    const mv = new THREE.Vector3(
+      Math.abs(mx) < dead ? 0 : mx,
+      0,
+      Math.abs(mz) < dead ? 0 : mz
+    );
+
+    if (mv.lengthSq() > 0.0001) {
+      mv.normalize();
+      const speed = 2.0;
+      const yaw = getCameraYaw();
+      const move = new THREE.Vector3(mv.x, 0, mv.z).multiplyScalar(speed * dt);
+      move.applyAxisAngle(up, yaw);
+      attemptMove(move);
+    }
+
+    // Snap turn (45°)
+    const snapDead = 0.45;
+    if (Math.abs(rx) > snapDead) {
+      const now = performance.now() / 1000;
+      if (now - state.lastSnapT > 0.28) {
+        const amt = (rx > 0 ? -1 : 1) * (Math.PI / 4);
+        rotatePlayer(amt);
+        state.lastSnapT = now;
+      }
     }
   }
 
   function update(dt) {
-    // Always keep height locked
     lockHeight();
 
     if (renderer.xr.isPresenting) {
-      // Make sure laser visibility matches the active controller while aiming
       setLaserVisible(state.aiming);
-
-      // XR locomotion
       applyXRLocomotion(dt);
-
-      // Aim update
       updateAim();
     } else {
-      // Non-XR: hide VR-only visuals
       laserLine0.visible = false;
       laserLine1.visible = false;
       ring.visible = false;
+      padRing.visible = false;
     }
   }
 
@@ -319,8 +326,5 @@ export function createVRRig(renderer, scene, camera, opts = {}) {
     lockHeight();
   }
 
-  return {
-    update,
-    setHeightLock,
-  };
-}
+  return { update, setHeightLock };
+                        }

@@ -1,347 +1,251 @@
-// /js/bots.js — Scarlett Poker VR — BOTS v3 (Seats to world.chairs[] + Tournament Flow)
-// Requires: /js/avatar.js, world exports chairs[]
+// /js/bot.js — Scarlett Poker VR — Bots v1 (Seated + Elimination Walk + Winner Crown)
+// Uses createAvatar() from ./avatar.js
+// Uses world.seats + world.padById.lobby for walk targets
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { createAvatar } from "./avatar.js";
 
-export function init({ scene, world }) {
-  const floorY = world?.floorY ?? 0;
-  const chairs = Array.isArray(world?.chairs) ? world.chairs : [];
+export const BotManager = {
+  scene: null,
+  world: null,
 
-  const CFG = {
-    walkSpeed: 0.85,
-    turnSpeed: 4.0,
-    lobbyWanderRadius: 12.0,
-    handSeconds: 9.5,
-    winnerCrownSeconds: 60.0,
-    breakBetweenGames: 0.75,
-    minY: floorY + 0.0015,
-    seatCount: Math.max(6, chairs.length || 8),
-  };
+  bots: [],
+  alive: [],
+  eliminated: [],
+  winner: null,
 
-  const bots = [];
-  const lobbyBots = [];
-  let activeBots = [];
-  let state = "PLAYING";
-  let tHand = 0;
-  let tWinner = 0;
-  let tReseat = 0;
+  // tournament timings (placeholder demo pacing)
+  secondsPerElimination: 10,
+  crownHoldSeconds: 60,
+  _t: 0,
+  _phase: "idle", // idle | running | crown
 
-  const crown = makeCrown();
-  crown.visible = false;
-  scene.add(crown);
+  init({ scene, world }) {
+    this.scene = scene;
+    this.world = world;
+    this.reset();
+  },
 
-  // Create bots
-  for (let i = 0; i < CFG.seatCount; i++) {
-    const hue = (i / CFG.seatCount);
-    const shirt = hsvToHex(hue, 0.65, 0.95);
+  reset() {
+    // remove old bots
+    for (const b of this.bots) this.scene.remove(b.group);
+    this.bots = [];
+    this.alive = [];
+    this.eliminated = [];
+    this.winner = null;
+    this._t = 0;
+    this._phase = "idle";
+  },
 
-    const av = createAvatar({
-      name: `Bot_${i + 1}`,
-      height: 1.74,
-      shirt,
-      accent: 0x00ffaa
-    });
+  spawnBots({ count = 8 } = {}) {
+    const seats = this.world?.seats || [];
+    const floorY = this.world?.floorY ?? 0;
 
-    const bot = {
-      id: i,
-      group: av.group,
-      avatar: av,
-      mode: "SEATED",
-      seatIndex: i,
-      target: new THREE.Vector3(),
-      eliminated: false,
-      isWinner: false,
+    // 6 seated, rest wander in lobby
+    for (let i = 0; i < count; i++) {
+      const isSeated = i < Math.min(6, seats.length);
+      const name = `BOT_${i + 1}`;
+
+      const avatar = createAvatar({
+        name,
+        height: 1.78,
+        shirt: (i % 2 === 0) ? 0x2bd7ff : 0xff2bd6,
+        accent: 0x00ffaa,
+      });
+
+      avatar.group.position.y = floorY; // IMPORTANT: no under-floor
+      avatar.group.userData.isBot = true;
+
+      const bot = {
+        id: name,
+        group: avatar.group,
+        api: avatar,
+        state: isSeated ? "seated" : "lobby_walk",
+        seatIndex: isSeated ? i : -1,
+        speed: 0.8 + (i * 0.03),
+        target: new THREE.Vector3(),
+        crown: null,
+      };
+
+      if (isSeated) {
+        const s = seats[i];
+        bot.group.position.set(s.position.x, floorY, s.position.z);
+        bot.group.rotation.y = s.yaw;
+      } else {
+        const lobby = this.world?.padById?.lobby?.position || new THREE.Vector3(0, floorY, 11.5);
+        bot.group.position.set(lobby.x + (Math.random() * 2 - 1), floorY, lobby.z + (Math.random() * 2 - 1));
+        bot.target.copy(bot.group.position);
+      }
+
+      this.scene.add(bot.group);
+      this.bots.push(bot);
+      this.alive.push(bot);
+    }
+
+    this._phase = "running";
+    this._t = 0;
+  },
+
+  update(dt) {
+    if (this._phase === "idle") return;
+
+    // lobby walkers gentle motion
+    const lobby = this.world?.padById?.lobby?.position || new THREE.Vector3(0, this.world?.floorY ?? 0, 11.5);
+    for (const b of this.bots) {
+      if (b.state !== "lobby_walk") continue;
+      // pick target if close
+      if (b.group.position.distanceTo(b.target) < 0.25) {
+        b.target.set(
+          lobby.x + (Math.random() * 5 - 2.5),
+          lobby.y,
+          lobby.z + (Math.random() * 5 - 2.5)
+        );
+      }
+      this._walkTo(b, b.target, dt);
+    }
+
+    if (this._phase === "running") {
+      this._t += dt;
+
+      // Every N seconds eliminate one (demo tournament)
+      if (this._t >= this.secondsPerElimination && this.alive.length > 1) {
+        this._t = 0;
+        // eliminate a random alive that isn't already eliminated
+        const idx = Math.floor(Math.random() * this.alive.length);
+        const loser = this.alive.splice(idx, 1)[0];
+        this._eliminate(loser);
+      }
+
+      // If one left => winner
+      if (this.alive.length === 1 && !this.winner) {
+        this.winner = this.alive[0];
+        this._giveCrown(this.winner);
+        this._phase = "crown";
+        this._t = 0;
+      }
+    }
+
+    if (this._phase === "crown") {
+      this._t += dt;
+
+      // winner walks around lobby with crown
+      const win = this.winner;
+      if (win) {
+        // ensure winner is lobby walking
+        if (win.state !== "winner_walk") {
+          win.state = "winner_walk";
+          win.target.copy(lobby);
+        }
+        if (win.group.position.distanceTo(win.target) < 0.3) {
+          win.target.set(
+            lobby.x + (Math.random() * 6 - 3),
+            lobby.y,
+            lobby.z + (Math.random() * 6 - 3)
+          );
+        }
+        this._walkTo(win, win.target, dt);
+      }
+
+      // After crown hold => new game: reseat alive + respawn eliminated back to lobby
+      if (this._t >= this.crownHoldSeconds) {
+        this._t = 0;
+        this._startNextGame();
+      }
+    }
+  },
+
+  _eliminate(bot) {
+    bot.state = "eliminated_walk";
+    this.eliminated.push(bot);
+
+    // send to lobby
+    const lobby = this.world?.padById?.lobby?.position || new THREE.Vector3(0, this.world?.floorY ?? 0, 11.5);
+    bot.target.set(
+      lobby.x + (Math.random() * 5 - 2.5),
+      lobby.y,
+      lobby.z + (Math.random() * 5 - 2.5)
+    );
+
+    // Once they reach, they wander
+    // (handled in update: when state set to lobby_walk after reaching)
+    bot._onArrive = () => {
+      bot.state = "lobby_walk";
     };
+  },
 
-    scene.add(bot.group);
-    bots.push(bot);
-  }
+  _giveCrown(bot) {
+    // simple crown: gold torus + spikes
+    const crown = new THREE.Group();
+    const base = new THREE.Mesh(
+      new THREE.TorusGeometry(0.12, 0.03, 10, 24),
+      new THREE.MeshStandardMaterial({ color: 0xffd27a, emissive: 0x2a1a08, emissiveIntensity: 0.55, roughness: 0.35, metalness: 0.75 })
+    );
+    base.rotation.x = Math.PI / 2;
+    crown.add(base);
 
-  reseatNewGame();
-
-  function update(dt) {
-    for (const b of bots) {
-      if (b.group.position.y < CFG.minY) b.group.position.y = CFG.minY;
+    const spikeMat = new THREE.MeshStandardMaterial({ color: 0xffd27a, roughness: 0.35, metalness: 0.75 });
+    for (let i = 0; i < 8; i++) {
+      const sp = new THREE.Mesh(new THREE.ConeGeometry(0.02, 0.08, 10), spikeMat);
+      const a = (i / 8) * Math.PI * 2;
+      sp.position.set(Math.cos(a) * 0.12, 0.06, Math.sin(a) * 0.12);
+      crown.add(sp);
     }
 
-    if (state === "PLAYING") {
-      tHand += dt;
-      stepLobby(dt);
+    // attach above head (avatar has no bones, so approximate)
+    crown.position.set(0, 1.85, 0);
+    bot.group.add(crown);
+    bot.crown = crown;
+  },
 
-      if (tHand >= CFG.handSeconds) {
-        tHand = 0;
-        if (activeBots.length > 2) eliminateOneRandom();
-        if (activeBots.length === 2) state = "FINAL2";
+  _startNextGame() {
+    const seats = this.world?.seats || [];
+    const floorY = this.world?.floorY ?? 0;
+
+    // remove crown
+    if (this.winner?.crown) {
+      this.winner.group.remove(this.winner.crown);
+      this.winner.crown = null;
+    }
+
+    // everyone becomes alive again
+    this.alive = [...this.bots];
+    this.eliminated = [];
+    this.winner = null;
+
+    // reseat first 6, rest lobby
+    for (let i = 0; i < this.bots.length; i++) {
+      const b = this.bots[i];
+
+      if (i < Math.min(6, seats.length)) {
+        const s = seats[i];
+        b.state = "seated";
+        b.seatIndex = i;
+        b.group.position.set(s.position.x, floorY, s.position.z);
+        b.group.rotation.y = s.yaw;
+      } else {
+        b.state = "lobby_walk";
+        b.seatIndex = -1;
       }
     }
 
-    if (state === "FINAL2") {
-      tHand += dt;
-      stepLobby(dt);
+    this._phase = "running";
+  },
 
-      if (tHand >= CFG.handSeconds * 1.25) {
-        tHand = 0;
-        const winner = activeBots[Math.floor(Math.random() * activeBots.length)];
-        declareWinner(winner);
-        state = "WINNER_WALK";
-        tWinner = 0;
-        startNextGameWhileWinnerWalks(winner);
-      }
-    }
+  _walkTo(bot, target, dt) {
+    const pos = bot.group.position;
+    const dir = new THREE.Vector3(target.x - pos.x, 0, target.z - pos.z);
+    const d = dir.length();
 
-    if (state === "WINNER_WALK") {
-      tWinner += dt;
-      stepWinnerWalk(dt);
-      stepLobby(dt);
-
-      if (tWinner >= CFG.winnerCrownSeconds) {
-        finishWinnerWalk();
-        state = "RESEAT";
-        tReseat = 0;
-      }
-    }
-
-    if (state === "RESEAT") {
-      tReseat += dt;
-      stepLobby(dt);
-      if (tReseat >= CFG.breakBetweenGames) {
-        reseatNewGame();
-        state = "PLAYING";
-        tHand = 0;
-      }
-    }
-  }
-
-  function reseatNewGame() {
-    for (const b of bots) {
-      b.eliminated = false;
-      b.isWinner = false;
-      b.mode = "SEATED";
-    }
-
-    activeBots = bots.slice(0, CFG.seatCount);
-
-    for (let i = 0; i < activeBots.length; i++) {
-      const b = activeBots[i];
-      b.seatIndex = i % CFG.seatCount;
-      placeBotOnSeat(b);
-      sitPose(b);
-
-      const li = lobbyBots.indexOf(b);
-      if (li >= 0) lobbyBots.splice(li, 1);
-    }
-
-    // extras roam (crowd)
-    for (const b of bots) {
-      if (!activeBots.includes(b) && !lobbyBots.includes(b)) {
-        b.mode = "WALKING";
-        b.eliminated = true;
-        standPose(b);
-        sendBotToLobby(b);
-        lobbyBots.push(b);
-      }
-    }
-
-    crown.visible = false;
-    crown.userData.winnerBot = null;
-  }
-
-  function eliminateOneRandom() {
-    const idx = Math.floor(Math.random() * activeBots.length);
-    const b = activeBots[idx];
-    activeBots.splice(idx, 1);
-
-    b.eliminated = true;
-    b.mode = "WALKING";
-    standPose(b);
-    sendBotToLobby(b);
-    if (!lobbyBots.includes(b)) lobbyBots.push(b);
-  }
-
-  function declareWinner(winnerBot) {
-    winnerBot.isWinner = true;
-    winnerBot.eliminated = true;
-    winnerBot.mode = "WALKING";
-    standPose(winnerBot);
-
-    crown.visible = true;
-    crown.userData.winnerBot = winnerBot;
-    attachCrownToBot(winnerBot);
-
-    sendBotToLobby(winnerBot);
-    if (!lobbyBots.includes(winnerBot)) lobbyBots.push(winnerBot);
-  }
-
-  function startNextGameWhileWinnerWalks(winnerBot) {
-    const nextPlayers = bots.filter(b => b !== winnerBot);
-    activeBots = nextPlayers.slice(0, CFG.seatCount);
-
-    for (let i = 0; i < activeBots.length; i++) {
-      const b = activeBots[i];
-      b.mode = "SEATED";
-      b.eliminated = false;
-      b.isWinner = false;
-      b.seatIndex = i % CFG.seatCount;
-      placeBotOnSeat(b);
-      sitPose(b);
-
-      const li = lobbyBots.indexOf(b);
-      if (li >= 0) lobbyBots.splice(li, 1);
-    }
-
-    for (const b of bots) {
-      if (b === winnerBot) continue;
-      if (!activeBots.includes(b) && !lobbyBots.includes(b)) {
-        b.mode = "WALKING";
-        b.eliminated = true;
-        standPose(b);
-        sendBotToLobby(b);
-        lobbyBots.push(b);
-      }
-    }
-  }
-
-  function finishWinnerWalk() {
-    const winner = crown.userData.winnerBot;
-    crown.visible = false;
-    crown.userData.winnerBot = null;
-
-    if (winner) {
-      winner.isWinner = false;
-      winner.eliminated = true;
-      winner.mode = "WALKING";
-      standPose(winner);
-      sendBotToLobby(winner);
-      if (!lobbyBots.includes(winner)) lobbyBots.push(winner);
-    }
-  }
-
-  function placeBotOnSeat(b) {
-    const seat = chairs[b.seatIndex] || chairs[b.seatIndex % Math.max(1, chairs.length)];
-    if (seat?.position) {
-      b.group.position.copy(seat.position);
-      b.group.rotation.set(0, seat.yaw ?? 0, 0);
+    if (d < 0.18) {
+      if (bot._onArrive) { bot._onArrive(); bot._onArrive = null; }
       return;
     }
 
-    // fallback ring if chairs missing
-    const a = (b.seatIndex / CFG.seatCount) * Math.PI * 2;
-    const r = 3.1;
-    const x = Math.cos(a) * r;
-    const z = Math.sin(a) * r;
-    const yaw = Math.atan2(-x, -z);
-    b.group.position.set(x, floorY + 0.0015, z);
-    b.group.rotation.set(0, yaw, 0);
+    dir.normalize();
+    pos.addScaledVector(dir, bot.speed * dt);
+
+    // face direction
+    const yaw = Math.atan2(dir.x, dir.z);
+    bot.group.rotation.y = yaw;
   }
-
-  function sendBotToLobby(b) {
-    const angle = Math.random() * Math.PI * 2;
-    const r = CFG.lobbyWanderRadius * (0.65 + Math.random() * 0.35);
-    const tx = Math.cos(angle) * r;
-    const tz = Math.sin(angle) * r;
-
-    const bounds = world?.bounds;
-    if (bounds) {
-      b.target.x = THREE.MathUtils.clamp(tx, bounds.min.x, bounds.max.x);
-      b.target.z = THREE.MathUtils.clamp(tz, bounds.min.z, bounds.max.z);
-    } else {
-      b.target.set(tx, 0, tz);
-    }
-    b.target.y = floorY + 0.0015;
-  }
-
-  function stepLobby(dt) {
-    for (const b of lobbyBots) {
-      if (!b || b.mode !== "WALKING") continue;
-      walkTowardTarget(b, dt);
-      if (b.group.position.distanceToSquared(b.target) < 0.25) sendBotToLobby(b);
-    }
-  }
-
-  function stepWinnerWalk(dt) {
-    const winner = crown.userData.winnerBot;
-    if (!winner) return;
-    attachCrownToBot(winner);
-    if (winner.mode !== "WALKING") return;
-    walkTowardTarget(winner, dt);
-    if (winner.group.position.distanceToSquared(winner.target) < 0.35) sendBotToLobby(winner);
-  }
-
-  function walkTowardTarget(b, dt) {
-    const pos = b.group.position;
-    const dx = b.target.x - pos.x;
-    const dz = b.target.z - pos.z;
-    const len = Math.hypot(dx, dz) || 1;
-
-    const vx = dx / len;
-    const vz = dz / len;
-
-    pos.x += vx * CFG.walkSpeed * dt;
-    pos.z += vz * CFG.walkSpeed * dt;
-
-    const desiredYaw = Math.atan2(vx, vz);
-    b.group.rotation.y = dampAngle(b.group.rotation.y, desiredYaw, CFG.turnSpeed, dt);
-
-    const bounds = world?.bounds;
-    if (bounds) {
-      pos.x = THREE.MathUtils.clamp(pos.x, bounds.min.x, bounds.max.x);
-      pos.z = THREE.MathUtils.clamp(pos.z, bounds.min.z, bounds.max.z);
-    }
-    if (pos.y < CFG.minY) pos.y = CFG.minY;
-  }
-
-  function sitPose(b) { b.group.position.y = floorY + 0.0015; }
-  function standPose(b) { b.group.position.y = floorY + 0.0015; }
-
-  function makeCrown() {
-    const g = new THREE.Group();
-    const base = new THREE.Mesh(
-      new THREE.TorusGeometry(0.11, 0.03, 10, 22),
-      new THREE.MeshStandardMaterial({ color: 0xffd27a, emissive: 0x2a1a08, emissiveIntensity: 0.35, roughness: 0.35, metalness: 0.75 })
-    );
-    base.rotation.x = Math.PI / 2;
-    g.add(base);
-
-    const spikeMat = new THREE.MeshStandardMaterial({ color: 0xffd27a, roughness: 0.35, metalness: 0.8 });
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2;
-      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.10, 10), spikeMat);
-      spike.position.set(Math.cos(a) * 0.11, 0.06, Math.sin(a) * 0.11);
-      g.add(spike);
-    }
-    return g;
-  }
-
-  function attachCrownToBot(bot) {
-    const worldPos = new THREE.Vector3();
-    bot.group.getWorldPosition(worldPos);
-    crown.position.set(worldPos.x, (worldPos.y + 1.72), worldPos.z);
-    crown.rotation.y = bot.group.rotation.y;
-  }
-
-  function hsvToHex(h, s, v) {
-    const c = v * s;
-    const x = c * (1 - Math.abs((h * 6) % 2 - 1));
-    const m = v - c;
-    let r = 0, g = 0, b = 0;
-    const i = Math.floor(h * 6);
-    if (i === 0) [r,g,b] = [c,x,0];
-    if (i === 1) [r,g,b] = [x,c,0];
-    if (i === 2) [r,g,b] = [0,c,x];
-    if (i === 3) [r,g,b] = [0,x,c];
-    if (i === 4) [r,g,b] = [x,0,c];
-    if (i === 5) [r,g,b] = [c,0,x];
-    const rr = Math.round((r+m) * 255);
-    const gg = Math.round((g+m) * 255);
-    const bb = Math.round((b+m) * 255);
-    return (rr<<16) | (gg<<8) | bb;
-  }
-
-  function dampAngle(current, target, lambda, dt) {
-    let delta = ((target - current + Math.PI) % (Math.PI * 2)) - Math.PI;
-    return current + delta * (1 - Math.exp(-lambda * dt));
-  }
-
-  return { update };
-    }
+};

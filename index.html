@@ -2,77 +2,22 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Scarlett Poker VR</title>
   <style>
-    html, body { margin:0; height:100%; background:#000; overflow:hidden; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    canvas { display:block; width:100vw; height:100vh; }
-    /* HUD */
-    #hud {
-      position: fixed; top: 14px; left: 14px; z-index: 10;
-      color: #44ff99; font-size: 14px; line-height: 1.35;
-      text-shadow: 0 0 8px rgba(68,255,153,.35);
-      pointer-events: none;
-      max-width: 92vw;
-      white-space: pre-wrap;
-    }
-    #hud .title { font-size: 18px; margin-bottom: 6px; }
-    /* DEV controls (Android / mobile) */
-    #devControls {
-      position: fixed; left: 0; right: 0; bottom: 0; z-index: 11;
-      display: none; gap: 12px; justify-content: center; padding: 14px 10px 22px;
-      pointer-events: none;
-    }
-    .joyWrap {
-      width: 170px; height: 170px; border-radius: 22px;
-      background: rgba(0,0,0,.35);
-      outline: 2px solid rgba(68,255,153,.25);
-      box-shadow: 0 0 18px rgba(68,255,153,.15);
-      position: relative;
-      pointer-events: auto;
-      touch-action: none;
-    }
-    .joyLabel {
-      position: absolute; top: 10px; left: 0; right: 0;
-      text-align:center; color: rgba(68,255,153,.85);
-      font-size: 14px; letter-spacing: .08em;
-    }
-    .joyStick {
-      width: 86px; height: 86px; border-radius: 50%;
-      background: rgba(68,255,153,.22);
-      outline: 2px solid rgba(68,255,153,.30);
-      position: absolute; left: 50%; top: 50%;
-      transform: translate(-50%,-50%);
-    }
-
-    /* small help row */
-    #help {
-      position: fixed; bottom: 8px; left: 12px; right: 12px;
-      color: rgba(255,255,255,.65);
-      font-size: 12px;
-      z-index: 9;
-      pointer-events: none;
+    html,body{margin:0;height:100%;background:#000;overflow:hidden}
+    #overlay{
+      position:fixed;left:0;top:0;right:0;
+      padding:12px 14px;color:#00ff66;
+      font-family:ui-monospace,Menlo,Consolas,monospace;
+      white-space:pre-wrap;line-height:1.25;font-size:13px;
+      pointer-events:none;
+      text-shadow:0 0 10px rgba(0,255,120,.25);
     }
   </style>
 </head>
 <body>
-  <div id="hud"></div>
-
-  <div id="devControls">
-    <div class="joyWrap" id="joyMove">
-      <div class="joyLabel">MOVE</div>
-      <div class="joyStick" id="joyMoveStick"></div>
-    </div>
-    <div class="joyWrap" id="joyTurn">
-      <div class="joyLabel">TURN</div>
-      <div class="joyStick" id="joyTurnStick"></div>
-    </div>
-  </div>
-
-  <div id="help">
-    Keys (desktop dev): <b>WASD</b> move, <b>Q/E</b> turn, <b>B</b> brightness, <b>H/J</b> height, <b>X</b> swap LR
-  </div>
-
+  <div id="overlay">Scarlett Poker VR — loading…</div>
   <script type="module" src="./js/main.js"></script>
 </body>
 </html>

@@ -6,56 +6,27 @@
   <title>Scarlett Poker VR</title>
   <style>
     html,body{margin:0;height:100%;background:#000;overflow:hidden}
-    #overlay{
-      position:fixed;inset:0;padding:14px;color:#00ff66;
+    canvas{display:block}
+    #hub{
+      position:fixed;inset:0;
+      color:#00ff66;background:#000;
       font-family:ui-monospace,Menlo,Consolas,monospace;
       white-space:pre-wrap;line-height:1.35;font-size:13px;
+      padding:14px;
       pointer-events:none;
-      text-shadow:0 1px 0 rgba(0,0,0,.8);
+      text-shadow:0 0 8px rgba(0,255,120,.25);
     }
-    #hud{
-      position:fixed;left:10px;right:10px;bottom:10px;
-      display:flex;gap:10px;justify-content:space-between;align-items:flex-end;
-      pointer-events:none;
-    }
-    .pad{
-      width:140px;height:140px;border-radius:999px;
-      background:rgba(255,255,255,0.06);
-      border:1px solid rgba(255,255,255,0.14);
-      backdrop-filter:blur(8px);
-      pointer-events:auto;
-      touch-action:none;
-      user-select:none;
-    }
-    .btnRow{
-      position:fixed;top:10px;right:10px;display:flex;gap:8px;
-      pointer-events:auto;
-    }
-    .btn{
-      padding:10px 12px;border-radius:12px;
-      background:rgba(10,10,12,0.55);
-      border:1px solid rgba(255,255,255,0.15);
-      color:#e8e8e8;
-      font-family:ui-monospace,Menlo,Consolas,monospace;
-      font-size:12px;
-      user-select:none;
+    #hint{
+      position:fixed;left:12px;bottom:10px;
+      color:#8affb8;font-family:ui-monospace,Menlo,Consolas,monospace;
+      font-size:12px;opacity:.9;
+      background:rgba(0,0,0,.35);padding:6px 8px;border-radius:10px;
     }
   </style>
 </head>
 <body>
-  <div id="overlay">Scarlett Poker VR — loading main.js…</div>
-
-  <!-- Android dev HUD -->
-  <div class="btnRow">
-    <div class="btn" id="btnStore">STORE</div>
-    <div class="btn" id="btnCal">CAL HEIGHT</div>
-    <div class="btn" id="btnMusic">MUSIC</div>
-  </div>
-  <div id="hud">
-    <div class="pad" id="padLook" title="Look"></div>
-    <div class="pad" id="padMove" title="Move"></div>
-  </div>
-
+  <div id="hub">Scarlett Poker VR — booting…</div>
+  <div id="hint">VR: use VR button • Left stick move • Right stick 45° turn • Trigger teleport • Y toggles menu</div>
   <script type="module" src="./js/main.js"></script>
 </body>
-      </html>
+</html>

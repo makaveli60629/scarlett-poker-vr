@@ -1,129 +1,136 @@
-// /js/avatar.js — Scarlett Poker VR — Avatar v2 (Equip-ready)
-// createAvatar({ name, height, shirt, accent })
+// /js/avatar.js — Simple Avatar v1 (open for future upgrades)
+// Provides: group + API methods for cosmetics
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
-export function createAvatar({ name="Bot", height=1.74, shirt=0x2bd7ff, accent=0x00ffaa } = {}) {
+export function createAvatar({ name="BOT", height=1.78 } = {}) {
   const group = new THREE.Group();
-  group.name = name;
+  group.userData.name = name;
 
-  const body = new THREE.Group();
-  group.add(body);
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x3b3b3b, roughness: 0.85 });
+  const shirtMat = new THREE.MeshStandardMaterial({ color: 0x00ffaa, roughness: 0.75, metalness: 0.05 });
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xd8b79a, roughness: 0.9 });
 
-  // simple proportions
-  const headY = height * 0.92;
-  const torsoY = height * 0.62;
-  const hipY = height * 0.42;
+  const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.55, 6, 12), bodyMat);
+  leg.position.y = 0.55;
+  group.add(leg);
 
-  const skinMat = new THREE.MeshStandardMaterial({ color: 0xd9b38c, roughness: 0.9 });
-  const shirtMat = new THREE.MeshStandardMaterial({ color: shirt, roughness: 0.85, metalness: 0.05, emissive: 0x000000 });
-  const pantsMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.55, 6, 12), shirtMat);
+  torso.position.y = 1.25;
+  group.add(torso);
 
-  // Head
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 20, 20), skinMat);
-  head.position.y = headY;
-  body.add(head);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.18, 18, 18), headMat);
+  head.position.y = 1.78;
+  group.add(head);
 
-  // Torso
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.32, 0.14), shirtMat);
-  torso.position.y = torsoY;
-  body.add(torso);
+  // face plane
+  const faceMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.10), faceMat);
+  face.position.set(0, 1.78, 0.165);
+  group.add(face);
 
-  // Hips/legs (simple)
-  const hips = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.12, 0.12), pantsMat);
-  hips.position.y = hipY;
-  body.add(hips);
+  // gear holders
+  const gear = {
+    hat: null,
+    glasses: null,
+    aura: null,
+  };
 
-  const legGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.38, 12);
-  const legL = new THREE.Mesh(legGeo, pantsMat);
-  const legR = new THREE.Mesh(legGeo, pantsMat);
-  legL.position.set(-0.06, hipY - 0.24, 0);
-  legR.position.set( 0.06, hipY - 0.24, 0);
-  body.add(legL, legR);
-
-  // Arms
-  const armGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.28, 12);
-  const armL = new THREE.Mesh(armGeo, shirtMat);
-  const armR = new THREE.Mesh(armGeo, shirtMat);
-  armL.position.set(-0.16, torsoY + 0.02, 0);
-  armR.position.set( 0.16, torsoY + 0.02, 0);
-  armL.rotation.z = 0.15;
-  armR.rotation.z = -0.15;
-  body.add(armL, armR);
-
-  // Name tag “plate” (safe)
-  const tag = new THREE.Mesh(
-    new THREE.BoxGeometry(0.26, 0.06, 0.01),
-    new THREE.MeshStandardMaterial({ color: 0x0b0d12, emissive: accent, emissiveIntensity: 0.15, roughness: 0.9 })
-  );
-  tag.position.set(0, headY + 0.18, 0);
-  body.add(tag);
-
-  // Attach points for gear
-  const gear = new THREE.Group();
-  gear.name = "gear";
-  body.add(gear);
-
-  const hatMount = new THREE.Object3D();
-  hatMount.name = "hatMount";
-  hatMount.position.set(0, headY + 0.08, 0);
-  body.add(hatMount);
-
-  const faceMount = new THREE.Object3D();
-  faceMount.name = "faceMount";
-  faceMount.position.set(0, headY, 0.105);
-  body.add(faceMount);
-
-  const aura = new THREE.Mesh(
-    new THREE.TorusGeometry(0.22, 0.01, 10, 64),
-    new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: 0.25, transparent: true, opacity: 0.75 })
-  );
-  aura.rotation.x = Math.PI / 2;
-  aura.position.y = 0.02;
-  aura.visible = false;
-  group.add(aura);
+  // scale to requested height
+  const baseHeight = 1.85;
+  const s = height / baseHeight;
+  group.scale.setScalar(s);
 
   const api = {
     group,
-    setShirtColor(hex) {
-      shirtMat.color.setHex(hex);
-      shirtMat.needsUpdate = true;
-    },
-    setAura(hexOrNull) {
-      if (!hexOrNull) { aura.visible = false; return; }
-      aura.material.color.setHex(hexOrNull);
-      aura.material.emissive.setHex(hexOrNull);
-      aura.visible = true;
-    },
+
     clearGear() {
-      while (gear.children.length) gear.remove(gear.children[0]);
+      if (gear.hat) group.remove(gear.hat);
+      if (gear.glasses) group.remove(gear.glasses);
+      if (gear.aura) group.remove(gear.aura);
+      gear.hat = gear.glasses = gear.aura = null;
     },
-    equipHat({ color=0x111111 }={}) {
-      // simple cap
-      const cap = new THREE.Mesh(
-        new THREE.SphereGeometry(0.115, 18, 18, 0, Math.PI*2, 0, Math.PI/1.8),
-        new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.05 })
-      );
-      cap.position.y = 0.0;
-      hatMount.add(cap);
-      gear.add(cap);
+
+    setShirtColor(color) {
+      if (typeof color === "number") shirtMat.color.setHex(color);
     },
-    equipGlasses({ color=0x111111 }={}) {
-      const frame = new THREE.Mesh(
-        new THREE.BoxGeometry(0.16, 0.03, 0.02),
-        new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.2 })
-      );
-      frame.position.set(0, 0.0, 0.0);
-      faceMount.add(frame);
-      gear.add(frame);
+
+    setFace(type) {
+      // super-safe: draw simple “styles” using colors (no canvas)
+      if (type === "smile") faceMat.color.setHex(0x00ffaa);
+      else faceMat.color.setHex(0x111111);
+    },
+
+    equipHat(data) {
+      if (gear.hat) group.remove(gear.hat);
+      if (!data || data.type === "none") { gear.hat = null; return; }
+
+      if (data.type === "cap") {
+        const cap = new THREE.Group();
+        const dome = new THREE.Mesh(
+          new THREE.SphereGeometry(0.18, 18, 18, 0, Math.PI * 2, 0, Math.PI / 2),
+          new THREE.MeshStandardMaterial({ color: data.color ?? 0x111111, roughness: 0.6 })
+        );
+        dome.position.set(0, 1.90, 0);
+        cap.add(dome);
+
+        const brim = new THREE.Mesh(
+          new THREE.BoxGeometry(0.20, 0.03, 0.10),
+          new THREE.MeshStandardMaterial({ color: data.color ?? 0x111111, roughness: 0.6 })
+        );
+        brim.position.set(0, 1.86, 0.13);
+        cap.add(brim);
+
+        gear.hat = cap;
+        group.add(cap);
+      }
+    },
+
+    equipGlasses(data) {
+      if (gear.glasses) group.remove(gear.glasses);
+      if (!data || data.type === "none") { gear.glasses = null; return; }
+
+      if (data.type === "basic") {
+        const g = new THREE.Group();
+        const mat = new THREE.MeshStandardMaterial({ color: data.color ?? 0x111111, roughness: 0.4, metalness: 0.2 });
+        const lensGeo = new THREE.BoxGeometry(0.08, 0.04, 0.01);
+
+        const l1 = new THREE.Mesh(lensGeo, mat);
+        l1.position.set(-0.05, 1.78, 0.17);
+        const l2 = new THREE.Mesh(lensGeo, mat);
+        l2.position.set(0.05, 1.78, 0.17);
+
+        const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.01, 0.01), mat);
+        bridge.position.set(0, 1.78, 0.17);
+
+        g.add(l1, l2, bridge);
+        gear.glasses = g;
+        group.add(g);
+      }
+    },
+
+    setAura(data) {
+      if (gear.aura) group.remove(gear.aura);
+      if (!data || data.type === "none") { gear.aura = null; return; }
+
+      if (data.type === "ring") {
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(0.30, 0.02, 10, 36),
+          new THREE.MeshStandardMaterial({
+            color: data.color ?? 0x00ffaa,
+            emissive: data.color ?? 0x00ffaa,
+            emissiveIntensity: 1.5,
+            transparent: true,
+            opacity: 0.85
+          })
+        );
+        ring.rotation.x = Math.PI / 2;
+        ring.position.y = 0.1;
+        gear.aura = ring;
+        group.add(ring);
+      }
     }
   };
-
-  // Store references
-  group.userData.avatar = api;
-  group.userData._hatMount = hatMount;
-  group.userData._faceMount = faceMount;
-  group.userData._gear = gear;
 
   return api;
 }

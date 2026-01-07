@@ -3,7 +3,14 @@ import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js
 
 import { createHub } from "./diagnostics.js";
 import { safeImport } from "./safe_import.js";
+import { ShirtSystem } from "./shirt.js";
 
+// after grips exist:
+const shirts = ShirtSystem.create({ textureUrl: "assets/textures/shirt_diffuse.png" });
+
+// whenever grips are ready:
+shirts.attachToControllerGrip(leftGrip);
+shirts.attachToControllerGrip(rightGrip);
 const hub = createHub();
 hub.addLine("✅ main.js started");
 

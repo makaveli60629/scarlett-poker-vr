@@ -1,5 +1,6 @@
-// /js/avatar.js — basic bot avatar (shirt-compatible dimensions)
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+// /js/avatar.js — bot avatar (canonical dimensions + slots)
+// IMPORTANT: uses local ./three.js so all modules share one THREE instance.
+import * as THREE from "./three.js";
 import { BODY_DIMS } from "./body_dims.js";
 
 export const Avatar = {
@@ -31,16 +32,8 @@ export const Avatar = {
       rightWrist: new THREE.Object3D(),
     };
 
-    g.userData.slots.leftWrist.position.set(
-      BODY_DIMS.wrists.left.x,
-      BODY_DIMS.wrists.left.y,
-      BODY_DIMS.wrists.left.z
-    );
-    g.userData.slots.rightWrist.position.set(
-      BODY_DIMS.wrists.right.x,
-      BODY_DIMS.wrists.right.y,
-      BODY_DIMS.wrists.right.z
-    );
+    g.userData.slots.leftWrist.position.set(BODY_DIMS.wrists.left.x, BODY_DIMS.wrists.left.y, BODY_DIMS.wrists.left.z);
+    g.userData.slots.rightWrist.position.set(BODY_DIMS.wrists.right.x, BODY_DIMS.wrists.right.y, BODY_DIMS.wrists.right.z);
 
     g.add(g.userData.slots.leftWrist, g.userData.slots.rightWrist);
 

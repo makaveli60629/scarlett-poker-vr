@@ -1,4 +1,4 @@
-// /js/main.js — Scarlett Poker VR — MAIN v13 (VR + Android Touch)
+// /js/main.js — Scarlett Poker VR — MAIN v14 (World v11 + Bots seated + VR laser + Android touch)
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -12,7 +12,9 @@ import { AvatarItems } from "./avatar_items.js";
 import { createAvatar } from "./avatar.js";
 import { MobileTouch } from "./mobile_touch.js";
 
-// Optional controls module (VR movement)
+import { VRController } from "./vrcontroller.js";
+import { BotManager } from "./bot.js";
+
 let Controls = null;
 
 const overlay = document.getElementById("overlay");
@@ -21,7 +23,7 @@ function hubLine(s){
   if (!overlay) return;
   const lines = (overlay.textContent || "").split("\n");
   lines.push(s);
-  overlay.textContent = lines.slice(-22).join("\n");
+  overlay.textContent = lines.slice(-24).join("\n");
 }
 
 async function safeImport(path, label){
@@ -43,15 +45,12 @@ const App = {
   camera: null,
   renderer: null,
   clock: null,
-
   playerRig: null,
   worldData: null,
-
   localAvatar: null,
 
   async init() {
     this.clock = new THREE.Clock();
-
     this.scene = new THREE.Scene();
 
     this.playerRig = new THREE.Group();
@@ -66,15 +65,15 @@ const App = {
     this.renderer.xr.enabled = true;
     document.body.appendChild(this.renderer.domElement);
 
-    // ALWAYS keep VR Button
+    // VR button ALWAYS
     document.body.appendChild(VRButton.createButton(this.renderer));
     hubLine("✅ VRButton ready");
 
-    // Try to import VR controls (if missing, Android still works)
+    // Optional VR controls
     const cmod = await safeImport("./controls.js", "controls.js");
     Controls = cmod?.Controls || null;
 
-    // World
+    // Build World
     try {
       this.worldData = World.build(this.scene, this.playerRig);
       hubLine("✅ world.js loaded");
@@ -84,7 +83,7 @@ const App = {
       this.worldData = null;
     }
 
-    // Spawn on lobby pad
+    // Spawn on lobby pad ALWAYS
     if (this.worldData?.spawn) {
       this.playerRig.position.set(this.worldData.spawn.x, 0, this.worldData.spawn.z);
       hubLine("✅ Spawn on telepad");
@@ -102,7 +101,7 @@ const App = {
       console.warn(e);
     }
 
-    // Poker
+    // Poker sim (safe)
     try {
       PokerSimulation.init?.({ scene: this.scene, world: this.worldData });
       hubLine("✅ poker_simulation.js loaded");
@@ -111,9 +110,9 @@ const App = {
       console.warn(e);
     }
 
-    // Local avatar preview (to see cosmetics on Android)
+    // Local avatar preview (for store cosmetics)
     this.localAvatar = createAvatar({ name:"YOU", height:1.78, shirt:0x00ffaa, accent:0x00ffaa });
-    this.localAvatar.group.position.set(this.playerRig.position.x + 1.2, 0, this.playerRig.position.z + 0.6);
+    this.localAvatar.group.position.set(this.playerRig.position.x + 1.2, this.worldData?.floorY ?? 0, this.playerRig.position.z + 0.6);
     this.scene.add(this.localAvatar.group);
 
     // Store
@@ -125,25 +124,54 @@ const App = {
         this.applyProfileToAvatar(this.localAvatar, profile);
       };
 
-      // initial profile apply
-      const profile = AvatarItems.loadState();
-      this.applyProfileToAvatar(this.localAvatar, profile);
+      this.applyProfileToAvatar(this.localAvatar, AvatarItems.loadState());
     } catch (e) {
       hubLine("⚠️ store.js failed");
       console.warn(e);
     }
 
-    // Mobile touch controls (Android)
+    // Android touch controls
     try {
-      MobileTouch.init({
-        renderer: this.renderer,
-        camera: this.camera,
-        player: this.playerRig,
-        overlay
-      });
+      MobileTouch.init({ renderer: this.renderer, camera: this.camera, player: this.playerRig, overlay });
       hubLine("✅ mobile_touch.js loaded");
     } catch (e) {
       hubLine("⚠️ mobile_touch.js failed");
+      console.warn(e);
+    }
+
+    // VR Controller ray (laser + ring) that follows hand
+    try {
+      const floorY = this.worldData?.floorY ?? 0;
+      const kioskTargets = () => {
+        const k = this.worldData?.kiosk;
+        if (!k) return [];
+        return k.userData?.rayTargets?.length ? k.userData.rayTargets : [k];
+      };
+
+      VRController.init({
+        renderer: this.renderer,
+        scene: this.scene,
+        camera: this.camera,
+        floorY,
+        getRayTargets: kioskTargets,
+        onKioskActivate: () => {
+          Store?.toggle?.();
+          hubLine("🛍️ Store toggled (VR ray)");
+        }
+      });
+      hubLine("✅ vrcontroller.js loaded");
+    } catch (e) {
+      hubLine("⚠️ vrcontroller.js failed");
+      console.warn(e);
+    }
+
+    // Bots seated + tournament demo
+    try {
+      BotManager.init({ scene: this.scene, world: this.worldData });
+      BotManager.spawnBots({ count: 8 });
+      hubLine("✅ bot.js loaded (bots seated)");
+    } catch (e) {
+      hubLine("⚠️ bot.js failed");
       console.warn(e);
     }
 
@@ -170,7 +198,7 @@ const App = {
     window.addEventListener("resize", () => this.resize());
     this.renderer.setAnimationLoop(() => this.animate());
 
-    hubLine("✅ Loaded — Android: use 2 thumbs • Oculus: Enter VR");
+    hubLine("✅ Loaded — Android: 2 thumbs • Oculus: Enter VR");
   },
 
   applyProfileToAvatar(avatarApi, profile) {
@@ -185,10 +213,7 @@ const App = {
     avatarApi.clearGear?.();
 
     if (shirtItem?.data?.shirt) avatarApi.setShirtColor(shirtItem.data.shirt);
-
-    if (auraItem?.data?.aura) avatarApi.setAura(auraItem.data.aura);
-    else avatarApi.setAura(null);
-
+    if (auraItem?.data?.aura) avatarApi.setAura(auraItem.data.aura); else avatarApi.setAura(null);
     if (hatItem?.data?.hat === "cap") avatarApi.equipHat({ color: hatItem.data.color || 0x111111 });
     if (gItem?.data?.glasses === "basic") avatarApi.equipGlasses({ color: gItem.data.color || 0x111111 });
   },
@@ -202,12 +227,19 @@ const App = {
   animate() {
     const dt = this.clock.getDelta();
 
-    // Android touch (non-VR)
+    // Android touch when NOT in VR
     try { MobileTouch.update(dt); } catch {}
 
-    // VR controls (VR only)
+    // VR controls when in VR
     try { Controls?.update?.(dt); } catch {}
 
+    // VR ray follows controller
+    try { VRController.update(); } catch {}
+
+    // bots
+    try { BotManager.update(dt); } catch {}
+
+    // ui + poker sim
     try { UI?.update?.(dt); } catch {}
     try { PokerSimulation?.update?.(dt); } catch {}
 

@@ -1,24 +1,25 @@
-// /js/main.js — Scarlett VR Poker — VRButton hard-fix + unified THREE
-// - Uses local ./three.js (single THREE instance across project)
-// - Forces VRButton visible bottom-right
-// - Strong error logging (shows up in your Debug log box)
-// - Keeps your locomotion/teleport scaffolding hooks
+// /js/main.js — Scarlett VR Poker — VRButton HARD FIX (FULL)
+// - Forces VRButton visible/clickable above overlays (Quest-friendly)
+// - Uses local ./three.js so the project shares ONE THREE instance
+// - Keeps your movement + snap turn + teleport arc
+// - Calls initWorld from ./world.js
 
 import * as THREE from "./three.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
 import { initWorld } from "./world.js";
 
 const log = (m) => (window.__hubLog ? window.__hubLog(m) : console.log(m));
+const warn = (m) => (window.__hubLog ? window.__hubLog("⚠️ " + m) : console.warn(m));
 const err = (m) => (window.__hubLog ? window.__hubLog("❌ " + m) : console.error(m));
 
-log("[ScarlettVR] main.js boot (VRButton hard-fix)");
+log("[ScarlettVR] main.js boot (VRButton hard fix)");
 
 let renderer, scene, camera;
 let world = null;
 
 const clock = new THREE.Clock();
 
-// XR rig
+// XR rig: camera is inside a "player" group we move/teleport
 const player = new THREE.Group();
 const head = new THREE.Group();
 
@@ -27,39 +28,36 @@ boot().catch((e) => {
   console.error(e);
 });
 
-// Catch runtime errors and show them in your debug box
+// Show runtime errors in your debug box
 window.addEventListener("error", (e) => err("JS Error: " + (e?.message || e)));
-window.addEventListener("unhandledrejection", (e) => err("Promise Rejection: " + (e?.reason?.message || e?.reason || e)));
+window.addEventListener("unhandledrejection", (e) =>
+  err("Promise Rejection: " + (e?.reason?.message || e?.reason || e))
+);
 
 async function boot() {
-  // Make sure the page doesn't hide the button
+  // Basic page safety so nothing can hide the button
   document.documentElement.style.height = "100%";
   document.body.style.margin = "0";
   document.body.style.height = "100%";
   document.body.style.overflow = "hidden";
   document.body.style.background = "#000";
 
-  // Renderer
+  // renderer
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setSize(innerWidth, innerHeight);
   renderer.xr.enabled = true;
-
   document.body.appendChild(renderer.domElement);
 
-  // VR Button
-  const btn = VRButton.createButton(renderer);
-  btn.style.position = "fixed";
-  btn.style.right = "12px";
-  btn.style.bottom = "12px";
-  btn.style.zIndex = "99999";
-  btn.style.maxWidth = "260px";
-  btn.style.fontSize = "14px";
-
-  document.body.appendChild(btn);
+  // VR button (create + append)
+  const vrBtn = VRButton.createButton(renderer);
+  document.body.appendChild(vrBtn);
   log("[ScarlettVR] VRButton appended ✅");
 
-  // Scene / Camera
+  // FORCE button on top of any overlays (this is the key fix)
+  forceVRButtonOnTop();
+
+  // scene/camera
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
 
@@ -68,13 +66,13 @@ async function boot() {
   player.add(head);
   scene.add(player);
 
-  // Lights so it's never black
+  // lights (so it’s never black)
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.15));
   const key = new THREE.DirectionalLight(0xffffff, 0.85);
   key.position.set(6, 10, 4);
   scene.add(key);
 
-  // Init world
+  // init world
   world = await initWorld({ THREE, scene, log });
 
   // Spawn: use first spawn pad, face table
@@ -87,17 +85,22 @@ async function boot() {
   // Controllers + locomotion
   setupXRControls();
 
-  // Resize + loop
   window.addEventListener("resize", onResize);
   renderer.setAnimationLoop(tick);
 
-  // Extra: log XR support check
+  // Confirm XR support to your debug panel
   if (navigator.xr?.isSessionSupported) {
     const ok = await navigator.xr.isSessionSupported("immersive-vr");
-    log("[ScarlettVR] XR support immersive-vr: " + ok);
+    log("[ScarlettVR] XR immersive-vr supported: " + ok);
   } else {
-    err("navigator.xr missing (no WebXR in this browser)");
+    warn("navigator.xr is missing (browser WebXR disabled?)");
   }
+
+  // Confirm the VRButton exists (useful when debugging)
+  setTimeout(() => {
+    const btn = document.getElementById("VRButton");
+    log(btn ? "✅ VRButton exists in DOM" : "❌ VRButton NOT found in DOM");
+  }, 800);
 
   log("[ScarlettVR] Ready ✅");
 }
@@ -115,11 +118,63 @@ function faceTargetYawOnly(obj3d, target) {
   obj3d.rotation.set(0, yaw, 0);
 }
 
-// -------------------- CONTROLS (same structure as your current code) --------------------
-let c0, c1;
+// ==================== VR BUTTON HARD FIX ====================
+function forceVRButtonOnTop() {
+  // Inject CSS that wins even against messy overlays
+  const style = document.createElement("style");
+  style.textContent = `
+    #VRButton {
+      position: fixed !important;
+      right: 12px !important;
+      bottom: 12px !important;
+      z-index: 2147483647 !important;
+      pointer-events: auto !important;
+      display: block !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      transform: none !important;
+      max-width: 280px !important;
+    }
+
+    /* Try to stop common overlays from blocking taps */
+    .overlay, .hud, .ui, .panel, .debug,
+    #debug, #hud, #overlay, #ui, #panel {
+      pointer-events: none !important;
+    }
+  `;
+  document.head.appendChild(style);
+
+  // Also keep VRButton as the last element so it stays on top
+  const keepOnTop = () => {
+    const btn = document.getElementById("VRButton");
+    if (!btn) return;
+
+    // Re-append to body so it stays last
+    if (btn.parentElement !== document.body || document.body.lastElementChild !== btn) {
+      document.body.appendChild(btn);
+    }
+
+    // Inline styles as a fallback
+    btn.style.position = "fixed";
+    btn.style.right = "12px";
+    btn.style.bottom = "12px";
+    btn.style.zIndex = "2147483647";
+    btn.style.pointerEvents = "auto";
+    btn.style.display = "block";
+    btn.style.visibility = "visible";
+    btn.style.opacity = "1";
+  };
+
+  keepOnTop();
+  // Some HUD scripts recreate overlays after load, so keep enforcing
+  setInterval(keepOnTop, 500);
+}
+
+// -------------------- CONTROLS --------------------
+let c0, c1; // controllers
 let teleport = null;
 
-const MOVE_SPEED = 2.25;
+const MOVE_SPEED = 2.25; // meters/sec
 const TURN_ANGLE = THREE.MathUtils.degToRad(45);
 const DEADZONE = 0.20;
 
@@ -136,6 +191,7 @@ function setupXRControls() {
   c0.addEventListener("disconnected", () => (c0.userData.inputSource = null));
   c1.addEventListener("disconnected", () => (c1.userData.inputSource = null));
 
+  // Teleport trigger: "select" (right trigger usually)
   c0.addEventListener("selectstart", () => onSelectStart(c0));
   c1.addEventListener("selectstart", () => onSelectStart(c1));
   c0.addEventListener("selectend", () => onSelectEnd(c0));
@@ -167,6 +223,7 @@ function onSelectEnd(controller) {
   if (teleport.active && teleport.valid && teleport.hitPoint) {
     const p = teleport.hitPoint.clone();
 
+    // Clamp inside room so you never land in walls
     if (world?.roomClamp) {
       p.x = THREE.MathUtils.clamp(p.x, world.roomClamp.minX, world.roomClamp.maxX);
       p.z = THREE.MathUtils.clamp(p.z, world.roomClamp.minZ, world.roomClamp.maxZ);
@@ -174,7 +231,7 @@ function onSelectEnd(controller) {
 
     player.position.set(p.x, 0, p.z);
 
-    // keep facing table
+    // keep facing the table after teleport
     const focus = world?.tableFocus || new THREE.Vector3(0, 0, -6.5);
     faceTargetYawOnly(player, focus);
   }
@@ -185,13 +242,14 @@ function onSelectEnd(controller) {
   teleport.arcLine.visible = false;
 }
 
+// Movement + snap turn
 let snapArmed = true;
 
 function applyLocomotion(dt) {
   const left = findControllerByHand("left") || c0;
   const right = findControllerByHand("right") || c1;
 
-  // Left stick move
+  // ---- Left stick move ----
   const gpL = getGamepad(left);
   if (gpL?.axes?.length >= 2) {
     const x = gpL.axes[2] ?? gpL.axes[0];
@@ -205,6 +263,7 @@ function applyLocomotion(dt) {
       const forward = new THREE.Vector3(Math.sin(headYaw), 0, Math.cos(headYaw));
       const rightv = new THREE.Vector3(forward.z, 0, -forward.x);
 
+      // invert Y so pushing forward moves forward
       const move = new THREE.Vector3();
       move.addScaledVector(forward, (-ay) * MOVE_SPEED * dt);
       move.addScaledVector(rightv, (ax) * MOVE_SPEED * dt);
@@ -218,7 +277,7 @@ function applyLocomotion(dt) {
     }
   }
 
-  // Right stick snap turn
+  // ---- Right stick snap turn ----
   const gpR = getGamepad(right);
   if (gpR?.axes?.length >= 2) {
     const x = gpR.axes[2] ?? gpR.axes[0];
@@ -231,7 +290,7 @@ function applyLocomotion(dt) {
     }
   }
 
-  // Teleport arc update
+  // ---- Teleport arc update on right hand ----
   const rightHand = findControllerByHand("right") || c1;
   if (teleport.active) updateTeleportArc(THREE, rightHand, teleport, world);
 }
@@ -249,7 +308,7 @@ function getHeadYaw() {
   return e.y;
 }
 
-// -------------------- TELEPORT --------------------
+// -------------------- TELEPORT SYSTEM --------------------
 function createTeleportSystem(THREE) {
   const arcMat = new THREE.LineBasicMaterial({ color: 0x33ff66, transparent: true, opacity: 0.9 });
   const arcGeo = new THREE.BufferGeometry();
@@ -318,6 +377,7 @@ function updateTeleportArc(THREE, controller, tp, world) {
 
     tp.valid = true;
     tp.hitPoint = hit;
+
     tp.ring.visible = true;
     tp.ring.position.set(hit.x, 0.03, hit.z);
   } else {
@@ -333,4 +393,4 @@ function tick() {
   applyLocomotion(dt);
   if (world?.tick) world.tick(dt);
   renderer.render(scene, camera);
-            }
+        }

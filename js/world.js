@@ -1,5 +1,17 @@
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+import { TableFactory } from "./table_factory.js";
 
+const table = TableFactory.build({
+  scene,
+  position: new THREE.Vector3(0, 0, 0),
+  shape: "oval",     // "round" or "oval"
+  seats: 8,          // 6 or 8
+  theme: "black_gold", // classic_green / emerald_lux / black_gold / custom
+  title: "SCARLETT POKER",
+});
+
+// later: seat positions for bots
+console.log(table.seatPositions);
 export const World = {
   _tex: null,
 

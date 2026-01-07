@@ -1,121 +1,184 @@
-// js/main.js — Scarlett Poker VR — WORLD+RIG BOOT v10 (GitHub Pages safe)
-// - Always shows VRButton
-// - Loads world.js FIRST and uses its returned spawn/bounds
-// - No double-floors (prevents blinking / void issues)
-// - Adds a headlamp for extra visibility in VR
-// - Uses VRRig for movement/laser/teleport/height lock
+// /js/main.js — Scarlett Poker VR — MAIN (Quest WebXR + Android Dev Mode) — PERMANENT
+// GitHub Pages safe: uses CDN three.module.js + local modules.
+// Requirements:
+//  - /js/world.js exporting World.build(scene, playerGroup) -> { spawn, colliders, bounds, pads, padById, floorY }
+//  - /js/vr_rig.js exporting VRRig (for Quest teleport laser/ring)
+//  - /js/dev_mode.js exporting DevMode (for Android 2D dev controls)
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
-import { VRRig } from "./vr_rig.js";
+
 import { World } from "./world.js";
+import { VRRig } from "./vr_rig.js";
+import { DevMode } from "./dev_mode.js";
 
-const hubEl = document.getElementById("hub");
-const logs = [];
-function hub(msg) {
-  logs.push(msg);
-  while (logs.length > 22) logs.shift();
-  if (hubEl) hubEl.textContent = logs.join("\n");
-  console.log(msg);
-}
-const ok = (m) => hub(`✅ ${m}`);
-const warn = (m) => hub(`⚠️ ${m}`);
-const fail = (m) => hub(`❌ ${m}`);
+// ---------------- HUD (green boot log) ----------------
+const HUB = (() => {
+  const el = document.getElementById("hub");
+  const add = (txt) => { if (el) el.textContent += txt + "\n"; };
+  return {
+    ok: (t) => add("✅ " + t),
+    warn: (t) => add("⚠️ " + t),
+    err: (t) => add("❌ " + t),
+  };
+})();
 
-hub("Scarlett Poker VR — booting…");
-
-// ---------- Core ----------
+// ---------------- Scene / Renderer ----------------
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x05070b);
-scene.fog = new THREE.Fog(0x05070b, 4, 80);
+scene.background = new THREE.Color(0x020205);
 
-const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 2000);
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 200);
+camera.position.set(0, 1.7, 6);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
 renderer.xr.enabled = true;
-
 document.body.appendChild(renderer.domElement);
-document.body.appendChild(VRButton.createButton(renderer));
-ok("VRButton added");
+HUB.ok("Renderer ready");
 
-// Player rig group
-const player = new THREE.Group();
-player.add(camera);
-scene.add(player);
-
-// Headlamp (insurance against “black world”)
-const headlamp = new THREE.PointLight(0xffffff, 2.8, 90);
-camera.add(headlamp);
-ok("Headlamp on camera");
-
-// ---------- Build WORLD (your v10 file) ----------
-let worldData = null;
-
+// VRButton ALWAYS present (Quest needs it)
 try {
-  worldData = World.build(scene, player);
-  ok("world.js built");
+  document.body.appendChild(VRButton.createButton(renderer));
+  HUB.ok("VRButton added");
 } catch (e) {
-  fail("world.js build crashed — check console");
-  console.error(e);
+  HUB.warn("VRButton unavailable (non-secure origin or browser limitation)");
 }
 
-// Apply spawn (NEVER center table)
+// Headlamp so you never go full black
+const headlamp = new THREE.PointLight(0xffffff, 1.2, 18);
+camera.add(headlamp);
+scene.add(camera);
+HUB.ok("Headlamp on camera");
+
+// Player root (we move this)
+const playerGroup = new THREE.Group();
+playerGroup.position.set(0, 0, 0);
+scene.add(playerGroup);
+
+// ---------------- Build World ----------------
+let worldData = null;
+let floorMeshes = [];
+try {
+  worldData = World.build(scene, playerGroup);
+  HUB.ok("world.js built");
+} catch (e) {
+  HUB.err("world.js failed: " + (e?.message || e));
+}
+
+// collect floor meshes tagged by world.js
+floorMeshes = scene.children.filter(o => o?.userData?.isFloor === true);
+
+// Spawn to pad if world gave us one
 if (worldData?.spawn) {
-  player.position.set(worldData.spawn.x, 0, worldData.spawn.z);
-  ok(`Spawn set to pad (${worldData.spawn.x.toFixed(2)}, ${worldData.spawn.z.toFixed(2)})`);
-} else {
-  // safe fallback spawn
-  player.position.set(0, 0, 10);
-  warn("Spawn fallback used");
+  playerGroup.position.x = worldData.spawn.x;
+  playerGroup.position.z = worldData.spawn.z;
+  HUB.ok(`Spawn set to pad (${worldData.spawn.x.toFixed(2)}, ${worldData.spawn.z.toFixed(2)})`);
 }
 
-// Face toward center/table
-player.rotation.y = Math.PI;
+// ---------------- Quest Rig (laser/ring/teleport) ----------------
+let rigReady = false;
+try {
+  if (worldData) {
+    VRRig.setWorldRefs({
+      floors: floorMeshes,
+      colliders: worldData.colliders || [],
+      bounds: worldData.bounds || null,
+      pads: worldData.pads || [],
+      floorY: worldData.floorY ?? 0
+    });
 
-// ---------- VR RIG ----------
-const rig = VRRig.create({ renderer, scene, camera, player, hub });
-ok("VRRig created");
-
-// Apply bounds from world (correct room limits)
-if (worldData?.bounds?.min && worldData?.bounds?.max) {
-  rig.setBounds({
-    minX: worldData.bounds.min.x,
-    maxX: worldData.bounds.max.x,
-    minZ: worldData.bounds.min.z,
-    maxZ: worldData.bounds.max.z,
-  });
-  ok("Bounds applied from world");
-} else {
-  rig.setBounds({ minX: -15.5, maxX: 15.5, minZ: -15.5, maxZ: 15.5 });
-  warn("Bounds fallback used");
+    VRRig.setHeightLock(true, 1.80); // locked height
+    VRRig.create(renderer, scene, camera, playerGroup, HUB);
+    rigReady = true;
+    HUB.ok("VRRig created");
+  }
+} catch (e) {
+  HUB.warn("VRRig failed: " + (e?.message || e));
 }
 
-// Height lock: keeps “standing view” even if you sit
-// Adjust this number anytime (1.78–1.90 typical)
-rig.setHeightLock(1.80, true);
-ok("Height lock enabled");
+// ---------------- Android/Desktop Dev Mode ----------------
+const dev = DevMode.init({
+  onTeleport: ({ x, y }) => {
+    // raycast from screen point to floor
+    if (!floorMeshes.length) return;
 
-// ---------- Diagnostics summary ----------
-hub("");
-ok(`Pads: ${worldData?.pads?.length ?? 0}`);
-ok(`Colliders: ${worldData?.colliders?.length ?? 0}`);
-ok("Enter VR");
+    const ndc = new THREE.Vector2(
+      (x / innerWidth) * 2 - 1,
+      -(y / innerHeight) * 2 + 1
+    );
 
-// ---------- Render loop ----------
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(ndc, camera);
+    const hits = ray.intersectObjects(floorMeshes, true);
+    if (!hits.length) return;
+
+    const p = hits[0].point;
+    // respect bounds if available
+    if (worldData?.bounds) {
+      p.x = Math.max(worldData.bounds.min.x, Math.min(worldData.bounds.max.x, p.x));
+      p.z = Math.max(worldData.bounds.min.z, Math.min(worldData.bounds.max.z, p.z));
+    }
+    playerGroup.position.x = p.x;
+    playerGroup.position.z = p.z;
+    HUB.ok(`Dev teleport -> (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`);
+  }
+});
+
+if (dev.enabled) HUB.ok("DevMode enabled (Android/desktop)");
+
+// ---------------- Simple Dev Movement ----------------
+function applyDevMovement(dt) {
+  const axes = DevMode.getAxes();
+  const moveSpeed = 3.2;   // m/s
+  const turnSpeed = 1.7;   // rad/s
+
+  // rotate playerGroup
+  playerGroup.rotation.y -= axes.turnX * turnSpeed * dt;
+
+  // forward/right in player space
+  const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0,1,0), playerGroup.rotation.y);
+  const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0,1,0), playerGroup.rotation.y);
+
+  const v = new THREE.Vector3();
+  v.addScaledVector(forward, axes.moveY * moveSpeed * dt);
+  v.addScaledVector(right, axes.moveX * moveSpeed * dt);
+
+  playerGroup.position.add(v);
+
+  // clamp to bounds
+  if (worldData?.bounds) {
+    playerGroup.position.x = Math.max(worldData.bounds.min.x, Math.min(worldData.bounds.max.x, playerGroup.position.x));
+    playerGroup.position.z = Math.max(worldData.bounds.min.z, Math.min(worldData.bounds.max.z, playerGroup.position.z));
+  }
+}
+
+// ---------------- Resize ----------------
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ---------------- Main loop ----------------
 let lastT = performance.now();
 renderer.setAnimationLoop(() => {
   const now = performance.now();
   const dt = Math.min(0.05, (now - lastT) / 1000);
   lastT = now;
 
-  rig.update(dt);
+  // Quest rig update (laser + ring + height lock)
+  if (rigReady) {
+    try { VRRig.update(renderer); } catch {}
+  }
+
+  // DevMode movement if enabled and NOT presenting XR
+  if (DevMode.enabled() && !renderer.xr.isPresenting) {
+    applyDevMovement(dt);
+  }
+
   renderer.render(scene, camera);
 });
-
-addEventListener("resize", () => {
-  camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-});
+HUB.ok("Boot complete");

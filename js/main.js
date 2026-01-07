@@ -1,268 +1,344 @@
-// /js/main.js — Scarlett Poker VR — Core Stable Build (GitHub Pages Safe)
-// - Always shows VRButton
-// - Builds World
-// - Spawns on Lobby pad
-// - VRRig (controllers + laser + ring + teleport)
-// - Android DEV joysticks (MOVE / TURN)
-// - Hub loader: safely loads your other JS modules without breaking the build
+// /js/main.js — Scarlett Poker VR 1.0 (GitHub Pages SAFE, VRButton ALWAYS)
+// - CDN Three.js + VRButton
+// - Green HUB overlay (load report)
+// - World build + forced spawn on lobby pad
+// - Optional modules loaded safely (won't crash if missing)
+// - Optional vrcontroller.js rig (laser/ring/teleport) if present
+// - Dev controls (WASD) when not in XR (Android/desktop debugging)
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
 
 import { World } from "./world.js";
-import { createVRRig } from "./vrcontroller.js";
-import { createDevTouch } from "./dev_touch.js";
-import { createHub, hubOK, hubWarn, hubFail } from "./hub.js";
-import { loadOptionalModules } from "./hub_loader.js";
 
-const APP = {
-  version: "CORE_STABLE_ALL_IN_ONE_v1",
-  HEIGHT_LOCK_M: 1.80,
-  BRIGHTNESS_BOOST: true,
-  SWAP_MOVE_X: false,  // if left stick L/R feels reversed, flip this live with X
-};
+const overlay = document.getElementById("overlay");
+const HUB = makeHub(overlay);
 
-let renderer, scene, camera;
-let playerGroup;      // main player root
-let worldData;
-let rig;              // VR rig system
-let devTouch;         // Android dev movement
-let headlamp;
+// ---------- boot ----------
+HUB.line("Scarlett Poker VR — booting…");
+HUB.line("--------------------------------");
 
-boot().catch((e) => {
-  console.error(e);
-  hubFail("Fatal boot error: " + (e?.message || e));
-});
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05060a);
+scene.fog = new THREE.Fog(0x05060a, 8, 90);
 
-async function boot() {
-  createHub(document.getElementById("hud"));
+const camera = new THREE.PerspectiveCamera(
+  70,
+  window.innerWidth / window.innerHeight,
+  0.05,
+  220
+);
 
-  hubOK(`Scarlett Poker VR — booting...\n${APP.version}`);
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
 
-  // Renderer
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.setSize(innerWidth, innerHeight);
-  renderer.setClearColor(0x000000, 1);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.35;
-  renderer.xr.enabled = true;
-  document.body.appendChild(renderer.domElement);
+// IMPORTANT: XR color output
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
 
-  // VR Button
-  document.body.appendChild(VRButton.createButton(renderer));
-  hubOK("VRButton added");
+document.body.appendChild(renderer.domElement);
 
-  // Scene + Camera
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x000008);
+// ALWAYS keep VR button
+document.body.appendChild(VRButton.createButton(renderer));
+HUB.ok("VRButton", "Ready");
 
-  camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 200);
-  camera.position.set(0, APP.HEIGHT_LOCK_M, 8);
+// Player rig (camera parent)
+const player = new THREE.Group();
+player.name = "PlayerRig";
+scene.add(player);
+player.add(camera);
 
-  // Player root
-  playerGroup = new THREE.Group();
-  playerGroup.name = "PlayerGroup";
-  playerGroup.add(camera);
-  scene.add(playerGroup);
+// Default camera local offset (head height when not in XR)
+camera.position.set(0, 1.8, 0);
 
-  // Baseline lights (always on)
-  const amb = new THREE.AmbientLight(0xffffff, 0.55);
-  scene.add(amb);
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 0.85);
-  hemi.position.set(0, 20, 0);
-  scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffffff, 1.2);
-  sun.position.set(14, 24, 10);
-  scene.add(sun);
+// ---------- build world ----------
+let world = null;
+try {
+  world = World.build(scene, player); // some versions accept (scene, player)
+  HUB.ok("world.js", "Built (scene, player)");
+} catch (e1) {
+  try {
+    world = World.build(scene); // newer versions accept (scene)
+    HUB.ok("world.js", "Built (scene)");
+  } catch (e2) {
+    HUB.fail("world.js", e2);
+    // If world totally fails, still show something instead of black
+    addFailsafeLight(scene);
+    addFailsafeFloor(scene);
+  }
+}
 
-  // Headlamp on camera (fix black void)
-  headlamp = new THREE.SpotLight(0xffffff, APP.BRIGHTNESS_BOOST ? 2.0 : 1.2, 30, Math.PI / 5, 0.25, 1);
-  headlamp.position.set(0, 0.1, 0.1);
-  headlamp.target.position.set(0, 0, -1);
-  camera.add(headlamp);
-  camera.add(headlamp.target);
-  hubOK("Baseline lights + headlamp enabled");
+// ---------- force spawn on lobby pad ----------
+forceSpawnOnLobby(player, world);
+HUB.ok("spawn", `Rig at ${fmtV3(player.position)}`);
 
-  // World
-  worldData = World.build(scene, playerGroup);
-  hubOK("world.js built");
+// ---------- optional VR rig (controller laser/ring/teleport) ----------
+let vrRig = null;
+try {
+  const mod = await safeImport("./vrcontroller.js");
+  if (mod?.createVRRig) {
+    vrRig = mod.createVRRig(renderer, scene, camera, {
+      heightLockM: 1.80,         // locked height you asked for
+      getWorld: () => world,     // lets rig raycast pads/floor
+    });
+    HUB.ok("vrcontroller.js", "Rig attached (laser/ring/teleport)");
+  } else {
+    HUB.skip("vrcontroller.js", "No createVRRig export (or file missing)");
+  }
+} catch (e) {
+  HUB.fail("vrcontroller.js", e);
+}
 
-  // Spawn on Lobby pad
-  safeSpawnToPad("lobby");
-  hubOK(`Spawn set to pad (${worldData.spawn.x.toFixed(2)}, ${worldData.spawn.z.toFixed(2)})`);
-
-  // VR Rig
-  rig = createVRRig(renderer, scene, camera, {
-    heightLockM: APP.HEIGHT_LOCK_M,
-    getWorld: () => worldData,
-    swapMoveX: () => APP.SWAP_MOVE_X,
-  });
-  hubOK("VRRig: controllers (grip-based) ready");
-  hubOK(`VRRig: heightlock ON @ ${APP.HEIGHT_LOCK_M.toFixed(2)}m`);
-  hubOK("VRRig created");
-
-  // Android DEV touch controls
-  devTouch = createDevTouch({
-    rootEl: document.getElementById("devControls"),
-    moveEl: document.getElementById("joyMove"),
-    moveStickEl: document.getElementById("joyMoveStick"),
-    turnEl: document.getElementById("joyTurn"),
-    turnStickEl: document.getElementById("joyTurnStick"),
-  });
-  if (devTouch.enabled) hubOK("DEV MODE ON (buttons + movement)");
-
-  // Load your optional modules safely (won’t break if they error)
-  await loadOptionalModules({
-    hubOK, hubWarn, hubFail,
-    context: {
-      THREE,
+// ---------- optional modules (won't crash if missing/broken) ----------
+await loadOptional("./controls.js", "controls.js", async (m) => {
+  // Support both styles: Controls.init(...) or init(...)
+  const C = m?.Controls || m;
+  if (C?.init) {
+    C.init({
       renderer,
-      scene,
       camera,
-      playerGroup,
-      worldData,
-      rig,
-    }
-  });
-
-  hubOK("Boot complete");
-
-  // Resize
-  addEventListener("resize", () => {
-    camera.aspect = innerWidth / innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(innerWidth, innerHeight);
-  });
-
-  // Keyboard dev shortcuts
-  addEventListener("keydown", (e) => {
-    if (e.key === "b" || e.key === "B") toggleBrightness();
-    if (e.key === "x" || e.key === "X") {
-      APP.SWAP_MOVE_X = !APP.SWAP_MOVE_X;
-      hubWarn(`Swap Move X: ${APP.SWAP_MOVE_X ? "ON" : "OFF"}`);
-    }
-    if (e.key === "h" || e.key === "H") adjustHeight(+0.05);
-    if (e.key === "j" || e.key === "J") adjustHeight(-0.05);
-  });
-
-  // Main loop
-  let lastT = performance.now();
-  renderer.setAnimationLoop(() => {
-    const now = performance.now();
-    const dt = Math.min(0.05, (now - lastT) / 1000);
-    lastT = now;
-
-    // Update rig (controllers, laser, teleport, movement in XR)
-    rig.update(dt);
-
-    // If not in XR, allow desktop keys + Android dev joystick movement
-    if (!renderer.xr.isPresenting) {
-      applyDesktopMovement(dt);
-      applyAndroidMovement(dt);
-    }
-
-    renderer.render(scene, camera);
-  });
-}
-
-function safeSpawnToPad(id) {
-  const pad = worldData?.padById?.[id];
-  const p = pad?.position || worldData?.spawn || new THREE.Vector3(0, 0, 11.5);
-
-  // Keep player on floor and outside table
-  playerGroup.position.set(p.x, 0, p.z);
-}
-
-const keys = { w:false,a:false,s:false,d:false,q:false,e:false };
-addEventListener("keydown", (e) => {
-  if (e.key === "w") keys.w = true;
-  if (e.key === "a") keys.a = true;
-  if (e.key === "s") keys.s = true;
-  if (e.key === "d") keys.d = true;
-  if (e.key === "q") keys.q = true;
-  if (e.key === "e") keys.e = true;
-});
-addEventListener("keyup", (e) => {
-  if (e.key === "w") keys.w = false;
-  if (e.key === "a") keys.a = false;
-  if (e.key === "s") keys.s = false;
-  if (e.key === "d") keys.d = false;
-  if (e.key === "q") keys.q = false;
-  if (e.key === "e") keys.e = false;
+      player,
+      colliders: world?.colliders || [],
+      bounds: world?.bounds || null,
+      pads: world?.pads || [],
+      padById: world?.padById || {},
+      floorY: world?.floorY ?? 0,
+    });
+    scene.userData._controls = C;
+    return true;
+  }
+  return false;
 });
 
-function applyDesktopMovement(dt) {
-  const speed = 2.2;
-  const turnSpeed = 1.8;
+await loadOptional("./ui.js", "ui.js", async (m) => {
+  const UI = m?.UI || m;
+  if (UI?.init) {
+    UI.init(scene, camera);
+    scene.userData._ui = UI;
+    return true;
+  }
+  return false;
+});
 
-  if (keys.q) playerGroup.rotation.y += turnSpeed * dt;
-  if (keys.e) playerGroup.rotation.y -= turnSpeed * dt;
+await loadOptional("./poker_simulation.js", "poker_simulation.js", async (m) => {
+  const P = m?.PokerSimulation || m;
+  if (P?.build) {
+    P.build({}); // crash-safe version will idle if no bots/players
+    scene.userData._poker = P;
+    return true;
+  }
+  return false;
+});
 
-  const dir = new THREE.Vector3();
-  if (keys.w) dir.z -= 1;
-  if (keys.s) dir.z += 1;
-  if (keys.a) dir.x -= 1;
-  if (keys.d) dir.x += 1;
-  if (dir.lengthSq() < 0.0001) return;
+await loadOptional("./bots.js", "bots.js", async (m) => {
+  if (m?.init) {
+    const api = m.init({ scene, world });
+    // support optional update hook
+    if (api?.update) scene.userData._botsUpdate = api.update;
+    return true;
+  }
+  return false;
+});
 
-  dir.normalize();
-  dir.applyAxisAngle(new THREE.Vector3(0,1,0), playerGroup.rotation.y);
-  attemptMove(dir.multiplyScalar(speed * dt));
-}
+await loadOptional("./interactions.js", "interactions.js", async (m) => {
+  if (m?.init) {
+    m.init({ scene, camera, world });
+    return true;
+  }
+  return false;
+});
 
-function applyAndroidMovement(dt) {
-  if (!devTouch?.enabled) return;
-  const v = devTouch.getMove();   // x,z
-  const t = devTouch.getTurn();   // x
-  const speed = 2.0;
-  const snap = 1.6;
+await loadOptional("./store.js", "store.js", async (m) => {
+  if (m?.init) {
+    m.init({ scene, world });
+    return true;
+  }
+  return false;
+});
 
-  if (Math.abs(t) > 0.1) playerGroup.rotation.y -= t * snap * dt;
+await loadOptional("./watch_ui.js", "watch_ui.js", async (m) => {
+  if (m?.init) {
+    m.init({ camera, scene });
+    return true;
+  }
+  return false;
+});
 
-  const move = new THREE.Vector3(v.x, 0, v.y);
-  if (move.lengthSq() < 0.0005) return;
+// ---------- dev controls (Android/Desktop when not in XR) ----------
+const dev = makeDevControls({ renderer, player, camera, world });
 
-  move.normalize().multiplyScalar(speed * dt);
-  move.applyAxisAngle(new THREE.Vector3(0,1,0), playerGroup.rotation.y);
-  attemptMove(move);
-}
+// ---------- resize ----------
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
 
-function attemptMove(delta) {
-  // Bounds clamp (from world)
-  const b = worldData?.bounds;
-  if (!b) {
-    playerGroup.position.add(delta);
-    return;
+// ---------- animation loop ----------
+const clock = new THREE.Clock();
+HUB.line("");
+HUB.line("✅ Ready — press Enter VR");
+
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta();
+
+  // If you have external controls.js, update it
+  if (scene.userData._controls?.update) {
+    try { scene.userData._controls.update(dt); } catch {}
   }
 
-  const next = playerGroup.position.clone().add(delta);
+  // VR rig update (laser/ring/teleport)
+  if (renderer.xr.isPresenting && vrRig?.update) {
+    try { vrRig.update(dt); } catch {}
+  }
 
-  // Keep inside room bounds
-  next.x = THREE.MathUtils.clamp(next.x, b.min.x, b.max.x);
-  next.z = THREE.MathUtils.clamp(next.z, b.min.z, b.max.z);
+  // UI update hook
+  if (scene.userData._ui?.update) {
+    try { scene.userData._ui.update(dt); } catch {}
+  }
 
-  // Very simple “don’t go through table collider area” (keep-out box)
-  // Your World already includes table collider; this is an extra safety fallback.
-  const keepOut = new THREE.Box3(
-    new THREE.Vector3(-3.2, 0, -3.2),
-    new THREE.Vector3( 3.2, 3,  3.2)
+  // bots update hook
+  if (scene.userData._botsUpdate) {
+    try { scene.userData._botsUpdate(dt); } catch {}
+  }
+
+  // dev update if not in XR
+  dev.update(dt);
+
+  renderer.render(scene, camera);
+});
+
+// ===================== helpers =====================
+
+function makeHub(overlayEl) {
+  const lines = [];
+  const push = (s) => {
+    lines.push(String(s));
+    if (overlayEl) overlayEl.textContent = lines.join("\n");
+  };
+  return {
+    line: (t) => push(t),
+    ok: (name, msg) => push(`✅ ${name}: ${msg || "ok"}`),
+    skip: (name, msg) => push(`⏭️ ${name}: ${msg || "skipped"}`),
+    fail: (name, e) => push(`❌ ${name}: ${errStr(e)}`),
+  };
+}
+
+function errStr(e) {
+  const s = String(e?.message || e || "error");
+  return s.length > 180 ? s.slice(0, 180) + "…" : s;
+}
+
+async function safeImport(path) {
+  // If module fails (404 / syntax), return null without crashing main.js
+  try {
+    return await import(path);
+  } catch (e) {
+    return null;
+  }
+}
+
+async function loadOptional(path, name, runner) {
+  const m = await safeImport(path);
+  if (!m) {
+    HUB.skip(name, "Missing or not importable");
+    return;
+  }
+  try {
+    const ok = await runner(m);
+    if (ok) HUB.ok(name, "Loaded");
+    else HUB.skip(name, "No supported exports");
+  } catch (e) {
+    HUB.fail(name, e);
+  }
+}
+
+function forceSpawnOnLobby(player, world) {
+  // Spawn priority:
+  // 1) world.padById.lobby.position
+  // 2) world.spawn
+  // 3) fallback (0,0,10)
+  const lobby = world?.padById?.lobby?.position;
+  const spawn = world?.spawn;
+
+  const p = lobby || spawn || new THREE.Vector3(0, 0, 10);
+  player.position.set(p.x, 0, p.z);
+
+  // face toward the table center
+  player.rotation.set(0, 0, 0);
+}
+
+function fmtV3(v) {
+  return `(${v.x.toFixed(2)}, ${v.y.toFixed(2)}, ${v.z.toFixed(2)})`;
+}
+
+function addFailsafeLight(scene) {
+  scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+  sun.position.set(10, 18, 8);
+  scene.add(sun);
+}
+
+function addFailsafeFloor(scene) {
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(40, 40),
+    new THREE.MeshStandardMaterial({ color: 0x1a1d22, roughness: 1.0 })
   );
-  if (keepOut.containsPoint(next)) return;
-
-  playerGroup.position.copy(next);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = 0.0015;
+  scene.add(floor);
 }
 
-function toggleBrightness() {
-  APP.BRIGHTNESS_BOOST = !APP.BRIGHTNESS_BOOST;
-  headlamp.intensity = APP.BRIGHTNESS_BOOST ? 2.0 : 1.2;
-  renderer.toneMappingExposure = APP.BRIGHTNESS_BOOST ? 1.45 : 1.25;
-  hubWarn(`Brightness boost: ${APP.BRIGHTNESS_BOOST ? "ON" : "OFF"}`);
-}
+function makeDevControls({ renderer, player, camera, world }) {
+  const keys = new Set();
+  window.addEventListener("keydown", (e) => keys.add(e.key.toLowerCase()));
+  window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
 
-function adjustHeight(d) {
-  APP.HEIGHT_LOCK_M = THREE.MathUtils.clamp(APP.HEIGHT_LOCK_M + d, 1.4, 2.2);
-  rig.setHeightLock(APP.HEIGHT_LOCK_M);
-  hubWarn(`Height lock: ${APP.HEIGHT_LOCK_M.toFixed(2)}m`);
-}
+  const tmp = new THREE.Vector3();
+  const up = new THREE.Vector3(0, 1, 0);
+
+  const clampToBounds = (p) => {
+    const b = world?.bounds;
+    if (!b) return;
+    p.x = THREE.MathUtils.clamp(p.x, b.min.x, b.max.x);
+    p.z = THREE.MathUtils.clamp(p.z, b.min.z, b.max.z);
+  };
+
+  return {
+    update(dt) {
+      // Only run when NOT in XR (Android/desktop debugging)
+      if (renderer.xr.isPresenting) return;
+
+      // lock dev height so you can see over table while sitting
+      camera.position.y = 1.80;
+
+      const speed = 2.2;
+      const turn = 1.6;
+
+      const fwd = new THREE.Vector3();
+      camera.getWorldDirection(fwd);
+      fwd.y = 0; fwd.normalize();
+
+      const right = tmp.copy(fwd).cross(up).normalize();
+
+      const move = new THREE.Vector3();
+
+      if (keys.has("w")) move.add(fwd);
+      if (keys.has("s")) move.sub(fwd);
+      if (keys.has("a")) move.sub(right);
+      if (keys.has("d")) move.add(right);
+
+      if (move.lengthSq() > 0.0001) {
+        move.normalize().multiplyScalar(speed * dt);
+        player.position.add(move);
+        clampToBounds(player.position);
+      }
+
+      if (keys.has("arrowleft")) player.rotation.y += turn * dt;
+      if (keys.has("arrowright")) player.rotation.y -= turn * dt;
+    },
+  };
+  }

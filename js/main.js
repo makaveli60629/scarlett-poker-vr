@@ -1,8 +1,9 @@
-// /js/main.js — Scarlet VR Poker (Stable XR Boot + Fallback World + Optional world.js)
-// Quest/GitHub Pages safe.
-// - Always creates VRButton
-// - Always renders a visible fallback world
-// - Dynamically imports ./js/world.js if present and uses it if it exports initWorld(ctx)
+// /js/main.js — Scarlet VR Poker (GitHub Pages FIX)
+// IMPORTANT:
+// - DO NOT import from "three" anywhere.
+// - Uses CDN Three + VRButton.
+// - Builds a visible fallback world (so you never see black)
+// - Optionally loads ./world.js via dynamic import (won't break if world.js fails)
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -11,7 +12,7 @@ import { XRControllerModelFactory } from "https://unpkg.com/three@0.160.0/exampl
 const log = (m) => { try { window.__hubLog?.(String(m)); } catch {} };
 
 let scene, camera, renderer, clock;
-let playerRig, head;
+let playerRig;
 let floorMesh;
 
 let controller1, grip1;
@@ -37,7 +38,7 @@ boot().catch((e) => {
 });
 
 async function boot() {
-  log("✅ main.js running");
+  log("✅ main.js running (CDN three)");
 
   clock = new THREE.Clock();
 
@@ -46,11 +47,8 @@ async function boot() {
 
   camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 220);
 
-  // Player rig
   playerRig = new THREE.Group();
-  head = new THREE.Group();
-  head.add(camera);
-  playerRig.add(head);
+  playerRig.add(camera);
   scene.add(playerRig);
   playerRig.position.set(0, 1.6, 3.2);
 
@@ -61,13 +59,13 @@ async function boot() {
 
   document.body.appendChild(renderer.domElement);
 
-  // VR button (this must appear if main.js runs)
+  // VR Button MUST appear if main.js runs
   document.body.appendChild(VRButton.createButton(renderer));
-  log("✅ VRButton created");
+  log("✅ VRButton created (ENTER VR should appear)");
 
   addLights();
 
-  // Build fallback world FIRST so you never get black
+  // Always build fallback world first (no black screens)
   const fb = buildFallbackWorld();
   floorMesh = fb.floorMesh;
 
@@ -76,11 +74,10 @@ async function boot() {
 
   initControllers();
 
-  // Try optional world.js (won't break if missing)
+  // Optional real world (won't break boot if it errors)
   await tryLoadWorldJs();
 
   window.addEventListener("resize", onResize);
-
   renderer.setAnimationLoop(tick);
 }
 
@@ -142,7 +139,7 @@ function applyVRLocomotion(dt) {
     if (Math.abs(ly) < dead) ly = 0;
     if (Math.abs(rx) < dead) rx = 0;
 
-    // Smooth move
+    // Move
     if (lx !== 0 || ly !== 0) {
       const yaw = playerRig.rotation.y;
       const f = -ly;
@@ -198,7 +195,6 @@ function tick() {
     applyVRLocomotion(dt);
     updateTeleportRay();
   }
-  // optional world tick hook
   try { window.__worldTick?.(dt); } catch {}
   renderer.render(scene, camera);
 }
@@ -221,7 +217,7 @@ function makeTeleportMarker() {
   return ring;
 }
 
-// ---------- Fallback world (always visible) ----------
+// ---------- fallback world (always visible) ----------
 function buildFallbackWorld() {
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(40, 40),
@@ -237,24 +233,8 @@ function buildFallbackWorld() {
   addWall( roomSize/2, wallH/2, 0, wallT, wallH, roomSize, wallMat);
   addWall(-roomSize/2, wallH/2, 0, wallT, wallH, roomSize, wallMat);
 
-  const table = createFallbackTable();
-  scene.add(table);
-
-  spawnFallbackBots(8);
-
-  log("✅ Fallback world built (no-black guarantee)");
-  return { floorMesh: floor };
-}
-
-function addWall(x,y,z,sx,sy,sz,mat){
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz), mat);
-  mesh.position.set(x,y,z);
-  scene.add(mesh);
-}
-
-function createFallbackTable(){
+  // table
   const table = new THREE.Group();
-
   const base = new THREE.Mesh(
     new THREE.CylinderGeometry(0.35, 0.6, 0.75, 24),
     new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.85 })
@@ -276,55 +256,33 @@ function createFallbackTable(){
   felt.position.y = 0.82;
   table.add(felt);
 
-  // seats
-  const seatMat = new THREE.MeshStandardMaterial({ color: 0x202020, roughness: 0.95 });
-  const seatGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.08, 20);
-  for (let i=0;i<8;i++){
-    const a = (i/8)*Math.PI*2;
-    const r = 2.7;
-    const seat = new THREE.Mesh(seatGeo, seatMat);
-    seat.position.set(Math.cos(a)*r, 0.45, Math.sin(a)*r);
-    table.add(seat);
-  }
+  scene.add(table);
 
-  table.position.set(0,0,0);
-  return table;
+  log("✅ Fallback world built");
+  return { floorMesh: floor };
+
+  function addWall(x,y,z,sx,sy,sz,mat){
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz), mat);
+    mesh.position.set(x,y,z);
+    scene.add(mesh);
+  }
 }
 
-function spawnFallbackBots(count){
-  const botGeo = new THREE.CapsuleGeometry(0.18, 0.55, 6, 12);
-  const colors = [0x7b1e1e,0x1e3a7b,0x2a7b1e,0x7b6a1e,0x5a1e7b,0x1e7b6f,0x7b3f1e,0x3f3f3f];
-  const bots = [];
-  for (let i=0;i<count;i++){
-    const mat = new THREE.MeshStandardMaterial({ color: colors[i%colors.length], roughness: 0.9 });
-    const bot = new THREE.Mesh(botGeo, mat);
-    const a = (i/count)*Math.PI*2;
-    bot.position.set(Math.cos(a)*2.9, 0.95, Math.sin(a)*2.9);
-    bot.userData = { phase: Math.random()*Math.PI*2, bob: 0.02 + Math.random()*0.02 };
-    scene.add(bot);
-    bots.push(bot);
-  }
-  // idle animation hook
-  window.__worldTick = () => {
-    const t = performance.now()/1000;
-    for (const b of bots) b.position.y = 0.95 + Math.sin(t*2 + b.userData.phase) * b.userData.bob;
-  };
-}
-
-// ---------- Optional real world.js ----------
+// ---------- optional world.js loader ----------
 async function tryLoadWorldJs() {
   try {
+    // IMPORTANT: dynamic import so errors don't kill VR
     const mod = await import("./world.js");
     log("✅ Imported ./js/world.js");
     if (typeof mod.initWorld !== "function") {
-      log("⚠ world.js missing export initWorld(ctx) — keeping fallback");
+      log("⚠ world.js has no export initWorld(ctx). Keeping fallback.");
       return;
     }
-    const result = await mod.initWorld({ THREE, scene, renderer, hubLog: log, hubStatus: () => {} });
+    const result = await mod.initWorld({ THREE, scene, renderer, hubLog: log });
     if (result?.floorMesh) floorMesh = result.floorMesh;
     if (result?.bounds) state.bounds = result.bounds;
     log("✅ world.js initialized (override applied)");
   } catch (e) {
-    log("⚠ world.js failed to load — keeping fallback: " + (e?.message || e));
+    log("⚠ world.js failed to load (kept fallback): " + (e?.message || e));
   }
-        }
+}

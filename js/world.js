@@ -308,22 +308,35 @@ function makeCard(THREE, base = 0xffffff) {
   card.rotation.x = -Math.PI / 2;
   return card;
 }
-
 function makeLeaderboard(THREE) {
   const g = new THREE.Group();
 
+  // Main glass panel (safe geometry)
   const glass = new THREE.Mesh(
-    new THREE.RoundedBoxGeometry(2.2, 0.55, 0.06, 8, 0.12),
+    new THREE.BoxGeometry(2.2, 0.55, 0.06),
     new THREE.MeshStandardMaterial({
       color: 0x0b0b0b,
       roughness: 0.25,
-      metalness: 0.1,
+      metalness: 0.15,
       emissive: new THREE.Color(0x00ff88),
       emissiveIntensity: 0.18,
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.75,
     })
   );
+  g.add(glass);
+
+  // Neon trim (fake rounded edge look)
+  const trim = new THREE.Mesh(
+    new THREE.BoxGeometry(2.3, 0.60, 0.01),
+    new THREE.MeshBasicMaterial({ color: 0x33ff66 })
+  );
+  trim.position.z = 0.04;
+  g.add(trim);
+
+  return g;
+}
+
   g.add(glass);
 
   const bar = new THREE.Mesh(

@@ -1,6 +1,6 @@
-// /js/world.js — Scarlett VR Poker — Update 9.0 (World + Teleport Pads + Table + Bots)
-// NO imports here. main.js passes THREE in.
-// Walls are ONE solid matching color. Uses your textures if present; falls back safely.
+// /js/world.js — Scarlett VR Poker — Update 9.0 (PATCH A)
+// Bigger lobby, brighter, chairs, name tags, shirt on one bot, crown winner, kiosks.
+// No imports here. main.js passes THREE.
 
 export async function initWorld(ctx) {
   const { THREE, scene, hubLog } = ctx;
@@ -17,17 +17,19 @@ export async function initWorld(ctx) {
     }, undefined, () => resolve(null));
   });
 
-  // Use your real texture names (from your screenshots)
-  const texCarpet = await loadTex("./assets/textures/lobby_carpet.jpg", 4, 4);
-  const texRosewood = await loadTex("./assets/textures/rosewood_veneer1_4k.jpg", 2, 2); // if filename differs, it will safely fall back
+  // Your known textures (safe fallback)
+  const texCarpet  = await loadTex("./assets/textures/lobby_carpet.jpg", 6, 6);
+  const texRosewood= await loadTex("./assets/textures/rosewood_veneer1_4k.jpg", 2, 2); // OK if missing
+  const texShirt   = await loadTex("./assets/textures/shirt_diffuse.png", 1, 1);
+  const texCrown   = await loadTex("./assets/textures/crown_diffuse.png", 1, 1);
 
-  // ---------- Room (Lobby) ----------
-  const WALL_COLOR = 0x1a1a1a; // single matching wall color
-  const wallMat = new THREE.MeshStandardMaterial({
-    color: WALL_COLOR,
-    roughness: 0.92,
-    metalness: 0.0
-  });
+  // ---------- Room ----------
+  const ROOM = 34;            // bigger
+  const wallH = 3.8;
+  const wallT = 0.45;
+
+  const WALL_COLOR = 0x171717; // one solid matching color
+  const wallMat = new THREE.MeshStandardMaterial({ color: WALL_COLOR, roughness: 0.95, metalness: 0.0 });
 
   const floorMat = new THREE.MeshStandardMaterial({
     color: texCarpet ? 0xffffff : 0x111111,
@@ -36,72 +38,71 @@ export async function initWorld(ctx) {
     metalness: 0.0
   });
 
-  const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), floorMat);
+  const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(ROOM*2, ROOM*2), floorMat);
   floorMesh.rotation.x = -Math.PI/2;
   floorMesh.position.y = 0;
   scene.add(floorMesh);
 
-  // Solid walls + ceiling
-  const roomSize = 18;
-  const wallH = 3.4;
-  const wallT = 0.35;
+  // Walls
+  addWall(0, wallH/2,  ROOM, ROOM*2, wallH, wallT);
+  addWall(0, wallH/2, -ROOM, ROOM*2, wallH, wallT);
+  addWall( ROOM, wallH/2, 0, wallT, wallH, ROOM*2);
+  addWall(-ROOM, wallH/2, 0, wallT, wallH, ROOM*2);
 
-  addWall(0, wallH/2,  roomSize/2, roomSize, wallH, wallT); // north
-  addWall(0, wallH/2, -roomSize/2, roomSize, wallH, wallT); // south
-  addWall( roomSize/2, wallH/2, 0, wallT, wallH, roomSize); // east
-  addWall(-roomSize/2, wallH/2, 0, wallT, wallH, roomSize); // west
-
+  // Ceiling
   const ceil = new THREE.Mesh(
-    new THREE.PlaneGeometry(roomSize, roomSize),
+    new THREE.PlaneGeometry(ROOM*2, ROOM*2),
     new THREE.MeshStandardMaterial({ color: 0x0e0e0e, roughness: 1 })
   );
   ceil.rotation.x = Math.PI/2;
   ceil.position.y = wallH;
   scene.add(ceil);
 
-  // ---------- Teleport pads + "teleport machine" ----------
+  // ---------- Teleport pads ----------
   const teleportPads = [];
   const spawnPads = [];
 
-  const padMat = new THREE.MeshStandardMaterial({ color: 0x0a2a18, roughness: 0.8, metalness: 0.1, emissive: new THREE.Color(0x062010) });
-  const padGlowMat = new THREE.MeshStandardMaterial({ color: 0x33ff66, roughness: 0.4, metalness: 0.2, emissive: new THREE.Color(0x22ff55), emissiveIntensity: 0.35 });
+  const padMat = new THREE.MeshStandardMaterial({
+    color: 0x0a2a18, roughness: 0.8, metalness: 0.1,
+    emissive: new THREE.Color(0x062010), emissiveIntensity: 0.25
+  });
+  const padSpawnMat = new THREE.MeshStandardMaterial({
+    color: 0x113018, roughness: 0.6, metalness: 0.1,
+    emissive: new THREE.Color(0x22ff55), emissiveIntensity: 0.25
+  });
 
-  function makePad(x, z, isSpawn = false) {
-    const g = new THREE.CylinderGeometry(0.55, 0.55, 0.08, 32);
-    const m = isSpawn ? padGlowMat : padMat;
+  function makePad(x, z, isSpawn=false) {
+    const g = new THREE.CylinderGeometry(0.62, 0.62, 0.09, 32);
+    const m = isSpawn ? padSpawnMat : padMat;
     const pad = new THREE.Mesh(g, m);
-    pad.position.set(x, 0.04, z);
-    pad.name = isSpawn ? "spawn_pad" : "teleport_pad";
+    pad.position.set(x, 0.045, z);
     scene.add(pad);
     teleportPads.push(pad);
     if (isSpawn) spawnPads.push(new THREE.Vector3(x, 0, z));
 
-    // ring detail
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.35, 0.52, 32),
+      new THREE.RingGeometry(0.40, 0.58, 32),
       new THREE.MeshBasicMaterial({ color: 0x33ff66, side: THREE.DoubleSide })
     );
     ring.rotation.x = -Math.PI/2;
-    ring.position.set(x, 0.09, z);
+    ring.position.set(x, 0.10, z);
     scene.add(ring);
 
     return pad;
   }
 
-  // Lobby spawn pads (domain spawn teleport sites)
-  // You spawn ONLY on these.
-  makePad(0, 6.8, true);     // main lobby spawn (faces table)
-  makePad(-2.2, 6.8, true);  // alternate spawn
-  makePad( 2.2, 6.8, true);  // alternate spawn
+  // Spawn pads INSIDE room, with clear space
+  makePad(0,  18, true);
+  makePad(-2.6, 18, true);
+  makePad( 2.6, 18, true);
 
-  // Extra teleport pads around the space
-  makePad(0, 2.6, false);
-  makePad(-4.6, 1.6, false);
-  makePad( 4.6, 1.6, false);
-  makePad(0, -5.8, false);
+  // Extra pads
+  makePad(0, 10, false);
+  makePad(-10, 8, false);
+  makePad( 10, 8, false);
+  makePad(0, -14, false);
 
-  // Teleport machine visual near spawn
-  const machine = new THREE.Group();
+  // Teleport machine behind spawn
   const woodMat = new THREE.MeshStandardMaterial({
     color: texRosewood ? 0xffffff : 0x2b1d12,
     map: texRosewood || null,
@@ -109,88 +110,114 @@ export async function initWorld(ctx) {
     metalness: 0.05
   });
 
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.9, 0.22, 32), woodMat);
-  base.position.set(0, 0.11, 8.2);
+  const machine = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 1.05, 0.26, 32), woodMat);
+  base.position.set(0, 0.13, 22);
   machine.add(base);
 
-  const core = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.85, 24), new THREE.MeshStandardMaterial({
-    color: 0x121212, roughness: 0.4, metalness: 0.6, emissive: new THREE.Color(0x081808), emissiveIntensity: 0.25
-  }));
-  core.position.set(0, 0.62, 8.2);
+  const core = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.38, 0.38, 0.95, 24),
+    new THREE.MeshStandardMaterial({ color: 0x131313, roughness: 0.35, metalness: 0.7, emissive: new THREE.Color(0x081808), emissiveIntensity: 0.32 })
+  );
+  core.position.set(0, 0.70, 22);
   machine.add(core);
 
-  const halo = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.06, 16, 50),
-    new THREE.MeshStandardMaterial({ color: 0x33ff66, emissive: new THREE.Color(0x22ff55), emissiveIntensity: 0.4, roughness: 0.4 })
+  const halo = new THREE.Mesh(
+    new THREE.TorusGeometry(0.62, 0.07, 16, 50),
+    new THREE.MeshStandardMaterial({ color: 0x33ff66, emissive: new THREE.Color(0x22ff55), emissiveIntensity: 0.5, roughness: 0.4 })
   );
   halo.rotation.x = Math.PI/2;
-  halo.position.set(0, 1.05, 8.2);
+  halo.position.set(0, 1.18, 22);
   machine.add(halo);
 
   scene.add(machine);
 
-  // ---------- Poker Table (visible from lobby spawn) ----------
+  // ---------- Poker Table ----------
   const table = new THREE.Group();
   table.position.set(0, 0, 0);
+  scene.add(table);
 
-  const tableWood = woodMat;
-  const tableRim = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.25, 2.25, 0.14, 64),
-    tableWood
+  const rim = new THREE.Mesh(
+    new THREE.CylinderGeometry(2.35, 2.35, 0.16, 64),
+    woodMat
   );
-  tableRim.position.y = 0.86;
-  table.add(tableRim);
+  rim.position.y = 0.88;
+  table.add(rim);
 
   const felt = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.02, 2.02, 0.10, 64),
+    new THREE.CylinderGeometry(2.10, 2.10, 0.11, 64),
     new THREE.MeshStandardMaterial({ color: 0x0b4b2e, roughness: 1.0 })
   );
-  felt.position.y = 0.86;
+  felt.position.y = 0.88;
   table.add(felt);
 
   const pedestal = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.35, 0.65, 0.85, 24),
+    new THREE.CylinderGeometry(0.42, 0.75, 0.88, 24),
     new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9 })
   );
-  pedestal.position.y = 0.42;
+  pedestal.position.y = 0.44;
   table.add(pedestal);
 
-  scene.add(table);
-
-  // ---------- Bots + simple “playing” loop ----------
+  // ---------- Chairs + Bots ----------
   const bots = [];
-  const botMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.9 });
-  const accent = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.8 });
-
   const seatCount = 8;
-  const radius = 2.85;
+  const radius = 3.05;
+
+  const botMat = new THREE.MeshStandardMaterial({ color: 0x3b3b3b, roughness: 0.92 });
+  const botHeadMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.85 });
+
+  const shirtMat = new THREE.MeshStandardMaterial({
+    color: texShirt ? 0xffffff : 0x444444,
+    map: texShirt || null,
+    roughness: 0.9
+  });
+
+  // crown mesh (winner)
+  const crown = makeCrown(THREE, texCrown);
+  crown.visible = false;
+  scene.add(crown);
 
   for (let i = 0; i < seatCount; i++) {
     const a = (i / seatCount) * Math.PI * 2;
     const x = Math.cos(a) * radius;
     const z = Math.sin(a) * radius;
 
+    // Chair
+    const chair = makeChair(THREE, woodMat);
+    chair.position.set(x, 0, z);
+    chair.lookAt(0, 1.0, 0);
+    scene.add(chair);
+
+    // Bot
     const bot = new THREE.Group();
 
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.55, 6, 12), botMat);
+    // Body (one bot with your shirt)
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.55, 6, 12), i === 0 ? shirtMat : botMat);
     body.position.y = 1.02;
     bot.add(body);
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 16), accent);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 16), botHeadMat);
     head.position.y = 1.52;
     bot.add(head);
 
     bot.position.set(x, 0, z);
     bot.lookAt(0, 1.2, 0);
     scene.add(bot);
-    bots.push(bot);
+
+    // Name tag + money
+    const tag = makeNameTag(THREE, `BOT ${i+1}\n$${(1000 + i*250).toLocaleString()}`);
+    tag.position.set(0, 1.88, 0);
+    bot.add(tag);
+
+    bots.push({ bot, tag, bankroll: 1000 + i*250 });
   }
 
-  // Cards + pot indicator (simple visual gameplay)
+  // ---------- Pot + Cards ----------
   const pot = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.18, 0.18, 0.08, 24),
+    new THREE.CylinderGeometry(0.20, 0.20, 0.09, 24),
     new THREE.MeshStandardMaterial({ color: 0xffd36a, roughness: 0.35, metalness: 0.4 })
   );
-  pot.position.set(0, 0.95, 0);
+  pot.position.set(0, 0.97, 0);
   scene.add(pot);
 
   const cardMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
@@ -200,73 +227,99 @@ export async function initWorld(ctx) {
   for (let i=0;i<5;i++){
     const c = new THREE.Mesh(cardGeo, cardMat);
     c.rotation.x = -Math.PI/2;
-    c.position.set((i-2)*0.26, 0.92, 0);
+    c.position.set((i-2)*0.26, 0.94, 0);
     c.visible = false;
     scene.add(c);
     dealCards.push(c);
   }
 
-  // ---------- Leaderboard panel (in-lobby visible) ----------
+  // ---------- Leaderboard & Store kiosk ----------
   const board = makeBillboard(THREE, "LEADERBOARD\n1) Player\n2) Bot King\n3) Bot Queen\n\n(placeholder)");
-  board.position.set(-6.2, 1.6, 5.2);
-  board.rotation.y = Math.PI/2.2;
+  board.position.set(-12.5, 1.7, 9);
+  board.rotation.y = Math.PI/2.3;
   scene.add(board);
 
-  // ---------- Animation / Tick ----------
+  const store = makeKiosk(THREE, woodMat, "STORE\nHats / Shirts\n(placeholder)");
+  store.position.set(12.0, 0, 9);
+  store.rotation.y = -Math.PI/2.3;
+  scene.add(store);
+
+  // ---------- Hand loop + crown winner ----------
   let t = 0;
   let dealTimer = 0;
   let dealIndex = 0;
-  let phase = 0; // 0=shuffle,1=deal,2=show,3=reset
+  let phase = 0; // 0=wait,1=deal,2=show,3=reset
+  let winnerIndex = 0;
+
+  function setWinner(idx) {
+    winnerIndex = idx % bots.length;
+    const w = bots[winnerIndex].bot;
+    crown.visible = true;
+    crown.position.set(w.position.x, 1.78, w.position.z);
+  }
+
+  setWinner(0);
 
   function tick(dt) {
     t += dt;
 
-    // Subtle bot idle
+    // Bot idle
     for (let i=0;i<bots.length;i++){
-      bots[i].position.y = 0.0 + Math.sin(t*1.2 + i)*0.01;
-      bots[i].rotation.y += Math.sin(t*0.6 + i)*0.0008;
+      const b = bots[i].bot;
+      b.position.y = Math.sin(t*1.2 + i)*0.01;
+      b.rotation.y += Math.sin(t*0.6 + i)*0.0008;
+    }
+
+    // Crown follow + spin
+    if (crown.visible) {
+      const w = bots[winnerIndex].bot;
+      crown.position.x = w.position.x;
+      crown.position.z = w.position.z;
+      crown.rotation.y += dt * 1.2;
     }
 
     // Pot pulse
-    pot.scale.setScalar(1 + Math.sin(t*2.2)*0.04);
+    pot.scale.setScalar(1 + Math.sin(t*2.2)*0.05);
 
-    // Simple hand loop
+    // Simple “hand”
     dealTimer += dt;
-    if (phase === 0 && dealTimer > 1.0) {
-      // start dealing
-      dealTimer = 0;
-      dealIndex = 0;
-      phase = 1;
+    if (phase === 0 && dealTimer > 1.1) {
+      dealTimer = 0; dealIndex = 0; phase = 1;
       for (const c of dealCards) c.visible = false;
-    }
-    else if (phase === 1 && dealTimer > 0.35) {
+    } else if (phase === 1 && dealTimer > 0.32) {
       dealTimer = 0;
       if (dealIndex < dealCards.length) {
         dealCards[dealIndex].visible = true;
         dealIndex++;
       } else {
-        phase = 2;
-        dealTimer = 0;
+        phase = 2; dealTimer = 0;
       }
-    }
-    else if (phase === 2 && dealTimer > 2.0) {
-      phase = 3;
-      dealTimer = 0;
-    }
-    else if (phase === 3 && dealTimer > 0.6) {
+    } else if (phase === 2 && dealTimer > 2.0) {
+      phase = 3; dealTimer = 0;
+
+      // Rotate winner + update one bankroll to show “gameplay”
+      winnerIndex = (winnerIndex + 1) % bots.length;
+      setWinner(winnerIndex);
+      bots[winnerIndex].bankroll += 250;
+      bots[winnerIndex].tag.material.map = makeNameTagTexture(
+        THREE,
+        `BOT ${winnerIndex+1}\n$${bots[winnerIndex].bankroll.toLocaleString()}`
+      );
+      bots[winnerIndex].tag.material.map.needsUpdate = true;
+    } else if (phase === 3 && dealTimer > 0.6) {
       for (const c of dealCards) c.visible = false;
-      phase = 0;
-      dealTimer = 0;
+      phase = 0; dealTimer = 0;
     }
   }
 
-  log("✅ World 9.0 built: lobby + pads + table + bots + leaderboard");
+  log("✅ World 9.0 Patch A built (big lobby, pads, chairs, bots, tags, crown, kiosks)");
 
   return {
     floorMesh,
     teleportPads,
     spawnPads,
-    tick,
+    roomClamp: { minX: -ROOM+1.2, maxX: ROOM-1.2, minZ: -ROOM+1.2, maxZ: ROOM-1.2 },
+    tick
   };
 
   function addWall(x,y,z,sx,sy,sz){
@@ -276,20 +329,97 @@ export async function initWorld(ctx) {
   }
 }
 
+function makeChair(THREE, woodMat) {
+  const g = new THREE.Group();
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.08, 0.6), woodMat);
+  seat.position.y = 0.45;
+  g.add(seat);
+
+  const back = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.08), woodMat);
+  back.position.set(0, 0.75, -0.26);
+  g.add(back);
+
+  const legMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9 });
+  for (const [lx,lz] of [[-0.22,-0.22],[0.22,-0.22],[-0.22,0.22],[0.22,0.22]]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,0.45,10), legMat);
+    leg.position.set(lx, 0.22, lz);
+    g.add(leg);
+  }
+  return g;
+}
+
+function makeCrown(THREE, texCrown) {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({
+    color: texCrown ? 0xffffff : 0xffd36a,
+    map: texCrown || null,
+    roughness: 0.35,
+    metalness: 0.55,
+    emissive: new THREE.Color(0x222200),
+    emissiveIntensity: 0.12
+  });
+
+  const band = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.05, 14, 28), mat);
+  band.rotation.x = Math.PI/2;
+  g.add(band);
+
+  for (let i=0;i<6;i++){
+    const spike = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.18, 10), mat);
+    const a = (i/6) * Math.PI*2;
+    spike.position.set(Math.cos(a)*0.16, 0.12, Math.sin(a)*0.16);
+    spike.rotation.x = Math.PI;
+    g.add(spike);
+  }
+  g.position.y = 1.78;
+  return g;
+}
+
+function makeNameTag(THREE, text) {
+  const tex = makeNameTagTexture(THREE, text);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.75, 0.38), mat);
+  mesh.renderOrder = 9999;
+  return mesh;
+}
+
+function makeNameTagTexture(THREE, text) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 256;
+  const c = canvas.getContext("2d");
+
+  c.fillStyle = "rgba(0,0,0,0.65)";
+  c.fillRect(0,0,512,256);
+  c.strokeStyle = "rgba(51,255,102,0.45)";
+  c.lineWidth = 6;
+  c.strokeRect(16,16,480,224);
+
+  c.fillStyle = "white";
+  c.font = "bold 42px system-ui, Arial";
+  c.textBaseline = "top";
+
+  const lines = String(text).split("\n");
+  let y = 34;
+  for (let i=0;i<lines.length;i++){
+    c.fillText(lines[i], 36, y);
+    y += 52;
+  }
+
+  return new THREE.CanvasTexture(canvas);
+}
+
 function makeBillboard(THREE, text) {
   const canvas = document.createElement("canvas");
   canvas.width = 512;
   canvas.height = 512;
   const ctx = canvas.getContext("2d");
 
-  // panel
   ctx.fillStyle = "rgba(0,0,0,0.72)";
   ctx.fillRect(0,0,512,512);
   ctx.strokeStyle = "rgba(255,255,255,0.25)";
   ctx.lineWidth = 6;
   ctx.strokeRect(16,16,480,480);
 
-  // text
   ctx.fillStyle = "white";
   ctx.font = "bold 34px system-ui, Arial";
   ctx.textAlign = "left";
@@ -308,3 +438,16 @@ function makeBillboard(THREE, text) {
   mesh.position.y = 1.6;
   return mesh;
 }
+
+function makeKiosk(THREE, woodMat, label) {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.0, 1.1), woodMat);
+  base.position.set(0, 0.5, 0);
+  g.add(base);
+
+  const sign = makeBillboard(THREE, label);
+  sign.position.set(0, 1.8, 0.7);
+  g.add(sign);
+
+  return g;
+         }

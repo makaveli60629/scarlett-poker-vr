@@ -1,247 +1,168 @@
-// /js/world.js — Scarlett VR Poker (FULL WORLD LOADER)
-// Purpose: Restore YOUR original modules (teleporter machine, full room, poker sim, cards)
-// while staying robust and cache-proof.
-//
-// main.js imports this as: import(`./world.js?v=${V}`)
-// and calls: initWorld({ THREE, scene, log })
-
+// /js/world.js — Full World (uses your actual filenames)
 export async function initWorld({ THREE, scene, log = console.log }) {
-  log("[world] boot (loader)");
+  const V = new URL(import.meta.url).searchParams.get("v") || "no-v";
+  const imp = async (p) => {
+    try { return await import(`${p}?v=${V}`); }
+    catch (e) { log(`⚠️ [world] import failed: ${p} — ${e?.message || e}`); return null; }
+  };
 
   const world = {
     group: new THREE.Group(),
     tableFocus: new THREE.Vector3(0, 0, -6.5),
-    spawnPads: [new THREE.Vector3(0, 0, 2.0)],
-    roomClamp: { minX: -7.5, maxX: 7.5, minZ: -13.5, maxZ: 7.5 },
+    spawnPads: [],
+    roomClamp: { minX: -8, maxX: 8, minZ: -14, maxZ: 8 },
+    seats: [],
+    lobbyZone: { min: new THREE.Vector3(-6, 0, 8), max: new THREE.Vector3(6, 0, 14) },
+    bots: null,              // IMPORTANT for poker_simulation.js
     tick: (dt) => {},
   };
 
   world.group.name = "World";
   scene.add(world.group);
 
-  // Helper: cache-proof import using the same querystring as world.js got
-  const V = new URL(import.meta.url).searchParams.get("v") || "no-v";
-  const imp = async (path) => {
-    try {
-      return await import(`${path}?v=${V}`);
-    } catch (e) {
-      log(`⚠️ [world] import failed: ${path} — ${e?.message || e}`);
-      return null;
+  // ---------- lights (optional) ----------
+  const lights_pack = await imp("./lights_pack.js");
+  if (lights_pack) {
+    const fn = lights_pack.buildLights || lights_pack.initLights || lights_pack.addLights || lights_pack.setupLights;
+    if (typeof fn === "function") {
+      try { fn({ THREE, scene, world, log, parent: world.group }); }
+      catch (e) { log("⚠️ [world] lights_pack error: " + (e?.message || e)); }
     }
-  };
+  }
 
-  // Helper: safe call
-  const safe = async (label, fn) => {
-    try {
-      return await fn();
-    } catch (e) {
-      log(`⚠️ [world] ${label} failed — ${e?.message || e}`);
-      return null;
+  // ---------- environment ----------
+  const textures = await imp("./textures.js"); // optional helper
+  for (const [modPath, names] of [
+    ["./vip_room.js", ["build", "buildVIPRoom", "initVIPRoom", "createVIPRoom"]],
+    ["./solid_walls.js", ["build", "buildSolidWalls", "initSolidWalls", "createSolidWalls"]],
+    ["./spectator_rail.js", ["build", "buildSpectatorRail", "initSpectatorRail", "createSpectatorRail"]],
+    ["./water_fountain.js", ["build", "buildWaterFountain", "initWaterFountain", "createWaterFountain"]],
+  ]) {
+    const m = await imp(modPath);
+    if (!m) continue;
+    const fn = names.map(n => m[n]).find(f => typeof f === "function");
+    if (fn) {
+      try {
+        const res = fn({ THREE, scene, world, log, parent: world.group, textures });
+        if (res?.isObject3D && !res.parent) world.group.add(res);
+      } catch (e) {
+        log(`⚠️ [world] ${modPath} error: ${e?.message || e}`);
+      }
     }
-  };
+  }
 
-  // ---------------------------------------------------------
-  // 1) Load YOUR full environment/world build (if present)
-  // ---------------------------------------------------------
-  // These are COMMON filenames you’ve used in this project.
-  // If your repo uses different ones, just rename the paths below.
-  const candidates = [
-    "./world_full.js",
-    "./room.js",
-    "./environment.js",
-    "./world_build.js",
-    "./World.js",
-  ];
+  // ---------- table ----------
+  const tableMods = [
+    await imp("./table_factory.js"),
+    await imp("./boss_table.js"),
+    await imp("./table_6_oval.js"),
+    await imp("./table.js"),
+  ].filter(Boolean);
 
-  let envBuilt = false;
+  let tableRes = null;
+  for (const m of tableMods) {
+    const fn = m.build || m.buildTable || m.createTable || m.create || null;
+    if (typeof fn === "function") {
+      try {
+        tableRes = fn({ THREE, scene, world, log, parent: world.group, textures }) || tableRes;
+        break;
+      } catch (e) {
+        log("⚠️ [world] table build error: " + (e?.message || e));
+      }
+    }
+  }
 
-  for (const p of candidates) {
-    const mod = await imp(p);
-    if (!mod) continue;
+  // seats/focus from table if provided
+  if (tableRes?.tableFocus) world.tableFocus.copy(tableRes.tableFocus);
+  if (tableRes?.focus) world.tableFocus.copy(tableRes.focus);
+  if (tableRes?.roomClamp) world.roomClamp = tableRes.roomClamp;
+  if (tableRes?.seats?.length) world.seats = tableRes.seats;
 
-    // Try common entry points
-    const buildFn =
-      mod.initWorld ||
-      mod.buildWorld ||
-      mod.buildRoom ||
-      mod.createWorld ||
-      mod.init ||
+  // fallback seats if none
+  if (!world.seats.length) {
+    const c = world.tableFocus.clone();
+    const r = 3.2;
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const p = new THREE.Vector3(c.x + Math.cos(a) * r, 0, c.z + Math.sin(a) * r);
+      world.seats.push({ position: p, yaw: Math.atan2(c.x - p.x, c.z - p.z) });
+    }
+  }
+
+  // spawn pad
+  world.spawnPads = [new THREE.Vector3(world.tableFocus.x, 0, world.tableFocus.z + 6.0)];
+
+  // ---------- YOUR teleporter machine ----------
+  const teleport_machine = await imp("./teleport_machine.js");
+  if (teleport_machine) {
+    const fn =
+      teleport_machine.buildTeleportMachine ||
+      teleport_machine.createTeleportMachine ||
+      teleport_machine.build ||
+      teleport_machine.init ||
       null;
 
-    if (typeof buildFn === "function") {
-      const result = await safe(`environment via ${p}`, async () =>
-        buildFn({ THREE, scene, worldGroup: world.group, log })
-      );
-
-      // If that module returned useful metadata, adopt it
-      if (result?.tableFocus) world.tableFocus.copy(result.tableFocus);
-      if (result?.spawnPads?.length) world.spawnPads = result.spawnPads;
-      if (result?.roomClamp) world.roomClamp = result.roomClamp;
-      if (typeof result?.tick === "function") {
-        const prev = world.tick;
-        world.tick = (dt) => {
-          prev(dt);
-          result.tick(dt);
-        };
+    if (typeof fn === "function") {
+      try {
+        const tele = fn({ THREE, scene, world, log, parent: world.group, textures });
+        if (tele?.isObject3D && !tele.parent) world.group.add(tele);
+        log("[world] teleport_machine.js ✅");
+      } catch (e) {
+        log("⚠️ [world] teleport_machine error: " + (e?.message || e));
       }
-
-      envBuilt = true;
-      log(`[world] environment loaded from ${p} ✅`);
-      break;
+    } else {
+      log("⚠️ [world] teleport_machine.js loaded but no build function found");
     }
   }
 
-  // If no environment module exists, do NOT panic — keep a tiny safety floor
-  if (!envBuilt) {
-    log("[world] No full environment module found — keeping minimal safety floor.");
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(80, 80),
-      new THREE.MeshStandardMaterial({ color: 0x0b0b10, roughness: 0.98 })
-    );
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = 0;
-    world.group.add(floor);
-  }
-
-  // ---------------------------------------------------------
-  // 2) Restore YOUR original teleporter machine module
-  // ---------------------------------------------------------
-  // Expected: you already have a teleporter machine .js we made earlier.
-  // Try common names; whichever exists will be used.
-  const teleMods = [
-    "./teleport_machine.js",
-    "./teleporter_machine.js",
-    "./TeleportMachine.js",
-    "./teleporter.js",
-  ];
-
-  let teleporter = null;
-
-  for (const p of teleMods) {
-    const mod = await imp(p);
-    if (!mod) continue;
-
-    const buildFn =
-      mod.buildTeleportMachine ||
-      mod.createTeleportMachine ||
-      mod.buildTeleporterMachine ||
-      mod.createTeleporterMachine ||
-      mod.initTeleportMachine ||
-      null;
-
-    if (typeof buildFn === "function") {
-      teleporter = await safe(`teleporter build via ${p}`, async () =>
-        buildFn({ THREE, scene, parent: world.group, log })
-      );
-
-      // Some builders return a mesh/group, some add to parent and return nothing.
-      if (teleporter && teleporter.isObject3D) {
-        if (!teleporter.parent) world.group.add(teleporter);
-      }
-
-      // Optional: if that module exports tick/update for FX
-      const tickFn = mod.tick || mod.update || mod.teleportTick || null;
-      if (typeof tickFn === "function") {
-        const prev = world.tick;
-        world.tick = (dt) => {
-          prev(dt);
-          tickFn(dt);
-        };
-      }
-
-      log(`[world] teleporter restored from ${p} ✅`);
-      break;
-    }
-  }
-
-  if (!teleporter) {
-    log("[world] ⚠️ Could not find your teleporter module. (Keeping none rather than wrong one.)");
-  }
-
-  // ---------------------------------------------------------
-  // 3) Restore Bots system (your Bots module, not the dummy BossBots)
-  // ---------------------------------------------------------
-  const botsMod =
-    (await imp("./bots.js")) ||
-    (await imp("./Bots.js")) ||
-    null;
-
+  // ---------- bots ----------
+  const botsMod = await imp("./bots.js");
   if (botsMod?.Bots?.init) {
-    // Provide seats + lobby zone if your world build has them
-    const getSeats =
-      () => (world.seats ? world.seats : (world._getSeats ? world._getSeats() : []));
-    const getLobbyZone =
-      () => (world.lobbyZone ? world.lobbyZone : (world._getLobbyZone ? world._getLobbyZone() : null));
-
-    await safe("Bots.init", async () => {
+    try {
       botsMod.Bots.init({
         scene,
         rig: null,
-        getSeats,
-        getLobbyZone,
+        getSeats: () => world.seats,
+        getLobbyZone: () => world.lobbyZone,
       });
-    });
 
-    const prev = world.tick;
-    world.tick = (dt) => {
-      prev(dt);
-      botsMod.Bots.update(dt);
-    };
+      world.bots = botsMod.Bots; // IMPORTANT for poker_simulation.js
+      const prev = world.tick;
+      world.tick = (dt) => { prev(dt); botsMod.Bots.update(dt); };
 
-    log("[world] Bots system restored ✅");
+      log("[world] bots.js ✅");
+    } catch (e) {
+      log("⚠️ [world] Bots.init failed: " + (e?.message || e));
+    }
   } else {
-    log("[world] ⚠️ Bots module not found or missing Bots.init (skipping).");
+    log("⚠️ [world] bots.js missing Bots.init");
   }
 
-  // ---------------------------------------------------------
-  // 4) Restore PokerSimulation / cards (your gameplay)
-  // ---------------------------------------------------------
-  const pokerCandidates = [
-    "./poker_simulation.js",
-    "./PokerSimulation.js",
-    "./poker.js",
-    "./gameplay.js",
-  ];
+  // ---------- poker simulation ----------
+  const pokerSim = await imp("./poker_simulation.js");
+  if (pokerSim?.PokerSimulation?.init) {
+    try {
+      pokerSim.PokerSimulation.init({
+        THREE,
+        scene,
+        getSeats: () => world.seats,
+        tableFocus: world.tableFocus,
+        world, // give it world so it can access world.bots if it wants
+        log,
+      });
 
-  for (const p of pokerCandidates) {
-    const mod = await imp(p);
-    if (!mod) continue;
-
-    const startFn =
-      mod.initPoker ||
-      mod.startPoker ||
-      mod.PokerSimulation?.init ||
-      mod.PokerSimulation?.start ||
-      mod.init ||
-      null;
-
-    if (typeof startFn === "function") {
-      const sim = await safe(`poker start via ${p}`, async () =>
-        startFn({ THREE, scene, world, log })
-      );
-
-      // If it provides tick/update
-      const tickFn =
-        sim?.tick ||
-        sim?.update ||
-        mod.tick ||
-        mod.update ||
-        mod.PokerSimulation?.update ||
-        null;
-
+      const tickFn = pokerSim.PokerSimulation.update || pokerSim.PokerSimulation.tick;
       if (typeof tickFn === "function") {
         const prev = world.tick;
-        world.tick = (dt) => {
-          prev(dt);
-          tickFn(dt);
-        };
+        world.tick = (dt) => { prev(dt); tickFn(dt); };
       }
 
-      log(`[world] PokerSimulation restored from ${p} ✅`);
-      break;
+      log("[world] poker_simulation ✅");
+    } catch (e) {
+      log("⚠️ [world] poker_simulation init failed: " + (e?.message || e));
     }
   }
 
   log("[world] ready ✅");
   return world;
-    }
+}

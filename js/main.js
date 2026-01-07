@@ -1,3 +1,5 @@
+// /js/main.js — Scarlett Poker VR — MAIN vNext (Quest + GitHub Pages safe)
+
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
 
@@ -5,12 +7,6 @@ import { createHub } from "./diagnostics.js";
 import { safeImport } from "./safe_import.js";
 import { ShirtSystem } from "./shirt.js";
 
-// after grips exist:
-const shirts = ShirtSystem.create({ textureUrl: "assets/textures/shirt_diffuse.png" });
-
-// whenever grips are ready:
-shirts.attachToControllerGrip(leftGrip);
-shirts.attachToControllerGrip(rightGrip);
 const hub = createHub();
 hub.addLine("✅ main.js started");
 
@@ -23,6 +19,13 @@ const App = {
   rig: null,        // player rig group
   worldData: null,  // from world.build
   systems: {},      // loaded modules
+
+  // XR grips
+  leftGrip: null,
+  rightGrip: null,
+
+  // shirts
+  shirts: null,
 
   fpsT: 0,
   fpsC: 0,
@@ -37,7 +40,7 @@ const App = {
     this.renderer.xr.enabled = true;
     document.body.appendChild(this.renderer.domElement);
 
-    // ✅ VR button always
+    // ✅ VR button always (Quest)
     document.body.appendChild(VRButton.createButton(this.renderer));
     hub.addLine("✅ VRButton attached");
 
@@ -56,6 +59,26 @@ const App = {
 
     // Backup lighting (prevents black void even if world fails)
     this.addBackupLights();
+
+    // Headlamp attached to camera (helps a LOT on Quest)
+    this.addHeadlamp();
+
+    // --- Create XR controller grips (these are the anchors for hands/laser/shirts) ---
+    this.leftGrip = this.renderer.xr.getControllerGrip(0);
+    this.rightGrip = this.renderer.xr.getControllerGrip(1);
+    this.scene.add(this.leftGrip, this.rightGrip);
+    hub.addLine("✅ Controller grips created");
+
+    // --- Shirts (attach to grips) ---
+    try {
+      this.shirts = ShirtSystem.create({ textureUrl: "assets/textures/shirt_diffuse.png" });
+      const okL = this.shirts.attachToControllerGrip(this.leftGrip);
+      const okR = this.shirts.attachToControllerGrip(this.rightGrip);
+      hub.addLine(okL && okR ? "✅ Shirt attached to grips" : "⚠️ Shirt attach partial");
+    } catch (e) {
+      hub.addLine("⚠️ ShirtSystem failed");
+      hub.addLine(`   ↳ ${String(e?.message || e)}`.slice(0, 180));
+    }
 
     // --- Safe imports (everything optional except world/controls) ---
     const WorldI  = await safeImport(hub, "world", "./world.js");
@@ -99,9 +122,9 @@ const App = {
     }
 
     // Spawn safely on lobby pad if present
-    this.applySpawn();
+    this.applySpawn(true);
 
-    // --- Controls init (VR + keyboard fallback + collision) ---
+    // --- Controls init (movement/collision) ---
     try {
       this.systems.Controls?.init?.({
         renderer: this.renderer,
@@ -118,12 +141,15 @@ const App = {
     }
 
     // --- VR controller rig: hands + laser + teleport ring ---
+    // IMPORTANT: pass grips so the laser does NOT get stuck at world center
     try {
       this.systems.VRController?.init?.({
         renderer: this.renderer,
         scene: this.scene,
         rig: this.rig,
         camera: this.camera,
+        leftGrip: this.leftGrip,
+        rightGrip: this.rightGrip,
         getWorld: () => this.worldData,
       });
       hub.addLine("✅ VRController init");
@@ -138,6 +164,7 @@ const App = {
         renderer: this.renderer,
         rig: this.rig,
         camera: this.camera,
+        // phone: look = left finger drag, move = right thumb pad
         onTeleport: (pos) => this.systems.Controls?.teleportTo?.(pos),
         getBounds: () => this.worldData?.bounds || null,
         getFloorY: () => this.worldData?.floorY ?? 0,
@@ -208,17 +235,31 @@ const App = {
   },
 
   addBackupLights() {
-    // These stay even if world builds, to prevent darkness on failures
-    const amb = new THREE.AmbientLight(0xffffff, 0.35);
+    const amb = new THREE.AmbientLight(0xffffff, 0.45);
     this.scene.add(amb);
 
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 0.55);
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 0.75);
     hemi.position.set(0, 12, 0);
     this.scene.add(hemi);
 
-    const key = new THREE.DirectionalLight(0xffffff, 0.9);
+    const key = new THREE.DirectionalLight(0xffffff, 1.1);
     key.position.set(8, 18, 8);
     this.scene.add(key);
+  },
+
+  addHeadlamp() {
+    // A small point light attached to camera to prevent “void darkness”
+    const lamp = new THREE.PointLight(0xffffff, 1.2, 12);
+    lamp.position.set(0, 0.2, -0.2);
+    this.camera.add(lamp);
+
+    const lamp2 = new THREE.SpotLight(0xffffff, 0.9, 18, Math.PI / 7, 0.4, 1.0);
+    lamp2.position.set(0, 0.15, 0.1);
+    lamp2.target.position.set(0, 0.1, -1.0);
+    this.camera.add(lamp2);
+    this.camera.add(lamp2.target);
+
+    hub.addLine("✅ Headlamp on camera");
   },
 
   addFallbackFloor() {
@@ -233,11 +274,10 @@ const App = {
 
   applySpawn(force = false) {
     if (!this.worldData?.spawn) return;
-    // Always put rig at spawn (prevents spawning in table)
     if (force || this.rig.position.lengthSq() < 0.001) {
       this.rig.position.set(this.worldData.spawn.x, 0, this.worldData.spawn.z);
       this.rig.rotation.y = 0;
-      hub.addLine(`✅ Spawned @ lobby pad (${this.worldData.spawn.x.toFixed(1)}, ${this.worldData.spawn.z.toFixed(1)})`);
+      hub.addLine(`✅ Spawned @ lobby pad (${this.worldData.spawn.x.toFixed(2)}, ${this.worldData.spawn.z.toFixed(2)})`);
     }
   },
 
@@ -267,6 +307,7 @@ const App = {
         if (s.handedness === "right") right = true;
       }
     }
+
     hub.set({
       xr: !!session,
       left,

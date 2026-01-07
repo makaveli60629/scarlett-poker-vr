@@ -1,10 +1,8 @@
-// /js/controls.js — Scarlett Poker VR Controls (PERMANENT FIX)
-// Fixes:
-// - Laser is rigged to RIGHT GRIP (stable)
-// - Teleport aims by raycasting TeleportFloor (no more broken hits)
-// - Floor blinking reduced because ray hit plane is separate (y=0.01)
-// - Height lock stays constant seated/standing
-// - Smooth move (left stick) + snap turn (right stick)
+// /js/controls.js — Scarlett Poker VR — Controls v12
+// - Left stick: smooth move (NOT inverted)
+// - Right stick: 45° snap turn
+// - Right trigger hold/release: teleport
+// - Height lock: keeps your chosen "standing" height (CAL button)
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
@@ -12,143 +10,141 @@ export const Controls = {
   renderer: null,
   camera: null,
   player: null,
-
-  controllers: { left: null, right: null },
-  grips: { left: null, right: null },
-
-  teleportFloor: null,
-  floorY: 0.01,
-
   colliders: [],
   bounds: null,
+  floorY: 0,
 
-  moveSpeed: 2.2,
+  moveSpeed: 2.25,
   snapAngle: THREE.MathUtils.degToRad(45),
   snapCooldown: 0.25,
   _snapT: 0,
 
-  lockHeight: true,
-  targetEyeHeight: 1.72,
-  baseY: 0.01,
+  // height lock
+  targetEyeHeight: 1.75,
+  _calibrated: false,
 
-  // teleport
+  // teleport visuals
   tpActive: false,
-  tpCooldown: 0,
+  tpHold: 0,
+  tpMaxRadius: 7.0,
   tpTarget: new THREE.Vector3(),
-  tpMaxDist: 25,
-
-  // ray tools
-  raycaster: new THREE.Raycaster(),
-  _hit: new THREE.Vector3(),
-
-  // visuals
-  laser: null,
-  laserMat: null,
-  targetRing: null,
-  targetRingMat: null,
+  tpRings: null,
+  tpBeam: null,
+  tpCooldown: 0,
 
   _tmp: new THREE.Vector3(),
 
-  init(opts) {
-    this.renderer = opts.renderer;
-    this.camera = opts.camera;
-    this.player = opts.player;
+  init({ renderer, camera, player, colliders = [], bounds = null, floorY = 0 }) {
+    this.renderer = renderer;
+    this.camera = camera;
+    this.player = player;
+    this.colliders = colliders;
+    this.bounds = bounds;
+    this.floorY = floorY;
 
-    this.controllers = opts.controllers || this.controllers;
-    this.grips = opts.grips || this.grips;
+    this._buildTeleportViz();
+  },
 
-    this.colliders = opts.colliders || [];
-    this.bounds = opts.bounds || null;
+  calibrateHeight() {
+    // lock to CURRENT headset height (best when you are standing how you want it)
+    this.targetEyeHeight = Math.max(1.6, this.camera.position.y);
+    this._calibrated = true;
+  },
 
-    this.teleportFloor = opts.teleportFloor || null;
-    this.floorY = typeof opts.floorY === "number" ? opts.floorY : 0.01;
+  _buildTeleportViz() {
+    // rings
+    const g = new THREE.Group();
+    const mk = (r, c) =>
+      new THREE.Mesh(
+        new THREE.TorusGeometry(r, 0.03, 10, 48),
+        new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 1.8, roughness: 0.25, metalness: 0.1 })
+      );
 
-    this.lockHeight = opts.lockHeight ?? true;
-    this.targetEyeHeight = opts.targetEyeHeight ?? 1.72;
-    this.baseY = opts.baseY ?? 0.01;
+    const r1 = mk(0.22, 0xff2bd6);
+    const r2 = mk(0.30, 0x2bd7ff);
+    const r3 = mk(0.38, 0x00ffaa);
+    r1.rotation.x = r2.rotation.x = r3.rotation.x = Math.PI / 2;
+    r1.position.y = r2.position.y = r3.position.y = 0.02;
+    g.add(r1, r2, r3);
+    g.visible = false;
 
-    // -------- LASER (attach to RIGHT GRIP, not controller) --------
-    const pts = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)];
-    const geo = new THREE.BufferGeometry().setFromPoints(pts);
-
-    this.laserMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
-    this.laser = new THREE.Line(geo, this.laserMat);
-    this.laser.visible = true;
-
-    // Attach to grip if available (best), else controller right, else player
-    const attach = this.grips?.right || this.controllers?.right || this.player;
-    attach.add(this.laser);
-
-    // -------- TARGET RING --------
-    this.targetRingMat = new THREE.MeshStandardMaterial({
-      color: 0x00ffaa,
-      emissive: 0x00ffaa,
-      emissiveIntensity: 2.4,
-      transparent: true,
-      opacity: 0.0,
-      roughness: 0.2,
-      metalness: 0.0,
-      side: THREE.DoubleSide
+    // beam
+    const beamGeo = new THREE.CylinderGeometry(0.01, 0.02, 1, 10, 1, true);
+    const beamMat = new THREE.MeshStandardMaterial({
+      color: 0x00ffaa, emissive: 0x00ffaa, emissiveIntensity: 1.2,
+      transparent: true, opacity: 0.35, roughness: 0.2
     });
+    const beam = new THREE.Mesh(beamGeo, beamMat);
+    beam.visible = false;
 
-    this.targetRing = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.38, 72), this.targetRingMat);
-    this.targetRing.rotation.x = -Math.PI / 2;
-    this.targetRing.position.y = this.floorY + 0.02;
+    this.tpRings = g;
+    this.tpBeam = beam;
 
-    // add to scene root
-    this.player.parent?.add?.(this.targetRing) || this.player.add(this.targetRing);
+    this.player.add(this.tpBeam);
+    this.player.parent?.add?.(this.tpRings) || this.player.add(this.tpRings);
   },
 
   update(dt) {
     if (!this.renderer?.xr) return;
 
-    this._snapT = Math.max(0, this._snapT - dt);
-    this.tpCooldown = Math.max(0, this.tpCooldown - dt);
-
-    // height lock
-    if (this.lockHeight) {
-      const camLocalY = this.camera.position.y;
-      this.player.position.y = this.baseY + (this.targetEyeHeight - camLocalY);
-    }
-
+    // if not in VR session, do nothing (Android uses MobileTouch)
     const session = this.renderer.xr.getSession?.();
     if (!session) return;
 
-    let left = null, right = null;
-    for (const src of session.inputSources || []) {
-      if (!src?.gamepad) continue;
-      if (src.handedness === "left") left = src.gamepad;
-      if (src.handedness === "right") right = src.gamepad;
+    // auto-calibrate once (first time entering VR) if user never pressed CAL
+    if (!this._calibrated) {
+      this.targetEyeHeight = Math.max(1.65, this.camera.position.y);
+      this._calibrated = true;
     }
 
-    if (left) this._moveFromStick(left, dt);
-    if (right) this._snapTurnFromStick(right);
+    this._snapT = Math.max(0, this._snapT - dt);
+    this.tpCooldown = Math.max(0, this.tpCooldown - dt);
 
-    if (right) this._teleportAimAndFire(right, dt);
-    else this._updateLaserOnly(6);
+    // height lock (keep consistent)
+    const camLocalY = this.camera.position.y;
+    const dy = this.targetEyeHeight - camLocalY;
+    this.player.position.y += dy;
+
+    // read controllers
+    let leftGP = null, rightGP = null;
+    for (const src of session.inputSources || []) {
+      if (!src?.gamepad) continue;
+      if (src.handedness === "left") leftGP = src.gamepad;
+      if (src.handedness === "right") rightGP = src.gamepad;
+    }
+
+    if (leftGP) this._moveFromStick(leftGP, dt);
+    if (rightGP) this._snapTurnFromStick(rightGP);
+    if (rightGP) this._teleportLogic(rightGP, dt);
   },
 
   _moveFromStick(gp, dt) {
-    const ax = gp.axes?.[2] ?? gp.axes?.[0] ?? 0;
-    const ay = gp.axes?.[3] ?? gp.axes?.[1] ?? 0;
+    // axes mapping fallback
+    const ax = gp.axes?.[2] ?? gp.axes?.[0] ?? 0; // strafe
+    const ay = gp.axes?.[3] ?? gp.axes?.[1] ?? 0; // forward/back
 
-    const dx = Math.abs(ax) < 0.12 ? 0 : ax;
-    const dy = Math.abs(ay) < 0.12 ? 0 : ay;
-    if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) return;
+    const x = Math.abs(ax) < 0.12 ? 0 : ax;
+    const y = Math.abs(ay) < 0.12 ? 0 : ay;
 
+    if (x === 0 && y === 0) return;
+
+    // camera yaw basis
     const fwd = new THREE.Vector3();
     this.camera.getWorldDirection(fwd);
     fwd.y = 0;
     fwd.normalize();
 
-    const rightDir = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+    const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
 
+    // IMPORTANT: forward is -y on stick; NO inversion of x
     const move = new THREE.Vector3();
-    move.addScaledVector(fwd, -dy);
-    move.addScaledVector(rightDir, dx);
-    if (move.lengthSq() > 0.0001) move.normalize();
+    move.addScaledVector(fwd, -y);
+    move.addScaledVector(right, x);
+    move.normalize();
 
-    const next = this._tmp.copy(this.player.position).addScaledVector(move, this.moveSpeed * dt);
+    const step = this.moveSpeed * dt;
+    const next = this._tmp.copy(this.player.position).addScaledVector(move, step);
+
     this._tryMoveTo(next);
   },
 
@@ -161,88 +157,67 @@ export const Controls = {
     this.player.rotation.y += (ax > 0 ? -this.snapAngle : this.snapAngle);
   },
 
-  _teleportAimAndFire(gp, dt) {
+  _teleportLogic(gp, dt) {
     const trigger = gp.buttons?.[0]?.value ?? 0;
-    const aiming = trigger > 0.55 && this.tpCooldown <= 0;
 
-    // Aim raycast
-    const hit = this._raycastTeleportFloor();
-    const laserLen = hit ? this._laserLenToHit() : 6;
-
-    this._updateLaserOnly(laserLen);
-
-    // ring
-    if (aiming && hit) {
-      this.targetRing.position.set(this.tpTarget.x, this.floorY + 0.02, this.tpTarget.z);
-      this.targetRingMat.opacity = THREE.MathUtils.lerp(this.targetRingMat.opacity, 0.95, Math.min(1, dt * 12));
+    if (trigger > 0.75 && this.tpCooldown <= 0) {
+      this.tpHold += dt;
       this.tpActive = true;
+
+      const ax = gp.axes?.[2] ?? gp.axes?.[0] ?? 0;
+      const ay = gp.axes?.[3] ?? gp.axes?.[1] ?? 0;
+
+      const fwd = new THREE.Vector3();
+      this.camera.getWorldDirection(fwd);
+      fwd.y = 0;
+      fwd.normalize();
+
+      const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+
+      const off = new THREE.Vector3();
+      off.addScaledVector(fwd, -ay);
+      off.addScaledVector(right, ax);
+      if (off.lengthSq() < 0.02) off.copy(fwd);
+      off.normalize();
+
+      const dist = THREE.MathUtils.clamp(1.5 + this.tpHold * 3.0, 1.5, this.tpMaxRadius);
+
+      this.tpTarget.copy(this.player.position).addScaledVector(off, dist);
+      this.tpTarget.y = this.player.position.y; // keep rig height system consistent
+
+      if (this.bounds) {
+        this.tpTarget.x = THREE.MathUtils.clamp(this.tpTarget.x, this.bounds.min.x, this.bounds.max.x);
+        this.tpTarget.z = THREE.MathUtils.clamp(this.tpTarget.z, this.bounds.min.z, this.bounds.max.z);
+      }
+
+      // show rings on floor plane
+      this.tpRings.visible = true;
+      this.tpRings.position.set(this.tpTarget.x, this.floorY + 0.01, this.tpTarget.z);
+
+      // beam
+      this.tpBeam.visible = true;
+      const targetOnGround = new THREE.Vector3(this.tpTarget.x, this.floorY + 0.8, this.tpTarget.z);
+      const beamMid = targetOnGround.clone();
+      this.player.worldToLocal(beamMid);
+
+      const len = beamMid.length();
+      this.tpBeam.scale.set(1, len, 1);
+      this.tpBeam.position.copy(beamMid.clone().multiplyScalar(0.5));
+      this.tpBeam.lookAt(new THREE.Vector3(0, 0, 0));
       return;
     }
 
-    // fade ring when not aiming
-    this.targetRingMat.opacity = THREE.MathUtils.lerp(this.targetRingMat.opacity, 0.0, Math.min(1, dt * 10));
-
-    // Release teleport
-    if (this.tpActive && trigger < 0.15) {
+    if (this.tpActive && trigger < 0.2) {
       this.tpActive = false;
-      this.tpCooldown = 0.22;
-      if (!hit) return;
+      this.tpHold = 0;
+      this.tpCooldown = 0.25;
+      this.tpRings.visible = false;
+      this.tpBeam.visible = false;
 
       const dest = this._tmp.copy(this.tpTarget);
       dest.y = this.player.position.y;
       this._tryMoveTo(dest, true);
     }
-  },
-
-  _raycastTeleportFloor() {
-    // Use RIGHT GRIP position/direction if available
-    const src = this.grips?.right || this.controllers?.right;
-    if (!src) return false;
-
-    const origin = new THREE.Vector3();
-    const dir = new THREE.Vector3(0, 0, -1);
-
-    src.getWorldPosition(origin);
-    dir.applyQuaternion(src.getWorldQuaternion(new THREE.Quaternion()));
-    dir.normalize();
-
-    this.raycaster.set(origin, dir);
-    this.raycaster.far = this.tpMaxDist;
-
-    if (this.teleportFloor) {
-      const hits = this.raycaster.intersectObject(this.teleportFloor, false);
-      if (hits && hits.length) {
-        const p = hits[0].point;
-        this.tpTarget.set(p.x, this.floorY, p.z);
-
-        // bounds clamp
-        if (this.bounds) {
-          this.tpTarget.x = THREE.MathUtils.clamp(this.tpTarget.x, this.bounds.min.x, this.bounds.max.x);
-          this.tpTarget.z = THREE.MathUtils.clamp(this.tpTarget.z, this.bounds.min.z, this.bounds.max.z);
-        }
-        return true;
-      }
-    }
-
-    return false;
-  },
-
-  _laserLenToHit() {
-    // laser length from right grip to tpTarget
-    const src = this.grips?.right || this.controllers?.right;
-    if (!src) return 6;
-    const origin = new THREE.Vector3();
-    src.getWorldPosition(origin);
-    return Math.max(0.5, Math.min(this.tpMaxDist, origin.distanceTo(this.tpTarget)));
-  },
-
-  _updateLaserOnly(len) {
-    if (!this.laser) return;
-    const pos = this.laser.geometry.attributes.position;
-    pos.setXYZ(0, 0, 0, 0);
-    pos.setXYZ(1, 0, 0, -len);
-    pos.needsUpdate = true;
-    this.laserMat.opacity = 0.95;
   },
 
   _tryMoveTo(nextPos, isTeleport = false) {
@@ -251,11 +226,10 @@ export const Controls = {
       nextPos.z = THREE.MathUtils.clamp(nextPos.z, this.bounds.min.z, this.bounds.max.z);
     }
 
+    // collider block (simple radius)
     const r = 0.28;
     for (const c of this.colliders || []) {
-      const box = c?.isBox3 ? c : c?.userData?.box;
-      if (!box) continue;
-
+      const box = new THREE.Box3().setFromObject(c);
       if (
         nextPos.x > box.min.x - r && nextPos.x < box.max.x + r &&
         nextPos.z > box.min.z - r && nextPos.z < box.max.z + r

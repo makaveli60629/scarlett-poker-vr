@@ -1,6 +1,4 @@
-// /js/world.js — Scarlett Poker VR — WORLD v11 (Bright + Seats + Kiosk + Chips/Cards)
-// GitHub Pages safe (CDN three.module.js)
-// Returns: { spawn, colliders, bounds, pads, padById, floorY, seats, kiosk }
+// /js/world.js — Scarlett Poker VR — WORLD v12 (Bright + Seats + Kiosk + Pads + RayTargets + Colliders)
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
@@ -15,21 +13,18 @@ export const World = {
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(repeat[0], repeat[1]);
 
-    try {
-      this._tex.load(
-        url,
-        (loaded) => {
-          loaded.wrapS = loaded.wrapT = THREE.RepeatWrapping;
-          loaded.repeat.set(repeat[0], repeat[1]);
-          t.image = loaded.image;
-          t.needsUpdate = true;
-        },
-        undefined,
-        () => console.warn("Missing texture:", url)
-      );
-    } catch (e) {
-      console.warn("Texture load exception:", url, e);
-    }
+    this._tex.load(
+      url,
+      (loaded) => {
+        loaded.wrapS = loaded.wrapT = THREE.RepeatWrapping;
+        loaded.repeat.set(repeat[0], repeat[1]);
+        t.image = loaded.image;
+        t.needsUpdate = true;
+      },
+      undefined,
+      () => console.warn("Missing texture:", url)
+    );
+
     return t;
   },
 
@@ -40,24 +35,22 @@ export const World = {
     return m;
   },
 
-  build(scene, playerGroup) {
+  build(scene) {
     const ROOM_W = 34;
     const ROOM_D = 34;
     const WALL_H = 9.5;
     const floorY = 0;
 
-    // ---------- LIGHTS (brighter + stable) ----------
-    scene.add(new THREE.AmbientLight(0xffffff, 0.75));
-
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 1.0);
+    // Lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 1.1);
     hemi.position.set(0, 18, 0);
     scene.add(hemi);
-
-    const sun = new THREE.DirectionalLight(0xffffff, 1.7);
+    const sun = new THREE.DirectionalLight(0xffffff, 1.9);
     sun.position.set(16, 22, 10);
     scene.add(sun);
 
-    // ---------- MATERIALS ----------
+    // Materials
     const floorMat = this._mat({
       file: "Marblegold Floors.jpg",
       color: 0x2b2f38,
@@ -79,17 +72,16 @@ export const World = {
       roughness: 0.35,
       metalness: 0.55,
       emissive: 0x2a1a08,
-      emissiveIntensity: 0.55,
+      emissiveIntensity: 0.6,
     });
 
-    // ---------- FLOOR (anti-blink lift) ----------
+    // Floor (lift to kill blinking)
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = floorY + 0.002;
-    floor.userData.isFloor = true;
     scene.add(floor);
 
-    // ---------- WALLS ----------
+    // Walls
     const mkWall = (w, h, x, y, z, ry) => {
       const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat);
       m.position.set(x, y, z);
@@ -102,75 +94,62 @@ export const World = {
     mkWall(ROOM_D, WALL_H,  ROOM_W / 2, WALL_H / 2, 0, -Math.PI / 2);
     mkWall(ROOM_D, WALL_H, -ROOM_W / 2, WALL_H / 2, 0,  Math.PI / 2);
 
-    // ---------- TRIM ----------
+    // Trim
     const trimH = 0.22;
     const trimY = floorY + trimH / 2 + 0.002;
-    const t1 = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W, trimH, 0.22), trimMat);
-    t1.position.set(0, trimY, -ROOM_D / 2 + 0.11);
-    scene.add(t1);
-    const t2 = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W, trimH, 0.22), trimMat);
-    t2.position.set(0, trimY,  ROOM_D / 2 - 0.11);
-    scene.add(t2);
-    const t3 = new THREE.Mesh(new THREE.BoxGeometry(0.22, trimH, ROOM_D), trimMat);
-    t3.position.set( ROOM_W / 2 - 0.11, trimY, 0);
-    scene.add(t3);
-    const t4 = new THREE.Mesh(new THREE.BoxGeometry(0.22, trimH, ROOM_D), trimMat);
-    t4.position.set(-ROOM_W / 2 + 0.11, trimY, 0);
-    scene.add(t4);
+    const addTrim = (geo, x, z) => {
+      const t = new THREE.Mesh(geo, trimMat);
+      t.position.set(x, trimY, z);
+      scene.add(t);
+    };
+    addTrim(new THREE.BoxGeometry(ROOM_W, trimH, 0.22), 0, -ROOM_D / 2 + 0.11);
+    addTrim(new THREE.BoxGeometry(ROOM_W, trimH, 0.22), 0,  ROOM_D / 2 - 0.11);
+    addTrim(new THREE.BoxGeometry(0.22, trimH, ROOM_D),  ROOM_W / 2 - 0.11, 0);
+    addTrim(new THREE.BoxGeometry(0.22, trimH, ROOM_D), -ROOM_W / 2 + 0.11, 0);
 
-    // ---------- TABLE ----------
-    const tableGroup = new THREE.Group();
-    tableGroup.position.set(0, 0, 0);
-
+    // Table
+    const table = new THREE.Group();
+    table.position.set(0, 0, 0);
     const feltMat = new THREE.MeshStandardMaterial({ color: 0x0b3a2a, roughness: 0.9, metalness: 0.02 });
     const railMat = new THREE.MeshStandardMaterial({ color: 0x121212, roughness: 0.55, metalness: 0.1 });
 
-    const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(2.35, 2.35, 0.18, 48), feltMat);
-    tableTop.position.y = 0.95;
-    tableGroup.add(tableTop);
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(2.35, 2.35, 0.18, 48), feltMat);
+    top.position.y = 0.95;
+    table.add(top);
 
-    const tableRail = new THREE.Mesh(new THREE.TorusGeometry(2.35, 0.14, 18, 56), railMat);
-    tableRail.rotation.x = Math.PI / 2;
-    tableRail.position.y = 1.05;
-    tableGroup.add(tableRail);
+    const rail = new THREE.Mesh(new THREE.TorusGeometry(2.35, 0.14, 18, 56), railMat);
+    rail.rotation.x = Math.PI / 2;
+    rail.position.y = 1.05;
+    table.add(rail);
 
     const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.55, 0.9, 24), railMat);
     pedestal.position.y = 0.45;
-    tableGroup.add(pedestal);
+    table.add(pedestal);
 
-    // brighter local table light
-    const tableLight = new THREE.PointLight(0xffffff, 1.25, 14);
+    const tableLight = new THREE.PointLight(0xffffff, 1.35, 16);
     tableLight.position.set(0, 2.9, 0);
-    tableGroup.add(tableLight);
+    table.add(tableLight);
 
-    scene.add(tableGroup);
+    scene.add(table);
 
-    // ---------- CHIPS + CARDS (static preview) ----------
+    // Chips + cards preview
     const chipMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.25, metalness: 0.2 });
     const chipGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.02, 22);
-
-    const chips = new THREE.Group();
-    chips.position.set(0.35, 1.06, 0.25);
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0; i < 16; i++) {
       const c = new THREE.Mesh(chipGeo, chipMat);
-      c.position.set((i % 6) * 0.1, (Math.floor(i / 6)) * 0.022, 0);
-      chips.add(c);
+      c.position.set(-0.4 + (i % 4) * 0.11, 1.06 + Math.floor(i / 4) * 0.022, 0.25);
+      table.add(c);
     }
-    tableGroup.add(chips);
-
-    const cardMat = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.85, metalness: 0.0 });
+    const cardMat = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.85 });
     const cardGeo = new THREE.PlaneGeometry(0.16, 0.22);
-    const cards = new THREE.Group();
-    cards.position.set(-0.35, 1.06, -0.15);
     for (let i = 0; i < 5; i++) {
       const card = new THREE.Mesh(cardGeo, cardMat);
       card.rotation.x = -Math.PI / 2;
-      card.position.set(i * 0.18, 0.002, 0);
-      cards.add(card);
+      card.position.set(-0.35 + i * 0.18, 1.06, -0.15);
+      table.add(card);
     }
-    tableGroup.add(cards);
 
-    // ---------- CHAIRS (face TABLE correctly) + SEATS ARRAY ----------
+    // Chairs + seats
     const seats = [];
     const chairMat = new THREE.MeshStandardMaterial({ color: 0x3b3b3b, roughness: 0.85, metalness: 0.05 });
     const chairRadius = 3.1;
@@ -206,28 +185,23 @@ export const World = {
       const chair = mkChair();
       chair.position.set(cx, floorY, cz);
 
-      // FACE the center of the table
-      const yawToCenter = Math.atan2(0 - cx, 0 - cz);
-      chair.rotation.y = yawToCenter;
+      // FACE the center of table
+      const yaw = Math.atan2(0 - cx, 0 - cz);
+      chair.rotation.y = yaw;
 
       scene.add(chair);
 
-      // seat position: a bit forward from chair, at standing floor Y
+      // Seat point slightly forward of chair
       const seatPos = new THREE.Vector3(cx, floorY, cz).add(
-        new THREE.Vector3(0, 0, 0.55).applyAxisAngle(new THREE.Vector3(0, 1, 0), yawToCenter)
+        new THREE.Vector3(0, 0, 0.55).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw)
       );
 
-      seats.push({
-        id: `seat_${i}`,
-        position: seatPos,
-        yaw: yawToCenter,
-      });
+      seats.push({ id: `seat_${i}`, position: seatPos, yaw });
     }
 
-    // ---------- TELEPORT PADS ----------
+    // Pads
     const pads = [];
     const padById = {};
-
     const mkPad = (id, x, z, color) => {
       const g = new THREE.Group();
       g.position.set(x, floorY, z);
@@ -275,32 +249,32 @@ export const World = {
     mkPad("store", 11.5, 0, 0x2bd7ff);
     mkPad("tournament", 0, -11.5, 0xffd27a);
 
-    // ---------- STORE KIOSK (ray target) ----------
+    // Store kiosk (ray target)
+    const kioskPos = new THREE.Vector3(11.5, floorY, 2.8);
     const kiosk = new THREE.Group();
-    kiosk.position.set(11.5, floorY, 2.8);
+    kiosk.position.copy(kioskPos);
 
     const kioskBody = new THREE.Mesh(
       new THREE.BoxGeometry(1.2, 1.4, 0.8),
       new THREE.MeshStandardMaterial({ color: 0x0f1014, roughness: 0.75, metalness: 0.15 })
     );
     kioskBody.position.y = 0.7;
+    kioskBody.userData.isKioskPart = true;
     kiosk.add(kioskBody);
 
     const kioskScreen = new THREE.Mesh(
       new THREE.PlaneGeometry(1.0, 0.65),
-      new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0x003322, emissiveIntensity: 0.9 })
+      new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0x003322, emissiveIntensity: 1.05 })
     );
     kioskScreen.position.set(0, 1.05, 0.41);
+    kioskScreen.userData.isKioskPart = true;
     kiosk.add(kioskScreen);
 
-    kiosk.userData.isStoreKiosk = true;
-    kiosk.userData.rayTargets = [kioskBody, kioskScreen];
     scene.add(kiosk);
 
-    // ---------- COLLIDERS + BOUNDS ----------
+    // Colliders
     const colliders = [];
     const wallThick = 0.5;
-
     const addBoxCollider = (w, h, d, x, y, z) => {
       const mesh = new THREE.Mesh(
         new THREE.BoxGeometry(w, h, d),
@@ -321,16 +295,28 @@ export const World = {
     addBoxCollider(6.4, 2.6, 6.4, 0, 1.0, 0);
 
     // kiosk collider
-    addBoxCollider(1.4, 1.6, 1.0, kiosk.position.x, 0.8, kiosk.position.z);
+    addBoxCollider(1.4, 1.6, 1.0, kioskPos.x, 0.8, kioskPos.z);
 
     const bounds = {
       min: new THREE.Vector3(-ROOM_W / 2 + 1.2, floorY, -ROOM_D / 2 + 1.2),
       max: new THREE.Vector3( ROOM_W / 2 - 1.2, floorY,  ROOM_D / 2 - 1.2),
     };
 
-    // spawn = lobby pad
     const spawn = padById.lobby.position.clone();
 
-    return { spawn, colliders, bounds, pads, padById, floorY, seats, kiosk };
-  },
+    // VR ray targets
+    const rayTargets = [kioskBody, kioskScreen];
+
+    return {
+      floorY,
+      spawn,
+      bounds,
+      colliders,
+      pads,
+      padById,
+      seats,
+      kioskPos,
+      rayTargets,
+    };
+  }
 };

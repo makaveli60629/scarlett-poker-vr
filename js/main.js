@@ -1,35 +1,11 @@
-// /js/main.js — Scarlett Poker VR — MAIN v15 (All systems: World + Controls + VR Ray + Android + Store + Bots + Poker)
-
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
 
-import { World } from "./world.js";
-import { Controls } from "./controls.js";
-import { VRController } from "./vrcontroller.js";
-import { MobileTouch } from "./mobile_touch.js";
-import { UI } from "./ui.js";
-import { Store } from "./store.js";
-import { AvatarItems } from "./avatar_items.js";
-import { createAvatar } from "./avatar.js";
-import { BotManager } from "./bot.js";
-import { PokerSimulation } from "./poker_simulation.js";
+import { createHub } from "./diagnostics.js";
+import { safeImport } from "./safe_import.js";
 
-const overlay = document.getElementById("overlay");
-const btnStore = document.getElementById("btnStore");
-const btnCal = document.getElementById("btnCal");
-const btnMusic = document.getElementById("btnMusic");
-
-function hubReset(){
-  if (!overlay) return;
-  overlay.textContent = "Scarlett Poker VR — hub\n";
-}
-function hubLine(s){
-  if (!overlay) return;
-  overlay.textContent += s + "\n";
-}
-
-hubReset();
-hubLine("Booting…");
+const hub = createHub();
+hub.addLine("✅ main.js started");
 
 const App = {
   scene: null,
@@ -37,198 +13,225 @@ const App = {
   renderer: null,
   clock: null,
 
-  rig: null,
-  world: null,
-  localAvatar: null,
+  rig: null,        // player rig group
+  worldData: null,  // from world.build
+  systems: {},      // loaded modules
 
-  music: null,
-  musicOn: false,
+  fpsT: 0,
+  fpsC: 0,
 
   async init() {
     this.clock = new THREE.Clock();
 
-    this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x07080c);
-    this.scene.fog = new THREE.Fog(0x07080c, 2, 85);
-
-    this.rig = new THREE.Group();
-    this.scene.add(this.rig);
-
-    this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 220);
-    this.camera.position.set(0, 1.65, 3);
-    this.rig.add(this.camera);
-
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    // Renderer
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.xr.enabled = true;
     document.body.appendChild(this.renderer.domElement);
 
-    // ✅ VR button ALWAYS
+    // ✅ VR button always
     document.body.appendChild(VRButton.createButton(this.renderer));
-    hubLine("✅ VRButton");
+    hub.addLine("✅ VRButton attached");
 
-    // World
+    // Scene
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x07080c);
+    this.scene.fog = new THREE.Fog(0x07080c, 4, 70);
+
+    // Rig + Camera
+    this.rig = new THREE.Group();
+    this.scene.add(this.rig);
+
+    this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
+    this.camera.position.set(0, 1.65, 0);
+    this.rig.add(this.camera);
+
+    // Backup lighting (prevents black void even if world fails)
+    this.addBackupLights();
+
+    // --- Safe imports (everything optional except world/controls) ---
+    const WorldI  = await safeImport(hub, "world", "./world.js");
+    const CtrlsI  = await safeImport(hub, "controls", "./controls.js");
+    const VRI     = await safeImport(hub, "vrcontroller", "./vrcontroller.js");
+    const AndI    = await safeImport(hub, "android_controls", "./android_controls.js");
+    const UII     = await safeImport(hub, "ui", "./ui.js");
+    const AudioI  = await safeImport(hub, "audio", "./audio.js");
+    const PokerI  = await safeImport(hub, "poker_simulation", "./poker_simulation.js");
+    const BotsI   = await safeImport(hub, "bots", "./bots.js");
+    const StoreI  = await safeImport(hub, "store", "./store.js");
+    const InvI    = await safeImport(hub, "inventory", "./inventory.js");
+    const AvatarI = await safeImport(hub, "avatar", "./avatar.js");
+
+    this.systems.World = WorldI.mod?.World || null;
+    this.systems.Controls = CtrlsI.mod?.Controls || null;
+    this.systems.VRController = VRI.mod?.VRController || null;
+    this.systems.AndroidControls = AndI.mod?.AndroidControls || null;
+    this.systems.UI = UII.mod?.UI || null;
+    this.systems.Audio = AudioI.mod?.AudioSystem || null;
+    this.systems.Poker = PokerI.mod?.PokerSimulation || null;
+    this.systems.Bots = BotsI.mod?.Bots || null;
+    this.systems.Store = StoreI.mod?.Store || null;
+    this.systems.Inventory = InvI.mod?.Inventory || null;
+    this.systems.Avatar = AvatarI.mod?.Avatar || null;
+
+    // --- World build (spawn MUST be on lobby pad) ---
     try {
-      this.world = World.build(this.scene, this.rig);
-      hubLine("✅ world.js");
+      if (this.systems.World?.build) {
+        this.worldData = this.systems.World.build(this.scene, this.rig);
+        hub.addLine("✅ World built");
+      } else {
+        hub.addLine("⚠️ World missing build() — using fallback floor");
+        this.addFallbackFloor();
+      }
     } catch (e) {
-      hubLine("❌ world.js FAILED");
-      console.error(e);
-      this.world = null;
+      hub.addLine("❌ World build error — using fallback floor");
+      hub.addLine(`   ↳ ${String(e?.message || e)}`.slice(0, 180));
+      hub.set({ lastErr: String(e?.message || e) });
+      this.addFallbackFloor();
     }
 
-    // Spawn on lobby pad ALWAYS
-    if (this.world?.spawn) {
-      this.rig.position.set(this.world.spawn.x, 0, this.world.spawn.z);
-      hubLine("✅ Spawn on telepad");
-    } else {
-      this.rig.position.set(0, 0, 10);
-      hubLine("⚠️ Spawn fallback");
-    }
+    // Spawn safely on lobby pad if present
+    this.applySpawn();
 
-    // Controls (VR locomotion + teleport + height lock)
+    // --- Controls init (VR + keyboard fallback + collision) ---
     try {
-      Controls.init({
+      this.systems.Controls?.init?.({
         renderer: this.renderer,
-        camera: this.camera,
-        player: this.rig,
-        colliders: this.world?.colliders || [],
-        bounds: this.world?.bounds || null,
-        floorY: this.world?.floorY ?? 0,
-      });
-      hubLine("✅ controls.js");
-    } catch (e) {
-      hubLine("❌ controls.js FAILED");
-      console.error(e);
-    }
-
-    // Android touch
-    try {
-      MobileTouch.init({
         camera: this.camera,
         rig: this.rig,
-        padLookId: "padLook",
-        padMoveId: "padMove",
+        colliders: this.worldData?.colliders || [],
+        bounds: this.worldData?.bounds || null,
+        floorY: this.worldData?.floorY ?? 0,
       });
-      hubLine("✅ mobile_touch.js");
+      hub.addLine("✅ Controls init");
     } catch (e) {
-      hubLine("⚠️ mobile_touch.js failed");
-      console.warn(e);
+      hub.addLine("⚠️ Controls init failed");
+      hub.addLine(`   ↳ ${String(e?.message || e)}`.slice(0, 180));
     }
 
-    // UI
+    // --- VR controller rig: hands + laser + teleport ring ---
     try {
-      UI.init({ overlay });
-      hubLine("✅ ui.js");
-    } catch (e) {
-      hubLine("⚠️ ui.js failed");
-    }
-
-    // Store + items
-    try {
-      AvatarItems.ensureDefaults();
-      Store.init({
-        onEquip: (state) => {
-          AvatarItems.saveState(state);
-          this.applyAvatarState(this.localAvatar, state);
-        },
-        onRequestState: () => AvatarItems.loadState(),
-      });
-      hubLine("✅ store.js + avatar_items.js");
-    } catch (e) {
-      hubLine("⚠️ store.js / avatar_items.js failed");
-      console.warn(e);
-    }
-
-    // Local avatar preview by kiosk
-    try {
-      this.localAvatar = createAvatar({ name: "YOU", height: 1.78 });
-      const k = this.world?.kioskPos || new THREE.Vector3(11.5, 0, 2.8);
-      this.localAvatar.group.position.set(k.x - 1.6, this.world?.floorY ?? 0, k.z);
-      this.scene.add(this.localAvatar.group);
-      this.applyAvatarState(this.localAvatar, AvatarItems.loadState());
-      hubLine("✅ avatar.js preview");
-    } catch (e) {
-      hubLine("⚠️ avatar.js failed");
-      console.warn(e);
-    }
-
-    // VR controller ray (laser + ring follows HAND)
-    try {
-      VRController.init({
+      this.systems.VRController?.init?.({
         renderer: this.renderer,
         scene: this.scene,
+        rig: this.rig,
         camera: this.camera,
-        floorY: this.world?.floorY ?? 0,
-        getRayTargets: () => (this.world?.rayTargets || []),
-        onPrimaryAction: (hit) => {
-          // If hit kiosk => toggle store
-          if (hit?.object?.userData?.isKioskPart || hit?.object?.parent?.userData?.isKioskPart) {
-            Store.toggle();
-            hubLine("🛍️ Store toggled (VR)");
-          }
-        }
+        getWorld: () => this.worldData,
       });
-      hubLine("✅ vrcontroller.js");
+      hub.addLine("✅ VRController init");
     } catch (e) {
-      hubLine("⚠️ vrcontroller.js failed");
-      console.warn(e);
+      hub.addLine("⚠️ VRController init failed");
+      hub.addLine(`   ↳ ${String(e?.message || e)}`.slice(0, 180));
     }
 
-    // Bots + tournament behavior
+    // --- Android touch controls (two thumb pads) ---
     try {
-      BotManager.init({ scene: this.scene, world: this.world });
-      BotManager.spawnBots({ count: 8 });
-      hubLine("✅ bot.js");
+      this.systems.AndroidControls?.init?.({
+        renderer: this.renderer,
+        rig: this.rig,
+        camera: this.camera,
+        onTeleport: (pos) => this.systems.Controls?.teleportTo?.(pos),
+        getBounds: () => this.worldData?.bounds || null,
+        getFloorY: () => this.worldData?.floorY ?? 0,
+      });
+      hub.addLine("✅ AndroidControls init");
     } catch (e) {
-      hubLine("⚠️ bot.js failed");
-      console.warn(e);
+      hub.addLine("⚠️ AndroidControls init failed");
+      hub.addLine(`   ↳ ${String(e?.message || e)}`.slice(0, 180));
     }
 
-    // Poker simulation (wires to bots)
+    // --- UI ---
     try {
-      PokerSimulation.init({ bots: BotManager, world: this.world });
-      hubLine("✅ poker_simulation.js");
+      this.systems.UI?.init?.({
+        scene: this.scene,
+        camera: this.camera,
+        rig: this.rig,
+        hub,
+        onRecenter: () => this.applySpawn(true),
+        onToggleHeightLock: () => this.systems.Controls?.toggleHeightLock?.(),
+      });
+      hub.addLine("✅ UI init");
     } catch (e) {
-      hubLine("⚠️ poker_simulation.js failed");
-      console.warn(e);
+      hub.addLine("⚠️ UI init failed");
+      hub.addLine(`   ↳ ${String(e?.message || e)}`.slice(0, 180));
     }
 
-    // Buttons (Android)
-    if (btnStore) btnStore.onclick = () => Store.toggle();
-    if (btnCal) btnCal.onclick = () => {
-      Controls.calibrateHeight();
-      hubLine("📏 Height calibrated");
-    };
-    if (btnMusic) btnMusic.onclick = () => this.toggleMusic();
+    // --- Inventory + Store ---
+    try {
+      this.systems.Inventory?.init?.();
+      this.systems.Store?.init?.({ inventory: this.systems.Inventory });
+      hub.addLine("✅ Store+Inventory init");
+    } catch (e) {
+      hub.addLine("⚠️ Store/Inventory init failed");
+      hub.addLine(`   ↳ ${String(e?.message || e)}`.slice(0, 180));
+    }
+
+    // --- Audio ---
+    try {
+      this.systems.Audio?.init?.({ camera: this.camera, hub });
+      hub.addLine("✅ Audio init");
+    } catch (e) {
+      hub.addLine("⚠️ Audio init failed");
+    }
+
+    // --- Poker + Bots ---
+    try {
+      this.systems.Poker?.build?.();
+      hub.addLine("✅ PokerSimulation init");
+    } catch (e) {
+      hub.addLine("⚠️ PokerSimulation init failed");
+    }
+
+    try {
+      this.systems.Bots?.init?.({
+        scene: this.scene,
+        rig: this.rig,
+        getSeats: () => this.worldData?.seats || [],
+        getLobbyZone: () => this.worldData?.lobbyZone || null,
+      });
+      hub.addLine("✅ Bots init");
+    } catch (e) {
+      hub.addLine("⚠️ Bots init failed");
+    }
 
     window.addEventListener("resize", () => this.resize());
-
     this.renderer.setAnimationLoop(() => this.animate());
-    hubLine("✅ Loaded. Android: pads. Oculus: Enter VR.");
+    hub.addLine("✅ Animation loop started");
   },
 
-  applyAvatarState(avatarApi, state) {
-    if (!avatarApi || !state) return;
-    avatarApi.clearGear();
+  addBackupLights() {
+    // These stay even if world builds, to prevent darkness on failures
+    const amb = new THREE.AmbientLight(0xffffff, 0.35);
+    this.scene.add(amb);
 
-    const shirt = AvatarItems.getItem(state.equipped.shirt);
-    const hat = AvatarItems.getItem(state.equipped.hat);
-    const glasses = AvatarItems.getItem(state.equipped.glasses);
-    const aura = AvatarItems.getItem(state.equipped.aura);
-    const face = AvatarItems.getItem(state.equipped.face);
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 0.55);
+    hemi.position.set(0, 12, 0);
+    this.scene.add(hemi);
 
-    if (shirt?.data?.color) avatarApi.setShirtColor(shirt.data.color);
-    if (face?.data?.type) avatarApi.setFace(face.data.type);
-    if (hat?.data?.type) avatarApi.equipHat(hat.data);
-    if (glasses?.data?.type) avatarApi.equipGlasses(glasses.data);
-    if (aura?.data?.type) avatarApi.setAura(aura.data);
+    const key = new THREE.DirectionalLight(0xffffff, 0.9);
+    key.position.set(8, 18, 8);
+    this.scene.add(key);
   },
 
-  toggleMusic() {
-    // Simple: no external assets needed. If you add assets/audio/lobby_ambience.mp3 later, we can wire it.
-    this.musicOn = !this.musicOn;
-    hubLine(this.musicOn ? "🎵 Music ON (placeholder)" : "🔇 Music OFF");
+  addFallbackFloor() {
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(40, 40),
+      new THREE.MeshStandardMaterial({ color: 0x15161b, roughness: 1 })
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = 0.001;
+    this.scene.add(floor);
+  },
+
+  applySpawn(force = false) {
+    if (!this.worldData?.spawn) return;
+    // Always put rig at spawn (prevents spawning in table)
+    if (force || this.rig.position.lengthSq() < 0.001) {
+      this.rig.position.set(this.worldData.spawn.x, 0, this.worldData.spawn.z);
+      this.rig.rotation.y = 0;
+      hub.addLine(`✅ Spawned @ lobby pad (${this.worldData.spawn.x.toFixed(1)}, ${this.worldData.spawn.z.toFixed(1)})`);
+    }
   },
 
   resize() {
@@ -240,22 +243,40 @@ const App = {
   animate() {
     const dt = this.clock.getDelta();
 
-    // Android touch always available
-    MobileTouch.update(dt);
+    // FPS
+    this.fpsT += dt; this.fpsC++;
+    if (this.fpsT > 0.5) {
+      hub.set({ fps: this.fpsC / this.fpsT });
+      this.fpsT = 0; this.fpsC = 0;
+    }
 
-    // VR controls only when XR session active
-    Controls.update(dt);
+    // XR + controller detect
+    const session = this.renderer.xr.getSession?.();
+    let left = false, right = false;
+    if (session?.inputSources) {
+      for (const s of session.inputSources) {
+        if (!s?.gamepad) continue;
+        if (s.handedness === "left") left = true;
+        if (s.handedness === "right") right = true;
+      }
+    }
+    hub.set({
+      xr: !!session,
+      left,
+      right,
+      rig: { x: this.rig.position.x, y: this.rig.position.y, z: this.rig.position.z },
+    });
 
-    // VR ray follows controller when in VR
-    VRController.update(dt);
+    // Update systems
+    this.systems.Controls?.update?.(dt);
+    this.systems.VRController?.update?.(dt);
+    this.systems.AndroidControls?.update?.(dt);
+    this.systems.UI?.update?.(dt);
+    this.systems.Audio?.update?.(dt);
+    this.systems.Bots?.update?.(dt);
 
-    // bots + poker sim
-    BotManager.update(dt);
-    PokerSimulation.update(dt);
-
-    UI.update(dt);
     this.renderer.render(this.scene, this.camera);
-  }
+  },
 };
 
 App.init();

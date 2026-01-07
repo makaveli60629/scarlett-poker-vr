@@ -1,57 +1,33 @@
-// /js/main.js — Scarlett VR Poker (FULL ACTIVE, crash-proof)
-// Cache-proof (loaded as main.js?v=... from index.html)
-// - VRButton
-// - Player rig (spawn facing table)
-// - Left stick move (relative to head yaw)
-// - Right stick snap turn (45°)
-// - Right trigger teleport (arc + landing ring)
-// - Calls world.tick(dt) safely (won’t die if poker sim crashes)
+// /js/main.js — Scarlett VR Poker (FULL ACTIVE, cache-safe)
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
 
 const log = (m) => (window.__hubLog ? window.__hubLog(m) : console.log(m));
 
-// version passed in from index.html dynamic import
-const V = new URL(import.meta.url).searchParams.get("v") || (window.__BUILD_V || "no-v");
-log("[main] FULL ACTIVE boot v=" + V);
-
-// ---- GLOBAL ERROR TRAPS (THIS WILL SHOW THE REAL FILE+LINE) ----
-window.addEventListener("error", (e) => {
-  log(`❌ window.error: ${e?.message || e}`);
-  if (e?.error?.stack) log(e.error.stack);
-});
-window.addEventListener("unhandledrejection", (e) => {
-  log(`❌ unhandledrejection: ${e?.reason?.message || e?.reason || e}`);
-  if (e?.reason?.stack) log(e.reason.stack);
-});
+// cache-bust from URL: main.js?v=123
+const V = new URL(import.meta.url).searchParams.get("v") || (window.__BUILD_V || Date.now().toString());
+log("[main] boot v=" + V);
 
 let renderer, scene, camera;
 let world = null;
 
 const clock = new THREE.Clock();
-
-// XR rig
 const player = new THREE.Group();
 const head = new THREE.Group();
 
-// controllers
 let c0 = null, c1 = null;
 
-// locomotion tuning
-const MOVE_SPEED = 2.25; // m/s
+const MOVE_SPEED = 2.25;
 const TURN_ANGLE = THREE.MathUtils.degToRad(45);
 const DEADZONE = 0.20;
-
 let snapArmed = true;
 
-// teleport system
 let teleport = null;
 
 boot().catch((e) => log("❌ boot failed: " + (e?.message || e)));
 
 async function boot() {
-  // Renderer
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setSize(innerWidth, innerHeight);
@@ -59,17 +35,15 @@ async function boot() {
   document.body.appendChild(renderer.domElement);
   log("[main] renderer ok ✅");
 
-  // VR Button
   const btn = VRButton.createButton(renderer);
-  document.body.appendChild(btn);
   btn.id = "VRButton";
   btn.style.position = "fixed";
   btn.style.right = "12px";
   btn.style.bottom = "12px";
   btn.style.zIndex = "2147483647";
+  document.body.appendChild(btn);
   log("[main] VRButton appended ✅");
 
-  // Scene / Camera
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
 
@@ -78,17 +52,17 @@ async function boot() {
   player.add(head);
   scene.add(player);
 
-  // Lights
+  // safe lights
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.15));
   const key = new THREE.DirectionalLight(0xffffff, 0.85);
   key.position.set(6, 10, 4);
   scene.add(key);
 
-  // Teleport visuals
+  // teleport visuals
   teleport = createTeleportSystem(THREE);
   scene.add(teleport.arcLine, teleport.ring);
 
-  // Load world cache-proof
+  // load world (cache-safe)
   try {
     const mod = await import(`./world.js?v=${V}`);
     world = await mod.initWorld({ THREE, scene, log });
@@ -97,36 +71,28 @@ async function boot() {
     log("❌ world import/init failed: " + (e?.message || e));
   }
 
-  // Spawn facing table
+  // spawn
   const spawn = world?.spawnPads?.[0] || new THREE.Vector3(0, 0, 2);
   player.position.set(spawn.x, 0, spawn.z);
 
   if (world?.tableFocus) {
-    const toTable = new THREE.Vector3().subVectors(
-      world.tableFocus,
-      new THREE.Vector3(spawn.x, 0, spawn.z)
-    );
-    const yaw = Math.atan2(toTable.x, toTable.z);
-    player.rotation.set(0, yaw, 0);
+    const toTable = new THREE.Vector3().subVectors(world.tableFocus, new THREE.Vector3(spawn.x, 0, spawn.z));
+    player.rotation.y = Math.atan2(toTable.x, toTable.z);
   }
 
-  // XR controllers
   setupXRControls();
 
   window.addEventListener("resize", onResize);
-
-  // Render loop
   renderer.setAnimationLoop(tick);
 
-  // XR support info
   if (navigator.xr?.isSessionSupported) {
     const ok = await navigator.xr.isSessionSupported("immersive-vr");
     log("[main] XR immersive-vr supported = " + ok);
   } else {
-    log("[main] navigator.xr missing (normal on many phones)");
+    log("[main] navigator.xr missing (Android Chrome usually no WebXR)");
   }
 
-  log("[main] FULL ACTIVE ready ✅ v=" + V);
+  log("[main] ready ✅ v=" + V);
 }
 
 function onResize() {
@@ -135,7 +101,7 @@ function onResize() {
   renderer.setSize(innerWidth, innerHeight);
 }
 
-// -------------------- XR CONTROLS --------------------
+// ---- XR controls ----
 function setupXRControls() {
   c0 = renderer.xr.getController(0);
   c1 = renderer.xr.getController(1);
@@ -143,7 +109,6 @@ function setupXRControls() {
 
   c0.addEventListener("connected", (e) => (c0.userData.inputSource = e.data));
   c1.addEventListener("connected", (e) => (c1.userData.inputSource = e.data));
-
   c0.addEventListener("disconnected", () => (c0.userData.inputSource = null));
   c1.addEventListener("disconnected", () => (c1.userData.inputSource = null));
 
@@ -159,20 +124,16 @@ function getGamepad(controller) {
   const src = controller?.userData?.inputSource;
   return src && src.gamepad ? src.gamepad : null;
 }
-
 function isRightHand(controller) {
   const src = controller?.userData?.inputSource;
   if (!src) return controller === c1;
-  if (src.handedness) return src.handedness === "right";
-  return controller === c1;
+  return src.handedness ? src.handedness === "right" : controller === c1;
 }
-
 function findControllerByHand(hand) {
   const a = c0?.userData?.inputSource?.handedness === hand ? c0 : null;
   const b = c1?.userData?.inputSource?.handedness === hand ? c1 : null;
   return a || b || null;
 }
-
 function getHeadYaw() {
   const q = new THREE.Quaternion();
   camera.getWorldQuaternion(q);
@@ -180,12 +141,11 @@ function getHeadYaw() {
   return e.y;
 }
 
-// -------------------- TELEPORT --------------------
+// ---- teleport ----
 function onSelectStart(controller) {
   if (!isRightHand(controller)) return;
   teleport.active = true;
 }
-
 function onSelectEnd(controller) {
   if (!isRightHand(controller)) return;
 
@@ -212,12 +172,11 @@ function onSelectEnd(controller) {
   teleport.arcLine.visible = false;
 }
 
-// -------------------- LOCOMOTION --------------------
+// ---- locomotion ----
 function applyLocomotion(dt) {
   const left = findControllerByHand("left") || c0;
   const right = findControllerByHand("right") || c1;
 
-  // ---- left stick move ----
   const gpL = getGamepad(left);
   if (gpL?.axes?.length >= 2) {
     const x = gpL.axes[2] ?? gpL.axes[0];
@@ -244,7 +203,6 @@ function applyLocomotion(dt) {
     }
   }
 
-  // ---- right stick snap turn ----
   const gpR = getGamepad(right);
   if (gpR?.axes?.length >= 2) {
     const x = gpR.axes[2] ?? gpR.axes[0];
@@ -257,14 +215,11 @@ function applyLocomotion(dt) {
     }
   }
 
-  // ---- teleport arc update ----
   const rightHand = findControllerByHand("right") || c1;
-  if (teleport.active && rightHand) {
-    updateTeleportArc(THREE, rightHand, teleport, world);
-  }
+  if (teleport.active && rightHand) updateTeleportArc(THREE, rightHand, teleport, world);
 }
 
-// -------------------- TELEPORT SYSTEM --------------------
+// ---- teleport visuals ----
 function createTeleportSystem(THREE) {
   const arcMat = new THREE.LineBasicMaterial({ color: 0x33ff66, transparent: true, opacity: 0.9 });
   const arcGeo = new THREE.BufferGeometry();
@@ -294,30 +249,24 @@ function updateTeleportArc(THREE, controller, tp, world) {
   controller.getWorldQuaternion(q);
   dir.applyQuaternion(q).normalize();
 
-  const g = -9.8;
-  const v = 7.0;
-  const step = 0.06;
-  const maxT = 2.0;
+  const g = -9.8, v = 7.0, step = 0.06, maxT = 2.0;
 
   const positions = tp.arcLine.geometry.attributes.position.array;
   let hit = null;
-
   let idx = 0;
-  for (let tt = 0; tt <= maxT; tt += step) {
+
+  for (let t = 0; t <= maxT; t += step) {
     const p = new THREE.Vector3(
-      origin.x + dir.x * v * tt,
-      origin.y + dir.y * v * tt + 0.5 * g * tt * tt,
-      origin.z + dir.z * v * tt
+      origin.x + dir.x * v * t,
+      origin.y + dir.y * v * t + 0.5 * g * t * t,
+      origin.z + dir.z * v * t
     );
 
     positions[idx++] = p.x;
     positions[idx++] = p.y;
     positions[idx++] = p.z;
 
-    if (!hit && p.y <= 0.02) {
-      hit = p;
-      break;
-    }
+    if (!hit && p.y <= 0.02) { hit = p; break; }
   }
 
   while (idx < positions.length) {
@@ -331,13 +280,11 @@ function updateTeleportArc(THREE, controller, tp, world) {
       hit.x = THREE.MathUtils.clamp(hit.x, world.roomClamp.minX, world.roomClamp.maxX);
       hit.z = THREE.MathUtils.clamp(hit.z, world.roomClamp.minZ, world.roomClamp.maxZ);
     }
-
     tp.valid = true;
     tp.hitPoint = hit;
 
     tp.ring.visible = true;
     tp.ring.position.set(hit.x, 0.03, hit.z);
-    tp.arcLine.visible = true;
   } else {
     tp.valid = false;
     tp.hitPoint = null;
@@ -345,28 +292,10 @@ function updateTeleportArc(THREE, controller, tp, world) {
   }
 }
 
-// -------------------- LOOP (SAFE) --------------------
+// ---- loop ----
 function tick() {
   const dt = clock.getDelta();
-
-  try {
-    applyLocomotion(dt);
-  } catch (e) {
-    log("❌ applyLocomotion crashed: " + (e?.message || e));
-    if (e?.stack) log(e.stack);
-  }
-
-  try {
-    if (world?.tick) world.tick(dt);
-  } catch (e) {
-    log("❌ world.tick crashed: " + (e?.message || e));
-    if (e?.stack) log(e.stack);
-  }
-
-  try {
-    renderer.render(scene, camera);
-  } catch (e) {
-    log("❌ render crashed: " + (e?.message || e));
-    if (e?.stack) log(e.stack);
-  }
-}
+  applyLocomotion(dt);
+  if (world?.tick) world.tick(dt);
+  renderer.render(scene, camera);
+                                             }

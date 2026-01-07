@@ -2,92 +2,77 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,height=device-height,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>Scarlett Poker VR</title>
   <style>
-    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#050607; }
+    html, body { margin:0; height:100%; background:#000; overflow:hidden; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    canvas { display:block; width:100vw; height:100vh; }
+    /* HUD */
     #hud {
-      position: fixed; left: 12px; top: 10px; z-index: 10;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      font-size: 14px; line-height: 1.3;
-      color: #53ff9a;
-      text-shadow: 0 0 10px rgba(0,255,120,.35);
-      background: rgba(0,0,0,.35);
-      border: 1px solid rgba(83,255,154,.25);
-      border-radius: 10px;
-      padding: 10px 12px;
-      max-width: 90vw;
-    }
-    #hud .ok { color:#53ff9a; }
-    #hud .warn { color:#ffd27a; }
-    #hud .bad { color:#ff5b5b; }
-    #devPad {
-      position: fixed; left: 0; right: 0; bottom: 10px; z-index: 20;
-      display: none;
+      position: fixed; top: 14px; left: 14px; z-index: 10;
+      color: #44ff99; font-size: 14px; line-height: 1.35;
+      text-shadow: 0 0 8px rgba(68,255,153,.35);
       pointer-events: none;
-      padding: 0 12px;
-      gap: 12px;
-      justify-content: space-between;
-      align-items: flex-end;
+      max-width: 92vw;
+      white-space: pre-wrap;
     }
-    .stick {
-      width: 170px; height: 170px;
-      border-radius: 18px;
-      background: rgba(0,0,0,.40);
-      border: 1px solid rgba(83,255,154,.25);
-      box-shadow: 0 0 20px rgba(0,255,120,.12);
+    #hud .title { font-size: 18px; margin-bottom: 6px; }
+    /* DEV controls (Android / mobile) */
+    #devControls {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 11;
+      display: none; gap: 12px; justify-content: center; padding: 14px 10px 22px;
+      pointer-events: none;
+    }
+    .joyWrap {
+      width: 170px; height: 170px; border-radius: 22px;
+      background: rgba(0,0,0,.35);
+      outline: 2px solid rgba(68,255,153,.25);
+      box-shadow: 0 0 18px rgba(68,255,153,.15);
       position: relative;
       pointer-events: auto;
-      user-select: none;
-      -webkit-user-select: none;
       touch-action: none;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      color:#53ff9a;
-      font-family: ui-monospace, monospace;
     }
-    .knob {
-      width: 70px; height: 70px; border-radius: 50%;
-      border: 2px solid rgba(83,255,154,.35);
-      background: rgba(20,90,60,.35);
-      box-shadow: 0 0 18px rgba(0,255,120,.18);
-      position: absolute;
-      transform: translate(0px,0px);
+    .joyLabel {
+      position: absolute; top: 10px; left: 0; right: 0;
+      text-align:center; color: rgba(68,255,153,.85);
+      font-size: 14px; letter-spacing: .08em;
     }
-    .label {
-      position:absolute; bottom: 10px; left:0; right:0;
-      text-align:center;
-      font-size: 12px; opacity: .85;
-      pointer-events:none;
+    .joyStick {
+      width: 86px; height: 86px; border-radius: 50%;
+      background: rgba(68,255,153,.22);
+      outline: 2px solid rgba(68,255,153,.30);
+      position: absolute; left: 50%; top: 50%;
+      transform: translate(-50%,-50%);
     }
-    #tip {
-      position: fixed; left: 12px; bottom: 12px; z-index: 12;
-      color: rgba(255,255,255,.75);
-      font-family: ui-monospace, monospace;
+
+    /* small help row */
+    #help {
+      position: fixed; bottom: 8px; left: 12px; right: 12px;
+      color: rgba(255,255,255,.65);
       font-size: 12px;
-      text-shadow: 0 0 10px rgba(0,0,0,.35);
+      z-index: 9;
+      pointer-events: none;
     }
-    canvas { display:block; }
   </style>
 </head>
-
 <body>
-  <div id="hud">Scarlett Poker VR — loading…</div>
+  <div id="hud"></div>
 
-  <div id="devPad">
-    <div class="stick" id="moveStick">
-      <div class="knob" id="moveKnob"></div>
-      <div class="label">MOVE</div>
+  <div id="devControls">
+    <div class="joyWrap" id="joyMove">
+      <div class="joyLabel">MOVE</div>
+      <div class="joyStick" id="joyMoveStick"></div>
     </div>
-    <div class="stick" id="turnStick">
-      <div class="knob" id="turnKnob"></div>
-      <div class="label">TURN</div>
+    <div class="joyWrap" id="joyTurn">
+      <div class="joyLabel">TURN</div>
+      <div class="joyStick" id="joyTurnStick"></div>
     </div>
   </div>
 
-  <div id="tip">Android DEV: use MOVE/TURN pads • Desktop: WASD + QE • VR: left stick move, right stick snap turn • Teleport: grip/trigger/thumbstick-click</div>
+  <div id="help">
+    Keys (desktop dev): <b>WASD</b> move, <b>Q/E</b> turn, <b>B</b> brightness, <b>H/J</b> height, <b>X</b> swap LR
+  </div>
 
   <script type="module" src="./js/main.js"></script>
 </body>
-  </html>
+</html>

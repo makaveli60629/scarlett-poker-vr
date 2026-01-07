@@ -1,5 +1,3 @@
-// /js/world.js — Scarlett Poker VR — WORLD v12 (Bright + Seats + Kiosk + Pads + RayTargets + Colliders)
-
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
 export const World = {
@@ -13,47 +11,53 @@ export const World = {
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(repeat[0], repeat[1]);
 
-    this._tex.load(
-      url,
-      (loaded) => {
-        loaded.wrapS = loaded.wrapT = THREE.RepeatWrapping;
-        loaded.repeat.set(repeat[0], repeat[1]);
-        t.image = loaded.image;
-        t.needsUpdate = true;
-      },
-      undefined,
-      () => console.warn("Missing texture:", url)
-    );
-
+    try {
+      this._tex.load(
+        url,
+        (loaded) => {
+          loaded.wrapS = loaded.wrapT = THREE.RepeatWrapping;
+          loaded.repeat.set(repeat[0], repeat[1]);
+          t.image = loaded.image;
+          t.needsUpdate = true;
+        },
+        undefined,
+        () => console.warn("Missing texture:", url)
+      );
+    } catch (e) {
+      console.warn("Texture load exception:", url, e);
+    }
     return t;
   },
 
   _mat({ file = null, color = 0x666666, roughness = 0.92, metalness = 0.05, repeat = [6, 6] }) {
     const map = file ? this._safeTexture(file, { repeat }) : null;
     const m = new THREE.MeshStandardMaterial({ color, roughness, metalness, map });
-    if (map) m.map.colorSpace = THREE.SRGBColorSpace;
+    if (m.map) m.map.colorSpace = THREE.SRGBColorSpace;
     return m;
   },
 
-  build(scene) {
+  build(scene, rig) {
     const ROOM_W = 34;
     const ROOM_D = 34;
     const WALL_H = 9.5;
     const floorY = 0;
 
-    // Lights
-    scene.add(new THREE.AmbientLight(0xffffff, 0.85));
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 1.1);
-    hemi.position.set(0, 18, 0);
+    // WORLD LIGHTS (strong enough that it never goes black)
+    const amb = new THREE.AmbientLight(0xffffff, 0.55);
+    scene.add(amb);
+
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 1.05);
+    hemi.position.set(0, 20, 0);
     scene.add(hemi);
-    const sun = new THREE.DirectionalLight(0xffffff, 1.9);
-    sun.position.set(16, 22, 10);
+
+    const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+    sun.position.set(14, 24, 10);
     scene.add(sun);
 
     // Materials
     const floorMat = this._mat({
       file: "Marblegold Floors.jpg",
-      color: 0x2b2f38,
+      color: 0x2a2d35,
       repeat: [6, 6],
       roughness: 0.95,
       metalness: 0.02,
@@ -72,13 +76,13 @@ export const World = {
       roughness: 0.35,
       metalness: 0.55,
       emissive: 0x2a1a08,
-      emissiveIntensity: 0.6,
+      emissiveIntensity: 0.45,
     });
 
-    // Floor (lift to kill blinking)
+    // Floor (lift a hair to avoid shimmer)
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), floorMat);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.y = floorY + 0.002;
+    floor.position.y = floorY + 0.0015;
     scene.add(floor);
 
     // Walls
@@ -90,72 +94,97 @@ export const World = {
       return m;
     };
     mkWall(ROOM_W, WALL_H, 0, WALL_H / 2, -ROOM_D / 2, 0);
-    mkWall(ROOM_W, WALL_H, 0, WALL_H / 2,  ROOM_D / 2, Math.PI);
-    mkWall(ROOM_D, WALL_H,  ROOM_W / 2, WALL_H / 2, 0, -Math.PI / 2);
-    mkWall(ROOM_D, WALL_H, -ROOM_W / 2, WALL_H / 2, 0,  Math.PI / 2);
+    mkWall(ROOM_W, WALL_H, 0, WALL_H / 2, ROOM_D / 2, Math.PI);
+    mkWall(ROOM_D, WALL_H, ROOM_W / 2, WALL_H / 2, 0, -Math.PI / 2);
+    mkWall(ROOM_D, WALL_H, -ROOM_W / 2, WALL_H / 2, 0, Math.PI / 2);
 
     // Trim
     const trimH = 0.22;
-    const trimY = floorY + trimH / 2 + 0.002;
-    const addTrim = (geo, x, z) => {
-      const t = new THREE.Mesh(geo, trimMat);
-      t.position.set(x, trimY, z);
-      scene.add(t);
+    const trimY = floorY + trimH / 2 + 0.001;
+    const t1 = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W, trimH, 0.22), trimMat);
+    t1.position.set(0, trimY, -ROOM_D / 2 + 0.11);
+    scene.add(t1);
+    const t2 = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W, trimH, 0.22), trimMat);
+    t2.position.set(0, trimY, ROOM_D / 2 - 0.11);
+    scene.add(t2);
+    const t3 = new THREE.Mesh(new THREE.BoxGeometry(0.22, trimH, ROOM_D), trimMat);
+    t3.position.set(ROOM_W / 2 - 0.11, trimY, 0);
+    scene.add(t3);
+    const t4 = new THREE.Mesh(new THREE.BoxGeometry(0.22, trimH, ROOM_D), trimMat);
+    t4.position.set(-ROOM_W / 2 + 0.11, trimY, 0);
+    scene.add(t4);
+
+    // Elegant Guardrails (glowing)
+    const rails = new THREE.Group();
+    const railColor = 0x00ffaa;
+    const railMat = new THREE.MeshStandardMaterial({
+      color: 0x0b0c10,
+      emissive: railColor,
+      emissiveIntensity: 0.65,
+      roughness: 0.4,
+      metalness: 0.15,
+    });
+
+    const railH = 1.05;
+    const railTh = 0.08;
+    const railR = 6.3;
+
+    const mkRailSeg = (w, d, x, z) => {
+      const seg = new THREE.Mesh(new THREE.BoxGeometry(w, railH, d), railMat);
+      seg.position.set(x, railH / 2, z);
+      rails.add(seg);
+      return seg;
     };
-    addTrim(new THREE.BoxGeometry(ROOM_W, trimH, 0.22), 0, -ROOM_D / 2 + 0.11);
-    addTrim(new THREE.BoxGeometry(ROOM_W, trimH, 0.22), 0,  ROOM_D / 2 - 0.11);
-    addTrim(new THREE.BoxGeometry(0.22, trimH, ROOM_D),  ROOM_W / 2 - 0.11, 0);
-    addTrim(new THREE.BoxGeometry(0.22, trimH, ROOM_D), -ROOM_W / 2 + 0.11, 0);
+
+    mkRailSeg(railR * 2, railTh, 0, -railR);
+    mkRailSeg(railR * 2, railTh, 0, railR);
+    mkRailSeg(railTh, railR * 2, -railR, 0);
+    mkRailSeg(railTh, railR * 2, railR, 0);
+    scene.add(rails);
 
     // Table
-    const table = new THREE.Group();
-    table.position.set(0, 0, 0);
+    const tableGroup = new THREE.Group();
+    tableGroup.position.set(0, 0, 0);
+
     const feltMat = new THREE.MeshStandardMaterial({ color: 0x0b3a2a, roughness: 0.9, metalness: 0.02 });
-    const railMat = new THREE.MeshStandardMaterial({ color: 0x121212, roughness: 0.55, metalness: 0.1 });
+    const railTopMat = new THREE.MeshStandardMaterial({ color: 0x121212, roughness: 0.55, metalness: 0.1 });
 
-    const top = new THREE.Mesh(new THREE.CylinderGeometry(2.35, 2.35, 0.18, 48), feltMat);
-    top.position.y = 0.95;
-    table.add(top);
+    const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(2.35, 2.35, 0.18, 56), feltMat);
+    tableTop.position.y = 0.95;
+    tableGroup.add(tableTop);
 
-    const rail = new THREE.Mesh(new THREE.TorusGeometry(2.35, 0.14, 18, 56), railMat);
-    rail.rotation.x = Math.PI / 2;
-    rail.position.y = 1.05;
-    table.add(rail);
+    const tableRail = new THREE.Mesh(new THREE.TorusGeometry(2.35, 0.14, 18, 72), railTopMat);
+    tableRail.rotation.x = Math.PI / 2;
+    tableRail.position.y = 1.05;
+    tableGroup.add(tableRail);
 
-    const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.55, 0.9, 24), railMat);
+    const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.55, 0.9, 28), railTopMat);
     pedestal.position.y = 0.45;
-    table.add(pedestal);
+    tableGroup.add(pedestal);
 
-    const tableLight = new THREE.PointLight(0xffffff, 1.35, 16);
-    tableLight.position.set(0, 2.9, 0);
-    table.add(tableLight);
+    // Center chips placeholder (always visible)
+    const pot = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.22, 0.22, 0.09, 18),
+      new THREE.MeshStandardMaterial({ color: 0xffd27a, roughness: 0.35, metalness: 0.35, emissive: 0x1b1206, emissiveIntensity: 0.25 })
+    );
+    pot.position.set(0, 1.08, 0);
+    tableGroup.add(pot);
 
-    scene.add(table);
+    // Table light
+    const tableLight = new THREE.PointLight(0xffffff, 1.1, 14);
+    tableLight.position.set(0, 3.0, 0);
+    tableGroup.add(tableLight);
 
-    // Chips + cards preview
-    const chipMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.25, metalness: 0.2 });
-    const chipGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.02, 22);
-    for (let i = 0; i < 16; i++) {
-      const c = new THREE.Mesh(chipGeo, chipMat);
-      c.position.set(-0.4 + (i % 4) * 0.11, 1.06 + Math.floor(i / 4) * 0.022, 0.25);
-      table.add(c);
-    }
-    const cardMat = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.85 });
-    const cardGeo = new THREE.PlaneGeometry(0.16, 0.22);
-    for (let i = 0; i < 5; i++) {
-      const card = new THREE.Mesh(cardGeo, cardMat);
-      card.rotation.x = -Math.PI / 2;
-      card.position.set(-0.35 + i * 0.18, 1.06, -0.15);
-      table.add(card);
-    }
+    scene.add(tableGroup);
 
-    // Chairs + seats
-    const seats = [];
+    // Chairs + seat anchors (chairs face table correctly)
     const chairMat = new THREE.MeshStandardMaterial({ color: 0x3b3b3b, roughness: 0.85, metalness: 0.05 });
-    const chairRadius = 3.1;
+    const chairRadius = 3.15;
 
+    const seats = [];
     const mkChair = () => {
       const g = new THREE.Group();
+
       const seat = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.08, 0.55), chairMat);
       seat.position.y = 0.45;
       g.add(seat);
@@ -165,10 +194,7 @@ export const World = {
       g.add(back);
 
       const legGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.42, 10);
-      const offsets = [
-        [-0.23, 0.23], [0.23, 0.23],
-        [-0.23,-0.23], [0.23,-0.23],
-      ];
+      const offsets = [[-0.23, 0.22],[0.23,0.22],[-0.23,-0.22],[0.23,-0.22]];
       for (const [lx, lz] of offsets) {
         const leg = new THREE.Mesh(legGeo, chairMat);
         leg.position.set(lx, 0.22, lz);
@@ -183,23 +209,25 @@ export const World = {
       const cz = Math.sin(a) * chairRadius;
 
       const chair = mkChair();
-      chair.position.set(cx, floorY, cz);
+      chair.position.set(cx, 0, cz);
 
-      // FACE the center of table
-      const yaw = Math.atan2(0 - cx, 0 - cz);
-      chair.rotation.y = yaw;
+      // Face table center:
+      chair.lookAt(0, 0, 0);
+      chair.rotation.y += Math.PI; // correct chair facing direction
 
       scene.add(chair);
 
-      // Seat point slightly forward of chair
-      const seatPos = new THREE.Vector3(cx, floorY, cz).add(
-        new THREE.Vector3(0, 0, 0.55).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw)
-      );
-
-      seats.push({ id: `seat_${i}`, position: seatPos, yaw });
+      const seatAnchor = new THREE.Object3D();
+      seatAnchor.position.set(cx, 0, cz);
+      seatAnchor.lookAt(0, 0, 0);
+      seats.push({
+        index: i,
+        position: new THREE.Vector3(cx, 0, cz),
+        yaw: seatAnchor.rotation.y,
+      });
     }
 
-    // Pads
+    // Teleport pads (Lobby spawn must be here)
     const pads = [];
     const padById = {};
     const mkPad = (id, x, z, color) => {
@@ -221,17 +249,9 @@ export const World = {
       ring1.position.y = 0.06;
       g.add(ring1);
 
-      const ring2 = new THREE.Mesh(
-        new THREE.TorusGeometry(0.52, 0.03, 12, 64),
-        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.5, roughness: 0.2, metalness: 0.2, transparent: true, opacity: 0.9 })
-      );
-      ring2.rotation.x = Math.PI / 2;
-      ring2.position.y = 0.065;
-      g.add(ring2);
-
       const beacon = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.06, 0.06, 1.0, 12),
-        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.1 })
+        new THREE.CylinderGeometry(0.06, 0.06, 1.05, 12),
+        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.2 })
       );
       beacon.position.y = 0.55;
       g.add(beacon);
@@ -239,6 +259,7 @@ export const World = {
       scene.add(g);
 
       const pad = { id, position: new THREE.Vector3(x, floorY, z), radius: 0.95, object: g };
+      g.userData.teleportPad = pad;
       pads.push(pad);
       padById[id] = pad;
       return pad;
@@ -249,74 +270,49 @@ export const World = {
     mkPad("store", 11.5, 0, 0x2bd7ff);
     mkPad("tournament", 0, -11.5, 0xffd27a);
 
-    // Store kiosk (ray target)
-    const kioskPos = new THREE.Vector3(11.5, floorY, 2.8);
-    const kiosk = new THREE.Group();
-    kiosk.position.copy(kioskPos);
-
-    const kioskBody = new THREE.Mesh(
-      new THREE.BoxGeometry(1.2, 1.4, 0.8),
-      new THREE.MeshStandardMaterial({ color: 0x0f1014, roughness: 0.75, metalness: 0.15 })
-    );
-    kioskBody.position.y = 0.7;
-    kioskBody.userData.isKioskPart = true;
-    kiosk.add(kioskBody);
-
-    const kioskScreen = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.0, 0.65),
-      new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0x003322, emissiveIntensity: 1.05 })
-    );
-    kioskScreen.position.set(0, 1.05, 0.41);
-    kioskScreen.userData.isKioskPart = true;
-    kiosk.add(kioskScreen);
-
-    scene.add(kiosk);
-
-    // Colliders
+    // Colliders + bounds
     const colliders = [];
     const wallThick = 0.5;
-    const addBoxCollider = (w, h, d, x, y, z) => {
-      const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(w, h, d),
-        new THREE.MeshBasicMaterial({ visible: false })
-      );
+
+    const addCollider = (w, h, d, x, y, z) => {
+      const m = new THREE.MeshBasicMaterial({ visible: false });
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
       mesh.position.set(x, y, z);
+      mesh.userData.box = new THREE.Box3().setFromObject(mesh);
       scene.add(mesh);
       colliders.push(mesh);
       return mesh;
     };
 
-    addBoxCollider(ROOM_W, WALL_H, wallThick, 0, WALL_H / 2, -ROOM_D / 2);
-    addBoxCollider(ROOM_W, WALL_H, wallThick, 0, WALL_H / 2,  ROOM_D / 2);
-    addBoxCollider(wallThick, WALL_H, ROOM_D,  ROOM_W / 2, WALL_H / 2, 0);
-    addBoxCollider(wallThick, WALL_H, ROOM_D, -ROOM_W / 2, WALL_H / 2, 0);
+    // Walls
+    addCollider(ROOM_W, WALL_H, wallThick, 0, WALL_H / 2, -ROOM_D / 2);
+    addCollider(ROOM_W, WALL_H, wallThick, 0, WALL_H / 2, ROOM_D / 2);
+    addCollider(wallThick, WALL_H, ROOM_D, ROOM_W / 2, WALL_H / 2, 0);
+    addCollider(wallThick, WALL_H, ROOM_D, -ROOM_W / 2, WALL_H / 2, 0);
 
-    // table collider
-    addBoxCollider(6.4, 2.6, 6.4, 0, 1.0, 0);
+    // Table blocker (so you can't walk through)
+    addCollider(6.4, 2.6, 6.4, 0, 1.0, 0);
 
-    // kiosk collider
-    addBoxCollider(1.4, 1.6, 1.0, kioskPos.x, 0.8, kioskPos.z);
+    // Guardrail blockers (walkway)
+    addCollider(railR * 2, railH, railTh + 0.02, 0, railH / 2, -railR);
+    addCollider(railR * 2, railH, railTh + 0.02, 0, railH / 2, railR);
+    addCollider(railTh + 0.02, railH, railR * 2, -railR, railH / 2, 0);
+    addCollider(railTh + 0.02, railH, railR * 2, railR, railH / 2, 0);
 
     const bounds = {
       min: new THREE.Vector3(-ROOM_W / 2 + 1.2, floorY, -ROOM_D / 2 + 1.2),
-      max: new THREE.Vector3( ROOM_W / 2 - 1.2, floorY,  ROOM_D / 2 - 1.2),
+      max: new THREE.Vector3(ROOM_W / 2 - 1.2, floorY, ROOM_D / 2 - 1.2),
     };
 
+    // Lobby “wander zone” for eliminated bots
+    const lobbyZone = {
+      min: new THREE.Vector3(-12, 0, 7.5),
+      max: new THREE.Vector3(12, 0, 15.5),
+    };
+
+    // ✅ Default spawn ALWAYS = lobby pad
     const spawn = padById.lobby.position.clone();
 
-    // VR ray targets
-    const rayTargets = [kioskBody, kioskScreen];
-
-    return {
-      floorY,
-      spawn,
-      bounds,
-      colliders,
-      pads,
-      padById,
-      seats,
-      kioskPos,
-      rayTargets,
-    };
-  }
+    return { spawn, colliders, bounds, pads, padById, floorY, seats, lobbyZone };
+  },
 };

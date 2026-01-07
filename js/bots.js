@@ -1,7 +1,6 @@
-// /js/bots.js — Tournament Bots + Lobby Wandering + Shirt Atlas
-import * as THREE from "./three.js";
+// /js/bots.js — Scarlett VR Poker Bots (CLEAN)
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { Avatar } from "./avatar.js";
-import { BODY_DIMS } from "./body_dims.js";
 
 export const Bots = {
   scene: null,
@@ -12,10 +11,8 @@ export const Bots = {
   bots: [],
   state: "seating",
   timer: 0,
+  activeCount: 6, // seated
   winnerIndex: -1,
-
-  _shirtTex: null,
-  _shirtMat: null,
 
   init({ scene, rig, getSeats, getLobbyZone }) {
     this.scene = scene;
@@ -25,21 +22,21 @@ export const Bots = {
 
     const seats = this.getSeats?.() || [];
     if (!seats.length) {
-      console.warn("[Bots] No seats provided. Bots not spawned.");
+      console.warn("[Bots] No seats available yet.");
       return;
     }
-
-    this._ensureShirtMaterial();
 
     // Create 8 bots total (6 seats + 2 lobby)
     this.bots = [];
     for (let i = 0; i < 8; i++) {
-      const a = Avatar.create({ color: i % 2 ? 0x2bd7ff : 0xff2bd6 }); // <-- this is your “blue/pink”
-      a.userData.bot = { id: i, seated: false, eliminated: false, target: null, crown: false };
-
-      // add shirt using your atlas texture
-      this._addShirt(a);
-
+      const a = Avatar.create({ color: i % 2 ? 0x2bd7ff : 0xff2bd6 });
+      a.userData.bot = {
+        id: i,
+        seated: false,
+        eliminated: false,
+        target: null,
+        crown: false,
+      };
       this.scene.add(a);
       this.bots.push(a);
     }
@@ -47,45 +44,6 @@ export const Bots = {
     this._seatBots();
     this.state = "playing";
     this.timer = 0;
-
-    console.log("[Bots] Spawned", this.bots.length, "bots.");
-  },
-
-  _ensureShirtMaterial() {
-    if (this._shirtMat) return;
-
-    const loader = new THREE.TextureLoader();
-    this._shirtTex = loader.load(BODY_DIMS.shirt.textureUrl);
-    this._shirtTex.colorSpace = THREE.SRGBColorSpace;
-    this._shirtTex.anisotropy = 4;
-    this._shirtTex.wrapS = THREE.ClampToEdgeWrapping;
-    this._shirtTex.wrapT = THREE.ClampToEdgeWrapping;
-
-    this._shirtMat = new THREE.MeshStandardMaterial({
-      map: this._shirtTex,
-      roughness: 0.95,
-      metalness: 0.0,
-      transparent: true,
-      opacity: 1.0,
-    });
-  },
-
-  _addShirt(bot) {
-    // remove old
-    const old = bot.getObjectByName("bot_shirt");
-    if (old) old.parent?.remove(old);
-
-    const shirtGeo = new THREE.BoxGeometry(
-      BODY_DIMS.shirt.width,
-      BODY_DIMS.shirt.height,
-      BODY_DIMS.shirt.depth
-    );
-
-    const shirt = new THREE.Mesh(shirtGeo, this._shirtMat);
-    shirt.name = "bot_shirt";
-    shirt.position.set(0, BODY_DIMS.shirt.centerY, BODY_DIMS.shirt.zOffset);
-
-    bot.add(shirt);
   },
 
   _seatBots() {
@@ -94,13 +52,13 @@ export const Bots = {
       const b = this.bots[i];
       const d = b.userData.bot;
 
-      d.crown = false;
+      this._removeCrown(b);
       d.eliminated = false;
 
       if (i < Math.min(6, seats.length)) {
         const s = seats[i];
         b.position.set(s.position.x, 0, s.position.z);
-        b.rotation.y = s.yaw;
+        b.rotation.y = s.yaw ?? 0;
         d.seated = true;
       } else {
         d.seated = false;
@@ -125,6 +83,8 @@ export const Bots = {
   },
 
   _giveCrown(bot) {
+    if (bot.getObjectByName("crown")) return;
+
     bot.userData.bot.crown = true;
 
     const crown = new THREE.Mesh(
@@ -132,13 +92,13 @@ export const Bots = {
       new THREE.MeshStandardMaterial({
         color: 0xffd27a,
         emissive: 0xffd27a,
-        emissiveIntensity: 0.45,
+        emissiveIntensity: 0.35,
         roughness: 0.35,
-        metalness: 0.55
+        metalness: 0.55,
       })
     );
     crown.rotation.x = Math.PI / 2;
-    crown.position.y = 1.55;
+    crown.position.y = 1.45;
     crown.name = "crown";
     bot.add(crown);
   },
@@ -154,7 +114,7 @@ export const Bots = {
 
     this.timer += dt;
 
-    // Demo tournament: eliminate one seated bot every 12s until 2 remain
+    // Demo tournament: every 12s eliminate 1 seated bot until 2 remain, then crown winner for 60s
     if (this.state === "playing") {
       if (this.timer > 12) {
         this.timer = 0;
@@ -170,7 +130,6 @@ export const Bots = {
           const winner = seated[Math.floor(Math.random() * seated.length)];
           this.winnerIndex = winner.userData.bot.id;
           this._giveCrown(winner);
-
           winner.userData.bot.seated = false;
           this._sendToLobby(winner);
           this.timer = 0;

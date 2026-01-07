@@ -1,24 +1,22 @@
-// /js/dev_mode.js — Scarlett Poker VR — DEV MODE (Android/desktop 2D controls)
-// No WebXR required. Gives on-screen joystick controls + optional tap teleport.
+// /js/dev_mode.js — Scarlett Poker VR — DEV MODE (Android/desktop)
+// Provides on-screen MOVE + TURN, optional tap teleport.
 // GitHub Pages safe.
 
 export const DevMode = (() => {
   let _enabled = false;
+  let _forced = false;
   let _root = null;
-  let _move = { x: 0, y: 0 }; // x=strife, y=forward
-  let _turn = { x: 0, y: 0 }; // x=turn
+  let _move = { x: 0, y: 0 };
+  let _turn = { x: 0, y: 0 };
   let _tapTeleport = false;
   let _onTeleport = null;
 
-  function isMobile() {
-    return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-  }
+  function forceEnable(v) { _forced = !!v; }
+  function isMobile() { return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent); }
 
   function shouldEnable() {
-    // Enable dev mode if:
-    // - URL has ?dev=1  OR
-    // - not in XR and on mobile
     const url = new URL(window.location.href);
+    if (_forced) return true;
     if (url.searchParams.get("dev") === "1") return true;
     if (!("xr" in navigator) && isMobile()) return true;
     return false;
@@ -80,8 +78,6 @@ export const DevMode = (() => {
       const cy = clamp(dy, -max, max);
 
       stick.style.transform = `translate(${cx}px,${cy}px)`;
-
-      // normalize to [-1,1]
       onMove(cx / max, cy / max);
     };
 
@@ -105,6 +101,7 @@ export const DevMode = (() => {
 
     _enabled = shouldEnable();
     if (!_enabled) return { enabled: false };
+    if (_root) return { enabled: true }; // already created
 
     _root = document.createElement("div");
     _root.id = "devHud";
@@ -128,9 +125,8 @@ export const DevMode = (() => {
     _root.appendChild(right.pad);
 
     _bindStick(left.pad, left.stick, (x, y) => {
-      // y is down-positive; invert to make up=forward
       _move.x = x;
-      _move.y = -y;
+      _move.y = -y; // invert for forward
     });
 
     _bindStick(right.pad, right.stick, (x, y) => {
@@ -138,7 +134,6 @@ export const DevMode = (() => {
       _turn.y = y;
     });
 
-    // Teleport toggle + tap handling
     const btn = document.createElement("button");
     btn.textContent = "Tap Teleport: OFF";
     btn.style.position = "absolute";
@@ -159,10 +154,8 @@ export const DevMode = (() => {
     };
     _root.appendChild(btn);
 
-    // tap to teleport uses click coordinates; main.js will raycast
     window.addEventListener("pointerdown", (e) => {
       if (!_tapTeleport) return;
-      // ignore taps on UI pads/buttons
       if (e.target && (e.target.tagName === "BUTTON" || e.target.closest?.("#devHud"))) return;
       if (_onTeleport) _onTeleport({ x: e.clientX, y: e.clientY });
     });
@@ -171,15 +164,7 @@ export const DevMode = (() => {
   }
 
   function enabled() { return _enabled; }
+  function getAxes() { return { moveX: _move.x, moveY: _move.y, turnX: _turn.x }; }
 
-  // Returns movement values you can apply each frame
-  function getAxes() {
-    return {
-      moveX: _move.x,
-      moveY: _move.y,
-      turnX: _turn.x
-    };
-  }
-
-  return { init, enabled, getAxes };
+  return { init, enabled, getAxes, forceEnable };
 })();

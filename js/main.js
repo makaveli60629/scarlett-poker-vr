@@ -1,22 +1,24 @@
-// /js/main.js — Scarlett VR Poker 9.2.2 (GitHub Pages SAFE: no "three" bare imports)
+// /js/main.js — Scarlett VR Poker 9.2 (FULL Hooked)
+// - CDN THREE + VRButton + ControllerModel
+// - Loads world.js which loads teleport_machine.js + bots.js
+// - Handles locomotion, snap-turn, teleport arc + pointer
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
+import { XRControllerModelFactory } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/XRControllerModelFactory.js";
 
 const log = (m) => (window.__hubLog ? window.__hubLog(m) : console.log(m));
-const V = new URL(import.meta.url).searchParams.get("v") || (window.__BUILD_V || String(Date.now()));
+const V = new URL(import.meta.url).searchParams.get("v") || (window.__BUILD_V || "9020");
 log("[main] boot v=" + V);
 
 let renderer, scene, camera;
 let world = null;
-
 const clock = new THREE.Clock();
 
 // XR rig
 const player = new THREE.Group();
 const head = new THREE.Group();
 
-// controllers
 let c0 = null, c1 = null;
 let g0 = null, g1 = null;
 
@@ -26,14 +28,9 @@ const TURN_ANGLE = THREE.MathUtils.degToRad(45);
 const DEADZONE = 0.20;
 let snapArmed = true;
 
-// teleport
+// teleport system + pointer
 let teleport = null;
-
-// pointer (laser)
 let rightPointer = null;
-
-// spawn circle
-let spawnCircle = null;
 
 boot().catch((e) => log("❌ boot failed: " + (e?.message || e)));
 
@@ -42,6 +39,7 @@ async function boot() {
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setSize(innerWidth, innerHeight);
   renderer.xr.enabled = true;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
   document.body.appendChild(renderer.domElement);
 
   const btn = VRButton.createButton(renderer);
@@ -61,17 +59,14 @@ async function boot() {
   player.add(head);
   scene.add(player);
 
-  // preview height (non-VR)
+  // non-VR preview height
   camera.position.set(0, 1.6, 0);
 
-  // stronger lighting
-  scene.add(new THREE.AmbientLight(0xffffff, 0.65));
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.2));
-  const key = new THREE.DirectionalLight(0xffffff, 1.25);
-  key.position.set(6, 10, 4);
-  scene.add(key);
+  // base lights (world adds more)
+  scene.add(new THREE.AmbientLight(0xffffff, 0.40));
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.8));
 
-  // teleport visuals
+  // teleport visuals (arc+ring)
   teleport = createTeleportSystem(THREE);
   scene.add(teleport.arcLine, teleport.ring);
 
@@ -84,27 +79,20 @@ async function boot() {
     log("❌ world import/init failed: " + (e?.message || e));
   }
 
-  // spawn
-  const spawn = world?.spawnPads?.[0] || new THREE.Vector3(0, 0, 3.5);
+  // spawn at ultimate spawn spot
+  const spawn = world?.spawnPads?.[0] || new THREE.Vector3(0, 0, 3.6);
   player.position.set(spawn.x, 0, spawn.z);
 
-  // visible spawn circle
-  spawnCircle = makeSpawnCircle(THREE);
-  spawnCircle.position.set(spawn.x, 0.01, spawn.z);
-  scene.add(spawnCircle);
-
-  // face table
+  // face table immediately
   faceTableNow(false);
 
   setupXRControls();
 
-  // recenter event from HUD
   window.addEventListener("scarlett-recenter", () => {
     faceTableNow(true);
     log("[main] recenter ✅");
   });
 
-  // XR session start recenter
   renderer.xr.addEventListener("sessionstart", () => {
     setTimeout(() => {
       faceTableNow(true);
@@ -134,9 +122,9 @@ function setupXRControls() {
   g1 = renderer.xr.getControllerGrip(1);
   scene.add(g0, g1);
 
-  // GitHub Pages SAFE controller grip meshes
-  g0.add(makeGripMesh(THREE));
-  g1.add(makeGripMesh(THREE));
+  const modelFactory = new XRControllerModelFactory();
+  g0.add(modelFactory.createControllerModel(g0));
+  g1.add(modelFactory.createControllerModel(g1));
 
   c0.addEventListener("connected", (e) => (c0.userData.inputSource = e.data));
   c1.addEventListener("connected", (e) => (c1.userData.inputSource = e.data));
@@ -149,30 +137,11 @@ function setupXRControls() {
   c0.addEventListener("selectend", () => onSelectEnd(c0));
   c1.addEventListener("selectend", () => onSelectEnd(c1));
 
-  // laser pointer on right grip
+  // laser pointer attached to right grip
   rightPointer = buildLaserPointer(THREE);
   (g1 || g0).add(rightPointer.group);
 
   log("[main] controllers ready ✅");
-}
-
-function makeGripMesh(THREE) {
-  const g = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.014, 0.018, 0.10, 10),
-    new THREE.MeshStandardMaterial({ color: 0x222a33, roughness: 0.6, metalness: 0.2 })
-  );
-  body.rotation.x = Math.PI / 2;
-  body.position.z = -0.03;
-  g.add(body);
-
-  const tip = new THREE.Mesh(
-    new THREE.SphereGeometry(0.012, 10, 10),
-    new THREE.MeshStandardMaterial({ color: 0x33ff66, emissive: 0x33ff66, emissiveIntensity: 0.35 })
-  );
-  tip.position.z = -0.085;
-  g.add(tip);
-  return g;
 }
 
 function getGamepad(controller) {
@@ -255,7 +224,8 @@ function applyLocomotion(dt) {
   const left = findControllerByHand("left") || c0;
   const right = findControllerByHand("right") || c1;
 
-  // QUEST AXIS FIX (forward is usually NEGATIVE y)
+  // NOTE: Quest usually gives forward as NEGATIVE Y.
+  // If you still feel reversed, flip the sign in the move line below.
   const gpL = getGamepad(left);
   if (gpL?.axes?.length >= 2) {
     const x = gpL.axes[2] ?? gpL.axes[0];
@@ -270,7 +240,7 @@ function applyLocomotion(dt) {
       const rightv = new THREE.Vector3(forward.z, 0, -forward.x);
 
       const move = new THREE.Vector3();
-      move.addScaledVector(forward, (-ay) * MOVE_SPEED * dt);
+      move.addScaledVector(forward, (-ay) * MOVE_SPEED * dt); // ✅ forward = -ay
       move.addScaledVector(rightv, (ax) * MOVE_SPEED * dt);
 
       player.position.add(move);
@@ -282,7 +252,7 @@ function applyLocomotion(dt) {
     }
   }
 
-  // snap turn
+  // snap turn on right stick X
   const gpR = getGamepad(right);
   if (gpR?.axes?.length >= 2) {
     const x = gpR.axes[2] ?? gpR.axes[0];
@@ -295,10 +265,10 @@ function applyLocomotion(dt) {
     }
   }
 
-  // pointer always
+  // update pointer always
   updateLaserPointer(THREE, rightPointer, teleport, world, camera);
 
-  // teleport arc
+  // teleport arc while active
   if (teleport.active) {
     const src = teleport.sourceObj || (findControllerByHand("right") || c1);
     updateTeleportArc(THREE, src, teleport, world, camera);
@@ -308,6 +278,8 @@ function applyLocomotion(dt) {
 // ---------------- Pointer + Teleport visuals ----------------
 function buildLaserPointer(THREE) {
   const group = new THREE.Group();
+  group.name = "RightLaserPointer";
+
   const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
   const mat = new THREE.LineBasicMaterial({ color: 0x33ff66, transparent: true, opacity: 0.9 });
   const line = new THREE.Line(geo, mat);
@@ -375,6 +347,7 @@ function updateTeleportArc(THREE, sourceObj, tp, world, cam) {
 
   const origin = new THREE.Vector3();
   const q = new THREE.Quaternion();
+
   if (sourceObj?.getWorldPosition) sourceObj.getWorldPosition(origin);
   if (sourceObj?.getWorldQuaternion) sourceObj.getWorldQuaternion(q);
 
@@ -432,29 +405,10 @@ function updateTeleportArc(THREE, sourceObj, tp, world, cam) {
   }
 }
 
-// ---------------- Spawn circle ----------------
-function makeSpawnCircle(THREE) {
-  const ring = new THREE.Mesh(
-    new THREE.RingGeometry(0.28, 0.36, 48),
-    new THREE.MeshBasicMaterial({ color: 0x66ffff, transparent: true, opacity: 0.75, side: THREE.DoubleSide })
-  );
-  ring.rotation.x = -Math.PI / 2;
-
-  const dot = new THREE.Mesh(
-    new THREE.CircleGeometry(0.10, 24),
-    new THREE.MeshBasicMaterial({ color: 0x66ffff, transparent: true, opacity: 0.22 })
-  );
-  dot.rotation.x = -Math.PI / 2;
-
-  const g = new THREE.Group();
-  g.add(ring, dot);
-  return g;
-}
-
 // ---------------- Loop ----------------
 function tick() {
   const dt = clock.getDelta();
   applyLocomotion(dt);
   if (world?.tick) world.tick(dt);
   renderer.render(scene, camera);
-}
+                                             }

@@ -64,8 +64,9 @@ async function boot() {
 
   // load world (cache-safe)
   try {
-    const mod = await import(`./world.js?v=${V}`);
-    world = await mod.initWorld({ THREE, scene, log });
+    const mod = await import(`./world.js?v=${encodeURIComponent(V)}`);
+    // ✅ IMPORTANT: pass v so world uses same cache-bust for submodules
+    world = await mod.initWorld({ THREE, scene, log, v: V });
     log("[main] world init ✅");
   } catch (e) {
     log("❌ world import/init failed: " + (e?.message || e));
@@ -75,8 +76,12 @@ async function boot() {
   const spawn = world?.spawnPads?.[0] || new THREE.Vector3(0, 0, 2);
   player.position.set(spawn.x, 0, spawn.z);
 
+  // face table
   if (world?.tableFocus) {
-    const toTable = new THREE.Vector3().subVectors(world.tableFocus, new THREE.Vector3(spawn.x, 0, spawn.z));
+    const toTable = new THREE.Vector3().subVectors(
+      world.tableFocus,
+      new THREE.Vector3(spawn.x, 0, spawn.z)
+    );
     player.rotation.y = Math.atan2(toTable.x, toTable.z);
   }
 
@@ -160,7 +165,10 @@ function onSelectEnd(controller) {
     player.position.set(p.x, 0, p.z);
 
     if (world?.tableFocus) {
-      const toTable = new THREE.Vector3().subVectors(world.tableFocus, new THREE.Vector3(p.x, 0, p.z));
+      const toTable = new THREE.Vector3().subVectors(
+        world.tableFocus,
+        new THREE.Vector3(p.x, 0, p.z)
+      );
       player.rotation.y = Math.atan2(toTable.x, toTable.z);
     }
   }
@@ -177,6 +185,7 @@ function applyLocomotion(dt) {
   const left = findControllerByHand("left") || c0;
   const right = findControllerByHand("right") || c1;
 
+  // left stick move
   const gpL = getGamepad(left);
   if (gpL?.axes?.length >= 2) {
     const x = gpL.axes[2] ?? gpL.axes[0];
@@ -192,7 +201,7 @@ function applyLocomotion(dt) {
 
       const move = new THREE.Vector3();
       move.addScaledVector(forward, (-ay) * MOVE_SPEED * dt);
-      move.addScaledVector(rightv, (ax) * MOVE_SPEED * dt);
+      move.addScaledVector(rightv, ax * MOVE_SPEED * dt);
 
       player.position.add(move);
 
@@ -203,6 +212,7 @@ function applyLocomotion(dt) {
     }
   }
 
+  // right stick snap turn
   const gpR = getGamepad(right);
   if (gpR?.axes?.length >= 2) {
     const x = gpR.axes[2] ?? gpR.axes[0];
@@ -215,6 +225,7 @@ function applyLocomotion(dt) {
     }
   }
 
+  // teleport arc update
   const rightHand = findControllerByHand("right") || c1;
   if (teleport.active && rightHand) updateTeleportArc(THREE, rightHand, teleport, world);
 }
@@ -249,7 +260,7 @@ function updateTeleportArc(THREE, controller, tp, world) {
   controller.getWorldQuaternion(q);
   dir.applyQuaternion(q).normalize();
 
-  const g = -9.8, v = 7.0, step = 0.06, maxT = 2.0;
+  const g = -9.8, vel = 7.0, step = 0.06, maxT = 2.0;
 
   const positions = tp.arcLine.geometry.attributes.position.array;
   let hit = null;
@@ -257,9 +268,9 @@ function updateTeleportArc(THREE, controller, tp, world) {
 
   for (let t = 0; t <= maxT; t += step) {
     const p = new THREE.Vector3(
-      origin.x + dir.x * v * t,
-      origin.y + dir.y * v * t + 0.5 * g * t * t,
-      origin.z + dir.z * v * t
+      origin.x + dir.x * vel * t,
+      origin.y + dir.y * vel * t + 0.5 * g * t * t,
+      origin.z + dir.z * vel * t
     );
 
     positions[idx++] = p.x;
@@ -298,4 +309,4 @@ function tick() {
   applyLocomotion(dt);
   if (world?.tick) world.tick(dt);
   renderer.render(scene, camera);
-                                             }
+  }

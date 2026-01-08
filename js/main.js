@@ -1,4 +1,4 @@
-// /js/main.js — Scarlett VR Poker MAIN v11.1 (CONTROLLERS FIXED + SINGLE GAME)
+// /js/main.js — Scarlett Poker VR MAIN v11.2 (Back Together)
 
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
@@ -13,27 +13,22 @@ import { HandsSystem } from "./hands.js";
 const BUILD = window.__BUILD_V || Date.now().toString();
 const log = (...a) => console.log(...a);
 
-// ---------------- SCENE ----------------
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x020205);
-scene.fog = new THREE.Fog(0x020205, 4, 85);
+scene.fog = new THREE.Fog(0x020205, 4, 95);
 
-// ---------------- CAMERA ----------------
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 300);
 
-// ---------------- RENDERER ----------------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio));
 renderer.xr.enabled = true;
-
 try { renderer.xr.setReferenceSpaceType("local-floor"); } catch {}
+
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 
-// ---------------- PLAYER RIG ----------------
-// IMPORTANT: Controllers/grips MUST be children of this rig,
-// so they move/teleport with you (fixes "controller stuck in front of face").
+// Player rig
 const player = new THREE.Group();
 player.name = "PlayerRig";
 scene.add(player);
@@ -41,30 +36,26 @@ scene.add(player);
 player.add(camera);
 camera.position.set(0, 1.65, 0);
 
-// Spawn (on teleport circle)
+// Spawn on teleport circle
 player.position.set(0, 0, 3.6);
 player.rotation.set(0, 0, 0);
 
-// ---------------- BASE LIGHTS ----------------
-scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.2));
-const dir = new THREE.DirectionalLight(0xffffff, 1.1);
+// Baseline lighting
+scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.1));
+const dir = new THREE.DirectionalLight(0xffffff, 1.0);
 dir.position.set(10, 14, 8);
 scene.add(dir);
 
-// ---------------- XR CONTROLLERS (PARENTED TO PLAYER) ----------------
+// Controllers + grips parented to player rig
 const controllerModelFactory = new XRControllerModelFactory();
 const controllers = [];
 const grips = [];
 
 function makeLaser() {
-  const geo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, 0, -1),
-  ]);
+  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
   const mat = new THREE.LineBasicMaterial({ color: 0x7fe7ff });
   const line = new THREE.Line(geo, mat);
   line.scale.z = 10;
-  line.name = "Laser";
   return line;
 }
 
@@ -72,56 +63,53 @@ for (let i = 0; i < 2; i++) {
   const c = renderer.xr.getController(i);
   c.name = "Controller" + i;
   c.add(makeLaser());
-  // ✅ parent to player rig
   player.add(c);
   controllers.push(c);
 
   const g = renderer.xr.getControllerGrip(i);
   g.name = "Grip" + i;
   g.add(controllerModelFactory.createControllerModel(g));
-  // ✅ parent to player rig
   player.add(g);
   grips.push(g);
 }
 
 log("[main] controllers ready ✅");
 
-// ---------------- WORLD ----------------
+// WORLD
 const world = await initWorld({ THREE, scene, log, v: BUILD });
+
+// Provide camera to modules (billboards)
+scene.userData.cameraRef = camera;
+
 try { world?.connect?.({ camera, player, renderer, controllers, grips }); } catch {}
 
-// Look at table on load (flat)
-if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.1, world.tableFocus.z);
+// face table
+if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.2, world.tableFocus.z);
 
-log("[main] world ready ✅");
-
-// ---------------- SYSTEMS ----------------
-const controls = Controls.init({ THREE, renderer, camera, player, controllers, grips, world, log });
-const teleport = Teleport.init({ THREE, scene, renderer, camera, player, controllers, world, log });
+// Systems
+const controls = Controls.init({ THREE, renderer, camera, player, log, world });
+const teleport = Teleport.init({ THREE, scene, renderer, camera, player, controllers, log, world });
 const hands = HandsSystem.init({ THREE, scene, renderer, log });
 
-// DealingMix = the ONLY poker dealing now (no duplicates)
-const dealing = DealingMix.init({ THREE, scene, world, log });
+const dealing = DealingMix.init({ THREE, scene, log, world });
 dealing.startHand?.();
 
-// HUD toggles from index.html (optional)
-window.addEventListener("scarlett-toggle-teleport", (e) => { teleport?.setEnabled?.(!!e.detail); });
-window.addEventListener("scarlett-toggle-hands", (e) => { hands?.setEnabled?.(!!e.detail); });
+// Recenter
 window.addEventListener("scarlett-recenter", () => {
   player.position.set(0, 0, 3.6);
   player.rotation.set(0, 0, 0);
-  if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.1, world.tableFocus.z);
+  if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.2, world.tableFocus.z);
   log("[main] recentered ✅");
 });
 
-// ---------------- RESIZE ----------------
+// Resize
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// ---------------- LOOP ----------------
+// Loop
 let last = performance.now();
 renderer.setAnimationLoop(() => {
   const now = performance.now();

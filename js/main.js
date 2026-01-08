@@ -1,18 +1,37 @@
-// /js/main.js — Scarlett VR Poker 9.2 (MODULAR CORE + WORLD)
+// /js/main.js — Scarlett VR Poker 9.2
+// ✅ GitHub Pages SAFE: ONLY URL imports. No "three" bare imports anywhere.
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
-import { createRigCore } from "./rig_controls.js";
+import { XRControllerModelFactory } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/XRControllerModelFactory.js";
 
 const log = (m) => (window.__hubLog ? window.__hubLog(m) : console.log(m));
-const V = new URL(import.meta.url).searchParams.get("v") || (window.__BUILD_V || "9021");
+const V = new URL(import.meta.url).searchParams.get("v") || (window.__BUILD_V || "9020");
 log("[main] boot v=" + V);
 
 let renderer, scene, camera;
 let world = null;
+
 const clock = new THREE.Clock();
 
-let rig = null;
+// XR rig
+const player = new THREE.Group();
+const head = new THREE.Group();
+
+let c0 = null, c1 = null;
+let g0 = null, g1 = null;
+
+// movement tuning
+const MOVE_SPEED = 2.25;
+const TURN_ANGLE = THREE.MathUtils.degToRad(45);
+const DEADZONE = 0.20;
+let snapArmed = true;
+
+// teleport
+let teleport = null;
+
+// pointer (laser)
+let rightPointer = null;
 
 boot().catch((e) => log("❌ boot failed: " + (e?.message || e)));
 
@@ -30,23 +49,29 @@ async function boot() {
   btn.style.bottom = "12px";
   btn.style.zIndex = "2147483647";
   document.body.appendChild(btn);
+  log("[main] VRButton appended ✅");
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
 
   camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 350);
+  head.add(camera);
+  player.add(head);
+  scene.add(player);
+
+  // preview height (non-VR)
   camera.position.set(0, 1.6, 0);
 
-  // base lights (world adds more)
+  // lights (world.js adds more)
   scene.add(new THREE.AmbientLight(0xffffff, 0.55));
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.0));
   const key = new THREE.DirectionalLight(0xffffff, 1.0);
   key.position.set(6, 10, 4);
   scene.add(key);
 
-  // ✅ permanent rig core
-  rig = createRigCore({ THREE, renderer, scene, camera, log });
-  rig.setupControllers();
+  // teleport visuals (arc + ring)
+  teleport = createTeleportSystem(THREE);
+  scene.add(teleport.arcLine, teleport.ring);
 
   // load world
   try {
@@ -57,35 +82,25 @@ async function boot() {
     log("❌ world import/init failed: " + (e?.message || e));
   }
 
-  // spawn at official spawn pad
-  const spawn = world?.spawnPads?.[0] || new THREE.Vector3(0, 0, 3.5);
-  rig.player.position.set(spawn.x, 0, spawn.z);
+  // spawn + face table (XR-aware after session start)
+  const spawn = world?.spawnPads?.[0] || new THREE.Vector3(0, 0, 3.6);
+  player.position.set(spawn.x, 0, spawn.z);
+  faceTableNow(false);
 
-  // face table (non-XR)
-  faceTable(false);
+  setupXRControls();
 
-  // recenter hotkeys / debug
-  window.addEventListener("keydown", (e) => {
-    if (e.key.toLowerCase() === "i") {
-      window.dispatchEvent(new Event("scarlett-toggle-invert-move"));
-    }
-    if (e.key.toLowerCase() === "r") {
-      window.dispatchEvent(new Event("scarlett-recenter"));
-    }
-  });
-
+  // HUD recenter
   window.addEventListener("scarlett-recenter", () => {
-    const s = world?.spawnPads?.[0] || new THREE.Vector3(0, 0, 3.5);
-    rig.player.position.set(s.x, 0, s.z);
-    faceTable(true);
+    faceTableNow(true);
     log("[main] recenter ✅");
   });
 
+  // XR session start recenter (fix “spawn facing wall”)
   renderer.xr.addEventListener("sessionstart", () => {
     setTimeout(() => {
-      faceTable(true);
+      faceTableNow(true);
       log("[main] sessionstart recenter ✅");
-    }, 80);
+    }, 60);
   });
 
   window.addEventListener("resize", onResize);
@@ -100,6 +115,57 @@ function onResize() {
   renderer.setSize(innerWidth, innerHeight);
 }
 
+// ---------------- Controllers ----------------
+function setupXRControls() {
+  c0 = renderer.xr.getController(0);
+  c1 = renderer.xr.getController(1);
+  scene.add(c0, c1);
+
+  g0 = renderer.xr.getControllerGrip(0);
+  g1 = renderer.xr.getControllerGrip(1);
+  scene.add(g0, g1);
+
+  const modelFactory = new XRControllerModelFactory();
+  g0.add(modelFactory.createControllerModel(g0));
+  g1.add(modelFactory.createControllerModel(g1));
+
+  c0.addEventListener("connected", (e) => (c0.userData.inputSource = e.data));
+  c1.addEventListener("connected", (e) => (c1.userData.inputSource = e.data));
+  c0.addEventListener("disconnected", () => (c0.userData.inputSource = null));
+  c1.addEventListener("disconnected", () => (c1.userData.inputSource = null));
+
+  // right trigger teleport
+  c0.addEventListener("selectstart", () => onSelectStart(c0));
+  c1.addEventListener("selectstart", () => onSelectStart(c1));
+  c0.addEventListener("selectend", () => onSelectEnd(c0));
+  c1.addEventListener("selectend", () => onSelectEnd(c1));
+
+  // laser pointer on RIGHT GRIP (stays with your hand)
+  rightPointer = buildLaserPointer(THREE);
+  (g1 || g0).add(rightPointer.group);
+
+  log("[main] controllers ready ✅");
+}
+
+function getGamepad(controller) {
+  const src = controller?.userData?.inputSource;
+  return src && src.gamepad ? src.gamepad : null;
+}
+function isRightHand(controller) {
+  const src = controller?.userData?.inputSource;
+  if (!src) return controller === c1;
+  return src.handedness ? src.handedness === "right" : controller === c1;
+}
+function findControllerByHand(hand) {
+  const a = c0?.userData?.inputSource?.handedness === hand ? c0 : null;
+  const b = c1?.userData?.inputSource?.handedness === hand ? c1 : null;
+  return a || b || null;
+}
+function findGripForController(controller) {
+  if (controller === c0) return g0;
+  if (controller === c1) return g1;
+  return null;
+}
 function getHeadYaw() {
   const q = new THREE.Quaternion();
   camera.getWorldQuaternion(q);
@@ -107,33 +173,236 @@ function getHeadYaw() {
   return e.y;
 }
 
-function faceTable(xrAware = false) {
+// ---------------- Facing ----------------
+function faceTableNow(xrAware = false) {
   if (!world?.tableFocus) return;
 
-  const pos = new THREE.Vector3(rig.player.position.x, 0, rig.player.position.z);
+  const pos = new THREE.Vector3(player.position.x, 0, player.position.z);
   const toTable = new THREE.Vector3().subVectors(world.tableFocus, pos);
   const desiredYaw = Math.atan2(toTable.x, toTable.z);
 
   if (!xrAware) {
-    rig.player.rotation.y = desiredYaw;
+    player.rotation.y = desiredYaw;
     return;
   }
+
   const headYaw = getHeadYaw();
-  rig.player.rotation.y += (desiredYaw - headYaw);
+  const delta = desiredYaw - headYaw;
+  player.rotation.y += delta;
 }
 
+// ---------------- Teleport ----------------
+function onSelectStart(controller) {
+  if (!isRightHand(controller)) return;
+  teleport.active = true;
+  teleport.controller = controller;
+  teleport.sourceObj = findGripForController(controller) || controller;
+}
+function onSelectEnd(controller) {
+  if (!isRightHand(controller)) return;
+
+  if (teleport.active && teleport.valid && teleport.hitPoint) {
+    const p = teleport.hitPoint.clone();
+
+    if (world?.roomClamp) {
+      p.x = THREE.MathUtils.clamp(p.x, world.roomClamp.minX, world.roomClamp.maxX);
+      p.z = THREE.MathUtils.clamp(p.z, world.roomClamp.minZ, world.roomClamp.maxZ);
+    }
+
+    player.position.set(p.x, 0, p.z);
+    faceTableNow(true);
+  }
+
+  teleport.active = false;
+  teleport.valid = false;
+  teleport.hitPoint = null;
+  teleport.ring.visible = false;
+  teleport.arcLine.visible = false;
+  teleport.controller = null;
+  teleport.sourceObj = null;
+}
+
+// ---------------- Locomotion ----------------
+function applyLocomotion(dt) {
+  const left = findControllerByHand("left") || c0;
+  const right = findControllerByHand("right") || c1;
+
+  // ✅ Quest forward/back fix: forward is -ay
+  const gpL = getGamepad(left);
+  if (gpL?.axes?.length >= 2) {
+    const x = gpL.axes[2] ?? gpL.axes[0];
+    const y = gpL.axes[3] ?? gpL.axes[1];
+
+    const ax = Math.abs(x) > DEADZONE ? x : 0;
+    const ay = Math.abs(y) > DEADZONE ? y : 0;
+
+    if (ax || ay) {
+      const headYaw = getHeadYaw();
+      const forward = new THREE.Vector3(Math.sin(headYaw), 0, Math.cos(headYaw));
+      const rightv = new THREE.Vector3(forward.z, 0, -forward.x);
+
+      const move = new THREE.Vector3();
+      move.addScaledVector(forward, (-ay) * MOVE_SPEED * dt);
+      move.addScaledVector(rightv, (ax) * MOVE_SPEED * dt);
+
+      player.position.add(move);
+
+      if (world?.roomClamp) {
+        player.position.x = THREE.MathUtils.clamp(player.position.x, world.roomClamp.minX, world.roomClamp.maxX);
+        player.position.z = THREE.MathUtils.clamp(player.position.z, world.roomClamp.minZ, world.roomClamp.maxZ);
+      }
+    }
+  }
+
+  const gpR = getGamepad(right);
+  if (gpR?.axes?.length >= 2) {
+    const x = gpR.axes[2] ?? gpR.axes[0];
+    const ax = Math.abs(x) > 0.65 ? x : 0;
+
+    if (ax === 0) snapArmed = true;
+    if (snapArmed && ax !== 0) {
+      player.rotation.y += ax > 0 ? -TURN_ANGLE : TURN_ANGLE;
+      snapArmed = false;
+    }
+  }
+
+  // controller pointer always
+  updateLaserPointer(THREE, rightPointer, teleport, world, camera);
+
+  // teleport arc
+  if (teleport.active) {
+    const src = teleport.sourceObj || (findControllerByHand("right") || c1);
+    updateTeleportArc(THREE, src, teleport, world, camera);
+  }
+}
+
+// ---------------- Pointer + Teleport visuals ----------------
+function buildLaserPointer(THREE) {
+  const group = new THREE.Group();
+  group.name = "RightLaserPointer";
+
+  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
+  const mat = new THREE.LineBasicMaterial({ color: 0x33ff66, transparent: true, opacity: 0.9 });
+  const line = new THREE.Line(geo, mat);
+  line.scale.z = 6;
+  group.add(line);
+
+  const dot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.02, 12, 12),
+    new THREE.MeshBasicMaterial({ color: 0x33ff66 })
+  );
+  dot.position.set(0, 0, -6);
+  group.add(dot);
+
+  group.rotation.x = -0.10;
+  return { group, line, dot, hit: new THREE.Vector3() };
+}
+
+function updateLaserPointer(THREE, pointer, tp, world, cam) {
+  if (!pointer) return;
+  const src = tp?.sourceObj || g1 || c1 || cam;
+
+  const origin = new THREE.Vector3();
+  const q = new THREE.Quaternion();
+  src.getWorldPosition(origin);
+  src.getWorldQuaternion(q);
+
+  const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(q).normalize();
+
+  // intersect floor y=0
+  const t = (0.03 - origin.y) / (dir.y || -0.0001);
+  const hit = origin.clone().addScaledVector(dir, Math.max(0.1, Math.min(8.0, t)));
+
+  if (world?.roomClamp) {
+    hit.x = THREE.MathUtils.clamp(hit.x, world.roomClamp.minX, world.roomClamp.maxX);
+    hit.z = THREE.MathUtils.clamp(hit.z, world.roomClamp.minZ, world.roomClamp.maxZ);
+  }
+
+  pointer.hit.copy(hit);
+  pointer.dot.position.copy(pointer.group.worldToLocal(hit.clone()));
+
+  const dist = origin.distanceTo(hit);
+  pointer.line.scale.z = Math.max(0.3, dist);
+}
+
+function createTeleportSystem(THREE) {
+  const arcMat = new THREE.LineBasicMaterial({ color: 0x33ff66, transparent: true, opacity: 0.9 });
+  const arcGeo = new THREE.BufferGeometry();
+  const arcPts = new Float32Array(60 * 3);
+  arcGeo.setAttribute("position", new THREE.BufferAttribute(arcPts, 3));
+  const arcLine = new THREE.Line(arcGeo, arcMat);
+  arcLine.visible = false;
+
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.25, 0.36, 40),
+    new THREE.MeshBasicMaterial({ color: 0x33ff66, transparent: true, opacity: 0.75, side: THREE.DoubleSide })
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.visible = false;
+
+  return { active: false, valid: false, hitPoint: null, arcLine, ring, controller: null, sourceObj: null };
+}
+
+function updateTeleportArc(THREE, sourceObj, tp, world, cam) {
+  tp.arcLine.visible = true;
+
+  const origin = new THREE.Vector3();
+  const q = new THREE.Quaternion();
+  sourceObj.getWorldPosition(origin);
+  sourceObj.getWorldQuaternion(q);
+
+  // fallback if pose is bad
+  const poseBad = !isFinite(origin.x) || !isFinite(origin.y) || !isFinite(origin.z) || origin.length() < 0.001;
+  if (poseBad) { cam.getWorldPosition(origin); cam.getWorldQuaternion(q); }
+
+  const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(q).normalize();
+
+  const g = -9.8, v = 7.0, step = 0.06, maxT = 2.0;
+  const positions = tp.arcLine.geometry.attributes.position.array;
+
+  let hit = null;
+  let idx = 0;
+
+  for (let t = 0; t <= maxT; t += step) {
+    const p = new THREE.Vector3(
+      origin.x + dir.x * v * t,
+      origin.y + dir.y * v * t + 0.5 * g * t * t,
+      origin.z + dir.z * v * t
+    );
+
+    positions[idx++] = p.x;
+    positions[idx++] = p.y;
+    positions[idx++] = p.z;
+
+    if (!hit && p.y <= 0.02) { hit = p; break; }
+  }
+
+  while (idx < positions.length) {
+    positions[idx] = positions[idx - 3];
+    idx++;
+  }
+  tp.arcLine.geometry.attributes.position.needsUpdate = true;
+
+  if (hit) {
+    if (world?.roomClamp) {
+      hit.x = THREE.MathUtils.clamp(hit.x, world.roomClamp.minX, world.roomClamp.maxX);
+      hit.z = THREE.MathUtils.clamp(hit.z, world.roomClamp.minZ, world.roomClamp.maxZ);
+    }
+    tp.valid = true;
+    tp.hitPoint = hit;
+    tp.ring.visible = true;
+    tp.ring.position.set(hit.x, 0.03, hit.z);
+  } else {
+    tp.valid = false;
+    tp.hitPoint = null;
+    tp.ring.visible = false;
+  }
+}
+
+// ---------------- Loop ----------------
 function tick() {
   const dt = clock.getDelta();
-
-  // rig movement + pointer + teleport visuals
-  rig.applyLocomotion(dt, world);
-
-  // ✅ teleporter interaction + floor teleport handled by world
-  if (world?.handleTeleportConfirm) {
-    world.handleTeleportConfirm({ rig, camera, dt });
-  }
-
+  applyLocomotion(dt);
   if (world?.tick) world.tick(dt);
-
   renderer.render(scene, camera);
-  }
+    }

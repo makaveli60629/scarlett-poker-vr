@@ -1,9 +1,9 @@
-// /js/world.js — Scarlett Poker VR WORLD v10.6 (Grid Floor + Alignment Fix)
-// Fixes:
-// - grid debug floor (no carpet)
-// - dealer button positions computed in TABLE-LOCAL space
-// - chips/pot visible and on the table
-// - panels moved nearer to spawn so you can always see them
+// /js/world.js — Scarlett Poker VR WORLD v10.7 (Table-centered HUD + Flat Dealer + True Anchors)
+// Key fixes:
+// - Panels above table (readable from afar)
+// - Dealer button is flat and larger
+// - Table-local placement used for dealer spots
+// - Grid floor still enabled for debugging
 
 export async function initWorld({ THREE, scene, log = console.log, v = "1000" }) {
   const L = (...a) => { try { log(...a); } catch { console.log(...a); } };
@@ -22,6 +22,13 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
     chairs: [],
     seats: [],
 
+    viz: {
+      pot: null,
+      dealerBtn: null,
+      dealerSpotsLocal: [],
+      panels: null
+    },
+
     bots: null,
 
     panels: { root: null, visible: true },
@@ -37,7 +44,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
     connect({ playerRig, camera }) {
       world._playerRig = playerRig || null;
       world._camera = camera || null;
-      try { world.bots?.setPlayerRig?.(playerRig); } catch {}
+      try { world.bots?.setPlayerRig?.(playerRig, camera); } catch {}
     },
 
     tick: (dt) => {}
@@ -55,7 +62,6 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
     ctx.fillStyle = "#0c0f18";
     ctx.fillRect(0, 0, size, size);
 
-    // fine grid
     ctx.strokeStyle = "rgba(255,255,255,0.07)";
     ctx.lineWidth = 2;
     for (let i = 0; i <= cells; i++) {
@@ -64,8 +70,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
       ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(size, p); ctx.stroke();
     }
 
-    // bold every 4
-    ctx.strokeStyle = "rgba(127,231,255,0.18)";
+    ctx.strokeStyle = "rgba(127,231,255,0.20)";
     ctx.lineWidth = 4;
     for (let i = 0; i <= cells; i += 4) {
       const p = (i / cells) * size;
@@ -82,26 +87,21 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
 
   // ---------- MATERIALS ----------
   const mat = {
-    floor: new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 1.0,
-      metalness: 0.0,
-      map: makeGridTexture({ cells: 16 })
-    }),
+    floor: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1.0, map: makeGridTexture({ cells: 16 }) }),
     wall: new THREE.MeshStandardMaterial({ color: 0x141826, roughness: 0.95 }),
     ceiling: new THREE.MeshStandardMaterial({ color: 0x070812, roughness: 0.9, side: THREE.BackSide }),
     felt: new THREE.MeshStandardMaterial({ color: 0x0f5d3a, roughness: 0.92 }),
     wood: new THREE.MeshStandardMaterial({ color: 0x2a1b10, roughness: 0.85 }),
-    metalDark: new THREE.MeshStandardMaterial({ color: 0x12131a, roughness: 0.85, metalness: 0.15 }),
+    metal: new THREE.MeshStandardMaterial({ color: 0x12131a, roughness: 0.85, metalness: 0.15 }),
     chairFrame: new THREE.MeshStandardMaterial({ color: 0x151821, roughness: 0.95 }),
     chairSeat: new THREE.MeshStandardMaterial({ color: 0x2a1b10, roughness: 0.85 }),
     holo: new THREE.MeshStandardMaterial({
       color: 0x7fe7ff,
       emissive: 0x2bd7ff,
-      emissiveIntensity: 1.8,
-      roughness: 0.2,
+      emissiveIntensity: 2.2,
+      roughness: 0.15,
       transparent: true,
-      opacity: 0.85
+      opacity: 0.9
     }),
     chip: new THREE.MeshStandardMaterial({
       color: 0xff2d7a,
@@ -118,12 +118,12 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
     })
   };
 
-  // ---------- LIGHTING ----------
-  world.group.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.75));
-  const key = new THREE.DirectionalLight(0xffffff, 1.65);
+  // ---------- LIGHTING (brighter) ----------
+  world.group.add(new THREE.HemisphereLight(0xffffff, 0x223344, 2.15));
+  const key = new THREE.DirectionalLight(0xffffff, 1.85);
   key.position.set(7, 12, 6);
   world.group.add(key);
-  world.group.add(new THREE.AmbientLight(0xffffff, 0.25));
+  world.group.add(new THREE.AmbientLight(0xffffff, 0.35));
 
   // ---------- FLOOR ----------
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), mat.floor);
@@ -160,7 +160,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
   spawnRing.position.set(world.spawnPads[0].x, 0.02, world.spawnPads[0].z);
   world.group.add(spawnRing);
 
-  // ---------- TABLE (WITH BASE) ----------
+  // ---------- TABLE (with base) ----------
   const TABLE_Y = 0.92;
   const table = new THREE.Group();
   table.position.copy(world.tableFocus);
@@ -168,7 +168,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
   world.group.add(table);
   world.table = table;
 
-  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 1.15, 0.70, 32), mat.metalDark);
+  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 1.15, 0.70, 32), mat.metal);
   pedestal.position.y = 0.35;
   table.add(pedestal);
 
@@ -228,96 +228,96 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
     world.seats.push({ index: i, position: seatPos, yaw, sitY: SEAT_SURFACE_Y, lookAt: c.clone(), anchor: seatAnchor });
   }
 
-  // ---------- POT CHIPS (table-local, visible) ----------
+  // ---------- POT CHIPS ----------
   function makeChip() {
     const g = new THREE.Group();
     const body = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 0.012, 24), mat.chip);
     body.position.y = 0.006;
     g.add(body);
-    const stripe1 = new THREE.Mesh(new THREE.TorusGeometry(0.058, 0.006, 10, 40), mat.chipStripe);
-    stripe1.rotation.x = Math.PI / 2;
-    stripe1.position.y = 0.006;
-    g.add(stripe1);
-    const stripe2 = stripe1.clone();
+
+    const stripe = new THREE.Mesh(new THREE.TorusGeometry(0.058, 0.006, 10, 40), mat.chipStripe);
+    stripe.rotation.x = Math.PI / 2;
+    stripe.position.y = 0.006;
+    g.add(stripe);
+
+    const stripe2 = stripe.clone();
     stripe2.scale.setScalar(0.82);
     g.add(stripe2);
+
     return g;
   }
 
   const pot = new THREE.Group();
   pot.name = "PotStack";
-  pot.position.set(0, TABLE_Y + 0.02, 0);
+  pot.position.set(0, TABLE_Y + 0.02, 0); // table-local
   table.add(pot);
+  world.viz.pot = pot;
 
-  for (let i = 0; i < 16; i++) {
+  for (let i = 0; i < 18; i++) {
     const chip = makeChip();
     chip.position.set((Math.random() - 0.5) * 0.14, i * 0.010, (Math.random() - 0.5) * 0.14);
     pot.add(chip);
   }
 
-  // ---------- DEALER BUTTON (FIX: compute table-local spots) ----------
-  const dealerBtn = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.02, 22), mat.holo);
-  dealerBtn.rotation.x = Math.PI / 2;
+  // ---------- DEALER BUTTON (flat + bigger) ----------
+  const dealerBtn = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.02, 28), mat.holo);
+  // ✅ cylinder is already flat on table (axis Y). No rotation needed.
+  dealerBtn.position.set(0.62, TABLE_Y + 0.011, -0.18);
   table.add(dealerBtn);
+  world.viz.dealerBtn = dealerBtn;
 
+  // Dealer spots in table-local space
   const dealerSpotsLocal = world.seats.map((s) => {
-    const inward = new THREE.Vector3(c.x - s.position.x, 0, c.z - s.position.z).normalize().multiplyScalar(0.55);
-    const worldPos = new THREE.Vector3(s.position.x + inward.x, TABLE_Y + 0.03, s.position.z + inward.z);
-    return table.worldToLocal(worldPos.clone()); // ✅ convert to table-local
+    const inwardW = new THREE.Vector3(c.x - s.position.x, 0, c.z - s.position.z).normalize().multiplyScalar(0.55);
+    const posW = new THREE.Vector3(s.position.x + inwardW.x, TABLE_Y + 0.011, s.position.z + inwardW.z);
+    return table.worldToLocal(posW.clone());
   });
+  world.viz.dealerSpotsLocal = dealerSpotsLocal;
 
-  let dealerIndex = 0;
-  let dealerMoveT = 0;
-  let dealerHold = 0;
-
-  // ---------- PANELS (move them near spawn so you always see them) ----------
-  function makePanel(lines) {
+  // ---------- PANELS ABOVE TABLE ----------
+  function makePanel() {
     const canvas = document.createElement("canvas");
     canvas.width = 1024;
     canvas.height = 512;
     const ctx = canvas.getContext("2d");
 
-    function draw(txt) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "rgba(0,0,0,0.70)";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      ctx.fillStyle = "#7fe7ff";
-      ctx.font = "bold 54px Arial";
-      ctx.fillText("SCARLETT VR POKER", 40, 70);
-
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "36px Arial";
-      let y = 140;
-      for (const line of txt) {
-        ctx.fillText(line, 40, y);
-        y += 54;
-      }
-    }
-
-    draw(lines);
-
     const tex = new THREE.CanvasTexture(canvas);
     tex.needsUpdate = true;
 
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.2), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
-    mesh.userData._draw = draw;
-    mesh.userData._tex = tex;
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.6, 1.2),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true })
+    );
+
+    mesh.userData.draw = (lines) => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "rgba(0,0,0,0.68)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = "#7fe7ff";
+      ctx.font = "bold 56px Arial";
+      ctx.fillText("SCARLETT VR POKER", 40, 75);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "40px Arial";
+      let y = 160;
+      for (const line of lines) {
+        ctx.fillText(line, 40, y);
+        y += 62;
+      }
+
+      tex.needsUpdate = true;
+    };
+
     return mesh;
   }
 
-  world.panels.root = new THREE.Group();
-  world.group.add(world.panels.root);
-
-  const p1 = makePanel(["Grid Floor Debug ON", "Bots aligned to Y=0", "Press M to toggle panels"]);
-  p1.position.set(-2.3, 2.1, 4.8);
-  p1.rotation.y = 0.10;
-  world.panels.root.add(p1);
-
-  const p2 = makePanel(["Table: 6-Max", "Pot: 1,250", "Dealer: seat-to-seat"]);
-  p2.position.set(2.3, 2.1, 4.8);
-  p2.rotation.y = -0.10;
-  world.panels.root.add(p2);
+  const panel = makePanel();
+  panel.position.set(0, 2.65, 0);     // table-local
+  panel.rotation.y = Math.PI;         // face toward spawn-ish
+  panel.rotation.x = -0.08;
+  table.add(panel);
+  world.viz.panels = panel;
 
   // ---------- OPTIONAL: BOTS ----------
   try {
@@ -343,29 +343,29 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
     L("[world] ⚠️ bots import failed:", e?.message || e);
   }
 
-  // ---------- WORLD TICK ----------
+  // ---------- WORLD TICK (dealer seat-to-seat + panel status) ----------
   const baseTick = world.tick;
-  const tickState = { t: 0 };
+  const tickState = { t: 0, dealerIndex: 0, moveT: 0, hold: 0, pot: 1250, lastAction: "—" };
 
   world.tick = (dt) => {
     baseTick(dt);
     tickState.t += dt;
 
-    // spawn pulse
+    // pulse spawn ring
     spawnRing.material.opacity = 0.62 + Math.sin(tickState.t * 3.0) * 0.18;
 
     // dealer: hold then move
-    dealerHold += dt;
-    const HOLD = 1.6;
-    const MOVE = 0.45;
+    const HOLD = 1.5;
+    const MOVE = 0.42;
 
-    if (dealerHold >= HOLD) {
-      dealerMoveT += dt / MOVE;
+    tickState.hold += dt;
+    if (tickState.hold >= HOLD) {
+      tickState.moveT += dt / MOVE;
 
-      const from = dealerSpotsLocal[dealerIndex];
-      const to = dealerSpotsLocal[(dealerIndex + 1) % dealerSpotsLocal.length];
+      const from = dealerSpotsLocal[tickState.dealerIndex];
+      const to = dealerSpotsLocal[(tickState.dealerIndex + 1) % dealerSpotsLocal.length];
 
-      const t = Math.min(1, dealerMoveT);
+      const t = Math.min(1, tickState.moveT);
       const e = 1 - Math.pow(1 - t, 3);
 
       dealerBtn.position.set(
@@ -375,24 +375,29 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
       );
 
       if (t >= 1) {
-        dealerIndex = (dealerIndex + 1) % dealerSpotsLocal.length;
-        dealerHold = 0;
-        dealerMoveT = 0;
+        tickState.dealerIndex = (tickState.dealerIndex + 1) % dealerSpotsLocal.length;
+        tickState.hold = 0;
+        tickState.moveT = 0;
+
+        // fake readable action feed (bots can overwrite later)
+        const actions = ["CHECK", "BET 120", "FOLD", "CALL", "RAISE 300"];
+        tickState.lastAction = actions[Math.floor(Math.random() * actions.length)];
+        tickState.pot += Math.floor(Math.random() * 120);
       }
     } else {
-      dealerBtn.position.copy(dealerSpotsLocal[dealerIndex]);
+      dealerBtn.position.copy(dealerSpotsLocal[tickState.dealerIndex]);
     }
 
     // pot pulse
     pot.scale.setScalar(1.0 + Math.sin(tickState.t * 2.4) * 0.03);
 
-    // panel refresh (simple)
-    p2.userData._draw([
-      "Table: 6-Max",
-      "Pot: " + (1250 + Math.floor((Math.sin(tickState.t) * 0.5 + 0.5) * 600)).toLocaleString(),
-      "Dealer: seat-to-seat"
+    // panel updated above table
+    panel.userData.draw([
+      `6-MAX • POT: $${tickState.pot.toLocaleString()}`,
+      `DEALER: Seat ${tickState.dealerIndex}`,
+      `ACTION: ${tickState.lastAction}`,
+      `TURN: Seat ${tickState.dealerIndex} (temp)`,
     ]);
-    p2.userData._tex.needsUpdate = true;
   };
 
   L("[world] ready ✅ seats=" + world.seats.length);

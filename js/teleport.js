@@ -1,39 +1,30 @@
-// /js/teleport.js — Scarlett Teleport v10.7 (WIRED)
-// - Toggleable from HUD (scarlett-toggle-teleport)
-// - Marker hidden + teleport disabled when off
-export const Teleport = {
-  init({ THREE, scene, renderer, player, controllers = [], log, world }) {
-    const L = (...a) => { try { log?.(...a); } catch { console.log(...a); } };
+// /js/teleport.js — simple, reliable teleport for Quest/WebXR (v1.1)
+// Adds: setEnabled(on/off) so HUD can disable teleport.
 
+export const Teleport = {
+  init({ THREE, scene, renderer, camera, player, controllers, log, world }) {
     const raycaster = new THREE.Raycaster();
     const tempMat = new THREE.Matrix4();
     const tempDir = new THREE.Vector3();
     const hitPoint = new THREE.Vector3();
 
-    let enabled = true;
-    try {
-      const f = window.__SCARLETT_FLAGS;
-      if (f) enabled = !!f.teleport;
-    } catch {}
+    const state = { enabled: true, lastHitOK: false };
 
-    // Marker
+    // Teleport marker
     const marker = new THREE.Mesh(
       new THREE.RingGeometry(0.25, 0.38, 48),
       new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
     );
     marker.rotation.x = -Math.PI / 2;
     marker.visible = false;
-    marker.name = "TeleportMarker";
     scene.add(marker);
 
-    // Tele targets
+    // Determine teleportable surfaces
     const teleTargets = [];
     if (world?.floor) teleTargets.push(world.floor);
     scene.traverse((o) => {
       if (o?.isMesh && (o.name === "Floor" || o.name === "floor")) teleTargets.push(o);
     });
-
-    let lastHitOK = false;
 
     function controllerRay(controller) {
       tempMat.identity().extractRotation(controller.matrixWorld);
@@ -45,7 +36,7 @@ export const Teleport = {
     }
 
     function updateMarker() {
-      if (!enabled) { marker.visible = false; lastHitOK = false; return; }
+      if (!state.enabled) { marker.visible = false; state.lastHitOK = false; return; }
 
       const c = controllers[1] || controllers[0];
       if (!c) return;
@@ -57,18 +48,18 @@ export const Teleport = {
         hitPoint.copy(hits[0].point);
         marker.position.set(hitPoint.x, 0.02, hitPoint.z);
         marker.visible = true;
-        lastHitOK = true;
+        state.lastHitOK = true;
       } else {
         marker.visible = false;
-        lastHitOK = false;
+        state.lastHitOK = false;
       }
     }
 
     function doTeleport() {
-      if (!enabled) return;
-      if (!lastHitOK) return;
+      if (!state.enabled) return;
+      if (!state.lastHitOK) return;
       player.position.set(marker.position.x, 0, marker.position.z);
-      L("[teleport] moved ✅");
+      log("[teleport] moved ✅");
     }
 
     for (const c of controllers) {
@@ -76,21 +67,12 @@ export const Teleport = {
       c.addEventListener("squeezestart", doTeleport);
     }
 
-    // HUD toggle
-    window.addEventListener("scarlett-toggle-teleport", (e) => {
-      enabled = !!e?.detail;
-      marker.visible = false;
-      lastHitOK = false;
-      L("[teleport] enabled=", enabled);
-    });
-
-    L("[teleport] ready ✅");
+    log("[teleport] ready ✅");
 
     return {
       setEnabled(v) {
-        enabled = !!v;
-        marker.visible = false;
-        lastHitOK = false;
+        state.enabled = !!v;
+        if (!state.enabled) marker.visible = false;
       },
       update() {
         updateMarker();

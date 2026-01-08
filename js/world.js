@@ -1,45 +1,52 @@
-// /js/world.js — FULL WORLD (YOUR teleporter + safe fallbacks)
-// IMPORTANT: Do NOT import THREE here.
+// /js/world.js — Scarlett VR Poker — Update 9.0 FULL WORLD
+// IMPORTANT: No THREE imports. Uses THREE passed from main.js.
 
-export async function initWorld({ THREE, scene, log = console.log }) {
-  log("[world] FULL WORLD boot");
+import { createTeleportMachine } from "./teleport_machine.js";
+import { Bots } from "./bots.js";
+import { initStore } from "./store.js";
+import { initScorpionRoom } from "./scorpion_room.js";
+
+export async function initWorld({ THREE, scene, log = console.log, v = "no-v" }) {
+  log("[world] FULL WORLD boot v=" + v);
 
   const world = {
     group: new THREE.Group(),
     tableFocus: new THREE.Vector3(0, 0, -6.5),
     spawnPads: [],
-    roomClamp: { minX: -8, maxX: 8, minZ: -14, maxZ: 8 },
+    roomClamp: { minX: -8, maxX: 8, minZ: -14, maxZ: 14 },
     seats: [],
     lobbyZone: { min: new THREE.Vector3(-6, 0, 8), max: new THREE.Vector3(6, 0, 14) },
     bots: null,
-    tick: (dt) => {},
+    onPlayerTeleport: null,
+    tick: (dt) => {}
   };
 
+  world.group.name = "World";
   scene.add(world.group);
 
-  // ---------- floor ----------
+  // -------- Floor / Walls --------
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(60, 60),
-    new THREE.MeshStandardMaterial({ color: 0x0b0b10, roughness: 0.98 })
+    new THREE.MeshStandardMaterial({ color: 0x090a10, roughness: 0.98 })
   );
   floor.rotation.x = -Math.PI / 2;
   world.group.add(floor);
 
-  // ---------- walls ----------
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0x141826, roughness: 0.95 });
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x121826, roughness: 0.95 });
   const mkWall = (w, h, d, x, y, z) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
     m.position.set(x, y, z);
     world.group.add(m);
   };
   mkWall(16, 4, 0.3, 0, 2, -14);
-  mkWall(16, 4, 0.3, 0, 2, 8);
-  mkWall(0.3, 4, 22, -8, 2, -3);
-  mkWall(0.3, 4, 22, 8, 2, -3);
+  mkWall(16, 4, 0.3, 0, 2, 14);
+  mkWall(0.3, 4, 28, -8, 2, 0);
+  mkWall(0.3, 4, 28, 8, 2, 0);
 
-  // ---------- table fallback ----------
+  // -------- Poker Table --------
   const table = new THREE.Group();
-  table.position.set(0, 0, -6.5);
+  table.name = "PokerTable";
+  table.position.copy(world.tableFocus);
 
   const felt = new THREE.Mesh(
     new THREE.CylinderGeometry(2.6, 2.6, 0.18, 48),
@@ -71,7 +78,6 @@ export async function initWorld({ THREE, scene, log = console.log }) {
   table.add(base);
 
   world.group.add(table);
-  world.tableFocus.set(0, 0, -6.5);
 
   // seats (6)
   const c = world.tableFocus.clone();
@@ -82,150 +88,98 @@ export async function initWorld({ THREE, scene, log = console.log }) {
     world.seats.push({ position: p, yaw: Math.atan2(c.x - p.x, c.z - p.z) });
   }
 
+  // spawn pad default (behind table)
   world.spawnPads = [new THREE.Vector3(world.tableFocus.x, 0, world.tableFocus.z + 6)];
 
-  // ---------- YOUR TELEPORTER ----------
-  let tele = null;
-  try {
-    const mod = await import(`./teleport_machine.js?v=${Date.now()}`);
-    if (mod?.TeleportMachine?.build) {
-      const texLoader = new THREE.TextureLoader();
-      tele = mod.TeleportMachine;
-      tele.build(scene, texLoader);
+  // -------- Teleport Machine (YOUR portal style) --------
+  const tele = createTeleportMachine(THREE);
+  const teleGroup = tele.build(scene, new THREE.TextureLoader());
+  const safe = tele.getSafeSpawn?.();
+  if (safe?.position) world.spawnPads = [safe.position.clone()];
 
-      if (tele.getSafeSpawn) {
-        const s = tele.getSafeSpawn();
-        if (s?.position) world.spawnPads = [s.position.clone ? s.position.clone() : new THREE.Vector3(s.position.x, s.position.y, s.position.z)];
+  // teleport burst hook (optional)
+  world.onPlayerTeleport = (p) => {
+    // small flash at landing
+    const flash = new THREE.PointLight(0x6a2bff, 1.5, 4);
+    flash.position.set(p.x, 1.0, p.z);
+    scene.add(flash);
+    let life = 0.15;
+    const prev = world.tick;
+    world.tick = (dt) => {
+      prev(dt);
+      life -= dt;
+      flash.intensity = Math.max(0, life * 10);
+      if (life <= 0) {
+        scene.remove(flash);
+        world.tick = prev;
       }
-
-      const prev = world.tick;
-      world.tick = (dt) => {
-        prev(dt);
-        if (tele?.tick) tele.tick(dt);
-      };
-
-      log("[world] ✅ teleport_machine.js loaded (YOUR portal)");
-    } else {
-      log("[world] ⚠️ teleport_machine.js loaded but missing TeleportMachine.build");
-    }
-  } catch (e) {
-    log("[world] ❌ teleport_machine.js import failed: " + (e?.message || e));
-  }
-
-  // ---------- BOTS (try yours, fallback safe) ----------
-  let botsSystem = null;
-  try {
-    const botsMod = await import(`./bots.js?v=${Date.now()}`);
-    if (botsMod?.Bots?.init) {
-      botsSystem = await botsMod.Bots.init({ THREE, scene, world, log });
-      if (!botsSystem?.update) botsSystem = null; // if it doesn’t give an update loop, we fallback
-      log("[world] ✅ bots.js (Bots.init) loaded");
-    }
-  } catch (e) {
-    log("[world] ⚠️ bots import failed: " + (e?.message || e));
-  }
-
-  if (!botsSystem) {
-    botsSystem = buildSafeBots(THREE, scene, world);
-    log("[world] ⚠️ Using SAFE bots fallback");
-  }
-
-  world.bots = botsSystem;
-  const prevBots = world.tick;
-  world.tick = (dt) => {
-    prevBots(dt);
-    botsSystem.update?.(dt);
+    };
   };
 
-  // ---------- POKER SIM (guarded) ----------
+  // tick teleporter FX
+  const prevTick0 = world.tick;
+  world.tick = (dt) => {
+    prevTick0(dt);
+    tele.tick(dt);
+  };
+
+  // -------- Store + Scorpion Room --------
+  const store = await initStore({ THREE, scene, world, log });
+  const scorp = await initScorpionRoom({ THREE, scene, world, log });
+
+  const prevTick1 = world.tick;
+  world.tick = (dt) => {
+    prevTick1(dt);
+    store?.tick?.(dt);
+    scorp?.tick?.(dt);
+  };
+
+  // -------- Bots --------
+  const botsSystem = await Bots.init({ THREE, scene, world, log });
+  world.bots = botsSystem;
+
+  const prevTick2 = world.tick;
+  world.tick = (dt) => {
+    prevTick2(dt);
+    botsSystem?.update?.(dt);
+  };
+
+  // -------- Poker Simulation --------
   try {
-    const pokerSim = await import(`./poker_simulation.js?v=${Date.now()}`);
-    const PS = pokerSim?.PokerSimulation;
+    const pokerMod = await import(`./poker_simulation.js?v=${encodeURIComponent(v)}`);
+    const PS = pokerMod?.PokerSimulation;
     if (PS?.init) {
-      PS.init({ THREE, scene, world, bots: botsSystem, getSeats: () => world.seats, tableFocus: world.tableFocus, log });
+      PS.init({
+        THREE,
+        scene,
+        world,
+        bots: botsSystem,
+        getSeats: () => world.seats
+      });
 
       const tfn = PS.update || PS.tick;
       if (typeof tfn === "function") {
         let disabled = false;
-        const prevPoker = world.tick;
+        const prevTick3 = world.tick;
         world.tick = (dt) => {
-          prevPoker(dt);
+          prevTick3(dt);
           if (disabled) return;
-          try { tfn(dt); }
-          catch (e) { disabled = true; log("❌ PokerSimulation crashed (DISABLED): " + (e?.message || e)); }
+          try {
+            tfn(dt);
+          } catch (e) {
+            disabled = true;
+            log("❌ PokerSimulation crashed (DISABLED): " + (e?.message || e));
+          }
         };
       }
-
-      log("[world] ✅ poker_simulation init");
+      log("[world] poker_simulation init ✅");
+    } else {
+      log("[world] poker_simulation loaded but missing init ⚠️");
     }
   } catch (e) {
-    log("[world] ⚠️ poker_simulation import failed: " + (e?.message || e));
+    log("[world] poker_simulation import failed ⚠️ " + (e?.message || e));
   }
 
   log("[world] FULL WORLD ready ✅");
   return world;
-}
-
-// ---------- SAFE BOTS ----------
-function buildSafeBots(THREE, scene, world) {
-  const bots = [];
-  const matA = new THREE.MeshStandardMaterial({ color: 0x2bd7ff, roughness: 0.85 });
-  const matB = new THREE.MeshStandardMaterial({ color: 0xff2bd6, roughness: 0.85 });
-  const headMat = new THREE.MeshStandardMaterial({ color: 0xf2d6c9, roughness: 0.85 });
-
-  function makeBot(i) {
-    const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.55, 6, 12), i % 2 ? matA : matB);
-    body.position.y = 0.55;
-    g.add(body);
-
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 14), headMat);
-    head.position.y = 1.25;
-    g.add(head);
-
-    g.userData.bot = { id: i, seated: false, target: null };
-    scene.add(g);
-    return g;
-  }
-
-  for (let i = 0; i < 8; i++) bots.push(makeBot(i));
-
-  // seat 6
-  for (let i = 0; i < bots.length; i++) {
-    const b = bots[i];
-    if (i < 6) {
-      const s = world.seats[i];
-      b.position.set(s.position.x, 0, s.position.z);
-      b.rotation.y = s.yaw;
-      b.userData.bot.seated = true;
-    } else {
-      b.position.set((Math.random() * 10) - 5, 0, 10 + Math.random() * 3);
-      b.userData.bot.seated = false;
-      b.userData.bot.target = b.position.clone();
-    }
-  }
-
-  function pickTarget() {
-    const z = THREE.MathUtils.lerp(world.lobbyZone.min.z, world.lobbyZone.max.z, Math.random());
-    const x = THREE.MathUtils.lerp(world.lobbyZone.min.x, world.lobbyZone.max.x, Math.random());
-    return new THREE.Vector3(x, 0, z);
-  }
-
-  return {
-    bots,
-    update(dt) {
-      for (const b of bots) {
-        const d = b.userData.bot;
-        if (d.seated) continue;
-        if (!d.target || b.position.distanceTo(d.target) < 0.2) d.target = pickTarget();
-        const dir = d.target.clone().sub(b.position);
-        dir.y = 0;
-        if (dir.length() > 0.001) {
-          dir.normalize();
-          b.position.addScaledVector(dir, dt * 0.7);
-          b.lookAt(d.target.x, b.position.y, d.target.z);
-        }
-      }
-    }
-  };
-                                       }
+                                }

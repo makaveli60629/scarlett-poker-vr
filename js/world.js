@@ -1,4 +1,4 @@
-// /js/world.js — Scarlett Poker VR WORLD v10.0 (GitHub Pages safe)
+// /js/world.js — Scarlett Poker VR WORLD v10.1 (SeatAnchors + stable)
 // No "three" import here. main.js passes THREE in.
 // Exports: initWorld({ THREE, scene, log, v }) -> returns world object
 
@@ -20,16 +20,14 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
     floor: null,
     table: null,
     chairs: [],
-    seats: [], // seat anchors (position + yaw + sitY)
+    seats: [], // seat anchors (position + yaw + sitY + anchor)
 
     // optional modules
-    teleporter: null,          // TeleportMachine instance group
-    teleportModule: null,      // imported module reference
-    bots: null,                // Bots module reference
+    teleporter: null,
+    teleportModule: null,
+    bots: null,
 
-    // API helpers
     connect({ playerRig, controllers }) {
-      // Connect optional teleport module if present
       try {
         if (world.teleportModule?.TeleportMachine?.connect) {
           world.teleportModule.TeleportMachine.connect({ playerRig, controllers });
@@ -40,7 +38,6 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
       }
     },
 
-    // tick gets assigned below
     tick: (dt) => {}
   };
 
@@ -71,7 +68,6 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
       );
     });
 
-  // You can add more here later without breaking load
   const T = {
     carpet: await loadTex("assets/textures/lobby_carpet.jpg", { repeat: [2, 2], srgb: true }),
     brick: await loadTex("assets/textures/brickwall.jpg", { repeat: [2, 1], srgb: true }),
@@ -108,24 +104,25 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
   };
 
   // ---------------- LIGHTING (WORLD LOCAL) ----------------
-  world.group.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.1));
+  // Slightly brighter than v10.0 to reduce "dark room" complaints
+  world.group.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.25));
 
-  const key = new THREE.DirectionalLight(0xffffff, 1.0);
+  const key = new THREE.DirectionalLight(0xffffff, 1.15);
   key.position.set(7, 12, 6);
   world.group.add(key);
 
-  const fill = new THREE.PointLight(0x7fe7ff, 0.55, 18);
+  const fill = new THREE.PointLight(0x7fe7ff, 0.60, 22);
   fill.position.set(0, 2.4, 2.0);
   world.group.add(fill);
 
-  const purple = new THREE.PointLight(0xb46bff, 0.65, 18);
+  const purple = new THREE.PointLight(0xb46bff, 0.72, 22);
   purple.position.set(0, 2.6, 3.6);
   world.group.add(purple);
 
   // ---------------- FLOOR (TELEPORT TARGET) ----------------
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), mat.floor);
   floor.rotation.x = -Math.PI / 2;
-  floor.name = "Floor"; // IMPORTANT: TeleportMachine will find this
+  floor.name = "Floor";
   world.group.add(floor);
   world.floor = floor;
 
@@ -216,7 +213,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
   glowRing.position.y = 0.69;
   rails.add(glowRing);
 
-  // ---------------- CHAIRS + SEATS ----------------
+  // ---------------- CHAIRS + SEATS (SeatAnchors) ----------------
   function makeChair() {
     const g = new THREE.Group();
     g.name = "Chair";
@@ -242,51 +239,58 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
 
   const c = world.tableFocus.clone();
   const seatR = 3.05;
+
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2;
 
-    // chair position
-    const p = new THREE.Vector3(
+    // chair base position
+    const chairPos = new THREE.Vector3(
       c.x + Math.cos(a) * seatR,
       0,
       c.z + Math.sin(a) * seatR
     );
 
     // yaw so chair faces table
-    const yaw = Math.atan2(c.x - p.x, c.z - p.z);
-
-    // seat anchor: slightly inward from chair base
-    const inward = new THREE.Vector3(c.x - p.x, 0, c.z - p.z).normalize().multiplyScalar(0.18);
-    const seatPos = p.clone().add(inward);
-
-    // seat height: where hips should land for “sitting”
-    const sitY = 0.52;
-
-    world.seats.push({
-      index: i,
-      position: seatPos,
-      yaw,
-      sitY,
-      lookAt: c.clone()
-    });
+    const yaw = Math.atan2(c.x - chairPos.x, c.z - chairPos.z);
 
     const chair = makeChair();
-    chair.position.set(p.x, 0, p.z);
+    chair.position.copy(chairPos);
     chair.rotation.y = yaw;
     chair.name = "Chair_" + i;
     world.group.add(chair);
     world.chairs.push(chair);
+
+    // ✅ SeatAnchor: authoritative seat placement
+    const seatAnchor = new THREE.Object3D();
+    seatAnchor.name = "SeatAnchor_" + i;
+
+    // Toward table (+Z in chair local because chair faces table via yaw)
+    const ANCHOR_INWARD_Z = 0.18;
+    const SEAT_SURFACE_Y = 0.52;
+
+    seatAnchor.position.set(0, SEAT_SURFACE_Y, ANCHOR_INWARD_Z);
+    chair.add(seatAnchor);
+
+    const seatPos = new THREE.Vector3();
+    seatAnchor.getWorldPosition(seatPos);
+
+    world.seats.push({
+      index: i,
+      position: seatPos,     // compatibility
+      yaw,
+      sitY: SEAT_SURFACE_Y,  // seat surface height
+      lookAt: c.clone(),
+      anchor: seatAnchor     // ✅ NEW
+    });
   }
 
   // ---------------- OPTIONAL: TELEPORT MACHINE ----------------
-  // If /js/teleport_machine.js exists, we load it and build it.
-  // If missing, we just skip with a warning (no crash).
   try {
     const tm = await import(`./teleport_machine.js?v=${encodeURIComponent(v)}`);
     if (tm?.TeleportMachine?.build) {
       world.teleportModule = tm;
       const tele = tm.TeleportMachine.build({ THREE, scene: world.group, log });
-      tele.position.set(0, 0, 3.6); // near spawn
+      tele.position.set(0, 0, 3.6);
       world.teleporter = tele;
 
       if (typeof tm.TeleportMachine.tick === "function") {
@@ -300,7 +304,6 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
   }
 
   // ---------------- OPTIONAL: BOTS ----------------
-  // If /js/bots.js exists with Bots.init/update, we load and run it.
   try {
     const botsMod = await import(`./bots.js?v=${encodeURIComponent(v)}`);
     if (botsMod?.Bots?.init) {
@@ -327,7 +330,6 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
   }
 
   // ---------------- WORLD ANIMATION LOOP ----------------
-  // Pulse spawn ring + glow ring, keep stable.
   const baseTick = world.tick;
   world.tick = (dt) => {
     baseTick(dt);
@@ -343,4 +345,4 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
 
   L("[world] ready ✅ seats=" + world.seats.length);
   return world;
-          }
+      }

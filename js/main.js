@@ -1,248 +1,160 @@
-// /js/hands.js — Scarlett Hands v2.0 (GitHub Pages safe)
-// Exports: HandsSystem AND Hands (compat forever)
-// Purpose:
-// - Visible glove hands for controller mode AND hand-tracking mode.
-// - Never crash if hand-tracking isn't available.
-// - Fixes missing clamp() bug from v1.0.
-// - Works with main.js importing either:
-//    import { HandsSystem } from "./hands.js";
-//   OR older:
-//    import { Hands } from "./hands.js";
+// /js/main.js — Scarlett Poker VR Boot v10.7 (FULL WIRED)
+// CDN import-map compatible (three + addons).
+// Wires HUD toggles to Controls / Teleport / Hands systems.
 
-function _clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+import * as THREE from "three";
+import { VRButton } from "three/addons/webxr/VRButton.js";
+import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
 
-function _makeGlove(THREE, color = 0x0b0b0f, accent = 0xff2d7a) {
-  const g = new THREE.Group();
-  g.name = "Glove";
+import { initWorld } from "./world.js";
+import { Controls } from "./controls.js";
+import { Teleport } from "./teleport.js";
+import { DealingMix } from "./dealingMix.js";
+import { HandsSystem } from "./hands.js";
 
-  const mat = new THREE.MeshStandardMaterial({
-    color,
-    roughness: 0.55,
-    metalness: 0.10
-  });
+// ---------- LOG ----------
+const logEl = document.getElementById("log");
+const log = (m, ...rest) => {
+  console.log(m, ...rest);
+  if (logEl) logEl.textContent += "\n" + String(m);
+};
 
-  const accentMat = new THREE.MeshStandardMaterial({
-    color: accent,
-    roughness: 0.35,
-    metalness: 0.20,
-    emissive: accent,
-    emissiveIntensity: 0.15
-  });
+const BOOT_V = window.__BUILD_V || Date.now().toString();
+log("BOOT v=" + BOOT_V);
 
-  // palm
-  const palm = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.018, 0.08), mat);
-  palm.position.set(0, 0, 0);
-  g.add(palm);
+// ---------- SCENE ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x020205);
+scene.fog = new THREE.Fog(0x020205, 3, 90);
 
-  // knuckle ridge
-  const ridge = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.01, 0.05), accentMat);
-  ridge.position.set(0, 0.012, 0.012);
-  g.add(ridge);
+// ---------- CAMERA ----------
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 300);
 
-  // fingers (4)
-  for (let i = 0; i < 4; i++) {
-    const f = new THREE.Mesh(new THREE.CapsuleGeometry(0.007, 0.035, 6, 10), mat);
-    f.rotation.x = Math.PI / 2;
-    f.position.set(-0.018 + i * 0.012, 0.010, 0.042);
-    g.add(f);
-  }
+// ---------- RENDERER ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+try { renderer.xr.setReferenceSpaceType("local-floor"); } catch {}
+document.body.appendChild(renderer.domElement);
 
-  // thumb
-  const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.007, 0.03, 6, 10), mat);
-  thumb.rotation.z = -0.6;
-  thumb.rotation.x = Math.PI / 2;
-  thumb.position.set(0.03, 0.003, 0.02);
-  g.add(thumb);
+// VR button (Three)
+const vrBtn = VRButton.createButton(renderer);
+document.body.appendChild(vrBtn);
 
-  // pinch orb
-  const orb = new THREE.Mesh(
-    new THREE.SphereGeometry(0.012, 12, 10),
-    new THREE.MeshStandardMaterial({
-      color: accent,
-      emissive: accent,
-      emissiveIntensity: 0.35,
-      roughness: 0.25
-    })
-  );
-  orb.position.set(0.0, 0.015, 0.065);
-  orb.name = "pinch_orb";
-  orb.visible = false;
-  g.add(orb);
+// ---------- PLAYER RIG ----------
+const player = new THREE.Group();
+player.name = "PlayerRig";
+player.add(camera);
+scene.add(player);
 
-  g.userData.pinchOrb = orb;
+// Spawn
+player.position.set(0, 0, 3.6);
+camera.position.set(0, 1.65, 0);
 
-  return g;
+// ---------- LIGHTING ----------
+scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.15));
+const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+dir.position.set(7, 12, 6);
+scene.add(dir);
+
+// ---------- XR CONTROLLERS ----------
+const controllerModelFactory = new XRControllerModelFactory();
+const controllers = [];
+const grips = [];
+
+function makeLaser() {
+  const geo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0, 0, -1),
+  ]);
+  const mat = new THREE.LineBasicMaterial({ color: 0x00ffcc });
+  const line = new THREE.Line(geo, mat);
+  line.scale.z = 10;
+  return line;
 }
 
-function _applyDefaultPose(handObj, isLeft) {
-  // Base placement relative to the tracked/controller target
-  handObj.scale.setScalar(1.0);
+for (let i = 0; i < 2; i++) {
+  const c = renderer.xr.getController(i);
+  c.name = "Controller" + i;
+  c.add(makeLaser());
+  scene.add(c);
+  controllers.push(c);
 
-  // mild rotation bias so glove reads better in VR
-  handObj.rotation.set(0, 0, 0);
-
-  // offset: left/right mirrored
-  handObj.position.set(isLeft ? -0.02 : 0.02, -0.01, -0.03);
+  const g = renderer.xr.getControllerGrip(i);
+  g.name = "Grip" + i;
+  g.add(controllerModelFactory.createControllerModel(g));
+  scene.add(g);
+  grips.push(g);
 }
 
-function _updateFromTarget(THREE, handObj, targetObj, isLeft) {
-  if (!handObj || !targetObj) return;
+log("[main] controllers ready ✅");
 
-  // world pose from target
-  targetObj.getWorldPosition(handObj.position);
-  targetObj.getWorldQuaternion(handObj.quaternion);
+// ---------- WORLD ----------
+const world = await initWorld({ THREE, scene, log, v: BOOT_V });
 
-  // Small offset so glove sits nicely *in front* of target pose
-  // Mirror x for left/right so they feel symmetric
-  handObj.translateZ(-0.03);
-  handObj.translateY(-0.01);
-  handObj.translateX(isLeft ? -0.01 : 0.01);
+if (world?.tableFocus) {
+  camera.lookAt(world.tableFocus.x, 1.0, world.tableFocus.z);
 }
 
-function _updatePinch(THREE, xrHand) {
-  try {
-    const thumb = xrHand.joints?.["thumb-tip"];
-    const index = xrHand.joints?.["index-finger-tip"];
-    if (!thumb || !index) return 0;
+log("[main] world loaded ✅");
 
-    const tp = new THREE.Vector3();
-    const ip = new THREE.Vector3();
-    thumb.getWorldPosition(tp);
-    index.getWorldPosition(ip);
+// Connect optional world features (teleporter machine, etc.)
+try { world?.connect?.({ playerRig: player, controllers }); } catch {}
 
-    const d = tp.distanceTo(ip);
-    // pinch when close
-    return _clamp(1.0 - (d - 0.01) / 0.03, 0, 1);
-  } catch {
-    return 0;
-  }
+// ---------- SYSTEMS ----------
+const controls = Controls.init({ THREE, renderer, camera, player, log, world });
+const hands = HandsSystem.init({ THREE, scene, renderer, log });
+const teleport = Teleport.init({ THREE, scene, renderer, player, controllers, log, world });
+
+const dealing = DealingMix.init({ THREE, scene, log, world });
+dealing.startHand?.();
+
+// ---------- APPLY INITIAL HUD FLAGS ----------
+function applyFlags() {
+  const f = window.__SCARLETT_FLAGS || {};
+  try { controls?.setMoveEnabled?.(!!f.move); } catch {}
+  try { controls?.setSnapEnabled?.(!!f.snap); } catch {}
+  try { teleport?.setEnabled?.(!!f.teleport); } catch {}
+  try { hands?.setEnabled?.(!!f.hands); } catch {}
 }
+applyFlags();
 
-function _createSystem() {
-  return {
-    init({ THREE, scene, renderer, log = console.log } = {}) {
-      const L = (...a) => { try { log(...a); } catch { console.log(...a); } };
+// Also react if flags are changed programmatically
+window.addEventListener("scarlett-toggle-teleport", (e) => teleport?.setEnabled?.(!!e.detail));
+window.addEventListener("scarlett-toggle-hands", (e) => hands?.setEnabled?.(!!e.detail));
+window.addEventListener("scarlett-toggle-move", (e) => controls?.setMoveEnabled?.(!!e.detail));
+window.addEventListener("scarlett-toggle-snap", (e) => controls?.setSnapEnabled?.(!!e.detail));
 
-      const root = new THREE.Group();
-      root.name = "HandsSystem";
-      scene.add(root);
+// ---------- RECENTER ----------
+window.addEventListener("scarlett-recenter", () => {
+  player.position.set(0, 0, 3.6);
+  player.rotation.set(0, 0, 0);
+  if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.0, world.tableFocus.z);
+  log("[main] recentered ✅");
+});
 
-      const state = {
-        enabled: true,
-        t: 0,
-        hands: [
-          { index: 0, obj: null, type: "unknown", pinch: 0 }, // left
-          { index: 1, obj: null, type: "unknown", pinch: 0 }  // right
-        ],
-        xrHands: [null, null],
-        grips: [null, null],
-        _addedHandsToScene: [false, false],
-      };
+// ---------- RESIZE ----------
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
 
-      // Create gloves
-      const left = _makeGlove(THREE, 0x0b0b0f, 0xff2d7a);
-      const right = _makeGlove(THREE, 0x0b0b0f, 0x7fe7ff);
-      left.name = "HandLeft";
-      right.name = "HandRight";
+// ---------- LOOP ----------
+let last = performance.now();
+renderer.setAnimationLoop(() => {
+  const now = performance.now();
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
 
-      root.add(left, right);
-      state.hands[0].obj = left;
-      state.hands[1].obj = right;
+  try { world?.tick?.(dt); } catch (e) { console.error(e); }
+  try { controls?.update?.(dt); } catch (e) { console.error(e); }
+  try { teleport?.update?.(dt); } catch (e) { console.error(e); }
+  try { dealing?.update?.(dt); } catch (e) { console.error(e); }
+  try { hands?.update?.(dt); } catch (e) { console.error(e); }
 
-      _applyDefaultPose(left, true);
-      _applyDefaultPose(right, false);
+  renderer.render(scene, camera);
+});
 
-      function bindXRHands() {
-        try {
-          const s = renderer?.xr?.getSession?.();
-          if (!s) return;
-
-          for (let i = 0; i < 2; i++) {
-            const h = renderer.xr.getHand(i);
-            if (h && !state.xrHands[i]) {
-              state.xrHands[i] = h;
-
-              // Only add if it isn't already parented somewhere
-              // (Three sometimes returns an object already attached)
-              if (!h.parent && !state._addedHandsToScene[i]) {
-                scene.add(h);
-                state._addedHandsToScene[i] = true;
-              }
-
-              L("[Hands] XR hand bound:", i);
-            }
-          }
-        } catch {}
-      }
-
-      function bindGrips() {
-        try {
-          for (let i = 0; i < 2; i++) {
-            const g = renderer.xr.getControllerGrip(i);
-            if (g && !state.grips[i]) state.grips[i] = g;
-          }
-        } catch {}
-      }
-
-      function update(dt) {
-        if (!state.enabled) return;
-        state.t += dt;
-
-        bindXRHands();
-        bindGrips();
-
-        // Left=0, Right=1 (Three convention for getHand/getControllerGrip)
-        for (let i = 0; i < 2; i++) {
-          const isLeft = (i === 0);
-          const handObj = state.hands[i].obj;
-          const xrHand = state.xrHands[i];
-          const grip = state.grips[i];
-
-          if (xrHand) {
-            state.hands[i].type = "hand-tracking";
-
-            _updateFromTarget(THREE, handObj, xrHand, isLeft);
-
-            const p = _updatePinch(THREE, xrHand);
-            state.hands[i].pinch = p;
-
-            const orb = handObj?.userData?.pinchOrb;
-            if (orb) {
-              orb.visible = p > 0.65;
-              orb.scale.setScalar(0.8 + p * 0.6);
-            }
-          } else if (grip) {
-            state.hands[i].type = "controller";
-
-            _updateFromTarget(THREE, handObj, grip, isLeft);
-
-            // tiny idle
-            const bob = Math.sin(state.t * 2.2 + i) * 0.002;
-            handObj.position.y += bob;
-
-            const orb = handObj?.userData?.pinchOrb;
-            if (orb) orb.visible = false;
-          } else {
-            state.hands[i].type = "unbound";
-            const orb = handObj?.userData?.pinchOrb;
-            if (orb) orb.visible = false;
-          }
-        }
-      }
-
-      function setEnabled(v) {
-        state.enabled = !!v;
-        root.visible = state.enabled;
-      }
-
-      L("[Hands] init ✅ v2.0");
-      return { update, setEnabled, root };
-    }
-  };
-}
-
-// Primary export (new)
-export const HandsSystem = _createSystem();
-
-// Compat export (old)
-export const Hands = HandsSystem;
+log("[main] ready ✅");

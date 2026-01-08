@@ -1,9 +1,18 @@
-// /js/world.js — Scarlett Poker VR WORLD v10.3 TEMP (Visible Poker + Stable)
+// /js/world.js — Scarlett Poker VR WORLD v10.4 TEMP (ALIGNMENT + LIGHTS + CLEAN)
 // No "three" import here. main.js passes THREE in.
 // Exports: initWorld({ THREE, scene, log, v }) -> returns world object
+//
+// Fixes vs your pasted v10.3:
+// ✅ Adds missing clamp() (your tick used clamp but it wasn't defined -> breaks build)
+// ✅ Sets world.tableY so DealingMix can align to felt correctly
+// ✅ Strong overhead table lights so cards/chips are readable
+// ✅ Removes the old TEMP “poker viz” cards/chips (they fight with DealingMix and cause height confusion)
+// ✅ Seat anchors unchanged (Bots uses them)
 
 export async function initWorld({ THREE, scene, log = console.log, v = "1000" }) {
   const L = (...a) => { try { log(...a); } catch { console.log(...a); } };
+  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+
   L("[world] init v=" + v);
 
   const world = {
@@ -19,12 +28,10 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
     chairs: [],
     seats: [],
 
-    // poker viz refs
-    viz: {
-      communityCards: [],
-      potStack: null,
-      dealerButton: null
-    },
+    // Metrics for other modules
+    tableY: 0.92,   // felt center Y
+    feltH: 0.18,    // felt cylinder height
+    tableTopY: 1.01, // computed below
 
     teleporter: null,
     teleportModule: null,
@@ -76,8 +83,6 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
     brick: await loadTex("./assets/textures/brickwall.jpg", { repeat: [2, 1], srgb: true }),
     ceiling: await loadTex("./assets/textures/ceiling_dome_main.jpg", { srgb: true }),
     felt: await loadTex("./assets/textures/table_felt_green.jpg", { srgb: true }),
-    // optional card back if you have it:
-    cardBack: await loadTex("./assets/textures/cards/scarlett_card_back_512.jpg", { srgb: true })
   };
 
   // ---------- MATERIALS ----------
@@ -90,20 +95,6 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
     metalDark: new THREE.MeshStandardMaterial({ color: 0x12131a, roughness: 0.85, metalness: 0.15 }),
     chairFrame: new THREE.MeshStandardMaterial({ color: 0x151821, roughness: 0.95 }),
     chairSeat: new THREE.MeshStandardMaterial({ color: 0x2a1b10, roughness: 0.85 }),
-
-    card: new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.6,
-      metalness: 0.0,
-      map: T.cardBack || null
-    }),
-    chip: new THREE.MeshStandardMaterial({
-      color: 0xff2d7a,
-      roughness: 0.35,
-      metalness: 0.1,
-      emissive: 0x1a0010,
-      emissiveIntensity: 0.25
-    }),
     holo: new THREE.MeshStandardMaterial({
       color: 0x7fe7ff,
       emissive: 0x2bd7ff,
@@ -129,24 +120,23 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
   purple.position.set(0, 2.8, 3.6);
   world.group.add(purple);
 
-  world.group.add(new THREE.AmbientLight(0xffffff, 0.18));
-// EXTRA TABLE LIGHTS (makes cards/chips readable in Quest)
-  const tableOver = new THREE.SpotLight(0xffffff, 2.4, 18, Math.PI / 5, 0.35, 1.0);
+  world.group.add(new THREE.AmbientLight(0xffffff, 0.22));
+
+  // Extra table lights (so cards/chips are readable in Quest)
+  const tableOver = new THREE.SpotLight(0xffffff, 2.8, 22, Math.PI / 5, 0.35, 1.0);
   tableOver.position.set(world.tableFocus.x, 6.2, world.tableFocus.z);
-  tableOver.target.position.set(world.tableFocus.x, 0.9, world.tableFocus.z);
+  tableOver.target.position.set(world.tableFocus.x, 1.0, world.tableFocus.z);
   world.group.add(tableOver);
   world.group.add(tableOver.target);
 
-  const tableFillA = new THREE.PointLight(0xffffff, 0.85, 14);
-  tableFillA.position.set(world.tableFocus.x + 2.0, 2.2, world.tableFocus.z + 1.2);
+  const tableFillA = new THREE.PointLight(0xffffff, 0.95, 16);
+  tableFillA.position.set(world.tableFocus.x + 2.2, 2.4, world.tableFocus.z + 1.3);
   world.group.add(tableFillA);
 
-  const tableFillB = new THREE.PointLight(0xffffff, 0.65, 14);
-  tableFillB.position.set(world.tableFocus.x - 2.0, 2.0, world.tableFocus.z - 1.2);
+  const tableFillB = new THREE.PointLight(0xffffff, 0.85, 16);
+  tableFillB.position.set(world.tableFocus.x - 2.2, 2.2, world.tableFocus.z - 1.3);
   world.group.add(tableFillB);
 
-  // small ambient bump
-  world.group.add(new THREE.AmbientLight(0xffffff, 0.28));
   // ---------- FLOOR ----------
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), mat.floor);
   floor.rotation.x = -Math.PI / 2;
@@ -185,14 +175,19 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
   world.group.add(spawnRing);
 
   // ---------- TABLE ----------
-  const TABLE_Y = 0.92; // felt height (used for bot metrics)
+  const TABLE_Y = 0.92;
+  const FELT_H = 0.18;
+  world.tableY = TABLE_Y;
+  world.feltH = FELT_H;
+  world.tableTopY = TABLE_Y + (FELT_H * 0.5);
+
   const table = new THREE.Group();
   table.position.copy(world.tableFocus);
   table.name = "PokerTable";
   world.group.add(table);
   world.table = table;
 
-  const felt = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 0.18, 64), mat.felt);
+  const felt = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, FELT_H, 64), mat.felt);
   felt.position.y = TABLE_Y;
   felt.name = "TableFelt";
   table.add(felt);
@@ -237,45 +232,14 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
   glowRing.position.y = 0.69;
   rails.add(glowRing);
 
-  // ---------- POKER VIS (TEMP) ----------
-  // Community cards (5) hovering above felt center
-  const cardW = 0.30, cardH = 0.42;
-  const cardGeo = new THREE.PlaneGeometry(cardW, cardH);
-  for (let i = 0; i < 5; i++) {
-    const card = new THREE.Mesh(cardGeo, mat.card);
-    card.name = "CommunityCard_" + i;
-    card.rotation.x = -Math.PI / 2;
-    card.position.set(-0.72 + i * 0.36, TABLE_Y + 0.035, 0.0);
-    // start hidden-ish: scale 0 until "deal"
-    card.scale.setScalar(0.001);
-    table.add(card);
-    world.viz.communityCards.push(card);
-  }
-
-  // Pot stack placeholder (chips)
-  const pot = new THREE.Group();
-  pot.name = "PotStack";
-  pot.position.set(0, TABLE_Y + 0.02, 0);
-  table.add(pot);
-  world.viz.potStack = pot;
-
-  const chipGeo = new THREE.CylinderGeometry(0.065, 0.065, 0.012, 18);
-  for (let i = 0; i < 14; i++) {
-    const chip = new THREE.Mesh(chipGeo, mat.chip);
-    chip.rotation.x = Math.PI / 2;
-    chip.position.set((Math.random() - 0.5) * 0.12, 0.006 + i * 0.010, (Math.random() - 0.5) * 0.12);
-    pot.add(chip);
-  }
-
-  // Dealer button (small holo puck)
+  // Dealer button (purely visual marker)
   const dealerBtn = new THREE.Mesh(
     new THREE.CylinderGeometry(0.08, 0.08, 0.02, 22),
     mat.holo
   );
   dealerBtn.rotation.x = Math.PI / 2;
-  dealerBtn.position.set(0.55, TABLE_Y + 0.03, -0.25);
+  dealerBtn.position.set(0.55, world.tableTopY + 0.01, -0.25);
   table.add(dealerBtn);
-  world.viz.dealerButton = dealerBtn;
 
   // ---------- CHAIRS + SEATS ----------
   function makeChair() {
@@ -390,43 +354,23 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
 
   // ---------- WORLD TICK ----------
   const baseTick = world.tick;
-
-  // simple “poker is alive” animation even before DealingMix hooks:
-  // cards pop in one-by-one, dealer button orbits, pot pulses.
-  const vizTick = { t: 0 };
+  const tickState = { t: 0 };
 
   world.tick = (dt) => {
     baseTick(dt);
-
-    vizTick.t += dt;
+    tickState.t += dt;
 
     // spawn ring pulse
-    spawnRing.material.opacity = 0.65 + Math.sin(vizTick.t * 3.0) * 0.18;
+    spawnRing.material.opacity = 0.65 + Math.sin(tickState.t * 3.0) * 0.18;
 
     // rail glow pulse
-    glowRing.material.emissiveIntensity = 1.15 + Math.sin(vizTick.t * 3.5) * 0.35;
+    glowRing.material.emissiveIntensity = 1.15 + Math.sin(tickState.t * 3.5) * 0.35;
 
-    // community cards "deal" loop
-    const step = 0.55;
-    for (let i = 0; i < world.viz.communityCards.length; i++) {
-      const card = world.viz.communityCards[i];
-      const appearT = clamp((vizTick.t - i * step) / 0.35, 0, 1);
-      const s = 0.001 + appearT * 1.0;
-      card.scale.setScalar(s);
-      card.position.y = TABLE_Y + 0.02 + appearT * 0.02 + Math.sin(vizTick.t * 2.2 + i) * 0.002;
-    }
-
-    // dealer button orbit (tiny)
+    // dealer button tiny orbit
     const r = 0.62;
-    world.viz.dealerButton.position.x = Math.cos(vizTick.t * 0.6) * r;
-    world.viz.dealerButton.position.z = Math.sin(vizTick.t * 0.6) * r;
-    world.viz.dealerButton.position.y = TABLE_Y + 0.03;
-
-    // pot pulse
-    if (world.viz.potStack) {
-      const ps = 1.0 + Math.sin(vizTick.t * 2.5) * 0.03;
-      world.viz.potStack.scale.setScalar(ps);
-    }
+    dealerBtn.position.x = Math.cos(tickState.t * 0.6) * r;
+    dealerBtn.position.z = Math.sin(tickState.t * 0.6) * r;
+    dealerBtn.position.y = world.tableTopY + 0.01;
   };
 
   L("[world] ready ✅ seats=" + world.seats.length);

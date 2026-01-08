@@ -1,47 +1,36 @@
-// /js/main.js — Scarlett VR Poker — Update 9.0 (FULL BUILD, CDN-only Three)
-// - One THREE instance (CDN)
-// - VRButton
-// - Movement + snap turn + teleport arc
-// - world.init + world.tick
-// - Debug overlay log
+// /js/main.js — Scarlett VR Poker (FULL ACTIVE 9.0, cache-safe)
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
 
-const debugEl = document.getElementById("debugCard");
-function log(msg) {
-  console.log(msg);
-  if (!debugEl) return;
-  const now = new Date().toLocaleTimeString();
-  const prev = debugEl.textContent || "";
-  debugEl.textContent = `${prev}\n${msg}`.trim().slice(-6000);
-}
-window.__hubLog = log;
+const log = (m) => (window.__hubLog ? window.__hubLog(m) : console.log(m));
 
-const V = new URL(import.meta.url).searchParams.get("v") || "9000";
-log(`[main] boot v=${V}`);
+// cache-bust from URL: main.js?v=123
+const V = new URL(import.meta.url).searchParams.get("v") || (window.__BUILD_V || Date.now().toString());
+log("[main] boot v=" + V);
 
 let renderer, scene, camera;
 let world = null;
 
 const clock = new THREE.Clock();
 
-// XR rig: camera in head in player
+// XR rig
 const player = new THREE.Group();
 const head = new THREE.Group();
 
+// controllers
 let c0 = null, c1 = null;
 
-// locomotion
-const MOVE_SPEED = 2.25;
+// locomotion tuning
+const MOVE_SPEED = 2.25; // m/s
 const TURN_ANGLE = THREE.MathUtils.degToRad(45);
 const DEADZONE = 0.20;
 let snapArmed = true;
 
-// teleport arc
+// teleport system visuals
 let teleport = null;
 
-boot().catch(e => log("❌ boot failed: " + (e?.message || e)));
+boot().catch((e) => log("❌ boot failed: " + (e?.message || e)));
 
 async function boot() {
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -51,29 +40,36 @@ async function boot() {
   document.body.appendChild(renderer.domElement);
   log("[main] renderer ok ✅");
 
+  // VR Button
   const btn = VRButton.createButton(renderer);
   btn.id = "VRButton";
+  btn.style.position = "fixed";
+  btn.style.right = "12px";
+  btn.style.bottom = "12px";
+  btn.style.zIndex = "2147483647";
   document.body.appendChild(btn);
   log("[main] VRButton appended ✅");
 
+  // Scene / Camera
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x05060a);
+  scene.background = new THREE.Color(0x06060a);
 
-  camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 300);
+  camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 350);
   head.add(camera);
   player.add(head);
   scene.add(player);
 
-  // Always-lit scene
+  // Safe lights (never black)
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.15));
-  const key = new THREE.DirectionalLight(0xffffff, 0.85);
+  const key = new THREE.DirectionalLight(0xffffff, 0.90);
   key.position.set(6, 10, 4);
   scene.add(key);
 
+  // Teleport visuals (arc + ring)
   teleport = createTeleportSystem(THREE);
   scene.add(teleport.arcLine, teleport.ring);
 
-  // Load world
+  // Load world (cache-safe)
   try {
     const mod = await import(`./world.js?v=${encodeURIComponent(V)}`);
     world = await mod.initWorld({ THREE, scene, log, v: V });
@@ -82,14 +78,17 @@ async function boot() {
     log("❌ world import/init failed: " + (e?.message || e));
   }
 
-  // Spawn
+  // Spawn (use world spawn)
   const spawn = world?.spawnPads?.[0] || new THREE.Vector3(0, 0, 2);
   player.position.set(spawn.x, 0, spawn.z);
 
-  // Face the table
+  // Face the table if available
   if (world?.tableFocus) {
-    const to = new THREE.Vector3().subVectors(world.tableFocus, new THREE.Vector3(spawn.x, 0, spawn.z));
-    player.rotation.y = Math.atan2(to.x, to.z);
+    const toTable = new THREE.Vector3().subVectors(
+      world.tableFocus,
+      new THREE.Vector3(spawn.x, 0, spawn.z)
+    );
+    player.rotation.y = Math.atan2(toTable.x, toTable.z);
   }
 
   setupXRControls();
@@ -97,14 +96,15 @@ async function boot() {
   window.addEventListener("resize", onResize);
   renderer.setAnimationLoop(tick);
 
+  // XR support info
   if (navigator.xr?.isSessionSupported) {
     const ok = await navigator.xr.isSessionSupported("immersive-vr");
     log("[main] XR immersive-vr supported = " + ok);
   } else {
-    log("[main] navigator.xr missing (Android Chrome often no WebXR)");
+    log("[main] navigator.xr missing (Android Chrome usually no WebXR)");
   }
 
-  log(`[main] ready ✅ v=${V}`);
+  log("[main] ready ✅ v=" + V);
 }
 
 function onResize() {
@@ -113,7 +113,7 @@ function onResize() {
   renderer.setSize(innerWidth, innerHeight);
 }
 
-// ---------- XR Controls ----------
+// -------------------- XR CONTROLS --------------------
 function setupXRControls() {
   c0 = renderer.xr.getController(0);
   c1 = renderer.xr.getController(1);
@@ -137,19 +137,16 @@ function getGamepad(controller) {
   const src = controller?.userData?.inputSource;
   return src && src.gamepad ? src.gamepad : null;
 }
-
 function isRightHand(controller) {
   const src = controller?.userData?.inputSource;
   if (!src) return controller === c1;
   return src.handedness ? src.handedness === "right" : controller === c1;
 }
-
 function findControllerByHand(hand) {
   const a = c0?.userData?.inputSource?.handedness === hand ? c0 : null;
   const b = c1?.userData?.inputSource?.handedness === hand ? c1 : null;
   return a || b || null;
 }
-
 function getHeadYaw() {
   const q = new THREE.Quaternion();
   camera.getWorldQuaternion(q);
@@ -157,32 +154,36 @@ function getHeadYaw() {
   return e.y;
 }
 
-// ---------- Teleport ----------
+// -------------------- TELEPORT --------------------
 function onSelectStart(controller) {
   if (!isRightHand(controller)) return;
   teleport.active = true;
 }
-
 function onSelectEnd(controller) {
   if (!isRightHand(controller)) return;
 
   if (teleport.active && teleport.valid && teleport.hitPoint) {
     const p = teleport.hitPoint.clone();
 
+    // clamp inside room
     if (world?.roomClamp) {
       p.x = THREE.MathUtils.clamp(p.x, world.roomClamp.minX, world.roomClamp.maxX);
       p.z = THREE.MathUtils.clamp(p.z, world.roomClamp.minZ, world.roomClamp.maxZ);
     }
 
-    player.position.set(p.x, 0, p.z);
-
-    if (world?.tableFocus) {
-      const to = new THREE.Vector3().subVectors(world.tableFocus, new THREE.Vector3(p.x, 0, p.z));
-      player.rotation.y = Math.atan2(to.x, to.z);
+    // collide vs world
+    if (world?.resolvePlayer) {
+      const resolved = world.resolvePlayer(p, 0.28);
+      p.copy(resolved);
     }
 
-    // optional teleport burst fx hook
-    if (world?.onPlayerTeleport) world.onPlayerTeleport(p);
+    player.position.set(p.x, 0, p.z);
+
+    // keep facing table (feels good)
+    if (world?.tableFocus) {
+      const toTable = new THREE.Vector3().subVectors(world.tableFocus, new THREE.Vector3(p.x, 0, p.z));
+      player.rotation.y = Math.atan2(toTable.x, toTable.z);
+    }
   }
 
   teleport.active = false;
@@ -192,12 +193,12 @@ function onSelectEnd(controller) {
   teleport.arcLine.visible = false;
 }
 
-// ---------- Locomotion ----------
+// -------------------- LOCOMOTION --------------------
 function applyLocomotion(dt) {
   const left = findControllerByHand("left") || c0;
   const right = findControllerByHand("right") || c1;
 
-  // Left stick move
+  // ---- left stick move ----
   const gpL = getGamepad(left);
   if (gpL?.axes?.length >= 2) {
     const x = gpL.axes[2] ?? gpL.axes[0];
@@ -207,28 +208,39 @@ function applyLocomotion(dt) {
     const ay = Math.abs(y) > DEADZONE ? y : 0;
 
     if (ax || ay) {
-      const yaw = getHeadYaw();
-      const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+      const headYaw = getHeadYaw();
+      const forward = new THREE.Vector3(Math.sin(headYaw), 0, Math.cos(headYaw));
       const rightv = new THREE.Vector3(forward.z, 0, -forward.x);
 
+      // ✅ FIX: forward/back was reversed before
       const move = new THREE.Vector3();
-      move.addScaledVector(forward, (-ay) * MOVE_SPEED * dt);
+      move.addScaledVector(forward, (ay) * MOVE_SPEED * dt);      // forward when stick forward
       move.addScaledVector(rightv, (ax) * MOVE_SPEED * dt);
 
-      player.position.add(move);
+      const next = player.position.clone().add(move);
 
+      // room clamp
       if (world?.roomClamp) {
-        player.position.x = THREE.MathUtils.clamp(player.position.x, world.roomClamp.minX, world.roomClamp.maxX);
-        player.position.z = THREE.MathUtils.clamp(player.position.z, world.roomClamp.minZ, world.roomClamp.maxZ);
+        next.x = THREE.MathUtils.clamp(next.x, world.roomClamp.minX, world.roomClamp.maxX);
+        next.z = THREE.MathUtils.clamp(next.z, world.roomClamp.minZ, world.roomClamp.maxZ);
+      }
+
+      // wall collision (hard)
+      if (world?.resolvePlayer) {
+        const resolved = world.resolvePlayer(next, 0.28);
+        player.position.copy(resolved);
+      } else {
+        player.position.copy(next);
       }
     }
   }
 
-  // Right stick snap turn
+  // ---- right stick snap turn ----
   const gpR = getGamepad(right);
   if (gpR?.axes?.length >= 2) {
     const x = gpR.axes[2] ?? gpR.axes[0];
     const ax = Math.abs(x) > 0.65 ? x : 0;
+
     if (ax === 0) snapArmed = true;
     if (snapArmed && ax !== 0) {
       player.rotation.y += ax > 0 ? -TURN_ANGLE : TURN_ANGLE;
@@ -236,12 +248,12 @@ function applyLocomotion(dt) {
     }
   }
 
-  // Teleport arc update
+  // ---- teleport arc update ----
   const rightHand = findControllerByHand("right") || c1;
   if (teleport.active && rightHand) updateTeleportArc(THREE, rightHand, teleport, world);
 }
 
-// ---------- Teleport Visuals ----------
+// -------------------- TELEPORT VISUALS --------------------
 function createTeleportSystem(THREE) {
   const arcMat = new THREE.LineBasicMaterial({ color: 0x33ff66, transparent: true, opacity: 0.9 });
   const arcGeo = new THREE.BufferGeometry();
@@ -272,17 +284,18 @@ function updateTeleportArc(THREE, controller, tp, world) {
   dir.applyQuaternion(q).normalize();
 
   const g = -9.8, v = 7.0, step = 0.06, maxT = 2.0;
-  const positions = tp.arcLine.geometry.attributes.position.array;
 
+  const positions = tp.arcLine.geometry.attributes.position.array;
   let hit = null;
   let idx = 0;
 
-  for (let tt = 0; tt <= maxT; tt += step) {
+  for (let t = 0; t <= maxT; t += step) {
     const p = new THREE.Vector3(
-      origin.x + dir.x * v * tt,
-      origin.y + dir.y * v * tt + 0.5 * g * tt * tt,
-      origin.z + dir.z * v * tt
+      origin.x + dir.x * v * t,
+      origin.y + dir.y * v * t + 0.5 * g * t * t,
+      origin.z + dir.z * v * t
     );
+
     positions[idx++] = p.x;
     positions[idx++] = p.y;
     positions[idx++] = p.z;
@@ -303,6 +316,7 @@ function updateTeleportArc(THREE, controller, tp, world) {
     }
     tp.valid = true;
     tp.hitPoint = hit;
+
     tp.ring.visible = true;
     tp.ring.position.set(hit.x, 0.03, hit.z);
   } else {
@@ -312,10 +326,76 @@ function updateTeleportArc(THREE, controller, tp, world) {
   }
 }
 
-// ---------- Loop ----------
+// -------------------- LOOP --------------------
 function tick() {
   const dt = clock.getDelta();
+
   applyLocomotion(dt);
+
   if (world?.tick) world.tick(dt);
+
   renderer.render(scene, camera);
+    }// /js/store.js — Update 9.0 store (safe visuals, no UI clicks yet)
+
+import { ShopCatalog } from "./shop_catalog.js";
+import { createTextureKit } from "./textures.js";
+
+export async function initStore({ THREE, scene, world, log = console.log }) {
+  const kit = createTextureKit(THREE, { log });
+
+  const g = new THREE.Group();
+  g.name = "Store";
+  g.position.set(-5.5, 0, 2.5); // left side of lobby
+  world.group.add(g);
+
+  // kiosk base
+  const kiosk = new THREE.Mesh(
+    new THREE.BoxGeometry(2.2, 1.1, 1.1),
+    new THREE.MeshStandardMaterial({ color: 0x121826, roughness: 0.85 })
+  );
+  kiosk.position.y = 0.55;
+  g.add(kiosk);
+
+  // sign
+  const sign = new THREE.Mesh(
+    new THREE.BoxGeometry(2.2, 0.35, 0.1),
+    new THREE.MeshStandardMaterial({ color: 0x2a3cff, emissive: 0x2a3cff, emissiveIntensity: 0.55, roughness: 0.4 })
+  );
+  sign.position.set(0, 1.35, 0.55);
+  g.add(sign);
+
+  // item pedestals
+  const pedMat = new THREE.MeshStandardMaterial({ color: 0x0e1018, roughness: 0.9 });
+  const iconMatFallback = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
+
+  for (let i = 0; i < ShopCatalog.length; i++) {
+    const item = ShopCatalog[i];
+    const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 0.25, 20), pedMat);
+    ped.position.set(-0.75 + i * 0.5, 0.125, -0.55);
+    g.add(ped);
+
+    const iconTex = await kit.load(item.icon).catch(() => null);
+    const iconMat = iconTex
+      ? new THREE.MeshStandardMaterial({ map: iconTex, transparent: true, roughness: 0.9 })
+      : iconMatFallback;
+
+    const icon = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.28), iconMat);
+    icon.position.set(ped.position.x, 0.55, ped.position.z);
+    icon.rotation.y = Math.PI;
+    icon.userData.spin = 0.6 + Math.random() * 0.4;
+    icon.userData.itemId = item.id;
+    g.add(icon);
+  }
+
+  // store tick (spin icons)
+  return {
+    group: g,
+    tick(dt) {
+      for (const child of g.children) {
+        if (child.isMesh && child.geometry?.type === "PlaneGeometry" && child.userData?.spin) {
+          child.rotation.y += dt * child.userData.spin;
+        }
+      }
+    }
+  };
 }

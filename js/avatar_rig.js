@@ -1,202 +1,340 @@
-// /js/avatar_rig.js — Scarlett VR Poker (Procedural skinned "pill" bot body)
-// GitHub Pages SAFE: no imports. main.js/world.js pass THREE in.
+// /js/avatar_rig.js — Scarlett Avatar Rig (GitHub Pages SAFE: no bare "three" import)
 //
-// What this gives you:
-// - createBotAvatar({THREE, variant:"male"|"female", textureUrl})
-// - Returns a THREE.Group with:
-//   - skinned torso+legs (one SkinnedMesh) + head mesh + simple hands
-// - Simple skeleton + idle/walk animation via avatar.update(dt)
-//
-// NOTE: This is a lightweight "starter body" so you can swap textures/outfits later.
+// Exports:
+// - createAvatarRig({ THREE, textureUrl, gender })
+//   returns { root, skinned, skeleton, bones, mixer, actions, setPose(), playWalk() }
 
-export function createBotAvatar({
-  THREE,
-  variant = "male",
-  textureUrl = "assets/textures/avatars/suit_male_albedo.png",
-  skinTone = 0xf2d6c9,
-} = {}) {
+export function createAvatarRig({ THREE, textureUrl = null, gender = "male" } = {}) {
+  // --- Basic proportions (meters) ---
+  const H = 1.68; // overall height baseline
+  const shoulderW = gender === "female" ? 0.34 : 0.40;
+  const hipW = gender === "female" ? 0.30 : 0.34;
+
+  // --- Bones ---
   const root = new THREE.Group();
-  root.name = "BotAvatar";
+  root.name = "AvatarRoot";
 
-  // ---------- texture ----------
-  const tex = new THREE.TextureLoader().load(textureUrl);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.flipY = false;
+  const bones = {};
+  const mkBone = (name) => {
+    const b = new THREE.Bone();
+    b.name = name;
+    bones[name] = b;
+    return b;
+  };
 
-  const suitMat = new THREE.MeshStandardMaterial({
-    map: tex,
-    color: 0xffffff,
-    roughness: 0.72,
-    metalness: 0.08,
-    skinning: true,
-  });
+  const hips = mkBone("Hips");
+  hips.position.set(0, 0.95, 0);
 
-  // ---------- proportions ----------
-  const P = variant === "female"
-    ? { height: 1.62, shoulder: 0.44, hip: 0.36, chest: 0.40 }
-    : { height: 1.72, shoulder: 0.48, hip: 0.38, chest: 0.44 };
+  const spine = mkBone("Spine");
+  spine.position.set(0, 0.12, 0);
 
-  // ---------- bones ----------
-  const bones = [];
-  const hips = new THREE.Bone(); hips.name = "hips"; hips.position.y = 0.86;
-  const spine = new THREE.Bone(); spine.name = "spine"; spine.position.y = 0.18;
-  const chest = new THREE.Bone(); chest.name = "chest"; chest.position.y = 0.22;
-  const neck = new THREE.Bone(); neck.name = "neck"; neck.position.y = 0.14;
-  const headB = new THREE.Bone(); headB.name = "head"; headB.position.y = 0.12;
+  const chest = mkBone("Chest");
+  chest.position.set(0, 0.18, 0);
 
-  const lThigh = new THREE.Bone(); lThigh.name="lThigh"; lThigh.position.set(-0.12, -0.20, 0);
-  const lShin  = new THREE.Bone(); lShin.name="lShin";  lShin.position.set(0, -0.44, 0);
-  const lFoot  = new THREE.Bone(); lFoot.name="lFoot";  lFoot.position.set(0, -0.44, 0.06);
+  const neck = mkBone("Neck");
+  neck.position.set(0, 0.16, 0);
 
-  const rThigh = new THREE.Bone(); rThigh.name="rThigh"; rThigh.position.set( 0.12, -0.20, 0);
-  const rShin  = new THREE.Bone(); rShin.name="rShin";  rShin.position.set(0, -0.44, 0);
-  const rFoot  = new THREE.Bone(); rFoot.name="rFoot";  rFoot.position.set(0, -0.44, 0.06);
+  const head = mkBone("Head");
+  head.position.set(0, 0.12, 0);
 
-  const lUpperArm = new THREE.Bone(); lUpperArm.name="lUpperArm"; lUpperArm.position.set(-P.shoulder/2, 0.18, 0);
-  const lForeArm  = new THREE.Bone(); lForeArm.name="lForeArm";  lForeArm.position.set(-0.24, -0.10, 0);
+  const lUpperArm = mkBone("LeftUpperArm");
+  lUpperArm.position.set(-shoulderW * 0.5, 0.14, 0);
 
-  const rUpperArm = new THREE.Bone(); rUpperArm.name="rUpperArm"; rUpperArm.position.set( P.shoulder/2, 0.18, 0);
-  const rForeArm  = new THREE.Bone(); rForeArm.name="rForeArm";  rForeArm.position.set( 0.24, -0.10, 0);
+  const lLowerArm = mkBone("LeftLowerArm");
+  lLowerArm.position.set(-0.25, 0, 0);
 
+  const lHand = mkBone("LeftHand");
+  lHand.position.set(-0.24, 0, 0);
+
+  const rUpperArm = mkBone("RightUpperArm");
+  rUpperArm.position.set(shoulderW * 0.5, 0.14, 0);
+
+  const rLowerArm = mkBone("RightLowerArm");
+  rLowerArm.position.set(0.25, 0, 0);
+
+  const rHand = mkBone("RightHand");
+  rHand.position.set(0.24, 0, 0);
+
+  const lUpperLeg = mkBone("LeftUpperLeg");
+  lUpperLeg.position.set(-hipW * 0.5, -0.05, 0);
+
+  const lLowerLeg = mkBone("LeftLowerLeg");
+  lLowerLeg.position.set(0, -0.42, 0);
+
+  const lFoot = mkBone("LeftFoot");
+  lFoot.position.set(0, -0.41, 0.05);
+
+  const rUpperLeg = mkBone("RightUpperLeg");
+  rUpperLeg.position.set(hipW * 0.5, -0.05, 0);
+
+  const rLowerLeg = mkBone("RightLowerLeg");
+  rLowerLeg.position.set(0, -0.42, 0);
+
+  const rFoot = mkBone("RightFoot");
+  rFoot.position.set(0, -0.41, 0.05);
+
+  // hierarchy
+  root.add(hips);
   hips.add(spine);
   spine.add(chest);
   chest.add(neck);
-  neck.add(headB);
+  neck.add(head);
 
-  hips.add(lThigh); lThigh.add(lShin); lShin.add(lFoot);
-  hips.add(rThigh); rThigh.add(rShin); rShin.add(rFoot);
+  chest.add(lUpperArm);
+  lUpperArm.add(lLowerArm);
+  lLowerArm.add(lHand);
 
-  chest.add(lUpperArm); lUpperArm.add(lForeArm);
-  chest.add(rUpperArm); rUpperArm.add(rForeArm);
+  chest.add(rUpperArm);
+  rUpperArm.add(rLowerArm);
+  rLowerArm.add(rHand);
 
-  bones.push(hips, spine, chest, neck, headB, lThigh, lShin, lFoot, rThigh, rShin, rFoot, lUpperArm, lForeArm, rUpperArm, rForeArm);
+  hips.add(lUpperLeg);
+  lUpperLeg.add(lLowerLeg);
+  lLowerLeg.add(lFoot);
 
-  const skeleton = new THREE.Skeleton(bones);
+  hips.add(rUpperLeg);
+  rUpperLeg.add(rLowerLeg);
+  rLowerLeg.add(rFoot);
 
-  // ---------- skinned mesh geometry ----------
-  // One "pill" body: cylinder with shoulder bulge + hips, skinned by Y to hips/spine/chest + thighs/shins.
-  const height = P.height;
-  const geo = new THREE.CylinderGeometry(P.chest*0.55, P.hip*0.62, height*0.92, 18, 26, true);
-  // scale a bit for shoulders
-  const pos = geo.attributes.position;
-  for (let i=0; i<pos.count; i++) {
-    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-    const ny = (y / (height*0.46)); // -1..1
-    let sx = 1, sz = 1;
-    // shoulders
-    if (ny > 0.45) { sx = 1.18; sz = 1.10; }
-    // chest
-    if (ny > 0.15 && ny <= 0.45) { sx = 1.08; sz = 1.06; }
-    // hips
-    if (ny < -0.10 && ny > -0.55) { sx = 1.05; sz = 1.05; }
-    pos.setXYZ(i, x*sx, y, z*sz);
-  }
-  pos.needsUpdate = true;
-  geo.computeVertexNormals();
+  // --- Skinned Mesh (simple “pill body” but skinned so it animates) ---
+  const geom = buildPillBodyGeometry(THREE, {
+    height: H,
+    shoulderW,
+    hipW,
+    chestDepth: 0.22,
+    hipDepth: 0.22
+  });
 
-  // UVs: simple cylindrical wrap
-  // (CylinderGeometry already provides uv, good enough for this "all-over suit" texture)
+  // load texture (optional)
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x10121a,
+    roughness: 0.72,
+    metalness: 0.12
+  });
 
-  // Skinning: assign by Y bands
-  const skinIndex = [];
-  const skinWeight = [];
-  const v = new THREE.Vector3();
-  for (let i=0; i<pos.count; i++) {
-    v.set(pos.getX(i), pos.getY(i) + hips.position.y, pos.getZ(i)); // body sits around hips
-    const y = v.y;
-
-    // bone indices:
-    // 0 hips, 1 spine, 2 chest, 5 lThigh, 6 lShin, 8 rThigh, 9 rShin
-    let a=0, b=1, wa=1, wb=0;
-
-    if (y > hips.position.y + 0.40) { a=2; b=1; wb=0.15; wa=0.85; }
-    else if (y > hips.position.y + 0.18) { a=1; b=0; wb=0.25; wa=0.75; }
-    else if (y > hips.position.y - 0.05) { a=0; b=1; wb=0.10; wa=0.90; }
-    else {
-      // legs: split left/right by X
-      const isLeft = v.x < 0;
-      if (y > hips.position.y - 0.48) { a = isLeft ? 5 : 8; b = 0; wb=0.10; wa=0.90; }
-      else { a = isLeft ? 6 : 9; b = isLeft ? 5 : 8; wb=0.20; wa=0.80; }
-    }
-
-    skinIndex.push(a, b, 0, 0);
-    skinWeight.push(wa, wb, 0, 0);
+  if (textureUrl) {
+    const loader = new THREE.TextureLoader();
+    loader.load(
+      textureUrl,
+      (t) => {
+        t.colorSpace = THREE.SRGBColorSpace;
+        mat.map = t;
+        mat.needsUpdate = true;
+      },
+      undefined,
+      () => {}
+    );
   }
 
-  geo.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(skinIndex, 4));
-  geo.setAttribute("skinWeight", new THREE.Float32BufferAttribute(skinWeight, 4));
+  const skinned = new THREE.SkinnedMesh(geom, mat);
+  skinned.name = "AvatarSkinnedBody";
 
-  const skinned = new THREE.SkinnedMesh(geo, suitMat);
-  skinned.name = "BotBody";
+  // bind skeleton
+  const boneList = [
+    hips, spine, chest, neck, head,
+    lUpperArm, lLowerArm, lHand,
+    rUpperArm, rLowerArm, rHand,
+    lUpperLeg, lLowerLeg, lFoot,
+    rUpperLeg, rLowerLeg, rFoot
+  ];
+
+  const skeleton = new THREE.Skeleton(boneList);
   skinned.add(hips);
   skinned.bind(skeleton);
 
-  root.add(skinned);
+  // helper pose controls + mixer
+  const mixer = new THREE.AnimationMixer(skinned);
 
-  // ---------- head ----------
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.16, 16, 16),
-    new THREE.MeshStandardMaterial({ color: skinTone, roughness: 0.85, metalness: 0.0 })
-  );
-  head.position.y = headB.getWorldPosition(new THREE.Vector3()).y;
-  head.name = "BotHead";
-  headB.add(head);
-
-  // ---------- simple hands ----------
-  const handMat = new THREE.MeshStandardMaterial({ color: skinTone, roughness: 0.9 });
-  const handGeo = new THREE.SphereGeometry(0.05, 12, 12);
-
-  const lHand = new THREE.Mesh(handGeo, handMat); lHand.position.set(-0.22, -0.10, 0); lHand.name="lHand";
-  const rHand = new THREE.Mesh(handGeo, handMat); rHand.position.set( 0.22, -0.10, 0); rHand.name="rHand";
-  lForeArm.add(lHand);
-  rForeArm.add(rHand);
-
-  // ---------- shoes (simple) ----------
-  const shoeMat = new THREE.MeshStandardMaterial({ color: 0x0f121a, roughness: 0.95 });
-  const shoeGeo = new THREE.BoxGeometry(0.12, 0.06, 0.26);
-
-  const lShoe = new THREE.Mesh(shoeGeo, shoeMat); lShoe.position.set(0, -0.02, 0.10); lShoe.name="lShoe";
-  const rShoe = new THREE.Mesh(shoeGeo, shoeMat); rShoe.position.set(0, -0.02, 0.10); rShoe.name="rShoe";
-  lFoot.add(lShoe);
-  rFoot.add(rShoe);
-
-  // ---------- animator ----------
-  const state = { t: 0, walking: false, walkPhase: Math.random()*Math.PI*2 };
-  root.userData.avatar = {
+  const api = {
+    root,
+    skinned,
     skeleton,
-    bones: { hips, spine, chest, neck, headB, lThigh, lShin, lFoot, rThigh, rShin, rFoot, lUpperArm, lForeArm, rUpperArm, rForeArm },
-    state,
-    setWalking(v) { state.walking = !!v; },
-    update(dt) {
-      state.t += dt;
-      const t = state.t;
-
-      // idle breathing
-      spine.rotation.x = Math.sin(t*1.6) * 0.03;
-      chest.rotation.x = Math.sin(t*1.3+1.0) * 0.02;
-      headB.rotation.y = Math.sin(t*0.9) * 0.10;
-
-      // subtle arm sway
-      lUpperArm.rotation.z =  Math.sin(t*1.2) * 0.10;
-      rUpperArm.rotation.z = -Math.sin(t*1.2) * 0.10;
-
-      // walk cycle
-      const w = state.walking ? 1 : 0;
-      const phase = t*4.2 + state.walkPhase;
-
-      lThigh.rotation.x =  Math.sin(phase) * 0.55 * w;
-      rThigh.rotation.x = -Math.sin(phase) * 0.55 * w;
-
-      lShin.rotation.x  = Math.max(0, -Math.sin(phase)) * 0.55 * w;
-      rShin.rotation.x  = Math.max(0,  Math.sin(phase)) * 0.55 * w;
-
-      // slight bounce
-      hips.position.y = 0.86 + Math.abs(Math.sin(phase)) * 0.02 * w;
-    }
+    bones,
+    mixer,
+    actions: {},
+    setPose,
+    playWalk
   };
 
-  // scale to game units (match your current bot scale)
-  root.scale.set(1, 1, 1);
+  // attach mesh under root
+  root.add(skinned);
 
-  return root;
+  // default pose
+  setPose("idle");
+
+  // build a simple “walk” clip so bots can move without extra assets
+  api.actions.walk = mixer.clipAction(makeWalkClip(THREE, bones));
+  api.actions.idle = mixer.clipAction(makeIdleClip(THREE, bones));
+  api.actions.idle.play();
+
+  return api;
+
+  // ---- functions ----
+  function setPose(mode = "idle") {
+    // mild “natural” arms
+    bones.LeftUpperArm.rotation.z = 0.10;
+    bones.RightUpperArm.rotation.z = -0.10;
+    bones.LeftLowerArm.rotation.z = 0.05;
+    bones.RightLowerArm.rotation.z = -0.05;
+
+    if (mode === "sit") {
+      // sit: rotate legs forward + lower hips slightly
+      bones.Hips.position.y = 0.88;
+      bones.LeftUpperLeg.rotation.x = -1.10;
+      bones.RightUpperLeg.rotation.x = -1.10;
+      bones.LeftLowerLeg.rotation.x = 1.35;
+      bones.RightLowerLeg.rotation.x = 1.35;
+      bones.LeftFoot.rotation.x = -0.25;
+      bones.RightFoot.rotation.x = -0.25;
+    } else {
+      // stand
+      bones.Hips.position.y = 0.95;
+      bones.LeftUpperLeg.rotation.x = 0;
+      bones.RightUpperLeg.rotation.x = 0;
+      bones.LeftLowerLeg.rotation.x = 0;
+      bones.RightLowerLeg.rotation.x = 0;
+      bones.LeftFoot.rotation.x = 0;
+      bones.RightFoot.rotation.x = 0;
+    }
+  }
+
+  function playWalk(on = true) {
+    const walk = api.actions.walk;
+    const idle = api.actions.idle;
+    if (!walk || !idle) return;
+
+    if (on) {
+      idle.fadeOut(0.15);
+      walk.reset().fadeIn(0.15).play();
+    } else {
+      walk.fadeOut(0.15);
+      idle.reset().fadeIn(0.15).play();
+    }
+  }
 }
+
+// ---------- Geometry: pill-ish torso + limbs ----------
+function buildPillBodyGeometry(THREE, opts) {
+  const {
+    height = 1.68,
+    shoulderW = 0.40,
+    hipW = 0.34,
+    chestDepth = 0.22,
+    hipDepth = 0.22
+  } = opts || {};
+
+  // A single geometry that looks like a fitted suit body.
+  // We skin it with basic weights (hips/chest/legs/arms) so it animates.
+  const segmentsH = 18;
+  const segmentsR = 20;
+
+  // Use lathe profile for a smooth “suit” silhouette
+  const pts = [];
+  const y0 = 0.05;
+  const y1 = height - 0.15;
+
+  for (let i = 0; i <= segmentsH; i++) {
+    const t = i / segmentsH;
+    const y = THREE.MathUtils.lerp(y0, y1, t);
+
+    // radius curve: hips -> waist -> chest
+    const waist = 0.14;
+    const hip = hipW * 0.23;
+    const chest = shoulderW * 0.23;
+
+    let r;
+    if (t < 0.35) {
+      r = THREE.MathUtils.lerp(hip, waist, t / 0.35);
+    } else if (t < 0.70) {
+      r = waist;
+    } else {
+      r = THREE.MathUtils.lerp(waist, chest, (t - 0.70) / 0.30);
+    }
+
+    pts.push(new THREE.Vector2(r, y));
+  }
+
+  const geom = new THREE.LatheGeometry(pts, segmentsR);
+  geom.computeVertexNormals();
+
+  // add UVs that behave like a suit texture
+  // LatheGeometry already has UVs, but we’ll keep them as-is.
+
+  // Skin attributes
+  const pos = geom.attributes.position;
+  const skinIndices = [];
+  const skinWeights = [];
+
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+
+    // bone index map in createAvatarRig() order:
+    // 0 Hips, 1 Spine, 2 Chest, 3 Neck, 4 Head,
+    // 5 LUA, 6 LLA, 7 LH, 8 RUA, 9 RLA, 10 RH,
+    // 11 LUL, 12 LLL, 13 LF, 14 RUL, 15 RLL, 16 RF
+
+    // weights by height (simple but good enough to animate)
+    let i0 = 0, i1 = 1;
+    let w0 = 1, w1 = 0;
+
+    if (y < 0.55) {
+      i0 = 0; i1 = 1;
+      w0 = 0.85; w1 = 0.15;
+    } else if (y < 1.05) {
+      i0 = 1; i1 = 2;
+      w0 = 0.45; w1 = 0.55;
+    } else if (y < 1.30) {
+      i0 = 2; i1 = 3;
+      w0 = 0.75; w1 = 0.25;
+    } else {
+      i0 = 3; i1 = 4;
+      w0 = 0.85; w1 = 0.15;
+    }
+
+    skinIndices.push(i0, i1, 0, 0);
+    skinWeights.push(w0, w1, 0, 0);
+  }
+
+  geom.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(skinIndices, 4));
+  geom.setAttribute("skinWeight", new THREE.Float32BufferAttribute(skinWeights, 4));
+
+  return geom;
+}
+
+// ---------- Procedural “walk” animation ----------
+function makeWalkClip(THREE, bones) {
+  const times = [0, 0.25, 0.5, 0.75, 1.0];
+
+  // legs swing
+  const legSwing = [0, 0.55, 0, -0.55, 0];
+  const invSwing = [0, -0.55, 0, 0.55, 0];
+
+  const tracks = [
+    new THREE.NumberKeyframeTrack("Hips.position[y]", times, [0.95, 0.955, 0.95, 0.945, 0.95]),
+
+    new THREE.NumberKeyframeTrack("LeftUpperLeg.rotation[x]", times, legSwing),
+    new THREE.NumberKeyframeTrack("RightUpperLeg.rotation[x]", times, invSwing),
+
+    new THREE.NumberKeyframeTrack("LeftLowerLeg.rotation[x]", times, [0.05, 0.25, 0.05, 0.15, 0.05]),
+    new THREE.NumberKeyframeTrack("RightLowerLeg.rotation[x]", times, [0.05, 0.15, 0.05, 0.25, 0.05]),
+
+    // arms opposite
+    new THREE.NumberKeyframeTrack("LeftUpperArm.rotation[x]", times, invSwing.map(v => v * 0.45)),
+    new THREE.NumberKeyframeTrack("RightUpperArm.rotation[x]", times, legSwing.map(v => v * 0.45)),
+  ];
+
+  const clip = new THREE.AnimationClip("walk", 1.0, tracks);
+  clip.optimize();
+  return clip;
+}
+
+function makeIdleClip(THREE, bones) {
+  const times = [0, 1.0, 2.0];
+  const tracks = [
+    new THREE.NumberKeyframeTrack("Chest.rotation[x]", times, [0.01, -0.01, 0.01]),
+    new THREE.NumberKeyframeTrack("Hips.position[y]", times, [0.95, 0.952, 0.95]),
+  ];
+  const clip = new THREE.AnimationClip("idle", 2.0, tracks);
+  clip.optimize();
+  return clip;
+        }

@@ -1,240 +1,248 @@
-// /js/main.js — Scarlett Poker VR Boot v10.7 (FULL STABLE + PERMA FIXES)
-// Fixes / upgrades:
-// - Controllers + grips parented to PlayerRig (prevents "controller got away from me")
-// - Bots get player rig + camera refs for billboarding (tags/cards always face you)
-// - Hands import is resilient (won't crash if hands.js export name changes)
-// - Rebind on XR session start/end (Quest can change inputSources)
-// - dt passed everywhere
+// /js/hands.js — Scarlett Hands v2.0 (GitHub Pages safe)
+// Exports: HandsSystem AND Hands (compat forever)
+// Purpose:
+// - Visible glove hands for controller mode AND hand-tracking mode.
+// - Never crash if hand-tracking isn't available.
+// - Fixes missing clamp() bug from v1.0.
+// - Works with main.js importing either:
+//    import { HandsSystem } from "./hands.js";
+//   OR older:
+//    import { Hands } from "./hands.js";
 
-import * as THREE from "three";
-import { VRButton } from "three/addons/webxr/VRButton.js";
-import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
+function _clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
-import { initWorld } from "./world.js";
-import { Controls } from "./controls.js";
-import { Teleport } from "./teleport.js";
-import { DealingMix } from "./dealingMix.js";
+function _makeGlove(THREE, color = 0x0b0b0f, accent = 0xff2d7a) {
+  const g = new THREE.Group();
+  g.name = "Glove";
 
-// IMPORTANT: we load hands in a safe way (prevents "export mismatch" crash)
-async function safeLoadHands() {
+  const mat = new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.55,
+    metalness: 0.10
+  });
+
+  const accentMat = new THREE.MeshStandardMaterial({
+    color: accent,
+    roughness: 0.35,
+    metalness: 0.20,
+    emissive: accent,
+    emissiveIntensity: 0.15
+  });
+
+  // palm
+  const palm = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.018, 0.08), mat);
+  palm.position.set(0, 0, 0);
+  g.add(palm);
+
+  // knuckle ridge
+  const ridge = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.01, 0.05), accentMat);
+  ridge.position.set(0, 0.012, 0.012);
+  g.add(ridge);
+
+  // fingers (4)
+  for (let i = 0; i < 4; i++) {
+    const f = new THREE.Mesh(new THREE.CapsuleGeometry(0.007, 0.035, 6, 10), mat);
+    f.rotation.x = Math.PI / 2;
+    f.position.set(-0.018 + i * 0.012, 0.010, 0.042);
+    g.add(f);
+  }
+
+  // thumb
+  const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.007, 0.03, 6, 10), mat);
+  thumb.rotation.z = -0.6;
+  thumb.rotation.x = Math.PI / 2;
+  thumb.position.set(0.03, 0.003, 0.02);
+  g.add(thumb);
+
+  // pinch orb
+  const orb = new THREE.Mesh(
+    new THREE.SphereGeometry(0.012, 12, 10),
+    new THREE.MeshStandardMaterial({
+      color: accent,
+      emissive: accent,
+      emissiveIntensity: 0.35,
+      roughness: 0.25
+    })
+  );
+  orb.position.set(0.0, 0.015, 0.065);
+  orb.name = "pinch_orb";
+  orb.visible = false;
+  g.add(orb);
+
+  g.userData.pinchOrb = orb;
+
+  return g;
+}
+
+function _applyDefaultPose(handObj, isLeft) {
+  // Base placement relative to the tracked/controller target
+  handObj.scale.setScalar(1.0);
+
+  // mild rotation bias so glove reads better in VR
+  handObj.rotation.set(0, 0, 0);
+
+  // offset: left/right mirrored
+  handObj.position.set(isLeft ? -0.02 : 0.02, -0.01, -0.03);
+}
+
+function _updateFromTarget(THREE, handObj, targetObj, isLeft) {
+  if (!handObj || !targetObj) return;
+
+  // world pose from target
+  targetObj.getWorldPosition(handObj.position);
+  targetObj.getWorldQuaternion(handObj.quaternion);
+
+  // Small offset so glove sits nicely *in front* of target pose
+  // Mirror x for left/right so they feel symmetric
+  handObj.translateZ(-0.03);
+  handObj.translateY(-0.01);
+  handObj.translateX(isLeft ? -0.01 : 0.01);
+}
+
+function _updatePinch(THREE, xrHand) {
   try {
-    const mod = await import("./hands.js");
-    // Accept either HandsSystem (preferred) or Hands (older)
-    return mod.HandsSystem || mod.Hands || null;
-  } catch (e) {
-    console.warn("[main] hands import failed:", e?.message || e);
-    return null;
+    const thumb = xrHand.joints?.["thumb-tip"];
+    const index = xrHand.joints?.["index-finger-tip"];
+    if (!thumb || !index) return 0;
+
+    const tp = new THREE.Vector3();
+    const ip = new THREE.Vector3();
+    thumb.getWorldPosition(tp);
+    index.getWorldPosition(ip);
+
+    const d = tp.distanceTo(ip);
+    // pinch when close
+    return _clamp(1.0 - (d - 0.01) / 0.03, 0, 1);
+  } catch {
+    return 0;
   }
 }
 
-// ---------- LOG ----------
-const logEl = document.getElementById("log");
-const log = (m, ...rest) => {
-  console.log(m, ...rest);
-  if (logEl) logEl.textContent += "\n" + String(m);
-};
+function _createSystem() {
+  return {
+    init({ THREE, scene, renderer, log = console.log } = {}) {
+      const L = (...a) => { try { log(...a); } catch { console.log(...a); } };
 
-const BOOT_V = window.__BUILD_V || Date.now().toString();
-log("BOOT v=" + BOOT_V);
-log("location.href=" + location.href);
-log("navigator.xr=" + !!navigator.xr);
+      const root = new THREE.Group();
+      root.name = "HandsSystem";
+      scene.add(root);
 
-// ---------- SCENE ----------
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x020205);
-scene.fog = new THREE.Fog(0x020205, 3, 85);
+      const state = {
+        enabled: true,
+        t: 0,
+        hands: [
+          { index: 0, obj: null, type: "unknown", pinch: 0 }, // left
+          { index: 1, obj: null, type: "unknown", pinch: 0 }  // right
+        ],
+        xrHands: [null, null],
+        grips: [null, null],
+        _addedHandsToScene: [false, false],
+      };
 
-// ---------- CAMERA ----------
-const camera = new THREE.PerspectiveCamera(
-  70,
-  window.innerWidth / window.innerHeight,
-  0.05,
-  300
-);
+      // Create gloves
+      const left = _makeGlove(THREE, 0x0b0b0f, 0xff2d7a);
+      const right = _makeGlove(THREE, 0x0b0b0f, 0x7fe7ff);
+      left.name = "HandLeft";
+      right.name = "HandRight";
 
-// ---------- RENDERER ----------
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.xr.enabled = true;
+      root.add(left, right);
+      state.hands[0].obj = left;
+      state.hands[1].obj = right;
 
-try { renderer.xr.setReferenceSpaceType("local-floor"); } catch {}
+      _applyDefaultPose(left, true);
+      _applyDefaultPose(right, false);
 
-document.body.appendChild(renderer.domElement);
-document.body.appendChild(VRButton.createButton(renderer));
+      function bindXRHands() {
+        try {
+          const s = renderer?.xr?.getSession?.();
+          if (!s) return;
 
-// ---------- PLAYER RIG ----------
-const player = new THREE.Group();
-player.name = "PlayerRig";
-player.add(camera);
-scene.add(player);
+          for (let i = 0; i < 2; i++) {
+            const h = renderer.xr.getHand(i);
+            if (h && !state.xrHands[i]) {
+              state.xrHands[i] = h;
 
-// spawn position (X/Z); keep Y at 0 for local-floor
-player.position.set(0, 0, 3.6);
-camera.position.set(0, 1.65, 0);
+              // Only add if it isn't already parented somewhere
+              // (Three sometimes returns an object already attached)
+              if (!h.parent && !state._addedHandsToScene[i]) {
+                scene.add(h);
+                state._addedHandsToScene[i] = true;
+              }
 
-// ---------- LIGHTING (global baseline) ----------
-scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.25));
-const dir = new THREE.DirectionalLight(0xffffff, 1.2);
-dir.position.set(7, 12, 6);
-scene.add(dir);
-scene.add(new THREE.AmbientLight(0xffffff, 0.12));
+              L("[Hands] XR hand bound:", i);
+            }
+          }
+        } catch {}
+      }
 
-// ---------- XR CONTROLLERS (parent to rig) ----------
-const controllerModelFactory = new XRControllerModelFactory();
-const controllers = [];
-const grips = [];
+      function bindGrips() {
+        try {
+          for (let i = 0; i < 2; i++) {
+            const g = renderer.xr.getControllerGrip(i);
+            if (g && !state.grips[i]) state.grips[i] = g;
+          }
+        } catch {}
+      }
 
-function makeLaser() {
-  const geo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, 0, -1),
-  ]);
-  const mat = new THREE.LineBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.95 });
-  const line = new THREE.Line(geo, mat);
-  line.name = "Laser";
-  line.scale.z = 12;
-  return line;
-}
+      function update(dt) {
+        if (!state.enabled) return;
+        state.t += dt;
 
-// NOTE: Parent controllers/grips to player rig (NOT scene).
-// This stabilizes “where my controller is” across ref-space/session changes.
-for (let i = 0; i < 2; i++) {
-  const c = renderer.xr.getController(i);
-  c.name = "Controller" + i;
-  c.add(makeLaser());
-  player.add(c);
-  controllers.push(c);
+        bindXRHands();
+        bindGrips();
 
-  const g = renderer.xr.getControllerGrip(i);
-  g.name = "Grip" + i;
-  g.add(controllerModelFactory.createControllerModel(g));
-  player.add(g);
-  grips.push(g);
-}
+        // Left=0, Right=1 (Three convention for getHand/getControllerGrip)
+        for (let i = 0; i < 2; i++) {
+          const isLeft = (i === 0);
+          const handObj = state.hands[i].obj;
+          const xrHand = state.xrHands[i];
+          const grip = state.grips[i];
 
-log("[main] controllers ready ✅ (parented to rig)");
+          if (xrHand) {
+            state.hands[i].type = "hand-tracking";
 
-// ---------- WORLD ----------
-const world = await initWorld({ THREE, scene, log, v: BOOT_V });
+            _updateFromTarget(THREE, handObj, xrHand, isLeft);
 
-if (world?.tableFocus) {
-  camera.lookAt(world.tableFocus.x, 1.0, world.tableFocus.z);
-}
-log("[main] world loaded ✅");
+            const p = _updatePinch(THREE, xrHand);
+            state.hands[i].pinch = p;
 
-// Connect optional world features (teleporter machine etc.)
-try { world?.connect?.({ playerRig: player, controllers }); } catch {}
+            const orb = handObj?.userData?.pinchOrb;
+            if (orb) {
+              orb.visible = p > 0.65;
+              orb.scale.setScalar(0.8 + p * 0.6);
+            }
+          } else if (grip) {
+            state.hands[i].type = "controller";
 
-// ---------- CONTROLS ----------
-const controls = Controls.init({
-  THREE,
-  renderer,
-  camera,
-  player,
-  controllers,
-  grips,
-  log,
-  world
-});
+            _updateFromTarget(THREE, handObj, grip, isLeft);
 
-// ---------- BOTS: give them player rig/camera refs for billboarding ----------
-function bindBots() {
-  try {
-    // world.bots is assigned in world.js after loading bots.js
-    if (world?.bots?.setPlayerRig) {
-      world.bots.setPlayerRig(player, camera);
-      log("[main] bots bound to playerRig ✅");
+            // tiny idle
+            const bob = Math.sin(state.t * 2.2 + i) * 0.002;
+            handObj.position.y += bob;
+
+            const orb = handObj?.userData?.pinchOrb;
+            if (orb) orb.visible = false;
+          } else {
+            state.hands[i].type = "unbound";
+            const orb = handObj?.userData?.pinchOrb;
+            if (orb) orb.visible = false;
+          }
+        }
+      }
+
+      function setEnabled(v) {
+        state.enabled = !!v;
+        root.visible = state.enabled;
+      }
+
+      L("[Hands] init ✅ v2.0");
+      return { update, setEnabled, root };
     }
-  } catch (e) {
-    console.warn("[main] bots bind failed:", e?.message || e);
-  }
-}
-bindBots();
-
-// ---------- HANDS (safe) ----------
-let hands = null;
-const HandsModule = await safeLoadHands();
-if (HandsModule?.init) {
-  try {
-    hands = HandsModule.init({ THREE, scene, renderer, log });
-    log("[main] hands ready ✅");
-  } catch (e) {
-    console.warn("[main] hands init failed:", e?.message || e);
-  }
-} else {
-  log("[main] hands skipped (module missing or wrong export)");
+  };
 }
 
-// ---------- TELEPORT ----------
-const teleport = Teleport.init({
-  THREE,
-  scene,
-  renderer,
-  camera,
-  player,
-  controllers,
-  log,
-  world
-});
+// Primary export (new)
+export const HandsSystem = _createSystem();
 
-// ---------- DEALING ----------
-const dealing = DealingMix.init({
-  THREE,
-  scene,
-  log,
-  world
-});
-dealing.startHand?.();
-
-// ---------- XR SESSION REBIND (Quest can swap inputSources) ----------
-renderer.xr.addEventListener("sessionstart", () => {
-  log("[main] XR sessionstart ✅");
-  // re-bind bots (billboarding ref)
-  bindBots();
-  // hands module may need to rebind XR hands/grips internally; we just keep update loop running
-});
-
-renderer.xr.addEventListener("sessionend", () => {
-  log("[main] XR sessionend ✅");
-  // desktop mode continues; no special handling required
-});
-
-// ---------- ACTION EVENT (sit/join later) ----------
-window.addEventListener("scarlett-action", () => {
-  try { world?.onAction?.({ player, camera }); } catch {}
-});
-
-// ---------- RECENTER ----------
-window.addEventListener("scarlett-recenter", () => {
-  player.position.set(0, 0, 3.6);
-  player.rotation.set(0, 0, 0);
-  if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.0, world.tableFocus.z);
-  log("[main] recentered ✅");
-});
-
-// ---------- RESIZE ----------
-window.addEventListener("resize", () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
-
-// ---------- LOOP ----------
-let last = performance.now();
-
-renderer.setAnimationLoop(() => {
-  const now = performance.now();
-  const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
-
-  try { world?.tick?.(dt); } catch (e) { console.error(e); }
-  try { controls?.update?.(dt); } catch (e) { console.error(e); }
-  try { teleport?.update?.(dt); } catch (e) { console.error(e); }
-  try { dealing?.update?.(dt); } catch (e) { console.error(e); }
-  try { hands?.update?.(dt); } catch (e) { console.error(e); }
-
-  renderer.render(scene, camera);
-});
-
-log("[main] ready ✅");
+// Compat export (old)
+export const Hands = HandsSystem;

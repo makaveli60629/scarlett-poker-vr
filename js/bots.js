@@ -1,244 +1,193 @@
-// /js/bots.js — Bots 9.0 (shirts + chip tags + lobby wander)
-// MUST export Bots.init for world.js to detect it.
+// /js/bots.js — Scarlett VR Poker Bots (seated + lobby walkers + shirt + name tags + chip stacks)
+// ✅ NO three import — THREE is passed in.
 
 export const Bots = {
-  scene: null,
-  getSeats: null,
-  getLobbyZone: null,
-  tableFocus: null,
-
   bots: [],
-  timer: 0,
+  seats: [],
+  lobbyZone: null,
+  tableFocus: null,
+  chipsBySeat: [],
+  turnRingBySeat: [],
+  _t: 0,
 
   init({ THREE, scene, getSeats, getLobbyZone, tableFocus }) {
-    this.THREE = THREE;
-    this.scene = scene;
-    this.getSeats = getSeats;
-    this.getLobbyZone = getLobbyZone;
+    this.seats = getSeats();
+    this.lobbyZone = getLobbyZone();
     this.tableFocus = tableFocus;
-
-    const seats = this.getSeats?.() || [];
-    if (!seats.length) {
-      console.warn("[bots] no seats provided");
-      return;
-    }
-
     this.bots = [];
-    for (let i = 0; i < 8; i++) {
-      const bot = this._makeBot(i);
-      bot.userData.bot = {
-        id: i,
-        seated: false,
-        target: null,
-        stack: 1500 + Math.floor(Math.random() * 1500),
-      };
-      this.scene.add(bot);
-      this.bots.push(bot);
-    }
+    this.chipsBySeat = [];
+    this.turnRingBySeat = [];
+    this._t = 0;
 
-    this._seatBots();
-    console.log("[bots] init ok ✅ bots=" + this.bots.length);
-  },
+    const texLoader = new THREE.TextureLoader();
+    let shirtTex = null;
+    try {
+      shirtTex = texLoader.load("assets/textures/shirt_diffuse.png", (t) => {
+        t.colorSpace = THREE.SRGBColorSpace;
+      }, undefined, () => {});
+    } catch {}
 
-  _makeBot(i) {
-    const THREE = this.THREE;
-    const g = new THREE.Group();
-    g.name = `Bot_${i}`;
+    const headMat = new THREE.MeshStandardMaterial({ color: 0xf2d6c9, roughness: 0.85 });
+    const pantsMat = new THREE.MeshStandardMaterial({ color: 0x11131a, roughness: 1.0 });
 
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: i % 2 ? 0x2bd7ff : 0xff2bd6,
-      roughness: 0.85,
-      metalness: 0.05,
-    });
+    const mkNameTag = (name) => {
+      const c = document.createElement("canvas");
+      c.width = 512; c.height = 256;
+      const ctx = c.getContext("2d");
+      ctx.clearRect(0,0,c.width,c.height);
+      ctx.fillStyle = "rgba(0,0,0,0.65)";
+      ctx.fillRect(30, 60, 452, 140);
+      ctx.strokeStyle = "rgba(180,107,255,0.85)";
+      ctx.lineWidth = 8;
+      ctx.strokeRect(30, 60, 452, 140);
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 64px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(name, 256, 130);
 
-    const headMat = new THREE.MeshStandardMaterial({
-      color: 0xf2d6c9,
-      roughness: 0.85,
-    });
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false });
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.45), mat);
+      plane.renderOrder = 9999;
+      return plane;
+    };
 
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.20, 0.60, 7, 14), bodyMat);
-    torso.position.y = 0.58;
-    torso.name = "torso";
-    g.add(torso);
+    const mkChipStack = () => {
+      const g = new THREE.Group();
+      const chipMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.0 });
+      for (let i = 0; i < 12; i++) {
+        const chip = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.02, 18), chipMat);
+        chip.position.y = i * 0.021;
+        chip.rotation.y = (i * 0.4) % Math.PI;
+        g.add(chip);
+      }
+      return g;
+    };
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.165, 16, 16), headMat);
-    head.position.y = 1.28;
-    head.name = "head";
-    g.add(head);
+    const mkTurnRing = () => {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.18, 0.26, 28),
+        new THREE.MeshBasicMaterial({ color: 0xb46bff, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.visible = false;
+      return ring;
+    };
 
-    // Shirt logo (canvas texture)
-    const logoTex = makeLogoTexture(THREE, "SCARLETT");
-    const logo = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.24, 0.12),
-      new THREE.MeshBasicMaterial({ map: logoTex, transparent: true })
-    );
-    logo.position.set(0, 1.02, 0.205);
-    logo.name = "shirtLogo";
-    g.add(logo);
+    const makeBot = (i) => {
+      const g = new THREE.Group();
 
-    // Chip tag above head (sprite)
-    const tag = makeChipTag(THREE, "CHIPS: 0000");
-    tag.position.set(0, 1.62, 0);
-    tag.name = "chipTag";
-    g.add(tag);
+      const shirtMat = new THREE.MeshStandardMaterial({
+        color: i % 2 ? 0x2bd7ff : 0xff2bd6,
+        map: shirtTex || null,
+        roughness: 0.95,
+        metalness: 0.0
+      });
 
-    return g;
-  },
+      // torso (shirt-friendly)
+      const torso = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.28, 0.20, 0.72, 18, 1, true),
+        shirtMat
+      );
+      torso.position.y = 0.92;
+      g.add(torso);
 
-  _seatBots() {
-    const seats = this.getSeats?.() || [];
+      // shoulders
+      const sL = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 14), shirtMat);
+      const sR = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 14), shirtMat);
+      sL.position.set(-0.25, 1.18, 0.02);
+      sR.position.set( 0.25, 1.18, 0.02);
+      g.add(sL, sR);
+
+      // head
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 14), headMat);
+      head.position.y = 1.42;
+      g.add(head);
+
+      // hips
+      const hips = new THREE.Mesh(new THREE.CylinderGeometry(0.20, 0.22, 0.22, 14), pantsMat);
+      hips.position.y = 0.55;
+      g.add(hips);
+
+      // name tag
+      const tag = mkNameTag(`BOT ${i+1}`);
+      tag.position.set(0, 1.85, 0);
+      g.add(tag);
+
+      g.userData.bot = { id: i, seated: false, target: null, seatIndex: -1 };
+      scene.add(g);
+      return g;
+    };
+
+    for (let i = 0; i < 8; i++) this.bots.push(makeBot(i));
+
+    // seat 6, lobby 2
     for (let i = 0; i < this.bots.length; i++) {
       const b = this.bots[i];
-      const d = b.userData.bot;
-
-      if (i < Math.min(6, seats.length)) {
-        const s = seats[i];
+      if (i < 6) {
+        const s = this.seats[i];
         b.position.set(s.position.x, 0, s.position.z);
         b.rotation.y = s.yaw;
-        d.seated = true;
+        b.userData.bot.seated = true;
+        b.userData.bot.seatIndex = i;
+
+        // chip stack on table (in front of each seat)
+        const chip = mkChipStack();
+        const dirToTable = new THREE.Vector3(this.tableFocus.x - s.position.x, 0, this.tableFocus.z - s.position.z).normalize();
+        const chipPos = new THREE.Vector3(
+          s.position.x + dirToTable.x * 0.55,
+          1.02,
+          s.position.z + dirToTable.z * 0.55
+        );
+        chip.position.copy(chipPos);
+        scene.add(chip);
+        this.chipsBySeat[i] = chip;
+
+        // turn ring on felt
+        const tr = mkTurnRing();
+        tr.position.set(chipPos.x, 1.03, chipPos.z);
+        scene.add(tr);
+        this.turnRingBySeat[i] = tr;
       } else {
-        d.seated = false;
-        this._sendToLobby(b);
+        b.userData.bot.seated = false;
+        b.position.set((Math.random() * 10) - 5, 0, 9 + Math.random() * 3);
+        b.userData.bot.target = b.position.clone();
       }
     }
   },
 
-  _sendToLobby(bot) {
-    const THREE = this.THREE;
-    const zone = this.getLobbyZone?.();
-    const x = zone ? THREE.MathUtils.lerp(zone.min.x, zone.max.x, Math.random()) : (Math.random() * 8 - 4);
-    const z = zone ? THREE.MathUtils.lerp(zone.min.z, zone.max.z, Math.random()) : (10 + Math.random() * 3);
-    bot.position.set(x, 0, z);
-    bot.userData.bot.target = bot.position.clone();
-  },
-
-  _pickLobbyTarget() {
-    const THREE = this.THREE;
-    const zone = this.getLobbyZone?.();
-    const x = zone ? THREE.MathUtils.lerp(zone.min.x, zone.max.x, Math.random()) : (Math.random() * 10 - 5);
-    const z = zone ? THREE.MathUtils.lerp(zone.min.z, zone.max.z, Math.random()) : (10 + Math.random() * 4);
-    return new THREE.Vector3(x, 0, z);
-  },
-
-  setBotStack(id, amount) {
-    const b = this.bots.find(x => x.userData.bot.id === id);
-    if (!b) return;
-
-    b.userData.bot.stack = Math.max(0, Math.floor(amount));
-    const tag = b.getObjectByName("chipTag");
-    if (tag?.material?.map) {
-      tag.material.map.dispose?.();
-      tag.material.map = makeChipTagTexture(this.THREE, `CHIPS: ${b.userData.bot.stack}`);
-      tag.material.needsUpdate = true;
+  setTurn(seatIndex) {
+    for (let i = 0; i < this.turnRingBySeat.length; i++) {
+      const r = this.turnRingBySeat[i];
+      if (!r) continue;
+      r.visible = (i === seatIndex);
     }
   },
 
   update(dt) {
-    if (!this.bots.length) return;
-    this.timer += dt;
+    this._t += dt;
 
+    // lobby walkers
     for (const b of this.bots) {
       const d = b.userData.bot;
+      if (d.seated) continue;
 
-      // seated bots face table
-      if (d.seated && this.tableFocus) {
-        b.lookAt(this.tableFocus.x, 0.9, this.tableFocus.z);
+      if (!d.target || b.position.distanceTo(d.target) < 0.2) {
+        const z = THREE.MathUtils.lerp(this.lobbyZone.min.z, this.lobbyZone.max.z, Math.random());
+        const x = THREE.MathUtils.lerp(this.lobbyZone.min.x, this.lobbyZone.max.x, Math.random());
+        d.target = new THREE.Vector3(x, 0, z);
       }
 
-      // lobby wander
-      if (!d.seated) {
-        if (!d.target || b.position.distanceTo(d.target) < 0.2) {
-          d.target = this._pickLobbyTarget();
-        }
-        const dir = d.target.clone().sub(b.position);
-        dir.y = 0;
-        const dist = dir.length();
-        if (dist > 0.001) {
-          dir.normalize();
-          b.position.addScaledVector(dir, dt * 0.7);
-          b.lookAt(d.target.x, b.position.y, d.target.z);
-        }
+      const dir = d.target.clone().sub(b.position);
+      dir.y = 0;
+      const dist = dir.length();
+      if (dist > 0.001) {
+        dir.normalize();
+        b.position.addScaledVector(dir, dt * 0.7);
+        b.lookAt(d.target.x, b.position.y, d.target.z);
       }
     }
-  },
-};
-
-// ---------- textures ----------
-function makeLogoTexture(THREE, text) {
-  const c = document.createElement("canvas");
-  c.width = 512; c.height = 256;
-  const ctx = c.getContext("2d");
-
-  ctx.clearRect(0, 0, c.width, c.height);
-
-  ctx.fillStyle = "rgba(0,0,0,0)";
-  ctx.fillRect(0, 0, c.width, c.height);
-
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 58px Arial";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(text, 256, 110);
-
-  ctx.strokeStyle = "rgba(180, 107, 255, 0.9)";
-  ctx.lineWidth = 12;
-  ctx.beginPath();
-  ctx.moveTo(120, 170);
-  ctx.lineTo(392, 170);
-  ctx.stroke();
-
-  const tex = new THREE.CanvasTexture(c);
-  tex.needsUpdate = true;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-function makeChipTag(THREE, label) {
-  const tex = makeChipTagTexture(THREE, label);
-  const m = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
-  const s = new THREE.Sprite(m);
-  s.scale.set(0.75, 0.25, 1);
-  return s;
-}
-
-function makeChipTagTexture(THREE, label) {
-  const c = document.createElement("canvas");
-  c.width = 512; c.height = 256;
-  const ctx = c.getContext("2d");
-
-  ctx.clearRect(0, 0, c.width, c.height);
-
-  ctx.fillStyle = "rgba(15, 18, 32, 0.75)";
-  roundRect(ctx, 40, 70, 432, 116, 38);
-  ctx.fill();
-
-  ctx.strokeStyle = "rgba(180, 107, 255, 0.85)";
-  ctx.lineWidth = 8;
-  roundRect(ctx, 40, 70, 432, 116, 38);
-  ctx.stroke();
-
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 54px Arial";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(label, 256, 128);
-
-  const tex = new THREE.CanvasTexture(c);
-  tex.needsUpdate = true;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
   }
+};

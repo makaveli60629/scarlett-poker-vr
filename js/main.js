@@ -40,13 +40,44 @@ async function boot() {
   document.body.appendChild(renderer.domElement);
 
   // VR button
-  const btn = VRButton.createButton(renderer);
-  btn.id = "VRButton";
-  btn.style.position = "fixed";
-  btn.style.right = "12px";
-  btn.style.bottom = "12px";
-  btn.style.zIndex = "2147483647";
-  document.body.appendChild(btn);
+  // VR Button (hardened)
+  let btn = null;
+  try {
+    btn = VRButton.createButton(renderer);
+    btn.id = "VRButton";
+    btn.style.position = "fixed";
+    btn.style.right = "12px";
+    btn.style.bottom = "12px";
+    btn.style.zIndex = "2147483647";
+    btn.style.display = "block";
+    document.body.appendChild(btn);
+    log("[main] VRButton appended ✅");
+  } catch (e) {
+    log("⚠️ VRButton create failed: " + (e?.message || e));
+  }
+
+  // If XR exists but VRButton didn’t show, show a forced button and tell us why
+  const force = document.getElementById("forceVR");
+  if (force) {
+    const hasXR = !!navigator.xr;
+    log("[main] navigator.xr = " + hasXR);
+
+    if (!btn) {
+      force.style.display = "block";
+      force.onclick = async () => {
+        try {
+          if (!navigator.xr) throw new Error("navigator.xr missing");
+          const ok = await navigator.xr.isSessionSupported("immersive-vr");
+          log("[main] immersive-vr supported = " + ok);
+          if (!ok) throw new Error("immersive-vr not supported");
+          const session = await navigator.xr.requestSession("immersive-vr", { optionalFeatures: ["local-floor","bounded-floor"] });
+          renderer.xr.setSession(session);
+        } catch (err) {
+          log("❌ Force ENTER VR failed: " + (err?.message || err));
+        }
+      };
+    }
+  }
 
   // scene/camera
   scene = new THREE.Scene();

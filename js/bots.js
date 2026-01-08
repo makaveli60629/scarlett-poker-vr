@@ -1,170 +1,135 @@
-// /js/bots.js — Scarlett VR Poker Bots (CLEAN)
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
-import { Avatar } from "./avatar.js";
+// /js/bots.js — Update 9.0 bots system (safe, visible, shirts, crown hook)
+
+import { createTextureKit } from "./textures.js";
 
 export const Bots = {
-  scene: null,
-  rig: null,
-  getSeats: null,
-  getLobbyZone: null,
+  async init({ THREE, scene, world, log = console.log }) {
+    const tex = createTextureKit(THREE, { log });
 
-  bots: [],
-  state: "seating",
-  timer: 0,
-  activeCount: 6, // seated
-  winnerIndex: -1,
+    // Optional bot shirt texture (put your file here)
+    const SHIRT_TEX = await tex.load("assets/textures/shirt.png").catch(() => null);
 
-  init({ scene, rig, getSeats, getLobbyZone }) {
-    this.scene = scene;
-    this.rig = rig;
-    this.getSeats = getSeats;
-    this.getLobbyZone = getLobbyZone;
+    const bots = [];
+    const seatCount = Math.min(6, world.seats.length || 6);
 
-    const seats = this.getSeats?.() || [];
-    if (!seats.length) {
-      console.warn("[Bots] No seats available yet.");
-      return;
+    const headMat = new THREE.MeshStandardMaterial({ color: 0xf2d6c9, roughness: 0.85 });
+    const bodyMatA = new THREE.MeshStandardMaterial({ color: 0x2bd7ff, roughness: 0.85 });
+    const bodyMatB = new THREE.MeshStandardMaterial({ color: 0xff2bd6, roughness: 0.85 });
+
+    function makeBot(i) {
+      const g = new THREE.Group();
+      g.name = `Bot_${i}`;
+
+      // Body (shirt as a plane on chest)
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.55, 6, 12), i % 2 ? bodyMatA : bodyMatB);
+      body.position.y = 0.55;
+      g.add(body);
+
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 14), headMat);
+      head.position.y = 1.25;
+      g.add(head);
+
+      // Shirt billboard
+      const shirtMat = SHIRT_TEX
+        ? new THREE.MeshStandardMaterial({ map: SHIRT_TEX, transparent: true, roughness: 0.9 })
+        : new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
+
+      const shirt = new THREE.Mesh(new THREE.PlaneGeometry(0.32, 0.32), shirtMat);
+      shirt.position.set(0, 0.78, 0.18);
+      shirt.rotation.y = Math.PI; // face forward relative to bot look
+      shirt.name = "shirt";
+      g.add(shirt);
+
+      // Crown placeholder (hidden until winner)
+      const crown = new THREE.Mesh(
+        new THREE.ConeGeometry(0.16, 0.18, 8),
+        new THREE.MeshStandardMaterial({ color: 0xffd27a, emissive: 0xffd27a, emissiveIntensity: 0.35, roughness: 0.6 })
+      );
+      crown.position.y = 1.55;
+      crown.visible = false;
+      crown.name = "crown";
+      g.add(crown);
+
+      g.userData.bot = { id: i, seated: false, target: null, crownTimer: 0 };
+      scene.add(g);
+      return g;
     }
 
-    // Create 8 bots total (6 seats + 2 lobby)
-    this.bots = [];
-    for (let i = 0; i < 8; i++) {
-      const a = Avatar.create({ color: i % 2 ? 0x2bd7ff : 0xff2bd6 });
-      a.userData.bot = {
-        id: i,
-        seated: false,
-        eliminated: false,
-        target: null,
-        crown: false,
-      };
-      this.scene.add(a);
-      this.bots.push(a);
-    }
+    for (let i = 0; i < 8; i++) bots.push(makeBot(i));
 
-    this._seatBots();
-    this.state = "playing";
-    this.timer = 0;
-  },
-
-  _seatBots() {
-    const seats = this.getSeats?.() || [];
-    for (let i = 0; i < this.bots.length; i++) {
-      const b = this.bots[i];
-      const d = b.userData.bot;
-
-      this._removeCrown(b);
-      d.eliminated = false;
-
-      if (i < Math.min(6, seats.length)) {
-        const s = seats[i];
+    // seat first 6
+    for (let i = 0; i < bots.length; i++) {
+      const b = bots[i];
+      if (i < seatCount) {
+        const s = world.seats[i];
         b.position.set(s.position.x, 0, s.position.z);
-        b.rotation.y = s.yaw ?? 0;
-        d.seated = true;
+        b.rotation.y = s.yaw;
+        b.userData.bot.seated = true;
       } else {
-        d.seated = false;
-        this._sendToLobby(b);
+        b.userData.bot.seated = false;
+        sendToLobby(b);
       }
     }
-  },
 
-  _sendToLobby(bot) {
-    const zone = this.getLobbyZone?.();
-    const x = zone ? THREE.MathUtils.lerp(zone.min.x, zone.max.x, Math.random()) : (Math.random() * 8 - 4);
-    const z = zone ? THREE.MathUtils.lerp(zone.min.z, zone.max.z, Math.random()) : (10 + Math.random() * 3);
-    bot.position.set(x, 0, z);
-    bot.userData.bot.target = bot.position.clone();
-  },
+    function sendToLobby(bot) {
+      const z = THREE.MathUtils.lerp(world.lobbyZone.min.z, world.lobbyZone.max.z, Math.random());
+      const x = THREE.MathUtils.lerp(world.lobbyZone.min.x, world.lobbyZone.max.x, Math.random());
+      bot.position.set(x, 0, z);
+      bot.userData.bot.target = bot.position.clone();
+    }
 
-  _pickLobbyTarget() {
-    const zone = this.getLobbyZone?.();
-    const x = zone ? THREE.MathUtils.lerp(zone.min.x, zone.max.x, Math.random()) : (Math.random() * 10 - 5);
-    const z = zone ? THREE.MathUtils.lerp(zone.min.z, zone.max.z, Math.random()) : (10 + Math.random() * 4);
-    return new THREE.Vector3(x, 0, z);
-  },
+    function pickTarget() {
+      const z = THREE.MathUtils.lerp(world.lobbyZone.min.z, world.lobbyZone.max.z, Math.random());
+      const x = THREE.MathUtils.lerp(world.lobbyZone.min.x, world.lobbyZone.max.x, Math.random());
+      return new THREE.Vector3(x, 0, z);
+    }
 
-  _giveCrown(bot) {
-    if (bot.getObjectByName("crown")) return;
+    function setWinner(botIndex, seconds = 60) {
+      for (const b of bots) {
+        const c = b.getObjectByName("crown");
+        if (c) c.visible = false;
+        b.userData.bot.crownTimer = 0;
+      }
+      const b = bots[botIndex];
+      if (!b) return;
+      const c = b.getObjectByName("crown");
+      if (c) c.visible = true;
+      b.userData.bot.crownTimer = seconds;
+    }
 
-    bot.userData.bot.crown = true;
+    log("[world] bots.js (Bots.init) loaded ✅");
 
-    const crown = new THREE.Mesh(
-      new THREE.TorusGeometry(0.14, 0.05, 10, 16),
-      new THREE.MeshStandardMaterial({
-        color: 0xffd27a,
-        emissive: 0xffd27a,
-        emissiveIntensity: 0.35,
-        roughness: 0.35,
-        metalness: 0.55,
-      })
-    );
-    crown.rotation.x = Math.PI / 2;
-    crown.position.y = 1.45;
-    crown.name = "crown";
-    bot.add(crown);
-  },
+    return {
+      bots,
+      setWinner,
+      update(dt) {
+        for (const b of bots) {
+          const d = b.userData.bot;
 
-  _removeCrown(bot) {
-    const c = bot.getObjectByName("crown");
-    if (c) bot.remove(c);
-    bot.userData.bot.crown = false;
-  },
+          // crown timer
+          if (d.crownTimer > 0) {
+            d.crownTimer -= dt;
+            const c = b.getObjectByName("crown");
+            if (c) {
+              c.visible = d.crownTimer > 0;
+              c.rotation.y += dt * 2.0;
+            }
+          }
 
-  update(dt) {
-    if (!this.bots.length) return;
+          if (d.seated) continue;
 
-    this.timer += dt;
+          if (!d.target || b.position.distanceTo(d.target) < 0.25) d.target = pickTarget();
 
-    // Demo tournament: every 12s eliminate 1 seated bot until 2 remain, then crown winner for 60s
-    if (this.state === "playing") {
-      if (this.timer > 12) {
-        this.timer = 0;
-
-        const seated = this.bots.filter(b => b.userData.bot.seated && !b.userData.bot.eliminated);
-        if (seated.length > 2) {
-          const out = seated[Math.floor(Math.random() * seated.length)];
-          out.userData.bot.eliminated = true;
-          out.userData.bot.seated = false;
-          this._sendToLobby(out);
-        } else {
-          this.state = "winner_walk";
-          const winner = seated[Math.floor(Math.random() * seated.length)];
-          this.winnerIndex = winner.userData.bot.id;
-          this._giveCrown(winner);
-          winner.userData.bot.seated = false;
-          this._sendToLobby(winner);
-          this.timer = 0;
+          const dir = d.target.clone().sub(b.position);
+          dir.y = 0;
+          const dist = dir.length();
+          if (dist > 0.001) {
+            dir.normalize();
+            b.position.addScaledVector(dir, dt * 0.65);
+            b.lookAt(d.target.x, b.position.y, d.target.z);
+          }
         }
       }
-    }
-
-    if (this.state === "winner_walk") {
-      if (this.timer > 60) {
-        const w = this.bots.find(b => b.userData.bot.id === this.winnerIndex);
-        if (w) this._removeCrown(w);
-
-        this.state = "playing";
-        this.timer = 0;
-        this._seatBots();
-      }
-    }
-
-    // Lobby wandering
-    for (const b of this.bots) {
-      const d = b.userData.bot;
-      if (d.seated) continue;
-
-      if (!d.target || b.position.distanceTo(d.target) < 0.2) {
-        d.target = this._pickLobbyTarget();
-      }
-
-      const dir = d.target.clone().sub(b.position);
-      dir.y = 0;
-      const dist = dir.length();
-      if (dist > 0.001) {
-        dir.normalize();
-        b.position.addScaledVector(dir, dt * 0.7);
-        b.lookAt(d.target.x, b.position.y, d.target.z);
-      }
-    }
-  },
+    };
+  }
 };

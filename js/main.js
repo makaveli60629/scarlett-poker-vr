@@ -1,6 +1,4 @@
-// /js/main.js — Scarlett Poker VR Boot (FULL) v10.4
-// Works with your current structure: world.js + controls.js + teleport.js + dealingMix.js
-// Adds visible gloves/hands via /js/hands.js
+// /js/main.js — Scarlett Poker VR Boot v10.4 (PERMA CONTROLLER ATTACH FIX)
 
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
@@ -10,16 +8,12 @@ import { initWorld } from "./world.js";
 import { Controls } from "./controls.js";
 import { Teleport } from "./teleport.js";
 import { DealingMix } from "./dealingMix.js";
-import { Hands } from "./hands.js";
 
 // ---------- LOG ----------
 const logEl = document.getElementById("log");
-const log = (m, ...rest) => {
-  try { console.log(m, ...rest); } catch {}
-  if (logEl) {
-    logEl.textContent += "\n" + (typeof m === "string" ? m : JSON.stringify(m));
-    if (rest?.length) logEl.textContent += " " + rest.map(r => (typeof r === "string" ? r : JSON.stringify(r))).join(" ");
-  }
+const log = (m) => {
+  console.log(m);
+  if (logEl) logEl.textContent += "\n" + m;
 };
 
 log("[main] booting…");
@@ -53,21 +47,26 @@ document.body.appendChild(VRButton.createButton(renderer));
 // ---------- PLAYER RIG ----------
 const player = new THREE.Group();
 player.name = "PlayerRig";
-player.add(camera);
 scene.add(player);
 
-// Spawn position
+// XR pivot inside player (nice for future)
+const xrPivot = new THREE.Group();
+xrPivot.name = "XRPivot";
+player.add(xrPivot);
+
+// Put camera under player rig
+player.add(camera);
+
+// spawn position
 player.position.set(0, 0, 3.6);
 camera.position.set(0, 1.65, 0);
 
-// ---------- LIGHTING (GLOBAL SAFETY) ----------
-scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.15));
-
-const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+// ---------- LIGHTING (global safety net) ----------
+scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.25));
+const dir = new THREE.DirectionalLight(0xffffff, 1.15);
 dir.position.set(7, 12, 6);
 scene.add(dir);
-
-scene.add(new THREE.AmbientLight(0xffffff, 0.12));
+scene.add(new THREE.AmbientLight(0xffffff, 0.15));
 
 // ---------- XR CONTROLLERS ----------
 const controllerModelFactory = new XRControllerModelFactory();
@@ -81,6 +80,7 @@ function makeLaser() {
   ]);
   const mat = new THREE.LineBasicMaterial({ color: 0x00ffcc });
   const line = new THREE.Line(geo, mat);
+  line.name = "Laser";
   line.scale.z = 10;
   return line;
 }
@@ -89,38 +89,28 @@ for (let i = 0; i < 2; i++) {
   const c = renderer.xr.getController(i);
   c.name = "Controller" + i;
   c.add(makeLaser());
-  scene.add(c);
+
+  // ✅ PERMANENT FIX:
+  // Parent controllers to PLAYER RIG so teleport/movement moves them with you.
+  xrPivot.add(c);
+
   controllers.push(c);
 
   const g = renderer.xr.getControllerGrip(i);
   g.name = "Grip" + i;
   g.add(controllerModelFactory.createControllerModel(g));
-  scene.add(g);
+
+  // ✅ Same fix for grip/controller model
+  xrPivot.add(g);
+
   grips.push(g);
 }
 
-log("[main] controllers ready ✅");
-
-// ---------- HANDS / GLOVES ----------
-try {
-  Hands.init({
-    THREE,
-    renderer,
-    grips,
-    log
-  });
-  log("[main] gloves ready ✅");
-} catch (e) {
-  console.warn(e);
-  log("[main] gloves init failed:", e?.message || e);
-}
+log("[main] controllers ready ✅ (attached to PlayerRig)");
 
 // ---------- WORLD ----------
 const buildV = window.__BUILD_V || Date.now().toString();
 const world = await initWorld({ THREE, scene, log, v: buildV });
-
-// Provide a default if world.js doesn’t set it (used by dealingMix)
-world.tableY = (typeof world.tableY === "number") ? world.tableY : 0.92;
 
 if (world?.tableFocus) {
   camera.lookAt(world.tableFocus.x, 1.0, world.tableFocus.z);
@@ -128,11 +118,11 @@ if (world?.tableFocus) {
 
 log("[main] world loaded ✅");
 
-// Connect optional world modules (TeleportMachine, etc.)
+// ✅ connect world modules that need player/controllers (teleporter machine, etc)
 try {
   world?.connect?.({ playerRig: player, controllers });
 } catch (e) {
-  log("[main] world.connect failed:", e?.message || e);
+  console.warn(e);
 }
 
 // ---------- CONTROLS ----------
@@ -165,27 +155,13 @@ const dealing = DealingMix.init({
   log,
   world
 });
-
-// Optional: react to dealing events (safe even if unused)
-try {
-  dealing.onHandStart = () => log("[DealingMix] hand start");
-  dealing.onHandEnd = (winnerSeat) => log("[DealingMix] hand end winnerSeat=" + winnerSeat);
-} catch {}
-
-// Start immediately
-try {
-  dealing.startHand?.();
-} catch (e) {
-  log("[main] dealing.startHand failed:", e?.message || e);
-}
+dealing.startHand?.();
 
 // ---------- RECENTER ----------
 window.addEventListener("scarlett-recenter", () => {
   player.position.set(0, 0, 3.6);
   player.rotation.set(0, 0, 0);
-  if (world?.tableFocus) {
-    camera.lookAt(world.tableFocus.x, 1.0, world.tableFocus.z);
-  }
+  if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.0, world.tableFocus.z);
   log("[main] recentered ✅");
 });
 

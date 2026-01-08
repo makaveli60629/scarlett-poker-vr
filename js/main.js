@@ -1,4 +1,4 @@
-// /js/main.js — Scarlett Poker VR Boot v10.4 (PERMA CONTROLLER ATTACH FIX)
+// /js/main.js — Scarlett Poker VR Boot v10.5 (Hands + World HUD + Billboards)
 
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
@@ -8,6 +8,7 @@ import { initWorld } from "./world.js";
 import { Controls } from "./controls.js";
 import { Teleport } from "./teleport.js";
 import { DealingMix } from "./dealingMix.js";
+import { Hands } from "./hands.js";
 
 // ---------- LOG ----------
 const logEl = document.getElementById("log");
@@ -24,12 +25,7 @@ scene.background = new THREE.Color(0x020205);
 scene.fog = new THREE.Fog(0x020205, 1, 55);
 
 // ---------- CAMERA ----------
-const camera = new THREE.PerspectiveCamera(
-  70,
-  window.innerWidth / window.innerHeight,
-  0.05,
-  250
-);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
 
 // ---------- RENDERER ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -37,9 +33,7 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
 
-try {
-  renderer.xr.setReferenceSpaceType("local-floor");
-} catch {}
+try { renderer.xr.setReferenceSpaceType("local-floor"); } catch {}
 
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
@@ -49,19 +43,18 @@ const player = new THREE.Group();
 player.name = "PlayerRig";
 scene.add(player);
 
-// XR pivot inside player (nice for future)
+// pivot for XR nodes (so moving player moves controllers/hands)
 const xrPivot = new THREE.Group();
 xrPivot.name = "XRPivot";
 player.add(xrPivot);
 
-// Put camera under player rig
 player.add(camera);
 
-// spawn position
+// spawn
 player.position.set(0, 0, 3.6);
 camera.position.set(0, 1.65, 0);
 
-// ---------- LIGHTING (global safety net) ----------
+// ---------- GLOBAL LIGHT SAFETY ----------
 scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.25));
 const dir = new THREE.DirectionalLight(0xffffff, 1.15);
 dir.position.set(7, 12, 6);
@@ -74,10 +67,7 @@ const controllers = [];
 const grips = [];
 
 function makeLaser() {
-  const geo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, 0, -1)
-  ]);
+  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
   const mat = new THREE.LineBasicMaterial({ color: 0x00ffcc });
   const line = new THREE.Line(geo, mat);
   line.name = "Laser";
@@ -89,73 +79,56 @@ for (let i = 0; i < 2; i++) {
   const c = renderer.xr.getController(i);
   c.name = "Controller" + i;
   c.add(makeLaser());
-
-  // ✅ PERMANENT FIX:
-  // Parent controllers to PLAYER RIG so teleport/movement moves them with you.
   xrPivot.add(c);
-
   controllers.push(c);
 
   const g = renderer.xr.getControllerGrip(i);
   g.name = "Grip" + i;
   g.add(controllerModelFactory.createControllerModel(g));
-
-  // ✅ Same fix for grip/controller model
   xrPivot.add(g);
-
   grips.push(g);
 }
 
-log("[main] controllers ready ✅ (attached to PlayerRig)");
+log("[main] controllers ready ✅");
+
+// ---------- XR HANDS (VISIBLE GLOVES / HANDS) ----------
+const hands = Hands.init({
+  THREE,
+  renderer,
+  xrPivot,
+  controllers,
+  log
+});
+log("[main] hands init ✅");
 
 // ---------- WORLD ----------
 const buildV = window.__BUILD_V || Date.now().toString();
 const world = await initWorld({ THREE, scene, log, v: buildV });
 
-if (world?.tableFocus) {
-  camera.lookAt(world.tableFocus.x, 1.0, world.tableFocus.z);
-}
+if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.0, world.tableFocus.z);
 
 log("[main] world loaded ✅");
 
-// ✅ connect world modules that need player/controllers (teleporter machine, etc)
-try {
-  world?.connect?.({ playerRig: player, controllers });
-} catch (e) {
-  console.warn(e);
-}
+// connect world to player/controllers so world can billboard cards/screens to you
+try { world?.connect?.({ playerRig: player, controllers, camera }); } catch {}
 
 // ---------- CONTROLS ----------
-const controls = Controls.init({
-  THREE,
-  renderer,
-  camera,
-  player,
-  controllers,
-  log,
-  world
-});
+const controls = Controls.init({ THREE, renderer, camera, player, controllers, log, world });
 
 // ---------- TELEPORT ----------
-const teleport = Teleport.init({
-  THREE,
-  scene,
-  renderer,
-  camera,
-  player,
-  controllers,
-  log,
-  world
-});
+const teleport = Teleport.init({ THREE, scene, renderer, camera, player, controllers, log, world });
 
 // ---------- DEALING ----------
-const dealing = DealingMix.init({
-  THREE,
-  scene,
-  log,
-  world
-});
+const dealing = DealingMix.init({ THREE, scene, log, world });
 dealing.startHand?.();
+
+// ---------- MENU TOGGLE (world panels) ----------
+window.addEventListener("keydown", (e) => {
+  if (e.key?.toLowerCase() === "m") {
+    world?.togglePanels?.();
+    log("[main] toggle panels (M)");
+  }
+});
 
 // ---------- RECENTER ----------
 window.addEventListener("scarlett-recenter", () => {
@@ -174,7 +147,6 @@ window.addEventListener("resize", () => {
 
 // ---------- LOOP ----------
 let last = performance.now();
-
 renderer.setAnimationLoop(() => {
   const now = performance.now();
   const dt = Math.min(0.05, (now - last) / 1000);
@@ -184,6 +156,7 @@ renderer.setAnimationLoop(() => {
   try { controls?.update?.(dt); } catch (e) { console.error(e); }
   try { teleport?.update?.(dt); } catch (e) { console.error(e); }
   try { dealing?.update?.(dt); } catch (e) { console.error(e); }
+  try { hands?.update?.(dt); } catch (e) { console.error(e); }
 
   renderer.render(scene, camera);
 });

@@ -10,23 +10,17 @@
       position: fixed; left: 12px; top: 12px; right: 12px;
       color: #fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
       background: rgba(0,0,0,0.55); border-radius: 18px; padding: 14px 16px;
-      z-index: 9999; backdrop-filter: blur(10px);
+      z-index: 9999;
     }
-    #hudTitle { font-size: 34px; font-weight: 900; margin-bottom: 6px; letter-spacing: 0.5px; }
-    #hudSub { opacity: 0.95; line-height: 1.35; }
-    #hudBtns { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+    #hud small { opacity:0.85; }
+    #controls {
+      display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;
+    }
     .btn {
-      padding: 10px 14px; border-radius: 12px;
-      border: 1px solid rgba(255,255,255,0.18);
-      background: rgba(0,0,0,0.55); color:#fff;
-      font-size: 14px; font-weight: 650;
-    }
-    #status {
-      margin-top: 10px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      color: #9ff; opacity: 0.95;
-      background: rgba(0,0,0,0.35);
-      padding: 10px 12px; border-radius: 12px;
+      padding: 12px 14px; border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.22);
+      background: rgba(0,0,0,0.45); color:#fff;
+      font-size: 15px;
     }
     #log {
       position: fixed; left: 12px; right: 12px; bottom: 84px;
@@ -36,26 +30,16 @@
       z-index: 9999;
     }
     #log.hidden { display:none; }
-    #forceVR {
-      position: fixed; right: 12px; bottom: 12px;
-      padding: 14px 18px; border-radius: 12px;
-      border: 1px solid rgba(255,255,255,0.25);
-      background: rgba(0,0,0,0.65); color:#fff;
-      font-size: 16px; z-index: 2147483647;
-      display:none;
-    }
   </style>
 </head>
 <body>
   <div id="hud">
-    <div id="hudTitle">Scarlett VR Poker</div>
-    <div id="hudSub">
-      Quest: tap <b>ENTER VR</b> (bottom-right).<br/>
-      Move: Left stick • Snap turn: Right stick • Teleport: Right trigger<br/>
-      Android preview: WebXR may not exist — you’ll still see the world in 2D.
-    </div>
+    <div style="font-size:34px;font-weight:800;margin-bottom:6px;">Scarlett VR Poker</div>
+    <div>Quest: tap <b>ENTER VR</b> (bottom-right).</div>
+    <div>Move: Left stick • Snap turn: Right stick • Teleport: Right trigger</div>
+    <small>Android preview: WebXR may not exist — you’ll still see the world in 2D.</small>
 
-    <div id="hudBtns">
+    <div id="controls">
       <button class="btn" id="btnRecenter">Recenter</button>
       <button class="btn" id="btnToggleLog">Toggle Log</button>
       <button class="btn" id="btnReload">Reload</button>
@@ -63,23 +47,22 @@
       <button class="btn" id="btnCopyLog">Copy Log</button>
     </div>
 
-    <div id="status">Booting…</div>
+    <div id="buildInfo" style="margin-top:10px;opacity:0.9;"></div>
   </div>
 
   <div id="log">Booting…</div>
-  <button id="forceVR">ENTER VR</button>
 
   <script type="module">
     const logEl = document.getElementById('log');
-    const statusEl = document.getElementById('status');
+    const buildEl = document.getElementById('buildInfo');
 
     window.__hubLog = (m) => {
       logEl.textContent += "\n" + m;
       logEl.scrollTop = logEl.scrollHeight;
-      statusEl.textContent = m;
       console.log(m);
     };
 
+    // build id (cache bust)
     const v = Date.now().toString();
     window.__BUILD_V = v;
     __hubLog("BOOT v=" + v);
@@ -87,30 +70,21 @@
     // HUD buttons
     document.getElementById("btnRecenter").onclick = () => {
       window.dispatchEvent(new Event("scarlett-recenter"));
-      __hubLog("[hud] recenter");
     };
     document.getElementById("btnToggleLog").onclick = () => {
       logEl.classList.toggle("hidden");
     };
     document.getElementById("btnReload").onclick = () => location.reload();
     document.getElementById("btnFullscreen").onclick = async () => {
-      try {
-        if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
-        else await document.exitFullscreen();
-      } catch {}
+      try { await document.documentElement.requestFullscreen(); } catch {}
     };
     document.getElementById("btnCopyLog").onclick = async () => {
-      try {
-        await navigator.clipboard.writeText(logEl.textContent || "");
-        __hubLog("[hud] log copied ✅");
-      } catch {
-        __hubLog("[hud] copy failed (browser blocked)");
-      }
+      try { await navigator.clipboard.writeText(logEl.textContent); } catch {}
     };
 
-    // Import main
-    import(`./js/main.js?v=${v}`)
-      .catch(e => __hubLog("❌ main import failed: " + (e?.message || e)));
+    buildEl.textContent = `Build: ${v}`;
+
+    import(`./js/main.js?v=${v}`).catch(e => __hubLog("❌ main import failed: " + (e?.message || e)));
   </script>
 </body>
 </html>

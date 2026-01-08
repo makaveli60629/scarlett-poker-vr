@@ -1,40 +1,43 @@
-// /js/dealingMix.js — Scarlett Poker VR DealingMix v1.2 (FIX ALIGNMENT + UNIQUE CARDS + HOVER)
-// Key fixes:
-// - Uses TABLE-LOCAL coordinates when parenting cards to world.table (prevents "game behind table")
-// - Generates unique 52-card deck and creates face textures (rank/suit)
-// - Community cards hover ABOVE table and face the player
-// - Hole cards go ABOVE SEATED BOTS' HEADS (not duplicated in bots.js)
+// /js/dealingMix.js — Scarlett Poker VR DealingMix v1.1
+// Adds:
+// - size scaling via init({ scale:{hole,community}, lift:{table,communityHover} })
+// - lifts cards above felt (no under-table clipping)
+// - strict single shuffled 52-deck (no duplicates)
 
 export const DealingMix = {
-  init({ THREE, scene, log = console.log, world }) {
+  init({ THREE, scene, log = console.log, world, scale = {}, lift = {} }) {
     const L = (...a) => { try { log(...a); } catch { console.log(...a); } };
 
     const table = world?.table || world?.group || scene;
+    const focus = world?.tableFocus || new THREE.Vector3(0, 0, -6.5);
     const seats = world?.seats || [];
-    const tableY = world?.metrics?.tableY ?? 0.92;
 
-    // Local table origin is (0,0,0) inside world.table.
-    // So ALL card/chip positions here are LOCAL to the table group.
-    const FOCUS = new THREE.Vector3(0, 0, 0);
+    const HOLE_SCALE = Number(scale.hole || 1.0);
+    const COMM_SCALE = Number(scale.community || 1.0);
 
-    // Card sizing (VR-friendly) — slightly bigger than before, but not huge
-    const CARD_W = 0.10;
-    const CARD_H = 0.14;
+    const TABLE_LIFT = Number(lift.table || 0.03);
+    const COMM_HOVER = Number(lift.communityHover || 0.18);
+
+    // Base card size (then scaled)
+    const BASE_W = 0.10;
+    const BASE_H = 0.14;
     const CARD_T = 0.002;
 
-    // Local positions on table
-    const deckPos = new THREE.Vector3(0.78, tableY + 0.10, 0.22);
-    const burnPos = new THREE.Vector3(0.52, tableY + 0.10, 0.22);
+    const TABLE_Y = (world?.metrics?.tableY ?? 0.92);
+    const CARD_Y = TABLE_Y + TABLE_LIFT;
+
+    // Deck and burn positions on the REAL table center
+    const deckPos = new THREE.Vector3(focus.x + 0.55, CARD_Y + 0.01, focus.z + 0.20);
+    const burnPos = new THREE.Vector3(focus.x + 0.36, CARD_Y + 0.01, focus.z + 0.20);
 
     const comm = [
-      new THREE.Vector3(-0.40, tableY + 0.18, 0.02),
-      new THREE.Vector3(-0.20, tableY + 0.18, 0.02),
-      new THREE.Vector3( 0.00, tableY + 0.18, 0.02),
-      new THREE.Vector3( 0.20, tableY + 0.18, 0.02),
-      new THREE.Vector3( 0.40, tableY + 0.18, 0.02),
+      new THREE.Vector3(focus.x - 0.40, CARD_Y + COMM_HOVER, focus.z + 0.02),
+      new THREE.Vector3(focus.x - 0.20, CARD_Y + COMM_HOVER, focus.z + 0.02),
+      new THREE.Vector3(focus.x + 0.00, CARD_Y + COMM_HOVER, focus.z + 0.02),
+      new THREE.Vector3(focus.x + 0.20, CARD_Y + COMM_HOVER, focus.z + 0.02),
+      new THREE.Vector3(focus.x + 0.40, CARD_Y + COMM_HOVER, focus.z + 0.02),
     ];
 
-    // State
     const state = {
       running: true,
       phase: "idle",
@@ -46,15 +49,14 @@ export const DealingMix = {
       timers: [],
     };
 
-    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-    const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
-
     function schedule(delay, fn) {
       state.timers.push({ at: state.t + Math.max(0, delay), fn });
     }
 
     function clearAll() {
-      for (const c of state.activeCards) { try { c.parent?.remove(c); } catch {} }
+      for (const c of state.activeCards) {
+        try { c.parent?.remove(c); } catch {}
+      }
       state.activeCards.length = 0;
       state.queue.length = 0;
       state.timers.length = 0;
@@ -63,11 +65,15 @@ export const DealingMix = {
       state.phase = "idle";
     }
 
+    function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
     function enqueueMove(obj, from, to, dur = 0.22, onDone = null) {
       state.queue.push({ obj, from: from.clone(), to: to.clone(), dur: Math.max(0.12, dur), t: 0, onDone });
     }
 
-    // --------- CARD FACE TEXTURE ----------
+    function randInt(n) { return Math.floor(Math.random() * n); }
+
+    // --- Card face texture (simple, readable) ---
     function cardFaceTexture(rank, suit) {
       const c = document.createElement("canvas");
       c.width = 256; c.height = 356;
@@ -76,7 +82,7 @@ export const DealingMix = {
       ctx.fillStyle = "#f8f8f8";
       ctx.fillRect(0, 0, c.width, c.height);
 
-      ctx.strokeStyle = "rgba(0,0,0,0.22)";
+      ctx.strokeStyle = "rgba(0,0,0,0.25)";
       ctx.lineWidth = 6;
       ctx.strokeRect(6, 6, c.width - 12, c.height - 12);
 
@@ -103,177 +109,168 @@ export const DealingMix = {
       ctx.fillText(suit, c.width / 2, c.height / 2 + 10);
 
       const tex = new THREE.CanvasTexture(c);
-      tex.colorSpace = THREE.SRGBColorSpace;
       tex.needsUpdate = true;
       return tex;
     }
 
-    const backMat = new THREE.MeshStandardMaterial({
-      color: 0xff2d7a,
-      roughness: 0.55,
-      emissive: 0x220010,
-      emissiveIntensity: 0.35,
-      side: THREE.DoubleSide
-    });
-
-    function makeCardMesh(rank, suit) {
+    function makeCardMesh(rank = "A", suit = "♠", backColor = 0xff2d7a) {
       const g = new THREE.Group();
       g.name = "Card";
 
-      const faceTex = cardFaceTexture(rank, suit);
+      const w = BASE_W, h = BASE_H;
+
       const faceMat = new THREE.MeshStandardMaterial({
-        map: faceTex,
+        map: cardFaceTexture(rank, suit),
         roughness: 0.55,
         emissive: 0x111111,
-        emissiveIntensity: 0.18,
+        emissiveIntensity: 0.15,
         side: THREE.DoubleSide
       });
 
-      const geo = new THREE.PlaneGeometry(CARD_W, CARD_H);
+      const backMat = new THREE.MeshStandardMaterial({
+        color: backColor,
+        roughness: 0.55,
+        emissive: 0x220010,
+        emissiveIntensity: 0.25,
+        side: THREE.DoubleSide
+      });
+
+      const geo = new THREE.PlaneGeometry(w, h);
 
       const face = new THREE.Mesh(geo, faceMat);
-      face.position.z = 0.001;
-
       const back = new THREE.Mesh(geo, backMat);
-      back.position.z = -0.001;
+      face.position.y = 0.001;
+      back.position.y = -0.001;
       back.rotation.y = Math.PI;
 
-      // card is a billboard-ish plane; lay it "upright" by default (we will orient per-target)
-      g.add(face, back);
-      g.userData.rank = rank;
-      g.userData.suit = suit;
+      // Lay flat: y-up world, so rotate around X to lie on table
+      g.rotation.x = -Math.PI / 2;
 
+      g.add(face, back);
       return g;
     }
 
-    // --------- DECK ----------
-    const suits = ["S", "H", "D", "C"];
-    const ranks = ["A","2","3","4","5","6","7","8","9","T","J","Q","K"];
-    const suitGlyph = { S:"♠", H:"♥", D:"♦", C:"♣" };
+    // ---------- DECK ----------
+    const SUITS = ["♠", "♥", "♦", "♣"];
+    const RANKS = ["A","2","3","4","5","6","7","8","9","T","J","Q","K"];
 
     function buildDeck() {
-      const deck = [];
-      for (const s of suits) for (const r of ranks) deck.push(r + s);
-
-      // Fisher-Yates shuffle
-      for (let i = deck.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [deck[i], deck[j]] = [deck[j], deck[i]];
+      const d = [];
+      for (const s of SUITS) for (const r of RANKS) d.push({ r, s });
+      for (let i = d.length - 1; i > 0; i--) {
+        const j = randInt(i + 1);
+        [d[i], d[j]] = [d[j], d[i]];
       }
-
-      state.deck = deck;
+      state.deck = d;
       state.deckIndex = 0;
     }
 
-    function drawCardId() {
+    function drawCard() {
       if (state.deckIndex >= state.deck.length) return null;
       return state.deck[state.deckIndex++];
     }
 
-    function parseCard(id) {
-      const r = id[0];
-      const s = id[1];
-      return { rank: r, suit: suitGlyph[s] || "♠" };
-    }
-
-    // --------- TARGET POSITIONS ----------
-    function seatHeadTarget(seatIndex, cardIndex) {
+    // ---------- TARGETS ----------
+    function seatCardTarget(seatIndex, cardIndex) {
       const s = seats[seatIndex];
       const a = (seatIndex / 6) * Math.PI * 2;
 
-      // If seat exists, convert world position to table-local by subtracting table world pos
-      let headWorld = null;
+      let base;
       if (s?.position) {
-        headWorld = s.position.clone();
+        base = s.position.clone();
       } else {
-        // fallback ring around tableFocus (world coords)
-        headWorld = new THREE.Vector3(Math.cos(a) * 3.05, 0, Math.sin(a) * 3.05);
-        // this fallback is already LOCAL if we assume centered, but keep safe
+        base = new THREE.Vector3(
+          focus.x + Math.cos(a) * 3.05,
+          0,
+          focus.z + Math.sin(a) * 3.05
+        );
       }
 
-      // Raise above head (in world), then convert to local
-      headWorld.y = (s?.position?.y ?? 0.52) + 1.25;
+      // move inward toward table
+      const inward = new THREE.Vector3(focus.x - base.x, 0, focus.z - base.z).normalize().multiplyScalar(0.55);
+      const tpos = base.clone().add(inward);
 
-      const headLocal = headWorld.clone();
-      try {
-        // table is a Group in world space; convert to local
-        table.worldToLocal(headLocal);
-      } catch {}
+      // on table surface
+      tpos.y = CARD_Y;
 
-      // spread two cards slightly
-      headLocal.x += (cardIndex === 0 ? -0.11 : 0.11);
-      headLocal.y += (cardIndex === 0 ? 0.03 : 0.00);
+      // spread hole cards sideways
+      const side = new THREE.Vector3().crossVectors(inward, new THREE.Vector3(0, 1, 0)).normalize();
+      tpos.add(side.multiplyScalar(cardIndex === 0 ? -0.06 : 0.06));
 
-      return headLocal;
+      return tpos;
     }
 
     function communityTarget(i) {
       return comm[Math.max(0, Math.min(comm.length - 1, i))].clone();
     }
 
-    // --------- DEAL ACTIONS ----------
-    function dealHoleToSeat(seatIndex, cardIndex, delay = 0) {
+    // ---------- VISUAL DECK STACK ----------
+    const deckStack = new THREE.Group();
+    deckStack.name = "DeckStack";
+    deckStack.position.copy(deckPos);
+    table.add(deckStack);
+
+    for (let i = 0; i < 8; i++) {
+      const c = makeCardMesh("A", "♠", 0x2b7cff);
+      c.scale.setScalar(0.65);
+      c.position.set(0, i * 0.0012, 0);
+      deckStack.add(c);
+    }
+
+    // ---------- ACTIONS ----------
+    function dealOneToSeat(seatIndex, cardIndex, delay = 0) {
       schedule(delay, () => {
-        const id = drawCardId();
-        if (!id) return;
+        const cd = drawCard();
+        if (!cd) return;
 
-        const { rank, suit } = parseCard(id);
-        const card = makeCardMesh(rank, suit);
-        card.userData.id = id;
-
-        // start at deckPos (LOCAL)
+        const card = makeCardMesh(cd.r, cd.s, 0x2b7cff);
         card.position.copy(deckPos);
-        card.rotation.set(0, 0, 0);
+
+        // hole cards bigger (your request)
+        card.scale.setScalar(HOLE_SCALE);
 
         table.add(card);
         state.activeCards.push(card);
 
-        const to = seatHeadTarget(seatIndex, cardIndex);
-
-        enqueueMove(card, deckPos, to, 0.20, () => {
-          // Face the player after landing (billboard-ish)
-          card.userData.billboard = true;
-        });
+        const to = seatCardTarget(seatIndex, cardIndex);
+        enqueueMove(card, deckPos, to, 0.22);
       });
     }
 
     function burnOne(delay = 0) {
       schedule(delay, () => {
-        const id = drawCardId();
-        if (!id) return;
+        const cd = drawCard();
+        if (!cd) return;
 
-        const { rank, suit } = parseCard(id);
-        const card = makeCardMesh(rank, suit);
-        card.userData.id = id;
-
+        const card = makeCardMesh(cd.r, cd.s, 0x1b1c26);
         card.position.copy(deckPos);
+        card.scale.setScalar(0.8);
+
         table.add(card);
         state.activeCards.push(card);
 
-        enqueueMove(card, deckPos, burnPos, 0.16, () => {
-          schedule(0.35, () => { try { table.remove(card); } catch {} });
-        });
+        enqueueMove(card, deckPos, burnPos, 0.18);
+        schedule(0.45, () => { try { table.remove(card); } catch {} });
       });
     }
 
     function dealCommunity(count, startIndex, delay = 0) {
       for (let i = 0; i < count; i++) {
         schedule(delay + i * 0.18, () => {
-          const id = drawCardId();
-          if (!id) return;
+          const cd = drawCard();
+          if (!cd) return;
 
-          const { rank, suit } = parseCard(id);
-          const card = makeCardMesh(rank, suit);
-          card.userData.id = id;
-
+          const card = makeCardMesh(cd.r, cd.s, 0x9b59ff);
           card.position.copy(deckPos);
+
+          // community cards even bigger + hover
+          card.scale.setScalar(COMM_SCALE);
+
           table.add(card);
           state.activeCards.push(card);
 
           const to = communityTarget(startIndex + i);
-          enqueueMove(card, deckPos, to, 0.22, () => {
-            card.userData.billboard = true;
-          });
+          enqueueMove(card, deckPos, to, 0.24);
         });
       }
     }
@@ -286,11 +283,12 @@ export const DealingMix = {
       state.phase = "dealing";
       L("[DealingMix] startHand ✅");
 
-      // Pre-flop: 2 rounds to 6 seats (seats 0..5)
-      let t = 0.18;
+      let t = 0.15;
+
+      // 6 seats, 2 cards each
       for (let round = 0; round < 2; round++) {
         for (let s = 0; s < 6; s++) {
-          dealHoleToSeat(s, round, t);
+          dealOneToSeat(s, round, t);
           t += 0.10;
         }
       }
@@ -299,38 +297,21 @@ export const DealingMix = {
       burnOne(t + 0.35);
       dealCommunity(3, 0, t + 0.55);
 
-      burnOne(t + 2.00);
-      dealCommunity(1, 3, t + 2.20);
+      burnOne(t + 2.10);
+      dealCommunity(1, 3, t + 2.30);
 
-      burnOne(t + 3.35);
-      dealCommunity(1, 4, t + 3.55);
+      burnOne(t + 3.60);
+      dealCommunity(1, 4, t + 3.80);
 
-      schedule(t + 5.1, () => {
+      schedule(t + 5.2, () => {
         state.phase = "done";
         L("[DealingMix] hand complete ✅");
-        // loop hands for now
-        schedule(2.0, () => startHand());
       });
     }
 
-    // Billboard cards to the camera (so you can read them)
-    const tmpV = new THREE.Vector3();
-    function facePlayer(card) {
-      if (!card) return;
-      // Use camera world pos; convert to table local for stable lookAt in local space
-      try {
-        camera.getWorldPosition(tmpV);
-        const local = tmpV.clone();
-        table.worldToLocal(local);
-        card.lookAt(local.x, card.position.y, local.z);
-      } catch {}
-    }
-
-    // Update
     function update(dt) {
       state.t += dt;
 
-      // run scheduled actions
       if (state.timers.length) {
         state.timers.sort((a, b) => a.at - b.at);
         while (state.timers.length && state.timers[0].at <= state.t) {
@@ -339,11 +320,10 @@ export const DealingMix = {
         }
       }
 
-      // animate one queued move at a time
       if (state.queue.length) {
         const m = state.queue[0];
         m.t += dt;
-        const t = clamp(m.t / m.dur, 0, 1);
+        const t = Math.min(1, m.t / m.dur);
         const e = easeOutCubic(t);
 
         m.obj.position.set(
@@ -356,13 +336,6 @@ export const DealingMix = {
           state.queue.shift();
           try { m.onDone?.(); } catch {}
         }
-      }
-
-      // hover + billboard
-      for (const c of state.activeCards) {
-        if (!c?.userData?.billboard) continue;
-        c.position.y += Math.sin(state.t * 2.1 + (c.position.x * 3.0)) * 0.0008;
-        facePlayer(c);
       }
     }
 

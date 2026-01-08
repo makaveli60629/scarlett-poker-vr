@@ -105,9 +105,43 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9004" })
   world.rails = rails;
 
   // ------------------ TELEPORTER (YOUR MODULE + FX) ------------------
-  // This uses your teleport_machine.js and ensures it is visible & ticking.
-  world.teleporter = await loadTeleporter(THREE, scene, world.group, texLoader, v, log);
+  // ------------------ TELEPORTER (YOUR MODULE) ------------------
+  try {
+    const mod = await import(`./teleport_machine.js?v=${encodeURIComponent(v)}`);
+    if (mod?.TeleportMachine?.build) {
+      const texLoader = new THREE.TextureLoader();
 
+      const tele = mod.TeleportMachine.build({
+        THREE,
+        scene,
+        texLoader
+      });
+
+      // keep it where we expect
+      tele.position.set(0, 0, 2.2);
+
+      // safe spawn from teleporter
+      if (typeof mod.TeleportMachine.getSafeSpawn === "function") {
+        const s = mod.TeleportMachine.getSafeSpawn(THREE);
+        if (s?.position) world.spawnPads = [s.position.clone()];
+      }
+
+      // tick FX
+      if (typeof mod.TeleportMachine.tick === "function") {
+        const prev = world.tick;
+        world.tick = (dt) => {
+          prev(dt);
+          mod.TeleportMachine.tick(dt);
+        };
+      }
+
+      log("[world] ✅ teleport_machine.js loaded (no three imports)");
+    } else {
+      log("[world] ⚠️ teleport_machine.js loaded but TeleportMachine.build missing");
+    }
+  } catch (e) {
+    log("[world] ❌ teleport_machine.js import failed: " + (e?.message || e));
+  }
   // ------------------ BOTS (UPGRADED: shirts + nametags) ------------------
   const bots = buildBotsWithShirts(THREE, scene, world, texLoader);
   world.bots = bots;

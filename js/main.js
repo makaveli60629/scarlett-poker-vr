@@ -1,5 +1,9 @@
 // /js/main.js — Scarlett Poker VR Boot v10.5 (Hands + World HUD + Billboards)
-
+import { Hands } from "./hands.js";
+// ...
+const hands = Hands.init({ THREE, renderer, xrPivot, controllers, log });
+// ...
+try { hands?.update?.(dt); } catch {}
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";

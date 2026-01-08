@@ -1,89 +1,226 @@
-// /js/hands.js — Scarlett VR Hands v1.0 (visible in controllers + hand tracking)
-// No "three" import. main passes THREE.
+// /js/hands.js — Scarlett Hands v1.0 (GitHub Pages safe)
+// Exports: HandsSystem
+// Purpose:
+// - Provide visible "glove" hands for controller mode AND hand-tracking mode.
+// - Never crash if hand-tracking isn't available.
+// - Works with main.js importing:  import { HandsSystem } from "./hands.js";
 
-export const Hands = {
-  init({ THREE, renderer, xrPivot, controllers = [], log = console.log }) {
-    const L = (...a) => { try { log(...a); } catch {} };
+export const HandsSystem = {
+  init({ THREE, scene, renderer, log = console.log } = {}) {
+    const L = (...a) => { try { log(...a); } catch { console.log(...a); } };
+
+    const root = new THREE.Group();
+    root.name = "HandsSystem";
+    scene.add(root);
 
     const state = {
-      hands: [],
-      controllerGloves: [],
-      t: 0
+      enabled: true,
+      t: 0,
+      hands: [
+        { index: 0, obj: null, type: "unknown", pinch: 0 },
+        { index: 1, obj: null, type: "unknown", pinch: 0 }
+      ],
+      // hand-tracking objects (if available)
+      xrHands: [null, null],
+      // fallback controller grips (if available)
+      grips: [null, null],
     };
 
-    // ---- controller gloves (always show) ----
-    const gloveMat = new THREE.MeshStandardMaterial({
-      color: 0x111111,
-      roughness: 0.35,
-      metalness: 0.05,
-      emissive: 0x060606,
-      emissiveIntensity: 0.35
-    });
-
-    function makeGlove() {
+    // ---- Simple glove mesh ----
+    function makeGlove(color = 0x0b0b0f, accent = 0xff2d7a) {
       const g = new THREE.Group();
       g.name = "Glove";
 
-      const palm = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.10), gloveMat);
-      palm.position.set(0, -0.01, -0.035);
+      const mat = new THREE.MeshStandardMaterial({
+        color,
+        roughness: 0.55,
+        metalness: 0.1,
+        emissive: 0x000000,
+        emissiveIntensity: 0.0
+      });
+
+      const accentMat = new THREE.MeshStandardMaterial({
+        color: accent,
+        roughness: 0.35,
+        metalness: 0.2,
+        emissive: accent,
+        emissiveIntensity: 0.15
+      });
+
+      // palm
+      const palm = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.018, 0.08), mat);
+      palm.position.set(0, 0, 0);
       g.add(palm);
 
-      const kn = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.02, 0.06), gloveMat);
-      kn.position.set(0, 0.01, -0.015);
-      g.add(kn);
+      // knuckle ridge
+      const ridge = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.01, 0.05), accentMat);
+      ridge.position.set(0, 0.012, 0.012);
+      g.add(ridge);
 
-      const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.038, 0.03, 16), gloveMat);
-      cuff.rotation.x = Math.PI / 2;
-      cuff.position.set(0, 0.0, 0.035);
-      g.add(cuff);
+      // fingers (4)
+      for (let i = 0; i < 4; i++) {
+        const f = new THREE.Mesh(new THREE.CapsuleGeometry(0.007, 0.035, 6, 10), mat);
+        f.rotation.x = Math.PI / 2;
+        f.position.set(-0.018 + i * 0.012, 0.010, 0.042);
+        g.add(f);
+      }
 
+      // thumb
+      const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.007, 0.03, 6, 10), mat);
+      thumb.rotation.z = -0.6;
+      thumb.rotation.x = Math.PI / 2;
+      thumb.position.set(0.03, 0.003, 0.02);
+      g.add(thumb);
+
+      // tiny “pinch orb”
+      const orb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.012, 12, 10),
+        new THREE.MeshStandardMaterial({
+          color: accent,
+          emissive: accent,
+          emissiveIntensity: 0.35,
+          roughness: 0.25
+        })
+      );
+      orb.position.set(0.0, 0.015, 0.065);
+      orb.name = "pinch_orb";
+      orb.visible = false;
+      g.add(orb);
+
+      g.userData.pinchOrb = orb;
       return g;
     }
 
-    controllers.forEach((c, i) => {
-      const glove = makeGlove();
-      glove.position.set(0, 0, 0);
-      glove.rotation.x = -0.2;
-      c.add(glove);
-      state.controllerGloves.push(glove);
-    });
+    // Create visible hands (always)
+    const left = makeGlove(0x0b0b0f, 0xff2d7a);
+    const right = makeGlove(0x0b0b0f, 0x7fe7ff);
 
-    // ---- WebXR hand tracking palms (simple visible) ----
-    for (let i = 0; i < 2; i++) {
-      const hand = renderer.xr.getHand(i);
-      hand.name = "XRHand" + i;
+    left.name = "HandLeft";
+    right.name = "HandRight";
 
-      const palm = new THREE.Mesh(
-        new THREE.SphereGeometry(0.035, 18, 14),
-        new THREE.MeshStandardMaterial({
-          color: 0x1a1a1a,
-          roughness: 0.35,
-          emissive: 0x0b0b0b,
-          emissiveIntensity: 0.4
-        })
-      );
-      palm.name = "PalmMesh";
-      palm.position.set(0, 0, 0);
+    root.add(left, right);
 
-      hand.add(palm);
-      xrPivot.add(hand);
-      state.hands.push({ hand, palm });
+    state.hands[0].obj = left;
+    state.hands[1].obj = right;
+
+    // Slight offset so they sit nicely on controllers / tracked hands
+    function applyDefaultPose(handObj, isLeft) {
+      handObj.scale.setScalar(1.0);
+      handObj.rotation.set(0, 0, 0);
+      // Put palm slightly “forward”
+      handObj.position.set(isLeft ? -0.02 : 0.02, -0.01, -0.03);
+    }
+    applyDefaultPose(left, true);
+    applyDefaultPose(right, false);
+
+    // Try to hook XRHands if available
+    function bindXRHands() {
+      try {
+        const xr = renderer?.xr;
+        const s = xr?.getSession?.();
+        if (!s) return;
+
+        // renderer.xr.getHand(i) exists in Three when WebXR hand-tracking is enabled
+        for (let i = 0; i < 2; i++) {
+          const h = renderer.xr.getHand(i);
+          if (h && !state.xrHands[i]) {
+            state.xrHands[i] = h;
+            scene.add(h);
+            L("[Hands] XR hand bound:", i);
+          }
+        }
+      } catch {}
     }
 
-    L("[Hands] ready ✅");
-    return {
-      update(dt) {
-        state.t += dt;
-        // tiny pulse so you can see them
-        for (const g of state.controllerGloves) {
-          const s = 1.0 + Math.sin(state.t * 2.2) * 0.01;
-          g.scale.setScalar(s);
+    // Hook controller grips if possible (for controller mode)
+    function bindGrips() {
+      try {
+        for (let i = 0; i < 2; i++) {
+          const g = renderer.xr.getControllerGrip(i);
+          if (g && !state.grips[i]) state.grips[i] = g;
         }
-        for (const h of state.hands) {
-          const s = 1.0 + Math.sin(state.t * 2.0) * 0.01;
-          h.palm.scale.setScalar(s);
+      } catch {}
+    }
+
+    // Pinch detection (very light heuristic)
+    function updatePinchFromXRHand(xrHand, handState) {
+      // If joints exist, use distance between thumb-tip and index-tip
+      try {
+        const thumb = xrHand.joints?.["thumb-tip"];
+        const index = xrHand.joints?.["index-finger-tip"];
+        if (!thumb || !index) return 0;
+
+        const tp = new THREE.Vector3();
+        const ip = new THREE.Vector3();
+        thumb.getWorldPosition(tp);
+        index.getWorldPosition(ip);
+
+        const d = tp.distanceTo(ip);
+        // pinch when close
+        const pinch = clamp(1.0 - (d - 0.01) / 0.03, 0, 1);
+        return pinch;
+      } catch {
+        return 0;
+      }
+    }
+
+    function updateHandObjFromTarget(handObj, targetObj) {
+      if (!handObj || !targetObj) return;
+      // Copy world pose of target -> hand root (approx)
+      targetObj.getWorldPosition(handObj.position);
+      targetObj.getWorldQuaternion(handObj.quaternion);
+      // Small offset so it sits like a glove on top
+      handObj.translateZ(-0.03);
+      handObj.translateY(-0.01);
+    }
+
+    function update(dt) {
+      if (!state.enabled) return;
+      state.t += dt;
+
+      bindXRHands();
+      bindGrips();
+
+      // If XR hands are tracked, attach gloves to them.
+      // Otherwise attach to grips (controller mode).
+      for (let i = 0; i < 2; i++) {
+        const handObj = state.hands[i].obj;
+        const xrHand = state.xrHands[i];
+        const grip = state.grips[i];
+
+        if (xrHand) {
+          state.hands[i].type = "hand-tracking";
+          // Attach glove near the hand root (not joint-perfect, but stable)
+          updateHandObjFromTarget(handObj, xrHand);
+
+          // pinch highlight
+          const p = updatePinchFromXRHand(xrHand, state.hands[i]);
+          state.hands[i].pinch = p;
+          if (handObj.userData.pinchOrb) {
+            handObj.userData.pinchOrb.visible = p > 0.65;
+            handObj.userData.pinchOrb.scale.setScalar(0.8 + p * 0.6);
+          }
+        } else if (grip) {
+          state.hands[i].type = "controller";
+          updateHandObjFromTarget(handObj, grip);
+
+          // subtle idle “breathing”
+          const bob = Math.sin(state.t * 2.2 + i) * 0.002;
+          handObj.position.y += bob;
+
+          if (handObj.userData.pinchOrb) handObj.userData.pinchOrb.visible = false;
+        } else {
+          state.hands[i].type = "unbound";
         }
       }
-    };
+    }
+
+    function setEnabled(v) {
+      state.enabled = !!v;
+      root.visible = state.enabled;
+    }
+
+    L("[Hands] init ✅");
+    return { update, setEnabled, root };
   }
 };

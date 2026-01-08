@@ -1,123 +1,77 @@
-// /js/bots.js — Scarlett Bots 9.2 (NO three import)
+// /js/bots.js — Scarlett Bots 9.2 (NO THREE import)
 
 import { createAvatarRig } from "./avatar_rig.js";
 
-export const Bots = (() => {
-  let THREE, scene, getSeats, getLobbyZone, tableFocus;
-  const bots = [];
-  const walkers = [];
+export const Bots = {
+  _THREE: null,
+  _scene: null,
+  _texLoader: null,
+  _getSeats: null,
+  _getLobbyZone: null,
+  _tableFocus: null,
 
-  function init(ctx) {
-    THREE = ctx.THREE;
-    scene = ctx.scene;
-    getSeats = ctx.getSeats;
-    getLobbyZone = ctx.getLobbyZone;
-    tableFocus = ctx.tableFocus;
+  _bots: [],
+  _t: 0,
 
-    // seated bots (6)
+  init({ THREE, scene, getSeats, getLobbyZone, tableFocus }) {
+    this._THREE = THREE;
+    this._scene = scene;
+    this._getSeats = getSeats;
+    this._getLobbyZone = getLobbyZone;
+    this._tableFocus = tableFocus;
+
+    this._texLoader = new THREE.TextureLoader();
+
+    // 6 bots (one per seat)
     const seats = getSeats();
     for (let i = 0; i < seats.length; i++) {
-      const gender = i % 2 === 0 ? "male" : "female";
-      const tex = gender === "male"
-        ? "assets/textures/avatars/suit_male_albedo.png"
-        : "assets/textures/avatars/suit_female_albedo.png";
+      const variant = i % 2 === 0 ? "male" : "female";
 
-      const rig = createAvatarRig({ THREE, textureUrl: tex, gender });
+      const texturePath =
+        variant === "male"
+          ? "assets/textures/avatars/suit_male_albedo.png"
+          : "assets/textures/avatars/suit_female_albedo.png";
 
-      rig.root.name = `Bot_Seat_${i}`;
-      rig.root.position.copy(seats[i].position);
+      const rig = createAvatarRig({
+        THREE,
+        texLoader: this._texLoader,
+        variant,
+        texturePath
+      });
 
-      // align to chair yaw
-      rig.root.rotation.y = seats[i].yaw;
+      rig.position.set(seats[i].position.x, 0, seats[i].position.z);
+      rig.rotation.y = seats[i].yaw;
 
-      // seat height alignment (chair seat ~0.50, table felt ~0.92)
-      // put hips slightly above chair seat so body is not in floor
-      rig.root.position.y = 0.0;
+      // sit correctly on chair seat height (your chair seat is ~0.50, table felt ~0.92)
+      rig.position.y = 0.52;
 
-      rig.setPose("sit");
-      rig.playWalk(false);
+      // state
+      rig.userData.mode = "seated"; // "seated" | "walking"
+      rig.userData.seatIndex = i;
 
-      // small “head placeholder”
-      const head = new THREE.Mesh(
-        new THREE.SphereGeometry(0.11, 18, 14),
-        new THREE.MeshStandardMaterial({ color: 0x10121a, roughness: 0.55, metalness: 0.15, emissive: 0x05060a })
-      );
-      head.position.set(0, 1.48, 0.06);
-      rig.root.add(head);
-
-      scene.add(rig.root);
-      bots.push({ rig, mode: "sit" });
+      scene.add(rig);
+      this._bots.push(rig);
     }
+  },
 
-    // lobby walkers (4)
-    const z = getLobbyZone();
-    for (let i = 0; i < 4; i++) {
-      const gender = i % 2 === 0 ? "male" : "female";
-      const tex = gender === "male"
-        ? "assets/textures/avatars/suit_male_albedo.png"
-        : "assets/textures/avatars/suit_female_albedo.png";
+  update(dt) {
+    this._t += dt;
 
-      const rig = createAvatarRig({ THREE, textureUrl: tex, gender });
-      rig.root.name = `Bot_Walker_${i}`;
+    // animate seated bots with subtle breathing + tiny arm motion
+    for (const b of this._bots) {
+      const J = b.userData.joints;
+      if (!J) continue;
 
-      rig.root.position.set(
-        THREE.MathUtils.lerp(z.min.x, z.max.x, Math.random()),
-        0,
-        THREE.MathUtils.lerp(z.min.z, z.max.z, Math.random())
-      );
+      const breath = Math.sin(this._t * 1.7) * 0.02;
+      J.chest.position.y = 0.95 + breath;
 
-      rig.setPose("idle");
-      rig.playWalk(true);
+      // tiny “play” motion
+      const handWave = Math.sin(this._t * 2.2) * 0.15;
+      J.armL.rotation.x = -0.35 + handWave * 0.25;
+      J.armR.rotation.x = -0.35 - handWave * 0.25;
 
-      // head
-      const head = new THREE.Mesh(
-        new THREE.SphereGeometry(0.11, 18, 14),
-        new THREE.MeshStandardMaterial({ color: 0x10121a, roughness: 0.55, metalness: 0.15, emissive: 0x05060a })
-      );
-      head.position.set(0, 1.48, 0.06);
-      rig.root.add(head);
-
-      // target
-      const target = new THREE.Vector3(
-        THREE.MathUtils.lerp(z.min.x, z.max.x, Math.random()),
-        0,
-        THREE.MathUtils.lerp(z.min.z, z.max.z, Math.random())
-      );
-
-      scene.add(rig.root);
-      walkers.push({ rig, target, speed: 0.55 + Math.random() * 0.25 });
+      // head look
+      J.head.rotation.y = Math.sin(this._t * 0.6) * 0.25;
     }
-  }
-
-  function update(dt) {
-    // update mixers
-    for (const b of bots) b.rig.mixer.update(dt);
-    for (const w of walkers) w.rig.mixer.update(dt);
-
-    // move walkers
-    const z = getLobbyZone();
-    for (const w of walkers) {
-      const p = w.rig.root.position;
-      const to = new THREE.Vector3().subVectors(w.target, p);
-      const d = to.length();
-
-      if (d < 0.25) {
-        w.target.set(
-          THREE.MathUtils.lerp(z.min.x, z.max.x, Math.random()),
-          0,
-          THREE.MathUtils.lerp(z.min.z, z.max.z, Math.random())
-        );
-        continue;
-      }
-
-      to.normalize();
-      p.addScaledVector(to, w.speed * dt);
-
-      // face direction of movement
-      const yaw = Math.atan2(to.x, to.z);
-      w.rig.root.rotation.y = yaw;
-    }
-  }
-
-  return { init, update };
-})();
+  },
+};

@@ -5,74 +5,57 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
   <title>Scarlett VR Poker</title>
   <style>
-    html,body { margin:0; padding:0; overflow:hidden; background:#000; touch-action:none; }
+    html,body { margin:0; padding:0; overflow:hidden; background:#000; }
     #hud {
       position: fixed; left: 12px; top: 12px; right: 12px;
       color: #fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      background: rgba(0,0,0,0.58); border-radius: 18px; padding: 14px 16px;
-      z-index: 9999;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      background: rgba(0,0,0,0.55); border-radius: 18px; padding: 14px 16px;
+      z-index: 9999; backdrop-filter: blur(10px);
     }
-    #hud .title { font-size: 34px; font-weight: 850; margin-bottom: 6px; letter-spacing: 0.2px; }
-    #hud .sub { opacity: 0.92; line-height: 1.3; }
-    #hud .row { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
+    #hudTitle { font-size: 34px; font-weight: 900; margin-bottom: 6px; letter-spacing: 0.5px; }
+    #hudSub { opacity: 0.95; line-height: 1.35; }
+    #hudBtns { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
     .btn {
-      padding: 10px 12px; border-radius: 12px;
+      padding: 10px 14px; border-radius: 12px;
       border: 1px solid rgba(255,255,255,0.18);
       background: rgba(0,0,0,0.55); color:#fff;
       font-size: 14px; font-weight: 650;
-      user-select: none;
     }
-    .btn:active { transform: translateY(1px); }
-
     #status {
       margin-top: 10px;
-      padding: 10px 12px;
-      border-radius: 14px;
-      background: rgba(255,255,255,0.06);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
-      white-space: pre-wrap;
-      color: #bff;
-    }
-
-    #logWrap {
-      position: fixed; left: 12px; right: 12px; bottom: 84px;
-      z-index: 9999;
+      color: #9ff; opacity: 0.95;
+      background: rgba(0,0,0,0.35);
+      padding: 10px 12px; border-radius: 12px;
     }
     #log {
+      position: fixed; left: 12px; right: 12px; bottom: 84px;
       color: #9ff; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      background: rgba(0,0,0,0.58); border-radius: 18px; padding: 12px;
-      max-height: 38vh; overflow:auto; white-space: pre-wrap;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      background: rgba(0,0,0,0.55); border-radius: 18px; padding: 12px;
+      max-height: 40vh; overflow:auto; white-space: pre-wrap;
+      z-index: 9999;
     }
-
+    #log.hidden { display:none; }
     #forceVR {
       position: fixed; right: 12px; bottom: 12px;
-      padding: 14px 18px; border-radius: 14px;
-      border: 1px solid rgba(255,255,255,0.22);
-      background: rgba(0,0,0,0.70); color:#fff;
-      font-size: 16px; font-weight: 800;
-      z-index: 2147483647;
+      padding: 14px 18px; border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(0,0,0,0.65); color:#fff;
+      font-size: 16px; z-index: 2147483647;
       display:none;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
     }
-
-    /* Hide HUD/log in VR if you want later by adding a body class */
-    body.vr #hud { display:none; }
-    body.vr #logWrap { display:none; }
   </style>
 </head>
 <body>
   <div id="hud">
-    <div class="title">Scarlett VR Poker</div>
-    <div class="sub">
-      <div><b>Quest:</b> tap <b>ENTER VR</b> (bottom-right).</div>
-      <div><b>Move:</b> Left stick • <b>Snap turn:</b> Right stick • <b>Teleport:</b> Right trigger</div>
-      <div><b>Android preview:</b> WebXR may not exist — you’ll still see the world in 2D.</div>
+    <div id="hudTitle">Scarlett VR Poker</div>
+    <div id="hudSub">
+      Quest: tap <b>ENTER VR</b> (bottom-right).<br/>
+      Move: Left stick • Snap turn: Right stick • Teleport: Right trigger<br/>
+      Android preview: WebXR may not exist — you’ll still see the world in 2D.
     </div>
 
-    <div class="row">
+    <div id="hudBtns">
       <button class="btn" id="btnRecenter">Recenter</button>
       <button class="btn" id="btnToggleLog">Toggle Log</button>
       <button class="btn" id="btnReload">Reload</button>
@@ -80,123 +63,54 @@
       <button class="btn" id="btnCopyLog">Copy Log</button>
     </div>
 
-    <div id="status">Status: booting…</div>
+    <div id="status">Booting…</div>
   </div>
 
-  <div id="logWrap">
-    <div id="log">Booting…</div>
-  </div>
-
+  <div id="log">Booting…</div>
   <button id="forceVR">ENTER VR</button>
 
   <script type="module">
     const logEl = document.getElementById('log');
     const statusEl = document.getElementById('status');
-    const forceBtn = document.getElementById('forceVR');
-    const logWrap = document.getElementById('logWrap');
 
-    // ======== BUILD VERSION (change this when you push an update) ========
-    const BUILD = "9010";
-    window.__BUILD_V = BUILD;
-
-    // ======== HUD Logger used by main.js/world.js ========
     window.__hubLog = (m) => {
-      const line = (typeof m === "string") ? m : JSON.stringify(m);
-      logEl.textContent += "\n" + line;
+      logEl.textContent += "\n" + m;
       logEl.scrollTop = logEl.scrollHeight;
-      console.log(line);
+      statusEl.textContent = m;
+      console.log(m);
     };
 
-    function setStatus(lines) {
-      statusEl.textContent = lines.join("\n");
-    }
+    const v = Date.now().toString();
+    window.__BUILD_V = v;
+    __hubLog("BOOT v=" + v);
 
-    __hubLog("BOOT v=" + BUILD);
-
-    // ======== Status ========
-    const ua = navigator.userAgent || "";
-    const isQuest = /OculusBrowser|Quest|Oculus/i.test(ua);
-    const hasXR = !!navigator.xr;
-    let supportedVR = false;
-
-    setStatus([
-      "Build: " + BUILD,
-      "UA: " + (isQuest ? "Quest/OculusBrowser" : "Other"),
-      "navigator.xr: " + (hasXR ? "true" : "false"),
-      "immersive-vr: checking…"
-    ]);
-
-    if (navigator.xr?.isSessionSupported) {
-      try {
-        supportedVR = await navigator.xr.isSessionSupported("immersive-vr");
-      } catch {}
-    }
-
-    setStatus([
-      "Build: " + BUILD,
-      "UA: " + (isQuest ? "Quest/OculusBrowser" : "Other"),
-      "navigator.xr: " + (hasXR ? "true" : "false"),
-      "immersive-vr: " + (supportedVR ? "supported ✅" : "not supported ⚠️")
-    ]);
-
-    // ======== Import your main.js (cache-safe) ========
-    try {
-      await import(`./js/main.js?v=${encodeURIComponent(BUILD)}`);
-      __hubLog("main.js loaded ✅");
-    } catch (e) {
-      __hubLog("❌ main import failed: " + (e?.message || e));
-    }
-
-    // ======== VRButton fallback ========
-    // If VRButton doesn't appear within 1.2s on Quest, show a big fallback
-    setTimeout(() => {
-      const vrBtn = document.getElementById("VRButton");
-      const shouldShowFallback = isQuest && supportedVR && (!vrBtn || vrBtn.offsetParent === null);
-      if (shouldShowFallback) {
-        forceBtn.style.display = "block";
-        __hubLog("⚠️ VRButton not visible → showing fallback ENTER VR button");
-      }
-    }, 1200);
-
-    // The fallback button just clicks the real VRButton if it exists
-    forceBtn.addEventListener("click", () => {
-      const vrBtn = document.getElementById("VRButton");
-      if (vrBtn) vrBtn.click();
-      else __hubLog("⚠️ VRButton not found yet.");
-    });
-
-    // ======== Quick actions ========
-    document.getElementById("btnToggleLog").addEventListener("click", () => {
-      logWrap.style.display = (logWrap.style.display === "none") ? "block" : "none";
-    });
-
-    document.getElementById("btnReload").addEventListener("click", () => {
-      location.reload();
-    });
-
-    document.getElementById("btnFullscreen").addEventListener("click", async () => {
+    // HUD buttons
+    document.getElementById("btnRecenter").onclick = () => {
+      window.dispatchEvent(new Event("scarlett-recenter"));
+      __hubLog("[hud] recenter");
+    };
+    document.getElementById("btnToggleLog").onclick = () => {
+      logEl.classList.toggle("hidden");
+    };
+    document.getElementById("btnReload").onclick = () => location.reload();
+    document.getElementById("btnFullscreen").onclick = async () => {
       try {
         if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
         else await document.exitFullscreen();
-      } catch (e) {
-        __hubLog("⚠️ fullscreen failed: " + (e?.message || e));
-      }
-    });
-
-    document.getElementById("btnCopyLog").addEventListener("click", async () => {
+      } catch {}
+    };
+    document.getElementById("btnCopyLog").onclick = async () => {
       try {
-        await navigator.clipboard.writeText(logEl.textContent);
-        __hubLog("✅ log copied to clipboard");
+        await navigator.clipboard.writeText(logEl.textContent || "");
+        __hubLog("[hud] log copied ✅");
       } catch {
-        __hubLog("⚠️ clipboard blocked (browser policy)");
+        __hubLog("[hud] copy failed (browser blocked)");
       }
-    });
+    };
 
-    // Recenter: tells main.js to re-face the table + reset teleport visuals if you implement it
-    document.getElementById("btnRecenter").addEventListener("click", () => {
-      window.dispatchEvent(new Event("scarlett-recenter"));
-      __hubLog("🔄 recenter requested");
-    });
+    // Import main
+    import(`./js/main.js?v=${v}`)
+      .catch(e => __hubLog("❌ main import failed: " + (e?.message || e)));
   </script>
 </body>
 </html>

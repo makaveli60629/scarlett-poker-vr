@@ -4,6 +4,17 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
   <title>Scarlett VR Poker</title>
+
+  <!-- ✅ IMPORT MAP FIX: makes "three" work everywhere (even if some file imports from "three") -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
   <style>
     html,body { margin:0; padding:0; overflow:hidden; background:#000; }
     #hud {
@@ -13,9 +24,7 @@
       z-index: 9999;
     }
     #hud small { opacity:0.85; }
-    #controls {
-      display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;
-    }
+    #controls { display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; }
     .btn {
       padding: 12px 14px; border-radius: 14px;
       border: 1px solid rgba(255,255,255,0.22);
@@ -62,28 +71,20 @@
       console.log(m);
     };
 
-    // build id (cache bust)
+    // cache bust
     const v = Date.now().toString();
     window.__BUILD_V = v;
     __hubLog("BOOT v=" + v);
-
-    // HUD buttons
-    document.getElementById("btnRecenter").onclick = () => {
-      window.dispatchEvent(new Event("scarlett-recenter"));
-    };
-    document.getElementById("btnToggleLog").onclick = () => {
-      logEl.classList.toggle("hidden");
-    };
-    document.getElementById("btnReload").onclick = () => location.reload();
-    document.getElementById("btnFullscreen").onclick = async () => {
-      try { await document.documentElement.requestFullscreen(); } catch {}
-    };
-    document.getElementById("btnCopyLog").onclick = async () => {
-      try { await navigator.clipboard.writeText(logEl.textContent); } catch {}
-    };
-
     buildEl.textContent = `Build: ${v}`;
 
+    // HUD buttons
+    document.getElementById("btnRecenter").onclick = () => window.dispatchEvent(new Event("scarlett-recenter"));
+    document.getElementById("btnToggleLog").onclick = () => logEl.classList.toggle("hidden");
+    document.getElementById("btnReload").onclick = () => location.reload();
+    document.getElementById("btnFullscreen").onclick = async () => { try { await document.documentElement.requestFullscreen(); } catch {} };
+    document.getElementById("btnCopyLog").onclick = async () => { try { await navigator.clipboard.writeText(logEl.textContent); } catch {} };
+
+    // import main
     import(`./js/main.js?v=${v}`).catch(e => __hubLog("❌ main import failed: " + (e?.message || e)));
   </script>
 </body>

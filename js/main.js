@@ -1,15 +1,15 @@
-// /js/main.js — Scarlett Poker VR Boot v10.5 (FULL / STABLE / HANDS FIXED)
-// GitHub Pages safe (uses local ./three.js wrapper)
+// /js/main.js — Scarlett Poker VR Boot v10.5 (CDN IMPORTS / FULL / STABLE)
+// Uses "three" + addons (CDN / import map style).
 //
 // Fixes:
-// - Correctly imports { HandsSystem } from "./hands.js"
-// - Avoids "Identifier 'Hands' already been declared" by not declaring conflicting names
-// - Parents controllers + grips to PlayerRig so they never drift away when you move/teleport
-// - Calls world.connect + bots.setPlayerRig safely
+// - Correct HandsSystem import from "./hands.js"
+// - No duplicate "Hands" declarations
+// - Parents controllers + grips to PlayerRig (prevents drifting after move/teleport)
+// - Hooks bots billboard to player (if bots.js supports setPlayerRig)
 
-import * as THREE from "./three.js";
-import { VRButton } from "./three.js";
-import { XRControllerModelFactory } from "./three.js";
+import * as THREE from "three";
+import { VRButton } from "three/addons/webxr/VRButton.js";
+import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
 
 import { initWorld } from "./world.js";
 import { Controls } from "./controls.js";
@@ -46,7 +46,7 @@ const camera = new THREE.PerspectiveCamera(
 );
 
 // ---------- RENDERER ----------
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
 
@@ -79,7 +79,7 @@ scene.add(dir);
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.22));
 
-// ---------- XR CONTROLLERS (PARENTED TO PLAYER) ----------
+// ---------- XR CONTROLLERS (PARENTED TO PLAYER RIG) ----------
 const controllerModelFactory = new XRControllerModelFactory();
 const controllers = [];
 const grips = [];
@@ -101,7 +101,7 @@ for (let i = 0; i < 2; i++) {
   c.name = "Controller" + i;
   c.add(makeLaser());
 
-  // ✅ permanent fix: controller follows you because it lives under PlayerRig
+  // ✅ PERMANENT: controller moves with you because it's under PlayerRig
   player.add(c);
   controllers.push(c);
 
@@ -109,7 +109,7 @@ for (let i = 0; i < 2; i++) {
   g.name = "Grip" + i;
   g.add(controllerModelFactory.createControllerModel(g));
 
-  // ✅ also parent grip under PlayerRig
+  // ✅ ALSO parent grip under PlayerRig
   player.add(g);
   grips.push(g);
 }
@@ -184,7 +184,7 @@ try {
   console.error(e);
 }
 
-// Let bots billboard to you (tags/cards face you)
+// Let bots billboard to you (tags/cards face you) if supported
 try {
   world?.bots?.setPlayerRig?.(player, camera);
 } catch {}

@@ -1,110 +1,82 @@
-// /js/poker_simulation.js — Watchable Poker Loop 9.0
-// - Reveals community cards over time (flop/turn/river)
-// - Randomly transfers chips and updates bot tags
-// - Keeps the scene alive and understandable
+// /js/poker_simulation.js — Watchable Poker Loop (simple, visible, stable)
+// ✅ NO imports — uses injected bots/world.
 
 export const PokerSimulation = {
+  ui: null,
   t: 0,
-  phase: 0, // 0 pre, 1 flop, 2 turn, 3 river, 4 showdown
+  seatTurn: 0,
   pot: 0,
+  phase: "preflop",
+  timer: 0,
 
-  init({ THREE, world, bots, log = console.log }) {
-    this.THREE = THREE;
-    this.world = world;
-    this.bots = bots;
-    this.log = log;
-
+  init({ bots, world }) {
     this.t = 0;
-    this.phase = 0;
+    this.seatTurn = 0;
     this.pot = 0;
+    this.phase = "preflop";
+    this.timer = 0;
 
-    // ensure cards start hidden
-    if (world.cards?.setRevealedCount) world.cards.setRevealedCount(0);
+    // world.pokerView is created in world.js
+    this.ui = world?.pokerUI || null;
+
+    // kick off
+    this.pot = 150;
+    this._setAction("Dealer shuffles…");
+    if (bots?.setTurn) bots.setTurn(this.seatTurn);
   },
 
   update(dt) {
     this.t += dt;
+    this.timer += dt;
 
-    // pulse hover cards
-    if (this.world?.cards?.setPulse) this.world.cards.setPulse(this.t);
+    // each action every ~3 seconds
+    if (this.timer >= 3.2) {
+      this.timer = 0;
 
-    // every ~2 seconds advance action
-    if (this.t < 2.0) return;
-    this.t = 0;
+      const actionRoll = Math.random();
+      let action = "checks";
+      let amt = 0;
 
-    if (this.phase === 0) {
-      // new hand: reset pot
-      this.pot = 0;
-      if (this.world.cards?.setRevealedCount) this.world.cards.setRevealedCount(0);
-      this._randomBetting();
-      this.phase = 1;
-      return;
-    }
+      if (actionRoll < 0.25) { action = "calls"; amt = 50 + Math.floor(Math.random()*3)*50; }
+      else if (actionRoll < 0.50) { action = "raises"; amt = 100 + Math.floor(Math.random()*6)*50; }
+      else if (actionRoll < 0.65) { action = "folds"; amt = 0; }
+      else { action = "checks"; amt = 0; }
 
-    if (this.phase === 1) {
-      // flop
-      if (this.world.cards?.setRevealedCount) this.world.cards.setRevealedCount(3);
-      this._randomBetting();
-      this.phase = 2;
-      return;
-    }
+      if (amt) this.pot += amt;
 
-    if (this.phase === 2) {
-      // turn
-      if (this.world.cards?.setRevealedCount) this.world.cards.setRevealedCount(4);
-      this._randomBetting();
-      this.phase = 3;
-      return;
-    }
-
-    if (this.phase === 3) {
-      // river
-      if (this.world.cards?.setRevealedCount) this.world.cards.setRevealedCount(5);
-      this._randomBetting();
-      this.phase = 4;
-      return;
-    }
-
-    if (this.phase === 4) {
-      // showdown: pick a winner among seated
-      const seated = (this.bots?.bots || []).filter(b => b.userData?.bot?.seated);
-      if (seated.length) {
-        const w = seated[Math.floor(Math.random() * seated.length)];
-        const id = w.userData.bot.id;
-
-        // award pot
-        w.userData.bot.stack += this.pot;
-        if (this.bots?.setBotStack) this.bots.setBotStack(id, w.userData.bot.stack);
-
-        this.log(`[Poker] Winner bot ${id} wins ${this.pot}`);
+      // phase advance every full table rotation
+      if (this.seatTurn === 5) {
+        if (this.phase === "preflop") this.phase = "flop";
+        else if (this.phase === "flop") this.phase = "turn";
+        else if (this.phase === "turn") this.phase = "river";
+        else if (this.phase === "river") this.phase = "showdown";
+        else this.phase = "preflop";
       }
-      this.phase = 0;
+
+      // showdown winner
+      if (this.phase === "showdown") {
+        const winner = 1 + Math.floor(Math.random() * 6);
+        this._setAction(`BOT ${winner} WINS! (Pot ${this.pot})`);
+        this.pot = 150;
+        this.phase = "preflop";
+      } else {
+        const seatHuman = this.seatTurn + 1;
+        if (amt) this._setAction(`BOT ${seatHuman} ${action} ${amt} • ${this.phase.toUpperCase()}`);
+        else this._setAction(`BOT ${seatHuman} ${action} • ${this.phase.toUpperCase()}`);
+      }
+
+      // next seat
+      this.seatTurn = (this.seatTurn + 1) % 6;
+
+      // highlight turn ring
+      if (world?.bots?.setTurn) world.bots.setTurn(this.seatTurn);
+
+      // update pot text
+      if (world?.setPotText) world.setPotText(`POT: ${this.pot}`);
     }
   },
 
-  _randomBetting() {
-    const seated = (this.bots?.bots || []).filter(b => b.userData?.bot?.seated);
-    if (seated.length < 2) return;
-
-    // choose 2-4 bettors
-    const n = Math.min(seated.length, 2 + Math.floor(Math.random() * 3));
-    const bettors = shuffle(seated).slice(0, n);
-
-    for (const b of bettors) {
-      const d = b.userData.bot;
-      const bet = Math.min(d.stack, 50 + Math.floor(Math.random() * 150));
-      d.stack -= bet;
-      this.pot += bet;
-      if (this.bots?.setBotStack) this.bots.setBotStack(d.id, d.stack);
-    }
+  _setAction(text) {
+    if (this.ui?.setLine) this.ui.setLine(text);
   }
 };
-
-function shuffle(a) {
-  const x = a.slice();
-  for (let i = x.length - 1; i > 0; i--) {
-    const j = (Math.random() * (i + 1)) | 0;
-    [x[i], x[j]] = [x[j], x[i]];
-  }
-  return x;
-}

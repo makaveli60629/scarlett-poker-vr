@@ -6,7 +6,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9020" })
   const world = {
     group: new THREE.Group(),
     tableFocus: new THREE.Vector3(0, 0, -6.5),
-    spawnPads: [new THREE.Vector3(0, 0, 3.6)],          // “ultimate spawn spot”
+    spawnPads: [new THREE.Vector3(0, 0, 3.6)],
     roomClamp: { minX: -7.6, maxX: 7.6, minZ: -13.6, maxZ: 7.6 },
     seats: [],
     lobbyZone: { min: new THREE.Vector3(-6, 0, 6), max: new THREE.Vector3(6, 0, 12) },
@@ -18,7 +18,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9020" })
   world.group.name = "World";
   scene.add(world.group);
 
-  // ---------------- TEXTURES (safe) ----------------
+  // ---------------- TEXTURES ----------------
   const texLoader = new THREE.TextureLoader();
   const loadTex = (url, opts = {}) =>
     new Promise((resolve) => {
@@ -47,7 +47,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9020" })
     felt: await loadTex("assets/textures/table_felt_green.jpg", { srgb: true }),
   };
 
-  // ---------------- LIGHTING (more) ----------------
+  // ---------------- LIGHTING ----------------
   world.group.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.1));
 
   const key = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -58,7 +58,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9020" })
   fill.position.set(0, 2.4, 2.0);
   world.group.add(fill);
 
-  const purple = new THREE.PointLight(0xb46bff, 0.55, 18);
+  const purple = new THREE.PointLight(0xb46bff, 0.65, 18);
   purple.position.set(0, 2.6, 3.6);
   world.group.add(purple);
 
@@ -94,7 +94,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9020" })
   ceiling.scale.set(1.3, 0.9, 1.3);
   world.group.add(ceiling);
 
-  // ---------------- SPAWN CIRCLE (permanent marker) ----------------
+  // ---------------- SPAWN CIRCLE ----------------
   const spawnRing = new THREE.Mesh(
     new THREE.RingGeometry(0.28, 0.42, 48),
     new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
@@ -104,10 +104,9 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9020" })
   spawnRing.name = "SpawnRing";
   world.group.add(spawnRing);
 
-  // pulse
-  const prevTick0 = world.tick;
+  const tick0 = world.tick;
   world.tick = (dt) => {
-    prevTick0(dt);
+    tick0(dt);
     spawnRing.userData.t = (spawnRing.userData.t || 0) + dt;
     spawnRing.material.opacity = 0.65 + Math.sin(spawnRing.userData.t * 3.0) * 0.18;
   };
@@ -133,12 +132,12 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9020" })
   rim.position.y = 1.01;
   table.add(rim);
 
-  // ---------------- RAILS (bigger radius + glow top ring) ----------------
+  // ---------------- RAILS (bigger radius + glow) ----------------
   const rails = new THREE.Group();
   rails.name = "Rails";
   table.add(rails);
 
-  const railR = 3.75; // ✅ pushed out so not too close to chairs
+  const railR = 3.75;
   const postMat = new THREE.MeshStandardMaterial({ color: 0x12131a, roughness: 0.85 });
   for (let i = 0; i < 28; i++) {
     const a = (i / 28) * Math.PI * 2;
@@ -147,7 +146,6 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9020" })
     rails.add(post);
   }
 
-  // dark ring
   const railRing = new THREE.Mesh(
     new THREE.TorusGeometry(railR, 0.05, 10, 90),
     new THREE.MeshStandardMaterial({ color: 0x1b1c26, roughness: 0.85 })
@@ -156,7 +154,6 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9020" })
   railRing.position.y = 0.62;
   rails.add(railRing);
 
-  // glow ring (top)
   const glowRing = new THREE.Mesh(
     new THREE.TorusGeometry(railR, 0.018, 10, 120),
     new THREE.MeshStandardMaterial({
@@ -173,21 +170,19 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9020" })
   glowRing.position.y = 0.69;
   rails.add(glowRing);
 
-  // animate rail glow
-  const prevTick1 = world.tick;
+  const tick1 = world.tick;
   world.tick = (dt) => {
-    prevTick1(dt);
+    tick1(dt);
     glowRing.userData.t = (glowRing.userData.t || 0) + dt;
     glowRing.material.emissiveIntensity = 1.15 + Math.sin(glowRing.userData.t * 3.5) * 0.35;
   };
 
-  // ---------------- CHAIRS (6) ----------------
+  // ---------------- CHAIRS (6 seats) ----------------
   const chairMat = new THREE.MeshStandardMaterial({ color: 0x151821, roughness: 0.95 });
   const chairSeatMat = new THREE.MeshStandardMaterial({ color: 0x2a1b10, roughness: 0.85 });
 
   function makeChair() {
     const g = new THREE.Group();
-
     const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.30, 0.30, 0.08, 18), chairSeatMat);
     seat.position.y = 0.50;
     g.add(seat);
@@ -207,7 +202,6 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9020" })
     return g;
   }
 
-  // seats pushed slightly outward from table, inside rails
   const c = world.tableFocus.clone();
   const seatR = 3.05;
   for (let i = 0; i < 6; i++) {
@@ -226,7 +220,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9020" })
   try {
     const mod = await import(`./teleport_machine.js?v=${encodeURIComponent(v)}`);
     if (mod?.TeleportMachine?.build) {
-      const tele = mod.TeleportMachine.build({ THREE, scene: world.group, texLoader });
+      const tele = mod.TeleportMachine.build({ THREE, scene: world.group, texLoader, log });
       tele.position.set(0, 0, 3.6);
       world.teleporter = tele;
 
@@ -265,4 +259,4 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9020" })
 
   log("[world] ready ✅");
   return world;
-}
+      }

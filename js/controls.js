@@ -1,19 +1,14 @@
-// /js/controls.js — Scarlett VR Poker Controls v10.7 (WIRED)
-// - Smooth move (left stick) + Snap turn (right stick)
-// - Desktop fallback (WASD + mouse look + Q/E snap)
-// - Android dock support via "scarlett-touch" events
-// - Listens to HUD toggles: scarlett-toggle-move, scarlett-toggle-snap
+// /js/controls.js — Scarlett VR Poker Controls v11.2
+// XR: RIGHT stick = smooth move, LEFT stick = snap turn
+// Desktop: WASD + QE snap turn + mouse look
 
 export const Controls = {
-  init({ THREE, renderer, camera, player, log, world } = {}) {
-    const L = (...a) => { try { log?.(...a); } catch { console.log(...a); } };
+  init({ THREE, renderer, camera, player, log = console.log } = {}) {
+    const L = (...a) => { try { log(...a); } catch { console.log(...a); } };
 
     const state = {
       enabled: true,
-      moveEnabled: true,
-      snapEnabled: true,
-
-      moveSpeed: 1.9,
+      moveSpeed: 2.2,
       sprintMult: 1.6,
       snapTurnDeg: 35,
       snapCooldown: 0.22,
@@ -26,25 +21,12 @@ export const Controls = {
       keys: Object.create(null),
       mouseSens: 0.0022,
       queuedSnap: 0,
-
-      // Android/touch dock
-      touch: { f:0, b:0, l:0, r:0, turnL:0, turnR:0 },
-      touchActiveAt: 0,
     };
-
-    // apply initial HUD flags if present
-    try {
-      const f = window.__SCARLETT_FLAGS;
-      if (f) {
-        state.moveEnabled = !!f.move;
-        state.snapEnabled = !!f.snap;
-      }
-    } catch {}
 
     const snapTurnRad = (state.snapTurnDeg * Math.PI) / 180;
 
-    // ---------- Desktop controls ----------
-    const canvas = renderer?.domElement;
+    // --- Desktop controls ---
+    const canvas = renderer.domElement;
 
     function onKey(e, down) {
       state.keys[e.code] = down;
@@ -53,12 +35,11 @@ export const Controls = {
         if (e.code === "KeyE") state.queuedSnap = -1;
       }
     }
-
     window.addEventListener("keydown", (e) => onKey(e, true));
     window.addEventListener("keyup", (e) => onKey(e, false));
 
-    canvas?.addEventListener("click", () => {
-      if (renderer?.xr?.isPresenting) return;
+    canvas.addEventListener("click", () => {
+      if (renderer.xr?.isPresenting) return;
       canvas.requestPointerLock?.();
     });
 
@@ -74,80 +55,42 @@ export const Controls = {
       state.pitch = Math.max(-lim, Math.min(lim, state.pitch));
     });
 
-    // ---------- HUD toggle listeners ----------
-    window.addEventListener("scarlett-toggle-move", (e) => {
-      state.moveEnabled = !!e?.detail;
-      L("[controls] moveEnabled=", state.moveEnabled);
-    });
+    // --- XR input helpers ---
+    function getSession() { return renderer.xr?.getSession?.() || null; }
+    function getSources() { return getSession()?.inputSources || []; }
 
-    window.addEventListener("scarlett-toggle-snap", (e) => {
-      state.snapEnabled = !!e?.detail;
-      L("[controls] snapEnabled=", state.snapEnabled);
-    });
-
-    // ---------- Android dock listener ----------
-    window.addEventListener("scarlett-touch", (e) => {
-      if (!e?.detail) return;
-      state.touch = {
-        f: +e.detail.f || 0,
-        b: +e.detail.b || 0,
-        l: +e.detail.l || 0,
-        r: +e.detail.r || 0,
-        turnL: +e.detail.turnL || 0,
-        turnR: +e.detail.turnR || 0,
-      };
-      state.touchActiveAt = performance.now();
-    });
-
-    // ---------- XR helpers ----------
-    function getSession() {
-      return renderer?.xr?.getSession?.() || null;
-    }
-    function getSources() {
-      return getSession()?.inputSources || [];
-    }
-    function getHandSource(handedness) {
+    function getSource(handedness) {
       const sources = getSources();
       for (const s of sources) if (s.handedness === handedness) return s;
       return null;
     }
 
-    // Quest mappings differ across runtimes.
-    // We handle both common cases:
-    // Case A: each controller has its own gamepad with axes[0,1]
-    // Case B: axes[0,1] left + axes[2,3] right
-    function getStick(src, handedness) {
+    function getStick(src) {
       const gp = src?.gamepad;
       if (!gp || !gp.axes) return { x: 0, y: 0 };
 
-      const a = gp.axes;
-      if (a.length >= 4) {
-        // Some runtimes put both sticks in one GP
-        if (handedness === "right") {
-          // prefer [2,3], fallback [0,1]
-          return { x: a[2] ?? a[0] ?? 0, y: a[3] ?? a[1] ?? 0 };
-        } else {
-          return { x: a[0] ?? 0, y: a[1] ?? 0 };
-        }
+      // If 4 axes exist, right stick is [2,3], left is [0,1]
+      if (gp.axes.length >= 4) {
+        if (src.handedness === "right") return { x: gp.axes[2] || 0, y: gp.axes[3] || 0 };
+        return { x: gp.axes[0] || 0, y: gp.axes[1] || 0 };
       }
-      return { x: a[0] || 0, y: a[1] || 0 };
+      // fallback
+      return { x: gp.axes[0] || 0, y: gp.axes[1] || 0 };
     }
 
-    // ---------- Movement math ----------
+    // --- movement math ---
     const tmpQ = new THREE.Quaternion();
     const fwd = new THREE.Vector3();
     const right = new THREE.Vector3();
     const dir = new THREE.Vector3();
 
     function applyMove(strafeX, stickY, dt, sprint) {
-      if (!state.moveEnabled) return;
-
       const dz = 0.14;
       const ax = Math.abs(strafeX) < dz ? 0 : strafeX;
       const ay = Math.abs(stickY) < dz ? 0 : stickY;
       if (ax === 0 && ay === 0) return;
 
-      const forward = -ay; // stick forward usually negative
+      const forward = -ay; // forward usually negative
       const strafe = ax;
 
       camera.getWorldQuaternion(tmpQ);
@@ -170,89 +113,51 @@ export const Controls = {
 
       player.position.x += dir.x * step;
       player.position.z += dir.z * step;
-
-      // optional world clamp if present
-      try {
-        const c = world?.roomClamp;
-        if (c) {
-          player.position.x = Math.max(c.minX, Math.min(c.maxX, player.position.x));
-          player.position.z = Math.max(c.minZ, Math.min(c.maxZ, player.position.z));
-        }
-      } catch {}
     }
 
     function applySnapTurn(xAxis) {
-      if (!state.snapEnabled) return;
-
       const dz = 0.55;
       if (Math.abs(xAxis) < dz) return;
       if (state.snapT > 0) return;
 
       const sign = xAxis > 0 ? -1 : 1;
       player.rotation.y += sign * snapTurnRad;
-      state.yaw = player.rotation.y;
       state.snapT = state.snapCooldown;
     }
 
-    L("[controls] ready ✅ (move/snap wired)");
+    L("[controls] ready ✅ (XR: right-move, left-snap)");
 
     return {
-      setMoveEnabled(v) { state.moveEnabled = !!v; },
-      setSnapEnabled(v) { state.snapEnabled = !!v; },
-      setEnabled(v) { state.enabled = !!v; },
-
       update(dt) {
         if (!state.enabled) return;
         state.snapT = Math.max(0, state.snapT - dt);
 
-        const isXR = renderer?.xr?.isPresenting;
+        const isXR = renderer.xr?.isPresenting;
 
         if (isXR) {
-          // VR: left stick = move, right stick = snap turn
-          const leftSrc = getHandSource("left");
-          const rightSrc = getHandSource("right");
-
-          const mv = getStick(leftSrc, "left");
+          // RIGHT stick moves
+          const rightSrc = getSource("right");
+          const mv = getStick(rightSrc);
           applyMove(mv.x, mv.y, dt, false);
 
-          const tr = getStick(rightSrc, "right");
+          // LEFT stick snap-turn
+          const leftSrc = getSource("left");
+          const tr = getStick(leftSrc);
           applySnapTurn(tr.x);
 
           return;
         }
 
-        // Desktop / Android:
-        // yaw on player, pitch on camera
+        // Desktop
         player.rotation.y = state.yaw;
         camera.rotation.x = state.pitch;
 
-        // If Android dock is active recently, use it
-        const recentlyTouched = (performance.now() - state.touchActiveAt) < 250;
-
-        if (recentlyTouched) {
-          const forward = (state.touch.f ? 1 : 0) + (state.touch.b ? -1 : 0);
-          const strafe  = (state.touch.r ? 1 : 0) + (state.touch.l ? -1 : 0);
-
-          if (forward !== 0 || strafe !== 0) {
-            applyMove(strafe, -forward, dt, false);
-          }
-
-          // smooth turn buttons act like snap pulses
-          if (state.touch.turnL) applySnapTurn(-1);
-          if (state.touch.turnR) applySnapTurn( 1);
-
-          return;
-        }
-
-        // Desktop keys
         const k = state.keys;
         const forward = (k["KeyW"] ? 1 : 0) + (k["KeyS"] ? -1 : 0);
         const strafe = (k["KeyD"] ? 1 : 0) + (k["KeyA"] ? -1 : 0);
         const sprint = !!k["ShiftLeft"] || !!k["ShiftRight"];
 
-        if (forward !== 0 || strafe !== 0) {
-          applyMove(strafe, -forward, dt, sprint);
-        }
+        if (forward !== 0 || strafe !== 0) applyMove(strafe, -forward, dt, sprint);
 
         if (state.queuedSnap !== 0 && state.snapT <= 0) {
           player.rotation.y += state.queuedSnap * snapTurnRad;

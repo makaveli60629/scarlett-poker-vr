@@ -1,12 +1,11 @@
-// /js/main.js — Scarlett Poker VR Boot v10.4 (FULL UPGRADED / STABLE)
-// GitHub Pages safe
-// - Controllers/grips are parented to PlayerRig so they never "drift away" when you move.
-// - HandsSystem is optional but expected to exist at ./hands.js exporting HandsSystem.
-// - World/Controls/Teleport/DealingMix remain modular.
-
-// IMPORTANT:
-// This file assumes you have /js/three.js as your three wrapper.
-// If your project uses bare "three" imports instead, change the first 3 imports accordingly.
+// /js/main.js — Scarlett Poker VR Boot v10.5 (FULL / STABLE / HANDS FIXED)
+// GitHub Pages safe (uses local ./three.js wrapper)
+//
+// Fixes:
+// - Correctly imports { HandsSystem } from "./hands.js"
+// - Avoids "Identifier 'Hands' already been declared" by not declaring conflicting names
+// - Parents controllers + grips to PlayerRig so they never drift away when you move/teleport
+// - Calls world.connect + bots.setPlayerRig safely
 
 import * as THREE from "./three.js";
 import { VRButton } from "./three.js";
@@ -16,19 +15,16 @@ import { initWorld } from "./world.js";
 import { Controls } from "./controls.js";
 import { Teleport } from "./teleport.js";
 import { DealingMix } from "./dealingMix.js";
-
-// Hands (must export HandsSystem from /js/hands.js)
 import { HandsSystem } from "./hands.js";
 
 // ---------- LOG ----------
 const logEl = document.getElementById("log");
-const log = (m, ...rest) => {
-  try { console.log(m, ...rest); } catch {}
-  if (logEl) {
-    const line = typeof m === "string" ? m : JSON.stringify(m);
-    logEl.textContent += "\n" + line + (rest?.length ? " " + rest.map(String).join(" ") : "");
-    logEl.scrollTop = logEl.scrollHeight;
-  }
+const log = (...a) => {
+  try { console.log(...a); } catch {}
+  if (!logEl) return;
+  const line = a.map(x => (typeof x === "string" ? x : JSON.stringify(x))).join(" ");
+  logEl.textContent += "\n" + line;
+  logEl.scrollTop = logEl.scrollHeight;
 };
 
 const BUILD_V = window.__BUILD_V || Date.now().toString();
@@ -54,7 +50,6 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
 
-// modern lighting defaults
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.15;
@@ -106,7 +101,7 @@ for (let i = 0; i < 2; i++) {
   c.name = "Controller" + i;
   c.add(makeLaser());
 
-  // ✅ Parent to player rig (fixes controller drifting when player moves/teleports)
+  // ✅ permanent fix: controller follows you because it lives under PlayerRig
   player.add(c);
   controllers.push(c);
 
@@ -114,7 +109,7 @@ for (let i = 0; i < 2; i++) {
   g.name = "Grip" + i;
   g.add(controllerModelFactory.createControllerModel(g));
 
-  // ✅ Parent to player rig too
+  // ✅ also parent grip under PlayerRig
   player.add(g);
   grips.push(g);
 }
@@ -127,18 +122,16 @@ try {
   world = await initWorld({ THREE, scene, log, v: BUILD_V });
   log("[main] world loaded ✅");
 } catch (e) {
-  log("[main] world init failed ❌ " + (e?.message || e));
+  log("[main] world init failed ❌", e?.message || e);
   console.error(e);
 }
 
-// Optional: look at table
+// face table if available
 try {
-  if (world?.tableFocus) {
-    camera.lookAt(world.tableFocus.x, 1.0, world.tableFocus.z);
-  }
+  if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.0, world.tableFocus.z);
 } catch {}
 
-// Give world a chance to connect teleporter machine, etc.
+// allow world modules to connect (teleport machine, etc)
 try {
   world?.connect?.({ playerRig: player, controllers });
 } catch {}
@@ -152,13 +145,13 @@ try {
     camera,
     player,
     controllers,
-    grips,     // some control rigs use grip space
+    grips,
     log,
     world,
   });
   log("[main] controls init ✅");
 } catch (e) {
-  log("[main] controls init failed ❌ " + (e?.message || e));
+  log("[main] controls init failed ❌", e?.message || e);
   console.error(e);
 }
 
@@ -177,22 +170,21 @@ try {
   });
   log("[main] teleport init ✅");
 } catch (e) {
-  log("[main] teleport init failed ❌ " + (e?.message || e));
+  log("[main] teleport init failed ❌", e?.message || e);
   console.error(e);
 }
 
-// ---------- HANDS (VISIBLE GLOVES) ----------
-let hands = null;
+// ---------- HANDS (GLOVES) ----------
+let handsSystem = null;
 try {
-  hands = HandsSystem.init({ THREE, scene, renderer, log });
+  handsSystem = HandsSystem.init({ THREE, scene, renderer, log });
   log("[main] hands init ✅");
 } catch (e) {
-  // If hands.js is missing or export is wrong, this is where it would fail.
-  log("[main] hands init failed ❌ " + (e?.message || e));
+  log("[main] hands init failed ❌", e?.message || e);
   console.error(e);
 }
 
-// Tell bots about player rig so name tags / cards can billboard toward you (if bots supports it)
+// Let bots billboard to you (tags/cards face you)
 try {
   world?.bots?.setPlayerRig?.(player, camera);
 } catch {}
@@ -204,7 +196,7 @@ try {
   dealing.startHand?.();
   log("[main] dealing started ✅");
 } catch (e) {
-  log("[main] dealing init failed ❌ " + (e?.message || e));
+  log("[main] dealing init failed ❌", e?.message || e);
   console.error(e);
 }
 
@@ -212,11 +204,9 @@ try {
 window.addEventListener("scarlett-recenter", () => {
   player.position.set(0, 0, 3.6);
   player.rotation.set(0, 0, 0);
-
   try {
     if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.0, world.tableFocus.z);
   } catch {}
-
   log("[main] recentered ✅");
 });
 
@@ -238,7 +228,7 @@ renderer.setAnimationLoop(() => {
   try { world?.tick?.(dt); } catch (e) { console.error(e); }
   try { controls?.update?.(dt); } catch (e) { console.error(e); }
   try { teleport?.update?.(dt); } catch (e) { console.error(e); }
-  try { hands?.update?.(dt); } catch (e) { console.error(e); }
+  try { handsSystem?.update?.(dt); } catch (e) { console.error(e); }
   try { dealing?.update?.(dt); } catch (e) { console.error(e); }
 
   renderer.render(scene, camera);

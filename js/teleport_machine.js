@@ -1,256 +1,176 @@
-// /js/teleport_machine.js — Scarlett Poker VR (TeleportMachine v1.0)
-// GitHub Pages safe module (no "three" import). World/main passes THREE in.
+// /js/TeleportMachine.js
+// Scarlett VR Poker — Teleport Machine (refixed / permanent)
+// - Self-contained: builds mesh + collider + target ring + pointer sync hooks
+// - Works with your existing controller ray/teleport logic (you call setAim / setActive)
 
-export const TeleportMachine = (() => {
-  let _THREE = null;
-  let _log = console.log;
+import { TeleportVFX } from "./TeleportVFX.js";
 
-  let machine = null;
-  let marker = null;
-  let baseRing = null;
-  let glowRing = null;
-  let light = null;
+export class TeleportMachine {
+  constructor({
+    scene,
+    THREE,
+    position = { x: 0, y: 0, z: -6 },
+    rotationY = 0,
+    scale = 1,
+    name = "TeleportMachine",
+    ringRadius = 0.55,
+  }) {
+    this.scene = scene;
+    this.THREE = THREE;
 
-  let teleTargets = [];
-  let controllers = [];
-  let playerRig = null;
+    this.group = new THREE.Group();
+    this.group.name = name;
+    this.group.position.set(position.x, position.y, position.z);
+    this.group.rotation.y = rotationY;
+    this.group.scale.setScalar(scale);
 
-  const raycaster = { v: null, rc: null };
-  let lastHitOK = false;
-  let lastHitPoint = null;
+    this.active = true;
+    this._aimPoint = new THREE.Vector3();
+    this._aimNormal = new THREE.Vector3(0, 1, 0);
 
-  function safeLog(...args) { try { _log(...args); } catch {} }
-
-  function makeMachineMesh() {
-    const g = new _THREE.Group();
-    g.name = "TeleportMachine";
-
-    // pedestal
-    const pedestal = new _THREE.Mesh(
-      new _THREE.CylinderGeometry(0.28, 0.36, 0.22, 24),
-      new _THREE.MeshStandardMaterial({ color: 0x10121a, roughness: 0.9, metalness: 0.1 })
-    );
-    pedestal.position.y = 0.11;
-    g.add(pedestal);
-
-    // core orb
-    const orb = new _THREE.Mesh(
-      new _THREE.SphereGeometry(0.10, 18, 14),
-      new _THREE.MeshStandardMaterial({
-        color: 0x7fe7ff,
-        emissive: 0x2bd7ff,
-        emissiveIntensity: 1.3,
-        roughness: 0.25,
-        metalness: 0.1,
-      })
-    );
-    orb.position.y = 0.31;
-    orb.name = "TeleportOrb";
-    g.add(orb);
-
-    // ring base
-    baseRing = new _THREE.Mesh(
-      new _THREE.TorusGeometry(0.42, 0.04, 10, 48),
-      new _THREE.MeshStandardMaterial({ color: 0x1b1c26, roughness: 0.85, metalness: 0.1 })
-    );
-    baseRing.rotation.x = Math.PI / 2;
-    baseRing.position.y = 0.02;
-    g.add(baseRing);
-
-    // glow ring
-    glowRing = new _THREE.Mesh(
-      new _THREE.TorusGeometry(0.42, 0.016, 10, 64),
-      new _THREE.MeshStandardMaterial({
-        color: 0x7fe7ff,
-        emissive: 0x2bd7ff,
-        emissiveIntensity: 1.5,
-        roughness: 0.25,
-        metalness: 0.1,
-        transparent: true,
-        opacity: 0.9,
-      })
-    );
-    glowRing.rotation.x = Math.PI / 2;
-    glowRing.position.y = 0.03;
-    g.add(glowRing);
-
-    // light
-    light = new _THREE.PointLight(0x2bd7ff, 0.9, 6);
-    light.position.set(0, 0.45, 0);
-    g.add(light);
-
-    // marker (teleport destination)
-    marker = new _THREE.Mesh(
-      new _THREE.RingGeometry(0.25, 0.38, 52),
-      new _THREE.MeshBasicMaterial({
-        color: 0x7fe7ff,
-        transparent: true,
-        opacity: 0.85,
-        side: _THREE.DoubleSide,
-      })
-    );
-    marker.rotation.x = -Math.PI / 2;
-    marker.visible = false;
-    marker.name = "TeleportMarker";
-    g.add(marker);
-
-    // Save a reference for animation
-    g.userData.orb = orb;
-    g.userData.t = 0;
-
-    return g;
-  }
-
-  function ensureRaycaster() {
-    if (!raycaster.rc) raycaster.rc = new _THREE.Raycaster();
-    if (!raycaster.v) raycaster.v = new _THREE.Vector3();
-    if (!lastHitPoint) lastHitPoint = new _THREE.Vector3();
-  }
-
-  function getControllerRay(controller) {
-    ensureRaycaster();
-
-    // direction: controller forward (0,0,-1) rotated by controller world rotation
-    const m = new _THREE.Matrix4().extractRotation(controller.matrixWorld);
-    const dir = raycaster.v.set(0, 0, -1).applyMatrix4(m).normalize();
-
-    const origin = new _THREE.Vector3().setFromMatrixPosition(controller.matrixWorld);
-
-    raycaster.rc.set(origin, dir);
-    raycaster.rc.far = 30;
-    return raycaster.rc;
-  }
-
-  function updateMarkerFromController() {
-    if (!machine) return;
-
-    // Prefer right controller if exists
-    const c = controllers[1] || controllers[0];
-    if (!c) {
-      marker.visible = false;
-      lastHitOK = false;
-      return;
-    }
-
-    const rc = getControllerRay(c);
-    const hits = rc.intersectObjects(teleTargets, true);
-
-    if (hits && hits.length) {
-      lastHitPoint.copy(hits[0].point);
-      marker.position.set(lastHitPoint.x - machine.position.x, 0.01, lastHitPoint.z - machine.position.z);
-      marker.visible = true;
-      lastHitOK = true;
-    } else {
-      marker.visible = false;
-      lastHitOK = false;
-    }
-  }
-
-  function doTeleport() {
-    if (!playerRig || !lastHitOK || !lastHitPoint) return;
-    // Move rig to destination (keep y=0 for floor space)
-    playerRig.position.set(lastHitPoint.x, 0, lastHitPoint.z);
-    safeLog("[TeleportMachine] ✅ teleported to", lastHitPoint.x.toFixed(2), lastHitPoint.z.toFixed(2));
-  }
-
-  function bindInputs() {
-    // VR controller triggers
-    controllers.forEach((c) => {
-      if (!c) return;
-      c.addEventListener("selectstart", doTeleport);
-      c.addEventListener("squeezestart", doTeleport);
+    // ===== Base pedestal =====
+    const baseGeo = new THREE.CylinderGeometry(0.75, 0.95, 0.35, 32, 1, false);
+    const baseMat = new THREE.MeshStandardMaterial({
+      color: 0x111111,
+      metalness: 0.7,
+      roughness: 0.35,
     });
+    const base = new THREE.Mesh(baseGeo, baseMat);
+    base.position.y = 0.175;
+    base.castShadow = true;
+    base.receiveShadow = true;
+    this.group.add(base);
 
-    // Desktop / mobile fallback: tap/click teleports to current marker (if visible)
-    window.addEventListener("pointerdown", () => {
-      if (marker?.visible) doTeleport();
+    // ===== Column =====
+    const colGeo = new THREE.CylinderGeometry(0.18, 0.22, 1.2, 24);
+    const colMat = new THREE.MeshStandardMaterial({
+      color: 0x1b1b1b,
+      metalness: 0.6,
+      roughness: 0.35,
     });
+    const col = new THREE.Mesh(colGeo, colMat);
+    col.position.y = 0.35 + 0.6;
+    col.castShadow = true;
+    this.group.add(col);
+
+    // ===== Crown “dock” head =====
+    const headGeo = new THREE.TorusGeometry(0.35, 0.09, 16, 48);
+    const headMat = new THREE.MeshStandardMaterial({
+      color: 0x252525,
+      metalness: 0.85,
+      roughness: 0.25,
+    });
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.rotation.x = Math.PI / 2;
+    head.position.y = 1.55;
+    head.castShadow = true;
+    this.group.add(head);
+
+    // ===== Emissive core (glow base) =====
+    const coreGeo = new THREE.SphereGeometry(0.12, 24, 18);
+    this.coreMat = new THREE.MeshStandardMaterial({
+      color: 0x12051d,
+      emissive: 0x7b2cff,
+      emissiveIntensity: 1.6,
+      metalness: 0.0,
+      roughness: 0.25,
+    });
+    const core = new THREE.Mesh(coreGeo, this.coreMat);
+    core.position.y = 1.55;
+    this.group.add(core);
+
+    // ===== Target ring (visual landing indicator) =====
+    const ringGeo = new THREE.RingGeometry(ringRadius * 0.7, ringRadius, 48);
+    this.ringMat = new THREE.MeshStandardMaterial({
+      color: 0x2b0a4d,
+      emissive: 0x7b2cff,
+      emissiveIntensity: 1.3,
+      roughness: 0.35,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.0,
+      depthWrite: false,
+    });
+    this.ring = new THREE.Mesh(ringGeo, this.ringMat);
+    this.ring.rotation.x = -Math.PI / 2;
+    this.ring.position.y = 0.01; // slightly above floor
+    this.scene.add(this.ring);
+
+    // ===== Collider (simple cylinder) =====
+    // Your collision system can read this.userData.collider if you have one.
+    const colliGeo = new THREE.CylinderGeometry(0.95, 0.95, 0.6, 16);
+    const colliMat = new THREE.MeshBasicMaterial({ visible: false });
+    this.collider = new THREE.Mesh(colliGeo, colliMat);
+    this.collider.position.y = 0.3;
+    this.collider.userData.isCollider = true;
+    this.collider.userData.colliderType = "cylinder";
+    this.collider.userData.blocking = true;
+    this.group.add(this.collider);
+
+    // ===== VFX =====
+    this.vfx = new TeleportVFX({ THREE, parent: this.group });
+    this.vfx.setIntensity(1.0);
+
+    this.scene.add(this.group);
+
+    // tick state
+    this._t = 0;
+    this._ringPulse = 0;
   }
 
-  function pickTeleportTargets(sceneOrGroup) {
-    teleTargets = [];
-
-    // Priority: mesh named "Floor" or "floor" (your world can name it)
-    sceneOrGroup.traverse?.((o) => {
-      if (o?.isMesh && (o.name === "Floor" || o.name === "floor")) teleTargets.push(o);
-    });
-
-    // If none found, fall back to any big plane geometry-ish meshes
-    if (!teleTargets.length) {
-      sceneOrGroup.traverse?.((o) => {
-        if (!o?.isMesh) return;
-        const g = o.geometry;
-        if (!g) return;
-        const type = g.type || "";
-        if (type.includes("Plane") || type.includes("Box")) teleTargets.push(o);
-      });
-    }
-
-    safeLog("[TeleportMachine] targets:", teleTargets.length);
+  setActive(on) {
+    this.active = !!on;
+    this.vfx.setEnabled(this.active);
+    if (!this.active) this.hideTarget();
   }
 
-  return {
-    /**
-     * Build and return the machine group.
-     * Call signature matches your world.js usage:
-     * TeleportMachine.build({ THREE, scene: world.group, texLoader, log, playerRig?, controllers? })
-     */
-    build({ THREE, scene, log = console.log, playerRig: rig = null, controllers: ctrls = null }) {
-      _THREE = THREE;
-      _log = log || console.log;
+  // Call this from your controller raycast, when you have a hit on the floor.
+  setAim(hitPoint, hitNormal = { x: 0, y: 1, z: 0 }) {
+    if (!hitPoint) return;
+    this._aimPoint.set(hitPoint.x, hitPoint.y, hitPoint.z);
+    this._aimNormal.set(hitNormal.x, hitNormal.y, hitNormal.z).normalize();
 
-      machine = makeMachineMesh();
-      scene.add(machine);
+    // show ring at aim point
+    this.ring.position.copy(this._aimPoint);
+    // align ring with normal (usually floor -> up)
+    // simple: keep ring flat unless you want wall-teleport later
+    this.ring.rotation.x = -Math.PI / 2;
+    this.showTarget();
+  }
 
-      // Store references if provided
-      playerRig = rig || null;
-      controllers = Array.isArray(ctrls) ? ctrls : [];
+  showTarget() {
+    this.ringMat.opacity = 0.85;
+  }
 
-      // Discover floor/targets under provided scene/group
-      pickTeleportTargets(scene);
+  hideTarget() {
+    this.ringMat.opacity = 0.0;
+  }
 
-      // Only bind once
-      try { bindInputs(); } catch {}
+  // Optional helper: returns a safe teleport destination (e.g., keep Y = floor)
+  getTeleportDestination() {
+    return { x: this._aimPoint.x, y: this._aimPoint.y, z: this._aimPoint.z };
+  }
 
-      safeLog("[TeleportMachine] build ✅");
-      return machine;
-    },
+  update(dt) {
+    this._t += dt;
 
-    /**
-     * Optionally called from world tick.
-     */
-    tick(dt = 0.016) {
-      if (!machine) return;
+    // core pulse
+    const pulse = 1.2 + Math.sin(this._t * 4.0) * 0.45;
+    this.coreMat.emissiveIntensity = this.active ? pulse : 0.0;
 
-      machine.userData.t += dt;
-
-      // Animate orb + glow
-      const t = machine.userData.t;
-      if (machine.userData.orb) {
-        machine.userData.orb.position.y = 0.31 + Math.sin(t * 2.2) * 0.02;
-        machine.userData.orb.material.emissiveIntensity = 1.25 + Math.sin(t * 3.2) * 0.35;
-      }
-
-      if (glowRing?.material) {
-        glowRing.material.opacity = 0.75 + Math.sin(t * 3.0) * 0.18;
-        glowRing.material.emissiveIntensity = 1.25 + Math.sin(t * 3.0) * 0.35;
-      }
-
-      if (light) {
-        light.intensity = 0.85 + Math.sin(t * 3.2) * 0.25;
-      }
-
-      // Update marker from controller ray
-      try { updateMarkerFromController(); } catch {}
-    },
-
-    /**
-     * Allow main.js to inject controllers and rig later (recommended).
-     */
-    connect({ playerRig: rig, controllers: ctrls }) {
-      if (rig) playerRig = rig;
-      if (Array.isArray(ctrls)) controllers = ctrls;
-      safeLog("[TeleportMachine] connect ✅");
+    // ring pulse
+    if (this.ringMat.opacity > 0.01) {
+      this._ringPulse += dt;
+      const op = 0.55 + Math.sin(this._ringPulse * 5.0) * 0.25;
+      this.ringMat.opacity = Math.max(0.25, Math.min(0.95, op));
     }
-  };
-})();
+
+    this.vfx.update(dt);
+  }
+
+  dispose() {
+    this.scene.remove(this.group);
+    this.scene.remove(this.ring);
+    this.vfx.dispose?.();
+  }
+}

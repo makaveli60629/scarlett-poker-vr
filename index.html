@@ -1,10 +1,11 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
   <title>Scarlett Poker VR</title>
 
+  <!-- GitHub Pages-safe import map -->
   <script type="importmap">
   {
     "imports": {
@@ -15,28 +16,99 @@
   </script>
 
   <style>
-    html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
-    #log{position:fixed;left:10px;bottom:10px;right:10px;max-height:220px;overflow:auto;
-      background:rgba(0,0,0,.6);color:#8cff8c;padding:10px;border-radius:12px;font:12px ui-monospace,monospace;z-index:999999}
+    html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial; }
+    #hud { position:fixed; left:0; top:0; right:0; padding:18px; z-index:999999; pointer-events:none; }
+    #hudCard {
+      max-width: 760px; margin: 0 auto;
+      background: rgba(0,0,0,.55);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 12px 40px rgba(0,0,0,.35);
+      pointer-events:auto;
+    }
+    h1 { margin:0 0 6px 0; font-size: 40px; letter-spacing:.4px; }
+    .sub { opacity:.9; font-size: 16px; line-height: 1.35; }
+    .btns { margin-top: 12px; display:flex; gap: 10px; flex-wrap: wrap; }
+    button {
+      background: rgba(0,0,0,.35);
+      border: 1px solid rgba(255,255,255,.12);
+      color: #fff;
+      padding: 10px 14px;
+      border-radius: 16px;
+      font-size: 16px;
+    }
+    #log {
+      margin-top: 12px;
+      color: #72f7ff;
+      font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+      font-size: 15px;
+      white-space: pre-wrap;
+    }
   </style>
 </head>
+
 <body>
-  <pre id="log">Booting…</pre>
+  <div id="hud">
+    <div id="hudCard">
+      <h1>Scarlett Poker VR</h1>
+      <div class="sub">
+        This page boots <b>js/main.js</b>. If you opened the wrong repo URL, the log will tell you.<br/>
+        Correct site base should contain <b>/scarlett-poker-vr/</b>.
+      </div>
+
+      <div class="btns">
+        <button id="btnReload">Reload</button>
+        <button id="btnCopyLog">Copy Log</button>
+      </div>
+
+      <div id="log">Booting…</div>
+    </div>
+  </div>
 
   <script type="module">
     const logEl = document.getElementById("log");
-    const log = (m)=>{ logEl.textContent += "\n" + m; console.log(m); };
+    let logText = "";
+    const log = (m) => {
+      const s = String(m ?? "");
+      logText += s + "\n";
+      logEl.textContent = logText;
+      console.log(s);
+    };
+
+    document.getElementById("btnReload").onclick = () => location.reload();
+    document.getElementById("btnCopyLog").onclick = async () => {
+      try { await navigator.clipboard.writeText(logText); } catch {}
+    };
 
     const v = Date.now().toString();
     log("BOOT v=" + v);
-    log("navigator.xr: " + ("xr" in navigator));
+    log("location.href=" + location.href);
+    log("navigator.xr=" + ("xr" in navigator));
+
+    // IMPORTANT: compute base path from THIS file so it works even if moved
+    // Example: https://makaveli60629.github.io/scarlett-poker-vr/index.html
+    const base = new URL(".", import.meta.url).href;   // ends with /
+    const mainUrl = new URL("js/main.js", base).href + "?v=" + encodeURIComponent(v);
+
+    log("Importing main from:");
+    log(mainUrl);
+
+    // Quick sanity check: tell you if you opened the wrong repo URL
+    if (!base.includes("/scarlett-poker-vr/")) {
+      log("⚠️ WARNING: base path does NOT include /scarlett-poker-vr/");
+      log("You may have opened the wrong URL (like /poker-vr/).");
+    }
 
     try {
-      // IMPORTANT: this must match your folder name EXACTLY: js/main.js
-      await import(`./js/main.js?v=${encodeURIComponent(v)}`);
+      await import(mainUrl);
       log("✅ main.js imported");
     } catch (e) {
       log("❌ main import failed: " + (e?.message || e));
+      log("Fix checklist:");
+      log("1) Open: https://makaveli60629.github.io/scarlett-poker-vr/");
+      log("2) Confirm file exists: /scarlett-poker-vr/js/main.js");
+      log("3) Ensure folder is named exactly: js (lowercase)");
     }
   </script>
 </body>

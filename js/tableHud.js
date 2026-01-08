@@ -1,4 +1,4 @@
-// /js/tableHud.js — Scarlett Table HUD v1.0 (Billboard + Game State)
+// /js/tableHud.js — Scarlett Table HUD v1.1 (bigger fonts + cleaner)
 
 export const TableHud = {
   build({ THREE, parent, title = "$10,000 Table", log = console.log } = {}) {
@@ -18,100 +18,74 @@ export const TableHud = {
       t: 0
     };
 
-    function makeBoard() {
-      const c = document.createElement("canvas");
-      c.width = 1024;
-      c.height = 512;
-      const ctx = c.getContext("2d");
+    const canvas = document.createElement("canvas");
+    canvas.width = 1024;
+    canvas.height = 512;
+    const ctx = canvas.getContext("2d");
 
-      const tex = new THREE.CanvasTexture(c);
-      tex.needsUpdate = true;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
 
-      const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
-      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.45, 0.72), mat);
-      mesh.name = "HudBoard";
-      mesh.position.set(0, 0, 0);
+    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.70, 0.78), mat);
+    mesh.name = "HudBoard";
+    root.add(mesh);
 
-      mesh.userData.canvas = c;
-      mesh.userData.ctx = ctx;
-      mesh.userData.tex = tex;
-
-      return mesh;
+    function rr(x,y,w,h,r,fill,stroke){
+      ctx.beginPath();
+      ctx.moveTo(x+r,y);
+      ctx.arcTo(x+w,y,x+w,y+h,r);
+      ctx.arcTo(x+w,y+h,x,y+h,r);
+      ctx.arcTo(x,y+h,x,y,r);
+      ctx.arcTo(x,y,x+w,y,r);
+      ctx.closePath();
+      if(fill) ctx.fill();
+      if(stroke) ctx.stroke();
     }
-
-    const board = makeBoard();
-    root.add(board);
-
-    root.position.set(0, 0, 0);
-    root.rotation.set(0, 0, 0);
 
     function draw() {
-      const ctx = board.userData.ctx;
-      const c = board.userData.canvas;
+      ctx.clearRect(0,0,canvas.width,canvas.height);
 
-      ctx.clearRect(0, 0, c.width, c.height);
+      ctx.fillStyle = "rgba(10,12,20,0.78)";
+      rr(24,24,canvas.width-48,canvas.height-48,28,true,false);
 
-      // background
-      ctx.fillStyle = "rgba(10,12,20,0.72)";
-      roundRect(ctx, 26, 26, c.width - 52, c.height - 52, 28, true);
+      ctx.strokeStyle = "rgba(127,231,255,0.40)";
+      ctx.lineWidth = 7;
+      rr(24,24,canvas.width-48,canvas.height-48,28,false,true);
 
-      // border glow
-      ctx.strokeStyle = "rgba(127,231,255,0.35)";
-      ctx.lineWidth = 6;
-      roundRect(ctx, 26, 26, c.width - 52, c.height - 52, 28, false);
-
-      // title
+      // TITLE
       ctx.fillStyle = "#e8ecff";
-      ctx.font = "bold 54px Arial";
+      ctx.font = "bold 64px Arial";
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
-      ctx.fillText(state.title, c.width / 2, 58);
+      ctx.fillText(state.title, canvas.width/2, 52);
 
-      // street / pot
+      // STREET (BIGGER)
       ctx.fillStyle = "#7fe7ff";
-      ctx.font = "bold 40px Arial";
-      ctx.fillText(state.street.toUpperCase(), c.width / 2, 132);
+      ctx.font = "bold 54px Arial";
+      ctx.fillText(state.street.toUpperCase(), canvas.width/2, 138);
 
+      // POT (BIGGER)
       ctx.fillStyle = "#ff2d7a";
-      ctx.font = "bold 52px Arial";
-      ctx.fillText("POT  $" + Number(state.pot).toLocaleString(), c.width / 2, 190);
+      ctx.font = "bold 64px Arial";
+      ctx.fillText("POT  $" + Number(state.pot).toLocaleString(), canvas.width/2, 210);
 
-      // turn + action
+      // TURN
       ctx.fillStyle = "#e8ecff";
-      ctx.font = "bold 38px Arial";
-      ctx.fillText("TURN:  " + state.turnName, c.width / 2, 278);
+      ctx.font = "bold 46px Arial";
+      ctx.fillText("TURN:  " + state.turnName, canvas.width/2, 305);
 
+      // ACTION
       ctx.fillStyle = "rgba(232,236,255,0.92)";
-      ctx.font = "bold 34px Arial";
-      ctx.fillText(state.action, c.width / 2, 340);
+      ctx.font = "bold 40px Arial";
+      ctx.fillText(state.action, canvas.width/2, 372);
 
-      // small footer
+      // footer
       ctx.fillStyle = "rgba(152,160,199,0.9)";
-      ctx.font = "28px Arial";
-      ctx.fillText("Scarlett VR Poker • Live Table", c.width / 2, 410);
+      ctx.font = "30px Arial";
+      ctx.fillText("Scarlett VR Poker • Live Table", canvas.width/2, 430);
 
-      board.userData.tex.needsUpdate = true;
-
-      function roundRect(ctx, x, y, w, h, r, fill) {
-        ctx.beginPath();
-        ctx.moveTo(x + r, y);
-        ctx.arcTo(x + w, y, x + w, y + h, r);
-        ctx.arcTo(x + w, y + h, x, y + h, r);
-        ctx.arcTo(x, y + h, x, y, r);
-        ctx.arcTo(x, y, x + w, y, r);
-        ctx.closePath();
-        if (fill) ctx.fill(); else ctx.stroke();
-      }
-    }
-
-    // Public setters (DealingMix / PokerSim can call this)
-    function setTarget(cam) { state.target = cam || null; }
-    function setGameState({ pot, street, turnName, action } = {}) {
-      if (typeof pot === "number") state.pot = pot;
-      if (street) state.street = street;
-      if (turnName) state.turnName = turnName;
-      if (action) state.action = action;
-      draw();
+      tex.needsUpdate = true;
     }
 
     draw();
@@ -119,17 +93,22 @@ export const TableHud = {
 
     return {
       root,
-      setTarget,
-      setGameState,
+      setTarget(cam) { state.target = cam || null; },
+      setGameState({ pot, street, turnName, action } = {}) {
+        if (typeof pot === "number") state.pot = pot;
+        if (street) state.street = street;
+        if (turnName) state.turnName = turnName;
+        if (action) state.action = action;
+        draw();
+      },
       update(dt) {
         state.t += dt;
-        // billboard
         if (state.target) {
-          const p = state.target.position.clone();
+          const p = state.target.position;
           root.lookAt(p.x, root.position.y, p.z);
         }
-        // gentle hover
-        root.position.y = Math.sin(state.t * 1.2) * 0.01;
+        // tiny hover
+        root.position.y = Math.sin(state.t * 1.1) * 0.01;
       }
     };
   }

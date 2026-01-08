@@ -2,16 +2,43 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,maximum-scale=1"
+    />
     <title>Scarlett VR Poker</title>
+
+    <!-- ✅ IMPORT MAP (THIS FIXES "three" ON GITHUB PAGES) -->
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+    </script>
+
     <style>
-      html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      }
+
       #hud {
-        position: fixed; left: 0; top: 0; right: 0;
+        position: fixed;
+        left: 0;
+        top: 0;
+        right: 0;
         padding: 18px 18px 10px 18px;
         z-index: 999999;
         pointer-events: none;
       }
+
       #hudCard {
         max-width: 720px;
         background: rgba(0,0,0,0.55);
@@ -22,9 +49,26 @@
         box-shadow: 0 12px 40px rgba(0,0,0,0.35);
         pointer-events: auto;
       }
-      h1 { margin:0 0 8px 0; font-size: 44px; letter-spacing: .5px; }
-      .sub { opacity:.9; font-size:18px; line-height: 1.35; }
-      .btns { margin-top: 14px; display:flex; gap:14px; flex-wrap:wrap; }
+
+      h1 {
+        margin: 0 0 8px 0;
+        font-size: 44px;
+        letter-spacing: .5px;
+      }
+
+      .sub {
+        opacity: .9;
+        font-size: 18px;
+        line-height: 1.35;
+      }
+
+      .btns {
+        margin-top: 14px;
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+
       button {
         background: rgba(0,0,0,0.35);
         border: 1px solid rgba(255,255,255,0.12);
@@ -33,23 +77,28 @@
         border-radius: 16px;
         font-size: 18px;
       }
+
       #log {
         margin-top: 12px;
         color: #72f7ff;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         font-size: 18px;
         white-space: pre-wrap;
       }
     </style>
   </head>
+
   <body>
+    <!-- HUD -->
     <div id="hud">
       <div id="hudCard">
         <h1>Scarlett VR Poker</h1>
         <div class="sub">
           Quest: tap <b>ENTER VR</b> (bottom-right).<br/>
           Move: Left stick • Snap turn: Right stick • Teleport: Right trigger<br/>
-          <span style="opacity:.75">Android preview: WebXR may not exist — you’ll still see the world in 2D.</span>
+          <span style="opacity:.75">
+            Android preview: WebXR may not exist — you’ll still see the world in 2D.
+          </span>
         </div>
 
         <div class="btns">
@@ -64,34 +113,47 @@
       </div>
     </div>
 
+    <!-- BOOT + LOGGER -->
     <script type="module">
-      // Simple HUD logger used by main.js
       const el = document.getElementById("log");
-      let show = true;
+      let showLog = true;
+
       window.__hubLogText = "";
-      window.__hubLog = (m) => {
-        const msg = String(m ?? "");
-        window.__hubLogText += msg + "\n";
-        if (show) el.textContent = window.__hubLogText;
-        console.log(msg);
+      window.__hubLog = (msg) => {
+        const m = String(msg ?? "");
+        window.__hubLogText += m + "\n";
+        if (showLog) el.textContent = window.__hubLogText;
+        console.log(m);
       };
 
-      const V = Date.now().toString();
-      window.__BUILD_V = V;
-      window.__hubLog("BOOT v=" + V);
+      const BUILD_V = Date.now().toString();
+      window.__BUILD_V = BUILD_V;
 
-      document.getElementById("btnRecenter").onclick = () => window.dispatchEvent(new Event("scarlett-recenter"));
-      document.getElementById("btnToggleLog").onclick = () => { show = !show; el.style.display = show ? "block" : "none"; };
+      __hubLog("BOOT v=" + BUILD_V);
+      __hubLog("navigator.xr: " + ("xr" in navigator));
+
+      document.getElementById("btnRecenter").onclick = () =>
+        window.dispatchEvent(new Event("scarlett-recenter"));
+
+      document.getElementById("btnToggleLog").onclick = () => {
+        showLog = !showLog;
+        el.style.display = showLog ? "block" : "none";
+      };
+
       document.getElementById("btnReload").onclick = () => location.reload();
-      document.getElementById("btnFullscreen").onclick = () => document.documentElement.requestFullscreen?.();
+      document.getElementById("btnFullscreen").onclick = () =>
+        document.documentElement.requestFullscreen?.();
+
       document.getElementById("btnCopyLog").onclick = async () => {
-        try { await navigator.clipboard.writeText(window.__hubLogText); } catch {}
+        try {
+          await navigator.clipboard.writeText(window.__hubLogText);
+        } catch {}
       };
 
       try {
-        await import(`./js/main.js?v=${encodeURIComponent(V)}`);
+        await import(`./js/main.js?v=${encodeURIComponent(BUILD_V)}`);
       } catch (e) {
-        window.__hubLog("❌ main import failed: " + (e?.message || e));
+        __hubLog("❌ main import failed: " + (e?.message || e));
       }
     </script>
   </body>

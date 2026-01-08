@@ -1,6 +1,4 @@
 // /js/main.js — Scarlett VR Poker 9.2.2 (GitHub Pages SAFE: no "three" bare imports)
-// Fixes: ❌ Failed to resolve module specifier "three"
-// by REMOVING XRControllerModelFactory (it imports "three" internally)
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -66,7 +64,7 @@ async function boot() {
   // preview height (non-VR)
   camera.position.set(0, 1.6, 0);
 
-  // ✅ stronger lighting (less “dark room”)
+  // stronger lighting
   scene.add(new THREE.AmbientLight(0xffffff, 0.65));
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.2));
   const key = new THREE.DirectionalLight(0xffffff, 1.25);
@@ -86,11 +84,11 @@ async function boot() {
     log("❌ world import/init failed: " + (e?.message || e));
   }
 
-  // spawn point
+  // spawn
   const spawn = world?.spawnPads?.[0] || new THREE.Vector3(0, 0, 3.5);
   player.position.set(spawn.x, 0, spawn.z);
 
-  // ✅ visible spawn circle at your “ultimate spawn spot”
+  // visible spawn circle
   spawnCircle = makeSpawnCircle(THREE);
   spawnCircle.position.set(spawn.x, 0.01, spawn.z);
   scene.add(spawnCircle);
@@ -136,7 +134,7 @@ function setupXRControls() {
   g1 = renderer.xr.getControllerGrip(1);
   scene.add(g0, g1);
 
-  // ✅ GitHub Pages SAFE: simple controller grip meshes (no XRControllerModelFactory)
+  // GitHub Pages SAFE controller grip meshes
   g0.add(makeGripMesh(THREE));
   g1.add(makeGripMesh(THREE));
 
@@ -151,7 +149,7 @@ function setupXRControls() {
   c0.addEventListener("selectend", () => onSelectEnd(c0));
   c1.addEventListener("selectend", () => onSelectEnd(c1));
 
-  // laser pointer on “right” grip (fallback ok)
+  // laser pointer on right grip
   rightPointer = buildLaserPointer(THREE);
   (g1 || g0).add(rightPointer.group);
 
@@ -203,7 +201,7 @@ function getHeadYaw() {
   return e.y;
 }
 
-// ---------------- Spawn / Facing ----------------
+// ---------------- Facing ----------------
 function faceTableNow(xrAware = false) {
   if (!world?.tableFocus) return;
 
@@ -271,7 +269,6 @@ function applyLocomotion(dt) {
       const forward = new THREE.Vector3(Math.sin(headYaw), 0, Math.cos(headYaw));
       const rightv = new THREE.Vector3(forward.z, 0, -forward.x);
 
-      // ✅ forward = -ay (Quest)
       const move = new THREE.Vector3();
       move.addScaledVector(forward, (-ay) * MOVE_SPEED * dt);
       move.addScaledVector(rightv, (ax) * MOVE_SPEED * dt);
@@ -311,8 +308,6 @@ function applyLocomotion(dt) {
 // ---------------- Pointer + Teleport visuals ----------------
 function buildLaserPointer(THREE) {
   const group = new THREE.Group();
-  group.name = "RightLaserPointer";
-
   const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
   const mat = new THREE.LineBasicMaterial({ color: 0x33ff66, transparent: true, opacity: 0.9 });
   const line = new THREE.Line(geo, mat);
@@ -327,7 +322,6 @@ function buildLaserPointer(THREE) {
   group.add(dot);
 
   group.rotation.x = -0.10;
-
   return { group, line, dot, hit: new THREE.Vector3() };
 }
 
@@ -381,7 +375,6 @@ function updateTeleportArc(THREE, sourceObj, tp, world, cam) {
 
   const origin = new THREE.Vector3();
   const q = new THREE.Quaternion();
-
   if (sourceObj?.getWorldPosition) sourceObj.getWorldPosition(origin);
   if (sourceObj?.getWorldQuaternion) sourceObj.getWorldQuaternion(q);
 
@@ -464,4 +457,4 @@ function tick() {
   applyLocomotion(dt);
   if (world?.tick) world.tick(dt);
   renderer.render(scene, camera);
-                               }
+}

@@ -1,170 +1,178 @@
-// /js/teleport_machine.js — Portal Teleporter (IMAGE-STYLE, CDN THREE, GitHub Pages safe)
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+// /js/teleport_machine.js — Scarlett Portal (9.0) — NO imports, uses passed THREE
 
-export const TeleportMachine = {
-  group: null,
-  padCenter: new THREE.Vector3(0, 0, 3.6),
+export function createTeleportMachine(THREE) {
+  const api = {
+    group: null,
+    padCenter: new THREE.Vector3(0, 0, 3.6),
 
-  build(scene, texLoader = null) {
-    const g = new THREE.Group();
-    g.name = "TeleportPortal";
-    g.position.copy(this.padCenter);
+    build(scene, texLoader = null) {
+      const g = new THREE.Group();
+      g.name = "TeleportMachine";
+      g.position.copy(api.padCenter);
 
-    // ---------- base disk ----------
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.9, 0.95, 0.12, 40),
-      new THREE.MeshStandardMaterial({ color: 0x0b1020, roughness: 0.35, metalness: 0.75 })
-    );
-    base.position.y = 0.06;
-    g.add(base);
+      // --- base pad ---
+      const base = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.9, 1.0, 0.14, 36),
+        new THREE.MeshStandardMaterial({ color: 0x0e1018, roughness: 0.85, metalness: 0.15 })
+      );
+      base.position.y = 0.07;
+      g.add(base);
 
-    // ---------- floor glyph ring ----------
-    const glyph = new THREE.Mesh(
-      new THREE.RingGeometry(0.62, 0.82, 72),
-      new THREE.MeshStandardMaterial({
-        color: 0x79b6ff,
-        emissive: 0x79b6ff,
+      // --- glowing rune disc (optional texture) ---
+      let discMat = new THREE.MeshStandardMaterial({
+        color: 0x55e7ff,
+        emissive: 0x55e7ff,
         emissiveIntensity: 1.35,
-        transparent: true,
-        opacity: 0.95,
-        side: THREE.DoubleSide,
         roughness: 0.35,
-        metalness: 0.1
-      })
-    );
-    glyph.rotation.x = -Math.PI / 2;
-    glyph.position.y = 0.125;
-    glyph.name = "glyph";
-    g.add(glyph);
-
-    // ---------- portal frame ----------
-    const frameMat = new THREE.MeshStandardMaterial({
-      color: 0x0a1222,
-      roughness: 0.4,
-      metalness: 0.85,
-      emissive: 0x0b1b30,
-      emissiveIntensity: 0.25
-    });
-
-    const left = new THREE.Mesh(new THREE.BoxGeometry(0.28, 2.6, 0.28), frameMat);
-    const right = new THREE.Mesh(new THREE.BoxGeometry(0.28, 2.6, 0.28), frameMat);
-    const top = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.28, 0.28), frameMat);
-
-    left.position.set(-0.95, 1.35, 0);
-    right.position.set(0.95, 1.35, 0);
-    top.position.set(0, 2.78, 0);
-
-    g.add(left, right, top);
-
-    // ---------- inner energy plane ----------
-    const portal = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.7, 2.35),
-      new THREE.MeshStandardMaterial({
-        color: 0xd8f0ff,
-        emissive: 0xd8f0ff,
-        emissiveIntensity: 1.1,
+        metalness: 0.0,
         transparent: true,
-        opacity: 0.88,
-        roughness: 0.15,
-        metalness: 0.0
-      })
-    );
-    portal.position.set(0, 1.33, 0);
-    portal.name = "portal";
-    g.add(portal);
+        opacity: 0.95
+      });
 
-    // ---------- purple electricity arc line (top) ----------
-    const arcGeo = new THREE.BufferGeometry();
-    const arcPts = new Float32Array(64 * 3);
-    arcGeo.setAttribute("position", new THREE.BufferAttribute(arcPts, 3));
-    const arc = new THREE.Line(
-      arcGeo,
-      new THREE.LineBasicMaterial({ color: 0xb46bff, transparent: true, opacity: 0.95 })
-    );
-    arc.position.set(0, 2.78, 0);
-    arc.name = "arc";
-    g.add(arc);
-
-    // ---------- floating debris ----------
-    const pCount = 90;
-    const pGeo = new THREE.BufferGeometry();
-    const pPos = new Float32Array(pCount * 3);
-    for (let i = 0; i < pCount; i++) {
-      pPos[i * 3 + 0] = (Math.random() - 0.5) * 1.7;
-      pPos[i * 3 + 1] = Math.random() * 2.2;
-      pPos[i * 3 + 2] = (Math.random() - 0.5) * 0.45;
-    }
-    pGeo.setAttribute("position", new THREE.BufferAttribute(pPos, 3));
-    const debris = new THREE.Points(
-      pGeo,
-      new THREE.PointsMaterial({ color: 0xcaa2ff, size: 0.045, transparent: true, opacity: 0.85 })
-    );
-    debris.name = "debris";
-    g.add(debris);
-
-    // ---------- glow light ----------
-    const glow = new THREE.PointLight(0x8f6bff, 1.2, 7);
-    glow.position.set(0, 1.7, 0.25);
-    glow.name = "glow";
-    g.add(glow);
-
-    // fx state
-    g.userData._t = 0;
-
-    scene.add(g);
-    this.group = g;
-    return g;
-  },
-
-  tick(dt) {
-    if (!this.group) return;
-    const g = this.group;
-    g.userData._t += dt;
-    const t = g.userData._t;
-
-    const glyph = g.getObjectByName("glyph");
-    const portal = g.getObjectByName("portal");
-    const arc = g.getObjectByName("arc");
-    const debris = g.getObjectByName("debris");
-    const glow = g.getObjectByName("glow");
-
-    if (glyph) glyph.rotation.z += dt * 0.55;
-
-    if (portal) {
-      portal.material.emissiveIntensity = 1.0 + Math.sin(t * 4.5) * 0.25;
-      portal.material.opacity = 0.82 + Math.sin(t * 3.2) * 0.05;
-    }
-
-    if (glow) glow.intensity = 1.0 + Math.sin(t * 5.0) * 0.35;
-
-    if (arc) {
-      const arr = arc.geometry.attributes.position.array;
-      let idx = 0;
-      for (let i = 0; i < 64; i++) {
-        const a = (i / 63) * Math.PI * 2;
-        const r = 0.92 + Math.sin(t * 10 + i * 0.8) * 0.06;
-        const y = Math.sin(t * 12 + i * 1.1) * 0.08;
-        arr[idx++] = Math.cos(a) * r;
-        arr[idx++] = y;
-        arr[idx++] = Math.sin(a) * 0.04;
+      if (texLoader) {
+        try {
+          const t = texLoader.load(
+            "assets/textures/Teleport glow.jpg",
+            (tt) => {
+              tt.wrapS = tt.wrapT = THREE.RepeatWrapping;
+              tt.repeat.set(1, 1);
+              tt.colorSpace = THREE.SRGBColorSpace;
+            },
+            undefined,
+            () => {}
+          );
+          discMat = new THREE.MeshStandardMaterial({
+            map: t,
+            color: 0xffffff,
+            emissive: 0x55e7ff,
+            emissiveIntensity: 1.1,
+            roughness: 0.35,
+            metalness: 0.0,
+            transparent: true,
+            opacity: 0.95
+          });
+        } catch {}
       }
-      arc.geometry.attributes.position.needsUpdate = true;
-    }
 
-    if (debris) {
-      const p = debris.geometry.attributes.position.array;
-      for (let j = 0; j < p.length; j += 3) {
-        p[j + 1] += dt * 0.28;
-        if (p[j + 1] > 2.4) p[j + 1] = 0;
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(0.78, 48), discMat);
+      disc.rotation.x = -Math.PI / 2;
+      disc.position.y = 0.145;
+      disc.name = "portalDisc";
+      g.add(disc);
+
+      // --- portal frame (matches your image vibe) ---
+      const frameMat = new THREE.MeshStandardMaterial({
+        color: 0x0c1020,
+        roughness: 0.35,
+        metalness: 0.55,
+        emissive: 0x0a1a3a,
+        emissiveIntensity: 0.45
+      });
+
+      const frame = new THREE.Group();
+      frame.position.set(0, 0, -1.5);
+
+      const leftPillar = new THREE.Mesh(new THREE.BoxGeometry(0.35, 2.7, 0.35), frameMat);
+      leftPillar.position.set(-1.1, 1.35, 0);
+      const rightPillar = leftPillar.clone();
+      rightPillar.position.x = 1.1;
+
+      const topBar = new THREE.Mesh(new THREE.BoxGeometry(2.75, 0.35, 0.35), frameMat);
+      topBar.position.set(0, 2.55, 0);
+
+      frame.add(leftPillar, rightPillar, topBar);
+      frame.name = "portalFrame";
+      g.add(frame);
+
+      // --- inner glow plane (soft) ---
+      const portalGlow = new THREE.Mesh(
+        new THREE.PlaneGeometry(2.1, 2.2),
+        new THREE.MeshStandardMaterial({
+          color: 0x9fefff,
+          emissive: 0x9fefff,
+          emissiveIntensity: 0.95,
+          transparent: true,
+          opacity: 0.18,
+          side: THREE.DoubleSide
+        })
+      );
+      portalGlow.position.set(0, 1.35, -1.32);
+      portalGlow.name = "portalGlow";
+      g.add(portalGlow);
+
+      // --- purple electricity line (top corners) ---
+      const zapGeo = new THREE.BufferGeometry();
+      const pts = new Float32Array(64 * 3);
+      zapGeo.setAttribute("position", new THREE.BufferAttribute(pts, 3));
+      const zap = new THREE.Line(
+        zapGeo,
+        new THREE.LineBasicMaterial({ color: 0xb46bff, transparent: true, opacity: 0.9 })
+      );
+      zap.position.set(0, 2.55, -1.32);
+      zap.name = "portalZap";
+      g.add(zap);
+
+      // --- light ---
+      const glowLight = new THREE.PointLight(0x8f3dff, 0.9, 7);
+      glowLight.position.set(0, 1.8, -1.25);
+      glowLight.name = "portalLight";
+      g.add(glowLight);
+
+      g.userData._t = 0;
+
+      scene.add(g);
+      api.group = g;
+      return g;
+    },
+
+    tick(dt) {
+      if (!api.group) return;
+      const g = api.group;
+      g.userData._t += dt;
+      const t = g.userData._t;
+
+      const disc = g.getObjectByName("portalDisc");
+      const glow = g.getObjectByName("portalGlow");
+      const zap = g.getObjectByName("portalZap");
+      const light = g.getObjectByName("portalLight");
+
+      if (disc) {
+        disc.rotation.z += dt * 0.35;
+        disc.material.emissiveIntensity = 1.05 + Math.sin(t * 4.0) * 0.25;
       }
-      debris.geometry.attributes.position.needsUpdate = true;
-    }
-  },
 
-  getSafeSpawn() {
-    return {
-      position: new THREE.Vector3(this.padCenter.x, 0, this.padCenter.z + 1.6),
-      yaw: 0
-    };
-  }
-};
+      if (glow) glow.material.opacity = 0.16 + (Math.sin(t * 2.0) * 0.03);
+
+      if (light) light.intensity = 0.75 + Math.sin(t * 6.0) * 0.20;
+
+      if (zap) {
+        const arr = zap.geometry.attributes.position.array;
+        let idx = 0;
+
+        // draw a crackly line between two top corners
+        const A = { x: -1.05, y: 0.0, z: 0.0 };
+        const B = { x:  1.05, y: 0.0, z: 0.0 };
+
+        for (let i = 0; i < 64; i++) {
+          const u = i / 63;
+          const x = THREE.MathUtils.lerp(A.x, B.x, u);
+          const y = Math.sin(t * 14 + i * 0.7) * 0.07 + (Math.random() - 0.5) * 0.02;
+          const z = 0;
+          arr[idx++] = x;
+          arr[idx++] = y;
+          arr[idx++] = z;
+        }
+        zap.geometry.attributes.position.needsUpdate = true;
+      }
+    },
+
+    getSafeSpawn() {
+      return {
+        position: new THREE.Vector3(api.padCenter.x, 0, api.padCenter.z + 1.2),
+        yaw: 0
+      };
+    }
+  };
+
+  return api;
+}

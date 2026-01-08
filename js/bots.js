@@ -1,43 +1,86 @@
-// /js/bots.js — Scarlett Poker VR Bots v1.1 (SEATING FIXED)
-// Expects world.js provides getSeats() -> array of { position, yaw, sitY, lookAt }
+// /js/bots.js — Scarlett Poker VR Bots v1.2 (SeatAnchor snap + Outfit textures)
+// No external imports. world.js passes THREE in.
+// Expects getSeats() -> array of { position, yaw, sitY, lookAt, anchor? }
 
 export const Bots = (() => {
   let THREE = null;
   let root = null;
   let bots = [];
   let getSeats = null;
-  let tableFocus = null;
-  let lobbyZone = null;
 
   function L(...a) { try { console.log(...a); } catch {} }
 
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
   function lerp(a, b, t) { return a + (b - a) * t; }
 
-  function makeMaterial(color) {
-    return new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.05 });
+  // ✅ Outfit texture (change this path if needed)
+  const BOT_SHIRT_TEX_URL = "assets/textures/avatars/bot_shirt_futuristic_blue.png";
+
+  // cached materials so we don't load 5 times
+  const Mats = {
+    shirt: null,
+    dark: null,
+    skin: null,
+    loaded: false
+  };
+
+  async function ensureMaterials() {
+    if (Mats.loaded) return;
+    Mats.loaded = true;
+
+    Mats.dark = new THREE.MeshStandardMaterial({ color: 0x12131a, roughness: 0.9, metalness: 0.08 });
+    Mats.skin = new THREE.MeshStandardMaterial({ color: 0xd2b48c, roughness: 0.85, metalness: 0.0 });
+
+    // load shirt texture
+    const loader = new THREE.TextureLoader();
+    const tex = await new Promise((resolve) => {
+      loader.load(
+        BOT_SHIRT_TEX_URL,
+        (t) => {
+          try { t.colorSpace = THREE.SRGBColorSpace; } catch {}
+          resolve(t);
+        },
+        undefined,
+        () => resolve(null)
+      );
+    });
+
+    Mats.shirt = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: tex || null,
+      roughness: 0.92,
+      metalness: 0.02
+    });
+
+    if (!tex) {
+      // fallback color if missing
+      Mats.shirt.color.setHex(0x2b6cff);
+      L("[Bots] ⚠️ missing shirt texture:", BOT_SHIRT_TEX_URL);
+    } else {
+      L("[Bots] shirt texture loaded ✅");
+    }
   }
 
-  function makeBotAvatar(color = 0x5ac8fa) {
+  function makeBotAvatar() {
     const g = new THREE.Group();
     g.name = "BotAvatar";
 
-    const matBody = makeMaterial(color);
-    const matDark = makeMaterial(0x12131a);
-    const matSkin = makeMaterial(0xd2b48c);
+    const matBody = Mats.shirt || new THREE.MeshStandardMaterial({ color: 0x2b6cff, roughness: 0.9 });
+    const matDark = Mats.dark || new THREE.MeshStandardMaterial({ color: 0x12131a, roughness: 0.9 });
+    const matSkin = Mats.skin || new THREE.MeshStandardMaterial({ color: 0xd2b48c, roughness: 0.85 });
 
     // Root sits on floor; we position parts upward via hips group.
     const hips = new THREE.Group();
     hips.name = "Hips";
     g.add(hips);
 
-    // Torso (centered above hips)
+    // Torso (with outfit texture)
     const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.22, 6, 12), matBody);
     torso.position.set(0, 0.52, 0);
     torso.name = "Torso";
     hips.add(torso);
 
-    // Head (above torso)
+    // Head
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 18, 14), matSkin);
     head.position.set(0, 0.78, 0.02);
     head.name = "Head";
@@ -48,7 +91,7 @@ export const Bots = (() => {
     neck.position.set(0, 0.70, 0.02);
     hips.add(neck);
 
-    // Arms
+    // Arms (outfit texture)
     const armL = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.22, 6, 10), matBody);
     armL.position.set(-0.18, 0.56, 0.0);
     armL.rotation.z = 0.22;
@@ -59,7 +102,7 @@ export const Bots = (() => {
     armR.rotation.z = -0.22;
     hips.add(armR);
 
-    // Legs as joints (thigh + shin), so we can “bend knees”
+    // Legs as joints
     const legL = new THREE.Group(); legL.name = "LegL"; hips.add(legL);
     const legR = new THREE.Group(); legR.name = "LegR"; hips.add(legR);
 
@@ -87,7 +130,7 @@ export const Bots = (() => {
     footR.position.set(0.08, 0.03, 0.22);
     legR.add(footR);
 
-    // Hands (simple spheres)
+    // Hands
     const handL = new THREE.Mesh(new THREE.SphereGeometry(0.035, 12, 10), matSkin);
     handL.position.set(-0.25, 0.40, 0.08);
     hips.add(handL);
@@ -97,15 +140,7 @@ export const Bots = (() => {
     hips.add(handR);
 
     // store refs for animation + pose
-    g.userData = {
-      hips,
-      head,
-      torso,
-      legL,
-      legR,
-      baseColor: color,
-      sit: 0
-    };
+    g.userData = { hips, head, torso, legL, legR, sit: 0 };
 
     // default standing pose
     setSitAmount(g, 0);
@@ -113,7 +148,7 @@ export const Bots = (() => {
     return g;
   }
 
-  // Smooth sit/stand pose (FIXED: leg forward + better bend)
+  // Smooth sit/stand pose (leg forward + better bend)
   function setSitAmount(avatar, amt01) {
     const a = avatar?.userData;
     if (!a) return;
@@ -121,55 +156,52 @@ export const Bots = (() => {
     const t = clamp(amt01, 0, 1);
     a.sit = t;
 
-    // --- Pose tuning constants ---
-    // Push legs forward so knees/feet clear chair + table
     const legForward = lerp(0.00, 0.22, t);
-    // Small torso lean back when sitting
     const torsoLean = lerp(-0.05, 0.18, t);
-    // Hip bend (rotate legs at hip)
     const hipBend = lerp(0.02, -0.85, t);
 
-    // torso + head
     a.torso.rotation.x = torsoLean;
     a.head.rotation.x = lerp(0.02, -0.06, t);
 
-    // Bend legs and move them forward as a whole
     a.legL.rotation.x = hipBend;
     a.legR.rotation.x = hipBend;
 
-    // ✅ shove both leg roots forward so thighs/knees don't clip the chair
     a.legL.position.z = legForward;
     a.legR.position.z = legForward;
   }
 
-  // Place avatar on a given seat (FIXED: hip offset + small forward slide)
+  // Place avatar on a given seat (SeatAnchor snap if available)
   function placeAtSeat(avatar, seat) {
-    const p = seat.position.clone();
+    // Prefer authoritative anchor
+    if (seat.anchor && seat.anchor.getWorldPosition) {
+      const wp = new THREE.Vector3();
+      const wq = new THREE.Quaternion();
+      seat.anchor.getWorldPosition(wp);
+      seat.anchor.getWorldQuaternion(wq);
 
-    // Root at chair XZ
-    avatar.position.set(p.x, 0, p.z);
+      avatar.position.set(wp.x, 0, wp.z); // root stays on floor
+      avatar.quaternion.copy(wq);
 
-    // Face table / seat direction
-    if (typeof seat.yaw === "number") {
-      avatar.rotation.y = seat.yaw;
-    } else if (seat.lookAt) {
-      const t = seat.lookAt.clone();
-      t.y = 0;
-      avatar.lookAt(t);
+      const HIP_ABOVE_SEAT = 0.18; // tune 0.14–0.22
+      avatar.userData.hips.position.y = (seat.sitY ?? 0.52) + HIP_ABOVE_SEAT;
+
+      // tiny forward slide onto seat
+      avatar.translateZ(0.04);
+
+      setSitAmount(avatar, 1);
+      return;
     }
 
-    // ✅ Critical: seat.sitY is usually the SEAT SURFACE height (cushion),
-    // not the hip joint height. Add offset so butt doesn’t sink into chair.
-    const HIP_ABOVE_SEAT = 0.18; // adjust 0.14–0.22 if needed
-    const SLIDE_FORWARD = 0.04;  // subtle slide onto the seat
+    // Fallback
+    const p = seat.position.clone();
+    avatar.position.set(p.x, 0, p.z);
 
-    // Lift hips to seated hip height
-    avatar.userData.hips.position.y = (seat.sitY ?? 0.45) + HIP_ABOVE_SEAT;
+    if (typeof seat.yaw === "number") avatar.rotation.y = seat.yaw;
+    else if (seat.lookAt) { const t = seat.lookAt.clone(); t.y = 0; avatar.lookAt(t); }
 
-    // Small forward slide so they don't sit "behind" chair back
-    avatar.translateZ(SLIDE_FORWARD);
-
-    // Sitting pose
+    const HIP_ABOVE_SEAT = 0.18;
+    avatar.userData.hips.position.y = (seat.sitY ?? 0.52) + HIP_ABOVE_SEAT;
+    avatar.translateZ(0.04);
     setSitAmount(avatar, 1);
   }
 
@@ -177,20 +209,18 @@ export const Bots = (() => {
     const av = bot.avatar;
     const u = av.userData;
 
-    // subtle idle motion
     const breathe = Math.sin(t * 1.8 + bot.seed) * 0.015;
     u.torso.position.y = 0.52 + breathe;
 
-    // head look wobble (small)
     u.head.rotation.y = Math.sin(t * 0.9 + bot.seed) * 0.18;
   }
 
   return {
-    init({ THREE: _THREE, scene, getSeats: _getSeats, getLobbyZone, tableFocus: _tableFocus }) {
+    async init({ THREE: _THREE, scene, getSeats: _getSeats }) {
       THREE = _THREE;
       getSeats = _getSeats;
-      tableFocus = _tableFocus || new THREE.Vector3(0, 0, -6.5);
-      lobbyZone = getLobbyZone ? getLobbyZone() : null;
+
+      await ensureMaterials();
 
       if (root) {
         try { scene.remove(root); } catch {}
@@ -202,14 +232,13 @@ export const Bots = (() => {
       bots = [];
 
       const seats = (typeof getSeats === "function") ? getSeats() : [];
-      const colors = [0xff6b6b, 0x4cd964, 0x5ac8fa, 0xffcc00, 0xffffff];
 
       // Seat 0 is player, bots use seats 1..5 (6-seat table)
       for (let i = 1; i < 6; i++) {
         const seat = seats[i];
         if (!seat) continue;
 
-        const av = makeBotAvatar(colors[i - 1]);
+        const av = makeBotAvatar();
         placeAtSeat(av, seat);
 
         root.add(av);

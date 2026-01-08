@@ -1,118 +1,103 @@
-// /js/teleport_machine.js — Teleport Pad + FX (GitHub Pages safe)
-// ✅ NO imports. THREE is passed in.
+// /js/teleport_machine.js — Scarlett Teleporter (NO three import)
 
-export const TeleportMachine = {
-  group: null,
-  padCenter: { x: 0, y: 0, z: 3.6 },
+export const TeleportMachine = (() => {
+  let _THREE = null;
+  let _portalMat = null;
+  let _electric = [];
+  let _t = 0;
 
-  build({ THREE, scene, texLoader = null }) {
-    this.group = new THREE.Group();
-    this.group.name = "TeleportMachine";
-    this.group.position.set(this.padCenter.x, this.padCenter.y, this.padCenter.z);
+  function build({ THREE, scene, texLoader, log = console.log }) {
+    _THREE = THREE;
+
+    const g = new THREE.Group();
+    g.name = "TeleportMachine";
 
     const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.62, 0.74, 0.14, 36),
-      new THREE.MeshStandardMaterial({ color: 0x0c0d12, roughness: 0.85, metalness: 0.25 })
+      new THREE.CylinderGeometry(0.85, 0.95, 0.12, 46),
+      new THREE.MeshStandardMaterial({ color: 0x0e1220, roughness: 0.5, metalness: 0.2, emissive: 0x05060a })
     );
-    base.position.y = 0.07;
+    base.position.y = 0.06;
+    g.add(base);
 
-    let ringMat = new THREE.MeshStandardMaterial({
-      color: 0x7fe7ff, emissive: 0x45d7ff, emissiveIntensity: 2.2,
-      roughness: 0.25, metalness: 0.05, transparent: true, opacity: 0.98
-    });
-
-    if (texLoader) {
-      try {
-        const t = texLoader.load("assets/textures/teleporter/teleporter_portal_transparent.png", (tt) => {
-          tt.colorSpace = THREE.SRGBColorSpace;
-        });
-        ringMat = new THREE.MeshStandardMaterial({
-          map: t, color: 0xffffff,
-          emissive: 0x79e0ff, emissiveIntensity: 2.0,
-          roughness: 0.25, metalness: 0.05, transparent: true, opacity: 0.98
-        });
-      } catch {}
-    }
-
-    const glow = new THREE.Mesh(new THREE.TorusGeometry(0.54, 0.05, 14, 72), ringMat);
-    glow.rotation.x = Math.PI / 2;
-    glow.position.y = 0.14;
-    glow.name = "glowRing";
-
-    const plane = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.35, 1.75),
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.78, 0.04, 12, 90),
       new THREE.MeshStandardMaterial({
-        color: 0xffffff, emissive: 0x7fe7ff, emissiveIntensity: 1.1,
-        transparent: true, opacity: 0.95, depthWrite: false
+        color: 0x7fe7ff,
+        emissive: 0x2bd7ff,
+        emissiveIntensity: 1.6,
+        roughness: 0.25,
+        metalness: 0.1,
+        transparent: true,
+        opacity: 0.9
       })
     );
-    plane.position.set(0, 1.05, 0);
-    plane.name = "portalPlane";
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.14;
+    g.add(ring);
 
-    if (texLoader) {
-      try {
-        const ptex = texLoader.load("assets/textures/teleporter/teleporter_portal_scene.png", (tt) => {
-          tt.colorSpace = THREE.SRGBColorSpace;
-        });
-        plane.material.map = ptex;
-        plane.material.needsUpdate = true;
-      } catch {}
-    }
-
-    const beacon = new THREE.PointLight(0x79e0ff, 1.0, 14);
-    beacon.position.set(0, 1.7, 0);
-    beacon.name = "beacon";
-
-    const arcGeo = new THREE.BufferGeometry();
-    const arcPts = new Float32Array(52 * 3);
-    arcGeo.setAttribute("position", new THREE.BufferAttribute(arcPts, 3));
-    const arc = new THREE.Line(
-      arcGeo,
-      new THREE.LineBasicMaterial({ color: 0xb46bff, transparent: true, opacity: 0.95 })
+    // Portal “frame”
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(1.35, 2.1, 0.16),
+      new THREE.MeshStandardMaterial({ color: 0x0c1020, roughness: 0.4, metalness: 0.15 })
     );
-    arc.position.y = 0.30;
-    arc.name = "arcLine";
+    frame.position.set(0, 1.12, -0.55);
+    g.add(frame);
 
-    this.group.add(base, glow, plane, beacon, arc);
-    scene.add(this.group);
+    // Portal plane (transparent texture)
+    const texA = texLoader.load("assets/textures/teleporter/teleporter_portal_transparent.png");
+    texA.colorSpace = THREE.SRGBColorSpace;
 
-    this.group.userData._t = 0;
-    return this.group;
-  },
+    _portalMat = new THREE.MeshBasicMaterial({
+      map: texA,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false
+    });
 
-  tick(dt) {
-    if (!this.group) return;
-    const g = this.group;
-    g.userData._t = (g.userData._t || 0) + dt;
-    const t = g.userData._t;
+    const portal = new THREE.Mesh(new THREE.PlaneGeometry(1.18, 1.85), _portalMat);
+    portal.position.set(0, 1.12, -0.46);
+    g.add(portal);
 
-    const ring = g.getObjectByName("glowRing");
-    const beacon = g.getObjectByName("beacon");
-    const arc = g.getObjectByName("arcLine");
-    const plane = g.getObjectByName("portalPlane");
-
-    if (ring) {
-      ring.rotation.z += dt * 0.9;
-      ring.material.emissiveIntensity = 1.8 + Math.sin(t * 6.0) * 0.45;
+    // Purple “electricity” arcs
+    _electric = [];
+    for (let i = 0; i < 8; i++) {
+      const bolt = new THREE.Mesh(
+        new THREE.TorusGeometry(0.10 + i * 0.01, 0.008, 6, 24),
+        new THREE.MeshBasicMaterial({ color: 0xb46bff, transparent: true, opacity: 0.65 })
+      );
+      bolt.position.set((i % 2 ? 0.45 : -0.45), 2.10, -0.55);
+      bolt.rotation.y = i * 0.4;
+      bolt.rotation.x = 0.5 + i * 0.1;
+      g.add(bolt);
+      _electric.push(bolt);
     }
-    if (beacon) beacon.intensity = 0.9 + Math.sin(t * 5.0) * 0.35;
-    if (plane) {
-      plane.material.opacity = 0.85 + Math.sin(t * 2.8) * 0.10;
-      plane.rotation.y = Math.sin(t * 0.9) * 0.08;
+
+    // Add a soft purple point light
+    const p = new THREE.PointLight(0xb46bff, 1.15, 6);
+    p.position.set(0, 2.05, -0.55);
+    g.add(p);
+
+    // store references
+    g.userData._ring = ring;
+    g.userData._portal = portal;
+    g.userData._light = p;
+
+    log("[teleporter] build ✅");
+    return g;
+  }
+
+  function tick(dt) {
+    _t += dt;
+
+    if (_portalMat) {
+      _portalMat.opacity = 0.90 + Math.sin(_t * 2.4) * 0.08;
     }
 
-    if (arc) {
-      const pos = arc.geometry.attributes.position.array;
-      let idx = 0;
-      for (let i = 0; i < 52; i++) {
-        const a = (i / 51) * Math.PI * 2;
-        const r = 0.40 + Math.sin(t * 10 + i * 0.9) * 0.04;
-        const y = Math.sin(t * 13 + i * 1.1) * 0.06;
-        pos[idx++] = Math.cos(a) * r;
-        pos[idx++] = y;
-        pos[idx++] = Math.sin(a) * r;
-      }
-      arc.geometry.attributes.position.needsUpdate = true;
+    for (const e of _electric) {
+      e.rotation.z += dt * 2.2;
+      e.material.opacity = 0.45 + (Math.sin(_t * 8.0 + e.rotation.y) * 0.20);
     }
   }
-};
+
+  return { build, tick };
+})();

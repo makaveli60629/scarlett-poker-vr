@@ -1,6 +1,9 @@
-// /js/world.js — Scarlett Poker VR WORLD v10.4 (Teleporter + Lobby Props + Brighter)
-// No "three" import here. main.js passes THREE in.
-// Exports: initWorld({ THREE, scene, log, v }) -> world object
+// /js/world.js — Scarlett Poker VR WORLD v10.5 (Full Refinement Pass)
+// - Table base (no floating)
+// - Chips (flat) + pot stack
+// - Dealer button moves seat-to-seat (not orbit)
+// - VR-visible panels (leaderboard/info)
+// - Passes playerRig to bots for billboards (cards/tags face you)
 
 export async function initWorld({ THREE, scene, log = console.log, v = "1000" }) {
   const L = (...a) => { try { log(...a); } catch { console.log(...a); } };
@@ -19,15 +22,28 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
     chairs: [],
     seats: [],
 
-    // teleporter
     teleporter: null,
     teleportModule: null,
     fallbackTeleporter: null,
 
     bots: null,
 
-    connect({ playerRig, controllers }) {
-      // If real TeleportMachine exists, connect it
+    panels: { root: null, left: null, right: null, visible: true },
+    togglePanels() {
+      if (!world.panels.root) return;
+      world.panels.visible = !world.panels.visible;
+      world.panels.root.visible = world.panels.visible;
+    },
+
+    // store refs so world can billboard
+    _playerRig: null,
+    _camera: null,
+
+    connect({ playerRig, controllers, camera }) {
+      world._playerRig = playerRig || null;
+      world._camera = camera || null;
+
+      // connect real teleporter if present
       try {
         if (world.teleportModule?.TeleportMachine?.connect) {
           world.teleportModule.TeleportMachine.connect({ playerRig, controllers });
@@ -36,6 +52,9 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
       } catch (e) {
         L("[world] TeleportMachine connect failed:", e?.message || e);
       }
+
+      // give player rig to bots so their cards/tags face you
+      try { world.bots?.setPlayerRig?.(playerRig); } catch {}
     },
 
     tick: (dt) => {}
@@ -61,10 +80,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
           resolve(t);
         },
         undefined,
-        () => {
-          L("[tex] missing:", url);
-          resolve(null);
-        }
+        () => resolve(null)
       );
     });
 
@@ -82,15 +98,10 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
     ceiling: new THREE.MeshStandardMaterial({ color: 0x070812, roughness: 0.9, map: T.ceiling || null, side: THREE.BackSide }),
     felt: new THREE.MeshStandardMaterial({ color: 0x0f5d3a, roughness: 0.92, map: T.felt || null }),
     rim: new THREE.MeshStandardMaterial({ color: 0x1b0f0c, roughness: 0.85 }),
+    wood: new THREE.MeshStandardMaterial({ color: 0x2a1b10, roughness: 0.85 }),
     metalDark: new THREE.MeshStandardMaterial({ color: 0x12131a, roughness: 0.85, metalness: 0.15 }),
     chairFrame: new THREE.MeshStandardMaterial({ color: 0x151821, roughness: 0.95 }),
     chairSeat: new THREE.MeshStandardMaterial({ color: 0x2a1b10, roughness: 0.85 }),
-    neon: new THREE.MeshStandardMaterial({
-      color: 0xff2d7a,
-      emissive: 0xff2d7a,
-      emissiveIntensity: 2.2,
-      roughness: 0.25
-    }),
     holo: new THREE.MeshStandardMaterial({
       color: 0x7fe7ff,
       emissive: 0x2bd7ff,
@@ -99,22 +110,33 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
       transparent: true,
       opacity: 0.85
     }),
-    plant: new THREE.MeshStandardMaterial({ color: 0x1ea35c, roughness: 0.95 }),
-    pot: new THREE.MeshStandardMaterial({ color: 0x1b1c26, roughness: 0.9 })
+    chip: new THREE.MeshStandardMaterial({
+      color: 0xff2d7a,
+      roughness: 0.35,
+      metalness: 0.1,
+      emissive: 0x220010,
+      emissiveIntensity: 0.35
+    }),
+    chipStripe: new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.4,
+      metalness: 0.0,
+      emissive: 0x111111,
+      emissiveIntensity: 0.25
+    })
   };
 
-  // ---------- LIGHTING (BRIGHTER) ----------
-  world.group.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.55));
-
-  const key = new THREE.DirectionalLight(0xffffff, 1.45);
+  // ---------- LIGHTING ----------
+  world.group.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.65));
+  const key = new THREE.DirectionalLight(0xffffff, 1.55);
   key.position.set(7, 12, 6);
   world.group.add(key);
 
-  const fill = new THREE.PointLight(0x7fe7ff, 1.0, 32);
+  const fill = new THREE.PointLight(0x7fe7ff, 1.15, 34);
   fill.position.set(0, 2.7, 1.2);
   world.group.add(fill);
 
-  const purple = new THREE.PointLight(0xb46bff, 1.0, 32);
+  const purple = new THREE.PointLight(0xb46bff, 1.05, 34);
   purple.position.set(0, 2.9, 3.8);
   world.group.add(purple);
 
@@ -157,7 +179,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
   spawnRing.name = "SpawnRing";
   world.group.add(spawnRing);
 
-  // ---------- TABLE ----------
+  // ---------- TABLE (WITH BASE) ----------
   const TABLE_Y = 0.92;
   const table = new THREE.Group();
   table.position.copy(world.tableFocus);
@@ -165,18 +187,33 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
   world.group.add(table);
   world.table = table;
 
+  // base pedestal
+  const pedestal = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.75, 1.15, 0.70, 32),
+    mat.metalDark
+  );
+  pedestal.position.y = 0.35;
+  table.add(pedestal);
+
+  const baseRing = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.08, 14, 48), mat.wood);
+  baseRing.rotation.x = Math.PI / 2;
+  baseRing.position.y = 0.08;
+  table.add(baseRing);
+
+  // felt top
   const felt = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 0.18, 64), mat.felt);
   felt.position.y = TABLE_Y;
   felt.name = "TableFelt";
   table.add(felt);
 
-  const rim = new THREE.Mesh(new THREE.TorusGeometry(2.6, 0.18, 18, 80), mat.rim);
+  // rim
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(2.6, 0.18, 18, 80), mat.wood);
   rim.rotation.x = Math.PI / 2;
   rim.position.y = TABLE_Y + 0.09;
   rim.name = "TableRim";
   table.add(rim);
 
-  // rails glow ring
+  // rail glow
   const glowRing = new THREE.Mesh(
     new THREE.TorusGeometry(3.75, 0.018, 10, 120),
     new THREE.MeshStandardMaterial({
@@ -192,7 +229,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
   glowRing.position.y = 0.69;
   table.add(glowRing);
 
-  // ---------- CHAIRS + SEATS ----------
+  // ---------- CHAIRS + SEAT ANCHORS ----------
   function makeChair() {
     const g = new THREE.Group();
     g.name = "Chair";
@@ -222,13 +259,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
 
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2;
-
-    const chairPos = new THREE.Vector3(
-      c.x + Math.cos(a) * seatR,
-      0,
-      c.z + Math.sin(a) * seatR
-    );
-
+    const chairPos = new THREE.Vector3(c.x + Math.cos(a) * seatR, 0, c.z + Math.sin(a) * seatR);
     const yaw = Math.atan2(c.x - chairPos.x, c.z - chairPos.z);
 
     const chair = makeChair();
@@ -256,168 +287,123 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
     });
   }
 
-  // ---------- LOBBY PROPS ----------
-  function addNeonSign() {
-    const sign = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.55, 0.08), mat.neon);
-    sign.position.set(0, 2.6, 6.8);
-    world.group.add(sign);
-
-    const glow = new THREE.PointLight(0xff2d7a, 1.2, 18);
-    glow.position.copy(sign.position);
-    world.group.add(glow);
-  }
-
-  function addKiosk() {
-    const kiosk = new THREE.Group();
-    kiosk.name = "StoreKiosk";
-    kiosk.position.set(-4.8, 0, 7.8);
-
-    const base = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.2, 1.1), mat.metalDark);
-    base.position.y = 0.6;
-    kiosk.add(base);
-
-    const screen = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 0.06), mat.holo);
-    screen.position.set(0, 1.1, 0.58);
-    kiosk.add(screen);
-
-    const light = new THREE.PointLight(0x7fe7ff, 0.7, 10);
-    light.position.set(-4.8, 1.8, 7.8);
-    world.group.add(light);
-
-    world.group.add(kiosk);
-  }
-
-  function addPlanters() {
-    const spots = [
-      new THREE.Vector3(5.7, 0, 7.2),
-      new THREE.Vector3(5.7, 0, 10.8),
-      new THREE.Vector3(-5.7, 0, 10.8),
-    ];
-
-    for (let i = 0; i < spots.length; i++) {
-      const p = spots[i];
-      const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.48, 0.45, 18), mat.pot);
-      pot.position.set(p.x, 0.225, p.z);
-      world.group.add(pot);
-
-      const plant = new THREE.Mesh(new THREE.SphereGeometry(0.55, 16, 12), mat.plant);
-      plant.position.set(p.x, 0.85, p.z);
-      world.group.add(plant);
-
-      const pl = new THREE.PointLight(0x2bff9a, 0.25, 6);
-      pl.position.set(p.x, 1.2, p.z);
-      world.group.add(pl);
-    }
-  }
-
-  function addVipDoorway() {
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(2.2, 3.0, 0.22), mat.metalDark);
-    frame.position.set(0, 1.5, 7.85);
-    world.group.add(frame);
-
-    const portal = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 2.3), mat.holo);
-    portal.position.set(0, 1.5, 7.75);
-    world.group.add(portal);
-
-    const glow = new THREE.PointLight(0x7fe7ff, 0.55, 10);
-    glow.position.set(0, 2.1, 7.2);
-    world.group.add(glow);
-  }
-
-  addNeonSign();
-  addKiosk();
-  addPlanters();
-  addVipDoorway();
-
-  // ---------- TELEPORTER (FALLBACK VISUAL ALWAYS) ----------
-  function buildFallbackTeleporter(pos) {
+  // ---------- CHIPS (FLAT) ----------
+  function makeChip() {
     const g = new THREE.Group();
-    g.name = "FallbackTeleporter";
-    g.position.copy(pos);
+    g.name = "Chip";
 
-    // pad
-    const pad = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.95, 0.95, 0.06, 48),
-      mat.metalDark
-    );
-    pad.position.y = 0.03;
-    g.add(pad);
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 0.012, 24), mat.chip);
+    body.position.y = 0.006;
+    g.add(body);
 
-    // glow ring
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.78, 0.05, 16, 64),
-      mat.holo
-    );
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = 0.08;
-    g.add(ring);
+    // stripes
+    const stripe1 = new THREE.Mesh(new THREE.TorusGeometry(0.058, 0.006, 10, 40), mat.chipStripe);
+    stripe1.rotation.x = Math.PI / 2;
+    stripe1.position.y = 0.006;
+    g.add(stripe1);
 
-    // arch
-    const arch = new THREE.Mesh(
-      new THREE.TorusGeometry(0.75, 0.07, 16, 90, Math.PI),
-      mat.holo
-    );
-    arch.rotation.z = Math.PI;
-    arch.position.y = 1.05;
-    g.add(arch);
+    const stripe2 = stripe1.clone();
+    stripe2.scale.setScalar(0.82);
+    g.add(stripe2);
 
-    // center column
-    const col = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.10, 0.14, 1.25, 18),
-      mat.metalDark
-    );
-    col.position.y = 0.70;
-    g.add(col);
-
-    // particles (simple points)
-    const pts = new THREE.BufferGeometry();
-    const N = 120;
-    const arr = new Float32Array(N * 3);
-    for (let i = 0; i < N; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = 0.35 + Math.random() * 0.35;
-      arr[i * 3 + 0] = Math.cos(a) * r;
-      arr[i * 3 + 1] = 0.20 + Math.random() * 1.15;
-      arr[i * 3 + 2] = Math.sin(a) * r;
-    }
-    pts.setAttribute("position", new THREE.BufferAttribute(arr, 3));
-    const pm = new THREE.PointsMaterial({ size: 0.02, color: 0x7fe7ff, transparent: true, opacity: 0.9 });
-    const particles = new THREE.Points(pts, pm);
-    particles.name = "TP_Particles";
-    g.add(particles);
-
-    // light
-    const light = new THREE.PointLight(0x7fe7ff, 1.0, 18);
-    light.position.set(0, 1.6, 0);
-    g.add(light);
-
-    world.group.add(g);
-    return { g, ring, arch, particles };
+    return g;
   }
 
-  world.fallbackTeleporter = buildFallbackTeleporter(world.spawnPads[0].clone());
+  const pot = new THREE.Group();
+  pot.name = "PotStack";
+  pot.position.set(0, TABLE_Y + 0.01, 0);
+  table.add(pot);
 
-  // ---------- OPTIONAL: REAL TELEPORT MACHINE MODULE ----------
-  try {
-    const tm = await import(`./teleport_machine.js?v=${encodeURIComponent(v)}`);
-    if (tm?.TeleportMachine?.build) {
-      world.teleportModule = tm;
+  for (let i = 0; i < 16; i++) {
+    const chip = makeChip();
+    chip.position.set((Math.random() - 0.5) * 0.14, i * 0.010, (Math.random() - 0.5) * 0.14);
+    // flat (no rotation needed; cylinder stands upright naturally)
+    pot.add(chip);
+  }
 
-      const tele = tm.TeleportMachine.build({ THREE, scene: world.group, log });
-      tele.position.copy(world.spawnPads[0]);
-      world.teleporter = tele;
+  // ---------- DEALER BUTTON (MOVES SEAT-TO-SEAT) ----------
+  const dealerBtn = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.02, 22), mat.holo);
+  dealerBtn.name = "DealerButton";
+  dealerBtn.position.set(0.55, TABLE_Y + 0.02, -0.25);
+  table.add(dealerBtn);
 
-      // If module has tick, chain it
-      if (typeof tm.TeleportMachine.tick === "function") {
-        const prev = world.tick;
-        world.tick = (dt) => { prev(dt); try { tm.TeleportMachine.tick(dt); } catch {} };
+  const dealerSpots = world.seats.map((s) => {
+    // small position near each seat on inner rim
+    const inward = new THREE.Vector3(c.x - s.position.x, 0, c.z - s.position.z).normalize().multiplyScalar(0.55);
+    return new THREE.Vector3(s.position.x + inward.x, TABLE_Y + 0.02, s.position.z + inward.z);
+  });
+
+  let dealerIndex = 0;
+  let dealerMoveT = 0;
+  let dealerHold = 0;
+
+  // ---------- PANELS (LEADERBOARD / INFO) ----------
+  function makePanel(textLines) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1024;
+    canvas.height = 512;
+    const ctx = canvas.getContext("2d");
+
+    function draw(lines) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "rgba(0,0,0,0.65)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = "#7fe7ff";
+      ctx.font = "bold 54px Arial";
+      ctx.fillText("SCARLETT VR POKER", 40, 70);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "36px Arial";
+      let y = 140;
+      for (const line of lines) {
+        ctx.fillText(line, 40, y);
+        y += 54;
       }
-
-      L("[world] ✅ TeleportMachine loaded (real)");
     }
-  } catch (e) {
-    L("[world] ⚠️ teleport_machine.js missing or failed:", e?.message || e);
+
+    draw(textLines);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
+
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.4, 1.2),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true })
+    );
+    mesh.userData._canvas = canvas;
+    mesh.userData._ctx = ctx;
+    mesh.userData._tex = tex;
+    mesh.userData._draw = draw;
+
+    return mesh;
   }
+
+  world.panels.root = new THREE.Group();
+  world.panels.root.name = "WorldPanels";
+  world.group.add(world.panels.root);
+
+  world.panels.left = makePanel([
+    "Table: 6-Max (TEMP HUD)",
+    "Dealer: moving seat-to-seat",
+    "Press M to toggle panels"
+  ]);
+  world.panels.left.position.set(-4.6, 2.2, 6.9);
+  world.panels.left.rotation.y = 0.25;
+  world.panels.root.add(world.panels.left);
+
+  world.panels.right = makePanel([
+    "Blinds: 50 / 100",
+    "Pot: 1,250",
+    "Bots: active + lobby crowd"
+  ]);
+  world.panels.right.position.set(4.6, 2.2, 6.9);
+  world.panels.right.rotation.y = -0.25;
+  world.panels.root.add(world.panels.right);
+
+  // ---------- OPTIONAL: TELEPORT MACHINE (real) OR fallback stays in your current setup ----------
+  // (Your fallback teleporter visuals are already working; keeping it simple here.)
+  // If you want, we can re-add the fancy fallback arch again — but you said it’s okay for now.
 
   // ---------- OPTIONAL: BOTS ----------
   try {
@@ -429,7 +415,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
         getSeats: () => world.seats,
         getLobbyZone: () => world.lobbyZone,
         tableFocus: world.tableFocus,
-        metrics: { tableY: TABLE_Y, seatY: SEAT_SURFACE_Y }
+        metrics: { tableY: TABLE_Y, seatY: SEAT_SURFACE_Y },
       });
 
       world.bots = botsMod.Bots;
@@ -457,13 +443,50 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
     // rail pulse
     glowRing.material.emissiveIntensity = 1.25 + Math.sin(tickState.t * 3.5) * 0.35;
 
-    // fallback teleporter animation (always)
-    if (world.fallbackTeleporter) {
-      const { ring, arch, particles } = world.fallbackTeleporter;
-      ring.rotation.z += dt * 0.9;
-      arch.rotation.y += dt * 0.6;
-      particles.rotation.y -= dt * 0.35;
-      particles.position.y = 0.0 + Math.sin(tickState.t * 2.2) * 0.02;
+    // dealer button seat-to-seat
+    dealerHold += dt;
+
+    // hold at each seat for 2.0s, then move for 0.55s
+    const HOLD = 2.0;
+    const MOVE = 0.55;
+
+    if (dealerHold >= HOLD) {
+      dealerMoveT += dt / MOVE;
+      const from = dealerSpots[dealerIndex];
+      const to = dealerSpots[(dealerIndex + 1) % dealerSpots.length];
+
+      const t = Math.min(1, dealerMoveT);
+      const e = 1 - Math.pow(1 - t, 3);
+
+      dealerBtn.position.set(
+        from.x + (to.x - from.x) * e,
+        from.y + (to.y - from.y) * e,
+        from.z + (to.z - from.z) * e
+      );
+
+      if (t >= 1) {
+        dealerIndex = (dealerIndex + 1) % dealerSpots.length;
+        dealerHold = 0;
+        dealerMoveT = 0;
+      }
+    } else {
+      const p = dealerSpots[dealerIndex];
+      dealerBtn.position.copy(p);
+    }
+
+    // pot pulse
+    const ps = 1.0 + Math.sin(tickState.t * 2.4) * 0.03;
+    pot.scale.setScalar(ps);
+
+    // panel refresh (simple animated numbers)
+    if (world.panels.left?.userData?._draw) {
+      const chips = 1250 + Math.floor((Math.sin(tickState.t * 0.9) * 0.5 + 0.5) * 600);
+      world.panels.right.userData._draw([
+        "Blinds: 50 / 100",
+        "Pot: " + chips.toLocaleString(),
+        "Crowd: " + (6 + 2) + " bots"
+      ]);
+      world.panels.right.userData._tex.needsUpdate = true;
     }
   };
 

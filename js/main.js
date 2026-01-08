@@ -1,4 +1,4 @@
-// /js/main.js — Scarlett VR Poker (9.0 FINAL RIG + TELEPORT FIX, cache-safe)
+// /js/main.js — Scarlett VR Poker (9.0 FINAL RIG + TELEPORT FIX, FULL FILE)
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -17,13 +17,15 @@ const clock = new THREE.Clock();
 const player = new THREE.Group();
 const head = new THREE.Group();
 
-let c0 = null, c1 = null;
-let g0 = null, g1 = null; // controller grips (often better pose)
+let c0 = null,
+  c1 = null;
+let g0 = null,
+  g1 = null;
 
 // movement tuning
 const MOVE_SPEED = 2.25;
 const TURN_ANGLE = THREE.MathUtils.degToRad(45);
-const DEADZONE = 0.20;
+const DEADZONE = 0.2;
 let snapArmed = true;
 
 // teleport system
@@ -40,44 +42,13 @@ async function boot() {
   document.body.appendChild(renderer.domElement);
 
   // VR button
-  // VR Button (hardened)
-  let btn = null;
-  try {
-    btn = VRButton.createButton(renderer);
-    btn.id = "VRButton";
-    btn.style.position = "fixed";
-    btn.style.right = "12px";
-    btn.style.bottom = "12px";
-    btn.style.zIndex = "2147483647";
-    btn.style.display = "block";
-    document.body.appendChild(btn);
-    log("[main] VRButton appended ✅");
-  } catch (e) {
-    log("⚠️ VRButton create failed: " + (e?.message || e));
-  }
-
-  // If XR exists but VRButton didn’t show, show a forced button and tell us why
-  const force = document.getElementById("forceVR");
-  if (force) {
-    const hasXR = !!navigator.xr;
-    log("[main] navigator.xr = " + hasXR);
-
-    if (!btn) {
-      force.style.display = "block";
-      force.onclick = async () => {
-        try {
-          if (!navigator.xr) throw new Error("navigator.xr missing");
-          const ok = await navigator.xr.isSessionSupported("immersive-vr");
-          log("[main] immersive-vr supported = " + ok);
-          if (!ok) throw new Error("immersive-vr not supported");
-          const session = await navigator.xr.requestSession("immersive-vr", { optionalFeatures: ["local-floor","bounded-floor"] });
-          renderer.xr.setSession(session);
-        } catch (err) {
-          log("❌ Force ENTER VR failed: " + (err?.message || err));
-        }
-      };
-    }
-  }
+  const btn = VRButton.createButton(renderer);
+  btn.id = "VRButton";
+  btn.style.position = "fixed";
+  btn.style.right = "12px";
+  btn.style.bottom = "12px";
+  btn.style.zIndex = "2147483647";
+  document.body.appendChild(btn);
 
   // scene/camera
   scene = new THREE.Scene();
@@ -91,16 +62,16 @@ async function boot() {
   // non-VR preview height
   camera.position.set(0, 1.6, 0);
 
-  // lights (safe)
+  // lights
   scene.add(new THREE.AmbientLight(0xffffff, 0.55));
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.0));
   const key = new THREE.DirectionalLight(0xffffff, 1.0);
   key.position.set(6, 10, 4);
   scene.add(key);
 
-  // teleport visuals
+  // teleport visuals (attach to rig so they never "stick in world space")
   teleport = createTeleportSystem(THREE);
-  scene.add(teleport.arcLine, teleport.ring);
+  player.add(teleport.arcLine, teleport.ring);
 
   // load world
   try {
@@ -111,20 +82,19 @@ async function boot() {
     log("❌ world import/init failed: " + (e?.message || e));
   }
 
-  // spawn position (safe)
+  // forced spawn (stable)
   const forcedSpawn = new THREE.Vector3(0, 0, 3.5);
   player.position.set(forcedSpawn.x, 0, forcedSpawn.z);
   player.rotation.set(0, Math.PI, 0);
 
-  // rotate toward table (non-XR)
-  faceTableNow();
+  // face table immediately (non-xr)
+  faceTableNow(false);
 
   // controllers
   setupXRControls();
 
-  // ✅ XR session start recenter (THIS FIXES “spawn facing wall”)
+  // recenter on session start (fix "spawn facing wall")
   renderer.xr.addEventListener("sessionstart", () => {
-    // give XR a moment to populate headset pose
     setTimeout(() => {
       faceTableNow(true);
       log("[main] sessionstart recenter ✅");
@@ -145,15 +115,18 @@ function onResize() {
 
 // ==================== CONTROLLERS ====================
 function setupXRControls() {
+  // controllers
   c0 = renderer.xr.getController(0);
   c1 = renderer.xr.getController(1);
-  scene.add(c0, c1);
 
+  // grips (better pose)
   g0 = renderer.xr.getControllerGrip(0);
   g1 = renderer.xr.getControllerGrip(1);
-  scene.add(g0, g1);
 
-  // controller models (helps on Quest)
+  // ✅ IMPORTANT FIX: parent controllers to PLAYER RIG, not scene
+  player.add(c0, c1, g0, g1);
+
+  // controller models (Quest)
   const modelFactory = new XRControllerModelFactory();
   g0.add(modelFactory.createControllerModel(g0));
   g1.add(modelFactory.createControllerModel(g1));
@@ -169,28 +142,32 @@ function setupXRControls() {
   c0.addEventListener("selectend", () => onSelectEnd(c0));
   c1.addEventListener("selectend", () => onSelectEnd(c1));
 
-  log("[main] controllers ready ✅");
+  log("[main] controllers ready ✅ (rig-attached)");
 }
 
 function getGamepad(controller) {
   const src = controller?.userData?.inputSource;
   return src && src.gamepad ? src.gamepad : null;
 }
+
 function isRightHand(controller) {
   const src = controller?.userData?.inputSource;
   if (!src) return controller === c1;
   return src.handedness ? src.handedness === "right" : controller === c1;
 }
+
 function findControllerByHand(hand) {
   const a = c0?.userData?.inputSource?.handedness === hand ? c0 : null;
   const b = c1?.userData?.inputSource?.handedness === hand ? c1 : null;
   return a || b || null;
 }
+
 function findGripForController(controller) {
   if (controller === c0) return g0;
   if (controller === c1) return g1;
   return null;
 }
+
 function getHeadYaw() {
   const q = new THREE.Quaternion();
   camera.getWorldQuaternion(q);
@@ -199,7 +176,6 @@ function getHeadYaw() {
 }
 
 // ==================== SPAWN / RECENTER ====================
-// If xrAware=true, we align the *headset forward* to the table direction.
 function faceTableNow(xrAware = false) {
   if (!world?.tableFocus) return;
 
@@ -212,7 +188,7 @@ function faceTableNow(xrAware = false) {
     return;
   }
 
-  // XR-aware: rotate player so that headset forward ends up facing desiredYaw
+  // XR-aware: rotate player so that headset forward points to table
   const headYaw = getHeadYaw();
   const delta = desiredYaw - headYaw;
   player.rotation.y += delta;
@@ -224,7 +200,7 @@ function onSelectStart(controller) {
 
   teleport.active = true;
 
-  // ✅ lock teleport to the controller that pressed trigger
+  // lock teleport to the controller that pressed trigger
   teleport.controller = controller;
   teleport.grip = findGripForController(controller) || controller;
 }
@@ -260,7 +236,7 @@ function applyLocomotion(dt) {
   const left = findControllerByHand("left") || c0;
   const right = findControllerByHand("right") || c1;
 
-  // ---- left stick move (forward is forward) ----
+  // ---- left stick move (correct forward/back) ----
   const gpL = getGamepad(left);
   if (gpL?.axes?.length >= 2) {
     const x = gpL.axes[2] ?? gpL.axes[0];
@@ -275,6 +251,7 @@ function applyLocomotion(dt) {
       const rightv = new THREE.Vector3(forward.z, 0, -forward.x);
 
       const move = new THREE.Vector3();
+      // ay positive should move forward
       move.addScaledVector(forward, ay * MOVE_SPEED * dt);
       move.addScaledVector(rightv, ax * MOVE_SPEED * dt);
 
@@ -301,7 +278,7 @@ function applyLocomotion(dt) {
     }
   }
 
-  // ---- teleport arc update (right trigger only) ----
+  // ---- teleport arc update ----
   if (teleport.active) {
     const src = teleport.grip || teleport.controller || (findControllerByHand("right") || c1);
     updateTeleportArc(THREE, src, teleport, world, camera);
@@ -327,30 +304,32 @@ function createTeleportSystem(THREE) {
   return { active: false, valid: false, hitPoint: null, arcLine, ring, controller: null, grip: null };
 }
 
-// If controller pose is bad, fallback to camera-based arc so it never draws from world origin.
+// If controller pose is bad, fallback to camera (never draw from world origin)
 function updateTeleportArc(THREE, sourceObj, tp, world, cam) {
   tp.arcLine.visible = true;
 
   const origin = new THREE.Vector3();
   const q = new THREE.Quaternion();
 
-  // try controller/grip pose
   if (sourceObj?.getWorldPosition) sourceObj.getWorldPosition(origin);
   if (sourceObj?.getWorldQuaternion) sourceObj.getWorldQuaternion(q);
 
-  const poseLooksBad = !isFinite(origin.x) || !isFinite(origin.y) || !isFinite(origin.z) || origin.length() < 0.001;
+  const poseLooksBad =
+    !isFinite(origin.x) || !isFinite(origin.y) || !isFinite(origin.z) || origin.length() < 0.001;
 
   if (poseLooksBad) {
-    // fallback to head/gaze
     cam.getWorldPosition(origin);
     cam.getWorldQuaternion(q);
   }
 
   const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(q).normalize();
 
-  const g = -9.8, v = 7.0, step = 0.06, maxT = 2.0;
-  const positions = tp.arcLine.geometry.attributes.position.array;
+  const g = -9.8,
+    v = 7.0,
+    step = 0.06,
+    maxT = 2.0;
 
+  const positions = tp.arcLine.geometry.attributes.position.array;
   let hit = null;
   let idx = 0;
 
@@ -365,7 +344,10 @@ function updateTeleportArc(THREE, sourceObj, tp, world, cam) {
     positions[idx++] = p.y;
     positions[idx++] = p.z;
 
-    if (!hit && p.y <= 0.02) { hit = p; break; }
+    if (!hit && p.y <= 0.02) {
+      hit = p;
+      break;
+    }
   }
 
   while (idx < positions.length) {

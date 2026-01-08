@@ -1,4 +1,4 @@
-// /js/main.js — Scarlett Poker VR MAIN v11.2 (Back Together)
+// /js/main.js — Scarlett Poker VR MAIN v11.3 (Stand by default + Action-to-Join)
 
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
@@ -34,13 +34,13 @@ player.name = "PlayerRig";
 scene.add(player);
 
 player.add(camera);
-camera.position.set(0, 1.65, 0);
 
-// Spawn on teleport circle
+// Always stand by default
 player.position.set(0, 0, 3.6);
 player.rotation.set(0, 0, 0);
+camera.position.set(0, 1.65, 0);
 
-// Baseline lighting
+// Baseline lights
 scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.1));
 const dir = new THREE.DirectionalLight(0xffffff, 1.0);
 dir.position.set(10, 14, 8);
@@ -77,29 +77,40 @@ log("[main] controllers ready ✅");
 
 // WORLD
 const world = await initWorld({ THREE, scene, log, v: BUILD });
-
-// Provide camera to modules (billboards)
 scene.userData.cameraRef = camera;
 
-try { world?.connect?.({ camera, player, renderer, controllers, grips }); } catch {}
+// DEALING (created before connect so world can call it)
+const dealing = DealingMix.init({ THREE, scene, log, world });
+dealing.setIncludePlayer(false);
 
-// face table
+// Connect refs
+try { world?.connect?.({ camera, player, renderer, controllers, grips, dealing }); } catch {}
+
+// Face table
 if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.2, world.tableFocus.z);
 
 // Systems
 const controls = Controls.init({ THREE, renderer, camera, player, log, world });
-const teleport = Teleport.init({ THREE, scene, renderer, camera, player, controllers, log, world });
+const teleport = Teleport.init({ THREE, scene, renderer, player, controllers, log, world });
 const hands = HandsSystem.init({ THREE, scene, renderer, log });
 
-const dealing = DealingMix.init({ THREE, scene, log, world });
-dealing.startHand?.();
+// ACTION: trigger (select) -> talk to guard / join pad
+for (const c of controllers) {
+  c.addEventListener("selectstart", () => {
+    try { world?.onAction?.(); } catch {}
+  });
+}
 
-// Recenter
+// RECENTER (always standing reset)
 window.addEventListener("scarlett-recenter", () => {
   player.position.set(0, 0, 3.6);
   player.rotation.set(0, 0, 0);
+  camera.position.set(0, 1.65, 0); // force standing
+  world.playerSeated = false;
+  dealing.setIncludePlayer(false);
+
   if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.2, world.tableFocus.z);
-  log("[main] recentered ✅");
+  log("[main] recentered ✅ (standing)");
 });
 
 // Resize
@@ -109,7 +120,7 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Loop
+// LOOP
 let last = performance.now();
 renderer.setAnimationLoop(() => {
   const now = performance.now();

@@ -1,207 +1,135 @@
-// /js/tableHud.js — Scarlett Table HUD v1.0 (Canvas Board)
-// Purpose: Big readable table identifier + pot/turn/action board above table.
-// No "three" import. World passes THREE in (GitHub Pages safe).
+// /js/tableHud.js — Scarlett Table HUD v1.0 (Billboard + Game State)
 
 export const TableHud = {
-  build({ THREE, parent, log = console.log, title = "$10,000 Table", pos = { x: 0, y: 1.55, z: 0 } } = {}) {
+  build({ THREE, parent, title = "$10,000 Table", log = console.log } = {}) {
     const L = (...a) => { try { log(...a); } catch { console.log(...a); } };
 
-    // ---- canvas ----
-    const canvas = document.createElement("canvas");
-    canvas.width = 1024;
-    canvas.height = 512;
-    const ctx = canvas.getContext("2d");
-
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.needsUpdate = true;
-    tex.colorSpace = THREE.SRGBColorSpace;
-
-    const mat = new THREE.MeshBasicMaterial({
-      map: tex,
-      transparent: true,
-      depthTest: true
-    });
-
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.85, 0.92), mat);
-    mesh.name = "TableHudBoard";
-    mesh.position.set(pos.x, pos.y, pos.z);
-
-    // subtle glow backing
-    const glow = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.95, 1.02),
-      new THREE.MeshBasicMaterial({ color: 0x0b0d14, transparent: true, opacity: 0.55 })
-    );
-    glow.position.set(0, 0, -0.002);
-    mesh.add(glow);
-
-    parent?.add(mesh);
+    const root = new THREE.Group();
+    root.name = "TableHud";
+    parent.add(root);
 
     const state = {
       title,
-      blinds: "Blinds: 50 / 100",
-      ante: "Ante: 0",
       pot: 0,
       street: "Preflop",
       turnName: "—",
-      turnSeat: "-",
-      lastAction: "Waiting…",
-      toCall: 0,
-      minRaise: 0,
-      handNo: 1,
-      t: 0,
-      target: null
+      action: "Waiting…",
+      target: null,
+      t: 0
     };
 
-    // ---- draw helpers ----
-    function roundRect(x, y, w, h, r) {
-      ctx.beginPath();
-      ctx.moveTo(x + r, y);
-      ctx.arcTo(x + w, y, x + w, y + h, r);
-      ctx.arcTo(x + w, y + h, x, y + h, r);
-      ctx.arcTo(x, y + h, x, y, r);
-      ctx.arcTo(x, y, x + w, y, r);
-      ctx.closePath();
+    function makeBoard() {
+      const c = document.createElement("canvas");
+      c.width = 1024;
+      c.height = 512;
+      const ctx = c.getContext("2d");
+
+      const tex = new THREE.CanvasTexture(c);
+      tex.needsUpdate = true;
+
+      const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.45, 0.72), mat);
+      mesh.name = "HudBoard";
+      mesh.position.set(0, 0, 0);
+
+      mesh.userData.canvas = c;
+      mesh.userData.ctx = ctx;
+      mesh.userData.tex = tex;
+
+      return mesh;
     }
 
-    function fmtMoney(n) {
-      const v = Math.max(0, Number(n) || 0);
-      return "$" + v.toLocaleString();
-    }
+    const board = makeBoard();
+    root.add(board);
+
+    root.position.set(0, 0, 0);
+    root.rotation.set(0, 0, 0);
 
     function draw() {
-      const W = canvas.width, H = canvas.height;
-      ctx.clearRect(0, 0, W, H);
+      const ctx = board.userData.ctx;
+      const c = board.userData.canvas;
 
-      // background glass
-      ctx.fillStyle = "rgba(10,12,20,0.78)";
-      roundRect(28, 28, W - 56, H - 56, 34);
-      ctx.fill();
+      ctx.clearRect(0, 0, c.width, c.height);
 
-      // border
-      ctx.strokeStyle = "rgba(127,231,255,0.22)";
+      // background
+      ctx.fillStyle = "rgba(10,12,20,0.72)";
+      roundRect(ctx, 26, 26, c.width - 52, c.height - 52, 28, true);
+
+      // border glow
+      ctx.strokeStyle = "rgba(127,231,255,0.35)";
       ctx.lineWidth = 6;
-      roundRect(28, 28, W - 56, H - 56, 34);
-      ctx.stroke();
-
-      // header bar
-      ctx.fillStyle = "rgba(127,231,255,0.12)";
-      roundRect(46, 46, W - 92, 108, 26);
-      ctx.fill();
+      roundRect(ctx, 26, 26, c.width - 52, c.height - 52, 28, false);
 
       // title
       ctx.fillStyle = "#e8ecff";
-      ctx.font = "800 54px system-ui, -apple-system, Segoe UI, Roboto, Arial";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
-      ctx.fillText(state.title, 72, 98);
+      ctx.font = "bold 54px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillText(state.title, c.width / 2, 58);
 
-      // right badge: Hand #
-      ctx.textAlign = "right";
-      ctx.fillStyle = "rgba(255,45,122,0.95)";
-      ctx.font = "800 40px system-ui, -apple-system, Segoe UI, Roboto, Arial";
-      ctx.fillText("HAND " + state.handNo, W - 78, 98);
-
-      // 2 columns info cards
-      const leftX = 58, rightX = W / 2 + 10;
-      const cardW = W / 2 - 78;
-      const cardH = 118;
-
-      // card 1: Pot + Street
-      ctx.fillStyle = "rgba(255,255,255,0.06)";
-      roundRect(leftX, 175, cardW, cardH, 26);
-      ctx.fill();
-
-      ctx.fillStyle = "#98a0c7";
-      ctx.font = "700 28px system-ui";
-      ctx.textAlign = "left";
-      ctx.fillText("POT", leftX + 26, 210);
-
+      // street / pot
       ctx.fillStyle = "#7fe7ff";
-      ctx.font = "900 52px system-ui";
-      ctx.fillText(fmtMoney(state.pot), leftX + 26, 265);
+      ctx.font = "bold 40px Arial";
+      ctx.fillText(state.street.toUpperCase(), c.width / 2, 132);
 
-      ctx.fillStyle = "#98a0c7";
-      ctx.font = "700 26px system-ui";
-      ctx.fillText(state.street, leftX + 26, 305);
+      ctx.fillStyle = "#ff2d7a";
+      ctx.font = "bold 52px Arial";
+      ctx.fillText("POT  $" + Number(state.pot).toLocaleString(), c.width / 2, 190);
 
-      // card 2: Turn
-      ctx.fillStyle = "rgba(255,255,255,0.06)";
-      roundRect(rightX, 175, cardW, cardH, 26);
-      ctx.fill();
-
-      ctx.fillStyle = "#98a0c7";
-      ctx.font = "700 28px system-ui";
-      ctx.textAlign = "left";
-      ctx.fillText("TURN", rightX + 26, 210);
-
+      // turn + action
       ctx.fillStyle = "#e8ecff";
-      ctx.font = "900 46px system-ui";
-      ctx.fillText(state.turnName, rightX + 26, 262);
+      ctx.font = "bold 38px Arial";
+      ctx.fillText("TURN:  " + state.turnName, c.width / 2, 278);
 
-      ctx.fillStyle = "#98a0c7";
-      ctx.font = "700 26px system-ui";
-      ctx.fillText("Seat " + state.turnSeat, rightX + 26, 305);
+      ctx.fillStyle = "rgba(232,236,255,0.92)";
+      ctx.font = "bold 34px Arial";
+      ctx.fillText(state.action, c.width / 2, 340);
 
-      // bottom long card: Last action + to call + min raise
-      ctx.fillStyle = "rgba(255,255,255,0.06)";
-      roundRect(58, 315, W - 116, 140, 26);
-      ctx.fill();
+      // small footer
+      ctx.fillStyle = "rgba(152,160,199,0.9)";
+      ctx.font = "28px Arial";
+      ctx.fillText("Scarlett VR Poker • Live Table", c.width / 2, 410);
 
-      ctx.fillStyle = "#98a0c7";
-      ctx.font = "700 26px system-ui";
-      ctx.textAlign = "left";
-      ctx.fillText("ACTION", 84, 352);
+      board.userData.tex.needsUpdate = true;
 
-      ctx.fillStyle = "#e8ecff";
-      ctx.font = "800 40px system-ui";
-      ctx.fillText(state.lastAction, 84, 404);
-
-      // right-side call/raise
-      ctx.textAlign = "right";
-      ctx.fillStyle = "#ffcc00";
-      ctx.font = "800 28px system-ui";
-      ctx.fillText("TO CALL: " + fmtMoney(state.toCall), W - 84, 362);
-
-      ctx.fillStyle = "#4cd964";
-      ctx.fillText("MIN RAISE: " + fmtMoney(state.minRaise), W - 84, 410);
-
-      // footer line: blinds/ante
-      ctx.textAlign = "left";
-      ctx.fillStyle = "rgba(232,236,255,0.75)";
-      ctx.font = "700 22px system-ui";
-      ctx.fillText(state.blinds + "    •    " + state.ante, 72, H - 62);
-
-      tex.needsUpdate = true;
+      function roundRect(ctx, x, y, w, h, r, fill) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
+        if (fill) ctx.fill(); else ctx.stroke();
+      }
     }
 
-    function billboardTo(targetObj) {
-      if (!targetObj) return;
-      const p = targetObj.position;
-      mesh.lookAt(p.x, mesh.position.y, p.z);
-    }
-
-    function setTarget(t) { state.target = t || null; }
-
-    function setData(patch = {}) {
-      Object.assign(state, patch);
+    // Public setters (DealingMix / PokerSim can call this)
+    function setTarget(cam) { state.target = cam || null; }
+    function setGameState({ pot, street, turnName, action } = {}) {
+      if (typeof pot === "number") state.pot = pot;
+      if (street) state.street = street;
+      if (turnName) state.turnName = turnName;
+      if (action) state.action = action;
       draw();
     }
 
-    // default draw
     draw();
-    L("[TableHud] build ✅");
+    L("[TableHud] ready ✅");
 
     return {
-      root: mesh,
+      root,
       setTarget,
-      setData,
+      setGameState,
       update(dt) {
         state.t += dt;
-        // subtle pulse (very light)
-        const s = 1.0 + Math.sin(state.t * 1.5) * 0.01;
-        mesh.scale.set(s, s, 1);
-
-        billboardTo(state.target);
+        // billboard
+        if (state.target) {
+          const p = state.target.position.clone();
+          root.lookAt(p.x, root.position.y, p.z);
+        }
+        // gentle hover
+        root.position.y = Math.sin(state.t * 1.2) * 0.01;
       }
     };
   }

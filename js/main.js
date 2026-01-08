@@ -1,4 +1,4 @@
-// /js/main.js — Scarlett Poker VR Boot v10
+// /js/main.js — Scarlett Poker VR Boot v10 (FIXED for class-based Controls)
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
@@ -90,16 +90,32 @@ if (world?.tableFocus) {
 log("[main] world loaded ✅");
 
 // ---------- MOVEMENT + TELEPORT ----------
-const controls = Controls.init({
+// ✅ FIX: Controls is a class (new Controls), NOT Controls.init(...)
+const controls = new Controls({
   THREE,
   renderer,
+  scene,
   camera,
-  player,
-  controllers,
-  log,
-  world
+
+  // IMPORTANT: your class-based Controls creates its own rig by default.
+  // We want it to move YOUR existing player rig, so we attach camera back to player
+  // and then tell Controls to use your player rig as its rig.
 });
 
+// Force Controls to use your existing player rig (no guessing)
+controls.rig = player;         // use your rig
+controls.scene = scene;        // ensure marker goes to correct scene
+controls.camera = camera;      // ensure camera references match
+
+// Provide floor + colliders from world if present
+// (These are OPTIONAL; if missing, teleport/movement still runs but without collision/teleport hits)
+controls.setFloorMeshes?.(world?.floorMeshes || world?.floors || world?.floor ? [world.floor] : []);
+controls.setColliders?.(world?.colliders || world?.worldColliders || []);
+
+// If your world exposes teleport machine, wire it
+if (world?.teleportMachine) controls.setTeleportMachine?.(world.teleportMachine);
+
+// Teleport system (your existing teleport.js stays the same)
 const teleport = Teleport.init({
   THREE,
   scene,

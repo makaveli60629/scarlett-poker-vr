@@ -1,4 +1,4 @@
-// /js/world.js — Scarlett Poker VR WORLD v10.1 (SeatAnchors + stable)
+// /js/world.js — Scarlett Poker VR WORLD v10.2 (GitHub Pages safe + SeatAnchors)
 // No "three" import here. main.js passes THREE in.
 // Exports: initWorld({ THREE, scene, log, v }) -> returns world object
 
@@ -10,19 +10,16 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
   const world = {
     v,
     group: new THREE.Group(),
-    // core points
     tableFocus: new THREE.Vector3(0, 0, -6.5),
     spawnPads: [new THREE.Vector3(0, 0, 3.6)],
     lobbyZone: { min: new THREE.Vector3(-6, 0, 6), max: new THREE.Vector3(6, 0, 12) },
     roomClamp: { minX: -7.6, maxX: 7.6, minZ: -13.6, maxZ: 7.6 },
 
-    // physical refs
     floor: null,
     table: null,
     chairs: [],
-    seats: [], // seat anchors (position + yaw + sitY + anchor)
+    seats: [],
 
-    // optional modules
     teleporter: null,
     teleportModule: null,
     bots: null,
@@ -68,11 +65,12 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
       );
     });
 
+  // ✅ Use ./assets/... for GitHub Pages robustness
   const T = {
-    carpet: await loadTex("assets/textures/lobby_carpet.jpg", { repeat: [2, 2], srgb: true }),
-    brick: await loadTex("assets/textures/brickwall.jpg", { repeat: [2, 1], srgb: true }),
-    ceiling: await loadTex("assets/textures/ceiling_dome_main.jpg", { srgb: true }),
-    felt: await loadTex("assets/textures/table_felt_green.jpg", { srgb: true })
+    carpet: await loadTex("./assets/textures/lobby_carpet.jpg", { repeat: [2, 2], srgb: true }),
+    brick: await loadTex("./assets/textures/brickwall.jpg", { repeat: [2, 1], srgb: true }),
+    ceiling: await loadTex("./assets/textures/ceiling_dome_main.jpg", { srgb: true }),
+    felt: await loadTex("./assets/textures/table_felt_green.jpg", { srgb: true })
   };
 
   const mat = {
@@ -103,8 +101,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
     chairSeat: new THREE.MeshStandardMaterial({ color: 0x2a1b10, roughness: 0.85 })
   };
 
-  // ---------------- LIGHTING (WORLD LOCAL) ----------------
-  // Slightly brighter than v10.0 to reduce "dark room" complaints
+  // ---------------- LIGHTING ----------------
   world.group.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.25));
 
   const key = new THREE.DirectionalLight(0xffffff, 1.15);
@@ -119,14 +116,14 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
   purple.position.set(0, 2.6, 3.6);
   world.group.add(purple);
 
-  // ---------------- FLOOR (TELEPORT TARGET) ----------------
+  // ---------------- FLOOR ----------------
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), mat.floor);
   floor.rotation.x = -Math.PI / 2;
   floor.name = "Floor";
   world.group.add(floor);
   world.floor = floor;
 
-  // ---------------- WALLS (SOLID ROOM) ----------------
+  // ---------------- WALLS ----------------
   const wallH = 6.0;
   const mkWall = (w, h, d, x, y, z) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat.wall);
@@ -243,14 +240,12 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2;
 
-    // chair base position
     const chairPos = new THREE.Vector3(
       c.x + Math.cos(a) * seatR,
       0,
       c.z + Math.sin(a) * seatR
     );
 
-    // yaw so chair faces table
     const yaw = Math.atan2(c.x - chairPos.x, c.z - chairPos.z);
 
     const chair = makeChair();
@@ -260,11 +255,10 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
     world.group.add(chair);
     world.chairs.push(chair);
 
-    // ✅ SeatAnchor: authoritative seat placement
+    // ✅ authoritative anchor on the chair
     const seatAnchor = new THREE.Object3D();
     seatAnchor.name = "SeatAnchor_" + i;
 
-    // Toward table (+Z in chair local because chair faces table via yaw)
     const ANCHOR_INWARD_Z = 0.18;
     const SEAT_SURFACE_Y = 0.52;
 
@@ -276,11 +270,11 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
 
     world.seats.push({
       index: i,
-      position: seatPos,     // compatibility
+      position: seatPos,
       yaw,
-      sitY: SEAT_SURFACE_Y,  // seat surface height
+      sitY: SEAT_SURFACE_Y,
       lookAt: c.clone(),
-      anchor: seatAnchor     // ✅ NEW
+      anchor: seatAnchor
     });
   }
 
@@ -307,7 +301,8 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
   try {
     const botsMod = await import(`./bots.js?v=${encodeURIComponent(v)}`);
     if (botsMod?.Bots?.init) {
-      botsMod.Bots.init({
+      // ✅ await init (bots may load textures)
+      await botsMod.Bots.init({
         THREE,
         scene: world.group,
         getSeats: () => world.seats,
@@ -334,15 +329,13 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
   world.tick = (dt) => {
     baseTick(dt);
 
-    // spawn ring pulse
     spawnRing.userData.t = (spawnRing.userData.t || 0) + dt;
     spawnRing.material.opacity = 0.65 + Math.sin(spawnRing.userData.t * 3.0) * 0.18;
 
-    // rail glow pulse
     glowRing.userData.t = (glowRing.userData.t || 0) + dt;
     glowRing.material.emissiveIntensity = 1.15 + Math.sin(glowRing.userData.t * 3.5) * 0.35;
   };
 
   L("[world] ready ✅ seats=" + world.seats.length);
   return world;
-      }
+  }

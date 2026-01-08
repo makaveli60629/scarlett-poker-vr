@@ -1,4 +1,5 @@
-// /js/main.js — Scarlett Poker VR MAIN v11.3 (Stand by default + Action-to-Join)
+// /js/main.js — Scarlett Poker VR MAIN v11.3a (compat fix)
+// Fix: don't crash if dealingMix lacks setIncludePlayer()
 
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
@@ -46,7 +47,7 @@ const dir = new THREE.DirectionalLight(0xffffff, 1.0);
 dir.position.set(10, 14, 8);
 scene.add(dir);
 
-// Controllers + grips parented to player rig
+// Controllers + grips parented to player rig (fixes "controllers in front of me")
 const controllerModelFactory = new XRControllerModelFactory();
 const controllers = [];
 const grips = [];
@@ -63,13 +64,13 @@ for (let i = 0; i < 2; i++) {
   const c = renderer.xr.getController(i);
   c.name = "Controller" + i;
   c.add(makeLaser());
-  player.add(c);
+  player.add(c);               // ✅ parent to player rig
   controllers.push(c);
 
   const g = renderer.xr.getControllerGrip(i);
   g.name = "Grip" + i;
   g.add(controllerModelFactory.createControllerModel(g));
-  player.add(g);
+  player.add(g);               // ✅ parent to player rig
   grips.push(g);
 }
 
@@ -81,7 +82,14 @@ scene.userData.cameraRef = camera;
 
 // DEALING (created before connect so world can call it)
 const dealing = DealingMix.init({ THREE, scene, log, world });
-dealing.setIncludePlayer(false);
+
+// ✅ COMPAT: only call if function exists (your error)
+if (typeof dealing?.setIncludePlayer === "function") {
+  dealing.setIncludePlayer(false);
+} else {
+  // Older dealingMix: just ignore player-include feature
+  log("[main] dealingMix has no setIncludePlayer() (ok)");
+}
 
 // Connect refs
 try { world?.connect?.({ camera, player, renderer, controllers, grips, dealing }); } catch {}
@@ -106,8 +114,11 @@ window.addEventListener("scarlett-recenter", () => {
   player.position.set(0, 0, 3.6);
   player.rotation.set(0, 0, 0);
   camera.position.set(0, 1.65, 0); // force standing
+
   world.playerSeated = false;
-  dealing.setIncludePlayer(false);
+
+  // ✅ COMPAT:
+  if (typeof dealing?.setIncludePlayer === "function") dealing.setIncludePlayer(false);
 
   if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.2, world.tableFocus.z);
   log("[main] recentered ✅ (standing)");

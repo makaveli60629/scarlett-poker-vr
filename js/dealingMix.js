@@ -1,38 +1,42 @@
-// /js/dealingMix.js — Scarlett Poker VR DealingMix v1.2 (FIXED PLACEMENT + BIGGER CARDS + VISIBLE POT)
+// /js/dealingMix.js — Scarlett Poker VR DealingMix v1.3 (TOTAL ALIGNMENT FIX)
+// - Cards/chips placed on TABLE TOP surface (not inside felt)
+// - Chips lay flat (no wrong rotation)
+// - Chip stripe texture (temporary casino style)
 // GitHub Pages safe module (no "three" import). main.js passes THREE in.
 
 export const DealingMix = {
   init({ THREE, scene, log = console.log, world }) {
     const L = (...a) => { try { log(...a); } catch { console.log(...a); } };
 
-    // IMPORTANT FIX:
-    // Use WORLD SPACE parent so our positions (which are world coords) land correctly.
     const parent = world?.group || scene;
     const focus  = world?.tableFocus || new THREE.Vector3(0, 0, -6.5);
     const seats  = world?.seats || [];
 
-    // pull table height if world provides it
+    // In your world.js: felt.position.y = 0.92 and cylinder height = 0.18
     const TABLE_Y = (typeof world?.tableY === "number") ? world.tableY : 0.92;
+    const FELT_H  = 0.18;
+    const TABLE_TOP = TABLE_Y + (FELT_H * 0.5);     // ✅ top surface of felt
+    const ON_TABLE = TABLE_TOP + 0.004;             // ✅ small lift above surface
 
-    // ---------- CARD SIZING (BIGGER) ----------
-    const CARD_W = 0.095; // was 0.065
-    const CARD_H = 0.135; // was 0.090
-    const CARD_T = 0.002;
+    // Bigger cards (your request)
+    const CARD_W = 0.095;
+    const CARD_H = 0.135;
+    const CARD_T = 0.0022;
 
-    // ---------- POSITIONS (NOW ON TABLE) ----------
-    // Put the "dealer/deck" on the felt near center-right, not behind the table.
-    const deckPos = new THREE.Vector3(focus.x + 0.55, TABLE_Y + 0.030, focus.z - 0.18);
-    const burnPos = new THREE.Vector3(focus.x + 0.35, TABLE_Y + 0.030, focus.z - 0.18);
+    // Dealer/deck ON the felt (center-right)
+    const deckPos = new THREE.Vector3(focus.x + 0.50, ON_TABLE, focus.z - 0.18);
+    const burnPos = new THREE.Vector3(focus.x + 0.30, ON_TABLE, focus.z - 0.18);
 
+    // Community cards center line
     const comm = [
-      new THREE.Vector3(focus.x - 0.40, TABLE_Y + 0.022, focus.z + 0.02),
-      new THREE.Vector3(focus.x - 0.20, TABLE_Y + 0.022, focus.z + 0.02),
-      new THREE.Vector3(focus.x + 0.00, TABLE_Y + 0.022, focus.z + 0.02),
-      new THREE.Vector3(focus.x + 0.20, TABLE_Y + 0.022, focus.z + 0.02),
-      new THREE.Vector3(focus.x + 0.40, TABLE_Y + 0.022, focus.z + 0.02),
+      new THREE.Vector3(focus.x - 0.44, ON_TABLE, focus.z + 0.02),
+      new THREE.Vector3(focus.x - 0.22, ON_TABLE, focus.z + 0.02),
+      new THREE.Vector3(focus.x + 0.00, ON_TABLE, focus.z + 0.02),
+      new THREE.Vector3(focus.x + 0.22, ON_TABLE, focus.z + 0.02),
+      new THREE.Vector3(focus.x + 0.44, ON_TABLE, focus.z + 0.02),
     ];
 
-    // ---------- HOOKS ----------
+    // Hooks
     const hooks = {
       onHandStart: null,
       onHoleCard: null,
@@ -41,7 +45,6 @@ export const DealingMix = {
       onHandEnd: null
     };
 
-    // ---------- STATE ----------
     const state = {
       phase: "idle",
       t: 0,
@@ -54,7 +57,6 @@ export const DealingMix = {
       potGroup: null
     };
 
-    // ---------- UTIL ----------
     function schedule(delay, fn) {
       state.timers.push({ at: state.t + Math.max(0, delay), fn });
     }
@@ -62,9 +64,7 @@ export const DealingMix = {
     function randInt(n) { return Math.floor(Math.random() * n); }
 
     function clearAll() {
-      for (const o of state.active) {
-        try { o.parent?.remove(o); } catch {}
-      }
+      for (const o of state.active) { try { o.parent?.remove(o); } catch {} }
       state.active.length = 0;
       state.queue.length = 0;
       state.timers.length = 0;
@@ -72,11 +72,8 @@ export const DealingMix = {
       state.deckIndex = 0;
       state.phase = "idle";
       state.potCount = 0;
-
-      if (state.potGroup) {
-        try { state.potGroup.parent?.remove(state.potGroup); } catch {}
-        state.potGroup = null;
-      }
+      if (state.potGroup) { try { state.potGroup.parent?.remove(state.potGroup); } catch {} }
+      state.potGroup = null;
     }
 
     function enqueueMove(obj, from, to, dur = 0.22, onDone = null) {
@@ -90,7 +87,7 @@ export const DealingMix = {
       });
     }
 
-    // ---------- CARD MESH ----------
+    // ---------- Card mesh ----------
     function makeCardMesh(backColor = 0x2b7cff) {
       const g = new THREE.Group();
       g.name = "Card";
@@ -120,7 +117,7 @@ export const DealingMix = {
       return g;
     }
 
-    // ---------- DECK ----------
+    // ---------- Deck ----------
     function buildDeck() {
       const suits = ["S","H","D","C"];
       const ranks = ["A","2","3","4","5","6","7","8","9","T","J","Q","K"];
@@ -138,10 +135,10 @@ export const DealingMix = {
       return state.deck[state.deckIndex++];
     }
 
-    // ---------- TARGETS ----------
+    // ---------- Targets ----------
     function seatCardTarget(seatIndex, cardIndex) {
       const s = seats[seatIndex];
-      const y = TABLE_Y + 0.020;
+      const y = ON_TABLE;
 
       if (!s) {
         const a = (seatIndex / 6) * Math.PI * 2;
@@ -150,20 +147,21 @@ export const DealingMix = {
           0,
           focus.z + Math.sin(a) * 3.05
         );
-        const inward = new THREE.Vector3(focus.x - p.x, 0, focus.z - p.z).normalize().multiplyScalar(0.55);
+        const inward = new THREE.Vector3(focus.x - p.x, 0, focus.z - p.z).normalize().multiplyScalar(0.65);
         const base = p.clone().add(inward);
         base.y = y;
-        base.x += (cardIndex === 0 ? -0.05 : 0.05);
+        base.x += (cardIndex === 0 ? -0.06 : 0.06);
         return base;
       }
 
+      // base is seat anchor point; move inward to table edge
       const base = s.position.clone();
-      const inward = new THREE.Vector3(focus.x - base.x, 0, focus.z - base.z).normalize().multiplyScalar(0.55);
+      const inward = new THREE.Vector3(focus.x - base.x, 0, focus.z - base.z).normalize().multiplyScalar(0.65);
       const tpos = base.clone().add(inward);
       tpos.y = y;
 
       const side = new THREE.Vector3().crossVectors(inward, new THREE.Vector3(0, 1, 0)).normalize();
-      tpos.add(side.multiplyScalar(cardIndex === 0 ? -0.055 : 0.055));
+      tpos.add(side.multiplyScalar(cardIndex === 0 ? -0.065 : 0.065));
       return tpos;
     }
 
@@ -171,25 +169,65 @@ export const DealingMix = {
       return comm[Math.max(0, Math.min(comm.length - 1, i))].clone();
     }
 
-    // ---------- POT VISUAL (CENTER + CLEAR) ----------
+    // ---------- Chip materials (striped casino look) ----------
+    function makeChipSideTexture({ base = "#ff2d7a", stripe = "#ffffff", text = "$25" } = {}) {
+      const c = document.createElement("canvas");
+      c.width = 512;
+      c.height = 128;
+      const ctx = c.getContext("2d");
+
+      ctx.fillStyle = base;
+      ctx.fillRect(0, 0, c.width, c.height);
+
+      // stripes
+      const stripeW = 26;
+      ctx.fillStyle = stripe;
+      for (let x = 0; x < c.width; x += 90) {
+        ctx.fillRect(x, 0, stripeW, c.height);
+      }
+
+      // text
+      ctx.fillStyle = "#111";
+      ctx.font = "bold 54px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, c.width / 2, c.height / 2);
+
+      const tex = new THREE.CanvasTexture(c);
+      try { tex.colorSpace = THREE.SRGBColorSpace; } catch {}
+      tex.needsUpdate = true;
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(1, 1);
+      return tex;
+    }
+
+    function makeChipMaterial(denomText) {
+      const sideTex = makeChipSideTexture({ base: "#ff2d7a", stripe: "#ffffff", text: denomText });
+      const topMat = new THREE.MeshStandardMaterial({
+        color: 0xff2d7a, roughness: 0.35, metalness: 0.1,
+        emissive: 0x220010, emissiveIntensity: 0.35
+      });
+      const bottomMat = topMat.clone();
+      const sideMat = new THREE.MeshStandardMaterial({
+        map: sideTex, roughness: 0.45, metalness: 0.08,
+        emissive: 0x120008, emissiveIntensity: 0.25
+      });
+      return [topMat, bottomMat, sideMat];
+    }
+
+    // ---------- Pot visual (flat + centered) ----------
     function buildPot() {
       const g = new THREE.Group();
       g.name = "PotChips";
-      g.position.set(focus.x, TABLE_Y + 0.020, focus.z - 0.08);
+      g.position.set(focus.x, ON_TABLE, focus.z - 0.08);
 
-      const chipGeo = new THREE.CylinderGeometry(0.018, 0.018, 0.006, 18);
-      const chipMat = new THREE.MeshStandardMaterial({
-        color: 0xff2d7a,
-        roughness: 0.35,
-        metalness: 0.1,
-        emissive: 0x220010,
-        emissiveIntensity: 0.45
-      });
+      // CylinderGeometry groups: 0=top,1=bottom,2=side
+      const chipGeo = new THREE.CylinderGeometry(0.020, 0.020, 0.007, 22, 1, false);
+      const mats = makeChipMaterial("$25");
 
       for (let i = 0; i < 30; i++) {
-        const chip = new THREE.Mesh(chipGeo, chipMat);
-        chip.rotation.x = Math.PI / 2;
-        chip.position.set((Math.random() - 0.5) * 0.06, 0.004 + i * 0.0042, (Math.random() - 0.5) * 0.06);
+        const chip = new THREE.Mesh(chipGeo, mats);
+        chip.position.set((Math.random() - 0.5) * 0.07, 0.004 + i * 0.0068, (Math.random() - 0.5) * 0.07);
         chip.scale.setScalar(0.001);
         chip.userData.idx = i;
         g.add(chip);
@@ -208,7 +246,7 @@ export const DealingMix = {
       try { hooks.onPot?.(state.potCount); } catch {}
     }
 
-    // ---------- DECK STACK PROP (ON TABLE, CENTERED) ----------
+    // ---------- Deck stack prop (on table, flat) ----------
     const deckStack = new THREE.Group();
     deckStack.name = "DeckStack";
     deckStack.position.copy(deckPos);
@@ -217,11 +255,11 @@ export const DealingMix = {
     const backColors = [0x2b7cff, 0x6bff8f, 0xffcc00, 0xff6b6b, 0xffffff];
     for (let i = 0; i < 10; i++) {
       const c = makeCardMesh(backColors[i % backColors.length]);
-      c.position.set(0, i * 0.0016, 0);
+      c.position.set(0, i * 0.0020, 0);
       deckStack.add(c);
     }
 
-    // ---------- ACTIONS ----------
+    // ---------- Actions ----------
     function dealOneToSeat(seatIndex, cardIndex, delay = 0) {
       schedule(delay, () => {
         const id = drawCardId();
@@ -235,7 +273,7 @@ export const DealingMix = {
         state.active.push(card);
 
         const to = seatCardTarget(seatIndex, cardIndex);
-        enqueueMove(card, deckPos, to, 0.22, () => {
+        enqueueMove(card, deckPos, to, 0.24, () => {
           try { hooks.onHoleCard?.(seatIndex, cardIndex, card, id); } catch {}
           setPotCount(state.potCount + 1);
         });
@@ -255,7 +293,7 @@ export const DealingMix = {
         state.active.push(card);
 
         enqueueMove(card, deckPos, burnPos, 0.18);
-        schedule(0.50, () => { try { parent.remove(card); } catch {} });
+        schedule(0.55, () => { try { parent.remove(card); } catch {} });
       });
     }
 
@@ -274,7 +312,7 @@ export const DealingMix = {
 
           const ci = startIndex + i;
           const to = communityTarget(ci);
-          enqueueMove(card, deckPos, to, 0.24, () => {
+          enqueueMove(card, deckPos, to, 0.26, () => {
             try { hooks.onCommunity?.(ci, card, id); } catch {}
             setPotCount(state.potCount + 2);
           });
@@ -294,11 +332,11 @@ export const DealingMix = {
       L("[DealingMix] startHand ✅");
       try { hooks.onHandStart?.(); } catch {}
 
-      let t = 0.15;
+      let t = 0.18;
       for (let round = 0; round < 2; round++) {
         for (let s = 0; s < 6; s++) {
           dealOneToSeat(s, round, t);
-          t += 0.10;
+          t += 0.11;
         }
       }
 
@@ -321,7 +359,6 @@ export const DealingMix = {
       schedule(t + 7.0, () => startHand());
     }
 
-    // ---------- UPDATE ----------
     function update(dt) {
       state.t += dt;
 
@@ -345,8 +382,8 @@ export const DealingMix = {
           m.from.z + (m.to.z - m.from.z) * e
         );
 
-        // tiny hover
-        m.obj.position.y += Math.sin(state.t * 10.0 + m.t * 20.0) * 0.0012;
+        // tiny hover ABOVE table (still safe)
+        m.obj.position.y = Math.max(ON_TABLE, m.obj.position.y) + Math.sin(state.t * 10.0) * 0.0010;
 
         if (tt >= 1) {
           state.queue.shift();

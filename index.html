@@ -2,10 +2,286 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
-  <title>Scarlett Poker VR</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
+  <title>Scarlett VR Poker</title>
 
-  <!-- GitHub Pages-safe import map -->
+  <style>
+    :root{
+      --bg:#05060a;
+      --panel:#0b0d14cc;
+      --panel2:#0b0d14f2;
+      --text:#e8ecff;
+      --muted:#98a0c7;
+      --aqua:#7fe7ff;
+      --pink:#ff2d7a;
+      --ok:#4cd964;
+      --warn:#ffcc00;
+      --bad:#ff6b6b;
+      --shadow: 0 12px 40px rgba(0,0,0,.45);
+      --radius: 18px;
+    }
+
+    html, body {
+      margin:0; padding:0; height:100%;
+      background:var(--bg);
+      overflow:hidden;
+      font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      color:var(--text);
+      touch-action: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Canvas */
+    canvas { display:block; width:100vw; height:100vh; }
+
+    /* HUD wrapper */
+    #hud {
+      position: fixed;
+      left: 0; top: 0; right: 0;
+      padding: 14px 14px 10px 14px;
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    /* Top bar */
+    #topbar {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    #brand {
+      pointer-events:none;
+      display:flex; align-items:center; gap:10px;
+      padding: 10px 12px;
+      background: linear-gradient(180deg, rgba(10,12,20,.85), rgba(10,12,20,.65));
+      border: 1px solid rgba(127,231,255,.18);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    #brand .dot {
+      width:10px; height:10px; border-radius:50%;
+      background: var(--aqua);
+      box-shadow: 0 0 18px rgba(127,231,255,.65);
+    }
+
+    #brand .title {
+      font-weight: 700;
+      letter-spacing: .2px;
+      font-size: 14px;
+      line-height: 1.2;
+    }
+
+    #brand .sub {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.2;
+    }
+
+    /* Control panel */
+    #panel {
+      pointer-events: auto;
+      display:flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+      align-items: center;
+
+      padding: 10px;
+      background: linear-gradient(180deg, rgba(10,12,20,.90), rgba(10,12,20,.70));
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .btn {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap: 8px;
+      min-height: 38px;
+      padding: 0 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.06);
+      color: var(--text);
+      font-weight: 650;
+      font-size: 13px;
+      letter-spacing:.2px;
+      cursor: pointer;
+      user-select:none;
+      -webkit-user-select:none;
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn.primary {
+      border-color: rgba(127,231,255,.35);
+      background: rgba(127,231,255,.14);
+      box-shadow: 0 0 0 1px rgba(127,231,255,.15) inset;
+    }
+    .btn.pink {
+      border-color: rgba(255,45,122,.35);
+      background: rgba(255,45,122,.14);
+      box-shadow: 0 0 0 1px rgba(255,45,122,.15) inset;
+    }
+    .btn.good {
+      border-color: rgba(76,217,100,.35);
+      background: rgba(76,217,100,.12);
+    }
+    .btn.warn {
+      border-color: rgba(255,204,0,.35);
+      background: rgba(255,204,0,.12);
+    }
+    .btn.ghost {
+      background: rgba(255,255,255,.04);
+      border-color: rgba(255,255,255,.10);
+    }
+    .btn.small { min-height: 34px; padding: 0 10px; font-size: 12.5px; }
+
+    .pill {
+      display:inline-flex; align-items:center; gap:8px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.05);
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .pill b { color: var(--text); font-weight: 700; }
+
+    /* Bottom dock (mobile-friendly quick controls) */
+    #dock {
+      position: fixed;
+      left: 12px; right: 12px; bottom: 12px;
+      z-index: 11;
+      pointer-events: auto;
+
+      display:flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items:center;
+      justify-content: center;
+
+      padding: 10px;
+      border-radius: 22px;
+      background: linear-gradient(180deg, rgba(10,12,20,.92), rgba(10,12,20,.72));
+      border: 1px solid rgba(255,255,255,.08);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    /* Log */
+    #logwrap {
+      position: fixed;
+      left: 12px;
+      bottom: 92px;
+      width: min(560px, calc(100vw - 24px));
+      max-height: 40vh;
+      z-index: 12;
+      pointer-events: auto;
+
+      border-radius: 18px;
+      background: rgba(0,0,0,.52);
+      border: 1px solid rgba(255,255,255,.10);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      display: none;
+    }
+
+    #loghead {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      padding: 10px 12px;
+      background: rgba(10,12,20,.85);
+      border-bottom: 1px solid rgba(255,255,255,.08);
+    }
+    #loghead .h {
+      font-weight: 750;
+      font-size: 13px;
+      letter-spacing: .2px;
+    }
+    #log {
+      margin:0;
+      padding: 10px 12px 12px 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 11px;
+      line-height: 1.35;
+      color: rgba(232,236,255,.92);
+      overflow:auto;
+      max-height: calc(40vh - 44px);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* Overlay / help */
+    #help {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      pointer-events: auto;
+      display: none;
+      background: rgba(0,0,0,.55);
+      backdrop-filter: blur(10px);
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    #helpCard {
+      width: min(720px, 100%);
+      border-radius: 22px;
+      background: rgba(10,12,20,.92);
+      border: 1px solid rgba(255,255,255,.10);
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+    #helpCard h2 {
+      margin: 0 0 10px 0;
+      font-size: 18px;
+      letter-spacing:.2px;
+    }
+    #helpCard .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      color: rgba(232,236,255,.92);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    #helpCard .row {
+      padding: 10px 12px;
+      border-radius: 16px;
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.08);
+    }
+    #helpCard .row b { color: var(--aqua); }
+    #helpCard .actions { margin-top: 12px; display:flex; justify-content:flex-end; gap:10px; }
+
+    /* VRButton positioning (Three injects it) */
+    .vrButton {
+      position: fixed !important;
+      right: 14px !important;
+      bottom: 92px !important;
+      z-index: 30 !important;
+    }
+
+    /* Small screens: tighten */
+    @media (max-width: 520px) {
+      #panel { justify-content: center; }
+      #brand { display:none; }
+      #logwrap { bottom: 100px; }
+      .vrButton { bottom: 110px !important; }
+    }
+  </style>
+
+  <!-- IMPORT MAP (CDN "C & D" style) -->
+  <!-- Permanent, stable: always use the same Three version here. -->
   <script type="importmap">
   {
     "imports": {
@@ -14,102 +290,254 @@
     }
   }
   </script>
-
-  <style>
-    html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial; }
-    #hud { position:fixed; left:0; top:0; right:0; padding:18px; z-index:999999; pointer-events:none; }
-    #hudCard {
-      max-width: 760px; margin: 0 auto;
-      background: rgba(0,0,0,.55);
-      border: 1px solid rgba(255,255,255,.08);
-      border-radius: 18px;
-      padding: 18px;
-      box-shadow: 0 12px 40px rgba(0,0,0,.35);
-      pointer-events:auto;
-    }
-    h1 { margin:0 0 6px 0; font-size: 40px; letter-spacing:.4px; }
-    .sub { opacity:.9; font-size: 16px; line-height: 1.35; }
-    .btns { margin-top: 12px; display:flex; gap: 10px; flex-wrap: wrap; }
-    button {
-      background: rgba(0,0,0,.35);
-      border: 1px solid rgba(255,255,255,.12);
-      color: #fff;
-      padding: 10px 14px;
-      border-radius: 16px;
-      font-size: 16px;
-    }
-    #log {
-      margin-top: 12px;
-      color: #72f7ff;
-      font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
-      font-size: 15px;
-      white-space: pre-wrap;
-    }
-  </style>
 </head>
 
 <body>
+  <!-- HUD -->
   <div id="hud">
-    <div id="hudCard">
-      <h1>Scarlett Poker VR</h1>
-      <div class="sub">
-        This page boots <b>js/main.js</b>. If you opened the wrong repo URL, the log will tell you.<br/>
-        Correct site base should contain <b>/scarlett-poker-vr/</b>.
+    <div id="topbar">
+      <div id="brand">
+        <div class="dot"></div>
+        <div>
+          <div class="title">Scarlett VR Poker</div>
+          <div class="sub">WebXR • Quest • Android</div>
+        </div>
       </div>
 
-      <div class="btns">
-        <button id="btnReload">Reload</button>
-        <button id="btnCopyLog">Copy Log</button>
+      <div id="panel">
+        <span class="pill"><b>Status</b><span id="statusText">Booting…</span></span>
+        <button class="btn primary small" id="btnEnter" title="Enter VR (Quest)">Enter VR</button>
+        <button class="btn pink small" id="btnRecenter" title="Reset your position">Recenter</button>
+        <button class="btn ghost small" id="btnTeleport" title="Toggle Teleport">Teleport</button>
+        <button class="btn ghost small" id="btnMove" title="Toggle Smooth Move">Move</button>
+        <button class="btn ghost small" id="btnSnap" title="Toggle Snap Turn">Snap</button>
+        <button class="btn ghost small" id="btnHands" title="Toggle Hands/Gloves">Hands</button>
+        <button class="btn warn small" id="btnHelp" title="Controls / Help">Help</button>
+        <button class="btn ghost small" id="btnLog" title="Show/Hide Log">Log</button>
       </div>
-
-      <div id="log">Booting…</div>
     </div>
   </div>
 
+  <!-- Mobile / Android dock -->
+  <div id="dock" aria-label="Mobile Controls">
+    <button class="btn good" id="mForward">▲</button>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <button class="btn" id="mLeft">◀</button>
+      <button class="btn" id="mBack">▼</button>
+      <button class="btn" id="mRight">▶</button>
+    </div>
+    <button class="btn pink" id="mTeleport">Teleport</button>
+    <button class="btn" id="mTurnL">⟲</button>
+    <button class="btn" id="mTurnR">⟳</button>
+  </div>
+
+  <!-- Log panel -->
+  <div id="logwrap">
+    <div id="loghead">
+      <div class="h">Console Log</div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn small ghost" id="btnCopyLog">Copy</button>
+        <button class="btn small ghost" id="btnClearLog">Clear</button>
+        <button class="btn small ghost" id="btnCloseLog">Close</button>
+      </div>
+    </div>
+    <pre id="log"></pre>
+  </div>
+
+  <!-- Help overlay -->
+  <div id="help">
+    <div id="helpCard">
+      <h2>Controls</h2>
+      <div class="grid">
+        <div class="row"><b>Quest Controllers:</b> Left stick move, right stick snap-turn. Trigger = teleport aim/confirm (if teleport enabled).</div>
+        <div class="row"><b>Hand Tracking:</b> Gloves show automatically. Pinch shows a small orb (visual only right now).</div>
+        <div class="row"><b>Android:</b> Use the bottom dock arrows to move/turn. Tap “Teleport” to toggle teleport mode.</div>
+        <div class="row"><b>Recenter:</b> Press HUD “Recenter” anytime to reset to spawn.</div>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="btnCloseHelp">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOOT -->
   <script type="module">
-    const logEl = document.getElementById("log");
-    let logText = "";
-    const log = (m) => {
-      const s = String(m ?? "");
-      logText += s + "\n";
-      logEl.textContent = logText;
-      console.log(s);
-    };
-
-    document.getElementById("btnReload").onclick = () => location.reload();
-    document.getElementById("btnCopyLog").onclick = async () => {
-      try { await navigator.clipboard.writeText(logText); } catch {}
-    };
-
+    // Version bust (forces fresh main.js on GitHub Pages)
     const v = Date.now().toString();
-    log("BOOT v=" + v);
-    log("location.href=" + location.href);
-    log("navigator.xr=" + ("xr" in navigator));
+    window.__BUILD_V = v;
 
-    // IMPORTANT: compute base path from THIS file so it works even if moved
-    // Example: https://makaveli60629.github.io/scarlett-poker-vr/index.html
-    const base = new URL(".", import.meta.url).href;   // ends with /
-    const mainUrl = new URL("js/main.js", base).href + "?v=" + encodeURIComponent(v);
+    const statusText = document.getElementById("statusText");
+    const setStatus = (t) => { if (statusText) statusText.textContent = " " + t; };
 
-    log("Importing main from:");
-    log(mainUrl);
+    // Wire log UI
+    const logEl = document.getElementById("log");
+    const logWrap = document.getElementById("logwrap");
+    const appendLog = (m) => {
+      try { console.log(m); } catch {}
+      if (!logEl) return;
+      logEl.textContent += "\n" + m;
+      logEl.scrollTop = logEl.scrollHeight;
+    };
 
-    // Quick sanity check: tell you if you opened the wrong repo URL
-    if (!base.includes("/scarlett-poker-vr/")) {
-      log("⚠️ WARNING: base path does NOT include /scarlett-poker-vr/");
-      log("You may have opened the wrong URL (like /poker-vr/).");
+    appendLog("BOOT v=" + v);
+    appendLog("location.href=" + location.href);
+    appendLog("navigator.xr=" + (!!navigator.xr));
+
+    // Buttons
+    const btnEnter = document.getElementById("btnEnter");
+    const btnRecenter = document.getElementById("btnRecenter");
+    const btnTeleport = document.getElementById("btnTeleport");
+    const btnMove = document.getElementById("btnMove");
+    const btnSnap = document.getElementById("btnSnap");
+    const btnHands = document.getElementById("btnHands");
+    const btnHelp = document.getElementById("btnHelp");
+    const btnLog = document.getElementById("btnLog");
+
+    // Log controls
+    document.getElementById("btnCopyLog")?.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(logEl?.textContent || "");
+        appendLog("[hud] log copied ✅");
+      } catch {
+        appendLog("[hud] log copy failed ⚠️");
+      }
+    });
+    document.getElementById("btnClearLog")?.addEventListener("click", () => {
+      if (logEl) logEl.textContent = "";
+      appendLog("[hud] log cleared ✅");
+    });
+    document.getElementById("btnCloseLog")?.addEventListener("click", () => {
+      if (logWrap) logWrap.style.display = "none";
+    });
+
+    // Help overlay
+    const help = document.getElementById("help");
+    btnHelp?.addEventListener("click", () => { help.style.display = "flex"; });
+    document.getElementById("btnCloseHelp")?.addEventListener("click", () => { help.style.display = "none"; });
+
+    // Toggle log
+    btnLog?.addEventListener("click", () => {
+      const show = (logWrap.style.display !== "block");
+      logWrap.style.display = show ? "block" : "none";
+    });
+
+    // Global toggles (main.js will read these)
+    window.__SCARLETT_FLAGS = window.__SCARLETT_FLAGS || {
+      teleport: true,
+      move: true,
+      snap: true,
+      hands: true
+    };
+
+    const updateTogglesUI = () => {
+      const f = window.__SCARLETT_FLAGS;
+      btnTeleport?.classList.toggle("primary", !!f.teleport);
+      btnMove?.classList.toggle("primary", !!f.move);
+      btnSnap?.classList.toggle("primary", !!f.snap);
+      btnHands?.classList.toggle("primary", !!f.hands);
+    };
+    updateTogglesUI();
+
+    btnTeleport?.addEventListener("click", () => {
+      window.__SCARLETT_FLAGS.teleport = !window.__SCARLETT_FLAGS.teleport;
+      appendLog("[hud] teleport=" + window.__SCARLETT_FLAGS.teleport);
+      updateTogglesUI();
+      window.dispatchEvent(new CustomEvent("scarlett-toggle-teleport", { detail: window.__SCARLETT_FLAGS.teleport }));
+    });
+
+    btnMove?.addEventListener("click", () => {
+      window.__SCARLETT_FLAGS.move = !window.__SCARLETT_FLAGS.move;
+      appendLog("[hud] move=" + window.__SCARLETT_FLAGS.move);
+      updateTogglesUI();
+      window.dispatchEvent(new CustomEvent("scarlett-toggle-move", { detail: window.__SCARLETT_FLAGS.move }));
+    });
+
+    btnSnap?.addEventListener("click", () => {
+      window.__SCARLETT_FLAGS.snap = !window.__SCARLETT_FLAGS.snap;
+      appendLog("[hud] snap=" + window.__SCARLETT_FLAGS.snap);
+      updateTogglesUI();
+      window.dispatchEvent(new CustomEvent("scarlett-toggle-snap", { detail: window.__SCARLETT_FLAGS.snap }));
+    });
+
+    btnHands?.addEventListener("click", () => {
+      window.__SCARLETT_FLAGS.hands = !window.__SCARLETT_FLAGS.hands;
+      appendLog("[hud] hands=" + window.__SCARLETT_FLAGS.hands);
+      updateTogglesUI();
+      window.dispatchEvent(new CustomEvent("scarlett-toggle-hands", { detail: window.__SCARLETT_FLAGS.hands }));
+    });
+
+    // Recenter
+    btnRecenter?.addEventListener("click", () => {
+      appendLog("[hud] recenter");
+      window.dispatchEvent(new Event("scarlett-recenter"));
+    });
+
+    // "Enter VR" helper (VRButton exists too, this just nudges)
+    btnEnter?.addEventListener("click", () => {
+      appendLog("[hud] enter vr");
+      // VRButton handles session start; we just scroll to it visually
+      document.querySelector("button")?.scrollIntoView?.({ block: "end" });
+    });
+
+    // -------- ANDROID / TOUCH DOCK --------
+    // These emit events that your controls.js / android_controls.js can listen to.
+    const touchState = { f:0, b:0, l:0, r:0, turnL:0, turnR:0 };
+
+    function bindHold(btnId, key, value) {
+      const el = document.getElementById(btnId);
+      if (!el) return;
+
+      const down = (e) => { e.preventDefault(); touchState[key] = value; window.dispatchEvent(new CustomEvent("scarlett-touch", { detail: { ...touchState } })); };
+      const up   = (e) => { e.preventDefault(); touchState[key] = 0; window.dispatchEvent(new CustomEvent("scarlett-touch", { detail: { ...touchState } })); };
+
+      el.addEventListener("pointerdown", down, { passive:false });
+      el.addEventListener("pointerup", up, { passive:false });
+      el.addEventListener("pointercancel", up, { passive:false });
+      el.addEventListener("pointerleave", up, { passive:false });
     }
 
+    bindHold("mForward", "f", 1);
+    bindHold("mBack", "b", 1);
+    bindHold("mLeft", "l", 1);
+    bindHold("mRight", "r", 1);
+    bindHold("mTurnL", "turnL", 1);
+    bindHold("mTurnR", "turnR", 1);
+
+    document.getElementById("mTeleport")?.addEventListener("click", () => {
+      window.__SCARLETT_FLAGS.teleport = !window.__SCARLETT_FLAGS.teleport;
+      appendLog("[hud] teleport=" + window.__SCARLETT_FLAGS.teleport);
+      updateTogglesUI();
+      window.dispatchEvent(new CustomEvent("scarlett-toggle-teleport", { detail: window.__SCARLETT_FLAGS.teleport }));
+    });
+
+    // Hide mobile dock in VR (Quest) but keep it for Android
+    function updateDockVisibility() {
+      const isProbablyQuest = /Oculus|Quest/i.test(navigator.userAgent || "");
+      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+      // If Quest: hide dock (controllers exist). If Android: show dock.
+      const show = isMobile && !isProbablyQuest;
+      document.getElementById("dock").style.display = show ? "flex" : "none";
+    }
+    updateDockVisibility();
+
+    // -------- LOAD MAIN --------
     try {
+      setStatus("Loading…");
+      const mainUrl = "./js/main.js?v=" + encodeURIComponent(v);
+      appendLog("Importing main from:\n" + new URL(mainUrl, location.href).toString());
       await import(mainUrl);
-      log("✅ main.js imported");
+      setStatus("Ready ✅");
+      appendLog("[index] main imported ✅");
     } catch (e) {
-      log("❌ main import failed: " + (e?.message || e));
-      log("Fix checklist:");
-      log("1) Open: https://makaveli60629.github.io/scarlett-poker-vr/");
-      log("2) Confirm file exists: /scarlett-poker-vr/js/main.js");
-      log("3) Ensure folder is named exactly: js (lowercase)");
+      setStatus("Import error ❌");
+      appendLog("❌ main import failed: " + (e?.message || e));
+      console.error(e);
+
+      appendLog("Fix checklist:");
+      appendLog("1) Open: " + location.href);
+      appendLog("2) Confirm file exists: /scarlett-poker-vr/js/main.js");
+      appendLog("3) Ensure folder is named exactly: js (lowercase)");
     }
   </script>
 </body>
-</html>
+      </html>

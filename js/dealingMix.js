@@ -1,5 +1,6 @@
-// /js/dealingMix.js — Scarlett Poker VR DealingMix v1.0
+// /js/dealingMix.js — Scarlett Poker VR DealingMix v1.1
 // GitHub Pages safe module (no "three" import). main.js passes THREE in.
+// Adds event hooks so world/bots can react and you SEE poker happening.
 
 export const DealingMix = {
   init({ THREE, scene, log = console.log, world }) {
@@ -27,6 +28,17 @@ export const DealingMix = {
       new THREE.Vector3(focus.x + 0.30, 0.935, focus.z + 0.02),
     ];
 
+    // ---------- HOOKS (world can listen) ----------
+    // You can set these from main.js after init:
+    // dealing.onHoleCard = (...) => {}
+    const hooks = {
+      onHandStart: null,
+      onHoleCard: null,     // (seatIndex, cardIndex, cardMesh, cardId) => void
+      onCommunity: null,    // (communityIndex, cardMesh, cardId) => void
+      onPot: null,          // (potCountLike) => void
+      onHandEnd: null       // (winnerSeatIndex) => void
+    };
+
     // ---------- STATE ----------
     const state = {
       running: true,
@@ -35,9 +47,13 @@ export const DealingMix = {
       deck: [],
       deckIndex: 0,
       activeCards: [],
-      queue: [],          // animation queue items
-      timers: [],         // scheduled actions
+      queue: [],
+      timers: [],
       lastDt: 0.016,
+
+      // visuals
+      potCount: 0,
+      potGroup: null
     };
 
     // ---------- UTIL ----------
@@ -55,6 +71,12 @@ export const DealingMix = {
       state.deck.length = 0;
       state.deckIndex = 0;
       state.phase = "idle";
+      state.potCount = 0;
+
+      if (state.potGroup) {
+        try { state.potGroup.parent?.remove(state.potGroup); } catch {}
+        state.potGroup = null;
+      }
     }
 
     function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
@@ -98,33 +120,22 @@ export const DealingMix = {
       );
       body.rotation.x = -Math.PI / 2;
 
-      g.add(body);
-      g.add(front);
-      g.add(back);
+      g.add(body, front, back);
 
       // default: lying flat
-      g.rotation.x = 0;
+      g.rotation.x = -Math.PI / 2; // lie on table nicely
       g.userData.faceUp = false;
 
       return g;
     }
 
-    function setFaceUp(card, yes) {
-      // In this simple build: face-up means rotate 180 around Y so white face is visible.
-      // (You can later replace with real textures.)
-      card.userData.faceUp = !!yes;
-      // nothing else needed because front/back are separate meshes
-    }
-
     // ---------- DECK LOGIC ----------
     function buildDeck() {
-      // Standard 52 (we only use IDs; visuals are generic for now)
       const suits = ["S", "H", "D", "C"];
       const ranks = ["A","2","3","4","5","6","7","8","9","T","J","Q","K"];
       const deck = [];
       for (const s of suits) for (const r of ranks) deck.push(r + s);
 
-      // Fisher-Yates shuffle
       for (let i = deck.length - 1; i > 0; i--) {
         const j = randInt(i + 1);
         [deck[i], deck[j]] = [deck[j], deck[i]];
@@ -135,16 +146,13 @@ export const DealingMix = {
 
     function drawCardId() {
       if (state.deckIndex >= state.deck.length) return null;
-      const id = state.deck[state.deckIndex++];
-      return id;
+      return state.deck[state.deckIndex++];
     }
 
     // ---------- TARGET POSITIONS ----------
     function seatCardTarget(seatIndex, cardIndex) {
-      // seatIndex: 0..5
       const s = seats[seatIndex];
       if (!s) {
-        // fallback ring around focus
         const a = (seatIndex / 6) * Math.PI * 2;
         const p = new THREE.Vector3(
           focus.x + Math.cos(a) * 3.05,
@@ -163,7 +171,6 @@ export const DealingMix = {
       const tpos = base.clone().add(inward);
       tpos.y = 0.935;
 
-      // spread 2 hole cards sideways around facing direction
       const side = new THREE.Vector3().crossVectors(inward, new THREE.Vector3(0, 1, 0)).normalize();
       tpos.add(side.multiplyScalar(cardIndex === 0 ? -0.045 : 0.045));
       return tpos;
@@ -173,13 +180,52 @@ export const DealingMix = {
       return comm[Math.max(0, Math.min(comm.length - 1, i))].clone();
     }
 
+    // ---------- POT VISUAL (TEMP BUT REAL) ----------
+    function buildPot() {
+      const g = new THREE.Group();
+      g.name = "PotChips";
+      g.position.set(focus.x, 0.935, focus.z - 0.08);
+
+      const chipGeo = new THREE.CylinderGeometry(0.010, 0.010, 0.003, 14);
+      const chipMat = new THREE.MeshStandardMaterial({
+        color: 0xff2d7a,
+        roughness: 0.35,
+        metalness: 0.1,
+        emissive: 0x1a0010,
+        emissiveIntensity: 0.25
+      });
+
+      // build 20 chips, reveal as pot increases
+      for (let i = 0; i < 20; i++) {
+        const chip = new THREE.Mesh(chipGeo, chipMat);
+        chip.rotation.x = Math.PI / 2;
+        chip.position.set((Math.random() - 0.5) * 0.03, 0.001 + i * 0.0024, (Math.random() - 0.5) * 0.03);
+        chip.scale.setScalar(0.001);
+        chip.userData.idx = i;
+        g.add(chip);
+      }
+
+      table.add(g);
+      return g;
+    }
+
+    function setPotCount(n) {
+      state.potCount = Math.max(0, Math.min(20, n | 0));
+      if (!state.potGroup) return;
+      for (const chip of state.potGroup.children) {
+        const on = chip.userData.idx < state.potCount;
+        const s = on ? 1.0 : 0.001;
+        chip.scale.setScalar(s);
+      }
+      try { hooks.onPot?.(state.potCount); } catch {}
+    }
+
     // ---------- TABLE PROPS (deck stack) ----------
     const deckStack = new THREE.Group();
     deckStack.name = "DeckStack";
     deckStack.position.copy(deckPos);
     table.add(deckStack);
 
-    // a small stack of visible back cards
     const backColors = [0x2b7cff, 0x6bff8f, 0xffcc00, 0xff6b6b, 0xffffff];
     for (let i = 0; i < 10; i++) {
       const c = makeCardMesh(backColors[i % backColors.length]);
@@ -197,13 +243,16 @@ export const DealingMix = {
         const card = makeCardMesh(0x2b7cff);
         card.userData.id = id;
         card.position.copy(deckPos);
-        card.rotation.x = -Math.PI / 2;
 
         table.add(card);
         state.activeCards.push(card);
 
         const to = seatCardTarget(seatIndex, cardIndex);
-        enqueueMove(card, deckPos, to, 0.22);
+        enqueueMove(card, deckPos, to, 0.22, () => {
+          try { hooks.onHoleCard?.(seatIndex, cardIndex, card, id); } catch {}
+          // pot ticks up as cards are dealt (temp but shows action)
+          setPotCount(state.potCount + 1);
+        });
       });
     }
 
@@ -215,16 +264,12 @@ export const DealingMix = {
         const card = makeCardMesh(0x1b1c26);
         card.userData.id = id;
         card.position.copy(deckPos);
-        card.rotation.x = -Math.PI / 2;
 
         table.add(card);
         state.activeCards.push(card);
 
         enqueueMove(card, deckPos, burnPos, 0.18);
-        // Optionally remove burn after settle
-        schedule(0.45, () => {
-          try { table.remove(card); } catch {}
-        });
+        schedule(0.45, () => { try { table.remove(card); } catch {} });
       });
     }
 
@@ -237,13 +282,16 @@ export const DealingMix = {
           const card = makeCardMesh(0x9b59ff);
           card.userData.id = id;
           card.position.copy(deckPos);
-          card.rotation.x = -Math.PI / 2;
 
           table.add(card);
           state.activeCards.push(card);
 
-          const to = communityTarget(startIndex + i);
-          enqueueMove(card, deckPos, to, 0.24);
+          const ci = startIndex + i;
+          const to = communityTarget(ci);
+          enqueueMove(card, deckPos, to, 0.24, () => {
+            try { hooks.onCommunity?.(ci, card, id); } catch {}
+            setPotCount(state.potCount + 2);
+          });
         });
       }
     }
@@ -252,9 +300,14 @@ export const DealingMix = {
       clearAll();
       buildDeck();
 
+      // build pot visual each hand
+      state.potGroup = buildPot();
+      setPotCount(0);
+
       state.t = 0;
       state.phase = "dealing";
       L("[DealingMix] startHand ✅");
+      try { hooks.onHandStart?.(); } catch {}
 
       // Pre-flop: 2 rounds to 6 seats
       let t = 0.15;
@@ -266,7 +319,6 @@ export const DealingMix = {
       }
 
       // Flop / Turn / River
-      // Burn then community
       burnOne(t + 0.35);
       dealCommunity(3, 0, t + 0.55);
 
@@ -279,7 +331,15 @@ export const DealingMix = {
       // End phase
       schedule(t + 5.2, () => {
         state.phase = "done";
-        L("[DealingMix] hand complete ✅");
+        // pick a random winner seat for now (until hand evaluator arrives)
+        const winnerSeat = Math.floor(Math.random() * 6);
+        try { hooks.onHandEnd?.(winnerSeat); } catch {}
+        L("[DealingMix] hand complete ✅ winnerSeat=" + winnerSeat);
+      });
+
+      // Auto loop next hand (so you always SEE poker happening)
+      schedule(t + 7.0, () => {
+        startHand();
       });
     }
 
@@ -290,7 +350,6 @@ export const DealingMix = {
 
       // Run scheduled actions
       if (state.timers.length) {
-        // Execute due timers in order
         state.timers.sort((a, b) => a.at - b.at);
         while (state.timers.length && state.timers[0].at <= state.t) {
           const it = state.timers.shift();
@@ -302,18 +361,27 @@ export const DealingMix = {
       if (state.queue.length) {
         const m = state.queue[0];
         m.t += dt;
-        const t = Math.min(1, m.t / m.dur);
-        const e = easeOutCubic(t);
+        const tt = Math.min(1, m.t / m.dur);
+        const e = easeOutCubic(tt);
         m.obj.position.set(
           m.from.x + (m.to.x - m.from.x) * e,
           m.from.y + (m.to.y - m.from.y) * e,
           m.from.z + (m.to.z - m.from.z) * e
         );
 
-        if (t >= 1) {
+        // subtle hover while moving
+        m.obj.position.y += Math.sin((state.t * 10.0) + m.t * 20.0) * 0.0015;
+
+        if (tt >= 1) {
           state.queue.shift();
           try { m.onDone?.(); } catch {}
         }
+      }
+
+      // pot gentle pulse
+      if (state.potGroup) {
+        const ps = 1.0 + Math.sin(state.t * 2.8) * 0.03;
+        state.potGroup.scale.setScalar(ps);
       }
     }
 
@@ -321,7 +389,10 @@ export const DealingMix = {
     return {
       startHand,
       update,
-      clear: clearAll
+      clear: clearAll,
+
+      // hooks users can set
+      ...hooks
     };
   }
 };

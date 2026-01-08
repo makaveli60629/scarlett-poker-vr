@@ -4,41 +4,28 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
   <title>Scarlett VR Poker</title>
-
-  <!-- ✅ IMPORT MAP FIX: makes "three" work everywhere (even if some file imports from "three") -->
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-      "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-    }
-  }
-  </script>
-
   <style>
     html,body { margin:0; padding:0; overflow:hidden; background:#000; }
-    #hud {
-      position: fixed; left: 12px; top: 12px; right: 12px;
-      color: #fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      background: rgba(0,0,0,0.55); border-radius: 18px; padding: 14px 16px;
-      z-index: 9999;
+    #hud{
+      position:fixed; left:12px; top:12px; right:12px;
+      color:#fff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      background:rgba(0,0,0,.55); border-radius:18px; padding:14px 16px;
+      z-index:9999; backdrop-filter:blur(6px);
     }
-    #hud small { opacity:0.85; }
-    #controls { display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; }
-    .btn {
-      padding: 12px 14px; border-radius: 14px;
-      border: 1px solid rgba(255,255,255,0.22);
-      background: rgba(0,0,0,0.45); color:#fff;
-      font-size: 15px;
+    #hud .row{display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;}
+    .btn{
+      padding:12px 16px; border-radius:14px; cursor:pointer;
+      border:1px solid rgba(255,255,255,.18);
+      background:rgba(0,0,0,.55); color:#fff; font-size:16px;
     }
-    #log {
-      position: fixed; left: 12px; right: 12px; bottom: 84px;
-      color: #9ff; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      background: rgba(0,0,0,0.55); border-radius: 18px; padding: 12px;
-      max-height: 40vh; overflow:auto; white-space: pre-wrap;
-      z-index: 9999;
+    #log{
+      position:fixed; left:12px; right:12px; bottom:84px;
+      color:#9ff; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      background:rgba(0,0,0,.55); border-radius:18px; padding:12px;
+      max-height:40vh; overflow:auto; white-space:pre-wrap;
+      z-index:9999; display:block; backdrop-filter:blur(6px);
     }
-    #log.hidden { display:none; }
+    #VRButton{ z-index:2147483647 !important; }
   </style>
 </head>
 <body>
@@ -46,46 +33,69 @@
     <div style="font-size:34px;font-weight:800;margin-bottom:6px;">Scarlett VR Poker</div>
     <div>Quest: tap <b>ENTER VR</b> (bottom-right).</div>
     <div>Move: Left stick • Snap turn: Right stick • Teleport: Right trigger</div>
-    <small>Android preview: WebXR may not exist — you’ll still see the world in 2D.</small>
+    <div style="opacity:.8;margin-top:6px">Android preview: WebXR may not exist — you’ll still see the world in 2D.</div>
 
-    <div id="controls">
-      <button class="btn" id="btnRecenter">Recenter</button>
-      <button class="btn" id="btnToggleLog">Toggle Log</button>
-      <button class="btn" id="btnReload">Reload</button>
-      <button class="btn" id="btnFullscreen">Fullscreen</button>
-      <button class="btn" id="btnCopyLog">Copy Log</button>
+    <div class="row">
+      <button class="btn" id="recenterBtn">Recenter</button>
+      <button class="btn" id="toggleLogBtn">Toggle Log</button>
+      <button class="btn" id="reloadBtn">Reload</button>
+      <button class="btn" id="fullscreenBtn">Fullscreen</button>
+      <button class="btn" id="copyLogBtn">Copy Log</button>
     </div>
 
-    <div id="buildInfo" style="margin-top:10px;opacity:0.9;"></div>
+    <div id="mini" style="margin-top:10px;opacity:.9;font-family:ui-monospace,Menlo,Consolas,monospace">
+      Build: <span id="buildId">-</span><br/>
+      UA: <span id="ua">-</span><br/>
+      navigator.xr: <span id="xr">-</span><br/>
+      immersive-vr: <span id="ivr">-</span>
+    </div>
   </div>
 
   <div id="log">Booting…</div>
 
   <script type="module">
     const logEl = document.getElementById('log');
-    const buildEl = document.getElementById('buildInfo');
+    const buildEl = document.getElementById('buildId');
+    const uaEl = document.getElementById('ua');
+    const xrEl = document.getElementById('xr');
+    const ivrEl = document.getElementById('ivr');
 
     window.__hubLog = (m) => {
-      logEl.textContent += "\n" + m;
+      logEl.textContent += "\\n" + m;
       logEl.scrollTop = logEl.scrollHeight;
       console.log(m);
     };
 
-    // cache bust
     const v = Date.now().toString();
     window.__BUILD_V = v;
+    buildEl.textContent = v;
+    uaEl.textContent = /Quest|Oculus/i.test(navigator.userAgent) ? "Quest" : "Other";
+
+    xrEl.textContent = !!navigator.xr;
+    if (navigator.xr?.isSessionSupported) {
+      navigator.xr.isSessionSupported("immersive-vr")
+        .then(s => ivrEl.textContent = s ? "supported ✅" : "nope ❌")
+        .catch(()=> ivrEl.textContent = "error");
+    } else ivrEl.textContent = "n/a";
+
     __hubLog("BOOT v=" + v);
-    buildEl.textContent = `Build: ${v}`;
 
-    // HUD buttons
-    document.getElementById("btnRecenter").onclick = () => window.dispatchEvent(new Event("scarlett-recenter"));
-    document.getElementById("btnToggleLog").onclick = () => logEl.classList.toggle("hidden");
-    document.getElementById("btnReload").onclick = () => location.reload();
-    document.getElementById("btnFullscreen").onclick = async () => { try { await document.documentElement.requestFullscreen(); } catch {} };
-    document.getElementById("btnCopyLog").onclick = async () => { try { await navigator.clipboard.writeText(logEl.textContent); } catch {} };
+    document.getElementById("recenterBtn").onclick = () => window.dispatchEvent(new Event("scarlett-recenter"));
+    document.getElementById("toggleLogBtn").onclick = () => logEl.style.display = (logEl.style.display === "none" ? "block" : "none");
+    document.getElementById("reloadBtn").onclick = () => location.reload();
+    document.getElementById("fullscreenBtn").onclick = async () => {
+      try {
+        if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
+        else await document.exitFullscreen();
+      } catch {}
+    };
+    document.getElementById("copyLogBtn").onclick = async () => {
+      try { await navigator.clipboard.writeText(logEl.textContent); __hubLog("[hud] copied log ✅"); }
+      catch { __hubLog("[hud] copy failed ❌"); }
+    };
 
-    // import main
-    import(`./js/main.js?v=${v}`).catch(e => __hubLog("❌ main import failed: " + (e?.message || e)));
+    import(`./js/main.js?v=${v}`)
+      .catch(e => __hubLog("❌ main import failed: " + (e?.message || e)));
   </script>
 </body>
 </html>

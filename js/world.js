@@ -13,15 +13,13 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9011" })
     lobbyZone: { min: new THREE.Vector3(-6, 0, 6), max: new THREE.Vector3(6, 0, 12) },
     bots: null,
     teleporter: null,
-    pokerUI: null,
-    setPotText: () => {},
     tick: (dt) => {},
   };
 
   world.group.name = "World";
   scene.add(world.group);
 
-  // ------------------ TEXTURES (safe) ------------------
+  // ---------- textures ----------
   const texLoader = new THREE.TextureLoader();
 
   const loadTex = (url, opts = {}) =>
@@ -37,10 +35,14 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9011" })
           resolve(t);
         },
         undefined,
-        () => { log(`[tex] missing: ${url} (using null)`); resolve(null); }
+        () => {
+          log(`[tex] missing: ${url} (using null)`);
+          resolve(null);
+        }
       );
     });
 
+  // Use YOUR filenames (case/spacing matters!)
   const T = {
     carpet: await loadTex("assets/textures/lobby_carpet.jpg", { repeat: [2, 2], srgb: true }),
     brick: await loadTex("assets/textures/brickwall.jpg", { repeat: [2, 1], srgb: true }),
@@ -50,18 +52,28 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9011" })
     casinoArt1: await loadTex("assets/textures/casino_art.jpg", { srgb: true }),
     casinoArt2: await loadTex("assets/textures/Casinoart2.jpg", { srgb: true }),
     scorpionBrand: await loadTex("assets/textures/Scorpion room brand.jpg", { srgb: true }),
+
+    store_shirt: await loadTex("assets/textures/store/shirt_icon.png", { srgb: true }),
+    store_crown: await loadTex("assets/textures/store/crown_icon.png", { srgb: true }),
+    store_hat: await loadTex("assets/textures/store/hat_icon.png", { srgb: true }),
+    store_chip: await loadTex("assets/textures/store/chip_icon.png", { srgb: true }),
+
+    wall_pic1: await loadTex("assets/textures/walls/pic1.png", { srgb: true }),
+    wall_pic2: await loadTex("assets/textures/walls/pic2.png", { srgb: true }),
   };
 
-  // ------------------ LIGHTING ------------------
-  world.group.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.9));
-  const key = new THREE.DirectionalLight(0xffffff, 0.8);
+  // ---------- lighting (extra world lights) ----------
+  world.group.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.85));
+
+  const key = new THREE.DirectionalLight(0xffffff, 0.7);
   key.position.set(6, 10, 4);
   world.group.add(key);
+
   const accent = new THREE.PointLight(0xb46bff, 0.55, 12);
   accent.position.set(0, 2.2, 1.8);
   world.group.add(accent);
 
-  // ------------------ FLOOR (carpet) ------------------
+  // ---------- floor ----------
   const floorMat = new THREE.MeshStandardMaterial({
     color: 0x111118,
     roughness: 0.95,
@@ -72,7 +84,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9011" })
   floor.name = "LobbyFloor";
   world.group.add(floor);
 
-  // ------------------ ROOM BOX (brick walls) ------------------
+  // ---------- walls ----------
   const wallMat = new THREE.MeshStandardMaterial({
     color: 0x141826,
     roughness: 0.95,
@@ -91,7 +103,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9011" })
   mkWall(0.3, 4, 22, -8, 2, -3);
   mkWall(0.3, 4, 22, 8, 2, -3);
 
-  // ------------------ CEILING DOME ------------------
+  // ---------- ceiling dome ----------
   const ceilingMat = new THREE.MeshStandardMaterial({
     color: 0x0b0c12,
     roughness: 0.9,
@@ -103,7 +115,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9011" })
   ceiling.scale.set(1.4, 0.85, 1.4);
   world.group.add(ceiling);
 
-  // ------------------ WALL ART ------------------
+  // ---------- wall art ----------
   const addWallArt = (tex, x, y, z, ry, w = 3.2, h = 2.0) => {
     const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, map: tex || null });
     const p = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
@@ -121,9 +133,11 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9011" })
   };
 
   addWallArt(T.casinoArt1, -4.5, 2.1, -13.85, 0, 3.2, 2.0);
-  addWallArt(T.casinoArt2, 4.5, 2.1, -13.85, 0, 3.2, 2.0);
+  addWallArt(T.casinoArt2,  4.5, 2.1, -13.85, 0, 3.2, 2.0);
+  if (T.wall_pic1) addWallArt(T.wall_pic1, -7.85, 2.0, -2.5,  Math.PI / 2, 2.4, 1.6);
+  if (T.wall_pic2) addWallArt(T.wall_pic2,  7.85, 2.0, -2.5, -Math.PI / 2, 2.4, 1.6);
 
-  // ------------------ TABLE ------------------
+  // ---------- table ----------
   const table = new THREE.Group();
   table.name = "PokerTable";
   table.position.set(0, 0, -6.5);
@@ -157,13 +171,13 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9011" })
 
   world.tableFocus.set(0, 0, -6.5);
 
-  // ------------------ RAILS (pushed outward a bit so not inside chairs) ------------------
+  // ---------- rails (pulled slightly OUT so they don’t intersect chairs) ----------
   const rails = new THREE.Group();
   rails.name = "Rails";
   table.add(rails);
 
   const railMat = new THREE.MeshStandardMaterial({ color: 0x12131a, roughness: 0.85 });
-  const railR = 3.55; // <-- OUTWARD FIX
+  const railR = 3.45; // ✅ pushed out
   for (let i = 0; i < 24; i++) {
     const a = (i / 24) * Math.PI * 2;
     const post = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.5, 10), railMat);
@@ -178,7 +192,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9011" })
   railRing.position.y = 0.5;
   rails.add(railRing);
 
-  // ------------------ CHAIRS (6) ------------------
+  // ---------- chairs + seats ----------
   const chairMat = new THREE.MeshStandardMaterial({ color: 0x151821, roughness: 0.95 });
   const chairSeatMat = new THREE.MeshStandardMaterial({ color: 0x2a1b10, roughness: 0.85 });
 
@@ -203,12 +217,11 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9011" })
     return g;
   }
 
-  // seats (6)
   const c = world.tableFocus.clone();
-  const r = 3.35; // chair ring
+  const seatR = 3.25; // ✅ chair ring
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2;
-    const p = new THREE.Vector3(c.x + Math.cos(a) * r, 0, c.z + Math.sin(a) * r);
+    const p = new THREE.Vector3(c.x + Math.cos(a) * seatR, 0, c.z + Math.sin(a) * seatR);
     const yaw = Math.atan2(c.x - p.x, c.z - p.z);
     world.seats.push({ position: p, yaw });
 
@@ -218,7 +231,26 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9011" })
     world.group.add(chair);
   }
 
-  // ------------------ SCORPION ROOM ------------------
+  // ---------- poker view (always visible so you can WATCH) ----------
+  const pokerView = buildPokerView(THREE);
+  pokerView.position.set(0, 1.05, -6.5);
+  world.group.add(pokerView);
+
+  // animate poker view
+  const prevTickA = world.tick;
+  world.tick = (dt) => {
+    prevTickA(dt);
+    pokerView.userData.t = (pokerView.userData.t || 0) + dt;
+    const t = pokerView.userData.t;
+
+    const cards = pokerView.getObjectByName("community");
+    if (cards) cards.position.y = 0.12 + Math.sin(t * 1.6) * 0.015;
+
+    const pot = pokerView.getObjectByName("potText");
+    if (pot?.material) pot.material.opacity = 0.85 + Math.sin(t * 3.0) * 0.12;
+  };
+
+  // ---------- scorpion room ----------
   const scorpion = new THREE.Group();
   scorpion.name = "ScorpionRoom";
   scorpion.position.set(-11.5, 0, -7.0);
@@ -238,9 +270,9 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9011" })
     scorpion.add(m);
   };
   scWall(10, 3.5, 0.25, 0, 1.75, -5);
-  scWall(10, 3.5, 0.25, 0, 1.75, 5);
+  scWall(10, 3.5, 0.25, 0, 1.75,  5);
   scWall(0.25, 3.5, 10, -5, 1.75, 0);
-  scWall(0.25, 3.5, 10, 5, 1.75, 0);
+  scWall(0.25, 3.5, 10,  5, 1.75, 0);
 
   if (T.scorpionBrand) {
     const brand = new THREE.Mesh(
@@ -250,9 +282,10 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9011" })
     brand.position.set(0, 1.9, -4.85);
     scorpion.add(brand);
   }
-  scorpion.add(new THREE.PointLight(0xff2bd6, 0.6, 10).position.set(0, 2.2, 0));
 
-  // ------------------ STORE CORNER ------------------
+  scorpion.add(new THREE.PointLight(0xff2bd6, 0.6, 10)).position.set(0, 2.2, 0);
+
+  // ---------- store ----------
   const store = new THREE.Group();
   store.name = "Store";
   store.position.set(6.2, 0, 5.8);
@@ -262,47 +295,60 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9011" })
   sign.position.set(0, 2.25, 0);
   store.add(sign);
 
-  // store pedestals (visual only for now)
   const pedMat = new THREE.MeshStandardMaterial({ color: 0x141826, roughness: 0.95 });
-  for (let i = 0; i < 4; i++) {
+  const iconMat = (tex) =>
+    new THREE.MeshBasicMaterial({ map: tex || null, transparent: true, opacity: tex ? 1 : 0 });
+
+  const items = [
+    { name: "Shirt", tex: T.store_shirt },
+    { name: "Crown", tex: T.store_crown },
+    { name: "Hat",   tex: T.store_hat },
+    { name: "Chips", tex: T.store_chip },
+  ];
+
+  for (let i = 0; i < items.length; i++) {
     const x = (i - 1.5) * 0.85;
+
     const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.30, 0.5, 18), pedMat);
     ped.position.set(x, 0.25, 0);
     store.add(ped);
 
-    const label = makeSign(THREE, ["Shirt","Crown","Hat","Chips"][i]);
+    const icon = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.34), iconMat(items[i].tex));
+    icon.position.set(x, 0.95, 0.18);
+    store.add(icon);
+
+    const label = makeSign(THREE, items[i].name);
     label.scale.set(0.32, 0.32, 0.32);
     label.position.set(x, 1.32, 0.12);
     store.add(label);
   }
 
-  // ------------------ POKER VIEW UI (always visible) ------------------
-  const pokerView = buildPokerView(THREE);
-  pokerView.position.set(0, 1.05, -6.5);
-  world.group.add(pokerView);
-
-  world.pokerUI = pokerView.userData.ui;
-  world.setPotText = (txt) => pokerView.userData.ui?.setPot?.(txt);
-
-  // ------------------ TELEPORT MACHINE ------------------
+  // ---------- teleport machine module ----------
   let teleLoaded = false;
   try {
     const mod = await import(`./teleport_machine.js?v=${encodeURIComponent(v)}`);
+
     if (mod?.TeleportMachine?.build) {
-      const tele = mod.TeleportMachine.build({ THREE, scene, texLoader });
+      let tele = null;
+      try { tele = mod.TeleportMachine.build({ THREE, scene, texLoader }); }
+      catch { tele = mod.TeleportMachine.build(scene, texLoader, THREE); }
+
       if (tele) {
         tele.position.set(0, 0, 2.2);
         world.teleporter = tele;
         teleLoaded = true;
 
         if (typeof mod.TeleportMachine.getSafeSpawn === "function") {
-          const s = mod.TeleportMachine.getSafeSpawn(THREE);
+          let s = null;
+          try { s = mod.TeleportMachine.getSafeSpawn(THREE); } catch { s = mod.TeleportMachine.getSafeSpawn(); }
           if (s?.position) world.spawnPads = [s.position.clone()];
         }
+
         if (typeof mod.TeleportMachine.tick === "function") {
           const prev = world.tick;
-          world.tick = (dt) => { prev(dt); mod.TeleportMachine.tick(dt); };
+          world.tick = (dt) => { prev(dt); try { mod.TeleportMachine.tick(dt); } catch {} };
         }
+
         log("[world] ✅ TeleportMachine loaded + ticking");
       }
     }
@@ -321,53 +367,22 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9011" })
     log("[world] ⚠️ Using fallback teleporter ring");
   }
 
-  // ------------------ BOTS ------------------
-  try {
-    const botsMod = await import(`./bots.js?v=${encodeURIComponent(v)}`);
-    if (botsMod?.Bots?.init) {
-      botsMod.Bots.init({
-        THREE,
-        scene,
-        getSeats: () => world.seats,
-        getLobbyZone: () => world.lobbyZone,
-        tableFocus: world.tableFocus,
-      });
-      world.bots = botsMod.Bots;
-
-      const prev = world.tick;
-      world.tick = (dt) => { prev(dt); world.bots.update(dt); };
-
-      log("[world] ✅ bots.js loaded");
-    } else {
-      log("[world] ⚠️ bots.js missing Bots.init");
-    }
-  } catch (e) {
-    log("[world] ⚠️ bots import failed: " + (e?.message || e));
-  }
-
-  // ------------------ POKER SIM ------------------
-  try {
-    const simMod = await import(`./poker_simulation.js?v=${encodeURIComponent(v)}`);
-    if (simMod?.PokerSimulation?.init) {
-      simMod.PokerSimulation.init({ bots: world.bots, world });
-      const prev = world.tick;
-      world.tick = (dt) => { prev(dt); simMod.PokerSimulation.update(dt); };
-      log("[world] ✅ PokerSimulation init");
-    }
-  } catch (e) {
-    log("[world] ⚠️ PokerSimulation import failed: " + (e?.message || e));
-  }
+  // ---------- bots (fallback always visible) ----------
+  world.bots = buildSafeBots(THREE, scene, world);
+  const prevBots = world.tick;
+  world.tick = (dt) => { prevBots(dt); world.bots.update(dt); };
 
   log("[world] ready ✅");
   return world;
 }
 
-// ---------------- helpers ----------------
+// ================= HELPERS =================
 function makeSign(THREE, text) {
   const c = document.createElement("canvas");
   c.width = 512; c.height = 256;
   const ctx = c.getContext("2d");
 
+  ctx.clearRect(0, 0, c.width, c.height);
   ctx.fillStyle = "rgba(15, 18, 32, 0.75)";
   roundRect(ctx, 40, 70, 432, 116, 36);
   ctx.fill();
@@ -387,8 +402,7 @@ function makeSign(THREE, text) {
   tex.colorSpace = THREE.SRGBColorSpace;
 
   const m = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.95, depthTest: false });
-  const p = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.8), m);
-  return p;
+  return new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.8), m);
 }
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -409,7 +423,6 @@ function buildPokerView(THREE) {
   const g = new THREE.Group();
   g.name = "PokerView";
 
-  // community cards (always visible)
   const community = new THREE.Group();
   community.name = "community";
 
@@ -432,71 +445,91 @@ function buildPokerView(THREE) {
     card.rotation.x = -0.7;
     community.add(card);
   }
+
   g.add(community);
 
-  // pot sign
-  const pot = makeSign(THREE, "POT: 150");
+  const pot = makeSign(THREE, "POT: 2500");
   pot.name = "potText";
-  pot.scale.set(0.42, 0.42, 0.42);
+  pot.scale.set(0.4, 0.4, 0.4);
   pot.position.set(0, 0.28, -0.55);
   pot.rotation.x = -0.55;
   g.add(pot);
 
-  // action sign (what happened)
-  const action = makeSign(THREE, "Waiting…");
-  action.name = "actionText";
-  action.scale.set(0.42, 0.42, 0.42);
-  action.position.set(0, 0.40, -0.92);
-  action.rotation.x = -0.55;
-  g.add(action);
-
-  // simple controller for UI text
-  g.userData.ui = {
-    setPot(txt) { replaceTextOnSign(THREE, pot, txt); },
-    setLine(txt) { replaceTextOnSign(THREE, action, txt); }
-  };
-
-  // hover animation
-  g.userData.t = 0;
-  const prevTick = g.userData.tick || (() => {});
-  g.userData.tick = (dt) => {
-    prevTick(dt);
-    g.userData.t += dt;
-    const t = g.userData.t;
-    community.position.y = 0.12 + Math.sin(t * 1.6) * 0.015;
-  };
-
   return g;
 }
 
-function replaceTextOnSign(THREE, signMesh, text) {
-  // signMesh is a Plane with a CanvasTexture
-  const mat = signMesh.material;
-  if (!mat?.map) return;
+function buildSafeBots(THREE, scene, world) {
+  const bots = [];
 
-  // re-create canvas for simplicity
-  const c = document.createElement("canvas");
-  c.width = 512; c.height = 256;
-  const ctx = c.getContext("2d");
+  // ✅ wider shoulders so your shirt will “fit” better later
+  const bodyMatA = new THREE.MeshStandardMaterial({ color: 0x2bd7ff, roughness: 0.85 });
+  const bodyMatB = new THREE.MeshStandardMaterial({ color: 0xff2bd6, roughness: 0.85 });
+  const headMat  = new THREE.MeshStandardMaterial({ color: 0xf2d6c9, roughness: 0.85 });
 
-  ctx.fillStyle = "rgba(15, 18, 32, 0.75)";
-  roundRect(ctx, 40, 70, 432, 116, 36);
-  ctx.fill();
+  function makeBot(i) {
+    const g = new THREE.Group();
 
-  ctx.strokeStyle = "rgba(180, 107, 255, 0.85)";
-  ctx.lineWidth = 8;
-  roundRect(ctx, 40, 70, 432, 116, 36);
-  ctx.stroke();
+    // torso
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.20, 0.60, 6, 12), i % 2 ? bodyMatA : bodyMatB);
+    torso.position.y = 0.62;
+    g.add(torso);
 
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 50px Arial";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(text, 256, 128);
+    // shoulders (this is what helps your shirt not look skinny)
+    const shoulders = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.20, 0.34), i % 2 ? bodyMatA : bodyMatB);
+    shoulders.position.set(0, 0.98, 0);
+    g.add(shoulders);
 
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  mat.map.dispose?.();
-  mat.map = tex;
-  mat.needsUpdate = true;
-         }
+    // head
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 14), headMat);
+    head.position.y = 1.30;
+    g.add(head);
+
+    g.userData.bot = { id: i, seated: false, target: null };
+    scene.add(g);
+    return g;
+  }
+
+  for (let i = 0; i < 8; i++) bots.push(makeBot(i));
+
+  // seat 6, lobby 2
+  for (let i = 0; i < bots.length; i++) {
+    const b = bots[i];
+    if (i < 6) {
+      const s = world.seats[i];
+      // ✅ raise them slightly so they don’t “lean through chair”
+      b.position.set(s.position.x, 0.02, s.position.z);
+      b.rotation.y = s.yaw;
+      b.userData.bot.seated = true;
+    } else {
+      b.userData.bot.seated = false;
+      b.position.set((Math.random() * 10) - 5, 0, 9 + Math.random() * 3);
+      b.userData.bot.target = b.position.clone();
+    }
+  }
+
+  function pickTarget() {
+    const z = THREE.MathUtils.lerp(world.lobbyZone.min.z, world.lobbyZone.max.z, Math.random());
+    const x = THREE.MathUtils.lerp(world.lobbyZone.min.x, world.lobbyZone.max.x, Math.random());
+    return new THREE.Vector3(x, 0, z);
+  }
+
+  return {
+    bots,
+    update(dt) {
+      for (const b of bots) {
+        const d = b.userData.bot;
+        if (d.seated) continue;
+
+        if (!d.target || b.position.distanceTo(d.target) < 0.2) d.target = pickTarget();
+        const dir = d.target.clone().sub(b.position);
+        dir.y = 0;
+
+        if (dir.length() > 0.001) {
+          dir.normalize();
+          b.position.addScaledVector(dir, dt * 0.7);
+          b.lookAt(d.target.x, b.position.y, d.target.z);
+        }
+      }
+    }
+  };
+}

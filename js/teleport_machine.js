@@ -1,5 +1,5 @@
 // /js/teleport_machine.js — Teleport Pad + FX (GitHub Pages SAFE)
-// ✅ NO imports here.
+// ✅ NO imports here. We receive THREE from world.js.
 
 export const TeleportMachine = {
   group: null,
@@ -20,7 +20,6 @@ export const TeleportMachine = {
     );
     base.position.y = 0.06;
 
-    // glow ring (texture optional)
     let glowMat = new THREE.MeshStandardMaterial({
       color: 0x00ffaa,
       emissive: 0x00ffaa,
@@ -81,7 +80,6 @@ export const TeleportMachine = {
     );
     topCap.position.set(0, 0.18, 0);
 
-    // purple electricity arc
     const arcGeo = new THREE.BufferGeometry();
     const arcPts = new Float32Array(42 * 3);
     arcGeo.setAttribute("position", new THREE.BufferAttribute(arcPts, 3));
@@ -113,9 +111,8 @@ export const TeleportMachine = {
       ring.rotation.z += dt * 0.9;
       ring.material.emissiveIntensity = 1.4 + Math.sin(t * 6.0) * 0.35;
     }
-    if (beacon) {
-      beacon.intensity = 0.7 + Math.sin(t * 5.0) * 0.25;
-    }
+    if (beacon) beacon.intensity = 0.7 + Math.sin(t * 5.0) * 0.25;
+
     if (arc) {
       const pos = arc.geometry.attributes.position.array;
       let idx = 0;

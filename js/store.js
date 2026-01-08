@@ -1,64 +1,56 @@
-// /js/store.js — Update 9.0 store (safe visuals, no UI clicks yet)
+// /js/StoreChips.js
+// Lightweight store kiosk + chip prototype spawner hooks.
 
-import { ShopCatalog } from "./shop_catalog.js";
-import { createTextureKit } from "./textures.js";
+export function createStoreKiosk({ THREE, position = { x: 6, y: 0, z: -4 } }) {
+  const group = new THREE.Group();
+  group.name = "StoreKiosk";
+  group.position.set(position.x, position.y, position.z);
 
-export async function initStore({ THREE, scene, world, log = console.log }) {
-  const kit = createTextureKit(THREE, { log });
-
-  const g = new THREE.Group();
-  g.name = "Store";
-  g.position.set(-5.5, 0, 2.5); // left side of lobby
-  world.group.add(g);
-
-  // kiosk base
-  const kiosk = new THREE.Mesh(
-    new THREE.BoxGeometry(2.2, 1.1, 1.1),
-    new THREE.MeshStandardMaterial({ color: 0x121826, roughness: 0.85 })
+  const base = new THREE.Mesh(
+    new THREE.BoxGeometry(1.6, 1.1, 0.8),
+    new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0.4, roughness: 0.6 })
   );
-  kiosk.position.y = 0.55;
-  g.add(kiosk);
+  base.position.y = 0.55;
+  base.castShadow = true;
+  base.receiveShadow = true;
+  group.add(base);
 
-  // sign
   const sign = new THREE.Mesh(
-    new THREE.BoxGeometry(2.2, 0.35, 0.1),
-    new THREE.MeshStandardMaterial({ color: 0x2a3cff, emissive: 0x2a3cff, emissiveIntensity: 0.55, roughness: 0.4 })
+    new THREE.PlaneGeometry(1.4, 0.5),
+    new THREE.MeshStandardMaterial({
+      color: 0x101010,
+      emissive: 0x5a2cff,
+      emissiveIntensity: 1.1,
+      transparent: true,
+      opacity: 0.95,
+    })
   );
-  sign.position.set(0, 1.35, 0.55);
-  g.add(sign);
+  sign.position.set(0, 1.35, 0.41);
+  group.add(sign);
 
-  // item pedestals
-  const pedMat = new THREE.MeshStandardMaterial({ color: 0x0e1018, roughness: 0.9 });
-  const iconMatFallback = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
+  // invisible “interact” collider
+  const col = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.6, 1.0), new THREE.MeshBasicMaterial({ visible: false }));
+  col.position.y = 0.8;
+  col.userData.isInteractable = true;
+  col.userData.action = "OPEN_STORE";
+  group.add(col);
 
-  for (let i = 0; i < ShopCatalog.length; i++) {
-    const item = ShopCatalog[i];
-    const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 0.25, 20), pedMat);
-    ped.position.set(-0.75 + i * 0.5, 0.125, -0.55);
-    g.add(ped);
+  return group;
+}
 
-    const iconTex = await kit.load(item.icon).catch(() => null);
-    const iconMat = iconTex
-      ? new THREE.MeshStandardMaterial({ map: iconTex, transparent: true, roughness: 0.9 })
-      : iconMatFallback;
-
-    const icon = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.28), iconMat);
-    icon.position.set(ped.position.x, 0.55, ped.position.z);
-    icon.rotation.y = Math.PI;
-    icon.userData.spin = 0.6 + Math.random() * 0.4;
-    icon.userData.itemId = item.id;
-    g.add(icon);
-  }
-
-  // store tick (spin icons)
-  return {
-    group: g,
-    tick(dt) {
-      for (const child of g.children) {
-        if (child.isMesh && child.geometry?.type === "PlaneGeometry" && child.userData?.spin) {
-          child.rotation.y += dt * child.userData.spin;
-        }
-      }
-    }
-  };
-                                                          }
+// chip mesh generator (you’ll attach physics in your existing physics system)
+export function createChipMesh({ THREE, value = 100, radius = 0.022, thickness = 0.008 }) {
+  const geo = new THREE.CylinderGeometry(radius, radius, thickness, 32);
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x202020,
+    metalness: 0.1,
+    roughness: 0.45,
+  });
+  const chip = new THREE.Mesh(geo, mat);
+  chip.rotation.x = Math.PI / 2;
+  chip.castShadow = true;
+  chip.receiveShadow = true;
+  chip.userData.isChip = true;
+  chip.userData.value = value;
+  return chip;
+}

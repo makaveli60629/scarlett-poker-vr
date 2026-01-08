@@ -130,7 +130,23 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
   world.group.add(purple);
 
   world.group.add(new THREE.AmbientLight(0xffffff, 0.18));
+// EXTRA TABLE LIGHTS (makes cards/chips readable in Quest)
+  const tableOver = new THREE.SpotLight(0xffffff, 2.4, 18, Math.PI / 5, 0.35, 1.0);
+  tableOver.position.set(world.tableFocus.x, 6.2, world.tableFocus.z);
+  tableOver.target.position.set(world.tableFocus.x, 0.9, world.tableFocus.z);
+  world.group.add(tableOver);
+  world.group.add(tableOver.target);
 
+  const tableFillA = new THREE.PointLight(0xffffff, 0.85, 14);
+  tableFillA.position.set(world.tableFocus.x + 2.0, 2.2, world.tableFocus.z + 1.2);
+  world.group.add(tableFillA);
+
+  const tableFillB = new THREE.PointLight(0xffffff, 0.65, 14);
+  tableFillB.position.set(world.tableFocus.x - 2.0, 2.0, world.tableFocus.z - 1.2);
+  world.group.add(tableFillB);
+
+  // small ambient bump
+  world.group.add(new THREE.AmbientLight(0xffffff, 0.28));
   // ---------- FLOOR ----------
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), mat.floor);
   floor.rotation.x = -Math.PI / 2;

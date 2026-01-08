@@ -1,37 +1,60 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
   <title>Scarlett VR Poker</title>
-
   <style>
-    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; touch-action:none; }
-    canvas { position:fixed; inset:0; z-index:1; }
-    #VRButton { position:fixed !important; right:12px !important; bottom:12px !important; z-index:999999 !important; pointer-events:auto !important; }
-    .overlay { position:fixed; top:12px; left:12px; right:12px; z-index:10; pointer-events:none; }
-    .card { background:rgba(10,10,16,.78); border:1px solid rgba(255,255,255,.10); border-radius:18px; padding:14px 16px; color:#fff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; }
-    .card h2{ margin:0 0 8px; font-size:22px; }
-    .card p{ margin:0; line-height:1.35; opacity:.9; }
-    .debug { position:fixed; left:12px; right:12px; bottom:86px; z-index:20; pointer-events:none; }
-    .debug .card{ font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size:14px; white-space:pre-wrap; }
+    html,body { margin:0; padding:0; overflow:hidden; background:#000; }
+    #hud {
+      position: fixed; left: 12px; top: 12px; right: 12px;
+      color: #fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      background: rgba(0,0,0,0.55); border-radius: 18px; padding: 14px 16px;
+      z-index: 9999;
+    }
+    #log {
+      position: fixed; left: 12px; right: 12px; bottom: 84px;
+      color: #9ff; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: rgba(0,0,0,0.55); border-radius: 18px; padding: 12px;
+      max-height: 40vh; overflow:auto; white-space: pre-wrap;
+      z-index: 9999;
+    }
+    #forceVR {
+      position: fixed; right: 12px; bottom: 12px;
+      padding: 14px 18px; border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(0,0,0,0.65); color:#fff;
+      font-size: 16px; z-index: 2147483647;
+      display:none;
+    }
   </style>
 </head>
 <body>
-  <div class="overlay">
-    <div class="card">
-      <h2>Scarlett VR Poker</h2>
-      <p>
-        Quest: tap <b>ENTER VR</b> (bottom-right).<br/>
-        Move: Left stick • Snap turn: Right stick • Teleport: Right trigger.<br/>
-        Android: WebXR may not exist — still shows preview.
-      </p>
-    </div>
+  <div id="hud">
+    <div style="font-size:34px;font-weight:800;margin-bottom:6px;">Scarlett VR Poker</div>
+    <div>Quest: tap <b>ENTER VR</b> (bottom-right).</div>
+    <div>Move: Left stick • Snap turn: Right stick • Teleport: Right trigger</div>
   </div>
 
-  <div class="debug" id="debug"><div class="card" id="debugCard">Booting…</div></div>
+  <div id="log">Booting…</div>
+  <button id="forceVR">ENTER VR</button>
 
-  <!-- CACHE BUST: change v= whenever you push -->
-  <script type="module" src="./js/main.js?v=9001"></script>
+  <script type="module">
+    // simple on-screen logger
+    const logEl = document.getElementById('log');
+    window.__hubLog = (m) => {
+      logEl.textContent += "\n" + m;
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(m);
+    };
+
+    // cache-bust build id
+    const v = Date.now().toString();
+    window.__BUILD_V = v;
+    __hubLog("BOOT v=" + v);
+
+    // import main
+    import(`./js/main.js?v=${v}`).catch(e => __hubLog("❌ main import failed: " + (e?.message || e)));
+  </script>
 </body>
 </html>

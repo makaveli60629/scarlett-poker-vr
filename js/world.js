@@ -459,56 +459,74 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9003" })
   scorpion.add(makeTextPanel(THREE, "SCORPION ROOM", 0, 2.9, -2.75, 0, 0.36));
 
   // ------------------ TELEPORT MACHINE (YOUR MODULE) ------------------
-  // NOTE: your teleport_machine.js should NOT import its own three.
-  // It should export: TeleportMachine.build({ THREE, scene, texLoader }) OR TeleportMachine.build(scene, texLoader, THREE).
-  let teleLoaded = false;
+// teleport_machine.js MUST NOT import its own THREE.
+// It must export: TeleportMachine.build({ THREE, scene, texLoader })
 
-  try {
-    const mod = await import(`./teleport_machine.js?v=${encodeURIComponent(v)}`);
+let teleLoaded = false;
 
-    // Support BOTH signatures:
-    // A) build(scene, texLoader)
-    // B) build({THREE, scene, texLoader})
-    if (mod?.TeleportMachine?.build) {
-      let tele = null;
+try {
+  const mod = await import(`./teleport_machine.js?v=${encodeURIComponent(v)}`);
+  const TM = mod?.TeleportMachine;
 
-      try {
-        tele = mod.TeleportMachine.build({ THREE, scene, texLoader }); // preferred
-      } catch {
-        tele = mod.TeleportMachine.build(scene, texLoader, THREE); // fallback
+  if (TM?.build) {
+    // 1️⃣ BUILD teleporter (GitHub Pages safe signature)
+    const tele = TM.build({ THREE, scene, texLoader });
+
+    if (tele) {
+      // 2️⃣ FORCE known-good placement
+      tele.position.set(0, 0, 2.2);
+
+      // 3️⃣ ENSURE it is parented to the world
+      if (!tele.parent) world.group.add(tele);
+
+      // 4️⃣ STORE reference so we can animate it
+      world.teleporter = TM;
+
+      // 5️⃣ OPTIONAL: safe spawn from teleporter
+      if (typeof TM.getSafeSpawn === "function") {
+        const s = TM.getSafeSpawn(THREE);
+        if (s?.position) world.spawnPads = [s.position.clone()];
       }
 
-      if (tele) {
-        // force correct placement
-        tele.position.set(0, 0, 2.2);
-        teleLoaded = true;
-
-        // safe spawn from teleporter
-        if (typeof mod.TeleportMachine.getSafeSpawn === "function") {
-          const s = mod.TeleportMachine.getSafeSpawn();
-          if (s?.position) world.spawnPads = [s.position.clone()];
+      // 6️⃣ TICK IT EVERY FRAME (THIS IS THE KEY PART)
+      const prevTick = world.tick;
+      world.tick = (dt) => {
+        prevTick(dt);
+        try {
+          if (world.teleporter?.tick) world.teleporter.tick(dt);
+        } catch (e) {
+          log("[world] ⚠️ TeleportMachine.tick error");
         }
+      };
 
-        // tick fx if available
-        if (typeof mod.TeleportMachine.tick === "function") {
-          const prev = world.tick;
-          world.tick = (dt) => {
-            prev(dt);
-            try { mod.TeleportMachine.tick(dt); } catch {}
-          };
-        }
-
-        log("[world] ✅ teleport_machine.js loaded");
-      } else {
-        log("[world] ⚠️ teleport_machine.js build returned null");
-      }
+      teleLoaded = true;
+      log("[world] ✅ teleport_machine.js loaded + ticking");
     } else {
-      log("[world] ⚠️ teleport_machine.js loaded but TeleportMachine.build missing");
+      log("[world] ⚠️ TeleportMachine.build returned null");
     }
-  } catch (e) {
-    log("[world] ❌ teleport_machine.js import failed: " + (e?.message || e));
+  } else {
+    log("[world] ⚠️ TeleportMachine.build missing");
   }
+} catch (e) {
+  log("[world] ❌ teleport_machine.js import failed: " + (e?.message || e));
+}
 
+// ------------------ FALLBACK (ONLY IF TELEPORTER FAILS) ------------------
+if (!teleLoaded) {
+  const fallback = new THREE.Mesh(
+    new THREE.TorusGeometry(0.7, 0.07, 16, 64),
+    new THREE.MeshStandardMaterial({
+      color: 0x6a2bff,
+      emissive: 0x6a2bff,
+      emissiveIntensity: 1.2
+    })
+  );
+  fallback.rotation.x = Math.PI / 2;
+  fallback.position.set(0, 1.0, 2.2);
+  world.group.add(fallback);
+
+  log("[world] ⚠️ Using fallback teleporter ring");
+}
   if (!teleLoaded) {
     // Safe fallback portal ring if teleporter fails
     const fallback = new THREE.Mesh(

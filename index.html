@@ -1,160 +1,432 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width,initial-scale=1,maximum-scale=1"
-    />
-    <title>Scarlett VR Poker</title>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+  <title>Scarlett Poker VR — Single File</title>
 
-    <!-- ✅ IMPORT MAP (THIS FIXES "three" ON GITHUB PAGES) -->
-    <script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-        "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-      }
+  <!-- Importmap: GitHub-safe Three.js -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
     }
-    </script>
+  }
+  </script>
 
-    <style>
-      html, body {
-        margin: 0;
-        padding: 0;
-        height: 100%;
-        background: #000;
-        overflow: hidden;
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      }
+  <style>
+    html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial; }
+    #hud { position:fixed; left:0; top:0; right:0; padding:18px; z-index:999999; pointer-events:none; }
+    #hudCard { max-width:760px; margin:0 auto; background:rgba(0,0,0,.55); border:1px solid rgba(255,255,255,.08);
+      border-radius:18px; padding:18px; box-shadow:0 12px 40px rgba(0,0,0,.35); pointer-events:auto; }
+    h1 { margin:0 0 8px 0; font-size:42px; letter-spacing:.4px; }
+    .sub { opacity:.9; font-size:16px; line-height:1.35; }
+    .btns { margin-top:12px; display:flex; gap:10px; flex-wrap:wrap; }
+    button { background:rgba(0,0,0,.35); border:1px solid rgba(255,255,255,.12); color:#fff; padding:10px 14px;
+      border-radius:16px; font-size:16px; }
+    #log { margin-top:12px; color:#72f7ff; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+      font-size:16px; white-space:pre-wrap; }
+    canvas { display:block; }
+  </style>
+</head>
 
-      #hud {
-        position: fixed;
-        left: 0;
-        top: 0;
-        right: 0;
-        padding: 18px 18px 10px 18px;
-        z-index: 999999;
-        pointer-events: none;
-      }
-
-      #hudCard {
-        max-width: 720px;
-        background: rgba(0,0,0,0.55);
-        border: 1px solid rgba(255,255,255,0.08);
-        border-radius: 18px;
-        padding: 18px;
-        margin: 0 auto;
-        box-shadow: 0 12px 40px rgba(0,0,0,0.35);
-        pointer-events: auto;
-      }
-
-      h1 {
-        margin: 0 0 8px 0;
-        font-size: 44px;
-        letter-spacing: .5px;
-      }
-
-      .sub {
-        opacity: .9;
-        font-size: 18px;
-        line-height: 1.35;
-      }
-
-      .btns {
-        margin-top: 14px;
-        display: flex;
-        gap: 14px;
-        flex-wrap: wrap;
-      }
-
-      button {
-        background: rgba(0,0,0,0.35);
-        border: 1px solid rgba(255,255,255,0.12);
-        color: #fff;
-        padding: 12px 18px;
-        border-radius: 16px;
-        font-size: 18px;
-      }
-
-      #log {
-        margin-top: 12px;
-        color: #72f7ff;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 18px;
-        white-space: pre-wrap;
-      }
-    </style>
-  </head>
-
-  <body>
-    <!-- HUD -->
-    <div id="hud">
-      <div id="hudCard">
-        <h1>Scarlett VR Poker</h1>
-        <div class="sub">
-          Quest: tap <b>ENTER VR</b> (bottom-right).<br/>
-          Move: Left stick • Snap turn: Right stick • Teleport: Right trigger<br/>
-          <span style="opacity:.75">
-            Android preview: WebXR may not exist — you’ll still see the world in 2D.
-          </span>
-        </div>
-
-        <div class="btns">
-          <button id="btnRecenter">Recenter</button>
-          <button id="btnToggleLog">Toggle Log</button>
-          <button id="btnReload">Reload</button>
-          <button id="btnFullscreen">Fullscreen</button>
-          <button id="btnCopyLog">Copy Log</button>
-        </div>
-
-        <div id="log">Booting…</div>
+<body>
+  <div id="hud">
+    <div id="hudCard">
+      <h1>Scarlett Poker VR</h1>
+      <div class="sub">
+        Quest: tap <b>ENTER VR</b> (bottom-right).<br/>
+        Desktop: <b>M</b> toggles menu • Click to interact.<br/>
+        VR: point controller • Trigger selects / teleports.
       </div>
+
+      <div class="btns">
+        <button id="btnRecenter">Recenter</button>
+        <button id="btnDeal">Deal New Hand</button>
+        <button id="btnToggleLog">Toggle Log</button>
+        <button id="btnReload">Reload</button>
+      </div>
+
+      <div id="log">Booting…</div>
     </div>
+  </div>
 
-    <!-- BOOT + LOGGER -->
-    <script type="module">
-      const el = document.getElementById("log");
-      let showLog = true;
+  <script type="module">
+    import * as THREE from "three";
+    import { VRButton } from "three/addons/webxr/VRButton.js";
+    import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
 
-      window.__hubLogText = "";
-      window.__hubLog = (msg) => {
-        const m = String(msg ?? "");
-        window.__hubLogText += m + "\n";
-        if (showLog) el.textContent = window.__hubLogText;
-        console.log(m);
-      };
+    // ================= HUD Logger =================
+    const el = document.getElementById("log");
+    let showLog = true;
+    let logText = "";
+    function hubLog(msg) {
+      const m = String(msg ?? "");
+      logText += m + "\n";
+      if (showLog) el.textContent = logText;
+      console.log(m);
+    }
 
-      const BUILD_V = Date.now().toString();
-      window.__BUILD_V = BUILD_V;
+    const BUILD_V = Date.now().toString();
+    hubLog("BOOT v=" + BUILD_V);
+    hubLog("navigator.xr: " + ("xr" in navigator));
 
-      __hubLog("BOOT v=" + BUILD_V);
-      __hubLog("navigator.xr: " + ("xr" in navigator));
+    document.getElementById("btnToggleLog").onclick = () => {
+      showLog = !showLog;
+      el.style.display = showLog ? "block" : "none";
+    };
+    document.getElementById("btnReload").onclick = () => location.reload();
 
-      document.getElementById("btnRecenter").onclick = () =>
-        window.dispatchEvent(new Event("scarlett-recenter"));
+    // ================= Three Core =================
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x020205);
+    scene.fog = new THREE.Fog(0x020205, 1, 45);
 
-      document.getElementById("btnToggleLog").onclick = () => {
-        showLog = !showLog;
-        el.style.display = showLog ? "block" : "none";
-      };
+    const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.05, 250);
 
-      document.getElementById("btnReload").onclick = () => location.reload();
-      document.getElementById("btnFullscreen").onclick = () =>
-        document.documentElement.requestFullscreen?.();
+    const renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.xr.enabled = true;
+    try { renderer.xr.setReferenceSpaceType("local-floor"); } catch {}
+    document.body.appendChild(renderer.domElement);
+    document.body.appendChild(VRButton.createButton(renderer));
 
-      document.getElementById("btnCopyLog").onclick = async () => {
-        try {
-          await navigator.clipboard.writeText(window.__hubLogText);
-        } catch {}
-      };
+    // Player rig
+    const player = new THREE.Group();
+    player.add(camera);
+    scene.add(player);
 
-      try {
-        await import(`./js/main.js?v=${encodeURIComponent(BUILD_V)}`);
-      } catch (e) {
-        __hubLog("❌ main import failed: " + (e?.message || e));
+    // Lights
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.1));
+    const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+    dir.position.set(7, 12, 6);
+    scene.add(dir);
+
+    // ================= World (simple, solid) =================
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(80, 80),
+      new THREE.MeshStandardMaterial({ color: 0x0b0c12, roughness: 0.95 })
+    );
+    floor.rotation.x = -Math.PI/2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    function mkWall(w,h,d,x,y,z) {
+      const m = new THREE.Mesh(
+        new THREE.BoxGeometry(w,h,d),
+        new THREE.MeshStandardMaterial({ color: 0x141826, roughness: 0.95 })
+      );
+      m.position.set(x,y,z);
+      scene.add(m);
+    }
+    const wallH = 6.0;
+    mkWall(16, wallH, 0.3, 0, wallH/2, -14);
+    mkWall(16, wallH, 0.3, 0, wallH/2,  8);
+    mkWall(0.3, wallH, 22, -8, wallH/2, -3);
+    mkWall(0.3, wallH, 22,  8, wallH/2, -3);
+
+    // Spawn
+    player.position.set(0, 0, 3.6);
+
+    // ================= Poker Table =================
+    const tableFocus = new THREE.Vector3(0,0,-6.5);
+
+    const table = new THREE.Group();
+    table.position.copy(tableFocus);
+    scene.add(table);
+
+    const felt = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.6, 2.6, 0.18, 64),
+      new THREE.MeshStandardMaterial({ color: 0x0f5d3a, roughness: 0.92 })
+    );
+    felt.position.y = 0.92;
+    table.add(felt);
+
+    const rim = new THREE.Mesh(
+      new THREE.TorusGeometry(2.6, 0.18, 18, 80),
+      new THREE.MeshStandardMaterial({ color: 0x1b0f0c, roughness: 0.85 })
+    );
+    rim.rotation.x = Math.PI/2;
+    rim.position.y = 1.01;
+    table.add(rim);
+
+    const railR = 3.75;
+    const glowRing = new THREE.Mesh(
+      new THREE.TorusGeometry(railR, 0.018, 10, 120),
+      new THREE.MeshStandardMaterial({
+        color: 0x7fe7ff,
+        emissive: 0x2bd7ff,
+        emissiveIntensity: 1.25,
+        roughness: 0.25,
+        metalness: 0.1,
+        transparent: true,
+        opacity: 0.85
+      })
+    );
+    glowRing.rotation.x = Math.PI/2;
+    glowRing.position.y = 0.69;
+    table.add(glowRing);
+
+    // ================= Chairs + Seats =================
+    function makeChair() {
+      const g = new THREE.Group();
+      const seatMat = new THREE.MeshStandardMaterial({ color: 0x2a1b10, roughness: 0.85 });
+      const chairMat = new THREE.MeshStandardMaterial({ color: 0x151821, roughness: 0.95 });
+
+      const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.30,0.30,0.08,18), seatMat);
+      seat.position.y = 0.50; g.add(seat);
+
+      const back = new THREE.Mesh(new THREE.BoxGeometry(0.60,0.62,0.09), chairMat);
+      back.position.set(0,0.90,-0.24); g.add(back);
+
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.10,0.48,12), chairMat);
+      leg.position.y = 0.24; g.add(leg);
+
+      const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.24,0.24,0.06,16), chairMat);
+      foot.position.y = 0.03; g.add(foot);
+
+      return g;
+    }
+
+    const seats = [];
+    const seatR = 3.05;
+    for (let i=0;i<6;i++){
+      const a = (i/6)*Math.PI*2;
+      const p = new THREE.Vector3(
+        tableFocus.x + Math.cos(a)*seatR,
+        0,
+        tableFocus.z + Math.sin(a)*seatR
+      );
+      const yaw = Math.atan2(tableFocus.x - p.x, tableFocus.z - p.z);
+      seats.push({ position:p, yaw });
+
+      const ch = makeChair();
+      ch.position.copy(p);
+      ch.rotation.y = yaw;
+      scene.add(ch);
+    }
+
+    // ================= Simple Avatar (seated) =================
+    class SimpleAvatar {
+      constructor(color=0x8aa0ff) {
+        this.root = new THREE.Group();
+        const skin = new THREE.MeshStandardMaterial({ color, roughness:0.85 });
+        const cloth = new THREE.MeshStandardMaterial({ color:0x222222, roughness:0.95 });
+
+        this.hipStand = 0.95;
+        this.hipSit = 0.62;
+        this.legUpper = 0.38;
+        this.legLower = 0.38;
+
+        this.pelvis = new THREE.Group();
+        this.pelvis.position.y = this.hipStand;
+        this.root.add(this.pelvis);
+
+        const torso = new THREE.Mesh(new THREE.BoxGeometry(0.28,0.42,0.18), cloth);
+        torso.position.y = 0.30; this.pelvis.add(torso);
+
+        const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.06,0.08,14), skin);
+        neck.position.y = 0.47; this.pelvis.add(neck);
+
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.13,18,18), skin);
+        head.position.y = 0.56; this.pelvis.add(head);
+
+        this.left = this._leg(cloth);
+        this.right = this._leg(cloth);
+        this.left.hip.position.set(-0.10,0.02,0);
+        this.right.hip.position.set(0.10,0.02,0);
+        this.root.add(this.left.root);
+        this.root.add(this.right.root);
+
+        this.setSitAmount(1);
       }
-    </script>
-  </body>
+
+      _leg(mat){
+        const root = new THREE.Group();
+        const hip = new THREE.Group(); root.add(hip);
+        const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.055,0.06,this.legUpper,12), mat);
+        upper.position.y = -this.legUpper/2; hip.add(upper);
+        const knee = new THREE.Group(); knee.position.y = -this.legUpper; hip.add(knee);
+        const lower = new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.052,this.legLower,12), mat);
+        lower.position.y = -this.legLower/2; knee.add(lower);
+        const foot = new THREE.Mesh(new THREE.BoxGeometry(0.11,0.04,0.20), mat);
+        foot.position.set(0, -this.legLower-0.02, 0.07); hip.add(foot);
+        return { root, hip, knee };
+      }
+
+      setWorldPose(position, yaw){
+        this.root.position.set(position.x, 0, position.z);
+        this.root.rotation.y = yaw;
+      }
+
+      setSitAmount(a){
+        const t = Math.max(0, Math.min(1, a));
+        this.pelvis.position.y = THREE.MathUtils.lerp(this.hipStand, this.hipSit, t);
+        const hipBend = THREE.MathUtils.lerp(0.0, -0.55, t);
+        const kneeBend = THREE.MathUtils.lerp(0.0, 1.20, t);
+        this.left.hip.rotation.x = hipBend;
+        this.right.hip.rotation.x = hipBend;
+        this.left.knee.rotation.x = kneeBend;
+        this.right.knee.rotation.x = kneeBend;
+        const legForward = THREE.MathUtils.lerp(0.00, 0.22, t);
+        this.left.root.position.set(0,0,legForward);
+        this.right.root.position.set(0,0,legForward);
+      }
+
+      update(dt){}
+    }
+
+    // Spawn bots (seat 0 reserved for player)
+    const bots = [];
+    const colors = [0xff6b6b,0x4cd964,0x5ac8fa,0xffcc00,0xffffff];
+    for (let i=1;i<6;i++){
+      const b = new SimpleAvatar(colors[i-1]);
+      b.setWorldPose(seats[i].position, seats[i].yaw);
+      scene.add(b.root);
+      bots.push(b);
+    }
+    hubLog("World ready ✅  (single-file build)");
+
+    // ================= Controllers (fixed) =================
+    const controllerModelFactory = new XRControllerModelFactory();
+    const controllers = [];
+    const grips = [];
+
+    function makeLaser(){
+      const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
+      const mat = new THREE.LineBasicMaterial({ color: 0x00ffcc });
+      const line = new THREE.Line(geo, mat);
+      line.scale.z = 10;
+      return line;
+    }
+
+    for (let i=0;i<2;i++){
+      const c = renderer.xr.getController(i);
+      c.add(makeLaser());
+      scene.add(c);
+      controllers.push(c);
+
+      const g = renderer.xr.getControllerGrip(i);
+      g.add(controllerModelFactory.createControllerModel(g));
+      scene.add(g);
+      grips.push(g);
+    }
+
+    // ================= DealingMix (built-in) =================
+    const deckPos = new THREE.Vector3(tableFocus.x + 0.65, 0.93, tableFocus.z + 0.15);
+    const comm = [];
+    for (let i=0;i<5;i++){
+      comm.push(new THREE.Vector3(tableFocus.x + (-0.30 + i*0.15), 0.93, tableFocus.z));
+    }
+
+    function makeCard(backColor){
+      const g = new THREE.Group();
+      const w=0.065, h=0.090, t=0.002;
+      const front = new THREE.Mesh(new THREE.PlaneGeometry(w,h), new THREE.MeshStandardMaterial({ color:0xffffff, roughness:0.6 }));
+      front.position.z = t/2;
+      const back = new THREE.Mesh(new THREE.PlaneGeometry(w,h), new THREE.MeshStandardMaterial({ color:backColor, roughness:0.6 }));
+      back.rotation.y = Math.PI; back.position.z = -t/2;
+      const body = new THREE.Mesh(new THREE.BoxGeometry(w,h,t), new THREE.MeshStandardMaterial({ color:0x111111, roughness:0.9 }));
+      g.add(body); g.add(front); g.add(back);
+      g.rotation.x = -Math.PI/2;
+      return g;
+    }
+
+    const activeCards = [];
+    const queue = [];
+    const backColors = [0x2b7cff,0x6bff8f,0xffcc00,0xff6b6b,0xffffff];
+
+    function easeOutCubic(t){ return 1 - Math.pow(1 - t, 3); }
+    function enqueue(obj, from, to, dur){
+      queue.push({ obj, from:from.clone(), to:to.clone(), t:0, dur:Math.max(0.12,dur) });
+    }
+    function seatCardTarget(seatIndex, cardIndex){
+      const s = seats[seatIndex];
+      const base = s.position.clone();
+      const inward = new THREE.Vector3(tableFocus.x - base.x, 0, tableFocus.z - base.z).normalize().multiplyScalar(0.52);
+      const tpos = base.clone().add(inward); tpos.y = 0.93;
+      const side = new THREE.Vector3().crossVectors(inward, new THREE.Vector3(0,1,0)).normalize();
+      tpos.add(side.multiplyScalar(cardIndex===0 ? -0.04 : 0.04));
+      return tpos;
+    }
+
+    function clearCards(){
+      for (const c of activeCards) scene.remove(c);
+      activeCards.length = 0;
+      queue.length = 0;
+    }
+
+    function dealHand(){
+      clearCards();
+      let di = 0;
+
+      // 2 cards to each seat (including seat 0 placeholder)
+      for (let round=0; round<2; round++){
+        for (let s=0; s<6; s++){
+          const card = makeCard(backColors[(di++) % backColors.length]);
+          card.position.copy(deckPos);
+          scene.add(card);
+          activeCards.push(card);
+          enqueue(card, deckPos, seatCardTarget(s, round), 0.22);
+        }
+      }
+
+      // 5 community cards
+      for (let i=0;i<5;i++){
+        const card = makeCard(0x9b59ff);
+        card.position.copy(deckPos);
+        scene.add(card);
+        activeCards.push(card);
+        enqueue(card, deckPos, comm[i], 0.24);
+      }
+      hubLog("DealingMix: new hand ✅");
+    }
+
+    document.getElementById("btnDeal").onclick = dealHand;
+
+    // ================= Recenter =================
+    document.getElementById("btnRecenter").onclick = () => {
+      player.position.set(0,0,3.6);
+      hubLog("Recentered ✅");
+    };
+
+    // Initial deal
+    dealHand();
+
+    // ================= Render loop =================
+    let last = performance.now();
+    renderer.setAnimationLoop(() => {
+      const now = performance.now();
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+
+      glowRing.userData.t = (glowRing.userData.t || 0) + dt;
+      glowRing.material.emissiveIntensity = 1.15 + Math.sin(glowRing.userData.t * 3.5) * 0.35;
+
+      // Animate one queued card at a time (smooth dealing feel)
+      if (queue.length){
+        const m = queue[0];
+        m.t += dt;
+        const t = Math.min(1, m.t / m.dur);
+        const e = easeOutCubic(t);
+        m.obj.position.set(
+          m.from.x + (m.to.x - m.from.x) * e,
+          m.from.y + (m.to.y - m.from.y) * e,
+          m.from.z + (m.to.z - m.from.z) * e
+        );
+        if (t >= 1) queue.shift();
+      }
+
+      renderer.render(scene, camera);
+    });
+
+    addEventListener("resize", () => {
+      camera.aspect = innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+  </script>
+</body>
 </html>

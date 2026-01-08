@@ -37,12 +37,13 @@ export const PokerSimulation = {
 
 // ---------- helpers ----------
 function clearCards() {
+  if (!scene) return;
   for (const c of cards) scene.remove(c);
   cards.length = 0;
 }
 
 function deal() {
-  if (!scene || !world || !getSeats) return;
+  if (!scene || !world || !getSeats || !THREE_REF) return;
 
   const seats = getSeats() || [];
   const table = world.tableFocus;

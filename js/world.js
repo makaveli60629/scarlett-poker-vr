@@ -58,7 +58,182 @@ export async function initWorld({ THREE, scene, log = console.log, v = "9022" })
   );
   floor.rotation.x = -Math.PI / 2;
   world.group.add(floor);
+// ---------- SAFE BOTS fallback (RIGGED pill bodies) ----------
+async function buildSafeBots(THREE, scene, world, v, log) {
+  // Import rig helper (local file, GitHub Pages safe)
+  let Rig = null;
+  try {
+    Rig = await import(`./avatar_rig.js?v=${encodeURIComponent(v)}`);
+    log?.("[world] ✅ avatar_rig.js loaded");
+  } catch (e) {
+    log?.("[world] ⚠️ avatar_rig.js import failed: " + (e?.message || e));
+  }
 
+  const bots = [];
+  const totalBots = 8;
+
+  // textures (you uploaded from the zip)
+  const MALE_TEX   = "assets/textures/avatars/suit_male_albedo.png";
+  const FEMALE_TEX = "assets/textures/avatars/suit_female_albedo.png";
+
+  // If rig import fails, fallback material (still visible)
+  const fallbackMatA = new THREE.MeshStandardMaterial({ color: 0x2bd7ff, roughness: 0.85 });
+  const fallbackMatB = new THREE.MeshStandardMaterial({ color: 0xff2bd6, roughness: 0.85 });
+  const headMat      = new THREE.MeshStandardMaterial({ color: 0xf2d6c9, roughness: 0.85 });
+
+  function makeFallbackBot(i) {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.55, 6, 12), i % 2 ? fallbackMatA : fallbackMatB);
+    body.position.y = 0.55;
+    g.add(body);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 14), headMat);
+    head.position.y = 1.25;
+    g.add(head);
+
+    g.userData.avatar = { update: () => {} };
+    return g;
+  }
+
+  async function makeRigBot(i) {
+    const g = new THREE.Group();
+
+    // gender alternation (4 male / 4 female)
+    const isFemale = (i % 2) === 1;
+    const texUrl = isFemale ? FEMALE_TEX : MALE_TEX;
+
+    // Create rig
+    const avatar = Rig?.createAvatarRig
+      ? await Rig.createAvatarRig({ THREE, textureUrl: texUrl, gender: isFemale ? "female" : "male" })
+      : null;
+
+    if (!avatar) {
+      // fallback if rig creation fails
+      const fb = makeFallbackBot(i);
+      g.add(fb);
+      g.userData.avatar = { update: () => {} };
+      return g;
+    }
+
+    g.add(avatar.root);
+
+    // Add a simple head on top (you can replace later with your real heads)
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 14), headMat);
+    head.position.set(0, 1.58, 0);
+    g.add(head);
+
+    // store update hook
+    g.userData.avatar = avatar;
+
+    return g;
+  }
+
+  // Create bots (async because rig)
+  for (let i = 0; i < totalBots; i++) {
+    const b = await makeRigBot(i);
+    b.name = `Bot_${i}`;
+    b.userData.bot = {
+      id: i,
+      seated: false,
+      target: null,
+      speed: 0.85 + Math.random() * 0.35,
+      // used for walk direction smoothing
+      vel: new THREE.Vector3(),
+      yaw: 0,
+      // for “more realistic” walk timing
+      stepT: Math.random() * 10,
+    };
+    scene.add(b);
+    bots.push(b);
+  }
+
+  // Seating fix:
+  // Your chairs seat is at y≈0.48. We want hips around ~0.95 for your table setup,
+  // but BOT ROOT should remain y=0 on floor; we offset the avatar root locally.
+  const seatedAvatarYOffset = 0.46; // tweak if needed
+
+  // Seat 6, lobby 2
+  for (let i = 0; i < bots.length; i++) {
+    const b = bots[i];
+    if (i < 6) {
+      const s = world.seats[i];
+      b.position.set(s.position.x, 0, s.position.z);
+      b.rotation.y = s.yaw;
+      b.userData.bot.seated = true;
+
+      // pull avatar up so “butt is on chair”, not in floor
+      const avatarRoot = b.children.find(ch => ch?.name === "AvatarRigRoot") || b.children[0];
+      if (avatarRoot) avatarRoot.position.y = seatedAvatarYOffset;
+    } else {
+      b.userData.bot.seated = false;
+      b.position.set((Math.random() * 10) - 5, 0, 9 + Math.random() * 3);
+      b.userData.bot.target = b.position.clone();
+    }
+  }
+
+  function pickTarget() {
+    const z = THREE.MathUtils.lerp(world.lobbyZone.min.z, world.lobbyZone.max.z, Math.random());
+    const x = THREE.MathUtils.lerp(world.lobbyZone.min.x, world.lobbyZone.max.x, Math.random());
+    return new THREE.Vector3(x, 0, z);
+  }
+
+  // “More realistic” walk feeling = velocity smoothing + step cycle + slight body lean
+  function updateBotWalk(b, dt) {
+    const d = b.userData.bot;
+    if (d.seated) {
+      // idle animation only
+      b.userData.avatar?.update?.(dt);
+      return;
+    }
+
+    if (!d.target || b.position.distanceTo(d.target) < 0.35) d.target = pickTarget();
+
+    const desired = d.target.clone().sub(b.position);
+    desired.y = 0;
+
+    const dist = desired.length();
+    if (dist < 0.001) return;
+
+    desired.normalize();
+
+    // velocity smoothing
+    const targetVel = desired.multiplyScalar(d.speed);
+    d.vel.lerp(targetVel, 1 - Math.pow(0.001, dt)); // smooth independent of FPS
+
+    // apply movement
+    b.position.addScaledVector(d.vel, dt);
+
+    // yaw smoothing
+    const desiredYaw = Math.atan2(d.vel.x, d.vel.z);
+    let dy = desiredYaw - d.yaw;
+    while (dy > Math.PI) dy -= Math.PI * 2;
+    while (dy < -Math.PI) dy += Math.PI * 2;
+    d.yaw += dy * Math.min(1, dt * 8.5);
+    b.rotation.y = d.yaw;
+
+    // step cycle: speed-based
+    d.stepT += dt * (2.0 + d.speed * 1.8);
+
+    // lean and bob for realism
+    const avatarRoot = b.children.find(ch => ch?.name === "AvatarRigRoot") || b.children[0];
+    if (avatarRoot) {
+      const bob = Math.sin(d.stepT * 2.0) * 0.01;
+      const sway = Math.sin(d.stepT) * 0.02;
+      avatarRoot.position.y = 0.0 + bob;
+      avatarRoot.rotation.z = sway * 0.35;
+    }
+
+    // animate skeleton
+    b.userData.avatar?.update?.(dt);
+  }
+
+  return {
+    bots,
+    update(dt) {
+      for (const b of bots) updateBotWalk(b, dt);
+    }
+  };
+}
   // taller walls
   const wallMat = new THREE.MeshStandardMaterial({ color: 0x141826, roughness: 0.95, map: T.brick || null });
   const WALL_H = 6.0, WALL_Y = WALL_H / 2;

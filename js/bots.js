@@ -1,4 +1,4 @@
-// /js/bots.js — Scarlett Poker VR Bots v1.0 (no external imports)
+// /js/bots.js — Scarlett Poker VR Bots v1.1 (SEATING FIXED)
 // Expects world.js provides getSeats() -> array of { position, yaw, sitY, lookAt }
 
 export const Bots = (() => {
@@ -26,8 +26,7 @@ export const Bots = (() => {
     const matDark = makeMaterial(0x12131a);
     const matSkin = makeMaterial(0xd2b48c);
 
-    // Root sits on floor; we position parts upward
-    // Hips/pelvis
+    // Root sits on floor; we position parts upward via hips group.
     const hips = new THREE.Group();
     hips.name = "Hips";
     g.add(hips);
@@ -97,7 +96,7 @@ export const Bots = (() => {
     handR.position.set(0.25, 0.40, 0.08);
     hips.add(handR);
 
-    // store refs for animation
+    // store refs for animation + pose
     g.userData = {
       hips,
       head,
@@ -105,7 +104,7 @@ export const Bots = (() => {
       legL,
       legR,
       baseColor: color,
-      sit: 1
+      sit: 0
     };
 
     // default standing pose
@@ -114,6 +113,7 @@ export const Bots = (() => {
     return g;
   }
 
+  // Smooth sit/stand pose (FIXED: leg forward + better bend)
   function setSitAmount(avatar, amt01) {
     const a = avatar?.userData;
     if (!a) return;
@@ -121,36 +121,55 @@ export const Bots = (() => {
     const t = clamp(amt01, 0, 1);
     a.sit = t;
 
-    // When sitting: hips lower, torso leans slightly back, knees bend, feet forward.
-    // When standing: hips up, legs straight-ish.
-    const hips = a.hips;
+    // --- Pose tuning constants ---
+    // Push legs forward so knees/feet clear chair + table
+    const legForward = lerp(0.00, 0.22, t);
+    // Small torso lean back when sitting
+    const torsoLean = lerp(-0.05, 0.18, t);
+    // Hip bend (rotate legs at hip)
+    const hipBend = lerp(0.02, -0.85, t);
 
-    // hip height (world units)
-    const hipY = lerp(0.00, 0.00, 0); // keep root 0, we’ll place avatar by seatY externally
-    hips.position.y = hipY;
+    // torso + head
+    a.torso.rotation.x = torsoLean;
+    a.head.rotation.x = lerp(0.02, -0.06, t);
 
-    // torso lean
-    a.torso.rotation.x = lerp(-0.05, 0.22, t);
+    // Bend legs and move them forward as a whole
+    a.legL.rotation.x = hipBend;
+    a.legR.rotation.x = hipBend;
 
-    // head counter-lean slightly so it doesn’t look broken
-    a.head.rotation.x = lerp(0.02, -0.08, t);
-
-    // legs bend: rotate the groups a bit to simulate knee bend
-    a.legL.rotation.x = lerp(0.02, -0.95, t);
-    a.legR.rotation.x = lerp(0.02, -0.95, t);
+    // ✅ shove both leg roots forward so thighs/knees don't clip the chair
+    a.legL.position.z = legForward;
+    a.legR.position.z = legForward;
   }
 
+  // Place avatar on a given seat (FIXED: hip offset + small forward slide)
   function placeAtSeat(avatar, seat) {
-    // Seat position is on floor-ish; we place avatar root on floor, then raise by seat.sitY
     const p = seat.position.clone();
+
+    // Root at chair XZ
     avatar.position.set(p.x, 0, p.z);
 
-    // face toward table
-    avatar.rotation.y = seat.yaw;
+    // Face table / seat direction
+    if (typeof seat.yaw === "number") {
+      avatar.rotation.y = seat.yaw;
+    } else if (seat.lookAt) {
+      const t = seat.lookAt.clone();
+      t.y = 0;
+      avatar.lookAt(t);
+    }
 
-    // set root vertical: seat.sitY is where hips should feel seated, so lift the whole avatar
-    avatar.position.y = 0; // keep on floor
-    avatar.userData.hips.position.y = seat.sitY; // put hips at seat height
+    // ✅ Critical: seat.sitY is usually the SEAT SURFACE height (cushion),
+    // not the hip joint height. Add offset so butt doesn’t sink into chair.
+    const HIP_ABOVE_SEAT = 0.18; // adjust 0.14–0.22 if needed
+    const SLIDE_FORWARD = 0.04;  // subtle slide onto the seat
+
+    // Lift hips to seated hip height
+    avatar.userData.hips.position.y = (seat.sitY ?? 0.45) + HIP_ABOVE_SEAT;
+
+    // Small forward slide so they don't sit "behind" chair back
+    avatar.translateZ(SLIDE_FORWARD);
+
+    // Sitting pose
     setSitAmount(avatar, 1);
   }
 
@@ -164,9 +183,6 @@ export const Bots = (() => {
 
     // head look wobble (small)
     u.head.rotation.y = Math.sin(t * 0.9 + bot.seed) * 0.18;
-
-    // small hand movement
-    // (hands are part of hips; we can just animate torso a bit and it looks alive)
   }
 
   return {
@@ -188,7 +204,7 @@ export const Bots = (() => {
       const seats = (typeof getSeats === "function") ? getSeats() : [];
       const colors = [0xff6b6b, 0x4cd964, 0x5ac8fa, 0xffcc00, 0xffffff];
 
-      // Seat 0 is player, bots use seats 1..5
+      // Seat 0 is player, bots use seats 1..5 (6-seat table)
       for (let i = 1; i < 6; i++) {
         const seat = seats[i];
         if (!seat) continue;

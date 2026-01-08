@@ -1,5 +1,4 @@
 // /js/bots.js — Scarlett bots 9.2 (rigged pill bodies + walk animation)
-
 import { createAvatarRig } from "./avatar_rig.js";
 
 export const Bots = {
@@ -17,13 +16,13 @@ export const Bots = {
     this._getLobbyZone = getLobbyZone;
     this._tableFocus = tableFocus;
 
-    // textures (you’ll replace these with your real shirt/body textures)
-    const maleTex = "assets/textures/avatars/bot_body_male.png";
-    const femaleTex = "assets/textures/avatars/bot_body_female.png";
+    // ✅ EXACT filenames from your repo screenshot
+    const maleTex = "assets/textures/avatars/suit_male_albedo.png";
+    const femaleTex = "assets/textures/avatars/suit_female_albedo.png";
 
-    // build 8 bots
     for (let i = 0; i < 8; i++) {
       const isFemale = (i % 2) === 1;
+
       const rig = await createAvatarRig({
         THREE,
         textureUrl: isFemale ? femaleTex : maleTex,
@@ -38,7 +37,7 @@ export const Bots = {
         rig,
       };
 
-      // head (simple)
+      // Head placeholder (we’ll swap to your helmet/face mesh next)
       const head = new THREE.Mesh(
         new THREE.SphereGeometry(0.16, 14, 14),
         new THREE.MeshStandardMaterial({ color: 0xf2d6c9, roughness: 0.85 })
@@ -59,11 +58,8 @@ export const Bots = {
       if (i < 6 && seats[i]) {
         const s = seats[i];
         d.seated = true;
-        b.position.set(s.position.x, 0, s.position.z);
+        b.position.set(s.position.x, 0.02, s.position.z); // ✅ lifted so not sunk
         b.rotation.y = s.yaw;
-
-        // ✅ seat height fix (lift body so it’s ON chair, not half in floor)
-        b.position.y = 0.02;
       } else {
         d.seated = false;
         b.position.set((Math.random() * 10) - 5, 0, 9 + Math.random() * 3);
@@ -88,12 +84,10 @@ export const Bots = {
       const rig = d.rig;
 
       if (d.seated) {
-        // subtle idle motion
         rig.update(dt, 0.1);
         continue;
       }
 
-      // walking lobby
       if (!d.target || b.position.distanceTo(d.target) < 0.25) d.target = this._pickTarget();
 
       const dir = d.target.clone().sub(b.position);

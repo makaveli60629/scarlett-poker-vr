@@ -1,5 +1,5 @@
 // /js/main.js — Scarlett VR Poker 9.2 (NO bare "three" imports)
-
+import { SimpleAvatar } from "./avatars.js";
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
 import { XRControllerModelFactory } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/XRControllerModelFactory.js";

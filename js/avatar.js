@@ -1,91 +1,112 @@
-// /js/avatar_rig.js — lightweight rigged "pill body" (GitHub Pages safe)
-// ✅ No imports; caller passes THREE.
+// js/avatars.js
+import * as THREE from "three";
 
-export async function createAvatarRig({ THREE, textureUrl }) {
-  const root = new THREE.Group();
-  root.name = "AvatarRigRoot";
+export class SimpleAvatar {
+  constructor(color = 0x8aa0ff) {
+    this.root = new THREE.Group();
+    this.root.name = "bot_avatar";
 
-  const loader = new THREE.TextureLoader();
-  const tex = await new Promise((resolve) => {
-    loader.load(textureUrl, (t) => { t.colorSpace = THREE.SRGBColorSpace; resolve(t); }, undefined, () => resolve(null));
-  });
+    const skin = new THREE.MeshStandardMaterial({ color, roughness: 0.85 });
+    const cloth = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.95 });
 
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    map: tex || null,
-    roughness: 0.85,
-    metalness: 0.05,
-  });
+    // ====== Body proportions (tuned for chair sit) ======
+    this.hipHeightStanding = 0.95;  // hips when standing
+    this.hipHeightSitting = 0.62;   // hips when sitting
+    this.legUpper = 0.38;
+    this.legLower = 0.38;
 
-  // bones
-  const hip = new THREE.Bone(); hip.position.y = 0.98;
-  const spine = new THREE.Bone(); spine.position.y = 0.28;
-  const chest = new THREE.Bone(); chest.position.y = 0.22;
+    // Pelvis (anchor)
+    this.pelvis = new THREE.Group();
+    this.pelvis.position.y = this.hipHeightStanding;
+    this.root.add(this.pelvis);
 
-  const shoulderL = new THREE.Bone(); shoulderL.position.set(-0.22, 0.14, 0);
-  const shoulderR = new THREE.Bone(); shoulderR.position.set( 0.22, 0.14, 0);
+    // Torso
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.42, 0.18), cloth);
+    torso.position.y = 0.30;
+    this.pelvis.add(torso);
 
-  const thighL = new THREE.Bone(); thighL.position.set(-0.12, -0.22, 0);
-  const thighR = new THREE.Bone(); thighR.position.set( 0.12, -0.22, 0);
+    // Head (correctly above torso)
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 18, 18), skin);
+    head.position.y = 0.56;
+    this.pelvis.add(head);
 
-  hip.add(spine); spine.add(chest);
-  chest.add(shoulderL); chest.add(shoulderR);
-  hip.add(thighL); hip.add(thighR);
+    // Simple neck
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.08, 14), skin);
+    neck.position.y = 0.47;
+    this.pelvis.add(neck);
 
-  // geometry (capsule with shoulder width)
-  const geo = new THREE.CapsuleGeometry(0.25, 0.84, 10, 18);
-  geo.translate(0, 0.92, 0);
+    // Legs (L/R)
+    this.leftLeg = this._makeLeg(cloth);
+    this.rightLeg = this._makeLeg(cloth);
 
-  // simple skin to hip/spine/chest
-  const pos = geo.attributes.position;
-  const skinIndex = [];
-  const skinWeight = [];
-  const bones = [hip, spine, chest];
+    this.leftLeg.hip.position.set(-0.10, 0.02, 0.00);
+    this.rightLeg.hip.position.set( 0.10, 0.02, 0.00);
 
-  const yMin = 0.50, yMax = 1.80;
-  for (let i = 0; i < pos.count; i++) {
-    const y = pos.getY(i);
-    const t = THREE.MathUtils.clamp((y - yMin) / (yMax - yMin), 0, 1);
-    const a = t * (bones.length - 1);
-    const i0 = Math.floor(a);
-    const i1 = Math.min(bones.length - 1, i0 + 1);
-    const w1 = a - i0;
-    const w0 = 1 - w1;
-    skinIndex.push(i0, i1, 0, 0);
-    skinWeight.push(w0, w1, 0, 0);
+    this.root.add(this.leftLeg.root);
+    this.root.add(this.rightLeg.root);
+
+    // Feet anchors are implicit by leg lengths; we keep them near floor by pose math
+    this._sitAmount = 0; // 0 standing, 1 sitting
   }
 
-  geo.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(skinIndex, 4));
-  geo.setAttribute("skinWeight", new THREE.Float32BufferAttribute(skinWeight, 4));
+  _makeLeg(mat) {
+    const root = new THREE.Group();
+    const hip = new THREE.Group();
+    root.add(hip);
 
-  const skinned = new THREE.SkinnedMesh(geo, mat);
-  skinned.frustumCulled = false;
+    const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.06, this.legUpper, 12), mat);
+    upper.position.y = -this.legUpper / 2;
+    hip.add(upper);
 
-  const skeleton = new THREE.Skeleton([hip, spine, chest, shoulderL, shoulderR, thighL, thighR]);
-  skinned.add(hip);
-  skinned.bind(skeleton);
+    const knee = new THREE.Group();
+    knee.position.y = -this.legUpper;
+    hip.add(knee);
 
-  // initial pose shoulders slightly out (so shirts fill better)
-  shoulderL.rotation.z = 0.35;
-  shoulderR.rotation.z = -0.35;
+    const lower = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.052, this.legLower, 12), mat);
+    lower.position.y = -this.legLower / 2;
+    knee.add(lower);
 
-  root.add(skinned);
+    // tiny foot
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.04, 0.20), mat);
+    foot.position.set(0, -this.legLower - 0.02, 0.07);
+    hip.add(foot);
 
-  // animation
-  let t = Math.random() * 10;
-  function update(dt, speed = 1.0) {
-    t += dt;
-    const phase = t * (2.4 + speed * 0.8);
-
-    thighL.rotation.x = Math.sin(phase) * 0.55;
-    thighR.rotation.x = Math.sin(phase + Math.PI) * 0.55;
-
-    shoulderL.rotation.x = Math.sin(phase + Math.PI) * 0.28;
-    shoulderR.rotation.x = Math.sin(phase) * 0.28;
-
-    spine.rotation.x = Math.sin(t * 1.6) * 0.03;
-    chest.rotation.x = Math.sin(t * 1.8) * 0.03;
+    return { root, hip, knee };
   }
 
-  return { root, skinned, update };
+  setWorldPose(position, lookAtTarget) {
+    this.root.position.copy(position);
+    if (lookAtTarget) {
+      const t = lookAtTarget.clone();
+      t.y = position.y; // keep flat
+      this.root.lookAt(t);
+    }
+  }
+
+  // Smoothly pose sit/stand
+  setSitAmount(a) {
+    this._sitAmount = Math.max(0, Math.min(1, a));
+
+    // Lower pelvis when sitting
+    this.pelvis.position.y = THREE.MathUtils.lerp(this.hipHeightStanding, this.hipHeightSitting, this._sitAmount);
+
+    // Sitting: hips rotate slightly back, knees bend ~90°, feet forward
+    const hipBend = THREE.MathUtils.lerp(0.0, -0.55, this._sitAmount);
+    const kneeBend = THREE.MathUtils.lerp(0.0, 1.20, this._sitAmount);
+
+    this.leftLeg.hip.rotation.x = hipBend;
+    this.rightLeg.hip.rotation.x = hipBend;
+
+    this.leftLeg.knee.rotation.x = kneeBend;
+    this.rightLeg.knee.rotation.x = kneeBend;
+
+    // Shift legs forward so feet don’t intersect chair/table
+    const legForward = THREE.MathUtils.lerp(0.00, 0.22, this._sitAmount);
+    this.leftLeg.root.position.set(0, 0, legForward);
+    this.rightLeg.root.position.set(0, 0, legForward);
+  }
+
+  update(dt) {
+    // optional idle animation later (breathing, head turn)
+  }
 }

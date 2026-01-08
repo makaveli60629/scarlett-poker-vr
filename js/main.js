@@ -90,12 +90,28 @@ if (world?.tableFocus) {
 log("[main] world loaded ✅");
 
 // ---------- MOVEMENT + TELEPORT ----------
-// ✅ FIX: Controls is a class (new Controls), NOT Controls.init(...)
-const controls = new Controls({
+// Controls MUST be init-style (NOT "new Controls()")
+const controls = Controls.init({
   THREE,
   renderer,
-  scene,
   camera,
+  player,
+  controllers,
+  log,
+  world
+});
+
+// Teleport stays as-is
+const teleport = Teleport.init({
+  THREE,
+  scene,
+  renderer,
+  camera,
+  player,
+  controllers,
+  log,
+  world
+});
 
   // IMPORTANT: your class-based Controls creates its own rig by default.
   // We want it to move YOUR existing player rig, so we attach camera back to player

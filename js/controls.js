@@ -1,66 +1,73 @@
-// js/controls.js
-import * as THREE from "three";
-import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
-
+// /js/controls.js — smooth move + snap turn for Quest
 export const Controls = {
-  init({ scene, camera, renderer, playerGroup, HUD }) {
-    if (typeof window.actionId === "undefined") window.actionId = null;
+  init({ THREE, renderer, camera, player, controllers, log, world }) {
+    let session = null;
 
-    // Use local-floor so your height + floor makes sense
-    try { renderer.xr.setReferenceSpaceType("local-floor"); } catch (e) {}
-
-    // Desktop helpers
-    window.addEventListener("keydown", (e) => {
-      if (e.code === "KeyM") window.actionId = "menu";
+    renderer.xr.addEventListener("sessionstart", () => {
+      session = renderer.xr.getSession();
+      log("[controls] XR session started");
+    });
+    renderer.xr.addEventListener("sessionend", () => {
+      session = null;
+      log("[controls] XR session ended");
     });
 
-    window.addEventListener("mousedown", () => {
-      window.actionId = "primary_click";
-    });
+    let snapCooldown = 0;
 
-    const controllerModelFactory = new XRControllerModelFactory();
+    function applyMove(dt) {
+      if (!session) return;
 
-    function makeLaser() {
-      const geo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(0, 0, 0),
-        new THREE.Vector3(0, 0, -1),
-      ]);
-      const mat = new THREE.LineBasicMaterial({ color: 0x00ffcc });
-      const line = new THREE.Line(geo, mat);
-      line.name = "laserLine";
-      line.scale.z = 10;
-      return line;
+      const sources = session.inputSources || [];
+      for (const src of sources) {
+        const gp = src.gamepad;
+        if (!gp || !gp.axes) continue;
+
+        // Left stick usually axes[2], axes[3] on Quest, but can vary.
+        // We'll detect both common layouts.
+        const axX = (gp.axes.length >= 4) ? gp.axes[2] : gp.axes[0];
+        const axY = (gp.axes.length >= 4) ? gp.axes[3] : gp.axes[1];
+
+        // deadzone
+        const dz = 0.15;
+        const x = Math.abs(axX) < dz ? 0 : axX;
+        const y = Math.abs(axY) < dz ? 0 : axY;
+
+        // Smooth move (forward/back + strafe) in camera yaw space
+        if (x || y) {
+          const speed = 2.2;
+          const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+          forward.y = 0; forward.normalize();
+
+          const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+          right.y = 0; right.normalize();
+
+          const delta = new THREE.Vector3()
+            .addScaledVector(forward, -y * speed * dt)
+            .addScaledVector(right, x * speed * dt);
+
+          player.position.add(delta);
+
+          // Optional clamp if world provides bounds
+          if (world?.roomClamp) {
+            player.position.x = Math.max(world.roomClamp.minX, Math.min(world.roomClamp.maxX, player.position.x));
+            player.position.z = Math.max(world.roomClamp.minZ, Math.min(world.roomClamp.maxZ, player.position.z));
+          }
+        }
+
+        // Snap turn (right stick if available)
+        const rx = (gp.axes.length >= 4) ? gp.axes[0] : 0; // fallback
+        snapCooldown = Math.max(0, snapCooldown - dt);
+        if (snapCooldown === 0) {
+          if (rx > 0.85) { player.rotation.y -= Math.PI / 6; snapCooldown = 0.22; }
+          if (rx < -0.85) { player.rotation.y += Math.PI / 6; snapCooldown = 0.22; }
+        }
+
+        break; // only use first valid gamepad
+      }
     }
 
-    function setupController(i) {
-      // DO NOT parent controller under playerGroup (prevents “controller far away” bug)
-      const controller = renderer.xr.getController(i);
-      controller.name = `controller_${i}`;
-      controller.add(makeLaser());
-      scene.add(controller);
-
-      // Grip model (visual controller model)
-      const grip = renderer.xr.getControllerGrip(i);
-      grip.name = `controllerGrip_${i}`;
-      grip.add(controllerModelFactory.createControllerModel(grip));
-      scene.add(grip);
-
-      controller.addEventListener("selectstart", () => {
-        window.actionId = "primary_click";
-      });
-
-      return { controller, grip };
-    }
-
-    const c0 = setupController(0);
-    const c1 = setupController(1);
-
-    if (HUD && HUD.log) HUD.log("Controls fixed: controllers attached to scene (no double-transform).");
-
-    function update() {
-      if (typeof window.actionId === "undefined") window.actionId = null;
-    }
-
-    return { update, controller0: c0.controller, controller1: c1.controller };
-  },
+    return {
+      update(dt) { applyMove(dt); }
+    };
+  }
 };

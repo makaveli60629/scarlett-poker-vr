@@ -1,278 +1,139 @@
-// /js/dealingMix.js — Scarlett Poker VR DealingMix v1.4 (Anchored + Hover)
-// - Uses world.anchors.* (no more "game behind table")
-// - Community cards hover
-// - True 52-card deck, no duplicates
-// - Updates TableHud (pot/street/turn/action)
+// /js/main.js — Scarlett Poker VR MAIN v11.3 (Stand by default + Action-to-Join)
 
-export const DealingMix = {
-  init({ THREE, scene, log = console.log, world }) {
-    const L = (...a) => { try { log(...a); } catch { console.log(...a); } };
+import * as THREE from "three";
+import { VRButton } from "three/addons/webxr/VRButton.js";
+import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
 
-    const table = world?.table || world?.group || scene;
-    const seats = world?.seats || [];
+import { initWorld } from "./world.js";
+import { Controls } from "./controls.js";
+import { Teleport } from "./teleport.js";
+import { DealingMix } from "./dealingMix.js";
+import { HandsSystem } from "./hands.js";
 
-    const dealerA = world?.anchors?.dealer;
-    const commA = world?.anchors?.community;
+const BUILD = window.__BUILD_V || Date.now().toString();
+const log = (...a) => console.log(...a);
 
-    // base sizing, you asked:
-    // hole cards 2x, community 4x
-    const BASE_W = 0.10, BASE_H = 0.14;
-    const HOLE_SCALE = 2.0;
-    const COMM_SCALE = 4.0;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x020205);
+scene.fog = new THREE.Fog(0x020205, 4, 95);
 
-    const state = {
-      t: 0,
-      deck: [],
-      di: 0,
-      active: [],
-      queue: [],
-      timers: [],
-      street: "Preflop",
-      pot: 15000,
-      turn: "LUNA",
-      running: true
-    };
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 300);
 
-    const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
-    const easeOut = (t)=>1-Math.pow(1-t,3);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio));
+renderer.xr.enabled = true;
+try { renderer.xr.setReferenceSpaceType("local-floor"); } catch {}
 
-    function schedule(delay, fn) {
-      state.timers.push({ at: state.t + Math.max(0, delay), fn });
-    }
+document.body.appendChild(renderer.domElement);
+document.body.appendChild(VRButton.createButton(renderer));
 
-    function enqueueMove(obj, from, to, dur = 0.32, onDone = null) {
-      state.queue.push({ obj, from: from.clone(), to: to.clone(), dur: Math.max(0.14, dur), t: 0, onDone });
-    }
+// Player rig
+const player = new THREE.Group();
+player.name = "PlayerRig";
+scene.add(player);
 
-    function clearAll() {
-      for (const o of state.active) { try { o.parent?.remove(o); } catch {} }
-      state.active.length = 0;
-      state.queue.length = 0;
-      state.timers.length = 0;
-      state.deck.length = 0;
-      state.di = 0;
-    }
+player.add(camera);
 
-    function buildDeck() {
-      const suits = ["♠","♥","♦","♣"];
-      const ranks = ["A","2","3","4","5","6","7","8","9","T","J","Q","K"];
-      const deck = [];
-      for (const s of suits) for (const r of ranks) deck.push({ r, s });
-      for (let i = deck.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [deck[i], deck[j]] = [deck[j], deck[i]];
-      }
-      state.deck = deck;
-      state.di = 0;
-    }
+// Always stand by default
+player.position.set(0, 0, 3.6);
+player.rotation.set(0, 0, 0);
+camera.position.set(0, 1.65, 0);
 
-    function draw() {
-      if (state.di >= state.deck.length) return null;
-      return state.deck[state.di++];
-    }
+// Baseline lights
+scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.1));
+const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+dir.position.set(10, 14, 8);
+scene.add(dir);
 
-    function cardFaceTexture(rank, suit) {
-      const c = document.createElement("canvas");
-      c.width = 512; c.height = 768;
-      const ctx = c.getContext("2d");
+// Controllers + grips parented to player rig
+const controllerModelFactory = new XRControllerModelFactory();
+const controllers = [];
+const grips = [];
 
-      ctx.fillStyle = "#f8f8f8";
-      ctx.fillRect(0,0,c.width,c.height);
+function makeLaser() {
+  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
+  const mat = new THREE.LineBasicMaterial({ color: 0x7fe7ff });
+  const line = new THREE.Line(geo, mat);
+  line.scale.z = 10;
+  return line;
+}
 
-      ctx.strokeStyle = "rgba(0,0,0,0.22)";
-      ctx.lineWidth = 10;
-      ctx.strokeRect(14,14,c.width-28,c.height-28);
+for (let i = 0; i < 2; i++) {
+  const c = renderer.xr.getController(i);
+  c.name = "Controller" + i;
+  c.add(makeLaser());
+  player.add(c);
+  controllers.push(c);
 
-      const red = (suit==="♥"||suit==="♦");
-      ctx.fillStyle = red ? "#b6001b" : "#12131a";
+  const g = renderer.xr.getControllerGrip(i);
+  g.name = "Grip" + i;
+  g.add(controllerModelFactory.createControllerModel(g));
+  player.add(g);
+  grips.push(g);
+}
 
-      ctx.textAlign="left"; ctx.textBaseline="top";
-      ctx.font="bold 110px Arial";
-      ctx.fillText(rank, 40, 36);
-      ctx.font="bold 120px Arial";
-      ctx.fillText(suit, 40, 150);
+log("[main] controllers ready ✅");
 
-      ctx.textAlign="center"; ctx.textBaseline="middle";
-      ctx.font="bold 320px Arial";
-      ctx.fillText(suit, c.width/2, c.height/2 + 20);
+// WORLD
+const world = await initWorld({ THREE, scene, log, v: BUILD });
+scene.userData.cameraRef = camera;
 
-      ctx.textAlign="right"; ctx.textBaseline="bottom";
-      ctx.font="bold 110px Arial";
-      ctx.fillText(rank, c.width-40, c.height-150);
-      ctx.font="bold 120px Arial";
-      ctx.fillText(suit, c.width-40, c.height-36);
+// DEALING (created before connect so world can call it)
+const dealing = DealingMix.init({ THREE, scene, log, world });
+dealing.setIncludePlayer(false);
 
-      const tex = new THREE.CanvasTexture(c);
-      tex.needsUpdate = true;
-      return tex;
-    }
+// Connect refs
+try { world?.connect?.({ camera, player, renderer, controllers, grips, dealing }); } catch {}
 
-    function makeCard({ r, s, scale }) {
-      const g = new THREE.Group();
-      g.name = "Card";
-      const w = BASE_W * scale, h = BASE_H * scale;
+// Face table
+if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.2, world.tableFocus.z);
 
-      const geo = new THREE.PlaneGeometry(w, h);
+// Systems
+const controls = Controls.init({ THREE, renderer, camera, player, log, world });
+const teleport = Teleport.init({ THREE, scene, renderer, player, controllers, log, world });
+const hands = HandsSystem.init({ THREE, scene, renderer, log });
 
-      const faceMat = new THREE.MeshStandardMaterial({
-        map: cardFaceTexture(r, s),
-        roughness: 0.5,
-        side: THREE.DoubleSide
-      });
+// ACTION: trigger (select) -> talk to guard / join pad
+for (const c of controllers) {
+  c.addEventListener("selectstart", () => {
+    try { world?.onAction?.(); } catch {}
+  });
+}
 
-      const backMat = new THREE.MeshStandardMaterial({
-        color: 0xff2d7a,
-        emissive: 0x220010,
-        emissiveIntensity: 0.35,
-        roughness: 0.55,
-        side: THREE.DoubleSide
-      });
+// RECENTER (always standing reset)
+window.addEventListener("scarlett-recenter", () => {
+  player.position.set(0, 0, 3.6);
+  player.rotation.set(0, 0, 0);
+  camera.position.set(0, 1.65, 0); // force standing
+  world.playerSeated = false;
+  dealing.setIncludePlayer(false);
 
-      const face = new THREE.Mesh(geo, faceMat);
-      const back = new THREE.Mesh(geo, backMat);
-      face.position.z = 0.002;
-      back.position.z = -0.002;
-      back.rotation.y = Math.PI;
+  if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.2, world.tableFocus.z);
+  log("[main] recentered ✅ (standing)");
+});
 
-      g.rotation.x = -Math.PI / 2;
-      g.add(face, back);
+// Resize
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
 
-      return g;
-    }
+// LOOP
+let last = performance.now();
+renderer.setAnimationLoop(() => {
+  const now = performance.now();
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
 
-    function dealerPosWorld() {
-      const p = new THREE.Vector3();
-      if (dealerA) dealerA.getWorldPosition(p);
-      else p.set(0.9, 1.0, -6.3);
-      return p;
-    }
+  try { world?.tick?.(dt); } catch (e) { console.error(e); }
+  try { controls?.update?.(dt); } catch (e) { console.error(e); }
+  try { teleport?.update?.(dt); } catch (e) { console.error(e); }
+  try { dealing?.update?.(dt); } catch (e) { console.error(e); }
+  try { hands?.update?.(dt); } catch (e) { console.error(e); }
 
-    function communityPosWorld(i) {
-      const p = new THREE.Vector3();
-      if (commA) commA.getWorldPosition(p);
-      else p.set(0, 1.9, -6.5);
-      p.x += (-1.35 + i * 0.68);
-      return p;
-    }
+  renderer.render(scene, camera);
+});
 
-    function seatTargetWorld(seatIndex, cardIndex) {
-      const s = seats[seatIndex];
-      const p = s ? s.position.clone() : new THREE.Vector3(0, 1.5, -6.5);
-      p.y = 2.05;
-      p.x += (cardIndex === 0 ? -0.22 : 0.22);
-      return p;
-    }
-
-    function pushHud(actionText) {
-      try {
-        world?.tableHud?.setGameState?.({
-          pot: state.pot,
-          street: state.street,
-          turnName: state.turn,
-          action: actionText
-        });
-      } catch {}
-    }
-
-    function dealHole(seatIndex, cardIndex, delay) {
-      schedule(delay, () => {
-        const cs = draw(); if (!cs) return;
-        const from = dealerPosWorld();
-        const card = makeCard({ ...cs, scale: HOLE_SCALE });
-        card.position.copy(from);
-        table.add(card);
-        state.active.push(card);
-
-        const to = seatTargetWorld(seatIndex, cardIndex);
-        enqueueMove(card, from, to, 0.34);
-      });
-    }
-
-    function dealCommunity(count, startIndex, delay) {
-      for (let i = 0; i < count; i++) {
-        schedule(delay + i * 0.26, () => {
-          const cs = draw(); if (!cs) return;
-          const from = dealerPosWorld();
-          const card = makeCard({ ...cs, scale: COMM_SCALE });
-          card.position.copy(from);
-          table.add(card);
-          state.active.push(card);
-
-          const to = communityPosWorld(startIndex + i);
-          enqueueMove(card, from, to, 0.38);
-        });
-      }
-    }
-
-    function startHand() {
-      clearAll();
-      buildDeck();
-
-      state.street = "Preflop";
-      state.turn = "LUNA";
-      state.pot = 15000;
-
-      pushHud("Dealing…");
-
-      // seats 1..5 are bots, seat 0 reserved for you later
-      let t = 0.25;
-      for (let round = 0; round < 2; round++) {
-        for (let s = 1; s < 6; s++) {
-          dealHole(s, round, t);
-          t += 0.14;
-        }
-      }
-
-      schedule(t + 0.9, () => { state.street = "Flop"; pushHud("Flop"); });
-      dealCommunity(3, 0, t + 1.05);
-
-      schedule(t + 3.0, () => { state.street = "Turn"; pushHud("Turn"); });
-      dealCommunity(1, 3, t + 3.2);
-
-      schedule(t + 4.4, () => { state.street = "River"; pushHud("River"); });
-      dealCommunity(1, 4, t + 4.6);
-
-      schedule(t + 6.2, () => pushHud("Action: betting…"));
-    }
-
-    function update(dt) {
-      state.t += dt;
-
-      if (state.timers.length) {
-        state.timers.sort((a,b)=>a.at-b.at);
-        while (state.timers.length && state.timers[0].at <= state.t) {
-          const it = state.timers.shift();
-          try { it.fn(); } catch {}
-        }
-      }
-
-      if (state.queue.length) {
-        const m = state.queue[0];
-        m.t += dt;
-        const tt = clamp(m.t / m.dur, 0, 1);
-        const e = easeOut(tt);
-
-        m.obj.position.set(
-          m.from.x + (m.to.x - m.from.x) * e,
-          m.from.y + (m.to.y - m.from.y) * e,
-          m.from.z + (m.to.z - m.from.z) * e
-        );
-
-        if (tt >= 1) state.queue.shift();
-      }
-
-      // Hover community cards gently + face camera
-      const cam = scene.userData.cameraRef;
-      if (cam) {
-        for (const c of state.active) {
-          const isCommunity = c.position.y > 2.3; // quick heuristic (community is high)
-          if (isCommunity) c.position.y += Math.sin(state.t * 1.6 + c.position.x) * 0.0015;
-          c.lookAt(cam.position.x, c.position.y, cam.position.z);
-        }
-      }
-    }
-
-    L("[DealingMix] ready ✅");
-    return { startHand, update, clear: clearAll };
-  }
-};
+log("[main] ready ✅ v=" + BUILD);

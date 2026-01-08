@@ -343,4 +343,4 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
 
   L("[world] ready ✅ seats=" + world.seats.length);
   return world;
-                                  }
+          }

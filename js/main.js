@@ -1,7 +1,5 @@
-// /js/main.js — Scarlett VR Poker 9.2 (FULL Hooked)
-// - CDN THREE + VRButton + ControllerModel
-// - Loads world.js which loads teleport_machine.js + bots.js
-// - Handles locomotion, snap-turn, teleport arc + pointer
+// /js/main.js — Scarlett VR Poker 9.2 (GitHub Pages SAFE)
+// IMPORTANT: DO NOT import from "three". Use CDN module URLs only.
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -22,13 +20,13 @@ const head = new THREE.Group();
 let c0 = null, c1 = null;
 let g0 = null, g1 = null;
 
-// movement tuning
+// movement
 const MOVE_SPEED = 2.25;
 const TURN_ANGLE = THREE.MathUtils.degToRad(45);
 const DEADZONE = 0.20;
 let snapArmed = true;
 
-// teleport system + pointer
+// teleport visuals
 let teleport = null;
 let rightPointer = null;
 
@@ -59,31 +57,24 @@ async function boot() {
   player.add(head);
   scene.add(player);
 
-  // non-VR preview height
   camera.position.set(0, 1.6, 0);
 
-  // base lights (world adds more)
   scene.add(new THREE.AmbientLight(0xffffff, 0.40));
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.8));
 
-  // teleport visuals (arc+ring)
   teleport = createTeleportSystem(THREE);
   scene.add(teleport.arcLine, teleport.ring);
 
-  // load world
-  try {
-    const mod = await import(`./world.js?v=${encodeURIComponent(V)}`);
-    world = await mod.initWorld({ THREE, scene, log, v: V });
-    log("[main] world init ✅");
-  } catch (e) {
-    log("❌ world import/init failed: " + (e?.message || e));
-  }
+  // Load world.js (world imports teleport_machine.js and bots.js)
+  const mod = await import(`./world.js?v=${encodeURIComponent(V)}`);
+  world = await mod.initWorld({ THREE, scene, log, v: V });
+  log("[main] world init ✅");
 
-  // spawn at ultimate spawn spot
+  // Spawn at spawn pad
   const spawn = world?.spawnPads?.[0] || new THREE.Vector3(0, 0, 3.6);
   player.position.set(spawn.x, 0, spawn.z);
 
-  // face table immediately
+  // Face table
   faceTableNow(false);
 
   setupXRControls();
@@ -112,7 +103,7 @@ function onResize() {
   renderer.setSize(innerWidth, innerHeight);
 }
 
-// ---------------- Controllers ----------------
+// ---------- Controllers ----------
 function setupXRControls() {
   c0 = renderer.xr.getController(0);
   c1 = renderer.xr.getController(1);
@@ -131,13 +122,11 @@ function setupXRControls() {
   c0.addEventListener("disconnected", () => (c0.userData.inputSource = null));
   c1.addEventListener("disconnected", () => (c1.userData.inputSource = null));
 
-  // trigger teleport
   c0.addEventListener("selectstart", () => onSelectStart(c0));
   c1.addEventListener("selectstart", () => onSelectStart(c1));
   c0.addEventListener("selectend", () => onSelectEnd(c0));
   c1.addEventListener("selectend", () => onSelectEnd(c1));
 
-  // laser pointer attached to right grip
   rightPointer = buildLaserPointer(THREE);
   (g1 || g0).add(rightPointer.group);
 
@@ -170,7 +159,7 @@ function getHeadYaw() {
   return e.y;
 }
 
-// ---------------- Facing ----------------
+// ---------- Facing ----------
 function faceTableNow(xrAware = false) {
   if (!world?.tableFocus) return;
 
@@ -188,7 +177,7 @@ function faceTableNow(xrAware = false) {
   player.rotation.y += delta;
 }
 
-// ---------------- Teleport ----------------
+// ---------- Teleport ----------
 function onSelectStart(controller) {
   if (!isRightHand(controller)) return;
   teleport.active = true;
@@ -219,13 +208,11 @@ function onSelectEnd(controller) {
   teleport.sourceObj = null;
 }
 
-// ---------------- Locomotion ----------------
+// ---------- Locomotion ----------
 function applyLocomotion(dt) {
   const left = findControllerByHand("left") || c0;
   const right = findControllerByHand("right") || c1;
 
-  // NOTE: Quest usually gives forward as NEGATIVE Y.
-  // If you still feel reversed, flip the sign in the move line below.
   const gpL = getGamepad(left);
   if (gpL?.axes?.length >= 2) {
     const x = gpL.axes[2] ?? gpL.axes[0];
@@ -240,7 +227,7 @@ function applyLocomotion(dt) {
       const rightv = new THREE.Vector3(forward.z, 0, -forward.x);
 
       const move = new THREE.Vector3();
-      move.addScaledVector(forward, (-ay) * MOVE_SPEED * dt); // ✅ forward = -ay
+      move.addScaledVector(forward, (-ay) * MOVE_SPEED * dt); // ✅ normal Quest forward
       move.addScaledVector(rightv, (ax) * MOVE_SPEED * dt);
 
       player.position.add(move);
@@ -252,7 +239,6 @@ function applyLocomotion(dt) {
     }
   }
 
-  // snap turn on right stick X
   const gpR = getGamepad(right);
   if (gpR?.axes?.length >= 2) {
     const x = gpR.axes[2] ?? gpR.axes[0];
@@ -265,21 +251,17 @@ function applyLocomotion(dt) {
     }
   }
 
-  // update pointer always
   updateLaserPointer(THREE, rightPointer, teleport, world, camera);
 
-  // teleport arc while active
   if (teleport.active) {
     const src = teleport.sourceObj || (findControllerByHand("right") || c1);
     updateTeleportArc(THREE, src, teleport, world, camera);
   }
 }
 
-// ---------------- Pointer + Teleport visuals ----------------
+// ---------- Laser + Teleport visuals ----------
 function buildLaserPointer(THREE) {
   const group = new THREE.Group();
-  group.name = "RightLaserPointer";
-
   const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
   const mat = new THREE.LineBasicMaterial({ color: 0x33ff66, transparent: true, opacity: 0.9 });
   const line = new THREE.Line(geo, mat);
@@ -351,10 +333,8 @@ function updateTeleportArc(THREE, sourceObj, tp, world, cam) {
   if (sourceObj?.getWorldPosition) sourceObj.getWorldPosition(origin);
   if (sourceObj?.getWorldQuaternion) sourceObj.getWorldQuaternion(q);
 
-  const poseLooksBad =
-    !isFinite(origin.x) || !isFinite(origin.y) || !isFinite(origin.z) || origin.length() < 0.001;
-
-  if (poseLooksBad) {
+  const poseBad = !isFinite(origin.x) || !isFinite(origin.y) || !isFinite(origin.z);
+  if (poseBad) {
     cam.getWorldPosition(origin);
     cam.getWorldQuaternion(q);
   }
@@ -392,10 +372,8 @@ function updateTeleportArc(THREE, sourceObj, tp, world, cam) {
       hit.x = THREE.MathUtils.clamp(hit.x, world.roomClamp.minX, world.roomClamp.maxX);
       hit.z = THREE.MathUtils.clamp(hit.z, world.roomClamp.minZ, world.roomClamp.maxZ);
     }
-
     tp.valid = true;
     tp.hitPoint = hit;
-
     tp.ring.visible = true;
     tp.ring.position.set(hit.x, 0.03, hit.z);
   } else {
@@ -405,10 +383,10 @@ function updateTeleportArc(THREE, sourceObj, tp, world, cam) {
   }
 }
 
-// ---------------- Loop ----------------
+// ---------- Loop ----------
 function tick() {
   const dt = clock.getDelta();
   applyLocomotion(dt);
   if (world?.tick) world.tick(dt);
   renderer.render(scene, camera);
-                                             }
+}

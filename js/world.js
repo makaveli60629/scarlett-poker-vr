@@ -93,14 +93,12 @@ export async function initWorld({ THREE, scene, log = console.log, v = "no-v" })
   let teleGroup = null;
 
   try {
-    // IMPORTANT: exact filename + stable cache-bust version
     const mod = await import(`./teleport_machine.js?v=${encodeURIComponent(v)}`);
 
     if (mod?.TeleportMachine?.build) {
       const texLoader = new THREE.TextureLoader();
       teleGroup = mod.TeleportMachine.build(scene, texLoader);
 
-      // If it provides safe spawn, use it
       if (mod.TeleportMachine.getSafeSpawn) {
         const s = mod.TeleportMachine.getSafeSpawn();
         if (s?.position) world.spawnPads = [s.position.clone()];
@@ -189,7 +187,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "no-v" })
           prevPoker(dt);
           if (disabled) return;
           try {
-            tfn(dt); // safe because poker_simulation.js fix does not rely on `this`
+            tfn(dt);
           } catch (e) {
             disabled = true;
             log("❌ PokerSimulation tick crashed (DISABLED): " + (e?.message || e));
@@ -211,17 +209,12 @@ export async function initWorld({ THREE, scene, log = console.log, v = "no-v" })
 
 /* =========================
    TELEPORTER FX (for YOUR machine)
-   - soft glow pulse
-   - purple electricity ring
-   - small spark bursts
 ========================= */
 function attachTeleporterFX(THREE, teleGroup) {
-  // Find a “glow-ish” mesh on your teleporter; otherwise just add our own ring FX above base.
   const fx = new THREE.Group();
   fx.name = "TeleporterFX";
   teleGroup.add(fx);
 
-  // Main purple ring (subtle, classy)
   const ring = new THREE.Mesh(
     new THREE.TorusGeometry(0.62, 0.035, 14, 72),
     new THREE.MeshStandardMaterial({
@@ -238,7 +231,6 @@ function attachTeleporterFX(THREE, teleGroup) {
   ring.position.y = 0.14;
   fx.add(ring);
 
-  // Electricity line loop
   const geo = new THREE.BufferGeometry();
   const pts = new Float32Array(72 * 3);
   geo.setAttribute("position", new THREE.BufferAttribute(pts, 3));
@@ -249,12 +241,10 @@ function attachTeleporterFX(THREE, teleGroup) {
   zap.position.y = 0.18;
   fx.add(zap);
 
-  // Glow light (small)
   const glow = new THREE.PointLight(0x8f3dff, 0.7, 5);
   glow.position.set(0, 0.8, 0);
   fx.add(glow);
 
-  // Spark particles (tiny)
   const sparkGeo = new THREE.BufferGeometry();
   const sparkCount = 22;
   const sparkPos = new Float32Array(sparkCount * 3);
@@ -266,11 +256,8 @@ function attachTeleporterFX(THREE, teleGroup) {
   sparks.position.y = 0.35;
   fx.add(sparks);
 
-  // state
   let t = 0;
   const sparkVel = Array.from({ length: sparkCount }, () => new THREE.Vector3());
-
-  // init spark positions
   for (let i = 0; i < sparkCount; i++) respawnSpark(i);
 
   function respawnSpark(i) {
@@ -279,23 +266,16 @@ function attachTeleporterFX(THREE, teleGroup) {
     sparkPos[i * 3 + 0] = Math.cos(a) * rr;
     sparkPos[i * 3 + 1] = (Math.random() * 0.15) - 0.05;
     sparkPos[i * 3 + 2] = Math.sin(a) * rr;
-
-    // float up + swirl
     sparkVel[i].set((Math.random() - 0.5) * 0.25, 0.35 + Math.random() * 0.25, (Math.random() - 0.5) * 0.25);
   }
 
   return {
     tick(dt) {
       t += dt;
-
-      // ring motion
       ring.rotation.z += dt * 0.9;
       ring.material.emissiveIntensity = 1.0 + Math.sin(t * 5.0) * 0.35;
-
-      // glow pulse
       glow.intensity = 0.55 + (Math.sin(t * 6.5) * 0.20);
 
-      // electricity loop wiggle
       const arr = zap.geometry.attributes.position.array;
       let idx = 0;
       for (let i = 0; i < 72; i++) {
@@ -308,13 +288,10 @@ function attachTeleporterFX(THREE, teleGroup) {
       }
       zap.geometry.attributes.position.needsUpdate = true;
 
-      // sparks drift
       for (let i = 0; i < sparkCount; i++) {
         sparkPos[i * 3 + 0] += sparkVel[i].x * dt;
         sparkPos[i * 3 + 1] += sparkVel[i].y * dt;
         sparkPos[i * 3 + 2] += sparkVel[i].z * dt;
-
-        // fade out / respawn
         if (sparkPos[i * 3 + 1] > 0.45 || Math.random() < 0.005) respawnSpark(i);
       }
       sparks.geometry.attributes.position.needsUpdate = true;
@@ -419,7 +396,6 @@ function buildSafeBots(THREE, scene, world) {
 
   for (let i = 0; i < 8; i++) bots.push(makeBot(i));
 
-  // Seat 6, lobby 2
   for (let i = 0; i < bots.length; i++) {
     const b = bots[i];
     if (i < 6) {
@@ -459,4 +435,4 @@ function buildSafeBots(THREE, scene, world) {
       }
     }
   };
-}
+          }

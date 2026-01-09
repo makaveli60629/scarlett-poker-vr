@@ -1,5 +1,5 @@
 // /js/main.js — Scarlett Poker VR Boot v10.9 (HANDS-ONLY + AVATAR 4.0 + YOUR WORLD)
-
+import { AvatarUpdate1 } from "./avatar1.js";
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";

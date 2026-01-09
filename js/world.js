@@ -1,6 +1,7 @@
-// /js/world.js — Scarlett VR Poker (World Loader V3.1)
-// FIX: adds world.setFlag + world API expected by main.js
-// Keeps: adapter mounting system + real-world modules
+// /js/world.js — Scarlett VR Poker (World Loader V3.1 FULL)
+// HARD FIX: main.js expects world.setFlag()
+// ALSO: mounts your modular world pieces safely with adapters
+// Signature line confirms correct deployment.
 
 window.dispatchEvent(new CustomEvent("scarlett-log",{detail:"[world] ✅ LOADER SIGNATURE: WORLD.JS V3.1 ACTIVE"}));
 
@@ -22,19 +23,20 @@ async function imp(path){
   }
 }
 
+// Call function with multiple arg styles (modules differ)
 async function callWithAdapters(fn, label, ctx){
   const { THREE, scene, renderer, camera, player, controllers, world } = ctx;
 
   const attempts = [
-    { args: [ctx],                            note: "(ctx)" },
-    { args: [scene],                          note: "(scene)" },
-    { args: [THREE, scene],                   note: "(THREE, scene)" },
-    { args: [scene, ctx],                     note: "(scene, ctx)" },
-    { args: [ctx, scene],                     note: "(ctx, scene)" },
-    { args: [THREE, scene, renderer],         note: "(THREE, scene, renderer)" },
-    { args: [scene, renderer, camera],        note: "(scene, renderer, camera)" },
-    { args: [THREE, scene, renderer, camera], note: "(THREE, scene, renderer, camera)" },
-    { args: [world],                          note: "(world)" },
+    { args: [ctx],                             note: "(ctx)" },
+    { args: [scene],                           note: "(scene)" },
+    { args: [THREE, scene],                    note: "(THREE, scene)" },
+    { args: [scene, ctx],                      note: "(scene, ctx)" },
+    { args: [ctx, scene],                      note: "(ctx, scene)" },
+    { args: [THREE, scene, renderer],          note: "(THREE, scene, renderer)" },
+    { args: [scene, renderer, camera],         note: "(scene, renderer, camera)" },
+    { args: [THREE, scene, renderer, camera],  note: "(THREE, scene, renderer, camera)" },
+    { args: [world],                           note: "(world)" },
   ];
 
   let lastErr = null;
@@ -47,8 +49,7 @@ async function callWithAdapters(fn, label, ctx){
       return { ok:true, result:r };
     } catch (e) {
       lastErr = e;
-      const msg = String(e?.message || e);
-      ui(`[world] ⚠️ retry ${label} after error: ${msg}`);
+      ui(`[world] ⚠️ retry ${label} after error: ${e?.message || e}`);
       continue;
     }
   }
@@ -60,16 +61,15 @@ async function callWithAdapters(fn, label, ctx){
 async function mountObject(obj, label, ctx){
   if (!obj || typeof obj !== "object") return false;
 
-  const preferred = ["init","mount","build","create","spawn","setup","addToScene","attach"];
-
-  for (const name of preferred){
-    if (typeof obj[name] === "function"){
-      const { ok } = await callWithAdapters(obj[name].bind(obj), `${label}.${name}`, ctx);
-      if (ok) return true;
-      return false;
+  const methods = ["init","mount","build","create","spawn","setup","addToScene","attach","start"];
+  for (const m of methods){
+    if (typeof obj[m] === "function"){
+      const { ok } = await callWithAdapters(obj[m].bind(obj), `${label}.${m}`, ctx);
+      return ok;
     }
   }
 
+  // If only one function exists, call it
   const fnKeys = Object.keys(obj).filter(k => typeof obj[k] === "function");
   if (fnKeys.length === 1){
     const k = fnKeys[0];
@@ -110,6 +110,9 @@ async function mountModule(mod, label, ctx){
 
 export const World = {
   init({ THREE, scene, renderer, camera, player, controllers, log }) {
+    // -------------------------
+    // World object + required API
+    // -------------------------
     const W = {
       THREE, scene, renderer, camera, player, controllers, log,
       colliders: [],
@@ -121,14 +124,20 @@ export const World = {
       _realLoaded: false,
       textureKit: null,
       Inventory: null,
-      update(){},
+      update: () => {},
     };
 
-    // -------------------------
-    // ✅ API expected by main.js
-    // -------------------------
-    W.setFlag = (k, v) => { if (k in W.flags) W.flags[k] = !!v; };
+    // ✅ REQUIRED by main.js
+    W.setFlag = (key, value) => {
+      W.flags = W.flags || {};
+      W.flags[key] = !!value;
+      try { window.dispatchEvent(new CustomEvent("scarlett-flag", { detail:{ key, value:!!value } })); } catch {}
+    };
+    W.getFlag = (key) => !!(W.flags && W.flags[key]);
+
+    // Helpful extras (safe)
     W.setMode = (m) => { W.mode = String(m || "lobby"); };
+    W.getMode = () => W.mode || "lobby";
 
     W.getPlayerYaw = () => W._playerYaw;
     W.addPlayerYaw = (d) => {
@@ -193,7 +202,7 @@ export const World = {
     };
 
     // -------------------------
-    // FALLBACK WORLD
+    // FALLBACK WORLD (always builds)
     // -------------------------
     ui("[world] fallback world building…");
 
@@ -218,8 +227,8 @@ export const World = {
     const wallW = new THREE.Mesh(new THREE.BoxGeometry(1,4.4,60), wallMat); wallW.position.set(-15,2.2,0); scene.add(wallW);
     const wallE = new THREE.Mesh(new THREE.BoxGeometry(1,4.4,60), wallMat); wallE.position.set( 15,2.2,0); scene.add(wallE);
 
-    // colliders also stored in scene.userData to merge later
     scene.userData.colliders = scene.userData.colliders || [];
+
     function addColliderBox(pos, size, name="collider"){
       const geo = new THREE.BoxGeometry(size.sx, size.sy, size.sz);
       const mat = new THREE.MeshBasicMaterial({ visible:false });
@@ -231,6 +240,7 @@ export const World = {
       scene.userData.colliders.push(m);
       return m;
     }
+
     addColliderBox({x:0,y:2.2,z:-15},{sx:60,sy:4.4,sz:1},"col_wall_n");
     addColliderBox({x:0,y:2.2,z: 15},{sx:60,sy:4.4,sz:1},"col_wall_s");
     addColliderBox({x:-15,y:2.2,z:0},{sx:1,sy:4.4,sz:60},"col_wall_w");
@@ -266,7 +276,7 @@ export const World = {
 
     ui("[world] fallback built ✅");
 
-    // Inventory fallback for ShopUI
+    // Inventory shim for ShopUI
     W.Inventory = W.Inventory || {
       getChips(){
         return [
@@ -281,7 +291,7 @@ export const World = {
     };
 
     // -------------------------
-    // REAL WORLD LOAD
+    // REAL WORLD LOAD (async)
     // -------------------------
     (async () => {
       const ctx = { THREE, scene, renderer, camera, player, controllers, world: W, log, Inventory: W.Inventory };
@@ -323,10 +333,11 @@ export const World = {
       mounted += (await mountModule(tableF,  "table_factory.js", ctx)) ? 1 : 0;
       mounted += (await mountModule(rail,    "spectator_rail.js", ctx)) ? 1 : 0;
 
-      // TeleportMachine export is an object — ensure we try init/build/etc
+      // TeleportMachine: mount object directly
       if (tpMach?.TeleportMachine) {
         const ok = await mountObject(tpMach.TeleportMachine, "teleport_machine.js.TeleportMachine", ctx);
-        mounted += ok ? 1 : 0;
+        if (ok) mounted++;
+        else ui("[world] ⚠️ TeleportMachine present but did not mount (no callable method found)");
       } else {
         mounted += (await mountModule(tpMach, "teleport_machine.js", ctx)) ? 1 : 0;
       }
@@ -342,7 +353,6 @@ export const World = {
         catch (e){ ui("[world] ❌ vr_ui_panel init failed :: " + (e?.message || e)); }
       }
 
-      // Merge colliders from scene.userData
       if (Array.isArray(scene.userData?.colliders)) {
         for (const c of scene.userData.colliders) if (c && !W.colliders.includes(c)) W.colliders.push(c);
         ui("[world] colliders merged ✅");

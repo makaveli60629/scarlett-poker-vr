@@ -1,32 +1,31 @@
-// /js/controls.js — Scarlett VR Poker Controls v2.0
-// - Smooth move + snap turn
-// - VR: movement works on LEFT stick, and ALSO on RIGHT stick (your request)
-// - Snap turn default 45°
-// - Enable toggles (from HUD)
+// /js/controls.js — Scarlett Controls v2.0
+// - 45° snap-turn
+// - Right stick ALSO moves (same as left)
+// - Y button toggles in-hand menu (dispatches event)
+// - Desktop WASD + mouse look kept
 
 export const Controls = {
-  init({ THREE, renderer, camera, player, controllers, log = console.log, world }) {
+  init({ THREE, renderer, camera, player, controllers, log, world }) {
     const state = {
-      enabledMove: true,
-      enabledSnap: true,
+      enabled: true,
       moveSpeed: 1.9,
       sprintMult: 1.6,
-      snapTurnDeg: 45,
+      snapTurnDeg: 45,          // ✅ 45 degrees
       snapCooldown: 0.22,
       snapT: 0,
 
-      // desktop
       yaw: 0,
       pitch: 0,
       pointerLocked: false,
       keys: Object.create(null),
       mouseSens: 0.0022,
       queuedSnap: 0,
+
+      menuHeld: false,
+      lastMenuToggle: 0,
     };
 
-    const dzMove = 0.14;
-    const dzSnap = 0.55;
-
+    const snapTurnRad = (state.snapTurnDeg * Math.PI) / 180;
     const canvas = renderer.domElement;
 
     function onKey(e, down) {
@@ -34,8 +33,10 @@ export const Controls = {
       if (down) {
         if (e.code === "KeyQ") state.queuedSnap = 1;
         if (e.code === "KeyE") state.queuedSnap = -1;
+        if (e.code === "KeyM") window.dispatchEvent(new Event("scarlett-toggle-menu"));
       }
     }
+
     window.addEventListener("keydown", (e) => onKey(e, true));
     window.addEventListener("keyup", (e) => onKey(e, false));
 
@@ -43,7 +44,11 @@ export const Controls = {
       if (renderer.xr?.isPresenting) return;
       canvas.requestPointerLock?.();
     });
-    document.addEventListener("pointerlockchange", () => { state.pointerLocked = (document.pointerLockElement === canvas); });
+
+    document.addEventListener("pointerlockchange", () => {
+      state.pointerLocked = document.pointerLockElement === canvas;
+    });
+
     document.addEventListener("mousemove", (e) => {
       if (!state.pointerLocked) return;
       state.yaw -= e.movementX * state.mouseSens;
@@ -52,8 +57,14 @@ export const Controls = {
       state.pitch = Math.max(-lim, Math.min(lim, state.pitch));
     });
 
-    function getSession() { return renderer.xr?.getSession?.() || null; }
-    function getSources() { return getSession()?.inputSources || []; }
+    function getSession() {
+      return renderer.xr?.getSession?.() || null;
+    }
+
+    function getSources() {
+      return getSession()?.inputSources || [];
+    }
+
     function getHandSource(handedness) {
       for (const s of getSources()) if (s.handedness === handedness) return s;
       return null;
@@ -62,12 +73,20 @@ export const Controls = {
     function getStick(src) {
       const gp = src?.gamepad;
       if (!gp || !gp.axes) return { x: 0, y: 0 };
-
+      // Quest common mapping:
+      // Left: axes[0], axes[1]
+      // Right: axes[2], axes[3]
       if (gp.axes.length >= 4) {
         if (src.handedness === "right") return { x: gp.axes[2] || 0, y: gp.axes[3] || 0 };
         return { x: gp.axes[0] || 0, y: gp.axes[1] || 0 };
       }
       return { x: gp.axes[0] || 0, y: gp.axes[1] || 0 };
+    }
+
+    function getButton(src, index) {
+      const gp = src?.gamepad;
+      const b = gp?.buttons?.[index];
+      return !!b?.pressed;
     }
 
     const tmpQ = new THREE.Quaternion();
@@ -76,20 +95,26 @@ export const Controls = {
     const dir = new THREE.Vector3();
 
     function applyMove(strafeX, stickY, dt, sprint) {
-      if (!state.enabledMove) return;
-
-      const ax = Math.abs(strafeX) < dzMove ? 0 : strafeX;
-      const ay = Math.abs(stickY) < dzMove ? 0 : stickY;
+      const dz = 0.14;
+      const ax = Math.abs(strafeX) < dz ? 0 : strafeX;
+      const ay = Math.abs(stickY) < dz ? 0 : stickY;
       if (ax === 0 && ay === 0) return;
 
       const forward = -ay;
       const strafe = ax;
 
       camera.getWorldQuaternion(tmpQ);
-      fwd.set(0, 0, -1).applyQuaternion(tmpQ); fwd.y = 0; fwd.normalize();
-      right.set(1, 0, 0).applyQuaternion(tmpQ); right.y = 0; right.normalize();
 
-      dir.set(0, 0, 0).addScaledVector(fwd, forward).addScaledVector(right, strafe);
+      fwd.set(0, 0, -1).applyQuaternion(tmpQ);
+      fwd.y = 0; fwd.normalize();
+
+      right.set(1, 0, 0).applyQuaternion(tmpQ);
+      right.y = 0; right.normalize();
+
+      dir.set(0, 0, 0)
+        .addScaledVector(fwd, forward)
+        .addScaledVector(right, strafe);
+
       if (dir.lengthSq() < 1e-6) return;
       dir.normalize();
 
@@ -98,72 +123,46 @@ export const Controls = {
 
       player.position.x += dir.x * step;
       player.position.z += dir.z * step;
-
-      // clamp to room if world provides
-      const hw = world?.room?.halfW ?? 12;
-      const hd = world?.room?.halfD ?? 12;
-      player.position.x = Math.max(-hw + 0.7, Math.min(hw - 0.7, player.position.x));
-      player.position.z = Math.max(-hd + 0.7, Math.min(hd - 0.7, player.position.z));
-
-      // keep out of rail radius (basic)
-      if (world?.railRadius) {
-        const cx = (world?.tableFocus?.x ?? 0);
-        const cz = (world?.tableFocus?.z ?? -6.5);
-        const dx = player.position.x - cx;
-        const dz = player.position.z - cz;
-        const rr = world.railRadius - 0.35;
-        const d2 = dx*dx + dz*dz;
-        if (d2 < rr*rr) {
-          const d = Math.max(0.0001, Math.sqrt(d2));
-          player.position.x = cx + (dx / d) * rr;
-          player.position.z = cz + (dz / d) * rr;
-        }
-      }
     }
 
     function applySnapTurn(xAxis) {
-      if (!state.enabledSnap) return;
-      if (Math.abs(xAxis) < dzSnap) return;
+      const dz = 0.55;
+      if (Math.abs(xAxis) < dz) return;
       if (state.snapT > 0) return;
 
-      const snapTurnRad = (state.snapTurnDeg * Math.PI) / 180;
       const sign = xAxis > 0 ? -1 : 1;
       player.rotation.y += sign * snapTurnRad;
-      state.yaw = player.rotation.y;
       state.snapT = state.snapCooldown;
     }
 
-    function setSnapDeg(d) { state.snapTurnDeg = Math.max(10, Math.min(90, d)); }
-    function setMoveEnabled(v) { state.enabledMove = !!v; }
-    function setSnapEnabled(v) { state.enabledSnap = !!v; }
-
-    log("[controls] ready ✅ (move + snap) snap=" + state.snapTurnDeg);
+    log?.("[controls] ready ✅ (45° snap + right-stick move + menu)");
 
     return {
-      setSnapDeg,
-      setMoveEnabled,
-      setSnapEnabled,
       update(dt) {
+        if (!state.enabled) return;
         state.snapT = Math.max(0, state.snapT - dt);
 
         const isXR = renderer.xr?.isPresenting;
-
         if (isXR) {
-          // VR: move (LEFT preferred, RIGHT fallback), snap (RIGHT X)
           const left = getHandSource("left");
           const rightSrc = getHandSource("right");
 
+          // ✅ Move with BOTH sticks (adds together)
           const mvL = getStick(left);
           const mvR = getStick(rightSrc);
+          applyMove(mvL.x + mvR.x, mvL.y + mvR.y, dt, false);
 
-          // if left not working, right also moves you (your request)
-          const useX = (Math.abs(mvL.x) > dzMove || Math.abs(mvL.y) > dzMove) ? mvL.x : mvR.x;
-          const useY = (Math.abs(mvL.x) > dzMove || Math.abs(mvL.y) > dzMove) ? mvL.y : mvR.y;
+          // ✅ Snap with right stick X
+          const tr = getStick(rightSrc);
+          applySnapTurn(tr.x);
 
-          applyMove(useX, useY, dt, false);
-
-          // snap always from right stick
-          applySnapTurn(mvR.x);
+          // ✅ Y button menu toggle (Quest often maps Y = button index 3 on left)
+          const now = performance.now() * 0.001;
+          const yPressed = getButton(left, 3);
+          if (yPressed && (now - state.lastMenuToggle) > 0.45) {
+            state.lastMenuToggle = now;
+            window.dispatchEvent(new Event("scarlett-toggle-menu"));
+          }
           return;
         }
 
@@ -176,10 +175,11 @@ export const Controls = {
         const strafe = (k["KeyD"] ? 1 : 0) + (k["KeyA"] ? -1 : 0);
         const sprint = !!k["ShiftLeft"] || !!k["ShiftRight"];
 
-        if (forward !== 0 || strafe !== 0) applyMove(strafe, -forward, dt, sprint);
+        if (forward !== 0 || strafe !== 0) {
+          applyMove(strafe, -forward, dt, sprint);
+        }
 
         if (state.queuedSnap !== 0 && state.snapT <= 0) {
-          const snapTurnRad = (state.snapTurnDeg * Math.PI) / 180;
           player.rotation.y += state.queuedSnap * snapTurnRad;
           state.yaw = player.rotation.y;
           state.queuedSnap = 0;

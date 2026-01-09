@@ -273,6 +273,21 @@
       #vrButtonSlot { bottom: 110px; }
     }
   </style>
+  // ---- Capture logs from modules (world.js / loaders) into the on-screen log ----
+window.addEventListener("scarlett-log", (e) => {
+  try { appendLog(String(e?.detail ?? "")); } catch {}
+});
+
+// Optional: mirror console warnings/errors to the on-screen log too
+(function hookConsole(){
+  const origLog = console.log.bind(console);
+  const origWarn = console.warn.bind(console);
+  const origErr = console.error.bind(console);
+
+  console.log = (...a) => { origLog(...a); try { appendLog(a.map(String).join(" ")); } catch {} };
+  console.warn = (...a) => { origWarn(...a); try { appendLog("⚠️ " + a.map(String).join(" ")); } catch {} };
+  console.error = (...a) => { origErr(...a); try { appendLog("❌ " + a.map(String).join(" ")); } catch {} };
+})();
 
   <script type="importmap">
   {

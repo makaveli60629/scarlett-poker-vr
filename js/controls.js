@@ -1,130 +1,144 @@
-// /js/controls.js — Scarlett Controls v2.0
-// - Left stick: forward/back + strafe
-// - Right stick: snap turn
-// - Y button: toggle left-wrist menu
-// - Works with your HUD flags + touch dock events
+// /js/controls.js — Scarlett Controls v3.0
+// - Smooth move + strafe (left stick X/Y)
+// - Snap turn (right stick X)
+// - Y button toggles "watch menu" event (handled in hands.js)
+// - Works with Android dock via scarlett-touch events
 
-export const Controls = {
-  init({ THREE, renderer, camera, player, controllers, grips, log, world }) {
+export const Controls = (() => {
+  function init({ THREE, renderer, camera, player, log, world } = {}) {
     const state = {
-      moveSpeed: 2.2,
-      strafeSpeed: 2.0,
-      snapAngle: Math.PI / 6, // 30 deg
+      move: true,
+      snap: true,
+      speed: 2.1,
+      snapAngle: Math.PI / 6,
       snapCooldown: 0,
-      axes: { lx: 0, ly: 0, rx: 0, ry: 0 },
-      touch: { f:0,b:0,l:0,r:0,turnL:0,turnR:0 },
-      menuOpen: false,
+      touch: { f:0,b:0,l:0,r:0,turnL:0,turnR:0 }
     };
 
-    // HUD toggles
-    const flags = window.__SCARLETT_FLAGS || { move:true, snap:true, teleport:true, hands:true };
+    // flags from your HUD
+    const flags = window.__SCARLETT_FLAGS || { move:true, snap:true };
+    state.move = !!flags.move;
+    state.snap = !!flags.snap;
+
+    window.addEventListener("scarlett-toggle-move", (e) => state.move = !!e.detail);
+    window.addEventListener("scarlett-toggle-snap", (e) => state.snap = !!e.detail);
 
     window.addEventListener("scarlett-touch", (e) => {
-      state.touch = e?.detail || state.touch;
+      state.touch = Object.assign(state.touch, e.detail || {});
     });
 
-    // Y toggles menu (Quest: "ybutton" on left controller)
-    function onSessionStart() {
-      const session = renderer.xr.getSession();
-      if (!session) return;
-
-      session.addEventListener("selectstart", (ev) => {
-        // keep select for teleport etc, not hijacking here
-      });
-
-      session.addEventListener("inputsourceschange", () => {
-        // no-op
-      });
-
-      log?.("[controls] session start ✅");
+    // read XR gamepads
+    function getXRGamepads() {
+      const s = renderer.xr.getSession?.();
+      if (!s) return [];
+      const gps = [];
+      for (const src of s.inputSources) {
+        if (src && src.gamepad) gps.push({ handedness: src.handedness, gamepad: src.gamepad });
+      }
+      return gps;
     }
 
-    renderer.xr.addEventListener?.("sessionstart", onSessionStart);
+    function forwardVector() {
+      const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+      fwd.y = 0; fwd.normalize();
+      return fwd;
+    }
+    function rightVector() {
+      const r = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
+      r.y = 0; r.normalize();
+      return r;
+    }
 
-    function pollGamepads() {
-      state.axes.lx = 0; state.axes.ly = 0; state.axes.rx = 0; state.axes.ry = 0;
+    let lastYDown = false;
 
-      const session = renderer.xr.getSession();
-      if (!session) return;
+    function update(dt) {
+      const gps = getXRGamepads();
 
-      for (const src of session.inputSources) {
-        const gp = src.gamepad;
+      // Left stick = move/strafe
+      let lx = 0, ly = 0;
+      // Right stick x = snap
+      let rx = 0;
+
+      // Y button = menu toggle (left controller)
+      let yDown = false;
+
+      for (const g of gps) {
+        const gp = g.gamepad;
         if (!gp) continue;
 
-        const ax = gp.axes || [];
-        const buttons = gp.buttons || [];
+        // Standard: axes[0], axes[1] = left stick; axes[2], axes[3] = right stick
+        if (g.handedness === "left") {
+          lx = gp.axes?.[0] ?? 0;
+          ly = gp.axes?.[1] ?? 0;
 
-        // Quest controllers: left stick is usually axes[2],[3] for left; right stick axes[0],[1] for right (varies)
-        // We’ll detect by handedness and map safely.
-        if (src.handedness === "left") {
-          state.axes.lx = ax[2] ?? ax[0] ?? 0;
-          state.axes.ly = ax[3] ?? ax[1] ?? 0;
+          // Oculus: Y usually buttons[3]
+          yDown = !!gp.buttons?.[3]?.pressed;
+        }
+        if (g.handedness === "right") {
+          rx = gp.axes?.[2] ?? 0;
+        }
+      }
 
-          // Y button is typically buttons[3] on left (varies). We'll check common indices.
-          const yPressed = !!(buttons[3]?.pressed || buttons[4]?.pressed);
-          if (yPressed && !state._yLatch) {
-            state._yLatch = true;
-            state.menuOpen = !state.menuOpen;
-            window.dispatchEvent(new CustomEvent("scarlett-menu", { detail: state.menuOpen }));
-            log?.("[controls] menu=" + state.menuOpen);
+      // Y toggle (edge)
+      if (yDown && !lastYDown) {
+        window.dispatchEvent(new Event("scarlett-toggle-watchmenu"));
+      }
+      lastYDown = yDown;
+
+      // Snap turn
+      if (state.snap) {
+        state.snapCooldown = Math.max(0, state.snapCooldown - dt);
+        if (state.snapCooldown <= 0) {
+          if (rx > 0.75) {
+            player.rotation.y -= state.snapAngle;
+            state.snapCooldown = 0.20;
+          } else if (rx < -0.75) {
+            player.rotation.y += state.snapAngle;
+            state.snapCooldown = 0.20;
           }
-          if (!yPressed) state._yLatch = false;
-        }
-
-        if (src.handedness === "right") {
-          state.axes.rx = ax[2] ?? ax[0] ?? 0;
-          state.axes.ry = ax[3] ?? ax[1] ?? 0;
         }
       }
-    }
 
-    function movePlayer(dt) {
-      if (!flags.move) return;
+      // Move
+      if (state.move) {
+        // include Android dock
+        const t = state.touch;
+        let mx = lx;
+        let mz = ly;
 
-      // combine XR stick + touch dock
-      const lx = state.axes.lx + (state.touch.r ? 1 : 0) - (state.touch.l ? 1 : 0);
-      const ly = state.axes.ly + (state.touch.b ? 1 : 0) - (state.touch.f ? 1 : 0);
+        if (t.l) mx -= 0.85;
+        if (t.r) mx += 0.85;
+        if (t.f) mz -= 0.85;
+        if (t.b) mz += 0.85;
 
-      // deadzone
-      const dx = Math.abs(lx) < 0.12 ? 0 : lx;
-      const dy = Math.abs(ly) < 0.12 ? 0 : ly;
+        // deadzone
+        const dz = 0.12;
+        if (Math.abs(mx) < dz) mx = 0;
+        if (Math.abs(mz) < dz) mz = 0;
 
-      if (!dx && !dy) return;
+        if (mx || mz) {
+          const fwd = forwardVector();
+          const right = rightVector();
 
-      const forward = new THREE.Vector3(0,0,-1).applyQuaternion(player.quaternion);
-      forward.y = 0; forward.normalize();
+          // NOTE: stick forward is negative Z in axes (ly)
+          const move = new THREE.Vector3();
+          move.addScaledVector(fwd, -mz);
+          move.addScaledVector(right, mx);
+          move.normalize().multiplyScalar(state.speed * dt);
 
-      const right = new THREE.Vector3(1,0,0).applyQuaternion(player.quaternion);
-      right.y = 0; right.normalize();
-
-      const speedF = state.moveSpeed * dt * (-dy);   // stick up is negative
-      const speedS = state.strafeSpeed * dt * (dx);
-
-      player.position.addScaledVector(forward, speedF);
-      player.position.addScaledVector(right, speedS);
-    }
-
-    function snapTurn(dt) {
-      if (!flags.snap) return;
-
-      state.snapCooldown = Math.max(0, state.snapCooldown - dt);
-
-      const rx = state.axes.rx + (state.touch.turnR ? 1 : 0) - (state.touch.turnL ? 1 : 0);
-
-      if (state.snapCooldown > 0) return;
-      if (Math.abs(rx) < 0.65) return;
-
-      const dir = rx > 0 ? -1 : 1;
-      player.rotation.y += dir * state.snapAngle;
-      state.snapCooldown = 0.22;
-    }
-
-    return {
-      update(dt) {
-        pollGamepads();
-        movePlayer(dt);
-        snapTurn(dt);
+          // apply, keep on floor
+          player.position.add(move);
+          player.position.y = 0;
+        }
       }
-    };
+
+      // Android dock snap turn buttons
+      if (state.touch.turnL) player.rotation.y += state.snapAngle * dt * 4.0;
+      if (state.touch.turnR) player.rotation.y -= state.snapAngle * dt * 4.0;
+    }
+
+    return { update };
   }
-};
+
+  return { init };
+})();

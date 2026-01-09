@@ -1,196 +1,178 @@
-// /js/hands.js — Scarlett Hands v1.1 (GitHub Pages safe)
-// Fixes:
-// - Adds missing clamp() (prevents runtime errors)
-// - Binds XR hands OR grips safely
-// - Always shows gloves when bound (controller or hand tracking)
+// /js/hands.js — Scarlett Hands v2.0
+// - Hand tracking wrist meshes (simple gloves)
+// - Left wrist WATCH mesh
+// - Left wrist MENU panel toggled by Y (scarlett-menu event)
 
-export const HandsSystem = {
-  init({ THREE, scene, renderer, log = console.log } = {}) {
-    const L = (...a) => { try { log(...a); } catch { console.log(...a); } };
-    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+export const HandsSystem = (() => {
+  let THREE, scene, renderer, log;
 
-    const root = new THREE.Group();
-    root.name = "HandsSystem";
-    scene.add(root);
+  const S = {
+    root: null,
+    left: { wrist: null, glove: null, watch: null, menu: null, menuTex: null },
+    right:{ wrist: null, glove: null },
+    menuOpen: false,
+  };
 
-    const state = {
-      enabled: true,
-      t: 0,
-      hands: [
-        { index: 0, obj: null, type: "unknown", pinch: 0 },
-        { index: 1, obj: null, type: "unknown", pinch: 0 }
-      ],
-      xrHands: [null, null],
-      grips: [null, null],
-    };
+  function makeCanvasMenu() {
+    const c = document.createElement("canvas");
+    c.width = 512; c.height = 256;
+    const ctx = c.getContext("2d");
 
-    function makeGlove(color = 0x0b0b0f, accent = 0xff2d7a) {
-      const g = new THREE.Group();
-      g.name = "Glove";
+    function draw() {
+      ctx.clearRect(0,0,c.width,c.height);
+      ctx.fillStyle = "rgba(10,12,20,0.72)";
+      ctx.fillRect(0,0,c.width,c.height);
 
-      const mat = new THREE.MeshStandardMaterial({
-        color,
-        roughness: 0.55,
-        metalness: 0.1
-      });
+      ctx.strokeStyle = "rgba(127,231,255,0.55)";
+      ctx.lineWidth = 6;
+      ctx.strokeRect(8,8,c.width-16,c.height-16);
 
-      const accentMat = new THREE.MeshStandardMaterial({
-        color: accent,
-        roughness: 0.35,
-        metalness: 0.2,
-        emissive: accent,
-        emissiveIntensity: 0.12
-      });
+      ctx.fillStyle = "#e8ecff";
+      ctx.font = "bold 40px Arial";
+      ctx.fillText("SCARLETT MENU", 24, 54);
 
-      const palm = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.018, 0.08), mat);
-      g.add(palm);
+      ctx.fillStyle = "rgba(232,236,255,0.85)";
+      ctx.font = "28px Arial";
+      ctx.fillText("• Store", 24, 110);
+      ctx.fillText("• Poker Table", 24, 146);
+      ctx.fillText("• Skins / Outfits", 24, 182);
 
-      const ridge = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.01, 0.05), accentMat);
-      ridge.position.set(0, 0.012, 0.012);
-      g.add(ridge);
-
-      for (let i = 0; i < 4; i++) {
-        const f = new THREE.Mesh(new THREE.CapsuleGeometry(0.007, 0.035, 6, 10), mat);
-        f.rotation.x = Math.PI / 2;
-        f.position.set(-0.018 + i * 0.012, 0.010, 0.042);
-        g.add(f);
-      }
-
-      const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.007, 0.03, 6, 10), mat);
-      thumb.rotation.z = -0.6;
-      thumb.rotation.x = Math.PI / 2;
-      thumb.position.set(0.03, 0.003, 0.02);
-      g.add(thumb);
-
-      const orb = new THREE.Mesh(
-        new THREE.SphereGeometry(0.012, 12, 10),
-        new THREE.MeshStandardMaterial({
-          color: accent,
-          emissive: accent,
-          emissiveIntensity: 0.35,
-          roughness: 0.25
-        })
-      );
-      orb.position.set(0.0, 0.015, 0.065);
-      orb.name = "pinch_orb";
-      orb.visible = false;
-      g.add(orb);
-
-      g.userData.pinchOrb = orb;
-      return g;
+      ctx.fillStyle = "rgba(127,231,255,0.9)";
+      ctx.font = "bold 26px Arial";
+      ctx.fillText("Press Y to Close", 300, 230);
     }
 
-    const left = makeGlove(0x0b0b0f, 0xff2d7a);
-    const right = makeGlove(0x0b0b0f, 0x7fe7ff);
-    left.name = "HandLeft";
-    right.name = "HandRight";
-    root.add(left, right);
-
-    state.hands[0].obj = left;
-    state.hands[1].obj = right;
-
-    function bindXRHands() {
-      try {
-        const s = renderer?.xr?.getSession?.();
-        if (!s) return;
-        for (let i = 0; i < 2; i++) {
-          const h = renderer.xr.getHand(i);
-          if (h && !state.xrHands[i]) {
-            state.xrHands[i] = h;
-            scene.add(h);
-            L("[Hands] XR hand bound:", i);
-          }
-        }
-      } catch {}
-    }
-
-    function bindGrips() {
-      try {
-        for (let i = 0; i < 2; i++) {
-          const g = renderer.xr.getControllerGrip(i);
-          if (g && !state.grips[i]) state.grips[i] = g;
-        }
-      } catch {}
-    }
-
-    function updatePinchFromXRHand(xrHand) {
-      try {
-        const thumb = xrHand.joints?.["thumb-tip"];
-        const index = xrHand.joints?.["index-finger-tip"];
-        if (!thumb || !index) return 0;
-
-        const tp = new THREE.Vector3();
-        const ip = new THREE.Vector3();
-        thumb.getWorldPosition(tp);
-        index.getWorldPosition(ip);
-
-        const d = tp.distanceTo(ip);
-        return clamp(1.0 - (d - 0.01) / 0.03, 0, 1);
-      } catch {
-        return 0;
-      }
-    }
-
-    const tmpPos = new THREE.Vector3();
-    const tmpQuat = new THREE.Quaternion();
-
-    function updateHandObjFromTarget(handObj, targetObj) {
-      if (!handObj || !targetObj) return;
-
-      targetObj.getWorldPosition(tmpPos);
-      targetObj.getWorldQuaternion(tmpQuat);
-
-      handObj.position.copy(tmpPos);
-      handObj.quaternion.copy(tmpQuat);
-
-      // Slight glove offset
-      handObj.translateZ(-0.03);
-      handObj.translateY(-0.01);
-    }
-
-    function update(dt) {
-      if (!state.enabled) return;
-      state.t += dt;
-
-      bindXRHands();
-      bindGrips();
-
-      for (let i = 0; i < 2; i++) {
-        const handObj = state.hands[i].obj;
-        const xrHand = state.xrHands[i];
-        const grip = state.grips[i];
-
-        if (xrHand) {
-          state.hands[i].type = "hand-tracking";
-          updateHandObjFromTarget(handObj, xrHand);
-
-          const p = updatePinchFromXRHand(xrHand);
-          state.hands[i].pinch = p;
-
-          if (handObj.userData.pinchOrb) {
-            handObj.userData.pinchOrb.visible = p > 0.65;
-            handObj.userData.pinchOrb.scale.setScalar(0.8 + p * 0.6);
-          }
-        } else if (grip) {
-          state.hands[i].type = "controller";
-          updateHandObjFromTarget(handObj, grip);
-
-          const bob = Math.sin(state.t * 2.2 + i) * 0.002;
-          handObj.position.y += bob;
-
-          if (handObj.userData.pinchOrb) handObj.userData.pinchOrb.visible = false;
-        } else {
-          state.hands[i].type = "unbound";
-        }
-      }
-    }
-
-    function setEnabled(v) {
-      state.enabled = !!v;
-      root.visible = state.enabled;
-    }
-
-    L("[Hands] init ✅ v1.1");
-    return { update, setEnabled, root };
+    draw();
+    return { c, ctx, draw };
   }
-};
+
+  function init({ THREE: _T, scene: _S, renderer: _R, log: _L } = {}) {
+    THREE = _T; scene = _S; renderer = _R; log = _L || console.log;
+
+    if (S.root) { try { scene.remove(S.root); } catch {} }
+    S.root = new THREE.Group();
+    S.root.name = "HandsRoot";
+    scene.add(S.root);
+
+    const gloveMat = new THREE.MeshStandardMaterial({
+      color: 0x10131a,
+      roughness: 0.55,
+      metalness: 0.25,
+      emissive: 0x00ffff,
+      emissiveIntensity: 0.35
+    });
+
+    const gloveGeo = new THREE.CylinderGeometry(0.028, 0.038, 0.22, 14);
+    const watchGeo = new THREE.BoxGeometry(0.052, 0.012, 0.062);
+
+    // gloves
+    S.left.glove = new THREE.Mesh(gloveGeo, gloveMat);
+    S.right.glove = new THREE.Mesh(gloveGeo, gloveMat);
+    S.left.glove.rotation.x = Math.PI / 2;
+    S.right.glove.rotation.x = Math.PI / 2;
+    S.left.glove.visible = false;
+    S.right.glove.visible = false;
+
+    // watch
+    const watchMat = new THREE.MeshStandardMaterial({
+      color: 0x0b0d14,
+      roughness: 0.25,
+      metalness: 0.55,
+      emissive: 0x00ffff,
+      emissiveIntensity: 0.5
+    });
+    S.left.watch = new THREE.Mesh(watchGeo, watchMat);
+    S.left.watch.visible = false;
+
+    // wrist menu
+    const menu = makeCanvasMenu();
+    const tex = new THREE.CanvasTexture(menu.c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+
+    const menuMat = new THREE.MeshBasicMaterial({
+      map: tex,
+      transparent: true,
+      opacity: 0.92,
+      depthTest: false
+    });
+
+    S.left.menu = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.11), menuMat);
+    S.left.menu.renderOrder = 300;
+    S.left.menu.visible = false;
+
+    S.left.menuTex = tex;
+
+    S.root.add(S.left.glove, S.right.glove, S.left.watch, S.left.menu);
+
+    window.addEventListener("scarlett-menu", (e) => {
+      S.menuOpen = !!e.detail;
+    });
+
+    log("[hands] ready ✅");
+    return { update };
+  }
+
+  function update(dt) {
+    const session = renderer.xr.getSession?.();
+    if (!session) return;
+
+    const refSpace = renderer.xr.getReferenceSpace?.();
+    const frame = renderer.xr.getFrame?.(); // may not exist in some builds
+    // Your main loop already has frame; if your main passes none, we still try with xr.getFrame.
+    // Prefer the frame passed from main.js by adding HandsSystem.update(frame, refSpace)
+  }
+
+  function updateFromFrame(frame, refSpace) {
+    if (!frame || !refSpace) return;
+
+    let leftSeen = false, rightSeen = false;
+
+    for (const src of frame.session.inputSources) {
+      if (!src?.hand) continue;
+      const wrist = src.hand.get("wrist");
+      const pose = frame.getJointPose(wrist, refSpace);
+      if (!pose) continue;
+
+      const isLeft = (src.handedness === "left");
+
+      const glove = isLeft ? S.left.glove : S.right.glove;
+      glove.position.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z);
+      glove.quaternion.set(
+        pose.transform.orientation.x,
+        pose.transform.orientation.y,
+        pose.transform.orientation.z,
+        pose.transform.orientation.w
+      );
+      glove.visible = !!(window.__SCARLETT_FLAGS?.hands ?? true);
+
+      if (isLeft) {
+        leftSeen = true;
+
+        // watch sits just above wrist
+        S.left.watch.position.copy(glove.position);
+        S.left.watch.quaternion.copy(glove.quaternion);
+        S.left.watch.translateZ(0.04);
+        S.left.watch.translateY(0.01);
+        S.left.watch.visible = glove.visible;
+
+        // menu attached to wrist and angled toward face
+        S.left.menu.position.copy(glove.position);
+        S.left.menu.quaternion.copy(glove.quaternion);
+        S.left.menu.translateZ(0.10);
+        S.left.menu.translateY(0.02);
+        S.left.menu.rotation.x += -0.8;
+        S.left.menu.visible = glove.visible && S.menuOpen;
+      } else {
+        rightSeen = true;
+      }
+    }
+
+    if (!leftSeen) { S.left.glove.visible = false; S.left.watch.visible = false; S.left.menu.visible = false; }
+    if (!rightSeen) { S.right.glove.visible = false; }
+  }
+
+  return {
+    init,
+    update: updateFromFrame
+  };
+})();

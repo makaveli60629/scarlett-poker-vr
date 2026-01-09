@@ -1,9 +1,11 @@
-// /js/main.js — Scarlett Poker VR Boot v12.3 (FULL)
-// ✅ Keeps your existing pipeline (world + controls + teleport + hands + dealing + poker)
-// ✅ Fixes chairs/furniture AFTER world loads (auto-detects chairs/seats and flips if needed)
-// ✅ Makes DealingMix use TABLE hole cards + hover reflection (requires DealingMix v2.4)
-// ✅ Forces high-stakes (20,000) via PokerSim option
-// ✅ Adds “decision time” pacing by stretching street timers (PokerSim doesn’t have per-player think phases yet)
+// /js/main.js — Scarlett VR Poker Boot v11.2 (STABLE + Controller-on-Rig Fix)
+// Works with your permanent index.html importmap (CDN).
+// Key fixes:
+// - Controllers + grips parented to PlayerRig so they follow locomotion/teleport.
+// - Purple glow lasers.
+// - Safe fallbacks for world.tableFocus to prevent undefined.x errors.
+// - Listens to __SCARLETT_FLAGS and HUD toggle events.
+// - DealingMix loaded safely (won't crash if missing).
 
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
@@ -12,154 +14,116 @@ import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFa
 import { initWorld } from "./world.js";
 import { Controls } from "./controls.js";
 import { Teleport } from "./teleport.js";
-import { DealingMix } from "./dealingMix.js";
 import { HandsSystem } from "./hands.js";
-import { PokerSim } from "./poker.js";
 
-// ---------- LOG ----------
+// ------------------------------------------------------------
+// LOG (index.html expects #log)
+// ------------------------------------------------------------
 const logEl = document.getElementById("log");
-const log = (m, ...rest) => {
-  try { console.log(m, ...rest); } catch {}
+function LOG(...a) {
+  try { console.log(...a); } catch {}
   try {
     if (logEl) {
-      logEl.textContent += "\n" + String(m);
+      logEl.textContent += "\n" + a.map(x => String(x)).join(" ");
       logEl.scrollTop = logEl.scrollHeight;
     }
   } catch {}
-};
+}
+window.addEventListener("unhandledrejection", (e) => {
+  LOG("❌ unhandledrejection:", e?.reason?.message || e?.reason || e);
+});
+window.addEventListener("error", (e) => {
+  LOG("❌ error:", e?.message || e);
+});
 
 const BOOT_V = window.__BUILD_V || Date.now().toString();
-log("BOOT v=" + BOOT_V);
+LOG("BOOT v=" + BOOT_V);
 
-// ---------- TUNING (YOU ASKED: slower + high stakes) ----------
-const GAME = {
-  seats: 6,
-  startingStack: 20000,
-
-  // You asked ~15 seconds per player. PokerSim v1.2 has no explicit per-player action loop,
-  // so we approximate by stretching each street timer.
-  // For 6 seats: 6 * 15 = 90 seconds per street (very slow). You can reduce if needed.
-  decisionSecondsPerPlayer: 15,
-  approxStreetSeconds() { return this.seats * this.decisionSecondsPerPlayer; },
-
-  // Dealing cinematic timing
-  tDealHole: 6.0,           // hole dealing animation window
-  tShowdown: 8.0,
-  tNextHand: 4.0,
-};
-
-// Flop/Turn/River street durations (approx decisions)
-// If you want EXACT 15s per player with individual decisions, we’ll patch poker.js next.
-const STREET_SECONDS = Math.max(20, GAME.approxStreetSeconds()); // safety min
-const tFlop = STREET_SECONDS;
-const tTurn = STREET_SECONDS;
-const tRiver = STREET_SECONDS;
-
-// ---------- SCENE ----------
+// ------------------------------------------------------------
+// SCENE
+// ------------------------------------------------------------
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x05060a);
-scene.fog = new THREE.Fog(0x05060a, 6, 120);
+scene.background = new THREE.Color(0x020205);
+scene.fog = new THREE.Fog(0x020205, 3, 90);
 
-// ---------- CAMERA ----------
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 300);
+// ------------------------------------------------------------
+// CAMERA + PLAYER RIG
+// ------------------------------------------------------------
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 350);
 
-// ---------- RENDERER (Quest-safe defaults) ----------
-const renderer = new THREE.WebGLRenderer({
-  antialias: false,
-  powerPreference: "high-performance",
-});
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.xr.enabled = true;
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-
-try { renderer.xr.setReferenceSpaceType("local-floor"); } catch {}
-
-document.body.appendChild(renderer.domElement);
-
-// VRButton kept as fallback/native
-try {
-  document.body.appendChild(VRButton.createButton(renderer));
-  log("[main] VRButton appended ✅");
-} catch (e) {
-  log("❌ VRButton failed: " + (e?.message || e));
-}
-
-// ---------- XR: session perf tuning ----------
-renderer.xr.addEventListener("sessionstart", () => {
-  try {
-    renderer.setPixelRatio(1.0);
-    renderer.xr.setFoveation?.(1.0);
-  } catch {}
-  log("[xr] sessionstart ✅");
-});
-
-renderer.xr.addEventListener("sessionend", () => {
-  try { renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25)); } catch {}
-  log("[xr] sessionend ✅");
-});
-
-// ---------- XR: Direct Enter VR (HUD should dispatch scarlett-enter-vr) ----------
-window.addEventListener("scarlett-enter-vr", async () => {
-  try {
-    const xr = navigator.xr;
-    if (!xr) throw new Error("navigator.xr missing");
-
-    const ok = await xr.isSessionSupported?.("immersive-vr");
-    if (ok === false) throw new Error("immersive-vr not supported");
-
-    const session = await xr.requestSession("immersive-vr", {
-      optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"],
-    });
-
-    await renderer.xr.setSession(session);
-    log("[xr] requestSession ✅ (entered VR)");
-  } catch (e) {
-    log("❌ [xr] Enter VR failed: " + (e?.message || e));
-    console.error(e);
-  }
-});
-
-// ---------- PLAYER RIG ----------
 const player = new THREE.Group();
 player.name = "PlayerRig";
 player.add(camera);
 scene.add(player);
 
-// spawn defaults
+// spawn (world will align this too)
 player.position.set(0, 0, 3.6);
-player.rotation.set(0, 0, 0);
 camera.position.set(0, 1.65, 0);
 
-// ---------- LIGHTING ----------
-scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.2));
+// ------------------------------------------------------------
+// RENDERER
+// ------------------------------------------------------------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
 
-const dir = new THREE.DirectionalLight(0xffffff, 1.15);
+try { renderer.xr.setReferenceSpaceType("local-floor"); } catch {}
+
+document.body.appendChild(renderer.domElement);
+document.body.appendChild(VRButton.createButton(renderer));
+
+// ------------------------------------------------------------
+// LIGHTING (baseline; world adds more)
+// ------------------------------------------------------------
+scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.15));
+const dir = new THREE.DirectionalLight(0xffffff, 1.0);
 dir.position.set(7, 12, 6);
 scene.add(dir);
 
-const pink = new THREE.PointLight(0xff2d7a, 0.65, 18);
-pink.position.set(0, 3.0, -5.5);
-scene.add(pink);
+// ------------------------------------------------------------
+// FLAGS FROM INDEX HUD
+// ------------------------------------------------------------
+const Flags = (window.__SCARLETT_FLAGS = window.__SCARLETT_FLAGS || {
+  teleport: true,
+  move: true,
+  snap: true,
+  hands: true
+});
 
-const aqua = new THREE.PointLight(0x7fe7ff, 0.55, 18);
-aqua.position.set(0, 3.0, -7.5);
-scene.add(aqua);
+// toggle events from index.html
+window.addEventListener("scarlett-toggle-teleport", (e) => { Flags.teleport = !!e.detail; LOG("[hud] teleport=" + Flags.teleport); });
+window.addEventListener("scarlett-toggle-move", (e) => { Flags.move = !!e.detail; LOG("[hud] move=" + Flags.move); });
+window.addEventListener("scarlett-toggle-snap", (e) => { Flags.snap = !!e.detail; LOG("[hud] snap=" + Flags.snap); });
+window.addEventListener("scarlett-toggle-hands", (e) => { Flags.hands = !!e.detail; LOG("[hud] hands=" + Flags.hands); });
 
-// ---------- XR CONTROLLERS ----------
+// ------------------------------------------------------------
+// XR CONTROLLERS (IMPORTANT: parent to PlayerRig so they follow movement)
+// ------------------------------------------------------------
 const controllerModelFactory = new XRControllerModelFactory();
 const controllers = [];
 const grips = [];
 
+// purple glow laser
 function makeLaser() {
   const geo = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(0, 0, 0),
     new THREE.Vector3(0, 0, -1),
   ]);
-  const mat = new THREE.LineBasicMaterial({ color: 0xb200ff, transparent: true, opacity: 0.95 });
+  const mat = new THREE.LineBasicMaterial({ color: 0xb46bff, transparent: true, opacity: 0.95 });
   const line = new THREE.Line(geo, mat);
-  line.name = "Laser";
   line.scale.z = 10;
+  line.name = "LaserLine";
+
+  // little glowing tip
+  const tip = new THREE.Mesh(
+    new THREE.SphereGeometry(0.010, 10, 8),
+    new THREE.MeshBasicMaterial({ color: 0xff2d7a, transparent: true, opacity: 0.95 })
+  );
+  tip.position.z = -1.0;
+  tip.name = "LaserTip";
+  line.add(tip);
+
   return line;
 }
 
@@ -167,230 +131,211 @@ for (let i = 0; i < 2; i++) {
   const c = renderer.xr.getController(i);
   c.name = "Controller" + i;
   c.add(makeLaser());
+
+  // ✅ Parent to player rig (fixes “controllers floating in front of me”)
   player.add(c);
   controllers.push(c);
 
   const g = renderer.xr.getControllerGrip(i);
   g.name = "Grip" + i;
   g.add(controllerModelFactory.createControllerModel(g));
+
+  // ✅ Parent to player rig also
   player.add(g);
   grips.push(g);
 }
 
-function updateControllerVisibility() {
-  const on = !!renderer.xr?.isPresenting;
-  for (const c of controllers) c.visible = on;
-  for (const g of grips) g.visible = on;
-}
-renderer.xr.addEventListener?.("sessionstart", updateControllerVisibility);
-renderer.xr.addEventListener?.("sessionend", updateControllerVisibility);
-updateControllerVisibility();
+LOG("[main] controllers ready ✅");
 
-log("[main] controllers ready ✅");
-
-// ---------- WORLD ----------
-const world = await initWorld({ THREE, scene, log, v: BOOT_V });
-
-// ✅ Required for DealingMix facing player
-world.cameraRef = camera;
-
-// Provide safe defaults
-if (!world.tableFocus) world.tableFocus = new THREE.Vector3(0, 0, -6.5);
-if (!world.tableY) world.tableY = 0.92;
-
-if (world?.spawn) {
-  player.position.set(world.spawn.x, 0, world.spawn.z);
-  player.rotation.set(0, world.spawnYaw || 0, 0);
-}
-if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.15, world.tableFocus.z);
-
-try { world?.connect?.({ playerRig: player, camera, controllers, grips, renderer }); } catch {}
-log("[main] world loaded ✅");
-
-// ✅ Fix chairs & seating after load (does not remove anything)
+// ------------------------------------------------------------
+// WORLD
+// ------------------------------------------------------------
+let world = null;
 try {
-  fixFurnitureAndSeating({ THREE, scene, world, log });
-  log("[main] furniture fix pass ✅");
+  world = await initWorld({ THREE, scene, log: LOG, v: BOOT_V });
+  LOG("[world] ready ✅");
 } catch (e) {
-  log("❌ [main] furniture fix pass failed: " + (e?.message || e));
+  LOG("❌ world init failed:", e?.message || e);
+  world = null;
 }
 
-// ---------- CONTROLS ----------
-const controls = Controls.init({ THREE, renderer, camera, player, controllers, grips, log, world });
+// safe tableFocus fallback
+const tableFocus = world?.tableFocus && Number.isFinite(world.tableFocus.x)
+  ? world.tableFocus
+  : new THREE.Vector3(0, 0, -6.5);
 
-// ---------- HANDS ----------
-const hands = HandsSystem.init({ THREE, scene, renderer, log });
+// point camera at table by default (non-VR)
+try { camera.lookAt(tableFocus.x, 1.0, tableFocus.z); } catch {}
 
-// ---------- TELEPORT ----------
-const teleport = Teleport.init({ THREE, scene, renderer, camera, player, controllers, log, world });
+LOG("[main] world loaded ✅");
 
-// ---------- DEALING VISUALS ----------
-const dealing = DealingMix.init({ THREE, scene, log, world });
-
-// Ask DealingMix v2.4+ to do TABLE hole + hover reflection
+// Connect world features
 try {
-  dealing?.setPresentation?.({
-    holeCardsOnTable: true,
-    hoverReflection: true,
-    flopStyle: "3-then-1-then-1",
-    winnerRevealFlyToCommunity: true
-  });
-} catch {}
+  world?.connect?.({ playerRig: player, camera, controllers, grips });
+} catch (e) {
+  LOG("[main] world.connect failed:", e?.message || e);
+}
 
-// ---------- POKER ENGINE ----------
-const poker = PokerSim.create({
-  seats: GAME.seats,
-  log,
-  maxHands: 999999,
-
-  // High stakes
-  startingStack: GAME.startingStack,
-
-  // Slow cinematic timings
-  tDealHole: GAME.tDealHole,
-  tFlop,
-  tTurn,
-  tRiver,
-  tShowdown: GAME.tShowdown,
-  tNextHand: GAME.tNextHand,
-
-  toyBetting: true,
-  names: ["BOT 1","BOT 2","BOT 3","BOT 4","BOT 5","BOT 6"],
+// ------------------------------------------------------------
+// CONTROLS
+// ------------------------------------------------------------
+const controls = Controls.init({
+  THREE,
+  renderer,
+  camera,
+  player,
+  controllers,
+  grips,
+  log: LOG,
+  world
 });
 
-// Wire Poker → DealingMix
-poker.on("state", (s) => {
-  dealing?.setStreet?.(s.street);
-  dealing?.setAction?.(s.actionText || s.phase || "—");
-  dealing?.setPot?.(s.pot);
+// Optional: HUD touch movement (Android) — if your controls.js supports it
+let touchVec = { f: 0, b: 0, l: 0, r: 0, turnL: 0, turnR: 0 };
+window.addEventListener("scarlett-touch", (e) => {
+  if (!e?.detail) return;
+  touchVec = { ...touchVec, ...e.detail };
 });
 
-poker.on("blinds", (b) => {
-  dealing?.onBlinds?.(b);
-  dealing?.setPot?.(b.pot);
+// ------------------------------------------------------------
+// HANDS
+// ------------------------------------------------------------
+const hands = HandsSystem.init({
+  THREE,
+  scene,
+  renderer,
+  log: LOG
 });
 
-poker.on("action", (a) => {
-  dealing?.onAction?.(a);
+// ------------------------------------------------------------
+// TELEPORT
+// ------------------------------------------------------------
+const teleport = Teleport.init({
+  THREE,
+  scene,
+  renderer,
+  camera,
+  player,
+  controllers,
+  log: LOG,
+  world
 });
 
-poker.on("deal", (d) => {
-  dealing?.onDeal?.(d);
-});
+// ------------------------------------------------------------
+// DEALING MIX (SAFE LOAD)
+// ------------------------------------------------------------
+let dealing = null;
+async function loadDealingMix() {
+  const tryPaths = [
+    "./dealingMix.js",
+    "./DealingMix.js",
+    "./dealerMix.js",
+    "./DealerMix.js"
+  ];
 
-poker.on("showdown", (sd) => {
-  dealing?.onShowdown?.(sd);
-});
+  for (const p of tryPaths) {
+    try {
+      const mod = await import(`${p}?v=${encodeURIComponent(BOOT_V)}`);
+      if (mod?.DealingMix?.init) return mod.DealingMix;
+    } catch {}
+  }
+  return null;
+}
 
-poker.on("finished", (f) => {
-  dealing?.showFinished?.(f);
-});
+try {
+  const DealingMix = await loadDealingMix();
+  if (DealingMix) {
+    dealing = DealingMix.init({
+      THREE,
+      scene,
+      log: LOG,
+      world
+    });
+    dealing.startHand?.();
+    LOG("[DealingMix] init ✅");
+  } else {
+    LOG("[DealingMix] missing ⚠️ (no module found)");
+  }
+} catch (e) {
+  LOG("[DealingMix] init failed ⚠️", e?.message || e);
+  dealing = null;
+}
 
-poker.startHand();
-log("[main] PokerSim started ✅");
-
-// ---------- HUD EVENTS ----------
+// ------------------------------------------------------------
+// RECENTER (from HUD)
+// ------------------------------------------------------------
 window.addEventListener("scarlett-recenter", () => {
-  if (world?.spawn) player.position.set(world.spawn.x, 0, world.spawn.z);
-  else player.position.set(0, 0, 3.6);
+  const spawn = world?.spawnPads?.[0] || new THREE.Vector3(0, 0, 3.6);
+  player.position.set(spawn.x, 0, spawn.z);
   player.rotation.set(0, 0, 0);
-  if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.15, world.tableFocus.z);
-  log("[main] recentered ✅");
+  try { camera.lookAt(tableFocus.x, 1.0, tableFocus.z); } catch {}
+  LOG("[main] recentered ✅");
 });
 
-// ---------- RESIZE / ERROR ----------
+// ------------------------------------------------------------
+// RESIZE
+// ------------------------------------------------------------
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-window.addEventListener("unhandledrejection", (e) => {
-  console.error(e);
-  log("❌ unhandledrejection: " + (e?.reason?.message || e?.reason || e));
-});
-window.addEventListener("error", (e) => {
-  log("❌ window.error: " + (e?.message || e));
-});
+// ------------------------------------------------------------
+// SMALL HELPERS
+// ------------------------------------------------------------
+function clampPosToRoom() {
+  const c = world?.roomClamp;
+  if (!c) return;
+  player.position.x = clamp(player.position.x, c.minX, c.maxX);
+  player.position.z = clamp(player.position.z, c.minZ, c.maxZ);
+}
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
-// ---------- LOOP ----------
+// ------------------------------------------------------------
+// LOOP
+// ------------------------------------------------------------
 let last = performance.now();
+
 renderer.setAnimationLoop(() => {
   const now = performance.now();
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
 
-  try { world?.tick?.(dt); } catch {}
-  try { controls?.update?.(dt); } catch {}
-  try { teleport?.update?.(dt); } catch {}
-  try { poker?.update?.(dt); } catch {}
-  try { dealing?.update?.(dt); } catch {}
-  try { hands?.update?.(dt); } catch {}
+  // respect HUD flags
+  try { world?.tick?.(dt); } catch (e) { console.error(e); }
+
+  try {
+    // If controls.js supports internal flags, let it read window.__SCARLETT_FLAGS
+    if (Flags.move || Flags.snap) controls?.update?.(dt);
+  } catch (e) { console.error(e); }
+
+  try {
+    if (Flags.teleport) teleport?.update?.(dt);
+  } catch (e) { console.error(e); }
+
+  try { dealing?.update?.(dt); } catch (e) { console.error(e); }
+
+  try {
+    hands?.setEnabled?.(!!Flags.hands);
+    if (Flags.hands) hands?.update?.(dt);
+  } catch (e) { console.error(e); }
+
+  // keep inside room bounds (simple safety)
+  try { clampPosToRoom(); } catch {}
+
+  // laser pulse
+  try {
+    const t = now * 0.001;
+    for (const c of controllers) {
+      const line = c.getObjectByName("LaserLine");
+      if (line?.material) line.material.opacity = 0.70 + Math.sin(t * 4.0) * 0.18;
+      const tip = c.getObjectByName("LaserTip");
+      if (tip?.material) tip.material.opacity = 0.75 + Math.sin(t * 6.0) * 0.22;
+    }
+  } catch {}
 
   renderer.render(scene, camera);
 });
 
-log("[main] ready ✅");
-
-// =====================================================
-// Furniture/Seating Fix Utilities
-// =====================================================
-function fixFurnitureAndSeating({ THREE, scene, world, log }) {
-  const center = new THREE.Vector3(
-    world?.tableFocus?.x ?? 0,
-    0,
-    world?.tableFocus?.z ?? 0
-  );
-
-  // Prefer explicit arrays from world.js if present
-  let chairs = world?.chairs || world?.seats || world?.seatChairs || null;
-
-  // If not present, best-effort name search
-  if (!chairs || !chairs.length) chairs = findManyByNameLike(scene, ["chair", "seat"]);
-
-  if (!chairs || !chairs.length) {
-    log("[fix] no chairs found.");
-    return;
-  }
-
-  const tmpFwd = new THREE.Vector3(0, 0, -1);
-  const tmpPos = new THREE.Vector3();
-  const toCenter = new THREE.Vector3();
-
-  for (const chair of chairs) {
-    if (!chair) continue;
-
-    chair.getWorldPosition(tmpPos);
-    toCenter.copy(center).sub(tmpPos).setY(0);
-
-    // Face table
-    chair.lookAt(center.x, chair.position.y, center.z);
-
-    // If chair model is reversed, flip
-    const fwd = tmpFwd.clone().applyQuaternion(chair.quaternion).setY(0).normalize();
-    const dir = toCenter.clone().normalize();
-    const dot = fwd.dot(dir);
-    if (dot < -0.25) chair.rotateY(Math.PI);
-
-    // Small outward nudge to avoid clipping
-    const away = tmpPos.clone().sub(center).setY(0);
-    if (away.length() > 0.001) {
-      away.normalize();
-      chair.position.addScaledVector(away, 0.04);
-    }
-  }
-
-  // If world exposes a seating fix, run it
-  try { world?.fixSeating?.(); } catch {}
-}
-
-function findManyByNameLike(root, needles) {
-  const out = [];
-  root.traverse(o => {
-    const n = (o.name || "").toLowerCase();
-    if (!n) return;
-    if (needles.some(k => n.includes(k))) out.push(o);
-  });
-  const seen = new Set();
-  return out.filter(o => (seen.has(o.uuid) ? false : (seen.add(o.uuid), true)));
-      }
+LOG("[main] ready ✅");

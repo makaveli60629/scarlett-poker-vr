@@ -1,36 +1,74 @@
-// js/solid_walls.js — Simple solid walls (8.0)
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+// /js/solid_walls.js — Scarlett VR Poker (Compat Build)
+// Accepts build(ctx) OR build(scene) OR build(THREE, scene)
+// Adds simple room walls + optional colliders list.
+
+function _ctxScene(a, b){
+  if (a && a.scene && typeof a.scene.add === "function") return a.scene;
+  if (a && typeof a.add === "function") return a;
+  if (b && typeof b.add === "function") return b;
+  return null;
+}
+function _ctxTHREE(a, b){
+  if (a && a.THREE) return a.THREE;
+  return a; // (THREE, scene)
+}
 
 export const SolidWalls = {
-  group: null,
+  build(a, b){
+    const scene = _ctxScene(a, b);
+    const THREE = _ctxTHREE(a, b);
 
-  build(scene) {
-    this.group = new THREE.Group();
-    this.group.name = "SolidWalls";
+    if (!scene) throw new Error("SolidWalls.build: scene not found");
+    if (!THREE) throw new Error("SolidWalls.build: THREE not found");
 
-    const mat = new THREE.MeshStandardMaterial({ color: 0x0b0c10, roughness: 0.95 });
+    if (scene.userData.__solid_walls_built) return;
+    scene.userData.__solid_walls_built = true;
 
-    const h = 3.2;
-    const size = 18;
-    const t = 0.25;
+    // Basic room dims (match your fallback-ish)
+    const roomW = 60;
+    const roomD = 60;
+    const wallH = 4.4;
+    const wallT = 1.0;
+    const halfW = 15;
+    const halfD = 15;
 
-    const wallGeoX = new THREE.BoxGeometry(size, h, t);
-    const wallGeoZ = new THREE.BoxGeometry(t, h, size);
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x1a1f33,
+      roughness: 0.92,
+      metalness: 0.04
+    });
 
-    const north = new THREE.Mesh(wallGeoX, mat);
-    north.position.set(0, h / 2, -size / 2);
+    function wallBox(sx, sy, sz, x, y, z, name){
+      const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat);
+      m.name = name;
+      m.position.set(x, y, z);
+      scene.add(m);
+      return m;
+    }
 
-    const south = new THREE.Mesh(wallGeoX, mat);
-    south.position.set(0, h / 2, size / 2);
+    // Visible walls
+    wallBox(roomW, wallH, wallT, 0, wallH/2, -halfD, "wall_n");
+    wallBox(roomW, wallH, wallT, 0, wallH/2,  halfD, "wall_s");
+    wallBox(wallT, wallH, roomD, -halfW, wallH/2, 0, "wall_w");
+    wallBox(wallT, wallH, roomD,  halfW, wallH/2, 0, "wall_e");
 
-    const east = new THREE.Mesh(wallGeoZ, mat);
-    east.position.set(size / 2, h / 2, 0);
+    // Colliders for your collision solver (optional pattern used in your project)
+    scene.userData.colliders = scene.userData.colliders || [];
 
-    const west = new THREE.Mesh(wallGeoZ, mat);
-    west.position.set(-size / 2, h / 2, 0);
+    function colliderBox(sx, sy, sz, x, y, z, name){
+      const geo = new THREE.BoxGeometry(sx, sy, sz);
+      const mat = new THREE.MeshBasicMaterial({ visible: false });
+      const c = new THREE.Mesh(geo, mat);
+      c.name = name;
+      c.position.set(x, y, z);
+      scene.add(c);
+      scene.userData.colliders.push(c);
+      return c;
+    }
 
-    this.group.add(north, south, east, west);
-    scene.add(this.group);
-    return this.group;
+    colliderBox(roomW, wallH, wallT, 0, wallH/2, -halfD, "col_wall_n");
+    colliderBox(roomW, wallH, wallT, 0, wallH/2,  halfD, "col_wall_s");
+    colliderBox(wallT, wallH, roomD, -halfW, wallH/2, 0, "col_wall_w");
+    colliderBox(wallT, wallH, roomD,  halfW, wallH/2, 0, "col_wall_e");
   }
 };

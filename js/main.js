@@ -1,19 +1,10 @@
-// /js/main.js — Scarlett VR Poker — Permanent Main
-// Uses your index.html HUD events + importmap "three" + "three/addons/".
-
+// /js/main.js — Scarlett VR Poker — FULL MAIN (movement/teleport normal + poker + world + Update 4.0 avatar)
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 
 import { initWorld, CyberAvatar } from "./world.js";
 
-// ---------- HUD logger hook ----------
-const log = (m) => {
-  try { console.log(m); } catch {}
-  try {
-    // Your index defines appendLog inside module scope, not global.
-    // But it also logs to console already. We'll keep console-only here.
-  } catch {}
-};
+const log = (m) => { try { console.log(m); } catch {} };
 
 // ---------- Renderer ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -25,23 +16,35 @@ document.body.appendChild(renderer.domElement);
 // ---------- Scene + Camera ----------
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 250);
-camera.position.set(0, 1.6, 2.4);
+camera.position.set(0, 1.6, 3.0);
 
 // ---------- World ----------
 const world = initWorld({ THREE, scene, log });
 
-// ---------- VRButton (use session init from index) ----------
+// ---------- VRButton (uses your index session init with hand-tracking) ----------
 const sessionInit = window.__XR_SESSION_INIT || { optionalFeatures: ["local-floor", "bounded-floor"] };
-const vrBtn = VRButton.createButton(renderer, sessionInit);
-document.body.appendChild(vrBtn);
+document.body.appendChild(VRButton.createButton(renderer, sessionInit));
 log("[main] VRButton appended ✅");
 
-// ---------- Controllers (input allowed, models hidden permanently) ----------
+// ---------- Controllers (hidden) ----------
 const controller1 = renderer.xr.getController(0);
 const controller2 = renderer.xr.getController(1);
 controller1.visible = false;
 controller2.visible = false;
 scene.add(controller1, controller2);
+
+// ---------- Spawn helper (prevents table-stuck) ----------
+function placePlayerAtSpawn() {
+  const spawn = (world.spawn || new THREE.Vector3(0, 0, 3.0)).clone();
+  const camXZ = new THREE.Vector3(camera.position.x, 0, camera.position.z);
+  const delta = spawn.clone().sub(camXZ);
+  world.group.position.sub(delta);
+  log("[spawn] placed ✅ " + spawn.toArray().map(n=>n.toFixed(2)).join(","));
+}
+
+renderer.xr.addEventListener("sessionstart", () => {
+  requestAnimationFrame(() => placePlayerAtSpawn());
+});
 
 // ---------- Avatar 4.0 ----------
 const avatar4_0 = new CyberAvatar({
@@ -51,47 +54,28 @@ const avatar4_0 = new CyberAvatar({
   textureURL: "assets/textures/cyber_suit_atlas.png",
   log
 });
-log("[main] Avatar 4.0 ready ✅");
 
-// Respect your HUD "Hands" toggle
 window.addEventListener("scarlett-toggle-hands", (e) => {
-  const v = !!e.detail;
-  avatar4_0.setHandsVisible(v);
-  log("[main] hands toggle -> " + v);
+  avatar4_0.setHandsVisible(!!e.detail);
 });
 
 // ---------- Recenter ----------
 window.addEventListener("scarlett-recenter", () => {
-  // Soft recenter by resetting world group position (keeps XR reference space stable)
   world.group.position.set(0, 0, 0);
   world.group.rotation.set(0, 0, 0);
+  placePlayerAtSpawn();
   log("[main] recenter ✅");
 });
 
-// ---------- Movement + Teleport state ----------
+// ---------- Toggles ----------
 const state = {
-  // toggles are stored in index as __SCARLETT_FLAGS
-  move: !!window.__SCARLETT_FLAGS?.move,
-  snap: !!window.__SCARLETT_FLAGS?.snap,
-  teleport: !!window.__SCARLETT_FLAGS?.teleport,
-
-  // movement
-  vel: new THREE.Vector3(),
-  moveSpeed: 1.45,     // m/s
-  turnSpeed: 2.25,     // rad/s for smooth (we use snap mostly)
+  moveSpeed: 1.55,
   snapAngle: THREE.MathUtils.degToRad(30),
   snapCooldown: 0,
-
-  // teleport
-  teleportHit: new THREE.Vector3(),
   teleportOk: false,
+  teleportHit: new THREE.Vector3(),
   teleportArmed: false,
 };
-
-// HUD toggles -> update state
-window.addEventListener("scarlett-toggle-move", (e) => (state.move = !!e.detail));
-window.addEventListener("scarlett-toggle-snap", (e) => (state.snap = !!e.detail));
-window.addEventListener("scarlett-toggle-teleport", (e) => (state.teleport = !!e.detail));
 
 // ---------- Teleport visuals ----------
 const marker = new THREE.Mesh(
@@ -109,20 +93,18 @@ const rayLine = new THREE.Line(
 rayLine.visible = false;
 controller1.add(rayLine);
 
-// Basic raycast down to floor
 const raycaster = new THREE.Raycaster();
 const tmpMat = new THREE.Matrix4();
 const tmpDir = new THREE.Vector3();
 
-// Teleport confirm = select
+// Teleport confirm
 controller1.addEventListener("selectstart", () => {
-  if (!state.teleport) return;
+  if (!window.__SCARLETT_FLAGS?.teleport) return;
   state.teleportArmed = true;
 });
 controller1.addEventListener("selectend", () => {
-  if (!state.teleport) return;
+  if (!window.__SCARLETT_FLAGS?.teleport) return;
   if (state.teleportArmed && state.teleportOk) {
-    // Teleport by moving world opposite of hit (keeps camera stable)
     const hit = state.teleportHit.clone();
     const camXZ = new THREE.Vector3(camera.position.x, 0, camera.position.z);
     const delta = hit.clone().sub(camXZ);
@@ -144,14 +126,12 @@ window.addEventListener("scarlett-touch", (e) => {
   touch.turnR = d.turnR || 0;
 });
 
-// ---------- Poker simulation (watchable) ----------
+// ---------- Poker simulation (simple watchable loop) ----------
 const sim = {
-  t: 0,
+  timer: 0,
   phase: "idle",
   deck: [],
-  community: [null, null, null, null, null],
   dealIndex: 0,
-  timer: 0,
   handCount: 0,
   winnerSeat: 0,
 };
@@ -161,7 +141,6 @@ function makeDeck() {
   const ranks = ["A","K","Q","J","10","9","8","7","6","5","4","3","2"];
   const deck = [];
   for (const s of suits) for (const r of ranks) deck.push(r + s);
-  // shuffle
   for (let i = deck.length - 1; i > 0; i--) {
     const j = (Math.random() * (i + 1)) | 0;
     [deck[i], deck[j]] = [deck[j], deck[i]];
@@ -171,7 +150,6 @@ function makeDeck() {
 
 function startHand() {
   sim.deck = makeDeck();
-  sim.community = [null, null, null, null, null];
   sim.dealIndex = 0;
   sim.timer = 0;
   sim.phase = "preflop";
@@ -181,66 +159,51 @@ function startHand() {
 }
 
 function revealNext(n) {
-  for (let k = 0; k < n; k++) {
-    if (sim.dealIndex >= 5) return;
-    sim.community[sim.dealIndex] = sim.deck.pop();
-    sim.dealIndex++;
-  }
+  sim.dealIndex = Math.min(5, sim.dealIndex + n);
 }
 
-function pickWinner() {
-  // Placeholder “winner” for now: pick a random seat around table
-  sim.winnerSeat = (Math.random() * 6) | 0; // 0..5
+function pickWinnerAndMovePot() {
+  sim.winnerSeat = (Math.random() * 6) | 0;
   const angle = (sim.winnerSeat / 6) * Math.PI * 2;
-  const r = 1.9;
-  const winnerPosLocal = new THREE.Vector3(Math.cos(angle) * r, 0, Math.sin(angle) * r);
-  const winnerPosWorld = winnerPosLocal.clone();
-  world.pokerTable.group.localToWorld(winnerPosWorld);
-  world.pokerTable.movePotToWinner(winnerPosWorld);
+  const r = 2.0;
+  const winnerLocal = new THREE.Vector3(Math.cos(angle) * r, 0, Math.sin(angle) * r);
+  const winnerWorld = winnerLocal.clone();
+  world.pokerTable.group.localToWorld(winnerWorld);
+  world.pokerTable.movePotToWinner(winnerWorld);
   log(`[poker] winner seat=${sim.winnerSeat}`);
 }
 
 function updatePoker(dt) {
   sim.timer += dt;
 
-  // Display is visual only; the card text is not textured yet.
-  // But the community cards DO hover + face player (your requirement).
-  // We "simulate" dealing phases by time.
   if (sim.phase === "idle") {
     startHand();
     return;
   }
 
   if (sim.phase === "preflop" && sim.timer > 1.2) {
-    // Flop (3)
     revealNext(3);
     sim.phase = "flop";
-    log("[poker] flop " + sim.community.slice(0,3).join(" "));
+    log("[poker] flop");
     return;
   }
-
   if (sim.phase === "flop" && sim.timer > 2.4) {
-    // Turn (1)
     revealNext(1);
     sim.phase = "turn";
-    log("[poker] turn " + sim.community[3]);
+    log("[poker] turn");
     return;
   }
-
   if (sim.phase === "turn" && sim.timer > 3.6) {
-    // River (1)
     revealNext(1);
     sim.phase = "river";
-    log("[poker] river " + sim.community[4]);
+    log("[poker] river");
     return;
   }
-
   if (sim.phase === "river" && sim.timer > 5.0) {
     sim.phase = "showdown";
-    pickWinner();
+    pickWinnerAndMovePot();
     return;
   }
-
   if (sim.phase === "showdown" && sim.timer > 7.5) {
     sim.phase = "idle";
     sim.timer = 0;
@@ -266,26 +229,29 @@ renderer.setAnimationLoop((t, frame) => {
   controller1.visible = false;
   controller2.visible = false;
 
-  // Update avatar (hand tracking requires XR frame + refSpace)
+  // Avatar update (hand tracking)
   if (frame) {
     const refSpace = renderer.xr.getReferenceSpace();
     avatar4_0.update(frame, refSpace, camera);
   }
 
-  // Teleport ray only when teleport toggle enabled and in XR
+  // Teleport ray (always escapable)
   state.teleportOk = false;
   marker.visible = false;
   rayLine.visible = false;
 
-  if (state.teleport && renderer.xr.isPresenting) {
-    // Ray from controller1 pose
+  const flags = window.__SCARLETT_FLAGS || {};
+  const teleportOn = !!flags.teleport;
+  const moveOn = !!flags.move;
+  const snapOn = !!flags.snap;
+
+  if (teleportOn && renderer.xr.isPresenting) {
     tmpMat.identity().extractRotation(controller1.matrixWorld);
     tmpDir.set(0, 0, -1).applyMatrix4(tmpMat);
 
     raycaster.ray.origin.setFromMatrixPosition(controller1.matrixWorld);
     raycaster.ray.direction.copy(tmpDir);
 
-    // Intersect with floor (y=0 plane)
     const origin = raycaster.ray.origin;
     const dir = raycaster.ray.direction;
     const denom = dir.y;
@@ -293,69 +259,75 @@ renderer.setAnimationLoop((t, frame) => {
       const tHit = (0 - origin.y) / denom;
       if (tHit > 0) {
         const hit = origin.clone().add(dir.clone().multiplyScalar(tHit));
-        // prevent teleport too close to table top area (simple radius block)
-        const distToTable = new THREE.Vector2(hit.x, hit.z).length();
-        const blocked = distToTable < 1.35; // avoid teleporting into table
-        if (!blocked) {
-          state.teleportOk = true;
-          state.teleportHit.copy(hit);
-          marker.position.set(hit.x, 0.01, hit.z);
-          marker.visible = true;
+
+        // clamp if aiming too close to table center
+        const v2 = new THREE.Vector2(hit.x, hit.z);
+        const dist = v2.length();
+        const TABLE_BLOCK_R = 1.05;
+        const ESCAPE_R = 1.85;
+        const finalHit = hit.clone();
+
+        if (dist < TABLE_BLOCK_R) {
+          if (v2.lengthSq() < 1e-6) v2.set(1, 0);
+          v2.normalize().multiplyScalar(ESCAPE_R);
+          finalHit.x = v2.x;
+          finalHit.z = v2.y;
         }
+
+        state.teleportOk = true;
+        state.teleportHit.copy(finalHit);
+        marker.position.set(finalHit.x, 0.01, finalHit.z);
+        marker.visible = true;
       }
     }
 
     rayLine.visible = true;
-    // Update ray line length
     const pts = rayLine.geometry.attributes.position;
     pts.setXYZ(0, 0, 0, 0);
-    pts.setXYZ(1, 0, 0, state.teleportOk ? -6 : -3);
+    pts.setXYZ(1, 0, 0, -6);
     pts.needsUpdate = true;
   }
 
-  // Movement (XR gamepad sticks OR mobile dock)
-  const flags = window.__SCARLETT_FLAGS || {};
-  state.move = !!flags.move;
-  state.snap = !!flags.snap;
-  state.teleport = !!flags.teleport;
-
+  // Movement input (robust)
   let moveX = 0, moveZ = 0, snapX = 0;
 
-  // XR gamepad (controller1 usually left hand)
   if (renderer.xr.isPresenting) {
     const session = renderer.xr.getSession();
+    const gps = [];
     if (session?.inputSources) {
-      for (const src of session.inputSources) {
-        if (!src?.gamepad) continue;
-        const axes = src.gamepad.axes || [];
-        const handed = src.handedness;
+      for (const src of session.inputSources) if (src?.gamepad) gps.push(src);
 
-        // left stick -> move
-        if (handed === "left") {
-          moveX = axes[2] ?? axes[0] ?? 0;
-          moveZ = axes[3] ?? axes[1] ?? 0;
-        }
-        // right stick -> snap
-        if (handed === "right") {
-          snapX = axes[2] ?? axes[0] ?? 0;
-        }
+      const leftSrc = gps.find(s => s.handedness === "left") || gps[0];
+      const rightSrc = gps.find(s => s.handedness === "right") || gps[1];
+
+      const readStick = (src) => {
+        const a = src?.gamepad?.axes || [];
+        return { x: (a[2] ?? a[0] ?? 0), y: (a[3] ?? a[1] ?? 0) };
+      };
+
+      if (leftSrc) {
+        const s = readStick(leftSrc);
+        moveX = s.x; moveZ = s.y;
+      }
+      if (rightSrc) {
+        const s = readStick(rightSrc);
+        snapX = s.x;
       }
     }
   }
 
-  // Mobile dock overrides/adds
+  // Mobile dock adds
   moveZ += (touch.f ? -1 : 0) + (touch.b ? 1 : 0);
   moveX += (touch.r ? 1 : 0) + (touch.l ? -1 : 0);
   snapX += (touch.turnR ? 1 : 0) + (touch.turnL ? -1 : 0);
 
-  // Apply movement by moving world group opposite of desired direction
-  if (state.move) {
+  // Apply move (world moves opposite)
+  if (moveOn) {
     const dead = 0.14;
     const mx = Math.abs(moveX) > dead ? moveX : 0;
     const mz = Math.abs(moveZ) > dead ? moveZ : 0;
 
     if (mx || mz) {
-      // camera forward on XZ plane
       const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
       fwd.y = 0; fwd.normalize();
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
@@ -364,24 +336,23 @@ renderer.setAnimationLoop((t, frame) => {
       const dir = new THREE.Vector3();
       dir.addScaledVector(right, mx);
       dir.addScaledVector(fwd, mz);
-      dir.normalize();
+      if (dir.lengthSq() > 1e-6) dir.normalize();
 
-      const delta = dir.multiplyScalar(state.moveSpeed * dt);
-      world.group.position.sub(delta); // move world opposite
+      const delta = dir.multiplyScalar(1.55 * dt);
+      world.group.position.sub(delta);
     }
   }
 
-  // Snap turn by rotating world around camera
-  if (state.snap) {
+  // Snap turn (rotate world around camera)
+  if (snapOn) {
     const dead = 0.65;
     state.snapCooldown = Math.max(0, state.snapCooldown - dt);
 
     if (state.snapCooldown === 0 && Math.abs(snapX) > dead) {
-      const sgn = snapX > 0 ? -1 : 1; // invert for natural feel
+      const sgn = snapX > 0 ? -1 : 1;
       const angle = sgn * state.snapAngle;
 
       const camPos = camera.position.clone();
-      // translate world so cam at origin, rotate, translate back
       world.group.position.sub(camPos);
       world.group.rotateY(angle);
       world.group.position.add(camPos);
@@ -390,13 +361,13 @@ renderer.setAnimationLoop((t, frame) => {
     }
   }
 
-  // Update table visuals (cards hover + face player; pot animation)
-  world.pokerTable.update(dt, camera);
+  // Update world (NPCs + table hover)
+  world.update(dt, camera);
 
-  // Poker simulation
+  // Poker sim tick
   updatePoker(dt);
 
   renderer.render(scene, camera);
 });
 
-log("[main] ready ✅");
+log("[main] FULL ready ✅");

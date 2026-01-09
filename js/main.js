@@ -1,341 +1,187 @@
-// /js/main.js — Scarlett VR Poker Boot v11.2 (STABLE + Controller-on-Rig Fix)
-// Works with your permanent index.html importmap (CDN).
-// Key fixes:
-// - Controllers + grips parented to PlayerRig so they follow locomotion/teleport.
-// - Purple glow lasers.
-// - Safe fallbacks for world.tableFocus to prevent undefined.x errors.
-// - Listens to __SCARLETT_FLAGS and HUD toggle events.
-// - DealingMix loaded safely (won't crash if missing).
+// /js/controls.js — Scarlett Controls v4.2 (FULL / FIXED)
+// ✅ Smooth move + strafe (left stick)
+// ✅ Optional right-stick forward/back movement (requested)
+// ✅ Snap turn (right stick X)
+// ✅ Reads HUD flags (move/snap)
+// ✅ Emits "scarlett-menu" ONCE per Y press (debounced)
+// ✅ Mobile dock fallback (scarlett-touch)
 
-import * as THREE from "three";
-import { VRButton } from "three/addons/webxr/VRButton.js";
-import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
+export const Controls = (() => {
+  function init({ THREE, renderer, camera, player, controllers, grips, log, world } = {}) {
+    const L = (...a) => { try { log?.(...a); } catch { console.log(...a); } };
 
-import { initWorld } from "./world.js";
-import { Controls } from "./controls.js";
-import { Teleport } from "./teleport.js";
-import { HandsSystem } from "./hands.js";
+    const Flags = () => (window.__SCARLETT_FLAGS || {});
+    const S = {
+      moveEnabled: !!(Flags().move ?? true),
+      snapEnabled: !!(Flags().snap ?? true),
 
-// ------------------------------------------------------------
-// LOG (index.html expects #log)
-// ------------------------------------------------------------
-const logEl = document.getElementById("log");
-function LOG(...a) {
-  try { console.log(...a); } catch {}
-  try {
-    if (logEl) {
-      logEl.textContent += "\n" + a.map(x => String(x)).join(" ");
-      logEl.scrollTop = logEl.scrollHeight;
+      speed: 2.2,
+      rightMoveSpeed: 2.0,          // ✅ right-hand forward/back (slightly slower by default)
+      snapAngle: THREE.MathUtils.degToRad(45), // ✅ your requested 45°
+      deadzone: 0.18,
+
+      snapCooldown: 0,
+      touch: { f:0,b:0,l:0,r:0,turnL:0,turnR:0 },
+
+      // menu debounce
+      yWasDown: false,
+      lastMenuT: 0,
+
+      // if you want right-stick move always ON:
+      rightStickMoveEnabled: true,
+    };
+
+    // HUD toggle events
+    window.addEventListener("scarlett-toggle-move", (e) => { S.moveEnabled = !!e.detail; });
+    window.addEventListener("scarlett-toggle-snap", (e) => { S.snapEnabled = !!e.detail; });
+    window.addEventListener("scarlett-touch", (e) => { S.touch = e.detail || S.touch; });
+
+    function getSession() {
+      try { return renderer?.xr?.getSession?.() || null; } catch { return null; }
     }
-  } catch {}
-}
-window.addEventListener("unhandledrejection", (e) => {
-  LOG("❌ unhandledrejection:", e?.reason?.message || e?.reason || e);
-});
-window.addEventListener("error", (e) => {
-  LOG("❌ error:", e?.message || e);
-});
 
-const BOOT_V = window.__BUILD_V || Date.now().toString();
-LOG("BOOT v=" + BOOT_V);
-
-// ------------------------------------------------------------
-// SCENE
-// ------------------------------------------------------------
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x020205);
-scene.fog = new THREE.Fog(0x020205, 3, 90);
-
-// ------------------------------------------------------------
-// CAMERA + PLAYER RIG
-// ------------------------------------------------------------
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 350);
-
-const player = new THREE.Group();
-player.name = "PlayerRig";
-player.add(camera);
-scene.add(player);
-
-// spawn (world will align this too)
-player.position.set(0, 0, 3.6);
-camera.position.set(0, 1.65, 0);
-
-// ------------------------------------------------------------
-// RENDERER
-// ------------------------------------------------------------
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.xr.enabled = true;
-
-try { renderer.xr.setReferenceSpaceType("local-floor"); } catch {}
-
-document.body.appendChild(renderer.domElement);
-document.body.appendChild(VRButton.createButton(renderer));
-
-// ------------------------------------------------------------
-// LIGHTING (baseline; world adds more)
-// ------------------------------------------------------------
-scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.15));
-const dir = new THREE.DirectionalLight(0xffffff, 1.0);
-dir.position.set(7, 12, 6);
-scene.add(dir);
-
-// ------------------------------------------------------------
-// FLAGS FROM INDEX HUD
-// ------------------------------------------------------------
-const Flags = (window.__SCARLETT_FLAGS = window.__SCARLETT_FLAGS || {
-  teleport: true,
-  move: true,
-  snap: true,
-  hands: true
-});
-
-// toggle events from index.html
-window.addEventListener("scarlett-toggle-teleport", (e) => { Flags.teleport = !!e.detail; LOG("[hud] teleport=" + Flags.teleport); });
-window.addEventListener("scarlett-toggle-move", (e) => { Flags.move = !!e.detail; LOG("[hud] move=" + Flags.move); });
-window.addEventListener("scarlett-toggle-snap", (e) => { Flags.snap = !!e.detail; LOG("[hud] snap=" + Flags.snap); });
-window.addEventListener("scarlett-toggle-hands", (e) => { Flags.hands = !!e.detail; LOG("[hud] hands=" + Flags.hands); });
-
-// ------------------------------------------------------------
-// XR CONTROLLERS (IMPORTANT: parent to PlayerRig so they follow movement)
-// ------------------------------------------------------------
-const controllerModelFactory = new XRControllerModelFactory();
-const controllers = [];
-const grips = [];
-
-// purple glow laser
-function makeLaser() {
-  const geo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, 0, -1),
-  ]);
-  const mat = new THREE.LineBasicMaterial({ color: 0xb46bff, transparent: true, opacity: 0.95 });
-  const line = new THREE.Line(geo, mat);
-  line.scale.z = 10;
-  line.name = "LaserLine";
-
-  // little glowing tip
-  const tip = new THREE.Mesh(
-    new THREE.SphereGeometry(0.010, 10, 8),
-    new THREE.MeshBasicMaterial({ color: 0xff2d7a, transparent: true, opacity: 0.95 })
-  );
-  tip.position.z = -1.0;
-  tip.name = "LaserTip";
-  line.add(tip);
-
-  return line;
-}
-
-for (let i = 0; i < 2; i++) {
-  const c = renderer.xr.getController(i);
-  c.name = "Controller" + i;
-  c.add(makeLaser());
-
-  // ✅ Parent to player rig (fixes “controllers floating in front of me”)
-  player.add(c);
-  controllers.push(c);
-
-  const g = renderer.xr.getControllerGrip(i);
-  g.name = "Grip" + i;
-  g.add(controllerModelFactory.createControllerModel(g));
-
-  // ✅ Parent to player rig also
-  player.add(g);
-  grips.push(g);
-}
-
-LOG("[main] controllers ready ✅");
-
-// ------------------------------------------------------------
-// WORLD
-// ------------------------------------------------------------
-let world = null;
-try {
-  world = await initWorld({ THREE, scene, log: LOG, v: BOOT_V });
-  LOG("[world] ready ✅");
-} catch (e) {
-  LOG("❌ world init failed:", e?.message || e);
-  world = null;
-}
-
-// safe tableFocus fallback
-const tableFocus = world?.tableFocus && Number.isFinite(world.tableFocus.x)
-  ? world.tableFocus
-  : new THREE.Vector3(0, 0, -6.5);
-
-// point camera at table by default (non-VR)
-try { camera.lookAt(tableFocus.x, 1.0, tableFocus.z); } catch {}
-
-LOG("[main] world loaded ✅");
-
-// Connect world features
-try {
-  world?.connect?.({ playerRig: player, camera, controllers, grips });
-} catch (e) {
-  LOG("[main] world.connect failed:", e?.message || e);
-}
-
-// ------------------------------------------------------------
-// CONTROLS
-// ------------------------------------------------------------
-const controls = Controls.init({
-  THREE,
-  renderer,
-  camera,
-  player,
-  controllers,
-  grips,
-  log: LOG,
-  world
-});
-
-// Optional: HUD touch movement (Android) — if your controls.js supports it
-let touchVec = { f: 0, b: 0, l: 0, r: 0, turnL: 0, turnR: 0 };
-window.addEventListener("scarlett-touch", (e) => {
-  if (!e?.detail) return;
-  touchVec = { ...touchVec, ...e.detail };
-});
-
-// ------------------------------------------------------------
-// HANDS
-// ------------------------------------------------------------
-const hands = HandsSystem.init({
-  THREE,
-  scene,
-  renderer,
-  log: LOG
-});
-
-// ------------------------------------------------------------
-// TELEPORT
-// ------------------------------------------------------------
-const teleport = Teleport.init({
-  THREE,
-  scene,
-  renderer,
-  camera,
-  player,
-  controllers,
-  log: LOG,
-  world
-});
-
-// ------------------------------------------------------------
-// DEALING MIX (SAFE LOAD)
-// ------------------------------------------------------------
-let dealing = null;
-async function loadDealingMix() {
-  const tryPaths = [
-    "./dealingMix.js",
-    "./DealingMix.js",
-    "./dealerMix.js",
-    "./DealerMix.js"
-  ];
-
-  for (const p of tryPaths) {
-    try {
-      const mod = await import(`${p}?v=${encodeURIComponent(BOOT_V)}`);
-      if (mod?.DealingMix?.init) return mod.DealingMix;
-    } catch {}
-  }
-  return null;
-}
-
-try {
-  const DealingMix = await loadDealingMix();
-  if (DealingMix) {
-    dealing = DealingMix.init({
-      THREE,
-      scene,
-      log: LOG,
-      world
-    });
-    dealing.startHand?.();
-    LOG("[DealingMix] init ✅");
-  } else {
-    LOG("[DealingMix] missing ⚠️ (no module found)");
-  }
-} catch (e) {
-  LOG("[DealingMix] init failed ⚠️", e?.message || e);
-  dealing = null;
-}
-
-// ------------------------------------------------------------
-// RECENTER (from HUD)
-// ------------------------------------------------------------
-window.addEventListener("scarlett-recenter", () => {
-  const spawn = world?.spawnPads?.[0] || new THREE.Vector3(0, 0, 3.6);
-  player.position.set(spawn.x, 0, spawn.z);
-  player.rotation.set(0, 0, 0);
-  try { camera.lookAt(tableFocus.x, 1.0, tableFocus.z); } catch {}
-  LOG("[main] recentered ✅");
-});
-
-// ------------------------------------------------------------
-// RESIZE
-// ------------------------------------------------------------
-window.addEventListener("resize", () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
-
-// ------------------------------------------------------------
-// SMALL HELPERS
-// ------------------------------------------------------------
-function clampPosToRoom() {
-  const c = world?.roomClamp;
-  if (!c) return;
-  player.position.x = clamp(player.position.x, c.minX, c.maxX);
-  player.position.z = clamp(player.position.z, c.minZ, c.maxZ);
-}
-function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-
-// ------------------------------------------------------------
-// LOOP
-// ------------------------------------------------------------
-let last = performance.now();
-
-renderer.setAnimationLoop(() => {
-  const now = performance.now();
-  const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
-
-  // respect HUD flags
-  try { world?.tick?.(dt); } catch (e) { console.error(e); }
-
-  try {
-    // If controls.js supports internal flags, let it read window.__SCARLETT_FLAGS
-    if (Flags.move || Flags.snap) controls?.update?.(dt);
-  } catch (e) { console.error(e); }
-
-  try {
-    if (Flags.teleport) teleport?.update?.(dt);
-  } catch (e) { console.error(e); }
-
-  try { dealing?.update?.(dt); } catch (e) { console.error(e); }
-
-  try {
-    hands?.setEnabled?.(!!Flags.hands);
-    if (Flags.hands) hands?.update?.(dt);
-  } catch (e) { console.error(e); }
-
-  // keep inside room bounds (simple safety)
-  try { clampPosToRoom(); } catch {}
-
-  // laser pulse
-  try {
-    const t = now * 0.001;
-    for (const c of controllers) {
-      const line = c.getObjectByName("LaserLine");
-      if (line?.material) line.material.opacity = 0.70 + Math.sin(t * 4.0) * 0.18;
-      const tip = c.getObjectByName("LaserTip");
-      if (tip?.material) tip.material.opacity = 0.75 + Math.sin(t * 6.0) * 0.22;
+    // Normalize deadzone
+    function dz(v) {
+      const a = Math.abs(v);
+      if (a < S.deadzone) return 0;
+      const sign = Math.sign(v);
+      const t = (a - S.deadzone) / (1 - S.deadzone);
+      return sign * t;
     }
-  } catch {}
 
-  renderer.render(scene, camera);
-});
+    // Find XR input source by handedness
+    function getSource(handedness) {
+      const session = getSession();
+      if (!session?.inputSources) return null;
+      for (const src of session.inputSources) {
+        if (!src?.gamepad) continue;
+        if (src.handedness === handedness) return src;
+      }
+      return null;
+    }
 
-LOG("[main] ready ✅");
+    // Quest mapping is typically:
+    // Left stick:  axes[0], axes[1]
+    // Right stick: axes[2], axes[3]
+    // But some runtimes expose per-controller axes as [0],[1] only.
+    function readStick(src, which) {
+      // which: "left" or "right"
+      const gp = src?.gamepad;
+      if (!gp) return { x: 0, y: 0, buttons: [] };
+
+      const axes = gp.axes || [];
+      const buttons = gp.buttons || [];
+
+      // If 4+ axes exist, use standard Quest mapping.
+      if (axes.length >= 4) {
+        if (which === "right") return { x: axes[2] || 0, y: axes[3] || 0, buttons };
+        return { x: axes[0] || 0, y: axes[1] || 0, buttons };
+      }
+
+      // If only 2 axes exist on each controller, use [0],[1]
+      return { x: axes[0] || 0, y: axes[1] || 0, buttons };
+    }
+
+    // Move relative to PLAYER yaw (stable)
+    const fwd = new THREE.Vector3();
+    const side = new THREE.Vector3();
+
+    function moveLocal(strafeX, forwardY, speed, dt) {
+      if (strafeX === 0 && forwardY === 0) return;
+
+      fwd.set(0, 0, -1).applyQuaternion(player.quaternion);
+      fwd.y = 0; fwd.normalize();
+
+      side.set(1, 0, 0).applyQuaternion(player.quaternion);
+      side.y = 0; side.normalize();
+
+      player.position.addScaledVector(fwd, forwardY * speed * dt);
+      player.position.addScaledVector(side, strafeX * speed * dt);
+    }
+
+    function snapTurn(xAxis) {
+      S.snapCooldown = Math.max(0, S.snapCooldown - 0); // handled in update, keep simple here
+      if (!S.snapEnabled) return;
+      if (Math.abs(xAxis) < 0.75) return;
+      if (S.snapCooldown > 0) return;
+
+      // right stick: positive should turn right; adjust sign to feel natural
+      player.rotation.y -= Math.sign(xAxis) * S.snapAngle;
+      S.snapCooldown = 0.25;
+    }
+
+    function emitMenuOnce(nowSec, pressed) {
+      // debounce + edge trigger
+      if (pressed && !S.yWasDown) {
+        // extra guard: avoid double-fire within 0.2s
+        if ((nowSec - S.lastMenuT) > 0.20) {
+          window.dispatchEvent(new Event("scarlett-menu"));
+          S.lastMenuT = nowSec;
+          L("[controls] scarlett-menu ✅");
+        }
+      }
+      S.yWasDown = pressed;
+    }
+
+    L("[controls] ready ✅ (45° snap + left move + right move + debounced menu)");
+
+    function update(dt) {
+      // Keep rig on ground plane (world collision later)
+      player.position.y = 0;
+
+      // --- Mobile dock fallback (Android) ---
+      if (!renderer?.xr?.isPresenting) {
+        const f = (S.touch.f || 0) - (S.touch.b || 0);
+        const r = (S.touch.r || 0) - (S.touch.l || 0);
+        const turn = (S.touch.turnR || 0) - (S.touch.turnL || 0);
+
+        // move
+        moveLocal(r, f, S.speed, dt);
+
+        // smooth turn on mobile
+        player.rotation.y -= turn * 1.6 * dt;
+        return;
+      }
+
+      // --- XR ---
+      const leftSrc = getSource("left");
+      const rightSrc = getSource("right");
+
+      const left = readStick(leftSrc, "left");
+      const right = readStick(rightSrc, "right");
+
+      // movement (left stick)
+      if (S.moveEnabled) {
+        const lx = dz(left.x);
+        const ly = dz(left.y);
+
+        // forward is typically -Y
+        moveLocal(lx, (-ly), S.speed, dt);
+
+        // movement (right stick forward/back too — requested)
+        if (S.rightStickMoveEnabled) {
+          const ry = dz(right.y);
+          if (Math.abs(ry) > 0) moveLocal(0, (-ry), S.rightMoveSpeed, dt);
+        }
+      }
+
+      // snap turn (right stick X)
+      S.snapCooldown = Math.max(0, S.snapCooldown - dt);
+      snapTurn(dz(right.x));
+
+      // Y button -> menu (debounced)
+      // Quest mapping varies; Y is often left controller button[3]
+      const buttons = left.buttons || [];
+      const yPressed =
+        !!buttons[3]?.pressed || // common "Y"
+        !!buttons[4]?.pressed || // fallback
+        !!buttons[5]?.pressed;   // fallback
+
+      emitMenuOnce(performance.now() * 0.001, yPressed);
+    }
+
+    return { update };
+  }
+
+  return { init };
+})();

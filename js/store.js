@@ -1,9 +1,6 @@
-// /js/store.js — Scarlett VR Poker StoreSystem v1.0
-// GitHub Pages safe: no "three" import. main/world will pass THREE.
-// Builds a store kiosk/showcase area + interactive pads.
-// Does NOT require modifying main.js/world.js yet.
-// Integration later: call StoreSystem.init({ THREE, scene: world.group, log, world, player, camera })
-// or just init it inside world.js when you're ready.
+// /js/store.js — Scarlett VR Poker StoreSystem v1.1 (Carousel + Gaze Info + Glass/Mirror)
+// Safe, standalone. Does NOT require modifying main.js or world.js yet.
+// Usage later (when you allow): StoreSystem.init({ THREE, scene: world.group, world, player, camera, log })
 
 import { StoreCatalog } from "./store_catalog.js";
 
@@ -21,13 +18,21 @@ export const StoreSystem = (() => {
     kiosk: null,
     pads: [],
     uiBillboard: null,
+    itemBillboard: null,
+    carousel: null,
+    mirrorWall: null,
+
     active: true,
     t: 0,
     lastFocusPad: null,
-    // simple “wallet” placeholder for now
+    lastFocusItem: null,
+
     wallet: { chips: 100000 },
-    // user-owned cosmetics placeholder
     owned: new Set(),
+
+    raycaster: null,
+    tmpV: null,
+    tmpV2: null
   };
 
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -35,22 +40,6 @@ export const StoreSystem = (() => {
 
   function safeColorSpace(tex) {
     try { tex.colorSpace = THREE.SRGBColorSpace; } catch {}
-  }
-
-  async function loadTexture(url) {
-    return await new Promise((resolve) => {
-      try {
-        const loader = new THREE.TextureLoader();
-        loader.load(
-          url,
-          (t) => { safeColorSpace(t); resolve(t); },
-          undefined,
-          () => resolve(null)
-        );
-      } catch {
-        resolve(null);
-      }
-    });
   }
 
   function makeNeonMat(hex, emissiveHex, intensity = 1.2, opacity = 0.95) {
@@ -79,7 +68,19 @@ export const StoreSystem = (() => {
     });
   }
 
-  function makeSignCanvas(textTop, textBottom) {
+  function makeMirrorGlassMat() {
+    // fake “mirror glass” — reflective-ish look without real reflection pipeline
+    return new THREE.MeshStandardMaterial({
+      color: 0x0b0d14,
+      roughness: 0.05,
+      metalness: 0.95,
+      emissive: 0x000000,
+      transparent: true,
+      opacity: 0.22
+    });
+  }
+
+  function makeSignCanvas(textTop, textBottom, accent = "#7fe7ff") {
     const c = document.createElement("canvas");
     c.width = 1024;
     c.height = 512;
@@ -95,7 +96,7 @@ export const StoreSystem = (() => {
     ctx.font = "bold 72px Arial";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillStyle = "#7fe7ff";
+    ctx.fillStyle = accent;
     ctx.fillText(textTop, 512, 210);
 
     // bottom line
@@ -125,12 +126,11 @@ export const StoreSystem = (() => {
     return tex;
   }
 
-  function makeBillboardSign(w = 1.6, h = 0.8, top = "STORE", bottom = "Cosmetics • Skins • VIP") {
-    const tex = makeSignCanvas(top, bottom);
+  function makeBillboard(w, h, top, bottom, accent = "#7fe7ff") {
+    const tex = makeSignCanvas(top, bottom, accent);
     const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: true });
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
-    m.name = "StoreSign";
-    m.renderOrder = 25;
+    m.renderOrder = 30;
     return m;
   }
 
@@ -140,7 +140,7 @@ export const StoreSystem = (() => {
 
     const base = new THREE.Mesh(
       new THREE.RingGeometry(0.26, 0.40, 48),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.78, side: THREE.DoubleSide })
     );
     base.rotation.x = -Math.PI / 2;
     base.position.y = 0.02;
@@ -148,18 +148,18 @@ export const StoreSystem = (() => {
 
     const plate = new THREE.Mesh(
       new THREE.CylinderGeometry(0.22, 0.22, 0.02, 28),
-      makeNeonMat(0x0b0d14, color, 0.55, 0.92)
+      makeNeonMat(0x0b0d14, color, 0.55, 0.95)
     );
     plate.position.y = 0.01;
     g.add(plate);
 
-    // label (canvas)
-    const tex = makeSignCanvas(label, "Tap / Trigger");
+    const tex = makeSignCanvas(label, "Tap / Trigger", "#7fe7ff");
     const sign = new THREE.Mesh(
       new THREE.PlaneGeometry(0.92, 0.42),
       new THREE.MeshBasicMaterial({ map: tex, transparent: true })
     );
     sign.position.set(0, 0.62, 0);
+    sign.visible = false; // only show when focused
     g.add(sign);
 
     g.userData = {
@@ -181,47 +181,46 @@ export const StoreSystem = (() => {
     const skin = new THREE.MeshStandardMaterial({ color: sex === "female" ? 0xd9b6a3 : 0xd2b48c, roughness: 0.65 });
     const suit = new THREE.MeshStandardMaterial({ color: sex === "female" ? 0x1b1020 : 0x111318, roughness: 0.75, metalness: 0.05 });
 
-    // low-poly but more human-like proportions
-    const pelvis = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.14, 0.14), suit);
-    pelvis.position.y = 0.98;
-    g.add(pelvis);
+    // proportions (more human-like)
+    const hips = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.14, 0.16), suit);
+    hips.position.y = 0.98;
+    g.add(hips);
 
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.50, 6, 14), suit);
-    torso.position.y = 1.25;
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.56, 6, 14), suit);
+    torso.position.y = 1.28;
     g.add(torso);
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.135, 18, 12), skin);
-    head.position.y = 1.62;
-    g.add(head);
-
-    // shoulders
-    const shoulder = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 0.18), suit);
-    shoulder.position.y = 1.45;
+    const shoulder = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.12, 0.20), suit);
+    shoulder.position.y = 1.52;
     g.add(shoulder);
 
-    // arms with elbows
-    const upperArmGeo = new THREE.CapsuleGeometry(0.045, 0.22, 6, 10);
-    const foreArmGeo  = new THREE.CapsuleGeometry(0.042, 0.20, 6, 10);
-    const handGeo     = new THREE.BoxGeometry(0.06, 0.03, 0.09);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.14, 18, 12), skin);
+    head.position.y = 1.72;
+    g.add(head);
+
+    // arms w/ elbows
+    const upperArmGeo = new THREE.CapsuleGeometry(0.046, 0.25, 6, 10);
+    const foreArmGeo  = new THREE.CapsuleGeometry(0.043, 0.22, 6, 10);
+    const handGeo     = new THREE.BoxGeometry(0.065, 0.03, 0.10);
 
     function arm(side = -1) {
       const root = new THREE.Group();
-      root.position.set(0.22 * side, 1.43, 0);
+      root.position.set(0.24 * side, 1.50, 0);
 
       const upper = new THREE.Mesh(upperArmGeo, suit);
-      upper.position.y = -0.12;
+      upper.position.y = -0.14;
       root.add(upper);
 
       const elbow = new THREE.Group();
-      elbow.position.y = -0.26;
+      elbow.position.y = -0.30;
       root.add(elbow);
 
       const fore = new THREE.Mesh(foreArmGeo, suit);
-      fore.position.y = -0.10;
+      fore.position.y = -0.11;
       elbow.add(fore);
 
       const hand = new THREE.Mesh(handGeo, suit);
-      hand.position.set(0, -0.25, 0.02);
+      hand.position.set(0, -0.28, 0.02);
       elbow.add(hand);
 
       root.userData = { elbow };
@@ -233,28 +232,28 @@ export const StoreSystem = (() => {
     g.add(armL, armR);
 
     // legs + shoes
-    const thighGeo = new THREE.CapsuleGeometry(0.055, 0.33, 6, 12);
-    const shinGeo  = new THREE.CapsuleGeometry(0.05, 0.30, 6, 12);
-    const shoeGeo  = new THREE.BoxGeometry(0.12, 0.05, 0.22);
+    const thighGeo = new THREE.CapsuleGeometry(0.058, 0.36, 6, 12);
+    const shinGeo  = new THREE.CapsuleGeometry(0.052, 0.32, 6, 12);
+    const shoeGeo  = new THREE.BoxGeometry(0.13, 0.05, 0.24);
 
     function leg(side = -1) {
       const hip = new THREE.Group();
-      hip.position.set(0.10 * side, 0.93, 0);
+      hip.position.set(0.11 * side, 0.93, 0);
 
       const thigh = new THREE.Mesh(thighGeo, suit);
-      thigh.position.y = -0.18;
+      thigh.position.y = -0.20;
       hip.add(thigh);
 
       const knee = new THREE.Group();
-      knee.position.y = -0.40;
+      knee.position.y = -0.44;
       hip.add(knee);
 
       const shin = new THREE.Mesh(shinGeo, suit);
-      shin.position.y = -0.16;
+      shin.position.y = -0.18;
       knee.add(shin);
 
-      const shoe = new THREE.Mesh(shoeGeo, new THREE.MeshStandardMaterial({ color: 0x0b0b0f, roughness: 0.8 }));
-      shoe.position.set(0, -0.35, 0.08);
+      const shoe = new THREE.Mesh(shoeGeo, new THREE.MeshStandardMaterial({ color: 0x0b0b0f, roughness: 0.85 }));
+      shoe.position.set(0, -0.37, 0.08);
       knee.add(shoe);
 
       hip.userData = { knee };
@@ -265,12 +264,7 @@ export const StoreSystem = (() => {
     const legR = leg(1);
     g.add(legL, legR);
 
-    // simple “tag”
-    const tag = makeBillboardSign(0.9, 0.35, sex === "female" ? "STORE MODEL" : "STORE MODEL", sex === "female" ? "FEMALE" : "MALE");
-    tag.position.set(0, 1.95, 0);
-    g.add(tag);
-
-    g.userData = { armL, armR, legL, legR, tag, sex };
+    g.userData = { armL, armR, legL, legR, sex };
     return g;
   }
 
@@ -278,31 +272,158 @@ export const StoreSystem = (() => {
     const g = new THREE.Group();
     g.name = "Shelf";
 
-    const wood = new THREE.MeshStandardMaterial({ color: 0x1b0f0c, roughness: 0.9 });
+    const wood = new THREE.MeshStandardMaterial({ color: 0x1b0f0c, roughness: 0.95 });
     const metal = new THREE.MeshStandardMaterial({ color: 0x12131a, roughness: 0.75, metalness: 0.15 });
 
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.5, 0.35), metal);
-    frame.position.y = 0.75;
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(1.35, 1.55, 0.35), metal);
+    frame.position.y = 0.78;
     g.add(frame);
 
     for (let i = 0; i < 3; i++) {
-      const plank = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.06, 0.30), wood);
-      plank.position.set(0, 0.35 + i * 0.45, 0);
+      const plank = new THREE.Mesh(new THREE.BoxGeometry(1.22, 0.06, 0.30), wood);
+      plank.position.set(0, 0.38 + i * 0.46, 0);
       g.add(plank);
-    }
-
-    // little “product blocks”
-    const pmat = makeNeonMat(0x0b0d14, 0xff2d7a, 0.45, 0.98);
-    for (let i = 0; i < 6; i++) {
-      const box = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.10, 0.12), pmat);
-      box.position.set(-0.50 + (i % 3) * 0.50, 0.40 + Math.floor(i / 3) * 0.45, 0.02);
-      g.add(box);
     }
 
     return g;
   }
 
-  function buildStoreKiosk({ position = new THREE.Vector3(6.0, 0, -6.5), yaw = Math.PI / 2 } = {}) {
+  // --- Product display items (chips/cards) ---
+  function makeChipToken(color = 0xff2d7a, accent = 0x7fe7ff) {
+    const g = new THREE.Group();
+    g.name = "ChipToken";
+
+    const outer = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.12, 0.035, 40),
+      new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.2 })
+    );
+    outer.rotation.x = Math.PI / 2;
+    g.add(outer);
+
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.078, 0.012, 10, 40),
+      makeNeonMat(accent, accent, 0.6, 0.95)
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.z = 0.020;
+    g.add(ring);
+
+    return g;
+  }
+
+  function makeCardToken(backColor = 0x141826, edge = 0xff2d7a) {
+    const g = new THREE.Group();
+    g.name = "CardToken";
+
+    const card = new THREE.Mesh(
+      new THREE.BoxGeometry(0.16, 0.22, 0.01),
+      new THREE.MeshStandardMaterial({ color: backColor, roughness: 0.55, metalness: 0.05, emissive: edge, emissiveIntensity: 0.12 })
+    );
+    g.add(card);
+
+    const edgeGlow = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.18, 0.24),
+      new THREE.MeshBasicMaterial({ color: edge, transparent: true, opacity: 0.22 })
+    );
+    edgeGlow.position.z = 0.008;
+    g.add(edgeGlow);
+
+    return g;
+  }
+
+  function makeProductCarousel() {
+    const root = new THREE.Group();
+    root.name = "ProductCarousel";
+
+    const base = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.80, 0.95, 0.10, 48),
+      new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.95 })
+    );
+    base.position.y = 0.05;
+    root.add(base);
+
+    const rim = new THREE.Mesh(
+      new THREE.TorusGeometry(0.86, 0.03, 10, 80),
+      makeNeonMat(0x7fe7ff, 0x2bd7ff, 1.1, 0.9)
+    );
+    rim.rotation.x = Math.PI / 2;
+    rim.position.y = 0.11;
+    root.add(rim);
+
+    const items = [];
+
+    // pick some catalog items (first few)
+    const pick = [];
+    for (const cat of StoreCatalog.categories) {
+      for (const it of cat.items) {
+        pick.push({ ...it, cat: cat.id });
+      }
+    }
+
+    // build 8 display objects around ring
+    const N = Math.min(8, pick.length);
+    for (let i = 0; i < N; i++) {
+      const it = pick[i];
+      const ang = (i / N) * Math.PI * 2;
+
+      let obj;
+      if (it.type === "chip_skin") obj = makeChipToken(0xff2d7a, 0x7fe7ff);
+      else if (it.type === "card_back") obj = makeCardToken(0x141826, 0x7fe7ff);
+      else if (it.type === "hands") obj = makeChipToken(0x7fe7ff, 0xff2d7a);
+      else obj = makeCardToken(0x141826, 0xff2d7a);
+
+      obj.position.set(Math.cos(ang) * 0.65, 0.35, Math.sin(ang) * 0.65);
+      obj.rotation.y = -ang;
+      obj.userData.storeItem = it;
+      obj.userData.spinPhase = Math.random() * 10;
+      root.add(obj);
+      items.push(obj);
+    }
+
+    root.userData.items = items;
+    root.userData.spinSpeed = 0.30;
+
+    return root;
+  }
+
+  function buildMirrorWall() {
+    // A wall panel with glass + “fake reflection” copy of mannequins behind it
+    const root = new THREE.Group();
+    root.name = "MirrorWall";
+
+    const panel = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.4, 1.5),
+      new THREE.MeshStandardMaterial({ color: 0x141826, roughness: 0.85, metalness: 0.1 })
+    );
+    panel.position.set(0, 1.25, -1.35);
+    root.add(panel);
+
+    const mirror = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.2, 1.3),
+      makeMirrorGlassMat()
+    );
+    mirror.position.set(0, 1.25, -1.34);
+    root.add(mirror);
+
+    const glass = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.25, 1.35),
+      makeGlassMat(0.14)
+    );
+    glass.position.set(0, 1.25, -1.33);
+    root.add(glass);
+
+    const trim = new THREE.Mesh(
+      new THREE.BoxGeometry(2.35, 1.45, 0.02),
+      makeNeonMat(0x7fe7ff, 0x2bd7ff, 0.9, 0.8)
+    );
+    trim.position.set(0, 1.25, -1.32);
+    root.add(trim);
+
+    root.userData = { mirror, glass };
+    return root;
+  }
+
+  function buildStoreKiosk({ position, yaw } = {}) {
     const root = new THREE.Group();
     root.name = "StoreKiosk";
     root.position.copy(position);
@@ -310,51 +431,51 @@ export const StoreSystem = (() => {
 
     // platform
     const platform = new THREE.Mesh(
-      new THREE.CylinderGeometry(2.2, 2.2, 0.10, 48),
+      new THREE.CylinderGeometry(2.25, 2.25, 0.10, 48),
       new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.95 })
     );
     platform.position.y = 0.05;
     root.add(platform);
 
-    // back wall (kiosk shell)
+    // kiosk shell
     const shell = new THREE.Mesh(
-      new THREE.CylinderGeometry(2.0, 2.0, 2.2, 48, 1, true, Math.PI * 0.1, Math.PI * 1.8),
+      new THREE.CylinderGeometry(2.0, 2.0, 2.3, 48, 1, true, Math.PI * 0.1, Math.PI * 1.8),
       new THREE.MeshStandardMaterial({ color: 0x141826, roughness: 0.9, metalness: 0.05, side: THREE.DoubleSide })
     );
-    shell.position.y = 1.15;
+    shell.position.y = 1.18;
     root.add(shell);
 
-    // glass window arc
+    // glass arc
     const glass = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.75, 1.75, 1.6, 48, 1, true, Math.PI * 0.15, Math.PI * 0.7),
+      new THREE.CylinderGeometry(1.75, 1.75, 1.65, 48, 1, true, Math.PI * 0.15, Math.PI * 0.7),
       makeGlassMat(0.16)
     );
-    glass.position.y = 1.20;
+    glass.position.y = 1.22;
     glass.rotation.y = Math.PI * 0.25;
     root.add(glass);
 
-    // neon trim ring
+    // neon trim
     const trim = new THREE.Mesh(
       new THREE.TorusGeometry(1.92, 0.03, 10, 80),
-      makeNeonMat(0x7fe7ff, 0x2bd7ff, 1.25, 0.95)
+      makeNeonMat(0x7fe7ff, 0x2bd7ff, 1.25, 0.92)
     );
     trim.rotation.x = Math.PI / 2;
-    trim.position.y = 2.10;
+    trim.position.y = 2.12;
     root.add(trim);
 
-    // store sign
-    const sign = makeBillboardSign(1.8, 0.85, "SCARLETT STORE", "Skins • VIP • Cosmetics");
-    sign.position.set(0, 2.55, 1.25);
+    // sign
+    const sign = makeBillboard(1.85, 0.86, "SCARLETT STORE", "Skins • VIP • Cosmetics");
+    sign.position.set(0, 2.60, 1.25);
     root.add(sign);
 
-    // mannequins behind glass
+    // mannequins inside
     const man1 = makeMannequin("male");
-    man1.position.set(-0.55, 0, -0.40);
+    man1.position.set(-0.62, 0, -0.40);
     man1.rotation.y = Math.PI * 0.35;
     root.add(man1);
 
     const man2 = makeMannequin("female");
-    man2.position.set(0.55, 0, -0.40);
+    man2.position.set(0.62, 0, -0.40);
     man2.rotation.y = -Math.PI * 0.35;
     root.add(man2);
 
@@ -364,7 +485,19 @@ export const StoreSystem = (() => {
     shelf.rotation.y = Math.PI;
     root.add(shelf);
 
-    // interactive pads (outside, so player can step up)
+    // mirror wall behind mannequins
+    const mirrorWall = buildMirrorWall();
+    mirrorWall.position.set(0, 0, 0);
+    root.add(mirrorWall);
+    state.mirrorWall = mirrorWall;
+
+    // carousel inside-front
+    const carousel = makeProductCarousel();
+    carousel.position.set(0, 0, 0.10);
+    root.add(carousel);
+    state.carousel = carousel;
+
+    // pads outside (player-facing)
     const padEnter = makePad("JOIN STORE", 0x7fe7ff);
     padEnter.position.set(0, 0, 1.55);
     root.add(padEnter);
@@ -377,65 +510,81 @@ export const StoreSystem = (() => {
     padDaily.position.set(0.9, 0, 1.25);
     root.add(padDaily);
 
-    // actions
     padEnter.userData.onActivate = () => openStoreUI();
     padPreview.userData.onActivate = () => previewSpin();
     padDaily.userData.onActivate = () => dailyClaim();
 
     state.pads.push(padEnter, padPreview, padDaily);
 
+    // item info billboard (only shows when looking at carousel items)
+    state.itemBillboard = makeBillboard(1.35, 0.65, "ITEM", "Look at a product");
+    state.itemBillboard.name = "StoreItemBillboard";
+    state.itemBillboard.position.set(0, 2.15, 0.55);
+    state.itemBillboard.visible = false;
+    root.add(state.itemBillboard);
+
+    // animate mannequins slightly (pose)
+    man1.userData.armL.rotation.z = 0.10;
+    man1.userData.armR.rotation.z = -0.10;
+    man2.userData.armL.rotation.z = 0.10;
+    man2.userData.armR.rotation.z = -0.10;
+
+    // keep refs
+    root.userData = { man1, man2 };
+
     return root;
+  }
+
+  function showItemBillboard(item) {
+    if (!state.itemBillboard) return;
+    const price = (item?.price != null) ? `${item.price.toLocaleString()} ${StoreCatalog.currencyName}` : "";
+    const top = item?.name || "ITEM";
+    const bottom = price || "—";
+    state.itemBillboard.material.map = makeSignCanvas(top, bottom, "#ff2d7a");
+    state.itemBillboard.material.needsUpdate = true;
+    state.itemBillboard.visible = true;
+    state.itemBillboard.userData.life = 0.25; // short, refreshed while gazing
   }
 
   function openStoreUI() {
     L("[store] open UI ✅ (placeholder)");
-    // Later: replace with real wrist menu / 3D UI.
-    showBillboard(`STORE OPEN`, `Wallet: $${state.wallet.chips.toLocaleString()}`);
+    showFloatingUI("STORE OPEN", `Wallet: ${state.wallet.chips.toLocaleString()} Chips`);
   }
 
   function previewSpin() {
     L("[store] preview spin ✅");
-    showBillboard("PREVIEW", "Rotating showcase…");
-    // simple effect: spin kiosk for a second
-    state.kiosk.userData.spinT = 1.2;
+    showFloatingUI("PREVIEW", "Rotating showcase…");
+    if (state.kiosk) state.kiosk.userData.spinT = 1.4;
   }
 
   function dailyClaim() {
     const reward = 2500 + Math.floor(Math.random() * 2500);
     state.wallet.chips += reward;
     L("[store] daily claim ✅ +" + reward);
-    showBillboard("DAILY CLAIM", `+${reward.toLocaleString()} Chips`);
+    showFloatingUI("DAILY CLAIM", `+${reward.toLocaleString()} Chips`);
   }
 
-  function showBillboard(top, bottom) {
+  function showFloatingUI(top, bottom) {
     if (!state.uiBillboard) return;
-    try {
-      state.uiBillboard.material.map = makeSignCanvas(top, bottom);
-      state.uiBillboard.material.needsUpdate = true;
-      state.uiBillboard.visible = true;
-      state.uiBillboard.userData.life = 2.2;
-    } catch {}
+    state.uiBillboard.material.map = makeSignCanvas(top, bottom, "#7fe7ff");
+    state.uiBillboard.material.needsUpdate = true;
+    state.uiBillboard.visible = true;
+    state.uiBillboard.userData.life = 2.2;
   }
 
   function buildUIBillboard() {
-    const tex = makeSignCanvas("STORE", "Ready");
-    const m = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.4, 0.7),
-      new THREE.MeshBasicMaterial({ map: tex, transparent: true })
-    );
+    const m = makeBillboard(1.5, 0.75, "STORE", "Ready");
     m.name = "StoreBillboardUI";
     m.position.set(0, 2.15, -4.5);
     m.visible = false;
-    m.renderOrder = 30;
     m.userData.life = 0;
     return m;
   }
 
-  // Basic “activate pad” if player is near + looking at it
   function handlePadFocus(dt) {
     if (!player || !camera) return;
 
-    const camPos = new THREE.Vector3();
+    const camPos = state.tmpV.set(0, 0, 0);
     camera.getWorldPosition(camPos);
 
     let best = null;
@@ -444,46 +593,92 @@ export const StoreSystem = (() => {
     for (const pad of state.pads) {
       if (!pad?.userData?.active) continue;
 
-      const p = new THREE.Vector3();
+      const p = state.tmpV2.set(0, 0, 0);
       pad.getWorldPosition(p);
 
       const d = camPos.distanceTo(p);
       if (d > 4.0) continue;
 
-      // facing check (dot)
       const toPad = p.clone().sub(camPos).normalize();
       const camDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
       const dot = camDir.dot(toPad);
 
       const score = dot * (1.0 / Math.max(0.25, d));
-      if (score > bestScore) {
-        bestScore = score;
-        best = pad;
-      }
+      if (score > bestScore) { bestScore = score; best = pad; }
     }
 
     state.lastFocusPad = best || null;
 
-    // subtle highlight pulse
+    // highlight
     for (const pad of state.pads) {
       const u = pad.userData;
       u.pulseT += dt;
       const active = (pad === best);
-      const base = u.base;
-      if (base?.material) {
-        base.material.opacity = active
-          ? 0.82 + Math.sin(u.pulseT * 5.0) * 0.12
-          : 0.62 + Math.sin(u.pulseT * 3.0) * 0.10;
+
+      if (u.base?.material) {
+        u.base.material.opacity = active
+          ? 0.86 + Math.sin(u.pulseT * 5.0) * 0.10
+          : 0.62 + Math.sin(u.pulseT * 3.0) * 0.08;
       }
-      if (u.sign) u.sign.visible = active; // show label only when focused
+      if (u.sign) u.sign.visible = active;
+    }
+  }
+
+  function handleItemGaze(dt) {
+    if (!camera || !state.carousel || !state.raycaster) return;
+
+    // short-lived billboard (refreshed while gazing)
+    if (state.itemBillboard?.visible) {
+      state.itemBillboard.userData.life -= dt;
+      if (state.itemBillboard.userData.life <= 0) state.itemBillboard.visible = false;
+    }
+
+    const items = state.carousel.userData.items || [];
+    if (!items.length) return;
+
+    const camPos = new THREE.Vector3();
+    camera.getWorldPosition(camPos);
+    const camDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+
+    state.raycaster.set(camPos, camDir);
+    state.raycaster.far = 6.0;
+
+    const hits = state.raycaster.intersectObjects(items, true);
+    if (!hits || !hits.length) {
+      state.lastFocusItem = null;
+      return;
+    }
+
+    // choose first hit with storeItem
+    let hitObj = hits[0].object;
+    while (hitObj && !hitObj.userData?.storeItem && hitObj.parent) hitObj = hitObj.parent;
+
+    if (hitObj?.userData?.storeItem) {
+      state.lastFocusItem = hitObj;
+      showItemBillboard(hitObj.userData.storeItem);
+    } else {
+      state.lastFocusItem = null;
     }
   }
 
   function onAction() {
-    // called when you press your “action” button later (or by event)
+    // prioritized: pad -> item
     const pad = state.lastFocusPad;
-    if (pad?.userData?.onActivate) {
-      pad.userData.onActivate();
+    if (pad?.userData?.onActivate) return pad.userData.onActivate();
+
+    const it = state.lastFocusItem?.userData?.storeItem;
+    if (it) {
+      // buy placeholder
+      const price = it.price || 0;
+      if (state.wallet.chips >= price) {
+        state.wallet.chips -= price;
+        state.owned.add(it.id);
+        showFloatingUI("PURCHASED", `${it.name}`);
+        L("[store] purchased ✅", it.id);
+      } else {
+        showFloatingUI("NOT ENOUGH", `${it.price.toLocaleString()} Chips`);
+        L("[store] purchase failed (insufficient) ⚠️", it.id);
+      }
     }
   }
 
@@ -496,13 +691,40 @@ export const StoreSystem = (() => {
       state.kiosk.rotation.y += dt * 1.6;
     }
 
-    // billboard lifetime
+    // main billboard life
     if (state.uiBillboard?.visible) {
       state.uiBillboard.userData.life -= dt;
       if (state.uiBillboard.userData.life <= 0) state.uiBillboard.visible = false;
     }
 
+    // carousel spin + bob items
+    if (state.carousel) {
+      const sp = state.carousel.userData.spinSpeed || 0.25;
+      state.carousel.rotation.y += dt * sp;
+
+      const items = state.carousel.userData.items || [];
+      for (const obj of items) {
+        const ph = obj.userData.spinPhase || 0;
+        obj.position.y = 0.35 + Math.sin(state.t * 2.2 + ph) * 0.03;
+        obj.rotation.x = Math.sin(state.t * 1.8 + ph) * 0.08;
+      }
+    }
+
+    // mannequins idle + fake mirror “reflection motion”
+    if (state.kiosk?.userData?.man1 && state.kiosk.userData.man2) {
+      const { man1, man2 } = state.kiosk.userData;
+      const t = state.t;
+
+      // small pose motion
+      man1.userData.armL.rotation.x = -0.20 + Math.sin(t * 1.2) * 0.12;
+      man1.userData.armR.rotation.x = -0.20 - Math.sin(t * 1.2) * 0.12;
+
+      man2.userData.armL.rotation.x = -0.22 + Math.sin(t * 1.25 + 1.3) * 0.12;
+      man2.userData.armR.rotation.x = -0.22 - Math.sin(t * 1.25 + 1.3) * 0.12;
+    }
+
     handlePadFocus(dt);
+    handleItemGaze(dt);
   }
 
   return {
@@ -516,7 +738,10 @@ export const StoreSystem = (() => {
 
       if (!THREE || !scene) throw new Error("StoreSystem.init missing THREE or scene");
 
-      // root
+      state.raycaster = new THREE.Raycaster();
+      state.tmpV = new THREE.Vector3();
+      state.tmpV2 = new THREE.Vector3();
+
       if (state.root) { try { scene.remove(state.root); } catch {} }
       state.root = new THREE.Group();
       state.root.name = "StoreSystem";
@@ -524,26 +749,24 @@ export const StoreSystem = (() => {
 
       state.pads.length = 0;
       state.lastFocusPad = null;
+      state.lastFocusItem = null;
 
-      // place store on RIGHT side by default (you asked left/right, not front/back)
-      // We'll mirror later for poker door too in world.js.
+      // Place store on RIGHT side of tableFocus (left/right like you wanted)
       const tf = world?.tableFocus || new THREE.Vector3(0, 0, -6.5);
 
-      // right side store kiosk
       state.kiosk = buildStoreKiosk({
         position: new THREE.Vector3(tf.x + 6.2, 0, tf.z),
         yaw: -Math.PI / 2
       });
       state.root.add(state.kiosk);
 
-      // floating UI billboard in the “air space” near the table
+      // floating UI billboard near table area
       state.uiBillboard = buildUIBillboard();
       state.root.add(state.uiBillboard);
 
-      // Listen for a global action event (your index/main already dispatches scarlett-action sometimes)
       window.addEventListener("scarlett-action", onAction);
 
-      L("[store] init ✅ kiosk + pads ready");
+      L("[store] init ✅ v1.1 (carousel + gaze + mirror)");
       return { tick, onAction, root: state.root, catalog: StoreCatalog };
     },
 

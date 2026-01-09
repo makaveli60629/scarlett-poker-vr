@@ -1,11 +1,12 @@
-// /js/world.js — Scarlett VR Poker (ORCHESTRATOR + HARD LOGGING + WIDE MANIFEST)
-// You will SEE exactly what is failing in your on-screen log.
+// /js/world.js — Real Mount Loader for Scarlett VR Poker
+// Uses your log panel via scarlett-log messages.
+// Mounts object exports (LightsPack, SolidWalls, etc.) + function exports (initVRUI, init)
 
 function ui(m){
   try { window.dispatchEvent(new CustomEvent("scarlett-log", { detail: String(m) })); } catch {}
 }
 
-async function tryImport(path) {
+async function tryImport(path){
   const v = encodeURIComponent(window.__BUILD_V || Date.now().toString());
   const url = path.includes("?") ? `${path}&v=${v}` : `${path}?v=${v}`;
   ui(`[world] import ${url}`);
@@ -19,45 +20,14 @@ async function tryImport(path) {
   }
 }
 
-async function callBest(mod, path, ctx) {
-  if (!mod) return false;
-
-  // Most common function names across your project history
-  const names = [
-    "init","boot","setup","mount","build","create","spawn","addToScene","start",
-    "initWorld","buildWorld","mountWorld","createWorld",
-    "initScene","buildScene","mountScene",
-  ];
-
-  // 1) direct named exports
-  for (const n of names) {
-    if (typeof mod[n] === "function") {
-      ui(`[world] calling ${path} :: ${n}()`);
-      try { await mod[n](ctx); ui(`[world] ✅ mounted ${path} via ${n}()`); return true; }
-      catch (e) { ui(`[world] ❌ ${path} ${n}() threw :: ${e?.message || e}`); return false; }
+async function callAny(obj, names, ctx, label){
+  for (const n of names){
+    if (typeof obj?.[n] === "function"){
+      ui(`[world] calling ${label}.${n}()`);
+      try { await obj[n](ctx); ui(`[world] ✅ ok ${label}.${n}()`); return true; }
+      catch (e){ ui(`[world] ❌ threw ${label}.${n}() :: ${e?.message || e}`); return false; }
     }
   }
-
-  // 2) default export function
-  if (typeof mod.default === "function") {
-    ui(`[world] calling ${path} :: default()`);
-    try { await mod.default(ctx); ui(`[world] ✅ mounted ${path} via default()`); return true; }
-    catch (e) { ui(`[world] ❌ ${path} default() threw :: ${e?.message || e}`); return false; }
-  }
-
-  // 3) default export object with functions
-  if (mod.default && typeof mod.default === "object") {
-    for (const n of names) {
-      if (typeof mod.default[n] === "function") {
-        ui(`[world] calling ${path} :: default.${n}()`);
-        try { await mod.default[n](ctx); ui(`[world] ✅ mounted ${path} via default.${n}()`); return true; }
-        catch (e) { ui(`[world] ❌ ${path} default.${n}() threw :: ${e?.message || e}`); return false; }
-      }
-    }
-  }
-
-  // 4) If we got here, we imported it but didn’t find mount funcs
-  ui(`[world] ⚠️ imported ${path} but no mount function found. exports=${Object.keys(mod).join(",")}${mod.default ? " (has default)" : ""}`);
   return false;
 }
 
@@ -72,11 +42,13 @@ export const World = {
       seatedIndex: -1,
       _playerYaw: Math.PI,
       _realLoaded: false,
+      textureKit: null,
     };
 
     W.isRealWorldLoaded = () => !!W._realLoaded;
 
     const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+
     function addColliderBox(pos, size, name="collider"){
       const geo = new THREE.BoxGeometry(size.sx, size.sy, size.sz);
       const mat = new THREE.MeshBasicMaterial({ visible:false });
@@ -87,6 +59,7 @@ export const World = {
       W.colliders.push(m);
       return m;
     }
+
     function addRingMarker(pos, r0, r1, color){
       const g = new THREE.RingGeometry(r0,r1,64);
       const m = new THREE.MeshBasicMaterial({ color, transparent:true, opacity:0.85, side:THREE.DoubleSide });
@@ -99,7 +72,7 @@ export const World = {
     }
 
     // -----------------------
-    // FALLBACK WORLD (always visible)
+    // FALLBACK WORLD
     // -----------------------
     ui("[world] fallback world building…");
 
@@ -145,6 +118,7 @@ export const World = {
       mark.material.opacity = 0.55;
       W.seats.push({ index:i, position:new THREE.Vector3(px,0,pz), yaw:a+Math.PI });
     }
+
     ui("[world] fallback built ✅");
 
     // -----------------------
@@ -153,56 +127,141 @@ export const World = {
     (async () => {
       const ctx = { THREE, scene, renderer, camera, player, controllers, world: W, log };
 
-      // Wide manifest (covers your naming patterns from prior builds)
-      const manifest = [
-        // world builders / scene builders
-        "./world_builder.js",
-        "./world_build.js",
-        "./worldgen.js",
-        "./WorldGen.js",
-        "./scene_builder.js",
-
-        // your known modules
-        "./textures.js",
-        "./lights_pack.js",
-        "./solid_walls.js",
-
-        "./table_factory.js",
-        "./table.js",
-        "./chair.js",
-        "./spectator_rail.js",
-
-        "./teleport_machine.js",
-        "./TeleportMachine.js",
-        "./teleport_fx.js",
-        "./TeleportVFX.js",
-        "./teleport_burst_fx.js",
-
-        "./store.js",
-        "./store_kiosk.js",
-        "./shop_ui.js",
-
-        "./water_fountain.js",
-
-        "./ui.js",
-        "./vr_ui.js",
-        "./vr_ui_panel.js",
-      ];
+      // Import what exists (based on your log)
+      const textures = await tryImport("./textures.js");
+      const lights_pack = await tryImport("./lights_pack.js");
+      const solid_walls = await tryImport("./solid_walls.js");
+      const table_factory = await tryImport("./table_factory.js");
+      const spectator_rail = await tryImport("./spectator_rail.js");
+      const teleport_machine = await tryImport("./teleport_machine.js");
+      const teleport_fx = await tryImport("./teleport_fx.js");
+      const teleport_vfx = await tryImport("./TeleportVFX.js");
+      const teleport_burst = await tryImport("./teleport_burst_fx.js");
+      const store = await tryImport("./store.js");
+      const shop_ui = await tryImport("./shop_ui.js");
+      const water = await tryImport("./water_fountain.js");
+      const uiMod = await tryImport("./ui.js");
+      const vr_ui = await tryImport("./vr_ui.js");
+      const vr_ui_panel = await tryImport("./vr_ui_panel.js");
 
       let mounted = 0;
-      for (const p of manifest) {
-        const mod = await tryImport(p);
-        const ok = await callBest(mod, p, ctx);
-        if (ok) {
+
+      // textures.js -> createTextureKit()
+      if (textures?.createTextureKit) {
+        try {
+          W.textureKit = textures.createTextureKit({ THREE, renderer, base: "./assets/" });
+          scene.userData.textureKit = W.textureKit;
           mounted++;
           W._realLoaded = true;
+          ui("[world] ✅ mounted textures via createTextureKit()");
+        } catch (e) {
+          ui("[world] ❌ textures.createTextureKit failed :: " + (e?.message || e));
         }
       }
 
-      // Pull colliders if your real world registers them
-      const extra = scene.userData?.colliders;
-      if (Array.isArray(extra)) {
-        for (const c of extra) if (c && !W.colliders.includes(c)) W.colliders.push(c);
+      // lights_pack.js -> LightsPack object
+      if (lights_pack?.LightsPack) {
+        const ok = await callAny(lights_pack.LightsPack, ["init","mount","build","create","spawn","setup"], ctx, "LightsPack");
+        if (ok) { mounted++; W._realLoaded = true; }
+      }
+
+      // solid_walls.js -> SolidWalls object
+      if (solid_walls?.SolidWalls) {
+        const ok = await callAny(solid_walls.SolidWalls, ["init","mount","build","create","spawn","setup"], ctx, "SolidWalls");
+        if (ok) { mounted++; W._realLoaded = true; }
+      }
+
+      // table_factory.js -> TableFactory object
+      if (table_factory?.TableFactory) {
+        const ok = await callAny(table_factory.TableFactory, ["init","mount","build","create","spawn","setup"], ctx, "TableFactory");
+        if (ok) { mounted++; W._realLoaded = true; }
+      }
+
+      // spectator_rail.js -> SpectatorRail object
+      if (spectator_rail?.SpectatorRail) {
+        const ok = await callAny(spectator_rail.SpectatorRail, ["init","mount","build","create","spawn","setup"], ctx, "SpectatorRail");
+        if (ok) { mounted++; W._realLoaded = true; }
+      }
+
+      // teleport_machine.js -> TeleportMachine object
+      if (teleport_machine?.TeleportMachine) {
+        const ok = await callAny(teleport_machine.TeleportMachine, ["init","mount","build","create","spawn","setup"], ctx, "TeleportMachine");
+        if (ok) { mounted++; W._realLoaded = true; }
+      }
+
+      // TeleportVFX.js -> TeleportVFX object
+      if (teleport_vfx?.TeleportVFX) {
+        const ok = await callAny(teleport_vfx.TeleportVFX, ["init","mount","build","create","spawn","setup"], ctx, "TeleportVFX");
+        if (ok) { mounted++; W._realLoaded = true; }
+      }
+
+      // teleport_fx.js -> createTeleportFX()
+      if (teleport_fx?.createTeleportFX) {
+        try {
+          const fx = teleport_fx.createTeleportFX(ctx);
+          scene.userData.teleportFX = fx;
+          mounted++;
+          W._realLoaded = true;
+          ui("[world] ✅ mounted teleport_fx via createTeleportFX()");
+        } catch (e) {
+          ui("[world] ❌ createTeleportFX failed :: " + (e?.message || e));
+        }
+      }
+
+      // teleport_burst_fx.js -> createTeleportBurstFX()
+      if (teleport_burst?.createTeleportBurstFX) {
+        try {
+          const fx = teleport_burst.createTeleportBurstFX(ctx);
+          scene.userData.teleportBurstFX = fx;
+          mounted++;
+          W._realLoaded = true;
+          ui("[world] ✅ mounted teleport_burst via createTeleportBurstFX()");
+        } catch (e) {
+          ui("[world] ❌ createTeleportBurstFX failed :: " + (e?.message || e));
+        }
+      }
+
+      // store.js -> StoreSystem object
+      if (store?.StoreSystem) {
+        const ok = await callAny(store.StoreSystem, ["init","mount","build","create","spawn","setup"], ctx, "StoreSystem");
+        if (ok) { mounted++; W._realLoaded = true; }
+      }
+
+      // shop_ui.js -> ShopUI object
+      if (shop_ui?.ShopUI) {
+        const ok = await callAny(shop_ui.ShopUI, ["init","mount","build","create","spawn","setup"], ctx, "ShopUI");
+        if (ok) { mounted++; W._realLoaded = true; }
+      }
+
+      // water_fountain.js -> WaterFountain object
+      if (water?.WaterFountain) {
+        const ok = await callAny(water.WaterFountain, ["init","mount","build","create","spawn","setup"], ctx, "WaterFountain");
+        if (ok) { mounted++; W._realLoaded = true; }
+      }
+
+      // ui.js -> UI object
+      if (uiMod?.UI) {
+        const ok = await callAny(uiMod.UI, ["init","mount","build","create","spawn","setup"], ctx, "UI");
+        if (ok) { mounted++; W._realLoaded = true; }
+      }
+
+      // vr_ui.js -> initVRUI function
+      if (typeof vr_ui?.initVRUI === "function") {
+        ui("[world] calling initVRUI()");
+        try { await vr_ui.initVRUI(ctx); mounted++; W._realLoaded = true; ui("[world] ✅ mounted vr_ui via initVRUI()"); }
+        catch (e){ ui("[world] ❌ initVRUI failed :: " + (e?.message || e)); }
+      }
+
+      // vr_ui_panel.js -> init function
+      if (typeof vr_ui_panel?.init === "function") {
+        ui("[world] calling vr_ui_panel.init()");
+        try { await vr_ui_panel.init(ctx); mounted++; W._realLoaded = true; ui("[world] ✅ mounted vr_ui_panel via init()"); }
+        catch (e){ ui("[world] ❌ vr_ui_panel.init failed :: " + (e?.message || e)); }
+      }
+
+      // Merge colliders if your modules add them
+      if (Array.isArray(scene.userData?.colliders)) {
+        for (const c of scene.userData.colliders) if (c && !W.colliders.includes(c)) W.colliders.push(c);
         ui("[world] colliders merged from scene.userData ✅");
       }
 
@@ -210,7 +269,7 @@ export const World = {
         ui(`[world] ✅ REAL WORLD LOADED (mounted=${mounted})`);
         window.dispatchEvent(new CustomEvent("scarlett-world-loaded", { detail: { mounted } }));
       } else {
-        ui("[world] ❌ REAL WORLD DID NOT LOAD (no module mounted)");
+        ui("[world] ❌ REAL WORLD DID NOT LOAD");
         window.dispatchEvent(new Event("scarlett-world-failed"));
       }
     })();

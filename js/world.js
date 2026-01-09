@@ -1,48 +1,64 @@
-// /js/world.js — Scarlett VR Poker (ORCHESTRATOR + REAL-WORLD DETECTOR)
+// /js/world.js — Scarlett VR Poker (ORCHESTRATOR + HARD LOGGING + WIDE MANIFEST)
+// You will SEE exactly what is failing in your on-screen log.
+
+function ui(m){
+  try { window.dispatchEvent(new CustomEvent("scarlett-log", { detail: String(m) })); } catch {}
+}
 
 async function tryImport(path) {
   const v = encodeURIComponent(window.__BUILD_V || Date.now().toString());
   const url = path.includes("?") ? `${path}&v=${v}` : `${path}?v=${v}`;
+  ui(`[world] import ${url}`);
   try {
-    return await import(url);
+    const mod = await import(url);
+    ui(`[world] ✅ imported ${path}`);
+    return mod;
   } catch (e) {
-    console.warn("[world] import failed:", path, e?.message || e);
+    ui(`[world] ❌ import failed ${path} :: ${e?.message || e}`);
     return null;
   }
 }
 
-async function callBest(mod, names, args) {
-  if (!mod) return { ok:false, name:null };
+async function callBest(mod, path, ctx) {
+  if (!mod) return false;
 
+  // Most common function names across your project history
+  const names = [
+    "init","boot","setup","mount","build","create","spawn","addToScene","start",
+    "initWorld","buildWorld","mountWorld","createWorld",
+    "initScene","buildScene","mountScene",
+  ];
+
+  // 1) direct named exports
   for (const n of names) {
-    const fn = mod[n];
-    if (typeof fn === "function") {
-      try {
-        await fn(args);
-        return { ok:true, name:n };
-      } catch (e) {
-        console.warn(`[world] ${n}() threw`, e?.message || e);
-        return { ok:false, name:n };
-      }
+    if (typeof mod[n] === "function") {
+      ui(`[world] calling ${path} :: ${n}()`);
+      try { await mod[n](ctx); ui(`[world] ✅ mounted ${path} via ${n}()`); return true; }
+      catch (e) { ui(`[world] ❌ ${path} ${n}() threw :: ${e?.message || e}`); return false; }
     }
   }
 
+  // 2) default export function
   if (typeof mod.default === "function") {
-    try { await mod.default(args); return { ok:true, name:"default()" }; }
-    catch (e) { console.warn("[world] default() threw", e?.message || e); return { ok:false, name:"default()" }; }
+    ui(`[world] calling ${path} :: default()`);
+    try { await mod.default(ctx); ui(`[world] ✅ mounted ${path} via default()`); return true; }
+    catch (e) { ui(`[world] ❌ ${path} default() threw :: ${e?.message || e}`); return false; }
   }
 
+  // 3) default export object with functions
   if (mod.default && typeof mod.default === "object") {
     for (const n of names) {
-      const fn = mod.default[n];
-      if (typeof fn === "function") {
-        try { await fn(args); return { ok:true, name:`default.${n}()` }; }
-        catch (e) { console.warn(`[world] default.${n}() threw`, e?.message || e); return { ok:false, name:`default.${n}()` }; }
+      if (typeof mod.default[n] === "function") {
+        ui(`[world] calling ${path} :: default.${n}()`);
+        try { await mod.default[n](ctx); ui(`[world] ✅ mounted ${path} via default.${n}()`); return true; }
+        catch (e) { ui(`[world] ❌ ${path} default.${n}() threw :: ${e?.message || e}`); return false; }
       }
     }
   }
 
-  return { ok:false, name:null };
+  // 4) If we got here, we imported it but didn’t find mount funcs
+  ui(`[world] ⚠️ imported ${path} but no mount function found. exports=${Object.keys(mod).join(",")}${mod.default ? " (has default)" : ""}`);
+  return false;
 }
 
 export const World = {
@@ -56,13 +72,11 @@ export const World = {
       seatedIndex: -1,
       _playerYaw: Math.PI,
       _realLoaded: false,
-      modules: {},
     };
 
     W.isRealWorldLoaded = () => !!W._realLoaded;
 
     const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
-
     function addColliderBox(pos, size, name="collider"){
       const geo = new THREE.BoxGeometry(size.sx, size.sy, size.sz);
       const mat = new THREE.MeshBasicMaterial({ visible:false });
@@ -73,7 +87,6 @@ export const World = {
       W.colliders.push(m);
       return m;
     }
-
     function addRingMarker(pos, r0, r1, color){
       const g = new THREE.RingGeometry(r0,r1,64);
       const m = new THREE.MeshBasicMaterial({ color, transparent:true, opacity:0.85, side:THREE.DoubleSide });
@@ -86,8 +99,10 @@ export const World = {
     }
 
     // -----------------------
-    // FALLBACK WORLD (immediate)
+    // FALLBACK WORLD (always visible)
     // -----------------------
+    ui("[world] fallback world building…");
+
     scene.background = new THREE.Color(0x05060a);
     scene.fog = new THREE.Fog(0x05060a, 12, 90);
 
@@ -121,7 +136,6 @@ export const World = {
     tableTop.position.set(0,1.02,0);
     scene.add(tableTop);
 
-    // seats markers
     const seatRadius = 3.35;
     for (let i=0;i<8;i++){
       const a = (i/8)*Math.PI*2 + Math.PI;
@@ -131,16 +145,24 @@ export const World = {
       mark.material.opacity = 0.55;
       W.seats.push({ index:i, position:new THREE.Vector3(px,0,pz), yaw:a+Math.PI });
     }
+    ui("[world] fallback built ✅");
 
     // -----------------------
-    // LOAD REAL WORLD MODULES
+    // REAL WORLD LOAD
     // -----------------------
     (async () => {
       const ctx = { THREE, scene, renderer, camera, player, controllers, world: W, log };
 
-      // These are from YOUR /js listing.
-      // If any of these file names differ by even 1 character/case, they will fail on GitHub Pages.
+      // Wide manifest (covers your naming patterns from prior builds)
       const manifest = [
+        // world builders / scene builders
+        "./world_builder.js",
+        "./world_build.js",
+        "./worldgen.js",
+        "./WorldGen.js",
+        "./scene_builder.js",
+
+        // your known modules
         "./textures.js",
         "./lights_pack.js",
         "./solid_walls.js",
@@ -151,7 +173,9 @@ export const World = {
         "./spectator_rail.js",
 
         "./teleport_machine.js",
+        "./TeleportMachine.js",
         "./teleport_fx.js",
+        "./TeleportVFX.js",
         "./teleport_burst_fx.js",
 
         "./store.js",
@@ -165,39 +189,31 @@ export const World = {
         "./vr_ui_panel.js",
       ];
 
-      const bootNames = ["init","boot","setup","mount","build","create","spawn","addToScene","start"];
-
-      let mountedCount = 0;
+      let mounted = 0;
       for (const p of manifest) {
         const mod = await tryImport(p);
-        if (!mod) continue;
-
-        const res = await callBest(mod, bootNames, ctx);
-        if (res.ok) {
-          mountedCount++;
+        const ok = await callBest(mod, p, ctx);
+        if (ok) {
+          mounted++;
           W._realLoaded = true;
-          log?.(`[world] mounted ${p} via ${res.name} ✅`);
-        } else {
-          log?.(`[world] loaded ${p} but no mount fn found ⚠️`);
         }
       }
 
-      // Pull colliders if your world code registers them
+      // Pull colliders if your real world registers them
       const extra = scene.userData?.colliders;
       if (Array.isArray(extra)) {
         for (const c of extra) if (c && !W.colliders.includes(c)) W.colliders.push(c);
-        log?.("[world] pulled colliders from scene.userData ✅");
+        ui("[world] colliders merged from scene.userData ✅");
       }
 
       if (W._realLoaded) {
-        window.dispatchEvent(new CustomEvent("scarlett-world-loaded", { detail: { mountedCount } }));
+        ui(`[world] ✅ REAL WORLD LOADED (mounted=${mounted})`);
+        window.dispatchEvent(new CustomEvent("scarlett-world-loaded", { detail: { mounted } }));
       } else {
+        ui("[world] ❌ REAL WORLD DID NOT LOAD (no module mounted)");
         window.dispatchEvent(new Event("scarlett-world-failed"));
       }
-    })().catch((e) => {
-      console.warn("[world] module chain crashed:", e);
-      window.dispatchEvent(new Event("scarlett-world-failed"));
-    });
+    })();
 
     // -----------------------
     // API used by main.js
@@ -238,15 +254,6 @@ export const World = {
       return p;
     };
 
-    W.getNearestSeat = (pos) => {
-      let best=null, bestD=Infinity;
-      for (const s of W.seats){
-        const d = (pos.x-s.position.x)**2 + (pos.z-s.position.z)**2;
-        if (d < bestD){ bestD=d; best=s; }
-      }
-      return best;
-    };
-
     W.sitPlayerAtSeat = (seatIndex) => {
       const s = W.seats.find(x => x.index === seatIndex) || W.seats[0];
       W.seatedIndex = s.index;
@@ -255,7 +262,7 @@ export const World = {
       W._playerYaw = s.yaw;
       player.rotation.y = W._playerYaw;
       player.position.y = renderer.xr.isPresenting ? 0 : 1.35;
-      log?.(`sitPlayerAtSeat(${W.seatedIndex}) ✅`);
+      ui(`[world] sit seat=${W.seatedIndex}`);
     };
 
     W.standPlayerInLobby = () => {
@@ -263,13 +270,13 @@ export const World = {
       player.position.set(0, renderer.xr.isPresenting ? 0 : 1.7, 6);
       W._playerYaw = Math.PI;
       player.rotation.y = W._playerYaw;
-      log?.("standPlayerInLobby ✅");
+      ui("[world] stand lobby");
     };
 
     W.update = () => {};
-
     player.rotation.y = W._playerYaw;
-    log?.("world init ✅");
+
+    ui("[world] init complete ✅");
     return W;
   }
 };

@@ -303,4 +303,3 @@ renderer.setAnimationLoop((t, frame) => {
 
   renderer.render(scene, camera);
 });
-```0

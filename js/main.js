@@ -1,10 +1,17 @@
-// /js/main.js — Scarlett VR Poker (FINAL boot version)
-// CDN importmap provides: import * as THREE from "three"
-// Uses index.html events:
+// /js/main.js — Scarlett VR Poker (FINAL, CDN importmap build)
+// Uses your index.html events:
 // - scarlett-enter-vr
 // - scarlett-recenter
 // - scarlett-toggle-teleport/move/snap/hands
 // - scarlett-touch
+//
+// Scorpion Room behavior:
+// - spawn seated immediately
+// - recenter returns to seat
+//
+// Requires:
+// - importmap mapping "three" in index.html
+// - /js/world.js (orchestrator below)
 
 import * as THREE from "three";
 import { World } from "./world.js";
@@ -13,9 +20,9 @@ const statusText = document.getElementById("statusText");
 const setStatus = (t) => { if (statusText) statusText.textContent = " " + t; };
 const log = (...a) => console.log("[main]", ...a);
 
-// Forward logs into your on-screen logger if you want
-function uiLog(msg){
-  try { window.dispatchEvent(new CustomEvent("scarlett-log", { detail: msg })); } catch {}
+// optional: forward messages into your on-screen log panel (index.html already logs window errors)
+function uiLog(msg) {
+  try { window.dispatchEvent(new CustomEvent("scarlett-log", { detail: String(msg) })); } catch {}
 }
 
 // Canvas
@@ -54,24 +61,27 @@ const controllers = {
 };
 scene.add(controllers.left, controllers.right, controllers.leftGrip, controllers.rightGrip);
 
-// Flags from index.html
-const flags = () => (window.__SCARLETT_FLAGS || { teleport:true, move:true, snap:true, hands:true });
+// Flags from index.html (localStorage-backed)
+const flags = () => (window.__SCARLETT_FLAGS || { teleport: true, move: true, snap: true, hands: true });
 
 // Android dock state
-let touch = { f:0, b:0, l:0, r:0, turnL:0, turnR:0 };
+let touch = { f: 0, b: 0, l: 0, r: 0, turnL: 0, turnR: 0 };
 window.addEventListener("scarlett-touch", (e) => { touch = e?.detail || touch; });
 
-// Desktop fallback keys (kept, but not required)
+// Desktop fallback keys (optional)
 const keys = new Set();
 window.addEventListener("keydown", (e) => keys.add(e.code));
 window.addEventListener("keyup", (e) => keys.delete(e.code));
 
-// World
-const world = World.init({ THREE, scene, renderer, camera, player, controllers, log: (...a)=>console.log("[world]", ...a) });
+// World init
+const world = World.init({
+  THREE, scene, renderer, camera, player, controllers,
+  log: (...a) => console.log("[world]", ...a),
+});
 
 // Modes
-let mode = "lobby";
-function setMode(m){ mode = m; world.setMode(m); }
+let mode = "seated";
+function setMode(m) { mode = m; world.setMode(m); }
 
 // Apply initial flags
 world.setFlag("teleport", !!flags().teleport);
@@ -79,59 +89,49 @@ world.setFlag("move", !!flags().move);
 world.setFlag("snap", !!flags().snap);
 world.setFlag("hands", !!flags().hands);
 
-// Toggle hooks
+// Hook HUD toggle events
 window.addEventListener("scarlett-toggle-teleport", (e) => world.setFlag("teleport", !!e.detail));
 window.addEventListener("scarlett-toggle-move", (e) => world.setFlag("move", !!e.detail));
 window.addEventListener("scarlett-toggle-snap", (e) => world.setFlag("snap", !!e.detail));
 window.addEventListener("scarlett-toggle-hands", (e) => world.setFlag("hands", !!e.detail));
 
-// Spawn rules (Scorpion vs Lobby)
+// Scorpion Room seat index (0-7). You can change globally in console if desired:
+// window.__SCARLETT_SEAT_INDEX__ = 3;
 const seatIndex = Number.isFinite(+window.__SCARLETT_SEAT_INDEX__) ? (+window.__SCARLETT_SEAT_INDEX__) : 0;
-const spawnMode = (window.__SCARLETT_SPAWN_MODE__ || "lobby");     // "seated" or "lobby"
-const recenterMode = (window.__SCARLETT_RECENTER_MODE__ || "lobby"); // "seat" or "lobby"
 
-if (spawnMode === "seated") {
+// Spawn seated immediately
+world.sitPlayerAtSeat(seatIndex);
+setMode("seated");
+setStatus("Ready ✅");
+uiLog(`[main] Scorpion spawn seated seat=${seatIndex}`);
+
+// Recenter -> return to seat (Scorpion behavior)
+window.addEventListener("scarlett-recenter", () => {
+  log("event: scarlett-recenter");
   world.sitPlayerAtSeat(seatIndex);
   setMode("seated");
-} else {
-  world.standPlayerInLobby();
-  setMode("lobby");
-}
-
-setStatus("Ready ✅");
-uiLog(`[main] room=${window.__SCARLETT_ROOM__ || "unknown"} spawnMode=${spawnMode} seat=${seatIndex}`);
-
-// Recenter behavior
-window.addEventListener("scarlett-recenter", () => {
-  log("recenter");
-  if (recenterMode === "seat") {
-    world.sitPlayerAtSeat(seatIndex);
-    setMode("seated");
-  } else {
-    world.standPlayerInLobby();
-    setMode("lobby");
-  }
 });
 
-// Enter VR (from HUD)
-async function enterVR(){
+// Enter VR (from HUD event)
+async function enterVR() {
   if (!navigator.xr) { uiLog("❌ navigator.xr not found"); return; }
   try {
     const ok = await navigator.xr.isSessionSupported("immersive-vr");
     if (!ok) { uiLog("❌ immersive-vr not supported"); return; }
 
-    const init = window.__XR_SESSION_INIT || { optionalFeatures: ["local-floor","bounded-floor","hand-tracking"] };
+    const init = window.__XR_SESSION_INIT || { optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"] };
     init.optionalFeatures = Array.from(new Set([...(init.optionalFeatures || []), "local-floor"]));
 
     const session = await navigator.xr.requestSession("immersive-vr", init);
     await renderer.xr.setSession(session);
 
-    // In VR keep rig at y=0
+    // In VR keep rig at y=0 (local-floor)
     player.position.y = 0;
 
     session.addEventListener("end", () => {
-      // Desktop fallback height based on mode
-      player.position.y = (mode === "seated") ? 1.35 : 1.7;
+      // Desktop fallback height
+      player.position.y = 1.35;
+      uiLog("[main] VR session ended");
     });
 
     uiLog("[main] VR session started ✅");
@@ -140,45 +140,50 @@ async function enterVR(){
     uiLog("❌ enterVR failed: " + (e?.message || e));
   }
 }
-window.addEventListener("scarlett-enter-vr", () => enterVR());
+window.addEventListener("scarlett-enter-vr", () => {
+  log("event: scarlett-enter-vr");
+  enterVR();
+});
 
-// Input polling
-const input = { axesL:[0,0], axesR:[0,0], snapCooldown:0 };
-
-function pollGamepads(){
+// Gamepad polling
+const input = { axesL: [0, 0], axesR: [0, 0], snapCooldown: 0 };
+function pollGamepads() {
   const session = renderer.xr.getSession();
   if (!session) return;
 
-  let gpL=null, gpR=null;
-  for (const src of session.inputSources){
+  let gpL = null, gpR = null;
+  for (const src of session.inputSources) {
     if (!src?.gamepad) continue;
     if (!gpL) gpL = src.gamepad;
     else if (!gpR) gpR = src.gamepad;
   }
 
-  if (gpL){
+  if (gpL) {
     input.axesL[0] = gpL.axes?.[2] ?? gpL.axes?.[0] ?? 0;
     input.axesL[1] = gpL.axes?.[3] ?? gpL.axes?.[1] ?? 0;
   }
-  if (gpR){
+  if (gpR) {
     input.axesR[0] = gpR.axes?.[2] ?? gpR.axes?.[0] ?? 0;
     input.axesR[1] = gpR.axes?.[3] ?? gpR.axes?.[1] ?? 0;
   }
 }
 
-// Movement (disabled while seated by design for Scorpion)
-function applyMove(dt){
+// Movement: disabled while seated (Scorpion)
+function applyMove(dt) {
   if (!flags().move) return;
   if (mode === "seated") return;
 
-  let x=0, z=0;
+  let x = 0, z = 0;
 
+  // VR stick
   x += input.axesL[0] || 0;
   z += input.axesL[1] || 0;
 
-  x += (touch.r?1:0) - (touch.l?1:0);
-  z += (touch.b?1:0) - (touch.f?1:0);
+  // Android dock
+  x += (touch.r ? 1 : 0) - (touch.l ? 1 : 0);
+  z += (touch.b ? 1 : 0) - (touch.f ? 1 : 0);
 
+  // Desktop keys
   if (keys.has("KeyA")) x -= 1;
   if (keys.has("KeyD")) x += 1;
   if (keys.has("KeyW")) z -= 1;
@@ -204,7 +209,7 @@ function applyMove(dt){
   player.position.copy(world.resolvePlayerCollision(from, to));
 }
 
-function applySnapTurn(dt){
+function applySnapTurn(dt) {
   if (!flags().snap) return;
 
   input.snapCooldown = Math.max(0, input.snapCooldown - dt);
@@ -217,10 +222,10 @@ function applySnapTurn(dt){
 
   const thresh = 0.72;
   if (sx > thresh) {
-    world.addPlayerYaw(-Math.PI/6);
+    world.addPlayerYaw(-Math.PI / 6);
     input.snapCooldown = 0.22;
   } else if (sx < -thresh) {
-    world.addPlayerYaw(+Math.PI/6);
+    world.addPlayerYaw(+Math.PI / 6);
     input.snapCooldown = 0.22;
   }
 }

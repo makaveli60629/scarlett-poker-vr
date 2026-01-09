@@ -1,4 +1,4 @@
-// /js/main.js — Scarlett VR Poker — CASINO MASTER MAIN (FIXED PATH + CACHE-BUST WORLD)
+// /js/main.js — Scarlett VR Poker — MASTER MAIN (Cache-bust world + movement + teleport)
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 
@@ -7,44 +7,44 @@ const log = (m) => { try { console.log(m); } catch {} };
 const BUILD_V = (window.__BUILD_V || Date.now()).toString();
 log("[main] BUILD_V=" + BUILD_V);
 
-// ✅ IMPORTANT FIX: main.js is already in /js/, so world is ./world.js (NOT ./js/world.js)
+// ✅ main.js is inside /js/, so world is ./world.js
 const worldModUrl = "./world.js?v=" + encodeURIComponent(BUILD_V);
 log("[main] Import world:\n" + new URL(worldModUrl, location.href).toString());
 
 const WorldMod = await import(worldModUrl);
 const { initWorld, CyberAvatar } = WorldMod;
 
-// ---------- Renderer ----------
+// Renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
 
-// ---------- Scene + Camera ----------
+// Scene + Camera
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 250);
 camera.position.set(0, 1.6, 6.0);
 
-// ---------- World ----------
+// World
 const world = initWorld({ THREE, scene, log });
 log("[main] world init ✅");
 
-// ---------- VRButton ----------
+// VR Button
 const sessionInit = window.__XR_SESSION_INIT || { optionalFeatures: ["local-floor", "bounded-floor"] };
 document.body.appendChild(VRButton.createButton(renderer, sessionInit));
 log("[main] VRButton appended ✅");
 
-// ---------- Controllers hidden ----------
+// Controllers hidden
 const controller1 = renderer.xr.getController(0);
 const controller2 = renderer.xr.getController(1);
 controller1.visible = false;
 controller2.visible = false;
 scene.add(controller1, controller2);
 
-// ---------- Spawn helper ----------
+// Spawn
 function placePlayerAtSpawn() {
-  const spawn = (world.spawn || new THREE.Vector3(0, 0, 6.0)).clone();
+  const spawn = (world.spawn || new THREE.Vector3(0, 0, 6)).clone();
   const camXZ = new THREE.Vector3(camera.position.x, 0, camera.position.z);
   const delta = spawn.clone().sub(camXZ);
   world.group.position.sub(delta);
@@ -52,15 +52,11 @@ function placePlayerAtSpawn() {
 }
 renderer.xr.addEventListener("sessionstart", () => requestAnimationFrame(placePlayerAtSpawn));
 
-// ---------- Avatar 4.0 ----------
-const avatar4_0 = new CyberAvatar({
-  THREE, scene, camera,
-  textureURL: "assets/textures/cyber_suit_atlas.png",
-  log
-});
+// Avatar 4.0
+const avatar4_0 = new CyberAvatar({ THREE, scene, camera, log });
 window.addEventListener("scarlett-toggle-hands", (e) => avatar4_0.setHandsVisible(!!e.detail));
 
-// ---------- Recenter ----------
+// Recenter
 window.addEventListener("scarlett-recenter", () => {
   world.group.position.set(0, 0, 0);
   world.group.rotation.set(0, 0, 0);
@@ -68,7 +64,7 @@ window.addEventListener("scarlett-recenter", () => {
   log("[main] recenter ✅");
 });
 
-// ---------- Touch controls ----------
+// Touch dock
 const touch = { f:0,b:0,l:0,r:0,turnL:0,turnR:0 };
 window.addEventListener("scarlett-touch", (e) => {
   const d = e.detail || {};
@@ -76,16 +72,15 @@ window.addEventListener("scarlett-touch", (e) => {
   touch.turnL = d.turnL || 0; touch.turnR = d.turnR || 0;
 });
 
-// Stick shaping
+// Input shaping
 function shapeAxis(v, dead = 0.18) {
   const a = Math.abs(v);
   if (a < dead) return 0;
   const s = (a - dead) / (1 - dead);
-  const curved = s * s;
-  return Math.sign(v) * curved;
+  return Math.sign(v) * (s * s);
 }
 
-// ---------- Teleport visuals ----------
+// Teleport visuals
 const marker = new THREE.Mesh(
   new THREE.RingGeometry(0.20, 0.30, 48),
   new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.85 })
@@ -137,9 +132,8 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// ---------- Loop ----------
+// Loop
 let lastT = performance.now();
-
 renderer.setAnimationLoop((t, frame) => {
   const now = performance.now();
   const dt = Math.min(0.05, (now - lastT) / 1000);
@@ -180,18 +174,16 @@ renderer.setAnimationLoop((t, frame) => {
       if (tHit > 0) {
         const hit = origin.clone().add(dir.clone().multiplyScalar(tHit));
 
-        // clamp near table center (always escapable)
+        // avoid landing inside table core (escape clamp)
         const v2 = new THREE.Vector2(hit.x, hit.z);
         const dist = v2.length();
         const TABLE_BLOCK_R = 1.25;
         const ESCAPE_R = 2.4;
         const finalHit = hit.clone();
-
         if (dist < TABLE_BLOCK_R) {
           if (v2.lengthSq() < 1e-6) v2.set(1, 0);
           v2.normalize().multiplyScalar(ESCAPE_R);
-          finalHit.x = v2.x;
-          finalHit.z = v2.y;
+          finalHit.x = v2.x; finalHit.z = v2.y;
         }
 
         state.teleportOk = true;
@@ -208,7 +200,7 @@ renderer.setAnimationLoop((t, frame) => {
     pts.needsUpdate = true;
   }
 
-  // Movement input
+  // Read controller sticks
   let moveX = 0, moveZ = 0, snapX = 0;
 
   if (renderer.xr.isPresenting) {
@@ -233,7 +225,7 @@ renderer.setAnimationLoop((t, frame) => {
   moveX += (touch.r ? 1 : 0) + (touch.l ? -1 : 0);
   snapX += (touch.turnR ? 1 : 0) + (touch.turnL ? -1 : 0);
 
-  // Apply move
+  // Movement
   if (moveOn) {
     const mx = shapeAxis(moveX);
     const mz = shapeAxis(moveZ);
@@ -243,11 +235,8 @@ renderer.setAnimationLoop((t, frame) => {
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
       right.y = 0; right.normalize();
 
-      const dir = new THREE.Vector3();
-      dir.addScaledVector(right, mx);
-      dir.addScaledVector(fwd, mz);
+      const dir = new THREE.Vector3().addScaledVector(right, mx).addScaledVector(fwd, mz);
       if (dir.lengthSq() > 1e-6) dir.normalize();
-
       world.group.position.sub(dir.multiplyScalar(state.moveSpeed * dt));
     }
   }
@@ -275,4 +264,4 @@ renderer.setAnimationLoop((t, frame) => {
   renderer.render(scene, camera);
 });
 
-log("[main] CASINO MASTER ready ✅");
+log("[main] MASTER ready ✅");

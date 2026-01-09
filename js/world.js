@@ -621,3 +621,18 @@ class NPCBot {
     this._footR.position.y = 0.025 + Math.max(0, -Math.sin(this._walkPhase)) * 0.02;
   }
 }
+function getCyberMannequinMaterial(THREE) {
+  const tex = new THREE.TextureLoader().load(
+    "assets/textures/cyber_suit_atlas.png"
+  );
+  tex.flipY = false;
+
+  return new THREE.MeshStandardMaterial({
+    map: tex,
+    emissiveMap: tex,
+    emissive: new THREE.Color(0x00ffff),
+    emissiveIntensity: 1.6, // slightly lower than player avatar
+    metalness: 0.75,
+    roughness: 0.28,
+  });
+}

@@ -1,27 +1,20 @@
-// /js/world.js — Scarlett VR Poker World (CDN-safe, no local three import)
-// Called from main.js with { THREE, scene, renderer, camera, player, controllers }
+// /js/world.js — Scarlett VR Poker World (CDN-safe)
+// Provides: room, walls, table, rail collision, 8 seats, simple zones & APIs.
 
 export const World = {
   init({ THREE, scene, renderer, camera, player, controllers, log }) {
     const W = {
       THREE, scene, renderer, camera, player, controllers, log,
       colliders: [],
-      _playerYaw: Math.PI, // face toward table by default
+      _playerYaw: Math.PI,
       mode: "lobby",
       seatedIndex: -1,
-      flags: {
-        teleport: true,
-        move: true,
-        snap: true,
-        hands: true,
-      },
+      flags: { teleport: true, move: true, snap: true, hands: true },
+      seats: [],
       zones: {
         tableCenter: new THREE.Vector3(0, 0, 0),
         tableRadius: 4.2,
-        spectateCenter: new THREE.Vector3(-6.0, 0, 2.0),
-        spectateRadius: 2.25,
       },
-      seats: [],
     };
 
     const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -34,17 +27,6 @@ export const World = {
       mesh.position.set(pos.x, pos.y, pos.z);
       scene.add(mesh);
       W.colliders.push(mesh);
-      return mesh;
-    }
-
-    function addVisibleBox(pos, size, material, name = "box") {
-      const geo = new THREE.BoxGeometry(size.sx, size.sy, size.sz);
-      const mesh = new THREE.Mesh(geo, material);
-      mesh.name = name;
-      mesh.position.set(pos.x, pos.y, pos.z);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      scene.add(mesh);
       return mesh;
     }
 
@@ -64,9 +46,7 @@ export const World = {
       return ring;
     }
 
-    // --------------------
     // Lighting
-    // --------------------
     scene.add(new THREE.AmbientLight(0xffffff, 0.35));
 
     const key = new THREE.DirectionalLight(0xffffff, 1.25);
@@ -81,32 +61,39 @@ export const World = {
     pink.position.set(-5, 3.2, -3);
     scene.add(pink);
 
-    // --------------------
-    // Floor + walls (solid)
-    // --------------------
+    // Floor
     const floorMat = new THREE.MeshStandardMaterial({ color: 0x111421, roughness: 0.95, metalness: 0.05 });
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
     scene.add(floor);
 
+    // Walls (visible)
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x1a1f33, roughness: 0.9, metalness: 0.05 });
 
-    // Visible walls
-    addVisibleBox({ x: 0, y: 2.2, z: -15 }, { sx: 60, sy: 4.4, sz: 1 }, wallMat, "wall_n");
-    addVisibleBox({ x: 0, y: 2.2, z: 15 }, { sx: 60, sy: 4.4, sz: 1 }, wallMat, "wall_s");
-    addVisibleBox({ x: -15, y: 2.2, z: 0 }, { sx: 1, sy: 4.4, sz: 60 }, wallMat, "wall_w");
-    addVisibleBox({ x: 15, y: 2.2, z: 0 }, { sx: 1, sy: 4.4, sz: 60 }, wallMat, "wall_e");
+    const wallN = new THREE.Mesh(new THREE.BoxGeometry(60, 4.4, 1), wallMat);
+    wallN.position.set(0, 2.2, -15);
+    scene.add(wallN);
 
-    // Colliders
+    const wallS = new THREE.Mesh(new THREE.BoxGeometry(60, 4.4, 1), wallMat);
+    wallS.position.set(0, 2.2, 15);
+    scene.add(wallS);
+
+    const wallW = new THREE.Mesh(new THREE.BoxGeometry(1, 4.4, 60), wallMat);
+    wallW.position.set(-15, 2.2, 0);
+    scene.add(wallW);
+
+    const wallE = new THREE.Mesh(new THREE.BoxGeometry(1, 4.4, 60), wallMat);
+    wallE.position.set(15, 2.2, 0);
+    scene.add(wallE);
+
+    // Wall colliders
     addColliderBox({ x: 0, y: 2.2, z: -15 }, { sx: 60, sy: 4.4, sz: 1 }, "col_wall_n");
     addColliderBox({ x: 0, y: 2.2, z: 15 }, { sx: 60, sy: 4.4, sz: 1 }, "col_wall_s");
     addColliderBox({ x: -15, y: 2.2, z: 0 }, { sx: 1, sy: 4.4, sz: 60 }, "col_wall_w");
     addColliderBox({ x: 15, y: 2.2, z: 0 }, { sx: 1, sy: 4.4, sz: 60 }, "col_wall_e");
 
-    // --------------------
-    // Table + rail
-    // --------------------
+    // Table
     const tableMat = new THREE.MeshStandardMaterial({
       color: 0x0b3a2a,
       roughness: 0.8,
@@ -117,8 +104,6 @@ export const World = {
 
     const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(2.3, 2.3, 0.22, 64), tableMat);
     tableTop.position.set(0, 1.02, 0);
-    tableTop.castShadow = true;
-    tableTop.receiveShadow = true;
     scene.add(tableTop);
 
     const tableBase = new THREE.Mesh(
@@ -126,10 +111,9 @@ export const World = {
       new THREE.MeshStandardMaterial({ color: 0x12131a, roughness: 0.65, metalness: 0.25 })
     );
     tableBase.position.set(0, 0.45, 0);
-    tableBase.castShadow = true;
-    tableBase.receiveShadow = true;
     scene.add(tableBase);
 
+    // Rail (visual)
     const rail = new THREE.Mesh(
       new THREE.TorusGeometry(2.65, 0.14, 24, 80),
       new THREE.MeshStandardMaterial({ color: 0x161a2a, roughness: 0.7, metalness: 0.2 })
@@ -138,7 +122,7 @@ export const World = {
     rail.position.set(0, 1.0, 0);
     scene.add(rail);
 
-    // Rail collision approximation
+    // Rail collision (12 boxes)
     const ringY = 1.0;
     const ringR = 2.65;
     for (let i = 0; i < 12; i++) {
@@ -150,25 +134,14 @@ export const World = {
       box.updateMatrixWorld(true);
     }
 
-    // --------------------
     // Seats (8)
-    // --------------------
     const seatRadius = 3.35;
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2 + Math.PI;
       const px = Math.cos(a) * seatRadius;
       const pz = Math.sin(a) * seatRadius;
 
-      const chair = new THREE.Mesh(
-        new THREE.BoxGeometry(0.6, 0.8, 0.6),
-        new THREE.MeshStandardMaterial({ color: 0x0f111a, roughness: 0.85, metalness: 0.15 })
-      );
-      chair.position.set(px, 0.4, pz);
-      chair.rotation.y = a + Math.PI;
-      chair.castShadow = true;
-      chair.receiveShadow = true;
-      scene.add(chair);
-
+      // Seat marker
       const mark = addRingMarker(new THREE.Vector3(px, 0, pz), 0.12, 0.19, 0xffcc00);
       mark.material.opacity = 0.55;
 
@@ -179,18 +152,13 @@ export const World = {
       });
     }
 
-    // Spectate marker + lobby marker
-    addRingMarker(new THREE.Vector3(W.zones.spectateCenter.x, 0, W.zones.spectateCenter.z), 0.35, 0.5, 0xff2d7a);
-    addRingMarker(new THREE.Vector3(0, 0, 6), 0.25, 0.38, 0x7fe7ff);
-
-    // --------------------
     // API
-    // --------------------
     W.setMode = (m) => { W.mode = m; };
 
     W.setFlag = (k, v) => { if (k in W.flags) W.flags[k] = !!v; };
 
     W.getPlayerYaw = () => W._playerYaw;
+
     W.addPlayerYaw = (delta) => {
       W._playerYaw += delta;
       player.rotation.y = W._playerYaw;
@@ -222,7 +190,7 @@ export const World = {
         }
       }
 
-      // Room clamp backup
+      // backup clamp
       p.x = clamp(p.x, -13.7, 13.7);
       p.z = clamp(p.z, -13.7, 13.7);
       return p;
@@ -230,10 +198,7 @@ export const World = {
 
     W.getZoneAt = (pos) => {
       const p = new THREE.Vector3(pos.x, 0, pos.z);
-      const spect = new THREE.Vector3(W.zones.spectateCenter.x, 0, W.zones.spectateCenter.z);
       const table = new THREE.Vector3(W.zones.tableCenter.x, 0, W.zones.tableCenter.z);
-
-      if (p.distanceTo(spect) <= W.zones.spectateRadius) return "spectate";
       if (p.distanceTo(table) <= W.zones.tableRadius) return "table";
       return "lobby";
     };
@@ -259,7 +224,7 @@ export const World = {
       W._playerYaw = seat.yaw;
       player.rotation.y = W._playerYaw;
 
-      // Desktop “seated height”; VR uses local-floor (rig y 0)
+      // Desktop seated height; VR uses local-floor so rig y=0
       player.position.y = renderer.xr.isPresenting ? 0 : 1.35;
 
       log?.(`sitPlayerAtSeat(${seatIndex}) ✅`);
@@ -274,18 +239,17 @@ export const World = {
     };
 
     W.recenter = () => {
-      // “Recenter” means: go to lobby spawn, face table
+      // Default recenter = lobby; main.js overrides for Scorpion Room
       W.standPlayerInLobby();
     };
 
     W.update = () => {
-      // Ambient pulse
       const t = performance.now() * 0.001;
       neon.intensity = 1.7 + Math.sin(t * 1.2) * 0.25;
       pink.intensity = 1.3 + Math.cos(t * 1.0) * 0.22;
     };
 
-    // Apply initial yaw
+    // initial yaw
     player.rotation.y = W._playerYaw;
 
     log?.("world init ✅");

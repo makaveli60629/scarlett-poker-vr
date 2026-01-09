@@ -1,16 +1,15 @@
-// /js/controls.js — Scarlett VR Poker Controls v11.2
-// XR: RIGHT stick = smooth move, LEFT stick = snap turn
-// Desktop: WASD + QE snap turn + mouse look
+// /js/controls.js — Scarlett VR Poker Controls v10.8
+// Movement + snap turn + desktop fallback.
+// VR: RIGHT stick moves, LEFT stick snap-turn 45°.
+// Adds simple room clamp if world.roomClamp exists.
 
 export const Controls = {
-  init({ THREE, renderer, camera, player, log = console.log } = {}) {
-    const L = (...a) => { try { log(...a); } catch { console.log(...a); } };
-
+  init({ THREE, renderer, camera, player, controllers, log, world }) {
     const state = {
       enabled: true,
-      moveSpeed: 2.2,
+      moveSpeed: 2.0,
       sprintMult: 1.6,
-      snapTurnDeg: 35,
+      snapTurnDeg: 45,
       snapCooldown: 0.22,
       snapT: 0,
 
@@ -24,10 +23,9 @@ export const Controls = {
     };
 
     const snapTurnRad = (state.snapTurnDeg * Math.PI) / 180;
-
-    // --- Desktop controls ---
     const canvas = renderer.domElement;
 
+    // --- Desktop ---
     function onKey(e, down) {
       state.keys[e.code] = down;
       if (down) {
@@ -42,11 +40,9 @@ export const Controls = {
       if (renderer.xr?.isPresenting) return;
       canvas.requestPointerLock?.();
     });
-
     document.addEventListener("pointerlockchange", () => {
       state.pointerLocked = document.pointerLockElement === canvas;
     });
-
     document.addEventListener("mousemove", (e) => {
       if (!state.pointerLocked) return;
       state.yaw -= e.movementX * state.mouseSens;
@@ -55,34 +51,40 @@ export const Controls = {
       state.pitch = Math.max(-lim, Math.min(lim, state.pitch));
     });
 
-    // --- XR input helpers ---
+    // --- XR helpers ---
     function getSession() { return renderer.xr?.getSession?.() || null; }
     function getSources() { return getSession()?.inputSources || []; }
-
-    function getSource(handedness) {
-      const sources = getSources();
-      for (const s of sources) if (s.handedness === handedness) return s;
+    function getHandSource(handedness) {
+      for (const s of getSources()) if (s.handedness === handedness) return s;
       return null;
     }
 
-    function getStick(src) {
+    function getStick(src, which = "primary") {
       const gp = src?.gamepad;
       if (!gp || !gp.axes) return { x: 0, y: 0 };
 
-      // If 4 axes exist, right stick is [2,3], left is [0,1]
+      // Quest common mapping:
+      // - left stick: axes[0], axes[1]
+      // - right stick: axes[2], axes[3]
       if (gp.axes.length >= 4) {
         if (src.handedness === "right") return { x: gp.axes[2] || 0, y: gp.axes[3] || 0 };
         return { x: gp.axes[0] || 0, y: gp.axes[1] || 0 };
       }
-      // fallback
       return { x: gp.axes[0] || 0, y: gp.axes[1] || 0 };
     }
 
-    // --- movement math ---
+    // Movement math (camera-forward on XZ plane)
     const tmpQ = new THREE.Quaternion();
     const fwd = new THREE.Vector3();
     const right = new THREE.Vector3();
     const dir = new THREE.Vector3();
+
+    function applyRoomClamp() {
+      const c = world?.roomClamp;
+      if (!c) return;
+      player.position.x = Math.max(c.minX, Math.min(c.maxX, player.position.x));
+      player.position.z = Math.max(c.minZ, Math.min(c.maxZ, player.position.z));
+    }
 
     function applyMove(strafeX, stickY, dt, sprint) {
       const dz = 0.14;
@@ -90,7 +92,7 @@ export const Controls = {
       const ay = Math.abs(stickY) < dz ? 0 : stickY;
       if (ax === 0 && ay === 0) return;
 
-      const forward = -ay; // forward usually negative
+      const forward = -ay; // forward is typically negative on stickY
       const strafe = ax;
 
       camera.getWorldQuaternion(tmpQ);
@@ -113,6 +115,8 @@ export const Controls = {
 
       player.position.x += dir.x * step;
       player.position.z += dir.z * step;
+
+      applyRoomClamp();
     }
 
     function applySnapTurn(xAxis) {
@@ -125,7 +129,7 @@ export const Controls = {
       state.snapT = state.snapCooldown;
     }
 
-    L("[controls] ready ✅ (XR: right-move, left-snap)");
+    log?.("[controls] ready ✅ (VR: right move, left snap 45°)");
 
     return {
       update(dt) {
@@ -135,20 +139,21 @@ export const Controls = {
         const isXR = renderer.xr?.isPresenting;
 
         if (isXR) {
-          // RIGHT stick moves
-          const rightSrc = getSource("right");
+          const left = getHandSource("left");
+          const rightSrc = getHandSource("right");
+
+          // ✅ RIGHT stick move
           const mv = getStick(rightSrc);
           applyMove(mv.x, mv.y, dt, false);
 
-          // LEFT stick snap-turn
-          const leftSrc = getSource("left");
-          const tr = getStick(leftSrc);
+          // ✅ LEFT stick snap turn
+          const tr = getStick(left);
           applySnapTurn(tr.x);
 
           return;
         }
 
-        // Desktop
+        // Desktop:
         player.rotation.y = state.yaw;
         camera.rotation.x = state.pitch;
 
@@ -165,6 +170,8 @@ export const Controls = {
           state.queuedSnap = 0;
           state.snapT = state.snapCooldown;
         }
+
+        applyRoomClamp();
       }
     };
   }

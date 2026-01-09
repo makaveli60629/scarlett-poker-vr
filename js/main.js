@@ -1,6 +1,4 @@
-// /js/main.js — Scarlett VR Poker — CASINO MASTER MAIN (CACHE-BUST WORLD)
-// IMPORTANT: This file dynamically imports world.js with ?v=__BUILD_V to prevent Quest/GitHub cache issues.
-
+// /js/main.js — Scarlett VR Poker — CASINO MASTER MAIN (FIXED PATH + CACHE-BUST WORLD)
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 
@@ -9,8 +7,8 @@ const log = (m) => { try { console.log(m); } catch {} };
 const BUILD_V = (window.__BUILD_V || Date.now()).toString();
 log("[main] BUILD_V=" + BUILD_V);
 
-// Dynamically import world with cache bust
-const worldModUrl = "./js/world.js?v=" + encodeURIComponent(BUILD_V);
+// ✅ IMPORTANT FIX: main.js is already in /js/, so world is ./world.js (NOT ./js/world.js)
+const worldModUrl = "./world.js?v=" + encodeURIComponent(BUILD_V);
 log("[main] Import world:\n" + new URL(worldModUrl, location.href).toString());
 
 const WorldMod = await import(worldModUrl);
@@ -52,7 +50,6 @@ function placePlayerAtSpawn() {
   world.group.position.sub(delta);
   log("[spawn] placed ✅ " + spawn.toArray().map(n => n.toFixed(2)).join(","));
 }
-
 renderer.xr.addEventListener("sessionstart", () => requestAnimationFrame(placePlayerAtSpawn));
 
 // ---------- Avatar 4.0 ----------
@@ -61,7 +58,6 @@ const avatar4_0 = new CyberAvatar({
   textureURL: "assets/textures/cyber_suit_atlas.png",
   log
 });
-
 window.addEventListener("scarlett-toggle-hands", (e) => avatar4_0.setHandsVisible(!!e.detail));
 
 // ---------- Recenter ----------
@@ -72,7 +68,7 @@ window.addEventListener("scarlett-recenter", () => {
   log("[main] recenter ✅");
 });
 
-// ---------- Movement helpers ----------
+// ---------- Touch controls ----------
 const touch = { f:0,b:0,l:0,r:0,turnL:0,turnR:0 };
 window.addEventListener("scarlett-touch", (e) => {
   const d = e.detail || {};
@@ -80,6 +76,7 @@ window.addEventListener("scarlett-touch", (e) => {
   touch.turnL = d.turnL || 0; touch.turnR = d.turnR || 0;
 });
 
+// Stick shaping
 function shapeAxis(v, dead = 0.18) {
   const a = Math.abs(v);
   if (a < dead) return 0;
@@ -133,7 +130,7 @@ controller1.addEventListener("selectend", () => {
   state.teleportArmed = false;
 });
 
-// ---------- Resize ----------
+// Resize
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();

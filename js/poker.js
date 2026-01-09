@@ -1,7 +1,6 @@
-// /js/poker.js — Scarlett PokerSim v1.1 (WATCH SET: 12 HANDS)
-// ✅ Real 52-card deck + evaluation
-// ✅ Emits: deal/action/blinds/showdown/state/finished
-// ✅ Stops after maxHands so you can watch a full set
+// /js/poker.js — Scarlett PokerSim v1.2 (SHOWDOWN CARD SOURCES)
+// ✅ Adds best5Detailed: tells DealingMix which winning cards came from HOLE vs COMMUNITY
+// ✅ Keeps watch-set (maxHands) behavior
 
 export const PokerSim = (() => {
   function makeEmitter() {
@@ -30,6 +29,7 @@ export const PokerSim = (() => {
     const s = SUIT_CH[c.s] || "?";
     return r + s;
   }
+  function cardKey(c){ return `${c.r}_${c.s}`; }
 
   function makeDeck() {
     const deck = [];
@@ -106,7 +106,7 @@ export const PokerSim = (() => {
   }
 
   function bestOf7(cards7) {
-    let best = null, bestIdx = null;
+    let best = null, bestIdx = null, bestFive = null;
     for (let a=0;a<3;a++){
       for (let b=a+1;b<4;b++){
         for (let c=b+1;c<5;c++){
@@ -114,13 +114,13 @@ export const PokerSim = (() => {
             for (let e=d+1;e<7;e++){
               const five = [cards7[a], cards7[b], cards7[c], cards7[d], cards7[e]];
               const sc = score5(five);
-              if (!best || compareScore(sc, best) > 0) { best = sc; bestIdx = [a,b,c,d,e]; }
+              if (!best || compareScore(sc, best) > 0) { best = sc; bestIdx = [a,b,c,d,e]; bestFive = five; }
             }
           }
         }
       }
     }
-    return { score: best, usedIdx: bestIdx };
+    return { score: best, usedIdx: bestIdx, bestFive };
   }
 
   function catName(cat) {
@@ -135,6 +135,36 @@ export const PokerSim = (() => {
       case 2: return "ONE PAIR";
       default: return "HIGH CARD";
     }
+  }
+
+  // Map the 5 winning cards back to their source (hole/community).
+  // Returns array of { card, label, from:"HOLE"|"COMM", index } where index is 0..1 for hole, 0..4 for community
+  function mapBest5ToSources(cards7, best5) {
+    // build multimap of key -> [indices]
+    const bins = new Map();
+    for (let i=0;i<cards7.length;i++){
+      const k = cardKey(cards7[i]);
+      if (!bins.has(k)) bins.set(k, []);
+      bins.get(k).push(i);
+    }
+
+    const used = new Set();
+    const out = [];
+    for (const c of best5) {
+      const k = cardKey(c);
+      const arr = bins.get(k) || [];
+      let pick = -1;
+      for (const idx of arr) {
+        if (!used.has(idx)) { pick = idx; break; }
+      }
+      if (pick < 0) pick = arr[0] ?? -1;
+      used.add(pick);
+
+      if (pick <= 1) out.push({ card: c, label: cardToString(c), from: "HOLE", index: pick });
+      else out.push({ card: c, label: cardToString(c), from: "COMM", index: pick - 2 });
+    }
+
+    return out;
   }
 
   function create(opts = {}) {
@@ -252,23 +282,28 @@ export const PokerSim = (() => {
         }
       }
 
-      E.emit("deal", { type: "HOLE" });
+      // Provide hole labels per seat for DealingMix “above head cards”
+      E.emit("deal", {
+        type: "HOLE",
+        hole: S.players.map(p => ({ seat: p.seat, name: p.name, cards: p.hole.map(cardToString), raw: p.hole.slice() }))
+      });
     }
 
-    function dealFlop() { burnOne(); S.community.push(drawOne(), drawOne(), drawOne()); E.emit("deal", { type:"FLOP", communityRaw: S.community.slice() }); }
-    function dealTurn() { burnOne(); S.community.push(drawOne()); E.emit("deal", { type:"TURN", communityRaw: S.community.slice() }); }
-    function dealRiver(){ burnOne(); S.community.push(drawOne()); E.emit("deal", { type:"RIVER", communityRaw: S.community.slice() }); }
+    function dealFlop() { burnOne(); S.community.push(drawOne(), drawOne(), drawOne()); E.emit("deal", { type:"FLOP", communityRaw: S.community.slice(), community: S.community.map(cardToString) }); }
+    function dealTurn() { burnOne(); S.community.push(drawOne()); E.emit("deal", { type:"TURN", communityRaw: S.community.slice(), community: S.community.map(cardToString) }); }
+    function dealRiver(){ burnOne(); S.community.push(drawOne()); E.emit("deal", { type:"RIVER", communityRaw: S.community.slice(), community: S.community.map(cardToString) }); }
 
     function earlyWinIfOneLeft() {
       const alive = activePlayers();
       if (alive.length === 1) {
         const w = alive[0];
         w.stack += S.pot;
-        const payload = {
-          winners: [{ seat: w.seat, name: w.name, amount: S.pot, handName: "—", best5: [] }],
-          pot: S.pot
-        };
-        E.emit("showdown", payload);
+        E.emit("showdown", {
+          winners: [{ seat: w.seat, name: w.name, amount: S.pot, handName: "—", best5: [], best5Detailed: [] }],
+          pot: S.pot,
+          community: S.community.map(cardToString),
+          communityRaw: S.community.slice()
+        });
         return true;
       }
       return false;
@@ -281,14 +316,19 @@ export const PokerSim = (() => {
       const results = [];
       for (const p of alive) {
         const cards7 = [...p.hole, ...S.community];
-        const { score } = bestOf7(cards7);
+        const { score, bestFive } = bestOf7(cards7);
+        const detailed = mapBest5ToSources(cards7, bestFive);
+
         results.push({
           seat: p.seat,
           name: p.name,
           score,
           handName: catName(score.cat),
-          best5: score.cards.map(cardToString),
+          best5: bestFive.map(cardToString),
+          best5Raw: bestFive.slice(),
+          best5Detailed: detailed, // ✅ what we need
           hole: p.hole.map(cardToString),
+          holeRaw: p.hole.slice()
         });
       }
 
@@ -305,7 +345,22 @@ export const PokerSim = (() => {
         w.amount = add;
       }
 
-      E.emit("showdown", { winners, pot: S.pot });
+      E.emit("showdown", {
+        winners: winners.map(w => ({
+          seat: w.seat,
+          name: w.name,
+          amount: w.amount,
+          handName: w.handName,
+          best5: w.best5,
+          best5Raw: w.best5Raw,
+          best5Detailed: w.best5Detailed,
+          hole: w.hole,
+          holeRaw: w.holeRaw
+        })),
+        pot: S.pot,
+        community: S.community.map(cardToString),
+        communityRaw: S.community.slice()
+      });
     }
 
     function setPhase(phase, street, actionText) {
@@ -317,7 +372,6 @@ export const PokerSim = (() => {
 
     function startHand() {
       if (S.finished) return;
-
       resetPlayersIfNeeded();
       rotateDealer();
       dealHole();
@@ -330,8 +384,6 @@ export const PokerSim = (() => {
       if (S.phase === "IDLE") return;
 
       S.timer += dt;
-
-      // light toy betting once per street
       if (S.toyBetting && S.timer > 0.45 && S.timer < 0.50) maybeToyBetting();
 
       if (S.phase === "HOLE" && S.timer >= S.tDealHole) {
@@ -350,7 +402,6 @@ export const PokerSim = (() => {
         setPhase("END", "SHOWDOWN", "NEXT");
       } else if (S.phase === "END" && S.timer >= S.tNextHand) {
         S.handsPlayed++;
-
         if (S.handsPlayed >= S.maxHands) {
           S.finished = true;
           E.emit("finished", { handsPlayed: S.handsPlayed });
@@ -360,11 +411,7 @@ export const PokerSim = (() => {
       }
     }
 
-    return {
-      on: E.on,
-      startHand,
-      update
-    };
+    return { on: E.on, startHand, update };
   }
 
   return { create };

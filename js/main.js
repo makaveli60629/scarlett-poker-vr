@@ -1,8 +1,9 @@
-// /js/main.js — Scarlett Poker VR Boot v12.0 (FULL)
-// ✅ Direct Enter VR via HUD event (fixes crash-before-enter)
-// ✅ Quest-safe sessionstart perf profile (pixel ratio + foveation)
+// /js/main.js — Scarlett Poker VR Boot v12.1 (CLEAN FULL)
+// ✅ Direct Enter VR via HUD event (scarlett-enter-vr)
+// ✅ Quest-safe perf: pixel ratio + foveation on sessionstart
 // ✅ Full pipeline: world + controls + teleport + hands + dealing + poker
-// ✅ No duplicate THREE declarations
+// ✅ DealingMix wired: showdown best5 + fly-in hole card copies
+// ✅ NO duplicate declarations
 
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
@@ -60,7 +61,7 @@ try {
   log("❌ VRButton failed: " + (e?.message || e));
 }
 
-// ---------- XR: Direct Enter VR (HUD calls this) ----------
+// ---------- XR: session perf tuning ----------
 renderer.xr.addEventListener("sessionstart", () => {
   try {
     renderer.setPixelRatio(1.0);
@@ -70,12 +71,11 @@ renderer.xr.addEventListener("sessionstart", () => {
 });
 
 renderer.xr.addEventListener("sessionend", () => {
-  try {
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
-  } catch {}
+  try { renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25)); } catch {}
   log("[xr] sessionend ✅");
 });
 
+// ---------- XR: Direct Enter VR (HUD should dispatch scarlett-enter-vr) ----------
 window.addEventListener("scarlett-enter-vr", async () => {
   try {
     const xr = navigator.xr;
@@ -95,62 +95,7 @@ window.addEventListener("scarlett-enter-vr", async () => {
     console.error(e);
   }
 });
-// ---------- DEALING VISUALS ----------
-const dealing = DealingMix.init({ THREE, scene, log, world });
 
-// ---------- POKER ENGINE ----------
-const poker = PokerSim.create({
-  seats: 6,
-  log,
-  maxHands: 12,        // ✅ 12 round game like you asked
-  tDealHole: 1.2,
-  tFlop: 1.6,
-  tTurn: 1.4,
-  tRiver: 1.4,
-  tShowdown: 2.6,
-  tNextHand: 1.2,
-  toyBetting: true,
-  names: ["BOT 1","BOT 2","BOT 3","BOT 4","BOT 5","BOT 6"],
-});
-
-// ✅ Wire Poker → DealingMix
-poker.on("state", (s) => {
-  // update HUD street + action
-  dealing?.setStreet?.(s.street);
-  dealing?.setAction?.(s.actionText || s.phase || "—");
-  dealing?.setPot?.(s.pot);
-  log(`[poker] state=${s.phase} street=${s.street} pot=$${s.pot}`);
-});
-
-poker.on("blinds", (b) => {
-  dealing?.onBlinds?.(b);
-  dealing?.setPot?.(b.pot);
-  log(`[poker] blinds: SB=${b.small} BB=${b.big} pot=$${b.pot}`);
-});
-
-poker.on("action", (a) => {
-  dealing?.onAction?.(a);
-  log(`[poker] ${a.name} ${a.type}${a.amount ? " $" + a.amount : ""}`);
-});
-
-poker.on("deal", (d) => {
-  dealing?.onDeal?.(d);     // ✅ HOLE/FLOP/TURN/RIVER handled inside DealingMix
-});
-
-poker.on("showdown", (sd) => {
-  dealing?.onShowdown?.(sd);  // ✅ THIS is what makes hole cards fly into the 5-card row
-  const w = sd?.winners?.[0];
-  if (w) log(`[poker] SHOWDOWN winner=${w.name} hand=${w.handName}`);
-});
-
-poker.on("finished", (f) => {
-  dealing?.showFinished?.(f);
-  log(`[poker] FINISHED hands=${f.handsPlayed}`);
-});
-
-// Start
-poker.startHand();
-log("[main] PokerSim started ✅");
 // ---------- PLAYER RIG ----------
 const player = new THREE.Group();
 player.name = "PlayerRig";
@@ -183,7 +128,10 @@ const controllers = [];
 const grips = [];
 
 function makeLaser() {
-  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
+  const geo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0, 0, -1),
+  ]);
   const mat = new THREE.LineBasicMaterial({ color: 0xb200ff, transparent: true, opacity: 0.95 });
   const line = new THREE.Line(geo, mat);
   line.name = "Laser";
@@ -240,40 +188,47 @@ const teleport = Teleport.init({ THREE, scene, renderer, camera, player, control
 // ---------- DEALING VISUALS ----------
 const dealing = DealingMix.init({ THREE, scene, log, world });
 
-// ---------- POKER ----------
+// ---------- POKER ENGINE ----------
 const poker = PokerSim.create({
   seats: 6,
   log,
-  toyBetting: true,
+  maxHands: 12,
   tDealHole: 1.2,
   tFlop: 1.6,
   tTurn: 1.4,
   tRiver: 1.4,
   tShowdown: 2.6,
   tNextHand: 1.2,
+  toyBetting: true,
   names: ["BOT 1","BOT 2","BOT 3","BOT 4","BOT 5","BOT 6"],
 });
 
+// Wire Poker → DealingMix (this enables “winner cards fly into best5”)
 poker.on("state", (s) => {
-  dealing?.setPot?.(s.pot);
   dealing?.setStreet?.(s.street);
+  dealing?.setAction?.(s.actionText || s.phase || "—");
+  dealing?.setPot?.(s.pot);
+});
+
+poker.on("blinds", (b) => {
+  dealing?.onBlinds?.(b);
+  dealing?.setPot?.(b.pot);
 });
 
 poker.on("action", (a) => {
-  if (a.type === "FOLD") dealing?.setAction?.(`${a.name} FOLDS`);
-  if (a.type === "BET") dealing?.setAction?.(`${a.name} BETS $${a.amount}`);
+  dealing?.onAction?.(a);
 });
 
 poker.on("deal", (d) => {
-  if (d.type === "HOLE") {
-    dealing?.setHoleCards?.(d.players);
-  } else {
-    dealing?.setCommunity?.(d.communityRaw || d.community || []);
-  }
+  dealing?.onDeal?.(d);
 });
 
 poker.on("showdown", (sd) => {
-  dealing?.showShowdown?.(sd);
+  dealing?.onShowdown?.(sd);
+});
+
+poker.on("finished", (f) => {
+  dealing?.showFinished?.(f);
 });
 
 poker.startHand();
@@ -287,62 +242,8 @@ window.addEventListener("scarlett-recenter", () => {
   if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.15, world.tableFocus.z);
   log("[main] recentered ✅");
 });
-// ---------- DEALING VISUALS ----------
-const dealing = DealingMix.init({ THREE, scene, log, world });
 
-// ---------- POKER ENGINE ----------
-const poker = PokerSim.create({
-  seats: 6,
-  log,
-  maxHands: 12,        // ✅ 12 round game like you asked
-  tDealHole: 1.2,
-  tFlop: 1.6,
-  tTurn: 1.4,
-  tRiver: 1.4,
-  tShowdown: 2.6,
-  tNextHand: 1.2,
-  toyBetting: true,
-  names: ["BOT 1","BOT 2","BOT 3","BOT 4","BOT 5","BOT 6"],
-});
-
-// ✅ Wire Poker → DealingMix
-poker.on("state", (s) => {
-  // update HUD street + action
-  dealing?.setStreet?.(s.street);
-  dealing?.setAction?.(s.actionText || s.phase || "—");
-  dealing?.setPot?.(s.pot);
-  log(`[poker] state=${s.phase} street=${s.street} pot=$${s.pot}`);
-});
-
-poker.on("blinds", (b) => {
-  dealing?.onBlinds?.(b);
-  dealing?.setPot?.(b.pot);
-  log(`[poker] blinds: SB=${b.small} BB=${b.big} pot=$${b.pot}`);
-});
-
-poker.on("action", (a) => {
-  dealing?.onAction?.(a);
-  log(`[poker] ${a.name} ${a.type}${a.amount ? " $" + a.amount : ""}`);
-});
-
-poker.on("deal", (d) => {
-  dealing?.onDeal?.(d);     // ✅ HOLE/FLOP/TURN/RIVER handled inside DealingMix
-});
-
-poker.on("showdown", (sd) => {
-  dealing?.onShowdown?.(sd);  // ✅ THIS is what makes hole cards fly into the 5-card row
-  const w = sd?.winners?.[0];
-  if (w) log(`[poker] SHOWDOWN winner=${w.name} hand=${w.handName}`);
-});
-
-poker.on("finished", (f) => {
-  dealing?.showFinished?.(f);
-  log(`[poker] FINISHED hands=${f.handsPlayed}`);
-});
-
-// Start
-poker.startHand();
-log("[main] PokerSim started ✅");
+// ---------- RESIZE / ERROR ----------
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();

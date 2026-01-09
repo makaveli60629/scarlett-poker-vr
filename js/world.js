@@ -1,9 +1,9 @@
-// /js/world.js — Scarlett World v10.9 (SEAT FIX + LIGHTS + DECOR + LEFT/RIGHT DOORS)
-// - Seat anchors lowered so bots sit correctly (no floating feet)
-// - Added ceiling lights + corner lights
-// - Added pillars + plants for vibe
-// - Doors remain LEFT/RIGHT
-// - Keeps Bots integration
+// /js/world.js — Scarlett World v11.0 (CHAIR FACING FIX + SEAT ANCHOR FIX + GUARD HUMANOID)
+// Fixes:
+// - Chairs always face table (no reversed chairs)
+// - Seat anchor placed correctly (bots sit ON seat, not “standing in chair”)
+// - Guard is now a humanoid mannequin, not a pill capsule
+// Keeps: doors left/right, lights, plants, pillars, rails, bots
 
 import { Bots } from "./bots.js";
 
@@ -17,6 +17,7 @@ export async function initWorld({ THREE, scene, log, v } = {}) {
 
   // ---------- TEXTURES ----------
   const loader = new THREE.TextureLoader();
+
   const floorTex = loader.load("./assets/textures/scarlett_floor_tile_seamless.png?v=" + v);
   floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
   floorTex.repeat.set(6, 6);
@@ -27,25 +28,21 @@ export async function initWorld({ THREE, scene, log, v } = {}) {
   wallTex.repeat.set(5, 2);
   wallTex.colorSpace = THREE.SRGBColorSpace;
 
-  // Put your processed transparent door PNG here:
-  // /assets/textures/scarlett_door.png
+  // Your processed transparent door PNG (same for store/poker)
   const doorTex = loader.load("./assets/textures/scarlett_door.png?v=" + v);
   doorTex.colorSpace = THREE.SRGBColorSpace;
 
   // ---------- ROOM ----------
   const roomW = 28, roomD = 28, roomH = 6.8;
 
-  // floor
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(roomW, roomD),
     new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.92, metalness: 0.0 })
   );
   floor.name = "Floor";
   floor.rotation.x = -Math.PI / 2;
-  floor.position.y = 0;
   group.add(floor);
 
-  // walls
   function wall(x, z, ry, w = roomW, h = roomH) {
     const m = new THREE.Mesh(
       new THREE.PlaneGeometry(w, h),
@@ -57,11 +54,11 @@ export async function initWorld({ THREE, scene, log, v } = {}) {
     return m;
   }
   wall(0, -roomD / 2, 0, roomW, roomH);
-  wall(0, roomD / 2, Math.PI, roomW, roomH);
+  wall(0,  roomD / 2, Math.PI, roomW, roomH);
   wall(-roomW / 2, 0, Math.PI / 2, roomD, roomH);
-  wall(roomW / 2, 0, -Math.PI / 2, roomD, roomH);
+  wall( roomW / 2, 0, -Math.PI / 2, roomD, roomH);
 
-  // ---------- LIGHTS / CEILING ----------
+  // ---------- LIGHTS ----------
   const ceil = new THREE.Group();
   ceil.name = "CeilingLights";
   group.add(ceil);
@@ -79,19 +76,17 @@ export async function initWorld({ THREE, scene, log, v } = {}) {
     ceil.add(L);
   }
 
-  // main area lights
   addCeilLight(0, tableFocus.z, 0x7fe7ff, 0.85);
   addCeilLight(2.8, tableFocus.z - 1.5, 0xff2d7a, 0.65);
   addCeilLight(-2.8, tableFocus.z - 1.5, 0xff2d7a, 0.65);
   addCeilLight(0, tableFocus.z + 2.2, 0xffffff, 0.7);
 
-  // corner ambience
   addCeilLight(roomW/2 - 2.5, roomD/2 - 2.5, 0x7fe7ff, 0.35);
   addCeilLight(-roomW/2 + 2.5, roomD/2 - 2.5, 0xff2d7a, 0.35);
   addCeilLight(roomW/2 - 2.5, -roomD/2 + 2.5, 0xff2d7a, 0.35);
   addCeilLight(-roomW/2 + 2.5, -roomD/2 + 2.5, 0x7fe7ff, 0.35);
 
-  // ---------- TABLE TOP (felt + lines) ----------
+  // ---------- TABLE ----------
   function feltTexture() {
     const c = document.createElement("canvas");
     c.width = 1024; c.height = 1024;
@@ -100,13 +95,12 @@ export async function initWorld({ THREE, scene, log, v } = {}) {
     ctx.fillStyle = "#0a3a2c";
     ctx.fillRect(0,0,1024,1024);
 
-    // grain
     for (let i = 0; i < 1400; i++) {
       ctx.fillStyle = `rgba(255,255,255,${Math.random()*0.02})`;
       ctx.fillRect(Math.random()*1024, Math.random()*1024, 2, 2);
     }
 
-    // thick outer white border
+    // thick outer white border (table edge line)
     ctx.strokeStyle = "rgba(255,255,255,0.92)";
     ctx.lineWidth = 26;
     ctx.beginPath();
@@ -120,7 +114,6 @@ export async function initWorld({ THREE, scene, log, v } = {}) {
     ctx.ellipse(512, 512, 365, 270, 0, 0, Math.PI * 2);
     ctx.stroke();
 
-    // logo
     ctx.fillStyle = "rgba(255,255,255,0.14)";
     ctx.font = "bold 90px Arial";
     ctx.textAlign = "center";
@@ -133,11 +126,11 @@ export async function initWorld({ THREE, scene, log, v } = {}) {
     return tex;
   }
 
-  const feltTex = feltTexture();
   const tableTop = new THREE.Mesh(
     new THREE.CylinderGeometry(1.95, 2.25, 0.18, 64),
-    new THREE.MeshStandardMaterial({ map: feltTex, roughness: 0.88, metalness: 0.05 })
+    new THREE.MeshStandardMaterial({ map: feltTexture(), roughness: 0.88, metalness: 0.05 })
   );
+  tableTop.name = "TableTop";
   tableTop.position.set(tableFocus.x, tableY, tableFocus.z);
   group.add(tableTop);
 
@@ -145,6 +138,7 @@ export async function initWorld({ THREE, scene, log, v } = {}) {
     new THREE.CylinderGeometry(0.55, 0.90, 1.15, 28),
     new THREE.MeshStandardMaterial({ color: 0x121826, roughness: 0.6, metalness: 0.2 })
   );
+  tableBase.name = "TableBase";
   tableBase.position.set(tableFocus.x, tableY - 0.68, tableFocus.z);
   group.add(tableBase);
 
@@ -153,6 +147,7 @@ export async function initWorld({ THREE, scene, log, v } = {}) {
     new THREE.TorusGeometry(3.85, 0.10, 12, 90),
     new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.45, metalness: 0.25, emissive: 0x101020, emissiveIntensity: 0.25 })
   );
+  rail.name = "Rail";
   rail.position.set(tableFocus.x, 0.95, tableFocus.z);
   rail.rotation.x = Math.PI / 2;
   group.add(rail);
@@ -165,58 +160,7 @@ export async function initWorld({ THREE, scene, log, v } = {}) {
   railGlow.rotation.copy(rail.rotation);
   group.add(railGlow);
 
-  // ---------- CHAIRS + SEATS ----------
-  const seats = [];
-  function makeChair(angle, idx) {
-    const chair = new THREE.Group();
-    chair.name = "Chair_" + idx;
-
-    const r = 2.75;
-    const x = tableFocus.x + Math.cos(angle) * r;
-    const z = tableFocus.z + Math.sin(angle) * r;
-
-    chair.position.set(x, 0, z);
-    chair.rotation.y = -angle + Math.PI / 2;
-
-    const seat = new THREE.Mesh(
-      new THREE.BoxGeometry(0.55, 0.10, 0.55),
-      new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 0.65, metalness: 0.1 })
-    );
-    seat.position.y = 0.48;
-    chair.add(seat);
-
-    const back = new THREE.Mesh(
-      new THREE.BoxGeometry(0.55, 0.58, 0.10),
-      new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 0.65, metalness: 0.1 })
-    );
-    back.position.set(0, 0.78, -0.23);
-    chair.add(back);
-
-    // ✅ lowered anchor (was 0.52). This fixes floating feet & “standing in chair”
-    const anchor = new THREE.Object3D();
-    anchor.name = "SeatAnchor";
-    anchor.position.set(0, 0.46, 0.08);
-    chair.add(anchor);
-
-    group.add(chair);
-    seats[idx] = { anchor, yaw: chair.rotation.y };
-  }
-
-  const angles = [-0.2, 0.55, 1.35, 2.25, 3.05, 3.85];
-  angles.forEach((a, i) => makeChair(a, i + 1));
-
-  function getSeats() { return seats; }
-
-  // ---------- GUARD (outside rail front) ----------
-  const guard = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.22, 0.75, 8, 16),
-    new THREE.MeshStandardMaterial({ color: 0x1a1f2a, roughness: 0.6, metalness: 0.15, emissive: 0x0b0b10, emissiveIntensity: 0.25 })
-  );
-  guard.position.set(tableFocus.x, 0.95, tableFocus.z + 4.5);
-  guard.name = "GuardNPC";
-  group.add(guard);
-
-  // ---------- DECOR (pillars + plants) ----------
+  // ---------- DECOR ----------
   function pillar(x, z) {
     const p = new THREE.Mesh(
       new THREE.CylinderGeometry(0.25, 0.28, 3.8, 18),
@@ -247,6 +191,89 @@ export async function initWorld({ THREE, scene, log, v } = {}) {
   }
   plant(-roomW/2 + 2.6, tableFocus.z);
   plant(roomW/2 - 2.6, tableFocus.z);
+
+  // ---------- CHAIRS + SEATS (FIXED FACING) ----------
+  const seats = [];
+  function makeChair(angle, idx) {
+    const chair = new THREE.Group();
+    chair.name = "Chair_" + idx;
+
+    const r = 2.75;
+    chair.position.set(
+      tableFocus.x + Math.cos(angle) * r,
+      0,
+      tableFocus.z + Math.sin(angle) * r
+    );
+
+    // ✅ Always face the table reliably
+    chair.lookAt(tableFocus.x, 0, tableFocus.z);
+
+    const seat = new THREE.Mesh(
+      new THREE.BoxGeometry(0.55, 0.10, 0.55),
+      new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 0.65, metalness: 0.1 })
+    );
+    seat.position.y = 0.48;
+    chair.add(seat);
+
+    // ✅ Backrest goes AWAY from table (positive Z now)
+    const back = new THREE.Mesh(
+      new THREE.BoxGeometry(0.55, 0.58, 0.10),
+      new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 0.65, metalness: 0.1 })
+    );
+    back.position.set(0, 0.78, 0.23);
+    chair.add(back);
+
+    // ✅ Seat anchor: lower + slightly toward table (negative Z)
+    const anchor = new THREE.Object3D();
+    anchor.name = "SeatAnchor";
+    anchor.position.set(0, 0.42, -0.10);
+    chair.add(anchor);
+
+    group.add(chair);
+    seats[idx] = { anchor, yaw: chair.rotation.y };
+  }
+
+  const angles = [-0.2, 0.55, 1.35, 2.25, 3.05, 3.85];
+  angles.forEach((a, i) => makeChair(a, i + 1));
+  function getSeats() { return seats; }
+
+  // ---------- GUARD (HUMANOID) ----------
+  function makeHumanoid(color = 0x1a1f2a, skin = 0xd2b48c) {
+    const g = new THREE.Group();
+    const suit = new THREE.MeshStandardMaterial({ color, roughness: 0.7, metalness: 0.12 });
+    const skinM = new THREE.MeshStandardMaterial({ color: skin, roughness: 0.65 });
+
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.55, 8, 16), suit);
+    torso.position.y = 1.05;
+    g.add(torso);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.14, 18, 14), skinM);
+    head.position.y = 1.55;
+    g.add(head);
+
+    const armGeo = new THREE.CapsuleGeometry(0.05, 0.30, 8, 12);
+    const armL = new THREE.Mesh(armGeo, suit);
+    const armR = new THREE.Mesh(armGeo, suit);
+    armL.position.set(-0.26, 1.15, 0);
+    armR.position.set( 0.26, 1.15, 0);
+    g.add(armL, armR);
+
+    const legGeo = new THREE.CapsuleGeometry(0.06, 0.40, 8, 12);
+    const legL = new THREE.Mesh(legGeo, suit);
+    const legR = new THREE.Mesh(legGeo, suit);
+    legL.position.set(-0.10, 0.45, 0);
+    legR.position.set( 0.10, 0.45, 0);
+    g.add(legL, legR);
+
+    return g;
+  }
+
+  const guard = makeHumanoid(0x121826, 0xd2b48c);
+  guard.name = "GuardNPC";
+  // ✅ Outside rail, front where you can walk up
+  guard.position.set(tableFocus.x, 0, tableFocus.z + 4.9);
+  guard.lookAt(tableFocus.x, 1.0, tableFocus.z);
+  group.add(guard);
 
   // ---------- DOORS LEFT/RIGHT ----------
   function makeDoor(signText, x, z, yaw) {
@@ -324,7 +351,7 @@ export async function initWorld({ THREE, scene, log, v } = {}) {
 
   // ---------- BOTS ----------
   try {
-    Bots.init({ THREE, scene, getSeats, tableFocus, metrics: { tableY, seatY: 0.46 } });
+    Bots.init({ THREE, scene, getSeats, tableFocus, metrics: { tableY, seatY: 0.42 } });
   } catch (e) {
     console.error(e);
     log?.("[world] bots init failed ❌ " + (e?.message || e));
@@ -356,4 +383,4 @@ export async function initWorld({ THREE, scene, log, v } = {}) {
   };
 
   return api;
-}
+         }

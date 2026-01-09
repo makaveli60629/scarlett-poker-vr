@@ -1,92 +1,65 @@
-// js/water_fountain.js — Animated lobby fountain (GitHub-safe)
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+// /js/water_fountain.js — Scarlett VR Poker (Compat Build)
+// Accepts build(ctx) OR build(scene) OR build(THREE, scene)
+
+function _ctxScene(a, b){
+  if (a && a.scene && typeof a.scene.add === "function") return a.scene;
+  if (a && typeof a.add === "function") return a;
+  if (b && typeof b.add === "function") return b;
+  return null;
+}
+function _ctxTHREE(a, b){
+  if (a && a.THREE) return a.THREE;
+  return a; // (THREE, scene)
+}
 
 export const WaterFountain = {
-  group: null,
-  water: null,
-  t: 0,
+  build(a, b){
+    const scene = _ctxScene(a, b);
+    const THREE = _ctxTHREE(a, b);
 
-  build(scene, pos = { x: 0, y: 0, z: 9.0 }) {
-    this.group = new THREE.Group();
-    this.group.name = "WaterFountain";
-    this.group.position.set(pos.x, pos.y, pos.z);
+    if (!scene) throw new Error("WaterFountain.build: scene not found");
+    if (!THREE) throw new Error("WaterFountain.build: THREE not found");
 
-    const stoneMat = new THREE.MeshStandardMaterial({
-      color: 0x1b1f24,
-      roughness: 0.9,
-      metalness: 0.05,
-      emissive: 0x001015,
-      emissiveIntensity: 0.25
-    });
+    if (scene.userData.__water_fountain_built) return;
+    scene.userData.__water_fountain_built = true;
 
-    const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.10, 0.45, 28), stoneMat);
-    bowl.position.y = 0.22;
+    // Simple fountain object (visual placeholder that proves build works)
+    const group = new THREE.Group();
+    group.name = "water_fountain";
+    group.position.set(-8, 0, -8);
 
-    const inner = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.90, 0.32, 28), stoneMat);
-    inner.position.y = 0.26;
-
-    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 0.75, 18), stoneMat);
-    pillar.position.y = 0.65;
-
-    const top = new THREE.Mesh(new THREE.SphereGeometry(0.18, 18, 14), stoneMat);
-    top.position.y = 1.08;
-
-    // Water disk (animated emissive shimmer)
-    const waterMat = new THREE.MeshStandardMaterial({
-      color: 0x0b2a33,
-      roughness: 0.25,
-      metalness: 0.05,
-      transparent: true,
-      opacity: 0.92,
-      emissive: 0x006b7a,
-      emissiveIntensity: 0.45
-    });
-    this.water = new THREE.Mesh(new THREE.CircleGeometry(0.75, 32), waterMat);
-    this.water.rotation.x = -Math.PI / 2;
-    this.water.position.y = 0.40;
-
-    // Water jet
-    const jetMat = new THREE.MeshStandardMaterial({
-      color: 0x8feaff,
-      roughness: 0.15,
-      metalness: 0.0,
-      transparent: true,
-      opacity: 0.6,
-      emissive: 0x00d9ff,
-      emissiveIntensity: 0.9
-    });
-    const jet = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.05, 0.55, 14), jetMat);
-    jet.position.y = 1.05;
-
-    // Glow
-    const glow = new THREE.PointLight(0x00ffaa, 0.45, 7);
-    glow.position.set(0, 1.45, 0);
-
-    // Base ring
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(1.08, 0.06, 10, 44),
-      new THREE.MeshStandardMaterial({
-        color: 0x00ffaa,
-        emissive: 0x00ffaa,
-        emissiveIntensity: 1.2,
-        roughness: 0.35
-      })
+    const base = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.9, 1.1, 0.35, 32),
+      new THREE.MeshStandardMaterial({ color: 0x20263d, roughness: 0.85, metalness: 0.1 })
     );
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = 0.03;
+    base.position.y = 0.18;
+    group.add(base);
 
-    this.group.add(bowl, inner, pillar, top, this.water, jet, ring, glow);
-    scene.add(this.group);
-    return this.group;
-  },
+    const bowl = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.8, 0.95, 0.22, 32),
+      new THREE.MeshStandardMaterial({ color: 0x2a3252, roughness: 0.75, metalness: 0.12 })
+    );
+    bowl.position.y = 0.42;
+    group.add(bowl);
 
-  update(dt) {
-    if (!this.group || !this.water) return;
-    this.t += dt;
+    const water = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.72, 0.72, 0.06, 24),
+      new THREE.MeshStandardMaterial({ color: 0x3ad6ff, roughness: 0.15, metalness: 0.0, transparent:true, opacity:0.65 })
+    );
+    water.position.y = 0.52;
+    group.add(water);
 
-    // gentle bob + shimmer
-    this.water.material.emissiveIntensity = 0.35 + Math.sin(this.t * 2.0) * 0.12;
-    this.water.material.opacity = 0.88 + Math.sin(this.t * 1.3) * 0.04;
-    this.water.rotation.z = Math.sin(this.t * 0.35) * 0.06;
+    const jet = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.06, 0.6, 16),
+      new THREE.MeshStandardMaterial({ color: 0x7fe7ff, roughness: 0.2, metalness: 0.0, transparent:true, opacity:0.55 })
+    );
+    jet.position.y = 0.85;
+    group.add(jet);
+
+    const glow = new THREE.PointLight(0x7fe7ff, 0.8, 6);
+    glow.position.set(0, 1.0, 0);
+    group.add(glow);
+
+    scene.add(group);
   }
 };

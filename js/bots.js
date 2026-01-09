@@ -1,231 +1,201 @@
-// /js/bots.js — Scarlett Bots v3.0 (LOW POLY ONE-MESH + SHIRT TEXTURE + SEATED)
-// ✅ One merged low-poly mesh per bot (single draw call)
-// ✅ Shirt texture on body/arms (repeating pattern)
-// ✅ Head uses skin color (via small atlas region)
-// ✅ Seats bots correctly on SeatAnchor world position (no floating)
-// ✅ Simple "hands on table" baked pose
-// ✅ Safe fallback if texture missing
-
-import * as THREE from "three";
-import { BufferGeometryUtils } from "three/addons/utils/BufferGeometryUtils.js";
+// /js/bots.js — Scarlett Bots v3.1 (ONE MESH + UV + NO BufferGeometryUtils)
+// - No BufferGeometryUtils import (fixes your crash)
+// - One mesh per bot, seated correctly, hands toward table
+// - UVs generated so you can texture with shirt/cyber atlas later
 
 export const Bots = (() => {
-  let scene, getSeats, tableFocus, metrics;
+  let THREE, scene, getSeats, tableFocus, metrics;
 
   const B = {
     bots: [],
     WALKERS: 0,
-    _atlasTex: null,
-    _atlasMat: null,
-    _atlasReady: false,
   };
 
-  // ---------- TEXTURE / ATLAS ----------
-  // We build a 1024x512 atlas:
-  // Left  (0..0.25 U)  = solid "skin" area (white, then vertex colors tint it)
-  // Right (0.25..1 U)  = shirt diffuse image stretched to fit
-  function buildAtlasMaterial({ shirtUrl, skinColor = 0xd2b48c } = {}) {
-    const canvas = document.createElement("canvas");
-    canvas.width = 1024;
-    canvas.height = 512;
-    const ctx = canvas.getContext("2d");
+  // --------- Minimal geometry merge (no addons needed) ---------
+  function mergeGeometriesNonIndexed(THREE, geos) {
+    // All geometries MUST be non-indexed and must have position + uv
+    let totalVerts = 0;
+    for (const g of geos) totalVerts += g.attributes.position.count;
 
-    // base fill
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const pos = new Float32Array(totalVerts * 3);
+    const uv  = new Float32Array(totalVerts * 2);
 
-    // left skin zone (white — vertexColor will tint)
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, 256, 512);
+    let pOff = 0, uOff = 0;
+    for (const g of geos) {
+      pos.set(g.attributes.position.array, pOff); pOff += g.attributes.position.array.length;
+      uv.set(g.attributes.uv.array, uOff); uOff += g.attributes.uv.array.length;
+    }
 
-    // right zone placeholder
-    ctx.fillStyle = "#2a2f3a";
-    ctx.fillRect(256, 0, 768, 512);
+    const out = new THREE.BufferGeometry();
+    out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    out.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    out.computeVertexNormals();
+    return out;
+  }
 
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.wrapT = THREE.RepeatWrapping;
-    tex.needsUpdate = true;
+  function makeUvWrap(geo, { u0=0.0, u1=1.0, v0=0.0, v1=1.0 } = {}) {
+    geo = geo.toNonIndexed();
+    const pos = geo.attributes.position;
+    const uv = new Float32Array(pos.count * 2);
 
-    // Load shirt image into right side when ready
-    const loader = new THREE.TextureLoader();
-    loader.load(
-      shirtUrl,
-      (shirtTex) => {
-        // draw shirtTex image into right side
-        try {
-          const img = shirtTex.image;
-          // clear right region
-          ctx.clearRect(256, 0, 768, 512);
-          // draw the shirt diffuse into right region
-          ctx.drawImage(img, 256, 0, 768, 512);
+    // cylindrical wrap around Y axis
+    for (let i=0;i<pos.count;i++){
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      const theta = Math.atan2(z, x); // -pi..pi
+      let U = (theta / (Math.PI * 2)) + 0.5;
+      let V = (y + 0.2) / 1.8;
+      V = Math.max(0, Math.min(1, V));
 
-          tex.needsUpdate = true;
-          B._atlasReady = true;
-        } catch (e) {
-          console.warn("[bots] atlas draw failed:", e);
-        }
-      },
-      undefined,
-      (err) => {
-        console.warn("[bots] shirt texture load failed:", err);
-      }
+      // map into atlas region
+      U = u0 + U * (u1 - u0);
+      V = v0 + V * (v1 - v0);
+
+      uv[i*2+0] = U;
+      uv[i*2+1] = V;
+    }
+
+    geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    return geo;
+  }
+
+  function makeUvHead(geo, { u0=0.70, u1=1.0, v0=0.50, v1=1.0 } = {}) {
+    geo = geo.toNonIndexed();
+    const pos = geo.attributes.position;
+    const uv = new Float32Array(pos.count * 2);
+
+    for (let i=0;i<pos.count;i++){
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      const theta = Math.atan2(z, x);
+      let U = (theta / (Math.PI * 2)) + 0.5;
+      let V = (y + 0.25) / 0.55;
+      V = Math.max(0, Math.min(1, V));
+
+      U = u0 + U * (u1 - u0);
+      V = v0 + V * (v1 - v0);
+
+      uv[i*2+0] = U;
+      uv[i*2+1] = V;
+    }
+
+    geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    return geo;
+  }
+
+  function makeBotGeometry() {
+    const parts = [];
+    const M = new THREE.Matrix4();
+
+    function add(geo, mat) {
+      const g = geo.clone();
+      g.applyMatrix4(mat);
+      parts.push(g);
+    }
+
+    // Build parts with UV zones:
+    // Body uses left 0..0.70 of texture, head uses top-right.
+    const bodyZone = { u0:0.0, u1:0.70, v0:0.0, v1:1.0 };
+    const headZone = { u0:0.70, u1:1.0, v0:0.50, v1:1.0 };
+
+    // Torso
+    add(
+      makeUvWrap(new THREE.CylinderGeometry(0.18, 0.22, 0.55, 10, 1, false), bodyZone),
+      M.clone().makeTranslation(0, 0.95, 0)
     );
 
-    // Vertex colors ON so head can be tinted skin while body stays dark
+    // Hips
+    add(
+      makeUvWrap(new THREE.CylinderGeometry(0.20, 0.20, 0.20, 10, 1, false), bodyZone),
+      M.clone().makeTranslation(0, 0.68, 0)
+    );
+
+    // Neck
+    add(
+      makeUvWrap(new THREE.CylinderGeometry(0.07, 0.08, 0.08, 10, 1, false), bodyZone),
+      M.clone().makeTranslation(0, 1.22, 0.02)
+    );
+
+    // Head
+    add(
+      makeUvHead(new THREE.SphereGeometry(0.14, 10, 8), headZone),
+      M.clone().makeTranslation(0, 1.35, 0.02)
+    );
+
+    // Arms (tilted slightly forward)
+    {
+      const armL = makeUvWrap(new THREE.CylinderGeometry(0.06, 0.05, 0.42, 8), bodyZone);
+      const armR = makeUvWrap(new THREE.CylinderGeometry(0.06, 0.05, 0.42, 8), bodyZone);
+
+      const ML = new THREE.Matrix4()
+        .makeRotationZ(0.55)
+        .multiply(new THREE.Matrix4().makeTranslation(-0.28, 0.98, -0.05));
+      const MR = new THREE.Matrix4()
+        .makeRotationZ(-0.55)
+        .multiply(new THREE.Matrix4().makeTranslation(0.28, 0.98, -0.05));
+
+      add(armL, ML);
+      add(armR, MR);
+    }
+
+    // Legs
+    {
+      const legL = makeUvWrap(new THREE.CylinderGeometry(0.08, 0.06, 0.55, 8), bodyZone);
+      const legR = makeUvWrap(new THREE.CylinderGeometry(0.08, 0.06, 0.55, 8), bodyZone);
+
+      const ML = new THREE.Matrix4()
+        .makeRotationX(0.25)
+        .multiply(new THREE.Matrix4().makeTranslation(-0.10, 0.32, 0.10));
+      const MR = new THREE.Matrix4()
+        .makeRotationX(0.25)
+        .multiply(new THREE.Matrix4().makeTranslation(0.10, 0.32, 0.10));
+
+      add(legL, ML);
+      add(legR, MR);
+    }
+
+    // Feet
+    add(
+      makeUvWrap(new THREE.BoxGeometry(0.10, 0.05, 0.22), bodyZone),
+      M.clone().makeTranslation(-0.10, 0.02, 0.22)
+    );
+    add(
+      makeUvWrap(new THREE.BoxGeometry(0.10, 0.05, 0.22), bodyZone),
+      M.clone().makeTranslation(0.10, 0.02, 0.22)
+    );
+
+    // Merge (no addons)
+    return mergeGeometriesNonIndexed(THREE, parts);
+  }
+
+  async function makeMaterial(v) {
+    const loader = new THREE.TextureLoader();
+
+    // Safe default if texture missing
     const mat = new THREE.MeshStandardMaterial({
-      map: tex,
-      vertexColors: true,
+      color: 0x141923,
       roughness: 0.75,
       metalness: 0.12,
       emissive: 0x001018,
-      emissiveIntensity: 0.10,
+      emissiveIntensity: 0.10
     });
 
-    B._atlasTex = tex;
-    B._atlasMat = mat;
+    // Use shirt_diffuse.png if present (your file list shows it)
+    loader.load(
+      `./assets/textures/shirt_diffuse.png?v=${v}`,
+      (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        mat.map = tex;
+        mat.color.setHex(0xffffff);
+        mat.needsUpdate = true;
+      },
+      undefined,
+      () => {
+        // if it fails, stay on safe default
+      }
+    );
+
     return mat;
   }
 
-  // ---------- UV HELPERS ----------
-  // Remap geometry UVs into atlas region:
-  // uRange = [u0,u1] inside atlas, vRange=[v0,v1]
-  function remapUV(geo, u0, u1, v0, v1) {
-    const uv = geo.attributes.uv;
-    if (!uv) return geo;
-    for (let i = 0; i < uv.count; i++) {
-      const u = uv.getX(i);
-      const v = uv.getY(i);
-      uv.setXY(i, u0 + u * (u1 - u0), v0 + v * (v1 - v0));
-    }
-    uv.needsUpdate = true;
-    return geo;
-  }
-
-  function applyVertexColor(geo, hex) {
-    const c = new THREE.Color(hex);
-    const count = geo.attributes.position.count;
-    const colors = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      colors[i * 3 + 0] = c.r;
-      colors[i * 3 + 1] = c.g;
-      colors[i * 3 + 2] = c.b;
-    }
-    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    return geo;
-  }
-
-  // ---------- LOW POLY BOT (ONE MERGED MESH) ----------
-  // We bake a seated pose directly into geometry.
-  function makeLowPolyBotMesh({ suitColor = 0x141923, skinColor = 0xd2b48c } = {}) {
-    const parts = [];
-
-    // Atlas regions:
-    // Skin area: U 0.00..0.25
-    // Shirt area: U 0.25..1.00
-    const SKIN_U0 = 0.00, SKIN_U1 = 0.25;
-    const SHIRT_U0 = 0.25, SHIRT_U1 = 1.00;
-
-    // --- TORSO (boxy low poly) ---
-    {
-      const torso = new THREE.BoxGeometry(0.42, 0.55, 0.24, 1, 1, 1);
-      // Seated: lower torso
-      torso.translate(0, 0.78, 0.02);
-      remapUV(torso, SHIRT_U0, SHIRT_U1, 0.0, 1.0);
-      applyVertexColor(torso, suitColor);
-      parts.push(torso);
-    }
-
-    // --- PELVIS ---
-    {
-      const pelvis = new THREE.BoxGeometry(0.34, 0.18, 0.20, 1, 1, 1);
-      pelvis.translate(0, 0.52, 0.05);
-      remapUV(pelvis, SHIRT_U0, SHIRT_U1, 0.0, 1.0);
-      applyVertexColor(pelvis, suitColor);
-      parts.push(pelvis);
-    }
-
-    // --- HEAD (low poly) ---
-    {
-      const head = new THREE.SphereGeometry(0.13, 10, 8);
-      head.translate(0, 1.16, 0.04);
-      // head samples SKIN region of atlas
-      remapUV(head, SKIN_U0, SKIN_U1, 0.0, 1.0);
-      applyVertexColor(head, skinColor);
-      parts.push(head);
-    }
-
-    // --- ARMS (low poly cylinders), baked "hands on table" pose ---
-    {
-      const armGeo = new THREE.CylinderGeometry(0.055, 0.055, 0.38, 8, 1, true);
-
-      // Left arm
-      const aL = armGeo.clone();
-      // rotate forward/down
-      aL.rotateX(Math.PI * 0.55);
-      aL.rotateZ(Math.PI * 0.08);
-      aL.translate(-0.26, 0.80, -0.12);
-      remapUV(aL, SHIRT_U0, SHIRT_U1, 0.0, 1.0);
-      applyVertexColor(aL, suitColor);
-      parts.push(aL);
-
-      // Right arm
-      const aR = armGeo.clone();
-      aR.rotateX(Math.PI * 0.55);
-      aR.rotateZ(-Math.PI * 0.08);
-      aR.translate(0.26, 0.80, -0.12);
-      remapUV(aR, SHIRT_U0, SHIRT_U1, 0.0, 1.0);
-      applyVertexColor(aR, suitColor);
-      parts.push(aR);
-    }
-
-    // --- LEGS (bent) ---
-    {
-      const legGeo = new THREE.CylinderGeometry(0.07, 0.07, 0.48, 8, 1, true);
-
-      const lL = legGeo.clone();
-      lL.rotateX(Math.PI * 0.42);
-      lL.translate(-0.11, 0.30, 0.14);
-      remapUV(lL, SHIRT_U0, SHIRT_U1, 0.0, 1.0);
-      applyVertexColor(lL, suitColor);
-      parts.push(lL);
-
-      const lR = legGeo.clone();
-      lR.rotateX(Math.PI * 0.42);
-      lR.translate(0.11, 0.30, 0.14);
-      remapUV(lR, SHIRT_U0, SHIRT_U1, 0.0, 1.0);
-      applyVertexColor(lR, suitColor);
-      parts.push(lR);
-    }
-
-    // --- SHOES (simple boxes) ---
-    {
-      const shoe = new THREE.BoxGeometry(0.14, 0.06, 0.26, 1, 1, 1);
-
-      const sL = shoe.clone();
-      sL.translate(-0.11, 0.06, 0.28);
-      remapUV(sL, SHIRT_U0, SHIRT_U1, 0.0, 1.0);
-      applyVertexColor(sL, suitColor);
-      parts.push(sL);
-
-      const sR = shoe.clone();
-      sR.translate(0.11, 0.06, 0.28);
-      remapUV(sR, SHIRT_U0, SHIRT_U1, 0.0, 1.0);
-      applyVertexColor(sR, suitColor);
-      parts.push(sR);
-    }
-
-    const merged = BufferGeometryUtils.mergeGeometries(parts, false);
-    merged.computeVertexNormals();
-
-    const bot = new THREE.Mesh(merged, B._atlasMat || new THREE.MeshStandardMaterial({ color: 0x141923 }));
-    bot.frustumCulled = true;
-    bot.userData = { mode: "seated", seatIndex: 0 };
-    return bot;
-  }
-
-  // ---------- SEATING ----------
   function sitBot(bot, seatIndex) {
     const seats = getSeats?.() || [];
     const s = seats[seatIndex];
@@ -237,63 +207,45 @@ export const Bots = (() => {
     bot.position.copy(anchorPos);
     bot.rotation.set(0, s.yaw, 0);
 
-    // push a touch away from table to avoid clipping
+    // push slightly away from table so body doesn't clip
     const toTable = new THREE.Vector3().subVectors(tableFocus, bot.position);
     toTable.y = 0;
     toTable.normalize();
     bot.position.addScaledVector(toTable, -0.10);
 
-    // lower a hair so butt meets seat
-    bot.position.y -= (metrics?.seatDrop ?? 0.06);
+    // seat drop
+    bot.position.y -= (metrics?.seatDrop ?? 0.07);
 
-    bot.userData.mode = "seated";
-    bot.userData.seatIndex = seatIndex;
+    // slight lean for "hands toward table"
+    bot.rotation.x = -0.02;
   }
 
-  // ---------- API ----------
-  function init({ THREE: _THREE, scene: _scene, getSeats: _getSeats, tableFocus: _tableFocus, metrics: _metrics } = {}) {
-    // note: THREE is imported at top; _THREE passed from world is okay but not required here
-    scene = _scene;
-    getSeats = _getSeats;
-    tableFocus = _tableFocus || new THREE.Vector3(0, 0, -6.5);
-    metrics = _metrics || { seatDrop: 0.06 };
+  async function init({ THREE: _T, scene: _S, getSeats: _G, tableFocus: _F, metrics: _M, v } = {}) {
+    THREE = _T;
+    scene = _S;
+    getSeats = _G;
+    tableFocus = _F || new THREE.Vector3(0,0,-6.5);
+    metrics = _M || { seatDrop: 0.07 };
 
-    // cleanup
-    for (const b of B.bots) {
-      try { scene.remove(b); } catch {}
-    }
+    for (const b of B.bots) { try { scene.remove(b); } catch {} }
     B.bots = [];
 
-    // build atlas material once
-    if (!B._atlasMat) {
-      buildAtlasMaterial({
-        shirtUrl: "./assets/textures/shirt_diffuse.png",
-      });
-    }
+    const geo = makeBotGeometry();
+    const mat = await makeMaterial(v || Date.now().toString());
 
-    // create 6 seated bots (seat indexes 1..6 from your world.js)
-    for (let i = 0; i < 6; i++) {
-      const bot = makeLowPolyBotMesh();
-      bot.name = "Bot_" + (i + 1);
-
-      // match your player scale (tweak if needed)
-      bot.scale.setScalar(0.95);
-
+    for (let i=0;i<6;i++){
+      const bot = new THREE.Mesh(geo, mat);
+      bot.name = `Bot_${i+1}`;
+      bot.scale.setScalar(0.92);
       scene.add(bot);
       B.bots.push(bot);
 
-      sitBot(bot, i + 1);
+      sitBot(bot, i+1);
     }
   }
 
-  function setPlayerRig(_playerRig, _camera) {
-    // reserved for future (look-at player, etc.)
-  }
-
-  function update(dt) {
-    // stable seated bots only for now
-    // later: tiny idle head bob / look-at can be done by a small shader or separate head bone
-  }
+  function update() {}
+  function setPlayerRig() {}
 
   return { init, update, setPlayerRig };
 })();

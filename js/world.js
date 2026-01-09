@@ -1,264 +1,256 @@
-// /js/world.js — Scarlett Poker VR WORLD v11.0 (FULL FIXTURES + DOORS + TELEPORT PADS)
+// /js/world.js — Scarlett Poker VR WORLD v11.2 (BIGGER ROOM + DOORS + PADS + SOLID)
 // No "three" import here. main.js passes THREE in.
 // Exports: initWorld({ THREE, scene, log, v }) -> returns world object
 
 export async function initWorld({ THREE, scene, log = console.log, v = "1000" }) {
   const L = (...a) => { try { log(...a); } catch { console.log(...a); } };
+  const clamp = (x,a,b) => Math.max(a, Math.min(b,x));
   L("[world] init v=" + v);
 
-  // ---------- helpers ----------
-  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
-
-  async function loadTex(url, { repeat = null, srgb = true } = {}) {
-    const loader = new THREE.TextureLoader();
-    return await new Promise((resolve) => {
-      loader.load(
-        url,
-        (t) => {
-          try {
-            if (repeat) {
-              t.wrapS = t.wrapT = THREE.RepeatWrapping;
-              t.repeat.set(repeat[0], repeat[1]);
-            }
-            if (srgb) t.colorSpace = THREE.SRGBColorSpace;
-            t.anisotropy = 8;
-          } catch {}
-          resolve(t);
-        },
-        undefined,
-        () => { L("[tex] missing:", url); resolve(null); }
-      );
-    });
-  }
-
-  // ---------- world object ----------
   const world = {
     v,
     group: new THREE.Group(),
     tableFocus: new THREE.Vector3(0, 0, -6.5),
-    tableY: 0.92,
-    seatSurfaceY: 0.52,
 
-    // boundaries (bigger room)
-    room: { halfW: 12, halfD: 12, height: 6 },
+    // doubled room size (and used for player clamp)
+    roomClamp: { minX: -15.5, maxX: 15.5, minZ: -28.5, maxZ: 15.5 },
+
+    // metrics so other modules can align
+    metrics: { tableY: 0.92, seatY: 0.52 },
 
     floor: null,
     table: null,
     chairs: [],
     seats: [],
 
-    // doors + pads
-    storeDoor: null,
-    pokerDoor: null,
-    pads: [],
+    // interactables (pads, etc.)
+    interactables: [],
 
-    // for main/dealing mix
-    cameraRef: null,
+    // info for HUD
+    game: { tableName: "$10,000 Table", pot: 0, turn: "—", phase: "Waiting" },
 
-    connect({ playerRig, controllers }) {
-      // optional
-    },
-
-    tick(dt) {},
+    // hooks
+    connect() {},
+    tick(dt) {}
   };
 
   world.group.name = "World";
   scene.add(world.group);
 
-  // ---------- textures ----------
+  // ---------- TEXTURES ----------
+  const texLoader = new THREE.TextureLoader();
+  const loadTex = (url, opts = {}) =>
+    new Promise((resolve) => {
+      texLoader.load(
+        url,
+        (t) => {
+          try {
+            if (opts.repeat) {
+              t.wrapS = t.wrapT = THREE.RepeatWrapping;
+              t.repeat.set(opts.repeat[0], opts.repeat[1]);
+            }
+            if (opts.srgb) t.colorSpace = THREE.SRGBColorSpace;
+          } catch {}
+          resolve(t);
+        },
+        undefined,
+        () => {
+          L("[tex] missing:", url);
+          resolve(null);
+        }
+      );
+    });
+
   const T = {
-    floor: await loadTex("./assets/textures/scarlett_floor_tile_seamless.png", { repeat: [6, 6], srgb: true }),
-    wall:  await loadTex("./assets/textures/1767279790736.jpg", { repeat: [4, 2], srgb: true }), // your chosen wall texture
-    doorStore: await loadTex("./assets/textures/door_store.png", { repeat: null, srgb: true }),
-    doorPoker: await loadTex("./assets/textures/door_poker.png", { repeat: null, srgb: true }),
+    // floor
+    tile: await loadTex("./assets/textures/scarlett_floor_tile_seamless.png", { repeat: [8, 8], srgb: true }),
+
+    // walls: user requested this exact file
+    wall: await loadTex("./assets/textures/1767279790736.jpg", { repeat: [6, 3], srgb: true }),
+
+    // doors (same png can be used for both; you said you’ll use both names)
+    doorStore: await loadTex("./assets/textures/door_store.png", { srgb: true }),
+    doorPoker: await loadTex("./assets/textures/door_poker.png", { srgb: true }),
   };
 
-  // ---------- materials ----------
+  // ---------- MATERIALS ----------
   const mat = {
-    floor: new THREE.MeshStandardMaterial({ color: 0x9097a6, roughness: 0.95, map: T.floor || null }),
-    wall:  new THREE.MeshStandardMaterial({ color: 0xb2b6c4, roughness: 0.88, metalness: 0.05, map: T.wall || null }),
-    ceiling: new THREE.MeshStandardMaterial({ color: 0x0a0b12, roughness: 0.9, side: THREE.BackSide }),
-
+    floor: new THREE.MeshStandardMaterial({
+      color: 0x101018,
+      roughness: 0.95,
+      map: T.tile || null,
+    }),
+    wall: new THREE.MeshStandardMaterial({
+      color: 0x151a2a,
+      roughness: 0.95,
+      map: T.wall || null,
+    }),
+    trim: new THREE.MeshStandardMaterial({
+      color: 0x0d0f16,
+      roughness: 0.65,
+      metalness: 0.15,
+    }),
     felt: new THREE.MeshStandardMaterial({ color: 0x0f5d3a, roughness: 0.92 }),
-    rim:  new THREE.MeshStandardMaterial({ color: 0x1b0f0c, roughness: 0.85 }),
+    rim: new THREE.MeshStandardMaterial({ color: 0x1b0f0c, roughness: 0.85 }),
     metalDark: new THREE.MeshStandardMaterial({ color: 0x12131a, roughness: 0.85, metalness: 0.15 }),
-
     chairFrame: new THREE.MeshStandardMaterial({ color: 0x151821, roughness: 0.95 }),
     chairSeat: new THREE.MeshStandardMaterial({ color: 0x2a1b10, roughness: 0.85 }),
-
     holo: new THREE.MeshStandardMaterial({
       color: 0x7fe7ff,
       emissive: 0x2bd7ff,
       emissiveIntensity: 1.25,
       roughness: 0.2,
       transparent: true,
-      opacity: 0.85
+      opacity: 0.88
     }),
-
-    doorFrame: new THREE.MeshStandardMaterial({ color: 0x101018, roughness: 0.85, metalness: 0.05 }),
+    neonPink: new THREE.MeshStandardMaterial({
+      color: 0xff2d7a,
+      emissive: 0xff2d7a,
+      emissiveIntensity: 1.35,
+      roughness: 0.25,
+      transparent: true,
+      opacity: 0.9
+    }),
     door: (tex) => new THREE.MeshStandardMaterial({
       map: tex || null,
-      color: tex ? 0xffffff : 0x444466,
-      roughness: 0.65,
-      emissive: 0x111122,
-      emissiveIntensity: tex ? 0.35 : 0.15,
-      transparent: true
+      color: tex ? 0xffffff : 0x222233,
+      roughness: 0.55,
+      metalness: 0.05,
+      transparent: true,
+      opacity: 1.0,
+      side: THREE.DoubleSide
     })
   };
 
-  // ---------- lights (stronger) ----------
-  world.group.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.45));
+  // ---------- LIGHTING ----------
+  world.group.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.55));
 
-  const key = new THREE.DirectionalLight(0xffffff, 1.35);
-  key.position.set(8, 12, 7);
+  const key = new THREE.DirectionalLight(0xffffff, 1.25);
+  key.position.set(10, 18, 10);
   world.group.add(key);
 
-  const pink = new THREE.PointLight(0xff2d7a, 0.95, 40);
-  pink.position.set(-4, 3.0, -2);
-  world.group.add(pink);
+  const fill = new THREE.PointLight(0x7fe7ff, 0.95, 50);
+  fill.position.set(0, 3.2, 2.0);
+  world.group.add(fill);
 
-  const aqua = new THREE.PointLight(0x7fe7ff, 0.95, 40);
-  aqua.position.set(4, 3.0, -2);
-  world.group.add(aqua);
+  const purple = new THREE.PointLight(0xb46bff, 1.05, 50);
+  purple.position.set(0, 3.2, 6.8);
+  world.group.add(purple);
 
-  world.group.add(new THREE.AmbientLight(0xffffff, 0.22));
+  world.group.add(new THREE.AmbientLight(0xffffff, 0.18));
 
-  // ---------- floor ----------
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(world.room.halfW*2, world.room.halfD*2), mat.floor);
-  floor.rotation.x = -Math.PI/2;
+  // ---------- FLOOR ----------
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(80, 90), mat.floor);
+  floor.rotation.x = -Math.PI / 2;
   floor.name = "Floor";
-  floor.userData.solid = true;
+  floor.receiveShadow = false;
   world.group.add(floor);
   world.floor = floor;
 
-  // ---------- walls (SOLID) ----------
-  const { halfW, halfD, height } = world.room;
+  // ---------- WALLS (solid) ----------
+  // room bounds: x in [-16,16], z in [-29,16]
+  const wallH = 7.2;
 
-  function wallBox(w, h, d, x, y, z) {
+  const mkWall = (w, h, d, x, y, z) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat.wall);
     m.position.set(x, y, z);
     m.name = "Wall";
-    m.userData.solid = true;
     world.group.add(m);
+
+    // trim
+    const t = new THREE.Mesh(new THREE.BoxGeometry(w, 0.18, d + 0.02), mat.trim);
+    t.position.set(x, 0.09, z);
+    world.group.add(t);
+
     return m;
-  }
+  };
 
-  const thick = 0.35;
-  wallBox(halfW*2 + thick, height, thick, 0, height/2, -halfD);
-  wallBox(halfW*2 + thick, height, thick, 0, height/2,  halfD);
-  wallBox(thick, height, halfD*2 + thick, -halfW, height/2, 0);
-  wallBox(thick, height, halfD*2 + thick,  halfW, height/2, 0);
+  // back/front
+  mkWall(32, wallH, 0.35, 0, wallH / 2, -29);
+  mkWall(32, wallH, 0.35, 0, wallH / 2, 16);
 
-  // ---------- ceiling dome ----------
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(halfW*1.15, 32, 18), mat.ceiling);
-  dome.position.set(0, height + 0.4, -2);
-  dome.scale.set(1.2, 0.7, 1.2);
-  world.group.add(dome);
+  // left/right
+  mkWall(0.35, wallH, 45, -16, wallH / 2, -6.5);
+  mkWall(0.35, wallH, 45, 16, wallH / 2, -6.5);
 
-  // ---------- spawn ring (you spawn here) ----------
-  const spawnPos = new THREE.Vector3(0, 0, 3.6);
-  world.spawnPos = spawnPos.clone();
-
-  const spawnRing = new THREE.Mesh(
-    new THREE.RingGeometry(0.28, 0.42, 48),
-    new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
-  );
-  spawnRing.rotation.x = -Math.PI/2;
-  spawnRing.position.set(spawnPos.x, 0.02, spawnPos.z);
-  spawnRing.name = "SpawnRing";
-  world.group.add(spawnRing);
-
-  // ---------- table ----------
+  // ---------- TABLE ----------
+  const TABLE_Y = world.metrics.tableY;
   const table = new THREE.Group();
-  table.name = "PokerTable";
   table.position.copy(world.tableFocus);
+  table.name = "PokerTable";
   world.group.add(table);
   world.table = table;
 
-  const felt = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 0.18, 64), mat.felt);
-  felt.position.y = world.tableY;
+  const felt = new THREE.Mesh(new THREE.CylinderGeometry(2.65, 2.65, 0.18, 64), mat.felt);
+  felt.position.y = TABLE_Y;
+  felt.name = "TableFelt";
   table.add(felt);
 
-  const rim = new THREE.Mesh(new THREE.TorusGeometry(2.6, 0.18, 18, 80), mat.rim);
-  rim.rotation.x = Math.PI/2;
-  rim.position.y = world.tableY + 0.09;
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(2.65, 0.18, 18, 90), mat.rim);
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = TABLE_Y + 0.09;
+  rim.name = "TableRim";
   table.add(rim);
 
-  // simple stand (so it’s not floating)
-  const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.65, 0.92, 26), mat.metalDark);
-  stand.position.y = 0.46;
-  table.add(stand);
+  // table stand (so it’s not floating)
+  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.95, 0.82, 24), mat.metalDark);
+  pedestal.position.y = TABLE_Y - 0.50;
+  pedestal.name = "TablePedestal";
+  table.add(pedestal);
 
-  // ---------- rails + glow ----------
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(1.35, 1.35, 0.10, 30), mat.metalDark);
+  base.position.y = 0.05;
+  base.name = "TableBase";
+  table.add(base);
+
+  // ---------- RAILS (solid ring) ----------
   const rails = new THREE.Group();
   rails.name = "Rails";
   table.add(rails);
 
-  const railR = 3.75;
+  const railR = 3.85;
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(railR, 0.065, 12, 120), mat.metalDark);
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = 0.80;
+  rails.add(ring);
 
-  for (let i = 0; i < 28; i++) {
-    const a = (i / 28) * Math.PI * 2;
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.62, 10), mat.metalDark);
-    post.position.set(Math.cos(a) * railR, 0.31, Math.sin(a) * railR);
-    rails.add(post);
-  }
-
-  const railRing = new THREE.Mesh(new THREE.TorusGeometry(railR, 0.05, 10, 90), mat.metalDark);
-  railRing.rotation.x = Math.PI/2;
-  railRing.position.y = 0.62;
-  rails.add(railRing);
-
-  const glowRing = new THREE.Mesh(
-    new THREE.TorusGeometry(railR, 0.018, 10, 120),
-    new THREE.MeshStandardMaterial({
-      color: 0x7fe7ff,
-      emissive: 0x2bd7ff,
-      emissiveIntensity: 1.35,
-      roughness: 0.25,
-      metalness: 0.1,
-      transparent: true,
-      opacity: 0.85
-    })
-  );
-  glowRing.rotation.x = Math.PI/2;
-  glowRing.position.y = 0.69;
+  const glowRing = new THREE.Mesh(new THREE.TorusGeometry(railR, 0.020, 10, 160), mat.holo);
+  glowRing.rotation.x = Math.PI / 2;
+  glowRing.position.y = 0.86;
   rails.add(glowRing);
 
-  // solid “rail collider” radius for bots/player logic
-  world.railRadius = railR;
-
-  // ---------- chairs + seats ----------
+  // ---------- CHAIRS + SEATS (6-max + 1 player seat extra = seat 0) ----------
   function makeChair() {
     const g = new THREE.Group();
-    const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.30, 0.30, 0.08, 18), mat.chairSeat);
-    seat.position.y = 0.50;
+    g.name = "Chair";
+
+    const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.08, 18), mat.chairSeat);
+    seat.position.y = 0.52;
     g.add(seat);
 
-    const back = new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.62, 0.09), mat.chairFrame);
-    back.position.set(0, 0.90, -0.24);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.66, 0.09), mat.chairFrame);
+    back.position.set(0, 0.94, -0.25);
     g.add(back);
 
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.10, 0.48, 12), mat.chairFrame);
-    leg.position.y = 0.24;
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.10, 0.50, 12), mat.chairFrame);
+    leg.position.y = 0.25;
     g.add(leg);
 
-    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.06, 16), mat.chairFrame);
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.06, 16), mat.chairFrame);
     foot.position.y = 0.03;
     g.add(foot);
 
     return g;
   }
 
-  const seatR = 3.05;
+  const c = world.tableFocus.clone();
+  const seatR = 3.15;
+  const SEAT_SURFACE_Y = world.metrics.seatY;
+
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2;
-    const chairPos = new THREE.Vector3(
-      world.tableFocus.x + Math.cos(a) * seatR,
-      0,
-      world.tableFocus.z + Math.sin(a) * seatR
-    );
-
-    const yaw = Math.atan2(world.tableFocus.x - chairPos.x, world.tableFocus.z - chairPos.z);
+    const chairPos = new THREE.Vector3(c.x + Math.cos(a) * seatR, 0, c.z + Math.sin(a) * seatR);
+    const yaw = Math.atan2(c.x - chairPos.x, c.z - chairPos.z);
 
     const chair = makeChair();
     chair.position.copy(chairPos);
@@ -269,7 +261,7 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
 
     const seatAnchor = new THREE.Object3D();
     seatAnchor.name = "SeatAnchor_" + i;
-    seatAnchor.position.set(0, world.seatSurfaceY, 0.18);
+    seatAnchor.position.set(0, SEAT_SURFACE_Y, 0.18);
     chair.add(seatAnchor);
 
     const seatPos = new THREE.Vector3();
@@ -279,143 +271,136 @@ export async function initWorld({ THREE, scene, log = console.log, v = "1000" })
       index: i,
       position: seatPos,
       yaw,
+      sitY: SEAT_SURFACE_Y,
+      lookAt: c.clone(),
       anchor: seatAnchor
     });
   }
 
-  // ---------- DOOR ENTRANCES (opposite walls, near middle) ----------
-  function buildDoor({ name, wallZ, tex, label }) {
+  // ---------- TELEPORTER VISUAL (always exists) ----------
+  const tele = new THREE.Group();
+  tele.name = "TeleportMachineVisual";
+
+  const ringMesh = new THREE.Mesh(
+    new THREE.RingGeometry(0.48, 0.66, 64),
+    new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.92, side: THREE.DoubleSide })
+  );
+  ringMesh.rotation.x = -Math.PI / 2;
+  ringMesh.position.y = 0.02;
+  tele.add(ringMesh);
+
+  const arc = new THREE.Mesh(new THREE.TorusGeometry(0.66, 0.06, 12, 64, Math.PI), mat.neonPink);
+  arc.rotation.z = Math.PI;
+  arc.position.set(0, 1.12, 0);
+  tele.add(arc);
+
+  tele.position.set(0, 0, 3.6);
+  world.group.add(tele);
+  world.teleporter = tele;
+
+  // ---------- DOORS + PADS (STORE / POKER ROOM) ----------
+  // Put them on opposite sides, near middle of the wall
+  function makeDoor({ name, z, label, tex, padColor = 0x7fe7ff, targetPos }) {
     const g = new THREE.Group();
     g.name = name;
 
     // frame
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(2.4, 3.2, 0.18), mat.doorFrame);
-    frame.position.set(0, 1.6, 0);
-    g.add(frame);
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(4.6, 5.4, 0.28), mat.trim);
+    frame.position.set(0, 2.7, z);
+    world.group.add(frame);
 
     // door plane
-    const door = new THREE.Mesh(new THREE.PlaneGeometry(2.1, 2.8), mat.door(tex));
-    door.position.set(0, 1.55, 0.10);
-    g.add(door);
+    const door = new THREE.Mesh(new THREE.PlaneGeometry(4.0, 5.0), mat.door(tex));
+    door.position.set(0, 2.55, z + 0.17);
+    door.name = name + "_Door";
+    world.group.add(door);
 
-    // neon label
-    const c = document.createElement("canvas");
-    c.width = 1024; c.height = 256;
-    const ctx = c.getContext("2d");
-    ctx.clearRect(0,0,c.width,c.height);
-    ctx.fillStyle = "rgba(0,0,0,0.0)";
-    ctx.fillRect(0,0,c.width,c.height);
-    ctx.font = "900 120px Arial";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = "#7fe7ff";
-    ctx.shadowColor = "#7fe7ff";
-    ctx.shadowBlur = 20;
-    ctx.fillText(label, 512, 128);
-    const signTex = new THREE.CanvasTexture(c);
-    try { signTex.colorSpace = THREE.SRGBColorSpace; } catch {}
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.6), new THREE.MeshBasicMaterial({ map: signTex, transparent: true }));
-    sign.position.set(0, 3.05, 0.12);
-    g.add(sign);
+    // neon label above
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(3.1, 0.42, 0.12), mat.neonPink);
+    sign.position.set(0, 5.25, z + 0.20);
+    sign.name = name + "_Sign";
+    world.group.add(sign);
 
-    // place on wall
-    g.position.set(0, 0, wallZ);
-    g.rotation.y = (wallZ < 0) ? 0 : Math.PI; // face inward
-    world.group.add(g);
-
-    return g;
-  }
-
-  // Poker Room door on NORTH wall (z = -halfD + a bit inward)
-  world.pokerDoor = buildDoor({
-    name: "PokerDoor",
-    wallZ: -halfD + 0.22,
-    tex: T.doorPoker || T.doorStore,
-    label: "POKER ROOM"
-  });
-
-  // Store door on SOUTH wall (z = +halfD - a bit inward)
-  world.storeDoor = buildDoor({
-    name: "StoreDoor",
-    wallZ: +halfD - 0.22,
-    tex: T.doorStore || T.doorPoker,
-    label: "STORE"
-  });
-
-  // ---------- TELEPORT PADS IN FRONT OF DOORS ----------
-  function makePad(name, at, dest) {
-    const pad = new THREE.Group();
-    pad.name = name;
-
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.32, 0.52, 48),
-      new THREE.MeshBasicMaterial({ color: 0xff2d7a, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
+    // teleport pad in front
+    const pad = new THREE.Mesh(
+      new THREE.RingGeometry(0.60, 0.86, 64),
+      new THREE.MeshBasicMaterial({ color: padColor, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
     );
-    ring.rotation.x = -Math.PI/2;
-    ring.position.set(0, 0.02, 0);
-    pad.add(ring);
-
-    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.45, 10), mat.holo);
-    pillar.position.set(0, 0.25, 0);
-    pad.add(pillar);
-
-    const tag = (() => {
-      const c = document.createElement("canvas");
-      c.width = 512; c.height = 256;
-      const ctx = c.getContext("2d");
-      ctx.fillStyle = "rgba(0,0,0,0.65)";
-      ctx.fillRect(0,0,c.width,c.height);
-      ctx.font = "900 64px Arial";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = "#e8ecff";
-      ctx.fillText(name.replace("Pad_", ""), 256, 128);
-      const tex = new THREE.CanvasTexture(c);
-      try { tex.colorSpace = THREE.SRGBColorSpace; } catch {}
-      const m = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
-      const p = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.45), m);
-      p.position.set(0, 0.78, 0);
-      return p;
-    })();
-    pad.add(tag);
-
-    pad.position.copy(at);
-    pad.userData.dest = dest.clone();
-    pad.userData.r = 0.55;
-    pad.userData.ring = ring;
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.set(0, 0.03, z - (z > 0 ? 2.0 : -2.0));
+    pad.name = name + "_Pad";
     world.group.add(pad);
 
-    world.pads.push(pad);
-    return pad;
+    // interactable
+    pad.userData.action = {
+      type: "teleport",
+      target: targetPos || new THREE.Vector3(0, 0, 3.6),
+      label: label || name
+    };
+
+    world.interactables.push(pad);
+
+    return { door, pad, sign };
   }
 
-  const pokerPadPos = new THREE.Vector3(0, 0, -halfD + 1.35);
-  const storePadPos = new THREE.Vector3(0, 0,  halfD - 1.35);
+  // Poker room door on BACK wall side (near z = -29)
+  makeDoor({
+    name: "PokerDoor",
+    z: -28.5,
+    label: "Poker Room",
+    tex: T.doorPoker,
+    padColor: 0x7fe7ff,
+    targetPos: new THREE.Vector3(0, 0, -6.0) // near table
+  });
 
-  // where they teleport to (simple “room points” for now)
-  const pokerDest = new THREE.Vector3(0, 0, -2.0);
-  const storeDest = new THREE.Vector3(0, 0,  6.0);
+  // Store door on FRONT wall side (near z = +16)
+  makeDoor({
+    name: "StoreDoor",
+    z: 15.5,
+    label: "Store",
+    tex: T.doorStore,
+    padColor: 0xff2d7a,
+    targetPos: new THREE.Vector3(10, 0, 8) // store corner
+  });
 
-  makePad("Pad_POKER", pokerPadPos, pokerDest);
-  makePad("Pad_STORE", storePadPos, storeDest);
+  // ---------- SIMPLE STORE KIOSK (corner) ----------
+  const kiosk = new THREE.Group();
+  kiosk.name = "StoreKiosk";
+  kiosk.position.set(10, 0, 8);
+  world.group.add(kiosk);
 
-  // ---------- world tick ----------
-  const tickState = { t: 0 };
+  const kBase = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.1, 2.0), mat.metalDark);
+  kBase.position.y = 0.55;
+  kiosk.add(kBase);
 
+  const kTop = new THREE.Mesh(new THREE.BoxGeometry(3.3, 0.10, 2.1), mat.holo);
+  kTop.position.y = 1.12;
+  kiosk.add(kTop);
+
+  // mannequin near kiosk
+  const mannequin = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 1.10, 10, 16), mat.trim);
+  mannequin.position.set(11.8, 1.0, 7.0);
+  mannequin.name = "Mannequin";
+  world.group.add(mannequin);
+
+  // guard at rails
+  const guard = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 1.05, 10, 16), mat.metalDark);
+  guard.position.set(world.tableFocus.x + 4.8, 0.95, world.tableFocus.z + 0.2);
+  guard.name = "RailGuard";
+  world.group.add(guard);
+
+  // ---------- WORLD TICK ----------
+  const viz = { t: 0 };
   world.tick = (dt) => {
-    tickState.t += dt;
+    viz.t += dt;
 
-    // pulse spawn ring + rail glow
-    spawnRing.material.opacity = 0.65 + Math.sin(tickState.t * 3.0) * 0.18;
-    glowRing.material.emissiveIntensity = 1.15 + Math.sin(tickState.t * 3.5) * 0.35;
+    // pulse rail glow
+    glowRing.material.emissiveIntensity = 1.05 + Math.sin(viz.t * 3.5) * 0.40;
 
-    // pulse pads
-    for (const p of world.pads) {
-      const ring = p.userData.ring;
-      ring.material.opacity = 0.62 + Math.sin(tickState.t*4.0 + p.position.z)*0.22;
-    }
+    // pulse teleporter ring
+    ringMesh.material.opacity = 0.68 + Math.sin(viz.t * 4.2) * 0.18;
   };
 
-  L("[world] ready ✅ seats=" + world.seats.length + " pads=" + world.pads.length);
+  L("[world] ready ✅ seats=" + world.seats.length + " interact=" + world.interactables.length);
   return world;
     }

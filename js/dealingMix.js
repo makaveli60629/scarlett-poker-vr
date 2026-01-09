@@ -1,8 +1,6 @@
-// /js/dealingMix.js — Scarlett DealingMix v2.2 (FULL WATCH GAME)
-// ✅ Hovering community cards facing player
-// ✅ Big HUD above table (street/action/pot)
-// ✅ Purple pot numbers with transparent background
-// ✅ Chips per seat + pot chips animate on bets
+// /js/dealingMix.js — Scarlett DealingMix v2.3 (SHOWDOWN COMBINE CARDS)
+// ✅ Winner's HOLE cards fly to community slots to form the actual best 5-card hand
+// ✅ Needs PokerSim v1.2 (best5Detailed)
 
 export const DealingMix = (() => {
   let THREE, scene, log, world;
@@ -16,14 +14,17 @@ export const DealingMix = (() => {
     tableHud: null,
     potHud: null,
     winnerHud: null,
-    comm: [],
+
+    comm: [],            // 5 table/community display cards
+    seatHoles: [],       // seatHoles[1..6] = [cardMesh, cardMesh]
+    seatHoleLabels: [],  // last labels
+
     pot: 0,
     street: "PREFLOP",
     action: "—",
 
-    seatChips: [],   // 1..6
-    potChips: null,  // group
-    chipAnims: [],   // moving chips
+    chipAnims: [],
+    winnerAnims: [],     // hole->slot animations at showdown
   };
 
   function cardLabel(c) {
@@ -107,7 +108,6 @@ export const DealingMix = (() => {
     ctx.fillStyle = "rgba(0,0,0,0.25)";
     rounded(ctx, 20, 20, W-40, H-40, 36);
     ctx.fill();
-
     ctx.fillStyle = "#b200ff";
     ctx.font = "bold 96px Arial";
     ctx.textAlign = "center";
@@ -163,9 +163,11 @@ export const DealingMix = (() => {
   }
 
   function setCard(mesh, label) {
+    if (!mesh) return;
     const H = mesh.userData._hud;
     if (mesh.userData._label === label) return;
     mesh.userData._label = label;
+
     H.drawFn = (ctx,W,HH)=>{
       ctx.clearRect(0,0,W,HH);
       ctx.fillStyle="#f8f8f8"; ctx.fillRect(0,0,W,HH);
@@ -185,30 +187,16 @@ export const DealingMix = (() => {
     redraw(mesh);
   }
 
-  function makeChip(color=0xff2d7a) {
-    // thinner/smaller chips
-    const geo = new THREE.CylinderGeometry(0.055, 0.055, 0.012, 28);
-    const mat = new THREE.MeshStandardMaterial({
-      color,
-      roughness: 0.35,
-      metalness: 0.12,
-      emissive: color,
-      emissiveIntensity: 0.05
-    });
-    const m = new THREE.Mesh(geo, mat);
-    m.rotation.x = Math.PI/2;
-    return m;
-  }
-
-  function chipStack(count=12) {
-    const g = new THREE.Group();
-    const colors = [0xff2d7a, 0x7fe7ff, 0xffcc00];
-    for (let i=0;i<count;i++){
-      const c = makeChip(colors[i % colors.length]);
-      c.position.y = i * 0.012;
-      g.add(c);
-    }
-    return g;
+  // Seat “above head” positions (approx, stable)
+  function seatHeadPos(seatIndex, tf) {
+    const angles = [-0.2, 0.55, 1.35, 2.25, 3.05, 3.85];
+    const a = angles[(seatIndex-1) % 6];
+    const r = 2.55;
+    // slightly outward from table
+    const x = tf.x + Math.cos(a) * r;
+    const z = tf.z + Math.sin(a) * r;
+    const y = (world.tableY || 0.92) + 1.10; // above seated head
+    return new THREE.Vector3(x, y, z);
   }
 
   function init({ THREE: _T, scene: _S, log: _L, world: _W } = {}) {
@@ -222,24 +210,21 @@ export const DealingMix = (() => {
     const tf = world.tableFocus || new THREE.Vector3(0,0,-6.5);
     const ty = world.tableY || 0.92;
 
-    // Big HUD
     S.tableHud = hudPlane(drawTableHud, 1400, 520, 2.7, 0.92);
     S.tableHud.position.set(tf.x, ty + 1.65, tf.z - 0.22);
     S.root.add(S.tableHud);
 
-    // Pot HUD
     S.potHud = hudPlane(drawPotHud, 700, 260, 0.95, 0.36);
     S.potHud.position.set(tf.x, ty + 0.55, tf.z);
     S.potHud.material.opacity = 0.12;
     S.root.add(S.potHud);
 
-    // Winner HUD
     S.winnerHud = hudPlane(drawWinner(""), 1200, 260, 2.0, 0.46);
     S.winnerHud.position.set(tf.x, ty + 1.20, tf.z + 0.85);
     S.winnerHud.material.opacity = 0.0;
     S.root.add(S.winnerHud);
 
-    // Community cards (5)
+    // Community row cards (5)
     S.comm.length = 0;
     for (let i=0;i<5;i++){
       const c = makeCardMesh("??");
@@ -248,19 +233,20 @@ export const DealingMix = (() => {
       S.comm.push(c);
     }
 
-    // Chips: per seat + pot
-    S.potChips = chipStack(18);
-    S.potChips.position.set(tf.x, ty + 0.01, tf.z + 0.02);
-    S.root.add(S.potChips);
-
-    S.seatChips = [];
-    const seatR = 1.55;
-    for (let i=1;i<=6;i++){
-      const a = [-0.2, 0.55, 1.35, 2.25, 3.05, 3.85][i-1];
-      const g = chipStack(10);
-      g.position.set(tf.x + Math.cos(a)*seatR, ty + 0.01, tf.z + Math.sin(a)*seatR);
-      S.root.add(g);
-      S.seatChips[i] = g;
+    // Hole cards above each seat head (2 cards)
+    S.seatHoles = [];
+    S.seatHoleLabels = [];
+    for (let seat=1; seat<=6; seat++) {
+      const p = seatHeadPos(seat, tf);
+      const c0 = makeCardMesh("??");
+      const c1 = makeCardMesh("??");
+      c0.scale.setScalar(0.85);
+      c1.scale.setScalar(0.85);
+      c0.position.copy(p).add(new THREE.Vector3(-0.18, 0.02, 0));
+      c1.position.copy(p).add(new THREE.Vector3( 0.18, 0.02, 0));
+      S.root.add(c0, c1);
+      S.seatHoles[seat] = [c0, c1];
+      S.seatHoleLabels[seat] = ["??","??"];
     }
 
     redraw(S.tableHud);
@@ -268,79 +254,141 @@ export const DealingMix = (() => {
 
     log("[DealingMix] init ✅");
 
+    // ---- public hooks ----
     function setPot(p) { S.pot = p|0; redraw(S.tableHud); redraw(S.potHud); }
     function setStreet(st) { S.street = st || "—"; redraw(S.tableHud); }
     function setAction(a) { S.action = a || "—"; redraw(S.tableHud); }
 
     function onDeal(d) {
       if (!d) return;
-      if (d.type === "HOLE") {
-        setAction("DEALING");
-      } else if (d.type === "FLOP") {
-        setStreet("FLOP");
-        setAction("FLOP");
-        const c = d.communityRaw || [];
-        for (let i=0;i<5;i++) setCard(S.comm[i], cardLabel(c[i]));
-      } else if (d.type === "TURN") {
-        setStreet("TURN");
-        setAction("TURN");
-        const c = d.communityRaw || [];
-        for (let i=0;i<5;i++) setCard(S.comm[i], cardLabel(c[i]));
-      } else if (d.type === "RIVER") {
-        setStreet("RIVER");
-        setAction("RIVER");
-        const c = d.communityRaw || [];
-        for (let i=0;i<5;i++) setCard(S.comm[i], cardLabel(c[i]));
-      }
-    }
 
-    function onAction(a) {
-      if (!a) return;
-      if (a.type === "FOLD") {
-        setAction(`${a.name} FOLDS`);
+      if (d.type === "HOLE") {
+        setStreet("PREFLOP");
+        setAction("DEALING");
+
+        // set hole cards above heads (real labels)
+        // d.hole = [{seat, cards:["As","Kd"]}]
+        for (const h of (d.hole || [])) {
+          const seat = (h.seat|0) + 1; // 0-based -> 1..6
+          const cards = h.cards || ["??","??"];
+          const m = S.seatHoles[seat];
+          if (!m) continue;
+          setCard(m[0], cards[0] || "??");
+          setCard(m[1], cards[1] || "??");
+          S.seatHoleLabels[seat] = [cards[0]||"??", cards[1]||"??"];
+        }
+
+        // reset community row to unknown
+        for (let i=0;i<5;i++) setCard(S.comm[i], "??");
+        // hide winner banner
+        S.winnerHud.material.opacity = 0.0;
         return;
       }
-      if (a.type === "BET") {
-        setAction(`${a.name} BETS $${a.amount}`);
-        // Animate 1 chip from seat -> pot
-        const seatIndex = (a.seat|0) + 1;
-        const src = S.seatChips[seatIndex];
-        if (!src) return;
 
-        const chip = makeChip(0xb200ff);
-        const start = new THREE.Vector3();
-        const end = new THREE.Vector3();
-        src.getWorldPosition(start);
-        S.potChips.getWorldPosition(end);
+      if (d.type === "FLOP") { setStreet("FLOP"); setAction("FLOP"); }
+      if (d.type === "TURN") { setStreet("TURN"); setAction("TURN"); }
+      if (d.type === "RIVER"){ setStreet("RIVER"); setAction("RIVER"); }
 
-        chip.position.copy(start);
-        chip.position.y += 0.12;
-        S.root.add(chip);
-
-        S.chipAnims.push({
-          mesh: chip,
-          t: 0,
-          dur: 0.35,
-          a: start.clone(),
-          b: end.clone().add(new THREE.Vector3((Math.random()-0.5)*0.08, 0.14 + Math.random()*0.06, (Math.random()-0.5)*0.08))
-        });
-      }
+      // show community as it grows
+      const c = d.communityRaw || [];
+      for (let i=0;i<5;i++) setCard(S.comm[i], cardLabel(c[i]));
     }
 
-    function onBlinds(b) {
+    function onBlinds() {
       setStreet("PREFLOP");
       setAction("BLINDS");
     }
 
+    function onAction(a) {
+      if (!a) return;
+      if (a.type === "FOLD") setAction(`${a.name} FOLDS`);
+      if (a.type === "BET")  setAction(`${a.name} BETS $${a.amount}`);
+    }
+
+    // ✅ MAIN FEATURE: combine winning cards into the community row
     function onShowdown(sd) {
       const w = sd?.winners?.[0];
       if (!w) return;
-      const text = `${w.name} WINS • ${w.handName} • ${(w.best5||[]).join(" ")}`;
+
+      // Yellow banner still ok, but the actual “show hand” is the card combine
+      const text = `${w.name} WINS • ${w.handName}`;
       S.winnerHud.userData._hud.drawFn = drawWinner(text);
       redraw(S.winnerHud);
       S.winnerHud.material.opacity = 0.95;
-      setTimeout(() => { if (S.winnerHud) S.winnerHud.material.opacity = 0.0; }, 2400);
+
+      setStreet("SHOWDOWN");
       setAction("SHOWDOWN");
+
+      // If poker didn't provide detailed mapping, fallback to just show best5 as labels
+      const detailed = w.best5Detailed;
+      if (!Array.isArray(detailed) || detailed.length !== 5) {
+        const labels = w.best5 || [];
+        for (let i=0;i<5;i++) setCard(S.comm[i], labels[i] || "??");
+        setTimeout(() => { if (S.winnerHud) S.winnerHud.material.opacity = 0.0; }, 2500);
+        return;
+      }
+
+      // Clear any old winner animations
+      S.winnerAnims.length = 0;
+
+      // Step 1: Immediately set community row to the WIN LINE order
+      // (cards from community just appear, cards from hole will “fly in” and land)
+      for (let i=0;i<5;i++){
+        const di = detailed[i];
+        if (di.from === "COMM") {
+          setCard(S.comm[i], di.label);
+        } else {
+          // placeholder until the flying card lands
+          setCard(S.comm[i], "??");
+        }
+      }
+
+      // Step 2: Animate each winning HOLE card from above head -> its target slot
+      // Find winner seat index
+      const winnerSeat = (w.seat|0) + 1;
+      const holeMeshes = S.seatHoles[winnerSeat];
+      if (!holeMeshes) return;
+
+      // Choose which hole mesh to move: index 0 or 1 from mapping
+      const tf = world.tableFocus || new THREE.Vector3(0,0,-6.5);
+      const ty = world.tableY || 0.92;
+
+      for (let slot=0; slot<5; slot++) {
+        const di = detailed[slot];
+        if (di.from !== "HOLE") continue;
+
+        const holeIdx = di.index; // 0 or 1
+        const srcMesh = holeMeshes[holeIdx];
+        if (!srcMesh) continue;
+
+        const start = srcMesh.position.clone();
+
+        const end = new THREE.Vector3(
+          tf.x + (slot-2)*0.44,
+          ty + 0.55,
+          tf.z - 0.15
+        );
+
+        // “clone” a flying copy so the above-head card stays visible
+        // (then we can optionally hide it later if you want)
+        const fly = makeCardMesh(di.label);
+        fly.scale.copy(srcMesh.scale);
+        fly.position.copy(start);
+        S.root.add(fly);
+
+        S.winnerAnims.push({
+          mesh: fly,
+          t: 0,
+          dur: 0.55,
+          a: start.clone(),
+          b: end.clone().add(new THREE.Vector3(0, 0.08, 0)),
+          label: di.label,
+          slot
+        });
+      }
+
+      // Fade banner later
+      setTimeout(() => { if (S.winnerHud) S.winnerHud.material.opacity = 0.0; }, 2800);
     }
 
     function showFinished(payload) {
@@ -368,6 +416,20 @@ export const DealingMix = (() => {
         c.rotation.x = 0;
       }
 
+      // Hole cards float above heads, face player
+      const tf = world.tableFocus || new THREE.Vector3(0,0,-6.5);
+      for (let seat=1; seat<=6; seat++) {
+        const p = seatHeadPos(seat, tf);
+        const m = S.seatHoles[seat];
+        if (!m) continue;
+        m[0].position.lerp(p.clone().add(new THREE.Vector3(-0.18, 0.02 + Math.sin(S.t*2 + seat)*0.02, 0)), 0.12);
+        m[1].position.lerp(p.clone().add(new THREE.Vector3( 0.18, 0.02 + Math.sin(S.t*2 + seat + 1)*0.02, 0)), 0.12);
+        m[0].lookAt(cam.position.x, m[0].position.y, cam.position.z);
+        m[1].lookAt(cam.position.x, m[1].position.y, cam.position.z);
+        m[0].rotation.x = 0;
+        m[1].rotation.x = 0;
+      }
+
       // Pot HUD “look-to-reveal”
       const potPos = S.potHud.position.clone();
       const toPot = potPos.sub(cam.position).normalize();
@@ -378,18 +440,21 @@ export const DealingMix = (() => {
       S.potHud.material.opacity += (targetOpacity - S.potHud.material.opacity) * 0.12;
       S.potHud.lookAt(cam.position.x, S.potHud.position.y, cam.position.z);
 
-      // Chip animations
-      for (let i=S.chipAnims.length-1;i>=0;i--){
-        const A = S.chipAnims[i];
+      // Winner “fly in” animations
+      for (let i=S.winnerAnims.length-1;i>=0;i--){
+        const A = S.winnerAnims[i];
         A.t += dt;
         const k = Math.min(1, A.t / A.dur);
-        // smoothstep
         const s = k*k*(3-2*k);
         A.mesh.position.lerpVectors(A.a, A.b, s);
+        A.mesh.lookAt(cam.position.x, A.mesh.position.y, cam.position.z);
+        A.mesh.rotation.x = 0;
+
         if (k >= 1) {
-          // drop into pot stack area
+          // land: set the actual community slot to the label, then remove flyer
+          setCard(S.comm[A.slot], A.label);
           try { S.root.remove(A.mesh); } catch {}
-          S.chipAnims.splice(i,1);
+          S.winnerAnims.splice(i,1);
         }
       }
     }

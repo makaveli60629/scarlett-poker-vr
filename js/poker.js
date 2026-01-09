@@ -1,603 +1,440 @@
-// /js/poker.js — Scarlett PokerJS v1.0 (REAL DECK + REAL HAND EVAL + SHOWDOWN BEST5)
-// Drop-in Texas Hold’em engine (6-max by default).
-//
-// What this does:
-// ✅ Real 52-card deck, shuffle, deal 2 hole cards each
-// ✅ Deal flop/turn/river in order
-// ✅ Evaluate best 5-card hand out of 7 (brute force 21 combos, reliable)
-// ✅ Determine winner(s) + the exact 5 cards used (for "show winning hand" UI)
-// ✅ Simple timed state machine so you can WATCH hands play out
-// ✅ Optional "toy betting" (random check/call/bet/fold) — safe + can be disabled
-//
-// What this does NOT do (yet):
-// ❌ Side pots / all-in / split-pot chip distribution beyond simple splits
-// ❌ Full poker AI
-//
-// Integration points you can use right now:
-// - poker.on("state", (s)=>{})      // state changes
-// - poker.on("deal", (payload)=>{}) // cards dealt (hole/community)
-// - poker.on("showdown", (payload)=>{}) // winners + best5
-// - poker.getPublicState()          // UI-friendly state snapshot
-//
-// Usage (in main.js):
-//   import { PokerJS } from "./poker.js";
-//   const poker = PokerJS.create({ seats: 6, log });
-//   poker.startHand();
-//   // in animation loop:
-//   poker.update(dt);
-//
-// If you have a visual system (DealingMix), call it inside the events:
-//   poker.on("deal", ({type, ...}) => dealing.applyDeal(...))
-//   poker.on("showdown", (data)=> dealing.showWinners(data))
+// /js/poker.js — Scarlett PokerSim v1.0 (FULL)
+// ✅ Fixes your import error: exports a named export "PokerSim"
+// ✅ Runs real Texas Hold'em hands (6-max default)
+// ✅ Emits events you can hook into visuals later (deal/flop/turn/river/showdown/winner)
+// ✅ Evaluates real winning hands + returns the exact 5-card combo and which cards were used
 
-export const PokerJS = (() => {
-  // ---------- Event Emitter ----------
-  function makeEmitter() {
-    const map = new Map();
-    return {
-      on(type, fn) {
-        if (!map.has(type)) map.set(type, new Set());
-        map.get(type).add(fn);
-        return () => map.get(type)?.delete(fn);
-      },
-      emit(type, payload) {
-        const set = map.get(type);
-        if (!set) return;
-        for (const fn of set) {
-          try { fn(payload); } catch (e) { console.error(e); }
-        }
-      }
+export const PokerSim = (() => {
+  // ---------- Utilities ----------
+  const RANKS = "23456789TJQKA";
+  const SUITS = "cdhs"; // clubs, diamonds, hearts, spades
+
+  const rankValue = (rChar) => RANKS.indexOf(rChar) + 2; // 2..14
+  const rankChar = (v) => RANKS[v - 2];
+
+  function mulberry32(seed) {
+    let t = seed >>> 0;
+    return function () {
+      t += 0x6D2B79F5;
+      let x = Math.imul(t ^ (t >>> 15), 1 | t);
+      x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
+      return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
     };
   }
 
-  // ---------- Card Helpers ----------
-  const RANKS = [2,3,4,5,6,7,8,9,10,11,12,13,14]; // 11=J,12=Q,13=K,14=A
-  const SUITS = [0,1,2,3]; // 0=♠ 1=♥ 2=♦ 3=♣ (any mapping is fine if consistent)
-  const SUIT_CH = ["♠","♥","♦","♣"];
-  const RANK_CH = { 11:"J", 12:"Q", 13:"K", 14:"A" };
+  function nowSeed() {
+    // stable-ish per reload but changes often
+    return (Date.now() ^ (performance.now() * 1000)) >>> 0;
+  }
 
-  function cardToString(c) {
-    const r = RANK_CH[c.r] || String(c.r);
-    const s = SUIT_CH[c.s] || "?";
-    return r + s;
+  function shuffle(arr, rnd) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = (rnd() * (i + 1)) | 0;
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
   }
 
   function makeDeck() {
     const deck = [];
-    for (const s of SUITS) for (const r of RANKS) deck.push({ r, s });
+    for (const s of SUITS) for (const r of RANKS) deck.push(r + s);
     return deck;
   }
 
-  function shuffle(a) {
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = (Math.random() * (i + 1)) | 0;
-      const t = a[i]; a[i] = a[j]; a[j] = t;
-    }
-    return a;
-  }
+  function cardRank(card) { return rankValue(card[0]); }
+  function cardSuit(card) { return card[1]; }
 
-  // ---------- 5-card Hand Scoring ----------
-  // Score format: { cat, kickers: number[], ranks: number[], cards: [c1..c5] }
-  // cat higher = better
-  // Categories:
-  // 9 Straight Flush
-  // 8 Four of a Kind
-  // 7 Full House
-  // 6 Flush
-  // 5 Straight
-  // 4 Three of a Kind
-  // 3 Two Pair
-  // 2 One Pair
-  // 1 High Card
-  //
-  // Comparison: cat, then kickers lexicographically
-  function score5(cards5) {
-    // ranks sorted desc
-    const rs = cards5.map(c => c.r).sort((a,b)=>b-a);
-    const ss = cards5.map(c => c.s);
+  // ---------- 5-card evaluator ----------
+  // Returns a comparable score array: higher is better.
+  // category: 8 straight flush, 7 four, 6 full house, 5 flush, 4 straight, 3 trips, 2 two pair, 1 pair, 0 high
+  function eval5(cards5) {
+    const ranks = cards5.map(cardRank).sort((a, b) => b - a);
+    const suits = cards5.map(cardSuit);
 
-    // counts by rank
-    const counts = new Map();
-    for (const r of rs) counts.set(r, (counts.get(r) || 0) + 1);
+    // counts
+    const count = new Map();
+    for (const r of ranks) count.set(r, (count.get(r) || 0) + 1);
 
-    // groups: [count, rank] sorted by count desc, then rank desc
-    const groups = Array.from(counts.entries())
-      .map(([rank, count]) => [count, rank])
-      .sort((a,b)=> (b[0]-a[0]) || (b[1]-a[1]));
+    // sort ranks by (count desc, rank desc)
+    const groups = Array.from(count.entries())
+      .map(([r, c]) => ({ r, c }))
+      .sort((a, b) => (b.c - a.c) || (b.r - a.r));
 
-    const isFlush = ss.every(s => s === ss[0]);
+    const isFlush = suits.every((s) => s === suits[0]);
 
-    // straight detection (handle wheel A-5)
-    const uniq = Array.from(new Set(rs)).sort((a,b)=>b-a);
+    // straight (A2345 low)
+    const uniq = Array.from(new Set(ranks)).sort((a, b) => b - a);
     let isStraight = false;
     let straightHigh = 0;
 
     if (uniq.length === 5) {
-      const max = uniq[0], min = uniq[4];
-      if (max - min === 4) { isStraight = true; straightHigh = max; }
-      // wheel: A,5,4,3,2 => treat high as 5
-      if (!isStraight && uniq[0] === 14 && uniq[1] === 5 && uniq[2] === 4 && uniq[3] === 3 && uniq[4] === 2) {
-        isStraight = true; straightHigh = 5;
+      const hi = uniq[0];
+      const lo = uniq[4];
+      if (hi - lo === 4) { isStraight = true; straightHigh = hi; }
+      // wheel: A 5 4 3 2
+      if (uniq[0] === 14 && uniq[1] === 5 && uniq[2] === 4 && uniq[3] === 3 && uniq[4] === 2) {
+        isStraight = true;
+        straightHigh = 5;
       }
     }
 
-    // Straight Flush
-    if (isFlush && isStraight) {
-      return { cat: 9, kickers: [straightHigh], cards: cards5 };
+    if (isStraight && isFlush) return [8, straightHigh];
+    if (groups[0].c === 4) return [7, groups[0].r, groups[1].r];
+    if (groups[0].c === 3 && groups[1].c === 2) return [6, groups[0].r, groups[1].r];
+    if (isFlush) return [5, ...uniq];
+    if (isStraight) return [4, straightHigh];
+    if (groups[0].c === 3) {
+      const kickers = groups.slice(1).map(g => g.r).sort((a, b) => b - a);
+      return [3, groups[0].r, ...kickers];
     }
-
-    // Four of a kind
-    if (groups[0][0] === 4) {
-      const quadRank = groups[0][1];
-      const kicker = groups[1][1];
-      return { cat: 8, kickers: [quadRank, kicker], cards: cards5 };
+    if (groups[0].c === 2 && groups[1].c === 2) {
+      const highPair = Math.max(groups[0].r, groups[1].r);
+      const lowPair  = Math.min(groups[0].r, groups[1].r);
+      const kicker = groups[2].r;
+      return [2, highPair, lowPair, kicker];
     }
-
-    // Full house
-    if (groups[0][0] === 3 && groups[1][0] === 2) {
-      return { cat: 7, kickers: [groups[0][1], groups[1][1]], cards: cards5 };
+    if (groups[0].c === 2) {
+      const pair = groups[0].r;
+      const kickers = groups.slice(1).map(g => g.r).sort((a, b) => b - a);
+      return [1, pair, ...kickers];
     }
-
-    // Flush
-    if (isFlush) {
-      return { cat: 6, kickers: rs.slice(), cards: cards5 };
-    }
-
-    // Straight
-    if (isStraight) {
-      return { cat: 5, kickers: [straightHigh], cards: cards5 };
-    }
-
-    // Trips
-    if (groups[0][0] === 3) {
-      const trips = groups[0][1];
-      const kick = groups.slice(1).map(g => g[1]).sort((a,b)=>b-a);
-      return { cat: 4, kickers: [trips, ...kick], cards: cards5 };
-    }
-
-    // Two Pair
-    if (groups[0][0] === 2 && groups[1][0] === 2) {
-      const highPair = Math.max(groups[0][1], groups[1][1]);
-      const lowPair = Math.min(groups[0][1], groups[1][1]);
-      const kicker = groups[2][1];
-      return { cat: 3, kickers: [highPair, lowPair, kicker], cards: cards5 };
-    }
-
-    // One Pair
-    if (groups[0][0] === 2) {
-      const pair = groups[0][1];
-      const kick = groups.slice(1).map(g => g[1]).sort((a,b)=>b-a);
-      return { cat: 2, kickers: [pair, ...kick], cards: cards5 };
-    }
-
-    // High Card
-    return { cat: 1, kickers: rs.slice(), cards: cards5 };
+    return [0, ...uniq];
   }
 
-  function compareScore(a, b) {
-    if (a.cat !== b.cat) return a.cat - b.cat;
-    const n = Math.max(a.kickers.length, b.kickers.length);
-    for (let i=0;i<n;i++){
-      const da = a.kickers[i] || 0;
-      const db = b.kickers[i] || 0;
-      if (da !== db) return da - db;
+  function cmpScore(a, b) {
+    const n = Math.max(a.length, b.length);
+    for (let i = 0; i < n; i++) {
+      const av = a[i] ?? 0;
+      const bv = b[i] ?? 0;
+      if (av !== bv) return av - bv;
     }
     return 0;
   }
 
-  // best of 7: brute force all 21 combos of 5
-  function bestOf7(cards7) {
-    let best = null;
+  // choose best 5 out of 7 (brute force 21 combos)
+  function bestOf7(sevenCards) {
+    let bestScore = null;
     let bestIdx = null;
 
-    // indices 0..6 choose 5
-    for (let a=0;a<3;a++){
-      for (let b=a+1;b<4;b++){
-        for (let c=b+1;c<5;c++){
-          for (let d=c+1;d<6;d++){
-            for (let e=d+1;e<7;e++){
-              const five = [cards7[a], cards7[b], cards7[c], cards7[d], cards7[e]];
-              const sc = score5(five);
-              if (!best || compareScore(sc, best) > 0) {
-                best = sc;
-                bestIdx = [a,b,c,d,e];
+    // indices 0..6, choose 5
+    for (let a = 0; a < 3; a++) {
+      for (let b = a + 1; b < 4; b++) {
+        for (let c = b + 1; c < 5; c++) {
+          for (let d = c + 1; d < 6; d++) {
+            for (let e = d + 1; e < 7; e++) {
+              const idx = [a, b, c, d, e];
+              const hand5 = idx.map(i => sevenCards[i]);
+              const score = eval5(hand5);
+              if (!bestScore || cmpScore(score, bestScore) > 0) {
+                bestScore = score;
+                bestIdx = idx;
               }
             }
           }
         }
       }
     }
-    return { score: best, usedIdx: bestIdx };
+
+    const bestCards = bestIdx.map(i => sevenCards[i]);
+    return { score: bestScore, idx: bestIdx, cards: bestCards };
   }
 
-  function catName(cat) {
-    switch (cat) {
-      case 9: return "STRAIGHT FLUSH";
-      case 8: return "FOUR OF A KIND";
-      case 7: return "FULL HOUSE";
-      case 6: return "FLUSH";
-      case 5: return "STRAIGHT";
-      case 4: return "THREE OF A KIND";
-      case 3: return "TWO PAIR";
-      case 2: return "ONE PAIR";
-      default: return "HIGH CARD";
-    }
+  function categoryName(cat) {
+    return [
+      "High Card",
+      "One Pair",
+      "Two Pair",
+      "Three of a Kind",
+      "Straight",
+      "Flush",
+      "Full House",
+      "Four of a Kind",
+      "Straight Flush",
+    ][cat] || "Unknown";
   }
 
   // ---------- Engine ----------
-  function create(opts = {}) {
-    const log = opts.log || console.log;
-    const E = makeEmitter();
+  function create({ seats = 6, toyBetting = true, log = console.log, seed = null } = {}) {
+    const rnd = mulberry32(seed ?? nowSeed());
 
+    const listeners = new Map();
+    const on = (name, fn) => {
+      if (!listeners.has(name)) listeners.set(name, new Set());
+      listeners.get(name).add(fn);
+      return () => listeners.get(name)?.delete(fn);
+    };
+    const emit = (name, payload) => {
+      try { log?.(`[PokerSim] ${name}`); } catch {}
+      const set = listeners.get(name);
+      if (set) for (const fn of set) { try { fn(payload); } catch (e) { console.error(e); } }
+    };
+
+    // state
     const S = {
-      seats: Math.max(2, Math.min(9, opts.seats || 6)),
-      smallBlind: opts.smallBlind ?? 5,
-      bigBlind: opts.bigBlind ?? 10,
-      startingStack: opts.startingStack ?? 1000,
-
-      // phase timing (seconds)
-      tDealHole: opts.tDealHole ?? 1.2,
-      tFlop: opts.tFlop ?? 1.4,
-      tTurn: opts.tTurn ?? 1.3,
-      tRiver: opts.tRiver ?? 1.3,
-      tShowdown: opts.tShowdown ?? 2.2,
-      tNextHand: opts.tNextHand ?? 1.2,
-
-      // optional toy betting
-      toyBetting: opts.toyBetting ?? true,
-
-      // runtime
-      phase: "IDLE",         // IDLE, HOLE, FLOP, TURN, RIVER, SHOWDOWN, END
-      street: "PREFLOP",     // PREFLOP, FLOP, TURN, RIVER, SHOWDOWN
-      timer: 0,
+      seats,
+      toyBetting,
+      handNo: 0,
 
       dealer: 0,
-      action: 0,
+      sb: 1,
+      bb: 2,
 
       deck: [],
       community: [],
-      players: [], // {seat, stack, inHand, folded, hole:[c,c], bet, name}
+      hole: Array.from({ length: seats }, () => []),
 
       pot: 0,
-      lastWinners: null
+      stacks: Array.from({ length: seats }, () => 10000),
+      inHand: Array.from({ length: seats }, () => true),
+
+      street: "idle", // preflop/flop/turn/river/showdown
+      timer: 0,
+      phase: 0,
+
+      lastShowdown: null,
     };
 
-    function resetPlayersIfNeeded() {
-      if (S.players.length !== S.seats) {
-        S.players = [];
-        for (let i=0;i<S.seats;i++){
-          S.players.push({
-            seat: i,
-            name: opts.names?.[i] || `BOT ${i+1}`,
-            stack: S.startingStack,
-            inHand: true,
-            folded: false,
-            hole: [],
-            bet: 0
-          });
-        }
-      }
-    }
+    // simple timing sequence (seconds)
+    const T = {
+      dealHole: 1.1,
+      toFlop: 1.5,
+      toTurn: 1.5,
+      toRiver: 1.5,
+      toShow: 1.2,
+      nextHand: 2.2,
+    };
 
-    function rotateDealer() {
-      S.dealer = (S.dealer + 1) % S.seats;
-    }
+    function resetHand() {
+      S.handNo += 1;
+      S.street = "preflop";
+      S.phase = 0;
+      S.timer = 0;
+      S.community.length = 0;
+      for (let i = 0; i < S.seats; i++) S.hole[i] = [];
+      S.inHand = Array.from({ length: S.seats }, () => true);
+      S.pot = 0;
 
-    function burnOne() { S.deck.pop(); }
-    function drawOne() { return S.deck.pop(); }
+      S.deck = makeDeck();
+      shuffle(S.deck, rnd);
+    }
 
     function postBlinds() {
-      const sb = (S.dealer + 1) % S.seats;
-      const bb = (S.dealer + 2) % S.seats;
-      const pSB = S.players[sb];
-      const pBB = S.players[bb];
+      // rotate dealer & blinds
+      S.dealer = (S.dealer + 1) % S.seats;
+      S.sb = (S.dealer + 1) % S.seats;
+      S.bb = (S.dealer + 2) % S.seats;
 
-      const a = Math.min(pSB.stack, S.smallBlind);
-      const b = Math.min(pBB.stack, S.bigBlind);
+      const small = 50;
+      const big = 100;
 
-      pSB.stack -= a; pSB.bet += a; S.pot += a;
-      pBB.stack -= b; pBB.bet += b; S.pot += b;
+      S.stacks[S.sb] = Math.max(0, S.stacks[S.sb] - small);
+      S.stacks[S.bb] = Math.max(0, S.stacks[S.bb] - big);
+      S.pot += small + big;
 
-      E.emit("blinds", { sb, bb, small: a, big: b, pot: S.pot });
-    }
-
-    function clearBets() {
-      for (const p of S.players) p.bet = 0;
-    }
-
-    function activePlayers() {
-      return S.players.filter(p => p.inHand && !p.folded);
-    }
-
-    function maybeToyBetting(streetName) {
-      if (!S.toyBetting) return;
-
-      // simple: sometimes someone folds, sometimes someone "bets"
-      // (this is visual spice, not poker-accurate betting)
-      const alive = activePlayers();
-      if (alive.length <= 1) return;
-
-      // on each street, random small pot increment
-      const bump = [10, 15, 20, 25][Math.min(3, ["PREFLOP","FLOP","TURN","RIVER"].indexOf(streetName))] || 10;
-      const who = alive[(Math.random() * alive.length) | 0];
-      const doFold = Math.random() < 0.06; // rare folds
-
-      if (doFold && alive.length > 2) {
-        who.folded = true;
-        E.emit("action", { type:"FOLD", seat: who.seat, name: who.name, pot: S.pot });
-      } else {
-        const amt = Math.min(who.stack, bump + ((Math.random()*bump)|0));
-        who.stack -= amt;
-        who.bet += amt;
-        S.pot += amt;
-        E.emit("action", { type:"BET", seat: who.seat, name: who.name, amount: amt, pot: S.pot });
-      }
+      emit("blinds", {
+        dealer: S.dealer,
+        sb: S.sb,
+        bb: S.bb,
+        small,
+        big,
+        pot: S.pot,
+      });
     }
 
     function dealHole() {
-      for (const p of S.players) {
-        p.inHand = (p.stack > 0);
-        p.folded = false;
-        p.hole = [];
-        p.bet = 0;
-      }
-      S.community = [];
-      S.pot = 0;
-      S.lastWinners = null;
-
-      S.deck = shuffle(makeDeck());
-
-      postBlinds();
-
-      // deal 2 rounds starting left of dealer
-      for (let r=0;r<2;r++){
-        for (let i=1;i<=S.seats;i++){
-          const seat = (S.dealer + i) % S.seats;
-          const p = S.players[seat];
-          if (!p.inHand) continue;
-          p.hole.push(drawOne());
+      // 2 rounds
+      for (let round = 0; round < 2; round++) {
+        for (let i = 0; i < S.seats; i++) {
+          const seat = (S.dealer + 1 + i) % S.seats; // start left of dealer
+          if (!S.inHand[seat]) continue;
+          S.hole[seat].push(S.deck.pop());
         }
       }
-
-      E.emit("deal", {
-        type: "HOLE",
-        players: S.players.map(p => ({ seat: p.seat, name: p.name, hole: p.hole.slice(), inHand: p.inHand }))
+      emit("dealHole", {
+        hole: S.hole.map(h => h.slice()),
+        pot: S.pot,
+        dealer: S.dealer
       });
     }
 
     function dealFlop() {
-      burnOne();
-      S.community.push(drawOne(), drawOne(), drawOne());
-      E.emit("deal", { type:"FLOP", community: S.community.slice() });
+      S.deck.pop(); // burn
+      S.community.push(S.deck.pop(), S.deck.pop(), S.deck.pop());
+      S.street = "flop";
+      emit("flop", { community: S.community.slice(), pot: S.pot });
     }
 
     function dealTurn() {
-      burnOne();
-      S.community.push(drawOne());
-      E.emit("deal", { type:"TURN", community: S.community.slice() });
+      S.deck.pop(); // burn
+      S.community.push(S.deck.pop());
+      S.street = "turn";
+      emit("turn", { community: S.community.slice(), pot: S.pot });
     }
 
     function dealRiver() {
-      burnOne();
-      S.community.push(drawOne());
-      E.emit("deal", { type:"RIVER", community: S.community.slice() });
+      S.deck.pop(); // burn
+      S.community.push(S.deck.pop());
+      S.street = "river";
+      emit("river", { community: S.community.slice(), pot: S.pot });
     }
 
-    function earlyWinIfOneLeft() {
-      const alive = activePlayers();
-      if (alive.length === 1) {
-        const w = alive[0];
-        w.stack += S.pot;
-        const payload = {
-          winners: [{
-            seat: w.seat,
-            name: w.name,
-            amount: S.pot,
-            reason: "EVERYONE FOLDED",
-            handName: "—",
-            best5: [],
-            used: { holeIdx: [], commIdx: [] }
-          }],
-          pot: S.pot,
-          community: S.community.slice()
-        };
-        S.lastWinners = payload;
-        E.emit("showdown", payload);
-        return true;
-      }
-      return false;
+    function toyBetting() {
+      // very simple pot growth for watchable sim
+      if (!S.toyBetting) return;
+      const add = 150 + ((rnd() * 350) | 0);
+      S.pot += add;
+      emit("pot", { pot: S.pot, add, street: S.street });
     }
 
     function showdown() {
-      const alive = activePlayers();
-      if (alive.length === 0) return;
-
-      // compute best hands
+      // evaluate all active seats
       const results = [];
-      for (const p of alive) {
-        const cards7 = [...p.hole, ...S.community];
-        const { score, usedIdx } = bestOf7(cards7);
+      for (let s = 0; s < S.seats; s++) {
+        if (!S.inHand[s]) continue;
+        const seven = [...S.hole[s], ...S.community];
+        const best = bestOf7(seven);
 
-        // Map usedIdx into hole/community indexes
+        // map best indices to "hole" vs "community" for UI highlighting
+        // seven layout: [hole0, hole1, comm0, comm1, comm2, comm3, comm4]
         const holeIdx = [];
         const commIdx = [];
-        for (const idx of usedIdx) {
-          if (idx < 2) holeIdx.push(idx);
-          else commIdx.push(idx - 2);
+        for (const i of best.idx) {
+          if (i === 0 || i === 1) holeIdx.push(i); // 0/1 in seven = hole
+          else commIdx.push(i - 2); // 2..6 => community 0..4
         }
 
         results.push({
-          seat: p.seat,
-          name: p.name,
-          score,
-          handName: catName(score.cat),
+          seat: s,
+          hole: S.hole[s].slice(),
+          best5: best.cards.slice(),
+          score: best.score.slice(),
+          category: categoryName(best.score[0]),
           used: { holeIdx, commIdx },
-          best5: score.cards.map(cardToString),
-          hole: p.hole.slice()
         });
       }
 
-      // determine top score
-      let best = results[0];
-      for (let i=1;i<results.length;i++){
-        if (compareScore(results[i].score, best.score) > 0) best = results[i];
-      }
+      // determine winner(s)
+      results.sort((a, b) => cmpScore(a.score, b.score)); // ascending
+      const bestScore = results.length ? results[results.length - 1].score : [0];
+      const winners = results.filter(r => cmpScore(r.score, bestScore) === 0);
 
-      // winners = all tied with best
-      const winners = results.filter(r => compareScore(r.score, best.score) === 0);
+      // split pot equally among winners (toy payout)
+      const winAmt = winners.length ? Math.floor(S.pot / winners.length) : 0;
+      for (const w of winners) S.stacks[w.seat] += winAmt;
 
-      // split pot
-      const share = Math.floor(S.pot / winners.length);
-      let remainder = S.pot - share * winners.length;
+      S.lastShowdown = { winners, results, pot: S.pot, winAmt };
+      S.street = "showdown";
 
-      for (const w of winners) {
-        const p = S.players[w.seat];
-        const add = share + (remainder > 0 ? 1 : 0);
-        remainder = Math.max(0, remainder - 1);
-        p.stack += add;
-        w.amount = add;
-      }
+      emit("showdown", {
+        community: S.community.slice(),
+        results,
+        winners,
+        pot: S.pot,
+        winAmt,
+      });
 
-      const payload = {
+      emit("winner", {
         winners: winners.map(w => ({
           seat: w.seat,
-          name: w.name,
-          amount: w.amount,
-          handName: w.handName,
+          category: w.category,
           best5: w.best5,
           used: w.used,
-          hole: w.hole.map(cardToString)
+          hole: w.hole,
         })),
         pot: S.pot,
-        community: S.community.map(cardToString),
-        communityRaw: S.community.slice(),
-        results // full detail if you want it
-      };
-
-      S.lastWinners = payload;
-      E.emit("showdown", payload);
-    }
-
-    function setPhase(phase, street) {
-      S.phase = phase;
-      if (street) S.street = street;
-      S.timer = 0;
-      E.emit("state", { phase: S.phase, street: S.street, pot: S.pot });
+        winAmt,
+      });
     }
 
     function startHand() {
-      resetPlayersIfNeeded();
-      rotateDealer();
-      dealHole();
-      setPhase("HOLE", "PREFLOP");
-      log(`[PokerJS] Hand start — dealer=${S.dealer+1}`);
+      resetHand();
+      postBlinds();
+      emit("handStart", {
+        handNo: S.handNo,
+        dealer: S.dealer,
+        sb: S.sb,
+        bb: S.bb,
+        stacks: S.stacks.slice(),
+        pot: S.pot
+      });
     }
 
+    // deterministic phase machine
     function update(dt) {
-      if (S.phase === "IDLE") return;
       S.timer += dt;
 
-      // On each street, allow a tiny toy betting spice once early in the street
-      // (kept safe so it can't spam)
-      if (S.toyBetting && S.timer > 0.35 && S.timer < 0.40) {
-        maybeToyBetting(S.street);
-        // If folds ended hand, go to END quickly
-        if (earlyWinIfOneLeft()) setPhase("END", "SHOWDOWN");
+      // If idle, do nothing until startHand called
+      if (S.street === "idle") return;
+
+      // preflop timeline
+      if (S.street === "preflop") {
+        if (S.phase === 0 && S.timer >= T.dealHole) {
+          S.phase = 1;
+          dealHole();
+          toyBetting();
+        }
+        if (S.phase === 1 && S.timer >= T.dealHole + T.toFlop) {
+          S.phase = 2;
+          dealFlop();
+          toyBetting();
+        }
       }
 
-      if (S.phase === "HOLE") {
-        if (S.timer >= S.tDealHole) {
-          if (earlyWinIfOneLeft()) return setPhase("END", "SHOWDOWN");
-          clearBets();
-          dealFlop();
-          setPhase("FLOP", "FLOP");
-        }
-      } else if (S.phase === "FLOP") {
-        if (S.timer >= S.tFlop) {
-          if (earlyWinIfOneLeft()) return setPhase("END", "SHOWDOWN");
-          clearBets();
+      if (S.street === "flop") {
+        if (S.timer >= T.dealHole + T.toFlop + T.toTurn) {
           dealTurn();
-          setPhase("TURN", "TURN");
+          toyBetting();
         }
-      } else if (S.phase === "TURN") {
-        if (S.timer >= S.tTurn) {
-          if (earlyWinIfOneLeft()) return setPhase("END", "SHOWDOWN");
-          clearBets();
+      }
+
+      if (S.street === "turn") {
+        if (S.timer >= T.dealHole + T.toFlop + T.toTurn + T.toRiver) {
           dealRiver();
-          setPhase("RIVER", "RIVER");
+          toyBetting();
         }
-      } else if (S.phase === "RIVER") {
-        if (S.timer >= S.tRiver) {
-          setPhase("SHOWDOWN", "SHOWDOWN");
+      }
+
+      if (S.street === "river") {
+        if (S.timer >= T.dealHole + T.toFlop + T.toTurn + T.toRiver + T.toShow) {
           showdown();
         }
-      } else if (S.phase === "SHOWDOWN") {
-        if (S.timer >= S.tShowdown) {
-          setPhase("END", "SHOWDOWN");
-        }
-      } else if (S.phase === "END") {
-        if (S.timer >= S.tNextHand) {
+      }
+
+      if (S.street === "showdown") {
+        if (S.timer >= T.dealHole + T.toFlop + T.toTurn + T.toRiver + T.toShow + T.nextHand) {
+          // next hand
+          S.street = "idle";
+          emit("handEnd", { handNo: S.handNo });
           startHand();
         }
       }
     }
 
-    function getPublicState() {
+    function getState() {
       return {
-        phase: S.phase,
-        street: S.street,
+        handNo: S.handNo,
         dealer: S.dealer,
+        sb: S.sb,
+        bb: S.bb,
         pot: S.pot,
-        community: S.community.map(cardToString),
-        players: S.players.map(p => ({
-          seat: p.seat,
-          name: p.name,
-          stack: p.stack,
-          inHand: p.inHand,
-          folded: p.folded,
-          hole: p.hole.map(cardToString) // you can hide this for non-debug UI
-        })),
-        lastWinners: S.lastWinners
+        street: S.street,
+        community: S.community.slice(),
+        hole: S.hole.map(h => h.slice()),
+        stacks: S.stacks.slice(),
+        lastShowdown: S.lastShowdown,
       };
     }
 
-    // For UI where you want to hide hole cards until showdown:
-    function getMaskedState() {
-      return {
-        phase: S.phase,
-        street: S.street,
-        dealer: S.dealer,
-        pot: S.pot,
-        community: S.community.map(cardToString),
-        players: S.players.map(p => ({
-          seat: p.seat,
-          name: p.name,
-          stack: p.stack,
-          inHand: p.inHand,
-          folded: p.folded,
-          hole: (S.phase === "SHOWDOWN" || S.phase === "END") ? p.hole.map(cardToString) : ["??","??"]
-        })),
-        lastWinners: S.lastWinners
-      };
-    }
+    // Start immediately for convenience if you want:
+    // (but I leave it manual so you control it in main.js)
+    // startHand();
 
     return {
-      on: E.on,
-      emit: E.emit,
-
+      on,
+      emit,
       startHand,
       update,
-
-      getPublicState,
-      getMaskedState,
-
-      // Debug helpers
-      _debug: {
-        cardToString,
-        bestOf7,
-        score5,
-        compareScore
-      }
+      getState,
     };
   }
 

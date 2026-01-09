@@ -302,6 +302,12 @@
 
       <div id="panel">
         <span class="pill"><b>Status</b><span id="statusText">Booting…</span></span>
+
+        <!-- Update 4.0 indicator (does not affect logic) -->
+        <span class="pill" title="Update 4.0: Hands-only cyber gloves + helmet">
+          <b>Avatar</b><span id="avatarText">4.0 (Hands)</span>
+        </span>
+
         <button class="btn primary small" id="btnEnter" title="Enter VR (Quest)">Enter VR</button>
         <button class="btn pink small" id="btnRecenter" title="Reset your position">Recenter</button>
         <button class="btn ghost small" id="btnTeleport" title="Toggle Teleport">Teleport</button>
@@ -364,6 +370,13 @@
     const v = Date.now().toString();
     window.__BUILD_V = v;
 
+    // ---- Update 4.0: give main.js a single place to read XR session features ----
+    // main.js should use this when calling VRButton.createButton(renderer, sessionInit)
+    // or navigator.xr.requestSession('immersive-vr', sessionInit)
+    window.__XR_SESSION_INIT = {
+      optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
+    };
+
     const statusText = document.getElementById("statusText");
     const setStatus = (t) => { if (statusText) statusText.textContent = " " + t; };
 
@@ -389,6 +402,7 @@
     appendLog("href=" + location.href);
     appendLog("ua=" + (navigator.userAgent || ""));
     appendLog("navigator.xr=" + (!!navigator.xr));
+    appendLog("[index] Update 4.0 sessionInit=" + JSON.stringify(window.__XR_SESSION_INIT));
 
     // ---- Buttons ----
     const btnEnter = document.getElementById("btnEnter");

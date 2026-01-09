@@ -1,26 +1,48 @@
-// /js/dealingMix.js — Scarlett DealingMix v2.0
-// - Community cards always face player + hover
-// - Pot HUD: smaller, transparent background, purple numbers
-// - Chips: smaller + skinnier
+// /js/dealingMix.js — Scarlett DealingMix v2.0 (DRIVEN BY PokerSim)
+// ✅ Community cards always face player + hover (no tilt)
+// ✅ Pot HUD: purple, transparent background, big numbers
+// ✅ Supports PokerSim hooks:
+//    - setPot(pot)
+//    - setCommunity(cardsRaw) (raw objects {r,s})
+//    - setHoleCards(players) (players: [{seat, hole:[{r,s},{r,s}]}])
+//    - setAction({seat, type, amount, name})
+//    - showShowdown(sd) (winners + used indices)
+// ✅ Winning reveal: highlights winning 5; pulls used hole cards into showcase area
 
 export const DealingMix = (() => {
   let THREE, scene, log, world;
 
+  const SUIT_CH = ["♠","♥","♦","♣"];
+  const RANK_CH = { 11:"J", 12:"Q", 13:"K", 14:"A" };
+
   const state = {
     t: 0,
     root: null,
+
     tableHud: null,
     potHud: null,
-    comm: [],
+    actionHud: null,
+
+    comm: [],            // 5 community card meshes
+    commRaw: [],         // raw community cards
+    hole: new Map(),     // seat -> [mesh, mesh]
+    holeRaw: new Map(),  // seat -> raw hole cards
+
     chipPile: null,
     dealerButton: null,
 
     pot: 0,
-    current: "—",
     actionText: "—",
-    street: "—",
+    actionSeat: -1,
+    actionName: "",
+    actionType: "",
+
+    showdownTimer: 0,
+    showdownActive: false,
+    showdownUsed: null, // {winnerSeat, usedHoleIdx[], usedCommIdx[]}
   };
 
+  // ---------- Canvas helpers ----------
   function makeCanvasTex(drawFn, w = 1024, h = 512) {
     const c = document.createElement("canvas");
     c.width = w; c.height = h;
@@ -57,66 +79,112 @@ export const DealingMix = (() => {
     ctx.closePath();
   }
 
+  function cardToText(c) {
+    if (!c) return "??";
+    const r = RANK_CH[c.r] || String(c.r);
+    const s = SUIT_CH[c.s] || "?";
+    return r + s;
+  }
+
+  // ---------- HUD draw ----------
   function tableHudDraw(ctx, W, H) {
     ctx.clearRect(0,0,W,H);
 
-    ctx.fillStyle = "rgba(8,10,16,0.70)";
-    rounded(ctx, 30, 40, W-60, H-80, 40);
+    ctx.fillStyle = "rgba(8,10,16,0.72)";
+    rounded(ctx, 30, 40, W-60, H-80, 44);
     ctx.fill();
 
     ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 58px Arial";
+    ctx.font = "bold 60px Arial";
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
     ctx.fillText("Scarlett Poker • 6-Max • $10,000 Table", 70, 70);
 
-    ctx.fillStyle = "#7fe7ff";
-    ctx.font = "bold 46px Arial";
-    ctx.fillText(state.street, 70, 150);
+    const streets = [
+      ["PREFLOP", "#7fe7ff"],
+      ["FLOP",    "#4cd964"],
+      ["TURN",    "#ff2d7a"],
+      ["RIVER",   "#ffcc00"],
+    ];
+    let x = 70;
+    for (const [label, color] of streets) {
+      ctx.fillStyle = color;
+      ctx.font = "bold 46px Arial";
+      ctx.fillText(label, x, 152);
+      x += ctx.measureText(label).width + 40;
+    }
 
     ctx.fillStyle = "#e8ecff";
-    ctx.font = "bold 48px Arial";
-    ctx.fillText(`Pot: $${state.pot.toLocaleString()}`, 70, 220);
-
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 48px Arial";
-    ctx.fillText(`Turn: ${state.current}`, 70, 290);
+    ctx.font = "bold 58px Arial";
+    ctx.fillText(`Pot: $${(state.pot||0).toLocaleString()}`, 70, 230);
 
     ctx.fillStyle = "rgba(255,255,255,0.08)";
-    rounded(ctx, 70, 350, W-140, 120, 30);
+    rounded(ctx, 70, 320, W-140, 140, 34);
     ctx.fill();
 
     ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 74px Arial";
+    ctx.font = "bold 80px Arial";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(`${state.actionText}`, W/2, 412);
+    const line = state.actionText || "—";
+    ctx.fillText(line, W/2, 390);
   }
 
   function potHudDraw(ctx, W, H) {
     ctx.clearRect(0,0,W,H);
 
-    // transparent background
-    ctx.fillStyle = "rgba(0,0,0,0.25)";
-    rounded(ctx, 20, 20, W-40, H-40, 34);
+    // transparent back
+    ctx.fillStyle = "rgba(0,0,0,0.10)";
+    rounded(ctx, 18, 18, W-36, H-36, 40);
     ctx.fill();
 
-    ctx.strokeStyle = "rgba(178,0,255,0.65)";
-    ctx.lineWidth = 6;
-    rounded(ctx, 20, 20, W-40, H-40, 34);
-    ctx.stroke();
+    // purple glow text
+    ctx.shadowColor = "rgba(178,0,255,0.85)";
+    ctx.shadowBlur = 22;
 
     ctx.fillStyle = "#b200ff";
-    ctx.font = "bold 92px Arial";
+    ctx.font = "bold 120px Arial";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(`$${state.pot.toLocaleString()}`, W/2, H/2);
+    ctx.fillText(`$${(state.pot||0).toLocaleString()}`, W/2, H/2 + 6);
+
+    ctx.shadowBlur = 0;
   }
 
-  function makeCardFace(rank="A", suit="♠") {
+  function actionHudDraw(ctx, W, H) {
+    ctx.clearRect(0,0,W,H);
+
+    // small floating card: name + action
+    ctx.fillStyle = "rgba(8,10,16,0.65)";
+    rounded(ctx, 20, 20, W-40, H-40, 32);
+    ctx.fill();
+
+    ctx.fillStyle = "#7fe7ff";
+    ctx.font = "bold 60px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillText(state.actionName || "—", W/2, 36);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 84px Arial";
+    ctx.textBaseline = "middle";
+
+    // action colored
+    const type = (state.actionType || "").toUpperCase();
+    if (type === "BET") ctx.fillStyle = "#ff2d7a";
+    else if (type === "FOLD") ctx.fillStyle = "#ff6b6b";
+    else if (type === "CHECK") ctx.fillStyle = "#7fe7ff";
+    else ctx.fillStyle = "#ffffff";
+
+    ctx.fillText(state.actionText || "—", W/2, 170);
+  }
+
+  // ---------- Card mesh ----------
+  function makeCardMesh(rank="A", suit="♠") {
     const texObj = makeCanvasTex((ctx,W,H)=>{
       ctx.fillStyle="#f8f8f8"; ctx.fillRect(0,0,W,H);
-      ctx.strokeStyle="rgba(0,0,0,0.22)"; ctx.lineWidth=10; ctx.strokeRect(10,10,W-20,H-20);
+      ctx.strokeStyle="rgba(0,0,0,0.20)"; ctx.lineWidth=10; ctx.strokeRect(10,10,W-20,H-20);
+
       const red = (suit==="♥"||suit==="♦");
       ctx.fillStyle = red ? "#b6001b" : "#111";
 
@@ -140,6 +208,7 @@ export const DealingMix = (() => {
     const mat = new THREE.MeshStandardMaterial({
       map: texObj.tex,
       roughness: 0.55,
+      metalness: 0.05,
       emissive: 0x111111,
       emissiveIntensity: 0.18,
       side: THREE.DoubleSide
@@ -147,12 +216,54 @@ export const DealingMix = (() => {
 
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.36, 0.50), mat);
     mesh.renderOrder = 100;
-    mesh.userData._card = { rank, suit };
+    mesh.userData._card = { tex: texObj.tex };
     return mesh;
   }
 
+  function setCardFace(mesh, cardObj) {
+    // rebuild the canvas texture without creating new mesh
+    const txt = cardToText(cardObj);
+    const rank = txt.slice(0, txt.length-1);
+    const suit = txt.slice(-1);
+
+    const c = document.createElement("canvas");
+    c.width = 512; c.height = 712;
+    const ctx = c.getContext("2d");
+
+    ctx.fillStyle="#f8f8f8"; ctx.fillRect(0,0,512,712);
+    ctx.strokeStyle="rgba(0,0,0,0.20)"; ctx.lineWidth=10; ctx.strokeRect(10,10,492,692);
+
+    const red = (suit==="♥"||suit==="♦");
+    ctx.fillStyle = red ? "#b6001b" : "#111";
+
+    ctx.font="bold 110px Arial";
+    ctx.textAlign="left"; ctx.textBaseline="top";
+    ctx.fillText(rank, 28, 18);
+    ctx.font="bold 128px Arial";
+    ctx.fillText(suit, 28, 140);
+
+    ctx.textAlign="right"; ctx.textBaseline="bottom";
+    ctx.font="bold 110px Arial";
+    ctx.fillText(rank, 512-28, 712-140);
+    ctx.font="bold 128px Arial";
+    ctx.fillText(suit, 512-28, 712-22);
+
+    ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.font="bold 240px Arial";
+    ctx.fillText(suit, 512/2, 712/2+10);
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
+
+    mesh.material.map = tex;
+    mesh.material.needsUpdate = true;
+  }
+
+  // ---------- chips / dealer ----------
   function makeChip(color=0xff2d7a) {
-    const geo = new THREE.CylinderGeometry(0.055, 0.055, 0.012, 32);
+    // ✅ smaller + thinner (your request)
+    const geo = new THREE.CylinderGeometry(0.055, 0.055, 0.012, 28);
     const mat = new THREE.MeshStandardMaterial({
       color,
       roughness: 0.35,
@@ -166,7 +277,7 @@ export const DealingMix = (() => {
   }
 
   function makeDealerButton() {
-    const geo = new THREE.CylinderGeometry(0.09, 0.09, 0.02, 40);
+    const geo = new THREE.CylinderGeometry(0.085, 0.085, 0.018, 36);
     const mat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       roughness: 0.45,
@@ -174,9 +285,107 @@ export const DealingMix = (() => {
       emissive: 0x222222,
       emissiveIntensity: 0.2
     });
-    return new THREE.Mesh(geo, mat);
+    const m = new THREE.Mesh(geo, mat);
+    m.rotation.set(0,0,0);
+    return m;
   }
 
+  // ---------- seat helpers ----------
+  function getSeatPose(seatIndex) {
+    // returns position on table edge facing center
+    const seats = world?.getSeats?.() || [];
+    const s = seats[seatIndex];
+    if (!s?.anchor) return null;
+
+    const p = new THREE.Vector3();
+    s.anchor.getWorldPosition(p);
+
+    // move slightly toward table to put hole cards on table edge
+    const tf = world.tableFocus || new THREE.Vector3(0,0,-6.5);
+    const toTable = new THREE.Vector3().subVectors(tf, p);
+    toTable.y = 0; toTable.normalize();
+
+    const onTable = p.clone().addScaledVector(toTable, 0.55);
+    onTable.y = (world.tableY || 0.92) + 0.55;
+
+    return { pos: onTable, yaw: s.yaw };
+  }
+
+  // ---------- Public hooks ----------
+  function setPot(p) {
+    state.pot = p || 0;
+    if (state.tableHud) redraw(state.tableHud);
+    if (state.potHud) redraw(state.potHud);
+  }
+
+  function setAction(a) {
+    // a: {seat, type, amount, name}
+    state.actionSeat = (a?.seat ?? -1);
+    state.actionType = (a?.type || "");
+    state.actionName = (a?.name || "");
+    if (a?.type === "BET") state.actionText = `BET $${(a.amount||0).toLocaleString()}`;
+    else if (a?.type === "FOLD") state.actionText = "FOLD";
+    else if (a?.type === "CHECK") state.actionText = "CHECK";
+    else state.actionText = a?.type || "—";
+
+    if (state.tableHud) redraw(state.tableHud);
+    if (state.actionHud) redraw(state.actionHud);
+  }
+
+  function setCommunity(cardsRaw) {
+    state.commRaw = Array.isArray(cardsRaw) ? cardsRaw.slice() : [];
+    // set faces
+    for (let i=0;i<state.comm.length;i++){
+      const c = state.comm[i];
+      const raw = state.commRaw[i];
+      if (raw) setCardFace(c, raw);
+    }
+  }
+
+  function setHoleCards(players) {
+    // players: [{seat, hole:[{r,s},{r,s}]}]
+    if (!Array.isArray(players)) return;
+    state.holeRaw.clear();
+
+    for (const p of players) {
+      if (!p?.hole?.length) continue;
+      state.holeRaw.set(p.seat, p.hole.slice(0,2));
+    }
+
+    // update visuals
+    for (const [seat, two] of state.holeRaw.entries()) {
+      const pair = state.hole.get(seat);
+      if (!pair) continue;
+      if (two[0]) setCardFace(pair[0], two[0]);
+      if (two[1]) setCardFace(pair[1], two[1]);
+    }
+  }
+
+  function showShowdown(sd) {
+    // pick first winner for now (supports ties later)
+    const w = sd?.winners?.[0];
+    if (!w) return;
+
+    // store used indices so update() can animate highlight
+    state.showdownActive = true;
+    state.showdownTimer = 0;
+
+    state.showdownUsed = {
+      winnerSeat: w.seat, // 0-based seat from PokerSim
+      usedHoleIdx: w.used?.holeIdx || [],
+      usedCommIdx: w.used?.commIdx || []
+    };
+
+    // big action banner
+    state.actionSeat = w.seat;
+    state.actionName = w.name || "WINNER";
+    state.actionType = "WIN";
+    state.actionText = `WIN • ${w.handName}`;
+    if (state.actionHud) redraw(state.actionHud);
+    if (state.tableHud) redraw(state.tableHud);
+  }
+
+  // ---------- Init ----------
   function init({ THREE: _T, scene: _S, log: _L, world: _W } = {}) {
     THREE = _T; scene = _S; log = _L || console.log; world = _W || {};
 
@@ -185,97 +394,217 @@ export const DealingMix = (() => {
     state.root.name = "DealingMixRoot";
     scene.add(state.root);
 
-    const tf = world.tableFocus || new THREE.Vector3(0,0,-8.8);
+    const tf = world.tableFocus || new THREE.Vector3(0,0,-6.5);
 
+    // main HUD
     state.tableHud = makeHudPlane(tableHudDraw, 1400, 520, 2.6, 0.90);
-    state.tableHud.position.set(tf.x, (world.tableY || 0.92) + 1.55, tf.z - 0.30);
+    state.tableHud.position.set(tf.x, (world.tableY || 0.92) + 1.55, tf.z - 0.20);
     state.root.add(state.tableHud);
 
-    state.potHud = makeHudPlane(potHudDraw, 640, 240, 0.75, 0.28);
+    // pot HUD (purple, transparent)
+    state.potHud = makeHudPlane(potHudDraw, 820, 300, 1.10, 0.40);
     state.potHud.position.set(tf.x, (world.tableY || 0.92) + 0.55, tf.z);
-    state.potHud.material.opacity = 0.10;
+    state.potHud.material.opacity = 0.18;
     state.root.add(state.potHud);
 
-    // community cards (placeholders updated by PokerSim)
+    // action HUD floats above the acting seat (moves each action)
+    state.actionHud = makeHudPlane(actionHudDraw, 900, 260, 1.25, 0.38);
+    state.actionHud.position.set(tf.x, (world.tableY || 0.92) + 1.35, tf.z + 1.25);
+    state.actionHud.material.opacity = 0.0; // fades in when actions happen
+    state.root.add(state.actionHud);
+
+    // community cards (5 placeholders)
     state.comm.length = 0;
+    state.commRaw = [];
+
     for (let i=0;i<5;i++){
-      const c = makeCardFace("?", "♠");
+      const c = makeCardMesh("?", "♠");
       c.position.set(tf.x + (i-2)*0.44, (world.tableY || 0.92) + 0.55, tf.z - 0.15);
       state.root.add(c);
       state.comm.push(c);
     }
 
-    // chip pile center
+    // hole cards per seat (6 seats assumed)
+    state.hole.clear();
+    state.holeRaw.clear();
+    for (let seat=0; seat<6; seat++){
+      const a = makeCardMesh("?", "♠");
+      const b = makeCardMesh("?", "♠");
+      a.scale.setScalar(0.72);
+      b.scale.setScalar(0.72);
+      state.root.add(a);
+      state.root.add(b);
+      state.hole.set(seat, [a,b]);
+    }
+
+    // chips
     state.chipPile = new THREE.Group();
-    for (let i=0;i<16;i++){
+    for (let i=0;i<18;i++){
       const col = (i%3===0)?0xff2d7a:(i%3===1)?0x7fe7ff:0xffcc00;
       const chip = makeChip(col);
-      chip.position.set((Math.random()-0.5)*0.14, (world.tableY || 0.92) + 0.010 + i*0.012, (Math.random()-0.5)*0.14);
+      chip.position.set((Math.random()-0.5)*0.12, (world.tableY || 0.92) + 0.006 + i*0.012, (Math.random()-0.5)*0.12);
       state.chipPile.add(chip);
     }
     state.chipPile.position.set(tf.x, 0, tf.z);
     state.root.add(state.chipPile);
 
+    // dealer button
     state.dealerButton = makeDealerButton();
-    state.dealerButton.position.set(tf.x + 1.05, (world.tableY || 0.92) + 0.012, tf.z + 0.85);
+    state.dealerButton.position.set(tf.x + 0.95, (world.tableY || 0.92) + 0.010, tf.z + 0.75);
     state.root.add(state.dealerButton);
 
-    log("[DealingMix] init ✅");
+    // init
+    state.pot = 0;
+    state.actionText = "—";
+    state.actionSeat = -1;
+    state.showdownActive = false;
+    state.showdownUsed = null;
 
-    function setStatus({ pot, current, actionText, street } = {}) {
-      if (typeof pot === "number") state.pot = pot;
-      if (current) state.current = current;
-      if (actionText) state.actionText = actionText;
-      if (street) state.street = street;
-      redraw(state.tableHud);
-      redraw(state.potHud);
-    }
+    redraw(state.tableHud);
+    redraw(state.potHud);
+    redraw(state.actionHud);
 
-    function setCommunity(cards) {
-      // cards = [{rank:'A', suit:'♠'}, ...]
-      for (let i=0;i<5;i++){
-        const c = state.comm[i];
-        const card = cards?.[i];
-        if (!card) continue;
-
-        // replace material texture by rebuilding (simple & safe)
-        const repl = makeCardFace(card.rank, card.suit);
-        repl.position.copy(c.position);
-        repl.rotation.copy(c.rotation);
-        state.root.remove(c);
-        state.root.add(repl);
-        state.comm[i] = repl;
-      }
-    }
+    log("[DealingMix] v2.0 init ✅");
 
     function update(dt) {
       state.t += dt;
+
       const cam = world?.cameraRef;
       if (!cam?.position) return;
 
+      // table HUD faces player
       state.tableHud.lookAt(cam.position.x, state.tableHud.position.y, cam.position.z);
 
+      // community cards hover + face player (no tilt)
       for (let i=0;i<state.comm.length;i++){
         const c = state.comm[i];
-        c.position.y = (world.tableY || 0.92) + 0.55 + Math.sin(state.t*2 + i)*0.02;
+        c.position.y = (world.tableY || 0.92) + 0.55 + Math.sin(state.t*2 + i)*0.03;
         c.lookAt(cam.position.x, c.position.y, cam.position.z);
-        c.rotation.x = 0;
+        c.rotation.x = 0; // keep upright (prevents tilt/blink-looking behavior)
       }
 
-      // “look-to-reveal” pot HUD
+      // pot HUD reveal when you look at pot (gentle)
       const potPos = state.potHud.position.clone();
       const toPot = potPos.sub(cam.position).normalize();
       const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(cam.quaternion).normalize();
       const dot = fwd.dot(toPot);
       const reveal = Math.max(0, Math.min(1, (dot - 0.90) / 0.08));
-      const targetOpacity = 0.06 + reveal * 0.72;
-      state.potHud.material.opacity += (targetOpacity - state.potHud.material.opacity) * 0.12;
-
+      const targetOpacity = 0.12 + reveal * 0.78;
+      state.potHud.material.opacity += (targetOpacity - state.potHud.material.opacity) * 0.10;
       state.potHud.lookAt(cam.position.x, state.potHud.position.y, cam.position.z);
-      state.potHud.position.y = (world.tableY || 0.92) + 0.55 + Math.sin(state.t*2.2)*0.008;
+
+      // hole cards: place near each seat, face camera
+      for (let seat=0; seat<6; seat++){
+        const pose = getSeatPose(seat+1); // seats in world are 1..6
+        const pair = state.hole.get(seat);
+        if (!pose || !pair) continue;
+
+        // spread slightly
+        const right = new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0), pose.yaw);
+        const base = pose.pos;
+
+        pair[0].position.copy(base).addScaledVector(right, -0.11);
+        pair[1].position.copy(base).addScaledVector(right,  0.11);
+
+        // face player, stay upright
+        pair[0].lookAt(cam.position.x, pair[0].position.y, cam.position.z);
+        pair[1].lookAt(cam.position.x, pair[1].position.y, cam.position.z);
+        pair[0].rotation.x = 0;
+        pair[1].rotation.x = 0;
+
+        // subtle hover
+        pair[0].position.y += Math.sin(state.t*2.2 + seat)*0.006;
+        pair[1].position.y += Math.sin(state.t*2.2 + seat + 0.7)*0.006;
+
+        // default dim
+        pair[0].material.emissiveIntensity = 0.16;
+        pair[1].material.emissiveIntensity = 0.16;
+      }
+
+      // action HUD placement + fade
+      if (state.actionSeat >= 0) {
+        const pose = getSeatPose(state.actionSeat+1);
+        if (pose) {
+          state.actionHud.position.set(pose.pos.x, (world.tableY||0.92)+1.48, pose.pos.z);
+          state.actionHud.lookAt(cam.position.x, state.actionHud.position.y, cam.position.z);
+
+          // fade in fast, fade out slow
+          const target = 0.92;
+          state.actionHud.material.opacity += (target - state.actionHud.material.opacity) * 0.12;
+        }
+      } else {
+        state.actionHud.material.opacity += (0.0 - state.actionHud.material.opacity) * 0.10;
+      }
+
+      // showdown highlight: brighten used cards and “pull” used hole cards toward community strip
+      if (state.showdownActive && state.showdownUsed) {
+        state.showdownTimer += dt;
+
+        const { winnerSeat, usedHoleIdx, usedCommIdx } = state.showdownUsed;
+
+        // brighten used community cards
+        for (const idx of usedCommIdx) {
+          const cm = state.comm[idx];
+          if (cm) cm.material.emissiveIntensity = 0.65 + Math.sin(state.t*8)*0.18;
+        }
+
+        // used hole cards: bring them up near community center
+        const pair = state.hole.get(winnerSeat);
+        if (pair) {
+          for (const hi of usedHoleIdx) {
+            const hm = pair[hi];
+            if (hm) {
+              hm.material.emissiveIntensity = 0.90 + Math.sin(state.t*10)*0.25;
+
+              // target positions near community strip ends
+              const target = new THREE.Vector3(
+                tf.x + (hi===0 ? -1.15 : 1.15),
+                (world.tableY || 0.92) + 0.70,
+                tf.z - 0.45
+              );
+              hm.position.lerp(target, 0.06);
+            }
+          }
+        }
+
+        // end showdown visuals after a bit (PokerSim will start new hand)
+        if (state.showdownTimer > 2.2) {
+          state.showdownActive = false;
+          state.showdownUsed = null;
+          state.showdownTimer = 0;
+          state.actionSeat = -1;
+        }
+      }
     }
 
-    return { setStatus, setCommunity, update, root: state.root };
+    function startHand() {
+      // reset visuals for new hand
+      state.actionSeat = -1;
+      state.actionName = "";
+      state.actionType = "";
+      state.actionText = "—";
+      state.showdownActive = false;
+      state.showdownUsed = null;
+      state.showdownTimer = 0;
+
+      // dim community
+      for (const c of state.comm) c.material.emissiveIntensity = 0.18;
+
+      redraw(state.tableHud);
+      redraw(state.potHud);
+      redraw(state.actionHud);
+    }
+
+    return {
+      startHand,
+      update,
+      setPot,
+      setCommunity,
+      setHoleCards,
+      setAction,
+      showShowdown,
+      root: state.root
+    };
   }
 
   return { init };

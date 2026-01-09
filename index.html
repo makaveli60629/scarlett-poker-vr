@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
-  <title>Scarlett VR Poker</title>
+  <title>Scarlett VR Poker — DEBUG</title>
 
   <style>
     :root{
@@ -20,7 +20,6 @@
       --shadow: 0 12px 40px rgba(0,0,0,.45);
       --radius: 18px;
     }
-
     html, body {
       margin:0; padding:0; height:100%;
       background:var(--bg);
@@ -30,7 +29,6 @@
       touch-action: none;
       -webkit-tap-highlight-color: transparent;
     }
-
     canvas { display:block; width:100vw; height:100vh; }
 
     #hud {
@@ -40,7 +38,6 @@
       z-index: 10;
       pointer-events: none;
     }
-
     #topbar {
       display:flex;
       align-items:center;
@@ -48,7 +45,6 @@
       gap: 10px;
       pointer-events: none;
     }
-
     #brand {
       pointer-events:none;
       display:flex; align-items:center; gap:10px;
@@ -59,25 +55,13 @@
       box-shadow: var(--shadow);
       backdrop-filter: blur(10px);
     }
-
     #brand .dot {
       width:10px; height:10px; border-radius:50%;
       background: var(--aqua);
       box-shadow: 0 0 18px rgba(127,231,255,.65);
     }
-
-    #brand .title {
-      font-weight: 700;
-      letter-spacing: .2px;
-      font-size: 14px;
-      line-height: 1.2;
-    }
-
-    #brand .sub {
-      font-size: 12px;
-      color: var(--muted);
-      line-height: 1.2;
-    }
+    #brand .title { font-weight: 700; letter-spacing: .2px; font-size: 14px; line-height: 1.2; }
+    #brand .sub { font-size: 12px; color: var(--muted); line-height: 1.2; }
 
     #panel {
       pointer-events: auto;
@@ -86,7 +70,6 @@
       gap: 8px;
       justify-content: flex-end;
       align-items: center;
-
       padding: 10px;
       background: linear-gradient(180deg, rgba(10,12,20,.90), rgba(10,12,20,.70));
       border: 1px solid rgba(255,255,255,.08);
@@ -94,7 +77,6 @@
       box-shadow: var(--shadow);
       backdrop-filter: blur(10px);
     }
-
     .btn {
       display:inline-flex;
       align-items:center;
@@ -155,13 +137,11 @@
       left: 12px; right: 12px; bottom: 12px;
       z-index: 11;
       pointer-events: auto;
-
       display:flex;
       gap: 10px;
       flex-wrap: wrap;
       align-items:center;
       justify-content: center;
-
       padding: 10px;
       border-radius: 22px;
       background: linear-gradient(180deg, rgba(10,12,20,.92), rgba(10,12,20,.72));
@@ -175,10 +155,9 @@
       left: 12px;
       bottom: 92px;
       width: min(560px, calc(100vw - 24px));
-      max-height: 40vh;
+      max-height: 45vh;
       z-index: 12;
       pointer-events: auto;
-
       border-radius: 18px;
       background: rgba(0,0,0,.52);
       border: 1px solid rgba(255,255,255,.10);
@@ -186,7 +165,6 @@
       overflow: hidden;
       display: none;
     }
-
     #loghead {
       display:flex;
       align-items:center;
@@ -196,11 +174,7 @@
       background: rgba(10,12,20,.85);
       border-bottom: 1px solid rgba(255,255,255,.08);
     }
-    #loghead .h {
-      font-weight: 750;
-      font-size: 13px;
-      letter-spacing: .2px;
-    }
+    #loghead .h { font-weight: 750; font-size: 13px; letter-spacing: .2px; }
     #log {
       margin:0;
       padding: 10px 12px 12px 12px;
@@ -209,7 +183,7 @@
       line-height: 1.35;
       color: rgba(232,236,255,.92);
       overflow:auto;
-      max-height: calc(40vh - 44px);
+      max-height: calc(45vh - 44px);
       white-space: pre-wrap;
       word-break: break-word;
     }
@@ -234,29 +208,11 @@
       box-shadow: var(--shadow);
       padding: 16px;
     }
-    #helpCard h2 {
-      margin: 0 0 10px 0;
-      font-size: 18px;
-      letter-spacing:.2px;
-    }
-    #helpCard .grid {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 10px;
-      color: rgba(232,236,255,.92);
-      font-size: 13px;
-      line-height: 1.35;
-    }
-    #helpCard .row {
-      padding: 10px 12px;
-      border-radius: 16px;
-      background: rgba(255,255,255,.05);
-      border: 1px solid rgba(255,255,255,.08);
-    }
+    #helpCard h2 { margin: 0 0 10px 0; font-size: 18px; letter-spacing:.2px; }
+    #helpCard .grid { display: grid; grid-template-columns: 1fr; gap: 10px; color: rgba(232,236,255,.92); font-size: 13px; line-height: 1.35; }
+    #helpCard .row { padding: 10px 12px; border-radius: 16px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08); }
     #helpCard .row b { color: var(--aqua); }
     #helpCard .actions { margin-top: 12px; display:flex; justify-content:flex-end; gap:10px; }
-
-    button[style*="position: fixed"] { z-index: 30 !important; }
 
     #vrButtonSlot {
       position: fixed;
@@ -273,21 +229,6 @@
       #vrButtonSlot { bottom: 110px; }
     }
   </style>
-  // ---- Capture logs from modules (world.js / loaders) into the on-screen log ----
-window.addEventListener("scarlett-log", (e) => {
-  try { appendLog(String(e?.detail ?? "")); } catch {}
-});
-
-// Optional: mirror console warnings/errors to the on-screen log too
-(function hookConsole(){
-  const origLog = console.log.bind(console);
-  const origWarn = console.warn.bind(console);
-  const origErr = console.error.bind(console);
-
-  console.log = (...a) => { origLog(...a); try { appendLog(a.map(String).join(" ")); } catch {} };
-  console.warn = (...a) => { origWarn(...a); try { appendLog("⚠️ " + a.map(String).join(" ")); } catch {} };
-  console.error = (...a) => { origErr(...a); try { appendLog("❌ " + a.map(String).join(" ")); } catch {} };
-})();
 
   <script type="importmap">
   {
@@ -306,22 +247,24 @@ window.addEventListener("scarlett-log", (e) => {
         <div class="dot"></div>
         <div>
           <div class="title">Scarlett VR Poker</div>
-          <div class="sub">WebXR • Quest • Android</div>
+          <div class="sub">DEBUG • WebXR • Quest • Android</div>
         </div>
       </div>
 
       <div id="panel">
         <span class="pill"><b>Status</b><span id="statusText">Booting…</span></span>
-        <span class="pill" title="Update 4.0: Hands-only cyber gloves + helmet"><b>Avatar</b><span id="avatarText">4.0 (Hands)</span></span>
+        <span class="pill"><b>Build</b><span id="buildText">—</span></span>
 
-        <button class="btn primary small" id="btnEnter" title="Enter VR (Quest)">Enter VR</button>
-        <button class="btn pink small" id="btnRecenter" title="Reset your position">Recenter</button>
-        <button class="btn ghost small" id="btnTeleport" title="Toggle Teleport">Teleport</button>
-        <button class="btn ghost small" id="btnMove" title="Toggle Smooth Move">Move</button>
-        <button class="btn ghost small" id="btnSnap" title="Toggle Snap Turn">Snap</button>
-        <button class="btn ghost small" id="btnHands" title="Toggle Hands/Gloves">Hands</button>
-        <button class="btn warn small" id="btnHelp" title="Controls / Help">Help</button>
-        <button class="btn ghost small" id="btnLog" title="Show/Hide Log">Log</button>
+        <button class="btn primary small" id="btnEnter">Enter VR</button>
+        <button class="btn pink small" id="btnRecenter">Recenter</button>
+        <button class="btn ghost small" id="btnTeleport">Teleport</button>
+        <button class="btn ghost small" id="btnMove">Move</button>
+        <button class="btn ghost small" id="btnSnap">Snap</button>
+        <button class="btn ghost small" id="btnHands">Hands</button>
+
+        <button class="btn warn small" id="btnDiag">Diagnostics</button>
+        <button class="btn ghost small" id="btnHelp">Help</button>
+        <button class="btn ghost small" id="btnLog">Log</button>
       </div>
     </div>
   </div>
@@ -354,12 +297,12 @@ window.addEventListener("scarlett-log", (e) => {
 
   <div id="help">
     <div id="helpCard">
-      <h2>Controls</h2>
+      <h2>Controls (Debug)</h2>
       <div class="grid">
-        <div class="row"><b>Quest Controllers:</b> Left stick move, right stick snap-turn. Trigger = teleport confirm (if teleport enabled).</div>
-        <div class="row"><b>Hand Tracking:</b> Gloves show automatically. Pinch shows a small orb (visual only right now).</div>
-        <div class="row"><b>Android:</b> Use bottom dock arrows to move/turn. Tap “Teleport” to toggle teleport mode.</div>
-        <div class="row"><b>Recenter:</b> Press HUD “Recenter” anytime to reset to spawn.</div>
+        <div class="row"><b>Quest:</b> Left stick move • Right stick turn • Toggle Snap for snap/smooth.</div>
+        <div class="row"><b>Android:</b> Use dock arrows • Tap Teleport to toggle.</div>
+        <div class="row"><b>Diagnostics:</b> Checks key files for 404 + prints results in Log.</div>
+        <div class="row"><b>Log:</b> Mirrors console.log/warn/error + module logs.</div>
       </div>
       <div class="actions">
         <button class="btn primary" id="btnCloseHelp">Close</button>
@@ -368,34 +311,55 @@ window.addEventListener("scarlett-log", (e) => {
   </div>
 
   <script type="module">
+    // ---- Build version ----
     const v = Date.now().toString();
     window.__BUILD_V = v;
+    document.getElementById("buildText").textContent = " " + v;
 
-    window.__XR_SESSION_INIT = {
-      optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
-    };
+    // XR init
+    window.__XR_SESSION_INIT = { optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"] };
 
+    // Status helpers
     const statusText = document.getElementById("statusText");
-    const setStatus = (t) => { if (statusText) statusText.textContent = " " + t; };
+    const setStatus = (t) => { statusText.textContent = " " + t; };
 
+    // ---- On-screen log ----
     const logEl = document.getElementById("log");
     const logWrap = document.getElementById("logwrap");
     function appendLog(m) {
-      try { console.log(m); } catch {}
       if (!logEl) return;
       logEl.textContent += "\n" + String(m);
       logEl.scrollTop = logEl.scrollHeight;
     }
 
+    // Capture module logs
+    window.addEventListener("scarlett-log", (e) => {
+      try { appendLog(String(e?.detail ?? "")); } catch {}
+    });
+
+    // Mirror console logs to on-screen log (NO recursion: use original refs)
+    (function hookConsole(){
+      const origLog = console.log.bind(console);
+      const origWarn = console.warn.bind(console);
+      const origErr = console.error.bind(console);
+
+      console.log = (...a) => { origLog(...a); try { appendLog(a.map(String).join(" ")); } catch {} };
+      console.warn = (...a) => { origWarn(...a); try { appendLog("⚠️ " + a.map(String).join(" ")); } catch {} };
+      console.error = (...a) => { origErr(...a); try { appendLog("❌ " + a.map(String).join(" ")); } catch {} };
+    })();
+
+    // Window errors
     window.addEventListener("error", (e) => appendLog("❌ window.error: " + (e?.message || e)));
     window.addEventListener("unhandledrejection", (e) => appendLog("❌ unhandledrejection: " + (e?.reason?.message || e?.reason || e)));
 
+    // Boot header
     appendLog("BOOT v=" + v);
     appendLog("href=" + location.href);
     appendLog("ua=" + (navigator.userAgent || ""));
     appendLog("navigator.xr=" + (!!navigator.xr));
-    appendLog("[index] Update 4.0 sessionInit=" + JSON.stringify(window.__XR_SESSION_INIT));
+    appendLog("[index] sessionInit=" + JSON.stringify(window.__XR_SESSION_INIT));
 
+    // HUD buttons
     const btnEnter = document.getElementById("btnEnter");
     const btnRecenter = document.getElementById("btnRecenter");
     const btnTeleport = document.getElementById("btnTeleport");
@@ -404,7 +368,9 @@ window.addEventListener("scarlett-log", (e) => {
     const btnHands = document.getElementById("btnHands");
     const btnHelp = document.getElementById("btnHelp");
     const btnLog = document.getElementById("btnLog");
+    const btnDiag = document.getElementById("btnDiag");
 
+    // Log panel controls
     document.getElementById("btnCopyLog")?.addEventListener("click", async () => {
       try { await navigator.clipboard.writeText(logEl?.textContent || ""); appendLog("[hud] log copied ✅"); }
       catch { appendLog("[hud] log copy failed ⚠️"); }
@@ -412,27 +378,28 @@ window.addEventListener("scarlett-log", (e) => {
     document.getElementById("btnClearLog")?.addEventListener("click", () => { if (logEl) logEl.textContent = ""; appendLog("[hud] log cleared ✅"); });
     document.getElementById("btnCloseLog")?.addEventListener("click", () => { if (logWrap) logWrap.style.display = "none"; });
 
+    // Help
     const help = document.getElementById("help");
     btnHelp?.addEventListener("click", () => { help.style.display = "flex"; });
     document.getElementById("btnCloseHelp")?.addEventListener("click", () => { help.style.display = "none"; });
 
+    // Toggle log display
     btnLog?.addEventListener("click", () => {
-      const show = (logWrap.style.display !== "block");
-      logWrap.style.display = show ? "block" : "none";
+      logWrap.style.display = (logWrap.style.display === "block") ? "none" : "block";
     });
 
+    // Persistent toggles
     const LS_KEY = "scarlett_flags_v1";
     const saved = (() => { try { return JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch { return null; } })();
-
     window.__SCARLETT_FLAGS = Object.assign({ teleport:true, move:true, snap:true, hands:true }, saved || {});
     function saveFlags(){ try { localStorage.setItem(LS_KEY, JSON.stringify(window.__SCARLETT_FLAGS)); } catch {} }
 
     function updateTogglesUI(){
       const f = window.__SCARLETT_FLAGS;
-      btnTeleport?.classList.toggle("primary", !!f.teleport);
-      btnMove?.classList.toggle("primary", !!f.move);
-      btnSnap?.classList.toggle("primary", !!f.snap);
-      btnHands?.classList.toggle("primary", !!f.hands);
+      btnTeleport.classList.toggle("primary", !!f.teleport);
+      btnMove.classList.toggle("primary", !!f.move);
+      btnSnap.classList.toggle("primary", !!f.snap);
+      btnHands.classList.toggle("primary", !!f.hands);
     }
     updateTogglesUI();
 
@@ -442,21 +409,18 @@ window.addEventListener("scarlett-log", (e) => {
       appendLog("[hud] teleport=" + window.__SCARLETT_FLAGS.teleport);
       window.dispatchEvent(new CustomEvent("scarlett-toggle-teleport", { detail: window.__SCARLETT_FLAGS.teleport }));
     });
-
     btnMove?.addEventListener("click", () => {
       window.__SCARLETT_FLAGS.move = !window.__SCARLETT_FLAGS.move;
       saveFlags(); updateTogglesUI();
       appendLog("[hud] move=" + window.__SCARLETT_FLAGS.move);
       window.dispatchEvent(new CustomEvent("scarlett-toggle-move", { detail: window.__SCARLETT_FLAGS.move }));
     });
-
     btnSnap?.addEventListener("click", () => {
       window.__SCARLETT_FLAGS.snap = !window.__SCARLETT_FLAGS.snap;
       saveFlags(); updateTogglesUI();
       appendLog("[hud] snap=" + window.__SCARLETT_FLAGS.snap);
       window.dispatchEvent(new CustomEvent("scarlett-toggle-snap", { detail: window.__SCARLETT_FLAGS.snap }));
     });
-
     btnHands?.addEventListener("click", () => {
       window.__SCARLETT_FLAGS.hands = !window.__SCARLETT_FLAGS.hands;
       saveFlags(); updateTogglesUI();
@@ -467,6 +431,12 @@ window.addEventListener("scarlett-log", (e) => {
     btnRecenter?.addEventListener("click", () => {
       appendLog("[hud] recenter");
       window.dispatchEvent(new Event("scarlett-recenter"));
+    });
+
+    // Enter VR button -> event
+    btnEnter?.addEventListener("click", () => {
+      appendLog("[hud] enter vr");
+      window.dispatchEvent(new Event("scarlett-enter-vr"));
     });
 
     // Android dock (touch)
@@ -507,39 +477,33 @@ window.addEventListener("scarlett-log", (e) => {
     }
     updateDockVisibility();
 
-    // VRButton mount (fallback only)
-    const vrSlot = document.getElementById("vrButtonSlot");
-    function findVRButton(){
-      const buttons = Array.from(document.querySelectorAll("button"));
-      for (const b of buttons){
-        const t = (b.textContent || "").toUpperCase();
-        if (t.includes("ENTER VR") || t.includes("VR")) return b;
+    // Diagnostics: checks files for 404 (very useful when phone crashes)
+    async function diagnostics(){
+      appendLog("[diag] running…");
+      const base = location.href.replace(/\/[^\/]*$/, "/");
+      const files = [
+        "js/main.js",
+        "js/world.js",
+        "js/textures.js",
+        "js/lights_pack.js",
+        "js/solid_walls.js",
+        "js/table_factory.js",
+        "js/teleport_machine.js",
+        "js/store.js",
+        "js/water_fountain.js",
+      ];
+      for (const f of files){
+        const url = new URL(f + "?v=" + encodeURIComponent(v), base).toString();
+        try {
+          const r = await fetch(url, { cache:"no-store" });
+          appendLog(`[diag] ${f} -> ${r.status} ${r.ok ? "✅" : "❌"} `);
+        } catch (e) {
+          appendLog(`[diag] ${f} -> ERR ❌ ${e?.message || e}`);
+        }
       }
-      return null;
+      appendLog("[diag] done.");
     }
-    function mountVRButton(){
-      const b = findVRButton();
-      if (!b || !vrSlot) return false;
-      if (b.id && (b.id.startsWith("btn") || b.id.startsWith("m"))) return false;
-      if (b.parentElement !== vrSlot){
-        vrSlot.appendChild(b);
-        b.style.position = "static";
-        b.style.margin = "0";
-        appendLog("[hud] VRButton mounted ✅");
-      }
-      return true;
-    }
-    let tries = 0;
-    const vrMountTimer = setInterval(()=>{
-      tries++;
-      if (mountVRButton() || tries > 60) clearInterval(vrMountTimer);
-    }, 250);
-
-    // ✅ ONE Enter VR handler: DIRECT EVENT ONLY
-    btnEnter?.addEventListener("click", () => {
-      appendLog("[hud] enter vr (direct)");
-      window.dispatchEvent(new Event("scarlett-enter-vr"));
-    });
+    btnDiag?.addEventListener("click", diagnostics);
 
     // ---- LOAD MAIN ----
     try {
@@ -553,12 +517,11 @@ window.addEventListener("scarlett-log", (e) => {
       setStatus("Import error ❌");
       appendLog("❌ main import failed: " + (e?.message || e));
       console.error(e);
-
       appendLog("Fix checklist:");
-      appendLog("1) Open: " + location.href);
-      appendLog("2) Confirm file exists: /js/main.js");
-      appendLog("3) Ensure folder is named exactly: js (lowercase)");
+      appendLog("1) Confirm /js/main.js exists");
+      appendLog("2) Folder name is exactly: js (lowercase)");
+      appendLog("3) Check Diagnostics button for 404s");
     }
   </script>
 </body>
-          </html>
+</html>

@@ -1,113 +1,51 @@
-// /js/main.js — ScarlettVR Poker (GitHub Pages safe)
-// Requires: /js/world.js and a local three module at /js/three.module.js
-// Optional: if you already have /js/teleport.js etc, you can wire it into the hooks.
+// /js/main.js — Scarlett VR Poker (CDN importmap / Quest / Android safe)
+// Uses your index.html HUD events:
+// - "scarlett-enter-vr" (button)
+// - "scarlett-recenter"
+// - "scarlett-toggle-teleport" / "scarlett-toggle-move" / "scarlett-toggle-snap" / "scarlett-toggle-hands"
+// - "scarlett-touch" (Android dock)
+//
+// Requires: /js/world.js
+// CDN three is provided by importmap:  import * as THREE from "three";
 
-import * as THREE from "./three.module.js";
+import * as THREE from "three";
 import { World } from "./world.js";
 
-/* -----------------------------
-   Small, CDN-free WebXR button
--------------------------------- */
-function makeVRButton(renderer, { onEnter, onExit } = {}) {
-  const btn = document.createElement("button");
-  btn.id = "enter-vr";
-  btn.style.cssText = `
-    position:fixed; right:16px; bottom:16px; z-index:9999;
-    padding:12px 14px; border-radius:14px; border:1px solid rgba(255,255,255,.18);
-    background:rgba(10,12,18,.72); color:#e8ecff; font:600 14px system-ui;
-    box-shadow:0 10px 30px rgba(0,0,0,.35); backdrop-filter: blur(8px);
-  `;
-  btn.textContent = "ENTER VR";
-  btn.disabled = true;
-  btn.style.opacity = "0.6";
+const $ = (id) => document.getElementById(id);
+const statusText = $("statusText");
+const setStatus = (t) => { if (statusText) statusText.textContent = " " + t; };
 
-  async function init() {
-    if (!("xr" in navigator)) {
-      btn.textContent = "WEBXR NOT FOUND";
-      return;
-    }
-    try {
-      const ok = await navigator.xr.isSessionSupported("immersive-vr");
-      if (!ok) {
-        btn.textContent = "VR NOT SUPPORTED";
-        return;
-      }
-      btn.disabled = false;
-      btn.style.opacity = "1";
-      btn.textContent = "ENTER VR";
-    } catch (e) {
-      btn.textContent = "VR CHECK FAILED";
-      console.warn(e);
-    }
-  }
-
-  btn.onclick = async () => {
-    if (!renderer.xr.enabled) renderer.xr.enabled = true;
-
-    if (renderer.xr.isPresenting) {
-      const s = renderer.xr.getSession();
-      if (s) await s.end();
-      return;
-    }
-
-    try {
-      const session = await navigator.xr.requestSession("immersive-vr", {
-        optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking", "layers"],
-        requiredFeatures: ["local-floor"]
-      });
-      renderer.xr.setSession(session);
-      btn.textContent = "EXIT VR";
-
-      session.addEventListener("end", () => {
-        btn.textContent = "ENTER VR";
-        onExit && onExit();
-      });
-
-      onEnter && onEnter();
-    } catch (e) {
-      console.error("requestSession failed:", e);
-    }
-  };
-
-  init();
-  document.body.appendChild(btn);
-  return btn;
-}
-
-/* -----------------------------
-   App boot
--------------------------------- */
 const log = (...a) => console.log("[main]", ...a);
 
-const canvas = document.createElement("canvas");
-canvas.style.cssText = "position:fixed; inset:0; width:100%; height:100%;";
-document.body.style.margin = "0";
-document.body.style.overflow = "hidden";
-document.body.style.background = "#05060a";
-document.body.appendChild(canvas);
+// Use the existing page canvas (if any) or create one.
+let canvas = document.querySelector("canvas");
+if (!canvas) {
+  canvas = document.createElement("canvas");
+  document.body.appendChild(canvas);
+}
 
+// Renderer
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.physicallyCorrectLights = true;
 renderer.xr.enabled = true;
 
+// Scene + camera
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0x05060a, 12, 85);
+scene.background = new THREE.Color(0x05060a);
+scene.fog = new THREE.Fog(0x05060a, 12, 90);
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
 
-// Player rig (camera sits inside this)
+// Player rig (camera is inside this). In VR: rig y should be 0 (local-floor).
 const player = new THREE.Group();
 player.name = "playerRig";
-player.position.set(0, 1.7, 6); // lobby spawn (standing)
+player.position.set(0, 1.7, 6); // desktop standing spawn
 player.add(camera);
 scene.add(player);
 
-/* -----------------------------
-   Controllers (Quest)
--------------------------------- */
+// Controllers
 const controllers = {
   left: renderer.xr.getController(0),
   right: renderer.xr.getController(1),
@@ -116,82 +54,142 @@ const controllers = {
 };
 scene.add(controllers.left, controllers.right, controllers.leftGrip, controllers.rightGrip);
 
-// Track input
+// Flags (from index.html)
+const flags = () => (window.__SCARLETT_FLAGS || { teleport: true, move: true, snap: true, hands: true });
+
+// Touch state (Android dock)
+let touch = { f:0, b:0, l:0, r:0, turnL:0, turnR:0 };
+
+// Gamepad polling
 const input = {
   axesL: [0, 0],
   axesR: [0, 0],
-  buttonsL: [],
-  buttonsR: [],
   snapCooldown: 0,
 };
 
 function pollGamepads() {
   const session = renderer.xr.getSession();
   if (!session) return;
-  const sources = session.inputSources;
-  // Map: first gamepad -> left, second -> right (usually true on Quest)
+
+  // Find up to 2 gamepads from inputSources
   let gpL = null, gpR = null;
-  for (const src of sources) {
-    if (!src.gamepad) continue;
+  for (const src of session.inputSources) {
+    if (!src || !src.gamepad) continue;
     if (!gpL) gpL = src.gamepad;
     else if (!gpR) gpR = src.gamepad;
   }
+
   if (gpL) {
+    // Quest sometimes reports left stick on axes 2/3
     input.axesL[0] = gpL.axes?.[2] ?? gpL.axes?.[0] ?? 0;
     input.axesL[1] = gpL.axes?.[3] ?? gpL.axes?.[1] ?? 0;
-    input.buttonsL = gpL.buttons || [];
   }
   if (gpR) {
     input.axesR[0] = gpR.axes?.[2] ?? gpR.axes?.[0] ?? 0;
     input.axesR[1] = gpR.axes?.[3] ?? gpR.axes?.[1] ?? 0;
-    input.buttonsR = gpR.buttons || [];
   }
 }
 
-/* -----------------------------
-   Build the world
--------------------------------- */
+// Modes
+let mode = "lobby"; // "lobby" | "seated" | "spectate"
+function setMode(m) {
+  mode = m;
+  world.setMode(m);
+}
+
+// World init
 const world = World.init({
-  THREE,
-  scene,
-  renderer,
-  camera,
-  player,
-  controllers,
-  log: (...a) => console.log("[world]", ...a),
+  THREE, scene, renderer, camera, player, controllers, log: (...a) => console.log("[world]", ...a),
 });
 
-/* -----------------------------
-   Movement & seating rules
--------------------------------- */
-let mode = "lobby"; // "lobby" | "seated" | "spectate"
+// Start in lobby standing
+setMode("lobby");
+setStatus("Ready ✅");
 
-function setMode(next) {
-  mode = next;
-  world.setMode(next);
+// --------------------
+// WebXR session control (your HUD button triggers this)
+// --------------------
+async function enterVR() {
+  if (!navigator.xr) {
+    log("navigator.xr not found");
+    return;
+  }
+  try {
+    const supported = await navigator.xr.isSessionSupported("immersive-vr");
+    if (!supported) {
+      log("immersive-vr not supported");
+      return;
+    }
 
-  // Standing in lobby/spectate; seated at table
-  if (next === "seated") {
-    // keep camera height fixed while seated
-    camera.position.y = 1.35;
-  } else {
-    camera.position.y = 0; // in VR, HMD supplies height; in desktop, we keep rig height
+    // Use your global config if present
+    const init = window.__XR_SESSION_INIT || { optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"] };
+    // Ensure local-floor is present for stable height
+    init.optionalFeatures = Array.from(new Set([...(init.optionalFeatures || []), "local-floor"]));
+
+    const session = await navigator.xr.requestSession("immersive-vr", init);
+    await renderer.xr.setSession(session);
+
+    // In VR: rig y must be 0 (local-floor)
+    player.position.y = 0;
+
+    session.addEventListener("end", () => {
+      // Desktop fallback height
+      player.position.y = 1.7;
+      log("VR session ended");
+    });
+
+    log("VR session started ✅");
+  } catch (e) {
+    console.error(e);
+    log("enterVR failed:", e?.message || e);
   }
 }
 
-setMode("lobby");
+// Hook your HUD event
+window.addEventListener("scarlett-enter-vr", () => {
+  log("event: scarlett-enter-vr");
+  enterVR();
+});
 
-// WASD (desktop fallback)
+// Recenter hook (your HUD button)
+window.addEventListener("scarlett-recenter", () => {
+  log("event: scarlett-recenter");
+  world.recenter();
+  setMode("lobby");
+});
+
+// Toggle hooks (we store in world too)
+window.addEventListener("scarlett-toggle-teleport", (e) => world.setFlag("teleport", !!e.detail));
+window.addEventListener("scarlett-toggle-move", (e) => world.setFlag("move", !!e.detail));
+window.addEventListener("scarlett-toggle-snap", (e) => world.setFlag("snap", !!e.detail));
+window.addEventListener("scarlett-toggle-hands", (e) => world.setFlag("hands", !!e.detail));
+
+// Android touch dock hook
+window.addEventListener("scarlett-touch", (e) => {
+  touch = e?.detail || touch;
+});
+
+// Desktop keyboard fallback (optional)
 const keys = new Set();
 window.addEventListener("keydown", (e) => keys.add(e.code));
 window.addEventListener("keyup", (e) => keys.delete(e.code));
 
-function getMoveVector(dt) {
+// Movement helpers
+function getYaw() { return world.getPlayerYaw(); }
+
+function getMoveIntent() {
+  // If move is disabled, no movement (except spectate still respects move flag)
+  if (!flags().move) return { x: 0, z: 0 };
+
   let x = 0, z = 0;
 
-  // VR sticks (left)
+  // VR left stick
   x += input.axesL[0] || 0;
   z += input.axesL[1] || 0;
+
+  // Android dock
+  x += (touch.r ? 1 : 0) - (touch.l ? 1 : 0);
+  z += (touch.b ? 1 : 0) - (touch.f ? 1 : 0);
 
   // Desktop WASD
   if (keys.has("KeyA")) x -= 1;
@@ -199,42 +197,49 @@ function getMoveVector(dt) {
   if (keys.has("KeyW")) z -= 1;
   if (keys.has("KeyS")) z += 1;
 
-  // deadzone
+  // Deadzone
   const dz = 0.12;
   if (Math.abs(x) < dz) x = 0;
   if (Math.abs(z) < dz) z = 0;
 
-  // speed
-  const speed = mode === "lobby" ? 2.4 : (mode === "spectate" ? 2.8 : 0.0);
-  return { x: x * speed * dt, z: z * speed * dt };
+  return { x, z };
 }
 
 function applyMove(dt) {
+  // Seated = no walking
   if (mode === "seated") return;
 
-  const mv = getMoveVector(dt);
-  if (!mv.x && !mv.z) return;
+  const intent = getMoveIntent();
+  if (!intent.x && !intent.z) return;
 
-  // Move relative to camera yaw
-  const yaw = world.getPlayerYaw();
+  const speed = (mode === "spectate") ? 2.8 : 2.4;
+  const yaw = getYaw();
   const cos = Math.cos(yaw), sin = Math.sin(yaw);
 
-  const dx = mv.x * cos - mv.z * sin;
-  const dz = mv.x * sin + mv.z * cos;
+  // Move relative to yaw
+  const dx = (intent.x * cos - intent.z * sin) * speed * dt;
+  const dz = (intent.x * sin + intent.z * cos) * speed * dt;
 
-  const nextPos = player.position.clone();
-  nextPos.x += dx;
-  nextPos.z += dz;
+  const from = player.position.clone();
+  const to = from.clone();
+  to.x += dx;
+  to.z += dz;
 
-  // Collision against world colliders
-  const resolved = world.resolvePlayerCollision(player.position, nextPos);
+  const resolved = world.resolvePlayerCollision(from, to);
   player.position.copy(resolved);
 }
 
 function applySnapTurn(dt) {
-  // right stick X
+  if (!flags().snap) return;
+
   input.snapCooldown = Math.max(0, input.snapCooldown - dt);
-  const sx = input.axesR[0] || 0;
+
+  // VR right stick
+  let sx = input.axesR[0] || 0;
+
+  // Android dock turning
+  if (touch.turnL) sx -= 1;
+  if (touch.turnR) sx += 1;
 
   if (input.snapCooldown > 0) return;
 
@@ -248,14 +253,18 @@ function applySnapTurn(dt) {
   }
 }
 
-/* -----------------------------
-   Auto-seat + spectate
--------------------------------- */
+// Auto-seat / spectate zones
 function updateZones() {
   const z = world.getZoneAt(player.position);
 
+  // Spectate zone overrides lobby (but not seated)
+  if (mode !== "seated") {
+    if (z === "spectate" && mode !== "spectate") setMode("spectate");
+    if (z !== "spectate" && mode === "spectate") setMode("lobby");
+  }
+
+  // Auto-seat when you enter table zone (only if not already seated)
   if (z === "table" && mode !== "seated") {
-    // Auto-seat into nearest seat
     const seat = world.getNearestSeat(player.position);
     if (seat) {
       world.sitPlayerAtSeat(seat.index);
@@ -263,65 +272,21 @@ function updateZones() {
     }
   }
 
-  if (z === "lobby" && mode === "seated") {
-    // If you leave table zone, stand back up
+  // Stand up when you leave table zone
+  if (mode === "seated" && z !== "table") {
     world.standPlayerInLobby();
-    setMode("lobby");
-  }
-
-  if (z === "spectate" && mode !== "spectate") {
-    setMode("spectate");
-  } else if (z !== "spectate" && mode === "spectate") {
     setMode("lobby");
   }
 }
 
-// Desktop shortcut keys
-window.addEventListener("keydown", (e) => {
-  if (e.code === "KeyP") {
-    // Toggle spectate (desktop)
-    if (mode === "spectate") setMode("lobby");
-    else {
-      world.movePlayerToSpectate();
-      setMode("spectate");
-    }
-  }
-  if (e.code === "Escape" && mode === "seated") {
-    world.standPlayerInLobby();
-    setMode("lobby");
-  }
-});
-
-/* -----------------------------
-   Resize
--------------------------------- */
+// Resize
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-/* -----------------------------
-   VR Button
--------------------------------- */
-makeVRButton(renderer, {
-  onEnter: () => {
-    log("VR session start ✅");
-    // In VR, camera local y comes from headset; keep rig y for floor.
-    // We keep player.position.y as 0 in VR to let local-floor work.
-    // World uses local-floor; playerRig y stays at 0 in VR.
-    if (renderer.xr.isPresenting) player.position.y = 0;
-  },
-  onExit: () => {
-    log("VR session end ✅");
-    // restore desktop standing height
-    player.position.y = 1.7;
-  }
-});
-
-/* -----------------------------
-   Render loop
--------------------------------- */
+// Main loop
 let lastT = performance.now();
 renderer.setAnimationLoop(() => {
   const now = performance.now();
@@ -338,4 +303,4 @@ renderer.setAnimationLoop(() => {
   renderer.render(scene, camera);
 });
 
-log("boot ✅");
+log("main boot ✅");

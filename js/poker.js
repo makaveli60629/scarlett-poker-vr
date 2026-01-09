@@ -1,5 +1,7 @@
-// /js/poker.js — Scarlett PokerSim v1.0 (REAL DECK + BEST5 SHOWDOWN)
-// Exports: PokerSim (create)
+// /js/poker.js — Scarlett PokerSim v1.1 (WATCH SET: 12 HANDS)
+// ✅ Real 52-card deck + evaluation
+// ✅ Emits: deal/action/blinds/showdown/state/finished
+// ✅ Stops after maxHands so you can watch a full set
 
 export const PokerSim = (() => {
   function makeEmitter() {
@@ -153,6 +155,7 @@ export const PokerSim = (() => {
       tNextHand: opts.tNextHand ?? 1.2,
 
       toyBetting: opts.toyBetting ?? true,
+      maxHands: opts.maxHands ?? 12,
 
       phase: "IDLE",
       street: "PREFLOP",
@@ -163,7 +166,8 @@ export const PokerSim = (() => {
       community: [],
       players: [],
       pot: 0,
-      lastWinners: null
+      handsPlayed: 0,
+      finished: false,
     };
 
     function resetPlayersIfNeeded() {
@@ -205,20 +209,20 @@ export const PokerSim = (() => {
     function clearBets() { for (const p of S.players) p.bet = 0; }
     function activePlayers() { return S.players.filter(p => p.inHand && !p.folded); }
 
-    function maybeToyBetting(streetName) {
+    function maybeToyBetting() {
       if (!S.toyBetting) return;
       const alive = activePlayers();
       if (alive.length <= 1) return;
 
-      const bump = [10, 15, 20, 25][Math.min(3, ["PREFLOP","FLOP","TURN","RIVER"].indexOf(streetName))] || 10;
       const who = alive[(Math.random() * alive.length) | 0];
-      const doFold = Math.random() < 0.06;
+      const doFold = Math.random() < 0.05;
 
       if (doFold && alive.length > 2) {
         who.folded = true;
         E.emit("action", { type:"FOLD", seat: who.seat, name: who.name, pot: S.pot });
       } else {
-        const amt = Math.min(who.stack, bump + ((Math.random()*bump)|0));
+        const bump = 10 + ((Math.random()*18)|0);
+        const amt = Math.min(who.stack, bump);
         who.stack -= amt;
         who.bet += amt;
         S.pot += amt;
@@ -235,7 +239,6 @@ export const PokerSim = (() => {
       }
       S.community = [];
       S.pot = 0;
-      S.lastWinners = null;
 
       S.deck = shuffle(makeDeck());
       postBlinds();
@@ -249,15 +252,12 @@ export const PokerSim = (() => {
         }
       }
 
-      E.emit("deal", {
-        type: "HOLE",
-        players: S.players.map(p => ({ seat: p.seat, name: p.name, hole: p.hole.slice(), inHand: p.inHand }))
-      });
+      E.emit("deal", { type: "HOLE" });
     }
 
-    function dealFlop() { burnOne(); S.community.push(drawOne(), drawOne(), drawOne()); E.emit("deal", { type:"FLOP", community: S.community.map(cardToString), communityRaw: S.community.slice() }); }
-    function dealTurn() { burnOne(); S.community.push(drawOne()); E.emit("deal", { type:"TURN", community: S.community.map(cardToString), communityRaw: S.community.slice() }); }
-    function dealRiver(){ burnOne(); S.community.push(drawOne()); E.emit("deal", { type:"RIVER", community: S.community.map(cardToString), communityRaw: S.community.slice() }); }
+    function dealFlop() { burnOne(); S.community.push(drawOne(), drawOne(), drawOne()); E.emit("deal", { type:"FLOP", communityRaw: S.community.slice() }); }
+    function dealTurn() { burnOne(); S.community.push(drawOne()); E.emit("deal", { type:"TURN", communityRaw: S.community.slice() }); }
+    function dealRiver(){ burnOne(); S.community.push(drawOne()); E.emit("deal", { type:"RIVER", communityRaw: S.community.slice() }); }
 
     function earlyWinIfOneLeft() {
       const alive = activePlayers();
@@ -265,15 +265,9 @@ export const PokerSim = (() => {
         const w = alive[0];
         w.stack += S.pot;
         const payload = {
-          winners: [{
-            seat: w.seat, name: w.name, amount: S.pot,
-            reason: "EVERYONE FOLDED", handName: "—", best5: [], used: { holeIdx: [], commIdx: [] }
-          }],
-          pot: S.pot,
-          community: S.community.map(cardToString),
-          communityRaw: S.community.slice()
+          winners: [{ seat: w.seat, name: w.name, amount: S.pot, handName: "—", best5: [] }],
+          pot: S.pot
         };
-        S.lastWinners = payload;
         E.emit("showdown", payload);
         return true;
       }
@@ -287,102 +281,90 @@ export const PokerSim = (() => {
       const results = [];
       for (const p of alive) {
         const cards7 = [...p.hole, ...S.community];
-        const { score, usedIdx } = bestOf7(cards7);
-
-        const holeIdx = [];
-        const commIdx = [];
-        for (const idx of usedIdx) (idx < 2) ? holeIdx.push(idx) : commIdx.push(idx - 2);
-
+        const { score } = bestOf7(cards7);
         results.push({
           seat: p.seat,
           name: p.name,
           score,
           handName: catName(score.cat),
-          used: { holeIdx, commIdx },
           best5: score.cards.map(cardToString),
-          hole: p.hole.map(cardToString)
+          hole: p.hole.map(cardToString),
         });
       }
 
       let best = results[0];
       for (let i=1;i<results.length;i++) if (compareScore(results[i].score, best.score) > 0) best = results[i];
-
       const winners = results.filter(r => compareScore(r.score, best.score) === 0);
 
       const share = Math.floor(S.pot / winners.length);
       let remainder = S.pot - share * winners.length;
-
       for (const w of winners) {
-        const p = S.players[w.seat];
         const add = share + (remainder > 0 ? 1 : 0);
         remainder = Math.max(0, remainder - 1);
-        p.stack += add;
+        S.players[w.seat].stack += add;
         w.amount = add;
       }
 
-      const payload = {
-        winners: winners.map(w => ({
-          seat: w.seat,
-          name: w.name,
-          amount: w.amount,
-          handName: w.handName,
-          best5: w.best5,
-          used: w.used,
-          hole: w.hole
-        })),
-        pot: S.pot,
-        community: S.community.map(cardToString),
-        communityRaw: S.community.slice(),
-      };
-
-      S.lastWinners = payload;
-      E.emit("showdown", payload);
+      E.emit("showdown", { winners, pot: S.pot });
     }
 
-    function setPhase(phase, street) {
+    function setPhase(phase, street, actionText) {
       S.phase = phase;
       if (street) S.street = street;
       S.timer = 0;
-      E.emit("state", { phase: S.phase, street: S.street, pot: S.pot });
+      E.emit("state", { phase: S.phase, street: S.street, pot: S.pot, actionText: actionText || "—" });
     }
 
     function startHand() {
+      if (S.finished) return;
+
       resetPlayersIfNeeded();
       rotateDealer();
       dealHole();
-      setPhase("HOLE", "PREFLOP");
-      log(`[PokerSim] Hand start — dealer=${S.dealer+1}`);
+      setPhase("HOLE", "PREFLOP", `HAND ${S.handsPlayed + 1} / ${S.maxHands}`);
+      log(`[PokerSim] Hand ${S.handsPlayed + 1} start — dealer=${S.dealer+1}`);
     }
 
     function update(dt) {
+      if (S.finished) return;
       if (S.phase === "IDLE") return;
+
       S.timer += dt;
 
-      if (S.toyBetting && S.timer > 0.35 && S.timer < 0.40) {
-        maybeToyBetting(S.street);
-        if (earlyWinIfOneLeft()) setPhase("END", "SHOWDOWN");
-      }
+      // light toy betting once per street
+      if (S.toyBetting && S.timer > 0.45 && S.timer < 0.50) maybeToyBetting();
 
       if (S.phase === "HOLE" && S.timer >= S.tDealHole) {
-        if (earlyWinIfOneLeft()) return setPhase("END", "SHOWDOWN");
-        clearBets(); dealFlop(); setPhase("FLOP", "FLOP");
+        if (earlyWinIfOneLeft()) return setPhase("END", "SHOWDOWN", "END");
+        clearBets(); dealFlop(); setPhase("FLOP", "FLOP", "FLOP");
       } else if (S.phase === "FLOP" && S.timer >= S.tFlop) {
-        if (earlyWinIfOneLeft()) return setPhase("END", "SHOWDOWN");
-        clearBets(); dealTurn(); setPhase("TURN", "TURN");
+        if (earlyWinIfOneLeft()) return setPhase("END", "SHOWDOWN", "END");
+        clearBets(); dealTurn(); setPhase("TURN", "TURN", "TURN");
       } else if (S.phase === "TURN" && S.timer >= S.tTurn) {
-        if (earlyWinIfOneLeft()) return setPhase("END", "SHOWDOWN");
-        clearBets(); dealRiver(); setPhase("RIVER", "RIVER");
+        if (earlyWinIfOneLeft()) return setPhase("END", "SHOWDOWN", "END");
+        clearBets(); dealRiver(); setPhase("RIVER", "RIVER", "RIVER");
       } else if (S.phase === "RIVER" && S.timer >= S.tRiver) {
-        setPhase("SHOWDOWN", "SHOWDOWN");
+        setPhase("SHOWDOWN", "SHOWDOWN", "SHOWDOWN");
         showdown();
       } else if (S.phase === "SHOWDOWN" && S.timer >= S.tShowdown) {
-        setPhase("END", "SHOWDOWN");
+        setPhase("END", "SHOWDOWN", "NEXT");
       } else if (S.phase === "END" && S.timer >= S.tNextHand) {
+        S.handsPlayed++;
+
+        if (S.handsPlayed >= S.maxHands) {
+          S.finished = true;
+          E.emit("finished", { handsPlayed: S.handsPlayed });
+          return;
+        }
         startHand();
       }
     }
 
-    return { on: E.on, startHand, update };
+    return {
+      on: E.on,
+      startHand,
+      update
+    };
   }
 
   return { create };

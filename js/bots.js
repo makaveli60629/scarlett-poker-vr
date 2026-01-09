@@ -1,10 +1,8 @@
-// /js/bots.js — Scarlett Bots v4.0 (ONE MESH + BOTH SKINS: MANNEQUIN + CYBER)
-// Goals:
-// ✅ Single mesh per bot (low-poly procedural geometry)
-// ✅ Two looks: "mannequin" (neutral) + "cyber" (atlas + emissive glow if texture exists)
-// ✅ Seated placement uses SeatAnchor world position (no floating)
-// ✅ Simple seated pose (lean + arms forward feel)
-// ✅ No BufferGeometryUtils, GitHub Pages safe
+// /js/bots.js — Scarlett Bots v4.1 (ONE MESH + ACTIVE/WINNER GLOW)
+// ✅ One mesh per bot (low-poly merged geometry, no BufferGeometryUtils)
+// ✅ Two skins: mannequin + cyber atlas (fallback safe)
+// ✅ Seated using SeatAnchor world position (no float)
+// ✅ Active seat glow red, winner glow gold
 
 export const Bots = (() => {
   let THREE, scene, getSeats, tableFocus, metrics, log;
@@ -12,14 +10,13 @@ export const Bots = (() => {
 
   const B = {
     bots: [],
-    // default looks: you said "both" — mix them
-    // first 3 bots mannequin, last 3 cyber
     defaultSkins: ["mannequin","mannequin","mannequin","cyber","cyber","cyber"],
+    materials: null
   };
 
-  // -----------------------------
-  // Minimal geometry merge (no addons)
-  // -----------------------------
+  let activeSeat = -1; // 0..5
+  let winnerSeat = -1; // 0..5
+
   function mergeGeometriesNonIndexed(THREE, geos) {
     let totalVerts = 0;
     for (const g of geos) totalVerts += g.attributes.position.count;
@@ -43,7 +40,6 @@ export const Bots = (() => {
   }
 
   function uvCylWrap(geo, zone) {
-    // zone = {u0,u1,v0,v1} region inside your atlas
     geo = geo.toNonIndexed();
     const pos = geo.attributes.position;
     const uv = new Float32Array(pos.count * 2);
@@ -89,15 +85,10 @@ export const Bots = (() => {
     return geo;
   }
 
-  // -----------------------------
-  // One low-poly “avatar” mesh
-  // -----------------------------
   function makeBotGeometry() {
     const parts = [];
     const M = new THREE.Matrix4();
 
-    // Atlas zones (safe defaults)
-    // Body gets most of atlas, head gets top-right corner
     const bodyZone = { u0: 0.00, u1: 0.70, v0: 0.00, v1: 1.00 };
     const headZone = { u0: 0.70, u1: 1.00, v0: 0.50, v1: 1.00 };
 
@@ -107,31 +98,26 @@ export const Bots = (() => {
       parts.push(g);
     }
 
-    // Torso (low poly)
     add(
       uvCylWrap(new THREE.CylinderGeometry(0.18, 0.22, 0.55, 10, 1, false), bodyZone),
       M.clone().makeTranslation(0, 0.95, 0)
     );
 
-    // Hips
     add(
       uvCylWrap(new THREE.CylinderGeometry(0.20, 0.20, 0.22, 10, 1, false), bodyZone),
       M.clone().makeTranslation(0, 0.68, 0)
     );
 
-    // Neck
     add(
       uvCylWrap(new THREE.CylinderGeometry(0.07, 0.08, 0.10, 10, 1, false), bodyZone),
       M.clone().makeTranslation(0, 1.22, 0.02)
     );
 
-    // Head
     add(
       uvHead(new THREE.SphereGeometry(0.14, 10, 8), headZone),
       M.clone().makeTranslation(0, 1.35, 0.02)
     );
 
-    // Arms (forward resting)
     {
       const armL = uvCylWrap(new THREE.CylinderGeometry(0.06, 0.05, 0.42, 8, 1, false), bodyZone);
       const armR = uvCylWrap(new THREE.CylinderGeometry(0.06, 0.05, 0.42, 8, 1, false), bodyZone);
@@ -150,7 +136,6 @@ export const Bots = (() => {
       add(armR, MR);
     }
 
-    // Legs (bent seated)
     {
       const legL = uvCylWrap(new THREE.CylinderGeometry(0.08, 0.06, 0.55, 8, 1, false), bodyZone);
       const legR = uvCylWrap(new THREE.CylinderGeometry(0.08, 0.06, 0.55, 8, 1, false), bodyZone);
@@ -167,22 +152,12 @@ export const Bots = (() => {
       add(legR, MR);
     }
 
-    // Feet
-    add(
-      uvCylWrap(new THREE.BoxGeometry(0.10, 0.05, 0.22), bodyZone),
-      M.clone().makeTranslation(-0.10, 0.02, 0.26)
-    );
-    add(
-      uvCylWrap(new THREE.BoxGeometry(0.10, 0.05, 0.22), bodyZone),
-      M.clone().makeTranslation(0.10, 0.02, 0.26)
-    );
+    add(new THREE.BoxGeometry(0.10, 0.05, 0.22).toNonIndexed(), M.clone().makeTranslation(-0.10, 0.02, 0.26));
+    add(new THREE.BoxGeometry(0.10, 0.05, 0.22).toNonIndexed(), M.clone().makeTranslation( 0.10, 0.02, 0.26));
 
     return mergeGeometriesNonIndexed(THREE, parts);
   }
 
-  // -----------------------------
-  // Materials: mannequin + cyber
-  // -----------------------------
   function makeMannequinMaterial() {
     return new THREE.MeshStandardMaterial({
       color: 0x8aa0b8,
@@ -202,7 +177,6 @@ export const Bots = (() => {
       emissiveIntensity: 2.0
     });
 
-    // Try to load atlas; if missing, it still renders with emissive color
     const loader = new THREE.TextureLoader();
     const url = `./assets/textures/cyber_suit_atlas.png?v=${encodeURIComponent(vCache)}`;
 
@@ -213,12 +187,11 @@ export const Bots = (() => {
         mat.map = tex;
         mat.emissiveMap = tex;
         mat.needsUpdate = true;
-        log?.(`[bots] cyber atlas loaded ✅ ${url}`);
+        log?.(`[bots] cyber atlas loaded ✅`);
       },
       undefined,
       () => {
-        // silently keep fallback
-        log?.(`[bots] cyber atlas missing (fallback material used) ⚠️`);
+        log?.(`[bots] cyber atlas missing (fallback used) ⚠️`);
       }
     );
 
@@ -232,9 +205,6 @@ export const Bots = (() => {
     };
   }
 
-  // -----------------------------
-  // Seating logic (stable)
-  // -----------------------------
   function seatBot(mesh, seatIndex) {
     const seats = getSeats?.() || [];
     const s = seats[seatIndex];
@@ -246,22 +216,16 @@ export const Bots = (() => {
     mesh.position.copy(p);
     mesh.rotation.set(0, s.yaw, 0);
 
-    // Push slightly away from table so chest doesn't clip
     const toTable = new THREE.Vector3().subVectors(tableFocus, mesh.position);
     toTable.y = 0;
     toTable.normalize();
     mesh.position.addScaledVector(toTable, -0.10);
 
-    // Drop onto seat cushion
     mesh.position.y -= (metrics?.seatDrop ?? 0.075);
 
-    // slight “lean in”
     mesh.rotation.x = -0.02;
   }
 
-  // -----------------------------
-  // Public API
-  // -----------------------------
   function setSkin(botIndex, skinName) {
     const bot = B.bots[botIndex];
     if (!bot) return;
@@ -278,6 +242,9 @@ export const Bots = (() => {
     }
   }
 
+  function setActiveSeat(seat) { activeSeat = (typeof seat === "number") ? seat : -1; }
+  function setWinnerSeat(seat) { winnerSeat = (typeof seat === "number") ? seat : -1; }
+
   async function init({ THREE: _T, scene: _S, getSeats: _G, tableFocus: _F, metrics: _M, v, log: _L } = {}) {
     THREE = _T;
     scene = _S;
@@ -287,35 +254,53 @@ export const Bots = (() => {
     log = _L || console.log;
     vCache = v || Date.now().toString();
 
-    // cleanup
     for (const b of B.bots) { try { scene.remove(b); } catch {} }
     B.bots = [];
 
-    // build once
     const geometry = makeBotGeometry();
     B.materials = buildMaterials();
 
-    // create 6 seated bots
     for (let i=0;i<6;i++){
       const skin = B.defaultSkins[i] || "mannequin";
       const bot = new THREE.Mesh(geometry, B.materials[skin] || B.materials.mannequin);
       bot.name = `Bot_${i+1}`;
       bot.userData.skin = skin;
 
-      // Match your player height feel
       bot.scale.setScalar(0.92);
-
       scene.add(bot);
       B.bots.push(bot);
 
       seatBot(bot, i+1);
     }
 
-    log("[bots] v4.0 init ✅ (one-mesh bots + mannequin/cyber skins)");
+    log("[bots] v4.1 init ✅");
   }
 
   function update(dt) {
-    // Later: subtle idle motion, winner animation, turn highlight
+    const t = performance.now() * 0.004;
+
+    for (let i=0;i<B.bots.length;i++){
+      const bot = B.bots[i];
+      if (!bot?.material) continue;
+
+      if (i === activeSeat) {
+        bot.material.emissive = new THREE.Color(0xff2d2d);
+        bot.material.emissiveIntensity = 0.55 + Math.sin(t*6)*0.18;
+      } else if (i === winnerSeat) {
+        bot.material.emissive = new THREE.Color(0xffcc00);
+        bot.material.emissiveIntensity = 0.65 + Math.sin(t*7)*0.20;
+      } else {
+        if (bot.userData.skin === "cyber") {
+          bot.material.emissive = new THREE.Color(0x00ffff);
+          bot.material.emissiveIntensity = 2.0;
+        } else {
+          bot.material.emissive = new THREE.Color(0x000000);
+          bot.material.emissiveIntensity = 0.0;
+        }
+      }
+
+      bot.material.needsUpdate = true;
+    }
   }
 
   return {
@@ -323,6 +308,7 @@ export const Bots = (() => {
     update,
     setSkin,
     toggleAllSkins,
-    _debug: { B }
+    setActiveSeat,
+    setWinnerSeat,
   };
 })();

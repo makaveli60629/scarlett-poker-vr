@@ -1,89 +1,98 @@
-// /js/vr_ui.js — controller-attached UI (hands/watch/menu)
-// Caller passes THREE + scene + controller grips
+// /js/vr_ui.js — Scarlett VR Poker (VR UI v2.0)
+// Fix: missing avatar textures no longer spam errors
+// Uses canvas fallback textures if assets are missing.
 
-export async function initVRUI({ THREE, scene, leftGrip, rightGrip, log = console.log }) {
+const seenMissing = new Set();
+
+function ui(m){
+  try { window.dispatchEvent(new CustomEvent("scarlett-log", { detail: String(m) })); } catch {}
+  try { console.log(m); } catch {}
+}
+
+function onceMissing(path){
+  if (seenMissing.has(path)) return;
+  seenMissing.add(path);
+  ui(`[ui] missing texture: ${path}`);
+}
+
+function makeFallbackTexture(THREE, label){
+  const c = document.createElement("canvas");
+  c.width = 256; c.height = 256;
+  const g = c.getContext("2d");
+  g.fillStyle = "#0b0d14";
+  g.fillRect(0,0,c.width,c.height);
+  g.fillStyle = "#7fe7ff";
+  g.font = "bold 18px system-ui, sans-serif";
+  g.fillText("SCARLETT VR", 56, 120);
+  g.fillStyle = "#ff2d7a";
+  g.fillText(label, 90, 150);
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+async function tryLoadTexture(THREE, url, label){
   const loader = new THREE.TextureLoader();
+  return await new Promise((resolve) => {
+    loader.load(
+      url,
+      (t) => resolve(t),
+      undefined,
+      () => {
+        onceMissing(url);
+        resolve(makeFallbackTexture(THREE, label));
+      }
+    );
+  });
+}
 
-  function load(url) {
-    return new Promise((resolve) => {
-      loader.load(
-        url,
-        (t) => {
-          t.colorSpace = THREE.SRGBColorSpace;
-          resolve(t);
-        },
-        undefined,
-        () => {
-          log(`[ui] missing texture: ${url}`);
-          resolve(null);
-        }
-      );
-    });
+export async function initVRUI(ctx){
+  const { THREE, scene, renderer } = ctx;
+  if (!THREE || !scene || !renderer) return;
+
+  // Mount once
+  if (scene.userData.__vruiMounted) return;
+  scene.userData.__vruiMounted = true;
+
+  // Load textures with fallback
+  const base = "assets/textures/avatars/";
+  const handsTex = await tryLoadTexture(THREE, base + "Hands.jpg", "Hands");
+  const watchTex = await tryLoadTexture(THREE, base + "Watch.jpg", "Watch");
+  const menuTex  = await tryLoadTexture(THREE, base + "Menu hand.jpg", "Menu");
+
+  // Simple floating “wrist” icon planes (optional)
+  const planeGeo = new THREE.PlaneGeometry(0.18, 0.18);
+  function addPlane(tex, x, y, z){
+    const m = new THREE.MeshBasicMaterial({ map: tex, transparent:true, opacity: 0.95 });
+    const p = new THREE.Mesh(planeGeo, m);
+    p.position.set(x,y,z);
+    scene.add(p);
+    return p;
   }
 
-  // ✅ your exact filenames
-  const handsTex = await load("assets/textures/avatars/Hands.jpg");
-  const watchTex = await load("assets/textures/avatars/Watch.jpg");
-  const menuTex  = await load("assets/textures/avatars/Menu hand.jpg");
+  const handsPlane = addPlane(handsTex, -0.35, 1.45, 1.2);
+  const watchPlane = addPlane(watchTex,  0.35, 1.45, 1.2);
+  const menuPlane  = addPlane(menuTex,   0.00, 1.65, 1.1);
 
-  // helper: make a textured plane
-  function makePlane(tex, w, h, emissive = true) {
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      map: tex || null,
-      transparent: true,
-      opacity: 1,
-      roughness: 0.6,
-      metalness: 0.05,
-      depthWrite: false,
-      emissive: emissive ? new THREE.Color(0x66ffff) : new THREE.Color(0x000000),
-      emissiveIntensity: emissive ? 0.55 : 0.0,
-    });
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
-    mesh.renderOrder = 999;
-    return mesh;
-  }
-
-  // -------- Right hand image (Hands.jpg)
-  // NOTE: if your Hands.jpg contains both hands in one image, it’ll still look good as a “glove plate” for now.
-  const rightHandPlate = makePlane(handsTex, 0.16, 0.16, true);
-  rightHandPlate.position.set(0.02, -0.02, -0.05);
-  rightHandPlate.rotation.x = -0.7;
-  rightHandPlate.rotation.y = 0.0;
-
-  // -------- Left hand image (Hands.jpg) + menu plate (Menu hand.jpg)
-  const leftHandPlate = makePlane(handsTex, 0.16, 0.16, true);
-  leftHandPlate.position.set(-0.02, -0.02, -0.05);
-  leftHandPlate.rotation.x = -0.7;
-
-  const menuPlate = makePlane(menuTex, 0.20, 0.26, true);
-  menuPlate.position.set(0.06, 0.05, -0.10); // floating off left hand
-  menuPlate.rotation.y = -0.25;
-  menuPlate.rotation.x = -0.15;
-
-  // -------- Watch (Watch.jpg) on left wrist
-  const watchPlate = makePlane(watchTex, 0.14, 0.14, true);
-  watchPlate.position.set(-0.05, 0.00, -0.06);
-  watchPlate.rotation.x = -1.15;
-  watchPlate.rotation.y = 0.15;
-
-  if (rightGrip) rightGrip.add(rightHandPlate);
-  if (leftGrip) {
-    leftGrip.add(leftHandPlate);
-    leftGrip.add(menuPlate);
-    leftGrip.add(watchPlate);
-  }
-
-  // light that makes UI pop
-  const uiLight = new THREE.PointLight(0x66ffff, 0.35, 2.0);
-  uiLight.position.set(0, 1.6, 0.2);
-  scene.add(uiLight);
-
-  return {
-    rightHandPlate,
-    leftHandPlate,
-    menuPlate,
-    watchPlate,
-    setMenuVisible(v) { menuPlate.visible = !!v; },
+  // subtle bob so you can see it's alive
+  const start = performance.now();
+  const tick = () => {
+    const t = (performance.now() - start) * 0.001;
+    handsPlane.position.y = 1.45 + Math.sin(t * 1.7) * 0.02;
+    watchPlane.position.y = 1.45 + Math.sin(t * 1.7 + 1.2) * 0.02;
+    menuPlane.position.y  = 1.65 + Math.sin(t * 1.3 + 2.1) * 0.015;
+    menuPlane.rotation.z  = Math.sin(t * 0.8) * 0.08;
   };
+
+  // Hook into world update if available
+  if (ctx.world && typeof ctx.world.update === "function") {
+    const prev = ctx.world.update;
+    ctx.world.update = (dt) => { try { prev(dt); } catch {} try { tick(); } catch {} };
+  } else {
+    // fallback tick
+    scene.userData.__vruiTick = tick;
+  }
+
+  return { handsPlane, watchPlane, menuPlane };
 }

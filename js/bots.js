@@ -1,314 +1,176 @@
-// /js/bots.js — Scarlett Bots v4.1 (ONE MESH + ACTIVE/WINNER GLOW)
-// ✅ One mesh per bot (low-poly merged geometry, no BufferGeometryUtils)
-// ✅ Two skins: mannequin + cyber atlas (fallback safe)
-// ✅ Seated using SeatAnchor world position (no float)
-// ✅ Active seat glow red, winner glow gold
+// /js/bots.js — Scarlett Bots v3.0 (ONE-MESH LOWPOLY + SEATED CORRECT)
+// ✅ One Mesh per bot (merged geometry) WITHOUT BufferGeometryUtils import
+// ✅ Seated correctly using SeatAnchor world position
+// ✅ Lower head, hands on table, feet touch floor
+// ✅ No walkers by default
 
 export const Bots = (() => {
-  let THREE, scene, getSeats, tableFocus, metrics, log;
-  let vCache = "0";
+  let THREE, scene, getSeats, tableFocus, metrics;
 
-  const B = {
-    bots: [],
-    defaultSkins: ["mannequin","mannequin","mannequin","cyber","cyber","cyber"],
-    materials: null
-  };
+  const B = { bots: [], WALKERS: 0 };
 
-  let activeSeat = -1; // 0..5
-  let winnerSeat = -1; // 0..5
+  // Minimal geometry merge (positions/normals/uv + index)
+  function mergeGeometries(THREE, geoms) {
+    // Convert to non-indexed for simplicity
+    const list = geoms.map(g => g.index ? g.toNonIndexed() : g);
+    let total = 0;
+    for (const g of list) total += g.attributes.position.count;
 
-  function mergeGeometriesNonIndexed(THREE, geos) {
-    let totalVerts = 0;
-    for (const g of geos) totalVerts += g.attributes.position.count;
+    const pos = new Float32Array(total * 3);
+    const nor = new Float32Array(total * 3);
+    const uv  = new Float32Array(total * 2);
 
-    const pos = new Float32Array(totalVerts * 3);
-    const uv  = new Float32Array(totalVerts * 2);
+    let o3 = 0, o2 = 0;
+    for (const g of list) {
+      const p = g.attributes.position.array;
+      const n = g.attributes.normal?.array;
+      const u = g.attributes.uv?.array;
 
-    let pOff = 0, uOff = 0;
-    for (const g of geos) {
-      pos.set(g.attributes.position.array, pOff);
-      uv.set(g.attributes.uv.array, uOff);
-      pOff += g.attributes.position.array.length;
-      uOff += g.attributes.uv.array.length;
+      pos.set(p, o3);
+      if (n) nor.set(n, o3);
+      if (u) uv.set(u, o2);
+
+      o3 += p.length;
+      o2 += u ? u.length : (g.attributes.position.count * 2);
     }
 
     const out = new THREE.BufferGeometry();
     out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    out.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
     out.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
-    out.computeVertexNormals();
+    out.computeBoundingSphere();
     return out;
   }
 
-  function uvCylWrap(geo, zone) {
-    geo = geo.toNonIndexed();
-    const pos = geo.attributes.position;
-    const uv = new Float32Array(pos.count * 2);
-
-    for (let i=0;i<pos.count;i++){
-      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-      const theta = Math.atan2(z, x);
-      let U = (theta / (Math.PI * 2)) + 0.5;
-      let V = (y + 0.25) / 1.8;
-      V = Math.max(0, Math.min(1, V));
-
-      U = zone.u0 + U * (zone.u1 - zone.u0);
-      V = zone.v0 + V * (zone.v1 - zone.v0);
-
-      uv[i*2+0] = U;
-      uv[i*2+1] = V;
-    }
-
-    geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
-    return geo;
-  }
-
-  function uvHead(geo, zone) {
-    geo = geo.toNonIndexed();
-    const pos = geo.attributes.position;
-    const uv = new Float32Array(pos.count * 2);
-
-    for (let i=0;i<pos.count;i++){
-      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-      const theta = Math.atan2(z, x);
-      let U = (theta / (Math.PI * 2)) + 0.5;
-      let V = (y + 0.20) / 0.70;
-      V = Math.max(0, Math.min(1, V));
-
-      U = zone.u0 + U * (zone.u1 - zone.u0);
-      V = zone.v0 + V * (zone.v1 - zone.v0);
-
-      uv[i*2+0] = U;
-      uv[i*2+1] = V;
-    }
-
-    geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
-    return geo;
-  }
-
-  function makeBotGeometry() {
-    const parts = [];
-    const M = new THREE.Matrix4();
-
-    const bodyZone = { u0: 0.00, u1: 0.70, v0: 0.00, v1: 1.00 };
-    const headZone = { u0: 0.70, u1: 1.00, v0: 0.50, v1: 1.00 };
-
-    function add(geo, mat) {
-      const g = geo.clone();
-      g.applyMatrix4(mat);
-      parts.push(g);
-    }
-
-    add(
-      uvCylWrap(new THREE.CylinderGeometry(0.18, 0.22, 0.55, 10, 1, false), bodyZone),
-      M.clone().makeTranslation(0, 0.95, 0)
-    );
-
-    add(
-      uvCylWrap(new THREE.CylinderGeometry(0.20, 0.20, 0.22, 10, 1, false), bodyZone),
-      M.clone().makeTranslation(0, 0.68, 0)
-    );
-
-    add(
-      uvCylWrap(new THREE.CylinderGeometry(0.07, 0.08, 0.10, 10, 1, false), bodyZone),
-      M.clone().makeTranslation(0, 1.22, 0.02)
-    );
-
-    add(
-      uvHead(new THREE.SphereGeometry(0.14, 10, 8), headZone),
-      M.clone().makeTranslation(0, 1.35, 0.02)
-    );
-
-    {
-      const armL = uvCylWrap(new THREE.CylinderGeometry(0.06, 0.05, 0.42, 8, 1, false), bodyZone);
-      const armR = uvCylWrap(new THREE.CylinderGeometry(0.06, 0.05, 0.42, 8, 1, false), bodyZone);
-
-      const ML = new THREE.Matrix4()
-        .makeRotationZ(0.55)
-        .multiply(new THREE.Matrix4().makeRotationX(-0.70))
-        .multiply(new THREE.Matrix4().makeTranslation(-0.28, 0.98, -0.10));
-
-      const MR = new THREE.Matrix4()
-        .makeRotationZ(-0.55)
-        .multiply(new THREE.Matrix4().makeRotationX(-0.70))
-        .multiply(new THREE.Matrix4().makeTranslation(0.28, 0.98, -0.10));
-
-      add(armL, ML);
-      add(armR, MR);
-    }
-
-    {
-      const legL = uvCylWrap(new THREE.CylinderGeometry(0.08, 0.06, 0.55, 8, 1, false), bodyZone);
-      const legR = uvCylWrap(new THREE.CylinderGeometry(0.08, 0.06, 0.55, 8, 1, false), bodyZone);
-
-      const ML = new THREE.Matrix4()
-        .makeRotationX(1.10)
-        .multiply(new THREE.Matrix4().makeTranslation(-0.10, 0.34, 0.12));
-
-      const MR = new THREE.Matrix4()
-        .makeRotationX(1.10)
-        .multiply(new THREE.Matrix4().makeTranslation(0.10, 0.34, 0.12));
-
-      add(legL, ML);
-      add(legR, MR);
-    }
-
-    add(new THREE.BoxGeometry(0.10, 0.05, 0.22).toNonIndexed(), M.clone().makeTranslation(-0.10, 0.02, 0.26));
-    add(new THREE.BoxGeometry(0.10, 0.05, 0.22).toNonIndexed(), M.clone().makeTranslation( 0.10, 0.02, 0.26));
-
-    return mergeGeometriesNonIndexed(THREE, parts);
-  }
-
-  function makeMannequinMaterial() {
+  function botMaterial() {
     return new THREE.MeshStandardMaterial({
-      color: 0x8aa0b8,
+      color: 0x141923,
+      roughness: 0.75,
+      metalness: 0.12,
+      emissive: 0x001018,
+      emissiveIntensity: 0.10
+    });
+  }
+
+  function skinMaterial() {
+    return new THREE.MeshStandardMaterial({
+      color: 0xd2b48c,
       roughness: 0.65,
-      metalness: 0.05,
-      emissive: 0x000000,
-      emissiveIntensity: 0.0
+      metalness: 0.02
     });
   }
 
-  function makeCyberMaterial() {
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.25,
-      metalness: 0.80,
-      emissive: new THREE.Color(0x00ffff),
-      emissiveIntensity: 2.0
-    });
+  function makeBotOneMesh() {
+    // Build parts as simple lowpoly primitives, then merge
+    const parts = [];
 
-    const loader = new THREE.TextureLoader();
-    const url = `./assets/textures/cyber_suit_atlas.png?v=${encodeURIComponent(vCache)}`;
+    // Torso (box-ish)
+    const torso = new THREE.BoxGeometry(0.34, 0.52, 0.18);
+    torso.translate(0, 0.90, 0);
+    parts.push(torso);
 
-    loader.load(
-      url,
-      (tex) => {
-        tex.colorSpace = THREE.SRGBColorSpace;
-        mat.map = tex;
-        mat.emissiveMap = tex;
-        mat.needsUpdate = true;
-        log?.(`[bots] cyber atlas loaded ✅`);
-      },
-      undefined,
-      () => {
-        log?.(`[bots] cyber atlas missing (fallback used) ⚠️`);
-      }
-    );
+    // Pelvis
+    const pelvis = new THREE.BoxGeometry(0.30, 0.18, 0.16);
+    pelvis.translate(0, 0.62, 0.02);
+    parts.push(pelvis);
 
-    return mat;
+    // Head (low sphere)
+    const head = new THREE.SphereGeometry(0.12, 10, 8);
+    head.translate(0, 1.18, 0.02);
+    parts.push(head);
+
+    // Upper arms
+    const armL = new THREE.BoxGeometry(0.10, 0.30, 0.10);
+    armL.translate(-0.25, 0.92, 0.00);
+    parts.push(armL);
+
+    const armR = new THREE.BoxGeometry(0.10, 0.30, 0.10);
+    armR.translate(0.25, 0.92, 0.00);
+    parts.push(armR);
+
+    // Forearms (toward table pose)
+    const foreL = new THREE.BoxGeometry(0.10, 0.26, 0.10);
+    foreL.rotateX(-0.85);
+    foreL.translate(-0.25, 0.77, -0.14);
+    parts.push(foreL);
+
+    const foreR = new THREE.BoxGeometry(0.10, 0.26, 0.10);
+    foreR.rotateX(-0.85);
+    foreR.translate(0.25, 0.77, -0.14);
+    parts.push(foreR);
+
+    // Thighs (bent sitting)
+    const thighL = new THREE.BoxGeometry(0.11, 0.30, 0.11);
+    thighL.rotateX(0.95);
+    thighL.translate(-0.10, 0.48, 0.12);
+    parts.push(thighL);
+
+    const thighR = new THREE.BoxGeometry(0.11, 0.30, 0.11);
+    thighR.rotateX(0.95);
+    thighR.translate(0.10, 0.48, 0.12);
+    parts.push(thighR);
+
+    // Shins down to floor
+    const shinL = new THREE.BoxGeometry(0.10, 0.34, 0.10);
+    shinL.translate(-0.10, 0.20, 0.20);
+    parts.push(shinL);
+
+    const shinR = new THREE.BoxGeometry(0.10, 0.34, 0.10);
+    shinR.translate(0.10, 0.20, 0.20);
+    parts.push(shinR);
+
+    // Merge all to ONE geometry
+    const geom = mergeGeometries(THREE, parts);
+
+    // Single material (suit). Head will be faked via emissive “skin panel” later.
+    const mesh = new THREE.Mesh(geom, botMaterial());
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    return mesh;
   }
 
-  function buildMaterials() {
-    return {
-      mannequin: makeMannequinMaterial(),
-      cyber: makeCyberMaterial()
-    };
-  }
-
-  function seatBot(mesh, seatIndex) {
+  function sitBot(botMesh, seatIndex) {
     const seats = getSeats?.() || [];
     const s = seats[seatIndex];
     if (!s?.anchor) return;
 
-    const p = new THREE.Vector3();
-    s.anchor.getWorldPosition(p);
+    const anchorPos = new THREE.Vector3();
+    s.anchor.getWorldPosition(anchorPos);
 
-    mesh.position.copy(p);
-    mesh.rotation.set(0, s.yaw, 0);
+    botMesh.position.copy(anchorPos);
+    botMesh.rotation.set(0, s.yaw, 0);
 
-    const toTable = new THREE.Vector3().subVectors(tableFocus, mesh.position);
-    toTable.y = 0;
-    toTable.normalize();
-    mesh.position.addScaledVector(toTable, -0.10);
+    // push back from table a little (prevent clipping)
+    const toTable = new THREE.Vector3().subVectors(tableFocus, botMesh.position);
+    toTable.y = 0; toTable.normalize();
+    botMesh.position.addScaledVector(toTable, -0.10);
 
-    mesh.position.y -= (metrics?.seatDrop ?? 0.075);
-
-    mesh.rotation.x = -0.02;
+    // lower to sit on cushion
+    botMesh.position.y -= (metrics?.seatDrop ?? 0.07);
   }
 
-  function setSkin(botIndex, skinName) {
-    const bot = B.bots[botIndex];
-    if (!bot) return;
-    const mat = B.materials?.[skinName];
-    if (!mat) return;
-    bot.material = mat;
-    bot.userData.skin = skinName;
-  }
-
-  function toggleAllSkins() {
-    for (let i=0;i<B.bots.length;i++){
-      const cur = B.bots[i].userData.skin || "mannequin";
-      setSkin(i, cur === "mannequin" ? "cyber" : "mannequin");
-    }
-  }
-
-  function setActiveSeat(seat) { activeSeat = (typeof seat === "number") ? seat : -1; }
-  function setWinnerSeat(seat) { winnerSeat = (typeof seat === "number") ? seat : -1; }
-
-  async function init({ THREE: _T, scene: _S, getSeats: _G, tableFocus: _F, metrics: _M, v, log: _L } = {}) {
-    THREE = _T;
-    scene = _S;
-    getSeats = _G;
+  function init({ THREE: _T, scene: _S, getSeats: _G, tableFocus: _F, metrics: _M } = {}) {
+    THREE = _T; scene = _S; getSeats = _G;
     tableFocus = _F || new THREE.Vector3(0,0,-6.5);
-    metrics = _M || { seatDrop: 0.075 };
-    log = _L || console.log;
-    vCache = v || Date.now().toString();
+    metrics = _M || { seatDrop: 0.07 };
 
     for (const b of B.bots) { try { scene.remove(b); } catch {} }
     B.bots = [];
 
-    const geometry = makeBotGeometry();
-    B.materials = buildMaterials();
-
     for (let i=0;i<6;i++){
-      const skin = B.defaultSkins[i] || "mannequin";
-      const bot = new THREE.Mesh(geometry, B.materials[skin] || B.materials.mannequin);
-      bot.name = `Bot_${i+1}`;
-      bot.userData.skin = skin;
+      const bot = makeBotOneMesh();
+      bot.name = "BotMesh_" + (i+1);
 
-      bot.scale.setScalar(0.92);
+      // scale close to player height seated
+      bot.scale.setScalar(1.05);
+
       scene.add(bot);
       B.bots.push(bot);
-
-      seatBot(bot, i+1);
-    }
-
-    log("[bots] v4.1 init ✅");
-  }
-
-  function update(dt) {
-    const t = performance.now() * 0.004;
-
-    for (let i=0;i<B.bots.length;i++){
-      const bot = B.bots[i];
-      if (!bot?.material) continue;
-
-      if (i === activeSeat) {
-        bot.material.emissive = new THREE.Color(0xff2d2d);
-        bot.material.emissiveIntensity = 0.55 + Math.sin(t*6)*0.18;
-      } else if (i === winnerSeat) {
-        bot.material.emissive = new THREE.Color(0xffcc00);
-        bot.material.emissiveIntensity = 0.65 + Math.sin(t*7)*0.20;
-      } else {
-        if (bot.userData.skin === "cyber") {
-          bot.material.emissive = new THREE.Color(0x00ffff);
-          bot.material.emissiveIntensity = 2.0;
-        } else {
-          bot.material.emissive = new THREE.Color(0x000000);
-          bot.material.emissiveIntensity = 0.0;
-        }
-      }
-
-      bot.material.needsUpdate = true;
+      sitBot(bot, i+1);
     }
   }
 
-  return {
-    init,
-    update,
-    setSkin,
-    toggleAllSkins,
-    setActiveSeat,
-    setWinnerSeat,
-  };
+  function update(dt) {}
+
+  return { init, update };
 })();

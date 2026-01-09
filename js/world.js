@@ -1,7 +1,8 @@
-// /js/world.js — Scarlett VR Poker (World Loader V2)
-// Fixes: "no mount function found" by mounting object exports
-// Fixes: stops trying missing world_builder/worldgen files
-// Fixes: prevents store_kiosk.js crash from blocking world load
+// /js/world.js — Scarlett VR Poker (World Loader V3)
+// Fixes:
+//  - scene.add is not a function (modules expecting scene arg, not ctx)
+//  - ShopUI expects Inventory.getChips()
+//  - keeps debug logging via scarlett-log
 
 function ui(m){
   try { window.dispatchEvent(new CustomEvent("scarlett-log", { detail: String(m) })); } catch {}
@@ -21,69 +22,97 @@ async function imp(path){
   }
 }
 
-// Try best mount method on an object (your modules export objects)
-async function mountObject(obj, label, ctx){
-  if (!obj || typeof obj !== "object") return false;
+// Try multiple calling conventions for a given function.
+// This is THE fix for LightsPack/SolidWalls/WaterFountain style modules.
+async function callWithAdapters(fn, label, ctx){
+  const { THREE, scene, renderer, camera, player, controllers, world } = ctx;
 
-  // Common method names
-  const preferred = ["init", "mount", "build", "create", "spawn", "setup", "addToScene", "attach"];
+  // Most common patterns seen in modular Three.js projects:
+  const attempts = [
+    { args: [ctx],                           note: "(ctx)" },
+    { args: [scene],                         note: "(scene)" },
+    { args: [THREE, scene],                  note: "(THREE, scene)" },
+    { args: [scene, ctx],                    note: "(scene, ctx)" },
+    { args: [ctx, scene],                    note: "(ctx, scene)" },
+    { args: [THREE, scene, renderer],        note: "(THREE, scene, renderer)" },
+    { args: [scene, renderer, camera],       note: "(scene, renderer, camera)" },
+    { args: [THREE, scene, renderer, camera],note: "(THREE, scene, renderer, camera)" },
+    { args: [world],                         note: "(world)" },
+  ];
 
-  // If it has any preferred method, call it
-  for (const name of preferred){
-    if (typeof obj[name] === "function"){
-      ui(`[world] calling ${label}.${name}()`);
-      try {
-        const r = await obj[name](ctx);
-        ui(`[world] ✅ mounted ${label} via ${name}()`);
-        return true;
-      } catch (e) {
-        ui(`[world] ❌ ${label}.${name} threw :: ${e?.message || e}`);
-        return false;
+  let lastErr = null;
+
+  for (const a of attempts){
+    ui(`[world] calling ${label} ${a.note}`);
+    try {
+      const r = await fn(...a.args);
+      ui(`[world] ✅ ok ${label} ${a.note}`);
+      return { ok:true, result:r };
+    } catch (e) {
+      lastErr = e;
+      const msg = String(e?.message || e);
+
+      // If we see the classic mismatch, keep trying next adapter
+      if (msg.includes("scene.add is not a function") || msg.includes("Cannot read") || msg.includes("undefined")) {
+        ui(`[world] ⚠️ retry ${label} after error: ${msg}`);
+        continue;
       }
+
+      // For other errors, still continue trying adapters (some modules are picky),
+      // but we log it clearly.
+      ui(`[world] ⚠️ ${label} failed ${a.note}: ${msg}`);
+      continue;
     }
   }
 
-  // Otherwise: if it only has ONE function, call it
+  ui(`[world] ❌ all call adapters failed for ${label}: ${lastErr?.message || lastErr}`);
+  return { ok:false, error:lastErr };
+}
+
+async function mountObject(obj, label, ctx){
+  if (!obj || typeof obj !== "object") return false;
+
+  const preferred = ["init","mount","build","create","spawn","setup","addToScene","attach"];
+
+  for (const name of preferred){
+    if (typeof obj[name] === "function"){
+      const { ok } = await callWithAdapters(obj[name].bind(obj), `${label}.${name}`, ctx);
+      if (ok) return true;
+      return false;
+    }
+  }
+
+  // If it has only one function key, call it.
   const fnKeys = Object.keys(obj).filter(k => typeof obj[k] === "function");
   if (fnKeys.length === 1){
     const k = fnKeys[0];
-    ui(`[world] calling ${label}.${k}() (only function found)`);
-    try {
-      await obj[k](ctx);
-      ui(`[world] ✅ mounted ${label} via ${k}()`);
-      return true;
-    } catch (e) {
-      ui(`[world] ❌ ${label}.${k} threw :: ${e?.message || e}`);
-      return false;
-    }
+    const { ok } = await callWithAdapters(obj[k].bind(obj), `${label}.${k}`, ctx);
+    return ok;
   }
 
   ui(`[world] ⚠️ ${label} imported but no callable method found. keys=${Object.keys(obj).join(",")}`);
   return false;
 }
 
-// Try best mount on a module (function export OR object export)
 async function mountModule(mod, label, ctx){
   if (!mod) return false;
 
-  // Function exports
+  // function exports
   const fnNames = ["init","mount","build","create","setup","boot","start","initVRUI"];
   for (const n of fnNames){
     if (typeof mod[n] === "function"){
-      ui(`[world] calling ${label}.${n}()`);
-      try { await mod[n](ctx); ui(`[world] ✅ mounted ${label} via ${n}()`); return true; }
-      catch (e){ ui(`[world] ❌ ${label}.${n} threw :: ${e?.message || e}`); return false; }
+      const { ok } = await callWithAdapters(mod[n], `${label}.${n}`, ctx);
+      return ok;
     }
   }
 
-  // Default export function
+  // default export function
   if (typeof mod.default === "function"){
-    ui(`[world] calling ${label}.default()`);
-    try { await mod.default(ctx); ui(`[world] ✅ mounted ${label} via default()`); return true; }
-    catch (e){ ui(`[world] ❌ ${label}.default threw :: ${e?.message || e}`); return false; }
+    const { ok } = await callWithAdapters(mod.default, `${label}.default`, ctx);
+    return ok;
   }
 
-  // Object exports (your pattern)
+  // object exports (your common pattern)
   for (const k of Object.keys(mod)){
     if (mod[k] && typeof mod[k] === "object"){
       const ok = await mountObject(mod[k], `${label}.${k}`, ctx);
@@ -106,6 +135,7 @@ export const World = {
       _playerYaw: Math.PI,
       _realLoaded: false,
       textureKit: null,
+      Inventory: null, // we'll add shim
     };
 
     const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
@@ -131,7 +161,7 @@ export const World = {
       return ring;
     }
 
-    // ---------------- FALLBACK ----------------
+    // ---- FALLBACK ----
     ui("[world] fallback world building…");
 
     scene.background = new THREE.Color(0x05060a);
@@ -179,35 +209,53 @@ export const World = {
 
     ui("[world] fallback built ✅");
 
-    // ---------------- REAL WORLD LOAD ----------------
+    // ---- Inventory shim (fix ShopUI.init crash) ----
+    // If your real Inventory exists later, this can be replaced.
+    W.Inventory = W.Inventory || {
+      getChips(){
+        // simple starter set
+        return [
+          { denom: 1,   color: "white" },
+          { denom: 5,   color: "red" },
+          { denom: 25,  color: "green" },
+          { denom: 100, color: "black" },
+          { denom: 500, color: "purple" },
+          { denom: 1000,color: "gold" },
+        ];
+      },
+      getChipDenoms(){
+        return [1,5,25,100,500,1000];
+      }
+    };
+
+    // ---- REAL WORLD LOAD ----
     (async () => {
-      const ctx = { THREE, scene, renderer, camera, player, controllers, world: W, log };
+      const ctx = { THREE, scene, renderer, camera, player, controllers, world: W, log, Inventory: W.Inventory };
 
-      // Import modules you DO have (your diagnostics confirmed these 200)
       const textures = await imp("./textures.js");
-      const lights = await imp("./lights_pack.js");
-      const walls = await imp("./solid_walls.js");
-      const tableFactory = await imp("./table_factory.js");
-      const rail = await imp("./spectator_rail.js");
-      const tpMachine = await imp("./teleport_machine.js");
-      const store = await imp("./store.js");
-      const shopUI = await imp("./shop_ui.js");
-      const water = await imp("./water_fountain.js");
-      const uiMod = await imp("./ui.js");
-      const vrui = await imp("./vr_ui.js");
-      const vrPanel = await imp("./vr_ui_panel.js");
+      const lights   = await imp("./lights_pack.js");
+      const walls    = await imp("./solid_walls.js");
+      const tableF   = await imp("./table_factory.js");
+      const rail     = await imp("./spectator_rail.js");
+      const tpMach   = await imp("./teleport_machine.js");
+      const store    = await imp("./store.js");
+      const shopUI   = await imp("./shop_ui.js");
+      const water    = await imp("./water_fountain.js");
+      const uiMod    = await imp("./ui.js");
+      const vrui     = await imp("./vr_ui.js");
+      const vrPanel  = await imp("./vr_ui_panel.js");
 
-      // Optional FX
+      // Optional FX (these already worked for you)
       await imp("./teleport_fx.js");
       await imp("./TeleportVFX.js");
       await imp("./teleport_burst_fx.js");
 
-      // IMPORTANT: Skip store_kiosk for now (it’s crashing your world)
-      ui("[world] ⚠️ store_kiosk.js temporarily skipped (TextureBank cache mismatch)");
+      // NOTE: store_kiosk.js can be re-enabled later; keep it off until cache is clean.
+      ui("[world] ⚠️ store_kiosk.js skipped for now (will re-enable after cache reset)");
 
       let mounted = 0;
 
-      // textures.js uses createTextureKit()
+      // textures kit
       if (textures?.createTextureKit) {
         try {
           W.textureKit = textures.createTextureKit({ THREE, renderer, base: "./assets/" });
@@ -219,27 +267,25 @@ export const World = {
         }
       }
 
-      // Object-export modules mount
-      mounted += (await mountModule(lights, "lights_pack.js", ctx)) ? 1 : 0;
-      mounted += (await mountModule(walls, "solid_walls.js", ctx)) ? 1 : 0;
-      mounted += (await mountModule(tableFactory, "table_factory.js", ctx)) ? 1 : 0;
-      mounted += (await mountModule(rail, "spectator_rail.js", ctx)) ? 1 : 0;
-      mounted += (await mountModule(tpMachine, "teleport_machine.js", ctx)) ? 1 : 0;
-      mounted += (await mountModule(store, "store.js", ctx)) ? 1 : 0;
-      mounted += (await mountModule(shopUI, "shop_ui.js", ctx)) ? 1 : 0;
-      mounted += (await mountModule(water, "water_fountain.js", ctx)) ? 1 : 0;
-      mounted += (await mountModule(uiMod, "ui.js", ctx)) ? 1 : 0;
+      // Mount everything using adapters
+      mounted += (await mountModule(lights,  "lights_pack.js", ctx)) ? 1 : 0;
+      mounted += (await mountModule(walls,   "solid_walls.js", ctx)) ? 1 : 0;
+      mounted += (await mountModule(tableF,  "table_factory.js", ctx)) ? 1 : 0;
+      mounted += (await mountModule(rail,    "spectator_rail.js", ctx)) ? 1 : 0;
+      mounted += (await mountModule(tpMach,  "teleport_machine.js", ctx)) ? 1 : 0;
+      mounted += (await mountModule(store,   "store.js", ctx)) ? 1 : 0;
+      mounted += (await mountModule(shopUI,  "shop_ui.js", ctx)) ? 1 : 0;
+      mounted += (await mountModule(water,   "water_fountain.js", ctx)) ? 1 : 0;
+      mounted += (await mountModule(uiMod,   "ui.js", ctx)) ? 1 : 0;
+      mounted += (await mountModule(vrui,    "vr_ui.js", ctx)) ? 1 : 0;
 
-      // vr_ui.js exports initVRUI
-      mounted += (await mountModule(vrui, "vr_ui.js", ctx)) ? 1 : 0;
-
-      // vr_ui_panel.js exports init()
+      // vr panel
       if (vrPanel?.init) {
         try { await vrPanel.init(ctx); ui("[world] ✅ mounted vr_ui_panel.js via init()"); mounted++; }
         catch (e){ ui("[world] ❌ vr_ui_panel init failed :: " + (e?.message || e)); }
       }
 
-      // Merge colliders from modules if they add them
+      // Merge colliders if modules register them
       if (Array.isArray(scene.userData?.colliders)) {
         for (const c of scene.userData.colliders) if (c && !W.colliders.includes(c)) W.colliders.push(c);
         ui("[world] colliders merged ✅");
@@ -254,7 +300,7 @@ export const World = {
       window.dispatchEvent(new CustomEvent("scarlett-world-loaded", { detail: { mounted } }));
     })();
 
-    // API for movement/collision (kept)
+    // Collision helper kept
     W.resolvePlayerCollision = (fromPos, toPos) => {
       const radius = 0.28;
       const p = toPos.clone();

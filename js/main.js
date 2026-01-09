@@ -1,8 +1,9 @@
-// /js/main.js — Scarlett Poker VR Boot v12.2 (CLEAN FULL)
-// ✅ Post-world chair + bot seating corrective pass (does not remove anything)
-// ✅ High stakes default: 20,000 stacks (passed to PokerSim if supported)
-// ✅ Slow cinematic pacing (incl. optional 15s decision time per player)
-// ✅ Keeps your existing pipeline + event wiring intact
+// /js/main.js — Scarlett Poker VR Boot v12.3 (FULL)
+// ✅ Keeps your existing pipeline (world + controls + teleport + hands + dealing + poker)
+// ✅ Fixes chairs/furniture AFTER world loads (auto-detects chairs/seats and flips if needed)
+// ✅ Makes DealingMix use TABLE hole cards + hover reflection (requires DealingMix v2.4)
+// ✅ Forces high-stakes (20,000) via PokerSim option
+// ✅ Adds “decision time” pacing by stretching street timers (PokerSim doesn’t have per-player think phases yet)
 
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
@@ -30,20 +31,29 @@ const log = (m, ...rest) => {
 const BOOT_V = window.__BUILD_V || Date.now().toString();
 log("BOOT v=" + BOOT_V);
 
-// ✅ NEW: Global tuning knobs (safe, centralized)
+// ---------- TUNING (YOU ASKED: slower + high stakes) ----------
 const GAME = {
   seats: 6,
-  startingStack: 20000,           // high stakes
-  decisionSeconds: 15,            // per-player decision target
-  // Visual pacing (seconds) — slower & more watchable
-  tDealHole: 3.2,                 // hole cards total animation time
-  tFlop: 3.0,                     // flop staging
-  tTurn: 2.6,
-  tRiver: 2.6,
-  tShowdown: 6.0,
-  tNextHand: 3.0,
-  maxHands: 999999,               // endless unless you cap it
+  startingStack: 20000,
+
+  // You asked ~15 seconds per player. PokerSim v1.2 has no explicit per-player action loop,
+  // so we approximate by stretching each street timer.
+  // For 6 seats: 6 * 15 = 90 seconds per street (very slow). You can reduce if needed.
+  decisionSecondsPerPlayer: 15,
+  approxStreetSeconds() { return this.seats * this.decisionSecondsPerPlayer; },
+
+  // Dealing cinematic timing
+  tDealHole: 6.0,           // hole dealing animation window
+  tShowdown: 8.0,
+  tNextHand: 4.0,
 };
+
+// Flop/Turn/River street durations (approx decisions)
+// If you want EXACT 15s per player with individual decisions, we’ll patch poker.js next.
+const STREET_SECONDS = Math.max(20, GAME.approxStreetSeconds()); // safety min
+const tFlop = STREET_SECONDS;
+const tTurn = STREET_SECONDS;
+const tRiver = STREET_SECONDS;
 
 // ---------- SCENE ----------
 const scene = new THREE.Scene();
@@ -181,6 +191,13 @@ log("[main] controllers ready ✅");
 // ---------- WORLD ----------
 const world = await initWorld({ THREE, scene, log, v: BOOT_V });
 
+// ✅ Required for DealingMix facing player
+world.cameraRef = camera;
+
+// Provide safe defaults
+if (!world.tableFocus) world.tableFocus = new THREE.Vector3(0, 0, -6.5);
+if (!world.tableY) world.tableY = 0.92;
+
 if (world?.spawn) {
   player.position.set(world.spawn.x, 0, world.spawn.z);
   player.rotation.set(0, world.spawnYaw || 0, 0);
@@ -190,10 +207,9 @@ if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.15, world.tableFocus.
 try { world?.connect?.({ playerRig: player, camera, controllers, grips, renderer }); } catch {}
 log("[main] world loaded ✅");
 
-// ✅ NEW: Post-world furniture fix pass (chairs + seated bots orientation)
-// This does NOT remove anything; it only rotates / nudges chairs to face table.
+// ✅ Fix chairs & seating after load (does not remove anything)
 try {
-  fixFurniturePass({ THREE, scene, world, log });
+  fixFurnitureAndSeating({ THREE, scene, world, log });
   log("[main] furniture fix pass ✅");
 } catch (e) {
   log("❌ [main] furniture fix pass failed: " + (e?.message || e));
@@ -211,43 +227,38 @@ const teleport = Teleport.init({ THREE, scene, renderer, camera, player, control
 // ---------- DEALING VISUALS ----------
 const dealing = DealingMix.init({ THREE, scene, log, world });
 
-// ✅ NEW: Ask DealingMix to enable table+hover presentation if supported (safe optional)
+// Ask DealingMix v2.4+ to do TABLE hole + hover reflection
 try {
   dealing?.setPresentation?.({
     holeCardsOnTable: true,
     hoverReflection: true,
-    flopStyle: "3-then-1-then-1",      // flop then turn then river
+    flopStyle: "3-then-1-then-1",
     winnerRevealFlyToCommunity: true
   });
-  dealing?.setDecisionSeconds?.(GAME.decisionSeconds);
-  dealing?.setStartingStack?.(GAME.startingStack);
 } catch {}
 
 // ---------- POKER ENGINE ----------
 const poker = PokerSim.create({
   seats: GAME.seats,
   log,
-  maxHands: GAME.maxHands,
+  maxHands: 999999,
 
-  // ✅ NEW: slower timings
+  // High stakes
+  startingStack: GAME.startingStack,
+
+  // Slow cinematic timings
   tDealHole: GAME.tDealHole,
-  tFlop: GAME.tFlop,
-  tTurn: GAME.tTurn,
-  tRiver: GAME.tRiver,
+  tFlop,
+  tTurn,
+  tRiver,
   tShowdown: GAME.tShowdown,
   tNextHand: GAME.tNextHand,
-
-  // ✅ NEW: high stakes + slow decisions (if PokerSim supports these keys, it will use them)
-  startingStack: GAME.startingStack,
-  tDecision: GAME.decisionSeconds,
-  tThink: GAME.decisionSeconds,
-  decisionSeconds: GAME.decisionSeconds,
 
   toyBetting: true,
   names: ["BOT 1","BOT 2","BOT 3","BOT 4","BOT 5","BOT 6"],
 });
 
-// Wire Poker → DealingMix (this enables “winner cards fly into best5”)
+// Wire Poker → DealingMix
 poker.on("state", (s) => {
   dealing?.setStreet?.(s.street);
   dealing?.setAction?.(s.actionText || s.phase || "—");
@@ -322,34 +333,26 @@ renderer.setAnimationLoop(() => {
 log("[main] ready ✅");
 
 // =====================================================
-// ✅ NEW: Furniture fix pass helpers
+// Furniture/Seating Fix Utilities
 // =====================================================
-function fixFurniturePass({ THREE, scene, world, log }) {
-  // Determine table center
-  const center = new THREE.Vector3();
-  if (world?.tableFocus) {
-    center.set(world.tableFocus.x, 0, world.tableFocus.z);
-  } else {
-    // try find a table-ish object in scene
-    const tableObj = scene.getObjectByName("PokerTable") || scene.getObjectByName("Table") || findByNameLike(scene, ["table", "poker"]);
-    if (tableObj) tableObj.getWorldPosition(center);
-    else center.set(0, 0, 0);
-  }
+function fixFurnitureAndSeating({ THREE, scene, world, log }) {
+  const center = new THREE.Vector3(
+    world?.tableFocus?.x ?? 0,
+    0,
+    world?.tableFocus?.z ?? 0
+  );
 
-  // Gather chairs
-  const chairs =
-    world?.chairs ||
-    world?.seats ||
-    world?.furniture?.chairs ||
-    findManyByNameLike(scene, ["chair", "seat"]);
+  // Prefer explicit arrays from world.js if present
+  let chairs = world?.chairs || world?.seats || world?.seatChairs || null;
+
+  // If not present, best-effort name search
+  if (!chairs || !chairs.length) chairs = findManyByNameLike(scene, ["chair", "seat"]);
 
   if (!chairs || !chairs.length) {
-    log("[fix] no chairs found (world.chairs/world.seats/name search).");
+    log("[fix] no chairs found.");
     return;
   }
 
-  // Fix chair facing: lookAt table center + optional 180° flip if chair forward axis is reversed
-  // We do a smart guess: if chair forward points AWAY from table, flip it.
   const tmpFwd = new THREE.Vector3(0, 0, -1);
   const tmpPos = new THREE.Vector3();
   const toCenter = new THREE.Vector3();
@@ -360,42 +363,25 @@ function fixFurniturePass({ THREE, scene, world, log }) {
     chair.getWorldPosition(tmpPos);
     toCenter.copy(center).sub(tmpPos).setY(0);
 
-    // Make it face center
+    // Face table
     chair.lookAt(center.x, chair.position.y, center.z);
 
-    // Guess if model is reversed: compare forward vector to direction-to-center
+    // If chair model is reversed, flip
     const fwd = tmpFwd.clone().applyQuaternion(chair.quaternion).setY(0).normalize();
     const dir = toCenter.clone().normalize();
     const dot = fwd.dot(dir);
-
-    // If dot is strongly negative, chair is facing away from table -> rotate 180
     if (dot < -0.25) chair.rotateY(Math.PI);
 
-    // Slight outward nudge (prevents bots clipping through chair/table)
+    // Small outward nudge to avoid clipping
     const away = tmpPos.clone().sub(center).setY(0);
     if (away.length() > 0.001) {
       away.normalize();
-      chair.position.addScaledVector(away, 0.03);
+      chair.position.addScaledVector(away, 0.04);
     }
   }
 
-  // If your bots are attached to chairs or have seat anchors, align them too (optional)
-  try {
-    world?.fixSeating?.(); // if your world has a method
-  } catch {}
-
-  log(`[fix] chairs corrected: ${chairs.length}`);
-}
-
-function findByNameLike(root, needles) {
-  let found = null;
-  root.traverse(o => {
-    if (found) return;
-    const n = (o.name || "").toLowerCase();
-    if (!n) return;
-    if (needles.some(k => n.includes(k))) found = o;
-  });
-  return found;
+  // If world exposes a seating fix, run it
+  try { world?.fixSeating?.(); } catch {}
 }
 
 function findManyByNameLike(root, needles) {
@@ -405,7 +391,6 @@ function findManyByNameLike(root, needles) {
     if (!n) return;
     if (needles.some(k => n.includes(k))) out.push(o);
   });
-  // de-dupe by uuid
   const seen = new Set();
   return out.filter(o => (seen.has(o.uuid) ? false : (seen.add(o.uuid), true)));
-                                        }
+      }

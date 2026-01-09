@@ -1,10 +1,10 @@
-// /js/bots.js — Scarlett Bots v2.5 (HUMANOID + SEAT GROUNDING + GAZE TAGS)
+// /js/bots.js — Scarlett Bots v2.6 (GROUND PLANT + HIGHER TAGS + HIGHER CARDS)
 // Exports: Bots
-// ✅ Humanoid low-poly body (no pill)
-// ✅ Seated bots snap to seats, face table
-// ✅ Walkers wander, avoid rail + avoid player + avoid each other
-// ✅ Lobby name tags only show when player looks at them
-// ✅ Never throws if seats missing / world partial
+// ✅ Bot model auto-calibrates to floor (no floating walkers)
+// ✅ Tags higher over heads (no face overlap)
+// ✅ Cards higher than tags (no overlap)
+// ✅ Lobby tags only appear when looked at
+// ✅ Seated bots face table regardless of chair yaw
 
 export const Bots = (() => {
   let THREE = null;
@@ -18,18 +18,9 @@ export const Bots = (() => {
   let playerRig = null;
   let cameraRef = null;
 
-  const state = {
-    t: 0,
-    bots: [],
-    seated: [],
-    walkers: [],
-  };
+  const state = { t: 0, bots: [], seated: [], walkers: [] };
 
-  // ---------- helpers ----------
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const lerp = (a, b, t) => a + (b - a) * t;
-
-  function v3(x=0,y=0,z=0){ return new THREE.Vector3(x,y,z); }
 
   function safeGetWorldPos(obj, out) {
     try { obj.getWorldPosition(out); return true; } catch { return false; }
@@ -41,7 +32,7 @@ export const Bots = (() => {
     return Math.atan2(dx, dz);
   }
 
-  function billboardToCamera(obj, lockY=true) {
+  function billboardToCamera(obj, lockY = true) {
     if (!obj || !cameraRef) return;
     const p = new THREE.Vector3();
     cameraRef.getWorldPosition(p);
@@ -49,23 +40,19 @@ export const Bots = (() => {
     else obj.lookAt(p);
   }
 
-  // ---------- tag (canvas) ----------
+  // ---------- tag ----------
   function makeCanvasTag(name, chips) {
     const c = document.createElement("canvas");
     c.width = 512; c.height = 256;
     const ctx = c.getContext("2d");
-
     ctx.clearRect(0,0,c.width,c.height);
 
-    // backing
     ctx.fillStyle = "rgba(0,0,0,0.62)";
-    roundRect(ctx, 26, 54, 460, 148, 26, true);
+    rr(26, 54, 460, 148, 26, true);
 
-    // header glow stripe
     ctx.fillStyle = "rgba(127,231,255,0.18)";
-    roundRect(ctx, 36, 64, 440, 40, 18, true);
+    rr(36, 64, 440, 40, 18, true);
 
-    // text
     ctx.fillStyle = "#ffffff";
     ctx.font = "900 46px Arial";
     ctx.textAlign = "center";
@@ -81,7 +68,7 @@ export const Bots = (() => {
     tex.colorSpace = THREE.SRGBColorSpace;
     return tex;
 
-    function roundRect(ctx, x, y, w, h, r, fill) {
+    function rr(x, y, w, h, r, fill) {
       ctx.beginPath();
       ctx.moveTo(x + r, y);
       ctx.arcTo(x + w, y, x + w, y + h, r);
@@ -95,11 +82,7 @@ export const Bots = (() => {
 
   function makeTag(name, chips) {
     const tex = makeCanvasTag(name, chips);
-    const mat = new THREE.MeshBasicMaterial({
-      map: tex,
-      transparent: true,
-      depthTest: false,
-    });
+    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.68, 0.34), mat);
     mesh.name = "NameTag";
     mesh.renderOrder = 999;
@@ -107,7 +90,7 @@ export const Bots = (() => {
     return mesh;
   }
 
-  // ---------- simple card (optional) ----------
+  // ---------- optional simple cards ----------
   function cardTexture(rank, suit) {
     const c = document.createElement("canvas");
     c.width = 256; c.height = 356;
@@ -122,7 +105,7 @@ export const Bots = (() => {
     const isRed = (suit === "♥" || suit === "♦");
     ctx.fillStyle = isRed ? "#b6001b" : "#121214";
 
-    // ✅ Bigger corners (you requested)
+    // bigger corners
     ctx.font = "900 72px Arial";
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
@@ -151,7 +134,7 @@ export const Bots = (() => {
   function makeHoleCards() {
     const g = new THREE.Group();
     g.name = "HoleCards";
-    const geo = new THREE.PlaneGeometry(0.24, 0.34); // ✅ bigger
+    const geo = new THREE.PlaneGeometry(0.24, 0.34);
     const defs = [{ r:"A", s:"♦" }, { r:"K", s:"♠" }];
 
     defs.forEach((cs, i) => {
@@ -194,11 +177,10 @@ export const Bots = (() => {
     return g;
   }
 
-  // ---------- HUMANOID LOW-POLY (no pill) ----------
-  // Built to be “shirt-friendly” and readable in VR: shoulders/elbows/hands/shoes included.
+  // ---------- HUMANOID LOW-POLY ----------
+  // Key fix: internal model is shifted so its lowest point touches y=0.
   function makeHumanoid({
-    name="BOT",
-    chips=10000,
+    name="BOT", chips=10000,
     suitColor=0x151a22,
     accent=0x7fe7ff,
     skinColor=0xd2b48c,
@@ -208,12 +190,17 @@ export const Bots = (() => {
     const g = new THREE.Group();
     g.name = "BotHumanoid";
 
-    const suit = new THREE.MeshStandardMaterial({ color: suitColor, roughness: 0.78, metalness: 0.06 });
-    const suit2 = new THREE.MeshStandardMaterial({ color: accent, roughness: 0.55, metalness: 0.10, emissive: accent, emissiveIntensity: 0.08 });
-    const skin = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.65, metalness: 0.02 });
+    // INTERNAL model container (we will shift THIS to plant feet)
+    const model = new THREE.Group();
+    model.name = "BotModel";
+    g.add(model);
 
-    // Root / pelvis at y=0 (feet contact ground controlled by leg lengths)
+    const suit  = new THREE.MeshStandardMaterial({ color: suitColor, roughness: 0.78, metalness: 0.06 });
+    const suit2 = new THREE.MeshStandardMaterial({ color: accent, roughness: 0.55, metalness: 0.10, emissive: accent, emissiveIntensity: 0.08 });
+    const skin  = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.65, metalness: 0.02 });
+
     const rig = {
+      model,
       pelvis: new THREE.Group(),
       spine: new THREE.Group(),
       neck: new THREE.Group(),
@@ -228,11 +215,12 @@ export const Bots = (() => {
       kneeR: new THREE.Group(),
       tag: null,
       cards: null,
+      groundShift: 0,
     };
-    rig.pelvis.name = "pelvis";
-    g.add(rig.pelvis);
 
-    // hips/torso proportions
+    rig.pelvis.name = "pelvis";
+    model.add(rig.pelvis);
+
     const torsoW = female ? 0.30 : 0.32;
     const torsoH = female ? 0.42 : 0.46;
 
@@ -247,12 +235,10 @@ export const Bots = (() => {
     chest.position.set(0, 0.26, 0.02);
     rig.spine.add(chest);
 
-    // subtle “shirt collar” accent
     const collar = new THREE.Mesh(new THREE.BoxGeometry(torsoW*0.85, 0.05, 0.22), suit2);
     collar.position.set(0, 0.48, 0.03);
     rig.spine.add(collar);
 
-    // neck + head
     rig.neck.position.set(0, 0.52, 0.04);
     rig.spine.add(rig.neck);
 
@@ -265,7 +251,6 @@ export const Bots = (() => {
     rig.neck.add(head);
     rig.head = head;
 
-    // shoulders (give real silhouette)
     rig.shoulderL.position.set(-(torsoW*0.56), 0.44, 0.02);
     rig.shoulderR.position.set( (torsoW*0.56), 0.44, 0.02);
     rig.spine.add(rig.shoulderL, rig.shoulderR);
@@ -274,7 +259,6 @@ export const Bots = (() => {
     const foreArmGeo  = new THREE.CapsuleGeometry(0.042, 0.20, 6, 10);
     const handGeo     = new THREE.BoxGeometry(0.08, 0.05, 0.10);
 
-    // upper arms
     const upperL = new THREE.Mesh(upperArmGeo, suit);
     const upperR = new THREE.Mesh(upperArmGeo, suit);
     upperL.rotation.z = 0.18;
@@ -284,7 +268,6 @@ export const Bots = (() => {
     rig.shoulderL.add(upperL);
     rig.shoulderR.add(upperR);
 
-    // elbows are actual joints now
     rig.elbowL.position.set(-0.06, -0.28, 0.02);
     rig.elbowR.position.set( 0.06, -0.28, 0.02);
     rig.shoulderL.add(rig.elbowL);
@@ -341,15 +324,22 @@ export const Bots = (() => {
     rig.kneeL.add(shoeL);
     rig.kneeR.add(shoeR);
 
-    // name tag (higher, readable)
+    // ---- AUTO FLOOR PLANT (fix floating walkers) ----
+    // compute lowest y of internal model, shift it down so minY becomes 0
+    model.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(model);
+    const shift = -box.min.y;
+    model.position.y += shift;
+    rig.groundShift = shift;
+
+    // Tag + Cards (higher)
     rig.tag = makeTag(name, chips);
-    rig.tag.position.set(0, 1.82, 0);
+    rig.tag.position.set(0, 2.05, 0); // ✅ higher than head
     g.add(rig.tag);
 
-    // optional hole cards above head (facing camera in update)
     if (withCards) {
       rig.cards = makeHoleCards();
-      rig.cards.position.set(-0.14, 2.10, 0);
+      rig.cards.position.set(-0.14, 2.32, 0); // ✅ higher than tag
       g.add(rig.cards);
     }
 
@@ -370,7 +360,7 @@ export const Bots = (() => {
     }
   }
 
-  function separate(bots, minDist=0.62) {
+  function separate(bots, minDist=0.70) {
     for (let i=0;i<bots.length;i++){
       for (let j=i+1;j<bots.length;j++){
         const a = bots[i].position, b = bots[j].position;
@@ -387,41 +377,52 @@ export const Bots = (() => {
     }
   }
 
-  // ---------- bot spawners ----------
+  // ---------- gaze tags ----------
+  function isLookedAt(bot, maxDist=7.5, cone=0.92) {
+    if (!cameraRef) return false;
+    const camPos = new THREE.Vector3();
+    cameraRef.getWorldPosition(camPos);
+
+    const botPos = new THREE.Vector3();
+    bot.getWorldPosition(botPos);
+
+    const toBot = botPos.sub(camPos);
+    const dist = toBot.length();
+    if (dist > maxDist) return false;
+
+    toBot.normalize();
+
+    const camFwd = new THREE.Vector3(0,0,-1)
+      .applyQuaternion(cameraRef.getWorldQuaternion(new THREE.Quaternion()))
+      .normalize();
+
+    return camFwd.dot(toBot) > cone;
+  }
+
+  // ---------- spawners ----------
   function addSeatedBot(seatIndex, name, chips, female=false) {
     const seat = seats[seatIndex];
     if (!seat || !seat.anchor) return null;
 
     const bot = makeHumanoid({
-      name,
-      chips,
-      female,
+      name, chips, female,
       suitColor: 0x121826,
       accent: female ? 0xff2d7a : 0x7fe7ff,
       withCards: true,
     });
-    bot.name = `SeatedBot_${seatIndex}`;
 
     const wp = new THREE.Vector3();
     if (!safeGetWorldPos(seat.anchor, wp)) return null;
 
-    // ✅ Seat grounding:
-    // We place the bot so shoes hit y=0 (floor) OR seatY if your seats are raised.
-    // The humanoid was built with hips around ~0.92 above its local origin.
-    // For seated, we want hips slightly lower and knees bent.
-    const desiredFeetY = 0; // floor
     bot.position.copy(wp);
 
-    // If your seat anchors are already at chair height, keep that y as baseline, but clamp sane:
-    const seatBaseY = clamp(wp.y, 0.0, 2.0);
+    // keep seated stable: use anchor y directly (model is floor-planted internally now)
+    bot.position.y = wp.y;
 
-    // Put bot origin at seatBaseY - 0.92 so hips land at seatBaseY
-    bot.position.y = seatBaseY - 0.92;
+    // always face table (fix “chair reversed” symptom visually)
+    bot.rotation.y = yawToFace(wp, tableFocus || new THREE.Vector3(0,0,-6.5));
 
-    // ✅ Always face table (fixes “chairs reversed” visually even if chair meshes are flipped)
-    bot.rotation.y = yawToFace(wp, tableFocus || v3(0,0,-6.5));
-
-    // Seated pose default
+    // seated pose
     bot.userData.hipL.rotation.x = -0.65;
     bot.userData.hipR.rotation.x = -0.65;
     bot.userData.kneeL.rotation.x = 1.05;
@@ -446,16 +447,15 @@ export const Bots = (() => {
       accent: female ? 0xff2d7a : 0x7fe7ff,
       withCards: false,
     });
+
     bot.name = `Walker_${i}`;
 
-    // random around table (not a herd)
     bot.position.set(
       (tableFocus?.x || 0) + (Math.random()-0.5)*14,
-      0,
+      0, // ✅ now truly planted
       (tableFocus?.z || -6.5) + (Math.random()-0.5)*12
     );
 
-    // lobby tags start hidden (they appear only when looked at)
     if (bot.userData?.tag) bot.userData.tag.visible = false;
 
     const w = {
@@ -467,7 +467,6 @@ export const Bots = (() => {
       ),
       speed: 0.55 + Math.random()*0.35,
       phase: Math.random()*10,
-      lookCooldown: 0,
     };
 
     root.add(bot);
@@ -482,27 +481,6 @@ export const Bots = (() => {
       0,
       (tableFocus?.z || -6.5) + (Math.random()-0.5)*12
     );
-  }
-
-  // ---------- gaze logic for lobby tags ----------
-  function isLookedAt(bot, maxDist=7.5, cone=0.92) {
-    if (!cameraRef) return false;
-    const camPos = new THREE.Vector3();
-    cameraRef.getWorldPosition(camPos);
-
-    const botPos = new THREE.Vector3();
-    bot.getWorldPosition(botPos);
-
-    const toBot = botPos.sub(camPos);
-    const dist = toBot.length();
-    if (dist > maxDist) return false;
-
-    toBot.normalize();
-
-    const camFwd = new THREE.Vector3(0,0,-1).applyQuaternion(cameraRef.getWorldQuaternion(new THREE.Quaternion())).normalize();
-    const d = camFwd.dot(toBot);
-
-    return d > cone; // tight cone, feels intentional
   }
 
   // ---------- API ----------
@@ -525,7 +503,6 @@ export const Bots = (() => {
       state.seated.length = 0;
       state.walkers.length = 0;
 
-      // seated (6-max feel: 5 bots + player seat later)
       if (seats.length) {
         addSeatedBot(1, "LUNA", 10000, true);
         addSeatedBot(2, "JAX", 10000, false);
@@ -534,46 +511,39 @@ export const Bots = (() => {
         addSeatedBot(5, "KAI", 10000, false);
       }
 
-      // two lobby walkers (you requested: 1 male, 1 female)
+      // 1 male + 1 female lobby walker
       addWalker(0, false);
       addWalker(1, true);
 
       console.log("[Bots] init ✅ seated=" + state.seated.length + " walkers=" + state.walkers.length);
     },
 
-    setPlayerRig(rig, cam) {
-      playerRig = rig || null;
-      cameraRef = cam || null;
-    },
+    setPlayerRig(rig, cam) { playerRig = rig || null; cameraRef = cam || null; },
 
     update(dt) {
       if (!root || !THREE) return;
       state.t += dt;
 
-      // ----- walkers -----
+      // walkers
       for (const w of state.walkers) {
         const b = w.bot;
         const u = b.userData;
         const t = state.t + w.phase;
 
-        // choose new target sometimes
         const dxT = w.target.x - b.position.x;
         const dzT = w.target.z - b.position.z;
         if (Math.hypot(dxT, dzT) < 0.45) pickTarget(w);
         if (Math.random() < 0.002) pickTarget(w);
 
-        // move to target
         const dx = w.target.x - b.position.x;
         const dz = w.target.z - b.position.z;
         const d = Math.max(0.0001, Math.hypot(dx, dz));
 
         b.position.x += (dx / d) * w.speed * dt;
         b.position.z += (dz / d) * w.speed * dt;
-
-        // face movement direction
         b.rotation.y = Math.atan2(dx, dz);
 
-        // rail avoidance (keep them outside)
+        // keep outside rail
         const rx = b.position.x - tableFocus.x;
         const rz = b.position.z - tableFocus.z;
         const rd = Math.hypot(rx, rz);
@@ -584,13 +554,12 @@ export const Bots = (() => {
           b.position.z += (rz / Math.max(0.0001, rd)) * push;
         }
 
-        // avoid player (secondary circle)
         if (playerRig) avoidPoint(b.position, playerRig.position, 1.35);
 
-        // keep feet on ground
+        // ✅ planted (model calibrated)
         b.position.y = 0;
 
-        // walk animation (hips/knees/arms) — readable, not expensive
+        // walk animation
         const gait = Math.sin(t * 6.2);
         const bend = Math.abs(gait);
         const swing = gait;
@@ -605,7 +574,7 @@ export const Bots = (() => {
         u.elbowL.rotation.x = -0.25 - swing * 0.20;
         u.elbowR.rotation.x = -0.25 + swing * 0.20;
 
-        // gaze tags (only show when looked at)
+        // gaze tags for lobby
         if (u.tag) {
           const looked = isLookedAt(b, 7.5, 0.92);
           u.tag.visible = looked;
@@ -613,31 +582,19 @@ export const Bots = (() => {
         }
       }
 
-      // no overlapping walkers
-      separate(state.walkers.map(w => w.bot), 0.70);
+      separate(state.walkers.map(w => w.bot), 0.75);
 
-      // ----- seated bots: idle + cards always face camera -----
+      // seated idle + always-visible tags + cards face camera
       for (const b of state.seated) {
         const u = b.userData;
         const t = state.t + b.position.x * 0.5;
 
-        // idle breathing
-        const breath = Math.sin(t * 1.4) * 0.01;
-        b.position.y += breath * 0.0; // keep stable in chairs (no bobbing into chair)
-
-        // seated arm micro motion
-        u.shoulderL.rotation.z = 0.08 + Math.sin(t * 2.1) * 0.06;
-        u.shoulderR.rotation.z = -0.08 - Math.sin(t * 2.1) * 0.06;
-
-        // seated tags always visible
         if (u.tag) {
           u.tag.visible = true;
           billboardToCamera(u.tag, true);
         }
-
-        // hole cards face player (you required this)
         if (u.cards) {
-          u.cards.position.y = 2.10 + Math.sin(t * 1.9) * 0.03;
+          u.cards.position.y = 2.32 + Math.sin(t * 1.9) * 0.03;
           billboardToCamera(u.cards, true);
         }
       }

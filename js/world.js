@@ -4,7 +4,7 @@
 // ✅ Does NOT depend on your older world.js — replace this file as a known-good baseline
 // NOTE: If you already had custom textures/models, this version won’t delete them (because it doesn’t know them),
 // but it will be a full working world that matches your “store + mannequins + two doors” request.
-
+import { Avatar1 } from "./avatar1.js";
 export async function initWorld({ THREE, scene, log = console.log, v = "" } = {}) {
   const world = {
     spawn: { x: 0, z: 3.6 },

@@ -1,324 +1,328 @@
-// /js/world.js — Scarlett World v1.4
-// - Guard moved OUTSIDE rail at front
-// - Spawn point placed ON teleport circle
-// - Poker table top gets a custom felt texture with markings + path line
-// - Ceiling trim + ceiling lights
-// - Simple corner fountain
-// - Doors remain LEFT/RIGHT
+// /js/world.js — Scarlett World v10.8 (FULL REBUILD)
+// Includes:
+// - Floor texture + wall texture
+// - Poker table surface with border line + pass line
+// - Chairs + seats with anchors (Bots can sit)
+// - Rail ring collider (visual + keeps bots outside in bots.js)
+// - Guard OUTSIDE rail (front)
+// - Doorways LEFT/RIGHT using your PNGs (store/poker)
+// - Teleport pads at both doors
+// - Teleport machine spawn circle (spawn here)
 
 import { Bots } from "./bots.js";
 
-export async function initWorld({ THREE, scene, log } = {}) {
-  const L=(...a)=>{ try{log?.(...a);}catch{console.log(...a);} };
-
+export async function initWorld({ THREE, scene, log, v } = {}) {
   const group = new THREE.Group();
-  group.name="WorldRoot";
+  group.name = "WorldRoot";
   scene.add(group);
 
-  const colliders=[];
-  const seats=[];
-  const tableFocus=new THREE.Vector3(0,0,-6.5);
-  const metrics={ tableY:0.92, seatY:0.52 };
-  const tableTopY = metrics.tableY;
+  const tableFocus = new THREE.Vector3(0, 0, -6.5);
+  const tableY = 0.92;
 
-  // TEXTURES
-  const tl=new THREE.TextureLoader();
-  const floorTex = tl.load("./assets/textures/scarlett_floor_tile_seamless.png");
-  floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping;
-  floorTex.repeat.set(10,10);
+  // ---------- TEXTURES ----------
+  const loader = new THREE.TextureLoader();
+  const floorTex = loader.load("./assets/textures/scarlett_floor_tile_seamless.png?v=" + v);
+  floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+  floorTex.repeat.set(6, 6);
+  floorTex.colorSpace = THREE.SRGBColorSpace;
 
-  const wallTex = tl.load("./assets/textures/1767279790736.jpg");
-  wallTex.wrapS=wallTex.wrapT=THREE.RepeatWrapping;
-  wallTex.repeat.set(6,2);
+  // user said: use this jpg path for wall
+  const wallTex = loader.load("./assets/textures/1767279790736.jpg?v=" + v);
+  wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping;
+  wallTex.repeat.set(5, 2);
+  wallTex.colorSpace = THREE.SRGBColorSpace;
 
-  const storeDoorTex = tl.load("./assets/textures/scarlett_door_store.png");
-  const pokerDoorTex = tl.load("./assets/textures/scarlett_door_poker.png");
+  // door pngs (put them in assets/textures/ as you upload)
+  const doorTex = loader.load("./assets/textures/scarlett_door.png?v=" + v);
+  doorTex.colorSpace = THREE.SRGBColorSpace;
 
-  // LIGHTS
-  group.add(new THREE.HemisphereLight(0xffffff, 0x1b2a33, 1.25));
-  const key=new THREE.DirectionalLight(0xffffff, 1.15);
-  key.position.set(8,14,6);
-  group.add(key);
+  // ---------- ROOM ----------
+  const roomW = 26, roomD = 26, roomH = 6.5;
 
-  // ROOM
-  const ROOM_W=34, ROOM_D=34, ROOM_H=8;
-
+  // floor
   const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(ROOM_W, ROOM_D),
-    new THREE.MeshStandardMaterial({ map:floorTex, color:0xffffff, roughness:0.95 })
+    new THREE.PlaneGeometry(roomW, roomD),
+    new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9, metalness: 0.0 })
   );
-  floor.name="Floor";
-  floor.rotation.x=-Math.PI/2;
+  floor.name = "Floor";
+  floor.rotation.x = -Math.PI/2;
+  floor.position.y = 0;
+  floor.receiveShadow = false;
   group.add(floor);
-  colliders.push(floor);
 
-  const wallMat=new THREE.MeshStandardMaterial({ map:wallTex, color:0xffffff, roughness:0.95 });
-
-  function wall(w,h,pos,rotY){
-    const vis=new THREE.Mesh(new THREE.PlaneGeometry(w,h), wallMat);
-    vis.position.copy(pos);
-    vis.rotation.y=rotY;
-    group.add(vis);
-
-    const col=new THREE.Mesh(new THREE.BoxGeometry(w,h,0.3), new THREE.MeshBasicMaterial({visible:false}));
-    col.position.copy(pos);
-    col.rotation.y=rotY;
-    group.add(col);
-    colliders.push(col);
+  // walls
+  function wall(x,z, ry, w=roomW, h=roomH) {
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.85, metalness: 0.0 })
+    );
+    m.position.set(x, h/2, z);
+    m.rotation.y = ry;
+    group.add(m);
+    return m;
   }
+  wall(0, -roomD/2, 0, roomW, roomH);
+  wall(0,  roomD/2, Math.PI, roomW, roomH);
+  wall(-roomW/2, 0, Math.PI/2, roomD, roomH);
+  wall( roomW/2, 0, -Math.PI/2, roomD, roomH);
 
-  wall(ROOM_W, ROOM_H, new THREE.Vector3(0,ROOM_H/2,-ROOM_D/2), 0);
-  wall(ROOM_W, ROOM_H, new THREE.Vector3(0,ROOM_H/2, ROOM_D/2), Math.PI);
-  wall(ROOM_D, ROOM_H, new THREE.Vector3(-ROOM_W/2,ROOM_H/2,0), Math.PI/2);
-  wall(ROOM_D, ROOM_H, new THREE.Vector3( ROOM_W/2,ROOM_H/2,0), -Math.PI/2);
-
-  // CEILING TRIM + LIGHTS
-  const ceilingTrim = new THREE.Mesh(
-    new THREE.BoxGeometry(ROOM_W-0.5, 0.18, ROOM_D-0.5),
-    new THREE.MeshStandardMaterial({ color:0x10131a, roughness:0.85, emissive:0x0a0b10, emissiveIntensity:0.12 })
+  // ceiling trim ring (simple)
+  const trim = new THREE.Mesh(
+    new THREE.TorusGeometry(10.5, 0.08, 10, 80),
+    new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 0.45, metalness: 0.25, emissive: 0x08080c, emissiveIntensity: 0.15 })
   );
-  ceilingTrim.position.set(0, ROOM_H-0.12, 0);
-  group.add(ceilingTrim);
+  trim.position.set(0, roomH - 0.35, -6.5);
+  trim.rotation.x = Math.PI/2;
+  group.add(trim);
 
-  for(let i=0;i<6;i++){
-    const lamp=new THREE.PointLight(i%2?0x7fe7ff:0xff2d7a, 0.65, 18, 2.0);
-    lamp.position.set(-10 + i*4, ROOM_H-1.2, -2);
-    group.add(lamp);
-  }
+  // ---------- TABLE TOP (felt + lines) ----------
+  function feltTexture() {
+    const c = document.createElement("canvas");
+    c.width = 1024; c.height = 1024;
+    const ctx = c.getContext("2d");
 
-  // TABLE FELT TEXTURE (procedural)
-  function makeFeltTex(){
-    const c=document.createElement("canvas");
-    c.width=1024; c.height=1024;
-    const ctx=c.getContext("2d");
+    // felt base
+    ctx.fillStyle = "#0b3a2b";
+    ctx.fillRect(0,0,1024,1024);
 
-    // base felt
-    ctx.fillStyle="#0f3b2a";
-    ctx.fillRect(0,0,c.width,c.height);
-
-    // subtle noise dots
-    ctx.globalAlpha=0.10;
-    for(let i=0;i<9000;i++){
-      const x=(Math.random()*1024)|0;
-      const y=(Math.random()*1024)|0;
-      const v=120+(Math.random()*40)|0;
-      ctx.fillStyle=`rgb(${v},${v+30},${v})`;
-      ctx.fillRect(x,y,1,1);
+    // subtle grain
+    for (let i=0;i<1200;i++){
+      ctx.fillStyle = `rgba(255,255,255,${Math.random()*0.02})`;
+      ctx.fillRect(Math.random()*1024, Math.random()*1024, 2, 2);
     }
-    ctx.globalAlpha=1;
 
-    // oval lines
-    ctx.strokeStyle="rgba(255,255,255,0.35)";
-    ctx.lineWidth=10;
+    // big border line (thick white) = table edge
+    ctx.strokeStyle = "rgba(255,255,255,0.92)";
+    ctx.lineWidth = 22;
     ctx.beginPath();
-    ctx.ellipse(512,512,360,300,0,0,Math.PI*2);
+    ctx.ellipse(512, 512, 430, 320, 0, 0, Math.PI*2);
     ctx.stroke();
 
-    ctx.strokeStyle="rgba(127,231,255,0.35)";
-    ctx.lineWidth=6;
+    // inner pass line (aqua)
+    ctx.strokeStyle = "rgba(127,231,255,0.88)";
+    ctx.lineWidth = 10;
     ctx.beginPath();
-    ctx.ellipse(512,512,300,240,0,0,Math.PI*2);
+    ctx.ellipse(512, 512, 360, 265, 0, 0, Math.PI*2);
     ctx.stroke();
 
-    // “path line” toward dealer spot
-    ctx.strokeStyle="rgba(255,45,122,0.45)";
-    ctx.lineWidth=8;
-    ctx.beginPath();
-    ctx.moveTo(512, 512);
-    ctx.lineTo(720, 320);
-    ctx.stroke();
+    // center logo text
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    ctx.font = "bold 92px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("SCARLETT VR POKER", 512, 512);
 
-    // community card box
-    ctx.strokeStyle="rgba(255,255,255,0.35)";
-    ctx.lineWidth=6;
-    ctx.strokeRect(512-260, 512-80, 520, 160);
-
-    const tex=new THREE.CanvasTexture(c);
-    tex.wrapS=tex.wrapT=THREE.ClampToEdgeWrapping;
-    tex.needsUpdate=true;
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.needsUpdate = true;
     return tex;
   }
 
-  // TABLE
-  const table = new THREE.Group();
-  table.name="PokerTable";
-  table.position.set(tableFocus.x, tableTopY, tableFocus.z);
-  group.add(table);
+  const feltTex = feltTexture();
 
-  const feltTex = makeFeltTex();
-  const top = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.45,1.55,0.16,48),
-    new THREE.MeshStandardMaterial({ map:feltTex, color:0xffffff, roughness:0.85 })
+  const tableTop = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.95, 2.25, 0.18, 64),
+    new THREE.MeshStandardMaterial({ map: feltTex, roughness: 0.85, metalness: 0.05 })
   );
-  top.position.y=0;
-  table.add(top);
+  tableTop.position.set(tableFocus.x, tableY, tableFocus.z);
+  group.add(tableTop);
 
-  const stem=new THREE.Mesh(
-    new THREE.CylinderGeometry(0.22,0.32,0.9,22),
-    new THREE.MeshStandardMaterial({ color:0x151822, roughness:0.8 })
+  // table base
+  const tableBase = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.55, 0.85, 1.10, 28),
+    new THREE.MeshStandardMaterial({ color: 0x121826, roughness: 0.6, metalness: 0.2 })
   );
-  stem.position.y=-0.55; table.add(stem);
+  tableBase.position.set(tableFocus.x, tableY-0.65, tableFocus.z);
+  group.add(tableBase);
 
-  const base=new THREE.Mesh(
-    new THREE.CylinderGeometry(0.9,1.05,0.18,28),
-    new THREE.MeshStandardMaterial({ color:0x10131a, roughness:0.9 })
+  // ---------- RAIL ----------
+  const rail = new THREE.Mesh(
+    new THREE.TorusGeometry(3.75, 0.10, 12, 90),
+    new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.45, metalness: 0.25, emissive: 0x101020, emissiveIntensity: 0.25 })
   );
-  base.position.y=-1.05; table.add(base);
-
-  // table collider
-  const tableCol=new THREE.Mesh(
-    new THREE.CylinderGeometry(1.75,1.75,1.35,24),
-    new THREE.MeshBasicMaterial({visible:false})
-  );
-  tableCol.position.copy(table.position).add(new THREE.Vector3(0,-0.40,0));
-  group.add(tableCol);
-  colliders.push(tableCol);
-
-  // RAIL (solid)
-  const rail=new THREE.Mesh(
-    new THREE.TorusGeometry(3.85,0.08,10,64),
-    new THREE.MeshStandardMaterial({ color:0x10131a, roughness:0.65, emissive:0xff2d7a, emissiveIntensity:0.10 })
-  );
-  rail.rotation.x=Math.PI/2;
-  rail.position.set(tableFocus.x,0.95,tableFocus.z);
+  rail.position.set(tableFocus.x, 0.95, tableFocus.z);
+  rail.rotation.x = Math.PI/2;
   group.add(rail);
 
-  const railCol=new THREE.Mesh(
-    new THREE.TorusGeometry(3.85,0.24,10,32),
-    new THREE.MeshBasicMaterial({visible:false})
+  // glowing rail strip
+  const railGlow = new THREE.Mesh(
+    new THREE.TorusGeometry(3.75, 0.03, 10, 120),
+    new THREE.MeshStandardMaterial({ color: 0x7fe7ff, emissive: 0x7fe7ff, emissiveIntensity: 0.45, roughness: 0.2, metalness: 0.0 })
   );
-  railCol.rotation.x=Math.PI/2;
-  railCol.position.copy(rail.position);
-  group.add(railCol);
-  colliders.push(railCol);
+  railGlow.position.copy(rail.position);
+  railGlow.rotation.copy(rail.rotation);
+  group.add(railGlow);
 
-  // CHAIRS + SEATS
-  function chair(angle,i){
-    const c=new THREE.Group(); c.name="Chair_"+i;
-    const r=2.6;
-    c.position.set(tableFocus.x+Math.cos(angle)*r,0,tableFocus.z+Math.sin(angle)*r);
-    c.rotation.y=-angle+Math.PI/2;
+  // ---------- CHAIRS + SEATS ----------
+  const seats = [];
+  function makeChair(angle, idx) {
+    const chair = new THREE.Group();
+    chair.name = "Chair_" + idx;
 
-    const seat=new THREE.Mesh(new THREE.BoxGeometry(0.55,0.10,0.55),
-      new THREE.MeshStandardMaterial({color:0x1a1f2a,roughness:0.85})
+    const r = 2.75;
+    const x = tableFocus.x + Math.cos(angle) * r;
+    const z = tableFocus.z + Math.sin(angle) * r;
+
+    chair.position.set(x, 0, z);
+    chair.rotation.y = -angle + Math.PI/2;
+
+    const seat = new THREE.Mesh(
+      new THREE.BoxGeometry(0.55, 0.10, 0.55),
+      new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 0.65, metalness: 0.1 })
     );
-    seat.position.y=metrics.seatY;
-    c.add(seat);
+    seat.position.y = 0.48;
+    chair.add(seat);
 
-    const back=new THREE.Mesh(new THREE.BoxGeometry(0.55,0.60,0.10),
-      new THREE.MeshStandardMaterial({color:0x171b24,roughness:0.9})
+    const back = new THREE.Mesh(
+      new THREE.BoxGeometry(0.55, 0.58, 0.10),
+      new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 0.65, metalness: 0.1 })
     );
-    back.position.set(0,metrics.seatY+0.32,-0.24);
-    c.add(back);
+    back.position.set(0, 0.78, -0.23);
+    chair.add(back);
 
-    const anchor=new THREE.Object3D();
-    anchor.position.set(0,metrics.seatY+0.02,0.08);
-    c.add(anchor);
+    const anchor = new THREE.Object3D();
+    anchor.name = "SeatAnchor";
+    anchor.position.set(0, 0.52, 0.08);
+    chair.add(anchor);
 
-    const col=new THREE.Mesh(new THREE.BoxGeometry(0.7,1.0,0.7), new THREE.MeshBasicMaterial({visible:false}));
-    col.position.set(0,0.5,0);
-    c.add(col);
-    colliders.push(col);
+    group.add(chair);
 
-    group.add(c);
-    seats.push({index:i, anchor, yaw:c.rotation.y});
+    seats[idx] = { anchor, yaw: chair.rotation.y };
   }
 
-  for(let i=0;i<6;i++){
-    chair((i/6)*Math.PI*2 + Math.PI/6, i);
-  }
-  chair(Math.PI/2, 7);
+  // 6-max seats (leave one seat for you later)
+  const angles = [ -0.2, 0.55, 1.35, 2.25, 3.05, 3.85 ];
+  angles.forEach((a, i) => makeChair(a, i+1));
 
-  function getSeats(){ return seats; }
+  function getSeats() { return seats; }
 
-  // GUARD (moved OUTSIDE rail, front)
-  function mannequin(color=0x1b2130){
-    const g=new THREE.Group();
-    const mat=new THREE.MeshStandardMaterial({color,roughness:0.8});
-    const body=new THREE.Mesh(new THREE.CapsuleGeometry(0.18,0.55,8,16), mat);
-    body.position.y=1.0;
-    g.add(body);
-    const head=new THREE.Mesh(new THREE.SphereGeometry(0.14,18,14), mat);
-    head.position.y=1.55;
-    g.add(head);
-    return g;
-  }
-
-  const guard = mannequin(0x1b2130);
-  guard.name="RailGuard";
-  guard.position.set(tableFocus.x, 0, tableFocus.z + 5.0); // ✅ outside front
+  // ---------- GUARD (outside rail, front) ----------
+  const guard = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.22, 0.75, 8, 16),
+    new THREE.MeshStandardMaterial({ color: 0x1a1f2a, roughness: 0.6, metalness: 0.15, emissive: 0x0b0b10, emissiveIntensity: 0.25 })
+  );
+  guard.position.set(tableFocus.x, 0.95, tableFocus.z + 4.4); // ✅ outside rail in front
+  guard.name = "GuardNPC";
   group.add(guard);
 
-  // DOORS LEFT/RIGHT
-  function doorway(tex, x, z, label){
-    const frame=new THREE.Mesh(new THREE.BoxGeometry(3.2,4.6,0.22),
-      new THREE.MeshStandardMaterial({color:0x10131a,roughness:0.7,emissive:0x220010,emissiveIntensity:0.18})
-    );
-    frame.position.set(x,2.3,z);
-    frame.rotation.y = (x<0)?Math.PI/2:-Math.PI/2;
-    group.add(frame);
-    colliders.push(frame);
+  // ---------- DOORS LEFT/RIGHT ----------
+  function makeDoor(signText, x, z, yaw) {
+    const door = new THREE.Group();
+    door.position.set(x, 0, z);
+    door.rotation.y = yaw;
 
-    const plane=new THREE.Mesh(new THREE.PlaneGeometry(2.6,4.0),
-      new THREE.MeshBasicMaterial({map:tex,transparent:true,opacity:1,depthWrite:false})
+    // doorway frame
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(2.2, 3.2, 0.18),
+      new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 0.45, metalness: 0.25 })
     );
-    plane.position.set(x + (x<0?0.13:-0.13),2.1,z);
-    plane.rotation.y = (x<0)?Math.PI/2:-Math.PI/2;
-    plane.renderOrder=60;
-    group.add(plane);
+    frame.position.set(0, 1.6, 0);
+    door.add(frame);
 
-    const pad=new THREE.Mesh(new THREE.RingGeometry(0.45,0.62,48),
-      new THREE.MeshBasicMaterial({color:0x7fe7ff,transparent:true,opacity:0.75,side:THREE.DoubleSide})
+    // door panel (your PNG)
+    const panel = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.0, 3.0),
+      new THREE.MeshStandardMaterial({
+        map: doorTex,
+        transparent: true,
+        alphaTest: 0.02,
+        roughness: 0.35,
+        metalness: 0.1,
+        emissive: 0x111111,
+        emissiveIntensity: 0.25
+      })
     );
-    pad.rotation.x=-Math.PI/2;
-    pad.position.set(x + (x<0?1.2:-1.2),0.03,z);
-    pad.name=label+"_TeleportPad";
-    group.add(pad);
-    colliders.push(pad);
+    panel.position.set(0, 1.55, 0.10);
+    door.add(panel);
 
-    return {pad};
+    // neon sign above
+    const signCanvas = document.createElement("canvas");
+    signCanvas.width = 1024; signCanvas.height = 256;
+    const ctx = signCanvas.getContext("2d");
+    ctx.clearRect(0,0,1024,256);
+    ctx.fillStyle = "rgba(0,0,0,0.0)";
+    ctx.font = "bold 110px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#7fe7ff";
+    ctx.fillText(signText, 512, 130);
+    const signTex = new THREE.CanvasTexture(signCanvas);
+    signTex.colorSpace = THREE.SRGBColorSpace;
+
+    const sign = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.6, 0.65),
+      new THREE.MeshStandardMaterial({ map: signTex, transparent: true, emissive: 0x7fe7ff, emissiveIntensity: 0.55 })
+    );
+    sign.position.set(0, 3.25, 0.12);
+    door.add(sign);
+
+    // teleport pad in front
+    const pad = new THREE.Mesh(
+      new THREE.RingGeometry(0.35, 0.52, 48),
+      new THREE.MeshStandardMaterial({ color: 0xff2d7a, emissive: 0xff2d7a, emissiveIntensity: 0.55, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
+    );
+    pad.rotation.x = -Math.PI/2;
+    pad.position.set(0, 0.02, 1.25);
+    pad.name = signText === "STORE" ? "PadStore" : "PadPoker";
+    door.add(pad);
+
+    group.add(door);
+    return { door, pad };
   }
 
-  const storeDoor = doorway(storeDoorTex, -ROOM_W/2 + 0.2, 0, "STORE");
-  const pokerDoor = doorway(pokerDoorTex,  ROOM_W/2 - 0.2, 0, "POKER");
+  // LEFT & RIGHT doors (not front/back)
+  const leftDoor = makeDoor("STORE", -roomW/2 + 0.25, tableFocus.z, Math.PI/2);
+  const rightDoor = makeDoor("POKER", roomW/2 - 0.25, tableFocus.z, -Math.PI/2);
 
-  // WATER FOUNTAIN (corner)
-  const fountain=new THREE.Group();
-  fountain.name="WaterFountain";
-  const bowl=new THREE.Mesh(new THREE.CylinderGeometry(0.7,0.9,0.35,26),
-    new THREE.MeshStandardMaterial({color:0x2a2f3a,roughness:0.7,metalness:0.05})
+  // ---------- TELEPORT MACHINE SPAWN PAD ----------
+  const spawnPad = new THREE.Mesh(
+    new THREE.RingGeometry(0.55, 0.85, 64),
+    new THREE.MeshStandardMaterial({ color: 0x7fe7ff, emissive: 0x7fe7ff, emissiveIntensity: 0.45, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
   );
-  bowl.position.y=0.18;
-  fountain.add(bowl);
+  spawnPad.rotation.x = -Math.PI/2;
+  spawnPad.position.set(0, 0.02, 3.6);
+  spawnPad.name = "SpawnPad";
+  group.add(spawnPad);
 
-  const water=new THREE.Mesh(new THREE.CylinderGeometry(0.62,0.62,0.05,22),
-    new THREE.MeshStandardMaterial({color:0x2aa8ff,roughness:0.2,emissive:0x0a2a55,emissiveIntensity:0.35,transparent:true,opacity:0.65})
-  );
-  water.position.y=0.33;
-  fountain.add(water);
-
-  fountain.position.set(-ROOM_W/2 + 2.5, 0, -ROOM_D/2 + 2.5);
-  group.add(fountain);
-  colliders.push(bowl);
-
-  // BOTS
-  try { Bots.init({ THREE, scene, getSeats, tableFocus, metrics }); } catch (e) { console.error(e); L("[world] Bots init failed ❌"); }
-
-  function connect({ playerRig, camera } = {}) {
-    try { Bots.setPlayerRig(playerRig, camera); } catch {}
+  // ---------- BOTS ----------
+  // (Bots will finally appear because seats exist + we actually call Bots.init)
+  try {
+    Bots.init({ THREE, scene, getSeats, tableFocus, metrics: { tableY, seatY: 0.52 } });
+    // player rig is attached in connect()
+  } catch (e) {
+    console.error(e);
+    log?.("[world] bots init failed ❌ " + (e?.message || e));
   }
 
-  function tick(dt){
-    try { Bots.update(dt); } catch {}
-    const t=performance.now()*0.001;
-    storeDoor.pad.material.opacity=0.55+Math.sin(t*3.0)*0.18;
-    pokerDoor.pad.material.opacity=0.55+Math.sin((t+0.7)*3.0)*0.18;
-    rail.material.emissiveIntensity=0.09+Math.sin(t*2.0)*0.05;
-  }
+  log?.("[world] ready ✅");
 
-  // ✅ Spawn ON teleport circle
-  const spawn = { x: 0, y: 0, z: 3.6 };
+  // ---------- WORLD API ----------
+  const api = {
+    group,
+    floor,
+    tableFocus,
+    tableY,
+    spawn: new THREE.Vector3(0, 0, 3.6),
+    spawnYaw: 0,
 
-  L("[world] ready ✅");
-  return { group, floor, colliders, tableFocus, tableTopY, metrics, getSeats, connect, tick, spawn };
-                }
+    getSeats,
+
+    connect({ playerRig, camera }) {
+      // allow bots to avoid player + billboard to camera
+      try { Bots.setPlayerRig(playerRig, camera); } catch {}
+      api.playerRigRef = playerRig;
+      api.cameraRef = camera;
+    },
+
+    tick(dt) {
+      // pulse glows
+      spawnPad.material.opacity = 0.65 + Math.sin(performance.now()*0.004)*0.18;
+      railGlow.material.emissiveIntensity = 0.35 + Math.sin(performance.now()*0.003)*0.20;
+
+      try { Bots.update(dt); } catch (e) { console.error(e); }
+    }
+  };
+
+  return api;
+    }

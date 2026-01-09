@@ -34,6 +34,47 @@ export const Bots = (() => {
     walkers: [],
     rngSeed: 12345
   };
+// js/bots.js
+import * as THREE from 'three';
+
+export function initBots({ scene, tableGroup, seats = [] }) {
+  if (!scene || !tableGroup) {
+    console.warn('[bots] scene/tableGroup missing, skipping bot init');
+    return { bots: [] };
+  }
+
+  // Example bot spawn using a quaternion safely
+  const bots = [];
+  const spawnCount = Math.min(seats.length, 5);
+
+  for (let i = 0; i < spawnCount; i++) {
+    const seat = seats[i];
+    const bot = new THREE.Group();
+
+    // basic placeholder body
+    const body = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.18, 0.35, 4, 8),
+      new THREE.MeshStandardMaterial({ color: 0x8899aa, roughness: 0.9 })
+    );
+    body.position.y = 0.55;
+    bot.add(body);
+
+    // place at seat
+    if (seat?.position) bot.position.copy(seat.position);
+    bot.position.y = 0;
+
+    // face table center (safe)
+    const center = new THREE.Vector3();
+    tableGroup.getWorldPosition(center);
+    bot.lookAt(center.x, bot.position.y, center.z);
+
+    scene.add(bot);
+    bots.push(bot);
+  }
+
+  console.log('[bots] ready ✅', bots.length);
+  return { bots };
+}
 
   // ---- helpers ----
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));

@@ -1,4 +1,47 @@
-// /js/world.js — stable base world for Scarlett (CDN-safe)
+// /js/world.js — Scarlett VR Poker World ORCHESTRATOR (uses your existing modules)
+// Goal: show your real world again (teleport machine, store, textures, lights, fountain, rails, etc)
+// while keeping a safe fallback if a module fails.
+//
+// Works with CDN importmap (Three passed in from main.js)
+
+async function tryImport(path) {
+  try {
+    return await import(path);
+  } catch (e) {
+    console.warn("[world] optional import failed:", path, e?.message || e);
+    return null;
+  }
+}
+
+// Call a module using the best available export name.
+// Returns whatever the called function returns.
+async function callBest(mod, names, args) {
+  if (!mod) return null;
+  for (const n of names) {
+    const fn = mod[n];
+    if (typeof fn === "function") {
+      try { return await fn(args); }
+      catch (e) {
+        console.warn(`[world] ${n}() failed`, e?.message || e);
+        return null;
+      }
+    }
+  }
+  // default export as function
+  if (typeof mod.default === "function") {
+    try { return await mod.default(args); } catch (e) { console.warn("[world] default() failed", e); }
+  }
+  // default export object with init/build
+  if (mod.default && typeof mod.default === "object") {
+    for (const n of names) {
+      const fn = mod.default[n];
+      if (typeof fn === "function") {
+        try { return await fn(args); } catch (e) { console.warn(`[world] default.${n}() failed`, e); }
+      }
+    }
+  }
+  return null;
+}
 
 export const World = {
   init({ THREE, scene, renderer, camera, player, controllers, log }) {
@@ -13,7 +56,10 @@ export const World = {
       zones: {
         tableCenter: new THREE.Vector3(0,0,0),
         tableRadius: 4.2,
-      }
+      },
+
+      // will be filled by optional modules
+      modules: {},
     };
 
     const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
@@ -40,21 +86,17 @@ export const World = {
       return ring;
     }
 
-    // Lights
-    scene.add(new THREE.AmbientLight(0xffffff, 0.35));
-    const dir = new THREE.DirectionalLight(0xffffff, 1.25);
+    // -----------------------
+    // 1) SAFE FALLBACK WORLD (so you always see something)
+    // -----------------------
+    scene.background = new THREE.Color(0x05060a);
+    scene.fog = new THREE.Fog(0x05060a, 12, 90);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.9);
     dir.position.set(6,10,6);
     scene.add(dir);
 
-    const neon = new THREE.PointLight(0x7fe7ff, 2.0, 20, 2.0);
-    neon.position.set(0,4,0);
-    scene.add(neon);
-
-    const pink = new THREE.PointLight(0xff2d7a, 1.6, 18, 2.0);
-    pink.position.set(-5,3.2,-3);
-    scene.add(pink);
-
-    // Floor
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(60,60),
       new THREE.MeshStandardMaterial({ color:0x111421, roughness:0.95, metalness:0.05 })
@@ -62,7 +104,6 @@ export const World = {
     floor.rotation.x = -Math.PI/2;
     scene.add(floor);
 
-    // Walls
     const wallMat = new THREE.MeshStandardMaterial({ color:0x1a1f33, roughness:0.9, metalness:0.05 });
     const wallN = new THREE.Mesh(new THREE.BoxGeometry(60,4.4,1), wallMat); wallN.position.set(0,2.2,-15); scene.add(wallN);
     const wallS = new THREE.Mesh(new THREE.BoxGeometry(60,4.4,1), wallMat); wallS.position.set(0,2.2, 15); scene.add(wallS);
@@ -74,43 +115,15 @@ export const World = {
     addColliderBox({x:-15,y:2.2,z:0},{sx:1,sy:4.4,sz:60},"col_wall_w");
     addColliderBox({x:15,y:2.2,z:0},{sx:1,sy:4.4,sz:60},"col_wall_e");
 
-    // Table
-    const tableMat = new THREE.MeshStandardMaterial({
-      color:0x0b3a2a, roughness:0.8, metalness:0.05,
-      emissive:0x02160f, emissiveIntensity:0.45
-    });
-
-    const top = new THREE.Mesh(new THREE.CylinderGeometry(2.3,2.3,0.22,64), tableMat);
-    top.position.set(0,1.02,0);
-    scene.add(top);
-
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.7,1.05,0.9,32),
-      new THREE.MeshStandardMaterial({ color:0x12131a, roughness:0.65, metalness:0.25 })
+    // Minimal table placeholder (your real table will replace/cover this)
+    const tableTop = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.3,2.3,0.22,64),
+      new THREE.MeshStandardMaterial({ color:0x0b3a2a, roughness:0.8, metalness:0.05 })
     );
-    base.position.set(0,0.45,0);
-    scene.add(base);
+    tableTop.position.set(0,1.02,0);
+    scene.add(tableTop);
 
-    const rail = new THREE.Mesh(
-      new THREE.TorusGeometry(2.65,0.14,24,80),
-      new THREE.MeshStandardMaterial({ color:0x161a2a, roughness:0.7, metalness:0.2 })
-    );
-    rail.rotation.x = Math.PI/2;
-    rail.position.set(0,1.0,0);
-    scene.add(rail);
-
-    // Rail collision
-    const ringY = 1.0, ringR = 2.65;
-    for (let i=0;i<12;i++){
-      const a = (i/12)*Math.PI*2;
-      const x = Math.cos(a)*ringR;
-      const z = Math.sin(a)*ringR;
-      const box = addColliderBox({x,y:ringY,z},{sx:1.2,sy:1.4,sz:0.25},"col_rail");
-      box.rotation.y = a;
-      box.updateMatrixWorld(true);
-    }
-
-    // Seats (8)
+    // Seats markers (keep, but your real chairs may also appear)
     const seatRadius = 3.35;
     for (let i=0;i<8;i++){
       const a = (i/8)*Math.PI*2 + Math.PI;
@@ -121,7 +134,89 @@ export const World = {
       W.seats.push({ index:i, position:new THREE.Vector3(px,0,pz), yaw:a+Math.PI });
     }
 
-    // API
+    // -----------------------
+    // 2) LOAD YOUR REAL WORLD MODULES (async, non-blocking)
+    // -----------------------
+    (async () => {
+      const ctx = { THREE, scene, renderer, camera, player, controllers, world: W, log };
+
+      // Your modules (from your folder screenshots)
+      const mods = {
+        textures:        await tryImport("./textures.js"),
+        lights_pack:     await tryImport("./lights_pack.js"),
+        solid_walls:     await tryImport("./solid_walls.js"),
+        table_factory:   await tryImport("./table_factory.js"),
+        table:           await tryImport("./table.js"),
+        chair:           await tryImport("./chair.js"),
+        spectator_rail:  await tryImport("./spectator_rail.js"),
+        teleport_machine:await tryImport("./teleport_machine.js"),
+        teleport_fx:     await tryImport("./teleport_fx.js"),
+        teleport_burst:  await tryImport("./teleport_burst_fx.js"),
+        store:           await tryImport("./store.js"),
+        store_kiosk:     await tryImport("./store_kiosk.js"),
+        shop_ui:         await tryImport("./shop_ui.js"),
+        water_fountain:  await tryImport("./water_fountain.js"),
+        ui:              await tryImport("./ui.js"),
+        vr_ui:           await tryImport("./vr_ui.js"),
+        vr_ui_panel:     await tryImport("./vr_ui_panel.js"),
+      };
+      W.modules = mods;
+
+      // 2a) Textures / materials first
+      await callBest(mods.textures, ["init","boot","load","apply","mount","setup"], ctx);
+
+      // 2b) Lights pack (your real lighting)
+      await callBest(mods.lights_pack, ["init","build","create","mount","add","setup"], ctx);
+
+      // 2c) Solid walls (your textured lobby)
+      await callBest(mods.solid_walls, ["init","build","create","mount","addToScene","spawn"], ctx);
+
+      // 2d) Table + chairs (real assets)
+      // Prefer table_factory if it exists
+      const tableRes =
+        (await callBest(mods.table_factory, ["init","build","create","spawn","mount"], ctx)) ||
+        (await callBest(mods.table, ["init","build","create","spawn","mount"], ctx));
+
+      // Chairs if separate module
+      await callBest(mods.chair, ["init","build","create","spawn","mount"], ctx);
+
+      // 2e) Spectator rail (if you have it)
+      await callBest(mods.spectator_rail, ["init","build","create","mount","addToScene","spawn"], ctx);
+
+      // 2f) Teleport machine + FX
+      await callBest(mods.teleport_machine, ["init","build","create","mount","spawn"], ctx);
+      await callBest(mods.teleport_fx, ["init","build","create","mount","spawn"], ctx);
+      await callBest(mods.teleport_burst, ["init","build","create","mount","spawn"], ctx);
+
+      // 2g) Store + kiosk + shop UI
+      await callBest(mods.store, ["init","build","create","mount","spawn"], ctx);
+      await callBest(mods.store_kiosk, ["init","build","create","mount","spawn"], ctx);
+      await callBest(mods.shop_ui, ["init","build","create","mount","spawn"], ctx);
+
+      // 2h) Water fountain
+      await callBest(mods.water_fountain, ["init","build","create","mount","spawn"], ctx);
+
+      // 2i) In-world UI modules (optional)
+      await callBest(mods.ui, ["init","build","create","mount"], ctx);
+      await callBest(mods.vr_ui, ["init","build","create","mount"], ctx);
+      await callBest(mods.vr_ui_panel, ["init","build","create","mount"], ctx);
+
+      // 2j) Collect colliders if modules registered them
+      // (Common patterns: scene.userData.colliders or world.colliders additions)
+      const extra = scene.userData?.colliders;
+      if (Array.isArray(extra)) {
+        for (const c of extra) if (c && !W.colliders.includes(c)) W.colliders.push(c);
+        log?.("[world] pulled colliders from scene.userData ✅");
+      }
+
+      log?.("[world] real modules loaded ✅");
+    })().catch((e) => {
+      console.warn("[world] module chain failed:", e);
+    });
+
+    // -----------------------
+    // 3) API used by main.js
+    // -----------------------
     W.setMode = (m)=>{ W.mode = m; };
     W.setFlag = (k,v)=>{ if (k in W.flags) W.flags[k] = !!v; };
     W.getPlayerYaw = ()=>W._playerYaw;
@@ -186,16 +281,16 @@ export const World = {
       log?.("standPlayerInLobby ✅");
     };
 
+    W.recenter = () => W.standPlayerInLobby();
+
     W.update = () => {
-      const t = performance.now() * 0.001;
-      neon.intensity = 1.7 + Math.sin(t * 1.2) * 0.25;
-      pink.intensity = 1.3 + Math.cos(t * 1.0) * 0.22;
+      // let your packs animate themselves; fallback does nothing
     };
 
-    // Apply initial yaw
+    // initial yaw
     player.rotation.y = W._playerYaw;
 
-    log?.("world init ✅");
+    log?.("world init ✅ (orchestrator)");
     return W;
   }
 };

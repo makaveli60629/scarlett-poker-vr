@@ -622,6 +622,10 @@
       appendLog("2) Confirm file exists: /js/main.js");
       appendLog("3) Ensure folder is named exactly: js (lowercase)");
     }
+    btnEnter?.addEventListener("click", () => {
+  appendLog("[hud] enter vr (direct)");
+  window.dispatchEvent(new Event("scarlett-enter-vr"));
+});
   </script>
 </body>
 </html>

@@ -1,373 +1,205 @@
-// /js/world.js — Scarlett VR Poker (World Loader V3.1 FULL)
-// HARD FIX: main.js expects world.setFlag()
-// ALSO: mounts your modular world pieces safely with adapters
-// Signature line confirms correct deployment.
+// /js/main.js — Scarlett VR Poker (SAFE PARSE BOOT v2)
+// Boots standing in lobby. Adds join-table + spectate controls.
 
-window.dispatchEvent(new CustomEvent("scarlett-log",{detail:"[world] ✅ LOADER SIGNATURE: WORLD.JS V3.1 ACTIVE"}));
+import * as THREE from "three";
+import { VRButton } from "three/addons/webxr/VRButton.js";
+import { World } from "./world.js";
 
-function ui(m){
+function emitLog(m){
   try { window.dispatchEvent(new CustomEvent("scarlett-log", { detail: String(m) })); } catch {}
+  try { console.log(m); } catch {}
 }
 
-async function imp(path){
-  const v = encodeURIComponent(window.__BUILD_V || Date.now().toString());
-  const url = `${path}?v=${v}`;
-  ui(`[world] import ${url}`);
-  try {
-    const mod = await import(url);
-    ui(`[world] ✅ imported ${path}`);
-    return mod;
-  } catch (e) {
-    ui(`[world] ❌ import failed ${path} :: ${e?.message || e}`);
-    return null;
-  }
+const BUILD_V = window.__BUILD_V || Date.now().toString();
+
+// Renderer / Scene
+const canvas = document.createElement("canvas");
+document.body.appendChild(canvas);
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05060a);
+
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 300);
+
+const player = new THREE.Group();
+player.position.set(0, 1.7, 9);
+player.add(camera);
+scene.add(player);
+
+// Baseline lights
+scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+const sun = new THREE.DirectionalLight(0xffffff, 0.85);
+sun.position.set(7, 11, 6);
+scene.add(sun);
+
+// Controllers
+const controllers = { left: null, right: null };
+try {
+  controllers.left = renderer.xr.getController(0);
+  controllers.right = renderer.xr.getController(1);
+  scene.add(controllers.left);
+  scene.add(controllers.right);
+} catch {}
+
+// World
+const world = World.init({ THREE, scene, renderer, camera, player, controllers, log: emitLog });
+
+// Polyfills
+world.flags = world.flags || { teleport: true, move: true, snap: true, hands: true };
+if (typeof world.setFlag !== "function") world.setFlag = (k, v) => { world.flags[k] = !!v; };
+if (typeof world.getFlag !== "function") world.getFlag = (k) => !!world.flags?.[k];
+if (typeof world.update !== "function") world.update = () => {};
+
+// Default flags
+world.setFlag("teleport", true);
+world.setFlag("move", true);
+world.setFlag("snap", true);
+world.setFlag("hands", true);
+
+// ✅ RULE: spawn standing in lobby
+if (typeof world.standPlayerInLobby === "function") world.standPlayerInLobby();
+else player.position.set(0, 1.7, 9);
+
+// VR Button
+const vrBtn = VRButton.createButton(renderer);
+document.body.appendChild(vrBtn);
+
+window.addEventListener("scarlett-enter-vr", () => {
+  try { vrBtn.click(); emitLog("[main] enter-vr forwarded"); } catch {}
+});
+
+// HUD toggles
+window.addEventListener("scarlett-toggle-teleport", (e) => world.setFlag("teleport", !!e.detail));
+window.addEventListener("scarlett-toggle-move", (e) => world.setFlag("move", !!e.detail));
+window.addEventListener("scarlett-toggle-snap", (e) => world.setFlag("snap", !!e.detail));
+window.addEventListener("scarlett-toggle-hands", (e) => world.setFlag("hands", !!e.detail));
+
+// Recenter = back to lobby stand
+window.addEventListener("scarlett-recenter", () => {
+  emitLog("[main] recenter -> lobby");
+  if (typeof world.standPlayerInLobby === "function") world.standPlayerInLobby();
+  else player.position.set(0, 1.7, 9);
+});
+
+// Quick events for UI buttons (future RoomManager)
+window.Scarlett = window.Scarlett || {};
+window.Scarlett.joinTable = (seat=0) => window.dispatchEvent(new CustomEvent("scarlett-join-table", { detail:{ seat } }));
+window.Scarlett.spectate  = (spot=0) => window.dispatchEvent(new CustomEvent("scarlett-spectate", { detail:{ spot } }));
+window.Scarlett.lobby     = () => window.dispatchEvent(new Event("scarlett-stand-lobby"));
+
+// Touch dock input
+const touch = { f:0, b:0, l:0, r:0, turnL:0, turnR:0 };
+window.addEventListener("scarlett-touch", (e) => {
+  const d = e?.detail || {};
+  touch.f = d.f || 0; touch.b = d.b || 0; touch.l = d.l || 0; touch.r = d.r || 0;
+  touch.turnL = d.turnL || 0; touch.turnR = d.turnR || 0;
+});
+
+// Keyboard debug (desktop)
+const keys = Object.create(null);
+window.addEventListener("keydown", (e) => { keys[e.code] = true; });
+window.addEventListener("keyup", (e) => { keys[e.code] = false; });
+
+// Hotkeys:
+// J = join table seat 0
+// K = spectate spot 0
+// L = lobby
+window.addEventListener("keydown", (e)=>{
+  if (e.code === "KeyJ") window.Scarlett.joinTable(0);
+  if (e.code === "KeyK") window.Scarlett.spectate(0);
+  if (e.code === "KeyL") window.Scarlett.lobby();
+});
+
+function moveIntent(){
+  let x = 0, z = 0;
+  if (keys.KeyW) z += 1;
+  if (keys.KeyS) z -= 1;
+  if (keys.KeyA) x -= 1;
+  if (keys.KeyD) x += 1;
+
+  if (touch.f) z += 1;
+  if (touch.b) z -= 1;
+  if (touch.l) x -= 1;
+  if (touch.r) x += 1;
+
+  return { x, z };
 }
 
-// Call function with multiple arg styles (modules differ)
-async function callWithAdapters(fn, label, ctx){
-  const { THREE, scene, renderer, camera, player, controllers, world } = ctx;
-
-  const attempts = [
-    { args: [ctx],                             note: "(ctx)" },
-    { args: [scene],                           note: "(scene)" },
-    { args: [THREE, scene],                    note: "(THREE, scene)" },
-    { args: [scene, ctx],                      note: "(scene, ctx)" },
-    { args: [ctx, scene],                      note: "(ctx, scene)" },
-    { args: [THREE, scene, renderer],          note: "(THREE, scene, renderer)" },
-    { args: [scene, renderer, camera],         note: "(scene, renderer, camera)" },
-    { args: [THREE, scene, renderer, camera],  note: "(THREE, scene, renderer, camera)" },
-    { args: [world],                           note: "(world)" },
-  ];
-
-  let lastErr = null;
-
-  for (const a of attempts){
-    ui(`[world] calling ${label} ${a.note}`);
-    try {
-      const r = await fn(...a.args);
-      ui(`[world] ✅ ok ${label} ${a.note}`);
-      return { ok:true, result:r };
-    } catch (e) {
-      lastErr = e;
-      ui(`[world] ⚠️ retry ${label} after error: ${e?.message || e}`);
-      continue;
-    }
-  }
-
-  ui(`[world] ❌ all call adapters failed for ${label}: ${lastErr?.message || lastErr}`);
-  return { ok:false, error:lastErr };
+function turnIntent(){
+  let t = 0;
+  if (keys.KeyQ) t += 1;
+  if (keys.KeyE) t -= 1;
+  if (touch.turnL) t += 1;
+  if (touch.turnR) t -= 1;
+  return t;
 }
 
-async function mountObject(obj, label, ctx){
-  if (!obj || typeof obj !== "object") return false;
+// Loop
+let last = performance.now();
+let snapCooldown = 0;
 
-  const methods = ["init","mount","build","create","spawn","setup","addToScene","attach","start"];
-  for (const m of methods){
-    if (typeof obj[m] === "function"){
-      const { ok } = await callWithAdapters(obj[m].bind(obj), `${label}.${m}`, ctx);
-      return ok;
+function loop(now){
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+
+  // Turn
+  const t = turnIntent();
+  const snap = world.getFlag("snap");
+  if (t) {
+    if (snap) {
+      snapCooldown -= dt;
+      if (snapCooldown <= 0) {
+        const step = THREE.MathUtils.degToRad(45) * Math.sign(t);
+        player.rotation.y += step;
+        snapCooldown = 0.22;
+      }
+    } else {
+      player.rotation.y += t * dt * 1.65;
+      snapCooldown = 0;
+    }
+  } else snapCooldown = 0;
+
+  // Move (ONLY when standing — if seated, we keep you fixed)
+  const mode = (typeof world.getMode === "function") ? world.getMode() : "lobby";
+  const allowMove = (mode !== "table");
+
+  if (allowMove && world.getFlag("move")) {
+    const { x, z } = moveIntent();
+    if (x || z) {
+      const v = new THREE.Vector2(x, z);
+      if (v.length() > 1) v.normalize();
+
+      const speed = 2.0;
+      const dir = new THREE.Vector3(v.x, 0, -v.y);
+      dir.applyAxisAngle(new THREE.Vector3(0,1,0), player.rotation.y);
+
+      const from = player.position.clone();
+      const to = from.clone().addScaledVector(dir, speed * dt);
+
+      if (typeof world.resolvePlayerCollision === "function") {
+        const fixed = world.resolvePlayerCollision(from, to);
+        player.position.copy(fixed);
+      } else player.position.copy(to);
     }
   }
 
-  // If only one function exists, call it
-  const fnKeys = Object.keys(obj).filter(k => typeof obj[k] === "function");
-  if (fnKeys.length === 1){
-    const k = fnKeys[0];
-    const { ok } = await callWithAdapters(obj[k].bind(obj), `${label}.${k}`, ctx);
-    return ok;
-  }
-
-  ui(`[world] ⚠️ ${label} imported but no callable method found. keys=${Object.keys(obj).join(",")}`);
-  return false;
+  try { world.update(dt); } catch {}
+  renderer.render(scene, camera);
 }
 
-async function mountModule(mod, label, ctx){
-  if (!mod) return false;
+renderer.setAnimationLoop(loop);
 
-  const fnNames = ["init","mount","build","create","setup","boot","start","initVRUI"];
-  for (const n of fnNames){
-    if (typeof mod[n] === "function"){
-      const { ok } = await callWithAdapters(mod[n], `${label}.${n}`, ctx);
-      return ok;
-    }
-  }
+// Resize
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
 
-  if (typeof mod.default === "function"){
-    const { ok } = await callWithAdapters(mod.default, `${label}.default`, ctx);
-    return ok;
-  }
-
-  for (const k of Object.keys(mod)){
-    if (mod[k] && typeof mod[k] === "object"){
-      const ok = await mountObject(mod[k], `${label}.${k}`, ctx);
-      if (ok) return true;
-    }
-  }
-
-  ui(`[world] ⚠️ imported ${label} but nothing mounted. exports=${Object.keys(mod).join(",")}`);
-  return false;
-}
-
-export const World = {
-  init({ THREE, scene, renderer, camera, player, controllers, log }) {
-    // -------------------------
-    // World object + required API
-    // -------------------------
-    const W = {
-      THREE, scene, renderer, camera, player, controllers, log,
-      colliders: [],
-      seats: [],
-      flags: { teleport:true, move:true, snap:true, hands:true },
-      mode: "lobby",
-      seatedIndex: -1,
-      _playerYaw: Math.PI,
-      _realLoaded: false,
-      textureKit: null,
-      Inventory: null,
-      update: () => {},
-    };
-
-    // ✅ REQUIRED by main.js
-    W.setFlag = (key, value) => {
-      W.flags = W.flags || {};
-      W.flags[key] = !!value;
-      try { window.dispatchEvent(new CustomEvent("scarlett-flag", { detail:{ key, value:!!value } })); } catch {}
-    };
-    W.getFlag = (key) => !!(W.flags && W.flags[key]);
-
-    // Helpful extras (safe)
-    W.setMode = (m) => { W.mode = String(m || "lobby"); };
-    W.getMode = () => W.mode || "lobby";
-
-    W.getPlayerYaw = () => W._playerYaw;
-    W.addPlayerYaw = (d) => {
-      W._playerYaw += d;
-      if (player) player.rotation.y = W._playerYaw;
-    };
-
-    W.sitPlayerAtSeat = (seatIndex=0) => {
-      const s = W.seats.find(x => x.index === seatIndex) || W.seats[0];
-      W.seatedIndex = s?.index ?? 0;
-      if (player && s){
-        player.position.x = s.position.x;
-        player.position.z = s.position.z;
-        W._playerYaw = s.yaw;
-        player.rotation.y = W._playerYaw;
-        player.position.y = (renderer?.xr?.isPresenting) ? 0 : 1.35;
-      }
-      ui(`[world] sit seat=${W.seatedIndex}`);
-    };
-
-    W.standPlayerInLobby = () => {
-      W.seatedIndex = -1;
-      if (player){
-        player.position.set(0, (renderer?.xr?.isPresenting) ? 0 : 1.7, 6);
-        W._playerYaw = Math.PI;
-        player.rotation.y = W._playerYaw;
-      }
-      ui("[world] stand lobby");
-    };
-
-    const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
-
-    W.resolvePlayerCollision = (fromPos, toPos) => {
-      const radius = 0.28;
-      const p = toPos.clone();
-
-      for (const c of W.colliders){
-        const box = new THREE.Box3().setFromObject(c);
-        box.min.x -= radius; box.max.x += radius;
-        box.min.z -= radius; box.max.z += radius;
-
-        const yProbe = 1.0;
-        if (yProbe < box.min.y || yProbe > box.max.y) continue;
-
-        if (p.x > box.min.x && p.x < box.max.x && p.z > box.min.z && p.z < box.max.z){
-          const dxMin = Math.abs(p.x - box.min.x);
-          const dxMax = Math.abs(box.max.x - p.x);
-          const dzMin = Math.abs(p.z - box.min.z);
-          const dzMax = Math.abs(box.max.z - p.z);
-          const m = Math.min(dxMin,dxMax,dzMin,dzMax);
-
-          if (m === dxMin) p.x = box.min.x;
-          else if (m === dxMax) p.x = box.max.x;
-          else if (m === dzMin) p.z = box.min.z;
-          else p.z = box.max.z;
-        }
-      }
-
-      p.x = clamp(p.x, -13.7, 13.7);
-      p.z = clamp(p.z, -13.7, 13.7);
-      return p;
-    };
-
-    // -------------------------
-    // FALLBACK WORLD (always builds)
-    // -------------------------
-    ui("[world] fallback world building…");
-
-    scene.background = new THREE.Color(0x05060a);
-    scene.fog = new THREE.Fog(0x05060a, 12, 90);
-
-    scene.add(new THREE.AmbientLight(0xffffff, 0.25));
-    const dir = new THREE.DirectionalLight(0xffffff, 0.9);
-    dir.position.set(6,10,6);
-    scene.add(dir);
-
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(60,60),
-      new THREE.MeshStandardMaterial({ color:0x111421, roughness:0.95, metalness:0.05 })
-    );
-    floor.rotation.x = -Math.PI/2;
-    scene.add(floor);
-
-    const wallMat = new THREE.MeshStandardMaterial({ color:0x1a1f33, roughness:0.9, metalness:0.05 });
-    const wallN = new THREE.Mesh(new THREE.BoxGeometry(60,4.4,1), wallMat); wallN.position.set(0,2.2,-15); scene.add(wallN);
-    const wallS = new THREE.Mesh(new THREE.BoxGeometry(60,4.4,1), wallMat); wallS.position.set(0,2.2, 15); scene.add(wallS);
-    const wallW = new THREE.Mesh(new THREE.BoxGeometry(1,4.4,60), wallMat); wallW.position.set(-15,2.2,0); scene.add(wallW);
-    const wallE = new THREE.Mesh(new THREE.BoxGeometry(1,4.4,60), wallMat); wallE.position.set( 15,2.2,0); scene.add(wallE);
-
-    scene.userData.colliders = scene.userData.colliders || [];
-
-    function addColliderBox(pos, size, name="collider"){
-      const geo = new THREE.BoxGeometry(size.sx, size.sy, size.sz);
-      const mat = new THREE.MeshBasicMaterial({ visible:false });
-      const m = new THREE.Mesh(geo, mat);
-      m.name = name;
-      m.position.set(pos.x,pos.y,pos.z);
-      scene.add(m);
-      W.colliders.push(m);
-      scene.userData.colliders.push(m);
-      return m;
-    }
-
-    addColliderBox({x:0,y:2.2,z:-15},{sx:60,sy:4.4,sz:1},"col_wall_n");
-    addColliderBox({x:0,y:2.2,z: 15},{sx:60,sy:4.4,sz:1},"col_wall_s");
-    addColliderBox({x:-15,y:2.2,z:0},{sx:1,sy:4.4,sz:60},"col_wall_w");
-    addColliderBox({x:15,y:2.2,z:0},{sx:1,sy:4.4,sz:60},"col_wall_e");
-
-    const tableTop = new THREE.Mesh(
-      new THREE.CylinderGeometry(2.3,2.3,0.22,64),
-      new THREE.MeshStandardMaterial({ color:0x0b3a2a, roughness:0.8, metalness:0.05 })
-    );
-    tableTop.position.set(0,1.02,0);
-    scene.add(tableTop);
-
-    function addRingMarker(pos, r0, r1, color){
-      const g = new THREE.RingGeometry(r0,r1,64);
-      const m = new THREE.MeshBasicMaterial({ color, transparent:true, opacity:0.85, side:THREE.DoubleSide });
-      const ring = new THREE.Mesh(g,m);
-      ring.rotation.x = -Math.PI/2;
-      ring.position.copy(pos);
-      ring.position.y = 0.02;
-      scene.add(ring);
-      return ring;
-    }
-
-    const seatRadius = 3.35;
-    for (let i=0;i<8;i++){
-      const a = (i/8)*Math.PI*2 + Math.PI;
-      const px = Math.cos(a)*seatRadius;
-      const pz = Math.sin(a)*seatRadius;
-      const mark = addRingMarker(new THREE.Vector3(px,0,pz),0.12,0.19,0xffcc00);
-      mark.material.opacity = 0.55;
-      W.seats.push({ index:i, position:new THREE.Vector3(px,0,pz), yaw:a+Math.PI });
-    }
-
-    ui("[world] fallback built ✅");
-
-    // Inventory shim for ShopUI
-    W.Inventory = W.Inventory || {
-      getChips(){
-        return [
-          { denom: 1,   color: "white" },
-          { denom: 5,   color: "red" },
-          { denom: 25,  color: "green" },
-          { denom: 100, color: "black" },
-          { denom: 500, color: "purple" },
-          { denom: 1000,color: "gold" },
-        ];
-      }
-    };
-
-    // -------------------------
-    // REAL WORLD LOAD (async)
-    // -------------------------
-    (async () => {
-      const ctx = { THREE, scene, renderer, camera, player, controllers, world: W, log, Inventory: W.Inventory };
-
-      const textures = await imp("./textures.js");
-      const lights   = await imp("./lights_pack.js");
-      const walls    = await imp("./solid_walls.js");
-      const tableF   = await imp("./table_factory.js");
-      const rail     = await imp("./spectator_rail.js");
-      const tpMach   = await imp("./teleport_machine.js");
-      const store    = await imp("./store.js");
-      const shopUI   = await imp("./shop_ui.js");
-      const water    = await imp("./water_fountain.js");
-      const uiMod    = await imp("./ui.js");
-      const vrui     = await imp("./vr_ui.js");
-      const vrPanel  = await imp("./vr_ui_panel.js");
-
-      await imp("./teleport_fx.js");
-      await imp("./TeleportVFX.js");
-      await imp("./teleport_burst_fx.js");
-
-      ui("[world] ⚠️ store_kiosk.js skipped for now (will re-enable after cache reset)");
-
-      let mounted = 0;
-
-      if (textures?.createTextureKit) {
-        try {
-          W.textureKit = textures.createTextureKit({ THREE, renderer, base: "./assets/" });
-          scene.userData.textureKit = W.textureKit;
-          ui("[world] ✅ mounted textures via createTextureKit()");
-          mounted++;
-        } catch (e) {
-          ui("[world] ❌ createTextureKit failed :: " + (e?.message || e));
-        }
-      }
-
-      mounted += (await mountModule(lights,  "lights_pack.js", ctx)) ? 1 : 0;
-      mounted += (await mountModule(walls,   "solid_walls.js", ctx)) ? 1 : 0;
-      mounted += (await mountModule(tableF,  "table_factory.js", ctx)) ? 1 : 0;
-      mounted += (await mountModule(rail,    "spectator_rail.js", ctx)) ? 1 : 0;
-
-      // TeleportMachine: mount object directly
-      if (tpMach?.TeleportMachine) {
-        const ok = await mountObject(tpMach.TeleportMachine, "teleport_machine.js.TeleportMachine", ctx);
-        if (ok) mounted++;
-        else ui("[world] ⚠️ TeleportMachine present but did not mount (no callable method found)");
-      } else {
-        mounted += (await mountModule(tpMach, "teleport_machine.js", ctx)) ? 1 : 0;
-      }
-
-      mounted += (await mountModule(store,   "store.js", ctx)) ? 1 : 0;
-      mounted += (await mountModule(shopUI,  "shop_ui.js", ctx)) ? 1 : 0;
-      mounted += (await mountModule(water,   "water_fountain.js", ctx)) ? 1 : 0;
-      mounted += (await mountModule(uiMod,   "ui.js", ctx)) ? 1 : 0;
-      mounted += (await mountModule(vrui,    "vr_ui.js", ctx)) ? 1 : 0;
-
-      if (vrPanel?.init) {
-        try { await vrPanel.init(ctx); ui("[world] ✅ mounted vr_ui_panel.js via init()"); mounted++; }
-        catch (e){ ui("[world] ❌ vr_ui_panel init failed :: " + (e?.message || e)); }
-      }
-
-      if (Array.isArray(scene.userData?.colliders)) {
-        for (const c of scene.userData.colliders) if (c && !W.colliders.includes(c)) W.colliders.push(c);
-        ui("[world] colliders merged ✅");
-      }
-
-      W._realLoaded = mounted > 0;
-      ui(W._realLoaded
-        ? `[world] ✅ REAL WORLD LOADED (mounted=${mounted})`
-        : "[world] ❌ REAL WORLD DID NOT LOAD (mounted=0)"
-      );
-
-      window.dispatchEvent(new CustomEvent("scarlett-world-loaded", { detail: { mounted } }));
-    })();
-
-    ui("[world] init complete ✅");
-    return W;
-  }
-};
+window.__SCARLETT_WORLD = world;
+emitLog("[main] boot ✅ v=" + BUILD_V);

@@ -1,261 +1,479 @@
-// /js/avatar1.js — Scarlett Avatar Update 1 (SAFE ADD-ON)
-// Goal: Add a "cyber suit" mannequin that follows player HMD + hand tracking,
-// without touching world.js.
-// - Helmet follows HMD
-// - Torso/Hips yaw-lock to head
-// - Hands follow WebXR hand-tracking (wrist joints)
-// - Legs do simple walk swing when player moves
-//
-// Texture:
-// - Uses cyber_suit_diffuse.png as diffuse
-// - Auto-builds emissive from cyan lines inside the diffuse (no extra emissive needed)
+// /js/avatar1.js — Scarlett Avatar v1.0 (Low-Poly Humanoid + Simple Rig + Walk Cycle)
+// Exports:
+//   - Avatar1.create({ THREE, gender, height, outfit, skinTone, name }) -> { root, bones, parts, setPose, setLookAt, setScaleToHeight, update }
+// Notes:
+// - Procedural low-poly human-like mesh built from primitives.
+// - Rig is a hierarchy of Object3Ds ("bones") you can rotate for animation.
+// - Clothing is basic geometry + materials; swap textures later by replacing materials/maps.
 
-export class AvatarUpdate1 {
-  constructor({ THREE, scene, camera, playerRig, v, log = console.log } = {}) {
-    this.THREE = THREE;
-    this.scene = scene;
-    this.camera = camera;
-    this.playerRig = playerRig;
-    this.v = v || Date.now().toString();
-    this.log = log;
+export const Avatar1 = (() => {
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const lerp = (a, b, t) => a + (b - a) * t;
 
-    this.root = new THREE.Group();
-    this.root.name = "AvatarUpdate1";
-    scene.add(this.root);
-
-    this._tmp = {
-      yawEuler: new THREE.Euler(0, 0, 0, "YXZ"),
-      yawQ: new THREE.Quaternion(),
-      v3a: new THREE.Vector3(),
-      v3b: new THREE.Vector3(),
-      lastCam: new THREE.Vector3(),
-    };
-
-    this.state = {
-      speed: 0,
-      enabled: true,
-      showHands: true,
-      showBody: true,
-    };
-
-    // Build materials + meshes
-    this._build();
-    this.log("[AvatarUpdate1] ready ✅");
+  function makeMat(THREE, { color = 0xffffff, roughness = 0.85, metalness = 0.05, emissive = 0x000000, emissiveIntensity = 0 } = {}) {
+    return new THREE.MeshStandardMaterial({ color, roughness, metalness, emissive, emissiveIntensity });
   }
 
-  setEnabled(on) {
-    this.state.enabled = !!on;
-    this.root.visible = this.state.enabled;
-  }
-  setShowHands(on) {
-    this.state.showHands = !!on;
-    this.parts.leftHand.visible = false;
-    this.parts.rightHand.visible = false;
-  }
-  setShowBody(on) {
-    this.state.showBody = !!on;
-    this.parts.helmet.visible = on;
-    this.parts.torso.visible = on;
-    this.parts.hips.visible = on;
-    this.parts.leftLeg.visible = on;
-    this.parts.rightLeg.visible = on;
-  }
-
-  // Build emissive from cyan lines inside diffuse
-  _makeEmissiveFromImage(img, boost = 2.2) {
+  // Simple face texture (procedural). Replace later with real textures if you want.
+  function makeFaceTexture(THREE, { skin = "#d2b48c" } = {}) {
     const c = document.createElement("canvas");
-    c.width = img.width;
-    c.height = img.height;
+    c.width = 256; c.height = 256;
     const ctx = c.getContext("2d");
-    ctx.drawImage(img, 0, 0);
 
-    const im = ctx.getImageData(0, 0, c.width, c.height);
-    const d = im.data;
+    ctx.fillStyle = skin;
+    ctx.fillRect(0, 0, 256, 256);
 
-    for (let i = 0; i < d.length; i += 4) {
-      const r = d[i], g = d[i + 1], b = d[i + 2];
+    // subtle shading
+    const grd = ctx.createRadialGradient(128, 120, 20, 128, 128, 140);
+    grd.addColorStop(0, "rgba(0,0,0,0.00)");
+    grd.addColorStop(1, "rgba(0,0,0,0.12)");
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, 256, 256);
 
-      // cyan detector: g+b high, r low
-      const cyan = Math.max(0, Math.min(255, (g + b) - (r * 1.2)));
-      const v = Math.min(255, cyan * boost);
+    // eyes
+    ctx.fillStyle = "rgba(0,0,0,0.65)";
+    ctx.beginPath(); ctx.arc(90, 110, 10, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(166, 110, 10, 0, Math.PI * 2); ctx.fill();
 
-      // emissive cyan
-      d[i] = 0;
-      d[i + 1] = v;
-      d[i + 2] = v;
-      d[i + 3] = 255;
-    }
+    ctx.fillStyle = "rgba(127,231,255,0.65)";
+    ctx.beginPath(); ctx.arc(92, 110, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(168, 110, 4, 0, Math.PI * 2); ctx.fill();
 
-    ctx.putImageData(im, 0, 0);
+    // brows
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(76, 92); ctx.lineTo(104, 88); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(152, 88); ctx.lineTo(180, 92); ctx.stroke();
 
-    const tex = new this.THREE.CanvasTexture(c);
-    tex.colorSpace = this.THREE.SRGBColorSpace;
+    // nose
+    ctx.strokeStyle = "rgba(0,0,0,0.15)";
+    ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(128, 115); ctx.lineTo(124, 148); ctx.stroke();
+
+    // mouth
+    ctx.strokeStyle = "rgba(120,0,20,0.35)";
+    ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(108, 172); ctx.quadraticCurveTo(128, 182, 148, 172); ctx.stroke();
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
     tex.needsUpdate = true;
     return tex;
   }
 
-  _build() {
-    const THREE = this.THREE;
-    const loader = new THREE.TextureLoader();
+  function createBones(THREE) {
+    const b = {};
 
-    // Suit diffuse (required)
-    const suitDiffuse = loader.load(`./assets/textures/cyber_suit_diffuse.png?v=${this.v}`);
-    suitDiffuse.colorSpace = THREE.SRGBColorSpace;
+    // Root at feet level (Y=0 ground)
+    b.root = new THREE.Group();
+    b.root.name = "AvatarRoot";
 
-    // Material placeholders (we attach emissive after image is ready)
-    const suitMat = new THREE.MeshStandardMaterial({
-      map: suitDiffuse,
-      emissive: new THREE.Color(0x00ffff),
-      emissiveIntensity: 1.6,
-      metalness: 0.35,
+    // Pelvis / hips at body center
+    b.hips = new THREE.Object3D();
+    b.hips.name = "hips";
+    b.hips.position.set(0, 0.95, 0);
+    b.root.add(b.hips);
+
+    b.spine = new THREE.Object3D();
+    b.spine.name = "spine";
+    b.spine.position.set(0, 0.20, 0);
+    b.hips.add(b.spine);
+
+    b.chest = new THREE.Object3D();
+    b.chest.name = "chest";
+    b.chest.position.set(0, 0.30, 0);
+    b.spine.add(b.chest);
+
+    b.neck = new THREE.Object3D();
+    b.neck.name = "neck";
+    b.neck.position.set(0, 0.28, 0.02);
+    b.chest.add(b.neck);
+
+    b.head = new THREE.Object3D();
+    b.head.name = "head";
+    b.head.position.set(0, 0.12, 0.02);
+    b.neck.add(b.head);
+
+    // Arms
+    b.shoulderL = new THREE.Object3D();
+    b.shoulderR = new THREE.Object3D();
+    b.shoulderL.name = "shoulderL";
+    b.shoulderR.name = "shoulderR";
+    b.shoulderL.position.set(-0.22, 0.23, 0.02);
+    b.shoulderR.position.set( 0.22, 0.23, 0.02);
+    b.chest.add(b.shoulderL, b.shoulderR);
+
+    b.upperArmL = new THREE.Object3D();
+    b.upperArmR = new THREE.Object3D();
+    b.upperArmL.name = "upperArmL";
+    b.upperArmR.name = "upperArmR";
+    b.upperArmL.position.set(-0.10, 0.00, 0);
+    b.upperArmR.position.set( 0.10, 0.00, 0);
+    b.shoulderL.add(b.upperArmL);
+    b.shoulderR.add(b.upperArmR);
+
+    b.elbowL = new THREE.Object3D();
+    b.elbowR = new THREE.Object3D();
+    b.elbowL.name = "elbowL";
+    b.elbowR.name = "elbowR";
+    b.elbowL.position.set(-0.18, -0.18, 0.00);
+    b.elbowR.position.set( 0.18, -0.18, 0.00);
+    b.upperArmL.add(b.elbowL);
+    b.upperArmR.add(b.elbowR);
+
+    b.forearmL = new THREE.Object3D();
+    b.forearmR = new THREE.Object3D();
+    b.forearmL.name = "forearmL";
+    b.forearmR.name = "forearmR";
+    b.forearmL.position.set(-0.02, -0.02, 0);
+    b.forearmR.position.set( 0.02, -0.02, 0);
+    b.elbowL.add(b.forearmL);
+    b.elbowR.add(b.forearmR);
+
+    b.wristL = new THREE.Object3D();
+    b.wristR = new THREE.Object3D();
+    b.wristL.name = "wristL";
+    b.wristR.name = "wristR";
+    b.wristL.position.set(-0.16, -0.18, 0.02);
+    b.wristR.position.set( 0.16, -0.18, 0.02);
+    b.forearmL.add(b.wristL);
+    b.forearmR.add(b.wristR);
+
+    // Legs
+    b.hipL = new THREE.Object3D();
+    b.hipR = new THREE.Object3D();
+    b.hipL.name = "hipL";
+    b.hipR.name = "hipR";
+    b.hipL.position.set(-0.12, -0.08, 0.02);
+    b.hipR.position.set( 0.12, -0.08, 0.02);
+    b.hips.add(b.hipL, b.hipR);
+
+    b.kneeL = new THREE.Object3D();
+    b.kneeR = new THREE.Object3D();
+    b.kneeL.name = "kneeL";
+    b.kneeR.name = "kneeR";
+    b.kneeL.position.set(0, -0.42, 0);
+    b.kneeR.position.set(0, -0.42, 0);
+    b.hipL.add(b.kneeL);
+    b.hipR.add(b.kneeR);
+
+    b.ankleL = new THREE.Object3D();
+    b.ankleR = new THREE.Object3D();
+    b.ankleL.name = "ankleL";
+    b.ankleR.name = "ankleR";
+    b.ankleL.position.set(0, -0.44, 0.02);
+    b.ankleR.position.set(0, -0.44, 0.02);
+    b.kneeL.add(b.ankleL);
+    b.kneeR.add(b.ankleR);
+
+    b.footL = new THREE.Object3D();
+    b.footR = new THREE.Object3D();
+    b.footL.name = "footL";
+    b.footR.name = "footR";
+    b.footL.position.set(0, -0.05, 0.08);
+    b.footR.position.set(0, -0.05, 0.08);
+    b.ankleL.add(b.footL);
+    b.ankleR.add(b.footR);
+
+    return b;
+  }
+
+  function buildMesh(THREE, bones, opts) {
+    const parts = {};
+    const gender = opts.gender || "male";
+
+    // proportions (low poly but human-like)
+    const body = {
+      shoulderWidth: gender === "female" ? 0.44 : 0.48,
+      chestDepth:    gender === "female" ? 0.22 : 0.24,
+      waistWidth:    gender === "female" ? 0.30 : 0.32,
+      hipWidth:      gender === "female" ? 0.34 : 0.33,
+      legThickness:  gender === "female" ? 0.105 : 0.115,
+      armThickness:  gender === "female" ? 0.085 : 0.090,
+      headSize:      0.16
+    };
+
+    const skinTone = opts.skinTone ?? 0xd2b48c;
+
+    const mats = {
+      skin: makeMat(THREE, { color: skinTone, roughness: 0.65, metalness: 0.03 }),
+      hair: makeMat(THREE, { color: 0x1a1412, roughness: 0.85, metalness: 0.02 }),
+      shirt: makeMat(THREE, { color: opts.outfit?.shirt ?? 0x141826, roughness: 0.85, metalness: 0.03 }),
+      pants: makeMat(THREE, { color: opts.outfit?.pants ?? 0x0f121a, roughness: 0.92, metalness: 0.02 }),
+      shoes: makeMat(THREE, { color: opts.outfit?.shoes ?? 0x0b0d14, roughness: 0.55, metalness: 0.15 }),
+      accent: makeMat(THREE, { color: opts.outfit?.accent ?? 0x7fe7ff, roughness: 0.35, metalness: 0.15, emissive: opts.outfit?.accent ?? 0x7fe7ff, emissiveIntensity: 0.12 })
+    };
+
+    // --- Torso (on chest) ---
+    const chestGeo = new THREE.BoxGeometry(body.shoulderWidth, 0.38, body.chestDepth);
+    const chest = new THREE.Mesh(chestGeo, mats.shirt);
+    chest.position.set(0, 0.18, 0.02);
+    chest.castShadow = true;
+    bones.chest.add(chest);
+    parts.chest = chest;
+
+    // --- Abdomen (on spine) ---
+    const bellyGeo = new THREE.BoxGeometry(body.waistWidth, 0.28, body.chestDepth * 0.95);
+    const belly = new THREE.Mesh(bellyGeo, mats.shirt);
+    belly.position.set(0, 0.02, 0.02);
+    bones.spine.add(belly);
+    parts.belly = belly;
+
+    // --- Hips / pelvis (on hips) ---
+    const hipGeo = new THREE.BoxGeometry(body.hipWidth, 0.22, body.chestDepth * 0.95);
+    const hips = new THREE.Mesh(hipGeo, mats.pants);
+    hips.position.set(0, -0.12, 0.02);
+    bones.hips.add(hips);
+    parts.hips = hips;
+
+    // --- Head (on head bone) ---
+    const faceTex = makeFaceTexture(THREE, { skin: "#d2b48c" }); // you can swap later
+    const headMat = new THREE.MeshStandardMaterial({
+      color: skinTone,
       roughness: 0.55,
+      metalness: 0.02,
+      map: faceTex
     });
 
-    // When the image is available, build emissive from it
-    const applyEmissive = () => {
-      const img = suitDiffuse.image;
-      if (!img?.width) return;
-      const emissive = this._makeEmissiveFromImage(img, 2.2);
-      suitMat.emissiveMap = emissive;
-      suitMat.needsUpdate = true;
-    };
+    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(body.headSize, 1), headMat);
+    head.position.set(0, body.headSize, 0.02);
+    bones.head.add(head);
+    parts.head = head;
 
-    // Some browsers load image async; keep trying briefly
-    let tries = 0;
-    const timer = setInterval(() => {
-      tries++;
-      if (suitDiffuse.image?.width) {
-        applyEmissive();
-        clearInterval(timer);
-        this.log("[AvatarUpdate1] emissive built ✅");
-      }
-      if (tries > 80) clearInterval(timer);
-    }, 50);
+    // hair cap
+    const hair = new THREE.Mesh(new THREE.IcosahedronGeometry(body.headSize * 1.02, 0), mats.hair);
+    hair.scale.set(1.02, 0.85, 1.02);
+    hair.position.set(0, body.headSize * 1.10, 0.0);
+    bones.head.add(hair);
+    parts.hair = hair;
 
-    // Helmet: simple sphere (we can swap to helmet texture later)
-    const helmetMat = suitMat.clone();
-    helmetMat.metalness = 0.6;
-    helmetMat.roughness = 0.25;
-    helmetMat.emissiveIntensity = 2.0;
+    // --- Arms ---
+    function arm(side /* -1 left, +1 right */) {
+      const s = side;
 
-    // Build segmented mannequin (Quest-friendly)
-    this.parts = {
-      helmet: new THREE.Mesh(new THREE.SphereGeometry(0.15, 16, 12), helmetMat),
+      const upper = new THREE.Mesh(
+        new THREE.CapsuleGeometry(body.armThickness, 0.24, 6, 10),
+        mats.shirt
+      );
+      upper.rotation.z = Math.PI / 2;
+      upper.position.set(s * 0.12, -0.10, 0.0);
+      (s < 0 ? bones.upperArmL : bones.upperArmR).add(upper);
 
-      torso: new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.50, 6, 12), suitMat),
-      hips: new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.25, 6, 12), suitMat),
+      const fore = new THREE.Mesh(
+        new THREE.CapsuleGeometry(body.armThickness * 0.92, 0.22, 6, 10),
+        mats.shirt
+      );
+      fore.rotation.z = Math.PI / 2;
+      fore.position.set(s * 0.10, -0.08, 0.0);
+      (s < 0 ? bones.forearmL : bones.forearmR).add(fore);
 
-      leftLeg: new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.55, 6, 10), suitMat),
-      rightLeg: new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.55, 6, 10), suitMat),
+      const hand = new THREE.Mesh(
+        new THREE.BoxGeometry(0.07, 0.05, 0.10),
+        mats.skin
+      );
+      hand.position.set(s * 0.02, -0.02, 0.05);
+      (s < 0 ? bones.wristL : bones.wristR).add(hand);
 
-      // hands: cylinders (we hide when not tracked)
-      leftHand: new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.06, 0.35, 12), suitMat),
-      rightHand: new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.06, 0.35, 12), suitMat),
+      // glove accent strip
+      const glove = new THREE.Mesh(
+        new THREE.BoxGeometry(0.065, 0.018, 0.085),
+        mats.accent
+      );
+      glove.position.set(s * 0.02, 0.01, 0.02);
+      (s < 0 ? bones.wristL : bones.wristR).add(glove);
 
-      visorGlow: new THREE.PointLight(0x00ffff, 0.85, 1.2),
-    };
+      return { upper, fore, hand, glove };
+    }
+    parts.armL = arm(-1);
+    parts.armR = arm(+1);
 
-    this.parts.helmet.name = "AU1_Helmet";
-    this.parts.torso.name = "AU1_Torso";
-    this.parts.hips.name = "AU1_Hips";
-    this.parts.leftLeg.name = "AU1_LeftLeg";
-    this.parts.rightLeg.name = "AU1_RightLeg";
-    this.parts.leftHand.name = "AU1_LeftHand";
-    this.parts.rightHand.name = "AU1_RightHand";
+    // --- Legs ---
+    function leg(side /* -1 left, +1 right */) {
+      const s = side;
+      const upper = new THREE.Mesh(
+        new THREE.CapsuleGeometry(body.legThickness, 0.34, 6, 10),
+        mats.pants
+      );
+      upper.position.set(0, -0.18, 0);
+      (s < 0 ? bones.hipL : bones.hipR).add(upper);
 
-    // default offsets (relative to camera each frame)
-    this.parts.torso.position.y = -0.55;
-    this.parts.hips.position.y = -0.95;
-    this.parts.leftLeg.position.set(-0.10, -1.45, 0);
-    this.parts.rightLeg.position.set(0.10, -1.45, 0);
+      const lower = new THREE.Mesh(
+        new THREE.CapsuleGeometry(body.legThickness * 0.95, 0.32, 6, 10),
+        mats.pants
+      );
+      lower.position.set(0, -0.18, 0);
+      (s < 0 ? bones.kneeL : bones.kneeR).add(lower);
 
-    this.parts.leftHand.rotation.x = Math.PI / 2;
-    this.parts.rightHand.rotation.x = Math.PI / 2;
-    this.parts.leftHand.visible = false;
-    this.parts.rightHand.visible = false;
+      // shoe
+      const shoe = new THREE.Mesh(
+        new THREE.BoxGeometry(0.13, 0.06, 0.28),
+        mats.shoes
+      );
+      shoe.position.set(0, -0.02, 0.10);
+      (s < 0 ? bones.footL : bones.footR).add(shoe);
 
-    this.parts.visorGlow.position.set(0, 0.02, 0.10);
-    this.parts.helmet.add(this.parts.visorGlow);
+      // toe cap
+      const toe = new THREE.Mesh(
+        new THREE.BoxGeometry(0.12, 0.035, 0.10),
+        mats.accent
+      );
+      toe.position.set(0, 0.01, 0.20);
+      (s < 0 ? bones.footL : bones.footR).add(toe);
 
-    this.root.add(
-      this.parts.helmet,
-      this.parts.torso,
-      this.parts.hips,
-      this.parts.leftLeg,
-      this.parts.rightLeg,
-      this.parts.leftHand,
-      this.parts.rightHand
-    );
+      return { upper, lower, shoe, toe };
+    }
+    parts.legL = leg(-1);
+    parts.legR = leg(+1);
+
+    // --- Neck detail ---
+    const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.10, 0.06, 10), mats.shirt);
+    collar.position.set(0, 0.02, 0.02);
+    bones.neck.add(collar);
+    parts.collar = collar;
+
+    // --- Simple “name plate” anchor point (optional for your tags) ---
+    const tagAnchor = new THREE.Object3D();
+    tagAnchor.name = "TagAnchor";
+    tagAnchor.position.set(0, 1.85, 0);
+    bones.root.add(tagAnchor);
+    parts.tagAnchor = tagAnchor;
+
+    // Slight “A-pose” baseline
+    bones.shoulderL.rotation.z = 0.10;
+    bones.shoulderR.rotation.z = -0.10;
+    bones.upperArmL.rotation.x = -0.15;
+    bones.upperArmR.rotation.x = -0.15;
+
+    return { parts, materials: mats };
   }
 
-  // Call in your render loop: avatar.update({ frame, refSpace, dt })
-  update({ frame, refSpace, dt = 0.016 } = {}) {
-    if (!this.state.enabled) return;
+  function setScaleToHeight(root, desiredHeightMeters = 1.70) {
+    // Our default procedural rig is roughly ~1.75m
+    const current = 1.75;
+    const s = desiredHeightMeters / current;
+    root.scale.setScalar(s);
+    return s;
+  }
 
-    const THREE = this.THREE;
-    const cam = this.camera;
-    const tmp = this._tmp;
+  function create({ THREE, gender = "male", height = 1.72, outfit = {}, skinTone = 0xd2b48c, name = "BOT" } = {}) {
+    if (!THREE) throw new Error("Avatar1.create requires THREE");
 
-    // Helmet follows HMD
-    this.parts.helmet.position.copy(cam.position);
-    this.parts.helmet.quaternion.copy(cam.quaternion);
+    const bones = createBones(THREE);
+    const { parts, materials } = buildMesh(THREE, bones, { gender, outfit, skinTone, name });
 
-    // Torso + hips yaw-lock to head (no pitch/roll)
-    tmp.yawEuler.setFromQuaternion(cam.quaternion, "YXZ");
-    tmp.yawEuler.x = 0;
-    tmp.yawEuler.z = 0;
-    tmp.yawQ.setFromEuler(tmp.yawEuler);
+    // Root convenience: place feet on ground
+    bones.root.position.set(0, 0, 0);
 
-    this.parts.torso.position.copy(cam.position).add(tmp.v3a.set(0, -0.55, 0));
-    this.parts.torso.quaternion.copy(tmp.yawQ);
+    // Scale to requested height
+    setScaleToHeight(bones.root, height);
 
-    this.parts.hips.position.copy(cam.position).add(tmp.v3a.set(0, -0.95, 0));
-    this.parts.hips.quaternion.copy(tmp.yawQ);
+    const state = {
+      t: 0,
+      locomotion: 0,     // 0..1
+      walkSpeed: 1.0,    // animation multiplier
+      turn: 0,           // radians
+      lookYaw: 0,
+      lookPitch: 0,
+      mood: "neutral"
+    };
 
-    // Simple leg swing based on camera movement speed
-    const nowPos = tmp.v3b.copy(cam.position);
-    const d = nowPos.distanceTo(tmp.lastCam);
-    tmp.lastCam.copy(nowPos);
+    function setPose(p = {}) {
+      // You can override key bones quickly
+      if (p.hips)  bones.hips.rotation.set(p.hips.x || 0, p.hips.y || 0, p.hips.z || 0);
+      if (p.chest) bones.chest.rotation.set(p.chest.x || 0, p.chest.y || 0, p.chest.z || 0);
+      if (p.head)  bones.head.rotation.set(p.head.x || 0, p.head.y || 0, p.head.z || 0);
 
-    const rawSpeed = d / Math.max(0.0001, dt); // meters/sec approx
-    this.state.speed = this.state.speed * 0.85 + rawSpeed * 0.15;
-
-    const t = performance.now() * 0.008;
-    const swing = Math.min(0.35, this.state.speed * 0.08);
-    this.parts.leftLeg.rotation.x = Math.sin(t) * swing;
-    this.parts.rightLeg.rotation.x = Math.sin(t + Math.PI) * swing;
-
-    // Hands-only: wrist joint tracking (if provided)
-    if (!frame || !refSpace || !this.state.showHands) return;
-
-    let leftSeen = false, rightSeen = false;
-
-    for (const src of frame.session.inputSources) {
-      if (!src?.hand) continue;
-      const wrist = src.hand.get("wrist");
-      const pose = frame.getJointPose(wrist, refSpace);
-      if (!pose) continue;
-
-      const m = (src.handedness === "left") ? this.parts.leftHand : this.parts.rightHand;
-
-      m.position.set(
-        pose.transform.position.x,
-        pose.transform.position.y,
-        pose.transform.position.z
-      );
-      m.quaternion.set(
-        pose.transform.orientation.x,
-        pose.transform.orientation.y,
-        pose.transform.orientation.z,
-        pose.transform.orientation.w
-      );
-      m.visible = true;
-
-      if (src.handedness === "left") leftSeen = true;
-      if (src.handedness === "right") rightSeen = true;
+      if (p.armL) bones.upperArmL.rotation.x = p.armL.x ?? bones.upperArmL.rotation.x;
+      if (p.armR) bones.upperArmR.rotation.x = p.armR.x ?? bones.upperArmR.rotation.x;
+      if (p.legL) bones.hipL.rotation.x = p.legL.x ?? bones.hipL.rotation.x;
+      if (p.legR) bones.hipR.rotation.x = p.legR.x ?? bones.hipR.rotation.x;
     }
 
-    if (!leftSeen) this.parts.leftHand.visible = false;
-    if (!rightSeen) this.parts.rightHand.visible = false;
+    function setLookAt(targetVec3) {
+      if (!targetVec3) return;
+      const headWorld = new THREE.Vector3();
+      parts.head.getWorldPosition(headWorld);
+      const dir = new THREE.Vector3().subVectors(targetVec3, headWorld);
+      dir.y = clamp(dir.y, -0.8, 0.8);
+
+      const yaw = Math.atan2(dir.x, dir.z);
+      const pitch = -Math.atan2(dir.y, Math.max(0.001, Math.hypot(dir.x, dir.z)));
+
+      state.lookYaw = yaw;
+      state.lookPitch = clamp(pitch, -0.45, 0.45);
+    }
+
+    function update(dt, params = {}) {
+      state.t += dt;
+
+      // Locomotion intensity can be fed by your bot speed
+      if (typeof params.locomotion === "number") state.locomotion = clamp(params.locomotion, 0, 1);
+      if (typeof params.walkSpeed === "number") state.walkSpeed = clamp(params.walkSpeed, 0.2, 3.0);
+
+      const loc = state.locomotion;
+      const w = state.walkSpeed;
+
+      // Walk cycle
+      const cycle = state.t * (3.8 * w);
+      const s = Math.sin(cycle);
+      const c = Math.cos(cycle);
+
+      // Subtle full-body bob
+      const bob = (0.012 * loc) * Math.abs(s);
+      bones.hips.position.y = 0.95 + bob;
+
+      // Hips sway + counter-rotate chest (more human-like)
+      bones.hips.rotation.y = 0.10 * loc * s;
+      bones.chest.rotation.y = -0.06 * loc * s;
+      bones.chest.rotation.x = 0.03 * loc * Math.abs(s);
+
+      // Legs
+      const legFwd = 0.75 * loc;
+      bones.hipL.rotation.x =  legFwd * s;
+      bones.hipR.rotation.x = -legFwd * s;
+
+      // knees bend when leg comes forward
+      bones.kneeL.rotation.x = 0.55 * loc * Math.max(0, -s);
+      bones.kneeR.rotation.x = 0.55 * loc * Math.max(0,  s);
+
+      // ankles / feet
+      bones.ankleL.rotation.x = -0.20 * loc * Math.max(0, -s);
+      bones.ankleR.rotation.x = -0.20 * loc * Math.max(0,  s);
+
+      // Arms swing opposite legs
+      const armSwing = 0.55 * loc;
+      bones.upperArmL.rotation.x = -0.15 + (-armSwing * s);
+      bones.upperArmR.rotation.x = -0.15 + ( armSwing * s);
+
+      // elbows soften
+      bones.elbowL.rotation.x = 0.25 + 0.35 * loc * Math.max(0,  s);
+      bones.elbowR.rotation.x = 0.25 + 0.35 * loc * Math.max(0, -s);
+
+      // wrists subtle
+      bones.wristL.rotation.x = 0.08 * loc * c;
+      bones.wristR.rotation.x = -0.08 * loc * c;
+
+      // Head look (blend toward target look if you use setLookAt)
+      bones.neck.rotation.y = lerp(bones.neck.rotation.y, state.lookYaw * 0.20, 0.10);
+      bones.neck.rotation.x = lerp(bones.neck.rotation.x, state.lookPitch * 0.35, 0.10);
+
+      // Idle breathing even when standing
+      const breath = 0.02 * Math.sin(state.t * 1.6);
+      bones.chest.rotation.z = 0.02 * breath;
+    }
+
+    // A clean “handle” object you can attach into world/bots
+    return {
+      root: bones.root,
+      bones,
+      parts,
+      materials,
+      setPose,
+      setLookAt,
+      setScaleToHeight: (h) => setScaleToHeight(bones.root, h),
+      update
+    };
   }
-}
+
+  return { create };
+})();

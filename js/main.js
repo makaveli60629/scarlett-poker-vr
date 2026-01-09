@@ -1,341 +1,341 @@
-// /js/main.js — Scarlett VR Poker Boot v11.2 (STABLE + Controller-on-Rig Fix)
-// Works with your permanent index.html importmap (CDN).
-// Key fixes:
-// - Controllers + grips parented to PlayerRig so they follow locomotion/teleport.
-// - Purple glow lasers.
-// - Safe fallbacks for world.tableFocus to prevent undefined.x errors.
-// - Listens to __SCARLETT_FLAGS and HUD toggle events.
-// - DealingMix loaded safely (won't crash if missing).
+// /js/main.js — ScarlettVR Poker (GitHub Pages safe)
+// Requires: /js/world.js and a local three module at /js/three.module.js
+// Optional: if you already have /js/teleport.js etc, you can wire it into the hooks.
 
-import * as THREE from "three";
-import { VRButton } from "three/addons/webxr/VRButton.js";
-import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
+import * as THREE from "./three.module.js";
+import { World } from "./world.js";
 
-import { initWorld } from "./world.js";
-import { Controls } from "./controls.js";
-import { Teleport } from "./teleport.js";
-import { HandsSystem } from "./hands.js";
+/* -----------------------------
+   Small, CDN-free WebXR button
+-------------------------------- */
+function makeVRButton(renderer, { onEnter, onExit } = {}) {
+  const btn = document.createElement("button");
+  btn.id = "enter-vr";
+  btn.style.cssText = `
+    position:fixed; right:16px; bottom:16px; z-index:9999;
+    padding:12px 14px; border-radius:14px; border:1px solid rgba(255,255,255,.18);
+    background:rgba(10,12,18,.72); color:#e8ecff; font:600 14px system-ui;
+    box-shadow:0 10px 30px rgba(0,0,0,.35); backdrop-filter: blur(8px);
+  `;
+  btn.textContent = "ENTER VR";
+  btn.disabled = true;
+  btn.style.opacity = "0.6";
 
-// ------------------------------------------------------------
-// LOG (index.html expects #log)
-// ------------------------------------------------------------
-const logEl = document.getElementById("log");
-function LOG(...a) {
-  try { console.log(...a); } catch {}
-  try {
-    if (logEl) {
-      logEl.textContent += "\n" + a.map(x => String(x)).join(" ");
-      logEl.scrollTop = logEl.scrollHeight;
+  async function init() {
+    if (!("xr" in navigator)) {
+      btn.textContent = "WEBXR NOT FOUND";
+      return;
     }
-  } catch {}
+    try {
+      const ok = await navigator.xr.isSessionSupported("immersive-vr");
+      if (!ok) {
+        btn.textContent = "VR NOT SUPPORTED";
+        return;
+      }
+      btn.disabled = false;
+      btn.style.opacity = "1";
+      btn.textContent = "ENTER VR";
+    } catch (e) {
+      btn.textContent = "VR CHECK FAILED";
+      console.warn(e);
+    }
+  }
+
+  btn.onclick = async () => {
+    if (!renderer.xr.enabled) renderer.xr.enabled = true;
+
+    if (renderer.xr.isPresenting) {
+      const s = renderer.xr.getSession();
+      if (s) await s.end();
+      return;
+    }
+
+    try {
+      const session = await navigator.xr.requestSession("immersive-vr", {
+        optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking", "layers"],
+        requiredFeatures: ["local-floor"]
+      });
+      renderer.xr.setSession(session);
+      btn.textContent = "EXIT VR";
+
+      session.addEventListener("end", () => {
+        btn.textContent = "ENTER VR";
+        onExit && onExit();
+      });
+
+      onEnter && onEnter();
+    } catch (e) {
+      console.error("requestSession failed:", e);
+    }
+  };
+
+  init();
+  document.body.appendChild(btn);
+  return btn;
 }
-window.addEventListener("unhandledrejection", (e) => {
-  LOG("❌ unhandledrejection:", e?.reason?.message || e?.reason || e);
-});
-window.addEventListener("error", (e) => {
-  LOG("❌ error:", e?.message || e);
-});
 
-const BOOT_V = window.__BUILD_V || Date.now().toString();
-LOG("BOOT v=" + BOOT_V);
+/* -----------------------------
+   App boot
+-------------------------------- */
+const log = (...a) => console.log("[main]", ...a);
 
-// ------------------------------------------------------------
-// SCENE
-// ------------------------------------------------------------
+const canvas = document.createElement("canvas");
+canvas.style.cssText = "position:fixed; inset:0; width:100%; height:100%;";
+document.body.style.margin = "0";
+document.body.style.overflow = "hidden";
+document.body.style.background = "#05060a";
+document.body.appendChild(canvas);
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.physicallyCorrectLights = true;
+renderer.xr.enabled = true;
+
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x020205);
-scene.fog = new THREE.Fog(0x020205, 3, 90);
+scene.fog = new THREE.Fog(0x05060a, 12, 85);
 
-// ------------------------------------------------------------
-// CAMERA + PLAYER RIG
-// ------------------------------------------------------------
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 350);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
 
+// Player rig (camera sits inside this)
 const player = new THREE.Group();
-player.name = "PlayerRig";
+player.name = "playerRig";
+player.position.set(0, 1.7, 6); // lobby spawn (standing)
 player.add(camera);
 scene.add(player);
 
-// spawn (world will align this too)
-player.position.set(0, 0, 3.6);
-camera.position.set(0, 1.65, 0);
+/* -----------------------------
+   Controllers (Quest)
+-------------------------------- */
+const controllers = {
+  left: renderer.xr.getController(0),
+  right: renderer.xr.getController(1),
+  leftGrip: renderer.xr.getControllerGrip(0),
+  rightGrip: renderer.xr.getControllerGrip(1),
+};
+scene.add(controllers.left, controllers.right, controllers.leftGrip, controllers.rightGrip);
 
-// ------------------------------------------------------------
-// RENDERER
-// ------------------------------------------------------------
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.xr.enabled = true;
+// Track input
+const input = {
+  axesL: [0, 0],
+  axesR: [0, 0],
+  buttonsL: [],
+  buttonsR: [],
+  snapCooldown: 0,
+};
 
-try { renderer.xr.setReferenceSpaceType("local-floor"); } catch {}
-
-document.body.appendChild(renderer.domElement);
-document.body.appendChild(VRButton.createButton(renderer));
-
-// ------------------------------------------------------------
-// LIGHTING (baseline; world adds more)
-// ------------------------------------------------------------
-scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.15));
-const dir = new THREE.DirectionalLight(0xffffff, 1.0);
-dir.position.set(7, 12, 6);
-scene.add(dir);
-
-// ------------------------------------------------------------
-// FLAGS FROM INDEX HUD
-// ------------------------------------------------------------
-const Flags = (window.__SCARLETT_FLAGS = window.__SCARLETT_FLAGS || {
-  teleport: true,
-  move: true,
-  snap: true,
-  hands: true
-});
-
-// toggle events from index.html
-window.addEventListener("scarlett-toggle-teleport", (e) => { Flags.teleport = !!e.detail; LOG("[hud] teleport=" + Flags.teleport); });
-window.addEventListener("scarlett-toggle-move", (e) => { Flags.move = !!e.detail; LOG("[hud] move=" + Flags.move); });
-window.addEventListener("scarlett-toggle-snap", (e) => { Flags.snap = !!e.detail; LOG("[hud] snap=" + Flags.snap); });
-window.addEventListener("scarlett-toggle-hands", (e) => { Flags.hands = !!e.detail; LOG("[hud] hands=" + Flags.hands); });
-
-// ------------------------------------------------------------
-// XR CONTROLLERS (IMPORTANT: parent to PlayerRig so they follow movement)
-// ------------------------------------------------------------
-const controllerModelFactory = new XRControllerModelFactory();
-const controllers = [];
-const grips = [];
-
-// purple glow laser
-function makeLaser() {
-  const geo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, 0, -1),
-  ]);
-  const mat = new THREE.LineBasicMaterial({ color: 0xb46bff, transparent: true, opacity: 0.95 });
-  const line = new THREE.Line(geo, mat);
-  line.scale.z = 10;
-  line.name = "LaserLine";
-
-  // little glowing tip
-  const tip = new THREE.Mesh(
-    new THREE.SphereGeometry(0.010, 10, 8),
-    new THREE.MeshBasicMaterial({ color: 0xff2d7a, transparent: true, opacity: 0.95 })
-  );
-  tip.position.z = -1.0;
-  tip.name = "LaserTip";
-  line.add(tip);
-
-  return line;
-}
-
-for (let i = 0; i < 2; i++) {
-  const c = renderer.xr.getController(i);
-  c.name = "Controller" + i;
-  c.add(makeLaser());
-
-  // ✅ Parent to player rig (fixes “controllers floating in front of me”)
-  player.add(c);
-  controllers.push(c);
-
-  const g = renderer.xr.getControllerGrip(i);
-  g.name = "Grip" + i;
-  g.add(controllerModelFactory.createControllerModel(g));
-
-  // ✅ Parent to player rig also
-  player.add(g);
-  grips.push(g);
-}
-
-LOG("[main] controllers ready ✅");
-
-// ------------------------------------------------------------
-// WORLD
-// ------------------------------------------------------------
-let world = null;
-try {
-  world = await initWorld({ THREE, scene, log: LOG, v: BOOT_V });
-  LOG("[world] ready ✅");
-} catch (e) {
-  LOG("❌ world init failed:", e?.message || e);
-  world = null;
-}
-
-// safe tableFocus fallback
-const tableFocus = world?.tableFocus && Number.isFinite(world.tableFocus.x)
-  ? world.tableFocus
-  : new THREE.Vector3(0, 0, -6.5);
-
-// point camera at table by default (non-VR)
-try { camera.lookAt(tableFocus.x, 1.0, tableFocus.z); } catch {}
-
-LOG("[main] world loaded ✅");
-
-// Connect world features
-try {
-  world?.connect?.({ playerRig: player, camera, controllers, grips });
-} catch (e) {
-  LOG("[main] world.connect failed:", e?.message || e);
-}
-
-// ------------------------------------------------------------
-// CONTROLS
-// ------------------------------------------------------------
-const controls = Controls.init({
-  THREE,
-  renderer,
-  camera,
-  player,
-  controllers,
-  grips,
-  log: LOG,
-  world
-});
-
-// Optional: HUD touch movement (Android) — if your controls.js supports it
-let touchVec = { f: 0, b: 0, l: 0, r: 0, turnL: 0, turnR: 0 };
-window.addEventListener("scarlett-touch", (e) => {
-  if (!e?.detail) return;
-  touchVec = { ...touchVec, ...e.detail };
-});
-
-// ------------------------------------------------------------
-// HANDS
-// ------------------------------------------------------------
-const hands = HandsSystem.init({
-  THREE,
-  scene,
-  renderer,
-  log: LOG
-});
-
-// ------------------------------------------------------------
-// TELEPORT
-// ------------------------------------------------------------
-const teleport = Teleport.init({
-  THREE,
-  scene,
-  renderer,
-  camera,
-  player,
-  controllers,
-  log: LOG,
-  world
-});
-
-// ------------------------------------------------------------
-// DEALING MIX (SAFE LOAD)
-// ------------------------------------------------------------
-let dealing = null;
-async function loadDealingMix() {
-  const tryPaths = [
-    "./dealingMix.js",
-    "./DealingMix.js",
-    "./dealerMix.js",
-    "./DealerMix.js"
-  ];
-
-  for (const p of tryPaths) {
-    try {
-      const mod = await import(`${p}?v=${encodeURIComponent(BOOT_V)}`);
-      if (mod?.DealingMix?.init) return mod.DealingMix;
-    } catch {}
+function pollGamepads() {
+  const session = renderer.xr.getSession();
+  if (!session) return;
+  const sources = session.inputSources;
+  // Map: first gamepad -> left, second -> right (usually true on Quest)
+  let gpL = null, gpR = null;
+  for (const src of sources) {
+    if (!src.gamepad) continue;
+    if (!gpL) gpL = src.gamepad;
+    else if (!gpR) gpR = src.gamepad;
   }
-  return null;
+  if (gpL) {
+    input.axesL[0] = gpL.axes?.[2] ?? gpL.axes?.[0] ?? 0;
+    input.axesL[1] = gpL.axes?.[3] ?? gpL.axes?.[1] ?? 0;
+    input.buttonsL = gpL.buttons || [];
+  }
+  if (gpR) {
+    input.axesR[0] = gpR.axes?.[2] ?? gpR.axes?.[0] ?? 0;
+    input.axesR[1] = gpR.axes?.[3] ?? gpR.axes?.[1] ?? 0;
+    input.buttonsR = gpR.buttons || [];
+  }
 }
 
-try {
-  const DealingMix = await loadDealingMix();
-  if (DealingMix) {
-    dealing = DealingMix.init({
-      THREE,
-      scene,
-      log: LOG,
-      world
-    });
-    dealing.startHand?.();
-    LOG("[DealingMix] init ✅");
+/* -----------------------------
+   Build the world
+-------------------------------- */
+const world = World.init({
+  THREE,
+  scene,
+  renderer,
+  camera,
+  player,
+  controllers,
+  log: (...a) => console.log("[world]", ...a),
+});
+
+/* -----------------------------
+   Movement & seating rules
+-------------------------------- */
+let mode = "lobby"; // "lobby" | "seated" | "spectate"
+
+function setMode(next) {
+  mode = next;
+  world.setMode(next);
+
+  // Standing in lobby/spectate; seated at table
+  if (next === "seated") {
+    // keep camera height fixed while seated
+    camera.position.y = 1.35;
   } else {
-    LOG("[DealingMix] missing ⚠️ (no module found)");
+    camera.position.y = 0; // in VR, HMD supplies height; in desktop, we keep rig height
   }
-} catch (e) {
-  LOG("[DealingMix] init failed ⚠️", e?.message || e);
-  dealing = null;
 }
 
-// ------------------------------------------------------------
-// RECENTER (from HUD)
-// ------------------------------------------------------------
-window.addEventListener("scarlett-recenter", () => {
-  const spawn = world?.spawnPads?.[0] || new THREE.Vector3(0, 0, 3.6);
-  player.position.set(spawn.x, 0, spawn.z);
-  player.rotation.set(0, 0, 0);
-  try { camera.lookAt(tableFocus.x, 1.0, tableFocus.z); } catch {}
-  LOG("[main] recentered ✅");
+setMode("lobby");
+
+// WASD (desktop fallback)
+const keys = new Set();
+window.addEventListener("keydown", (e) => keys.add(e.code));
+window.addEventListener("keyup", (e) => keys.delete(e.code));
+
+function getMoveVector(dt) {
+  let x = 0, z = 0;
+
+  // VR sticks (left)
+  x += input.axesL[0] || 0;
+  z += input.axesL[1] || 0;
+
+  // Desktop WASD
+  if (keys.has("KeyA")) x -= 1;
+  if (keys.has("KeyD")) x += 1;
+  if (keys.has("KeyW")) z -= 1;
+  if (keys.has("KeyS")) z += 1;
+
+  // deadzone
+  const dz = 0.12;
+  if (Math.abs(x) < dz) x = 0;
+  if (Math.abs(z) < dz) z = 0;
+
+  // speed
+  const speed = mode === "lobby" ? 2.4 : (mode === "spectate" ? 2.8 : 0.0);
+  return { x: x * speed * dt, z: z * speed * dt };
+}
+
+function applyMove(dt) {
+  if (mode === "seated") return;
+
+  const mv = getMoveVector(dt);
+  if (!mv.x && !mv.z) return;
+
+  // Move relative to camera yaw
+  const yaw = world.getPlayerYaw();
+  const cos = Math.cos(yaw), sin = Math.sin(yaw);
+
+  const dx = mv.x * cos - mv.z * sin;
+  const dz = mv.x * sin + mv.z * cos;
+
+  const nextPos = player.position.clone();
+  nextPos.x += dx;
+  nextPos.z += dz;
+
+  // Collision against world colliders
+  const resolved = world.resolvePlayerCollision(player.position, nextPos);
+  player.position.copy(resolved);
+}
+
+function applySnapTurn(dt) {
+  // right stick X
+  input.snapCooldown = Math.max(0, input.snapCooldown - dt);
+  const sx = input.axesR[0] || 0;
+
+  if (input.snapCooldown > 0) return;
+
+  const thresh = 0.72;
+  if (sx > thresh) {
+    world.addPlayerYaw(-Math.PI / 6); // 30°
+    input.snapCooldown = 0.22;
+  } else if (sx < -thresh) {
+    world.addPlayerYaw(+Math.PI / 6);
+    input.snapCooldown = 0.22;
+  }
+}
+
+/* -----------------------------
+   Auto-seat + spectate
+-------------------------------- */
+function updateZones() {
+  const z = world.getZoneAt(player.position);
+
+  if (z === "table" && mode !== "seated") {
+    // Auto-seat into nearest seat
+    const seat = world.getNearestSeat(player.position);
+    if (seat) {
+      world.sitPlayerAtSeat(seat.index);
+      setMode("seated");
+    }
+  }
+
+  if (z === "lobby" && mode === "seated") {
+    // If you leave table zone, stand back up
+    world.standPlayerInLobby();
+    setMode("lobby");
+  }
+
+  if (z === "spectate" && mode !== "spectate") {
+    setMode("spectate");
+  } else if (z !== "spectate" && mode === "spectate") {
+    setMode("lobby");
+  }
+}
+
+// Desktop shortcut keys
+window.addEventListener("keydown", (e) => {
+  if (e.code === "KeyP") {
+    // Toggle spectate (desktop)
+    if (mode === "spectate") setMode("lobby");
+    else {
+      world.movePlayerToSpectate();
+      setMode("spectate");
+    }
+  }
+  if (e.code === "Escape" && mode === "seated") {
+    world.standPlayerInLobby();
+    setMode("lobby");
+  }
 });
 
-// ------------------------------------------------------------
-// RESIZE
-// ------------------------------------------------------------
+/* -----------------------------
+   Resize
+-------------------------------- */
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// ------------------------------------------------------------
-// SMALL HELPERS
-// ------------------------------------------------------------
-function clampPosToRoom() {
-  const c = world?.roomClamp;
-  if (!c) return;
-  player.position.x = clamp(player.position.x, c.minX, c.maxX);
-  player.position.z = clamp(player.position.z, c.minZ, c.maxZ);
-}
-function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+/* -----------------------------
+   VR Button
+-------------------------------- */
+makeVRButton(renderer, {
+  onEnter: () => {
+    log("VR session start ✅");
+    // In VR, camera local y comes from headset; keep rig y for floor.
+    // We keep player.position.y as 0 in VR to let local-floor work.
+    // World uses local-floor; playerRig y stays at 0 in VR.
+    if (renderer.xr.isPresenting) player.position.y = 0;
+  },
+  onExit: () => {
+    log("VR session end ✅");
+    // restore desktop standing height
+    player.position.y = 1.7;
+  }
+});
 
-// ------------------------------------------------------------
-// LOOP
-// ------------------------------------------------------------
-let last = performance.now();
-
+/* -----------------------------
+   Render loop
+-------------------------------- */
+let lastT = performance.now();
 renderer.setAnimationLoop(() => {
   const now = performance.now();
-  const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
+  const dt = Math.min(0.05, (now - lastT) / 1000);
+  lastT = now;
 
-  // respect HUD flags
-  try { world?.tick?.(dt); } catch (e) { console.error(e); }
+  pollGamepads();
+  applySnapTurn(dt);
+  applyMove(dt);
 
-  try {
-    // If controls.js supports internal flags, let it read window.__SCARLETT_FLAGS
-    if (Flags.move || Flags.snap) controls?.update?.(dt);
-  } catch (e) { console.error(e); }
-
-  try {
-    if (Flags.teleport) teleport?.update?.(dt);
-  } catch (e) { console.error(e); }
-
-  try { dealing?.update?.(dt); } catch (e) { console.error(e); }
-
-  try {
-    hands?.setEnabled?.(!!Flags.hands);
-    if (Flags.hands) hands?.update?.(dt);
-  } catch (e) { console.error(e); }
-
-  // keep inside room bounds (simple safety)
-  try { clampPosToRoom(); } catch {}
-
-  // laser pulse
-  try {
-    const t = now * 0.001;
-    for (const c of controllers) {
-      const line = c.getObjectByName("LaserLine");
-      if (line?.material) line.material.opacity = 0.70 + Math.sin(t * 4.0) * 0.18;
-      const tip = c.getObjectByName("LaserTip");
-      if (tip?.material) tip.material.opacity = 0.75 + Math.sin(t * 6.0) * 0.22;
-    }
-  } catch {}
+  world.update(dt);
+  updateZones();
 
   renderer.render(scene, camera);
 });
 
-LOG("[main] ready ✅");
+log("boot ✅");

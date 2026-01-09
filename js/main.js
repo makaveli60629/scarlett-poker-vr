@@ -1,38 +1,50 @@
-// /js/main.js — Scarlett VR Poker — CASINO MASTER MAIN (movement improved)
+// /js/main.js — Scarlett VR Poker — CASINO MASTER MAIN (CACHE-BUST WORLD)
+// IMPORTANT: This file dynamically imports world.js with ?v=__BUILD_V to prevent Quest/GitHub cache issues.
+
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
-import { initWorld, CyberAvatar } from "./world.js";
 
 const log = (m) => { try { console.log(m); } catch {} };
 
-// Renderer
+const BUILD_V = (window.__BUILD_V || Date.now()).toString();
+log("[main] BUILD_V=" + BUILD_V);
+
+// Dynamically import world with cache bust
+const worldModUrl = "./js/world.js?v=" + encodeURIComponent(BUILD_V);
+log("[main] Import world:\n" + new URL(worldModUrl, location.href).toString());
+
+const WorldMod = await import(worldModUrl);
+const { initWorld, CyberAvatar } = WorldMod;
+
+// ---------- Renderer ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
 
-// Scene + Camera
+// ---------- Scene + Camera ----------
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 250);
 camera.position.set(0, 1.6, 6.0);
 
-// World
+// ---------- World ----------
 const world = initWorld({ THREE, scene, log });
+log("[main] world init ✅");
 
-// VR Button (uses your index session init)
+// ---------- VRButton ----------
 const sessionInit = window.__XR_SESSION_INIT || { optionalFeatures: ["local-floor", "bounded-floor"] };
 document.body.appendChild(VRButton.createButton(renderer, sessionInit));
 log("[main] VRButton appended ✅");
 
-// Controllers hidden
+// ---------- Controllers hidden ----------
 const controller1 = renderer.xr.getController(0);
 const controller2 = renderer.xr.getController(1);
 controller1.visible = false;
 controller2.visible = false;
 scene.add(controller1, controller2);
 
-// Spawn helper
+// ---------- Spawn helper ----------
 function placePlayerAtSpawn() {
   const spawn = (world.spawn || new THREE.Vector3(0, 0, 6.0)).clone();
   const camXZ = new THREE.Vector3(camera.position.x, 0, camera.position.z);
@@ -40,17 +52,19 @@ function placePlayerAtSpawn() {
   world.group.position.sub(delta);
   log("[spawn] placed ✅ " + spawn.toArray().map(n => n.toFixed(2)).join(","));
 }
+
 renderer.xr.addEventListener("sessionstart", () => requestAnimationFrame(placePlayerAtSpawn));
 
-// Avatar 4.0
+// ---------- Avatar 4.0 ----------
 const avatar4_0 = new CyberAvatar({
   THREE, scene, camera,
   textureURL: "assets/textures/cyber_suit_atlas.png",
   log
 });
+
 window.addEventListener("scarlett-toggle-hands", (e) => avatar4_0.setHandsVisible(!!e.detail));
 
-// Recenter
+// ---------- Recenter ----------
 window.addEventListener("scarlett-recenter", () => {
   world.group.position.set(0, 0, 0);
   world.group.rotation.set(0, 0, 0);
@@ -58,7 +72,23 @@ window.addEventListener("scarlett-recenter", () => {
   log("[main] recenter ✅");
 });
 
-// Teleport visuals
+// ---------- Movement helpers ----------
+const touch = { f:0,b:0,l:0,r:0,turnL:0,turnR:0 };
+window.addEventListener("scarlett-touch", (e) => {
+  const d = e.detail || {};
+  touch.f = d.f || 0; touch.b = d.b || 0; touch.l = d.l || 0; touch.r = d.r || 0;
+  touch.turnL = d.turnL || 0; touch.turnR = d.turnR || 0;
+});
+
+function shapeAxis(v, dead = 0.18) {
+  const a = Math.abs(v);
+  if (a < dead) return 0;
+  const s = (a - dead) / (1 - dead);
+  const curved = s * s;
+  return Math.sign(v) * curved;
+}
+
+// ---------- Teleport visuals ----------
 const marker = new THREE.Mesh(
   new THREE.RingGeometry(0.20, 0.30, 48),
   new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.85 })
@@ -79,7 +109,7 @@ const tmpMat = new THREE.Matrix4();
 const tmpDir = new THREE.Vector3();
 
 const state = {
-  moveSpeed: 2.0, // faster, less floaty
+  moveSpeed: 2.0,
   snapAngle: THREE.MathUtils.degToRad(30),
   snapCooldown: 0,
   teleportOk: false,
@@ -87,7 +117,6 @@ const state = {
   teleportArmed: false,
 };
 
-// Teleport confirm
 controller1.addEventListener("selectstart", () => {
   if (!window.__SCARLETT_FLAGS?.teleport) return;
   state.teleportArmed = true;
@@ -104,31 +133,16 @@ controller1.addEventListener("selectend", () => {
   state.teleportArmed = false;
 });
 
-// Mobile touch
-const touch = { f:0,b:0,l:0,r:0,turnL:0,turnR:0 };
-window.addEventListener("scarlett-touch", (e) => {
-  const d = e.detail || {};
-  touch.f = d.f || 0; touch.b = d.b || 0; touch.l = d.l || 0; touch.r = d.r || 0;
-  touch.turnL = d.turnL || 0; touch.turnR = d.turnR || 0;
-});
-
-// stick shaping (feels tighter)
-function shapeAxis(v, dead = 0.18) {
-  const a = Math.abs(v);
-  if (a < dead) return 0;
-  const s = (a - dead) / (1 - dead);
-  const curved = s * s; // quadratic curve
-  return Math.sign(v) * curved;
-}
-
+// ---------- Resize ----------
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Loop
+// ---------- Loop ----------
 let lastT = performance.now();
+
 renderer.setAnimationLoop((t, frame) => {
   const now = performance.now();
   const dt = Math.min(0.05, (now - lastT) / 1000);
@@ -163,17 +177,19 @@ renderer.setAnimationLoop((t, frame) => {
     const origin = raycaster.ray.origin;
     const dir = raycaster.ray.direction;
     const denom = dir.y;
+
     if (Math.abs(denom) > 1e-5) {
       const tHit = (0 - origin.y) / denom;
       if (tHit > 0) {
         const hit = origin.clone().add(dir.clone().multiplyScalar(tHit));
 
-        // Always escapable clamp near table center
+        // clamp near table center (always escapable)
         const v2 = new THREE.Vector2(hit.x, hit.z);
         const dist = v2.length();
         const TABLE_BLOCK_R = 1.25;
         const ESCAPE_R = 2.4;
         const finalHit = hit.clone();
+
         if (dist < TABLE_BLOCK_R) {
           if (v2.lengthSq() < 1e-6) v2.set(1, 0);
           v2.normalize().multiplyScalar(ESCAPE_R);
@@ -195,7 +211,7 @@ renderer.setAnimationLoop((t, frame) => {
     pts.needsUpdate = true;
   }
 
-  // Movement input (robust)
+  // Movement input
   let moveX = 0, moveZ = 0, snapX = 0;
 
   if (renderer.xr.isPresenting) {
@@ -211,14 +227,8 @@ renderer.setAnimationLoop((t, frame) => {
       return { x: (a[2] ?? a[0] ?? 0), y: (a[3] ?? a[1] ?? 0) };
     };
 
-    if (leftSrc) {
-      const s = readStick(leftSrc);
-      moveX = s.x; moveZ = s.y;
-    }
-    if (rightSrc) {
-      const s = readStick(rightSrc);
-      snapX = s.x;
-    }
+    if (leftSrc) { const s = readStick(leftSrc); moveX = s.x; moveZ = s.y; }
+    if (rightSrc) { const s = readStick(rightSrc); snapX = s.x; }
   }
 
   // Mobile dock
@@ -262,7 +272,7 @@ renderer.setAnimationLoop((t, frame) => {
     }
   }
 
-  // World update (bots + table)
+  // Update world
   world.update(dt, camera);
 
   renderer.render(scene, camera);

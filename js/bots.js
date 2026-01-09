@@ -1,222 +1,298 @@
-// /js/bots.js — Scarlett Bots v3.1 (AVATAR UPDATE 1)
-// - Proper seated pose, feet on floor, hands on table
-// - Safe materials (no textures required)
-// - Optional idle motion
+// /js/bots.js — Scarlett Bots v3.0 (LOW POLY ONE-MESH + SHIRT TEXTURE + SEATED)
+// ✅ One merged low-poly mesh per bot (single draw call)
+// ✅ Shirt texture on body/arms (repeating pattern)
+// ✅ Head uses skin color (via small atlas region)
+// ✅ Seats bots correctly on SeatAnchor world position (no floating)
+// ✅ Simple "hands on table" baked pose
+// ✅ Safe fallback if texture missing
+
+import * as THREE from "three";
+import { BufferGeometryUtils } from "three/addons/utils/BufferGeometryUtils.js";
 
 export const Bots = (() => {
-  let THREE, scene, getSeats, tableFocus, metrics;
-  let playerRig, camera;
+  let scene, getSeats, tableFocus, metrics;
 
-  const B = { bots: [], config: { count: 6, idle: true } };
+  const B = {
+    bots: [],
+    WALKERS: 0,
+    _atlasTex: null,
+    _atlasMat: null,
+    _atlasReady: false,
+  };
 
-  function makeSuitMat() {
-    return new THREE.MeshStandardMaterial({
-      color: 0x141923,
-      roughness: 0.78,
-      metalness: 0.10,
+  // ---------- TEXTURE / ATLAS ----------
+  // We build a 1024x512 atlas:
+  // Left  (0..0.25 U)  = solid "skin" area (white, then vertex colors tint it)
+  // Right (0.25..1 U)  = shirt diffuse image stretched to fit
+  function buildAtlasMaterial({ shirtUrl, skinColor = 0xd2b48c } = {}) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1024;
+    canvas.height = 512;
+    const ctx = canvas.getContext("2d");
+
+    // base fill
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // left skin zone (white — vertexColor will tint)
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, 256, 512);
+
+    // right zone placeholder
+    ctx.fillStyle = "#2a2f3a";
+    ctx.fillRect(256, 0, 768, 512);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.needsUpdate = true;
+
+    // Load shirt image into right side when ready
+    const loader = new THREE.TextureLoader();
+    loader.load(
+      shirtUrl,
+      (shirtTex) => {
+        // draw shirtTex image into right side
+        try {
+          const img = shirtTex.image;
+          // clear right region
+          ctx.clearRect(256, 0, 768, 512);
+          // draw the shirt diffuse into right region
+          ctx.drawImage(img, 256, 0, 768, 512);
+
+          tex.needsUpdate = true;
+          B._atlasReady = true;
+        } catch (e) {
+          console.warn("[bots] atlas draw failed:", e);
+        }
+      },
+      undefined,
+      (err) => {
+        console.warn("[bots] shirt texture load failed:", err);
+      }
+    );
+
+    // Vertex colors ON so head can be tinted skin while body stays dark
+    const mat = new THREE.MeshStandardMaterial({
+      map: tex,
+      vertexColors: true,
+      roughness: 0.75,
+      metalness: 0.12,
       emissive: 0x001018,
-      emissiveIntensity: 0.10
+      emissiveIntensity: 0.10,
     });
+
+    B._atlasTex = tex;
+    B._atlasMat = mat;
+    return mat;
   }
-  function makeSkinMat() {
-    return new THREE.MeshStandardMaterial({ color: 0xd2b48c, roughness: 0.65, metalness: 0.0 });
+
+  // ---------- UV HELPERS ----------
+  // Remap geometry UVs into atlas region:
+  // uRange = [u0,u1] inside atlas, vRange=[v0,v1]
+  function remapUV(geo, u0, u1, v0, v1) {
+    const uv = geo.attributes.uv;
+    if (!uv) return geo;
+    for (let i = 0; i < uv.count; i++) {
+      const u = uv.getX(i);
+      const v = uv.getY(i);
+      uv.setXY(i, u0 + u * (u1 - u0), v0 + v * (v1 - v0));
+    }
+    uv.needsUpdate = true;
+    return geo;
   }
 
-  function makeBot() {
-    const bot = new THREE.Group();
-    const suit = makeSuitMat();
-    const skin = makeSkinMat();
+  function applyVertexColor(geo, hex) {
+    const c = new THREE.Color(hex);
+    const count = geo.attributes.position.count;
+    const colors = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      colors[i * 3 + 0] = c.r;
+      colors[i * 3 + 1] = c.g;
+      colors[i * 3 + 2] = c.b;
+    }
+    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    return geo;
+  }
 
-    const hips = new THREE.Group();
-    const spine = new THREE.Group();
-    const chest = new THREE.Group();
-    const headPivot = new THREE.Group();
+  // ---------- LOW POLY BOT (ONE MERGED MESH) ----------
+  // We bake a seated pose directly into geometry.
+  function makeLowPolyBotMesh({ suitColor = 0x141923, skinColor = 0xd2b48c } = {}) {
+    const parts = [];
 
-    bot.add(hips);
-    hips.add(spine);
-    spine.add(chest);
-    chest.add(headPivot);
+    // Atlas regions:
+    // Skin area: U 0.00..0.25
+    // Shirt area: U 0.25..1.00
+    const SKIN_U0 = 0.00, SKIN_U1 = 0.25;
+    const SHIRT_U0 = 0.25, SHIRT_U1 = 1.00;
 
-    const hipsMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.20, 6, 10), suit);
-    hipsMesh.position.y = 0.10; hips.add(hipsMesh);
-
-    const torsoMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.55, 8, 12), suit);
-    torsoMesh.position.y = 0.48; chest.add(torsoMesh);
-
-    const headMesh = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 12), skin);
-    headMesh.position.y = 0.20; headPivot.add(headMesh);
-
-    function makeArm(side) {
-      const s = side;
-      const shoulder = new THREE.Group();
-      const upper = new THREE.Group();
-      const lower = new THREE.Group();
-      const hand = new THREE.Group();
-
-      chest.add(shoulder);
-      shoulder.add(upper);
-      upper.add(lower);
-      lower.add(hand);
-
-      shoulder.position.set(0.22 * s, 0.72, 0.02);
-
-      const upperMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.26, 6, 10), suit);
-      upperMesh.position.y = -0.16; upper.add(upperMesh);
-
-      const lowerMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.24, 6, 10), suit);
-      lowerMesh.position.y = -0.16; lower.add(lowerMesh);
-
-      const handMesh = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.03, 0.10), suit);
-      handMesh.position.set(0, -0.02, 0.02); hand.add(handMesh);
-
-      return { shoulder, upper, lower, hand };
+    // --- TORSO (boxy low poly) ---
+    {
+      const torso = new THREE.BoxGeometry(0.42, 0.55, 0.24, 1, 1, 1);
+      // Seated: lower torso
+      torso.translate(0, 0.78, 0.02);
+      remapUV(torso, SHIRT_U0, SHIRT_U1, 0.0, 1.0);
+      applyVertexColor(torso, suitColor);
+      parts.push(torso);
     }
 
-    function makeLeg(side) {
-      const s = side;
-      const hip = new THREE.Group();
-      const thigh = new THREE.Group();
-      const shin = new THREE.Group();
-      const foot = new THREE.Group();
-
-      hips.add(hip);
-      hip.add(thigh);
-      thigh.add(shin);
-      shin.add(foot);
-
-      hip.position.set(0.10 * s, 0.10, 0.00);
-
-      const thighMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.30, 6, 10), suit);
-      thighMesh.position.y = -0.18; thigh.add(thighMesh);
-
-      const shinMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.28, 6, 10), suit);
-      shinMesh.position.y = -0.18; shin.add(shinMesh);
-
-      const footMesh = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.04, 0.18), suit);
-      footMesh.position.set(0, -0.02, 0.06); foot.add(footMesh);
-
-      return { hip, thigh, shin, foot };
+    // --- PELVIS ---
+    {
+      const pelvis = new THREE.BoxGeometry(0.34, 0.18, 0.20, 1, 1, 1);
+      pelvis.translate(0, 0.52, 0.05);
+      remapUV(pelvis, SHIRT_U0, SHIRT_U1, 0.0, 1.0);
+      applyVertexColor(pelvis, suitColor);
+      parts.push(pelvis);
     }
 
-    const armL = makeArm(-1), armR = makeArm(+1);
-    const legL = makeLeg(-1), legR = makeLeg(+1);
+    // --- HEAD (low poly) ---
+    {
+      const head = new THREE.SphereGeometry(0.13, 10, 8);
+      head.translate(0, 1.16, 0.04);
+      // head samples SKIN region of atlas
+      remapUV(head, SKIN_U0, SKIN_U1, 0.0, 1.0);
+      applyVertexColor(head, skinColor);
+      parts.push(head);
+    }
 
-    spine.position.y = 0.10;
-    chest.position.y = 0.10;
-    headPivot.position.y = 1.20;
+    // --- ARMS (low poly cylinders), baked "hands on table" pose ---
+    {
+      const armGeo = new THREE.CylinderGeometry(0.055, 0.055, 0.38, 8, 1, true);
 
-    bot.userData = {
-      hips, spine, chest, headPivot,
-      armL, armR, legL, legR,
-      seated: true,
-      seatIndex: 0,
-      t: Math.random() * 10
-    };
+      // Left arm
+      const aL = armGeo.clone();
+      // rotate forward/down
+      aL.rotateX(Math.PI * 0.55);
+      aL.rotateZ(Math.PI * 0.08);
+      aL.translate(-0.26, 0.80, -0.12);
+      remapUV(aL, SHIRT_U0, SHIRT_U1, 0.0, 1.0);
+      applyVertexColor(aL, suitColor);
+      parts.push(aL);
 
+      // Right arm
+      const aR = armGeo.clone();
+      aR.rotateX(Math.PI * 0.55);
+      aR.rotateZ(-Math.PI * 0.08);
+      aR.translate(0.26, 0.80, -0.12);
+      remapUV(aR, SHIRT_U0, SHIRT_U1, 0.0, 1.0);
+      applyVertexColor(aR, suitColor);
+      parts.push(aR);
+    }
+
+    // --- LEGS (bent) ---
+    {
+      const legGeo = new THREE.CylinderGeometry(0.07, 0.07, 0.48, 8, 1, true);
+
+      const lL = legGeo.clone();
+      lL.rotateX(Math.PI * 0.42);
+      lL.translate(-0.11, 0.30, 0.14);
+      remapUV(lL, SHIRT_U0, SHIRT_U1, 0.0, 1.0);
+      applyVertexColor(lL, suitColor);
+      parts.push(lL);
+
+      const lR = legGeo.clone();
+      lR.rotateX(Math.PI * 0.42);
+      lR.translate(0.11, 0.30, 0.14);
+      remapUV(lR, SHIRT_U0, SHIRT_U1, 0.0, 1.0);
+      applyVertexColor(lR, suitColor);
+      parts.push(lR);
+    }
+
+    // --- SHOES (simple boxes) ---
+    {
+      const shoe = new THREE.BoxGeometry(0.14, 0.06, 0.26, 1, 1, 1);
+
+      const sL = shoe.clone();
+      sL.translate(-0.11, 0.06, 0.28);
+      remapUV(sL, SHIRT_U0, SHIRT_U1, 0.0, 1.0);
+      applyVertexColor(sL, suitColor);
+      parts.push(sL);
+
+      const sR = shoe.clone();
+      sR.translate(0.11, 0.06, 0.28);
+      remapUV(sR, SHIRT_U0, SHIRT_U1, 0.0, 1.0);
+      applyVertexColor(sR, suitColor);
+      parts.push(sR);
+    }
+
+    const merged = BufferGeometryUtils.mergeGeometries(parts, false);
+    merged.computeVertexNormals();
+
+    const bot = new THREE.Mesh(merged, B._atlasMat || new THREE.MeshStandardMaterial({ color: 0x141923 }));
+    bot.frustumCulled = true;
+    bot.userData = { mode: "seated", seatIndex: 0 };
     return bot;
   }
 
+  // ---------- SEATING ----------
   function sitBot(bot, seatIndex) {
     const seats = getSeats?.() || [];
     const s = seats[seatIndex];
     if (!s?.anchor) return;
 
-    const seatPos = new THREE.Vector3();
-    s.anchor.getWorldPosition(seatPos);
+    const anchorPos = new THREE.Vector3();
+    s.anchor.getWorldPosition(anchorPos);
 
-    bot.position.copy(seatPos);
+    bot.position.copy(anchorPos);
     bot.rotation.set(0, s.yaw, 0);
 
-    // push slightly away from table (prevents clipping)
+    // push a touch away from table to avoid clipping
     const toTable = new THREE.Vector3().subVectors(tableFocus, bot.position);
-    toTable.y = 0; toTable.normalize();
-    bot.position.addScaledVector(toTable, -0.06);
+    toTable.y = 0;
+    toTable.normalize();
+    bot.position.addScaledVector(toTable, -0.10);
 
-    const U = bot.userData;
+    // lower a hair so butt meets seat
+    bot.position.y -= (metrics?.seatDrop ?? 0.06);
 
-    // lean into backrest slightly
-    U.spine.rotation.set(-0.08, 0, 0);
-    U.chest.rotation.set(-0.10, 0, 0);
-    U.headPivot.rotation.set(0.10, 0, 0);
-
-    // legs (sit)
-    const thighForward = 1.05;
-    const shinDown = -1.10;
-    U.legL.thigh.rotation.set(thighForward, 0, 0);
-    U.legR.thigh.rotation.set(thighForward, 0, 0);
-    U.legL.shin.rotation.set(shinDown, 0, 0);
-    U.legR.shin.rotation.set(shinDown, 0, 0);
-    U.legL.foot.rotation.set(0.15, 0, 0);
-    U.legR.foot.rotation.set(0.15, 0, 0);
-
-    // feet touch floor: measure lowest foot world y and shift bot
-    const fL = new THREE.Vector3(), fR = new THREE.Vector3();
-    U.legL.foot.getWorldPosition(fL);
-    U.legR.foot.getWorldPosition(fR);
-    const minFootY = Math.min(fL.y, fR.y);
-    bot.position.y += (0 - minFootY);
-
-    // arms: hands on table edge
-    U.armL.shoulder.rotation.set(0.55, 0, 0.20);
-    U.armR.shoulder.rotation.set(0.55, 0, -0.20);
-
-    U.armL.upper.rotation.set(0.60, 0.10, 0.0);
-    U.armR.upper.rotation.set(0.60, -0.10, 0.0);
-
-    U.armL.lower.rotation.set(-0.85, 0.05, 0.0);
-    U.armR.lower.rotation.set(-0.85, -0.05, 0.0);
-
-    U.armL.hand.position.set(-0.18, -0.24, -0.28);
-    U.armR.hand.position.set(+0.18, -0.24, -0.28);
-    U.armL.hand.rotation.set(-0.25, 0, 0);
-    U.armR.hand.rotation.set(-0.25, 0, 0);
-
-    // tiny forward nudge so hands reach
-    bot.position.addScaledVector(toTable, 0.06);
-
-    U.seated = true;
-    U.seatIndex = seatIndex;
+    bot.userData.mode = "seated";
+    bot.userData.seatIndex = seatIndex;
   }
 
-  function animateSeated(bot, dt) {
-    const U = bot.userData;
-    if (!U?.seated) return;
+  // ---------- API ----------
+  function init({ THREE: _THREE, scene: _scene, getSeats: _getSeats, tableFocus: _tableFocus, metrics: _metrics } = {}) {
+    // note: THREE is imported at top; _THREE passed from world is okay but not required here
+    scene = _scene;
+    getSeats = _getSeats;
+    tableFocus = _tableFocus || new THREE.Vector3(0, 0, -6.5);
+    metrics = _metrics || { seatDrop: 0.06 };
 
-    U.t += dt;
-    const breathe = 0.015 * Math.sin(U.t * 1.6);
-    const nod = 0.02 * Math.sin(U.t * 0.9 + 1.1);
-
-    U.chest.position.y = 0.10 + breathe;
-    U.headPivot.rotation.x = 0.10 + nod * 0.12;
-
-    U.armL.hand.rotation.z = Math.sin(U.t * 1.9) * 0.06;
-    U.armR.hand.rotation.z = -Math.sin(U.t * 2.1) * 0.06;
-  }
-
-  function init({ THREE: _T, scene: _S, getSeats: _G, tableFocus: _F, metrics: _M, config: _C } = {}) {
-    THREE = _T; scene = _S; getSeats = _G;
-    tableFocus = _F || new THREE.Vector3(0,0,-8.8);
-    metrics = _M || { seatY: 0.42, tableY: 0.92 };
-    B.config = Object.assign(B.config, _C || {});
-
-    for (const b of B.bots) { try { scene.remove(b); } catch {} }
+    // cleanup
+    for (const b of B.bots) {
+      try { scene.remove(b); } catch {}
+    }
     B.bots = [];
 
-    const count = Math.max(1, Math.min(6, B.config.count || 6));
-    for (let i=0;i<count;i++){
-      const bot = makeBot();
-      bot.name = "Bot_" + (i+1);
-      bot.scale.setScalar(1.0);
+    // build atlas material once
+    if (!B._atlasMat) {
+      buildAtlasMaterial({
+        shirtUrl: "./assets/textures/shirt_diffuse.png",
+      });
+    }
+
+    // create 6 seated bots (seat indexes 1..6 from your world.js)
+    for (let i = 0; i < 6; i++) {
+      const bot = makeLowPolyBotMesh();
+      bot.name = "Bot_" + (i + 1);
+
+      // match your player scale (tweak if needed)
+      bot.scale.setScalar(0.95);
+
       scene.add(bot);
       B.bots.push(bot);
-      sitBot(bot, i+1);
+
+      sitBot(bot, i + 1);
     }
   }
 
-  function setPlayerRig(_playerRig, _camera) { playerRig = _playerRig; camera = _camera; }
+  function setPlayerRig(_playerRig, _camera) {
+    // reserved for future (look-at player, etc.)
+  }
+
   function update(dt) {
-    if (!B.config.idle) return;
-    for (const bot of B.bots) animateSeated(bot, dt);
+    // stable seated bots only for now
+    // later: tiny idle head bob / look-at can be done by a small shader or separate head bone
   }
 
   return { init, update, setPlayerRig };

@@ -256,12 +256,8 @@
     #helpCard .row b { color: var(--aqua); }
     #helpCard .actions { margin-top: 12px; display:flex; justify-content:flex-end; gap:10px; }
 
-    /* Force VRButton to a known place (Three may not use .vrButton class) */
-    button[style*="position: fixed"] {
-      z-index: 30 !important;
-    }
+    button[style*="position: fixed"] { z-index: 30 !important; }
 
-    /* Preferred VR button placement (Quest-friendly) */
     #vrButtonSlot {
       position: fixed;
       right: 14px;
@@ -278,7 +274,6 @@
     }
   </style>
 
-  <!-- IMPORT MAP (CDN "C & D" style) -->
   <script type="importmap">
   {
     "imports": {
@@ -302,11 +297,7 @@
 
       <div id="panel">
         <span class="pill"><b>Status</b><span id="statusText">Booting…</span></span>
-
-        <!-- Update 4.0 indicator (does not affect logic) -->
-        <span class="pill" title="Update 4.0: Hands-only cyber gloves + helmet">
-          <b>Avatar</b><span id="avatarText">4.0 (Hands)</span>
-        </span>
+        <span class="pill" title="Update 4.0: Hands-only cyber gloves + helmet"><b>Avatar</b><span id="avatarText">4.0 (Hands)</span></span>
 
         <button class="btn primary small" id="btnEnter" title="Enter VR (Quest)">Enter VR</button>
         <button class="btn pink small" id="btnRecenter" title="Reset your position">Recenter</button>
@@ -320,10 +311,8 @@
     </div>
   </div>
 
-  <!-- VRButton slot (we will move the Three VRButton here if it appears) -->
   <div id="vrButtonSlot" aria-label="VR Button Slot"></div>
 
-  <!-- Mobile / Android dock -->
   <div id="dock" aria-label="Mobile Controls">
     <button class="btn good" id="mForward">▲</button>
     <div style="display:flex; gap:10px; align-items:center;">
@@ -336,7 +325,6 @@
     <button class="btn" id="mTurnR">⟳</button>
   </div>
 
-  <!-- Log panel -->
   <div id="logwrap">
     <div id="loghead">
       <div class="h">Console Log</div>
@@ -349,7 +337,6 @@
     <pre id="log"></pre>
   </div>
 
-  <!-- Help overlay -->
   <div id="help">
     <div id="helpCard">
       <h2>Controls</h2>
@@ -366,13 +353,9 @@
   </div>
 
   <script type="module">
-    // ---- Permanent boot version (cache bust on GitHub Pages) ----
     const v = Date.now().toString();
     window.__BUILD_V = v;
 
-    // ---- Update 4.0: give main.js a single place to read XR session features ----
-    // main.js should use this when calling VRButton.createButton(renderer, sessionInit)
-    // or navigator.xr.requestSession('immersive-vr', sessionInit)
     window.__XR_SESSION_INIT = {
       optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
     };
@@ -380,7 +363,6 @@
     const statusText = document.getElementById("statusText");
     const setStatus = (t) => { if (statusText) statusText.textContent = " " + t; };
 
-    // ---- Log UI ----
     const logEl = document.getElementById("log");
     const logWrap = document.getElementById("logwrap");
     function appendLog(m) {
@@ -390,13 +372,8 @@
       logEl.scrollTop = logEl.scrollHeight;
     }
 
-    // capture hard errors
-    window.addEventListener("error", (e) => {
-      appendLog("❌ window.error: " + (e?.message || e));
-    });
-    window.addEventListener("unhandledrejection", (e) => {
-      appendLog("❌ unhandledrejection: " + (e?.reason?.message || e?.reason || e));
-    });
+    window.addEventListener("error", (e) => appendLog("❌ window.error: " + (e?.message || e)));
+    window.addEventListener("unhandledrejection", (e) => appendLog("❌ unhandledrejection: " + (e?.reason?.message || e?.reason || e)));
 
     appendLog("BOOT v=" + v);
     appendLog("href=" + location.href);
@@ -404,7 +381,6 @@
     appendLog("navigator.xr=" + (!!navigator.xr));
     appendLog("[index] Update 4.0 sessionInit=" + JSON.stringify(window.__XR_SESSION_INIT));
 
-    // ---- Buttons ----
     const btnEnter = document.getElementById("btnEnter");
     const btnRecenter = document.getElementById("btnRecenter");
     const btnTeleport = document.getElementById("btnTeleport");
@@ -414,52 +390,29 @@
     const btnHelp = document.getElementById("btnHelp");
     const btnLog = document.getElementById("btnLog");
 
-    // ---- Log controls ----
     document.getElementById("btnCopyLog")?.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(logEl?.textContent || "");
-        appendLog("[hud] log copied ✅");
-      } catch {
-        appendLog("[hud] log copy failed ⚠️");
-      }
+      try { await navigator.clipboard.writeText(logEl?.textContent || ""); appendLog("[hud] log copied ✅"); }
+      catch { appendLog("[hud] log copy failed ⚠️"); }
     });
-    document.getElementById("btnClearLog")?.addEventListener("click", () => {
-      if (logEl) logEl.textContent = "";
-      appendLog("[hud] log cleared ✅");
-    });
-    document.getElementById("btnCloseLog")?.addEventListener("click", () => {
-      if (logWrap) logWrap.style.display = "none";
-    });
+    document.getElementById("btnClearLog")?.addEventListener("click", () => { if (logEl) logEl.textContent = ""; appendLog("[hud] log cleared ✅"); });
+    document.getElementById("btnCloseLog")?.addEventListener("click", () => { if (logWrap) logWrap.style.display = "none"; });
 
-    // ---- Help overlay ----
     const help = document.getElementById("help");
     btnHelp?.addEventListener("click", () => { help.style.display = "flex"; });
     document.getElementById("btnCloseHelp")?.addEventListener("click", () => { help.style.display = "none"; });
 
-    // ---- Toggle log ----
     btnLog?.addEventListener("click", () => {
       const show = (logWrap.style.display !== "block");
       logWrap.style.display = show ? "block" : "none";
     });
 
-    // ---- Persistent toggles ----
     const LS_KEY = "scarlett_flags_v1";
-    const saved = (() => {
-      try { return JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch { return null; }
-    })();
+    const saved = (() => { try { return JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch { return null; } })();
 
-    window.__SCARLETT_FLAGS = Object.assign({
-      teleport: true,
-      move: true,
-      snap: true,
-      hands: true
-    }, saved || {});
+    window.__SCARLETT_FLAGS = Object.assign({ teleport:true, move:true, snap:true, hands:true }, saved || {});
+    function saveFlags(){ try { localStorage.setItem(LS_KEY, JSON.stringify(window.__SCARLETT_FLAGS)); } catch {} }
 
-    function saveFlags() {
-      try { localStorage.setItem(LS_KEY, JSON.stringify(window.__SCARLETT_FLAGS)); } catch {}
-    }
-
-    function updateTogglesUI() {
+    function updateTogglesUI(){
       const f = window.__SCARLETT_FLAGS;
       btnTeleport?.classList.toggle("primary", !!f.teleport);
       btnMove?.classList.toggle("primary", !!f.move);
@@ -470,81 +423,66 @@
 
     btnTeleport?.addEventListener("click", () => {
       window.__SCARLETT_FLAGS.teleport = !window.__SCARLETT_FLAGS.teleport;
-      saveFlags();
+      saveFlags(); updateTogglesUI();
       appendLog("[hud] teleport=" + window.__SCARLETT_FLAGS.teleport);
-      updateTogglesUI();
       window.dispatchEvent(new CustomEvent("scarlett-toggle-teleport", { detail: window.__SCARLETT_FLAGS.teleport }));
     });
 
     btnMove?.addEventListener("click", () => {
       window.__SCARLETT_FLAGS.move = !window.__SCARLETT_FLAGS.move;
-      saveFlags();
+      saveFlags(); updateTogglesUI();
       appendLog("[hud] move=" + window.__SCARLETT_FLAGS.move);
-      updateTogglesUI();
       window.dispatchEvent(new CustomEvent("scarlett-toggle-move", { detail: window.__SCARLETT_FLAGS.move }));
     });
 
     btnSnap?.addEventListener("click", () => {
       window.__SCARLETT_FLAGS.snap = !window.__SCARLETT_FLAGS.snap;
-      saveFlags();
+      saveFlags(); updateTogglesUI();
       appendLog("[hud] snap=" + window.__SCARLETT_FLAGS.snap);
-      updateTogglesUI();
       window.dispatchEvent(new CustomEvent("scarlett-toggle-snap", { detail: window.__SCARLETT_FLAGS.snap }));
     });
 
     btnHands?.addEventListener("click", () => {
       window.__SCARLETT_FLAGS.hands = !window.__SCARLETT_FLAGS.hands;
-      saveFlags();
+      saveFlags(); updateTogglesUI();
       appendLog("[hud] hands=" + window.__SCARLETT_FLAGS.hands);
-      updateTogglesUI();
       window.dispatchEvent(new CustomEvent("scarlett-toggle-hands", { detail: window.__SCARLETT_FLAGS.hands }));
     });
 
-    // ---- Recenter ----
     btnRecenter?.addEventListener("click", () => {
       appendLog("[hud] recenter");
       window.dispatchEvent(new Event("scarlett-recenter"));
     });
 
-    // ---- Android / touch dock ----
+    // Android dock (touch)
     const touchState = { f:0, b:0, l:0, r:0, turnL:0, turnR:0 };
-
-    function emitTouch() {
-      window.dispatchEvent(new CustomEvent("scarlett-touch", { detail: { ...touchState } }));
-    }
-
-    function bindHold(btnId, key, value) {
+    function emitTouch(){ window.dispatchEvent(new CustomEvent("scarlett-touch", { detail: { ...touchState } })); }
+    function bindHold(btnId, key, value){
       const el = document.getElementById(btnId);
       if (!el) return;
-
-      const down = (e) => { e.preventDefault(); touchState[key] = value; emitTouch(); };
-      const up   = (e) => { e.preventDefault(); touchState[key] = 0; emitTouch(); };
-
+      const down = (e)=>{ e.preventDefault(); touchState[key]=value; emitTouch(); };
+      const up   = (e)=>{ e.preventDefault(); touchState[key]=0; emitTouch(); };
       el.addEventListener("pointerdown", down, { passive:false });
       el.addEventListener("pointerup", up, { passive:false });
       el.addEventListener("pointercancel", up, { passive:false });
       el.addEventListener("pointerleave", up, { passive:false });
     }
-
-    bindHold("mForward", "f", 1);
-    bindHold("mBack", "b", 1);
-    bindHold("mLeft", "l", 1);
-    bindHold("mRight", "r", 1);
-    bindHold("mTurnL", "turnL", 1);
-    bindHold("mTurnR", "turnR", 1);
+    bindHold("mForward","f",1);
+    bindHold("mBack","b",1);
+    bindHold("mLeft","l",1);
+    bindHold("mRight","r",1);
+    bindHold("mTurnL","turnL",1);
+    bindHold("mTurnR","turnR",1);
 
     document.getElementById("mTeleport")?.addEventListener("click", () => {
       window.__SCARLETT_FLAGS.teleport = !window.__SCARLETT_FLAGS.teleport;
-      saveFlags();
+      saveFlags(); updateTogglesUI();
       appendLog("[hud] teleport=" + window.__SCARLETT_FLAGS.teleport);
-      updateTogglesUI();
       window.dispatchEvent(new CustomEvent("scarlett-toggle-teleport", { detail: window.__SCARLETT_FLAGS.teleport }));
     });
 
-    // Dock visibility:
-    // - Show on regular Android phones/tablets
-    // - Hide on Quest Browser (even though it says Android)
-    function updateDockVisibility() {
+    // Dock visibility (hide on Quest)
+    function updateDockVisibility(){
       const ua = navigator.userAgent || "";
       const isQuest = /OculusBrowser|Oculus|Quest/i.test(ua);
       const isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
@@ -554,30 +492,21 @@
     }
     updateDockVisibility();
 
-    // ---- VR Button handling ----
-    // We'll move the Three VRButton into #vrButtonSlot if it appears.
+    // VRButton mount (fallback only)
     const vrSlot = document.getElementById("vrButtonSlot");
-
-    function findVRButton() {
-      // VRButton.createButton(renderer) creates a button with text like "ENTER VR"
-      // Find any button containing VR text.
+    function findVRButton(){
       const buttons = Array.from(document.querySelectorAll("button"));
-      for (const b of buttons) {
+      for (const b of buttons){
         const t = (b.textContent || "").toUpperCase();
         if (t.includes("ENTER VR") || t.includes("VR")) return b;
       }
       return null;
     }
-
-    function mountVRButton() {
+    function mountVRButton(){
       const b = findVRButton();
       if (!b || !vrSlot) return false;
-
-      // Avoid moving our own HUD buttons
       if (b.id && (b.id.startsWith("btn") || b.id.startsWith("m"))) return false;
-
-      // Move into slot
-      if (b.parentElement !== vrSlot) {
+      if (b.parentElement !== vrSlot){
         vrSlot.appendChild(b);
         b.style.position = "static";
         b.style.margin = "0";
@@ -585,23 +514,16 @@
       }
       return true;
     }
-
-    // keep trying briefly (VRButton can appear after main loads)
     let tries = 0;
-    const vrMountTimer = setInterval(() => {
+    const vrMountTimer = setInterval(()=>{
       tries++;
       if (mountVRButton() || tries > 60) clearInterval(vrMountTimer);
     }, 250);
 
-    // Enter VR button: click the real Three VRButton
+    // ✅ ONE Enter VR handler: DIRECT EVENT ONLY
     btnEnter?.addEventListener("click", () => {
-      appendLog("[hud] enter vr");
-      const b = findVRButton();
-      if (b) {
-        b.click();
-      } else {
-        appendLog("[hud] VRButton not found yet ⚠️");
-      }
+      appendLog("[hud] enter vr (direct)");
+      window.dispatchEvent(new Event("scarlett-enter-vr"));
     });
 
     // ---- LOAD MAIN ----
@@ -622,10 +544,6 @@
       appendLog("2) Confirm file exists: /js/main.js");
       appendLog("3) Ensure folder is named exactly: js (lowercase)");
     }
-    btnEnter?.addEventListener("click", () => {
-  appendLog("[hud] enter vr (direct)");
-  window.dispatchEvent(new Event("scarlett-enter-vr"));
-});
   </script>
 </body>
-</html>
+          </html>

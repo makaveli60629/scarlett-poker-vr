@@ -1,104 +1,108 @@
-// /js/gameplay_fx.js
-// Scarlett VR Poker — Game Feel + HUD + FX Pack
-// Requires: THREE in scope, scene, camera, renderer, bots array, table, chairs array, HUD element (#hud)
+// /js/gameplay_fx.js — Scarlett VR Poker FULL FX PACK
 
 export function createGameFeelFX({ THREE, scene, camera, renderer, bots, table, chairs, hudEl, log = console.log }) {
 
-  // ----------------------------
-  // Utility
-  // ----------------------------
   const delay = (ms) => new Promise(res => setTimeout(res, ms));
   const rand = (a, b) => a + Math.random() * (b - a);
+  const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
-  // Pacing knobs (tune here)
+  // Pacing knobs (YOU WANTED "SLOW DOWN A GOOD AMOUNT")
   const pace = {
-    dealCardMs: 650,
-    betweenPlayersMs: 550,
-    thinkMinMs: 1800,
-    thinkMaxMs: 3600,
-    afterActionMs: 900,
-    showdownPauseMs: 3800,
-    betweenHandsMs: 2200,
-    winBannerMs: 8500
+    dealCardMs: 750,
+    thinkMinMs: 2200,
+    thinkMaxMs: 4200,
+    afterActionMs: 1100,
+    showdownPauseMs: 4200,
+    betweenHandsMs: 2600,
+    winBannerMs: 9000
   };
 
-  // ----------------------------
-  // HUD: Big win banner + action log
-  // ----------------------------
+  // ---------- HUD (big win + action feed + hand status slots) ----------
   const hud = {
     actionFeed: [],
+    statusLine: "",
+    potLine: "",
+
     setHTML(html) { if (hudEl) hudEl.innerHTML = html; },
-    clear() { if (hudEl) hudEl.innerHTML = ""; },
+    pushAction(text) {
+      this.actionFeed.unshift({ text, t: Date.now() });
+      this.actionFeed = this.actionFeed.slice(0, 7);
+      this.render();
+    },
+    setStatus(text) { this.statusLine = text; this.render(); },
+    setPot(text) { this.potLine = text; this.render(); },
+
+    render() {
+      const items = this.actionFeed
+        .map(a => `<div style="padding:6px 10px;border-radius:12px;background:rgba(5,6,10,.55);border:1px solid rgba(152,160,199,.15);margin-top:8px;">${escapeHtml(a.text)}</div>`)
+        .join("");
+
+      this.setHTML(`
+        <div style="position:fixed;left:18px;top:18px;max-width:460px;color:#e8ecff;font-size:16px;line-height:1.25;">
+          <div style="opacity:.85;margin-bottom:10px;color:#98a0c7;">Hand Feed</div>
+          ${items}
+        </div>
+
+        <div style="position:fixed;right:18px;top:18px;max-width:460px;color:#e8ecff;font-size:16px;line-height:1.25;text-align:right;">
+          <div style="opacity:.85;margin-bottom:10px;color:#98a0c7;">Table</div>
+          <div style="padding:8px 10px;border-radius:12px;background:rgba(5,6,10,.55);border:1px solid rgba(152,160,199,.15);">
+            <div style="opacity:.95;">${escapeHtml(this.statusLine || "Playing...")}</div>
+            <div style="opacity:.85;color:#98a0c7;margin-top:4px;">${escapeHtml(this.potLine || "")}</div>
+          </div>
+        </div>
+      `);
+    },
 
     showWinBanner({ winnerName, handName, amount = null }) {
       const amt = amount != null ? `<div style="font-size:26px;opacity:.95;margin-top:6px;">+${formatMoney(amount)}</div>` : "";
-      hud.setHTML(`
+      const banner = `
         <div style="
           position:fixed;left:50%;top:14%;
           transform:translateX(-50%);
           padding:18px 22px;
-          background:rgba(10,12,20,.82);
+          background:rgba(10,12,20,.86);
           border:1px solid rgba(255,204,0,.35);
           border-radius:18px;
           box-shadow:0 14px 50px rgba(0,0,0,.55);
           text-align:center;
-          min-width:340px;
+          min-width:360px;
           ">
           <div style="font-size:46px;letter-spacing:1px;color:#ffcc00;text-shadow:0 0 18px rgba(255,204,0,.55);">
-            🏆 ${winnerName} WINS 🏆
+            🏆 ${escapeHtml(winnerName)} WINS 🏆
           </div>
           <div style="font-size:30px;color:#e8ecff;margin-top:6px;text-shadow:0 0 14px rgba(127,231,255,.25);">
-            ${handName}
+            ${escapeHtml(handName)}
           </div>
           ${amt}
         </div>
-
-        ${hud.renderActionFeed()}
-      `);
-
-      setTimeout(() => {
-        // Keep the feed, remove banner (simple approach: rebuild feed only)
-        hud.setHTML(hud.renderActionFeed());
-      }, pace.winBannerMs);
-    },
-
-    pushAction(text) {
-      hud.actionFeed.unshift({ text, t: Date.now() });
-      hud.actionFeed = hud.actionFeed.slice(0, 7);
-      hud.setHTML(hud.renderActionFeed());
-    },
-
-    renderActionFeed() {
-      const items = hud.actionFeed
-        .map(a => `<div style="padding:6px 10px;border-radius:12px;background:rgba(5,6,10,.55);border:1px solid rgba(152,160,199,.15);margin-top:8px;">${escapeHtml(a.text)}</div>`)
-        .join("");
-
-      return `
-        <div style="
-          position:fixed;left:18px;top:18px;max-width:420px;
-          color:#e8ecff;font-size:16px;line-height:1.25;
-          ">
-          <div style="opacity:.85;margin-bottom:10px;color:#98a0c7;">Hand Feed</div>
-          ${items}
-        </div>
       `;
+
+      // render banner + feed
+      const oldFeed = this.actionFeed.slice();
+      const oldStatus = this.statusLine;
+      const oldPot = this.potLine;
+
+      this.setHTML(banner + (hudEl ? hudEl.innerHTML : ""));
+      setTimeout(() => {
+        this.actionFeed = oldFeed;
+        this.statusLine = oldStatus;
+        this.potLine = oldPot;
+        this.render();
+      }, pace.winBannerMs);
     }
   };
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, m => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[m]));
   }
-
   function formatMoney(n) {
     const sign = n < 0 ? "-" : "";
     const v = Math.abs(n);
     return sign + "$" + v.toLocaleString(undefined, { maximumFractionDigits: 0 });
   }
 
-  // ----------------------------
-  // Name tags (CanvasTexture sprites)
-  // ----------------------------
-  function makeNameTagSprite(bot, label = "BOT", stack = 0, status = "") {
+  // ---------- Name tags ----------
+  function makeNameTag(bot, label) {
     const canvas = document.createElement("canvas");
     canvas.width = 512;
     canvas.height = 256;
@@ -110,14 +114,12 @@ export function createGameFeelFX({ THREE, scene, camera, renderer, bots, table, 
 
     const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
     const sprite = new THREE.Sprite(mat);
-    sprite.scale.set(0.9, 0.45, 1);   // size in world
-    sprite.position.set(0, 1.95, 0);  // above head
-
+    sprite.scale.set(0.9, 0.45, 1);
+    sprite.position.set(0, 1.95, 0);
     bot.mesh.add(sprite);
 
-    bot._tag = { canvas, ctx, texture, sprite, label, stack, status };
+    bot._tag = { canvas, ctx, texture, sprite, label, stack: bot.stack || 1500, status: "" };
     drawTag(bot);
-    return sprite;
   }
 
   function drawTag(bot) {
@@ -126,22 +128,17 @@ export function createGameFeelFX({ THREE, scene, camera, renderer, bots, table, 
     const { ctx, canvas } = t;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // bg
     roundRect(ctx, 18, 18, 476, 220, 28, "rgba(10,12,20,.88)", "rgba(127,231,255,.28)");
 
-    // title
     ctx.fillStyle = "#7fe7ff";
     ctx.font = "bold 44px Arial";
     ctx.textAlign = "center";
     ctx.fillText(t.label, 256, 85);
 
-    // stack
     ctx.fillStyle = "#e8ecff";
     ctx.font = "34px Arial";
     ctx.fillText(formatMoney(t.stack || 0), 256, 145);
 
-    // status
     ctx.fillStyle = t.status === "FOLDED" ? "#ff6b6b" : (t.status === "ALL-IN" ? "#ffcc00" : "#98a0c7");
     ctx.font = "28px Arial";
     ctx.fillText(t.status || "", 256, 195);
@@ -157,13 +154,8 @@ export function createGameFeelFX({ THREE, scene, camera, renderer, bots, table, 
     ctx.arcTo(x, y+h, x, y, r);
     ctx.arcTo(x, y, x+w, y, r);
     ctx.closePath();
-    ctx.fillStyle = fill;
-    ctx.fill();
-    if (stroke) {
-      ctx.strokeStyle = stroke;
-      ctx.lineWidth = 6;
-      ctx.stroke();
-    }
+    ctx.fillStyle = fill; ctx.fill();
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 6; ctx.stroke(); }
   }
 
   function updateBotTag(bot, { label, stack, status }) {
@@ -174,19 +166,29 @@ export function createGameFeelFX({ THREE, scene, camera, renderer, bots, table, 
     drawTag(bot);
   }
 
-  // Make tags face camera gently (sprites do automatically, but we keep consistent)
-  function updateTagsEachFrame() {
-    for (const b of bots) {
-      if (!b._tag) continue;
-      // sprite always billboard; nothing needed
+  // ---------- Seating fix (chairs + bots) ----------
+  function fixSeat(chair, bot, tablePos) {
+    chair.lookAt(tablePos.x, chair.position.y, tablePos.z);
+
+    bot.mesh.position.copy(chair.position);
+    bot.mesh.rotation.y = chair.rotation.y;
+
+    bot.mesh.position.y += 0.45;
+
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(chair.quaternion);
+    bot.mesh.position.add(forward.multiplyScalar(0.08));
+  }
+
+  function fixAllSeating() {
+    const tpos = table.position.clone();
+    for (let i = 0; i < bots.length; i++) {
+      if (!chairs[i] || !bots[i]) continue;
+      fixSeat(chairs[i], bots[i], tpos);
     }
   }
 
-  // ----------------------------
-  // Crown (winner indicator)
-  // ----------------------------
-  function makeCrownMesh() {
-    // Simple stylized crown: torus base + spikes
+  // ---------- Crown ----------
+  function makeCrown() {
     const group = new THREE.Group();
 
     const base = new THREE.Mesh(
@@ -197,7 +199,6 @@ export function createGameFeelFX({ THREE, scene, camera, renderer, bots, table, 
     group.add(base);
 
     const spikeMat = new THREE.MeshStandardMaterial({ color: 0xffcc00, emissive: 0x442200, emissiveIntensity: 0.8, metalness: 0.9, roughness: 0.2 });
-
     for (let i = 0; i < 7; i++) {
       const spike = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.12, 10), spikeMat);
       const a = (i / 7) * Math.PI * 2;
@@ -206,7 +207,6 @@ export function createGameFeelFX({ THREE, scene, camera, renderer, bots, table, 
       group.add(spike);
     }
 
-    // glow ring
     const glow = new THREE.Mesh(
       new THREE.RingGeometry(0.17, 0.23, 42),
       new THREE.MeshBasicMaterial({ color: 0xffcc00, transparent: true, opacity: 0.22, side: THREE.DoubleSide })
@@ -217,107 +217,58 @@ export function createGameFeelFX({ THREE, scene, camera, renderer, bots, table, 
 
     group.position.y = 2.15;
     group.scale.setScalar(1.15);
-
     group.userData._spin = rand(0.7, 1.2);
     group.userData._bob = rand(0.8, 1.3);
-
     return group;
   }
 
-  function setWinnerCrown(bot, on = true) {
-    // Remove crowns from everyone
+  function setWinnerCrown(bot) {
     for (const b of bots) {
-      if (b._crown) {
-        b.mesh.remove(b._crown);
-        b._crown = null;
-      }
+      if (b._crown) { b.mesh.remove(b._crown); b._crown = null; }
     }
-    if (!on) return;
-
-    const crown = makeCrownMesh();
+    const crown = makeCrown();
     bot.mesh.add(crown);
     bot._crown = crown;
   }
 
-  function updateCrownEachFrame(dt) {
+  function clearCrown() {
     for (const b of bots) {
-      if (!b._crown) continue;
-      const c = b._crown;
-      c.rotation.y += dt * c.userData._spin;
-      c.position.y = 2.15 + Math.sin(perfNow() * 0.002 * c.userData._bob) * 0.03;
+      if (b._crown) { b.mesh.remove(b._crown); b._crown = null; }
     }
   }
 
-  function perfNow() {
-    return (typeof performance !== "undefined") ? performance.now() : Date.now();
-  }
-
-  // ----------------------------
-  // Chairs + seated alignment (fix facing wrong)
-  // ----------------------------
-  function fixChairAndSeatBot(chair, bot, tablePos) {
-    // Chairs should face table center
-    chair.lookAt(tablePos.x, chair.position.y, tablePos.z);
-
-    // Bot faces same direction as chair
-    bot.mesh.position.copy(chair.position);
-    bot.mesh.rotation.y = chair.rotation.y;
-
-    // Seat height (tweak based on your bot model)
-    bot.mesh.position.y += 0.45;
-
-    // Small nudge forward so butt is on seat, not back
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(chair.quaternion);
-    bot.mesh.position.add(forward.multiplyScalar(0.08));
-  }
-
-  function fixAllSeating() {
-    const tablePos = table.position.clone();
-    for (let i = 0; i < bots.length; i++) {
-      const chair = chairs[i];
-      const bot = bots[i];
-      if (!chair || !bot || !bot.mesh) continue;
-      fixChairAndSeatBot(chair, bot, tablePos);
-    }
-  }
-
-  // ----------------------------
-  // Chips + Pot (visual, lightweight)
-  // ----------------------------
-  const chip = {
-    mat: new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.2, roughness: 0.6 }),
-    geom: new THREE.CylinderGeometry(0.03, 0.03, 0.012, 28)
-  };
+  // ---------- Chips + Pot ----------
+  const chipMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.2, roughness: 0.6 });
+  const chipGeom = new THREE.CylinderGeometry(0.03, 0.03, 0.012, 28);
 
   const potGroup = new THREE.Group();
   potGroup.position.copy(table.position);
   potGroup.position.y += 0.86;
   scene.add(potGroup);
 
-  function makeChipStack(height = 14) {
+  function makeChipStack(chips = 10) {
     const g = new THREE.Group();
-    const count = Math.max(3, Math.min(28, Math.floor(height)));
+    const count = Math.max(3, Math.min(28, Math.floor(chips)));
     for (let i = 0; i < count; i++) {
-      const m = new THREE.Mesh(chip.geom, chip.mat);
+      const m = new THREE.Mesh(chipGeom, chipMat);
       m.position.y = i * 0.012;
       g.add(m);
     }
     return g;
   }
 
-  function attachChipStacks() {
+  function attachChips() {
     for (const b of bots) {
       if (b._chips) continue;
-      const stack = makeChipStack(12);
-      stack.position.set(0.16, 0.9, 0.12); // relative to bot seat area
+      const stack = makeChipStack(10);
+      stack.position.set(0.16, 0.9, 0.12);
       b.mesh.add(stack);
       b._chips = stack;
     }
   }
 
-  function updateChipStackHeight(bot, stackMoney) {
-    // convert money to visual chip count (simple scaling)
-    const chips = Math.max(3, Math.min(28, Math.floor((stackMoney || 0) / 200)));
+  function updateChipStackHeight(bot, money) {
+    const chips = Math.max(3, Math.min(28, Math.floor((money || 0) / 200)));
     if (!bot._chips) return;
     bot.mesh.remove(bot._chips);
     bot._chips = makeChipStack(chips);
@@ -325,54 +276,44 @@ export function createGameFeelFX({ THREE, scene, camera, renderer, bots, table, 
     bot.mesh.add(bot._chips);
   }
 
-  async function moveChipsToPot(bot, amount = 0) {
-    if (!bot._chips) return;
+  function worldPos(obj, out) {
+    obj.updateWorldMatrix(true, false);
+    return out.setFromMatrixPosition(obj.matrixWorld);
+  }
+  function easeOutCubic(t){ return 1 - Math.pow(1 - t, 3); }
 
-    // Create a "travel stack" so we don't rip chips off the player instantly
+  async function moveChipsToPot(bot) {
+    if (!bot._chips) return;
     const travel = bot._chips.clone(true);
     travel.position.copy(worldPos(bot._chips, new THREE.Vector3()));
     scene.add(travel);
 
-    // Animate toward pot
     const start = travel.position.clone();
     const end = potGroup.position.clone().add(new THREE.Vector3(rand(-0.06, 0.06), 0.02, rand(-0.06, 0.06)));
 
-    const t0 = perfNow();
-    const dur = 650;
+    const t0 = now();
+    const dur = 700;
 
-    while (perfNow() - t0 < dur) {
-      const t = (perfNow() - t0) / dur;
+    while (now() - t0 < dur) {
+      const t = (now() - t0) / dur;
       travel.position.lerpVectors(start, end, easeOutCubic(t));
       travel.position.y += Math.sin(t * Math.PI) * 0.06;
       await delay(16);
     }
 
     travel.position.copy(end);
-    // Merge into pot pile
     potGroup.add(travel);
-    travel.position.copy(new THREE.Vector3(rand(-0.09, 0.09), rand(0.0, 0.06), rand(-0.09, 0.09)));
+    travel.position.set(rand(-0.09, 0.09), rand(0.0, 0.06), rand(-0.09, 0.09));
     travel.rotation.y = rand(0, Math.PI * 2);
-
-    // Optional: update bot chip height externally via updateChipStackHeight()
   }
-
-  function worldPos(obj, out) {
-    obj.updateWorldMatrix(true, false);
-    return out.setFromMatrixPosition(obj.matrixWorld);
-  }
-
-  function easeOutCubic(t){ return 1 - Math.pow(1 - t, 3); }
 
   function clearPotVisuals() {
     while (potGroup.children.length) potGroup.remove(potGroup.children[0]);
   }
 
-  // ----------------------------
-  // Win FX: particles + table pulse
-  // ----------------------------
+  // ---------- Win FX particles ----------
   const particles = [];
-
-  function spawnWinParticles(position, count = 60) {
+  function spawnWinParticles(position, count = 70) {
     for (let i = 0; i < count; i++) {
       const p = new THREE.Mesh(
         new THREE.SphereGeometry(0.008, 8, 8),
@@ -400,63 +341,50 @@ export function createGameFeelFX({ THREE, scene, camera, renderer, bots, table, 
     }
   }
 
-  // table pulse
+  // ---------- Table pulse ----------
   let tablePulse = 0;
   function pulseTable() { tablePulse = 1; }
   function updateTablePulse(dt) {
-    if (!table || !table.material) return;
     if (tablePulse <= 0) return;
     tablePulse -= dt * 1.3;
     const k = Math.max(0, tablePulse);
-    // If you have MeshStandardMaterial, emissive can pulse:
-    if (table.material.emissive) {
-      table.material.emissiveIntensity = 0.15 + k * 1.1;
-    }
+    const felt = table.userData?.felt;
+    if (felt?.material?.emissive) felt.material.emissiveIntensity = 0.15 + k * 1.1;
   }
 
-  // ----------------------------
-  // Elimination: fade out + swap in new bot
-  // ----------------------------
+  // ---------- Elimination + respawn ----------
   async function eliminateBot(bot) {
-    if (!bot.mesh) return;
     updateBotTag(bot, { status: "ELIMINATED" });
     hud.pushAction(`${bot._tag?.label || "BOT"} eliminated`);
 
-    // Fade out
     const meshes = [];
     bot.mesh.traverse(o => { if (o.isMesh && o.material) meshes.push(o); });
+    meshes.forEach(m => { m.material.transparent = true; m.material.opacity = 1; });
 
-    const startOp = meshes.map(m => (m.material.opacity ?? 1));
-    meshes.forEach(m => { m.material.transparent = true; });
-
-    const t0 = perfNow();
+    const t0 = now();
     const dur = 900;
-
-    while (perfNow() - t0 < dur) {
-      const t = (perfNow() - t0) / dur;
+    while (now() - t0 < dur) {
+      const t = (now() - t0) / dur;
       const op = 1 - easeOutCubic(t);
-      meshes.forEach((m, idx) => { m.material.opacity = startOp[idx] * op; });
+      meshes.forEach(m => { m.material.opacity = op; });
       await delay(16);
     }
-
     bot.mesh.visible = false;
   }
 
   async function respawnBot(bot, { label, stack }) {
     bot.mesh.visible = true;
+    updateBotTag(bot, { label, stack, status: "" });
+    updateChipStackHeight(bot, stack);
 
-    // Reset opacity
     const meshes = [];
     bot.mesh.traverse(o => { if (o.isMesh && o.material) meshes.push(o); });
     meshes.forEach(m => { m.material.transparent = true; m.material.opacity = 0; });
 
-    updateBotTag(bot, { label, stack, status: "" });
-
-    // Fade in
-    const t0 = perfNow();
+    const t0 = now();
     const dur = 900;
-    while (perfNow() - t0 < dur) {
-      const t = (perfNow() - t0) / dur;
+    while (now() - t0 < dur) {
+      const t = (now() - t0) / dur;
       const op = easeOutCubic(t);
       meshes.forEach(m => { m.material.opacity = op; });
       await delay(16);
@@ -466,13 +394,10 @@ export function createGameFeelFX({ THREE, scene, camera, renderer, bots, table, 
     hud.pushAction(`${label} joined the table`);
   }
 
-  // ----------------------------
-  // Dealer button (simple visual marker)
-  // ----------------------------
+  // ---------- Dealer button ----------
   let dealerBtn = null;
   function setDealer(bot) {
     if (dealerBtn && dealerBtn.parent) dealerBtn.parent.remove(dealerBtn);
-
     dealerBtn = new THREE.Mesh(
       new THREE.CylinderGeometry(0.06, 0.06, 0.02, 26),
       new THREE.MeshStandardMaterial({ color: 0x7fe7ff, emissive: 0x0b2030, emissiveIntensity: 0.6, roughness: 0.35 })
@@ -482,54 +407,46 @@ export function createGameFeelFX({ THREE, scene, camera, renderer, bots, table, 
     hud.pushAction(`${bot._tag?.label || "BOT"} is the dealer`);
   }
 
-  // ----------------------------
-  // Camera focus helper (optional)
-  // ----------------------------
-  async function focusWinner(bot) {
-    // Gentle look-at to winner for a moment
-    const startQ = camera.quaternion.clone();
-    const target = bot.mesh.getWorldPosition(new THREE.Vector3());
-    const dummy = new THREE.Object3D();
-    dummy.position.copy(camera.position);
-    dummy.lookAt(target);
-    const endQ = dummy.quaternion.clone();
-
-    const t0 = perfNow();
-    const dur = 700;
-    while (perfNow() - t0 < dur) {
-      const t = (perfNow() - t0) / dur;
-      camera.quaternion.slerpQuaternions(startQ, endQ, easeOutCubic(t));
-      await delay(16);
+  // ---------- Update loop ----------
+  function updateCrown(dt) {
+    for (const b of bots) {
+      if (!b._crown) continue;
+      const c = b._crown;
+      c.rotation.y += dt * c.userData._spin;
+      c.position.y = 2.15 + Math.sin(now() * 0.002 * c.userData._bob) * 0.03;
     }
   }
 
-  // ----------------------------
-  // Public API you call from your poker engine
-  // ----------------------------
+  // ---------- Public API ----------
   function init() {
-    // Create name tags + chip stacks + fix seating once
     for (let i = 0; i < bots.length; i++) {
       const b = bots[i];
-      if (!b || !b.mesh) continue;
-      if (!b._tag) makeNameTagSprite(b, `BOT ${i+1}`, b.stack || 1500, "");
+      if (!b?.mesh) continue;
+      if (!b._tag) makeNameTag(b, `BOT ${i + 1}`);
+      updateBotTag(b, { stack: b.stack || 1500, status: "" });
     }
-    attachChipStacks();
+    attachChips();
     fixAllSeating();
-    hud.pushAction("Game feel pack loaded");
+    hud.setStatus("Waiting for next hand...");
+    hud.setPot("Pot: $0");
+    hud.pushAction("FX pack loaded ✅");
   }
 
-  // You call this each frame in your render loop
   function update(dt) {
-    updateTagsEachFrame();
-    updateCrownEachFrame(dt);
+    updateCrown(dt);
     updateParticles(dt);
     updateTablePulse(dt);
   }
 
-  // Hand hooks (call these from your simulation)
-  async function onDealCard(toBotLabel, cardStr) {
-    hud.pushAction(`${toBotLabel} dealt ${cardStr}`);
-    await delay(pace.dealCardMs);
+  // Poker hooks (your engine calls these)
+  async function onNewHand({ handNo }) {
+    clearPotVisuals();
+    clearCrown();
+    for (const b of bots) updateBotTag(b, { status: "" });
+    hud.setStatus(`Hand #${handNo}`);
+    hud.setPot("Pot: $0");
+    hud.pushAction(`--- Hand #${handNo} starts ---`);
+    await delay(pace.betweenHandsMs);
   }
 
   async function onBotThinking(bot) {
@@ -538,46 +455,46 @@ export function createGameFeelFX({ THREE, scene, camera, renderer, bots, table, 
     updateBotTag(bot, { status: "" });
   }
 
-  async function onBotAction(bot, action, amount = null) {
+  async function onBotAction(bot, action, amount, potNow) {
     const name = bot._tag?.label || "BOT";
     const msg = amount != null ? `${name}: ${action} ${formatMoney(amount)}` : `${name}: ${action}`;
     hud.pushAction(msg);
+    if (potNow != null) hud.setPot(`Pot: ${formatMoney(potNow)}`);
 
-    // A small chip-to-pot move for bets/calls/raises
     if (["BET","CALL","RAISE","ALL-IN"].includes(action)) {
-      await moveChipsToPot(bot, amount || 0);
+      await moveChipsToPot(bot);
     }
     await delay(pace.afterActionMs);
   }
 
+  async function onDealStep(text) {
+    hud.pushAction(text);
+    await delay(pace.dealCardMs);
+  }
+
   async function onShowdownPause() {
+    hud.pushAction("Showdown...");
     await delay(pace.showdownPauseMs);
   }
 
-  async function onWinner({ bot, winnerName, handName, winAmount = null }) {
-    setWinnerCrown(bot, true);
+  async function onWinner({ bot, winnerName, handName, winAmount, potNow }) {
+    setWinnerCrown(bot);
     pulseTable();
-    spawnWinParticles(bot.mesh.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 1.6, 0)), 70);
+    spawnWinParticles(bot.mesh.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 1.6, 0)), 80);
     hud.showWinBanner({ winnerName, handName, amount: winAmount });
+    hud.pushAction(`${winnerName} wins with ${handName}`);
+    if (potNow != null) hud.setPot(`Pot: ${formatMoney(potNow)} (paid)`);
 
-    // Optional: focus camera for a moment (safe even in VR; it just adjusts view)
-    // await focusWinner(bot);
-
-    // Remove crown later
-    setTimeout(() => setWinnerCrown(bot, false), 11000);
-  }
-
-  async function onNewHand() {
-    clearPotVisuals();
-    for (const b of bots) updateBotTag(b, { status: "" });
-    await delay(pace.betweenHandsMs);
+    setTimeout(() => clearCrown(), 11000);
   }
 
   return {
     pace,
     hud,
+
     init,
     update,
+
     fixAllSeating,
     setDealer,
     updateBotTag,
@@ -585,12 +502,11 @@ export function createGameFeelFX({ THREE, scene, camera, renderer, bots, table, 
     eliminateBot,
     respawnBot,
 
-    // poker engine hooks
-    onDealCard,
+    onNewHand,
     onBotThinking,
     onBotAction,
+    onDealStep,
     onShowdownPause,
-    onWinner,
-    onNewHand
+    onWinner
   };
-}
+                                                    }

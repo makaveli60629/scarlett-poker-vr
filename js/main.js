@@ -1,247 +1,411 @@
- // /js/main.js — Scarlett VR Poker (FULL FX BUILD)
-// Assumes you have Three.js available as module at ./js/three.module.js
-// If your project uses a wrapper ./three.js, swap import accordingly.
+// /js/main.js — Scarlett Poker VR Boot v12.2 (CLEAN FULL)
+// ✅ Post-world chair + bot seating corrective pass (does not remove anything)
+// ✅ High stakes default: 20,000 stacks (passed to PokerSim if supported)
+// ✅ Slow cinematic pacing (incl. optional 15s decision time per player)
+// ✅ Keeps your existing pipeline + event wiring intact
 
-import * as THREE from './three.module.js';
-import { VRButton } from './VRButton.js';
-import { createGameFeelFX } from './gameplay_fx.js';
-import { createPokerEngine } from './poker_engine.js';
+import * as THREE from "three";
+import { VRButton } from "three/addons/webxr/VRButton.js";
+import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
 
-const log = (...a) => console.log('[Scarlett]', ...a);
+import { initWorld } from "./world.js";
+import { Controls } from "./controls.js";
+import { Teleport } from "./teleport.js";
+import { DealingMix } from "./dealingMix.js";
+import { HandsSystem } from "./hands.js";
+import { PokerSim } from "./poker.js";
 
-let scene, camera, renderer;
-let table, chairs = [], bots = [];
-let FX, Engine;
+// ---------- LOG ----------
+const logEl = document.getElementById("log");
+const log = (m, ...rest) => {
+  try { console.log(m, ...rest); } catch {}
+  try {
+    if (logEl) {
+      logEl.textContent += "\n" + String(m);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  } catch {}
+};
 
-boot();
+const BOOT_V = window.__BUILD_V || Date.now().toString();
+log("BOOT v=" + BOOT_V);
 
-function boot() {
-  // Renderer
-  renderer = new THREE.WebGLRenderer({ antialias:true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-  renderer.xr.enabled = true;
-  document.body.appendChild(renderer.domElement);
+// ✅ NEW: Global tuning knobs (safe, centralized)
+const GAME = {
+  seats: 6,
+  startingStack: 20000,           // high stakes
+  decisionSeconds: 15,            // per-player decision target
+  // Visual pacing (seconds) — slower & more watchable
+  tDealHole: 3.2,                 // hole cards total animation time
+  tFlop: 3.0,                     // flop staging
+  tTurn: 2.6,
+  tRiver: 2.6,
+  tShowdown: 6.0,
+  tNextHand: 3.0,
+  maxHands: 999999,               // endless unless you cap it
+};
 
-  // VR button
+// ---------- SCENE ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05060a);
+scene.fog = new THREE.Fog(0x05060a, 6, 120);
+
+// ---------- CAMERA ----------
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 300);
+
+// ---------- RENDERER (Quest-safe defaults) ----------
+const renderer = new THREE.WebGLRenderer({
+  antialias: false,
+  powerPreference: "high-performance",
+});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+try { renderer.xr.setReferenceSpaceType("local-floor"); } catch {}
+
+document.body.appendChild(renderer.domElement);
+
+// VRButton kept as fallback/native
+try {
   document.body.appendChild(VRButton.createButton(renderer));
-
-  // Scene
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x05060a);
-
-  // Camera
-  camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.01, 200);
-  camera.position.set(0, 1.6, 3.1);
-
-  // Lights (casino vibe)
-  const hemi = new THREE.HemisphereLight(0x9fb6ff, 0x1a1a24, 0.85);
-  scene.add(hemi);
-
-  const key = new THREE.DirectionalLight(0xffffff, 1.35);
-  key.position.set(2, 5, 3);
-  scene.add(key);
-
-  const rim = new THREE.PointLight(0x7fe7ff, 0.9, 12);
-  rim.position.set(-2, 2.2, -2);
-  scene.add(rim);
-
-  // Floor
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(40, 40),
-    new THREE.MeshStandardMaterial({ color: 0x0a0b12, roughness: 1 })
-  );
-  floor.rotation.x = -Math.PI / 2;
-  scene.add(floor);
-
-  // Simple room walls
-  addWalls();
-
-  // Poker set
-  table = makeTable();
-  scene.add(table);
-
-  chairs = makeChairs(8, table.position, 1.4);
-  chairs.forEach(c => scene.add(c));
-
-  bots = makeBots(8);
-  bots.forEach(b => scene.add(b.mesh));
-
-  // FX pack
-  FX = createGameFeelFX({
-    THREE, scene, camera, renderer,
-    bots, table, chairs,
-    hudEl: document.getElementById('hud'),
-    log
-  });
-  FX.init();
-
-  // Poker engine (slow + readable)
-  Engine = createPokerEngine({
-    bots,
-    fx: FX,
-    log
-  });
-  Engine.start(); // endless loop
-
-  // Render loop
-  let last = performance.now();
-  renderer.setAnimationLoop(() => {
-    const now = performance.now();
-    const dt = (now - last) / 1000;
-    last = now;
-
-    FX.update(dt);
-    renderer.render(scene, camera);
-  });
-
-  // Resize
-  window.addEventListener('resize', onResize);
-  onResize();
-
-  log('Boot complete ✅');
+  log("[main] VRButton appended ✅");
+} catch (e) {
+  log("❌ VRButton failed: " + (e?.message || e));
 }
 
-function onResize() {
+// ---------- XR: session perf tuning ----------
+renderer.xr.addEventListener("sessionstart", () => {
+  try {
+    renderer.setPixelRatio(1.0);
+    renderer.xr.setFoveation?.(1.0);
+  } catch {}
+  log("[xr] sessionstart ✅");
+});
+
+renderer.xr.addEventListener("sessionend", () => {
+  try { renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25)); } catch {}
+  log("[xr] sessionend ✅");
+});
+
+// ---------- XR: Direct Enter VR (HUD should dispatch scarlett-enter-vr) ----------
+window.addEventListener("scarlett-enter-vr", async () => {
+  try {
+    const xr = navigator.xr;
+    if (!xr) throw new Error("navigator.xr missing");
+
+    const ok = await xr.isSessionSupported?.("immersive-vr");
+    if (ok === false) throw new Error("immersive-vr not supported");
+
+    const session = await xr.requestSession("immersive-vr", {
+      optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"],
+    });
+
+    await renderer.xr.setSession(session);
+    log("[xr] requestSession ✅ (entered VR)");
+  } catch (e) {
+    log("❌ [xr] Enter VR failed: " + (e?.message || e));
+    console.error(e);
+  }
+});
+
+// ---------- PLAYER RIG ----------
+const player = new THREE.Group();
+player.name = "PlayerRig";
+player.add(camera);
+scene.add(player);
+
+// spawn defaults
+player.position.set(0, 0, 3.6);
+player.rotation.set(0, 0, 0);
+camera.position.set(0, 1.65, 0);
+
+// ---------- LIGHTING ----------
+scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.2));
+
+const dir = new THREE.DirectionalLight(0xffffff, 1.15);
+dir.position.set(7, 12, 6);
+scene.add(dir);
+
+const pink = new THREE.PointLight(0xff2d7a, 0.65, 18);
+pink.position.set(0, 3.0, -5.5);
+scene.add(pink);
+
+const aqua = new THREE.PointLight(0x7fe7ff, 0.55, 18);
+aqua.position.set(0, 3.0, -7.5);
+scene.add(aqua);
+
+// ---------- XR CONTROLLERS ----------
+const controllerModelFactory = new XRControllerModelFactory();
+const controllers = [];
+const grips = [];
+
+function makeLaser() {
+  const geo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0, 0, -1),
+  ]);
+  const mat = new THREE.LineBasicMaterial({ color: 0xb200ff, transparent: true, opacity: 0.95 });
+  const line = new THREE.Line(geo, mat);
+  line.name = "Laser";
+  line.scale.z = 10;
+  return line;
+}
+
+for (let i = 0; i < 2; i++) {
+  const c = renderer.xr.getController(i);
+  c.name = "Controller" + i;
+  c.add(makeLaser());
+  player.add(c);
+  controllers.push(c);
+
+  const g = renderer.xr.getControllerGrip(i);
+  g.name = "Grip" + i;
+  g.add(controllerModelFactory.createControllerModel(g));
+  player.add(g);
+  grips.push(g);
+}
+
+function updateControllerVisibility() {
+  const on = !!renderer.xr?.isPresenting;
+  for (const c of controllers) c.visible = on;
+  for (const g of grips) g.visible = on;
+}
+renderer.xr.addEventListener?.("sessionstart", updateControllerVisibility);
+renderer.xr.addEventListener?.("sessionend", updateControllerVisibility);
+updateControllerVisibility();
+
+log("[main] controllers ready ✅");
+
+// ---------- WORLD ----------
+const world = await initWorld({ THREE, scene, log, v: BOOT_V });
+
+if (world?.spawn) {
+  player.position.set(world.spawn.x, 0, world.spawn.z);
+  player.rotation.set(0, world.spawnYaw || 0, 0);
+}
+if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.15, world.tableFocus.z);
+
+try { world?.connect?.({ playerRig: player, camera, controllers, grips, renderer }); } catch {}
+log("[main] world loaded ✅");
+
+// ✅ NEW: Post-world furniture fix pass (chairs + seated bots orientation)
+// This does NOT remove anything; it only rotates / nudges chairs to face table.
+try {
+  fixFurniturePass({ THREE, scene, world, log });
+  log("[main] furniture fix pass ✅");
+} catch (e) {
+  log("❌ [main] furniture fix pass failed: " + (e?.message || e));
+}
+
+// ---------- CONTROLS ----------
+const controls = Controls.init({ THREE, renderer, camera, player, controllers, grips, log, world });
+
+// ---------- HANDS ----------
+const hands = HandsSystem.init({ THREE, scene, renderer, log });
+
+// ---------- TELEPORT ----------
+const teleport = Teleport.init({ THREE, scene, renderer, camera, player, controllers, log, world });
+
+// ---------- DEALING VISUALS ----------
+const dealing = DealingMix.init({ THREE, scene, log, world });
+
+// ✅ NEW: Ask DealingMix to enable table+hover presentation if supported (safe optional)
+try {
+  dealing?.setPresentation?.({
+    holeCardsOnTable: true,
+    hoverReflection: true,
+    flopStyle: "3-then-1-then-1",      // flop then turn then river
+    winnerRevealFlyToCommunity: true
+  });
+  dealing?.setDecisionSeconds?.(GAME.decisionSeconds);
+  dealing?.setStartingStack?.(GAME.startingStack);
+} catch {}
+
+// ---------- POKER ENGINE ----------
+const poker = PokerSim.create({
+  seats: GAME.seats,
+  log,
+  maxHands: GAME.maxHands,
+
+  // ✅ NEW: slower timings
+  tDealHole: GAME.tDealHole,
+  tFlop: GAME.tFlop,
+  tTurn: GAME.tTurn,
+  tRiver: GAME.tRiver,
+  tShowdown: GAME.tShowdown,
+  tNextHand: GAME.tNextHand,
+
+  // ✅ NEW: high stakes + slow decisions (if PokerSim supports these keys, it will use them)
+  startingStack: GAME.startingStack,
+  tDecision: GAME.decisionSeconds,
+  tThink: GAME.decisionSeconds,
+  decisionSeconds: GAME.decisionSeconds,
+
+  toyBetting: true,
+  names: ["BOT 1","BOT 2","BOT 3","BOT 4","BOT 5","BOT 6"],
+});
+
+// Wire Poker → DealingMix (this enables “winner cards fly into best5”)
+poker.on("state", (s) => {
+  dealing?.setStreet?.(s.street);
+  dealing?.setAction?.(s.actionText || s.phase || "—");
+  dealing?.setPot?.(s.pot);
+});
+
+poker.on("blinds", (b) => {
+  dealing?.onBlinds?.(b);
+  dealing?.setPot?.(b.pot);
+});
+
+poker.on("action", (a) => {
+  dealing?.onAction?.(a);
+});
+
+poker.on("deal", (d) => {
+  dealing?.onDeal?.(d);
+});
+
+poker.on("showdown", (sd) => {
+  dealing?.onShowdown?.(sd);
+});
+
+poker.on("finished", (f) => {
+  dealing?.showFinished?.(f);
+});
+
+poker.startHand();
+log("[main] PokerSim started ✅");
+
+// ---------- HUD EVENTS ----------
+window.addEventListener("scarlett-recenter", () => {
+  if (world?.spawn) player.position.set(world.spawn.x, 0, world.spawn.z);
+  else player.position.set(0, 0, 3.6);
+  player.rotation.set(0, 0, 0);
+  if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.15, world.tableFocus.z);
+  log("[main] recentered ✅");
+});
+
+// ---------- RESIZE / ERROR ----------
+window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-}
+});
 
-// ------------------------------
-// World helpers
-// ------------------------------
-function addWalls() {
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 1 });
-  const wallGeo = new THREE.BoxGeometry(40, 5, 0.4);
-  const wall1 = new THREE.Mesh(wallGeo, wallMat);
-  wall1.position.set(0, 2.5, -12);
-  scene.add(wall1);
+window.addEventListener("unhandledrejection", (e) => {
+  console.error(e);
+  log("❌ unhandledrejection: " + (e?.reason?.message || e?.reason || e));
+});
+window.addEventListener("error", (e) => {
+  log("❌ window.error: " + (e?.message || e));
+});
 
-  const wall2 = wall1.clone(); wall2.position.set(0, 2.5, 12); scene.add(wall2);
+// ---------- LOOP ----------
+let last = performance.now();
+renderer.setAnimationLoop(() => {
+  const now = performance.now();
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
 
-  const wallSideGeo = new THREE.BoxGeometry(0.4, 5, 40);
-  const wall3 = new THREE.Mesh(wallSideGeo, wallMat);
-  wall3.position.set(-12, 2.5, 0);
-  scene.add(wall3);
+  try { world?.tick?.(dt); } catch {}
+  try { controls?.update?.(dt); } catch {}
+  try { teleport?.update?.(dt); } catch {}
+  try { poker?.update?.(dt); } catch {}
+  try { dealing?.update?.(dt); } catch {}
+  try { hands?.update?.(dt); } catch {}
 
-  const wall4 = wall3.clone(); wall4.position.set(12, 2.5, 0); scene.add(wall4);
-}
+  renderer.render(scene, camera);
+});
 
-function makeTable() {
-  const group = new THREE.Group();
+log("[main] ready ✅");
 
-  // Base
-  const base = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.65, 0.85, 0.8, 32),
-    new THREE.MeshStandardMaterial({ color: 0x141621, roughness: 0.9, metalness: 0.1 })
-  );
-  base.position.y = 0.4;
-  group.add(base);
-
-  // Felt top (important)
-  const felt = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.05, 1.05, 0.08, 48),
-    new THREE.MeshStandardMaterial({ color: 0x0e5a3b, roughness: 0.95 })
-  );
-  felt.position.y = 0.86;
-  felt.material.emissive = new THREE.Color(0x000000);
-  felt.material.emissiveIntensity = 0.15;
-  group.add(felt);
-
-  // Rail ring
-  const rail = new THREE.Mesh(
-    new THREE.TorusGeometry(1.1, 0.09, 18, 64),
-    new THREE.MeshStandardMaterial({ color: 0x1a1c2a, roughness: 0.55, metalness: 0.15 })
-  );
-  rail.rotation.x = Math.PI / 2;
-  rail.position.y = 0.9;
-  group.add(rail);
-
-  // Save reference to top felt as "table" material pulsing target
-  group.userData.felt = felt;
-
-  group.position.set(0, 0, 0);
-  return group;
-}
-
-function makeChairs(count, tablePos, radius) {
-  const out = [];
-  for (let i = 0; i < count; i++) {
-    const a = (i / count) * Math.PI * 2;
-    const x = tablePos.x + Math.cos(a) * radius;
-    const z = tablePos.z + Math.sin(a) * radius;
-
-    const chair = new THREE.Group();
-
-    const seat = new THREE.Mesh(
-      new THREE.BoxGeometry(0.45, 0.08, 0.45),
-      new THREE.MeshStandardMaterial({ color: 0x0c0e16, roughness: 0.95 })
-    );
-    seat.position.y = 0.45;
-    chair.add(seat);
-
-    const back = new THREE.Mesh(
-      new THREE.BoxGeometry(0.45, 0.5, 0.08),
-      new THREE.MeshStandardMaterial({ color: 0x0c0e16, roughness: 0.95 })
-    );
-    back.position.set(0, 0.72, -0.18);
-    chair.add(back);
-
-    // Position chair
-    chair.position.set(x, 0, z);
-
-    // KEY: chair faces table center (so bots also face correctly)
-    chair.lookAt(tablePos.x, chair.position.y, tablePos.z);
-
-    // If your chair model points the wrong way, uncomment:
-    // chair.rotateY(Math.PI);
-
-    out.push(chair);
+// =====================================================
+// ✅ NEW: Furniture fix pass helpers
+// =====================================================
+function fixFurniturePass({ THREE, scene, world, log }) {
+  // Determine table center
+  const center = new THREE.Vector3();
+  if (world?.tableFocus) {
+    center.set(world.tableFocus.x, 0, world.tableFocus.z);
+  } else {
+    // try find a table-ish object in scene
+    const tableObj = scene.getObjectByName("PokerTable") || scene.getObjectByName("Table") || findByNameLike(scene, ["table", "poker"]);
+    if (tableObj) tableObj.getWorldPosition(center);
+    else center.set(0, 0, 0);
   }
-  return out;
-}
 
-function makeBots(count) {
-  const out = [];
-  for (let i = 0; i < count; i++) {
-    const bot = {
-      id: i,
-      stack: 1500,
-      mesh: makeBotMesh(i)
-    };
-    out.push(bot);
+  // Gather chairs
+  const chairs =
+    world?.chairs ||
+    world?.seats ||
+    world?.furniture?.chairs ||
+    findManyByNameLike(scene, ["chair", "seat"]);
+
+  if (!chairs || !chairs.length) {
+    log("[fix] no chairs found (world.chairs/world.seats/name search).");
+    return;
   }
-  return out;
+
+  // Fix chair facing: lookAt table center + optional 180° flip if chair forward axis is reversed
+  // We do a smart guess: if chair forward points AWAY from table, flip it.
+  const tmpFwd = new THREE.Vector3(0, 0, -1);
+  const tmpPos = new THREE.Vector3();
+  const toCenter = new THREE.Vector3();
+
+  for (const chair of chairs) {
+    if (!chair) continue;
+
+    chair.getWorldPosition(tmpPos);
+    toCenter.copy(center).sub(tmpPos).setY(0);
+
+    // Make it face center
+    chair.lookAt(center.x, chair.position.y, center.z);
+
+    // Guess if model is reversed: compare forward vector to direction-to-center
+    const fwd = tmpFwd.clone().applyQuaternion(chair.quaternion).setY(0).normalize();
+    const dir = toCenter.clone().normalize();
+    const dot = fwd.dot(dir);
+
+    // If dot is strongly negative, chair is facing away from table -> rotate 180
+    if (dot < -0.25) chair.rotateY(Math.PI);
+
+    // Slight outward nudge (prevents bots clipping through chair/table)
+    const away = tmpPos.clone().sub(center).setY(0);
+    if (away.length() > 0.001) {
+      away.normalize();
+      chair.position.addScaledVector(away, 0.03);
+    }
+  }
+
+  // If your bots are attached to chairs or have seat anchors, align them too (optional)
+  try {
+    world?.fixSeating?.(); // if your world has a method
+  } catch {}
+
+  log(`[fix] chairs corrected: ${chairs.length}`);
 }
 
-function makeBotMesh(i) {
-  const group = new THREE.Group();
-
-  // Body
-  const body = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.18, 0.45, 6, 12),
-    new THREE.MeshStandardMaterial({ color: 0x2a2d3e, roughness: 0.85 })
-  );
-  body.position.y = 0.9;
-  group.add(body);
-
-  // Head
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.16, 16, 16),
-    new THREE.MeshStandardMaterial({ color: 0x30344a, roughness: 0.6 })
-  );
-  head.position.y = 1.35;
-  group.add(head);
-
-  // Eyes (tiny glow)
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x7fe7ff });
-  const eye1 = new THREE.Mesh(new THREE.SphereGeometry(0.02, 10, 10), eyeMat);
-  const eye2 = eye1.clone();
-  eye1.position.set(-0.06, 1.37, 0.12);
-  eye2.position.set(0.06, 1.37, 0.12);
-  group.add(eye1, eye2);
-
-  group.userData.botIndex = i;
-  return group;
+function findByNameLike(root, needles) {
+  let found = null;
+  root.traverse(o => {
+    if (found) return;
+    const n = (o.name || "").toLowerCase();
+    if (!n) return;
+    if (needles.some(k => n.includes(k))) found = o;
+  });
+  return found;
 }
+
+function findManyByNameLike(root, needles) {
+  const out = [];
+  root.traverse(o => {
+    const n = (o.name || "").toLowerCase();
+    if (!n) return;
+    if (needles.some(k => n.includes(k))) out.push(o);
+  });
+  // de-dupe by uuid
+  const seen = new Set();
+  return out.filter(o => (seen.has(o.uuid) ? false : (seen.add(o.uuid), true)));
+                                        }

@@ -1,13 +1,6 @@
-// /js/poker.js — Scarlett Poker Engine v1.1
-// Exports BOTH names for compatibility:
-//   ✅ export const PokerSim = { create }
-//   ✅ export const PokerJS  = { create }
-//
-// Real Texas Hold'em:
-// - 52 card deck, shuffle, deal
-// - flop/turn/river
-// - best 5 out of 7 (21 combos)
-// - winner(s) + exact best5 used (holeIdx + commIdx)
+// /js/poker.js — Scarlett Poker Engine v1.1 (Exports PokerSim + PokerJS)
+// ✅ Fixes: main.js can import { PokerSim } OR { PokerJS }
+// ✅ Real Texas Hold'em, streets, best-of-7, winners + exact best5 used
 
 function makeEmitter() {
   const map = new Map();
@@ -27,9 +20,8 @@ function makeEmitter() {
   };
 }
 
-// ---------- Card Helpers ----------
-const RANKS = [2,3,4,5,6,7,8,9,10,11,12,13,14]; // 11=J,12=Q,13=K,14=A
-const SUITS = [0,1,2,3]; // ♠ ♥ ♦ ♣
+const RANKS = [2,3,4,5,6,7,8,9,10,11,12,13,14];
+const SUITS = [0,1,2,3];
 const SUIT_CH = ["♠","♥","♦","♣"];
 const RANK_CH = { 11:"J", 12:"Q", 13:"K", 14:"A" };
 
@@ -53,7 +45,7 @@ function shuffle(a) {
   return a;
 }
 
-// ---------- 5-card Hand Scoring ----------
+// ---------- scoring ----------
 function score5(cards5) {
   const rs = cards5.map(c => c.r).sort((a,b)=>b-a);
   const ss = cards5.map(c => c.s);
@@ -74,56 +66,32 @@ function score5(cards5) {
   if (uniq.length === 5) {
     const max = uniq[0], min = uniq[4];
     if (max - min === 4) { isStraight = true; straightHigh = max; }
-    // wheel A-5
     if (!isStraight && uniq[0] === 14 && uniq[1] === 5 && uniq[2] === 4 && uniq[3] === 3 && uniq[4] === 2) {
       isStraight = true; straightHigh = 5;
     }
   }
 
-  // 9 Straight Flush
   if (isFlush && isStraight) return { cat: 9, kickers: [straightHigh], cards: cards5 };
-
-  // 8 Four
-  if (groups[0][0] === 4) {
-    const quadRank = groups[0][1];
-    const kicker = groups[1][1];
-    return { cat: 8, kickers: [quadRank, kicker], cards: cards5 };
-  }
-
-  // 7 Full House
-  if (groups[0][0] === 3 && groups[1][0] === 2) {
-    return { cat: 7, kickers: [groups[0][1], groups[1][1]], cards: cards5 };
-  }
-
-  // 6 Flush
+  if (groups[0][0] === 4) return { cat: 8, kickers: [groups[0][1], groups[1][1]], cards: cards5 };
+  if (groups[0][0] === 3 && groups[1][0] === 2) return { cat: 7, kickers: [groups[0][1], groups[1][1]], cards: cards5 };
   if (isFlush) return { cat: 6, kickers: rs.slice(), cards: cards5 };
-
-  // 5 Straight
   if (isStraight) return { cat: 5, kickers: [straightHigh], cards: cards5 };
-
-  // 4 Trips
   if (groups[0][0] === 3) {
     const trips = groups[0][1];
-    const kick = groups.slice(1).map(g => g[1]).sort((a,b)=>b-a);
+    const kick = groups.slice(1).map(g=>g[1]).sort((a,b)=>b-a);
     return { cat: 4, kickers: [trips, ...kick], cards: cards5 };
   }
-
-  // 3 Two Pair
   if (groups[0][0] === 2 && groups[1][0] === 2) {
     const highPair = Math.max(groups[0][1], groups[1][1]);
     const lowPair  = Math.min(groups[0][1], groups[1][1]);
     const kicker   = groups[2][1];
     return { cat: 3, kickers: [highPair, lowPair, kicker], cards: cards5 };
   }
-
-  // 2 One Pair
   if (groups[0][0] === 2) {
     const pair = groups[0][1];
-    const kick = groups.slice(1).map(g => g[1]).sort((a,b)=>b-a);
+    const kick = groups.slice(1).map(g=>g[1]).sort((a,b)=>b-a);
     return { cat: 2, kickers: [pair, ...kick], cards: cards5 };
   }
-
-  // 1 High Card
   return { cat: 1, kickers: rs.slice(), cards: cards5 };
 }
 
@@ -138,7 +106,6 @@ function compareScore(a, b) {
   return 0;
 }
 
-// best of 7: brute force all 21 combos
 function bestOf7(cards7) {
   let best = null;
   let bestIdx = null;
@@ -176,7 +143,7 @@ function catName(cat) {
   }
 }
 
-// ---------- Engine ----------
+// ---------- engine ----------
 function create(opts = {}) {
   const log = opts.log || console.log;
   const E = makeEmitter();
@@ -187,7 +154,6 @@ function create(opts = {}) {
     bigBlind: opts.bigBlind ?? 10,
     startingStack: opts.startingStack ?? 1000,
 
-    // timing
     tDealHole: opts.tDealHole ?? 1.2,
     tFlop: opts.tFlop ?? 1.6,
     tTurn: opts.tTurn ?? 1.4,
@@ -202,7 +168,6 @@ function create(opts = {}) {
     timer: 0,
 
     dealer: 0,
-
     deck: [],
     community: [],
     players: [],
@@ -229,7 +194,6 @@ function create(opts = {}) {
   }
 
   function rotateDealer() { S.dealer = (S.dealer + 1) % S.seats; }
-
   function burnOne() { S.deck.pop(); }
   function drawOne() { return S.deck.pop(); }
 
@@ -249,12 +213,10 @@ function create(opts = {}) {
   }
 
   function clearBets() { for (const p of S.players) p.bet = 0; }
-
   function activePlayers() { return S.players.filter(p => p.inHand && !p.folded); }
 
   function maybeToyBetting(streetName) {
     if (!S.toyBetting) return;
-
     const alive = activePlayers();
     if (alive.length <= 1) return;
 
@@ -308,13 +270,11 @@ function create(opts = {}) {
     S.community.push(drawOne(), drawOne(), drawOne());
     E.emit("deal", { type:"FLOP", community: S.community.slice() });
   }
-
   function dealTurn() {
     burnOne();
     S.community.push(drawOne());
     E.emit("deal", { type:"TURN", community: S.community.slice() });
   }
-
   function dealRiver() {
     burnOne();
     S.community.push(drawOne());
@@ -440,23 +400,17 @@ function create(opts = {}) {
     if (S.phase === "HOLE") {
       if (S.timer >= S.tDealHole) {
         if (earlyWinIfOneLeft()) return setPhase("END", "SHOWDOWN");
-        clearBets();
-        dealFlop();
-        setPhase("FLOP", "FLOP");
+        clearBets(); dealFlop(); setPhase("FLOP", "FLOP");
       }
     } else if (S.phase === "FLOP") {
       if (S.timer >= S.tFlop) {
         if (earlyWinIfOneLeft()) return setPhase("END", "SHOWDOWN");
-        clearBets();
-        dealTurn();
-        setPhase("TURN", "TURN");
+        clearBets(); dealTurn(); setPhase("TURN", "TURN");
       }
     } else if (S.phase === "TURN") {
       if (S.timer >= S.tTurn) {
         if (earlyWinIfOneLeft()) return setPhase("END", "SHOWDOWN");
-        clearBets();
-        dealRiver();
-        setPhase("RIVER", "RIVER");
+        clearBets(); dealRiver(); setPhase("RIVER", "RIVER");
       }
     } else if (S.phase === "RIVER") {
       if (S.timer >= S.tRiver) {
@@ -464,50 +418,10 @@ function create(opts = {}) {
         showdown();
       }
     } else if (S.phase === "SHOWDOWN") {
-      if (S.timer >= S.tShowdown) {
-        setPhase("END", "SHOWDOWN");
-      }
+      if (S.timer >= S.tShowdown) setPhase("END", "SHOWDOWN");
     } else if (S.phase === "END") {
       if (S.timer >= S.tNextHand) startHand();
     }
-  }
-
-  function getPublicState() {
-    return {
-      phase: S.phase,
-      street: S.street,
-      dealer: S.dealer,
-      pot: S.pot,
-      community: S.community.map(cardToString),
-      players: S.players.map(p => ({
-        seat: p.seat,
-        name: p.name,
-        stack: p.stack,
-        inHand: p.inHand,
-        folded: p.folded,
-        hole: p.hole.map(cardToString)
-      })),
-      lastWinners: S.lastWinners
-    };
-  }
-
-  function getMaskedState() {
-    return {
-      phase: S.phase,
-      street: S.street,
-      dealer: S.dealer,
-      pot: S.pot,
-      community: S.community.map(cardToString),
-      players: S.players.map(p => ({
-        seat: p.seat,
-        name: p.name,
-        stack: p.stack,
-        inHand: p.inHand,
-        folded: p.folded,
-        hole: (S.phase === "SHOWDOWN" || S.phase === "END") ? p.hole.map(cardToString) : ["??","??"]
-      })),
-      lastWinners: S.lastWinners
-    };
   }
 
   return {
@@ -515,12 +429,45 @@ function create(opts = {}) {
     emit: E.emit,
     startHand,
     update,
-    getPublicState,
-    getMaskedState,
-    _debug: { cardToString, bestOf7, score5, compareScore }
+    getPublicState() {
+      return {
+        phase: S.phase,
+        street: S.street,
+        dealer: S.dealer,
+        pot: S.pot,
+        community: S.community.map(cardToString),
+        players: S.players.map(p => ({
+          seat: p.seat,
+          name: p.name,
+          stack: p.stack,
+          inHand: p.inHand,
+          folded: p.folded,
+          hole: p.hole.map(cardToString)
+        })),
+        lastWinners: S.lastWinners
+      };
+    },
+    getMaskedState() {
+      return {
+        phase: S.phase,
+        street: S.street,
+        dealer: S.dealer,
+        pot: S.pot,
+        community: S.community.map(cardToString),
+        players: S.players.map(p => ({
+          seat: p.seat,
+          name: p.name,
+          stack: p.stack,
+          inHand: p.inHand,
+          folded: p.folded,
+          hole: (S.phase === "SHOWDOWN" || S.phase === "END") ? p.hole.map(cardToString) : ["??","??"]
+        })),
+        lastWinners: S.lastWinners
+      };
+    }
   };
 }
 
-// ✅ Export both names so main.js can import either
+// ✅ Compatibility exports:
 export const PokerSim = { create };
 export const PokerJS  = { create };

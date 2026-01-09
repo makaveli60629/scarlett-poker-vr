@@ -1,186 +1,238 @@
-// /js/controls.js — Scarlett Controls v4.2 (FULL / FIXED)
-// ✅ Smooth move + strafe (left stick)
-// ✅ Optional right-stick forward/back movement (requested)
-// ✅ Snap turn (right stick X)
-// ✅ Reads HUD flags (move/snap)
-// ✅ Emits "scarlett-menu" ONCE per Y press (debounced)
-// ✅ Mobile dock fallback (scarlett-touch)
+// /js/controls.js — Scarlett Controls v4.2 (FULL, STABLE)
+// ✅ Left stick smooth move + strafe
+// ✅ Right stick snap turn (45° by default)
+// ✅ Optional: Right stick forward/back can also move (toggle)
+// ✅ Mobile dock support via "scarlett-touch"
+// ✅ Reads HUD flags: window.__SCARLETT_FLAGS.move / snap
+// ✅ Emits "scarlett-menu" on Y press (edge-trigger, no spam)
 
 export const Controls = (() => {
   function init({ THREE, renderer, camera, player, controllers, grips, log, world } = {}) {
     const L = (...a) => { try { log?.(...a); } catch { console.log(...a); } };
 
-    const Flags = () => (window.__SCARLETT_FLAGS || {});
     const S = {
-      moveEnabled: !!(Flags().move ?? true),
-      snapEnabled: !!(Flags().snap ?? true),
+      moveEnabled: !!(window.__SCARLETT_FLAGS?.move ?? true),
+      snapEnabled: !!(window.__SCARLETT_FLAGS?.snap ?? true),
 
-      speed: 2.2,
-      rightMoveSpeed: 2.0,          // ✅ right-hand forward/back (slightly slower by default)
-      snapAngle: THREE.MathUtils.degToRad(45), // ✅ your requested 45°
+      // movement feel
+      speed: 2.2,              // m/s
       deadzone: 0.18,
 
+      // snap feel
+      snapAngleDeg: 45,
+      snapAngle: THREE?.MathUtils?.degToRad ? THREE.MathUtils.degToRad(45) : (Math.PI / 4),
       snapCooldown: 0,
+      snapCooldownTime: 0.25,
+
+      // optional: allow right stick forward/back to move too
+      rightStickMoveEnabled: true,
+
+      // mobile dock
       touch: { f:0,b:0,l:0,r:0,turnL:0,turnR:0 },
 
-      // menu debounce
-      yWasDown: false,
-      lastMenuT: 0,
-
-      // if you want right-stick move always ON:
-      rightStickMoveEnabled: true,
+      // menu latch
+      yLatch: false,
     };
 
-    // HUD toggle events
+    // live update from HUD
     window.addEventListener("scarlett-toggle-move", (e) => { S.moveEnabled = !!e.detail; });
     window.addEventListener("scarlett-toggle-snap", (e) => { S.snapEnabled = !!e.detail; });
     window.addEventListener("scarlett-touch", (e) => { S.touch = e.detail || S.touch; });
+
+    // Let HUD or other systems change snap angle if needed
+    window.addEventListener("scarlett-snap-angle", (e) => {
+      const deg = Number(e?.detail);
+      if (!Number.isFinite(deg) || deg <= 0) return;
+      S.snapAngleDeg = deg;
+      S.snapAngle = THREE.MathUtils.degToRad(deg);
+      L("[controls] snap angle set:", deg);
+    });
 
     function getSession() {
       try { return renderer?.xr?.getSession?.() || null; } catch { return null; }
     }
 
-    // Normalize deadzone
+    // Find gamepad for a handedness
+    function getSource(handednessWanted) {
+      const session = getSession();
+      if (!session) return null;
+      const sources = session.inputSources || [];
+      for (const src of sources) {
+        if (!src?.gamepad) continue;
+        if (handednessWanted && src.handedness !== handednessWanted) continue;
+        return src;
+      }
+      return null;
+    }
+
+    // Normalize deadzone with rescale so it feels analog
     function dz(v) {
       const a = Math.abs(v);
       if (a < S.deadzone) return 0;
       const sign = Math.sign(v);
       const t = (a - S.deadzone) / (1 - S.deadzone);
-      return sign * t;
+      return sign * Math.min(1, Math.max(0, t));
     }
 
-    // Find XR input source by handedness
-    function getSource(handedness) {
-      const session = getSession();
-      if (!session?.inputSources) return null;
-      for (const src of session.inputSources) {
-        if (!src?.gamepad) continue;
-        if (src.handedness === handedness) return src;
-      }
-      return null;
-    }
+    // Quest sometimes reports left stick on axes[2]/[3] or [0]/[1]
+    function readStick(src, prefer = "left") {
+      if (!src?.gamepad) return { x: 0, y: 0, buttons: [] };
+      const axes = src.gamepad.axes || [];
+      const buttons = src.gamepad.buttons || [];
 
-    // Quest mapping is typically:
-    // Left stick:  axes[0], axes[1]
-    // Right stick: axes[2], axes[3]
-    // But some runtimes expose per-controller axes as [0],[1] only.
-    function readStick(src, which) {
-      // which: "left" or "right"
-      const gp = src?.gamepad;
-      if (!gp) return { x: 0, y: 0, buttons: [] };
+      // If we have 4 axes, common layout:
+      // left: 0,1 and right: 2,3
+      // BUT some browsers swap; so we try both.
+      let x = 0, y = 0;
 
-      const axes = gp.axes || [];
-      const buttons = gp.buttons || [];
-
-      // If 4+ axes exist, use standard Quest mapping.
       if (axes.length >= 4) {
-        if (which === "right") return { x: axes[2] || 0, y: axes[3] || 0, buttons };
-        return { x: axes[0] || 0, y: axes[1] || 0, buttons };
+        if (prefer === "left") {
+          x = axes[0] ?? 0;
+          y = axes[1] ?? 0;
+          // fallback if zeros:
+          if (Math.abs(x) < 0.001 && Math.abs(y) < 0.001) {
+            x = axes[2] ?? 0;
+            y = axes[3] ?? 0;
+          }
+        } else {
+          x = axes[2] ?? 0;
+          y = axes[3] ?? 0;
+          if (Math.abs(x) < 0.001 && Math.abs(y) < 0.001) {
+            x = axes[0] ?? 0;
+            y = axes[1] ?? 0;
+          }
+        }
+      } else {
+        x = axes[0] ?? 0;
+        y = axes[1] ?? 0;
       }
 
-      // If only 2 axes exist on each controller, use [0],[1]
-      return { x: axes[0] || 0, y: axes[1] || 0, buttons };
+      return { x, y, buttons, axes };
     }
 
-    // Move relative to PLAYER yaw (stable)
+    // Reused vectors to avoid GC stutter
     const fwd = new THREE.Vector3();
     const side = new THREE.Vector3();
 
-    function moveLocal(strafeX, forwardY, speed, dt) {
-      if (strafeX === 0 && forwardY === 0) return;
+    function moveByAxes(ax, ay, dt) {
+      // ay forward is typically negative on sticks
+      const x = dz(ax);
+      const y = dz(ay);
 
+      if (x === 0 && y === 0) return;
+
+      // Movement direction is based on PLAYER orientation (not head),
+      // which feels stable for VR locomotion.
       fwd.set(0, 0, -1).applyQuaternion(player.quaternion);
-      fwd.y = 0; fwd.normalize();
-
       side.set(1, 0, 0).applyQuaternion(player.quaternion);
-      side.y = 0; side.normalize();
 
-      player.position.addScaledVector(fwd, forwardY * speed * dt);
-      player.position.addScaledVector(side, strafeX * speed * dt);
+      // flatten Y
+      fwd.y = 0; side.y = 0;
+      fwd.normalize(); side.normalize();
+
+      const step = S.speed * dt;
+
+      // forward/back
+      player.position.addScaledVector(fwd, (-y) * step);
+      // strafe
+      player.position.addScaledVector(side, (x) * step);
     }
 
-    function snapTurn(xAxis) {
-      S.snapCooldown = Math.max(0, S.snapCooldown - 0); // handled in update, keep simple here
+    function snapTurnByAxis(rx, dt) {
       if (!S.snapEnabled) return;
-      if (Math.abs(xAxis) < 0.75) return;
+      S.snapCooldown = Math.max(0, S.snapCooldown - dt);
+
+      const x = dz(rx);
+      if (Math.abs(x) < 0.75) return;
       if (S.snapCooldown > 0) return;
 
-      // right stick: positive should turn right; adjust sign to feel natural
-      player.rotation.y -= Math.sign(xAxis) * S.snapAngle;
-      S.snapCooldown = 0.25;
+      // Right stick right = turn right (negative rot) usually feels correct
+      player.rotation.y -= Math.sign(x) * S.snapAngle;
+      S.snapCooldown = S.snapCooldownTime;
     }
 
-    function emitMenuOnce(nowSec, pressed) {
-      // debounce + edge trigger
-      if (pressed && !S.yWasDown) {
-        // extra guard: avoid double-fire within 0.2s
-        if ((nowSec - S.lastMenuT) > 0.20) {
-          window.dispatchEvent(new Event("scarlett-menu"));
-          S.lastMenuT = nowSec;
-          L("[controls] scarlett-menu ✅");
+    function emitMenuFromY(buttons) {
+      // Y varies by platform; we check a range.
+      const pressed =
+        !!buttons?.[3]?.pressed ||
+        !!buttons?.[4]?.pressed ||
+        !!buttons?.[5]?.pressed;
+
+      if (pressed && !S.yLatch) {
+        S.yLatch = true;
+        window.dispatchEvent(new Event("scarlett-menu"));
+        L("[controls] menu event (Y) ✅");
+      }
+      if (!pressed) S.yLatch = false;
+    }
+
+    function updateDesktopFromTouch(dt) {
+      // Mobile dock fallback (Android)
+      const f = (S.touch.f || 0) - (S.touch.b || 0);
+      const r = (S.touch.r || 0) - (S.touch.l || 0);
+      const turn = (S.touch.turnR || 0) - (S.touch.turnL || 0);
+
+      fwd.set(0, 0, -1).applyQuaternion(player.quaternion);
+      side.set(1, 0, 0).applyQuaternion(player.quaternion);
+      fwd.y = 0; side.y = 0;
+      fwd.normalize(); side.normalize();
+
+      player.position.addScaledVector(fwd, f * S.speed * dt);
+      player.position.addScaledVector(side, r * S.speed * dt);
+
+      // smooth turn on mobile
+      player.rotation.y -= turn * 1.6 * dt;
+    }
+
+    L("[controls] ready ✅ (left move + right snap + Y menu)");
+
+    return {
+      setRightStickMoveEnabled(v) { S.rightStickMoveEnabled = !!v; },
+      setSpeed(v) { if (Number.isFinite(v)) S.speed = Math.max(0.2, v); },
+      setSnapAngleDeg(deg) {
+        if (!Number.isFinite(deg) || deg <= 0) return;
+        S.snapAngleDeg = deg;
+        S.snapAngle = THREE.MathUtils.degToRad(deg);
+      },
+
+      update(dt) {
+        if (!dt || dt <= 0) return;
+
+        // Always keep player on floor for lobby mode
+        player.position.y = 0;
+
+        // If not in XR: use mobile dock only (your index dock)
+        if (!renderer?.xr?.isPresenting) {
+          updateDesktopFromTouch(dt);
+          return;
         }
-      }
-      S.yWasDown = pressed;
-    }
 
-    L("[controls] ready ✅ (45° snap + left move + right move + debounced menu)");
+        const leftSrc = getSource("left");
+        const rightSrc = getSource("right");
 
-    function update(dt) {
-      // Keep rig on ground plane (world collision later)
-      player.position.y = 0;
+        const left = readStick(leftSrc, "left");
+        const right = readStick(rightSrc, "right");
 
-      // --- Mobile dock fallback (Android) ---
-      if (!renderer?.xr?.isPresenting) {
-        const f = (S.touch.f || 0) - (S.touch.b || 0);
-        const r = (S.touch.r || 0) - (S.touch.l || 0);
-        const turn = (S.touch.turnR || 0) - (S.touch.turnL || 0);
+        // movement
+        if (S.moveEnabled) {
+          // left stick drives movement
+          moveByAxes(left.x, left.y, dt);
 
-        // move
-        moveLocal(r, f, S.speed, dt);
-
-        // smooth turn on mobile
-        player.rotation.y -= turn * 1.6 * dt;
-        return;
-      }
-
-      // --- XR ---
-      const leftSrc = getSource("left");
-      const rightSrc = getSource("right");
-
-      const left = readStick(leftSrc, "left");
-      const right = readStick(rightSrc, "right");
-
-      // movement (left stick)
-      if (S.moveEnabled) {
-        const lx = dz(left.x);
-        const ly = dz(left.y);
-
-        // forward is typically -Y
-        moveLocal(lx, (-ly), S.speed, dt);
-
-        // movement (right stick forward/back too — requested)
-        if (S.rightStickMoveEnabled) {
-          const ry = dz(right.y);
-          if (Math.abs(ry) > 0) moveLocal(0, (-ry), S.rightMoveSpeed, dt);
+          // optional: right stick forward/back ALSO moves (your request)
+          if (S.rightStickMoveEnabled) {
+            // only use right Y for forward/back, but DO NOT strafe from it
+            const ry = dz(right.y);
+            if (Math.abs(ry) > 0) moveByAxes(0, ry, dt);
+          }
         }
+
+        // snap
+        snapTurnByAxis(right.x, dt);
+
+        // menu on Y (left controller)
+        emitMenuFromY(left.buttons);
       }
-
-      // snap turn (right stick X)
-      S.snapCooldown = Math.max(0, S.snapCooldown - dt);
-      snapTurn(dz(right.x));
-
-      // Y button -> menu (debounced)
-      // Quest mapping varies; Y is often left controller button[3]
-      const buttons = left.buttons || [];
-      const yPressed =
-        !!buttons[3]?.pressed || // common "Y"
-        !!buttons[4]?.pressed || // fallback
-        !!buttons[5]?.pressed;   // fallback
-
-      emitMenuOnce(performance.now() * 0.001, yPressed);
-    }
-
-    return { update };
+    };
   }
 
   return { init };

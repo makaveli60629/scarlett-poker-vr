@@ -1,8 +1,4 @@
-// /js/dealingMix.js — Scarlett DealingMix v1.4
-// Fixes you asked for:
-// - Community cards ALWAYS hover + face player
-// - Cards no longer “tilt away”
-// - Pot HUD is nearly invisible unless you look at the pot area (so it doesn't block cards)
+// /js/dealingMix.js — Scarlett DealingMix v1.4 (Community cards always face player)
 
 export const DealingMix = (() => {
   let THREE, scene, log, world;
@@ -122,7 +118,6 @@ export const DealingMix = (() => {
       const red = (suit==="♥"||suit==="♦");
       ctx.fillStyle = red ? "#b6001b" : "#111";
 
-      // ✅ BIG corners
       ctx.font="bold 110px Arial";
       ctx.textAlign="left"; ctx.textBaseline="top";
       ctx.fillText(rank, 28, 18);
@@ -148,7 +143,6 @@ export const DealingMix = (() => {
       side: THREE.DoubleSide
     });
 
-    // community base size (big)
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.36, 0.50), mat);
     mesh.renderOrder = 100;
     return mesh;
@@ -164,7 +158,6 @@ export const DealingMix = (() => {
       emissiveIntensity: 0.06
     });
     const m = new THREE.Mesh(geo, mat);
-    // ✅ flat
     m.rotation.set(0,0,0);
     return m;
   }
@@ -193,31 +186,26 @@ export const DealingMix = (() => {
 
     const tf = world.tableFocus || new THREE.Vector3(0,0,-6.5);
 
-    // HUD higher so it’s not crowding the cards
     state.tableHud = makeHudPlane(tableHudDraw, 1400, 520, 2.6, 0.90);
     state.tableHud.position.set(tf.x, (world.tableY || 0.92) + 1.55, tf.z - 0.20);
     state.root.add(state.tableHud);
 
-    // Pot HUD sits near center, but “look-to-reveal”
     state.potHud = makeHudPlane(potHudDraw, 700, 260, 0.95, 0.36);
     state.potHud.position.set(tf.x, (world.tableY || 0.92) + 0.55, tf.z);
-    state.potHud.material.opacity = 0.08; // ✅ basically invisible unless looked at
+    state.potHud.material.opacity = 0.08;
     state.root.add(state.potHud);
 
-    // Community cards (always face player)
     const ranks = ["A","K","Q","J","10"];
     const suits = ["♠","♦","♥","♣","♠"];
     state.comm.length = 0;
 
     for (let i=0;i<5;i++){
       const c = makeCard(ranks[i], suits[i]);
-      // position above table center
       c.position.set(tf.x + (i-2)*0.44, (world.tableY || 0.92) + 0.55, tf.z - 0.15);
       state.root.add(c);
       state.comm.push(c);
     }
 
-    // chip pile center
     state.chipPile = new THREE.Group();
     for (let i=0;i<18;i++){
       const col = (i%3===0)?0xff2d7a:(i%3===1)?0x7fe7ff:0xffcc00;
@@ -228,7 +216,6 @@ export const DealingMix = (() => {
     state.chipPile.position.set(tf.x, 0, tf.z);
     state.root.add(state.chipPile);
 
-    // dealer button
     state.dealerButton = makeDealerButton();
     state.dealerButton.position.set(tf.x + 0.95, (world.tableY || 0.92) + 0.012, tf.z + 0.75);
     state.root.add(state.dealerButton);
@@ -249,35 +236,24 @@ export const DealingMix = (() => {
       const cam = world?.cameraRef;
       if (!cam?.position) return;
 
-      // Table HUD faces player
       state.tableHud.lookAt(cam.position.x, state.tableHud.position.y, cam.position.z);
 
-      // ✅ Community cards ALWAYS face player + hover
+      // Community cards ALWAYS face player + hover
       for (let i=0;i<state.comm.length;i++){
         const c = state.comm[i];
         c.position.y = (world.tableY || 0.92) + 0.55 + Math.sin(state.t*2 + i)*0.03;
-
-        // face player
         c.lookAt(cam.position.x, c.position.y, cam.position.z);
-        // keep upright (no weird tilt)
-        c.rotation.x = 0;
       }
 
-      // ✅ Pot HUD “look-to-reveal”
-      // If you look near the pot spot, it brightens; otherwise fades out.
+      // Pot HUD look-to-reveal
       const potPos = state.potHud.position.clone();
       const toPot = potPos.sub(cam.position).normalize();
-
       const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(cam.quaternion).normalize();
-      const dot = fwd.dot(toPot); // 1 = directly looking at it
-
-      // threshold 0.92 (~23 deg cone)
+      const dot = fwd.dot(toPot);
       const reveal = Math.max(0, Math.min(1, (dot - 0.90) / 0.08));
       const targetOpacity = 0.06 + reveal * 0.94;
-
       state.potHud.material.opacity += (targetOpacity - state.potHud.material.opacity) * 0.12;
 
-      // keep pot HUD facing player but not loud
       state.potHud.lookAt(cam.position.x, state.potHud.position.y, cam.position.z);
       state.potHud.position.y = (world.tableY || 0.92) + 0.55 + Math.sin(state.t*2.2)*0.01;
     }

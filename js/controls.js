@@ -1,140 +1,104 @@
-// /js/controls.js — Scarlett Controls v3.0
-// - Smooth move + strafe (left stick X/Y)
-// - Snap turn (right stick X)
-// - Y button toggles "watch menu" event (handled in hands.js)
-// - Works with Android dock via scarlett-touch events
+// /js/controls.js — Scarlett Controls v4.0 (FULL)
+// ✅ Smooth move + strafe (left stick X/Y)
+// ✅ Snap turn (right stick X)
+// ✅ Reads HUD flags (move/snap)
+// ✅ Emits "scarlett-menu" on Y (or Oculus menu fallback)
 
 export const Controls = (() => {
-  function init({ THREE, renderer, camera, player, log, world } = {}) {
-    const state = {
-      move: true,
-      snap: true,
-      speed: 2.1,
-      snapAngle: Math.PI / 6,
+  function init({ THREE, renderer, camera, player, controllers, grips, log, world } = {}) {
+    const S = {
+      moveEnabled: !!(window.__SCARLETT_FLAGS?.move ?? true),
+      snapEnabled: !!(window.__SCARLETT_FLAGS?.snap ?? true),
+      speed: 2.2,
+      snapAngle: THREE.MathUtils.degToRad(30),
+      deadzone: 0.18,
       snapCooldown: 0,
-      touch: { f:0,b:0,l:0,r:0,turnL:0,turnR:0 }
+      touch: { f:0,b:0,l:0,r:0,turnL:0,turnR:0 },
     };
 
-    // flags from your HUD
-    const flags = window.__SCARLETT_FLAGS || { move:true, snap:true };
-    state.move = !!flags.move;
-    state.snap = !!flags.snap;
+    window.addEventListener("scarlett-toggle-move", (e) => { S.moveEnabled = !!e.detail; });
+    window.addEventListener("scarlett-toggle-snap", (e) => { S.snapEnabled = !!e.detail; });
+    window.addEventListener("scarlett-touch", (e) => { S.touch = e.detail || S.touch; });
 
-    window.addEventListener("scarlett-toggle-move", (e) => state.move = !!e.detail);
-    window.addEventListener("scarlett-toggle-snap", (e) => state.snap = !!e.detail);
+    function getSession() { return renderer.xr.getSession?.(); }
 
-    window.addEventListener("scarlett-touch", (e) => {
-      state.touch = Object.assign(state.touch, e.detail || {});
-    });
-
-    // read XR gamepads
-    function getXRGamepads() {
-      const s = renderer.xr.getSession?.();
-      if (!s) return [];
-      const gps = [];
-      for (const src of s.inputSources) {
-        if (src && src.gamepad) gps.push({ handedness: src.handedness, gamepad: src.gamepad });
+    function readGamepadAxes(handednessWanted) {
+      const session = getSession();
+      if (!session) return null;
+      for (const src of session.inputSources) {
+        if (!src?.gamepad) continue;
+        if (handednessWanted && src.handedness !== handednessWanted) continue;
+        const axes = src.gamepad.axes || [];
+        const buttons = src.gamepad.buttons || [];
+        return { axes, buttons, handedness: src.handedness };
       }
-      return gps;
+      return null;
     }
 
-    function forwardVector() {
-      const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
-      fwd.y = 0; fwd.normalize();
-      return fwd;
+    function dz(v) {
+      const a = Math.abs(v);
+      if (a < S.deadzone) return 0;
+      const sign = Math.sign(v);
+      const t = (a - S.deadzone) / (1 - S.deadzone);
+      return sign * t;
     }
-    function rightVector() {
-      const r = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
-      r.y = 0; r.normalize();
-      return r;
-    }
-
-    let lastYDown = false;
 
     function update(dt) {
-      const gps = getXRGamepads();
+      // clamp to floor always
+      player.position.y = 0;
 
-      // Left stick = move/strafe
-      let lx = 0, ly = 0;
-      // Right stick x = snap
-      let rx = 0;
+      // --- Mobile dock fallback ---
+      if (!renderer.xr.isPresenting) {
+        // use touch state only
+        const f = S.touch.f - S.touch.b;
+        const r = S.touch.r - S.touch.l;
+        const turn = S.touch.turnR - S.touch.turnL;
 
-      // Y button = menu toggle (left controller)
-      let yDown = false;
+        const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(player.quaternion);
+        const side = new THREE.Vector3(1,0,0).applyQuaternion(player.quaternion);
 
-      for (const g of gps) {
-        const gp = g.gamepad;
-        if (!gp) continue;
-
-        // Standard: axes[0], axes[1] = left stick; axes[2], axes[3] = right stick
-        if (g.handedness === "left") {
-          lx = gp.axes?.[0] ?? 0;
-          ly = gp.axes?.[1] ?? 0;
-
-          // Oculus: Y usually buttons[3]
-          yDown = !!gp.buttons?.[3]?.pressed;
-        }
-        if (g.handedness === "right") {
-          rx = gp.axes?.[2] ?? 0;
-        }
+        player.position.addScaledVector(fwd, f * S.speed * dt);
+        player.position.addScaledVector(side, r * S.speed * dt);
+        player.rotation.y -= turn * 1.6 * dt;
+        return;
       }
 
-      // Y toggle (edge)
-      if (yDown && !lastYDown) {
-        window.dispatchEvent(new Event("scarlett-toggle-watchmenu"));
+      // --- XR stick move ---
+      const left = readGamepadAxes("left");
+      const right = readGamepadAxes("right");
+
+      // Smooth move/strafe
+      if (S.moveEnabled && left?.axes?.length >= 2) {
+        const x = dz(left.axes[2] ?? left.axes[0] ?? 0);  // sometimes axes[2]/[3] on Quest
+        const y = dz(left.axes[3] ?? left.axes[1] ?? 0);
+
+        const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(player.quaternion);
+        const side = new THREE.Vector3(1,0,0).applyQuaternion(player.quaternion);
+
+        player.position.addScaledVector(fwd, (-y) * S.speed * dt);
+        player.position.addScaledVector(side, (x) * S.speed * dt);
       }
-      lastYDown = yDown;
 
       // Snap turn
-      if (state.snap) {
-        state.snapCooldown = Math.max(0, state.snapCooldown - dt);
-        if (state.snapCooldown <= 0) {
-          if (rx > 0.75) {
-            player.rotation.y -= state.snapAngle;
-            state.snapCooldown = 0.20;
-          } else if (rx < -0.75) {
-            player.rotation.y += state.snapAngle;
-            state.snapCooldown = 0.20;
-          }
+      S.snapCooldown = Math.max(0, S.snapCooldown - dt);
+      if (S.snapEnabled && right?.axes?.length >= 2) {
+        const rx = dz(right.axes[2] ?? right.axes[0] ?? 0);
+        if (Math.abs(rx) > 0.75 && S.snapCooldown <= 0) {
+          player.rotation.y -= Math.sign(rx) * S.snapAngle;
+          S.snapCooldown = 0.25;
         }
       }
 
-      // Move
-      if (state.move) {
-        // include Android dock
-        const t = state.touch;
-        let mx = lx;
-        let mz = ly;
+      // Y button -> menu event
+      // Quest: buttons[3] or [4] varies; we check a few
+      if (left?.buttons?.length) {
+        const yPressed =
+          !!left.buttons[3]?.pressed ||
+          !!left.buttons[4]?.pressed ||
+          !!left.buttons[5]?.pressed;
 
-        if (t.l) mx -= 0.85;
-        if (t.r) mx += 0.85;
-        if (t.f) mz -= 0.85;
-        if (t.b) mz += 0.85;
-
-        // deadzone
-        const dz = 0.12;
-        if (Math.abs(mx) < dz) mx = 0;
-        if (Math.abs(mz) < dz) mz = 0;
-
-        if (mx || mz) {
-          const fwd = forwardVector();
-          const right = rightVector();
-
-          // NOTE: stick forward is negative Z in axes (ly)
-          const move = new THREE.Vector3();
-          move.addScaledVector(fwd, -mz);
-          move.addScaledVector(right, mx);
-          move.normalize().multiplyScalar(state.speed * dt);
-
-          // apply, keep on floor
-          player.position.add(move);
-          player.position.y = 0;
-        }
+        if (yPressed) window.dispatchEvent(new Event("scarlett-menu"));
       }
-
-      // Android dock snap turn buttons
-      if (state.touch.turnL) player.rotation.y += state.snapAngle * dt * 4.0;
-      if (state.touch.turnR) player.rotation.y -= state.snapAngle * dt * 4.0;
     }
 
     return { update };

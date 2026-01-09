@@ -1,176 +1,173 @@
-// /js/TeleportMachine.js
-// Scarlett VR Poker — Teleport Machine (refixed / permanent)
-// - Self-contained: builds mesh + collider + target ring + pointer sync hooks
-// - Works with your existing controller ray/teleport logic (you call setAim / setActive)
+// /js/teleport_machine.js — Scarlett VR Poker (Mountable TeleportMachine v2)
+// Exports: TeleportMachine with init/build/mount so World loader can mount it.
+// Provides: simple teleport target + confirm + visual rune
 
-import { TeleportVFX } from "./TeleportVFX.js";
+export const TeleportMachine = {
+  init(ctx){ return this.mount(ctx); },
+  build(ctx){ return this.mount(ctx); },
 
-export class TeleportMachine {
-  constructor({
-    scene,
-    THREE,
-    position = { x: 0, y: 0, z: -6 },
-    rotationY = 0,
-    scale = 1,
-    name = "TeleportMachine",
-    ringRadius = 0.55,
-  }) {
-    this.scene = scene;
-    this.THREE = THREE;
+  mount(ctx){
+    const { THREE, scene, renderer, player } = ctx;
+    if (!THREE || !scene || !renderer || !player) throw new Error("TeleportMachine.mount: missing ctx parts");
 
-    this.group = new THREE.Group();
-    this.group.name = name;
-    this.group.position.set(position.x, position.y, position.z);
-    this.group.rotation.y = rotationY;
-    this.group.scale.setScalar(scale);
+    // Prevent double-mount
+    if (scene.userData.__teleport_machine_built) return;
+    scene.userData.__teleport_machine_built = true;
 
-    this.active = true;
-    this._aimPoint = new THREE.Vector3();
-    this._aimNormal = new THREE.Vector3(0, 1, 0);
+    // State
+    const S = {
+      enabled: true,
+      target: new THREE.Vector3(0, 0, 6),
+      hasTarget: false,
+      ring: null,
+      beam: null,
+      ray: new THREE.Raycaster(),
+      tmpM4: new THREE.Matrix4(),
+      tmpDir: new THREE.Vector3(),
+      floorY: 0,
+    };
 
-    // ===== Base pedestal =====
-    const baseGeo = new THREE.CylinderGeometry(0.75, 0.95, 0.35, 32, 1, false);
-    const baseMat = new THREE.MeshStandardMaterial({
-      color: 0x111111,
-      metalness: 0.7,
-      roughness: 0.35,
+    // Visible rune ring (Scorpion Rune feel)
+    const ringGeo = new THREE.RingGeometry(0.32, 0.46, 64);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0x7fe7ff, transparent: true, opacity: 0.85, side: THREE.DoubleSide
     });
-    const base = new THREE.Mesh(baseGeo, baseMat);
-    base.position.y = 0.175;
-    base.castShadow = true;
-    base.receiveShadow = true;
-    this.group.add(base);
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(0, 0.02, 2);
+    ring.visible = false;
+    scene.add(ring);
+    S.ring = ring;
 
-    // ===== Column =====
-    const colGeo = new THREE.CylinderGeometry(0.18, 0.22, 1.2, 24);
-    const colMat = new THREE.MeshStandardMaterial({
-      color: 0x1b1b1b,
-      metalness: 0.6,
-      roughness: 0.35,
+    // Small pillar “machine”
+    const base = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.35, 0.45, 1.15, 28),
+      new THREE.MeshStandardMaterial({ color: 0x101526, roughness: 0.6, metalness: 0.2 })
+    );
+    base.position.set(0, 0.58, 2);
+    scene.add(base);
+
+    const core = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.12, 0.55, 20),
+      new THREE.MeshStandardMaterial({ color: 0xff2d7a, roughness: 0.2, metalness: 0.1, transparent:true, opacity:0.8 })
+    );
+    core.position.set(0, 1.05, 2);
+    scene.add(core);
+
+    const glow = new THREE.PointLight(0x7fe7ff, 1.2, 8);
+    glow.position.set(0, 1.25, 2);
+    scene.add(glow);
+
+    // Find floor mesh to raycast against (fallback floor exists)
+    const floorCandidates = [];
+    scene.traverse((o)=>{
+      if (!o || !o.isMesh) return;
+      const name = (o.name||"").toLowerCase();
+      if (name.includes("floor")) floorCandidates.push(o);
+      // also treat large plane meshes as floor
+      if (o.geometry && o.geometry.type === "PlaneGeometry") floorCandidates.push(o);
     });
-    const col = new THREE.Mesh(colGeo, colMat);
-    col.position.y = 0.35 + 0.6;
-    col.castShadow = true;
-    this.group.add(col);
 
-    // ===== Crown “dock” head =====
-    const headGeo = new THREE.TorusGeometry(0.35, 0.09, 16, 48);
-    const headMat = new THREE.MeshStandardMaterial({
-      color: 0x252525,
-      metalness: 0.85,
-      roughness: 0.25,
-    });
-    const head = new THREE.Mesh(headGeo, headMat);
-    head.rotation.x = Math.PI / 2;
-    head.position.y = 1.55;
-    head.castShadow = true;
-    this.group.add(head);
-
-    // ===== Emissive core (glow base) =====
-    const coreGeo = new THREE.SphereGeometry(0.12, 24, 18);
-    this.coreMat = new THREE.MeshStandardMaterial({
-      color: 0x12051d,
-      emissive: 0x7b2cff,
-      emissiveIntensity: 1.6,
-      metalness: 0.0,
-      roughness: 0.25,
-    });
-    const core = new THREE.Mesh(coreGeo, this.coreMat);
-    core.position.y = 1.55;
-    this.group.add(core);
-
-    // ===== Target ring (visual landing indicator) =====
-    const ringGeo = new THREE.RingGeometry(ringRadius * 0.7, ringRadius, 48);
-    this.ringMat = new THREE.MeshStandardMaterial({
-      color: 0x2b0a4d,
-      emissive: 0x7b2cff,
-      emissiveIntensity: 1.3,
-      roughness: 0.35,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.0,
-      depthWrite: false,
-    });
-    this.ring = new THREE.Mesh(ringGeo, this.ringMat);
-    this.ring.rotation.x = -Math.PI / 2;
-    this.ring.position.y = 0.01; // slightly above floor
-    this.scene.add(this.ring);
-
-    // ===== Collider (simple cylinder) =====
-    // Your collision system can read this.userData.collider if you have one.
-    const colliGeo = new THREE.CylinderGeometry(0.95, 0.95, 0.6, 16);
-    const colliMat = new THREE.MeshBasicMaterial({ visible: false });
-    this.collider = new THREE.Mesh(colliGeo, colliMat);
-    this.collider.position.y = 0.3;
-    this.collider.userData.isCollider = true;
-    this.collider.userData.colliderType = "cylinder";
-    this.collider.userData.blocking = true;
-    this.group.add(this.collider);
-
-    // ===== VFX =====
-    this.vfx = new TeleportVFX({ THREE, parent: this.group });
-    this.vfx.setIntensity(1.0);
-
-    this.scene.add(this.group);
-
-    // tick state
-    this._t = 0;
-    this._ringPulse = 0;
-  }
-
-  setActive(on) {
-    this.active = !!on;
-    this.vfx.setEnabled(this.active);
-    if (!this.active) this.hideTarget();
-  }
-
-  // Call this from your controller raycast, when you have a hit on the floor.
-  setAim(hitPoint, hitNormal = { x: 0, y: 1, z: 0 }) {
-    if (!hitPoint) return;
-    this._aimPoint.set(hitPoint.x, hitPoint.y, hitPoint.z);
-    this._aimNormal.set(hitNormal.x, hitNormal.y, hitNormal.z).normalize();
-
-    // show ring at aim point
-    this.ring.position.copy(this._aimPoint);
-    // align ring with normal (usually floor -> up)
-    // simple: keep ring flat unless you want wall-teleport later
-    this.ring.rotation.x = -Math.PI / 2;
-    this.showTarget();
-  }
-
-  showTarget() {
-    this.ringMat.opacity = 0.85;
-  }
-
-  hideTarget() {
-    this.ringMat.opacity = 0.0;
-  }
-
-  // Optional helper: returns a safe teleport destination (e.g., keep Y = floor)
-  getTeleportDestination() {
-    return { x: this._aimPoint.x, y: this._aimPoint.y, z: this._aimPoint.z };
-  }
-
-  update(dt) {
-    this._t += dt;
-
-    // core pulse
-    const pulse = 1.2 + Math.sin(this._t * 4.0) * 0.45;
-    this.coreMat.emissiveIntensity = this.active ? pulse : 0.0;
-
-    // ring pulse
-    if (this.ringMat.opacity > 0.01) {
-      this._ringPulse += dt;
-      const op = 0.55 + Math.sin(this._ringPulse * 5.0) * 0.25;
-      this.ringMat.opacity = Math.max(0.25, Math.min(0.95, op));
+    function setEnabled(v){
+      S.enabled = !!v;
+      if (!S.enabled) { S.ring.visible = false; S.hasTarget = false; }
     }
 
-    this.vfx.update(dt);
-  }
+    // Hook HUD toggle
+    window.addEventListener("scarlett-toggle-teleport", (e)=> setEnabled(!!e.detail));
 
-  dispose() {
-    this.scene.remove(this.group);
-    this.scene.remove(this.ring);
-    this.vfx.dispose?.();
+    // Simple “tap to teleport” on mobile: tap screen = teleport to ring if valid
+    window.addEventListener("pointerdown", (e)=>{
+      // ignore clicks on UI buttons
+      const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : "";
+      if (tag === "button") return;
+      if (!S.enabled) return;
+
+      // if we have a target, teleport
+      if (S.hasTarget) {
+        player.position.x = S.target.x;
+        player.position.z = S.target.z;
+      }
+    }, { passive:true });
+
+    // Controller raycast teleport (Quest): aim with right controller
+    const right = renderer.xr.getController(1);
+    const left = renderer.xr.getController(0);
+
+    function updateTargetFromController(ctrl){
+      if (!ctrl) return;
+
+      // ray direction
+      S.tmpM4.identity().extractRotation(ctrl.matrixWorld);
+      S.tmpDir.set(0, 0, -1).applyMatrix4(S.tmpM4).normalize();
+
+      const origin = new THREE.Vector3().setFromMatrixPosition(ctrl.matrixWorld);
+      S.ray.set(origin, S.tmpDir);
+
+      const hits = S.ray.intersectObjects(floorCandidates.length ? floorCandidates : scene.children, true);
+      if (hits && hits.length) {
+        const h = hits[0];
+        // only accept near-floor hits
+        const p = h.point;
+        S.target.copy(p);
+        S.target.y = 0;
+        S.hasTarget = true;
+
+        S.ring.position.set(S.target.x, 0.02, S.target.z);
+        S.ring.visible = true;
+      } else {
+        S.hasTarget = false;
+        S.ring.visible = false;
+      }
+    }
+
+    // Confirm teleport on trigger squeeze
+    function tryConfirmTeleport(){
+      if (!S.enabled || !S.hasTarget) return;
+      player.position.x = S.target.x;
+      player.position.z = S.target.z;
+    }
+
+    // XR select = trigger for many browsers
+    right?.addEventListener("select", tryConfirmTeleport);
+    left?.addEventListener("select", tryConfirmTeleport);
+
+    // Also allow HUD “Recenter” to cancel ring
+    window.addEventListener("scarlett-recenter", ()=>{
+      S.hasTarget = false;
+      if (S.ring) S.ring.visible = false;
+    });
+
+    // Per-frame update
+    const tick = () => {
+      if (!S.enabled) return;
+      // Prefer right controller in XR, else do nothing (mobile uses tap)
+      if (renderer.xr.isPresenting) updateTargetFromController(right || left);
+
+      // subtle rune pulse
+      if (S.ring && S.ring.visible) {
+        const t = performance.now() * 0.002;
+        S.ring.material.opacity = 0.55 + 0.25 * Math.sin(t * 2.2);
+        S.ring.rotation.z = t * 0.35;
+      }
+    };
+
+    // store update hook where world can call later if it wants
+    scene.userData.__teleport_tick = tick;
+
+    // also register a global ticker if main isn’t calling it
+    const oldLoop = renderer.getAnimationLoop?.();
+    // (do nothing; main already runs render loop)
+
+    // expose in ctx.world if present
+    if (ctx.world) {
+      const prev = ctx.world.update;
+      ctx.world.update = (dt)=>{
+        try { prev && prev(dt); } catch {}
+        try { tick(); } catch {}
+      };
+    }
+
+    return { enabled:()=>S.enabled };
   }
-}
+};

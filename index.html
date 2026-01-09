@@ -106,10 +106,6 @@
       background: rgba(255,45,122,.14);
       box-shadow: 0 0 0 1px rgba(255,45,122,.15) inset;
     }
-    .btn.good {
-      border-color: rgba(76,217,100,.35);
-      background: rgba(76,217,100,.12);
-    }
     .btn.warn {
       border-color: rgba(255,204,0,.35);
       background: rgba(255,204,0,.12);
@@ -263,6 +259,7 @@
         <button class="btn ghost small" id="btnHands">Hands</button>
 
         <button class="btn warn small" id="btnDiag">Diagnostics</button>
+        <button class="btn warn small" id="btnForceLog">Force Log</button>
         <button class="btn ghost small" id="btnHelp">Help</button>
         <button class="btn ghost small" id="btnLog">Log</button>
       </div>
@@ -272,7 +269,7 @@
   <div id="vrButtonSlot" aria-label="VR Button Slot"></div>
 
   <div id="dock" aria-label="Mobile Controls">
-    <button class="btn good" id="mForward">▲</button>
+    <button class="btn" id="mForward">▲</button>
     <div style="display:flex; gap:10px; align-items:center;">
       <button class="btn" id="mLeft">◀</button>
       <button class="btn" id="mBack">▼</button>
@@ -302,7 +299,7 @@
         <div class="row"><b>Quest:</b> Left stick move • Right stick turn • Toggle Snap for snap/smooth.</div>
         <div class="row"><b>Android:</b> Use dock arrows • Tap Teleport to toggle.</div>
         <div class="row"><b>Diagnostics:</b> Checks key files for 404 + prints results in Log.</div>
-        <div class="row"><b>Log:</b> Mirrors console.log/warn/error + module logs.</div>
+        <div class="row"><b>Log:</b> Auto-opens on any warn/error.</div>
       </div>
       <div class="actions">
         <button class="btn primary" id="btnCloseHelp">Close</button>
@@ -311,55 +308,53 @@
   </div>
 
   <script type="module">
-    // ---- Build version ----
     const v = Date.now().toString();
     window.__BUILD_V = v;
+    window.__XR_SESSION_INIT = { optionalFeatures: ["local-floor","bounded-floor","hand-tracking"] };
+
     document.getElementById("buildText").textContent = " " + v;
 
-    // XR init
-    window.__XR_SESSION_INIT = { optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"] };
-
-    // Status helpers
     const statusText = document.getElementById("statusText");
     const setStatus = (t) => { statusText.textContent = " " + t; };
 
-    // ---- On-screen log ----
     const logEl = document.getElementById("log");
     const logWrap = document.getElementById("logwrap");
-    function appendLog(m) {
+
+    function openLog(){ logWrap.style.display = "block"; }
+    function appendLog(m){
       if (!logEl) return;
       logEl.textContent += "\n" + String(m);
       logEl.scrollTop = logEl.scrollHeight;
     }
 
-    // Capture module logs
+    // Module logs
     window.addEventListener("scarlett-log", (e) => {
       try { appendLog(String(e?.detail ?? "")); } catch {}
     });
 
-    // Mirror console logs to on-screen log (NO recursion: use original refs)
+    // Mirror console into log and auto-open on warn/error
     (function hookConsole(){
       const origLog = console.log.bind(console);
       const origWarn = console.warn.bind(console);
       const origErr = console.error.bind(console);
 
       console.log = (...a) => { origLog(...a); try { appendLog(a.map(String).join(" ")); } catch {} };
-      console.warn = (...a) => { origWarn(...a); try { appendLog("⚠️ " + a.map(String).join(" ")); } catch {} };
-      console.error = (...a) => { origErr(...a); try { appendLog("❌ " + a.map(String).join(" ")); } catch {} };
+      console.warn = (...a) => { origWarn(...a); try { openLog(); appendLog("⚠️ " + a.map(String).join(" ")); } catch {} };
+      console.error = (...a) => { origErr(...a); try { openLog(); appendLog("❌ " + a.map(String).join(" ")); } catch {} };
     })();
 
-    // Window errors
-    window.addEventListener("error", (e) => appendLog("❌ window.error: " + (e?.message || e)));
-    window.addEventListener("unhandledrejection", (e) => appendLog("❌ unhandledrejection: " + (e?.reason?.message || e?.reason || e)));
+    // Window errors -> auto-open log
+    window.addEventListener("error", (e) => { openLog(); appendLog("❌ window.error: " + (e?.message || e)); });
+    window.addEventListener("unhandledrejection", (e) => { openLog(); appendLog("❌ unhandledrejection: " + (e?.reason?.message || e?.reason || e)); });
 
-    // Boot header
+    // Boot
     appendLog("BOOT v=" + v);
     appendLog("href=" + location.href);
     appendLog("ua=" + (navigator.userAgent || ""));
     appendLog("navigator.xr=" + (!!navigator.xr));
     appendLog("[index] sessionInit=" + JSON.stringify(window.__XR_SESSION_INIT));
 
-    // HUD buttons
+    // Buttons
     const btnEnter = document.getElementById("btnEnter");
     const btnRecenter = document.getElementById("btnRecenter");
     const btnTeleport = document.getElementById("btnTeleport");
@@ -369,31 +364,27 @@
     const btnHelp = document.getElementById("btnHelp");
     const btnLog = document.getElementById("btnLog");
     const btnDiag = document.getElementById("btnDiag");
+    const btnForceLog = document.getElementById("btnForceLog");
 
-    // Log panel controls
     document.getElementById("btnCopyLog")?.addEventListener("click", async () => {
       try { await navigator.clipboard.writeText(logEl?.textContent || ""); appendLog("[hud] log copied ✅"); }
-      catch { appendLog("[hud] log copy failed ⚠️"); }
+      catch { openLog(); appendLog("[hud] log copy failed ⚠️"); }
     });
-    document.getElementById("btnClearLog")?.addEventListener("click", () => { if (logEl) logEl.textContent = ""; appendLog("[hud] log cleared ✅"); });
-    document.getElementById("btnCloseLog")?.addEventListener("click", () => { if (logWrap) logWrap.style.display = "none"; });
+    document.getElementById("btnClearLog")?.addEventListener("click", () => { logEl.textContent = ""; appendLog("[hud] log cleared ✅"); });
+    document.getElementById("btnCloseLog")?.addEventListener("click", () => { logWrap.style.display = "none"; });
 
-    // Help
     const help = document.getElementById("help");
     btnHelp?.addEventListener("click", () => { help.style.display = "flex"; });
     document.getElementById("btnCloseHelp")?.addEventListener("click", () => { help.style.display = "none"; });
 
-    // Toggle log display
-    btnLog?.addEventListener("click", () => {
-      logWrap.style.display = (logWrap.style.display === "block") ? "none" : "block";
-    });
+    btnLog?.addEventListener("click", () => { logWrap.style.display = (logWrap.style.display === "block") ? "none" : "block"; });
+    btnForceLog?.addEventListener("click", () => { openLog(); appendLog("[hud] log forced open ✅"); });
 
-    // Persistent toggles
+    // toggles
     const LS_KEY = "scarlett_flags_v1";
     const saved = (() => { try { return JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch { return null; } })();
     window.__SCARLETT_FLAGS = Object.assign({ teleport:true, move:true, snap:true, hands:true }, saved || {});
     function saveFlags(){ try { localStorage.setItem(LS_KEY, JSON.stringify(window.__SCARLETT_FLAGS)); } catch {} }
-
     function updateTogglesUI(){
       const f = window.__SCARLETT_FLAGS;
       btnTeleport.classList.toggle("primary", !!f.teleport);
@@ -432,14 +423,12 @@
       appendLog("[hud] recenter");
       window.dispatchEvent(new Event("scarlett-recenter"));
     });
-
-    // Enter VR button -> event
     btnEnter?.addEventListener("click", () => {
       appendLog("[hud] enter vr");
       window.dispatchEvent(new Event("scarlett-enter-vr"));
     });
 
-    // Android dock (touch)
+    // Android dock touch
     const touchState = { f:0, b:0, l:0, r:0, turnL:0, turnR:0 };
     function emitTouch(){ window.dispatchEvent(new CustomEvent("scarlett-touch", { detail: { ...touchState } })); }
     function bindHold(btnId, key, value){
@@ -466,7 +455,7 @@
       window.dispatchEvent(new CustomEvent("scarlett-toggle-teleport", { detail: window.__SCARLETT_FLAGS.teleport }));
     });
 
-    // Dock visibility (hide on Quest)
+    // Dock visibility
     function updateDockVisibility(){
       const ua = navigator.userAgent || "";
       const isQuest = /OculusBrowser|Oculus|Quest/i.test(ua);
@@ -477,8 +466,9 @@
     }
     updateDockVisibility();
 
-    // Diagnostics: checks files for 404 (very useful when phone crashes)
+    // Diagnostics (auto-open log if any fail)
     async function diagnostics(){
+      openLog();
       appendLog("[diag] running…");
       const base = location.href.replace(/\/[^\/]*$/, "/");
       const files = [
@@ -492,16 +482,19 @@
         "js/store.js",
         "js/water_fountain.js",
       ];
+      let bad = 0;
       for (const f of files){
         const url = new URL(f + "?v=" + encodeURIComponent(v), base).toString();
         try {
           const r = await fetch(url, { cache:"no-store" });
-          appendLog(`[diag] ${f} -> ${r.status} ${r.ok ? "✅" : "❌"} `);
+          appendLog(`[diag] ${f} -> ${r.status} ${r.ok ? "✅" : "❌"}`);
+          if (!r.ok) bad++;
         } catch (e) {
           appendLog(`[diag] ${f} -> ERR ❌ ${e?.message || e}`);
+          bad++;
         }
       }
-      appendLog("[diag] done.");
+      appendLog(bad ? `[diag] done (FAILS=${bad}) ❌` : "[diag] done ✅");
     }
     btnDiag?.addEventListener("click", diagnostics);
 
@@ -514,13 +507,14 @@
       setStatus("Ready ✅");
       appendLog("[index] main imported ✅");
     } catch (e) {
+      openLog();
       setStatus("Import error ❌");
       appendLog("❌ main import failed: " + (e?.message || e));
       console.error(e);
       appendLog("Fix checklist:");
       appendLog("1) Confirm /js/main.js exists");
       appendLog("2) Folder name is exactly: js (lowercase)");
-      appendLog("3) Check Diagnostics button for 404s");
+      appendLog("3) Press Diagnostics for 404s");
     }
   </script>
 </body>

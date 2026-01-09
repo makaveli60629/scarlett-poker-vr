@@ -1,5 +1,14 @@
 // /js/main.js — Scarlett Poker VR Boot v11.1 (No BufferGeometryUtils import)
+import * as THREE from "three";
+import { VRButton } from "three/addons/webxr/VRButton.js";
+import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
 
+import { initWorld } from "./world.js";
+import { Controls } from "./controls.js";
+import { Teleport } from "./teleport.js";
+import { DealingMix } from "./dealingMix.js";
+import { HandsSystem } from "./hands.js";
+import { PokerSim } from "./poker.js";
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";

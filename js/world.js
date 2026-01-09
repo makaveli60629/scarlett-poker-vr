@@ -1,3 +1,4 @@
+window.dispatchEvent(new CustomEvent("scarlett-log",{detail:"[world] ✅ LOADER SIGNATURE: WORLD.JS V3 ACTIVE"}));
 // /js/world.js — Scarlett VR Poker (World Loader V3)
 // Fixes:
 //  - scene.add is not a function (modules expecting scene arg, not ctx)

@@ -1,74 +1,66 @@
-// /js/bots.js — Scarlett Bots v2.6 (GROUND PLANT + HIGHER TAGS + HIGHER CARDS)
+// /js/bots.js — Scarlett Bots v2.6 (SMOOTH SEEK + SLERP + GROUND FIX)
 // Exports: Bots
-// ✅ Bot model auto-calibrates to floor (no floating walkers)
-// ✅ Tags higher over heads (no face overlap)
-// ✅ Cards higher than tags (no overlap)
-// ✅ Lobby tags only appear when looked at
-// ✅ Seated bots face table regardless of chair yaw
+// - Walkers: smooth target-seeking (slerp + translateZ), no "sliding"
+// - Seated bots: placed on seat anchors if available
+// - Avoids rail + avoids player + separation
+// - Tags higher; hole cards higher than tags
+// - Keeps walkers planted to floor (y=0)
 
 export const Bots = (() => {
   let THREE = null;
-  let sceneRef = null;
   let root = null;
 
   let seats = [];
   let tableFocus = null;
-  let metrics = { tableY: 0.92, seatY: 0.52 };
 
   let playerRig = null;
   let cameraRef = null;
 
-  const state = { t: 0, bots: [], seated: [], walkers: [] };
+  const state = {
+    t: 0,
+    seated: [],
+    walkers: [],
+    bots: [],
+  };
 
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const clamp01 = (v) => clamp(v, 0, 1);
 
-  function safeGetWorldPos(obj, out) {
-    try { obj.getWorldPosition(out); return true; } catch { return false; }
-  }
+  // geometry anchor so feet land on Y=0 when bot.position.y = 0 - PELVIS_BASE_Y (for seated)
+  const PELVIS_BASE_Y = 0.46;
 
-  function yawToFace(fromPos, toPos) {
-    const dx = (toPos.x - fromPos.x);
-    const dz = (toPos.z - fromPos.z);
-    return Math.atan2(dx, dz);
-  }
+  // Smooth bot settings (your requested logic, tuned)
+  const botSettings = {
+    walkSpeed: 1.15,       // m/s
+    rotationSpeed: 4.0,    // higher = faster turning
+    stopDistance: 0.55,
+  };
 
-  function billboardToCamera(obj, lockY = true) {
-    if (!obj || !cameraRef) return;
-    const p = new THREE.Vector3();
-    cameraRef.getWorldPosition(p);
-    if (lockY) obj.lookAt(p.x, obj.position.y, p.z);
-    else obj.lookAt(p);
-  }
-
-  // ---------- tag ----------
+  // ---- helper: canvas tag (name + chips) ----
   function makeCanvasTag(name, chips) {
     const c = document.createElement("canvas");
     c.width = 512; c.height = 256;
     const ctx = c.getContext("2d");
+
     ctx.clearRect(0,0,c.width,c.height);
-
     ctx.fillStyle = "rgba(0,0,0,0.62)";
-    rr(26, 54, 460, 148, 26, true);
-
-    ctx.fillStyle = "rgba(127,231,255,0.18)";
-    rr(36, 64, 440, 40, 18, true);
+    roundRect(ctx, 30, 50, 452, 156, 28, true);
 
     ctx.fillStyle = "#ffffff";
-    ctx.font = "900 46px Arial";
+    ctx.font = "bold 44px Arial";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(name, 256, 112);
+    ctx.fillText(name, 256, 104);
 
     ctx.fillStyle = "#7fe7ff";
-    ctx.font = "900 38px Arial";
-    ctx.fillText("$" + Number(chips||0).toLocaleString(), 256, 168);
+    ctx.font = "bold 38px Arial";
+    ctx.fillText("$" + Number(chips).toLocaleString(), 256, 162);
 
     const tex = new THREE.CanvasTexture(c);
     tex.needsUpdate = true;
-    tex.colorSpace = THREE.SRGBColorSpace;
     return tex;
 
-    function rr(x, y, w, h, r, fill) {
+    function roundRect(ctx, x, y, w, h, r, fill) {
       ctx.beginPath();
       ctx.moveTo(x + r, y);
       ctx.arcTo(x + w, y, x + w, y + h, r);
@@ -83,291 +75,338 @@ export const Bots = (() => {
   function makeTag(name, chips) {
     const tex = makeCanvasTag(name, chips);
     const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false });
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.68, 0.34), mat);
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.32), mat);
     mesh.name = "NameTag";
-    mesh.renderOrder = 999;
-    mesh.visible = true;
+    mesh.renderOrder = 50;
     return mesh;
   }
 
-  // ---------- optional simple cards ----------
+  // ---- cards above head (simple) ----
   function cardTexture(rank, suit) {
     const c = document.createElement("canvas");
     c.width = 256; c.height = 356;
     const ctx = c.getContext("2d");
 
-    ctx.fillStyle = "#f7f7f8";
+    ctx.fillStyle = "#f8f8f8";
     ctx.fillRect(0,0,c.width,c.height);
+
     ctx.strokeStyle = "rgba(0,0,0,0.25)";
     ctx.lineWidth = 6;
     ctx.strokeRect(6,6,c.width-12,c.height-12);
 
     const isRed = (suit === "♥" || suit === "♦");
-    ctx.fillStyle = isRed ? "#b6001b" : "#121214";
+    ctx.fillStyle = isRed ? "#b6001b" : "#111";
 
-    // bigger corners
-    ctx.font = "900 72px Arial";
+    // BIGGER corner ranks (your request)
+    ctx.font = "bold 64px Arial";
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
     ctx.fillText(rank, 18, 10);
-    ctx.font = "900 74px Arial";
-    ctx.fillText(suit, 18, 86);
+    ctx.font = "bold 68px Arial";
+    ctx.fillText(suit, 18, 70);
 
     ctx.textAlign = "right";
     ctx.textBaseline = "bottom";
-    ctx.font = "900 72px Arial";
-    ctx.fillText(rank, c.width - 18, c.height - 92);
-    ctx.font = "900 74px Arial";
-    ctx.fillText(suit, c.width - 18, c.height - 14);
+    ctx.font = "bold 64px Arial";
+    ctx.fillText(rank, c.width - 18, c.height - 78);
+    ctx.font = "bold 68px Arial";
+    ctx.fillText(suit, c.width - 18, c.height - 12);
 
+    // center suit
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = "900 150px Arial";
-    ctx.fillText(suit, c.width/2, c.height/2 + 8);
+    ctx.font = "bold 150px Arial";
+    ctx.fillText(suit, c.width/2, c.height/2 + 10);
 
     const tex = new THREE.CanvasTexture(c);
     tex.needsUpdate = true;
-    tex.colorSpace = THREE.SRGBColorSpace;
     return tex;
   }
 
   function makeHoleCards() {
     const g = new THREE.Group();
     g.name = "HoleCards";
-    const geo = new THREE.PlaneGeometry(0.24, 0.34);
-    const defs = [{ r:"A", s:"♦" }, { r:"K", s:"♠" }];
+
+    const geo = new THREE.PlaneGeometry(0.20, 0.28);
+
+    const defs = [
+      { r: "A", s: "♠" },
+      { r: "K", s: "♦" },
+    ];
 
     defs.forEach((cs, i) => {
       const face = new THREE.MeshStandardMaterial({
         map: cardTexture(cs.r, cs.s),
         roughness: 0.55,
-        metalness: 0.05,
         emissive: 0x111111,
-        emissiveIntensity: 0.20,
-        side: THREE.DoubleSide,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
+        emissiveIntensity: 0.22,
+        side: THREE.DoubleSide
       });
-
       const back = new THREE.MeshStandardMaterial({
         color: 0xff2d7a,
-        roughness: 0.6,
+        roughness: 0.55,
         emissive: 0x220010,
-        emissiveIntensity: 0.35,
-        side: THREE.DoubleSide,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
+        emissiveIntensity: 0.45,
+        side: THREE.DoubleSide
       });
+
+      // reduce z-flicker
+      face.polygonOffset = true; face.polygonOffsetFactor = -2; face.polygonOffsetUnits = -2;
+      back.polygonOffset = true; back.polygonOffsetFactor = -2; back.polygonOffsetUnits = -2;
 
       const card = new THREE.Group();
       const faceM = new THREE.Mesh(geo, face);
       const backM = new THREE.Mesh(geo, back);
+
       faceM.position.z = 0.002;
       backM.position.z = -0.002;
       backM.rotation.y = Math.PI;
 
       card.add(faceM, backM);
-      card.position.x = i * 0.28;
-      card.renderOrder = 50;
+      card.position.x = i * 0.24;
+      card.renderOrder = 10;
       g.add(card);
     });
 
     return g;
   }
 
-  // ---------- HUMANOID LOW-POLY ----------
-  // Key fix: internal model is shifted so its lowest point touches y=0.
-  function makeHumanoid({
-    name="BOT", chips=10000,
-    suitColor=0x151a22,
-    accent=0x7fe7ff,
-    skinColor=0xd2b48c,
-    female=false,
-    withCards=false,
-  } = {}) {
+  // ---- avatar ----
+  function makeAvatar({ suitColor=0x111318, skinColor=0xd2b48c, name="BOT", chips=10000, withCards=false, showTagAlways=true } = {}) {
     const g = new THREE.Group();
-    g.name = "BotHumanoid";
+    g.name = "BotAvatar";
 
-    // INTERNAL model container (we will shift THIS to plant feet)
-    const model = new THREE.Group();
-    model.name = "BotModel";
-    g.add(model);
+    const suit = new THREE.MeshStandardMaterial({ color: suitColor, roughness: 0.75, metalness: 0.05 });
+    const skin = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.65 });
 
-    const suit  = new THREE.MeshStandardMaterial({ color: suitColor, roughness: 0.78, metalness: 0.06 });
-    const suit2 = new THREE.MeshStandardMaterial({ color: accent, roughness: 0.55, metalness: 0.10, emissive: accent, emissiveIntensity: 0.08 });
-    const skin  = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.65, metalness: 0.02 });
+    // pelvis (rig root)
+    const pelvis = new THREE.Group();
+    pelvis.name = "pelvis";
+    pelvis.position.y = PELVIS_BASE_Y;
+    g.add(pelvis);
 
-    const rig = {
-      model,
-      pelvis: new THREE.Group(),
-      spine: new THREE.Group(),
-      neck: new THREE.Group(),
-      head: null,
-      shoulderL: new THREE.Group(),
-      shoulderR: new THREE.Group(),
-      elbowL: new THREE.Group(),
-      elbowR: new THREE.Group(),
-      hipL: new THREE.Group(),
-      hipR: new THREE.Group(),
-      kneeL: new THREE.Group(),
-      kneeR: new THREE.Group(),
-      tag: null,
-      cards: null,
-      groundShift: 0,
-    };
+    // torso (slightly nicer than pill)
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.165, 0.50, 8, 16), suit);
+    torso.position.y = 0.58;
+    pelvis.add(torso);
 
-    rig.pelvis.name = "pelvis";
-    model.add(rig.pelvis);
+    // chest/shoulder block
+    const chest = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.22, 0.20), suit);
+    chest.position.set(0, 0.72, 0.02);
+    pelvis.add(chest);
 
-    const torsoW = female ? 0.30 : 0.32;
-    const torsoH = female ? 0.42 : 0.46;
+    // head higher
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.14, 18, 14), skin);
+    head.position.y = 0.92;
+    pelvis.add(head);
 
-    const hips = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.16, 0.18), suit);
-    hips.position.set(0, 0.92, 0);
-    rig.pelvis.add(hips);
+    // arms + hands
+    const armGeo = new THREE.CapsuleGeometry(0.045, 0.28, 8, 12);
+    const handGeo = new THREE.SphereGeometry(0.05, 14, 12);
 
-    rig.spine.position.set(0, 0.96, 0);
-    rig.pelvis.add(rig.spine);
+    const armL = new THREE.Group(); armL.name = "armL";
+    const armR = new THREE.Group(); armR.name = "armR";
+    armL.position.set(-0.24, 0.74, 0.03);
+    armR.position.set( 0.24, 0.74, 0.03);
+    pelvis.add(armL, armR);
 
-    const chest = new THREE.Mesh(new THREE.BoxGeometry(torsoW, torsoH, 0.20), suit);
-    chest.position.set(0, 0.26, 0.02);
-    rig.spine.add(chest);
+    const upperL = new THREE.Mesh(armGeo, suit); upperL.position.y = -0.14; armL.add(upperL);
+    const upperR = new THREE.Mesh(armGeo, suit); upperR.position.y = -0.14; armR.add(upperR);
 
-    const collar = new THREE.Mesh(new THREE.BoxGeometry(torsoW*0.85, 0.05, 0.22), suit2);
-    collar.position.set(0, 0.48, 0.03);
-    rig.spine.add(collar);
-
-    rig.neck.position.set(0, 0.52, 0.04);
-    rig.spine.add(rig.neck);
-
-    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.06, 0.09, 10), skin);
-    neck.position.set(0, 0.05, 0);
-    rig.neck.add(neck);
-
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.14, 16, 14), skin);
-    head.position.set(0, 0.22, 0);
-    rig.neck.add(head);
-    rig.head = head;
-
-    rig.shoulderL.position.set(-(torsoW*0.56), 0.44, 0.02);
-    rig.shoulderR.position.set( (torsoW*0.56), 0.44, 0.02);
-    rig.spine.add(rig.shoulderL, rig.shoulderR);
-
-    const upperArmGeo = new THREE.CapsuleGeometry(0.045, 0.22, 6, 10);
-    const foreArmGeo  = new THREE.CapsuleGeometry(0.042, 0.20, 6, 10);
-    const handGeo     = new THREE.BoxGeometry(0.08, 0.05, 0.10);
-
-    const upperL = new THREE.Mesh(upperArmGeo, suit);
-    const upperR = new THREE.Mesh(upperArmGeo, suit);
-    upperL.rotation.z = 0.18;
-    upperR.rotation.z = -0.18;
-    upperL.position.set(-0.02, -0.12, 0.02);
-    upperR.position.set( 0.02, -0.12, 0.02);
-    rig.shoulderL.add(upperL);
-    rig.shoulderR.add(upperR);
-
-    rig.elbowL.position.set(-0.06, -0.28, 0.02);
-    rig.elbowR.position.set( 0.06, -0.28, 0.02);
-    rig.shoulderL.add(rig.elbowL);
-    rig.shoulderR.add(rig.elbowR);
-
-    const foreL = new THREE.Mesh(foreArmGeo, suit);
-    const foreR = new THREE.Mesh(foreArmGeo, suit);
-    foreL.rotation.z = 0.18;
-    foreR.rotation.z = -0.18;
-    foreL.position.set(0.00, -0.10, 0.02);
-    foreR.position.set(0.00, -0.10, 0.02);
-    rig.elbowL.add(foreL);
-    rig.elbowR.add(foreR);
-
-    const handL = new THREE.Mesh(handGeo, suit2);
-    const handR = new THREE.Mesh(handGeo, suit2);
-    handL.position.set(0, -0.24, 0.05);
-    handR.position.set(0, -0.24, 0.05);
-    rig.elbowL.add(handL);
-    rig.elbowR.add(handR);
+    const handL = new THREE.Mesh(handGeo, suit); handL.position.set(0, -0.34, 0.02); armL.add(handL);
+    const handR = new THREE.Mesh(handGeo, suit); handR.position.set(0, -0.34, 0.02); armR.add(handR);
 
     // legs
-    rig.hipL.position.set(-0.10, 0.88, 0);
-    rig.hipR.position.set( 0.10, 0.88, 0);
-    rig.pelvis.add(rig.hipL, rig.hipR);
+    const thighGeo = new THREE.CapsuleGeometry(0.06, 0.28, 8, 14);
+    const shinGeo  = new THREE.CapsuleGeometry(0.055, 0.26, 8, 14);
+    const footGeo  = new THREE.BoxGeometry(0.12, 0.055, 0.23);
 
-    const thighGeo = new THREE.CapsuleGeometry(0.06, 0.28, 6, 12);
-    const shinGeo  = new THREE.CapsuleGeometry(0.055, 0.26, 6, 12);
-    const shoeGeo  = new THREE.BoxGeometry(0.12, 0.06, 0.24);
+    const hipL = new THREE.Group(); hipL.name = "hipL";
+    const hipR = new THREE.Group(); hipR.name = "hipR";
+    hipL.position.set(-0.10, 0.24, 0);
+    hipR.position.set( 0.10, 0.24, 0);
+    pelvis.add(hipL, hipR);
 
-    const thighL = new THREE.Mesh(thighGeo, suit);
-    const thighR = new THREE.Mesh(thighGeo, suit);
-    thighL.position.set(0, -0.16, 0);
-    thighR.position.set(0, -0.16, 0);
-    rig.hipL.add(thighL);
-    rig.hipR.add(thighR);
+    const thighL = new THREE.Mesh(thighGeo, suit); thighL.position.y = -0.16; hipL.add(thighL);
+    const thighR = new THREE.Mesh(thighGeo, suit); thighR.position.y = -0.16; hipR.add(thighR);
 
-    rig.kneeL.position.set(0, -0.34, 0);
-    rig.kneeR.position.set(0, -0.34, 0);
-    rig.hipL.add(rig.kneeL);
-    rig.hipR.add(rig.kneeR);
+    const kneeL = new THREE.Group(); kneeL.name = "kneeL"; kneeL.position.y = -0.32; hipL.add(kneeL);
+    const kneeR = new THREE.Group(); kneeR.name = "kneeR"; kneeR.position.y = -0.32; hipR.add(kneeR);
 
-    const shinL = new THREE.Mesh(shinGeo, suit);
-    const shinR = new THREE.Mesh(shinGeo, suit);
-    shinL.position.set(0, -0.14, 0);
-    shinR.position.set(0, -0.14, 0);
-    rig.kneeL.add(shinL);
-    rig.kneeR.add(shinR);
+    const shinL = new THREE.Mesh(shinGeo, suit); shinL.position.y = -0.15; kneeL.add(shinL);
+    const shinR = new THREE.Mesh(shinGeo, suit); shinR.position.y = -0.15; kneeR.add(shinR);
 
-    const shoeL = new THREE.Mesh(shoeGeo, suit2);
-    const shoeR = new THREE.Mesh(shoeGeo, suit2);
-    shoeL.position.set(0, -0.30, 0.09);
-    shoeR.position.set(0, -0.30, 0.09);
-    rig.kneeL.add(shoeL);
-    rig.kneeR.add(shoeR);
+    // shoes
+    const footL = new THREE.Mesh(footGeo, new THREE.MeshStandardMaterial({ color: 0x0b0b10, roughness: 0.85 }));
+    const footR = footL.clone();
+    footL.position.set(0, -0.33, 0.09);
+    footR.position.set(0, -0.33, 0.09);
+    kneeL.add(footL);
+    kneeR.add(footR);
 
-    // ---- AUTO FLOOR PLANT (fix floating walkers) ----
-    // compute lowest y of internal model, shift it down so minY becomes 0
-    model.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(model);
-    const shift = -box.min.y;
-    model.position.y += shift;
-    rig.groundShift = shift;
+    const tag = makeTag(name, chips);
+    // higher tag (your request)
+    tag.position.set(0, 1.92, 0);
+    tag.visible = !!showTagAlways;
+    g.add(tag);
 
-    // Tag + Cards (higher)
-    rig.tag = makeTag(name, chips);
-    rig.tag.position.set(0, 2.05, 0); // ✅ higher than head
-    g.add(rig.tag);
-
+    let cards = null;
     if (withCards) {
-      rig.cards = makeHoleCards();
-      rig.cards.position.set(-0.14, 2.32, 0); // ✅ higher than tag
-      g.add(rig.cards);
+      cards = makeHoleCards();
+      // cards higher than tag so they never overlap
+      cards.position.set(-0.12, 2.18, 0);
+      g.add(cards);
     }
 
-    g.userData = rig;
+    g.userData = {
+      pelvis, head, armL, armR, hipL, hipR, kneeL, kneeR,
+      tag, cards,
+      showTagAlways
+    };
+
     return g;
   }
 
-  // ---------- avoidance / spacing ----------
+  function billboardToPlayer(obj) {
+    if (!obj) return;
+    const ref = cameraRef || playerRig;
+    if (!ref) return;
+    const p = ref.position.clone();
+    obj.lookAt(p.x, obj.position.y, p.z);
+  }
+
+  // ---- placement ----
+  function addSeatedBot(seatIndex, name, chips, flipYaw = false) {
+    const seat = seats[seatIndex];
+    if (!seat || !seat.anchor) return null;
+
+    const bot = makeAvatar({ name, chips, suitColor: 0x121826, withCards: true, showTagAlways: true });
+    bot.name = `SeatedBot_${seatIndex}`;
+
+    const wp = new THREE.Vector3();
+    seat.anchor.getWorldPosition(wp);
+
+    bot.position.copy(wp);
+    // pelvis base sits at anchor height
+    bot.position.y -= PELVIS_BASE_Y;
+
+    const yaw = seat.yaw || 0;
+    bot.rotation.y = flipYaw ? (yaw + Math.PI) : yaw;
+
+    root.add(bot);
+    state.bots.push(bot);
+    state.seated.push(bot);
+    return bot;
+  }
+
+  function addWalker(i) {
+    const bot = makeAvatar({
+      name: "LOBBY",
+      chips: 0,
+      suitColor: (i % 2 === 0) ? 0x1a1f2a : 0x121826,
+      withCards: false,
+      showTagAlways: false // lobby tags only when looked at (we’ll still billboard)
+    });
+
+    bot.name = `Walker_${i}`;
+
+    // spawn near table but outside rail radius
+    const baseX = (tableFocus?.x || 0) + (Math.random() - 0.5) * 12;
+    const baseZ = (tableFocus?.z || -6.5) + (Math.random() - 0.5) * 10;
+
+    bot.position.set(baseX, 0, baseZ);
+
+    const w = {
+      bot,
+      target: new THREE.Vector3(baseX, 0, baseZ),
+      speed: 0.95 + Math.random() * 0.35,
+      phase: Math.random() * 10,
+      // keep outside rail
+      railR: 3.85,
+      // small random repath timer
+      repathT: 0.5 + Math.random() * 1.8,
+    };
+
+    pickNewTarget(w, true);
+
+    root.add(bot);
+    state.walkers.push(w);
+    state.bots.push(bot);
+    return w;
+  }
+
+  function pickNewTarget(w, force = false) {
+    // pick a random point around the table but OUTSIDE rail radius
+    const cx = tableFocus?.x || 0;
+    const cz = tableFocus?.z || -6.5;
+
+    // random ring outside rail: 4.2 .. 7.5
+    const r = 4.2 + Math.random() * 3.3;
+    const a = Math.random() * Math.PI * 2;
+
+    w.target.set(cx + Math.cos(a) * r, 0, cz + Math.sin(a) * r);
+
+    if (force) w.repathT = 0.5 + Math.random() * 1.8;
+  }
+
+  // --- bot movement: your smooth logic (slerp + translateZ) ---
+  const _dir = { v: null };
+  const _lookMat = { m: null };
+  const _tQuat = { q: null };
+
+  function updateBotMovement(botModel, targetPosition, deltaTime) {
+    if (!botModel || !targetPosition) return;
+
+    const direction = _dir.v;
+    direction.subVectors(targetPosition, botModel.position);
+    direction.y = 0;
+
+    const distance = direction.length();
+
+    if (distance > botSettings.stopDistance) {
+      // Smooth rotation
+      const lookMatrix = _lookMat.m;
+      lookMatrix.lookAt(targetPosition, botModel.position, botModel.up);
+
+      const targetQuaternion = _tQuat.q;
+      targetQuaternion.setFromRotationMatrix(lookMatrix);
+
+      botModel.quaternion.slerp(targetQuaternion, botSettings.rotationSpeed * deltaTime);
+
+      // Walk forward in local space (no sideways slide)
+      const step = botSettings.walkSpeed * deltaTime;
+      botModel.translateZ(step);
+
+      // keep planted
+      botModel.position.y = 0;
+    } else {
+      // arrived: stop + repath handled elsewhere
+      botModel.position.y = 0;
+    }
+  }
+
+  // avoid point (player)
   function avoidPoint(pos, p, radius) {
     const dx = pos.x - p.x;
     const dz = pos.z - p.z;
     const d = Math.hypot(dx, dz);
     if (d < 0.0001) return;
     if (d < radius) {
-      const push = (radius - d) * 0.85;
+      const push = (radius - d) * 1.2;
       pos.x += (dx / d) * push;
       pos.z += (dz / d) * push;
     }
   }
 
-  function separate(bots, minDist=0.70) {
-    for (let i=0;i<bots.length;i++){
-      for (let j=i+1;j<bots.length;j++){
+  // separate walkers so they don't overlap
+  function separateBots(bots, minDist = 0.62) {
+    for (let i = 0; i < bots.length; i++) {
+      for (let j = i + 1; j < bots.length; j++) {
         const a = bots[i].position, b = bots[j].position;
         const dx = a.x - b.x, dz = a.z - b.z;
         const d = Math.hypot(dx, dz);
         if (d > 0.0001 && d < minDist) {
-          const push = (minDist - d) * 0.52;
+          const push = (minDist - d) * 0.5;
           a.x += (dx / d) * push;
           a.z += (dz / d) * push;
           b.x -= (dx / d) * push;
@@ -377,121 +416,16 @@ export const Bots = (() => {
     }
   }
 
-  // ---------- gaze tags ----------
-  function isLookedAt(bot, maxDist=7.5, cone=0.92) {
-    if (!cameraRef) return false;
-    const camPos = new THREE.Vector3();
-    cameraRef.getWorldPosition(camPos);
-
-    const botPos = new THREE.Vector3();
-    bot.getWorldPosition(botPos);
-
-    const toBot = botPos.sub(camPos);
-    const dist = toBot.length();
-    if (dist > maxDist) return false;
-
-    toBot.normalize();
-
-    const camFwd = new THREE.Vector3(0,0,-1)
-      .applyQuaternion(cameraRef.getWorldQuaternion(new THREE.Quaternion()))
-      .normalize();
-
-    return camFwd.dot(toBot) > cone;
-  }
-
-  // ---------- spawners ----------
-  function addSeatedBot(seatIndex, name, chips, female=false) {
-    const seat = seats[seatIndex];
-    if (!seat || !seat.anchor) return null;
-
-    const bot = makeHumanoid({
-      name, chips, female,
-      suitColor: 0x121826,
-      accent: female ? 0xff2d7a : 0x7fe7ff,
-      withCards: true,
-    });
-
-    const wp = new THREE.Vector3();
-    if (!safeGetWorldPos(seat.anchor, wp)) return null;
-
-    bot.position.copy(wp);
-
-    // keep seated stable: use anchor y directly (model is floor-planted internally now)
-    bot.position.y = wp.y;
-
-    // always face table (fix “chair reversed” symptom visually)
-    bot.rotation.y = yawToFace(wp, tableFocus || new THREE.Vector3(0,0,-6.5));
-
-    // seated pose
-    bot.userData.hipL.rotation.x = -0.65;
-    bot.userData.hipR.rotation.x = -0.65;
-    bot.userData.kneeL.rotation.x = 1.05;
-    bot.userData.kneeR.rotation.x = 1.05;
-    bot.userData.shoulderL.rotation.x = -0.35;
-    bot.userData.shoulderR.rotation.x = -0.35;
-    bot.userData.elbowL.rotation.x = -0.55;
-    bot.userData.elbowR.rotation.x = -0.55;
-
-    root.add(bot);
-    state.bots.push(bot);
-    state.seated.push(bot);
-    return bot;
-  }
-
-  function addWalker(i, female=false) {
-    const bot = makeHumanoid({
-      name: female ? "MAYA" : "NOAH",
-      chips: 0,
-      female,
-      suitColor: 0x1a1f2a,
-      accent: female ? 0xff2d7a : 0x7fe7ff,
-      withCards: false,
-    });
-
-    bot.name = `Walker_${i}`;
-
-    bot.position.set(
-      (tableFocus?.x || 0) + (Math.random()-0.5)*14,
-      0, // ✅ now truly planted
-      (tableFocus?.z || -6.5) + (Math.random()-0.5)*12
-    );
-
-    if (bot.userData?.tag) bot.userData.tag.visible = false;
-
-    const w = {
-      bot,
-      target: new THREE.Vector3(
-        (tableFocus?.x || 0) + (Math.random()-0.5)*14,
-        0,
-        (tableFocus?.z || -6.5) + (Math.random()-0.5)*12
-      ),
-      speed: 0.55 + Math.random()*0.35,
-      phase: Math.random()*10,
-    };
-
-    root.add(bot);
-    state.walkers.push(w);
-    state.bots.push(bot);
-    return w;
-  }
-
-  function pickTarget(w) {
-    w.target.set(
-      (tableFocus?.x || 0) + (Math.random()-0.5)*14,
-      0,
-      (tableFocus?.z || -6.5) + (Math.random()-0.5)*12
-    );
-  }
-
-  // ---------- API ----------
   return {
-    init({ THREE: _THREE, scene, getSeats, tableFocus: _tf, metrics: _m } = {}) {
+    init({ THREE: _THREE, scene, getSeats, tableFocus: _tf } = {}) {
       THREE = _THREE;
-      sceneRef = scene;
-
       seats = (typeof getSeats === "function") ? (getSeats() || []) : [];
       tableFocus = _tf || new THREE.Vector3(0, 0, -6.5);
-      if (_m) metrics = _m;
+
+      // preallocate vectors for movement to avoid GC
+      _dir.v = new THREE.Vector3();
+      _lookMat.m = new THREE.Matrix4();
+      _tQuat.q = new THREE.Quaternion();
 
       if (root) { try { scene.remove(root); } catch {} }
       root = new THREE.Group();
@@ -503,100 +437,97 @@ export const Bots = (() => {
       state.seated.length = 0;
       state.walkers.length = 0;
 
+      // seated bots (try both yaw orientations if chairs are reversed in your current world)
       if (seats.length) {
-        addSeatedBot(1, "LUNA", 10000, true);
-        addSeatedBot(2, "JAX", 10000, false);
-        addSeatedBot(3, "NOVA", 10000, true);
-        addSeatedBot(4, "RAVEN", 10000, false);
-        addSeatedBot(5, "KAI", 10000, false);
+        // If your chairs are facing wrong, flipYaw=true fixes without touching world
+        const flipYaw = true;
+
+        addSeatedBot(1, "LUNA", 10000, flipYaw);
+        addSeatedBot(2, "JAX", 10000, flipYaw);
+        addSeatedBot(3, "NOVA", 10000, flipYaw);
+        addSeatedBot(4, "RAVEN", 10000, flipYaw);
+        addSeatedBot(5, "KAI", 10000, flipYaw);
       }
 
-      // 1 male + 1 female lobby walker
-      addWalker(0, false);
-      addWalker(1, true);
+      // walkers
+      for (let i = 0; i < 10; i++) addWalker(i);
 
       console.log("[Bots] init ✅ seated=" + state.seated.length + " walkers=" + state.walkers.length);
     },
 
     setPlayerRig(rig, cam) { playerRig = rig || null; cameraRef = cam || null; },
 
+    // Optional: world can call this when player looks at NPC
+    // Example later: Bots.setLobbyTagVisible(bot, true/false)
+    setLobbyTagVisible(bot, visible) {
+      try {
+        if (!bot?.userData?.tag) return;
+        if (bot.userData.showTagAlways) return;
+        bot.userData.tag.visible = !!visible;
+      } catch {}
+    },
+
     update(dt) {
-      if (!root || !THREE) return;
+      if (!root) return;
       state.t += dt;
 
-      // walkers
+      // Walkers: smooth seek + avoid + repath
       for (const w of state.walkers) {
         const b = w.bot;
         const u = b.userData;
-        const t = state.t + w.phase;
 
-        const dxT = w.target.x - b.position.x;
-        const dzT = w.target.z - b.position.z;
-        if (Math.hypot(dxT, dzT) < 0.45) pickTarget(w);
-        if (Math.random() < 0.002) pickTarget(w);
+        // repath timer
+        w.repathT -= dt;
+        if (w.repathT <= 0) {
+          pickNewTarget(w, true);
+        }
 
-        const dx = w.target.x - b.position.x;
-        const dz = w.target.z - b.position.z;
-        const d = Math.max(0.0001, Math.hypot(dx, dz));
+        // Avoid player circle
+        if (playerRig) avoidPoint(b.position, playerRig.position, 1.25);
 
-        b.position.x += (dx / d) * w.speed * dt;
-        b.position.z += (dz / d) * w.speed * dt;
-        b.rotation.y = Math.atan2(dx, dz);
+        // Keep outside rail radius
+        const cx = tableFocus?.x || 0;
+        const cz = tableFocus?.z || -6.5;
 
-        // keep outside rail
-        const rx = b.position.x - tableFocus.x;
-        const rz = b.position.z - tableFocus.z;
+        const rx = b.position.x - cx;
+        const rz = b.position.z - cz;
         const rd = Math.hypot(rx, rz);
-        const railR = 3.85;
-        if (rd < railR) {
-          const push = (railR - rd) * 1.25;
+        if (rd < w.railR) {
+          // push outward and repath
+          const push = (w.railR - rd) * 1.6;
           b.position.x += (rx / Math.max(0.0001, rd)) * push;
           b.position.z += (rz / Math.max(0.0001, rd)) * push;
+          pickNewTarget(w, true);
         }
 
-        if (playerRig) avoidPoint(b.position, playerRig.position, 1.35);
+        // Smooth movement toward target (your logic)
+        updateBotMovement(b, w.target, dt);
 
-        // ✅ planted (model calibrated)
-        b.position.y = 0;
-
-        // walk animation
-        const gait = Math.sin(t * 6.2);
-        const bend = Math.abs(gait);
-        const swing = gait;
-
-        u.hipL.rotation.x = -0.25 - bend * 0.55;
-        u.kneeL.rotation.x = 0.35 + bend * 0.95;
-        u.hipR.rotation.x = -0.25 - (1 - bend) * 0.55;
-        u.kneeR.rotation.x = 0.35 + (1 - bend) * 0.95;
-
-        u.shoulderL.rotation.x = -0.10 + swing * 0.35;
-        u.shoulderR.rotation.x = -0.10 - swing * 0.35;
-        u.elbowL.rotation.x = -0.25 - swing * 0.20;
-        u.elbowR.rotation.x = -0.25 + swing * 0.20;
-
-        // gaze tags for lobby
-        if (u.tag) {
-          const looked = isLookedAt(b, 7.5, 0.92);
-          u.tag.visible = looked;
-          if (looked) billboardToCamera(u.tag, true);
-        }
+        // Lobby tags: default hidden until looked at; still billboard if visible
+        billboardToPlayer(u.tag);
       }
 
-      separate(state.walkers.map(w => w.bot), 0.75);
+      // No overlapping
+      separateBots(state.walkers.map(w => w.bot), 0.65);
 
-      // seated idle + always-visible tags + cards face camera
+      // Seated bots: idle + cards face player
       for (const b of state.seated) {
         const u = b.userData;
-        const t = state.t + b.position.x * 0.5;
+        const t = state.t + b.position.x;
 
-        if (u.tag) {
-          u.tag.visible = true;
-          billboardToCamera(u.tag, true);
-        }
+        // seated micro-breath (does not affect feet because seated)
+        u.pelvis.position.y = PELVIS_BASE_Y + Math.sin(t * 1.6) * 0.01;
+
+        // idle arm motion
+        u.armL.rotation.z = 0.12 + Math.sin(t * 2.2) * 0.10;
+        u.armR.rotation.z = -0.12 - Math.sin(t * 2.2) * 0.10;
+
+        // keep tags and cards readable
         if (u.cards) {
-          u.cards.position.y = 2.32 + Math.sin(t * 1.9) * 0.03;
-          billboardToCamera(u.cards, true);
+          u.cards.position.y = 2.18 + Math.sin(t * 2.0) * 0.02;
+          billboardToPlayer(u.cards);
         }
+        billboardToPlayer(u.tag);
       }
     }
   };

@@ -1,339 +1,261 @@
-// /js/dealingMix.js — Scarlett DealingMix v1.0 (FIXED EXPORT + REAL 52 DECK + TABLE-CENTERED)
-// Exports: DealingMix
-// Goals:
-// - Always plays ON the table (uses world.tableFocus + world.tableTopY)
-// - Real 52-card deck shuffle (no duplicates)
-// - Community cards hover and face player
-// - Simple "table HUD" canvas sign above community cards
-// - Safe: never throws if world missing parts
+// /js/dealingMix.js — Scarlett DealingMix v1.2
+// - chips + dealer button flat on table top
+// - HUD moved higher
+// - Pot HUD appears ONLY when you look at pot center
+// - Bigger corner ranks for readability
 
 export const DealingMix = (() => {
   let THREE, scene, world, log;
-  let root, commGroup, hudMesh, dealerChip, deckMesh, potChips;
-  let playerRig = null, cameraRef = null;
+  let root, commGroup, tableHud, turnHud, potHud, dealerChip, deckMesh, potChips;
+  let playerRig=null, cameraRef=null;
 
-  const state = {
-    t: 0,
-    running: false,
-    deck: [],
-    burn: [],
-    community: [],
-    dealerSeat: 0,
-    pot: 150,
-    street: "PREFLOP",
-    turnName: "LUNA",
-  };
+  const state = { t:0, running:false, deck:[], street:"PREFLOP", pot:150, turn:"LUNA" };
+  const SUITS=["♠","♥","♦","♣"];
+  const RANKS=["A","K","Q","J","10","9","8","7","6","5","4","3","2"];
 
-  const SUITS = ["♠", "♥", "♦", "♣"];
-  const RANKS = ["A","K","Q","J","10","9","8","7","6","5","4","3","2"];
+  const L=(...a)=>{ try{log?.(...a);}catch{console.log(...a);} };
 
-  function L(...a){ try{ log?.(...a); } catch { console.log(...a); } }
-
-  function tablePos() {
+  function tablePos(){
     const tf = world?.tableFocus || new THREE.Vector3(0,0,-6.5);
     const y  = world?.tableTopY ?? (world?.metrics?.tableY ?? 0.92);
-    return { x: tf.x, y, z: tf.z };
+    return { x:tf.x, y, z:tf.z };
   }
 
-  function buildDeck() {
-    const d = [];
-    for (const s of SUITS) for (const r of RANKS) d.push({ r, s });
-    // Fisher–Yates
-    for (let i = d.length - 1; i > 0; i--) {
-      const j = (Math.random() * (i + 1)) | 0;
-      [d[i], d[j]] = [d[j], d[i]];
+  function buildDeck(){
+    const d=[];
+    for(const s of SUITS) for(const r of RANKS) d.push({r,s});
+    for(let i=d.length-1;i>0;i--){
+      const j=(Math.random()*(i+1))|0;
+      [d[i],d[j]]=[d[j],d[i]];
     }
     return d;
   }
 
-  function drawCard() {
-    if (!state.deck.length) state.deck = buildDeck();
-    return state.deck.pop();
-  }
+  function drawCard(){ if(!state.deck.length) state.deck=buildDeck(); return state.deck.pop(); }
 
-  function cardFaceTexture(cs) {
-    const c = document.createElement("canvas");
-    c.width = 256; c.height = 356;
-    const ctx = c.getContext("2d");
+  function cardTex(cs){
+    const c=document.createElement("canvas");
+    c.width=256;c.height=356;
+    const ctx=c.getContext("2d");
+    ctx.fillStyle="#f8f8f8"; ctx.fillRect(0,0,c.width,c.height);
+    ctx.strokeStyle="rgba(0,0,0,0.25)"; ctx.lineWidth=6; ctx.strokeRect(6,6,c.width-12,c.height-12);
 
-    ctx.fillStyle = "#f8f8f8";
-    ctx.fillRect(0,0,c.width,c.height);
+    const red=(cs.s==="♥"||cs.s==="♦");
+    ctx.fillStyle=red?"#b6001b":"#111";
 
-    ctx.strokeStyle = "rgba(0,0,0,0.25)";
-    ctx.lineWidth = 6;
-    ctx.strokeRect(6,6,c.width-12,c.height-12);
+    // ✅ BIGGER corner ranks
+    ctx.font="bold 68px Arial";
+    ctx.textAlign="left"; ctx.textBaseline="top";
+    ctx.fillText(cs.r, 18, 12);
+    ctx.font="bold 72px Arial";
+    ctx.fillText(cs.s, 18, 78);
 
-    const isRed = (cs.s === "♥" || cs.s === "♦");
-    ctx.fillStyle = isRed ? "#b6001b" : "#111";
-
-    ctx.font = "bold 54px Arial";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillText(cs.r, 18, 14);
-    ctx.font = "bold 60px Arial";
-    ctx.fillText(cs.s, 18, 64);
-
-    ctx.textAlign = "right";
-    ctx.textBaseline = "bottom";
-    ctx.font = "bold 54px Arial";
-    ctx.fillText(cs.r, c.width-18, c.height-68);
-    ctx.font = "bold 60px Arial";
+    ctx.textAlign="right"; ctx.textBaseline="bottom";
+    ctx.font="bold 68px Arial";
+    ctx.fillText(cs.r, c.width-18, c.height-86);
+    ctx.font="bold 72px Arial";
     ctx.fillText(cs.s, c.width-18, c.height-14);
 
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.font = "bold 140px Arial";
-    ctx.fillText(cs.s, c.width/2, c.height/2 + 10);
+    ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.font="bold 150px Arial";
+    ctx.fillText(cs.s, c.width/2, c.height/2 + 12);
 
-    const tex = new THREE.CanvasTexture(c);
-    tex.needsUpdate = true;
-    return tex;
+    const t=new THREE.CanvasTexture(c); t.needsUpdate=true; return t;
   }
 
-  function makeCardMesh(cs) {
-    const geo = new THREE.PlaneGeometry(0.28, 0.40); // bigger than bot cards
-    const faceMat = new THREE.MeshStandardMaterial({
-      map: cardFaceTexture(cs),
-      roughness: 0.55,
-      metalness: 0.0,
-      emissive: 0x111111,
-      emissiveIntensity: 0.18,
-      side: THREE.DoubleSide
-    });
-    const backMat = new THREE.MeshStandardMaterial({
-      color: 0xff2d7a,
-      roughness: 0.6,
-      emissive: 0x220010,
-      emissiveIntensity: 0.4,
-      side: THREE.DoubleSide
-    });
-
-    // group (face + back) to avoid flip weirdness
-    const g = new THREE.Group();
-    const face = new THREE.Mesh(geo, faceMat);
-    const back = new THREE.Mesh(geo, backMat);
-    face.position.z = 0.002;
-    back.position.z = -0.002;
-    back.rotation.y = Math.PI;
-    g.add(face, back);
-
-    g.renderOrder = 30;
+  function makeCard(cs){
+    const geo=new THREE.PlaneGeometry(0.30, 0.42);
+    const face=new THREE.MeshStandardMaterial({ map:cardTex(cs), roughness:0.55, emissive:0x111111, emissiveIntensity:0.18, side:THREE.DoubleSide });
+    const back=new THREE.MeshStandardMaterial({ color:0xff2d7a, roughness:0.6, emissive:0x220010, emissiveIntensity:0.35, side:THREE.DoubleSide });
+    const g=new THREE.Group();
+    const f=new THREE.Mesh(geo, face); f.position.z=0.002;
+    const b=new THREE.Mesh(geo, back); b.position.z=-0.002; b.rotation.y=Math.PI;
+    g.add(f,b);
     return g;
   }
 
-  function makeDealerChip() {
-    const g = new THREE.CylinderGeometry(0.09, 0.09, 0.012, 32);
-    const m = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      emissive: 0x222222,
-      emissiveIntensity: 0.25,
-      roughness: 0.35
-    });
-    const chip = new THREE.Mesh(g, m);
-    chip.rotation.x = Math.PI/2; // flat on table
-    chip.name = "DealerChip";
-    return chip;
+  function makeChip(color){
+    const geo=new THREE.CylinderGeometry(0.06,0.06,0.014,28);
+    const mat=new THREE.MeshStandardMaterial({ color, roughness:0.35, emissive:color, emissiveIntensity:0.06 });
+    const m=new THREE.Mesh(geo,mat);
+    m.rotation.x=Math.PI/2; // ✅ flat
+    return m;
   }
 
-  function makeDeckBlock() {
-    const g = new THREE.BoxGeometry(0.12, 0.05, 0.18);
-    const m = new THREE.MeshStandardMaterial({
-      color: 0x111318,
-      roughness: 0.55,
-      emissive: 0x120014,
-      emissiveIntensity: 0.18
-    });
-    const d = new THREE.Mesh(g, m);
-    d.name = "DeckBlock";
-    return d;
-  }
-
-  function makePotChips() {
-    const group = new THREE.Group();
-    group.name = "PotChips";
-    for (let i = 0; i < 10; i++) {
-      const r = 0.06, h = 0.012;
-      const geo = new THREE.CylinderGeometry(r, r, h, 26);
-      const denom = i % 3;
-      const col = denom === 0 ? 0xff2d7a : (denom === 1 ? 0x7fe7ff : 0xffffff);
-      const mat = new THREE.MeshStandardMaterial({
-        color: col,
-        roughness: 0.35,
-        emissive: col,
-        emissiveIntensity: 0.08
-      });
-      const c = new THREE.Mesh(geo, mat);
-      c.rotation.x = Math.PI/2;
-      c.position.set((Math.random()-0.5)*0.22, 0.008 + i*0.003, (Math.random()-0.5)*0.18);
-      group.add(c);
+  function makePot(){
+    const g=new THREE.Group();
+    for(let i=0;i<18;i++){
+      const col = i%3===0?0xff2d7a:(i%3===1?0x7fe7ff:0xffffff);
+      const c=makeChip(col);
+      c.position.set((Math.random()-0.5)*0.25, 0.008 + i*0.004, (Math.random()-0.5)*0.22);
+      g.add(c);
     }
-    return group;
+    return g;
   }
 
-  function makeHudCanvas() {
-    const c = document.createElement("canvas");
-    c.width = 1024; c.height = 256;
-    const ctx = c.getContext("2d");
-
-    ctx.clearRect(0,0,c.width,c.height);
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
-    roundRect(ctx, 18, 18, 988, 220, 26, true);
-
-    ctx.fillStyle = "#7fe7ff";
-    ctx.font = "bold 44px Arial";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    ctx.fillText("Scarlett VR Poker • 6-Max", 44, 76);
-
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 38px Arial";
-    ctx.fillText(`Table: $10,000`, 44, 140);
-
-    ctx.fillStyle = "#ff2d7a";
-    ctx.font = "bold 38px Arial";
-    ctx.fillText(`Pot: $${state.pot} • ${state.street} • Turn: ${state.turnName}`, 410, 140);
-
-    const tex = new THREE.CanvasTexture(c);
-    tex.needsUpdate = true;
-    return tex;
-
-    function roundRect(ctx,x,y,w,h,r,fill){
-      ctx.beginPath();
-      ctx.moveTo(x+r,y);
-      ctx.arcTo(x+w,y,x+w,y+h,r);
-      ctx.arcTo(x+w,y+h,x,y+h,r);
-      ctx.arcTo(x,y+h,x,y,r);
-      ctx.arcTo(x,y,x+w,y,r);
-      ctx.closePath();
-      if(fill) ctx.fill();
-    }
+  function makeDealerChip(){
+    const geo=new THREE.CylinderGeometry(0.10,0.10,0.012,34);
+    const mat=new THREE.MeshStandardMaterial({ color:0xffffff, roughness:0.35, emissive:0x222222, emissiveIntensity:0.18 });
+    const m=new THREE.Mesh(geo,mat);
+    m.rotation.x=Math.PI/2;
+    return m;
   }
 
-  function makeHudMesh() {
-    const tex = makeHudCanvas();
-    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false });
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 0.55), mat);
-    mesh.name = "TableHUD";
-    mesh.renderOrder = 80;
-    mesh.userData.refresh = () => {
-      mesh.material.map = makeHudCanvas();
-      mesh.material.map.needsUpdate = true;
-      mesh.material.needsUpdate = true;
+  function makeDeck(){
+    const geo=new THREE.BoxGeometry(0.14,0.05,0.20);
+    const mat=new THREE.MeshStandardMaterial({ color:0x12131a, roughness:0.55, emissive:0x120014, emissiveIntensity:0.16 });
+    return new THREE.Mesh(geo,mat);
+  }
+
+  function makeHud(text, w=2.0, h=0.48){
+    const c=document.createElement("canvas");
+    c.width=1024; c.height=256;
+    const ctx=c.getContext("2d");
+    ctx.fillStyle="rgba(0,0,0,0.55)";
+    ctx.fillRect(0,0,c.width,c.height);
+    ctx.fillStyle="#7fe7ff";
+    ctx.font="bold 52px Arial";
+    ctx.fillText(text, 44, 96);
+    const t=new THREE.CanvasTexture(c); t.needsUpdate=true;
+    const m=new THREE.MeshBasicMaterial({ map:t, transparent:true, depthTest:false });
+    const mesh=new THREE.Mesh(new THREE.PlaneGeometry(w,h), m);
+    mesh.renderOrder=120;
+    mesh.userData.setText=(txt)=>{
+      const ctx2=c.getContext("2d");
+      ctx2.clearRect(0,0,c.width,c.height);
+      ctx2.fillStyle="rgba(0,0,0,0.55)";
+      ctx2.fillRect(0,0,c.width,c.height);
+      ctx2.fillStyle="#7fe7ff";
+      ctx2.font="bold 52px Arial";
+      ctx2.fillText(txt, 44, 96);
+      t.needsUpdate=true;
     };
     return mesh;
   }
 
-  function facePlayer(obj) {
-    if (!obj) return;
-    const ref = cameraRef || playerRig;
-    if (!ref) return;
-    const p = ref.position.clone();
+  function facePlayer(obj){
+    const ref=cameraRef||playerRig;
+    if(!ref||!obj) return;
+    const p=ref.position.clone();
     obj.lookAt(p.x, obj.position.y, p.z);
   }
 
-  function layoutEverything() {
-    const { x, y, z } = tablePos();
-
-    // community hover area
-    commGroup.position.set(x, y + 0.55, z + 0.10);
-    hudMesh.position.set(x, y + 0.95, z - 0.05);
-
-    // dealer chip + deck block (front of dealer)
-    dealerChip.position.set(x + 0.45, y + 0.012, z - 0.35);
-    deckMesh.position.set(x + 0.30, y + 0.03, z - 0.35);
-
-    // pot chips in middle of table
-    potChips.position.set(x, y + 0.012, z + 0.02);
+  function lookingAtPoint(pt, maxAngleDeg=12){
+    if(!cameraRef) return false;
+    const camPos = new THREE.Vector3();
+    const camDir = new THREE.Vector3();
+    cameraRef.getWorldPosition(camPos);
+    cameraRef.getWorldDirection(camDir);
+    const to = pt.clone().sub(camPos).normalize();
+    const dot = camDir.dot(to);
+    const ang = Math.acos(Math.min(1,Math.max(-1,dot))) * (180/Math.PI);
+    return ang < maxAngleDeg;
   }
 
-  function clearCommunity() {
-    state.community.length = 0;
-    while (commGroup.children.length) commGroup.remove(commGroup.children[0]);
+  function layout(){
+    const {x,y,z}=tablePos();
+
+    // community hover (faces player)
+    commGroup.position.set(x, y+0.62, z+0.10);
+
+    // ✅ Higher table ID HUD
+    tableHud.position.set(x, y+1.40, z-0.08);
+
+    // ✅ Turn HUD directly above community cards
+    turnHud.position.set(x, y+1.05, z+0.10);
+
+    // pot chips center
+    potChips.position.set(x, y+0.010, z+0.02);
+
+    // dealer chip + deck (face down area)
+    dealerChip.position.set(x+0.55, y+0.010, z-0.40);
+    deckMesh.position.set(x+0.33, y+0.035, z-0.40);
+
+    // pot HUD appears near pot
+    potHud.position.set(x, y+0.45, z+0.02);
   }
 
-  function dealCommunity(count) {
-    clearCommunity();
-    for (let i = 0; i < count; i++) {
-      const cs = drawCard();
-      state.community.push(cs);
-      const m = makeCardMesh(cs);
-      m.position.x = (i - (count-1)/2) * 0.34;
-      m.position.y = 0;
-      m.position.z = 0;
+  function setCommunity(n){
+    while(commGroup.children.length) commGroup.remove(commGroup.children[0]);
+    for(let i=0;i<n;i++){
+      const cs=drawCard();
+      const m=makeCard(cs);
+      m.position.x=(i-(n-1)/2)*0.36;
       commGroup.add(m);
     }
   }
 
-  function nextStreet() {
-    if (state.street === "PREFLOP") { state.street = "FLOP"; dealCommunity(3); }
-    else if (state.street === "FLOP") { state.street = "TURN"; dealCommunity(4); }
-    else if (state.street === "TURN") { state.street = "RIVER"; dealCommunity(5); }
-    else { state.street = "PREFLOP"; state.deck = buildDeck(); dealCommunity(0); }
-    hudMesh.userData.refresh?.();
+  function nextStreet(){
+    if(state.street==="PREFLOP"){ state.street="FLOP"; setCommunity(3); }
+    else if(state.street==="FLOP"){ state.street="TURN"; setCommunity(4); }
+    else if(state.street==="TURN"){ state.street="RIVER"; setCommunity(5); }
+    else { state.street="PREFLOP"; setCommunity(0); }
   }
 
   return {
-    init({ THREE: _THREE, scene: _scene, log: _log, world: _world } = {}) {
-      THREE = _THREE; scene = _scene; world = _world; log = _log;
+    init({ THREE:_T, scene:_S, log:_L, world:_W }={}){
+      THREE=_T; scene=_S; log=_L; world=_W;
+      if(root){ try{scene.remove(root);}catch{} }
+      root=new THREE.Group(); root.name="DealingMixRoot"; scene.add(root);
 
-      if (root) { try { scene.remove(root); } catch {} }
-      root = new THREE.Group();
-      root.name = "DealingMixRoot";
-      scene.add(root);
+      commGroup=new THREE.Group(); commGroup.name="Community";
+      potChips=makePot();
+      dealerChip=makeDealerChip();
+      deckMesh=makeDeck();
 
-      commGroup = new THREE.Group();
-      commGroup.name = "CommunityCards";
-      root.add(commGroup);
+      tableHud=makeHud("Scarlett VR Poker • 6-Max • Table: $10,000", 2.35, 0.52);
+      turnHud =makeHud("Pot: $150 • PREFLOP • Turn: LUNA", 2.20, 0.48);
+      potHud  =makeHud("Pot: $150", 1.10, 0.34);
+      potHud.visible=false;
 
-      dealerChip = makeDealerChip();
-      deckMesh   = makeDeckBlock();
-      potChips   = makePotChips();
-      hudMesh    = makeHudMesh();
+      root.add(commGroup, potChips, dealerChip, deckMesh, tableHud, turnHud, potHud);
 
-      root.add(dealerChip, deckMesh, potChips, hudMesh);
+      state.deck=buildDeck();
+      state.street="PREFLOP";
+      state.pot=150;
+      state.turn="LUNA";
+      setCommunity(0);
+      layout();
 
-      state.deck = buildDeck();
-      state.street = "PREFLOP";
-      state.turnName = "LUNA";
-      state.pot = 150;
-
-      layoutEverything();
       L("[DealingMix] init ✅");
       return {
-        setPlayerRig(rig, cam){ playerRig = rig || null; cameraRef = cam || null; },
+        setPlayerRig(rig, cam){ playerRig=rig||null; cameraRef=cam||null; },
         startHand(){
-          state.running = true;
-          state.deck = buildDeck();
-          state.street = "PREFLOP";
-          state.pot = 150;
-          dealCommunity(0);
-          hudMesh.userData.refresh?.();
-          L("[DealingMix] startHand ✅");
+          state.running=true;
+          state.deck=buildDeck();
+          state.street="PREFLOP";
+          state.pot=150;
+          state.turn="LUNA";
+          setCommunity(0);
+          turnHud.userData.setText(`Pot: $${state.pot} • ${state.street} • Turn: ${state.turn}`);
+          potHud.userData.setText(`Pot: $${state.pot}`);
         },
         update(dt){
-          state.t += dt;
-          // subtle float
-          const { x, y, z } = tablePos();
-          commGroup.position.y = (y + 0.55) + Math.sin(state.t*1.6)*0.02;
-          hudMesh.position.y   = (y + 0.95) + Math.sin(state.t*1.2)*0.015;
+          state.t+=dt;
+
+          // gentle hover
+          const {y}=tablePos();
+          commGroup.position.y = (y+0.62) + Math.sin(state.t*1.6)*0.02;
 
           // face player
           facePlayer(commGroup);
-          facePlayer(hudMesh);
+          facePlayer(tableHud);
+          facePlayer(turnHud);
+          facePlayer(potHud);
 
-          // idle dealer chip glow
-          dealerChip.material.emissiveIntensity = 0.20 + (Math.sin(state.t*3.0)*0.08);
+          // ✅ Pot HUD only when looking at pot center
+          const {x,z}=tablePos();
+          const potPoint = new THREE.Vector3(x, y+0.02, z+0.02);
+          potHud.visible = lookingAtPoint(potPoint, 12);
 
-          // auto-advance street slowly (for demo)
-          if (state.running) {
-            state._acc = (state._acc || 0) + dt;
-            if (state._acc > 4.0) {
-              state._acc = 0;
-              nextStreet();
-            }
+          // auto demo
+          state._acc=(state._acc||0)+dt;
+          if(state.running && state._acc>4.0){
+            state._acc=0;
+            nextStreet();
+            turnHud.userData.setText(`Pot: $${state.pot} • ${state.street} • Turn: ${state.turn}`);
           }
-        },
-        root
+        }
       };
     }
   };

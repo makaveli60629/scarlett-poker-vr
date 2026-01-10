@@ -1,13 +1,11 @@
-// /js/world.js — Scarlett VR Poker — HYBRID WORLD LOADER v3.6 (REVIVE + AUDIT UPGRADE)
-// Keeps: your dynamic import/mount adapter system
-// Adds: room separation, room switching API, teleport-to-table, android click/teleport, solid bounds clamp
-// Goal: bring back your "real lobby" world modules AND stabilize alignment/overlap issues.
-
-window.dispatchEvent(new CustomEvent("scarlett-log", { detail: "[world] ✅ LOADER SIGNATURE: WORLD.JS V3.6 HYBRID ACTIVE" }));
+// /js/world.js — SCARLETT HYBRID WORLD v15.0 (FULL)
+// Tries OLD modular lobby first (textures/lights/walls/table/rail/teleport/store/scorpion/room_manager)
+// Falls back to SAFE procedural world (v12.3) if anything fails.
+// Exposes initWorld(...) so your existing main.js still works.
 
 function ui(log, m){
+  try { (log || console.log)(m); } catch {}
   try { window.dispatchEvent(new CustomEvent("scarlett-log", { detail: String(m) })); } catch {}
-  try { (log||console.log)(m); } catch {}
 }
 
 async function imp(path){
@@ -31,13 +29,9 @@ async function callWithAdapters(fn, label, ctx, log){
     { args:[scene], note:"(scene)" },
     { args:[THREE, scene], note:"(THREE,scene)" },
     { args:[scene, ctx], note:"(scene,ctx)" },
-    { args:[ctx, scene], note:"(ctx,scene)" },
-    { args:[THREE, scene, renderer], note:"(THREE,scene,renderer)" },
-    { args:[scene, renderer, camera], note:"(scene,renderer,camera)" },
     { args:[THREE, scene, renderer, camera], note:"(THREE,scene,renderer,camera)" },
     { args:[world], note:"(world)" },
   ];
-
   let lastErr=null;
   for (const a of attempts){
     try{
@@ -50,13 +44,12 @@ async function callWithAdapters(fn, label, ctx, log){
       ui(log, `[world] ⚠️ retry ${label} after error: ${e?.message || e}`);
     }
   }
-  ui(log, `[world] ❌ all call adapters failed for ${label}: ${lastErr?.message || lastErr}`);
+  ui(log, `[world] ❌ adapters failed for ${label}: ${lastErr?.message || lastErr}`);
   return { ok:false, error:lastErr };
 }
 
 async function mountModule(mod, label, ctx, log){
   if (!mod) return 0;
-
   const fnNames = ["init","mount","build","create","spawn","setup","start","boot","initVRUI"];
   for (const n of fnNames){
     if (typeof mod[n] === "function"){
@@ -64,12 +57,10 @@ async function mountModule(mod, label, ctx, log){
       return ok.ok ? 1 : 0;
     }
   }
-
   if (typeof mod.default === "function"){
     const ok = await callWithAdapters(mod.default, `${label}.default`, ctx, log);
     return ok.ok ? 1 : 0;
   }
-
   for (const k of Object.keys(mod)){
     const v = mod[k];
     if (v && typeof v === "object"){
@@ -81,386 +72,248 @@ async function mountModule(mod, label, ctx, log){
       }
     }
   }
-
-  ui(log, `[world] ⚠️ imported ${label} but nothing mounted. exports=${Object.keys(mod).join(",")}`);
+  ui(log, `[world] ⚠️ imported ${label} but nothing mounted`);
   return 0;
 }
 
-/** --------------------------------------------------------
- *  ROOM LAYOUT (NO OVERLAP) — this fixes the “ring in two rooms” problem
- *  -------------------------------------------------------- */
-function getRoomLayout(THREE){
-  return {
-    lobby:    new THREE.Vector3(0,   0,   0),
-    store:    new THREE.Vector3(-45, 0,   0),
-    scorpion: new THREE.Vector3(45,  0,   0),
-    spectate: new THREE.Vector3(0,   0,  -45),
+// -------------------------
+// SAFE procedural fallback (your v12.3 world, kept intact)
+// -------------------------
+async function buildProceduralWorld({ THREE, scene, log="console" } = {}){
+  const world = {
+    spawn: { x: 0, z: 3.6 },
+    spawnYaw: 0,
+    tableFocus: new THREE.Vector3(0, 0, -6.5),
+    tableY: 0.92,
+    chairs: [],
+    seats: [],
+    colliders: [],
+    floorMeshes: [],
+    cameraRef: null,
+    connect() {},
+    fixSeating() {},
+    tick() {},
+    clickFromCamera() {},
+    teleportFromCamera() {},
   };
-}
 
-function getRoomBounds(){
-  // Local bounds per room center (simple clamp). Tune as you like.
-  return {
-    lobby:    { w: 40, d: 40 },
-    store:    { w: 24, d: 28 },
-    scorpion: { w: 20, d: 20 },
-    spectate: { w: 22, d: 22 },
-  };
-}
+  const matFloor = new THREE.MeshStandardMaterial({ color: 0x080912, roughness: 1.0 });
+  const matWall  = new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 1.0 });
+  const matTrim  = new THREE.MeshStandardMaterial({ color: 0x161a28, roughness: 0.65, metalness: 0.1 });
+  const matNeonA = new THREE.MeshStandardMaterial({ color: 0x7fe7ff, emissive: 0x113344, emissiveIntensity: 1.0, roughness: 0.25 });
+  const matNeonP = new THREE.MeshStandardMaterial({ color: 0xff2d7a, emissive: 0x330814, emissiveIntensity: 1.1, roughness: 0.25 });
 
-/** --------------------------------------------------------
- *  FALLBACK WORLD (safe baseline, used if modules fail)
- *  -------------------------------------------------------- */
-function buildFallback(ctx){
-  const { THREE, scene, world, log } = ctx;
-  ui(log, "[world] fallback world building…");
-  if (world.__fallbackBuilt) return;
-  world.__fallbackBuilt = true;
+  const room = new THREE.Group();
+  room.name = "RoomRoot";
+  scene.add(room);
 
-  const floor = new THREE.Mesh(
-    new THREE.CircleGeometry(14, 64),
-    new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.95, metalness: 0.02 })
-  );
-  floor.rotation.x = -Math.PI/2;
-  scene.add(floor);
-  world.colliders.push(floor);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(36, 36), matFloor);
+  floor.rotation.x = -Math.PI / 2;
+  floor.name = "Floor";
+  room.add(floor);
+  world.floorMeshes.push(floor);
 
-  const tableTop = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.3, 2.3, 0.22, 64),
-    new THREE.MeshStandardMaterial({ color: 0x0b3a2a, roughness: 0.8, metalness: 0.05 })
-  );
-  tableTop.position.set(0, 1.02, 0);
-  scene.add(tableTop);
-
-  world.seats = [];
-  world.seatMarkers = [];
-  const seatRadius = 3.35;
-
-  for (let i=0;i<8;i++){
-    const a = (i/8)*Math.PI*2 + Math.PI;
-    const px = Math.cos(a)*seatRadius;
-    const pz = Math.sin(a)*seatRadius;
-
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.12, 0.19, 64),
-      new THREE.MeshBasicMaterial({ color: 0xffcc00, transparent:true, opacity:0.55, side:THREE.DoubleSide })
-    );
-    ring.rotation.x = -Math.PI/2;
-    ring.position.set(px, 0.02, pz);
-    ring.userData.seatIndex = i;
-    scene.add(ring);
-
-    world.seatMarkers.push(ring);
-    world.seats.push({ index:i, position:new THREE.Vector3(px, 1.6, pz), yaw:a+Math.PI });
+  function addWall(x,y,z,w,h,d,name){
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), matWall);
+    m.position.set(x,y,z);
+    m.name = name;
+    room.add(m);
+    world.colliders.push(m);
   }
+  addWall(0, 2.5, -18, 36, 5, 0.35, "WallBack");
+  addWall(0, 2.5,  18, 36, 5, 0.35, "WallFront");
+  addWall(-18, 2.5, 0, 0.35, 5, 36, "WallLeft");
+  addWall( 18, 2.5, 0, 0.35, 5, 36, "WallRight");
 
-  world.spectatorSpots = [];
-  const specR = 6.2;
+  const trim = new THREE.Mesh(new THREE.TorusGeometry(11.5, 0.12, 10, 96), matTrim);
+  trim.rotation.x = Math.PI / 2;
+  trim.position.set(0, 3.85, -6.5);
+  room.add(trim);
+
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.6, 0.08), matNeonA);
+  sign.position.set(0, 2.65, -12.8);
+  room.add(sign);
+
+  // Table FIXED: felt lies flat via rotation.x = Math.PI/2 not required when using Cylinder as top surface
+  const table = new THREE.Group();
+  table.name = "PokerTable";
+
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.75, 0.95, 0.78, 36),
+    new THREE.MeshStandardMaterial({ color: 0x141621, roughness: 0.9, metalness: 0.08 })
+  );
+  base.position.y = 0.39;
+  table.add(base);
+
+  const felt = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.55, 1.55, 0.08, 56),
+    new THREE.MeshStandardMaterial({ color: 0x0e5a3b, roughness: 0.95 })
+  );
+  felt.position.y = world.tableY;
+  table.add(felt);
+
+  const rail = new THREE.Mesh(
+    new THREE.TorusGeometry(1.60, 0.10, 16, 90),
+    new THREE.MeshStandardMaterial({ color: 0x1a1c2a, roughness: 0.55, metalness: 0.12 })
+  );
+  rail.rotation.x = Math.PI / 2;
+  rail.position.y = world.tableY + 0.03;
+  table.add(rail);
+
+  table.position.set(world.tableFocus.x, 0, world.tableFocus.z);
+  room.add(table);
+
+  // Chairs
+  const chairRadius = 2.35;
+  const angles = [-0.2, 0.55, 1.35, 2.25, 3.05, 3.85];
+  function makeChair(){
+    const c = new THREE.Group();
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.09, 0.52), matTrim);
+    seat.position.y = 0.45; c.add(seat);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.55, 0.09), matTrim);
+    back.position.set(0, 0.74, -0.215); c.add(back);
+    const legMat = new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.9 });
+    const legGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.45, 12);
+    for (const dx of [-0.20, 0.20]) for (const dz of [-0.20, 0.20]) {
+      const leg = new THREE.Mesh(legGeo, legMat);
+      leg.position.set(dx, 0.225, dz);
+      c.add(leg);
+    }
+    return c;
+  }
   for (let i=0;i<6;i++){
-    const a = (i/6)*Math.PI*2 + Math.PI;
-    world.spectatorSpots.push({ pos:new THREE.Vector3(Math.cos(a)*specR, 1.6, Math.sin(a)*specR), yaw:a+Math.PI });
+    const a = angles[i];
+    const chair = makeChair();
+    chair.position.set(world.tableFocus.x + Math.cos(a)*chairRadius, 0, world.tableFocus.z + Math.sin(a)*chairRadius);
+    chair.lookAt(world.tableFocus.x, chair.position.y, world.tableFocus.z);
+    room.add(chair);
+    world.chairs.push(chair);
+    world.seats.push(chair);
   }
 
-  ui(log, "[world] fallback built ✅");
+  // Floating orb (FIX: not a “fat green ball”)
+  const orb = new THREE.Mesh(new THREE.SphereGeometry(0.10, 18, 18), matNeonP);
+  orb.position.set(0, 2.4, world.tableFocus.z);
+  room.add(orb);
+
+  world.connect = ({ camera, playerRig } = {}) => {
+    world.cameraRef = camera || world.cameraRef;
+    world.playerRig = playerRig || world.playerRig;
+  };
+  world.tick = (dt) => {
+    orb.rotation.y += dt * 1.2;
+    orb.position.y = 2.4 + Math.sin(performance.now()*0.002)*0.06;
+  };
+
+  // Android helpers
+  const raycaster = new THREE.Raycaster();
+  world.clickFromCamera = () => {
+    if (!world.cameraRef) return;
+    const origin = new THREE.Vector3(); world.cameraRef.getWorldPosition(origin);
+    const dir = new THREE.Vector3(0,0,-1).applyQuaternion(world.cameraRef.quaternion).normalize();
+    raycaster.set(origin, dir); raycaster.far = 60;
+    const hits = raycaster.intersectObjects(scene.children, true);
+    if (!hits.length) return;
+    let n = hits[0].object;
+    while (n && !n.userData?.onClick && n.parent) n = n.parent;
+    n?.userData?.onClick?.();
+  };
+  world.teleportFromCamera = () => {
+    if (!world.cameraRef || !world.playerRig) return;
+    const origin = new THREE.Vector3(); world.cameraRef.getWorldPosition(origin);
+    const dir = new THREE.Vector3(0,0,-1).applyQuaternion(world.cameraRef.quaternion).normalize();
+    if (Math.abs(dir.y) < 1e-4) return;
+    const t = -origin.y / dir.y;
+    if (t < 0.2 || t > 150) return;
+    const hit = origin.clone().addScaledVector(dir, t);
+    world.playerRig.position.set(hit.x, 0, hit.z);
+  };
+
+  ui(log, "[world] ✅ procedural fallback built");
+  return world;
 }
 
-/** --------------------------------------------------------
- *  HELPERS: find likely roots by multiple names
- *  -------------------------------------------------------- */
-function findAny(scene, names){
-  for (const n of names){
-    const obj = scene.getObjectByName(n);
-    if (obj) return obj;
+// -------------------------
+// MAIN ENTRY: initWorld()
+// -------------------------
+export async function initWorld({ THREE, scene, renderer, camera, player, controllers, log, v } = {}){
+  const ctx = { THREE, scene, renderer, camera, player, controllers, log };
+
+  // World object shared to modules
+  const W = {
+    spawn: { x: 0, z: 3.6 },
+    spawnYaw: 0,
+    tableFocus: new THREE.Vector3(0,0,-6.5),
+    tableY: 0.92,
+    colliders: [],
+    interactables: [],
+    uiPanels: [],
+    uiButtons: [],
+    rayTargets: [],
+    mode: "lobby",
+    connect(){},
+    tick(){},
+  };
+  ctx.world = W;
+  scene.userData.interactables = W.interactables;
+
+  // Try OLD modular world
+  ui(log, "[world] trying modular lobby…");
+  const textures = await imp("./textures.js");
+  const lights   = await imp("./lights_pack.js");
+  const walls    = await imp("./solid_walls.js");
+  const tableF   = await imp("./table_factory.js");
+  const rail     = await imp("./spectator_rail.js");
+  const tpMach   = await imp("./teleport_machine.js");
+  const store    = await imp("./store.js");
+  const uiMod    = await imp("./ui.js");
+  const vrui     = await imp("./vr_ui.js");
+  const vrPanel  = await imp("./vr_ui_panel.js");
+  const scorp    = await imp("./scorpion_room.js");
+  const rm       = await imp("./room_manager.js");
+
+  // Mount texture kit first if present
+  if (textures?.createTextureKit && renderer){
+    try{
+      const kit = textures.createTextureKit({ THREE, renderer, base:"./assets/textures/", log });
+      scene.userData.textureKit = kit;
+      ui(log, "[world] ✅ textures kit mounted");
+    }catch(e){
+      ui(log, "[world] ⚠️ texture kit failed: " + (e?.message||e));
+    }
   }
-  return null;
-}
 
-function ensureRoomRoot(scene, THREE, name){
-  let g = scene.getObjectByName(name);
-  if (!g){
-    g = new THREE.Group();
-    g.name = name;
-    scene.add(g);
-  }
-  return g;
-}
+  let mounted = 0;
+  mounted += await mountModule(lights,  "lights_pack.js", ctx, log);
+  mounted += await mountModule(walls,   "solid_walls.js", ctx, log);
+  mounted += await mountModule(tableF,  "table_factory.js", ctx, log);
+  mounted += await mountModule(rail,    "spectator_rail.js", ctx, log);
+  mounted += await mountModule(tpMach,  "teleport_machine.js", ctx, log);
+  mounted += await mountModule(store,   "store.js", ctx, log);
+  mounted += await mountModule(uiMod,   "ui.js", ctx, log);
+  mounted += await mountModule(vrui,    "vr_ui.js", ctx, log);
+  mounted += await mountModule(vrPanel, "vr_ui_panel.js", ctx, log);
+  mounted += await mountModule(scorp,   "scorpion_room.js", ctx, log);
+  mounted += await mountModule(rm,      "room_manager.js", ctx, log);
 
-function rehome(obj, newParent){
-  if (!obj || !newParent) return;
-  if (obj.parent === newParent) return;
-  try { newParent.add(obj); } catch {}
-}
+  if (mounted > 0){
+    ui(log, `[world] ✅ modular world mounted (${mounted})`);
+    // Best-effort: expose clickables for Android
+    W.clickFromCamera = W.clickFromCamera || (()=>{});
+    W.teleportFromCamera = W.teleportFromCamera || (()=>{});
+    W.connect = ({ playerRig, camera } = {}) => { W.playerRig = playerRig; W.cameraRef = camera; };
 
-/** --------------------------------------------------------
- *  MAIN WORLD EXPORT
- *  -------------------------------------------------------- */
-export const World = {
-  async init({ THREE, scene, renderer, camera, player, controllers, log }) {
-    const ctx = { THREE, scene, renderer, camera, player, controllers, log };
+    // Try to set a sane spawn if RoomManager didn’t
+    if (!W.spawn) W.spawn = { x: 0, z: 3.6 };
+    if (!W.tableFocus) W.tableFocus = new THREE.Vector3(0,0,-6.5);
 
-    const W = {
-      THREE, scene, renderer, camera, player, controllers, log,
-      colliders: [],
-      seats: [],
-      seatMarkers: [],
-      spectatorSpots: [],
-      points: {},
-      flags: { teleport:true, move:true, snap:true, hands:true },
-      mode: "lobby",
-      seatedIndex: -1,
-      __fallbackBuilt: false,
-      __realLoaded: false,
-
-      // room state (added)
-      rooms: { current: "lobby", layout: getRoomLayout(THREE), bounds: getRoomBounds(), roots: {} },
-    };
-
-    // ✅ Pre-create arrays that UI modules often push into
-    W.interactables = [];
-    W.uiPanels = [];
-    W.uiButtons = [];
-    W.rayTargets = [];
-    scene.userData.interactables = W.interactables;
-
-    // ✅ Flags API always present
-    W.setFlag = (k, v)=>{ W.flags[k] = !!v; };
-    W.getFlag = (k)=>!!W.flags[k];
-    W.toggleFlag = (k)=>{ W.flags[k] = !W.flags[k]; return W.flags[k]; };
-
-    ctx.world = W;
-
-    // Build fallback baseline immediately so something always exists
-    buildFallback(ctx);
-
-    // Inventory shim for shop_ui
-    W.Inventory = W.Inventory || {
-      getChips() {
-        return [
-          { denom:1, color:"white" },
-          { denom:5, color:"red" },
-          { denom:25, color:"green" },
-          { denom:100, color:"black" },
-          { denom:500, color:"purple" },
-          { denom:1000, color:"gold" },
-        ];
-      }
-    };
-    ctx.Inventory = W.Inventory;
-
-    // --- Imports (your original full world)
-    const textures = await imp("./textures.js");
-    const lights   = await imp("./lights_pack.js");
-    const walls    = await imp("./solid_walls.js");
-    const tableF   = await imp("./table_factory.js");
-    const rail     = await imp("./spectator_rail.js");
-    const tpMach   = await imp("./teleport_machine.js");
-    const store    = await imp("./store.js");
-    const shopUI   = await imp("./shop_ui.js");
-    const water    = await imp("./water_fountain.js");
-    const uiMod    = await imp("./ui.js");
-    const vrui     = await imp("./vr_ui.js");
-    const vrPanel  = await imp("./vr_ui_panel.js");
-    const scorp    = await imp("./scorpion_room.js");
-    const rm       = await imp("./room_manager.js");
-
-    await imp("./teleport_fx.js");
-    await imp("./TeleportVFX.js");
-    await imp("./teleport_burst_fx.js");
-
-    // Mount textures first
-    if (textures?.createTextureKit) {
-      try{
-        const kit = textures.createTextureKit({ THREE, renderer, base:"./assets/textures/", log });
-        scene.userData.textureKit = kit;
-        ui(log, "[world] ✅ mounted textures via createTextureKit()");
-      }catch(e){
-        ui(log, "[world] ❌ createTextureKit failed :: " + (e?.message||e));
-      }
-    }
-
-    // Mount world modules
-    let mounted = 0;
-    mounted += await mountModule(lights,  "lights_pack.js", ctx, log);
-    mounted += await mountModule(walls,   "solid_walls.js", ctx, log);
-    mounted += await mountModule(tableF,  "table_factory.js", ctx, log);
-    mounted += await mountModule(rail,    "spectator_rail.js", ctx, log);
-    mounted += await mountModule(tpMach,  "teleport_machine.js", ctx, log);
-    mounted += await mountModule(store,   "store.js", ctx, log);
-    mounted += await mountModule(shopUI,  "shop_ui.js", ctx, log);
-    mounted += await mountModule(water,   "water_fountain.js", ctx, log);
-    mounted += await mountModule(uiMod,   "ui.js", ctx, log);
-    mounted += await mountModule(vrui,    "vr_ui.js", ctx, log);
-    mounted += await mountModule(vrPanel, "vr_ui_panel.js", ctx, log);
-    mounted += await mountModule(scorp,   "scorpion_room.js", ctx, log);
-    mounted += await mountModule(rm,      "room_manager.js", ctx, log);
-
-    W.__realLoaded = mounted > 0;
-    ui(log, W.__realLoaded
-      ? `[world] ✅ REAL WORLD LOADED (mounted=${mounted})`
-      : `[world] ❌ REAL WORLD DID NOT LOAD (mounted=${mounted})`
-    );
-
-    /** --------------------------------------------------------
-     *  ROOM ROOTS + ALIGNMENT AUDIT FIX
-     *  This is the part that brings sanity back:
-     *  - each room gets its own root group
-     *  - we rehome module roots into those room roots when possible
-     *  - we move room roots FAR apart to prevent overlap bleed
-     *  -------------------------------------------------------- */
-    const lobbyRoot    = ensureRoomRoot(scene, THREE, "room_lobby_root");
-    const storeRoot    = ensureRoomRoot(scene, THREE, "room_store_root");
-    const scorpionRoot = ensureRoomRoot(scene, THREE, "room_scorpion_root");
-    const spectateRoot = ensureRoomRoot(scene, THREE, "room_spectate_root");
-
-    W.rooms.roots = { lobby: lobbyRoot, store: storeRoot, scorpion: scorpionRoot, spectate: spectateRoot };
-
-    lobbyRoot.position.copy(W.rooms.layout.lobby);
-    storeRoot.position.copy(W.rooms.layout.store);
-    scorpionRoot.position.copy(W.rooms.layout.scorpion);
-    spectateRoot.position.copy(W.rooms.layout.spectate);
-
-    // Try to find likely module roots and move them into the correct room root
-    const foundStore = findAny(scene, ["store_root","store","StoreSystem","STORE_ROOT"]);
-    const foundScorp = findAny(scene, ["scorpion_room","scorpion","ScorpionRoom","SCORPION_ROOT"]);
-    const foundTable = findAny(scene, ["poker_table","table","table_root","TABLE_ROOT"]);
-    const foundRail  = findAny(scene, ["spectator_rail","rail","SpectatorRail"]);
-    const foundTp    = findAny(scene, ["teleport_machine","TeleportMachine","tp_machine","teleporter"]);
-
-    // IMPORTANT: Only rehome if they are not already one of our room roots
-    if (foundStore && foundStore !== storeRoot) rehome(foundStore, storeRoot);
-    if (foundScorp && foundScorp !== scorpionRoot) rehome(foundScorp, scorpionRoot);
-
-    // Lobby should contain the main table/rail/teleporter if those are global
-    // (If your modules already build separate table per room, this won't hurt.)
-    if (foundTable && foundTable !== lobbyRoot) rehome(foundTable, lobbyRoot);
-    if (foundRail  && foundRail  !== lobbyRoot) rehome(foundRail,  lobbyRoot);
-    if (foundTp    && foundTp    !== lobbyRoot) rehome(foundTp,    lobbyRoot);
-
-    // Visibility control
-    function setRoomVisible(room){
-      W.rooms.current = room;
-      lobbyRoot.visible    = (room === "lobby");
-      storeRoot.visible    = (room === "store");
-      scorpionRoot.visible = (room === "scorpion");
-      spectateRoot.visible = (room === "spectate");
-      ui(log, `[world] room=${room}`);
-    }
-
-    // Spawn helpers
-    function faceYawToward(target){
-      const pos = new THREE.Vector3(player.position.x, 1.6, player.position.z);
-      const dir = target.clone().sub(pos); dir.y = 0;
-      if (dir.lengthSq() < 1e-6) return;
-      dir.normalize();
-      player.rotation.set(0, Math.atan2(dir.x, dir.z), 0);
-    }
-
-    function spawnInRoom(room){
-      const base = W.rooms.layout[room].clone();
-      if (room === "lobby"){
-        player.position.copy(base).add(new THREE.Vector3(0, 0, 10));
-        faceYawToward(base.clone().add(new THREE.Vector3(0,1.6,0)));
-      }
-      if (room === "store"){
-        player.position.copy(base).add(new THREE.Vector3(0, 0, 8));
-        faceYawToward(base.clone().add(new THREE.Vector3(0,1.6,0)));
-      }
-      if (room === "scorpion"){
-        // corner spawn, face center table area
-        player.position.copy(base).add(new THREE.Vector3(6, 0, 6));
-        faceYawToward(base.clone().add(new THREE.Vector3(0,1.6,0)));
-      }
-      if (room === "spectate"){
-        player.position.copy(base).add(new THREE.Vector3(0, 0, 7));
-        faceYawToward(base.clone().add(new THREE.Vector3(0,1.6,0)));
-      }
-    }
-
-    // Public API requested
-    W.goRoom = (room)=>{
-      if (!W.rooms.layout[room]) room = "lobby";
-      setRoomVisible(room);
-      spawnInRoom(room);
-    };
-
-    // Teleport-to-table: tries to find a table in scorpion room, else falls back to scorpion center
-    W.teleportToTable = ()=>{
-      // ensure scorpion visible so you can see it
-      W.goRoom("scorpion");
-
-      // try to find something table-like inside scorpion root
-      const t =
-        scorpionRoot.getObjectByName?.("poker_table") ||
-        scorpionRoot.getObjectByName?.("table") ||
-        scorpionRoot.getObjectByName?.("table_root");
-
-      const center = (t)
-        ? new THREE.Vector3().setFromMatrixPosition(t.matrixWorld)
-        : W.rooms.layout.scorpion.clone();
-
-      // land at a rail-ish spot in front of center
-      const spot = center.clone().add(new THREE.Vector3(0, 0, 5.2));
-      player.position.set(spot.x, 0, spot.z);
-      faceYawToward(center.clone().setY(1.6));
-      ui(log, "[world] teleportToTable ✅");
-    };
-
-    // Android helpers: click/teleport ray from camera
-    const raycaster = new THREE.Raycaster();
-    W.clickFromCamera = ()=>{
-      const origin = new THREE.Vector3(); camera.getWorldPosition(origin);
-      const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion).normalize();
-      raycaster.set(origin, dir); raycaster.far = 40;
-      const hits = raycaster.intersectObjects(W.interactables?.length ? W.interactables : (scene.userData.interactables || []), true);
-      if (!hits.length) return;
-      const o = hits[0].object;
-      let n = o;
-      while (n && !n.userData?.onClick && n.parent) n = n.parent;
-      n?.userData?.onClick?.();
-    };
-
-    W.teleportFromCamera = ()=>{
-      const origin = new THREE.Vector3(); camera.getWorldPosition(origin);
-      const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion).normalize();
-      if (Math.abs(dir.y) < 0.0001) return;
-      const t = -origin.y / dir.y;
-      if (t < 0.2 || t > 120) return;
-      const hit = origin.clone().addScaledVector(dir, t);
-      player.position.set(hit.x, 0, hit.z);
-    };
-
-    // Solid clamp (prevents walking through walls even when module collisions fail)
-    function clampToRoomBounds(){
-      const room = W.rooms.current || "lobby";
-      const b = W.rooms.bounds[room] || { w: 36, d: 36 };
-      const base = W.rooms.layout[room] || new THREE.Vector3();
-
-      const halfW = (b.w/2) - 0.8;
-      const halfD = (b.d/2) - 0.8;
-
-      const local = player.position.clone().sub(base);
-      local.x = Math.max(-halfW, Math.min(halfW, local.x));
-      local.z = Math.max(-halfD, Math.min(halfD, local.z));
-
-      const clamped = local.add(base);
-      player.position.set(clamped.x, 0, clamped.z);
-    }
-
-    // Update hook: keep UI update + clamp
-    W.update = (dt)=>{
-      if (W.__ui?.update) { try { W.__ui.update(dt); } catch {} }
-      clampToRoomBounds();
-    };
-
-    // Start in lobby (revived world)
-    setRoomVisible("lobby");
-    spawnInRoom("lobby");
-
-    // Let main.js / vr_ui use it
-    window.dispatchEvent(new CustomEvent("scarlett-world-loaded", { detail: { mounted } }));
-    ui(log, "[world] init complete ✅");
     return W;
   }
-};
 
-export default World;
+  // Fallback
+  ui(log, "[world] modular failed → using procedural fallback");
+  const fallback = await buildProceduralWorld({ THREE, scene, log });
+  // Merge into W so main.js pipeline still sees expected fields
+  Object.assign(W, fallback);
+  return W;
+}

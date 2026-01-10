@@ -1,10 +1,18 @@
-// /js/world.js — SCARLETT MASTER WORLD — FULL v10.2 (COMPAT + BOTS + DEMO GAME)
-// ✅ LOADER SIGNATURE: WORLD.JS V10.2 ACTIVE
+// /js/world.js — SCARLETT MASTER WORLD — FULL v10.3
+// ✅ LOADER SIGNATURE: WORLD.JS V10.3 ACTIVE
+//
+// Fixes:
+// - TeleportMachine.init destructuring { world } (world was undefined → mount crash)
+// - UI.init expects ctx.__ui.hub
+// Adds:
+// - Auto-beacons for Store + Rail + Table so you can SEE them instantly
+// - Spawn points: store / rail / table
+// - Still mounts all your modules
 
 export const World = {
   async init(baseCtx) {
     const ctx = World._createCtx(baseCtx);
-    ctx.log(`[world] ✅ LOADER SIGNATURE: WORLD.JS V10.2 ACTIVE`);
+    ctx.log(`[world] ✅ LOADER SIGNATURE: WORLD.JS V10.3 ACTIVE`);
 
     ctx.log(`[world] fallback world building…`);
     World._buildFallbackLobby(ctx);
@@ -12,9 +20,11 @@ export const World = {
 
     const mountedCount = await World._mountAllSystems(ctx);
 
-    // If bots/game did not mount from external modules, spawn fallback bots + demo play
-    if (!ctx.__hasBots) World._spawnFallbackBots(ctx);
+    // If poker_sim missing, keep a visible demo so you can observe while building
     if (!ctx.__hasDemoGame) World._startDemoPoker(ctx);
+
+    // Drop beacons + create spawns so you can find Store/Rail/Table instantly
+    World._placeWayfinding(ctx);
 
     World._finalizeWorld(ctx);
 
@@ -45,27 +55,27 @@ export const World = {
     ctx.spawns = ctx.spawns || {};
     ctx.textures = ctx.textures || {};
     ctx.flags = ctx.flags || {};
+
     ctx.ui = ctx.ui || {};
     ctx.ui.panels = ctx.ui.panels || [];
     ctx.ui.buttons = ctx.ui.buttons || [];
     ctx.ui.hotspots = ctx.ui.hotspots || [];
 
-    // legacy ui compat
+    // ✅ legacy UI compat (prevents UI.init hub crash)
     ctx.__ui = ctx.__ui || {};
     ctx.ui.__ui = ctx.ui.__ui || ctx.__ui;
-    ctx.ui.hub = ctx.ui.hub || null;
-    ctx.__ui.hub = ctx.__ui.hub || ctx.ui.hub;
+    if (!("hub" in ctx.__ui)) ctx.__ui.hub = null;
+    if (!("hub" in ctx.ui)) ctx.ui.hub = ctx.__ui.hub;
 
-    // legacy rooms compat
+    // ✅ legacy room compat
     ctx.rooms = ctx.rooms || {};
     ctx.rooms.mode = ctx.rooms.mode || "lobby";
     ctx.rm = ctx.rm || { mode: ctx.rooms.mode };
     ctx.room = ctx.room || { mode: ctx.rooms.mode };
 
-    // legacy world compat
+    // ✅ legacy world compat + mount() (prevents TeleportMachine crash)
     ctx.world = ctx.world || {};
     ctx.world.colliders = ctx.world.colliders || ctx.solids;
-    ctx.colliders = ctx.colliders || ctx.world.colliders;
     ctx.world.triggers = ctx.world.triggers || ctx.triggers;
 
     ctx.addMounted = (obj) => {
@@ -73,7 +83,12 @@ export const World = {
       ctx.__mounted.push(obj);
       if (ctx.scene && obj.isObject3D && obj.parent !== ctx.scene) ctx.scene.add(obj);
     };
-    ctx.world.mount = ctx.world.mount || ((obj) => ctx.addMounted(obj));
+
+    // Critical: world.mount must exist
+    ctx.world.mount = ctx.world.mount || ((obj)=>ctx.addMounted(obj));
+
+    // Helpful aliases some older modules use
+    ctx.colliders = ctx.colliders || ctx.world.colliders;
 
     ctx.addSolid = (obj) => {
       if (!obj) return;
@@ -110,12 +125,11 @@ export const World = {
     }
   },
 
-  async _call(ctx, label, fn, arg = ctx) {
+  async _call(ctx, label, fn, arg) {
     if (typeof fn !== "function") return false;
     try {
       ctx.log(`[world] calling ${label}`);
-      const res = await fn(arg);
-      if (res?.tick) ctx.addTicker((dt)=>res.tick(dt, ctx));
+      await fn(arg);
       ctx.log(`[world] ✅ ok ${label}`);
       return true;
     } catch (e) {
@@ -128,7 +142,7 @@ export const World = {
     let mounted = 0;
     const v = ctx._v || Date.now();
 
-    // TEXTURES
+    // textures
     {
       const m = await World._safeImport(ctx, `./textures.js?v=${v}`);
       const kitFn = m?.createTextureKit || m?.Textures?.createTextureKit || m?.default?.createTextureKit;
@@ -138,7 +152,7 @@ export const World = {
       }
     }
 
-    // CORE WORLD SYSTEMS (your modules)
+    // build systems
     const systems = [
       ["lights_pack.js.LightsPack.build (ctx)", `./lights_pack.js?v=${v}`, (m)=>m?.LightsPack?.build || m?.default?.LightsPack?.build || m?.build],
       ["solid_walls.js.SolidWalls.build (ctx)", `./solid_walls.js?v=${v}`, (m)=>m?.SolidWalls?.build || m?.default?.SolidWalls?.build || m?.build],
@@ -153,28 +167,33 @@ export const World = {
       ["vr_ui_panel.js.init (ctx)", `./vr_ui_panel.js?v=${v}`, (m)=>m?.VRUIPanel?.init || m?.default?.VRUIPanel?.init || m?.init],
       ["scorpion_room.js.ScorpionRoom.build (ctx)", `./scorpion_room.js?v=${v}`, (m)=>m?.ScorpionRoom?.build || m?.default?.ScorpionRoom?.build || m?.build],
       ["room_manager.js.RoomManager.init (ctx)", `./room_manager.js?v=${v}`, (m)=>m?.RoomManager?.init || m?.default?.RoomManager?.init || m?.init],
+      ["bots.js.Bots.init (ctx)", `./bots.js?v=${v}`, (m)=>m?.Bots?.init || m?.default?.Bots?.init || m?.init],
     ];
 
     for (const [label, path, pick] of systems){
       const mod = await World._safeImport(ctx, path);
       const fn = pick(mod);
-      if (await World._call(ctx, label, fn, ctx)) mounted++;
+
+      // ✅ IMPORTANT: pass a “rich” arg object that guarantees legacy destructuring works
+      const arg = {
+        ...ctx,
+        world: ctx.world,     // TeleportMachine destructures this
+        __ui: ctx.__ui,       // UI.init expects this
+        ui: ctx.ui,
+        colliders: ctx.colliders,
+      };
+
+      if (await World._call(ctx, label, fn, arg)) mounted++;
     }
 
-    // OPTIONAL: bots module if you have it
-    {
-      const m = await World._safeImport(ctx, `./bots.js?v=${v}`);
-      const init = m?.Bots?.init || m?.default?.Bots?.init || m?.init;
-      const ok = await World._call(ctx, `bots.js.Bots.init (ctx)`, init, ctx);
-      if (ok) { ctx.__hasBots = true; mounted++; }
-    }
-
-    // OPTIONAL: poker sim module if you have it
+    // poker sim (optional)
     {
       const m = await World._safeImport(ctx, `./poker_sim.js?v=${v}`);
       const init = m?.PokerSim?.init || m?.default?.PokerSim?.init || m?.init;
-      const ok = await World._call(ctx, `poker_sim.js.PokerSim.init (ctx)`, init, ctx);
-      if (ok) { ctx.__hasDemoGame = true; mounted++; }
+      if (init && await World._call(ctx, `poker_sim.js.PokerSim.init (ctx)`, init, { ...ctx, world: ctx.world })) {
+        ctx.__hasDemoGame = true;
+        mounted++;
+      }
     }
 
     // FX (optional)
@@ -193,11 +212,11 @@ export const World = {
     root.name = "MASTER_LOBBY";
     ctx.addMounted(root);
 
-    // Better-looking lobby instantly (more “appealing” even before textures)
-    const floorMat = new THREE.MeshStandardMaterial({ color: 0x090b14, roughness: 0.92, metalness: 0.05 });
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), floorMat);
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(80, 80),
+      new THREE.MeshStandardMaterial({ color: 0x090b14, roughness: 0.92, metalness: 0.05 })
+    );
     floor.rotation.x = -Math.PI/2;
-    floor.receiveShadow = true;
     root.add(floor);
 
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x151a2d, roughness: 0.78, metalness: 0.08 });
@@ -214,7 +233,6 @@ export const World = {
     mkWall(thick, wallH, 80, -half, wallH/2, 0);
     mkWall(thick, wallH, 80,  half, wallH/2, 0);
 
-    // Neon ring lights
     const amb = new THREE.AmbientLight(0x9fb1ff, 0.22);
     root.add(amb);
 
@@ -226,71 +244,16 @@ export const World = {
     rim.position.set(0, 3.2, 0);
     root.add(rim);
 
-    // spawns
+    // default spawns
     ctx.addSpawn("lobby", new THREE.Vector3(0,0,14), Math.PI);
     ctx.addSpawn("spectator", new THREE.Vector3(0,0,20), Math.PI);
     ctx.addSpawn("scorpion_seat", new THREE.Vector3(14,0,0), -Math.PI/2);
-
-    // subtle pulse
-    let t=0;
-    ctx.addTicker((dt)=>{
-      t += dt;
-      rim.intensity = 1.9 + Math.sin(t*0.9)*0.25;
-      amb.intensity = 0.20 + Math.sin(t*0.4)*0.02;
-    });
-  },
-
-  _spawnFallbackBots(ctx){
-    const { THREE, scene } = ctx;
-    if (!THREE || !scene) return;
-    ctx.__hasBots = true;
-
-    const bots = new THREE.Group();
-    bots.name = "BOTS_FALLBACK";
-    scene.add(bots);
-
-    const botMat = new THREE.MeshStandardMaterial({ color: 0x0d1020, roughness: 0.55, metalness: 0.15, emissive: 0x001a22, emissiveIntensity: 0.25 });
-    const headMat = new THREE.MeshStandardMaterial({ color: 0x0a0c14, roughness: 0.35, metalness: 0.2, emissive: 0x004455, emissiveIntensity: 0.5 });
-
-    const botList = [];
-    const count = 8;
-    for (let i=0;i<count;i++){
-      const g = new THREE.Group();
-      g.userData.phase = Math.random()*Math.PI*2;
-
-      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.85, 6, 14), botMat);
-      body.position.y = 1.05;
-
-      const head = new THREE.Mesh(new THREE.SphereGeometry(0.19, 18, 18), headMat);
-      head.position.y = 1.68;
-
-      g.add(body, head);
-      bots.add(g);
-      botList.push(g);
-    }
-
-    // ring around table area
-    ctx.addTicker((dt)=>{
-      const R = 3.2;
-      for (let i=0;i<botList.length;i++){
-        const b = botList[i];
-        b.userData.phase += dt * 0.25;
-        const a = (i/botList.length)*Math.PI*2 + b.userData.phase*0.15;
-        b.position.set(Math.cos(a)*R, 0, Math.sin(a)*R);
-        b.rotation.y = -a + Math.PI/2;
-        b.position.y = 0;
-      }
-    });
-
-    ctx.bots = botList;
   },
 
   _startDemoPoker(ctx){
     const { THREE, scene } = ctx;
     if (!THREE || !scene) return;
-    ctx.__hasDemoGame = true;
 
-    // Simple “dealer chip” + “card” visual so you can OBSERVE the game while editing
     const root = new THREE.Group();
     root.name = "DEMO_POKER";
     scene.add(root);
@@ -302,14 +265,12 @@ export const World = {
     chip.position.set(0, 1.05, 0);
     root.add(chip);
 
-    const cardMat = new THREE.MeshStandardMaterial({ color: 0xe8ecff, roughness: 0.85, metalness: 0.0 });
-    const cards = [];
+    const cardMat = new THREE.MeshStandardMaterial({ color: 0xe8ecff, roughness: 0.85 });
     for (let i=0;i<5;i++){
       const c = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.32), cardMat);
       c.position.set(-0.6 + i*0.3, 1.02, 0.2);
       c.rotation.x = -Math.PI/2;
       root.add(c);
-      cards.push(c);
     }
 
     let t=0;
@@ -320,14 +281,96 @@ export const World = {
     });
   },
 
+  _findFirstByName(scene, needles){
+    let found = null;
+    scene.traverse((o)=>{
+      if (found) return;
+      const n = (o.name || "").toLowerCase();
+      if (!n) return;
+      for (const needle of needles){
+        if (n.includes(needle)) { found = o; return; }
+      }
+    });
+    return found;
+  },
+
+  _placeWayfinding(ctx){
+    const { THREE, scene } = ctx;
+    if (!THREE || !scene) return;
+
+    const makeBeacon = (pos, color=0x7fe7ff)=>{
+      const g = new THREE.Group();
+      g.position.copy(pos);
+
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.5, 0.65, 48),
+        new THREE.MeshBasicMaterial({ color, transparent:true, opacity:0.85, side:THREE.DoubleSide })
+      );
+      ring.rotation.x = -Math.PI/2;
+      ring.position.y = 0.02;
+      g.add(ring);
+
+      const pillar = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.06, 0.06, 3.0, 18),
+        new THREE.MeshBasicMaterial({ color, transparent:true, opacity:0.35 })
+      );
+      pillar.position.y = 1.5;
+      g.add(pillar);
+
+      const orb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.12, 16, 16),
+        new THREE.MeshBasicMaterial({ color })
+      );
+      orb.position.y = 3.0;
+      g.add(orb);
+
+      ctx.addMounted(g);
+
+      let t = Math.random()*10;
+      ctx.addTicker((dt)=>{
+        t += dt;
+        ring.rotation.z += dt*0.8;
+        orb.position.y = 3.0 + Math.sin(t*2.0)*0.12;
+      });
+
+      return g;
+    };
+
+    // Try to find store + rail + table roots by name
+    const storeObj = World._findFirstByName(scene, ["store", "shop"]);
+    const railObj  = World._findFirstByName(scene, ["rail", "spectator"]);
+    const tableObj = World._findFirstByName(scene, ["table"]);
+
+    if (storeObj){
+      const p = new THREE.Vector3();
+      storeObj.getWorldPosition(p);
+      makeBeacon(p, 0xff2d7a);
+      ctx.addSpawn("store", p.clone().add(new THREE.Vector3(0,0,3)), Math.PI);
+      ctx.log("[world] ✅ beacon: STORE");
+    }
+
+    if (railObj){
+      const p = new THREE.Vector3();
+      railObj.getWorldPosition(p);
+      makeBeacon(p, 0x7fe7ff);
+      ctx.addSpawn("rail", p.clone().add(new THREE.Vector3(0,0,3)), Math.PI);
+      ctx.log("[world] ✅ beacon: RAIL");
+    }
+
+    if (tableObj){
+      const p = new THREE.Vector3();
+      tableObj.getWorldPosition(p);
+      makeBeacon(p, 0x4cd964);
+      ctx.addSpawn("table", p.clone().add(new THREE.Vector3(0,0,3)), Math.PI);
+      ctx.log("[world] ✅ beacon: TABLE");
+    }
+  },
+
   _finalizeWorld(ctx) {
     const { THREE } = ctx;
     if (!THREE) return;
 
     if (!ctx.spawns.lobby) ctx.addSpawn("lobby", new THREE.Vector3(0,0,14), Math.PI);
-    if (!ctx.spawns.scorpion_seat) ctx.addSpawn("scorpion_seat", new THREE.Vector3(14,0,0), -Math.PI/2);
-    if (!ctx.spawns.spectator) ctx.addSpawn("spectator", new THREE.Vector3(0,0,20), Math.PI);
-
     ctx.setRoomMode(ctx.rooms?.mode || "lobby");
   },
 

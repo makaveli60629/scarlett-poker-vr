@@ -1,18 +1,15 @@
-// /js/controls.js — Scarlett Controls v3.5 (FULL)
-// Scorpion = seated, no locomotion.
-// Leave seat (B/Y) => go back to lobby (standing).
+// /js/controls.js — Scarlett Controls v3.6 (FULL)
+// - Seat uses seated headset height (no negative-Y hacks)
+// - Leave works across multiple Quest button mappings
+// - Leave also works via keyboard (L / Esc)
+// - Still: seated = no locomotion, only look
 
 export const Controls = {
   init(ctx) {
     const { THREE, renderer, camera, player, world, log } = ctx;
 
     const state = {
-      ctx,
-      THREE,
-      renderer,
-      camera,
-      player,
-      world,
+      ctx, THREE, renderer, camera, player, world,
       seated: false,
       seatedAt: null,
       moveEnabled: true,
@@ -22,17 +19,16 @@ export const Controls = {
       _keys: new Set(),
       _lastSnap: 0,
       _gpPrev: { left: {}, right: {} },
+      seatHeadY: 1.05, // ✅ seated headset height feel
     };
 
     world.seated = !!world.seated;
 
-    // Keyboard fallback
     window.addEventListener("keydown", (e) => state._keys.add(e.code));
     window.addEventListener("keyup", (e) => state._keys.delete(e.code));
 
     function getXRGamepads() {
-      const xr = renderer?.xr;
-      const session = xr?.getSession?.();
+      const session = renderer?.xr?.getSession?.();
       const sources = session?.inputSources || [];
       let left = null, right = null;
       for (const s of sources) {
@@ -55,18 +51,14 @@ export const Controls = {
       return !!isDownNow && !prev;
     }
 
-    // NEW SpawnPoints system first, legacy second
     function teleportToSpawn(key, opts = {}) {
-      if (ctx.spawns?.apply) {
-        return ctx.spawns.apply(key, player, { standY: opts.standY ?? 1.65 });
-      }
+      if (ctx.spawns?.apply) return ctx.spawns.apply(key, player, opts);
       const sp = world?.spawns?.[key];
       if (!sp) return false;
       const pos = sp.pos || sp.position || sp;
       const yaw = sp.yaw || 0;
       const standY = opts.standY ?? 1.65;
-      const y = (pos.y ?? 0) + standY;
-      player.position.set(pos.x ?? 0, y, pos.z ?? 0);
+      player.position.set(pos.x ?? 0, (pos.y ?? 0) + standY, pos.z ?? 0);
       player.rotation.set(0, yaw, 0);
       return true;
     }
@@ -74,6 +66,8 @@ export const Controls = {
     function resetVelocity() {
       if (player?.userData?.velocity?.set) player.userData.velocity.set(0, 0, 0);
     }
+
+    function setEnabled(v) { state.enabled = !!v; }
 
     // PUBLIC: sit
     function sitAt(spawnKey = "table_seat_1") {
@@ -84,15 +78,15 @@ export const Controls = {
 
       resetVelocity();
 
-      // seat spawns should already have correct y; we do standY=0
-      if (!teleportToSpawn(spawnKey, { standY: 0.0 })) {
+      // ✅ seated headset height
+      if (!teleportToSpawn(spawnKey, { standY: state.seatHeadY })) {
         teleportToSpawn("lobby_spawn", { standY: 1.65 });
       }
 
-      log?.(`[controls] 🪑 seated @ ${spawnKey}`);
+      log?.(`[controls] 🪑 seated @ ${spawnKey} (headY=${state.seatHeadY.toFixed(2)})`);
     }
 
-    // PUBLIC: standing
+    // PUBLIC: stand
     function forceStanding(spawnKey = "lobby_spawn") {
       state.seated = false;
       state.seatedAt = null;
@@ -105,9 +99,8 @@ export const Controls = {
       log?.(`[controls] ✅ standing @ ${spawnKey}`);
     }
 
-    // PUBLIC: leave seat => LOBBY
+    // PUBLIC: leave -> lobby
     function leaveSeat() {
-      // If we're seated, leave. If not seated, still allow as "panic exit"
       state.seated = false;
       state.seatedAt = null;
       state.moveEnabled = true;
@@ -115,10 +108,9 @@ export const Controls = {
 
       resetVelocity();
 
-      // Route through RoomManager if present
+      // Prefer RoomManager route
       window.dispatchEvent(new CustomEvent("scarlett-leave-table"));
-
-      // Also directly place at lobby spawn as a fallback
+      // Hard fallback
       teleportToSpawn("lobby_spawn", { standY: 1.65 });
 
       log?.("[controls] ✅ leave -> lobby");
@@ -128,32 +120,47 @@ export const Controls = {
       const yaw = player.rotation.y;
       const cos = Math.cos(yaw);
       const sin = Math.sin(yaw);
-      const vx = (dx * cos - dz * sin) * state.speed * dt;
-      const vz = (dx * sin + dz * cos) * state.speed * dt;
-      player.position.x += vx;
-      player.position.z += vz;
+      player.position.x += (dx * cos - dz * sin) * state.speed * dt;
+      player.position.z += (dx * sin + dz * cos) * state.speed * dt;
     }
 
     function update(dt) {
       if (!state.enabled) return;
 
+      // Keyboard escape hatch
+      if (state._keys.has("Escape") || state._keys.has("KeyL")) {
+        // one-shot
+        state._keys.delete("Escape");
+        state._keys.delete("KeyL");
+        leaveSeat();
+      }
+
       const gps = getXRGamepads();
 
-      // Leave table:
-      // Right B is often buttons[5], left Y is often buttons[3]
+      // ✅ Leave mappings: try MANY common indices (Quest varies)
+      // Right: B (5) / A (4) / secondary (1) / menu-ish (3)
       if (gps.right) {
-        const b = buttonPressed(gps.right, 5) || buttonPressed(gps.right, 1);
-        if (justPressed("right", "leave", b)) leaveSeat();
-      }
-      if (gps.left) {
-        const y = buttonPressed(gps.left, 3) || buttonPressed(gps.left, 1);
-        if (justPressed("left", "leave", y)) leaveSeat();
+        const leaveNow =
+          buttonPressed(gps.right, 5) || // B
+          buttonPressed(gps.right, 4) || // A (sometimes right primary)
+          buttonPressed(gps.right, 1) || // secondary
+          buttonPressed(gps.right, 3);   // menu-ish
+        if (justPressed("right", "leave", leaveNow)) leaveSeat();
       }
 
-      // If seated: NO locomotion, only look around
+      // Left: Y (3) / X (4) / secondary (1) / menu-ish (2)
+      if (gps.left) {
+        const leaveNow =
+          buttonPressed(gps.left, 3) || // Y
+          buttonPressed(gps.left, 4) || // X
+          buttonPressed(gps.left, 1) || // secondary
+          buttonPressed(gps.left, 2);   // menu-ish
+        if (justPressed("left", "leave", leaveNow)) leaveSeat();
+      }
+
+      // seated => no locomotion
       if (!state.moveEnabled || world.seated) return;
 
-      // Desktop move
       let dx = 0, dz = 0;
       if (state._keys.has("KeyW") || state._keys.has("ArrowUp")) dz -= 1;
       if (state._keys.has("KeyS") || state._keys.has("ArrowDown")) dz += 1;
@@ -162,7 +169,6 @@ export const Controls = {
 
       if (dx || dz) moveLocal(dx, dz, dt);
 
-      // snap turn
       const now = performance.now();
       if (now - state._lastSnap > 180) {
         if (state._keys.has("KeyQ")) { player.rotation.y += state.snapTurn; state._lastSnap = now; }
@@ -175,8 +181,11 @@ export const Controls = {
     Controls.sitAt = sitAt;
     Controls.forceStanding = forceStanding;
     Controls.leaveSeat = leaveSeat;
+    Controls.resetVelocity = resetVelocity;
+    Controls.clearMotion = () => {};
+    Controls.setEnabled = setEnabled;
 
-    log?.("[controls] init ✅ v3.5 (seat/leave scorpion ready)");
+    log?.("[controls] init ✅ v3.6 (seat height + robust leave)");
     return Controls;
   },
 
@@ -185,4 +194,7 @@ export const Controls = {
   sitAt() {},
   forceStanding() {},
   leaveSeat() {},
+  resetVelocity() {},
+  clearMotion() {},
+  setEnabled() {},
 };

@@ -1,10 +1,9 @@
-// /js/alignment.js — Scarlett Poker VR
-// GitHub Pages SAFE: NO imports. Pure math + transforms.
+// /js/alignment.js — Scarlett Poker VR (SAFE)
+// Fix: do NOT force rig Y during immersive VR (Quest). Only for mobile preview.
 
 export const Alignment = {
-  // Set your "locked standing height" here:
-  STANDING_EYE_Y: 1.62,     // raise to 1.70 if you want taller later
-  EXTRA_Y: 0.10,            // small lift to stop floor jitter
+  STANDING_EYE_Y: 1.62,
+  EXTRA_Y: 0.10,
   ENABLE_HEIGHT_LOCK: true,
 
   _ready: false,
@@ -13,15 +12,17 @@ export const Alignment = {
   init(playerGroup, camera) {
     this._ready = true;
     this._lastAppliedY = null;
-    // We apply lock in update() once XR camera has a local Y.
   },
 
-  update(playerGroup, camera) {
+  update(playerGroup, camera, renderer) {
     if (!this._ready || !this.ENABLE_HEIGHT_LOCK) return;
     if (!playerGroup || !camera) return;
 
-    // In WebXR camera.position.y is LOCAL inside the rig.
-    // We set rig Y so that "eye height" feels like standing.
+    // If in immersive VR, do NOT override Y
+    const session = renderer?.xr?.getSession?.() || null;
+    if (session) return;
+
+    // Mobile preview height lock only
     const camLocalY = camera.position?.y ?? 0;
     const targetRigY = (this.STANDING_EYE_Y - camLocalY) + this.EXTRA_Y;
 
@@ -35,6 +36,5 @@ export const Alignment = {
     if (!playerGroup || !pad?.position) return;
     playerGroup.position.x = pad.position.x;
     playerGroup.position.z = pad.position.z;
-    // Y handled by update() lock.
   },
 };

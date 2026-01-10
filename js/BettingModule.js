@@ -42,7 +42,6 @@ export function update(dt, ctx) {
   if (!ctx.renderer?.xr?.isPresenting) return;
   if (!ctx.gestures) return;
 
-  // Each frame: if pinchDown, "grab" nearest chip
   _handLogic("left", ctx);
   _handLogic("right", ctx);
 }
@@ -55,31 +54,33 @@ function _handLogic(side, ctx) {
   const handPos = new THREE.Vector3();
   handObj.getWorldPosition(handPos);
 
-  // grab on pinchDown if not holding
+  // Grab on pinchDown if not holding
   if (g.pinchDown && !ctx.heldChip[side]) {
     const c = nearestChip(ctx, handPos, 0.09);
     if (c) {
       ctx.heldChip[side] = c;
       ctx.LOG?.push?.("log", `[Betting] ${side} grabbed chip ${c.userData.value}`);
+
+      // click haptic
+      ctx.haptics?.click?.("both");
     }
   }
 
-  // while pinching: keep chip at hand
+  // While pinching: keep chip at hand
   if (g.pinch && ctx.heldChip[side]) {
     const c = ctx.heldChip[side];
     c.position.copy(handPos);
     c.position.y += 0.01;
   }
 
-  // release when pinch ends
+  // Release when pinch ends
   if (!g.pinch && ctx.heldChip[side]) {
     const c = ctx.heldChip[side];
     ctx.heldChip[side] = null;
 
-    // For now: release = place bet on Bears if chip >= 1000, else just drop
     const v = c.userData.value || 0;
 
-    // “Place bet” behavior: if you release near the table center, count as bet
+    // Release near table = place bet
     const tableCenter = new THREE.Vector3(0, 0.86, -1.2);
     const dToTable = c.position.distanceTo(tableCenter);
 
@@ -89,15 +90,20 @@ function _handLogic(side, ctx) {
 
       ctx.LOG?.push?.("log", `[Betting] BET placed on BEARS: +${v} (total ${ctx.bets.bears})`);
 
+      // Whale alert
       if (v > 500) {
-        ctx.LOG?.push?.("warn", `[WHALE ALERT] Bet ${v} > 500 (trigger glow + haptics later)`);
+        ctx.LOG?.push?.("warn", `[WHALE ALERT] Bet ${v} > 500 (glow + 10-pulse haptics)`);
+        ctx.haptics?.whale?.("both");
+      } else {
+        ctx.haptics?.pulse?.("both", 0.55, 30);
       }
 
-      // remove chip from table (consumed)
+      // consume chip
       c.parent?.remove(c);
     } else {
-      // drop on floor
+      // Drop on floor
       c.position.y = 0.02;
+      ctx.haptics?.pulse?.("both", 0.25, 18);
     }
   }
 }

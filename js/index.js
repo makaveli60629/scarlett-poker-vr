@@ -1,10 +1,11 @@
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
+
 import { createWorld, createLowPolyAvatar, applyClothing } from "./world.js";
+import { createSafeModuleLoader } from "./module_loader.js";
 
-let scene, camera, renderer, labelRenderer, playerAvatar;
-
+// --- UI refs
 const ui = {
   grid: document.getElementById("diagGrid"),
   logBox: document.getElementById("logBox"),
@@ -14,19 +15,16 @@ const ui = {
 
 const LOG = {
   lines: [],
-  max: 260,
+  max: 300,
   push(kind, msg){
     const time = new Date().toLocaleTimeString();
     const line = `[${time}] ${kind.toUpperCase()}: ${msg}`;
     this.lines.push(line);
     if (this.lines.length > this.max) this.lines.splice(0, this.lines.length - this.max);
     if (ui.logBox) ui.logBox.textContent = this.lines.join("\n");
-    console[kind === "error" ? "error" : kind === "warn" ? "warn" : "log"](msg);
+    (kind === "error" ? console.error : kind === "warn" ? console.warn : console.log)(msg);
   },
-  clear(){
-    this.lines = [];
-    if (ui.logBox) ui.logBox.textContent = "";
-  },
+  clear(){ this.lines = []; if (ui.logBox) ui.logBox.textContent = ""; },
   copy(){
     const text = this.lines.join("\n");
     navigator.clipboard?.writeText?.(text).then(
@@ -47,9 +45,22 @@ setInterval(()=> {
   if (c) c.textContent = new Date().toLocaleString();
 }, 250);
 
-// --------------------
-// Cards / Deal System
-// --------------------
+// --- helpers
+function toggleMenu() {
+  const el = document.getElementById("menu-frame");
+  el.style.display = (el.style.display === "none" || !el.style.display) ? "block" : "none";
+}
+window.gameAction = (type) => {
+  if (type === "muck") LOG.push("log", "Boss MUCK: hides losing hand (info control).");
+  if (type === "show") LOG.push("log", "Boss SHOW: reveals hand (intimidation).");
+  document.getElementById("menu-frame").style.display = "none";
+};
+
+// --- scene state
+let scene, camera, renderer, labelRenderer, playerAvatar;
+let ctx = null;
+
+// --- animation registry
 const tmpV = new THREE.Vector3();
 const tmpV2 = new THREE.Vector3();
 const anims = [];
@@ -61,11 +72,8 @@ function tickAnims(t){
   }
 }
 
-const cards = {
-  group: null,
-  dealerAnchor: null,
-  dealt: false,
-};
+// --- Cards
+const cards = { group:null, dealerAnchor:null, dealt:false };
 
 function makeCardMesh() {
   const geo = new THREE.PlaneGeometry(0.065, 0.09);
@@ -77,13 +85,11 @@ function makeCardMesh() {
   });
   const m = new THREE.Mesh(geo, mat);
   m.rotation.x = -Math.PI / 2;
-
   const edge = new THREE.LineSegments(
     new THREE.EdgesGeometry(geo),
     new THREE.LineBasicMaterial({ color: 0x00ffff })
   );
   m.add(edge);
-
   return m;
 }
 
@@ -103,28 +109,20 @@ function getFallbackHandTarget(out, handedness) {
   out.add(right.multiplyScalar(handedness === "left" ? -0.12 : 0.12));
   return out;
 }
-
 function getHandTarget(out, handedness) {
   const hand = handedness === "left" ? playerAvatar.leftHand : playerAvatar.rightHand;
   if (!hand) return getFallbackHandTarget(out, handedness);
   hand.getWorldPosition(out);
-  // If still near origin, fallback
   if (out.lengthSq() < 0.0001) return getFallbackHandTarget(out, handedness);
   return out;
 }
 
 function dealHoleCards() {
-  cards.dealt = false; // allow re-deal on demand
-  if (cards.dealt) return;
-  cards.dealt = true;
-
   if (!cards.group) {
     cards.group = new THREE.Group();
     cards.group.name = "Cards";
     scene.add(cards.group);
   }
-
-  // Clean old
   while (cards.group.children.length) cards.group.remove(cards.group.children[0]);
 
   const p0 = getDealerWorldPos(new THREE.Vector3());
@@ -143,80 +141,42 @@ function dealHoleCards() {
     const u = Math.min(1, (tNow - startT) / dur);
     const from = getDealerWorldPos(tmpV.set(0,0,0)).clone();
     const to = getHandTarget(tmpV2.set(0,0,0), side).clone();
-
-    const mid = from.clone().lerp(to, 0.5);
-    mid.y += lift;
-
+    const mid = from.clone().lerp(to, 0.5); mid.y += lift;
     const a = from.clone().lerp(mid, u);
     const b = mid.clone().lerp(to, u);
     const pos = a.lerp(b, u);
 
     card.position.copy(pos);
-
-    // face-ish toward camera
     card.quaternion.copy(camera.quaternion);
     card.rotateX(-Math.PI / 2);
     card.rotateZ(side === "left" ? -0.25 : 0.25);
-
     return u < 1;
   });
 
   fly(c1, "left");
   fly(c2, "right");
-
   LOG.push("log", "Dealt 2 hole cards ✅");
 }
 
-// --------------------
-// Input / Menu UI
-// --------------------
-function toggleMenu() {
-  const el = document.getElementById("menu-frame");
-  el.style.display = (el.style.display === "none" || !el.style.display) ? "block" : "none";
-}
-
-window.gameAction = (type) => {
-  if (type === "muck") LOG.push("log", "Boss MUCK: hides losing hand (info control).");
-  if (type === "show") LOG.push("log", "Boss SHOW: reveals hand (intimidation).");
-  document.getElementById("menu-frame").style.display = "none";
-};
-
-document.getElementById("btnMenu").onclick = () => toggleMenu();
-document.getElementById("btnDeal").onclick = () => dealHoleCards();
-document.getElementById("btnClear").onclick = () => LOG.clear();
-document.getElementById("btnCopy").onclick = () => LOG.copy();
-
-addEventListener("keydown", (e) => {
-  const k = e.key.toLowerCase();
-  if (k === "m") toggleMenu();
-  if (k === "d") dealHoleCards();
-});
-
-// --------------------
-// XR Hand Tracking
-// --------------------
+// --- XR Hands
 function handleHandTracking(frame) {
   const session = renderer.xr.getSession();
   if (!session) return;
-
   const refSpace = renderer.xr.getReferenceSpace();
+
   for (const inputSource of session.inputSources) {
     if (!inputSource.hand) continue;
-
     const wrist = inputSource.hand.get("wrist");
     if (!wrist) continue;
-
     const pose = frame.getPose(wrist, refSpace);
     if (!pose) continue;
 
     const handMesh = inputSource.handedness === "left" ? playerAvatar.leftHand : playerAvatar.rightHand;
-
     handMesh.position.set(
       pose.transform.position.x,
       pose.transform.position.y,
       pose.transform.position.z
     );
-
     handMesh.quaternion.set(
       pose.transform.orientation.x,
       pose.transform.orientation.y,
@@ -226,9 +186,7 @@ function handleHandTracking(frame) {
   }
 }
 
-// --------------------
-// Diagnostics metrics
-// --------------------
+// --- Diagnostics metrics
 let last = performance.now();
 let fpsAcc = 0, fpsCount = 0, fps = 0;
 
@@ -258,11 +216,21 @@ async function setCaps(){
   ui.capImm.textContent = immersive ? "YES" : "NO";
 }
 
-// --------------------
-// Init
-// --------------------
-function init() {
-  setCaps();
+// --- Buttons
+document.getElementById("btnMenu").onclick = () => toggleMenu();
+document.getElementById("btnDeal").onclick = () => dealHoleCards();
+document.getElementById("btnClear").onclick = () => LOG.clear();
+document.getElementById("btnCopy").onclick = () => LOG.copy();
+
+addEventListener("keydown", (e) => {
+  const k = e.key.toLowerCase();
+  if (k === "m") toggleMenu();
+  if (k === "d") dealHoleCards();
+});
+
+// --- Init
+async function init() {
+  await setCaps();
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
@@ -274,11 +242,12 @@ function init() {
   renderer.xr.enabled = true;
   document.body.appendChild(renderer.domElement);
 
-  // ✅ VR Button ALWAYS
-  const vrBtn = VRButton.createButton(renderer);
+  // VR button
+  const vrBtn = VRButton.createButton(renderer, { optionalFeatures: ["hand-tracking","local-floor"] });
   vrBtn.id = "VRButton";
   document.body.appendChild(vrBtn);
 
+  // Labels
   labelRenderer = new CSS2DRenderer();
   labelRenderer.setSize(window.innerWidth, window.innerHeight);
   labelRenderer.domElement.style.position = "fixed";
@@ -292,17 +261,61 @@ function init() {
 
   playerAvatar = createLowPolyAvatar();
   scene.add(playerAvatar);
-
-  // Clothing texture path (keep your assets folder rule)
   applyClothing(playerAvatar, "assets/textures/clothing_diffuse.png");
 
-  // Nametag example
+  // Nametag
   const tagEl = document.createElement("div");
   tagEl.className = "nametag-container";
-  tagEl.innerHTML = `BOSS<span class="nametag-sub">Tight-Aggressive • Muck Ready</span>`;
+  tagEl.innerHTML = `BOSS<span class="nametag-sub">Pinch to Bet • Fist to Show</span>`;
   const tagObj = new CSS2DObject(tagEl);
   playerAvatar.headAnchor.add(tagObj);
 
+  // XR hands (three.js)
+  const hands = {
+    left: renderer.xr.getHand(0),
+    right: renderer.xr.getHand(1),
+  };
+  scene.add(hands.left, hands.right);
+
+  // Safe module loader
+  const modLog = (kind, msg) => LOG.push(kind === "error" ? "error" : kind === "warn" ? "warn" : "log", msg);
+  const Modules = createSafeModuleLoader({ log: modLog });
+  const V = new URLSearchParams(location.search).get("v") || Date.now();
+
+  // CONTINUE ADDING MODULES HERE FOREVER
+  const MODULE_MANIFEST = [
+    { name: "GestureEngine", url: `./GestureEngineModule.js?v=${V}`, required: true },
+    { name: "Betting", url: `./BettingModule.js?v=${V}`, required: true },
+    { name: "Jumbotron", url: `./JumbotronModule.js?v=${V}`, required: false },
+  ];
+
+  // Shared context for every module
+  ctx = {
+    THREE, scene, camera, renderer, labelRenderer,
+    LOG,
+    hands,
+    playerAvatar,
+    dealHoleCards,
+    toggleMenu,
+    cards,
+    wallet: { chips: 5000 },
+    bets: { bears: 0, packers: 0 },
+  };
+
+  await Modules.loadAll(MODULE_MANIFEST, ctx);
+
+  // Hook spawn chips button AFTER module init
+  document.getElementById("btnSpawnChips").onclick = () => {
+    const betting = Modules.get("Betting");
+    if (!betting?.spawnChipSet) {
+      LOG.push("warn", "BettingModule.spawnChipSet missing");
+      return;
+    }
+    const origin = new THREE.Vector3(0, 0.82, -0.65); // in front of table
+    betting.spawnChipSet(ctx, origin);
+  };
+
+  // XR session hooks
   renderer.xr.addEventListener("sessionstart", () => {
     LOG.push("log", "XR session started ✅");
     setTimeout(() => dealHoleCards(), 220);
@@ -311,8 +324,9 @@ function init() {
 
   window.addEventListener("resize", onWindowResize);
 
-  renderer.setAnimationLoop(render);
-  LOG.push("log", "Init complete ✅ (Permanent Three boot)");
+  // Loop
+  renderer.setAnimationLoop((timestamp, frame) => render(timestamp, frame, Modules));
+  LOG.push("log", "Init complete ✅ (Update 5.4 permanent)");
 }
 
 function onWindowResize() {
@@ -322,7 +336,7 @@ function onWindowResize() {
   labelRenderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-function render(timestamp, frame) {
+function render(timestamp, frame, Modules) {
   const now = performance.now();
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
@@ -332,25 +346,32 @@ function render(timestamp, frame) {
 
   if (frame) {
     handleHandTracking(frame);
-
-    // Torso follows head yaw
+    // torso follows head yaw
     const torso = playerAvatar.getObjectByName("Torso");
     if (torso) torso.rotation.y = camera.rotation.y;
-
-    // Avatar follows camera (standing offset)
+    // avatar follows camera
     playerAvatar.position.set(camera.position.x, camera.position.y - 1.6, camera.position.z);
   }
 
   tickAnims(performance.now());
 
-  const sess = renderer.xr.getSession();
+  // module updates
+  try { Modules.updateAll(dt, ctx); } catch (e) { LOG.push("warn", `Modules.updateAll error: ${e?.message || e}`); }
+
+  // module counts
+  const rep = Modules.getReport();
+  const ok = rep.filter(r=>r.status==="ok").length;
+  const warn = rep.filter(r=>r.status==="warn").length;
+  const fail = rep.filter(r=>r.status==="fail").length;
+
   setMetrics([
     ["FPS", `${fps}`],
     ["XR", renderer.xr.isPresenting ? "ON" : "OFF"],
-    ["Session", sess ? "active" : "none"],
-    ["CamY", `${camera.position.y.toFixed(2)}`],
-    ["Cards", cards.dealt ? "dealt" : "ready"],
-    ["Menu", (document.getElementById("menu-frame").style.display === "block") ? "open" : "closed"]
+    ["Session", renderer.xr.getSession() ? "active" : "none"],
+    ["Cards", cards.group ? `${cards.group.children.length} in scene` : "none"],
+    ["Wallet", `${ctx.wallet?.chips ?? 0} chips`],
+    ["Bears Bet", `${ctx.bets?.bears ?? 0}`],
+    ["Modules", `${ok} ok • ${warn} warn • ${fail} fail`],
   ]);
 
   renderer.render(scene, camera);

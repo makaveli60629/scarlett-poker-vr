@@ -1,4 +1,4 @@
-// /js/spawn_points.js — SpawnPoints v3.1 (SEAT HEIGHT FIX)
+// /js/spawn_points.js — SpawnPoints v3.2 (SCORPION SEAT SAFE)
 // Builds visible pads + registers named spawn transforms.
 // Convention: we store { x, z, y, yaw } and apply to player safely.
 
@@ -6,7 +6,6 @@ export const SpawnPoints = {
   build(ctx) {
     const { THREE, scene, log } = ctx;
 
-    // --- helpers ---
     const mkPad = (name, x, z, yaw, color = 0x7fe7ff) => {
       const pad = new THREE.Mesh(
         new THREE.CylinderGeometry(0.55, 0.55, 0.08, 28),
@@ -36,68 +35,48 @@ export const SpawnPoints = {
       return pad;
     };
 
-    // --- registry ---
     const spawns = {};
     const register = (name, x, z, yaw, opts = {}) => {
-      spawns[name] = {
-        x, z,
-        y: opts.y ?? 0,
-        yaw,
-        room: opts.room ?? "any",
-      };
+      spawns[name] = { x, z, y: opts.y ?? 0, yaw, room: opts.room ?? "any" };
       if (opts.pad !== false) mkPad(name, x, z, yaw, opts.color ?? 0x7fe7ff);
       log?.(`[spawns] ✅ ${name} @ ${x.toFixed(2)},${z.toFixed(2)} yaw=${yaw.toFixed(2)}`);
     };
 
-    // --- EXISTING ---
+    // Main spawns
     register("lobby_spawn", 0.00, 3.20, Math.PI, { room: "lobby", color: 0x7fe7ff });
     register("store_spawn", 4.50, -3.50, Math.PI, { room: "store", color: 0xff2d7a });
     register("spectator", 0.00, -3.00, 0.00, { room: "spectate", color: 0xffcc00 });
 
-    // ✅ Seat height fix:
-    // Lower the rig so standing players "feel seated" at the table.
-    // If it feels too low/high, tweak -0.60 to -0.50 or -0.70.
-    const SEAT_Y = -0.60;
+    // Lobby seat (near felt but not in it)
+    register("table_seat_1", 0.00, 1.55, Math.PI, { room: "table", color: 0x4cd964, pad: false });
 
-    register("table_seat_1", 0.00, 0.95, Math.PI, { room: "table", color: 0x4cd964, pad: false, y: SEAT_Y });
-
+    // Scorpion gate
     register("scorpion_gate", 8.00, 0.00, -Math.PI / 2, { room: "scorpion", color: 0xb266ff });
 
-    // ✅ Scorpion seat (auto-seat target)
-    // yaw=Math.PI is correct for seat at z=0.95 facing toward table center near z=0.
-    register("scorpion_seat_1", 8.00, 0.95, Math.PI, { room: "scorpion", color: 0x4cd964, pad: false, y: SEAT_Y });
+    // ✅ SCORPION SEAT — moved OUT from table edge to avoid spawning inside table
+    // Old: z=0.95 (often too close / inside table mesh)
+    // New: z=1.65 puts you clearly on chair side of felt
+    register("scorpion_seat_1", 8.00, 1.65, Math.PI, { room: "scorpion", color: 0x4cd964, pad: false });
 
-    // ✅ Safe standing spawn (optional, still useful if you ever want free-roam in scorpion)
-    register(
-      "scorpion_safe_spawn",
-      7.10,
-      1.85,
-      Math.PI,
-      { room: "scorpion", color: 0x00e5ff }
-    );
+    // Optional safe standing pad
+    register("scorpion_safe_spawn", 7.10, 1.85, Math.PI, { room: "scorpion", color: 0x00e5ff });
 
+    // Exit marker
     register("scorpion_exit", 8.00, 0.00, Math.PI, { room: "lobby", color: 0xff6b6b, pad: false });
 
-    // expose
     ctx.spawns = {
       map: spawns,
-
-      get(name) {
-        return spawns[name] || null;
-      },
+      get(name) { return spawns[name] || null; },
 
       apply(name, player, opts = {}) {
         const s = spawns[name];
         if (!s || !player) return false;
 
         const standY = opts.standY ?? 1.65;
-
         player.position.set(s.x, s.y + standY, s.z);
         player.rotation.set(0, s.yaw, 0);
 
-        if (player.userData?.velocity) {
-          player.userData.velocity.set(0, 0, 0);
-        }
+        if (player.userData?.velocity) player.userData.velocity.set(0, 0, 0);
 
         ctx.controls?.resetVelocity?.();
         ctx.controls?.clearMotion?.();

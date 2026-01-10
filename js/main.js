@@ -1,6 +1,7 @@
-// /js/main.js — Scarlett VR Poker — MAIN v10.6 (FULL)
-// Fixes: guaranteed render loop, correct local-floor ref space, movement updates,
-// safer spawn recenter timing, controller visibility.
+// /js/main.js — Scarlett VR Poker — MAIN v10.7 (FULL)
+// FIX: main owns animation loop + calls Controls.update(dt)
+// FIX: renderer.xr reference space type local-floor
+// FIX: recenter uses world.spawns (via SpawnPoints)
 
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
@@ -17,28 +18,29 @@ function log(...a) {
     window.dispatchEvent(new CustomEvent("scarlett-log", { detail: a.map(String).join(" ") }));
   } catch {}
 }
+
 log(`[main] boot ✅ v=${BUILD}`);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x05060a);
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
-camera.position.set(0, 1.6, 2.6);
 
-// Player rig
+// Player rig — in local-floor we keep rig.y = 0 always
 const player = new THREE.Group();
 player.name = "PLAYER_RIG";
 player.position.set(0, 0, 0);
-player.add(camera);
 scene.add(player);
+player.add(camera);
 
+// Renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-
-// IMPORTANT: set reference space type BEFORE entering VR
 renderer.xr.enabled = true;
+
+// IMPORTANT: this is the correct way to prefer local-floor in Three/WebXR
 renderer.xr.setReferenceSpaceType("local-floor");
 
 document.body.appendChild(renderer.domElement);
@@ -49,7 +51,7 @@ btn.style.zIndex = "9999";
 document.body.appendChild(btn);
 log("[main] VRButton appended ✅");
 
-// Ambient (real lights from world)
+// Small ambient (world adds real lighting)
 scene.add(new THREE.AmbientLight(0xffffff, 0.25));
 
 // Controllers
@@ -89,22 +91,11 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// ===== Init =====
+// Clock for dt
+const clock = new THREE.Clock();
+
+// World ctx
 let worldCtx = null;
-let controlsApi = null;
-
-// Small helper: safe spawn after XR starts (timing matters on Quest)
-function spawnSafe(name = "lobby_spawn") {
-  try {
-    // In XR local-floor, keep rig y=0 (headset provides height)
-    if (renderer.xr.isPresenting) player.position.y = 0;
-
-    if (controlsApi?.teleportToSpawn) controlsApi.teleportToSpawn(name);
-    else if (Controls?.teleportToSpawn) Controls.teleportToSpawn(name);
-  } catch (e) {
-    log("⚠️ spawnSafe failed:", e?.message || e);
-  }
-}
 
 (async function boot() {
   worldCtx = await World.init({
@@ -118,8 +109,8 @@ function spawnSafe(name = "lobby_spawn") {
     BUILD,
   });
 
-  // Controls init should return an API (if yours doesn't, we still handle it)
-  controlsApi = Controls.init({
+  // Init controls (no animation loop inside controls)
+  Controls.init({
     THREE,
     scene,
     renderer,
@@ -128,57 +119,51 @@ function spawnSafe(name = "lobby_spawn") {
     controllers: { controller1, controller2 },
     world: worldCtx,
     log,
-  }) || null;
+  });
 
   log("[main] world init ✅");
   log("[main] ready ✅");
+
+  // Main render loop
+  renderer.setAnimationLoop(() => {
+    const dt = Math.min(clock.getDelta(), 0.033);
+
+    // In XR local-floor, keep rig on floor (prevents “giant/standing on something”)
+    if (renderer.xr.isPresenting) player.position.y = 0;
+
+    // Update controls (movement/turn)
+    Controls.update?.(dt);
+
+    // Render
+    renderer.render(scene, camera);
+  });
 })().catch((e) => {
   console.error(e);
   log("❌ [main] boot failed:", e?.message || e);
 });
 
-// ===== XR session hooks =====
+// XR session start/end hooks
 renderer.xr.addEventListener("sessionstart", () => {
   log("[main] XR session start ✅");
 
-  // Prevent “giant” feeling: rig stays at floor; headset provides the height
+  // Always keep rig on floor
   player.position.y = 0;
 
-  // Delay a tick so reference space is stable, then spawn
-  setTimeout(() => spawnSafe("lobby_spawn"), 150);
+  // Recenter to lobby spawn (if available)
+  try {
+    Controls.teleportToSpawn("lobby_spawn");
+  } catch {}
 });
 
 renderer.xr.addEventListener("sessionend", () => {
   log("[main] XR session end ✅");
 });
 
-// HUD bridge
+// UI bridge buttons
 window.addEventListener("scarlett-recenter", () => {
   log("[main] recenter requested");
-  spawnSafe("lobby_spawn");
+  Controls.teleportToSpawn("lobby_spawn");
 });
 window.addEventListener("scarlett-enter-vr", async () => {
   log("[main] enter vr requested");
-  // VRButton handles actual session creation.
-});
-
-// ===== GUARANTEED animation loop =====
-let last = performance.now();
-renderer.setAnimationLoop(() => {
-  const now = performance.now();
-  const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
-
-  // Ensure controls update happens every frame
-  try {
-    if (controlsApi?.update) controlsApi.update(dt);
-    else if (Controls?.update) Controls.update(dt);
-  } catch (e) {
-    // don't spam
-  }
-
-  // Keep rig y locked when in XR
-  if (renderer.xr.isPresenting) player.position.y = 0;
-
-  renderer.render(scene, camera);
 });

@@ -2,224 +2,83 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
-  <title>Scarlett VR Poker — Debug Build</title>
-
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>Scarlett Poker VR — Lobby</title>
   <style>
-    :root{
-      --bg:#05060a;
-      --panel:rgba(11,13,20,.78);
-      --panel2:rgba(11,13,20,.92);
-      --text:#e8ecff;
-      --muted:#98a0c7;
-      --aqua:#7fe7ff;
-      --pink:#ff2d7a;
-      --ok:#4cd964;
-      --warn:#ffcc00;
-      --bad:#ff6b6b;
-      --radius:16px;
-      --shadow: 0 14px 45px rgba(0,0,0,.48);
-      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-    }
+    html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#05060a; }
+    #app { position:fixed; inset:0; }
+    canvas { display:block; width:100%; height:100%; touch-action:none; }
 
-    html, body {
-      margin:0; padding:0; height:100%; width:100%;
-      background:var(--bg);
-      overflow:hidden;
-      color:var(--text);
-      font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      touch-action:none;
-    }
-    canvas{ display:block; }
-
-    /* VR Button must always be visible */
-    #VRButton, button#VRButton{
-      position:fixed !important;
-      right: max(14px, env(safe-area-inset-right)) !important;
-      bottom: max(14px, env(safe-area-inset-bottom)) !important;
-      z-index: 999999 !important;
-      border-radius: 14px !important;
-      font-weight: 800 !important;
-      letter-spacing: .2px !important;
-    }
-
-    /* HUD container */
+    /* HUD */
     #hud {
-      position: fixed;
-      left: max(12px, env(safe-area-inset-left));
-      top:  max(12px, env(safe-area-inset-top));
-      z-index: 999998;
-      width: min(560px, calc(100vw - 24px));
-      max-height: min(70vh, calc(100vh - 24px));
-      background: var(--panel);
-      border: 1px solid rgba(127,231,255,.20);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(6px);
-      overflow: hidden;
-      pointer-events: none; /* HUD won't block VR button / canvas */
-    }
-
-    #hudInner {
-      pointer-events: auto; /* but controls inside can be clicked */
-      padding: 10px 10px 8px 10px;
-      display:flex;
-      flex-direction:column;
-      gap:8px;
-    }
-
-    #hudHeader{
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap:10px;
-    }
-
-    #title{
-      font-weight:900;
-      color: var(--aqua);
-      line-height: 1.1;
-    }
-    #sub{
-      font-size: 12px;
-      color: var(--muted);
-      margin-top: 2px;
-    }
-
-    .pillRow{ display:flex; flex-wrap:wrap; gap:6px; }
-    .pill{
-      font-size: 12px;
-      padding: 4px 8px;
-      border-radius: 999px;
-      border: 1px solid rgba(127,231,255,.20);
-      background: rgba(5,6,10,.35);
-      color: var(--text);
-      white-space: nowrap;
-    }
-    .pill.ok{ border-color: rgba(76,217,100,.35); color: #dfffe7; }
-    .pill.warn{ border-color: rgba(255,204,0,.35); color: #fff6cc; }
-    .pill.bad{ border-color: rgba(255,107,107,.35); color: #ffd7d7; }
-
-    .btnRow{ display:flex; flex-wrap:wrap; gap:6px; }
-    button.dbg {
-      pointer-events:auto;
-      border: 1px solid rgba(127,231,255,.22);
-      background: rgba(11,13,20,.75);
-      color: var(--text);
+      position: fixed; left: 10px; top: 10px;
+      z-index: 10;
+      font: 12px/1.25 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      color: #e7e7e7;
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.12);
+      padding: 10px;
       border-radius: 12px;
-      padding: 7px 10px;
-      font-weight: 800;
-      font-size: 12px;
-      cursor: pointer;
-    }
-    button.dbg:active{ transform: translateY(1px); }
-    button.dbg.pink{ border-color: rgba(255,45,122,.25); }
-    button.dbg.good{ border-color: rgba(76,217,100,.25); }
-
-    #metrics{
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px 10px;
-      font-family: var(--mono);
-      font-size: 12px;
-      color: var(--text);
-    }
-    .kv{ display:flex; justify-content:space-between; gap:10px; }
-    .k{ color: var(--muted); }
-    .v{ color: var(--text); text-align:right; }
-
-    #logWrap{
-      border: 1px solid rgba(127,231,255,.16);
-      background: rgba(5,6,10,.35);
-      border-radius: 14px;
-      overflow:hidden;
-    }
-    #logHeader{
-      padding: 8px 10px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      border-bottom: 1px solid rgba(127,231,255,.12);
-      font-size: 12px;
-      color: var(--muted);
-    }
-    #log{
-      padding: 8px 10px;
-      font-family: var(--mono);
-      font-size: 11px;
-      line-height: 1.35;
-      max-height: 260px;
-      overflow:auto;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-
-    /* Mobile hint */
-    #touchHint{
-      position: fixed;
-      left: max(12px, env(safe-area-inset-left));
-      bottom: max(12px, env(safe-area-inset-bottom));
-      z-index: 999997;
-      background: rgba(11,13,20,.68);
-      border: 1px solid rgba(255,45,122,.18);
-      border-radius: 14px;
-      padding: 10px 12px;
-      font-size: 12px;
-      color: var(--text);
-      box-shadow: var(--shadow);
+      max-width: min(520px, calc(100vw - 20px));
       pointer-events: none;
-      display:none;
-      width: min(420px, calc(100vw - 24px));
+      white-space: pre-wrap;
     }
-    @media (hover: none) and (pointer: coarse) {
-      #touchHint{ display:block; }
+    #hud .title { font-weight: 700; margin-bottom: 6px; }
+
+    /* Mobile controls */
+    #touchControls {
+      position: fixed; inset: 0;
+      z-index: 20;
+      display: none; /* enabled by JS only on mobile non-XR */
+      pointer-events: none;
     }
+    .btn {
+      pointer-events: auto;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+      width: 72px; height: 72px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(0,0,0,0.35);
+      color: #fff;
+      font: 700 14px system-ui;
+      display:flex; align-items:center; justify-content:center;
+      backdrop-filter: blur(6px);
+    }
+    .btn:active { transform: scale(0.98); background: rgba(255,255,255,0.08); }
+
+    /* Left cluster (movement) */
+    #leftCluster { position: fixed; left: 14px; bottom: 14px; display:grid; gap:10px; grid-template-columns: 72px 72px; }
+    /* Right cluster (look + action/menu) */
+    #rightCluster { position: fixed; right: 14px; bottom: 14px; display:grid; gap:10px; grid-template-columns: 72px 72px; }
+
+    .wide { grid-column: span 2; width: 154px; }
   </style>
 </head>
 
 <body>
-  <div id="hud">
-    <div id="hudInner">
-      <div id="hudHeader">
-        <div>
-          <div id="title">Scarlett VR Poker — Debug HUD</div>
-          <div id="sub">
-            Build <span id="build"></span> • <span id="clock"></span>
-          </div>
-        </div>
-        <div class="pillRow" id="caps"></div>
-      </div>
+  <div id="app"></div>
 
-      <div class="btnRow">
-        <button class="dbg good" id="btnHUD">HUD: ON</button>
-        <button class="dbg" id="btnVerbose">Logs: NORMAL</button>
-        <button class="dbg" id="btnCopy">Copy Logs</button>
-        <button class="dbg pink" id="btnClear">Clear</button>
-        <button class="dbg" id="btnRecenter">Recenter</button>
-        <button class="dbg" id="btnMode">Move: FREE</button>
-      </div>
+  <div id="hud"><div class="title">BOOT…</div></div>
 
-      <div id="metrics"></div>
+  <div id="touchControls">
+    <div id="leftCluster">
+      <div class="btn" id="btnFwd">▲</div>
+      <div class="btn" id="btnTurnR">⟳</div>
+      <div class="btn" id="btnLeft">◀</div>
+      <div class="btn" id="btnRight">▶</div>
+      <div class="btn wide" id="btnBack">▼</div>
+    </div>
 
-      <div id="logWrap">
-        <div id="logHeader">
-          <div>Console / Errors</div>
-          <div id="logCount"></div>
-        </div>
-        <div id="log"></div>
-      </div>
+    <div id="rightCluster">
+      <div class="btn" id="btnTurnL">⟲</div>
+      <div class="btn" id="btnJump">JUMP</div>
+      <div class="btn wide" id="btnAction">ACTION</div>
+      <div class="btn wide" id="btnMenu">MENU</div>
     </div>
   </div>
 
-  <div id="touchHint">
-    <b>Android / Mobile controls</b><br>
-    1-finger drag: look • 2-finger drag: move • double-tap: recenter
-  </div>
-
-  <script type="module">
-    const v = Date.now();
-    document.getElementById("build").textContent = `v=${v}`;
-    import(`./js/main.js?v=${v}`);
-  </script>
+  <script type="module" src="./js/main.js"></script>
 </body>
 </html>

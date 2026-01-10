@@ -1,4 +1,3 @@
-<!-- /index.html — Scarlett VR Poker (FULL) — VR Ready + GitHub Pages Safe -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -9,247 +8,306 @@
   <style>
     :root{
       --bg:#05060a;
-      --panel:#0b0d14cc;
-      --panel2:#0b0d14f2;
+      --panel:#0b0d14ee;
       --text:#e8ecff;
       --muted:#98a0c7;
       --aqua:#7fe7ff;
       --pink:#ff2d7a;
-      --shadow: 0 12px 40px rgba(0,0,0,.45);
-      --radius: 18px;
+      --warn:#ffcc00;
+      --bad:#ff6b6b;
+      --ok:#4cd964;
+      --radius:16px;
+      --shadow: 0 14px 50px rgba(0,0,0,.55);
     }
-
     html, body {
-      margin:0;
-      padding:0;
-      height:100%;
+      margin:0; padding:0; height:100%;
       background:var(--bg);
       overflow:hidden;
       font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial;
       color:var(--text);
     }
-
     canvas { display:block; }
 
-    /* Top HUD */
-    #hud {
-      position:fixed;
-      left:0; right:0; top:0;
-      padding:14px 14px 10px 14px;
-      z-index:10;
-      pointer-events:none;
+    /* Debug overlay */
+    #dbg {
+      position:fixed; left:12px; right:12px; top:12px;
+      z-index:9999;
+      pointer-events:auto;
+      max-width: 1040px;
+      margin: 0 auto;
     }
-    #hud .row{
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap:12px;
-    }
-    #brand{
-      pointer-events:none;
-      background:linear-gradient(135deg, rgba(11,13,20,.88), rgba(11,13,20,.55));
-      border:1px solid rgba(127,231,255,.22);
-      border-radius:var(--radius);
-      box-shadow:var(--shadow);
-      padding:10px 12px;
-      min-width: 240px;
-    }
-    #brand .title{
-      font-weight:800;
-      letter-spacing:.4px;
-      line-height:1.05;
-      font-size:16px;
-    }
-    #brand .sub{
-      margin-top:4px;
-      color:var(--muted);
-      font-size:12px;
-      line-height:1.2;
-    }
-    #status{
-      pointer-events:none;
-      text-align:right;
-      background:linear-gradient(135deg, rgba(11,13,20,.88), rgba(11,13,20,.55));
-      border:1px solid rgba(255,45,122,.18);
-      border-radius:var(--radius);
-      box-shadow:var(--shadow);
-      padding:10px 12px;
-      min-width: 220px;
-    }
-    #status .pill{
-      display:inline-block;
-      padding:4px 9px;
-      border-radius:999px;
-      background:rgba(127,231,255,.12);
-      border:1px solid rgba(127,231,255,.25);
-      font-size:12px;
-      color:var(--aqua);
-      margin-bottom:6px;
-    }
-    #status .hint{
-      color:var(--muted);
-      font-size:12px;
-      line-height:1.25;
-    }
-
-    /* Bottom help */
-    #help {
-      position:fixed;
-      left:0; right:0; bottom:0;
-      padding:12px 14px 14px 14px;
-      z-index:10;
-      pointer-events:none;
-    }
-    #help .card{
-      margin:0 auto;
-      max-width:920px;
-      background:linear-gradient(135deg, rgba(11,13,20,.90), rgba(11,13,20,.62));
-      border:1px solid rgba(127,231,255,.16);
-      border-radius:var(--radius);
-      box-shadow:var(--shadow);
-      padding:10px 12px;
-      display:flex;
-      flex-wrap:wrap;
-      gap:10px 14px;
-      align-items:center;
-      justify-content:space-between;
-    }
-    .k{
-      display:flex; gap:10px; align-items:center;
-      color:var(--muted);
-      font-size:12px;
-      line-height:1.2;
-    }
-    .keycap{
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      height:24px;
-      padding:0 10px;
-      border-radius:10px;
-      background:rgba(255,255,255,.06);
-      border:1px solid rgba(255,255,255,.12);
-      color:var(--text);
-      font-weight:700;
-      letter-spacing:.2px;
-      min-width:44px;
-    }
-
-    /* Loader */
-    #loader {
-      position:fixed;
-      inset:0;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      background:radial-gradient(1200px 800px at 50% 15%, rgba(127,231,255,.08), rgba(5,6,10,1));
-      z-index:999;
-    }
-    #loader .panel{
-      width:min(720px, calc(100% - 32px));
-      background:linear-gradient(135deg, rgba(11,13,20,.92), rgba(11,13,20,.72));
-      border:1px solid rgba(127,231,255,.22);
-      border-radius:22px;
-      box-shadow:var(--shadow);
-      padding:18px 16px;
-    }
-    #loader h1{
-      margin:0 0 6px 0;
-      font-size:18px;
-      letter-spacing:.3px;
-    }
-    #loader p{
-      margin:0;
-      color:var(--muted);
-      font-size:13px;
-      line-height:1.35;
-    }
-    #loader .bar{
-      margin-top:12px;
-      height:10px;
-      border-radius:999px;
-      background:rgba(255,255,255,.06);
-      border:1px solid rgba(255,255,255,.10);
+    #dbg .card{
+      background:linear-gradient(135deg, rgba(11,13,20,.95), rgba(11,13,20,.75));
+      border:1px solid rgba(127,231,255,.20);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
       overflow:hidden;
     }
-    #loader .bar > i{
-      display:block;
-      height:100%;
-      width:40%;
-      background:linear-gradient(90deg, rgba(127,231,255,.25), rgba(255,45,122,.25), rgba(127,231,255,.25));
-      animation: load 1.2s linear infinite;
+    #dbg .top{
+      display:flex; gap:10px; align-items:center; justify-content:space-between;
+      padding:10px 12px;
+      border-bottom:1px solid rgba(255,255,255,.08);
     }
-    @keyframes load {
-      0% { transform:translateX(-60%); }
-      100% { transform:translateX(260%); }
+    #dbg .title{
+      font-weight:800;
+      letter-spacing:.2px;
+      display:flex;
+      gap:10px;
+      align-items:center;
+      flex-wrap:wrap;
     }
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      font-size:12px;
+      padding:5px 9px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.06);
+      color:var(--muted);
+    }
+    .dot{ width:8px; height:8px; border-radius:99px; background:var(--warn); display:inline-block; }
+    .dot.ok{ background: var(--ok); }
+    .dot.bad{ background: var(--bad); }
 
-    /* Make VRButton sit nicely */
+    #dbg .btns{ display:flex; gap:8px; flex-wrap:wrap; }
+    button{
+      appearance:none;
+      border:none;
+      border-radius:12px;
+      padding:8px 10px;
+      font-weight:700;
+      cursor:pointer;
+      background:rgba(127,231,255,.12);
+      border:1px solid rgba(127,231,255,.22);
+      color:var(--aqua);
+    }
+    button.alt{
+      background:rgba(255,45,122,.10);
+      border:1px solid rgba(255,45,122,.22);
+      color:var(--pink);
+    }
+    button.dim{
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.10);
+      color:var(--text);
+      font-weight:600;
+    }
+    button:active{ transform: translateY(1px); }
+
+    #dbg .body{
+      padding:10px 12px 12px 12px;
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:10px;
+    }
+    #env{
+      display:flex; flex-wrap:wrap; gap:8px;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.3;
+    }
+    #log{
+      height: 210px;
+      overflow:auto;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(0,0,0,.35);
+      padding:10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size:12px;
+      white-space:pre-wrap;
+      word-break:break-word;
+      color:#e8ecff;
+    }
+    .kv{
+      display:inline-flex; gap:6px; align-items:center;
+      padding:5px 9px;
+      border-radius:999px;
+      background:rgba(255,255,255,.05);
+      border:1px solid rgba(255,255,255,.08);
+    }
+    .k{ color:var(--muted); }
+    .v{ color:var(--text); }
+
+    /* VRButton positioning */
     #VRButton, .vr-button {
       position: fixed !important;
-      right: 14px !important;
-      bottom: 86px !important;
-      z-index: 50 !important;
+      right: 12px !important;
+      bottom: 12px !important;
+      z-index: 9998 !important;
       border-radius: 14px !important;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial !important;
       box-shadow: var(--shadow) !important;
+    }
+
+    /* Small footer hint */
+    #hint {
+      position:fixed; left:12px; right:12px; bottom:12px;
+      z-index:10;
+      max-width:1040px;
+      margin: 0 auto;
+      pointer-events:none;
+      color:rgba(232,236,255,.75);
+      font-size:12px;
+      text-shadow: 0 2px 18px rgba(0,0,0,.6);
     }
   </style>
 </head>
 
 <body>
-  <!-- Lightweight UI overlay (doesn't interfere with XR) -->
-  <div id="hud" aria-hidden="true">
-    <div class="row">
-      <div id="brand">
-        <div class="title">SCARLETT VR POKER</div>
-        <div class="sub">GitHub Pages safe • Quest Browser ready</div>
+  <div id="dbg">
+    <div class="card">
+      <div class="top">
+        <div class="title">
+          <span>SCARLETT VR POKER — DEBUG BOOT</span>
+          <span class="pill"><span id="stDot" class="dot"></span><span id="stText">Booting…</span></span>
+          <span class="pill"><span class="k">v</span><span id="ver" class="v">?</span></span>
+        </div>
+        <div class="btns">
+          <button class="dim" id="btnToggle">Hide</button>
+          <button class="dim" id="btnClear">Clear</button>
+          <button class="alt" id="btnReload">Reload + CacheBust</button>
+        </div>
       </div>
 
-      <div id="status">
-        <div class="pill" id="buildPill">BOOTING…</div>
-        <div class="hint" id="hintLine">
-          If you don’t see <b>Enter VR</b>, open Quest Browser DevTools Console for errors.
+      <div class="body" id="dbgBody">
+        <div id="env"></div>
+        <div id="log"></div>
+
+        <div style="color:var(--muted); font-size:12px; line-height:1.35;">
+          <b style="color:var(--text);">If you have NO VR button:</b> it means <b>main.js didn’t load</b> or <b>VR is not supported on this browser</b>.
+          This panel will show the exact error (usually a file path/case issue like <code>VRButton.js</code> not found).
         </div>
       </div>
     </div>
   </div>
 
-  <div id="help" aria-hidden="true">
-    <div class="card">
-      <div class="k"><span class="keycap">Left Stick</span> Move</div>
-      <div class="k"><span class="keycap">Right Stick</span> Snap Turn</div>
-      <div class="k"><span class="keycap">Trigger</span> Click</div>
-      <div class="k"><span class="keycap">Grip</span> Hold to Teleport Aim</div>
-      <div class="k"><span class="keycap">Grip + Trigger</span> Teleport</div>
-    </div>
-  </div>
-
-  <!-- Loader -->
-  <div id="loader" role="status" aria-live="polite">
-    <div class="panel">
-      <h1>Loading Scarlett VR Poker…</h1>
-      <p>
-        Tip: If something looks “wrong lobby / no lasers”, it usually means a module path/case error.
-        Use Quest Browser DevTools Console and paste the first red error line.
-      </p>
-      <div class="bar"><i></i></div>
-    </div>
+  <div id="hint">
+    Quest: open in Oculus/Meta Quest Browser. Android Chrome often has no VR WebXR button.
   </div>
 
   <script>
-    // Simple boot indicator + cache bust help
+    // ===== Debug logger that works even if modules fail =====
     (function(){
-      const pill = document.getElementById("buildPill");
-      const loader = document.getElementById("loader");
-      const v = new URLSearchParams(location.search).get("v") || "no-v";
-      pill.textContent = "BUILD: " + v;
-      // Hide loader after a bit (main.js will still show fatal overlay if needed)
-      setTimeout(() => { loader.style.display = "none"; }, 1200);
+      const logEl = document.getElementById("log");
+      const envEl = document.getElementById("env");
+      const stDot = document.getElementById("stDot");
+      const stText = document.getElementById("stText");
+      const verEl = document.getElementById("ver");
+      const btnToggle = document.getElementById("btnToggle");
+      const btnClear = document.getElementById("btnClear");
+      const btnReload = document.getElementById("btnReload");
+      const dbgBody = document.getElementById("dbgBody");
+
+      const params = new URLSearchParams(location.search);
+      const v = params.get("v") || String(Date.now());
+      verEl.textContent = v;
+
+      function setStatus(kind, text){
+        stText.textContent = text;
+        stDot.classList.remove("ok","bad");
+        if (kind === "ok") stDot.classList.add("ok");
+        if (kind === "bad") stDot.classList.add("bad");
+      }
+
+      function append(line){
+        const t = new Date().toLocaleTimeString();
+        logEl.textContent += `[${t}] ${line}\n`;
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      // capture console
+      const _log = console.log, _warn = console.warn, _err = console.error;
+      console.log = (...a)=>{ _log(...a); append("LOG  " + a.map(safe).join(" ")); };
+      console.warn = (...a)=>{ _warn(...a); append("WARN " + a.map(safe).join(" ")); };
+      console.error = (...a)=>{ _err(...a); append("ERR  " + a.map(safe).join(" ")); };
+
+      function safe(x){
+        try{
+          if (x instanceof Error) return (x.stack || x.message || String(x));
+          if (typeof x === "object") return JSON.stringify(x);
+          return String(x);
+        }catch(e){ return String(x); }
+      }
+
+      // global error handlers
+      window.addEventListener("error", (e) => {
+        setStatus("bad", "Runtime error");
+        console.error("window.error:", e.message, e.filename, e.lineno+":"+e.colno);
+      });
+      window.addEventListener("unhandledrejection", (e) => {
+        setStatus("bad", "Promise rejection");
+        console.error("unhandledrejection:", e.reason);
+      });
+
+      // UI buttons
+      btnToggle.onclick = () => {
+        const hidden = dbgBody.style.display === "none";
+        dbgBody.style.display = hidden ? "grid" : "none";
+        btnToggle.textContent = hidden ? "Hide" : "Show";
+      };
+      btnClear.onclick = () => { logEl.textContent = ""; };
+      btnReload.onclick = () => {
+        const u = new URL(location.href);
+        u.searchParams.set("v", String(Date.now()));
+        location.href = u.toString();
+      };
+
+      // env info
+      const isSecure = window.isSecureContext;
+      const hasXR = !!navigator.xr;
+      const ua = navigator.userAgent;
+      envEl.innerHTML = [
+        kv("secureContext", isSecure ? "YES" : "NO (VR requires https/secure)"),
+        kv("navigator.xr", hasXR ? "YES" : "NO (no WebXR here)"),
+        kv("platform", navigator.platform || "n/a"),
+        kv("userAgent", ua.slice(0, 90) + (ua.length>90 ? "…" : "")),
+        kv("href", location.href),
+      ].join("");
+
+      function kv(k, v){
+        return `<span class="kv"><span class="k">${escapeHtml(k)}:</span><span class="v">${escapeHtml(String(v))}</span></span>`;
+      }
+      function escapeHtml(s){
+        return s.replace(/[&<>"']/g, (m)=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[m]));
+      }
+
+      console.log("BOOT", { v, secureContext:isSecure, xr:hasXR });
+
+      // ===== Robust module boot: dynamic import with explicit error display =====
+      setStatus("warn", "Loading main.js…");
+      const mainPath = "./js/main.js?v=" + encodeURIComponent(v);
+
+      import(mainPath)
+        .then(() => {
+          setStatus("ok", "main.js loaded ✅");
+          console.log("main.js import ✅", mainPath);
+
+          // If VRButton still missing after a moment, warn loudly
+          setTimeout(() => {
+            const hasVRBtn = !!document.getElementById("VRButton") || !!document.querySelector(".vr-button");
+            if (!hasVRBtn) {
+              console.warn("VRButton not found in DOM.");
+              if (!navigator.xr) {
+                console.warn("navigator.xr is missing — this browser likely cannot show a VR button (common on Android Chrome).");
+              } else {
+                console.warn("navigator.xr exists but VRButton isn't present — main.js may not be appending it (or VRButton.js path is wrong).");
+              }
+              setStatus("bad", "No VR button");
+            }
+          }, 1200);
+        })
+        .catch((err) => {
+          setStatus("bad", "main.js failed to load");
+          console.error("FAILED TO IMPORT", mainPath, err);
+          console.error("Most common causes:");
+          console.error("1) Wrong file path: /js/main.js not found");
+          console.error("2) Case mismatch: VRButton.js vs vrbutton.js (GitHub is case-sensitive)");
+          console.error("3) three.js wrapper missing: /js/three.js not found");
+        });
     })();
   </script>
-
-  <!-- IMPORTANT: module load (cache bust with ?v= ) -->
-  <script type="module" src="./js/main.js?v=1"></script>
 </body>
-</html>
+  </html>

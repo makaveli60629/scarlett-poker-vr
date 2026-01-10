@@ -15,6 +15,9 @@ export const AndroidControls = {
   pitch: 0,
   speed: 2.0,
 
+  // ✅ fixed eye height for mobile preview
+  EYE_Y: 1.62,
+
   ui: null,
 
   init({ renderer, rig, camera, onTeleport, getBounds, getFloorY }) {
@@ -29,6 +32,11 @@ export const AndroidControls = {
 
     if (!this.enabled) return;
 
+    // ✅ FORCE mobile preview posture: rig at floor, camera at eye height
+    const floor = this.getFloorY?.() ?? 0;
+    this.rig.position.y = floor;
+    this.camera.position.y = this.EYE_Y;
+
     this._buildUI();
     this._bindTouch();
   },
@@ -40,7 +48,6 @@ export const AndroidControls = {
     ui.style.pointerEvents = "none";
     ui.style.zIndex = "9";
 
-    // left pad (look)
     const left = document.createElement("div");
     left.style.position = "absolute";
     left.style.left = "18px";
@@ -53,7 +60,6 @@ export const AndroidControls = {
     left.style.pointerEvents = "auto";
     left.dataset.pad = "look";
 
-    // right pad (move)
     const right = document.createElement("div");
     right.style.position = "absolute";
     right.style.right = "18px";
@@ -66,7 +72,6 @@ export const AndroidControls = {
     right.style.pointerEvents = "auto";
     right.dataset.pad = "move";
 
-    // teleport button
     const tp = document.createElement("button");
     tp.textContent = "TELEPORT";
     tp.style.position = "absolute";
@@ -80,13 +85,17 @@ export const AndroidControls = {
     tp.style.pointerEvents = "auto";
 
     tp.addEventListener("click", () => {
-      // teleport forward a few meters (dev convenience)
       const fwd = new THREE.Vector3();
       this.camera.getWorldDirection(fwd);
       fwd.y = 0; fwd.normalize();
+
       const dest = this.rig.position.clone().addScaledVector(fwd, 3.0);
       dest.y = this.getFloorY?.() ?? 0;
       this.onTeleport?.(dest);
+
+      // ✅ keep the camera at eye height after teleport
+      this.rig.position.y = dest.y;
+      this.camera.position.y = this.EYE_Y;
     });
 
     ui.appendChild(left);
@@ -162,6 +171,11 @@ export const AndroidControls = {
   update(dt) {
     if (!this.enabled) return;
 
+    // ✅ HARD CLAMP HEIGHT every frame (this fixes your “very very high” problem)
+    const floor = this.getFloorY?.() ?? 0;
+    this.rig.position.y = floor;
+    this.camera.position.y = this.EYE_Y;
+
     // Look
     if (this.look.active) {
       const yawSpeed = 0.0022;
@@ -193,6 +207,7 @@ export const AndroidControls = {
         next.x = THREE.MathUtils.clamp(next.x, b.min.x, b.max.x);
         next.z = THREE.MathUtils.clamp(next.z, b.min.z, b.max.z);
       }
+
       this.rig.position.x = next.x;
       this.rig.position.z = next.z;
     }

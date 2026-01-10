@@ -1,34 +1,35 @@
-// /js/main.js — Scarlett VR Poker — Boot Core 1.0 (Permanent)
-// Goals:
-// ✅ ONE boot entry point
-// ✅ VR Button always appears (3-level fallback)
-// ✅ World always renders (fallback bright world)
-// ✅ Loud diagnostics + on-screen logs (Quest/Android friendly)
-// ✅ Safe optional module loading (never hard-fails)
+// /js/main.js — Scarlett Hybrid 1.0 (PERMANENT BOOT CORE)
+// ✅ Single entry point
+// ✅ VRButton always appears (local VRButton.js -> three/addons -> manual fallback)
+// ✅ Always renders (world.js or fallback world)
+// ✅ Loads existing modules safely (never hard-crash)
 
 (async function boot() {
-  // ---------- Double boot guard ----------
+  // ---------------- Double-boot guard ----------------
   if (window.__SCARLETT_BOOTED__) {
     console.warn("Scarlett already booted — preventing double init");
     throw new Error("Double boot prevented");
   }
   window.__SCARLETT_BOOTED__ = true;
 
-  // ---------- HUD refs ----------
+  // ---------------- HUD + logger ----------------
   const ui = {
     grid: document.getElementById("scarlettGrid"),
     logBox: document.getElementById("scarlettLog"),
     capXR: document.getElementById("capXR"),
     capImm: document.getElementById("capImm"),
     btnMenu: document.getElementById("btnMenu"),
-    btnReboot: document.getElementById("btnReboot"),
+    btnLobby: document.getElementById("btnRoomLobby"),
+    btnStore: document.getElementById("btnRoomStore"),
+    btnScorpion: document.getElementById("btnRoomScorpion"),
+    btnSoftReboot: document.getElementById("btnSoftReboot"),
     btnCopy: document.getElementById("btnCopyLog"),
     btnClear: document.getElementById("btnClearLog"),
   };
 
   const LOG = {
     lines: [],
-    max: 320,
+    max: 360,
     push(kind, msg) {
       const time = new Date().toLocaleTimeString();
       const line = `[${time}] ${kind.toUpperCase()}: ${msg}`;
@@ -47,7 +48,8 @@
     }
   };
 
-  window.SCARLETT_LOG = LOG;
+  window.SCARLETT = window.SCARLETT || {};
+  window.SCARLETT.LOG = LOG;
 
   addEventListener("error", (e) => LOG.push("error", `${e.message} @ ${e.filename}:${e.lineno}:${e.colno}`));
   addEventListener("unhandledrejection", (e) => {
@@ -77,11 +79,14 @@
     return { xr, immersive };
   }
 
-  // ---------- Load THREE (prefer your local wrapper if it exists) ----------
+  ui.btnClear?.addEventListener("click", () => LOG.clear());
+  ui.btnCopy?.addEventListener("click", () => LOG.copy());
+  ui.btnSoftReboot?.addEventListener("click", () => location.reload());
+
+  // ---------------- Load THREE (prefer your local /js/three.js) ----------------
   const THREE = await (async () => {
     try {
-      const mod = await import("./three.js"); // your repo shows /js/three.js exists
-      // wrapper might export default or named exports
+      const mod = await import("./three.js");
       return mod.default || mod.THREE || mod;
     } catch {
       const mod = await import("three");
@@ -89,23 +94,23 @@
     }
   })();
 
-  // ---------- Safe import helper ----------
-  async function safeImport(url, name = url) {
+  // ---------------- Safe import helper ----------------
+  async function safeImport(url, label = url) {
     try {
       const mod = await import(url);
-      LOG.push("log", `import ok: ${name}`);
+      LOG.push("log", `import ok: ${label}`);
       return mod;
     } catch (e) {
-      LOG.push("warn", `import fail: ${name} — ${e?.message || e}`);
+      LOG.push("warn", `import fail: ${label} — ${e?.message || e}`);
       return null;
     }
   }
 
-  // ---------- Create renderer/scene/camera ----------
+  // ---------------- Renderer / scene / camera ----------------
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
 
-  const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 500);
+  const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 800);
   camera.position.set(0, 1.65, 2.8);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -119,21 +124,20 @@
     renderer.setSize(innerWidth, innerHeight);
   });
 
-  // ---------- VR Button (3-level fallback) ----------
+  // ---------------- VRButton (3-level fallback) ----------------
   async function attachVRButton() {
-    // A) Your local /js/VRButton.js first
-    const localVR = await safeImport("./VRButton.js", "./VRButton.js");
-    if (localVR) {
+    // A) Your local /js/VRButton.js
+    const local = await safeImport("./VRButton.js", "./VRButton.js");
+    if (local) {
       try {
-        // common patterns
-        if (typeof localVR.createVRButton === "function") {
-          const btn = localVR.createVRButton(renderer);
+        if (typeof local.createVRButton === "function") {
+          const btn = local.createVRButton(renderer);
           if (btn) btn.id = "VRButton";
           LOG.push("log", "VRButton ✅ via local createVRButton()");
           return true;
         }
-        if (localVR.VRButton?.createButton) {
-          const btn = localVR.VRButton.createButton(renderer);
+        if (local.VRButton?.createButton) {
+          const btn = local.VRButton.createButton(renderer);
           btn.id = "VRButton";
           document.body.appendChild(btn);
           LOG.push("log", "VRButton ✅ via local VRButton.createButton()");
@@ -144,30 +148,28 @@
       }
     }
 
-    // B) Three addons VRButton
-    const threeVR = await safeImport("three/addons/webxr/VRButton.js", "three/addons/webxr/VRButton.js")
-      || await safeImport("https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js", "unpkg VRButton.js");
+    // B) three/addons
+    const threeVR =
+      await safeImport("three/addons/webxr/VRButton.js", "three/addons/webxr/VRButton.js") ||
+      await safeImport("https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js", "unpkg VRButton.js");
 
     if (threeVR?.VRButton?.createButton) {
-      try {
-        const btn = threeVR.VRButton.createButton(renderer, {
-          optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"]
-        });
-        btn.id = "VRButton";
-        document.body.appendChild(btn);
-        LOG.push("log", "VRButton ✅ via three/addons");
-        return true;
-      } catch (e) {
-        LOG.push("warn", `Three VRButton failed: ${e?.message || e}`);
-      }
+      const btn = threeVR.VRButton.createButton(renderer, {
+        optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"]
+      });
+      btn.id = "VRButton";
+      document.body.appendChild(btn);
+      LOG.push("log", "VRButton ✅ via three/addons");
+      return true;
     }
 
-    // C) Manual fallback button
+    // C) Manual fallback
     if (navigator.xr) {
       const btn = document.createElement("button");
       btn.id = "VRButton";
       btn.textContent = "ENTER VR (Fallback)";
-      btn.style.cssText = "position:fixed;right:14px;bottom:14px;z-index:999999;padding:12px 14px;border-radius:14px;font-weight:900;";
+      btn.style.cssText =
+        "position:fixed;right:14px;bottom:14px;z-index:999999;padding:12px 14px;border-radius:14px;font-weight:900;";
       btn.onclick = async () => {
         try {
           const session = await navigator.xr.requestSession("immersive-vr", {
@@ -180,16 +182,16 @@
         }
       };
       document.body.appendChild(btn);
-      LOG.push("warn", "Using fallback VR button.");
+      LOG.push("warn", "Using manual fallback VR button.");
       return true;
     }
 
-    LOG.push("error", "No navigator.xr — cannot enter VR on this browser/device.");
+    LOG.push("error", "No navigator.xr — cannot enter VR on this browser.");
     return false;
   }
 
-  // ---------- Always-visible fallback world ----------
-  function buildBrightFallbackWorld() {
+  // ---------------- Minimal always-visible fallback world ----------------
+  function buildFallbackWorld() {
     scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x080812, 1.05));
 
     const dir = new THREE.DirectionalLight(0xffffff, 1.15);
@@ -197,31 +199,24 @@
     scene.add(dir);
 
     const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(60, 60),
+      new THREE.PlaneGeometry(80, 80),
       new THREE.MeshStandardMaterial({ color: 0x11131a, roughness: 0.95 })
     );
     floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
     scene.add(floor);
 
-    const grid = new THREE.GridHelper(60, 60, 0x00ffff, 0x223344);
+    const grid = new THREE.GridHelper(80, 80, 0x00ffff, 0x223344);
     grid.material.transparent = true;
     grid.material.opacity = 0.35;
     grid.position.y = 0.01;
     scene.add(grid);
 
-    const pillar = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.25, 0.25, 2.2, 20),
-      new THREE.MeshStandardMaterial({
-        color: 0x0a0b12,
-        roughness: 0.4,
-        metalness: 0.2,
-        emissive: new THREE.Color(0x00ffff),
-        emissiveIntensity: 1.25
-      })
+    const hub = new THREE.Mesh(
+      new THREE.CylinderGeometry(6.0, 6.0, 0.20, 64),
+      new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.5, metalness: 0.15 })
     );
-    pillar.position.set(0, 1.1, -2.2);
-    scene.add(pillar);
+    hub.position.set(0, 0.10, 0);
+    scene.add(hub);
 
     const table = new THREE.Mesh(
       new THREE.CylinderGeometry(1.2, 1.2, 0.12, 40),
@@ -230,159 +225,83 @@
     table.position.set(0, 0.78, -1.2);
     scene.add(table);
 
-    const marker = new THREE.Mesh(
-      new THREE.SphereGeometry(0.08, 18, 18),
-      new THREE.MeshBasicMaterial({ color: 0xff2d7a })
-    );
-    marker.position.set(0, 1.55, -0.6);
-    scene.add(marker);
-
-    // Dealer anchor for dealing systems (many of your modules look for this)
     const dealer = new THREE.Object3D();
     dealer.name = "DealerAnchor";
     dealer.position.set(0, 0.92, -0.35);
     scene.add(dealer);
 
-    LOG.push("warn", "Fallback world built ✅ (so you are never blind).");
+    LOG.push("warn", "Fallback world built ✅ (you are never blind).");
   }
 
-  // ---------- Load your real world.js (safe) ----------
-  let worldStatus = "fallback";
-  async function loadWorld() {
-    const mod = await safeImport("./world.js", "./world.js");
-    if (!mod) {
-      buildBrightFallbackWorld();
-      return;
-    }
+  // ---------------- Load unified world (below) ----------------
+  let worldStatus = "none";
+  const worldMod = await safeImport("./world.js", "./world.js");
+  if (!worldMod) {
+    buildFallbackWorld();
+    worldStatus = "fallback (world.js missing)";
+  }
 
+  // ---------------- Create runtime ctx ----------------
+  const ctx = {
+    THREE, scene, camera, renderer, LOG,
+    BUILD: Date.now(),
+    systems: {},
+    world: null,
+    room: "lobby",
+    mode: "lobby",
+  };
+
+  // ---------------- Init world ----------------
+  if (worldMod?.World?.init) {
     try {
-      // patterns we support:
-      // 1) export const World = { init(ctx) }
-      // 2) export function createWorld(scene)
-      // 3) export default { init }
-      const ctx = { THREE, scene, renderer, camera, log: (m) => LOG.push("log", m), LOG };
-
-      if (mod.World?.init) {
-        await mod.World.init(ctx);
-        worldStatus = "World.init(ctx)";
-        LOG.push("log", "World.init ✅");
-        return;
-      }
-
-      if (typeof mod.createWorld === "function") {
-        mod.createWorld(scene);
-        worldStatus = "createWorld(scene)";
-        LOG.push("log", "createWorld ✅");
-        return;
-      }
-
-      if (mod.default?.init) {
-        await mod.default.init(ctx);
-        worldStatus = "default.init(ctx)";
-        LOG.push("log", "world default.init ✅");
-        return;
-      }
-
-      // If we got here, the world module loaded but didn’t match expected exports.
-      LOG.push("warn", "world.js loaded but no known init/createWorld export found.");
-      buildBrightFallbackWorld();
+      await worldMod.World.init(ctx);
+      worldStatus = "World.init ✅";
+      ctx.world = worldMod.World;
     } catch (e) {
-      LOG.push("error", `world init failed: ${e?.message || e}`);
-      buildBrightFallbackWorld();
+      LOG.push("error", `World.init failed: ${e?.message || e}`);
+      buildFallbackWorld();
+      worldStatus = "fallback (World.init crash)";
     }
+  } else {
+    buildFallbackWorld();
+    worldStatus = "fallback (no World.init export)";
   }
 
-  // ---------- Controls: load your movement/phone modules if they exist ----------
-  const Systems = [];
-  function addSystem(name, sys) {
-    if (!sys) return;
-    Systems.push({ name, sys });
-    LOG.push("log", `system added: ${name}`);
-  }
+  // ---------------- Hands objects always present (harmless) ----------------
+  try {
+    const left = renderer.xr.getHand(0); left.name = "XRHandLeft";
+    const right = renderer.xr.getHand(1); right.name = "XRHandRight";
+    scene.add(left, right);
+    ctx.hands = { left, right };
+  } catch {}
 
-  async function initOptionalSystems() {
-    // These are in your repo list. We load them if they export init/update.
-    const candidates = [
-      ["diagnostics", "./diagnostics.js"],
-      ["dev_mode", "./dev_mode.js"],
-      ["input_hub", "./input_hub.js"],
-      ["input", "./input.js"],
-      ["hands", "./hands.js"],
-      ["interactions", "./interactions.js"],
-      ["vr_locomotion", "./vr_locomotion.js"],
-      ["xr_locomotion", "./xr_locomotion.js"],
-      ["android_controls", "./android_controls.js"],
-      ["mobile_touch", "./mobile_touch.js"],
-      ["teleport", "./teleport.js"],
-      ["teleport_machine", "./teleport_machine.js"],
-      ["vr_ui", "./vr_ui.js"],
-      ["ui", "./ui.js"],
-      ["poker_sim", "./poker_sim.js"],
-    ];
-
-    const ctx = { THREE, scene, renderer, camera, LOG, log: (m)=>LOG.push("log", m) };
-
-    for (const [name, url] of candidates) {
-      const mod = await safeImport(url, url);
-      if (!mod) continue;
-
-      const sys =
-        mod.default ||
-        mod[name] ||
-        mod.System ||
-        mod[name.replace(/[-_].*$/,"")] ||
-        mod;
-
-      // If it has init/update, register it
-      if (sys?.init || sys?.update) {
-        try {
-          if (sys.init) await sys.init(ctx);
-          addSystem(name, sys);
-        } catch (e) {
-          LOG.push("warn", `system init failed (${name}): ${e?.message || e}`);
-        }
-      }
-    }
-  }
-
-  // ---------- Menu toggle ----------
+  // ---------------- Simple debug controls ----------------
   function toggleMenu() {
-    // If you have your own HUD/UI system, it can override this later.
-    // For now, we simply log.
-    LOG.push("log", "Menu toggle (M). If you have ui.js/vr_ui.js it should hook here.");
+    // If your ui.js already manages menu, it can override this later.
+    LOG.push("log", "Menu toggle pressed (M).");
   }
 
   ui.btnMenu?.addEventListener("click", toggleMenu);
   addEventListener("keydown", (e) => { if (e.key.toLowerCase() === "m") toggleMenu(); });
 
-  ui.btnClear?.addEventListener("click", () => LOG.clear());
-  ui.btnCopy?.addEventListener("click", () => LOG.copy());
-  ui.btnReboot?.addEventListener("click", () => {
-    LOG.push("warn", "Soft reboot requested. Reloading page…");
-    location.reload();
-  });
+  function setRoom(room) {
+    ctx.world?.setRoom?.(ctx, room);
+    ctx.room = room;
+    ctx.mode = room;
+    LOG.push("log", `Room => ${room}`);
+  }
+  ui.btnLobby?.addEventListener("click", () => setRoom("lobby"));
+  ui.btnStore?.addEventListener("click", () => setRoom("store"));
+  ui.btnScorpion?.addEventListener("click", () => setRoom("scorpion"));
 
-  // ---------- Boot sequence ----------
-  const caps = await setCaps();
-  LOG.push("log", `Boot start. XR=${caps.xr} immersive-vr=${caps.immersive}`);
-
+  // ---------------- XR session events ----------------
+  await setCaps();
   await attachVRButton();
-  await loadWorld();
-  await initOptionalSystems();
-
-  // Add XR hands objects (even if modules handle hands, this is harmless)
-  try {
-    const leftHand = renderer.xr.getHand(0);
-    const rightHand = renderer.xr.getHand(1);
-    leftHand.name = "XRHandLeft";
-    rightHand.name = "XRHandRight";
-    scene.add(leftHand, rightHand);
-  } catch {}
 
   renderer.xr.addEventListener("sessionstart", () => LOG.push("log", "XR sessionstart ✅"));
   renderer.xr.addEventListener("sessionend", () => LOG.push("warn", "XR sessionend"));
 
-  // ---------- Render loop ----------
+  // ---------------- Main loop ----------------
   let last = performance.now();
   let fpsAcc = 0, fpsCount = 0, fps = 0;
 
@@ -394,21 +313,19 @@
     fpsAcc += dt; fpsCount++;
     if (fpsAcc >= 0.5) { fps = Math.round(fpsCount / fpsAcc); fpsAcc = 0; fpsCount = 0; }
 
-    // Update optional systems
-    for (const s of Systems) {
-      try { s.sys.update?.(dt, { THREE, scene, renderer, camera, LOG }); } catch {}
-    }
+    try { ctx.world?.update?.(ctx, dt); } catch {}
 
     setMetrics([
       ["FPS", `${fps}`],
       ["XR Presenting", renderer.xr.isPresenting ? "YES" : "NO"],
       ["VRButton", document.getElementById("VRButton") ? "YES" : "NO"],
       ["World", worldStatus],
-      ["Systems", `${Systems.length}`],
+      ["Room", ctx.room],
+      ["Systems", Object.keys(ctx.systems || {}).length.toString()],
     ]);
 
     renderer.render(scene, camera);
   });
 
-  LOG.push("log", "Boot complete ✅");
+  LOG.push("log", "Hybrid boot complete ✅");
 })();

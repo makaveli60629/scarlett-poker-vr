@@ -1,34 +1,75 @@
-// /js/room_manager.js — decides which room to run
-// Default: Scorpion (spawn seated)
-// You can override via URL: ?room=lobby
-
-import { safeImport } from "./safe_import.js";
+// /js/room_manager.js — Room Manager (FULL)
+// - Manages mode: lobby | table | scorpion | spectate
+// - Provides: stand(), sit(seatIndex), spectate(), gotoScorpion(), gotoLobby(), recenter()
 
 export const RoomManager = {
-  getRoom() {
-    const url = new URL(location.href);
-    const r = (url.searchParams.get("room") || "").toLowerCase();
+  init(ctx) {
+    const { THREE, world, player, log } = ctx;
+    const ui = (m) => (log ? log(m) : console.log(m));
 
-    // Allow forcing lobby for testing:
-    if (r === "lobby" || r === "vip") return r;
+    world.mode = world.mode || "lobby";
+    world.seatedIndex = world.seatedIndex ?? -1;
 
-    // Default = scorpion
-    return "scorpion";
-  },
+    const spawnLobby = new THREE.Vector3(0, 1.6, 7.0);
+    const spawnSpectate = new THREE.Vector3(0, 1.6, 4.2);
 
-  async boot() {
-    const room = this.getRoom();
-    window.__SCARLETT_ROOM__ = room;
-
-    // Load room config (sets spawn rules etc)
-    if (room === "scorpion") {
-      await safeImport("./js/scorpion_room.js");
-    } else {
-      // If you later add vip_room.js etc, you can load here.
-      // For now, lobby just uses the same main, different spawn mode.
+    function setPosYaw(pos, yaw = Math.PI) {
+      player.position.copy(pos);
+      player.rotation.set(0, yaw, 0);
     }
 
-    // Load main last
-    await safeImport("./js/main.js");
+    world.gotoLobby = () => {
+      world.mode = "lobby";
+      world.seatedIndex = -1;
+      setPosYaw(spawnLobby, Math.PI);
+      ui("[rm] lobby");
+    };
+
+    world.spectate = () => {
+      world.mode = "spectate";
+      world.seatedIndex = -1;
+      setPosYaw(spawnSpectate, Math.PI);
+      ui("[rm] spectate");
+    };
+
+    world.gotoScorpion = () => {
+      world.mode = "scorpion";
+      world.seatedIndex = -1;
+      const p = world.points?.scorpion ? world.points.scorpion.clone().add(new THREE.Vector3(0, 1.6, 2.5)) : new THREE.Vector3(7, 1.6, 2.5);
+      setPosYaw(p, Math.PI);
+      ui("[rm] scorpion");
+    };
+
+    world.sit = (seatIndex = 0) => {
+      world.mode = "table";
+      world.seatedIndex = seatIndex;
+      const s = world.seats?.[seatIndex];
+      if (s?.position) {
+        setPosYaw(s.position.clone().add(new THREE.Vector3(0, 0, 0)), s.yaw ?? Math.PI);
+      } else {
+        setPosYaw(new THREE.Vector3(0, 1.6, 2.6), Math.PI);
+      }
+      ui("[rm] sit seat=" + seatIndex);
+    };
+
+    world.stand = () => world.gotoLobby();
+
+    world.recenter = () => {
+      // "recenter" means: go to current mode spawn
+      if (world.mode === "table") world.sit(world.seatedIndex >= 0 ? world.seatedIndex : 0);
+      else if (world.mode === "scorpion") world.gotoScorpion();
+      else if (world.mode === "spectate") world.spectate();
+      else world.gotoLobby();
+      ui("[rm] recenter");
+    };
+
+    // default spawn
+    if (!world.__spawnedOnce) {
+      world.__spawnedOnce = true;
+      world.gotoLobby();
+    }
+
+    ui("[rm] init ✅");
+    return world;
   }
 };

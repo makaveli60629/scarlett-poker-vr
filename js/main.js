@@ -1,21 +1,14 @@
-// /js/main.js — Scarlett Hybrid 2.1 (FULL, PERMANENT)
-// ✅ World loads (world.js) + all your systems (safe)
-// ✅ ALWAYS spawn on SpawnPad/SpawnPoint and ALWAYS face BossTable/center
-// ✅ VRButton always appears (local VRButton.js -> three/addons -> fallback)
-// ✅ HANDS-ONLY teleport: laser + floor ring ALWAYS visible in VR (camera fallback)
-// ✅ Pinch teleport (right hand thumb+index) when joints available
-// ✅ Ray forced slightly downward so it always hits the floor
-// ✅ Laser/ring render on top (depthTest off)
-// ✅ Desktop/Android fallback movement still available (non-VR)
-//
-// IMPORTANT: This file assumes your debug HUD exists in index.html:
-// #scarlettGrid #scarlettLog #capXR #capImm and buttons if you have them
+// /js/main.js — Scarlett Hybrid 2.2 (FULL, PERMANENT)
+// ✅ Spawn on pad + face center
+// ✅ Laser + ring ALWAYS visible in VR (camera fallback if hands not ready)
+// ✅ Pinch teleport (right hand) + GestureEngine update loop wired
+// ✅ VRButton reliable
+// ✅ Desktop/Android fallback move (non-VR)
 
 (async function boot() {
   if (window.__SCARLETT_BOOTED__) throw new Error("Double boot prevented");
   window.__SCARLETT_BOOTED__ = true;
 
-  // ---------------- HUD + logger ----------------
   const ui = {
     grid: document.getElementById("scarlettGrid"),
     logBox: document.getElementById("scarlettLog"),
@@ -86,45 +79,35 @@
   ui.btnCopy?.addEventListener("click", () => LOG.copy());
   ui.btnSoftReboot?.addEventListener("click", () => location.reload());
 
-  function toggleMenu() {
-    LOG.push("log", "Menu toggle pressed (M).");
-  }
+  function toggleMenu() { LOG.push("log", "Menu toggle pressed (M)."); }
   ui.btnMenu?.addEventListener("click", toggleMenu);
   addEventListener("keydown", (e) => { if (e.key.toLowerCase() === "m") toggleMenu(); });
 
-  // ---------------- Load THREE (prefer your local /js/three.js) ----------------
+  // THREE
   const THREE = await (async () => {
     try { const m = await import("./three.js"); return m.default || m.THREE || m; }
     catch { return await import("three"); }
   })();
 
   async function safeImport(url, label = url) {
-    try {
-      const m = await import(url);
-      LOG.push("log", `import ok: ${label}`);
-      return m;
-    } catch (e) {
-      LOG.push("warn", `import fail: ${label} — ${e?.message || e}`);
-      return null;
-    }
+    try { const m = await import(url); LOG.push("log", `import ok: ${label}`); return m; }
+    catch (e) { LOG.push("warn", `import fail: ${label} — ${e?.message || e}`); return null; }
   }
 
-  // ---------------- Scene / Rig / Camera / Renderer ----------------
+  // Scene
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
 
+  // Camera + Rig
   const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 800);
-
-  // Player rig (required for android_controls/mobile_touch and for teleport)
   const player = new THREE.Group();
   player.name = "PlayerRig";
-  player.position.set(0, 0, 0);
-  player.rotation.set(0, 0, 0);
   scene.add(player);
 
   camera.position.set(0, 1.65, 0);
   player.add(camera);
 
+  // Renderer
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(innerWidth, innerHeight);
   renderer.xr.enabled = true;
@@ -136,9 +119,8 @@
     renderer.setSize(innerWidth, innerHeight);
   });
 
-  // ---------------- VRButton (local -> addons -> fallback) ----------------
+  // VRButton
   async function attachVRButton() {
-    // A) local /js/VRButton.js
     const local = await safeImport("./VRButton.js", "./VRButton.js");
     if (local) {
       try {
@@ -155,18 +137,11 @@
           LOG.push("log", "VRButton ✅ via local VRButton.createButton()");
           return true;
         }
-        if (typeof local.createButton === "function") {
-          const btn = local.createButton(renderer);
-          if (btn) { btn.id = "VRButton"; document.body.appendChild(btn); }
-          LOG.push("log", "VRButton ✅ via local createButton()");
-          return true;
-        }
       } catch (e) {
         LOG.push("warn", `Local VRButton failed: ${e?.message || e}`);
       }
     }
 
-    // B) three/addons
     const threeVR =
       await safeImport("three/addons/webxr/VRButton.js", "three/addons/webxr/VRButton.js") ||
       await safeImport("https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js", "unpkg VRButton.js");
@@ -181,7 +156,6 @@
       return true;
     }
 
-    // C) manual fallback
     if (navigator.xr) {
       const btn = document.createElement("button");
       btn.id = "VRButton";
@@ -208,7 +182,7 @@
     return false;
   }
 
-  // ---------------- ctx (shared runtime) ----------------
+  // ctx
   const ctx = {
     THREE, scene, camera, renderer, LOG,
     BUILD: Date.now(),
@@ -217,7 +191,6 @@
     room: "lobby",
     mode: "lobby",
 
-    // aliases for legacy modules
     player,
     rig: player,
     cameraRig: player,
@@ -228,20 +201,16 @@
     disableFallbackMove: false,
   };
 
-  // ---------------- Load world.js ----------------
+  // Load world
   const worldMod = await safeImport("./world.js", "./world.js");
   if (worldMod?.World?.init) {
-    try {
-      await worldMod.World.init(ctx);
-      ctx.world = worldMod.World;
-    } catch (e) {
-      LOG.push("error", `World.init failed: ${e?.message || e}`);
-    }
+    await worldMod.World.init(ctx);
+    ctx.world = worldMod.World;
   } else {
     LOG.push("error", "world.js missing World.init");
   }
 
-  // ---------------- Spawn pad + face center/table ----------------
+  // Spawn + face
   const _tmp = new THREE.Vector3();
   const _tmp2 = new THREE.Vector3();
 
@@ -253,8 +222,6 @@
       sp.getWorldPosition(_tmp);
       player.position.set(_tmp.x, 0, _tmp.z);
       LOG.push("log", `Spawn ✅ x=${player.position.x.toFixed(2)} z=${player.position.z.toFixed(2)}`);
-    } else {
-      LOG.push("warn", "No SpawnPoint/SpawnPad found.");
     }
 
     if (table) {
@@ -273,7 +240,7 @@
   applySpawnAndFacing();
   renderer.xr.addEventListener("sessionstart", () => setTimeout(applySpawnAndFacing, 200));
 
-  // ---------------- Room buttons ----------------
+  // Room buttons
   function setRoom(room) {
     try { ctx.world?.setRoom?.(ctx, room); } catch {}
     ctx.room = room;
@@ -284,23 +251,29 @@
   ui.btnStore?.addEventListener("click", () => setRoom("store"));
   ui.btnScorpion?.addEventListener("click", () => setRoom("scorpion"));
 
-  // ---------------- Hands (for gesture + teleport) ----------------
-  let leftHand = null, rightHand = null;
+  // Gesture Engine
+  const gestureMod = await safeImport("./gesture_engine.js", "./gesture_engine.js");
+  gestureMod?.GestureEngine?.init?.({
+    THREE, renderer, scene, camera,
+    log: (m) => LOG.push("log", m),
+    LOG
+  });
+
+  // Hands (optional visuals)
   try {
-    leftHand = renderer.xr.getHand(0); leftHand.name = "XRHandLeft";
-    rightHand = renderer.xr.getHand(1); rightHand.name = "XRHandRight";
-    scene.add(leftHand, rightHand);
-    ctx.hands = { left: leftHand, right: rightHand };
+    const l = renderer.xr.getHand(0); l.name = "XRHandLeft";
+    const r = renderer.xr.getHand(1); r.name = "XRHandRight";
+    scene.add(l, r);
+    ctx.hands = { left: l, right: r };
   } catch {}
 
-  // ===============================
-  // HANDS-ONLY TELEPORT (LASER + RING ALWAYS VISIBLE IN VR)
-  // ===============================
-  const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // y=0
+  // Teleport visuals (laser + ring)
+  const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
-  const laserGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]);
-  const laserMat = new THREE.LineBasicMaterial({ color: 0x00ffff });
-  const laser = new THREE.Line(laserGeom, laserMat);
+  const laser = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]),
+    new THREE.LineBasicMaterial({ color: 0x00ffff })
+  );
   laser.name = "TeleportLaser";
   laser.renderOrder = 9999;
   laser.material.depthTest = false;
@@ -317,99 +290,47 @@
   ring.material.depthTest = false;
   scene.add(ring);
 
-  const pinch = { active: false, lastActive: false, strength: 0 };
-
-  const jA = new THREE.Vector3();
-  const jB = new THREE.Vector3();
   const origin = new THREE.Vector3();
   const dir = new THREE.Vector3();
   const hit = new THREE.Vector3();
 
-  function getJointWorld(hand, jointName, out) {
-    const j = hand?.joints?.[jointName];
-    if (!j) return false;
-    j.getWorldPosition(out);
-    return true;
-  }
-
-  function updatePinch() {
-    // Right-hand pinch to teleport
-    const h = rightHand;
-    if (!h) { pinch.active = false; pinch.strength = 0; return; }
-
-    const okA = getJointWorld(h, "index-finger-tip", jA);
-    const okB = getJointWorld(h, "thumb-tip", jB);
-    if (!okA || !okB) { pinch.active = false; pinch.strength = 0; return; }
-
-    const dist = jA.distanceTo(jB);
-    // tuned for Quest hands
-    pinch.active = dist < 0.028;
-    pinch.strength = Math.max(0, Math.min(1, (0.05 - dist) / 0.05));
-  }
-
   function updateTeleportRay() {
-    // Prefer wrist orientation if available; else camera direction.
-    let useHand = false;
+    // Always from camera (most reliable + always works)
+    camera.getWorldPosition(origin);
+    camera.getWorldDirection(dir);
+    dir.normalize();
 
-    if (rightHand) {
-      const wrist = rightHand.joints?.wrist;
-      if (wrist) {
-        wrist.getWorldPosition(origin);
-        const q = new THREE.Quaternion();
-        wrist.getWorldQuaternion(q);
-        dir.set(0, 0, -1).applyQuaternion(q).normalize();
-        // ✅ Force slight downward tilt so we ALWAYS hit the floor
-        dir.y -= 0.35;
-        dir.normalize();
-        useHand = true;
-      }
-    }
-
-    if (!useHand) {
-      camera.getWorldPosition(origin);
-      camera.getWorldDirection(dir);
-      dir.normalize();
-      // ✅ Force slight downward tilt
-      dir.y -= 0.35;
-      dir.normalize();
-    }
+    // force downward tilt
+    dir.y -= 0.35;
+    dir.normalize();
 
     const denom = floorPlane.normal.dot(dir);
-    if (Math.abs(denom) < 1e-6) {
-      ring.visible = false;
-      laser.visible = false;
-      return { ok: false };
-    }
+    if (Math.abs(denom) < 1e-6) return { ok: false };
 
     const t = -(floorPlane.normal.dot(origin) + floorPlane.constant) / denom;
-    if (t < 0.25 || t > 24) {
-      ring.visible = false;
-      laser.visible = false;
-      return { ok: false };
-    }
+    if (t < 0.25 || t > 24) return { ok: false };
 
     hit.copy(origin).addScaledVector(dir, t);
 
-    // Laser line
     laser.geometry.setFromPoints([origin, hit]);
-    laser.visible = true;
-
-    // Floor marker ring
     ring.position.set(hit.x, 0.02, hit.z);
-    ring.visible = true;
 
     return { ok: true, point: hit.clone() };
   }
 
   function teleportTo(point) {
-    // place rig on floor
     player.position.set(point.x, 0, point.z);
     LOG.push("log", `Teleport ✅ x=${point.x.toFixed(2)} z=${point.z.toFixed(2)}`);
   }
 
-  // ===============================
-  // Desktop/Android fallback movement (non-VR)
-  // ===============================
+  // Pinch teleport via GestureEngine right-hand pinchstart
+  let queuedTeleport = false;
+  gestureMod?.GestureEngine?.on?.("pinchstart", (e) => {
+    if (e.hand !== "right") return;
+    queuedTeleport = true;
+  });
+
+  // Desktop/Android fallback move (non-VR only)
   const MoveFallback = (() => {
     const keys = {};
     let touchMove = { active: false, id: -1, startX: 0, startY: 0, dx: 0, dy: 0 };
@@ -421,24 +342,15 @@
     addEventListener("touchstart", (e) => {
       for (const t of e.changedTouches) {
         const leftSide = t.clientX < innerWidth * 0.5;
-        if (leftSide && !touchMove.active) {
-          touchMove = { active: true, id: t.identifier, startX: t.clientX, startY: t.clientY, dx: 0, dy: 0 };
-        } else if (!leftSide && !touchLook.active) {
-          touchLook = { active: true, id: t.identifier, startX: t.clientX, startY: t.clientY, dx: 0, dy: 0 };
-        }
+        if (leftSide && !touchMove.active) touchMove = { active: true, id: t.identifier, startX: t.clientX, startY: t.clientY, dx: 0, dy: 0 };
+        else if (!leftSide && !touchLook.active) touchLook = { active: true, id: t.identifier, startX: t.clientX, startY: t.clientY, dx: 0, dy: 0 };
       }
     }, { passive: true });
 
     addEventListener("touchmove", (e) => {
       for (const t of e.changedTouches) {
-        if (touchMove.active && t.identifier === touchMove.id) {
-          touchMove.dx = t.clientX - touchMove.startX;
-          touchMove.dy = t.clientY - touchMove.startY;
-        }
-        if (touchLook.active && t.identifier === touchLook.id) {
-          touchLook.dx = t.clientX - touchLook.startX;
-          touchLook.dy = t.clientY - touchLook.startY;
-        }
+        if (touchMove.active && t.identifier === touchMove.id) { touchMove.dx = t.clientX - touchMove.startX; touchMove.dy = t.clientY - touchMove.startY; }
+        if (touchLook.active && t.identifier === touchLook.id) { touchLook.dx = t.clientX - touchLook.startX; touchLook.dy = t.clientY - touchLook.startY; }
       }
     }, { passive: true });
 
@@ -512,18 +424,18 @@
     };
   })();
 
-  // ---------------- Capability + VRButton ----------------
+  // Caps + VRButton
   await setCaps();
   await attachVRButton();
 
   renderer.xr.addEventListener("sessionstart", () => LOG.push("log", "XR sessionstart ✅"));
   renderer.xr.addEventListener("sessionend", () => LOG.push("warn", "XR sessionend"));
 
-  // ---------------- Main loop ----------------
+  // Main loop (note: frame is passed in XR!)
   let last = performance.now();
   let fpsAcc = 0, fpsCount = 0, fps = 0;
 
-  renderer.setAnimationLoop(() => {
+  renderer.setAnimationLoop((time, frame) => {
     const now = performance.now();
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
@@ -531,45 +443,40 @@
     fpsAcc += dt; fpsCount++;
     if (fpsAcc >= 0.5) { fps = Math.round(fpsCount / fpsAcc); fpsAcc = 0; fpsCount = 0; }
 
-    // World update
     try { ctx.world?.update?.(ctx, dt); } catch {}
 
-    // Desktop/Android movement
+    // Non-VR movement
     MoveFallback.update(dt);
 
-    // VR teleport (laser + ring ALWAYS)
+    // Gesture updates (VR only)
     if (renderer.xr.isPresenting) {
-      const ray = updateTeleportRay(); // ALWAYS show laser/ring in VR
-      updatePinch();
+      const refSpace = renderer.xr.getReferenceSpace?.();
+      gestureMod?.GestureEngine?.update?.(frame, refSpace);
 
-      const rising = pinch.active && !pinch.lastActive;
-      pinch.lastActive = pinch.active;
-
-      if (rising && ray.ok && ring.visible) {
-        teleportTo(ray.point);
-      }
-
-      // visibility safety
+      // Laser+ring always on in VR
+      const ray = updateTeleportRay();
       laser.visible = ray.ok;
       ring.visible = ray.ok;
-    } else {
-      // keep visible if you want testing in non-VR; otherwise hide:
-      // laser.visible = false; ring.visible = false;
+
+      // Teleport if we got a pinchstart event
+      if (queuedTeleport && ray.ok) {
+        queuedTeleport = false;
+        teleportTo(ray.point);
+      }
     }
 
     setMetrics([
       ["FPS", `${fps}`],
-      ["XR Presenting", renderer.xr.isPresenting ? "YES" : "NO"],
+      ["XR", renderer.xr.isPresenting ? "YES" : "NO"],
       ["VRButton", document.getElementById("VRButton") ? "YES" : "NO"],
       ["Room", ctx.room],
       ["Systems", Object.keys(ctx.systems || {}).length.toString()],
       ["Colliders", `${ctx.colliders?.length || 0}`],
-      ["Pinch", renderer.xr.isPresenting ? (pinch.active ? "ON" : "off") : "n/a"],
       ["Rig XYZ", `${player.position.x.toFixed(1)},${player.position.y.toFixed(1)},${player.position.z.toFixed(1)}`],
     ]);
 
     renderer.render(scene, camera);
   });
 
-  LOG.push("log", "Hybrid 2.1 boot complete ✅ (laser/ring forced + pinch teleport)");
+  LOG.push("log", "Hybrid 2.2 boot complete ✅ (GestureEngine wired + teleport stable)");
 })();

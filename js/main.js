@@ -1,8 +1,11 @@
-// /js/main.js — Scarlett Hybrid 2.7 (FULL)
-// ✅ FIX 1: Spawn facing includes +180° flip (so you don't face the teleport machine)
-// ✅ FIX 2: Controllers + XRHands are parented to PlayerRig (so they follow you; no "stuck on table")
-// ✅ Center hub table already in world.js; this makes you face it reliably
-// ✅ Teleport ray anchored to right controller (valid pose check)
+// /js/main.js — Scarlett Hybrid 2.7 (FULL, PERMANENT DEBUG BUILD)
+// FIXES:
+// ✅ spawn facing +180° (stop starting facing teleport machine)
+// ✅ controllers + XRHands parented to PlayerRig (no more stuck on table)
+// ✅ teleport ray attached to right controller (valid pose check)
+// ✅ controller locomotion + snap turn
+// ✅ loads world + optional systems
+// ✅ loads gesture_engine + betting_module (included below)
 
 (async function boot() {
   console.log("HYBRID_MAIN=2.7");
@@ -81,7 +84,7 @@
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
 
-  // Rig + camera
+  // PlayerRig + camera
   const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 800);
   const player = new THREE.Group();
   player.name = "PlayerRig";
@@ -113,7 +116,7 @@
     LOG.push("warn", "VRButton.js not found or invalid.");
   }
 
-  // ctx
+  // Context
   const ctx = {
     THREE, scene, camera, renderer, LOG,
     BUILD: Date.now(),
@@ -126,7 +129,7 @@
     pitchObject: camera,
   };
 
-  // world
+  // World
   const worldMod = await safeImport("./world.js", "./world.js");
   if (worldMod?.World?.init) {
     await worldMod.World.init(ctx);
@@ -135,7 +138,7 @@
     LOG.push("error", "world.js missing World.init");
   }
 
-  // ✅ FIX: Controllers MUST be parented to PlayerRig so they move with teleport
+  // ✅ IMPORTANT: parent controllers to rig so they follow teleport/movement
   const controllerL = renderer.xr.getController(0);
   controllerL.name = "ControllerLeft";
   player.add(controllerL);
@@ -146,20 +149,19 @@
 
   LOG.push("log", "Controllers parented to PlayerRig ✅ (no more stuck-on-table)");
 
-  // XR hands (also parent to rig)
-  let rightHand = null, leftHand = null;
+  // ✅ Hands also parent to rig
+  let leftHand = null, rightHand = null;
   try {
     leftHand = renderer.xr.getHand(0); leftHand.name = "XRHandLeft"; player.add(leftHand);
     rightHand = renderer.xr.getHand(1); rightHand.name = "XRHandRight"; player.add(rightHand);
     LOG.push("log", "XRHands parented to PlayerRig ✅");
   } catch {
-    LOG.push("warn", "XRHands unavailable (controller-only is fine).");
+    LOG.push("warn", "XRHands unavailable (controller-only OK).");
   }
 
-  // Spawn + facing: look at center table, then flip 180° (your request)
+  // Spawn + facing: look at center, then flip +180° so you don't face teleporter
   const tmp = new THREE.Vector3();
   const tmp2 = new THREE.Vector3();
-
   function applySpawnAndFacing() {
     const sp = scene.getObjectByName("SpawnPoint") || scene.getObjectByName("SpawnPad");
     const target = scene.getObjectByName("BossTable") || scene.getObjectByName("HubPlate");
@@ -178,20 +180,16 @@
 
       if (v.lengthSq() > 1e-6) {
         let yaw = Math.atan2(v.x, v.z);
-
-        // ✅ your new instruction: flip 180°
-        yaw += Math.PI;
-
+        yaw += Math.PI; // ✅ 180 flip
         player.rotation.set(0, yaw, 0);
         LOG.push("log", "Facing corrected ✅ (+180° flip)");
       }
     }
   }
-
   applySpawnAndFacing();
   renderer.xr.addEventListener("sessionstart", () => setTimeout(applySpawnAndFacing, 220));
 
-  // Optional modules (safe)
+  // Modules
   const gestureMod = await safeImport("./gesture_engine.js", "./gesture_engine.js");
   const betMod = await safeImport("./betting_module.js", "./betting_module.js");
 
@@ -204,7 +202,7 @@
   if (BettingModule?.init) BettingModule.init(ctx);
   if (!BettingModule) LOG.push("warn", "BettingModule missing -> betting disabled.");
 
-  // Teleport visuals (anchored to controllerR)
+  // Teleport visuals anchored to right controller
   const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
   const laser = new THREE.Line(
@@ -231,7 +229,7 @@
 
   function controllerPoseValid() {
     controllerR.getWorldPosition(o);
-    return o.lengthSq() > 0.05; // blocks stale origin
+    return o.lengthSq() > 0.05; // blocks 0,0,0 pose
   }
 
   function updateTeleportRay() {
@@ -281,12 +279,11 @@
       const gp = src.gamepad;
       if (!gp) continue;
       const b = gp.buttons || [];
-      if (b[0]?.pressed || b[4]?.pressed || b[5]?.pressed) return true;
+      if (b[0]?.pressed || b[4]?.pressed || b[5]?.pressed) return true; // trigger/A/B
     }
     return false;
   }
 
-  // locomotion
   const move = { speed: 2.6, snapDeg: 30, snapCooldown: 0 };
 
   // pinch teleport queue
@@ -310,6 +307,7 @@
     if (renderer.xr.isPresenting) {
       try { GestureEngine?.update?.(frame, renderer.xr.getReferenceSpace?.()); } catch {}
 
+      // locomotion
       const gp = readGamepad();
       if (gp?.axes) {
         const ax = gp.axes;
@@ -318,6 +316,7 @@
 
         const yaw = player.rotation.y;
         const sin = Math.sin(yaw), cos = Math.cos(yaw);
+
         const forward = -y;
         const strafe = x;
 
@@ -332,6 +331,7 @@
         }
       }
 
+      // teleport
       const ray = updateTeleportRay();
       laser.visible = ray.ok;
       ring.visible = ray.ok;
@@ -357,5 +357,5 @@
   });
 
   await setCaps();
-  LOG.push("log", "Hybrid 2.7 boot complete ✅ (180° facing + controllers follow rig + center hub ready)");
+  LOG.push("log", "Hybrid 2.7 boot complete ✅ (facing +180, controllers follow rig, hub demo live)");
 })();

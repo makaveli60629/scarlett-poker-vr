@@ -2,9 +2,9 @@
 // ✅ 4 corner cubes + hub
 // ✅ Brighter lighting
 // ✅ SpawnPad z-fighting fixed (lift + polygonOffset)
-// ✅ Center hub table
+// ✅ Center hub table + rail
 // ✅ ALWAYS-ON demo: 2 bots walking + visible card dealing at center
-// ✅ Still loads your real modules if present (bots/poker_sim/etc)
+// ✅ Tries to load your existing systems (room_manager, teleport_machine, teleport, store, scorpion, bots, poker_sim, ui, vr_ui, interactions)
 
 export const World = {
   async init(ctx) {
@@ -27,7 +27,7 @@ export const World = {
       log(`[world] system ok: ${name}`);
     };
 
-    // ---------- Lighting (BRIGHT) ----------
+    // Lighting
     scene.add(new THREE.HemisphereLight(0xe8f3ff, 0x101018, 1.35));
 
     const dir = new THREE.DirectionalLight(0xffffff, 1.65);
@@ -42,7 +42,7 @@ export const World = {
     hubB.position.set(0, 4.5, -6);
     scene.add(hubB);
 
-    // ---------- Materials ----------
+    // Materials
     const floorMat = new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.95 });
     const wallMat  = new THREE.MeshStandardMaterial({ color: 0x070912, roughness: 0.78, metalness: 0.12 });
     const neonMat  = new THREE.MeshStandardMaterial({
@@ -52,7 +52,7 @@ export const World = {
       roughness: 0.35
     });
 
-    // ---------- Helpers ----------
+    // Helpers
     const makeSolid = (mesh) => {
       mesh.userData.solid = true;
       ctx.colliders.push(mesh);
@@ -67,13 +67,13 @@ export const World = {
       return m;
     };
 
-    // ---------- Base floor ----------
+    // Base floor
     const base = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), floorMat);
     base.rotation.x = -Math.PI / 2;
     base.receiveShadow = true;
     scene.add(base);
 
-    // ---------- Layout ----------
+    // Layout
     const WALL_H = 3.0;
     const WALL_T = 0.26;
 
@@ -94,7 +94,7 @@ export const World = {
       { name: "Room_SE", x:  cornerOffset, z: -cornerOffset },
     ];
 
-    // ---------- Hub plate + neon ring ----------
+    // Hub plate + neon ring
     const hubPlate = new THREE.Mesh(
       new THREE.CylinderGeometry(hubPlateR, hubPlateR, 0.22, 64),
       new THREE.MeshStandardMaterial({ color: 0x0a0b12, roughness: 0.45, metalness: 0.18 })
@@ -109,7 +109,7 @@ export const World = {
     ring.name = "HubRing";
     scene.add(ring);
 
-    // ---------- Boss table (CENTER) ----------
+    // Boss table (CENTER)
     const bossTable = new THREE.Mesh(
       new THREE.CylinderGeometry(1.75, 1.75, 0.14, 44),
       new THREE.MeshStandardMaterial({ color: 0x0c2a22, roughness: 0.9, metalness: 0.05 })
@@ -131,7 +131,7 @@ export const World = {
     dealer.position.set(0, 0.92, 0.95);
     scene.add(dealer);
 
-    // ---------- Fallback guard rail ring ----------
+    // Fallback rail ring
     const rail = new THREE.Mesh(
       new THREE.TorusGeometry(3.9, 0.08, 12, 120),
       new THREE.MeshStandardMaterial({ color: 0x121422, emissive: 0x132a3a, emissiveIntensity: 0.55 })
@@ -141,7 +141,7 @@ export const World = {
     rail.name = "FallbackRail";
     scene.add(rail);
 
-    // ---------- Rooms + corridors ----------
+    // Rooms + corridors
     const buildRoom = (r) => {
       makeFloor(roomSize, roomSize, r.x, r.z);
 
@@ -149,7 +149,6 @@ export const World = {
       const innerIsX = Math.abs(toCenter.x) > Math.abs(toCenter.z);
       const doorW = 3.2;
 
-      // side walls
       makeSolid(new THREE.Mesh(new THREE.BoxGeometry(WALL_T, WALL_H, roomSize + WALL_T), wallMat))
         .position.set(r.x - roomHalf, WALL_H / 2, r.z);
       makeSolid(new THREE.Mesh(new THREE.BoxGeometry(WALL_T, WALL_H, roomSize + WALL_T), wallMat))
@@ -203,7 +202,6 @@ export const World = {
         }
       }
 
-      // corridor toward hub
       const corridorDir = new THREE.Vector3(-r.x, 0, -r.z).normalize();
       const corridorCenter = new THREE.Vector3(r.x, 0, r.z)
         .add(corridorDir.clone().multiplyScalar(roomHalf + corridorL/2));
@@ -228,7 +226,7 @@ export const World = {
 
     rooms.forEach(buildRoom);
 
-    // ---------- SpawnPad (NW room) — Z-FIGHT FIX ----------
+    // SpawnPad (NW room) — z-fight fix
     const spawnRoom = rooms[0]; // NW
     const spawnPadMat = new THREE.MeshStandardMaterial({
       color: 0x0a0b12,
@@ -246,7 +244,7 @@ export const World = {
       spawnPadMat
     );
     spawnPad.name = "SpawnPad";
-    spawnPad.position.set(spawnRoom.x, 0.14, spawnRoom.z); // lifted slightly to avoid flicker
+    spawnPad.position.set(spawnRoom.x, 0.14, spawnRoom.z);
     spawnPad.renderOrder = 10;
     scene.add(spawnPad);
 
@@ -255,7 +253,7 @@ export const World = {
     sp.position.set(spawnRoom.x, 0, spawnRoom.z);
     scene.add(sp);
 
-    // Teleporter behind you visually
+    // Teleport machine behind spawn (visual)
     const tmAnchor = new THREE.Object3D();
     tmAnchor.name = "TeleportMachineSpawn";
     tmAnchor.position.set(spawnRoom.x, 0, spawnRoom.z + 2.8);
@@ -275,7 +273,7 @@ export const World = {
     tmCore.name = "TeleportMachineFallback";
     scene.add(tmCore);
 
-    // ---------- DEMO: 2 bots walking around hub ----------
+    // DEMO: 2 bots walking around hub
     const makeDemoBot = (name, tint) => {
       const g = new THREE.Group();
       g.name = name;
@@ -306,26 +304,12 @@ export const World = {
     ];
     ctx.demo.bots.forEach((b) => scene.add(b.obj));
 
-    // ---------- DEMO: visible card dealing on center table ----------
+    // DEMO: dealing on center table
     const cardGroup = new THREE.Group();
     cardGroup.name = "DemoCards";
     scene.add(cardGroup);
 
-    const makeCard = () => {
-      const geo = new THREE.PlaneGeometry(0.07, 0.10);
-      const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, metalness: 0.0, side: THREE.DoubleSide });
-      const m = new THREE.Mesh(geo, mat);
-      m.rotation.x = -Math.PI / 2;
-      // neon edge
-      const edge = new THREE.LineSegments(
-        new THREE.EdgesGeometry(geo),
-        new THREE.LineBasicMaterial({ color: 0x00ffff })
-      );
-      m.add(edge);
-      return m;
-    };
-
-    const deckPos = new THREE.Vector3(0, 0.92, 0.95); // dealer anchor
+    const deckPos = new THREE.Vector3(0, 0.92, 0.95);
     const seatTargets = [
       new THREE.Vector3(-0.55, 0.86, 0.25),
       new THREE.Vector3( 0.55, 0.86, 0.25),
@@ -346,7 +330,7 @@ export const World = {
     log(`[world] SpawnPad @ (${spawnPad.position.x.toFixed(1)}, ${spawnPad.position.z.toFixed(1)})`);
     log("[world] demo bots + demo dealing ✅");
 
-    // ---------- Load your existing systems safely ----------
+    // Load your existing systems safely
     const rm = await safeImport("./room_manager.js");
     if (rm?.RoomManager?.init) { try { rm.RoomManager.init(ctx); addSystem("room_manager", rm.RoomManager); } catch {} }
 
@@ -379,31 +363,17 @@ export const World = {
     const interactions = await safeImport("./interactions.js");
     if (interactions?.Interactions?.init) { try { interactions.Interactions.init(ctx); addSystem("interactions", interactions.Interactions); } catch {} }
 
-    this.setRoom(ctx, ctx.room || "lobby");
     log("[world] init complete ✅");
   },
 
-  setRoom(ctx, room) {
-    ctx.room = room;
-    ctx.mode = room;
-
-    const rm = ctx.systems?.room_manager;
-    if (rm?.setRoom) return rm.setRoom(ctx, room);
-
-    ctx.systems?.store?.setActive?.(room === "store");
-    ctx.systems?.scorpion?.setActive?.(room === "scorpion");
-    ctx.systems?.poker_sim?.setMode?.(room === "poker" ? "table" : "lobby_demo");
-    ctx.LOG?.push?.("log", `[world] setRoom fallback => ${room}`);
-  },
-
   update(ctx, dt) {
-    // run real systems
+    // Run real systems
     const systems = ctx.systems || {};
     for (const k of Object.keys(systems)) {
       try { systems[k]?.update?.(dt, ctx); } catch {}
     }
 
-    // DEMO bots (always)
+    // DEMO bots
     if (ctx.demo?.bots?.length) {
       const r = 5.2;
       for (const b of ctx.demo.bots) {
@@ -416,18 +386,18 @@ export const World = {
       }
     }
 
-    // DEMO dealing (always)
+    // DEMO dealing
     const dc = ctx.demo?.cards;
     if (dc) {
       dc.timer += dt;
 
-      // spawn a new card every ~0.6s, animate to seat
       if (dc.timer > 0.6) {
         dc.timer = 0;
-        const card = (new ctx.THREE.Mesh(
+
+        const card = new ctx.THREE.Mesh(
           new ctx.THREE.PlaneGeometry(0.07, 0.10),
           new ctx.THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, metalness: 0.0, side: ctx.THREE.DoubleSide })
-        ));
+        );
         card.rotation.x = -Math.PI / 2;
         card.position.copy(dc.deckPos);
 
@@ -444,20 +414,17 @@ export const World = {
         dc.group.add(card);
         dc.active.push(card);
 
-        // clear pile occasionally
         if (dc.active.length > 18) {
           for (const c of dc.active) dc.group.remove(c);
           dc.active.length = 0;
         }
       }
 
-      // animate active cards
       for (const card of dc.active) {
         const a = card.userData.anim;
         if (!a) continue;
         a.t = Math.min(1, a.t + dt * 1.8);
 
-        // arc
         const mid = a.from.clone().lerp(a.to, 0.5);
         mid.y += 0.25;
 

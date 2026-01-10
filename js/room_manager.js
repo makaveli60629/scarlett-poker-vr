@@ -1,75 +1,67 @@
-// /js/room_manager.js — Room Manager (FULL)
-// - Manages mode: lobby | table | scorpion | spectate
-// - Provides: stand(), sit(seatIndex), spectate(), gotoScorpion(), gotoLobby(), recenter()
+// /js/room_manager.js — Room Manager v3 (FULL)
 
 export const RoomManager = {
   init(ctx) {
-    const { THREE, world, player, log } = ctx;
-    const ui = (m) => (log ? log(m) : console.log(m));
+    ctx.room = "lobby";
+    ctx.log?.("[rm] lobby");
+    this._wireTeleports(ctx);
+    ctx.log?.("[rm] init ✅");
+  },
 
-    world.mode = world.mode || "lobby";
-    world.seatedIndex = world.seatedIndex ?? -1;
+  setRoom(ctx, room) {
+    ctx.room = room;
+    ctx.mode = room;
 
-    const spawnLobby = new THREE.Vector3(0, 1.6, 7.0);
-    const spawnSpectate = new THREE.Vector3(0, 1.6, 4.2);
+    ctx.log?.(`[rm] room=${room}`);
 
-    function setPosYaw(pos, yaw = Math.PI) {
-      player.position.copy(pos);
-      player.rotation.set(0, yaw, 0);
+    // behaviors
+    if (room === "lobby") {
+      ctx.systems?.scorpion?.setActive?.(false);
+      ctx.systems?.store?.setActive?.(true);
+      ctx.PokerSim?.setMode?.("lobby_demo");
     }
 
-    world.gotoLobby = () => {
-      world.mode = "lobby";
-      world.seatedIndex = -1;
-      setPosYaw(spawnLobby, Math.PI);
-      ui("[rm] lobby");
-    };
+    if (room === "store") {
+      ctx.systems?.scorpion?.setActive?.(false);
+      ctx.systems?.store?.setActive?.(true);
+      ctx.PokerSim?.setMode?.("lobby_demo");
+    }
 
-    world.spectate = () => {
-      world.mode = "spectate";
-      world.seatedIndex = -1;
-      setPosYaw(spawnSpectate, Math.PI);
-      ui("[rm] spectate");
-    };
+    if (room === "spectate") {
+      ctx.systems?.scorpion?.setActive?.(false);
+      ctx.PokerSim?.setMode?.("lobby_demo");
+    }
 
-    world.gotoScorpion = () => {
-      world.mode = "scorpion";
-      world.seatedIndex = -1;
-      const p = world.points?.scorpion ? world.points.scorpion.clone().add(new THREE.Vector3(0, 1.6, 2.5)) : new THREE.Vector3(7, 1.6, 2.5);
-      setPosYaw(p, Math.PI);
-      ui("[rm] scorpion");
-    };
+    if (room === "scorpion") {
+      ctx.systems?.scorpion?.setActive?.(true);
+      ctx.PokerSim?.setMode?.("scorpion_match");
+      ctx.PokerSim?.ensureScorpionMatch?.(); // bots playing if you’re not seated
+    }
+  },
 
-    world.sit = (seatIndex = 0) => {
-      world.mode = "table";
-      world.seatedIndex = seatIndex;
-      const s = world.seats?.[seatIndex];
-      if (s?.position) {
-        setPosYaw(s.position.clone().add(new THREE.Vector3(0, 0, 0)), s.yaw ?? Math.PI);
-      } else {
-        setPosYaw(new THREE.Vector3(0, 1.6, 2.6), Math.PI);
+  _wireTeleports(ctx) {
+    // Global event: scarlett-goto("lobby_spawn"/"store_spawn"/etc)
+    window.addEventListener("scarlett-goto", (e) => {
+      const dest = String(e?.detail || "");
+      if (!dest) return;
+
+      if (dest === "lobby") {
+        this.setRoom(ctx, "lobby");
+        window.dispatchEvent(new CustomEvent("scarlett-spawn", { detail: "lobby_spawn" }));
       }
-      ui("[rm] sit seat=" + seatIndex);
-    };
-
-    world.stand = () => world.gotoLobby();
-
-    world.recenter = () => {
-      // "recenter" means: go to current mode spawn
-      if (world.mode === "table") world.sit(world.seatedIndex >= 0 ? world.seatedIndex : 0);
-      else if (world.mode === "scorpion") world.gotoScorpion();
-      else if (world.mode === "spectate") world.spectate();
-      else world.gotoLobby();
-      ui("[rm] recenter");
-    };
-
-    // default spawn
-    if (!world.__spawnedOnce) {
-      world.__spawnedOnce = true;
-      world.gotoLobby();
-    }
-
-    ui("[rm] init ✅");
-    return world;
+      if (dest === "store") {
+        this.setRoom(ctx, "store");
+        window.dispatchEvent(new CustomEvent("scarlett-spawn", { detail: "store_spawn" }));
+      }
+      if (dest === "spectate") {
+        this.setRoom(ctx, "spectate");
+        window.dispatchEvent(new CustomEvent("scarlett-spawn", { detail: "spectator" }));
+      }
+      if (dest === "scorpion") {
+        this.setRoom(ctx, "scorpion");
+        window.dispatchEvent(new CustomEvent("scarlett-spawn", { detail: "table_seat_1" }));
+        window.dispatchEvent(new CustomEvent("scarlett-seat", { detail: { table: "scorpion", seat: 0 } }));
+      }
+    });
   }
 };

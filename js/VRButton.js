@@ -1,7 +1,6 @@
-// /js/VRButton.js — Scarlett VRButton v1.2 (FULL)
-// Always returns the actual button element.
-// If #vrButtonSlot exists, it mounts there. Otherwise caller can append it.
-// Supports createButton(renderer, sessionInit?) pattern.
+// /js/VRButton.js — Scarlett VRButton v1.3 (FULL)
+// Logs session start/end and errors so Quest debugging is obvious.
+// Always returns the actual <button>.
 
 export const VRButton = {
   createButton(renderer, sessionInit = null) {
@@ -35,14 +34,20 @@ export const VRButton = {
     async function isSupported() {
       try {
         if (!navigator.xr) return false;
-        return await navigator.xr.isSessionSupported("immersive-vr");
-      } catch {
+        const ok = await navigator.xr.isSessionSupported("immersive-vr");
+        console.log("[VRButton] isSessionSupported(immersive-vr) =", ok);
+        return ok;
+      } catch (e) {
+        console.error("[VRButton] isSessionSupported error", e);
         return false;
       }
     }
 
     async function start() {
-      if (!navigator.xr) return;
+      if (!navigator.xr) {
+        console.error("[VRButton] navigator.xr missing");
+        return;
+      }
 
       const init =
         sessionInit ||
@@ -53,15 +58,18 @@ export const VRButton = {
         };
 
       try {
+        console.log("[VRButton] requestSession(immersive-vr) init =", init);
         show("STARTING…", false);
 
         const session = await navigator.xr.requestSession("immersive-vr", init);
         currentSession = session;
 
-        // connect to three
+        console.log("[VRButton] session started ✅");
         await renderer.xr.setSession(session);
+        console.log("[VRButton] renderer.xr.setSession ✅");
 
         session.addEventListener("end", () => {
+          console.log("[VRButton] session ended");
           currentSession = null;
           show("ENTER VR", true);
         });
@@ -76,6 +84,7 @@ export const VRButton = {
 
     async function end() {
       try {
+        console.log("[VRButton] ending session…");
         show("ENDING…", false);
         await currentSession.end();
       } catch (e) {
@@ -87,6 +96,7 @@ export const VRButton = {
     }
 
     button.addEventListener("click", async () => {
+      console.log("[VRButton] clicked");
       if (currentSession) await end();
       else await start();
     });
@@ -97,7 +107,6 @@ export const VRButton = {
       if (slot && !slot.contains(button)) slot.appendChild(button);
     });
 
-    // initial state
     (async () => {
       const ok = await isSupported();
       if (ok) show("ENTER VR", true);

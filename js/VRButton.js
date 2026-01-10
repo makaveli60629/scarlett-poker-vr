@@ -3,14 +3,12 @@
 // Works on GitHub Pages + Meta Quest Browser.
 
 export const VRButton = {
-
   createButton(renderer, sessionInit = {}) {
     const button = document.createElement("button");
     button.id = "VRButton";
     button.type = "button";
     button.textContent = "ENTER VR";
 
-    // Hard visible styling (prevents hidden/offscreen issues)
     button.style.cssText = `
       position: fixed;
       right: 12px;
@@ -20,10 +18,10 @@ export const VRButton = {
       border-radius: 14px;
       background: rgba(11,13,20,.88);
       color: #e8ecff;
-      font: 700 14px system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      font: 800 14px system-ui, -apple-system, Segoe UI, Roboto, Arial;
       letter-spacing: .3px;
       box-shadow: 0 14px 45px rgba(0,0,0,.55);
-      z-index: 99999;
+      z-index: 999999;
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
     `;
@@ -62,7 +60,6 @@ export const VRButton = {
         }
 
         if (currentSession === null) {
-          // Default safe features for Quest
           const init = {
             optionalFeatures: [
               "local-floor",
@@ -74,7 +71,6 @@ export const VRButton = {
             ...sessionInit
           };
 
-          // If domOverlay is present, ensure it points to document.body
           if (init.optionalFeatures?.includes("dom-overlay")) {
             init.domOverlay = init.domOverlay || { root: document.body };
           }
@@ -90,7 +86,6 @@ export const VRButton = {
       }
     };
 
-    // Boot: decide visibility
     isSupported().then((supported) => {
       console.log("[VRButton] isSessionSupported(immersive-vr) =", supported);
       if (!supported) {

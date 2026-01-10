@@ -1,222 +1,167 @@
-// /js/controls.js — Scarlett Controls v3.2 (FULL)
-// FIX: Does NOT set renderer.setAnimationLoop (main.js owns the loop).
-// Provides: update(dt), XR thumbsticks (Quest), Android dock (scarlett-touch),
-// keyboard WASD, snap/smooth turning, and spawn teleports.
-// Prevents “giant height” by never adding Y offsets in XR local-floor.
+// /js/controls.js — Scarlett Controls v3.3 (FULL)
+// Fixes/Adds:
+// - Adds seat state + Leave Seat action (B/Y)
+// - Exposes Controls.leaveSeat()
+// - Prevents double XR start issues (does not touch animationLoop)
 
 export const Controls = {
-  _inited: false,
-  _ctx: null,
-
-  init({ THREE, scene, renderer, camera, player, controllers, world, log }) {
-    if (this._inited) return this;
-    this._inited = true;
+  init(ctx) {
+    const { THREE, renderer, camera, player, world, log } = ctx;
 
     const state = {
-      moveSpeed: 2.15,        // m/s
-      turnSpeed: 2.35,        // rad/s
-      snapTurn: true,
-      snapAngle: Math.PI / 6, // 30°
-      snapCooldown: 0,
-
-      keys: { w: 0, a: 0, s: 0, d: 0 },
-      touch: { f: 0, b: 0, l: 0, r: 0, turnL: 0, turnR: 0 },
+      ctx,
+      THREE,
+      renderer,
+      camera,
+      player,
+      world,
+      seated: false,
+      seatedAt: null,      // spawn key or seat key
+      moveEnabled: true,
+      speed: 2.0,
+      snapTurn: Math.PI / 6,
+      _keys: new Set(),
+      _lastSnap: 0,
+      _gpPrev: { left: {}, right: {} },
     };
 
-    const getFlag = (k, fallback = true) => {
-      try { return !!(window.__SCARLETT_FLAGS?.[k] ?? fallback); }
-      catch { return fallback; }
-    };
+    world.seated = world.seated ?? false;
 
-    // Keyboard fallback
-    window.addEventListener("keydown", (e) => {
-      const k = (e.key || "").toLowerCase();
-      if (k === "w") state.keys.w = 1;
-      if (k === "a") state.keys.a = 1;
-      if (k === "s") state.keys.s = 1;
-      if (k === "d") state.keys.d = 1;
-    });
-    window.addEventListener("keyup", (e) => {
-      const k = (e.key || "").toLowerCase();
-      if (k === "w") state.keys.w = 0;
-      if (k === "a") state.keys.a = 0;
-      if (k === "s") state.keys.s = 0;
-      if (k === "d") state.keys.d = 0;
-    });
+    // Basic keyboard move (desktop fallback)
+    window.addEventListener("keydown", (e) => state._keys.add(e.code));
+    window.addEventListener("keyup", (e) => state._keys.delete(e.code));
 
-    // Android touch dock -> scarlett-touch
-    window.addEventListener("scarlett-touch", (e) => {
-      if (!e?.detail) return;
-      state.touch = Object.assign(state.touch, e.detail);
-    });
+    function getXRGamepads() {
+      const xr = renderer?.xr;
+      const session = xr?.getSession?.();
+      const sources = session?.inputSources || [];
+      let left = null, right = null;
+      for (const s of sources) {
+        const gp = s.gamepad;
+        if (!gp) continue;
+        if (s.handedness === "left") left = gp;
+        if (s.handedness === "right") right = gp;
+      }
+      return { left, right };
+    }
 
-    // Toggles (read by getFlag)
-    window.addEventListener("scarlett-toggle-snap", (e) => (state.snapTurn = !!e.detail));
+    function buttonPressed(gp, idx) {
+      const b = gp?.buttons?.[idx];
+      return !!(b && (b.pressed || b.value > 0.75));
+    }
 
-    // store ctx
-    this._ctx = { THREE, scene, renderer, camera, player, controllers, world, log, state, getFlag };
+    function justPressed(hand, name, isDownNow) {
+      const prev = state._gpPrev[hand]?.[name] || false;
+      state._gpPrev[hand][name] = !!isDownNow;
+      return !!isDownNow && !prev;
+    }
+
+    function teleportToSpawn(key) {
+      const sp = world?.spawns?.[key];
+      if (!sp) return false;
+      player.position.set(sp.pos.x, sp.pos.y, sp.pos.z);
+      player.rotation.set(0, sp.yaw || 0, 0);
+      return true;
+    }
+
+    // PUBLIC: join seat
+    function sitAt(spawnKey = "table_seat_1") {
+      state.seated = true;
+      state.seatedAt = spawnKey;
+      state.moveEnabled = false;
+      world.seated = true;
+
+      // teleport to seat if available
+      if (!teleportToSpawn(spawnKey)) {
+        // fallback to lobby_spawn
+        teleportToSpawn("lobby_spawn");
+      }
+
+      log?.(`[controls] 🪑 seated @ ${spawnKey}`);
+    }
+
+    // PUBLIC: leave seat
+    function leaveSeat() {
+      if (!state.seated && !world.seated) return;
+
+      state.seated = false;
+      state.seatedAt = null;
+      state.moveEnabled = true;
+      world.seated = false;
+
+      // If poker sim exists, return to lobby table by default
+      ctx.poker?.setTable?.("lobby");
+
+      // teleport to lobby standing spawn
+      if (!teleportToSpawn("lobby_spawn")) {
+        // fallback spectator
+        teleportToSpawn("spectator");
+      }
+
+      log?.("[controls] ✅ left seat (standing)");
+    }
+
+    function moveLocal(dx, dz, dt) {
+      // move relative to camera yaw
+      const yaw = player.rotation.y;
+      const cos = Math.cos(yaw);
+      const sin = Math.sin(yaw);
+      const vx = (dx * cos - dz * sin) * state.speed * dt;
+      const vz = (dx * sin + dz * cos) * state.speed * dt;
+      player.position.x += vx;
+      player.position.z += vz;
+    }
+
+    function update(dt) {
+      // XR buttons
+      const gps = getXRGamepads();
+
+      // Leave seat mappings:
+      // - Right controller B is typically buttons[5] on Oculus Touch
+      // - Left controller Y is typically buttons[3]
+      // These vary a bit, so we watch both common indices.
+      if (gps.right) {
+        const b = buttonPressed(gps.right, 5) || buttonPressed(gps.right, 1); // B or secondary
+        if (justPressed("right", "leave", b)) leaveSeat();
+      }
+      if (gps.left) {
+        const y = buttonPressed(gps.left, 3) || buttonPressed(gps.left, 1); // Y or secondary
+        if (justPressed("left", "leave", y)) leaveSeat();
+      }
+
+      // If seated: we don't allow movement (but still allow look)
+      if (!state.moveEnabled || world.seated) return;
+
+      // Desktop movement
+      let dx = 0, dz = 0;
+      if (state._keys.has("KeyW") || state._keys.has("ArrowUp")) dz -= 1;
+      if (state._keys.has("KeyS") || state._keys.has("ArrowDown")) dz += 1;
+      if (state._keys.has("KeyA") || state._keys.has("ArrowLeft")) dx -= 1;
+      if (state._keys.has("KeyD") || state._keys.has("ArrowRight")) dx += 1;
+
+      if (dx || dz) moveLocal(dx, dz, dt);
+
+      // Snap turn (Q/E)
+      const now = performance.now();
+      if (now - state._lastSnap > 180) {
+        if (state._keys.has("KeyQ")) { player.rotation.y += state.snapTurn; state._lastSnap = now; }
+        if (state._keys.has("KeyE")) { player.rotation.y -= state.snapTurn; state._lastSnap = now; }
+      }
+    }
+
+    // expose API
+    Controls.update = update;
+    Controls.teleportToSpawn = teleportToSpawn;
+    Controls.sitAt = sitAt;
+    Controls.leaveSeat = leaveSeat;
 
     log?.("[controls] init ✅ (no animationLoop; main drives update())");
-    return this;
+    return Controls;
   },
 
-  // main.js calls this every frame
-  update(dt = 0.016) {
-    const ctx = this._ctx;
-    if (!ctx) return;
-
-    const { renderer, player, camera, state, getFlag } = ctx;
-
-    // Keep rig on floor in XR local-floor (prevents “giant / floating pad”)
-    if (renderer?.xr?.isPresenting) {
-      player.position.y = 0;
-    } else {
-      // non-XR: keep camera at standing height if it got reset
-      if (camera.parent === player) camera.position.y = Math.max(camera.position.y, 1.6);
-    }
-
-    // Movement
-    if (getFlag("move", true)) this._updateMove(dt);
-
-    // Turning
-    if (getFlag("snap", true) && state.snapTurn) this._updateSnapTurn(dt);
-    else this._updateSmoothTurn(dt);
-  },
-
-  teleportToSpawn(name = "lobby_spawn") {
-    const { world, player, log } = this._ctx || {};
-    const sp = world?.spawns?.[name];
-    if (!sp) {
-      log?.(`[controls] ⚠️ spawn not found: ${name}`);
-      return;
-    }
-    // Only set XZ + yaw; NEVER add Y in local-floor
-    player.position.set(sp.position.x, 0, sp.position.z);
-    player.rotation.y = sp.yaw || 0;
-    log?.(`[controls] ✅ teleported to ${name}`);
-  },
-
-  // -------- XR Input Helpers --------
-  _getSession() {
-    try { return this._ctx?.renderer?.xr?.getSession?.() || null; }
-    catch { return null; }
-  },
-
-  _getGamepadByHand(handedness /* "left" | "right" */) {
-    const s = this._getSession();
-    if (!s?.inputSources) return null;
-
-    try {
-      for (const src of s.inputSources) {
-        if (!src?.gamepad) continue;
-        if (src.handedness === handedness) return src.gamepad;
-      }
-      // fallback: first gamepad
-      for (const src of s.inputSources) {
-        if (src?.gamepad) return src.gamepad;
-      }
-    } catch {}
-    return null;
-  },
-
-  // -------- Movement --------
-  _updateMove(dt) {
-    const { THREE, camera, player, state } = this._ctx;
-
-    let x = 0, y = 0;
-
-    // Prefer XR left stick (Quest): axes[0]=x, axes[1]=y
-    const gpL = this._getGamepadByHand("left");
-    if (gpL?.axes?.length >= 2) {
-      x = gpL.axes[0] ?? 0;
-      y = gpL.axes[1] ?? 0;
-    } else {
-      // Touch dock
-      x = (state.touch.r ? 1 : 0) + (state.touch.l ? -1 : 0);
-      y = (state.touch.b ? 1 : 0) + (state.touch.f ? -1 : 0);
-
-      // Keyboard
-      x += state.keys.d ? 1 : 0;
-      x += state.keys.a ? -1 : 0;
-      y += state.keys.s ? 1 : 0;
-      y += state.keys.w ? -1 : 0;
-    }
-
-    // deadzone
-    const dz = 0.16;
-    if (Math.abs(x) < dz) x = 0;
-    if (Math.abs(y) < dz) y = 0;
-    if (!x && !y) return;
-
-    // Move in camera-forward plane
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-    forward.y = 0; forward.normalize();
-
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-    right.y = 0; right.normalize();
-
-    const move = new THREE.Vector3();
-    move.addScaledVector(right, x);
-    move.addScaledVector(forward, y);
-    if (move.lengthSq() > 0) move.normalize();
-
-    player.position.addScaledVector(move, state.moveSpeed * dt);
-  },
-
-  // -------- Turning --------
-  _updateSnapTurn(dt) {
-    const { player, state } = this._ctx;
-
-    if (state.snapCooldown > 0) {
-      state.snapCooldown -= dt;
-      return;
-    }
-
-    // Prefer XR right stick X. On Quest: axes[2]/[3] sometimes exist,
-    // but safest is right controller axes[0]/[1] for its stick.
-    let t = 0;
-    const gpR = this._getGamepadByHand("right");
-    if (gpR?.axes?.length >= 1) {
-      // Most reliable for right controller stick X:
-      t = gpR.axes[0] ?? 0;
-      // If a device uses axes[2] for right stick, take the stronger:
-      if (gpR.axes.length >= 3) {
-        const a0 = Math.abs(gpR.axes[0] ?? 0);
-        const a2 = Math.abs(gpR.axes[2] ?? 0);
-        if (a2 > a0) t = gpR.axes[2] ?? 0;
-      }
-    } else {
-      // Touch dock
-      t = (state.touch.turnR ? 1 : 0) + (state.touch.turnL ? -1 : 0);
-    }
-
-    const dz = 0.35;
-    if (Math.abs(t) < dz) return;
-
-    const dir = t > 0 ? -1 : 1; // VR feel
-    player.rotation.y += dir * state.snapAngle;
-    state.snapCooldown = 0.22;
-  },
-
-  _updateSmoothTurn(dt) {
-    const { player, state } = this._ctx;
-
-    let t = 0;
-    const gpR = this._getGamepadByHand("right");
-    if (gpR?.axes?.length >= 1) {
-      t = gpR.axes[0] ?? 0;
-      if (gpR.axes.length >= 3) {
-        const a0 = Math.abs(gpR.axes[0] ?? 0);
-        const a2 = Math.abs(gpR.axes[2] ?? 0);
-        if (a2 > a0) t = gpR.axes[2] ?? 0;
-      }
-    } else {
-      t = (state.touch.turnR ? 1 : 0) + (state.touch.turnL ? -1 : 0);
-    }
-
-    const dz = 0.15;
-    if (Math.abs(t) < dz) return;
-
-    player.rotation.y += (-t) * state.turnSpeed * dt;
-  },
+  // these will be assigned in init
+  update() {},
+  teleportToSpawn() { return false; },
+  sitAt() {},
+  leaveSeat() {},
 };

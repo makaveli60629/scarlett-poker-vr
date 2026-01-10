@@ -1,13 +1,16 @@
-// /js/world.js — SCARLETT VR POKER — WORLD MASTER v14 (ULTIMATE BASELINE)
-// ✅ Lobby + Store (bigger) + Scorpion (beautified) + Spectate
+// /js/world.js — SCARLETT VR POKER — WORLD MASTER v14.1 (FULL EQUIPPED)
+// ✅ Classic Lobby restored (live demo poker table + boss bots seated + spectator rail + walkers)
+// ✅ Store bigger / baseline
+// ✅ Scorpion beautified + neon gold/yellow corner pillars top-to-bottom + better pot (no fat green ball)
+// ✅ Chairs face table correctly (FIXED)
+// ✅ Arch Teleporter (portal style) in lobby (clickable + vibe restored)
 // ✅ Teleport pads + lasers + clickables
 // ✅ VR locomotion (sticks) + teleport (squeeze aim, trigger commit)
-// ✅ Lobby feels alive: walker bots circling + wandering
-// ✅ Scorpion: better table, upright bots, visible card dealing loop
 // ✅ Android tap-to-click supported via clickFromCamera()
 
 export const World = (() => {
-  let THREE, scene, renderer, camera, player, controllers, log;
+  let THREE, scene, renderer, camera, player, log;
+  let controllers = []; // ALWAYS normalized array
 
   const S = {
     ready: false,
@@ -15,6 +18,8 @@ export const World = (() => {
 
     raycaster: null,
     tmpMat: null,
+    tmpV: null,
+    tmpV2: null,
 
     lasers: [],
     move: { speed: 2.1, snap: Math.PI / 6, snapCooldown: 0 },
@@ -25,11 +30,28 @@ export const World = (() => {
     clickables: [],
     hovered: null,
 
+    // Lobby ambience
     lobby: {
+      t: 0,
       walkers: [],
-      t: 0
+      demo: {
+        t: 0,
+        tableZ: -2.4,
+        tableGroup: null,
+        felt: null,
+        shoe: null,
+        pot: null,
+        bots: [],
+        seats: [],
+        handState: "idle",
+        stepT: 0,
+        community: [],
+        hole: []
+      },
+      teleporter: null
     },
 
+    // Scorpion poker
     poker: {
       t: 0,
       tableZ: -2.8,
@@ -47,13 +69,20 @@ export const World = (() => {
   };
 
   async function init(ctx) {
-    ({ THREE, scene, renderer, camera, player, controllers, log } = ctx);
+    ({ THREE, scene, renderer, camera, player, log } = ctx);
+
+    // Normalize controllers (robust)
+    const raw = ctx.controllers;
+    controllers = Array.isArray(raw) ? raw : (raw ? [raw.left, raw.right].filter(Boolean) : []);
+    if (!controllers) controllers = [];
 
     S.root = new THREE.Group();
     scene.add(S.root);
 
     S.raycaster = new THREE.Raycaster();
     S.tmpMat = new THREE.Matrix4();
+    S.tmpV = new THREE.Vector3();
+    S.tmpV2 = new THREE.Vector3();
 
     addLights();
     buildShell();
@@ -66,8 +95,11 @@ export const World = (() => {
     setRoom("lobby");
     forceSpawnForRoom("lobby");
 
+    // Start lobby demo automatically (bots playing)
+    startDemoHandLoop();
+
     S.ready = true;
-    log?.("ready ✅");
+    log?.("ready ✅ (v14.1 FULL)");
   }
 
   function update(dt) {
@@ -82,12 +114,21 @@ export const World = (() => {
 
     // ambient
     S.lobby.t += dt;
+
+    // Lobby demo always animates even if not visible (keeps state consistent)
+    S.lobby.demo.t += dt;
+    animatePokerBots(S.lobby.demo);
+    updatePokerDealing(dt, S.lobby.demo);
+    animateTeleporter(dt);
+
+    // lobby walkers only when in lobby
     if (S.rooms.current === "lobby") updateLobbyWalkers(dt);
 
+    // Scorpion poker only when in scorpion
     S.poker.t += dt;
     if (S.rooms.current === "scorpion") {
-      animatePokerBots();
-      updatePokerDealing(dt);
+      animatePokerBots(S.poker);
+      updatePokerDealing(dt, S.poker);
     }
   }
 
@@ -101,16 +142,15 @@ export const World = (() => {
     key.position.set(7, 12, 6);
     scene.add(key);
 
-    const fill = new THREE.PointLight(0x88ccff, 0.75, 60);
+    const fill = new THREE.PointLight(0x88ccff, 0.75, 70);
     fill.position.set(-7, 3.2, -7);
     scene.add(fill);
 
-    const warm = new THREE.PointLight(0xff88cc, 0.6, 60);
+    const warm = new THREE.PointLight(0xff88cc, 0.6, 70);
     warm.position.set(7, 3.2, -7);
     scene.add(warm);
 
-    // ceiling glow ring light
-    const ringLight = new THREE.PointLight(0x7fe7ff, 0.35, 80);
+    const ringLight = new THREE.PointLight(0x7fe7ff, 0.35, 90);
     ringLight.position.set(0, 6.3, 0);
     scene.add(ringLight);
   }
@@ -130,7 +170,6 @@ export const World = (() => {
     walls.position.y = 3.5;
     S.root.add(walls);
 
-    // Ceiling ring
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(13, 0.28, 18, 120),
       new THREE.MeshStandardMaterial({
@@ -144,7 +183,6 @@ export const World = (() => {
     ring.rotation.x = Math.PI / 2;
     S.root.add(ring);
 
-    // Landmark pillar
     const pillar = new THREE.Mesh(
       new THREE.CylinderGeometry(0.25, 0.35, 2.4, 20),
       new THREE.MeshStandardMaterial({ color: 0x10131e, roughness: 0.75, metalness: 0.2 })
@@ -163,9 +201,9 @@ export const World = (() => {
     sign.position.set(0, 2.45, -12.5);
     S.root.add(sign);
 
-    // spectator rail ring
+    // spectator rail ring for lobby feel
     const rail = new THREE.Mesh(
-      new THREE.TorusGeometry(9.5, 0.09, 16, 140),
+      new THREE.TorusGeometry(9.5, 0.10, 16, 140),
       new THREE.MeshStandardMaterial({ color: 0x1b1c26, roughness: 0.65, metalness: 0.15 })
     );
     rail.rotation.x = Math.PI / 2;
@@ -209,8 +247,8 @@ export const World = (() => {
 
   function forceSpawnForRoom(room) {
     if (room === "lobby") {
-      player.position.set(0, 0, 6.5);
-      faceYawToward(new THREE.Vector3(0, 1.6, 0));
+      player.position.set(0, 0, 7.6);
+      faceYawToward(new THREE.Vector3(0, 1.6, -2.2)); // face demo table
     } else if (room === "store") {
       player.position.set(8.5, 0, 4.2);
       faceYawToward(new THREE.Vector3(8.5, 1.6, 0));
@@ -232,18 +270,18 @@ export const World = (() => {
   }
 
   // =========================================================
-  // LOBBY (pretty + walkers)
+  // LOBBY — CLASSIC DEMO TABLE + BOSS BOTS + ARCH TELEPORTER
   // =========================================================
   function buildLobby(g) {
-    const title = makeBillboard("LOBBY", 1.2);
-    title.position.set(0, 2.2, 2.2);
+    const title = makeBillboard("LOBBY — LIVE TABLE", 1.2);
+    title.position.set(0, 2.35, 2.4);
     g.add(title);
 
-    const prompt = makeBillboard("Pads → Store / Scorpion / Spectate", 0.85);
-    prompt.position.set(0, 1.55, 0.7);
+    const prompt = makeBillboard("Watch the bots play. Use pads to travel.", 0.85);
+    prompt.position.set(0, 1.55, 1.0);
     g.add(prompt);
 
-    // Decorative “portal” ring
+    // Portal ring decor
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(1.15, 0.08, 16, 72),
       new THREE.MeshStandardMaterial({ color: 0x7fe7ff, emissive: 0x05161a, roughness: 0.35 })
@@ -252,8 +290,90 @@ export const World = (() => {
     ring.position.set(0, 0.06, 0);
     g.add(ring);
 
-    // Add a few walkers to make it feel alive
+    // Arch Teleporter (clickable)
+    const tp = buildArchTeleporter();
+    tp.position.set(0, 0, 0);
+    tp.userData.onClick = () => { setRoom("scorpion"); forceSpawnForRoom("scorpion"); };
+    g.add(tp);
+    S.clickables.push(tp);
+    S.lobby.teleporter = tp;
+
+    // Live demo poker table in lobby (boss bots seated + dealing)
+    buildPokerTableSet(g, S.lobby.demo, { tableZ: S.lobby.demo.tableZ, title: "BOSS TABLE", accent: 0x7fe7ff });
+
+    // Walkers around the lobby for life
     spawnLobbyWalkers(g, 6);
+  }
+
+  function buildArchTeleporter() {
+    const g = new THREE.Group();
+
+    // Base platform
+    const base = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.35, 1.35, 0.12, 72),
+      new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.85, metalness: 0.15 })
+    );
+    base.position.y = 0.06;
+    g.add(base);
+
+    // Arch frame (two pillars + top)
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x10131e, roughness: 0.6, metalness: 0.25 });
+    const pillarGeom = new THREE.BoxGeometry(0.18, 2.25, 0.18);
+    const p1 = new THREE.Mesh(pillarGeom, frameMat);
+    const p2 = new THREE.Mesh(pillarGeom, frameMat);
+    p1.position.set(-0.78, 1.125, 0);
+    p2.position.set(0.78, 1.125, 0);
+    g.add(p1, p2);
+
+    const top = new THREE.Mesh(new THREE.BoxGeometry(1.80, 0.18, 0.18), frameMat);
+    top.position.set(0, 2.25, 0);
+    g.add(top);
+
+    // Inner portal ring (glow)
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.95, 0.06, 14, 120),
+      new THREE.MeshStandardMaterial({
+        color: 0x7fe7ff,
+        roughness: 0.25,
+        metalness: 0.15,
+        emissive: 0x052128,
+        emissiveIntensity: 1.0
+      })
+    );
+    ring.position.set(0, 1.35, 0);
+    ring.rotation.y = Math.PI / 2;
+    g.add(ring);
+    g.userData._ring = ring;
+
+    // Energy coil (purple electricity vibe)
+    const coil = new THREE.Mesh(
+      new THREE.TorusKnotGeometry(0.55, 0.035, 140, 16),
+      new THREE.MeshBasicMaterial({ color: 0xff2d7a, transparent: true, opacity: 0.22 })
+    );
+    coil.position.set(0, 1.35, 0);
+    coil.rotation.x = Math.PI / 2;
+    g.add(coil);
+    g.userData._coil = coil;
+
+    const label = makeBillboard("ARCH TELEPORT → SCORPION", 0.7);
+    label.position.set(0, 2.95, 0);
+    g.add(label);
+
+    // Make it "clickable"
+    g.userData.onClick = () => {};
+    return g;
+  }
+
+  function animateTeleporter(dt) {
+    const tp = S.lobby.teleporter;
+    if (!tp) return;
+    const ring = tp.userData._ring;
+    const coil = tp.userData._coil;
+    if (ring) ring.rotation.z += dt * 0.55;
+    if (coil) {
+      coil.rotation.z -= dt * 0.75;
+      coil.rotation.y += dt * 0.35;
+    }
   }
 
   function spawnLobbyWalkers(g, count) {
@@ -261,16 +381,12 @@ export const World = (() => {
 
     for (let i = 0; i < count; i++) {
       const bot = makeWalkerBot(i);
-      bot.position.set(
-        (Math.random() - 0.5) * 10,
-        0,
-        (Math.random() - 0.5) * 10
-      );
+      bot.position.set((Math.random() - 0.5) * 10, 0, (Math.random() - 0.5) * 10);
 
       bot.userData.walk = {
-        r: 6 + Math.random() * 3,
+        r: 7 + Math.random() * 3,
         a: Math.random() * Math.PI * 2,
-        s: 0.22 + Math.random() * 0.25,
+        s: 0.18 + Math.random() * 0.22,
         wobble: Math.random() * 10
       };
 
@@ -280,7 +396,6 @@ export const World = (() => {
   }
 
   function updateLobbyWalkers(dt) {
-    // Simple orbit paths; keeps it cheap + stable
     for (const b of S.lobby.walkers) {
       const w = b.userData.walk;
       w.a += dt * w.s;
@@ -291,16 +406,13 @@ export const World = (() => {
       b.position.x = x;
       b.position.z = z;
 
-      // face direction of travel
       b.rotation.y = Math.atan2(-Math.sin(w.a), -Math.cos(w.a));
-
-      // idle bob
       b.position.y = 0.02 * Math.sin((S.lobby.t * 2.1) + w.wobble);
     }
   }
 
   // =========================================================
-  // STORE (bigger, prettier)
+  // STORE
   // =========================================================
   function buildStore(g) {
     g.position.set(8.5, 0, 0);
@@ -309,7 +421,6 @@ export const World = (() => {
     title.position.set(0, 2.4, -6.0);
     g.add(title);
 
-    // Big store floor platform
     const plat = new THREE.Mesh(
       new THREE.CylinderGeometry(6.8, 6.8, 0.08, 72),
       new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.95 })
@@ -317,7 +428,6 @@ export const World = (() => {
     plat.position.set(0, 0.04, -6.0);
     g.add(plat);
 
-    // Shelves
     for (let i = 0; i < 5; i++) {
       const shelf = new THREE.Mesh(
         new THREE.BoxGeometry(2.2, 1.3, 0.35),
@@ -334,7 +444,6 @@ export const World = (() => {
       g.add(glow);
     }
 
-    // Kiosk
     const kiosk = new THREE.Mesh(
       new THREE.BoxGeometry(2.6, 1.05, 1.4),
       new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.7, metalness: 0.2 })
@@ -346,7 +455,6 @@ export const World = (() => {
     panel.position.set(0, 1.6, -4.2);
     g.add(panel);
 
-    // Back pad
     const back = makePad("BACK → LOBBY", 0x7fe7ff);
     back.position.set(0, 0.01, -1.2);
     back.userData.onClick = () => { setRoom("lobby"); forceSpawnForRoom("lobby"); };
@@ -376,16 +484,19 @@ export const World = (() => {
   }
 
   // =========================================================
-  // SCORPION (beautified + dealing)
+  // SCORPION — NICER + NEON CORNERS + FIXED CHAIRS + BETTER POT
   // =========================================================
   function buildScorpion(g) {
     g.position.set(-8.5, 0, 0);
+
+    // Nicer “room” box (so neon corners make sense visually)
+    buildScorpionRoomBox(g);
 
     const title = makeBillboard("SCORPION ROOM — TABLE 1", 1.0);
     title.position.set(0, 2.35, -6.9);
     g.add(title);
 
-    // room glow accents
+    // floor accent ring
     const neon = new THREE.Mesh(
       new THREE.TorusGeometry(4.6, 0.08, 16, 120),
       new THREE.MeshBasicMaterial({ color: 0xff2d7a, transparent: true, opacity: 0.18 })
@@ -394,11 +505,144 @@ export const World = (() => {
     neon.position.set(0, 0.09, S.poker.tableZ);
     g.add(neon);
 
-    // table group
+    // Table set
+    buildPokerTableSet(g, S.poker, { tableZ: S.poker.tableZ, title: "SCORPION TABLE", accent: 0xff2d7a });
+
+    // Buttons
+    const start = makeButton("START HAND");
+    start.position.set(0, 1.2, S.poker.tableZ + 3.1);
+    start.userData.onClick = () => startHand(S.poker);
+    g.add(start);
+    S.clickables.push(start);
+
+    const back = makePad("BACK → LOBBY", 0x7fe7ff);
+    back.position.set(0, 0.01, S.poker.tableZ + 6.6);
+    back.userData.onClick = () => { setRoom("lobby"); forceSpawnForRoom("lobby"); };
+    g.add(back);
+    S.clickables.push(back);
+  }
+
+  function buildScorpionRoomBox(g) {
+    // dimensions of the “Scorpion room box”
+    const w = 12.5, h = 6.6, d = 13.0;
+    const z0 = S.poker.tableZ + 1.6;
+
+    // Dark walls with subtle roughness (placeholder “texture look”)
+    const wallMat = new THREE.MeshStandardMaterial({
+      color: 0x07080e,
+      roughness: 0.92,
+      metalness: 0.05
+    });
+
+    const floorMat = new THREE.MeshStandardMaterial({
+      color: 0x090b12,
+      roughness: 0.95,
+      metalness: 0.02
+    });
+
+    // floor
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(0, 0.01, z0);
+    g.add(floor);
+
+    // 4 walls (simple planes)
+    const wallN = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat);
+    wallN.position.set(0, h/2, z0 - d/2);
+    g.add(wallN);
+
+    const wallS = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat);
+    wallS.position.set(0, h/2, z0 + d/2);
+    wallS.rotation.y = Math.PI;
+    g.add(wallS);
+
+    const wallE = new THREE.Mesh(new THREE.PlaneGeometry(d, h), wallMat);
+    wallE.position.set(w/2, h/2, z0);
+    wallE.rotation.y = -Math.PI / 2;
+    g.add(wallE);
+
+    const wallW = new THREE.Mesh(new THREE.PlaneGeometry(d, h), wallMat);
+    wallW.position.set(-w/2, h/2, z0);
+    wallW.rotation.y = Math.PI / 2;
+    g.add(wallW);
+
+    // Neon corner pillars top-to-bottom (gold/yellow)
+    const neonMat = new THREE.MeshStandardMaterial({
+      color: 0xffcc00,
+      emissive: 0xffcc00,
+      emissiveIntensity: 0.95,
+      roughness: 0.25,
+      metalness: 0.05
+    });
+
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, h, 20), neonMat);
+
+    const corners = [
+      [ w/2 - 0.05, h/2, z0 - d/2 + 0.05],
+      [-w/2 + 0.05, h/2, z0 - d/2 + 0.05],
+      [ w/2 - 0.05, h/2, z0 + d/2 - 0.05],
+      [-w/2 + 0.05, h/2, z0 + d/2 - 0.05],
+    ];
+
+    for (const [x,y,z] of corners) {
+      const p = tube.clone();
+      p.position.set(x,y,z);
+      g.add(p);
+
+      // Small “cap glow” top/bottom
+      const cap = new THREE.Mesh(
+        new THREE.SphereGeometry(0.08, 16, 16),
+        new THREE.MeshBasicMaterial({ color: 0xffee55, transparent: true, opacity: 0.55 })
+      );
+      cap.position.set(x, h - 0.05, z);
+      g.add(cap);
+
+      const cap2 = cap.clone();
+      cap2.position.y = 0.12;
+      g.add(cap2);
+    }
+
+    // Extra neon strips along wall ends (you asked “each end of the walls neon yellow”)
+    const stripMat = new THREE.MeshBasicMaterial({ color: 0xffee55, transparent: true, opacity: 0.18 });
+    const stripGeomNS = new THREE.PlaneGeometry(w, 0.18);
+    const stripGeomEW = new THREE.PlaneGeometry(d, 0.18);
+
+    const stripTopN = new THREE.Mesh(stripGeomNS, stripMat);
+    stripTopN.position.set(0, h - 0.35, z0 - d/2 + 0.02);
+    g.add(stripTopN);
+
+    const stripTopS = stripTopN.clone();
+    stripTopS.position.z = z0 + d/2 - 0.02;
+    stripTopS.rotation.y = Math.PI;
+    g.add(stripTopS);
+
+    const stripTopE = new THREE.Mesh(stripGeomEW, stripMat);
+    stripTopE.position.set(w/2 - 0.02, h - 0.35, z0);
+    stripTopE.rotation.y = -Math.PI/2;
+    g.add(stripTopE);
+
+    const stripTopW = stripTopE.clone();
+    stripTopW.position.x = -w/2 + 0.02;
+    stripTopW.rotation.y = Math.PI/2;
+    g.add(stripTopW);
+  }
+
+  // =========================================================
+  // POKER TABLE BUILDER (shared by Lobby demo and Scorpion)
+  // =========================================================
+  function buildPokerTableSet(roomGroup, P, opts) {
+    // opts: { tableZ, title, accent }
+    const { tableZ, title, accent } = opts;
+
+    // group
     const table = new THREE.Group();
-    table.position.set(0, 0, S.poker.tableZ);
-    g.add(table);
-    S.poker.tableGroup = table;
+    table.position.set(0, 0, tableZ);
+    roomGroup.add(table);
+    P.tableGroup = table;
+
+    const sign = makeBillboard(title, 0.85);
+    sign.position.set(0, 2.15, tableZ - 3.9);
+    roomGroup.add(sign);
 
     // felt (oval-ish)
     const felt = new THREE.Mesh(
@@ -409,7 +653,7 @@ export const World = (() => {
     felt.scale.set(1.25, 1.0, 0.78);
     felt.position.y = 1.02;
     table.add(felt);
-    S.poker.felt = felt;
+    P.felt = felt;
 
     // felt line
     const feltLine = new THREE.Mesh(
@@ -446,49 +690,61 @@ export const World = (() => {
     );
     shoe.position.set(0, 1.06, -0.60);
     table.add(shoe);
-    S.poker.shoe = shoe;
+    P.shoe = shoe;
 
-    // pot (small/dark so it doesn’t look like a “tree”)
-    const pot = makeChipStack(10, { dark: true });
+    // POT FIX: small chip pot (no big green ball)
+    const pot = makeChipPot(18);
     pot.position.set(0, 1.045, 0.02);
-    pot.scale.setScalar(0.9);
+    pot.scale.setScalar(1.0);
     table.add(pot);
-    S.poker.pot = pot;
+    P.pot = pot;
 
-    // seats + bots + chairs + chip stacks
-    buildPokerSeatsBotsAndChips(g, table);
+    // accent glow ring (subtle)
+    const glow = new THREE.Mesh(
+      new THREE.RingGeometry(2.25, 2.45, 96),
+      new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.10 })
+    );
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.y = 1.035;
+    glow.scale.set(1.25, 1.0, 0.78);
+    table.add(glow);
 
-    // cards
-    buildCardMeshes(table);
+    // Seats + bots + chairs + chip stacks
+    buildPokerSeatsBotsAndChips(roomGroup, table, P);
 
-    // buttons
-    const start = makeButton("START HAND");
-    start.position.set(0, 1.2, table.position.z + 3.1);
-    start.userData.onClick = () => startHand();
-    g.add(start);
-    S.clickables.push(start);
+    // Cards
+    buildCardMeshes(table, P);
 
-    const back = makePad("BACK → LOBBY", 0x7fe7ff);
-    back.position.set(0, 0.01, table.position.z + 6.6);
-    back.userData.onClick = () => { setRoom("lobby"); forceSpawnForRoom("lobby"); };
-    g.add(back);
-    S.clickables.push(back);
+    // Auto-hand loop for lobby demo only (Scorpion uses Start Hand)
+    if (P === S.lobby.demo) {
+      const btn = makeButton("JOIN SCORPION (ARCH OR PAD)");
+      btn.position.set(0, 1.15, tableZ + 3.35);
+      btn.userData.onClick = () => { setRoom("scorpion"); forceSpawnForRoom("scorpion"); };
+      roomGroup.add(btn);
+      S.clickables.push(btn);
+    }
   }
 
-  function buildPokerSeatsBotsAndChips(roomGroup, table) {
-    S.poker.bots.length = 0;
-    S.poker.seats.length = 0;
-    S.poker.hole.length = 0;
+  function buildPokerSeatsBotsAndChips(roomGroup, table, P) {
+    P.bots.length = 0;
+    P.seats.length = 0;
+    P.hole.length = 0;
 
     const botCount = 8;
     const radius = 3.05;
+    const center = new THREE.Vector3(0, 0, table.position.z);
 
     for (let i = 0; i < botCount; i++) {
       const ang = (i / botCount) * Math.PI * 2;
 
       const chair = makeChair();
-      chair.position.set(Math.cos(ang) * radius, 0, table.position.z + Math.sin(ang) * radius);
-      chair.rotation.y = -ang + Math.PI / 2;
+      const x = Math.cos(ang) * radius;
+      const z = table.position.z + Math.sin(ang) * radius;
+      chair.position.set(x, 0, z);
+
+      // ✅ FIX: chair faces table (no “opposite way”)
+      faceObjectYawAt(chair, center);
+
       roomGroup.add(chair);
 
       const seatPos = new THREE.Vector3(
@@ -496,27 +752,39 @@ export const World = (() => {
         0,
         table.position.z + Math.sin(ang) * (radius - 0.55)
       );
-      S.poker.seats.push({ pos: seatPos, ang });
+      P.seats.push({ pos: seatPos, ang });
 
       const bot = makePokerBot(i);
       bot.position.copy(seatPos);
-      bot.rotation.y = -ang + Math.PI;
+
+      // face bot toward table
+      faceObjectYawAt(bot, center);
+
       roomGroup.add(bot);
-      S.poker.bots.push(bot);
+      P.bots.push(bot);
 
       // chip stack per seat
       const stack = makeChipStack(14 + (i % 6), { dark: false });
       stack.position.set(Math.cos(ang) * 1.7, 1.05, table.position.z + Math.sin(ang) * 1.25);
       table.add(stack);
 
-      S.poker.hole.push([]);
+      P.hole.push([]);
     }
   }
 
-  function animatePokerBots() {
-    for (let i = 0; i < S.poker.bots.length; i++) {
-      const b = S.poker.bots[i];
-      const t = S.poker.t + i * 0.6;
+  function faceObjectYawAt(obj, targetWorld) {
+    const pos = new THREE.Vector3(obj.position.x, 0, obj.position.z);
+    const dir = targetWorld.clone().sub(pos);
+    dir.y = 0;
+    if (dir.lengthSq() < 0.000001) return;
+    dir.normalize();
+    obj.rotation.y = Math.atan2(dir.x, dir.z);
+  }
+
+  function animatePokerBots(P) {
+    for (let i = 0; i < P.bots.length; i++) {
+      const b = P.bots[i];
+      const t = P.t + i * 0.6;
 
       const head = b.getObjectByName("head");
       if (head) {
@@ -529,12 +797,12 @@ export const World = (() => {
   }
 
   // -------------------
-  // Card dealing visuals
+  // Card dealing visuals (shared)
   // -------------------
-  function buildCardMeshes(table) {
+  function buildCardMeshes(table, P) {
     // clear old
-    for (const m of S.poker.community) table.remove(m);
-    S.poker.community.length = 0;
+    for (const m of P.community) table.remove(m);
+    P.community.length = 0;
 
     // 5 community
     for (let i = 0; i < 5; i++) {
@@ -543,12 +811,12 @@ export const World = (() => {
       card.rotation.x = -Math.PI / 2;
       card.visible = false;
       table.add(card);
-      S.poker.community.push(card);
+      P.community.push(card);
     }
 
     // hole cards 2 per seat
-    for (let s = 0; s < S.poker.seats.length; s++) {
-      const seat = S.poker.seats[s];
+    for (let s = 0; s < P.seats.length; s++) {
+      const seat = P.seats[s];
       const center = new THREE.Vector3(0, 1.045, table.position.z);
       const dir = new THREE.Vector3(seat.pos.x, 0, seat.pos.z)
         .sub(new THREE.Vector3(0, 0, table.position.z))
@@ -572,83 +840,100 @@ export const World = (() => {
       table.add(c1);
       table.add(c2);
 
-      S.poker.hole[s] = [c1, c2];
+      P.hole[s] = [c1, c2];
     }
   }
 
-  function startHand() {
-    if (S.poker.handState !== "idle") return;
+  function startHand(P) {
+    if (P.handState !== "idle") return;
 
-    for (const c of S.poker.community) c.visible = false;
-    for (const pair of S.poker.hole) {
+    for (const c of P.community) c.visible = false;
+    for (const pair of P.hole) {
       pair[0].visible = false;
       pair[1].visible = false;
     }
 
     // flash felt
-    const mat = S.poker.felt.material;
+    const mat = P.felt.material;
     const original = mat.color.getHex();
     mat.color.setHex(0x16a065);
     setTimeout(() => mat.color.setHex(original), 160);
 
-    S.poker.handState = "deal_hole";
-    S.poker.stepT = 0;
+    P.handState = "deal_hole";
+    P.stepT = 0;
     log?.("[poker] start hand ✅");
   }
 
-  function updatePokerDealing(dt) {
-    if (S.poker.handState === "idle") return;
-    S.poker.stepT += dt;
+  function updatePokerDealing(dt, P) {
+    if (P.handState === "idle") return;
+    P.stepT += dt;
 
-    if (S.poker.handState === "deal_hole") {
-      const idx = Math.floor(S.poker.stepT / 0.12);
-      if (idx >= S.poker.seats.length * 2) {
-        S.poker.handState = "deal_flop";
-        S.poker.stepT = 0;
+    if (P.handState === "deal_hole") {
+      const idx = Math.floor(P.stepT / 0.12);
+      if (idx >= P.seats.length * 2) {
+        P.handState = "deal_flop";
+        P.stepT = 0;
         return;
       }
       const seat = Math.floor(idx / 2);
       const which = idx % 2;
-      const card = S.poker.hole[seat]?.[which];
+      const card = P.hole[seat]?.[which];
       if (card) card.visible = true;
       return;
     }
 
-    if (S.poker.handState === "deal_flop") {
-      if (S.poker.stepT > 0.6) {
-        S.poker.community[0].visible = true;
-        S.poker.community[1].visible = true;
-        S.poker.community[2].visible = true;
-        S.poker.handState = "deal_turn";
-        S.poker.stepT = 0;
+    if (P.handState === "deal_flop") {
+      if (P.stepT > 0.6) {
+        P.community[0].visible = true;
+        P.community[1].visible = true;
+        P.community[2].visible = true;
+        P.handState = "deal_turn";
+        P.stepT = 0;
       }
       return;
     }
 
-    if (S.poker.handState === "deal_turn") {
-      if (S.poker.stepT > 0.9) {
-        S.poker.community[3].visible = true;
-        S.poker.handState = "deal_river";
-        S.poker.stepT = 0;
+    if (P.handState === "deal_turn") {
+      if (P.stepT > 0.9) {
+        P.community[3].visible = true;
+        P.handState = "deal_river";
+        P.stepT = 0;
       }
       return;
     }
 
-    if (S.poker.handState === "deal_river") {
-      if (S.poker.stepT > 0.9) {
-        S.poker.community[4].visible = true;
-        S.poker.handState = "showdown";
-        S.poker.stepT = 0;
+    if (P.handState === "deal_river") {
+      if (P.stepT > 0.9) {
+        P.community[4].visible = true;
+        P.handState = "showdown";
+        P.stepT = 0;
       }
       return;
     }
 
-    if (S.poker.handState === "showdown") {
-      if (S.poker.stepT > 1.4) {
-        S.poker.handState = "idle";
+    if (P.handState === "showdown") {
+      if (P.stepT > 1.4) {
+        P.handState = "idle";
         log?.("[poker] showdown ✅");
       }
     }
+  }
+
+  function startDemoHandLoop() {
+    // lobby demo keeps playing continuously
+    const P = S.lobby.demo;
+    if (P._looping) return;
+    P._looping = true;
+
+    const loop = () => {
+      // if we’re already in a hand, wait
+      if (P.handState !== "idle") { setTimeout(loop, 900); return; }
+      startHand(P);
+      // wait long enough for a full hand to play
+      setTimeout(loop, 7000);
+    };
+
+    setTimeout(loop, 900);
   }
 
   // =========================================================
@@ -677,6 +962,11 @@ export const World = (() => {
   function buildLasers() {
     S.lasers.length = 0;
 
+    if (!controllers || !controllers.length) {
+      log?.("controllers missing (ok) — lasers deferred");
+      return;
+    }
+
     for (const c of controllers) {
       const geom = new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(0, 0, 0),
@@ -701,6 +991,11 @@ export const World = (() => {
   }
 
   function wireControllerEvents() {
+    if (!controllers || !controllers.length) {
+      log?.("controllers missing (ok) — controller events deferred");
+      return;
+    }
+
     for (const c of controllers) {
       c.addEventListener("selectstart", () => {
         if (S.tp.aiming && S.tp.lastValid && S.tp.cooldown <= 0) {
@@ -723,6 +1018,7 @@ export const World = (() => {
 
   function updateRays() {
     const objs = S.clickables;
+    if (!S.lasers.length) return;
 
     for (const laser of S.lasers) {
       const c = laser.controller;
@@ -772,7 +1068,6 @@ export const World = (() => {
   function clickFromCamera() {
     const origin = new THREE.Vector3();
     camera.getWorldPosition(origin);
-
     const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
 
     S.raycaster.set(origin, dir);
@@ -921,7 +1216,7 @@ export const World = (() => {
       const v = new THREE.Vector3();
       v.addScaledVector(rightV, ax);
       v.addScaledVector(forward, ay);
-      v.normalize();
+      if (v.lengthSq() > 0.00001) v.normalize();
 
       player.position.addScaledVector(v, dt * S.move.speed);
     }
@@ -1050,7 +1345,6 @@ export const World = (() => {
   function makePokerBot(i) {
     const g = makeWalkerBot(i);
 
-    // shoulders/arms (simple body presence)
     const armMat = new THREE.MeshStandardMaterial({ color: 0x14151d, roughness: 0.85 });
     const armGeom = new THREE.CylinderGeometry(0.035, 0.035, 0.45, 12);
 
@@ -1086,13 +1380,32 @@ export const World = (() => {
     return g;
   }
 
+  function makeChipPot(n = 18) {
+    // “pot” as a small low mound of chips (prevents “big fat ball” look)
+    const g = new THREE.Group();
+    const colors = [0xff2d7a, 0x7fe7ff, 0xffcc00, 0xffffff];
+    for (let i = 0; i < n; i++) {
+      const mat = new THREE.MeshStandardMaterial({
+        color: colors[i % colors.length],
+        roughness: 0.45,
+        metalness: 0.12
+      });
+      const chip = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.013, 18), mat);
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random() * 0.18;
+      chip.position.set(Math.cos(a) * r, 0.010 + (i * 0.004), Math.sin(a) * r);
+      chip.rotation.y = Math.random() * Math.PI;
+      g.add(chip);
+    }
+    g.scale.setScalar(1.0);
+    return g;
+  }
+
   function makeCardMesh() {
-    // simple card: white front, dark back edge
-    const card = new THREE.Mesh(
+    return new THREE.Mesh(
       new THREE.PlaneGeometry(0.20, 0.28),
       new THREE.MeshStandardMaterial({ color: 0xf3f4ff, roughness: 0.65, metalness: 0.0 })
     );
-    return card;
   }
 
   function makeBillboard(text, scale = 1) {

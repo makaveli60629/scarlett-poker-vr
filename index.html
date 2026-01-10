@@ -1,3 +1,4 @@
+<!-- /index.html — Scarlett VR Poker (FULL) — VR Ready + GitHub Pages Safe -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -14,552 +15,241 @@
       --muted:#98a0c7;
       --aqua:#7fe7ff;
       --pink:#ff2d7a;
-      --ok:#4cd964;
-      --warn:#ffcc00;
-      --bad:#ff6b6b;
       --shadow: 0 12px 40px rgba(0,0,0,.45);
       --radius: 18px;
     }
+
     html, body {
-      margin:0; padding:0; height:100%;
-      background:var(--bg); overflow:hidden;
+      margin:0;
+      padding:0;
+      height:100%;
+      background:var(--bg);
+      overflow:hidden;
       font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial;
       color:var(--text);
-      touch-action:none;
-      -webkit-tap-highlight-color:transparent;
     }
-    canvas { display:block; width:100vw; height:100vh; }
 
-    #hud{ position:fixed; left:0; top:0; right:0; padding:14px; z-index:10; pointer-events:none; }
-    #topbar{ display:flex; align-items:center; justify-content:space-between; gap:10px; pointer-events:none; }
+    canvas { display:block; }
 
+    /* Top HUD */
+    #hud {
+      position:fixed;
+      left:0; right:0; top:0;
+      padding:14px 14px 10px 14px;
+      z-index:10;
+      pointer-events:none;
+    }
+    #hud .row{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+    }
     #brand{
       pointer-events:none;
-      display:flex; align-items:center; gap:10px;
+      background:linear-gradient(135deg, rgba(11,13,20,.88), rgba(11,13,20,.55));
+      border:1px solid rgba(127,231,255,.22);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
       padding:10px 12px;
-      background:linear-gradient(180deg, rgba(10,12,20,.85), rgba(10,12,20,.65));
-      border:1px solid rgba(127,231,255,.18);
+      min-width: 240px;
+    }
+    #brand .title{
+      font-weight:800;
+      letter-spacing:.4px;
+      line-height:1.05;
+      font-size:16px;
+    }
+    #brand .sub{
+      margin-top:4px;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.2;
+    }
+    #status{
+      pointer-events:none;
+      text-align:right;
+      background:linear-gradient(135deg, rgba(11,13,20,.88), rgba(11,13,20,.55));
+      border:1px solid rgba(255,45,122,.18);
       border-radius:var(--radius);
       box-shadow:var(--shadow);
-      backdrop-filter:blur(10px);
+      padding:10px 12px;
+      min-width: 220px;
     }
-    #brand .dot{ width:10px; height:10px; border-radius:50%;
-      background:var(--aqua); box-shadow:0 0 18px rgba(127,231,255,.65);
+    #status .pill{
+      display:inline-block;
+      padding:4px 9px;
+      border-radius:999px;
+      background:rgba(127,231,255,.12);
+      border:1px solid rgba(127,231,255,.25);
+      font-size:12px;
+      color:var(--aqua);
+      margin-bottom:6px;
     }
-    #brand .title{ font-weight:800; letter-spacing:.2px; font-size:14px; line-height:1.2; }
-    #brand .sub{ font-size:12px; color:var(--muted); line-height:1.2; }
+    #status .hint{
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.25;
+    }
 
-    #panel{
-      pointer-events:auto;
-      display:flex; flex-wrap:wrap; gap:8px;
-      justify-content:flex-end; align-items:center;
-      padding:10px;
-      background:linear-gradient(180deg, rgba(10,12,20,.90), rgba(10,12,20,.70));
-      border:1px solid rgba(255,255,255,.08);
+    /* Bottom help */
+    #help {
+      position:fixed;
+      left:0; right:0; bottom:0;
+      padding:12px 14px 14px 14px;
+      z-index:10;
+      pointer-events:none;
+    }
+    #help .card{
+      margin:0 auto;
+      max-width:920px;
+      background:linear-gradient(135deg, rgba(11,13,20,.90), rgba(11,13,20,.62));
+      border:1px solid rgba(127,231,255,.16);
       border-radius:var(--radius);
       box-shadow:var(--shadow);
-      backdrop-filter:blur(10px);
+      padding:10px 12px;
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px 14px;
+      align-items:center;
+      justify-content:space-between;
     }
-
-    .btn{
-      display:inline-flex; align-items:center; justify-content:center; gap:8px;
-      min-height:38px; padding:0 12px; border-radius:14px;
-      border:1px solid rgba(255,255,255,.12);
+    .k{
+      display:flex; gap:10px; align-items:center;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.2;
+    }
+    .keycap{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      height:24px;
+      padding:0 10px;
+      border-radius:10px;
       background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.12);
       color:var(--text);
-      font-weight:700; font-size:13px; letter-spacing:.2px;
-      cursor:pointer; user-select:none; -webkit-user-select:none;
-    }
-    .btn:active{ transform:translateY(1px); }
-    .btn.primary{ border-color:rgba(127,231,255,.35); background:rgba(127,231,255,.14); box-shadow:0 0 0 1px rgba(127,231,255,.15) inset; }
-    .btn.pink{ border-color:rgba(255,45,122,.35); background:rgba(255,45,122,.14); box-shadow:0 0 0 1px rgba(255,45,122,.15) inset; }
-    .btn.warn{ border-color:rgba(255,204,0,.35); background:rgba(255,204,0,.12); }
-    .btn.ghost{ background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.10); }
-    .btn.small{ min-height:34px; padding:0 10px; font-size:12.5px; }
-
-    .pill{
-      display:inline-flex; align-items:center; gap:8px;
-      padding:7px 10px; border-radius:999px;
-      border:1px solid rgba(255,255,255,.10);
-      background:rgba(255,255,255,.05);
-      font-size:12px; color:var(--muted);
-      white-space:nowrap;
-    }
-    .pill b{ color:var(--text); font-weight:800; }
-
-    #dock{
-      position:fixed; left:12px; right:12px; bottom:12px; z-index:11;
-      pointer-events:auto;
-      display:flex; gap:10px; flex-wrap:wrap;
-      align-items:center; justify-content:center;
-      padding:10px; border-radius:22px;
-      background:linear-gradient(180deg, rgba(10,12,20,.92), rgba(10,12,20,.72));
-      border:1px solid rgba(255,255,255,.08);
-      box-shadow:var(--shadow);
-      backdrop-filter:blur(10px);
+      font-weight:700;
+      letter-spacing:.2px;
+      min-width:44px;
     }
 
-    #logwrap{
-      position:fixed; left:12px; bottom:92px;
-      width:min(780px, calc(100vw - 24px));
-      max-height:52vh; z-index:12;
-      pointer-events:auto;
-      border-radius:18px;
-      background:rgba(0,0,0,.52);
-      border:1px solid rgba(255,255,255,.10);
-      box-shadow:var(--shadow);
-      overflow:hidden;
-      display:none;
+    /* Loader */
+    #loader {
+      position:fixed;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:radial-gradient(1200px 800px at 50% 15%, rgba(127,231,255,.08), rgba(5,6,10,1));
+      z-index:999;
     }
-    #loghead{
-      display:flex; align-items:center; justify-content:space-between; gap:10px;
-      padding:10px 12px;
-      background:rgba(10,12,20,.85);
-      border-bottom:1px solid rgba(255,255,255,.08);
-    }
-    #loghead .h{ font-weight:800; font-size:13px; letter-spacing:.2px; }
-    #log{
-      margin:0; padding:10px 12px 12px 12px;
-      font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;
-      font-size:11px; line-height:1.35;
-      color:rgba(232,236,255,.92);
-      overflow:auto;
-      max-height:calc(52vh - 44px);
-      white-space:pre-wrap; word-break:break-word;
-    }
-
-    #help{
-      position:fixed; inset:0; z-index:20;
-      pointer-events:auto;
-      display:none;
-      background:rgba(0,0,0,.55);
-      backdrop-filter:blur(10px);
-      align-items:center; justify-content:center; padding:16px;
-    }
-    #helpCard{
-      width:min(760px, 100%);
+    #loader .panel{
+      width:min(720px, calc(100% - 32px));
+      background:linear-gradient(135deg, rgba(11,13,20,.92), rgba(11,13,20,.72));
+      border:1px solid rgba(127,231,255,.22);
       border-radius:22px;
-      background:rgba(10,12,20,.92);
-      border:1px solid rgba(255,255,255,.10);
       box-shadow:var(--shadow);
-      padding:16px;
+      padding:18px 16px;
     }
-    #helpCard h2{ margin:0 0 10px 0; font-size:18px; letter-spacing:.2px; }
-    #helpCard .grid{ display:grid; grid-template-columns:1fr; gap:10px; color:rgba(232,236,255,.92); font-size:13px; line-height:1.35; }
-    #helpCard .row{ padding:10px 12px; border-radius:16px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08); }
-    #helpCard .row b{ color:var(--aqua); }
-    #helpCard .actions{ margin-top:12px; display:flex; justify-content:flex-end; gap:10px; }
+    #loader h1{
+      margin:0 0 6px 0;
+      font-size:18px;
+      letter-spacing:.3px;
+    }
+    #loader p{
+      margin:0;
+      color:var(--muted);
+      font-size:13px;
+      line-height:1.35;
+    }
+    #loader .bar{
+      margin-top:12px;
+      height:10px;
+      border-radius:999px;
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.10);
+      overflow:hidden;
+    }
+    #loader .bar > i{
+      display:block;
+      height:100%;
+      width:40%;
+      background:linear-gradient(90deg, rgba(127,231,255,.25), rgba(255,45,122,.25), rgba(127,231,255,.25));
+      animation: load 1.2s linear infinite;
+    }
+    @keyframes load {
+      0% { transform:translateX(-60%); }
+      100% { transform:translateX(260%); }
+    }
 
-    #vrButtonSlot{ position:fixed; right:14px; bottom:92px; z-index:30; pointer-events:auto; }
-
-    @media (max-width:520px){
-      #panel{ justify-content:center; }
-      #brand{ display:none; }
-      #logwrap{ bottom:100px; }
-      #vrButtonSlot{ bottom:110px; }
+    /* Make VRButton sit nicely */
+    #VRButton, .vr-button {
+      position: fixed !important;
+      right: 14px !important;
+      bottom: 86px !important;
+      z-index: 50 !important;
+      border-radius: 14px !important;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial !important;
+      box-shadow: var(--shadow) !important;
     }
   </style>
-
-  <!-- Importmap: /js/three.js wrapper re-exports from this "three" mapping -->
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-    }
-  }
-  </script>
 </head>
 
 <body>
-  <div id="hud">
-    <div id="topbar">
+  <!-- Lightweight UI overlay (doesn't interfere with XR) -->
+  <div id="hud" aria-hidden="true">
+    <div class="row">
       <div id="brand">
-        <div class="dot"></div>
-        <div>
-          <div class="title">Scarlett VR Poker</div>
-          <div class="sub">WebXR • Quest • Android</div>
+        <div class="title">SCARLETT VR POKER</div>
+        <div class="sub">GitHub Pages safe • Quest Browser ready</div>
+      </div>
+
+      <div id="status">
+        <div class="pill" id="buildPill">BOOTING…</div>
+        <div class="hint" id="hintLine">
+          If you don’t see <b>Enter VR</b>, open Quest Browser DevTools Console for errors.
         </div>
       </div>
-
-      <div id="panel">
-        <span class="pill"><b>Status</b><span id="statusText">Booting…</span></span>
-        <span class="pill"><b>Build</b><span id="buildText">—</span></span>
-
-        <button class="btn primary small" id="btnEnter">Enter VR</button>
-        <button class="btn pink small" id="btnRecenter">Recenter</button>
-
-        <button class="btn ghost small" id="btnTeleport">Teleport</button>
-        <button class="btn ghost small" id="btnMove">Move</button>
-        <button class="btn ghost small" id="btnSnap">Snap</button>
-        <button class="btn ghost small" id="btnHands">Hands</button>
-
-        <button class="btn ghost small" id="btnLobby">Lobby</button>
-        <button class="btn ghost small" id="btnScorpion">Scorpion</button>
-        <button class="btn ghost small" id="btnSpectate">Spectate</button>
-        <button class="btn ghost small" id="btnStore">Store</button>
-
-        <button class="btn warn small" id="btnDiag">Diagnostics</button>
-        <button class="btn warn small" id="btnForceLog">Force Log</button>
-        <button class="btn ghost small" id="btnHelp">Help</button>
-        <button class="btn ghost small" id="btnLog">Log</button>
-        <button class="btn ghost small" id="btnReset">Reset</button>
-      </div>
     </div>
   </div>
 
-  <div id="vrButtonSlot" aria-label="VR Button Slot"></div>
-
-  <!-- Mobile controls (Android only, hidden on Quest) -->
-  <div id="dock" aria-label="Mobile Controls">
-    <button class="btn" id="mForward">▲</button>
-    <div style="display:flex; gap:10px; align-items:center;">
-      <button class="btn" id="mLeft">◀</button>
-      <button class="btn" id="mBack">▼</button>
-      <button class="btn" id="mRight">▶</button>
-    </div>
-    <button class="btn pink" id="mTeleport">Teleport</button>
-    <button class="btn" id="mTurnL">⟲</button>
-    <button class="btn" id="mTurnR">⟳</button>
-  </div>
-
-  <!-- Log -->
-  <div id="logwrap">
-    <div id="loghead">
-      <div class="h">Console Log</div>
-      <div style="display:flex; gap:8px;">
-        <button class="btn small ghost" id="btnCopyLog">Copy</button>
-        <button class="btn small ghost" id="btnClearLog">Clear</button>
-        <button class="btn small ghost" id="btnCloseLog">Close</button>
-      </div>
-    </div>
-    <pre id="log"></pre>
-  </div>
-
-  <!-- Help -->
-  <div id="help">
-    <div id="helpCard">
-      <h2>Controls</h2>
-      <div class="grid">
-        <div class="row"><b>Quest:</b> Left stick move • Right stick turn • Toggle Snap for snap/smooth.</div>
-        <div class="row"><b>Android:</b> Use dock arrows • Tap Teleport to toggle.</div>
-        <div class="row"><b>Rooms:</b> Lobby / Scorpion / Spectate / Store buttons send events to room_manager.</div>
-        <div class="row"><b>Diagnostics:</b> Checks key files for 404 + shows content-type and file head.</div>
-        <div class="row"><b>Reset:</b> Clears saved flags + reloads.</div>
-      </div>
-      <div class="actions">
-        <button class="btn primary" id="btnCloseHelp">Close</button>
-      </div>
+  <div id="help" aria-hidden="true">
+    <div class="card">
+      <div class="k"><span class="keycap">Left Stick</span> Move</div>
+      <div class="k"><span class="keycap">Right Stick</span> Snap Turn</div>
+      <div class="k"><span class="keycap">Trigger</span> Click</div>
+      <div class="k"><span class="keycap">Grip</span> Hold to Teleport Aim</div>
+      <div class="k"><span class="keycap">Grip + Trigger</span> Teleport</div>
     </div>
   </div>
 
-  <script type="module">
-    // =========================
-    // Scarlett FULL Index vALL
-    // =========================
+  <!-- Loader -->
+  <div id="loader" role="status" aria-live="polite">
+    <div class="panel">
+      <h1>Loading Scarlett VR Poker…</h1>
+      <p>
+        Tip: If something looks “wrong lobby / no lasers”, it usually means a module path/case error.
+        Use Quest Browser DevTools Console and paste the first red error line.
+      </p>
+      <div class="bar"><i></i></div>
+    </div>
+  </div>
 
-    const v = Date.now().toString();
-    window.__BUILD_V = v;
-
-    // "All options" WebXR session init (browsers ignore unsupported features)
-    // Note: Main/VRButton should read this.
-    window.__XR_SESSION_INIT = {
-      optionalFeatures: [
-        // Reference spaces
-        "local-floor",
-        "bounded-floor",
-        "local",
-        "viewer",
-
-        // Input
-        "hand-tracking",
-
-        // Rendering / composition
-        "layers",
-        "dom-overlay",
-        "depth-sensing",
-
-        // Anchors + hit testing
-        "anchors",
-        "hit-test",
-
-        // Scene understanding (where supported)
-        "plane-detection",
-        "mesh-detection",
-
-        // WebXR features that may exist on some runtimes
-        "light-estimation",
-        "secondary-views",
-        "unbounded"
-      ],
-      // domOverlay only works if supported; safe otherwise
-      domOverlay: { root: document.body },
-      // depthSensing (safe to include; ignored if unsupported)
-      depthSensing: {
-        usagePreference: ["cpu-optimized", "gpu-optimized"],
-        dataFormatPreference: ["luminance-alpha", "float32"]
-      }
-    };
-
-    const statusText = document.getElementById("statusText");
-    const setStatus = (t) => { statusText.textContent = " " + t; };
-    document.getElementById("buildText").textContent = " " + v;
-
-    // ---- log system ----
-    const logEl = document.getElementById("log");
-    const logWrap = document.getElementById("logwrap");
-    const openLog = () => (logWrap.style.display = "block");
-    const toggleLog = () => (logWrap.style.display = (logWrap.style.display === "block" ? "none" : "block"));
-    function appendLog(m){
-      if (!logEl) return;
-      logEl.textContent += "\n" + String(m);
-      logEl.scrollTop = logEl.scrollHeight;
-    }
-
-    window.addEventListener("scarlett-log", (e) => {
-      try { appendLog(String(e?.detail ?? "")); } catch {}
-    });
-
-    (function hookConsole(){
-      const origLog = console.log.bind(console);
-      const origWarn = console.warn.bind(console);
-      const origErr = console.error.bind(console);
-      console.log = (...a)=>{ origLog(...a); try{ appendLog(a.map(String).join(" ")); }catch{} };
-      console.warn = (...a)=>{ origWarn(...a); try{ openLog(); appendLog("⚠️ "+a.map(String).join(" ")); }catch{} };
-      console.error = (...a)=>{ origErr(...a); try{ openLog(); appendLog("❌ "+a.map(String).join(" ")); }catch{} };
+  <script>
+    // Simple boot indicator + cache bust help
+    (function(){
+      const pill = document.getElementById("buildPill");
+      const loader = document.getElementById("loader");
+      const v = new URLSearchParams(location.search).get("v") || "no-v";
+      pill.textContent = "BUILD: " + v;
+      // Hide loader after a bit (main.js will still show fatal overlay if needed)
+      setTimeout(() => { loader.style.display = "none"; }, 1200);
     })();
-
-    window.addEventListener("error", (e)=>{ openLog(); appendLog("❌ window.error: " + (e?.message || e)); });
-    window.addEventListener("unhandledrejection", (e)=>{ openLog(); appendLog("❌ unhandledrejection: " + (e?.reason?.message || e?.reason || e)); });
-
-    appendLog("BOOT v=" + v);
-    appendLog("href=" + location.href);
-    appendLog("ua=" + (navigator.userAgent || ""));
-    appendLog("navigator.xr=" + (!!navigator.xr));
-    appendLog("[index] sessionInit=" + JSON.stringify(window.__XR_SESSION_INIT));
-
-    // ---- UI elements ----
-    const btnEnter = document.getElementById("btnEnter");
-    const btnRecenter = document.getElementById("btnRecenter");
-    const btnTeleport = document.getElementById("btnTeleport");
-    const btnMove = document.getElementById("btnMove");
-    const btnSnap = document.getElementById("btnSnap");
-    const btnHands = document.getElementById("btnHands");
-
-    const btnLobby = document.getElementById("btnLobby");
-    const btnScorpion = document.getElementById("btnScorpion");
-    const btnSpectate = document.getElementById("btnSpectate");
-    const btnStore = document.getElementById("btnStore");
-
-    const btnHelp = document.getElementById("btnHelp");
-    const btnLog = document.getElementById("btnLog");
-    const btnDiag = document.getElementById("btnDiag");
-    const btnForceLog = document.getElementById("btnForceLog");
-    const btnReset = document.getElementById("btnReset");
-
-    document.getElementById("btnCopyLog")?.addEventListener("click", async ()=>{
-      try { await navigator.clipboard.writeText(logEl?.textContent || ""); appendLog("[hud] log copied ✅"); }
-      catch { openLog(); appendLog("[hud] log copy failed ⚠️"); }
-    });
-    document.getElementById("btnClearLog")?.addEventListener("click", ()=>{ logEl.textContent=""; appendLog("[hud] log cleared ✅"); });
-    document.getElementById("btnCloseLog")?.addEventListener("click", ()=>{ logWrap.style.display="none"; });
-
-    const help = document.getElementById("help");
-    btnHelp?.addEventListener("click", ()=>{ help.style.display="flex"; });
-    document.getElementById("btnCloseHelp")?.addEventListener("click", ()=>{ help.style.display="none"; });
-
-    btnLog?.addEventListener("click", toggleLog);
-    btnForceLog?.addEventListener("click", ()=>{ openLog(); appendLog("[hud] log forced open ✅"); });
-
-    // ---- flags / toggles ----
-    const LS_KEY="scarlett_flags_v2";
-    const defaultFlags = { teleport:true, move:true, snap:true, hands:true };
-    const saved = (()=>{ try{ return JSON.parse(localStorage.getItem(LS_KEY) || "null"); }catch{ return null; }})();
-    window.__SCARLETT_FLAGS = Object.assign({}, defaultFlags, saved || {});
-    const saveFlags = ()=>{ try{ localStorage.setItem(LS_KEY, JSON.stringify(window.__SCARLETT_FLAGS)); }catch{} };
-
-    const updateTogglesUI = ()=>{
-      const f = window.__SCARLETT_FLAGS;
-      btnTeleport.classList.toggle("primary", !!f.teleport);
-      btnMove.classList.toggle("primary", !!f.move);
-      btnSnap.classList.toggle("primary", !!f.snap);
-      btnHands.classList.toggle("primary", !!f.hands);
-    };
-    updateTogglesUI();
-
-    function emit(name, detail){
-      window.dispatchEvent(new CustomEvent(name, { detail }));
-    }
-
-    btnTeleport.addEventListener("click", ()=>{
-      window.__SCARLETT_FLAGS.teleport=!window.__SCARLETT_FLAGS.teleport; saveFlags(); updateTogglesUI();
-      appendLog("[hud] teleport="+window.__SCARLETT_FLAGS.teleport);
-      emit("scarlett-toggle-teleport", window.__SCARLETT_FLAGS.teleport);
-    });
-    btnMove.addEventListener("click", ()=>{
-      window.__SCARLETT_FLAGS.move=!window.__SCARLETT_FLAGS.move; saveFlags(); updateTogglesUI();
-      appendLog("[hud] move="+window.__SCARLETT_FLAGS.move);
-      emit("scarlett-toggle-move", window.__SCARLETT_FLAGS.move);
-    });
-    btnSnap.addEventListener("click", ()=>{
-      window.__SCARLETT_FLAGS.snap=!window.__SCARLETT_FLAGS.snap; saveFlags(); updateTogglesUI();
-      appendLog("[hud] snap="+window.__SCARLETT_FLAGS.snap);
-      emit("scarlett-toggle-snap", window.__SCARLETT_FLAGS.snap);
-    });
-    btnHands.addEventListener("click", ()=>{
-      window.__SCARLETT_FLAGS.hands=!window.__SCARLETT_FLAGS.hands; saveFlags(); updateTogglesUI();
-      appendLog("[hud] hands="+window.__SCARLETT_FLAGS.hands);
-      emit("scarlett-toggle-hands", window.__SCARLETT_FLAGS.hands);
-    });
-
-    btnRecenter.addEventListener("click", ()=>{ appendLog("[hud] recenter"); window.dispatchEvent(new Event("scarlett-recenter")); });
-
-    // ✅ FULL, SAFE ENTER VR:
-    // - Dispatch event that main.js listens to (best path; real user gesture)
-    // - Also try clicking the real VRButton if it exists (no guessing / no recursion)
-    btnEnter.addEventListener("click", () => {
-      appendLog("[hud] enter vr -> dispatch scarlett-enter-vr");
-      window.dispatchEvent(new Event("scarlett-enter-vr"));
-
-      // optional: click actual VRButton created by VRButton.js (if present)
-      const real = document.querySelector("#vrButtonSlot button[data-scarlett-vrbutton]");
-      if (real && real !== btnEnter) {
-        real.click();
-        appendLog("[hud] also clicked real VRButton ✅");
-      }
-    });
-
-    // rooms / actions
-    btnLobby?.addEventListener("click", ()=>{ appendLog("[hud] room=lobby"); emit("scarlett-room", "lobby"); });
-    btnScorpion?.addEventListener("click", ()=>{ appendLog("[hud] room=scorpion"); emit("scarlett-room", "scorpion"); });
-    btnSpectate?.addEventListener("click", ()=>{ appendLog("[hud] room=spectate"); emit("scarlett-room", "spectator"); });
-    btnStore?.addEventListener("click", ()=>{ appendLog("[hud] room=store"); emit("scarlett-room", "store"); });
-
-    // reset
-    btnReset?.addEventListener("click", ()=>{
-      try { localStorage.removeItem(LS_KEY); } catch {}
-      appendLog("[hud] reset flags + reload");
-      location.reload();
-    });
-
-    // ---- mobile dock controls ----
-    const touchState={ f:0,b:0,l:0,r:0,turnL:0,turnR:0 };
-    const emitTouch=()=>emit("scarlett-touch", { ...touchState });
-
-    function bindHold(btnId,key,val){
-      const el=document.getElementById(btnId); if(!el) return;
-      const down=(e)=>{ e.preventDefault(); touchState[key]=val; emitTouch(); };
-      const up=(e)=>{ e.preventDefault(); touchState[key]=0; emitTouch(); };
-      el.addEventListener("pointerdown",down,{passive:false});
-      el.addEventListener("pointerup",up,{passive:false});
-      el.addEventListener("pointercancel",up,{passive:false});
-      el.addEventListener("pointerleave",up,{passive:false});
-    }
-    bindHold("mForward","f",1);
-    bindHold("mBack","b",1);
-    bindHold("mLeft","l",1);
-    bindHold("mRight","r",1);
-    bindHold("mTurnL","turnL",1);
-    bindHold("mTurnR","turnR",1);
-
-    document.getElementById("mTeleport")?.addEventListener("click", ()=>{
-      window.__SCARLETT_FLAGS.teleport=!window.__SCARLETT_FLAGS.teleport; saveFlags(); updateTogglesUI();
-      appendLog("[hud] teleport="+window.__SCARLETT_FLAGS.teleport);
-      emit("scarlett-toggle-teleport", window.__SCARLETT_FLAGS.teleport);
-    });
-
-    // show dock on Android phone; hide on Quest
-    (function updateDockVisibility(){
-      const ua=navigator.userAgent||"";
-      const isQuest=/OculusBrowser|Oculus|Quest/i.test(ua);
-      const isMobile=/Android|iPhone|iPad|iPod/i.test(ua);
-      const show=isMobile && !isQuest;
-      const dock=document.getElementById("dock");
-      if(dock) dock.style.display=show ? "flex" : "none";
-    })();
-
-    // ---- diagnostics ----
-    async function fetchHead(url) {
-      const r = await fetch(url, { cache: "no-store" });
-      const ct = (r.headers.get("content-type") || "?").toLowerCase();
-      const txt = await r.text();
-      const head = (txt || "").slice(0, 100).replace(/\s+/g, " ");
-      const looksHtml = head.toLowerCase().includes("<!doctype") || head.toLowerCase().includes("<html");
-      return { r, ct, head, looksHtml };
-    }
-
-    async function diagnostics(){
-      openLog();
-      appendLog("[diag] running…");
-      const base=location.href.replace(/\/[^\/]*$/, "/");
-
-      const files=[
-        "js/main.js",
-        "js/world.js",
-        "js/controls.js",
-        "js/spawn_points.js",
-        "js/VRButton.js",
-        "js/three.js",
-        "js/textures.js",
-        "js/lights_pack.js",
-        "js/solid_walls.js",
-        "js/table_factory.js",
-        "js/spectator_rail.js",
-        "js/teleport_machine.js",
-        "js/store.js",
-        "js/ui.js",
-        "js/vr_ui.js",
-        "js/vr_ui_panel.js",
-        "js/scorpion_room.js",
-        "js/room_manager.js",
-        "js/bots.js",
-        "js/poker_sim.js"
-      ];
-
-      let issues=0;
-      for(const f of files){
-        const url=new URL(f+"?v="+encodeURIComponent(v), base).toString();
-        try{
-          const { r, ct, head, looksHtml } = await fetchHead(url);
-          const note =
-            !r.ok ? " ❌" :
-            looksHtml ? " 🚨LOOKS-LIKE-HTML" :
-            " ✅";
-          appendLog(`[diag] ${f} -> ${r.status} (type=${ct}) HEAD="${head}"${note}`);
-          if(!r.ok || looksHtml) issues++;
-        }catch(e){
-          appendLog(`[diag] ${f} -> ERR ❌ ${e?.message||e}`);
-          issues++;
-        }
-      }
-      appendLog(issues ? `[diag] done (ISSUES=${issues}) ❌` : "[diag] done ✅");
-      return issues;
-    }
-    btnDiag.addEventListener("click", diagnostics);
-
-    // ---- load main (dynamic import) ----
-    async function loadMain(){
-      setStatus("Loading…");
-      const mainUrl="./js/main.js?v="+encodeURIComponent(v);
-      appendLog("Import main:\n"+new URL(mainUrl, location.href).toString());
-      await import(mainUrl);
-      setStatus("Ready ✅");
-      appendLog("[index] main imported ✅");
-    }
-
-    try{
-      await loadMain();
-    }catch(e){
-      openLog();
-      setStatus("Import error ❌");
-      appendLog("❌ main import failed: "+(e?.message||e));
-      console.error(e);
-      appendLog("Fix checklist:");
-      appendLog("1) Confirm /js/main.js exists");
-      appendLog("2) Folder name is exactly: js (lowercase)");
-      appendLog("3) Press Diagnostics for 404s + check content-type is JS");
-      await diagnostics();
-    }
   </script>
+
+  <!-- IMPORTANT: module load (cache bust with ?v= ) -->
+  <script type="module" src="./js/main.js?v=1"></script>
 </body>
 </html>

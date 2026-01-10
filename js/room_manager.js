@@ -1,5 +1,4 @@
-// /js/room_manager.js — Room Manager v4 (SAFE SPAWNS)
-// Ensures you never spawn on table/colliders when entering rooms.
+// /js/room_manager.js — Room Manager v5 (SCORPION = AUTO-SEAT + INSTANT HAND)
 
 export const RoomManager = {
   init(ctx) {
@@ -13,61 +12,79 @@ export const RoomManager = {
   setRoom(ctx, room) {
     ctx.room = room;
     ctx.mode = room;
-
     ctx.log?.(`[rm] room=${room}`);
 
-    // behaviors
+    // --- LOBBY ---
     if (room === "lobby") {
       ctx.systems?.scorpion?.setActive?.(false);
       ctx.systems?.store?.setActive?.(true);
+
+      // Return to standing + lobby spawn
+      ctx.controls?.forceStanding?.("lobby_spawn");
+      ctx.spawns?.apply?.("lobby_spawn", ctx.player, { standY: 1.65 });
+
+      // Lobby poker demo
       ctx.PokerSim?.setMode?.("lobby_demo");
 
-      // safe lobby spawn
-      ctx.spawns?.apply?.("lobby_spawn", ctx.player, { standY: 1.65 });
+      return;
     }
 
+    // --- STORE ---
     if (room === "store") {
       ctx.systems?.scorpion?.setActive?.(false);
       ctx.systems?.store?.setActive?.(true);
-      ctx.PokerSim?.setMode?.("lobby_demo");
 
+      ctx.controls?.forceStanding?.("store_spawn");
       ctx.spawns?.apply?.("store_spawn", ctx.player, { standY: 1.65 });
+
+      ctx.PokerSim?.setMode?.("lobby_demo");
+      return;
     }
 
+    // --- SPECTATE ---
     if (room === "spectate") {
       ctx.systems?.scorpion?.setActive?.(false);
-      ctx.PokerSim?.setMode?.("lobby_demo");
+      ctx.systems?.store?.setActive?.(false);
 
+      ctx.controls?.forceStanding?.("spectator");
       ctx.spawns?.apply?.("spectator", ctx.player, { standY: 1.65 });
+
+      ctx.PokerSim?.setMode?.("lobby_demo");
+      return;
     }
 
-    // ✅ NEW: scorpion room safe spawn (in front of the teleport machine / entry area)
+    // --- SCORPION (AUTO-SEAT + PLAY) ---
     if (room === "scorpion") {
       ctx.systems?.store?.setActive?.(false);
       ctx.systems?.scorpion?.setActive?.(true);
 
-      // IMPORTANT: do NOT spawn at scorpion_seat_1 here
-      // That’s how you end up on/inside the table.
-      ctx.spawns?.apply?.("scorpion_safe_spawn", ctx.player, { standY: 1.65 });
+      // IMPORTANT: Seat the player (movement disabled) at a SAFE seat position
+      // This is your "sit down and start instantly" behavior.
+      ctx.controls?.sitAt?.("scorpion_seat_1");
 
-      // If you want auto-seat later, do it AFTER 1-2 seconds when collision settles.
-      // ctx.PokerSim?.setMode?.("scorpion_autoseat");
+      // Start scorpion gameplay mode (player + bots)
+      ctx.PokerSim?.setMode?.("scorpion_play");
+
+      return;
     }
   },
 
-  // Basic teleporter / pad wiring (adapt to your TeleportMachine events)
   _wireTeleports(ctx) {
-    // If your teleport machine emits events, hook them here.
-    // This is defensive: it won’t break if the event system changes.
+    // room change event
     window.addEventListener("scarlett-room", (e) => {
       const room = e?.detail?.room;
       if (!room) return;
       this.setRoom(ctx, room);
     });
 
-    // If your TeleportMachine sets ctx.teleportMachine and calls callbacks:
+    // If TeleportMachine has callback API
     if (ctx.teleportMachine?.onRoom) {
       ctx.teleportMachine.onRoom((room) => this.setRoom(ctx, room));
     }
+
+    // OPTIONAL: allow controls.leaveSeat() to route through RoomManager cleanly
+    window.addEventListener("scarlett-leave-table", () => {
+      this.setRoom(ctx, "lobby");
+    });
   },
 };

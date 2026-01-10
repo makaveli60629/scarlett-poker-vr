@@ -8,277 +8,223 @@
   <style>
     :root{
       --bg:#05060a;
-      --panel:#0b0d14ee;
+      --panel:#0b0d14cc;
+      --panel2:#0b0d14f2;
       --text:#e8ecff;
       --muted:#98a0c7;
       --aqua:#7fe7ff;
       --pink:#ff2d7a;
+      --ok:#4cd964;
       --warn:#ffcc00;
       --bad:#ff6b6b;
-      --ok:#4cd964;
-      --radius:16px;
-      --shadow: 0 14px 50px rgba(0,0,0,.55);
+      --shadow: 0 12px 40px rgba(0,0,0,.45);
+      --radius: 18px;
     }
+
     html, body {
       margin:0; padding:0; height:100%;
       background:var(--bg);
       overflow:hidden;
       font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial;
       color:var(--text);
-    }
-    canvas { display:block; }
-
-    #VRButton, .vr-button {
-      position: fixed !important;
-      right: 12px !important;
-      bottom: 12px !important;
-      z-index: 9998 !important;
-      border-radius: 14px !important;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial !important;
-      box-shadow: var(--shadow) !important;
+      touch-action:none;
     }
 
-    #dbg {
-      position:fixed; left:12px; right:12px; top:12px;
-      z-index:9999;
-      pointer-events:auto;
-      max-width: 1040px;
-      margin: 0 auto;
-    }
-    #dbg .card{
-      background:linear-gradient(135deg, rgba(11,13,20,.95), rgba(11,13,20,.75));
-      border:1px solid rgba(127,231,255,.20);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      overflow:hidden;
-    }
-    #dbg .top{
-      display:flex; gap:10px; align-items:center; justify-content:space-between;
-      padding:10px 12px;
-      border-bottom:1px solid rgba(255,255,255,.08);
-    }
-    #dbg .title{
-      font-weight:800;
-      letter-spacing:.2px;
+    #app { position:fixed; inset:0; }
+    canvas { width:100%; height:100%; display:block; }
+
+    /* Top HUD (minimal) */
+    #hud {
+      position: fixed;
+      left: calc(env(safe-area-inset-left) + 12px);
+      top: calc(env(safe-area-inset-top) + 12px);
       display:flex;
       gap:10px;
+      z-index: 20;
       align-items:center;
-      flex-wrap:wrap;
+      pointer-events:none;
     }
-    .pill{
-      display:inline-flex;
-      align-items:center;
+    .chip {
+      pointer-events:auto;
+      background: rgba(11,13,20,.72);
+      border: 1px solid rgba(180,200,255,.14);
+      box-shadow: var(--shadow);
+      border-radius: 999px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: var(--text);
+      display:flex;
       gap:8px;
-      font-size:12px;
-      padding:5px 9px;
-      border-radius:999px;
-      border:1px solid rgba(255,255,255,.10);
-      background:rgba(255,255,255,.06);
-      color:var(--muted);
+      align-items:center;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
     }
-    .dot{ width:8px; height:8px; border-radius:99px; background:var(--warn); display:inline-block; }
-    .dot.ok{ background: var(--ok); }
-    .dot.bad{ background: var(--bad); }
+    .chip b { color: var(--aqua); font-weight:800; }
 
-    #dbg .btns{ display:flex; gap:8px; flex-wrap:wrap; }
-    button{
+    /* Android Touch Controls */
+    #touchControls {
+      position: fixed;
+      inset: 0;
+      z-index: 15;
+      pointer-events:none;
+      display:none; /* enabled by main.js when mobile & non-XR */
+    }
+
+    .stick {
+      position: absolute;
+      width: 150px;
+      height: 150px;
+      border-radius: 999px;
+      background: rgba(11,13,20,.38);
+      border: 1px solid rgba(180,200,255,.14);
+      box-shadow: var(--shadow);
+      pointer-events:auto;
+      touch-action:none;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    .stick .nub {
+      position:absolute;
+      left:50%; top:50%;
+      width: 62px; height: 62px;
+      transform: translate(-50%,-50%);
+      border-radius: 999px;
+      background: rgba(127,231,255,.16);
+      border: 1px solid rgba(127,231,255,.32);
+    }
+
+    #moveStick { left: calc(env(safe-area-inset-left) + 16px); bottom: calc(env(safe-area-inset-bottom) + 16px); }
+    #lookStick { right: calc(env(safe-area-inset-right) + 16px); bottom: calc(env(safe-area-inset-bottom) + 16px); }
+
+    /* ---------- Android Debug Hub (dockable, draggable, collapsible, hideable) ---------- */
+    :root{
+      --dbg-gap: 10px;
+      --dbg-radius: 14px;
+      --dbg-bg: rgba(10,12,18,.86);
+      --dbg-border: rgba(180,200,255,.18);
+      --dbg-text: #e8ecff;
+      --dbg-muted: rgba(232,236,255,.72);
+      --dbg-shadow: 0 14px 48px rgba(0,0,0,.55);
+    }
+
+    #androidDebugHub {
+      position: fixed;
+      left: calc(env(safe-area-inset-left) + var(--dbg-gap));
+      top: calc(env(safe-area-inset-top) + 58px); /* keep out of VR button area */
+      width: min(420px, calc(100vw - 2*var(--dbg-gap) - env(safe-area-inset-left) - env(safe-area-inset-right)));
+      max-height: min(52vh, calc(100vh - 2*var(--dbg-gap) - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+      z-index: 99999;
+      background: var(--dbg-bg);
+      border: 1px solid var(--dbg-border);
+      border-radius: var(--dbg-radius);
+      box-shadow: var(--dbg-shadow);
+      color: var(--dbg-text);
+      overflow: hidden;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      pointer-events:none; /* key */
+      display:none;
+    }
+
+    #androidDebugHub .dbgHeader,
+    #androidDebugHub .dbgBody,
+    #androidDebugHub button {
+      pointer-events:auto;
+    }
+
+    #androidDebugHub .dbgHeader {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      padding:10px 10px;
+      cursor:grab;
+      user-select:none;
+      border-bottom:1px solid var(--dbg-border);
+    }
+    #androidDebugHub.dragging .dbgHeader { cursor:grabbing; }
+
+    #androidDebugHub .dbgTitle {
+      font-weight:800;
+      font-size:12px;
+      letter-spacing:.5px;
+      color: var(--aqua);
+    }
+
+    #androidDebugHub .dbgBtns { display:flex; gap:6px; }
+    #androidDebugHub .dbgBtn {
       appearance:none;
-      border:none;
-      border-radius:12px;
-      padding:8px 10px;
-      font-weight:700;
-      cursor:pointer;
-      background:rgba(127,231,255,.12);
-      border:1px solid rgba(127,231,255,.22);
-      color:var(--aqua);
-    }
-    button.alt{
-      background:rgba(255,45,122,.10);
-      border:1px solid rgba(255,45,122,.22);
-      color:var(--pink);
-    }
-    button.dim{
-      background:rgba(255,255,255,.06);
-      border:1px solid rgba(255,255,255,.10);
-      color:var(--text);
-      font-weight:600;
-    }
-    button:active{ transform: translateY(1px); }
-
-    #dbg .body{
-      padding:10px 12px 12px 12px;
-      display:grid;
-      grid-template-columns: 1fr;
-      gap:10px;
-    }
-    #env{
-      display:flex; flex-wrap:wrap; gap:8px;
-      color:var(--muted);
+      border:1px solid var(--dbg-border);
+      background: rgba(255,255,255,.06);
+      color: var(--dbg-text);
+      border-radius: 10px;
+      padding:6px 9px;
       font-size:12px;
-      line-height:1.3;
+      line-height: 1;
     }
-    #log{
-      height: 210px;
-      overflow:auto;
-      border-radius:14px;
-      border:1px solid rgba(255,255,255,.10);
-      background:rgba(0,0,0,.35);
+
+    #androidDebugHub .dbgBody {
       padding:10px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      overflow:auto;
+      max-height: calc(52vh - 46px);
       font-size:12px;
-      white-space:pre-wrap;
-      word-break:break-word;
-      color:#e8ecff;
+      color: var(--dbg-muted);
+      white-space: pre-wrap;
     }
-    .kv{
-      display:inline-flex; gap:6px; align-items:center;
-      padding:5px 9px;
-      border-radius:999px;
-      background:rgba(255,255,255,.05);
-      border:1px solid rgba(255,255,255,.08);
-    }
-    .k{ color:var(--muted); }
-    .v{ color:var(--text); }
-  </style>
 
-  <!-- ✅ IMPORT MAP FIX:
-       This makes `import * as THREE from "three"` work on GitHub Pages + Quest.
-       It points "three" to your local module wrapper at /js/three.js -->
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "./js/three.js"
+    #androidDebugHub.collapsed .dbgBody { display:none; }
+    #androidDebugHub.collapsed { width:auto; }
+
+    #androidDebugFab {
+      position: fixed;
+      right: calc(env(safe-area-inset-right) + 12px);
+      bottom: calc(env(safe-area-inset-bottom) + 12px);
+      z-index: 99999;
+      border: 1px solid var(--dbg-border);
+      background: rgba(10,12,18,.72);
+      color: var(--dbg-text);
+      border-radius: 999px;
+      padding: 10px 12px;
+      font-size: 12px;
+      box-shadow: var(--dbg-shadow);
+      display:none;
+      pointer-events:auto;
     }
-  }
-  </script>
+    #androidDebugFab.show { display:block; }
+  </style>
 </head>
 
 <body>
-  <div id="dbg">
-    <div class="card">
-      <div class="top">
-        <div class="title">
-          <span>SCARLETT VR POKER — DEBUG BOOT</span>
-          <span class="pill"><span id="stDot" class="dot"></span><span id="stText">Booting…</span></span>
-          <span class="pill"><span class="k">v</span><span id="ver" class="v">?</span></span>
-        </div>
-        <div class="btns">
-          <button class="dim" id="btnToggle">Hide</button>
-          <button class="dim" id="btnClear">Clear</button>
-          <button class="alt" id="btnReload">Reload + CacheBust</button>
-        </div>
-      </div>
+  <div id="app"></div>
 
-      <div class="body" id="dbgBody">
-        <div id="env"></div>
-        <div id="log"></div>
-
-        <div style="color:var(--muted); font-size:12px; line-height:1.35;">
-          <b style="color:var(--text);">If VR button is missing:</b> main.js didn’t load or the browser doesn’t support immersive-vr.
-          <br/>This panel shows the exact import error.
-        </div>
-      </div>
-    </div>
+  <div id="hud">
+    <div class="chip"><b>Scarlett</b> VR Poker</div>
+    <button class="chip" id="btnMenu">Menu</button>
+    <button class="chip" id="btnDebug">Debug</button>
   </div>
 
-  <script>
-    (function(){
-      const logEl = document.getElementById("log");
-      const envEl = document.getElementById("env");
-      const stDot = document.getElementById("stDot");
-      const stText = document.getElementById("stText");
-      const verEl = document.getElementById("ver");
-      const btnToggle = document.getElementById("btnToggle");
-      const btnClear = document.getElementById("btnClear");
-      const btnReload = document.getElementById("btnReload");
-      const dbgBody = document.getElementById("dbgBody");
+  <div id="touchControls">
+    <div class="stick" id="moveStick"><div class="nub"></div></div>
+    <div class="stick" id="lookStick"><div class="nub"></div></div>
+  </div>
 
-      const params = new URLSearchParams(location.search);
-      const v = params.get("v") || String(Date.now());
-      verEl.textContent = v;
+  <div id="androidDebugHub" class="collapsed">
+    <div class="dbgHeader">
+      <div class="dbgTitle">ANDROID DEBUG</div>
+      <div class="dbgBtns">
+        <button class="dbgBtn" id="dbgCollapseBtn">▾</button>
+        <button class="dbgBtn" id="dbgHideBtn">✕</button>
+      </div>
+    </div>
+    <div class="dbgBody" id="dbgLog"></div>
+  </div>
 
-      function setStatus(kind, text){
-        stText.textContent = text;
-        stDot.classList.remove("ok","bad");
-        if (kind === "ok") stDot.classList.add("ok");
-        if (kind === "bad") stDot.classList.add("bad");
-      }
-      function safe(x){
-        try{
-          if (x instanceof Error) return (x.stack || x.message || String(x));
-          if (typeof x === "object") return JSON.stringify(x);
-          return String(x);
-        }catch(e){ return String(x); }
-      }
-      function append(line){
-        const t = new Date().toLocaleTimeString();
-        logEl.textContent += `[${t}] ${line}\n`;
-        logEl.scrollTop = logEl.scrollHeight;
-      }
+  <button id="androidDebugFab">Show Debug</button>
 
-      const _log = console.log, _warn = console.warn, _err = console.error;
-      console.log = (...a)=>{ _log(...a); append("LOG  " + a.map(safe).join(" ")); };
-      console.warn = (...a)=>{ _warn(...a); append("WARN " + a.map(safe).join(" ")); };
-      console.error = (...a)=>{ _err(...a); append("ERR  " + a.map(safe).join(" ")); };
-
-      window.addEventListener("error", (e) => {
-        setStatus("bad", "Runtime error");
-        console.error("window.error:", e.message, e.filename, e.lineno+":"+e.colno);
-      });
-      window.addEventListener("unhandledrejection", (e) => {
-        setStatus("bad", "Promise rejection");
-        console.error("unhandledrejection:", e.reason);
-      });
-
-      btnToggle.onclick = () => {
-        const hidden = dbgBody.style.display === "none";
-        dbgBody.style.display = hidden ? "grid" : "none";
-        btnToggle.textContent = hidden ? "Hide" : "Show";
-      };
-      btnClear.onclick = () => { logEl.textContent = ""; };
-      btnReload.onclick = () => {
-        const u = new URL(location.href);
-        u.searchParams.set("v", String(Date.now()));
-        location.href = u.toString();
-      };
-
-      const isSecure = window.isSecureContext;
-      const hasXR = !!navigator.xr;
-      envEl.innerHTML = [
-        kv("secureContext", isSecure ? "YES" : "NO"),
-        kv("navigator.xr", hasXR ? "YES" : "NO"),
-        kv("platform", navigator.platform || "n/a"),
-        kv("href", location.href),
-      ].join("");
-
-      function kv(k, v){
-        return `<span class="kv"><span class="k">${esc(k)}:</span><span class="v">${esc(String(v))}</span></span>`;
-      }
-      function esc(s){
-        return s.replace(/[&<>"']/g, (m)=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[m]));
-      }
-
-      console.log("BOOT", { v, secureContext:isSecure, xr:hasXR });
-
-      setStatus("warn", "Loading main.js…");
-      const mainPath = "./js/main.js?v=" + encodeURIComponent(v);
-
-      import(mainPath).then(() => {
-        setStatus("ok", "main.js loaded ✅");
-        console.log("main.js import ✅", mainPath);
-
-        setTimeout(() => {
-          const hasVRBtn = !!document.getElementById("VRButton") || !!document.querySelector(".vr-button");
-          if (!hasVRBtn) {
-            console.warn("VRButton not found in DOM (main may have crashed after import).");
-            setStatus("bad", "No VR button");
-          }
-        }, 1200);
-      }).catch((err) => {
-        setStatus("bad", "main.js failed to load");
-        console.error("FAILED TO IMPORT", mainPath, err);
-      });
-    })();
+  <script type="module">
+    // Hard cache-bust: index always loads newest main
+    const v = Date.now();
+    import(`./js/main.js?v=${v}`);
   </script>
 </body>
 </html>

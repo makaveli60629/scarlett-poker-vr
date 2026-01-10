@@ -1,319 +1,726 @@
-// /js/world.js — SCARLETT HYBRID WORLD v15.0 (FULL)
-// Tries OLD modular lobby first (textures/lights/walls/table/rail/teleport/store/scorpion/room_manager)
-// Falls back to SAFE procedural world (v12.3) if anything fails.
-// Exposes initWorld(...) so your existing main.js still works.
+// /js/world.js — Scarlett VR Poker — NEW WORLD HYBRID v12.0 (FULL)
+// ✅ Combines “old + new” world data: lobby + store + rail + scorpion room + poker table(s) + bots + teleport + UI
+// ✅ GitHub Pages safe (ESM). Uses optional/dynamic imports and hard fallbacks.
+// ✅ Auto-fixes chair/seat facing after load (best-effort).
+// ✅ Exposes a clean ctx for main.js: world.group, world.ctx, world.update(), world.dispose()
+// ✅ RoomManager supported (lobby/store/spectate/scorpion) if present.
+//
+// Usage from main.js (example):
+//   const world = await World.init({ THREE, scene, renderer, camera, player, controllers, log, BUILD });
+//   // in your render loop: world.update(dt)
+//
+// Notes:
+// - If a module is missing, this world still boots via fallback.
+// - This file assumes your project has a local three wrapper imported in main.js.
+// - Keep your other systems as-is; this tries to wire them up if they exist.
 
-function ui(log, m){
-  try { (log || console.log)(m); } catch {}
-  try { window.dispatchEvent(new CustomEvent("scarlett-log", { detail: String(m) })); } catch {}
-}
+const SIG = "WORLD.JS HYBRID v12.0 ACTIVE";
 
-async function imp(path){
-  const v = encodeURIComponent(window.__BUILD_V || Date.now().toString());
-  const url = `${path}?v=${v}`;
-  ui(null, `[world] import ${url}`);
+async function safeImport(path, log = console.log) {
   try {
-    const mod = await import(url);
-    ui(null, `[world] ✅ imported ${path}`);
+    const mod = await import(`${path}`);
     return mod;
   } catch (e) {
-    ui(null, `[world] ❌ import failed ${path} :: ${e?.message || e}`);
+    log?.(`[world] (optional) missing ${path}`);
     return null;
   }
 }
 
-async function callWithAdapters(fn, label, ctx, log){
-  const { THREE, scene, renderer, camera, player, controllers, world } = ctx;
-  const attempts = [
-    { args:[ctx], note:"(ctx)" },
-    { args:[scene], note:"(scene)" },
-    { args:[THREE, scene], note:"(THREE,scene)" },
-    { args:[scene, ctx], note:"(scene,ctx)" },
-    { args:[THREE, scene, renderer, camera], note:"(THREE,scene,renderer,camera)" },
-    { args:[world], note:"(world)" },
-  ];
-  let lastErr=null;
-  for (const a of attempts){
-    try{
-      ui(log, `[world] calling ${label} ${a.note}`);
-      const r = await fn(...a.args);
-      ui(log, `[world] ✅ ok ${label} ${a.note}`);
-      return { ok:true, result:r };
-    }catch(e){
-      lastErr=e;
-      ui(log, `[world] ⚠️ retry ${label} after error: ${e?.message || e}`);
-    }
+function now() { return (typeof performance !== "undefined" ? performance.now() : Date.now()); }
+
+function setMat(mesh, mat) {
+  if (!mesh) return;
+  if (mesh.material && Array.isArray(mesh.material)) {
+    mesh.material.forEach((m) => m && (m.dispose?.(), 0));
+  } else if (mesh.material) {
+    mesh.material.dispose?.();
   }
-  ui(log, `[world] ❌ adapters failed for ${label}: ${lastErr?.message || lastErr}`);
-  return { ok:false, error:lastErr };
+  mesh.material = mat;
 }
 
-async function mountModule(mod, label, ctx, log){
-  if (!mod) return 0;
-  const fnNames = ["init","mount","build","create","spawn","setup","start","boot","initVRUI"];
-  for (const n of fnNames){
-    if (typeof mod[n] === "function"){
-      const ok = await callWithAdapters(mod[n], `${label}.${n}`, ctx, log);
-      return ok.ok ? 1 : 0;
+function makeTextSprite(THREE, text, opts = {}) {
+  const {
+    font = "700 40px system-ui, -apple-system, Segoe UI, Roboto, Arial",
+    pad = 18,
+    bg = "rgba(10,12,20,0.65)",
+    fg = "#e8ecff",
+    radius = 18,
+    border = "rgba(127,231,255,0.35)",
+  } = opts;
+
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+
+  ctx.font = font;
+  const w = Math.ceil(ctx.measureText(text).width) + pad * 2;
+  const h = 80 + pad;
+  canvas.width = w;
+  canvas.height = h;
+
+  // rounded rect
+  const r = radius;
+  ctx.fillStyle = bg;
+  ctx.strokeStyle = border;
+  ctx.lineWidth = 4;
+
+  ctx.beginPath();
+  ctx.moveTo(r, 2);
+  ctx.lineTo(w - r, 2);
+  ctx.quadraticCurveTo(w - 2, 2, w - 2, r);
+  ctx.lineTo(w - 2, h - r);
+  ctx.quadraticCurveTo(w - 2, h - 2, w - r, h - 2);
+  ctx.lineTo(r, h - 2);
+  ctx.quadraticCurveTo(2, h - 2, 2, h - r);
+  ctx.lineTo(2, r);
+  ctx.quadraticCurveTo(2, 2, r, 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.font = font;
+  ctx.fillStyle = fg;
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, pad, h / 2);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.anisotropy = 4;
+  tex.needsUpdate = true;
+
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+  const spr = new THREE.Sprite(mat);
+  spr.scale.set(Math.max(1.2, w / 260), 0.42, 1);
+  spr.renderOrder = 999;
+
+  spr.userData._dispose = () => {
+    mat.map?.dispose?.();
+    mat.dispose?.();
+  };
+
+  return spr;
+}
+
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+function fixChairFacing({ THREE, root, log }) {
+  // Best-effort:
+  // - Find objects likely to be chairs / seats and rotate them to face table center if they have a "seat" tag,
+  //   OR rotate 180° if they look backward (heuristic).
+  // - This is intentionally conservative.
+  try {
+    const chairs = [];
+    root.traverse((o) => {
+      const n = (o.name || "").toLowerCase();
+      if (n.includes("chair") || n.includes("seat") || o.userData?.isSeat) chairs.push(o);
+    });
+
+    if (!chairs.length) {
+      log?.("[world] chair fix: none detected");
+      return;
     }
-  }
-  if (typeof mod.default === "function"){
-    const ok = await callWithAdapters(mod.default, `${label}.default`, ctx, log);
-    return ok.ok ? 1 : 0;
-  }
-  for (const k of Object.keys(mod)){
-    const v = mod[k];
-    if (v && typeof v === "object"){
-      for (const n of fnNames){
-        if (typeof v[n] === "function"){
-          const ok = await callWithAdapters(v[n].bind(v), `${label}.${k}.${n}`, ctx, log);
-          return ok.ok ? 1 : 0;
+
+    // Determine "table center" if any mesh named table exists
+    let table = null;
+    root.traverse((o) => {
+      const n = (o.name || "").toLowerCase();
+      if (!table && (n.includes("table") || o.userData?.isTable)) table = o;
+    });
+
+    const tablePos = new THREE.Vector3();
+    if (table) table.getWorldPosition(tablePos);
+
+    const tmpPos = new THREE.Vector3();
+    const tmpDir = new THREE.Vector3();
+    const fwd = new THREE.Vector3(0, 0, -1);
+
+    let fixed = 0;
+
+    for (const c of chairs) {
+      c.getWorldPosition(tmpPos);
+
+      // If we have a table, face it
+      if (table) {
+        tmpDir.copy(tablePos).sub(tmpPos);
+        tmpDir.y = 0;
+        if (tmpDir.lengthSq() > 0.0001) {
+          tmpDir.normalize();
+          // compute desired yaw so chair -Z faces tmpDir
+          const yaw = Math.atan2(tmpDir.x, tmpDir.z); // yaw in radians
+          c.rotation.y = yaw;
+          fixed++;
+          continue;
         }
       }
+
+      // Otherwise, heuristic: flip 180 if its forward is mostly pointing +Z (common “backwards” symptom)
+      const wq = c.getWorldQuaternion(new THREE.Quaternion());
+      const wf = fwd.clone().applyQuaternion(wq);
+      if (wf.z > 0.35) {
+        c.rotation.y += Math.PI;
+        fixed++;
+      }
     }
+
+    log?.(`[world] chair fix: processed=${chairs.length} adjusted=${fixed}`);
+  } catch (e) {
+    log?.("[world] chair fix failed", e);
   }
-  ui(log, `[world] ⚠️ imported ${label} but nothing mounted`);
-  return 0;
 }
 
-// -------------------------
-// SAFE procedural fallback (your v12.3 world, kept intact)
-// -------------------------
-async function buildProceduralWorld({ THREE, scene, log="console" } = {}){
-  const world = {
-    spawn: { x: 0, z: 3.6 },
-    spawnYaw: 0,
-    tableFocus: new THREE.Vector3(0, 0, -6.5),
-    tableY: 0.92,
-    chairs: [],
-    seats: [],
-    colliders: [],
-    floorMeshes: [],
-    cameraRef: null,
-    connect() {},
-    fixSeating() {},
-    tick() {},
-    clickFromCamera() {},
-    teleportFromCamera() {},
-  };
+function buildFallbackWorld({ THREE, group, log }) {
+  // Simple “old world” fallback: floor + walls + light + sign
+  const floorGeo = new THREE.PlaneGeometry(80, 80, 1, 1);
+  floorGeo.rotateX(-Math.PI / 2);
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.92, metalness: 0.02 });
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.receiveShadow = true;
+  floor.name = "fallback_floor";
+  group.add(floor);
 
-  const matFloor = new THREE.MeshStandardMaterial({ color: 0x080912, roughness: 1.0 });
-  const matWall  = new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 1.0 });
-  const matTrim  = new THREE.MeshStandardMaterial({ color: 0x161a28, roughness: 0.65, metalness: 0.1 });
-  const matNeonA = new THREE.MeshStandardMaterial({ color: 0x7fe7ff, emissive: 0x113344, emissiveIntensity: 1.0, roughness: 0.25 });
-  const matNeonP = new THREE.MeshStandardMaterial({ color: 0xff2d7a, emissive: 0x330814, emissiveIntensity: 1.1, roughness: 0.25 });
+  const grid = new THREE.GridHelper(80, 80, 0x223344, 0x111827);
+  grid.material.transparent = true;
+  grid.material.opacity = 0.35;
+  grid.position.y = 0.001;
+  group.add(grid);
 
-  const room = new THREE.Group();
-  room.name = "RoomRoot";
-  scene.add(room);
+  const hemi = new THREE.HemisphereLight(0xcfe8ff, 0x080812, 0.9);
+  hemi.position.set(0, 12, 0);
+  group.add(hemi);
 
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(36, 36), matFloor);
-  floor.rotation.x = -Math.PI / 2;
-  floor.name = "Floor";
-  room.add(floor);
-  world.floorMeshes.push(floor);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.1);
+  dir.position.set(10, 18, 6);
+  dir.castShadow = true;
+  dir.shadow.mapSize.set(1024, 1024);
+  group.add(dir);
 
-  function addWall(x,y,z,w,h,d,name){
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), matWall);
-    m.position.set(x,y,z);
-    m.name = name;
-    room.add(m);
-    world.colliders.push(m);
-  }
-  addWall(0, 2.5, -18, 36, 5, 0.35, "WallBack");
-  addWall(0, 2.5,  18, 36, 5, 0.35, "WallFront");
-  addWall(-18, 2.5, 0, 0.35, 5, 36, "WallLeft");
-  addWall( 18, 2.5, 0, 0.35, 5, 36, "WallRight");
+  const sign = makeTextSprite(THREE, "Scarlett VR Poker — Loading World…", {});
+  sign.position.set(0, 2.2, -3.2);
+  group.add(sign);
 
-  const trim = new THREE.Mesh(new THREE.TorusGeometry(11.5, 0.12, 10, 96), matTrim);
-  trim.rotation.x = Math.PI / 2;
-  trim.position.set(0, 3.85, -6.5);
-  room.add(trim);
-
-  const sign = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.6, 0.08), matNeonA);
-  sign.position.set(0, 2.65, -12.8);
-  room.add(sign);
-
-  // Table FIXED: felt lies flat via rotation.x = Math.PI/2 not required when using Cylinder as top surface
-  const table = new THREE.Group();
-  table.name = "PokerTable";
-
-  const base = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.75, 0.95, 0.78, 36),
-    new THREE.MeshStandardMaterial({ color: 0x141621, roughness: 0.9, metalness: 0.08 })
-  );
-  base.position.y = 0.39;
-  table.add(base);
-
-  const felt = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.55, 1.55, 0.08, 56),
-    new THREE.MeshStandardMaterial({ color: 0x0e5a3b, roughness: 0.95 })
-  );
-  felt.position.y = world.tableY;
-  table.add(felt);
-
-  const rail = new THREE.Mesh(
-    new THREE.TorusGeometry(1.60, 0.10, 16, 90),
-    new THREE.MeshStandardMaterial({ color: 0x1a1c2a, roughness: 0.55, metalness: 0.12 })
-  );
-  rail.rotation.x = Math.PI / 2;
-  rail.position.y = world.tableY + 0.03;
-  table.add(rail);
-
-  table.position.set(world.tableFocus.x, 0, world.tableFocus.z);
-  room.add(table);
-
-  // Chairs
-  const chairRadius = 2.35;
-  const angles = [-0.2, 0.55, 1.35, 2.25, 3.05, 3.85];
-  function makeChair(){
-    const c = new THREE.Group();
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.09, 0.52), matTrim);
-    seat.position.y = 0.45; c.add(seat);
-    const back = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.55, 0.09), matTrim);
-    back.position.set(0, 0.74, -0.215); c.add(back);
-    const legMat = new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.9 });
-    const legGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.45, 12);
-    for (const dx of [-0.20, 0.20]) for (const dz of [-0.20, 0.20]) {
-      const leg = new THREE.Mesh(legGeo, legMat);
-      leg.position.set(dx, 0.225, dz);
-      c.add(leg);
-    }
-    return c;
-  }
-  for (let i=0;i<6;i++){
-    const a = angles[i];
-    const chair = makeChair();
-    chair.position.set(world.tableFocus.x + Math.cos(a)*chairRadius, 0, world.tableFocus.z + Math.sin(a)*chairRadius);
-    chair.lookAt(world.tableFocus.x, chair.position.y, world.tableFocus.z);
-    room.add(chair);
-    world.chairs.push(chair);
-    world.seats.push(chair);
-  }
-
-  // Floating orb (FIX: not a “fat green ball”)
-  const orb = new THREE.Mesh(new THREE.SphereGeometry(0.10, 18, 18), matNeonP);
-  orb.position.set(0, 2.4, world.tableFocus.z);
-  room.add(orb);
-
-  world.connect = ({ camera, playerRig } = {}) => {
-    world.cameraRef = camera || world.cameraRef;
-    world.playerRig = playerRig || world.playerRig;
-  };
-  world.tick = (dt) => {
-    orb.rotation.y += dt * 1.2;
-    orb.position.y = 2.4 + Math.sin(performance.now()*0.002)*0.06;
-  };
-
-  // Android helpers
-  const raycaster = new THREE.Raycaster();
-  world.clickFromCamera = () => {
-    if (!world.cameraRef) return;
-    const origin = new THREE.Vector3(); world.cameraRef.getWorldPosition(origin);
-    const dir = new THREE.Vector3(0,0,-1).applyQuaternion(world.cameraRef.quaternion).normalize();
-    raycaster.set(origin, dir); raycaster.far = 60;
-    const hits = raycaster.intersectObjects(scene.children, true);
-    if (!hits.length) return;
-    let n = hits[0].object;
-    while (n && !n.userData?.onClick && n.parent) n = n.parent;
-    n?.userData?.onClick?.();
-  };
-  world.teleportFromCamera = () => {
-    if (!world.cameraRef || !world.playerRig) return;
-    const origin = new THREE.Vector3(); world.cameraRef.getWorldPosition(origin);
-    const dir = new THREE.Vector3(0,0,-1).applyQuaternion(world.cameraRef.quaternion).normalize();
-    if (Math.abs(dir.y) < 1e-4) return;
-    const t = -origin.y / dir.y;
-    if (t < 0.2 || t > 150) return;
-    const hit = origin.clone().addScaledVector(dir, t);
-    world.playerRig.position.set(hit.x, 0, hit.z);
-  };
-
-  ui(log, "[world] ✅ procedural fallback built");
-  return world;
+  log?.("[world] fallback built ✅");
+  return { floor, sign, hemi, dir, grid };
 }
 
-// -------------------------
-// MAIN ENTRY: initWorld()
-// -------------------------
-export async function initWorld({ THREE, scene, renderer, camera, player, controllers, log, v } = {}){
-  const ctx = { THREE, scene, renderer, camera, player, controllers, log };
+export const World = {
+  async init({ THREE, scene, renderer, camera, player, controllers, log = console.log, BUILD }) {
+    const t0 = now();
+    log?.(`[world] init v=${BUILD || "dev"}`);
+    log?.(`[world] ✅ LOADER SIGNATURE: ${SIG}`);
 
-  // World object shared to modules
-  const W = {
-    spawn: { x: 0, z: 3.6 },
-    spawnYaw: 0,
-    tableFocus: new THREE.Vector3(0,0,-6.5),
-    tableY: 0.92,
-    colliders: [],
-    interactables: [],
-    uiPanels: [],
-    uiButtons: [],
-    rayTargets: [],
-    mode: "lobby",
-    connect(){},
-    tick(){},
-  };
-  ctx.world = W;
-  scene.userData.interactables = W.interactables;
+    // Root group for everything in-world
+    const group = new THREE.Group();
+    group.name = "scarlett_world_root";
+    scene.add(group);
 
-  // Try OLD modular world
-  ui(log, "[world] trying modular lobby…");
-  const textures = await imp("./textures.js");
-  const lights   = await imp("./lights_pack.js");
-  const walls    = await imp("./solid_walls.js");
-  const tableF   = await imp("./table_factory.js");
-  const rail     = await imp("./spectator_rail.js");
-  const tpMach   = await imp("./teleport_machine.js");
-  const store    = await imp("./store.js");
-  const uiMod    = await imp("./ui.js");
-  const vrui     = await imp("./vr_ui.js");
-  const vrPanel  = await imp("./vr_ui_panel.js");
-  const scorp    = await imp("./scorpion_room.js");
-  const rm       = await imp("./room_manager.js");
+    // Context shared with systems
+    const ctx = {
+      THREE,
+      scene,
+      renderer,
+      camera,
+      player,
+      controllers,
+      log,
+      BUILD,
+      mode: "lobby",
+      room: "lobby",
+      world: null,
+      systems: {},
+      PokerSim: null,
+      clock: { t: 0, dt: 0, last: now() },
+      // convenience
+      setMode: (m) => (ctx.mode = m),
+      setRoom: (r) => (ctx.room = r),
+    };
 
-  // Mount texture kit first if present
-  if (textures?.createTextureKit && renderer){
-    try{
-      const kit = textures.createTextureKit({ THREE, renderer, base:"./assets/textures/", log });
-      scene.userData.textureKit = kit;
-      ui(log, "[world] ✅ textures kit mounted");
-    }catch(e){
-      ui(log, "[world] ⚠️ texture kit failed: " + (e?.message||e));
+    // Always build a fallback base immediately (old behavior)
+    const fallback = buildFallbackWorld({ THREE, group, log });
+
+    // Optional modules (new behavior)
+    const [
+      texturesMod,
+      lightsMod,
+      wallsMod,
+      tableFactoryMod,
+      railMod,
+      teleportMachineMod,
+      storeMod,
+      uiMod,
+      vrUiMod,
+      vrUiPanelMod,
+      scorpionMod,
+      roomManagerMod,
+      botsMod,
+      pokerSimMod,
+      spawnPointsMod,
+      teleportMod,
+      solidWallsMod
+    ] = await Promise.all([
+      safeImport(`./textures.js?v=${BUILD}`, log),
+      safeImport(`./lights_pack.js?v=${BUILD}`, log),
+      safeImport(`./walls.js?v=${BUILD}`, log), // legacy/optional
+      safeImport(`./table_factory.js?v=${BUILD}`, log),
+      safeImport(`./spectator_rail.js?v=${BUILD}`, log),
+      safeImport(`./teleport_machine.js?v=${BUILD}`, log),
+      safeImport(`./store.js?v=${BUILD}`, log),
+      safeImport(`./ui.js?v=${BUILD}`, log),
+      safeImport(`./vr_ui.js?v=${BUILD}`, log),
+      safeImport(`./vr_ui_panel.js?v=${BUILD}`, log),
+      safeImport(`./scorpion_room.js?v=${BUILD}`, log),
+      safeImport(`./room_manager.js?v=${BUILD}`, log),
+      safeImport(`./bots.js?v=${BUILD}`, log),
+      safeImport(`./poker_sim.js?v=${BUILD}`, log),
+      safeImport(`./spawn_points.js?v=${BUILD}`, log),
+      safeImport(`./teleport.js?v=${BUILD}`, log), // simple teleport fallback/alt
+      safeImport(`./solid_walls.js?v=${BUILD}`, log),
+    ]);
+
+    // Apply nicer lighting if available (new)
+    try {
+      if (lightsMod?.LightsPack?.init) {
+        lightsMod.LightsPack.init({ THREE, scene: group, renderer, log, mode: "casino" });
+        log?.("[world] ✅ LightsPack loaded");
+        // If we have a lights pack, dim fallback lights a bit
+        if (fallback.hemi) fallback.hemi.intensity = 0.35;
+        if (fallback.dir) fallback.dir.intensity = 0.45;
+      }
+    } catch (e) {
+      log?.("[world] LightsPack init failed", e);
     }
+
+    // Texture kit (for felt/chips/walls etc.) if available
+    let textureKit = null;
+    try {
+      if (texturesMod?.createTextureKit) {
+        textureKit = await texturesMod.createTextureKit({ THREE, log, BUILD });
+        log?.("[world] ✅ TextureKit ready");
+      }
+    } catch (e) {
+      log?.("[world] TextureKit failed", e);
+    }
+
+    // Solid walls/colliders (if you have them)
+    try {
+      const SolidWalls = solidWallsMod?.SolidWalls || wallsMod?.SolidWalls;
+      if (SolidWalls?.init) {
+        SolidWalls.init({ THREE, scene: group, log, textureKit });
+        log?.("[world] ✅ SolidWalls loaded");
+      }
+    } catch (e) {
+      log?.("[world] SolidWalls init failed", e);
+    }
+
+    // Build “new” world layout elements (lobby/store/rail/scorpion)
+    // We’ll add them to `group` and label them for room switching.
+    const rooms = {
+      lobby: new THREE.Group(),
+      store: new THREE.Group(),
+      scorpion: new THREE.Group(),
+      spectate: new THREE.Group(),
+    };
+    rooms.lobby.name = "room_lobby";
+    rooms.store.name = "room_store";
+    rooms.scorpion.name = "room_scorpion";
+    rooms.spectate.name = "room_spectate";
+    group.add(rooms.lobby, rooms.store, rooms.scorpion, rooms.spectate);
+
+    // Default room visibility (start lobby)
+    rooms.lobby.visible = true;
+    rooms.store.visible = true;     // store kiosk lives in lobby space often
+    rooms.spectate.visible = true;  // rail visible in lobby
+    rooms.scorpion.visible = false; // off until entered
+
+    // Spawn points (optional)
+    try {
+      if (spawnPointsMod?.SpawnPoints?.init) {
+        ctx.systems.spawn = spawnPointsMod.SpawnPoints.init({ THREE, scene: group, log });
+        log?.("[world] ✅ SpawnPoints loaded");
+      }
+    } catch (e) {
+      log?.("[world] SpawnPoints init failed", e);
+    }
+
+    // Teleport machine (preferred “new”)
+    try {
+      if (teleportMachineMod?.TeleportMachine?.init) {
+        ctx.systems.teleportMachine = teleportMachineMod.TeleportMachine.init({
+          THREE,
+          scene: rooms.lobby,
+          renderer,
+          camera,
+          player,
+          controllers,
+          log,
+          textureKit,
+        });
+        log?.("[world] ✅ TeleportMachine loaded");
+      }
+    } catch (e) {
+      log?.("[world] TeleportMachine init failed", e);
+    }
+
+    // Simple teleport fallback (older)
+    try {
+      if (!ctx.systems.teleportMachine && teleportMod?.Teleport?.init) {
+        ctx.systems.teleport = teleportMod.Teleport.init({
+          THREE,
+          scene: group,
+          renderer,
+          camera,
+          player,
+          controllers,
+          log,
+          world: { group },
+        });
+        log?.("[world] ✅ Teleport (fallback) loaded");
+      }
+    } catch (e) {
+      log?.("[world] Teleport fallback init failed", e);
+    }
+
+    // Spectator rail (optional)
+    try {
+      if (railMod?.SpectatorRail?.init) {
+        ctx.systems.rail = railMod.SpectatorRail.init({
+          THREE,
+          scene: rooms.spectate,
+          log,
+          textureKit,
+        });
+        log?.("[world] ✅ SpectatorRail loaded");
+      }
+    } catch (e) {
+      log?.("[world] SpectatorRail init failed", e);
+    }
+
+    // Store system (optional)
+    try {
+      if (storeMod?.StoreSystem?.init) {
+        ctx.systems.store = storeMod.StoreSystem;
+        storeMod.StoreSystem.init({
+          THREE,
+          scene: rooms.store,
+          world: { group },
+          player,
+          camera,
+          log,
+        });
+        log?.("[world] ✅ StoreSystem loaded");
+      }
+    } catch (e) {
+      log?.("[world] StoreSystem init failed", e);
+    }
+
+    // Scorpion room (optional)
+    try {
+      if (scorpionMod?.ScorpionRoom?.init) {
+        ctx.systems.scorpion = scorpionMod.ScorpionRoom;
+        scorpionMod.ScorpionRoom.init({
+          THREE,
+          scene: rooms.scorpion,
+          renderer,
+          camera,
+          player,
+          controllers,
+          log,
+          textureKit,
+        });
+        log?.("[world] ✅ ScorpionRoom loaded");
+      }
+    } catch (e) {
+      log?.("[world] ScorpionRoom init failed", e);
+    }
+
+    // Tables + poker sim
+    // - If TableFactory exists, create a nice casino table.
+    // - Otherwise create a simple placeholder table.
+    let table = null;
+    let tableRoot = new THREE.Group();
+    tableRoot.name = "poker_table_root";
+    rooms.lobby.add(tableRoot);
+
+    try {
+      if (tableFactoryMod?.TableFactory?.create) {
+        table = await tableFactoryMod.TableFactory.create({
+          THREE,
+          scene: tableRoot,
+          log,
+          textureKit,
+          variant: "round_8", // you can change to "oval_8", "round_6", etc. if your factory supports it
+        });
+        log?.("[world] ✅ TableFactory created table");
+      }
+    } catch (e) {
+      log?.("[world] TableFactory failed", e);
+    }
+
+    if (!table) {
+      // old/simple table
+      const base = new THREE.Group();
+      base.name = "simple_table";
+      tableRoot.add(base);
+
+      const top = new THREE.Mesh(
+        new THREE.CylinderGeometry(1.35, 1.35, 0.12, 64),
+        new THREE.MeshStandardMaterial({ color: 0x102a1c, roughness: 0.95, metalness: 0.02 })
+      );
+      top.position.y = 0.82;
+
+      const rim = new THREE.Mesh(
+        new THREE.TorusGeometry(1.35, 0.08, 16, 64),
+        new THREE.MeshStandardMaterial({ color: 0x20202a, roughness: 0.55, metalness: 0.15 })
+      );
+      rim.rotation.x = Math.PI / 2;
+      rim.position.y = 0.86;
+
+      const leg = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.22, 0.32, 0.8, 24),
+        new THREE.MeshStandardMaterial({ color: 0x1a1b22, roughness: 0.85, metalness: 0.08 })
+      );
+      leg.position.y = 0.4;
+
+      base.add(top, rim, leg);
+
+      // seat markers (to help chair fixer + poker sim fallback)
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        const seat = new THREE.Object3D();
+        seat.name = `seat_${i}`;
+        seat.userData.isSeat = true;
+        seat.position.set(Math.sin(a) * 1.9, 0, Math.cos(a) * 1.9);
+        seat.lookAt(0, 0, 0);
+        base.add(seat);
+      }
+
+      table = { root: base, seats: base.children.filter(o => o.userData?.isSeat), isFallback: true };
+      log?.("[world] table fallback built ✅");
+    }
+
+    // Poker simulation (optional, but we try hard)
+    try {
+      if (pokerSimMod?.PokerSim?.init) {
+        ctx.PokerSim = pokerSimMod.PokerSim;
+        pokerSimMod.PokerSim.init({
+          THREE,
+          scene: tableRoot,
+          table,
+          player,
+          camera,
+          controllers,
+          log,
+          textureKit,
+        });
+        log?.("[world] ✅ PokerSim loaded");
+      }
+    } catch (e) {
+      log?.("[world] PokerSim init failed", e);
+    }
+
+    // Bots (optional)
+    try {
+      if (botsMod?.Bots?.init) {
+        ctx.systems.bots = botsMod.Bots;
+        botsMod.Bots.init({
+          THREE,
+          scene: rooms.lobby,
+          player,
+          camera,
+          log,
+          textureKit,
+          // if your bots module uses these:
+          rail: ctx.systems.rail,
+          table,
+        });
+        log?.("[world] ✅ Bots loaded");
+      }
+    } catch (e) {
+      log?.("[world] Bots init failed", e);
+    }
+
+    // UI systems (optional)
+    try {
+      if (uiMod?.UI?.init) {
+        ctx.systems.ui = uiMod.UI;
+        uiMod.UI.init({
+          THREE,
+          scene: group,
+          renderer,
+          camera,
+          player,
+          controllers,
+          log,
+          textureKit,
+        });
+        log?.("[world] ✅ UI loaded");
+      }
+    } catch (e) {
+      log?.("[world] UI init failed", e);
+    }
+
+    try {
+      if (vrUiMod?.initVRUI) {
+        ctx.systems.vrui = vrUiMod.initVRUI({
+          THREE,
+          scene: group,
+          renderer,
+          camera,
+          player,
+          controllers,
+          log,
+        });
+        log?.("[world] ✅ VR UI loaded");
+      }
+    } catch (e) {
+      log?.("[world] VR UI init failed", e);
+    }
+
+    try {
+      if (vrUiPanelMod?.VRUIPanel?.init) {
+        ctx.systems.vrPanel = vrUiPanelMod.VRUIPanel.init({
+          THREE,
+          scene: group,
+          renderer,
+          camera,
+          player,
+          controllers,
+          log,
+        });
+        log?.("[world] ✅ VRUIPanel loaded");
+      }
+    } catch (e) {
+      log?.("[world] VRUIPanel init failed", e);
+    }
+
+    // Room manager (optional) — wires teleports / room switching behaviors
+    try {
+      if (roomManagerMod?.RoomManager?.init) {
+        ctx.systems.roomManager = roomManagerMod.RoomManager;
+        roomManagerMod.RoomManager.init(ctx);
+        log?.("[world] ✅ RoomManager loaded");
+      }
+    } catch (e) {
+      log?.("[world] RoomManager init failed", e);
+    }
+
+    // Seat/chair facing fix (best effort) AFTER everything is attached
+    fixChairFacing({ THREE, root: group, log });
+
+    // Replace fallback “Loading…” sign once ready
+    try {
+      if (fallback.sign) {
+        fallback.sign.userData._dispose?.();
+        group.remove(fallback.sign);
+      }
+      const ready = makeTextSprite(THREE, "Scarlett VR Poker — World Ready ✅", {
+        bg: "rgba(10,12,20,0.55)",
+        border: "rgba(255,45,122,0.35)",
+      });
+      ready.position.set(0, 2.2, -3.2);
+      rooms.lobby.add(ready);
+      ctx.systems._readySign = ready;
+    } catch {}
+
+    // World interface
+    const world = {
+      group,
+      ctx,
+      rooms,
+      table,
+      textureKit,
+
+      setRoom(room) {
+        ctx.room = room;
+        ctx.mode = room;
+
+        // Visibility / behavior policy:
+        // - lobby: show lobby+store+rail; hide scorpion
+        // - store: show store area (kept in lobby group here), keep rail on
+        // - spectate: show rail, hide scorpion
+        // - scorpion: hide lobby/store/rail, show scorpion
+        const isScorpion = room === "scorpion";
+
+        rooms.scorpion.visible = isScorpion;
+        rooms.lobby.visible = !isScorpion;
+        rooms.store.visible = !isScorpion;     // store lives with lobby in this hybrid
+        rooms.spectate.visible = !isScorpion;
+
+        // Let your systems react if they support it
+        try { ctx.systems.scorpion?.setActive?.(isScorpion); } catch {}
+        try { ctx.systems.store?.setActive?.(!isScorpion); } catch {}
+
+        // If you have PokerSim modes, keep lobby demo running unless scorpion wants instant seat play
+        try {
+          if (ctx.PokerSim?.setMode) {
+            ctx.PokerSim.setMode(isScorpion ? "scorpion_play" : "lobby_demo");
+          }
+        } catch {}
+
+        // RoomManager hook if present
+        try { ctx.systems.roomManager?.setRoom?.(ctx, room); } catch {}
+
+        log?.(`[world] setRoom -> ${room}`);
+      },
+
+      update(dt = 0) {
+        const t = now();
+        const c = ctx.clock;
+        c.dt = dt || ((t - c.last) / 1000);
+        c.last = t;
+        c.t += c.dt;
+
+        // Update systems if they have tick/update
+        try { ctx.systems.teleportMachine?.update?.(c.dt); } catch {}
+        try { ctx.systems.teleport?.update?.(c.dt); } catch {}
+        try { ctx.systems.store?.update?.(c.dt); } catch {}
+        try { ctx.systems.scorpion?.update?.(c.dt); } catch {}
+        try { ctx.systems.bots?.update?.(c.dt); } catch {}
+        try { ctx.PokerSim?.update?.(c.dt); } catch {}
+        try { ctx.systems.ui?.update?.(c.dt); } catch {}
+        try { ctx.systems.vrui?.update?.(c.dt); } catch {}
+        try { ctx.systems.vrPanel?.update?.(c.dt); } catch {}
+
+        // Keep “ready” sign gently bobbing
+        const s = ctx.systems._readySign;
+        if (s) {
+          s.position.y = 2.18 + Math.sin(c.t * 1.3) * 0.03;
+        }
+      },
+
+      dispose() {
+        // Best-effort cleanup
+        try { ctx.systems.store?.dispose?.(); } catch {}
+        try { ctx.systems.scorpion?.dispose?.(); } catch {}
+        try { ctx.systems.teleportMachine?.dispose?.(); } catch {}
+        try { ctx.systems.teleport?.dispose?.(); } catch {}
+        try { ctx.systems.bots?.dispose?.(); } catch {}
+        try { ctx.PokerSim?.dispose?.(); } catch {}
+        try { ctx.systems.ui?.dispose?.(); } catch {}
+        try { ctx.systems.vrui?.dispose?.(); } catch {}
+        try { ctx.systems.vrPanel?.dispose?.(); } catch {}
+
+        try {
+          group.traverse((o) => {
+            if (o.userData?._dispose) o.userData._dispose();
+            if (o.geometry) o.geometry.dispose?.();
+            if (o.material) {
+              if (Array.isArray(o.material)) o.material.forEach((m) => m?.dispose?.());
+              else o.material.dispose?.();
+            }
+          });
+        } catch {}
+
+        scene.remove(group);
+      }
+    };
+
+    // tie-back
+    ctx.world = world;
+
+    // Pick initial room (lobby), but allow RoomManager to override
+    world.setRoom(ctx.room || "lobby");
+
+    const t1 = now();
+    log?.(`[world] ready ✅ (${Math.round(t1 - t0)}ms)`);
+
+    return world;
   }
-
-  let mounted = 0;
-  mounted += await mountModule(lights,  "lights_pack.js", ctx, log);
-  mounted += await mountModule(walls,   "solid_walls.js", ctx, log);
-  mounted += await mountModule(tableF,  "table_factory.js", ctx, log);
-  mounted += await mountModule(rail,    "spectator_rail.js", ctx, log);
-  mounted += await mountModule(tpMach,  "teleport_machine.js", ctx, log);
-  mounted += await mountModule(store,   "store.js", ctx, log);
-  mounted += await mountModule(uiMod,   "ui.js", ctx, log);
-  mounted += await mountModule(vrui,    "vr_ui.js", ctx, log);
-  mounted += await mountModule(vrPanel, "vr_ui_panel.js", ctx, log);
-  mounted += await mountModule(scorp,   "scorpion_room.js", ctx, log);
-  mounted += await mountModule(rm,      "room_manager.js", ctx, log);
-
-  if (mounted > 0){
-    ui(log, `[world] ✅ modular world mounted (${mounted})`);
-    // Best-effort: expose clickables for Android
-    W.clickFromCamera = W.clickFromCamera || (()=>{});
-    W.teleportFromCamera = W.teleportFromCamera || (()=>{});
-    W.connect = ({ playerRig, camera } = {}) => { W.playerRig = playerRig; W.cameraRef = camera; };
-
-    // Try to set a sane spawn if RoomManager didn’t
-    if (!W.spawn) W.spawn = { x: 0, z: 3.6 };
-    if (!W.tableFocus) W.tableFocus = new THREE.Vector3(0,0,-6.5);
-
-    return W;
-  }
-
-  // Fallback
-  ui(log, "[world] modular failed → using procedural fallback");
-  const fallback = await buildProceduralWorld({ THREE, scene, log });
-  // Merge into W so main.js pipeline still sees expected fields
-  Object.assign(W, fallback);
-  return W;
-}
+};

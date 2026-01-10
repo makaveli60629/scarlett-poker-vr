@@ -1,10 +1,12 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>VR Boss Casino — Update 5.4 (Permanent)</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
+  <title>Scarlett VR Poker</title>
 
+  <!-- If you prefer your local /js/three.js wrapper, you can keep it.
+       This importmap is safe and helps on Android/Quest if your wrapper isn’t used. -->
   <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
   <script type="importmap">
   {
@@ -16,8 +18,7 @@
   </script>
 
   <style>
-    body { margin:0; overflow:hidden; background:#000; touch-action:none; }
-
+    html, body { margin:0; padding:0; height:100%; background:#05060a; overflow:hidden; }
     #VRButton, button#VRButton{
       position:fixed !important;
       right:max(14px, env(safe-area-inset-right)) !important;
@@ -27,76 +28,39 @@
       font-weight:900 !important;
     }
 
-    #hud-container{ position:fixed; inset:0; pointer-events:none; z-index:10; }
-
-    #menu-frame{
-      position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-      width:80vw; height:80vh;
-      border:2px solid rgba(0,255,255,0.18);
-      background:rgba(0,20,30,.35);
-      display:none; pointer-events:auto;
-      backdrop-filter: blur(5px);
-    }
-    .corner{ position:absolute; width:30px; height:30px; border:4px solid #00ffff; }
-    .top-left{ top:-5px; left:-5px; border-right:none; border-bottom:none; }
-    .top-right{ top:-5px; right:-5px; border-left:none; border-bottom:none; }
-    .bottom-left{ bottom:-5px; left:-5px; border-right:none; border-top:none; }
-    .bottom-right{ bottom:-5px; right:-5px; border-left:none; border-top:none; }
-
-    .button-row{ display:flex; justify-content:center; margin-top:60vh; }
-    .poker-btn{
-      background:rgba(0,255,255,0.16);
-      border:2px solid #00ffff;
-      color:#00ffff;
-      padding:14px 26px;
-      margin:10px;
-      cursor:pointer;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-weight:900;
-      border-radius: 12px;
-    }
-
-    #diag{
-      position:fixed;
-      left:max(10px, env(safe-area-inset-left));
-      top:max(10px, env(safe-area-inset-top));
-      z-index:999998;
+    /* Minimal always-on diagnostics overlay (safe) */
+    #scarlettDiag{
+      position:fixed; left:max(10px, env(safe-area-inset-left)); top:max(10px, env(safe-area-inset-top));
       width:min(560px, calc(100vw - 20px));
+      z-index:999998;
       background: rgba(0,20,30,.55);
       border: 1px solid rgba(0,255,255,.18);
       border-radius: 14px;
       padding: 10px 12px;
-      pointer-events:auto;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      color: #bffcff;
       backdrop-filter: blur(6px);
+      color:#bffcff;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      pointer-events:auto;
     }
-    #diagTop{ display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
-    #diagTitle{ font-weight:1000; color:#00ffff; }
-    #diagSmall{ font-size:11px; opacity:.9; }
-    #diagGrid{
-      margin-top:8px;
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px 10px;
-      font-size: 12px;
-    }
+    #scarlettDiag .top{ display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+    #scarlettDiag .title{ font-weight:1000; color:#00ffff; }
+    #scarlettDiag .small{ font-size:11px; opacity:.9; }
+    #scarlettGrid{ margin-top:8px; display:grid; grid-template-columns:1fr 1fr; gap:6px 10px; font-size:12px; }
     .kv{ display:flex; justify-content:space-between; gap:10px; }
     .k{ opacity:.75; }
     .v{ text-align:right; }
-    #diagBtns{ margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
-    #diagBtns button{
-      pointer-events:auto;
+    #scarlettBtns{ margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
+    #scarlettBtns button{
       background: rgba(0,255,255,.10);
       border: 1px solid rgba(0,255,255,.22);
-      color: #bffcff;
-      border-radius: 12px;
-      padding: 7px 10px;
-      font-weight: 900;
-      cursor: pointer;
-      font-size: 12px;
+      color:#bffcff;
+      border-radius:12px;
+      padding:7px 10px;
+      font-weight:900;
+      font-size:12px;
+      cursor:pointer;
     }
-    #logBox{
+    #scarlettLog{
       margin-top:10px;
       border: 1px solid rgba(0,255,255,.14);
       border-radius: 12px;
@@ -113,23 +77,11 @@
 </head>
 
 <body>
-  <div id="hud-container">
-    <div id="menu-frame">
-      <div class="corner top-left"></div><div class="corner top-right"></div>
-      <div class="corner bottom-left"></div><div class="corner bottom-right"></div>
-
-      <div class="button-row">
-        <button class="poker-btn" onclick="gameAction('muck')">MUCK HAND</button>
-        <button class="poker-btn" onclick="gameAction('show')">SHOW CARDS</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="diag">
-    <div id="diagTop">
+  <div id="scarlettDiag">
+    <div class="top">
       <div>
-        <div id="diagTitle">VR Boss Casino — JS Layout</div>
-        <div id="diagSmall">Build <span id="build"></span> • <span id="clock"></span></div>
+        <div class="title">Scarlett Boot Core</div>
+        <div class="small">Build <span id="build"></span> • <span id="clock"></span></div>
       </div>
       <div style="text-align:right; font-size:11px;">
         <div>WebXR: <span id="capXR">?</span></div>
@@ -137,23 +89,23 @@
       </div>
     </div>
 
-    <div id="diagGrid"></div>
+    <div id="scarlettGrid"></div>
 
-    <div id="diagBtns">
+    <div id="scarlettBtns">
       <button id="btnMenu">Menu (M)</button>
-      <button id="btnDeal">Deal (D)</button>
-      <button id="btnSpawnChips">Spawn Chips</button>
-      <button id="btnClear">Clear Logs</button>
-      <button id="btnCopy">Copy Logs</button>
+      <button id="btnReboot">Soft Reboot</button>
+      <button id="btnCopyLog">Copy Logs</button>
+      <button id="btnClearLog">Clear Logs</button>
     </div>
 
-    <div id="logBox"></div>
+    <div id="scarlettLog"></div>
   </div>
 
   <script type="module">
     const v = Date.now();
     document.getElementById("build").textContent = `v=${v}`;
-    import(`./js/index.js?v=${v}`);
+    setInterval(()=>document.getElementById("clock").textContent = new Date().toLocaleString(), 250);
+    import(`./js/main.js?v=${v}`);
   </script>
 </body>
 </html>

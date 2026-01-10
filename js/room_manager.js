@@ -1,83 +1,76 @@
-// /js/room_manager.js — RoomManager v7.6 (HARD BOOT LOBBY + CORRECT SPAWNS)
-//
-// Fixes:
-// ✅ ALWAYS passes ctx.player into ctx.spawns.apply()
-// ✅ Applies standY for NON-XR; lets Controls fix XR height (player.y=0 while presenting)
-// ✅ Guarantees scorpion hidden unless explicitly selected
-// ✅ Adds safe "force lobby" retries to beat late transforms / UI auto-room
+// /js/room_manager.js — Room Manager v4 (FULL)
+// Controls: start lobby, teleport to store / scorpion room, auto-seat on scorpion entry.
 
 export const RoomManager = {
   init(ctx) {
-    ctx.rooms = ctx.rooms || {};
-    ctx.rooms.current = "lobby";
+    ctx.room = "lobby";
+    ctx.mode = "lobby";
+    ctx.log?.("[rm] init → lobby");
 
-    const log = (...a) => (ctx.log ? ctx.log(...a) : console.log(...a));
+    // Register teleport pads (world will create them and pass refs)
+    ctx.teleports = ctx.teleports || {};
 
-    function isXRPresenting() {
-      try { return !!ctx.renderer?.xr?.isPresenting; } catch { return false; }
+    this._wireTeleports(ctx);
+    this._applyRoomBehaviors(ctx, "lobby");
+
+    ctx.log?.("[rm] init ✅");
+  },
+
+  setRoom(ctx, room) {
+    if (!room || ctx.room === room) return;
+    ctx.room = room;
+    ctx.mode = room;
+    ctx.log?.(`[rm] setRoom → ${room}`);
+
+    this._applyRoomBehaviors(ctx, room);
+
+    // Move / seat player
+    if (room === "lobby") {
+      ctx.world?.movePlayerTo?.("lobby_spawn");
+      ctx.world?.setSeated?.(false);
     }
 
-    function applySpawn(spawnName, opts = {}) {
-      if (!ctx.spawns?.apply) return false;
-
-      // IMPORTANT: pass the rig
-      const rig = ctx.player;
-
-      // In XR local-floor, rig.y should stay 0 (Controls v3.9 enforces this too)
-      const finalOpts = { ...(opts || {}) };
-      if (isXRPresenting()) {
-        // don’t stack height in XR
-        delete finalOpts.standY;
-      }
-
-      const ok = ctx.spawns.apply(spawnName, rig, finalOpts);
-
-      // HARD: ensure rig y sane in XR
-      if (isXRPresenting() && rig) rig.position.y = 0;
-
-      return ok;
+    if (room === "store") {
+      ctx.world?.movePlayerTo?.("store_spawn");
+      ctx.world?.setSeated?.(false);
     }
 
-    const setRoom = (name) => {
-      ctx.rooms.current = name;
-      log(`[rm] room=${name}`);
+    if (room === "scorpion") {
+      // Seat player at seat 0 in scorpion room
+      ctx.world?.movePlayerTo?.("scorpion_entry");
+      ctx.world?.seatPlayer?.(0);
+    }
+  },
 
-      // Toggle scorpion visibility
-      if (ctx.ScorpionRoom?.setActive) ctx.ScorpionRoom.setActive(name === "scorpion");
-      else if (ctx.systems?.scorpion?.setActive) ctx.systems.scorpion.setActive(name === "scorpion");
+  _applyRoomBehaviors(ctx, room) {
+    // Systems toggles (safe optional)
+    if (room === "lobby") {
+      ctx.systems?.store?.setActive?.(true);
+      ctx.systems?.scorpion?.setActive?.(false);
+      ctx.PokerSim?.setMode?.("lobby_demo");
+    }
 
-      // choose spawn
-      const spawnName =
-        name === "scorpion"   ? "scorpion_safe_spawn" :
-        name === "store"      ? "store_spawn" :
-        name === "spectator"  ? "spectator" :
-                                "lobby_spawn";
+    if (room === "store") {
+      ctx.systems?.store?.setActive?.(true);
+      ctx.systems?.scorpion?.setActive?.(false);
+      ctx.PokerSim?.setMode?.("lobby_demo");
+    }
 
-      // standing defaults (non seated)
-      const standY =
-        spawnName === "spectator" ? 1.65 :
-        spawnName === "store_spawn" ? 1.65 :
-        spawnName === "lobby_spawn" ? 1.65 :
-        // scorpion_safe_spawn is still standing unless you call Controls.sitAt(...)
-        1.65;
+    if (room === "scorpion") {
+      ctx.systems?.store?.setActive?.(false);
+      ctx.systems?.scorpion?.setActive?.(true);
+      ctx.PokerSim?.setMode?.("scorpion_table");
+    }
+  },
 
-      applySpawn(spawnName, { standY });
-
-      // re-apply after a tick to beat late transforms (chairs/table patching)
-      setTimeout(() => applySpawn(spawnName, { standY }), 180);
-      setTimeout(() => applySpawn(spawnName, { standY }), 520);
+  _wireTeleports(ctx) {
+    // Called once; TeleportMachine will call ctx.onTeleportHit(id)
+    ctx.onTeleportHit = (id) => {
+      ctx.log?.(`[rm] teleport hit: ${id}`);
+      if (id === "tp_store") this.setRoom(ctx, "store");
+      if (id === "tp_lobby") this.setRoom(ctx, "lobby");
+      if (id === "tp_scorpion") this.setRoom(ctx, "scorpion");
     };
-
-    ctx.rooms.setRoom = setRoom;
-
-    // ✅ ALWAYS boot lobby (HARD)
-    setRoom("lobby");
-
-    // ✅ FORCE lobby again after UI builds (if UI tries to auto-enter scorpion)
-    setTimeout(() => setRoom("lobby"), 600);
-    setTimeout(() => setRoom("lobby"), 1200);
-
-    log("[rm] init ✅ v7.6");
-    return ctx.rooms;
-  }
+    ctx.log?.("[rm] teleports wired ✅");
+  },
 };

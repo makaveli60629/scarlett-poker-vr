@@ -1,98 +1,219 @@
-<!-- /index.html — Scarlett VR Poker Hybrid 1.0 (FULL)
-     ✅ Always shows VR button (if WebXR supported)
-     ✅ Mobile/Android friendly viewport + safe-area
--->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta
-    name="viewport"
-    content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"
-  />
-  <title>Scarlett VR Poker</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
+  <title>Scarlett VR Poker — Debug Build</title>
 
   <style>
     :root{
       --bg:#05060a;
-      --panel:#0b0d14cc;
+      --panel:rgba(11,13,20,.78);
+      --panel2:rgba(11,13,20,.92);
       --text:#e8ecff;
       --muted:#98a0c7;
       --aqua:#7fe7ff;
       --pink:#ff2d7a;
-      --radius:18px;
+      --ok:#4cd964;
+      --warn:#ffcc00;
+      --bad:#ff6b6b;
+      --radius:16px;
+      --shadow: 0 14px 45px rgba(0,0,0,.48);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     }
-    html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      width: 100%;
-      overflow: hidden;
-      background: var(--bg);
-      color: var(--text);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      touch-action: none;
-    }
-    canvas { display:block; }
 
-    /* Ensure VR button is never hidden */
-    #VRButton, button#VRButton {
-      position: fixed !important;
-      right: 14px !important;
-      bottom: 14px !important;
+    html, body {
+      margin:0; padding:0; height:100%; width:100%;
+      background:var(--bg);
+      overflow:hidden;
+      color:var(--text);
+      font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      touch-action:none;
+    }
+    canvas{ display:block; }
+
+    /* VR Button must always be visible */
+    #VRButton, button#VRButton{
+      position:fixed !important;
+      right: max(14px, env(safe-area-inset-right)) !important;
+      bottom: max(14px, env(safe-area-inset-bottom)) !important;
       z-index: 999999 !important;
       border-radius: 14px !important;
       font-weight: 800 !important;
+      letter-spacing: .2px !important;
     }
 
-    /* Debug HUD (non-blocking) */
+    /* HUD container */
     #hud {
       position: fixed;
-      left: 12px;
-      top: 12px;
+      left: max(12px, env(safe-area-inset-left));
+      top:  max(12px, env(safe-area-inset-top));
       z-index: 999998;
+      width: min(560px, calc(100vw - 24px));
+      max-height: min(70vh, calc(100vh - 24px));
       background: var(--panel);
-      border: 1px solid rgba(127,231,255,.22);
+      border: 1px solid rgba(127,231,255,.20);
       border-radius: var(--radius);
-      padding: 10px 12px;
-      box-shadow: 0 14px 45px rgba(0,0,0,.45);
-      max-width: min(520px, calc(100vw - 24px));
-      pointer-events: none; /* don't block VRButton */
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(6px);
+      overflow: hidden;
+      pointer-events: none; /* HUD won't block VR button / canvas */
     }
-    #hud b { color: var(--aqua); }
-    #hud .muted { color: var(--muted); font-size: 12px; margin-top: 6px; }
 
-    /* Tiny mobile controls hint */
+    #hudInner {
+      pointer-events: auto; /* but controls inside can be clicked */
+      padding: 10px 10px 8px 10px;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+
+    #hudHeader{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+    }
+
+    #title{
+      font-weight:900;
+      color: var(--aqua);
+      line-height: 1.1;
+    }
+    #sub{
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .pillRow{ display:flex; flex-wrap:wrap; gap:6px; }
+    .pill{
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(127,231,255,.20);
+      background: rgba(5,6,10,.35);
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .pill.ok{ border-color: rgba(76,217,100,.35); color: #dfffe7; }
+    .pill.warn{ border-color: rgba(255,204,0,.35); color: #fff6cc; }
+    .pill.bad{ border-color: rgba(255,107,107,.35); color: #ffd7d7; }
+
+    .btnRow{ display:flex; flex-wrap:wrap; gap:6px; }
+    button.dbg {
+      pointer-events:auto;
+      border: 1px solid rgba(127,231,255,.22);
+      background: rgba(11,13,20,.75);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 7px 10px;
+      font-weight: 800;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    button.dbg:active{ transform: translateY(1px); }
+    button.dbg.pink{ border-color: rgba(255,45,122,.25); }
+    button.dbg.good{ border-color: rgba(76,217,100,.25); }
+
+    #metrics{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 10px;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text);
+    }
+    .kv{ display:flex; justify-content:space-between; gap:10px; }
+    .k{ color: var(--muted); }
+    .v{ color: var(--text); text-align:right; }
+
+    #logWrap{
+      border: 1px solid rgba(127,231,255,.16);
+      background: rgba(5,6,10,.35);
+      border-radius: 14px;
+      overflow:hidden;
+    }
+    #logHeader{
+      padding: 8px 10px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      border-bottom: 1px solid rgba(127,231,255,.12);
+      font-size: 12px;
+      color: var(--muted);
+    }
+    #log{
+      padding: 8px 10px;
+      font-family: var(--mono);
+      font-size: 11px;
+      line-height: 1.35;
+      max-height: 260px;
+      overflow:auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* Mobile hint */
     #touchHint{
       position: fixed;
-      left: 12px;
-      bottom: 12px;
+      left: max(12px, env(safe-area-inset-left));
+      bottom: max(12px, env(safe-area-inset-bottom));
       z-index: 999997;
-      background: rgba(11,13,20,.65);
-      border: 1px solid rgba(255,45,122,.22);
+      background: rgba(11,13,20,.68);
+      border: 1px solid rgba(255,45,122,.18);
       border-radius: 14px;
       padding: 10px 12px;
       font-size: 12px;
       color: var(--text);
+      box-shadow: var(--shadow);
       pointer-events: none;
-      display: none;
+      display:none;
+      width: min(420px, calc(100vw - 24px));
     }
-
     @media (hover: none) and (pointer: coarse) {
-      #touchHint { display: block; }
+      #touchHint{ display:block; }
     }
   </style>
 </head>
 
 <body>
   <div id="hud">
-    <div><b>Scarlett VR Poker</b> <span id="build"></span></div>
-    <div class="muted" id="status">Booting…</div>
-    <div class="muted">If VR button missing: open Quest Browser DevTools console.</div>
+    <div id="hudInner">
+      <div id="hudHeader">
+        <div>
+          <div id="title">Scarlett VR Poker — Debug HUD</div>
+          <div id="sub">
+            Build <span id="build"></span> • <span id="clock"></span>
+          </div>
+        </div>
+        <div class="pillRow" id="caps"></div>
+      </div>
+
+      <div class="btnRow">
+        <button class="dbg good" id="btnHUD">HUD: ON</button>
+        <button class="dbg" id="btnVerbose">Logs: NORMAL</button>
+        <button class="dbg" id="btnCopy">Copy Logs</button>
+        <button class="dbg pink" id="btnClear">Clear</button>
+        <button class="dbg" id="btnRecenter">Recenter</button>
+        <button class="dbg" id="btnMode">Move: FREE</button>
+      </div>
+
+      <div id="metrics"></div>
+
+      <div id="logWrap">
+        <div id="logHeader">
+          <div>Console / Errors</div>
+          <div id="logCount"></div>
+        </div>
+        <div id="log"></div>
+      </div>
+    </div>
   </div>
 
   <div id="touchHint">
-    Mobile controls: drag screen to look • 2-finger drag to move • double-tap to recenter
+    <b>Android / Mobile controls</b><br>
+    1-finger drag: look • 2-finger drag: move • double-tap: recenter
   </div>
 
   <script type="module">

@@ -1,28 +1,14 @@
-// /js/world.js — Scarlett MASTER WORLD v11 (FULL)
-// Loads full lobby + store + rail + scorpion room + bots + poker sim.
-// Safe: all modules optional; falls back if missing.
-
-import { createTextureKit } from "./textures.js";
-import { LightsPack } from "./lights_pack.js";
-import { SolidWalls } from "./solid_walls.js";
-import { TableFactory } from "./table_factory.js";
-import { SpectatorRail } from "./spectator_rail.js";
-import { TeleportMachine } from "./teleport_machine.js";
-import { StoreSystem } from "./store.js";
-import { UI } from "./ui.js";
-import { initVRUI } from "./vr_ui.js";
-import { VRUIPanel } from "./vr_ui_panel.js";
-import { ScorpionRoom } from "./scorpion_room.js";
-import { RoomManager } from "./room_manager.js";
-import { Bots } from "./bots.js";
-import { PokerSim } from "./poker_sim.js";
-import { SpawnPoints } from "./spawn_points.js";
+// /js/world.js — Scarlett MASTER WORLD v12 (FULL)
+// TRUE optional modules: uses dynamic imports so one missing/broken file won't kill the whole world.
+// Loads: lobby + store + rail + scorpion + bots + poker sim + spawn pads (optional).
+// Safe: falls back if modules fail, including GitHub Pages/Quest caching serving HTML instead of JS.
 
 export const World = {
   async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD }) {
     const ctx = {
       THREE, scene, renderer, camera, player, controllers, log,
       BUILD,
+
       colliders: [],
       anchors: {},        // named points in world
       beacons: {},        // named visual markers
@@ -32,35 +18,57 @@ export const World = {
       systems: {},        // store/ui/etc
     };
 
-    log?.(`[world] ✅ LOADER SIGNATURE: WORLD.JS V11 MASTER ACTIVE`);
+    log?.(`[world] ✅ LOADER SIGNATURE: WORLD.JS V12 MASTER ACTIVE`);
 
-    // ---- fallback floor ----
+    // ---- base floor always ----
     this._buildBaseFloor(ctx);
 
+    // ---- hard anchors FIRST (so SpawnPoints can read them) ----
+    // These are your "master" defaults. Other modules can overwrite them later if needed.
+    ctx.anchors.lobby_spawn   = new THREE.Vector3(0, 0, 3.2);
+    ctx.anchors.store_spawn   = new THREE.Vector3(4.5, 0, -3.5);
+    ctx.anchors.spectator     = new THREE.Vector3(0, 0, -3.0);
+    ctx.anchors.table_seat_1  = new THREE.Vector3(0, 0, 0.95);
+    ctx.anchors.scorpion_gate = new THREE.Vector3(8.0, 0, 0.0);
+
     // ---- textures kit ----
-    try {
-      ctx.textures = createTextureKit({ THREE, renderer, base: "./assets/textures/", log });
+    await safeCall("[textures] createTextureKit", async () => {
+      const mod = await safeModule("./textures.js");
+      const fn = mod?.createTextureKit;
+      if (!fn) return;
+      ctx.textures = fn({ THREE, renderer, base: "./assets/textures/", log });
       log?.("[world] ✅ mounted textures via createTextureKit()");
-    } catch (e) {
-      log?.("[world] ⚠️ textures kit failed: " + (e?.message || e));
-    }
+    }, log);
 
     // ---- lights ----
-    await safeCall("lights_pack.js.LightsPack.build", () => LightsPack.build(ctx), log);
+    await safeCall("[lights] LightsPack.build", async () => {
+      const mod = await safeModule("./lights_pack.js");
+      const sys = mod?.LightsPack;
+      if (sys?.build) await sys.build(ctx);
+    }, log);
 
     // ---- walls/colliders ----
-    await safeCall("solid_walls.js.SolidWalls.build", () => SolidWalls.build(ctx), log);
+    await safeCall("[walls] SolidWalls.build", async () => {
+      const mod = await safeModule("./solid_walls.js");
+      const sys = mod?.SolidWalls;
+      if (sys?.build) await sys.build(ctx);
+    }, log);
 
-    // ---- table factory (creates lobby demo table) ----
-    await safeCall("table_factory.js.TableFactory.build", async () => {
-      const out = await TableFactory.build(ctx);
-      // Convention: TableFactory should set ctx.tables.lobby
+    // ---- table factory ----
+    await safeCall("[tables] TableFactory.build", async () => {
+      const mod = await safeModule("./table_factory.js");
+      const sys = mod?.TableFactory;
+      if (!sys?.build) return;
+      const out = await sys.build(ctx);
       if (!ctx.tables.lobby && out?.lobby) ctx.tables.lobby = out.lobby;
     }, log);
 
     // ---- spectator rail ----
-    await safeCall("spectator_rail.js.SpectatorRail.build", async () => {
-      const rail = await SpectatorRail.build(ctx);
+    await safeCall("[rail] SpectatorRail.build", async () => {
+      const mod = await safeModule("./spectator_rail.js");
+      const sys = mod?.SpectatorRail;
+      if (!sys?.build) return;
+      const rail = await sys.build(ctx);
       if (rail) {
         rail.name = rail.name || "SPECTATOR_RAIL";
         ctx.rail = rail;
@@ -68,48 +76,90 @@ export const World = {
     }, log);
 
     // ---- teleport machine ----
-    await safeCall("teleport_machine.js.TeleportMachine.init", () => TeleportMachine.init(ctx), log);
+    await safeCall("[teleport] TeleportMachine.init", async () => {
+      const mod = await safeModule("./teleport_machine.js");
+      const sys = mod?.TeleportMachine;
+      if (sys?.init) await sys.init(ctx);
+    }, log);
 
     // ---- store ----
-    await safeCall("store.js.StoreSystem.init", async () => {
-      const store = await StoreSystem.init(ctx);
+    await safeCall("[store] StoreSystem.init", async () => {
+      const mod = await safeModule("./store.js");
+      const sys = mod?.StoreSystem;
+      if (!sys?.init) return;
+      const store = await sys.init(ctx);
       ctx.systems.store = store || ctx.systems.store;
+
       // Add a beacon you can see from spawn
       addBeacon(ctx, "STORE", new THREE.Vector3(4.5, 1.9, -3.5));
     }, log);
 
-    // ---- spawn pads ----
-    await safeCall("spawn_points.js.SpawnPoints.build", () => {
-      SpawnPoints.build({ THREE, scene, world: ctx, log });
-      // Hard anchors (for teleport + room swaps)
-      ctx.anchors.lobby_spawn   = new THREE.Vector3(0, 0, 3.2);
-      ctx.anchors.store_spawn   = new THREE.Vector3(4.5, 0, -3.5);
-      ctx.anchors.spectator     = new THREE.Vector3(0, 0, -3.0);
-      ctx.anchors.table_seat_1  = new THREE.Vector3(0, 0, 0.95);
-      ctx.anchors.scorpion_gate = new THREE.Vector3(8.0, 0, 0.0); // where the scorpion room entry sits
+    // ---- spawn pads (optional, BUT NO LONGER A HARD IMPORT) ----
+    await safeCall("[spawns] SpawnPoints.build", async () => {
+      // ensure container exists
+      ctx.spawns ||= {};
+      const mod = await safeModule("./spawn_points.js");
+      const sys = mod?.SpawnPoints;
+      if (!sys?.build) return;
+
+      sys.build({ THREE, scene, world: ctx, log });
+
+      // Convenience alias
+      ctx.spawns.default = ctx.spawns.lobby_spawn || ctx.spawns.default || null;
+
+      log?.("[world] ✅ SpawnPoints built (pads + ctx.spawns)");
     }, log);
 
     // ---- scorpion room ----
-    await safeCall("scorpion_room.js.ScorpionRoom.build", async () => {
-      const sc = await ScorpionRoom.build(ctx);
+    await safeCall("[scorpion] ScorpionRoom.build", async () => {
+      const mod = await safeModule("./scorpion_room.js");
+      const sys = mod?.ScorpionRoom;
+      if (!sys?.build) return;
+      const sc = await sys.build(ctx);
       ctx.systems.scorpion = sc || ctx.systems.scorpion;
     }, log);
 
     // ---- UI + VR UI ----
-    await safeCall("ui.js.UI.init", () => UI.init(ctx), log);
-    await safeCall("vr_ui.js.initVRUI", () => initVRUI(ctx), log);
-    await safeCall("vr_ui_panel.js.VRUIPanel.init", () => VRUIPanel.init(ctx), log);
+    await safeCall("[ui] UI.init", async () => {
+      const mod = await safeModule("./ui.js");
+      const sys = mod?.UI;
+      if (sys?.init) await sys.init(ctx);
+    }, log);
+
+    await safeCall("[vrui] initVRUI", async () => {
+      const mod = await safeModule("./vr_ui.js");
+      const fn = mod?.initVRUI;
+      if (fn) await fn(ctx);
+    }, log);
+
+    await safeCall("[vrui] VRUIPanel.init", async () => {
+      const mod = await safeModule("./vr_ui_panel.js");
+      const sys = mod?.VRUIPanel;
+      if (sys?.init) await sys.init(ctx);
+    }, log);
 
     // ---- rooms ----
-    await safeCall("room_manager.js.RoomManager.init", () => RoomManager.init(ctx), log);
+    await safeCall("[rooms] RoomManager.init", async () => {
+      const mod = await safeModule("./room_manager.js");
+      const sys = mod?.RoomManager;
+      if (sys?.init) await sys.init(ctx);
+    }, log);
 
     // ---- bots ----
-    await safeCall("bots.js.Bots.init", () => Bots.init(ctx), log);
+    await safeCall("[bots] Bots.init", async () => {
+      const mod = await safeModule("./bots.js");
+      const sys = mod?.Bots;
+      if (sys?.init) await sys.init(ctx);
+    }, log);
 
     // ---- poker sim ----
-    await safeCall("poker_sim.js.PokerSim.init", () => PokerSim.init(ctx), log);
+    await safeCall("[poker] PokerSim.init", async () => {
+      const mod = await safeModule("./poker_sim.js");
+      const sys = mod?.PokerSim;
+      if (sys?.init) await sys.init(ctx);
+    }, log);
 
-    // ---- final master layout lock (store + signage + rail visibility) ----
+    // ---- final master layout lock ----
     this._forceMasterLayout(ctx);
 
     log?.(`[world] ✅ REAL WORLD LOADED (mounted=MASTER)`);
@@ -174,6 +224,8 @@ export const World = {
   }
 };
 
+// ---------------- helpers ----------------
+
 async function safeCall(label, fn, log) {
   try {
     log?.(`[world] calling ${label}`);
@@ -182,6 +234,19 @@ async function safeCall(label, fn, log) {
     return out;
   } catch (e) {
     log?.(`[world] ⚠️ ${label} error: ${e?.message || e}`);
+    return null;
+  }
+}
+
+async function safeModule(path) {
+  try {
+    // cache-bust using the same v param if present
+    const v = new URL(location.href).searchParams.get("v");
+    const url = v ? `${path}?v=${encodeURIComponent(v)}` : path;
+    return await import(url);
+  } catch (e) {
+    // Important: if GitHub returns HTML/404, import throws here and we treat it as optional failure.
+    console.error(`❌ module load failed: ${path}`, e);
     return null;
   }
 }
@@ -197,4 +262,4 @@ function addBeacon(ctx, name, pos) {
   scene.add(m);
   ctx.beacons[name] = m;
   log?.(`[world] ✅ beacon: ${name}`);
-                     }
+        }

@@ -1,22 +1,18 @@
-// /js/room_manager.js — RoomManager v7.3 (BOOT LOBBY HARD)
+// /js/room_manager.js — RoomManager v7.4 (BOOT LOBBY HARD + VISIBILITY)
 
 export const RoomManager = {
   init(ctx) {
     ctx.rooms = ctx.rooms || {};
     ctx.rooms.current = "lobby";
 
-    function setRoom(name) {
+    const setRoom = (name) => {
       ctx.rooms.current = name;
       console.log(`[rm] room=${name}`);
 
-      // show/hide scorpion room
-      try {
-        if (ctx.ScorpionRoom && typeof ctx.ScorpionRoom.setActive === "function") {
-          ctx.ScorpionRoom.setActive(name === "scorpion");
-        }
-      } catch {}
+      // Toggle scorpion visibility
+      if (ctx.ScorpionRoom?.setActive) ctx.ScorpionRoom.setActive(name === "scorpion");
 
-      // choose spawn
+      // Spawn per room
       const spawnName =
         name === "scorpion" ? "scorpion_safe_spawn" :
         name === "store" ? "store_spawn" :
@@ -27,14 +23,17 @@ export const RoomManager = {
 
       // re-apply after a tick to beat late transforms
       setTimeout(() => ctx.spawns?.apply?.(spawnName), 250);
-    }
+    };
 
     ctx.rooms.setRoom = setRoom;
 
-    // ✅ HARD START IN LOBBY
+    // ✅ ALWAYS boot lobby
     setRoom("lobby");
 
-    console.log("[rm] init ✅ v7.3 (boot lobby hard)");
+    // ✅ FORCE lobby again after UI builds (if UI tries to auto-enter scorpion)
+    setTimeout(() => setRoom("lobby"), 600);
+
+    console.log("[rm] init ✅ v7.4");
     return ctx.rooms;
   }
 };

@@ -1,8 +1,8 @@
 // /js/world.js — Scarlett Hybrid World 2.0
 // ✅ 4 corner cubes (rooms) connected to a circular hub ring
 // ✅ Solid walls (colliders) + walkable corridors
-// ✅ SpawnPad in one corner + SpawnPoint on pad
-// ✅ BossTable in hub; always face it on spawn
+// ✅ SpawnPad + SpawnPoint (always spawn on pad)
+// ✅ BossTable in hub
 
 export const World = {
   async init(ctx) {
@@ -24,7 +24,7 @@ export const World = {
       log(`[world] system ok: ${name}`);
     };
 
-    // ---------- Lighting (never black) ----------
+    // ---------- Lighting ----------
     scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x080812, 1.05));
     const dir = new THREE.DirectionalLight(0xffffff, 1.15);
     dir.position.set(6, 12, 4);
@@ -32,8 +32,8 @@ export const World = {
 
     // ---------- Materials ----------
     const floorMat = new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.95 });
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x070912, roughness: 0.78, metalness: 0.12 });
-    const neonMat = new THREE.MeshStandardMaterial({
+    const wallMat  = new THREE.MeshStandardMaterial({ color: 0x070912, roughness: 0.78, metalness: 0.12 });
+    const neonMat  = new THREE.MeshStandardMaterial({
       color: 0x081018,
       emissive: new THREE.Color(0x00ffff),
       emissiveIntensity: 1.4,
@@ -55,31 +55,26 @@ export const World = {
       return m;
     };
 
-    // ---------- Base floor (big) ----------
+    // ---------- Base floor ----------
     const base = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), floorMat);
     base.rotation.x = -Math.PI / 2;
     base.receiveShadow = true;
     scene.add(base);
 
     // ---------- Layout ----------
-    // Four corner “cubes” (rooms) at N/E/S/W-ish corners around center,
-    // connected by straight corridors into a circular hub ring.
-
     const WALL_H = 3.0;
     const WALL_T = 0.26;
 
-    const roomSize = 12;           // room cube width/length
+    const roomSize = 12;
     const roomHalf = roomSize / 2;
 
     const corridorW = 4.2;
     const corridorL = 9.0;
 
-    const hubR = 8.2;              // outer hub ring radius visual
-    const hubPlateR = 7.2;         // walkable hub plate radius
+    const hubR = 8.2;
+    const hubPlateR = 7.2;
 
-    // Corner room centers (square corners around hub)
-    // Think: a square of rooms around the hub.
-    const cornerOffset = 18; // distance from center
+    const cornerOffset = 18;
     const rooms = [
       { name: "Room_NW", x: -cornerOffset, z:  cornerOffset },
       { name: "Room_NE", x:  cornerOffset, z:  cornerOffset },
@@ -95,15 +90,12 @@ export const World = {
     hubPlate.position.set(0, 0.11, 0);
     scene.add(hubPlate);
 
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(hubR, 0.13, 16, 140),
-      neonMat
-    );
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(hubR, 0.13, 16, 140), neonMat);
     ring.rotation.x = Math.PI / 2;
     ring.position.set(0, 0.35, 0);
     scene.add(ring);
 
-    // ---------- Boss table in hub ----------
+    // ---------- Boss table ----------
     const bossTable = new THREE.Mesh(
       new THREE.CylinderGeometry(1.55, 1.55, 0.14, 40),
       new THREE.MeshStandardMaterial({ color: 0x0c2a22, roughness: 0.9, metalness: 0.05 })
@@ -117,55 +109,45 @@ export const World = {
     dealer.position.set(0, 0.92, 0.8);
     scene.add(dealer);
 
-    // ---------- Build 4 rooms + corridor to hub ----------
+    // ---------- Rooms + corridors ----------
     const buildRoom = (r) => {
-      // Room floor
       makeFloor(roomSize, roomSize, r.x, r.z);
 
-      // Walls (full cube feel) with an opening facing toward center
-      // Compute direction to center to place doorway on inner-facing wall.
       const toCenter = new THREE.Vector3(-r.x, 0, -r.z);
-      const innerIsX = Math.abs(toCenter.x) > Math.abs(toCenter.z); // which wall faces center
+      const innerIsX = Math.abs(toCenter.x) > Math.abs(toCenter.z);
       const doorW = 3.2;
 
-      // West/East walls
+      // side walls
       makeSolid(new THREE.Mesh(new THREE.BoxGeometry(WALL_T, WALL_H, roomSize + WALL_T), wallMat))
         .position.set(r.x - roomHalf, WALL_H / 2, r.z);
       makeSolid(new THREE.Mesh(new THREE.BoxGeometry(WALL_T, WALL_H, roomSize + WALL_T), wallMat))
         .position.set(r.x + roomHalf, WALL_H / 2, r.z);
 
-      // North/South walls (we will split one into two segments for a doorway)
       const northZ = r.z + roomHalf;
       const southZ = r.z - roomHalf;
 
-      const splitWall = (zPos, isNorth) => {
-        const leftSegW = (roomSize - doorW) / 2;
-        const rightSegW = leftSegW;
+      const splitWallZ = (zPos) => {
+        const segW = (roomSize - doorW) / 2;
 
-        makeSolid(new THREE.Mesh(new THREE.BoxGeometry(leftSegW, WALL_H, WALL_T), wallMat))
-          .position.set(r.x - (doorW/2 + leftSegW/2), WALL_H/2, zPos);
+        makeSolid(new THREE.Mesh(new THREE.BoxGeometry(segW, WALL_H, WALL_T), wallMat))
+          .position.set(r.x - (doorW/2 + segW/2), WALL_H/2, zPos);
 
-        makeSolid(new THREE.Mesh(new THREE.BoxGeometry(rightSegW, WALL_H, WALL_T), wallMat))
-          .position.set(r.x + (doorW/2 + rightSegW/2), WALL_H/2, zPos);
+        makeSolid(new THREE.Mesh(new THREE.BoxGeometry(segW, WALL_H, WALL_T), wallMat))
+          .position.set(r.x + (doorW/2 + segW/2), WALL_H/2, zPos);
 
-        // Neon doorway header
         const header = new THREE.Mesh(new THREE.BoxGeometry(doorW + 0.6, 0.25, 0.25), neonMat);
         header.position.set(r.x, WALL_H - 0.2, zPos);
         scene.add(header);
       };
 
-      // Decide which wall gets doorway (the wall that faces center)
-      // If inner wall is X direction: doorway on West or East wall; else on North/South.
       if (innerIsX) {
-        // doorway on east wall if room is on west side; on west wall if room on east side
         const doorX = (r.x < 0) ? (r.x + roomHalf) : (r.x - roomHalf);
-        // Build full north/south
+
         makeSolid(new THREE.Mesh(new THREE.BoxGeometry(roomSize + WALL_T, WALL_H, WALL_T), wallMat))
           .position.set(r.x, WALL_H/2, northZ);
         makeSolid(new THREE.Mesh(new THREE.BoxGeometry(roomSize + WALL_T, WALL_H, WALL_T), wallMat))
           .position.set(r.x, WALL_H/2, southZ);
 
-        // Split the inner-facing side wall into two segments (doorway)
         const segL = (roomSize - doorW) / 2;
         makeSolid(new THREE.Mesh(new THREE.BoxGeometry(WALL_T, WALL_H, segL), wallMat))
           .position.set(doorX, WALL_H/2, r.z - (doorW/2 + segL/2));
@@ -176,37 +158,33 @@ export const World = {
         header.position.set(doorX, WALL_H - 0.2, r.z);
         scene.add(header);
       } else {
-        // doorway on south wall if room is north side; on north wall if room south side
         const doorZ = (r.z > 0) ? (r.z - roomHalf) : (r.z + roomHalf);
 
-        // Build full west/east already done, now build the other wall full and split the inner wall
-        // If doorway is on south wall, make north full; else make south full.
         if (doorZ === southZ) {
           makeSolid(new THREE.Mesh(new THREE.BoxGeometry(roomSize + WALL_T, WALL_H, WALL_T), wallMat))
             .position.set(r.x, WALL_H/2, northZ);
-          splitWall(southZ, false);
+          splitWallZ(southZ);
         } else {
           makeSolid(new THREE.Mesh(new THREE.BoxGeometry(roomSize + WALL_T, WALL_H, WALL_T), wallMat))
             .position.set(r.x, WALL_H/2, southZ);
-          splitWall(northZ, true);
+          splitWallZ(northZ);
         }
       }
 
-      // Corridor from doorway area toward hub
-      // Corridor center is between room and hub
+      // corridor toward hub
       const corridorDir = new THREE.Vector3(-r.x, 0, -r.z).normalize();
-      const corridorCenter = new THREE.Vector3(r.x, 0, r.z).add(corridorDir.multiplyScalar(roomHalf + corridorL/2));
+      const corridorCenter = new THREE.Vector3(r.x, 0, r.z)
+        .add(corridorDir.clone().multiplyScalar(roomHalf + corridorL/2));
+
       makeFloor(corridorW, corridorL, corridorCenter.x, corridorCenter.z);
 
-      // Corridor side walls (solid)
-      // Build in corridor local basis: use a sideways vector
-      const side = new THREE.Vector3(corridorDir.z, 0, -corridorDir.x); // perpendicular
-      const leftWallPos = corridorCenter.clone().add(side.clone().multiplyScalar(corridorW/2));
+      const side = new THREE.Vector3(corridorDir.z, 0, -corridorDir.x);
+      const leftWallPos  = corridorCenter.clone().add(side.clone().multiplyScalar(corridorW/2));
       const rightWallPos = corridorCenter.clone().add(side.clone().multiplyScalar(-corridorW/2));
 
-      const wallGeo = new THREE.BoxGeometry(WALL_T, WALL_H, corridorL);
-      // rotate corridor walls to align with corridor
       const yaw = Math.atan2(corridorDir.x, corridorDir.z);
+
+      const wallGeo = new THREE.BoxGeometry(WALL_T, WALL_H, corridorL);
 
       const lw = makeSolid(new THREE.Mesh(wallGeo, wallMat));
       lw.position.set(leftWallPos.x, WALL_H/2, leftWallPos.z);
@@ -219,7 +197,7 @@ export const World = {
 
     rooms.forEach(buildRoom);
 
-    // ---------- Spawn pad in NW room (you always spawn on a pad) ----------
+    // ---------- SpawnPad (NW room) ----------
     const spawnRoom = rooms[0]; // NW
     const spawnPad = new THREE.Mesh(
       new THREE.CylinderGeometry(0.85, 0.85, 0.16, 32),
@@ -235,19 +213,16 @@ export const World = {
     spawnPad.position.set(spawnRoom.x, 0.10, spawnRoom.z);
     scene.add(spawnPad);
 
-    // SpawnPoint sits on pad
     const sp = new THREE.Object3D();
     sp.name = "SpawnPoint";
     sp.position.set(spawnRoom.x, 0, spawnRoom.z);
     scene.add(sp);
 
-    // Teleport machine anchor at spawn (world places a marker; your real module can replace/augment)
     const tmAnchor = new THREE.Object3D();
     tmAnchor.name = "TeleportMachineSpawn";
     tmAnchor.position.set(spawnRoom.x, 0, spawnRoom.z + 2.6);
     scene.add(tmAnchor);
 
-    // Visual fallback teleport machine (if your module doesn't draw its own)
     const tmCore = new THREE.Mesh(
       new THREE.CylinderGeometry(0.35, 0.35, 2.2, 22),
       new THREE.MeshStandardMaterial({
@@ -265,16 +240,13 @@ export const World = {
     log("[world] 4-corner cubes + hub built ✅");
     log(`[world] SpawnPad @ (${spawnPad.position.x.toFixed(1)}, ${spawnPad.position.z.toFixed(1)})`);
 
-    // ---------- Try load your existing systems (safe) ----------
+    // ---------- Load your existing systems safely ----------
     const rm = await safeImport("./room_manager.js");
     if (rm?.RoomManager?.init) { try { rm.RoomManager.init(ctx); addSystem("room_manager", rm.RoomManager); } catch {} }
 
     const teleportMachine = await safeImport("./teleport_machine.js");
     if (teleportMachine?.TeleportMachine?.init) {
-      try {
-        await teleportMachine.TeleportMachine.init(ctx);
-        addSystem("teleport_machine", teleportMachine.TeleportMachine);
-      } catch {}
+      try { await teleportMachine.TeleportMachine.init(ctx); addSystem("teleport_machine", teleportMachine.TeleportMachine); } catch {}
     }
 
     const teleport = await safeImport("./teleport.js");

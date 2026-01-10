@@ -1,9 +1,11 @@
-// /js/world.js — Scarlett MASTER WORLD v14 (FULL)
-// FIXES:
-// - Properly wires SpawnPoints.build(ctx)
-// - Ensures PokerSim is accessible as ctx.PokerSim and ctx.poker
-// - Scorpion system returns setActive() so RoomManager can hide/show room
-// - Starts in lobby, scorpion hidden until entered
+// /js/world.js — Scarlett MASTER WORLD v15 (FULL)
+// FIXES (v15):
+// ✅ Exposes ScorpionRoom system on ctx.ScorpionRoom (so bridges/UI can toggle it)
+// ✅ Returns ctx as before (no breaking changes)
+// ✅ Guarantees START IN LOBBY (scorpion hidden)
+// ✅ Keeps your existing module load / safeCall patterns
+// ✅ Leaves PokerSim + RoomManager flow intact
+// ✅ Adds ctx.bounds (used by AndroidControls / bridge clamping)
 
 export const World = {
   async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD }) {
@@ -16,6 +18,12 @@ export const World = {
       beacons: {},
       spawns: {},
 
+      // ✅ bounds for mobile clamps (optional; can be overridden later)
+      bounds: {
+        min: new THREE.Vector3(-18, 0, -18),
+        max: new THREE.Vector3(18, 0, 18),
+      },
+
       mode: "lobby",
       tables: {},
       systems: {},
@@ -23,9 +31,13 @@ export const World = {
       // will be filled later if available:
       PokerSim: null,
       poker: null,
+
+      // optional controls (main may set later)
+      Controls: null,
+      controls: null,
     };
 
-    log?.(`[world] ✅ LOADER SIGNATURE: WORLD.JS V14 MASTER ACTIVE`);
+    log?.(`[world] ✅ LOADER SIGNATURE: WORLD.JS V15 MASTER ACTIVE`);
 
     this._buildBaseFloor(ctx);
 
@@ -36,6 +48,7 @@ export const World = {
     ctx.anchors.table_seat_1    = new THREE.Vector3(0, 0, 1.55);
     ctx.anchors.scorpion_gate   = new THREE.Vector3(8.0, 0, 0.0);
     ctx.anchors.scorpion_seat_1 = new THREE.Vector3(8.0, 0, 2.35);
+    ctx.anchors.scorpion_safe_spawn = new THREE.Vector3(7.1, 0, 1.85);
     ctx.anchors.scorpion_exit   = new THREE.Vector3(8.0, 0, 0.0);
 
     // ---- textures ----
@@ -113,11 +126,17 @@ export const World = {
       const mod = await safeModule("./scorpion_room.js");
       const sys = mod?.ScorpionRoom;
       if (!sys?.build) return;
+
       const sc = await sys.build(ctx);
+
+      // ✅ store system
       ctx.systems.scorpion = sc || ctx.systems.scorpion;
 
-      // start hidden (we begin in lobby)
-      ctx.systems.scorpion?.setActive?.(false);
+      // ✅ expose directly for bridges/UI
+      ctx.ScorpionRoom = ctx.systems.scorpion;
+
+      // ✅ start hidden (we begin in lobby)
+      ctx.ScorpionRoom?.setActive?.(false);
     }, log);
 
     // ---- UI ----
@@ -127,6 +146,7 @@ export const World = {
       if (sys?.init) await sys.init(ctx);
     }, log);
 
+    // ---- VR UI textures/hands/watch (optional) ----
     await safeCall("[vrui] initVRUI", async () => {
       const mod = await safeModule("./vr_ui.js");
       const fn = mod?.initVRUI;
@@ -138,10 +158,6 @@ export const World = {
       const sys = mod?.VRUIPanel;
       if (sys?.init) await sys.init(ctx);
     }, log);
-
-    // ---- controls (NOTE: usually created in main.js; we just alias if present) ----
-    // If your main sets ctx.controls later, RoomManager still works (it checks both).
-    ctx.controls ||= ctx.systems?.controls || null;
 
     // ---- poker sim ----
     await safeCall("[poker] PokerSim.init", async () => {
@@ -164,7 +180,7 @@ export const World = {
       if (sys?.init) await sys.init(ctx);
     }, log);
 
-    // ---- bots system (optional; PokerSim makes its own bot visuals anyway) ----
+    // ---- bots system (optional) ----
     await safeCall("[bots] Bots.init", async () => {
       const mod = await safeModule("./bots.js");
       const sys = mod?.Bots;
@@ -175,7 +191,7 @@ export const World = {
 
     // ✅ hard guarantee: start in lobby standing
     ctx.spawns?.apply?.("lobby_spawn", ctx.player, { standY: 1.65 });
-    ctx.systems.scorpion?.setActive?.(false);
+    ctx.ScorpionRoom?.setActive?.(false);
     ctx.systems.store?.setActive?.(true);
     ctx.PokerSim?.setMode?.("lobby_demo");
 
@@ -272,4 +288,4 @@ function addBeacon(ctx, name, pos) {
   scene.add(m);
   ctx.beacons[name] = m;
   log?.(`[world] ✅ beacon: ${name}`);
-}
+        }

@@ -1,6 +1,6 @@
 // /js/world.js — Scarlett MASTER WORLD v12 (FULL)
-// One world: Original Lobby (start) + Store (left) + Scorpion Room (teleport + auto-seat).
-// Safe optional modules; strong lighting; debug logs; hard fallbacks.
+// One world: Original Lobby (start) + Store (left) + Scorpion Room (right teleport + auto-seat).
+// Includes: TeleportMachine pads, RoomManager, PokerSim, basic bot seating in scorpion.
 
 import { TeleportMachine } from "./teleport_machine.js";
 import { StoreSystem } from "./store.js";
@@ -10,20 +10,17 @@ import { Bots } from "./bots.js";
 import { PokerSim } from "./poker_sim.js";
 
 export const World = {
-  async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD }) {
-    const ctx = {
-      THREE, scene, renderer, camera, player, controllers, log,
-      BUILD,
-      systems: {},
-      PokerSim: null,
-      world: this,
-      anchors: {},
-      seated: false,
-    };
+  async init(ctx) {
+    const { THREE, scene, renderer, camera, player, controllers, log } = ctx;
+
+    // attach systems container
+    ctx.systems = ctx.systems || {};
+    ctx.anchors = ctx.anchors || {};
+    ctx.seated = false;
 
     log?.("[world] init v12…");
 
-    // ---------- Always-on lighting (prevents black scene) ----------
+    // Always-on global lighting (prevents black world)
     const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.9);
     scene.add(hemi);
 
@@ -32,31 +29,31 @@ export const World = {
     sun.castShadow = true;
     scene.add(sun);
 
-    // ---------- Build ORIGINAL LOBBY ----------
+    // Build lobby + store shell
     this._buildLobby(ctx);
-
-    // ---------- Build STORE (left) ----------
     this._buildStoreShell(ctx);
 
-    // ---------- Build SCORPION ROOM (separate visible group) ----------
+    // Build scorpion room
     ScorpionRoom.init(ctx);
     ctx.systems.scorpion = ScorpionRoom;
 
-    // ---------- Teleport pads / machine ----------
-    ctx.teleports = {};
-    TeleportMachine?.init?.({
-      THREE, scene, renderer, camera, player, controllers, log,
-      // important hook:
-      onHit: (id) => ctx.onTeleportHit?.(id),
-      // spawn pads:
-      pads: [
-        { id: "tp_store", label: "STORE", pos: new THREE.Vector3(-4.0, 0.01, -1.0) },
-        { id: "tp_scorpion", label: "SCORPION ROOM", pos: new THREE.Vector3(4.0, 0.01, -1.0) },
-        { id: "tp_lobby", label: "LOBBY", pos: new THREE.Vector3(0.0, 0.01, 3.2) },
-      ],
-    });
+    // Teleport pads (call ctx.onTeleportHit)
+    try {
+      TeleportMachine?.init?.({
+        THREE, scene, renderer, camera, player, controllers, log,
+        onHit: (id) => ctx.onTeleportHit?.(id),
+        pads: [
+          { id: "tp_store", label: "STORE", pos: new THREE.Vector3(-4.0, 0.01, -1.0) },
+          { id: "tp_scorpion", label: "SCORPION ROOM", pos: new THREE.Vector3(4.0, 0.01, -1.0) },
+          { id: "tp_lobby", label: "LOBBY", pos: new THREE.Vector3(0.0, 0.01, 3.2) },
+        ],
+      });
+      log?.("[world] TeleportMachine ready ✅");
+    } catch (e) {
+      log?.("[world] TeleportMachine init error:", e);
+    }
 
-    // ---------- Store system (if you already have it) ----------
+    // Store system (optional)
     try {
       if (StoreSystem?.init) {
         StoreSystem.init(ctx);
@@ -69,7 +66,7 @@ export const World = {
       log?.("[world] store init error:", e);
     }
 
-    // ---------- Bots ----------
+    // Bots (optional)
     try {
       ctx.Bots = Bots;
       await Bots?.init?.(ctx);
@@ -78,7 +75,7 @@ export const World = {
       log?.("[world] bots init error:", e);
     }
 
-    // ---------- PokerSim (cards/chips/rounds) ----------
+    // PokerSim (cards visible)
     try {
       ctx.PokerSim = PokerSim;
       await PokerSim?.init?.(ctx);
@@ -87,27 +84,25 @@ export const World = {
       log?.("[world] PokerSim init error:", e);
     }
 
-    // ---------- Room Manager ----------
+    // Room Manager (wires ctx.rooms + teleport hits)
     RoomManager.init(ctx);
 
-    // Start in lobby spawn
+    // Start lobby mode
+    ctx.PokerSim?.setMode?.("lobby_demo");
     this.movePlayerTo("lobby_spawn", ctx);
     this.setSeated(false, ctx);
 
-    // Put 4 bots in Scorpion Room seats 1..4 (always there)
+    // Seat 4 bots in Scorpion seats 1..4
     this._spawnScorpionBots(ctx);
 
-    // Keep lobby demo “in front” (PokerSim mode handles visuals)
-    ctx.PokerSim?.setMode?.("lobby_demo");
-
-    // expose ctx so main can hold it
+    // expose ctx for debugging / main normalization
     this.ctx = ctx;
 
     log?.("[world] ready ✅");
-    return ctx;
+    return this;
   },
 
-  // ---------------- public helpers ----------------
+  // ---------- public helpers ----------
   movePlayerTo(anchorName, ctx = this.ctx) {
     const a = ctx?.anchors?.[anchorName];
     if (!a || !ctx?.player) return;
@@ -118,13 +113,6 @@ export const World = {
 
   setSeated(on, ctx = this.ctx) {
     ctx.seated = !!on;
-
-    // If you have a “standing height” rig, keep it simple:
-    // When seated, drop camera/player slightly so table view looks right.
-    // (Adjust these numbers if your rig differs.)
-    const y = on ? 0.0 : 0.0;
-    if (ctx.player) ctx.player.position.y = y;
-
     ctx.log?.(`[world] seated=${ctx.seated}`);
   },
 
@@ -132,21 +120,23 @@ export const World = {
     const seat = ctx?.scorpion?.seats?.[seatIndex];
     if (!seat || !ctx?.player) return;
 
-    // Sit position: a little back from seat point, facing table
     const forward = new ctx.THREE.Vector3(0, 0, -1).applyEuler(seat.rotation);
-    const sitPos = seat.position.clone().add(forward.multiplyScalar(0.22)); // tiny offset
+    const sitPos = seat.position.clone().add(forward.multiplyScalar(0.22));
     ctx.player.position.copy(sitPos);
     ctx.player.rotation.y = seat.rotation.y;
 
     this.setSeated(true, ctx);
-
-    // Tell PokerSim which seat is human
     ctx.PokerSim?.setHumanSeat?.(seatIndex);
 
     ctx.log?.(`[world] seatPlayer → seat ${seatIndex}`);
   },
 
-  // ---------------- build: lobby ----------------
+  update(dt) {
+    // Optional world update hook
+    // (PokerSim loop uses setTimeout; TeleportMachine may have its own internal updates)
+  },
+
+  // ---------- build lobby ----------
   _buildLobby(ctx) {
     const { THREE, scene } = ctx;
 
@@ -159,7 +149,7 @@ export const World = {
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // Simple walls (solid feel)
+    // Walls
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x10121a, roughness: 0.9, metalness: 0.05 });
     const mkWall = (w, h, d, x, y, z) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
@@ -174,10 +164,10 @@ export const World = {
     mkWall(0.4, 4, 28, -14, 2, 0);
     mkWall(0.4, 4, 28, 14, 2, 0);
 
-    // Anchors (spawns)
+    // Anchors
     ctx.anchors.lobby_spawn = new THREE.Object3D();
     ctx.anchors.lobby_spawn.position.set(0, 0, 6.5);
-    ctx.anchors.lobby_spawn.rotation.y = Math.PI; // face toward center/front
+    ctx.anchors.lobby_spawn.rotation.y = Math.PI;
     scene.add(ctx.anchors.lobby_spawn);
 
     ctx.anchors.store_spawn = new THREE.Object3D();
@@ -185,16 +175,12 @@ export const World = {
     ctx.anchors.store_spawn.rotation.y = Math.PI / 2;
     scene.add(ctx.anchors.store_spawn);
 
-    ctx.anchors.scorpion_entry = ctx.scorpion?.entry || new THREE.Object3D();
-    // NOTE: scorpion_entry inside scorpion group; RoomManager moves to it via seatPlayer()
+    // scorpion entry anchor is inside scorpion group; create proxy in anchors
+    ctx.anchors.scorpion_entry = new THREE.Object3D();
+    ctx.anchors.scorpion_entry.position.set(0, 0, 4.6);
+    ctx.anchors.scorpion_entry.rotation.y = Math.PI;
+    scene.add(ctx.anchors.scorpion_entry);
 
-    // “Bots playing in front” zone marker (PokerSim can use this)
-    ctx.anchors.lobby_table_zone = new THREE.Object3D();
-    ctx.anchors.lobby_table_zone.position.set(0, 0, -2.8);
-    ctx.anchors.lobby_table_zone.rotation.y = 0;
-    scene.add(ctx.anchors.lobby_table_zone);
-
-    // Visual signage: Store left, Scorpion right
     this._makeSign(ctx, "STORE", -6.5, 2.0, -1.0, Math.PI / 2);
     this._makeSign(ctx, "SCORPION ROOM", 6.5, 2.0, -1.0, -Math.PI / 2);
 
@@ -204,13 +190,13 @@ export const World = {
   _buildStoreShell(ctx) {
     const { THREE, scene } = ctx;
 
-    // Lightweight “store area” shell if StoreSystem isn't visible yet
     const frame = new THREE.Mesh(
       new THREE.BoxGeometry(5.5, 2.7, 5.5),
-      new THREE.MeshStandardMaterial({ color: 0x0c1020, roughness: 0.9, metalness: 0.08, transparent: true, opacity: 0.35 })
+      new THREE.MeshStandardMaterial({
+        color: 0x0c1020, roughness: 0.9, metalness: 0.08, transparent: true, opacity: 0.35
+      })
     );
     frame.position.set(-6.2, 1.35, 0.0);
-    frame.castShadow = false;
     frame.receiveShadow = true;
     scene.add(frame);
   },
@@ -238,11 +224,10 @@ export const World = {
   },
 
   _spawnScorpionBots(ctx) {
-    // Seat 1..4 are bots (seat0 is player)
     const seats = ctx?.scorpion?.seats;
     if (!seats || seats.length < 5) return;
 
-    // If your Bots module supports seating, use it; otherwise place simple “stand-ins”
+    // If Bots module supports spawnSeatedBot use it; else fallback capsules
     for (let i = 1; i <= 4; i++) {
       const s = seats[i];
       const ok = ctx.Bots?.spawnSeatedBot?.(ctx, {
@@ -253,7 +238,6 @@ export const World = {
       });
 
       if (!ok) {
-        // fallback: simple capsule bot
         const b = this._fallbackBot(ctx);
         b.position.copy(s.position);
         b.rotation.y = s.rotation.y;
@@ -283,6 +267,7 @@ export const World = {
     head.position.y = 1.32;
     head.castShadow = true;
     g.add(head);
+
     return g;
   },
 };

@@ -1,10 +1,11 @@
-// /js/main.js — SCARLETT VR POKER — MASTER MAIN v13 (FULL, HARDENED)
+// /js/main.js — SCARLETT VR POKER — MASTER MAIN v13.1 (FULL, COMPLETE, UNTRUNCATED)
 // ✅ Quest + GitHub Pages safe
-// ✅ Uses REAL Three.js (no wrapper dependency)
+// ✅ Uses REAL Three.js (no local wrapper dependency)
 // ✅ VRButton is "locked" + auto-repaired if any UI overwrites DOM
 // ✅ Controllers + gamepads wired
 // ✅ Injects ctx.THREE into World (world.js should NOT import three)
 // ✅ Safe delta time (no THREE.Clock)
+// ✅ NEVER wipes body.innerHTML (prevents killing VR button)
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { VRButton } from "./VRButton.js";
@@ -20,7 +21,9 @@ const state = {
   player: null,
   controllers: [],
   worldReady: false,
+
   lastTime: performance.now(),
+
   vrBtn: null,
   vrRepairTimer: null,
 };
@@ -30,11 +33,11 @@ boot().catch((err) => fatal(err));
 async function boot() {
   log("boot ✅ v=" + BUILD);
 
-  // --- Scene
+  // -------- Scene
   state.scene = new THREE.Scene();
   state.scene.background = new THREE.Color(0x05060a);
 
-  // --- Camera
+  // -------- Camera
   state.camera = new THREE.PerspectiveCamera(
     70,
     window.innerWidth / window.innerHeight,
@@ -43,26 +46,28 @@ async function boot() {
   );
   state.camera.position.set(0, 1.6, 3);
 
-  // --- Player rig
+  // -------- Player rig
   state.player = new THREE.Group();
   state.player.position.set(0, 0, 0);
   state.player.add(state.camera);
   state.scene.add(state.player);
 
-  // --- Renderer
+  // -------- Renderer
   state.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   state.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   state.renderer.setSize(window.innerWidth, window.innerHeight);
   state.renderer.xr.enabled = true;
+
+  // Attach canvas early
   document.body.appendChild(state.renderer.domElement);
 
-  // --- VRButton (LOCK + AUTO-REPAIR)
+  // -------- VR Button (LOCK + AUTO-REPAIR)
   mountVRButton();
 
-  // --- Controllers
+  // -------- Controllers
   initControllers();
 
-  // --- World
+  // -------- World
   await World.init({
     THREE,
     scene: state.scene,
@@ -77,26 +82,25 @@ async function boot() {
   state.worldReady = true;
   log("world init ✅");
 
-  // --- Events
+  // -------- Events
   window.addEventListener("resize", onResize, { passive: true });
 
-  // --- Loop
+  // -------- Loop
   state.renderer.setAnimationLoop(tick);
 
-  // Give your debug overlay time; if it overwrites DOM later, we auto-repair VR button
+  // If any overlay/UI wipes DOM later, keep VRButton alive
   startVRButtonRepairLoop();
 }
 
 function mountVRButton() {
   try {
-    // Create button
     const btn = VRButton.createButton(state.renderer);
 
-    // Force id/class for your debug panel checks
+    // Ensure selectors your debug panel expects
     btn.id = btn.id || "VRButton";
     btn.classList.add("vr-button");
 
-    // HARD force visible (some overlays/cssex can hide it)
+    // Hard visible styling (prevents overlays from hiding)
     btn.style.position = "fixed";
     btn.style.right = "12px";
     btn.style.bottom = "12px";
@@ -105,17 +109,21 @@ function mountVRButton() {
     btn.style.visibility = "visible";
     btn.style.pointerEvents = "auto";
 
-    // Append
     document.body.appendChild(btn);
 
-    // Lock reference globally so nothing can "lose" it
+    // Lock ref globally so it can be restored if removed
     state.vrBtn = btn;
-    Object.defineProperty(window, "__VR_BUTTON__", {
-      value: btn,
-      writable: false,
-      configurable: false,
-      enumerable: false,
-    });
+    try {
+      Object.defineProperty(window, "__VR_BUTTON__", {
+        value: btn,
+        writable: false,
+        configurable: false,
+        enumerable: false,
+      });
+    } catch (_) {
+      // If defineProperty fails for any reason, fallback to direct assign
+      window.__VR_BUTTON__ = btn;
+    }
 
     log("VRButton appended & locked ✅");
   } catch (e) {
@@ -126,24 +134,23 @@ function mountVRButton() {
 function startVRButtonRepairLoop() {
   if (state.vrRepairTimer) return;
 
-  // If any UI code replaces body.innerHTML or removes the button, we put it back.
   state.vrRepairTimer = window.setInterval(() => {
     try {
       const btn = state.vrBtn || window.__VR_BUTTON__;
       if (!btn) return;
 
-      const inDom = document.getElementById("VRButton") || document.querySelector(".vr-button");
-      if (!inDom) {
+      // Is the button still in DOM?
+      const found = document.getElementById("VRButton") || document.querySelector(".vr-button");
+      if (!found) {
         document.body.appendChild(btn);
-        // re-force visibility
         btn.style.display = "block";
         btn.style.visibility = "visible";
         btn.style.pointerEvents = "auto";
         btn.style.zIndex = "999999";
         log("VRButton repaired ✅ (re-appended)");
       }
-    } catch (e) {
-      // do nothing—repair loop should never crash main
+    } catch (_) {
+      // never crash main
     }
   }, 800);
 }
@@ -151,7 +158,9 @@ function startVRButtonRepairLoop() {
 function initControllers() {
   const r = state.renderer;
 
-  // Two controllers (Quest)
+  state.controllers.length = 0;
+
+  // Two standard controllers (Quest)
   for (let i = 0; i < 2; i++) {
     const c = r.xr.getController(i);
 
@@ -192,13 +201,18 @@ function tick() {
   }
 
   if (state.worldReady) {
-    World.update(dt);
+    try {
+      World.update(dt);
+    } catch (e) {
+      console.error("[main] World.update crashed ❌", e);
+    }
   }
 
   state.renderer.render(state.scene, state.camera);
 }
 
 function onResize() {
+  if (!state.camera || !state.renderer) return;
   state.camera.aspect = window.innerWidth / window.innerHeight;
   state.camera.updateProjectionMatrix();
   state.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -207,22 +221,27 @@ function onResize() {
 function fatal(err) {
   console.error("[main] FATAL ❌", err);
 
-  // IMPORTANT: do NOT replace body.innerHTML (it can kill VRButton on Quest).
+  // IMPORTANT: do NOT replace body.innerHTML (can kill VRButton on Quest).
   const wrap = document.createElement("div");
   wrap.style.cssText = `
     position:fixed; inset:0; z-index:999999;
     background:#05060a; color:#e8ecff;
-    font-family:system-ui; padding:18px;
-    overflow:auto;
+    font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    padding:18px; overflow:auto;
   `;
+
   wrap.innerHTML = `
     <h2 style="margin:0 0 10px 0;">Scarlett VR Poker — Fatal Error</h2>
     <div style="color:#98a0c7; margin-bottom:10px;">
       main.js failed before VR could start. Open Quest DevTools Console and paste the first red error.
     </div>
-    <pre style="white-space:pre-wrap; background:#0b0d14; padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,.1);">${escapeHtml(
-      String(err?.stack || err)
-    )}</pre>
+    <pre style="
+      white-space:pre-wrap;
+      background:#0b0d14;
+      padding:12px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.1);
+    ">${escapeHtml(String(err?.stack || err))}</pre>
   `;
 
   document.body.appendChild(wrap);

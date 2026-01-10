@@ -1,6 +1,6 @@
 // /js/scorpion_room.js — Scorpion Room v1 (FULL)
 // Round table + 5 chairs (YOU + 4 bots) + guardrail.
-// Exposes seat points for player + bots.
+// Exposes seat points and entry anchor.
 
 export const ScorpionRoom = {
   init(ctx) {
@@ -8,7 +8,7 @@ export const ScorpionRoom = {
 
     const group = new THREE.Group();
     group.name = "ScorpionRoom";
-    group.visible = false; // becomes visible only in scorpion mode
+    group.visible = false;
     scene.add(group);
 
     // Room floor
@@ -20,7 +20,7 @@ export const ScorpionRoom = {
     floor.receiveShadow = true;
     group.add(floor);
 
-    // Lighting inside room (prevents “black room” issues)
+    // Lighting inside room
     const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.75);
     group.add(hemi);
 
@@ -39,7 +39,6 @@ export const ScorpionRoom = {
     tableTop.receiveShadow = true;
     group.add(tableTop);
 
-    // Table base
     const base = new THREE.Mesh(
       new THREE.CylinderGeometry(0.35, 0.55, 0.78, 32),
       new THREE.MeshStandardMaterial({ color: 0x1b1b1f, roughness: 0.8, metalness: 0.15 })
@@ -49,7 +48,7 @@ export const ScorpionRoom = {
     base.receiveShadow = true;
     group.add(base);
 
-    // Guardrail ring
+    // Guardrail ring + posts
     const rail = new THREE.Mesh(
       new THREE.TorusGeometry(3.25, 0.06, 18, 84),
       new THREE.MeshStandardMaterial({ color: 0x2a2a33, roughness: 0.6, metalness: 0.35 })
@@ -59,7 +58,6 @@ export const ScorpionRoom = {
     rail.castShadow = true;
     group.add(rail);
 
-    // Posts around guardrail
     for (let i = 0; i < 18; i++) {
       const a = (i / 18) * Math.PI * 2;
       const post = new THREE.Mesh(
@@ -71,10 +69,10 @@ export const ScorpionRoom = {
       group.add(post);
     }
 
-    // Chairs (5 seats total: seat0 = player, seat1..4 = bots)
+    // Chairs + seat points
     const seats = [];
     const chairRadius = 2.05;
-    const seatCount = 5;
+    const seatCount = 5; // YOU + 4 bots
 
     for (let i = 0; i < seatCount; i++) {
       const a = (i / seatCount) * Math.PI * 2;
@@ -83,7 +81,7 @@ export const ScorpionRoom = {
 
       const chair = this._makeChair(THREE);
       chair.position.set(x, 0, z);
-      chair.rotation.y = -a + Math.PI; // face table
+      chair.rotation.y = -a + Math.PI;
       group.add(chair);
 
       const seatPoint = new THREE.Object3D();
@@ -94,21 +92,16 @@ export const ScorpionRoom = {
       seats.push(seatPoint);
     }
 
-    // Entry point (where teleport lands before seating)
+    // Entry anchor (teleport lands here first)
     const entry = new THREE.Object3D();
     entry.name = "scorpion_entry";
     entry.position.set(0, 0, 4.6);
     entry.rotation.y = Math.PI;
     group.add(entry);
 
-    ctx.scorpion = {
-      group,
-      seats,
-      entry,
-      tableTop,
-    };
+    ctx.scorpion = { group, seats, entry, tableTop };
 
-    log?.("[scorpion] room built ✅ (round table + 5 chairs + rail)");
+    log?.("[scorpion] built ✅ (round table + 5 chairs + rail)");
   },
 
   setActive(ctx, on) {
@@ -140,10 +133,8 @@ export const ScorpionRoom = {
     const legGeo = new THREE.CylinderGeometry(0.035, 0.045, 0.42, 10);
 
     const legOffsets = [
-      [-0.22, 0.21],
-      [0.22, 0.21],
-      [-0.22, -0.21],
-      [0.22, -0.21],
+      [-0.22, 0.21], [0.22, 0.21],
+      [-0.22, -0.21], [0.22, -0.21],
     ];
     for (const [lx, lz] of legOffsets) {
       const leg = new THREE.Mesh(legGeo, legMat);

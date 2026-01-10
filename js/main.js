@@ -1,211 +1,265 @@
-// /js/main.js — Scarlett VR Poker (SAFE PARSE BOOT)
-// Static imports only. No dynamic import URL concatenation.
-// Includes polyfills so main never crashes if world.js is missing methods.
+// /js/main.js — Scarlett VR Poker (Main) V4.2 SINGLE-BOOT FULL
+// Fixes: double boot, double world.init, duplicate listeners.
+// Works with your debug index (scarlett-enter-vr / toggles / recenter / touch).
 
-import * as THREE from "three";
-import { VRButton } from "three/addons/webxr/VRButton.js";
-import { World } from "./world.js";
+const v = window.__BUILD_V || Date.now().toString();
 
-function emitLog(m){
+function ui(m) {
   try { window.dispatchEvent(new CustomEvent("scarlett-log", { detail: String(m) })); } catch {}
   try { console.log(m); } catch {}
 }
 
-const BUILD_V = window.__BUILD_V || Date.now().toString();
-
-// ---------- Renderer / Scene ----------
-const canvas = document.createElement("canvas");
-document.body.appendChild(canvas);
-
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.xr.enabled = true;
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x05060a);
-
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 300);
-
-const player = new THREE.Group();
-player.position.set(0, 1.7, 6);
-player.add(camera);
-scene.add(player);
-
-// Baseline lights (prevents black screen even if world modules fail)
-scene.add(new THREE.AmbientLight(0xffffff, 0.35));
-const sun = new THREE.DirectionalLight(0xffffff, 0.85);
-sun.position.set(7, 11, 6);
-scene.add(sun);
-
-// Controllers placeholders
-const controllers = { left: null, right: null };
-try {
-  controllers.left = renderer.xr.getController(0);
-  controllers.right = renderer.xr.getController(1);
-  scene.add(controllers.left);
-  scene.add(controllers.right);
-} catch {}
-
-// ---------- World ----------
-const world = World.init({ THREE, scene, renderer, camera, player, controllers, log: emitLog });
-
-// ✅ Polyfills so main NEVER crashes again
-world.flags = world.flags || { teleport: true, move: true, snap: true, hands: true };
-
-if (typeof world.setFlag !== "function") {
-  emitLog("[main] ⚠️ world.setFlag missing — polyfilled");
-  world.setFlag = (k, v) => { world.flags[k] = !!v; };
-}
-if (typeof world.getFlag !== "function") {
-  world.getFlag = (k) => !!world.flags?.[k];
-}
-if (typeof world.update !== "function") {
-  world.update = () => {};
+// ✅ HARD BOOT GUARD (stops double-running even if imported twice)
+if (window.__SCARLETT_MAIN_BOOTED) {
+  ui(`[main] ⏭️ main.js already booted — skipping (v=${v})`);
+} else {
+  window.__SCARLETT_MAIN_BOOTED = true;
+  ui(`[main] boot ✅ v=${v}`);
+  await boot();
 }
 
-// apply defaults
-world.setFlag("teleport", true);
-world.setFlag("move", true);
-world.setFlag("snap", true);
-world.setFlag("hands", true);
+async function boot() {
+  // ---- Imports ----
+  const THREE = await import("three");
+  const { VRButton } = await import("three/addons/webxr/VRButton.js");
+  const { XRControllerModelFactory } = await import("three/addons/webxr/XRControllerModelFactory.js");
 
-// ---------- VR Button ----------
-const vrBtn = VRButton.createButton(renderer);
-document.body.appendChild(vrBtn);
+  // ---- Renderer / Scene / Camera ----
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
 
-// Hook HUD “Enter VR”
-window.addEventListener("scarlett-enter-vr", () => {
-  try { vrBtn.click(); emitLog("[main] enter-vr forwarded"); } catch {}
-});
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x05060a);
 
-// Hook HUD toggles
-window.addEventListener("scarlett-toggle-teleport", (e) => world.setFlag("teleport", !!e.detail));
-window.addEventListener("scarlett-toggle-move", (e) => world.setFlag("move", !!e.detail));
-window.addEventListener("scarlett-toggle-snap", (e) => world.setFlag("snap", !!e.detail));
-window.addEventListener("scarlett-toggle-hands", (e) => world.setFlag("hands", !!e.detail));
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
+  camera.position.set(0, 1.6, 6);
 
-// Recenter
-window.addEventListener("scarlett-recenter", () => {
-  emitLog("[main] recenter");
-  if (typeof world.standPlayerInLobby === "function") world.standPlayerInLobby();
-  else player.position.set(0, 1.7, 6);
-});
+  // Player rig (move this, not camera)
+  const player = new THREE.Group();
+  player.name = "player";
+  player.add(camera);
+  scene.add(player);
 
-// ---------- Input (Android dock + keyboard) ----------
-const touch = { f:0, b:0, l:0, r:0, turnL:0, turnR:0 };
-window.addEventListener("scarlett-touch", (e) => {
-  const d = e?.detail || {};
-  touch.f = d.f || 0;
-  touch.b = d.b || 0;
-  touch.l = d.l || 0;
-  touch.r = d.r || 0;
-  touch.turnL = d.turnL || 0;
-  touch.turnR = d.turnR || 0;
-});
+  // ---- Basic lighting (in case world modules fail) ----
+  scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+  dir.position.set(6, 10, 4);
+  scene.add(dir);
 
-const keys = Object.create(null);
-window.addEventListener("keydown", (e) => { keys[e.code] = true; });
-window.addEventListener("keyup", (e) => { keys[e.code] = false; });
+  // ---- Controllers ----
+  const controllerModelFactory = new XRControllerModelFactory();
 
-function moveIntent(){
-  let x = 0, z = 0;
+  const controller1 = renderer.xr.getController(0);
+  const controller2 = renderer.xr.getController(1);
+  scene.add(controller1, controller2);
 
-  // keyboard
-  if (keys.KeyW) z += 1;
-  if (keys.KeyS) z -= 1;
-  if (keys.KeyA) x -= 1;
-  if (keys.KeyD) x += 1;
+  const grip1 = renderer.xr.getControllerGrip(0);
+  const grip2 = renderer.xr.getControllerGrip(1);
+  grip1.add(controllerModelFactory.createControllerModel(grip1));
+  grip2.add(controllerModelFactory.createControllerModel(grip2));
+  scene.add(grip1, grip2);
 
-  // touch dock
-  if (touch.f) z += 1;
-  if (touch.b) z -= 1;
-  if (touch.l) x -= 1;
-  if (touch.r) x += 1;
+  const controllers = [controller1, controller2];
+  const controllerGrips = [grip1, grip2];
 
-  return { x, z };
-}
+  // ---- Resize ----
+  window.addEventListener("resize", () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
 
-function turnIntent(){
-  let t = 0;
+  // ---- VRButton ----
+  const sessionInit = window.__XR_SESSION_INIT || {
+    optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"]
+  };
 
-  // keyboard Q/E
-  if (keys.KeyQ) t += 1;
-  if (keys.KeyE) t -= 1;
+  try {
+    const btn = VRButton.createButton(renderer, sessionInit);
+    document.body.appendChild(btn);
+    ui("[main] VRButton appended ✅");
+  } catch (e) {
+    ui("[main] VRButton failed ⚠️ " + (e?.message || e));
+  }
 
-  // touch dock
-  if (touch.turnL) t += 1;
-  if (touch.turnR) t -= 1;
+  // ---- World init (GUARDED) ----
+  const worldMod = await import("./world.js?v=" + encodeURIComponent(v));
+  const World = worldMod.World || worldMod.default || worldMod;
 
-  return t;
-}
+  // ✅ ensure we only init world once per page load
+  if (window.__SCARLETT_WORLD_INITED) {
+    ui("[main] ⏭️ world already inited — using existing");
+  } else {
+    window.__SCARLETT_WORLD_INITED = true;
 
-// ---------- Loop ----------
-let last = performance.now();
-let snapCooldown = 0;
+    // init world
+    window.__SCARLETT_WORLD = await World.init({
+      THREE,
+      scene,
+      renderer,
+      camera,
+      player,
+      controllers,
+      log: ui
+    });
 
-function loop(now){
-  const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
+    ui("[main] world init ✅");
+  }
 
-  // Turn
-  const t = turnIntent();
-  const snap = world.getFlag("snap");
-  if (t) {
-    if (snap) {
-      snapCooldown -= dt;
-      if (snapCooldown <= 0) {
-        const step = THREE.MathUtils.degToRad(45) * Math.sign(t);
-        player.rotation.y += step;
-        snapCooldown = 0.22;
+  const world = window.__SCARLETT_WORLD;
+
+  // ---- Ensure flags API exists (should already now) ----
+  if (typeof world.setFlag !== "function") {
+    ui("[main] ⚠️ world.setFlag missing — polyfilled");
+    world.flags = world.flags || {};
+    world.setFlag = (k, val) => (world.flags[k] = !!val);
+    world.getFlag = (k) => !!world.flags[k];
+    world.toggleFlag = (k) => (world.flags[k] = !world.flags[k]);
+  }
+
+  // ---- Apply saved UI flags (from index debug HUD) ----
+  const flags = window.__SCARLETT_FLAGS || { teleport: true, move: true, snap: true, hands: true };
+  world.setFlag("teleport", !!flags.teleport);
+  world.setFlag("move", !!flags.move);
+  world.setFlag("snap", !!flags.snap);
+  world.setFlag("hands", !!flags.hands);
+
+  // ---- ONE-TIME event wiring guard ----
+  if (!window.__SCARLETT_MAIN_EVENTS_WIRED) {
+    window.__SCARLETT_MAIN_EVENTS_WIRED = true;
+
+    // Enter VR request from HUD button
+    window.addEventListener("scarlett-enter-vr", async () => {
+      ui("[main] HUD requested Enter VR");
+      // VRButton handles session start; this event is mainly for logging
+    });
+
+    // Toggles from HUD
+    window.addEventListener("scarlett-toggle-teleport", (e) => world.setFlag("teleport", !!e.detail));
+    window.addEventListener("scarlett-toggle-move", (e) => world.setFlag("move", !!e.detail));
+    window.addEventListener("scarlett-toggle-snap", (e) => world.setFlag("snap", !!e.detail));
+    window.addEventListener("scarlett-toggle-hands", (e) => world.setFlag("hands", !!e.detail));
+
+    // Recenter from HUD
+    window.addEventListener("scarlett-recenter", () => {
+      ui("[main] recenter");
+      world.recenter?.();
+    });
+
+    // Android touch dock movement (from index)
+    window.addEventListener("scarlett-touch", (e) => {
+      window.__SCARLETT_TOUCH = e.detail || {};
+    });
+  }
+
+  // ---- Movement / Turn (Quest + Mobile) ----
+  // We do minimal locomotion here so you're never “stuck”.
+  // Your existing teleport/move systems can override later.
+
+  const move = {
+    speed: 2.25,
+    turnSpeed: 2.2,
+    snapAngle: Math.PI / 4, // 45°
+    snapCooldown: 0,
+    yaw: 0
+  };
+
+  function getGamepads() {
+    const session = renderer.xr.getSession?.();
+    if (!session) return [];
+    return session.inputSources
+      .map(s => s.gamepad)
+      .filter(Boolean);
+  }
+
+  function applyMove(dt) {
+    // If seated at table, allow only turning unless you want otherwise
+    const seated = (world.mode === "table");
+    const flags = world.flags || {};
+
+    // Inputs (Quest gamepads)
+    let axX = 0, axY = 0, turnX = 0;
+    const pads = getGamepads();
+    if (pads[0]?.axes?.length >= 2) {
+      axX = pads[0].axes[2] ?? pads[0].axes[0] ?? 0; // left stick X (sometimes index differs)
+      axY = pads[0].axes[3] ?? pads[0].axes[1] ?? 0; // left stick Y
+    }
+    if (pads[1]?.axes?.length >= 2) {
+      turnX = pads[1].axes[2] ?? pads[1].axes[0] ?? 0; // right stick X
+    } else if (pads[0]?.axes?.length >= 4) {
+      // some devices put both sticks on one pad
+      turnX = pads[0].axes[2] ?? 0;
+    }
+
+    // Mobile touch dock
+    const t = window.__SCARLETT_TOUCH || {};
+    const mf = t.f ? 1 : 0;
+    const mb = t.b ? 1 : 0;
+    const ml = t.l ? 1 : 0;
+    const mr = t.r ? 1 : 0;
+
+    // combine
+    let mx = axX + (mr - ml) * 0.8;
+    let mz = axY + (mb - mf) * 0.8;
+
+    // deadzone
+    const dz = 0.15;
+    if (Math.abs(mx) < dz) mx = 0;
+    if (Math.abs(mz) < dz) mz = 0;
+
+    // Turning
+    const wantSnap = !!flags.snap;
+    if (wantSnap) {
+      move.snapCooldown -= dt;
+      const snapLeft = (t.turnL ? 1 : 0) || (turnX < -0.65);
+      const snapRight = (t.turnR ? 1 : 0) || (turnX > 0.65);
+      if (move.snapCooldown <= 0) {
+        if (snapLeft) { move.yaw += move.snapAngle; move.snapCooldown = 0.25; }
+        if (snapRight) { move.yaw -= move.snapAngle; move.snapCooldown = 0.25; }
       }
     } else {
-      player.rotation.y += t * dt * 1.65; // smooth
-      snapCooldown = 0;
+      const smoothTurn = (t.turnR ? 1 : 0) - (t.turnL ? 1 : 0);
+      const tx = (smoothTurn * 0.85) + turnX;
+      if (Math.abs(tx) > dz) move.yaw -= tx * move.turnSpeed * dt;
     }
-  } else {
-    snapCooldown = 0;
-  }
 
-  // Move
-  if (world.getFlag("move")) {
-    const { x, z } = moveIntent();
-    if (x || z) {
-      const v = new THREE.Vector2(x, z);
-      if (v.length() > 1) v.normalize();
+    player.rotation.y = move.yaw;
 
-      const speed = 2.0;
-      const dir = new THREE.Vector3(v.x, 0, -v.y);
-      dir.applyAxisAngle(new THREE.Vector3(0,1,0), player.rotation.y);
+    // Smooth Move
+    if (!!flags.move && !seated) {
+      const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), move.yaw);
+      const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), move.yaw);
 
-      const from = player.position.clone();
-      const to = from.clone().addScaledVector(dir, speed * dt);
+      const vel = new THREE.Vector3();
+      vel.addScaledVector(right, mx);
+      vel.addScaledVector(forward, mz);
 
-      if (typeof world.resolvePlayerCollision === "function") {
-        const fixed = world.resolvePlayerCollision(from, to);
-        player.position.copy(fixed);
-      } else {
-        player.position.copy(to);
+      if (vel.lengthSq() > 0.0001) {
+        vel.normalize().multiplyScalar(move.speed * dt);
+        player.position.add(vel);
       }
     }
   }
 
-  // Update hooks
-  try { world.update(dt); } catch {}
+  // ---- Animation loop ----
+  let lastT = performance.now();
+  renderer.setAnimationLoop(() => {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - lastT) / 1000);
+    lastT = now;
 
-  renderer.render(scene, camera);
-}
+    applyMove(dt);
 
-renderer.setAnimationLoop(loop);
+    // Let world update run (VR panel follow, etc.)
+    if (world?.update) {
+      try { world.update(dt); } catch {}
+    }
 
-// Resize
-window.addEventListener("resize", () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+    renderer.render(scene, camera);
+  });
 
-// Expose for debugging
-window.__SCARLETT_WORLD = world;
-
-emitLog("[main] boot ✅ v=" + BUILD_V);
+  ui("[main] ready ✅");
+  }

@@ -1,6 +1,6 @@
-// /js/scorpion_room.js — Scorpion Room v3.0 (FULL)
-// Circular poker lounge + single table + decor + guardrail + chairs.
-// Patches scorpion_seat_1 spawn to chair world transform (position + yaw) so you face the table.
+// /js/scorpion_room.js — Scorpion Room v3.2 (FULL)
+// Circular poker lounge + chairs + guardrail + setActive().
+// Also patches ctx.spawns.map.scorpion_seat_1 to chair transform so you face table.
 
 export const ScorpionRoom = {
   build(ctx) {
@@ -11,7 +11,7 @@ export const ScorpionRoom = {
     group.position.set(8, 0, 0);
     scene.add(group);
 
-    // ROOM
+    // CIRCULAR ROOM
     const ROOM_R = 5.2;
     const ROOM_H = 3.2;
 
@@ -21,7 +21,6 @@ export const ScorpionRoom = {
     );
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
-    floor.name = "SCORPION_FLOOR";
     group.add(floor);
 
     const walls = new THREE.Mesh(
@@ -30,7 +29,6 @@ export const ScorpionRoom = {
     );
     walls.position.set(0, ROOM_H / 2, 0);
     walls.receiveShadow = true;
-    walls.name = "SCORPION_WALLS";
     group.add(walls);
 
     const ceiling = new THREE.Mesh(
@@ -39,32 +37,13 @@ export const ScorpionRoom = {
     );
     ceiling.rotation.x = Math.PI / 2;
     ceiling.position.set(0, ROOM_H, 0);
-    ceiling.name = "SCORPION_CEILING";
     group.add(ceiling);
-
-    const carpet = new THREE.Mesh(
-      new THREE.RingGeometry(1.9, 3.6, 96),
-      new THREE.MeshStandardMaterial({ color: 0x0c0f1b, roughness: 1.0, metalness: 0.0 })
-    );
-    carpet.rotation.x = -Math.PI / 2;
-    carpet.position.y = 0.005;
-    carpet.name = "SCORPION_CARPET_RING";
-    group.add(carpet);
 
     // LIGHTS
     group.add(new THREE.AmbientLight(0x4b2466, 0.35));
-
     const centerGlow = new THREE.PointLight(0xb266ff, 2.2, 14);
     centerGlow.position.set(0, 2.6, 0);
-    centerGlow.name = "SCORPION_CENTER_GLOW";
     group.add(centerGlow);
-
-    const tableKey = new THREE.SpotLight(0x7fe7ff, 1.7, 12, Math.PI / 5, 0.55, 1.0);
-    tableKey.position.set(0, 3.0, 1.2);
-    tableKey.target.position.set(0, 0.9, 0);
-    tableKey.name = "SCORPION_TABLE_KEY";
-    group.add(tableKey);
-    group.add(tableKey.target);
 
     // TABLE
     const table = new THREE.Group();
@@ -84,25 +63,17 @@ export const ScorpionRoom = {
       new THREE.CylinderGeometry(0.95, 0.95, 0.10, 48),
       new THREE.MeshStandardMaterial({ color: 0x0c5a3a, roughness: 0.85, metalness: 0.0 })
     );
-    top.position.set(0, 0.75 + 0.05, 0);
+    top.position.set(0, 0.80, 0);
     top.castShadow = true;
     top.receiveShadow = true;
     table.add(top);
 
-    const rim = new THREE.Mesh(
-      new THREE.TorusGeometry(0.98, 0.02, 10, 80),
-      new THREE.MeshBasicMaterial({ color: 0xb266ff, transparent: true, opacity: 0.55 })
-    );
-    rim.rotation.x = Math.PI / 2;
-    rim.position.y = top.position.y + 0.06;
-    table.add(rim);
-
+    // surfaceY for PokerSim
     const surfaceY = group.position.y + table.position.y + top.position.y + 0.05;
     table.userData.surfaceY = surfaceY;
-    table.userData.tableHeight = surfaceY;
     table.userData.dealRadius = 0.62;
 
-    // GUARDRAIL
+    // GUARDRAIL (visible + collider)
     const RAIL_R = 2.15;
     const RAIL_H = 1.05;
 
@@ -112,99 +83,22 @@ export const ScorpionRoom = {
     );
     railRing.rotation.x = Math.PI / 2;
     railRing.position.y = RAIL_H;
-    railRing.name = "SCORPION_RAIL_RING";
     group.add(railRing);
 
-    // invisible blocker collider (spectators can't come in)
     const railCollider = new THREE.Mesh(
       new THREE.CylinderGeometry(RAIL_R, RAIL_R, 2.2, 48, 1, true),
       new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.0, side: THREE.DoubleSide })
     );
     railCollider.position.set(0, 1.1, 0);
-    railCollider.name = "SCORPION_RAIL_COLLIDER";
     railCollider.userData.isCollider = true;
     group.add(railCollider);
     ctx.colliders?.push?.(railCollider);
 
-    // DECOR (simple: benches + plants + banner)
-    const deco = new THREE.Group();
-    deco.name = "SCORPION_DECOR";
-    group.add(deco);
-
-    function addBench(name, x, z, yaw) {
-      const bench = new THREE.Group();
-      bench.name = name;
-      bench.position.set(x, 0, z);
-      bench.rotation.y = yaw;
-
-      const seat = new THREE.Mesh(
-        new THREE.BoxGeometry(1.2, 0.18, 0.45),
-        new THREE.MeshStandardMaterial({ color: 0x141421, roughness: 0.9, metalness: 0.02 })
-      );
-      seat.position.set(0, 0.22, 0);
-      seat.castShadow = true;
-      seat.receiveShadow = true;
-      bench.add(seat);
-
-      const back = new THREE.Mesh(
-        new THREE.BoxGeometry(1.2, 0.55, 0.10),
-        new THREE.MeshStandardMaterial({ color: 0x10101a, roughness: 0.95, metalness: 0.02 })
-      );
-      back.position.set(0, 0.55, -0.18);
-      back.castShadow = true;
-      back.receiveShadow = true;
-      bench.add(back);
-
-      deco.add(bench);
-    }
-
-    addBench("SCORPION_BENCH_A", 0, -(ROOM_R - 0.75), 0);
-    addBench("SCORPION_BENCH_B", (ROOM_R - 0.75), 0, -Math.PI / 2);
-    addBench("SCORPION_BENCH_C", -(ROOM_R - 0.75), 0, Math.PI / 2);
-
-    const potMat = new THREE.MeshStandardMaterial({ color: 0x11111a, roughness: 0.9, metalness: 0.05 });
-    const leafMat = new THREE.MeshStandardMaterial({ color: 0x0a6b44, roughness: 0.9, metalness: 0.0 });
-
-    function addPlant(i, a) {
-      const x = Math.sin(a) * (ROOM_R - 0.9);
-      const z = Math.cos(a) * (ROOM_R - 0.9);
-
-      const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.20, 0.22, 14), potMat);
-      pot.position.set(x, 0.11, z);
-      pot.castShadow = true;
-      pot.receiveShadow = true;
-      deco.add(pot);
-
-      const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.22, 14, 14), leafMat);
-      leaf.position.set(x, 0.42, z);
-      leaf.castShadow = true;
-      leaf.receiveShadow = true;
-      deco.add(leaf);
-
-      pot.name = `SCORPION_PLANT_POT_${i}`;
-      leaf.name = `SCORPION_PLANT_LEAF_${i}`;
-    }
-
-    addPlant(0, 0.65);
-    addPlant(1, 2.15);
-    addPlant(2, 4.05);
-
-    const banner = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.8, 0.75),
-      new THREE.MeshBasicMaterial({ color: 0xb266ff, transparent: true, opacity: 0.65 })
-    );
-    banner.position.set(0, 2.0, -(ROOM_R - 0.02));
-    banner.name = "SCORPION_BANNER";
-    group.add(banner);
-
     // CHAIRS
     const chairRadius = 1.55;
-    const chairRefs = {};
 
-    function makeChair(name) {
+    function makeChair() {
       const chair = new THREE.Group();
-      chair.name = name;
-
       const seat = new THREE.Mesh(
         new THREE.BoxGeometry(0.45, 0.08, 0.45),
         new THREE.MeshStandardMaterial({ color: 0x1b1b24, roughness: 0.7, metalness: 0.05 })
@@ -222,20 +116,6 @@ export const ScorpionRoom = {
       back.castShadow = true;
       back.receiveShadow = true;
       chair.add(back);
-
-      const pole = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.05, 0.07, 0.40, 14),
-        new THREE.MeshStandardMaterial({ color: 0x222233, roughness: 0.55, metalness: 0.15 })
-      );
-      pole.position.set(0, 0.20, 0);
-      chair.add(pole);
-
-      const feet = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.20, 0.24, 0.06, 18),
-        new THREE.MeshStandardMaterial({ color: 0x11111a, roughness: 0.8, metalness: 0.05 })
-      );
-      feet.position.set(0, 0.03, 0);
-      chair.add(feet);
 
       return chair;
     }
@@ -255,45 +135,52 @@ export const ScorpionRoom = {
       const x = Math.sin(rad) * chairRadius;
       const z = Math.cos(rad) * chairRadius;
 
-      const chair = makeChair(`CHAIR_${s.key}`);
+      const chair = makeChair();
       chair.position.set(x, 0, z);
 
-      // ✅ ALWAYS face the table center (fixes wall-facing spawns)
+      // ✅ face table center
       chair.lookAt(0, 0.45, 0);
 
       table.add(chair);
-      chairRefs[s.key] = chair;
       if (s.key === "scorpion_seat_1") playerChair = chair;
     }
 
-    // PATCH SPAWNPOINT (position + yaw) to chair transform
-    if (playerChair) {
-      const worldPos = new THREE.Vector3();
-      playerChair.getWorldPosition(worldPos);
+    // Patch spawn to chair transform (pos + yaw)
+    if (playerChair && ctx.spawns?.map?.scorpion_seat_1) {
+      const pos = new THREE.Vector3();
+      playerChair.getWorldPosition(pos);
 
       const q = new THREE.Quaternion();
       playerChair.getWorldQuaternion(q);
       const yaw = new THREE.Euler().setFromQuaternion(q, "YXZ").y;
 
-      const sp = ctx.spawns?.map?.scorpion_seat_1;
-      if (sp) {
-        sp.x = worldPos.x;
-        sp.z = worldPos.z;
-        sp.yaw = yaw;
-        sp.seatBack = 0.45;
-        log?.(`[scorpion] ✅ patched seat -> x=${sp.x.toFixed(2)} z=${sp.z.toFixed(2)} yaw=${sp.yaw.toFixed(2)}`);
-      } else {
-        log?.("[scorpion] ⚠️ ctx.spawns.map.scorpion_seat_1 missing (SpawnPoints not wired?)");
-      }
+      const sp = ctx.spawns.map.scorpion_seat_1;
+      sp.x = pos.x;
+      sp.z = pos.z;
+      sp.yaw = yaw;
+      sp.seatBack = 0.45;
+
+      log?.(`[scorpion] ✅ patched scorpion_seat_1 -> x=${sp.x.toFixed(2)} z=${sp.z.toFixed(2)} yaw=${sp.yaw.toFixed(2)}`);
     }
 
-    // publish handles
-    ctx.scorpionRoom = { group, table };
+    // Publish refs
     ctx.scorpionTable = table;
     ctx.tables ||= {};
     ctx.tables.scorpion = table;
 
-    log?.("[scorpion] build ✅ v3.0 (circular lounge + guardrail + chairs + facing fix)");
-    return ctx.scorpionRoom;
+    // Return a “system” with setActive so RoomManager can hide/show it
+    const system = {
+      group,
+      table,
+      setActive(v) {
+        group.visible = !!v;
+      }
+    };
+
+    // default hidden until entered
+    system.setActive(false);
+
+    log?.("[scorpion] build ✅ v3.2 (chairs + rail + toggle)");
+    return system;
   },
 };

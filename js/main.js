@@ -1,12 +1,11 @@
-// /js/main.js — Scarlett VR Poker (FULL) — No-Fallback Build
-// Goal: Always load interaction + teleport + correct poker room.
+// /js/main.js — Scarlett VR Poker (FULL) — Quest/GitHub safe
+// IMPORTANT: uses local ./three.js wrapper (and importmap also maps "three" -> "./three.js")
 
 import * as THREE from "./three.js";
 import { VRButton } from "./VRButton.js";
 import { World } from "./world.js";
 
 const BUILD = Date.now();
-
 const log = (...a) => console.log("[main]", ...a);
 
 const state = {
@@ -27,11 +26,9 @@ boot().catch(err => {
 async function boot() {
   log("boot ✅ v=" + BUILD);
 
-  // Scene
   state.scene = new THREE.Scene();
   state.scene.background = new THREE.Color(0x05060a);
 
-  // Camera + player rig
   state.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
   state.camera.position.set(0, 1.6, 3);
 
@@ -40,21 +37,17 @@ async function boot() {
   state.player.add(state.camera);
   state.scene.add(state.player);
 
-  // Renderer
   state.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   state.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   state.renderer.setSize(window.innerWidth, window.innerHeight);
   state.renderer.xr.enabled = true;
   document.body.appendChild(state.renderer.domElement);
 
-  // VR Button
   document.body.appendChild(VRButton.createButton(state.renderer));
   log("VRButton appended ✅");
 
-  // Controllers (2)
   initControllers();
 
-  // World
   await World.init({
     THREE,
     scene: state.scene,
@@ -69,10 +62,7 @@ async function boot() {
   state.worldReady = true;
   log("world init ✅");
 
-  // Resize
   window.addEventListener("resize", onResize);
-
-  // Render loop
   state.renderer.setAnimationLoop(tick);
 }
 
@@ -82,7 +72,7 @@ function initControllers() {
   for (let i = 0; i < 2; i++) {
     const c = r.xr.getController(i);
     c.userData.index = i;
-    c.userData.buttons = {};
+    c.userData.buttons = [];
     c.userData.axes = [0, 0, 0, 0];
     state.player.add(c);
     state.controllers.push(c);
@@ -104,20 +94,15 @@ function initControllers() {
 function tick() {
   const dt = Math.min(0.05, state.clock.getDelta());
 
-  // Update controller gamepads
   for (const c of state.controllers) {
     const gp = c.userData.gamepad;
     if (gp) {
       c.userData.axes = gp.axes ? gp.axes.slice(0) : [0, 0, 0, 0];
-      // Buttons mapping is not always stable across devices; keep generic
       c.userData.buttons = gp.buttons || [];
     }
   }
 
-  if (state.worldReady) {
-    World.update(dt);
-  }
-
+  if (state.worldReady) World.update(dt);
   state.renderer.render(state.scene, state.camera);
 }
 
@@ -143,4 +128,4 @@ function showFatal(err) {
 
 function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (m) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[m]));
-    }
+}

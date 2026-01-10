@@ -1,230 +1,104 @@
+<!-- /index.html — Scarlett VR Poker Hybrid 1.0 (FULL)
+     ✅ Always shows VR button (if WebXR supported)
+     ✅ Mobile/Android friendly viewport + safe-area
+-->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
+  <meta
+    name="viewport"
+    content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"
+  />
   <title>Scarlett VR Poker</title>
+
   <style>
-    html, body { margin:0; padding:0; height:100%; background:#05060a; overflow:hidden; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; color:#e8ecff; }
-    #app{ position:fixed; inset:0; }
-
-    /* Top HUD */
-    #hud{
-      position:fixed; left:0; top:0; right:0;
-      display:flex; gap:10px; align-items:center;
-      padding: 12px 12px;
-      z-index: 10000;
-      pointer-events:none;
+    :root{
+      --bg:#05060a;
+      --panel:#0b0d14cc;
+      --text:#e8ecff;
+      --muted:#98a0c7;
+      --aqua:#7fe7ff;
+      --pink:#ff2d7a;
+      --radius:18px;
     }
-    #hud .chip{
-      pointer-events:auto;
-      padding: 10px 12px;
-      border-radius: 14px;
-      border:1px solid rgba(255,255,255,.12);
-      background: rgba(11,13,20,.72);
-      color:#e8ecff;
-      font-weight: 700;
-    }
-    #hud .chip:active{ transform:scale(.98); }
-
-    /* Menu overlay */
-    #menuOverlay{
-      position: fixed; left: 12px; top: 58px;
-      width: 260px;
-      border-radius: 18px;
-      border: 1px solid rgba(127,231,255,.18);
-      background: rgba(11,13,20,.86);
-      box-shadow: 0 12px 40px rgba(0,0,0,.45);
-      padding: 12px;
-      z-index: 10001;
-      display: none;
-      pointer-events: auto;
-    }
-    #menuOverlay.show{ display:block; }
-    #menuOverlay h3{ margin: 4px 0 10px 0; font-size: 14px; letter-spacing:.4px; color:#98a0c7; }
-    #menuOverlay .row{ display:flex; gap:10px; }
-    #menuOverlay button{
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
       width: 100%;
-      margin: 6px 0;
-      padding: 10px 12px;
-      border-radius: 14px;
-      border:1px solid rgba(255,255,255,.12);
-      background: rgba(10,12,20,.72);
-      color:#e8ecff;
-      font-weight: 800;
-      letter-spacing:.4px;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      touch-action: none;
     }
-    #menuOverlay button:active{ transform: scale(.98); }
+    canvas { display:block; }
 
-    /* Android Debug Hub: draggable + collapsible */
-    #androidDebugFab{
-      position: fixed; right: 12px; bottom: 220px;
-      width: 56px; height: 56px; border-radius: 18px;
-      border:1px solid rgba(127,231,255,.18);
-      background: rgba(11,13,20,.78);
-      color:#e8ecff; font-weight:900;
-      display:none;
-      z-index: 10002;
+    /* Ensure VR button is never hidden */
+    #VRButton, button#VRButton {
+      position: fixed !important;
+      right: 14px !important;
+      bottom: 14px !important;
+      z-index: 999999 !important;
+      border-radius: 14px !important;
+      font-weight: 800 !important;
     }
-    #androidDebugFab.show{ display:block; }
 
-    #androidDebugHub{
-      position: fixed; right: 12px; top: 84px;
-      width: 320px;
-      border-radius: 18px;
-      border:1px solid rgba(127,231,255,.18);
-      background: rgba(11,13,20,.86);
-      box-shadow: 0 12px 40px rgba(0,0,0,.45);
-      z-index: 10002;
-      display:none;
-    }
-    #androidDebugHub .dbgHeader{
-      display:flex; align-items:center; justify-content:space-between;
-      padding: 10px 10px;
-      cursor: grab;
-      user-select:none;
-      border-bottom: 1px solid rgba(255,255,255,.08);
-    }
-    #androidDebugHub.dragging .dbgHeader{ cursor: grabbing; }
-    #androidDebugHub .dbgHeader .btns{ display:flex; gap:8px; }
-    #androidDebugHub .dbgHeader button{
-      border-radius: 12px;
-      border:1px solid rgba(255,255,255,.10);
-      background: rgba(10,12,20,.72);
-      color:#e8ecff;
-      padding: 6px 10px;
-      font-weight: 800;
-    }
-    #androidDebugHub .dbgBody{ padding: 10px; }
-    #dbgLog{
-      width: 100%;
-      height: 180px;
-      border-radius: 12px;
-      border: 1px solid rgba(255,255,255,.08);
-      background: rgba(0,0,0,.25);
-      color:#e8ecff;
-      padding: 8px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-size: 12px;
-      overflow:auto;
-      white-space: pre-wrap;
-    }
-    #androidDebugHub.collapsed .dbgBody{ display:none; }
-
-    /* Mobile D-pad */
-    #mobilePad{
+    /* Debug HUD (non-blocking) */
+    #hud {
       position: fixed;
-      left: 10px;
-      right: 10px;
-      bottom: 10px;
-      display: none;
+      left: 12px;
+      top: 12px;
+      z-index: 999998;
+      background: var(--panel);
+      border: 1px solid rgba(127,231,255,.22);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      box-shadow: 0 14px 45px rgba(0,0,0,.45);
+      max-width: min(520px, calc(100vw - 24px));
+      pointer-events: none; /* don't block VRButton */
+    }
+    #hud b { color: var(--aqua); }
+    #hud .muted { color: var(--muted); font-size: 12px; margin-top: 6px; }
+
+    /* Tiny mobile controls hint */
+    #touchHint{
+      position: fixed;
+      left: 12px;
+      bottom: 12px;
+      z-index: 999997;
+      background: rgba(11,13,20,.65);
+      border: 1px solid rgba(255,45,122,.22);
+      border-radius: 14px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: var(--text);
       pointer-events: none;
-      z-index: 99999;
+      display: none;
     }
-    #mobilePad *{ pointer-events:auto; }
 
-    #mobilePad{
-      display: grid;
-      grid-template-columns: 160px 1fr;
-      gap: 12px;
-      align-items: end;
+    @media (hover: none) and (pointer: coarse) {
+      #touchHint { display: block; }
     }
-    .dpad{ width:160px; height:160px; position:relative; }
-    .dpad .d{
-      position:absolute;
-      width: 56px; height: 56px;
-      border-radius: 14px;
-      border: 1px solid rgba(127,231,255,.25);
-      background: rgba(11,13,20,.72);
-      color: #e8ecff;
-      font-size: 20px;
-      backdrop-filter: blur(8px);
-    }
-    .dpad .up{ left: 52px; top: 0; }
-    .dpad .down{ left: 52px; bottom: 0; }
-    .dpad .left{ left: 0; top: 52px; }
-    .dpad .right{ right: 0; top: 52px; }
-
-    .abtns{
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      justify-items: end;
-    }
-    .abtns button{
-      height: 56px;
-      border-radius: 14px;
-      border: 1px solid rgba(255,255,255,.10);
-      background: rgba(11,13,20,.72);
-      color: #e8ecff;
-      font-weight: 900;
-      letter-spacing: .4px;
-      width: 100%;
-      backdrop-filter: blur(8px);
-    }
-    .abtns #mAction{ border-color: rgba(127,231,255,.35); }
-    .abtns #mTeleport{ border-color: rgba(255,204,0,.35); }
-
-    .turnRow{
-      grid-column: 1 / span 2;
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-    .d:active, .abtns button:active{ transform: scale(.98); }
   </style>
 </head>
+
 <body>
-  <div id="app"></div>
-
   <div id="hud">
-    <button class="chip" id="btnMenu">Menu (Y/M)</button>
-    <button class="chip" id="btnDebug">Debug</button>
+    <div><b>Scarlett VR Poker</b> <span id="build"></span></div>
+    <div class="muted" id="status">Booting…</div>
+    <div class="muted">If VR button missing: open Quest Browser DevTools console.</div>
   </div>
 
-  <div id="menuOverlay">
-    <h3>SCARLETT MENU</h3>
-    <button id="goLobby">Go Lobby</button>
-    <button id="goScorpion">Go Scorpion</button>
-    <button id="goStore">Go Store</button>
-    <button id="goSpectate">Go Spectate</button>
-    <button id="tpTable">Teleport to Table</button>
-    <div class="row">
-      <button id="closeMenu">Close</button>
-    </div>
+  <div id="touchHint">
+    Mobile controls: drag screen to look • 2-finger drag to move • double-tap to recenter
   </div>
 
-  <button id="androidDebugFab">DBG</button>
-  <div id="androidDebugHub">
-    <div class="dbgHeader">
-      <div><b>Debug Hub</b></div>
-      <div class="btns">
-        <button id="dbgCollapseBtn">▾</button>
-        <button id="dbgHideBtn">✕</button>
-      </div>
-    </div>
-    <div class="dbgBody">
-      <div id="dbgLog"></div>
-    </div>
-  </div>
-
-  <div id="mobilePad">
-    <div class="dpad">
-      <button class="d up" data-k="up">▲</button>
-      <button class="d left" data-k="left">◀</button>
-      <button class="d right" data-k="right">▶</button>
-      <button class="d down" data-k="down">▼</button>
-    </div>
-    <div class="abtns">
-      <button id="mAction">ACTION</button>
-      <button id="mTeleport">TELEPORT</button>
-      <div class="turnRow">
-        <button id="mTurnL">⟲</button>
-        <button id="mTurnR">⟳</button>
-      </div>
-    </div>
-  </div>
-
-  <script type="module" src="./js/main.js"></script>
+  <script type="module">
+    const v = Date.now();
+    document.getElementById("build").textContent = `v=${v}`;
+    import(`./js/main.js?v=${v}`);
+  </script>
 </body>
 </html>

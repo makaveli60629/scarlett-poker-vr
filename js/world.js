@@ -1,18 +1,18 @@
-// /js/world.js — SCARLETT MASTER WORLD — FULL v10.3
-// ✅ LOADER SIGNATURE: WORLD.JS V10.3 ACTIVE
+// /js/world.js — SCARLETT MASTER WORLD — FULL v10.4
+// ✅ LOADER SIGNATURE: WORLD.JS V10.4 ACTIVE
 //
 // Fixes:
-// - TeleportMachine.init destructuring { world } (world was undefined → mount crash)
-// - UI.init expects ctx.__ui.hub
+// - TeleportMachine.init expects { world } with world.mount()
+// - UI.init expects { __ui } so it can set __ui.hub
 // Adds:
-// - Auto-beacons for Store + Rail + Table so you can SEE them instantly
-// - Spawn points: store / rail / table
-// - Still mounts all your modules
+// - Wayfinding beacons (STORE / RAIL / TABLE)
+// - Spawn points (store / rail / table / lobby / spectator / scorpion_seat)
+// - Loads your full modular world as-is (store, rails, table, scorpion room, bots, poker sim)
 
 export const World = {
   async init(baseCtx) {
     const ctx = World._createCtx(baseCtx);
-    ctx.log(`[world] ✅ LOADER SIGNATURE: WORLD.JS V10.3 ACTIVE`);
+    ctx.log(`[world] ✅ LOADER SIGNATURE: WORLD.JS V10.4 ACTIVE`);
 
     ctx.log(`[world] fallback world building…`);
     World._buildFallbackLobby(ctx);
@@ -20,10 +20,10 @@ export const World = {
 
     const mountedCount = await World._mountAllSystems(ctx);
 
-    // If poker_sim missing, keep a visible demo so you can observe while building
+    // Ensure there is always something to observe
     if (!ctx.__hasDemoGame) World._startDemoPoker(ctx);
 
-    // Drop beacons + create spawns so you can find Store/Rail/Table instantly
+    // Make sure you can FIND the store + rails + table instantly
     World._placeWayfinding(ctx);
 
     World._finalizeWorld(ctx);
@@ -56,12 +56,13 @@ export const World = {
     ctx.textures = ctx.textures || {};
     ctx.flags = ctx.flags || {};
 
+    // UI containers
     ctx.ui = ctx.ui || {};
     ctx.ui.panels = ctx.ui.panels || [];
     ctx.ui.buttons = ctx.ui.buttons || [];
     ctx.ui.hotspots = ctx.ui.hotspots || [];
 
-    // ✅ legacy UI compat (prevents UI.init hub crash)
+    // ✅ legacy UI compat (prevents UI hub crash)
     ctx.__ui = ctx.__ui || {};
     ctx.ui.__ui = ctx.ui.__ui || ctx.__ui;
     if (!("hub" in ctx.__ui)) ctx.__ui.hub = null;
@@ -73,7 +74,7 @@ export const World = {
     ctx.rm = ctx.rm || { mode: ctx.rooms.mode };
     ctx.room = ctx.room || { mode: ctx.rooms.mode };
 
-    // ✅ legacy world compat + mount() (prevents TeleportMachine crash)
+    // ✅ legacy world compat + mount()
     ctx.world = ctx.world || {};
     ctx.world.colliders = ctx.world.colliders || ctx.solids;
     ctx.world.triggers = ctx.world.triggers || ctx.triggers;
@@ -84,10 +85,10 @@ export const World = {
       if (ctx.scene && obj.isObject3D && obj.parent !== ctx.scene) ctx.scene.add(obj);
     };
 
-    // Critical: world.mount must exist
+    // Critical: world.mount must exist for TeleportMachine
     ctx.world.mount = ctx.world.mount || ((obj)=>ctx.addMounted(obj));
 
-    // Helpful aliases some older modules use
+    // Helpful alias
     ctx.colliders = ctx.colliders || ctx.world.colliders;
 
     ctx.addSolid = (obj) => {
@@ -111,6 +112,20 @@ export const World = {
     };
 
     return ctx;
+  },
+
+  _compatArg(ctx){
+    // ✅ this is the big fix:
+    // many older modules destructure { world } or { __ui } from the arg passed in.
+    return {
+      ...ctx,
+      world: ctx.world,
+      __ui: ctx.__ui,
+      ui: ctx.ui,
+      colliders: ctx.colliders,
+      solids: ctx.solids,
+      triggers: ctx.triggers,
+    };
   },
 
   async _safeImport(ctx, path) {
@@ -142,17 +157,22 @@ export const World = {
     let mounted = 0;
     const v = ctx._v || Date.now();
 
-    // textures
+    // TEXTURES
     {
       const m = await World._safeImport(ctx, `./textures.js?v=${v}`);
       const kitFn = m?.createTextureKit || m?.Textures?.createTextureKit || m?.default?.createTextureKit;
       if (kitFn) {
-        try { ctx.textures = await kitFn(ctx) || ctx.textures; ctx.log(`[world] ✅ mounted textures via createTextureKit()`); mounted++; }
-        catch(e){ ctx.log(`[world] ⚠️ textures kit error: ${String(e?.message||e)}`); }
+        try {
+          ctx.textures = await kitFn(ctx) || ctx.textures;
+          ctx.log(`[world] ✅ mounted textures via createTextureKit()`);
+          mounted++;
+        } catch(e){
+          ctx.log(`[world] ⚠️ textures kit error: ${String(e?.message||e)}`);
+        }
       }
     }
 
-    // build systems
+    // SYSTEM MODULES
     const systems = [
       ["lights_pack.js.LightsPack.build (ctx)", `./lights_pack.js?v=${v}`, (m)=>m?.LightsPack?.build || m?.default?.LightsPack?.build || m?.build],
       ["solid_walls.js.SolidWalls.build (ctx)", `./solid_walls.js?v=${v}`, (m)=>m?.SolidWalls?.build || m?.default?.SolidWalls?.build || m?.build],
@@ -168,31 +188,19 @@ export const World = {
       ["scorpion_room.js.ScorpionRoom.build (ctx)", `./scorpion_room.js?v=${v}`, (m)=>m?.ScorpionRoom?.build || m?.default?.ScorpionRoom?.build || m?.build],
       ["room_manager.js.RoomManager.init (ctx)", `./room_manager.js?v=${v}`, (m)=>m?.RoomManager?.init || m?.default?.RoomManager?.init || m?.init],
       ["bots.js.Bots.init (ctx)", `./bots.js?v=${v}`, (m)=>m?.Bots?.init || m?.default?.Bots?.init || m?.init],
+      ["poker_sim.js.PokerSim.init (ctx)", `./poker_sim.js?v=${v}`, (m)=>m?.PokerSim?.init || m?.default?.PokerSim?.init || m?.init],
     ];
 
     for (const [label, path, pick] of systems){
       const mod = await World._safeImport(ctx, path);
       const fn = pick(mod);
+      const arg = World._compatArg(ctx);
 
-      // ✅ IMPORTANT: pass a “rich” arg object that guarantees legacy destructuring works
-      const arg = {
-        ...ctx,
-        world: ctx.world,     // TeleportMachine destructures this
-        __ui: ctx.__ui,       // UI.init expects this
-        ui: ctx.ui,
-        colliders: ctx.colliders,
-      };
-
-      if (await World._call(ctx, label, fn, arg)) mounted++;
-    }
-
-    // poker sim (optional)
-    {
-      const m = await World._safeImport(ctx, `./poker_sim.js?v=${v}`);
-      const init = m?.PokerSim?.init || m?.default?.PokerSim?.init || m?.init;
-      if (init && await World._call(ctx, `poker_sim.js.PokerSim.init (ctx)`, init, { ...ctx, world: ctx.world })) {
-        ctx.__hasDemoGame = true;
+      const ok = await World._call(ctx, label, fn, arg);
+      if (ok) {
         mounted++;
+        if (label.includes("Bots.init")) ctx.__hasBots = true;
+        if (label.includes("PokerSim.init")) ctx.__hasDemoGame = true;
       }
     }
 
@@ -279,6 +287,8 @@ export const World = {
       chip.rotation.y += dt*1.6;
       chip.position.y = 1.03 + Math.sin(t*2.2)*0.02;
     });
+
+    ctx.__hasDemoGame = true;
   },
 
   _findFirstByName(scene, needles){
@@ -336,7 +346,6 @@ export const World = {
       return g;
     };
 
-    // Try to find store + rail + table roots by name
     const storeObj = World._findFirstByName(scene, ["store", "shop"]);
     const railObj  = World._findFirstByName(scene, ["rail", "spectator"]);
     const tableObj = World._findFirstByName(scene, ["table"]);

@@ -1,9 +1,8 @@
-// /js/main.js — Scarlett VR Poker MAIN v3.3 (FULL)
+// /js/main.js — Scarlett VR Poker MAIN v3.4 (FULL)
 // - main.js owns renderer.setAnimationLoop
 // - World v12 dynamically loads optional modules (including SpawnPoints)
-// - main.js only optional-loads Controls (so a bad Controls file won't crash boot)
-// - Calls Controls.update(dt) every frame
-// - Auto-teleports to ctx.spawns.default or "lobby_spawn" once world is ready
+// - main.js optional-loads Controls (safe)
+// - HUD Enter VR triggers real VR session via event
 
 import { VRButton } from "./VRButton.js";
 import * as THREE_NS from "./three.js";
@@ -16,12 +15,8 @@ const warn = (...a) => console.warn(...a);
 const err = (...a) => console.error(...a);
 
 async function safeImport(path) {
-  try {
-    return await import(path);
-  } catch (e) {
-    err(`❌ import failed: ${path}`, e);
-    return null;
-  }
+  try { return await import(path); }
+  catch (e) { err(`❌ import failed: ${path}`, e); return null; }
 }
 
 function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
@@ -31,10 +26,7 @@ function makeRenderer(THREE) {
   renderer.setPixelRatio(clamp(window.devicePixelRatio || 1, 1, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
-
-  // Prefer local-floor to avoid “giant height”
   try { renderer.xr.setReferenceSpaceType?.("local-floor"); } catch {}
-
   document.body.appendChild(renderer.domElement);
   return renderer;
 }
@@ -66,13 +58,11 @@ function resize(renderer, camera) {
 }
 
 async function boot() {
-  // --- Diagnostics ---
   log(`BOOT v=${BOOT_V}`);
   log(`href=${location.href}`);
   log(`ua=${navigator.userAgent}`);
   log(`navigator.xr=${!!navigator.xr}`);
 
-  // Basic page safety
   document.body.style.margin = "0";
   document.body.style.overflow = "hidden";
   document.body.style.background = "#000";
@@ -88,39 +78,43 @@ async function boot() {
 
   window.addEventListener("resize", () => resize(renderer, camera));
 
-  // --- XR session init (yours) ---
-  const sessionInit = {
-    optionalFeatures: [
-      "local-floor",
-      "bounded-floor",
-      "hand-tracking",
-      "layers",
-      "dom-overlay",
-      "anchors",
-      "plane-detection",
-      "mesh-detection",
-      "hit-test",
-    ],
-    domOverlay: { root: document.body },
-  };
-  window.__SESSION_INIT__ = sessionInit;
+  // Use index.html canonical session init if present
+  const sessionInit =
+    window.__XR_SESSION_INIT ||
+    window.__SESSION_INIT__ || {
+      optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"],
+      domOverlay: { root: document.body },
+    };
 
-  // --- VR Button ---
+  // VRButton
+  let vrDomButton = null;
   try {
-    const btn = (VRButton.createButton.length >= 2)
+    vrDomButton = (VRButton.createButton.length >= 2)
       ? VRButton.createButton(renderer, sessionInit)
       : VRButton.createButton(renderer);
 
-    document.body.appendChild(btn);
-    log("[main] VRButton appended ✅");
+    vrDomButton?.setAttribute?.("data-scarlett-vrbutton", "1");
+
+    // If VRButton.js already mounted into #vrButtonSlot, appending again is harmless
+    if (vrDomButton && !vrDomButton.isConnected) document.body.appendChild(vrDomButton);
+
+    log("[main] VRButton ready ✅");
   } catch (e) {
     warn("[main] VRButton failed (non-fatal)", e);
   }
 
-  // Controllers bag (your systems can populate later)
+  // HUD enter event -> click real VR button
+  window.addEventListener("scarlett-enter-vr", () => {
+    try {
+      vrDomButton?.click?.();
+      log("[main] scarlett-enter-vr -> VRButton click ✅");
+    } catch (e) {
+      warn("[main] scarlett-enter-vr failed", e);
+    }
+  });
+
   const controllers = { left: null, right: null, hands: [] };
 
-  // Shared ctx passed into World/Controls
   const ctx = {
     THREE,
     scene,
@@ -133,13 +127,13 @@ async function boot() {
     sessionInit,
   };
 
-  // --- Optional load Controls (safe) ---
+  // Controls
   const cMod = await safeImport("./controls.js");
   const Controls = cMod?.Controls || null;
   if (Controls) log("[main] ✅ Controls imported");
   else warn("[main] ⚠️ Controls missing (non-fatal)");
 
-  // --- Init World (World v12 will optional-load SpawnPoints internally) ---
+  // World
   let world = null;
   try {
     world = await World.init(ctx);
@@ -153,7 +147,7 @@ async function boot() {
     ctx.world = world;
   }
 
-  // --- Init Controls (no animation loop in Controls) ---
+  // init Controls
   try {
     if (Controls?.init) {
       Controls.init({ ...ctx, world });
@@ -163,45 +157,32 @@ async function boot() {
     warn("[main] ⚠️ Controls.init failed (non-fatal)", e);
   }
 
-  // --- Auto-teleport once (safe) ---
-  // Prefer "default" alias created by SpawnPoints or world; else use lobby_spawn if present.
+  // Auto teleport
   let didAutoTP = false;
   const tryAutoTeleport = () => {
     if (didAutoTP) return;
     if (!Controls?.teleportToSpawn) return;
 
     const sp = world?.spawns || {};
-    if (sp.default) {
-      Controls.teleportToSpawn("default");
-      didAutoTP = true;
-      return;
-    }
-    if (sp.lobby_spawn) {
-      Controls.teleportToSpawn("lobby_spawn");
-      didAutoTP = true;
-      return;
-    }
+    if (sp.default) { Controls.teleportToSpawn("default"); didAutoTP = true; return; }
+    if (sp.lobby_spawn) { Controls.teleportToSpawn("lobby_spawn"); didAutoTP = true; return; }
   };
 
-  // try immediately, then retry a few frames in case spawns finish a tick later
   tryAutoTeleport();
-  let retryFrames = 40;
+  let retryFrames = 60;
 
-  // --- Main render loop ---
+  // Loop
   let last = performance.now();
   renderer.setAnimationLoop(() => {
     const now = performance.now();
     let dt = (now - last) / 1000;
     last = now;
-
     dt = clamp(dt, 0, 0.05);
 
     try {
       Controls?.update?.(dt);
       world?.update?.(dt);
-
       if (!didAutoTP && retryFrames-- > 0) tryAutoTeleport();
-
       renderer.render(scene, camera);
     } catch (e) {
       err("[main] render loop error", e);

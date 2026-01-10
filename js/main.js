@@ -1,299 +1,393 @@
-// /js/main.js — Scarlett VR Poker Hybrid 1.0 (FULL)
-// ✅ VRButton appended FIRST (so you always see it even if world crashes)
-// ✅ Works on Quest + Desktop + Android (touch look + 2-finger move fallback)
-// ✅ Calls world.update(dt) safely
-//
-// Assumes you have:
-// - /js/three.js wrapper that exports THREE (your existing setup)
-// - /js/three/examples/jsm/webxr/VRButton.js (local copy)
-// - /js/world.js (provided below)
+/**
+ * ===========================================================
+ * FILE: /js/main.js
+ * PROJECT: Scarlett Poker VR — New Update 1.0 (PERMANENT BOOT)
+ *
+ * PURPOSE:
+ *  - Single source of truth for boot order
+ *  - Always-on diagnostics (HUD + console)
+ *  - Android: on-screen movement + action + menu
+ *  - Quest: controller support stays enabled
+ *
+ * IMPORTANT RULE:
+ *  - index.html loads ONLY this file
+ *  - this file decides what other modules run
+ *
+ * HOW TO USE DEV MODES:
+ *  - Add ?dev=1 to URL for extra logs
+ *  - Add ?touch=1 to force touch controls
+ * ===========================================================
+ */
 
-import * as THREE from "./three.js";
-import { VRButton } from "./three/examples/jsm/webxr/VRButton.js";
-import { World } from "./world.js";
+import * as THREE from './three.js';
+import { VRButton } from './VRButton.js';
 
-const BUILD = new URLSearchParams(location.search).get("v") || `${Date.now()}`;
-const hudStatus = (msg) => {
-  const el = document.getElementById("status");
-  if (el) el.textContent = msg;
-};
-const log = (...a) => console.log(...a);
+// We will use your existing modules if present
+import { World } from './world.js';
+import { Controls } from './controls.js';
+import { UI } from './ui.js';
 
-log("BOOT v=" + BUILD);
-log("href=" + location.href);
-log("ua=" + navigator.userAgent);
-log("navigator.xr=" + !!navigator.xr);
+// Optional modules: safe import helper (if you have it)
+let SafeImport = null;
+try { SafeImport = await import('./safe_import.js'); } catch (e) { /* optional */ }
 
-hudStatus("Initializing renderer…");
+const qs = new URLSearchParams(location.search);
+const DEV = qs.get('dev') === '1';
+const FORCE_TOUCH = qs.get('touch') === '1';
 
-// --- Renderer (create first so VRButton can be appended immediately)
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
-renderer.setSize(innerWidth, innerHeight);
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.xr.enabled = true;
-document.body.appendChild(renderer.domElement);
+// DOM
+const hud = document.getElementById('hud');
+const toastEl = document.getElementById('toast');
+const touchLayer = document.getElementById('touchControls');
+const btnDev = document.getElementById('btnDev');
+const btnTouch = document.getElementById('btnTouch');
 
-// --- VR Button (append BEFORE anything else)
-try {
-  const btn = VRButton.createButton(renderer);
-  btn.id = "VRButton";
-  btn.style.position = "fixed";
-  btn.style.right = "14px";
-  btn.style.bottom = "14px";
-  btn.style.zIndex = "999999";
-  btn.style.borderRadius = "14px";
-  btn.style.fontWeight = "800";
-  btn.style.padding = "12px 14px";
-  document.body.appendChild(btn);
-  log("[main] VRButton appended ✅");
-  hudStatus("VRButton ready. Loading world…");
-} catch (e) {
-  console.error("[main] VRButton failed:", e);
-  hudStatus("VRButton failed (check console). Loading world anyway…");
+function hudSet(txt) {
+  if (!hud) return;
+  hud.innerHTML = `<div class="t">Scarlett Poker VR — New Update 1.0</div>${txt}`;
+}
+function toast(msg, ms = 1600) {
+  if (!toastEl) return;
+  toastEl.textContent = msg;
+  toastEl.style.display = 'block';
+  clearTimeout(toastEl._t);
+  toastEl._t = setTimeout(() => toastEl.style.display = 'none', ms);
 }
 
-// --- Scene + camera + player rig
+function log(...a) { console.log('[BOOT]', ...a); }
+function warn(...a) { console.warn('[BOOT]', ...a); }
+function err(...a) { console.error('[BOOT]', ...a); }
+
+window.addEventListener('error', (e) => {
+  err('window.error', e.message);
+  hudSet(`❌ ERROR:\n${e.message}\n${e.filename || ''}:${e.lineno || ''}`);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  err('unhandledrejection', e.reason);
+  hudSet(`❌ PROMISE ERROR:\n${String(e.reason)}`);
+});
+
+const isLikelyAndroid = /Android/i.test(navigator.userAgent);
+const isLikelyQuest = /OculusBrowser|Quest/i.test(navigator.userAgent);
+
+btnDev?.addEventListener('click', () => {
+  const u = new URL(location.href);
+  u.searchParams.set('dev', DEV ? '0' : '1');
+  location.href = u.toString();
+});
+btnTouch?.addEventListener('click', () => {
+  const u = new URL(location.href);
+  u.searchParams.set('touch', FORCE_TOUCH ? '0' : '1');
+  location.href = u.toString();
+});
+
+// -----------------------------------------------------------
+// RENDERER / SCENE / CAMERA / CLOCK
+// -----------------------------------------------------------
+const app = document.getElementById('app');
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.xr.enabled = true;
+app.appendChild(renderer.domElement);
+
+// VR Button (Quest)
+app.appendChild(VRButton.createButton(renderer));
+
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0x05060a, 12, 75);
+scene.background = new THREE.Color(0x05060a);
 
-const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 250);
-camera.position.set(0, 1.65, 4);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 200);
+camera.position.set(0, 1.6, 3);
 
+// Player Group (rig root)
 const player = new THREE.Group();
-player.name = "player_rig";
+player.name = 'PLAYER_RIG';
 player.position.set(0, 0, 0);
 player.add(camera);
 scene.add(player);
 
-// Soft ambient so you never get “black screen” during partial loads
-scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x080812, 0.65));
-const d = new THREE.DirectionalLight(0xffffff, 0.75);
-d.position.set(10, 18, 6);
-scene.add(d);
+const clock = new THREE.Clock();
 
-// --- Controllers (XR)
-const controllers = {
-  left: null,
-  right: null,
-  grips: [],
-  update() {}
-};
-
-function initControllers() {
-  try {
-    const c0 = renderer.xr.getController(0);
-    const c1 = renderer.xr.getController(1);
-    c0.name = "controller0";
-    c1.name = "controller1";
-    player.add(c0);
-    player.add(c1);
-
-    controllers.left = c0;
-    controllers.right = c1;
-
-    // quick visual pointer
-    const rayGeom = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, -1)
-    ]);
-    const rayMat = new THREE.LineBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.9 });
-    const ray0 = new THREE.Line(rayGeom, rayMat); ray0.scale.z = 6;
-    const ray1 = new THREE.Line(rayGeom, rayMat.clone()); ray1.scale.z = 6;
-
-    c0.add(ray0);
-    c1.add(ray1);
-
-    log("[main] controllers ready ✅");
-  } catch (e) {
-    console.warn("[main] controllers init failed:", e);
-  }
-}
-initControllers();
-
-// --- Desktop + Android fallback controls (no Oculus required)
-const input = {
-  keys: new Set(),
-  yaw: 0,
-  pitch: 0,
-  lookActive: false,
-  lastX: 0,
-  lastY: 0,
-
-  touchMode: {
-    active: false,
-    oneFinger: false,
-    twoFinger: false,
-    last: { x: 0, y: 0 },
-    last2: { x: 0, y: 0 },
-    move: new THREE.Vector2(0, 0)
-  }
-};
-
-addEventListener("keydown", (e) => input.keys.add(e.key.toLowerCase()));
-addEventListener("keyup", (e) => input.keys.delete(e.key.toLowerCase()));
-
-renderer.domElement.addEventListener("mousedown", (e) => {
-  input.lookActive = true;
-  input.lastX = e.clientX;
-  input.lastY = e.clientY;
-});
-addEventListener("mouseup", () => (input.lookActive = false));
-addEventListener("mousemove", (e) => {
-  if (!input.lookActive) return;
-  const dx = e.clientX - input.lastX;
-  const dy = e.clientY - input.lastY;
-  input.lastX = e.clientX;
-  input.lastY = e.clientY;
-
-  input.yaw -= dx * 0.0022;
-  input.pitch -= dy * 0.0020;
-  input.pitch = Math.max(-1.25, Math.min(1.25, input.pitch));
-});
-
-renderer.domElement.addEventListener("touchstart", (e) => {
-  input.touchMode.active = true;
-  if (e.touches.length === 1) {
-    input.touchMode.oneFinger = true;
-    input.touchMode.twoFinger = false;
-    input.touchMode.last.x = e.touches[0].clientX;
-    input.touchMode.last.y = e.touches[0].clientY;
-  } else if (e.touches.length >= 2) {
-    input.touchMode.oneFinger = false;
-    input.touchMode.twoFinger = true;
-    input.touchMode.last.x = e.touches[0].clientX;
-    input.touchMode.last.y = e.touches[0].clientY;
-    input.touchMode.last2.x = e.touches[1].clientX;
-    input.touchMode.last2.y = e.touches[1].clientY;
-  }
-}, { passive: false });
-
-renderer.domElement.addEventListener("touchmove", (e) => {
-  if (!input.touchMode.active) return;
-
-  if (e.touches.length === 1 && input.touchMode.oneFinger) {
-    const x = e.touches[0].clientX;
-    const y = e.touches[0].clientY;
-    const dx = x - input.touchMode.last.x;
-    const dy = y - input.touchMode.last.y;
-    input.touchMode.last.x = x;
-    input.touchMode.last.y = y;
-
-    input.yaw -= dx * 0.0032;
-    input.pitch -= dy * 0.0030;
-    input.pitch = Math.max(-1.25, Math.min(1.25, input.pitch));
-  }
-
-  if (e.touches.length >= 2 && input.touchMode.twoFinger) {
-    // 2-finger drag -> move
-    const x1 = e.touches[0].clientX, y1 = e.touches[0].clientY;
-    const x2 = e.touches[1].clientX, y2 = e.touches[1].clientY;
-    const cx = (x1 + x2) * 0.5;
-    const cy = (y1 + y2) * 0.5;
-
-    const lastCx = (input.touchMode.last.x + input.touchMode.last2.x) * 0.5;
-    const lastCy = (input.touchMode.last.y + input.touchMode.last2.y) * 0.5;
-
-    const dx = cx - lastCx;
-    const dy = cy - lastCy;
-
-    input.touchMode.last.x = x1; input.touchMode.last.y = y1;
-    input.touchMode.last2.x = x2; input.touchMode.last2.y = y2;
-
-    // scale for movement
-    input.touchMode.move.x = THREE.MathUtils.clamp(dx * 0.0025, -0.25, 0.25);
-    input.touchMode.move.y = THREE.MathUtils.clamp(dy * 0.0025, -0.25, 0.25);
-  }
-
-  e.preventDefault();
-}, { passive: false });
-
-renderer.domElement.addEventListener("touchend", () => {
-  input.touchMode.active = false;
-  input.touchMode.oneFinger = false;
-  input.touchMode.twoFinger = false;
-  input.touchMode.move.set(0, 0);
-}, { passive: true });
-
-renderer.domElement.addEventListener("dblclick", () => {
-  input.yaw = 0;
-  input.pitch = 0;
-});
-
-// Apply look to player/camera in non-XR
-function applyNonXRLook() {
-  // Only do this when NOT in XR presenting
-  if (renderer.xr.isPresenting) return;
-  player.rotation.y = input.yaw;
-  camera.rotation.x = input.pitch;
-}
-
-// Simple locomotion when NOT in XR
-function applyNonXRMove(dt) {
-  if (renderer.xr.isPresenting) return;
-
-  const speed = (input.keys.has("shift") ? 4.8 : 2.8);
-  const v = new THREE.Vector3();
-
-  if (input.keys.has("w") || input.keys.has("arrowup")) v.z -= 1;
-  if (input.keys.has("s") || input.keys.has("arrowdown")) v.z += 1;
-  if (input.keys.has("a") || input.keys.has("arrowleft")) v.x -= 1;
-  if (input.keys.has("d") || input.keys.has("arrowright")) v.x += 1;
-
-  // touch 2-finger move
-  if (input.touchMode.twoFinger) {
-    v.x += input.touchMode.move.x * 5.0;
-    v.z += input.touchMode.move.y * 5.0;
-  }
-
-  if (v.lengthSq() < 1e-6) return;
-  v.normalize().multiplyScalar(speed * dt);
-
-  // rotate movement by player yaw
-  const yaw = player.rotation.y;
-  const sin = Math.sin(yaw), cos = Math.cos(yaw);
-  const dx = v.x * cos - v.z * sin;
-  const dz = v.x * sin + v.z * cos;
-
-  player.position.x += dx;
-  player.position.z += dz;
-
-  // keep grounded
-  player.position.y = 0;
-}
-
-// --- Resize
-addEventListener("resize", () => {
-  camera.aspect = innerWidth / innerHeight;
+// Resize
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
+  renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// --- Boot world (guarded so VR button survives any crash)
-let world = null;
+// -----------------------------------------------------------
+// INPUT STATE (unifies Android + Keyboard + XR buttons)
+// -----------------------------------------------------------
+const input = {
+  moveX: 0, moveZ: 0,
+  turn: 0,
+  action: false,
+  menu: false,
+  // for UI display
+  mode: 'UNKNOWN',
+};
 
-(async () => {
-  try {
-    hudStatus("Loading world modules…");
-    world = await World.init({ THREE, scene, renderer, camera, player, controllers, log, BUILD });
-    hudStatus("World ready ✅");
-    log("[main] world init ✅");
-  } catch (e) {
-    console.error("[main] world init error:", e);
-    hudStatus("World failed (check console). VR button should still show.");
+function setTouchEnabled(enabled) {
+  if (!touchLayer) return;
+  touchLayer.style.display = enabled ? 'block' : 'none';
+}
+
+function bindTouchButtons() {
+  if (!touchLayer) return;
+
+  const active = new Set();
+
+  const setKey = (k, down) => {
+    if (down) active.add(k);
+    else active.delete(k);
+
+    // movement
+    input.moveX = (active.has('right') ? 1 : 0) + (active.has('left') ? -1 : 0);
+    input.moveZ = (active.has('forward') ? 1 : 0) + (active.has('back') ? -1 : 0);
+
+    // turning
+    input.turn = (active.has('turnR') ? -1 : 0) + (active.has('turnL') ? 1 : 0);
+
+    // action/menu (momentary)
+    input.action = active.has('action');
+    input.menu = active.has('menu');
+  };
+
+  const btns = touchLayer.querySelectorAll('button[data-key]');
+  btns.forEach((b) => {
+    const key = b.getAttribute('data-key');
+    const down = (ev) => { ev.preventDefault(); setKey(key, true); };
+    const up = (ev) => { ev.preventDefault(); setKey(key, false); };
+
+    b.addEventListener('pointerdown', down);
+    b.addEventListener('pointerup', up);
+    b.addEventListener('pointercancel', up);
+    b.addEventListener('pointerleave', up);
+  });
+}
+
+function bindKeyboard() {
+  const held = new Set();
+  window.addEventListener('keydown', (e) => {
+    held.add(e.code);
+    if (e.code === 'KeyM') input.menu = true;
+    if (e.code === 'Space') input.action = true;
+  });
+  window.addEventListener('keyup', (e) => {
+    held.delete(e.code);
+    if (e.code === 'KeyM') input.menu = false;
+    if (e.code === 'Space') input.action = false;
+  });
+
+  const apply = () => {
+    const left  = held.has('KeyA') || held.has('ArrowLeft');
+    const right = held.has('KeyD') || held.has('ArrowRight');
+    const up    = held.has('KeyW') || held.has('ArrowUp');
+    const down  = held.has('KeyS') || held.has('ArrowDown');
+    input.moveX = (right ? 1 : 0) + (left ? -1 : 0);
+    input.moveZ = (up ? 1 : 0) + (down ? -1 : 0);
+
+    const q = held.has('KeyQ');
+    const e = held.has('KeyE');
+    input.turn = (q ? 1 : 0) + (e ? -1 : 0);
+  };
+
+  // call every frame via update loop
+  return apply;
+}
+
+// XR button mapping (Quest controllers)
+function readXRButtons() {
+  // Use WebXR gamepad mapping if available
+  const session = renderer.xr.getSession();
+  if (!session) return;
+
+  let action = false;
+  let menu = false;
+
+  for (const src of session.inputSources) {
+    const gp = src.gamepad;
+    if (!gp) continue;
+
+    // Common mapping:
+    // buttons[0] trigger, buttons[1] squeeze/grip, buttons[3] / buttons[4] etc vary
+    const b = gp.buttons || [];
+
+    const trigger = b[0]?.pressed;
+    const grip = b[1]?.pressed;
+
+    // Menu is not always exposed; we map "A/X" style buttons as menu fallback.
+    const ax = b[4]?.pressed || b[5]?.pressed || b[3]?.pressed;
+
+    action = action || !!(trigger || grip);
+    menu = menu || !!ax;
   }
-})();
 
-// --- Render loop
-let last = performance.now();
+  input.action = action;
+  input.menu = menu;
+}
+
+// -----------------------------------------------------------
+// BOOT ORDER
+// -----------------------------------------------------------
+hudSet([
+  `UA: ${navigator.userAgent}`,
+  `XR: ${navigator.xr ? 'true' : 'false'}`,
+  `Mode Guess: ${isLikelyQuest ? 'Quest' : (isLikelyAndroid ? 'Android' : 'Desktop')}`,
+  `DEV: ${DEV ? 'ON' : 'OFF'}`,
+].join('\n'));
+
+log('Boot start', { DEV, FORCE_TOUCH, isLikelyAndroid, isLikelyQuest });
+
+bindTouchButtons();
+const applyKeyboard = bindKeyboard();
+
+// Decide touch mode
+const useTouch = FORCE_TOUCH || (isLikelyAndroid && !isLikelyQuest);
+setTouchEnabled(useTouch);
+input.mode = useTouch ? 'ANDROID_TOUCH' : (isLikelyQuest ? 'QUEST_XR' : 'DESKTOP');
+toast(useTouch ? 'Touch controls enabled' : 'Touch controls off');
+
+// Build world (your current world.js)
+let worldCtx = null;
+try {
+  worldCtx = World?.build?.({
+    THREE,
+    scene,
+    renderer,
+    player,
+    camera,
+    dev: DEV,
+    log,
+    warn,
+  }) || {};
+  log('World built');
+} catch (e) {
+  err('World.build failed', e);
+  hudSet(`❌ World.build failed:\n${String(e?.message || e)}`);
+}
+
+// Controls (your controls.js) — we pass unified input
+let controlsCtx = null;
+try {
+  controlsCtx = Controls?.init?.({
+    THREE,
+    scene,
+    renderer,
+    player,
+    camera,
+    input,
+    dev: DEV,
+    log,
+    warn,
+    // if your controls want it:
+    world: worldCtx,
+  }) || {};
+  log('Controls init ok');
+} catch (e) {
+  err('Controls.init failed', e);
+  hudSet(`❌ Controls.init failed:\n${String(e?.message || e)}`);
+}
+
+// UI (your ui.js) — hook menu/action
+let uiCtx = null;
+try {
+  uiCtx = UI?.init?.({
+    THREE,
+    scene,
+    renderer,
+    player,
+    camera,
+    input,
+    dev: DEV,
+    log,
+    warn,
+    world: worldCtx,
+  }) || {};
+  log('UI init ok');
+} catch (e) {
+  warn('UI.init failed (non-fatal)', e);
+}
+
+// -----------------------------------------------------------
+// MAIN LOOP
+// -----------------------------------------------------------
+let frames = 0;
+let fps = 0;
+let fpsT = 0;
+
+function updateHUD(dt) {
+  frames++;
+  fpsT += dt;
+  if (fpsT >= 0.5) {
+    fps = Math.round(frames / fpsT);
+    frames = 0;
+    fpsT = 0;
+  }
+
+  const pos = player.position;
+  hudSet([
+    `Mode: ${input.mode}   FPS: ${fps}`,
+    `Player: x=${pos.x.toFixed(2)} y=${pos.y.toFixed(2)} z=${pos.z.toFixed(2)}`,
+    `Move: x=${input.moveX} z=${input.moveZ} turn=${input.turn}`,
+    `Action: ${input.action ? '1' : '0'}   Menu: ${input.menu ? '1' : '0'}`,
+    `XR Session: ${renderer.xr.getSession() ? 'YES' : 'NO'}`,
+    `DEV: ${DEV ? 'ON' : 'OFF'}   TOUCH: ${useTouch ? 'ON' : 'OFF'}`,
+  ].join('\n'));
+}
+
 renderer.setAnimationLoop(() => {
-  const t = performance.now();
-  const dt = Math.min(0.05, (t - last) / 1000);
-  last = t;
+  const dt = Math.min(0.05, clock.getDelta());
 
-  applyNonXRLook();
-  applyNonXRMove(dt);
+  // Desktop keys
+  applyKeyboard?.();
 
-  try { world?.update?.(dt); } catch (e) { console.warn("[main] world.update error:", e); }
+  // Quest buttons (only when in XR session)
+  readXRButtons();
+
+  // Let your modules update if they expose tick/update
+  try { worldCtx?.tick?.(dt); } catch {}
+  try { controlsCtx?.tick?.(dt); } catch {}
+  try { uiCtx?.tick?.(dt); } catch {}
+
+  // If your Controls module does nothing, we provide a basic fallback movement:
+  if (!controlsCtx?.handlesMovement) {
+    const speed = 2.0;          // m/s
+    const turnSpeed = 1.8;      // rad/s
+
+    // forward direction (camera yaw)
+    const yaw = camera.rotation.y;
+    const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+    const right = new THREE.Vector3(forward.z, 0, -forward.x);
+
+    const move = new THREE.Vector3();
+    move.addScaledVector(right, input.moveX);
+    move.addScaledVector(forward, input.moveZ);
+    if (move.lengthSq() > 0) move.normalize();
+
+    player.position.addScaledVector(move, speed * dt);
+    player.rotation.y += input.turn * turnSpeed * dt;
+  }
+
+  // Menu toggle hook (one-shot)
+  if (input.menu) {
+    uiCtx?.toggleMenu?.();
+    // prevent rapid spam on touch
+    input.menu = false;
+  }
+
+  // Action hook (example)
+  if (input.action) {
+    uiCtx?.onAction?.();
+    // keep action held allowed; your UI can debounce
+  }
+
+  updateHUD(dt);
   renderer.render(scene, camera);
 });
+
+log('Animation loop running ✅');
+toast('Boot OK ✅');

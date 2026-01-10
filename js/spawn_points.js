@@ -1,6 +1,6 @@
-// /js/spawn_points.js — SpawnPoints v3.2 (SCORPION SEAT SAFE)
-// Builds visible pads + registers named spawn transforms.
-// Convention: we store { x, z, y, yaw } and apply to player safely.
+// /js/spawn_points.js — SpawnPoints v3.3 (SCORPION SEAT HARD SAFE)
+// Builds pads + registers named spawns.
+// Adds optional seat hints (seatBack) for Controls.sitAt() safety.
 
 export const SpawnPoints = {
   build(ctx) {
@@ -37,31 +37,39 @@ export const SpawnPoints = {
 
     const spawns = {};
     const register = (name, x, z, yaw, opts = {}) => {
-      spawns[name] = { x, z, y: opts.y ?? 0, yaw, room: opts.room ?? "any" };
+      spawns[name] = {
+        x, z,
+        y: opts.y ?? 0,
+        yaw,
+        room: opts.room ?? "any",
+        // optional seat hints
+        seatBack: opts.seatBack ?? 0,
+      };
       if (opts.pad !== false) mkPad(name, x, z, yaw, opts.color ?? 0x7fe7ff);
       log?.(`[spawns] ✅ ${name} @ ${x.toFixed(2)},${z.toFixed(2)} yaw=${yaw.toFixed(2)}`);
     };
 
-    // Main spawns
     register("lobby_spawn", 0.00, 3.20, Math.PI, { room: "lobby", color: 0x7fe7ff });
     register("store_spawn", 4.50, -3.50, Math.PI, { room: "store", color: 0xff2d7a });
     register("spectator", 0.00, -3.00, 0.00, { room: "spectate", color: 0xffcc00 });
 
-    // Lobby seat (near felt but not in it)
-    register("table_seat_1", 0.00, 1.55, Math.PI, { room: "table", color: 0x4cd964, pad: false });
+    // Lobby seat (safe)
+    register("table_seat_1", 0.00, 1.55, Math.PI, { room: "table", color: 0x4cd964, pad: false, seatBack: 0.35 });
 
-    // Scorpion gate
     register("scorpion_gate", 8.00, 0.00, -Math.PI / 2, { room: "scorpion", color: 0xb266ff });
 
-    // ✅ SCORPION SEAT — moved OUT from table edge to avoid spawning inside table
-    // Old: z=0.95 (often too close / inside table mesh)
-    // New: z=1.65 puts you clearly on chair side of felt
-    register("scorpion_seat_1", 8.00, 1.65, Math.PI, { room: "scorpion", color: 0x4cd964, pad: false });
+    // ✅ HARD SAFE SCORPION SEAT
+    // This is intentionally farther back so you cannot spawn inside the felt/table collider.
+    // If it feels too far, we can pull it forward later in small increments.
+    register("scorpion_seat_1", 8.00, 2.35, Math.PI, {
+      room: "scorpion",
+      color: 0x4cd964,
+      pad: false,
+      seatBack: 0.75, // Controls will nudge back along yaw by this much as extra safety
+    });
 
-    // Optional safe standing pad
     register("scorpion_safe_spawn", 7.10, 1.85, Math.PI, { room: "scorpion", color: 0x00e5ff });
 
-    // Exit marker
     register("scorpion_exit", 8.00, 0.00, Math.PI, { room: "lobby", color: 0xff6b6b, pad: false });
 
     ctx.spawns = {

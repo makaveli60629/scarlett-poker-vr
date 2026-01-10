@@ -1,22 +1,17 @@
-// /js/gesture_engine.js — GestureEngineModule v1.0 (HANDS-ONLY FOUNDATION)
+// /js/gesture_engine.js — GestureEngineModule v1.0
 // ✅ Per-hand pinch detection (thumb-tip ↔ index-finger-tip)
 // ✅ Emits events: pinchstart, pinchend
-// ✅ Provides stable API for next modules (chips/cards/store interactions)
-// Usage:
-//   GestureEngine.init({ THREE, renderer, scene, camera, log })
-//   GestureEngine.on("pinchstart", (e)=>{})
-//   GestureEngine.update(frame, referenceSpace)
+// ✅ update(frame, referenceSpace)
 
 export const GestureEngine = (() => {
   let THREE = null, renderer = null, scene = null, camera = null, log = console.log;
 
-  const listeners = new Map(); // event -> Set(cb)
-
+  const listeners = new Map();
   const state = {
     enabled: true,
     hands: {
-      left:  { pinch:false, last:false, strength:0, jointsOK:false, tipA:null, tipB:null },
-      right: { pinch:false, last:false, strength:0, jointsOK:false, tipA:null, tipB:null },
+      left:  { pinch:false, last:false, strength:0, jointsOK:false },
+      right: { pinch:false, last:false, strength:0, jointsOK:false },
     },
     tmpA: null,
     tmpB: null,
@@ -43,9 +38,10 @@ export const GestureEngine = (() => {
     return true;
   }
 
-  function updateHand(handedness) {
-    const handObj = handedness === "left" ? renderer?.xr?.getHand?.(0) : renderer?.xr?.getHand?.(1);
+  function updateOne(handedness, index) {
+    const handObj = renderer?.xr?.getHand?.(index);
     const h = state.hands[handedness];
+
     h.last = h.pinch;
 
     if (!handObj) {
@@ -76,7 +72,7 @@ export const GestureEngine = (() => {
       renderer = ctx.renderer;
       scene = ctx.scene;
       camera = ctx.camera;
-      log = ctx.log || ctx.LOG?.push?.bind(ctx.LOG, "log") || console.log;
+      log = ctx.log || ((m) => ctx.LOG?.push?.("log", m)) || console.log;
 
       state.tmpA = new THREE.Vector3();
       state.tmpB = new THREE.Vector3();
@@ -85,16 +81,13 @@ export const GestureEngine = (() => {
     },
 
     on,
-
     setEnabled(v) { state.enabled = !!v; },
-
     getState() { return state; },
 
     update(frame, referenceSpace) {
       if (!state.enabled) return;
-      // frame/referenceSpace kept for future (grab rays, hover, etc.)
-      updateHand("left");
-      updateHand("right");
+      updateOne("left", 0);
+      updateOne("right", 1);
     }
   };
 })();

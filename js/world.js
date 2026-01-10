@@ -1,416 +1,288 @@
-// /js/world.js — Scarlett MASTER WORLD v15 (FULL)
-// FIXES (v15):
-// ✅ Boots in LOBBY every time (scorpion hidden, store visible)
-// ✅ Calls SpawnPoints.build(ctx) and guarantees ctx.spawns.apply exists
-// ✅ XR height correctness: always uses ctx.spawns.apply(name, rig, {standY/seatY})
-// ✅ Room switching: listens to UI event "scarlett-room" and forces spawns
-// ✅ Scorpion uses ctx.systems.scorpion from ScorpionRoom.build(ctx)
-// ✅ PokerSim + Bots are optional, but wired to ctx.PokerSim / ctx.poker when present
-// ✅ Adds safe bounds getter used by AndroidControls if you wire it
+// /js/world.js — Scarlett MASTER WORLD v12 (FULL)
+// One world: Original Lobby (start) + Store (left) + Scorpion Room (teleport + auto-seat).
+// Safe optional modules; strong lighting; debug logs; hard fallbacks.
+
+import { TeleportMachine } from "./teleport_machine.js";
+import { StoreSystem } from "./store.js";
+import { ScorpionRoom } from "./scorpion_room.js";
+import { RoomManager } from "./room_manager.js";
+import { Bots } from "./bots.js";
+import { PokerSim } from "./poker_sim.js";
 
 export const World = {
   async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD }) {
     const ctx = {
       THREE, scene, renderer, camera, player, controllers, log,
-      BUILD: BUILD || "gh-pages",
-
-      // gameplay state
-      mode: "lobby",
-      tables: {},
+      BUILD,
       systems: {},
-      rooms: {},
-
-      // shared registries
-      colliders: [],
-      anchors: {},
-      beacons: {},
-      spawns: {},
-
-      // poker wiring
       PokerSim: null,
-      poker: null,
-
-      // helpers
-      bounds: {
-        min: new THREE.Vector3(-18, -10, -18),
-        max: new THREE.Vector3(18,  10,  18),
-      },
-      getBounds() { return this.bounds; },
+      world: this,
+      anchors: {},
+      seated: false,
     };
 
-    log?.(`[world] ✅ LOADER SIGNATURE: WORLD.JS V15 MASTER ACTIVE`);
+    log?.("[world] init v12…");
 
-    // --- BASE FLOOR (always present, never missing) ---
-    this._buildBaseFloor(ctx);
+    // ---------- Always-on lighting (prevents black scene) ----------
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.9);
+    scene.add(hemi);
 
-    // --- SAFE DEFAULT ANCHORS (used by some systems) ---
-    ctx.anchors.lobby_spawn     = new THREE.Vector3(0, 0, 2.8);
-    ctx.anchors.store_spawn     = new THREE.Vector3(4.5, 0, -3.5);
-    ctx.anchors.spectator       = new THREE.Vector3(0, 0, -3.0);
-    ctx.anchors.table_seat_1    = new THREE.Vector3(0, 0, 1.55);
-    ctx.anchors.scorpion_gate   = new THREE.Vector3(8.0, 0, 0.0);
-    ctx.anchors.scorpion_seat_1 = new THREE.Vector3(8.0, 0, 1.55);
-    ctx.anchors.scorpion_exit   = new THREE.Vector3(8.0, 0, 0.0);
+    const sun = new THREE.DirectionalLight(0xffffff, 1.35);
+    sun.position.set(4, 10, 3);
+    sun.castShadow = true;
+    scene.add(sun);
 
-    // --- TEXTURES ---
-    await safeCall("[textures] createTextureKit", async () => {
-      const mod = await safeModule("./textures.js");
-      const fn = mod?.createTextureKit;
-      if (!fn) return;
-      ctx.textures = fn({ THREE, renderer, base: "./assets/textures/", log });
-      log?.("[world] ✅ mounted textures via createTextureKit()");
-    }, log);
+    // ---------- Build ORIGINAL LOBBY ----------
+    this._buildLobby(ctx);
 
-    // --- LIGHTS ---
-    await safeCall("[lights] LightsPack.build", async () => {
-      const mod = await safeModule("./lights_pack.js");
-      const sys = mod?.LightsPack;
-      if (sys?.build) await sys.build(ctx);
-    }, log);
+    // ---------- Build STORE (left) ----------
+    this._buildStoreShell(ctx);
 
-    // --- WALLS ---
-    await safeCall("[walls] SolidWalls.build", async () => {
-      const mod = await safeModule("./solid_walls.js");
-      const sys = mod?.SolidWalls;
-      if (sys?.build) await sys.build(ctx);
-    }, log);
+    // ---------- Build SCORPION ROOM (separate visible group) ----------
+    ScorpionRoom.init(ctx);
+    ctx.systems.scorpion = ScorpionRoom;
 
-    // --- TABLES (Lobby) ---
-    await safeCall("[tables] TableFactory.build", async () => {
-      const mod = await safeModule("./table_factory.js");
-      const sys = mod?.TableFactory;
-      if (!sys?.build) return;
+    // ---------- Teleport pads / machine ----------
+    ctx.teleports = {};
+    TeleportMachine?.init?.({
+      THREE, scene, renderer, camera, player, controllers, log,
+      // important hook:
+      onHit: (id) => ctx.onTeleportHit?.(id),
+      // spawn pads:
+      pads: [
+        { id: "tp_store", label: "STORE", pos: new THREE.Vector3(-4.0, 0.01, -1.0) },
+        { id: "tp_scorpion", label: "SCORPION ROOM", pos: new THREE.Vector3(4.0, 0.01, -1.0) },
+        { id: "tp_lobby", label: "LOBBY", pos: new THREE.Vector3(0.0, 0.01, 3.2) },
+      ],
+    });
 
-      const out = await sys.build(ctx);
-
-      // Support either { lobby } or a Group directly
-      if (out?.lobby) ctx.tables.lobby = out.lobby;
-      else if (out?.isObject3D) ctx.tables.lobby = out;
-
-      // If TableFactory gave us bounds, keep them
-      if (out?.bounds?.min && out?.bounds?.max) {
-        ctx.bounds.min.copy(out.bounds.min);
-        ctx.bounds.max.copy(out.bounds.max);
+    // ---------- Store system (if you already have it) ----------
+    try {
+      if (StoreSystem?.init) {
+        StoreSystem.init(ctx);
+        ctx.systems.store = StoreSystem;
+        log?.("[world] store system loaded ✅");
+      } else {
+        log?.("[world] store system missing (ok)");
       }
-    }, log);
+    } catch (e) {
+      log?.("[world] store init error:", e);
+    }
 
-    // --- SPECTATOR RAIL (Lobby) ---
-    await safeCall("[rail] SpectatorRail.build", async () => {
-      const mod = await safeModule("./spectator_rail.js");
-      const sys = mod?.SpectatorRail;
-      if (!sys?.build) return;
-      const rail = await sys.build(ctx);
-      if (rail) {
-        rail.name = rail.name || "SPECTATOR_RAIL";
-        ctx.systems.rail = rail;
-      }
-    }, log);
+    // ---------- Bots ----------
+    try {
+      ctx.Bots = Bots;
+      await Bots?.init?.(ctx);
+      log?.("[world] bots loaded ✅");
+    } catch (e) {
+      log?.("[world] bots init error:", e);
+    }
 
-    // --- TELEPORT MACHINE (Lobby) ---
-    await safeCall("[teleport] TeleportMachine.init", async () => {
-      const mod = await safeModule("./teleport_machine.js");
-      const sys = mod?.TeleportMachine;
-      if (sys?.init) await sys.init(ctx);
-    }, log);
+    // ---------- PokerSim (cards/chips/rounds) ----------
+    try {
+      ctx.PokerSim = PokerSim;
+      await PokerSim?.init?.(ctx);
+      log?.("[world] PokerSim loaded ✅");
+    } catch (e) {
+      log?.("[world] PokerSim init error:", e);
+    }
 
-    // --- STORE ---
-    await safeCall("[store] StoreSystem.init", async () => {
-      const mod = await safeModule("./store.js");
-      const sys = mod?.StoreSystem;
-      if (!sys?.init) return;
-      const store = await sys.init(ctx);
-      ctx.systems.store = store || ctx.systems.store;
-      addBeacon(ctx, "STORE", new THREE.Vector3(4.5, 2.1, -3.5));
-    }, log);
+    // ---------- Room Manager ----------
+    RoomManager.init(ctx);
 
-    // --- SPAWN POINTS (CRITICAL) ---
-    await safeCall("[spawns] SpawnPoints.build", async () => {
-      const mod = await safeModule("./spawn_points.js");
-      const sys = mod?.SpawnPoints;
-      if (!sys?.build) return;
+    // Start in lobby spawn
+    this.movePlayerTo("lobby_spawn", ctx);
+    this.setSeated(false, ctx);
 
-      sys.build(ctx);
+    // Put 4 bots in Scorpion Room seats 1..4 (always there)
+    this._spawnScorpionBots(ctx);
 
-      // Guarantee apply exists
-      if (!ctx.spawns?.apply) {
-        log?.("[world] ⚠️ SpawnPoints missing apply(); installing fallback apply()");
-        this._installFallbackApply(ctx);
-      }
-
-      log?.("[world] ✅ SpawnPoints wired");
-    }, log);
-
-    // --- SCORPION ROOM (HIDDEN ON BOOT) ---
-    await safeCall("[scorpion] ScorpionRoom.build", async () => {
-      const mod = await safeModule("./scorpion_room.js");
-      const sys = mod?.ScorpionRoom;
-      if (!sys?.build) return;
-
-      const sc = await sys.build(ctx);
-      ctx.systems.scorpion = sc || ctx.systems.scorpion;
-
-      // Always start hidden
-      ctx.systems.scorpion?.setActive?.(false);
-    }, log);
-
-    // --- UI ---
-    await safeCall("[ui] UI.init", async () => {
-      const mod = await safeModule("./ui.js");
-      const sys = mod?.UI;
-      if (sys?.init) await sys.init(ctx);
-    }, log);
-
-    // --- VR UI (optional overlays/hands/watch) ---
-    await safeCall("[vrui] initVRUI", async () => {
-      const mod = await safeModule("./vr_ui.js");
-      const fn = mod?.initVRUI;
-      if (fn) await fn(ctx);
-    }, log);
-
-    await safeCall("[vrui] VRUIPanel.init", async () => {
-      const mod = await safeModule("./vr_ui_panel.js");
-      const sys = mod?.VRUIPanel;
-      if (sys?.init) await sys.init(ctx);
-    }, log);
-
-    // --- POKER SIM ---
-    await safeCall("[poker] PokerSim.init", async () => {
-      const mod = await safeModule("./poker_sim.js");
-      const sys = mod?.PokerSim;
-      if (!sys?.init) return;
-      await sys.init(ctx);
-      ctx.PokerSim = sys;
-      ctx.poker = sys;
-      log?.("[world] ✅ PokerSim wired (ctx.PokerSim + ctx.poker)");
-    }, log);
-
-    // --- BOTS (optional) ---
-    await safeCall("[bots] Bots.init", async () => {
-      const mod = await safeModule("./bots.js");
-      const sys = mod?.Bots;
-      if (sys?.init) await sys.init(ctx);
-    }, log);
-
-    // --- ROOM MANAGER (optional module) ---
-    await safeCall("[rooms] RoomManager.init", async () => {
-      const mod = await safeModule("./room_manager.js");
-      const sys = mod?.RoomManager;
-      if (sys?.init) await sys.init(ctx);
-    }, log);
-
-    // --- HARD ROOM BRIDGE (THIS FIXES "I BOOTED IN SCORPION") ---
-    this._installRoomBridge(ctx);
-
-    // --- LAYOUT POLISH ---
-    this._forceMasterLayout(ctx);
-
-    // ✅ FINAL: ALWAYS BOOT LOBBY standing (correct XR height)
-    ctx.mode = "lobby";
-    ctx.systems.scorpion?.setActive?.(false);
-    ctx.systems.store?.setActive?.(true);
-
-    ctx.spawns?.apply?.("lobby_spawn", ctx.player, { standY: 1.65 });
-
-    // force again after transforms settle
-    setTimeout(() => ctx.spawns?.apply?.("lobby_spawn", ctx.player, { standY: 1.65 }), 250);
-
+    // Keep lobby demo “in front” (PokerSim mode handles visuals)
     ctx.PokerSim?.setMode?.("lobby_demo");
 
-    log?.("[world] ✅ REAL WORLD LOADED (mounted=MASTER v15)");
+    // expose ctx so main can hold it
+    this.ctx = ctx;
+
+    log?.("[world] ready ✅");
     return ctx;
   },
 
-  // ---------------------------------------------------------------------------
-  // BASE FLOOR
-  // ---------------------------------------------------------------------------
-  _buildBaseFloor(ctx) {
-    const { THREE, scene } = ctx;
-    if (scene.getObjectByName("FLOOR")) return;
+  // ---------------- public helpers ----------------
+  movePlayerTo(anchorName, ctx = this.ctx) {
+    const a = ctx?.anchors?.[anchorName];
+    if (!a || !ctx?.player) return;
+    ctx.player.position.copy(a.position);
+    ctx.player.rotation.y = a.rotation?.y || 0;
+    ctx.log?.(`[world] movePlayerTo → ${anchorName}`);
+  },
 
+  setSeated(on, ctx = this.ctx) {
+    ctx.seated = !!on;
+
+    // If you have a “standing height” rig, keep it simple:
+    // When seated, drop camera/player slightly so table view looks right.
+    // (Adjust these numbers if your rig differs.)
+    const y = on ? 0.0 : 0.0;
+    if (ctx.player) ctx.player.position.y = y;
+
+    ctx.log?.(`[world] seated=${ctx.seated}`);
+  },
+
+  seatPlayer(seatIndex = 0, ctx = this.ctx) {
+    const seat = ctx?.scorpion?.seats?.[seatIndex];
+    if (!seat || !ctx?.player) return;
+
+    // Sit position: a little back from seat point, facing table
+    const forward = new ctx.THREE.Vector3(0, 0, -1).applyEuler(seat.rotation);
+    const sitPos = seat.position.clone().add(forward.multiplyScalar(0.22)); // tiny offset
+    ctx.player.position.copy(sitPos);
+    ctx.player.rotation.y = seat.rotation.y;
+
+    this.setSeated(true, ctx);
+
+    // Tell PokerSim which seat is human
+    ctx.PokerSim?.setHumanSeat?.(seatIndex);
+
+    ctx.log?.(`[world] seatPlayer → seat ${seatIndex}`);
+  },
+
+  // ---------------- build: lobby ----------------
+  _buildLobby(ctx) {
+    const { THREE, scene } = ctx;
+
+    // Floor
     const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(40, 40),
-      new THREE.MeshStandardMaterial({ color: 0x10131b, roughness: 1.0, metalness: 0.0 })
+      new THREE.PlaneGeometry(28, 28),
+      new THREE.MeshStandardMaterial({ color: 0x07080d, roughness: 0.95, metalness: 0.0 })
     );
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
-    floor.name = "FLOOR";
     scene.add(floor);
+
+    // Simple walls (solid feel)
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x10121a, roughness: 0.9, metalness: 0.05 });
+    const mkWall = (w, h, d, x, y, z) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+      m.position.set(x, y, z);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      scene.add(m);
+      return m;
+    };
+    mkWall(28, 4, 0.4, 0, 2, -14);
+    mkWall(28, 4, 0.4, 0, 2, 14);
+    mkWall(0.4, 4, 28, -14, 2, 0);
+    mkWall(0.4, 4, 28, 14, 2, 0);
+
+    // Anchors (spawns)
+    ctx.anchors.lobby_spawn = new THREE.Object3D();
+    ctx.anchors.lobby_spawn.position.set(0, 0, 6.5);
+    ctx.anchors.lobby_spawn.rotation.y = Math.PI; // face toward center/front
+    scene.add(ctx.anchors.lobby_spawn);
+
+    ctx.anchors.store_spawn = new THREE.Object3D();
+    ctx.anchors.store_spawn.position.set(-6.2, 0, 0.5);
+    ctx.anchors.store_spawn.rotation.y = Math.PI / 2;
+    scene.add(ctx.anchors.store_spawn);
+
+    ctx.anchors.scorpion_entry = ctx.scorpion?.entry || new THREE.Object3D();
+    // NOTE: scorpion_entry inside scorpion group; RoomManager moves to it via seatPlayer()
+
+    // “Bots playing in front” zone marker (PokerSim can use this)
+    ctx.anchors.lobby_table_zone = new THREE.Object3D();
+    ctx.anchors.lobby_table_zone.position.set(0, 0, -2.8);
+    ctx.anchors.lobby_table_zone.rotation.y = 0;
+    scene.add(ctx.anchors.lobby_table_zone);
+
+    // Visual signage: Store left, Scorpion right
+    this._makeSign(ctx, "STORE", -6.5, 2.0, -1.0, Math.PI / 2);
+    this._makeSign(ctx, "SCORPION ROOM", 6.5, 2.0, -1.0, -Math.PI / 2);
+
+    ctx.log?.("[world] lobby built ✅");
   },
 
-  // ---------------------------------------------------------------------------
-  // FALLBACK APPLY (only if SpawnPoints failed)
-  // ---------------------------------------------------------------------------
-  _installFallbackApply(ctx) {
-    const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
-    ctx.spawns = ctx.spawns || {};
-    ctx.spawns.map = ctx.spawns.map || {};
-    ctx.spawns.map.lobby_spawn = ctx.spawns.map.lobby_spawn || { x: 0, y: 0, z: 2.8, yaw: 0 };
+  _buildStoreShell(ctx) {
+    const { THREE, scene } = ctx;
 
-    const camLocalY = () => (ctx.camera?.position?.y ?? 0);
-    const rig = () => ctx.player || ctx.playerGroup || ctx.playerRig;
+    // Lightweight “store area” shell if StoreSystem isn't visible yet
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(5.5, 2.7, 5.5),
+      new THREE.MeshStandardMaterial({ color: 0x0c1020, roughness: 0.9, metalness: 0.08, transparent: true, opacity: 0.35 })
+    );
+    frame.position.set(-6.2, 1.35, 0.0);
+    frame.castShadow = false;
+    frame.receiveShadow = true;
+    scene.add(frame);
+  },
 
-    const applyEye = (desired) => {
-      const r = rig(); if (!r) return;
-      r.position.y = desired - camLocalY();
-    };
+  _makeSign(ctx, text, x, y, z, ry) {
+    const { THREE, scene } = ctx;
 
-    ctx.spawns.apply = (name = "lobby_spawn", rigOverride = null, opts = {}) => {
-      const s = ctx.spawns.map?.[name] || ctx.spawns.map.lobby_spawn;
-      const r = rigOverride || rig();
-      if (!r) return false;
+    const canvas = document.createElement("canvas");
+    canvas.width = 512; canvas.height = 256;
+    const g = canvas.getContext("2d");
+    g.fillStyle = "rgba(6,8,12,0.75)";
+    g.fillRect(0, 0, canvas.width, canvas.height);
+    g.font = "bold 54px system-ui, Arial";
+    g.fillStyle = "#e8ecff";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillText(text, canvas.width / 2, canvas.height / 2);
 
-      r.position.set(s.x || 0, 0, s.z || 0);
-      r.rotation.set(0, s.yaw || 0, 0);
+    const tex = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 1.4), mat);
+    plane.position.set(x, y, z);
+    plane.rotation.y = ry;
+    scene.add(plane);
+  },
 
-      // bounds clamp
-      const b = ctx.getBounds?.() || ctx.bounds;
-      if (b?.min && b?.max) {
-        r.position.x = clamp(r.position.x, b.min.x, b.max.x);
-        r.position.z = clamp(r.position.z, b.min.z, b.max.z);
+  _spawnScorpionBots(ctx) {
+    // Seat 1..4 are bots (seat0 is player)
+    const seats = ctx?.scorpion?.seats;
+    if (!seats || seats.length < 5) return;
+
+    // If your Bots module supports seating, use it; otherwise place simple “stand-ins”
+    for (let i = 1; i <= 4; i++) {
+      const s = seats[i];
+      const ok = ctx.Bots?.spawnSeatedBot?.(ctx, {
+        seatIndex: i,
+        position: s.position,
+        rotationY: s.rotation.y,
+        room: "scorpion",
+      });
+
+      if (!ok) {
+        // fallback: simple capsule bot
+        const b = this._fallbackBot(ctx);
+        b.position.copy(s.position);
+        b.rotation.y = s.rotation.y;
+        b.position.add(new ctx.THREE.Vector3(0, 0, 0.15));
+        ctx.scorpion.group.add(b);
       }
+    }
 
-      if (typeof opts.seatY === "number") applyEye(opts.seatY);
-      else if (typeof opts.standY === "number") applyEye(opts.standY);
-      else r.position.y = 0;
-
-      console.log(`[spawns:fallback] apply(${name}) x=${r.position.x.toFixed(2)} y=${r.position.y.toFixed(2)} z=${r.position.z.toFixed(2)}`);
-      return true;
-    };
+    ctx.log?.("[world] scorpion bots seated ✅ (4 bots)");
   },
 
-  // ---------------------------------------------------------------------------
-  // ROOM BRIDGE (authoritative)
-  // UI dispatches: window.dispatchEvent(new CustomEvent("scarlett-room",{detail:{name}}))
-  // This bridge forces room visibility + spawns correctly.
-  // ---------------------------------------------------------------------------
-  _installRoomBridge(ctx) {
-    if (ctx.__roomBridgeInstalled) return;
-    ctx.__roomBridgeInstalled = true;
+  _fallbackBot(ctx) {
+    const { THREE } = ctx;
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.18, 0.55, 6, 14),
+      new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.85, metalness: 0.05 })
+    );
+    body.position.y = 0.9;
+    body.castShadow = true;
+    g.add(body);
 
-    const log = ctx.log || console.log;
-
-    const setRoom = (name) => {
-      ctx.mode = name;
-      log(`[room-bridge] setRoom(${name})`);
-
-      // visibility
-      ctx.systems.scorpion?.setActive?.(name === "scorpion");
-
-      // spawns (standing unless you explicitly sit)
-      const spawnName =
-        name === "scorpion"   ? "scorpion_safe_spawn" :
-        name === "store"      ? "store_spawn" :
-        name === "spectator"  ? "spectator" :
-                                "lobby_spawn";
-
-      ctx.spawns?.apply?.(spawnName, ctx.player, { standY: 1.65 });
-      setTimeout(() => ctx.spawns?.apply?.(spawnName, ctx.player, { standY: 1.65 }), 250);
-
-      // poker mode hints
-      if (name === "scorpion") ctx.PokerSim?.setMode?.("scorpion");
-      else ctx.PokerSim?.setMode?.("lobby_demo");
-    };
-
-    ctx.rooms = ctx.rooms || {};
-    ctx.rooms.setRoom = setRoom;
-
-    // Listen to UI
-    window.addEventListener("scarlett-room", (ev) => {
-      const name = ev?.detail?.name;
-      if (!name) return;
-      setRoom(name);
-    });
-
-    // HARD BOOT LOBBY again after UI loads to prevent “stuck in scorpion”
-    setTimeout(() => setRoom("lobby"), 50);
-    setTimeout(() => setRoom("lobby"), 650);
-
-    log("[room-bridge] installed ✅");
-  },
-
-  // ---------------------------------------------------------------------------
-  // LAYOUT POLISH
-  // ---------------------------------------------------------------------------
-  _forceMasterLayout(ctx) {
-    const { scene, log, THREE } = ctx;
-
-    // Ensure store position + visible
-    const store = scene.getObjectByName("SCARLETT_STORE") || ctx.systems.store?.group || ctx.systems.store;
-    if (store?.position) {
-      store.position.set(4.5, 0, -3.5);
-      store.visible = true;
-    }
-
-    // Ensure rail visible
-    const rail = scene.getObjectByName("SPECTATOR_RAIL") || ctx.systems.rail;
-    if (rail?.position) {
-      rail.position.set(0, 0, 0);
-      rail.visible = true;
-    }
-
-    // Simple store sign glow
-    if (!scene.getObjectByName("STORE_SIGN")) {
-      const sign = new THREE.Mesh(
-        new THREE.PlaneGeometry(2.8, 0.9),
-        new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.85 })
-      );
-      sign.name = "STORE_SIGN";
-      sign.position.set(4.5, 2.1, -3.5);
-      sign.rotation.y = Math.PI;
-      scene.add(sign);
-
-      const glow = new THREE.PointLight(0x7fe7ff, 2.3, 12);
-      glow.position.set(4.5, 2.2, -3.5);
-      scene.add(glow);
-    }
-
-    // Table neon
-    if (!scene.getObjectByName("TABLE_NEON")) {
-      const neon = new THREE.PointLight(0xff2d7a, 1.8, 10);
-      neon.name = "TABLE_NEON";
-      neon.position.set(0, 2.2, 0);
-      scene.add(neon);
-    }
-
-    log?.("[world] ✅ master layout locked (v15)");
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.16, 16, 16),
+      new THREE.MeshStandardMaterial({ color: 0x5b647a, roughness: 0.75, metalness: 0.05 })
+    );
+    head.position.y = 1.32;
+    head.castShadow = true;
+    g.add(head);
+    return g;
   },
 };
-
-// -----------------------------------------------------------------------------
-// helpers
-// -----------------------------------------------------------------------------
-async function safeCall(label, fn, log) {
-  try {
-    log?.(`[world] calling ${label}`);
-    const out = await fn();
-    log?.(`[world] ✅ ok ${label}`);
-    return out;
-  } catch (e) {
-    log?.(`[world] ⚠️ ${label} error: ${e?.message || e}`);
-    return null;
-  }
-}
-
-async function safeModule(path) {
-  try {
-    const v = new URL(location.href).searchParams.get("v");
-    const url = v ? `${path}?v=${encodeURIComponent(v)}` : path;
-    return await import(url);
-  } catch (e) {
-    console.error(`❌ module load failed: ${path}`, e);
-    return null;
-  }
-}
-
-function addBeacon(ctx, name, pos) {
-  const { THREE, scene, log } = ctx;
-  const m = new THREE.Mesh(
-    new THREE.SphereGeometry(0.12, 18, 18),
-    new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.8 })
-  );
-  m.position.copy(pos);
-  m.name = `BEACON_${name}`;
-  scene.add(m);
-  ctx.beacons[name] = m;
-  log?.(`[world] ✅ beacon: ${name}`);
-        }

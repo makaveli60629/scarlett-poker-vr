@@ -20,209 +20,84 @@
       --shadow: 0 12px 40px rgba(0,0,0,.45);
       --radius: 18px;
     }
-    html, body {
-      margin:0; padding:0; height:100%;
-      background:var(--bg);
-      overflow:hidden;
-      font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      color:var(--text);
-      touch-action: none;
-      -webkit-tap-highlight-color: transparent;
+    html, body { margin:0; padding:0; height:100%; background:var(--bg); overflow:hidden;
+      font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; color:var(--text);
+      touch-action:none; -webkit-tap-highlight-color:transparent;
     }
     canvas { display:block; width:100vw; height:100vh; }
 
-    #hud {
-      position: fixed;
-      left: 0; top: 0; right: 0;
-      padding: 14px 14px 10px 14px;
-      z-index: 10;
-      pointer-events: none;
+    #hud{ position:fixed; left:0; top:0; right:0; padding:14px 14px 10px 14px; z-index:10; pointer-events:none; }
+    #topbar{ display:flex; align-items:center; justify-content:space-between; gap:10px; pointer-events:none; }
+    #brand{ pointer-events:none; display:flex; align-items:center; gap:10px; padding:10px 12px;
+      background:linear-gradient(180deg, rgba(10,12,20,.85), rgba(10,12,20,.65));
+      border:1px solid rgba(127,231,255,.18); border-radius:var(--radius);
+      box-shadow:var(--shadow); backdrop-filter:blur(10px);
     }
-    #topbar {
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap: 10px;
-      pointer-events: none;
-    }
-    #brand {
-      pointer-events:none;
-      display:flex; align-items:center; gap:10px;
-      padding: 10px 12px;
-      background: linear-gradient(180deg, rgba(10,12,20,.85), rgba(10,12,20,.65));
-      border: 1px solid rgba(127,231,255,.18);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(10px);
-    }
-    #brand .dot {
-      width:10px; height:10px; border-radius:50%;
-      background: var(--aqua);
-      box-shadow: 0 0 18px rgba(127,231,255,.65);
-    }
-    #brand .title { font-weight: 700; letter-spacing: .2px; font-size: 14px; line-height: 1.2; }
-    #brand .sub { font-size: 12px; color: var(--muted); line-height: 1.2; }
+    #brand .dot{ width:10px; height:10px; border-radius:50%; background:var(--aqua); box-shadow:0 0 18px rgba(127,231,255,.65); }
+    #brand .title{ font-weight:700; letter-spacing:.2px; font-size:14px; line-height:1.2; }
+    #brand .sub{ font-size:12px; color:var(--muted); line-height:1.2; }
 
-    #panel {
-      pointer-events: auto;
-      display:flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      justify-content: flex-end;
-      align-items: center;
-      padding: 10px;
-      background: linear-gradient(180deg, rgba(10,12,20,.90), rgba(10,12,20,.70));
-      border: 1px solid rgba(255,255,255,.08);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(10px);
+    #panel{ pointer-events:auto; display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; align-items:center;
+      padding:10px; background:linear-gradient(180deg, rgba(10,12,20,.90), rgba(10,12,20,.70));
+      border:1px solid rgba(255,255,255,.08); border-radius:var(--radius); box-shadow:var(--shadow);
+      backdrop-filter:blur(10px);
     }
-    .btn {
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      gap: 8px;
-      min-height: 38px;
-      padding: 0 12px;
-      border-radius: 14px;
-      border: 1px solid rgba(255,255,255,.12);
-      background: rgba(255,255,255,.06);
-      color: var(--text);
-      font-weight: 650;
-      font-size: 13px;
-      letter-spacing:.2px;
-      cursor: pointer;
-      user-select:none;
-      -webkit-user-select:none;
+    .btn{ display:inline-flex; align-items:center; justify-content:center; gap:8px;
+      min-height:38px; padding:0 12px; border-radius:14px;
+      border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.06);
+      color:var(--text); font-weight:650; font-size:13px; letter-spacing:.2px;
+      cursor:pointer; user-select:none; -webkit-user-select:none;
     }
-    .btn:active { transform: translateY(1px); }
-    .btn.primary {
-      border-color: rgba(127,231,255,.35);
-      background: rgba(127,231,255,.14);
-      box-shadow: 0 0 0 1px rgba(127,231,255,.15) inset;
-    }
-    .btn.pink {
-      border-color: rgba(255,45,122,.35);
-      background: rgba(255,45,122,.14);
-      box-shadow: 0 0 0 1px rgba(255,45,122,.15) inset;
-    }
-    .btn.warn {
-      border-color: rgba(255,204,0,.35);
-      background: rgba(255,204,0,.12);
-    }
-    .btn.ghost {
-      background: rgba(255,255,255,.04);
-      border-color: rgba(255,255,255,.10);
-    }
-    .btn.small { min-height: 34px; padding: 0 10px; font-size: 12.5px; }
+    .btn:active{ transform:translateY(1px); }
+    .btn.primary{ border-color:rgba(127,231,255,.35); background:rgba(127,231,255,.14); box-shadow:0 0 0 1px rgba(127,231,255,.15) inset; }
+    .btn.pink{ border-color:rgba(255,45,122,.35); background:rgba(255,45,122,.14); box-shadow:0 0 0 1px rgba(255,45,122,.15) inset; }
+    .btn.warn{ border-color:rgba(255,204,0,.35); background:rgba(255,204,0,.12); }
+    .btn.ghost{ background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.10); }
+    .btn.small{ min-height:34px; padding:0 10px; font-size:12.5px; }
 
-    .pill {
-      display:inline-flex; align-items:center; gap:8px;
-      padding: 7px 10px;
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,.10);
-      background: rgba(255,255,255,.05);
-      font-size: 12px;
-      color: var(--muted);
-      white-space: nowrap;
+    .pill{ display:inline-flex; align-items:center; gap:8px; padding:7px 10px; border-radius:999px;
+      border:1px solid rgba(255,255,255,.10); background:rgba(255,255,255,.05);
+      font-size:12px; color:var(--muted); white-space:nowrap;
     }
-    .pill b { color: var(--text); font-weight: 700; }
+    .pill b{ color:var(--text); font-weight:700; }
 
-    #dock {
-      position: fixed;
-      left: 12px; right: 12px; bottom: 12px;
-      z-index: 11;
-      pointer-events: auto;
-      display:flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      align-items:center;
-      justify-content: center;
-      padding: 10px;
-      border-radius: 22px;
-      background: linear-gradient(180deg, rgba(10,12,20,.92), rgba(10,12,20,.72));
-      border: 1px solid rgba(255,255,255,.08);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(10px);
+    #dock{ position:fixed; left:12px; right:12px; bottom:12px; z-index:11; pointer-events:auto;
+      display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:center;
+      padding:10px; border-radius:22px; background:linear-gradient(180deg, rgba(10,12,20,.92), rgba(10,12,20,.72));
+      border:1px solid rgba(255,255,255,.08); box-shadow:var(--shadow); backdrop-filter:blur(10px);
     }
+    #logwrap{ position:fixed; left:12px; bottom:92px; width:min(560px, calc(100vw - 24px));
+      max-height:45vh; z-index:12; pointer-events:auto; border-radius:18px;
+      background:rgba(0,0,0,.52); border:1px solid rgba(255,255,255,.10); box-shadow:var(--shadow);
+      overflow:hidden; display:none;
+    }
+    #loghead{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px;
+      background:rgba(10,12,20,.85); border-bottom:1px solid rgba(255,255,255,.08);
+    }
+    #loghead .h{ font-weight:750; font-size:13px; letter-spacing:.2px; }
+    #log{ margin:0; padding:10px 12px 12px 12px; font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;
+      font-size:11px; line-height:1.35; color:rgba(232,236,255,.92); overflow:auto;
+      max-height:calc(45vh - 44px); white-space:pre-wrap; word-break:break-word;
+    }
+    #help{ position:fixed; inset:0; z-index:20; pointer-events:auto; display:none;
+      background:rgba(0,0,0,.55); backdrop-filter:blur(10px); align-items:center; justify-content:center; padding:16px;
+    }
+    #helpCard{ width:min(720px, 100%); border-radius:22px; background:rgba(10,12,20,.92);
+      border:1px solid rgba(255,255,255,.10); box-shadow:var(--shadow); padding:16px;
+    }
+    #helpCard h2{ margin:0 0 10px 0; font-size:18px; letter-spacing:.2px; }
+    #helpCard .grid{ display:grid; grid-template-columns:1fr; gap:10px; color:rgba(232,236,255,.92); font-size:13px; line-height:1.35; }
+    #helpCard .row{ padding:10px 12px; border-radius:16px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08); }
+    #helpCard .row b{ color:var(--aqua); }
+    #helpCard .actions{ margin-top:12px; display:flex; justify-content:flex-end; gap:10px; }
 
-    #logwrap {
-      position: fixed;
-      left: 12px;
-      bottom: 92px;
-      width: min(560px, calc(100vw - 24px));
-      max-height: 45vh;
-      z-index: 12;
-      pointer-events: auto;
-      border-radius: 18px;
-      background: rgba(0,0,0,.52);
-      border: 1px solid rgba(255,255,255,.10);
-      box-shadow: var(--shadow);
-      overflow: hidden;
-      display: none;
-    }
-    #loghead {
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap: 10px;
-      padding: 10px 12px;
-      background: rgba(10,12,20,.85);
-      border-bottom: 1px solid rgba(255,255,255,.08);
-    }
-    #loghead .h { font-weight: 750; font-size: 13px; letter-spacing: .2px; }
-    #log {
-      margin:0;
-      padding: 10px 12px 12px 12px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-size: 11px;
-      line-height: 1.35;
-      color: rgba(232,236,255,.92);
-      overflow:auto;
-      max-height: calc(45vh - 44px);
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
+    #vrButtonSlot{ position:fixed; right:14px; bottom:92px; z-index:30; pointer-events:auto; }
 
-    #help {
-      position: fixed;
-      inset: 0;
-      z-index: 20;
-      pointer-events: auto;
-      display: none;
-      background: rgba(0,0,0,.55);
-      backdrop-filter: blur(10px);
-      align-items: center;
-      justify-content: center;
-      padding: 16px;
-    }
-    #helpCard {
-      width: min(720px, 100%);
-      border-radius: 22px;
-      background: rgba(10,12,20,.92);
-      border: 1px solid rgba(255,255,255,.10);
-      box-shadow: var(--shadow);
-      padding: 16px;
-    }
-    #helpCard h2 { margin: 0 0 10px 0; font-size: 18px; letter-spacing:.2px; }
-    #helpCard .grid { display: grid; grid-template-columns: 1fr; gap: 10px; color: rgba(232,236,255,.92); font-size: 13px; line-height: 1.35; }
-    #helpCard .row { padding: 10px 12px; border-radius: 16px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08); }
-    #helpCard .row b { color: var(--aqua); }
-    #helpCard .actions { margin-top: 12px; display:flex; justify-content:flex-end; gap:10px; }
-
-    #vrButtonSlot {
-      position: fixed;
-      right: 14px;
-      bottom: 92px;
-      z-index: 30;
-      pointer-events: auto;
-    }
-
-    @media (max-width: 520px) {
-      #panel { justify-content: center; }
-      #brand { display:none; }
-      #logwrap { bottom: 100px; }
-      #vrButtonSlot { bottom: 110px; }
+    @media (max-width:520px){
+      #panel{ justify-content:center; }
+      #brand{ display:none; }
+      #logwrap{ bottom:100px; }
+      #vrButtonSlot{ bottom:110px; }
     }
   </style>
 
@@ -299,7 +174,7 @@
         <div class="row"><b>Quest:</b> Left stick move • Right stick turn • Toggle Snap for snap/smooth.</div>
         <div class="row"><b>Android:</b> Use dock arrows • Tap Teleport to toggle.</div>
         <div class="row"><b>Diagnostics:</b> Checks key files for 404 + prints results in Log.</div>
-        <div class="row"><b>Log:</b> Auto-opens on any warn/error.</div>
+        <div class="row"><b>Log:</b> Auto-opens on warn/error.</div>
       </div>
       <div class="actions">
         <button class="btn primary" id="btnCloseHelp">Close</button>
@@ -311,7 +186,6 @@
     const v = Date.now().toString();
     window.__BUILD_V = v;
     window.__XR_SESSION_INIT = { optionalFeatures: ["local-floor","bounded-floor","hand-tracking"] };
-
     document.getElementById("buildText").textContent = " " + v;
 
     const statusText = document.getElementById("statusText");
@@ -319,42 +193,34 @@
 
     const logEl = document.getElementById("log");
     const logWrap = document.getElementById("logwrap");
+    const openLog = () => (logWrap.style.display = "block");
 
-    function openLog(){ logWrap.style.display = "block"; }
     function appendLog(m){
       if (!logEl) return;
       logEl.textContent += "\n" + String(m);
       logEl.scrollTop = logEl.scrollHeight;
     }
 
-    // Module logs
-    window.addEventListener("scarlett-log", (e) => {
-      try { appendLog(String(e?.detail ?? "")); } catch {}
-    });
+    window.addEventListener("scarlett-log", (e) => { try { appendLog(String(e?.detail ?? "")); } catch {} });
 
-    // Mirror console into log and auto-open on warn/error
     (function hookConsole(){
       const origLog = console.log.bind(console);
       const origWarn = console.warn.bind(console);
       const origErr = console.error.bind(console);
-
-      console.log = (...a) => { origLog(...a); try { appendLog(a.map(String).join(" ")); } catch {} };
-      console.warn = (...a) => { origWarn(...a); try { openLog(); appendLog("⚠️ " + a.map(String).join(" ")); } catch {} };
-      console.error = (...a) => { origErr(...a); try { openLog(); appendLog("❌ " + a.map(String).join(" ")); } catch {} };
+      console.log = (...a)=>{ origLog(...a); try{ appendLog(a.map(String).join(" ")); }catch{} };
+      console.warn = (...a)=>{ origWarn(...a); try{ openLog(); appendLog("⚠️ "+a.map(String).join(" ")); }catch{} };
+      console.error = (...a)=>{ origErr(...a); try{ openLog(); appendLog("❌ "+a.map(String).join(" ")); }catch{} };
     })();
 
-    // Window errors -> auto-open log
-    window.addEventListener("error", (e) => { openLog(); appendLog("❌ window.error: " + (e?.message || e)); });
-    window.addEventListener("unhandledrejection", (e) => { openLog(); appendLog("❌ unhandledrejection: " + (e?.reason?.message || e?.reason || e)); });
+    window.addEventListener("error", (e)=>{ openLog(); appendLog("❌ window.error: " + (e?.message || e)); });
+    window.addEventListener("unhandledrejection", (e)=>{ openLog(); appendLog("❌ unhandledrejection: " + (e?.reason?.message || e?.reason || e)); });
 
-    // Boot
     appendLog("BOOT v=" + v);
     appendLog("href=" + location.href);
     appendLog("ua=" + (navigator.userAgent || ""));
     appendLog("navigator.xr=" + (!!navigator.xr));
     appendLog("[index] sessionInit=" + JSON.stringify(window.__XR_SESSION_INIT));
 
-    // Buttons
     const btnEnter = document.getElementById("btnEnter");
     const btnRecenter = document.getElementById("btnRecenter");
     const btnTeleport = document.getElementById("btnTeleport");
@@ -366,80 +232,69 @@
     const btnDiag = document.getElementById("btnDiag");
     const btnForceLog = document.getElementById("btnForceLog");
 
-    document.getElementById("btnCopyLog")?.addEventListener("click", async () => {
+    document.getElementById("btnCopyLog")?.addEventListener("click", async ()=>{
       try { await navigator.clipboard.writeText(logEl?.textContent || ""); appendLog("[hud] log copied ✅"); }
       catch { openLog(); appendLog("[hud] log copy failed ⚠️"); }
     });
-    document.getElementById("btnClearLog")?.addEventListener("click", () => { logEl.textContent = ""; appendLog("[hud] log cleared ✅"); });
-    document.getElementById("btnCloseLog")?.addEventListener("click", () => { logWrap.style.display = "none"; });
+    document.getElementById("btnClearLog")?.addEventListener("click", ()=>{ logEl.textContent=""; appendLog("[hud] log cleared ✅"); });
+    document.getElementById("btnCloseLog")?.addEventListener("click", ()=>{ logWrap.style.display="none"; });
 
     const help = document.getElementById("help");
-    btnHelp?.addEventListener("click", () => { help.style.display = "flex"; });
-    document.getElementById("btnCloseHelp")?.addEventListener("click", () => { help.style.display = "none"; });
+    btnHelp?.addEventListener("click", ()=>{ help.style.display="flex"; });
+    document.getElementById("btnCloseHelp")?.addEventListener("click", ()=>{ help.style.display="none"; });
 
-    btnLog?.addEventListener("click", () => { logWrap.style.display = (logWrap.style.display === "block") ? "none" : "block"; });
-    btnForceLog?.addEventListener("click", () => { openLog(); appendLog("[hud] log forced open ✅"); });
+    btnLog?.addEventListener("click", ()=>{ logWrap.style.display = (logWrap.style.display==="block") ? "none" : "block"; });
+    btnForceLog?.addEventListener("click", ()=>{ openLog(); appendLog("[hud] log forced open ✅"); });
 
-    // toggles
-    const LS_KEY = "scarlett_flags_v1";
-    const saved = (() => { try { return JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch { return null; } })();
-    window.__SCARLETT_FLAGS = Object.assign({ teleport:true, move:true, snap:true, hands:true }, saved || {});
-    function saveFlags(){ try { localStorage.setItem(LS_KEY, JSON.stringify(window.__SCARLETT_FLAGS)); } catch {} }
-    function updateTogglesUI(){
-      const f = window.__SCARLETT_FLAGS;
+    // flags
+    const LS_KEY="scarlett_flags_v1";
+    const saved = (()=>{ try{ return JSON.parse(localStorage.getItem(LS_KEY) || "null"); }catch{ return null; }})();
+    window.__SCARLETT_FLAGS = Object.assign({ teleport:true, move:true, snap:true, hands:true }, saved||{});
+    const saveFlags=()=>{ try{ localStorage.setItem(LS_KEY, JSON.stringify(window.__SCARLETT_FLAGS)); }catch{} };
+    const updateTogglesUI=()=>{
+      const f=window.__SCARLETT_FLAGS;
       btnTeleport.classList.toggle("primary", !!f.teleport);
       btnMove.classList.toggle("primary", !!f.move);
       btnSnap.classList.toggle("primary", !!f.snap);
       btnHands.classList.toggle("primary", !!f.hands);
-    }
+    };
     updateTogglesUI();
 
-    btnTeleport?.addEventListener("click", () => {
-      window.__SCARLETT_FLAGS.teleport = !window.__SCARLETT_FLAGS.teleport;
-      saveFlags(); updateTogglesUI();
-      appendLog("[hud] teleport=" + window.__SCARLETT_FLAGS.teleport);
-      window.dispatchEvent(new CustomEvent("scarlett-toggle-teleport", { detail: window.__SCARLETT_FLAGS.teleport }));
+    btnTeleport.addEventListener("click", ()=>{
+      window.__SCARLETT_FLAGS.teleport=!window.__SCARLETT_FLAGS.teleport; saveFlags(); updateTogglesUI();
+      appendLog("[hud] teleport="+window.__SCARLETT_FLAGS.teleport);
+      window.dispatchEvent(new CustomEvent("scarlett-toggle-teleport",{detail:window.__SCARLETT_FLAGS.teleport}));
     });
-    btnMove?.addEventListener("click", () => {
-      window.__SCARLETT_FLAGS.move = !window.__SCARLETT_FLAGS.move;
-      saveFlags(); updateTogglesUI();
-      appendLog("[hud] move=" + window.__SCARLETT_FLAGS.move);
-      window.dispatchEvent(new CustomEvent("scarlett-toggle-move", { detail: window.__SCARLETT_FLAGS.move }));
+    btnMove.addEventListener("click", ()=>{
+      window.__SCARLETT_FLAGS.move=!window.__SCARLETT_FLAGS.move; saveFlags(); updateTogglesUI();
+      appendLog("[hud] move="+window.__SCARLETT_FLAGS.move);
+      window.dispatchEvent(new CustomEvent("scarlett-toggle-move",{detail:window.__SCARLETT_FLAGS.move}));
     });
-    btnSnap?.addEventListener("click", () => {
-      window.__SCARLETT_FLAGS.snap = !window.__SCARLETT_FLAGS.snap;
-      saveFlags(); updateTogglesUI();
-      appendLog("[hud] snap=" + window.__SCARLETT_FLAGS.snap);
-      window.dispatchEvent(new CustomEvent("scarlett-toggle-snap", { detail: window.__SCARLETT_FLAGS.snap }));
+    btnSnap.addEventListener("click", ()=>{
+      window.__SCARLETT_FLAGS.snap=!window.__SCARLETT_FLAGS.snap; saveFlags(); updateTogglesUI();
+      appendLog("[hud] snap="+window.__SCARLETT_FLAGS.snap);
+      window.dispatchEvent(new CustomEvent("scarlett-toggle-snap",{detail:window.__SCARLETT_FLAGS.snap}));
     });
-    btnHands?.addEventListener("click", () => {
-      window.__SCARLETT_FLAGS.hands = !window.__SCARLETT_FLAGS.hands;
-      saveFlags(); updateTogglesUI();
-      appendLog("[hud] hands=" + window.__SCARLETT_FLAGS.hands);
-      window.dispatchEvent(new CustomEvent("scarlett-toggle-hands", { detail: window.__SCARLETT_FLAGS.hands }));
+    btnHands.addEventListener("click", ()=>{
+      window.__SCARLETT_FLAGS.hands=!window.__SCARLETT_FLAGS.hands; saveFlags(); updateTogglesUI();
+      appendLog("[hud] hands="+window.__SCARLETT_FLAGS.hands);
+      window.dispatchEvent(new CustomEvent("scarlett-toggle-hands",{detail:window.__SCARLETT_FLAGS.hands}));
     });
 
-    btnRecenter?.addEventListener("click", () => {
-      appendLog("[hud] recenter");
-      window.dispatchEvent(new Event("scarlett-recenter"));
-    });
-    btnEnter?.addEventListener("click", () => {
-      appendLog("[hud] enter vr");
-      window.dispatchEvent(new Event("scarlett-enter-vr"));
-    });
+    btnRecenter.addEventListener("click", ()=>{ appendLog("[hud] recenter"); window.dispatchEvent(new Event("scarlett-recenter")); });
+    btnEnter.addEventListener("click", ()=>{ appendLog("[hud] enter vr"); window.dispatchEvent(new Event("scarlett-enter-vr")); });
 
-    // Android dock touch
-    const touchState = { f:0, b:0, l:0, r:0, turnL:0, turnR:0 };
-    function emitTouch(){ window.dispatchEvent(new CustomEvent("scarlett-touch", { detail: { ...touchState } })); }
-    function bindHold(btnId, key, value){
-      const el = document.getElementById(btnId);
-      if (!el) return;
-      const down = (e)=>{ e.preventDefault(); touchState[key]=value; emitTouch(); };
-      const up   = (e)=>{ e.preventDefault(); touchState[key]=0; emitTouch(); };
-      el.addEventListener("pointerdown", down, { passive:false });
-      el.addEventListener("pointerup", up, { passive:false });
-      el.addEventListener("pointercancel", up, { passive:false });
-      el.addEventListener("pointerleave", up, { passive:false });
+    // touch dock
+    const touchState={ f:0,b:0,l:0,r:0,turnL:0,turnR:0 };
+    const emitTouch=()=>window.dispatchEvent(new CustomEvent("scarlett-touch",{detail:{...touchState}}));
+    function bindHold(btnId,key,val){
+      const el=document.getElementById(btnId); if(!el) return;
+      const down=(e)=>{ e.preventDefault(); touchState[key]=val; emitTouch(); };
+      const up=(e)=>{ e.preventDefault(); touchState[key]=0; emitTouch(); };
+      el.addEventListener("pointerdown",down,{passive:false});
+      el.addEventListener("pointerup",up,{passive:false});
+      el.addEventListener("pointercancel",up,{passive:false});
+      el.addEventListener("pointerleave",up,{passive:false});
     }
     bindHold("mForward","f",1);
     bindHold("mBack","b",1);
@@ -448,68 +303,60 @@
     bindHold("mTurnL","turnL",1);
     bindHold("mTurnR","turnR",1);
 
-    document.getElementById("mTeleport")?.addEventListener("click", () => {
-      window.__SCARLETT_FLAGS.teleport = !window.__SCARLETT_FLAGS.teleport;
-      saveFlags(); updateTogglesUI();
-      appendLog("[hud] teleport=" + window.__SCARLETT_FLAGS.teleport);
-      window.dispatchEvent(new CustomEvent("scarlett-toggle-teleport", { detail: window.__SCARLETT_FLAGS.teleport }));
+    document.getElementById("mTeleport")?.addEventListener("click", ()=>{
+      window.__SCARLETT_FLAGS.teleport=!window.__SCARLETT_FLAGS.teleport; saveFlags(); updateTogglesUI();
+      appendLog("[hud] teleport="+window.__SCARLETT_FLAGS.teleport);
+      window.dispatchEvent(new CustomEvent("scarlett-toggle-teleport",{detail:window.__SCARLETT_FLAGS.teleport}));
     });
 
-    // Dock visibility
-    function updateDockVisibility(){
-      const ua = navigator.userAgent || "";
-      const isQuest = /OculusBrowser|Oculus|Quest/i.test(ua);
-      const isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
-      const show = isMobile && !isQuest;
-      const dock = document.getElementById("dock");
-      if (dock) dock.style.display = show ? "flex" : "none";
-    }
-    updateDockVisibility();
+    // dock visibility
+    (function updateDockVisibility(){
+      const ua=navigator.userAgent||"";
+      const isQuest=/OculusBrowser|Oculus|Quest/i.test(ua);
+      const isMobile=/Android|iPhone|iPad|iPod/i.test(ua);
+      const show=isMobile && !isQuest;
+      const dock=document.getElementById("dock");
+      if(dock) dock.style.display=show ? "flex" : "none";
+    })();
 
-    // Diagnostics (auto-open log if any fail)
+    // diagnostics
     async function diagnostics(){
       openLog();
       appendLog("[diag] running…");
-      const base = location.href.replace(/\/[^\/]*$/, "/");
-      const files = [
-        "js/main.js",
-        "js/world.js",
-        "js/textures.js",
-        "js/lights_pack.js",
-        "js/solid_walls.js",
-        "js/table_factory.js",
-        "js/teleport_machine.js",
-        "js/store.js",
-        "js/water_fountain.js",
+      const base=location.href.replace(/\/[^\/]*$/, "/");
+      const files=[
+        "js/main.js","js/world.js","js/textures.js","js/vr_ui.js","js/vr_ui_panel.js",
+        "js/lights_pack.js","js/solid_walls.js","js/table_factory.js","js/teleport_machine.js",
+        "js/store.js","js/shop_ui.js","js/water_fountain.js","js/scorpion_room.js","js/room_manager.js"
       ];
-      let bad = 0;
-      for (const f of files){
-        const url = new URL(f + "?v=" + encodeURIComponent(v), base).toString();
-        try {
-          const r = await fetch(url, { cache:"no-store" });
-          appendLog(`[diag] ${f} -> ${r.status} ${r.ok ? "✅" : "❌"}`);
-          if (!r.ok) bad++;
-        } catch (e) {
-          appendLog(`[diag] ${f} -> ERR ❌ ${e?.message || e}`);
+      let bad=0;
+      for(const f of files){
+        const url=new URL(f+"?v="+encodeURIComponent(v), base).toString();
+        try{
+          const r=await fetch(url,{cache:"no-store"});
+          appendLog(`[diag] ${f} -> ${r.status} ${r.ok?"✅":"❌"}`);
+          if(!r.ok) bad++;
+        }catch(e){
+          appendLog(`[diag] ${f} -> ERR ❌ ${e?.message||e}`);
           bad++;
         }
       }
       appendLog(bad ? `[diag] done (FAILS=${bad}) ❌` : "[diag] done ✅");
     }
-    btnDiag?.addEventListener("click", diagnostics);
+    btnDiag.addEventListener("click", diagnostics);
 
-    // ---- LOAD MAIN ----
-    try {
+    // load main
+    try{
       setStatus("Loading…");
-      const mainUrl = "./js/main.js?v=" + encodeURIComponent(v);
-      appendLog("Import main:\n" + new URL(mainUrl, location.href).toString());
+      const mainUrl="./js/main.js?v="+encodeURIComponent(v);
+      appendLog("Import main:\n"+new URL(mainUrl, location.href).toString());
       await import(mainUrl);
       setStatus("Ready ✅");
       appendLog("[index] main imported ✅");
-    } catch (e) {
+    }catch(e){
       openLog();
       setStatus("Import error ❌");
-      appendLog("❌ main import failed: " + (e?.message || e));
+      appendLog("❌ main import failed: "+(e?.message||e));
       console.error(e);
       appendLog("Fix checklist:");
       appendLog("1) Confirm /js/main.js exists");

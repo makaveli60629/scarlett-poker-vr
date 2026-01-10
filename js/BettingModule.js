@@ -1,12 +1,5 @@
 // /js/betting_module.js — BettingModule v1.0 (FULL)
-// ✅ Bet Zone (physical ring on floor near table)
-// ✅ Drop chip into zone => places bet (removes chip mesh into pot)
-// ✅ Whale Alert if total bet > 500 (visual flash + log event)
-// ✅ Works with GestureEngine + InteractionGrab system in main.js below
-//
-// Usage:
-//   BettingModule.init(ctx)
-//   BettingModule.update(ctx, dt)
+// Minimal bet zone + whale alert (safe, optional)
 
 export const BettingModule = (() => {
   const state = {
@@ -35,17 +28,14 @@ export const BettingModule = (() => {
       state.root.name = "BettingModule";
       scene.add(state.root);
 
-      // Find table
       const table = scene.getObjectByName("BossTable");
       const center = new THREE.Vector3();
       if (table) table.getWorldPosition(center);
       else center.set(0, 0, 0);
 
-      // Place bet zone in front of table (toward dealer)
       const zoneCenter = center.clone();
       zoneCenter.z += 0.95;
       zoneCenter.y = 0;
-
       state.zoneCenter = zoneCenter;
 
       const ring = new THREE.Mesh(
@@ -58,7 +48,6 @@ export const BettingModule = (() => {
       ring.renderOrder = 9998;
       ring.material.depthTest = false;
 
-      // center plate
       const plate = new THREE.Mesh(
         new THREE.CircleGeometry(0.34, 48),
         new THREE.MeshBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
@@ -69,39 +58,31 @@ export const BettingModule = (() => {
       state.root.add(plate, ring);
       state.zone = ring;
 
-      log("[BettingModule] init ✅ (bet zone placed)");
+      log("[BettingModule] init ✅");
     },
 
+    // if you drop a chip object with userData.value into zone, call this:
     tryDropChip(ctx, chipObj) {
-      const { LOG } = ctx;
       if (!chipObj?.userData?.value) return false;
-
       const pos = new ctx.THREE.Vector3();
       chipObj.getWorldPosition(pos);
-
       if (!inZone(pos)) return false;
 
       const v = Number(chipObj.userData.value) || 0;
       state.potValue += v;
-
-      // Remove chip from scene (goes into pot)
       chipObj.parent?.remove(chipObj);
-
-      LOG?.push?.("log", `[BettingModule] BET +${v} (pot=${state.potValue}) ✅`);
+      ctx.LOG?.push?.("log", `[BettingModule] BET +${v} (pot=${state.potValue}) ✅`);
 
       if (state.potValue > 500 && !state.lastWhale) {
         state.lastWhale = true;
-        state.flashT = 0.9; // seconds
-        LOG?.push?.("warn", "🐋 WHALE ALERT: bet exceeds 500!");
+        state.flashT = 0.9;
+        ctx.LOG?.push?.("warn", "🐋 WHALE ALERT: bet exceeds 500!");
       }
-
       return true;
     },
 
     update(ctx, dt) {
       if (!state.zone) return;
-
-      // Whale flash effect on bet zone
       if (state.flashT > 0) {
         state.flashT -= dt;
         const pulse = Math.sin((1 - state.flashT) * 22) * 0.5 + 0.5;

@@ -1,5 +1,9 @@
-// /js/world.js — Scarlett MASTER WORLD v13 (FULL)
-// FIX: SpawnPoints.build(ctx) must receive REAL ctx (not wrapper), otherwise ctx.spawns.apply/get/map never exist.
+// /js/world.js — Scarlett MASTER WORLD v14 (FULL)
+// FIXES:
+// - Properly wires SpawnPoints.build(ctx)
+// - Ensures PokerSim is accessible as ctx.PokerSim and ctx.poker
+// - Scorpion system returns setActive() so RoomManager can hide/show room
+// - Starts in lobby, scorpion hidden until entered
 
 export const World = {
   async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD }) {
@@ -10,13 +14,18 @@ export const World = {
       colliders: [],
       anchors: {},
       beacons: {},
-      spawns: {},       // will become SpawnPoints API {map,get,apply}
+      spawns: {},
+
       mode: "lobby",
       tables: {},
       systems: {},
+
+      // will be filled later if available:
+      PokerSim: null,
+      poker: null,
     };
 
-    log?.(`[world] ✅ LOADER SIGNATURE: WORLD.JS V13 MASTER ACTIVE`);
+    log?.(`[world] ✅ LOADER SIGNATURE: WORLD.JS V14 MASTER ACTIVE`);
 
     this._buildBaseFloor(ctx);
 
@@ -29,6 +38,7 @@ export const World = {
     ctx.anchors.scorpion_seat_1 = new THREE.Vector3(8.0, 0, 2.35);
     ctx.anchors.scorpion_exit   = new THREE.Vector3(8.0, 0, 0.0);
 
+    // ---- textures ----
     await safeCall("[textures] createTextureKit", async () => {
       const mod = await safeModule("./textures.js");
       const fn = mod?.createTextureKit;
@@ -37,18 +47,21 @@ export const World = {
       log?.("[world] ✅ mounted textures via createTextureKit()");
     }, log);
 
+    // ---- lights ----
     await safeCall("[lights] LightsPack.build", async () => {
       const mod = await safeModule("./lights_pack.js");
       const sys = mod?.LightsPack;
       if (sys?.build) await sys.build(ctx);
     }, log);
 
+    // ---- walls ----
     await safeCall("[walls] SolidWalls.build", async () => {
       const mod = await safeModule("./solid_walls.js");
       const sys = mod?.SolidWalls;
       if (sys?.build) await sys.build(ctx);
     }, log);
 
+    // ---- tables ----
     await safeCall("[tables] TableFactory.build", async () => {
       const mod = await safeModule("./table_factory.js");
       const sys = mod?.TableFactory;
@@ -57,6 +70,7 @@ export const World = {
       if (!ctx.tables.lobby && out?.lobby) ctx.tables.lobby = out.lobby;
     }, log);
 
+    // ---- spectator rail (lobby) ----
     await safeCall("[rail] SpectatorRail.build", async () => {
       const mod = await safeModule("./spectator_rail.js");
       const sys = mod?.SpectatorRail;
@@ -68,12 +82,14 @@ export const World = {
       }
     }, log);
 
+    // ---- teleport machine (lobby) ----
     await safeCall("[teleport] TeleportMachine.init", async () => {
       const mod = await safeModule("./teleport_machine.js");
       const sys = mod?.TeleportMachine;
       if (sys?.init) await sys.init(ctx);
     }, log);
 
+    // ---- store ----
     await safeCall("[store] StoreSystem.init", async () => {
       const mod = await safeModule("./store.js");
       const sys = mod?.StoreSystem;
@@ -83,23 +99,28 @@ export const World = {
       addBeacon(ctx, "STORE", new THREE.Vector3(4.5, 1.9, -3.5));
     }, log);
 
-    // ✅ critical: pass REAL ctx, not a wrapper
+    // ---- spawn points ----
     await safeCall("[spawns] SpawnPoints.build", async () => {
       const mod = await safeModule("./spawn_points.js");
       const sys = mod?.SpawnPoints;
       if (!sys?.build) return;
-      sys.build(ctx);
+      sys.build(ctx); // ✅ MUST be real ctx
       log?.(ctx.spawns?.apply ? "[world] ✅ SpawnPoints wired (ctx.spawns.apply live)" : "[world] ⚠️ SpawnPoints missing apply()");
     }, log);
 
+    // ---- scorpion room ----
     await safeCall("[scorpion] ScorpionRoom.build", async () => {
       const mod = await safeModule("./scorpion_room.js");
       const sys = mod?.ScorpionRoom;
       if (!sys?.build) return;
       const sc = await sys.build(ctx);
       ctx.systems.scorpion = sc || ctx.systems.scorpion;
+
+      // start hidden (we begin in lobby)
+      ctx.systems.scorpion?.setActive?.(false);
     }, log);
 
+    // ---- UI ----
     await safeCall("[ui] UI.init", async () => {
       const mod = await safeModule("./ui.js");
       const sys = mod?.UI;
@@ -118,25 +139,45 @@ export const World = {
       if (sys?.init) await sys.init(ctx);
     }, log);
 
+    // ---- controls (NOTE: usually created in main.js; we just alias if present) ----
+    // If your main sets ctx.controls later, RoomManager still works (it checks both).
+    ctx.controls ||= ctx.systems?.controls || null;
+
+    // ---- poker sim ----
+    await safeCall("[poker] PokerSim.init", async () => {
+      const mod = await safeModule("./poker_sim.js");
+      const sys = mod?.PokerSim;
+      if (!sys?.init) return;
+      await sys.init(ctx);
+
+      // ✅ critical: wire to ctx so RoomManager can switch modes
+      ctx.PokerSim = sys;
+      ctx.poker = sys;
+
+      log?.("[world] ✅ PokerSim wired (ctx.PokerSim + ctx.poker)");
+    }, log);
+
+    // ---- rooms ----
     await safeCall("[rooms] RoomManager.init", async () => {
       const mod = await safeModule("./room_manager.js");
       const sys = mod?.RoomManager;
       if (sys?.init) await sys.init(ctx);
     }, log);
 
+    // ---- bots system (optional; PokerSim makes its own bot visuals anyway) ----
     await safeCall("[bots] Bots.init", async () => {
       const mod = await safeModule("./bots.js");
       const sys = mod?.Bots;
       if (sys?.init) await sys.init(ctx);
     }, log);
 
-    await safeCall("[poker] PokerSim.init", async () => {
-      const mod = await safeModule("./poker_sim.js");
-      const sys = mod?.PokerSim;
-      if (sys?.init) await sys.init(ctx);
-    }, log);
-
     this._forceMasterLayout(ctx);
+
+    // ✅ hard guarantee: start in lobby standing
+    ctx.spawns?.apply?.("lobby_spawn", ctx.player, { standY: 1.65 });
+    ctx.systems.scorpion?.setActive?.(false);
+    ctx.systems.store?.setActive?.(true);
+    ctx.PokerSim?.setMode?.("lobby_demo");
 
     log?.(`[world] ✅ REAL WORLD LOADED (mounted=MASTER)`);
     log?.(`[world] init complete ✅`);
@@ -156,7 +197,7 @@ export const World = {
   },
 
   _forceMasterLayout(ctx) {
-    const { THREE, scene, log } = ctx;
+    const { scene, log } = ctx;
 
     const store = scene.getObjectByName("SCARLETT_STORE") || ctx.systems.store?.group || ctx.systems.store;
     if (store?.position) {
@@ -171,22 +212,22 @@ export const World = {
     }
 
     if (!scene.getObjectByName("STORE_SIGN")) {
-      const sign = new THREE.Mesh(
-        new THREE.PlaneGeometry(2.8, 0.9),
-        new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.85 })
+      const sign = new ctx.THREE.Mesh(
+        new ctx.THREE.PlaneGeometry(2.8, 0.9),
+        new ctx.THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.85 })
       );
       sign.name = "STORE_SIGN";
       sign.position.set(4.5, 2.1, -3.5);
       sign.rotation.y = Math.PI;
       scene.add(sign);
 
-      const glow = new THREE.PointLight(0x7fe7ff, 2.3, 12);
+      const glow = new ctx.THREE.PointLight(0x7fe7ff, 2.3, 12);
       glow.position.set(4.5, 2.2, -3.5);
       scene.add(glow);
     }
 
     if (!scene.getObjectByName("TABLE_NEON")) {
-      const neon = new THREE.PointLight(0xff2d7a, 1.8, 10);
+      const neon = new ctx.THREE.PointLight(0xff2d7a, 1.8, 10);
       neon.name = "TABLE_NEON";
       neon.position.set(0, 2.2, 0);
       scene.add(neon);
@@ -231,4 +272,4 @@ function addBeacon(ctx, name, pos) {
   scene.add(m);
   ctx.beacons[name] = m;
   log?.(`[world] ✅ beacon: ${name}`);
-        }
+}

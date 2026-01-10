@@ -28,7 +28,16 @@
     }
     canvas { display:block; }
 
-    /* Debug overlay */
+    #VRButton, .vr-button {
+      position: fixed !important;
+      right: 12px !important;
+      bottom: 12px !important;
+      z-index: 9998 !important;
+      border-radius: 14px !important;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial !important;
+      box-shadow: var(--shadow) !important;
+    }
+
     #dbg {
       position:fixed; left:12px; right:12px; top:12px;
       z-index:9999;
@@ -130,30 +139,18 @@
     }
     .k{ color:var(--muted); }
     .v{ color:var(--text); }
-
-    /* VRButton positioning */
-    #VRButton, .vr-button {
-      position: fixed !important;
-      right: 12px !important;
-      bottom: 12px !important;
-      z-index: 9998 !important;
-      border-radius: 14px !important;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial !important;
-      box-shadow: var(--shadow) !important;
-    }
-
-    /* Small footer hint */
-    #hint {
-      position:fixed; left:12px; right:12px; bottom:12px;
-      z-index:10;
-      max-width:1040px;
-      margin: 0 auto;
-      pointer-events:none;
-      color:rgba(232,236,255,.75);
-      font-size:12px;
-      text-shadow: 0 2px 18px rgba(0,0,0,.6);
-    }
   </style>
+
+  <!-- ✅ IMPORT MAP FIX:
+       This makes `import * as THREE from "three"` work on GitHub Pages + Quest.
+       It points "three" to your local module wrapper at /js/three.js -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./js/three.js"
+    }
+  }
+  </script>
 </head>
 
 <body>
@@ -177,19 +174,14 @@
         <div id="log"></div>
 
         <div style="color:var(--muted); font-size:12px; line-height:1.35;">
-          <b style="color:var(--text);">If you have NO VR button:</b> it means <b>main.js didn’t load</b> or <b>VR is not supported on this browser</b>.
-          This panel will show the exact error (usually a file path/case issue like <code>VRButton.js</code> not found).
+          <b style="color:var(--text);">If VR button is missing:</b> main.js didn’t load or the browser doesn’t support immersive-vr.
+          <br/>This panel shows the exact import error.
         </div>
       </div>
     </div>
   </div>
 
-  <div id="hint">
-    Quest: open in Oculus/Meta Quest Browser. Android Chrome often has no VR WebXR button.
-  </div>
-
   <script>
-    // ===== Debug logger that works even if modules fail =====
     (function(){
       const logEl = document.getElementById("log");
       const envEl = document.getElementById("env");
@@ -211,19 +203,6 @@
         if (kind === "ok") stDot.classList.add("ok");
         if (kind === "bad") stDot.classList.add("bad");
       }
-
-      function append(line){
-        const t = new Date().toLocaleTimeString();
-        logEl.textContent += `[${t}] ${line}\n`;
-        logEl.scrollTop = logEl.scrollHeight;
-      }
-
-      // capture console
-      const _log = console.log, _warn = console.warn, _err = console.error;
-      console.log = (...a)=>{ _log(...a); append("LOG  " + a.map(safe).join(" ")); };
-      console.warn = (...a)=>{ _warn(...a); append("WARN " + a.map(safe).join(" ")); };
-      console.error = (...a)=>{ _err(...a); append("ERR  " + a.map(safe).join(" ")); };
-
       function safe(x){
         try{
           if (x instanceof Error) return (x.stack || x.message || String(x));
@@ -231,8 +210,17 @@
           return String(x);
         }catch(e){ return String(x); }
       }
+      function append(line){
+        const t = new Date().toLocaleTimeString();
+        logEl.textContent += `[${t}] ${line}\n`;
+        logEl.scrollTop = logEl.scrollHeight;
+      }
 
-      // global error handlers
+      const _log = console.log, _warn = console.warn, _err = console.error;
+      console.log = (...a)=>{ _log(...a); append("LOG  " + a.map(safe).join(" ")); };
+      console.warn = (...a)=>{ _warn(...a); append("WARN " + a.map(safe).join(" ")); };
+      console.error = (...a)=>{ _err(...a); append("ERR  " + a.map(safe).join(" ")); };
+
       window.addEventListener("error", (e) => {
         setStatus("bad", "Runtime error");
         console.error("window.error:", e.message, e.filename, e.lineno+":"+e.colno);
@@ -242,7 +230,6 @@
         console.error("unhandledrejection:", e.reason);
       });
 
-      // UI buttons
       btnToggle.onclick = () => {
         const hidden = dbgBody.style.display === "none";
         dbgBody.style.display = hidden ? "grid" : "none";
@@ -255,59 +242,43 @@
         location.href = u.toString();
       };
 
-      // env info
       const isSecure = window.isSecureContext;
       const hasXR = !!navigator.xr;
-      const ua = navigator.userAgent;
       envEl.innerHTML = [
-        kv("secureContext", isSecure ? "YES" : "NO (VR requires https/secure)"),
-        kv("navigator.xr", hasXR ? "YES" : "NO (no WebXR here)"),
+        kv("secureContext", isSecure ? "YES" : "NO"),
+        kv("navigator.xr", hasXR ? "YES" : "NO"),
         kv("platform", navigator.platform || "n/a"),
-        kv("userAgent", ua.slice(0, 90) + (ua.length>90 ? "…" : "")),
         kv("href", location.href),
       ].join("");
 
       function kv(k, v){
-        return `<span class="kv"><span class="k">${escapeHtml(k)}:</span><span class="v">${escapeHtml(String(v))}</span></span>`;
+        return `<span class="kv"><span class="k">${esc(k)}:</span><span class="v">${esc(String(v))}</span></span>`;
       }
-      function escapeHtml(s){
+      function esc(s){
         return s.replace(/[&<>"']/g, (m)=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[m]));
       }
 
       console.log("BOOT", { v, secureContext:isSecure, xr:hasXR });
 
-      // ===== Robust module boot: dynamic import with explicit error display =====
       setStatus("warn", "Loading main.js…");
       const mainPath = "./js/main.js?v=" + encodeURIComponent(v);
 
-      import(mainPath)
-        .then(() => {
-          setStatus("ok", "main.js loaded ✅");
-          console.log("main.js import ✅", mainPath);
+      import(mainPath).then(() => {
+        setStatus("ok", "main.js loaded ✅");
+        console.log("main.js import ✅", mainPath);
 
-          // If VRButton still missing after a moment, warn loudly
-          setTimeout(() => {
-            const hasVRBtn = !!document.getElementById("VRButton") || !!document.querySelector(".vr-button");
-            if (!hasVRBtn) {
-              console.warn("VRButton not found in DOM.");
-              if (!navigator.xr) {
-                console.warn("navigator.xr is missing — this browser likely cannot show a VR button (common on Android Chrome).");
-              } else {
-                console.warn("navigator.xr exists but VRButton isn't present — main.js may not be appending it (or VRButton.js path is wrong).");
-              }
-              setStatus("bad", "No VR button");
-            }
-          }, 1200);
-        })
-        .catch((err) => {
-          setStatus("bad", "main.js failed to load");
-          console.error("FAILED TO IMPORT", mainPath, err);
-          console.error("Most common causes:");
-          console.error("1) Wrong file path: /js/main.js not found");
-          console.error("2) Case mismatch: VRButton.js vs vrbutton.js (GitHub is case-sensitive)");
-          console.error("3) three.js wrapper missing: /js/three.js not found");
-        });
+        setTimeout(() => {
+          const hasVRBtn = !!document.getElementById("VRButton") || !!document.querySelector(".vr-button");
+          if (!hasVRBtn) {
+            console.warn("VRButton not found in DOM (main may have crashed after import).");
+            setStatus("bad", "No VR button");
+          }
+        }, 1200);
+      }).catch((err) => {
+        setStatus("bad", "main.js failed to load");
+        console.error("FAILED TO IMPORT", mainPath, err);
+      });
     })();
   </script>
 </body>
-  </html>
+</html>

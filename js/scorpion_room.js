@@ -1,10 +1,10 @@
-// /js/scorpion_room.js — Scorpion Room v2.2 (FULL)
-// Fixes/Adds:
-// - Uses ctx (NOT ctx.world) for publishing refs
-// - Room shell uses BackSide so you can see inside
-// - Adds chairs aligned around the table (player + 4 bots)
-// - Forces ctx.spawns.map.scorpion_seat_1 to match the player chair transform (prevents "spawn in table")
-// - Sets table.userData.surfaceY for PokerSim dealing on top
+// /js/scorpion_room.js — Scorpion Room v3.0 (CIRCULAR ARENA)
+// - Circular room (no store, no pads)
+// - Central poker table only
+// - Chairs aligned correctly
+// - Player ALWAYS faces the table
+// - Guardrail prevents spectators from approaching felt
+// - Decorative, calm, casino-focused environment
 
 export const ScorpionRoom = {
   build(ctx) {
@@ -15,33 +15,39 @@ export const ScorpionRoom = {
     group.position.set(8, 0, 0);
     scene.add(group);
 
-    // ---------- ROOM SHELL (render inside) ----------
-    const room = new THREE.Mesh(
-      new THREE.BoxGeometry(6, 3, 6),
+    /* --------------------------------------------------
+       ROOM SHELL (CIRCULAR)
+    -------------------------------------------------- */
+    const roomRadius = 5.2;
+    const roomHeight = 3.2;
+
+    const shell = new THREE.Mesh(
+      new THREE.CylinderGeometry(roomRadius, roomRadius, roomHeight, 48, 1, true),
       new THREE.MeshStandardMaterial({
         color: 0x120816,
         roughness: 0.92,
         metalness: 0.0,
-        side: THREE.BackSide, // ✅ important
+        side: THREE.BackSide,
       })
     );
-    room.position.set(0, 1.5, 0);
-    room.receiveShadow = true;
-    room.name = "SCORPION_SHELL";
-    group.add(room);
+    shell.position.set(0, roomHeight / 2, 0);
+    shell.receiveShadow = true;
+    shell.name = "SCORPION_SHELL";
+    group.add(shell);
 
-    // Soft local lighting (helps immersion)
-    const ambient = new THREE.AmbientLight(0x552266, 0.35);
-    ambient.name = "SCORPION_AMBIENT";
+    /* --------------------------------------------------
+       LIGHTING (SOFT, FOCUSED)
+    -------------------------------------------------- */
+    const ambient = new THREE.AmbientLight(0x442244, 0.35);
     group.add(ambient);
 
-    const key = new THREE.PointLight(0xb266ff, 1.6, 10);
-    key.position.set(0, 2.3, 1.8);
-    key.name = "SCORPION_KEY";
-    key.castShadow = false;
-    group.add(key);
+    const tableLight = new THREE.PointLight(0xb266ff, 2.1, 6.5);
+    tableLight.position.set(0, 2.6, 0);
+    group.add(tableLight);
 
-    // ---------- TABLE ----------
+    /* --------------------------------------------------
+       TABLE
+    -------------------------------------------------- */
     const table = new THREE.Group();
     table.name = "SCORPION_TABLE";
     table.position.set(0, 0, 0);
@@ -49,134 +55,141 @@ export const ScorpionRoom = {
 
     const base = new THREE.Mesh(
       new THREE.CylinderGeometry(0.85, 0.95, 0.75, 32),
-      new THREE.MeshStandardMaterial({ color: 0x1a1a22, roughness: 0.6, metalness: 0.1 })
+      new THREE.MeshStandardMaterial({ color: 0x1a1a22, roughness: 0.6 })
     );
     base.position.set(0, 0.375, 0);
     base.castShadow = true;
-    base.receiveShadow = true;
-    base.name = "SCORPION_TABLE_BASE";
     table.add(base);
 
     const top = new THREE.Mesh(
       new THREE.CylinderGeometry(0.95, 0.95, 0.10, 48),
-      new THREE.MeshStandardMaterial({ color: 0x0c5a3a, roughness: 0.85, metalness: 0.0 })
+      new THREE.MeshStandardMaterial({ color: 0x0c5a3a, roughness: 0.9 })
     );
-    top.position.set(0, 0.75 + 0.05, 0);
+    top.position.set(0, 0.80, 0);
     top.castShadow = true;
-    top.receiveShadow = true;
-    top.name = "SCORPION_TABLE_FELT";
     table.add(top);
 
-    // Surface for dealing
-    const surfaceY = group.position.y + table.position.y + top.position.y + 0.05;
-    table.userData.surfaceY = surfaceY;
-    table.userData.tableHeight = surfaceY;
+    table.userData.surfaceY =
+      group.position.y + table.position.y + top.position.y + 0.05;
     table.userData.dealRadius = 0.62;
 
-    // ---------- CHAIRS (player + 4 bots) ----------
-    // Chair ring outside felt so seating never intersects table collider.
-    const chairRadius = 1.55; // ✅ outside table radius (~0.95)
-    const chairY = 0.0;
+    /* --------------------------------------------------
+       GUARDRAIL (SPECTATOR BOUNDARY)
+    -------------------------------------------------- */
+    const railRadius = 1.95;
+    const railHeight = 0.9;
 
-    function makeChair(name) {
-      const chair = new THREE.Group();
-      chair.name = name;
+    const rail = new THREE.Mesh(
+      new THREE.TorusGeometry(railRadius, 0.06, 16, 64),
+      new THREE.MeshStandardMaterial({
+        color: 0x7a6a8a,
+        roughness: 0.6,
+        metalness: 0.3,
+      })
+    );
+    rail.rotation.x = Math.PI / 2;
+    rail.position.y = railHeight;
+    rail.name = "SCORPION_GUARDRAIL";
+    group.add(rail);
+
+    // Physical blocker (invisible)
+    const railBlocker = new THREE.Mesh(
+      new THREE.CylinderGeometry(railRadius, railRadius, 1.2, 32),
+      new THREE.MeshStandardMaterial({ visible: false })
+    );
+    railBlocker.position.set(0, 0.6, 0);
+    railBlocker.name = "SCORPION_RAIL_BLOCKER";
+    group.add(railBlocker);
+
+    ctx.colliders?.push?.(railBlocker);
+
+    /* --------------------------------------------------
+       CHAIRS (PLAYER + 4 BOTS)
+    -------------------------------------------------- */
+    const chairRadius = 1.55;
+
+    function makeChair() {
+      const c = new THREE.Group();
 
       const seat = new THREE.Mesh(
         new THREE.BoxGeometry(0.45, 0.08, 0.45),
-        new THREE.MeshStandardMaterial({ color: 0x1b1b24, roughness: 0.7, metalness: 0.05 })
+        new THREE.MeshStandardMaterial({ color: 0x1b1b24 })
       );
-      seat.position.set(0, 0.45, 0);
-      seat.castShadow = true;
-      seat.receiveShadow = true;
-      chair.add(seat);
+      seat.position.y = 0.45;
+      c.add(seat);
 
       const back = new THREE.Mesh(
         new THREE.BoxGeometry(0.45, 0.55, 0.08),
-        new THREE.MeshStandardMaterial({ color: 0x161621, roughness: 0.8, metalness: 0.03 })
+        new THREE.MeshStandardMaterial({ color: 0x161621 })
       );
       back.position.set(0, 0.72, -0.18);
-      back.castShadow = true;
-      back.receiveShadow = true;
-      chair.add(back);
+      c.add(back);
 
-      const pole = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.05, 0.07, 0.40, 14),
-        new THREE.MeshStandardMaterial({ color: 0x222233, roughness: 0.55, metalness: 0.15 })
-      );
-      pole.position.set(0, 0.20, 0);
-      chair.add(pole);
-
-      const feet = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.20, 0.24, 0.06, 18),
-        new THREE.MeshStandardMaterial({ color: 0x11111a, roughness: 0.8, metalness: 0.05 })
-      );
-      feet.position.set(0, 0.03, 0);
-      chair.add(feet);
-
-      return chair;
+      return c;
     }
 
-    // Angles: player is "south" of table (positive Z), facing north (yaw=Math.PI)
     const seats = [
-      { key: "scorpion_seat_1", angle: 0,    yaw: Math.PI },        // player (z+)
-      { key: "scorpion_bot_1",  angle: 180,  yaw: 0 },              // opposite (z-)
-      { key: "scorpion_bot_2",  angle: 135,  yaw: -Math.PI / 4 },   // back-left
-      { key: "scorpion_bot_3",  angle: 225,  yaw:  Math.PI / 4 },   // back-right
-      { key: "scorpion_bot_4",  angle: 90,   yaw: -Math.PI / 2 },   // left
+      { key: "scorpion_seat_1", angle:   0 },   // PLAYER
+      { key: "bot_1",          angle: 180 },
+      { key: "bot_2",          angle: 120 },
+      { key: "bot_3",          angle: 240 },
+      { key: "bot_4",          angle:  60 },
     ];
 
-    const chairRefs = {};
+    let playerChair = null;
 
     for (const s of seats) {
-      const rad = (s.angle * Math.PI) / 180;
-      const x = Math.sin(rad) * chairRadius;
-      const z = Math.cos(rad) * chairRadius;
+      const r = (s.angle * Math.PI) / 180;
+      const x = Math.sin(r) * chairRadius;
+      const z = Math.cos(r) * chairRadius;
 
-      const chair = makeChair(`CHAIR_${s.key}`);
-      chair.position.set(x, chairY, z);
-      chair.rotation.y = s.yaw; // face toward center
+      const chair = makeChair();
+      chair.position.set(x, 0, z);
+
+      // FACE TABLE CENTER (THIS FIXES YOUR BACKWARDS SPAWN)
+      chair.lookAt(0, 0.45, 0);
+
       table.add(chair);
-      chairRefs[s.key] = chair;
-    }
 
-    // ---------- FORCE SPAWNPOINT TO MATCH PLAYER CHAIR ----------
-    // This is the big fix: even if your SpawnPoints file is slightly off,
-    // we overwrite scorpion_seat_1 to the real chair position in world space.
-    const playerChair = chairRefs["scorpion_seat_1"];
-    if (playerChair) {
-      // world position = group + table + chair
-      const worldPos = new THREE.Vector3();
-      playerChair.getWorldPosition(worldPos);
-
-      const yaw = playerChair.getWorldQuaternion(new THREE.Quaternion());
-      const eul = new THREE.Euler().setFromQuaternion(yaw, "YXZ");
-      const chairYaw = eul.y;
-
-      // Update SpawnPoints map if available
-      const sp = ctx.spawns?.map?.scorpion_seat_1;
-      if (sp) {
-        sp.x = worldPos.x;
-        sp.z = worldPos.z;
-        sp.yaw = chairYaw;
-        // optional seatBack hint for Controls seat nudge
-        sp.seatBack = 0.45;
-
-        log?.(
-          `[scorpion] ✅ patched spawn scorpion_seat_1 -> x=${sp.x.toFixed(2)} z=${sp.z.toFixed(2)} yaw=${sp.yaw.toFixed(2)}`
-        );
-      } else {
-        log?.("[scorpion] ⚠️ ctx.spawns.map.scorpion_seat_1 missing (SpawnPoints not wired?)");
+      if (s.key === "scorpion_seat_1") {
+        playerChair = chair;
       }
     }
 
-    // ---------- Publish handles ----------
+    /* --------------------------------------------------
+       FORCE SPAWN TO MATCH CHAIR (POSITION + YAW)
+    -------------------------------------------------- */
+    if (playerChair && ctx.spawns?.map?.scorpion_seat_1) {
+      const pos = new THREE.Vector3();
+      playerChair.getWorldPosition(pos);
+
+      const quat = new THREE.Quaternion();
+      playerChair.getWorldQuaternion(quat);
+
+      const yaw = new THREE.Euler().setFromQuaternion(quat, "YXZ").y;
+
+      const sp = ctx.spawns.map.scorpion_seat_1;
+      sp.x = pos.x;
+      sp.z = pos.z;
+      sp.yaw = yaw;
+      sp.seatBack = 0.45;
+
+      log?.(
+        `[scorpion] seat patched -> x=${sp.x.toFixed(2)} z=${sp.z.toFixed(
+          2
+        )} yaw=${sp.yaw.toFixed(2)}`
+      );
+    }
+
+    /* --------------------------------------------------
+       PUBLISH REFERENCES
+    -------------------------------------------------- */
     ctx.scorpionRoom = { group, table };
     ctx.scorpionTable = table;
     ctx.tables ||= {};
     ctx.tables.scorpion = table;
 
-    log?.("[scorpion] build ✅ v2.2 (chairs + spawn alignment)");
+    log?.("[scorpion] build ✅ v3.0 (circular arena, aligned seating)");
     return ctx.scorpionRoom;
   },
 };

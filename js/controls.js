@@ -1,15 +1,17 @@
-// /js/controls.js — Scarlett Controls v3.9 (FULL)
-// FIXES (v3.9):
-// ✅ REAL VR locomotion (thumbsticks) + snap turn (right stick)
-// ✅ Prevents "too high" bug: in XR presenting, we DO NOT apply standY to rig
-// ✅ Safe world reference: works whether ctx.world exists or ctx IS the world (your World.init returns ctx)
-// ✅ Seated mode still locks locomotion, but won’t force crazy Y in XR
-// ✅ Robust leave mappings preserved
+// /js/controls.js — Scarlett Controls v4.0 (FULL)
+// FIXES (v4.0):
+// ✅ Works with BOTH systems:
+//    - old SpawnPoints (ctx.spawns.apply)
+//    - new World anchors (world.movePlayerTo / world.seatPlayer)
+// ✅ Keeps REAL VR locomotion + snap turn + XR height fix
+// ✅ Seated mode locks locomotion without breaking XR height
+// ✅ Leave mapping is deliberate (press+hold style using "justPressed" still works)
+// ✅ leaveSeat() routes through RoomManager when available (ctx.rooms.setRoom)
 
 export const Controls = {
   init(ctx) {
     const { THREE, renderer, player, log } = ctx;
-    const world = ctx.world || ctx; // ✅ your World.init returns ctx as the world
+    const world = ctx.world || ctx; // some builds return ctx as world
 
     const state = {
       ctx, THREE, renderer, player, world,
@@ -20,7 +22,7 @@ export const Controls = {
       moveEnabled: true,
       enabled: true,
 
-      speed: 2.0,            // meters/sec
+      speed: 2.0,
       strafeSpeed: 2.0,
       snapTurn: Math.PI / 6, // 30°
       _keys: new Set(),
@@ -31,7 +33,6 @@ export const Controls = {
       // seated height for NON-XR only
       seatHeadY: 1.05,
 
-      // stick deadzone
       dead: 0.18,
     };
 
@@ -76,18 +77,24 @@ export const Controls = {
 
     function setEnabled(v) { state.enabled = !!v; }
 
-    // --- core spawn/teleport ---
+    // ---------------- spawn / teleport compatibility ----------------
     function teleportToSpawn(key, opts = {}) {
-      // We let SpawnPoints position X/Z/Yaw.
-      const ok = ctx.spawns?.apply ? ctx.spawns.apply(key, player, opts) : false;
+      let ok = false;
 
-      // ✅ CRITICAL HEIGHT FIX:
-      // In XR (local-floor), rig Y should usually stay 0.
-      // If we add standY, we stack on top of headset floor -> "very high / on chair".
+      // Old system: SpawnPoints
+      if (ctx.spawns?.apply) {
+        ok = !!ctx.spawns.apply(key, player, opts);
+      }
+      // New system: World anchors
+      else if (world?.movePlayerTo) {
+        world.movePlayerTo(key, ctx);
+        ok = true;
+      }
+
+      // Height fix:
       if (isXRPresenting()) {
         player.position.y = 0;
       } else {
-        // Non-XR fallback: apply requested standY if provided
         if (typeof opts.standY === "number") player.position.y = opts.standY;
       }
 
@@ -106,36 +113,23 @@ export const Controls = {
       log?.(`[controls] ✅ standing @ ${spawnKey} (xr=${isXRPresenting()})`);
     }
 
-    function nudgeBackFromTable(spawnKey) {
-      const sp = ctx.spawns?.get?.(spawnKey) || ctx.spawns?.map?.[spawnKey];
-      if (!sp) return;
-      const back = sp.seatBack ?? 0;
-      if (!back) return;
-
-      const fwdX = Math.sin(sp.yaw);
-      const fwdZ = Math.cos(sp.yaw);
-
-      player.position.x -= fwdX * back;
-      player.position.z -= fwdZ * back;
-
-      log?.(`[controls] 🧷 seat nudge back=${back.toFixed(2)} (${spawnKey})`);
-    }
-
-    function sitAt(spawnKey = "table_seat_1") {
+    // New seating path: use world.seatPlayer when possible
+    function sitAt(where = "scorpion", seatIndex = 0) {
       state.seated = true;
-      state.seatedAt = spawnKey;
+      state.seatedAt = `${where}:${seatIndex}`;
       state.moveEnabled = false;
       world.seated = true;
 
       resetVelocity();
 
-      // NOTE: in XR we will still force rig Y=0 (see teleportToSpawn fix)
-      teleportToSpawn(spawnKey, { standY: state.seatHeadY });
+      if (world?.seatPlayer && where === "scorpion") {
+        world.seatPlayer(seatIndex, ctx);
+      } else {
+        // fallback to old spawn key style
+        teleportToSpawn(where, { standY: state.seatHeadY });
+      }
 
-      // push you slightly away from table so you’re not “inside” geometry
-      nudgeBackFromTable(spawnKey);
-
-      log?.(`[controls] 🪑 seated @ ${spawnKey} (xr=${isXRPresenting()})`);
+      log?.(`[controls] 🪑 seated @ ${state.seatedAt} (xr=${isXRPresenting()})`);
     }
 
     function leaveSeat() {
@@ -147,22 +141,25 @@ export const Controls = {
       resetVelocity();
       window.dispatchEvent(new CustomEvent("scarlett-leave-table"));
 
-      teleportToSpawn("lobby_spawn", { standY: 1.65 });
+      // Prefer RoomManager to return you to lobby (also turns off scorpion room)
+      if (ctx.rooms?.setRoom) {
+        ctx.rooms.setRoom(ctx, "lobby");
+      } else {
+        teleportToSpawn("lobby_spawn", { standY: 1.65 });
+      }
 
       log?.("[controls] ✅ leave -> lobby");
     }
 
-    // --- movement helpers ---
+    // ---------------- movement helpers ----------------
     function applyDeadzone(v) {
       const d = state.dead;
       if (Math.abs(v) < d) return 0;
-      // remap to keep full range
       const s = (Math.abs(v) - d) / (1 - d);
       return Math.sign(v) * s;
     }
 
     function moveLocal(dx, dz, dt) {
-      // dx = strafe, dz = forward/back (negative = forward)
       const yaw = player.rotation.y;
       const cos = Math.cos(yaw);
       const sin = Math.sin(yaw);
@@ -174,7 +171,7 @@ export const Controls = {
       player.position.z += vz * state.speed * dt;
     }
 
-    function snapTurn(dir /* -1 or +1 */) {
+    function snapTurn(dir) {
       const now = performance.now();
       if (now - state._lastSnap < 180) return;
       player.rotation.y += dir * state.snapTurn;
@@ -184,7 +181,7 @@ export const Controls = {
     function update(dt) {
       if (!state.enabled) return;
 
-      // keyboard escape hatch
+      // keyboard leave
       if (state._keys.has("Escape") || state._keys.has("KeyL")) {
         state._keys.delete("Escape");
         state._keys.delete("KeyL");
@@ -193,7 +190,7 @@ export const Controls = {
 
       const gps = getXRGamepads();
 
-      // robust leave mappings (Quest varies)
+      // Leave mapping: keep it deliberate, but preserve your robust mappings
       if (gps.right) {
         const leaveNow =
           buttonPressed(gps.right, 5) || // B
@@ -213,13 +210,13 @@ export const Controls = {
         if (justPressed("left", "leave", leaveNow)) leaveSeat();
       }
 
-      // ✅ keep XR height sane always
+      // XR height sanity always
       if (isXRPresenting()) player.position.y = 0;
 
       // seated => no locomotion
       if (!state.moveEnabled || world.seated) return;
 
-      // ---- KEYBOARD movement (desktop) ----
+      // Keyboard locomotion (desktop)
       let kdx = 0, kdz = 0;
       if (state._keys.has("KeyW") || state._keys.has("ArrowUp")) kdz -= 1;
       if (state._keys.has("KeyS") || state._keys.has("ArrowDown")) kdz += 1;
@@ -235,12 +232,8 @@ export const Controls = {
         if (state._keys.has("KeyE")) snapTurn(-1);
       }
 
-      // ---- VR THUMBSTICK locomotion ----
-      // Most Quest profiles:
-      // left stick: axes[2]=x, axes[3]=y  OR axes[0]=x, axes[1]=y (depends)
-      // right stick: other pair
+      // VR thumbstick locomotion
       if (gps.left?.axes?.length) {
-        // choose the pair with bigger magnitude (works across mappings)
         const ax = gps.left.axes;
         const pairA = { x: ax[0] ?? 0, y: ax[1] ?? 0 };
         const pairB = { x: ax[2] ?? 0, y: ax[3] ?? 0 };
@@ -267,7 +260,6 @@ export const Controls = {
 
         const rx = applyDeadzone(stick.x);
 
-        // snap turn on right stick X
         if (rx > 0.75) snapTurn(-1);
         if (rx < -0.75) snapTurn(+1);
       }
@@ -283,7 +275,7 @@ export const Controls = {
     Controls.clearMotion = () => {};
     Controls.setEnabled = setEnabled;
 
-    log?.("[controls] init ✅ v3.9 (VR locomotion + XR height fix)");
+    log?.("[controls] init ✅ v4.0 (anchors + seating compatible)");
     return Controls;
   },
 

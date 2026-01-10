@@ -1,169 +1,184 @@
-// /js/main.js — Scarlett VR Poker — MAIN v10.7 (FULL)
-// FIX: main owns animation loop + calls Controls.update(dt)
-// FIX: renderer.xr reference space type local-floor
-// FIX: recenter uses world.spawns (via SpawnPoints)
+// /js/main.js — Scarlett VR Poker (SAFE BOOT) v1.0 FULL
+// Goal: never hard-crash on a single module export mismatch (Quest/GitHub Pages caching/404 HTML).
 
-import * as THREE from "three";
-import { VRButton } from "three/addons/webxr/VRButton.js";
-import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
-
+import { VRButton } from "./VRButton.js"; // keep your local VRButton
+import * as THREE_NS from "./three.js";   // your wrapper that exports THREE namespace (per your setup)
 import { World } from "./world.js";
-import { Controls } from "./controls.js";
 
-const BUILD = Date.now().toString();
+const BOOT_VERSION = (typeof window !== "undefined" && window.__BOOT_V) ? window.__BOOT_V : Date.now();
 
-function log(...a) {
-  console.log(...a);
+function log(...args) { console.log(...args); }
+function warn(...args) { console.warn(...args); }
+function err(...args) { console.error(...args); }
+
+async function safeImport(path, pickNamed = null) {
   try {
-    window.dispatchEvent(new CustomEvent("scarlett-log", { detail: a.map(String).join(" ") }));
-  } catch {}
+    const mod = await import(path);
+    if (!pickNamed) return mod;
+    return mod[pickNamed] || null;
+  } catch (e) {
+    err(`❌ import failed: ${path}`, e);
+    return null;
+  }
 }
 
-log(`[main] boot ✅ v=${BUILD}`);
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x05060a);
-
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
-
-// Player rig — in local-floor we keep rig.y = 0 always
-const player = new THREE.Group();
-player.name = "PLAYER_RIG";
-player.position.set(0, 0, 0);
-scene.add(player);
-player.add(camera);
-
-// Renderer
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.xr.enabled = true;
-
-// IMPORTANT: this is the correct way to prefer local-floor in Three/WebXR
-renderer.xr.setReferenceSpaceType("local-floor");
-
-document.body.appendChild(renderer.domElement);
-
-// VR Button
-const btn = VRButton.createButton(renderer);
-btn.style.zIndex = "9999";
-document.body.appendChild(btn);
-log("[main] VRButton appended ✅");
-
-// Small ambient (world adds real lighting)
-scene.add(new THREE.AmbientLight(0xffffff, 0.25));
-
-// Controllers
-const controller1 = renderer.xr.getController(0);
-const controller2 = renderer.xr.getController(1);
-scene.add(controller1);
-scene.add(controller2);
-
-const controllerGrip1 = renderer.xr.getControllerGrip(0);
-const controllerGrip2 = renderer.xr.getControllerGrip(1);
-scene.add(controllerGrip1);
-scene.add(controllerGrip2);
-
-const controllerModelFactory = new XRControllerModelFactory();
-controllerGrip1.add(controllerModelFactory.createControllerModel(controllerGrip1));
-controllerGrip2.add(controllerModelFactory.createControllerModel(controllerGrip2));
-
-function makeRay() {
-  const geom = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, 0, -1),
-  ]);
-  const mat = new THREE.LineBasicMaterial({ color: 0x7fe7ff });
-  const line = new THREE.Line(geom, mat);
-  line.name = "XR_RAY";
-  line.scale.z = 6;
-  return line;
+function makeRenderer() {
+  const renderer = new THREE_NS.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
+  return renderer;
 }
-controller1.add(makeRay());
-controller2.add(makeRay());
 
-// Resize
-window.addEventListener("resize", () => {
-  if (renderer.xr.isPresenting) return;
+function makeScene() {
+  const scene = new THREE_NS.Scene();
+  scene.background = new THREE_NS.Color(0x05060a);
+  return scene;
+}
+
+function makeCamera() {
+  const camera = new THREE_NS.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
+  camera.position.set(0, 1.6, 3);
+  return camera;
+}
+
+function makePlayerRig() {
+  const rig = new THREE_NS.Group();
+  rig.name = "PLAYER_RIG";
+  rig.position.set(0, 0, 0);
+  return rig;
+}
+
+function onResize(renderer, camera) {
+  renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+}
 
-// Clock for dt
-const clock = new THREE.Clock();
+async function boot() {
+  // Diagnostics
+  log(`BOOT v=${BOOT_VERSION}`);
+  log(`href=${location.href}`);
+  log(`ua=${navigator.userAgent}`);
+  log(`navigator.xr=${!!navigator.xr}`);
 
-// World ctx
-let worldCtx = null;
+  // Basic DOM safety
+  document.body.style.margin = "0";
+  document.body.style.overflow = "hidden";
+  document.body.style.background = "#000";
 
-(async function boot() {
-  worldCtx = await World.init({
-    THREE,
-    scene,
-    renderer,
-    camera,
-    player,
-    controllers: { controller1, controller2, controllerGrip1, controllerGrip2 },
-    log,
-    BUILD,
-  });
+  const THREE = THREE_NS;
+  const scene = makeScene();
+  const camera = makeCamera();
+  const renderer = makeRenderer();
+  const player = makePlayerRig();
 
-  // Init controls (no animation loop inside controls)
-  Controls.init({
-    THREE,
-    scene,
-    renderer,
-    camera,
-    player,
-    controllers: { controller1, controller2 },
-    world: worldCtx,
-    log,
-  });
+  scene.add(player);
+  player.add(camera);
 
-  log("[main] world init ✅");
-  log("[main] ready ✅");
+  window.addEventListener("resize", () => onResize(renderer, camera));
 
-  // Main render loop
-  renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.033);
-
-    // In XR local-floor, keep rig on floor (prevents “giant/standing on something”)
-    if (renderer.xr.isPresenting) player.position.y = 0;
-
-    // Update controls (movement/turn)
-    Controls.update?.(dt);
-
-    // Render
-    renderer.render(scene, camera);
-  });
-})().catch((e) => {
-  console.error(e);
-  log("❌ [main] boot failed:", e?.message || e);
-});
-
-// XR session start/end hooks
-renderer.xr.addEventListener("sessionstart", () => {
-  log("[main] XR session start ✅");
-
-  // Always keep rig on floor
-  player.position.y = 0;
-
-  // Recenter to lobby spawn (if available)
+  // VR Button
   try {
-    Controls.teleportToSpawn("lobby_spawn");
-  } catch {}
-});
+    document.body.appendChild(VRButton.createButton(renderer));
+    log("[main] VRButton appended ✅");
+  } catch (e) {
+    warn("[main] VRButton failed (non-fatal)", e);
+  }
 
-renderer.xr.addEventListener("sessionend", () => {
-  log("[main] XR session end ✅");
-});
+  // Your session init options (keep what you had)
+  const sessionInit = {
+    optionalFeatures: [
+      "local-floor",
+      "bounded-floor",
+      "hand-tracking",
+      "layers",
+      "dom-overlay",
+      "anchors",
+      "plane-detection",
+      "mesh-detection",
+      "hit-test",
+    ],
+    domOverlay: { root: document.body },
+  };
+  // (World/main may read this)
+  window.__SESSION_INIT__ = sessionInit;
 
-// UI bridge buttons
-window.addEventListener("scarlett-recenter", () => {
-  log("[main] recenter requested");
-  Controls.teleportToSpawn("lobby_spawn");
-});
-window.addEventListener("scarlett-enter-vr", async () => {
-  log("[main] enter vr requested");
-});
+  // Controllers container (your world may fill this)
+  const controllers = { left: null, right: null, hands: [] };
+
+  // Build a shared ctx object
+  const ctx = {
+    THREE,
+    scene,
+    renderer,
+    camera,
+    player,
+    controllers,
+    log,
+    BUILD: "gh-pages",
+    sessionInit,
+  };
+
+  // ---- SAFE MODULE LOADS ----
+  // SpawnPoints: DO NOT hard-fail if export mismatch
+  const SpawnPoints = await safeImport("./spawn_points.js", "SpawnPoints");
+  if (SpawnPoints) log("[main] ✅ SpawnPoints imported");
+  else warn("[main] ⚠️ SpawnPoints missing (game will still run)");
+
+  // Controls / Teleport etc: load if available
+  const Controls = await safeImport("./controls.js", "Controls");
+  if (Controls) log("[main] ✅ Controls imported");
+  else warn("[main] ⚠️ Controls missing");
+
+  // Init World (your World does the heavy lifting)
+  // IMPORTANT: world.spawns created early so SpawnPoints.build can register
+  let world = null;
+  try {
+    world = await World.init(ctx);
+    world ||= {};
+    world.spawns ||= {};
+    ctx.world = world;
+    log("[main] world init ✅");
+  } catch (e) {
+    err("[main] ❌ world init failed", e);
+    // Still keep rendering something so you can see errors in-VR
+    world = { spawns: {} };
+    ctx.world = world;
+  }
+
+  // Build spawn pads AFTER world exists
+  try {
+    if (SpawnPoints?.build) {
+      SpawnPoints.build({ THREE, scene, world, log });
+    }
+  } catch (e) {
+    warn("[main] ⚠️ SpawnPoints.build failed (non-fatal)", e);
+  }
+
+  // Init controls if present
+  try {
+    if (Controls?.init) {
+      Controls.init({ ...ctx, world });
+      log("[main] controllers ready ✅");
+    }
+  } catch (e) {
+    warn("[main] ⚠️ Controls.init failed (non-fatal)", e);
+  }
+
+  // Render loop
+  renderer.setAnimationLoop(() => {
+    try {
+      // Optional: world.update()
+      if (world?.update) world.update();
+      renderer.render(scene, camera);
+    } catch (e) {
+      err("[main] render loop error", e);
+    }
+  });
+
+  log(`[main] ready ✅ v=${BOOT_VERSION}`);
+}
+
+boot().catch((e) => err("BOOT FATAL", e));

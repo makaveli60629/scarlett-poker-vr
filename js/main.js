@@ -1,9 +1,9 @@
 // /js/main.js — Scarlett VR Poker MAIN v3.8 (FULL)
-// ✅ Keeps XR tiered requestSession logic + VRButton override
+// ✅ XR tiered requestSession logic + VRButton override
 // ✅ Publishes ctx on window.__SCARLETT_CTX for debugging
-// ✅ Wires RoomManager correctly (ctx.rooms) so "scarlett-room" always works
-// ✅ Uses World anchors for spawn/seat so facing + seating is consistent
-// ✅ Adds XR-start re-align to prevent “spawn drift / black / stuck” cases
+// ✅ RoomBridge: "scarlett-room" works reliably
+// ✅ Uses World anchors (no more “wrong facing / stuck”)
+// ✅ Re-align after XR starts (Quest refspace drift fix)
 
 import { VRButton } from "./VRButton.js";
 import * as THREE_NS from "./three.js";
@@ -157,7 +157,6 @@ async function boot() {
     warn("[main] VRButton failed (non-fatal)", e);
   }
 
-  // Core ctx (World will extend it)
   const controllers = { left: null, right: null, hands: [] };
 
   const ctx = {
@@ -170,7 +169,8 @@ async function boot() {
     log,
     BUILD: "gh-pages",
     sessionInit,
-    rooms: null,  // will be wired by World/RoomManager
+    rooms: null,
+    room: "lobby",
   };
 
   window.__SCARLETT_CTX = ctx;
@@ -188,9 +188,7 @@ async function boot() {
     world ||= {};
     ctx.world = world;
 
-    // IMPORTANT: World.init may have its own ctx internally, but we keep a handle:
-    // If World stored ctx as World.ctx (as in the v12 world.js I provided),
-    // then ctx.rooms may be set there. Either way we normalize below.
+    // normalize rooms
     ctx.rooms = ctx.rooms || world?.ctx?.rooms || world?.rooms || ctx.rooms;
 
     log("[main] world init ✅");
@@ -200,16 +198,7 @@ async function boot() {
     ctx.world = world;
   }
 
-  // If World didn’t set ctx.rooms, try to discover RoomManager on ctx/world
-  // (RoomManager.init(ctx) typically sets ctx.onTeleportHit + room state)
-  if (!ctx.rooms) {
-    // Preferred: world.ctx.rooms
-    if (world?.ctx?.rooms) ctx.rooms = world.ctx.rooms;
-    // Fallback: a rooms object on world
-    else if (world?.rooms) ctx.rooms = world.rooms;
-  }
-
-  // Init Controls (optional)
+  // Controls init (optional)
   try {
     if (Controls?.init) {
       Controls.init({ ...ctx, world });
@@ -220,30 +209,29 @@ async function boot() {
     warn("[main] ⚠️ Controls.init failed (non-fatal)", e);
   }
 
-  // ✅ RoomBridge: always handle UI room events (lobby/store/scorpion)
+  // ✅ RoomBridge: UI can force room change any time
   window.addEventListener("scarlett-room", (e) => {
     const name = e?.detail?.name;
     if (!name) return;
-    // Accept both "scorpion_room" and "scorpion"
+
     const mapped =
       name === "scorpion_room" ? "scorpion" :
       name === "poker_room" ? "lobby" :
       name;
 
     if (ctx.rooms?.setRoom) ctx.rooms.setRoom(ctx, mapped);
-    else if (ctx.world?.rooms?.setRoom) ctx.world.rooms.setRoom(ctx, mapped);
-    else console.warn("[RoomBridge] rooms not ready yet:", mapped);
+    else console.warn("[RoomBridge] rooms not ready:", mapped);
   });
 
-  // Spawn: ALWAYS start in original lobby using World anchors (no Controls teleport)
+  // Start in lobby spawn using World anchors
   try {
-    if (world?.movePlayerTo) world.movePlayerTo("lobby_spawn", ctx);
-    if (world?.setSeated) world.setSeated(false, ctx);
+    world?.movePlayerTo?.("lobby_spawn", ctx);
+    world?.setSeated?.(false, ctx);
+    ctx.room = "lobby";
   } catch (e) {
-    warn("[main] spawn align failed (non-fatal)", e);
+    warn("[main] initial spawn align failed (non-fatal)", e);
   }
 
-  // XR start function
   async function startXRFromUI() {
     if (!navigator.xr) return warn("[XR] navigator.xr missing");
     if (__XR_SESSION_ACTIVE) return warn("[XR] already active; ignoring");
@@ -256,11 +244,11 @@ async function boot() {
       __XR_SESSION_ACTIVE = true;
       __XR_SESSION_STARTING = false;
 
-      // Re-align once after XR begins (prevents drift / facing wrong)
+      // re-align after XR start (prevents drift/wrong-facing)
       setTimeout(() => {
         try {
-          if (ctx.room === "scorpion" && world?.seatPlayer) world.seatPlayer(0, ctx);
-          else if (world?.movePlayerTo) world.movePlayerTo("lobby_spawn", ctx);
+          if (ctx.room === "scorpion") world?.seatPlayer?.(0, ctx);
+          else world?.movePlayerTo?.("lobby_spawn", ctx);
         } catch {}
       }, 50);
 

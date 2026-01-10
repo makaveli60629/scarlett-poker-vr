@@ -1,400 +1,299 @@
-// /js/main.js — Scarlett MASTER BOOT v14.2 (FULL)
-// ✅ World.update(dt) loop
-// ✅ Controllers array + axes capture for World locomotion
-// ✅ Android: dual sticks move/look + HUD buttons (Action/Teleport)
-// ✅ Android: tap to click + 2-finger teleport fallback
-// ✅ Debug hub non-overlapping
+// /js/main.js — Scarlett VR Poker Hybrid 1.0 (FULL)
+// ✅ VRButton appended FIRST (so you always see it even if world crashes)
+// ✅ Works on Quest + Desktop + Android (touch look + 2-finger move fallback)
+// ✅ Calls world.update(dt) safely
+//
+// Assumes you have:
+// - /js/three.js wrapper that exports THREE (your existing setup)
+// - /js/three/examples/jsm/webxr/VRButton.js (local copy)
+// - /js/world.js (provided below)
 
 import * as THREE from "./three.js";
+import { VRButton } from "./three/examples/jsm/webxr/VRButton.js";
+import { World } from "./world.js";
 
-async function loadVRButton() {
-  try {
-    const mod = await import("./VRButton.js");
-    return mod.VRButton || mod.default || null;
-  } catch {
-    return null;
-  }
-}
+const BUILD = new URLSearchParams(location.search).get("v") || `${Date.now()}`;
+const hudStatus = (msg) => {
+  const el = document.getElementById("status");
+  if (el) el.textContent = msg;
+};
+const log = (...a) => console.log(...a);
 
-async function loadWorld(BUILD) {
-  const mod = await import(`./world.js?v=${BUILD}`);
-  return mod.World;
-}
+log("BOOT v=" + BUILD);
+log("href=" + location.href);
+log("ua=" + navigator.userAgent);
+log("navigator.xr=" + !!navigator.xr);
 
-const BUILD = Date.now();
-const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+hudStatus("Initializing renderer…");
 
-const app = document.getElementById("app");
-const btnDebug = document.getElementById("btnDebug");
-const btnMenu = document.getElementById("btnMenu");
-
-// Create HUD buttons if missing (safe)
-(function ensureHudButtons(){
-  const hud = document.getElementById("hud");
-  if (!hud) return;
-
-  const need = (id, label) => {
-    let b = document.getElementById(id);
-    if (!b) {
-      b = document.createElement("button");
-      b.className = "chip";
-      b.id = id;
-      b.textContent = label;
-      hud.appendChild(b);
-    }
-    return b;
-  };
-
-  need("btnAction", "Action");
-  need("btnTeleport", "Teleport");
-})();
-
-const btnAction = document.getElementById("btnAction");
-const btnTeleport = document.getElementById("btnTeleport");
-
-// Renderer
-const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
+// --- Renderer (create first so VRButton can be appended immediately)
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setSize(innerWidth, innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.xr.enabled = true;
-app.appendChild(renderer.domElement);
+document.body.appendChild(renderer.domElement);
 
-// Scene/camera/player rig
+// --- VR Button (append BEFORE anything else)
+try {
+  const btn = VRButton.createButton(renderer);
+  btn.id = "VRButton";
+  btn.style.position = "fixed";
+  btn.style.right = "14px";
+  btn.style.bottom = "14px";
+  btn.style.zIndex = "999999";
+  btn.style.borderRadius = "14px";
+  btn.style.fontWeight = "800";
+  btn.style.padding = "12px 14px";
+  document.body.appendChild(btn);
+  log("[main] VRButton appended ✅");
+  hudStatus("VRButton ready. Loading world…");
+} catch (e) {
+  console.error("[main] VRButton failed:", e);
+  hudStatus("VRButton failed (check console). Loading world anyway…");
+}
+
+// --- Scene + camera + player rig
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x05060a);
+scene.fog = new THREE.Fog(0x05060a, 12, 75);
 
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 1200);
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 250);
+camera.position.set(0, 1.65, 4);
 
 const player = new THREE.Group();
+player.name = "player_rig";
+player.position.set(0, 0, 0);
+player.add(camera);
 scene.add(player);
 
-camera.position.set(0, 1.65, 0);
-player.add(camera);
+// Soft ambient so you never get “black screen” during partial loads
+scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x080812, 0.65));
+const d = new THREE.DirectionalLight(0xffffff, 0.75);
+d.position.set(10, 18, 6);
+scene.add(d);
 
-// Safety ambient so Android never goes black
-scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+// --- Controllers (XR)
+const controllers = {
+  left: null,
+  right: null,
+  grips: [],
+  update() {}
+};
 
-// -----------------------------------------------------------
-// Debug hub (same behavior as before)
-// -----------------------------------------------------------
-const dbgHub = document.getElementById("androidDebugHub");
-const dbgFab = document.getElementById("androidDebugFab");
-const dbgLogEl = document.getElementById("dbgLog");
-
-function dbg(msg) {
-  const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
-  console.log(line);
-  if (dbgLogEl) {
-    dbgLogEl.textContent = (dbgLogEl.textContent + "\n" + line).trim();
-    dbgLogEl.scrollTop = dbgLogEl.scrollHeight;
-  }
-}
-
-// Enable debug hub on mobile
-(function initAndroidDebugHub(){
-  if (!dbgHub || !dbgFab) return;
-  if (!isMobile) return;
-
-  const btnCollapse = document.getElementById("dbgCollapseBtn");
-  const btnHide = document.getElementById("dbgHideBtn");
-
-  function clampToViewport(){
-    if (dbgHub.style.display === "none") return;
-    const r = dbgHub.getBoundingClientRect();
-    const pad = 8;
-    let x = r.left, y = r.top;
-    x = Math.max(pad, Math.min(window.innerWidth - r.width - pad, x));
-    y = Math.max(pad, Math.min(window.innerHeight - r.height - pad, y));
-    dbgHub.style.left = x + "px";
-    dbgHub.style.top  = y + "px";
-    dbgHub.style.right = "auto";
-    dbgHub.style.bottom = "auto";
-    try { localStorage.setItem("dbgHubPos", JSON.stringify({x,y})); } catch {}
-  }
-
-  function showHub(){ dbgHub.style.display="block"; dbgFab.classList.remove("show"); clampToViewport(); }
-  function hideHub(){ dbgHub.style.display="none"; dbgFab.classList.add("show"); }
-
-  dbgHub.style.display="none";
-  dbgFab.classList.add("show");
-
-  btnDebug?.addEventListener("click", ()=> {
-    const vis = dbgHub.style.display !== "none";
-    if (vis) hideHub(); else showHub();
-  });
-  dbgFab.addEventListener("click", showHub);
-
-  btnCollapse?.addEventListener("click",(e)=>{
-    e.stopPropagation();
-    dbgHub.classList.toggle("collapsed");
-    try { localStorage.setItem("dbgHubCollapsed", dbgHub.classList.contains("collapsed") ? "1" : "0"); } catch {}
-    clampToViewport();
-  });
-  btnHide?.addEventListener("click",(e)=>{ e.stopPropagation(); hideHub(); });
-
+function initControllers() {
   try {
-    const saved = JSON.parse(localStorage.getItem("dbgHubPos") || "null");
-    if (saved && typeof saved.x==="number" && typeof saved.y==="number") {
-      dbgHub.style.left = saved.x + "px";
-      dbgHub.style.top  = saved.y + "px";
-      dbgHub.style.right = "auto";
-      dbgHub.style.bottom = "auto";
-    }
-    const collapsed = localStorage.getItem("dbgHubCollapsed");
-    if (collapsed === "0") dbgHub.classList.remove("collapsed");
-    if (collapsed === "1") dbgHub.classList.add("collapsed");
-  } catch {}
+    const c0 = renderer.xr.getController(0);
+    const c1 = renderer.xr.getController(1);
+    c0.name = "controller0";
+    c1.name = "controller1";
+    player.add(c0);
+    player.add(c1);
 
-  const header = dbgHub.querySelector(".dbgHeader");
-  if (!header) return;
+    controllers.left = c0;
+    controllers.right = c1;
 
-  let dragging=false, startX=0,startY=0, baseX=0,baseY=0;
+    // quick visual pointer
+    const rayGeom = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 0, -1)
+    ]);
+    const rayMat = new THREE.LineBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.9 });
+    const ray0 = new THREE.Line(rayGeom, rayMat); ray0.scale.z = 6;
+    const ray1 = new THREE.Line(rayGeom, rayMat.clone()); ray1.scale.z = 6;
 
-  header.addEventListener("pointerdown",(e)=>{
-    if (e.target && (e.target.tagName==="BUTTON" || e.target.closest("button"))) return;
-    dragging=true;
-    dbgHub.classList.add("dragging");
-    header.setPointerCapture(e.pointerId);
-    const r = dbgHub.getBoundingClientRect();
-    startX=e.clientX; startY=e.clientY;
-    baseX=r.left; baseY=r.top;
-    dbgHub.style.left = baseX + "px";
-    dbgHub.style.top  = baseY + "px";
-    dbgHub.style.right="auto";
-    dbgHub.style.bottom="auto";
-  });
+    c0.add(ray0);
+    c1.add(ray1);
 
-  header.addEventListener("pointermove",(e)=>{
-    if (!dragging) return;
-    dbgHub.style.left = (baseX + (e.clientX-startX)) + "px";
-    dbgHub.style.top  = (baseY + (e.clientY-startY)) + "px";
-  });
-
-  header.addEventListener("pointerup",(e)=>{
-    if (!dragging) return;
-    dragging=false;
-    dbgHub.classList.remove("dragging");
-    try{ header.releasePointerCapture(e.pointerId);}catch{}
-    clampToViewport();
-  });
-
-  window.addEventListener("resize", clampToViewport);
-})();
-
-// -----------------------------------------------------------
-// Android dual-stick move/look
-// -----------------------------------------------------------
-const touchControls = document.getElementById("touchControls");
-const input = { moveX:0, moveY:0, lookX:0, lookY:0, yaw:0, pitch:0, enabled:false };
-const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
-
-function setupSticks(){
-  if (!touchControls) return;
-
-  const moveStick = document.getElementById("moveStick");
-  const lookStick = document.getElementById("lookStick");
-  const state = {
-    move: { active:false, id:null, ox:0, oy:0 },
-    look: { active:false, id:null, ox:0, oy:0 }
-  };
-
-  function bind(stickEl, which){
-    const nub = stickEl.querySelector(".nub");
-    const S = state[which];
-
-    const setNub = (x,y)=>{
-      if (!nub) return;
-      nub.style.transform = `translate(${x}px,${y}px) translate(-50%,-50%)`;
-    };
-
-    stickEl.addEventListener("pointerdown",(e)=>{
-      S.active=true; S.id=e.pointerId;
-      stickEl.setPointerCapture(e.pointerId);
-      const r = stickEl.getBoundingClientRect();
-      S.ox = r.left + r.width/2;
-      S.oy = r.top + r.height/2;
-      setNub(0,0);
-    });
-
-    stickEl.addEventListener("pointermove",(e)=>{
-      if (!S.active || e.pointerId!==S.id) return;
-      const dx = e.clientX - S.ox;
-      const dy = e.clientY - S.oy;
-      const max = 46;
-      const nx = clamp(dx, -max, max);
-      const ny = clamp(dy, -max, max);
-      setNub(nx, ny);
-
-      const vx = nx / max;
-      const vy = ny / max;
-
-      if (which==="move"){
-        input.moveX = vx;
-        input.moveY = -vy;
-      } else {
-        input.lookX = vx;
-        input.lookY = -vy;
-      }
-    });
-
-    const end = (e)=>{
-      if (e.pointerId!==S.id) return;
-      S.active=false; S.id=null;
-      setNub(0,0);
-      if (which==="move"){ input.moveX=0; input.moveY=0; }
-      else { input.lookX=0; input.lookY=0; }
-    };
-
-    stickEl.addEventListener("pointerup", end);
-    stickEl.addEventListener("pointercancel", end);
-  }
-
-  bind(moveStick,"move");
-  bind(lookStick,"look");
-}
-
-function enableAndroidControlsIfNeeded(){
-  const xrActive = renderer.xr.isPresenting;
-  if (isMobile && !xrActive) {
-    touchControls.style.display = "block";
-    input.enabled = true;
-  } else {
-    touchControls.style.display = "none";
-    input.enabled = false;
-    input.moveX=input.moveY=input.lookX=input.lookY=0;
+    log("[main] controllers ready ✅");
+  } catch (e) {
+    console.warn("[main] controllers init failed:", e);
   }
 }
+initControllers();
 
-setupSticks();
-enableAndroidControlsIfNeeded();
+// --- Desktop + Android fallback controls (no Oculus required)
+const input = {
+  keys: new Set(),
+  yaw: 0,
+  pitch: 0,
+  lookActive: false,
+  lastX: 0,
+  lastY: 0,
 
-// -----------------------------------------------------------
-// Controllers array + axes capture
-// -----------------------------------------------------------
-let controllers = []; // [0]=left [1]=right
-
-function buildControllerArray(){
-  const c0 = renderer.xr.getController(0);
-  const c1 = renderer.xr.getController(1);
-  controllers = [c0, c1];
-  scene.add(c0); scene.add(c1);
-}
-
-function updateControllerAxes(){
-  for (const c of controllers) {
-    const src = c?.inputSource;
-    const gp = src?.gamepad;
-    if (gp && gp.axes) c.userData.axes = gp.axes.slice(0);
-    else if (!c.userData.axes) c.userData.axes = [0,0,0,0];
+  touchMode: {
+    active: false,
+    oneFinger: false,
+    twoFinger: false,
+    last: { x: 0, y: 0 },
+    last2: { x: 0, y: 0 },
+    move: new THREE.Vector2(0, 0)
   }
-}
+};
 
-buildControllerArray();
+addEventListener("keydown", (e) => input.keys.add(e.key.toLowerCase()));
+addEventListener("keyup", (e) => input.keys.delete(e.key.toLowerCase()));
 
-renderer.xr.addEventListener("sessionstart", ()=>{
-  dbg("[main] XR sessionstart ✅");
-  buildControllerArray();
-  enableAndroidControlsIfNeeded();
+renderer.domElement.addEventListener("mousedown", (e) => {
+  input.lookActive = true;
+  input.lastX = e.clientX;
+  input.lastY = e.clientY;
 });
-renderer.xr.addEventListener("sessionend", ()=>{
-  dbg("[main] XR sessionend ✅");
-  enableAndroidControlsIfNeeded();
+addEventListener("mouseup", () => (input.lookActive = false));
+addEventListener("mousemove", (e) => {
+  if (!input.lookActive) return;
+  const dx = e.clientX - input.lastX;
+  const dy = e.clientY - input.lastY;
+  input.lastX = e.clientX;
+  input.lastY = e.clientY;
+
+  input.yaw -= dx * 0.0022;
+  input.pitch -= dy * 0.0020;
+  input.pitch = Math.max(-1.25, Math.min(1.25, input.pitch));
 });
 
-// VRButton
-(async ()=>{
-  const VRButton = await loadVRButton();
-  if (VRButton && navigator.xr) {
-    document.body.appendChild(VRButton.createButton(renderer));
-    dbg("[main] VRButton appended ✅");
-  } else {
-    dbg("[main] VRButton not available (ok)");
+renderer.domElement.addEventListener("touchstart", (e) => {
+  input.touchMode.active = true;
+  if (e.touches.length === 1) {
+    input.touchMode.oneFinger = true;
+    input.touchMode.twoFinger = false;
+    input.touchMode.last.x = e.touches[0].clientX;
+    input.touchMode.last.y = e.touches[0].clientY;
+  } else if (e.touches.length >= 2) {
+    input.touchMode.oneFinger = false;
+    input.touchMode.twoFinger = true;
+    input.touchMode.last.x = e.touches[0].clientX;
+    input.touchMode.last.y = e.touches[0].clientY;
+    input.touchMode.last2.x = e.touches[1].clientX;
+    input.touchMode.last2.y = e.touches[1].clientY;
   }
-})();
+}, { passive: false });
 
-// -----------------------------------------------------------
-// Load world
-// -----------------------------------------------------------
-const World = await loadWorld(BUILD);
-dbg("[main] world.js imported ✅");
+renderer.domElement.addEventListener("touchmove", (e) => {
+  if (!input.touchMode.active) return;
 
-await World.init({ THREE, scene, renderer, camera, player, controllers, log: dbg, BUILD });
-dbg("[main] world init ✅");
+  if (e.touches.length === 1 && input.touchMode.oneFinger) {
+    const x = e.touches[0].clientX;
+    const y = e.touches[0].clientY;
+    const dx = x - input.touchMode.last.x;
+    const dy = y - input.touchMode.last.y;
+    input.touchMode.last.x = x;
+    input.touchMode.last.y = y;
 
-// HUD buttons
-btnAction?.addEventListener("click", ()=> { try { World.clickFromCamera?.(); } catch {} });
-btnTeleport?.addEventListener("click", ()=> { try { World.teleportFromCamera?.(); } catch {} });
-btnMenu?.addEventListener("click", ()=> dbg("[ui] Menu tapped"));
-
-// Touch fallback: 1 tap action, 2-finger tap teleport
-let twoFingerArmed = false;
-
-function isUIHit(e){
-  const el = e.target;
-  if (!el) return false;
-  return !!(el.closest?.("#hud") || el.closest?.("#androidDebugHub") || el.closest?.("#androidDebugFab") || el.closest?.("#touchControls"));
-}
-
-renderer.domElement.addEventListener("touchstart", (e)=>{
-  if (renderer.xr.isPresenting) return;
-  if (isUIHit(e)) return;
-  if (e.touches.length === 2) twoFingerArmed = true;
-}, { passive:true });
-
-renderer.domElement.addEventListener("touchend", (e)=>{
-  if (renderer.xr.isPresenting) return;
-  if (isUIHit(e)) return;
-
-  if (twoFingerArmed) {
-    twoFingerArmed = false;
-    try { World.teleportFromCamera?.(); } catch {}
-    return;
+    input.yaw -= dx * 0.0032;
+    input.pitch -= dy * 0.0030;
+    input.pitch = Math.max(-1.25, Math.min(1.25, input.pitch));
   }
-  try { World.clickFromCamera?.(); } catch {}
-}, { passive:true });
 
-// Non-XR movement
-const clock = new THREE.Clock();
+  if (e.touches.length >= 2 && input.touchMode.twoFinger) {
+    // 2-finger drag -> move
+    const x1 = e.touches[0].clientX, y1 = e.touches[0].clientY;
+    const x2 = e.touches[1].clientX, y2 = e.touches[1].clientY;
+    const cx = (x1 + x2) * 0.5;
+    const cy = (y1 + y2) * 0.5;
 
-function updateNonXR(dt){
-  if (!input.enabled) return;
+    const lastCx = (input.touchMode.last.x + input.touchMode.last2.x) * 0.5;
+    const lastCy = (input.touchMode.last.y + input.touchMode.last2.y) * 0.5;
 
-  input.yaw   -= input.lookX * dt * 2.2;
-  input.pitch  = clamp(input.pitch + input.lookY * dt * 1.6, -1.2, 1.2);
+    const dx = cx - lastCx;
+    const dy = cy - lastCy;
 
+    input.touchMode.last.x = x1; input.touchMode.last.y = y1;
+    input.touchMode.last2.x = x2; input.touchMode.last2.y = y2;
+
+    // scale for movement
+    input.touchMode.move.x = THREE.MathUtils.clamp(dx * 0.0025, -0.25, 0.25);
+    input.touchMode.move.y = THREE.MathUtils.clamp(dy * 0.0025, -0.25, 0.25);
+  }
+
+  e.preventDefault();
+}, { passive: false });
+
+renderer.domElement.addEventListener("touchend", () => {
+  input.touchMode.active = false;
+  input.touchMode.oneFinger = false;
+  input.touchMode.twoFinger = false;
+  input.touchMode.move.set(0, 0);
+}, { passive: true });
+
+renderer.domElement.addEventListener("dblclick", () => {
+  input.yaw = 0;
+  input.pitch = 0;
+});
+
+// Apply look to player/camera in non-XR
+function applyNonXRLook() {
+  // Only do this when NOT in XR presenting
+  if (renderer.xr.isPresenting) return;
   player.rotation.y = input.yaw;
   camera.rotation.x = input.pitch;
-
-  const speed = 2.2;
-  const mx = input.moveX, my = input.moveY;
-
-  if (mx || my) {
-    const forward = new THREE.Vector3(0,0,-1).applyAxisAngle(new THREE.Vector3(0,1,0), input.yaw);
-    const right   = new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0), input.yaw);
-    const vel = new THREE.Vector3();
-    vel.addScaledVector(forward, my);
-    vel.addScaledVector(right, mx);
-    if (vel.lengthSq() > 0.0001) {
-      vel.normalize().multiplyScalar(speed * dt);
-      player.position.add(vel);
-    }
-  }
 }
 
-// Render loop
-renderer.setAnimationLoop(()=>{
-  const dt = Math.min(clock.getDelta(), 0.05);
-  enableAndroidControlsIfNeeded();
-  updateControllerAxes();
-  if (!renderer.xr.isPresenting) updateNonXR(dt);
-  World.update?.(dt);
-  renderer.render(scene, camera);
+// Simple locomotion when NOT in XR
+function applyNonXRMove(dt) {
+  if (renderer.xr.isPresenting) return;
+
+  const speed = (input.keys.has("shift") ? 4.8 : 2.8);
+  const v = new THREE.Vector3();
+
+  if (input.keys.has("w") || input.keys.has("arrowup")) v.z -= 1;
+  if (input.keys.has("s") || input.keys.has("arrowdown")) v.z += 1;
+  if (input.keys.has("a") || input.keys.has("arrowleft")) v.x -= 1;
+  if (input.keys.has("d") || input.keys.has("arrowright")) v.x += 1;
+
+  // touch 2-finger move
+  if (input.touchMode.twoFinger) {
+    v.x += input.touchMode.move.x * 5.0;
+    v.z += input.touchMode.move.y * 5.0;
+  }
+
+  if (v.lengthSq() < 1e-6) return;
+  v.normalize().multiplyScalar(speed * dt);
+
+  // rotate movement by player yaw
+  const yaw = player.rotation.y;
+  const sin = Math.sin(yaw), cos = Math.cos(yaw);
+  const dx = v.x * cos - v.z * sin;
+  const dz = v.x * sin + v.z * cos;
+
+  player.position.x += dx;
+  player.position.z += dz;
+
+  // keep grounded
+  player.position.y = 0;
+}
+
+// --- Resize
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
 });
 
-// Resize
-window.addEventListener("resize", ()=>{
-  camera.aspect = window.innerWidth/window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+// --- Boot world (guarded so VR button survives any crash)
+let world = null;
+
+(async () => {
+  try {
+    hudStatus("Loading world modules…");
+    world = await World.init({ THREE, scene, renderer, camera, player, controllers, log, BUILD });
+    hudStatus("World ready ✅");
+    log("[main] world init ✅");
+  } catch (e) {
+    console.error("[main] world init error:", e);
+    hudStatus("World failed (check console). VR button should still show.");
+  }
+})();
+
+// --- Render loop
+let last = performance.now();
+renderer.setAnimationLoop(() => {
+  const t = performance.now();
+  const dt = Math.min(0.05, (t - last) / 1000);
+  last = t;
+
+  applyNonXRLook();
+  applyNonXRMove(dt);
+
+  try { world?.update?.(dt); } catch (e) { console.warn("[main] world.update error:", e); }
+  renderer.render(scene, camera);
 });

@@ -1,10 +1,9 @@
-// /js/textures.js — Scarlett TextureKit v4 (NO-FETCH, ROCK SOLID)
-// - Exports: createTextureKit, TextureBank
-// - Fix: no HEAD/GET probing (mobile/GitHub can misbehave). We just try to load.
-// - Fix: absolute base computed from import.meta.url -> /assets/textures/
+// /js/textures.js — Scarlett TextureKit v5 DEBUG (PRINTS URLS)
+// Purpose: prove the exact URL being attempted on device + fix GitHub Pages root reliably.
 
 export const TextureBank = {
-  base: new URL("../assets/textures/", import.meta.url).toString(),
+  // We'll fill this in dynamically below
+  base: "",
   avatars: {
     face: [
       "avatars/Face.jpg", "avatars/face.jpg",
@@ -30,11 +29,29 @@ export const TextureBank = {
   }
 };
 
+// Robust “repo root” for GitHub Pages:
+// location.pathname is usually: /scarlett-poker-vr/ or /scarlett-poker-vr/index.html
+function getRepoRootURL() {
+  const parts = (location.pathname || "/").split("/").filter(Boolean);
+  // If served from a repo pages site, first segment is repo name
+  // e.g. ["scarlett-poker-vr"]
+  const repo = parts.length ? parts[0] : "";
+  const rootPath = repo ? `/${repo}/` : "/";
+  return location.origin + rootPath;
+}
+
+TextureBank.base = getRepoRootURL() + "assets/textures/";
+
+// Startup signature (so we KNOW you deployed this file)
+console.log("[textures] ✅ v5 DEBUG loaded");
+console.log("[textures] repoRoot =", getRepoRootURL());
+console.log("[textures] base     =", TextureBank.base);
+
 function safeJoin(base, rel) {
   return new URL(rel, base).toString();
 }
 
-function loadWithCandidates({ THREE, loader, base, candidates, log }) {
+function loadWithCandidates({ THREE, loader, base, candidates, log, label }) {
   const L = loader || new THREE.TextureLoader();
   const b = base || TextureBank.base;
 
@@ -50,10 +67,10 @@ function loadWithCandidates({ THREE, loader, base, candidates, log }) {
 
       const rel = candidates[i++];
       const url = safeJoin(b, rel);
+      const finalUrl = url + (url.includes("?") ? "&" : "?") + "v=" + Date.now();
 
-      // Cache-bust textures too (important on mobile GH Pages)
-      const bust = (url.includes("?") ? "&" : "?") + "v=" + Date.now();
-      const finalUrl = url + bust;
+      // IMPORTANT: print every attempt (first 2 attempts per texture to keep log readable)
+      if (i <= 2) log?.(`[tex] trying ${label || ""} -> ${finalUrl}`);
 
       L.load(
         finalUrl,
@@ -64,7 +81,6 @@ function loadWithCandidates({ THREE, loader, base, candidates, log }) {
         },
         undefined,
         () => {
-          // try next candidate
           tryNext();
         }
       );
@@ -74,30 +90,28 @@ function loadWithCandidates({ THREE, loader, base, candidates, log }) {
   });
 }
 
-export async function loadTextureAny({ THREE, loader, base, candidates, log }) {
-  return loadWithCandidates({ THREE, loader, base, candidates, log });
+export async function loadTextureAny({ THREE, loader, base, candidates, log, label }) {
+  return loadWithCandidates({ THREE, loader, base, candidates, log, label });
 }
 
 export function createTextureKit({ THREE, renderer, base, log = console.log }) {
   const loader = new THREE.TextureLoader();
-
-  // Prefer explicit base if passed, else bank base
   const resolvedBase = base ? new URL(base, location.href).toString() : TextureBank.base;
 
   const kit = {
     base: resolvedBase,
     loader,
     async getAvatarFace() {
-      return loadTextureAny({ THREE, loader, base: resolvedBase, candidates: TextureBank.avatars.face, log });
+      return loadTextureAny({ THREE, loader, base: resolvedBase, candidates: TextureBank.avatars.face, log, label: "face" });
     },
     async getAvatarHands() {
-      return loadTextureAny({ THREE, loader, base: resolvedBase, candidates: TextureBank.avatars.hands, log });
+      return loadTextureAny({ THREE, loader, base: resolvedBase, candidates: TextureBank.avatars.hands, log, label: "hands" });
     },
     async getAvatarWatch() {
-      return loadTextureAny({ THREE, loader, base: resolvedBase, candidates: TextureBank.avatars.watch, log });
+      return loadTextureAny({ THREE, loader, base: resolvedBase, candidates: TextureBank.avatars.watch, log, label: "watch" });
     },
     async getAvatarMenuHand() {
-      return loadTextureAny({ THREE, loader, base: resolvedBase, candidates: TextureBank.avatars.menuHand, log });
+      return loadTextureAny({ THREE, loader, base: resolvedBase, candidates: TextureBank.avatars.menuHand, log, label: "menuHand" });
     }
   };
 

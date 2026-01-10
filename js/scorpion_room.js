@@ -1,9 +1,10 @@
-// /js/scorpion_room.js — Scorpion Room v3.5 (OVAL + CHAIRS + SPAWN PATCH SAFE)
+// /js/scorpion_room.js — Scorpion Room v3.6 (TRUE OVAL 6-SEAT)
 // Fixes:
-// - OVAL table (scaled top + rim)
-// - Adds 6 visible chairs around the oval
-// - Patches scorpion_seat_1 regardless of ctx.spawns structure (map/list/direct)
-// - Does NOT touch Y spawn (height lock should not override in VR)
+// - TRUE oval table top (Shape + ExtrudeGeometry), not a scaled cylinder
+// - TRUE oval rim (TubeGeometry along EllipseCurve), not a scaled torus
+// - 6 chairs placed evenly around oval (x=a*sin, z=b*cos)
+// - Safe spawn patch for scorpion_seat_1 (supports ctx.spawns.map / list / direct)
+// - Keeps room show/hide via setActive()
 
 export const ScorpionRoom = {
   build(ctx) {
@@ -61,11 +62,14 @@ export const ScorpionRoom = {
     group.add(key);
     group.add(key.target);
 
-    // TABLE (OVAL)
+    // =========================
+    // TRUE OVAL TABLE (6 seats)
+    // =========================
     const table = new THREE.Group();
     table.name = "SCORPION_TABLE";
     group.add(table);
 
+    // Base pedestal (fine as cylinder)
     const base = new THREE.Mesh(
       new THREE.CylinderGeometry(0.85, 0.95, 0.75, 32),
       new THREE.MeshStandardMaterial({ color: 0x1a1a22, roughness: 0.6, metalness: 0.1 })
@@ -75,33 +79,63 @@ export const ScorpionRoom = {
     base.receiveShadow = true;
     table.add(base);
 
-    // OVAL TOP: build round, then scale to oval
-    const top = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.95, 0.95, 0.10, 64),
-      new THREE.MeshStandardMaterial({ color: 0x0c5a3a, roughness: 0.85, metalness: 0.0 })
-    );
-    top.position.set(0, 0.80, 0);
+    // OVAL dims (these define the actual table shape)
+    // a = half-width (X radius), b = half-length (Z radius)
+    const a = 1.35;   // wider
+    const b = 0.98;   // narrower
+
+    const TOP_Y = 0.80;
+    const TOP_THICK = 0.10;
+
+    // Top (TRUE oval) using Shape.absellipse + ExtrudeGeometry
+    const topShape = new THREE.Shape();
+    topShape.absellipse(0, 0, a, b, 0, Math.PI * 2, false, 0);
+
+    const topGeo = new THREE.ExtrudeGeometry(topShape, {
+      depth: TOP_THICK,
+      bevelEnabled: true,
+      bevelThickness: 0.015,
+      bevelSize: 0.015,
+      bevelSegments: 2,
+      curveSegments: 64,
+    });
+
+    const topMat = new THREE.MeshStandardMaterial({
+      color: 0x0c5a3a, roughness: 0.88, metalness: 0.0
+    });
+
+    const top = new THREE.Mesh(topGeo, topMat);
+    // Extrude goes +Z in local; rotate so thickness is vertical
+    top.rotation.x = -Math.PI / 2;
+    top.position.set(0, TOP_Y, 0);
     top.castShadow = true;
     top.receiveShadow = true;
-
-    // MAKE IT OVAL: wider X, slightly tighter Z
-    top.scale.set(1.35, 1.0, 1.05);
     table.add(top);
 
-    // rim glow (oval by scaling too)
-    const rim = new THREE.Mesh(
-      new THREE.TorusGeometry(0.98, 0.025, 10, 120),
-      new THREE.MeshBasicMaterial({ color: 0xb266ff, transparent: true, opacity: 0.70 })
+    // Rim glow (TRUE oval) using EllipseCurve + TubeGeometry
+    const rimY = TOP_Y + TOP_THICK + 0.02;
+    const rimCurve = new THREE.EllipseCurve(
+      0, 0,     // ax, ay
+      a + 0.03, // xRadius
+      b + 0.03, // yRadius
+      0, Math.PI * 2,
+      false, 0
     );
-    rim.rotation.x = Math.PI / 2;
-    rim.position.y = top.position.y + 0.06;
-    rim.scale.set(1.35, 1.0, 1.05); // match oval
+
+    const rimPts = rimCurve.getPoints(180).map(p => new THREE.Vector3(p.x, 0, p.y));
+    const rimPath = new THREE.CatmullRomCurve3(rimPts, true);
+
+    const rimGeo = new THREE.TubeGeometry(rimPath, 220, 0.015, 10, true);
+    const rimMat = new THREE.MeshBasicMaterial({ color: 0xb266ff, transparent: true, opacity: 0.75 });
+    const rim = new THREE.Mesh(rimGeo, rimMat);
+    rim.position.set(0, rimY, 0);
     table.add(rim);
 
-    // surfaceY for PokerSim (table top)
-    const surfaceY = group.position.y + table.position.y + top.position.y + 0.05;
+    // surfaceY for PokerSim
+    const surfaceY = group.position.y + table.position.y + TOP_Y + TOP_THICK + 0.01;
     table.userData.surfaceY = surfaceY;
-    table.userData.dealRadius = 0.72;
+    // dealRadius should fit the oval; use smaller of radii-ish
+    table.userData.dealRadius = Math.min(a, b) * 0.72;
 
     // GUARDRAIL
     const RAIL_R = 2.15;
@@ -130,7 +164,9 @@ export const ScorpionRoom = {
     group.add(railCollider);
     ctx.colliders?.push?.(railCollider);
 
-    // CHAIRS (6 chairs around OVAL table)
+    // =========================
+    // CHAIRS (6 players, oval)
+    // =========================
     const matSeat = new THREE.MeshStandardMaterial({
       color: 0x1b1b24,
       roughness: 0.7,
@@ -138,7 +174,12 @@ export const ScorpionRoom = {
       emissive: 0x120816,
       emissiveIntensity: 0.10,
     });
-    const matTrim = new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.55 });
+
+    const matTrim = new THREE.MeshBasicMaterial({
+      color: 0x7fe7ff,
+      transparent: true,
+      opacity: 0.55
+    });
 
     function makeChair(name) {
       const chair = new THREE.Group();
@@ -160,16 +201,16 @@ export const ScorpionRoom = {
       return chair;
     }
 
-    // OVAL CHAIR RING: different radii for x/z so it matches oval
-    const chairRX = 1.85;
-    const chairRZ = 1.35;
+    // Chair ring around oval: slightly bigger than table ellipse
+    const chairA = a + 0.55;
+    const chairB = b + 0.55;
 
     const seats = [
-      { key: "scorpion_seat_1", angle:   0 },  // player (front)
-      { key: "scorpion_bot_1",  angle: 180 },  // opposite
+      { key: "scorpion_seat_1", angle:   0 },  // player
+      { key: "scorpion_bot_1",  angle:  60 },
       { key: "scorpion_bot_2",  angle: 120 },
-      { key: "scorpion_bot_3",  angle: 240 },
-      { key: "scorpion_bot_4",  angle:  60 },
+      { key: "scorpion_bot_3",  angle: 180 },
+      { key: "scorpion_bot_4",  angle: 240 },
       { key: "scorpion_bot_5",  angle: 300 },
     ];
 
@@ -177,20 +218,26 @@ export const ScorpionRoom = {
 
     for (const s of seats) {
       const rad = (s.angle * Math.PI) / 180;
-      const x = Math.sin(rad) * chairRX;
-      const z = Math.cos(rad) * chairRZ;
+
+      // ellipse param placement
+      const x = Math.sin(rad) * chairA;
+      const z = Math.cos(rad) * chairB;
 
       const chair = makeChair(`CHAIR_${s.key}`);
       chair.position.set(x, 0, z);
-      chair.lookAt(0, 0.45, 0); // face table center
+
+      // face table center
+      chair.lookAt(0, 0.50, 0);
+
       table.add(chair);
 
       if (s.key === "scorpion_seat_1") playerChair = chair;
     }
 
-    // PATCH SPAWN (SAFE for map/list/flat)
+    // =========================
+    // SAFE SPAWN PATCH (chair)
+    // =========================
     function getSpawnRef(key) {
-      // supports ctx.spawns.map[key], ctx.spawns.list[key], ctx.spawns[key]
       return (
         ctx.spawns?.map?.[key] ||
         ctx.spawns?.list?.[key] ||
@@ -212,7 +259,7 @@ export const ScorpionRoom = {
         sp.x = pos.x;
         sp.z = pos.z;
         sp.yaw = yaw;
-        // IMPORTANT: do NOT set sp.y here (height should be 1.6 from spawn system)
+        // leave sp.y alone — your SpawnPoints system should own y (1.6)
         log?.(`[scorpion] ✅ patched scorpion_seat_1 -> x=${sp.x.toFixed(2)} z=${sp.z.toFixed(2)} yaw=${sp.yaw.toFixed(2)}`);
       } else {
         log?.("[scorpion] ⚠️ could not find ctx.spawns for scorpion_seat_1 (patch skipped)");
@@ -231,7 +278,7 @@ export const ScorpionRoom = {
     };
 
     system.setActive(false);
-    log?.("[scorpion] build ✅ v3.5 (OVAL table + 6 chairs + spawn patch safe)");
+    log?.("[scorpion] build ✅ v3.6 (TRUE oval 6-seat table + chairs)");
     return system;
   },
 };

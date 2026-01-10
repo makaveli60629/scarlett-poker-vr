@@ -1,16 +1,31 @@
 import * as THREE from "three";
 
 export function createWorld(scene) {
-  // Floor
+  // Circular casino floor
   const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(40, 40),
-    new THREE.MeshStandardMaterial({ color: 0x101014, roughness: 0.98 })
+    new THREE.CircleGeometry(10, 64),
+    new THREE.MeshStandardMaterial({ color: 0x07080f, roughness: 0.98 })
   );
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   scene.add(floor);
 
-  // Poker table anchor
+  // Neon ring
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(7.2, 0.06, 10, 64),
+    new THREE.MeshStandardMaterial({
+      color: 0x0a0b12,
+      roughness: 0.4,
+      metalness: 0.2,
+      emissive: new THREE.Color(0x00ffff),
+      emissiveIntensity: 0.55
+    })
+  );
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = 0.02;
+  scene.add(ring);
+
+  // Poker table
   const table = new THREE.Mesh(
     new THREE.CylinderGeometry(1.2, 1.2, 0.12, 40),
     new THREE.MeshStandardMaterial({ color: 0x0c2a22, roughness: 0.9, metalness: 0.05 })
@@ -27,13 +42,13 @@ export function createWorld(scene) {
   rim.position.y += 0.07;
   scene.add(rim);
 
-  // Dealer position marker (used by deal animation)
+  // Dealer anchor
   const dealer = new THREE.Object3D();
   dealer.name = "DealerAnchor";
   dealer.position.set(0, 0.92, -0.35);
   scene.add(dealer);
 
-  // Lights (never dark)
+  // Lights
   const key = new THREE.DirectionalLight(0xffffff, 1.0);
   key.position.set(5, 10, 7.5);
   scene.add(key);
@@ -50,19 +65,16 @@ export function createLowPolyAvatar() {
     roughness: 0.85,
   });
 
-  // Torso
   const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.25, 0.6, 4, 8), bodyMat);
   torso.name = "Torso";
   torso.position.y = 1.30;
   avatar.add(torso);
 
-  // Head
   const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.15, 1), bodyMat);
   head.name = "Head";
   head.position.y = 0.50;
   torso.add(head);
 
-  // Hands (driven by WebXR)
   const handGeo = new THREE.IcosahedronGeometry(0.06, 0);
   avatar.leftHand = new THREE.Mesh(handGeo, bodyMat);
   avatar.rightHand = new THREE.Mesh(handGeo, bodyMat);
@@ -70,7 +82,6 @@ export function createLowPolyAvatar() {
   avatar.rightHand.name = "RightHand";
   avatar.add(avatar.leftHand, avatar.rightHand);
 
-  // Legs
   const legGeo = new THREE.CapsuleGeometry(0.08, 0.5, 4, 6);
   const LLeg = new THREE.Mesh(legGeo, bodyMat);
   const RLeg = new THREE.Mesh(legGeo, bodyMat);
@@ -78,7 +89,6 @@ export function createLowPolyAvatar() {
   RLeg.position.set(0.15, -0.6, 0);
   torso.add(LLeg, RLeg);
 
-  // Head anchor for nametags
   avatar.headAnchor = new THREE.Object3D();
   avatar.headAnchor.position.set(0, 0.30, 0);
   head.add(avatar.headAnchor);

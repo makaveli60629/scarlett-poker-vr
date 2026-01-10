@@ -1,7 +1,9 @@
-// /js/main.js — Scarlett VR Poker MAIN v3.7 (FULL)
-// ✅ Adds RoomBridge listener for "scarlett-room" so UI always works
+// /js/main.js — Scarlett VR Poker MAIN v3.8 (FULL)
+// ✅ Keeps XR tiered requestSession logic + VRButton override
 // ✅ Publishes ctx on window.__SCARLETT_CTX for debugging
-// ✅ Keeps your XR tiered requestSession logic
+// ✅ Wires RoomManager correctly (ctx.rooms) so "scarlett-room" always works
+// ✅ Uses World anchors for spawn/seat so facing + seating is consistent
+// ✅ Adds XR-start re-align to prevent “spawn drift / black / stuck” cases
 
 import { VRButton } from "./VRButton.js";
 import * as THREE_NS from "./three.js";
@@ -155,6 +157,93 @@ async function boot() {
     warn("[main] VRButton failed (non-fatal)", e);
   }
 
+  // Core ctx (World will extend it)
+  const controllers = { left: null, right: null, hands: [] };
+
+  const ctx = {
+    THREE,
+    scene,
+    renderer,
+    camera,
+    player,
+    controllers,
+    log,
+    BUILD: "gh-pages",
+    sessionInit,
+    rooms: null,  // will be wired by World/RoomManager
+  };
+
+  window.__SCARLETT_CTX = ctx;
+
+  // Controls (optional)
+  const cMod = await safeImport("./controls.js");
+  const Controls = cMod?.Controls || null;
+  if (Controls) log("[main] ✅ Controls imported");
+  else warn("[main] ⚠️ Controls missing (non-fatal)");
+
+  // World
+  let world = null;
+  try {
+    world = await World.init(ctx);
+    world ||= {};
+    ctx.world = world;
+
+    // IMPORTANT: World.init may have its own ctx internally, but we keep a handle:
+    // If World stored ctx as World.ctx (as in the v12 world.js I provided),
+    // then ctx.rooms may be set there. Either way we normalize below.
+    ctx.rooms = ctx.rooms || world?.ctx?.rooms || world?.rooms || ctx.rooms;
+
+    log("[main] world init ✅");
+  } catch (e) {
+    err("[main] ❌ world init failed", e);
+    world = {};
+    ctx.world = world;
+  }
+
+  // If World didn’t set ctx.rooms, try to discover RoomManager on ctx/world
+  // (RoomManager.init(ctx) typically sets ctx.onTeleportHit + room state)
+  if (!ctx.rooms) {
+    // Preferred: world.ctx.rooms
+    if (world?.ctx?.rooms) ctx.rooms = world.ctx.rooms;
+    // Fallback: a rooms object on world
+    else if (world?.rooms) ctx.rooms = world.rooms;
+  }
+
+  // Init Controls (optional)
+  try {
+    if (Controls?.init) {
+      Controls.init({ ...ctx, world });
+      ctx.Controls = Controls;
+      log("[main] controls init ✅");
+    }
+  } catch (e) {
+    warn("[main] ⚠️ Controls.init failed (non-fatal)", e);
+  }
+
+  // ✅ RoomBridge: always handle UI room events (lobby/store/scorpion)
+  window.addEventListener("scarlett-room", (e) => {
+    const name = e?.detail?.name;
+    if (!name) return;
+    // Accept both "scorpion_room" and "scorpion"
+    const mapped =
+      name === "scorpion_room" ? "scorpion" :
+      name === "poker_room" ? "lobby" :
+      name;
+
+    if (ctx.rooms?.setRoom) ctx.rooms.setRoom(ctx, mapped);
+    else if (ctx.world?.rooms?.setRoom) ctx.world.rooms.setRoom(ctx, mapped);
+    else console.warn("[RoomBridge] rooms not ready yet:", mapped);
+  });
+
+  // Spawn: ALWAYS start in original lobby using World anchors (no Controls teleport)
+  try {
+    if (world?.movePlayerTo) world.movePlayerTo("lobby_spawn", ctx);
+    if (world?.setSeated) world.setSeated(false, ctx);
+  } catch (e) {
+    warn("[main] spawn align failed (non-fatal)", e);
+  }
+
+  // XR start function
   async function startXRFromUI() {
     if (!navigator.xr) return warn("[XR] navigator.xr missing");
     if (__XR_SESSION_ACTIVE) return warn("[XR] already active; ignoring");
@@ -166,6 +255,14 @@ async function boot() {
 
       __XR_SESSION_ACTIVE = true;
       __XR_SESSION_STARTING = false;
+
+      // Re-align once after XR begins (prevents drift / facing wrong)
+      setTimeout(() => {
+        try {
+          if (ctx.room === "scorpion" && world?.seatPlayer) world.seatPlayer(0, ctx);
+          else if (world?.movePlayerTo) world.movePlayerTo("lobby_spawn", ctx);
+        } catch {}
+      }, 50);
 
       session.addEventListener("end", () => {
         __XR_SESSION_ACTIVE = false;
@@ -194,80 +291,6 @@ async function boot() {
     log("[main] scarlett-enter-vr -> startXRFromUI ✅");
   });
 
-  const controllers = { left: null, right: null, hands: [] };
-
-  const ctx = {
-    THREE,
-    scene,
-    renderer,
-    camera,
-    player,
-    controllers,
-    log,
-    BUILD: "gh-pages",
-    sessionInit,
-  };
-
-  // expose for debugging
-  window.__SCARLETT_CTX = ctx;
-
-  // Controls
-  const cMod = await safeImport("./controls.js");
-  const Controls = cMod?.Controls || null;
-  if (Controls) log("[main] ✅ Controls imported");
-  else warn("[main] ⚠️ Controls missing (non-fatal)");
-
-  // World
-  let world = null;
-  try {
-    world = await World.init(ctx);
-    world ||= {};
-    world.spawns ||= {};
-    ctx.world = world;
-    log("[main] world init ✅");
-  } catch (e) {
-    err("[main] ❌ world init failed", e);
-    world = { spawns: {} };
-    ctx.world = world;
-  }
-
-  // init Controls
-  try {
-    if (Controls?.init) {
-      Controls.init({ ...ctx, world });
-      ctx.Controls = Controls;
-      log("[main] controls init ✅");
-    }
-  } catch (e) {
-    warn("[main] ⚠️ Controls.init failed (non-fatal)", e);
-  }
-
-  // ✅ RoomBridge: always handle UI room events
-  window.addEventListener("scarlett-room", (e) => {
-    const name = e?.detail?.name;
-    if (!name) return;
-    if (ctx.rooms?.setRoom) ctx.rooms.setRoom(name);
-    else if (ctx.world?.rooms?.setRoom) ctx.world.rooms.setRoom(name);
-    else console.warn("[RoomBridge] rooms not ready yet:", name);
-  });
-
-  // Auto teleport to lobby once
-  let didAutoTP = false;
-  const tryAutoTeleport = () => {
-    if (didAutoTP) return;
-    if (Controls?.forceStanding) {
-      Controls.forceStanding("lobby_spawn");
-      didAutoTP = true;
-      return;
-    }
-    if (Controls?.teleportToSpawn && (world?.spawns?.lobby_spawn || world?.spawns?.default)) {
-      Controls.teleportToSpawn(world?.spawns?.default ? "default" : "lobby_spawn", { standY: 1.65 });
-      didAutoTP = true;
-    }
-  };
-  tryAutoTeleport();
-  let retryFrames = 60;
-
   // Loop
   let last = performance.now();
   renderer.setAnimationLoop(() => {
@@ -279,9 +302,6 @@ async function boot() {
     try {
       Controls?.update?.(dt);
       world?.update?.(dt);
-
-      if (!didAutoTP && retryFrames-- > 0) tryAutoTeleport();
-
       renderer.render(scene, camera);
     } catch (e) {
       err("[main] render loop error", e);

@@ -1,76 +1,94 @@
-// /js/textures.js — Compatibility + TextureBank
-// Fixes: store_kiosk.js importing { TextureBank }
-// Also keeps: export createTextureKit (your existing API)
+// /js/textures.js — Scarlett TextureKit v2 (FULL)
+// - Exports: createTextureKit, TextureBank
+// - Safe loading: tries multiple candidate filenames, handles spaces, casing variants.
 
-let _THREE = null;
-let _renderer = null;
-
-const _cache = new Map(); // name -> THREE.Texture
-const _meta = new Map();  // name -> { url }
-
-function _ensureThree(THREE){
-  if (!_THREE && THREE) _THREE = THREE;
-}
-
-function _applyCommon(tex){
-  if (!tex) return tex;
-  try {
-    tex.colorSpace = _THREE?.SRGBColorSpace ?? tex.colorSpace;
-  } catch {}
-  tex.wrapS = tex.wrapT = (_THREE?.RepeatWrapping ?? tex.wrapS);
-  tex.anisotropy = Math.min(8, _renderer?.capabilities?.getMaxAnisotropy?.() || 8);
-  tex.needsUpdate = true;
-  return tex;
-}
-
-// ✅ NEW: TextureBank export (for store_kiosk.js)
 export const TextureBank = {
-  init({ THREE, renderer } = {}) {
-    _ensureThree(THREE);
-    if (renderer) _renderer = renderer;
-    return TextureBank;
-  },
-
-  has(name){ return _cache.has(name); },
-  get(name){ return _cache.get(name) || null; },
-
-  async load(name, url, { THREE, renderer } = {}) {
-    _ensureThree(THREE);
-    if (renderer) _renderer = renderer;
-    if (_cache.has(name)) return _cache.get(name);
-
-    if (!_THREE) throw new Error("TextureBank.load needs THREE (call TextureBank.init({THREE}) first)");
-    const loader = new _THREE.TextureLoader();
-    const tex = await new Promise((resolve, reject) => {
-      loader.load(url, resolve, undefined, reject);
-    });
-
-    _meta.set(name, { url });
-    _cache.set(name, _applyCommon(tex));
-    return tex;
-  },
-
-  register(name, texture, meta = {}) {
-    _cache.set(name, _applyCommon(texture));
-    _meta.set(name, meta);
-    return texture;
-  },
-
-  list(){ return Array.from(_cache.keys()); }
+  base: "./assets/textures/",
+  avatars: {
+    face: [
+      "avatars/Face.jpg", "avatars/face.jpg", "avatars/Face.jpeg", "avatars/face.jpeg", "avatars/Face.png", "avatars/face.png"
+    ],
+    hands: [
+      "avatars/Hands.jpg", "avatars/hands.jpg", "avatars/Hands.png", "avatars/hands.png"
+    ],
+    watch: [
+      "avatars/Watch.jpg", "avatars/watch.jpg", "avatars/Watch.png", "avatars/watch.png"
+    ],
+    menuHand: [
+      "avatars/Menu hand.jpg",     // your current file (space)
+      "avatars/Menu_hand.jpg",     // recommended rename
+      "avatars/menu_hand.jpg",
+      "avatars/menuhand.jpg",
+      "avatars/MenuHand.jpg"
+    ]
+  }
 };
 
-// ✅ Existing-style API your project uses
-export function createTextureKit({ THREE, renderer, base = "" } = {}) {
-  _ensureThree(THREE);
-  if (renderer) _renderer = renderer;
-  TextureBank.init({ THREE, renderer });
+function safeJoin(base, rel){
+  if (!base.endsWith("/")) base += "/";
+  // keep spaces, URL() will encode when used as URL
+  return new URL(rel, new URL(base, location.href)).toString();
+}
 
-  return {
+async function exists(url){
+  try{
+    const r = await fetch(url, { method: "GET", cache: "no-store" });
+    return r.ok;
+  }catch{
+    return false;
+  }
+}
+
+export async function loadTextureAny({ THREE, loader, base, candidates, log }) {
+  const L = loader || new THREE.TextureLoader();
+  const b = base || TextureBank.base;
+
+  for (const rel of candidates) {
+    const url = safeJoin(b, rel);
+    if (!(await exists(url))) continue;
+
+    try {
+      const tex = await new Promise((resolve, reject) => {
+        L.load(
+          url,
+          (t) => resolve(t),
+          undefined,
+          (e) => reject(e)
+        );
+      });
+      tex.colorSpace = THREE.SRGBColorSpace;
+      log?.(`[tex] ✅ ${rel}`);
+      return tex;
+    } catch (e) {
+      log?.(`[tex] ⚠️ load failed ${rel} :: ${e?.message || e}`);
+    }
+  }
+
+  log?.(`[tex] ❌ no candidate found: ${candidates.join(" | ")}`);
+  return null;
+}
+
+export function createTextureKit({ THREE, renderer, base = "./assets/textures/", log = console.log }) {
+  const loader = new THREE.TextureLoader();
+
+  const kit = {
     base,
-    bank: TextureBank,
-    load: (name, relUrl) => TextureBank.load(name, base + relUrl, { THREE, renderer }),
-    get: (name) => TextureBank.get(name),
-    has: (name) => TextureBank.has(name),
-    list: () => TextureBank.list(),
+    loader,
+    async getAvatarFace() {
+      return loadTextureAny({ THREE, loader, base, candidates: TextureBank.avatars.face, log });
+    },
+    async getAvatarHands() {
+      return loadTextureAny({ THREE, loader, base, candidates: TextureBank.avatars.hands, log });
+    },
+    async getAvatarWatch() {
+      return loadTextureAny({ THREE, loader, base, candidates: TextureBank.avatars.watch, log });
+    },
+    async getAvatarMenuHand() {
+      return loadTextureAny({ THREE, loader, base, candidates: TextureBank.avatars.menuHand, log });
+    }
   };
+
+  // Keep a reference for modules
+  if (renderer) renderer.__SCARLETT_TEXTUREKIT = kit;
+  return kit;
 }

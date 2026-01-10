@@ -1,13 +1,10 @@
-// /js/textures.js — Scarlett TextureKit v3 (FULL, FIXED PATHS)
+// /js/textures.js — Scarlett TextureKit v4 (NO-FETCH, ROCK SOLID)
 // - Exports: createTextureKit, TextureBank
-// - Safe loading: tries multiple candidate filenames, handles spaces + casing variants.
-// - FIX: Base path is resolved via import.meta.url so it never points to /js/assets/...
+// - Fix: no HEAD/GET probing (mobile/GitHub can misbehave). We just try to load.
+// - Fix: absolute base computed from import.meta.url -> /assets/textures/
 
 export const TextureBank = {
-  // Absolute base derived from this module location (/js/textures.js -> /assets/textures/)
-  // Example output: https://<host>/<repo>/assets/textures/
   base: new URL("../assets/textures/", import.meta.url).toString(),
-
   avatars: {
     face: [
       "avatars/Face.jpg", "avatars/face.jpg",
@@ -23,86 +20,73 @@ export const TextureBank = {
       "avatars/Watch.png", "avatars/watch.png"
     ],
     menuHand: [
-      "avatars/Menu hand.jpg", // space
+      "avatars/Menu hand.jpg",
       "avatars/Menu_hand.jpg",
       "avatars/menu_hand.jpg",
       "avatars/menuhand.jpg",
       "avatars/MenuHand.jpg",
-      "avatars/MenuHand.png"   // ✅ you have this one
+      "avatars/MenuHand.png"
     ]
   }
 };
 
 function safeJoin(base, rel) {
-  // base is an absolute URL string ending with /
   return new URL(rel, base).toString();
 }
 
-async function exists(url) {
-  try {
-    // HEAD is lighter; GitHub Pages supports it. If it fails, fall back to GET.
-    let r = await fetch(url, { method: "HEAD", cache: "no-store" });
-    if (r.ok) return true;
-
-    r = await fetch(url, { method: "GET", cache: "no-store" });
-    return r.ok;
-  } catch {
-    return false;
-  }
-}
-
-export async function loadTextureAny({ THREE, loader, base, candidates, log }) {
+function loadWithCandidates({ THREE, loader, base, candidates, log }) {
   const L = loader || new THREE.TextureLoader();
   const b = base || TextureBank.base;
 
-  for (const rel of candidates) {
-    const url = safeJoin(b, rel);
+  return new Promise((resolve) => {
+    let i = 0;
 
-    if (!(await exists(url))) continue;
+    const tryNext = () => {
+      if (i >= candidates.length) {
+        log?.(`[tex] ❌ no candidate found: ${candidates.join(" | ")}`);
+        resolve(null);
+        return;
+      }
 
-    try {
-      const tex = await new Promise((resolve, reject) => {
-        L.load(
-          url,
-          (t) => resolve(t),
-          undefined,
-          (e) => reject(e)
-        );
-      });
+      const rel = candidates[i++];
+      const url = safeJoin(b, rel);
 
-      // three r150+ uses colorSpace; keep consistent
-      tex.colorSpace = THREE.SRGBColorSpace;
+      // Cache-bust textures too (important on mobile GH Pages)
+      const bust = (url.includes("?") ? "&" : "?") + "v=" + Date.now();
+      const finalUrl = url + bust;
 
-      log?.(`[tex] ✅ ${rel}`);
-      return tex;
-    } catch (e) {
-      log?.(`[tex] ⚠️ load failed ${rel} :: ${e?.message || e}`);
-    }
-  }
+      L.load(
+        finalUrl,
+        (tex) => {
+          try { tex.colorSpace = THREE.SRGBColorSpace; } catch {}
+          log?.(`[tex] ✅ ${rel}`);
+          resolve(tex);
+        },
+        undefined,
+        () => {
+          // try next candidate
+          tryNext();
+        }
+      );
+    };
 
-  log?.(`[tex] ❌ no candidate found: ${candidates.join(" | ")}`);
-  return null;
+    tryNext();
+  });
+}
+
+export async function loadTextureAny({ THREE, loader, base, candidates, log }) {
+  return loadWithCandidates({ THREE, loader, base, candidates, log });
 }
 
 export function createTextureKit({ THREE, renderer, base, log = console.log }) {
   const loader = new THREE.TextureLoader();
 
-  // If caller passes a base, normalize it; otherwise use the bank base.
-  // If someone passes "./assets/textures/", this converts it to a safe absolute URL anyway.
-  const resolvedBase = (() => {
-    if (!base) return TextureBank.base;
-    try {
-      // Resolve relative bases safely against the page origin (not /js/)
-      return new URL(base, location.origin + location.pathname.replace(/\/[^\/]*$/, "/")).toString();
-    } catch {
-      return TextureBank.base;
-    }
-  })();
+  // Prefer explicit base if passed, else bank base
+  const resolvedBase = base ? new URL(base, location.href).toString() : TextureBank.base;
 
   const kit = {
     base: resolvedBase,
     loader,
-
     async getAvatarFace() {
       return loadTextureAny({ THREE, loader, base: resolvedBase, candidates: TextureBank.avatars.face, log });
     },
@@ -117,7 +101,6 @@ export function createTextureKit({ THREE, renderer, base, log = console.log }) {
     }
   };
 
-  // Keep a reference for modules
   if (renderer) renderer.__SCARLETT_TEXTUREKIT = kit;
   return kit;
 }

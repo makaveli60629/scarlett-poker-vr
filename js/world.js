@@ -1,14 +1,10 @@
-// /js/world.js — Scarlett Hybrid World 1.0 (Combined)
-// ✅ Always builds a visible hub + rooms
-// ✅ Then loads your real modules if they exist (safe)
-// ✅ Exposes World.init / World.update / World.setRoom
+// /js/world.js — Scarlett Hybrid World 1.1 (Square Entry → Circle Hub + Solid Walls + Spawn Facing Table)
 
 export const World = {
   async init(ctx) {
-    const { THREE, scene, camera, renderer, LOG } = ctx;
+    const { THREE, scene, LOG } = ctx;
     const log = (m) => LOG?.push?.("log", m) || console.log(m);
     const warn = (m) => LOG?.push?.("warn", m) || console.warn(m);
-    const err = (m) => LOG?.push?.("error", m) || console.error(m);
 
     ctx.systems = ctx.systems || {};
     ctx.room = ctx.room || "lobby";
@@ -26,32 +22,58 @@ export const World = {
       log(`[world] system ok: ${name}`);
     };
 
-    // ---------- 0) Always-visible base environment (hub blueprint) ----------
-    // Lighting (baseline so nothing is black even if lights_pack fails)
+    // ---------- BASE LIGHTING (never black) ----------
     scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x080812, 1.0));
     const dir = new THREE.DirectionalLight(0xffffff, 1.1);
     dir.position.set(6, 12, 4);
     scene.add(dir);
 
-    // Floor
+    // ---------- COLLIDERS ----------
+    // We keep a simple array so fallback movement can collide.
+    ctx.colliders = ctx.colliders || [];
+
+    const makeSolid = (mesh) => {
+      mesh.userData.solid = true;
+      ctx.colliders.push(mesh);
+      return mesh;
+    };
+
+    // ---------- FLOOR (big base) ----------
     const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(120, 120),
+      new THREE.PlaneGeometry(160, 160),
       new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.95 })
     );
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // Neon ring hub
-    const hub = new THREE.Mesh(
-      new THREE.CylinderGeometry(7.2, 7.2, 0.22, 64),
+    // ---------- YOUR BUILDING SHAPE ----------
+    // Square entry room (spawn area) -> doorway -> circular hub.
+    // Coordinates: player enters from +Z side toward -Z (toward hub/table).
+
+    const WALL_H = 3.0;
+    const WALL_T = 0.25;
+
+    // SQUARE ENTRY dimensions
+    const squareW = 12;      // width (X)
+    const squareL = 16;      // length (Z)
+    const squareCenter = new THREE.Vector3(0, WALL_H/2, 18); // forward of hub
+
+    // HUB circle
+    const hubRadius = 7.2;
+    const hubCenter = new THREE.Vector3(0, 0, 0);
+
+    // Visual hub plate
+    const hubPlate = new THREE.Mesh(
+      new THREE.CylinderGeometry(hubRadius, hubRadius, 0.22, 64),
       new THREE.MeshStandardMaterial({ color: 0x0a0b12, roughness: 0.45, metalness: 0.18 })
     );
-    hub.position.set(0, 0.11, 0);
-    scene.add(hub);
+    hubPlate.position.set(hubCenter.x, 0.11, hubCenter.z);
+    scene.add(hubPlate);
 
+    // Neon ring
     const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(7.2, 0.12, 16, 128),
+      new THREE.TorusGeometry(hubRadius, 0.12, 16, 128),
       new THREE.MeshStandardMaterial({
         color: 0x081018,
         emissive: new THREE.Color(0x00ffff),
@@ -60,177 +82,145 @@ export const World = {
       })
     );
     ring.rotation.x = Math.PI / 2;
-    ring.position.y = 0.35;
+    ring.position.set(hubCenter.x, 0.35, hubCenter.z);
     scene.add(ring);
 
-    // Center boss table anchor
-    const bossTable = new THREE.Mesh(
+    // Square entry floor plate (visual guide)
+    const entryPlate = new THREE.Mesh(
+      new THREE.BoxGeometry(squareW, 0.18, squareL),
+      new THREE.MeshStandardMaterial({ color: 0x070912, roughness: 0.8, metalness: 0.08 })
+    );
+    entryPlate.position.set(squareCenter.x, 0.09, squareCenter.z);
+    scene.add(entryPlate);
+
+    // ---- Solid square walls with ONE doorway opening toward the hub ----
+    const wallMat = new THREE.MeshStandardMaterial({
+      color: 0x080a12, roughness: 0.75, metalness: 0.10
+    });
+
+    // Doorway on the "south" wall (facing hub): centered opening
+    const doorW = 3.0;
+
+    // North wall (back of square, farthest from hub)
+    makeSolid(new THREE.Mesh(
+      new THREE.BoxGeometry(squareW + WALL_T, WALL_H, WALL_T),
+      wallMat
+    )).position.set(squareCenter.x, WALL_H/2, squareCenter.z + squareL/2);
+
+    // West wall
+    makeSolid(new THREE.Mesh(
+      new THREE.BoxGeometry(WALL_T, WALL_H, squareL + WALL_T),
+      wallMat
+    )).position.set(squareCenter.x - squareW/2, WALL_H/2, squareCenter.z);
+
+    // East wall
+    makeSolid(new THREE.Mesh(
+      new THREE.BoxGeometry(WALL_T, WALL_H, squareL + WALL_T),
+      wallMat
+    )).position.set(squareCenter.x + squareW/2, WALL_H/2, squareCenter.z);
+
+    // South wall split into two segments with doorway gap
+    const southZ = squareCenter.z - squareL/2;
+    const leftSegW = (squareW - doorW) / 2;
+    const rightSegW = leftSegW;
+
+    // left segment
+    makeSolid(new THREE.Mesh(
+      new THREE.BoxGeometry(leftSegW, WALL_H, WALL_T),
+      wallMat
+    )).position.set(squareCenter.x - (doorW/2 + leftSegW/2), WALL_H/2, southZ);
+
+    // right segment
+    makeSolid(new THREE.Mesh(
+      new THREE.BoxGeometry(rightSegW, WALL_H, WALL_T),
+      wallMat
+    )).position.set(squareCenter.x + (doorW/2 + rightSegW/2), WALL_H/2, southZ);
+
+    // ---- Hallway bridge from square doorway into hub ----
+    const hallW = 4.0;
+    const hallL = 8.0;
+    const hallCenter = new THREE.Vector3(0, 0.09, southZ - hallL/2);
+
+    const hallPlate = new THREE.Mesh(
+      new THREE.BoxGeometry(hallW, 0.18, hallL),
+      new THREE.MeshStandardMaterial({ color: 0x090b14, roughness: 0.9 })
+    );
+    hallPlate.position.copy(hallCenter);
+    scene.add(hallPlate);
+
+    // Hall walls (solid)
+    makeSolid(new THREE.Mesh(
+      new THREE.BoxGeometry(WALL_T, WALL_H, hallL),
+      wallMat
+    )).position.set(-hallW/2, WALL_H/2, hallCenter.z);
+
+    makeSolid(new THREE.Mesh(
+      new THREE.BoxGeometry(WALL_T, WALL_H, hallL),
+      wallMat
+    )).position.set(+hallW/2, WALL_H/2, hallCenter.z);
+
+    // Optional “arch” at hub entry (visual)
+    const arch = new THREE.Mesh(
+      new THREE.BoxGeometry(hallW + 0.6, 0.25, 0.25),
+      new THREE.MeshStandardMaterial({ color: 0x111827, emissive: new THREE.Color(0x00ffff), emissiveIntensity: 0.9 })
+    );
+    arch.position.set(0, WALL_H - 0.2, hallCenter.z - hallL/2 + 0.4);
+    scene.add(arch);
+
+    // ---- Boss table in hub (the thing you must face) ----
+    const table = new THREE.Mesh(
       new THREE.CylinderGeometry(1.55, 1.55, 0.14, 40),
       new THREE.MeshStandardMaterial({ color: 0x0c2a22, roughness: 0.9, metalness: 0.05 })
     );
-    bossTable.position.set(0, 0.78, -1.4);
-    bossTable.name = "BossTable";
-    scene.add(bossTable);
+    table.position.set(0, 0.78, -1.4);
+    table.name = "BossTable";
+    scene.add(table);
 
-    // Dealer anchor (many of your deal systems depend on it)
+    // Dealer anchor (for dealing modules)
     const dealer = new THREE.Object3D();
     dealer.name = "DealerAnchor";
     dealer.position.set(0, 0.92, -0.55);
     scene.add(dealer);
 
-    // Door/room stubs from your blueprint
-    const mkPortal = (name, x, z, color = 0x00ffff) => {
-      const g = new THREE.BoxGeometry(1.4, 2.2, 0.18);
-      const m = new THREE.MeshStandardMaterial({
-        color: 0x081018,
-        emissive: new THREE.Color(color),
-        emissiveIntensity: 1.5,
-        roughness: 0.35,
-        metalness: 0.15
-      });
-      const p = new THREE.Mesh(g, m);
-      p.position.set(x, 1.1, z);
-      p.name = name;
-      p.userData.isPortal = true;
-      p.userData.room = name.toLowerCase().includes("store") ? "store"
-                     : name.toLowerCase().includes("scorpion") ? "scorpion"
-                     : name.toLowerCase().includes("poker") ? "poker"
-                     : "lobby";
-      scene.add(p);
-      return p;
-    };
-
-    // Positions: store left, scorpion down-left-ish, poker right, event up
-    mkPortal("Portal_Store", -9.5, 0.0, 0x7fe7ff);
-    mkPortal("Portal_Poker",  9.5, 0.0, 0xff2d7a);
-    mkPortal("Portal_Event",  0.0, -10.5, 0xffcc00);
-    mkPortal("Portal_Scorpion", 0.0, 10.5, 0x9b5cff);
-
-    // Spawn point
+    // ---- Spawn point: inside the square, near its “beginning” ----
+    // This is the beginning of the square before reaching the circle, as you requested.
     const spawn = new THREE.Object3D();
     spawn.name = "SpawnPoint";
-    spawn.position.set(0, 1.65, 4.2);
+    spawn.position.set(0, 0, squareCenter.z + squareL/2 - 2.2); // near back of square
     scene.add(spawn);
 
-    log("[world] base hub built ✅");
+    log("[world] structure built ✅ (square entry → hall → circle hub)");
 
-    // ---------- 1) Try to load your richer lighting/world modules ----------
-    const lightsPack = await safeImport("./lights_pack.js");
-    if (lightsPack?.LightsPack?.init) {
-      try { await lightsPack.LightsPack.init(ctx); addSystem("lights_pack", lightsPack.LightsPack); }
-      catch (e) { warn(`lights_pack init failed: ${e?.message || e}`); }
-    }
-
-    const solidWalls = await safeImport("./solid_walls.js");
-    if (solidWalls?.SolidWalls?.init) {
-      try { await solidWalls.SolidWalls.init(ctx); addSystem("solid_walls", solidWalls.SolidWalls); }
-      catch (e) { warn(`solid_walls init failed: ${e?.message || e}`); }
-    }
-
-    // ---------- 2) Load core gameplay systems (safe) ----------
+    // ---------- Load your existing systems (safe) ----------
     const rm = await safeImport("./room_manager.js");
-    if (rm?.RoomManager?.init) {
-      try { rm.RoomManager.init(ctx); addSystem("room_manager", rm.RoomManager); }
-      catch (e) { warn(`room_manager init failed: ${e?.message || e}`); }
-    }
+    if (rm?.RoomManager?.init) { try { rm.RoomManager.init(ctx); addSystem("room_manager", rm.RoomManager); } catch {} }
 
     const teleportMachine = await safeImport("./teleport_machine.js");
-    if (teleportMachine?.TeleportMachine?.init) {
-      try { await teleportMachine.TeleportMachine.init(ctx); addSystem("teleport_machine", teleportMachine.TeleportMachine); }
-      catch (e) { warn(`teleport_machine init failed: ${e?.message || e}`); }
-    }
+    if (teleportMachine?.TeleportMachine?.init) { try { await teleportMachine.TeleportMachine.init(ctx); addSystem("teleport_machine", teleportMachine.TeleportMachine); } catch {} }
 
-    // Optional simple teleport ray (some builds used teleport.js)
     const teleport = await safeImport("./teleport.js");
-    if (teleport?.Teleport?.init) {
-      try { teleport.Teleport.init({ ...ctx, controllers: ctx.controllers }); addSystem("teleport", teleport.Teleport); }
-      catch (e) { warn(`teleport init failed: ${e?.message || e}`); }
-    }
+    if (teleport?.Teleport?.init) { try { teleport.Teleport.init(ctx); addSystem("teleport", teleport.Teleport); } catch {} }
 
-    // Store
     const store = await safeImport("./store.js");
-    if (store?.StoreSystem?.init) {
-      try { store.StoreSystem.init({ ...ctx, player: ctx.player, world: ctx.world }); addSystem("store", store.StoreSystem); }
-      catch (e) { warn(`store init failed: ${e?.message || e}`); }
-    }
+    if (store?.StoreSystem?.init) { try { store.StoreSystem.init(ctx); addSystem("store", store.StoreSystem); } catch {} }
 
-    // Scorpion room
     const scorpion = await safeImport("./scorpion_room.js");
-    if (scorpion?.ScorpionRoom?.init) {
-      try { scorpion.ScorpionRoom.init(ctx); addSystem("scorpion", scorpion.ScorpionRoom); }
-      catch (e) { warn(`scorpion init failed: ${e?.message || e}`); }
-    }
+    if (scorpion?.ScorpionRoom?.init) { try { scorpion.ScorpionRoom.init(ctx); addSystem("scorpion", scorpion.ScorpionRoom); } catch {} }
 
-    // Bots
     const bots = await safeImport("./bots.js");
-    if (bots?.Bots?.init) {
-      try { bots.Bots.init(ctx); addSystem("bots", bots.Bots); }
-      catch (e) { warn(`bots init failed: ${e?.message || e}`); }
-    }
+    if (bots?.Bots?.init) { try { bots.Bots.init(ctx); addSystem("bots", bots.Bots); } catch {} }
 
-    // Poker sim
     const pokerSim = await safeImport("./poker_sim.js");
-    if (pokerSim?.PokerSim?.init) {
-      try { pokerSim.PokerSim.init(ctx); addSystem("poker_sim", pokerSim.PokerSim); }
-      catch (e) { warn(`poker_sim init failed: ${e?.message || e}`); }
-    }
+    if (pokerSim?.PokerSim?.init) { try { pokerSim.PokerSim.init(ctx); addSystem("poker_sim", pokerSim.PokerSim); } catch {} }
 
-    // UI modules (optional)
     const uiMod = await safeImport("./ui.js");
-    if (uiMod?.UI?.init) {
-      try { uiMod.UI.init(ctx); addSystem("ui", uiMod.UI); }
-      catch (e) { warn(`ui init failed: ${e?.message || e}`); }
-    }
+    if (uiMod?.UI?.init) { try { uiMod.UI.init(ctx); addSystem("ui", uiMod.UI); } catch {} }
 
     const vrUi = await safeImport("./vr_ui.js");
-    if (vrUi?.initVRUI) {
-      try { vrUi.initVRUI(ctx); addSystem("vr_ui", { update: vrUi.updateVRUI || null }); }
-      catch (e) { warn(`vr_ui init failed: ${e?.message || e}`); }
-    }
-
-    // Controls / locomotion (Android + XR)
-    const xrLoc = await safeImport("./xr_locomotion.js");
-    if (xrLoc?.XrLocomotion?.init) {
-      try { xrLoc.XrLocomotion.init(ctx); addSystem("xr_locomotion", xrLoc.XrLocomotion); }
-      catch (e) { warn(`xr_locomotion init failed: ${e?.message || e}`); }
-    }
-
-    const vrLoc = await safeImport("./vr_locomotion.js");
-    if (vrLoc?.VRLocomotion?.init) {
-      try { vrLoc.VRLocomotion.init(ctx); addSystem("vr_locomotion", vrLoc.VRLocomotion); }
-      catch (e) { warn(`vr_locomotion init failed: ${e?.message || e}`); }
-    }
-
-    const android = await safeImport("./android_controls.js");
-    if (android?.AndroidControls?.init) {
-      try { android.AndroidControls.init(ctx); addSystem("android_controls", android.AndroidControls); }
-      catch (e) { warn(`android_controls init failed: ${e?.message || e}`); }
-    }
-
-    const mobileTouch = await safeImport("./mobile_touch.js");
-    if (mobileTouch?.MobileTouch?.init) {
-      try { mobileTouch.MobileTouch.init(ctx); addSystem("mobile_touch", mobileTouch.MobileTouch); }
-      catch (e) { warn(`mobile_touch init failed: ${e?.message || e}`); }
-    }
-
-    // Hands / input / interactions (hands-only pipeline)
-    const hands = await safeImport("./hands.js");
-    if (hands?.Hands?.init) {
-      try { hands.Hands.init(ctx); addSystem("hands", hands.Hands); }
-      catch (e) { warn(`hands init failed: ${e?.message || e}`); }
-    }
-
-    const input = await safeImport("./input.js");
-    if (input?.Input?.init) {
-      try { input.Input.init(ctx); addSystem("input", input.Input); }
-      catch (e) { warn(`input init failed: ${e?.message || e}`); }
-    }
+    if (vrUi?.initVRUI) { try { vrUi.initVRUI(ctx); addSystem("vr_ui", { update: vrUi.updateVRUI || null }); } catch {} }
 
     const interactions = await safeImport("./interactions.js");
-    if (interactions?.Interactions?.init) {
-      try { interactions.Interactions.init(ctx); addSystem("interactions", interactions.Interactions); }
-      catch (e) { warn(`interactions init failed: ${e?.message || e}`); }
-    }
+    if (interactions?.Interactions?.init) { try { interactions.Interactions.init(ctx); addSystem("interactions", interactions.Interactions); } catch {} }
 
     // Start in lobby
     this.setRoom(ctx, ctx.room || "lobby");
@@ -241,15 +231,9 @@ export const World = {
     ctx.room = room;
     ctx.mode = room;
 
-    // Prefer your actual RoomManager if loaded
     const rm = ctx.systems?.room_manager;
-    if (rm?.setRoom) {
-      rm.setRoom(ctx, room);
-      return;
-    }
+    if (rm?.setRoom) return rm.setRoom(ctx, room);
 
-    // Fallback behavior if RoomManager not present:
-    // show/hide store/scorpion systems if they implement setActive
     ctx.systems?.store?.setActive?.(room === "store");
     ctx.systems?.scorpion?.setActive?.(room === "scorpion");
     ctx.systems?.poker_sim?.setMode?.(room === "poker" ? "table" : "lobby_demo");
@@ -257,7 +241,6 @@ export const World = {
   },
 
   update(ctx, dt) {
-    // Update any loaded systems that expose update
     const systems = ctx.systems || {};
     for (const k of Object.keys(systems)) {
       try { systems[k]?.update?.(dt, ctx); } catch {}

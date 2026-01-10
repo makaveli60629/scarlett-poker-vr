@@ -1,9 +1,9 @@
-// /js/scorpion_room.js — Scorpion Room v3.4 (FULL)
-// Changes:
-// - Chairs are bigger + brighter + emissive trim (easy to see)
-// - Rail is brighter
-// - Still patches scorpion_seat_1 spawn to chair world transform so you face table
-// - Returns { setActive() } system so RoomManager can show/hide the room
+// /js/scorpion_room.js — Scorpion Room v3.5 (OVAL + CHAIRS + SPAWN PATCH SAFE)
+// Fixes:
+// - OVAL table (scaled top + rim)
+// - Adds 6 visible chairs around the oval
+// - Patches scorpion_seat_1 regardless of ctx.spawns structure (map/list/direct)
+// - Does NOT touch Y spawn (height lock should not override in VR)
 
 export const ScorpionRoom = {
   build(ctx) {
@@ -38,7 +38,6 @@ export const ScorpionRoom = {
       })
     );
     walls.position.set(0, ROOM_H / 2, 0);
-    walls.receiveShadow = true;
     group.add(walls);
 
     const ceiling = new THREE.Mesh(
@@ -62,7 +61,7 @@ export const ScorpionRoom = {
     group.add(key);
     group.add(key.target);
 
-    // TABLE
+    // TABLE (OVAL)
     const table = new THREE.Group();
     table.name = "SCORPION_TABLE";
     group.add(table);
@@ -76,28 +75,33 @@ export const ScorpionRoom = {
     base.receiveShadow = true;
     table.add(base);
 
+    // OVAL TOP: build round, then scale to oval
     const top = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.95, 0.95, 0.10, 48),
+      new THREE.CylinderGeometry(0.95, 0.95, 0.10, 64),
       new THREE.MeshStandardMaterial({ color: 0x0c5a3a, roughness: 0.85, metalness: 0.0 })
     );
     top.position.set(0, 0.80, 0);
     top.castShadow = true;
     top.receiveShadow = true;
+
+    // MAKE IT OVAL: wider X, slightly tighter Z
+    top.scale.set(1.35, 1.0, 1.05);
     table.add(top);
 
-    // rim glow
+    // rim glow (oval by scaling too)
     const rim = new THREE.Mesh(
-      new THREE.TorusGeometry(0.98, 0.025, 10, 96),
+      new THREE.TorusGeometry(0.98, 0.025, 10, 120),
       new THREE.MeshBasicMaterial({ color: 0xb266ff, transparent: true, opacity: 0.70 })
     );
     rim.rotation.x = Math.PI / 2;
     rim.position.y = top.position.y + 0.06;
+    rim.scale.set(1.35, 1.0, 1.05); // match oval
     table.add(rim);
 
-    // surfaceY for PokerSim
+    // surfaceY for PokerSim (table top)
     const surfaceY = group.position.y + table.position.y + top.position.y + 0.05;
     table.userData.surfaceY = surfaceY;
-    table.userData.dealRadius = 0.62;
+    table.userData.dealRadius = 0.72;
 
     // GUARDRAIL
     const RAIL_R = 2.15;
@@ -126,9 +130,7 @@ export const ScorpionRoom = {
     group.add(railCollider);
     ctx.colliders?.push?.(railCollider);
 
-    // CHAIRS (bigger + emissive trim so you SEE them)
-    const chairRadius = 1.55;
-
+    // CHAIRS (6 chairs around OVAL table)
     const matSeat = new THREE.MeshStandardMaterial({
       color: 0x1b1b24,
       roughness: 0.7,
@@ -136,7 +138,6 @@ export const ScorpionRoom = {
       emissive: 0x120816,
       emissiveIntensity: 0.10,
     });
-
     const matTrim = new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.55 });
 
     function makeChair(name) {
@@ -145,14 +146,10 @@ export const ScorpionRoom = {
 
       const seat = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.10, 0.55), matSeat);
       seat.position.set(0, 0.48, 0);
-      seat.castShadow = true;
-      seat.receiveShadow = true;
       chair.add(seat);
 
       const back = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.65, 0.10), matSeat);
       back.position.set(0, 0.80, -0.22);
-      back.castShadow = true;
-      back.receiveShadow = true;
       chair.add(back);
 
       const trim = new THREE.Mesh(new THREE.TorusGeometry(0.30, 0.015, 10, 60), matTrim);
@@ -163,20 +160,25 @@ export const ScorpionRoom = {
       return chair;
     }
 
+    // OVAL CHAIR RING: different radii for x/z so it matches oval
+    const chairRX = 1.85;
+    const chairRZ = 1.35;
+
     const seats = [
-      { key: "scorpion_seat_1", angle:   0 }, // player
-      { key: "scorpion_bot_1",  angle: 180 },
-      { key: "scorpion_bot_2",  angle: 135 },
-      { key: "scorpion_bot_3",  angle: 225 },
-      { key: "scorpion_bot_4",  angle:  90 },
+      { key: "scorpion_seat_1", angle:   0 },  // player (front)
+      { key: "scorpion_bot_1",  angle: 180 },  // opposite
+      { key: "scorpion_bot_2",  angle: 120 },
+      { key: "scorpion_bot_3",  angle: 240 },
+      { key: "scorpion_bot_4",  angle:  60 },
+      { key: "scorpion_bot_5",  angle: 300 },
     ];
 
     let playerChair = null;
 
     for (const s of seats) {
       const rad = (s.angle * Math.PI) / 180;
-      const x = Math.sin(rad) * chairRadius;
-      const z = Math.cos(rad) * chairRadius;
+      const x = Math.sin(rad) * chairRX;
+      const z = Math.cos(rad) * chairRZ;
 
       const chair = makeChair(`CHAIR_${s.key}`);
       chair.position.set(x, 0, z);
@@ -186,8 +188,18 @@ export const ScorpionRoom = {
       if (s.key === "scorpion_seat_1") playerChair = chair;
     }
 
-    // Patch spawn to the chair transform so you face the table
-    if (playerChair && ctx.spawns?.map?.scorpion_seat_1) {
+    // PATCH SPAWN (SAFE for map/list/flat)
+    function getSpawnRef(key) {
+      // supports ctx.spawns.map[key], ctx.spawns.list[key], ctx.spawns[key]
+      return (
+        ctx.spawns?.map?.[key] ||
+        ctx.spawns?.list?.[key] ||
+        ctx.spawns?.[key] ||
+        null
+      );
+    }
+
+    if (playerChair) {
       const pos = new THREE.Vector3();
       playerChair.getWorldPosition(pos);
 
@@ -195,13 +207,16 @@ export const ScorpionRoom = {
       playerChair.getWorldQuaternion(q);
       const yaw = new THREE.Euler().setFromQuaternion(q, "YXZ").y;
 
-      const sp = ctx.spawns.map.scorpion_seat_1;
-      sp.x = pos.x;
-      sp.z = pos.z;
-      sp.yaw = yaw;
-      sp.seatBack = 0.45;
-
-      log?.(`[scorpion] ✅ patched scorpion_seat_1 -> x=${sp.x.toFixed(2)} z=${sp.z.toFixed(2)} yaw=${sp.yaw.toFixed(2)}`);
+      const sp = getSpawnRef("scorpion_seat_1");
+      if (sp) {
+        sp.x = pos.x;
+        sp.z = pos.z;
+        sp.yaw = yaw;
+        // IMPORTANT: do NOT set sp.y here (height should be 1.6 from spawn system)
+        log?.(`[scorpion] ✅ patched scorpion_seat_1 -> x=${sp.x.toFixed(2)} z=${sp.z.toFixed(2)} yaw=${sp.yaw.toFixed(2)}`);
+      } else {
+        log?.("[scorpion] ⚠️ could not find ctx.spawns for scorpion_seat_1 (patch skipped)");
+      }
     }
 
     // publish
@@ -212,13 +227,11 @@ export const ScorpionRoom = {
     const system = {
       group,
       table,
-      setActive(v) {
-        group.visible = !!v;
-      },
+      setActive(v) { group.visible = !!v; },
     };
 
-    system.setActive(false); // hidden until you enter
-    log?.("[scorpion] build ✅ v3.4 (visible chairs + bright rail)");
+    system.setActive(false);
+    log?.("[scorpion] build ✅ v3.5 (OVAL table + 6 chairs + spawn patch safe)");
     return system;
   },
 };

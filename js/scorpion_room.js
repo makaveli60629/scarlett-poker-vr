@@ -1,10 +1,11 @@
-// /js/scorpion_room.js — Scorpion Room v3.6 (TRUE OVAL 6-SEAT)
+// /js/scorpion_room.js — Scorpion Room v3.7 (TRUE OVAL 6-SEAT + SPAWN PATCHES)
 // Fixes:
-// - TRUE oval table top (Shape + ExtrudeGeometry), not a scaled cylinder
-// - TRUE oval rim (TubeGeometry along EllipseCurve)
-// - 6 chairs placed evenly around oval
-// - Safe spawn patch for scorpion_seat_1 (supports ctx.spawns.map / list / direct)
-// - setActive() to show/hide room
+// ✅ TRUE oval table top (Shape + ExtrudeGeometry)
+// ✅ TRUE oval rim (TubeGeometry along EllipseCurve)
+// ✅ 6 chairs around oval
+// ✅ Patches BOTH scorpion_seat_1 AND scorpion_safe_spawn
+// ✅ Publishes system to ctx.systems.scorpion and ctx.ScorpionRoom for legacy toggles
+// ✅ setActive() show/hide room
 
 export const ScorpionRoom = {
   build(ctx) {
@@ -69,7 +70,7 @@ export const ScorpionRoom = {
     table.name = "SCORPION_TABLE";
     group.add(table);
 
-    // Base pedestal (fine circular pedestal)
+    // Base pedestal
     const base = new THREE.Mesh(
       new THREE.CylinderGeometry(0.85, 0.95, 0.75, 32),
       new THREE.MeshStandardMaterial({ color: 0x1a1a22, roughness: 0.6, metalness: 0.1 })
@@ -79,14 +80,13 @@ export const ScorpionRoom = {
     base.receiveShadow = true;
     table.add(base);
 
-    // OVAL dims: a = X radius (half-width), b = Z radius (half-length)
-    const a = 1.38;   // wider
-    const b = 0.98;   // narrower
-
+    // Oval dims
+    const a = 1.38; // X radius
+    const b = 0.98; // Z radius
     const TOP_Y = 0.80;
     const TOP_THICK = 0.10;
 
-    // Top: TRUE oval (Shape + ExtrudeGeometry)
+    // Top
     const topShape = new THREE.Shape();
     topShape.absellipse(0, 0, a, b, 0, Math.PI * 2, false, 0);
 
@@ -104,26 +104,17 @@ export const ScorpionRoom = {
     });
 
     const top = new THREE.Mesh(topGeo, topMat);
-    // Extrude is along +Z; rotate so thickness becomes vertical
     top.rotation.x = -Math.PI / 2;
     top.position.set(0, TOP_Y, 0);
     top.castShadow = true;
     top.receiveShadow = true;
     table.add(top);
 
-    // Rim: TRUE oval tube along ellipse curve
+    // Rim
     const rimY = TOP_Y + TOP_THICK + 0.02;
-    const rimCurve = new THREE.EllipseCurve(
-      0, 0,
-      a + 0.03,
-      b + 0.03,
-      0, Math.PI * 2,
-      false, 0
-    );
-
+    const rimCurve = new THREE.EllipseCurve(0, 0, a + 0.03, b + 0.03, 0, Math.PI * 2, false, 0);
     const rimPts = rimCurve.getPoints(220).map(p => new THREE.Vector3(p.x, 0, p.y));
     const rimPath = new THREE.CatmullRomCurve3(rimPts, true);
-
     const rimGeo = new THREE.TubeGeometry(rimPath, 260, 0.015, 10, true);
     const rimMat = new THREE.MeshBasicMaterial({ color: 0xb266ff, transparent: true, opacity: 0.75 });
 
@@ -200,7 +191,6 @@ export const ScorpionRoom = {
       return chair;
     }
 
-    // chair ellipse radius = table ellipse + spacing
     const chairA = a + 0.60;
     const chairB = b + 0.60;
 
@@ -217,45 +207,67 @@ export const ScorpionRoom = {
 
     for (const s of seats) {
       const rad = (s.angle * Math.PI) / 180;
-
       const x = Math.sin(rad) * chairA;
       const z = Math.cos(rad) * chairB;
 
       const chair = makeChair(`CHAIR_${s.key}`);
       chair.position.set(x, 0, z);
-      chair.lookAt(0, 0.50, 0); // face table center
+      chair.lookAt(0, 0.50, 0);
       table.add(chair);
 
       if (s.key === "scorpion_seat_1") playerChair = chair;
     }
 
-    // SAFE SPAWN PATCH
+    // --- Spawn patch helpers ---
     function getSpawnRef(key) {
       return (
         ctx.spawns?.map?.[key] ||
         ctx.spawns?.list?.[key] ||
+        ctx.spawns?.get?.(key) ||
         ctx.spawns?.[key] ||
         null
       );
     }
 
-    if (playerChair) {
+    function patchSpawnToObject(key, obj, seatBack = 0.45, yMode = "floor") {
+      const sp = getSpawnRef(key);
+      if (!sp || !obj) return false;
+
       const pos = new THREE.Vector3();
-      playerChair.getWorldPosition(pos);
+      obj.getWorldPosition(pos);
 
       const q = new THREE.Quaternion();
-      playerChair.getWorldQuaternion(q);
+      obj.getWorldQuaternion(q);
       const yaw = new THREE.Euler().setFromQuaternion(q, "YXZ").y;
 
-      const sp = getSpawnRef("scorpion_seat_1");
-      if (sp) {
-        sp.x = pos.x;
-        sp.z = pos.z;
-        sp.yaw = yaw;
-        log?.(`[scorpion] ✅ patched scorpion_seat_1 -> x=${sp.x.toFixed(2)} z=${sp.z.toFixed(2)} yaw=${sp.yaw.toFixed(2)}`);
-      } else {
-        log?.("[scorpion] ⚠️ no spawn object found for scorpion_seat_1 (patch skipped)");
-      }
+      sp.x = pos.x;
+      sp.z = pos.z;
+      sp.yaw = yaw;
+      sp.seatBack = seatBack;
+
+      // Don’t hard-set sp.y unless your SpawnPoints uses it.
+      // yMode="floor" means leave y alone.
+      if (yMode === "table") sp.y = surfaceY;
+
+      log?.(`[scorpion] ✅ patched ${key} -> x=${sp.x.toFixed(2)} z=${sp.z.toFixed(2)} yaw=${sp.yaw.toFixed(2)}`);
+      return true;
+    }
+
+    // patch scorpion_seat_1 to player chair
+    if (playerChair) patchSpawnToObject("scorpion_seat_1", playerChair, 0.45, "floor");
+
+    // patch scorpion_safe_spawn to a STANDING safe point behind chair (so you’re not “on” the chair)
+    if (playerChair) {
+      const safe = new THREE.Object3D();
+      safe.position.copy(playerChair.getWorldPosition(new THREE.Vector3()));
+      safe.quaternion.copy(playerChair.getWorldQuaternion(new THREE.Quaternion()));
+
+      // move back from chair along chair forward (so you stand behind it)
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(safe.quaternion);
+      safe.position.add(fwd.multiplyScalar(-0.85)); // behind chair
+      safe.position.y = 0; // floor
+
+      patchSpawnToObject("scorpion_safe_spawn", safe, 0.0, "floor");
     }
 
     // publish
@@ -269,8 +281,13 @@ export const ScorpionRoom = {
       setActive(v) { group.visible = !!v; },
     };
 
+    // ✅ Make it reachable by BOTH styles:
+    ctx.systems ||= {};
+    ctx.systems.scorpion = system;
+    ctx.ScorpionRoom = system;
+
     system.setActive(false);
-    log?.("[scorpion] build ✅ v3.6 (TRUE oval 6-seat table + chairs)");
+    log?.("[scorpion] build ✅ v3.7 (TRUE oval + 6 chairs + safe_spawn patched)");
     return system;
   },
 };

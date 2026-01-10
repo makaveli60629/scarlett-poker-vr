@@ -1,16 +1,14 @@
-// /js/world.js — SCARLETT VR POKER — WORLD MASTER v14.1 (FULL EQUIPPED)
-// ✅ Classic Lobby restored (live demo poker table + boss bots seated + spectator rail + walkers)
-// ✅ Store bigger / baseline
-// ✅ Scorpion beautified + neon gold/yellow corner pillars top-to-bottom + better pot (no fat green ball)
-// ✅ Chairs face table correctly (FIXED)
-// ✅ Arch Teleporter (portal style) in lobby (clickable + vibe restored)
-// ✅ Teleport pads + lasers + clickables
-// ✅ VR locomotion (sticks) + teleport (squeeze aim, trigger commit)
-// ✅ Android tap-to-click supported via clickFromCamera()
+// /js/world.js — SCARLETT VR POKER — WORLD MASTER v14.2 (FULL)
+// ✅ Flat poker table (FIXED)
+// ✅ Full-body seated bots (legs/arms/hands)
+// ✅ Scorpion room: neon gold/yellow corners + wall end strips + guardrails + leaderboard + tags + logo wall + logo felt + neon pass line
+// ✅ Lobby: live demo table + arch teleporter + pads
+// ✅ Store: doorway displays on both sides
+// ✅ VR teleport + VR stick locomotion + Android click + Android teleportFromCamera()
 
 export const World = (() => {
   let THREE, scene, renderer, camera, player, log;
-  let controllers = []; // ALWAYS normalized array
+  let controllers = [];
 
   const S = {
     ready: false,
@@ -18,8 +16,6 @@ export const World = (() => {
 
     raycaster: null,
     tmpMat: null,
-    tmpV: null,
-    tmpV2: null,
 
     lasers: [],
     move: { speed: 2.1, snap: Math.PI / 6, snapCooldown: 0 },
@@ -30,48 +26,36 @@ export const World = (() => {
     clickables: [],
     hovered: null,
 
-    // Lobby ambience
     lobby: {
       t: 0,
       walkers: [],
-      demo: {
-        t: 0,
-        tableZ: -2.4,
-        tableGroup: null,
-        felt: null,
-        shoe: null,
-        pot: null,
-        bots: [],
-        seats: [],
-        handState: "idle",
-        stepT: 0,
-        community: [],
-        hole: []
-      },
-      teleporter: null
+      teleporter: null,
+      demo: makePokerState(-2.4)
     },
 
-    // Scorpion poker
-    poker: {
+    poker: makePokerState(-2.8)
+  };
+
+  function makePokerState(tableZ) {
+    return {
       t: 0,
-      tableZ: -2.8,
+      tableZ,
       tableGroup: null,
       felt: null,
-      pot: null,
       shoe: null,
+      pot: null,
       bots: [],
       seats: [],
       handState: "idle",
       stepT: 0,
       community: [],
       hole: []
-    }
-  };
+    };
+  }
 
   async function init(ctx) {
     ({ THREE, scene, renderer, camera, player, log } = ctx);
 
-    // Normalize controllers (robust)
     const raw = ctx.controllers;
     controllers = Array.isArray(raw) ? raw : (raw ? [raw.left, raw.right].filter(Boolean) : []);
     if (!controllers) controllers = [];
@@ -81,8 +65,6 @@ export const World = (() => {
 
     S.raycaster = new THREE.Raycaster();
     S.tmpMat = new THREE.Matrix4();
-    S.tmpV = new THREE.Vector3();
-    S.tmpV2 = new THREE.Vector3();
 
     addLights();
     buildShell();
@@ -95,11 +77,10 @@ export const World = (() => {
     setRoom("lobby");
     forceSpawnForRoom("lobby");
 
-    // Start lobby demo automatically (bots playing)
     startDemoHandLoop();
 
     S.ready = true;
-    log?.("ready ✅ (v14.1 FULL)");
+    log?.("ready ✅ (v14.2 FULL)");
   }
 
   function update(dt) {
@@ -115,21 +96,37 @@ export const World = (() => {
     // ambient
     S.lobby.t += dt;
 
-    // Lobby demo always animates even if not visible (keeps state consistent)
+    // lobby demo always runs
     S.lobby.demo.t += dt;
     animatePokerBots(S.lobby.demo);
     updatePokerDealing(dt, S.lobby.demo);
     animateTeleporter(dt);
 
-    // lobby walkers only when in lobby
     if (S.rooms.current === "lobby") updateLobbyWalkers(dt);
 
-    // Scorpion poker only when in scorpion
+    // scorpion poker
     S.poker.t += dt;
     if (S.rooms.current === "scorpion") {
       animatePokerBots(S.poker);
       updatePokerDealing(dt, S.poker);
     }
+  }
+
+  // =========================================================
+  // ANDROID TELEPORT (camera ray to ground)
+  // =========================================================
+  function teleportFromCamera() {
+    const origin = new THREE.Vector3();
+    camera.getWorldPosition(origin);
+    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+
+    if (Math.abs(dir.y) < 0.0001) return;
+    const t = -origin.y / dir.y;
+    if (t < 0.2 || t > 60) return;
+
+    const hit = origin.clone().addScaledVector(dir, t);
+    player.position.set(hit.x, 0, hit.z);
+    log?.("[tp-cam] ✅", hit.x.toFixed(2), hit.z.toFixed(2));
   }
 
   // =========================================================
@@ -183,25 +180,7 @@ export const World = (() => {
     ring.rotation.x = Math.PI / 2;
     S.root.add(ring);
 
-    const pillar = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.25, 0.35, 2.4, 20),
-      new THREE.MeshStandardMaterial({ color: 0x10131e, roughness: 0.75, metalness: 0.2 })
-    );
-    pillar.position.set(0, 1.2, 0);
-    S.root.add(pillar);
-
-    const orb = new THREE.Mesh(
-      new THREE.SphereGeometry(0.22, 24, 24),
-      new THREE.MeshStandardMaterial({ color: 0xff2d7a, emissive: 0x2a0012, roughness: 0.4, metalness: 0.1 })
-    );
-    orb.position.set(0, 2.55, 0);
-    S.root.add(orb);
-
-    const sign = makeBillboard("SCARLETT VR POKER", 2.2);
-    sign.position.set(0, 2.45, -12.5);
-    S.root.add(sign);
-
-    // spectator rail ring for lobby feel
+    // spectator guardrail ring (global)
     const rail = new THREE.Mesh(
       new THREE.TorusGeometry(9.5, 0.10, 16, 140),
       new THREE.MeshStandardMaterial({ color: 0x1b1c26, roughness: 0.65, metalness: 0.15 })
@@ -209,6 +188,10 @@ export const World = (() => {
     rail.rotation.x = Math.PI / 2;
     rail.position.y = 0.05;
     S.root.add(rail);
+
+    const sign = makeBillboard("SCARLETT VR POKER", 2.1);
+    sign.position.set(0, 2.45, -12.5);
+    S.root.add(sign);
   }
 
   // =========================================================
@@ -248,7 +231,7 @@ export const World = (() => {
   function forceSpawnForRoom(room) {
     if (room === "lobby") {
       player.position.set(0, 0, 7.6);
-      faceYawToward(new THREE.Vector3(0, 1.6, -2.2)); // face demo table
+      faceYawToward(new THREE.Vector3(0, 1.6, -2.2));
     } else if (room === "store") {
       player.position.set(8.5, 0, 4.2);
       faceYawToward(new THREE.Vector3(8.5, 1.6, 0));
@@ -270,27 +253,18 @@ export const World = (() => {
   }
 
   // =========================================================
-  // LOBBY — CLASSIC DEMO TABLE + BOSS BOTS + ARCH TELEPORTER
+  // LOBBY
   // =========================================================
   function buildLobby(g) {
     const title = makeBillboard("LOBBY — LIVE TABLE", 1.2);
     title.position.set(0, 2.35, 2.4);
     g.add(title);
 
-    const prompt = makeBillboard("Watch the bots play. Use pads to travel.", 0.85);
+    const prompt = makeBillboard("Watch the bots play. Pads to travel.", 0.85);
     prompt.position.set(0, 1.55, 1.0);
     g.add(prompt);
 
-    // Portal ring decor
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(1.15, 0.08, 16, 72),
-      new THREE.MeshStandardMaterial({ color: 0x7fe7ff, emissive: 0x05161a, roughness: 0.35 })
-    );
-    ring.rotation.x = Math.PI / 2;
-    ring.position.set(0, 0.06, 0);
-    g.add(ring);
-
-    // Arch Teleporter (clickable)
+    // Arch teleporter center
     const tp = buildArchTeleporter();
     tp.position.set(0, 0, 0);
     tp.userData.onClick = () => { setRoom("scorpion"); forceSpawnForRoom("scorpion"); };
@@ -298,17 +272,21 @@ export const World = (() => {
     S.clickables.push(tp);
     S.lobby.teleporter = tp;
 
-    // Live demo poker table in lobby (boss bots seated + dealing)
-    buildPokerTableSet(g, S.lobby.demo, { tableZ: S.lobby.demo.tableZ, title: "BOSS TABLE", accent: 0x7fe7ff });
+    // Demo table
+    buildPokerTableSet(g, S.lobby.demo, {
+      tableZ: S.lobby.demo.tableZ,
+      title: "BOSS TABLE",
+      accent: 0x7fe7ff,
+      logoText: "BOSS"
+    });
 
-    // Walkers around the lobby for life
+    // Walkers
     spawnLobbyWalkers(g, 6);
   }
 
   function buildArchTeleporter() {
     const g = new THREE.Group();
 
-    // Base platform
     const base = new THREE.Mesh(
       new THREE.CylinderGeometry(1.35, 1.35, 0.12, 72),
       new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.85, metalness: 0.15 })
@@ -316,7 +294,6 @@ export const World = (() => {
     base.position.y = 0.06;
     g.add(base);
 
-    // Arch frame (two pillars + top)
     const frameMat = new THREE.MeshStandardMaterial({ color: 0x10131e, roughness: 0.6, metalness: 0.25 });
     const pillarGeom = new THREE.BoxGeometry(0.18, 2.25, 0.18);
     const p1 = new THREE.Mesh(pillarGeom, frameMat);
@@ -329,7 +306,6 @@ export const World = (() => {
     top.position.set(0, 2.25, 0);
     g.add(top);
 
-    // Inner portal ring (glow)
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(0.95, 0.06, 14, 120),
       new THREE.MeshStandardMaterial({
@@ -345,7 +321,6 @@ export const World = (() => {
     g.add(ring);
     g.userData._ring = ring;
 
-    // Energy coil (purple electricity vibe)
     const coil = new THREE.Mesh(
       new THREE.TorusKnotGeometry(0.55, 0.035, 140, 16),
       new THREE.MeshBasicMaterial({ color: 0xff2d7a, transparent: true, opacity: 0.22 })
@@ -359,7 +334,6 @@ export const World = (() => {
     label.position.set(0, 2.95, 0);
     g.add(label);
 
-    // Make it "clickable"
     g.userData.onClick = () => {};
     return g;
   }
@@ -378,18 +352,15 @@ export const World = (() => {
 
   function spawnLobbyWalkers(g, count) {
     S.lobby.walkers.length = 0;
-
     for (let i = 0; i < count; i++) {
       const bot = makeWalkerBot(i);
       bot.position.set((Math.random() - 0.5) * 10, 0, (Math.random() - 0.5) * 10);
-
       bot.userData.walk = {
         r: 7 + Math.random() * 3,
         a: Math.random() * Math.PI * 2,
         s: 0.18 + Math.random() * 0.22,
         wobble: Math.random() * 10
       };
-
       g.add(bot);
       S.lobby.walkers.push(bot);
     }
@@ -399,20 +370,17 @@ export const World = (() => {
     for (const b of S.lobby.walkers) {
       const w = b.userData.walk;
       w.a += dt * w.s;
-
       const x = Math.cos(w.a) * w.r;
       const z = Math.sin(w.a) * w.r;
-
       b.position.x = x;
       b.position.z = z;
-
       b.rotation.y = Math.atan2(-Math.sin(w.a), -Math.cos(w.a));
       b.position.y = 0.02 * Math.sin((S.lobby.t * 2.1) + w.wobble);
     }
   }
 
   // =========================================================
-  // STORE
+  // STORE (doorway displays both sides)
   // =========================================================
   function buildStore(g) {
     g.position.set(8.5, 0, 0);
@@ -428,21 +396,17 @@ export const World = (() => {
     plat.position.set(0, 0.04, -6.0);
     g.add(plat);
 
-    for (let i = 0; i < 5; i++) {
-      const shelf = new THREE.Mesh(
-        new THREE.BoxGeometry(2.2, 1.3, 0.35),
-        new THREE.MeshStandardMaterial({ color: 0x10131e, roughness: 0.8, metalness: 0.1 })
-      );
-      shelf.position.set(-3.6 + i * 1.8, 0.7, -8.2);
-      g.add(shelf);
+    // "Door" frame area
+    const doorX = 0, doorZ = -3.2;
 
-      const glow = new THREE.Mesh(
-        new THREE.BoxGeometry(2.1, 0.08, 0.30),
-        new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.10 })
-      );
-      glow.position.set(shelf.position.x, 1.35, shelf.position.z + 0.01);
-      g.add(glow);
-    }
+    // ✅ Display boards on both sides of the door
+    const leftDisplay = makeBillboard("FEATURED\nCROWNS\nSKINS\nEMOTES", 0.85);
+    leftDisplay.position.set(doorX - 1.55, 1.55, doorZ);
+    g.add(leftDisplay);
+
+    const rightDisplay = makeBillboard("LIMITED\nNEON SETS\nVIP PASS\nBUNDLES", 0.85);
+    rightDisplay.position.set(doorX + 1.55, 1.55, doorZ);
+    g.add(rightDisplay);
 
     const kiosk = new THREE.Mesh(
       new THREE.BoxGeometry(2.6, 1.05, 1.4),
@@ -484,31 +448,40 @@ export const World = (() => {
   }
 
   // =========================================================
-  // SCORPION — NICER + NEON CORNERS + FIXED CHAIRS + BETTER POT
+  // SCORPION — beautified + full table UI
   // =========================================================
   function buildScorpion(g) {
     g.position.set(-8.5, 0, 0);
 
-    // Nicer “room” box (so neon corners make sense visually)
     buildScorpionRoomBox(g);
 
-    const title = makeBillboard("SCORPION ROOM — TABLE 1", 1.0);
-    title.position.set(0, 2.35, -6.9);
-    g.add(title);
+    // Wall logo sign
+    const logo = makeBillboard("🦂  SCORPION LOUNGE  🦂", 1.15);
+    logo.position.set(0, 3.0, S.poker.tableZ - 5.9);
+    g.add(logo);
 
-    // floor accent ring
-    const neon = new THREE.Mesh(
-      new THREE.TorusGeometry(4.6, 0.08, 16, 120),
-      new THREE.MeshBasicMaterial({ color: 0xff2d7a, transparent: true, opacity: 0.18 })
-    );
-    neon.rotation.x = Math.PI / 2;
-    neon.position.set(0, 0.09, S.poker.tableZ);
-    g.add(neon);
+    // Leaderboard panel
+    const lb = makeBillboard("LEADERBOARD\n1) Scarlett — 120K\n2) KingBot — 98K\n3) Viper — 77K", 0.95);
+    lb.position.set(4.6, 2.1, S.poker.tableZ - 1.0);
+    g.add(lb);
 
-    // Table set
-    buildPokerTableSet(g, S.poker, { tableZ: S.poker.tableZ, title: "SCORPION TABLE", accent: 0xff2d7a });
+    // Tags panel
+    const tags = makeBillboard("TABLE TAGS\n• No-Limit Hold’em\n• VIP Room\n• Neon Stakes\n• Spectate Allowed", 0.95);
+    tags.position.set(-4.6, 2.1, S.poker.tableZ - 1.0);
+    g.add(tags);
 
-    // Buttons
+    // Guardrails around scorpion table zone
+    buildScorpionGuardrails(g, S.poker.tableZ);
+
+    // Table set with SCORPION logo on felt + pass line
+    buildPokerTableSet(g, S.poker, {
+      tableZ: S.poker.tableZ,
+      title: "SCORPION TABLE",
+      accent: 0xff2d7a,
+      logoText: "SCORPION"
+    });
+
+    // Start hand button
     const start = makeButton("START HAND");
     start.position.set(0, 1.2, S.poker.tableZ + 3.1);
     start.userData.onClick = () => startHand(S.poker);
@@ -523,30 +496,17 @@ export const World = (() => {
   }
 
   function buildScorpionRoomBox(g) {
-    // dimensions of the “Scorpion room box”
     const w = 12.5, h = 6.6, d = 13.0;
     const z0 = S.poker.tableZ + 1.6;
 
-    // Dark walls with subtle roughness (placeholder “texture look”)
-    const wallMat = new THREE.MeshStandardMaterial({
-      color: 0x07080e,
-      roughness: 0.92,
-      metalness: 0.05
-    });
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x07080e, roughness: 0.92, metalness: 0.05 });
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x090b12, roughness: 0.95, metalness: 0.02 });
 
-    const floorMat = new THREE.MeshStandardMaterial({
-      color: 0x090b12,
-      roughness: 0.95,
-      metalness: 0.02
-    });
-
-    // floor
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(0, 0.01, z0);
     g.add(floor);
 
-    // 4 walls (simple planes)
     const wallN = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat);
     wallN.position.set(0, h/2, z0 - d/2);
     g.add(wallN);
@@ -566,7 +526,7 @@ export const World = (() => {
     wallW.rotation.y = Math.PI / 2;
     g.add(wallW);
 
-    // Neon corner pillars top-to-bottom (gold/yellow)
+    // Neon corner pillars
     const neonMat = new THREE.MeshStandardMaterial({
       color: 0xffcc00,
       emissive: 0xffcc00,
@@ -575,8 +535,7 @@ export const World = (() => {
       metalness: 0.05
     });
 
-    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, h, 20), neonMat);
-
+    const tubeGeom = new THREE.CylinderGeometry(0.055, 0.055, h, 20);
     const corners = [
       [ w/2 - 0.05, h/2, z0 - d/2 + 0.05],
       [-w/2 + 0.05, h/2, z0 - d/2 + 0.05],
@@ -585,11 +544,10 @@ export const World = (() => {
     ];
 
     for (const [x,y,z] of corners) {
-      const p = tube.clone();
+      const p = new THREE.Mesh(tubeGeom, neonMat);
       p.position.set(x,y,z);
       g.add(p);
 
-      // Small “cap glow” top/bottom
       const cap = new THREE.Mesh(
         new THREE.SphereGeometry(0.08, 16, 16),
         new THREE.MeshBasicMaterial({ color: 0xffee55, transparent: true, opacity: 0.55 })
@@ -602,7 +560,7 @@ export const World = (() => {
       g.add(cap2);
     }
 
-    // Extra neon strips along wall ends (you asked “each end of the walls neon yellow”)
+    // Wall-end neon strips
     const stripMat = new THREE.MeshBasicMaterial({ color: 0xffee55, transparent: true, opacity: 0.18 });
     const stripGeomNS = new THREE.PlaneGeometry(w, 0.18);
     const stripGeomEW = new THREE.PlaneGeometry(d, 0.18);
@@ -627,14 +585,56 @@ export const World = (() => {
     g.add(stripTopW);
   }
 
+  function buildScorpionGuardrails(g, tableZ) {
+    // simple squared guard rail around table zone
+    const railMat = new THREE.MeshStandardMaterial({ color: 0x1b1c26, roughness: 0.65, metalness: 0.12 });
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.8, metalness: 0.2 });
+
+    const z0 = tableZ + 1.6;
+    const w = 8.8, d = 8.8;
+    const y = 0.75;
+
+    // posts
+    const postGeom = new THREE.CylinderGeometry(0.05, 0.05, 0.9, 14);
+    const corners = [
+      [ w/2, 0.45, z0 - d/2],
+      [-w/2, 0.45, z0 - d/2],
+      [ w/2, 0.45, z0 + d/2],
+      [-w/2, 0.45, z0 + d/2],
+    ];
+    for (const [x,py,z] of corners) {
+      const post = new THREE.Mesh(postGeom, postMat);
+      post.position.set(x, py, z);
+      g.add(post);
+    }
+
+    // rails (4)
+    const railGeomH = new THREE.BoxGeometry(w, 0.08, 0.08);
+    const railGeomV = new THREE.BoxGeometry(0.08, 0.08, d);
+
+    const rN = new THREE.Mesh(railGeomH, railMat);
+    rN.position.set(0, y, z0 - d/2);
+    g.add(rN);
+
+    const rS = rN.clone();
+    rS.position.z = z0 + d/2;
+    g.add(rS);
+
+    const rE = new THREE.Mesh(railGeomV, railMat);
+    rE.position.set(w/2, y, z0);
+    g.add(rE);
+
+    const rW = rE.clone();
+    rW.position.x = -w/2;
+    g.add(rW);
+  }
+
   // =========================================================
-  // POKER TABLE BUILDER (shared by Lobby demo and Scorpion)
+  // POKER TABLE SET (flat felt + logo + pass line)
   // =========================================================
   function buildPokerTableSet(roomGroup, P, opts) {
-    // opts: { tableZ, title, accent }
-    const { tableZ, title, accent } = opts;
+    const { tableZ, title, accent, logoText } = opts;
 
-    // group
     const table = new THREE.Group();
     table.position.set(0, 0, tableZ);
     roomGroup.add(table);
@@ -644,28 +644,46 @@ export const World = (() => {
     sign.position.set(0, 2.15, tableZ - 3.9);
     roomGroup.add(sign);
 
-    // felt (oval-ish)
+    // ✅ FLAT FELT: Cylinder top is already horizontal. No rotation.
+    const feltTex = makeFeltTexture({ text: logoText || "SCARLETT", accent });
+    const feltMat = new THREE.MeshStandardMaterial({
+      map: feltTex,
+      color: 0xffffff,
+      roughness: 0.92,
+      metalness: 0.0
+    });
+
     const felt = new THREE.Mesh(
       new THREE.CylinderGeometry(2.35, 2.35, 0.10, 72),
-      new THREE.MeshStandardMaterial({ color: 0x0f5f3d, roughness: 0.92 })
+      feltMat
     );
-    felt.rotation.x = Math.PI / 2;
+    felt.rotation.set(0, 0, 0);
     felt.scale.set(1.25, 1.0, 0.78);
     felt.position.y = 1.02;
     table.add(felt);
     P.felt = felt;
 
-    // felt line
+    // Neon pass line (thin glowing ring)
+    const pass = new THREE.Mesh(
+      new THREE.RingGeometry(1.52, 1.56, 120),
+      new THREE.MeshBasicMaterial({ color: 0xffee55, transparent: true, opacity: 0.22 })
+    );
+    pass.rotation.x = -Math.PI / 2;
+    pass.position.y = 1.031;
+    pass.scale.set(1.35, 1.0, 0.92);
+    table.add(pass);
+
+    // Felt line
     const feltLine = new THREE.Mesh(
       new THREE.RingGeometry(1.25, 1.32, 96),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.16 })
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.14 })
     );
     feltLine.rotation.x = -Math.PI / 2;
     feltLine.position.y = 1.03;
     feltLine.scale.set(1.42, 1.0, 0.96);
     table.add(feltLine);
 
-    // rail
+    // Rail
     const rail = new THREE.Mesh(
       new THREE.TorusGeometry(2.55, 0.20, 18, 140),
       new THREE.MeshStandardMaterial({ color: 0x241c16, roughness: 0.82, metalness: 0.08 })
@@ -675,7 +693,7 @@ export const World = (() => {
     rail.scale.set(1.12, 1.0, 0.86);
     table.add(rail);
 
-    // pedestal
+    // Pedestal
     const ped = new THREE.Mesh(
       new THREE.CylinderGeometry(0.48, 0.68, 1.05, 28),
       new THREE.MeshStandardMaterial({ color: 0x101019, roughness: 0.85, metalness: 0.2 })
@@ -683,7 +701,7 @@ export const World = (() => {
     ped.position.y = 0.52;
     table.add(ped);
 
-    // shoe
+    // Shoe
     const shoe = new THREE.Mesh(
       new THREE.BoxGeometry(0.40, 0.20, 0.58),
       new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.65, metalness: 0.25 })
@@ -692,14 +710,13 @@ export const World = (() => {
     table.add(shoe);
     P.shoe = shoe;
 
-    // POT FIX: small chip pot (no big green ball)
+    // Pot
     const pot = makeChipPot(18);
     pot.position.set(0, 1.045, 0.02);
-    pot.scale.setScalar(1.0);
     table.add(pot);
     P.pot = pot;
 
-    // accent glow ring (subtle)
+    // Accent glow ring
     const glow = new THREE.Mesh(
       new THREE.RingGeometry(2.25, 2.45, 96),
       new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.10 })
@@ -709,20 +726,9 @@ export const World = (() => {
     glow.scale.set(1.25, 1.0, 0.78);
     table.add(glow);
 
-    // Seats + bots + chairs + chip stacks
+    // Seats/bots/chairs/chips/cards
     buildPokerSeatsBotsAndChips(roomGroup, table, P);
-
-    // Cards
     buildCardMeshes(table, P);
-
-    // Auto-hand loop for lobby demo only (Scorpion uses Start Hand)
-    if (P === S.lobby.demo) {
-      const btn = makeButton("JOIN SCORPION (ARCH OR PAD)");
-      btn.position.set(0, 1.15, tableZ + 3.35);
-      btn.userData.onClick = () => { setRoom("scorpion"); forceSpawnForRoom("scorpion"); };
-      roomGroup.add(btn);
-      S.clickables.push(btn);
-    }
   }
 
   function buildPokerSeatsBotsAndChips(roomGroup, table, P) {
@@ -741,29 +747,23 @@ export const World = (() => {
       const x = Math.cos(ang) * radius;
       const z = table.position.z + Math.sin(ang) * radius;
       chair.position.set(x, 0, z);
-
-      // ✅ FIX: chair faces table (no “opposite way”)
       faceObjectYawAt(chair, center);
-
       roomGroup.add(chair);
 
+      const SEAT_Y = 0.48; // chair seat height
       const seatPos = new THREE.Vector3(
         Math.cos(ang) * (radius - 0.55),
-        0,
+        SEAT_Y,
         table.position.z + Math.sin(ang) * (radius - 0.55)
       );
       P.seats.push({ pos: seatPos, ang });
 
-      const bot = makePokerBot(i);
+      const bot = makeFullBodySeatedBot(i);
       bot.position.copy(seatPos);
-
-      // face bot toward table
       faceObjectYawAt(bot, center);
-
       roomGroup.add(bot);
       P.bots.push(bot);
 
-      // chip stack per seat
       const stack = makeChipStack(14 + (i % 6), { dark: false });
       stack.position.set(Math.cos(ang) * 1.7, 1.05, table.position.z + Math.sin(ang) * 1.25);
       table.add(stack);
@@ -791,20 +791,14 @@ export const World = (() => {
         head.rotation.y = 0.12 * Math.sin(t * 0.7);
         head.rotation.x = 0.06 * Math.sin(t * 0.9);
       }
-
-      b.position.y = 0.01 * Math.sin(t * 1.2);
+      b.position.y = (b.userData.baseY ?? b.position.y) + 0.008 * Math.sin(t * 1.2);
     }
   }
 
-  // -------------------
-  // Card dealing visuals (shared)
-  // -------------------
   function buildCardMeshes(table, P) {
-    // clear old
     for (const m of P.community) table.remove(m);
     P.community.length = 0;
 
-    // 5 community
     for (let i = 0; i < 5; i++) {
       const card = makeCardMesh();
       card.position.set(-0.55 + i * 0.275, 1.045, 0.30);
@@ -814,7 +808,6 @@ export const World = (() => {
       P.community.push(card);
     }
 
-    // hole cards 2 per seat
     for (let s = 0; s < P.seats.length; s++) {
       const seat = P.seats[s];
       const center = new THREE.Vector3(0, 1.045, table.position.z);
@@ -848,12 +841,8 @@ export const World = (() => {
     if (P.handState !== "idle") return;
 
     for (const c of P.community) c.visible = false;
-    for (const pair of P.hole) {
-      pair[0].visible = false;
-      pair[1].visible = false;
-    }
+    for (const pair of P.hole) { pair[0].visible = false; pair[1].visible = false; }
 
-    // flash felt
     const mat = P.felt.material;
     const original = mat.color.getHex();
     mat.color.setHex(0x16a065);
@@ -870,11 +859,7 @@ export const World = (() => {
 
     if (P.handState === "deal_hole") {
       const idx = Math.floor(P.stepT / 0.12);
-      if (idx >= P.seats.length * 2) {
-        P.handState = "deal_flop";
-        P.stepT = 0;
-        return;
-      }
+      if (idx >= P.seats.length * 2) { P.handState = "deal_flop"; P.stepT = 0; return; }
       const seat = Math.floor(idx / 2);
       const which = idx % 2;
       const card = P.hole[seat]?.[which];
@@ -884,55 +869,37 @@ export const World = (() => {
 
     if (P.handState === "deal_flop") {
       if (P.stepT > 0.6) {
-        P.community[0].visible = true;
-        P.community[1].visible = true;
-        P.community[2].visible = true;
-        P.handState = "deal_turn";
-        P.stepT = 0;
+        P.community[0].visible = true; P.community[1].visible = true; P.community[2].visible = true;
+        P.handState = "deal_turn"; P.stepT = 0;
       }
       return;
     }
 
     if (P.handState === "deal_turn") {
-      if (P.stepT > 0.9) {
-        P.community[3].visible = true;
-        P.handState = "deal_river";
-        P.stepT = 0;
-      }
+      if (P.stepT > 0.9) { P.community[3].visible = true; P.handState = "deal_river"; P.stepT = 0; }
       return;
     }
 
     if (P.handState === "deal_river") {
-      if (P.stepT > 0.9) {
-        P.community[4].visible = true;
-        P.handState = "showdown";
-        P.stepT = 0;
-      }
+      if (P.stepT > 0.9) { P.community[4].visible = true; P.handState = "showdown"; P.stepT = 0; }
       return;
     }
 
     if (P.handState === "showdown") {
-      if (P.stepT > 1.4) {
-        P.handState = "idle";
-        log?.("[poker] showdown ✅");
-      }
+      if (P.stepT > 1.4) { P.handState = "idle"; log?.("[poker] showdown ✅"); }
     }
   }
 
   function startDemoHandLoop() {
-    // lobby demo keeps playing continuously
     const P = S.lobby.demo;
     if (P._looping) return;
     P._looping = true;
 
     const loop = () => {
-      // if we’re already in a hand, wait
       if (P.handState !== "idle") { setTimeout(loop, 900); return; }
       startHand(P);
-      // wait long enough for a full hand to play
       setTimeout(loop, 7000);
     };
-
     setTimeout(loop, 900);
   }
 
@@ -961,40 +928,26 @@ export const World = (() => {
   // =========================================================
   function buildLasers() {
     S.lasers.length = 0;
-
-    if (!controllers || !controllers.length) {
-      log?.("controllers missing (ok) — lasers deferred");
-      return;
-    }
+    if (!controllers || !controllers.length) { log?.("controllers missing (ok) — lasers deferred"); return; }
 
     for (const c of controllers) {
-      const geom = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(0, 0, 0),
-        new THREE.Vector3(0, 0, -1)
-      ]);
+      const geom = new THREE.BufferGeometry().setFromPoints([ new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1) ]);
       const mat = new THREE.LineBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.95 });
       const line = new THREE.Line(geom, mat);
       line.scale.z = 10;
       c.add(line);
 
-      const dot = new THREE.Mesh(
-        new THREE.SphereGeometry(0.012, 16, 16),
-        new THREE.MeshBasicMaterial({ color: 0xff2d7a })
-      );
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(0.012, 16, 16), new THREE.MeshBasicMaterial({ color: 0xff2d7a }));
       dot.visible = false;
       scene.add(dot);
 
       S.lasers.push({ controller: c, line, dot });
     }
-
     log?.("lasers ready ✅");
   }
 
   function wireControllerEvents() {
-    if (!controllers || !controllers.length) {
-      log?.("controllers missing (ok) — controller events deferred");
-      return;
-    }
+    if (!controllers || !controllers.length) { log?.("controllers missing (ok) — controller events deferred"); return; }
 
     for (const c of controllers) {
       c.addEventListener("selectstart", () => {
@@ -1025,7 +978,7 @@ export const World = (() => {
 
       S.tmpMat.identity().extractRotation(c.matrixWorld);
       const origin = new THREE.Vector3().setFromMatrixPosition(c.matrixWorld);
-      const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(S.tmpMat).normalize();
+      const dir = new THREE.Vector3(0,0,-1).applyMatrix4(S.tmpMat).normalize();
 
       S.raycaster.set(origin, dir);
       S.raycaster.far = 25;
@@ -1052,7 +1005,7 @@ export const World = (() => {
 
     S.tmpMat.identity().extractRotation(controller.matrixWorld);
     const origin = new THREE.Vector3().setFromMatrixPosition(controller.matrixWorld);
-    const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(S.tmpMat).normalize();
+    const dir = new THREE.Vector3(0,0,-1).applyMatrix4(S.tmpMat).normalize();
 
     S.raycaster.set(origin, dir);
     S.raycaster.far = 25;
@@ -1064,11 +1017,10 @@ export const World = (() => {
     if (hitObj?.userData?.onClick) hitObj.userData.onClick();
   }
 
-  // Android/2D taps (ray from camera)
   function clickFromCamera() {
     const origin = new THREE.Vector3();
     camera.getWorldPosition(origin);
-    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+    const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion).normalize();
 
     S.raycaster.set(origin, dir);
     S.raycaster.far = 25;
@@ -1090,22 +1042,18 @@ export const World = (() => {
     if (S.hovered === obj) return;
 
     if (S.hovered) {
-      S.hovered.traverse?.((n) => {
-        if (n.material && n.material.emissive) n.material.emissive.setHex(0x000000);
-      });
+      S.hovered.traverse?.((n) => { if (n.material && n.material.emissive) n.material.emissive.setHex(0x000000); });
     }
 
     S.hovered = obj;
 
     if (S.hovered) {
-      S.hovered.traverse?.((n) => {
-        if (n.material && n.material.emissive) n.material.emissive.setHex(0x081a20);
-      });
+      S.hovered.traverse?.((n) => { if (n.material && n.material.emissive) n.material.emissive.setHex(0x081a20); });
     }
   }
 
   // =========================================================
-  // TELEPORT
+  // TELEPORT (VR arc)
   // =========================================================
   function buildTeleport() {
     const marker = new THREE.Mesh(
@@ -1134,7 +1082,7 @@ export const World = (() => {
 
     S.tmpMat.identity().extractRotation(c.matrixWorld);
     const origin = new THREE.Vector3().setFromMatrixPosition(c.matrixWorld);
-    const forward = new THREE.Vector3(0, 0, -1).applyMatrix4(S.tmpMat).normalize();
+    const forward = new THREE.Vector3(0,0,-1).applyMatrix4(S.tmpMat).normalize();
 
     const g = new THREE.Vector3(0, -9.8, 0);
     const v0 = forward.clone().multiplyScalar(7.5);
@@ -1150,11 +1098,7 @@ export const World = (() => {
         .add(g.clone().multiplyScalar(0.5 * t * t));
       pts.push(p);
 
-      if (p.y <= 0.02) {
-        hit = p.clone();
-        hit.y = 0.01;
-        break;
-      }
+      if (p.y <= 0.02) { hit = p.clone(); hit.y = 0.01; break; }
       last = p;
     }
 
@@ -1163,9 +1107,9 @@ export const World = (() => {
 
     for (let i = 0; i < 40; i++) {
       const p = pts[Math.min(i, pts.length - 1)] || last;
-      pos[i * 3 + 0] = p.x;
-      pos[i * 3 + 1] = p.y;
-      pos[i * 3 + 2] = p.z;
+      pos[i*3+0] = p.x;
+      pos[i*3+1] = p.y;
+      pos[i*3+2] = p.z;
     }
     arc.geometry.attributes.position.needsUpdate = true;
     arc.visible = true;
@@ -1196,8 +1140,8 @@ export const World = (() => {
     const left = controllers[0];
     const right = controllers[1];
 
-    const la = left?.userData?.axes || [0, 0, 0, 0];
-    const ra = right?.userData?.axes || [0, 0, 0, 0];
+    const la = left?.userData?.axes || [0,0,0,0];
+    const ra = right?.userData?.axes || [0,0,0,0];
 
     const mx = la[2] ?? la[0] ?? 0;
     const my = la[3] ?? la[1] ?? 0;
@@ -1207,10 +1151,10 @@ export const World = (() => {
     const ay = Math.abs(my) > dead ? my : 0;
 
     if (ax || ay) {
-      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(player.quaternion);
+      const forward = new THREE.Vector3(0,0,-1).applyQuaternion(player.quaternion);
       forward.y = 0; forward.normalize();
 
-      const rightV = new THREE.Vector3(1, 0, 0).applyQuaternion(player.quaternion);
+      const rightV = new THREE.Vector3(1,0,0).applyQuaternion(player.quaternion);
       rightV.y = 0; rightV.normalize();
 
       const v = new THREE.Vector3();
@@ -1229,8 +1173,66 @@ export const World = (() => {
   }
 
   // =========================================================
-  // PRIMITIVES
+  // PRIMITIVES + TEXTURES
   // =========================================================
+  function makeFeltTexture({ text="SCARLETT", accent=0xff2d7a }) {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    canvas.width = 1024;
+    canvas.height = 1024;
+
+    // base felt
+    ctx.fillStyle = "#0f5f3d";
+    ctx.fillRect(0,0,1024,1024);
+
+    // subtle felt noise
+    ctx.globalAlpha = 0.10;
+    for (let i=0;i<2200;i++){
+      const x = Math.random()*1024;
+      const y = Math.random()*1024;
+      const a = Math.random()*0.8;
+      ctx.fillStyle = `rgba(0,0,0,${a})`;
+      ctx.fillRect(x,y,1,1);
+    }
+    ctx.globalAlpha = 1;
+
+    // center scorpion logo circle
+    ctx.beginPath();
+    ctx.arc(512, 512, 180, 0, Math.PI*2);
+    ctx.fillStyle = "rgba(0,0,0,0.18)";
+    ctx.fill();
+
+    // accent ring
+    ctx.beginPath();
+    ctx.arc(512,512,205,0,Math.PI*2);
+    ctx.strokeStyle = `rgba(255,220,80,0.22)`;
+    ctx.lineWidth = 10;
+    ctx.stroke();
+
+    // text + scorpion glyph
+    ctx.fillStyle = "rgba(255,255,255,0.82)";
+    ctx.font = "900 84px system-ui, Arial";
+    ctx.textAlign="center";
+    ctx.textBaseline="middle";
+    ctx.fillText("🦂", 512, 440);
+    ctx.font = "900 64px system-ui, Arial";
+    ctx.fillText(text, 512, 520);
+
+    // table markings (simple arcs)
+    ctx.globalAlpha = 0.18;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(512, 610, 320, Math.PI*1.10, Math.PI*1.90);
+    ctx.stroke();
+    ctx.globalAlpha = 1.0;
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.anisotropy = 4;
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    return tex;
+  }
+
   function makePad(label, color) {
     const g = new THREE.Group();
 
@@ -1342,21 +1344,97 @@ export const World = (() => {
     return g;
   }
 
-  function makePokerBot(i) {
-    const g = makeWalkerBot(i);
+  function makeFullBodySeatedBot(i) {
+    const g = new THREE.Group();
 
-    const armMat = new THREE.MeshStandardMaterial({ color: 0x14151d, roughness: 0.85 });
-    const armGeom = new THREE.CylinderGeometry(0.035, 0.035, 0.45, 12);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1b1c26, roughness: 0.9 });
+    const limbMat = new THREE.MeshStandardMaterial({ color: 0x14151d, roughness: 0.85 });
+    const headMat = new THREE.MeshStandardMaterial({ color: 0x222433, roughness: 0.65 });
 
-    const a1 = new THREE.Mesh(armGeom, armMat);
-    a1.position.set(0.22, 1.1, 0.05);
-    a1.rotation.z = 0.9;
-    g.add(a1);
+    // torso
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.55, 6, 14), bodyMat);
+    torso.position.y = 0.58; // relative to seat Y
+    g.add(torso);
 
-    const a2 = new THREE.Mesh(armGeom, armMat);
-    a2.position.set(-0.22, 1.1, 0.05);
-    a2.rotation.z = -0.9;
-    g.add(a2);
+    // head
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 22, 22), headMat);
+    head.position.y = 1.04;
+    head.name = "head";
+    g.add(head);
+
+    // eyes
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0x7fe7ff });
+    const e1 = new THREE.Mesh(new THREE.SphereGeometry(0.015, 10, 10), eyeMat);
+    e1.position.set(0.05, 1.05, 0.13);
+    const e2 = e1.clone();
+    e2.position.x = -0.05;
+    g.add(e1, e2);
+
+    // hips anchor
+    const hips = new THREE.Group();
+    hips.position.set(0, 0.40, 0.06);
+    g.add(hips);
+
+    // arms toward table
+    const upperArmGeom = new THREE.CylinderGeometry(0.03, 0.03, 0.34, 12);
+    const foreArmGeom  = new THREE.CylinderGeometry(0.028, 0.028, 0.30, 12);
+
+    function arm(side=1) {
+      const shoulder = new THREE.Group();
+      shoulder.position.set(0.22*side, 0.66, 0.12);
+      g.add(shoulder);
+
+      const upper = new THREE.Mesh(upperArmGeom, limbMat);
+      upper.rotation.z = 0.55 * side;
+      upper.position.y = -0.17;
+      shoulder.add(upper);
+
+      const elbow = new THREE.Group();
+      elbow.position.set(0, -0.34, 0);
+      upper.add(elbow);
+
+      const fore = new THREE.Mesh(foreArmGeom, limbMat);
+      fore.rotation.z = 0.25 * side;
+      fore.position.y = -0.15;
+      elbow.add(fore);
+
+      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 12), limbMat);
+      hand.position.set(0, -0.30, 0.05);
+      elbow.add(hand);
+    }
+    arm(1); arm(-1);
+
+    // legs seated
+    const thighGeom = new THREE.CylinderGeometry(0.04, 0.04, 0.36, 12);
+    const calfGeom  = new THREE.CylinderGeometry(0.035, 0.035, 0.34, 12);
+
+    function leg(side=1) {
+      const hip = new THREE.Group();
+      hip.position.set(0.11*side, 0.42, 0.08);
+      g.add(hip);
+
+      const thigh = new THREE.Mesh(thighGeom, limbMat);
+      thigh.rotation.x = Math.PI / 2.25;
+      thigh.position.z = 0.18;
+      hip.add(thigh);
+
+      const knee = new THREE.Group();
+      knee.position.set(0, 0, 0.36);
+      thigh.add(knee);
+
+      const calf = new THREE.Mesh(calfGeom, limbMat);
+      calf.rotation.x = -Math.PI / 2.05;
+      calf.position.y = -0.17;
+      knee.add(calf);
+
+      const foot = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.05, 0.18), limbMat);
+      foot.position.set(0, -0.34, 0.02);
+      knee.add(foot);
+    }
+    leg(1); leg(-1);
+
+    // record baseY for bob
+    g.userData.baseY = g.position.y;
 
     return g;
   }
@@ -1368,11 +1446,7 @@ export const World = (() => {
       : [0xff2d7a, 0x7fe7ff, 0xffcc00, 0x4cd964, 0xffffff];
 
     for (let i = 0; i < n; i++) {
-      const mat = new THREE.MeshStandardMaterial({
-        color: colors[i % colors.length],
-        roughness: 0.42,
-        metalness: 0.15
-      });
+      const mat = new THREE.MeshStandardMaterial({ color: colors[i % colors.length], roughness: 0.42, metalness: 0.15 });
       const chip = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.015, 18), mat);
       chip.position.y = i * 0.016;
       g.add(chip);
@@ -1381,23 +1455,17 @@ export const World = (() => {
   }
 
   function makeChipPot(n = 18) {
-    // “pot” as a small low mound of chips (prevents “big fat ball” look)
     const g = new THREE.Group();
     const colors = [0xff2d7a, 0x7fe7ff, 0xffcc00, 0xffffff];
     for (let i = 0; i < n; i++) {
-      const mat = new THREE.MeshStandardMaterial({
-        color: colors[i % colors.length],
-        roughness: 0.45,
-        metalness: 0.12
-      });
+      const mat = new THREE.MeshStandardMaterial({ color: colors[i % colors.length], roughness: 0.45, metalness: 0.12 });
       const chip = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.013, 18), mat);
       const a = Math.random() * Math.PI * 2;
       const r = Math.random() * 0.18;
-      chip.position.set(Math.cos(a) * r, 0.010 + (i * 0.004), Math.sin(a) * r);
-      chip.rotation.y = Math.random() * Math.PI;
+      chip.position.set(Math.cos(a)*r, 0.010 + (i*0.004), Math.sin(a)*r);
+      chip.rotation.y = Math.random()*Math.PI;
       g.add(chip);
     }
-    g.scale.setScalar(1.0);
     return g;
   }
 
@@ -1435,9 +1503,7 @@ export const World = (() => {
       ctx.fillText(lines[0], 256, 128);
     } else {
       const baseY = 128 - (lines.length - 1) * 26;
-      for (let i = 0; i < lines.length; i++) {
-        ctx.fillText(lines[i], 256, baseY + i * 52);
-      }
+      for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], 256, baseY + i * 52);
     }
 
     const tex = new THREE.CanvasTexture(canvas);
@@ -1446,10 +1512,7 @@ export const World = (() => {
     const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.6 * scale, 0.8 * scale), mat);
 
-    mesh.onBeforeRender = () => {
-      mesh.quaternion.copy(camera.quaternion);
-    };
-
+    mesh.onBeforeRender = () => { mesh.quaternion.copy(camera.quaternion); };
     return mesh;
   }
 
@@ -1463,5 +1526,9 @@ export const World = (() => {
     ctx.closePath();
   }
 
-  return { init, update, clickFromCamera };
+  // =========================================================
+  // BUILD LASERS / TELEPORT / LOCOMOTION helpers already above
+  // =========================================================
+
+  return { init, update, clickFromCamera, teleportFromCamera };
 })();

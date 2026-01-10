@@ -1,9 +1,10 @@
-// /js/world.js — Scarlett Hybrid World 2.1 (FULL)
+// /js/world.js — Scarlett Hybrid World 2.2 (FULL)
 // ✅ 4 corner cubes + hub
-// ✅ Brighter lighting so hands/controllers visible
-// ✅ SpawnPad + SpawnPoint
-// ✅ BossTable + DealerAnchor in hub center
-// ✅ Simple fallback rail ring so you SEE the poker area even if modules fail
+// ✅ Brighter lighting
+// ✅ SpawnPad z-fighting fixed (lift + polygonOffset)
+// ✅ Center hub table
+// ✅ ALWAYS-ON demo: 2 bots walking + visible card dealing at center
+// ✅ Still loads your real modules if present (bots/poker_sim/etc)
 
 export const World = {
   async init(ctx) {
@@ -13,6 +14,7 @@ export const World = {
 
     ctx.systems = ctx.systems || {};
     ctx.colliders = ctx.colliders || [];
+    ctx.demo = ctx.demo || {};
 
     const safeImport = async (url) => {
       try { return await import(url); }
@@ -32,13 +34,12 @@ export const World = {
     dir.position.set(10, 16, 8);
     scene.add(dir);
 
-    // hub point lights (so hands are visible)
-    const hubA = new THREE.PointLight(0x7fe7ff, 1.6, 30);
-    hubA.position.set(0, 6, 0);
+    const hubA = new THREE.PointLight(0x7fe7ff, 1.6, 34);
+    hubA.position.set(0, 6.2, 0);
     scene.add(hubA);
 
-    const hubB = new THREE.PointLight(0xff2d7a, 1.1, 30);
-    hubB.position.set(0, 4, -6);
+    const hubB = new THREE.PointLight(0xff2d7a, 1.1, 34);
+    hubB.position.set(0, 4.5, -6);
     scene.add(hubB);
 
     // ---------- Materials ----------
@@ -130,7 +131,7 @@ export const World = {
     dealer.position.set(0, 0.92, 0.95);
     scene.add(dealer);
 
-    // ---------- Fallback guard rail (so you SEE it even if modules fail) ----------
+    // ---------- Fallback guard rail ring ----------
     const rail = new THREE.Mesh(
       new THREE.TorusGeometry(3.9, 0.08, 12, 120),
       new THREE.MeshStandardMaterial({ color: 0x121422, emissive: 0x132a3a, emissiveIntensity: 0.55 })
@@ -227,20 +228,26 @@ export const World = {
 
     rooms.forEach(buildRoom);
 
-    // ---------- SpawnPad (NW room) ----------
+    // ---------- SpawnPad (NW room) — Z-FIGHT FIX ----------
     const spawnRoom = rooms[0]; // NW
+    const spawnPadMat = new THREE.MeshStandardMaterial({
+      color: 0x0a0b12,
+      emissive: new THREE.Color(0x00ffff),
+      emissiveIntensity: 1.1,
+      roughness: 0.35,
+      metalness: 0.15,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2
+    });
+
     const spawnPad = new THREE.Mesh(
       new THREE.CylinderGeometry(0.85, 0.85, 0.16, 32),
-      new THREE.MeshStandardMaterial({
-        color: 0x0a0b12,
-        emissive: new THREE.Color(0x00ffff),
-        emissiveIntensity: 1.3,
-        roughness: 0.35,
-        metalness: 0.15
-      })
+      spawnPadMat
     );
     spawnPad.name = "SpawnPad";
-    spawnPad.position.set(spawnRoom.x, 0.10, spawnRoom.z);
+    spawnPad.position.set(spawnRoom.x, 0.14, spawnRoom.z); // lifted slightly to avoid flicker
+    spawnPad.renderOrder = 10;
     scene.add(spawnPad);
 
     const sp = new THREE.Object3D();
@@ -248,7 +255,7 @@ export const World = {
     sp.position.set(spawnRoom.x, 0, spawnRoom.z);
     scene.add(sp);
 
-    // Teleporter "behind" you (spawn faces hub, behind is further outward)
+    // Teleporter behind you visually
     const tmAnchor = new THREE.Object3D();
     tmAnchor.name = "TeleportMachineSpawn";
     tmAnchor.position.set(spawnRoom.x, 0, spawnRoom.z + 2.8);
@@ -268,8 +275,76 @@ export const World = {
     tmCore.name = "TeleportMachineFallback";
     scene.add(tmCore);
 
+    // ---------- DEMO: 2 bots walking around hub ----------
+    const makeDemoBot = (name, tint) => {
+      const g = new THREE.Group();
+      g.name = name;
+
+      const mat = new THREE.MeshStandardMaterial({ color: tint, roughness: 0.7, metalness: 0.05, flatShading: true });
+
+      const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.55, 4, 8), mat);
+      torso.position.y = 1.15;
+      g.add(torso);
+
+      const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.13, 1), mat);
+      head.position.set(0, 0.45, 0);
+      torso.add(head);
+
+      const legGeo = new THREE.CapsuleGeometry(0.07, 0.45, 4, 6);
+      const l = new THREE.Mesh(legGeo, mat);
+      const r2 = new THREE.Mesh(legGeo, mat);
+      l.position.set(-0.10, -0.65, 0);
+      r2.position.set(0.10, -0.65, 0);
+      torso.add(l, r2);
+
+      return g;
+    };
+
+    ctx.demo.bots = [
+      { obj: makeDemoBot("DemoBotA", 0x7fe7ff), t: 0, phase: 0 },
+      { obj: makeDemoBot("DemoBotB", 0xff2d7a), t: 0, phase: Math.PI },
+    ];
+    ctx.demo.bots.forEach((b) => scene.add(b.obj));
+
+    // ---------- DEMO: visible card dealing on center table ----------
+    const cardGroup = new THREE.Group();
+    cardGroup.name = "DemoCards";
+    scene.add(cardGroup);
+
+    const makeCard = () => {
+      const geo = new THREE.PlaneGeometry(0.07, 0.10);
+      const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, metalness: 0.0, side: THREE.DoubleSide });
+      const m = new THREE.Mesh(geo, mat);
+      m.rotation.x = -Math.PI / 2;
+      // neon edge
+      const edge = new THREE.LineSegments(
+        new THREE.EdgesGeometry(geo),
+        new THREE.LineBasicMaterial({ color: 0x00ffff })
+      );
+      m.add(edge);
+      return m;
+    };
+
+    const deckPos = new THREE.Vector3(0, 0.92, 0.95); // dealer anchor
+    const seatTargets = [
+      new THREE.Vector3(-0.55, 0.86, 0.25),
+      new THREE.Vector3( 0.55, 0.86, 0.25),
+      new THREE.Vector3(-0.55, 0.86,-0.25),
+      new THREE.Vector3( 0.55, 0.86,-0.25),
+    ];
+
+    ctx.demo.cards = {
+      group: cardGroup,
+      active: [],
+      timer: 0,
+      idx: 0,
+      deckPos,
+      seatTargets
+    };
+
     log("[world] 4-corner cubes + hub built ✅");
     log(`[world] SpawnPad @ (${spawnPad.position.x.toFixed(1)}, ${spawnPad.position.z.toFixed(1)})`);
+    log("[world] demo bots + demo dealing ✅");
 
     // ---------- Load your existing systems safely ----------
     const rm = await safeImport("./room_manager.js");
@@ -304,7 +379,6 @@ export const World = {
     const interactions = await safeImport("./interactions.js");
     if (interactions?.Interactions?.init) { try { interactions.Interactions.init(ctx); addSystem("interactions", interactions.Interactions); } catch {} }
 
-    // Start in lobby (bots + sim usually run there)
     this.setRoom(ctx, ctx.room || "lobby");
     log("[world] init complete ✅");
   },
@@ -323,9 +397,74 @@ export const World = {
   },
 
   update(ctx, dt) {
+    // run real systems
     const systems = ctx.systems || {};
     for (const k of Object.keys(systems)) {
       try { systems[k]?.update?.(dt, ctx); } catch {}
+    }
+
+    // DEMO bots (always)
+    if (ctx.demo?.bots?.length) {
+      const r = 5.2;
+      for (const b of ctx.demo.bots) {
+        b.t += dt * 0.55;
+        const ang = b.t + b.phase;
+        const x = Math.cos(ang) * r;
+        const z = Math.sin(ang) * r;
+        b.obj.position.set(x, 0, z);
+        b.obj.rotation.y = Math.atan2(-x, -z); // face center
+      }
+    }
+
+    // DEMO dealing (always)
+    const dc = ctx.demo?.cards;
+    if (dc) {
+      dc.timer += dt;
+
+      // spawn a new card every ~0.6s, animate to seat
+      if (dc.timer > 0.6) {
+        dc.timer = 0;
+        const card = (new ctx.THREE.Mesh(
+          new ctx.THREE.PlaneGeometry(0.07, 0.10),
+          new ctx.THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, metalness: 0.0, side: ctx.THREE.DoubleSide })
+        ));
+        card.rotation.x = -Math.PI / 2;
+        card.position.copy(dc.deckPos);
+
+        const edge = new ctx.THREE.LineSegments(
+          new ctx.THREE.EdgesGeometry(card.geometry),
+          new ctx.THREE.LineBasicMaterial({ color: 0x00ffff })
+        );
+        card.add(edge);
+
+        const target = dc.seatTargets[dc.idx % dc.seatTargets.length].clone();
+        dc.idx++;
+
+        card.userData.anim = { t: 0, from: dc.deckPos.clone(), to: target };
+        dc.group.add(card);
+        dc.active.push(card);
+
+        // clear pile occasionally
+        if (dc.active.length > 18) {
+          for (const c of dc.active) dc.group.remove(c);
+          dc.active.length = 0;
+        }
+      }
+
+      // animate active cards
+      for (const card of dc.active) {
+        const a = card.userData.anim;
+        if (!a) continue;
+        a.t = Math.min(1, a.t + dt * 1.8);
+
+        // arc
+        const mid = a.from.clone().lerp(a.to, 0.5);
+        mid.y += 0.25;
+
+        const p1 = a.from.clone().lerp(mid, a.t);
+        const p2 = mid.clone().lerp(a.to, a.t);
+        card.position.copy(p1.lerp(p2, a.t));
+      }
     }
   }
 };

@@ -1,6 +1,6 @@
-// /js/main.js — Scarlett Hybrid 2.7 (FULL, PERMANENT DEBUG BUILD)
+// /js/main.js — Scarlett Hybrid 2.7.1 (FULL, PERMANENT DEBUG BUILD)
 // FIXES:
-// ✅ spawn facing +180° (stop starting facing teleport machine)
+// ✅ spawn facing = EXACT face-to-target (no magic +180). Optional per-world offset.
 // ✅ controllers + XRHands parented to PlayerRig (no more stuck on table)
 // ✅ teleport ray attached to right controller (valid pose check)
 // ✅ controller locomotion + snap turn
@@ -8,7 +8,7 @@
 // ✅ loads gesture_engine + betting_module (included below)
 
 (async function boot() {
-  console.log("HYBRID_MAIN=2.7");
+  console.log("HYBRID_MAIN=2.7.1");
 
   if (window.__SCARLETT_BOOTED__) throw new Error("Double boot prevented");
   window.__SCARLETT_BOOTED__ = true;
@@ -138,7 +138,7 @@
     LOG.push("error", "world.js missing World.init");
   }
 
-  // ✅ IMPORTANT: parent controllers to rig so they follow teleport/movement
+  // ✅ Controllers parented to rig so they follow teleport/movement
   const controllerL = renderer.xr.getController(0);
   controllerL.name = "ControllerLeft";
   player.add(controllerL);
@@ -149,7 +149,7 @@
 
   LOG.push("log", "Controllers parented to PlayerRig ✅ (no more stuck-on-table)");
 
-  // ✅ Hands also parent to rig
+  // ✅ Hands also parented to rig
   let leftHand = null, rightHand = null;
   try {
     leftHand = renderer.xr.getHand(0); leftHand.name = "XRHandLeft"; player.add(leftHand);
@@ -159,33 +159,48 @@
     LOG.push("warn", "XRHands unavailable (controller-only OK).");
   }
 
-  // Spawn + facing: look at center, then flip +180° so you don't face teleporter
+  // ✅ FIXED Spawn + Facing (EXACT)
   const tmp = new THREE.Vector3();
   const tmp2 = new THREE.Vector3();
-  function applySpawnAndFacing() {
-    const sp = scene.getObjectByName("SpawnPoint") || scene.getObjectByName("SpawnPad");
-    const target = scene.getObjectByName("BossTable") || scene.getObjectByName("HubPlate");
 
-    if (sp) {
-      sp.getWorldPosition(tmp);
+  function applySpawnAndFacing() {
+    const spObj = scene.getObjectByName("SpawnPoint") || scene.getObjectByName("SpawnPad");
+
+    if (spObj) {
+      spObj.getWorldPosition(tmp);
       player.position.set(tmp.x, 0, tmp.z);
       LOG.push("log", `Spawn ✅ x=${player.position.x.toFixed(2)} z=${player.position.z.toFixed(2)}`);
+    } else {
+      LOG.push("warn", "No SpawnPoint/SpawnPad found.");
     }
+
+    // If the world defines a target name, use it.
+    const faceTargetName = scene.getObjectByName("SpawnPoint")?.userData?.faceTargetName || null;
+    const faceYawOffsetDeg = scene.getObjectByName("SpawnPoint")?.userData?.faceYawOffsetDeg || 0;
+    const yawOffset = THREE.MathUtils.degToRad(faceYawOffsetDeg);
+
+    const target =
+      (faceTargetName ? scene.getObjectByName(faceTargetName) : null) ||
+      scene.getObjectByName("HubPlate") ||
+      scene.getObjectByName("BossTable");
 
     if (target) {
       target.getWorldPosition(tmp);
       tmp2.set(player.position.x, 0, player.position.z);
+
       const v = tmp.sub(tmp2);
       v.y = 0;
 
       if (v.lengthSq() > 1e-6) {
-        let yaw = Math.atan2(v.x, v.z);
-        yaw += Math.PI; // ✅ 180 flip
+        const yaw = Math.atan2(v.x, v.z) + yawOffset;
         player.rotation.set(0, yaw, 0);
-        LOG.push("log", "Facing corrected ✅ (+180° flip)");
+        LOG.push("log", `Facing target ✅ (${target.name}) offset=${faceYawOffsetDeg}°`);
       }
+    } else {
+      LOG.push("warn", "No HubPlate/BossTable found for facing.");
     }
   }
+
   applySpawnAndFacing();
   renderer.xr.addEventListener("sessionstart", () => setTimeout(applySpawnAndFacing, 220));
 
@@ -357,5 +372,5 @@
   });
 
   await setCaps();
-  LOG.push("log", "Hybrid 2.7 boot complete ✅ (facing +180, controllers follow rig, hub demo live)");
+  LOG.push("log", "Hybrid 2.7.1 boot complete ✅ (EXACT facing, controllers follow rig, hub demo live)");
 })();

@@ -4,204 +4,227 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
   <title>Scarlett VR Poker</title>
-
   <style>
-    :root{
-      --bg:#05060a;
-      --panel:#0b0d14cc;
-      --text:#e8ecff;
-      --muted:#98a0c7;
-      --aqua:#7fe7ff;
-      --pink:#ff2d7a;
-      --shadow: 0 12px 40px rgba(0,0,0,.45);
-      --radius: 18px;
+    html, body { margin:0; padding:0; height:100%; background:#05060a; overflow:hidden; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; color:#e8ecff; }
+    #app{ position:fixed; inset:0; }
 
-      --dbg-gap: 10px;
-      --dbg-radius: 14px;
-      --dbg-bg: rgba(10,12,18,.86);
-      --dbg-border: rgba(180,200,255,.18);
-      --dbg-text: #e8ecff;
-      --dbg-muted: rgba(232,236,255,.72);
-      --dbg-shadow: 0 14px 48px rgba(0,0,0,.55);
-    }
-
-    html, body {
-      margin:0; padding:0; height:100%;
-      background:var(--bg);
-      overflow:hidden;
-      font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      color:var(--text);
-      touch-action:none;
-    }
-
-    #app { position:fixed; inset:0; }
-    canvas { width:100%; height:100%; display:block; }
-
-    /* HUD */
-    #hud {
-      position: fixed;
-      left: calc(env(safe-area-inset-left) + 12px);
-      top: calc(env(safe-area-inset-top) + 12px);
-      display:flex;
-      gap:10px;
-      z-index: 20;
-      align-items:center;
+    /* Top HUD */
+    #hud{
+      position:fixed; left:0; top:0; right:0;
+      display:flex; gap:10px; align-items:center;
+      padding: 12px 12px;
+      z-index: 10000;
       pointer-events:none;
     }
-    .chip {
+    #hud .chip{
       pointer-events:auto;
-      background: rgba(11,13,20,.72);
-      border: 1px solid rgba(180,200,255,.14);
-      box-shadow: var(--shadow);
-      border-radius: 999px;
       padding: 10px 12px;
-      font-size: 12px;
-      color: var(--text);
-      display:flex;
-      gap:8px;
-      align-items:center;
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
+      border-radius: 14px;
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(11,13,20,.72);
+      color:#e8ecff;
+      font-weight: 700;
     }
-    .chip b { color: var(--aqua); font-weight:800; }
+    #hud .chip:active{ transform:scale(.98); }
 
-    /* Touch Controls */
-    #touchControls {
-      position: fixed;
-      inset: 0;
-      z-index: 15;
-      pointer-events:none;
+    /* Menu overlay */
+    #menuOverlay{
+      position: fixed; left: 12px; top: 58px;
+      width: 260px;
+      border-radius: 18px;
+      border: 1px solid rgba(127,231,255,.18);
+      background: rgba(11,13,20,.86);
+      box-shadow: 0 12px 40px rgba(0,0,0,.45);
+      padding: 12px;
+      z-index: 10001;
+      display: none;
+      pointer-events: auto;
+    }
+    #menuOverlay.show{ display:block; }
+    #menuOverlay h3{ margin: 4px 0 10px 0; font-size: 14px; letter-spacing:.4px; color:#98a0c7; }
+    #menuOverlay .row{ display:flex; gap:10px; }
+    #menuOverlay button{
+      width: 100%;
+      margin: 6px 0;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(10,12,20,.72);
+      color:#e8ecff;
+      font-weight: 800;
+      letter-spacing:.4px;
+    }
+    #menuOverlay button:active{ transform: scale(.98); }
+
+    /* Android Debug Hub: draggable + collapsible */
+    #androidDebugFab{
+      position: fixed; right: 12px; bottom: 220px;
+      width: 56px; height: 56px; border-radius: 18px;
+      border:1px solid rgba(127,231,255,.18);
+      background: rgba(11,13,20,.78);
+      color:#e8ecff; font-weight:900;
+      display:none;
+      z-index: 10002;
+    }
+    #androidDebugFab.show{ display:block; }
+
+    #androidDebugHub{
+      position: fixed; right: 12px; top: 84px;
+      width: 320px;
+      border-radius: 18px;
+      border:1px solid rgba(127,231,255,.18);
+      background: rgba(11,13,20,.86);
+      box-shadow: 0 12px 40px rgba(0,0,0,.45);
+      z-index: 10002;
       display:none;
     }
-    .stick {
-      position: absolute;
-      width: 150px;
-      height: 150px;
-      border-radius: 999px;
-      background: rgba(11,13,20,.38);
-      border: 1px solid rgba(180,200,255,.14);
-      box-shadow: var(--shadow);
-      pointer-events:auto;
-      touch-action:none;
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-    }
-    .stick .nub {
-      position:absolute;
-      left:50%; top:50%;
-      width: 62px; height: 62px;
-      transform: translate(-50%,-50%);
-      border-radius: 999px;
-      background: rgba(127,231,255,.16);
-      border: 1px solid rgba(127,231,255,.32);
-    }
-    #moveStick { left: calc(env(safe-area-inset-left) + 16px); bottom: calc(env(safe-area-inset-bottom) + 16px); }
-    #lookStick { right: calc(env(safe-area-inset-right) + 16px); bottom: calc(env(safe-area-inset-bottom) + 16px); }
-
-    /* Debug Hub */
-    #androidDebugHub {
-      position: fixed;
-      left: calc(env(safe-area-inset-left) + var(--dbg-gap));
-      top: calc(env(safe-area-inset-top) + 58px);
-      width: min(420px, calc(100vw - 2*var(--dbg-gap) - env(safe-area-inset-left) - env(safe-area-inset-right)));
-      max-height: min(52vh, calc(100vh - 2*var(--dbg-gap) - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
-      z-index: 99999;
-      background: var(--dbg-bg);
-      border: 1px solid var(--dbg-border);
-      border-radius: var(--dbg-radius);
-      box-shadow: var(--dbg-shadow);
-      color: var(--dbg-text);
-      overflow: hidden;
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-      pointer-events:none;
-      display:none;
-    }
-    #androidDebugHub .dbgHeader,
-    #androidDebugHub .dbgBody,
-    #androidDebugHub button { pointer-events:auto; }
-
     #androidDebugHub .dbgHeader{
       display:flex; align-items:center; justify-content:space-between;
-      gap:8px; padding:10px 10px; cursor:grab; user-select:none;
-      border-bottom:1px solid var(--dbg-border);
+      padding: 10px 10px;
+      cursor: grab;
+      user-select:none;
+      border-bottom: 1px solid rgba(255,255,255,.08);
     }
-    #androidDebugHub.dragging .dbgHeader{ cursor:grabbing; }
-
-    #androidDebugHub .dbgTitle{
-      font-weight:800; font-size:12px; letter-spacing:.5px; color: var(--aqua);
+    #androidDebugHub.dragging .dbgHeader{ cursor: grabbing; }
+    #androidDebugHub .dbgHeader .btns{ display:flex; gap:8px; }
+    #androidDebugHub .dbgHeader button{
+      border-radius: 12px;
+      border:1px solid rgba(255,255,255,.10);
+      background: rgba(10,12,20,.72);
+      color:#e8ecff;
+      padding: 6px 10px;
+      font-weight: 800;
     }
-    #androidDebugHub .dbgBtns{ display:flex; gap:6px; }
-    #androidDebugHub .dbgBtn{
-      appearance:none;
-      border:1px solid var(--dbg-border);
-      background: rgba(255,255,255,.06);
-      color: var(--dbg-text);
-      border-radius: 10px;
-      padding:6px 9px;
-      font-size:12px;
-      line-height: 1;
-    }
-    #androidDebugHub .dbgBody{
-      padding:10px;
+    #androidDebugHub .dbgBody{ padding: 10px; }
+    #dbgLog{
+      width: 100%;
+      height: 180px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.08);
+      background: rgba(0,0,0,.25);
+      color:#e8ecff;
+      padding: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
       overflow:auto;
-      max-height: calc(52vh - 46px);
-      font-size:12px;
-      color: var(--dbg-muted);
       white-space: pre-wrap;
     }
     #androidDebugHub.collapsed .dbgBody{ display:none; }
-    #androidDebugHub.collapsed{ width:auto; }
 
-    #androidDebugFab{
+    /* Mobile D-pad */
+    #mobilePad{
       position: fixed;
-      right: calc(env(safe-area-inset-right) + 12px);
-      bottom: calc(env(safe-area-inset-bottom) + 12px);
+      left: 10px;
+      right: 10px;
+      bottom: 10px;
+      display: none;
+      pointer-events: none;
       z-index: 99999;
-      border: 1px solid var(--dbg-border);
-      background: rgba(10,12,18,.72);
-      color: var(--dbg-text);
-      border-radius: 999px;
-      padding: 10px 12px;
-      font-size: 12px;
-      box-shadow: var(--dbg-shadow);
-      display:none;
-      pointer-events:auto;
     }
-    #androidDebugFab.show{ display:block; }
+    #mobilePad *{ pointer-events:auto; }
+
+    #mobilePad{
+      display: grid;
+      grid-template-columns: 160px 1fr;
+      gap: 12px;
+      align-items: end;
+    }
+    .dpad{ width:160px; height:160px; position:relative; }
+    .dpad .d{
+      position:absolute;
+      width: 56px; height: 56px;
+      border-radius: 14px;
+      border: 1px solid rgba(127,231,255,.25);
+      background: rgba(11,13,20,.72);
+      color: #e8ecff;
+      font-size: 20px;
+      backdrop-filter: blur(8px);
+    }
+    .dpad .up{ left: 52px; top: 0; }
+    .dpad .down{ left: 52px; bottom: 0; }
+    .dpad .left{ left: 0; top: 52px; }
+    .dpad .right{ right: 0; top: 52px; }
+
+    .abtns{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      justify-items: end;
+    }
+    .abtns button{
+      height: 56px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(11,13,20,.72);
+      color: #e8ecff;
+      font-weight: 900;
+      letter-spacing: .4px;
+      width: 100%;
+      backdrop-filter: blur(8px);
+    }
+    .abtns #mAction{ border-color: rgba(127,231,255,.35); }
+    .abtns #mTeleport{ border-color: rgba(255,204,0,.35); }
+
+    .turnRow{
+      grid-column: 1 / span 2;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .d:active, .abtns button:active{ transform: scale(.98); }
   </style>
 </head>
-
 <body>
   <div id="app"></div>
 
   <div id="hud">
-    <div class="chip"><b>Scarlett</b> VR Poker</div>
-    <button class="chip" id="btnMenu">Menu</button>
+    <button class="chip" id="btnMenu">Menu (Y/M)</button>
     <button class="chip" id="btnDebug">Debug</button>
   </div>
 
-  <div id="touchControls">
-    <div class="stick" id="moveStick"><div class="nub"></div></div>
-    <div class="stick" id="lookStick"><div class="nub"></div></div>
+  <div id="menuOverlay">
+    <h3>SCARLETT MENU</h3>
+    <button id="goLobby">Go Lobby</button>
+    <button id="goScorpion">Go Scorpion</button>
+    <button id="goStore">Go Store</button>
+    <button id="goSpectate">Go Spectate</button>
+    <button id="tpTable">Teleport to Table</button>
+    <div class="row">
+      <button id="closeMenu">Close</button>
+    </div>
   </div>
 
-  <div id="androidDebugHub" class="collapsed">
+  <button id="androidDebugFab">DBG</button>
+  <div id="androidDebugHub">
     <div class="dbgHeader">
-      <div class="dbgTitle">ANDROID DEBUG</div>
-      <div class="dbgBtns">
-        <button class="dbgBtn" id="dbgCollapseBtn">▾</button>
-        <button class="dbgBtn" id="dbgHideBtn">✕</button>
+      <div><b>Debug Hub</b></div>
+      <div class="btns">
+        <button id="dbgCollapseBtn">▾</button>
+        <button id="dbgHideBtn">✕</button>
       </div>
     </div>
-    <div class="dbgBody" id="dbgLog"></div>
+    <div class="dbgBody">
+      <div id="dbgLog"></div>
+    </div>
   </div>
 
-  <button id="androidDebugFab">Show Debug</button>
+  <div id="mobilePad">
+    <div class="dpad">
+      <button class="d up" data-k="up">▲</button>
+      <button class="d left" data-k="left">◀</button>
+      <button class="d right" data-k="right">▶</button>
+      <button class="d down" data-k="down">▼</button>
+    </div>
+    <div class="abtns">
+      <button id="mAction">ACTION</button>
+      <button id="mTeleport">TELEPORT</button>
+      <div class="turnRow">
+        <button id="mTurnL">⟲</button>
+        <button id="mTurnR">⟳</button>
+      </div>
+    </div>
+  </div>
 
-  <script type="module">
-    const v = Date.now();
-    import(`./js/main.js?v=${v}`);
-  </script>
+  <script type="module" src="./js/main.js"></script>
 </body>
 </html>

@@ -1,169 +1,81 @@
-// /js/main.js — Scarlett VR Poker — MAIN v10.7 (FULL)
-// FIX: main owns animation loop + calls Controls.update(dt)
-// FIX: renderer.xr reference space type local-floor
-// FIX: recenter uses world.spawns (via SpawnPoints)
+// /js/spawn_points.js — Scarlett SpawnPoints v1 (FULL)
+// Creates visible spawn pads + registers world.spawns used by Controls.teleportToSpawn()
 
-import * as THREE from "three";
-import { VRButton } from "three/addons/webxr/VRButton.js";
-import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
+export const SpawnPoints = {
+  build({ THREE, scene, world, log }) {
+    if (!world || !THREE || !scene) return;
 
-import { World } from "./world.js";
-import { Controls } from "./controls.js";
+    // Ensure spawns container exists
+    world.spawns ||= {};
 
-const BUILD = Date.now().toString();
+    // Helper: register spawn + add pad mesh
+    const add = (name, pos, yaw = 0, color = 0x7fe7ff) => {
+      world.spawns[name] = { position: pos.clone(), yaw };
 
-function log(...a) {
-  console.log(...a);
-  try {
-    window.dispatchEvent(new CustomEvent("scarlett-log", { detail: a.map(String).join(" ") }));
-  } catch {}
-}
+      const pad = new THREE.Mesh(
+        new THREE.CircleGeometry(0.45, 48),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35 })
+      );
+      pad.rotation.x = -Math.PI / 2;
+      pad.position.copy(pos);
+      pad.position.y = 0.01; // slight above floor to avoid z-fighting
+      pad.name = `SPAWN_PAD_${name}`;
+      scene.add(pad);
 
-log(`[main] boot ✅ v=${BUILD}`);
+      // small “post” indicator
+      const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.03, 0.03, 0.65, 16),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85 })
+      );
+      post.position.set(pos.x, 0.33, pos.z);
+      post.name = `SPAWN_POST_${name}`;
+      scene.add(post);
 
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x05060a);
+      log?.(`[spawns] ✅ ${name} @ ${pos.x.toFixed(2)},${pos.z.toFixed(2)} yaw=${yaw.toFixed(2)}`);
+    };
 
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
+    // If anchors exist, use them; else fall back to sane defaults.
+    const A = world.anchors || {};
 
-// Player rig — in local-floor we keep rig.y = 0 always
-const player = new THREE.Group();
-player.name = "PLAYER_RIG";
-player.position.set(0, 0, 0);
-scene.add(player);
-player.add(camera);
+    // Lobby spawn (front of table, standing)
+    add(
+      "lobby_spawn",
+      A.lobby_spawn ? A.lobby_spawn.clone() : new THREE.Vector3(0, 0, 3.2),
+      Math.PI // face toward table by default
+    );
 
-// Renderer
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.xr.enabled = true;
+    // Store spawn
+    add(
+      "store_spawn",
+      A.store_spawn ? A.store_spawn.clone() : new THREE.Vector3(4.5, 0, -3.5),
+      Math.PI
+    );
 
-// IMPORTANT: this is the correct way to prefer local-floor in Three/WebXR
-renderer.xr.setReferenceSpaceType("local-floor");
+    // Spectator rail spawn (nice viewing angle)
+    add(
+      "spectator",
+      A.spectator ? A.spectator.clone() : new THREE.Vector3(0, 0, -3.0),
+      0
+    );
 
-document.body.appendChild(renderer.domElement);
+    // Table seat spawn (standing at a seat spot — you can auto-sit in scorpion only)
+    add(
+      "table_seat_1",
+      A.table_seat_1 ? A.table_seat_1.clone() : new THREE.Vector3(0, 0, 0.95),
+      Math.PI
+    );
 
-// VR Button
-const btn = VRButton.createButton(renderer);
-btn.style.zIndex = "9999";
-document.body.appendChild(btn);
-log("[main] VRButton appended ✅");
+    // Scorpion room “gate” / entry spawn
+    add(
+      "scorpion_gate",
+      A.scorpion_gate ? A.scorpion_gate.clone() : new THREE.Vector3(8.0, 0, 0.0),
+      -Math.PI / 2,
+      0xff2d7a
+    );
 
-// Small ambient (world adds real lighting)
-scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+    // Convenience alias for recenter button
+    world.spawns.default = world.spawns.lobby_spawn;
 
-// Controllers
-const controller1 = renderer.xr.getController(0);
-const controller2 = renderer.xr.getController(1);
-scene.add(controller1);
-scene.add(controller2);
-
-const controllerGrip1 = renderer.xr.getControllerGrip(0);
-const controllerGrip2 = renderer.xr.getControllerGrip(1);
-scene.add(controllerGrip1);
-scene.add(controllerGrip2);
-
-const controllerModelFactory = new XRControllerModelFactory();
-controllerGrip1.add(controllerModelFactory.createControllerModel(controllerGrip1));
-controllerGrip2.add(controllerModelFactory.createControllerModel(controllerGrip2));
-
-function makeRay() {
-  const geom = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, 0, -1),
-  ]);
-  const mat = new THREE.LineBasicMaterial({ color: 0x7fe7ff });
-  const line = new THREE.Line(geom, mat);
-  line.name = "XR_RAY";
-  line.scale.z = 6;
-  return line;
-}
-controller1.add(makeRay());
-controller2.add(makeRay());
-
-// Resize
-window.addEventListener("resize", () => {
-  if (renderer.xr.isPresenting) return;
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
-
-// Clock for dt
-const clock = new THREE.Clock();
-
-// World ctx
-let worldCtx = null;
-
-(async function boot() {
-  worldCtx = await World.init({
-    THREE,
-    scene,
-    renderer,
-    camera,
-    player,
-    controllers: { controller1, controller2, controllerGrip1, controllerGrip2 },
-    log,
-    BUILD,
-  });
-
-  // Init controls (no animation loop inside controls)
-  Controls.init({
-    THREE,
-    scene,
-    renderer,
-    camera,
-    player,
-    controllers: { controller1, controller2 },
-    world: worldCtx,
-    log,
-  });
-
-  log("[main] world init ✅");
-  log("[main] ready ✅");
-
-  // Main render loop
-  renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.033);
-
-    // In XR local-floor, keep rig on floor (prevents “giant/standing on something”)
-    if (renderer.xr.isPresenting) player.position.y = 0;
-
-    // Update controls (movement/turn)
-    Controls.update?.(dt);
-
-    // Render
-    renderer.render(scene, camera);
-  });
-})().catch((e) => {
-  console.error(e);
-  log("❌ [main] boot failed:", e?.message || e);
-});
-
-// XR session start/end hooks
-renderer.xr.addEventListener("sessionstart", () => {
-  log("[main] XR session start ✅");
-
-  // Always keep rig on floor
-  player.position.y = 0;
-
-  // Recenter to lobby spawn (if available)
-  try {
-    Controls.teleportToSpawn("lobby_spawn");
-  } catch {}
-});
-
-renderer.xr.addEventListener("sessionend", () => {
-  log("[main] XR session end ✅");
-});
-
-// UI bridge buttons
-window.addEventListener("scarlett-recenter", () => {
-  log("[main] recenter requested");
-  Controls.teleportToSpawn("lobby_spawn");
-});
-window.addEventListener("scarlett-enter-vr", async () => {
-  log("[main] enter vr requested");
-});
+    log?.("[spawns] ✅ pads built + world.spawns registered");
+  },
+};

@@ -1,11 +1,14 @@
-// /js/VRButton.js — Scarlett VRButton v1.1 (FULL)
-// Minimal WebXR "Enter VR" button that works on Quest + Android Chrome (if WebXR enabled).
-// Usage: document.body.appendChild(VRButton.createButton(renderer, sessionInit?))
+// /js/VRButton.js — Scarlett VRButton v1.2 (FULL)
+// Always returns the actual button element.
+// If #vrButtonSlot exists, it mounts there. Otherwise caller can append it.
+// Supports createButton(renderer, sessionInit?) pattern.
 
 export const VRButton = {
   createButton(renderer, sessionInit = null) {
     const button = document.createElement("button");
     button.textContent = "ENTER VR";
+    button.setAttribute("data-scarlett-vrbutton", "1");
+
     button.style.cssText = `
       position:relative;
       padding:10px 14px;
@@ -19,16 +22,6 @@ export const VRButton = {
       user-select:none;
       -webkit-user-select:none;
     `;
-
-    const slot = document.getElementById("vrButtonSlot");
-    if (slot) {
-      // If you have a slot in index.html, prefer it
-      slot.appendChild(button);
-      // Return a dummy span so callers who append don't double-insert
-      const dummy = document.createElement("span");
-      dummy.style.display = "none";
-      return dummy;
-    }
 
     let currentSession = null;
 
@@ -51,16 +44,21 @@ export const VRButton = {
     async function start() {
       if (!navigator.xr) return;
 
-      const init = sessionInit || window.__XR_SESSION_INIT || window.__SESSION_INIT__ || {
-        optionalFeatures: ["local-floor", "bounded-floor"],
-      };
+      const init =
+        sessionInit ||
+        window.__XR_SESSION_INIT ||
+        window.__SESSION_INIT__ || {
+          optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"],
+          domOverlay: { root: document.body },
+        };
 
       try {
         show("STARTING…", false);
+
         const session = await navigator.xr.requestSession("immersive-vr", init);
         currentSession = session;
 
-        // Three.js XR session hookup
+        // connect to three
         await renderer.xr.setSession(session);
 
         session.addEventListener("end", () => {
@@ -93,7 +91,13 @@ export const VRButton = {
       else await start();
     });
 
-    // Initial state
+    // mount into slot if present
+    queueMicrotask(() => {
+      const slot = document.getElementById("vrButtonSlot");
+      if (slot && !slot.contains(button)) slot.appendChild(button);
+    });
+
+    // initial state
     (async () => {
       const ok = await isSupported();
       if (ok) show("ENTER VR", true);

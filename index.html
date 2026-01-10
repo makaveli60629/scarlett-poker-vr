@@ -101,8 +101,8 @@
 
     #logwrap{
       position:fixed; left:12px; bottom:92px;
-      width:min(560px, calc(100vw - 24px));
-      max-height:45vh; z-index:12;
+      width:min(720px, calc(100vw - 24px));
+      max-height:50vh; z-index:12;
       pointer-events:auto;
       border-radius:18px;
       background:rgba(0,0,0,.52);
@@ -124,7 +124,7 @@
       font-size:11px; line-height:1.35;
       color:rgba(232,236,255,.92);
       overflow:auto;
-      max-height:calc(45vh - 44px);
+      max-height:calc(50vh - 44px);
       white-space:pre-wrap; word-break:break-word;
     }
 
@@ -160,7 +160,7 @@
     }
   </style>
 
-  <!-- Importmap: you still have this, but your game uses local ./js/three.js wrapper. Safe to keep. -->
+  <!-- Optional importmap (safe to keep) -->
   <script type="importmap">
   {
     "imports": {
@@ -241,7 +241,7 @@
         <div class="row"><b>Quest:</b> Left stick move • Right stick turn • Toggle Snap for snap/smooth.</div>
         <div class="row"><b>Android:</b> Use dock arrows • Tap Teleport to toggle.</div>
         <div class="row"><b>Rooms:</b> Lobby / Scorpion / Spectate / Store buttons send events to room_manager.</div>
-        <div class="row"><b>Diagnostics:</b> Checks key files for 404 + flags HTML served as JS.</div>
+        <div class="row"><b>Diagnostics:</b> Checks 404 + flags HTML served as JS + prints file head.</div>
         <div class="row"><b>Reset:</b> Clears saved flags + reloads.</div>
       </div>
       <div class="actions">
@@ -251,11 +251,14 @@
   </div>
 
   <script type="module">
-    // ---- build / boot ----
+    // =========================
+    // Scarlett Index FULL Loader
+    // =========================
+
     const v = Date.now().toString();
     window.__BUILD_V = v;
 
-    // Canonical XR session init (main/world can read this)
+    // Canonical XR init
     window.__XR_SESSION_INIT = {
       optionalFeatures: [
         "local-floor",
@@ -280,16 +283,11 @@
     const logWrap = document.getElementById("logwrap");
     const openLog = () => (logWrap.style.display = "block");
     const toggleLog = () => (logWrap.style.display = (logWrap.style.display === "block" ? "none" : "block"));
-
-    function appendLog(m){
+    const appendLog = (m) => {
       if (!logEl) return;
       logEl.textContent += "\n" + String(m);
       logEl.scrollTop = logEl.scrollHeight;
-    }
-
-    window.addEventListener("scarlett-log", (e) => {
-      try { appendLog(String(e?.detail ?? "")); } catch {}
-    });
+    };
 
     (function hookConsole(){
       const origLog = console.log.bind(console);
@@ -310,7 +308,7 @@
     appendLog("navigator.xr=" + (!!navigator.xr));
     appendLog("[index] sessionInit=" + JSON.stringify(window.__XR_SESSION_INIT));
 
-    // ---- buttons ----
+    // ---- buttons wiring (same behavior) ----
     const btnEnter = document.getElementById("btnEnter");
     const btnRecenter = document.getElementById("btnRecenter");
     const btnTeleport = document.getElementById("btnTeleport");
@@ -343,13 +341,12 @@
     btnLog?.addEventListener("click", toggleLog);
     btnForceLog?.addEventListener("click", ()=>{ openLog(); appendLog("[hud] log forced open ✅"); });
 
-    // ---- flags / toggles ----
+    // flags / toggles
     const LS_KEY="scarlett_flags_v2";
     const defaultFlags = { teleport:true, move:true, snap:true, hands:true };
     const saved = (()=>{ try{ return JSON.parse(localStorage.getItem(LS_KEY) || "null"); }catch{ return null; }})();
     window.__SCARLETT_FLAGS = Object.assign({}, defaultFlags, saved || {});
     const saveFlags = ()=>{ try{ localStorage.setItem(LS_KEY, JSON.stringify(window.__SCARLETT_FLAGS)); }catch{} };
-
     const updateTogglesUI = ()=>{
       const f = window.__SCARLETT_FLAGS;
       btnTeleport.classList.toggle("primary", !!f.teleport);
@@ -359,9 +356,7 @@
     };
     updateTogglesUI();
 
-    function emit(name, detail){
-      window.dispatchEvent(new CustomEvent(name, { detail }));
-    }
+    const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
 
     btnTeleport.addEventListener("click", ()=>{
       window.__SCARLETT_FLAGS.teleport=!window.__SCARLETT_FLAGS.teleport; saveFlags(); updateTogglesUI();
@@ -398,7 +393,7 @@
       location.reload();
     });
 
-    // ---- mobile dock controls ----
+    // mobile dock controls
     const touchState={ f:0,b:0,l:0,r:0,turnL:0,turnR:0 };
     const emitTouch=()=>emit("scarlett-touch", { ...touchState });
 
@@ -433,15 +428,25 @@
       if(dock) dock.style.display=show ? "flex" : "none";
     })();
 
-    // ---- diagnostics ----
+    // -------------------------
+    // FULL DIAGNOSTICS (real)
+    // -------------------------
+    async function fetchHead(url) {
+      const r = await fetch(url, { cache: "no-store" });
+      const ct = (r.headers.get("content-type") || "?").toLowerCase();
+      const txt = await r.text();
+      const head = (txt || "").slice(0, 80).replace(/\s+/g, " ");
+      const looksHtml = head.toLowerCase().includes("<!doctype") || head.toLowerCase().includes("<html");
+      return { r, ct, head, looksHtml, txt };
+    }
+
     async function diagnostics(){
       openLog();
       appendLog("[diag] running…");
-
       const base = location.href.replace(/\/[^\/]*$/, "/");
 
-      // Key files that commonly break boot (MUST include spawn_points + controls)
-      const files=[
+      const files = [
+        // BOOT CRITICAL:
         "js/main.js",
         "js/world.js",
         "js/controls.js",
@@ -449,6 +454,7 @@
         "js/VRButton.js",
         "js/three.js",
 
+        // OPTIONAL SYSTEMS:
         "js/textures.js",
         "js/lights_pack.js",
         "js/solid_walls.js",
@@ -465,51 +471,125 @@
         "js/poker_sim.js"
       ];
 
-      let bad=0;
-      for(const f of files){
-        const url=new URL(f+"?v="+encodeURIComponent(v), base).toString();
-        try{
-          const r=await fetch(url,{cache:"no-store"});
-          const ct=(r.headers.get("content-type")||"?").toLowerCase();
+      let issues = 0;
+      for (const f of files) {
+        const url = new URL(f + "?v=" + encodeURIComponent(v), base).toString();
+        try {
+          const { r, ct, head, looksHtml } = await fetchHead(url);
+          const note =
+            !r.ok ? " ❌" :
+            looksHtml ? " 🚨LOOKS-LIKE-HTML" :
+            (f.endsWith(".js") && !(ct.includes("javascript") || ct.includes("ecmascript") || ct.includes("text/plain") || ct.includes("octet-stream")))
+              ? " ⚠️CTYPE-SUSPICIOUS"
+              : " ✅";
 
-          // Flag HTML returned for JS paths (classic "does not provide export named")
-          const looksHtml = ct.includes("text/html");
-          const looksJs = ct.includes("javascript") || ct.includes("ecmascript") || ct.includes("text/plain");
-
-          appendLog(`[diag] ${f} -> ${r.status} ${r.ok?"✅":"❌"} (type=${ct})${looksHtml ? "  🚨HTML-SERVED-AS-JS" : ""}`);
-
-          if(!r.ok) bad++;
-          if(r.ok && looksHtml) bad++;
-          // if it isn't html and also isn't js-ish, it's suspicious too
-          if(r.ok && !looksHtml && !looksJs && f.endsWith(".js")) {
-            appendLog(`[diag] ⚠️ ${f} content-type suspicious: ${ct}`);
-          }
-        }catch(e){
-          appendLog(`[diag] ${f} -> ERR ❌ ${e?.message||e}`);
-          bad++;
+          appendLog(`[diag] ${f} -> ${r.status} (type=${ct}) HEAD="${head}"${note}`);
+          if (!r.ok || looksHtml) issues++;
+        } catch (e) {
+          appendLog(`[diag] ${f} -> ERR ❌ ${e?.message || e}`);
+          issues++;
         }
       }
-      appendLog(bad ? `[diag] done (ISSUES=${bad}) ❌` : "[diag] done ✅");
+      appendLog(issues ? `[diag] done (ISSUES=${issues}) ❌` : "[diag] done ✅");
+      return issues;
     }
-    btnDiag.addEventListener("click", diagnostics);
+    document.getElementById("btnDiag").addEventListener("click", diagnostics);
 
-    // ---- load main (dynamic import) ----
-    try{
+    // --------------------------------------
+    // FULL MAIN LOADER (multi-path + blob)
+    // --------------------------------------
+    function abs(u){ return new URL(u, location.href).toString(); }
+
+    async function tryImport(url) {
+      appendLog("[loader] import " + url);
+      return await import(url);
+    }
+
+    async function tryLoadViaBlob(url) {
+      appendLog("[loader] fetch+blob " + url);
+      const { r, ct, head, looksHtml, txt } = await fetchHead(url);
+      appendLog(`[loader] fetch -> ${r.status} type=${ct} head="${head}"`);
+
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      if (looksHtml) throw new Error("Server returned HTML for a JS module (wrong path/Pages output).");
+
+      // Convert fetched JS into a module blob and import it (bypasses strict MIME issues)
+      const blob = new Blob([txt], { type: "text/javascript" });
+      const blobUrl = URL.createObjectURL(blob);
+      try {
+        await import(blobUrl);
+      } finally {
+        URL.revokeObjectURL(blobUrl);
+      }
+      return true;
+    }
+
+    async function loadMain() {
       setStatus("Loading…");
-      const mainUrl="./js/main.js?v="+encodeURIComponent(v);
-      appendLog("Import main:\n"+new URL(mainUrl, location.href).toString());
-      await import(mainUrl);
-      setStatus("Ready ✅");
-      appendLog("[index] main imported ✅");
-    }catch(e){
+
+      // Candidate paths (covers common GH Pages setups/case issues)
+      const candidates = [
+        `./js/main.js?v=${encodeURIComponent(v)}`,
+        `./js/main.js`,                         // no query
+        `./JS/main.js?v=${encodeURIComponent(v)}`, // wrong case folder (common mistake)
+        `./docs/js/main.js?v=${encodeURIComponent(v)}`, // if Pages serves from /docs but files live there
+        `./assets/js/main.js?v=${encodeURIComponent(v)}` // some people put js under assets
+      ].map(abs);
+
+      appendLog("Import main candidates:");
+      candidates.forEach(u => appendLog(" - " + u));
+
+      // 1) Try normal dynamic import first
+      for (const u of candidates) {
+        try {
+          await tryImport(u);
+          setStatus("Ready ✅");
+          appendLog("[index] main imported ✅ (" + u + ")");
+          return true;
+        } catch (e) {
+          appendLog("❌ import failed: " + (e?.message || e));
+        }
+      }
+
+      // 2) Try blob loader (fixes bad content-type / module fetch quirks)
+      for (const u of candidates) {
+        try {
+          await tryLoadViaBlob(u);
+          setStatus("Ready ✅");
+          appendLog("[index] main loaded via blob ✅ (" + u + ")");
+          return true;
+        } catch (e) {
+          appendLog("❌ blob load failed: " + (e?.message || e));
+        }
+      }
+
+      // 3) If everything fails, auto-run diagnostics and show checklist
       openLog();
       setStatus("Import error ❌");
-      appendLog("❌ main import failed: "+(e?.message||e));
-      console.error(e);
       appendLog("Fix checklist:");
-      appendLog("1) Confirm /js/main.js exists");
-      appendLog("2) Folder name is exactly: js (lowercase)");
-      appendLog("3) Press Diagnostics for 404s + check content-type is JS (not HTML)");
+      appendLog("1) /js/main.js must exist EXACTLY (case-sensitive).");
+      appendLog("2) GitHub Pages must serve it as JS (not HTML fallback).");
+      appendLog("3) Run Diagnostics and check js/main.js: status + type + HEAD.");
+      appendLog("4) If js/main.js HEAD looks like HTML, your Pages output path is wrong.");
+
+      await diagnostics();
+      return false;
+    }
+
+    // Help/log buttons already wired above
+    document.getElementById("btnForceLog").addEventListener("click", ()=>{ openLog(); appendLog("[hud] log forced open ✅"); });
+    document.getElementById("btnLog").addEventListener("click", toggleLog);
+    document.getElementById("btnHelp").addEventListener("click", ()=>{ document.getElementById("help").style.display="flex"; });
+    document.getElementById("btnCloseHelp").addEventListener("click", ()=>{ document.getElementById("help").style.display="none"; });
+
+    // Boot main now
+    try {
+      await loadMain();
+    } catch (e) {
+      openLog();
+      setStatus("Import error ❌");
+      appendLog("❌ loader fatal: " + (e?.message || e));
+      await diagnostics();
     }
   </script>
 </body>

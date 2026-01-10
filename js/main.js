@@ -7,7 +7,7 @@
 
 import { THREE, VRButton } from "./three.js";
 import { World } from "./world.js";
-
+import { THREE, VRButton } from "./three.js";
 // ---------- small utilities ----------
 function now(){ return (typeof performance !== "undefined" ? performance.now() : Date.now()); }
 

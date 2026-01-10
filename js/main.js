@@ -1,8 +1,15 @@
-// /js/main.js — Scarlett Hybrid 1.0 (PERMANENT BOOT CORE)
-// ✅ Single entry point
+// /js/main.js — Scarlett Hybrid 1.2 (PERMANENT BOOT CORE — FULL)
+// ✅ Single entry point (index.html imports this only)
 // ✅ VRButton always appears (local VRButton.js -> three/addons -> manual fallback)
 // ✅ Always renders (world.js or fallback world)
-// ✅ Loads existing modules safely (never hard-crash)
+// ✅ Safe module loading (never hard-crash)
+// ✅ PlayerRig added (fixes android_controls + mobile_touch expectations)
+// ✅ Spawns at SpawnPoint (square entry) and ALWAYS faces table
+// ✅ Fallback movement (WASD + Android touch move/look) + basic collision vs ctx.colliders
+// ✅ Room buttons call World.setRoom safely
+//
+// NOTE: This file expects your /index.html to include the debug HUD elements:
+// #scarlettGrid #scarlettLog #capXR #capImm and buttons btnMenu btnRoomLobby btnRoomStore btnRoomScorpion etc.
 
 (async function boot() {
   // ---------------- Double-boot guard ----------------
@@ -29,7 +36,7 @@
 
   const LOG = {
     lines: [],
-    max: 360,
+    max: 420,
     push(kind, msg) {
       const time = new Date().toLocaleTimeString();
       const line = `[${time}] ${kind.toUpperCase()}: ${msg}`;
@@ -72,10 +79,10 @@
 
   async function setCaps() {
     const xr = !!navigator.xr;
-    ui.capXR.textContent = xr ? "YES" : "NO";
+    if (ui.capXR) ui.capXR.textContent = xr ? "YES" : "NO";
     let immersive = false;
     try { immersive = xr ? await navigator.xr.isSessionSupported("immersive-vr") : false; } catch {}
-    ui.capImm.textContent = immersive ? "YES" : "NO";
+    if (ui.capImm) ui.capImm.textContent = immersive ? "YES" : "NO";
     return { xr, immersive };
   }
 
@@ -111,7 +118,17 @@
   scene.background = new THREE.Color(0x05060a);
 
   const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 800);
+
+  // ✅ PlayerRig required by android_controls/mobile_touch (position/rotation exist)
+  const player = new THREE.Group();
+  player.name = "PlayerRig";
+  player.position.set(0, 0, 0);
+  player.rotation.set(0, 0, 0);
+  scene.add(player);
+
+  // camera local offset for standing height (non-XR). In XR, the headset pose overrides.
   camera.position.set(0, 1.65, 2.8);
+  player.add(camera);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(innerWidth, innerHeight);
@@ -126,7 +143,7 @@
 
   // ---------------- VRButton (3-level fallback) ----------------
   async function attachVRButton() {
-    // A) Your local /js/VRButton.js
+    // A) Local /js/VRButton.js
     const local = await safeImport("./VRButton.js", "./VRButton.js");
     if (local) {
       try {
@@ -141,6 +158,15 @@
           btn.id = "VRButton";
           document.body.appendChild(btn);
           LOG.push("log", "VRButton ✅ via local VRButton.createButton()");
+          return true;
+        }
+        if (typeof local.createButton === "function") {
+          const btn = local.createButton(renderer);
+          if (btn) {
+            btn.id = "VRButton";
+            document.body.appendChild(btn);
+          }
+          LOG.push("log", "VRButton ✅ via local createButton()");
           return true;
         }
       } catch (e) {
@@ -211,37 +237,28 @@
     grid.position.y = 0.01;
     scene.add(grid);
 
-    const hub = new THREE.Mesh(
-      new THREE.CylinderGeometry(6.0, 6.0, 0.20, 64),
-      new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.5, metalness: 0.15 })
-    );
-    hub.position.set(0, 0.10, 0);
-    scene.add(hub);
-
     const table = new THREE.Mesh(
       new THREE.CylinderGeometry(1.2, 1.2, 0.12, 40),
       new THREE.MeshStandardMaterial({ color: 0x0c2a22, roughness: 0.9, metalness: 0.05 })
     );
     table.position.set(0, 0.78, -1.2);
+    table.name = "BossTable";
     scene.add(table);
 
     const dealer = new THREE.Object3D();
     dealer.name = "DealerAnchor";
-    dealer.position.set(0, 0.92, -0.35);
+    dealer.position.set(0, 1.0, -0.35);
     scene.add(dealer);
+
+    const spawn = new THREE.Object3D();
+    spawn.name = "SpawnPoint";
+    spawn.position.set(0, 0, 6);
+    scene.add(spawn);
 
     LOG.push("warn", "Fallback world built ✅ (you are never blind).");
   }
 
-  // ---------------- Load unified world (below) ----------------
-  let worldStatus = "none";
-  const worldMod = await safeImport("./world.js", "./world.js");
-  if (!worldMod) {
-    buildFallbackWorld();
-    worldStatus = "fallback (world.js missing)";
-  }
-
-  // ---------------- Create runtime ctx ----------------
+  // ---------------- Runtime ctx ----------------
   const ctx = {
     THREE, scene, camera, renderer, LOG,
     BUILD: Date.now(),
@@ -249,25 +266,43 @@
     world: null,
     room: "lobby",
     mode: "lobby",
+
+    // ✅ Player rig aliases (fixes android_controls + mobile_touch expectations)
+    player,
+    rig: player,
+    cameraRig: player,
+    yawObject: player,     // yaw (left/right)
+    pitchObject: camera,   // pitch (up/down)
+
+    // Collision list populated by world.js if it creates solids
+    colliders: [],
+    disableFallbackMove: false, // set true if your locomotion modules fully work
   };
 
-  // ---------------- Init world ----------------
+  // ---------------- Load world.js ----------------
+  let worldStatus = "none";
+  const worldMod = await safeImport("./world.js", "./world.js");
+  if (!worldMod) {
+    buildFallbackWorld();
+    worldStatus = "fallback (world.js missing)";
+  }
+
   if (worldMod?.World?.init) {
     try {
       await worldMod.World.init(ctx);
-      worldStatus = "World.init ✅";
       ctx.world = worldMod.World;
+      worldStatus = "World.init ✅";
     } catch (e) {
       LOG.push("error", `World.init failed: ${e?.message || e}`);
       buildFallbackWorld();
       worldStatus = "fallback (World.init crash)";
     }
-  } else {
+  } else if (worldStatus === "none") {
     buildFallbackWorld();
     worldStatus = "fallback (no World.init export)";
   }
 
-  // ---------------- Hands objects always present (harmless) ----------------
+  // ---------------- Hands objects always present ----------------
   try {
     const left = renderer.xr.getHand(0); left.name = "XRHandLeft";
     const right = renderer.xr.getHand(1); right.name = "XRHandRight";
@@ -275,9 +310,47 @@
     ctx.hands = { left, right };
   } catch {}
 
-  // ---------------- Simple debug controls ----------------
+  // ---------------- SpawnPoint + Face Table (always) ----------------
+  const _tmpV = new THREE.Vector3();
+  const _tmpV2 = new THREE.Vector3();
+
+  function applySpawnAndFacing() {
+    const sp = scene.getObjectByName("SpawnPoint");
+    const table = scene.getObjectByName("BossTable");
+
+    if (sp) {
+      player.position.copy(sp.position);
+      player.position.y = 0;
+      LOG.push("log", `Spawn applied ✅ at x=${player.position.x.toFixed(2)} z=${player.position.z.toFixed(2)}`);
+    } else {
+      LOG.push("warn", "No SpawnPoint found; using current PlayerRig position.");
+    }
+
+    if (table) {
+      table.getWorldPosition(_tmpV);
+      _tmpV2.set(player.position.x, 0, player.position.z);
+      const dir = _tmpV.sub(_tmpV2);
+      dir.y = 0;
+      if (dir.lengthSq() > 0.00001) {
+        const yaw = Math.atan2(dir.x, dir.z);
+        player.rotation.set(0, yaw, 0);
+        LOG.push("log", "Facing table ✅");
+      }
+    } else {
+      LOG.push("warn", "No BossTable found to face.");
+    }
+  }
+
+  // Apply immediately (non-XR view)
+  applySpawnAndFacing();
+
+  // Re-apply on XR session start (Quest pose init)
+  renderer.xr.addEventListener("sessionstart", () => {
+    setTimeout(applySpawnAndFacing, 150);
+  });
+
+  // ---------------- Menu + room buttons ----------------
   function toggleMenu() {
-    // If your ui.js already manages menu, it can override this later.
     LOG.push("log", "Menu toggle pressed (M).");
   }
 
@@ -285,7 +358,7 @@
   addEventListener("keydown", (e) => { if (e.key.toLowerCase() === "m") toggleMenu(); });
 
   function setRoom(room) {
-    ctx.world?.setRoom?.(ctx, room);
+    try { ctx.world?.setRoom?.(ctx, room); } catch {}
     ctx.room = room;
     ctx.mode = room;
     LOG.push("log", `Room => ${room}`);
@@ -294,7 +367,133 @@
   ui.btnStore?.addEventListener("click", () => setRoom("store"));
   ui.btnScorpion?.addEventListener("click", () => setRoom("scorpion"));
 
-  // ---------------- XR session events ----------------
+  // ---------------- Fallback Locomotion + Collision ----------------
+  // Desktop: WASD/Arrows, Mobile: left drag move, right drag look
+  const MoveFallback = (() => {
+    const keys = {};
+    let touchMove = { active: false, id: -1, startX: 0, startY: 0, dx: 0, dy: 0 };
+    let touchLook = { active: false, id: -1, startX: 0, startY: 0, dx: 0, dy: 0 };
+
+    addEventListener("keydown", (e) => keys[e.key.toLowerCase()] = true);
+    addEventListener("keyup", (e) => keys[e.key.toLowerCase()] = false);
+
+    addEventListener("touchstart", (e) => {
+      for (const t of e.changedTouches) {
+        const leftSide = t.clientX < innerWidth * 0.5;
+        if (leftSide && !touchMove.active) {
+          touchMove = { active: true, id: t.identifier, startX: t.clientX, startY: t.clientY, dx: 0, dy: 0 };
+        } else if (!leftSide && !touchLook.active) {
+          touchLook = { active: true, id: t.identifier, startX: t.clientX, startY: t.clientY, dx: 0, dy: 0 };
+        }
+      }
+    }, { passive: true });
+
+    addEventListener("touchmove", (e) => {
+      for (const t of e.changedTouches) {
+        if (touchMove.active && t.identifier === touchMove.id) {
+          touchMove.dx = t.clientX - touchMove.startX;
+          touchMove.dy = t.clientY - touchMove.startY;
+        }
+        if (touchLook.active && t.identifier === touchLook.id) {
+          touchLook.dx = t.clientX - touchLook.startX;
+          touchLook.dy = t.clientY - touchLook.startY;
+        }
+      }
+    }, { passive: true });
+
+    addEventListener("touchend", (e) => {
+      for (const t of e.changedTouches) {
+        if (touchMove.active && t.identifier === touchMove.id) touchMove.active = false;
+        if (touchLook.active && t.identifier === touchLook.id) touchLook.active = false;
+      }
+    }, { passive: true });
+
+    // push-out collision for axis-aligned boxes (cheap + stable)
+    function collideSlide(nextPos, colliders) {
+      if (!colliders?.length) return nextPos;
+
+      const p = nextPos.clone();
+      const radius = 0.35;
+
+      // reuse 1 box to reduce allocations
+      const box = new THREE.Box3();
+
+      for (const c of colliders) {
+        if (!c) continue;
+        c.updateMatrixWorld?.(true);
+        box.setFromObject(c);
+
+        // expanded check
+        if (box.containsPoint(p)) {
+          const cx = (box.min.x + box.max.x) * 0.5;
+          const cz = (box.min.z + box.max.z) * 0.5;
+          const dx = p.x - cx;
+          const dz = p.z - cz;
+
+          if (Math.abs(dx) > Math.abs(dz)) {
+            p.x = dx > 0 ? box.max.x + radius : box.min.x - radius;
+          } else {
+            p.z = dz > 0 ? box.max.z + radius : box.min.z - radius;
+          }
+        }
+      }
+      return p;
+    }
+
+    return {
+      update(dt) {
+        if (ctx.disableFallbackMove) return;
+
+        // allow in both XR and non-XR for now; disable later if your locomotion takes over
+        const speed = (renderer.xr.isPresenting ? 1.15 : 2.4);
+
+        // LOOK (touch right side)
+        if (touchLook.active) {
+          const yawSpeed = 0.0022;
+          const pitchSpeed = 0.0018;
+          ctx.yawObject.rotation.y -= touchLook.dx * yawSpeed;
+          ctx.pitchObject.rotation.x -= touchLook.dy * pitchSpeed;
+          ctx.pitchObject.rotation.x = Math.max(-1.2, Math.min(1.2, ctx.pitchObject.rotation.x));
+          touchLook.dx *= 0.65;
+          touchLook.dy *= 0.65;
+        }
+
+        // Move vector
+        let forward = 0, strafe = 0;
+
+        // WASD/Arrows
+        if (keys["w"] || keys["arrowup"]) forward += 1;
+        if (keys["s"] || keys["arrowdown"]) forward -= 1;
+        if (keys["a"] || keys["arrowleft"]) strafe -= 1;
+        if (keys["d"] || keys["arrowright"]) strafe += 1;
+
+        // Touch move (left side)
+        if (touchMove.active) {
+          forward += (-touchMove.dy / 120);
+          strafe  += ( touchMove.dx / 120);
+          forward = Math.max(-1, Math.min(1, forward));
+          strafe  = Math.max(-1, Math.min(1, strafe));
+        }
+
+        if (forward === 0 && strafe === 0) return;
+
+        const yaw = ctx.yawObject.rotation.y;
+        const sin = Math.sin(yaw), cos = Math.cos(yaw);
+
+        const vx = (strafe * cos + forward * sin) * speed * dt;
+        const vz = (forward * cos - strafe * sin) * speed * dt;
+
+        const next = ctx.player.position.clone();
+        next.x += vx;
+        next.z += vz;
+
+        const fixed = collideSlide(next, ctx.colliders);
+        ctx.player.position.copy(fixed);
+      }
+    };
+  })();
+
+  // ---------------- XR capability + VRButton ----------------
   await setCaps();
   await attachVRButton();
 
@@ -313,19 +512,25 @@
     fpsAcc += dt; fpsCount++;
     if (fpsAcc >= 0.5) { fps = Math.round(fpsCount / fpsAcc); fpsAcc = 0; fpsCount = 0; }
 
+    // Update world + systems
     try { ctx.world?.update?.(ctx, dt); } catch {}
 
+    // Always-available movement
+    MoveFallback.update(dt);
+
+    // Metrics
     setMetrics([
       ["FPS", `${fps}`],
       ["XR Presenting", renderer.xr.isPresenting ? "YES" : "NO"],
       ["VRButton", document.getElementById("VRButton") ? "YES" : "NO"],
-      ["World", worldStatus],
       ["Room", ctx.room],
       ["Systems", Object.keys(ctx.systems || {}).length.toString()],
+      ["PlayerRig", `${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)}`],
+      ["Colliders", `${(ctx.colliders?.length || 0)}`],
     ]);
 
     renderer.render(scene, camera);
   });
 
-  LOG.push("log", "Hybrid boot complete ✅");
+  LOG.push("log", "Hybrid boot complete ✅ (spawn + movement enabled)");
 })();

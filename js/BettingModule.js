@@ -1,109 +1,115 @@
-import * as THREE from "three";
-import { createPhysicalChip } from "./ChipPhysicalityModule.js";
+// /js/betting_module.js — BettingModule v1.0 (FULL)
+// ✅ Bet Zone (physical ring on floor near table)
+// ✅ Drop chip into zone => places bet (removes chip mesh into pot)
+// ✅ Whale Alert if total bet > 500 (visual flash + log event)
+// ✅ Works with GestureEngine + InteractionGrab system in main.js below
+//
+// Usage:
+//   BettingModule.init(ctx)
+//   BettingModule.update(ctx, dt)
 
-export async function init(ctx) {
-  ctx.wallet = ctx.wallet || { chips: 5000 };
-  ctx.bets = ctx.bets || { bears: 0, packers: 0 };
+export const BettingModule = (() => {
+  const state = {
+    root: null,
+    zone: null,
+    zoneRadius: 0.55,
+    zoneCenter: null,
+    potValue: 0,
+    lastWhale: false,
+    flashT: 0
+  };
 
-  ctx.chipPool = [];
-  ctx.heldChip = { left: null, right: null };
-
-  ctx.LOG?.push?.("log", "[BettingModule] init ✅");
-}
-
-export function spawnChipSet(ctx, originWorld) {
-  const values = [10, 50, 100, 500, 1000];
-  const base = originWorld.clone();
-
-  for (let i = 0; i < values.length; i++) {
-    const chip = createPhysicalChip(values[i]);
-    chip.position.copy(base).add(new THREE.Vector3((i - 2) * 0.10, 0.02, 0));
-    chip.userData.grabbable = true;
-    ctx.scene.add(chip);
-    ctx.chipPool.push(chip);
+  function inZone(pos) {
+    if (!state.zoneCenter) return false;
+    const dx = pos.x - state.zoneCenter.x;
+    const dz = pos.z - state.zoneCenter.z;
+    return (dx*dx + dz*dz) <= (state.zoneRadius * state.zoneRadius);
   }
 
-  ctx.LOG?.push?.("log", "[BettingModule] spawned chip set ✅");
-}
+  return {
+    init(ctx) {
+      const { THREE, scene, LOG } = ctx;
+      const log = (m) => LOG?.push?.("log", m) || console.log(m);
 
-function nearestChip(ctx, handWorldPos, maxDist = 0.08) {
-  let best = null;
-  let bestD = maxDist;
+      state.root = new THREE.Group();
+      state.root.name = "BettingModule";
+      scene.add(state.root);
 
-  for (const c of ctx.chipPool) {
-    if (!c.parent) continue;
-    const d = c.position.distanceTo(handWorldPos);
-    if (d < bestD) { bestD = d; best = c; }
-  }
-  return best;
-}
+      // Find table
+      const table = scene.getObjectByName("BossTable");
+      const center = new THREE.Vector3();
+      if (table) table.getWorldPosition(center);
+      else center.set(0, 0, 0);
 
-export function update(dt, ctx) {
-  if (!ctx.renderer?.xr?.isPresenting) return;
-  if (!ctx.gestures) return;
+      // Place bet zone in front of table (toward dealer)
+      const zoneCenter = center.clone();
+      zoneCenter.z += 0.95;
+      zoneCenter.y = 0;
 
-  _handLogic("left", ctx);
-  _handLogic("right", ctx);
-}
+      state.zoneCenter = zoneCenter;
 
-function _handLogic(side, ctx) {
-  const g = ctx.gestures[side];
-  const handObj = ctx.hands?.[side];
-  if (!handObj) return;
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.38, state.zoneRadius, 48),
+        new THREE.MeshBasicMaterial({ color: 0xffcc00, transparent: true, opacity: 0.75, side: THREE.DoubleSide })
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(zoneCenter.x, 0.021, zoneCenter.z);
+      ring.name = "BetZone";
+      ring.renderOrder = 9998;
+      ring.material.depthTest = false;
 
-  const handPos = new THREE.Vector3();
-  handObj.getWorldPosition(handPos);
+      // center plate
+      const plate = new THREE.Mesh(
+        new THREE.CircleGeometry(0.34, 48),
+        new THREE.MeshBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
+      );
+      plate.rotation.x = -Math.PI / 2;
+      plate.position.set(zoneCenter.x, 0.02, zoneCenter.z);
 
-  // Grab on pinchDown if not holding
-  if (g.pinchDown && !ctx.heldChip[side]) {
-    const c = nearestChip(ctx, handPos, 0.09);
-    if (c) {
-      ctx.heldChip[side] = c;
-      ctx.LOG?.push?.("log", `[Betting] ${side} grabbed chip ${c.userData.value}`);
+      state.root.add(plate, ring);
+      state.zone = ring;
 
-      // click haptic
-      ctx.haptics?.click?.("both");
-    }
-  }
+      log("[BettingModule] init ✅ (bet zone placed)");
+    },
 
-  // While pinching: keep chip at hand
-  if (g.pinch && ctx.heldChip[side]) {
-    const c = ctx.heldChip[side];
-    c.position.copy(handPos);
-    c.position.y += 0.01;
-  }
+    tryDropChip(ctx, chipObj) {
+      const { LOG } = ctx;
+      if (!chipObj?.userData?.value) return false;
 
-  // Release when pinch ends
-  if (!g.pinch && ctx.heldChip[side]) {
-    const c = ctx.heldChip[side];
-    ctx.heldChip[side] = null;
+      const pos = new ctx.THREE.Vector3();
+      chipObj.getWorldPosition(pos);
 
-    const v = c.userData.value || 0;
+      if (!inZone(pos)) return false;
 
-    // Release near table = place bet
-    const tableCenter = new THREE.Vector3(0, 0.86, -1.2);
-    const dToTable = c.position.distanceTo(tableCenter);
+      const v = Number(chipObj.userData.value) || 0;
+      state.potValue += v;
 
-    if (dToTable < 0.65) {
-      ctx.bets.bears += v;
-      ctx.wallet.chips = Math.max(0, ctx.wallet.chips - v);
+      // Remove chip from scene (goes into pot)
+      chipObj.parent?.remove(chipObj);
 
-      ctx.LOG?.push?.("log", `[Betting] BET placed on BEARS: +${v} (total ${ctx.bets.bears})`);
+      LOG?.push?.("log", `[BettingModule] BET +${v} (pot=${state.potValue}) ✅`);
 
-      // Whale alert
-      if (v > 500) {
-        ctx.LOG?.push?.("warn", `[WHALE ALERT] Bet ${v} > 500 (glow + 10-pulse haptics)`);
-        ctx.haptics?.whale?.("both");
-      } else {
-        ctx.haptics?.pulse?.("both", 0.55, 30);
+      if (state.potValue > 500 && !state.lastWhale) {
+        state.lastWhale = true;
+        state.flashT = 0.9; // seconds
+        LOG?.push?.("warn", "🐋 WHALE ALERT: bet exceeds 500!");
       }
 
-      // consume chip
-      c.parent?.remove(c);
-    } else {
-      // Drop on floor
-      c.position.y = 0.02;
-      ctx.haptics?.pulse?.("both", 0.25, 18);
-    }
-  }
-}
+      return true;
+    },
+
+    update(ctx, dt) {
+      if (!state.zone) return;
+
+      // Whale flash effect on bet zone
+      if (state.flashT > 0) {
+        state.flashT -= dt;
+        const pulse = Math.sin((1 - state.flashT) * 22) * 0.5 + 0.5;
+        state.zone.material.opacity = 0.25 + 0.75 * pulse;
+        if (state.flashT <= 0) state.zone.material.opacity = 0.75;
+      }
+    },
+
+    getPot() { return state.potValue; }
+  };
+})();

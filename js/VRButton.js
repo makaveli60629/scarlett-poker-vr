@@ -1,118 +1,105 @@
-// /js/VRButton.js — Scarlett VRButton v1.3 (FULL)
-// Logs session start/end and errors so Quest debugging is obvious.
-// Always returns the actual <button>.
+// /js/VRButton.js — Scarlett VRButton (FULL, Quest-safe)
+// Always creates a visible button with id="VRButton".
+// Works on GitHub Pages + Meta Quest Browser.
 
 export const VRButton = {
-  createButton(renderer, sessionInit = null) {
-    const button = document.createElement("button");
-    button.textContent = "ENTER VR";
-    button.setAttribute("data-scarlett-vrbutton", "1");
 
+  createButton(renderer, sessionInit = {}) {
+    const button = document.createElement("button");
+    button.id = "VRButton";
+    button.type = "button";
+    button.textContent = "ENTER VR";
+
+    // Hard visible styling (prevents hidden/offscreen issues)
     button.style.cssText = `
-      position:relative;
-      padding:10px 14px;
-      border-radius:14px;
-      border:1px solid rgba(127,231,255,.35);
-      background:rgba(127,231,255,.14);
-      color:#e8ecff;
-      font-weight:800;
-      letter-spacing:.3px;
-      cursor:pointer;
-      user-select:none;
-      -webkit-user-select:none;
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      padding: 12px 14px;
+      border: 1px solid rgba(127,231,255,.45);
+      border-radius: 14px;
+      background: rgba(11,13,20,.88);
+      color: #e8ecff;
+      font: 700 14px system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      letter-spacing: .3px;
+      box-shadow: 0 14px 45px rgba(0,0,0,.55);
+      z-index: 99999;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
     `;
 
     let currentSession = null;
 
-    const show = (t, enabled = true) => {
-      button.textContent = t;
-      button.disabled = !enabled;
-      button.style.opacity = enabled ? "1" : "0.55";
-      button.style.cursor = enabled ? "pointer" : "default";
-    };
+    async function onSessionStarted(session) {
+      session.addEventListener("end", onSessionEnded);
+      await renderer.xr.setSession(session);
+      currentSession = session;
+      button.textContent = "EXIT VR";
+      console.log("[VRButton] session started ✅");
+    }
+
+    function onSessionEnded() {
+      currentSession = null;
+      button.textContent = "ENTER VR";
+      console.log("[VRButton] session ended ✅");
+    }
 
     async function isSupported() {
       try {
         if (!navigator.xr) return false;
-        const ok = await navigator.xr.isSessionSupported("immersive-vr");
-        console.log("[VRButton] isSessionSupported(immersive-vr) =", ok);
-        return ok;
+        return await navigator.xr.isSessionSupported("immersive-vr");
       } catch (e) {
-        console.error("[VRButton] isSessionSupported error", e);
+        console.warn("[VRButton] isSessionSupported error:", e);
         return false;
       }
     }
 
-    async function start() {
-      if (!navigator.xr) {
-        console.error("[VRButton] navigator.xr missing");
-        return;
-      }
-
-      const init =
-        sessionInit ||
-        window.__XR_SESSION_INIT ||
-        window.__SESSION_INIT__ || {
-          optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"],
-          domOverlay: { root: document.body },
-        };
-
+    button.onclick = async () => {
       try {
-        console.log("[VRButton] requestSession(immersive-vr) init =", init);
-        show("STARTING…", false);
+        if (!navigator.xr) {
+          alert("WebXR not available in this browser.");
+          return;
+        }
 
-        const session = await navigator.xr.requestSession("immersive-vr", init);
-        currentSession = session;
+        if (currentSession === null) {
+          // Default safe features for Quest
+          const init = {
+            optionalFeatures: [
+              "local-floor",
+              "bounded-floor",
+              "hand-tracking",
+              "layers",
+              "dom-overlay"
+            ],
+            ...sessionInit
+          };
 
-        console.log("[VRButton] session started ✅");
-        await renderer.xr.setSession(session);
-        console.log("[VRButton] renderer.xr.setSession ✅");
+          // If domOverlay is present, ensure it points to document.body
+          if (init.optionalFeatures?.includes("dom-overlay")) {
+            init.domOverlay = init.domOverlay || { root: document.body };
+          }
 
-        session.addEventListener("end", () => {
-          console.log("[VRButton] session ended");
-          currentSession = null;
-          show("ENTER VR", true);
-        });
-
-        show("EXIT VR", true);
+          const session = await navigator.xr.requestSession("immersive-vr", init);
+          await onSessionStarted(session);
+        } else {
+          await currentSession.end();
+        }
       } catch (e) {
-        console.error("[VRButton] requestSession failed", e);
-        show("VR FAILED", true);
-        setTimeout(() => show("ENTER VR", true), 1200);
+        console.error("[VRButton] requestSession failed ❌", e);
+        alert("VR failed to start. Open DevTools Console for the red error.");
       }
-    }
+    };
 
-    async function end() {
-      try {
-        console.log("[VRButton] ending session…");
-        show("ENDING…", false);
-        await currentSession.end();
-      } catch (e) {
-        console.error("[VRButton] end failed", e);
-      } finally {
-        currentSession = null;
-        show("ENTER VR", true);
+    // Boot: decide visibility
+    isSupported().then((supported) => {
+      console.log("[VRButton] isSessionSupported(immersive-vr) =", supported);
+      if (!supported) {
+        button.textContent = "VR NOT SUPPORTED";
+        button.style.opacity = "0.65";
+        button.style.borderColor = "rgba(255,107,107,.55)";
       }
-    }
-
-    button.addEventListener("click", async () => {
-      console.log("[VRButton] clicked");
-      if (currentSession) await end();
-      else await start();
     });
-
-    // mount into slot if present
-    queueMicrotask(() => {
-      const slot = document.getElementById("vrButtonSlot");
-      if (slot && !slot.contains(button)) slot.appendChild(button);
-    });
-
-    (async () => {
-      const ok = await isSupported();
-      if (ok) show("ENTER VR", true);
-      else show("VR NOT SUPPORTED", false);
-    })();
 
     return button;
-  },
+  }
 };

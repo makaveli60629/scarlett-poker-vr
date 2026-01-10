@@ -160,7 +160,7 @@
     }
   </style>
 
-  <!-- Importmap: lets /js/main.js import "three" + "three/addons/" -->
+  <!-- Importmap: you still have this, but your game uses local ./js/three.js wrapper. Safe to keep. -->
   <script type="importmap">
   {
     "imports": {
@@ -186,23 +186,19 @@
         <span class="pill"><b>Status</b><span id="statusText">Booting…</span></span>
         <span class="pill"><b>Build</b><span id="buildText">—</span></span>
 
-        <!-- core -->
         <button class="btn primary small" id="btnEnter">Enter VR</button>
         <button class="btn pink small" id="btnRecenter">Recenter</button>
 
-        <!-- toggles -->
         <button class="btn ghost small" id="btnTeleport">Teleport</button>
         <button class="btn ghost small" id="btnMove">Move</button>
         <button class="btn ghost small" id="btnSnap">Snap</button>
         <button class="btn ghost small" id="btnHands">Hands</button>
 
-        <!-- world / rooms -->
         <button class="btn ghost small" id="btnLobby">Lobby</button>
         <button class="btn ghost small" id="btnScorpion">Scorpion</button>
         <button class="btn ghost small" id="btnSpectate">Spectate</button>
         <button class="btn ghost small" id="btnStore">Store</button>
 
-        <!-- debug -->
         <button class="btn warn small" id="btnDiag">Diagnostics</button>
         <button class="btn warn small" id="btnForceLog">Force Log</button>
         <button class="btn ghost small" id="btnHelp">Help</button>
@@ -214,7 +210,6 @@
 
   <div id="vrButtonSlot" aria-label="VR Button Slot"></div>
 
-  <!-- Mobile controls (Android only, hidden on Quest) -->
   <div id="dock" aria-label="Mobile Controls">
     <button class="btn" id="mForward">▲</button>
     <div style="display:flex; gap:10px; align-items:center;">
@@ -227,7 +222,6 @@
     <button class="btn" id="mTurnR">⟳</button>
   </div>
 
-  <!-- Log -->
   <div id="logwrap">
     <div id="loghead">
       <div class="h">Console Log</div>
@@ -240,7 +234,6 @@
     <pre id="log"></pre>
   </div>
 
-  <!-- Help -->
   <div id="help">
     <div id="helpCard">
       <h2>Controls</h2>
@@ -248,7 +241,7 @@
         <div class="row"><b>Quest:</b> Left stick move • Right stick turn • Toggle Snap for snap/smooth.</div>
         <div class="row"><b>Android:</b> Use dock arrows • Tap Teleport to toggle.</div>
         <div class="row"><b>Rooms:</b> Lobby / Scorpion / Spectate / Store buttons send events to room_manager.</div>
-        <div class="row"><b>Diagnostics:</b> Checks key files for 404 + prints results in Log.</div>
+        <div class="row"><b>Diagnostics:</b> Checks key files for 404 + flags HTML served as JS.</div>
         <div class="row"><b>Reset:</b> Clears saved flags + reloads.</div>
       </div>
       <div class="actions">
@@ -262,8 +255,7 @@
     const v = Date.now().toString();
     window.__BUILD_V = v;
 
-    // IMPORTANT: WebXR sessionInit "all options"
-    // Keep this broad; browsers ignore unsupported ones.
+    // Canonical XR session init (main/world can read this)
     window.__XR_SESSION_INIT = {
       optionalFeatures: [
         "local-floor",
@@ -276,7 +268,6 @@
         "mesh-detection",
         "hit-test"
       ],
-      // domOverlay only matters if supported; safe otherwise
       domOverlay: { root: document.body }
     };
 
@@ -296,7 +287,6 @@
       logEl.scrollTop = logEl.scrollHeight;
     }
 
-    // allow game code to emit into HUD log
     window.addEventListener("scarlett-log", (e) => {
       try { appendLog(String(e?.detail ?? "")); } catch {}
     });
@@ -355,12 +345,7 @@
 
     // ---- flags / toggles ----
     const LS_KEY="scarlett_flags_v2";
-    const defaultFlags = {
-      teleport:true,
-      move:true,
-      snap:true,
-      hands:true
-    };
+    const defaultFlags = { teleport:true, move:true, snap:true, hands:true };
     const saved = (()=>{ try{ return JSON.parse(localStorage.getItem(LS_KEY) || "null"); }catch{ return null; }})();
     window.__SCARLETT_FLAGS = Object.assign({}, defaultFlags, saved || {});
     const saveFlags = ()=>{ try{ localStorage.setItem(LS_KEY, JSON.stringify(window.__SCARLETT_FLAGS)); }catch{} };
@@ -402,13 +387,11 @@
     btnRecenter.addEventListener("click", ()=>{ appendLog("[hud] recenter"); window.dispatchEvent(new Event("scarlett-recenter")); });
     btnEnter.addEventListener("click", ()=>{ appendLog("[hud] enter vr"); window.dispatchEvent(new Event("scarlett-enter-vr")); });
 
-    // rooms / actions
     btnLobby?.addEventListener("click", ()=>{ appendLog("[hud] room=lobby"); emit("scarlett-room", "lobby"); });
     btnScorpion?.addEventListener("click", ()=>{ appendLog("[hud] room=scorpion"); emit("scarlett-room", "scorpion"); });
     btnSpectate?.addEventListener("click", ()=>{ appendLog("[hud] room=spectate"); emit("scarlett-room", "spectator"); });
     btnStore?.addEventListener("click", ()=>{ appendLog("[hud] room=store"); emit("scarlett-room", "store"); });
 
-    // reset
     btnReset?.addEventListener("click", ()=>{
       try { localStorage.removeItem(LS_KEY); } catch {}
       appendLog("[hud] reset flags + reload");
@@ -441,7 +424,6 @@
       emit("scarlett-toggle-teleport", window.__SCARLETT_FLAGS.teleport);
     });
 
-    // show dock on Android phone; hide on Quest
     (function updateDockVisibility(){
       const ua=navigator.userAgent||"";
       const isQuest=/OculusBrowser|Oculus|Quest/i.test(ua);
@@ -455,12 +437,18 @@
     async function diagnostics(){
       openLog();
       appendLog("[diag] running…");
-      const base=location.href.replace(/\/[^\/]*$/, "/");
 
-      // Include EVERYTHING that could cause main import failure:
+      const base = location.href.replace(/\/[^\/]*$/, "/");
+
+      // Key files that commonly break boot (MUST include spawn_points + controls)
       const files=[
         "js/main.js",
         "js/world.js",
+        "js/controls.js",
+        "js/spawn_points.js",
+        "js/VRButton.js",
+        "js/three.js",
+
         "js/textures.js",
         "js/lights_pack.js",
         "js/solid_walls.js",
@@ -468,16 +456,13 @@
         "js/spectator_rail.js",
         "js/teleport_machine.js",
         "js/store.js",
-        "js/shop_ui.js",
-        "js/water_fountain.js",
         "js/ui.js",
         "js/vr_ui.js",
         "js/vr_ui_panel.js",
         "js/scorpion_room.js",
         "js/room_manager.js",
-        "js/teleport_fx.js",
-        "js/TeleportVFX.js",
-        "js/teleport_burst_fx.js"
+        "js/bots.js",
+        "js/poker_sim.js"
       ];
 
       let bad=0;
@@ -485,14 +470,26 @@
         const url=new URL(f+"?v="+encodeURIComponent(v), base).toString();
         try{
           const r=await fetch(url,{cache:"no-store"});
-          appendLog(`[diag] ${f} -> ${r.status} ${r.ok?"✅":"❌"} (type=${r.headers.get("content-type")||"?"})`);
+          const ct=(r.headers.get("content-type")||"?").toLowerCase();
+
+          // Flag HTML returned for JS paths (classic "does not provide export named")
+          const looksHtml = ct.includes("text/html");
+          const looksJs = ct.includes("javascript") || ct.includes("ecmascript") || ct.includes("text/plain");
+
+          appendLog(`[diag] ${f} -> ${r.status} ${r.ok?"✅":"❌"} (type=${ct})${looksHtml ? "  🚨HTML-SERVED-AS-JS" : ""}`);
+
           if(!r.ok) bad++;
+          if(r.ok && looksHtml) bad++;
+          // if it isn't html and also isn't js-ish, it's suspicious too
+          if(r.ok && !looksHtml && !looksJs && f.endsWith(".js")) {
+            appendLog(`[diag] ⚠️ ${f} content-type suspicious: ${ct}`);
+          }
         }catch(e){
           appendLog(`[diag] ${f} -> ERR ❌ ${e?.message||e}`);
           bad++;
         }
       }
-      appendLog(bad ? `[diag] done (FAILS=${bad}) ❌` : "[diag] done ✅");
+      appendLog(bad ? `[diag] done (ISSUES=${bad}) ❌` : "[diag] done ✅");
     }
     btnDiag.addEventListener("click", diagnostics);
 
@@ -512,7 +509,7 @@
       appendLog("Fix checklist:");
       appendLog("1) Confirm /js/main.js exists");
       appendLog("2) Folder name is exactly: js (lowercase)");
-      appendLog("3) Press Diagnostics for 404s + check content-type is JS");
+      appendLog("3) Press Diagnostics for 404s + check content-type is JS (not HTML)");
     }
   </script>
 </body>

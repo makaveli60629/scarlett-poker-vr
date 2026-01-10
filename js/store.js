@@ -1,6 +1,9 @@
-// /js/store.js — Scarlett VR Poker StoreSystem v1.1 (Carousel + Gaze Info + Glass/Mirror)
-// Safe, standalone. Does NOT require modifying main.js or world.js yet.
-// Usage later (when you allow): StoreSystem.init({ THREE, scene: world.group, world, player, camera, log })
+// /js/store.js — Scarlett VR Poker StoreSystem v1.2 (Carousel + Gaze Info + Glass/Mirror)
+// v1.2 FIXES:
+// ✅ init() accepts BOTH: init(ctx) OR init({THREE, scene, world, player, camera, log})
+// ✅ setActive(on) added so RoomManager/world can toggle store visibility
+// ✅ Store placed on LEFT of lobby focus (as requested)
+// ✅ Pointerdown fallback triggers onAction if you're looking at a pad/item
 
 import { StoreCatalog } from "./store_catalog.js";
 
@@ -32,7 +35,10 @@ export const StoreSystem = (() => {
 
     raycaster: null,
     tmpV: null,
-    tmpV2: null
+    tmpV2: null,
+
+    _boundAction: false,
+    _boundPointer: false,
   };
 
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -69,7 +75,6 @@ export const StoreSystem = (() => {
   }
 
   function makeMirrorGlassMat() {
-    // fake “mirror glass” — reflective-ish look without real reflection pipeline
     return new THREE.MeshStandardMaterial({
       color: 0x0b0d14,
       roughness: 0.05,
@@ -84,40 +89,36 @@ export const StoreSystem = (() => {
     const c = document.createElement("canvas");
     c.width = 1024;
     c.height = 512;
-    const ctx = c.getContext("2d");
+    const ctx2d = c.getContext("2d");
 
-    ctx.clearRect(0, 0, c.width, c.height);
+    ctx2d.clearRect(0, 0, c.width, c.height);
 
-    // background
-    ctx.fillStyle = "rgba(5,6,10,0.72)";
-    roundRect(ctx, 40, 70, 944, 372, 36, true);
+    ctx2d.fillStyle = "rgba(5,6,10,0.72)";
+    roundRect(ctx2d, 40, 70, 944, 372, 36, true);
 
-    // top line
-    ctx.font = "bold 72px Arial";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = accent;
-    ctx.fillText(textTop, 512, 210);
+    ctx2d.font = "bold 72px Arial";
+    ctx2d.textAlign = "center";
+    ctx2d.textBaseline = "middle";
+    ctx2d.fillStyle = accent;
+    ctx2d.fillText(textTop, 512, 210);
 
-    // bottom line
-    ctx.font = "bold 54px Arial";
-    ctx.fillStyle = "#ffffff";
-    ctx.fillText(textBottom, 512, 310);
+    ctx2d.font = "bold 54px Arial";
+    ctx2d.fillStyle = "#ffffff";
+    ctx2d.fillText(textBottom, 512, 310);
 
-    // glow border
-    ctx.strokeStyle = "rgba(127,231,255,0.38)";
-    ctx.lineWidth = 8;
-    roundRect(ctx, 40, 70, 944, 372, 36, false);
+    ctx2d.strokeStyle = "rgba(127,231,255,0.38)";
+    ctx2d.lineWidth = 8;
+    roundRect(ctx2d, 40, 70, 944, 372, 36, false);
 
-    function roundRect(ctx, x, y, w, h, r, fill) {
-      ctx.beginPath();
-      ctx.moveTo(x + r, y);
-      ctx.arcTo(x + w, y, x + w, y + h, r);
-      ctx.arcTo(x + w, y + h, x, y + h, r);
-      ctx.arcTo(x, y + h, x, y, r);
-      ctx.arcTo(x, y, x + w, y, r);
-      ctx.closePath();
-      if (fill) ctx.fill(); else ctx.stroke();
+    function roundRect(ctx3, x, y, w, h, r, fill) {
+      ctx3.beginPath();
+      ctx3.moveTo(x + r, y);
+      ctx3.arcTo(x + w, y, x + w, y + h, r);
+      ctx3.arcTo(x + w, y + h, x, y + h, r);
+      ctx3.arcTo(x, y + h, x, y, r);
+      ctx3.arcTo(x, y, x + w, y, r);
+      ctx3.closePath();
+      if (fill) ctx3.fill(); else ctx3.stroke();
     }
 
     const tex = new THREE.CanvasTexture(c);
@@ -159,7 +160,7 @@ export const StoreSystem = (() => {
       new THREE.MeshBasicMaterial({ map: tex, transparent: true })
     );
     sign.position.set(0, 0.62, 0);
-    sign.visible = false; // only show when focused
+    sign.visible = false;
     g.add(sign);
 
     g.userData = {
@@ -181,7 +182,6 @@ export const StoreSystem = (() => {
     const skin = new THREE.MeshStandardMaterial({ color: sex === "female" ? 0xd9b6a3 : 0xd2b48c, roughness: 0.65 });
     const suit = new THREE.MeshStandardMaterial({ color: sex === "female" ? 0x1b1020 : 0x111318, roughness: 0.75, metalness: 0.05 });
 
-    // proportions (more human-like)
     const hips = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.14, 0.16), suit);
     hips.position.y = 0.98;
     g.add(hips);
@@ -198,7 +198,6 @@ export const StoreSystem = (() => {
     head.position.y = 1.72;
     g.add(head);
 
-    // arms w/ elbows
     const upperArmGeo = new THREE.CapsuleGeometry(0.046, 0.25, 6, 10);
     const foreArmGeo  = new THREE.CapsuleGeometry(0.043, 0.22, 6, 10);
     const handGeo     = new THREE.BoxGeometry(0.065, 0.03, 0.10);
@@ -231,7 +230,6 @@ export const StoreSystem = (() => {
     const armR = arm(1);
     g.add(armL, armR);
 
-    // legs + shoes
     const thighGeo = new THREE.CapsuleGeometry(0.058, 0.36, 6, 12);
     const shinGeo  = new THREE.CapsuleGeometry(0.052, 0.32, 6, 12);
     const shoeGeo  = new THREE.BoxGeometry(0.13, 0.05, 0.24);
@@ -288,7 +286,6 @@ export const StoreSystem = (() => {
     return g;
   }
 
-  // --- Product display items (chips/cards) ---
   function makeChipToken(color = 0xff2d7a, accent = 0x7fe7ff) {
     const g = new THREE.Group();
     g.name = "ChipToken";
@@ -352,15 +349,11 @@ export const StoreSystem = (() => {
 
     const items = [];
 
-    // pick some catalog items (first few)
     const pick = [];
     for (const cat of StoreCatalog.categories) {
-      for (const it of cat.items) {
-        pick.push({ ...it, cat: cat.id });
-      }
+      for (const it of cat.items) pick.push({ ...it, cat: cat.id });
     }
 
-    // build 8 display objects around ring
     const N = Math.min(8, pick.length);
     for (let i = 0; i < N; i++) {
       const it = pick[i];
@@ -387,7 +380,6 @@ export const StoreSystem = (() => {
   }
 
   function buildMirrorWall() {
-    // A wall panel with glass + “fake reflection” copy of mannequins behind it
     const root = new THREE.Group();
     root.name = "MirrorWall";
 
@@ -429,7 +421,6 @@ export const StoreSystem = (() => {
     root.position.copy(position);
     root.rotation.y = yaw;
 
-    // platform
     const platform = new THREE.Mesh(
       new THREE.CylinderGeometry(2.25, 2.25, 0.10, 48),
       new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.95 })
@@ -437,7 +428,6 @@ export const StoreSystem = (() => {
     platform.position.y = 0.05;
     root.add(platform);
 
-    // kiosk shell
     const shell = new THREE.Mesh(
       new THREE.CylinderGeometry(2.0, 2.0, 2.3, 48, 1, true, Math.PI * 0.1, Math.PI * 1.8),
       new THREE.MeshStandardMaterial({ color: 0x141826, roughness: 0.9, metalness: 0.05, side: THREE.DoubleSide })
@@ -445,7 +435,6 @@ export const StoreSystem = (() => {
     shell.position.y = 1.18;
     root.add(shell);
 
-    // glass arc
     const glass = new THREE.Mesh(
       new THREE.CylinderGeometry(1.75, 1.75, 1.65, 48, 1, true, Math.PI * 0.15, Math.PI * 0.7),
       makeGlassMat(0.16)
@@ -454,7 +443,6 @@ export const StoreSystem = (() => {
     glass.rotation.y = Math.PI * 0.25;
     root.add(glass);
 
-    // neon trim
     const trim = new THREE.Mesh(
       new THREE.TorusGeometry(1.92, 0.03, 10, 80),
       makeNeonMat(0x7fe7ff, 0x2bd7ff, 1.25, 0.92)
@@ -463,12 +451,10 @@ export const StoreSystem = (() => {
     trim.position.y = 2.12;
     root.add(trim);
 
-    // sign
     const sign = makeBillboard(1.85, 0.86, "SCARLETT STORE", "Skins • VIP • Cosmetics");
     sign.position.set(0, 2.60, 1.25);
     root.add(sign);
 
-    // mannequins inside
     const man1 = makeMannequin("male");
     man1.position.set(-0.62, 0, -0.40);
     man1.rotation.y = Math.PI * 0.35;
@@ -479,25 +465,21 @@ export const StoreSystem = (() => {
     man2.rotation.y = -Math.PI * 0.35;
     root.add(man2);
 
-    // shelves inside
     const shelf = makeShelf();
     shelf.position.set(0, 0, -0.95);
     shelf.rotation.y = Math.PI;
     root.add(shelf);
 
-    // mirror wall behind mannequins
     const mirrorWall = buildMirrorWall();
     mirrorWall.position.set(0, 0, 0);
     root.add(mirrorWall);
     state.mirrorWall = mirrorWall;
 
-    // carousel inside-front
     const carousel = makeProductCarousel();
     carousel.position.set(0, 0, 0.10);
     root.add(carousel);
     state.carousel = carousel;
 
-    // pads outside (player-facing)
     const padEnter = makePad("JOIN STORE", 0x7fe7ff);
     padEnter.position.set(0, 0, 1.55);
     root.add(padEnter);
@@ -516,20 +498,17 @@ export const StoreSystem = (() => {
 
     state.pads.push(padEnter, padPreview, padDaily);
 
-    // item info billboard (only shows when looking at carousel items)
     state.itemBillboard = makeBillboard(1.35, 0.65, "ITEM", "Look at a product");
     state.itemBillboard.name = "StoreItemBillboard";
     state.itemBillboard.position.set(0, 2.15, 0.55);
     state.itemBillboard.visible = false;
     root.add(state.itemBillboard);
 
-    // animate mannequins slightly (pose)
     man1.userData.armL.rotation.z = 0.10;
     man1.userData.armR.rotation.z = -0.10;
     man2.userData.armL.rotation.z = 0.10;
     man2.userData.armR.rotation.z = -0.10;
 
-    // keep refs
     root.userData = { man1, man2 };
 
     return root;
@@ -543,7 +522,7 @@ export const StoreSystem = (() => {
     state.itemBillboard.material.map = makeSignCanvas(top, bottom, "#ff2d7a");
     state.itemBillboard.material.needsUpdate = true;
     state.itemBillboard.visible = true;
-    state.itemBillboard.userData.life = 0.25; // short, refreshed while gazing
+    state.itemBillboard.userData.life = 0.25;
   }
 
   function openStoreUI() {
@@ -609,7 +588,6 @@ export const StoreSystem = (() => {
 
     state.lastFocusPad = best || null;
 
-    // highlight
     for (const pad of state.pads) {
       const u = pad.userData;
       u.pulseT += dt;
@@ -627,7 +605,6 @@ export const StoreSystem = (() => {
   function handleItemGaze(dt) {
     if (!camera || !state.carousel || !state.raycaster) return;
 
-    // short-lived billboard (refreshed while gazing)
     if (state.itemBillboard?.visible) {
       state.itemBillboard.userData.life -= dt;
       if (state.itemBillboard.userData.life <= 0) state.itemBillboard.visible = false;
@@ -649,7 +626,6 @@ export const StoreSystem = (() => {
       return;
     }
 
-    // choose first hit with storeItem
     let hitObj = hits[0].object;
     while (hitObj && !hitObj.userData?.storeItem && hitObj.parent) hitObj = hitObj.parent;
 
@@ -662,13 +638,13 @@ export const StoreSystem = (() => {
   }
 
   function onAction() {
-    // prioritized: pad -> item
+    if (!state.active) return;
+
     const pad = state.lastFocusPad;
     if (pad?.userData?.onActivate) return pad.userData.onActivate();
 
     const it = state.lastFocusItem?.userData?.storeItem;
     if (it) {
-      // buy placeholder
       const price = it.price || 0;
       if (state.wallet.chips >= price) {
         state.wallet.chips -= price;
@@ -683,21 +659,19 @@ export const StoreSystem = (() => {
   }
 
   function tick(dt) {
+    if (!state.active) return;
     state.t += dt;
 
-    // kiosk spin preview
     if (state.kiosk?.userData?.spinT > 0) {
       state.kiosk.userData.spinT = Math.max(0, state.kiosk.userData.spinT - dt);
       state.kiosk.rotation.y += dt * 1.6;
     }
 
-    // main billboard life
     if (state.uiBillboard?.visible) {
       state.uiBillboard.userData.life -= dt;
       if (state.uiBillboard.userData.life <= 0) state.uiBillboard.visible = false;
     }
 
-    // carousel spin + bob items
     if (state.carousel) {
       const sp = state.carousel.userData.spinSpeed || 0.25;
       state.carousel.rotation.y += dt * sp;
@@ -710,12 +684,10 @@ export const StoreSystem = (() => {
       }
     }
 
-    // mannequins idle + fake mirror “reflection motion”
     if (state.kiosk?.userData?.man1 && state.kiosk.userData.man2) {
       const { man1, man2 } = state.kiosk.userData;
       const t = state.t;
 
-      // small pose motion
       man1.userData.armL.rotation.x = -0.20 + Math.sin(t * 1.2) * 0.12;
       man1.userData.armR.rotation.x = -0.20 - Math.sin(t * 1.2) * 0.12;
 
@@ -727,14 +699,44 @@ export const StoreSystem = (() => {
     handleItemGaze(dt);
   }
 
+  function _normalizeInitArgs(arg = {}) {
+    // Accept init(ctx) OR init({THREE, scene, world, player, camera, log})
+    // If caller passed ctx directly, it has THREE/scene/player/camera/log.
+    const isCtxShape = !!arg?.THREE && !!arg?.scene && !!arg?.player && !!arg?.camera;
+    if (isCtxShape) {
+      return {
+        THREE: arg.THREE,
+        scene: arg.scene,
+        world: arg.world || arg,
+        player: arg.player,
+        camera: arg.camera,
+        log: arg.log || console.log,
+      };
+    }
+    return arg;
+  }
+
+  function setActive(on) {
+    state.active = !!on;
+    if (state.root) state.root.visible = !!on;
+    if (!on) {
+      // hide transient UIs immediately
+      if (state.uiBillboard) state.uiBillboard.visible = false;
+      if (state.itemBillboard) state.itemBillboard.visible = false;
+    }
+    L(`[store] setActive(${state.active})`);
+  }
+
   return {
-    async init({ THREE: _THREE, scene: _scene, world: _world, player: _player, camera: _camera, log: _log } = {}) {
-      THREE = _THREE;
-      scene = _scene;
-      world = _world || null;
-      log = _log || console.log;
-      player = _player || null;
-      camera = _camera || null;
+    async init(args = {}) {
+      const a = _normalizeInitArgs(args);
+
+      THREE = a.THREE;
+      scene = a.scene;
+      world = a.world || null;
+      log = a.log || console.log;
+      player = a.player || null;
+      camera = a.camera || null;
 
       if (!THREE || !scene) throw new Error("StoreSystem.init missing THREE or scene");
 
@@ -751,25 +753,46 @@ export const StoreSystem = (() => {
       state.lastFocusPad = null;
       state.lastFocusItem = null;
 
-      // Place store on RIGHT side of tableFocus (left/right like you wanted)
-      const tf = world?.tableFocus || new THREE.Vector3(0, 0, -6.5);
+      // Determine lobby focus (fallback)
+      const tf =
+        world?.tableFocus ||
+        world?.anchors?.lobby_table_zone?.position ||
+        new THREE.Vector3(0, 0, -2.8);
 
+      // ✅ Place store LEFT of lobby focus (as requested)
       state.kiosk = buildStoreKiosk({
-        position: new THREE.Vector3(tf.x + 6.2, 0, tf.z),
-        yaw: -Math.PI / 2
+        position: new THREE.Vector3(tf.x - 6.2, 0, tf.z),
+        yaw: Math.PI / 2
       });
       state.root.add(state.kiosk);
 
-      // floating UI billboard near table area
+      // floating UI billboard near lobby area
       state.uiBillboard = buildUIBillboard();
       state.root.add(state.uiBillboard);
 
-      window.addEventListener("scarlett-action", onAction);
+      if (!state._boundAction) {
+        window.addEventListener("scarlett-action", onAction);
+        state._boundAction = true;
+      }
 
-      L("[store] init ✅ v1.1 (carousel + gaze + mirror)");
-      return { tick, onAction, root: state.root, catalog: StoreCatalog };
+      // ✅ fallback: pointer click triggers action (helpful if scarlett-action not emitted yet)
+      if (!state._boundPointer) {
+        window.addEventListener("pointerdown", () => {
+          if (!state.active) return;
+          // only act if looking at something store-related
+          if (state.lastFocusPad || state.lastFocusItem) onAction();
+        });
+        state._boundPointer = true;
+      }
+
+      // visible by default; RoomManager can toggle later
+      setActive(true);
+
+      L("[store] init ✅ v1.2 (carousel + gaze + mirror + active toggle)");
+      return { tick, onAction, root: state.root, catalog: StoreCatalog, setActive };
     },
 
+    setActive,
     setPlayerRig({ player: p, camera: c } = {}) { player = p || player; camera = c || camera; },
 
     tick,

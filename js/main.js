@@ -1,10 +1,10 @@
-// /js/main.js — Scarlett Hybrid 2.5 (FULL, PERMANENT)
-// ✅ Fixes your current issue: missing modules no longer break gameplay
-// ✅ Controllers move + snap turn
-// ✅ Teleport ray from RIGHT controller (primary), wrist hand (secondary), camera (last)
-// ✅ Teleport on trigger/A/B press (even if GestureEngine missing)
-// ✅ Still loads world systems as before
-// ✅ Logs missing-module warnings clearly
+// /js/main.js — Scarlett Hybrid 2.6 (FULL)
+// ✅ Facing fix: rotate 90° LEFT from current result (your request)
+// ✅ Teleport beam is ATTACHED to controller/camera (so it stays with you)
+// ✅ Beam depthTest ON (won't appear through walls)
+// ✅ Beam source validity check (prevents origin stuck at 0,0,0)
+// ✅ Controller movement + snap turn stays
+// ✅ Still loads optional gesture/betting modules if present
 
 (async function boot() {
   if (window.__SCARLETT_BOOTED__) throw new Error("Double boot prevented");
@@ -136,7 +136,7 @@
     LOG.push("error", "world.js missing World.init");
   }
 
-  // Spawn + facing (+135° correction)
+  // Spawn + facing FIX (90° LEFT of where you were)
   const tmp = new THREE.Vector3();
   const tmp2 = new THREE.Vector3();
   function applySpawnAndFacing() {
@@ -150,101 +150,147 @@
     if (table) {
       table.getWorldPosition(tmp);
       tmp2.set(player.position.x, 0, player.position.z);
-      const d = tmp.sub(tmp2);
-      d.y = 0;
-      if (d.lengthSq() > 1e-6) {
-        let yaw = Math.atan2(d.x, d.z);
-        yaw += THREE.MathUtils.degToRad(135);
+      const v = tmp.sub(tmp2);
+      v.y = 0;
+      if (v.lengthSq() > 1e-6) {
+        let yaw = Math.atan2(v.x, v.z);
+
+        // Previously we tried +135°. You said you need to face "right angle to the left" now.
+        // That means rotate -90° from what you're seeing.
+        const yawOffsetDeg = 45; // (= 135 - 90) => net 90° left correction
+        yaw += THREE.MathUtils.degToRad(yawOffsetDeg);
+
         player.rotation.set(0, yaw, 0);
-        LOG.push("log", "Facing table ✅ (with +135° correction)");
+        LOG.push("log", `Facing table ✅ (yawOffset=${yawOffsetDeg}°)`);
       }
     }
   }
   applySpawnAndFacing();
-  renderer.xr.addEventListener("sessionstart", () => setTimeout(applySpawnAndFacing, 200));
+  renderer.xr.addEventListener("sessionstart", () => setTimeout(applySpawnAndFacing, 220));
 
-  // Optional modules (may be missing on GitHub right now)
+  // Optional modules (safe if missing)
   const gestureMod = await safeImport("./gesture_engine.js", "./gesture_engine.js");
   const betMod = await safeImport("./betting_module.js", "./betting_module.js");
 
   const GestureEngine = gestureMod?.GestureEngine || null;
   const BettingModule = betMod?.BettingModule || null;
 
-  if (GestureEngine?.init) {
-    GestureEngine.init({ THREE, renderer, scene, camera, log: (m) => LOG.push("log", m), LOG });
-  } else {
-    LOG.push("warn", "GestureEngine missing -> pinch features disabled (controller still works).");
-  }
+  if (GestureEngine?.init) GestureEngine.init({ THREE, renderer, scene, camera, log: (m) => LOG.push("log", m), LOG });
+  if (!GestureEngine) LOG.push("warn", "GestureEngine missing -> pinch features disabled (controller still works).");
 
-  if (BettingModule?.init) {
-    BettingModule.init(ctx);
-  } else {
-    LOG.push("warn", "BettingModule missing -> bet zone disabled (movement/teleport still works).");
-  }
+  if (BettingModule?.init) BettingModule.init(ctx);
+  if (!BettingModule) LOG.push("warn", "BettingModule missing -> betting disabled (movement/teleport still works).");
 
   // Controllers
   const controllerL = renderer.xr.getController(0); controllerL.name = "ControllerLeft"; scene.add(controllerL);
   const controllerR = renderer.xr.getController(1); controllerR.name = "ControllerRight"; scene.add(controllerR);
 
-  // XR hands (optional)
+  // XR right hand (optional)
   let rightHand = null;
   try { rightHand = renderer.xr.getHand(1); rightHand.name = "XRHandRight"; scene.add(rightHand); } catch {}
 
-  // Teleport visuals
+  // ---------- Teleport visuals (ATTACHED) ----------
+  // We'll attach the laser to whichever aim source is active (controllerR or camera fallback).
   const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-  const laser = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]),
-    new THREE.LineBasicMaterial({ color: 0x00ffff })
-  );
-  laser.renderOrder = 9999; laser.material.depthTest = false; scene.add(laser);
+
+  const laserGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
+  const laserMat = new THREE.LineBasicMaterial({ color: 0x00ffff });
+  laserMat.depthTest = true;        // ✅ no "through walls"
+  laserMat.transparent = true;
+  laserMat.opacity = 0.95;
+
+  const laser = new THREE.Line(laserGeom, laserMat);
+  laser.name = "TeleportLaser";
+  laser.frustumCulled = false;
 
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(0.23, 0.34, 48),
     new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
   );
   ring.rotation.x = -Math.PI / 2;
-  ring.renderOrder = 9999; ring.material.depthTest = false;
-  ring.visible = false; scene.add(ring);
+  ring.name = "TeleportMarker";
+  ring.visible = false;
+  ring.material.depthTest = true;
 
-  const o = new THREE.Vector3();
-  const d = new THREE.Vector3();
+  // start attached to controllerR (preferred)
+  controllerR.add(laser);
+  scene.add(ring);
+
+  const o2 = new THREE.Vector3();
+  const d2 = new THREE.Vector3();
   const hit = new THREE.Vector3();
   const q = new THREE.Quaternion();
 
+  function isPoseValid(obj) {
+    // Valid if it isn't still at origin and has moved at least slightly
+    if (!obj) return false;
+    obj.getWorldPosition(o2);
+    return o2.lengthSq() > 0.05; // avoids (0,0,0) stale pose
+  }
+
   function getAimPose(outOrigin, outDir) {
-    // controllerR first (your request)
-    if (controllerR) {
+    // Prefer RIGHT controller if valid
+    if (isPoseValid(controllerR)) {
       controllerR.getWorldPosition(outOrigin);
       controllerR.getWorldQuaternion(q);
       outDir.set(0, 0, -1).applyQuaternion(q).normalize();
       outDir.y -= 0.18; outDir.normalize();
+      // ensure laser is parented to controllerR
+      if (laser.parent !== controllerR) {
+        laser.parent?.remove(laser);
+        controllerR.add(laser);
+        laser.position.set(0,0,0);
+      }
       return "controller";
     }
-    // right wrist if hand tracking is active
+
+    // Otherwise try right wrist if available
     const wrist = rightHand?.joints?.wrist;
     if (wrist) {
       wrist.getWorldPosition(outOrigin);
       wrist.getWorldQuaternion(q);
       outDir.set(0, 0, -1).applyQuaternion(q).normalize();
       outDir.y -= 0.22; outDir.normalize();
+      // parent laser to rightHand so it follows you
+      if (laser.parent !== rightHand) {
+        laser.parent?.remove(laser);
+        rightHand.add(laser);
+        laser.position.set(0,0,0);
+      }
       return "hand";
     }
+
+    // Final fallback: camera
     camera.getWorldPosition(outOrigin);
     camera.getWorldDirection(outDir);
     outDir.y -= 0.35; outDir.normalize();
+    if (laser.parent !== camera) {
+      laser.parent?.remove(laser);
+      camera.add(laser);
+      laser.position.set(0,0,0);
+    }
     return "camera";
   }
 
   function updateTeleportRay() {
-    const src = getAimPose(o, d);
-    const denom = floorPlane.normal.dot(d);
+    const src = getAimPose(o2, d2);
+
+    const denom = floorPlane.normal.dot(d2);
     if (Math.abs(denom) < 1e-6) return { ok: false, src };
-    const t = -(floorPlane.normal.dot(o) + floorPlane.constant) / denom;
+
+    const t = -(floorPlane.normal.dot(o2) + floorPlane.constant) / denom;
     if (t < 0.25 || t > 26) return { ok: false, src };
 
-    hit.copy(o).addScaledVector(d, t);
-    laser.geometry.setFromPoints([o, hit]);
+    hit.copy(o2).addScaledVector(d2, t);
+
+    // laser is in local space of its parent: just set endpoint distance along -Z
+    const dist = Math.max(0.2, Math.min(26, o2.distanceTo(hit)));
+    const pts = [new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-dist)];
+    laser.geometry.setFromPoints(pts);
+
     ring.position.set(hit.x, 0.02, hit.z);
+    ring.visible = true;
+
     return { ok: true, point: hit.clone(), src };
   }
 
@@ -283,7 +329,7 @@
     GestureEngine.on("pinchstart", (e) => { if (e.hand === "right") queuedTeleport = true; });
   }
 
-  // Main loop
+  // Loop
   let last = performance.now();
   let fpsAcc = 0, fpsCount = 0, fps = 0;
 
@@ -299,10 +345,9 @@
     try { BettingModule?.update?.(ctx, dt); } catch {}
 
     if (renderer.xr.isPresenting) {
-      // Gesture update (safe)
       try { GestureEngine?.update?.(frame, renderer.xr.getReferenceSpace?.()); } catch {}
 
-      // Locomotion
+      // locomotion
       const gp = readGamepad();
       if (gp?.axes) {
         const ax = gp.axes;
@@ -317,7 +362,6 @@
         player.position.x += (strafe * cos + forward * sin) * move.speed * dt;
         player.position.z += (forward * cos - strafe * sin) * move.speed * dt;
 
-        // snap turn from right stick x if present, else reuse left
         move.snapCooldown = Math.max(0, move.snapCooldown - dt);
         const turn = ax[2] ?? ax[0] ?? 0;
         if (move.snapCooldown <= 0 && Math.abs(turn) > 0.75) {
@@ -326,10 +370,8 @@
         }
       }
 
-      // Teleport aim
       const ray = updateTeleportRay();
       move.aim = ray.src;
-
       laser.visible = ray.ok;
       ring.visible = ray.ok;
 
@@ -354,5 +396,5 @@
   });
 
   await setCaps();
-  LOG.push("log", "Hybrid 2.5 boot complete ✅ (module-safe; upload missing files to enable chips/bets/pinch)");
+  LOG.push("log", "Hybrid 2.6 boot complete ✅ (yaw fixed + laser attached + demo hub alive)");
 })();

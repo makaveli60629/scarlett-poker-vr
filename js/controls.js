@@ -1,239 +1,217 @@
-// /js/controls.js — Scarlett Controls v4.2 (FULL, STABLE)
-// ✅ Left stick smooth move + strafe
-// ✅ Right stick snap turn (45° by default)
-// ✅ Optional: Right stick forward/back can also move (toggle)
-// ✅ Mobile dock support via "scarlett-touch"
-// ✅ Reads HUD flags: window.__SCARLETT_FLAGS.move / snap
-// ✅ Emits "scarlett-menu" on Y press (edge-trigger, no spam)
+// /js/controls.js — Scarlett Controls v3 (FULL)
+// Supports: XR thumbsticks (if present), Android touch dock (scarlett-touch events),
+// keyboard WASD, snap/smooth turn, and spawn teleports.
+// Also prevents “giant height” by not adding extra Y offsets in XR local-floor.
 
-export const Controls = (() => {
-  function init({ THREE, renderer, camera, player, controllers, grips, log, world } = {}) {
-    const L = (...a) => { try { log?.(...a); } catch { console.log(...a); } };
+export const Controls = {
+  _inited: false,
+  _ctx: null,
 
-    const S = {
-      moveEnabled: !!(window.__SCARLETT_FLAGS?.move ?? true),
-      snapEnabled: !!(window.__SCARLETT_FLAGS?.snap ?? true),
+  init({ THREE, scene, renderer, camera, player, controllers, world, log }) {
+    if (this._inited) return;
+    this._inited = true;
 
-      // movement feel
-      speed: 2.2,              // m/s
-      deadzone: 0.18,
-
-      // snap feel
-      snapAngleDeg: 45,
-      snapAngle: THREE?.MathUtils?.degToRad ? THREE.MathUtils.degToRad(45) : (Math.PI / 4),
+    const state = {
+      moveSpeed: 2.1,
+      turnSpeed: 2.2,
+      snapTurn: true,
+      snapAngle: Math.PI / 6,
       snapCooldown: 0,
-      snapCooldownTime: 0.25,
-
-      // optional: allow right stick forward/back to move too
-      rightStickMoveEnabled: true,
-
-      // mobile dock
-      touch: { f:0,b:0,l:0,r:0,turnL:0,turnR:0 },
-
-      // menu latch
-      yLatch: false,
+      keys: { w: 0, a: 0, s: 0, d: 0 },
+      touch: { f: 0, b: 0, l: 0, r: 0, turnL: 0, turnR: 0 },
     };
 
-    // live update from HUD
-    window.addEventListener("scarlett-toggle-move", (e) => { S.moveEnabled = !!e.detail; });
-    window.addEventListener("scarlett-toggle-snap", (e) => { S.snapEnabled = !!e.detail; });
-    window.addEventListener("scarlett-touch", (e) => { S.touch = e.detail || S.touch; });
+    const getFlag = (k, fallback = true) => {
+      try {
+        return !!(window.__SCARLETT_FLAGS?.[k] ?? fallback);
+      } catch {
+        return fallback;
+      }
+    };
 
-    // Let HUD or other systems change snap angle if needed
-    window.addEventListener("scarlett-snap-angle", (e) => {
-      const deg = Number(e?.detail);
-      if (!Number.isFinite(deg) || deg <= 0) return;
-      S.snapAngleDeg = deg;
-      S.snapAngle = THREE.MathUtils.degToRad(deg);
-      L("[controls] snap angle set:", deg);
+    // Keyboard fallback
+    window.addEventListener("keydown", (e) => {
+      const k = (e.key || "").toLowerCase();
+      if (k === "w") state.keys.w = 1;
+      if (k === "a") state.keys.a = 1;
+      if (k === "s") state.keys.s = 1;
+      if (k === "d") state.keys.d = 1;
+    });
+    window.addEventListener("keyup", (e) => {
+      const k = (e.key || "").toLowerCase();
+      if (k === "w") state.keys.w = 0;
+      if (k === "a") state.keys.a = 0;
+      if (k === "s") state.keys.s = 0;
+      if (k === "d") state.keys.d = 0;
     });
 
-    function getSession() {
-      try { return renderer?.xr?.getSession?.() || null; } catch { return null; }
-    }
+    // Android touch dock -> scarlett-touch
+    window.addEventListener("scarlett-touch", (e) => {
+      if (!e?.detail) return;
+      state.touch = Object.assign(state.touch, e.detail);
+    });
 
-    // Find gamepad for a handedness
-    function getSource(handednessWanted) {
-      const session = getSession();
-      if (!session) return null;
-      const sources = session.inputSources || [];
-      for (const src of sources) {
-        if (!src?.gamepad) continue;
-        if (handednessWanted && src.handedness !== handednessWanted) continue;
-        return src;
-      }
-      return null;
-    }
+    // Toggles
+    window.addEventListener("scarlett-toggle-snap", (e) => (state.snapTurn = !!e.detail));
+    window.addEventListener("scarlett-toggle-move", () => {});
+    window.addEventListener("scarlett-toggle-teleport", () => {});
 
-    // Normalize deadzone with rescale so it feels analog
-    function dz(v) {
-      const a = Math.abs(v);
-      if (a < S.deadzone) return 0;
-      const sign = Math.sign(v);
-      const t = (a - S.deadzone) / (1 - S.deadzone);
-      return sign * Math.min(1, Math.max(0, t));
-    }
+    // Recenter/teleport helpers
+    this._ctx = { THREE, scene, renderer, camera, player, controllers, world, log, state };
 
-    // Quest sometimes reports left stick on axes[2]/[3] or [0]/[1]
-    function readStick(src, prefer = "left") {
-      if (!src?.gamepad) return { x: 0, y: 0, buttons: [] };
-      const axes = src.gamepad.axes || [];
-      const buttons = src.gamepad.buttons || [];
+    // Animation tick
+    renderer.setAnimationLoop(() => {
+      const dt = Math.min(renderer.clock?.getDelta?.() ?? 0.016, 0.033);
 
-      // If we have 4 axes, common layout:
-      // left: 0,1 and right: 2,3
-      // BUT some browsers swap; so we try both.
-      let x = 0, y = 0;
-
-      if (axes.length >= 4) {
-        if (prefer === "left") {
-          x = axes[0] ?? 0;
-          y = axes[1] ?? 0;
-          // fallback if zeros:
-          if (Math.abs(x) < 0.001 && Math.abs(y) < 0.001) {
-            x = axes[2] ?? 0;
-            y = axes[3] ?? 0;
-          }
-        } else {
-          x = axes[2] ?? 0;
-          y = axes[3] ?? 0;
-          if (Math.abs(x) < 0.001 && Math.abs(y) < 0.001) {
-            x = axes[0] ?? 0;
-            y = axes[1] ?? 0;
-          }
-        }
-      } else {
-        x = axes[0] ?? 0;
-        y = axes[1] ?? 0;
-      }
-
-      return { x, y, buttons, axes };
-    }
-
-    // Reused vectors to avoid GC stutter
-    const fwd = new THREE.Vector3();
-    const side = new THREE.Vector3();
-
-    function moveByAxes(ax, ay, dt) {
-      // ay forward is typically negative on sticks
-      const x = dz(ax);
-      const y = dz(ay);
-
-      if (x === 0 && y === 0) return;
-
-      // Movement direction is based on PLAYER orientation (not head),
-      // which feels stable for VR locomotion.
-      fwd.set(0, 0, -1).applyQuaternion(player.quaternion);
-      side.set(1, 0, 0).applyQuaternion(player.quaternion);
-
-      // flatten Y
-      fwd.y = 0; side.y = 0;
-      fwd.normalize(); side.normalize();
-
-      const step = S.speed * dt;
-
-      // forward/back
-      player.position.addScaledVector(fwd, (-y) * step);
-      // strafe
-      player.position.addScaledVector(side, (x) * step);
-    }
-
-    function snapTurnByAxis(rx, dt) {
-      if (!S.snapEnabled) return;
-      S.snapCooldown = Math.max(0, S.snapCooldown - dt);
-
-      const x = dz(rx);
-      if (Math.abs(x) < 0.75) return;
-      if (S.snapCooldown > 0) return;
-
-      // Right stick right = turn right (negative rot) usually feels correct
-      player.rotation.y -= Math.sign(x) * S.snapAngle;
-      S.snapCooldown = S.snapCooldownTime;
-    }
-
-    function emitMenuFromY(buttons) {
-      // Y varies by platform; we check a range.
-      const pressed =
-        !!buttons?.[3]?.pressed ||
-        !!buttons?.[4]?.pressed ||
-        !!buttons?.[5]?.pressed;
-
-      if (pressed && !S.yLatch) {
-        S.yLatch = true;
-        window.dispatchEvent(new Event("scarlett-menu"));
-        L("[controls] menu event (Y) ✅");
-      }
-      if (!pressed) S.yLatch = false;
-    }
-
-    function updateDesktopFromTouch(dt) {
-      // Mobile dock fallback (Android)
-      const f = (S.touch.f || 0) - (S.touch.b || 0);
-      const r = (S.touch.r || 0) - (S.touch.l || 0);
-      const turn = (S.touch.turnR || 0) - (S.touch.turnL || 0);
-
-      fwd.set(0, 0, -1).applyQuaternion(player.quaternion);
-      side.set(1, 0, 0).applyQuaternion(player.quaternion);
-      fwd.y = 0; side.y = 0;
-      fwd.normalize(); side.normalize();
-
-      player.position.addScaledVector(fwd, f * S.speed * dt);
-      player.position.addScaledVector(side, r * S.speed * dt);
-
-      // smooth turn on mobile
-      player.rotation.y -= turn * 1.6 * dt;
-    }
-
-    L("[controls] ready ✅ (left move + right snap + Y menu)");
-
-    return {
-      setRightStickMoveEnabled(v) { S.rightStickMoveEnabled = !!v; },
-      setSpeed(v) { if (Number.isFinite(v)) S.speed = Math.max(0.2, v); },
-      setSnapAngleDeg(deg) {
-        if (!Number.isFinite(deg) || deg <= 0) return;
-        S.snapAngleDeg = deg;
-        S.snapAngle = THREE.MathUtils.degToRad(deg);
-      },
-
-      update(dt) {
-        if (!dt || dt <= 0) return;
-
-        // Always keep player on floor for lobby mode
+      // Clamp rig Y to floor (prevents “giant” feeling from bad offsets)
+      if (renderer.xr.isPresenting) {
         player.position.y = 0;
-
-        // If not in XR: use mobile dock only (your index dock)
-        if (!renderer?.xr?.isPresenting) {
-          updateDesktopFromTouch(dt);
-          return;
-        }
-
-        const leftSrc = getSource("left");
-        const rightSrc = getSource("right");
-
-        const left = readStick(leftSrc, "left");
-        const right = readStick(rightSrc, "right");
-
-        // movement
-        if (S.moveEnabled) {
-          // left stick drives movement
-          moveByAxes(left.x, left.y, dt);
-
-          // optional: right stick forward/back ALSO moves (your request)
-          if (S.rightStickMoveEnabled) {
-            // only use right Y for forward/back, but DO NOT strafe from it
-            const ry = dz(right.y);
-            if (Math.abs(ry) > 0) moveByAxes(0, ry, dt);
-          }
-        }
-
-        // snap
-        snapTurnByAxis(right.x, dt);
-
-        // menu on Y (left controller)
-        emitMenuFromY(left.buttons);
+      } else {
+        // non-XR: keep camera around standing height unless world overrides
+        if (camera.parent === player) camera.position.y = Math.max(camera.position.y, 1.6);
       }
-    };
-  }
 
-  return { init };
-})();
+      // Movement enabled?
+      if (getFlag("move", true)) {
+        this._updateMove(dt);
+      }
+
+      // Turning
+      if (getFlag("snap", true)) {
+        this._updateTurn(dt);
+      } else {
+        this._updateSmoothTurn(dt);
+      }
+
+      // Render
+      renderer.render(scene, camera);
+    });
+
+    log("[controls] init ✅ (XR + touch + keyboard)");
+  },
+
+  teleportToSpawn(name = "lobby_spawn") {
+    const { world, player, log } = this._ctx || {};
+    const sp = world?.spawns?.[name];
+    if (!sp) {
+      log?.(`[controls] ⚠️ spawn not found: ${name}`);
+      return;
+    }
+    player.position.set(sp.position.x, 0, sp.position.z);
+    player.rotation.y = sp.yaw || 0;
+    log?.(`[controls] ✅ teleported to ${name}`);
+  },
+
+  _getGamepadAxes() {
+    const r = this._ctx?.renderer;
+    try {
+      const session = r?.xr?.getSession?.();
+      if (!session) return null;
+
+      // Find the first inputSource with a gamepad
+      for (const src of session.inputSources || []) {
+        if (src?.gamepad?.axes?.length >= 2) return src.gamepad.axes;
+      }
+    } catch {}
+    return null;
+  },
+
+  _updateMove(dt) {
+    const { THREE, camera, player, state } = this._ctx;
+
+    // Input vector priority: XR thumbstick -> touch -> keyboard
+    let x = 0,
+      y = 0;
+
+    const axes = this._getGamepadAxes();
+    if (axes) {
+      // Common mapping: axes[2], axes[3] for left stick on some devices, but varies.
+      // We’ll support both patterns.
+      const ax0 = axes[0] ?? 0;
+      const ay0 = axes[1] ?? 0;
+      const ax2 = axes[2] ?? 0;
+      const ay3 = axes[3] ?? 0;
+
+      // pick the stronger stick signal
+      const m0 = Math.abs(ax0) + Math.abs(ay0);
+      const m2 = Math.abs(ax2) + Math.abs(ay3);
+      if (m2 > m0) {
+        x = ax2;
+        y = ay3;
+      } else {
+        x = ax0;
+        y = ay0;
+      }
+    } else {
+      // touch
+      x = (state.touch.r ? 1 : 0) + (state.touch.l ? -1 : 0);
+      y = (state.touch.b ? 1 : 0) + (state.touch.f ? -1 : 0);
+
+      // keyboard
+      x += state.keys.d ? 1 : 0;
+      x += state.keys.a ? -1 : 0;
+      y += state.keys.s ? 1 : 0;
+      y += state.keys.w ? -1 : 0;
+    }
+
+    // deadzone
+    const dz = 0.15;
+    if (Math.abs(x) < dz) x = 0;
+    if (Math.abs(y) < dz) y = 0;
+    if (!x && !y) return;
+
+    // Move in camera-forward plane
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    forward.y = 0;
+    forward.normalize();
+
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    right.y = 0;
+    right.normalize();
+
+    const move = new THREE.Vector3();
+    move.addScaledVector(right, x);
+    move.addScaledVector(forward, y);
+    if (move.lengthSq() > 0) move.normalize();
+
+    player.position.addScaledVector(move, state.moveSpeed * dt);
+  },
+
+  _updateTurn(dt) {
+    const { state } = this._ctx;
+    if (state.snapCooldown > 0) {
+      state.snapCooldown -= dt;
+      return;
+    }
+
+    // Turn input: XR right-stick if present else touch
+    let t = 0;
+    const axes = this._getGamepadAxes();
+    if (axes) {
+      // right-stick often axes[2]
+      t = axes[2] ?? 0;
+    } else {
+      t = (state.touch.turnR ? 1 : 0) + (state.touch.turnL ? -1 : 0);
+    }
+
+    const dz = 0.35;
+    if (Math.abs(t) < dz) return;
+
+    const dir = t > 0 ? -1 : 1; // invert feels better in VR
+    this._ctx.player.rotation.y += dir * state.snapAngle;
+    state.snapCooldown = 0.22;
+  },
+
+  _updateSmoothTurn(dt) {
+    const { state } = this._ctx;
+    let t = 0;
+    const axes = this._getGamepadAxes();
+    if (axes) t = axes[2] ?? 0;
+    else t = (state.touch.turnR ? 1 : 0) + (state.touch.turnL ? -1 : 0);
+
+    const dz = 0.15;
+    if (Math.abs(t) < dz) return;
+
+    this._ctx.player.rotation.y += (-t) * state.turnSpeed * dt;
+  },
+};

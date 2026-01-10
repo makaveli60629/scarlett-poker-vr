@@ -1,93 +1,94 @@
-// /js/main.js — Scarlett VR Poker (SAFE BOOT) v1.0 FULL
-// Goal: never hard-crash on a single module export mismatch (Quest/GitHub Pages caching/404 HTML).
+// /js/main.js — Scarlett VR Poker MAIN v3.3 (FULL)
+// - main.js owns renderer.setAnimationLoop
+// - World v12 dynamically loads optional modules (including SpawnPoints)
+// - main.js only optional-loads Controls (so a bad Controls file won't crash boot)
+// - Calls Controls.update(dt) every frame
+// - Auto-teleports to ctx.spawns.default or "lobby_spawn" once world is ready
 
-import { VRButton } from "./VRButton.js"; // keep your local VRButton
-import * as THREE_NS from "./three.js";   // your wrapper that exports THREE namespace (per your setup)
+import { VRButton } from "./VRButton.js";
+import * as THREE_NS from "./three.js";
 import { World } from "./world.js";
 
-const BOOT_VERSION = (typeof window !== "undefined" && window.__BOOT_V) ? window.__BOOT_V : Date.now();
+const BOOT_V = Date.now();
 
-function log(...args) { console.log(...args); }
-function warn(...args) { console.warn(...args); }
-function err(...args) { console.error(...args); }
+const log = (...a) => console.log(...a);
+const warn = (...a) => console.warn(...a);
+const err = (...a) => console.error(...a);
 
-async function safeImport(path, pickNamed = null) {
+async function safeImport(path) {
   try {
-    const mod = await import(path);
-    if (!pickNamed) return mod;
-    return mod[pickNamed] || null;
+    return await import(path);
   } catch (e) {
     err(`❌ import failed: ${path}`, e);
     return null;
   }
 }
 
-function makeRenderer() {
-  const renderer = new THREE_NS.WebGLRenderer({ antialias: true, alpha: false });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
+
+function makeRenderer(THREE) {
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(clamp(window.devicePixelRatio || 1, 1, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
+
+  // Prefer local-floor to avoid “giant height”
+  try { renderer.xr.setReferenceSpaceType?.("local-floor"); } catch {}
+
   document.body.appendChild(renderer.domElement);
   return renderer;
 }
 
-function makeScene() {
-  const scene = new THREE_NS.Scene();
-  scene.background = new THREE_NS.Color(0x05060a);
+function makeScene(THREE) {
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x05060a);
   return scene;
 }
 
-function makeCamera() {
-  const camera = new THREE_NS.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
-  camera.position.set(0, 1.6, 3);
-  return camera;
+function makeCamera(THREE) {
+  const cam = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
+  cam.position.set(0, 1.6, 3);
+  return cam;
 }
 
-function makePlayerRig() {
-  const rig = new THREE_NS.Group();
+function makePlayerRig(THREE) {
+  const rig = new THREE.Group();
   rig.name = "PLAYER_RIG";
   rig.position.set(0, 0, 0);
+  rig.rotation.set(0, 0, 0);
   return rig;
 }
 
-function onResize(renderer, camera) {
+function resize(renderer, camera) {
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
 }
 
 async function boot() {
-  // Diagnostics
-  log(`BOOT v=${BOOT_VERSION}`);
+  // --- Diagnostics ---
+  log(`BOOT v=${BOOT_V}`);
   log(`href=${location.href}`);
   log(`ua=${navigator.userAgent}`);
   log(`navigator.xr=${!!navigator.xr}`);
 
-  // Basic DOM safety
+  // Basic page safety
   document.body.style.margin = "0";
   document.body.style.overflow = "hidden";
   document.body.style.background = "#000";
 
   const THREE = THREE_NS;
-  const scene = makeScene();
-  const camera = makeCamera();
-  const renderer = makeRenderer();
-  const player = makePlayerRig();
+  const scene = makeScene(THREE);
+  const camera = makeCamera(THREE);
+  const renderer = makeRenderer(THREE);
+  const player = makePlayerRig(THREE);
 
   scene.add(player);
   player.add(camera);
 
-  window.addEventListener("resize", () => onResize(renderer, camera));
+  window.addEventListener("resize", () => resize(renderer, camera));
 
-  // VR Button
-  try {
-    document.body.appendChild(VRButton.createButton(renderer));
-    log("[main] VRButton appended ✅");
-  } catch (e) {
-    warn("[main] VRButton failed (non-fatal)", e);
-  }
-
-  // Your session init options (keep what you had)
+  // --- XR session init (yours) ---
   const sessionInit = {
     optionalFeatures: [
       "local-floor",
@@ -102,13 +103,24 @@ async function boot() {
     ],
     domOverlay: { root: document.body },
   };
-  // (World/main may read this)
   window.__SESSION_INIT__ = sessionInit;
 
-  // Controllers container (your world may fill this)
+  // --- VR Button ---
+  try {
+    const btn = (VRButton.createButton.length >= 2)
+      ? VRButton.createButton(renderer, sessionInit)
+      : VRButton.createButton(renderer);
+
+    document.body.appendChild(btn);
+    log("[main] VRButton appended ✅");
+  } catch (e) {
+    warn("[main] VRButton failed (non-fatal)", e);
+  }
+
+  // Controllers bag (your systems can populate later)
   const controllers = { left: null, right: null, hands: [] };
 
-  // Build a shared ctx object
+  // Shared ctx passed into World/Controls
   const ctx = {
     THREE,
     scene,
@@ -121,19 +133,13 @@ async function boot() {
     sessionInit,
   };
 
-  // ---- SAFE MODULE LOADS ----
-  // SpawnPoints: DO NOT hard-fail if export mismatch
-  const SpawnPoints = await safeImport("./spawn_points.js", "SpawnPoints");
-  if (SpawnPoints) log("[main] ✅ SpawnPoints imported");
-  else warn("[main] ⚠️ SpawnPoints missing (game will still run)");
-
-  // Controls / Teleport etc: load if available
-  const Controls = await safeImport("./controls.js", "Controls");
+  // --- Optional load Controls (safe) ---
+  const cMod = await safeImport("./controls.js");
+  const Controls = cMod?.Controls || null;
   if (Controls) log("[main] ✅ Controls imported");
-  else warn("[main] ⚠️ Controls missing");
+  else warn("[main] ⚠️ Controls missing (non-fatal)");
 
-  // Init World (your World does the heavy lifting)
-  // IMPORTANT: world.spawns created early so SpawnPoints.build can register
+  // --- Init World (World v12 will optional-load SpawnPoints internally) ---
   let world = null;
   try {
     world = await World.init(ctx);
@@ -143,42 +149,66 @@ async function boot() {
     log("[main] world init ✅");
   } catch (e) {
     err("[main] ❌ world init failed", e);
-    // Still keep rendering something so you can see errors in-VR
     world = { spawns: {} };
     ctx.world = world;
   }
 
-  // Build spawn pads AFTER world exists
-  try {
-    if (SpawnPoints?.build) {
-      SpawnPoints.build({ THREE, scene, world, log });
-    }
-  } catch (e) {
-    warn("[main] ⚠️ SpawnPoints.build failed (non-fatal)", e);
-  }
-
-  // Init controls if present
+  // --- Init Controls (no animation loop in Controls) ---
   try {
     if (Controls?.init) {
       Controls.init({ ...ctx, world });
-      log("[main] controllers ready ✅");
+      log("[main] controls init ✅");
     }
   } catch (e) {
     warn("[main] ⚠️ Controls.init failed (non-fatal)", e);
   }
 
-  // Render loop
+  // --- Auto-teleport once (safe) ---
+  // Prefer "default" alias created by SpawnPoints or world; else use lobby_spawn if present.
+  let didAutoTP = false;
+  const tryAutoTeleport = () => {
+    if (didAutoTP) return;
+    if (!Controls?.teleportToSpawn) return;
+
+    const sp = world?.spawns || {};
+    if (sp.default) {
+      Controls.teleportToSpawn("default");
+      didAutoTP = true;
+      return;
+    }
+    if (sp.lobby_spawn) {
+      Controls.teleportToSpawn("lobby_spawn");
+      didAutoTP = true;
+      return;
+    }
+  };
+
+  // try immediately, then retry a few frames in case spawns finish a tick later
+  tryAutoTeleport();
+  let retryFrames = 40;
+
+  // --- Main render loop ---
+  let last = performance.now();
   renderer.setAnimationLoop(() => {
+    const now = performance.now();
+    let dt = (now - last) / 1000;
+    last = now;
+
+    dt = clamp(dt, 0, 0.05);
+
     try {
-      // Optional: world.update()
-      if (world?.update) world.update();
+      Controls?.update?.(dt);
+      world?.update?.(dt);
+
+      if (!didAutoTP && retryFrames-- > 0) tryAutoTeleport();
+
       renderer.render(scene, camera);
     } catch (e) {
       err("[main] render loop error", e);
     }
   });
 
-  log(`[main] ready ✅ v=${BOOT_VERSION}`);
+  log(`[main] ready ✅ v=${BOOT_V}`);
 }
 
 boot().catch((e) => err("BOOT FATAL", e));

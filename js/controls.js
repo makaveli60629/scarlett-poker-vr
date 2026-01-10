@@ -1,7 +1,5 @@
 // /js/controls.js — Scarlett Controls v3.7 (FULL)
-// - Seated mode = no locomotion (look only)
-// - Scorpion seat safety nudge (prevents spawning inside table/collider push-to-center)
-// - Leave always works (B/Y/A/X/Menu-ish + L/Esc)
+// Seated mode: look only. Robust Leave. Seat safety nudge using sp.seatBack.
 
 export const Controls = {
   init(ctx) {
@@ -73,19 +71,15 @@ export const Controls = {
       log?.(`[controls] ✅ standing @ ${spawnKey}`);
     }
 
-    // ✅ seat safety nudge: move BACK along yaw so you cannot be in the felt/table collider
     function nudgeBackFromTable(spawnKey) {
       const sp = ctx.spawns?.get?.(spawnKey) || ctx.spawns?.map?.[spawnKey];
       if (!sp) return;
-
       const back = sp.seatBack ?? 0;
       if (!back) return;
 
-      // forward vector on XZ plane
       const fwdX = Math.sin(sp.yaw);
       const fwdZ = Math.cos(sp.yaw);
 
-      // move backwards (opposite of forward)
       player.position.x -= fwdX * back;
       player.position.z -= fwdZ * back;
 
@@ -99,25 +93,19 @@ export const Controls = {
       world.seated = true;
 
       resetVelocity();
-
-      // Seat at seated headset height
       teleportToSpawn(spawnKey, { standY: state.seatHeadY });
-
-      // Extra safety: nudge backward away from felt/table center
       nudgeBackFromTable(spawnKey);
 
       log?.(`[controls] 🪑 seated @ ${spawnKey} (headY=${state.seatHeadY.toFixed(2)})`);
     }
 
     function leaveSeat() {
-      // Always allow as panic exit
       state.seated = false;
       state.seatedAt = null;
       state.moveEnabled = true;
       world.seated = false;
 
       resetVelocity();
-
       window.dispatchEvent(new CustomEvent("scarlett-leave-table"));
       teleportToSpawn("lobby_spawn", { standY: 1.65 });
 
@@ -135,7 +123,7 @@ export const Controls = {
     function update(dt) {
       if (!state.enabled) return;
 
-      // Keyboard escape hatch (always)
+      // keyboard escape hatch
       if (state._keys.has("Escape") || state._keys.has("KeyL")) {
         state._keys.delete("Escape");
         state._keys.delete("KeyL");
@@ -144,24 +132,23 @@ export const Controls = {
 
       const gps = getXRGamepads();
 
-      // Leave mappings: try MANY indices (Quest can vary)
+      // robust leave mappings (Quest varies)
       if (gps.right) {
         const leaveNow =
           buttonPressed(gps.right, 5) || // B
-          buttonPressed(gps.right, 4) || // A (sometimes maps here)
-          buttonPressed(gps.right, 1) || // secondary
-          buttonPressed(gps.right, 3) || // menu-ish
-          buttonPressed(gps.right, 2);   // another common slot
+          buttonPressed(gps.right, 4) || // A (sometimes here)
+          buttonPressed(gps.right, 1) ||
+          buttonPressed(gps.right, 3) ||
+          buttonPressed(gps.right, 2);
         if (justPressed("right", "leave", leaveNow)) leaveSeat();
       }
-
       if (gps.left) {
         const leaveNow =
           buttonPressed(gps.left, 3) || // Y
           buttonPressed(gps.left, 4) || // X
-          buttonPressed(gps.left, 1) || // secondary
-          buttonPressed(gps.left, 2) || // menu-ish
-          buttonPressed(gps.left, 0);   // sometimes used as primary
+          buttonPressed(gps.left, 1) ||
+          buttonPressed(gps.left, 2) ||
+          buttonPressed(gps.left, 0);
         if (justPressed("left", "leave", leaveNow)) leaveSeat();
       }
 
@@ -192,7 +179,7 @@ export const Controls = {
     Controls.clearMotion = () => {};
     Controls.setEnabled = setEnabled;
 
-    log?.("[controls] init ✅ v3.7 (seat safety nudge + robust leave)");
+    log?.("[controls] init ✅ v3.7 (seat nudge + robust leave)");
     return Controls;
   },
 

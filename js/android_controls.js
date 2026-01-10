@@ -15,12 +15,12 @@ export const AndroidControls = {
   pitch: 0,
   speed: 2.0,
 
-  // ✅ fixed eye height for mobile preview
+  // ✅ mobile preview "standing" eye height
   EYE_Y: 1.62,
 
   ui: null,
 
-  init({ renderer, rig, camera, onTeleport, getBounds, getFloorY }) {
+  init({ rig, camera, onTeleport, getBounds, getFloorY }) {
     this.rig = rig;
     this.camera = camera;
     this.onTeleport = onTeleport;
@@ -32,13 +32,14 @@ export const AndroidControls = {
 
     if (!this.enabled) return;
 
-    // ✅ FORCE mobile preview posture: rig at floor, camera at eye height
+    // force stable starting posture
     const floor = this.getFloorY?.() ?? 0;
     this.rig.position.y = floor;
     this.camera.position.y = this.EYE_Y;
 
     this._buildUI();
     this._bindTouch();
+    console.log("[android] init ✅");
   },
 
   _buildUI() {
@@ -89,13 +90,9 @@ export const AndroidControls = {
       this.camera.getWorldDirection(fwd);
       fwd.y = 0; fwd.normalize();
 
-      const dest = this.rig.position.clone().addScaledVector(fwd, 3.0);
+      const dest = this.rig.position.clone().addScaledVector(fwd, 2.8);
       dest.y = this.getFloorY?.() ?? 0;
       this.onTeleport?.(dest);
-
-      // ✅ keep the camera at eye height after teleport
-      this.rig.position.y = dest.y;
-      this.camera.position.y = this.EYE_Y;
     });
 
     ui.appendChild(left);
@@ -168,10 +165,22 @@ export const AndroidControls = {
     window.addEventListener("touchcancel", onUp, { passive: false });
   },
 
+  teleportTo(dest) {
+    if (!this.enabled) return;
+    const floor = this.getFloorY?.() ?? 0;
+
+    this.rig.position.x = dest.x;
+    this.rig.position.z = dest.z;
+    this.rig.position.y = floor;
+
+    // ✅ camera eye height in mobile preview
+    this.camera.position.y = this.EYE_Y;
+  },
+
   update(dt) {
     if (!this.enabled) return;
 
-    // ✅ HARD CLAMP HEIGHT every frame (this fixes your “very very high” problem)
+    // ✅ HARD CLAMP HEIGHT every frame (fixes “very very high”)
     const floor = this.getFloorY?.() ?? 0;
     this.rig.position.y = floor;
     this.camera.position.y = this.EYE_Y;
@@ -188,7 +197,7 @@ export const AndroidControls = {
       this.camera.rotation.x = this.pitch;
     }
 
-    // Move (right pad)
+    // Move
     if (this.move.active) {
       const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.rig.quaternion);
       fwd.y = 0; fwd.normalize();

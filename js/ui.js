@@ -1,9 +1,8 @@
-// /js/ui.js — UI v5 (FULL)
-// Fixes:
-// ✅ Buttons now DISPATCH room events that RoomBridge listens to
-// ✅ Recenter works for VR + Mobile
-// ✅ Teleport toggle sends a spawn teleport
-// ✅ Works on phone and Quest without crashing
+// /js/ui.js — UI v5.2 (FULL FIXED)
+// ✅ Buttons call ctx.rooms.setRoom(name) when available (instant + reliable)
+// ✅ Falls back to dispatching "scarlett-room" if rooms not ready yet
+// ✅ Teleport uses Controls.teleportToSpawn (if available)
+// ✅ Reset is safe (no missing functions)
 
 export const UI = {
   init(ctx) {
@@ -44,40 +43,53 @@ export const UI = {
       b.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        try { onClick?.(); } catch {}
+        try { onClick?.(); } catch (err) { console.warn("[ui] click error", err); }
       });
       return b;
     };
 
-    const dispatchRoom = (name) => {
+    // ✅ Reliable room setter: direct call > event fallback
+    const setRoom = (name) => {
+      if (ctx.rooms?.setRoom) {
+        ctx.rooms.setRoom(name);
+        log(`[ui] room -> ${name} (direct)`);
+        return;
+      }
       window.dispatchEvent(new CustomEvent("scarlett-room", { detail: { name } }));
-      log(`[ui] room -> ${name}`);
+      log(`[ui] room -> ${name} (event fallback)`);
     };
 
-    const dispatchEnterVR = () => {
+    const enterVR = () => {
       window.dispatchEvent(new Event("scarlett-enter-vr"));
       log("[ui] enter vr -> event dispatched");
     };
 
-    // Top buttons (match what you showed)
-    panel.appendChild(makeBtn("Enter VR", dispatchEnterVR, { accent: true }));
+    const teleportLobby = () => {
+      // Best: use Controls teleport if present
+      if (ctx.Controls?.teleportToSpawn) {
+        ctx.Controls.teleportToSpawn("lobby_spawn", { standY: 1.65 });
+        log("[ui] teleport -> lobby_spawn (Controls)");
+        return;
+      }
+      // fallback: room
+      setRoom("lobby");
+    };
 
-    panel.appendChild(makeBtn("Recenter", () => {
-      // VR: reset reference space by re-applying lobby spawn
-      // Mobile: also re-applies lobby spawn (RoomBridge handles)
-      dispatchRoom("lobby");
-    }));
+    const recenter = () => {
+      // Recenter = just force lobby spawn again (stable)
+      if (ctx.Controls?.forceStanding) {
+        ctx.Controls.forceStanding("lobby_spawn");
+        log("[ui] recenter -> Controls.forceStanding");
+        return;
+      }
+      setRoom("lobby");
+    };
 
-    panel.appendChild(makeBtn("Teleport", () => {
-      // Quick teleport forward (mobile) OR to lobby_spawn (safe)
-      if (ctx.teleport) ctx.teleport("lobby_spawn");
-      else dispatchRoom("lobby");
-    }));
-
-    panel.appendChild(makeBtn("Move", () => {
-      // no-op (AndroidControls always enabled on phone)
-      log("[ui] move: AndroidControls active on phone");
-    }));
+    // Row 1
+    panel.appendChild(makeBtn("Enter VR", enterVR, { accent: true }));
+    panel.appendChild(makeBtn("Recenter", recenter));
+    panel.appendChild(makeBtn("Teleport", teleportLobby));
+    panel.appendChild(makeBtn("Move", () => log("[ui] move: handled by Controls/AndroidControls if present")));
 
     // Row 2
     panel.appendChild(makeBtn("Snap", () => {
@@ -91,20 +103,13 @@ export const UI = {
       }
     }));
 
-    panel.appendChild(makeBtn("Hands", () => {
-      // placeholder: keep for future hand toggle
-      log("[ui] hands toggle (placeholder)");
-    }));
-
-    panel.appendChild(makeBtn("Lobby", () => dispatchRoom("lobby")));
-    panel.appendChild(makeBtn("Scorpion", () => dispatchRoom("scorpion")));
+    panel.appendChild(makeBtn("Lobby", () => setRoom("lobby")));
+    panel.appendChild(makeBtn("Scorpion", () => setRoom("scorpion"), { accent: true }));
+    panel.appendChild(makeBtn("Store", () => setRoom("store")));
+    panel.appendChild(makeBtn("Spectate", () => setRoom("spectator")));
 
     // Row 3
-    panel.appendChild(makeBtn("Spectate", () => dispatchRoom("spectator")));
-    panel.appendChild(makeBtn("Store", () => dispatchRoom("store")));
-
     panel.appendChild(makeBtn("Diagnostics", () => {
-      // toggle a small diag overlay
       window.dispatchEvent(new Event("scarlett-diag"));
       log("[ui] diagnostics event");
     }));
@@ -114,25 +119,18 @@ export const UI = {
       log("[ui] force-log event");
     }));
 
-    // Row 4
     panel.appendChild(makeBtn("Help", () => alert(
-      "Mobile:\n- Use pads to look/move\n- Teleport button jumps forward\n\nRooms:\n- Lobby / Scorpion / Store / Spectate"
+      "Rooms:\n- Lobby / Scorpion / Store / Spectate\n\nIf you get stuck:\n- Press Recenter\n- Then Lobby\n- Then Scorpion"
     )));
 
-    panel.appendChild(makeBtn("Log", () => {
-      window.dispatchEvent(new Event("scarlett-force-log"));
-    }));
-
     panel.appendChild(makeBtn("Reset", () => {
-      // Hard reset to lobby + clamp height
-      dispatchRoom("lobby");
-      if (ctx.AndroidControls?.enabled) {
-        ctx.AndroidControls.teleportTo({ x: 0, y: 0, z: 0 });
-      }
-      log("[ui] reset -> lobby");
+      // Hard reset to lobby + standing height
+      if (ctx.Controls?.forceStanding) ctx.Controls.forceStanding("lobby_spawn");
+      else setRoom("lobby");
+      log("[ui] reset -> lobby (standing)");
     }, { accent: true }));
 
-    log("[ui] init ✅ v5");
+    log("[ui] init ✅ v5.2");
     return panel;
   },
 };

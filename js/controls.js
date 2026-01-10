@@ -1,15 +1,14 @@
-// /js/controls.js — Scarlett Controls v3.6 (FULL)
-// - Seat uses seated headset height (no negative-Y hacks)
-// - Leave works across multiple Quest button mappings
-// - Leave also works via keyboard (L / Esc)
-// - Still: seated = no locomotion, only look
+// /js/controls.js — Scarlett Controls v3.7 (FULL)
+// - Seated mode = no locomotion (look only)
+// - Scorpion seat safety nudge (prevents spawning inside table/collider push-to-center)
+// - Leave always works (B/Y/A/X/Menu-ish + L/Esc)
 
 export const Controls = {
   init(ctx) {
-    const { THREE, renderer, camera, player, world, log } = ctx;
+    const { THREE, renderer, player, world, log } = ctx;
 
     const state = {
-      ctx, THREE, renderer, camera, player, world,
+      ctx, THREE, renderer, player, world,
       seated: false,
       seatedAt: null,
       moveEnabled: true,
@@ -19,7 +18,7 @@ export const Controls = {
       _keys: new Set(),
       _lastSnap: 0,
       _gpPrev: { left: {}, right: {} },
-      seatHeadY: 1.05, // ✅ seated headset height feel
+      seatHeadY: 1.05,
     };
 
     world.seated = !!world.seated;
@@ -51,42 +50,17 @@ export const Controls = {
       return !!isDownNow && !prev;
     }
 
-    function teleportToSpawn(key, opts = {}) {
-      if (ctx.spawns?.apply) return ctx.spawns.apply(key, player, opts);
-      const sp = world?.spawns?.[key];
-      if (!sp) return false;
-      const pos = sp.pos || sp.position || sp;
-      const yaw = sp.yaw || 0;
-      const standY = opts.standY ?? 1.65;
-      player.position.set(pos.x ?? 0, (pos.y ?? 0) + standY, pos.z ?? 0);
-      player.rotation.set(0, yaw, 0);
-      return true;
-    }
-
     function resetVelocity() {
       if (player?.userData?.velocity?.set) player.userData.velocity.set(0, 0, 0);
     }
 
     function setEnabled(v) { state.enabled = !!v; }
 
-    // PUBLIC: sit
-    function sitAt(spawnKey = "table_seat_1") {
-      state.seated = true;
-      state.seatedAt = spawnKey;
-      state.moveEnabled = false;
-      world.seated = true;
-
-      resetVelocity();
-
-      // ✅ seated headset height
-      if (!teleportToSpawn(spawnKey, { standY: state.seatHeadY })) {
-        teleportToSpawn("lobby_spawn", { standY: 1.65 });
-      }
-
-      log?.(`[controls] 🪑 seated @ ${spawnKey} (headY=${state.seatHeadY.toFixed(2)})`);
+    function teleportToSpawn(key, opts = {}) {
+      if (ctx.spawns?.apply) return ctx.spawns.apply(key, player, opts);
+      return false;
     }
 
-    // PUBLIC: stand
     function forceStanding(spawnKey = "lobby_spawn") {
       state.seated = false;
       state.seatedAt = null;
@@ -99,8 +73,44 @@ export const Controls = {
       log?.(`[controls] ✅ standing @ ${spawnKey}`);
     }
 
-    // PUBLIC: leave -> lobby
+    // ✅ seat safety nudge: move BACK along yaw so you cannot be in the felt/table collider
+    function nudgeBackFromTable(spawnKey) {
+      const sp = ctx.spawns?.get?.(spawnKey) || ctx.spawns?.map?.[spawnKey];
+      if (!sp) return;
+
+      const back = sp.seatBack ?? 0;
+      if (!back) return;
+
+      // forward vector on XZ plane
+      const fwdX = Math.sin(sp.yaw);
+      const fwdZ = Math.cos(sp.yaw);
+
+      // move backwards (opposite of forward)
+      player.position.x -= fwdX * back;
+      player.position.z -= fwdZ * back;
+
+      log?.(`[controls] 🧷 seat nudge back=${back.toFixed(2)} (${spawnKey})`);
+    }
+
+    function sitAt(spawnKey = "table_seat_1") {
+      state.seated = true;
+      state.seatedAt = spawnKey;
+      state.moveEnabled = false;
+      world.seated = true;
+
+      resetVelocity();
+
+      // Seat at seated headset height
+      teleportToSpawn(spawnKey, { standY: state.seatHeadY });
+
+      // Extra safety: nudge backward away from felt/table center
+      nudgeBackFromTable(spawnKey);
+
+      log?.(`[controls] 🪑 seated @ ${spawnKey} (headY=${state.seatHeadY.toFixed(2)})`);
+    }
+
     function leaveSeat() {
+      // Always allow as panic exit
       state.seated = false;
       state.seatedAt = null;
       state.moveEnabled = true;
@@ -108,9 +118,7 @@ export const Controls = {
 
       resetVelocity();
 
-      // Prefer RoomManager route
       window.dispatchEvent(new CustomEvent("scarlett-leave-table"));
-      // Hard fallback
       teleportToSpawn("lobby_spawn", { standY: 1.65 });
 
       log?.("[controls] ✅ leave -> lobby");
@@ -127,9 +135,8 @@ export const Controls = {
     function update(dt) {
       if (!state.enabled) return;
 
-      // Keyboard escape hatch
+      // Keyboard escape hatch (always)
       if (state._keys.has("Escape") || state._keys.has("KeyL")) {
-        // one-shot
         state._keys.delete("Escape");
         state._keys.delete("KeyL");
         leaveSeat();
@@ -137,24 +144,24 @@ export const Controls = {
 
       const gps = getXRGamepads();
 
-      // ✅ Leave mappings: try MANY common indices (Quest varies)
-      // Right: B (5) / A (4) / secondary (1) / menu-ish (3)
+      // Leave mappings: try MANY indices (Quest can vary)
       if (gps.right) {
         const leaveNow =
           buttonPressed(gps.right, 5) || // B
-          buttonPressed(gps.right, 4) || // A (sometimes right primary)
+          buttonPressed(gps.right, 4) || // A (sometimes maps here)
           buttonPressed(gps.right, 1) || // secondary
-          buttonPressed(gps.right, 3);   // menu-ish
+          buttonPressed(gps.right, 3) || // menu-ish
+          buttonPressed(gps.right, 2);   // another common slot
         if (justPressed("right", "leave", leaveNow)) leaveSeat();
       }
 
-      // Left: Y (3) / X (4) / secondary (1) / menu-ish (2)
       if (gps.left) {
         const leaveNow =
           buttonPressed(gps.left, 3) || // Y
           buttonPressed(gps.left, 4) || // X
           buttonPressed(gps.left, 1) || // secondary
-          buttonPressed(gps.left, 2);   // menu-ish
+          buttonPressed(gps.left, 2) || // menu-ish
+          buttonPressed(gps.left, 0);   // sometimes used as primary
         if (justPressed("left", "leave", leaveNow)) leaveSeat();
       }
 
@@ -185,7 +192,7 @@ export const Controls = {
     Controls.clearMotion = () => {};
     Controls.setEnabled = setEnabled;
 
-    log?.("[controls] init ✅ v3.6 (seat height + robust leave)");
+    log?.("[controls] init ✅ v3.7 (seat safety nudge + robust leave)");
     return Controls;
   },
 

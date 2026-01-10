@@ -1,26 +1,21 @@
-// /js/main.js — Scarlett VR Poker MAIN v3.8 (FULL)
-// Built to match your architecture where World.init() RETURNS the runtime ctx.
-//
-// Fixes:
-// ✅ Uses returned ctx as the source of truth (World creates ctx internally)
-// ✅ Boots lobby hard (prevents starting in Scorpion)
-// ✅ Calls AndroidControls.update(dt) every frame (fixes "too high" on mobile)
-// ✅ RoomBridge listens to UI "scarlett-room" events and teleports correctly
-// ✅ Keeps your Quest-safe XR requestSession tier fallback + single-flight lock
-// ✅ main.js owns renderer.setAnimationLoop
+// /js/main.js — Scarlett VR Poker MAIN v3.7 (FULL)
+// ✅ Adds RoomBridge listener for "scarlett-room" so UI always works
+// ✅ Publishes ctx on window.__SCARLETT_CTX for debugging
+// ✅ Keeps your XR tiered requestSession logic
 
 import { VRButton } from "./VRButton.js";
 import * as THREE_NS from "./three.js";
 import { World } from "./world.js";
 
-import { AndroidControls } from "./android_controls.js";
-import { RoomBridge } from "./room_bridge.js";
-
 const BOOT_V = Date.now();
-
 const log = (...a) => console.log(...a);
 const warn = (...a) => console.warn(...a);
 const err = (...a) => console.error(...a);
+
+async function safeImport(path) {
+  try { return await import(path); }
+  catch (e) { err(`❌ import failed: ${path}`, e); return null; }
+}
 
 function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
 
@@ -68,31 +63,21 @@ function resize(renderer, camera) {
   camera.updateProjectionMatrix();
 }
 
-// ---- XR session init: SAFE + fallback tiers ----
-
 function sanitizeSessionInit(init) {
   const out = { ...(init || {}) };
-
   if (Array.isArray(out.optionalFeatures)) {
     out.optionalFeatures = out.optionalFeatures
       .filter((v) => typeof v === "string")
-      // reference spaces are NOT features
       .filter((v) => v !== "local" && v !== "viewer");
-  } else {
-    out.optionalFeatures = [];
-  }
-
-  // Strip fragile blocks that cause NotSupportedError on Quest/Android
+  } else out.optionalFeatures = [];
   delete out.domOverlay;
   delete out.depthSensing;
   delete out.requiredFeatures;
-
   return out;
 }
 
 function makeSessionInitTiers(baseInit) {
   const base = sanitizeSessionInit(baseInit);
-
   const tierA = {
     ...base,
     optionalFeatures: Array.from(new Set([
@@ -104,17 +89,14 @@ function makeSessionInitTiers(baseInit) {
       "hit-test",
     ])),
   };
-
   const tierB = { optionalFeatures: ["local-floor", "bounded-floor"] };
   const tierC = { optionalFeatures: ["local-floor"] };
   const tierD = {};
-
   return [tierA, tierB, tierC, tierD];
 }
 
 async function requestImmersiveVRWithFallback({ renderer, tiers }) {
   if (!navigator.xr) throw new Error("WebXR not available (navigator.xr missing)");
-
   let lastErr = null;
 
   for (const init of tiers) {
@@ -127,12 +109,9 @@ async function requestImmersiveVRWithFallback({ renderer, tiers }) {
     } catch (e) {
       lastErr = e;
       warn(`[XR] requestSession failed (${e?.name || "Error"}): ${e?.message || e}`);
-
-      // Only fall back on NotSupportedError
       if (e?.name && e.name !== "NotSupportedError") throw e;
     }
   }
-
   throw lastErr || new Error("requestSession failed (unknown)");
 }
 
@@ -157,10 +136,11 @@ async function boot() {
 
   window.addEventListener("resize", () => resize(renderer, camera));
 
-  // Canonical session init if present (sanitized)
   const rawSessionInit =
     window.__XR_SESSION_INIT ||
-    window.__SESSION_INIT__ || { optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"] };
+    window.__SESSION_INIT__ || {
+      optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"],
+    };
 
   const sessionInit = sanitizeSessionInit(rawSessionInit);
   const sessionTiers = makeSessionInitTiers(sessionInit);
@@ -168,10 +148,7 @@ async function boot() {
   // VRButton
   let vrDomButton = null;
   try {
-    // Create VRButton without passing init (we handle requestSession ourselves)
     vrDomButton = VRButton.createButton(renderer);
-    vrDomButton?.setAttribute?.("data-scarlett-vrbutton", "1");
-
     if (vrDomButton && !vrDomButton.isConnected) document.body.appendChild(vrDomButton);
     log("[main] VRButton ready ✅");
   } catch (e) {
@@ -180,11 +157,10 @@ async function boot() {
 
   async function startXRFromUI() {
     if (!navigator.xr) return warn("[XR] navigator.xr missing");
-    if (__XR_SESSION_ACTIVE) return warn("[XR] already active; ignoring start request");
+    if (__XR_SESSION_ACTIVE) return warn("[XR] already active; ignoring");
     if (__XR_SESSION_STARTING) return warn("[XR] start already in progress; ignoring");
 
     __XR_SESSION_STARTING = true;
-
     try {
       const session = await requestImmersiveVRWithFallback({ renderer, tiers: sessionTiers });
 
@@ -205,7 +181,6 @@ async function boot() {
     }
   }
 
-  // Override VRButton click so internal VRButton handler can't double-start
   if (vrDomButton) {
     vrDomButton.addEventListener("click", (ev) => {
       ev.preventDefault();
@@ -214,79 +189,86 @@ async function boot() {
     }, { capture: true });
   }
 
-  // HUD enter event -> call starter directly
   window.addEventListener("scarlett-enter-vr", () => {
     startXRFromUI();
     log("[main] scarlett-enter-vr -> startXRFromUI ✅");
   });
 
-  // ---- IMPORTANT: World.init RETURNS ctx. Use that returned ctx everywhere. ----
-  const baseCtx = {
+  const controllers = { left: null, right: null, hands: [] };
+
+  const ctx = {
     THREE,
     scene,
     renderer,
     camera,
     player,
-    controllers: { left: null, right: null, hands: [] },
+    controllers,
     log,
-    warn,
-    err,
     BUILD: "gh-pages",
     sessionInit,
   };
 
-  let ctx = null;
+  // expose for debugging
+  window.__SCARLETT_CTX = ctx;
+
+  // Controls
+  const cMod = await safeImport("./controls.js");
+  const Controls = cMod?.Controls || null;
+  if (Controls) log("[main] ✅ Controls imported");
+  else warn("[main] ⚠️ Controls missing (non-fatal)");
+
+  // World
+  let world = null;
   try {
-    ctx = await World.init(baseCtx);
-    log("[main] world init ✅ (using returned ctx)");
+    world = await World.init(ctx);
+    world ||= {};
+    world.spawns ||= {};
+    ctx.world = world;
+    log("[main] world init ✅");
   } catch (e) {
     err("[main] ❌ world init failed", e);
-    ctx = baseCtx;
-    ctx.world = ctx;
+    world = { spawns: {} };
+    ctx.world = world;
   }
 
-  // ✅ AndroidControls (mobile movement + look + fixes height perception)
+  // init Controls
   try {
-    AndroidControls.init({
-      renderer: ctx.renderer,
-      rig: ctx.player,
-      camera: ctx.camera,
-      onTeleport: (dest) => {
-        ctx.player.position.x = dest.x;
-        ctx.player.position.z = dest.z;
-      },
-      getBounds: () => ctx.bounds || ctx.world?.bounds || null,
-      getFloorY: () => 0,
-    });
-
-    // add a direct teleport helper for convenience
-    AndroidControls.teleportTo = (p) => {
-      ctx.player.position.x = p.x ?? ctx.player.position.x;
-      ctx.player.position.z = p.z ?? ctx.player.position.z;
-    };
-
-    ctx.AndroidControls = AndroidControls;
-    log("[main] AndroidControls wired ✅");
+    if (Controls?.init) {
+      Controls.init({ ...ctx, world });
+      ctx.Controls = Controls;
+      log("[main] controls init ✅");
+    }
   } catch (e) {
-    warn("[main] AndroidControls init failed (non-fatal)", e);
+    warn("[main] ⚠️ Controls.init failed (non-fatal)", e);
   }
 
-  // ✅ Room bridge (event-driven room switching)
-  try {
-    RoomBridge.init(ctx, { AndroidControls });
-    log("[main] RoomBridge wired ✅");
-  } catch (e) {
-    warn("[main] RoomBridge init failed (non-fatal)", e);
-  }
+  // ✅ RoomBridge: always handle UI room events
+  window.addEventListener("scarlett-room", (e) => {
+    const name = e?.detail?.name;
+    if (!name) return;
+    if (ctx.rooms?.setRoom) ctx.rooms.setRoom(name);
+    else if (ctx.world?.rooms?.setRoom) ctx.world.rooms.setRoom(name);
+    else console.warn("[RoomBridge] rooms not ready yet:", name);
+  });
 
-  // ✅ HARD GUARANTEE: START LOBBY + HIDE SCORPION
-  try {
-    setTimeout(() => ctx.setRoom?.("lobby"), 0);
-    setTimeout(() => ctx.setRoom?.("lobby"), 400);
-    setTimeout(() => ctx.setRoom?.("lobby"), 900);
-  } catch {}
+  // Auto teleport to lobby once
+  let didAutoTP = false;
+  const tryAutoTeleport = () => {
+    if (didAutoTP) return;
+    if (Controls?.forceStanding) {
+      Controls.forceStanding("lobby_spawn");
+      didAutoTP = true;
+      return;
+    }
+    if (Controls?.teleportToSpawn && (world?.spawns?.lobby_spawn || world?.spawns?.default)) {
+      Controls.teleportToSpawn(world?.spawns?.default ? "default" : "lobby_spawn", { standY: 1.65 });
+      didAutoTP = true;
+    }
+  };
+  tryAutoTeleport();
+  let retryFrames = 60;
 
-  // Render loop
+  // Loop
   let last = performance.now();
   renderer.setAnimationLoop(() => {
     const now = performance.now();
@@ -295,16 +277,10 @@ async function boot() {
     dt = clamp(dt, 0, 0.05);
 
     try {
-      // If your VR controls exist, they run here
-      ctx.Controls?.update?.(dt);
-      ctx.controls?.update?.(dt);
+      Controls?.update?.(dt);
+      world?.update?.(dt);
 
-      // ✅ Mobile controls must update EVERY frame
-      ctx.AndroidControls?.update?.(dt);
-
-      // World update
-      ctx.world?.update?.(dt);
-      ctx.update?.(dt);
+      if (!didAutoTP && retryFrames-- > 0) tryAutoTeleport();
 
       renderer.render(scene, camera);
     } catch (e) {

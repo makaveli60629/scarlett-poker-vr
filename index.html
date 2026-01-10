@@ -101,8 +101,8 @@
 
     #logwrap{
       position:fixed; left:12px; bottom:92px;
-      width:min(720px, calc(100vw - 24px));
-      max-height:50vh; z-index:12;
+      width:min(780px, calc(100vw - 24px));
+      max-height:52vh; z-index:12;
       pointer-events:auto;
       border-radius:18px;
       background:rgba(0,0,0,.52);
@@ -124,7 +124,7 @@
       font-size:11px; line-height:1.35;
       color:rgba(232,236,255,.92);
       overflow:auto;
-      max-height:calc(50vh - 44px);
+      max-height:calc(52vh - 44px);
       white-space:pre-wrap; word-break:break-word;
     }
 
@@ -137,7 +137,7 @@
       align-items:center; justify-content:center; padding:16px;
     }
     #helpCard{
-      width:min(720px, 100%);
+      width:min(760px, 100%);
       border-radius:22px;
       background:rgba(10,12,20,.92);
       border:1px solid rgba(255,255,255,.10);
@@ -160,7 +160,7 @@
     }
   </style>
 
-  <!-- Optional importmap (safe to keep; /js/three.js wrapper re-exports from here) -->
+  <!-- Importmap: /js/three.js wrapper re-exports from this "three" mapping -->
   <script type="importmap">
   {
     "imports": {
@@ -244,7 +244,7 @@
         <div class="row"><b>Quest:</b> Left stick move • Right stick turn • Toggle Snap for snap/smooth.</div>
         <div class="row"><b>Android:</b> Use dock arrows • Tap Teleport to toggle.</div>
         <div class="row"><b>Rooms:</b> Lobby / Scorpion / Spectate / Store buttons send events to room_manager.</div>
-        <div class="row"><b>Diagnostics:</b> Checks 404 + flags HTML served as JS + prints file head.</div>
+        <div class="row"><b>Diagnostics:</b> Checks key files for 404 + shows content-type and file head.</div>
         <div class="row"><b>Reset:</b> Clears saved flags + reloads.</div>
       </div>
       <div class="actions">
@@ -255,26 +255,50 @@
 
   <script type="module">
     // =========================
-    // Scarlett FULL Index Loader
+    // Scarlett FULL Index vALL
     // =========================
 
     const v = Date.now().toString();
     window.__BUILD_V = v;
 
-    // Canonical XR init for main.js / VRButton.js
+    // "All options" WebXR session init (browsers ignore unsupported features)
+    // Note: Main/VRButton should read this.
     window.__XR_SESSION_INIT = {
       optionalFeatures: [
+        // Reference spaces
         "local-floor",
         "bounded-floor",
+        "local",
+        "viewer",
+
+        // Input
         "hand-tracking",
+
+        // Rendering / composition
         "layers",
         "dom-overlay",
+        "depth-sensing",
+
+        // Anchors + hit testing
         "anchors",
+        "hit-test",
+
+        // Scene understanding (where supported)
         "plane-detection",
         "mesh-detection",
-        "hit-test"
+
+        // WebXR features that may exist on some runtimes
+        "light-estimation",
+        "secondary-views",
+        "unbounded"
       ],
-      domOverlay: { root: document.body }
+      // domOverlay only works if supported; safe otherwise
+      domOverlay: { root: document.body },
+      // depthSensing (safe to include; ignored if unsupported)
+      depthSensing: {
+        usagePreference: ["cpu-optimized", "gpu-optimized"],
+        dataFormatPreference: ["luminance-alpha", "float32"]
+      }
     };
 
     const statusText = document.getElementById("statusText");
@@ -286,23 +310,20 @@
     const logWrap = document.getElementById("logwrap");
     const openLog = () => (logWrap.style.display = "block");
     const toggleLog = () => (logWrap.style.display = (logWrap.style.display === "block" ? "none" : "block"));
-    const appendLog = (m) => {
+    function appendLog(m){
       if (!logEl) return;
       logEl.textContent += "\n" + String(m);
       logEl.scrollTop = logEl.scrollHeight;
-    };
+    }
 
-    // allow game code to emit into HUD log
     window.addEventListener("scarlett-log", (e) => {
       try { appendLog(String(e?.detail ?? "")); } catch {}
     });
 
-    // hook console -> HUD log
     (function hookConsole(){
       const origLog = console.log.bind(console);
       const origWarn = console.warn.bind(console);
       const origErr = console.error.bind(console);
-
       console.log = (...a)=>{ origLog(...a); try{ appendLog(a.map(String).join(" ")); }catch{} };
       console.warn = (...a)=>{ origWarn(...a); try{ openLog(); appendLog("⚠️ "+a.map(String).join(" ")); }catch{} };
       console.error = (...a)=>{ origErr(...a); try{ openLog(); appendLog("❌ "+a.map(String).join(" ")); }catch{} };
@@ -317,7 +338,7 @@
     appendLog("navigator.xr=" + (!!navigator.xr));
     appendLog("[index] sessionInit=" + JSON.stringify(window.__XR_SESSION_INIT));
 
-    // ---- buttons ----
+    // ---- UI elements ----
     const btnEnter = document.getElementById("btnEnter");
     const btnRecenter = document.getElementById("btnRecenter");
     const btnTeleport = document.getElementById("btnTeleport");
@@ -393,25 +414,22 @@
 
     btnRecenter.addEventListener("click", ()=>{ appendLog("[hud] recenter"); window.dispatchEvent(new Event("scarlett-recenter")); });
 
-    // ✅ FULL FIX: HUD Enter VR always clicks real VRButton if available
-    btnEnter.addEventListener("click", ()=>{
-      appendLog("[hud] enter vr");
-      const real =
-        document.querySelector("#vrButtonSlot button[data-scarlett-vrbutton]") ||
-        document.querySelector("button[data-scarlett-vrbutton]") ||
-        document.querySelector("#vrButtonSlot button") ||
-        document.querySelector("button");
-
-      if (real && (real.textContent || "").toLowerCase().includes("vr")) {
-        real.click();
-        appendLog("[hud] clicked VRButton ✅");
-        return;
-      }
+    // ✅ FULL, SAFE ENTER VR:
+    // - Dispatch event that main.js listens to (best path; real user gesture)
+    // - Also try clicking the real VRButton if it exists (no guessing / no recursion)
+    btnEnter.addEventListener("click", () => {
+      appendLog("[hud] enter vr -> dispatch scarlett-enter-vr");
       window.dispatchEvent(new Event("scarlett-enter-vr"));
-      appendLog("[hud] dispatched scarlett-enter-vr");
+
+      // optional: click actual VRButton created by VRButton.js (if present)
+      const real = document.querySelector("#vrButtonSlot button[data-scarlett-vrbutton]");
+      if (real && real !== btnEnter) {
+        real.click();
+        appendLog("[hud] also clicked real VRButton ✅");
+      }
     });
 
-    // rooms
+    // rooms / actions
     btnLobby?.addEventListener("click", ()=>{ appendLog("[hud] room=lobby"); emit("scarlett-room", "lobby"); });
     btnScorpion?.addEventListener("click", ()=>{ appendLog("[hud] room=scorpion"); emit("scarlett-room", "scorpion"); });
     btnSpectate?.addEventListener("click", ()=>{ appendLog("[hud] room=spectate"); emit("scarlett-room", "spectator"); });
@@ -465,7 +483,7 @@
       const r = await fetch(url, { cache: "no-store" });
       const ct = (r.headers.get("content-type") || "?").toLowerCase();
       const txt = await r.text();
-      const head = (txt || "").slice(0, 90).replace(/\s+/g, " ");
+      const head = (txt || "").slice(0, 100).replace(/\s+/g, " ");
       const looksHtml = head.toLowerCase().includes("<!doctype") || head.toLowerCase().includes("<html");
       return { r, ct, head, looksHtml };
     }
@@ -507,7 +525,6 @@
             !r.ok ? " ❌" :
             looksHtml ? " 🚨LOOKS-LIKE-HTML" :
             " ✅";
-
           appendLog(`[diag] ${f} -> ${r.status} (type=${ct}) HEAD="${head}"${note}`);
           if(!r.ok || looksHtml) issues++;
         }catch(e){

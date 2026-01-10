@@ -1,9 +1,16 @@
-// /js/main.js — Scarlett Hybrid 2.2 (FULL, PERMANENT)
-// ✅ Spawn on pad + face center
-// ✅ Laser + ring ALWAYS visible in VR (camera fallback if hands not ready)
-// ✅ Pinch teleport (right hand) + GestureEngine update loop wired
-// ✅ VRButton reliable
-// ✅ Desktop/Android fallback move (non-VR)
+// /js/main.js — Scarlett Hybrid 2.3 (FULL) — Chips + Betting + Hands-only Grab
+// ✅ Keeps: world 4-corner cubes + spawn pad + face center
+// ✅ Keeps: GestureEngine + VR teleport laser/ring (camera-based, reliable)
+// ✅ Adds: Grab system (pinch to grab nearest chip), release to drop
+// ✅ Adds: Chip rack spawner near SpawnPad + near Table
+// ✅ Adds: BettingModule bet zone + whale alert
+//
+// Required files:
+//   /js/world.js
+//   /js/gesture_engine.js
+//   /js/chip_physicality.js
+//   /js/betting_module.js
+//   /js/VRButton.js (you already have)
 
 (async function boot() {
   if (window.__SCARLETT_BOOTED__) throw new Error("Double boot prevented");
@@ -14,10 +21,6 @@
     logBox: document.getElementById("scarlettLog"),
     capXR: document.getElementById("capXR"),
     capImm: document.getElementById("capImm"),
-    btnMenu: document.getElementById("btnMenu"),
-    btnLobby: document.getElementById("btnRoomLobby"),
-    btnStore: document.getElementById("btnRoomStore"),
-    btnScorpion: document.getElementById("btnRoomScorpion"),
     btnSoftReboot: document.getElementById("btnSoftReboot"),
     btnCopy: document.getElementById("btnCopyLog"),
     btnClear: document.getElementById("btnClearLog"),
@@ -25,7 +28,7 @@
 
   const LOG = {
     lines: [],
-    max: 650,
+    max: 700,
     push(kind, msg) {
       const t = new Date().toLocaleTimeString();
       const line = `[${t}] ${kind.toUpperCase()}: ${msg}`;
@@ -35,23 +38,14 @@
       (kind === "error" ? console.error : kind === "warn" ? console.warn : console.log)(msg);
     },
     clear() { this.lines = []; if (ui.logBox) ui.logBox.textContent = ""; },
-    copy() {
-      const text = this.lines.join("\n");
-      navigator.clipboard?.writeText?.(text).then(
-        () => this.push("log", "Copied logs ✅"),
-        () => this.push("warn", "Clipboard copy failed.")
-      );
-    }
+    copy() { navigator.clipboard?.writeText?.(this.lines.join("\n")); this.push("log", "Copied logs ✅"); }
   };
 
   window.SCARLETT = window.SCARLETT || {};
   window.SCARLETT.LOG = LOG;
 
   addEventListener("error", (e) => LOG.push("error", `${e.message} @ ${e.filename}:${e.lineno}:${e.colno}`));
-  addEventListener("unhandledrejection", (e) => {
-    const reason = e.reason instanceof Error ? (e.reason.stack || e.reason.message) : String(e.reason);
-    LOG.push("error", `UnhandledPromiseRejection: ${reason}`);
-  });
+  addEventListener("unhandledrejection", (e) => LOG.push("error", `UnhandledPromiseRejection: ${e.reason?.message || e.reason}`));
 
   function setMetrics(rows) {
     if (!ui.grid) return;
@@ -78,10 +72,6 @@
   ui.btnClear?.addEventListener("click", () => LOG.clear());
   ui.btnCopy?.addEventListener("click", () => LOG.copy());
   ui.btnSoftReboot?.addEventListener("click", () => location.reload());
-
-  function toggleMenu() { LOG.push("log", "Menu toggle pressed (M)."); }
-  ui.btnMenu?.addEventListener("click", toggleMenu);
-  addEventListener("keydown", (e) => { if (e.key.toLowerCase() === "m") toggleMenu(); });
 
   // THREE
   const THREE = await (async () => {
@@ -119,67 +109,15 @@
     renderer.setSize(innerWidth, innerHeight);
   });
 
-  // VRButton
-  async function attachVRButton() {
-    const local = await safeImport("./VRButton.js", "./VRButton.js");
-    if (local) {
-      try {
-        if (typeof local.createVRButton === "function") {
-          const btn = local.createVRButton(renderer);
-          if (btn) btn.id = "VRButton";
-          LOG.push("log", "VRButton ✅ via local createVRButton()");
-          return true;
-        }
-        if (local.VRButton?.createButton) {
-          const btn = local.VRButton.createButton(renderer);
-          btn.id = "VRButton";
-          document.body.appendChild(btn);
-          LOG.push("log", "VRButton ✅ via local VRButton.createButton()");
-          return true;
-        }
-      } catch (e) {
-        LOG.push("warn", `Local VRButton failed: ${e?.message || e}`);
-      }
-    }
-
-    const threeVR =
-      await safeImport("three/addons/webxr/VRButton.js", "three/addons/webxr/VRButton.js") ||
-      await safeImport("https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js", "unpkg VRButton.js");
-
-    if (threeVR?.VRButton?.createButton) {
-      const btn = threeVR.VRButton.createButton(renderer, {
-        optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"]
-      });
-      btn.id = "VRButton";
-      document.body.appendChild(btn);
-      LOG.push("log", "VRButton ✅ via three/addons");
-      return true;
-    }
-
-    if (navigator.xr) {
-      const btn = document.createElement("button");
-      btn.id = "VRButton";
-      btn.textContent = "ENTER VR (Fallback)";
-      btn.style.cssText =
-        "position:fixed;right:14px;bottom:14px;z-index:999999;padding:12px 14px;border-radius:14px;font-weight:900;";
-      btn.onclick = async () => {
-        try {
-          const session = await navigator.xr.requestSession("immersive-vr", {
-            optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"]
-          });
-          await renderer.xr.setSession(session);
-          LOG.push("log", "Fallback XR session started ✅");
-        } catch (e) {
-          LOG.push("error", `Fallback requestSession failed: ${e?.message || e}`);
-        }
-      };
-      document.body.appendChild(btn);
-      LOG.push("warn", "Using manual fallback VR button.");
-      return true;
-    }
-
-    LOG.push("error", "No navigator.xr — cannot enter VR.");
-    return false;
+  // VRButton (use your local VRButton.js)
+  const vrb = await safeImport("./VRButton.js", "./VRButton.js");
+  if (vrb?.VRButton?.createButton) {
+    const btn = vrb.VRButton.createButton(renderer);
+    btn.id = "VRButton";
+    document.body.appendChild(btn);
+    LOG.push("log", "VRButton ✅");
+  } else {
+    LOG.push("warn", "VRButton.js not found or invalid.");
   }
 
   // ctx
@@ -188,17 +126,13 @@
     BUILD: Date.now(),
     systems: {},
     world: null,
-    room: "lobby",
-    mode: "lobby",
+    colliders: [],
 
     player,
     rig: player,
     cameraRig: player,
     yawObject: player,
     pitchObject: camera,
-
-    colliders: [],
-    disableFallbackMove: false,
   };
 
   // Load world
@@ -229,52 +163,39 @@
       _tmp2.set(player.position.x, 0, player.position.z);
       const d = _tmp.sub(_tmp2);
       d.y = 0;
-      if (d.lengthSq() > 1e-6) {
-        const yaw = Math.atan2(d.x, d.z);
-        player.rotation.set(0, yaw, 0);
-        LOG.push("log", "Facing table ✅");
-      }
+      if (d.lengthSq() > 1e-6) player.rotation.set(0, Math.atan2(d.x, d.z), 0);
+      LOG.push("log", "Facing table ✅");
     }
   }
 
   applySpawnAndFacing();
   renderer.xr.addEventListener("sessionstart", () => setTimeout(applySpawnAndFacing, 200));
 
-  // Room buttons
-  function setRoom(room) {
-    try { ctx.world?.setRoom?.(ctx, room); } catch {}
-    ctx.room = room;
-    ctx.mode = room;
-    LOG.push("log", `Room => ${room}`);
-  }
-  ui.btnLobby?.addEventListener("click", () => setRoom("lobby"));
-  ui.btnStore?.addEventListener("click", () => setRoom("store"));
-  ui.btnScorpion?.addEventListener("click", () => setRoom("scorpion"));
-
-  // Gesture Engine
+  // GestureEngine
   const gestureMod = await safeImport("./gesture_engine.js", "./gesture_engine.js");
-  gestureMod?.GestureEngine?.init?.({
-    THREE, renderer, scene, camera,
-    log: (m) => LOG.push("log", m),
-    LOG
-  });
+  gestureMod?.GestureEngine?.init?.({ THREE, renderer, scene, camera, log: (m) => LOG.push("log", m), LOG });
 
-  // Hands (optional visuals)
+  // Chip + Betting modules
+  const chipMod = await safeImport("./chip_physicality.js", "./chip_physicality.js");
+  const betMod = await safeImport("./betting_module.js", "./betting_module.js");
+
+  betMod?.BettingModule?.init?.(ctx);
+
+  // Hands
+  let leftHand = null, rightHand = null;
   try {
-    const l = renderer.xr.getHand(0); l.name = "XRHandLeft";
-    const r = renderer.xr.getHand(1); r.name = "XRHandRight";
-    scene.add(l, r);
-    ctx.hands = { left: l, right: r };
+    leftHand = renderer.xr.getHand(0); leftHand.name = "XRHandLeft";
+    rightHand = renderer.xr.getHand(1); rightHand.name = "XRHandRight";
+    scene.add(leftHand, rightHand);
   } catch {}
 
-  // Teleport visuals (laser + ring)
+  // Teleport laser + ring (camera based)
   const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
   const laser = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]),
     new THREE.LineBasicMaterial({ color: 0x00ffff })
   );
-  laser.name = "TeleportLaser";
   laser.renderOrder = 9999;
   laser.material.depthTest = false;
   scene.add(laser);
@@ -284,8 +205,6 @@
     new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
   );
   ring.rotation.x = -Math.PI / 2;
-  ring.visible = false;
-  ring.name = "TeleportMarker";
   ring.renderOrder = 9999;
   ring.material.depthTest = false;
   scene.add(ring);
@@ -295,26 +214,20 @@
   const hit = new THREE.Vector3();
 
   function updateTeleportRay() {
-    // Always from camera (most reliable + always works)
     camera.getWorldPosition(origin);
     camera.getWorldDirection(dir);
     dir.normalize();
-
-    // force downward tilt
     dir.y -= 0.35;
     dir.normalize();
 
     const denom = floorPlane.normal.dot(dir);
     if (Math.abs(denom) < 1e-6) return { ok: false };
-
     const t = -(floorPlane.normal.dot(origin) + floorPlane.constant) / denom;
     if (t < 0.25 || t > 24) return { ok: false };
 
     hit.copy(origin).addScaledVector(dir, t);
-
     laser.geometry.setFromPoints([origin, hit]);
     ring.position.set(hit.x, 0.02, hit.z);
-
     return { ok: true, point: hit.clone() };
   }
 
@@ -323,119 +236,141 @@
     LOG.push("log", `Teleport ✅ x=${point.x.toFixed(2)} z=${point.z.toFixed(2)}`);
   }
 
-  // Pinch teleport via GestureEngine right-hand pinchstart
+  // ==============
+  // GRAB SYSTEM
+  // ==============
+  const grab = {
+    held: { left: null, right: null },
+    holdOffset: new THREE.Vector3(0, 0, -0.08),
+    tmp: new THREE.Vector3(),
+    tmp2: new THREE.Vector3(),
+  };
+
+  function getHandWorldPos(hand, out) {
+    // try wrist joint for best stability
+    const wrist = hand?.joints?.wrist;
+    if (wrist) { wrist.getWorldPosition(out); return true; }
+    if (hand) { hand.getWorldPosition(out); return true; }
+    return false;
+  }
+
+  function findNearestChip(handedness) {
+    const hand = handedness === "left" ? leftHand : rightHand;
+    if (!hand) return null;
+
+    const handPos = grab.tmp;
+    if (!getHandWorldPos(hand, handPos)) return null;
+
+    let best = null;
+    let bestD2 = 0.12 * 0.12; // grab radius ~12cm
+
+    scene.traverse((o) => {
+      if (!o?.userData?.grabbable) return;
+      if (o.userData.type !== "chip") return;
+
+      o.getWorldPosition(grab.tmp2);
+      const d2 = handPos.distanceToSquared(grab.tmp2);
+      if (d2 < bestD2) { bestD2 = d2; best = o; }
+    });
+
+    return best;
+  }
+
+  function attachToHand(handedness, obj) {
+    const hand = handedness === "left" ? leftHand : rightHand;
+    if (!hand || !obj) return;
+
+    // detach from parent and attach to hand group
+    obj.parent?.remove(obj);
+    hand.add(obj);
+
+    // stable hold in front of wrist/palm
+    obj.position.set(0, 0, -0.08);
+    obj.rotation.set(-Math.PI / 2, 0, 0);
+
+    grab.held[handedness] = obj;
+    LOG.push("log", `[grab] ${handedness} grabbed chip ${obj.userData.value}`);
+  }
+
+  function releaseFromHand(handedness) {
+    const hand = handedness === "left" ? leftHand : rightHand;
+    const obj = grab.held[handedness];
+    if (!hand || !obj) return;
+
+    // compute world position before detach
+    obj.getWorldPosition(grab.tmp);
+    obj.getWorldQuaternion(new THREE.Quaternion());
+
+    hand.remove(obj);
+    scene.add(obj);
+
+    obj.position.copy(grab.tmp);
+    obj.rotation.set(-Math.PI / 2, obj.rotation.y, 0);
+
+    grab.held[handedness] = null;
+
+    // Check bet zone drop
+    betMod?.BettingModule?.tryDropChip?.(ctx, obj);
+  }
+
+  // Gesture events: left hand grab, right hand teleport/grab depending on what is near
+  // Rule:
+  // - Right pinch: if near chip -> grab; else teleport
+  // - Left pinch: grab/release only
   let queuedTeleport = false;
+
   gestureMod?.GestureEngine?.on?.("pinchstart", (e) => {
-    if (e.hand !== "right") return;
-    queuedTeleport = true;
+    if (e.hand === "right") {
+      const chip = findNearestChip("right");
+      if (chip) attachToHand("right", chip);
+      else queuedTeleport = true;
+    } else {
+      const chip = findNearestChip("left");
+      if (chip) attachToHand("left", chip);
+    }
   });
 
-  // Desktop/Android fallback move (non-VR only)
-  const MoveFallback = (() => {
-    const keys = {};
-    let touchMove = { active: false, id: -1, startX: 0, startY: 0, dx: 0, dy: 0 };
-    let touchLook = { active: false, id: -1, startX: 0, startY: 0, dx: 0, dy: 0 };
+  gestureMod?.GestureEngine?.on?.("pinchend", (e) => {
+    if (e.hand === "right") releaseFromHand("right");
+    if (e.hand === "left") releaseFromHand("left");
+  });
 
-    addEventListener("keydown", (e) => keys[e.key.toLowerCase()] = true);
-    addEventListener("keyup", (e) => keys[e.key.toLowerCase()] = false);
-
-    addEventListener("touchstart", (e) => {
-      for (const t of e.changedTouches) {
-        const leftSide = t.clientX < innerWidth * 0.5;
-        if (leftSide && !touchMove.active) touchMove = { active: true, id: t.identifier, startX: t.clientX, startY: t.clientY, dx: 0, dy: 0 };
-        else if (!leftSide && !touchLook.active) touchLook = { active: true, id: t.identifier, startX: t.clientX, startY: t.clientY, dx: 0, dy: 0 };
-      }
-    }, { passive: true });
-
-    addEventListener("touchmove", (e) => {
-      for (const t of e.changedTouches) {
-        if (touchMove.active && t.identifier === touchMove.id) { touchMove.dx = t.clientX - touchMove.startX; touchMove.dy = t.clientY - touchMove.startY; }
-        if (touchLook.active && t.identifier === touchLook.id) { touchLook.dx = t.clientX - touchLook.startX; touchLook.dy = t.clientY - touchLook.startY; }
-      }
-    }, { passive: true });
-
-    addEventListener("touchend", (e) => {
-      for (const t of e.changedTouches) {
-        if (touchMove.active && t.identifier === touchMove.id) touchMove.active = false;
-        if (touchLook.active && t.identifier === touchLook.id) touchLook.active = false;
-      }
-    }, { passive: true });
-
-    function collideSlide(nextPos, colliders) {
-      if (!colliders?.length) return nextPos;
-      const p = nextPos.clone();
-      const box = new THREE.Box3();
-      const radius = 0.35;
-      for (const c of colliders) {
-        if (!c) continue;
-        c.updateMatrixWorld?.(true);
-        box.setFromObject(c);
-        if (box.containsPoint(p)) {
-          const cx = (box.min.x + box.max.x) * 0.5;
-          const cz = (box.min.z + box.max.z) * 0.5;
-          const dx = p.x - cx;
-          const dz = p.z - cz;
-          if (Math.abs(dx) > Math.abs(dz)) p.x = dx > 0 ? box.max.x + radius : box.min.x - radius;
-          else p.z = dz > 0 ? box.max.z + radius : box.min.z - radius;
-        }
-      }
-      return p;
+  // ==============
+  // CHIP SPAWNERS
+  // ==============
+  function spawnChipPile(x, z, values) {
+    if (!chipMod?.ChipPhysicality) return;
+    let y = 0.05;
+    for (let i = 0; i < values.length; i++) {
+      const chip = chipMod.ChipPhysicality.createFromCtx(ctx, values[i]);
+      chip.position.set(x + (Math.random() - 0.5) * 0.25, y, z + (Math.random() - 0.5) * 0.25);
+      chip.rotation.y = Math.random() * Math.PI * 2;
+      scene.add(chip);
+      y += 0.014;
     }
+  }
 
-    return {
-      update(dt) {
-        if (ctx.disableFallbackMove) return;
-        if (renderer.xr.isPresenting) return;
+  // Spawn near SpawnPad and near Table
+  const sp = scene.getObjectByName("SpawnPoint") || scene.getObjectByName("SpawnPad");
+  if (sp) {
+    sp.getWorldPosition(_tmp);
+    spawnChipPile(_tmp.x + 1.2, _tmp.z + 0.2, [1, 5, 10, 25, 100, 500, 1000]);
+    spawnChipPile(_tmp.x + 1.6, _tmp.z - 0.4, [1, 1, 5, 5, 10, 25, 25, 100]);
+    LOG.push("log", "[chips] Spawn piles created near SpawnPad ✅");
+  }
 
-        const speed = 2.4;
+  const table = scene.getObjectByName("BossTable");
+  if (table) {
+    table.getWorldPosition(_tmp);
+    spawnChipPile(_tmp.x + 0.9, _tmp.z + 1.4, [10, 25, 100, 100, 500, 1000]);
+    LOG.push("log", "[chips] Spawn pile created near BossTable ✅");
+  }
 
-        if (touchLook.active) {
-          ctx.yawObject.rotation.y -= touchLook.dx * 0.0022;
-          ctx.pitchObject.rotation.x -= touchLook.dy * 0.0018;
-          ctx.pitchObject.rotation.x = Math.max(-1.2, Math.min(1.2, ctx.pitchObject.rotation.x));
-          touchLook.dx *= 0.65; touchLook.dy *= 0.65;
-        }
-
-        let forward = 0, strafe = 0;
-        if (keys["w"] || keys["arrowup"]) forward += 1;
-        if (keys["s"] || keys["arrowdown"]) forward -= 1;
-        if (keys["a"] || keys["arrowleft"]) strafe -= 1;
-        if (keys["d"] || keys["arrowright"]) strafe += 1;
-
-        if (touchMove.active) {
-          forward += (-touchMove.dy / 120);
-          strafe += (touchMove.dx / 120);
-          forward = Math.max(-1, Math.min(1, forward));
-          strafe = Math.max(-1, Math.min(1, strafe));
-        }
-
-        if (!forward && !strafe) return;
-
-        const yaw = ctx.yawObject.rotation.y;
-        const sin = Math.sin(yaw), cos = Math.cos(yaw);
-        const vx = (strafe * cos + forward * sin) * speed * dt;
-        const vz = (forward * cos - strafe * sin) * speed * dt;
-
-        const next = ctx.player.position.clone();
-        next.x += vx; next.z += vz;
-
-        ctx.player.position.copy(collideSlide(next, ctx.colliders));
-      }
-    };
-  })();
-
-  // Caps + VRButton
-  await setCaps();
-  await attachVRButton();
-
-  renderer.xr.addEventListener("sessionstart", () => LOG.push("log", "XR sessionstart ✅"));
-  renderer.xr.addEventListener("sessionend", () => LOG.push("warn", "XR sessionend"));
-
-  // Main loop (note: frame is passed in XR!)
+  // Loop
   let last = performance.now();
   let fpsAcc = 0, fpsCount = 0, fps = 0;
 
-  renderer.setAnimationLoop((time, frame) => {
+  renderer.setAnimationLoop((t, frame) => {
     const now = performance.now();
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
@@ -443,40 +378,43 @@
     fpsAcc += dt; fpsCount++;
     if (fpsAcc >= 0.5) { fps = Math.round(fpsCount / fpsAcc); fpsAcc = 0; fpsCount = 0; }
 
+    // world update
     try { ctx.world?.update?.(ctx, dt); } catch {}
 
-    // Non-VR movement
-    MoveFallback.update(dt);
+    // modules
+    betMod?.BettingModule?.update?.(ctx, dt);
 
-    // Gesture updates (VR only)
+    // gestures + teleport (VR only)
     if (renderer.xr.isPresenting) {
       const refSpace = renderer.xr.getReferenceSpace?.();
       gestureMod?.GestureEngine?.update?.(frame, refSpace);
 
-      // Laser+ring always on in VR
       const ray = updateTeleportRay();
       laser.visible = ray.ok;
       ring.visible = ray.ok;
 
-      // Teleport if we got a pinchstart event
       if (queuedTeleport && ray.ok) {
         queuedTeleport = false;
         teleportTo(ray.point);
       }
+    } else {
+      // in non-VR, hide teleport
+      laser.visible = false;
+      ring.visible = false;
     }
 
     setMetrics([
       ["FPS", `${fps}`],
       ["XR", renderer.xr.isPresenting ? "YES" : "NO"],
-      ["VRButton", document.getElementById("VRButton") ? "YES" : "NO"],
-      ["Room", ctx.room],
-      ["Systems", Object.keys(ctx.systems || {}).length.toString()],
-      ["Colliders", `${ctx.colliders?.length || 0}`],
+      ["Pot", `${betMod?.BettingModule?.getPot?.() ?? 0}`],
+      ["Held L", grab.held.left ? String(grab.held.left.userData.value) : "none"],
+      ["Held R", grab.held.right ? String(grab.held.right.userData.value) : "none"],
       ["Rig XYZ", `${player.position.x.toFixed(1)},${player.position.y.toFixed(1)},${player.position.z.toFixed(1)}`],
     ]);
 
     renderer.render(scene, camera);
   });
 
-  LOG.push("log", "Hybrid 2.2 boot complete ✅ (GestureEngine wired + teleport stable)");
+  await setCaps();
+  LOG.push("log", "Hybrid 2.3 boot complete ✅ (chips + bet zone + pinch grab)");
 })();

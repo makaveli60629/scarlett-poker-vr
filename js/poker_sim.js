@@ -1,9 +1,7 @@
-// /js/poker_sim.js — PokerSim v2.2 (SCORPION IMMERSION + ORIGIN FROM SPAWN)
-// - Anchors cards/chips to the correct table origin per mode
-// - Scorpion origin derives from scorpion_seat_1 spawn (more reliable than hardcoded x/z)
-// - Scorpion layout = closer, tighter, centered for focus
-// - Scorpion mode: player + 4 bots + instant deal vibe
-// - Lobby mode: demo loop
+// /js/poker_sim.js — PokerSim v2.3 (BOTS VISIBLE + SCORPION TABLE ALIGN)
+// - Same cards as v2.1
+// - Adds simple bot bodies so you SEE opponents
+// - Scorpion origin derives from scorpion_seat_1 and is placed forward into felt
 
 export const PokerSim = {
   init(ctx) {
@@ -18,12 +16,15 @@ export const PokerSim = {
     this.group.name = "PokerSimGroup";
     scene.add(this.group);
 
-    // Materials
     this.matCard = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0.0 });
     this.matCardBack = new THREE.MeshStandardMaterial({ color: 0x7fe7ff, roughness: 0.8, metalness: 0.05 });
 
-    // Card geo
     this.geoCard = new THREE.PlaneGeometry(0.07, 0.10);
+
+    // simple bot visuals
+    this.geoBot = new THREE.CylinderGeometry(0.12, 0.14, 0.70, 16);
+    this.matBot = new THREE.MeshStandardMaterial({ color: 0xb266ff, roughness: 0.65, metalness: 0.05 });
+    this.botMeshes = [];
 
     this.table = {
       origin: new THREE.Vector3(0, 0.78, 0),
@@ -31,7 +32,6 @@ export const PokerSim = {
       community: [],
       player: [],
       bots: [],
-      // layout presets (filled per mode)
       layout: null,
     };
 
@@ -42,7 +42,6 @@ export const PokerSim = {
   setMode(mode) {
     this.mode = mode;
 
-    // reset reveal flags
     this._handTimer = 0;
     this._revealedPlayer = false;
     this._revealedFlop = false;
@@ -57,20 +56,15 @@ export const PokerSim = {
   },
 
   _getSpawn(name) {
-    // SpawnPoints v3+ lives at ctx.spawns.map or ctx.spawns.get()
-    const sp = this.ctx?.spawns?.get?.(name) || this.ctx?.spawns?.map?.[name] || null;
-    return sp;
+    return this.ctx?.spawns?.get?.(name) || this.ctx?.spawns?.map?.[name] || null;
   },
 
   _configureTableForMode(mode) {
     const { THREE } = this.ctx;
 
-    // Default: lobby anchored at known center
     let origin = new THREE.Vector3(0.0, 0.78, 0.0);
     let yaw = 0;
 
-    // Layout presets (relative to origin)
-    // These numbers are tuned to feel good in VR.
     let layout = {
       community: { startX: -0.16, dz: 0.02, y: 0.01, stepX: 0.08, zTilt: 0.04 },
       player:    { x0: -0.05, stepX: 0.09, dz: 0.22, y: 0.012, tilt: 0.08 },
@@ -79,48 +73,33 @@ export const PokerSim = {
     };
 
     if (mode === "scorpion_play") {
-      // ✅ Derive origin from scorpion seat spawn so cards always align with YOUR room placement.
-      // Seat is at (8.00, z=0.95) facing toward table center near z~0.
-      // We place table origin slightly forward from the seat, and a bit down-table.
       const seat = this._getSpawn("scorpion_seat_1");
 
       if (seat) {
-        // Convert yaw into forward direction on XZ plane
-        const fwd = new THREE.Vector3(Math.sin(seat.yaw), 0, Math.cos(seat.yaw)); // yaw=PI => fwd=(0,-1)
-        // Place table origin about 0.65m in front of the seat (toward table)
-        const tableCenter = new THREE.Vector3(seat.x, 0.78, seat.z).add(fwd.multiplyScalar(0.65));
-        origin = tableCenter;
+        // Forward direction given yaw
+        const fwd = new THREE.Vector3(Math.sin(seat.yaw), 0, Math.cos(seat.yaw));
+        // Put table center ~0.85m in front of seat (felt)
+        origin = new THREE.Vector3(seat.x, 0.78, seat.z).add(fwd.multiplyScalar(0.85));
         yaw = seat.yaw;
       } else {
-        // fallback to your old hardcode
         origin = new THREE.Vector3(8.0, 0.78, 0.0);
         yaw = 0;
       }
 
-      // ✅ Close-quarters scorpion layout: pull everything closer + slightly larger feel
+      // tighter scorpion focus
       layout = {
-        community: { startX: -0.14, dz: 0.06, y: 0.012, stepX: 0.075, zTilt: 0.035 },
-        // player cards closer and more centered
+        community: { startX: -0.14, dz: 0.07, y: 0.012, stepX: 0.075, zTilt: 0.035 },
         player:    { x0: -0.045, stepX: 0.085, dz: 0.18, y: 0.014, tilt: 0.10 },
-        // bot cards near their seats
         bots:      { y: 0.012, dz: 0.00, x0: -0.028, stepX: 0.058 },
-        // faster reveals for "instant action"
         reveal:    { player: 0.35, flop: 1.10, turn: 1.80, river: 2.50, loop: 7.0 },
       };
-    }
 
-    this.table.origin.copy(origin);
-    this.table.yaw = yaw;
-    this.table.layout = layout;
-
-    // bots seats around table (relative positions around table)
-    if (mode === "scorpion_play") {
-      // 4 bots guaranteed
+      // ✅ 4 bots guaranteed
       this.table.bots = [
-        { name: "Bot A", seat: new THREE.Vector3(-0.36, 0, -0.05) },
-        { name: "Bot B", seat: new THREE.Vector3( 0.36, 0, -0.05) },
-        { name: "Bot C", seat: new THREE.Vector3( 0.34, 0,  0.23) },
-        { name: "Bot D", seat: new THREE.Vector3(-0.34, 0,  0.23) },
+        { name: "Bot A", seat: new THREE.Vector3(-0.38, 0, -0.08) },
+        { name: "Bot B", seat: new THREE.Vector3( 0.38, 0, -0.08) },
+        { name: "Bot C", seat: new THREE.Vector3( 0.34, 0,  0.26) },
+        { name: "Bot D", seat: new THREE.Vector3(-0.34, 0,  0.26) },
       ];
     } else {
       this.table.bots = [
@@ -128,6 +107,10 @@ export const PokerSim = {
         { name: "Bot B", seat: new THREE.Vector3( 0.30, 0,  0.20) },
       ];
     }
+
+    this.table.origin.copy(origin);
+    this.table.yaw = yaw;
+    this.table.layout = layout;
   },
 
   _clearTable() {
@@ -135,13 +118,26 @@ export const PokerSim = {
     while (this.group.children.length) this.group.remove(this.group.children[0]);
     this.table.community = [];
     this.table.player = [];
+    this.botMeshes = [];
   },
 
   _startHand() {
     const base = this.table.origin;
     const L = this.table.layout;
 
-    // Community cards
+    // --- bot bodies (so you see opponents) ---
+    for (let b = 0; b < this.table.bots.length; b++) {
+      const seat = this.table.bots[b].seat;
+      const bot = new THREE.Mesh(this.geoBot, this.matBot);
+      bot.position.set(base.x + seat.x, base.y + 0.35, base.z + seat.z);
+      bot.rotation.y = this.table.yaw + Math.PI; // face toward center-ish
+      bot.castShadow = true;
+      bot.receiveShadow = true;
+      this.group.add(bot);
+      this.botMeshes.push(bot);
+    }
+
+    // --- community cards ---
     for (let i = 0; i < 5; i++) {
       const m = this._makeCardMesh(true);
       m.position.set(base.x + L.community.startX + i * L.community.stepX, base.y + L.community.y, base.z + L.community.dz);
@@ -151,7 +147,7 @@ export const PokerSim = {
       this.table.community.push(m);
     }
 
-    // Player hole cards
+    // --- player hole cards ---
     for (let i = 0; i < 2; i++) {
       const m = this._makeCardMesh(true);
       m.position.set(base.x + (L.player.x0 + i * L.player.stepX), base.y + L.player.y, base.z + L.player.dz);
@@ -161,7 +157,7 @@ export const PokerSim = {
       this.table.player.push(m);
     }
 
-    // Bot hole cards
+    // --- bot hole cards (visual only) ---
     for (let b = 0; b < this.table.bots.length; b++) {
       const seat = this.table.bots[b].seat;
       for (let i = 0; i < 2; i++) {
@@ -180,13 +176,10 @@ export const PokerSim = {
 
     const msg =
       this.mode === "scorpion_play"
-        ? "Scorpion Table: You’re seated in. (B/Y = Leave to Lobby)"
+        ? "Scorpion Table: Dealing you in (Leave = B/Y/A/X or L/Esc)"
         : "Lobby Table: Demo hand";
-
     this.ctx?.ui?.toast?.(msg);
-    this.ctx?.log?.(this.mode === "scorpion_play"
-      ? "[PokerSim] 🦂 scorpion hand started (player + 4 bots)"
-      : "[PokerSim] 🎲 lobby demo hand started");
+    this.ctx?.log?.(msg);
   },
 
   _makeCardMesh(faceDown = true) {
@@ -204,13 +197,11 @@ export const PokerSim = {
 
     const R = this.table.layout?.reveal || { player: 0.8, flop: 1.6, turn: 2.4, river: 3.2, loop: 8.0 };
 
-    // Reveal player
     if (this._handTimer > R.player && !this._revealedPlayer) {
       this._revealedPlayer = true;
       for (const c of this.table.player) c.material = this.matCard;
     }
 
-    // Reveal community
     if (this._handTimer > R.flop && !this._revealedFlop) {
       this._revealedFlop = true;
       for (let i = 0; i < 3; i++) this.table.community[i].material = this.matCard;
@@ -224,7 +215,6 @@ export const PokerSim = {
       this.table.community[4].material = this.matCard;
     }
 
-    // Loop
     if (this._handTimer > R.loop) {
       this._revealedPlayer = false;
       this._revealedFlop = false;

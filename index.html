@@ -26,7 +26,7 @@
     }
     body { margin:0; overflow:hidden; background:#000; touch-action:none; }
 
-    /* Force VRButton visible (Quest sometimes hides behind overlays) */
+    /* Force VRButton visible */
     #VRButton, button#VRButton{
       position:fixed !important;
       right:max(14px, env(safe-area-inset-right)) !important;
@@ -100,7 +100,7 @@
       left:max(10px, env(safe-area-inset-left));
       top:max(10px, env(safe-area-inset-top));
       z-index:999998;
-      width:min(520px, calc(100vw - 20px));
+      width:min(560px, calc(100vw - 20px));
       background: rgba(0,20,30,.55);
       border: 1px solid rgba(0,255,255,.18);
       border-radius: 14px;
@@ -142,7 +142,7 @@
       border-radius: 12px;
       padding: 8px 10px;
       background: rgba(0,0,0,.22);
-      max-height: 180px;
+      max-height: 200px;
       overflow:auto;
       font-size: 11px;
       line-height: 1.35;

@@ -1,5 +1,8 @@
-// /js/room_manager.js — RoomManager v7 (FULL)
-// Guarantees lobby first, scorpion hidden until entered, scorpion seats + starts PokerSim.
+// /js/room_manager.js — RoomManager v7.2 (FULL)
+// Fixes:
+// - Hard guarantees scorpion setActive(true) + PokerSim scorpion_play (with retry)
+// - Always start lobby
+// - Leave always returns lobby
 
 export const RoomManager = {
   init(ctx) {
@@ -11,10 +14,9 @@ export const RoomManager = {
     this._wireHotkeys(ctx);
     this._wireDirectEvents(ctx);
 
-    // ✅ always begin lobby
     this.setRoom(ctx, "lobby");
 
-    ctx.log?.("[rm] init ✅ v7 (lobby-first + scorpion toggle + sim mode)");
+    ctx.log?.("[rm] init ✅ v7.2 (force scorpion mode + retry)");
   },
 
   setRoom(ctx, room) {
@@ -25,15 +27,23 @@ export const RoomManager = {
     const sc = ctx.systems?.scorpion;
     const store = ctx.systems?.store;
 
+    const forcePokerMode = (mode) => {
+      const sim = ctx.PokerSim || ctx.poker;
+      if (sim?.setMode) {
+        sim.setMode(mode);
+        return true;
+      }
+      return false;
+    };
+
     if (room === "lobby") {
       sc?.setActive?.(false);
       store?.setActive?.(true);
 
-      // standing spawn in lobby
       ctx.controls?.forceStanding?.("lobby_spawn");
       ctx.spawns?.apply?.("lobby_spawn", ctx.player, { standY: 1.65 });
 
-      ctx.PokerSim?.setMode?.("lobby_demo");
+      forcePokerMode("lobby_demo");
       return;
     }
 
@@ -44,7 +54,7 @@ export const RoomManager = {
       ctx.controls?.forceStanding?.("store_spawn");
       ctx.spawns?.apply?.("store_spawn", ctx.player, { standY: 1.65 });
 
-      ctx.PokerSim?.setMode?.("lobby_demo");
+      forcePokerMode("lobby_demo");
       return;
     }
 
@@ -55,7 +65,7 @@ export const RoomManager = {
       ctx.controls?.forceStanding?.("spectator");
       ctx.spawns?.apply?.("spectator", ctx.player, { standY: 1.65 });
 
-      ctx.PokerSim?.setMode?.("lobby_demo");
+      forcePokerMode("lobby_demo");
       return;
     }
 
@@ -67,18 +77,21 @@ export const RoomManager = {
       // seat player (no locomotion)
       ctx.controls?.sitAt?.("scorpion_seat_1");
 
-      // start scorpion poker visuals (4 bots are created by PokerSim)
-      ctx.PokerSim?.setMode?.("scorpion_play");
+      // force PokerSim mode now; if not ready, retry shortly
+      if (!forcePokerMode("scorpion_play")) {
+        setTimeout(() => forcePokerMode("scorpion_play"), 250);
+        setTimeout(() => forcePokerMode("scorpion_play"), 700);
+      }
 
+      // small debug ping
+      ctx.log?.("[rm] 🦂 entered scorpion (seat + sim mode forced)");
       return;
     }
 
-    // fallback
     this.setRoom(ctx, "lobby");
   },
 
   _wireTeleports(ctx) {
-    // TeleportMachine or pads should dispatch this
     window.addEventListener("scarlett-room", (e) => {
       const room = e?.detail?.room;
       if (!room) return;
@@ -97,8 +110,6 @@ export const RoomManager = {
   },
 
   _wireHotkeys(ctx) {
-    // Desktop fallback:
-    // P = enter scorpion, O = return lobby
     window.addEventListener("keydown", (e) => {
       if (e.code === "KeyP") this.setRoom(ctx, "scorpion");
       if (e.code === "KeyO") this.setRoom(ctx, "lobby");

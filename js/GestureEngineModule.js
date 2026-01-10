@@ -1,89 +1,100 @@
-import * as THREE from "three";
+// /js/gesture_engine.js — GestureEngineModule v1.0 (HANDS-ONLY FOUNDATION)
+// ✅ Per-hand pinch detection (thumb-tip ↔ index-finger-tip)
+// ✅ Emits events: pinchstart, pinchend
+// ✅ Provides stable API for next modules (chips/cards/store interactions)
+// Usage:
+//   GestureEngine.init({ THREE, renderer, scene, camera, log })
+//   GestureEngine.on("pinchstart", (e)=>{})
+//   GestureEngine.update(frame, referenceSpace)
 
-const JOINTS = {
-  wrist: "wrist",
-  thumbTip: "thumb-tip",
-  indexTip: "index-finger-tip",
-  middleTip: "middle-finger-tip",
-  ringTip: "ring-finger-tip",
-  pinkyTip: "pinky-finger-tip",
-  indexMetacarpal: "index-finger-metacarpal"
-};
+export const GestureEngine = (() => {
+  let THREE = null, renderer = null, scene = null, camera = null, log = console.log;
 
-function dist(a, b) { return a.distanceTo(b); }
+  const listeners = new Map(); // event -> Set(cb)
 
-function getJointWorldPos(handObj, jointName, out) {
-  // WebXR Hands (three.js) creates joint objects as children of handObj
-  const j = handObj?.joints?.[jointName] || handObj?.children?.find?.(c => c.jointName === jointName) || null;
-  if (!j) return false;
-  j.getWorldPosition(out);
-  return true;
-}
-
-export async function init(ctx) {
-  ctx.gestures = {
-    left: { pinch: false, fist: false, pinchDown: false, fistDown: false },
-    right: { pinch: false, fist: false, pinchDown: false, fistDown: false },
+  const state = {
+    enabled: true,
+    hands: {
+      left:  { pinch:false, last:false, strength:0, jointsOK:false, tipA:null, tipB:null },
+      right: { pinch:false, last:false, strength:0, jointsOK:false, tipA:null, tipB:null },
+    },
+    tmpA: null,
+    tmpB: null,
   };
 
-  ctx._gestureTmp = {
-    a: new THREE.Vector3(),
-    b: new THREE.Vector3(),
-    c: new THREE.Vector3(),
-    d: new THREE.Vector3(),
-    e: new THREE.Vector3(),
-    f: new THREE.Vector3(),
+  function on(evt, cb) {
+    if (!listeners.has(evt)) listeners.set(evt, new Set());
+    listeners.get(evt).add(cb);
+    return () => listeners.get(evt)?.delete(cb);
+  }
+
+  function emit(evt, payload) {
+    const set = listeners.get(evt);
+    if (!set) return;
+    for (const cb of set) {
+      try { cb(payload); } catch (e) { log(`[GestureEngine] listener error: ${e?.message || e}`); }
+    }
+  }
+
+  function getJointWorld(handObj, jointName, out) {
+    const j = handObj?.joints?.[jointName];
+    if (!j) return false;
+    j.getWorldPosition(out);
+    return true;
+  }
+
+  function updateHand(handedness) {
+    const handObj = handedness === "left" ? renderer?.xr?.getHand?.(0) : renderer?.xr?.getHand?.(1);
+    const h = state.hands[handedness];
+    h.last = h.pinch;
+
+    if (!handObj) {
+      h.pinch = false; h.strength = 0; h.jointsOK = false;
+      return;
+    }
+
+    const okA = getJointWorld(handObj, "index-finger-tip", state.tmpA);
+    const okB = getJointWorld(handObj, "thumb-tip", state.tmpB);
+
+    h.jointsOK = !!(okA && okB);
+    if (!h.jointsOK) {
+      h.pinch = false; h.strength = 0;
+      return;
+    }
+
+    const dist = state.tmpA.distanceTo(state.tmpB);
+    h.pinch = dist < 0.028;
+    h.strength = Math.max(0, Math.min(1, (0.05 - dist) / 0.05));
+
+    if (h.pinch && !h.last) emit("pinchstart", { hand: handedness, strength: h.strength, dist });
+    if (!h.pinch && h.last) emit("pinchend", { hand: handedness });
+  }
+
+  return {
+    init(ctx) {
+      THREE = ctx.THREE;
+      renderer = ctx.renderer;
+      scene = ctx.scene;
+      camera = ctx.camera;
+      log = ctx.log || ctx.LOG?.push?.bind(ctx.LOG, "log") || console.log;
+
+      state.tmpA = new THREE.Vector3();
+      state.tmpB = new THREE.Vector3();
+
+      log("[GestureEngine] init ✅");
+    },
+
+    on,
+
+    setEnabled(v) { state.enabled = !!v; },
+
+    getState() { return state; },
+
+    update(frame, referenceSpace) {
+      if (!state.enabled) return;
+      // frame/referenceSpace kept for future (grab rays, hover, etc.)
+      updateHand("left");
+      updateHand("right");
+    }
   };
-
-  ctx.LOG?.push?.("log", "[GestureEngine] init ✅");
-}
-
-export function update(dt, ctx) {
-  if (!ctx.renderer?.xr?.isPresenting) return;
-
-  const hands = ctx.hands;
-  if (!hands?.left || !hands?.right) return;
-
-  _updateHand("left", hands.left, ctx);
-  _updateHand("right", hands.right, ctx);
-}
-
-function _updateHand(side, handObj, ctx) {
-  const st = ctx.gestures[side];
-  const tmp = ctx._gestureTmp;
-
-  const hasThumb = getJointWorldPos(handObj, JOINTS.thumbTip, tmp.a);
-  const hasIndex = getJointWorldPos(handObj, JOINTS.indexTip, tmp.b);
-
-  const hasWrist = getJointWorldPos(handObj, JOINTS.wrist, tmp.c);
-  const hasMid = getJointWorldPos(handObj, JOINTS.middleTip, tmp.d);
-  const hasRing = getJointWorldPos(handObj, JOINTS.ringTip, tmp.e);
-  const hasPinky = getJointWorldPos(handObj, JOINTS.pinkyTip, tmp.f);
-
-  const prevPinch = st.pinch;
-  const prevFist = st.fist;
-
-  // PINCH: thumb-tip close to index-tip
-  let pinch = false;
-  if (hasThumb && hasIndex) {
-    const dTI = dist(tmp.a, tmp.b);
-    pinch = dTI < 0.022; // tweak if needed
-  }
-
-  // FIST: finger tips near wrist/palm-ish (cheap heuristic)
-  let fist = false;
-  if (hasWrist && hasIndex && hasMid && hasRing && hasPinky) {
-    const d1 = dist(tmp.b, tmp.c);
-    const d2 = dist(tmp.d, tmp.c);
-    const d3 = dist(tmp.e, tmp.c);
-    const d4 = dist(tmp.f, tmp.c);
-    const avg = (d1 + d2 + d3 + d4) / 4;
-    fist = avg < 0.09;
-  }
-
-  st.pinch = pinch;
-  st.fist = fist;
-
-  st.pinchDown = (!prevPinch && pinch);
-  st.fistDown = (!prevFist && fist);
-}
+})();

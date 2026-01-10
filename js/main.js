@@ -4,7 +4,8 @@
 // - Prevents double requestSession (InvalidStateError)
 // - Prevents resize while presenting (THREE warning)
 // - Publishes ctx.Controls for RoomManager seat/leave hooks
-
+import { AndroidControls } from "./android_controls.js";
+import { RoomBridge } from "./room_bridge.js";
 import { VRButton } from "./VRButton.js";
 import * as THREE_NS from "./three.js";
 import { World } from "./world.js";

@@ -1,63 +1,26 @@
+// /js/ui.js — Scarlett UI Hub (HARDENED) v2.0
 export const UI = {
-  root: null,
-  visible: true,
-  hub: null,
+  init(ctx = {}) {
+    const log = ctx.log || console.log;
 
-  init({ hub, onRecenter, onToggleHeightLock }) {
-    this.hub = hub;
+    // Guarantee containers
+    ctx.__ui = ctx.__ui || {};
+    ctx.ui = ctx.ui || {};
+    ctx.ui.__ui = ctx.ui.__ui || ctx.__ui;
 
-    // Let VRController call Controls via global bridge:
-    window.__scarlettTeleportTo = (pos) => {
-      // main.js will override this with Controls.teleportTo if available,
-      // but if not, we still attempt a direct rig move if present
-      window.__scarlettDirectTeleport?.(pos);
-    };
+    // Guarantee hub
+    if (!ctx.__ui.hub) ctx.__ui.hub = {};
+    if (!ctx.ui.hub) ctx.ui.hub = ctx.__ui.hub;
 
-    // A simple HTML overlay menu (works on Android + VR browser)
-    const root = document.createElement("div");
-    root.style.position = "fixed";
-    root.style.left = "12px";
-    root.style.top = "12px";
-    root.style.zIndex = "10";
-    root.style.pointerEvents = "auto";
-    root.style.display = "flex";
-    root.style.gap = "8px";
-    root.style.alignItems = "center";
+    // Minimal hub defaults so other modules can attach buttons/panels safely
+    const hub = ctx.__ui.hub;
+    hub.panels = hub.panels || [];
+    hub.buttons = hub.buttons || [];
+    hub.hotspots = hub.hotspots || [];
 
-    const mkBtn = (txt, fn) => {
-      const b = document.createElement("button");
-      b.textContent = txt;
-      b.style.padding = "8px 10px";
-      b.style.borderRadius = "10px";
-      b.style.border = "1px solid rgba(255,255,255,.2)";
-      b.style.background = "rgba(0,0,0,.35)";
-      b.style.color = "#fff";
-      b.addEventListener("click", fn);
-      return b;
-    };
+    // Expose for debugging
+    window.__SCARLETT_UIHUB = hub;
 
-    const btnRecenter = mkBtn("Recenter Spawn", () => onRecenter?.());
-    const btnHeight = mkBtn("Toggle Height Lock", () => onToggleHeightLock?.());
-    const btnHide = mkBtn("Hide UI", () => {
-      this.visible = !this.visible;
-      root.style.opacity = this.visible ? "1" : "0";
-      root.style.pointerEvents = this.visible ? "auto" : "none";
-    });
-
-    root.appendChild(btnRecenter);
-    root.appendChild(btnHeight);
-    root.appendChild(btnHide);
-
-    document.body.appendChild(root);
-    this.root = root;
-
-    // VR toggle via keyboard M (desktop fallback)
-    window.addEventListener("keydown", (e) => {
-      if (e.key.toLowerCase() === "m") btnHide.click();
-    });
-
-    hub?.addLine?.("✅ UI ready (buttons in top-left)");
-  },
-
-  update() {},
+    log("[ui] init ✅ hardened hub ready");
+  }
 };

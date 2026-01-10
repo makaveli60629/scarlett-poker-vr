@@ -61,7 +61,6 @@ export const BettingModule = (() => {
       log("[BettingModule] init ✅");
     },
 
-    // if you drop a chip object with userData.value into zone, call this:
     tryDropChip(ctx, chipObj) {
       if (!chipObj?.userData?.value) return false;
       const pos = new ctx.THREE.Vector3();
@@ -71,6 +70,7 @@ export const BettingModule = (() => {
       const v = Number(chipObj.userData.value) || 0;
       state.potValue += v;
       chipObj.parent?.remove(chipObj);
+
       ctx.LOG?.push?.("log", `[BettingModule] BET +${v} (pot=${state.potValue}) ✅`);
 
       if (state.potValue > 500 && !state.lastWhale) {

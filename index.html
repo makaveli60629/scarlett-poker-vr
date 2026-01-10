@@ -3,57 +3,72 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <title>Scarlett Poker VR — Lobby</title>
+  <title>Scarlett Poker VR — New Update 1.0</title>
   <style>
     html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#05060a; }
     #app { position:fixed; inset:0; }
     canvas { display:block; width:100%; height:100%; touch-action:none; }
 
-    /* HUD */
+    /* Debug HUD */
     #hud {
       position: fixed; left: 10px; top: 10px;
-      z-index: 10;
+      z-index: 30;
       font: 12px/1.25 system-ui, -apple-system, Segoe UI, Roboto, Arial;
       color: #e7e7e7;
-      background: rgba(0,0,0,0.55);
+      background: rgba(0,0,0,0.58);
       border: 1px solid rgba(255,255,255,0.12);
-      padding: 10px;
-      border-radius: 12px;
-      max-width: min(520px, calc(100vw - 20px));
+      padding: 10px 12px;
+      border-radius: 14px;
+      max-width: min(560px, calc(100vw - 20px));
       pointer-events: none;
       white-space: pre-wrap;
     }
-    #hud .title { font-weight: 700; margin-bottom: 6px; }
+    #hud .title { font-weight: 800; margin-bottom: 6px; }
 
-    /* Mobile controls */
+    /* Mobile Controls */
     #touchControls {
       position: fixed; inset: 0;
-      z-index: 20;
-      display: none; /* enabled by JS only on mobile non-XR */
+      z-index: 40;
+      display: none;  /* enabled by JS only when appropriate */
       pointer-events: none;
     }
+
     .btn {
       pointer-events: auto;
-      user-select: none;
-      -webkit-user-select: none;
+      user-select: none; -webkit-user-select: none;
       touch-action: none;
-      width: 72px; height: 72px;
+      width: 74px; height: 74px;
       border-radius: 16px;
       border: 1px solid rgba(255,255,255,0.18);
       background: rgba(0,0,0,0.35);
       color: #fff;
-      font: 700 14px system-ui;
+      font: 800 14px system-ui;
       display:flex; align-items:center; justify-content:center;
       backdrop-filter: blur(6px);
     }
     .btn:active { transform: scale(0.98); background: rgba(255,255,255,0.08); }
+    .wide { grid-column: span 2; width: 158px; }
 
-    /* Left cluster (movement) */
-    #leftCluster { position: fixed; left: 14px; bottom: 14px; display:grid; gap:10px; grid-template-columns: 72px 72px; }
-    /* Right cluster (look + action/menu) */
-    #rightCluster { position: fixed; right: 14px; bottom: 14px; display:grid; gap:10px; grid-template-columns: 72px 72px; }
+    #leftCluster  { position: fixed; left: 14px; bottom: 14px; display:grid; gap:10px; grid-template-columns: 74px 74px; }
+    #rightCluster { position: fixed; right:14px; bottom: 14px; display:grid; gap:10px; grid-template-columns: 74px 74px; }
 
-    .wide { grid-column: span 2; width: 154px; }
+    /* tiny toast */
+    #toast {
+      position: fixed;
+      left: 50%; bottom: 18px;
+      transform: translateX(-50%);
+      z-index: 45;
+      padding: 10px 14px;
+      border-radius: 14px;
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: #fff;
+      font: 700 13px system-ui;
+      display: none;
+      pointer-events: none;
+      max-width: min(520px, calc(100vw - 24px));
+      text-align: center;
+    }
   </style>
 </head>
 
@@ -61,6 +76,7 @@
   <div id="app"></div>
 
   <div id="hud"><div class="title">BOOT…</div></div>
+  <div id="toast"></div>
 
   <div id="touchControls">
     <div id="leftCluster">

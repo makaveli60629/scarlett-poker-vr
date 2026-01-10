@@ -1,7 +1,11 @@
-// /js/world.js — Scarlett MASTER WORLD v12 (FULL)
-// TRUE optional modules: uses dynamic imports so one missing/broken file won't kill the whole world.
+// /js/world.js — Scarlett MASTER WORLD v13 (FULL)
+// FIXES:
+// - SpawnPoints.build() now receives the REAL ctx (not a wrapper), so ctx.spawns.apply/get/map works.
+// - Adds missing anchors for scorpion seat/exit (harmless, helpful).
+// - Cleans up helper functions and removes stray brace issues.
+//
+// TRUE optional modules: dynamic imports so one missing/broken file won't kill the whole world.
 // Loads: lobby + store + rail + scorpion + bots + poker sim + spawn pads (optional).
-// Safe: falls back if modules fail, including GitHub Pages/Quest caching serving HTML instead of JS.
 
 export const World = {
   async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD }) {
@@ -10,26 +14,28 @@ export const World = {
       BUILD,
 
       colliders: [],
-      anchors: {},        // named points in world
-      beacons: {},        // named visual markers
-      spawns: {},         // spawn registry
+      anchors: {},
+      beacons: {},
+      spawns: {},       // will become SpawnPoints API object {map,get,apply}
       mode: "lobby",
-      tables: {},         // table refs
-      systems: {},        // store/ui/etc
+      tables: {},
+      systems: {},
     };
 
-    log?.(`[world] ✅ LOADER SIGNATURE: WORLD.JS V12 MASTER ACTIVE`);
+    log?.(`[world] ✅ LOADER SIGNATURE: WORLD.JS V13 MASTER ACTIVE`);
 
     // ---- base floor always ----
     this._buildBaseFloor(ctx);
 
-    // ---- hard anchors FIRST (so SpawnPoints can read them) ----
-    // These are your "master" defaults. Other modules can overwrite them later if needed.
-    ctx.anchors.lobby_spawn   = new THREE.Vector3(0, 0, 3.2);
-    ctx.anchors.store_spawn   = new THREE.Vector3(4.5, 0, -3.5);
-    ctx.anchors.spectator     = new THREE.Vector3(0, 0, -3.0);
-    ctx.anchors.table_seat_1  = new THREE.Vector3(0, 0, 0.95);
-    ctx.anchors.scorpion_gate = new THREE.Vector3(8.0, 0, 0.0);
+    // ---- anchors FIRST ----
+    ctx.anchors.lobby_spawn    = new THREE.Vector3(0, 0, 3.2);
+    ctx.anchors.store_spawn    = new THREE.Vector3(4.5, 0, -3.5);
+    ctx.anchors.spectator      = new THREE.Vector3(0, 0, -3.0);
+    ctx.anchors.table_seat_1   = new THREE.Vector3(0, 0, 1.55);
+
+    ctx.anchors.scorpion_gate  = new THREE.Vector3(8.0, 0, 0.0);
+    ctx.anchors.scorpion_seat_1= new THREE.Vector3(8.0, 0, 2.35);
+    ctx.anchors.scorpion_exit  = new THREE.Vector3(8.0, 0, 0.0);
 
     // ---- textures kit ----
     await safeCall("[textures] createTextureKit", async () => {
@@ -90,24 +96,25 @@ export const World = {
       const store = await sys.init(ctx);
       ctx.systems.store = store || ctx.systems.store;
 
-      // Add a beacon you can see from spawn
+      // beacon you can see from spawn
       addBeacon(ctx, "STORE", new THREE.Vector3(4.5, 1.9, -3.5));
     }, log);
 
-    // ---- spawn pads (optional, BUT NO LONGER A HARD IMPORT) ----
+    // ---- spawn pads (optional) ----
     await safeCall("[spawns] SpawnPoints.build", async () => {
-      // ensure container exists
-      ctx.spawns ||= {};
       const mod = await safeModule("./spawn_points.js");
       const sys = mod?.SpawnPoints;
       if (!sys?.build) return;
 
-      sys.build({ THREE, scene, world: ctx, log });
+      // ✅ CRITICAL FIX: pass REAL ctx
+      sys.build(ctx);
 
-      // Convenience alias
-      ctx.spawns.default = ctx.spawns.lobby_spawn || ctx.spawns.default || null;
-
-      log?.("[world] ✅ SpawnPoints built (pads + ctx.spawns)");
+      // sanity log to prove apply exists
+      if (ctx.spawns?.apply) {
+        log?.("[world] ✅ SpawnPoints wired (ctx.spawns.apply is live)");
+      } else {
+        log?.("[world] ⚠️ SpawnPoints built but ctx.spawns.apply missing (wrong export or build failed)");
+      }
     }, log);
 
     // ---- scorpion room ----
@@ -180,7 +187,7 @@ export const World = {
   },
 
   _forceMasterLayout(ctx) {
-    const { THREE, scene, log } = ctx;
+    const { scene, log } = ctx;
 
     // Store placement lock
     const store = scene.getObjectByName("SCARLETT_STORE") || ctx.systems.store?.group || ctx.systems.store;
@@ -198,6 +205,7 @@ export const World = {
 
     // Big neon sign
     if (!scene.getObjectByName("STORE_SIGN")) {
+      const { THREE } = ctx;
       const sign = new THREE.Mesh(
         new THREE.PlaneGeometry(2.8, 0.9),
         new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.85 })
@@ -214,6 +222,7 @@ export const World = {
 
     // Table neon pop
     if (!scene.getObjectByName("TABLE_NEON")) {
+      const { THREE } = ctx;
       const neon = new THREE.PointLight(0xff2d7a, 1.8, 10);
       neon.name = "TABLE_NEON";
       neon.position.set(0, 2.2, 0);
@@ -240,12 +249,10 @@ async function safeCall(label, fn, log) {
 
 async function safeModule(path) {
   try {
-    // cache-bust using the same v param if present
     const v = new URL(location.href).searchParams.get("v");
     const url = v ? `${path}?v=${encodeURIComponent(v)}` : path;
     return await import(url);
   } catch (e) {
-    // Important: if GitHub returns HTML/404, import throws here and we treat it as optional failure.
     console.error(`❌ module load failed: ${path}`, e);
     return null;
   }
@@ -262,4 +269,4 @@ function addBeacon(ctx, name, pos) {
   scene.add(m);
   ctx.beacons[name] = m;
   log?.(`[world] ✅ beacon: ${name}`);
-        }
+    }

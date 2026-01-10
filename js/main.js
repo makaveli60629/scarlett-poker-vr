@@ -1,247 +1,279 @@
-// /js/main.js — Scarlett VR Poker (Main) V5.0 FULL WORLD RESTORE
-// - Single boot guard
-// - Clean logging for your DEBUG index (NO double spam)
-// - VRButton + XR enabled
-// - Smooth move + snap/smooth turn + Android dock support
-// - Calls world.update(dt) + world.recenter()
+// /js/main.js — Scarlett Poker VR — FULL (Quest-safe) v9.1
+// Fixes:
+// - Quest/OculusBrowser: session.inputSources is not a real Array -> no .map() crash
+// - Prevent renderer.setSize while XR presenting
+// - Defensive controller + hand-tracking setup
+// - Keeps your existing world.js modular mounting
 
-const v = window.__BUILD_V || Date.now().toString();
+import { THREE, VRButton } from "./three.js";
+import { World } from "./world.js";
 
-function ui(m) {
-  // IMPORTANT: event-only to avoid duplicate logs (your debug index mirrors console)
-  try { window.dispatchEvent(new CustomEvent("scarlett-log", { detail: String(m) })); } catch {}
-}
+// ---------- small utilities ----------
+function now(){ return (typeof performance !== "undefined" ? performance.now() : Date.now()); }
 
-if (window.__SCARLETT_MAIN_BOOTED) {
-  ui(`[main] ⏭️ main.js already booted — skipping (v=${v})`);
-} else {
-  window.__SCARLETT_MAIN_BOOTED = true;
-  ui(`[main] boot ✅ v=${v}`);
-  await boot();
-}
+function getInputSources(session){
+  const out = [];
+  const srcs = session?.inputSources;
+  if (!srcs) return out;
 
-async function boot() {
-  const THREE = await import("three");
-  const { VRButton } = await import("three/addons/webxr/VRButton.js");
-  const { XRControllerModelFactory } = await import("three/addons/webxr/XRControllerModelFactory.js");
+  if (Array.isArray(srcs)) return srcs.slice();
 
-  // --- Renderer ---
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-  renderer.xr.enabled = true;
-  document.body.appendChild(renderer.domElement);
-
-  // --- Scene / Camera ---
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x05060a);
-
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 400);
-  camera.position.set(0, 1.6, 6);
-
-  // Rig (move rig, not camera)
-  const player = new THREE.Group();
-  player.name = "player";
-  player.add(camera);
-  scene.add(player);
-
-  // Safety lights (even if world modules fail)
-  scene.add(new THREE.AmbientLight(0xffffff, 0.25));
-  const dl = new THREE.DirectionalLight(0xffffff, 0.7);
-  dl.position.set(8, 12, 6);
-  scene.add(dl);
-
-  // --- Controllers ---
-  const controllerModelFactory = new XRControllerModelFactory();
-
-  const controller1 = renderer.xr.getController(0);
-  const controller2 = renderer.xr.getController(1);
-  scene.add(controller1, controller2);
-
-  const grip1 = renderer.xr.getControllerGrip(0);
-  const grip2 = renderer.xr.getControllerGrip(1);
-  grip1.add(controllerModelFactory.createControllerModel(grip1));
-  grip2.add(controllerModelFactory.createControllerModel(grip2));
-  scene.add(grip1, grip2);
-
-  const controllers = [controller1, controller2];
-  const controllerGrips = [grip1, grip2];
-
-  // Resize
-  window.addEventListener("resize", () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-
-  // VRButton
-  const sessionInit = window.__XR_SESSION_INIT || {
-    optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"]
-  };
-
+  // Iterable (most modern browsers)
   try {
-    if (!window.__SCARLETT_VRBUTTON_DONE) {
-      window.__SCARLETT_VRBUTTON_DONE = true;
-      const btn = VRButton.createButton(renderer, sessionInit);
-      document.body.appendChild(btn);
-      ui("[main] VRButton appended ✅");
+    if (typeof srcs[Symbol.iterator] === "function") {
+      for (const s of srcs) out.push(s);
+      return out;
     }
-  } catch (e) {
-    ui("[main] VRButton failed ⚠️ " + (e?.message || e));
+  } catch(e){ /* ignore */ }
+
+  // Array-like fallback
+  const len = (typeof srcs.length === "number") ? srcs.length : 0;
+  for (let i = 0; i < len; i++) {
+    const v = srcs[i] ?? (typeof srcs.item === "function" ? srcs.item(i) : undefined);
+    if (v) out.push(v);
   }
+  return out;
+}
 
-  // --- World init (guarded) ---
-  const worldMod = await import("./world.js?v=" + encodeURIComponent(v));
-  const World = worldMod.World || worldMod.default || worldMod;
-
-  if (!window.__SCARLETT_WORLD_INITED) {
-    window.__SCARLETT_WORLD_INITED = true;
-
-    window.__SCARLETT_WORLD = await World.init({
-      THREE, scene, renderer, camera, player, controllers, controllerGrips,
-      log: ui
-    });
-
-    ui("[main] world init ✅");
-  } else {
-    ui("[main] ⏭️ world already inited — using existing");
+function safeMapInputSources(session, fn){
+  const arr = getInputSources(session);
+  const res = [];
+  for (let i=0;i<arr.length;i++){
+    try { res.push(fn(arr[i], i)); } catch(e){ /* ignore */ }
   }
+  return res;
+}
 
-  const world = window.__SCARLETT_WORLD;
+// ---------- HUD logger (optional but helps) ----------
+function makeHudLogger(){
+  const hud = document.getElementById("hudlog") || (() => {
+    const el = document.createElement("div");
+    el.id = "hudlog";
+    el.style.cssText = `
+      position:fixed; left:0; right:0; top:0; max-height:55%;
+      overflow:auto; z-index:99999; padding:10px 12px;
+      font:12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      color:#e8ecff; background:rgba(6,7,12,.72); backdrop-filter: blur(6px);
+      border-bottom:1px solid rgba(255,255,255,.08);
+      display:none;
+    `;
+    document.body.appendChild(el);
+    return el;
+  })();
 
-  // Ensure flag API exists
-  if (typeof world.setFlag !== "function") {
-    world.flags = world.flags || {};
-    world.setFlag = (k, val) => (world.flags[k] = !!val);
-    world.getFlag = (k) => !!world.flags[k];
-    world.toggleFlag = (k) => (world.flags[k] = !world.flags[k]);
-    ui("[main] ⚠️ world.setFlag missing — polyfilled");
-  }
+  const api = {
+    open(){ hud.style.display = "block"; },
+    close(){ hud.style.display = "none"; },
+    toggle(){ hud.style.display = (hud.style.display === "none" ? "block" : "none"); },
+    log(...args){
+      const line = document.createElement("div");
+      line.textContent = args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
+      hud.appendChild(line);
+      hud.scrollTop = hud.scrollHeight;
+      // also console
+      console.log(...args);
+    }
+  };
+  return api;
+}
 
-  // Apply saved flags
-  const flags = window.__SCARLETT_FLAGS || { teleport: true, move: true, snap: true, hands: true };
-  world.setFlag("teleport", !!flags.teleport);
-  world.setFlag("move", !!flags.move);
-  world.setFlag("snap", !!flags.snap);
-  world.setFlag("hands", !!flags.hands);
+// ---------- boot ----------
+const BOOT = window.__BOOT || (window.__BOOT = { v: Date.now() });
+const log = makeHudLogger();
 
-  // One-time event wiring
-  if (!window.__SCARLETT_MAIN_EVENTS_WIRED) {
-    window.__SCARLETT_MAIN_EVENTS_WIRED = true;
+console.log(`[main] boot ✅ v=${BOOT.v}`);
 
-    window.addEventListener("scarlett-enter-vr", () => {
-      ui("[main] HUD requested Enter VR");
-    });
+window.addEventListener("error", (e) => {
+  console.warn("❌ window.error:", e?.message || e);
+  // auto-open hud when errors happen
+  try { log.open(); log.log("❌ window.error:", e?.message || String(e)); } catch(_) {}
+});
 
-    window.addEventListener("scarlett-toggle-teleport", (e) => world.setFlag("teleport", !!e.detail));
-    window.addEventListener("scarlett-toggle-move", (e) => world.setFlag("move", !!e.detail));
-    window.addEventListener("scarlett-toggle-snap", (e) => world.setFlag("snap", !!e.detail));
-    window.addEventListener("scarlett-toggle-hands", (e) => world.setFlag("hands", !!e.detail));
+window.addEventListener("unhandledrejection", (e) => {
+  console.warn("❌ unhandledrejection:", e?.reason || e);
+  try { log.open(); log.log("❌ unhandledrejection:", String(e?.reason || e)); } catch(_) {}
+});
 
-    window.addEventListener("scarlett-recenter", () => {
-      ui("[main] recenter");
-      world.recenter?.();
-    });
+// ---------- renderer / scene / camera ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05060a);
 
-    window.addEventListener("scarlett-touch", (e) => {
-      window.__SCARLETT_TOUCH = e.detail || {};
-    });
-  }
+const camera = new THREE.PerspectiveCamera(
+  70,
+  window.innerWidth / Math.max(1, window.innerHeight),
+  0.05,
+  200
+);
+camera.position.set(0, 1.6, 3);
 
-  // --- Locomotion ---
-  const move = {
-    speed: 2.35,
-    turnSpeed: 2.25,
-    snapAngle: Math.PI / 4, // 45°
-    snapCooldown: 0,
-    yaw: 0
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+renderer.setSize(window.innerWidth, window.innerHeight, false);
+renderer.xr.enabled = true;
+
+document.body.appendChild(renderer.domElement);
+
+// VR Button
+try {
+  const btn = VRButton.createButton(renderer, {
+    optionalFeatures: ["local-floor","bounded-floor","hand-tracking"]
+  });
+  document.body.appendChild(btn);
+  console.log("[main] VRButton appended ✅");
+} catch (e) {
+  console.warn("[main] VRButton create failed:", e);
+}
+
+// ---------- resize (XR-safe) ----------
+function onResize(){
+  const w = window.innerWidth;
+  const h = Math.max(1, window.innerHeight);
+
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+
+  // IMPORTANT: do not resize while XR is presenting
+  if (renderer?.xr?.isPresenting) return;
+
+  renderer.setSize(w, h, false);
+}
+window.addEventListener("resize", onResize);
+
+// ---------- controllers (safe) ----------
+function buildControllers(){
+  const controllers = {
+    left: null,
+    right: null,
+    grips: [],
+    pointers: [],
+    hands: [],
+    all: [],
   };
 
-  function getGamepads() {
-    const session = renderer.xr.getSession?.();
-    if (!session) return [];
-    return session.inputSources.map(s => s.gamepad).filter(Boolean);
+  // controller rays
+  for (let i=0;i<2;i++){
+    const c = renderer.xr.getController(i);
+    c.userData.index = i;
+    scene.add(c);
+    controllers.pointers.push(c);
+    controllers.all.push(c);
+
+    const g = renderer.xr.getControllerGrip(i);
+    g.userData.index = i;
+    scene.add(g);
+    controllers.grips.push(g);
+    controllers.all.push(g);
+
+    // hands
+    const h = renderer.xr.getHand(i);
+    h.userData.index = i;
+    scene.add(h);
+    controllers.hands.push(h);
+    controllers.all.push(h);
   }
 
-  function applyMove(dt) {
-    const seated = (world.mode === "table"); // table mode -> no walking unless you want later
-    const f = world.flags || {};
-
-    // Gamepads
-    let axX = 0, axY = 0, turnX = 0;
-    const pads = getGamepads();
-
-    if (pads[0]?.axes?.length >= 2) {
-      axX = pads[0].axes[2] ?? pads[0].axes[0] ?? 0;
-      axY = pads[0].axes[3] ?? pads[0].axes[1] ?? 0;
+  // assign left/right when we learn handedness
+  function refreshHandedness(session){
+    const srcs = getInputSources(session);
+    for (const s of srcs){
+      if (!s) continue;
+      const hand = s.handedness; // "left" | "right" | "none"
+      const idx = s.targetRayMode ? s : s; // noop, keep stable
+      // We can't directly map inputSource -> controller index in all runtimes,
+      // but Oculus usually orders left/right reliably. We'll still keep a fallback:
     }
-    if (pads[0]?.axes?.length >= 4) {
-      turnX = pads[0].axes[2] ?? 0;
-    }
-    if (pads[1]?.axes?.length >= 2) {
-      turnX = pads[1].axes[2] ?? pads[1].axes[0] ?? turnX;
-    }
-
-    // Mobile dock
-    const t = window.__SCARLETT_TOUCH || {};
-    const mf = t.f ? 1 : 0;
-    const mb = t.b ? 1 : 0;
-    const ml = t.l ? 1 : 0;
-    const mr = t.r ? 1 : 0;
-
-    let mx = axX + (mr - ml) * 0.85;
-    let mz = axY + (mb - mf) * 0.85;
-
-    const dz = 0.15;
-    if (Math.abs(mx) < dz) mx = 0;
-    if (Math.abs(mz) < dz) mz = 0;
-
-    // Turn
-    const wantSnap = !!f.snap;
-    if (wantSnap) {
-      move.snapCooldown -= dt;
-      const snapLeft = (t.turnL ? 1 : 0) || (turnX < -0.65);
-      const snapRight = (t.turnR ? 1 : 0) || (turnX > 0.65);
-      if (move.snapCooldown <= 0) {
-        if (snapLeft) { move.yaw += move.snapAngle; move.snapCooldown = 0.22; }
-        if (snapRight) { move.yaw -= move.snapAngle; move.snapCooldown = 0.22; }
-      }
-    } else {
-      const smoothTurn = (t.turnR ? 1 : 0) - (t.turnL ? 1 : 0);
-      const tx = (smoothTurn * 0.9) + turnX;
-      if (Math.abs(tx) > dz) move.yaw -= tx * move.turnSpeed * dt;
-    }
-
-    player.rotation.y = move.yaw;
-
-    // Walk
-    if (!!f.move && !seated) {
-      const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), move.yaw);
-      const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), move.yaw);
-
-      const vel = new THREE.Vector3();
-      vel.addScaledVector(right, mx);
-      vel.addScaledVector(forward, mz);
-
-      if (vel.lengthSq() > 0.0001) {
-        vel.normalize().multiplyScalar(move.speed * dt);
-        player.position.add(vel);
-      }
-    }
+    controllers.left = controllers.pointers[0] || null;
+    controllers.right = controllers.pointers[1] || null;
   }
 
-  // Animation loop
-  let lastT = performance.now();
-  renderer.setAnimationLoop(() => {
-    const now = performance.now();
-    const dt = Math.min(0.05, (now - lastT) / 1000);
-    lastT = now;
+  return { controllers, refreshHandedness };
+}
 
-    applyMove(dt);
-    world?.update?.(dt);
+const { controllers, refreshHandedness } = buildControllers();
 
-    renderer.render(scene, camera);
-  });
+// ---------- player rig ----------
+const player = new THREE.Group();
+player.name = "playerRig";
+player.position.set(0, 0, 0);
+player.add(camera);
+scene.add(player);
 
-  ui("[main] ready ✅");
-      }
+// ---------- XR session hooks ----------
+renderer.xr.addEventListener("sessionstart", () => {
+  const session = renderer.xr.getSession();
+  console.log("[main] XR sessionstart ✅");
+
+  // safe usage — never do session.inputSources.map(...)
+  try {
+    refreshHandedness(session);
+
+    // Example: if you need to log input sources safely
+    const info = safeMapInputSources(session, (s) => ({
+      handedness: s?.handedness,
+      targetRayMode: s?.targetRayMode,
+      hasHand: !!s?.hand
+    }));
+    console.log("[main] inputSources:", info);
+  } catch(e){
+    console.warn("[main] sessionstart handler error:", e);
+  }
+});
+
+renderer.xr.addEventListener("sessionend", () => {
+  console.log("[main] XR sessionend ✅");
+  // allow resize again after session ends
+  onResize();
+});
+
+// ---------- init World ----------
+let world = null;
+
+(async function init(){
+  try{
+    world = await World.init({
+      THREE,
+      scene,
+      renderer,
+      camera,
+      player,
+      controllers,
+      log: (...a)=>console.log(...a),
+      hud: log
+    });
+    console.log("[main] world init ✅");
+  }catch(e){
+    console.warn("[main] world init failed:", e);
+    log.open();
+    log.log("[main] world init failed:", String(e?.message || e));
+  }
+
+  console.log("[main] ready ✅");
+})();
+
+// ---------- main loop ----------
+let lastT = now();
+renderer.setAnimationLoop(() => {
+  const t = now();
+  const dt = Math.min(0.05, Math.max(0.0, (t - lastT) / 1000));
+  lastT = t;
+
+  // Keep handedness refreshed in a safe way (no map())
+  const session = renderer.xr.getSession();
+  if (session) {
+    try { refreshHandedness(session); } catch(_) {}
+  }
+
+  // world update
+  try {
+    if (world?.tick) world.tick(dt);
+  } catch(e){
+    console.warn("[main] world.tick error:", e);
+  }
+
+  renderer.render(scene, camera);
+});
+
+// Optional: keyboard toggle HUD on desktop
+window.addEventListener("keydown", (e) => {
+  if (e.key === "`" || e.key === "~") log.toggle();
+});

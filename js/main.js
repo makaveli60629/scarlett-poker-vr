@@ -1,8 +1,9 @@
-// /js/main.js — Scarlett VR Poker MAIN v3.5 (FULL)
-// FIX: Quest NotSupportedError via tiered XR session init fallback
-// - Removes invalid/fragile init fields (domOverlay/depthSensing/etc) from default path
-// - Overrides VRButton click to requestSession with safe fallbacks
-// - Keeps your scarlett-enter-vr event working
+// /js/main.js — Scarlett VR Poker MAIN v3.6 (FULL)
+// - main.js owns renderer.setAnimationLoop
+// - Quest-safe XR start: tiered requestSession fallback + single-flight lock
+// - Prevents double requestSession (InvalidStateError)
+// - Prevents resize while presenting (THREE warning)
+// - Publishes ctx.Controls for RoomManager seat/leave hooks
 
 import { VRButton } from "./VRButton.js";
 import * as THREE_NS from "./three.js";
@@ -51,7 +52,17 @@ function makePlayerRig(THREE) {
   return rig;
 }
 
+let __XR_SESSION_ACTIVE = false;
+let __XR_SESSION_STARTING = false;
+
+function isPresenting(renderer) {
+  try { return !!renderer?.xr?.isPresenting; } catch { return false; }
+}
+
 function resize(renderer, camera) {
+  // Don’t resize while XR is presenting (Quest warning + potential glitches)
+  if (isPresenting(renderer)) return;
+
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -60,24 +71,20 @@ function resize(renderer, camera) {
 // ---- XR session init: SAFE by default + fallback tiers ----
 
 function sanitizeSessionInit(init) {
-  // Clone shallow and scrub common foot-guns for Quest Browser
   const out = { ...(init || {}) };
 
-  // Only keep optionalFeatures if it is an array of strings.
   if (Array.isArray(out.optionalFeatures)) {
     out.optionalFeatures = out.optionalFeatures
       .filter((v) => typeof v === "string")
-      // IMPORTANT: "local" / "viewer" are NOT features; they're reference space types.
+      // reference space types are NOT features
       .filter((v) => v !== "local" && v !== "viewer");
   } else {
     out.optionalFeatures = [];
   }
 
-  // Strip fragile option blocks that can cause NotSupportedError on Quest
+  // Strip fragile option blocks that commonly cause NotSupportedError on Quest
   delete out.domOverlay;
   delete out.depthSensing;
-
-  // Strip other unsupported/nonstandard fields if someone injected them
   delete out.requiredFeatures;
 
   return out;
@@ -86,7 +93,6 @@ function sanitizeSessionInit(init) {
 function makeSessionInitTiers(baseInit) {
   const base = sanitizeSessionInit(baseInit);
 
-  // Tier A: Quest-safe "good" set
   const tierA = {
     ...base,
     optionalFeatures: Array.from(new Set([
@@ -99,13 +105,8 @@ function makeSessionInitTiers(baseInit) {
     ])),
   };
 
-  // Tier B: Common minimal
   const tierB = { optionalFeatures: ["local-floor", "bounded-floor"] };
-
-  // Tier C: Bare minimum
   const tierC = { optionalFeatures: ["local-floor"] };
-
-  // Tier D: Absolute bare (some browsers accept empty init)
   const tierD = {};
 
   return [tierA, tierB, tierC, tierD];
@@ -127,7 +128,7 @@ async function requestImmersiveVRWithFallback({ renderer, tiers }) {
       lastErr = e;
       warn(`[XR] requestSession failed (${e?.name || "Error"}): ${e?.message || e}`);
 
-      // Keep falling back for NotSupportedError; otherwise bubble up.
+      // Only fall back on NotSupportedError
       if (e?.name && e.name !== "NotSupportedError") throw e;
     }
   }
@@ -156,13 +157,11 @@ async function boot() {
 
   window.addEventListener("resize", () => resize(renderer, camera));
 
-  // Use index.html canonical session init if present, but sanitize it (Quest-safe)
+  // Canonical session init if present (sanitized)
   const rawSessionInit =
     window.__XR_SESSION_INIT ||
     window.__SESSION_INIT__ || {
       optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"],
-      // NOTE: domOverlay removed by default; it was causing NotSupportedError on Quest.
-      // domOverlay: { root: document.body },
     };
 
   const sessionInit = sanitizeSessionInit(rawSessionInit);
@@ -171,45 +170,56 @@ async function boot() {
   // VRButton
   let vrDomButton = null;
   try {
-    // Create VRButton without passing init (we will handle requestSession ourselves)
-    vrDomButton = (VRButton.createButton.length >= 2)
-      ? VRButton.createButton(renderer) // intentionally omit sessionInit
-      : VRButton.createButton(renderer);
-
+    // Create VRButton without passing init (we handle requestSession ourselves)
+    vrDomButton = VRButton.createButton(renderer);
     vrDomButton?.setAttribute?.("data-scarlett-vrbutton", "1");
 
-    // Mount
     if (vrDomButton && !vrDomButton.isConnected) document.body.appendChild(vrDomButton);
-
     log("[main] VRButton ready ✅");
   } catch (e) {
     warn("[main] VRButton failed (non-fatal)", e);
   }
 
-  // Override VRButton click so it uses our fallback tiers (prevents NotSupportedError hard-fail)
+  async function startXRFromUI() {
+    if (!navigator.xr) return warn("[XR] navigator.xr missing");
+    if (__XR_SESSION_ACTIVE) return warn("[XR] already active; ignoring start request");
+    if (__XR_SESSION_STARTING) return warn("[XR] start already in progress; ignoring");
+
+    __XR_SESSION_STARTING = true;
+
+    try {
+      const session = await requestImmersiveVRWithFallback({ renderer, tiers: sessionTiers });
+
+      __XR_SESSION_ACTIVE = true;
+      __XR_SESSION_STARTING = false;
+
+      session.addEventListener("end", () => {
+        __XR_SESSION_ACTIVE = false;
+        __XR_SESSION_STARTING = false;
+        log("[XR] session ended");
+      });
+
+      log("[main] VR session started via fallback ✅");
+    } catch (e) {
+      __XR_SESSION_ACTIVE = false;
+      __XR_SESSION_STARTING = false;
+      err("[main] ❌ VR session failed (all tiers)", e);
+    }
+  }
+
+  // Override VRButton click so internal VRButton handler can't double-start
   if (vrDomButton) {
-    vrDomButton.addEventListener("click", async (ev) => {
-      // Capture + stop so the internal VRButton handler (if any) doesn't run first
+    vrDomButton.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-
-      try {
-        await requestImmersiveVRWithFallback({ renderer, tiers: sessionTiers });
-        log("[main] VR session started via fallback ✅");
-      } catch (e) {
-        err("[main] ❌ VR session failed (all tiers)", e);
-      }
+      startXRFromUI();
     }, { capture: true });
   }
 
-  // HUD enter event -> click real VR button
+  // HUD enter event -> call starter directly (no programmatic clicks)
   window.addEventListener("scarlett-enter-vr", () => {
-    try {
-      vrDomButton?.click?.();
-      log("[main] scarlett-enter-vr -> VRButton click ✅");
-    } catch (e) {
-      warn("[main] scarlett-enter-vr failed", e);
-    }
+    startXRFromUI();
+    log("[main] scarlett-enter-vr -> startXRFromUI ✅");
   });
 
   const controllers = { left: null, right: null, hands: [] };
@@ -250,6 +260,7 @@ async function boot() {
   try {
     if (Controls?.init) {
       Controls.init({ ...ctx, world });
+      ctx.Controls = Controls; // IMPORTANT: RoomManager uses ctx.Controls for seat/leave
       log("[main] controls init ✅");
     }
   } catch (e) {
@@ -281,7 +292,9 @@ async function boot() {
     try {
       Controls?.update?.(dt);
       world?.update?.(dt);
+
       if (!didAutoTP && retryFrames-- > 0) tryAutoTeleport();
+
       renderer.render(scene, camera);
     } catch (e) {
       err("[main] render loop error", e);

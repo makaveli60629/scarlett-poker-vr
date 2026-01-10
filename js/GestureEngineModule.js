@@ -1,10 +1,6 @@
-// /js/gesture_engine.js — GestureEngineModule v1.0
-// ✅ Per-hand pinch detection (thumb-tip ↔ index-finger-tip)
-// ✅ Emits events: pinchstart, pinchend
-// ✅ update(frame, referenceSpace)
-
+// /js/gesture_engine.js — GestureEngine v1.0 (FULL)
 export const GestureEngine = (() => {
-  let THREE = null, renderer = null, scene = null, camera = null, log = console.log;
+  let THREE = null, renderer = null, log = console.log;
 
   const listeners = new Map();
   const state = {
@@ -22,13 +18,10 @@ export const GestureEngine = (() => {
     listeners.get(evt).add(cb);
     return () => listeners.get(evt)?.delete(cb);
   }
-
   function emit(evt, payload) {
     const set = listeners.get(evt);
     if (!set) return;
-    for (const cb of set) {
-      try { cb(payload); } catch (e) { log(`[GestureEngine] listener error: ${e?.message || e}`); }
-    }
+    for (const cb of set) { try { cb(payload); } catch (e) { log(`[GestureEngine] listener error: ${e?.message || e}`); } }
   }
 
   function getJointWorld(handObj, jointName, out) {
@@ -41,22 +34,15 @@ export const GestureEngine = (() => {
   function updateOne(handedness, index) {
     const handObj = renderer?.xr?.getHand?.(index);
     const h = state.hands[handedness];
-
     h.last = h.pinch;
 
-    if (!handObj) {
-      h.pinch = false; h.strength = 0; h.jointsOK = false;
-      return;
-    }
+    if (!handObj) { h.pinch = false; h.strength = 0; h.jointsOK = false; return; }
 
     const okA = getJointWorld(handObj, "index-finger-tip", state.tmpA);
     const okB = getJointWorld(handObj, "thumb-tip", state.tmpB);
 
     h.jointsOK = !!(okA && okB);
-    if (!h.jointsOK) {
-      h.pinch = false; h.strength = 0;
-      return;
-    }
+    if (!h.jointsOK) { h.pinch = false; h.strength = 0; return; }
 
     const dist = state.tmpA.distanceTo(state.tmpB);
     h.pinch = dist < 0.028;
@@ -70,20 +56,14 @@ export const GestureEngine = (() => {
     init(ctx) {
       THREE = ctx.THREE;
       renderer = ctx.renderer;
-      scene = ctx.scene;
-      camera = ctx.camera;
-      log = ctx.log || ((m) => ctx.LOG?.push?.("log", m)) || console.log;
-
+      log = ctx.log || console.log;
       state.tmpA = new THREE.Vector3();
       state.tmpB = new THREE.Vector3();
-
       log("[GestureEngine] init ✅");
     },
-
     on,
     setEnabled(v) { state.enabled = !!v; },
     getState() { return state; },
-
     update(frame, referenceSpace) {
       if (!state.enabled) return;
       updateOne("left", 0);

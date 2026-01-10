@@ -1,11 +1,5 @@
 // /js/world.js — Scarlett MASTER WORLD v13 (FULL)
-// FIXES:
-// - SpawnPoints.build() now receives the REAL ctx (not a wrapper), so ctx.spawns.apply/get/map works.
-// - Adds missing anchors for scorpion seat/exit (harmless, helpful).
-// - Cleans up helper functions and removes stray brace issues.
-//
-// TRUE optional modules: dynamic imports so one missing/broken file won't kill the whole world.
-// Loads: lobby + store + rail + scorpion + bots + poker sim + spawn pads (optional).
+// FIX: SpawnPoints.build(ctx) must receive REAL ctx (not wrapper), otherwise ctx.spawns.apply/get/map never exist.
 
 export const World = {
   async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD }) {
@@ -16,7 +10,7 @@ export const World = {
       colliders: [],
       anchors: {},
       beacons: {},
-      spawns: {},       // will become SpawnPoints API object {map,get,apply}
+      spawns: {},       // will become SpawnPoints API {map,get,apply}
       mode: "lobby",
       tables: {},
       systems: {},
@@ -24,20 +18,17 @@ export const World = {
 
     log?.(`[world] ✅ LOADER SIGNATURE: WORLD.JS V13 MASTER ACTIVE`);
 
-    // ---- base floor always ----
     this._buildBaseFloor(ctx);
 
-    // ---- anchors FIRST ----
-    ctx.anchors.lobby_spawn    = new THREE.Vector3(0, 0, 3.2);
-    ctx.anchors.store_spawn    = new THREE.Vector3(4.5, 0, -3.5);
-    ctx.anchors.spectator      = new THREE.Vector3(0, 0, -3.0);
-    ctx.anchors.table_seat_1   = new THREE.Vector3(0, 0, 1.55);
+    // anchors (safe defaults)
+    ctx.anchors.lobby_spawn     = new THREE.Vector3(0, 0, 3.2);
+    ctx.anchors.store_spawn     = new THREE.Vector3(4.5, 0, -3.5);
+    ctx.anchors.spectator       = new THREE.Vector3(0, 0, -3.0);
+    ctx.anchors.table_seat_1    = new THREE.Vector3(0, 0, 1.55);
+    ctx.anchors.scorpion_gate   = new THREE.Vector3(8.0, 0, 0.0);
+    ctx.anchors.scorpion_seat_1 = new THREE.Vector3(8.0, 0, 2.35);
+    ctx.anchors.scorpion_exit   = new THREE.Vector3(8.0, 0, 0.0);
 
-    ctx.anchors.scorpion_gate  = new THREE.Vector3(8.0, 0, 0.0);
-    ctx.anchors.scorpion_seat_1= new THREE.Vector3(8.0, 0, 2.35);
-    ctx.anchors.scorpion_exit  = new THREE.Vector3(8.0, 0, 0.0);
-
-    // ---- textures kit ----
     await safeCall("[textures] createTextureKit", async () => {
       const mod = await safeModule("./textures.js");
       const fn = mod?.createTextureKit;
@@ -46,21 +37,18 @@ export const World = {
       log?.("[world] ✅ mounted textures via createTextureKit()");
     }, log);
 
-    // ---- lights ----
     await safeCall("[lights] LightsPack.build", async () => {
       const mod = await safeModule("./lights_pack.js");
       const sys = mod?.LightsPack;
       if (sys?.build) await sys.build(ctx);
     }, log);
 
-    // ---- walls/colliders ----
     await safeCall("[walls] SolidWalls.build", async () => {
       const mod = await safeModule("./solid_walls.js");
       const sys = mod?.SolidWalls;
       if (sys?.build) await sys.build(ctx);
     }, log);
 
-    // ---- table factory ----
     await safeCall("[tables] TableFactory.build", async () => {
       const mod = await safeModule("./table_factory.js");
       const sys = mod?.TableFactory;
@@ -69,7 +57,6 @@ export const World = {
       if (!ctx.tables.lobby && out?.lobby) ctx.tables.lobby = out.lobby;
     }, log);
 
-    // ---- spectator rail ----
     await safeCall("[rail] SpectatorRail.build", async () => {
       const mod = await safeModule("./spectator_rail.js");
       const sys = mod?.SpectatorRail;
@@ -81,43 +68,30 @@ export const World = {
       }
     }, log);
 
-    // ---- teleport machine ----
     await safeCall("[teleport] TeleportMachine.init", async () => {
       const mod = await safeModule("./teleport_machine.js");
       const sys = mod?.TeleportMachine;
       if (sys?.init) await sys.init(ctx);
     }, log);
 
-    // ---- store ----
     await safeCall("[store] StoreSystem.init", async () => {
       const mod = await safeModule("./store.js");
       const sys = mod?.StoreSystem;
       if (!sys?.init) return;
       const store = await sys.init(ctx);
       ctx.systems.store = store || ctx.systems.store;
-
-      // beacon you can see from spawn
       addBeacon(ctx, "STORE", new THREE.Vector3(4.5, 1.9, -3.5));
     }, log);
 
-    // ---- spawn pads (optional) ----
+    // ✅ critical: pass REAL ctx, not a wrapper
     await safeCall("[spawns] SpawnPoints.build", async () => {
       const mod = await safeModule("./spawn_points.js");
       const sys = mod?.SpawnPoints;
       if (!sys?.build) return;
-
-      // ✅ CRITICAL FIX: pass REAL ctx
       sys.build(ctx);
-
-      // sanity log to prove apply exists
-      if (ctx.spawns?.apply) {
-        log?.("[world] ✅ SpawnPoints wired (ctx.spawns.apply is live)");
-      } else {
-        log?.("[world] ⚠️ SpawnPoints built but ctx.spawns.apply missing (wrong export or build failed)");
-      }
+      log?.(ctx.spawns?.apply ? "[world] ✅ SpawnPoints wired (ctx.spawns.apply live)" : "[world] ⚠️ SpawnPoints missing apply()");
     }, log);
 
-    // ---- scorpion room ----
     await safeCall("[scorpion] ScorpionRoom.build", async () => {
       const mod = await safeModule("./scorpion_room.js");
       const sys = mod?.ScorpionRoom;
@@ -126,7 +100,6 @@ export const World = {
       ctx.systems.scorpion = sc || ctx.systems.scorpion;
     }, log);
 
-    // ---- UI + VR UI ----
     await safeCall("[ui] UI.init", async () => {
       const mod = await safeModule("./ui.js");
       const sys = mod?.UI;
@@ -145,28 +118,24 @@ export const World = {
       if (sys?.init) await sys.init(ctx);
     }, log);
 
-    // ---- rooms ----
     await safeCall("[rooms] RoomManager.init", async () => {
       const mod = await safeModule("./room_manager.js");
       const sys = mod?.RoomManager;
       if (sys?.init) await sys.init(ctx);
     }, log);
 
-    // ---- bots ----
     await safeCall("[bots] Bots.init", async () => {
       const mod = await safeModule("./bots.js");
       const sys = mod?.Bots;
       if (sys?.init) await sys.init(ctx);
     }, log);
 
-    // ---- poker sim ----
     await safeCall("[poker] PokerSim.init", async () => {
       const mod = await safeModule("./poker_sim.js");
       const sys = mod?.PokerSim;
       if (sys?.init) await sys.init(ctx);
     }, log);
 
-    // ---- final master layout lock ----
     this._forceMasterLayout(ctx);
 
     log?.(`[world] ✅ REAL WORLD LOADED (mounted=MASTER)`);
@@ -187,25 +156,21 @@ export const World = {
   },
 
   _forceMasterLayout(ctx) {
-    const { scene, log } = ctx;
+    const { THREE, scene, log } = ctx;
 
-    // Store placement lock
     const store = scene.getObjectByName("SCARLETT_STORE") || ctx.systems.store?.group || ctx.systems.store;
     if (store?.position) {
       store.position.set(4.5, 0, -3.5);
       store.visible = true;
     }
 
-    // Rail visibility boost
     const rail = scene.getObjectByName("SPECTATOR_RAIL") || ctx.rail;
     if (rail?.position) {
       rail.position.set(0, 0, 0);
       rail.visible = true;
     }
 
-    // Big neon sign
     if (!scene.getObjectByName("STORE_SIGN")) {
-      const { THREE } = ctx;
       const sign = new THREE.Mesh(
         new THREE.PlaneGeometry(2.8, 0.9),
         new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.85 })
@@ -220,9 +185,7 @@ export const World = {
       scene.add(glow);
     }
 
-    // Table neon pop
     if (!scene.getObjectByName("TABLE_NEON")) {
-      const { THREE } = ctx;
       const neon = new THREE.PointLight(0xff2d7a, 1.8, 10);
       neon.name = "TABLE_NEON";
       neon.position.set(0, 2.2, 0);
@@ -233,8 +196,7 @@ export const World = {
   }
 };
 
-// ---------------- helpers ----------------
-
+// helpers
 async function safeCall(label, fn, log) {
   try {
     log?.(`[world] calling ${label}`);
@@ -269,4 +231,4 @@ function addBeacon(ctx, name, pos) {
   scene.add(m);
   ctx.beacons[name] = m;
   log?.(`[world] ✅ beacon: ${name}`);
-    }
+        }

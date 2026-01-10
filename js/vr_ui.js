@@ -1,91 +1,73 @@
-// /js/vr_ui.js — Scarlett VR Poker (VR UI v2.0)
-// Fix: missing avatar textures no longer spam errors.
-// Uses canvas fallback textures if assets are missing.
+// /js/vr_ui.js — Scarlett VR UI (FULL)
+// - Uses TextureKit to resolve avatar textures safely (supports spaces/case).
+// - Exports: initVRUI(ctx)
 
-const seenMissing = new Set();
+export async function initVRUI(ctx) {
+  const { THREE, scene, renderer, camera, player, log, world } = ctx;
+  const ui = (m) => (log ? log(m) : console.log(m));
 
-function ui(m){
-  try { window.dispatchEvent(new CustomEvent("scarlett-log", { detail: String(m) })); } catch {}
-  try { console.log(m); } catch {}
-}
-
-function onceMissing(path){
-  if (seenMissing.has(path)) return;
-  seenMissing.add(path);
-  ui(`[ui] missing texture: ${path}`);
-}
-
-function makeFallbackTexture(THREE, label){
-  const c = document.createElement("canvas");
-  c.width = 256; c.height = 256;
-  const g = c.getContext("2d");
-  g.fillStyle = "#0b0d14";
-  g.fillRect(0,0,c.width,c.height);
-  g.fillStyle = "#7fe7ff";
-  g.font = "bold 18px system-ui, sans-serif";
-  g.fillText("SCARLETT VR", 56, 120);
-  g.fillStyle = "#ff2d7a";
-  g.fillText(label, 96, 150);
-  const tex = new THREE.CanvasTexture(c);
-  tex.needsUpdate = true;
-  return tex;
-}
-
-async function tryLoadTexture(THREE, url, label){
-  const loader = new THREE.TextureLoader();
-  return await new Promise((resolve) => {
-    loader.load(
-      url,
-      (t) => resolve(t),
-      undefined,
-      () => {
-        onceMissing(url);
-        resolve(makeFallbackTexture(THREE, label));
-      }
-    );
-  });
-}
-
-export async function initVRUI(ctx){
-  const { THREE, scene } = ctx;
-  if (!THREE || !scene) return;
-
-  if (scene.userData.__vruiMounted) return;
-  scene.userData.__vruiMounted = true;
-
-  const base = "assets/textures/avatars/";
-  const handsTex = await tryLoadTexture(THREE, base + "Hands.jpg", "Hands");
-  const watchTex = await tryLoadTexture(THREE, base + "Watch.jpg", "Watch");
-  const menuTex  = await tryLoadTexture(THREE, base + "Menu hand.jpg", "Menu");
-
-  const planeGeo = new THREE.PlaneGeometry(0.18, 0.18);
-  function addPlane(tex, x, y, z){
-    const m = new THREE.MeshBasicMaterial({ map: tex, transparent:true, opacity: 0.95 });
-    const p = new THREE.Mesh(planeGeo, m);
-    p.position.set(x,y,z);
-    scene.add(p);
-    return p;
+  const textureKit = scene.userData.textureKit || renderer.__SCARLETT_TEXTUREKIT;
+  if (!textureKit) {
+    ui("[ui] ⚠️ No textureKit found. (textures.js not mounted?)");
   }
 
-  const handsPlane = addPlane(handsTex, -0.35, 1.45, 1.2);
-  const watchPlane = addPlane(watchTex,  0.35, 1.45, 1.2);
-  const menuPlane  = addPlane(menuTex,   0.00, 1.65, 1.1);
+  // Simple “hands/gloves” visual anchor (safe default)
+  const root = new THREE.Group();
+  root.name = "scarlett_vr_ui";
+  scene.add(root);
 
-  const start = performance.now();
-  const tick = () => {
-    const t = (performance.now() - start) * 0.001;
-    handsPlane.position.y = 1.45 + Math.sin(t * 1.7) * 0.02;
-    watchPlane.position.y = 1.45 + Math.sin(t * 1.7 + 1.2) * 0.02;
-    menuPlane.position.y  = 1.65 + Math.sin(t * 1.3 + 2.1) * 0.015;
-    menuPlane.rotation.z  = Math.sin(t * 0.8) * 0.08;
+  // A small floating badge near player (debug visible)
+  const badge = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.28, 0.10),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.9 })
+  );
+  badge.position.set(0.0, 1.65, -0.65);
+  root.add(badge);
+
+  // Build a tiny canvas texture for the badge so it always works
+  {
+    const c = document.createElement("canvas");
+    c.width = 512; c.height = 192;
+    const g = c.getContext("2d");
+    g.fillStyle = "rgba(10,12,20,.85)";
+    g.fillRect(0,0,c.width,c.height);
+    g.strokeStyle = "rgba(127,231,255,.65)";
+    g.lineWidth = 6;
+    g.strokeRect(10,10,c.width-20,c.height-20);
+    g.fillStyle = "rgba(232,236,255,.95)";
+    g.font = "bold 54px system-ui";
+    g.fillText("SCARLETT", 46, 78);
+    g.font = "28px system-ui";
+    g.fillStyle = "rgba(152,160,199,.95)";
+    g.fillText("VR Poker", 46, 132);
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    badge.material.map = tex;
+    badge.material.needsUpdate = true;
+  }
+
+  // Try loading avatar textures (no spam, only summary)
+  let handsTex=null, watchTex=null, menuTex=null;
+  if (textureKit) {
+    handsTex = await textureKit.getAvatarHands();
+    watchTex = await textureKit.getAvatarWatch();
+    menuTex  = await textureKit.getAvatarMenuHand();
+  }
+
+  ui(`[ui] avatar textures: hands=${!!handsTex} watch=${!!watchTex} menuHand=${!!menuTex}`);
+
+  // Optional: expose to world for future use
+  world.__ui = world.__ui || {};
+  world.__ui.textures = { handsTex, watchTex, menuTex };
+
+  // Update loop hook (badge follows camera gently)
+  world.__ui.update = (dt) => {
+    // keep badge in front of the camera (small smoothing)
+    const target = new THREE.Vector3(0, 0, -0.65).applyMatrix4(camera.matrixWorld);
+    badge.position.lerp(target, 0.25);
+    badge.quaternion.slerp(camera.quaternion, 0.25);
   };
 
-  if (ctx.world && typeof ctx.world.update === "function") {
-    const prev = ctx.world.update;
-    ctx.world.update = (dt) => { try { prev(dt); } catch {} try { tick(); } catch {} };
-  } else {
-    scene.userData.__vruiTick = tick;
-  }
-
-  return { handsPlane, watchPlane, menuPlane };
+  return { root };
 }

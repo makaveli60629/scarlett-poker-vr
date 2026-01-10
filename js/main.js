@@ -1,349 +1,400 @@
-// /js/main.js — Scarlett Poker VR Boot v12.4 (FULL, GitHub Pages safe)
-// ✅ Fixes: movement always works (Quest + Android)
-// ✅ Fixes: GitHub Pages imports (no "three" bare imports)
-// ✅ Keeps: Controls + Teleport + Hands + DealingMix + PokerSim pipeline
+// /js/main.js — Scarlett MASTER BOOT v14.2 (FULL)
+// ✅ World.update(dt) loop
+// ✅ Controllers array + axes capture for World locomotion
+// ✅ Android: dual sticks move/look + HUD buttons (Action/Teleport)
+// ✅ Android: tap to click + 2-finger teleport fallback
+// ✅ Debug hub non-overlapping
 
 import * as THREE from "./three.js";
-import { VRButton } from "./VRButton.js";
-import { XRControllerModelFactory } from "./XRControllerModelFactory.js";
 
-import { initWorld } from "./world.js";
-import { Controls } from "./controls.js";
-import { Teleport } from "./teleport.js";
-import { DealingMix } from "./dealingMix.js";
-import { HandsSystem } from "./hands.js";
-import { PokerSim } from "./poker.js";
-
-// ---------- LOG ----------
-const logEl = document.getElementById("log");
-const log = (m, ...rest) => {
-  try { console.log(m, ...rest); } catch {}
+async function loadVRButton() {
   try {
-    if (logEl) {
-      logEl.textContent += "\n" + String(m);
-      logEl.scrollTop = logEl.scrollHeight;
+    const mod = await import("./VRButton.js");
+    return mod.VRButton || mod.default || null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadWorld(BUILD) {
+  const mod = await import(`./world.js?v=${BUILD}`);
+  return mod.World;
+}
+
+const BUILD = Date.now();
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+const app = document.getElementById("app");
+const btnDebug = document.getElementById("btnDebug");
+const btnMenu = document.getElementById("btnMenu");
+
+// Create HUD buttons if missing (safe)
+(function ensureHudButtons(){
+  const hud = document.getElementById("hud");
+  if (!hud) return;
+
+  const need = (id, label) => {
+    let b = document.getElementById(id);
+    if (!b) {
+      b = document.createElement("button");
+      b.className = "chip";
+      b.id = id;
+      b.textContent = label;
+      hud.appendChild(b);
     }
-  } catch {}
-};
+    return b;
+  };
 
-const BOOT_V = window.__BUILD_V || Date.now().toString();
-log("BOOT v=" + BOOT_V);
+  need("btnAction", "Action");
+  need("btnTeleport", "Teleport");
+})();
 
-// ---------- TUNING ----------
-const GAME = {
-  seats: 6,
-  startingStack: 20000,
-  decisionSecondsPerPlayer: 15,
-  approxStreetSeconds() { return this.seats * this.decisionSecondsPerPlayer; },
-  tDealHole: 6.0,
-  tShowdown: 8.0,
-  tNextHand: 4.0,
-};
+const btnAction = document.getElementById("btnAction");
+const btnTeleport = document.getElementById("btnTeleport");
 
-const STREET_SECONDS = Math.max(20, GAME.approxStreetSeconds());
-const tFlop = STREET_SECONDS;
-const tTurn = STREET_SECONDS;
-const tRiver = STREET_SECONDS;
+// Renderer
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.xr.enabled = true;
+app.appendChild(renderer.domElement);
 
-// ---------- SCENE ----------
+// Scene/camera/player rig
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x05060a);
-scene.fog = new THREE.Fog(0x05060a, 6, 120);
 
-// ---------- CAMERA ----------
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 300);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 1200);
 
-// ---------- RENDERER ----------
-const renderer = new THREE.WebGLRenderer({
-  antialias: false,
-  powerPreference: "high-performance",
-});
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.xr.enabled = true;
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-
-try { renderer.xr.setReferenceSpaceType("local-floor"); } catch {}
-document.body.appendChild(renderer.domElement);
-
-// VR Button
-try {
-  document.body.appendChild(VRButton.createButton(renderer));
-  log("[main] VRButton appended ✅");
-} catch (e) {
-  log("❌ VRButton failed: " + (e?.message || e));
-}
-
-// ---------- XR tuning ----------
-renderer.xr.addEventListener("sessionstart", () => {
-  try {
-    renderer.setPixelRatio(1.0);
-    renderer.xr.setFoveation?.(1.0);
-  } catch {}
-  log("[xr] sessionstart ✅");
-});
-renderer.xr.addEventListener("sessionend", () => {
-  try { renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25)); } catch {}
-  log("[xr] sessionend ✅");
-});
-
-// ---------- PLAYER RIG ----------
 const player = new THREE.Group();
-player.name = "PlayerRig";
-player.add(camera);
 scene.add(player);
 
-player.position.set(0, 0, 3.6);
-player.rotation.set(0, 0, 0);
 camera.position.set(0, 1.65, 0);
+player.add(camera);
 
-// ---------- LIGHTING ----------
-scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.2));
-const dir = new THREE.DirectionalLight(0xffffff, 1.15);
-dir.position.set(7, 12, 6);
-scene.add(dir);
+// Safety ambient so Android never goes black
+scene.add(new THREE.AmbientLight(0xffffff, 0.25));
 
-const pink = new THREE.PointLight(0xff2d7a, 0.65, 18);
-pink.position.set(0, 3.0, -5.5);
-scene.add(pink);
+// -----------------------------------------------------------
+// Debug hub (same behavior as before)
+// -----------------------------------------------------------
+const dbgHub = document.getElementById("androidDebugHub");
+const dbgFab = document.getElementById("androidDebugFab");
+const dbgLogEl = document.getElementById("dbgLog");
 
-const aqua = new THREE.PointLight(0x7fe7ff, 0.55, 18);
-aqua.position.set(0, 3.0, -7.5);
-scene.add(aqua);
-
-// ---------- XR CONTROLLERS ----------
-const controllerModelFactory = new XRControllerModelFactory();
-const controllers = [];
-const grips = [];
-
-function makeLaser() {
-  const geo = new THREE.BufferGeometry().setFromPoints([ new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1) ]);
-  const mat = new THREE.LineBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.95 });
-  const line = new THREE.Line(geo, mat);
-  line.name = "Laser";
-  line.scale.z = 10;
-  return line;
+function dbg(msg) {
+  const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  console.log(line);
+  if (dbgLogEl) {
+    dbgLogEl.textContent = (dbgLogEl.textContent + "\n" + line).trim();
+    dbgLogEl.scrollTop = dbgLogEl.scrollHeight;
+  }
 }
 
-for (let i = 0; i < 2; i++) {
-  const c = renderer.xr.getController(i);
-  c.name = "Controller" + i;
-  c.add(makeLaser());
-  player.add(c);
-  controllers.push(c);
+// Enable debug hub on mobile
+(function initAndroidDebugHub(){
+  if (!dbgHub || !dbgFab) return;
+  if (!isMobile) return;
 
-  const g = renderer.xr.getControllerGrip(i);
-  g.name = "Grip" + i;
-  g.add(controllerModelFactory.createControllerModel(g));
-  player.add(g);
-  grips.push(g);
-}
+  const btnCollapse = document.getElementById("dbgCollapseBtn");
+  const btnHide = document.getElementById("dbgHideBtn");
 
-function updateControllerVisibility() {
-  const on = !!renderer.xr?.isPresenting;
-  for (const c of controllers) c.visible = on;
-  for (const g of grips) g.visible = on;
-}
-renderer.xr.addEventListener?.("sessionstart", updateControllerVisibility);
-renderer.xr.addEventListener?.("sessionend", updateControllerVisibility);
-updateControllerVisibility();
+  function clampToViewport(){
+    if (dbgHub.style.display === "none") return;
+    const r = dbgHub.getBoundingClientRect();
+    const pad = 8;
+    let x = r.left, y = r.top;
+    x = Math.max(pad, Math.min(window.innerWidth - r.width - pad, x));
+    y = Math.max(pad, Math.min(window.innerHeight - r.height - pad, y));
+    dbgHub.style.left = x + "px";
+    dbgHub.style.top  = y + "px";
+    dbgHub.style.right = "auto";
+    dbgHub.style.bottom = "auto";
+    try { localStorage.setItem("dbgHubPos", JSON.stringify({x,y})); } catch {}
+  }
 
-log("[main] controllers ready ✅");
+  function showHub(){ dbgHub.style.display="block"; dbgFab.classList.remove("show"); clampToViewport(); }
+  function hideHub(){ dbgHub.style.display="none"; dbgFab.classList.add("show"); }
 
-// ---------- ANDROID CONTROLS (D-pad + buttons) ----------
-const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-const mob = { up:0, down:0, left:0, right:0, turnL:false, turnR:false };
+  dbgHub.style.display="none";
+  dbgFab.classList.add("show");
 
-function bindHold(sel, key){
-  const el = document.querySelector(sel);
-  if (!el) return;
-  const set = (v)=> mob[key]=v;
-  el.addEventListener("pointerdown",(e)=>{ e.preventDefault(); set(1); el.setPointerCapture(e.pointerId); });
-  el.addEventListener("pointerup",()=> set(0));
-  el.addEventListener("pointercancel",()=> set(0));
-  el.addEventListener("pointerleave",()=> set(0));
-  el.addEventListener("touchstart",(e)=>{ e.preventDefault(); set(1); }, {passive:false});
-  el.addEventListener("touchend",(e)=>{ e.preventDefault(); set(0); }, {passive:false});
-  el.addEventListener("touchcancel",(e)=>{ e.preventDefault(); set(0); }, {passive:false});
-}
-
-// If your index has these IDs/classes, they’ll work. If not, ignore safely.
-bindHold("#mUp","up");
-bindHold("#mDown","down");
-bindHold("#mLeft","left");
-bindHold("#mRight","right");
-
-let __mobileAction = null;
-let __mobileTeleport = null;
-document.getElementById("mAction")?.addEventListener("click", ()=> __mobileAction?.());
-document.getElementById("mTeleport")?.addEventListener("click", ()=> __mobileTeleport?.());
-document.getElementById("mTurnL")?.addEventListener("click", ()=> { player.rotation.y += Math.PI/10; });
-document.getElementById("mTurnR")?.addEventListener("click", ()=> { player.rotation.y -= Math.PI/10; });
-
-// ---------- WORLD ----------
-const world = await initWorld({ THREE, scene, log, v: BOOT_V });
-window.__world = world;
-
-// For DealingMix facing player
-world.cameraRef = camera;
-
-// Provide safe defaults
-if (!world.tableFocus) world.tableFocus = new THREE.Vector3(0, 0, -6.5);
-if (!world.tableY) world.tableY = 0.92;
-
-// Spawn if world provides
-if (world?.spawn) {
-  player.position.set(world.spawn.x, 0, world.spawn.z);
-  player.rotation.set(0, world.spawnYaw || 0, 0);
-}
-if (world?.tableFocus) camera.lookAt(world.tableFocus.x, 1.15, world.tableFocus.z);
-
-try { world?.connect?.({ playerRig: player, camera, controllers, grips, renderer }); } catch {}
-log("[main] world loaded ✅");
-
-// ---------- CONTROLS ----------
-const controls = Controls.init({ THREE, renderer, camera, player, controllers, grips, log, world });
-
-// ---------- HANDS ----------
-const hands = HandsSystem.init({ THREE, scene, renderer, log });
-
-// ---------- TELEPORT ----------
-const teleport = Teleport.init({ THREE, scene, renderer, camera, player, controllers, log, world });
-
-// Android action/teleport hooks (camera ray)
-__mobileAction = () => world?.clickFromCamera?.?.() ?? teleport?.clickFromCamera?.?.();
-__mobileTeleport = () => world?.teleportFromCamera?.?.() ?? teleport?.teleportFromCamera?.?.();
-
-// ---------- DEALING VISUALS ----------
-const dealing = DealingMix.init({ THREE, scene, log, world });
-try {
-  dealing?.setPresentation?.({
-    holeCardsOnTable: true,
-    hoverReflection: true,
-    flopStyle: "3-then-1-then-1",
-    winnerRevealFlyToCommunity: true
+  btnDebug?.addEventListener("click", ()=> {
+    const vis = dbgHub.style.display !== "none";
+    if (vis) hideHub(); else showHub();
   });
-} catch {}
+  dbgFab.addEventListener("click", showHub);
 
-// ---------- POKER ENGINE ----------
-const poker = PokerSim.create({
-  seats: GAME.seats,
-  log,
-  maxHands: 999999,
-  startingStack: GAME.startingStack,
-  tDealHole: GAME.tDealHole,
-  tFlop, tTurn, tRiver,
-  tShowdown: GAME.tShowdown,
-  tNextHand: GAME.tNextHand,
-  toyBetting: true,
-  names: ["BOT 1","BOT 2","BOT 3","BOT 4","BOT 5","BOT 6"],
-});
+  btnCollapse?.addEventListener("click",(e)=>{
+    e.stopPropagation();
+    dbgHub.classList.toggle("collapsed");
+    try { localStorage.setItem("dbgHubCollapsed", dbgHub.classList.contains("collapsed") ? "1" : "0"); } catch {}
+    clampToViewport();
+  });
+  btnHide?.addEventListener("click",(e)=>{ e.stopPropagation(); hideHub(); });
 
-poker.on("state", (s) => {
-  dealing?.setStreet?.(s.street);
-  dealing?.setAction?.(s.actionText || s.phase || "—");
-  dealing?.setPot?.(s.pot);
-});
-poker.on("blinds", (b) => { dealing?.onBlinds?.(b); dealing?.setPot?.(b.pot); });
-poker.on("action", (a) => { dealing?.onAction?.(a); });
-poker.on("deal", (d) => { dealing?.onDeal?.(d); });
-poker.on("showdown", (sd) => { dealing?.onShowdown?.(sd); });
-poker.on("finished", (f) => { dealing?.showFinished?.(f); });
-
-poker.startHand();
-log("[main] PokerSim started ✅");
-
-// ---------- MOVEMENT FAIL-SAFE (this fixes “I can’t move”) ----------
-function getXRLeftAxes(){
-  const session = renderer.xr.getSession?.();
-  if (!session) return null;
-  for (const src of session.inputSources){
-    if (src?.handedness !== "left") continue;
-    const gp = src.gamepad;
-    if (gp?.axes?.length) return gp.axes;
-  }
-  // fallback: any gamepad axes
-  for (const src of session.inputSources){
-    const gp = src.gamepad;
-    if (gp?.axes?.length) return gp.axes;
-  }
-  return null;
-}
-
-function applyMoveFailsafe(dt){
-  const speed = 2.2;
-  let mx = 0, my = 0;
-
-  if (renderer.xr.isPresenting){
-    const axes = getXRLeftAxes();
-    if (axes){
-      mx = axes[2] ?? axes[0] ?? 0;
-      my = axes[3] ?? axes[1] ?? 0;
+  try {
+    const saved = JSON.parse(localStorage.getItem("dbgHubPos") || "null");
+    if (saved && typeof saved.x==="number" && typeof saved.y==="number") {
+      dbgHub.style.left = saved.x + "px";
+      dbgHub.style.top  = saved.y + "px";
+      dbgHub.style.right = "auto";
+      dbgHub.style.bottom = "auto";
     }
-  } else if (isMobile){
-    my = (mob.up ? 1 : 0) + (mob.down ? -1 : 0);
-    mx = (mob.right ? 1 : 0) + (mob.left ? -1 : 0);
+    const collapsed = localStorage.getItem("dbgHubCollapsed");
+    if (collapsed === "0") dbgHub.classList.remove("collapsed");
+    if (collapsed === "1") dbgHub.classList.add("collapsed");
+  } catch {}
+
+  const header = dbgHub.querySelector(".dbgHeader");
+  if (!header) return;
+
+  let dragging=false, startX=0,startY=0, baseX=0,baseY=0;
+
+  header.addEventListener("pointerdown",(e)=>{
+    if (e.target && (e.target.tagName==="BUTTON" || e.target.closest("button"))) return;
+    dragging=true;
+    dbgHub.classList.add("dragging");
+    header.setPointerCapture(e.pointerId);
+    const r = dbgHub.getBoundingClientRect();
+    startX=e.clientX; startY=e.clientY;
+    baseX=r.left; baseY=r.top;
+    dbgHub.style.left = baseX + "px";
+    dbgHub.style.top  = baseY + "px";
+    dbgHub.style.right="auto";
+    dbgHub.style.bottom="auto";
+  });
+
+  header.addEventListener("pointermove",(e)=>{
+    if (!dragging) return;
+    dbgHub.style.left = (baseX + (e.clientX-startX)) + "px";
+    dbgHub.style.top  = (baseY + (e.clientY-startY)) + "px";
+  });
+
+  header.addEventListener("pointerup",(e)=>{
+    if (!dragging) return;
+    dragging=false;
+    dbgHub.classList.remove("dragging");
+    try{ header.releasePointerCapture(e.pointerId);}catch{}
+    clampToViewport();
+  });
+
+  window.addEventListener("resize", clampToViewport);
+})();
+
+// -----------------------------------------------------------
+// Android dual-stick move/look
+// -----------------------------------------------------------
+const touchControls = document.getElementById("touchControls");
+const input = { moveX:0, moveY:0, lookX:0, lookY:0, yaw:0, pitch:0, enabled:false };
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+
+function setupSticks(){
+  if (!touchControls) return;
+
+  const moveStick = document.getElementById("moveStick");
+  const lookStick = document.getElementById("lookStick");
+  const state = {
+    move: { active:false, id:null, ox:0, oy:0 },
+    look: { active:false, id:null, ox:0, oy:0 }
+  };
+
+  function bind(stickEl, which){
+    const nub = stickEl.querySelector(".nub");
+    const S = state[which];
+
+    const setNub = (x,y)=>{
+      if (!nub) return;
+      nub.style.transform = `translate(${x}px,${y}px) translate(-50%,-50%)`;
+    };
+
+    stickEl.addEventListener("pointerdown",(e)=>{
+      S.active=true; S.id=e.pointerId;
+      stickEl.setPointerCapture(e.pointerId);
+      const r = stickEl.getBoundingClientRect();
+      S.ox = r.left + r.width/2;
+      S.oy = r.top + r.height/2;
+      setNub(0,0);
+    });
+
+    stickEl.addEventListener("pointermove",(e)=>{
+      if (!S.active || e.pointerId!==S.id) return;
+      const dx = e.clientX - S.ox;
+      const dy = e.clientY - S.oy;
+      const max = 46;
+      const nx = clamp(dx, -max, max);
+      const ny = clamp(dy, -max, max);
+      setNub(nx, ny);
+
+      const vx = nx / max;
+      const vy = ny / max;
+
+      if (which==="move"){
+        input.moveX = vx;
+        input.moveY = -vy;
+      } else {
+        input.lookX = vx;
+        input.lookY = -vy;
+      }
+    });
+
+    const end = (e)=>{
+      if (e.pointerId!==S.id) return;
+      S.active=false; S.id=null;
+      setNub(0,0);
+      if (which==="move"){ input.moveX=0; input.moveY=0; }
+      else { input.lookX=0; input.lookY=0; }
+    };
+
+    stickEl.addEventListener("pointerup", end);
+    stickEl.addEventListener("pointercancel", end);
   }
 
-  const dead = 0.15;
-  if (Math.abs(mx) < dead) mx = 0;
-  if (Math.abs(my) < dead) my = 0;
-  if (!mx && !my) return;
-
-  const yaw = player.rotation.y;
-  const forward = new THREE.Vector3(0,0,-1).applyAxisAngle(new THREE.Vector3(0,1,0), yaw);
-  const right = new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0), yaw);
-
-  const v = new THREE.Vector3();
-  v.addScaledVector(right, mx);
-  v.addScaledVector(forward, my);
-  if (v.lengthSq() > 1e-6) v.normalize();
-
-  player.position.addScaledVector(v, speed * dt);
+  bind(moveStick,"move");
+  bind(lookStick,"look");
 }
 
-// Panic unfreeze
-window.addEventListener("keydown",(e)=>{
-  if (e.key.toLowerCase()==="p"){
-    player.position.y = 0;
-    player.position.x += 0.25;
-    player.position.z += 0.25;
-    log("[panic] nudged player ✅");
+function enableAndroidControlsIfNeeded(){
+  const xrActive = renderer.xr.isPresenting;
+  if (isMobile && !xrActive) {
+    touchControls.style.display = "block";
+    input.enabled = true;
+  } else {
+    touchControls.style.display = "none";
+    input.enabled = false;
+    input.moveX=input.moveY=input.lookX=input.lookY=0;
   }
+}
+
+setupSticks();
+enableAndroidControlsIfNeeded();
+
+// -----------------------------------------------------------
+// Controllers array + axes capture
+// -----------------------------------------------------------
+let controllers = []; // [0]=left [1]=right
+
+function buildControllerArray(){
+  const c0 = renderer.xr.getController(0);
+  const c1 = renderer.xr.getController(1);
+  controllers = [c0, c1];
+  scene.add(c0); scene.add(c1);
+}
+
+function updateControllerAxes(){
+  for (const c of controllers) {
+    const src = c?.inputSource;
+    const gp = src?.gamepad;
+    if (gp && gp.axes) c.userData.axes = gp.axes.slice(0);
+    else if (!c.userData.axes) c.userData.axes = [0,0,0,0];
+  }
+}
+
+buildControllerArray();
+
+renderer.xr.addEventListener("sessionstart", ()=>{
+  dbg("[main] XR sessionstart ✅");
+  buildControllerArray();
+  enableAndroidControlsIfNeeded();
+});
+renderer.xr.addEventListener("sessionend", ()=>{
+  dbg("[main] XR sessionend ✅");
+  enableAndroidControlsIfNeeded();
 });
 
-// ---------- RESIZE / ERROR ----------
-window.addEventListener("resize", () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
-window.addEventListener("unhandledrejection", (e) => {
-  console.error(e);
-  log("❌ unhandledrejection: " + (e?.reason?.message || e?.reason || e));
-});
-window.addEventListener("error", (e) => {
-  log("❌ window.error: " + (e?.message || e));
-});
+// VRButton
+(async ()=>{
+  const VRButton = await loadVRButton();
+  if (VRButton && navigator.xr) {
+    document.body.appendChild(VRButton.createButton(renderer));
+    dbg("[main] VRButton appended ✅");
+  } else {
+    dbg("[main] VRButton not available (ok)");
+  }
+})();
 
-// ---------- LOOP ----------
-let last = performance.now();
-renderer.setAnimationLoop(() => {
-  const now = performance.now();
-  const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
+// -----------------------------------------------------------
+// Load world
+// -----------------------------------------------------------
+const World = await loadWorld(BUILD);
+dbg("[main] world.js imported ✅");
 
-  // ✅ guaranteed movement first (so you can always move)
-  try { applyMoveFailsafe(dt); } catch {}
+await World.init({ THREE, scene, renderer, camera, player, controllers, log: dbg, BUILD });
+dbg("[main] world init ✅");
 
-  try { world?.tick?.(dt); } catch {}
-  try { controls?.update?.(dt); } catch {}
-  try { teleport?.update?.(dt); } catch {}
-  try { poker?.update?.(dt); } catch {}
-  try { dealing?.update?.(dt); } catch {}
-  try { hands?.update?.(dt); } catch {}
+// HUD buttons
+btnAction?.addEventListener("click", ()=> { try { World.clickFromCamera?.(); } catch {} });
+btnTeleport?.addEventListener("click", ()=> { try { World.teleportFromCamera?.(); } catch {} });
+btnMenu?.addEventListener("click", ()=> dbg("[ui] Menu tapped"));
 
+// Touch fallback: 1 tap action, 2-finger tap teleport
+let twoFingerArmed = false;
+
+function isUIHit(e){
+  const el = e.target;
+  if (!el) return false;
+  return !!(el.closest?.("#hud") || el.closest?.("#androidDebugHub") || el.closest?.("#androidDebugFab") || el.closest?.("#touchControls"));
+}
+
+renderer.domElement.addEventListener("touchstart", (e)=>{
+  if (renderer.xr.isPresenting) return;
+  if (isUIHit(e)) return;
+  if (e.touches.length === 2) twoFingerArmed = true;
+}, { passive:true });
+
+renderer.domElement.addEventListener("touchend", (e)=>{
+  if (renderer.xr.isPresenting) return;
+  if (isUIHit(e)) return;
+
+  if (twoFingerArmed) {
+    twoFingerArmed = false;
+    try { World.teleportFromCamera?.(); } catch {}
+    return;
+  }
+  try { World.clickFromCamera?.(); } catch {}
+}, { passive:true });
+
+// Non-XR movement
+const clock = new THREE.Clock();
+
+function updateNonXR(dt){
+  if (!input.enabled) return;
+
+  input.yaw   -= input.lookX * dt * 2.2;
+  input.pitch  = clamp(input.pitch + input.lookY * dt * 1.6, -1.2, 1.2);
+
+  player.rotation.y = input.yaw;
+  camera.rotation.x = input.pitch;
+
+  const speed = 2.2;
+  const mx = input.moveX, my = input.moveY;
+
+  if (mx || my) {
+    const forward = new THREE.Vector3(0,0,-1).applyAxisAngle(new THREE.Vector3(0,1,0), input.yaw);
+    const right   = new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0), input.yaw);
+    const vel = new THREE.Vector3();
+    vel.addScaledVector(forward, my);
+    vel.addScaledVector(right, mx);
+    if (vel.lengthSq() > 0.0001) {
+      vel.normalize().multiplyScalar(speed * dt);
+      player.position.add(vel);
+    }
+  }
+}
+
+// Render loop
+renderer.setAnimationLoop(()=>{
+  const dt = Math.min(clock.getDelta(), 0.05);
+  enableAndroidControlsIfNeeded();
+  updateControllerAxes();
+  if (!renderer.xr.isPresenting) updateNonXR(dt);
+  World.update?.(dt);
   renderer.render(scene, camera);
 });
 
-log("[main] ready ✅");
+// Resize
+window.addEventListener("resize", ()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});

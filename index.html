@@ -1,73 +1,110 @@
+<!--
+===========================================================
+FILE: /index.html
+PROJECT: Scarlett Poker VR — New Update 1.0 (PERMANENT BOOT)
+PURPOSE:
+  - Fullscreen canvas host for GitHub Pages
+  - Debug HUD overlay (always available)
+  - Android on-screen buttons (always available)
+  - Loads ONLY ./js/main.js (single source of truth)
+
+DO NOT:
+  - Add more script tags
+  - Load other modules here
+SAFE TO EDIT:
+  - Button sizes, positions, styling
+===========================================================
+-->
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
   <title>Scarlett Poker VR — New Update 1.0</title>
+
   <style>
     html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#05060a; }
     #app { position:fixed; inset:0; }
     canvas { display:block; width:100%; height:100%; touch-action:none; }
 
     /* Debug HUD */
-    #hud {
-      position: fixed; left: 10px; top: 10px;
-      z-index: 30;
+    #hud{
+      position:fixed; left:10px; top:10px; z-index:50;
       font: 12px/1.25 system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      color: #e7e7e7;
-      background: rgba(0,0,0,0.58);
-      border: 1px solid rgba(255,255,255,0.12);
-      padding: 10px 12px;
-      border-radius: 14px;
-      max-width: min(560px, calc(100vw - 20px));
-      pointer-events: none;
-      white-space: pre-wrap;
+      color:#e9e9e9;
+      background:rgba(0,0,0,0.55);
+      border:1px solid rgba(255,255,255,0.12);
+      border-radius:14px;
+      padding:10px 12px;
+      max-width:min(720px, calc(100vw - 20px));
+      white-space:pre-wrap;
+      pointer-events:none;
     }
-    #hud .title { font-weight: 800; margin-bottom: 6px; }
+    #hud .t { font-weight:900; margin-bottom:6px; }
 
-    /* Mobile Controls */
-    #touchControls {
-      position: fixed; inset: 0;
-      z-index: 40;
-      display: none;  /* enabled by JS only when appropriate */
-      pointer-events: none;
+    /* Toast */
+    #toast{
+      position:fixed; left:50%; bottom:16px; transform:translateX(-50%);
+      z-index:60;
+      background:rgba(0,0,0,0.58);
+      border:1px solid rgba(255,255,255,0.12);
+      color:#fff;
+      border-radius:14px;
+      padding:10px 14px;
+      font: 700 13px system-ui;
+      display:none;
+      pointer-events:none;
+      max-width:min(520px, calc(100vw - 24px));
+      text-align:center;
     }
 
-    .btn {
-      pointer-events: auto;
-      user-select: none; -webkit-user-select: none;
-      touch-action: none;
-      width: 74px; height: 74px;
-      border-radius: 16px;
-      border: 1px solid rgba(255,255,255,0.18);
-      background: rgba(0,0,0,0.35);
-      color: #fff;
-      font: 800 14px system-ui;
+    /* Mobile / Android Touch Controls */
+    #touchControls{
+      position:fixed; inset:0; z-index:55;
+      display:none;           /* main.js will enable it on Android */
+      pointer-events:none;
+    }
+
+    .btn{
+      pointer-events:auto;
+      user-select:none; -webkit-user-select:none;
+      touch-action:none;
+      width:74px; height:74px;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,0.18);
+      background:rgba(0,0,0,0.35);
+      color:#fff;
+      font: 900 14px system-ui;
       display:flex; align-items:center; justify-content:center;
       backdrop-filter: blur(6px);
     }
-    .btn:active { transform: scale(0.98); background: rgba(255,255,255,0.08); }
-    .wide { grid-column: span 2; width: 158px; }
+    .btn:active{ transform:scale(0.98); background:rgba(255,255,255,0.10); }
 
-    #leftCluster  { position: fixed; left: 14px; bottom: 14px; display:grid; gap:10px; grid-template-columns: 74px 74px; }
-    #rightCluster { position: fixed; right:14px; bottom: 14px; display:grid; gap:10px; grid-template-columns: 74px 74px; }
+    #leftCluster{
+      position:fixed; left:14px; bottom:14px;
+      display:grid; gap:10px;
+      grid-template-columns:74px 74px;
+    }
+    #rightCluster{
+      position:fixed; right:14px; bottom:14px;
+      display:grid; gap:10px;
+      grid-template-columns:74px 74px;
+    }
+    .wide{ grid-column: span 2; width:158px; }
 
-    /* tiny toast */
-    #toast {
-      position: fixed;
-      left: 50%; bottom: 18px;
-      transform: translateX(-50%);
-      z-index: 45;
-      padding: 10px 14px;
-      border-radius: 14px;
-      background: rgba(0,0,0,0.55);
-      border: 1px solid rgba(255,255,255,0.12);
-      color: #fff;
-      font: 700 13px system-ui;
-      display: none;
-      pointer-events: none;
-      max-width: min(520px, calc(100vw - 24px));
-      text-align: center;
+    /* Small top-right dev buttons */
+    #devBar{
+      position:fixed; right:10px; top:10px; z-index:65;
+      display:flex; gap:8px;
+    }
+    .devBtn{
+      pointer-events:auto;
+      background:rgba(0,0,0,0.45);
+      border:1px solid rgba(255,255,255,0.14);
+      color:#fff;
+      border-radius:12px;
+      padding:8px 10px;
+      font: 800 12px system-ui;
     }
   </style>
 </head>
@@ -75,26 +112,31 @@
 <body>
   <div id="app"></div>
 
-  <div id="hud"><div class="title">BOOT…</div></div>
+  <div id="hud"><div class="t">BOOT</div>Starting…</div>
   <div id="toast"></div>
+
+  <div id="devBar">
+    <button class="devBtn" id="btnDev">DEV</button>
+    <button class="devBtn" id="btnTouch">TOUCH</button>
+  </div>
 
   <div id="touchControls">
     <div id="leftCluster">
-      <div class="btn" id="btnFwd">▲</div>
-      <div class="btn" id="btnTurnR">⟳</div>
-      <div class="btn" id="btnLeft">◀</div>
-      <div class="btn" id="btnRight">▶</div>
-      <div class="btn wide" id="btnBack">▼</div>
+      <button class="btn" data-key="left">◀</button>
+      <button class="btn" data-key="right">▶</button>
+      <button class="btn" data-key="back">▼</button>
+      <button class="btn" data-key="forward">▲</button>
     </div>
 
     <div id="rightCluster">
-      <div class="btn" id="btnTurnL">⟲</div>
-      <div class="btn" id="btnJump">JUMP</div>
-      <div class="btn wide" id="btnAction">ACTION</div>
-      <div class="btn wide" id="btnMenu">MENU</div>
+      <button class="btn" data-key="turnL">⟲</button>
+      <button class="btn" data-key="turnR">⟳</button>
+      <button class="btn wide" data-key="action">ACTION</button>
+      <button class="btn wide" data-key="menu">MENU</button>
     </div>
   </div>
 
+  <!-- SINGLE SOURCE OF TRUTH -->
   <script type="module" src="./js/main.js"></script>
 </body>
 </html>

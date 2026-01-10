@@ -1,4 +1,8 @@
-// /js/world.js — Scarlett Hybrid World 1.1 (Square Entry → Circle Hub + Solid Walls + Spawn Facing Table)
+// /js/world.js — Scarlett Hybrid World 2.0
+// ✅ 4 corner cubes (rooms) connected to a circular hub ring
+// ✅ Solid walls (colliders) + walkable corridors
+// ✅ SpawnPad in one corner + SpawnPoint on pad
+// ✅ BossTable in hub; always face it on spawn
 
 export const World = {
   async init(ctx) {
@@ -7,10 +11,8 @@ export const World = {
     const warn = (m) => LOG?.push?.("warn", m) || console.warn(m);
 
     ctx.systems = ctx.systems || {};
-    ctx.room = ctx.room || "lobby";
-    ctx.mode = ctx.mode || "lobby";
+    ctx.colliders = ctx.colliders || [];
 
-    // ---------- helpers ----------
     const safeImport = async (url) => {
       try { return await import(url); }
       catch (e) { warn(`import fail: ${url} — ${e?.message || e}`); return null; }
@@ -22,181 +24,258 @@ export const World = {
       log(`[world] system ok: ${name}`);
     };
 
-    // ---------- BASE LIGHTING (never black) ----------
-    scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x080812, 1.0));
-    const dir = new THREE.DirectionalLight(0xffffff, 1.1);
+    // ---------- Lighting (never black) ----------
+    scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x080812, 1.05));
+    const dir = new THREE.DirectionalLight(0xffffff, 1.15);
     dir.position.set(6, 12, 4);
     scene.add(dir);
 
-    // ---------- COLLIDERS ----------
-    // We keep a simple array so fallback movement can collide.
-    ctx.colliders = ctx.colliders || [];
+    // ---------- Materials ----------
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.95 });
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x070912, roughness: 0.78, metalness: 0.12 });
+    const neonMat = new THREE.MeshStandardMaterial({
+      color: 0x081018,
+      emissive: new THREE.Color(0x00ffff),
+      emissiveIntensity: 1.4,
+      roughness: 0.35
+    });
 
+    // ---------- Helpers ----------
     const makeSolid = (mesh) => {
       mesh.userData.solid = true;
       ctx.colliders.push(mesh);
+      scene.add(mesh);
       return mesh;
     };
 
-    // ---------- FLOOR (big base) ----------
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(160, 160),
-      new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.95 })
-    );
-    floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
-    scene.add(floor);
+    const makeFloor = (w, l, x, z, y = 0.09) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.18, l), floorMat);
+      m.position.set(x, y, z);
+      scene.add(m);
+      return m;
+    };
 
-    // ---------- YOUR BUILDING SHAPE ----------
-    // Square entry room (spawn area) -> doorway -> circular hub.
-    // Coordinates: player enters from +Z side toward -Z (toward hub/table).
+    // ---------- Base floor (big) ----------
+    const base = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), floorMat);
+    base.rotation.x = -Math.PI / 2;
+    base.receiveShadow = true;
+    scene.add(base);
+
+    // ---------- Layout ----------
+    // Four corner “cubes” (rooms) at N/E/S/W-ish corners around center,
+    // connected by straight corridors into a circular hub ring.
 
     const WALL_H = 3.0;
-    const WALL_T = 0.25;
+    const WALL_T = 0.26;
 
-    // SQUARE ENTRY dimensions
-    const squareW = 12;      // width (X)
-    const squareL = 16;      // length (Z)
-    const squareCenter = new THREE.Vector3(0, WALL_H/2, 18); // forward of hub
+    const roomSize = 12;           // room cube width/length
+    const roomHalf = roomSize / 2;
 
-    // HUB circle
-    const hubRadius = 7.2;
-    const hubCenter = new THREE.Vector3(0, 0, 0);
+    const corridorW = 4.2;
+    const corridorL = 9.0;
 
-    // Visual hub plate
+    const hubR = 8.2;              // outer hub ring radius visual
+    const hubPlateR = 7.2;         // walkable hub plate radius
+
+    // Corner room centers (square corners around hub)
+    // Think: a square of rooms around the hub.
+    const cornerOffset = 18; // distance from center
+    const rooms = [
+      { name: "Room_NW", x: -cornerOffset, z:  cornerOffset },
+      { name: "Room_NE", x:  cornerOffset, z:  cornerOffset },
+      { name: "Room_SW", x: -cornerOffset, z: -cornerOffset },
+      { name: "Room_SE", x:  cornerOffset, z: -cornerOffset },
+    ];
+
+    // ---------- Hub plate + neon ring ----------
     const hubPlate = new THREE.Mesh(
-      new THREE.CylinderGeometry(hubRadius, hubRadius, 0.22, 64),
+      new THREE.CylinderGeometry(hubPlateR, hubPlateR, 0.22, 64),
       new THREE.MeshStandardMaterial({ color: 0x0a0b12, roughness: 0.45, metalness: 0.18 })
     );
-    hubPlate.position.set(hubCenter.x, 0.11, hubCenter.z);
+    hubPlate.position.set(0, 0.11, 0);
     scene.add(hubPlate);
 
-    // Neon ring
     const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(hubRadius, 0.12, 16, 128),
-      new THREE.MeshStandardMaterial({
-        color: 0x081018,
-        emissive: new THREE.Color(0x00ffff),
-        emissiveIntensity: 1.6,
-        roughness: 0.35
-      })
+      new THREE.TorusGeometry(hubR, 0.13, 16, 140),
+      neonMat
     );
     ring.rotation.x = Math.PI / 2;
-    ring.position.set(hubCenter.x, 0.35, hubCenter.z);
+    ring.position.set(0, 0.35, 0);
     scene.add(ring);
 
-    // Square entry floor plate (visual guide)
-    const entryPlate = new THREE.Mesh(
-      new THREE.BoxGeometry(squareW, 0.18, squareL),
-      new THREE.MeshStandardMaterial({ color: 0x070912, roughness: 0.8, metalness: 0.08 })
-    );
-    entryPlate.position.set(squareCenter.x, 0.09, squareCenter.z);
-    scene.add(entryPlate);
-
-    // ---- Solid square walls with ONE doorway opening toward the hub ----
-    const wallMat = new THREE.MeshStandardMaterial({
-      color: 0x080a12, roughness: 0.75, metalness: 0.10
-    });
-
-    // Doorway on the "south" wall (facing hub): centered opening
-    const doorW = 3.0;
-
-    // North wall (back of square, farthest from hub)
-    makeSolid(new THREE.Mesh(
-      new THREE.BoxGeometry(squareW + WALL_T, WALL_H, WALL_T),
-      wallMat
-    )).position.set(squareCenter.x, WALL_H/2, squareCenter.z + squareL/2);
-
-    // West wall
-    makeSolid(new THREE.Mesh(
-      new THREE.BoxGeometry(WALL_T, WALL_H, squareL + WALL_T),
-      wallMat
-    )).position.set(squareCenter.x - squareW/2, WALL_H/2, squareCenter.z);
-
-    // East wall
-    makeSolid(new THREE.Mesh(
-      new THREE.BoxGeometry(WALL_T, WALL_H, squareL + WALL_T),
-      wallMat
-    )).position.set(squareCenter.x + squareW/2, WALL_H/2, squareCenter.z);
-
-    // South wall split into two segments with doorway gap
-    const southZ = squareCenter.z - squareL/2;
-    const leftSegW = (squareW - doorW) / 2;
-    const rightSegW = leftSegW;
-
-    // left segment
-    makeSolid(new THREE.Mesh(
-      new THREE.BoxGeometry(leftSegW, WALL_H, WALL_T),
-      wallMat
-    )).position.set(squareCenter.x - (doorW/2 + leftSegW/2), WALL_H/2, southZ);
-
-    // right segment
-    makeSolid(new THREE.Mesh(
-      new THREE.BoxGeometry(rightSegW, WALL_H, WALL_T),
-      wallMat
-    )).position.set(squareCenter.x + (doorW/2 + rightSegW/2), WALL_H/2, southZ);
-
-    // ---- Hallway bridge from square doorway into hub ----
-    const hallW = 4.0;
-    const hallL = 8.0;
-    const hallCenter = new THREE.Vector3(0, 0.09, southZ - hallL/2);
-
-    const hallPlate = new THREE.Mesh(
-      new THREE.BoxGeometry(hallW, 0.18, hallL),
-      new THREE.MeshStandardMaterial({ color: 0x090b14, roughness: 0.9 })
-    );
-    hallPlate.position.copy(hallCenter);
-    scene.add(hallPlate);
-
-    // Hall walls (solid)
-    makeSolid(new THREE.Mesh(
-      new THREE.BoxGeometry(WALL_T, WALL_H, hallL),
-      wallMat
-    )).position.set(-hallW/2, WALL_H/2, hallCenter.z);
-
-    makeSolid(new THREE.Mesh(
-      new THREE.BoxGeometry(WALL_T, WALL_H, hallL),
-      wallMat
-    )).position.set(+hallW/2, WALL_H/2, hallCenter.z);
-
-    // Optional “arch” at hub entry (visual)
-    const arch = new THREE.Mesh(
-      new THREE.BoxGeometry(hallW + 0.6, 0.25, 0.25),
-      new THREE.MeshStandardMaterial({ color: 0x111827, emissive: new THREE.Color(0x00ffff), emissiveIntensity: 0.9 })
-    );
-    arch.position.set(0, WALL_H - 0.2, hallCenter.z - hallL/2 + 0.4);
-    scene.add(arch);
-
-    // ---- Boss table in hub (the thing you must face) ----
-    const table = new THREE.Mesh(
+    // ---------- Boss table in hub ----------
+    const bossTable = new THREE.Mesh(
       new THREE.CylinderGeometry(1.55, 1.55, 0.14, 40),
       new THREE.MeshStandardMaterial({ color: 0x0c2a22, roughness: 0.9, metalness: 0.05 })
     );
-    table.position.set(0, 0.78, -1.4);
-    table.name = "BossTable";
-    scene.add(table);
+    bossTable.position.set(0, 0.78, 0);
+    bossTable.name = "BossTable";
+    scene.add(bossTable);
 
-    // Dealer anchor (for dealing modules)
     const dealer = new THREE.Object3D();
     dealer.name = "DealerAnchor";
-    dealer.position.set(0, 0.92, -0.55);
+    dealer.position.set(0, 0.92, 0.8);
     scene.add(dealer);
 
-    // ---- Spawn point: inside the square, near its “beginning” ----
-    // This is the beginning of the square before reaching the circle, as you requested.
-    const spawn = new THREE.Object3D();
-    spawn.name = "SpawnPoint";
-    spawn.position.set(0, 0, squareCenter.z + squareL/2 - 2.2); // near back of square
-    scene.add(spawn);
+    // ---------- Build 4 rooms + corridor to hub ----------
+    const buildRoom = (r) => {
+      // Room floor
+      makeFloor(roomSize, roomSize, r.x, r.z);
 
-    log("[world] structure built ✅ (square entry → hall → circle hub)");
+      // Walls (full cube feel) with an opening facing toward center
+      // Compute direction to center to place doorway on inner-facing wall.
+      const toCenter = new THREE.Vector3(-r.x, 0, -r.z);
+      const innerIsX = Math.abs(toCenter.x) > Math.abs(toCenter.z); // which wall faces center
+      const doorW = 3.2;
 
-    // ---------- Load your existing systems (safe) ----------
+      // West/East walls
+      makeSolid(new THREE.Mesh(new THREE.BoxGeometry(WALL_T, WALL_H, roomSize + WALL_T), wallMat))
+        .position.set(r.x - roomHalf, WALL_H / 2, r.z);
+      makeSolid(new THREE.Mesh(new THREE.BoxGeometry(WALL_T, WALL_H, roomSize + WALL_T), wallMat))
+        .position.set(r.x + roomHalf, WALL_H / 2, r.z);
+
+      // North/South walls (we will split one into two segments for a doorway)
+      const northZ = r.z + roomHalf;
+      const southZ = r.z - roomHalf;
+
+      const splitWall = (zPos, isNorth) => {
+        const leftSegW = (roomSize - doorW) / 2;
+        const rightSegW = leftSegW;
+
+        makeSolid(new THREE.Mesh(new THREE.BoxGeometry(leftSegW, WALL_H, WALL_T), wallMat))
+          .position.set(r.x - (doorW/2 + leftSegW/2), WALL_H/2, zPos);
+
+        makeSolid(new THREE.Mesh(new THREE.BoxGeometry(rightSegW, WALL_H, WALL_T), wallMat))
+          .position.set(r.x + (doorW/2 + rightSegW/2), WALL_H/2, zPos);
+
+        // Neon doorway header
+        const header = new THREE.Mesh(new THREE.BoxGeometry(doorW + 0.6, 0.25, 0.25), neonMat);
+        header.position.set(r.x, WALL_H - 0.2, zPos);
+        scene.add(header);
+      };
+
+      // Decide which wall gets doorway (the wall that faces center)
+      // If inner wall is X direction: doorway on West or East wall; else on North/South.
+      if (innerIsX) {
+        // doorway on east wall if room is on west side; on west wall if room on east side
+        const doorX = (r.x < 0) ? (r.x + roomHalf) : (r.x - roomHalf);
+        // Build full north/south
+        makeSolid(new THREE.Mesh(new THREE.BoxGeometry(roomSize + WALL_T, WALL_H, WALL_T), wallMat))
+          .position.set(r.x, WALL_H/2, northZ);
+        makeSolid(new THREE.Mesh(new THREE.BoxGeometry(roomSize + WALL_T, WALL_H, WALL_T), wallMat))
+          .position.set(r.x, WALL_H/2, southZ);
+
+        // Split the inner-facing side wall into two segments (doorway)
+        const segL = (roomSize - doorW) / 2;
+        makeSolid(new THREE.Mesh(new THREE.BoxGeometry(WALL_T, WALL_H, segL), wallMat))
+          .position.set(doorX, WALL_H/2, r.z - (doorW/2 + segL/2));
+        makeSolid(new THREE.Mesh(new THREE.BoxGeometry(WALL_T, WALL_H, segL), wallMat))
+          .position.set(doorX, WALL_H/2, r.z + (doorW/2 + segL/2));
+
+        const header = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, doorW + 0.6), neonMat);
+        header.position.set(doorX, WALL_H - 0.2, r.z);
+        scene.add(header);
+      } else {
+        // doorway on south wall if room is north side; on north wall if room south side
+        const doorZ = (r.z > 0) ? (r.z - roomHalf) : (r.z + roomHalf);
+
+        // Build full west/east already done, now build the other wall full and split the inner wall
+        // If doorway is on south wall, make north full; else make south full.
+        if (doorZ === southZ) {
+          makeSolid(new THREE.Mesh(new THREE.BoxGeometry(roomSize + WALL_T, WALL_H, WALL_T), wallMat))
+            .position.set(r.x, WALL_H/2, northZ);
+          splitWall(southZ, false);
+        } else {
+          makeSolid(new THREE.Mesh(new THREE.BoxGeometry(roomSize + WALL_T, WALL_H, WALL_T), wallMat))
+            .position.set(r.x, WALL_H/2, southZ);
+          splitWall(northZ, true);
+        }
+      }
+
+      // Corridor from doorway area toward hub
+      // Corridor center is between room and hub
+      const corridorDir = new THREE.Vector3(-r.x, 0, -r.z).normalize();
+      const corridorCenter = new THREE.Vector3(r.x, 0, r.z).add(corridorDir.multiplyScalar(roomHalf + corridorL/2));
+      makeFloor(corridorW, corridorL, corridorCenter.x, corridorCenter.z);
+
+      // Corridor side walls (solid)
+      // Build in corridor local basis: use a sideways vector
+      const side = new THREE.Vector3(corridorDir.z, 0, -corridorDir.x); // perpendicular
+      const leftWallPos = corridorCenter.clone().add(side.clone().multiplyScalar(corridorW/2));
+      const rightWallPos = corridorCenter.clone().add(side.clone().multiplyScalar(-corridorW/2));
+
+      const wallGeo = new THREE.BoxGeometry(WALL_T, WALL_H, corridorL);
+      // rotate corridor walls to align with corridor
+      const yaw = Math.atan2(corridorDir.x, corridorDir.z);
+
+      const lw = makeSolid(new THREE.Mesh(wallGeo, wallMat));
+      lw.position.set(leftWallPos.x, WALL_H/2, leftWallPos.z);
+      lw.rotation.y = yaw;
+
+      const rw = makeSolid(new THREE.Mesh(wallGeo, wallMat));
+      rw.position.set(rightWallPos.x, WALL_H/2, rightWallPos.z);
+      rw.rotation.y = yaw;
+    };
+
+    rooms.forEach(buildRoom);
+
+    // ---------- Spawn pad in NW room (you always spawn on a pad) ----------
+    const spawnRoom = rooms[0]; // NW
+    const spawnPad = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.85, 0.85, 0.16, 32),
+      new THREE.MeshStandardMaterial({
+        color: 0x0a0b12,
+        emissive: new THREE.Color(0x00ffff),
+        emissiveIntensity: 1.3,
+        roughness: 0.35,
+        metalness: 0.15
+      })
+    );
+    spawnPad.name = "SpawnPad";
+    spawnPad.position.set(spawnRoom.x, 0.10, spawnRoom.z);
+    scene.add(spawnPad);
+
+    // SpawnPoint sits on pad
+    const sp = new THREE.Object3D();
+    sp.name = "SpawnPoint";
+    sp.position.set(spawnRoom.x, 0, spawnRoom.z);
+    scene.add(sp);
+
+    // Teleport machine anchor at spawn (world places a marker; your real module can replace/augment)
+    const tmAnchor = new THREE.Object3D();
+    tmAnchor.name = "TeleportMachineSpawn";
+    tmAnchor.position.set(spawnRoom.x, 0, spawnRoom.z + 2.6);
+    scene.add(tmAnchor);
+
+    // Visual fallback teleport machine (if your module doesn't draw its own)
+    const tmCore = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.35, 0.35, 2.2, 22),
+      new THREE.MeshStandardMaterial({
+        color: 0x090b14,
+        emissive: new THREE.Color(0x9b5cff),
+        emissiveIntensity: 1.2,
+        roughness: 0.35
+      })
+    );
+    tmCore.position.copy(tmAnchor.position);
+    tmCore.position.y = 1.1;
+    tmCore.name = "TeleportMachineFallback";
+    scene.add(tmCore);
+
+    log("[world] 4-corner cubes + hub built ✅");
+    log(`[world] SpawnPad @ (${spawnPad.position.x.toFixed(1)}, ${spawnPad.position.z.toFixed(1)})`);
+
+    // ---------- Try load your existing systems (safe) ----------
     const rm = await safeImport("./room_manager.js");
     if (rm?.RoomManager?.init) { try { rm.RoomManager.init(ctx); addSystem("room_manager", rm.RoomManager); } catch {} }
 
     const teleportMachine = await safeImport("./teleport_machine.js");
-    if (teleportMachine?.TeleportMachine?.init) { try { await teleportMachine.TeleportMachine.init(ctx); addSystem("teleport_machine", teleportMachine.TeleportMachine); } catch {} }
+    if (teleportMachine?.TeleportMachine?.init) {
+      try {
+        await teleportMachine.TeleportMachine.init(ctx);
+        addSystem("teleport_machine", teleportMachine.TeleportMachine);
+      } catch {}
+    }
 
     const teleport = await safeImport("./teleport.js");
     if (teleport?.Teleport?.init) { try { teleport.Teleport.init(ctx); addSystem("teleport", teleport.Teleport); } catch {} }
@@ -222,7 +301,6 @@ export const World = {
     const interactions = await safeImport("./interactions.js");
     if (interactions?.Interactions?.init) { try { interactions.Interactions.init(ctx); addSystem("interactions", interactions.Interactions); } catch {} }
 
-    // Start in lobby
     this.setRoom(ctx, ctx.room || "lobby");
     log("[world] init complete ✅");
   },

@@ -1,11 +1,12 @@
-// /js/world.js — Scarlett MASTER WORLD (Update 4.8.2 FULL + Crash-Proof)
-// ✅ Fixes crash: uses p.position.applyAxisAngle (not p.applyAxisAngle)
-// ✅ Crash shield around optional décor (no more black-screen from a small error)
-// ✅ VIP spawn -> hallway -> circular lobby (4 doors) -> pit + rail -> table
-// ✅ 4 doorway jumbotrons + HLS stream
-// ✅ Green neon aim ring only (no pink square / green ball)
+// /js/world.js — Scarlett MASTER WORLD (Update 4.8.3 FULL - Radial Placement Fix)
+// ✅ Fixes "black void" by placing halls/rooms with radial vectors (no bad rotations)
+// ✅ VIP spawn lands inside VIP room reliably
+// ✅ Door gaps + pit + rail + table + chairs + cards + 4 jumbotrons
+// ✅ Green neon aim ring only
+// ✅ Crash-proof optional décor
 
 import * as THREE from "three";
+console.log("[world] LOADED world.js Update 4.8.3 ✅");
 
 export const World = (() => {
   const S = {
@@ -18,7 +19,6 @@ export const World = (() => {
     log: console.log,
 
     root: null,
-
     floorMain: null,
     floorPit: null,
 
@@ -43,7 +43,7 @@ export const World = (() => {
   const safeLog = (...a) => { try { S.log?.(...a); } catch {} };
 
   // -----------------------------
-  // Materials / Textures
+  // Materials
   // -----------------------------
   function getCasinoWallMaterial() {
     const texLoader = new THREE.TextureLoader();
@@ -62,11 +62,9 @@ export const World = (() => {
     });
   }
 
-  const matFloor = () => new THREE.MeshStandardMaterial({
-    color: 0x050508, roughness: 0.88, metalness: 0.06
-  });
+  const matFloor = () => new THREE.MeshStandardMaterial({ color: 0x050508, roughness: 0.88, metalness: 0.06 });
 
-  // ✅ IMPORTANT: BackSide so interiors are visible
+  // Interiors visible
   const matHall = () => new THREE.MeshStandardMaterial({
     color: 0x0a0a12,
     roughness: 0.82,
@@ -85,9 +83,7 @@ export const World = (() => {
     emissiveIntensity: 0.35
   });
 
-  const matGold = () => new THREE.MeshStandardMaterial({
-    color: 0xd4af37, roughness: 0.22, metalness: 0.92
-  });
+  const matGold = () => new THREE.MeshStandardMaterial({ color: 0xd4af37, roughness: 0.22, metalness: 0.92 });
 
   const matSign = () => new THREE.MeshStandardMaterial({
     color: 0x11111a,
@@ -99,7 +95,7 @@ export const World = (() => {
   });
 
   // -----------------------------
-  // Stream (plays after user action)
+  // Stream
   // -----------------------------
   function initLobbyStream() {
     const video = document.createElement("video");
@@ -142,7 +138,7 @@ export const World = (() => {
   }
 
   // -----------------------------
-  // Aim Ring (green neon only)
+  // Aim ring (green neon only)
   // -----------------------------
   function ensureAimRing() {
     if (S.aimRing && S.aimRing.parent) return;
@@ -152,8 +148,7 @@ export const World = (() => {
       color: 0x00ff7f,
       transparent: true,
       opacity: 0.95,
-      side: THREE.DoubleSide,
-      wireframe: false
+      side: THREE.DoubleSide
     });
 
     const ring = new THREE.Mesh(ringGeo, ringMat);
@@ -164,8 +159,14 @@ export const World = (() => {
     S.aimRing = ring;
   }
 
+  // Utility: direction vector for an angle (yaw) where 0 = north (toward -Z)
+  function dirFromAngle(a) {
+    // a=0 -> (0,0,-1), a=+90° -> (+1,0,0), a=180° -> (0,0,+1), a=-90° -> (-1,0,0)
+    return new THREE.Vector3(Math.sin(a), 0, -Math.cos(a));
+  }
+
   // -----------------------------
-  // Build FULL World
+  // Build FULL world (radial placement)
   // -----------------------------
   function buildWorld() {
     const root = ensureRoot();
@@ -180,7 +181,6 @@ export const World = (() => {
     // Sizes
     const lobbyRadius = 12.0;
     const wallHeight  = 8.0;
-
     const doorGap = THREE.MathUtils.degToRad(28);
 
     const pitRadius = 4.2;
@@ -198,40 +198,27 @@ export const World = (() => {
     const lights = new THREE.Group();
     lights.name = "CasinoLights";
     lights.add(new THREE.AmbientLight(0xffffff, 0.35));
-
     const key = new THREE.DirectionalLight(0xffffff, 0.75);
     key.position.set(6, 10, 4);
     lights.add(key);
-
     const rim = new THREE.PointLight(0x7fe7ff, 0.45, 30);
     rim.position.set(0, 6, 0);
     lights.add(rim);
-
     W.add(lights);
     S.refs.lights = lights;
 
-    // Wall arcs (4 segments, door gaps)
+    // Circular wall arcs (4 segments with door gaps)
     const wallMat = getCasinoWallMaterial();
     const quarter = (Math.PI * 2) / 4;
-
     for (let i = 0; i < 4; i++) {
       const thetaStart = i * quarter + doorGap / 2;
       const thetaLen   = quarter - doorGap;
-
       const geo = new THREE.CylinderGeometry(
-        lobbyRadius + 0.1,
-        lobbyRadius + 0.1,
-        wallHeight,
-        96,
-        1,
-        true,
-        thetaStart,
-        thetaLen
+        lobbyRadius + 0.1, lobbyRadius + 0.1, wallHeight,
+        96, 1, true, thetaStart, thetaLen
       );
-
       const wall = new THREE.Mesh(geo, wallMat);
       wall.position.y = wallHeight / 2;
-      wall.receiveShadow = true;
       W.add(wall);
     }
 
@@ -242,7 +229,6 @@ export const World = (() => {
     ring.name = "LobbyFloorMain";
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0;
-    ring.receiveShadow = true;
     W.add(ring);
     S.floorMain = ring;
 
@@ -250,7 +236,6 @@ export const World = (() => {
     pit.name = "LobbyFloorPit";
     pit.rotation.x = -Math.PI / 2;
     pit.position.y = -pitDepth;
-    pit.receiveShadow = true;
     W.add(pit);
     S.floorPit = pit;
 
@@ -269,7 +254,7 @@ export const World = (() => {
     W.add(rail);
     S.refs.rail = rail;
 
-    // Table + chairs + cards placeholders
+    // Table + chairs + cards placeholders (in pit)
     const table = new THREE.Group();
     table.name = "CenterPokerTable";
     table.position.set(0, -pitDepth + 0.02, 0);
@@ -309,54 +294,66 @@ export const World = (() => {
     W.add(table);
     S.refs.table = table;
 
-    // Halls + Rooms + Frames + Signs
+    // Hallways + rooms (RADIAL placement)
+    // yaw: 0 north, +90 east, 180 south, -90 west
     const defs = [
-      { key: "north", angle: 0,              label: "POKER" },
-      { key: "east",  angle: Math.PI / 2,    label: "STORE" },
-      { key: "south", angle: Math.PI,        label: "EVENT" },
-      { key: "west",  angle: -Math.PI / 2,   label: "VIP" }
+      { key: "north", yaw: 0,                label: "POKER" },
+      { key: "east",  yaw: Math.PI / 2,      label: "STORE" },
+      { key: "south", yaw: Math.PI,          label: "EVENT" },
+      { key: "west",  yaw: -Math.PI / 2,     label: "VIP" }
     ];
 
-    const doorZ = -(lobbyRadius - 0.15);
-
     for (const d of defs) {
+      const dir = dirFromAngle(d.yaw);
+
+      // Door location (just inside wall)
+      const doorPos = dir.clone().multiplyScalar(lobbyRadius - 0.15);
+
+      // Hall center
+      const hallCenter = dir.clone().multiplyScalar(lobbyRadius + hallLen / 2);
+
+      // Room center
+      const roomCenter = dir.clone().multiplyScalar(lobbyRadius + hallLen + roomD / 2);
+
+      // Hall mesh
       const hall = new THREE.Mesh(new THREE.BoxGeometry(hallW, hallH, hallLen), matHall());
       hall.name = `Hallway_${d.key}`;
-      hall.position.set(0, hallH / 2, doorZ - hallLen / 2);
-      hall.rotation.y = d.angle;
+      hall.position.set(hallCenter.x, hallH / 2, hallCenter.z);
+      hall.rotation.y = d.yaw;
       W.add(hall);
       S.refs.hallways[d.key] = hall;
 
+      // Room mesh
       const room = new THREE.Mesh(new THREE.BoxGeometry(roomW, roomH, roomD), matRoom());
       room.name = `Room_${d.label}`;
-      room.position.set(0, roomH / 2, doorZ - hallLen - roomD / 2);
-      room.rotation.y = d.angle;
+      room.position.set(roomCenter.x, roomH / 2, roomCenter.z);
+      room.rotation.y = d.yaw;
       W.add(room);
       S.refs.rooms[d.key] = room;
 
+      // Door frame at doorway
       const frame = new THREE.Mesh(new THREE.BoxGeometry(hallW + 0.55, 3.3, 0.25), matGold());
-      frame.position.set(0, 2.15, doorZ + 0.10);
-      frame.rotation.y = d.angle;
+      frame.position.set(doorPos.x, 2.15, doorPos.z);
+      frame.rotation.y = d.yaw;
       W.add(frame);
 
+      // Sign plate
       const sign = new THREE.Mesh(new THREE.PlaneGeometry(hallW + 0.25, 1.15), matSign());
-      sign.position.set(0, 2.15, doorZ + 0.26);
-      sign.rotation.y = d.angle;
+      sign.position.set(doorPos.x, 2.15, doorPos.z + 0.02);
+      sign.rotation.y = d.yaw;
       W.add(sign);
 
-      // Optional décor (crash-shielded)
+      // Optional doorway light (crash-proof)
       try {
         const light = new THREE.PointLight(0xff2d7a, 0.35, 8);
-        light.position.set(0, 3.1, doorZ + 0.15);
-        // ✅ FIXED: rotate the POSITION vector, not the light object
-        light.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), d.angle);
+        light.position.set(doorPos.x, 3.1, doorPos.z);
         W.add(light);
       } catch (e) {
-        safeLog("[world] doorway décor skipped:", e);
+        safeLog("[world] doorway light skipped:", e);
       }
     }
 
-    // Jumbotrons above each doorway
+    // Jumbotrons above each doorway (RADIAL placement)
     const streamTex = initLobbyStream();
     const jumboMat = new THREE.MeshStandardMaterial({
       map: streamTex,
@@ -371,22 +368,35 @@ export const World = (() => {
     const jumboGeo = new THREE.PlaneGeometry(7.8, 4.4);
 
     for (const d of defs) {
+      const dir = dirFromAngle(d.yaw);
+      const doorPos = dir.clone().multiplyScalar(lobbyRadius - 0.15);
+
       const j = new THREE.Mesh(jumboGeo, jumboMat);
       j.name = `Jumbotron_${d.key}`;
-      j.position.set(0, 5.75, doorZ + 0.40);
-      j.rotation.y = d.angle + Math.PI; // face inward
+
+      // place above doorway, pulled slightly inward
+      const jPos = doorPos.clone().multiplyScalar(0.98);
+      j.position.set(jPos.x, 5.75, jPos.z);
+      j.rotation.y = d.yaw + Math.PI; // face inward
       W.add(j);
       S.refs.jumbotrons.push(j);
     }
 
-    // VIP spawn: inside VIP room, centered and safe
-    S.spawnVIP.set(-18.0, 0, 0);
+    // VIP spawn: inside VIP room (west) a bit toward the back wall
+    {
+      const vip = defs.find(x => x.key === "west");
+      const dir = dirFromAngle(vip.yaw);
+      const roomCenter = dir.clone().multiplyScalar(lobbyRadius + hallLen + roomD / 2);
 
-    safeLog("[world] Update 4.8.2 built ✅ (FULL + crash-proof)");
+      // push deeper into VIP room by 2m
+      S.spawnVIP.copy(roomCenter).add(dir.clone().multiplyScalar(2.0));
+    }
+
+    safeLog("[world] Update 4.8.3 built ✅ (RADIAL placement, VIP spawn fixed)");
   }
 
   // -----------------------------
-  // Teleport: green ring + controller press
+  // Teleport (green ring + press)
   // -----------------------------
   function controllerPressed(controller) {
     try {
@@ -454,11 +464,11 @@ export const World = (() => {
       S.ray = new THREE.Raycaster();
       ensureAimRing();
 
-      // Spawn VIP + face lobby center
+      // Spawn VIP and face center
       S.player.position.set(S.spawnVIP.x, 0.02, S.spawnVIP.z);
       S.player.rotation.y = Math.atan2(0 - S.spawnVIP.x, 0 - S.spawnVIP.z);
 
-      safeLog("[world] build complete ✅ (FULL - should render now)");
+      safeLog("[world] build complete ✅ (Update 4.8.3)");
     },
 
     frame(ctx, dt) {

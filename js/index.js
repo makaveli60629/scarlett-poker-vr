@@ -1,4 +1,6 @@
-// /js/index.js — Scarlett Hybrid 1.0 (FULL + Streaming + Quest-safe XR)
+// /js/index.js — Scarlett Hybrid 1.0 (FULL + Quest click-safe)
+// ✅ requestSession happens immediately inside gesture handler (Quest requirement)
+
 import { HybridWorld } from "./world.js";
 
 const $ = (id) => document.getElementById(id);
@@ -12,7 +14,7 @@ const exitVrBtn = $("exitVrBtn");
 const rebuildBtn = $("rebuildBtn");
 const safeModeBtn = $("safeModeBtn");
 const hardResetBtn = $("hardResetBtn");
-const startAudioBtn = $("startAudioBtn");
+const startAudioBtn = $("startAudioBtn"); // ok if missing
 
 const copyLogsBtn = $("copyLogsBtn");
 const downloadLogsBtn = $("downloadLogsBtn");
@@ -24,7 +26,7 @@ const opt_nonvrControls = $("opt_nonvrControls");
 const opt_allowTeleport = $("opt_allowTeleport");
 const opt_allowBots = $("opt_allowBots");
 const opt_allowPoker = $("opt_allowPoker");
-const opt_allowStream = $("opt_allowStream");
+const opt_allowStream = $("opt_allowStream"); // ok if missing
 
 function setStatus(html) {
   console.log("[ui]", html);
@@ -39,7 +41,7 @@ function log(...a) {
   const line = `[${stamp()}] ` + a.map(x => (typeof x === "string" ? x : safeJson(x))).join(" ");
   LOGS.push(line);
   if (logEl) {
-    logEl.textContent = LOGS.slice(-400).join("\n");
+    logEl.textContent = LOGS.slice(-450).join("\n");
     logEl.scrollTop = logEl.scrollHeight;
   }
 }
@@ -60,19 +62,28 @@ function kvRow(k, v, cls = "") {
   return `<div class="k">${k}</div><div class="v ${cls}">${v}</div>`;
 }
 
-// Renderer + rig
+// --- Boot logs ---
 log("[main] boot", "v=" + Date.now());
 log("href=" + location.href);
 log("ua=" + navigator.userAgent);
 log("navigator.xr=", !!navigator.xr);
+log("THREE global=", typeof THREE);
+
+// --- Renderer ---
+if (typeof THREE === "undefined") {
+  setStatus("❌ THREE is not loaded. Add the Three.js script tag in index.html.");
+  throw new Error("THREE is undefined");
+}
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
 
-$("canvas").appendChild(renderer.domElement);
+const canvasHost = $("canvas") || $("canvas-container");
+canvasHost.appendChild(renderer.domElement);
 
+// Camera + rig
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 600);
 camera.position.set(0, 1.65, 6);
 
@@ -93,16 +104,19 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
 });
 
-// Diagnostics
+// --- Diagnostics ---
+let xrSupportedCached = null;
+
 async function refreshDiagnostics() {
   const hasXR = !!navigator.xr;
   const presenting = !!renderer.xr.isPresenting;
 
-  let supported = "unknown";
-  if (hasXR) {
-    try { supported = (await navigator.xr.isSessionSupported("immersive-vr")) ? "yes" : "no"; }
-    catch { supported = "error"; }
+  if (hasXR && xrSupportedCached === null) {
+    try { xrSupportedCached = await navigator.xr.isSessionSupported("immersive-vr"); }
+    catch { xrSupportedCached = false; }
   }
+
+  const supported = hasXR ? (xrSupportedCached ? "yes" : "no") : "missing";
 
   const xrCam = renderer.xr.getCamera(camera);
   const camPos = xrCam?.position
@@ -114,7 +128,7 @@ async function refreshDiagnostics() {
 
   const rows = [
     kvRow("WebXR", hasXR ? "available" : "missing", hasXR ? "good" : "bad"),
-    kvRow("immersive-vr", supported, supported === "yes" ? "good" : (supported === "no" ? "bad" : "warn")),
+    kvRow("immersive-vr", supported, supported === "yes" ? "good" : "bad"),
     kvRow("XR presenting", presenting ? "true" : "false", presenting ? "good" : "warn"),
     kvRow("Hand joints", handJoints, "warn"),
     kvRow("Camera", camPos, ""),
@@ -123,16 +137,24 @@ async function refreshDiagnostics() {
   if (diagKv) diagKv.innerHTML = rows.join("");
 }
 refreshDiagnostics();
-setInterval(refreshDiagnostics, 800);
+setInterval(refreshDiagnostics, 900);
 
-// Quest-safe XR
+// --- Quest-safe XR ---
+// IMPORTANT: Keep features minimal.
 const sessionInit = { optionalFeatures: ["local-floor", "hand-tracking"] };
+
 let xrSession = null;
 let xrStarting = false;
 
-async function enterVR() {
+function disableEnterBtn(disabled) {
+  if (enterVrBtn) enterVrBtn.disabled = !!disabled;
+}
+
+async function enterVR_GESTURE() {
+  // This function is called directly by click/pointer/touch.
   if (xrStarting) return;
   xrStarting = true;
+  disableEnterBtn(true);
 
   try {
     if (!navigator.xr) {
@@ -141,41 +163,41 @@ async function enterVR() {
       return;
     }
 
-    const ok = await navigator.xr.isSessionSupported("immersive-vr");
-    if (!ok) {
-      setStatus("immersive-vr not supported.");
-      log("[xr] immersive-vr not supported");
-      return;
-    }
-
+    // DO NOT await isSessionSupported here — Quest may lose user gesture.
     setStatus("Requesting XR session…");
     log("[xr] requestSession…", sessionInit);
 
+    let session;
     try {
-      xrSession = await navigator.xr.requestSession("immersive-vr", sessionInit);
+      session = await navigator.xr.requestSession("immersive-vr", sessionInit);
       log("[xr] requestSession ✅");
     } catch (err) {
       log("[xr] requestSession ❌", err?.name, err?.message, err);
       setStatus(`VR failed: <b>${err?.name || "Error"}</b> ${err?.message || ""}`);
+      disableEnterBtn(false);
       return;
     }
 
-    xrSession.addEventListener("end", () => {
+    xrSession = session;
+
+    session.addEventListener("end", () => {
       log("[xr] sessionend ✅");
       setStatus("XR session ended.");
       xrSession = null;
+      disableEnterBtn(false);
     });
 
-    renderer.xr.setSession(xrSession);
+    renderer.xr.setSession(session);
 
     const OPTS = readOPTS();
     if (OPTS.autobuild) {
       setStatus("Entered VR ✅ Building world…<br/>In VR: <b>LEFT pinch</b> toggles panel, <b>RIGHT pinch</b> clicks.");
       await HybridWorld.build({ THREE, renderer, camera, player, controllers, log, OPTS });
-      setStatus("Ready ✅<br/>Tap <b>Start Audio</b> once if you want stream sound.");
+      setStatus("Ready ✅<br/>In VR: <b>LEFT pinch</b> toggles panel, <b>RIGHT pinch</b> clicks.");
     } else {
       setStatus("Entered VR ✅ (Auto-build OFF). Tap Rebuild World outside VR.");
     }
+
   } finally {
     xrStarting = false;
   }
@@ -213,22 +235,35 @@ function hardReset() {
 
 async function startAudioGesture() {
   try {
-    await HybridWorld.startAudio(); // must be user gesture
-    setStatus("Audio started ✅ (spatial volume active).");
+    await HybridWorld.startAudio?.();
+    setStatus("Audio started ✅");
   } catch (err) {
     log("[audio] startAudio ❌", err?.name, err?.message, err);
     setStatus(`Audio blocked: <b>${err?.name || "Error"}</b> (tap again)`);
   }
 }
 
-enterVrBtn?.addEventListener("click", enterVR);
+// --- Wire events (use multiple to be bulletproof on Quest) ---
+function wireGesture(el, fn) {
+  if (!el) return;
+  el.addEventListener("click", fn, { passive: true });
+  el.addEventListener("pointerdown", fn, { passive: true });
+  el.addEventListener("touchstart", fn, { passive: true });
+}
+wireGesture(enterVrBtn, enterVR_GESTURE);
+
 exitVrBtn?.addEventListener("click", exitVR);
 rebuildBtn?.addEventListener("click", rebuildWorld);
 safeModeBtn?.addEventListener("click", enableSafeMode);
 hardResetBtn?.addEventListener("click", hardReset);
-startAudioBtn?.addEventListener("click", startAudioGesture);
+wireGesture(startAudioBtn, startAudioGesture);
 
-// Log tools
+// Keyboard fallback (desktop)
+window.addEventListener("keydown", (e) => {
+  if (e.code === "Enter") enterVR_GESTURE();
+});
+
+// --- Log tools ---
 clearLogsBtn?.addEventListener("click", () => {
   LOGS.length = 0;
   if (logEl) logEl.textContent = "";
@@ -258,9 +293,10 @@ dumpStateBtn?.addEventListener("click", () => {
   log("[dump] opts=", readOPTS());
 });
 
-// Render loop
+// --- Render loop ---
 renderer.setAnimationLoop(() => {
   HybridWorld.frame({ renderer, camera });
 });
 
-setStatus("Ready. Tap <b>Enter VR</b>.");
+// --- Boot UI ---
+setStatus("Ready. Tap <b>Enter VR</b>. (Quest-click-safe)");

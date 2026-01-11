@@ -1,25 +1,15 @@
-// /js/main.js — Scarlett Hybrid 3.0 (FULL, PERMANENT DEBUG BUILD)
-// Works with:
-// ✅ your updated index.html (auto-hide HUD in VR + mini HUD toggle)
-// ✅ /js/world.js v3.3+ (front room single exit + hub + statues)
-// Fixes you asked for:
-// ✅ Spawn facing: respects SpawnPoint.rotation when world sets useSpawnRotation
-// ✅ Spawn “behind me” issue fixed (no more fighting yaw math)
-// ✅ Teleport laser always hits FLOOR (uses ctx.floorY, default 0)
-// ✅ Movement speed slowed + smooth (left stick move)
-// ✅ Right stick snap turn at 45° (right controller stick)
-// ✅ Single-controller fallback (if only one stick source exists)
-// ✅ Controllers + hands stay parented to PlayerRig (no stuck-on-table)
-// ✅ VR HUD auto-hides via events (scarlett_xr_start / scarlett_xr_end)
-// ✅ Debug overlay fields supported (if index has them)
+// /js/main.js — Scarlett Hybrid 3.2 (FULL, PERMANENT DEBUG BUILD)
+// FIXES v3.2:
+// ✅ Spawn facing: explicitly face AWAY from teleport machine (or any "faceAwayFromName")
+// ✅ Teleport is edge-triggered (one leap per press) - no more rapid teleports holding trigger
+// ✅ Keeps: XR yaw correction, left move, right 45° snap, floor raycast teleport
 
 (async function boot() {
-  console.log("HYBRID_MAIN=3.0");
+  console.log("HYBRID_MAIN=3.2");
 
   if (window.__SCARLETT_BOOTED__) throw new Error("Double boot prevented");
   window.__SCARLETT_BOOTED__ = true;
 
-  // ---------- UI references (optional) ----------
   const ui = {
     grid: document.getElementById("scarlettGrid"),
     logBox: document.getElementById("scarlettLog"),
@@ -29,12 +19,8 @@
     btnCopy: document.getElementById("btnCopyLog"),
     btnClear: document.getElementById("btnClearLog"),
     btnMenu: document.getElementById("btnMenu"),
-    btnRoomLobby: document.getElementById("btnRoomLobby"),
-    btnRoomStore: document.getElementById("btnRoomStore"),
-    btnRoomScorpion: document.getElementById("btnRoomScorpion"),
+    panel: document.getElementById("scarlettDiag"),
   };
-
-  const DBG = window.__SCARLETT_DBG__ || null;
 
   const LOG = {
     lines: [],
@@ -61,7 +47,16 @@
   ui.btnCopy?.addEventListener("click", () => LOG.copy());
   ui.btnSoftReboot?.addEventListener("click", () => location.reload());
 
-  // ---------- metrics ----------
+  let menuVisible = true;
+  function setMenuVisible(v) {
+    menuVisible = !!v;
+    if (!ui.panel) return;
+    ui.panel.style.display = menuVisible ? "block" : "none";
+  }
+  function toggleMenu() { setMenuVisible(!menuVisible); }
+  ui.btnMenu?.addEventListener("click", toggleMenu);
+  addEventListener("keydown", (e) => { if (e.key.toLowerCase() === "m") toggleMenu(); });
+
   function setMetrics(rows) {
     if (!ui.grid) return;
     ui.grid.innerHTML = "";
@@ -84,7 +79,6 @@
     return { xr, immersive };
   }
 
-  // ---------- imports ----------
   const THREE = await (async () => {
     try { const m = await import("./three.js"); return m.default || m.THREE || m; }
     catch { return await import("three"); }
@@ -95,12 +89,12 @@
     catch (e) { LOG.push("warn", `import fail: ${label} — ${e?.message || e}`); return null; }
   }
 
-  // ---------- scene ----------
+  // Scene
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
 
-  // ---------- rig + camera ----------
-  const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 1200);
+  // PlayerRig + camera
+  const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 800);
   const player = new THREE.Group();
   player.name = "PlayerRig";
   scene.add(player);
@@ -108,7 +102,7 @@
   camera.position.set(0, 1.65, 0);
   player.add(camera);
 
-  // ---------- renderer ----------
+  // Renderer
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(innerWidth, innerHeight);
   renderer.xr.enabled = true;
@@ -120,7 +114,7 @@
     renderer.setSize(innerWidth, innerHeight);
   });
 
-  // ---------- VRButton ----------
+  // VRButton
   const vrb = await safeImport("./VRButton.js", "./VRButton.js");
   if (vrb?.VRButton?.createButton) {
     const btn = vrb.VRButton.createButton(renderer);
@@ -128,37 +122,24 @@
     document.body.appendChild(btn);
     LOG.push("log", "VRButton ✅ via local VRButton.createButton()");
   } else {
-    // fallback to addons if local missing
-    const vrb2 = await safeImport("three/addons/webxr/VRButton.js", "three/addons/webxr/VRButton.js");
-    if (vrb2?.VRButton?.createButton) {
-      const btn = vrb2.VRButton.createButton(renderer);
-      btn.id = "VRButton";
-      document.body.appendChild(btn);
-      LOG.push("log", "VRButton ✅ via three/addons");
-    } else {
-      LOG.push("warn", "VRButton not available (no Enter VR button will show).");
-    }
+    LOG.push("warn", "VRButton.js not found or invalid.");
   }
 
-  // Notify index.html to auto-hide HUD in VR
-  renderer.xr.addEventListener("sessionstart", () => window.dispatchEvent(new Event("scarlett_xr_start")));
-  renderer.xr.addEventListener("sessionend",   () => window.dispatchEvent(new Event("scarlett_xr_end")));
-
-  // ---------- ctx ----------
+  // Context
   const ctx = {
     THREE, scene, camera, renderer, LOG,
     BUILD: Date.now(),
     systems: {},
     world: null,
     colliders: [],
+    floors: [],
     player,
     rig: player,
     yawObject: player,
     pitchObject: camera,
-    floorY: 0
   };
 
-  // ---------- world ----------
+  // World
   const worldMod = await safeImport("./world.js", "./world.js");
   if (worldMod?.World?.init) {
     await worldMod.World.init(ctx);
@@ -167,7 +148,7 @@
     LOG.push("error", "world.js missing World.init");
   }
 
-  // ---------- controllers + hands (parent to rig) ----------
+  // Controllers parented to rig
   const controllerL = renderer.xr.getController(0);
   controllerL.name = "ControllerLeft";
   player.add(controllerL);
@@ -178,71 +159,118 @@
 
   LOG.push("log", "Controllers parented to PlayerRig ✅");
 
-  let leftHand = null, rightHand = null;
+  // Hands parented to rig
   try {
-    leftHand = renderer.xr.getHand(0); leftHand.name = "XRHandLeft"; player.add(leftHand);
-    rightHand = renderer.xr.getHand(1); rightHand.name = "XRHandRight"; player.add(rightHand);
+    const leftHand = renderer.xr.getHand(0); leftHand.name = "XRHandLeft"; player.add(leftHand);
+    const rightHand = renderer.xr.getHand(1); rightHand.name = "XRHandRight"; player.add(rightHand);
     LOG.push("log", "XRHands parented to PlayerRig ✅");
   } catch {
     LOG.push("warn", "XRHands unavailable (controller-only OK).");
   }
 
-  // ---------- spawn & facing ----------
+  // ---------- Spawn + facing (robust) ----------
   const tmpV = new THREE.Vector3();
   const tmpV2 = new THREE.Vector3();
+  const tmpQ = new THREE.Quaternion();
+
+  function getXRCameraYawRad() {
+    const xrCam = renderer.xr.getCamera(camera);
+    const e = new THREE.Euler().setFromQuaternion(xrCam.quaternion, "YXZ");
+    return e.y;
+  }
 
   function applySpawn() {
     const sp = scene.getObjectByName("SpawnPoint") || scene.getObjectByName("SpawnPad");
-    if (!sp) {
-      LOG.push("warn", "No SpawnPoint/SpawnPad found.");
-      return;
-    }
-
+    if (!sp) return;
     sp.getWorldPosition(tmpV);
     player.position.set(tmpV.x, 0, tmpV.z);
     LOG.push("log", `Spawn ✅ x=${player.position.x.toFixed(2)} z=${player.position.z.toFixed(2)}`);
+  }
 
-    // ✅ Primary rule: if world authored a spawn rotation, use it. (Stops “facing wall” chaos.)
-    if (sp.userData?.useSpawnRotation) {
-      player.rotation.set(0, sp.rotation.y, 0);
+  function computeYawToward(fromXZ, toWorld) {
+    tmpV.copy(toWorld);
+    tmpV2.set(fromXZ.x, 0, fromXZ.z);
+    const v = tmpV.sub(tmpV2);
+    v.y = 0;
+    if (v.lengthSq() < 1e-6) return null;
+    return Math.atan2(v.x, v.z);
+  }
+
+  function applyFacingXRCorrect() {
+    const sp = scene.getObjectByName("SpawnPoint");
+    const from = player.position;
+
+    // If world supplies an explicit rotation, use it (best)
+    if (sp && Math.abs(sp.rotation.y) > 0.0001) {
+      let desiredYaw = sp.rotation.y;
+
+      // XR correction
+      if (renderer.xr.isPresenting) desiredYaw = desiredYaw - getXRCameraYawRad();
+      player.rotation.set(0, desiredYaw, 0);
+
       LOG.push("log", `Facing from SpawnPoint.rotation ✅ yaw=${THREE.MathUtils.radToDeg(sp.rotation.y).toFixed(0)}°`);
       return;
     }
 
-    // Secondary: face a target if present
-    const faceName = sp.userData?.faceTargetName || "HubPlate";
-    const target = scene.getObjectByName(faceName) || scene.getObjectByName("BossTable") || scene.getObjectByName("HubPlate");
-    if (!target) return;
+    // Otherwise: face AWAY from TeleportMachine (or any configured object)
+    const awayName = sp?.userData?.faceAwayFromName || "TeleportMachineFallback";
+    const awayObj = scene.getObjectByName(awayName);
 
-    target.getWorldPosition(tmpV2);
-    const from = new THREE.Vector3(player.position.x, 0, player.position.z);
-    const to = new THREE.Vector3(tmpV2.x, 0, tmpV2.z);
-    const v = to.sub(from);
-    if (v.lengthSq() < 1e-6) return;
+    if (awayObj) {
+      awayObj.getWorldPosition(tmpV);
+      let yawToTele = computeYawToward(from, tmpV);
+      if (yawToTele != null) {
+        let desiredYaw = yawToTele + Math.PI; // face opposite
+        if (renderer.xr.isPresenting) desiredYaw = desiredYaw - getXRCameraYawRad();
+        player.rotation.set(0, desiredYaw, 0);
+        LOG.push("log", `Facing AWAY from ${awayName} ✅`);
+        return;
+      }
+    }
 
-    const yaw = Math.atan2(v.x, v.z); // face target
-    player.rotation.set(0, yaw, 0);
-    LOG.push("log", "Facing target ✅");
+    // Fallback: face toward hub
+    const targetName = sp?.userData?.faceTargetName || "HubPlate";
+    const target = scene.getObjectByName(targetName) || scene.getObjectByName("BossTable") || scene.getObjectByName("HubPlate");
+    if (target) {
+      target.getWorldPosition(tmpV);
+      let desiredYaw = computeYawToward(from, tmpV);
+      if (desiredYaw != null) {
+        if (renderer.xr.isPresenting) desiredYaw = desiredYaw - getXRCameraYawRad();
+        player.rotation.set(0, desiredYaw, 0);
+        LOG.push("log", `Facing toward ${targetName} ✅`);
+      }
+    }
   }
 
-  applySpawn();
-  renderer.xr.addEventListener("sessionstart", () => setTimeout(applySpawn, 220));
+  function applySpawnAndFacingAll() {
+    applySpawn();
+    applyFacingXRCorrect();
+  }
 
-  // ---------- optional modules ----------
+  applySpawnAndFacingAll();
+
+  renderer.xr.addEventListener("sessionstart", () => {
+    setTimeout(() => setMenuVisible(false), 900);
+    setTimeout(() => applySpawnAndFacingAll(), 300);
+  });
+
+  renderer.xr.addEventListener("sessionend", () => setMenuVisible(true));
+
+  // ---------- Modules ----------
   const gestureMod = await safeImport("./gesture_engine.js", "./gesture_engine.js");
   const betMod = await safeImport("./betting_module.js", "./betting_module.js");
-
-  const GestureEngine = gestureMod?.GestureEngine || null;
-  const BettingModule = betMod?.BettingModule || null;
+  const GestureEngine = gestureMod?.GestureEngine || gestureMod?.default || null;
+  const BettingModule = betMod?.BettingModule || betMod?.default || null;
 
   if (GestureEngine?.init) GestureEngine.init({ THREE, renderer, scene, camera, log: (m) => LOG.push("log", m), LOG });
-  if (!GestureEngine) LOG.push("warn", "GestureEngine missing -> pinch disabled (controller still works).");
+  if (!GestureEngine) LOG.push("warn", "GestureEngine missing -> pinch disabled.");
 
   if (BettingModule?.init) BettingModule.init(ctx);
   if (!BettingModule) LOG.push("warn", "BettingModule missing -> betting disabled.");
 
-  // ---------- teleport (floor plane y = ctx.floorY) ----------
-  const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -(ctx.floorY || 0));
+  // ---------- Teleport (edge-triggered) ----------
+  const raycaster = new THREE.Raycaster();
+  const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
   const laser = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]),
@@ -262,39 +290,50 @@
   const o = new THREE.Vector3();
   const d = new THREE.Vector3();
   const hit = new THREE.Vector3();
-  const q = new THREE.Quaternion();
 
-  function controllerPoseValid(ctrl) {
-    ctrl.getWorldPosition(o);
-    // Reject origin-ish poses that cause lasers to appear “through walls somewhere”
-    return o.lengthSq() > 0.02 && Number.isFinite(o.x) && Number.isFinite(o.y) && Number.isFinite(o.z);
+  function controllerPoseValid() {
+    controllerR.getWorldPosition(o);
+    return o.lengthSq() > 0.05;
   }
 
-  function updateTeleportRay() {
-    if (!controllerPoseValid(controllerR)) return { ok: false, src: "pose-bad" };
+  function rayToFloor() {
+    if (!controllerPoseValid()) return { ok: false };
 
     controllerR.getWorldPosition(o);
-    controllerR.getWorldQuaternion(q);
+    controllerR.getWorldQuaternion(tmpQ);
 
-    d.set(0, 0, -1).applyQuaternion(q).normalize();
-    // slight down tilt so it hits floor in small rooms
-    d.y -= 0.20;
+    d.set(0, 0, -1).applyQuaternion(tmpQ).normalize();
+    d.y -= 0.18;
     d.normalize();
 
+    // Prefer real floor meshes if provided by world
+    let floorMeshes = (ctx.floors && ctx.floors.length) ? ctx.floors : null;
+    if (!floorMeshes) {
+      floorMeshes = [];
+      scene.traverse((obj) => {
+        if (!obj.isMesh) return;
+        const n = (obj.name || "").toLowerCase();
+        if (n.includes("floor") || n.includes("hubplate") || n.includes("spawn") || n.includes("plate")) {
+          floorMeshes.push(obj);
+        }
+      });
+    }
+
+    if (floorMeshes && floorMeshes.length) {
+      raycaster.set(o, d);
+      const hits = raycaster.intersectObjects(floorMeshes, true);
+      if (hits && hits.length) {
+        hit.copy(hits[0].point);
+        return { ok: true, point: hit.clone(), src: "raycast" };
+      }
+    }
+
+    // fallback plane
     const denom = floorPlane.normal.dot(d);
-    if (Math.abs(denom) < 1e-6) return { ok: false, src: "parallel" };
-
+    if (Math.abs(denom) < 1e-6) return { ok: false };
     const t = -(floorPlane.normal.dot(o) + floorPlane.constant) / denom;
-    if (t < 0.15 || t > 40) return { ok: false, src: "range" };
-
+    if (t < 0.25 || t > 30) return { ok: false };
     hit.copy(o).addScaledVector(d, t);
-
-    const dist = THREE.MathUtils.clamp(o.distanceTo(hit), 0.2, 40);
-    laser.geometry.setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-dist)]);
-
-    ring.position.set(hit.x, (ctx.floorY || 0) + 0.02, hit.z);
-    ring.visible = true;
-
     return { ok: true, point: hit.clone(), src: "plane" };
   }
 
@@ -303,68 +342,52 @@
     LOG.push("log", `Teleport ✅ x=${point.x.toFixed(2)} z=${point.z.toFixed(2)}`);
   }
 
-  // ---------- gamepad mapping (left move, right snap 45°) ----------
-  function getInputSources() {
+  function getGamepad(handedness) {
     const s = renderer.xr.getSession?.();
-    return s ? Array.from(s.inputSources || []) : [];
-  }
-
-  function findGamepad(handedness) {
-    const srcs = getInputSources();
-    for (const src of srcs) if (src.gamepad && src.handedness === handedness) return src.gamepad;
+    if (!s) return null;
+    for (const src of s.inputSources) {
+      if (src.gamepad && src.handedness === handedness) return { gp: src.gamepad, src };
+    }
     return null;
   }
 
-  function readAxes(gp) {
-    if (!gp?.axes) return [0,0,0,0];
-    const a = gp.axes;
-    // Many XR gamepads provide 4 axes; some provide 2.
-    const ax0 = a[0] ?? 0;
-    const ax1 = a[1] ?? 0;
-    const ax2 = a[2] ?? ax0;
-    const ax3 = a[3] ?? ax1;
-    return [ax0, ax1, ax2, ax3];
+  function deadzone(v, dz = 0.18) {
+    return Math.abs(v) < dz ? 0 : v;
   }
 
-  function readButtons(gp) {
-    if (!gp?.buttons) return "";
-    // show first 6 buttons pressed states for debug
-    const b = gp.buttons;
-    let s = "";
-    for (let i = 0; i < Math.min(6, b.length); i++) s += b[i]?.pressed ? "1" : "0";
-    return s || "";
-  }
+  // Edge-triggered teleport press (per-controller)
+  const pressState = new Map(); // inputSource -> lastPressed
+  function readTeleportPressedEdge() {
+    const s = renderer.xr.getSession?.();
+    if (!s) return false;
 
-  function teleportPressed() {
-    const srcs = getInputSources();
-    for (const src of srcs) {
+    let fired = false;
+    for (const src of s.inputSources) {
       const gp = src.gamepad;
-      if (!gp?.buttons) continue;
-      const b = gp.buttons;
-      // A/X/trigger/grip often maps here depending on browser
-      if (b[0]?.pressed || b[1]?.pressed || b[4]?.pressed || b[5]?.pressed) return true;
+      if (!gp) continue;
+      const b = gp.buttons || [];
+      const pressed = !!(b[0]?.pressed || b[1]?.pressed || b[4]?.pressed || b[5]?.pressed);
+      const last = pressState.get(src) || false;
+
+      if (pressed && !last) fired = true; // rising edge => one leap
+      pressState.set(src, pressed);
     }
-    return false;
+    return fired;
   }
 
-  // ---------- movement tuning ----------
+  // Movement tuning
   const move = {
-    speed: 1.15,          // ✅ slower
-    dead: 0.18,
-    snapDeg: 45,          // ✅ 45° requested
-    snapCooldown: 0
+    speed: 1.10,   // slow
+    snapDeg: 45,
+    snapCooldown: 0,
   };
 
-  // pinch-to-teleport queue (optional)
+  // pinch teleport queue (edge style)
   let queuedTeleport = false;
-  if (GestureEngine?.on) GestureEngine.on("pinchstart", (e) => { if (e.hand === "right") queuedTeleport = true; });
+  if (GestureEngine?.on) {
+    GestureEngine.on("pinchstart", (e) => { if (e.hand === "right") queuedTeleport = true; });
+  }
 
-  // ---------- keyboard fallback (desktop debug) ----------
-  const keys = new Set();
-  addEventListener("keydown", (e) => keys.add(e.key.toLowerCase()));
-  addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
-
-  // ---------- loop ----------
   let last = performance.now();
   let fpsAcc = 0, fpsCount = 0, fps = 0;
 
@@ -376,158 +399,75 @@
     fpsAcc += dt; fpsCount++;
     if (fpsAcc >= 0.5) { fps = Math.round(fpsCount / fpsAcc); fpsAcc = 0; fpsCount = 0; }
 
-    // world update
     try { ctx.world?.update?.(ctx, dt); } catch {}
     try { BettingModule?.update?.(ctx, dt); } catch {}
 
-    // Keep floor plane updated if world changes floorY
-    floorPlane.constant = -(ctx.floorY || 0);
-
-    const presenting = renderer.xr.isPresenting;
-
-    // Update gesture engine
-    if (presenting) {
+    if (renderer.xr.isPresenting) {
       try { GestureEngine?.update?.(frame, renderer.xr.getReferenceSpace?.()); } catch {}
-    }
 
-    // --- movement (VR) ---
-    let leftGP = presenting ? findGamepad("left") : null;
-    let rightGP = presenting ? findGamepad("right") : null;
-
-    // Single-controller fallback
-    if (presenting && !leftGP && rightGP) leftGP = rightGP;
-    if (presenting && !rightGP && leftGP) rightGP = leftGP;
-
-    // left stick move
-    if (presenting && leftGP) {
-      const [ax0, ax1, ax2, ax3] = readAxes(leftGP);
-
-      // Prefer axes[2],[3] if present; otherwise use [0],[1]
-      let mx = (leftGP.axes?.length >= 4) ? ax2 : ax0;
-      let my = (leftGP.axes?.length >= 4) ? ax3 : ax1;
-
-      // invert Y so up = forward
-      my = -my;
-
-      const mag = Math.hypot(mx, my);
-      if (mag > move.dead) {
-        // normalize after deadzone
-        const nx = mx / mag;
-        const ny = my / mag;
+      // Left stick movement
+      const left = getGamepad("left");
+      if (left?.gp?.axes) {
+        const ax = left.gp.axes;
+        const x = deadzone(ax[0] ?? 0);
+        const y = deadzone(ax[1] ?? 0);
 
         const yaw = player.rotation.y;
         const sin = Math.sin(yaw), cos = Math.cos(yaw);
 
-        // forward/back + strafe
-        player.position.x += (nx * cos + ny * sin) * move.speed * dt;
-        player.position.z += (ny * cos - nx * sin) * move.speed * dt;
-      }
-    }
+        const forward = -y;
+        const strafe = x;
 
-    // right stick snap turn 45°
-    if (presenting && rightGP) {
-      move.snapCooldown = Math.max(0, move.snapCooldown - dt);
-
-      const [ax0, ax1, ax2, ax3] = readAxes(rightGP);
-      const tx = (rightGP.axes?.length >= 4) ? ax2 : ax0;
-
-      if (move.snapCooldown <= 0 && Math.abs(tx) > 0.78) {
-        const dir = (tx > 0) ? -1 : 1;
-        player.rotation.y += THREE.MathUtils.degToRad(move.snapDeg) * dir;
-        move.snapCooldown = 0.28;
-      }
-    }
-
-    // --- desktop WASD (non-VR) ---
-    if (!presenting) {
-      const yaw = player.rotation.y;
-      const sin = Math.sin(yaw), cos = Math.cos(yaw);
-      const speed = 1.3;
-
-      let forward = 0, strafe = 0;
-      if (keys.has("w")) forward += 1;
-      if (keys.has("s")) forward -= 1;
-      if (keys.has("a")) strafe -= 1;
-      if (keys.has("d")) strafe += 1;
-
-      if (forward || strafe) {
-        player.position.x += (strafe * cos + forward * sin) * speed * dt;
-        player.position.z += (forward * cos - strafe * sin) * speed * dt;
+        player.position.x += (strafe * cos + forward * sin) * move.speed * dt;
+        player.position.z += (forward * cos - strafe * sin) * move.speed * dt;
       }
 
-      if (keys.has("q")) player.rotation.y += THREE.MathUtils.degToRad(60) * dt;
-      if (keys.has("e")) player.rotation.y -= THREE.MathUtils.degToRad(60) * dt;
-    }
+      // Right stick snap turn
+      const right = getGamepad("right");
+      if (right?.gp?.axes) {
+        move.snapCooldown = Math.max(0, move.snapCooldown - dt);
+        const turn = deadzone(right.gp.axes[2] ?? right.gp.axes[0] ?? 0);
+        if (move.snapCooldown <= 0 && Math.abs(turn) > 0.75) {
+          player.rotation.y += THREE.MathUtils.degToRad(move.snapDeg) * (turn > 0 ? -1 : 1);
+          move.snapCooldown = 0.22;
+        }
+      }
 
-    // --- teleport ---
-    let ray = { ok: false };
-    if (presenting) {
-      ray = updateTeleportRay();
-      laser.visible = ray.ok;
-      ring.visible = ray.ok;
+      // Teleport ray + edge-triggered teleport
+      const ray = rayToFloor();
+      if (ray.ok) {
+        const dist = Math.max(0.2, Math.min(30, o.distanceTo(ray.point)));
+        laser.geometry.setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-dist)]);
+        ring.position.set(ray.point.x, ray.point.y + 0.02, ray.point.z);
+        laser.visible = true;
+        ring.visible = true;
 
-      if ((queuedTeleport || teleportPressed()) && ray.ok) {
-        queuedTeleport = false;
-        teleportTo(ray.point);
+        const fire = queuedTeleport || readTeleportPressedEdge();
+        if (fire && ray.ok) {
+          queuedTeleport = false;
+          teleportTo(ray.point);
+        }
+      } else {
+        laser.visible = false;
+        ring.visible = false;
       }
     } else {
       laser.visible = false;
       ring.visible = false;
     }
 
-    // --- Room label (simple heuristic based on rig position) ---
-    // (Front room is +Z, hub around 0, left is -X, right is +X, back is -Z)
-    const px = player.position.x;
-    const pz = player.position.z;
-    let room = "unknown";
-    const hubR = 16;
-    if (Math.hypot(px, pz) < hubR) room = "hub";
-    else if (pz > hubR) room = "front";
-    else if (pz < -hubR) room = "back";
-    else if (px < -hubR) room = "left";
-    else if (px > hubR) room = "right";
-
-    // --- Debug HUD updates ---
-    if (DBG?.set && DBG?.pill) {
-      DBG.pill("dbgPose", controllerPoseValid(controllerR), controllerPoseValid(controllerR) ? "pose: OK" : "pose: BAD");
-      DBG.pill("dbgRoom", true, `room: ${room}`);
-
-      DBG.set("dbgFloorY", `${(ctx.floorY || 0).toFixed(2)}`);
-      DBG.set("dbgTeleHit", ray?.ok ? `${ray.point.x.toFixed(1)},${ray.point.z.toFixed(1)}` : "-");
-
-      const axR = rightGP ? readAxes(rightGP) : [0,0,0,0];
-      const axL = leftGP ? readAxes(leftGP) : [0,0,0,0];
-
-      DBG.set("dbgAxesR", rightGP ? axR.map(v => (v||0).toFixed(2)).join(",") : "-");
-      DBG.set("dbgAxesL", leftGP  ? axL.map(v => (v||0).toFixed(2)).join(",") : "-");
-      DBG.set("dbgBtnsR", rightGP ? readButtons(rightGP) : "-");
-      DBG.set("dbgBtnsL", leftGP  ? readButtons(leftGP)  : "-");
-
-      DBG.set("dbgRig", `${px.toFixed(1)},${pz.toFixed(1)}`);
-      DBG.set("dbgYaw", `${THREE.MathUtils.radToDeg(player.rotation.y).toFixed(0)}`);
-    }
-
-    // compact grid metrics (legacy)
     setMetrics([
       ["FPS", `${fps}`],
-      ["XR", presenting ? "YES" : "NO"],
-      ["Room", room],
-      ["Rig", `${px.toFixed(1)},${pz.toFixed(1)}`],
-      ["Yaw°", `${THREE.MathUtils.radToDeg(player.rotation.y).toFixed(0)}`],
-      ["FloorY", `${(ctx.floorY || 0).toFixed(2)}`],
-      ["ControllersInRig", (controllerR.parent === player) ? "YES" : "NO"],
+      ["XR", renderer.xr.isPresenting ? "YES" : "NO"],
+      ["Rig", `${player.position.x.toFixed(1)},${player.position.z.toFixed(1)}`],
+      ["MoveSpeed", `${move.speed.toFixed(2)}`],
+      ["SnapTurn", `${move.snapDeg}°`],
       ["Modules", `gesture=${!!GestureEngine} bet=${!!BettingModule}`],
     ]);
 
     renderer.render(scene, camera);
   });
 
-  // ---------- optional buttons (won't break if missing) ----------
-  ui.btnMenu?.addEventListener("click", () => LOG.push("log", "Menu pressed (M)"));
-  ui.btnRoomLobby?.addEventListener("click", () => LOG.push("log", "Room: Lobby (not wired yet)"));
-  ui.btnRoomStore?.addEventListener("click", () => LOG.push("log", "Room: Store (not wired yet)"));
-  ui.btnRoomScorpion?.addEventListener("click", () => LOG.push("log", "Room: Scorpion (not wired yet)"));
-
   await setCaps();
-  LOG.push("log", "Hybrid 3.0 boot complete ✅ (spawn rotation respected, floor teleport fixed, slow move + 45° snap)");
+  LOG.push("log", "Hybrid 3.2 boot complete ✅ (face-away + teleport edge-trigger + slower movement)");
 })();

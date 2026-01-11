@@ -3,85 +3,250 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
-  <title>Scarlett VR Poker — World Only</title>
-
-  <!-- ✅ Importmap so ANY file can `import ... from "three"` -->
-  <script async src="https://unpkg.com/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-    }
-  }
-  </script>
+  <title>Scarlett VR Poker</title>
 
   <style>
-    html, body { margin:0; padding:0; height:100%; background:#05060a; overflow:hidden; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; }
-    canvas{ display:block; }
+    :root{
+      --bg:#05060a;
+      --panel:#0b0d14cc;
+      --panel2:#0b0d14f2;
+      --text:#e8ecff;
+      --muted:#98a0c7;
+      --aqua:#7fe7ff;
+      --pink:#ff2d7a;
+      --ok:#4cd964;
+      --warn:#ffcc00;
+      --bad:#ff6b6b;
+      --shadow: 0 12px 40px rgba(0,0,0,.45);
+      --radius: 18px;
+    }
 
-    /* Diagnostic overlay */
-    #diag {
-      position:fixed; left:10px; right:10px; top:10px;
-      max-height:38vh; overflow:auto;
+    html, body{
+      margin:0;
+      padding:0;
+      height:100%;
+      background:var(--bg);
+      overflow:hidden;
+      font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      color:var(--text);
+      touch-action:none;
+    }
+
+    #app{
+      position:fixed;
+      inset:0;
+    }
+
+    canvas{
+      display:block;
+      width:100%;
+      height:100%;
+    }
+
+    /* Diagnostics overlay */
+    #hud{
+      position:fixed;
+      left:12px;
+      top:12px;
+      right:12px;
+      max-width:820px;
+      margin:0 auto;
+      z-index:10;
+      pointer-events:none;
+    }
+
+    .panel{
+      pointer-events:auto;
+      background:var(--panel);
+      border:1px solid rgba(127,231,255,.18);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      overflow:hidden;
+    }
+
+    #hudHeader{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:space-between;
       padding:10px 12px;
-      background:rgba(6,8,14,.86);
-      border:1px solid rgba(127,231,255,.20);
-      border-radius:14px;
-      backdrop-filter: blur(8px);
-      z-index:20;
-      color:#e8ecff;
-      font-size:12px;
-      line-height:1.25;
-      white-space:pre-wrap;
+      background:linear-gradient(180deg, rgba(15,18,30,.85), rgba(8,10,16,.45));
+      border-bottom:1px solid rgba(127,231,255,.12);
     }
-    #diag .row{ margin:2px 0; }
-    #diag .ok{ color:#7CFFB2; }
-    #diag .warn{ color:#FFD36A; }
-    #diag .bad{ color:#FF7B7B; }
-    #diag .muted{ color:#98a0c7; }
 
-    #diagBar{
-      display:flex; gap:8px; align-items:center; justify-content:space-between;
-      margin-bottom:6px;
+    #hudHeader .left{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      min-width:0;
     }
+
+    .pill{
+      font-size:12px;
+      color:var(--muted);
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(152,160,199,.25);
+      background:rgba(0,0,0,.18);
+      white-space:nowrap;
+    }
+
+    .pill strong{ color:var(--text); font-weight:650; }
+
+    #hudActions{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+
     .btn{
-      appearance:none; border:none; cursor:pointer;
-      padding:6px 10px; border-radius:12px;
-      background:rgba(127,231,255,.10);
-      color:#e8ecff;
+      cursor:pointer;
+      user-select:none;
+      -webkit-user-select:none;
+      font-size:12px;
+      padding:8px 10px;
+      border-radius:12px;
       border:1px solid rgba(127,231,255,.22);
-      font-weight:800; font-size:12px;
+      background:rgba(0,0,0,.18);
+      color:var(--aqua);
     }
     .btn:active{ transform: translateY(1px); }
+
+    #logWrap{
+      padding:10px 12px 12px 12px;
+    }
+
+    #logPanel{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size:12px;
+      line-height:1.35;
+      color:var(--text);
+      background:rgba(0,0,0,.25);
+      border:1px solid rgba(152,160,199,.18);
+      border-radius:14px;
+      padding:10px;
+      max-height:40vh;
+      overflow:auto;
+
+      /* IMPORTANT: allow selection for Android fallback copy */
+      user-select:text;
+      -webkit-user-select:text;
+    }
+
+    .ok{ color:var(--ok); }
+    .warn{ color:var(--warn); }
+    .bad{ color:var(--bad); }
+    .muted{ color:var(--muted); }
+
+    /* Bottom-center VR button slot */
+    #vrSlot{
+      position:fixed;
+      left:0; right:0;
+      bottom:18px;
+      display:flex;
+      justify-content:center;
+      z-index:9;
+      pointer-events:auto;
+    }
+
+    /* Mobile joystick overlay */
+    #touchUI{
+      position:fixed;
+      inset:0;
+      z-index:8;
+      pointer-events:none;
+    }
+
+    #joy{
+      position:absolute;
+      left:18px;
+      bottom:18px;
+      width:140px;
+      height:140px;
+      border-radius:999px;
+      border:1px solid rgba(127,231,255,.22);
+      background:rgba(0,0,0,.18);
+      box-shadow:var(--shadow);
+      pointer-events:auto;
+      touch-action:none;
+      display:none; /* enabled by JS only on mobile flat mode */
+    }
+
+    #joyKnob{
+      position:absolute;
+      left:50%;
+      top:50%;
+      width:54px;
+      height:54px;
+      border-radius:999px;
+      transform:translate(-50%,-50%);
+      background:rgba(127,231,255,.22);
+      border:1px solid rgba(127,231,255,.35);
+    }
+
+    #hint{
+      position:absolute;
+      right:18px;
+      bottom:18px;
+      max-width:320px;
+      padding:10px 12px;
+      border-radius:14px;
+      border:1px solid rgba(152,160,199,.18);
+      background:rgba(0,0,0,.18);
+      box-shadow:var(--shadow);
+      color:var(--muted);
+      font-size:12px;
+      pointer-events:none;
+      display:none; /* enabled by JS on mobile flat mode */
+    }
+    #hint b{ color:var(--text); font-weight:650; }
+
   </style>
 </head>
+
 <body>
-  <div id="diag">
-    <div id="diagBar">
-      <div style="font-weight:900;">DIAGNOSTICS</div>
-      <div style="display:flex; gap:8px;">
-        <button class="btn" id="btnClear">CLEAR</button>
-        <button class="btn" id="btnMin">MIN</button>
+  <div id="app"></div>
+
+  <div id="hud" class="panel">
+    <div id="hudHeader">
+      <div class="left">
+        <div class="pill"><strong>Scarlett</strong> VR Poker</div>
+        <div class="pill" id="pillXR">XR: <span class="muted">checking…</span></div>
+        <div class="pill" id="pillMode">Mode: <span class="muted">boot</span></div>
+      </div>
+
+      <div id="hudActions">
+        <button class="btn" id="btnCopy">📋 Copy Log</button>
+        <button class="btn" id="btnDownload">⬇️ Download Log</button>
+        <button class="btn" id="btnClear">🧹 Clear</button>
+        <button class="btn" id="btnHide">👁 Hide</button>
       </div>
     </div>
-    <div id="diagRows"></div>
+
+    <div id="logWrap">
+      <div id="logPanel"></div>
+    </div>
   </div>
 
-  <script type="module" src="./js/index.js"></script>
+  <div id="touchUI">
+    <div id="joy">
+      <div id="joyKnob"></div>
+    </div>
+    <div id="hint">
+      <b>Flat Mode Controls</b><br/>
+      Drag screen = look<br/>
+      Left joystick = move<br/>
+      Tap = interact (if used)
+    </div>
+  </div>
 
-  <script>
-    // overlay controls (non-module)
-    (function(){
-      const diag = document.getElementById("diag");
-      const rows = document.getElementById("diagRows");
-      document.getElementById("btnClear")?.addEventListener("click", ()=> rows.innerHTML = "");
-      document.getElementById("btnMin")?.addEventListener("click", ()=>{
-        if (!diag) return;
-        diag.style.maxHeight = (diag.style.maxHeight === "38vh") ? "52px" : "38vh";
-        diag.style.overflow = (diag.style.maxHeight === "52px") ? "hidden" : "auto";
-      });
-    })();
-  </script>
+  <div id="vrSlot"></div>
+
+  <!-- Main entry -->
+  <script type="module" src="./js/main.js"></script>
 </body>
 </html>

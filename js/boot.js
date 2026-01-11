@@ -1,140 +1,51 @@
-// /js/boot.js — MASTER Diagnostics Boot (CLEAN)
-// ✅ Buttons + logs always work
-// ✅ Loads /js/index.js with cache-bust
-// NOTE: importmap must be in index.html <head> (do NOT inject here)
+// /boot.js — Scarlett VR Poker Boot (FULL)
+(() => {
+  const now = () => new Date().toTimeString().slice(0, 8);
+  const logEl = document.getElementById("log");
+  const xrEl = document.getElementById("xrstat");
+  const modeEl = document.getElementById("modestat");
 
-const $ = (id) => document.getElementById(id);
-const logPanel = $("logPanel");
-const pillXR = $("pillXR");
-const pillMode = $("pillMode");
-const btnCopy = $("btnCopy");
-const btnDownload = $("btnDownload");
-const btnClear = $("btnClear");
-const btnHide = $("btnHide");
-const hud = $("hud");
+  const log = (msg) => {
+    console.log(msg);
+    if (!logEl) return;
+    logEl.textContent += `${msg}\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+  };
 
-const LOG_MAX = 2200;
-const buf = [];
-let hudVisible = true;
+  const safe = (fn) => {
+    try { fn(); } catch (e) { console.error(e); log(`[${now()}] [ERR] ${e?.message || e}`); }
+  };
 
-function stamp(){
-  const d=new Date();
-  return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`;
-}
-function safe(v){
-  try{
-    if (typeof v==="string") return v;
-    if (v instanceof Error) return `${v.name}: ${v.message}\n${v.stack||""}`;
-    if (typeof v==="object") return JSON.stringify(v);
-    return String(v);
-  }catch{ return String(v); }
-}
-function push(line, cls=""){
-  const msg = `[${stamp()}] ${line}`;
-  buf.push(msg);
-  if (buf.length>LOG_MAX) buf.shift();
-  if (logPanel){
-    const div=document.createElement("div");
-    if (cls) div.className=cls;
-    div.textContent=msg;
-    logPanel.appendChild(div);
-    while (logPanel.childNodes.length>LOG_MAX) logPanel.removeChild(logPanel.firstChild);
-    logPanel.scrollTop=logPanel.scrollHeight;
-  }
-}
+  safe(() => {
+    log(`[${now()}] [BOOT] boot.js loaded ✅`);
 
-window.ScarlettLog = {
-  push,
-  buffer: buf,
-  setMode(t){ pillMode && (pillMode.innerHTML = `Mode: <span class="muted">${t}</span>`); },
-  setXR(html){ pillXR && (pillXR.innerHTML = html); }
-};
+    const xrOk = !!navigator.xr;
+    if (xrEl) xrEl.textContent = `XR: ${xrOk ? "supported" : "not found"}`;
+    if (modeEl) modeEl.textContent = `Mode: running`;
 
-push("[BOOT] boot.js loaded ✅","ok");
+    const btnCopy = document.getElementById("copyBtn");
+    const btnClear = document.getElementById("clearBtn");
 
-// Capture errors
-window.addEventListener("error",(e)=>{
-  push(`WINDOW ERROR: ${e.message||e.type}`,"bad");
-  if (e.error?.stack) push(e.error.stack,"muted");
-});
-window.addEventListener("unhandledrejection",(e)=>{
-  push(`PROMISE REJECT: ${safe(e.reason)}`,"bad");
-});
-
-// Mirror console
-const _log=console.log.bind(console);
-const _warn=console.warn.bind(console);
-const _err=console.error.bind(console);
-console.log=(...a)=>{_log(...a); push(a.map(safe).join(" "), "");};
-console.warn=(...a)=>{_warn(...a); push(a.map(safe).join(" "), "warn");};
-console.error=(...a)=>{_err(...a); push(a.map(safe).join(" "), "bad");};
-
-// Buttons
-btnClear?.addEventListener("click", ()=>{
-  buf.length=0;
-  if (logPanel) logPanel.innerHTML="";
-  push("Log cleared ✅","ok");
-});
-btnHide?.addEventListener("click", ()=>{
-  hudVisible=!hudVisible;
-  if (hud) hud.style.display = hudVisible ? "" : "none";
-});
-btnCopy?.addEventListener("click", async ()=>{
-  const text = buf.join("\n");
-  try{
-    await navigator.clipboard.writeText(text);
-    const old = btnCopy.textContent;
-    btnCopy.textContent="✅ Copied!";
-    setTimeout(()=>btnCopy.textContent=old, 1200);
-  }catch{
-    try{
-      const ta=document.createElement("textarea");
-      ta.value=text;
-      ta.style.position="fixed";
-      ta.style.left="-9999px";
-      document.body.appendChild(ta);
-      ta.focus(); ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-      const old = btnCopy.textContent;
-      btnCopy.textContent="✅ Copied!";
-      setTimeout(()=>btnCopy.textContent=old, 1200);
-    }catch{
-      alert("Copy failed. Long-press log box → Select All → Copy.");
+    if (btnCopy) {
+      btnCopy.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(logEl?.textContent || "");
+        } catch (e) {
+          console.warn(e);
+        }
+      };
     }
-  }
-});
-btnDownload?.addEventListener("click", ()=>{
-  const blob=new Blob([buf.join("\n")],{type:"text/plain"});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement("a");
-  a.href=url; a.download=`scarlett_log_${Date.now()}.txt`;
-  document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(url);
-});
 
-// XR label
-(async ()=>{
-  let supported=false;
-  try{
-    if (navigator.xr?.isSessionSupported) supported = await navigator.xr.isSessionSupported("immersive-vr");
-  }catch{}
-  window.ScarlettLog.setXR(`XR: <span class="${supported?"ok":"warn"}">${supported?"supported":"not supported"}</span>`);
-})();
+    if (btnClear) {
+      btnClear.onclick = () => { if (logEl) logEl.textContent = ""; };
+    }
 
-window.ScarlettLog.setMode("boot");
-
-// Load index.js (cache-bust)
-(async ()=>{
-  try{
-    window.ScarlettLog.setMode("loading index.js");
-    push("[BOOT] importing ./js/index.js …");
-    await import(`./index.js?v=${Date.now()}`);
-    push("[BOOT] index.js imported ✅","ok");
-    window.ScarlettLog.setMode("running");
-  }catch(e){
-    push("[BOOT] index.js FAILED ❌","bad");
-    push(String(e?.stack||e),"muted");
-    window.ScarlettLog.setMode("failed");
-  }
+    log(`[${now()}] [BOOT] importing ./js/index.js …`);
+    import("./js/index.js").then(() => {
+      log(`[${now()}] [BOOT] index.js imported ✅`);
+    }).catch((e) => {
+      console.error(e);
+      log(`[${now()}] [BOOT] index.js import FAILED ❌ ${e?.message || e}`);
+    });
+  });
 })();

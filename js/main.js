@@ -1,16 +1,21 @@
-// /js/main.js — Scarlett Hybrid 4.6 (HALLWAYS FIX + LASER FIX + INPUT FIX + FULL GRID MODE)
-// ✅ Laser always visible (both controllers, robust right-hand selection)
-// ✅ Movement restored (left stick move, right stick 45° snap)
-// ✅ Teleport is 1 leap per press (right trigger)
-// ✅ Bright + consistent lighting (less inside/outside mismatch)
+// /js/main.js — Scarlett Hybrid 4.5 (FULL REFINE)
+// - Bright + consistent lighting
+// - Grid-only (world controls floors; we don't add floors here)
+// - Laser always visible
+// - Left stick move; Right stick 45° snap; if no left stick -> right stick Y moves
+// - Teleport = 1 leap per press (right trigger / A / squeeze)
+// - Spawn faces BossTable (or SpawnPoint target/rotation if provided)
+// - HUD diagnostics restored + buttons wired
 
 (async function boot() {
+  console.log("SCARLETT_MAIN=4.5");
+
   if (window.__SCARLETT_BOOTED__) return;
   window.__SCARLETT_BOOTED__ = true;
 
-  const BUILD = (window.__SCARLETT_BUILD__ ||= Date.now());
-  console.log("SCARLETT_MAIN=4.6 BUILD=", BUILD);
-
+  // -------------------------
+  // HUD / Diagnostics wiring
+  // -------------------------
   const ui = {
     grid: document.getElementById("scarlettGrid"),
     logBox: document.getElementById("scarlettLog"),
@@ -19,6 +24,10 @@
     btnSoftReboot: document.getElementById("btnSoftReboot"),
     btnCopy: document.getElementById("btnCopyLog"),
     btnClear: document.getElementById("btnClearLog"),
+    btnMenu: document.getElementById("btnMenu"),
+    btnRoomLobby: document.getElementById("btnRoomLobby"),
+    btnRoomStore: document.getElementById("btnRoomStore"),
+    btnRoomScorpion: document.getElementById("btnRoomScorpion"),
   };
 
   const LOG = {
@@ -34,8 +43,8 @@
     },
     clear() { this.lines = []; if (ui.logBox) ui.logBox.textContent = ""; },
     copy() {
-      try { navigator.clipboard?.writeText?.(this.lines.join("\n")); this.push("log","Copied logs ✅"); }
-      catch { this.push("warn","Clipboard not available"); }
+      navigator.clipboard?.writeText?.(this.lines.join("\n"));
+      this.push("log", "Copied logs ✅");
     }
   };
 
@@ -71,30 +80,36 @@
     return { xr, immersive };
   }
 
-  // THREE
-  let THREE;
-  try {
-    const m = await import(`./three.js?v=${BUILD}`);
-    THREE = m.default || m.THREE || m;
-    LOG.push("log", "three via local wrapper ✅");
-  } catch {
-    THREE = await import("three");
-    LOG.push("log", "three via importmap ✅");
+  async function safeImport(url, label = url) {
+    try { const m = await import(url); LOG.push("log", `import ok: ${label}`); return m; }
+    catch (e) { LOG.push("warn", `import fail: ${label} — ${e?.message || e}`); return null; }
   }
 
+  // -------------------------
+  // THREE (prefer local wrapper)
+  // -------------------------
+  const THREE = await (async () => {
+    const local = await safeImport("./three.js", "three via local wrapper");
+    if (local) return local.default || local.THREE || local;
+    return await import("three");
+  })();
+
+  // -------------------------
   // Scene / Camera / Renderer
+  // -------------------------
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0b0f18);
+  scene.background = new THREE.Color(0x0a0c12);
 
   const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 1400);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setSize(innerWidth, innerHeight);
   renderer.xr.enabled = true;
 
+  // Quest brightness + stable response
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 2.05;
+  renderer.toneMappingExposure = 2.45;
   renderer.physicallyCorrectLights = false;
 
   document.body.appendChild(renderer.domElement);
@@ -105,12 +120,22 @@
     renderer.setSize(innerWidth, innerHeight);
   });
 
+  // -------------------------
   // VRButton
-  const { VRButton } = await import(`./VRButton.js?v=${BUILD}`);
-  document.body.appendChild(VRButton.createButton(renderer));
-  LOG.push("log", "VRButton ✅");
+  // -------------------------
+  const vrb = await safeImport("./VRButton.js", "./VRButton.js");
+  if (vrb?.VRButton?.createButton) {
+    const btn = vrb.VRButton.createButton(renderer);
+    btn.id = "VRButton";
+    document.body.appendChild(btn);
+    LOG.push("log", "VRButton ✅");
+  } else {
+    LOG.push("warn", "VRButton.js missing/invalid");
+  }
 
-  // Player Rig
+  // -------------------------
+  // Rig
+  // -------------------------
   const player = new THREE.Group();
   player.name = "PlayerRig";
   scene.add(player);
@@ -118,83 +143,136 @@
   camera.position.set(0, 1.65, 0);
   player.add(camera);
 
-  // Lighting (consistent: less “inside bright/outside black”)
-  scene.add(new THREE.AmbientLight(0xffffff, 1.25));
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x2a2a40, 2.6));
+  // -------------------------
+  // OVERKILL LIGHT PACK (inside + outside)
+  // -------------------------
+  const lightRoot = new THREE.Group();
+  lightRoot.name = "LightPack";
+  scene.add(lightRoot);
 
-  const sun = new THREE.DirectionalLight(0xffffff, 2.8);
-  sun.position.set(60, 120, 70);
-  scene.add(sun);
+  lightRoot.add(new THREE.AmbientLight(0xffffff, 1.15));
+  lightRoot.add(new THREE.HemisphereLight(0xffffff, 0x202030, 2.3));
 
-  // Mild headlamp (not overpowering)
-  const headLamp = new THREE.PointLight(0xffffff, 1.15, 28);
-  headLamp.position.set(0, 1.45, 0.35);
+  const sun = new THREE.DirectionalLight(0xffffff, 4.2);
+  sun.position.set(60, 110, 70);
+  lightRoot.add(sun);
+
+  // Headlamp: guarantees you can see what you're looking at
+  const headLamp = new THREE.PointLight(0xffffff, 2.6, 45);
+  headLamp.position.set(0, 1.25, 0.35);
   camera.add(headLamp);
 
-  // Controllers
-  const controller0 = renderer.xr.getController(0); controller0.name = "Controller0";
-  const controller1 = renderer.xr.getController(1); controller1.name = "Controller1";
-  player.add(controller0, controller1);
+  // -------------------------
+  // Context shared with World / Systems
+  // -------------------------
+  const ctx = {
+    THREE, scene, camera, renderer, player, rig: player, LOG,
+    BUILD: Date.now(),
+    systems: {},
+    world: null,
+    colliders: []
+  };
+
+  // -------------------------
+  // World
+  // -------------------------
+  const worldMod = await safeImport("./world.js", "./world.js");
+  if (worldMod?.World?.init) {
+    await worldMod.World.init(ctx);
+    ctx.world = worldMod.World;
+    LOG.push("log", `world module loaded: ${worldMod.World?.version || "unknown"}`);
+  } else {
+    LOG.push("error", "world.js missing World.init");
+  }
+
+  // -------------------------
+  // Controllers parented to rig
+  // -------------------------
+  const controllerL = renderer.xr.getController(0);
+  const controllerR = renderer.xr.getController(1);
+  controllerL.name = "ControllerLeft";
+  controllerR.name = "ControllerRight";
+  player.add(controllerL, controllerR);
   LOG.push("log", "Controllers parented to PlayerRig ✅");
 
-  // Hands (optional)
   try {
-    const hand0 = renderer.xr.getHand(0); hand0.name = "XRHand0";
-    const hand1 = renderer.xr.getHand(1); hand1.name = "XRHand1";
-    player.add(hand0, hand1);
+    const leftHand = renderer.xr.getHand(0);
+    const rightHand = renderer.xr.getHand(1);
+    leftHand.name = "XRHandLeft";
+    rightHand.name = "XRHandRight";
+    player.add(leftHand, rightHand);
     LOG.push("log", "XRHands parented to PlayerRig ✅");
   } catch {
-    LOG.push("warn", "XRHands unavailable (controller-only OK).");
+    LOG.push("warn", "XRHands unavailable (ok)");
   }
 
-  // Laser setup on BOTH controllers (Quest index may swap)
-  function makeLaser() {
-    const line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]),
-      new THREE.LineBasicMaterial({ color: 0x00ffff })
-    );
-    line.frustumCulled = false;
-    line.visible = false;
-    return line;
+  // -------------------------
+  // Room manager (optional)
+  // -------------------------
+  const rm = await safeImport("./room_manager.js", "./room_manager.js");
+  if (rm?.RoomManager?.init) {
+    rm.RoomManager.init(ctx);
+    ctx.systems.roomManager = rm.RoomManager;
+    LOG.push("log", "[rm] init ✅");
   }
 
-  const laser0 = makeLaser(); controller0.add(laser0);
-  const laser1 = makeLaser(); controller1.add(laser1);
+  // Room buttons -> RoomManager if present
+  function setRoom(name) {
+    const R = ctx.systems.roomManager;
+    if (R?.setRoom) R.setRoom(ctx, name);
+    else LOG.push("warn", `RoomManager missing; cannot setRoom(${name})`);
+  }
+  ui.btnRoomLobby?.addEventListener("click", () => setRoom("lobby"));
+  ui.btnRoomStore?.addEventListener("click", () => setRoom("store"));
+  ui.btnRoomScorpion?.addEventListener("click", () => setRoom("scorpion"));
 
-  const ring = new THREE.Mesh(
-    new THREE.RingGeometry(0.26, 0.37, 64),
-    new THREE.MeshBasicMaterial({ color: 0x7fe7ff, side: THREE.DoubleSide, transparent: true, opacity: 0.95 })
-  );
-  ring.rotation.x = -Math.PI / 2;
-  ring.visible = false;
-  scene.add(ring);
-
-  // World
-  const { World } = await import(`./world.js?v=${BUILD}`);
-  const ctx = { THREE, scene, camera, renderer, player, LOG, BUILD, colliders: [] };
-  await World.init(ctx);
-  LOG.push("log", `world module loaded: ${World.VERSION || "?"}`);
-
-  // Spawn + face table
+  // -------------------------
+  // Spawn facing: ALWAYS face BossTable by default
+  // -------------------------
   const tmpA = new THREE.Vector3();
   const tmpB = new THREE.Vector3();
-
   function applySpawnAndFacing() {
-    const sp = scene.getObjectByName("SpawnPoint");
+    const sp = scene.getObjectByName("SpawnPoint") || scene.getObjectByName("SpawnPad");
     if (sp) {
       sp.getWorldPosition(tmpA);
       player.position.set(tmpA.x, 0, tmpA.z);
       LOG.push("log", `Spawn ✅ x=${player.position.x.toFixed(2)} z=${player.position.z.toFixed(2)}`);
     }
 
-    const target = scene.getObjectByName("BossTable") || scene.getObjectByName("HubCenter");
-    if (target) {
-      target.getWorldPosition(tmpA);
-      tmpB.set(player.position.x, 0, player.position.z);
-      const v = tmpA.sub(tmpB); v.y = 0;
+    // Priority:
+    // 1) SpawnPoint.userData.faceTargetName
+    // 2) SpawnPoint.rotation.y if explicitly set
+    // 3) Look at BossTable / HubPlate
+    const faceTargetName = sp?.userData?.faceTargetName;
+    if (faceTargetName) {
+      const t = scene.getObjectByName(faceTargetName);
+      if (t) {
+        t.getWorldPosition(tmpB);
+        const v = tmpB.sub(new THREE.Vector3(player.position.x, 0, player.position.z));
+        v.y = 0;
+        if (v.lengthSq() > 1e-6) {
+          player.rotation.y = Math.atan2(v.x, v.z);
+          LOG.push("log", `Facing target ✅ (${faceTargetName})`);
+          return;
+        }
+      }
+    }
+
+    // explicit spawn rotation?
+    if (sp && Math.abs(sp.rotation?.y) > 1e-4) {
+      player.rotation.y = sp.rotation.y;
+      LOG.push("log", `Facing from SpawnPoint.rotation ✅ yaw=${(player.rotation.y * 180/Math.PI).toFixed(0)}°`);
+      return;
+    }
+
+    // default: face table
+    const table = scene.getObjectByName("BossTable") || scene.getObjectByName("HubPlate");
+    if (table) {
+      table.getWorldPosition(tmpB);
+      const v = tmpB.sub(new THREE.Vector3(player.position.x, 0, player.position.z));
+      v.y = 0;
       if (v.lengthSq() > 1e-6) {
-        const yaw = Math.atan2(v.x, v.z);
-        player.rotation.set(0, yaw, 0);
+        player.rotation.y = Math.atan2(v.x, v.z);
         LOG.push("log", "Facing table ✅ (BossTable)");
       }
     }
@@ -203,112 +281,130 @@
   applySpawnAndFacing();
   renderer.xr.addEventListener("sessionstart", () => setTimeout(applySpawnAndFacing, 180));
 
-  // Floor plane at y=0 for teleport (even with no floors)
+  // -------------------------
+  // Teleport ray + marker (always visible)
+  // -------------------------
   const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
-  // Robust controller + gamepad selection
-  function getInputMap() {
-    const session = renderer.xr.getSession();
-    if (!session) return { gpL:null, gpR:null, rightCtrl: controller1, rightLaser: laser1 };
+  const laserMat = new THREE.LineBasicMaterial({
+    color: 0x00ffff,
+    transparent: true,
+    opacity: 0.95,
+    depthTest: false,
+    depthWrite: false
+  });
+
+  const laser = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]),
+    laserMat
+  );
+  laser.frustumCulled = false;
+  laser.renderOrder = 9999;
+  controllerR.add(laser);
+
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.26, 0.38, 72),
+    new THREE.MeshBasicMaterial({
+      color: 0x7fe7ff,
+      transparent: true,
+      opacity: 0.95,
+      side: THREE.DoubleSide,
+      depthTest: false,
+      depthWrite: false
+    })
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.renderOrder = 9999;
+  ring.visible = false;
+  scene.add(ring);
+
+  const o = new THREE.Vector3();
+  const q = new THREE.Quaternion();
+  const dir = new THREE.Vector3();
+  const hit = new THREE.Vector3();
+  const hubPos = new THREE.Vector3();
+
+  function updateTeleportRay() {
+    controllerR.getWorldPosition(o);
+    controllerR.getWorldQuaternion(q);
+    if (o.lengthSq() < 0.0001) return false;
+
+    // Controller forward
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(q).normalize();
+
+    // Slight bias toward hub center so it “wants” to go there
+    const hub = scene.getObjectByName("HubPlate") || scene.getObjectByName("BossTable");
+    if (hub) {
+      hub.getWorldPosition(hubPos);
+      const toHub = hubPos.clone().sub(o).normalize();
+      fwd.lerp(toHub, 0.25).normalize();
+    }
+
+    // Aim down so it hits plane y=0
+    dir.copy(fwd);
+    dir.y -= 0.45;
+    dir.normalize();
+
+    const denom = floorPlane.normal.dot(dir);
+    if (Math.abs(denom) < 1e-4) return false;
+
+    const t = -(floorPlane.normal.dot(o) + floorPlane.constant) / denom;
+    if (t < 0.2 || t > 40) return false;
+
+    hit.copy(o).addScaledVector(dir, t);
+
+    laser.geometry.setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-t)]);
+    ring.position.set(hit.x, 0.02, hit.z);
+
+    laser.visible = true;
+    ring.visible = true;
+    return true;
+  }
+
+  // -------------------------
+  // Gamepad helpers (Quest axes fix)
+  // -------------------------
+  function getGamepads() {
+    const session = renderer.xr.getSession?.();
+    if (!session) return { gpL: null, gpR: null };
 
     let gpL = null, gpR = null;
-
-    // choose right controller based on handedness when possible
-    let rightCtrl = null;
-    let rightLaser = null;
-
     for (const src of session.inputSources) {
       if (!src.gamepad) continue;
       if (src.handedness === "left") gpL = src.gamepad;
       if (src.handedness === "right") gpR = src.gamepad;
     }
-
-    // Decide “right controller object” by whether gpR exists and which index has pose
-    // Fallback: show both lasers if we can’t decide.
-    const pickRight = () => {
-      if (gpR) {
-        // try to match a controller by checking which has non-zero pose
-        const p0 = new THREE.Vector3(); controller0.getWorldPosition(p0);
-        const p1 = new THREE.Vector3(); controller1.getWorldPosition(p1);
-        // if one is near origin and the other isn't, pick the valid one
-        const ok0 = p0.lengthSq() > 0.01;
-        const ok1 = p1.lengthSq() > 0.01;
-        if (ok1 && !ok0) return { c: controller1, l: laser1 };
-        if (ok0 && !ok1) return { c: controller0, l: laser0 };
-      }
-      // safe fallback
-      return { c: controller1, l: laser1 };
-    };
-
-    const pr = pickRight();
-    rightCtrl = pr.c;
-    rightLaser = pr.l;
-
-    return { gpL, gpR, rightCtrl, rightLaser };
+    return { gpL, gpR };
   }
 
-  // Teleport ray
-  const o = new THREE.Vector3();
-  const q = new THREE.Quaternion();
-  const dir = new THREE.Vector3();
-  const hit = new THREE.Vector3();
-
-  function hubTarget() {
-    return scene.getObjectByName("HubCenter") || scene.getObjectByName("BossTable") || null;
+  function deadzone(v, dz = 0.18) {
+    if (Math.abs(v) < dz) return 0;
+    return v;
   }
 
-  function updateTeleportRay(rightCtrl, rightLaser) {
-    // hide both by default
-    laser0.visible = false;
-    laser1.visible = false;
-    ring.visible = false;
-
-    rightCtrl.getWorldPosition(o);
-    rightCtrl.getWorldQuaternion(q);
-    if (o.lengthSq() < 0.0001) return false;
-
-    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(q).normalize();
-
-    // Bias toward hub center so you “tend” to point into the circle
-    const h = hubTarget();
-    if (h) {
-      const t = new THREE.Vector3();
-      h.getWorldPosition(t);
-      const toHub = t.sub(o).normalize();
-      fwd.lerp(toHub, 0.28).normalize();
-    }
-
-    dir.copy(fwd);
-    dir.y -= 0.35;
-    dir.normalize();
-
-    const denom = floorPlane.normal.dot(dir);
-    if (Math.abs(denom) < 0.001) return false;
-
-    const t = -(floorPlane.normal.dot(o) + floorPlane.constant) / denom;
-    if (t < 0.2 || t > 35) return false;
-
-    hit.copy(o).addScaledVector(dir, t);
-
-    rightLaser.geometry.setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-t)]);
-    rightLaser.visible = true;
-
-    ring.position.set(hit.x, 0.02, hit.z);
-    ring.visible = true;
-
-    return true;
-  }
-
-  // Locomotion settings
-  const MOVE_SPEED = 1.15;       // sane speed
-  const SNAP_ANGLE = Math.PI/4;  // 45°
+  // Move + snap
+  const MOVE_SPEED = 1.15;          // slower, controlled
+  const SNAP_ANGLE = Math.PI / 4;   // 45°
   let snapCooldown = 0;
 
-  // Teleport 1-leap per press
+  // Teleport = 1 leap per press
   let lastTeleportPressed = false;
 
+  function isTeleportPressed(gpR) {
+    if (!gpR?.buttons?.length) return false;
+    // Trigger(0) or squeeze(1) or A(4) often on Quest mappings
+    const b = gpR.buttons;
+    return !!(b[0]?.pressed || b[1]?.pressed || b[4]?.pressed);
+  }
+
+  // -------------------------
+  // Main loop
+  // -------------------------
   let last = performance.now();
   let fpsAcc = 0, fpsCount = 0, fps = 0;
+
+  await setCaps();
+  LOG.push("log", "Hybrid 4.5 boot complete ✅ (grid-only + hallways + bright + laser + move + 45° snap + 1-leap)");
 
   renderer.setAnimationLoop((t) => {
     const dt = Math.min(0.05, (t - last) / 1000);
@@ -317,17 +413,25 @@
     fpsAcc += dt; fpsCount++;
     if (fpsAcc >= 0.5) { fps = Math.round(fpsCount / fpsAcc); fpsAcc = 0; fpsCount = 0; }
 
-    try { World?.update?.(ctx, dt); } catch {}
+    try { ctx.world?.update?.(ctx, dt); } catch {}
 
     if (renderer.xr.isPresenting) {
-      const { gpL, gpR, rightCtrl, rightLaser } = getInputMap();
+      const { gpL, gpR } = getGamepads();
 
-      // Move with left stick (fallback if handedness missing)
-      const gpMove = gpL || gpR;
-      if (gpMove?.axes?.length >= 2) {
-        const lx = gpMove.axes[0] ?? 0;
-        const ly = gpMove.axes[1] ?? 0;
+      // Movement:
+      // - Prefer LEFT stick axes[0],[1]
+      // - If no left controller/gamepad -> use RIGHT stick Y (axes[3]) for forward/back
+      let lx = 0, ly = 0;
+      if (gpL?.axes?.length >= 2) {
+        lx = deadzone(gpL.axes[0] ?? 0);
+        ly = deadzone(gpL.axes[1] ?? 0);
+      } else if (gpR?.axes?.length >= 4) {
+        // single-controller fallback
+        lx = 0;
+        ly = deadzone(gpR.axes[3] ?? 0);
+      }
 
+      if (lx || ly) {
         const yaw = player.rotation.y;
         const forward = (-ly) * MOVE_SPEED * dt;
         const strafe  = ( lx) * MOVE_SPEED * dt;
@@ -336,47 +440,50 @@
         player.position.z += Math.cos(yaw) * forward - Math.sin(yaw) * strafe;
       }
 
-      // Snap turn with right stick X (Quest uses axes[2] often)
+      // Snap turn (RIGHT stick X): Quest usually uses axes[2] for right X
       snapCooldown = Math.max(0, snapCooldown - dt);
       let rx = 0;
-      if (gpR?.axes?.length >= 4) rx = gpR.axes[2] ?? 0;
-      else if (gpR?.axes?.length >= 1) rx = gpR.axes[0] ?? 0;
+      if (gpR?.axes?.length >= 4) rx = deadzone(gpR.axes[2] ?? 0, 0.25);
+      else if (gpR?.axes?.length >= 1) rx = deadzone(gpR.axes[0] ?? 0, 0.25);
+
       if (snapCooldown <= 0 && Math.abs(rx) > 0.75) {
         player.rotation.y += (rx > 0 ? -SNAP_ANGLE : SNAP_ANGLE);
         snapCooldown = 0.28;
       }
 
-      // Teleport ray
-      const canTeleport = updateTeleportRay(rightCtrl, rightLaser);
-
-      // Right trigger press (fallback: any gamepad button 0)
-      const gpTrig = gpR || gpL;
-      const pressed = !!gpTrig?.buttons?.[0]?.pressed;
+      // Teleport ray + leap
+      const canTeleport = updateTeleportRay();
+      const pressed = isTeleportPressed(gpR);
 
       if (pressed && !lastTeleportPressed && canTeleport) {
+        // one leap
         player.position.set(hit.x, 0, hit.z);
         LOG.push("log", `Teleport ✅ x=${hit.x.toFixed(2)} z=${hit.z.toFixed(2)}`);
       }
       lastTeleportPressed = pressed;
 
+      setMetrics([
+        ["FPS", `${fps}`],
+        ["XR", "YES"],
+        ["Rig", `${player.position.x.toFixed(1)},${player.position.z.toFixed(1)}`],
+        ["Move", gpL ? "LEFT stick" : "RIGHT-Y fallback"],
+        ["Snap", "RIGHT X 45°"],
+        ["Laser", laser.visible ? "YES" : "NO"],
+      ]);
+
     } else {
-      laser0.visible = false;
-      laser1.visible = false;
+      laser.visible = false;
       ring.visible = false;
       lastTeleportPressed = false;
-    }
 
-    setMetrics([
-      ["Build", `${BUILD}`],
-      ["FPS", `${fps}`],
-      ["XR", renderer.xr.isPresenting ? "YES" : "NO"],
-      ["Pos", `${player.position.x.toFixed(1)}, ${player.position.z.toFixed(1)}`],
-      ["World", `${World.VERSION || "?"}`],
-    ]);
+      setMetrics([
+        ["FPS", `${fps}`],
+        ["XR", "NO"],
+        ["Rig", `${player.position.x.toFixed(1)},${player.position.z.toFixed(1)}`],
+        ["Laser", "NO"],
+      ]);
+    }
 
     renderer.render(scene, camera);
   });
-
-  await setCaps();
-  LOG.push("log", "Hybrid 4.6 boot complete ✅ (laser+move restored, 45° snap, 1-press teleport)");
 })();

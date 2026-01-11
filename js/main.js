@@ -1,257 +1,152 @@
-// /js/main.js — Scarlett Diagnostic Build 4.6 (HUD COPY FIX + DOWNLOAD LOG + DEMO BOTS)
-// Goals:
-// ✅ HUD buttons always wired (even if DOM loads late)
-// ✅ Copy Logs works on Quest (Clipboard API -> execCommand -> prompt fallback)
-// ✅ Download Logs fallback
-// ✅ Bright lighting pack (never dark)
-// ✅ Movement + Teleport + 45° snap (right stick)
-// ✅ Laser always on RIGHT controller
-// ✅ Demo bots seated around BossTable (safe placeholders)
+// /js/main.js — Scarlett Hybrid 4.6 (NO-CLEANUP SAFE)
+// - Uses local ./three.js wrapper (GitHub Pages safe)
+// - RIGHT-hand laser only
+// - Fix forward/back inversion
+// - Bright, consistent lighting
+// - Spawn faces AWAY from teleporter (toward BossTable / hub center)
+// - Diagnostics HUD: Copy Log + Hard Reset always works
+// - Teleport is internal (does NOT depend on deleted teleport scripts)
 
 (async function boot(){
+  const BUILD = `4.6_${Date.now()}`;
+  const LOG = [];
+  const log = (...a) => {
+    const s = a.map(v => typeof v === "string" ? v : JSON.stringify(v)).join(" ");
+    LOG.push(`[${new Date().toLocaleTimeString()}] ${s}`);
+    console.log("[SCARLETT]", ...a);
+    if (LOG.length > 500) LOG.shift();
+    try { window.__SCARLETT_LOG__ = LOG; } catch {}
+  };
+
   if (window.__SCARLETT_BOOTED__) return;
   window.__SCARLETT_BOOTED__ = true;
+  window.__SCARLETT_LOG__ = LOG;
 
-  const BUILD = Date.now();
-  const qs = (id) => document.getElementById(id);
-
-  // -------------------------
-  // HUD / LOG SYSTEM
-  // -------------------------
-  const ui = {
-    grid: qs("scarlettGrid"),
-    logBox: qs("scarlettLog"),
-    capXR: qs("capXR"),
-    capImm: qs("capImm"),
-    btnSoftReboot: qs("btnSoftReboot"),
-    btnCopy: qs("btnCopyLog"),
-    btnClear: qs("btnClearLog"),
-    btnMenu: qs("btnMenu"),
-    btnRoomLobby: qs("btnRoomLobby"),
-    btnRoomStore: qs("btnRoomStore"),
-    btnRoomScorpion: qs("btnRoomScorpion"),
+  // ---------- HARD RESET ----------
+  window.__SCARLETT_RESET__ = () => {
+    log("HARD RESET requested");
+    try { localStorage.removeItem("scarlett_state"); } catch {}
+    try { location.reload(); } catch {}
   };
 
-  const LOG = {
-    lines: [],
-    max: 1200,
-    push(kind, msg){
-      const t = new Date().toLocaleTimeString();
-      const line = `[${t}] ${kind.toUpperCase()}: ${msg}`;
-      this.lines.push(line);
-      if (this.lines.length > this.max) this.lines.splice(0, this.lines.length - this.max);
-      if (ui.logBox) ui.logBox.textContent = this.lines.join("\n");
-      if (kind === "error") console.error(msg);
-      else if (kind === "warn") console.warn(msg);
-      else console.log(msg);
-    },
-    clear(){
-      this.lines.length = 0;
-      if (ui.logBox) ui.logBox.textContent = "";
-      this.push("log", "Logs cleared ✅");
-    }
-  };
+  // ---------- DIAGNOSTICS HUD (DOM, always available) ----------
+  function makeDiagnosticsHUD(){
+    const hud = document.createElement("div");
+    hud.id = "scarlett_diag";
+    hud.style.cssText = `
+      position:fixed; left:10px; top:10px; z-index:99999;
+      width:min(520px, calc(100vw - 20px));
+      background:rgba(10,12,18,.78);
+      color:#eaf0ff; font:12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      border:1px solid rgba(127,231,255,.25);
+      border-radius:14px; padding:10px;
+      box-shadow:0 12px 40px rgba(0,0,0,.45);
+      backdrop-filter: blur(8px);
+      pointer-events:auto;
+    `;
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;";
+    const title = document.createElement("div");
+    title.textContent = `Scarlett Diagnostics (BUILD ${BUILD})`;
+    title.style.cssText = "font-weight:700; color:#7fe7ff; margin-right:auto;";
+    const btnCopy = document.createElement("button");
+    btnCopy.textContent = "Copy Log";
+    btnCopy.style.cssText = "padding:6px 10px; border-radius:10px; border:1px solid rgba(127,231,255,.35); background:rgba(15,20,32,.9); color:#eaf0ff;";
+    const btnReset = document.createElement("button");
+    btnReset.textContent = "Hard Reset";
+    btnReset.style.cssText = "padding:6px 10px; border-radius:10px; border:1px solid rgba(255,45,122,.35); background:rgba(32,15,22,.9); color:#ffd7e7;";
+    const btnHide = document.createElement("button");
+    btnHide.textContent = "Hide";
+    btnHide.style.cssText = "padding:6px 10px; border-radius:10px; border:1px solid rgba(255,255,255,.20); background:rgba(15,20,32,.65); color:#cfd6ff;";
 
-  window.SCARLETT = window.SCARLETT || {};
-  window.SCARLETT.LOG = LOG;
+    const pre = document.createElement("pre");
+    pre.style.cssText = `
+      margin:0; max-height:220px; overflow:auto; white-space:pre-wrap;
+      border-radius:12px; padding:8px; background:rgba(0,0,0,.25);
+      border:1px solid rgba(255,255,255,.08);
+    `;
+    const update = () => { pre.textContent = LOG.slice(-80).join("\n"); };
+    setInterval(update, 250);
+    update();
 
-  addEventListener("error", (e) => LOG.push("error", `${e.message} @ ${e.filename}:${e.lineno}:${e.colno}`));
-  addEventListener("unhandledrejection", (e) => LOG.push("error", `UnhandledPromiseRejection: ${e.reason?.message || e.reason}`));
-
-  function setGrid(rows){
-    if (!ui.grid) return;
-    ui.grid.innerHTML = "";
-    for (const [k,v] of rows){
-      const row = document.createElement("div");
-      row.className = "kv";
-      const kk = document.createElement("div"); kk.className = "k"; kk.textContent = k;
-      const vv = document.createElement("div"); vv.className = "v"; vv.textContent = v;
-      row.appendChild(kk); row.appendChild(vv);
-      ui.grid.appendChild(row);
-    }
-  }
-
-  // --- Copy logs: 3-step fallback (Quest-safe)
-  async function copyTextRobust(text){
-    // 1) Clipboard API (best)
-    try{
-      if (navigator.clipboard?.writeText){
+    btnCopy.onclick = async () => {
+      const text = LOG.join("\n");
+      try {
         await navigator.clipboard.writeText(text);
-        return { ok: true, via: "clipboard" };
+        log("✅ Copied diagnostics log to clipboard");
+      } catch (e) {
+        // Fallback for browsers that block clipboard
+        try {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+          log("✅ Copied diagnostics log (fallback)");
+        } catch (e2) {
+          log("❌ Copy failed", String(e2 || e));
+        }
       }
-    }catch(e){
-      // continue to fallback
-    }
+    };
 
-    // 2) execCommand fallback (older mobile browsers)
-    try{
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.setAttribute("readonly", "");
-      ta.style.position = "fixed";
-      ta.style.left = "-9999px";
-      ta.style.top = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      ta.setSelectionRange(0, ta.value.length);
-      const ok = document.execCommand("copy");
-      document.body.removeChild(ta);
-      if (ok) return { ok: true, via: "execCommand" };
-    }catch(e){
-      // continue to fallback
-    }
+    btnReset.onclick = () => window.__SCARLETT_RESET__();
+    btnHide.onclick = () => { hud.style.display = "none"; };
 
-    // 3) Manual prompt fallback (always works)
-    try{
-      prompt("Copy the logs below:", text.slice(0, 50000)); // cap so prompt doesn't explode
-      return { ok: true, via: "prompt" };
-    }catch(e){
-      return { ok: false, via: "none", error: e?.message || String(e) };
-    }
+    row.appendChild(title);
+    row.appendChild(btnCopy);
+    row.appendChild(btnReset);
+    row.appendChild(btnHide);
+
+    hud.appendChild(row);
+    hud.appendChild(pre);
+    document.body.appendChild(hud);
   }
+  makeDiagnosticsHUD();
 
-  function downloadText(filename, text){
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url), 1000);
-  }
-
-  // Wire buttons safely (even if you tap multiple times)
-  function wireHUDButtons(){
-    ui.btnClear?.addEventListener("click", () => LOG.clear());
-
-    ui.btnSoftReboot?.addEventListener("click", () => {
-      LOG.push("log", "Soft reboot…");
-      location.reload();
-    });
-
-    ui.btnCopy?.addEventListener("click", async () => {
-      const text = LOG.lines.join("\n") || "(no logs yet)";
-      const res = await copyTextRobust(text);
-      if (res.ok) LOG.push("log", `Copy Logs ✅ via ${res.via}`);
-      else LOG.push("warn", `Copy failed ❌ (${res.via}) ${res.error || ""}`);
-
-      // Always also offer download on mobile/Quest
-      downloadText(`scarlett-log-${BUILD}.txt`, text);
-      LOG.push("log", "Downloaded log file ✅");
-    });
-
-    // Menu + room buttons (no-op safe; won’t break if modules missing)
-    ui.btnMenu?.addEventListener("click", () => {
-      LOG.push("log", "Menu pressed (M)");
-      // You can wire this to your UI system later.
-    });
-
-    ui.btnRoomLobby?.addEventListener("click", () => {
-      window.SCARLETT?.roomManager?.setRoom?.(window.SCARLETT, "lobby");
-      LOG.push("log", "Room: Lobby");
-    });
-    ui.btnRoomStore?.addEventListener("click", () => {
-      window.SCARLETT?.roomManager?.setRoom?.(window.SCARLETT, "store");
-      LOG.push("log", "Room: Store");
-    });
-    ui.btnRoomScorpion?.addEventListener("click", () => {
-      window.SCARLETT?.roomManager?.setRoom?.(window.SCARLETT, "scorpion");
-      LOG.push("log", "Room: Scorpion");
-    });
-  }
-
-  wireHUDButtons();
-
-  // -------------------------
-  // Capabilities readout
-  // -------------------------
-  async function setCaps(){
-    const xr = !!navigator.xr;
-    ui.capXR && (ui.capXR.textContent = xr ? "YES" : "NO");
-    let immersive = false;
-    try{ immersive = xr ? await navigator.xr.isSessionSupported("immersive-vr") : false; }catch{}
-    ui.capImm && (ui.capImm.textContent = immersive ? "YES" : "NO");
-    return { xr, immersive };
-  }
-
-  // -------------------------
-  // Imports
-  // -------------------------
-  async function safeImport(url, label=url){
-    try{
-      const m = await import(url);
-      LOG.push("log", `import ok: ${label}`);
-      return m;
-    }catch(e){
-      LOG.push("warn", `import fail: ${label} — ${e?.message || e}`);
+  // ---------- SAFE IMPORT ----------
+  async function safeImport(path){
+    try {
+      const mod = await import(path + (path.includes("?") ? "" : `?v=${BUILD}`));
+      log(`import ok: ${path}`);
+      return mod;
+    } catch (e) {
+      log(`import FAIL: ${path}`, String(e));
       return null;
     }
   }
 
-  // Prefer your local wrapper if present
-  const THREE = await (async () => {
-    const w = await safeImport("./three.js", "three via local wrapper");
-    if (w) return w.default || w.THREE || w;
-    return await import("three");
-  })();
+  // ---------- THREE ----------
+  const THREE = await import("./three.js");
+  log("three via local wrapper ✅");
 
-  // -------------------------
-  // Scene / Renderer
-  // -------------------------
+  // ---------- SCENE / CAMERA / RENDERER ----------
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x070912);
+  scene.background = new THREE.Color(0x090b12);
 
-  const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.05, 1500);
+  const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 1500);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
   renderer.setSize(innerWidth, innerHeight);
   renderer.xr.enabled = true;
 
-  // Bright + predictable
+  // Keep it bright and predictable:
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 3.4;
+  renderer.toneMappingExposure = 2.05;         // bright but not blown out
   renderer.physicallyCorrectLights = false;
 
+  document.body.style.margin = "0";
+  document.body.style.overflow = "hidden";
   document.body.appendChild(renderer.domElement);
 
   addEventListener("resize", () => {
-    camera.aspect = innerWidth/innerHeight;
+    camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight);
   });
 
-  // VRButton
-  const vrb = await safeImport("./VRButton.js", "./VRButton.js");
-  if (vrb?.VRButton?.createButton){
-    const btn = vrb.VRButton.createButton(renderer);
-    btn.id = "VRButton";
-    document.body.appendChild(btn);
-    LOG.push("log", "VRButton ✅");
-  }else{
-    LOG.push("warn", "VRButton missing/invalid.");
-  }
-
-  // -------------------------
-  // Light pack (cannot be dark)
-  // -------------------------
-  scene.add(new THREE.AmbientLight(0xffffff, 1.8));
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x1c1c2e, 3.2));
-
-  const sun = new THREE.DirectionalLight(0xffffff, 6.0);
-  sun.position.set(50, 120, 70);
-  scene.add(sun);
-
-  // Head-lamp: camera follow
-  const headLamp = new THREE.PointLight(0xffffff, 5.0, 140);
-  headLamp.position.set(0, 1.35, 0.35);
-  camera.add(headLamp);
-
-  // -------------------------
-  // PlayerRig
-  // -------------------------
+  // ---------- PLAYER RIG ----------
   const player = new THREE.Group();
   player.name = "PlayerRig";
   scene.add(player);
@@ -259,253 +154,236 @@
   camera.position.set(0, 1.65, 0);
   player.add(camera);
 
-  // Controllers ALWAYS in rig
-  const controllerL = renderer.xr.getController(0); controllerL.name="ControllerLeft";
-  const controllerR = renderer.xr.getController(1); controllerR.name="ControllerRight";
+  // ---------- VRButton ----------
+  const vrbtn = await safeImport("./VRButton.js");
+  if (vrbtn?.VRButton) {
+    document.body.appendChild(vrbtn.VRButton.createButton(renderer));
+    log("VRButton ✅");
+  } else {
+    log("VRButton missing ❌");
+  }
+
+  // ---------- LIGHT PACK (CONSISTENT INSIDE/OUTSIDE) ----------
+  const lightRoot = new THREE.Group();
+  lightRoot.name = "MainLightPack";
+  scene.add(lightRoot);
+
+  lightRoot.add(new THREE.AmbientLight(0xffffff, 0.9));
+  lightRoot.add(new THREE.HemisphereLight(0xffffff, 0x202033, 1.65));
+
+  const sun = new THREE.DirectionalLight(0xffffff, 2.8);
+  sun.position.set(60, 120, 40);
+  lightRoot.add(sun);
+
+  // Camera head-lamp so it never goes “black”
+  const headLamp = new THREE.PointLight(0xffffff, 1.8, 40);
+  headLamp.position.set(0, 1.4, 0.25);
+  camera.add(headLamp);
+
+  // ---------- CONTROLLERS (RIGHT HAND ONLY LASER) ----------
+  const controllerL = renderer.xr.getController(0); controllerL.name = "ControllerLeft";
+  const controllerR = renderer.xr.getController(1); controllerR.name = "ControllerRight";
   player.add(controllerL, controllerR);
-  LOG.push("log", "Controllers parented to PlayerRig ✅");
+  log("Controllers parented to PlayerRig ✅");
 
-  // XRHands (optional)
-  try{
-    const handL = renderer.xr.getHand(0); handL.name="XRHandLeft";
-    const handR = renderer.xr.getHand(1); handR.name="XRHandRight";
-    player.add(handL, handR);
-    LOG.push("log", "XRHands parented to PlayerRig ✅");
-  }catch{
-    LOG.push("warn", "XRHands unavailable (controller-only OK).");
-  }
+  try {
+    const leftHand = renderer.xr.getHand(0); leftHand.name = "XRHandLeft";
+    const rightHand = renderer.xr.getHand(1); rightHand.name = "XRHandRight";
+    player.add(leftHand, rightHand);
+    log("XRHands parented to PlayerRig ✅");
+  } catch {}
 
-  // -------------------------
-  // World
-  // -------------------------
-  const worldMod = await safeImport("./world.js", "./world.js");
+  // ---------- WORLD ----------
+  const worldMod = await safeImport("./world.js");
   const World = worldMod?.World;
-  const ctx = { THREE, scene, renderer, camera, player, rig: player, yawObject: player, LOG, systems:{}, colliders:[], BUILD };
-  if (World?.init){
-    await World.init(ctx);
-    LOG.push("log", `world module loaded: ${World?.version || "unknown"}`);
-  }else{
-    LOG.push("error", "world.js missing World.init");
-  }
 
-  // -------------------------
-  // Spawn: obey SpawnPoint.rotation exactly
-  // -------------------------
+  const ctx = { THREE, scene, renderer, camera, player, controllerL, controllerR, log, BUILD };
+  if (World?.init) await World.init(ctx);
+
+  // ---------- SPAWN (face away from teleporter) ----------
   function applySpawn(){
-    const sp = scene.getObjectByName("SpawnPoint") || scene.getObjectByName("SpawnPad");
-    if (!sp) { LOG.push("warn", "No SpawnPoint found."); return; }
-
-    player.position.set(sp.position.x, 0, sp.position.z);
-
-    // If world says "forceYaw", do it.
-    const forceYaw = sp.userData?.forceYaw;
-    if (forceYaw){
-      player.rotation.set(0, sp.rotation.y, 0);
-      LOG.push("log", `Spawn yaw forced ✅ yaw=${(sp.rotation.y*180/Math.PI).toFixed(1)}°`);
-    }else{
-      player.rotation.set(0, sp.rotation.y || Math.PI, 0);
-      LOG.push("log", "Spawn yaw applied ✅");
+    const sp = scene.getObjectByName("SpawnPoint");
+    if (sp) {
+      player.position.set(sp.position.x, 0, sp.position.z);
+      log(`Spawn ✅ x=${sp.position.x.toFixed(2)} z=${sp.position.z.toFixed(2)}`);
+    } else {
+      // safe fallback
+      player.position.set(0, 0, 28);
+      log("Spawn fallback ✅ x=0 z=28");
     }
 
-    LOG.push("log", `Spawn ✅ x=${player.position.x.toFixed(2)} z=${player.position.z.toFixed(2)}`);
+    // face toward BossTable (preferred), else HubCenter, else just flip 180 from teleporter
+    const boss = scene.getObjectByName("BossTable") || scene.getObjectByName("HubCenter");
+    const tp = scene.getObjectByName("TeleportMachine");
+    const target = new THREE.Vector3();
+
+    if (boss) {
+      boss.getWorldPosition(target);
+      const dir = target.sub(player.position);
+      const yaw = Math.atan2(dir.x, dir.z);
+      player.rotation.set(0, yaw, 0);
+      log("Facing target ✅", boss.name);
+    } else if (tp) {
+      // Face opposite teleporter
+      const tpp = new THREE.Vector3();
+      tp.getWorldPosition(tpp);
+      const dir = tpp.sub(player.position);
+      const yaw = Math.atan2(dir.x, dir.z) + Math.PI; // opposite
+      player.rotation.set(0, yaw, 0);
+      log("Facing opposite teleporter ✅");
+    } else {
+      player.rotation.set(0, Math.PI, 0);
+      log("Facing default ✅");
+    }
   }
   applySpawn();
-  renderer.xr.addEventListener("sessionstart", () => setTimeout(applySpawn, 160));
+  renderer.xr.addEventListener("sessionstart", () => setTimeout(applySpawn, 120));
 
-  // -------------------------
-  // DEMO BOTS (seated around BossTable)
-  // -------------------------
-  function addDemoBots(){
-    const table = scene.getObjectByName("BossTable");
-    if (!table) { LOG.push("warn", "BossTable not found; demo bots skipped."); return; }
+  // ---------- TELEPORT (internal, always works) ----------
+  const floorY = 0;
+  const floorPlane = new THREE.Plane(new THREE.Vector3(0,1,0), -floorY);
 
-    const tablePos = new THREE.Vector3();
-    table.getWorldPosition(tablePos);
+  // visible curved “floor arc” beam
+  const beamPoints = [];
+  for (let i=0;i<20;i++) beamPoints.push(new THREE.Vector3(0,0,0));
+  const beamGeo = new THREE.BufferGeometry().setFromPoints(beamPoints);
+  const beamMat = new THREE.LineBasicMaterial({ color: 0x7fe7ff, transparent:true, opacity:0.95 });
+  const beam = new THREE.Line(beamGeo, beamMat);
+  beam.frustumCulled = false;
+  controllerR.add(beam);
 
-    const botGroup = new THREE.Group();
-    botGroup.name = "DemoBots";
-    scene.add(botGroup);
-
-    const seatR = 3.1; // distance from table center
-    const colors = [0x7fe7ff,0xff2d7a,0xffffff,0x9b5cff,0x00ff9a,0xffcc00,0xff6b6b,0x8aa1ff];
-
-    const botMat = (c)=> new THREE.MeshStandardMaterial({ color:c, roughness:0.7, metalness:0.05, flatShading:true });
-
-    const torsoGeo = new THREE.CapsuleGeometry(0.18, 0.55, 4, 8);
-    const headGeo  = new THREE.IcosahedronGeometry(0.13, 1);
-
-    for (let i=0;i<8;i++){
-      const a = (i/8)*Math.PI*2;
-      const x = tablePos.x + Math.cos(a)*seatR;
-      const z = tablePos.z + Math.sin(a)*seatR;
-
-      const bot = new THREE.Group();
-      bot.position.set(x, 0, z);
-      bot.rotation.y = Math.atan2(tablePos.x - x, tablePos.z - z); // face table
-
-      const torso = new THREE.Mesh(torsoGeo, botMat(colors[i%colors.length]));
-      torso.position.y = 1.05;
-      bot.add(torso);
-
-      const head = new THREE.Mesh(headGeo, botMat(colors[i%colors.length]));
-      head.position.set(0, 0.45, 0);
-      torso.add(head);
-
-      // simple chair
-      const chair = new THREE.Mesh(
-        new THREE.BoxGeometry(0.55, 0.1, 0.55),
-        new THREE.MeshStandardMaterial({ color:0x10121a, roughness:0.8, metalness:0.2 })
-      );
-      chair.position.set(0, 0.45, 0.35);
-      bot.add(chair);
-
-      botGroup.add(bot);
-    }
-
-    LOG.push("log", "Demo bots seated ✅ (8 around BossTable)");
-  }
-  addDemoBots();
-
-  // -------------------------
-  // Teleport + Laser (right controller only)
-  // -------------------------
-  const floorPlane = new THREE.Plane(new THREE.Vector3(0,1,0), 0);
-  const o = new THREE.Vector3();
-  const q = new THREE.Quaternion();
-  const d = new THREE.Vector3();
-  const hit = new THREE.Vector3();
-
-  const laserMat = new THREE.LineBasicMaterial({ color: 0x00ffff });
-  laserMat.depthTest = false;
-
-  const laser = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]),
-    laserMat
-  );
-  laser.frustumCulled = false;
-  laser.renderOrder = 9999;
-  controllerR.add(laser);
-
+  // ring marker
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(0.26, 0.37, 64),
-    new THREE.MeshBasicMaterial({ color: 0x7fe7ff, side: THREE.DoubleSide, transparent: true, opacity: 0.95 })
+    new THREE.MeshBasicMaterial({ color: 0xff2d7a, side: THREE.DoubleSide, transparent:true, opacity:0.95 })
   );
   ring.rotation.x = -Math.PI/2;
-  ring.material.depthTest = false;
-  ring.renderOrder = 9999;
+  ring.visible = false;
   scene.add(ring);
 
-  function updateTeleport(){
-    controllerR.getWorldPosition(o);
-    controllerR.getWorldQuaternion(q);
-    if (o.lengthSq() < 0.001) return false;
+  const tmpPos = new THREE.Vector3();
+  const tmpQ = new THREE.Quaternion();
+  const tmpDir = new THREE.Vector3();
+  const hit = new THREE.Vector3();
 
-    d.set(0,0,-1).applyQuaternion(q).normalize();
-    d.y -= 0.35; d.normalize();
+  function updateTeleportArc(){
+    controllerR.getWorldPosition(tmpPos);
+    controllerR.getWorldQuaternion(tmpQ);
+    if (tmpPos.lengthSq() < 0.0001) return false;
 
-    const denom = floorPlane.normal.dot(d);
-    if (Math.abs(denom) < 1e-4) return false;
+    // base direction from controller
+    tmpDir.set(0,0,-1).applyQuaternion(tmpQ).normalize();
 
-    const t = -(floorPlane.normal.dot(o) + floorPlane.constant) / denom;
-    if (t < 0.2 || t > 40) return false;
+    // force it to “sit on the floor” visually (arc)
+    const arc = [];
+    const speed = 9.0;
+    const gravity = 18.0;
+    const start = tmpPos.clone();
+    const v0 = tmpDir.clone().multiplyScalar(speed);
+    v0.y += 2.2; // slight lift
 
-    hit.copy(o).addScaledVector(d, t);
-    laser.geometry.setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-t)]);
-    ring.position.set(hit.x, 0.02, hit.z);
+    let ok = false;
+    for (let i=0;i<20;i++){
+      const t = i * 0.07;
+      const p = new THREE.Vector3(
+        start.x + v0.x * t,
+        start.y + v0.y * t - 0.5 * gravity * t * t,
+        start.z + v0.z * t
+      );
+      arc.push(controllerR.worldToLocal(p.clone())); // local beam points
+      if (!ok && p.y <= floorY + 0.02 && i > 3){
+        hit.set(p.x, floorY, p.z);
+        ok = true;
+      }
+    }
 
-    laser.visible = true;
-    ring.visible = true;
-    return true;
+    if (ok){
+      beam.geometry.setFromPoints(arc);
+      ring.position.set(hit.x, floorY + 0.02, hit.z);
+      ring.visible = true;
+      beam.visible = true;
+      return true;
+    } else {
+      ring.visible = false;
+      beam.visible = false;
+      return false;
+    }
   }
 
-  // -------------------------
-  // Quest gamepad mapping (move on RIGHT controller if you prefer later)
-  // For now: movement on RIGHT stick Y (forward/back) so it works even if left stick fails.
-  // Snap turn on RIGHT stick X (45°).
-  // Teleport on RIGHT trigger (one leap per press).
-  // -------------------------
-  function getRightGamepad(){
-    const s = renderer.xr.getSession();
-    if (!s) return null;
-    for (const src of s.inputSources){
-      if (src.handedness === "right" && src.gamepad) return src.gamepad;
+  // ---------- INPUT (Quest-safe gamepad mapping) ----------
+  function getGamepads(){
+    const session = renderer.xr.getSession();
+    if (!session) return { gpL:null, gpR:null };
+    let gpL=null, gpR=null;
+    for (const src of session.inputSources){
+      if (!src?.gamepad) continue;
+      if (src.handedness === "left") gpL = src.gamepad;
+      if (src.handedness === "right") gpR = src.gamepad;
     }
-    for (const src of s.inputSources){
-      if (src.gamepad) return src.gamepad;
-    }
-    return null;
+    return { gpL, gpR };
   }
 
-  const MOVE_SPEED = 1.15;           // slower, controllable
-  const SNAP = Math.PI / 4;          // 45°
-  let snapCooldown = 0;
-  let lastTrigger = false;
+  const MOVE_SPEED = 1.55;
+  const SNAP_ANGLE = Math.PI/4;
+  let snapCD = 0;
+  let lastTeleport = false;
 
-  // -------------------------
-  // Loop
-  // -------------------------
-  let fpsAcc=0, fpsCount=0, fps=0;
+  // ---------- LOOP ----------
   let last = performance.now();
+  renderer.setAnimationLoop((t)=>{
+    const dt = Math.min(0.05, (t-last)/1000);
+    last = t;
 
-  await setCaps();
-  LOG.push("log", "Diagnostic build ready ✅");
-
-  renderer.setAnimationLoop((time) => {
-    const dt = Math.min(0.05, (time - last) / 1000);
-    last = time;
-
-    fpsAcc += dt; fpsCount++;
-    if (fpsAcc > 0.5){ fps = Math.round(fpsCount/fpsAcc); fpsAcc=0; fpsCount=0; }
-
-    try{ World?.update?.(ctx, dt); }catch{}
+    try { World?.update?.(ctx, dt); } catch {}
 
     if (renderer.xr.isPresenting){
-      const gpR = getRightGamepad();
+      const { gpL, gpR } = getGamepads();
 
-      // Movement on RIGHT stick vertical (Quest often reports as axes[3] or axes[1])
-      if (gpR?.axes?.length){
-        const rx = gpR.axes[2] ?? gpR.axes[0] ?? 0;   // right stick X
-        const ry = gpR.axes[3] ?? gpR.axes[1] ?? 0;   // right stick Y
+      // LEFT stick movement (fix inversion: forward should be forward)
+      if (gpL?.axes?.length >= 2){
+        const lx = gpL.axes[0] ?? 0;
+        const ly = gpL.axes[1] ?? 0;
+
+        // IMPORTANT: invert so pushing forward (negative ly) moves forward.
+        const forward = (-ly) * MOVE_SPEED * dt;
+        const strafe  = ( lx) * MOVE_SPEED * dt;
 
         const yaw = player.rotation.y;
-        const forward = (-ry) * MOVE_SPEED * dt;
-
-        // forward/back along yaw
-        player.position.x += Math.sin(yaw) * forward;
-        player.position.z += Math.cos(yaw) * forward;
-
-        // Snap turn
-        snapCooldown = Math.max(0, snapCooldown - dt);
-        if (snapCooldown <= 0 && Math.abs(rx) > 0.75){
-          player.rotation.y += (rx > 0 ? -SNAP : SNAP);
-          snapCooldown = 0.28;
-        }
+        player.position.x += Math.sin(yaw)*forward + Math.cos(yaw)*strafe;
+        player.position.z += Math.cos(yaw)*forward - Math.sin(yaw)*strafe;
       }
 
-      // Teleport
-      const ok = updateTeleport();
-      const pressed = !!gpR?.buttons?.[0]?.pressed; // trigger
-      if (pressed && !lastTrigger && ok){
+      // RIGHT stick snap turn (Quest: axes[2] on right gamepad when present)
+      snapCD = Math.max(0, snapCD - dt);
+      let rx = 0;
+      if (gpR?.axes?.length >= 4) rx = gpR.axes[2] ?? 0;
+      else if (gpR?.axes?.length >= 1) rx = gpR.axes[0] ?? 0;
+
+      if (snapCD <= 0 && Math.abs(rx) > 0.75){
+        player.rotation.y += (rx > 0 ? -SNAP_ANGLE : SNAP_ANGLE);
+        snapCD = 0.28;
+      }
+
+      // Teleport arc & trigger
+      const can = updateTeleportArc();
+      const trig = !!gpR?.buttons?.[0]?.pressed; // trigger button
+      if (trig && !lastTeleport && can){
         player.position.set(hit.x, 0, hit.z);
-        LOG.push("log", `Teleport ✅ x=${hit.x.toFixed(2)} z=${hit.z.toFixed(2)}`);
       }
-      lastTrigger = pressed;
-    }else{
-      laser.visible = false;
-      ring.visible = false;
-      lastTrigger = false;
-    }
+      lastTeleport = trig;
 
-    setGrid([
-      ["Build", String(BUILD)],
-      ["FPS", String(fps)],
-      ["XR Presenting", renderer.xr.isPresenting ? "YES" : "NO"],
-      ["Rig (x,z)", `${player.position.x.toFixed(2)}, ${player.position.z.toFixed(2)}`],
-      ["Copy", "Clipboard→execCommand→prompt + Download"],
-      ["Laser", "Right controller only"],
-    ]);
+    } else {
+      beam.visible = false;
+      ring.visible = false;
+      lastTeleport = false;
+    }
 
     renderer.render(scene, camera);
   });
 
+  // ---------- ROOM MANAGER (optional) ----------
+  const rm = await safeImport("./room_manager.js");
+  try { rm?.RoomManager?.init?.(ctx); } catch {}
+
+  log("Hybrid 4.6 boot complete ✅ (no-cleanup safe)");
 })();

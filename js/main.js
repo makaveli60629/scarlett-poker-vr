@@ -1,5 +1,5 @@
-// /js/main.js — Scarlett Hybrid STABLE Boot v5.0
-// Goals: never-stuck, HUD always-on, locomotion reliable, right-hand laser only, world loads even if optional modules fail.
+// /js/main.js — Scarlett Hybrid STABLE Boot v5.2
+// Fixes: stick locomotion swap/invert, right-hand laser lock, never-stuck render loop
 
 const log = (...a) => (window.SCARLETT?.log ? window.SCARLETT.log(...a) : console.log(...a));
 const err = (...a) => (window.SCARLETT?.err ? window.SCARLETT.err(...a) : console.error(...a));
@@ -25,7 +25,6 @@ async function safeImport(path) {
   if (!VRButton) err("VRButton missing");
   else log("VRButton ✅");
 
-  // Scene basics
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -35,7 +34,6 @@ async function safeImport(path) {
   renderer.toneMappingExposure = 1.35;
   document.body.appendChild(renderer.domElement);
 
-  // VR button
   try {
     const sessionInit = {
       optionalFeatures: [
@@ -57,38 +55,32 @@ async function safeImport(path) {
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.03, 500);
   camera.position.set(0, 1.65, 0);
 
-  // Player rig
   const player = new THREE.Group();
   player.name = "PlayerRig";
-  player.position.set(0, 0, 0);
   player.add(camera);
   scene.add(player);
 
-  // Controllers group
   const controllers = new THREE.Group();
   controllers.name = "Controllers";
   player.add(controllers);
   log("Controllers parented to PlayerRig ✅");
 
-  // XR hands group (optional)
   const handsGroup = new THREE.Group();
   handsGroup.name = "XRHands";
   player.add(handsGroup);
   log("XRHands parented to PlayerRig ✅");
 
-  // Resize
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // ---- Minimal right-hand laser (always on right) ----
+  // ---------- Right-hand laser (LOCKED RIGHT ONLY) ----------
   const raycaster = new THREE.Raycaster();
   const tempMat = new THREE.Matrix4();
   const dir = new THREE.Vector3();
   const origin = new THREE.Vector3();
-  const hit = new THREE.Vector3();
 
   const laserGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
   const laserMat = new THREE.LineBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.9 });
@@ -101,90 +93,115 @@ async function safeImport(path) {
   );
   halo.rotation.x = -Math.PI/2;
   halo.visible = false;
-
   scene.add(halo);
 
-  // Keep a reference to the RIGHT controller only
-  const rightController = renderer.xr.getController(0);
-  rightController.name = "RightController";
-  rightController.add(laserLine);
-  controllers.add(rightController);
+  const xrRight = renderer.xr.getController(0);
+  xrRight.name = "XRController0";
+  xrRight.add(laserLine);
+  controllers.add(xrRight);
 
-  const leftController = renderer.xr.getController(1);
-  leftController.name = "LeftController";
-  controllers.add(leftController);
+  const xrLeft = renderer.xr.getController(1);
+  xrLeft.name = "XRController1";
+  controllers.add(xrLeft);
 
-  // ---- Ultra-stable locomotion fallback (if your other systems fail) ----
-  // Right stick: move, Left stick: snap turn (45°)
+  // ---------- Handedness-safe gamepad binding ----------
+  let gpLeft = null;
+  let gpRight = null;
+
+  function refreshGamepads() {
+    gpLeft = null; gpRight = null;
+    const session = renderer.xr.getSession?.();
+    if (!session) return;
+
+    for (const src of session.inputSources) {
+      if (!src?.gamepad) continue;
+      if (src.handedness === "left") gpLeft = src.gamepad;
+      if (src.handedness === "right") gpRight = src.gamepad;
+    }
+
+    // Fallback: if handedness missing, use first two gamepads
+    if (!gpLeft || !gpRight) {
+      const gps = session.inputSources.map(s => s.gamepad).filter(Boolean);
+      if (!gpRight) gpRight = gps[0] || null;
+      if (!gpLeft) gpLeft = gps[1] || gps[0] || null;
+    }
+  }
+
+  renderer.xr.addEventListener("sessionstart", () => {
+    log("[xr] sessionstart ✅");
+    refreshGamepads();
+  });
+  renderer.xr.addEventListener("sessionend", () => {
+    log("[xr] sessionend ✅");
+    gpLeft = gpRight = null;
+  });
+
+  // ---------- Locomotion: RIGHT stick move / LEFT stick snap ----------
   const move = { x: 0, z: 0 };
   let snapCooldown = 0;
+  let dbgT = 0;
 
-  function getGamepads() {
-    const session = renderer.xr.getSession?.();
-    if (!session) return [];
-    return session.inputSources
-      .map(s => s.gamepad)
-      .filter(gp => gp && gp.axes && gp.buttons);
+  function axis(gp, i) {
+    const a = gp?.axes;
+    if (!a || i < 0 || i >= a.length) return 0;
+    const v = a[i];
+    return Number.isFinite(v) ? v : 0;
   }
 
   function applyLocomotion(dt) {
-    const gps = getGamepads();
-    if (!gps.length) return;
+    const session = renderer.xr.getSession?.();
+    if (!session) return;
 
-    // Find "right-hand" gamepad by heuristic: has more buttons and typically is first, but we also allow either.
-    // We'll read both and prefer the one with larger axis movement.
-    let best = null, bestMag = 0;
-    for (const gp of gps) {
-      const ax = gp.axes || [];
-      const mx = Math.abs(ax[2] ?? ax[0] ?? 0);
-      const mz = Math.abs(ax[3] ?? ax[1] ?? 0);
-      const mag = mx + mz;
-      if (mag > bestMag) { bestMag = mag; best = gp; }
-    }
-    const gp = best || gps[0];
-    const ax = gp.axes || [];
+    // refresh occasionally (some browsers reorder sources)
+    refreshGamepads();
 
-    // Standard mapping: [0,1]=left stick, [2,3]=right stick (but varies)
-    const lx = ax[0] ?? 0, ly = ax[1] ?? 0;
-    const rx = ax[2] ?? 0, ry = ax[3] ?? 0;
-
-    // Move on RIGHT stick (ry forward is usually -1). Fix inverted if needed.
     const dead = 0.18;
+
+    // RIGHT stick (usually axes 2/3). If missing, try 0/1.
+    const rx = axis(gpRight, 2) || axis(gpRight, 0);
+    const ry = axis(gpRight, 3) || axis(gpRight, 1);
+
+    // LEFT stick X for snap (usually axis 0). If missing, try 2.
+    const lx = axis(gpLeft, 0) || axis(gpLeft, 2);
+
     const mX = (Math.abs(rx) > dead) ? rx : 0;
-    const mZ = (Math.abs(ry) > dead) ? ry : 0;
+    const mY = (Math.abs(ry) > dead) ? ry : 0;
 
-    // Forward/back: we want pushing forward to move forward (toward -Z in rig local)
-    // Most controllers report forward as -1, so we invert ry to make forward positive.
+    // Forward/back: pushing forward should move forward.
+    // In most XR pads: forward is -1, so invert.
     move.x = mX;
-    move.z = -mZ;
+    move.z = -mY;
 
-    // Snap turn on LEFT stick X
     if (snapCooldown > 0) snapCooldown -= dt;
-
     const turnX = (Math.abs(lx) > 0.7) ? lx : 0;
     if (turnX && snapCooldown <= 0) {
-      const angle = (Math.PI / 4) * (turnX > 0 ? -1 : 1); // 45°
+      const angle = (Math.PI / 4) * (turnX > 0 ? -1 : 1);
       player.rotation.y += angle;
       snapCooldown = 0.28;
     }
 
-    const speed = 3.0; // m/s
+    const speed = 3.2;
     const vx = move.x * speed * dt;
     const vz = move.z * speed * dt;
 
     if (vx || vz) {
-      // Move in camera-facing direction but on ground plane
       const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
       const right = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
       fwd.y = 0; right.y = 0;
       fwd.normalize(); right.normalize();
-
       const delta = new THREE.Vector3().addScaledVector(right, vx).addScaledVector(fwd, vz);
       player.position.add(delta);
     }
+
+    // debug to HUD every ~2s
+    dbgT += dt;
+    if (dbgT > 2.0) {
+      dbgT = 0;
+      log(`[input] L.axes=${gpLeft?.axes?.length || 0} R.axes=${gpRight?.axes?.length || 0} | rx=${rx.toFixed(2)} ry=${ry.toFixed(2)} lx=${lx.toFixed(2)}`);
+    }
   }
 
-  // ---- Load World (safe) ----
+  // ---------- Load World ----------
   const WorldMod = await safeImport(`./world.js?v=${Date.now()}`);
   const World = WorldMod?.World;
 
@@ -201,30 +218,26 @@ async function safeImport(path) {
     err("World.init missing — check /js/world.js export");
   }
 
-  // Room manager (optional)
   const RM = await safeImport(`./room_manager.js?v=${Date.now()}`);
   if (RM?.RoomManager?.init) {
     try { RM.RoomManager.init(ctx); } catch (e) { err("RoomManager init failed", String(e?.stack || e)); }
   }
 
-  // ---- Render Loop (never stop) ----
+  // ---------- Render Loop ----------
   let last = performance.now();
   renderer.setAnimationLoop(() => {
     const now = performance.now();
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
 
-    // Locomotion fallback always available
     applyLocomotion(dt);
 
-    // Right-hand halo pointer to floors/teleport surfaces
+    // Right-hand halo hit floors
     try {
-      // Use right controller pose
-      tempMat.identity().extractRotation(rightController.matrixWorld);
+      tempMat.identity().extractRotation(xrRight.matrixWorld);
       dir.set(0,0,-1).applyMatrix4(tempMat).normalize();
-      origin.setFromMatrixPosition(rightController.matrixWorld);
+      origin.setFromMatrixPosition(xrRight.matrixWorld);
       raycaster.set(origin, dir);
-
       const hits = raycaster.intersectObjects(scene.children, true);
       const floorHit = hits.find(h => h.object && (h.object.userData?.isFloor || h.object.userData?.teleportable));
       if (floorHit) {

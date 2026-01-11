@@ -1,243 +1,293 @@
-// /js/index.js — Scarlett VR Poker Runtime (FULL) Update 4.8.4
+// /js/index.js — FULL DIAGNOSTIC RUNTIME
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { VRButton } from "./VRButton.js";
 import { World } from "./world.js";
 
 const now = () => new Date().toTimeString().slice(0, 8);
+const BUILD = "DIAG 1.0 (4.8.6)";
 
-function uiLog(msg) {
+const perfEl = document.getElementById("perf");
+const safeModeEl = document.getElementById("safeMode");
+const dumpBtn = document.getElementById("dumpBtn");
+const diagBtn = document.getElementById("diagBtn");
+const panicBtn = document.getElementById("panicBtn");
+
+function log(msg){
   console.log(msg);
   const el = document.getElementById("log");
   if (!el) return;
-  el.textContent += `${msg}\n`;
+  el.textContent += msg + "\n";
   el.scrollTop = el.scrollHeight;
 }
+function tag(t,m){ log(`[${now()}] [${t}] ${m}`); }
+function safe(t,fn){ try { return fn(); } catch(e){ console.error(e); tag(t, `ERROR ❌ ${e?.message || e}`); return null; } }
 
-function logTag(tag, msg) {
-  uiLog(`[${now()}] [${tag}] ${msg}`);
-}
+tag("index", `runtime start ✅ (${BUILD})`);
+tag("index", `THREE.REVISION=${THREE.REVISION}`);
 
-function safe(tag, fn) {
-  try { return fn(); }
-  catch (e) {
-    console.error(e);
-    logTag(tag, `ERROR ❌ ${e?.message || e}`);
-    return null;
-  }
-}
+let renderer = null, scene = null, camera = null, player = null;
+let world = null;
+let controllers = [];
+let frameCount = 0;
+let accTime = 0;
+let lastT = performance.now();
 
-const BUILD = "4.8.4 (HALLWAYS + spawn safe)";
-
-logTag("index", "runtime start ✅");
-
-// Renderer
-const renderer = safe("index", () => {
-  const r = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+// ---- Renderer creation with WebGL diagnostics
+renderer = safe("gl", () => {
+  const r = new THREE.WebGLRenderer({ antialias:true, alpha:true });
   r.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
-  r.setSize(window.innerWidth, window.innerHeight);
+  r.setSize(innerWidth, innerHeight);
   r.xr.enabled = true;
   document.body.appendChild(r.domElement);
   return r;
 });
 
-// Scene + camera
-const scene = new THREE.Scene();
+safe("gl", () => {
+  const gl = renderer.getContext();
+  const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+  const vendor = dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR);
+  const rend   = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+  tag("gl", `vendor=${vendor}`);
+  tag("gl", `renderer=${rend}`);
+  tag("gl", `maxTextureSize=${gl.getParameter(gl.MAX_TEXTURE_SIZE)}`);
+});
+
+// ---- Scene graph
+scene = new THREE.Scene();
 scene.background = new THREE.Color(0x05060a);
 
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 500);
+camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.05, 600);
 camera.position.set(0, 1.6, 6);
 
-// Player rig
-const player = new THREE.Group();
+player = new THREE.Group();
 player.name = "PlayerRig";
-player.position.set(0, 0, 0);
 player.add(camera);
+player.position.set(0,0,0);
 scene.add(player);
 
-// Lights (simple + safe)
-safe("index", () => {
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.9);
-  scene.add(hemi);
-  const dir = new THREE.DirectionalLight(0xffffff, 0.85);
-  dir.position.set(6, 12, 4);
-  scene.add(dir);
+// lights
+safe("lights", () => {
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x223355, 0.9));
+  const d = new THREE.DirectionalLight(0xffffff, 0.85);
+  d.position.set(6, 12, 4);
+  scene.add(d);
+  tag("lights", "installed ✅");
 });
 
-// VR Button
-safe("index", () => {
+// VR button
+safe("vr", () => {
   document.body.appendChild(VRButton.createButton(renderer));
-  logTag("index", "VRButton appended ✅");
+  tag("vr", "VRButton appended ✅");
 });
 
-// Controllers (laser-only)
-const controllers = [];
-safe("index", () => {
-  for (let i = 0; i < 2; i++) {
+// controllers + laser-only
+safe("input", () => {
+  for (let i=0;i<2;i++){
     const c = renderer.xr.getController(i);
-    c.name = `controller_${i}`;
     player.add(c);
     controllers.push(c);
 
-    // laser line (visual)
-    const geo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, -1)
-    ]);
+    const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
     const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x7fe7ff }));
-    line.name = "laser";
     line.scale.z = 10;
     c.add(line);
   }
-  logTag("index", "controller rays installed ✅ (laser only)");
+  tag("input", "controller rays installed ✅ (laser only)");
 });
 
-// Android dual-stick (touch)
-const touch = {
-  left: { id: null, x0: 0, y0: 0, x: 0, y: 0, active: false },
-  right:{ id: null, x0: 0, y0: 0, x: 0, y: 0, active: false }
-};
-
-function setupAndroidDualStick() {
-  const leftPad = document.getElementById("stickL");
-  const rightPad = document.getElementById("stickR");
-  if (!leftPad || !rightPad) return;
-
-  const bind = (el, side) => {
-    const s = touch[side];
-    const rectOf = () => el.getBoundingClientRect();
-    const norm = (cx, cy) => {
-      const r = rectOf();
-      const x = (cx - (r.left + r.width * 0.5)) / (r.width * 0.5);
-      const y = (cy - (r.top  + r.height * 0.5)) / (r.height * 0.5);
-      s.x = Math.max(-1, Math.min(1, x));
-      s.y = Math.max(-1, Math.min(1, y));
-    };
-
-    el.addEventListener("touchstart", (e) => {
-      const t = e.changedTouches[0];
-      s.id = t.identifier;
-      s.active = true;
-      norm(t.clientX, t.clientY);
-      e.preventDefault();
-    }, { passive: false });
-
-    el.addEventListener("touchmove", (e) => {
-      for (const t of e.changedTouches) {
-        if (t.identifier === s.id) {
-          norm(t.clientX, t.clientY);
-          break;
-        }
-      }
-      e.preventDefault();
-    }, { passive: false });
-
-    const end = (e) => {
-      for (const t of e.changedTouches) {
-        if (t.identifier === s.id) {
-          s.id = null;
-          s.active = false;
-          s.x = 0; s.y = 0;
-          break;
-        }
-      }
-      e.preventDefault();
-    };
-
-    el.addEventListener("touchend", end, { passive: false });
-    el.addEventListener("touchcancel", end, { passive: false });
+// Android dual-stick
+const touch = { left:{id:null,x:0,y:0,active:false}, right:{id:null,x:0,y:0,active:false} };
+function bindStick(el, key){
+  const s = touch[key];
+  const rect = () => el.getBoundingClientRect();
+  const setFrom = (cx,cy)=>{
+    const r = rect();
+    const nx = (cx - (r.left + r.width*0.5)) / (r.width*0.5);
+    const ny = (cy - (r.top  + r.height*0.5)) / (r.height*0.5);
+    s.x = Math.max(-1, Math.min(1, nx));
+    s.y = Math.max(-1, Math.min(1, ny));
   };
-
-  bind(leftPad, "left");
-  bind(rightPad, "right");
-  logTag("android", "dual-stick ready ✅");
+  el.addEventListener("touchstart", (e)=>{
+    const t = e.changedTouches[0];
+    s.id=t.identifier; s.active=true; setFrom(t.clientX,t.clientY);
+    e.preventDefault();
+  }, {passive:false});
+  el.addEventListener("touchmove", (e)=>{
+    for(const t of e.changedTouches){ if(t.identifier===s.id){ setFrom(t.clientX,t.clientY); break; } }
+    e.preventDefault();
+  }, {passive:false});
+  const end = (e)=>{
+    for(const t of e.changedTouches){ if(t.identifier===s.id){ s.id=null; s.active=false; s.x=0; s.y=0; break; } }
+    e.preventDefault();
+  };
+  el.addEventListener("touchend", end, {passive:false});
+  el.addEventListener("touchcancel", end, {passive:false});
 }
-setupAndroidDualStick();
-
-// Resize
-window.addEventListener("resize", () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+safe("android", ()=>{
+  const L = document.getElementById("stickL");
+  const R = document.getElementById("stickR");
+  if(L&&R){ bindStick(L,"left"); bindStick(R,"right"); tag("android","dual-stick ready ✅"); }
+  else tag("android","dual-stick missing");
 });
 
-// Build world
-logTag("index", "calling world.build() …");
-
-const world = {
-  group: new THREE.Group()
-};
+// world container
+world = { group: new THREE.Group() };
 scene.add(world.group);
 
-safe("world", () => {
-  World.build({ THREE, scene, renderer, camera, player, controllers, world, logTag, BUILD });
-});
+function buildFallbackWorld(){
+  // tiny reliable world
+  while (world.group.children.length) world.group.remove(world.group.children[0]);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x14224a, roughness: 0.7, metalness: 0.1 });
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(20,0.2,20), new THREE.MeshStandardMaterial({ color: 0x070a14 }));
+  floor.position.y = 0;
+  world.group.add(floor);
 
-// Movement (Android + VR)
-const tmpV = new THREE.Vector3();
-const tmpQ = new THREE.Quaternion();
-const euler = new THREE.Euler(0, 0, 0, "YXZ");
+  const box = new THREE.Mesh(new THREE.BoxGeometry(2,2,2), mat);
+  box.position.set(0,1,0);
+  world.group.add(box);
 
-let lastT = performance.now();
-
-function getYawFromCamera() {
-  // Use camera world quaternion; yaw only
-  camera.getWorldQuaternion(tmpQ);
-  euler.setFromQuaternion(tmpQ);
-  return euler.y;
+  player.position.set(0,0,6);
+  tag("fallback", "built ✅ (SAFE MODE)");
 }
 
-function tick() {
-  const t = performance.now();
-  const dt = Math.min(0.033, (t - lastT) / 1000);
-  lastT = t;
+function buildWorld(){
+  const safeMode = !!safeModeEl?.checked;
+  while (world.group.children.length) world.group.remove(world.group.children[0]);
 
-  // Android move/look
-  const moveX = touch.left.x;    // strafe
-  const moveZ = -touch.left.y;   // forward
-  const lookX = touch.right.x;   // yaw
-  const lookY = touch.right.y;   // pitch
-
-  // Apply look to camera when NOT in XR, for phone debugging
-  if (!renderer.xr.isPresenting) {
-    const yawSpeed = 1.8;
-    const pitchSpeed = 1.2;
-
-    const yaw = getYawFromCamera() - lookX * yawSpeed * dt;
-    const pitch = THREE.MathUtils.clamp(euler.x - lookY * pitchSpeed * dt, -1.2, 1.2);
-
-    euler.set(pitch, yaw, 0);
-    camera.quaternion.setFromEuler(euler);
+  if (safeMode){
+    buildFallbackWorld();
+    return;
   }
 
-  // Apply movement in XZ relative to yaw
-  const speed = 3.0;
-  const yaw = getYawFromCamera();
-  const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-  const right = new THREE.Vector3(forward.z, 0, -forward.x);
+  tag("world", "calling World.build() …");
+  const ok = safe("world", () => World.build({ THREE, scene, renderer, camera, player, controllers, world, tag, BUILD }));
+  if (ok === null){
+    tag("world", "World.build failed -> switching to SAFE MODE fallback");
+    if (safeModeEl) safeModeEl.checked = true;
+    buildFallbackWorld();
+  } else {
+    tag("world", "build complete ✅");
+  }
+}
 
-  tmpV.set(0, 0, 0);
-  tmpV.addScaledVector(forward, moveZ);
-  tmpV.addScaledVector(right, moveX);
-  if (tmpV.lengthSq() > 1e-6) tmpV.normalize().multiplyScalar(speed * dt);
+buildWorld();
 
-  // Keep player on ground plane (y=0), camera at ~1.6
+// buttons
+if (safeModeEl) safeModeEl.addEventListener("change", () => buildWorld());
+
+if (dumpBtn) dumpBtn.onclick = () => dumpScene();
+
+if (diagBtn) diagBtn.onclick = () => runDiagnostics();
+
+if (panicBtn) panicBtn.onclick = () => {
+  tag("panic", "reset requested");
+  // reset pose
+  player.position.set(0,0,0);
+  camera.position.set(0,1.6,6);
+  tag("panic", "player/camera reset ✅");
+};
+
+function dumpScene(){
+  const lines = [];
+  let count = 0;
+  scene.traverse((o)=>{
+    count++;
+    const name = o.name ? ` "${o.name}"` : "";
+    lines.push(`${o.type}${name}`);
+  });
+  tag("dump", `scene objects=${count}`);
+  lines.slice(0, 180).forEach(l => log(`[tree] ${l}`));
+  if (count > 180) tag("dump", `tree truncated (showing 180)`);
+}
+
+function runDiagnostics(){
+  tag("diag", "=== RUN DIAGNOSTICS ===");
+  tag("diag", `BUILD=${BUILD}`);
+  tag("diag", `xrPresenting=${renderer.xr.isPresenting}`);
+  tag("diag", `pixelRatio=${renderer.getPixelRatio?.()}`);
+  tag("diag", `size=${innerWidth}x${innerHeight}`);
+
+  // world bounding box
+  try{
+    const box = new THREE.Box3().setFromObject(world.group);
+    const size = new THREE.Vector3(); box.getSize(size);
+    const ctr  = new THREE.Vector3(); box.getCenter(ctr);
+    tag("diag", `world bounds size=(${size.x.toFixed(2)},${size.y.toFixed(2)},${size.z.toFixed(2)})`);
+    tag("diag", `world bounds center=(${ctr.x.toFixed(2)},${ctr.y.toFixed(2)},${ctr.z.toFixed(2)})`);
+  }catch(e){
+    tag("diag", `world bounds failed ❌ ${e?.message || e}`);
+  }
+
+  // controller presence
+  tag("diag", `controllers=${controllers.length}`);
+  tag("diag", "=== END DIAGNOSTICS ===");
+}
+
+// movement/look
+const tmpQ = new THREE.Quaternion();
+const eul = new THREE.Euler(0,0,0,"YXZ");
+const tmpV = new THREE.Vector3();
+
+function yawFromCamera(){
+  camera.getWorldQuaternion(tmpQ);
+  eul.setFromQuaternion(tmpQ);
+  return eul.y;
+}
+
+addEventListener("resize", ()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  tag("gl", `resize -> ${innerWidth}x${innerHeight}`);
+});
+
+renderer.setAnimationLoop(() => {
+  const t = performance.now();
+  const dt = Math.min(0.033, (t - lastT)/1000);
+  lastT = t;
+
+  // perf
+  frameCount++;
+  accTime += dt;
+  if (accTime >= 1.0){
+    const fps = frameCount / accTime;
+    if (perfEl) perfEl.textContent = `Perf: ${fps.toFixed(0)} fps`;
+    frameCount = 0;
+    accTime = 0;
+  }
+
+  // sticks
+  const moveX = touch.left.x;
+  const moveZ = -touch.left.y;
+  const lookX = touch.right.x;
+  const lookY = touch.right.y;
+
+  // look when not XR
+  if (!renderer.xr.isPresenting){
+    camera.getWorldQuaternion(tmpQ);
+    eul.setFromQuaternion(tmpQ);
+    eul.y -= lookX * 1.8 * dt;
+    eul.x = THREE.MathUtils.clamp(eul.x - lookY * 1.2 * dt, -1.2, 1.2);
+    eul.z = 0;
+    camera.quaternion.setFromEuler(eul);
+  }
+
+  // move
+  const yaw = yawFromCamera();
+  const fwd = new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
+  const rgt = new THREE.Vector3(fwd.z,0,-fwd.x);
+
+  tmpV.set(0,0,0);
+  tmpV.addScaledVector(fwd, moveZ);
+  tmpV.addScaledVector(rgt, moveX);
+  if (tmpV.lengthSq() > 1e-6) tmpV.normalize().multiplyScalar(3.0 * dt);
+
   player.position.add(tmpV);
   player.position.y = 0;
 
-  // Allow world systems update
-  safe("world", () => World.update?.({ dt, t: t / 1000 }));
+  safe("world", () => World.update?.({ dt, time: t/1000 }));
 
   renderer.render(scene, camera);
-}
-
-renderer.setAnimationLoop(tick);
-
-logTag("index", "world start ✅");
-
-// XR support log (matches your screenshot)
-safe("VRButton", async () => {
-  if (navigator.xr?.isSessionSupported) {
-    const ok = await navigator.xr.isSessionSupported("immersive-vr");
-    logTag("VRButton", `isSessionSupported(immersive-vr) = ${ok}`);
-  }
 });
+
+tag("index", "ready ✅");

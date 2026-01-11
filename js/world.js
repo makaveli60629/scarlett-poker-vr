@@ -1,377 +1,292 @@
-// /js/world.js — Scarlett Hybrid World v4.4 (FULL)
-// FIXES:
-// ✅ Hub floor ON (only in circle room); pit stays open
-// ✅ Teleporter moved farther behind spawn + offset so you DON'T see it
-// ✅ Welcome HUD smaller, higher, icon + name + $50k + time
-// ✅ All entrance signs face HubCenter
-// ✅ Seat pads removed; seats + bots moved closer to table + pinned
-// ✅ 4 Jumbotron frames above each hub entrance (with labels below)
-// ✅ Optional fireplace + fountain props in VIP room
+// /js/world.js — Scarlett WORLD v4.2 (HUB + HALLWAYS + SUNK PIT + RAILS + BRIGHT TRIMS)
+// Safe geometry-only build. No dependency on any optional deleted modules.
 
 export const World = {
-  async init(ctx) {
-    const { THREE, scene, LOG } = ctx;
-    ctx.worldVersion = "v4.4";
-    const log  = (m)=>LOG?.push?.("log", m) || console.log(m);
+  async init(ctx){
+    const { THREE, scene, log } = ctx;
 
-    // --- Materials ---
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x0a0b12, roughness: 0.78, metalness: 0.12 });
-    const darkMetal = new THREE.MeshStandardMaterial({ color: 0x14151a, roughness: 0.55, metalness: 0.22 });
-    const feltMat   = new THREE.MeshStandardMaterial({ color: 0x0c2a22, roughness: 0.92, metalness: 0.05 });
+    const root = new THREE.Group();
+    root.name = "WorldRoot";
+    scene.add(root);
 
-    const neon = (hex, intensity=2.0) => new THREE.MeshStandardMaterial({
-      color: 0x05060a,
-      emissive: new THREE.Color(hex),
-      emissiveIntensity: intensity,
-      roughness: 0.35,
-      metalness: 0.15
+    // ---- helpers ----
+    const mkMat = (c, emiss=0) => new THREE.MeshStandardMaterial({
+      color: c,
+      roughness: 0.75,
+      metalness: 0.05,
+      emissive: emiss ? new THREE.Color(c) : new THREE.Color(0x000000),
+      emissiveIntensity: emiss
     });
 
-    const trimHub  = neon(0x9b5cff, 2.25);
-    const trimCyan = neon(0x00ffff, 2.0);
-    const trimPink = neon(0xff2d7a, 1.95);
-    const trimGold = neon(0xffd36b, 1.85);
+    const MAT_WALL  = mkMat(0x151a26, 0.10);
+    const MAT_TRIM  = mkMat(0x7fe7ff, 1.15);
+    const MAT_TRIM2 = mkMat(0xff2d7a, 1.05);
+    const MAT_FLOOR = mkMat(0x0d1018, 0.05);
+    const MAT_PIT   = mkMat(0x0b0d14, 0.07);
 
-    // --- Layout ---
-    const WALL_T = 0.28;
-    const WALL_H_ROOM = 3.0;
-    const WALL_H_HUB  = 6.0;
+    // ---- GRID FLOOR (debug) ----
+    const grid = new THREE.GridHelper(220, 220, 0x2a2f44, 0x141827);
+    grid.position.y = 0.001;
+    grid.name = "Grid";
+    root.add(grid);
 
-    const HUB_R = 14.0;
-    const ROOM_S = 14.0;
-    const CORRIDOR_L = 10.0;
-    const CORRIDOR_W = 5.0;
+    // ---- HUB DIMENSIONS ----
+    const HUB_R = 16;
+    const WALL_H = 8.0;      // “twice as big” feel
+    const WALL_T = 0.7;
 
-    const frontZ = HUB_R + CORRIDOR_L + ROOM_S/2;
-    const backZ  = -(HUB_R + CORRIDOR_L + ROOM_S/2);
-    const leftX  = -(HUB_R + CORRIDOR_L + ROOM_S/2);
-    const rightX =  (HUB_R + CORRIDOR_L + ROOM_S/2);
+    const hub = new THREE.Group();
+    hub.name = "Hub";
+    root.add(hub);
 
-    // --- Hub Center anchor ---
     const hubCenter = new THREE.Object3D();
     hubCenter.name = "HubCenter";
-    hubCenter.position.set(0,0,0);
-    scene.add(hubCenter);
+    hub.add(hubCenter);
 
-    // --- Hub floor ON (solid) ---
+    // ---- CIRCULAR FLOOR (ONLY in hub as you requested earlier; grid remains visible) ----
     const hubFloor = new THREE.Mesh(
-      new THREE.CylinderGeometry(HUB_R-0.2, HUB_R-0.2, 0.14, 96),
-      new THREE.MeshStandardMaterial({ color: 0x090b14, roughness: 0.85 })
+      new THREE.CylinderGeometry(HUB_R - 0.4, HUB_R - 0.4, 0.18, 64),
+      MAT_FLOOR
     );
-    hubFloor.position.set(0, 0.07, 0);
-    hubFloor.name = "HubPlate";
-    scene.add(hubFloor);
+    hubFloor.position.y = 0.09;
+    hubFloor.name = "HubFloor";
+    hub.add(hubFloor);
 
-    // Hub base trim ring
-    const baseRing = new THREE.Mesh(new THREE.TorusGeometry(HUB_R, 0.13, 16, 180), trimHub);
-    baseRing.rotation.x = Math.PI/2;
-    baseRing.position.set(0, 0.10, 0);
-    scene.add(baseRing);
+    // ---- HUB WALL RING with 4 entrances (N/E/S/W) ----
+    // We build the ring as 4 curved segments with gaps centered on axes.
+    const ring = new THREE.Group();
+    ring.name = "HubRingWalls";
+    hub.add(ring);
 
-    // --- Pit (open) ---
-    const pitR = 6.9;
-    const pitH = 1.55;
+    const ENTRANCE_W = 7.4; // single entrance (no “two doors + middle wall”)
+    const gapAngle = ENTRANCE_W / HUB_R; // approx
 
-    const pitWall = new THREE.Mesh(
-      new THREE.CylinderGeometry(pitR, pitR, pitH, 72, 1, true),
-      new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.75, metalness: 0.10, side: THREE.DoubleSide })
+    function addArcWall(a0, a1){
+      const mid = (a0 + a1) * 0.5;
+      const arcLen = (a1 - a0) * HUB_R;
+      const wall = new THREE.Mesh(
+        new THREE.BoxGeometry(arcLen, WALL_H, WALL_T),
+        MAT_WALL
+      );
+      // place and rotate around ring
+      wall.position.set(Math.sin(mid) * HUB_R, WALL_H/2, Math.cos(mid) * HUB_R);
+      wall.rotation.y = mid;
+      ring.add(wall);
+
+      // trims: one near floor, one near top
+      const trimLow = new THREE.Mesh(
+        new THREE.BoxGeometry(arcLen, 0.22, 0.18),
+        MAT_TRIM
+      );
+      trimLow.position.copy(wall.position);
+      trimLow.position.y = 0.22;
+      trimLow.rotation.copy(wall.rotation);
+      ring.add(trimLow);
+
+      const trimHigh = new THREE.Mesh(
+        new THREE.BoxGeometry(arcLen, 0.22, 0.18),
+        MAT_TRIM2
+      );
+      trimHigh.position.copy(wall.position);
+      trimHigh.position.y = WALL_H - 0.35;
+      trimHigh.rotation.copy(wall.rotation);
+      ring.add(trimHigh);
+    }
+
+    // Build 4 segments between the 4 gaps (N, E, S, W)
+    // Gaps centered at 0 (north), pi/2 (east), pi (south), -pi/2 (west)
+    const gaps = [0, Math.PI/2, Math.PI, -Math.PI/2];
+    const sorted = gaps.map(a => (a + Math.PI*2) % (Math.PI*2)).sort((a,b)=>a-b);
+
+    for (let i=0;i<sorted.length;i++){
+      const g = sorted[i];
+      const gNext = sorted[(i+1)%sorted.length] + (i===sorted.length-1 ? Math.PI*2 : 0);
+      const a0 = g + gapAngle/2;
+      const a1 = gNext - gapAngle/2;
+      addArcWall(a0, a1);
+    }
+
+    // ---- HALLWAYS (N/E/S/W) aligned & guaranteed above ground ----
+    const HALL_L = 18;
+    const HALL_W = 8.0;
+    const HALL_H = 6.2;
+
+    function buildHall(name, dirX, dirZ){
+      const g = new THREE.Group();
+      g.name = name;
+
+      // floor
+      const floor = new THREE.Mesh(
+        new THREE.BoxGeometry(HALL_W, 0.18, HALL_L),
+        MAT_FLOOR
+      );
+      floor.position.set(dirX*(HUB_R + HALL_L/2), 0.09, dirZ*(HUB_R + HALL_L/2));
+      g.add(floor);
+
+      // walls
+      const wallL = new THREE.Mesh(
+        new THREE.BoxGeometry(0.5, HALL_H, HALL_L),
+        MAT_WALL
+      );
+      wallL.position.set(
+        dirX*(HUB_R + HALL_L/2) + (dirZ*1.0 + dirX*0.0) * (HALL_W/2),
+        HALL_H/2,
+        dirZ*(HUB_R + HALL_L/2) + (-dirX*1.0 + dirZ*0.0) * (HALL_W/2)
+      );
+      wallL.rotation.y = Math.atan2(dirX, dirZ);
+      g.add(wallL);
+
+      const wallR = wallL.clone();
+      wallR.position.x -= (dirZ*1.0) * HALL_W;
+      wallR.position.z -= (-dirX*1.0) * HALL_W;
+      g.add(wallR);
+
+      // ceiling trims (soft light)
+      const trim = new THREE.Mesh(
+        new THREE.BoxGeometry(HALL_W, 0.22, HALL_L),
+        MAT_TRIM
+      );
+      trim.position.set(dirX*(HUB_R + HALL_L/2), HALL_H - 0.35, dirZ*(HUB_R + HALL_L/2));
+      g.add(trim);
+
+      root.add(g);
+    }
+
+    buildHall("Hall_N", 0, -1);
+    buildHall("Hall_S", 0,  1);
+    buildHall("Hall_E", 1,  0);
+    buildHall("Hall_W",-1,  0);
+
+    // ---- SUNK PIT (table goes DOWN) ----
+    const PIT_R = 7.0;
+    const PIT_DEPTH = 2.2;
+
+    // pit “hole” volume (visual)
+    const pit = new THREE.Mesh(
+      new THREE.CylinderGeometry(PIT_R, PIT_R, PIT_DEPTH, 64, 1, true),
+      MAT_PIT
     );
-    pitWall.position.set(0, -pitH/2, 0);
-    scene.add(pitWall);
+    pit.position.y = -PIT_DEPTH/2 + 0.09;
+    pit.name = "Pit";
+    hub.add(pit);
 
-    const pitFloor = new THREE.Mesh(
-      new THREE.CylinderGeometry(pitR-0.25, pitR-0.25, 0.08, 72),
-      new THREE.MeshStandardMaterial({ color: 0x070912, roughness: 0.95 })
+    // pit bottom
+    const pitBottom = new THREE.Mesh(
+      new THREE.CylinderGeometry(PIT_R, PIT_R, 0.18, 64),
+      MAT_PIT
     );
-    pitFloor.position.set(0, -pitH+0.02, 0);
-    scene.add(pitFloor);
+    pitBottom.position.y = -PIT_DEPTH + 0.09;
+    hub.add(pitBottom);
 
-    // Pit lip rail (top edge)
-    const pitLipRail = new THREE.Mesh(
-      new THREE.TorusGeometry(pitR + 0.35, 0.11, 14, 160),
-      neon(0x00ffff, 1.25)
+    // rim rail (prevents walking into the dip)
+    const rimRail = new THREE.Mesh(
+      new THREE.TorusGeometry(PIT_R + 0.25, 0.08, 12, 90),
+      MAT_TRIM2
     );
-    pitLipRail.rotation.x = Math.PI/2;
-    pitLipRail.position.set(0, 0.22, 0);
-    scene.add(pitLipRail);
+    rimRail.rotation.x = Math.PI/2;
+    rimRail.position.y = 0.95;
+    rimRail.name = "PitRimRail";
+    hub.add(rimRail);
 
-    // Inner rail (inside pit)
-    const rail = new THREE.Mesh(
-      new THREE.TorusGeometry(5.05, 0.11, 12, 160),
-      new THREE.MeshStandardMaterial({ color: 0x0e1018, emissive: 0x18344a, emissiveIntensity: 1.0 })
+    // outer “spectator” rail ring
+    const outerRail = new THREE.Mesh(
+      new THREE.TorusGeometry(HUB_R - 1.4, 0.10, 14, 110),
+      MAT_TRIM
     );
-    rail.rotation.x = Math.PI/2;
-    rail.position.set(0, -0.72, 0);
-    rail.name = "MainRail";
-    scene.add(rail);
+    outerRail.rotation.x = Math.PI/2;
+    outerRail.position.y = 1.05;
+    outerRail.name = "OuterRail";
+    hub.add(outerRail);
 
-    // --- Grand table (8 seats) ---
-    const tableR = 2.65;
-    const table = new THREE.Mesh(
-      new THREE.CylinderGeometry(tableR, tableR, 0.16, 64),
-      feltMat
+    // ---- BOSS TABLE placeholder anchor (your real table module can replace this later) ----
+    const boss = new THREE.Group();
+    boss.name = "BossTable";
+    boss.position.set(0, -PIT_DEPTH + 0.45, 0);
+    hub.add(boss);
+
+    const tableTop = new THREE.Mesh(
+      new THREE.CylinderGeometry(5.2, 5.2, 0.45, 48),
+      mkMat(0x123032, 0.12)
     );
-    table.position.set(0, -0.58, 0);
-    table.name = "BossTable";
-    scene.add(table);
+    tableTop.position.y = 0.85;
+    boss.add(tableTop);
 
     const tableBase = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.9, 1.1, 0.95, 28),
-      darkMetal
+      new THREE.CylinderGeometry(1.2, 2.2, 1.2, 32),
+      mkMat(0x20263a, 0.08)
     );
-    tableBase.position.set(0, -1.02, 0);
-    scene.add(tableBase);
+    tableBase.position.y = 0.35;
+    boss.add(tableBase);
 
-    const rim = new THREE.Mesh(
-      new THREE.TorusGeometry(tableR, 0.10, 16, 140),
-      neon(0x9b5cff, 0.95)
+    // ---- TELEPORT MACHINE prop (for visuals) ----
+    const tp = new THREE.Group();
+    tp.name = "TeleportMachine";
+    tp.position.set(0, 0, HUB_R - 3.0); // south side inside hub
+    hub.add(tp);
+
+    const tpRing = new THREE.Mesh(
+      new THREE.TorusGeometry(1.1, 0.12, 10, 40),
+      MAT_TRIM
     );
-    rim.rotation.x = Math.PI/2;
-    rim.position.set(0, -0.48, 0);
-    scene.add(rim);
+    tpRing.rotation.x = Math.PI/2;
+    tpRing.position.y = 0.9;
+    tp.add(tpRing);
 
-    // --- Simple bot ---
-    function makeBot(matColor) {
-      const g = new THREE.Group();
-      const mat = new THREE.MeshStandardMaterial({ color: matColor, roughness: 0.7, metalness: 0.05, flatShading: true });
+    const tpCore = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.25, 0.25, 1.2, 18),
+      MAT_TRIM2
+    );
+    tpCore.position.y = 0.6;
+    tp.add(tpCore);
 
-      const torso = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.55, 0.22), mat);
-      torso.position.y = 1.05;
-      g.add(torso);
-
-      const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.14, 1), mat);
-      head.position.set(0, 0.42, 0);
-      torso.add(head);
-
-      const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.28, 4, 8), mat);
-      const arm2 = arm.clone();
-      arm.position.set(-0.25, 1.02, 0.06);
-      arm2.position.set(0.25, 1.02, 0.06);
-      arm.rotation.z = 0.35;
-      arm2.rotation.z = -0.35;
-      g.add(arm, arm2);
-
-      const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.38, 4, 8), mat);
-      const leg2 = leg.clone();
-      leg.position.set(-0.10, 0.55, 0);
-      leg2.position.set(0.10, 0.55, 0);
-      g.add(leg, leg2);
-
-      return g;
-    }
-
-    // Seats closer to table (inside inner rail, near table)
-    const seatR = 3.55;              // ✅ moved closer
-    const seatY = -0.98;
-    const chairGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.22, 16);
-
-    for (let i = 0; i < 8; i++) {
-      const a = (i/8) * Math.PI*2;
-      const x = Math.cos(a) * seatR;
-      const z = Math.sin(a) * seatR;
-
-      const chair = new THREE.Mesh(chairGeo, darkMetal);
-      chair.position.set(x, seatY, z);
-      scene.add(chair);
-
-      if (i < 6) {
-        const bot = makeBot(i%3===0 ? 0x7fe7ff : i%3===1 ? 0xff2d7a : 0xffd36b);
-        bot.position.set(x, seatY-0.04, z);
-        bot.rotation.y = Math.atan2(-x, -z);
-        scene.add(bot);
-      }
-    }
-
-    // Walkers in hub
-    ctx.demo = ctx.demo || {};
-    ctx.demo.walkers = [
-      { obj: makeBot(0x7fe7ff), t: 0.0, phase: 0.0 },
-      { obj: makeBot(0xff2d7a), t: 0.0, phase: Math.PI * 0.66 },
-      { obj: makeBot(0xffd36b), t: 0.0, phase: Math.PI * 1.33 },
-    ];
-    ctx.demo.walkers.forEach(w => scene.add(w.obj));
-
-    // --- Labels + Jumbotrons (face HubCenter) ---
-    function makeNeonLabel(text, colorHex="#00ffff", scale=1.0) {
+    // ---- ENTRANCE LABELS (simple 3D placards) ----
+    function addLabel(text, x,z, ry){
       const canvas = document.createElement("canvas");
-      canvas.width = 640;
-      canvas.height = 180;
+      canvas.width = 512; canvas.height = 128;
       const g = canvas.getContext("2d");
-      g.clearRect(0,0,640,180);
-
-      g.fillStyle = "rgba(0,0,0,0.32)";
-      g.fillRect(0,0,640,180);
-
-      g.font = "900 64px system-ui,Segoe UI,Arial";
+      g.fillStyle = "rgba(10,12,18,0.0)";
+      g.clearRect(0,0,canvas.width,canvas.height);
+      g.font = "900 64px system-ui, Arial";
       g.textAlign = "center";
       g.textBaseline = "middle";
-      g.fillStyle = colorHex;
-      g.shadowColor = colorHex;
+      g.fillStyle = "#7fe7ff";
+      g.shadowColor = "#7fe7ff";
       g.shadowBlur = 18;
-      g.fillText(text, 320, 95);
+      g.fillText(text, canvas.width/2, canvas.height/2);
 
       const tex = new THREE.CanvasTexture(canvas);
-      tex.colorSpace = THREE.SRGBColorSpace;
-
-      const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
-      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(5.2*scale, 1.4*scale), mat);
-      return mesh;
-    }
-
-    function faceToCenter(obj){
-      obj.lookAt(0, obj.position.y, 0);
-    }
-
-    function addJumbotron(atPos, labelText, labelColor){
-      const frame = new THREE.Mesh(
-        new THREE.BoxGeometry(6.2, 3.2, 0.22),
-        new THREE.MeshStandardMaterial({ color: 0x05060a, emissive: 0x0a2030, emissiveIntensity: 1.2, roughness: 0.5 })
-      );
-      frame.position.copy(atPos);
-      faceToCenter(frame);
-      scene.add(frame);
-
-      const screen = new THREE.Mesh(
-        new THREE.PlaneGeometry(5.6, 2.7),
-        new THREE.MeshBasicMaterial({ color: 0x0b1220 })
-      );
-      screen.position.copy(atPos);
-      screen.position.add(new THREE.Vector3(0,0,0.13));
-      faceToCenter(screen);
-      scene.add(screen);
-
-      const label = makeNeonLabel(labelText, labelColor, 0.85);
-      label.position.copy(atPos);
-      label.position.y -= 2.35;
-      label.position.add(new THREE.Vector3(0,0,0.10));
-      faceToCenter(label);
-      scene.add(label);
-    }
-
-    // 4 jumbotrons above entrances
-    addJumbotron(new THREE.Vector3(0, 5.1, HUB_R-0.9), "VIP",   "#ff2d7a");
-    addJumbotron(new THREE.Vector3(0, 5.1, -(HUB_R-0.9)), "EVENT", "#ffcc66");
-    addJumbotron(new THREE.Vector3(-(HUB_R-0.9), 5.1, 0), "STORE", "#00ffff");
-    addJumbotron(new THREE.Vector3((HUB_R-0.9), 5.1, 0), "POKER", "#9b5cff");
-
-    // --- Spawn moved back + teleporter moved farther behind + offset ---
-    const spawnZ = frontZ + 3.0;
-    const spawnPoint = new THREE.Object3D();
-    spawnPoint.name = "SpawnPoint";
-    spawnPoint.position.set(0, 0, spawnZ);
-    spawnPoint.userData.faceTargetName = "BossTable";
-    scene.add(spawnPoint);
-
-    const spawnPad = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.95, 0.95, 0.06, 36),
-      neon(0x00ffff, 1.2)
-    );
-    spawnPad.name = "SpawnPad";
-    spawnPad.position.set(0, 0.03, spawnZ);
-    scene.add(spawnPad);
-
-    const teleporter = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.38, 0.38, 2.2, 22),
-      new THREE.MeshStandardMaterial({
-        color: 0x090b14,
-        emissive: new THREE.Color(0x9b5cff),
-        emissiveIntensity: 1.6,
-        roughness: 0.35
-      })
-    );
-    teleporter.name = "TeleportMachine";
-    teleporter.position.set(1.8, 1.1, spawnZ + 8.2); // ✅ farther & offset
-    scene.add(teleporter);
-
-    // --- Welcome HUD (smaller, higher, icon + time + $50k) ---
-    function makeWelcomeHUD(){
-      const canvas = document.createElement("canvas");
-      canvas.width = 768;
-      canvas.height = 256;
-      const g = canvas.getContext("2d");
-      g.clearRect(0,0,768,256);
-
-      g.fillStyle = "rgba(0,0,0,0.30)";
-      g.fillRect(0,0,768,256);
-
-      // icon circle
-      g.fillStyle = "rgba(0,255,255,0.18)";
-      g.beginPath(); g.arc(96,128,58,0,Math.PI*2); g.fill();
-
-      g.strokeStyle = "rgba(0,255,255,0.65)";
-      g.lineWidth = 6;
-      g.beginPath(); g.arc(96,128,58,0,Math.PI*2); g.stroke();
-
-      g.fillStyle = "#00ffff";
-      g.shadowColor="#00ffff";
-      g.shadowBlur=18;
-
-      g.font = "900 42px system-ui,Segoe UI,Arial";
-      g.textAlign="left";
-      g.textBaseline="middle";
-      g.fillText("ACCOUNT: PLAYER", 180, 95);
-
-      g.font = "900 46px system-ui,Segoe UI,Arial";
-      g.fillText("$50,000", 180, 155);
-
-      g.font = "700 28px system-ui,Segoe UI,Arial";
-      g.fillStyle = "rgba(191,252,255,0.95)";
-      g.shadowBlur=0;
-      g.fillText("TIME: " + new Date().toLocaleTimeString(), 180, 205);
-
-      const tex = new THREE.CanvasTexture(canvas);
-      tex.colorSpace = THREE.SRGBColorSpace;
-
       const mat = new THREE.MeshBasicMaterial({ map: tex, transparent:true });
-      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 1.55), mat);
-      mesh.position.set(0, 3.2, spawnZ - 2.8); // ✅ higher near “X”
-      mesh.lookAt(0, 3.2, 0);
-      scene.add(mesh);
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 1.8), mat);
+      plane.position.set(x, 5.2, z);
+      plane.rotation.y = ry;
+      root.add(plane);
     }
-    makeWelcomeHUD();
 
-    // --- VIP fireplace + fountain props (simple) ---
-    const fireplace = new THREE.Mesh(
-      new THREE.BoxGeometry(2.0, 1.4, 0.8),
-      new THREE.MeshStandardMaterial({ color: 0x12121a, emissive: 0x301000, emissiveIntensity: 0.9, roughness: 0.7 })
-    );
-    fireplace.position.set(-4.2, 0.7, spawnZ - 4.8);
-    scene.add(fireplace);
+    addLabel("STORE", -HUB_R - 8, 0, Math.PI/2);
+    addLabel("EVENTS",  HUB_R + 8, 0, -Math.PI/2);
+    addLabel("VIP",     0, -HUB_R - 10, 0);
+    addLabel("POKER",   0,  HUB_R + 10, Math.PI);
 
-    const flame = new THREE.Mesh(
-      new THREE.ConeGeometry(0.28, 0.65, 14),
-      neon(0xff6b2a, 2.6)
-    );
-    flame.position.set(-4.2, 1.35, spawnZ - 4.8);
-    scene.add(flame);
+    // ---- SPAWN POINT (move back 3 grid blocks, in south hallway approach) ----
+    const sp = new THREE.Object3D();
+    sp.name = "SpawnPoint";
+    sp.position.set(0, 0, HUB_R + 18); // further back so welcome HUD can be in view
+    root.add(sp);
 
-    const fountain = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.9, 1.2, 0.55, 22),
-      new THREE.MeshStandardMaterial({ color: 0x0b1220, emissive: 0x001a2a, emissiveIntensity: 1.0 })
-    );
-    fountain.position.set(4.2, 0.28, spawnZ - 4.4);
-    scene.add(fountain);
+    // ---- extra light fixtures around hub for “elegant” feel ----
+    const ringLight = new THREE.PointLight(0xffffff, 1.2, 60);
+    ringLight.position.set(0, 7.5, 0);
+    hub.add(ringLight);
 
-    // NOTE: corridors + room walls remain from your last sealed build.
-    // If your current world.js already has sealed corridors + rooms,
-    // keep those sections and only paste these NEW pieces in.
-    // This v4.4 focuses on: floor back on, spawn/teleporter, jumbotrons, signs, seats.
-
-    log("[world] v4.4 built ✅ hub floor + smaller welcome HUD + jumbotrons + seat/bot fix + teleporter moved back");
+    log?.("[world] v4.2 built ✅ (hub+hallways+sunk pit+rails+labels)");
   },
 
   update(ctx, dt){
-    const walkers = ctx.demo?.walkers;
-    if (walkers?.length) {
-      const r = 10.2;
-      for (const w of walkers) {
-        w.t += dt * 0.25;
-        const a = w.t + w.phase;
-        const x = Math.cos(a) * r;
-        const z = Math.sin(a) * r;
-        w.obj.position.set(x, 0, z);
-        w.obj.rotation.y = Math.atan2(-x, -z);
-      }
+    // optional: subtle animation on teleporter ring
+    const tp = ctx.scene.getObjectByName("TeleportMachine");
+    if (tp) {
+      const ring = tp.children?.[0];
+      if (ring) ring.rotation.z += dt * 0.9;
     }
   }
 };

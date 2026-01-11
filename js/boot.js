@@ -1,4 +1,7 @@
-// /js/boot.js — ALWAYS-RUN Diagnostics + Loader
+// /js/boot.js — MASTER Diagnostics Boot + ImportMap + Loader
+// ✅ Fixes ANY `import "three"` across your repo by injecting an importmap BEFORE loading index.js
+// ✅ Buttons + log capture always work even if game fails
+
 const $ = (id) => document.getElementById(id);
 const logPanel = $("logPanel");
 const pillXR = $("pillXR");
@@ -9,7 +12,7 @@ const btnClear = $("btnClear");
 const btnHide = $("btnHide");
 const hud = $("hud");
 
-const LOG_MAX = 2000;
+const LOG_MAX = 2200;
 const buf = [];
 let hudVisible = true;
 
@@ -47,8 +50,22 @@ window.ScarlettLog = {
 };
 
 push("[BOOT] boot.js loaded ✅","ok");
-push("If you still see 'main.js FAILED' then your old index.html is still cached.","warn");
 
+// ✅ Inject importmap FIRST so any repo file can do: import "three"
+(function injectImportMap(){
+  const s = document.createElement("script");
+  s.type = "importmap";
+  s.textContent = JSON.stringify({
+    imports: {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/examples/jsm/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  });
+  document.head.appendChild(s);
+  push("[BOOT] importmap injected ✅ (three + examples)", "ok");
+})();
+
+// Capture runtime failures
 window.addEventListener("error",(e)=>{
   push(`WINDOW ERROR: ${e.message||e.type}`,"bad");
   if (e.error?.stack) push(e.error.stack,"muted");
@@ -65,7 +82,7 @@ console.log=(...a)=>{_log(...a); push(a.map(safe).join(" "), "");};
 console.warn=(...a)=>{_warn(...a); push(a.map(safe).join(" "), "warn");};
 console.error=(...a)=>{_err(...a); push(a.map(safe).join(" "), "bad");};
 
-// Buttons WORK here (even if game fails)
+// Buttons ALWAYS work here
 btnClear?.addEventListener("click", ()=>{
   buf.length=0;
   if (logPanel) logPanel.innerHTML="";
@@ -120,11 +137,12 @@ btnDownload?.addEventListener("click", ()=>{
 
 window.ScarlettLog.setMode("boot");
 
-// Load runtime index.js (cache-bust)
+// Load runtime index.js after a tick so importmap registers
 (async ()=>{
   try{
     window.ScarlettLog.setMode("loading index.js");
     push("[BOOT] importing ./js/index.js …");
+    await new Promise(r => setTimeout(r, 0));
     await import(`./index.js?v=${Date.now()}`);
     push("[BOOT] index.js imported ✅","ok");
     window.ScarlettLog.setMode("running");

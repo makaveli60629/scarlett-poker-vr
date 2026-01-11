@@ -1,10 +1,12 @@
-// /js/index.js — FULL DIAGNOSTIC RUNTIME
+// /js/index.js — FULL DIAGNOSTIC RUNTIME (UPLOAD THIS FILE)
+// If this file is missing, boot.js import will fail and you’ll get a blank world.
+
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { VRButton } from "./VRButton.js";
 import { World } from "./world.js";
 
 const now = () => new Date().toTimeString().slice(0, 8);
-const BUILD = "DIAG 1.0 (4.8.6)";
+const BUILD = "DIAG 1.0 (index.js restored)";
 
 const perfEl = document.getElementById("perf");
 const safeModeEl = document.getElementById("safeMode");
@@ -25,15 +27,8 @@ function safe(t,fn){ try { return fn(); } catch(e){ console.error(e); tag(t, `ER
 tag("index", `runtime start ✅ (${BUILD})`);
 tag("index", `THREE.REVISION=${THREE.REVISION}`);
 
-let renderer = null, scene = null, camera = null, player = null;
-let world = null;
-let controllers = [];
-let frameCount = 0;
-let accTime = 0;
-let lastT = performance.now();
-
-// ---- Renderer creation with WebGL diagnostics
-renderer = safe("gl", () => {
+// ---------- renderer / gl ----------
+const renderer = safe("gl", () => {
   const r = new THREE.WebGLRenderer({ antialias:true, alpha:true });
   r.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
   r.setSize(innerWidth, innerHeight);
@@ -52,14 +47,14 @@ safe("gl", () => {
   tag("gl", `maxTextureSize=${gl.getParameter(gl.MAX_TEXTURE_SIZE)}`);
 });
 
-// ---- Scene graph
-scene = new THREE.Scene();
+// ---------- scene / camera / player ----------
+const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x05060a);
 
-camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.05, 600);
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.05, 600);
 camera.position.set(0, 1.6, 6);
 
-player = new THREE.Group();
+const player = new THREE.Group();
 player.name = "PlayerRig";
 player.add(camera);
 player.position.set(0,0,0);
@@ -81,6 +76,7 @@ safe("vr", () => {
 });
 
 // controllers + laser-only
+const controllers = [];
 safe("input", () => {
   for (let i=0;i<2;i++){
     const c = renderer.xr.getController(i);
@@ -95,7 +91,7 @@ safe("input", () => {
   tag("input", "controller rays installed ✅ (laser only)");
 });
 
-// Android dual-stick
+// ---------- android sticks ----------
 const touch = { left:{id:null,x:0,y:0,active:false}, right:{id:null,x:0,y:0,active:false} };
 function bindStick(el, key){
   const s = touch[key];
@@ -130,22 +126,18 @@ safe("android", ()=>{
   else tag("android","dual-stick missing");
 });
 
-// world container
-world = { group: new THREE.Group() };
+// ---------- world container ----------
+const world = { group: new THREE.Group() };
 scene.add(world.group);
 
 function buildFallbackWorld(){
-  // tiny reliable world
   while (world.group.children.length) world.group.remove(world.group.children[0]);
   const mat = new THREE.MeshStandardMaterial({ color: 0x14224a, roughness: 0.7, metalness: 0.1 });
   const floor = new THREE.Mesh(new THREE.BoxGeometry(20,0.2,20), new THREE.MeshStandardMaterial({ color: 0x070a14 }));
-  floor.position.y = 0;
   world.group.add(floor);
-
   const box = new THREE.Mesh(new THREE.BoxGeometry(2,2,2), mat);
   box.position.set(0,1,0);
   world.group.add(box);
-
   player.position.set(0,0,6);
   tag("fallback", "built ✅ (SAFE MODE)");
 }
@@ -172,24 +164,21 @@ function buildWorld(){
 
 buildWorld();
 
-// buttons
+// HUD buttons
 if (safeModeEl) safeModeEl.addEventListener("change", () => buildWorld());
 
 if (dumpBtn) dumpBtn.onclick = () => dumpScene();
-
 if (diagBtn) diagBtn.onclick = () => runDiagnostics();
-
 if (panicBtn) panicBtn.onclick = () => {
   tag("panic", "reset requested");
-  // reset pose
   player.position.set(0,0,0);
   camera.position.set(0,1.6,6);
   tag("panic", "player/camera reset ✅");
 };
 
 function dumpScene(){
-  const lines = [];
   let count = 0;
+  const lines = [];
   scene.traverse((o)=>{
     count++;
     const name = o.name ? ` "${o.name}"` : "";
@@ -197,7 +186,7 @@ function dumpScene(){
   });
   tag("dump", `scene objects=${count}`);
   lines.slice(0, 180).forEach(l => log(`[tree] ${l}`));
-  if (count > 180) tag("dump", `tree truncated (showing 180)`);
+  if (count > 180) tag("dump", "tree truncated (showing 180)");
 }
 
 function runDiagnostics(){
@@ -206,8 +195,6 @@ function runDiagnostics(){
   tag("diag", `xrPresenting=${renderer.xr.isPresenting}`);
   tag("diag", `pixelRatio=${renderer.getPixelRatio?.()}`);
   tag("diag", `size=${innerWidth}x${innerHeight}`);
-
-  // world bounding box
   try{
     const box = new THREE.Box3().setFromObject(world.group);
     const size = new THREE.Vector3(); box.getSize(size);
@@ -217,13 +204,22 @@ function runDiagnostics(){
   }catch(e){
     tag("diag", `world bounds failed ❌ ${e?.message || e}`);
   }
-
-  // controller presence
   tag("diag", `controllers=${controllers.length}`);
   tag("diag", "=== END DIAGNOSTICS ===");
 }
 
-// movement/look
+// resize
+addEventListener("resize", ()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  tag("gl", `resize -> ${innerWidth}x${innerHeight}`);
+});
+
+// movement/look loop
+let lastT = performance.now();
+let frameCount = 0, accTime = 0;
+
 const tmpQ = new THREE.Quaternion();
 const eul = new THREE.Euler(0,0,0,"YXZ");
 const tmpV = new THREE.Vector3();
@@ -233,13 +229,6 @@ function yawFromCamera(){
   eul.setFromQuaternion(tmpQ);
   return eul.y;
 }
-
-addEventListener("resize", ()=>{
-  camera.aspect = innerWidth/innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-  tag("gl", `resize -> ${innerWidth}x${innerHeight}`);
-});
 
 renderer.setAnimationLoop(() => {
   const t = performance.now();
@@ -252,11 +241,9 @@ renderer.setAnimationLoop(() => {
   if (accTime >= 1.0){
     const fps = frameCount / accTime;
     if (perfEl) perfEl.textContent = `Perf: ${fps.toFixed(0)} fps`;
-    frameCount = 0;
-    accTime = 0;
+    frameCount = 0; accTime = 0;
   }
 
-  // sticks
   const moveX = touch.left.x;
   const moveZ = -touch.left.y;
   const lookX = touch.right.x;
@@ -272,7 +259,7 @@ renderer.setAnimationLoop(() => {
     camera.quaternion.setFromEuler(eul);
   }
 
-  // move
+  // walk
   const yaw = yawFromCamera();
   const fwd = new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
   const rgt = new THREE.Vector3(fwd.z,0,-fwd.x);

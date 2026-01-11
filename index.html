@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
+  <title>Scarlett VR Poker</title>
+
+  <style>
+    html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; }
+    #app { position:fixed; inset:0; }
+    #overlay {
+      position: fixed; left: 12px; right: 12px; bottom: 12px;
+      padding: 10px 12px; border-radius: 12px;
+      background: rgba(0,0,0,.70); color: #fff;
+      font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      max-height: 45vh; overflow:auto; white-space: pre-wrap;
+      box-shadow: 0 12px 40px rgba(0,0,0,.45);
+    }
+  </style>
+
+  <!-- ES module shim for importmaps -->
+  <script async src="https://unpkg.com/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
+
+  <!-- Three.js as module -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+    }
+  }
+  </script>
+</head>
+
+<body>
+  <div id="app"></div>
+  <div id="overlay">boot…</div>
+
+  <!-- IMPORTANT: use boot.js (new filename) -->
+  <script type="module" src="./js/boot.js"></script>
+</body>
+</html>

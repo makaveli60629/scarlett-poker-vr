@@ -3,91 +3,85 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
-  <title>Scarlett VR Poker</title>
+  <title>Scarlett VR Poker — World Only</title>
+
+  <!-- ✅ Importmap so ANY file can `import ... from "three"` -->
+  <script async src="https://unpkg.com/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
 
   <style>
-    html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#05060a; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; }
-    canvas { display:block; }
+    html, body { margin:0; padding:0; height:100%; background:#05060a; overflow:hidden; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    canvas{ display:block; }
 
-    /* Debug overlay */
-    #overlayWrap{
+    /* Diagnostic overlay */
+    #diag {
       position:fixed; left:10px; right:10px; top:10px;
-      z-index:9999;
-      pointer-events:auto;
-    }
-    #bar{
-      display:flex; gap:8px; flex-wrap:wrap;
-      align-items:center;
-      margin-bottom:8px;
-    }
-    .btn{
-      border:1px solid rgba(127,231,255,.35);
-      background:rgba(11,13,20,.85);
-      color:#e8ecff;
-      border-radius:12px;
+      max-height:38vh; overflow:auto;
       padding:10px 12px;
-      font-size:13px;
-      user-select:none;
-      touch-action:manipulation;
-    }
-    .btn:active{ transform:translateY(1px); }
-
-    #overlay{
-      max-height:34vh;
-      overflow:auto;
-      border:1px solid rgba(127,231,255,.25);
+      background:rgba(6,8,14,.86);
+      border:1px solid rgba(127,231,255,.20);
       border-radius:14px;
-      background:rgba(11,13,20,.75);
-      color:#dbe3ff;
-      padding:10px;
+      backdrop-filter: blur(8px);
+      z-index:20;
+      color:#e8ecff;
       font-size:12px;
-      line-height:1.35;
+      line-height:1.25;
       white-space:pre-wrap;
     }
-    #overlay.min{ max-height:12vh; opacity:.75; }
-    #overlay.hide{ display:none; }
+    #diag .row{ margin:2px 0; }
+    #diag .ok{ color:#7CFFB2; }
+    #diag .warn{ color:#FFD36A; }
+    #diag .bad{ color:#FF7B7B; }
+    #diag .muted{ color:#98a0c7; }
 
-    .ok{ color:#4cd964; }
-    .warn{ color:#ffcc00; }
-    .bad{ color:#ff6b6b; }
-    .muted{ color:#9aa5d1; }
-
-    /* Touch pads hint */
-    #touchHint{
-      position:fixed; bottom:10px; left:10px; right:10px;
-      z-index:9998;
-      display:flex; justify-content:space-between; gap:10px;
-      pointer-events:none;
-      opacity:.75;
-      font-size:12px;
-      color:#9aa5d1;
+    #diagBar{
+      display:flex; gap:8px; align-items:center; justify-content:space-between;
+      margin-bottom:6px;
     }
-    #touchHint .pill{
-      border:1px solid rgba(127,231,255,.25);
-      background:rgba(11,13,20,.45);
-      border-radius:999px;
-      padding:6px 10px;
+    .btn{
+      appearance:none; border:none; cursor:pointer;
+      padding:6px 10px; border-radius:12px;
+      background:rgba(127,231,255,.10);
+      color:#e8ecff;
+      border:1px solid rgba(127,231,255,.22);
+      font-weight:800; font-size:12px;
     }
+    .btn:active{ transform: translateY(1px); }
   </style>
 </head>
-
 <body>
-  <div id="overlayWrap">
-    <div id="bar">
-      <button class="btn" id="btnEnterVR">ENTER VR</button>
-      <button class="btn" id="btnRespawn">RESPAWN</button>
-      <button class="btn" id="btnToggleOverlay">DBG</button>
-      <button class="btn" id="btnCopy">COPY LOG</button>
-      <button class="btn" id="btnReload">RELOAD</button>
+  <div id="diag">
+    <div id="diagBar">
+      <div style="font-weight:900;">DIAGNOSTICS</div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn" id="btnClear">CLEAR</button>
+        <button class="btn" id="btnMin">MIN</button>
+      </div>
     </div>
-    <div id="overlay"></div>
-  </div>
-
-  <div id="touchHint">
-    <div class="pill">Android: Left = Move</div>
-    <div class="pill">Android: Right = Look</div>
+    <div id="diagRows"></div>
   </div>
 
   <script type="module" src="./js/index.js"></script>
+
+  <script>
+    // overlay controls (non-module)
+    (function(){
+      const diag = document.getElementById("diag");
+      const rows = document.getElementById("diagRows");
+      document.getElementById("btnClear")?.addEventListener("click", ()=> rows.innerHTML = "");
+      document.getElementById("btnMin")?.addEventListener("click", ()=>{
+        if (!diag) return;
+        diag.style.maxHeight = (diag.style.maxHeight === "38vh") ? "52px" : "38vh";
+        diag.style.overflow = (diag.style.maxHeight === "52px") ? "hidden" : "auto";
+      });
+    })();
+  </script>
 </body>
 </html>

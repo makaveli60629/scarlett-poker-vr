@@ -1,87 +1,80 @@
-// /boot.js — FULL DIAGNOSTIC BOOT
-const now = () => new Date().toTimeString().slice(0, 8);
-const logEl = document.getElementById("log");
-const xrEl  = document.getElementById("xrstat");
-const modeEl= document.getElementById("modestat");
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Scarlett VR Poker</title>
+  <style>
+    html, body { margin:0; padding:0; height:100%; background:#05060a; overflow:hidden;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#e8ecff; }
+    #hud{
+      position:fixed; left:12px; right:12px; top:12px;
+      border-radius:22px; padding:12px; z-index:10;
+      background:rgba(8,10,18,.78);
+      border:1px solid rgba(127,231,255,.14);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 14px 40px rgba(0,0,0,.55);
+    }
+    #row1{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .pill{ padding:8px 12px; border-radius:999px;
+      border:1px solid rgba(255,255,255,.12); background:rgba(10,14,24,.55); font-weight:800; font-size:13px; }
+    #log{
+      margin-top:10px; white-space:pre; font-size:12px; line-height:1.25;
+      max-height:240px; overflow:auto; padding:10px; border-radius:16px;
+      background:rgba(0,0,0,.35); border:1px solid rgba(255,255,255,.10);
+    }
+    #stickL,#stickR{
+      position:fixed; bottom:18px; width:132px; height:132px; border-radius:50%;
+      background:rgba(127,231,255,.08); border:1px solid rgba(127,231,255,.22);
+      z-index:9; touch-action:none;
+    }
+    #stickL{ left:18px; } #stickR{ right:18px; }
+    button{ border-radius:14px; border:1px solid rgba(255,255,255,.14); background:rgba(10,14,24,.55);
+      color:#e8ecff; padding:10px 12px; font-weight:900; font-size:13px; }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <div id="row1">
+      <span class="pill">Scarlett VR Poker</span>
+      <span class="pill" id="xrstat">XR</span>
+      <span class="pill" id="modestat">Mode</span>
+      <span class="pill" id="perf">Perf</span>
+      <button id="copyBtn">📋 Copy</button>
+      <button id="clearBtn">🧹 Clear</button>
+      <button id="diagBtn">🩺 Run Diagnostics</button>
+    </div>
+    <div id="log">[HTML] loaded ✅ (waiting for boot.js…)</div>
+  </div>
 
-function log(msg){
-  console.log(msg);
-  if (logEl){
-    logEl.textContent += msg + "\n";
-    logEl.scrollTop = logEl.scrollHeight;
-  }
-}
+  <div id="stickL"></div>
+  <div id="stickR"></div>
 
-function banner(){
-  log(`══════════════════════════════════════`);
-  log(`[${now()}] Scarlett Boot Diagnostic`);
-  log(`href=${location.href}`);
-  log(`secureContext=${window.isSecureContext}`);
-  log(`ua=${navigator.userAgent}`);
-  log(`navigator.xr=${!!navigator.xr}`);
-  log(`══════════════════════════════════════`);
-}
+  <!-- NON-MODULE heartbeat (runs even if modules fail) -->
+  <script>
+    (function(){
+      const logEl = document.getElementById("log");
+      const now = () => new Date().toTimeString().slice(0,8);
+      logEl.textContent += "\n[" + now() + "] [HTML] classic script running ✅";
+      // If boot doesn't run, warn after 1.5s
+      setTimeout(() => {
+        if (!window.__BOOT_OK__) {
+          logEl.textContent += "\n[" + now() + "] [HTML] BOOT NOT RUNNING ❌ (module script not executing)";
+          logEl.textContent += "\n[" + now() + "] [HTML] Check: boot.js location + GitHub Pages base path + cache";
+        }
+      }, 1500);
+    })();
+  </script>
 
-function installGlobalErrorCapture(){
-  window.addEventListener("error", (e) => {
-    log(`[${now()}] [GLOBAL] error ❌ ${e.message}`);
-    if (e.filename) log(`[${now()}] [GLOBAL] at ${e.filename}:${e.lineno}:${e.colno}`);
-  });
-
-  window.addEventListener("unhandledrejection", (e) => {
-    const msg = e?.reason?.message || String(e?.reason || "unknown");
-    log(`[${now()}] [GLOBAL] unhandledrejection ❌ ${msg}`);
-  });
-
-  // Monkey-patch console.error to mirror into HUD log
-  const origErr = console.error.bind(console);
-  console.error = (...args) => {
-    origErr(...args);
-    try {
-      const txt = args.map(a => (a?.message || a?.stack || String(a))).join(" ");
-      log(`[${now()}] [console.error] ${txt}`);
-    } catch {}
-  };
-}
-
-async function pingFile(path){
-  try {
-    const r = await fetch(path, { cache: "no-store" });
-    log(`[${now()}] [PING] ${path} -> ${r.status}`);
-    return r.ok;
-  } catch (e) {
-    log(`[${now()}] [PING] ${path} FAILED ❌ ${e?.message || e}`);
-    return false;
-  }
-}
-
-(async () => {
-  installGlobalErrorCapture();
-  banner();
-
-  log(`[${now()}] [BOOT] boot.js loaded ✅`);
-
-  if (xrEl) xrEl.textContent = `XR: ${navigator.xr ? "supported" : "not found"}`;
-  if (modeEl) modeEl.textContent = `Mode: running`;
-
-  // Buttons
-  const copyBtn  = document.getElementById("copyBtn");
-  const clearBtn = document.getElementById("clearBtn");
-  if (copyBtn) copyBtn.onclick = async () => { try { await navigator.clipboard.writeText(logEl?.textContent || ""); } catch {} };
-  if (clearBtn) clearBtn.onclick = () => { if (logEl) logEl.textContent = ""; };
-
-  // Pre-flight: verify critical files exist
-  await pingFile("./boot.js");
-  await pingFile("./js/index.js");
-  await pingFile("./js/world.js");
-  await pingFile("./js/VRButton.js");
-
-  log(`[${now()}] [BOOT] importing ./js/index.js …`);
-  try{
-    await import("./js/index.js");
-    log(`[${now()}] [BOOT] index.js imported ✅`);
-  }catch(e){
-    log(`[${now()}] [BOOT] index.js import FAILED ❌ ${e?.message || e}`);
-    console.error(e);
-  }
-})();
+  <!-- MODULE boot with cache-buster -->
+  <script type="module">
+    const v = Date.now();
+    import(`./boot.js?v=${v}`).catch(e => {
+      const logEl = document.getElementById("log");
+      const now = () => new Date().toTimeString().slice(0,8);
+      logEl.textContent += `\n[${now()}] [HTML] boot.js import FAILED ❌ ${e?.message || e}`;
+      console.error(e);
+    });
+  </script>
+</body>
+</html>

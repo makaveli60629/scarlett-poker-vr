@@ -13,26 +13,9 @@
     html,body{margin:0;padding:0;height:100%;background:var(--bg);overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;color:var(--text);touch-action:none;}
     #app{position:fixed;inset:0;}
     canvas{display:block;width:100%;height:100%;}
-
-    #hud{
-      position:fixed; left:12px; top:12px; right:12px; max-width:820px; margin:0 auto;
-      z-index:10; pointer-events:auto;
-    }
-    .panel{
-      background:var(--panel);
-      border:1px solid rgba(127,231,255,.18);
-      border-radius:var(--radius);
-      box-shadow:var(--shadow);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-      overflow:hidden;
-    }
-    #hudHeader{
-      display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap;
-      padding:10px 12px;
-      background:linear-gradient(180deg, rgba(15,18,30,.85), rgba(8,10,16,.45));
-      border-bottom:1px solid rgba(127,231,255,.12);
-    }
+    #hud{position:fixed;left:12px;top:12px;right:12px;max-width:820px;margin:0 auto;z-index:10;pointer-events:auto;}
+    .panel{background:var(--panel);border:1px solid rgba(127,231,255,.18);border-radius:var(--radius);box-shadow:var(--shadow);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);overflow:hidden;}
+    #hudHeader{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px 12px;background:linear-gradient(180deg, rgba(15,18,30,.85), rgba(8,10,16,.45));border-bottom:1px solid rgba(127,231,255,.12);}
     #hudHeader .left{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
     .pill{font-size:12px;color:var(--muted);padding:6px 10px;border-radius:999px;border:1px solid rgba(152,160,199,.25);background:rgba(0,0,0,.18);white-space:nowrap;}
     .pill strong{color:var(--text);font-weight:650;}
@@ -40,19 +23,11 @@
     .btn{cursor:pointer;user-select:none;-webkit-user-select:none;font-size:12px;padding:8px 10px;border-radius:12px;border:1px solid rgba(127,231,255,.22);background:rgba(0,0,0,.18);color:var(--aqua);}
     .btn:active{transform:translateY(1px);}
     #logWrap{padding:10px 12px 12px 12px;}
-    #logPanel{
-      font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;
-      font-size:12px;line-height:1.35;color:var(--text);
-      background:rgba(0,0,0,.25);
-      border:1px solid rgba(152,160,199,.18);
-      border-radius:14px;padding:10px;max-height:42vh;overflow:auto;
-      user-select:text;-webkit-user-select:text;-webkit-touch-callout:default;
-    }
+    #logPanel{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;font-size:12px;line-height:1.35;color:var(--text);background:rgba(0,0,0,.25);border:1px solid rgba(152,160,199,.18);border-radius:14px;padding:10px;max-height:42vh;overflow:auto;user-select:text;-webkit-user-select:text;-webkit-touch-callout:default;}
     .ok{color:var(--ok);} .warn{color:var(--warn);} .bad{color:var(--bad);} .muted{color:var(--muted);}
     #vrSlot{position:fixed;left:0;right:0;bottom:18px;display:flex;justify-content:center;z-index:9;pointer-events:auto;}
   </style>
 </head>
-
 <body>
   <div id="app"></div>
 
@@ -75,7 +50,7 @@
 
   <div id="vrSlot"></div>
 
-  <!-- Boot ALWAYS runs. Cache-bust to avoid stale files. -->
-  <script type="module" src="./js/boot.js?v=1"></script>
+  <!-- ✅ IMPORTANT: we load boot.js, NOT main.js -->
+  <script type="module" src="./js/boot.js?v=DEV_FORCE_1"></script>
 </body>
 </html>

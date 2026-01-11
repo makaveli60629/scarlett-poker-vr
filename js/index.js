@@ -1,10 +1,17 @@
 // /js/index.js — Scarlett VR Poker Boot (FULL, PATH-SAFE, CRASH-PROOF)
+// ✅ Always visible: cube + floor + render loop
+// ✅ VRButton (Quest compatible)
+// ✅ Imports ./world.js
+// ✅ Attempts to start HybridWorld.init(ctx)
+// ✅ If HybridWorld starts -> clears test objects so world is visible
+// ✅ If HybridWorld fails -> cube remains + error printed
 
 import * as THREE from "three";
 window.THREE = THREE;
 
-// ---------- overlay logger (CRASH-PROOF) ----------
+// ---------------- overlay logger (CRASH-PROOF) ----------------
 const overlay = document.getElementById("overlay");
+function safeJson(x) { try { return JSON.stringify(x); } catch { return String(x); } }
 function log(...a) {
   try {
     console.log(...a);
@@ -12,13 +19,11 @@ function log(...a) {
     const s = a.map(x => (typeof x === "string" ? x : safeJson(x))).join(" ");
     overlay.textContent += (overlay.textContent ? "\n" : "") + s;
   } catch (err) {
-    // If overlay logging ever fails, we still keep console alive
     console.log("[log-failed]", err);
   }
 }
-function safeJson(x) { try { return JSON.stringify(x); } catch { return String(x); } }
 
-// ---------- global error taps ----------
+// ---------------- global error taps ----------------
 window.addEventListener("error", (e) => {
   log("❌ window.error:", e?.message || String(e));
 });
@@ -27,7 +32,7 @@ window.addEventListener("unhandledrejection", (e) => {
   log("❌ unhandledrejection:", r?.message || String(r || e));
 });
 
-// ---------- boot header ----------
+// ---------------- boot header ----------------
 log("boot…");
 log("BOOT index.js ✅");
 log("href=" + location.href);
@@ -38,18 +43,21 @@ log("navigator.xr=" + (!!navigator.xr));
 // Build URLs relative to THIS file (/js/index.js)
 const here = (rel) => new URL(rel, import.meta.url).toString();
 
-// ---------- VISIBILITY TEST ----------
+// ---------------- create renderer ----------------
 log("STARTING VISIBILITY TEST ⏬");
 
 const app = document.getElementById("app") || document.body;
 
 let renderer;
 try {
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+  renderer = new THREE.WebGLRenderer({
+    antialias: true,
+    alpha: false,
+    powerPreference: "high-performance",
+  });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.xr.enabled = true;
-
   app.appendChild(renderer.domElement);
   log("renderer created ✅");
 } catch (e) {
@@ -57,17 +65,22 @@ try {
   throw e;
 }
 
+// ---------------- test scene (always visible) ----------------
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x101020);
 
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 200);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 400);
 camera.position.set(0, 1.6, 2);
 
+// Keep a “testRoot” group so we can remove it when the real world starts.
+const testRoot = new THREE.Group();
+scene.add(testRoot);
+
 // lights
-scene.add(new THREE.HemisphereLight(0xffffff, 0x303040, 1.2));
+testRoot.add(new THREE.HemisphereLight(0xffffff, 0x303040, 1.2));
 const dir = new THREE.DirectionalLight(0xffffff, 0.8);
 dir.position.set(3, 6, 2);
-scene.add(dir);
+testRoot.add(dir);
 
 // floor
 const floor = new THREE.Mesh(
@@ -76,7 +89,7 @@ const floor = new THREE.Mesh(
 );
 floor.rotation.x = -Math.PI / 2;
 floor.position.y = 0;
-scene.add(floor);
+testRoot.add(floor);
 
 // cube
 const cube = new THREE.Mesh(
@@ -84,7 +97,7 @@ const cube = new THREE.Mesh(
   new THREE.MeshStandardMaterial({ color: 0xff2d7a })
 );
 cube.position.set(0, 1.5, -2);
-scene.add(cube);
+testRoot.add(cube);
 
 // resize
 window.addEventListener("resize", () => {
@@ -101,7 +114,7 @@ renderer.setAnimationLoop(() => {
 });
 log("render loop running ✅");
 
-// ---------- VRButton ----------
+// ---------------- VRButton ----------------
 (async () => {
   try {
     const { VRButton } = await import("https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js");
@@ -112,7 +125,7 @@ log("render loop running ✅");
   }
 })();
 
-// ---------- import world (do not start yet) ----------
+// ---------------- safe import ----------------
 async function safeImport(rel) {
   const url = here(rel);
   try {
@@ -126,14 +139,62 @@ async function safeImport(rel) {
   }
 }
 
-const START_HYBRID_WORLD = true;
-
+// ---------------- start HybridWorld (AUTO) ----------------
 (async () => {
   try {
     const worldMod = await safeImport("./world.js");
     log("world module keys:", Object.keys(worldMod));
-    log("✅ Loader finished. Cube+VRButton should be visible now.");
+
+    const HybridWorld = worldMod?.HybridWorld;
+    if (!HybridWorld) {
+      log("❌ HybridWorld export missing (world.js must export const HybridWorld = …)");
+      log("✅ Staying in cube test mode.");
+      return;
+    }
+
+    // Build a “best-effort” ctx that matches common patterns from your project
+    const ctx = {
+      THREE,
+      scene,
+      renderer,
+      camera,
+      log,
+
+      // common fields many systems expect:
+      BUILD: { stamp: Date.now() },
+      systems: {},
+      state: {},
+
+      // player / rig placeholders (world can re-parent as needed)
+      player: new THREE.Group(),
+      rig: new THREE.Group(),
+
+      // controllers placeholders (hands-only worlds can ignore)
+      controllers: { left: null, right: null, hands: [] },
+    };
+
+    // Put camera under player so movement systems work naturally
+    ctx.player.add(camera);
+    scene.add(ctx.player);
+
+    log("▶ Attempting HybridWorld.init(ctx)…");
+
+    // Call init whether it is sync or async
+    const res = HybridWorld.init?.(ctx);
+    if (res instanceof Promise) await res;
+
+    log("✅ HybridWorld.init completed");
+
+    // If world started, remove testRoot so we see the real world
+    scene.remove(testRoot);
+    testRoot.clear();
+    log("✅ Test scene removed (now showing HybridWorld)");
+
+    log("✅ Loader finished. If anything breaks next, it will print here.");
   } catch (e) {
-    log("FATAL:", e?.message || String(e));
+    log("❌ HybridWorld boot failed:");
+    log(e?.message || String(e));
+    log(e?.stack || "");
+    log("✅ Staying in cube test mode so you are never blind.");
   }
 })();

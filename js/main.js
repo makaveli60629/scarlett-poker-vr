@@ -1,6 +1,7 @@
 // /js/main.js — Scarlett MASTER Boot + Diagnostics + Flat Controls (FULL)
-// Works on Android + Quest. Captures logs. Copy/Download/Clear/Hide works.
-// Imports your existing World from ./world.js without modifying it.
+// ✅ Fixes: "Failed to resolve module specifier 'three'" by using CDN imports.
+// ✅ Works on GitHub Pages + Android + Quest.
+// ✅ Keeps your World pipeline: import { World } from "./world.js";
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -24,11 +25,10 @@ const joy = $("joy");
 const joyKnob = $("joyKnob");
 const hint = $("hint");
 
-// If index bootstrap exists, log immediately
 window.__scarlettBootstrapLog?.("[main] starting…");
 
 // ---------- Log capture ----------
-const LOG_LINES_MAX = 1400;
+const LOG_LINES_MAX = 1600;
 const logBuffer = [];
 let hudVisible = true;
 
@@ -78,7 +78,6 @@ console.log = (...args) => { _log(...args); pushLog(args.map(safeToString).join(
 console.warn = (...args) => { _warn(...args); pushLog(args.map(safeToString).join(" "), "warn"); };
 console.error = (...args) => { _err(...args); pushLog(args.map(safeToString).join(" "), "bad"); };
 
-// Capture runtime errors
 window.addEventListener("error", (e) => {
   pushLog(`WINDOW ERROR: ${e.message}`, "bad");
   if (e.error?.stack) pushLog(e.error.stack, "muted");
@@ -106,8 +105,7 @@ btnCopy?.addEventListener("click", async () => {
     const old = btnCopy.textContent;
     btnCopy.textContent = "✅ Copied!";
     setTimeout(() => (btnCopy.textContent = old), 1200);
-  } catch (e) {
-    // execCommand fallback
+  } catch {
     try {
       const ta = document.createElement("textarea");
       ta.value = text;
@@ -122,7 +120,7 @@ btnCopy?.addEventListener("click", async () => {
       btnCopy.textContent = "✅ Copied!";
       setTimeout(() => (btnCopy.textContent = old), 1200);
     } catch {
-      alert("Copy failed. Long-press inside the log box → Select All → Copy.");
+      alert("Copy failed. Long-press the log → Select All → Copy.");
     }
   }
 });
@@ -163,10 +161,7 @@ function setModeLabel(txt) {
 
 // ---------- THREE setup ----------
 const app = document.getElementById("app");
-if (!app) {
-  pushLog("FATAL: #app missing in index.html", "bad");
-  throw new Error("#app missing");
-}
+if (!app) throw new Error("FATAL: #app missing in index.html");
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -174,9 +169,9 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.xr.enabled = true;
 app.appendChild(renderer.domElement);
+
 pushLog("Renderer created ✅", "ok");
 
-// Scene / camera / player rig
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x05060a);
 
@@ -185,68 +180,55 @@ camera.position.set(0, 1.6, 3);
 
 const player = new THREE.Group();
 player.name = "PlayerRig";
-player.position.set(0, 0, 0);
 player.add(camera);
 scene.add(player);
-pushLog("PlayerRig + Camera created ✅", "ok");
 
-// Light safety
+pushLog("PlayerRig + Camera created ✅", "ok");
 scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.85));
 
 // ---------- VR Button ----------
 try {
   const b = VRButton.createButton(renderer);
-  if (vrSlot) vrSlot.appendChild(b);
+  vrSlot?.appendChild(b);
   pushLog("VRButton appended ✅", "ok");
 } catch (e) {
   pushLog(`VRButton failed: ${safeToString(e)}`, "warn");
 }
 
-// ---------- Controllers placeholders ----------
+// Controllers placeholder (compatible with your world)
 const controllers = { left: null, right: null, lasers: [] };
 
-// ---------- Flat Mode Mobile Controls ----------
+// ---------- Flat Mode Controls ----------
 const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 let flatControlsEnabled = true;
 
-const flat = {
-  moveX: 0,
-  moveY: 0,
-  lookYaw: 0,
-  lookPitch: 0,
-  dragging: false,
-  lastX: 0,
-  lastY: 0,
-  speed: 2.4
-};
+const flat = { moveX:0, moveY:0, lookYaw:0, lookPitch:0, dragging:false, lastX:0, lastY:0, speed:2.4 };
 
-function enableFlatUI(on) {
+function enableFlatUI(on){
   if (!isMobile) return;
   if (joy) joy.style.display = on ? "block" : "none";
   if (hint) hint.style.display = on ? "block" : "none";
 }
 enableFlatUI(true);
 
-function applyFlatLook(dx, dy) {
+function applyFlatLook(dx, dy){
   const sens = 0.0032;
   flat.lookYaw -= dx * sens;
   flat.lookPitch -= dy * sens;
   flat.lookPitch = Math.max(-1.15, Math.min(1.15, flat.lookPitch));
-
   camera.rotation.order = "YXZ";
   camera.rotation.y = flat.lookYaw;
   camera.rotation.x = flat.lookPitch;
 }
 
-window.addEventListener("pointerdown", (e) => {
+window.addEventListener("pointerdown", (e)=>{
   if (!flatControlsEnabled) return;
   if (joy && (e.target === joy || joy.contains(e.target))) return;
   flat.dragging = true;
   flat.lastX = e.clientX;
   flat.lastY = e.clientY;
 });
-
-window.addEventListener("pointermove", (e) => {
+window.addEventListener("pointermove", (e)=>{
   if (!flat.dragging || !flatControlsEnabled) return;
   const dx = e.clientX - flat.lastX;
   const dy = e.clientY - flat.lastY;
@@ -254,117 +236,103 @@ window.addEventListener("pointermove", (e) => {
   flat.lastY = e.clientY;
   applyFlatLook(dx, dy);
 });
+window.addEventListener("pointerup", ()=>{ flat.dragging = false; });
 
-window.addEventListener("pointerup", () => { flat.dragging = false; });
-
-// Joystick
-let joyActive = false;
-let joyCenter = { x: 0, y: 0 };
-
-function setJoyKnob(nx, ny) {
+let joyActive=false;
+let joyCenter={x:0,y:0};
+function setJoyKnob(nx, ny){
   if (!joyKnob) return;
-  const r = 46;
-  joyKnob.style.transform = `translate(${nx * r}px, ${ny * r}px) translate(-50%,-50%)`;
+  const r=46;
+  joyKnob.style.transform = `translate(${nx*r}px, ${ny*r}px) translate(-50%,-50%)`;
 }
 
-joy?.addEventListener("pointerdown", (e) => {
-  joyActive = true;
+joy?.addEventListener("pointerdown",(e)=>{
+  joyActive=true;
   joy.setPointerCapture(e.pointerId);
-  const rect = joy.getBoundingClientRect();
-  joyCenter.x = rect.left + rect.width / 2;
-  joyCenter.y = rect.top + rect.height / 2;
+  const rect=joy.getBoundingClientRect();
+  joyCenter.x=rect.left+rect.width/2;
+  joyCenter.y=rect.top+rect.height/2;
 });
-
-joy?.addEventListener("pointermove", (e) => {
-  if (!joyActive) return;
-  const dx = (e.clientX - joyCenter.x);
-  const dy = (e.clientY - joyCenter.y);
-  const max = 46;
-  const nx = Math.max(-1, Math.min(1, dx / max));
-  const ny = Math.max(-1, Math.min(1, dy / max));
-  flat.moveX = nx;
-  flat.moveY = -ny;
+joy?.addEventListener("pointermove",(e)=>{
+  if(!joyActive) return;
+  const dx=e.clientX-joyCenter.x;
+  const dy=e.clientY-joyCenter.y;
+  const max=46;
+  const nx=Math.max(-1,Math.min(1,dx/max));
+  const ny=Math.max(-1,Math.min(1,dy/max));
+  flat.moveX=nx;
+  flat.moveY=-ny;
   setJoyKnob(nx, ny);
 });
-
-joy?.addEventListener("pointerup", () => {
-  joyActive = false;
-  flat.moveX = 0;
-  flat.moveY = 0;
-  setJoyKnob(0, 0);
+joy?.addEventListener("pointerup",()=>{
+  joyActive=false;
+  flat.moveX=0; flat.moveY=0;
+  setJoyKnob(0,0);
 });
 
-// Disable flat controls in VR
-renderer.xr.addEventListener("sessionstart", () => {
-  flatControlsEnabled = false;
+renderer.xr.addEventListener("sessionstart", ()=>{
+  flatControlsEnabled=false;
   enableFlatUI(false);
   setModeLabel("XR session");
-  pushLog("XR session started ✅", "ok");
+  pushLog("XR session started ✅","ok");
 });
-
-renderer.xr.addEventListener("sessionend", () => {
-  flatControlsEnabled = true;
+renderer.xr.addEventListener("sessionend", ()=>{
+  flatControlsEnabled=true;
   enableFlatUI(true);
   setModeLabel("flat");
-  pushLog("XR session ended", "warn");
+  pushLog("XR session ended","warn");
 });
 
-// Resize
-window.addEventListener("resize", () => {
+window.addEventListener("resize", ()=>{
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
 });
 
 // ---------- Load World ----------
-(async () => {
-  try {
+(async ()=>{
+  try{
     setModeLabel("loading world");
-    pushLog("Import world.js ✅", "ok");
+    pushLog("Import world.js ✅","ok");
 
     await World.init({
-      THREE,
-      scene,
-      renderer,
-      camera,
-      player,
-      controllers,
+      THREE, scene, renderer, camera, player, controllers,
       log: console.log,
       BUILD
     });
 
-    pushLog("World init ✅", "ok");
+    pushLog("World init ✅","ok");
     setModeLabel("ready");
-  } catch (e) {
-    pushLog(`World init FAIL: ${safeToString(e)}`, "bad");
+  }catch(e){
+    pushLog(`World init FAIL: ${safeToString(e)}`,"bad");
     setModeLabel("world fail");
   }
 })();
 
-// ---------- Main Loop ----------
+// ---------- Render loop ----------
 const clock = new THREE.Clock();
 
-renderer.setAnimationLoop(() => {
+renderer.setAnimationLoop(()=>{
   const dt = clock.getDelta();
 
-  if (flatControlsEnabled) {
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-    forward.y = 0; right.y = 0;
+  if(flatControlsEnabled){
+    const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+    const right = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
+    forward.y=0; right.y=0;
     forward.normalize(); right.normalize();
 
     const move = new THREE.Vector3()
       .addScaledVector(right, flat.moveX)
       .addScaledVector(forward, flat.moveY);
 
-    if (move.lengthSq() > 0.0001) {
-      move.normalize().multiplyScalar(flat.speed * dt);
+    if(move.lengthSq()>0.0001){
+      move.normalize().multiplyScalar(flat.speed*dt);
       player.position.add(move);
     }
   }
 
-  renderer.render(scene, camera);
+  renderer.render(scene,camera);
 });
 
-pushLog("Animation loop running ✅", "ok");
+pushLog("Animation loop running ✅","ok");
 setModeLabel("flat");

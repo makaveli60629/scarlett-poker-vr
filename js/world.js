@@ -1,10 +1,10 @@
-// /js/world.js — Scarlett MASTER WORLD (Update 4.8 STABLE)
-// ✅ Door gaps (arc segments) so hallways are visible
-// ✅ 4 hallways + 4 square rooms
-// ✅ VIP spawn
-// ✅ Pit divot + rail look-down
-// ✅ 4 doorway jumbotrons
-// ✅ Green neon floor ring target (ONLY visual; no pink square/green ball)
+// /js/world.js — Scarlett MASTER WORLD (Update 4.8.1 FULL - FIXED INTERIORS)
+// ✅ Fixes black screen by rendering hallway/room interiors (BackSide)
+// ✅ VIP spawn -> hallway -> circular lobby with 4 door gaps
+// ✅ Pit divot + gold rail + table + chairs + placeholder cards
+// ✅ 4 doorway jumbotrons (HLS video texture)
+// ✅ Green neon floor aim ring (ONLY teleport visual)
+// ✅ No pink square, no green ball markers
 
 import * as THREE from "three";
 
@@ -44,6 +44,9 @@ export const World = (() => {
 
   const safeLog = (...a) => { try { S.log?.(...a); } catch {} };
 
+  // -----------------------------
+  // Materials / Textures
+  // -----------------------------
   function getCasinoWallMaterial() {
     const texLoader = new THREE.TextureLoader();
     const wallTex = texLoader.load("assets/textures/casino_wall_diffuse.jpg");
@@ -61,11 +64,42 @@ export const World = (() => {
     });
   }
 
-  const matFloor = () => new THREE.MeshStandardMaterial({ color: 0x050508, roughness: 0.88, metalness: 0.06 });
-  const matHall  = () => new THREE.MeshStandardMaterial({ color: 0x0a0a12, roughness: 0.82, metalness: 0.10 });
-  const matRoom  = () => new THREE.MeshStandardMaterial({ color: 0x070711, roughness: 0.78, metalness: 0.14 });
-  const matGold  = () => new THREE.MeshStandardMaterial({ color: 0xd4af37, roughness: 0.22, metalness: 0.92 });
+  const matFloor = () => new THREE.MeshStandardMaterial({
+    color: 0x050508, roughness: 0.88, metalness: 0.06
+  });
 
+  // ✅ IMPORTANT: BackSide so you can SEE from inside (no black screen)
+  const matHall = () => new THREE.MeshStandardMaterial({
+    color: 0x0a0a12,
+    roughness: 0.82,
+    metalness: 0.10,
+    side: THREE.BackSide,
+    emissive: 0x05060a,
+    emissiveIntensity: 0.35
+  });
+
+  const matRoom = () => new THREE.MeshStandardMaterial({
+    color: 0x070711,
+    roughness: 0.78,
+    metalness: 0.14,
+    side: THREE.BackSide,
+    emissive: 0x05060a,
+    emissiveIntensity: 0.35
+  });
+
+  const matGold = () => new THREE.MeshStandardMaterial({
+    color: 0xd4af37, roughness: 0.22, metalness: 0.92
+  });
+
+  const matSign = () => new THREE.MeshStandardMaterial({
+    color: 0x11111a, roughness: 0.75, metalness: 0.15,
+    emissive: 0x080814, emissiveIntensity: 0.4,
+    side: THREE.DoubleSide
+  });
+
+  // -----------------------------
+  // Stream (simple; plays after user action)
+  // -----------------------------
   function initLobbyStream() {
     const video = document.createElement("video");
     video.id = "lobbyStream";
@@ -94,6 +128,9 @@ export const World = (() => {
     return tex;
   }
 
+  // -----------------------------
+  // Root
+  // -----------------------------
   function ensureRoot() {
     if (S.root && S.root.parent === S.scene) return S.root;
     const g = new THREE.Group();
@@ -103,8 +140,12 @@ export const World = (() => {
     return g;
   }
 
+  // -----------------------------
+  // Green aim ring (only teleport visual)
+  // -----------------------------
   function ensureAimRing() {
     if (S.aimRing && S.aimRing.parent) return;
+
     const ringGeo = new THREE.RingGeometry(0.22, 0.32, 128);
     const ringMat = new THREE.MeshBasicMaterial({
       color: 0x00ff7f,
@@ -113,6 +154,7 @@ export const World = (() => {
       side: THREE.DoubleSide,
       wireframe: false
     });
+
     const ring = new THREE.Mesh(ringGeo, ringMat);
     ring.name = "TeleportAimRing_Green";
     ring.rotation.x = -Math.PI / 2;
@@ -121,9 +163,11 @@ export const World = (() => {
     S.aimRing = ring;
   }
 
-  function buildLobby() {
+  // -----------------------------
+  // Build Lobby + Halls + Rooms
+  // -----------------------------
+  function buildWorld() {
     const root = ensureRoot();
-
     const prev = root.getObjectByName("ScarlettLobbyWorld");
     if (prev) root.remove(prev);
 
@@ -132,41 +176,47 @@ export const World = (() => {
     root.add(W);
     S.refs.lobby = W;
 
+    // Sizes
     const lobbyRadius = 12.0;
     const wallHeight  = 8.0;
 
-    const doorGap = THREE.MathUtils.degToRad(26);
+    const doorGap = THREE.MathUtils.degToRad(28); // slightly wider doors
 
     const pitRadius = 4.2;
     const pitDepth  = 0.85;
 
     const hallLen = 10.0;
-    const hallW   = 4.0;
-    const hallH   = 4.6;
+    const hallW   = 4.2;
+    const hallH   = 4.8;
 
-    const roomW   = 12.0;
-    const roomD   = 12.0;
-    const roomH   = 6.0;
+    const roomW   = 13.0;
+    const roomD   = 13.0;
+    const roomH   = 6.6;
 
-    // lights
+    // Lights
     const lights = new THREE.Group();
     lights.name = "CasinoLights";
     lights.add(new THREE.AmbientLight(0xffffff, 0.35));
+
     const key = new THREE.DirectionalLight(0xffffff, 0.75);
     key.position.set(6, 10, 4);
     lights.add(key);
+
+    // a touch of neon
     const rim = new THREE.PointLight(0x7fe7ff, 0.45, 30);
     rim.position.set(0, 6, 0);
     lights.add(rim);
+
     W.add(lights);
     S.refs.lights = lights;
 
-    // wall arcs with door gaps
+    // Circular Wall with REAL door gaps (4 arc segments)
     const wallMat = getCasinoWallMaterial();
     const quarter = (Math.PI * 2) / 4;
+
     for (let i = 0; i < 4; i++) {
       const thetaStart = i * quarter + doorGap / 2;
-      const thetaLen = quarter - doorGap;
+      const thetaLen   = quarter - doorGap;
 
       const geo = new THREE.CylinderGeometry(
         lobbyRadius + 0.1,
@@ -179,41 +229,49 @@ export const World = (() => {
         thetaLen
       );
 
-      const m = new THREE.Mesh(geo, wallMat);
-      m.position.y = wallHeight / 2;
-      W.add(m);
+      const wall = new THREE.Mesh(geo, wallMat);
+      wall.position.y = wallHeight / 2;
+      wall.receiveShadow = true;
+      W.add(wall);
     }
 
-    // floors
+    // Floors: ring + pit
     const floorMat = matFloor();
 
     const ring = new THREE.Mesh(new THREE.RingGeometry(pitRadius, lobbyRadius, 160), floorMat);
+    ring.name = "LobbyFloorMain";
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0;
+    ring.receiveShadow = true;
     W.add(ring);
     S.floorMain = ring;
 
     const pit = new THREE.Mesh(new THREE.CircleGeometry(pitRadius, 96), floorMat);
+    pit.name = "LobbyFloorPit";
     pit.rotation.x = -Math.PI / 2;
     pit.position.y = -pitDepth;
+    pit.receiveShadow = true;
     W.add(pit);
     S.floorPit = pit;
 
-    const pitWallGeo = new THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 96, 1, true);
-    const pitWallMat = new THREE.MeshStandardMaterial({ color: 0x0b0b14, roughness: 0.92, metalness: 0.04, side: THREE.DoubleSide });
-    const pitWall = new THREE.Mesh(pitWallGeo, pitWallMat);
+    const pitWall = new THREE.Mesh(
+      new THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 96, 1, true),
+      new THREE.MeshStandardMaterial({ color: 0x0b0b14, roughness: 0.92, metalness: 0.04, side: THREE.DoubleSide })
+    );
     pitWall.position.y = -pitDepth / 2;
     W.add(pitWall);
 
-    // rail
+    // Gold rail
     const rail = new THREE.Mesh(new THREE.TorusGeometry(pitRadius + 0.25, 0.08, 16, 180), matGold());
+    rail.name = "PitGuardRail";
     rail.rotation.x = Math.PI / 2;
     rail.position.y = 0.95;
     W.add(rail);
     S.refs.rail = rail;
 
-    // table + chairs + placeholder cards
+    // Table + chairs + cards placeholders
     const table = new THREE.Group();
+    table.name = "CenterPokerTable";
     table.position.set(0, -pitDepth + 0.02, 0);
 
     const base = new THREE.Mesh(
@@ -240,7 +298,7 @@ export const World = (() => {
       table.add(c);
     }
 
-    const cardMat = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.65, metalness: 0.0 });
+    const cardMat = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.65, metalness: 0.0, side: THREE.DoubleSide });
     for (let i = 0; i < 5; i++) {
       const card = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.34), cardMat);
       card.rotation.x = -Math.PI / 2;
@@ -251,43 +309,61 @@ export const World = (() => {
     W.add(table);
     S.refs.table = table;
 
-    // halls + rooms
+    // Halls + Rooms + Door frames + Signs
     const defs = [
       { key: "north", angle: 0,              label: "POKER" },
       { key: "east",  angle: Math.PI / 2,    label: "STORE" },
       { key: "south", angle: Math.PI,        label: "EVENT" },
-      { key: "west",  angle: -Math.PI / 2,   label: "VIP" } // spawn here
+      { key: "west",  angle: -Math.PI / 2,   label: "VIP" }
     ];
 
     const doorZ = -(lobbyRadius - 0.15);
 
     for (const d of defs) {
+      // hallway (interior)
       const hall = new THREE.Mesh(new THREE.BoxGeometry(hallW, hallH, hallLen), matHall());
+      hall.name = `Hallway_${d.key}`;
       hall.position.set(0, hallH / 2, doorZ - hallLen / 2);
       hall.rotation.y = d.angle;
       W.add(hall);
       S.refs.hallways[d.key] = hall;
 
+      // room (interior)
       const room = new THREE.Mesh(new THREE.BoxGeometry(roomW, roomH, roomD), matRoom());
+      room.name = `Room_${d.label}`;
       room.position.set(0, roomH / 2, doorZ - hallLen - roomD / 2);
       room.rotation.y = d.angle;
       W.add(room);
       S.refs.rooms[d.key] = room;
 
-      const frame = new THREE.Mesh(new THREE.BoxGeometry(hallW + 0.35, 3.1, 0.25), matGold());
-      frame.position.set(0, 2.05, doorZ + 0.1);
+      // doorway gold frame
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(hallW + 0.55, 3.3, 0.25), matGold());
+      frame.position.set(0, 2.15, doorZ + 0.10);
       frame.rotation.y = d.angle;
       W.add(frame);
+
+      // sign plate
+      const sign = new THREE.Mesh(new THREE.PlaneGeometry(hallW + 0.25, 1.15), matSign());
+      sign.position.set(0, 2.15, doorZ + 0.26);
+      sign.rotation.y = d.angle;
+      W.add(sign);
+
+      // small neon downlight above the doorway
+      const p = new THREE.PointLight(0xff2d7a, 0.35, 8);
+      p.position.set(0, 3.1, doorZ + 0.15);
+      p.applyAxisAngle(new THREE.Vector3(0,1,0), d.angle);
+      W.add(p);
     }
 
-    // 4 doorway jumbotrons
+    // Jumbotrons ABOVE each doorway
     const streamTex = initLobbyStream();
     const jumboMat = new THREE.MeshStandardMaterial({
       map: streamTex,
       emissive: 0xffffff,
       emissiveIntensity: 0.35,
       roughness: 0.6,
-      metalness: 0.1
+      metalness: 0.1,
+      side: THREE.DoubleSide
     });
 
     S.refs.jumbotrons.length = 0;
@@ -295,20 +371,23 @@ export const World = (() => {
 
     for (const d of defs) {
       const j = new THREE.Mesh(jumboGeo, jumboMat);
-      j.position.set(0, 5.6, doorZ + 0.35);
-      j.rotation.y = d.angle;
-      j.rotateY(Math.PI); // face inward
+      j.name = `Jumbotron_${d.key}`;
+      j.position.set(0, 5.75, doorZ + 0.40);
+      j.rotation.y = d.angle + Math.PI; // face inward
       W.add(j);
       S.refs.jumbotrons.push(j);
     }
 
-    // VIP spawn robust
-    // West room is rotated -90°, so we can just place spawn left of center:
+    // VIP spawn location: inside VIP room, not in wall
+    // We'll set it just deeper into the VIP room volume.
     S.spawnVIP.set(-18.0, 0, 0);
 
-    safeLog("[world] Update 4.8 built ✅ (doors + halls + rooms + 4 jumbotrons + VIP spawn)");
+    safeLog("[world] Update 4.8.1 built ✅ (FULL interiors + VIP spawn)");
   }
 
+  // -----------------------------
+  // Teleport: green ring + controller press
+  // -----------------------------
   function controllerPressed(controller) {
     try {
       const gp = controller?.inputSource?.gamepad;
@@ -322,6 +401,7 @@ export const World = (() => {
     ensureAimRing();
 
     const c0 = S.controllers && S.controllers[0];
+
     const pos = c0
       ? new THREE.Vector3().setFromMatrixPosition(c0.matrixWorld)
       : new THREE.Vector3().setFromMatrixPosition(S.camera.matrixWorld);
@@ -369,17 +449,16 @@ export const World = (() => {
     async build(ctx) {
       Object.assign(S, ctx);
       ensureRoot();
-      buildLobby();
+      buildWorld();
 
       S.ray = new THREE.Raycaster();
       ensureAimRing();
 
-      // Spawn in VIP (west)
+      // Spawn VIP + face toward lobby center
       S.player.position.set(S.spawnVIP.x, 0.02, S.spawnVIP.z);
-      // Face toward center
       S.player.rotation.y = Math.atan2(0 - S.spawnVIP.x, 0 - S.spawnVIP.z);
 
-      safeLog("[world] build complete ✅ (Spawn=VIP, clean visuals, green ring only)");
+      safeLog("[world] build complete ✅ (FULL - interiors visible, green ring only)");
     },
 
     frame(ctx, dt) {

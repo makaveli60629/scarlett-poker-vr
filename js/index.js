@@ -1,4 +1,4 @@
-// /js/index.js — MASTER Runtime (HybridWorld build + per-frame update)
+// /js/index.js — MASTER Runtime (HybridWorld build + frame-compatible)
 
 import * as THREE from "three";
 import { VRButton } from "three/examples/jsm/webxr/VRButton.js";
@@ -52,7 +52,8 @@ window.addEventListener("resize", ()=>{
 const controllers = { left:null, right:null, lasers:[] };
 
 let WorldLike = null;
-let worldFrame = null; // optional per-frame hook
+let ctx = null;
+let worldFrame = null;
 
 async function loadWorld(){
   setMode("importing world");
@@ -66,13 +67,19 @@ async function loadWorld(){
   const methods = Object.keys(WorldLike).filter(k => typeof WorldLike[k] === "function");
   L("[index] world methods: " + (methods.length ? methods.join(", ") : "(none)"), methods.length ? "ok" : "warn");
 
-  if (typeof WorldLike.build !== "function") {
-    throw new Error("World export missing build().");
-  }
+  if (typeof WorldLike.build !== "function") throw new Error("World export missing build().");
+  if (typeof WorldLike.frame === "function") worldFrame = WorldLike.frame.bind(WorldLike);
+}
 
-  if (typeof WorldLike.frame === "function") {
-    worldFrame = WorldLike.frame.bind(WorldLike);
-  }
+function callWorldFrameSafely(frameFn, ctx, dt, t){
+  // Try common signatures without spamming failures.
+  // Return true if one signature works (no throw), else false.
+  try { frameFn(ctx, dt, t); return true; } catch {}
+  try { frameFn(ctx); return true; } catch {}
+  try { frameFn(dt); return true; } catch {}
+  try { frameFn(t, dt); return true; } catch {}
+  try { frameFn(renderer, scene, camera, dt, t); return true; } catch {}
+  return false;
 }
 
 (async ()=>{
@@ -80,12 +87,14 @@ async function loadWorld(){
     setMode("loading world");
     await loadWorld();
 
-    L("[index] calling world.build() …");
-    await WorldLike.build({
+    ctx = {
       THREE, scene, renderer, camera, player, controllers,
       log: console.log,
       BUILD: Date.now()
-    });
+    };
+
+    L("[index] calling world.build() …");
+    await WorldLike.build(ctx);
 
     L("[index] world start ✅","ok");
     setMode("ready");
@@ -96,15 +105,29 @@ async function loadWorld(){
   }
 })();
 
-// render loop + per-frame world update
+// render loop + world.frame update
 const clock = new THREE.Clock();
+let elapsed = 0;
+
+// rate-limit log spam
+let frameErrCount = 0;
+let lastFrameErrAt = 0;
+
 renderer.setAnimationLoop(()=>{
   const dt = clock.getDelta();
+  elapsed += dt;
 
-  try{
-    if (worldFrame) worldFrame(dt);
-  }catch(e){
-    console.warn("[index] world.frame error:", e?.message || e);
+  if (worldFrame && ctx){
+    const ok = callWorldFrameSafely(worldFrame, ctx, dt, elapsed);
+    if (!ok){
+      const now = performance.now();
+      frameErrCount++;
+      // only log at most once per second
+      if (now - lastFrameErrAt > 1000){
+        lastFrameErrAt = now;
+        console.warn(`[index] world.frame failed (${frameErrCount}x). Check HybridWorld.frame signature.`);
+      }
+    }
   }
 
   renderer.render(scene, camera);

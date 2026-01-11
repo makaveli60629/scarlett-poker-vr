@@ -1,10 +1,10 @@
 // /js/index.js — Scarlett VR Poker Boot (FULL, PATH-SAFE, CRASH-PROOF)
-// ✅ Always visible: cube + floor + render loop
+// ✅ Always visible: cube + floor + render loop (never blind)
 // ✅ VRButton (Quest compatible)
-// ✅ Imports ./world.js
-// ✅ Attempts to start HybridWorld.init(ctx)
-// ✅ If HybridWorld starts -> clears test objects so world is visible
-// ✅ If HybridWorld fails -> cube remains + error printed
+// ✅ Imports ./world.js safely
+// ✅ Calls HybridWorld.init with the expected argument shape
+// ✅ On success: removes testRoot so real world shows
+// ✅ On failure: keeps cube + prints exact error
 
 import * as THREE from "three";
 window.THREE = THREE;
@@ -139,58 +139,54 @@ async function safeImport(rel) {
   }
 }
 
-// ---------------- start HybridWorld (AUTO) ----------------
+// ---------------- start HybridWorld (CORRECT ADAPTER) ----------------
 (async () => {
   try {
     const worldMod = await safeImport("./world.js");
     log("world module keys:", Object.keys(worldMod));
 
     const HybridWorld = worldMod?.HybridWorld;
-    if (!HybridWorld) {
-      log("❌ HybridWorld export missing (world.js must export const HybridWorld = …)");
+    if (!HybridWorld || typeof HybridWorld.init !== "function") {
+      log("❌ HybridWorld.init not found");
       log("✅ Staying in cube test mode.");
       return;
     }
 
-    // Build a “best-effort” ctx that matches common patterns from your project
-    const ctx = {
+    // ctx-like values your game historically expects
+    const BUILD = {
+      stamp: Date.now(),
+      mode: "hybrid",
+      platform: navigator.userAgent,
+    };
+
+    const player = new THREE.Group();
+    player.position.set(0, 0, 0);
+    player.add(camera);
+    scene.add(player);
+
+    const controllers = { left: null, right: null, hands: [] };
+
+    log("▶ HybridWorld.init START");
+
+    // Call with the exact destructured argument style your world versions used
+    await HybridWorld.init({
       THREE,
       scene,
       renderer,
       camera,
+      player,
+      controllers,
       log,
+      BUILD,
+    });
 
-      // common fields many systems expect:
-      BUILD: { stamp: Date.now() },
-      systems: {},
-      state: {},
+    log("✅ HybridWorld.init DONE");
 
-      // player / rig placeholders (world can re-parent as needed)
-      player: new THREE.Group(),
-      rig: new THREE.Group(),
-
-      // controllers placeholders (hands-only worlds can ignore)
-      controllers: { left: null, right: null, hands: [] },
-    };
-
-    // Put camera under player so movement systems work naturally
-    ctx.player.add(camera);
-    scene.add(ctx.player);
-
-    log("▶ Attempting HybridWorld.init(ctx)…");
-
-    // Call init whether it is sync or async
-    const res = HybridWorld.init?.(ctx);
-    if (res instanceof Promise) await res;
-
-    log("✅ HybridWorld.init completed");
-
-    // If world started, remove testRoot so we see the real world
+    // Remove test visuals so we see the real world
     scene.remove(testRoot);
     testRoot.clear();
-    log("✅ Test scene removed (now showing HybridWorld)");
 
-    log("✅ Loader finished. If anything breaks next, it will print here.");
+    log("🌍 HybridWorld is now active");
   } catch (e) {
     log("❌ HybridWorld boot failed:");
     log(e?.message || String(e));

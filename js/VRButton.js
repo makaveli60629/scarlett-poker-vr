@@ -15,7 +15,6 @@ export const VRButton = {
     b.style.fontFamily = "system-ui,-apple-system,Segoe UI,Roboto,Arial";
     b.style.fontWeight = "900";
     b.style.letterSpacing = "0.5px";
-    b.style.backdropFilter = "blur(8px)";
     b.style.zIndex = "9999";
 
     (async () => {

@@ -1,299 +1,641 @@
-// /js/table_factory.js — Scarlett TableFactory v1.0 (FULL, Quest-safe)
-// ✅ Exports: { TableFactory } with TableFactory.create(ctx)
-// ✅ Compatible with HybridWorld (expects TableFactory.create)
-// ✅ Builds a good-looking casino poker table (felt + rail + trim) + chip trays + dealer spot
-// ✅ Builds 8 chairs by default (or 6 if you pass seats: 6)
-// ✅ Returns an object with { group, table, felt, chairs, seats } for PokerSim/Seat systems
+// /js/world.js — Scarlett VR Poker HybridWorld 1.1 (FULL, Quest-safe, modular)
+// ✅ Exports: { HybridWorld }
+// ✅ VR Panel is OFF by default (enable only if you want it)
+// ✅ Never-black base scene
+// ✅ Optional modules won't crash if missing
+// ✅ Android/desktop nonvr controls supported (WASD + drag look) — touch is handled in index.js
 
-export const TableFactory = (() => {
-  function log(ctx, ...a) { try { (ctx.log || console.log)(...a); } catch (e) {} }
+export const HybridWorld = (() => {
+  const state = {
+    THREE: null,
+    renderer: null,
+    camera: null,
+    player: null,
+    controllers: null,
+    log: console.log,
 
-  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+    scene: null,
+    clock: null,
 
-  function makeMaterials(THREE) {
-    const mat = {
-      felt: new THREE.MeshStandardMaterial({
-        color: 0x0f3a2a, roughness: 0.95, metalness: 0.0
-      }),
-      rail: new THREE.MeshStandardMaterial({
-        color: 0x111117, roughness: 0.6, metalness: 0.1
-      }),
-      trim: new THREE.MeshStandardMaterial({
-        color: 0x1a2042, roughness: 0.35, metalness: 0.25, emissive: 0x060818, emissiveIntensity: 0.35
-      }),
-      base: new THREE.MeshStandardMaterial({
-        color: 0x0b0d14, roughness: 0.92, metalness: 0.05
-      }),
-      chip: new THREE.MeshStandardMaterial({
-        color: 0x2a2f55, roughness: 0.4, metalness: 0.25, emissive: 0x060818, emissiveIntensity: 0.22
-      }),
-      chair: new THREE.MeshStandardMaterial({
-        color: 0x141526, roughness: 0.85, metalness: 0.05
-      }),
-      chairCushion: new THREE.MeshStandardMaterial({
-        color: 0x2b1b24, roughness: 0.85, metalness: 0.05
-      })
-    };
-    return mat;
+    OPTS: {
+      autobuild: true,
+      nonvrControls: true,
+      allowTeleport: true,
+      allowBots: true,
+      allowPoker: true,
+      allowStream: true,
+      safeMode: false,
+
+      // ✅ NEW: VR panel toggle (OFF by default)
+      enableVRPanel: false
+    },
+
+    // anchors
+    spawn: null,
+    facingTarget: null,
+
+    // containers
+    root: null,
+    floor: null,
+
+    // loaded modules + systems
+    mods: {},
+    systems: {},
+
+    built: false
+  };
+
+  // -----------------------
+  // helpers
+  // -----------------------
+  function safeLog(...a) { try { state.log?.(...a); } catch(e) {} }
+
+  function initAnchorsIfNeeded() {
+    const THREE = state.THREE;
+    if (!state.spawn) state.spawn = new THREE.Vector3(0, 0, 26);
+    if (!state.facingTarget) state.facingTarget = new THREE.Vector3(0, 1.5, 0);
   }
 
-  function add(obj, child) { obj.add(child); return child; }
-
-  function makeRoundTable(THREE, mats, opts) {
-    const g = new THREE.Group();
-    g.name = "TableRound";
-
-    const tableY = opts.tableY ?? 1.02;
-
-    // Dimensions (tuned for VR scale)
-    const feltR = opts.feltRadius ?? 2.05;
-    const railR = feltR + (opts.railWidth ?? 0.34);
-    const railH = opts.railHeight ?? 0.14;
-    const feltH = opts.feltHeight ?? 0.07;
-
-    // Felt disk
-    const felt = new THREE.Mesh(
-      new THREE.CylinderGeometry(feltR, feltR, feltH, 64, 1, false),
-      mats.felt
-    );
-    felt.name = "Felt";
-    felt.position.set(0, tableY, 0);
-    felt.castShadow = false;
-    felt.receiveShadow = true;
-    add(g, felt);
-
-    // Rail ring
-    const rail = new THREE.Mesh(
-      new THREE.TorusGeometry(railR, (opts.railTube ?? 0.14), 18, 96),
-      mats.rail
-    );
-    rail.name = "Rail";
-    rail.position.set(0, tableY + feltH * 0.45 + railH * 0.1, 0);
-    rail.rotation.x = Math.PI / 2;
-    add(g, rail);
-
-    // Trim ring (glow-ish)
-    const trim = new THREE.Mesh(
-      new THREE.TorusGeometry(railR + 0.05, 0.04, 12, 96),
-      mats.trim
-    );
-    trim.name = "TrimRing";
-    trim.position.copy(rail.position);
-    trim.rotation.x = Math.PI / 2;
-    add(g, trim);
-
-    // Table base (pedestal)
-    const baseTop = new THREE.Mesh(
-      new THREE.CylinderGeometry(railR * 0.95, railR * 0.95, 0.22, 48),
-      mats.base
-    );
-    baseTop.name = "BaseTop";
-    baseTop.position.set(0, tableY - 0.22, 0);
-    add(g, baseTop);
-
-    const pedestal = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.55, 0.75, 0.9, 32),
-      mats.base
-    );
-    pedestal.name = "Pedestal";
-    pedestal.position.set(0, tableY - 0.78, 0);
-    add(g, pedestal);
-
-    const foot = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.25, 1.1, 0.12, 36),
-      mats.base
-    );
-    foot.name = "Foot";
-    foot.position.set(0, 0.06, 0);
-    add(g, foot);
-
-    // Dealer chip tray (a simple bar) at "north" (negative Z)
-    const tray = new THREE.Mesh(
-      new THREE.BoxGeometry(1.25, 0.06, 0.22),
-      mats.chip
-    );
-    tray.name = "DealerTray";
-    tray.position.set(0, tableY + 0.06, -feltR * 0.58);
-    add(g, tray);
-
-    // Dealer marker
-    const dealer = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.12, 0.12, 0.02, 24),
-      mats.trim
-    );
-    dealer.name = "DealerButton";
-    dealer.position.set(0, tableY + 0.06, -feltR * 0.36);
-    add(g, dealer);
-
-    // Light decal puck (fake spotlight)
-    const puck = new THREE.Mesh(
-      new THREE.CircleGeometry(railR * 1.05, 64),
-      new THREE.MeshBasicMaterial({ color: 0x0a0c18, transparent: true, opacity: 0.35 })
-    );
-    puck.name = "TableShadowPuck";
-    puck.rotation.x = -Math.PI / 2;
-    puck.position.y = 0.01;
-    add(g, puck);
-
-    return { group: g, table: g, felt, railR, feltR, tableY };
+  function optsAllow(key) {
+    if (state.OPTS?.safeMode) return false;
+    return state.OPTS?.[key] !== false;
   }
 
-  function makeChairsAndSeats(THREE, mats, tableInfo, opts) {
-    const chairs = [];
-    const seats = [];
+  async function tryImport(path) {
+    try {
+      const mod = await import(path);
+      safeLog("[world] import ok:", path);
+      return mod;
+    } catch (e) {
+      safeLog("[world] import FAIL:", path, e?.message || e);
+      return null;
+    }
+  }
 
-    const seatCount = opts.seats ?? 8;
-    const radius = (tableInfo.railR ?? 2.35) + (opts.chairRadiusOffset ?? 1.1);
-    const chairY = 0.0;
+  function disposeObject3D(obj) {
+    if (!obj) return;
+    try {
+      obj.traverse?.((o) => {
+        if (o.geometry?.dispose) o.geometry.dispose();
+        if (o.material) {
+          if (Array.isArray(o.material)) o.material.forEach(m => m?.dispose?.());
+          else o.material?.dispose?.();
+        }
+      });
+    } catch(e) {}
+  }
 
-    const chair = (label) => {
-      const cg = new THREE.Group();
-      cg.name = `Chair_${label}`;
+  // -----------------------
+  // Base scene (never black)
+  // -----------------------
+  function makeBaseScene() {
+    const THREE = state.THREE;
 
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.55, 16), mats.chair);
-      leg.position.set(0, 0.28, 0);
-      cg.add(leg);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x05060a);
 
-      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.24, 0.06, 18), mats.chair);
-      base.position.set(0, 0.03, 0);
-      cg.add(base);
+    // lights
+    scene.add(new THREE.HemisphereLight(0x9fb3ff, 0x0b0d14, 1.0));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.85);
+    dir.position.set(4, 10, 3);
+    scene.add(dir);
 
-      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.08, 0.44), mats.chairCushion);
-      seat.position.set(0, 0.58, 0);
-      cg.add(seat);
+    // floor
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(140, 140),
+      new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.95, metalness: 0.0 })
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = 0;
+    floor.name = "Floor";
+    scene.add(floor);
+    state.floor = floor;
 
-      const back = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.46, 0.08), mats.chair);
-      back.position.set(0, 0.84, -0.18);
-      cg.add(back);
+    // landmark ring
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(1.2, 0.08, 12, 64),
+      new THREE.MeshStandardMaterial({ color: 0x7fe7ff, roughness: 0.35, metalness: 0.25 })
+    );
+    ring.position.set(0, 1.4, 0);
+    ring.name = "LobbyRing";
+    scene.add(ring);
 
-      return cg;
+    return scene;
+  }
+
+  function setSpawnAndFacing() {
+    initAnchorsIfNeeded();
+    const { player, camera, THREE } = state;
+
+    // HARD ground-safe spawn by default (prevents “I’m in the air”)
+    player.position.set(state.spawn.x, 0.02, state.spawn.z);
+    camera.position.set(0, 1.65, 0);
+
+    // face target
+    const target = state.facingTarget.clone();
+    const camWorld = new THREE.Vector3();
+    camera.getWorldPosition(camWorld);
+
+    const look = target.sub(camWorld).normalize();
+    const yaw = Math.atan2(look.x, look.z);
+    player.rotation.set(0, yaw, 0);
+
+    safeLog("[spawn] HARD ✅", `x=${player.position.x.toFixed(2)}`, `y=${player.position.y.toFixed(2)}`, `z=${player.position.z.toFixed(2)}`);
+  }
+
+  function ensureRoot() {
+    const THREE = state.THREE;
+    if (state.root && state.root.parent === state.scene) return state.root;
+
+    const root = new THREE.Group();
+    root.name = "HybridRoot";
+    state.scene.add(root);
+    state.root = root;
+    return root;
+  }
+
+  // -----------------------
+  // Streaming system (optional)
+  // -----------------------
+  const Stream = (() => {
+    const CHANNELS = [
+      { id: "groove", name: "Groove Salad", url: "https://hls.somafm.com/hls/groovesalad/128k/program.m3u8" },
+      { id: "lush",   name: "Lush",         url: "https://hls.somafm.com/hls/lush/128k/program.m3u8" },
+    ];
+
+    const st = {
+      enabled: true,
+      url: CHANNELS[0].url,
+      maxDist: 15,
+
+      video: null,
+      hls: null,
+      texture: null,
+      screen: null,
+
+      audioStarted: false,
+      lastVol: -1
     };
 
-    // distribute seats around table; leave a dealer gap near -Z
-    // angle 0 => +Z, PI => -Z, we will bias away from -Z a bit
-    const startAngle = opts.startAngle ?? (Math.PI * 0.15);
-
-    for (let i = 0; i < seatCount; i++) {
-      const t = i / seatCount;
-      const ang = startAngle + t * Math.PI * 2;
-
-      const x = Math.sin(ang) * radius;
-      const z = Math.cos(ang) * radius;
-
-      const c = chair(i + 1);
-      c.position.set(x, chairY, z);
-
-      // face table center
-      const yaw = Math.atan2(-x, -z);
-      c.rotation.y = yaw;
-
-      chairs.push(c);
-
-      // seat anchor: where player head/rig should be located when seated
-      const seatAnchor = new THREE.Object3D();
-      seatAnchor.name = `Seat_${i + 1}`;
-      seatAnchor.position.set(
-        Math.sin(ang) * (tableInfo.feltR * 0.92),
-        tableInfo.tableY ?? 1.02,
-        Math.cos(ang) * (tableInfo.feltR * 0.92)
-      );
-
-      // look toward center
-      seatAnchor.lookAt(0, tableInfo.tableY ?? 1.02, 0);
-
-      // metadata
-      seatAnchor.userData = {
-        index: i,
-        label: `Seat ${i + 1}`,
-        type: "seat",
-        table: "main"
-      };
-
-      seats.push(seatAnchor);
+    function ensureVideoEl() {
+      if (st.video) return st.video;
+      const v = document.getElementById("streamSource") || document.createElement("video");
+      v.id = v.id || "streamSource";
+      v.crossOrigin = "anonymous";
+      v.playsInline = true;
+      v.loop = true;
+      v.autoplay = false;
+      v.muted = false;
+      v.preload = "auto";
+      st.video = v;
+      return v;
     }
 
-    return { chairs, seats };
-  }
-
-  function addTableLabels(THREE, tableInfo, opts) {
-    // Tiny 3D “hashmarks” around felt (cheap & reliable vs CanvasTexture text)
-    const g = new THREE.Group();
-    g.name = "TableMarks";
-
-    const count = opts.marks ?? 18;
-    const r = (tableInfo.feltR ?? 2.05) * 0.78;
-    const y = (tableInfo.tableY ?? 1.02) + 0.055;
-
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x1e2a5a, roughness: 0.45, metalness: 0.15, emissive: 0x040818, emissiveIntensity: 0.25
-    });
-
-    for (let i = 0; i < count; i++) {
-      const ang = (i / count) * Math.PI * 2;
-      const m = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.01, 0.04), mat);
-      m.position.set(Math.sin(ang) * r, y, Math.cos(ang) * r);
-      m.rotation.y = ang;
-      g.add(m);
+    function destroyHls() {
+      try { st.hls?.destroy?.(); } catch(e) {}
+      st.hls = null;
     }
-    return g;
-  }
 
-  async function create(ctx = {}) {
-    const THREE = ctx.THREE;
-    const root = ctx.root || ctx.scene;
-    const opts = ctx.opts || ctx.OPTS || {};
-    if (!THREE || !root) throw new Error("TableFactory.create: missing THREE or root/scene");
+    function load(url) {
+      st.url = url;
+      const video = ensureVideoEl();
+      destroyHls();
 
-    const mats = makeMaterials(THREE);
+      const HlsRef = window.Hls;
+      if (HlsRef && typeof HlsRef.isSupported === "function" && HlsRef.isSupported()) {
+        const hls = new HlsRef({ enableWorker: true, lowLatencyMode: false });
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        st.hls = hls;
+        safeLog("[stream] Hls.js attached ✅", url);
+      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = url;
+        safeLog("[stream] native HLS ✅", url);
+      } else {
+        safeLog("[stream] HLS not supported ❌");
+      }
+    }
 
-    const g = new THREE.Group();
-    g.name = "TableFactoryRoot";
+    function buildScreen(THREE, root) {
+      const video = ensureVideoEl();
+      if (!st.texture) {
+        st.texture = new THREE.VideoTexture(video);
+        try { st.texture.colorSpace = THREE.SRGBColorSpace; } catch(e) {}
+      }
+      const geo = new THREE.PlaneGeometry(16, 9);
+      const mat = new THREE.MeshBasicMaterial({ map: st.texture, color: 0xffffff });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.name = "LobbyScreen";
+      mesh.position.set(0, 2.55, -6.25);
+      root.add(mesh);
+      st.screen = mesh;
+      safeLog("[stream] screen built ✅");
+    }
 
-    // position (defaults to lobby center)
-    const px = opts.x ?? 0;
-    const pz = opts.z ?? 0;
-    g.position.set(px, 0, pz);
-    g.rotation.y = opts.yaw ?? 0;
-    root.add(g);
+    async function startAudio() {
+      if (!st.enabled) throw new Error("stream disabled");
+      const video = ensureVideoEl();
+      if ((!video.src || video.src === "") && !st.hls) load(st.url);
+      await video.play();
+      st.audioStarted = true;
+      safeLog("[stream] play ✅");
+    }
 
-    // build round table (default)
-    const tableInfo = makeRoundTable(THREE, mats, opts);
-    g.add(tableInfo.group);
+    function setChannel(url) {
+      if (!st.enabled) return;
+      load(url);
+      safeLog("[stream] channel set", url);
+    }
 
-    // marks (subtle)
-    g.add(addTableLabels(THREE, tableInfo, opts));
+    function updateSpatial(listenerPos) {
+      if (!st.enabled) return;
+      if (!st.video || !st.screen) return;
 
-    // chairs + seat anchors
-    const { chairs, seats } = makeChairsAndSeats(THREE, mats, tableInfo, opts);
-    for (const c of chairs) g.add(c);
-    for (const s of seats) g.add(s);
+      const dist = listenerPos.distanceTo(st.screen.position);
+      const vol = st.audioStarted ? Math.max(0, 1 - (dist / st.maxDist)) : 0;
 
-    // helpful tags for raycast / systems
-    g.traverse((o) => {
-      if (!o.userData) o.userData = {};
-      o.userData.isTableFactory = true;
-    });
+      if (Math.abs(vol - st.lastVol) > 0.01) {
+        st.video.volume = vol;
+        st.lastVol = vol;
+      }
+    }
 
-    log(ctx, "[table_factory] create ✅", `seats=${seats.length}`);
+    function dispose() {
+      destroyHls();
+      try { st.texture?.dispose?.(); } catch(e) {}
+      st.texture = null;
+      try { if (st.screen?.parent) st.screen.parent.remove(st.screen); } catch(e) {}
+      st.screen = null;
+      st.audioStarted = false;
+      st.lastVol = -1;
+    }
 
-    // return rich object (PokerSim can use table/felt; Seat system can use seats)
     return {
-      group: g,
-      table: tableInfo.table,
-      felt: tableInfo.felt,
-      chairs,
-      seats,
-      info: {
-        type: "round",
-        feltRadius: tableInfo.feltR,
-        railRadius: tableInfo.railR,
-        tableY: tableInfo.tableY
+      CHANNELS,
+      enable(v) { st.enabled = !!v; },
+      init({ THREE, root }) {
+        if (!st.enabled) return;
+        load(st.url);
+        buildScreen(THREE, root);
+      },
+      startAudio,
+      setChannel,
+      updateSpatial,
+      dispose
+    };
+  })();
+
+  async function startAudio() { return Stream.startAudio(); }
+
+  // -----------------------
+  // Optional module build
+  // -----------------------
+  async function buildModules() {
+    const THREE = state.THREE;
+    const root = ensureRoot();
+
+    // wipe root children each build
+    if (root.children.length) {
+      for (let i = root.children.length - 1; i >= 0; i--) {
+        const c = root.children[i];
+        root.remove(c);
+        disposeObject3D(c);
+      }
+    }
+
+    // imports
+    const spawnMod        = await tryImport("./spawn_points.js");
+    const decorMod        = await tryImport("./lobby_decor.js");
+    const wallsMod        = await tryImport("./solid_walls.js");
+    const storeMod        = await tryImport("./store.js");
+    const scorpionMod     = await tryImport("./scorpion_room.js");
+    const bossTableMod    = await tryImport("./boss_table.js");
+    const tableFactoryMod = await tryImport("./table_factory.js");
+    const botsMod         = await tryImport("./bots.js");
+    const pokerSimMod     = await tryImport("./poker_sim.js");
+    const roomMgrMod      = await tryImport("./room_manager.js");
+    const tpMachineMod    = await tryImport("./teleport_machine.js");
+    const tpMod           = await tryImport("./teleport.js");
+
+    state.mods = {
+      spawnMod, decorMod, wallsMod, storeMod, scorpionMod,
+      bossTableMod, tableFactoryMod, botsMod, pokerSimMod,
+      roomMgrMod, tpMachineMod, tpMod
+    };
+
+    // spawn points
+    try {
+      const SP = spawnMod?.SpawnPoints || spawnMod?.default;
+      if (SP?.apply) {
+        SP.apply({ THREE, root, player: state.player, log: state.log });
+        safeLog("[spawn] SpawnPoints applied ✅");
+      }
+    } catch (e) {
+      safeLog("[spawn] SpawnPoints apply FAIL", e?.message || e);
+    }
+
+    // lobby decor
+    try {
+      const Decor = decorMod?.LobbyDecor || decorMod?.default;
+      if (Decor?.init) {
+        await Decor.init({ THREE, scene: state.scene, root, log: state.log });
+        safeLog("[decor] LobbyDecor ✅");
+      }
+    } catch (e) {
+      safeLog("[decor] FAIL", e?.message || e);
+    }
+
+    // solid walls / hallways (this is your missing “other rooms” hook)
+    try {
+      const SW =
+        wallsMod?.SolidWalls ||
+        wallsMod?.default ||
+        (typeof wallsMod?.init === "function" ? wallsMod : null);
+
+      const fn = SW?.init || SW?.build || SW?.create;
+      if (fn) {
+        await fn.call(SW, { THREE, scene: state.scene, root, log: state.log });
+        safeLog("[walls] built ✅");
+      } else {
+        safeLog("[walls] missing SolidWalls.init ❌ (hallways won't appear)");
+      }
+    } catch (e) {
+      safeLog("[walls] FAIL", e?.message || e);
+    }
+
+    // store
+    try {
+      const Store = storeMod?.StoreSystem || storeMod?.default;
+      if (Store?.init) {
+        state.systems.store = await Store.init({
+          THREE, scene: state.scene, root,
+          player: state.player, camera: state.camera, log: state.log
+        });
+        safeLog("[store] StoreSystem ✅");
+      }
+    } catch (e) {
+      safeLog("[store] FAIL", e?.message || e);
+    }
+
+    // scorpion room
+    try {
+      const Sc = scorpionMod?.ScorpionRoom || scorpionMod?.default;
+      if (Sc?.init) {
+        state.systems.scorpion = await Sc.init({
+          THREE, scene: state.scene, root,
+          player: state.player, camera: state.camera, log: state.log
+        });
+        safeLog("[scorpion] ✅");
+      }
+    } catch (e) {
+      safeLog("[scorpion] FAIL", e?.message || e);
+    }
+
+    // stream
+    if (optsAllow("allowStream")) {
+      try { Stream.enable(true); Stream.init({ THREE, root }); }
+      catch(e){ safeLog("[stream] init FAIL", e?.message || e); }
+    } else {
+      Stream.enable(false);
+      Stream.dispose();
+    }
+
+    // table
+    let tableObj = null;
+    const BossTableAPI =
+      bossTableMod?.BossTable ||
+      bossTableMod?.default ||
+      (typeof bossTableMod?.init === "function" ? bossTableMod : null);
+
+    if (BossTableAPI?.init) {
+      try {
+        tableObj = await BossTableAPI.init({ THREE, scene: state.scene, root, log: state.log });
+        safeLog("[table] BossTable.init ✅");
+      } catch (e) {
+        safeLog("[table] BossTable.init FAIL", e?.message || e);
+      }
+    }
+
+    if (!tableObj && tableFactoryMod?.TableFactory?.create) {
+      try {
+        tableObj = await tableFactoryMod.TableFactory.create({ THREE, root, log: state.log });
+        safeLog("[table] TableFactory.create ✅");
+      } catch (e) {
+        safeLog("[table] TableFactory.create FAIL", e?.message || e);
+      }
+    }
+
+    if (!tableObj) {
+      const t = new THREE.Mesh(
+        new THREE.CylinderGeometry(2.25, 2.25, 0.25, 40),
+        new THREE.MeshStandardMaterial({ color: 0x102018, roughness: 0.9 })
+      );
+      t.position.set(0, 1.05, 0);
+      t.name = "PlaceholderTable";
+      root.add(t);
+      safeLog("[table] fallback placeholder (missing BossTable/TableFactory)");
+      tableObj = t;
+    }
+
+    // bots
+    if (optsAllow("allowBots") && botsMod?.Bots?.init) {
+      try {
+        state.systems.bots = await botsMod.Bots.init({
+          THREE, scene: state.scene, root,
+          player: state.player, log: state.log
+        });
+        safeLog("[bots] ✅");
+      } catch (e) {
+        safeLog("[bots] FAIL", e?.message || e);
+      }
+    }
+
+    // poker
+    if (optsAllow("allowPoker") && pokerSimMod?.PokerSim?.init) {
+      try {
+        state.systems.poker = await pokerSimMod.PokerSim.init({
+          THREE, scene: state.scene, root,
+          table: tableObj, player: state.player, camera: state.camera, log: state.log
+        });
+        safeLog("[poker] ✅");
+      } catch (e) {
+        safeLog("[poker] FAIL", e?.message || e);
+      }
+    }
+
+    // room manager
+    if (roomMgrMod?.RoomManager?.init) {
+      try {
+        state.systems.room = await roomMgrMod.RoomManager.init({
+          THREE, scene: state.scene, root,
+          player: state.player, camera: state.camera,
+          systems: state.systems, log: state.log
+        });
+        safeLog("[rm] ✅");
+      } catch (e) {
+        safeLog("[rm] FAIL", e?.message || e);
+      }
+    }
+
+    // teleport
+    if (optsAllow("allowTeleport")) {
+      const tp = tpMachineMod?.TeleportMachine || tpMod?.Teleport || tpMod?.default;
+      if (tp?.init) {
+        try {
+          state.systems.teleport = await tp.init({
+            THREE,
+            scene: state.scene,
+            renderer: state.renderer,
+            camera: state.camera,
+            player: state.player,
+            controllers: state.controllers,
+            log: state.log,
+            world: { floor: state.floor, root }
+          });
+          safeLog("[teleport] ✅");
+        } catch (e) {
+          safeLog("[teleport] FAIL", e?.message || e);
+        }
+      }
+    }
+  }
+
+  // -----------------------
+  // Non-VR controls (keyboard + drag)
+  // -----------------------
+  function installNonVRControls() {
+    if (state.systems.nonvr?.__installed) return;
+
+    const { camera, player } = state;
+    const keys = new Set();
+    let dragging = false;
+    let lastX = 0, lastY = 0;
+    let yaw = 0, pitch = 0;
+
+    window.addEventListener("keydown", (e) => keys.add(e.code));
+    window.addEventListener("keyup", (e) => keys.delete(e.code));
+
+    window.addEventListener("pointerdown", (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
+    window.addEventListener("pointerup", () => { dragging = false; });
+    window.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      const dx = e.clientX - lastX;
+      const dy = e.clientY - lastY;
+      lastX = e.clientX; lastY = e.clientY;
+      yaw -= dx * 0.003;
+      pitch -= dy * 0.003;
+      pitch = Math.max(-1.2, Math.min(1.2, pitch));
+      player.rotation.y = yaw;
+      camera.rotation.x = pitch;
+    });
+
+    state.systems.nonvr = {
+      __installed: true,
+      update(dt) {
+        if (state.renderer?.xr?.isPresenting) return;
+        const speed = (keys.has("ShiftLeft") ? 6 : 3) * dt;
+        const fwd = (keys.has("KeyW") ? 1 : 0) + (keys.has("KeyS") ? -1 : 0);
+        const str = (keys.has("KeyD") ? 1 : 0) + (keys.has("KeyA") ? -1 : 0);
+        if (!fwd && !str) return;
+
+        const dir = new state.THREE.Vector3();
+        player.getWorldDirection(dir);
+        dir.y = 0; dir.normalize();
+        const right = new state.THREE.Vector3(dir.z, 0, -dir.x);
+
+        player.position.addScaledVector(dir, fwd * speed);
+        player.position.addScaledVector(right, str * speed);
       }
     };
+
+    safeLog("[nonvr] controls ✅");
   }
 
-  return { create };
-})();
+  function attachHandsToRig() {
+    try {
+      const L = state.controllers?.handLeft;
+      const R = state.controllers?.handRight;
+      if (L && L.parent !== state.player) state.player.add(L);
+      if (R && R.parent !== state.player) state.player.add(R);
+    } catch(e) {}
+  }
 
-// Optional default export for compatibility with various import styles
-export default TableFactory;
+  // -----------------------
+  // Public API
+  // -----------------------
+  return {
+    startAudio,
+
+    async build({ THREE, renderer, camera, player, controllers, log, OPTS }) {
+      state.THREE = THREE;
+      state.renderer = renderer;
+      state.camera = camera;
+      state.player = player;
+      state.controllers = controllers;
+      state.log = log || console.log;
+      state.OPTS = { ...state.OPTS, ...(OPTS || {}) };
+
+      state.clock = new THREE.Clock();
+      initAnchorsIfNeeded();
+
+      state.scene = makeBaseScene();
+      if (!state.scene.children.includes(player)) state.scene.add(player);
+
+      attachHandsToRig();
+      setSpawnAndFacing();
+
+      if (state.OPTS.nonvrControls !== false) installNonVRControls();
+
+      // ✅ VR PANEL REMOVED (unless you explicitly enable it later)
+      // if (state.OPTS.enableVRPanel) { ... }
+
+      await buildModules();
+
+      state.built = true;
+      safeLog("[world] build complete ✅");
+      safeLog("✅ HybridWorld.build ✅");
+    },
+
+    async rebuild(ctx) {
+      state.built = false;
+
+      try { state.systems.teleport?.dispose?.(); } catch(e) {}
+      try { state.systems.bots?.dispose?.(); } catch(e) {}
+      try { state.systems.poker?.dispose?.(); } catch(e) {}
+      try { state.systems.room?.dispose?.(); } catch(e) {}
+
+      Stream.dispose();
+
+      try {
+        if (state.root) {
+          state.scene?.remove(state.root);
+          disposeObject3D(state.root);
+        }
+      } catch(e) {}
+      state.root = null;
+
+      state.mods = {};
+      state.systems = { nonvr: state.systems.nonvr };
+
+      await this.build(ctx);
+    },
+
+    frame({ renderer, camera }) {
+      if (!state.scene) return;
+      const dt = state.clock ? state.clock.getDelta() : 0.016;
+
+      try { state.systems.nonvr?.update?.(dt); } catch(e) {}
+      try { state.systems.bots?.update?.(dt); } catch(e) {}
+      try { state.systems.poker?.update?.(dt); } catch(e) {}
+      try { state.systems.room?.update?.(dt); } catch(e) {}
+      try { state.systems.teleport?.update?.(dt); } catch(e) {}
+
+      try {
+        const xrCam = renderer.xr.getCamera(camera);
+        Stream.updateSpatial(xrCam.position);
+      } catch(e) {}
+
+      renderer.render(state.scene, camera);
+    }
+  };
+})();

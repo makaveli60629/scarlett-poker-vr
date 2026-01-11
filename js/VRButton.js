@@ -1,4 +1,4 @@
-// /js/VRButton.js — simple reliable VRButton (ESM)
+// /js/VRButton.js — VERBOSE VRButton (Quest diagnostics)
 export const VRButton = {
   createButton(renderer){
     const b = document.createElement("button");
@@ -17,26 +17,55 @@ export const VRButton = {
     b.style.letterSpacing = "0.5px";
     b.style.zIndex = "9999";
 
+    const now = () => new Date().toTimeString().slice(0,8);
+    const hudLog = (msg) => {
+      try {
+        if (window.__scarlettLog) window.__scarlettLog(msg);
+        else console.log(msg);
+      } catch { console.log(msg); }
+    };
+    const tag = (t, m) => hudLog(`[${now()}] [${t}] ${m}`);
+
     (async () => {
       if (!navigator.xr){
         b.textContent = "XR NOT FOUND";
         b.disabled = true;
+        tag("VR", "navigator.xr missing ❌");
         return;
       }
-      const ok = await navigator.xr.isSessionSupported("immersive-vr");
+
+      let ok = false;
+      try{
+        ok = await navigator.xr.isSessionSupported("immersive-vr");
+      }catch(e){
+        tag("VR", `isSessionSupported threw ❌ ${e?.message || e}`);
+      }
+
+      tag("VR", `isSessionSupported(immersive-vr) = ${ok}`);
       if (!ok){
         b.textContent = "VR NOT SUPPORTED";
         b.disabled = true;
         return;
       }
+
       b.onclick = async () => {
+        tag("VR", "requestSession() …");
         try{
           const session = await navigator.xr.requestSession("immersive-vr", {
-            optionalFeatures: ["local-floor","bounded-floor","local","hand-tracking","layers","dom-overlay"],
+            optionalFeatures: [
+              "local-floor","bounded-floor","local",
+              "hand-tracking","layers","dom-overlay"
+            ],
             domOverlay: { root: document.body }
           });
+
+          session.addEventListener("end", () => tag("VR", "session ended"));
+          tag("VR", "session started ✅");
+
           renderer.xr.setSession(session);
+          tag("VR", "renderer.xr.setSession ✅");
         }catch(e){
+          tag("VR", `requestSession FAILED ❌ ${e?.message || e}`);
           console.error(e);
         }
       };

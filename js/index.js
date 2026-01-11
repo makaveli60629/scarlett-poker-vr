@@ -1,30 +1,39 @@
-// /js/index.js — Scarlett MASTER INDEX (Quest + Android + Desktop movement + lobby VIP spawn)
-// Requires: ./three.module.js (or your local wrapper), ./VRButton.js, ./world.js
+// /js/index.js — Scarlett MASTER INDEX (Wrapper-compatible)
+// ✅ Uses /js/three.js wrapper (NO bare imports)
+// ✅ Quest thumbstick move + optional turn
+// ✅ Desktop WASD + mouse look
+// ✅ Android dual-stick overlay
+// ✅ Hard spawn in VIP lobby square pad near Spawn Machine
+// ✅ Reset buttons + R hotkey
 
-import * as THREE from "./three.module.js";
-import { VRButton } from "./VRButton.js";
+import { THREE, VRButton } from "./three.js";
 import { World } from "./world.js";
 
-const BUILD = "MASTER 5.0 (Spawn VIP Lobby + Movement All Platforms)";
-
+const BUILD = "FULL-DIAG MASTER 5.1 (VIP Lobby Spawn + Movement All Platforms)";
 const log = (...a) => console.log(...a);
 
 log(`[index] runtime start ✅ (${BUILD})`);
-log(`[index] THREE.REVISION=${THREE.REVISION || "?"}`);
+log(`[index] THREE.REVISION=${THREE.REVISION ?? "?"}`);
 
-let scene, camera, renderer, player;
-let clock;
-let worldData;
+let scene, camera, renderer, player, clock;
+let world;
 
-// Desktop look
+// desktop look
 let yaw = 0, pitch = 0;
 let pointerLocked = false;
 
-// Touch sticks (Android)
+// keyboard movement
+let keyAxisX = 0, keyAxisY = 0;
+const keys = new Set();
+
+// Android touch sticks
 const touch = {
   left: { id: null, x0: 0, y0: 0, x: 0, y: 0, active: false },
   right:{ id: null, x0: 0, y0: 0, x: 0, y: 0, active: false },
 };
+
+const MOVE_SPEED = 2.6; // m/s
+const TURN_SPEED = 2.0; // rad/s
 
 init();
 
@@ -33,8 +42,8 @@ function init() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
 
-  // Camera + Player Rig
-  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
+  // Camera + PlayerRig
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
   player = new THREE.Group();
   player.name = "PlayerRig";
   scene.add(player);
@@ -50,42 +59,61 @@ function init() {
   renderer.xr.enabled = true;
   document.body.appendChild(renderer.domElement);
 
+  // GL info (helps debugging)
+  try {
+    const gl = renderer.getContext();
+    const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+    if (dbg) {
+      log(`[gl] vendor=${gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL)}`);
+      log(`[gl] renderer=${gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)}`);
+    }
+    log(`[gl] maxTextureSize=${gl.getParameter(gl.MAX_TEXTURE_SIZE)}`);
+  } catch {}
+
   // Lights (primary)
   const amb = new THREE.AmbientLight(0xffffff, 0.35);
   scene.add(amb);
-  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  const sun = new THREE.DirectionalLight(0xffffff, 0.95);
   sun.position.set(10, 18, 8);
   scene.add(sun);
+  log("[lights] installed ✅");
 
-  // VR Button
+  // VR button
   document.body.appendChild(VRButton.createButton(renderer));
-  log("[index] VRButton appended ✅");
+  log("[vr] VRButton appended ✅");
 
-  // UI + touch sticks + resets
+  // Build world
+  log("[world] calling World.build() …");
+  world = World.build({ THREE, scene, log, BUILD });
+  log("[world] build complete ✅");
+
+  // UI + controls
   installHUD();
   installTouchSticks();
   installDesktopControls();
 
-  // Build world
-  log("[world] calling World.build() …");
-  worldData = World.build({ THREE, scene, log });
-  log("[world] build complete ✅");
+  // Hard spawn: VIP square pad by spawn machine
+  resetToVIPLobby();
 
-  // FORCE SPAWN: VIP lobby pad A (next to spawn machine)
-  resetToLobbyVIP();
-
-  // Clock + loop
+  // Loop
   clock = new THREE.Clock();
   renderer.setAnimationLoop(tick);
 
   // Events
   window.addEventListener("resize", onResize);
+
   renderer.xr.addEventListener("sessionstart", () => {
     log("[XR] sessionstart ✅");
-    // In XR, camera height comes from headset, so keep camera local at 0
+    // In XR, headset controls height; camera local should be 0
     camera.position.set(0, 0, 0);
-    // Re-apply spawn so you NEVER start in the table by accident
-    resetToLobbyVIP();
+    // Hard re-spawn so you never start inside table/divot
+    resetToVIPLobby();
+  });
+
+  renderer.xr.addEventListener("sessionend", () => {
+    log("[XR] sessionend ✅");
+    // Restore desktop standing height
+    camera.position.set(0, 1.65, 0);
   });
 
   log("[index] ready ✅");
@@ -95,86 +123,95 @@ function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  log(`[gl] resize -> ${window.innerWidth}x${window.innerHeight}`);
 }
 
 // ============================
-// HARD SPAWN / RESET FUNCTIONS
+// SPAWNS / RESETS
 // ============================
-function resetToLobbyVIP() {
+function resetToVIPLobby() {
   const s = World.getSpawn("lobby_vip_A");
   player.position.set(s.x, s.y, s.z);
-  player.rotation.set(0, s.yaw || Math.PI, 0);
-  if (!renderer.xr.isPresenting) camera.position.set(0, 1.65, 0);
-  log("[spawn] lobby VIP ✅", s);
+  player.rotation.set(0, s.yaw ?? Math.PI, 0);
+
+  if (!renderer.xr.isPresenting) {
+    camera.position.set(0, 1.65, 0);
+    yaw = player.rotation.y;
+    pitch = 0;
+  }
+
+  log("[spawn] VIP lobby ✅", s);
 }
 
 function resetToLobbyCenter() {
   const s = World.getSpawn("lobby_center");
   player.position.set(s.x, s.y, s.z);
-  player.rotation.set(0, s.yaw || Math.PI, 0);
-  if (!renderer.xr.isPresenting) camera.position.set(0, 1.65, 0);
+  player.rotation.set(0, s.yaw ?? Math.PI, 0);
+
+  if (!renderer.xr.isPresenting) {
+    camera.position.set(0, 1.65, 0);
+    yaw = player.rotation.y;
+    pitch = 0;
+  }
+
   log("[spawn] lobby center ✅", s);
 }
 
 // ============================
-// MOVEMENT (Quest + Android + Desktop)
+// MOVEMENT CORE
 // ============================
-const MOVE_SPEED = 2.4; // m/s
-const TURN_SPEED = 1.9; // rad/s
-
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
-
   const presenting = renderer.xr.isPresenting;
 
   let moveX = 0, moveY = 0;
   let turn = 0;
 
-  // 1) XR controllers (Quest) — read gamepad axes
+  // 1) XR controllers (Quest)
   if (presenting) {
     const session = renderer.xr.getSession?.();
     if (session) {
+      // Collect strongest stick pair across all sources
+      let best = { mag: 0, mx: 0, my: 0, tx: 0 };
+
       for (const src of session.inputSources) {
         const gp = src?.gamepad;
         if (!gp || !gp.axes) continue;
 
-        // choose strongest pair
-        const a0 = gp.axes[0] ?? 0;
-        const a1 = gp.axes[1] ?? 0;
-        const a2 = gp.axes[2] ?? 0;
-        const a3 = gp.axes[3] ?? 0;
+        const a = gp.axes;
+        const a0 = a[0] ?? 0, a1 = a[1] ?? 0, a2 = a[2] ?? 0, a3 = a[3] ?? 0;
         const m01 = Math.abs(a0) + Math.abs(a1);
         const m23 = Math.abs(a2) + Math.abs(a3);
 
-        const ax = (m23 > m01) ? a2 : a0;
-        const ay = (m23 > m01) ? a3 : a1;
+        // movement pair = bigger magnitude
+        const mx = (m23 > m01) ? a2 : a0;
+        const my = (m23 > m01) ? a3 : a1;
+        const mag = Math.abs(mx) + Math.abs(my);
 
-        moveX = ax;
-        moveY = ay;
+        // "other" x axis (optional turn)
+        const tx = (m23 > m01) ? a0 : a2;
 
-        // Some devices expose turn on another stick; if present, use it gently
-        if (gp.axes.length >= 4) {
-          // attempt: use the "other pair" if it isn't the move pair
-          const tx = (m23 > m01) ? a0 : a2;
-          if (Math.abs(tx) > Math.abs(turn)) turn = tx;
-        }
+        if (mag > best.mag) best = { mag, mx, my, tx };
       }
+
+      moveX = best.mx;
+      moveY = best.my;
+      // gentle turn if present (some devices map right stick here)
+      turn = best.tx * 0.85;
     }
   }
 
-  // 2) Android touch sticks
+  // 2) Android touch sticks (non-XR)
   if (!presenting) {
-    // left = move, right = turn
     moveX += touch.left.x;
     moveY += touch.left.y;
     turn  += touch.right.x;
   }
 
-  // 3) Desktop keyboard WASD
+  // 3) Desktop keyboard (non-XR)
   if (!presenting) {
     moveX += keyAxisX;
     moveY += keyAxisY;
-    // mouse look uses yaw/pitch; turn axis optional
   }
 
   // deadzones
@@ -182,14 +219,19 @@ function tick() {
   moveY = deadzone(moveY, 0.12);
   turn  = deadzone(turn,  0.18);
 
-  // Apply turn to rig (XR + mobile)
+  // Apply turn
   if (turn) {
-    player.rotation.y -= turn * TURN_SPEED * dt;
+    if (presenting) {
+      player.rotation.y -= turn * TURN_SPEED * dt;
+    } else {
+      yaw -= turn * TURN_SPEED * dt;
+      player.rotation.y = yaw;
+    }
   }
 
-  // Move relative to view direction (camera world yaw)
+  // Apply movement relative to heading
   if (moveX || moveY) {
-    const heading = getHeadingYaw();
+    const heading = getHeadingYaw(presenting);
     const forward = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading));
     const right = new THREE.Vector3(forward.z, 0, -forward.x);
 
@@ -203,7 +245,7 @@ function tick() {
     }
   }
 
-  // Desktop camera pitch/yaw
+  // Desktop look
   if (!presenting) {
     camera.rotation.set(pitch, 0, 0);
     player.rotation.y = yaw;
@@ -216,9 +258,10 @@ function deadzone(v, dz) {
   return Math.abs(v) < dz ? 0 : v;
 }
 
-function getHeadingYaw() {
-  // In XR: camera world orientation matters. In non-XR: player yaw is authoritative.
-  if (!renderer.xr.isPresenting) return player.rotation.y;
+function getHeadingYaw(presenting) {
+  if (!presenting) return yaw;
+
+  // XR: use headset yaw
   const q = new THREE.Quaternion();
   camera.getWorldQuaternion(q);
   const e = new THREE.Euler().setFromQuaternion(q, "YXZ");
@@ -226,7 +269,7 @@ function getHeadingYaw() {
 }
 
 // ============================
-// HUD / BUTTONS
+// HUD
 // ============================
 function installHUD() {
   const hud = document.createElement("div");
@@ -234,7 +277,7 @@ function installHUD() {
   hud.style.left = "12px";
   hud.style.top = "12px";
   hud.style.zIndex = "9999";
-  hud.style.background = "rgba(10,12,18,0.55)";
+  hud.style.background = "rgba(10,12,18,0.58)";
   hud.style.color = "#e8ecff";
   hud.style.padding = "10px 12px";
   hud.style.borderRadius = "14px";
@@ -242,20 +285,22 @@ function installHUD() {
   hud.style.fontSize = "13px";
   hud.style.userSelect = "none";
   hud.style.backdropFilter = "blur(8px)";
-  hud.style.maxWidth = "320px";
+  hud.style.maxWidth = "360px";
+
   hud.innerHTML = `
-    <div style="font-weight:700;margin-bottom:6px;">Scarlett VR Poker — ${BUILD}</div>
-    <div style="opacity:.9;margin-bottom:8px;">Reset + Spawn controls</div>
+    <div style="font-weight:800;margin-bottom:6px;">Scarlett VR Poker</div>
+    <div style="opacity:.85;margin-bottom:8px;">${BUILD}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button id="btnVip">Spawn VIP Lobby</button>
       <button id="btnLobby">Spawn Lobby Center</button>
-      <button id="btnCopy">Copy Logs</button>
+      <button id="btnCopy">Copy Debug</button>
     </div>
-    <div style="opacity:.75;margin-top:8px;line-height:1.25;">
-      Desktop: click to mouse-look • WASD move • R reset<br/>
-      Android: left stick move • right stick turn
+    <div style="opacity:.7;margin-top:8px;line-height:1.25;">
+      Quest: thumbstick move (auto-detect axes) • Android: dual sticks<br/>
+      Desktop: click → mouse look • WASD move • R reset
     </div>
   `;
+
   document.body.appendChild(hud);
 
   const styleBtn = (b) => {
@@ -272,12 +317,18 @@ function installHUD() {
   const btnCopy = hud.querySelector("#btnCopy");
   [btnVip, btnLobby, btnCopy].forEach(styleBtn);
 
-  btnVip.onclick = resetToLobbyVIP;
+  btnVip.onclick = resetToVIPLobby;
   btnLobby.onclick = resetToLobbyCenter;
 
   btnCopy.onclick = async () => {
     try {
-      const text = "[HUD] copy not wired to your log buffer yet.\nTip: if you want, I can add a full log buffer + copy.";
+      const text =
+`BUILD=${BUILD}
+THREE.REVISION=${THREE.REVISION ?? "?"}
+xrPresenting=${renderer?.xr?.isPresenting ?? false}
+playerPos=${player?.position?.x?.toFixed?.(2)},${player?.position?.y?.toFixed?.(2)},${player?.position?.z?.toFixed?.(2)}
+playerYaw=${player?.rotation?.y?.toFixed?.(2)}`;
+
       await navigator.clipboard.writeText(text);
       log("[HUD] copied ✅");
     } catch (e) {
@@ -285,18 +336,14 @@ function installHUD() {
     }
   };
 
-  // Keyboard reset
   window.addEventListener("keydown", (e) => {
-    if (e.key.toLowerCase() === "r") resetToLobbyVIP();
+    if (e.key.toLowerCase() === "r") resetToVIPLobby();
   });
 }
 
 // ============================
 // DESKTOP CONTROLS
 // ============================
-let keyAxisX = 0, keyAxisY = 0;
-const keys = new Set();
-
 function installDesktopControls() {
   window.addEventListener("keydown", (e) => {
     keys.add(e.key.toLowerCase());
@@ -315,7 +362,6 @@ function installDesktopControls() {
     if (keys.has("s")) keyAxisY -= 1;
   }
 
-  // click to pointer-lock look
   renderer.domElement.addEventListener("click", () => {
     if (renderer.xr.isPresenting) return;
     renderer.domElement.requestPointerLock?.();
@@ -339,7 +385,6 @@ function installDesktopControls() {
 // ANDROID TOUCH STICKS
 // ============================
 function installTouchSticks() {
-  // Only show on touch devices
   const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
   if (!isTouch) return;
 
@@ -421,4 +466,4 @@ function installTouchSticks() {
   bind(touch.right, R);
 
   log("[android] dual-stick ready ✅");
-    }
+                               }

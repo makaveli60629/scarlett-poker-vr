@@ -1,429 +1,242 @@
-// /js/main.js — Scarlett Recovery v1.0 (FULL, UNSTOPPABLE)
-// Goals:
-// ✅ NEVER stuck on loading screen (forced render loop)
-// ✅ Diagnostics always works (copy fallback + download)
-// ✅ VRButton always added if possible
-// ✅ Movement + 45° snap + 1-leap teleport (right trigger)
-// ✅ Laser ALWAYS on right controller
-// ✅ World.init errors cannot kill boot
+// /js/main.js — Scarlett Hybrid STABLE Boot v5.0
+// Goals: never-stuck, HUD always-on, locomotion reliable, right-hand laser only, world loads even if optional modules fail.
 
-(async function boot(){
-  // -------------------------
-  // 0) HARD FAILSAFE LOG BOX
-  // -------------------------
-  const $ = (id) => document.getElementById(id);
-  const ui = {
-    grid: $("scarlettGrid"),
-    logBox: $("scarlettLog"),
-    capXR: $("capXR"),
-    capImm: $("capImm"),
-    btnToggleHUD: $("btnToggleHUD"),
-    btnReload: $("btnReload"),
-    btnClearLog: $("btnClearLog"),
-    btnCopyLog: $("btnCopyLog"),
-    btnShowText: $("btnShowText"),
-    btnDownload: $("btnDownload"),
-    copyBox: $("scarlettCopyBox"),
-    hud: $("scarlettDiag")
-  };
+const log = (...a) => (window.SCARLETT?.log ? window.SCARLETT.log(...a) : console.log(...a));
+const err = (...a) => (window.SCARLETT?.err ? window.SCARLETT.err(...a) : console.error(...a));
 
-  const LOG = [];
-  const logLine = (kind, msg) => {
-    const t = new Date().toLocaleTimeString();
-    const line = `[${t}] ${kind.toUpperCase()}: ${msg}`;
-    LOG.push(line);
-    if (LOG.length > 1200) LOG.splice(0, LOG.length - 1200);
-    if (ui.logBox) {
-      ui.logBox.textContent = LOG.join("\n");
-      ui.logBox.scrollTop = ui.logBox.scrollHeight;
-    }
-    (kind === "error" ? console.error : kind === "warn" ? console.warn : console.log)(msg);
-  };
+const BUILD = window.SCARLETT?.BUILD || "Hybrid";
 
-  window.__SCARLETT_LOG__ = LOG;
-  window.addEventListener("error", (e)=>logLine("error", `${e.message} @ ${e.filename}:${e.lineno}`));
-  window.addEventListener("unhandledrejection", (e)=>logLine("error", `UnhandledPromiseRejection: ${e.reason?.message || e.reason}`));
-
-  function setMetrics(rows){
-    if (!ui.grid) return;
-    ui.grid.innerHTML = "";
-    for (const [k,v] of rows){
-      const row = document.createElement("div");
-      row.className = "kv";
-      const kk = document.createElement("div"); kk.className = "k"; kk.textContent = k;
-      const vv = document.createElement("div"); vv.className = "v"; vv.textContent = v;
-      row.appendChild(kk); row.appendChild(vv);
-      ui.grid.appendChild(row);
-    }
+async function safeImport(path) {
+  try {
+    const m = await import(path);
+    log("import ok:", path);
+    return m;
+  } catch (e) {
+    err("import fail:", path, String(e?.stack || e));
+    return null;
   }
+}
 
-  async function copyText(text){
-    // modern clipboard (often blocked on Quest)
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-        return true;
-      }
-    } catch {}
-    // execCommand fallback
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.left = "-9999px";
-      document.body.appendChild(ta);
-      ta.focus(); ta.select();
-      const ok = document.execCommand("copy");
-      ta.remove();
-      return !!ok;
-    } catch {}
-    return false;
-  }
+(async function boot() {
+  log("three via local wrapper ✅");
+  const THREE = await (await import(`./three.js?v=${Date.now()}`));
 
-  function downloadText(text, filename){
-    try{
-      const blob = new Blob([text], {type:"text/plain"});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(()=>URL.revokeObjectURL(url), 500);
-    }catch{}
-  }
+  const { VRButton } = (await safeImport(`./VRButton.js?v=${Date.now()}`)) || {};
+  if (!VRButton) err("VRButton missing");
+  else log("VRButton ✅");
 
-  ui.btnToggleHUD?.addEventListener("click", ()=> {
-    if (!ui.hud) return;
-    ui.hud.style.display = (ui.hud.style.display === "none") ? "block" : "none";
-  });
-  ui.btnReload?.addEventListener("click", ()=> location.reload());
-  ui.btnClearLog?.addEventListener("click", ()=> { LOG.length = 0; logLine("log","Cleared ✅"); });
-  ui.btnCopyLog?.addEventListener("click", async ()=> {
-    const text = LOG.join("\n");
-    if (!text) return logLine("warn","Nothing to copy yet.");
-    const ok = await copyText(text);
-    if (ok) {
-      logLine("log","Copied ✅");
-    } else {
-      // fallback manual
-      if (ui.copyBox) {
-        ui.copyBox.style.display = "block";
-        ui.copyBox.value = text;
-        ui.copyBox.focus();
-        ui.copyBox.select();
-      }
-      logLine("warn","Clipboard blocked. Use Show Text then press-and-hold → Copy.");
-    }
-  });
-  ui.btnShowText?.addEventListener("click", ()=> {
-    if (!ui.copyBox) return;
-    ui.copyBox.style.display = (ui.copyBox.style.display === "none" || !ui.copyBox.style.display) ? "block" : "none";
-    ui.copyBox.value = LOG.join("\n");
-    ui.copyBox.focus();
-    ui.copyBox.select();
-  });
-  ui.btnDownload?.addEventListener("click", ()=> {
-    const text = LOG.join("\n");
-    if (!text) return logLine("warn","Nothing to download yet.");
-    downloadText(text, `scarlett_log_${Date.now()}.txt`);
-    logLine("log","Downloaded ✅");
-  });
-
-  // Capability check
-  const xr = !!navigator.xr;
-  if (ui.capXR) ui.capXR.textContent = xr ? "YES" : "NO";
-  let immersive = false;
-  try { immersive = xr ? await navigator.xr.isSessionSupported("immersive-vr") : false; } catch {}
-  if (ui.capImm) ui.capImm.textContent = immersive ? "YES" : "NO";
-
-  logLine("log", "Boot start ✅");
-
-  // -------------------------
-  // 1) THREE import (CDN)
-  // -------------------------
-  const THREE = await import("three");
-
-  // -------------------------
-  // 2) Scene / camera / renderer
-  // -------------------------
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x060812);
-
-  const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.05, 1500);
-
-  const renderer = new THREE.WebGLRenderer({ antialias:true });
-  renderer.setSize(innerWidth, innerHeight);
+  // Scene basics
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
-
-  // Bright defaults
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 2.2;
-
+  renderer.toneMappingExposure = 1.35;
   document.body.appendChild(renderer.domElement);
 
-  addEventListener("resize", ()=>{
-    camera.aspect = innerWidth/innerHeight;
+  // VR button
+  try {
+    const sessionInit = {
+      optionalFeatures: [
+        "local-floor","bounded-floor","local","viewer",
+        "hand-tracking","layers","dom-overlay",
+        "hit-test","anchors"
+      ],
+      domOverlay: { root: document.body }
+    };
+    document.body.appendChild(VRButton.createButton(renderer, sessionInit));
+  } catch (e) {
+    err("VRButton create failed", String(e?.stack || e));
+  }
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x05060a);
+  scene.fog = new THREE.Fog(0x05060a, 12, 120);
+
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.03, 500);
+  camera.position.set(0, 1.65, 0);
+
+  // Player rig
+  const player = new THREE.Group();
+  player.name = "PlayerRig";
+  player.position.set(0, 0, 0);
+  player.add(camera);
+  scene.add(player);
+
+  // Controllers group
+  const controllers = new THREE.Group();
+  controllers.name = "Controllers";
+  player.add(controllers);
+  log("Controllers parented to PlayerRig ✅");
+
+  // XR hands group (optional)
+  const handsGroup = new THREE.Group();
+  handsGroup.name = "XRHands";
+  player.add(handsGroup);
+  log("XRHands parented to PlayerRig ✅");
+
+  // Resize
+  window.addEventListener("resize", () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
-    renderer.setSize(innerWidth, innerHeight);
+    renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // -------------------------
-  // 3) Player rig
-  // -------------------------
-  const rig = new THREE.Group();
-  rig.name = "PlayerRig";
-  scene.add(rig);
+  // ---- Minimal right-hand laser (always on right) ----
+  const raycaster = new THREE.Raycaster();
+  const tempMat = new THREE.Matrix4();
+  const dir = new THREE.Vector3();
+  const origin = new THREE.Vector3();
+  const hit = new THREE.Vector3();
 
-  camera.position.set(0, 1.65, 0);
-  rig.add(camera);
+  const laserGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
+  const laserMat = new THREE.LineBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.9 });
+  const laserLine = new THREE.Line(laserGeom, laserMat);
+  laserLine.scale.z = 10;
 
-  // -------------------------
-  // 4) VRButton (safe import)
-  // -------------------------
-  try {
-    const { VRButton } = await import("./VRButton.js");
-    const btn = VRButton.createButton(renderer);
-    btn.id = "VRButton";
-    document.body.appendChild(btn);
-    logLine("log", "VRButton ✅");
-  } catch (e) {
-    logLine("warn", "VRButton missing/failed: " + (e?.message || e));
-  }
-
-  // -------------------------
-  // 5) Overkill lights (always visible)
-  // -------------------------
-  scene.add(new THREE.AmbientLight(0xffffff, 1.0));
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x1b1f3a, 2.2));
-
-  const sun = new THREE.DirectionalLight(0xffffff, 4.5);
-  sun.position.set(30, 80, 50);
-  scene.add(sun);
-
-  // headlamp follows camera
-  const headLamp = new THREE.PointLight(0xffffff, 2.6, 40);
-  headLamp.position.set(0, 1.4, 0.25);
-  camera.add(headLamp);
-
-  // -------------------------
-  // 6) Controllers / hands
-  // -------------------------
-  const cL = renderer.xr.getController(0);
-  const cR = renderer.xr.getController(1);
-  cL.name = "ControllerLeft";
-  cR.name = "ControllerRight";
-  rig.add(cL, cR);
-  logLine("log", "Controllers parented ✅");
-
-  try {
-    const hL = renderer.xr.getHand(0);
-    const hR = renderer.xr.getHand(1);
-    hL.name = "XRHandLeft";
-    hR.name = "XRHandRight";
-    rig.add(hL, hR);
-    logLine("log", "XRHands parented ✅");
-  } catch {
-    logLine("warn", "XRHands unavailable (OK).");
-  }
-
-  // -------------------------
-  // 7) Laser + ring (RIGHT controller only)
-  // -------------------------
-  const laser = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]),
-    new THREE.LineBasicMaterial({ color: 0x00ffff })
+  const halo = new THREE.Mesh(
+    new THREE.RingGeometry(0.18, 0.26, 40),
+    new THREE.MeshBasicMaterial({ color: 0xff2d7a, transparent: true, opacity: 0.75, side: THREE.DoubleSide })
   );
-  laser.frustumCulled = false;
-  cR.add(laser);
+  halo.rotation.x = -Math.PI/2;
+  halo.visible = false;
 
-  const ring = new THREE.Mesh(
-    new THREE.RingGeometry(0.26, 0.37, 64),
-    new THREE.MeshBasicMaterial({ color: 0x7fe7ff, side: THREE.DoubleSide, transparent:true, opacity:0.95 })
-  );
-  ring.rotation.x = -Math.PI/2;
-  scene.add(ring);
+  scene.add(halo);
 
-  // -------------------------
-  // 8) World (safe load)
-  // -------------------------
-  const ctx = { THREE, scene, rig, camera, renderer, logLine };
+  // Keep a reference to the RIGHT controller only
+  const rightController = renderer.xr.getController(0);
+  rightController.name = "RightController";
+  rightController.add(laserLine);
+  controllers.add(rightController);
 
-  let World = null;
-  try {
-    const m = await import("./world.js");
-    World = m?.World || null;
-    logLine("log", "world.js import ✅");
-  } catch (e) {
-    logLine("error", "world.js import FAILED: " + (e?.message || e));
+  const leftController = renderer.xr.getController(1);
+  leftController.name = "LeftController";
+  controllers.add(leftController);
+
+  // ---- Ultra-stable locomotion fallback (if your other systems fail) ----
+  // Right stick: move, Left stick: snap turn (45°)
+  const move = { x: 0, z: 0 };
+  let snapCooldown = 0;
+
+  function getGamepads() {
+    const session = renderer.xr.getSession?.();
+    if (!session) return [];
+    return session.inputSources
+      .map(s => s.gamepad)
+      .filter(gp => gp && gp.axes && gp.buttons);
   }
+
+  function applyLocomotion(dt) {
+    const gps = getGamepads();
+    if (!gps.length) return;
+
+    // Find "right-hand" gamepad by heuristic: has more buttons and typically is first, but we also allow either.
+    // We'll read both and prefer the one with larger axis movement.
+    let best = null, bestMag = 0;
+    for (const gp of gps) {
+      const ax = gp.axes || [];
+      const mx = Math.abs(ax[2] ?? ax[0] ?? 0);
+      const mz = Math.abs(ax[3] ?? ax[1] ?? 0);
+      const mag = mx + mz;
+      if (mag > bestMag) { bestMag = mag; best = gp; }
+    }
+    const gp = best || gps[0];
+    const ax = gp.axes || [];
+
+    // Standard mapping: [0,1]=left stick, [2,3]=right stick (but varies)
+    const lx = ax[0] ?? 0, ly = ax[1] ?? 0;
+    const rx = ax[2] ?? 0, ry = ax[3] ?? 0;
+
+    // Move on RIGHT stick (ry forward is usually -1). Fix inverted if needed.
+    const dead = 0.18;
+    const mX = (Math.abs(rx) > dead) ? rx : 0;
+    const mZ = (Math.abs(ry) > dead) ? ry : 0;
+
+    // Forward/back: we want pushing forward to move forward (toward -Z in rig local)
+    // Most controllers report forward as -1, so we invert ry to make forward positive.
+    move.x = mX;
+    move.z = -mZ;
+
+    // Snap turn on LEFT stick X
+    if (snapCooldown > 0) snapCooldown -= dt;
+
+    const turnX = (Math.abs(lx) > 0.7) ? lx : 0;
+    if (turnX && snapCooldown <= 0) {
+      const angle = (Math.PI / 4) * (turnX > 0 ? -1 : 1); // 45°
+      player.rotation.y += angle;
+      snapCooldown = 0.28;
+    }
+
+    const speed = 3.0; // m/s
+    const vx = move.x * speed * dt;
+    const vz = move.z * speed * dt;
+
+    if (vx || vz) {
+      // Move in camera-facing direction but on ground plane
+      const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+      const right = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
+      fwd.y = 0; right.y = 0;
+      fwd.normalize(); right.normalize();
+
+      const delta = new THREE.Vector3().addScaledVector(right, vx).addScaledVector(fwd, vz);
+      player.position.add(delta);
+    }
+  }
+
+  // ---- Load World (safe) ----
+  const WorldMod = await safeImport(`./world.js?v=${Date.now()}`);
+  const World = WorldMod?.World;
+
+  const ctx = { THREE, scene, renderer, camera, player, controllers, log, BUILD };
 
   if (World?.init) {
     try {
       await World.init(ctx);
-      logLine("log", "[world] init ✅");
+      log("world init ✅");
     } catch (e) {
-      logLine("error", "[world] init FAILED: " + (e?.message || e));
+      err("world init failed", String(e?.stack || e));
     }
   } else {
-    logLine("warn", "[world] missing World.init (continuing)");
+    err("World.init missing — check /js/world.js export");
   }
 
-  // -------------------------
-  // 9) Spawn facing target (table), never face teleporter
-  // -------------------------
-  function applySpawn() {
-    const sp = scene.getObjectByName("SpawnPoint") || scene.getObjectByName("SpawnPad");
-    const target = scene.getObjectByName("BossTable") || scene.getObjectByName("HubPlate");
-
-    if (sp) {
-      const p = new THREE.Vector3();
-      sp.getWorldPosition(p);
-      rig.position.set(p.x, 0, p.z);
-    }
-    if (target) {
-      const pRig = new THREE.Vector3(rig.position.x, 0, rig.position.z);
-      const pTar = new THREE.Vector3();
-      target.getWorldPosition(pTar);
-      pTar.y = 0;
-      const v = pTar.sub(pRig);
-      if (v.lengthSq() > 1e-6) {
-        const yaw = Math.atan2(v.x, v.z); // face target
-        rig.rotation.set(0, yaw, 0);
-      }
-    }
-    logLine("log", `Spawn ✅ x=${rig.position.x.toFixed(2)} z=${rig.position.z.toFixed(2)}`);
+  // Room manager (optional)
+  const RM = await safeImport(`./room_manager.js?v=${Date.now()}`);
+  if (RM?.RoomManager?.init) {
+    try { RM.RoomManager.init(ctx); } catch (e) { err("RoomManager init failed", String(e?.stack || e)); }
   }
 
-  applySpawn();
-  renderer.xr.addEventListener("sessionstart", ()=> setTimeout(applySpawn, 160));
-
-  // -------------------------
-  // 10) Teleport math (floor y=0)
-  // -------------------------
-  const floorPlane = new THREE.Plane(new THREE.Vector3(0,1,0), 0);
-  const o = new THREE.Vector3();
-  const q = new THREE.Quaternion();
-  const d = new THREE.Vector3();
-  const hit = new THREE.Vector3();
-
-  function updateTeleportRay() {
-    cR.getWorldPosition(o);
-    cR.getWorldQuaternion(q);
-
-    if (o.lengthSq() < 0.0001) return false;
-
-    d.set(0,0,-1).applyQuaternion(q).normalize();
-    d.y -= 0.35;
-    d.normalize();
-
-    const denom = floorPlane.normal.dot(d);
-    if (Math.abs(denom) < 1e-6) return false;
-
-    const t = -(floorPlane.normal.dot(o) + floorPlane.constant) / denom;
-    if (t < 0.25 || t > 40) return false;
-
-    hit.copy(o).addScaledVector(d, t);
-
-    laser.geometry.setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-t)]);
-    ring.position.set(hit.x, 0.02, hit.z);
-
-    laser.visible = true;
-    ring.visible = true;
-    return true;
-  }
-
-  // -------------------------
-  // 11) Gamepad mapping (Quest)
-  // LEFT stick = move, RIGHT stick X = 45° snap, RIGHT trigger = 1 leap teleport
-  // -------------------------
-  function getGamepads() {
-    const session = renderer.xr.getSession();
-    if (!session) return { gpL:null, gpR:null };
-    let gpL=null, gpR=null;
-    for (const src of session.inputSources) {
-      if (!src.gamepad) continue;
-      if (src.handedness === "left") gpL = src.gamepad;
-      if (src.handedness === "right") gpR = src.gamepad;
-    }
-    return { gpL, gpR };
-  }
-
-  const MOVE_SPEED = 1.25;
-  const SNAP = Math.PI/4; // 45°
-  let snapCooldown = 0;
-  let lastTrigger = false;
-
-  // -------------------------
-  // 12) MAIN LOOP
-  // -------------------------
+  // ---- Render Loop (never stop) ----
   let last = performance.now();
-  let fpsAcc=0, fpsCount=0, fps=0;
+  renderer.setAnimationLoop(() => {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
 
-  renderer.setAnimationLoop((time)=>{
-    const dt = Math.min(0.05, (time-last)/1000);
-    last = time;
+    // Locomotion fallback always available
+    applyLocomotion(dt);
 
-    fpsAcc += dt; fpsCount++;
-    if (fpsAcc >= 0.5) { fps = Math.round(fpsCount/fpsAcc); fpsAcc=0; fpsCount=0; }
+    // Right-hand halo pointer to floors/teleport surfaces
+    try {
+      // Use right controller pose
+      tempMat.identity().extractRotation(rightController.matrixWorld);
+      dir.set(0,0,-1).applyMatrix4(tempMat).normalize();
+      origin.setFromMatrixPosition(rightController.matrixWorld);
+      raycaster.set(origin, dir);
 
-    try { World?.update?.(ctx, dt); } catch {}
-
-    if (renderer.xr.isPresenting) {
-      const { gpL, gpR } = getGamepads();
-
-      // LEFT stick move
-      if (gpL?.axes?.length >= 2) {
-        const lx = gpL.axes[0] ?? 0;
-        const ly = gpL.axes[1] ?? 0;
-
-        const yaw = rig.rotation.y;
-        const forward = (-ly) * MOVE_SPEED * dt;
-        const strafe  = ( lx) * MOVE_SPEED * dt;
-
-        rig.position.x += Math.sin(yaw) * forward + Math.cos(yaw) * strafe;
-        rig.position.z += Math.cos(yaw) * forward - Math.sin(yaw) * strafe;
+      const hits = raycaster.intersectObjects(scene.children, true);
+      const floorHit = hits.find(h => h.object && (h.object.userData?.isFloor || h.object.userData?.teleportable));
+      if (floorHit) {
+        halo.position.copy(floorHit.point);
+        halo.visible = true;
+      } else {
+        halo.visible = false;
       }
-
-      // RIGHT stick snap
-      snapCooldown = Math.max(0, snapCooldown - dt);
-      let rx = 0;
-      if (gpR?.axes?.length >= 4) rx = gpR.axes[2] ?? 0;
-      else if (gpR?.axes?.length >= 1) rx = gpR.axes[0] ?? 0;
-
-      if (snapCooldown <= 0 && Math.abs(rx) > 0.75) {
-        rig.rotation.y += (rx > 0 ? -SNAP : SNAP);
-        snapCooldown = 0.28;
-      }
-
-      // Teleport 1 leap per trigger press
-      const ok = updateTeleportRay();
-      const trigger = !!gpR?.buttons?.[0]?.pressed;
-
-      if (trigger && !lastTrigger && ok) {
-        rig.position.set(hit.x, 0, hit.z);
-        logLine("log", `Teleport ✅ x=${hit.x.toFixed(2)} z=${hit.z.toFixed(2)}`);
-      }
-      lastTrigger = trigger;
-    } else {
-      laser.visible = false;
-      ring.visible = false;
-      lastTrigger = false;
-    }
-
-    setMetrics([
-      ["FPS", `${fps}`],
-      ["XR", renderer.xr.isPresenting ? "YES" : "NO"],
-      ["Rig", `${rig.position.x.toFixed(1)}, ${rig.position.z.toFixed(1)}`],
-      ["Move", "LEFT stick"],
-      ["Turn", "RIGHT stick 45°"],
-      ["Teleport", "RIGHT trigger (1 leap)"],
-    ]);
+    } catch (_) {}
 
     renderer.render(scene, camera);
   });
 
-  logLine("log", "Recovery boot complete ✅ (should NEVER stick on loading)");
-})();
+  log(`Hybrid boot complete ✅ (${BUILD})`);
+})().catch(e => err("boot fatal", String(e?.stack || e)));

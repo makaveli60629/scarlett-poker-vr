@@ -1,216 +1,80 @@
-// /js/boot.js — Scarlett VR Poker Boot (FULL, Quest-safe, HybridWorld 1.0 compatible)
-// ✅ Never blind: renders test scene until HybridWorld.build succeeds
-// ✅ VRButton (Quest compatible)
-// ✅ Hands support (renderer.xr.getHand)
-// ✅ Calls HybridWorld.build(...) then HybridWorld.frame(...) each loop
-// ✅ No HybridWorld.init anywhere
+// /js/boot.js — Scarlett Boot v6.0 (FULL)
+// ✅ This is the ONLY entry file index.html should load
+// ✅ Provides diagnostics + COPY LOG + Android touch controls
+// ✅ Imports and runs /js/index.js (the real game)
 
-import * as THREE from "three";
-window.THREE = THREE;
+const BUILD = Date.now();
+const LOG = [];
+const LOG_MAX = 3000;
 
-// ---------- overlay logger ----------
-const overlay = document.getElementById("overlay");
-const safeJson = (x) => { try { return JSON.stringify(x); } catch { return String(x); } };
-function log(...a) {
-  try {
-    console.log(...a);
-    if (!overlay) return;
-    const s = a.map(v => (typeof v === "string" ? v : safeJson(v))).join(" ");
-    overlay.textContent += (overlay.textContent ? "\n" : "") + s;
-  } catch (e) {
-    console.log("[overlay-log-failed]", e);
-  }
+const overlay = document.getElementById("log") || null;
+
+function pushLog(line){ LOG.push(line); if (LOG.length > LOG_MAX) LOG.shift(); }
+function write(line, cls="muted"){
+  const s = String(line);
+  pushLog(s);
+  if (!overlay) { console.log(s); return; }
+  const div = document.createElement("div");
+  div.className = `row ${cls}`;
+  div.textContent = s;
+  overlay.appendChild(div);
+  overlay.scrollTop = overlay.scrollHeight;
 }
+const ok  = (m)=>write(`✅ ${m}`,"ok");
+const warn= (m)=>write(`⚠️ ${m}`,"warnT");
+const bad = (m)=>write(`❌ ${m}`,"badT");
 
-// global error taps
-window.addEventListener("error", (e) => log("❌ window.error:", e?.message || String(e)));
-window.addEventListener("unhandledrejection", (e) => {
-  const r = e?.reason;
-  log("❌ unhandledrejection:", r?.message || String(r || e));
+window.SCARLETT = window.SCARLETT || {};
+window.SCARLETT.copyLog = async () => {
+  const text = LOG.join("\n");
+  try { await navigator.clipboard.writeText(text); ok("Copied log ✅"); }
+  catch { warn("Clipboard blocked — long-press select the log."); }
+};
+
+// Buttons in index.html call these (safe no-ops until game sets them)
+window.SCARLETT.respawnSafe = window.SCARLETT.respawnSafe || (()=>warn("respawnSafe not ready yet"));
+window.SCARLETT.snapDown    = window.SCARLETT.snapDown    || (()=>warn("snapDown not ready yet"));
+window.SCARLETT.gotoTable   = window.SCARLETT.gotoTable   || (()=>warn("gotoTable not ready yet"));
+
+window.addEventListener("error",(e)=>{
+  bad(`WINDOW ERROR: ${e?.message||"error"}${e?.filename?` @ ${e.filename}:${e.lineno}:${e.colno}`:""}`);
+  if (e?.error?.stack) write(e.error.stack,"badT");
+});
+window.addEventListener("unhandledrejection",(e)=>{
+  bad("UNHANDLED PROMISE REJECTION");
+  const r=e?.reason; bad(r?.message||String(r)); if (r?.stack) write(r.stack,"badT");
 });
 
-// ---------- boot header ----------
-const BOOT_SIG = "BOOT.JS ✅ " + Date.now() + " r" + Math.random().toString(16).slice(2);
-log("boot…");
-log(BOOT_SIG);
-log("href=" + location.href);
-log("THREE=" + THREE.REVISION);
-log("ua=" + navigator.userAgent);
-log("navigator.xr=" + (!!navigator.xr));
+write(`BUILD_STAMP: ${BUILD}`);
+write(`HREF: ${location.href}`);
+write(`UA: ${navigator.userAgent}`);
+write(`NAVIGATOR_XR: ${!!navigator.xr}`);
 
-// URLs relative to this file
-const here = (rel) => new URL(rel, import.meta.url).toString();
+(async ()=>{
+  // Load the real game runtime
+  try{
+    const mod = await import(`./index.js?v=6001`);
+    if (!mod?.startGame) throw new Error("index.js must export startGame()");
+    ok("index.js imported ✅");
 
-// ---------- renderer ----------
-const app = document.getElementById("app") || document.body;
-
-const renderer = new THREE.WebGLRenderer({
-  antialias: true,
-  alpha: false,
-  powerPreference: "high-performance"
-});
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-renderer.xr.enabled = true;
-app.appendChild(renderer.domElement);
-log("renderer created ✅");
-
-window.addEventListener("resize", () => {
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
-
-// ---------- camera + player rig ----------
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 500);
-camera.position.set(0, 1.6, 2);
-
-// Player group holds camera + hands
-const player = new THREE.Group();
-player.name = "PlayerRig";
-player.add(camera);
-
-// ---------- TEST SCENE (until world loads) ----------
-const testScene = new THREE.Scene();
-testScene.background = new THREE.Color(0x101020);
-
-const testRoot = new THREE.Group();
-testScene.add(testRoot);
-
-testRoot.add(new THREE.HemisphereLight(0xffffff, 0x303040, 1.2));
-const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-dir.position.set(3, 6, 2);
-testRoot.add(dir);
-
-const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(30, 30),
-  new THREE.MeshStandardMaterial({ color: 0x202028, roughness: 1, metalness: 0 })
-);
-floor.rotation.x = -Math.PI / 2;
-testRoot.add(floor);
-
-const cube = new THREE.Mesh(
-  new THREE.BoxGeometry(1, 1, 1),
-  new THREE.MeshStandardMaterial({ color: 0xff2d7a })
-);
-cube.position.set(0, 1.5, -2);
-testRoot.add(cube);
-
-testScene.add(player);
-
-// ---------- VRButton ----------
-(async () => {
-  try {
-    const { VRButton } = await import("https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js");
-    document.body.appendChild(VRButton.createButton(renderer));
-    log("VRButton added ✅");
-  } catch (e) {
-    log("❌ VRButton failed:", e?.message || String(e));
-  }
-})();
-
-// ---------- safe import ----------
-async function safeImport(rel) {
-  const url = here(rel);
-  try {
-    const mod = await import(url);
-    log("import ok:", rel);
-    return mod;
-  } catch (e) {
-    log("❌ import failed:", rel);
-    log(String(e?.stack || e));
-    throw e;
-  }
-}
-
-// ---------- controllers / hands ----------
-function makeControllers() {
-  // Hands (Quest hand tracking). These are Object3Ds updated by WebXR.
-  const handLeft = renderer.xr.getHand(0);
-  const handRight = renderer.xr.getHand(1);
-  handLeft.name = "handLeft";
-  handRight.name = "handRight";
-
-  // Attach hands to player so your world can parent them safely if desired
-  player.add(handLeft);
-  player.add(handRight);
-
-  // Your world expects controllers.handLeft / controllers.handRight (see VRPanel code)
-  return {
-    left: null,
-    right: null,
-    hands: [handLeft, handRight],
-    handLeft,
-    handRight
-  };
-}
-
-const controllers = makeControllers();
-
-// ---------- HybridWorld boot ----------
-let HW = null;
-let worldActive = false;
-
-(async () => {
-  try {
-    const worldMod = await safeImport("./world.js");
-    log("world module keys:", Object.keys(worldMod));
-
-    HW = worldMod?.HybridWorld ?? worldMod?.default ?? null;
-    if (!HW) {
-      log("❌ No HybridWorld export found");
-      return;
-    }
-
-    log("HybridWorld typeof:", typeof HW);
-    log("HybridWorld keys:", (typeof HW === "object" ? Object.keys(HW) : "(not object)"));
-
-    if (typeof HW !== "object" || typeof HW.build !== "function" || typeof HW.frame !== "function") {
-      log("❌ HybridWorld is not the expected object with build() + frame()");
-      return;
-    }
-
-    log("▶ HybridWorld.build START");
-
-    await HW.build({
-      THREE,
-      renderer,
-      camera,
-      player,
-      controllers,
-      log,
-      OPTS: {
-        autobuild: true,
-        nonvrControls: true,
-        allowTeleport: true,
-        allowBots: true,
-        allowPoker: true,
-        allowStream: true,
-        safeMode: false
-      }
+    const api = await mod.startGame({
+      BUILD,
+      log: (...a)=>write(a.map(String).join(" "), "muted"),
+      ok, warn, bad,
+      getLogText: ()=>LOG.join("\n")
     });
 
-    worldActive = true;
-    log("✅ HybridWorld.build DONE");
-    log("🌍 HybridWorld ACTIVE ✅");
+    ok("Game started ✅");
 
-  } catch (e) {
-    log("❌ HybridWorld.build FAILED:");
-    log(e?.message || String(e));
-    log(e?.stack || "");
-    worldActive = false;
+    // Allow UI buttons to work
+    if (api?.respawnSafe) window.SCARLETT.respawnSafe = api.respawnSafe;
+    if (api?.snapDown)    window.SCARLETT.snapDown    = api.snapDown;
+    if (api?.gotoTable)   window.SCARLETT.gotoTable   = api.gotoTable;
+    if (api?.gotoStore)   window.SCARLETT.gotoStore   = api.gotoStore;
+    if (api?.gotoScorpion)window.SCARLETT.gotoScorpion= api.gotoScorpion;
+
+  }catch(e){
+    bad("BOOT FAIL: " + (e?.message||e));
+    if (e?.stack) write(e.stack,"badT");
   }
 })();
-
-// ---------- main loop ----------
-renderer.setAnimationLoop(() => {
-  if (worldActive && HW) {
-    // IMPORTANT: Your HybridWorld.frame does the renderer.render internally
-    HW.frame({ renderer, camera });
-    return;
-  }
-
-  // fallback test render
-  cube.rotation.y += 0.01;
-  cube.rotation.x += 0.004;
-  renderer.render(testScene, camera);
-});
-log("render loop running ✅ (test mode until world builds)");

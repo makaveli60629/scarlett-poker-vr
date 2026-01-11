@@ -531,4 +531,3 @@
   await setCaps();
   LOG.push("log", "Hybrid 3.0 boot complete ✅ (spawn rotation respected, floor teleport fixed, slow move + 45° snap)");
 })();
-```0

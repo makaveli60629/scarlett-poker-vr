@@ -7,7 +7,7 @@
 
 import * as THREE from "three";
 import { VRButton } from "./VRButton.js";
-import { World } from "./world.js";
+import { World } from "./world.js?v=4_8_2_FIX2";
 
 const log = (...a) => console.log(...a);
 

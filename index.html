@@ -3,18 +3,36 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
-  <title>Scarlett VR Poker — Hybrid</title>
+  <title>Scarlett VR Poker — Diagnostic Build</title>
+
+  <!-- Import map (optional if you use local ./js/three.js wrapper) -->
+  <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
 
   <style>
     :root{
       --bg:#05060a;
-      --panel:rgba(0,20,30,.62);
-      --border:rgba(0,255,255,.18);
-      --cyan:#00ffff;
-      --txt:#bffcff;
+      --panel:rgba(0,20,30,.58);
+      --stroke:rgba(0,255,255,.18);
+      --stroke2:rgba(0,255,255,.22);
+      --text:#bffcff;
+      --title:#00ffff;
+      --muted:rgba(191,252,255,.75);
+      --shadow:0 12px 40px rgba(0,0,0,.45);
+      --r:14px;
     }
-    html, body { margin:0; padding:0; height:100%; background:var(--bg); overflow:hidden; }
 
+    html, body { margin:0; padding:0; height:100%; background:var(--bg); overflow:hidden; }
+    body { font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+
+    /* VR button always visible */
     #VRButton, button#VRButton{
       position:fixed !important;
       right:max(14px, env(safe-area-inset-right)) !important;
@@ -24,42 +42,69 @@
       font-weight:900 !important;
     }
 
-    /* ✅ Diagnostics HUD */
+    /* Prevent touch gesture conflicts on mobile/Quest */
+    canvas { touch-action: none; }
+
+    /* Diagnostic HUD */
     #scarlettDiag{
       position:fixed;
       left:max(10px, env(safe-area-inset-left));
       top:max(10px, env(safe-area-inset-top));
-      width:min(640px, calc(100vw - 20px));
+      width:min(620px, calc(100vw - 20px));
       z-index:999998;
       background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 14px;
+      border: 1px solid var(--stroke);
+      border-radius: var(--r);
       padding: 10px 12px;
       backdrop-filter: blur(6px);
-      color: var(--txt);
+      box-shadow: var(--shadow);
+      color: var(--text);
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      pointer-events:auto; /* ✅ buttons clickable */
+      pointer-events:auto; /* IMPORTANT: clickable */
     }
-    #scarlettDiag .top{ display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
-    #scarlettDiag .title{ font-weight:1000; color:var(--cyan); }
-    #scarlettDiag .small{ font-size:11px; opacity:.9; }
-    #scarlettGrid{ margin-top:8px; display:grid; grid-template-columns:1fr 1fr; gap:6px 10px; font-size:12px; }
+
+    #scarlettDiag .top{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      align-items:flex-start;
+    }
+    #scarlettDiag .title{ font-weight:1000; color:var(--title); letter-spacing:.3px; }
+    #scarlettDiag .small{ font-size:11px; opacity:.92; color:var(--muted); }
+
+    #scarlettGrid{
+      margin-top:8px;
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:6px 10px;
+      font-size:12px;
+    }
     .kv{ display:flex; justify-content:space-between; gap:10px; }
     .k{ opacity:.75; }
-    .v{ text-align:right; }
+    .v{ text-align:right; font-weight:900; }
 
-    #scarlettBtns{ margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
+    #scarlettBtns{
+      margin-top:10px;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
     #scarlettBtns button{
+      pointer-events:auto;
       background: rgba(0,255,255,.10);
-      border: 1px solid rgba(0,255,255,.22);
-      color: var(--txt);
-      border-radius:12px;
-      padding:7px 10px;
-      font-weight:900;
-      font-size:12px;
-      cursor:pointer;
-      user-select:none;
-      touch-action: manipulation;
+      border: 1px solid var(--stroke2);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 7px 10px;
+      font-weight: 1000;
+      font-size: 12px;
+      cursor: pointer;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #scarlettBtns button:active{
+      transform: translateY(1px);
+      opacity:.95;
     }
 
     #scarlettLog{
@@ -74,6 +119,15 @@
       line-height: 1.35;
       white-space: pre-wrap;
       word-break: break-word;
+      pointer-events:auto;
+    }
+
+    /* tiny help text */
+    #scarlettHint{
+      margin-top:8px;
+      font-size:11px;
+      opacity:.86;
+      color:var(--muted);
     }
   </style>
 </head>
@@ -82,8 +136,8 @@
   <div id="scarlettDiag">
     <div class="top">
       <div>
-        <div class="title">Scarlett Hybrid</div>
-        <div class="small">Build <span id="build">?</span> • <span id="clock">...</span></div>
+        <div class="title">Scarlett Diagnostic HUD</div>
+        <div class="small">Build <span id="build">?</span> • <span id="clock">?</span></div>
       </div>
       <div style="text-align:right; font-size:11px;">
         <div>WebXR: <span id="capXR">?</span></div>
@@ -94,23 +148,31 @@
     <div id="scarlettGrid"></div>
 
     <div id="scarlettBtns">
-      <button id="btnSoftReboot">Soft Reboot</button>
-      <button id="btnHardReset">Hard Reset</button>
-      <button id="btnCopyLog">Copy Logs</button>
-      <button id="btnClearLog">Clear Logs</button>
-
-      <button id="btnRoomLobby">Room: Lobby</button>
-      <button id="btnRoomStore">Room: Store</button>
-      <button id="btnRoomScorpion">Room: Scorpion</button>
+      <button id="btnMenu" type="button">Menu (M)</button>
+      <button id="btnRoomLobby" type="button">Room: Lobby</button>
+      <button id="btnRoomStore" type="button">Room: Store</button>
+      <button id="btnRoomScorpion" type="button">Room: Scorpion</button>
+      <button id="btnSoftReboot" type="button">Soft Reboot</button>
+      <button id="btnCopyLog" type="button">Copy Logs</button>
+      <button id="btnClearLog" type="button">Clear Logs</button>
     </div>
 
     <div id="scarlettLog"></div>
+
+    <div id="scarlettHint">
+      Tip: If Copy Logs is blocked, the system will also download a log file automatically.
+    </div>
   </div>
 
   <script type="module">
+    // Cache-bust every load so Quest/Android doesn’t keep old JS
     const v = Date.now();
-    document.getElementById("build").textContent = `v=${v}`;
-    setInterval(()=>document.getElementById("clock").textContent = new Date().toLocaleString(), 250);
+    const buildEl = document.getElementById("build");
+    const clockEl = document.getElementById("clock");
+    buildEl.textContent = `v=${v}`;
+    setInterval(()=> clockEl.textContent = new Date().toLocaleString(), 250);
+
+    // Boot main
     import(`./js/main.js?v=${v}`);
   </script>
 </body>

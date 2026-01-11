@@ -126,7 +126,7 @@ async function safeImport(rel) {
   }
 }
 
-const START_HYBRID_WORLD = false;
+const START_HYBRID_WORLD = true;
 
 (async () => {
   try {

@@ -1,73 +1,101 @@
-// /js/gesture_engine.js — GestureEngine v1.0 (FULL)
+// /js/gesture_engine.js — Scarlett GestureEngine v1.0 (FULL)
+// Hands-only pinch detection using XRHand joints.
+// Emits: pinchstart / pinchend / pinchhold
+// Safe: if no hands, it stays idle.
+
 export const GestureEngine = (() => {
-  let THREE = null, renderer = null, log = console.log;
-
-  const listeners = new Map();
   const state = {
-    enabled: true,
+    THREE: null,
+    renderer: null,
+    scene: null,
+    camera: null,
+    log: console.log,
+    listeners: new Map(),
     hands: {
-      left:  { pinch:false, last:false, strength:0, jointsOK:false },
-      right: { pinch:false, last:false, strength:0, jointsOK:false },
-    },
-    tmpA: null,
-    tmpB: null,
-  };
-
-  function on(evt, cb) {
-    if (!listeners.has(evt)) listeners.set(evt, new Set());
-    listeners.get(evt).add(cb);
-    return () => listeners.get(evt)?.delete(cb);
-  }
-  function emit(evt, payload) {
-    const set = listeners.get(evt);
-    if (!set) return;
-    for (const cb of set) { try { cb(payload); } catch (e) { log(`[GestureEngine] listener error: ${e?.message || e}`); } }
-  }
-
-  function getJointWorld(handObj, jointName, out) {
-    const j = handObj?.joints?.[jointName];
-    if (!j) return false;
-    j.getWorldPosition(out);
-    return true;
-  }
-
-  function updateOne(handedness, index) {
-    const handObj = renderer?.xr?.getHand?.(index);
-    const h = state.hands[handedness];
-    h.last = h.pinch;
-
-    if (!handObj) { h.pinch = false; h.strength = 0; h.jointsOK = false; return; }
-
-    const okA = getJointWorld(handObj, "index-finger-tip", state.tmpA);
-    const okB = getJointWorld(handObj, "thumb-tip", state.tmpB);
-
-    h.jointsOK = !!(okA && okB);
-    if (!h.jointsOK) { h.pinch = false; h.strength = 0; return; }
-
-    const dist = state.tmpA.distanceTo(state.tmpB);
-    h.pinch = dist < 0.028;
-    h.strength = Math.max(0, Math.min(1, (0.05 - dist) / 0.05));
-
-    if (h.pinch && !h.last) emit("pinchstart", { hand: handedness, strength: h.strength, dist });
-    if (!h.pinch && h.last) emit("pinchend", { hand: handedness });
-  }
-
-  return {
-    init(ctx) {
-      THREE = ctx.THREE;
-      renderer = ctx.renderer;
-      log = ctx.log || console.log;
-      state.tmpA = new THREE.Vector3();
-      state.tmpB = new THREE.Vector3();
-      log("[GestureEngine] init ✅");
-    },
-    on,
-    setEnabled(v) { state.enabled = !!v; },
-    getState() { return state; },
-    update(frame, referenceSpace) {
-      if (!state.enabled) return;
-      updateOne("left", 0);
-      updateOne("right", 1);
+      left: { pinched: false, strength: 0, last: 0 },
+      right:{ pinched: false, strength: 0, last: 0 },
     }
   };
+
+  function on(evt, fn) {
+    if (!state.listeners.has(evt)) state.listeners.set(evt, new Set());
+    state.listeners.get(evt).add(fn);
+  }
+
+  function emit(evt, payload) {
+    const set = state.listeners.get(evt);
+    if (!set) return;
+    for (const fn of set) {
+      try { fn(payload); } catch (e) { state.log?.(`[gesture] listener error: ${e?.message || e}`); }
+    }
+  }
+
+  function init({ THREE, renderer, scene, camera, log }) {
+    state.THREE = THREE;
+    state.renderer = renderer;
+    state.scene = scene;
+    state.camera = camera;
+    if (log) state.log = log;
+    state.log?.("[gesture] init ✅");
+  }
+
+  // Distance between thumb-tip and index-tip
+  function pinchStrengthFromHand(inputSource, frame, refSpace) {
+    const hand = inputSource.hand;
+    if (!hand) return 0;
+
+    const thumbTip = hand.get("thumb-tip");
+    const indexTip = hand.get("index-finger-tip");
+    if (!thumbTip || !indexTip) return 0;
+
+    const pThumb = frame.getPose(thumbTip, refSpace);
+    const pIndex = frame.getPose(indexTip, refSpace);
+    if (!pThumb || !pIndex) return 0;
+
+    const dx = pThumb.transform.position.x - pIndex.transform.position.x;
+    const dy = pThumb.transform.position.y - pIndex.transform.position.y;
+    const dz = pThumb.transform.position.z - pIndex.transform.position.z;
+    const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+
+    // Map distance to strength: closer => stronger pinch
+    // Typical pinch close distance ~ 0.01–0.02m; open ~ 0.05m
+    const strength = clamp01(1 - (dist - 0.01) / 0.04);
+    return strength;
+  }
+
+  function clamp01(v){ return Math.max(0, Math.min(1, v)); }
+
+  function update(frame, refSpace) {
+    const r = state.renderer;
+    if (!r?.xr?.isPresenting) return;
+
+    const session = r.xr.getSession?.();
+    if (!session) return;
+
+    for (const src of session.inputSources) {
+      if (!src.hand) continue;
+
+      const handName = (src.handedness === "left") ? "left" : "right";
+      const h = state.hands[handName];
+
+      const strength = pinchStrengthFromHand(src, frame, refSpace);
+      h.strength = strength;
+
+      const nowPinched = strength > 0.72;
+      const wasPinched = h.pinched;
+
+      if (nowPinched && !wasPinched) {
+        h.pinched = true;
+        h.last = performance.now();
+        emit("pinchstart", { hand: handName, strength });
+      } else if (!nowPinched && wasPinched) {
+        h.pinched = false;
+        emit("pinchend", { hand: handName, strength });
+      } else if (nowPinched && wasPinched) {
+        emit("pinchhold", { hand: handName, strength });
+      }
+    }
+  }
+
+  return { init, update, on };
 })();

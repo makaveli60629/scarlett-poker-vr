@@ -1,96 +1,85 @@
-// /js/betting_module.js — BettingModule v1.0 (FULL)
-// Minimal bet zone + whale alert (safe, optional)
+// /js/betting_module.js — Scarlett BettingModule v1.0 (FULL)
+// Minimal "bet zone" + physical chip spawn. Safe and extendable.
+// Works with controllers OR pinch later.
 
 export const BettingModule = (() => {
   const state = {
+    THREE: null,
+    scene: null,
+    log: console.log,
     root: null,
-    zone: null,
-    zoneRadius: 0.55,
-    zoneCenter: null,
-    potValue: 0,
-    lastWhale: false,
-    flashT: 0
+    betZone: null,
+    chips: [],
+    wallet: { chips: 100000 },
   };
 
-  function inZone(pos) {
-    if (!state.zoneCenter) return false;
-    const dx = pos.x - state.zoneCenter.x;
-    const dz = pos.z - state.zoneCenter.z;
-    return (dx*dx + dz*dz) <= (state.zoneRadius * state.zoneRadius);
+  function init(ctx) {
+    state.THREE = ctx.THREE;
+    state.scene = ctx.scene;
+    state.log = (m) => ctx.LOG?.push?.("log", m) || console.log(m);
+
+    state.root = new state.THREE.Group();
+    state.root.name = "BettingModule";
+    state.scene.add(state.root);
+
+    // Place a simple bet zone near the BossTable if it exists
+    const table = state.scene.getObjectByName("BossTable");
+    const basePos = new state.THREE.Vector3(0, 0.82, 0.0);
+    if (table) table.getWorldPosition(basePos);
+
+    const zone = new state.THREE.Mesh(
+      new state.THREE.CircleGeometry(0.55, 32),
+      new state.THREE.MeshBasicMaterial({ color: 0xffd700, transparent: true, opacity: 0.28 })
+    );
+    zone.rotation.x = -Math.PI / 2;
+    zone.position.set(basePos.x, 0.82, basePos.z - 1.35);
+    zone.name = "BetZone";
+    state.root.add(zone);
+    state.betZone = zone;
+
+    // Spawn a few demo chips on the table edge
+    spawnChip(10, basePos.x - 0.35, 0.86, basePos.z - 0.95);
+    spawnChip(100, basePos.x - 0.25, 0.86, basePos.z - 1.05);
+    spawnChip(1000, basePos.x - 0.15, 0.86, basePos.z - 1.15);
+
+    state.log("[bet] init ✅ (bet zone + demo chips)");
   }
 
-  return {
-    init(ctx) {
-      const { THREE, scene, LOG } = ctx;
-      const log = (m) => LOG?.push?.("log", m) || console.log(m);
+  function spawnChip(value, x, y, z) {
+    const THREE = state.THREE;
 
-      state.root = new THREE.Group();
-      state.root.name = "BettingModule";
-      scene.add(state.root);
+    let color = 0xffffff;
+    let scale = 1.0;
+    if (value >= 1000) { color = 0xffd700; scale = 1.25; }
+    else if (value >= 100) { color = 0xff0000; scale = 1.10; }
+    else if (value >= 10) { color = 0x0000ff; scale = 1.00; }
 
-      const table = scene.getObjectByName("BossTable");
-      const center = new THREE.Vector3();
-      if (table) table.getWorldPosition(center);
-      else center.set(0, 0, 0);
+    const geo = new THREE.CylinderGeometry(0.04 * scale, 0.04 * scale, 0.012 * scale, 14);
+    const mat = new THREE.MeshStandardMaterial({
+      color,
+      flatShading: true,
+      metalness: 0.35,
+      roughness: 0.35
+    });
 
-      const zoneCenter = center.clone();
-      zoneCenter.z += 0.95;
-      zoneCenter.y = 0;
-      state.zoneCenter = zoneCenter;
+    const chip = new THREE.Mesh(geo, mat);
+    chip.position.set(x, y, z);
+    chip.rotation.x = Math.PI / 2;
+    chip.userData.value = value;
 
-      const ring = new THREE.Mesh(
-        new THREE.RingGeometry(0.38, state.zoneRadius, 48),
-        new THREE.MeshBasicMaterial({ color: 0xffcc00, transparent: true, opacity: 0.75, side: THREE.DoubleSide })
-      );
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.set(zoneCenter.x, 0.021, zoneCenter.z);
-      ring.name = "BetZone";
-      ring.renderOrder = 9998;
-      ring.material.depthTest = false;
+    state.root.add(chip);
+    state.chips.push(chip);
+    return chip;
+  }
 
-      const plate = new THREE.Mesh(
-        new THREE.CircleGeometry(0.34, 48),
-        new THREE.MeshBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
-      );
-      plate.rotation.x = -Math.PI / 2;
-      plate.position.set(zoneCenter.x, 0.02, zoneCenter.z);
+  function update(ctx, dt) {
+    // tiny idle animation so you can SEE it's alive
+    const t = performance.now() * 0.001;
+    for (let i = 0; i < state.chips.length; i++) {
+      const c = state.chips[i];
+      c.rotation.z = t * 0.4 + i * 0.2;
+    }
+  }
 
-      state.root.add(plate, ring);
-      state.zone = ring;
-
-      log("[BettingModule] init ✅");
-    },
-
-    tryDropChip(ctx, chipObj) {
-      if (!chipObj?.userData?.value) return false;
-      const pos = new ctx.THREE.Vector3();
-      chipObj.getWorldPosition(pos);
-      if (!inZone(pos)) return false;
-
-      const v = Number(chipObj.userData.value) || 0;
-      state.potValue += v;
-      chipObj.parent?.remove(chipObj);
-
-      ctx.LOG?.push?.("log", `[BettingModule] BET +${v} (pot=${state.potValue}) ✅`);
-
-      if (state.potValue > 500 && !state.lastWhale) {
-        state.lastWhale = true;
-        state.flashT = 0.9;
-        ctx.LOG?.push?.("warn", "🐋 WHALE ALERT: bet exceeds 500!");
-      }
-      return true;
-    },
-
-    update(ctx, dt) {
-      if (!state.zone) return;
-      if (state.flashT > 0) {
-        state.flashT -= dt;
-        const pulse = Math.sin((1 - state.flashT) * 22) * 0.5 + 0.5;
-        state.zone.material.opacity = 0.25 + 0.75 * pulse;
-        if (state.flashT <= 0) state.zone.material.opacity = 0.75;
-      }
-    },
-
-    getPot() { return state.potValue; }
-  };
+  return { init, update };
 })();

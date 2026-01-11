@@ -25,18 +25,11 @@
       overflow:hidden;
       font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
       color:var(--text);
-      /* ✅ stop Android browser gestures from stealing your joystick drags */
-      touch-action: none;
+      touch-action:none;
     }
 
-    /* ✅ critical for Android touch controls */
-    canvas {
-      display:block;
-      width:100vw; height:100vh;
-      touch-action: none;
-    }
+    canvas { display:block; width:100vw; height:100vh; touch-action:none; }
 
-    /* Top HUD (lightweight, can be hidden) */
     #hudTop {
       position:fixed; left:0; top:0; right:0;
       padding:10px 12px;
@@ -45,7 +38,6 @@
       z-index: 9990;
     }
     #badge {
-      pointer-events:none;
       background: rgba(11,13,20,.82);
       border: 1px solid rgba(127,231,255,.22);
       padding: 8px 10px;
@@ -55,13 +47,8 @@
       box-shadow: var(--shadow);
       backdrop-filter: blur(6px);
     }
-    #hint {
-      pointer-events:none;
-      opacity:.75;
-      font-weight:700;
-    }
+    #hint { opacity:.75; font-weight:700; }
 
-    /* Debug overlay (min/hide supported) */
     #overlay {
       position: fixed;
       left: 12px;
@@ -78,22 +65,13 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
       font-size: 12px;
       line-height: 1.35;
-      pointer-events: auto; /* clickable for copy/scroll */
+      pointer-events:auto;
     }
     #overlay .row { margin: 2px 0; }
-    .ok   { color: var(--ok); }
-    .warn { color: var(--warn); }
-    .bad  { color: var(--bad); }
-    .muted{ color: var(--muted); }
+    .ok{ color:var(--ok); } .warn{ color:var(--warn); } .bad{ color:var(--bad); } .muted{ color:var(--muted); }
+    #overlay.min{ max-height:84px !important; overflow:hidden !important; opacity:.72 !important; }
+    #overlay.hide{ display:none !important; }
 
-    #overlay.min {
-      max-height: 84px !important;
-      overflow: hidden !important;
-      opacity: .72 !important;
-    }
-    #overlay.hide { display:none !important; }
-
-    /* Floating buttons (always available even if touch UI fails) */
     #miniBtns {
       position: fixed;
       right: 12px;
@@ -102,7 +80,7 @@
       gap: 10px;
       z-index: 9998;
       pointer-events: auto;
-      touch-action: none;
+      touch-action:none;
     }
     #miniBtns button{
       border: 1px solid rgba(127,231,255,.22);
@@ -114,13 +92,63 @@
       box-shadow: var(--shadow);
       letter-spacing:.2px;
     }
+
+    /* ✅ Emergency D-pad */
+    #dpad {
+      position: fixed;
+      left: 12px;
+      top: 62px;
+      width: 170px;
+      height: 170px;
+      z-index: 9997;
+      pointer-events: auto;
+      touch-action: none;
+      user-select: none;
+    }
+    #dpad .btn {
+      position:absolute;
+      width: 58px; height: 58px;
+      display:flex; align-items:center; justify-content:center;
+      border-radius: 16px;
+      border: 1px solid rgba(127,231,255,.22);
+      background: rgba(11,13,20,.78);
+      box-shadow: var(--shadow);
+      font-weight: 1000;
+      letter-spacing:.2px;
+    }
+    #dpad .up    { left:56px; top:0; }
+    #dpad .down  { left:56px; bottom:0; }
+    #dpad .left  { left:0; top:56px; }
+    #dpad .right { right:0; top:56px; }
+    #dpad .mid   { left:56px; top:56px; opacity:.85; }
+
+    /* Look pad (drag) */
+    #lookpad {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      width: 170px;
+      height: 170px;
+      border-radius: 999px;
+      border: 1px solid rgba(127,231,255,.22);
+      background: rgba(11,13,20,.35);
+      backdrop-filter: blur(6px);
+      box-shadow: var(--shadow);
+      z-index: 9996;
+      pointer-events: auto;
+      touch-action: none;
+      user-select: none;
+      display:flex; align-items:center; justify-content:center;
+      font-weight:900;
+      opacity:.9;
+    }
   </style>
 </head>
 
 <body>
   <div id="hudTop">
     <div id="badge">SCARLETT VR POKER</div>
-    <div id="hint">Android: Left stick move / Right stick look. DBG/HUD buttons top-right.</div>
+    <div id="hint">Android emergency controls enabled: D-Pad move + Look pad drag.</div>
   </div>
 
   <div id="miniBtns">
@@ -128,35 +156,31 @@
     <button id="btnHide">HUD</button>
   </div>
 
+  <div id="dpad">
+    <div class="btn up"    data-dir="up">▲</div>
+    <div class="btn left"  data-dir="left">◀</div>
+    <div class="btn mid"   data-dir="mid">◎</div>
+    <div class="btn right" data-dir="right">▶</div>
+    <div class="btn down"  data-dir="down">▼</div>
+  </div>
+
+  <div id="lookpad">LOOK</div>
+
   <div id="overlay"></div>
 
-  <!-- ✅ Cache-bust index.js so Android doesn't keep old modules -->
-  <script type="module" src="./js/index.js?v=200"></script>
+  <!-- cache bust -->
+  <script type="module" src="./js/index.js?v=300"></script>
 
   <script>
-    // Tiny fallback controls (work even if JS crashes early)
     (function(){
       const o = document.getElementById("overlay");
-      const btnMin = document.getElementById("btnMin");
-      const btnHide = document.getElementById("btnHide");
+      document.getElementById("btnMin").addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); o?.classList.toggle("min"); }, {passive:false});
+      document.getElementById("btnHide").addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); const hud=document.getElementById("hudTop"); if(hud) hud.style.display=(hud.style.display==="none"?"":"none"); }, {passive:false});
 
-      btnMin.addEventListener("click", (e) => {
-        e.preventDefault(); e.stopPropagation();
-        o?.classList.toggle("min");
-      }, { passive:false });
-
-      btnHide.addEventListener("click", (e) => {
-        e.preventDefault(); e.stopPropagation();
-        const hud = document.getElementById("hudTop");
-        if (hud) hud.style.display = (hud.style.display === "none" ? "" : "none");
-        else o?.classList.toggle("hide");
-      }, { passive:false });
-
-      // extra: prevent long-press menu / double-tap zoom weirdness
-      window.addEventListener("contextmenu", (e) => { e.preventDefault(); }, { passive:false });
-      window.addEventListener("gesturestart", (e) => { e.preventDefault(); }, { passive:false });
-      window.addEventListener("gesturechange", (e) => { e.preventDefault(); }, { passive:false });
-      window.addEventListener("gestureend", (e) => { e.preventDefault(); }, { passive:false });
+      window.addEventListener("contextmenu", (e)=>e.preventDefault(), {passive:false});
+      window.addEventListener("gesturestart", (e)=>e.preventDefault(), {passive:false});
+      window.addEventListener("gesturechange", (e)=>e.preventDefault(), {passive:false});
+      window.addEventListener("gestureend", (e)=>e.preventDefault(), {passive:false});
     })();
   </script>
 </body>

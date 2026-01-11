@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
+  <meta name="viewport"
+        content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
   <title>Scarlett VR Poker</title>
 
   <style>
@@ -17,69 +18,109 @@
       --shadow: 0 12px 40px rgba(0,0,0,.45);
       --radius: 16px;
     }
-    html, body { margin:0; padding:0; height:100%; background:var(--bg); overflow:hidden;
-      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; color:var(--text); }
-    canvas { display:block; width:100vw; height:100vh; }
 
+    html, body {
+      margin:0; padding:0; height:100%;
+      background:var(--bg);
+      overflow:hidden;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      color:var(--text);
+      /* ✅ stop Android browser gestures from stealing your joystick drags */
+      touch-action: none;
+    }
+
+    /* ✅ critical for Android touch controls */
+    canvas {
+      display:block;
+      width:100vw; height:100vh;
+      touch-action: none;
+    }
+
+    /* Top HUD (lightweight, can be hidden) */
     #hudTop {
-      position:fixed; left:0; top:0; right:0; z-index:9990;
-      padding:10px 12px; pointer-events:none;
+      position:fixed; left:0; top:0; right:0;
+      padding:10px 12px;
       display:flex; gap:10px; align-items:center;
+      pointer-events:none;
+      z-index: 9990;
     }
     #badge {
-      background:rgba(11,13,20,.82);
-      border:1px solid rgba(127,231,255,.22);
-      padding:8px 10px;
-      border-radius:999px;
-      font-weight:900;
-      letter-spacing:.3px;
-      box-shadow:var(--shadow);
+      pointer-events:none;
+      background: rgba(11,13,20,.82);
+      border: 1px solid rgba(127,231,255,.22);
+      padding: 8px 10px;
+      border-radius: 999px;
+      font-weight: 900;
+      letter-spacing: .3px;
+      box-shadow: var(--shadow);
       backdrop-filter: blur(6px);
     }
-    #hint { opacity:.75; font-weight:700; }
-
-    #overlay {
-      position:fixed; left:12px; bottom:12px; z-index:9999;
-      width:min(560px, calc(100vw - 24px));
-      max-height:46vh; overflow:auto;
-      padding:10px 12px;
-      border-radius:var(--radius);
-      background:var(--panel);
-      border:1px solid rgba(127,231,255,.22);
-      box-shadow:var(--shadow);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-size:12px; line-height:1.35;
-      pointer-events:auto;
+    #hint {
+      pointer-events:none;
+      opacity:.75;
+      font-weight:700;
     }
-    .row { margin:2px 0; }
-    .ok { color:var(--ok); }
-    .warn { color:var(--warn); }
-    .bad { color:var(--bad); }
-    .muted { color:var(--muted); }
 
-    #overlay.min{ max-height:84px !important; overflow:hidden !important; opacity:.72 !important; }
-    #overlay.hide{ display:none !important; }
+    /* Debug overlay (min/hide supported) */
+    #overlay {
+      position: fixed;
+      left: 12px;
+      bottom: 12px;
+      width: min(620px, calc(100vw - 24px));
+      max-height: 46vh;
+      overflow: auto;
+      padding: 10px 12px;
+      border-radius: var(--radius);
+      background: var(--panel);
+      border: 1px solid rgba(127,231,255,.22);
+      box-shadow: var(--shadow);
+      z-index: 9999;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      line-height: 1.35;
+      pointer-events: auto; /* clickable for copy/scroll */
+    }
+    #overlay .row { margin: 2px 0; }
+    .ok   { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .bad  { color: var(--bad); }
+    .muted{ color: var(--muted); }
 
+    #overlay.min {
+      max-height: 84px !important;
+      overflow: hidden !important;
+      opacity: .72 !important;
+    }
+    #overlay.hide { display:none !important; }
+
+    /* Floating buttons (always available even if touch UI fails) */
     #miniBtns {
-      position:fixed; right:12px; top:12px; z-index:9998;
-      display:flex; gap:10px; pointer-events:auto;
+      position: fixed;
+      right: 12px;
+      top: 12px;
+      display: flex;
+      gap: 10px;
+      z-index: 9998;
+      pointer-events: auto;
+      touch-action: none;
     }
     #miniBtns button{
-      border:1px solid rgba(127,231,255,.22);
-      background:rgba(11,13,20,.78);
-      color:var(--text);
-      font-weight:900;
-      padding:10px 12px;
-      border-radius:14px;
-      box-shadow:var(--shadow);
+      border: 1px solid rgba(127,231,255,.22);
+      background: rgba(11,13,20,.78);
+      color: var(--text);
+      font-weight: 900;
+      padding: 10px 12px;
+      border-radius: 14px;
+      box-shadow: var(--shadow);
       letter-spacing:.2px;
     }
   </style>
 </head>
+
 <body>
   <div id="hudTop">
     <div id="badge">SCARLETT VR POKER</div>
-    <div id="hint">Android dev: touch controls enabled. (We removed the face panel.)</div>
+    <div id="hint">Android: Left stick move / Right stick look. DBG/HUD buttons top-right.</div>
   </div>
 
   <div id="miniBtns">
@@ -89,18 +130,34 @@
 
   <div id="overlay"></div>
 
-  <!-- CACHE BUST so Android doesn't keep old modules -->
-  <script type="module" src="./js/index.js?v=100"></script>
+  <!-- ✅ Cache-bust index.js so Android doesn't keep old modules -->
+  <script type="module" src="./js/index.js?v=200"></script>
 
   <script>
-    const o = document.getElementById("overlay");
-    document.getElementById("btnMin").onclick = () => o?.classList.toggle("min");
-    document.getElementById("btnHide").onclick = () => {
-      const hud = document.getElementById("hudTop");
-      if (hud) hud.style.display = (hud.style.display === "none" ? "" : "none");
-      else o?.classList.toggle("hide");
-    };
-  </script> 
-  <script type="module" src="./js/index.js?v=101"></script>
+    // Tiny fallback controls (work even if JS crashes early)
+    (function(){
+      const o = document.getElementById("overlay");
+      const btnMin = document.getElementById("btnMin");
+      const btnHide = document.getElementById("btnHide");
+
+      btnMin.addEventListener("click", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        o?.classList.toggle("min");
+      }, { passive:false });
+
+      btnHide.addEventListener("click", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const hud = document.getElementById("hudTop");
+        if (hud) hud.style.display = (hud.style.display === "none" ? "" : "none");
+        else o?.classList.toggle("hide");
+      }, { passive:false });
+
+      // extra: prevent long-press menu / double-tap zoom weirdness
+      window.addEventListener("contextmenu", (e) => { e.preventDefault(); }, { passive:false });
+      window.addEventListener("gesturestart", (e) => { e.preventDefault(); }, { passive:false });
+      window.addEventListener("gesturechange", (e) => { e.preventDefault(); }, { passive:false });
+      window.addEventListener("gestureend", (e) => { e.preventDefault(); }, { passive:false });
+    })();
+  </script>
 </body>
 </html>

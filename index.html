@@ -1,159 +1,198 @@
+<!-- /index.html — Scarlett VR Poker (FULL) -->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
-  <title>Scarlett VR Poker</title>
+  <meta name="viewport"
+        content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
+  <title>Scarlett Poker VR</title>
 
   <style>
     :root{
-      --bg:#05060a; --panel:#0b0d14f2; --panel2:#0b0d14cc;
-      --text:#e8ecff; --muted:#98a0c7;
-      --ok:#4cd964; --warn:#ffcc00; --bad:#ff6b6b;
-      --shadow:0 12px 40px rgba(0,0,0,.45);
-      --radius:18px; --border:rgba(127,231,255,.22);
+      --bg:#05060a;
+      --panel:#0b0d14cc;
+      --panel2:#0b0d14f2;
+      --text:#e8ecff;
+      --muted:#98a0c7;
+      --aqua:#7fe7ff;
+      --pink:#ff2d7a;
+      --ok:#4cd964;
+      --warn:#ffcc00;
+      --bad:#ff6b6b;
+      --shadow: 0 12px 40px rgba(0,0,0,.45);
+      --radius: 16px;
+      --border: 1px solid rgba(255,255,255,.08);
     }
-    html, body { margin:0; padding:0; height:100%; background:var(--bg); overflow:hidden;
-      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; color:var(--text); }
+
+    html, body {
+      margin:0; padding:0; height:100%;
+      background: var(--bg);
+      overflow:hidden;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      color: var(--text);
+      touch-action: none; /* important for pointer controls */
+    }
+
     canvas { display:block; width:100vw; height:100vh; }
 
-    /* ✅ UI is “clickable”, but does NOT swallow the entire screen */
-    #dock{ position:fixed; left:0; right:0; top:0; z-index:10000; padding:10px; pointer-events:none; }
+    /* Top debug bar */
     #bar{
-      pointer-events:auto;
-      display:flex; flex-wrap:wrap; gap:10px; align-items:center;
-      padding:12px; border-radius:22px;
-      background:var(--panel2); border:1px solid var(--border);
-      box-shadow:var(--shadow); backdrop-filter:blur(6px);
+      position: fixed;
+      left: 10px; right: 10px; top: 10px;
+      display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+      padding:10px 10px;
+      background: var(--panel2);
+      border: var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      z-index: 50;
+      backdrop-filter: blur(10px);
     }
-    #brand{ font-weight:950; padding:8px 12px; border-radius:999px;
-      border:1px solid var(--border); background:rgba(11,13,20,.6); }
-    #sub{ opacity:.85; font-weight:900; }
 
     .btn{
-      pointer-events:auto;
-      border:1px solid var(--border);
-      background:rgba(11,13,20,.78);
-      color:var(--text); font-weight:950;
-      padding:10px 12px; border-radius:16px;
-      box-shadow:var(--shadow);
-      user-select:none; -webkit-user-select:none;
-    }
-    .btn:active{ transform:scale(.98); }
-    .good{ border-color:rgba(76,217,100,.35); }
-    .warn{ border-color:rgba(255,204,0,.35); }
-    .bad{ border-color:rgba(255,107,107,.35); }
-
-    #dbg{
-      pointer-events:auto;
-      margin-top:10px;
-      border-radius:22px;
-      background:var(--panel);
-      border:1px solid var(--border);
-      box-shadow:var(--shadow);
-      overflow:hidden;
-    }
-    #dbgHead{
-      display:flex; align-items:center; justify-content:space-between; gap:10px;
+      appearance:none; border:none;
       padding:10px 12px;
-      border-bottom:1px solid rgba(127,231,255,.12);
-      background:rgba(11,13,20,.45);
+      border-radius: 12px;
+      background: rgba(24,32,71,.95);
+      color: var(--text);
+      font-weight: 700;
+      font-size: 13px;
+      letter-spacing: .2px;
+      cursor: pointer;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
     }
-    #dbgTitle{ font-weight:950; opacity:.92; }
-    #dbgTip{ color:var(--muted); font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; font-weight:800; opacity:.85; }
+    .btn:active{ transform: translateY(1px); }
+    .btn.ok{ background: rgba(15,90,50,.95); }
+    .btn.warn{ background: rgba(110,85,10,.95); }
+    .btn.bad{ background: rgba(110,25,25,.95); }
 
-    #log{
-      width:100%;
-      max-height:32vh;
+    .pill{
+      padding:8px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.06);
+      border: var(--border);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    /* Collapsible log panel (not in your face) */
+    #dbg{
+      position: fixed;
+      left: 10px; right: 10px;
+      top: 74px;
+      max-height: 36vh;
       overflow:auto;
-      padding:10px 12px 12px 12px;
-      box-sizing:border-box;
-      font-family:ui-monospace,Menlo,Consolas,monospace;
-      font-size:12px;
-      line-height:1.35;
-      user-select:text; -webkit-user-select:text;
+      padding:10px;
+      background: var(--panel);
+      border: var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      z-index: 40;
+      backdrop-filter: blur(10px);
+      display:none; /* hidden by default */
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.3;
     }
-    #dbg.min #log{ max-height:80px; overflow:hidden; opacity:.75; }
-    #dbg.hide{ display:none !important; }
 
-    .row{ margin:2px 0; }
-    .ok{color:var(--ok)} .warnT{color:var(--warn)} .badT{color:var(--bad)} .muted{color:var(--muted)}
+    .row{ padding:2px 0; }
+    .muted{ color: var(--muted); }
+    .okT{ color: var(--ok); }
+    .warnT{ color: var(--warn); }
+    .badT{ color: var(--bad); }
 
-    /* Tiny touch hint (doesn't block) */
-    #hint{
-      position:fixed; left:50%; bottom:14px; transform:translateX(-50%);
-      z-index:9999; padding:8px 10px; border-radius:999px;
-      background:rgba(11,13,20,.55); border:1px solid rgba(127,231,255,.14);
-      color:rgba(232,236,255,.85); font-weight:900; font-size:12px;
-      pointer-events:none;
+    /* Mobile touch guides (non-interactive) */
+    #touchHint{
+      position: fixed;
+      left: 10px; right: 10px;
+      bottom: 10px;
+      display:flex;
+      justify-content: space-between;
+      gap: 10px;
+      z-index: 20;
+      pointer-events: none;
+      opacity: .75;
     }
+    .hint{
+      flex:1;
+      padding:10px 12px;
+      border-radius: 14px;
+      background: rgba(255,255,255,.06);
+      border: var(--border);
+      text-align:center;
+      font-size: 12px;
+      color: var(--muted);
+      backdrop-filter: blur(10px);
+    }
+
+    /* Keep buttons clickable; everything else doesn't block pointer */
+    #bar, #dbg { pointer-events: auto; }
   </style>
 </head>
 
 <body>
-  <div id="dock">
-    <div id="bar">
-      <div id="brand">SCARLETT VR POKER</div>
-      <div id="sub">Android Dev UI • Full Diagnostics • Copy Log</div>
+  <!-- Top controls -->
+  <div id="bar">
+    <button class="btn ok" onclick="document.getElementById('dbg').style.display='none';">HIDE LOG</button>
+    <button class="btn" onclick="document.getElementById('dbg').style.display='block';">SHOW LOG</button>
+    <button class="btn" onclick="window.SCARLETT?.copyLog?.()">COPY LOG</button>
 
-      <button class="btn good" id="btnEnterVR">ENTER VR</button>
-      <button class="btn" id="btnTable">TABLE</button>
-      <button class="btn" id="btnRespawn">RESPAWN SAFE</button>
+    <span class="pill" id="status">BOOTING…</span>
 
-      <button class="btn" id="btnSnap">SNAP DOWN</button>
-      <button class="btn" id="btnMin">MIN</button>
-      <button class="btn" id="btnHide">HIDE</button>
-      <button class="btn warn" id="btnClear">CLEAR</button>
-      <button class="btn good" id="btnCopy">COPY LOG</button>
-    </div>
+    <button class="btn warn" onclick="window.SCARLETT?.respawnSafe?.()">RESPAWN SAFE</button>
+    <button class="btn warn" onclick="window.SCARLETT?.snapDown?.()">SNAP DOWN</button>
+    <button class="btn" onclick="window.SCARLETT?.gotoTable?.()">GOTO TABLE</button>
+    <button class="btn" onclick="window.SCARLETT?.gotoStore?.()">GOTO STORE</button>
+    <button class="btn" onclick="window.SCARLETT?.gotoScorpion?.()">GOTO SCORPION</button>
 
-    <div id="dbg">
-      <div id="dbgHead">
-        <div id="dbgTitle">Diagnostics</div>
-        <div id="dbgTip">Tip: COPY LOG → paste here</div>
-      </div>
-      <div id="log"></div>
-    </div>
+    <button class="btn bad" onclick="location.reload()">RELOAD</button>
   </div>
 
-  <div id="hint">Touch: LEFT = move • RIGHT = look</div>
+  <!-- Debug log -->
+  <div id="dbg"><div id="log"></div></div>
+
+  <!-- Touch hints -->
+  <div id="touchHint">
+    <div class="hint">LEFT SIDE: MOVE</div>
+    <div class="hint">RIGHT SIDE: LOOK</div>
+  </div>
 
   <script>
-    const dbg = document.getElementById("dbg");
-    const log = document.getElementById("log");
+    // Minimal global API placeholders so buttons never throw errors
+    window.SCARLETT = window.SCARLETT || {};
+    window.SCARLETT.copyLog = window.SCARLETT.copyLog || (()=>{});
+    window.SCARLETT.respawnSafe = window.SCARLETT.respawnSafe || (()=>{});
+    window.SCARLETT.snapDown = window.SCARLETT.snapDown || (()=>{});
+    window.SCARLETT.gotoTable = window.SCARLETT.gotoTable || (()=>{});
+    window.SCARLETT.gotoStore = window.SCARLETT.gotoStore || (()=>{});
+    window.SCARLETT.gotoScorpion = window.SCARLETT.gotoScorpion || (()=>{});
 
-    document.getElementById("btnMin").addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); dbg.classList.toggle("min"); }, {passive:false});
-    document.getElementById("btnHide").addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); dbg.classList.toggle("hide"); }, {passive:false});
-    document.getElementById("btnClear").addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); log.innerHTML=""; }, {passive:false});
-
-    document.getElementById("btnCopy").addEventListener("click", async (e)=>{
-      e.preventDefault(); e.stopPropagation();
-      await window.SCARLETT?.copyLog?.();
-    }, {passive:false});
-
-    document.getElementById("btnEnterVR").addEventListener("click", (e)=>{
-      e.preventDefault(); e.stopPropagation();
-      const vrBtn = document.querySelector("#VRButton") || document.querySelector("button[title*='VR']");
-      vrBtn?.click?.();
-    }, {passive:false});
-
-    document.getElementById("btnRespawn").addEventListener("click", (e)=>{
-      e.preventDefault(); e.stopPropagation();
-      window.SCARLETT?.respawnSafe?.();
-    }, {passive:false});
-
-    document.getElementById("btnSnap").addEventListener("click", (e)=>{
-      e.preventDefault(); e.stopPropagation();
-      window.SCARLETT?.snapDown?.();
-    }, {passive:false});
-
-    document.getElementById("btnTable").addEventListener("click", (e)=>{
-      e.preventDefault(); e.stopPropagation();
-      window.SCARLETT?.gotoTable?.();
-    }, {passive:false});
+    // Status helper
+    window.SCARLETT.setStatus = (t) => {
+      const el = document.getElementById("status");
+      if (el) el.textContent = t;
+    };
   </script>
 
-  <!-- ✅ IMPORTANT: relative path -->
-  <script type="module" src="js/index.js?v=5001"></script>
+  <!-- ✅ SINGLE ENTRYPOINT: boot.js -->
+  <script type="module">
+    window.SCARLETT.setStatus?.("LOADING…");
+    import("./js/boot.js?v=6001").then(()=>{
+      window.SCARLETT.setStatus?.("RUNNING ✅");
+    }).catch((e)=>{
+      window.SCARLETT.setStatus?.("BOOT FAIL ❌");
+      const log = document.getElementById("log");
+      if (log) {
+        const d = document.createElement("div");
+        d.className = "row badT";
+        d.textContent = "boot.js failed: " + (e?.message || e);
+        log.appendChild(d);
+      }
+      console.error(e);
+    });
+  </script>
 </body>
 </html>

@@ -1,80 +1,159 @@
-// /js/boot.js — Scarlett Boot v6.0 (FULL)
-// ✅ This is the ONLY entry file index.html should load
-// ✅ Provides diagnostics + COPY LOG + Android touch controls
-// ✅ Imports and runs /js/index.js (the real game)
+// /js/boot.js — Scarlett Diagnostics Boot (ALWAYS RUNS)
+// ✅ Buttons work even if game fails
+// ✅ Captures errors/rejections
+// ✅ Captures console log/warn/error
+// ✅ Loads /js/index.js with cache-bust
 
-const BUILD = Date.now();
-const LOG = [];
-const LOG_MAX = 3000;
+const $ = (id) => document.getElementById(id);
+const logPanel = $("logPanel");
+const pillXR = $("pillXR");
+const pillMode = $("pillMode");
 
-const overlay = document.getElementById("log") || null;
+const btnCopy = $("btnCopy");
+const btnDownload = $("btnDownload");
+const btnClear = $("btnClear");
+const btnHide = $("btnHide");
+const hud = $("hud");
 
-function pushLog(line){ LOG.push(line); if (LOG.length > LOG_MAX) LOG.shift(); }
-function write(line, cls="muted"){
-  const s = String(line);
-  pushLog(s);
-  if (!overlay) { console.log(s); return; }
-  const div = document.createElement("div");
-  div.className = `row ${cls}`;
-  div.textContent = s;
-  overlay.appendChild(div);
-  overlay.scrollTop = overlay.scrollHeight;
+const LOG_MAX = 1800;
+const logBuffer = [];
+let hudVisible = true;
+
+function stamp(){
+  const d=new Date();
+  return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`;
 }
-const ok  = (m)=>write(`✅ ${m}`,"ok");
-const warn= (m)=>write(`⚠️ ${m}`,"warnT");
-const bad = (m)=>write(`❌ ${m}`,"badT");
 
-window.SCARLETT = window.SCARLETT || {};
-window.SCARLETT.copyLog = async () => {
-  const text = LOG.join("\n");
-  try { await navigator.clipboard.writeText(text); ok("Copied log ✅"); }
-  catch { warn("Clipboard blocked — long-press select the log."); }
+function push(line, cls=""){
+  const msg = `[${stamp()}] ${line}`;
+  logBuffer.push(msg);
+  if (logBuffer.length > LOG_MAX) logBuffer.shift();
+
+  if (logPanel){
+    const div = document.createElement("div");
+    if (cls) div.className = cls;
+    div.textContent = msg;
+    logPanel.appendChild(div);
+    while (logPanel.childNodes.length > LOG_MAX) logPanel.removeChild(logPanel.firstChild);
+    logPanel.scrollTop = logPanel.scrollHeight;
+  }
+}
+
+function safe(v){
+  try{
+    if (typeof v === "string") return v;
+    if (v instanceof Error) return `${v.name}: ${v.message}\n${v.stack||""}`;
+    if (typeof v === "object") return JSON.stringify(v);
+    return String(v);
+  }catch{ return String(v); }
+}
+
+// Expose for other modules
+window.ScarlettLog = {
+  push,
+  buffer: logBuffer,
+  setMode(txt){ if (pillMode) pillMode.innerHTML = `Mode: <span class="muted">${txt}</span>`; },
+  setXR(html){ if (pillXR) pillXR.innerHTML = html; }
 };
 
-// Buttons in index.html call these (safe no-ops until game sets them)
-window.SCARLETT.respawnSafe = window.SCARLETT.respawnSafe || (()=>warn("respawnSafe not ready yet"));
-window.SCARLETT.snapDown    = window.SCARLETT.snapDown    || (()=>warn("snapDown not ready yet"));
-window.SCARLETT.gotoTable   = window.SCARLETT.gotoTable   || (()=>warn("gotoTable not ready yet"));
+// Boot prints
+push("[BOOT] boot.js loaded ✅", "ok");
+push(`HREF: ${location.href}`);
+push(`UA: ${navigator.userAgent}`);
+push(`NAVIGATOR_XR: ${!!navigator.xr}`, navigator.xr ? "ok" : "warn");
 
-window.addEventListener("error",(e)=>{
-  bad(`WINDOW ERROR: ${e?.message||"error"}${e?.filename?` @ ${e.filename}:${e.lineno}:${e.colno}`:""}`);
-  if (e?.error?.stack) write(e.error.stack,"badT");
-});
-window.addEventListener("unhandledrejection",(e)=>{
-  bad("UNHANDLED PROMISE REJECTION");
-  const r=e?.reason; bad(r?.message||String(r)); if (r?.stack) write(r.stack,"badT");
-});
-
-write(`BUILD_STAMP: ${BUILD}`);
-write(`HREF: ${location.href}`);
-write(`UA: ${navigator.userAgent}`);
-write(`NAVIGATOR_XR: ${!!navigator.xr}`);
-
-(async ()=>{
-  // Load the real game runtime
+async function setXR(){
+  let supported=false;
   try{
-    const mod = await import(`./index.js?v=6001`);
-    if (!mod?.startGame) throw new Error("index.js must export startGame()");
-    ok("index.js imported ✅");
+    if (navigator.xr?.isSessionSupported) supported = await navigator.xr.isSessionSupported("immersive-vr");
+  }catch{}
+  window.ScarlettLog.setXR(`XR: <span class="${supported ? "ok":"warn"}">${supported ? "supported":"not supported"}</span>`);
+}
+setXR();
 
-    const api = await mod.startGame({
-      BUILD,
-      log: (...a)=>write(a.map(String).join(" "), "muted"),
-      ok, warn, bad,
-      getLogText: ()=>LOG.join("\n")
-    });
+window.ScarlettLog.setMode("boot");
 
-    ok("Game started ✅");
+// Capture runtime failures
+window.addEventListener("error", (e)=>{
+  push(`WINDOW ERROR: ${e.message || e.type}`, "bad");
+  if (e.error?.stack) push(e.error.stack, "muted");
+});
+window.addEventListener("unhandledrejection", (e)=>{
+  push(`PROMISE REJECT: ${safe(e.reason)}`, "bad");
+});
 
-    // Allow UI buttons to work
-    if (api?.respawnSafe) window.SCARLETT.respawnSafe = api.respawnSafe;
-    if (api?.snapDown)    window.SCARLETT.snapDown    = api.snapDown;
-    if (api?.gotoTable)   window.SCARLETT.gotoTable   = api.gotoTable;
-    if (api?.gotoStore)   window.SCARLETT.gotoStore   = api.gotoStore;
-    if (api?.gotoScorpion)window.SCARLETT.gotoScorpion= api.gotoScorpion;
+// Mirror console into panel
+const _log = console.log.bind(console);
+const _warn = console.warn.bind(console);
+const _err = console.error.bind(console);
+console.log = (...a)=>{ _log(...a); push(a.map(safe).join(" "), ""); };
+console.warn = (...a)=>{ _warn(...a); push(a.map(safe).join(" "), "warn"); };
+console.error = (...a)=>{ _err(...a); push(a.map(safe).join(" "), "bad"); };
 
+// Buttons (WORK NOW because they live in boot.js)
+btnClear?.addEventListener("click", ()=>{
+  logBuffer.length = 0;
+  if (logPanel) logPanel.innerHTML = "";
+  push("Log cleared ✅","ok");
+});
+
+btnHide?.addEventListener("click", ()=>{
+  hudVisible = !hudVisible;
+  if (hud) hud.style.display = hudVisible ? "" : "none";
+});
+
+btnCopy?.addEventListener("click", async ()=>{
+  const text = logBuffer.join("\n");
+  try{
+    await navigator.clipboard.writeText(text);
+    const old = btnCopy.textContent;
+    btnCopy.textContent = "✅ Copied!";
+    setTimeout(()=>btnCopy.textContent = old, 1200);
+  }catch{
+    // Fallback for some Android browsers
+    try{
+      const ta=document.createElement("textarea");
+      ta.value=text;
+      ta.style.position="fixed";
+      ta.style.left="-9999px";
+      document.body.appendChild(ta);
+      ta.focus(); ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      const old = btnCopy.textContent;
+      btnCopy.textContent = "✅ Copied!";
+      setTimeout(()=>btnCopy.textContent = old, 1200);
+    }catch{
+      alert("Copy failed. Long-press inside the log box → Select All → Copy.");
+    }
+  }
+});
+
+btnDownload?.addEventListener("click", ()=>{
+  const blob = new Blob([logBuffer.join("\n")], {type:"text/plain"});
+  const url = URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download=`scarlett_log_${Date.now()}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
+// Load the game runtime
+(async ()=>{
+  try{
+    window.ScarlettLog.setMode("loading index.js");
+    push("[BOOT] importing ./js/index.js …");
+    // Cache-bust to beat GitHub Pages/mobile caching
+    const v = Date.now();
+    await import(`./index.js?v=${v}`);
+    push("[BOOT] index.js imported ✅", "ok");
+    window.ScarlettLog.setMode("running");
   }catch(e){
-    bad("BOOT FAIL: " + (e?.message||e));
-    if (e?.stack) write(e.stack,"badT");
+    push("[BOOT] index.js FAILED ❌", "bad");
+    push(String(e?.stack || e), "muted");
+    window.ScarlettLog.setMode("failed");
   }
 })();

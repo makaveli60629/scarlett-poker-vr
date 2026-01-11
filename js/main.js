@@ -1,40 +1,129 @@
-// /js/main.js — Scarlett Hybrid 4.2 (ALIGN-FIRST GRID MODE)
-// ✅ bright lighting (Quest-friendly)
-// ✅ spawn ALWAYS faces BossTable
-// ✅ no fast sliding teleport: ONE leap per press
-// ✅ left stick move, right stick 45° snap, right stick forward/back solo
-// ✅ hub-biased laser that always hits floor plane
-// ✅ safe-wires your modules (room_manager, store, vr_ui, etc.) if present
+// /js/main.js — Scarlett Hybrid 4.3 (FULL HUD DIAGNOSTICS + BUTTONS WORK)
+// ✅ diagnostics grid + scroll log + copy/clear
+// ✅ Soft reboot + Hard reset
+// ✅ WebXR capability display
+// ✅ Keeps: bright lighting, grid world, spawn faces BossTable, left move + right 45° snap, teleport one-leap
 
 (async function boot() {
-  console.log("SCARLETT_MAIN=4.2");
+  console.log("SCARLETT_MAIN=4.3");
+
+  // Prevent double-boot
   if (window.__SCARLETT_BOOTED__) return;
   window.__SCARLETT_BOOTED__ = true;
 
-  // -------- THREE import: local first ----------
-  const THREE = await (async () => {
-    try {
-      const m = await import("./three.js");
-      return m.default || m.THREE || m;
-    } catch {
-      const m = await import("three");
-      return m.default || m.THREE || m;
-    }
-  })();
+  // -------------------------
+  // HUD references
+  // -------------------------
+  const ui = {
+    grid: document.getElementById("scarlettGrid"),
+    logBox: document.getElementById("scarlettLog"),
+    capXR: document.getElementById("capXR"),
+    capImm: document.getElementById("capImm"),
+    btnSoftReboot: document.getElementById("btnSoftReboot"),
+    btnHardReset: document.getElementById("btnHardReset"),
+    btnCopy: document.getElementById("btnCopyLog"),
+    btnClear: document.getElementById("btnClearLog"),
+    btnRoomLobby: document.getElementById("btnRoomLobby"),
+    btnRoomStore: document.getElementById("btnRoomStore"),
+    btnRoomScorpion: document.getElementById("btnRoomScorpion"),
+  };
 
-  // -------- Safe import helper ----------
-  const safeImport = async (url) => {
-    try {
-      const m = await import(url);
-      console.log(`[import ok] ${url}`);
-      return m;
-    } catch (e) {
-      console.warn(`[import fail] ${url} — ${e?.message || e}`);
-      return null;
+  // -------------------------
+  // LOG + diagnostics
+  // -------------------------
+  const LOG = {
+    lines: [],
+    max: 900,
+    push(kind, msg) {
+      const t = new Date().toLocaleTimeString();
+      const line = `[${t}] ${kind.toUpperCase()}: ${msg}`;
+      this.lines.push(line);
+      if (this.lines.length > this.max) this.lines.splice(0, this.lines.length - this.max);
+      if (ui.logBox) ui.logBox.textContent = this.lines.join("\n");
+      if (kind === "error") console.error(msg);
+      else if (kind === "warn") console.warn(msg);
+      else console.log(msg);
+    },
+    clear() { this.lines = []; if (ui.logBox) ui.logBox.textContent = ""; },
+    async copy() {
+      const txt = this.lines.join("\n");
+      try {
+        await navigator.clipboard.writeText(txt);
+        this.push("log", "Copied logs ✅");
+      } catch {
+        // fallback
+        const ta = document.createElement("textarea");
+        ta.value = txt;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+        this.push("log", "Copied logs (fallback) ✅");
+      }
     }
   };
 
-  // -------- Scene / Camera / Renderer ----------
+  window.SCARLETT = window.SCARLETT || {};
+  window.SCARLETT.LOG = LOG;
+
+  addEventListener("error", (e) => LOG.push("error", `${e.message} @ ${e.filename}:${e.lineno}:${e.colno}`));
+  addEventListener("unhandledrejection", (e) => LOG.push("error", `UnhandledPromiseRejection: ${e.reason?.message || e.reason}`));
+
+  function setMetrics(rows) {
+    if (!ui.grid) return;
+    ui.grid.innerHTML = "";
+    for (const [k, v] of rows) {
+      const row = document.createElement("div");
+      row.className = "kv";
+      const kk = document.createElement("div"); kk.className = "k"; kk.textContent = k;
+      const vv = document.createElement("div"); vv.className = "v"; vv.textContent = v;
+      row.appendChild(kk); row.appendChild(vv);
+      ui.grid.appendChild(row);
+    }
+  }
+
+  async function setCaps() {
+    const xr = !!navigator.xr;
+    if (ui.capXR) ui.capXR.textContent = xr ? "YES" : "NO";
+    let immersive = false;
+    try { immersive = xr ? await navigator.xr.isSessionSupported("immersive-vr") : false; } catch {}
+    if (ui.capImm) ui.capImm.textContent = immersive ? "YES" : "NO";
+    return { xr, immersive };
+  }
+
+  // Button wiring (guaranteed)
+  ui.btnClear?.addEventListener("click", () => LOG.clear());
+  ui.btnCopy?.addEventListener("click", () => LOG.copy());
+
+  ui.btnSoftReboot?.addEventListener("click", () => {
+    LOG.push("log", "Soft reboot…");
+    location.reload();
+  });
+
+  // Hard reset: clears your local flags + reloads
+  ui.btnHardReset?.addEventListener("click", () => {
+    LOG.push("warn", "Hard reset… clearing runtime flags");
+    try { delete window.__SCARLETT_BOOTED__; } catch {}
+    try { delete window.SCARLETT; } catch {}
+    location.reload();
+  });
+
+  // -------------------------
+  // Import THREE (local first)
+  // -------------------------
+  const THREE = await (async () => {
+    try { const m = await import("./three.js"); return m.default || m.THREE || m; }
+    catch { const m = await import("three"); return m.default || m.THREE || m; }
+  })();
+
+  async function safeImport(url, label = url) {
+    try { const m = await import(url); LOG.push("log", `import ok: ${label}`); return m; }
+    catch (e) { LOG.push("warn", `import fail: ${label} — ${e?.message || e}`); return null; }
+  }
+
+  // -------------------------
+  // Scene / camera / renderer
+  // -------------------------
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x070912);
 
@@ -44,10 +133,10 @@
   renderer.setSize(innerWidth, innerHeight);
   renderer.xr.enabled = true;
 
-  // BRIGHT + predictable on Quest
+  // Bright Quest-friendly output
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 3.15; // 🔥 brighter than before
+  renderer.toneMappingExposure = 3.15;
   renderer.physicallyCorrectLights = false;
 
   document.body.appendChild(renderer.domElement);
@@ -58,7 +147,22 @@
     renderer.setSize(innerWidth, innerHeight);
   });
 
-  // -------- Player rig ----------
+  // -------------------------
+  // VRButton
+  // -------------------------
+  const vrb = await safeImport("./VRButton.js", "./VRButton.js");
+  if (vrb?.VRButton?.createButton) {
+    const btn = vrb.VRButton.createButton(renderer);
+    btn.id = "VRButton";
+    document.body.appendChild(btn);
+    LOG.push("log", "VRButton ✅");
+  } else {
+    LOG.push("warn", "VRButton.js missing/invalid.");
+  }
+
+  // -------------------------
+  // Player rig
+  // -------------------------
   const player = new THREE.Group();
   player.name = "PlayerRig";
   scene.add(player);
@@ -66,33 +170,28 @@
   camera.position.set(0, 1.65, 0);
   player.add(camera);
 
-  // -------- VRButton ----------
-  const vrb = await safeImport("./VRButton.js");
-  if (vrb?.VRButton?.createButton) document.body.appendChild(vrb.VRButton.createButton(renderer));
-
-  // -------- Overkill lighting pack ----------
-  const lightRoot = new THREE.Group();
-  lightRoot.name = "LightPack";
-  scene.add(lightRoot);
-
-  lightRoot.add(new THREE.AmbientLight(0xffffff, 1.6));
-  lightRoot.add(new THREE.HemisphereLight(0xffffff, 0x2b2b45, 3.2));
-
+  // -------------------------
+  // OVERKILL LIGHT PACK
+  // -------------------------
+  scene.add(new THREE.AmbientLight(0xffffff, 1.6));
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x2b2b45, 3.2));
   const sun = new THREE.DirectionalLight(0xffffff, 7.0);
   sun.position.set(60, 140, 80);
-  lightRoot.add(sun);
+  scene.add(sun);
 
-  // Headlamp so “where you look is lit”
   const headLamp = new THREE.PointLight(0xffffff, 3.0, 45);
   headLamp.position.set(0, 1.4, 0.35);
   camera.add(headLamp);
 
-  // -------- Controllers + hands (parented to rig) ----------
+  // -------------------------
+  // Controllers + hands (parented to rig)
+  // -------------------------
   const controllerL = renderer.xr.getController(0);
   const controllerR = renderer.xr.getController(1);
   controllerL.name = "ControllerLeft";
   controllerR.name = "ControllerRight";
   player.add(controllerL, controllerR);
+  LOG.push("log", "Controllers parented to PlayerRig ✅");
 
   try {
     const handL = renderer.xr.getHand(0);
@@ -100,23 +199,30 @@
     handL.name = "XRHandLeft";
     handR.name = "XRHandRight";
     player.add(handL, handR);
-  } catch {}
+    LOG.push("log", "XRHands parented to PlayerRig ✅");
+  } catch {
+    LOG.push("warn", "XRHands unavailable (controller-only OK).");
+  }
 
-  // -------- World ----------
-  const worldMod = await safeImport("./world.js");
-  const World = worldMod?.World;
-  if (!World?.init) throw new Error("world.js missing export World.init(ctx)");
+  // -------------------------
+  // World
+  // -------------------------
+  const worldMod = await safeImport("./world.js", "./world.js");
+  if (!worldMod?.World?.init) throw new Error("world.js missing World.init");
 
   const ctx = {
     THREE, scene, renderer, camera, player,
     systems: {},
     colliders: [],
     mode: "lobby",
+    LOG
   };
 
-  await World.init(ctx);
+  await worldMod.World.init(ctx);
 
-  // -------- Spawn: ALWAYS face BossTable ----------
+  // -------------------------
+  // Spawn: ALWAYS face BossTable
+  // -------------------------
   const tmpP = new THREE.Vector3();
   const tmpT = new THREE.Vector3();
 
@@ -127,6 +233,7 @@
     if (sp) {
       sp.getWorldPosition(tmpP);
       player.position.set(tmpP.x, 0, tmpP.z);
+      LOG.push("log", `Spawn ✅ x=${player.position.x.toFixed(2)} z=${player.position.z.toFixed(2)}`);
     }
 
     if (table) {
@@ -135,7 +242,8 @@
       v.y = 0;
       if (v.lengthSq() > 1e-6) {
         const yaw = Math.atan2(v.x, v.z);
-        player.rotation.set(0, yaw, 0); // ✅ face table
+        player.rotation.set(0, yaw, 0);
+        LOG.push("log", "Facing table ✅ (BossTable)");
       }
     }
   }
@@ -143,34 +251,28 @@
   applySpawnFacingTable();
   renderer.xr.addEventListener("sessionstart", () => setTimeout(applySpawnFacingTable, 170));
 
-  // -------- Optional systems wiring (safe) ----------
-  const roomManagerMod = await safeImport("./room_manager.js");
-  if (roomManagerMod?.RoomManager?.init) {
-    ctx.systems.room_manager = roomManagerMod.RoomManager;
-    roomManagerMod.RoomManager.init(ctx);
+  // -------------------------
+  // Optional: Room Manager for buttons
+  // -------------------------
+  const rm = await safeImport("./room_manager.js", "./room_manager.js");
+  if (rm?.RoomManager?.init) {
+    ctx.systems.room_manager = rm.RoomManager;
+    rm.RoomManager.init(ctx);
+    LOG.push("log", "[rm] init ✅");
   }
 
-  const storeMod = await safeImport("./store.js");
-  const StoreSystem = storeMod?.StoreSystem || storeMod?.Store || null;
-  if (StoreSystem?.init) {
-    ctx.systems.store = StoreSystem;
-    StoreSystem.init({ THREE, scene, world: ctx.world, ctx, player, camera, log: console.log });
-    StoreSystem.setActive?.(false);
+  function setRoom(room) {
+    if (ctx.systems.room_manager?.setRoom) ctx.systems.room_manager.setRoom(ctx, room);
+    else LOG.push("warn", `RoomManager missing; can't setRoom(${room})`);
   }
 
-  const vrUiMod = await safeImport("./vr_ui.js");
-  if (vrUiMod?.initVRUI) {
-    ctx.systems.vr_ui = { init: vrUiMod.initVRUI };
-    vrUiMod.initVRUI(ctx);
-  }
+  ui.btnRoomLobby?.addEventListener("click", () => setRoom("lobby"));
+  ui.btnRoomStore?.addEventListener("click", () => setRoom("store"));
+  ui.btnRoomScorpion?.addEventListener("click", () => setRoom("scorpion"));
 
-  const uiMod = await safeImport("./ui.js");
-  if (uiMod?.UI?.init) {
-    ctx.systems.ui = uiMod.UI;
-    uiMod.UI.init(ctx);
-  }
-
-  // -------- Teleport (ONE leap per press) ----------
+  // -------------------------
+  // Teleport: ONE leap per press
+  // -------------------------
   const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
   const laser = new THREE.Line(
@@ -257,47 +359,26 @@
   let snapCooldown = 0;
   let lastTeleport = false;
 
-  // Store activation zone (West room)
-  const storeZone = {
-    enabled: !!StoreSystem,
-    inside: false,
-    center: new THREE.Vector3(),
-    half: new THREE.Vector3(6.5, 2.0, 6.5),
-  };
-
-  function updateStoreZone() {
-    if (!storeZone.enabled) return;
-    const room = scene.getObjectByName("Room_West_Store");
-    if (!room) return;
-    room.getWorldPosition(storeZone.center);
-
-    const dx = Math.abs(player.position.x - storeZone.center.x);
-    const dz = Math.abs(player.position.z - storeZone.center.z);
-    const nowInside = (dx <= storeZone.half.x && dz <= storeZone.half.z);
-
-    if (nowInside !== storeZone.inside) {
-      storeZone.inside = nowInside;
-      StoreSystem?.setActive?.(nowInside);
-      ctx.systems.room_manager?.setRoom?.(ctx, nowInside ? "store" : "lobby");
-    }
-  }
-
-  // -------- Loop ----------
+  // FPS
   let last = performance.now();
+  let fpsAcc = 0, fpsCount = 0, fps = 0;
+
+  // -------------------------
+  // Main Loop
+  // -------------------------
   renderer.setAnimationLoop((time) => {
     const dt = Math.min(0.05, (time - last) / 1000);
     last = time;
 
-    try { World?.update?.(ctx, dt); } catch {}
+    fpsAcc += dt; fpsCount++;
+    if (fpsAcc >= 0.5) { fps = Math.round(fpsCount / fpsAcc); fpsAcc = 0; fpsCount = 0; }
 
-    // optional updates
-    try { ctx.systems.ui?.update?.(ctx, dt); } catch {}
-    try { ctx.systems.store?.update?.(ctx, dt); } catch {}
+    try { worldMod.World?.update?.(ctx, dt); } catch {}
 
     if (renderer.xr.isPresenting) {
       const { gpL, gpR } = getGamepads();
 
-      // Left stick move (0,1)
+      // Left stick move (Quest: axes 0,1)
       if (gpL?.axes?.length >= 2) {
         const lx = gpL.axes[0] ?? 0;
         const ly = gpL.axes[1] ?? 0;
@@ -310,7 +391,7 @@
         player.position.z += Math.cos(yaw) * forward - Math.sin(yaw) * strafe;
       }
 
-      // Right stick forward/back solo (3)
+      // Right stick forward/back solo (Quest: axes 3)
       if (gpR?.axes?.length >= 4) {
         const ry = gpR.axes[3] ?? 0;
         if (Math.abs(ry) > 0.12) {
@@ -321,7 +402,7 @@
         }
       }
 
-      // Right stick snap turn (2)
+      // Right stick snap turn (Quest: axes 2)
       snapCooldown = Math.max(0, snapCooldown - dt);
       const rx = (gpR?.axes?.length >= 4) ? (gpR.axes[2] ?? 0) : (gpR?.axes?.[0] ?? 0);
       if (snapCooldown <= 0 && Math.abs(rx) > 0.75) {
@@ -329,22 +410,32 @@
         snapCooldown = 0.28;
       }
 
-      // Teleport (one press -> one leap)
+      // Teleport: one leap per press
       const canTeleport = updateTeleportRay();
       const pressed = teleportPressed(gpR);
       if (pressed && !lastTeleport && canTeleport) {
         player.position.set(hit.x, 0, hit.z);
+        LOG.push("log", `Teleport ✅ x=${hit.x.toFixed(2)} z=${hit.z.toFixed(2)}`);
       }
       lastTeleport = pressed;
-
-      updateStoreZone();
     } else {
       laser.visible = false;
       ring.visible = false;
       lastTeleport = false;
-      updateStoreZone();
     }
+
+    setMetrics([
+      ["FPS", `${fps}`],
+      ["XR Presenting", renderer.xr.isPresenting ? "YES" : "NO"],
+      ["Rig (x,z)", `${player.position.x.toFixed(2)}, ${player.position.z.toFixed(2)}`],
+      ["Yaw°", `${Math.round(THREE.MathUtils.radToDeg(player.rotation.y))}`],
+      ["TeleportRay", ring.visible ? "ON" : "OFF"],
+      ["Colliders", `${ctx.colliders?.length ?? 0}`],
+    ]);
 
     renderer.render(scene, camera);
   });
+
+  await setCaps();
+  LOG.push("log", "Hybrid 4.3 boot complete ✅ (HUD diagnostics restored + buttons working)");
 })();

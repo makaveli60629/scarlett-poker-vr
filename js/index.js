@@ -3,7 +3,7 @@
 
 import * as THREE from "three";
 import { VRButton } from "three/examples/jsm/webxr/VRButton.js";
-import { World } from "./world.js";
+import { World } from ".js/world.js";
 
 const L = window.ScarlettLog?.push || console.log;
 window.ScarlettLog?.setMode?.("init");

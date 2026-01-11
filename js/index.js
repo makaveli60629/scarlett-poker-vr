@@ -1,5 +1,5 @@
-// /js/index.js — MASTER SAFE Loader (JS folder)
-// Fixes: "world.js does not provide an export named 'World'"
+// /js/index.js — MASTER SAFE Loader v2 (supports init/build/start/create)
+// Fixes: HybridWorld exists but lacks .init()
 
 import * as THREE from "three";
 import { VRButton } from "three/examples/jsm/webxr/VRButton.js";
@@ -35,7 +35,7 @@ scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.85));
 
 L("[index] renderer/camera/rig ✅", "ok");
 
-// VR button
+// VR Button
 try {
   const b = VRButton.createButton(renderer);
   document.getElementById("vrSlot")?.appendChild(b);
@@ -50,10 +50,10 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
 });
 
-// placeholder controllers object expected by your world pipeline
+// controllers placeholder compatible with your project
 const controllers = { left: null, right: null, lasers: [] };
 
-async function resolveWorld() {
+async function loadWorldExport() {
   setMode("importing world");
   L("[index] importing ./world.js …");
 
@@ -61,8 +61,7 @@ async function resolveWorld() {
   const keys = Object.keys(mod);
   L("[index] world.js exports: " + (keys.length ? keys.join(", ") : "(none)"), keys.length ? "ok" : "warn");
 
-  // Common names across your versions
-  const candidate =
+  const obj =
     mod.World ||
     mod.HybridWorld ||
     mod.WorldSystem ||
@@ -70,22 +69,41 @@ async function resolveWorld() {
     mod.default ||
     null;
 
-  if (!candidate) {
-    throw new Error("world.js exports no World/HybridWorld/default. Fix export in /js/world.js.");
-  }
-  if (typeof candidate.init !== "function") {
-    throw new Error("Loaded world export but missing .init(). Fix /js/world.js export object.");
-  }
-  return candidate;
+  if (!obj) throw new Error("world.js exports no usable World/HybridWorld/default.");
+
+  return obj;
+}
+
+function pickWorldEntrypoint(obj) {
+  // Most common names across your versions:
+  const fn =
+    (typeof obj.init === "function" && { name: "init", fn: obj.init.bind(obj) }) ||
+    (typeof obj.build === "function" && { name: "build", fn: obj.build.bind(obj) }) ||
+    (typeof obj.start === "function" && { name: "start", fn: obj.start.bind(obj) }) ||
+    (typeof obj.create === "function" && { name: "create", fn: obj.create.bind(obj) }) ||
+    null;
+
+  return fn;
 }
 
 (async () => {
   try {
     setMode("loading world");
-    const WorldLike = await resolveWorld();
+    const WorldLike = await loadWorldExport();
 
-    L("[index] calling world.init() …");
-    await WorldLike.init({
+    // Tell us what methods exist (so we can standardize later)
+    const methods = Object.keys(WorldLike).filter(k => typeof WorldLike[k] === "function");
+    L("[index] world methods: " + (methods.length ? methods.join(", ") : "(none)"), methods.length ? "ok" : "warn");
+
+    const entry = pickWorldEntrypoint(WorldLike);
+    if (!entry) {
+      throw new Error("World export has no init/build/start/create function.");
+    }
+
+    L(`[index] calling world.${entry.name}() …`);
+
+    // Unified context object (your worlds vary)
+    const ctx = {
       THREE,
       scene,
       renderer,
@@ -94,18 +112,26 @@ async function resolveWorld() {
       controllers,
       log: console.log,
       BUILD: Date.now()
-    });
+    };
 
-    L("[index] world init ✅", "ok");
+    // Call the entry function
+    const result = await entry.fn(ctx);
+
+    // Some worlds return an object; some mutate scene directly; both are fine.
+    if (result && typeof result === "object") {
+      L("[index] world entry returned object ✅", "ok");
+    }
+
+    L("[index] world start ✅", "ok");
     setMode("ready");
   } catch (e) {
-    L("[index] world init FAIL ❌", "bad");
+    L("[index] world start FAIL ❌", "bad");
     L(String(e?.stack || e), "muted");
     setMode("world fail");
   }
 })();
 
-// render loop keeps screen alive even if world fails
+// render loop keeps UI alive even if world fails
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   clock.getDelta();

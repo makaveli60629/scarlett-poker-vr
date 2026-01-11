@@ -1,16 +1,15 @@
-// /js/world.js — Scarlett VR Poker HybridWorld 1.2 (FULL, Quest-safe, Android-dev friendly)
-// ✅ Entry: HybridWorld.build(...), HybridWorld.frame(...)
-// ✅ Never-black base scene always
-// ✅ Optional core modules:
-//    ./boss_table.js, ./table_factory.js, ./bots.js, ./poker_sim.js, ./room_manager.js,
-//    ./teleport_machine.js OR ./teleport.js
-// ✅ Added modules (optional):
-//    ./touch_controls.js, ./lobby_decor.js, ./store_room.js, ./spectator.js, ./seating.js, ./chips.js
-// ✅ Android: left joystick move, right drag look, buttons: DBG/HUD/TABLE/REBUILD/SAFE
-// ✅ Debug overlay minimizable (adds CSS class 'min' / 'hide')
-// ✅ VR: VRPanel left pinch toggle, right pinch click
-// ✅ Seat rings: when VRPanel hidden, right pinch selects seat ring
-// ✅ Demo chips bet loop (until PokerSim events wired)
+// /js/world.js — Scarlett VR Poker HybridWorld 1.3 (FULL)
+// ✅ Android-dev friendly (TouchControls)
+// ✅ Quest-safe
+// ✅ IMPORTANT CHANGE: VRPanel (the 3D HUD) is now **XR-only**
+//    -> It will NOT appear in Android/2D anymore.
+//    -> It appears ONLY after Enter VR (sessionstart), and is removed on sessionend.
+//
+// Optional core modules:
+//   ./boss_table.js, ./table_factory.js, ./bots.js, ./poker_sim.js, ./room_manager.js,
+//   ./teleport_machine.js OR ./teleport.js
+// Added optional modules:
+//   ./touch_controls.js, ./lobby_decor.js, ./store_room.js, ./spectator.js, ./seating.js, ./chips.js
 
 import { TouchControls } from "./touch_controls.js";
 
@@ -36,19 +35,20 @@ export const HybridWorld = (() => {
       safeMode: false
     },
 
-    // anchors
     spawn: null,
     facingTarget: null,
 
-    // containers
     root: null,
     floor: null,
 
-    // loaded modules + systems
     mods: {},
     systems: {},
 
-    built: false
+    built: false,
+
+    // internal
+    __xrListenersAdded: false,
+    __betTimer: 0
   };
 
   // -----------------------
@@ -284,8 +284,7 @@ export const HybridWorld = (() => {
       startAudio,
       setChannel,
       updateSpatial,
-      dispose,
-      get screen() { return st.screen; }
+      dispose
     };
   })();
 
@@ -294,7 +293,7 @@ export const HybridWorld = (() => {
   }
 
   // -----------------------
-  // VR Panel (pinch toggle + pinch click)
+  // VR Panel (XR ONLY)
   // -----------------------
   function makeVRPanel() {
     const THREE = state.THREE;
@@ -351,7 +350,7 @@ export const HybridWorld = (() => {
       return a.distanceTo(b) < 0.02;
     }
 
-    async function handlePress(label) {
+    async function handlePress(label, api) {
       safeLog("[vrpanel] press", label);
 
       if (label === "Hide") { g.visible = false; return; }
@@ -431,13 +430,53 @@ export const HybridWorld = (() => {
           // RIGHT pinch clicks
           if (cooldown === 0 && pinch(state.controllers?.handRight)) {
             cooldown = 0.25;
-            handlePress(hit.userData.label);
+            handlePress(hit.userData.label, api);
           }
         }
       }
     };
 
     return api;
+  }
+
+  function ensureXRPanelLifecycle(renderer) {
+    if (state.__xrListenersAdded) return;
+    state.__xrListenersAdded = true;
+
+    renderer.xr.addEventListener("sessionstart", () => {
+      try {
+        // create panel only now (XR)
+        const panel = makeVRPanel();
+        state.systems.vrpanel = panel;
+        state.camera.add(panel.group);
+
+        panel.rebuildFromPanel = async () => {
+          await api.rebuild({
+            THREE: state.THREE,
+            renderer: state.renderer,
+            camera: state.camera,
+            player: state.player,
+            controllers: state.controllers,
+            log: state.log,
+            OPTS: state.OPTS
+          });
+        };
+
+        safeLog("[vrpanel] XR sessionstart ✅ (panel created)");
+      } catch (e) {
+        safeLog("[vrpanel] XR sessionstart FAIL", e?.message || e);
+      }
+    });
+
+    renderer.xr.addEventListener("sessionend", () => {
+      try {
+        if (state.systems.vrpanel?.group?.parent) {
+          state.systems.vrpanel.group.parent.remove(state.systems.vrpanel.group);
+        }
+      } catch(e) {}
+      state.systems.vrpanel = null;
+      safeLog("[vrpanel] XR sessionend ✅ (panel removed)");
+    });
   }
 
   // -----------------------
@@ -471,8 +510,9 @@ export const HybridWorld = (() => {
       camera.rotation.x = pitch;
     });
 
-    // Touch controls UI (Android)
+    // Touch UI (Android)
     const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
+
     const touchAPI = {
       toggleDebug: () => {
         const o = document.getElementById("overlay");
@@ -488,12 +528,11 @@ export const HybridWorld = (() => {
         }
       },
       gotoTable: () => {
-        // Safe snap for debugging
         player.position.set(0, 0, 4.2);
         player.rotation.set(0, Math.PI, 0);
       },
       rebuild: async () => {
-        try { await state.systems.vrpanel?.rebuildFromPanel?.(); }
+        try { await api.rebuild({ THREE: state.THREE, renderer: state.renderer, camera: state.camera, player: state.player, controllers: state.controllers, log: state.log, OPTS: state.OPTS }); }
         catch (e) { state.log?.("[touch] rebuild failed", e?.message || e); }
       },
       safeMode: () => {
@@ -568,7 +607,7 @@ export const HybridWorld = (() => {
     const THREE = state.THREE;
     const root = ensureRoot();
 
-    // Clear root
+    // Clear root content
     if (root.children.length) {
       for (let i = root.children.length - 1; i >= 0; i--) {
         const c = root.children[i];
@@ -645,7 +684,7 @@ export const HybridWorld = (() => {
     const tablePos = new THREE.Vector3(0,0,0);
     try { tableObj.getWorldPosition(tablePos); } catch(e) {}
 
-    // DECOR / hallways vibe
+    // DECOR
     if (decorMod?.LobbyDecor?.init) {
       try { state.systems.decor = decorMod.LobbyDecor.init({ THREE, root, log: state.log }); safeLog("[decor] init ✅"); }
       catch (e) { safeLog("[decor] init FAIL", e?.message || e); }
@@ -696,7 +735,7 @@ export const HybridWorld = (() => {
           potPos: new THREE.Vector3(tablePos.x, 0, tablePos.z)
         });
 
-        state.systems.__betTimer = 0;
+        state.__betTimer = 0;
         safeLog("[chips] init ✅");
       } catch (e) { safeLog("[chips] init FAIL", e?.message || e); }
     }
@@ -758,7 +797,7 @@ export const HybridWorld = (() => {
   // -----------------------
   // Public API
   // -----------------------
-  return {
+  const api = {
     startAudio,
 
     async build({ THREE, renderer, camera, player, controllers, log, OPTS }) {
@@ -780,28 +819,17 @@ export const HybridWorld = (() => {
       attachHandsToRig();
       setSpawnAndFacing();
 
+      // XR-only panel lifecycle (prevents the untouchable HUD in Android/2D)
+      ensureXRPanelLifecycle(renderer);
+      state.systems.vrpanel = null; // explicitly none in 2D
+
       if (state.OPTS.nonvrControls !== false) installNonVRControls();
-
-      state.systems.vrpanel = makeVRPanel();
-      state.camera.add(state.systems.vrpanel.group);
-
-      state.systems.vrpanel.rebuildFromPanel = async () => {
-        await this.rebuild({
-          THREE: state.THREE,
-          renderer: state.renderer,
-          camera: state.camera,
-          player: state.player,
-          controllers: state.controllers,
-          log: state.log,
-          OPTS: state.OPTS
-        });
-      };
 
       await buildModules();
 
       state.built = true;
       safeLog("[world] HybridWorld built ✅");
-      safeLog("[world] VR Panel: LEFT pinch toggle, RIGHT pinch click ✅");
+      safeLog("[world] VRPanel is XR-only ✅ (no 2D HUD)");
     },
 
     async rebuild(ctx) {
@@ -816,11 +844,13 @@ export const HybridWorld = (() => {
       try { state.systems.store?.dispose?.(); } catch(e) {}
       try { state.systems.chips?.dispose?.(); } catch(e) {}
 
+      // remove XR panel if present (XR only)
       try {
         if (state.systems.vrpanel?.group?.parent) {
           state.systems.vrpanel.group.parent.remove(state.systems.vrpanel.group);
         }
       } catch(e) {}
+      state.systems.vrpanel = null;
 
       Stream.dispose();
 
@@ -833,11 +863,13 @@ export const HybridWorld = (() => {
       state.root = null;
 
       const keepNonVR = state.systems.nonvr;
+      const keepTouch = state.systems.__touch;
       state.mods = {};
       state.systems = {};
       if (keepNonVR?.__installed) state.systems.nonvr = keepNonVR;
+      if (keepTouch) state.systems.__touch = keepTouch;
 
-      await this.build(ctx);
+      await api.build(ctx);
     },
 
     frame({ renderer, camera }) {
@@ -860,17 +892,17 @@ export const HybridWorld = (() => {
 
       // demo bet loop
       try {
-        if (state.systems.__betTimer !== undefined && state.systems.chips?.bet) {
-          state.systems.__betTimer += dt;
-          if (state.systems.__betTimer > 2.0) {
-            state.systems.__betTimer = 0;
-            const seatId = "P" + (1 + Math.floor(Math.random()*8));
-            state.systems.chips.bet(seatId, 1 + Math.floor(Math.random()*3));
+        if (state.systems.chips?.bet) {
+          state.__betTimer += dt;
+          if (state.__betTimer > 2.0) {
+            state.__betTimer = 0;
+            const seatId = "P" + (1 + Math.floor(Math.random() * 8));
+            state.systems.chips.bet(seatId, 1 + Math.floor(Math.random() * 3));
           }
         }
       } catch(e) {}
 
-      // VR seat click (panel hidden)
+      // XR seat click (only in XR, when panel hidden)
       try {
         if (state.renderer?.xr?.isPresenting) {
           const panelVisible = !!state.systems.vrpanel?.group?.visible;
@@ -898,4 +930,6 @@ export const HybridWorld = (() => {
       renderer.render(state.scene, camera);
     }
   };
+
+  return api;
 })();

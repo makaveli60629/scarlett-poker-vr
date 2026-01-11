@@ -1,100 +1,51 @@
-// /js/VRButton.js — Scarlett VRButton (FULL, Quest-safe)
-// Always creates a visible button with id="VRButton".
-// Works on GitHub Pages + Meta Quest Browser.
-
+// /js/VRButton.js — minimal VRButton (ESM) for Three.js WebXR
 export const VRButton = {
-  createButton(renderer, sessionInit = {}) {
+  createButton(renderer) {
     const button = document.createElement("button");
     button.id = "VRButton";
-    button.type = "button";
     button.textContent = "ENTER VR";
+    button.style.position = "fixed";
+    button.style.right = "18px";
+    button.style.bottom = "18px";
+    button.style.padding = "12px 16px";
+    button.style.borderRadius = "14px";
+    button.style.border = "1px solid rgba(255,255,255,.25)";
+    button.style.background = "rgba(10,14,24,.65)";
+    button.style.color = "#e8ecff";
+    button.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    button.style.fontWeight = "700";
+    button.style.letterSpacing = "0.5px";
+    button.style.backdropFilter = "blur(8px)";
+    button.style.zIndex = "9999";
 
-    button.style.cssText = `
-      position: fixed;
-      right: 12px;
-      bottom: 12px;
-      padding: 12px 14px;
-      border: 1px solid rgba(127,231,255,.45);
-      border-radius: 14px;
-      background: rgba(11,13,20,.88);
-      color: #e8ecff;
-      font: 800 14px system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      letter-spacing: .3px;
-      box-shadow: 0 14px 45px rgba(0,0,0,.55);
-      z-index: 999999;
-      cursor: pointer;
-      -webkit-tap-highlight-color: transparent;
-    `;
-
-    let currentSession = null;
-
-    async function onSessionStarted(session) {
-      session.addEventListener("end", onSessionEnded);
-      await renderer.xr.setSession(session);
-      currentSession = session;
-      button.textContent = "EXIT VR";
-      console.log("[VRButton] session started ✅");
-    }
-
-    function onSessionEnded() {
-      currentSession = null;
-      button.textContent = "ENTER VR";
-      console.log("[VRButton] session ended ✅");
-    }
-
-    async function isSupported() {
-      try {
-        if (!navigator.xr) return false;
-        return await navigator.xr.isSessionSupported("immersive-vr");
-      } catch (e) {
-        console.warn("[VRButton] isSessionSupported error:", e);
-        return false;
+    async function init() {
+      if (!navigator.xr) {
+        button.textContent = "XR NOT FOUND";
+        button.disabled = true;
+        return;
       }
-    }
 
-    button.onclick = async () => {
-      try {
-        if (!navigator.xr) {
-          alert("WebXR not available in this browser.");
-          return;
-        }
-
-        if (currentSession === null) {
-          const init = {
-            optionalFeatures: [
-              "local-floor",
-              "bounded-floor",
-              "hand-tracking",
-              "layers",
-              "dom-overlay"
-            ],
-            ...sessionInit
-          };
-
-          if (init.optionalFeatures?.includes("dom-overlay")) {
-            init.domOverlay = init.domOverlay || { root: document.body };
-          }
-
-          const session = await navigator.xr.requestSession("immersive-vr", init);
-          await onSessionStarted(session);
-        } else {
-          await currentSession.end();
-        }
-      } catch (e) {
-        console.error("[VRButton] requestSession failed ❌", e);
-        alert("VR failed to start. Open DevTools Console for the red error.");
-      }
-    };
-
-    isSupported().then((supported) => {
-      console.log("[VRButton] isSessionSupported(immersive-vr) =", supported);
-      if (!supported) {
+      const ok = await navigator.xr.isSessionSupported("immersive-vr");
+      if (!ok) {
         button.textContent = "VR NOT SUPPORTED";
-        button.style.opacity = "0.65";
-        button.style.borderColor = "rgba(255,107,107,.55)";
+        button.disabled = true;
+        return;
       }
-    });
 
+      button.onclick = async () => {
+        try {
+          const session = await navigator.xr.requestSession("immersive-vr", {
+            optionalFeatures: ["local-floor", "bounded-floor", "local", "hand-tracking", "layers", "dom-overlay"],
+            domOverlay: { root: document.body }
+          });
+          renderer.xr.setSession(session);
+        } catch (e) {
+          console.error(e);
+        }
+      };
+    }
+
+    init();
     return button;
   }
 };

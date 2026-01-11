@@ -1,4 +1,4 @@
-// /js/index.js — MASTER Runtime (HybridWorld build + frame-compatible)
+// /js/index.js — MASTER Runtime + GUARANTEED ENTER VR
 
 import * as THREE from "three";
 import { VRButton } from "three/examples/jsm/webxr/VRButton.js";
@@ -29,26 +29,118 @@ const player = new THREE.Group();
 player.name = "PlayerRig";
 player.add(camera);
 scene.add(player);
-
 scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.85));
 
 L("[index] renderer/camera/rig ✅", "ok");
 
-// VR button
-try{
+// ---------- VR UI (force visible) ----------
+function ensureVROverlay() {
+  let host = document.getElementById("vrSlot");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "vrSlot";
+    document.body.appendChild(host);
+  }
+
+  // FORCE it visible and clickable
+  Object.assign(host.style, {
+    position: "fixed",
+    left: "0",
+    right: "0",
+    bottom: "18px",
+    display: "flex",
+    justifyContent: "center",
+    gap: "10px",
+    zIndex: "99999",
+    pointerEvents: "auto"
+  });
+
+  // Create a manual Enter VR button (always)
+  let manual = document.getElementById("btnEnterVR");
+  if (!manual) {
+    manual = document.createElement("button");
+    manual.id = "btnEnterVR";
+    manual.textContent = "ENTER VR";
+    Object.assign(manual.style, {
+      fontSize: "16px",
+      padding: "12px 18px",
+      borderRadius: "14px",
+      border: "1px solid rgba(127,231,255,.35)",
+      background: "rgba(0,0,0,.55)",
+      color: "#7fe7ff",
+      boxShadow: "0 12px 40px rgba(0,0,0,.45)",
+      cursor: "pointer"
+    });
+    host.appendChild(manual);
+  }
+
+  manual.onclick = async () => {
+    try {
+      L("[vr] manual ENTER VR pressed");
+      if (!navigator.xr) throw new Error("navigator.xr missing");
+
+      const ok = await navigator.xr.isSessionSupported?.("immersive-vr");
+      if (!ok) throw new Error("immersive-vr not supported");
+
+      // Request session directly (Quest will prompt)
+      const session = await navigator.xr.requestSession("immersive-vr", {
+        optionalFeatures: [
+          "local-floor",
+          "bounded-floor",
+          "local",
+          "viewer",
+          "hand-tracking",
+          "layers",
+          "dom-overlay"
+        ],
+        domOverlay: { root: document.body }
+      });
+
+      await renderer.xr.setSession(session);
+      L("[vr] session started ✅", "ok");
+    } catch (e) {
+      L("[vr] manual ENTER VR failed ❌", "bad");
+      L(String(e?.stack || e), "muted");
+      alert("ENTER VR failed: " + (e?.message || e));
+    }
+  };
+
+  return host;
+}
+
+const vrHost = ensureVROverlay();
+
+// Add standard VRButton too (fallback)
+try {
   const b = VRButton.createButton(renderer);
-  document.getElementById("vrSlot")?.appendChild(b);
+
+  // Make VRButton visible no matter what
+  Object.assign(b.style, {
+    fontSize: "16px",
+    padding: "12px 18px",
+    borderRadius: "14px",
+    marginLeft: "10px",
+    opacity: "1",
+    pointerEvents: "auto"
+  });
+
+  vrHost.appendChild(b);
   L("[index] VRButton appended ✅", "ok");
-}catch(e){
+} catch (e) {
   L("[index] VRButton failed: " + (e?.message || e), "warn");
 }
 
-window.addEventListener("resize", ()=>{
+// Log XR session starts/ends
+renderer.xr.addEventListener("sessionstart", () => L("[vr] renderer sessionstart ✅", "ok"));
+renderer.xr.addEventListener("sessionend", () => L("[vr] renderer sessionend", "warn"));
+
+window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
 });
 
+// ---------- World ----------
 const controllers = { left:null, right:null, lasers:[] };
 
 let WorldLike = null;
@@ -72,13 +164,11 @@ async function loadWorld(){
 }
 
 function callWorldFrameSafely(frameFn, ctx, dt, t){
-  // Try common signatures without spamming failures.
-  // Return true if one signature works (no throw), else false.
   try { frameFn(ctx, dt, t); return true; } catch {}
   try { frameFn(ctx); return true; } catch {}
   try { frameFn(dt); return true; } catch {}
   try { frameFn(t, dt); return true; } catch {}
-  try { frameFn(renderer, scene, camera, dt, t); return true; } catch {}
+  try { frameFn(ctx.renderer, ctx.scene, ctx.camera, dt, t); return true; } catch {}
   return false;
 }
 
@@ -87,11 +177,7 @@ function callWorldFrameSafely(frameFn, ctx, dt, t){
     setMode("loading world");
     await loadWorld();
 
-    ctx = {
-      THREE, scene, renderer, camera, player, controllers,
-      log: console.log,
-      BUILD: Date.now()
-    };
+    ctx = { THREE, scene, renderer, camera, player, controllers, log: console.log, BUILD: Date.now() };
 
     L("[index] calling world.build() …");
     await WorldLike.build(ctx);
@@ -105,13 +191,10 @@ function callWorldFrameSafely(frameFn, ctx, dt, t){
   }
 })();
 
-// render loop + world.frame update
+// ---------- Render loop ----------
 const clock = new THREE.Clock();
 let elapsed = 0;
-
-// rate-limit log spam
-let frameErrCount = 0;
-let lastFrameErrAt = 0;
+let lastFrameWarn = 0;
 
 renderer.setAnimationLoop(()=>{
   const dt = clock.getDelta();
@@ -121,11 +204,9 @@ renderer.setAnimationLoop(()=>{
     const ok = callWorldFrameSafely(worldFrame, ctx, dt, elapsed);
     if (!ok){
       const now = performance.now();
-      frameErrCount++;
-      // only log at most once per second
-      if (now - lastFrameErrAt > 1000){
-        lastFrameErrAt = now;
-        console.warn(`[index] world.frame failed (${frameErrCount}x). Check HybridWorld.frame signature.`);
+      if (now - lastFrameWarn > 1200){
+        lastFrameWarn = now;
+        console.warn("[index] world.frame signature mismatch (still running)");
       }
     }
   }

@@ -1,6 +1,7 @@
-// /js/boot.js — MASTER Diagnostics Boot + ImportMap + Loader
-// ✅ Fixes ANY `import "three"` across your repo by injecting an importmap BEFORE loading index.js
-// ✅ Buttons + log capture always work even if game fails
+// /js/boot.js — MASTER Diagnostics Boot (CLEAN)
+// ✅ Buttons + logs always work
+// ✅ Loads /js/index.js with cache-bust
+// NOTE: importmap must be in index.html <head> (do NOT inject here)
 
 const $ = (id) => document.getElementById(id);
 const logPanel = $("logPanel");
@@ -51,21 +52,7 @@ window.ScarlettLog = {
 
 push("[BOOT] boot.js loaded ✅","ok");
 
-// ✅ Inject importmap FIRST so any repo file can do: import "three"
-(function injectImportMap(){
-  const s = document.createElement("script");
-  s.type = "importmap";
-  s.textContent = JSON.stringify({
-    imports: {
-      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-      "three/examples/jsm/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-    }
-  });
-  document.head.appendChild(s);
-  push("[BOOT] importmap injected ✅ (three + examples)", "ok");
-})();
-
-// Capture runtime failures
+// Capture errors
 window.addEventListener("error",(e)=>{
   push(`WINDOW ERROR: ${e.message||e.type}`,"bad");
   if (e.error?.stack) push(e.error.stack,"muted");
@@ -74,7 +61,7 @@ window.addEventListener("unhandledrejection",(e)=>{
   push(`PROMISE REJECT: ${safe(e.reason)}`,"bad");
 });
 
-// Mirror console into panel
+// Mirror console
 const _log=console.log.bind(console);
 const _warn=console.warn.bind(console);
 const _err=console.error.bind(console);
@@ -82,7 +69,7 @@ console.log=(...a)=>{_log(...a); push(a.map(safe).join(" "), "");};
 console.warn=(...a)=>{_warn(...a); push(a.map(safe).join(" "), "warn");};
 console.error=(...a)=>{_err(...a); push(a.map(safe).join(" "), "bad");};
 
-// Buttons ALWAYS work here
+// Buttons
 btnClear?.addEventListener("click", ()=>{
   buf.length=0;
   if (logPanel) logPanel.innerHTML="";
@@ -126,7 +113,7 @@ btnDownload?.addEventListener("click", ()=>{
   URL.revokeObjectURL(url);
 });
 
-// XR support label
+// XR label
 (async ()=>{
   let supported=false;
   try{
@@ -137,12 +124,11 @@ btnDownload?.addEventListener("click", ()=>{
 
 window.ScarlettLog.setMode("boot");
 
-// Load runtime index.js after a tick so importmap registers
+// Load index.js (cache-bust)
 (async ()=>{
   try{
     window.ScarlettLog.setMode("loading index.js");
     push("[BOOT] importing ./js/index.js …");
-    await new Promise(r => setTimeout(r, 0));
     await import(`./index.js?v=${Date.now()}`);
     push("[BOOT] index.js imported ✅","ok");
     window.ScarlettLog.setMode("running");

@@ -1,8 +1,6 @@
-// /js/three.js — FULL Three.js ES Module (Quest + GitHub Pages SAFE)
-// This makes THREE.Scene, THREE.Clock, THREE.WebGLRenderer, etc. all work.
-//
-// IMPORTANT:
-// - Keep your index.html importmap mapping "three" -> "./js/three.js"
-// - Or import this file directly via: import * as THREE from "./three.js";
+// /js/three.js — Scarlett Three Wrapper (NO "three" bare imports anywhere)
 
-export * from "https://unpkg.com/three@0.160.0/build/three.module.js";
+export * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+
+export { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
+export { XRControllerModelFactory } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/XRControllerModelFactory.js";

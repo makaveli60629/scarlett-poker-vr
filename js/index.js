@@ -1,4 +1,8 @@
-// /js/index.js — XR-FIRST MASTER (fixes “VR is black even with probes”)
+// /js/index.js — XR Session Guaranteed + Watchdog (Quest black / missing sessionstart)
+// ✅ Manual ENTER VR button (direct requestSession + setSession)
+// ✅ Poll watchdog for renderer.xr.isPresenting
+// ✅ Still includes probes + debug room + controller rays
+// ✅ XR loop starts when presenting (event OR watchdog)
 
 import * as THREE from "three";
 import { VRButton } from "three/examples/jsm/webxr/VRButton.js";
@@ -12,16 +16,16 @@ setMode("init");
 const app = document.getElementById("app");
 if (!app) throw new Error("FATAL: #app missing");
 
+L(`[env] secureContext=${window.isSecureContext} ua=${navigator.userAgent}`, "ok");
+L(`[env] navigator.xr=${!!navigator.xr}`, navigator.xr ? "ok" : "bad");
+
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.xr.enabled = true;
 renderer.autoClear = true;
-
-// HARD clear color (if you still see black, XR layer isn’t presenting)
 renderer.setClearColor(0x2244ff, 1);
-
 app.appendChild(renderer.domElement);
 
 renderer.domElement.addEventListener("webglcontextlost", (e) => {
@@ -43,7 +47,7 @@ player.name = "PlayerRig";
 player.add(camera);
 scene.add(player);
 
-// Lights (doesn’t matter for MeshBasic probes, but keep anyway)
+// Lights (extra safety)
 scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.2));
 const headLamp = new THREE.PointLight(0xffffff, 2.7, 40);
 camera.add(headLamp);
@@ -56,7 +60,7 @@ const axes = new THREE.AxesHelper(2);
 axes.position.y = 0.02;
 debugRoot.add(axes);
 
-// Probes (NO lighting needed)
+// Probes (MeshBasic = must show if rendering)
 const probeRoot = new THREE.Group();
 player.add(probeRoot);
 
@@ -76,10 +80,78 @@ probeRoot.add(sphere);
 
 L("[index] probes + debug room installed ✅", "ok");
 
-// VRButton
+// UI host for buttons
+function ensureHost() {
+  let host = document.getElementById("vrSlot");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "vrSlot";
+    document.body.appendChild(host);
+  }
+  Object.assign(host.style, {
+    position: "fixed",
+    left: "0",
+    right: "0",
+    bottom: "18px",
+    display: "flex",
+    justifyContent: "center",
+    gap: "10px",
+    zIndex: "99999",
+    pointerEvents: "auto"
+  });
+  return host;
+}
+
+function makeBtn(text) {
+  const b = document.createElement("button");
+  b.textContent = text;
+  Object.assign(b.style, {
+    fontSize: "16px",
+    padding: "12px 18px",
+    borderRadius: "14px",
+    border: "1px solid rgba(127,231,255,.35)",
+    background: "rgba(0,0,0,.55)",
+    color: "#7fe7ff",
+    boxShadow: "0 12px 40px rgba(0,0,0,.45)",
+    cursor: "pointer"
+  });
+  return b;
+}
+
+const host = ensureHost();
+
+// Manual ENTER VR (this is the important part)
+const enterVR = makeBtn("ENTER VR (MANUAL)");
+host.appendChild(enterVR);
+
+enterVR.onclick = async () => {
+  try {
+    L("[vr] manual enter pressed");
+    if (!navigator.xr) throw new Error("navigator.xr missing");
+    const supported = await navigator.xr.isSessionSupported?.("immersive-vr");
+    L("[vr] isSessionSupported(immersive-vr)=" + supported, supported ? "ok" : "bad");
+    if (!supported) throw new Error("immersive-vr not supported");
+
+    const session = await navigator.xr.requestSession("immersive-vr", {
+      optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking", "layers"],
+    });
+
+    L("[vr] requestSession ✅, calling renderer.xr.setSession() …", "ok");
+    await renderer.xr.setSession(session);
+
+    // log session events too (not just renderer)
+    session.addEventListener("end", () => L("[vr] session end event", "warn"));
+    L("[vr] renderer.xr.setSession ✅", "ok");
+  } catch (e) {
+    L("[vr] manual enter FAIL ❌", "bad");
+    L(String(e?.stack || e), "muted");
+    alert("ENTER VR failed: " + (e?.message || e));
+  }
+};
+
+// Standard VRButton (still useful)
 try {
   const btn = VRButton.createButton(renderer);
-  const host = document.getElementById("vrSlot") || document.body;
   host.appendChild(btn);
   L("[index] VRButton appended ✅", "ok");
 } catch (e) {
@@ -112,7 +184,7 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
 });
 
-// ---- World build (keep, but it is NOT required to see probes) ----
+// ---- World build (keep) ----
 let WorldLike = null;
 let ctx = null;
 let worldFrame = null;
@@ -122,10 +194,12 @@ async function loadWorld() {
   L("[index] importing ./world.js …");
   const mod = await import("./world.js");
   L("[index] world.js exports: " + Object.keys(mod).join(", "), "ok");
+
   WorldLike = mod.World || mod.HybridWorld || mod.default || null;
   if (!WorldLike) throw new Error("No usable world export found.");
+
+  if (typeof WorldLike.frame === "function") worldFrame = WorldLike.frame.bind(WorldLike);
   if (typeof WorldLike.build === "function") {
-    if (typeof WorldLike.frame === "function") worldFrame = WorldLike.frame.bind(WorldLike);
     ctx = { THREE, scene, renderer, camera, player, controllers, log: console.log, BUILD: Date.now() };
     L("[index] calling world.build() …");
     await WorldLike.build(ctx);
@@ -139,7 +213,7 @@ loadWorld().catch(e => {
   L(String(e?.stack || e), "muted");
 });
 
-// ---- XR-FIRST loops ----
+// ---- XR-FIRST loops + watchdog ----
 const clock = new THREE.Clock();
 let elapsed = 0;
 
@@ -147,7 +221,6 @@ function tick() {
   const dt = clock.getDelta();
   elapsed += dt;
 
-  // keep forcing clear color in case background doesn’t apply in XR
   renderer.setClearColor(0x2244ff, 1);
 
   if (worldFrame && ctx) {
@@ -157,7 +230,7 @@ function tick() {
   renderer.render(scene, camera);
 }
 
-// 2D loop (always runs when NOT in XR)
+// 2D loop
 let rafId = 0;
 function start2DLoop() {
   cancelAnimationFrame(rafId);
@@ -170,20 +243,36 @@ function start2DLoop() {
   loop();
 }
 
-// XR loop (ONLY when XR session starts)
+// XR loop
 function startXRLoop() {
   renderer.setAnimationLoop(() => tick());
 }
 
+// Event-based switching (if it fires)
 renderer.xr.addEventListener("sessionstart", () => {
-  L("[vr] sessionstart ✅ (switching to XR loop)", "ok");
+  L("[vr] renderer sessionstart ✅", "ok");
   startXRLoop();
 });
 renderer.xr.addEventListener("sessionend", () => {
-  L("[vr] sessionend (switching to 2D loop)", "warn");
+  L("[vr] renderer sessionend", "warn");
   renderer.setAnimationLoop(null);
   start2DLoop();
 });
 
+// WATCHDOG (works even if events don’t fire)
+let lastPresenting = false;
+setInterval(() => {
+  const p = !!renderer.xr.isPresenting;
+  if (p !== lastPresenting) {
+    lastPresenting = p;
+    L("[vr] presenting=" + p, p ? "ok" : "warn");
+    if (p) startXRLoop();
+    else {
+      renderer.setAnimationLoop(null);
+      start2DLoop();
+    }
+  }
+}, 250);
+
 start2DLoop();
-L("[index] loops armed ✅ (2D now, XR on sessionstart)", "ok");
+L("[index] loops armed ✅ (2D now, XR on presenting)", "ok");

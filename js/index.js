@@ -1,20 +1,27 @@
-// /js/index.js — Scarlett VR Poker Boot + Diagnostic Recorder v3.0 (FULL)
-// ✅ Captures ALL errors: console + window.onerror + unhandledrejection
-// ✅ Writes into #overlay + keeps a memory buffer (for copy)
-// ✅ Exposes window.SCARLETT.copyLog(), respawnSafe(), gotoTable()
-// ✅ Boots HybridWorld
-// ✅ Prints spawn telemetry each second (player/camera heights)
+// /js/index.js — Scarlett VR Poker Boot + Android Controls + Full Diagnostics v4.0 (FULL)
+// ✅ Works with FULL WORLD world.js (HybridWorld)
+// ✅ Android movement: touch_controls.js (if present) + keyboard fallback
+// ✅ Full diagnostics: console hijack + window.onerror + unhandledrejection + COPY LOG buffer
+// ✅ Fixes “floating”: exposes RESPawn SAFE + SNAP DOWN (calls HybridWorld + hard fallback)
+// ✅ Cache-bust friendly (set INDEX_VERSION)
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
-import { HybridWorld } from "./world.js";
+
+// ====== IMPORTANT: bump this number anytime you change files to defeat cache
+const INDEX_VERSION = 4001;
+
+// Load world with cache-bust
+const { HybridWorld } = await import(`./world.js?v=${INDEX_VERSION}`);
 
 const BUILD_STAMP = Date.now();
 const overlay = document.getElementById("overlay");
 
-// --- log buffer (for copy)
+// --------------------
+// Log recorder (overlay + memory buffer)
+// --------------------
 const LOG = [];
-const LOG_MAX = 2000;
+const LOG_MAX = 2500;
 
 function pushLog(line) {
   LOG.push(line);
@@ -29,34 +36,33 @@ function writeOverlay(line, cls = "muted") {
     div.textContent = line;
     overlay.appendChild(div);
     overlay.scrollTop = overlay.scrollHeight;
-  } catch(e){}
+  } catch (e) {}
 }
 
-function logLine(line, cls="muted") {
+function logLine(line, cls = "muted") {
   const s = String(line);
   pushLog(s);
   writeOverlay(s, cls);
-  // still mirror to real console
-  try { console.log(s); } catch(e){}
+  try { console.log(s); } catch (e) {}
 }
 
-const ok   = (m)=>logLine(`✅ ${m}`, "ok");
-const warn = (m)=>logLine(`⚠️ ${m}`, "warn");
-const bad  = (m)=>logLine(`❌ ${m}`, "bad");
+const ok   = (m) => logLine(`✅ ${m}`, "ok");
+const warn = (m) => logLine(`⚠️ ${m}`, "warn");
+const bad  = (m) => logLine(`❌ ${m}`, "bad");
 
-// --- Capture console output too (so module loaders that use console get recorded)
-(function hijackConsole(){
+// Hijack console so anything written to console becomes copyable
+(function hijackConsole() {
   const orig = {
     log: console.log.bind(console),
     warn: console.warn.bind(console),
-    error: console.error.bind(console)
+    error: console.error.bind(console),
   };
-  console.log = (...a) => { orig.log(...a);  logLine(a.map(String).join(" "), "muted"); };
-  console.warn= (...a) => { orig.warn(...a); logLine(a.map(String).join(" "), "warn"); };
-  console.error=(...a) => { orig.error(...a);logLine(a.map(String).join(" "), "bad"); };
+  console.log = (...a) => { orig.log(...a);  try { logLine(a.map(String).join(" "), "muted"); } catch(e){} };
+  console.warn= (...a) => { orig.warn(...a); try { logLine(a.map(String).join(" "), "warn"); } catch(e){} };
+  console.error=(...a) => { orig.error(...a);try { logLine(a.map(String).join(" "), "bad"); } catch(e){} };
 })();
 
-// --- Global error capture (this is what you were missing)
+// Global error capture
 window.addEventListener("error", (e) => {
   const msg = e?.message || "window.error";
   const src = e?.filename ? ` @ ${e.filename}:${e.lineno}:${e.colno}` : "";
@@ -65,47 +71,57 @@ window.addEventListener("error", (e) => {
 });
 
 window.addEventListener("unhandledrejection", (e) => {
-  const r = e?.reason;
   bad("UNHANDLED PROMISE REJECTION:");
+  const r = e?.reason;
   if (r?.message) bad(r.message);
   else bad(String(r));
   if (r?.stack) logLine(r.stack, "bad");
 });
 
-// --- Anti-gesture
+// --------------------
+// Anti gesture (Android)
+// --------------------
 function lockTouchGestures() {
   try {
     document.documentElement.style.touchAction = "none";
     document.body.style.touchAction = "none";
     window.addEventListener("contextmenu", (e) => e.preventDefault(), { passive: false });
-  } catch(e){}
+    window.addEventListener("gesturestart", (e) => e.preventDefault(), { passive: false });
+    window.addEventListener("gesturechange", (e) => e.preventDefault(), { passive: false });
+    window.addEventListener("gestureend", (e) => e.preventDefault(), { passive: false });
+  } catch (e) {}
 }
 
-// --- Copy
-async function copyLog() {
+// --------------------
+// Clipboard helpers
+// --------------------
+async function copyLogToClipboard() {
   const text = LOG.join("\n");
-  if (!text.trim()) return { ok:false, reason:"empty" };
+  if (!text.trim()) { warn("Nothing to copy"); return { ok:false, reason:"empty" }; }
   try {
     await navigator.clipboard.writeText(text);
     ok("Copied log to clipboard ✅");
     return { ok:true };
-  } catch(e) {
-    warn("Clipboard blocked — selecting log text instead");
+  } catch (e) {
+    // fallback: select overlay
     try {
       const range = document.createRange();
       range.selectNodeContents(overlay);
       const sel = window.getSelection();
       sel.removeAllRanges();
       sel.addRange(range);
+      warn("Clipboard blocked — selected text (use Copy)");
       return { ok:false, reason:"clipboard-blocked" };
-    } catch(e2) {
+    } catch (e2) {
       bad("Copy failed");
       return { ok:false, reason:"copy-failed" };
     }
   }
 }
 
-// --- Boot header
+// --------------------
+// THREE boot
+// --------------------
 function header() {
   logLine(`BUILD_STAMP: ${BUILD_STAMP}`);
   logLine(`TIME: ${new Date().toLocaleString()}`);
@@ -160,61 +176,115 @@ function attachVRButton(renderer) {
   }
 }
 
-// --- Spawn telemetry + snap-down helper (fix “floating”)
-function installSpawnTelemetry({ renderer, player, camera }) {
-  const tmpV = new THREE.Vector3();
-  const tmpV2 = new THREE.Vector3();
-  const ray = new THREE.Raycaster();
-
-  function snapDown(reason="snap") {
-    // raycast from camera down; align rig base to floor hit
+// --------------------
+// Optional: Touch controls module (Android joystick)
+// --------------------
+async function initTouchControls(ctx) {
+  // If you already have /js/touch_controls.js in your project, this will run it.
+  // It should export { TouchControls } or default.
+  const mod = await (async () => {
     try {
-      const cam = renderer.xr.isPresenting ? renderer.xr.getCamera(camera) : camera;
-      cam.getWorldPosition(tmpV);
-
-      ray.set(tmpV.clone().add(new THREE.Vector3(0, 5, 0)), new THREE.Vector3(0, -1, 0));
-      const scene = HybridWorld?.__debugScene?.() || null; // optional hook (if you add later)
-      const hits = scene ? ray.intersectObjects(scene.children, true) : [];
-      const hit = hits.find(h => (h.object?.name || "").toLowerCase().includes("floor")) || hits[0];
-
-      if (hit) {
-        // put player rig base on floor
-        const floorY = hit.point.y;
-        player.position.y = floorY;
-        ok(`[spawn] SNAP DOWN ✅ (${reason}) floorY=${floorY.toFixed(2)}`);
-      } else {
-        warn("[spawn] SNAP DOWN: no floor hit (scene hook missing) — leaving Y as-is");
-      }
-    } catch(e) {
-      warn("[spawn] SNAP DOWN failed: " + (e?.message || e));
+      return await import(`./touch_controls.js?v=${INDEX_VERSION}`);
+    } catch (e) {
+      warn("[touch] touch_controls.js not found (ok) — using keyboard/mouse only");
+      return null;
     }
+  })();
+
+  const api = mod?.TouchControls || mod?.default;
+  if (!api?.init) return null;
+
+  try {
+    const controls = api.init({
+      THREE,
+      renderer: ctx.renderer,
+      camera: ctx.camera,
+      player: ctx.player,
+      log: (m)=>logLine(String(m))
+    });
+    ok("[touch] init ✅");
+    return controls;
+  } catch (e) {
+    warn("[touch] init FAIL: " + (e?.message || e));
+    return null;
   }
+}
 
-  // expose buttons to UI
+// --------------------
+// Global SCARLETT API for your index.html buttons
+// --------------------
+function installScarlettAPI(ctx) {
+  const { renderer, player, camera } = ctx;
+
   window.SCARLETT = window.SCARLETT || {};
-  window.SCARLETT.copyLog = copyLog;
-  window.SCARLETT.snapDown = () => snapDown("button");
 
-  // print telemetry every second in 2D
-  let t = 0;
-  return {
-    update(dt) {
-      t += dt;
-      if (t < 1.0) return;
-      t = 0;
+  window.SCARLETT.copyLog = copyLogToClipboard;
 
-      try {
-        player.getWorldPosition(tmpV);
-        camera.getWorldPosition(tmpV2);
-        logLine(`[pos] rig y=${tmpV.y.toFixed(2)} cam y=${tmpV2.y.toFixed(2)} x=${tmpV.x.toFixed(2)} z=${tmpV.z.toFixed(2)}`, "muted");
-
-        // if floating too high, auto attempt snapDown (2D only)
-        if (!renderer.xr.isPresenting && tmpV2.y > 6) snapDown("auto-floating");
-      } catch(e){}
+  window.SCARLETT.gotoTable = () => {
+    try {
+      player.position.set(0, player.position.y, 4.2);
+      player.rotation.set(0, Math.PI, 0);
+      ok("gotoTable()");
+    } catch (e) {
+      bad("gotoTable() failed: " + (e?.message || e));
     }
+  };
+
+  window.SCARLETT.respawnSafe = () => {
+    try {
+      // If HybridWorld provides a helper later, prefer it.
+      if (HybridWorld?.respawnSafe) {
+        HybridWorld.respawnSafe();
+        ok("respawnSafe() via HybridWorld");
+        return;
+      }
+    } catch (e) {}
+    // fallback
+    player.position.set(0, 0.02, 26);
+    camera.position.set(0, 1.65, 0);
+    ok("respawnSafe() fallback");
+  };
+
+  window.SCARLETT.snapDown = () => {
+    // Hard snap down to lobby floor. (No raycasting needed)
+    player.position.y = 0.02;
+    camera.position.set(0, 1.65, 0);
+    ok("snapDown() -> y=0.02");
+  };
+
+  window.SCARLETT.rebuild = async (opts = {}) => {
+    ok("Rebuild requested…");
+    try {
+      await HybridWorld.build({
+        THREE,
+        renderer,
+        camera,
+        player,
+        controllers: ctx.controllers,
+        log: (...a)=>logLine(a.map(String).join(" "), "muted"),
+        OPTS: {
+          nonvrControls: true,
+          allowTeleport: true,
+          allowBots: true,
+          allowPoker: true,
+          safeMode: !!opts.safeMode
+        }
+      });
+      ok("Rebuild done ✅");
+    } catch (e) {
+      bad("Rebuild failed: " + (e?.message || e));
+      if (e?.stack) logLine(e.stack, "bad");
+    }
+  };
+
+  window.SCARLETT.setSafeMode = async (v = true) => {
+    await window.SCARLETT.rebuild({ safeMode: !!v });
   };
 }
 
+// --------------------
+// Boot
+// --------------------
 async function boot() {
   lockTouchGestures();
   overlay && (overlay.innerHTML = "");
@@ -225,6 +295,7 @@ async function boot() {
   const renderer = createRenderer();
   const { player, camera } = makeRig();
   const controllers = makeXRHands(renderer);
+
   attachVRButton(renderer);
 
   window.addEventListener("resize", () => {
@@ -233,15 +304,14 @@ async function boot() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // expose helpers for your top UI
-  window.SCARLETT = window.SCARLETT || {};
-  window.SCARLETT.gotoTable = () => { player.position.set(0, player.position.y, 4.2); player.rotation.set(0, Math.PI, 0); ok("gotoTable()"); };
-  window.SCARLETT.respawnSafe = () => { player.position.set(0, 0, 26); camera.position.set(0, 1.65, 0); ok("respawnSafe() fallback"); };
+  const ctx = { renderer, player, camera, controllers };
+  installScarlettAPI(ctx);
 
-  // telemetry
-  const telemetry = installSpawnTelemetry({ renderer, player, camera });
+  // Touch controls (if file exists)
+  let touch = null;
+  touch = await initTouchControls(ctx);
 
-  // build world
+  // Build world
   try {
     await HybridWorld.build({
       THREE,
@@ -249,7 +319,7 @@ async function boot() {
       camera,
       player,
       controllers,
-      log: (...a) => logLine(a.map(String).join(" "), "muted"),
+      log: (...a)=>logLine(a.map(String).join(" "), "muted"),
       OPTS: {
         nonvrControls: true,
         allowTeleport: true,
@@ -264,10 +334,14 @@ async function boot() {
     if (e?.stack) logLine(e.stack, "bad");
   }
 
+  // Animation loop
   renderer.setAnimationLoop(() => {
     try {
-      const dt = 1 / 60;
-      telemetry.update(dt);
+      const dt = 1/60;
+
+      // update touch controls if present
+      try { touch?.update?.(dt); } catch(e) {}
+
       HybridWorld.frame({ renderer, camera });
     } catch (e) {
       bad("frame crash: " + (e?.message || e));

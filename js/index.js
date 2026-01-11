@@ -1,238 +1,310 @@
-// index.js — Quest-safe XR enter + Hands-only + Palm Menu + Render loop
-import { scene, initStream, setStream, enableAudio, updateSpatialAudio, lobbyScreen, CHANNELS, makeButtonPlane } from "./world.js";
+import { HybridWorld } from "./world.js";
 
-const statusEl = document.getElementById("status");
-const enterVrBtn = document.getElementById("enterVrBtn");
-const startAudioBtn = document.getElementById("startAudioBtn");
+/* ---------- HUD elements ---------- */
+const $ = (id) => document.getElementById(id);
 
+const statusEl = $("status");
+const logEl = $("log");
+const diagKv = $("diagKv");
+
+const enterVrBtn = $("enterVrBtn");
+const exitVrBtn = $("exitVrBtn");
+const rebuildBtn = $("rebuildBtn");
+const safeModeBtn = $("safeModeBtn");
+const hardResetBtn = $("hardResetBtn");
+
+const copyLogsBtn = $("copyLogsBtn");
+const downloadLogsBtn = $("downloadLogsBtn");
+const clearLogsBtn = $("clearLogsBtn");
+const dumpStateBtn = $("dumpStateBtn");
+
+const opt_autobuild = $("opt_autobuild");
+const opt_nonvrControls = $("opt_nonvrControls");
+const opt_allowTeleport = $("opt_allowTeleport");
+const opt_allowBots = $("opt_allowBots");
+const opt_allowPoker = $("opt_allowPoker");
+
+/* ---------- logging ---------- */
+const LOGS = [];
+function nowStamp() {
+  const d = new Date();
+  return d.toLocaleTimeString();
+}
 function setStatus(msg) {
-  console.log("[ui]", msg);
-  if (statusEl) statusEl.textContent = msg;
+  if (statusEl) statusEl.innerHTML = msg;
+}
+function log(...a) {
+  const line = `[${nowStamp()}] ` + a.map(x => typeof x === "string" ? x : safeJson(x)).join(" ");
+  LOGS.push(line);
+  console.log(...a);
+  if (logEl) {
+    logEl.textContent = LOGS.slice(-300).join("\n");
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+}
+function safeJson(x) {
+  try { return JSON.stringify(x); } catch { return String(x); }
 }
 
-// Renderer
+/* ---------- options state (affects world loader only, not XR init) ---------- */
+const OPTS = {
+  autobuild: true,
+  nonvrControls: true,
+  allowTeleport: true,
+  allowBots: true,
+  allowPoker: true,
+  safeMode: false,
+};
+function syncOptsFromUI() {
+  OPTS.autobuild = !!opt_autobuild?.checked;
+  OPTS.nonvrControls = !!opt_nonvrControls?.checked;
+  OPTS.allowTeleport = !!opt_allowTeleport?.checked;
+  OPTS.allowBots = !!opt_allowBots?.checked;
+  OPTS.allowPoker = !!opt_allowPoker?.checked;
+}
+
+/* ---------- renderer + camera ---------- */
+log("[main] boot v=" + Date.now());
+log("href=" + location.href);
+log("ua=" + navigator.userAgent);
+log("navigator.xr=" + !!navigator.xr);
+
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
+$("canvas").appendChild(renderer.domElement);
 
-document.getElementById("canvas-container").appendChild(renderer.domElement);
+// Camera base (XR camera comes from renderer.xr.getCamera)
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 600);
+camera.position.set(0, 1.65, 6);
+
+// Player rig
+const player = new THREE.Group();
+player.name = "PlayerRig";
+player.add(camera);
+
+// Controllers + hands (hands are primary)
+const controllers = {
+  left: renderer.xr.getController(0),
+  right: renderer.xr.getController(1),
+  handLeft: renderer.xr.getHand(0),
+  handRight: renderer.xr.getHand(1),
+};
 
 window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
 });
 
-// Camera (non-XR view + XR base)
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
-camera.position.set(0, 1.65, 4);
-
-// A simple player group (we can attach things later if needed)
-const player = new THREE.Group();
-player.add(camera);
-scene.add(player);
-
-// --- IMPORTANT: Quest-safe session init ---
-// Do NOT request risky features if you want to avoid "VR failed".
+/* ---------- Quest-safe XR init ---------- */
 const sessionInit = {
-  optionalFeatures: [
-    "local-floor",
-    "hand-tracking"
-  ]
+  // DO NOT add dom-overlay / depth-sensing / anchors / plane-detection / mesh-detection here.
+  // This is the #1 cause of "VR failed" / stuck loaders on Quest.
+  optionalFeatures: ["local-floor", "hand-tracking"]
 };
 
 let xrStarting = false;
+let xrSession = null;
 
+/* ---------- diagnostics ---------- */
+function kvRow(k, v, cls="") {
+  return `<div class="k">${k}</div><div class="v ${cls}">${v}</div>`;
+}
+async function refreshDiagnostics() {
+  const presenting = !!renderer.xr.isPresenting;
+  const hasXR = !!navigator.xr;
+
+  let supported = "unknown";
+  if (hasXR) {
+    try {
+      supported = await navigator.xr.isSessionSupported("immersive-vr") ? "yes" : "no";
+    } catch { supported = "error"; }
+  }
+
+  const handJoints =
+    (controllers.handLeft?.joints ? "yes" : "no") + " / " + (controllers.handRight?.joints ? "yes" : "no");
+
+  const xrCam = renderer.xr.getCamera(camera);
+  const camPos = xrCam?.position ? `${xrCam.position.x.toFixed(2)}, ${xrCam.position.y.toFixed(2)}, ${xrCam.position.z.toFixed(2)}` : "n/a";
+
+  const rows = [
+    kvRow("WebXR", hasXR ? "available" : "missing", hasXR ? "good" : "bad"),
+    kvRow("immersive-vr", supported, supported === "yes" ? "good" : (supported === "no" ? "bad" : "warn")),
+    kvRow("XR presenting", presenting ? "true" : "false", presenting ? "good" : "warn"),
+    kvRow("XR hands joints", handJoints, "warn"),
+    kvRow("URL", location.hostname || location.href, ""),
+    kvRow("Camera", camPos, ""),
+  ];
+  diagKv.innerHTML = rows.join("");
+}
+
+setInterval(refreshDiagnostics, 800);
+refreshDiagnostics();
+
+/* ---------- world build helpers ---------- */
+async function buildWorld() {
+  syncOptsFromUI();
+
+  // Pass your options down. Your HybridWorld can read ctx.OPTS to skip systems safely.
+  await HybridWorld.build({
+    THREE,
+    renderer,
+    camera,
+    player,
+    controllers,
+    log,
+    OPTS
+  });
+}
+
+async function rebuildWorld() {
+  syncOptsFromUI();
+  await HybridWorld.rebuild({
+    THREE,
+    renderer,
+    camera,
+    player,
+    controllers,
+    log,
+    OPTS
+  });
+}
+
+/* ---------- XR entry/exit ---------- */
 async function enterVR() {
   if (xrStarting) return;
   xrStarting = true;
+
   try {
+    syncOptsFromUI();
+
     if (!navigator.xr) {
       setStatus("WebXR not available in this browser.");
+      log("[xr] navigator.xr missing");
       return;
     }
 
-    const supported = await navigator.xr.isSessionSupported("immersive-vr");
-    if (!supported) {
-      setStatus("immersive-vr not supported (Quest Browser should support this).");
+    const ok = await navigator.xr.isSessionSupported("immersive-vr");
+    if (!ok) {
+      setStatus("immersive-vr not supported.");
+      log("[xr] immersive-vr not supported");
       return;
     }
 
     setStatus("Requesting XR session…");
+    log("[xr] requestSession…", safeJson(sessionInit));
 
-    // requestSession MUST happen from user gesture (button click)
-    let session;
     try {
-      session = await navigator.xr.requestSession("immersive-vr", sessionInit);
-      console.log("[xr] requestSession ✅", session);
+      xrSession = await navigator.xr.requestSession("immersive-vr", sessionInit);
+      log("[xr] requestSession ✅");
     } catch (err) {
-      console.log("[xr] requestSession ❌", err?.name, err?.message, err);
-      setStatus(`VR failed: ${err?.name || "Error"} — ${err?.message || ""}`);
+      log("[xr] requestSession ❌", err?.name, err?.message);
+      setStatus(`VR failed: <b>${err?.name || "Error"}</b> ${err?.message || ""}`);
       return;
     }
 
-    session.addEventListener("end", () => setStatus("XR session ended."));
-    renderer.xr.setSession(session);
+    xrSession.addEventListener("end", () => {
+      log("[xr] sessionend ✅");
+      setStatus("XR session ended.");
+      xrSession = null;
+    });
 
-    setStatus("Entered VR ✅. Tap Start Audio once, then use palm menu.");
+    renderer.xr.setSession(xrSession);
+    setStatus("Entered VR ✅");
+
+    // Build world after XR begins = most stable on Quest
+    if (OPTS.autobuild) {
+      setStatus("Building world…");
+      await buildWorld();
+      setStatus("Ready ✅ (Hands-only).");
+    } else {
+      setStatus("Entered VR ✅ (Auto-build OFF). Tap Rebuild World.");
+    }
 
   } finally {
     xrStarting = false;
   }
 }
 
-// --- Media start rules ---
-// HLS + video.play() MUST happen from a user gesture at least once.
-async function startAudioGesture() {
+async function exitVR() {
   try {
-    // Initialize default stream if needed
-    initStream(CHANNELS[0].url);
-
-    await enableAudio();
-    setStatus("Audio started ✅. Use palm menu to switch channels.");
-  } catch (err) {
-    console.log("[media] startAudio ❌", err?.name, err?.message, err);
-    setStatus(`Audio blocked: ${err?.name || "Error"} (tap again)`);
+    if (xrSession) {
+      await xrSession.end();
+    } else if (renderer.xr.getSession()) {
+      await renderer.xr.getSession().end();
+    }
+  } catch (e) {
+    log("[xr] exit error", e?.message || e);
   }
 }
 
+/* ---------- Safe Mode ---------- */
+function enableSafeMode() {
+  OPTS.safeMode = true;
+
+  // Force-disable optional systems (prevents module crashes from breaking your session)
+  opt_allowTeleport.checked = false;
+  opt_allowBots.checked = false;
+  opt_allowPoker.checked = false;
+
+  setStatus("Safe Mode enabled. Optional systems disabled. Tap Rebuild World.");
+  log("[mode] SAFE MODE enabled");
+}
+
+/* ---------- Hard reset ---------- */
+function hardReset() {
+  log("[reset] hard reset");
+  // fastest reliable: reload page
+  location.reload();
+}
+
+/* ---------- Button wiring (this is what you were missing) ---------- */
 enterVrBtn.addEventListener("click", enterVR);
-startAudioBtn.addEventListener("click", startAudioGesture);
+exitVrBtn.addEventListener("click", exitVR);
+rebuildBtn.addEventListener("click", async () => {
+  setStatus("Rebuilding world…");
+  await rebuildWorld();
+  setStatus("Rebuilt ✅");
+});
+safeModeBtn.addEventListener("click", enableSafeMode);
+hardResetBtn.addEventListener("click", hardReset);
 
-// Also allow a generic click anywhere as a fallback to init stream (safe)
-window.addEventListener("click", () => {
-  // Don’t spam-init; if video already has a src/hls attached, it’s okay.
-  initStream(CHANNELS[0].url);
-}, { once: true });
-
-// --- Hands-only setup ---
-const hand1 = renderer.xr.getHand(0); // left
-const hand2 = renderer.xr.getHand(1); // right
-scene.add(hand1);
-scene.add(hand2);
-
-// Palm Menu attached to LEFT hand
-const palmMenu = new THREE.Group();
-palmMenu.visible = true;
-hand1.add(palmMenu);
-
-// Position and tilt toward player
-palmMenu.position.set(0.0, 0.06, -0.10);
-palmMenu.rotation.set(-0.6, 0, 0);
-
-// Buttons
-const buttons = [];
-CHANNELS.forEach((ch, i) => {
-  const btn = makeButtonPlane(0.26, 0.11, 0x151525);
-  btn.position.set(0, -i * 0.13, 0);
-  btn.userData.channel = ch;
-  palmMenu.add(btn);
-  buttons.push(btn);
+/* ---------- Log tools ---------- */
+clearLogsBtn.addEventListener("click", () => {
+  LOGS.length = 0;
+  if (logEl) logEl.textContent = "";
+  log("[log] cleared");
+});
+copyLogsBtn.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(LOGS.join("\n"));
+    setStatus("Logs copied ✅");
+  } catch {
+    setStatus("Copy failed (clipboard blocked). Use Download Logs.");
+  }
+});
+downloadLogsBtn.addEventListener("click", () => {
+  const blob = new Blob([LOGS.join("\n")], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `scarlett_logs_${Date.now()}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+  setStatus("Logs downloaded ✅");
+});
+dumpStateBtn.addEventListener("click", () => {
+  log("[dump] OPTS=", OPTS);
+  log("[dump] XR presenting=", renderer.xr.isPresenting);
+  log("[dump] session=", !!renderer.xr.getSession());
 });
 
-// Visual highlight + selection handling
-function highlightButton(activeBtn) {
-  for (const b of buttons) {
-    b.material.color.set(b === activeBtn ? 0x00aa66 : 0x151525);
-  }
-}
-
-// Joint helpers
-const tmp = new THREE.Vector3();
-const tmp2 = new THREE.Vector3();
-const a = new THREE.Vector3();
-const b = new THREE.Vector3();
-
-function getJointWorldPos(hand, jointName, outVec3) {
-  const j = hand.joints?.[jointName];
-  if (!j) return false;
-  j.getWorldPosition(outVec3);
-  return true;
-}
-
-// Pinch to toggle menu (LEFT hand)
-let menuCooldown = 0;
-function leftPinchApprox() {
-  if (!getJointWorldPos(hand1, "thumb-tip", a)) return false;
-  if (!getJointWorldPos(hand1, "index-finger-tip", b)) return false;
-  return a.distanceTo(b) < 0.02;
-}
-
-let lastSelectedId = null;
-
-function checkPalmMenuInteraction(dt) {
-  menuCooldown = Math.max(0, menuCooldown - dt);
-
-  // Pinch toggle (debounced)
-  if (menuCooldown === 0 && leftPinchApprox()) {
-    palmMenu.visible = !palmMenu.visible;
-    menuCooldown = 0.35;
-    return;
-  }
-
-  if (!palmMenu.visible) return;
-
-  // Right index tip for poke
-  if (!getJointWorldPos(hand2, "index-finger-tip", tmp)) return;
-
-  let hovered = null;
-  let hoveredDist = 999;
-
-  for (const btn of buttons) {
-    btn.getWorldPosition(tmp2);
-    const d = tmp.distanceTo(tmp2);
-    if (d < hoveredDist) {
-      hoveredDist = d;
-      hovered = btn;
-    }
-  }
-
-  // Hover
-  if (hovered && hoveredDist < 0.055) {
-    highlightButton(hovered);
-
-    // Select on closer poke
-    if (hoveredDist < 0.032) {
-      const ch = hovered.userData.channel;
-      if (ch?.id && ch.id !== lastSelectedId) {
-        lastSelectedId = ch.id;
-        setStream(ch.url);
-        setStatus(`Channel: ${ch.name}`);
-      }
-    }
-  } else {
-    highlightButton(null);
-  }
-}
-
-// Simple “hand near screen” feedback (from your manifest)
-function checkHandInteraction() {
-  // If joints exist, use an actual fingertip; else fallback to hand position
-  const hasTip = getJointWorldPos(hand1, "index-finger-tip", tmp);
-  const p = hasTip ? tmp : hand1.position;
-
-  const dist = p.distanceTo(lobbyScreen.position);
-  if (dist < 1.0) lobbyScreen.material.color.set(0x00ff00);
-  else lobbyScreen.material.color.set(0xffffff);
-}
-
-// Animation loop
-let lastT = performance.now();
-
+/* ---------- Start animation loop ---------- */
 renderer.setAnimationLoop(() => {
-  const now = performance.now();
-  const dt = Math.max(0.001, (now - lastT) / 1000);
-  lastT = now;
-
-  // Spatial audio based on viewer position
-  const xrCam = renderer.xr.getCamera(camera);
-  updateSpatialAudio(xrCam.position);
-
-  checkHandInteraction();
-  checkPalmMenuInteraction(dt);
-
-  renderer.render(scene, camera);
+  HybridWorld.frame({ renderer, camera });
 });
 
-// Friendly boot log
-console.log("[boot] Quest-safe 4.2 loaded");
-setStatus("Ready. Tap Enter VR. If VR fails, open console and look for [xr] requestSession ❌.");
+// initial UI state
+setStatus("Ready. Tap <b>Enter VR</b>.");

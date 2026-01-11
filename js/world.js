@@ -1,73 +1,30 @@
-// /js/world.js — Scarlett MASTER WORLD (Yesterday Build) v1.1 (FULL)
-// ✅ No VRPanel / no camera HUD objects created here
-// ✅ Restores: circular lobby + hallways + store + scorpion room + teleport + bots + poker
-// ✅ Failsafe: missing modules won't crash, logs show what's missing
+import * as THREE from "three";
 
 export const HybridWorld = (() => {
   const S = {
-    THREE: null,
-    renderer: null,
-    camera: null,
-    player: null,
-    controllers: null,
+    THREE,
+    renderer:null,
+    camera:null,
+    player:null,
+    controllers:null,
     log: console.log,
 
-    scene: null,
-    clock: null,
+    scene:null,
+    clock:null,
+    root:null,
+    floor:null,
 
-    OPTS: {
-      allowTeleport: true,
-      allowBots: true,
-      allowPoker: true,
-      safeMode: false,
-      table: { sunken: true, seats: 8 }
-    },
-
-    root: null,
-    floor: null,
-    systems: {},
-    mods: {},
-
-    anchors: {
-      spawn: null,
-      facing: null
-    }
+    // teleport internals
+    _ray: null,
+    _tmpQ: null,
+    _tmpV: null,
+    _marker: null,
+    _triggerHeld: false
   };
 
-  const safeLog = (...a) => { try { S.log?.(...a); } catch(e) {} };
+  const safeLog = (...a)=>{ try{ S.log?.(...a); }catch(e){} };
 
-  async function tryImport(path) {
-    try {
-      const m = await import(path);
-      safeLog("[world] import ok:", path);
-      return m;
-    } catch (e) {
-      safeLog("[world] import FAIL:", path, e?.message || e);
-      return null;
-    }
-  }
-
-  function disposeObject3D(obj) {
-    if (!obj) return;
-    try {
-      obj.traverse?.((o) => {
-        if (o.geometry?.dispose) o.geometry.dispose();
-        if (o.material) {
-          if (Array.isArray(o.material)) o.material.forEach(m => m?.dispose?.());
-          else o.material?.dispose?.();
-        }
-      });
-    } catch(e) {}
-  }
-
-  function ensureAnchors() {
-    const THREE = S.THREE;
-    if (!S.anchors.spawn)  S.anchors.spawn  = new THREE.Vector3(0, 0, 26);
-    if (!S.anchors.facing) S.anchors.facing = new THREE.Vector3(0, 1.65, 0);
-  }
-
-  function makeBaseScene() {
-    const THREE = S.THREE;
+  function makeBaseScene(){
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x05060a);
 
@@ -76,9 +33,10 @@ export const HybridWorld = (() => {
     dir.position.set(4, 10, 3);
     scene.add(dir);
 
+    // floor
     const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(180, 180),
-      new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.95, metalness: 0.0 })
+      new THREE.PlaneGeometry(240, 240),
+      new THREE.MeshStandardMaterial({ color:0x0b0d14, roughness:0.96, metalness:0.0 })
     );
     floor.rotation.x = -Math.PI/2;
     floor.position.y = 0;
@@ -86,225 +44,250 @@ export const HybridWorld = (() => {
     scene.add(floor);
     S.floor = floor;
 
+    return scene;
+  }
+
+  function ensureRoot(){
+    if (S.root && S.root.parent === S.scene) return S.root;
+    const g = new THREE.Group();
+    g.name = "WorldRoot";
+    S.scene.add(g);
+    S.root = g;
+    return g;
+  }
+
+  function buildBlueprintWorld(){
+    const root = ensureRoot();
+
+    // lobby carpet
+    const carpet = new THREE.Mesh(
+      new THREE.CircleGeometry(9.0, 64),
+      new THREE.MeshStandardMaterial({ color:0x071025, roughness:0.95 })
+    );
+    carpet.rotation.x = -Math.PI/2;
+    carpet.position.y = 0.01;
+    carpet.name = "LobbyCarpet";
+    root.add(carpet);
+
+    // lobby landmark ring
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(1.2, 0.08, 12, 64),
       new THREE.MeshStandardMaterial({
-        color: 0x7fe7ff,
-        roughness: 0.35,
-        metalness: 0.25,
-        emissive: 0x071025,
-        emissiveIntensity: 0.35
+        color:0x7fe7ff,
+        roughness:0.35,
+        metalness:0.25,
+        emissive:0x071025,
+        emissiveIntensity:0.35
       })
     );
     ring.position.set(0, 1.4, 0);
     ring.name = "LobbyRing";
-    scene.add(ring);
+    root.add(ring);
 
-    return scene;
+    // circular lobby boundary (low wall ring)
+    const wallMat = new THREE.MeshStandardMaterial({ color:0x0e1220, roughness:0.95 });
+    const boundary = new THREE.Mesh(
+      new THREE.TorusGeometry(9.2, 0.35, 16, 64),
+      wallMat
+    );
+    boundary.rotation.x = Math.PI/2;
+    boundary.position.set(0, 1.1, 0);
+    boundary.name = "LobbyBoundary";
+    root.add(boundary);
+
+    // hallways
+    const hallGeo = new THREE.BoxGeometry(4.0, 2.6, 10.0);
+    const hall1 = new THREE.Mesh(hallGeo, wallMat);
+    hall1.position.set(-8.5, 1.3, 0);
+    hall1.name = "HallwayStore";
+    root.add(hall1);
+
+    const hall2 = new THREE.Mesh(hallGeo, wallMat);
+    hall2.position.set(8.5, 1.3, 0);
+    hall2.name = "HallwayScorpion";
+    root.add(hall2);
+
+    // room shells
+    const roomGeo = new THREE.BoxGeometry(10, 3.2, 10);
+    const storeRoom = new THREE.Mesh(roomGeo, wallMat);
+    storeRoom.position.set(-14.5, 1.6, 0);
+    storeRoom.name = "StoreRoomShell";
+    root.add(storeRoom);
+
+    const scorpionRoom = new THREE.Mesh(roomGeo, wallMat);
+    scorpionRoom.position.set(14.5, 1.6, 0);
+    scorpionRoom.name = "ScorpionRoomShell";
+    root.add(scorpionRoom);
+
+    // jumbotron placeholder
+    const screen = new THREE.Mesh(
+      new THREE.PlaneGeometry(10, 5.6),
+      new THREE.MeshStandardMaterial({ color:0x101325, emissive:0x0b1130, emissiveIntensity:0.45 })
+    );
+    screen.position.set(0, 3.1, -10.5);
+    screen.name = "Jumbotron";
+    root.add(screen);
+
+    // ✅ sunken table build
+    const feltRadius = 2.2;
+    const rimRadius = feltRadius + 0.25;
+    const tableY = 0.82;
+
+    const pit = new THREE.Mesh(
+      new THREE.CylinderGeometry(rimRadius+0.9, rimRadius+0.9, 0.25, 48),
+      new THREE.MeshStandardMaterial({ color:0x0a0c12, roughness:0.95 })
+    );
+    pit.position.set(0, 0.35, 0);
+    pit.name = "TablePit";
+    root.add(pit);
+
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(rimRadius+0.35, rimRadius+0.35, 0.22, 48),
+      new THREE.MeshStandardMaterial({ color:0x141720, roughness:0.9, metalness:0.05 })
+    );
+    body.position.set(0, tableY, 0);
+    body.name = "TableBody";
+    root.add(body);
+
+    const felt = new THREE.Mesh(
+      new THREE.CylinderGeometry(feltRadius, feltRadius, 0.10, 64),
+      new THREE.MeshStandardMaterial({ color:0x0c2a22, roughness:0.95, metalness:0.02 })
+    );
+    felt.position.set(0, tableY + 0.16, 0);
+    felt.name = "TableFelt";
+    root.add(felt);
+
+    const rim = new THREE.Mesh(
+      new THREE.TorusGeometry(rimRadius, 0.09, 14, 80),
+      new THREE.MeshStandardMaterial({ color:0x1a1a1a, roughness:0.6, metalness:0.1 })
+    );
+    rim.rotation.x = Math.PI/2;
+    rim.position.set(0, tableY + 0.21, 0);
+    rim.name = "TableRim";
+    root.add(rim);
+
+    // seats (8)
+    const seatRadius = rimRadius + 1.05;
+    const stoolMat = new THREE.MeshStandardMaterial({ color:0x141414, roughness:0.85 });
+
+    for (let i=0; i<8; i++){
+      const a = (i/8) * Math.PI * 2;
+      const x = Math.sin(a) * seatRadius;
+      const z = Math.cos(a) * seatRadius;
+
+      const stool = new THREE.Group();
+      stool.name = `Seat_${i}`;
+
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.18,0.18,0.45,18), stoolMat);
+      base.position.y = 0.35;
+      stool.add(base);
+
+      const top = new THREE.Mesh(new THREE.CylinderGeometry(0.28,0.28,0.08,22), stoolMat);
+      top.position.y = 0.62;
+      stool.add(top);
+
+      stool.position.set(x, 0, z);
+      stool.lookAt(0, 0, 0);
+
+      root.add(stool);
+    }
+
+    safeLog("[world] blueprint built ✅ (world-only)");
   }
 
-  function ensureRoot() {
-    const THREE = S.THREE;
-    if (S.root && S.root.parent === S.scene) return S.root;
-    const root = new THREE.Group();
-    root.name = "MasterRoot";
-    S.scene.add(root);
-    S.root = root;
-    return root;
+  function installTeleport(){
+    S._ray = new THREE.Raycaster();
+    S._tmpQ = new THREE.Quaternion();
+    S._tmpV = new THREE.Vector3();
+
+    // marker
+    const marker = new THREE.Mesh(
+      new THREE.RingGeometry(0.25, 0.38, 48),
+      new THREE.MeshBasicMaterial({ color:0x7fe7ff, transparent:true, opacity:0.85 })
+    );
+    marker.rotation.x = -Math.PI/2;
+    marker.visible = false;
+    marker.name = "TeleportMarker";
+    S.scene.add(marker);
+    S._marker = marker;
+
+    // trigger state via select events
+    const c1 = S.controllers?.controller1;
+    const c2 = S.controllers?.controller2;
+
+    const onSelectStart = ()=>{ S._triggerHeld = true; };
+    const onSelectEnd = ()=>{ S._triggerHeld = false; };
+
+    try{ c1?.addEventListener("selectstart", onSelectStart); c1?.addEventListener("selectend", onSelectEnd); }catch(e){}
+    try{ c2?.addEventListener("selectstart", onSelectStart); c2?.addEventListener("selectend", onSelectEnd); }catch(e){}
+
+    safeLog("[teleport] installed ✅ (laser + trigger)");
   }
 
-  function hardSpawnGround() {
-    ensureAnchors();
-    const { player, camera, THREE } = S;
+  function updateTeleport(){
+    if (!S.renderer?.xr?.isPresenting){ if (S._marker) S._marker.visible = false; return; }
 
-    player.position.set(S.anchors.spawn.x, 0.02, S.anchors.spawn.z);
-    camera.position.set(0, 1.65, 0);
+    const ctrl = S.controllers?.controller2 || S.controllers?.controller1;
+    if (!ctrl || !S._ray || !S.floor){ if (S._marker) S._marker.visible = false; return; }
 
-    const target = S.anchors.facing.clone();
-    const camWorld = new THREE.Vector3();
-    camera.getWorldPosition(camWorld);
-    const look = target.sub(camWorld).normalize();
-    const yaw = Math.atan2(look.x, look.z);
-    player.rotation.set(0, yaw, 0);
+    ctrl.getWorldQuaternion(S._tmpQ);
+    const dir = new THREE.Vector3(0,0,-1).applyQuaternion(S._tmpQ).normalize();
+    ctrl.getWorldPosition(S._tmpV);
 
-    safeLog("[spawn] HARD ✅ (yesterday world)", `x=${player.position.x.toFixed(2)}`, `y=${player.position.y.toFixed(2)}`, `z=${player.position.z.toFixed(2)}`);
-  }
+    S._ray.set(S._tmpV, dir);
+    const hits = S._ray.intersectObject(S.floor, false);
 
-  function optsAllow(key) {
-    if (S.OPTS?.safeMode) return false;
-    return S.OPTS?.[key] !== false;
-  }
-
-  async function buildYesterdayWorld() {
-    const THREE = S.THREE;
-    const root = ensureRoot();
-
-    // clear root
-    if (root.children.length) {
-      for (let i = root.children.length - 1; i >= 0; i--) {
-        const c = root.children[i];
-        root.remove(c);
-        disposeObject3D(c);
-      }
+    if (!hits.length){
+      if (S._marker) S._marker.visible = false;
+      return;
     }
 
-    // imports (yesterday blueprint)
-    const spawnMod        = await tryImport("./spawn_points.js");
-    const decorMod        = await tryImport("./lobby_decor.js");
-    const wallsMod        = await tryImport("./solid_walls.js");
-    const storeMod        = await tryImport("./store.js");
-    const scorpionMod     = await tryImport("./scorpion_room.js");
-    const bossTableMod    = await tryImport("./boss_table.js");
-    const tableFactoryMod = await tryImport("./table_factory.js");
-    const botsMod         = await tryImport("./bots.js");
-    const pokerSimMod     = await tryImport("./poker_sim.js");
-    const roomMgrMod      = await tryImport("./room_manager.js");
-    const tpMachineMod    = await tryImport("./teleport_machine.js");
-    const tpMod           = await tryImport("./teleport.js");
+    const p = hits[0].point;
+    S._marker.visible = true;
+    S._marker.position.copy(p);
 
-    S.mods = { spawnMod, decorMod, wallsMod, storeMod, scorpionMod, bossTableMod, tableFactoryMod, botsMod, pokerSimMod, roomMgrMod, tpMachineMod, tpMod };
-
-    // SpawnPoints optional
-    try {
-      const SP = spawnMod?.SpawnPoints || spawnMod?.default;
-      if (SP?.apply) { SP.apply({ THREE, root, player: S.player, log: S.log }); safeLog("[spawn] SpawnPoints applied ✅"); }
-    } catch (e) { safeLog("[spawn] SpawnPoints apply FAIL", e?.message || e); }
-
-    // Decor
-    try {
-      const Decor = decorMod?.LobbyDecor || decorMod?.default;
-      if (Decor?.init) { await Decor.init({ THREE, scene: S.scene, root, log: S.log }); safeLog("[decor] LobbyDecor ✅"); }
-      else safeLog("[decor] LobbyDecor missing init (skipped)");
-    } catch (e) { safeLog("[decor] LobbyDecor FAIL", e?.message || e); }
-
-    // Walls/Hallways (your “other rooms” shell)
-    try {
-      const SW = wallsMod?.SolidWalls || wallsMod?.default || (typeof wallsMod?.init === "function" ? wallsMod : null);
-      const fn = SW?.init || SW?.build || SW?.create;
-      if (fn) { await fn.call(SW, { THREE, scene: S.scene, root, log: S.log }); safeLog("[walls] ✅ (hallways/rooms shell)"); }
-      else safeLog("[walls] missing SolidWalls.init ❌ (rooms/hallways won't appear)");
-    } catch (e) { safeLog("[walls] FAIL", e?.message || e); }
-
-    // Store
-    try {
-      const Store = storeMod?.StoreSystem || storeMod?.default;
-      if (Store?.init) {
-        S.systems.store = await Store.init({ THREE, scene: S.scene, root, player: S.player, camera: S.camera, log: S.log });
-        try { Store.setActive?.(true); } catch(e) {}
-        safeLog("[store] StoreSystem ✅");
-      } else safeLog("[store] StoreSystem missing init (skipped)");
-    } catch (e) { safeLog("[store] FAIL", e?.message || e); }
-
-    // Scorpion room
-    try {
-      const Sc = scorpionMod?.ScorpionRoom || scorpionMod?.default;
-      if (Sc?.init) { S.systems.scorpion = await Sc.init({ THREE, scene: S.scene, root, player: S.player, camera: S.camera, log: S.log }); safeLog("[scorpion] ✅"); }
-      else safeLog("[scorpion] missing init (skipped)");
-    } catch (e) { safeLog("[scorpion] FAIL", e?.message || e); }
-
-    // Table (BossTable -> TableFactory -> placeholder)
-    let tableObj = null;
-
-    const BossTableAPI = bossTableMod?.BossTable || bossTableMod?.default || (typeof bossTableMod?.init === "function" ? bossTableMod : null);
-    if (BossTableAPI?.init) {
-      try {
-        tableObj = await BossTableAPI.init({ THREE, scene: S.scene, root, log: S.log, OPTS: S.OPTS?.table || { sunken:true } });
-        safeLog("[table] BossTable.init ✅");
-      } catch (e) { safeLog("[table] BossTable.init FAIL", e?.message || e); }
+    if (S._triggerHeld){
+      S.player.position.set(p.x, 0.02, p.z);
+      S._triggerHeld = false;
     }
-
-    if (!tableObj) {
-      const TF = tableFactoryMod?.TableFactory || tableFactoryMod?.default;
-      if (TF?.create) {
-        try {
-          tableObj = await TF.create({ THREE, root, log: S.log, OPTS: S.OPTS?.table || { sunken:true, seats:8 } });
-          safeLog("[table] TableFactory.create ✅");
-        } catch (e) { safeLog("[table] TableFactory.create FAIL", e?.message || e); }
-      }
-    }
-
-    if (!tableObj) {
-      const t = new THREE.Mesh(
-        new THREE.CylinderGeometry(2.25, 2.25, 0.25, 40),
-        new THREE.MeshStandardMaterial({ color: 0x102018, roughness: 0.9 })
-      );
-      t.position.set(0, 1.05, 0);
-      t.name = "PlaceholderTable";
-      root.add(t);
-      safeLog("[table] fallback placeholder (missing BossTable/TableFactory)");
-      tableObj = t;
-    }
-
-    // Teleport
-    if (optsAllow("allowTeleport")) {
-      const tp = tpMachineMod?.TeleportMachine || tpMod?.Teleport || tpMod?.default;
-      if (tp?.init) {
-        try {
-          S.systems.teleport = await tp.init({
-            THREE, scene: S.scene, renderer: S.renderer, camera: S.camera,
-            player: S.player, controllers: S.controllers, log: S.log,
-            world: { floor: S.floor, root }
-          });
-          safeLog("[teleport] ✅");
-        } catch (e) { safeLog("[teleport] FAIL", e?.message || e); }
-      } else safeLog("[teleport] module missing — skipped");
-    }
-
-    // Bots
-    if (optsAllow("allowBots") && botsMod?.Bots?.init) {
-      try { S.systems.bots = await botsMod.Bots.init({ THREE, scene: S.scene, root, player: S.player, log: S.log }); safeLog("[bots] ✅"); }
-      catch (e) { safeLog("[bots] FAIL", e?.message || e); }
-    }
-
-    // Poker
-    if (optsAllow("allowPoker") && pokerSimMod?.PokerSim?.init) {
-      try { S.systems.poker = await pokerSimMod.PokerSim.init({ THREE, scene: S.scene, root, table: tableObj, player: S.player, camera: S.camera, log: S.log }); safeLog("[poker] ✅"); }
-      catch (e) { safeLog("[poker] FAIL", e?.message || e); }
-    }
-
-    // Room Manager
-    if (roomMgrMod?.RoomManager?.init) {
-      try { S.systems.room = await roomMgrMod.RoomManager.init({ THREE, scene: S.scene, root, player: S.player, camera: S.camera, systems: S.systems, log: S.log }); safeLog("[rm] ✅"); }
-      catch (e) { safeLog("[rm] FAIL", e?.message || e); }
-    }
-
-    safeLog("[world] YOUR master world restored ✅ (yesterday build)");
   }
 
   return {
-    respawnSafe(){ hardSpawnGround(); },
-
-    async build({ THREE, renderer, camera, player, controllers, log, OPTS }) {
-      S.THREE = THREE;
+    async build({ THREE:THR, renderer, camera, player, controllers, log }){
+      S.THREE = THR || THREE;
       S.renderer = renderer;
       S.camera = camera;
       S.player = player;
       S.controllers = controllers || {};
       S.log = log || console.log;
-      S.OPTS = { ...S.OPTS, ...(OPTS || {}) };
 
       S.clock = new THREE.Clock();
-      ensureAnchors();
 
       S.scene = makeBaseScene();
       if (!S.scene.children.includes(player)) S.scene.add(player);
 
-      // no HUD/panel attached here
-      hardSpawnGround();
-      await buildYesterdayWorld();
+      // hard spawn
+      player.position.set(0, 0.02, 26);
+      camera.position.set(0, 1.65, 0);
 
-      safeLog("[world] build complete ✅");
-      safeLog("✅ HybridWorld.build ✅");
+      // ensure controller visuals exist in world scene (so lasers show in XR)
+      try{
+        if (S.controllers.controller1 && !S.scene.children.includes(S.controllers.controller1)) S.scene.add(S.controllers.controller1);
+        if (S.controllers.controller2 && !S.scene.children.includes(S.controllers.controller2)) S.scene.add(S.controllers.controller2);
+      }catch(e){}
+
+      buildBlueprintWorld();
+      installTeleport();
+
+      safeLog("[world] build complete ✅ (world-only)");
     },
 
-    frame({ renderer, camera }) {
+    frame({ renderer, camera }){
       if (!S.scene) return;
       const dt = S.clock ? S.clock.getDelta() : 0.016;
 
-      try { S.systems.bots?.update?.(dt); } catch(e) {}
-      try { S.systems.poker?.update?.(dt); } catch(e) {}
-      try { S.systems.room?.update?.(dt); } catch(e) {}
-      try { S.systems.teleport?.update?.(dt); } catch(e) {}
+      // teleport
+      try{ updateTeleport(); }catch(e){}
 
       renderer.render(S.scene, camera);
     }

@@ -1,186 +1,66 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
-  <title>Scarlett VR Poker</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>VR Lobby System - Update 4.2 (Quest Safe)</title>
+
+  <!-- Three.js (global THREE) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r152/three.min.js"></script>
+
+  <!-- HLS.js -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+
   <style>
-    html, body { margin:0; height:100%; background:#05060a; overflow:hidden; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; }
-    #hud {
-      position: fixed; left: 10px; top: 10px; right: 10px;
-      max-width: 720px;
-      background: rgba(10,12,20,.78);
-      border: 1px solid rgba(127,231,255,.22);
-      border-radius: 14px;
-      box-shadow: 0 10px 30px rgba(0,0,0,.45);
-      padding: 10px 10px 8px 10px;
-      color: #e8ecff;
-      z-index: 99999;
-      backdrop-filter: blur(8px);
-    }
-    #hudHeader { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-    #hudHeader .badge{
-      padding: 4px 8px; border-radius: 999px;
-      background: rgba(127,231,255,.12);
-      border: 1px solid rgba(127,231,255,.25);
-      color: #bff6ff;
-      font-size: 12px;
-    }
-    #hudHeader button{
-      appearance:none; border:0; cursor:pointer;
-      padding: 7px 10px; border-radius: 10px;
-      background: rgba(255,45,122,.12);
-      border: 1px solid rgba(255,45,122,.35);
-      color: #ffd0e2;
-      font-weight: 650;
-      font-size: 12px;
-    }
-    #hudHeader button.secondary{
-      background: rgba(127,231,255,.10);
-      border: 1px solid rgba(127,231,255,.28);
-      color:#d8fbff;
-    }
-    #hudMeta { margin-top: 6px; color: #98a0c7; font-size: 12px; }
-    #hudLog {
-      margin-top: 8px;
-      background: rgba(0,0,0,.25);
-      border: 1px solid rgba(255,255,255,.06);
+    html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; }
+    #canvas-container { width:100vw; height:100vh; position:fixed; inset:0; }
+
+    /* Simple in-VR starter overlay (2D) */
+    #overlay {
+      position: fixed;
+      left: 12px; top: 12px;
+      padding: 12px 14px;
       border-radius: 12px;
-      padding: 8px;
-      max-height: 32vh;
-      overflow:auto;
-      white-space: pre-wrap;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 11px;
-      line-height: 1.35;
+      color: #e8ecff;
+      background: rgba(10, 12, 20, 0.75);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      z-index: 9;
+      max-width: 340px;
+      user-select: none;
     }
-    #toast {
-      position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
-      background: rgba(0,0,0,.6);
-      border: 1px solid rgba(127,231,255,.22);
-      padding: 8px 10px; border-radius: 12px;
-      color: #e8ecff; font-size: 12px;
-      z-index: 999999;
-      opacity: 0; pointer-events:none;
-      transition: opacity .2s ease;
+    #overlay b { color: #7fe7ff; }
+    #overlay .row { display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
+    button {
+      appearance:none; border:0;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background:#1a2040;
+      color:#fff;
+      font-weight:600;
+      cursor:pointer;
     }
-    #toast.on { opacity: 1; }
+    button:active { transform: translateY(1px); }
+    #status { margin-top: 8px; color:#98a0c7; font-size: 13px; line-height:1.25; }
   </style>
 </head>
 <body>
-  <div id="hud">
-    <div id="hudHeader">
-      <span class="badge" id="hudStatus">BOOT</span>
-      <span class="badge" id="hudBuild">Scarlett Hybrid</span>
-      <button id="btnCopy" class="secondary">Copy Log</button>
-      <button id="btnReset">Reset</button>
-      <button id="btnHide" class="secondary">Hide</button>
-    </div>
-    <div id="hudMeta" id="hudMeta">waiting…</div>
-    <div id="hudLog"></div>
+  <div id="canvas-container"></div>
+
+  <!-- Hidden media assets -->
+  <div id="media-assets" style="display:none;">
+    <video id="streamSource" crossorigin="anonymous" playsinline></video>
   </div>
 
-  <div id="toast">Copied ✅</div>
+  <div id="overlay">
+    <div><b>Scarlett VR Lobby</b> — Quest Safe 4.2</div>
+    <div id="status">Tap <b>Enter VR</b>, then tap <b>Start Audio</b> once. Use left-hand menu to switch channels.</div>
+    <div class="row">
+      <button id="enterVrBtn">Enter VR</button>
+      <button id="startAudioBtn">Start Audio</button>
+    </div>
+  </div>
 
-  <script type="module">
-    // Global diagnostics bus that survives renderer crashes.
-    const hud = document.getElementById('hud');
-    const hudLog = document.getElementById('hudLog');
-    const hudMeta = document.getElementById('hudMeta');
-    const hudStatus = document.getElementById('hudStatus');
-    const hudBuild = document.getElementById('hudBuild');
-    const toast = document.getElementById('toast');
-
-    const buf = [];
-    const maxLines = 500;
-
-    function stamp(){
-      const d = new Date();
-      return d.toLocaleTimeString();
-    }
-
-    function push(line){
-      buf.push(line);
-      while (buf.length > maxLines) buf.shift();
-      hudLog.textContent = buf.join("\n");
-      hudLog.scrollTop = hudLog.scrollHeight;
-    }
-
-    function toastOn(msg){
-      toast.textContent = msg;
-      toast.classList.add('on');
-      setTimeout(()=>toast.classList.remove('on'), 900);
-    }
-
-    // Expose a stable logger
-    window.SCARLETT = window.SCARLETT || {};
-    window.SCARLETT.LOGS = buf;
-    window.SCARLETT.log = (...args) => {
-      const line = `[${stamp()}] LOG: ` + args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(" ");
-      console.log(...args);
-      push(line);
-    };
-    window.SCARLETT.err = (...args) => {
-      const line = `[${stamp()}] ERR: ` + args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(" ");
-      console.error(...args);
-      push(line);
-      hudStatus.textContent = "ERR";
-      hudStatus.style.background = "rgba(255,107,107,.18)";
-      hudStatus.style.borderColor = "rgba(255,107,107,.35)";
-    };
-
-    // Meta updater
-    const ua = navigator.userAgent;
-    const xr = !!navigator.xr;
-    hudMeta.textContent = `ua=${ua.slice(0,80)}… | xr=${xr} | href=${location.href}`;
-
-    // Buttons
-    async function copyLog(){
-      const text = buf.join("\n");
-      try{
-        await navigator.clipboard.writeText(text);
-        toastOn("Copied ✅");
-      }catch(e){
-        // Fallback for Quest/Android
-        const ta = document.createElement("textarea");
-        ta.value = text;
-        ta.style.position="fixed"; ta.style.left="-9999px";
-        document.body.appendChild(ta);
-        ta.focus(); ta.select();
-        document.execCommand("copy");
-        document.body.removeChild(ta);
-        toastOn("Copied (fallback) ✅");
-      }
-    }
-
-    document.getElementById("btnCopy").onclick = copyLog;
-
-    // Long-press anywhere on HUD copies (Quest-friendly)
-    let pressT = null;
-    hud.addEventListener("touchstart", () => {
-      pressT = setTimeout(copyLog, 550);
-    }, {passive:true});
-    hud.addEventListener("touchend", () => { if (pressT) clearTimeout(pressT); pressT=null; }, {passive:true});
-
-    document.getElementById("btnReset").onclick = () => location.reload(true);
-    document.getElementById("btnHide").onclick = () => {
-      if (hud.style.display === "none") { hud.style.display = ""; }
-      else { hud.style.display = "none"; }
-    };
-
-    // Boot main
-    const v = Date.now();
-    window.SCARLETT.BUILD = `Hybrid ${v}`;
-    hudBuild.textContent = window.SCARLETT.BUILD;
-
-    window.SCARLETT.log("BOOT v=" + v);
-    window.SCARLETT.log("navigator.xr=" + xr);
-
-    try{
-      await import(`./js/main.js?v=${v}`);
-    }catch(e){
-      window.SCARLETT.err("main import failed", String(e?.stack || e));
-    }
-  </script>
+  <script type="module" src="world.js"></script>
+  <script type="module" src="index.js"></script>
 </body>
 </html>

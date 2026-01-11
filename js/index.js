@@ -1,4 +1,8 @@
-// /js/index.js — MASTER Runtime + GUARANTEED ENTER VR
+// /js/index.js — BLACK SCREEN RESCUE (VR-safe)
+// ✅ Guarantees light + visible debug room
+// ✅ Creates simple controllers + rays if missing
+// ✅ Keeps your HybridWorld build
+// ✅ Adds "Reset View" button (2D + VR)
 
 import * as THREE from "three";
 import { VRButton } from "three/examples/jsm/webxr/VRButton.js";
@@ -22,18 +26,48 @@ app.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x05060a);
 
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 2000);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 3000);
 camera.position.set(0, 1.6, 3);
 
 const player = new THREE.Group();
 player.name = "PlayerRig";
 player.add(camera);
 scene.add(player);
-scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.85));
 
-L("[index] renderer/camera/rig ✅", "ok");
+// --- FAILSAFE LIGHTING (so you never get black) ---
+const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 1.0);
+scene.add(hemi);
 
-// ---------- VR UI (force visible) ----------
+// "Headlamp" on camera
+const headLamp = new THREE.PointLight(0xffffff, 2.5, 30);
+headLamp.position.set(0, 0, 0);
+camera.add(headLamp);
+
+// --- FAILSAFE DEBUG ROOM (in case world is missing or you spawn wrong) ---
+const debugRoot = new THREE.Group();
+debugRoot.name = "DebugRoom";
+scene.add(debugRoot);
+
+const grid = new THREE.GridHelper(30, 30);
+grid.position.y = 0;
+debugRoot.add(grid);
+
+const axes = new THREE.AxesHelper(2);
+axes.position.set(0, 0.02, 0);
+debugRoot.add(axes);
+
+// Big faint floor disc under you (helps orientation)
+const floorDisc = new THREE.Mesh(
+  new THREE.CircleGeometry(6, 64),
+  new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 1, metalness: 0 })
+);
+floorDisc.rotation.x = -Math.PI / 2;
+floorDisc.position.y = -0.01;
+debugRoot.add(floorDisc);
+
+L("[index] renderer/camera/rig + failsafes ✅", "ok");
+
+// --- VR UI slot (force visible) ---
 function ensureVROverlay() {
   let host = document.getElementById("vrSlot");
   if (!host) {
@@ -41,8 +75,6 @@ function ensureVROverlay() {
     host.id = "vrSlot";
     document.body.appendChild(host);
   }
-
-  // FORCE it visible and clickable
   Object.assign(host.style, {
     position: "fixed",
     left: "0",
@@ -54,95 +86,96 @@ function ensureVROverlay() {
     zIndex: "99999",
     pointerEvents: "auto"
   });
-
-  // Create a manual Enter VR button (always)
-  let manual = document.getElementById("btnEnterVR");
-  if (!manual) {
-    manual = document.createElement("button");
-    manual.id = "btnEnterVR";
-    manual.textContent = "ENTER VR";
-    Object.assign(manual.style, {
-      fontSize: "16px",
-      padding: "12px 18px",
-      borderRadius: "14px",
-      border: "1px solid rgba(127,231,255,.35)",
-      background: "rgba(0,0,0,.55)",
-      color: "#7fe7ff",
-      boxShadow: "0 12px 40px rgba(0,0,0,.45)",
-      cursor: "pointer"
-    });
-    host.appendChild(manual);
-  }
-
-  manual.onclick = async () => {
-    try {
-      L("[vr] manual ENTER VR pressed");
-      if (!navigator.xr) throw new Error("navigator.xr missing");
-
-      const ok = await navigator.xr.isSessionSupported?.("immersive-vr");
-      if (!ok) throw new Error("immersive-vr not supported");
-
-      // Request session directly (Quest will prompt)
-      const session = await navigator.xr.requestSession("immersive-vr", {
-        optionalFeatures: [
-          "local-floor",
-          "bounded-floor",
-          "local",
-          "viewer",
-          "hand-tracking",
-          "layers",
-          "dom-overlay"
-        ],
-        domOverlay: { root: document.body }
-      });
-
-      await renderer.xr.setSession(session);
-      L("[vr] session started ✅", "ok");
-    } catch (e) {
-      L("[vr] manual ENTER VR failed ❌", "bad");
-      L(String(e?.stack || e), "muted");
-      alert("ENTER VR failed: " + (e?.message || e));
-    }
-  };
-
   return host;
 }
-
 const vrHost = ensureVROverlay();
 
-// Add standard VRButton too (fallback)
-try {
+// Standard VR button
+try{
   const b = VRButton.createButton(renderer);
-
-  // Make VRButton visible no matter what
   Object.assign(b.style, {
     fontSize: "16px",
     padding: "12px 18px",
     borderRadius: "14px",
-    marginLeft: "10px",
     opacity: "1",
     pointerEvents: "auto"
   });
-
   vrHost.appendChild(b);
   L("[index] VRButton appended ✅", "ok");
-} catch (e) {
+}catch(e){
   L("[index] VRButton failed: " + (e?.message || e), "warn");
 }
 
-// Log XR session starts/ends
-renderer.xr.addEventListener("sessionstart", () => L("[vr] renderer sessionstart ✅", "ok"));
-renderer.xr.addEventListener("sessionend", () => L("[vr] renderer sessionend", "warn"));
+// Reset button (works in 2D and VR)
+const resetBtn = document.createElement("button");
+resetBtn.textContent = "RESET VIEW";
+Object.assign(resetBtn.style, {
+  fontSize: "16px",
+  padding: "12px 18px",
+  borderRadius: "14px",
+  border: "1px solid rgba(127,231,255,.35)",
+  background: "rgba(0,0,0,.55)",
+  color: "#7fe7ff",
+  boxShadow: "0 12px 40px rgba(0,0,0,.45)",
+  cursor: "pointer"
+});
+vrHost.appendChild(resetBtn);
 
-window.addEventListener("resize", () => {
+function resetRig() {
+  // Put player above the debug floor and centered
+  player.position.set(0, 1.6, 3);
+  player.rotation.set(0, 0, 0);
+  camera.rotation.set(0, 0, 0);
+  L("[debug] RESET VIEW ✅", "ok");
+}
+resetBtn.onclick = resetRig;
+
+// Helpful XR logs
+renderer.xr.addEventListener("sessionstart", () => {
+  L("[vr] sessionstart ✅", "ok");
+  // lift slightly in VR to avoid being under floor
+  player.position.y = Math.max(player.position.y, 1.6);
+});
+renderer.xr.addEventListener("sessionend", () => L("[vr] sessionend", "warn"));
+
+window.addEventListener("resize", ()=>{
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
 });
 
-// ---------- World ----------
-const controllers = { left:null, right:null, lasers:[] };
+// --- CONTROLLERS FAILSAFE (simple lines so you see rays even if world doesn’t attach) ---
+function makeControllerRay() {
+  const geo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0, 0, -1)
+  ]);
+  const mat = new THREE.LineBasicMaterial({ color: 0x7fe7ff });
+  const line = new THREE.Line(geo, mat);
+  line.scale.z = 8;
+  return line;
+}
 
+const controllers = {
+  left: renderer.xr.getController(0),
+  right: renderer.xr.getController(1),
+  lasers: []
+};
+
+controllers.left.name = "ControllerLeft";
+controllers.right.name = "ControllerRight";
+player.add(controllers.left);
+player.add(controllers.right);
+
+const lRay = makeControllerRay();
+const rRay = makeControllerRay();
+controllers.left.add(lRay);
+controllers.right.add(rRay);
+controllers.lasers.push(lRay, rRay);
+
+L("[index] controller rays installed ✅", "ok");
+
+// --- WORLD LOADER ---
 let WorldLike = null;
 let ctx = null;
 let worldFrame = null;
@@ -191,7 +224,7 @@ function callWorldFrameSafely(frameFn, ctx, dt, t){
   }
 })();
 
-// ---------- Render loop ----------
+// --- RENDER LOOP ---
 const clock = new THREE.Clock();
 let elapsed = 0;
 let lastFrameWarn = 0;

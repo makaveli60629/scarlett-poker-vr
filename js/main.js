@@ -1,7 +1,7 @@
-// /js/main.js — Scarlett Hybrid 3.7 (FULL BRIGHT + QUEST AXIS FIX + RIGHT STICK 45° SNAP + HUB-BIASED LASER)
+// /js/main.js — Scarlett Hybrid 3.8 (FULL BRIGHT + QUEST AXIS FIX + RIGHT STICK SOLO MOVE + 45° SNAP + HUB-BIASED LASER)
 
 (async function boot() {
-  console.log("SCARLETT_MAIN=3.7");
+  console.log("SCARLETT_MAIN=3.8");
   if (window.__SCARLETT_BOOTED__) return;
   window.__SCARLETT_BOOTED__ = true;
 
@@ -19,11 +19,11 @@
   renderer.setSize(innerWidth, innerHeight);
   renderer.xr.enabled = true;
 
-  // Make it BRIGHT on Quest:
+  // Bright on Quest:
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 2.35; // 🔥 big boost
-  renderer.physicallyCorrectLights = false; // keep simple predictable intensities
+  renderer.toneMappingExposure = 2.35;
+  renderer.physicallyCorrectLights = false;
 
   document.body.appendChild(renderer.domElement);
 
@@ -39,6 +39,7 @@
   const player = new THREE.Group();
   player.name = "PlayerRig";
   scene.add(player);
+
   camera.position.set(0, 1.65, 0);
   player.add(camera);
 
@@ -49,26 +50,26 @@
   document.body.appendChild(VRButton.createButton(renderer));
 
   // -------------------------
-  // ✅ GUARANTEED LIGHT PACK (OVERKILL)
+  // Overkill lights (backup)
   // -------------------------
   const lightRoot = new THREE.Group();
   lightRoot.name = "OverkillLightPack";
   scene.add(lightRoot);
 
-  lightRoot.add(new THREE.AmbientLight(0xffffff, 1.05));           // huge fill
-  lightRoot.add(new THREE.HemisphereLight(0xffffff, 0x2b2b40, 2.2)); // sky/ground
+  lightRoot.add(new THREE.AmbientLight(0xffffff, 1.05));
+  lightRoot.add(new THREE.HemisphereLight(0xffffff, 0x2b2b40, 2.2));
 
   const sun = new THREE.DirectionalLight(0xffffff, 4.0);
   sun.position.set(40, 90, 60);
   lightRoot.add(sun);
 
-  // Camera-follow lamp so you ALWAYS see what you look at
+  // Camera-follow lamp (always visible)
   const headLamp = new THREE.PointLight(0xffffff, 2.2, 35);
   headLamp.position.set(0, 1.4, 0.3);
   camera.add(headLamp);
 
   // -------------------------
-  // Controllers & Hands (parented to rig)
+  // Controllers & Hands
   // -------------------------
   const controllerL = renderer.xr.getController(0);
   const controllerR = renderer.xr.getController(1);
@@ -88,23 +89,23 @@
   // World
   // -------------------------
   const { World } = await import("./world.js");
-  const ctx = { THREE, scene };
+  const ctx = { THREE, scene, renderer, camera, player };
   await World.init(ctx);
 
   // -------------------------
-  // Spawn (AUTHORITATIVE)
+  // Spawn (authoritative)
   // -------------------------
   const spawn = scene.getObjectByName("SpawnPoint");
   function applySpawn() {
     if (!spawn) return;
     player.position.set(spawn.position.x, 0, spawn.position.z);
-    player.rotation.set(0, spawn.rotation.y || Math.PI, 0);
+    player.rotation.set(0, (spawn.rotation?.y ?? Math.PI), 0);
   }
   applySpawn();
   renderer.xr.addEventListener("sessionstart", () => setTimeout(applySpawn, 120));
 
   // -------------------------
-  // Floor plane for teleport
+  // Teleport floor plane
   // -------------------------
   const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
@@ -122,6 +123,7 @@
     new THREE.MeshBasicMaterial({ color: 0x7fe7ff, side: THREE.DoubleSide, transparent: true, opacity: 0.95 })
   );
   ring.rotation.x = -Math.PI / 2;
+  ring.visible = false;
   scene.add(ring);
 
   // Teleport helpers
@@ -129,8 +131,10 @@
   const q = new THREE.Quaternion();
   const dir = new THREE.Vector3();
   const hit = new THREE.Vector3();
+  const fwd = new THREE.Vector3();
+  const hubPos = new THREE.Vector3();
+  const toHub = new THREE.Vector3();
 
-  // Hub bias target
   const hub = () => scene.getObjectByName("HubPlate") || scene.getObjectByName("BossTable") || null;
 
   function updateTeleportRay() {
@@ -139,20 +143,18 @@
 
     if (o.lengthSq() < 0.0001) return false;
 
-    // Controller forward
-    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(q).normalize();
+    // forward from controller
+    fwd.set(0, 0, -1).applyQuaternion(q).normalize();
 
-    // Bias toward hub center (so beam tends to point into the circle)
+    // hub bias
     const h = hub();
     if (h) {
-      const target = new THREE.Vector3();
-      h.getWorldPosition(target);
-      const toHub = target.sub(o).normalize();
-      // blend: mostly controller forward, partially toward hub
+      h.getWorldPosition(hubPos);
+      toHub.copy(hubPos).sub(o).normalize();
       fwd.lerp(toHub, 0.35).normalize();
     }
 
-    // Aim downward a bit so it hits floor
+    // aim down so it hits floor
     dir.copy(fwd);
     dir.y -= 0.35;
     dir.normalize();
@@ -165,18 +167,18 @@
 
     hit.copy(o).addScaledVector(dir, t);
 
-    laser.geometry.setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-t)]);
-    ring.position.set(hit.x, 0.02, hit.z);
+    // ✅ FIX: laser uses WORLD distance
+    const dist = Math.max(0.2, Math.min(35, o.distanceTo(hit)));
+    laser.geometry.setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-dist)]);
 
-    laser.visible = true;
+    ring.position.set(hit.x, 0.02, hit.z);
     ring.visible = true;
+    laser.visible = true;
     return true;
   }
 
   // -------------------------
-  // ✅ QUEST GAMEPAD AXIS FIX
-  // Left stick: axes[0],[1]
-  // Right stick: axes[2],[3] (on Quest)
+  // Quest Gamepad helpers
   // -------------------------
   function getGamepads() {
     const session = renderer.xr.getSession();
@@ -191,14 +193,24 @@
     return { gpL, gpR };
   }
 
-  // Movement: LEFT stick
-  const MOVE_SPEED = 1.35;
+  function pressedTeleport(gpR) {
+    if (!gpR?.buttons) return false;
+    return !!(
+      gpR.buttons[0]?.pressed || // trigger
+      gpR.buttons[1]?.pressed || // squeeze
+      gpR.buttons[4]?.pressed || // A/X (varies)
+      gpR.buttons[5]?.pressed    // B/Y (varies)
+    );
+  }
 
-  // Snap turn: RIGHT stick X
+  // -------------------------
+  // Movement + snap
+  // -------------------------
+  const MOVE_SPEED_L = 1.15;
+  const MOVE_SPEED_R = 1.00; // right-stick solo forward/back
   const SNAP_ANGLE = Math.PI / 4; // 45°
   let snapCooldown = 0;
 
-  // Teleport: right trigger = 1 leap per press
   let lastTeleportPressed = false;
 
   // -------------------------
@@ -215,20 +227,31 @@
     if (renderer.xr.isPresenting) {
       const { gpL, gpR } = getGamepads();
 
-      // Movement (LEFT stick)
+      // LEFT stick move (axes[0],[1])
       if (gpL?.axes?.length >= 2) {
         const lx = gpL.axes[0] ?? 0;
         const ly = gpL.axes[1] ?? 0;
 
         const yaw = player.rotation.y;
-        const forward = (-ly) * MOVE_SPEED * dt;
-        const strafe  = ( lx) * MOVE_SPEED * dt;
+        const forward = (-ly) * MOVE_SPEED_L * dt;
+        const strafe  = ( lx) * MOVE_SPEED_L * dt;
 
         player.position.x += Math.sin(yaw) * forward + Math.cos(yaw) * strafe;
         player.position.z += Math.cos(yaw) * forward - Math.sin(yaw) * strafe;
       }
 
-      // Snap turn (RIGHT stick X) — use axes[2] when present, else fallback
+      // RIGHT stick SOLO forward/back on axes[3]
+      if (gpR?.axes?.length >= 4) {
+        const ry = gpR.axes[3] ?? 0;
+        if (Math.abs(ry) > 0.12) {
+          const yaw = player.rotation.y;
+          const forward = (-ry) * MOVE_SPEED_R * dt;
+          player.position.x += Math.sin(yaw) * forward;
+          player.position.z += Math.cos(yaw) * forward;
+        }
+      }
+
+      // RIGHT stick snap turn on axes[2]
       snapCooldown = Math.max(0, snapCooldown - dt);
       let rx = 0;
       if (gpR?.axes?.length >= 4) rx = gpR.axes[2] ?? 0;
@@ -239,9 +262,11 @@
         snapCooldown = 0.28;
       }
 
-      // Teleport
+      // Teleport ray
       const canTeleport = updateTeleportRay();
-      const pressed = !!gpR?.buttons?.[0]?.pressed; // trigger
+
+      // Teleport (1 leap per press)
+      const pressed = pressedTeleport(gpR);
       if (pressed && !lastTeleportPressed && canTeleport) {
         player.position.set(hit.x, 0, hit.z);
       }

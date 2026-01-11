@@ -1,21 +1,19 @@
-// /js/main.js — Scarlett Hybrid 4.4 (FULL REFINE)
-// ✅ Cache-proof module loading (world.js cannot be stale)
-// ✅ HUD buttons wired + always-on diagnostics
+// /js/main.js — Scarlett Hybrid 4.5 (REFINE)
+// ✅ Cache-proof module loading
+// ✅ HUD buttons wired + diagnostics
 // ✅ Overkill lighting + headlamp
-// ✅ Correct spawn facing (look-at hub/table)
+// ✅ Deterministic spawn facing
+// ✅ Grid-only alignment mode (?grid=1)
 // ✅ Teleport one leap per press
-// ✅ Left stick move + Right stick 45° snap (Quest axis safe)
+// ✅ Left stick move + Right stick 45° snap (Quest safe)
 
 (async function boot() {
   if (window.__SCARLETT_BOOTED__) return;
   window.__SCARLETT_BOOTED__ = true;
 
   const BUILD = (window.__SCARLETT_BUILD__ ||= Date.now());
-  console.log("SCARLETT_MAIN=4.4 BUILD=", BUILD);
+  console.log("SCARLETT_MAIN=4.5 BUILD=", BUILD);
 
-  // -------------------------
-  // HUD refs (index.html already has them)
-  // -------------------------
   const ui = {
     grid: document.getElementById("scarlettGrid"),
     logBox: document.getElementById("scarlettLog"),
@@ -80,11 +78,6 @@
     return { xr, immersive };
   }
 
-  function safeNow() { return performance?.now?.() ?? Date.now(); }
-
-  // -------------------------
-  // THREE
-  // -------------------------
   let THREE;
   try {
     const m = await import(`./three.js?v=${BUILD}`);
@@ -95,9 +88,7 @@
     LOG.push("log", "three via importmap ✅");
   }
 
-  // -------------------------
   // Scene / Camera / Renderer
-  // -------------------------
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
 
@@ -107,7 +98,6 @@
   renderer.setSize(innerWidth, innerHeight);
   renderer.xr.enabled = true;
 
-  // Bright & predictable on Quest
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 2.15;
@@ -121,16 +111,12 @@
     renderer.setSize(innerWidth, innerHeight);
   });
 
-  // -------------------------
-  // VRButton (cache-proof)
-  // -------------------------
+  // VRButton
   const { VRButton } = await import(`./VRButton.js?v=${BUILD}`);
   document.body.appendChild(VRButton.createButton(renderer));
   LOG.push("log", "VRButton ✅");
 
-  // -------------------------
   // Player Rig
-  // -------------------------
   const player = new THREE.Group();
   player.name = "PlayerRig";
   scene.add(player);
@@ -154,12 +140,9 @@
     LOG.push("warn", "XRHands unavailable (controller-only OK).");
   }
 
-  // -------------------------
-  // Overkill light pack
-  // -------------------------
+  // Overkill lights
   scene.add(new THREE.AmbientLight(0xffffff, 1.05));
   scene.add(new THREE.HemisphereLight(0xffffff, 0x1a1a2a, 2.2));
-
   const sun = new THREE.DirectionalLight(0xffffff, 3.2);
   sun.position.set(40, 90, 60);
   scene.add(sun);
@@ -168,37 +151,31 @@
   headLamp.position.set(0, 1.4, 0.35);
   camera.add(headLamp);
 
-  // -------------------------
+  // Grid-only alignment mode
+  const params = new URLSearchParams(location.search);
+  const GRID_ONLY = params.get("grid") === "1";
+
   // Context
-  // -------------------------
   const ctx = {
     THREE, scene, camera, renderer,
     player, rig: player, yawObject: player, pitchObject: camera,
-    LOG,
-    BUILD,
+    LOG, BUILD,
     systems: {},
     colliders: [],
     world: null,
     room: "lobby",
-    mode: "lobby"
+    mode: "lobby",
+    DEBUG_GRID_ONLY: GRID_ONLY
   };
 
-  // -------------------------
-  // Cache-proof world import + signature enforcement
-  // -------------------------
-  const worldMod = await import(`./world.js?v=${BUILD}`);
-  const World = worldMod?.World;
-  if (!World?.init) {
-    LOG.push("error", "world.js missing export World.init");
-    return;
-  }
-  LOG.push("log", `world module loaded: ${World.VERSION || "no VERSION"}`);
+  // Load world (cache-proof)
+  const { World } = await import(`./world.js?v=${BUILD}`);
+  if (!World?.init) { LOG.push("error", "world.js missing World.init"); return; }
+  LOG.push("log", `world module loaded: ${World.VERSION || "?"}`);
   await World.init(ctx);
   ctx.world = World;
 
-  // -------------------------
-  // Spawn & face table (deterministic)
-  // -------------------------
+  // Spawn & face table
   const tmpA = new THREE.Vector3();
   const tmpB = new THREE.Vector3();
 
@@ -210,17 +187,11 @@
       LOG.push("log", `Spawn ✅ x=${player.position.x.toFixed(2)} z=${player.position.z.toFixed(2)}`);
     }
 
-    // Always face hub/table (not the teleport machine)
-    const target =
-      scene.getObjectByName("BossTable") ||
-      scene.getObjectByName("HubPlate") ||
-      scene.getObjectByName("DealerAnchor");
-
+    const target = scene.getObjectByName("BossTable") || scene.getObjectByName("HubPlate");
     if (target) {
       target.getWorldPosition(tmpA);
       tmpB.set(player.position.x, 0, player.position.z);
       const v = tmpA.sub(tmpB); v.y = 0;
-
       if (v.lengthSq() > 1e-6) {
         const yaw = Math.atan2(v.x, v.z);
         player.rotation.set(0, yaw, 0);
@@ -232,9 +203,7 @@
   forceSpawnAndFace();
   renderer.xr.addEventListener("sessionstart", () => setTimeout(forceSpawnAndFace, 160));
 
-  // -------------------------
-  // Room manager (optional)
-  // -------------------------
+  // Room manager optional
   try {
     const rm = await import(`./room_manager.js?v=${BUILD}`);
     rm?.RoomManager?.init?.(ctx);
@@ -243,15 +212,13 @@
     LOG.push("warn", `room_manager missing: ${e?.message || e}`);
   }
 
-  // HUD buttons (desktop / android)
+  // HUD buttons
   ui.btnMenu?.addEventListener("click", () => LOG.push("log", "Menu button pressed"));
   ui.btnRoomLobby?.addEventListener("click", () => { ctx.room="lobby"; ctx.mode="lobby"; LOG.push("log","Room: Lobby"); });
   ui.btnRoomStore?.addEventListener("click", () => { ctx.room="store"; ctx.mode="store"; LOG.push("log","Room: Store"); });
   ui.btnRoomScorpion?.addEventListener("click", () => { ctx.room="scorpion"; ctx.mode="scorpion"; LOG.push("log","Room: Scorpion"); });
 
-  // -------------------------
-  // Teleport system (floor plane)
-  // -------------------------
+  // Teleport system
   const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
   const laser = new THREE.Line(
@@ -284,8 +251,6 @@
     if (o.lengthSq() < 0.0001) return false;
 
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(q).normalize();
-
-    // bias slightly toward hub center
     const h = hubTarget();
     if (h) {
       const t = new THREE.Vector3();
@@ -313,9 +278,6 @@
     return true;
   }
 
-  // -------------------------
-  // Quest gamepad mapping
-  // -------------------------
   function getGamepads() {
     const session = renderer.xr.getSession();
     if (!session) return { gpL: null, gpR: null };
@@ -328,23 +290,17 @@
     return { gpL, gpR };
   }
 
-  const MOVE_SPEED = 1.10;          // slower (your request)
-  const SNAP_ANGLE = Math.PI / 4;   // 45°
+  const MOVE_SPEED = 1.10;
+  const SNAP_ANGLE = Math.PI / 4;
   let snapCooldown = 0;
-
-  // Teleport one leap per press
   let lastTeleportPressed = false;
 
-  // -------------------------
-  // Main loop
-  // -------------------------
-  let last = safeNow();
+  let last = performance.now();
   let fpsAcc = 0, fpsCount = 0, fps = 0;
 
   renderer.setAnimationLoop((t) => {
-    const now = safeNow();
-    const dt = Math.min(0.05, (now - last) / 1000);
-    last = now;
+    const dt = Math.min(0.05, (t - last) / 1000);
+    last = t;
 
     fpsAcc += dt; fpsCount++;
     if (fpsAcc >= 0.5) { fps = Math.round(fpsCount / fpsAcc); fpsAcc = 0; fpsCount = 0; }
@@ -354,7 +310,7 @@
     if (renderer.xr.isPresenting) {
       const { gpL, gpR } = getGamepads();
 
-      // Move (left stick)
+      // Move
       if (gpL?.axes?.length >= 2) {
         const lx = gpL.axes[0] ?? 0;
         const ly = gpL.axes[1] ?? 0;
@@ -367,10 +323,9 @@
         player.position.z += Math.cos(yaw) * forward - Math.sin(yaw) * strafe;
       }
 
-      // Snap turn (right stick X: axes[2] on Quest)
+      // Snap turn
       snapCooldown = Math.max(0, snapCooldown - dt);
       const rx = (gpR?.axes?.length >= 4 ? (gpR.axes[2] ?? 0) : (gpR?.axes?.[0] ?? 0));
-
       if (snapCooldown <= 0 && Math.abs(rx) > 0.75) {
         player.rotation.y += (rx > 0 ? -SNAP_ANGLE : SNAP_ANGLE);
         snapCooldown = 0.28;
@@ -378,13 +333,13 @@
 
       // Teleport
       const canTeleport = updateTeleportRay();
-      const pressed = !!gpR?.buttons?.[0]?.pressed; // right trigger
-
+      const pressed = !!gpR?.buttons?.[0]?.pressed;
       if (pressed && !lastTeleportPressed && canTeleport) {
         player.position.set(hit.x, 0, hit.z);
         LOG.push("log", `Teleport ✅ x=${hit.x.toFixed(2)} z=${hit.z.toFixed(2)}`);
       }
       lastTeleportPressed = pressed;
+
     } else {
       laser.visible = false;
       ring.visible = false;
@@ -397,6 +352,7 @@
       ["XR", renderer.xr.isPresenting ? "YES" : "NO"],
       ["Pos", `${player.position.x.toFixed(1)}, ${player.position.z.toFixed(1)}`],
       ["World", `${ctx.world?.VERSION || "?"}`],
+      ["GridOnly", ctx.DEBUG_GRID_ONLY ? "YES" : "NO"],
       ["Room", `${ctx.room}`],
     ]);
 
@@ -404,5 +360,5 @@
   });
 
   await setCaps();
-  LOG.push("log", "Hybrid 4.4 boot complete ✅ (cache-proof + HUD wired + bright + 45° snap + 1-leap teleport)");
+  LOG.push("log", "Hybrid 4.5 boot complete ✅ (grid toggle + door gaps fixed + enclosed halls)");
 })();

@@ -4,10 +4,9 @@
 // ✅ Android dual-stick locomotion (touch) + desktop WASD
 // ✅ VR-ready with VRButton
 // ✅ Calls world.build() and world.frame()
-
+import { World } from "./world.js?v=4_8_3_radial_fix";
 import * as THREE from "three";
 import { VRButton } from "./VRButton.js";
-import { World } from "./world.js?v=4_8_2_FIX2";
 
 const log = (...a) => console.log(...a);
 

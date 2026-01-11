@@ -2,175 +2,66 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport"
-        content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
   <title>Scarlett VR Poker</title>
 
   <style>
     :root{
-      --bg:#05060a;
-      --panel:#0b0d14f2;
-      --panel2:#0b0d14cc;
-      --text:#e8ecff;
-      --muted:#98a0c7;
-      --ok:#4cd964;
-      --warn:#ffcc00;
-      --bad:#ff6b6b;
-      --shadow: 0 12px 40px rgba(0,0,0,.45);
-      --radius: 16px;
-      --border: rgba(127,231,255,.22);
+      --bg:#05060a; --panel:#0b0d14f2; --panel2:#0b0d14cc;
+      --text:#e8ecff; --muted:#98a0c7;
+      --ok:#4cd964; --warn:#ffcc00; --bad:#ff6b6b;
+      --shadow:0 12px 40px rgba(0,0,0,.45);
+      --radius:16px; --border:rgba(127,231,255,.22);
     }
-
-    html, body {
-      margin:0; padding:0; height:100%;
-      background:var(--bg);
-      overflow:hidden;
-      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      color:var(--text);
-      touch-action:none;
-    }
-
-    /* Critical for Android: prevent scroll/zoom stealing joystick drags */
+    html, body { margin:0; padding:0; height:100%; background:var(--bg); overflow:hidden;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; color:var(--text); touch-action:none; }
     canvas { display:block; width:100vw; height:100vh; touch-action:none; }
 
-    /* ===== Top Dock (no overlap with bottom controls) ===== */
-    #topDock {
-      position: fixed;
-      left: 0; right: 0; top: 0;
-      z-index: 10000;
-      pointer-events: none;
-      padding: 10px 10px 0 10px;
+    #topDock{ position:fixed; left:0; right:0; top:0; z-index:10000; pointer-events:none; padding:10px 10px 0 10px; }
+    #topBar{
+      pointer-events:auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+      padding:10px; border-radius:18px; background:var(--panel2);
+      border:1px solid var(--border); box-shadow:var(--shadow); backdrop-filter:blur(6px);
     }
+    #brand{ display:flex; gap:10px; align-items:center; padding:8px 10px; border-radius:999px;
+      border:1px solid var(--border); background:rgba(11,13,20,.7); font-weight:950; white-space:nowrap; }
+    #status{ opacity:.85; font-weight:900; white-space:nowrap; }
 
-    #topBar {
-      pointer-events: auto;
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      flex-wrap: wrap;
-      padding: 10px 10px;
-      border-radius: 18px;
-      background: var(--panel2);
-      border: 1px solid var(--border);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(6px);
+    .btn{
+      pointer-events:auto; border:1px solid var(--border); background:rgba(11,13,20,.78);
+      color:var(--text); font-weight:950; padding:10px 12px; border-radius:14px;
+      box-shadow:var(--shadow); touch-action:none; user-select:none; -webkit-user-select:none;
     }
+    .btn:active{ transform:scale(.98); }
+    .btn.good{ border-color:rgba(76,217,100,.35); }
+    .btn.warn{ border-color:rgba(255,204,0,.35); }
+    .btn.bad{ border-color:rgba(255,107,107,.35); }
 
-    #brand {
-      display:flex; align-items:center; gap:10px;
-      padding: 8px 10px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: rgba(11,13,20,.7);
-      font-weight: 950;
-      letter-spacing: .3px;
-      white-space: nowrap;
+    #debugWrap{ pointer-events:auto; margin-top:10px; border-radius:18px; background:var(--panel);
+      border:1px solid var(--border); box-shadow:var(--shadow); overflow:hidden; }
+    #debugHeader{
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+      padding:10px; border-bottom:1px solid rgba(127,231,255,.12); background:rgba(11,13,20,.5);
     }
-
-    #status {
-      opacity: .8;
-      font-weight: 800;
-      white-space: nowrap;
+    #debugTitle{ font-weight:950; opacity:.92; white-space:nowrap; }
+    #debugTip{ color:var(--muted); font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; font-weight:800; opacity:.85; white-space:nowrap; }
+    #overlay{
+      width:100%; max-height:34vh; overflow:auto; padding:10px 12px 12px 12px; box-sizing:border-box;
+      font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; line-height:1.35;
+      user-select:text; -webkit-user-select:text; touch-action:pan-x pan-y;
     }
+    #overlay .row{ margin:2px 0; }
+    .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)} .muted{color:var(--muted)}
+    #debugWrap.min #overlay{ max-height:70px; overflow:hidden; opacity:.75; }
+    #debugWrap.hide{ display:none !important; }
 
-    .btn {
-      pointer-events: auto;
-      border: 1px solid var(--border);
-      background: rgba(11,13,20,.78);
-      color: var(--text);
-      font-weight: 950;
-      padding: 10px 12px;
-      border-radius: 14px;
-      box-shadow: var(--shadow);
-      letter-spacing: .2px;
-      touch-action:none;
-      user-select: none;
-      -webkit-user-select: none;
+    #bootFail{
+      position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+      z-index:20000; padding:14px 16px; border-radius:16px; background:rgba(11,13,20,.92);
+      border:1px solid rgba(255,107,107,.45); box-shadow:var(--shadow);
+      display:none; max-width:calc(100vw - 24px); text-align:center;
+      font-weight:900;
     }
-    .btn:active { transform: scale(0.98); }
-
-    .btn.good { border-color: rgba(76,217,100,.35); }
-    .btn.warn { border-color: rgba(255,204,0,.35); }
-    .btn.bad  { border-color: rgba(255,107,107,.35); }
-
-    /* ===== Debug Drawer ===== */
-    #debugWrap {
-      pointer-events: auto;
-      margin-top: 10px;
-      border-radius: 18px;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      box-shadow: var(--shadow);
-      overflow: hidden;
-    }
-
-    #debugHeader {
-      display:flex;
-      align-items:center;
-      justify-content: space-between;
-      gap: 10px;
-      padding: 10px 10px;
-      border-bottom: 1px solid rgba(127,231,255,.12);
-      background: rgba(11,13,20,.5);
-    }
-
-    #debugTitle {
-      font-weight: 950;
-      letter-spacing: .25px;
-      opacity: .9;
-      white-space: nowrap;
-    }
-
-    #debugTip {
-      color: var(--muted);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-size: 12px;
-      font-weight: 800;
-      opacity: .8;
-      white-space: nowrap;
-    }
-
-    #overlay {
-      width: 100%;
-      max-height: 34vh;
-      overflow: auto;
-      padding: 10px 12px 12px 12px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-size: 12px;
-      line-height: 1.35;
-      box-sizing: border-box;
-      user-select: text;
-      -webkit-user-select: text;
-      touch-action: pan-x pan-y; /* allow scrolling inside log */
-    }
-
-    #overlay .row { margin: 2px 0; }
-    .ok{ color:var(--ok); } .warn{ color:var(--warn); } .bad{ color:var(--bad); } .muted{ color:var(--muted); }
-
-    /* collapsed/hidden */
-    #debugWrap.min #overlay { max-height: 70px; overflow: hidden; opacity: .75; }
-    #debugWrap.hide { display:none !important; }
-
-    /* ===== Toast ===== */
-    #toast {
-      position: fixed;
-      left: 50%;
-      top: 110px;
-      transform: translateX(-50%);
-      z-index: 10001;
-      padding: 10px 12px;
-      border-radius: 14px;
-      background: rgba(11,13,20,.88);
-      border: 1px solid var(--border);
-      box-shadow: var(--shadow);
-      font-weight: 900;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity .18s ease;
-      max-width: calc(100vw - 24px);
-      text-align: center;
-    }
-    #toast.show { opacity: 1; }
   </style>
 </head>
 
@@ -178,10 +69,9 @@
   <div id="topDock">
     <div id="topBar">
       <div id="brand">SCARLETT VR POKER</div>
-      <div id="status">Android Dev UI • Full Diagnostics • Copy Log</div>
+      <div id="status">Android Dev UI • Diagnostics</div>
 
       <button class="btn good" id="btnEnterVR">ENTER VR</button>
-      <button class="btn" id="btnTable">TABLE</button>
       <button class="btn" id="btnRespawn">RESPAWN SAFE</button>
       <button class="btn" id="btnSnap">SNAP DOWN</button>
 
@@ -194,110 +84,53 @@
     <div id="debugWrap">
       <div id="debugHeader">
         <div id="debugTitle">Diagnostics</div>
-        <div id="debugTip">Tip: COPY LOG → paste here</div>
+        <div id="debugTip">COPY LOG → paste here</div>
       </div>
       <div id="overlay"></div>
     </div>
   </div>
 
-  <div id="toast"></div>
-
-  <!-- Cache bust -->
-  <script type="module" src="./js/index.js?v=888"></script>
+  <div id="bootFail">JS did not boot. Check path to <code>js/index.js</code> and console.</div>
 
   <script>
-    (function(){
-      const overlay = document.getElementById("overlay");
-      const wrap = document.getElementById("debugWrap");
-      const toast = document.getElementById("toast");
+    // If index.js never runs, this will show after 2s
+    setTimeout(() => {
+      if (!window.SCARLETT_BOOTED) document.getElementById("bootFail").style.display = "block";
+    }, 2000);
 
-      function showToast(msg){
-        toast.textContent = msg;
-        toast.classList.add("show");
-        setTimeout(()=>toast.classList.remove("show"), 1200);
-      }
+    // UI buttons (call window.SCARLETT API from index.js)
+    const overlay = document.getElementById("overlay");
+    const wrap = document.getElementById("debugWrap");
 
-      // Controls
-      document.getElementById("btnMin").addEventListener("click", (e)=>{
-        e.preventDefault(); e.stopPropagation();
-        wrap.classList.toggle("min");
-      }, {passive:false});
+    document.getElementById("btnMin").addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); wrap.classList.toggle("min"); }, {passive:false});
+    document.getElementById("btnHide").addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); wrap.classList.toggle("hide"); }, {passive:false});
+    document.getElementById("btnClear").addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); overlay.innerHTML=""; }, {passive:false});
 
-      document.getElementById("btnHide").addEventListener("click", (e)=>{
-        e.preventDefault(); e.stopPropagation();
-        wrap.classList.toggle("hide");
-      }, {passive:false});
+    document.getElementById("btnCopy").addEventListener("click", async (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      await window.SCARLETT?.copyLog?.();
+    }, {passive:false});
 
-      document.getElementById("btnClear").addEventListener("click", (e)=>{
-        e.preventDefault(); e.stopPropagation();
-        overlay.innerHTML = "";
-        showToast("Log cleared");
-      }, {passive:false});
+    document.getElementById("btnEnterVR").addEventListener("click", (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      const vrBtn = document.querySelector("#VRButton") || document.querySelector("button[title*='VR']");
+      vrBtn?.click?.();
+    }, {passive:false});
 
-      document.getElementById("btnCopy").addEventListener("click", async (e)=>{
-        e.preventDefault(); e.stopPropagation();
+    document.getElementById("btnRespawn").addEventListener("click", (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      window.SCARLETT?.respawnSafe?.();
+    }, {passive:false});
 
-        // Prefer the recorder in index.js if present
-        if (window.SCARLETT?.copyLog) {
-          const r = await window.SCARLETT.copyLog();
-          showToast(r?.ok ? "Copied ✅" : (r?.reason === "clipboard-blocked" ? "Selected text (Copy)" : "Copy failed"));
-          return;
-        }
+    document.getElementById("btnSnap").addEventListener("click", (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      window.SCARLETT?.snapDown?.();
+    }, {passive:false});
 
-        // Fallback: copy overlay text directly
-        const text = overlay.innerText || "";
-        if (!text.trim()) { showToast("Nothing to copy"); return; }
-        try {
-          await navigator.clipboard.writeText(text);
-          showToast("Copied ✅");
-        } catch (err) {
-          try {
-            const range = document.createRange();
-            range.selectNodeContents(overlay);
-            const sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(range);
-            showToast("Clipboard blocked — text selected");
-          } catch (e2) {
-            showToast("Copy failed");
-          }
-        }
-      }, {passive:false});
-
-      document.getElementById("btnEnterVR").addEventListener("click", (e)=>{
-        e.preventDefault(); e.stopPropagation();
-        const vrBtn =
-          document.querySelector("#VRButton") ||
-          document.querySelector("button[title*='VR']") ||
-          document.querySelector("button.vr-button");
-        if (vrBtn?.click) vrBtn.click();
-        else showToast("VR button not found");
-      }, {passive:false});
-
-      document.getElementById("btnTable").addEventListener("click", (e)=>{
-        e.preventDefault(); e.stopPropagation();
-        if (window.SCARLETT?.gotoTable) window.SCARLETT.gotoTable();
-        else showToast("gotoTable not wired");
-      }, {passive:false});
-
-      document.getElementById("btnRespawn").addEventListener("click", (e)=>{
-        e.preventDefault(); e.stopPropagation();
-        if (window.SCARLETT?.respawnSafe) window.SCARLETT.respawnSafe();
-        else showToast("respawnSafe not wired");
-      }, {passive:false});
-
-      document.getElementById("btnSnap").addEventListener("click", (e)=>{
-        e.preventDefault(); e.stopPropagation();
-        if (window.SCARLETT?.snapDown) window.SCARLETT.snapDown();
-        else showToast("snapDown not wired");
-      }, {passive:false});
-
-      // prevent browser menus stealing input
-      window.addEventListener("contextmenu", (e)=>e.preventDefault(), {passive:false});
-      window.addEventListener("gesturestart", (e)=>e.preventDefault(), {passive:false});
-      window.addEventListener("gesturechange", (e)=>e.preventDefault(), {passive:false});
-      window.addEventListener("gestureend", (e)=>e.preventDefault(), {passive:false});
-    })();
+    window.addEventListener("contextmenu", (e)=>e.preventDefault(), {passive:false});
   </script>
+
+  <!-- ✅ IMPORTANT: NO leading slash. This keeps GitHub Pages project paths correct. -->
+  <script type="module" src="js/index.js?v=4002"></script>
 </body>
 </html>

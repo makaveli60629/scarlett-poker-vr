@@ -48,3 +48,49 @@ async function safeImport(rel) {
 })().catch((e) => {
   log("FATAL:", String(e?.message || e));
 });
+// ===== TEMP VISIBILITY TEST (DO NOT REMOVE YET) =====
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.xr.enabled = true;
+
+document.getElementById("app").appendChild(renderer.domElement);
+log("renderer created ✅");
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x101020);
+
+const camera = new THREE.PerspectiveCamera(
+  70,
+  window.innerWidth / window.innerHeight,
+  0.01,
+  100
+);
+camera.position.set(0, 1.6, 2);
+
+// light
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
+
+// big visible cube (cannot miss it)
+const cube = new THREE.Mesh(
+  new THREE.BoxGeometry(1, 1, 1),
+  new THREE.MeshStandardMaterial({ color: 0xff2d7a })
+);
+cube.position.set(0, 1.5, -2);
+scene.add(cube);
+
+// animation loop
+renderer.setAnimationLoop(() => {
+  cube.rotation.y += 0.01;
+  renderer.render(scene, camera);
+});
+
+log("render loop running ✅");
+
+// VR Button (Quest-compatible)
+import("https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js")
+  .then(({ VRButton }) => {
+    document.body.appendChild(VRButton.createButton(renderer));
+    log("VRButton added ✅");
+  });

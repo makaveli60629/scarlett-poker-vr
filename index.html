@@ -30,6 +30,7 @@
       touch-action:none;
     }
 
+    /* Critical for Android: prevent scroll/zoom stealing joystick drags */
     canvas { display:block; width:100vw; height:100vh; touch-action:none; }
 
     /* ===== Top Dock (no overlap with bottom controls) ===== */
@@ -37,7 +38,7 @@
       position: fixed;
       left: 0; right: 0; top: 0;
       z-index: 10000;
-      pointer-events: none; /* buttons enable pointer individually */
+      pointer-events: none;
       padding: 10px 10px 0 10px;
     }
 
@@ -83,6 +84,8 @@
       box-shadow: var(--shadow);
       letter-spacing: .2px;
       touch-action:none;
+      user-select: none;
+      -webkit-user-select: none;
     }
     .btn:active { transform: scale(0.98); }
 
@@ -118,11 +121,13 @@
       white-space: nowrap;
     }
 
-    #debugActions {
-      display:flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      justify-content: flex-end;
+    #debugTip {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      font-weight: 800;
+      opacity: .8;
+      white-space: nowrap;
     }
 
     #overlay {
@@ -136,12 +141,13 @@
       box-sizing: border-box;
       user-select: text;
       -webkit-user-select: text;
+      touch-action: pan-x pan-y; /* allow scrolling inside log */
     }
 
     #overlay .row { margin: 2px 0; }
     .ok{ color:var(--ok); } .warn{ color:var(--warn); } .bad{ color:var(--bad); } .muted{ color:var(--muted); }
 
-    /* collapsed mode */
+    /* collapsed/hidden */
     #debugWrap.min #overlay { max-height: 70px; overflow: hidden; opacity: .75; }
     #debugWrap.hide { display:none !important; }
 
@@ -172,11 +178,12 @@
   <div id="topDock">
     <div id="topBar">
       <div id="brand">SCARLETT VR POKER</div>
-      <div id="status">Android Dev UI • No overlap • Copy Log</div>
+      <div id="status">Android Dev UI • Full Diagnostics • Copy Log</div>
 
       <button class="btn good" id="btnEnterVR">ENTER VR</button>
       <button class="btn" id="btnTable">TABLE</button>
       <button class="btn" id="btnRespawn">RESPAWN SAFE</button>
+      <button class="btn" id="btnSnap">SNAP DOWN</button>
 
       <button class="btn" id="btnMin">MIN</button>
       <button class="btn" id="btnHide">HIDE</button>
@@ -187,11 +194,7 @@
     <div id="debugWrap">
       <div id="debugHeader">
         <div id="debugTitle">Diagnostics</div>
-        <div id="debugActions">
-          <span class="muted" style="font-family: ui-monospace, monospace; font-size:12px; opacity:.75;">
-            Tip: tap COPY LOG, then paste anywhere.
-          </span>
-        </div>
+        <div id="debugTip">Tip: COPY LOG → paste here</div>
       </div>
       <div id="overlay"></div>
     </div>
@@ -199,8 +202,8 @@
 
   <div id="toast"></div>
 
-  <!-- cache bust -->
-  <script type="module" src="./js/index.js?v=777"></script>
+  <!-- Cache bust -->
+  <script type="module" src="./js/index.js?v=888"></script>
 
   <script>
     (function(){
@@ -214,7 +217,7 @@
         setTimeout(()=>toast.classList.remove("show"), 1200);
       }
 
-      // ===== Buttons =====
+      // Controls
       document.getElementById("btnMin").addEventListener("click", (e)=>{
         e.preventDefault(); e.stopPropagation();
         wrap.classList.toggle("min");
@@ -233,23 +236,28 @@
 
       document.getElementById("btnCopy").addEventListener("click", async (e)=>{
         e.preventDefault(); e.stopPropagation();
+
+        // Prefer the recorder in index.js if present
+        if (window.SCARLETT?.copyLog) {
+          const r = await window.SCARLETT.copyLog();
+          showToast(r?.ok ? "Copied ✅" : (r?.reason === "clipboard-blocked" ? "Selected text (Copy)" : "Copy failed"));
+          return;
+        }
+
+        // Fallback: copy overlay text directly
         const text = overlay.innerText || "";
         if (!text.trim()) { showToast("Nothing to copy"); return; }
-
-        // Try clipboard first
         try {
           await navigator.clipboard.writeText(text);
           showToast("Copied ✅");
-          return;
         } catch (err) {
-          // Fallback: select all text so user can copy manually
           try {
             const range = document.createRange();
             range.selectNodeContents(overlay);
             const sel = window.getSelection();
             sel.removeAllRanges();
             sel.addRange(range);
-            showToast("Clipboard blocked — text selected (Copy)");
+            showToast("Clipboard blocked — text selected");
           } catch (e2) {
             showToast("Copy failed");
           }
@@ -258,16 +266,14 @@
 
       document.getElementById("btnEnterVR").addEventListener("click", (e)=>{
         e.preventDefault(); e.stopPropagation();
-        // click VRButton if present
         const vrBtn =
           document.querySelector("#VRButton") ||
           document.querySelector("button[title*='VR']") ||
           document.querySelector("button.vr-button");
-        if (vrBtn && vrBtn.click) vrBtn.click();
+        if (vrBtn?.click) vrBtn.click();
         else showToast("VR button not found");
       }, {passive:false});
 
-      // Hook to game functions if index.js exposes them
       document.getElementById("btnTable").addEventListener("click", (e)=>{
         e.preventDefault(); e.stopPropagation();
         if (window.SCARLETT?.gotoTable) window.SCARLETT.gotoTable();
@@ -280,7 +286,13 @@
         else showToast("respawnSafe not wired");
       }, {passive:false});
 
-      // prevent menus/gestures stealing input
+      document.getElementById("btnSnap").addEventListener("click", (e)=>{
+        e.preventDefault(); e.stopPropagation();
+        if (window.SCARLETT?.snapDown) window.SCARLETT.snapDown();
+        else showToast("snapDown not wired");
+      }, {passive:false});
+
+      // prevent browser menus stealing input
       window.addEventListener("contextmenu", (e)=>e.preventDefault(), {passive:false});
       window.addEventListener("gesturestart", (e)=>e.preventDefault(), {passive:false});
       window.addEventListener("gesturechange", (e)=>e.preventDefault(), {passive:false});

@@ -130,7 +130,17 @@ export const World = (() => {
       new THREE.Vector3(0, 0, (offset)),  // south
       new THREE.Vector3(-(offset), 0, 0)  // west
     ];
+// world.js (add somewhere accessible in World)
+const _spawns = {
+  lobby: { x: 0, y: 0, z: 10, yaw: Math.PI },   // <-- push away from table origin
+  store: { x: 12, y: 0, z: 0, yaw: -Math.PI/2 },
+  scorpion: { x: -12, y: 0, z: 0, yaw: Math.PI/2 },
+  spectate: { x: 0, y: 0, z: -12, yaw: 0 },
+};
 
+export function getSpawn(name="lobby"){
+  return _spawns[name] || _spawns.lobby;
+}
     // door wall skipped (faces lobby)
     const doorSides = [2, 3, 0, 1];
 

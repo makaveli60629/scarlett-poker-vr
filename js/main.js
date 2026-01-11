@@ -1,14 +1,15 @@
-// /js/main.js — Scarlett Hybrid 2.7.1 (FULL, PERMANENT DEBUG BUILD)
+// /js/main.js — Scarlett Hybrid 2.7.2 (FULL, PERMANENT DEBUG BUILD)
 // FIXES:
-// ✅ spawn facing = EXACT face-to-target (no magic +180). Optional per-world offset.
-// ✅ controllers + XRHands parented to PlayerRig (no more stuck on table)
-// ✅ teleport ray attached to right controller (valid pose check)
-// ✅ controller locomotion + snap turn
-// ✅ loads world + optional systems
-// ✅ loads gesture_engine + betting_module (included below)
+// ✅ Facing snapped to 45° (no more corner drift)
+// ✅ Teleport ring/laser hits real floor using ctx.floorY
+// ✅ Movement speed reduced + deadzone
+// ✅ RIGHT stick only movement + RIGHT stick 45° snap turn
+// ✅ controllers + XRHands parented to PlayerRig (no stuck-on-table)
+// ✅ teleport ray anchored to right controller (valid pose check)
+// ✅ loads world + optional systems + gesture_engine + betting_module
 
 (async function boot() {
-  console.log("HYBRID_MAIN=2.7.1");
+  console.log("HYBRID_MAIN=2.7.2");
 
   if (window.__SCARLETT_BOOTED__) throw new Error("Double boot prevented");
   window.__SCARLETT_BOOTED__ = true;
@@ -127,6 +128,7 @@
     rig: player,
     yawObject: player,
     pitchObject: camera,
+    floorY: 0, // ✅ world.js can overwrite this
   };
 
   // World
@@ -138,7 +140,7 @@
     LOG.push("error", "world.js missing World.init");
   }
 
-  // ✅ Controllers parented to rig so they follow teleport/movement
+  // ✅ Controllers parented to rig
   const controllerL = renderer.xr.getController(0);
   controllerL.name = "ControllerLeft";
   player.add(controllerL);
@@ -147,25 +149,29 @@
   controllerR.name = "ControllerRight";
   player.add(controllerR);
 
-  LOG.push("log", "Controllers parented to PlayerRig ✅ (no more stuck-on-table)");
+  LOG.push("log", "Controllers parented to PlayerRig ✅");
 
   // ✅ Hands also parented to rig
-  let leftHand = null, rightHand = null;
   try {
-    leftHand = renderer.xr.getHand(0); leftHand.name = "XRHandLeft"; player.add(leftHand);
-    rightHand = renderer.xr.getHand(1); rightHand.name = "XRHandRight"; player.add(rightHand);
+    const handL = renderer.xr.getHand(0); handL.name = "XRHandLeft"; player.add(handL);
+    const handR = renderer.xr.getHand(1); handR.name = "XRHandRight"; player.add(handR);
     LOG.push("log", "XRHands parented to PlayerRig ✅");
   } catch {
     LOG.push("warn", "XRHands unavailable (controller-only OK).");
   }
 
-  // ✅ FIXED Spawn + Facing (EXACT)
+  // ✅ Spawn + Facing snapped to 45°
   const tmp = new THREE.Vector3();
   const tmp2 = new THREE.Vector3();
+  const tmpQ = new THREE.Quaternion();
+  const SNAP_45 = Math.PI / 4;
+
+  function snapYaw45(yaw) {
+    return Math.round(yaw / SNAP_45) * SNAP_45;
+  }
 
   function applySpawnAndFacing() {
     const spObj = scene.getObjectByName("SpawnPoint") || scene.getObjectByName("SpawnPad");
-
     if (spObj) {
       spObj.getWorldPosition(tmp);
       player.position.set(tmp.x, 0, tmp.z);
@@ -174,30 +180,35 @@
       LOG.push("warn", "No SpawnPoint/SpawnPad found.");
     }
 
-    // If the world defines a target name, use it.
-    const faceTargetName = scene.getObjectByName("SpawnPoint")?.userData?.faceTargetName || null;
-    const faceYawOffsetDeg = scene.getObjectByName("SpawnPoint")?.userData?.faceYawOffsetDeg || 0;
-    const yawOffset = THREE.MathUtils.degToRad(faceYawOffsetDeg);
+    const spPoint = scene.getObjectByName("SpawnPoint");
 
+    // Prefer authored rotation if enabled by world
+    if (spPoint && spPoint.userData?.useSpawnRotation) {
+      spPoint.getWorldQuaternion(tmpQ);
+      const e = new THREE.Euler().setFromQuaternion(tmpQ, "YXZ");
+      player.rotation.set(0, snapYaw45(e.y), 0);
+      LOG.push("log", "Facing ✅ (SpawnPoint rotation, snapped 45°)");
+      return;
+    }
+
+    // Otherwise face target
+    const faceTargetName = spPoint?.userData?.faceTargetName || "HubPlate";
     const target =
-      (faceTargetName ? scene.getObjectByName(faceTargetName) : null) ||
-      scene.getObjectByName("HubPlate") ||
-      scene.getObjectByName("BossTable");
+      scene.getObjectByName(faceTargetName) ||
+      scene.getObjectByName("BossTable") ||
+      scene.getObjectByName("HubPlate");
 
-    if (target) {
-      target.getWorldPosition(tmp);
-      tmp2.set(player.position.x, 0, player.position.z);
+    if (!target) { LOG.push("warn", "No facing target found."); return; }
 
-      const v = tmp.sub(tmp2);
-      v.y = 0;
+    target.getWorldPosition(tmp);
+    tmp2.set(player.position.x, 0, player.position.z);
+    const v = tmp.sub(tmp2);
+    v.y = 0;
 
-      if (v.lengthSq() > 1e-6) {
-        const yaw = Math.atan2(v.x, v.z) + yawOffset;
-        player.rotation.set(0, yaw, 0);
-        LOG.push("log", `Facing target ✅ (${target.name}) offset=${faceYawOffsetDeg}°`);
-      }
-    } else {
-      LOG.push("warn", "No HubPlate/BossTable found for facing.");
+    if (v.lengthSq() > 1e-6) {
+      const yaw = snapYaw45(Math.atan2(v.x, v.z));
+      player.rotation.set(0, yaw, 0);
+      LOG.push("log", `Facing ✅ (${target.name}) snapped 45°`);
     }
   }
 
@@ -217,8 +228,8 @@
   if (BettingModule?.init) BettingModule.init(ctx);
   if (!BettingModule) LOG.push("warn", "BettingModule missing -> betting disabled.");
 
-  // Teleport visuals anchored to right controller
-  const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  // ✅ Teleport visuals anchored to right controller, using world floorY
+  const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -ctx.floorY);
 
   const laser = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]),
@@ -244,10 +255,13 @@
 
   function controllerPoseValid() {
     controllerR.getWorldPosition(o);
-    return o.lengthSq() > 0.05; // blocks 0,0,0 pose
+    return o.lengthSq() > 0.05;
   }
 
   function updateTeleportRay() {
+    // refresh plane constant in case world updates floorY
+    floorPlane.constant = -ctx.floorY;
+
     if (!controllerPoseValid()) return { ok: false, src: "controller-invalid" };
 
     controllerR.getWorldPosition(o);
@@ -261,14 +275,14 @@
     if (Math.abs(denom) < 1e-6) return { ok: false, src: "controller" };
 
     const t = -(floorPlane.normal.dot(o) + floorPlane.constant) / denom;
-    if (t < 0.25 || t > 26) return { ok: false, src: "controller" };
+    if (t < 0.25 || t > 40) return { ok: false, src: "controller" };
 
     hit.copy(o).addScaledVector(d, t);
 
-    const dist = Math.max(0.2, Math.min(26, o.distanceTo(hit)));
+    const dist = Math.max(0.2, Math.min(40, o.distanceTo(hit)));
     laser.geometry.setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-dist)]);
 
-    ring.position.set(hit.x, 0.02, hit.z);
+    ring.position.set(hit.x, ctx.floorY + 0.02, hit.z);
     ring.visible = true;
 
     return { ok: true, point: hit.clone(), src: "controller" };
@@ -279,11 +293,17 @@
     LOG.push("log", `Teleport ✅ x=${point.x.toFixed(2)} z=${point.z.toFixed(2)}`);
   }
 
-  function readGamepad() {
+  // ✅ Prefer RIGHT controller for everything (one-controller mode)
+  function readGamepadPreferred() {
     const s = renderer.xr.getSession?.();
     if (!s) return null;
-    for (const src of s.inputSources) if (src.gamepad && src.handedness === "left") return src.gamepad;
-    for (const src of s.inputSources) if (src.gamepad) return src.gamepad;
+
+    for (const src of s.inputSources) {
+      if (src.gamepad && src.handedness === "right") return { gp: src.gamepad, handedness: "right" };
+    }
+    for (const src of s.inputSources) {
+      if (src.gamepad) return { gp: src.gamepad, handedness: src.handedness || "unknown" };
+    }
     return null;
   }
 
@@ -294,14 +314,19 @@
       const gp = src.gamepad;
       if (!gp) continue;
       const b = gp.buttons || [];
-      if (b[0]?.pressed || b[4]?.pressed || b[5]?.pressed) return true; // trigger/A/B
+      if (b[0]?.pressed || b[4]?.pressed || b[5]?.pressed) return true;
     }
     return false;
   }
 
-  const move = { speed: 2.6, snapDeg: 30, snapCooldown: 0 };
+  const move = {
+    speed: 1.35,       // ✅ slower
+    deadzone: 0.16,
+    snapDeg: 45,       // ✅ 45° snap turns
+    snapCooldown: 0,
+    useRightStick: true
+  };
 
-  // pinch teleport queue
   let queuedTeleport = false;
   if (GestureEngine?.on) GestureEngine.on("pinchstart", (e) => { if (e.hand === "right") queuedTeleport = true; });
 
@@ -322,27 +347,47 @@
     if (renderer.xr.isPresenting) {
       try { GestureEngine?.update?.(frame, renderer.xr.getReferenceSpace?.()); } catch {}
 
-      // locomotion
-      const gp = readGamepad();
+      // locomotion — right stick only (if available)
+      const pack = readGamepadPreferred();
+      const gp = pack?.gp;
+
       if (gp?.axes) {
         const ax = gp.axes;
-        const x = ax[0] ?? 0;
-        const y = ax[1] ?? 0;
+
+        // right stick (2,3) if present, else fallback (0,1)
+        let sx = 0, sy = 0, tx = 0;
+
+        if (move.useRightStick && ax.length >= 4) {
+          sx = ax[2] ?? 0; // strafe
+          sy = ax[3] ?? 0; // forward/back
+          tx = sx;         // turn uses same axis
+        } else {
+          sx = ax[0] ?? 0;
+          sy = ax[1] ?? 0;
+          tx = ax[2] ?? sx ?? 0;
+        }
+
+        // deadzone
+        const dz = move.deadzone;
+        if (Math.abs(sx) < dz) sx = 0;
+        if (Math.abs(sy) < dz) sy = 0;
+        if (Math.abs(tx) < dz) tx = 0;
 
         const yaw = player.rotation.y;
         const sin = Math.sin(yaw), cos = Math.cos(yaw);
 
-        const forward = -y;
-        const strafe = x;
+        const forward = -sy;
+        const strafe = sx;
 
         player.position.x += (strafe * cos + forward * sin) * move.speed * dt;
         player.position.z += (forward * cos - strafe * sin) * move.speed * dt;
 
+        // snap turn 45°
         move.snapCooldown = Math.max(0, move.snapCooldown - dt);
-        const turn = ax[2] ?? ax[0] ?? 0;
-        if (move.snapCooldown <= 0 && Math.abs(turn) > 0.75) {
-          player.rotation.y += THREE.MathUtils.degToRad(move.snapDeg) * (turn > 0 ? -1 : 1);
-          move.snapCooldown = 0.25;
+        if (move.snapCooldown <= 0 && Math.abs(tx) > 0.75) {
+          player.rotation.y += THREE.MathUtils.degToRad(move.snapDeg) * (tx > 0 ? -1 : 1);
+          move.snapCooldown = 0.28;
+          LOG.push("log", `SnapTurn ${move.snapDeg}°`);
         }
       }
 
@@ -363,8 +408,10 @@
     setMetrics([
       ["FPS", `${fps}`],
       ["XR", renderer.xr.isPresenting ? "YES" : "NO"],
+      ["FloorY", `${ctx.floorY.toFixed(2)}`],
       ["Rig", `${player.position.x.toFixed(1)},${player.position.z.toFixed(1)}`],
       ["ControllersInRig", (controllerR.parent === player) ? "YES" : "NO"],
+      ["Move", `spd=${move.speed} dz=${move.deadzone} snap=${move.snapDeg}°`],
       ["Modules", `gesture=${!!GestureEngine} bet=${!!BettingModule}`],
     ]);
 
@@ -372,5 +419,5 @@
   });
 
   await setCaps();
-  LOG.push("log", "Hybrid 2.7.1 boot complete ✅ (EXACT facing, controllers follow rig, hub demo live)");
+  LOG.push("log", "Hybrid 2.7.2 boot complete ✅ (snap facing, floor-correct teleport, right-stick 45° turn)");
 })();

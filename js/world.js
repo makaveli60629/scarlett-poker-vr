@@ -1,717 +1,518 @@
-// /js/world.js — Scarlett Hybrid World v3.9 (FULL)
-// ✅ Center hub: spectator ring + sunken pit table on pedestal (people look DOWN into game)
-// ✅ Hub wall trims aligned + top trims
-// ✅ Glass “hood” panels on hub interior walls with illumination + labels
-// ✅ NO pillars (per your latest instruction)
-// ✅ Store placed in LEFT/WEST room with lit display cases + labels
-// ✅ Enclosed world (no outside gaps); corridor floors + corridor side walls
-// ✅ Door openings: clean N/S/E/W in hub that match corridor width
+// /js/world.js — Scarlett World 4.0 (ALIGN-FIRST GRID ONLY)
+// ✅ No solid floors. Only grid helpers.
+// ✅ Fully connected: hub + 4 rooms + 4 corridors (sealed exterior).
+// ✅ Openings are CLEAR and centered.
+// ✅ Hub centerpiece: sunken “pit” + pedestal + table (look-down viewing).
+// ✅ West room is Store: named Room_West_Store + StoreAnchor + labeled glass hoods.
+// ✅ Lots of lights inside hub to prevent “dark grey wall” bug.
 
 export const World = {
   async init(ctx) {
     const { THREE, scene } = ctx;
 
-    // -----------------------------
-    // Constants (grid-ish)
-    // -----------------------------
-    const WALL_H = 3.0;
-    const WALL_T = 0.28;
+    ctx.world = this;
+    ctx.colliders = ctx.colliders || [];
 
-    const HUB_R = 14.0;
+    // -------------------------
+    // GRID / SNAP
+    // -------------------------
+    const GRID = 0.5; // alignment step
+    const snap = (v) => Math.round(v / GRID) * GRID;
+    const snapV3 = (x, y, z) => new THREE.Vector3(snap(x), snap(y), snap(z));
 
-    const ROOM_S = 14.0;
-
-    const CORRIDOR_L = 8.0;
-    const CORRIDOR_W = 6.0;
-
-    // Room centers relative to hub center
-    const southZ = (HUB_R + CORRIDOR_L + ROOM_S / 2);
-    const northZ = -(HUB_R + CORRIDOR_L + ROOM_S / 2);
-    const westX  = -(HUB_R + CORRIDOR_L + ROOM_S / 2);
-    const eastX  = (HUB_R + CORRIDOR_L + ROOM_S / 2);
-
-    // -----------------------------
+    // -------------------------
     // Materials
-    // -----------------------------
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x0b0f18, roughness: 0.75, metalness: 0.10 });
-    const floorMat = new THREE.MeshStandardMaterial({ color: 0x070913, roughness: 0.95, metalness: 0.05 });
-
-    const darkMetal = new THREE.MeshStandardMaterial({ color: 0x14151a, roughness: 0.6, metalness: 0.2 });
-    const feltMat = new THREE.MeshStandardMaterial({ color: 0x0c2a22, roughness: 0.92, metalness: 0.05 });
+    // -------------------------
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x0b0d16, roughness: 0.85, metalness: 0.08 });
+    const neonHub = new THREE.MeshStandardMaterial({
+      color: 0x100518,
+      emissive: new THREE.Color(0x9b5cff),
+      emissiveIntensity: 2.2,
+      roughness: 0.25,
+      metalness: 0.2
+    });
 
     const neonCyan = new THREE.MeshStandardMaterial({
-      color: 0x061018,
+      color: 0x051018,
       emissive: new THREE.Color(0x00ffff),
-      emissiveIntensity: 3.0,
+      emissiveIntensity: 1.8,
       roughness: 0.25,
-      metalness: 0.12
+      metalness: 0.15
     });
 
-    const neonPink = new THREE.MeshStandardMaterial({
-      color: 0x12050c,
-      emissive: new THREE.Color(0xff2d7a),
-      emissiveIntensity: 2.6,
-      roughness: 0.25,
-      metalness: 0.12
-    });
-
-    const neonPurple = new THREE.MeshStandardMaterial({
-      color: 0x0c0614,
-      emissive: new THREE.Color(0x9b5cff),
-      emissiveIntensity: 3.2,
-      roughness: 0.25,
-      metalness: 0.12
-    });
-
-    // Glass hood material (needs WebGL2-ish but works on Quest)
     const glassMat = new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color(0x08202a),
-      transparent: true,
-      opacity: 0.28,
-      roughness: 0.08,
+      color: 0xffffff,
+      roughness: 0.05,
       metalness: 0.0,
-      transmission: 0.85,   // “glass”
-      thickness: 0.25,
-      ior: 1.35,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.08
-    });
-
-    // Simple “HUD panel” base (unlit)
-    const hudPanelMat = new THREE.MeshBasicMaterial({
-      color: 0x0a2030,
+      transmission: 1.0,
       transparent: true,
-      opacity: 0.90
+      opacity: 0.35,
+      thickness: 0.08,
+      ior: 1.35
     });
 
-    // -----------------------------
-    // Lights (world pack; main.js also adds extra)
-    // -----------------------------
-    const worldLights = new THREE.Group();
-    worldLights.name = "WorldLightPack";
-    scene.add(worldLights);
+    const darkMetal = new THREE.MeshStandardMaterial({ color: 0x14151a, roughness: 0.55, metalness: 0.22 });
+    const feltMat = new THREE.MeshStandardMaterial({ color: 0x0c2a22, roughness: 0.92, metalness: 0.05 });
 
-    worldLights.add(new THREE.AmbientLight(0xffffff, 0.55));
-    worldLights.add(new THREE.HemisphereLight(0xffffff, 0x202038, 1.45));
+    // -------------------------
+    // VISUAL GRIDS (no floors)
+    // -------------------------
+    const gridRoot = new THREE.Group();
+    gridRoot.name = "GridRoot";
+    scene.add(gridRoot);
 
-    const sun = new THREE.DirectionalLight(0xffffff, 2.2);
-    sun.position.set(30, 80, 40);
-    worldLights.add(sun);
+    const bigGrid = new THREE.GridHelper(240, 480, 0x133244, 0x0b141b);
+    bigGrid.position.y = 0.001;
+    gridRoot.add(bigGrid);
 
-    // -----------------------------
-    // Colliders (optional)
-    // -----------------------------
-    const colliders = [];
+    // axis marker
+    const axes = new THREE.AxesHelper(5);
+    axes.position.y = 0.02;
+    gridRoot.add(axes);
+
+    // Invisible plane (optional physical presence later)
+    const invisFloor = new THREE.Mesh(
+      new THREE.PlaneGeometry(260, 260),
+      new THREE.MeshBasicMaterial({ visible: false })
+    );
+    invisFloor.rotation.x = -Math.PI / 2;
+    invisFloor.name = "InvisibleFloor";
+    scene.add(invisFloor);
+
+    // -------------------------
+    // LIGHTS INSIDE WORLD (extra insurance)
+    // (main.js has big lights too — this prevents “world-only darkness”)
+    // -------------------------
+    const hubLightA = new THREE.PointLight(0x9b5cff, 2.4, 80);
+    hubLightA.position.copy(snapV3(0, 8, 0));
+    scene.add(hubLightA);
+
+    const hubLightB = new THREE.PointLight(0x00ffff, 2.2, 80);
+    hubLightB.position.copy(snapV3(0, 6, -8));
+    scene.add(hubLightB);
+
+    // ring of small hub lights
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const px = snap(Math.cos(a) * 8.5);
+      const pz = snap(Math.sin(a) * 8.5);
+      const pl = new THREE.PointLight(i % 2 ? 0x00ffff : 0x9b5cff, 1.25, 28);
+      pl.position.set(px, 3.4, pz);
+      scene.add(pl);
+    }
+
+    // -------------------------
+    // Helpers: colliders + labels
+    // -------------------------
     const addCollider = (mesh) => {
       mesh.userData.solid = true;
-      colliders.push(mesh);
+      ctx.colliders.push(mesh);
       scene.add(mesh);
       return mesh;
     };
-    ctx.colliders = colliders;
 
-    // -----------------------------
-    // Base infinite-ish ground (teleport always has something)
-    // -----------------------------
-    const base = new THREE.Mesh(new THREE.PlaneGeometry(240, 240), floorMat);
-    base.rotation.x = -Math.PI / 2;
-    base.position.y = 0;
-    scene.add(base);
+    const makeLabelSprite = (text) => {
+      const c = document.createElement("canvas");
+      c.width = 512; c.height = 128;
+      const g = c.getContext("2d");
 
-    // -----------------------------
-    // Text sprite helper (labels for hoods, store, etc.)
-    // -----------------------------
-    function makeTextSprite(text, { size = 256, pad = 18, fg = "#bffcff", bg = "rgba(0,0,0,0.45)" } = {}) {
-      const canvas = document.createElement("canvas");
-      canvas.width = size;
-      canvas.height = size;
-      const g = canvas.getContext("2d");
+      g.fillStyle = "rgba(0, 0, 0, 0.0)";
+      g.fillRect(0,0,c.width,c.height);
 
-      g.clearRect(0, 0, size, size);
-      g.fillStyle = bg;
-      g.fillRect(0, 0, size, size);
-
-      g.strokeStyle = "rgba(0,255,255,0.25)";
-      g.lineWidth = 6;
-      g.strokeRect(8, 8, size - 16, size - 16);
-
-      g.fillStyle = fg;
-      g.font = `bold ${Math.floor(size * 0.12)}px ui-monospace, Menlo, monospace`;
+      g.fillStyle = "rgba(0,255,255,0.85)";
+      g.font = "bold 48px system-ui, Arial";
       g.textAlign = "center";
       g.textBaseline = "middle";
+      g.fillText(text, c.width/2, c.height/2);
 
-      const lines = String(text).split("\n").slice(0, 5);
-      const lineH = size * 0.14;
-      const startY = size / 2 - (lines.length - 1) * (lineH / 2);
-
-      for (let i = 0; i < lines.length; i++) {
-        g.fillText(lines[i], size / 2, startY + i * lineH);
-      }
-
-      const tex = new THREE.CanvasTexture(canvas);
+      const tex = new THREE.CanvasTexture(c);
       tex.colorSpace = THREE.SRGBColorSpace;
 
       const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
       const spr = new THREE.Sprite(mat);
-      spr.scale.set(2.2, 2.2, 1);
-      spr.renderOrder = 999;
+      spr.scale.set(3.2, 0.8, 1);
       return spr;
+    };
+
+    // -------------------------
+    // WORLD GEOMETRY (snap-aligned)
+    // -------------------------
+    const WALL_H = 3.0;
+    const WALL_T = 0.30;
+
+    const HUB_R = 14.0;
+    const ROOM_S = 14.0;
+    const CORR_L = 10.0;
+    const CORR_W = 5.0;
+
+    // Name constants for room centers
+    const frontZ = snap(HUB_R + CORR_L + ROOM_S / 2);
+    const backZ  = snap(-(HUB_R + CORR_L + ROOM_S / 2));
+    const leftX  = snap(-(HUB_R + CORR_L + ROOM_S / 2));
+    const rightX = snap( (HUB_R + CORR_L + ROOM_S / 2));
+
+    // Wall builder for clean, sealed walls
+    function wallBox(w, h, d, x, y, z, ry = 0, mat = wallMat) {
+      const m = addCollider(new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat));
+      m.position.set(snap(x), snap(y), snap(z));
+      m.rotation.y = ry;
+      return m;
     }
 
-    // -----------------------------
-    // Trim helper for square rooms (base + top, door-safe)
-    // -----------------------------
-    function addDoorSafeTrimSquare({ x, z, size, y, mat, doorSide, doorW }) {
-      const t = 0.08, h = 0.06;
-      const half = size / 2;
-      const gap = doorW / 2;
+    // Build square room with a SINGLE door to the hub
+    function makeSquareRoom({ name, x, z, doorSide }) {
+      const anchor = new THREE.Object3D();
+      anchor.name = name;
+      anchor.position.set(snap(x), 0, snap(z));
+      scene.add(anchor);
 
-      const addSeg = (w, d, px, pz) => {
-        const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-        m.position.set(px, y, pz);
-        scene.add(m);
-      };
+      const half = ROOM_S / 2;
+      const doorW = CORR_W;
 
-      // N
-      if (doorSide !== "N") addSeg(size, t, x, z + half);
-      else {
-        const seg = (size - doorW) / 2;
-        addSeg(seg, t, x - (gap + seg/2), z + half);
-        addSeg(seg, t, x + (gap + seg/2), z + half);
-      }
-      // S
-      if (doorSide !== "S") addSeg(size, t, x, z - half);
-      else {
-        const seg = (size - doorW) / 2;
-        addSeg(seg, t, x - (gap + seg/2), z - half);
-        addSeg(seg, t, x + (gap + seg/2), z - half);
-      }
-      // E
-      if (doorSide !== "E") addSeg(t, size, x + half, z);
-      else {
-        const seg = (size - doorW) / 2;
-        addSeg(t, seg, x + half, z - (gap + seg/2));
-        addSeg(t, seg, x + half, z + (gap + seg/2));
-      }
-      // W
-      if (doorSide !== "W") addSeg(t, size, x - half, z);
-      else {
-        const seg = (size - doorW) / 2;
-        addSeg(t, seg, x - half, z - (gap + seg/2));
-        addSeg(t, seg, x - half, z + (gap + seg/2));
-      }
-    }
-
-    // -----------------------------
-    // Square room builder
-    // -----------------------------
-    function makeSquareRoom({ name, x, z, doorSide, trimMat }) {
-      const size = ROOM_S;
-      const half = size / 2;
-      const doorW = CORRIDOR_W;
-      const seg = (size - doorW) / 2;
-
-      // floor slab
-      const floor = new THREE.Mesh(new THREE.BoxGeometry(size, 0.18, size), floorMat);
-      floor.position.set(x, 0.09, z);
-      scene.add(floor);
-
-      // trims: base + top
-      addDoorSafeTrimSquare({ x, z, size, y: 0.03, mat: trimMat, doorSide, doorW });
-      addDoorSafeTrimSquare({ x, z, size, y: WALL_H - 0.03, mat: neonPink, doorSide, doorW });
-
-      // walls (door-safe)
-      const wallBox = (w, d, px, pz) => {
-        const m = addCollider(new THREE.Mesh(new THREE.BoxGeometry(w, WALL_H, d), wallMat));
-        m.position.set(px, WALL_H/2, pz);
-      };
-
-      // N
+      // north wall
       if (doorSide === "N") {
-        wallBox(seg, WALL_T, x - (doorW/2 + seg/2), z + half);
-        wallBox(seg, WALL_T, x + (doorW/2 + seg/2), z + half);
-      } else wallBox(size + WALL_T, WALL_T, x, z + half);
+        const seg = (ROOM_S - doorW) / 2;
+        wallBox(seg, WALL_H, WALL_T, x - (doorW/2 + seg/2), WALL_H/2, z + half);
+        wallBox(seg, WALL_H, WALL_T, x + (doorW/2 + seg/2), WALL_H/2, z + half);
+      } else wallBox(ROOM_S + WALL_T, WALL_H, WALL_T, x, WALL_H/2, z + half);
 
-      // S
+      // south wall
       if (doorSide === "S") {
-        wallBox(seg, WALL_T, x - (doorW/2 + seg/2), z - half);
-        wallBox(seg, WALL_T, x + (doorW/2 + seg/2), z - half);
-      } else wallBox(size + WALL_T, WALL_T, x, z - half);
+        const seg = (ROOM_S - doorW) / 2;
+        wallBox(seg, WALL_H, WALL_T, x - (doorW/2 + seg/2), WALL_H/2, z - half);
+        wallBox(seg, WALL_H, WALL_T, x + (doorW/2 + seg/2), WALL_H/2, z - half);
+      } else wallBox(ROOM_S + WALL_T, WALL_H, WALL_T, x, WALL_H/2, z - half);
 
-      // E
+      // east wall
       if (doorSide === "E") {
-        wallBox(WALL_T, seg, x + half, z - (doorW/2 + seg/2));
-        wallBox(WALL_T, seg, x + half, z + (doorW/2 + seg/2));
-      } else wallBox(WALL_T, size + WALL_T, x + half, z);
+        const seg = (ROOM_S - doorW) / 2;
+        wallBox(WALL_T, WALL_H, seg, x + half, WALL_H/2, z - (doorW/2 + seg/2));
+        wallBox(WALL_T, WALL_H, seg, x + half, WALL_H/2, z + (doorW/2 + seg/2));
+      } else wallBox(WALL_T, WALL_H, ROOM_S + WALL_T, x + half, WALL_H/2, z);
 
-      // W
+      // west wall
       if (doorSide === "W") {
-        wallBox(WALL_T, seg, x - half, z - (doorW/2 + seg/2));
-        wallBox(WALL_T, seg, x - half, z + (doorW/2 + seg/2));
-      } else wallBox(WALL_T, size + WALL_T, x - half, z);
+        const seg = (ROOM_S - doorW) / 2;
+        wallBox(WALL_T, WALL_H, seg, x - half, WALL_H/2, z - (doorW/2 + seg/2));
+        wallBox(WALL_T, WALL_H, seg, x - half, WALL_H/2, z + (doorW/2 + seg/2));
+      } else wallBox(WALL_T, WALL_H, ROOM_S + WALL_T, x - half, WALL_H/2, z);
 
-      // room light
-      const pl = new THREE.PointLight(0xffffff, 1.25, 28);
-      pl.position.set(x, 4.2, z);
-      scene.add(pl);
+      // bottom trim (base)
+      makeRoomTrimSquare(x, z, ROOM_S, neonCyan);
 
-      const anchor = new THREE.Object3D();
-      anchor.name = name;
-      anchor.position.set(x, 0, z);
-      scene.add(anchor);
+      // top trim (ceilingless, but top edge trim)
+      makeRoomTopTrimSquare(x, z, ROOM_S, neonCyan, WALL_H - 0.05);
 
       return anchor;
     }
 
-    // -----------------------------
-    // Corridor builder (floor + 2 side walls + trims + runway lights)
-    // -----------------------------
+    function makeRoomTrimSquare(x, z, size, mat) {
+      const t = 0.09, h = 0.06;
+      const half = size/2;
+      scene.add(
+        new THREE.Mesh(new THREE.BoxGeometry(size, h, t), mat).position.set(snap(x), 0.03, snap(z + half)),
+        new THREE.Mesh(new THREE.BoxGeometry(size, h, t), mat).position.set(snap(x), 0.03, snap(z - half))
+      );
+      const a = new THREE.Mesh(new THREE.BoxGeometry(t, h, size), mat);
+      a.position.set(snap(x + half), 0.03, snap(z));
+      const b = new THREE.Mesh(new THREE.BoxGeometry(t, h, size), mat);
+      b.position.set(snap(x - half), 0.03, snap(z));
+      scene.add(a, b);
+    }
+
+    function makeRoomTopTrimSquare(x, z, size, mat, y) {
+      const t = 0.09, h = 0.06;
+      const half = size/2;
+      const m1 = new THREE.Mesh(new THREE.BoxGeometry(size, h, t), mat);
+      const m2 = new THREE.Mesh(new THREE.BoxGeometry(size, h, t), mat);
+      m1.position.set(snap(x), y, snap(z + half));
+      m2.position.set(snap(x), y, snap(z - half));
+      scene.add(m1, m2);
+
+      const m3 = new THREE.Mesh(new THREE.BoxGeometry(t, h, size), mat);
+      const m4 = new THREE.Mesh(new THREE.BoxGeometry(t, h, size), mat);
+      m3.position.set(snap(x + half), y, snap(z));
+      m4.position.set(snap(x - half), y, snap(z));
+      scene.add(m3, m4);
+    }
+
+    // Corridors: connect room door to hub door, fully walled
     function makeCorridor({ name, x, z, yaw }) {
-      const floor = new THREE.Mesh(new THREE.BoxGeometry(CORRIDOR_W, 0.18, CORRIDOR_L), floorMat);
-      floor.position.set(x, 0.09, z);
-      floor.rotation.y = yaw;
-      scene.add(floor);
-
-      // side walls
-      const wallLen = CORRIDOR_L;
-      const wallGeo = new THREE.BoxGeometry(WALL_T, WALL_H, wallLen);
-
-      const left = addCollider(new THREE.Mesh(wallGeo, wallMat));
-      const right = addCollider(new THREE.Mesh(wallGeo, wallMat));
-
-      const side = new THREE.Vector3(Math.cos(yaw + Math.PI/2), 0, Math.sin(yaw + Math.PI/2));
-      const lp = new THREE.Vector3(x, 0, z).add(side.clone().multiplyScalar(CORRIDOR_W/2));
-      const rp = new THREE.Vector3(x, 0, z).add(side.clone().multiplyScalar(-CORRIDOR_W/2));
-
-      left.position.set(lp.x, WALL_H/2, lp.z);
-      right.position.set(rp.x, WALL_H/2, rp.z);
-      left.rotation.y = yaw;
-      right.rotation.y = yaw;
-
-      // trims base + top
-      const trimGeo = new THREE.BoxGeometry(0.08, 0.06, wallLen);
-      const tl = new THREE.Mesh(trimGeo, neonCyan);
-      const tr = new THREE.Mesh(trimGeo, neonCyan);
-      tl.position.set(lp.x, 0.03, lp.z);
-      tr.position.set(rp.x, 0.03, rp.z);
-      tl.rotation.y = yaw; tr.rotation.y = yaw;
-      scene.add(tl, tr);
-
-      const tl2 = new THREE.Mesh(trimGeo, neonPink);
-      const tr2 = new THREE.Mesh(trimGeo, neonPink);
-      tl2.position.set(lp.x, WALL_H - 0.03, lp.z);
-      tr2.position.set(rp.x, WALL_H - 0.03, rp.z);
-      tl2.rotation.y = yaw; tr2.rotation.y = yaw;
-      scene.add(tl2, tr2);
-
-      // runway lights
-      for (let i = -3; i <= 3; i++) {
-        const t = (i / 3) * (CORRIDOR_L * 0.45);
-        const fx = x + Math.sin(yaw) * t;
-        const fz = z + Math.cos(yaw) * t;
-        const p = new THREE.PointLight(0x9bdcff, 1.1, 16);
-        p.position.set(fx, 2.4, fz);
-        scene.add(p);
-      }
-
       const anchor = new THREE.Object3D();
       anchor.name = name;
-      anchor.position.set(x, 0, z);
+      anchor.position.set(snap(x), 0, snap(z));
       scene.add(anchor);
+
+      // corridor side walls
+      // corridor local forward is +Z rotated by yaw
+      const halfW = CORR_W / 2;
+      const halfL = CORR_L / 2;
+
+      // We build 2 long walls on sides:
+      // In local space: walls run length CORR_L, offset +/- halfW.
+      // Use boxes rotated by yaw.
+      const sideDX = Math.cos(yaw + Math.PI/2);
+      const sideDZ = Math.sin(yaw + Math.PI/2);
+
+      const leftX = x + sideDX * halfW;
+      const leftZ = z + sideDZ * halfW;
+      const rightX = x - sideDX * halfW;
+      const rightZ = z - sideDZ * halfW;
+
+      // long wall dimensions: thickness WALL_T, length CORR_L
+      const wallLen = CORR_L + WALL_T;
+
+      const w1 = addCollider(new THREE.Mesh(new THREE.BoxGeometry(WALL_T, WALL_H, wallLen), wallMat));
+      w1.position.set(snap(leftX), WALL_H/2, snap(leftZ));
+      w1.rotation.y = yaw;
+      scene.add(w1);
+
+      const w2 = addCollider(new THREE.Mesh(new THREE.BoxGeometry(WALL_T, WALL_H, wallLen), wallMat));
+      w2.position.set(snap(rightX), WALL_H/2, snap(rightZ));
+      w2.rotation.y = yaw;
+      scene.add(w2);
+
+      // trims on corridor sides (base + top)
+      const trimBaseGeo = new THREE.BoxGeometry(0.08, 0.06, wallLen);
+      const tb1 = new THREE.Mesh(trimBaseGeo, neonCyan);
+      const tb2 = new THREE.Mesh(trimBaseGeo, neonCyan);
+      tb1.position.set(snap(leftX), 0.03, snap(leftZ));
+      tb2.position.set(snap(rightX), 0.03, snap(rightZ));
+      tb1.rotation.y = yaw;
+      tb2.rotation.y = yaw;
+      scene.add(tb1, tb2);
+
+      const tt1 = new THREE.Mesh(trimBaseGeo, neonCyan);
+      const tt2 = new THREE.Mesh(trimBaseGeo, neonCyan);
+      tt1.position.set(snap(leftX), WALL_H - 0.05, snap(leftZ));
+      tt2.position.set(snap(rightX), WALL_H - 0.05, snap(rightZ));
+      tt1.rotation.y = yaw;
+      tt2.rotation.y = yaw;
+      scene.add(tt1, tt2);
+
       return anchor;
     }
 
-    // -----------------------------
-    // Hub: spectator ring + sunken pit + wall with 4 door cuts
-    // -----------------------------
+    // Hub: circular wall with 4 clean door gaps aligned to corridor width
     function makeHub() {
-      const walkwayY = 0.11;
-      const pitDepth = 1.35;
-      const pitY = walkwayY - pitDepth;
+      const hubAnchor = new THREE.Object3D();
+      hubAnchor.name = "HubPlate";
+      hubAnchor.position.set(0, 0, 0);
+      scene.add(hubAnchor);
 
-      const innerR = 6.2;     // pit mouth radius (spectator can look down)
-      const outerR = HUB_R;
-
-      // Walkable ring (HubPlate)
-      const hubWalkway = new THREE.Mesh(
-        new THREE.RingGeometry(innerR, outerR, 200),
-        new THREE.MeshStandardMaterial({
-          color: 0x0a0b12,
-          roughness: 0.55,
-          metalness: 0.10,
-          side: THREE.DoubleSide
-        })
-      );
-      hubWalkway.rotation.x = -Math.PI / 2;
-      hubWalkway.position.y = walkwayY;
-      hubWalkway.name = "HubPlate";
-      scene.add(hubWalkway);
-
-      // Pit wall (cylinder side)
-      const pitWall = new THREE.Mesh(
-        new THREE.CylinderGeometry(innerR, innerR, pitDepth, 180, 1, true),
-        new THREE.MeshStandardMaterial({
-          color: 0x070812,
-          roughness: 0.85,
-          metalness: 0.10,
-          side: THREE.DoubleSide
-        })
-      );
-      pitWall.position.y = walkwayY - pitDepth/2;
-      scene.add(pitWall);
-
-      // Pit floor
-      const pitFloor = new THREE.Mesh(
-        new THREE.CircleGeometry(innerR - 0.15, 160),
-        floorMat
-      );
-      pitFloor.rotation.x = -Math.PI / 2;
-      pitFloor.position.y = pitY;
-      pitFloor.name = "PitFloor";
-      scene.add(pitFloor);
-
-      // Lip rail (safety ring)
-      const lipRail = new THREE.Mesh(
-        new THREE.TorusGeometry(innerR + 0.10, 0.09, 12, 220),
-        neonPurple
-      );
-      lipRail.rotation.x = Math.PI/2;
-      lipRail.position.y = walkwayY + 0.06;
-      scene.add(lipRail);
-
-      // Outer base ring + top ring trims
-      const baseRing = new THREE.Mesh(new THREE.TorusGeometry(outerR, 0.14, 16, 240), neonPurple);
-      baseRing.rotation.x = Math.PI/2;
-      baseRing.position.y = walkwayY + 0.14;
+      // Neon ring trim at hub base (visual)
+      const baseRing = new THREE.Mesh(new THREE.TorusGeometry(HUB_R, 0.12, 16, 160), neonHub);
+      baseRing.rotation.x = Math.PI / 2;
+      baseRing.position.set(0, 0.28, 0);
       scene.add(baseRing);
 
-      const topRing = new THREE.Mesh(new THREE.TorusGeometry(outerR, 0.10, 16, 240), neonPink);
-      topRing.rotation.x = Math.PI/2;
-      topRing.position.y = WALL_H - 0.08;
-      scene.add(topRing);
+      // Circular wall from box segments
+      const segments = 56;
+      const gap = CORR_W; // doorway width
+      const gapHalf = gap / 2;
 
-      // Door cuts on hub wall
-      const doorW = CORRIDOR_W;
-      const buffer = 0.80;
-      const halfAng = Math.asin(Math.min(0.999, ((doorW/2 + buffer) / outerR)));
-      const doorCenters = [0, Math.PI/2, Math.PI, (3*Math.PI)/2]; // E, S(+Z), W, N(-Z)
-      const angDiff = (a, b) => {
-        let d = a - b;
-        while (d > Math.PI) d -= Math.PI * 2;
-        while (d < -Math.PI) d += Math.PI * 2;
-        return Math.abs(d);
-      };
-      const isDoor = (am) => doorCenters.some(c => angDiff(am, c) < halfAng);
-
-      // Build curved wall segments (colliders) + trims + glass hoods
-      const segments = 140;
-      const segLen = (2 * Math.PI * outerR) / segments;
-
-      // Inner wall neon trims (base/top) along segments
       for (let i = 0; i < segments; i++) {
         const a0 = (i / segments) * Math.PI * 2;
         const a1 = ((i + 1) / segments) * Math.PI * 2;
         const am = (a0 + a1) / 2;
-        if (isDoor(am)) continue;
 
-        const cx = Math.cos(am) * outerR;
-        const cz = Math.sin(am) * outerR;
+        const cx = Math.cos(am) * HUB_R;
+        const cz = Math.sin(am) * HUB_R;
 
-        const wall = addCollider(new THREE.Mesh(new THREE.BoxGeometry(WALL_T, WALL_H, segLen), wallMat));
-        wall.position.set(cx, WALL_H/2, cz);
+        // Leave doorway gaps at +Z (front), -Z (back), +X (east), -X (west)
+        // We remove segments near those axes within gapHalf.
+        const nearFront = Math.abs(cx) < gapHalf && cz > HUB_R * 0.65;   // +Z
+        const nearBack  = Math.abs(cx) < gapHalf && cz < -HUB_R * 0.65;  // -Z
+        const nearEast  = Math.abs(cz) < gapHalf && cx > HUB_R * 0.65;   // +X
+        const nearWest  = Math.abs(cz) < gapHalf && cx < -HUB_R * 0.65;  // -X
+        if (nearFront || nearBack || nearEast || nearWest) continue;
+
+        const segLen = (2 * Math.PI * HUB_R) / segments;
+
+        const wall = addCollider(new THREE.Mesh(
+          new THREE.BoxGeometry(WALL_T, WALL_H, segLen),
+          wallMat
+        ));
+        wall.position.set(snap(cx), WALL_H/2, snap(cz));
         wall.rotation.y = -am;
+        scene.add(wall);
 
-        // Base strip (inside edge)
-        const stripBase = new THREE.Mesh(new THREE.BoxGeometry(segLen * 0.92, 0.05, 0.06), neonCyan);
-        const inward = new THREE.Vector3(-Math.cos(am), 0, -Math.sin(am)).multiplyScalar(0.20);
-        stripBase.position.set(cx + inward.x, 0.06, cz + inward.z);
-        stripBase.rotation.y = -am + Math.PI/2;
-        scene.add(stripBase);
-
-        // Top strip
-        const stripTop = new THREE.Mesh(new THREE.BoxGeometry(segLen * 0.92, 0.05, 0.06), neonPink);
-        stripTop.position.set(cx + inward.x, WALL_H - 0.06, cz + inward.z);
-        stripTop.rotation.y = stripBase.rotation.y;
-        scene.add(stripTop);
-
-        // HUD panel (unlit)
-        const panel = new THREE.Mesh(new THREE.PlaneGeometry(segLen * 0.92, 2.35), hudPanelMat);
-        panel.position.set(cx + inward.x * 0.95, 1.55, cz + inward.z * 0.95);
-        panel.rotation.y = -am + Math.PI/2;
-        scene.add(panel);
-
-        // Some panels become “glass hoods”
-        if (i % 7 === 0) {
-          // glass hood box slightly protruding inward
-          const hood = new THREE.Mesh(new THREE.BoxGeometry(segLen * 0.78, 1.35, 0.55), glassMat);
-          hood.position.set(cx + inward.x * 1.85, 1.55, cz + inward.z * 1.85);
-          hood.rotation.y = panel.rotation.y;
-          scene.add(hood);
-
-          // hood frame glow
-          const hoodFrame = new THREE.Mesh(new THREE.BoxGeometry(segLen * 0.82, 1.42, 0.07), neonPurple);
-          hoodFrame.position.set(cx + inward.x * 1.72, 1.55, cz + inward.z * 1.72);
-          hoodFrame.rotation.y = panel.rotation.y;
-          scene.add(hoodFrame);
-
-          // hood light
-          const hoodLight = new THREE.PointLight(0x9b5cff, 1.6, 12);
-          hoodLight.position.set(hood.position.x, 2.15, hood.position.z);
-          scene.add(hoodLight);
-
-          // hood label (sprite)
-          const label = makeTextSprite("GLASS HOOD\nHUD PANEL", { fg: "#e8dcff", bg: "rgba(10,0,20,0.45)" });
-          label.position.set(hood.position.x, 2.75, hood.position.z);
-          scene.add(label);
-        }
+        // hub wall top trim (purple)
+        const topTrim = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, segLen), neonHub);
+        topTrim.position.set(snap(cx), WALL_H - 0.05, snap(cz));
+        topTrim.rotation.y = -am;
+        scene.add(topTrim);
       }
 
-      // Pit table pedestal + table + rail (in pit)
-      const pedestal = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.9, 1.2, 0.9, 32),
+      // Sunken pedestal pit + table
+      makeSunkenTable();
+
+      return hubAnchor;
+    }
+
+    function makeSunkenTable() {
+      // Pit outer ring (like a “sink” well)
+      const pitOuter = new THREE.Mesh(
+        new THREE.CylinderGeometry(5.8, 5.8, 0.9, 64),
         darkMetal
       );
-      pedestal.position.set(0, pitY + 0.45, 0);
-      pedestal.name = "TablePedestal";
-      scene.add(pedestal);
+      pitOuter.position.set(0, 0.45, 0);
+      scene.add(pitOuter);
 
-      const tableTop = new THREE.Mesh(
-        new THREE.CylinderGeometry(1.85, 1.85, 0.14, 48),
-        feltMat
+      // Pit inner floor (lower)
+      const pitFloor = new THREE.Mesh(
+        new THREE.CylinderGeometry(4.9, 4.9, 0.08, 64),
+        new THREE.MeshStandardMaterial({ color: 0x0a0b12, roughness: 0.55, metalness: 0.1 })
       );
-      tableTop.position.set(0, pitY + 0.92, 0);
-      tableTop.name = "BossTable";
-      scene.add(tableTop);
+      pitFloor.position.set(0, 0.06, 0);
+      scene.add(pitFloor);
 
-      const tableRim = new THREE.Mesh(
-        new THREE.TorusGeometry(1.85, 0.09, 16, 120),
-        darkMetal
+      // Rim ring (neon)
+      const pitRim = new THREE.Mesh(
+        new THREE.TorusGeometry(5.8, 0.10, 14, 140),
+        neonHub
       );
-      tableRim.rotation.x = Math.PI / 2;
-      tableRim.position.set(0, pitY + 1.00, 0);
-      scene.add(tableRim);
+      pitRim.rotation.x = Math.PI / 2;
+      pitRim.position.set(0, 0.92, 0);
+      scene.add(pitRim);
 
+      // Boss table lowered into the pit
+      const table = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 1.9, 0.14, 48), feltMat);
+      table.position.set(0, 0.62, 0);
+      table.name = "BossTable";
+      scene.add(table);
+
+      // Rail ring above table (optional)
       const rail = new THREE.Mesh(
-        new THREE.TorusGeometry(4.4, 0.12, 12, 160),
-        new THREE.MeshStandardMaterial({ color: 0x101622, emissive: 0x132a3a, emissiveIntensity: 1.35 })
+        new THREE.TorusGeometry(4.3, 0.11, 14, 140),
+        new THREE.MeshStandardMaterial({
+          color: 0x0f1220,
+          emissive: new THREE.Color(0x00ffff),
+          emissiveIntensity: 0.55,
+          roughness: 0.35
+        })
       );
-      rail.rotation.x = Math.PI/2;
-      rail.position.set(0, pitY + 0.68, 0);
+      rail.rotation.x = Math.PI / 2;
+      rail.position.set(0, 0.88, 0);
       rail.name = "MainRail";
       scene.add(rail);
 
-      // Dealer anchor for later dealing
-      const dealer = new THREE.Object3D();
-      dealer.name = "DealerAnchor";
-      dealer.position.set(0, pitY + 1.10, 1.05);
-      scene.add(dealer);
-
-      // Pit lighting
-      const pitLightA = new THREE.PointLight(0xffffff, 2.1, 35);
-      pitLightA.position.set(0, 6.0, 0);
-      scene.add(pitLightA);
-
-      const pitLightB = new THREE.PointLight(0x7fe7ff, 1.6, 25);
-      pitLightB.position.set(0, 2.5, 6.0);
-      scene.add(pitLightB);
-
-      // Ceiling-ish rings above the pit (crayon colors)
-      const ringA = new THREE.Mesh(new THREE.TorusGeometry(5.2, 0.10, 14, 240), neonCyan);
-      ringA.rotation.x = Math.PI/2;
-      ringA.position.set(0, 2.85, 0);
+      // Ceiling ring (no ceiling, but a floating ring light)
+      const ringA = new THREE.Mesh(
+        new THREE.TorusGeometry(6.6, 0.10, 14, 160),
+        new THREE.MeshStandardMaterial({
+          color: 0x12051a,
+          emissive: new THREE.Color(0xff2d7a),
+          emissiveIntensity: 1.8,
+          roughness: 0.25
+        })
+      );
+      ringA.rotation.x = Math.PI / 2;
+      ringA.position.set(0, 4.2, 0);
       scene.add(ringA);
 
-      const ringB = new THREE.Mesh(new THREE.TorusGeometry(5.2, 0.07, 14, 240), neonPink);
-      ringB.rotation.x = Math.PI/2;
-      ringB.position.set(0, 3.10, 0);
+      const ringB = new THREE.Mesh(
+        new THREE.TorusGeometry(7.4, 0.10, 14, 160),
+        neonCyan
+      );
+      ringB.rotation.x = Math.PI / 2;
+      ringB.position.set(0, 4.45, 0);
       scene.add(ringB);
     }
 
-    // Build hub
+    // -------------------------
+    // Build hub + rooms + corridors
+    // -------------------------
     makeHub();
 
-    // Rooms (South is spawn lobby; West is Store)
-    const roomSouth = makeSquareRoom({ name: "Room_South_Spawn", x: 0,    z: southZ, doorSide: "S", trimMat: neonCyan });
-    const roomNorth = makeSquareRoom({ name: "Room_North",      x: 0,    z: northZ, doorSide: "N", trimMat: neonPink });
-    const roomWest  = makeSquareRoom({ name: "Room_West_Store", x: westX, z: 0,     doorSide: "E", trimMat: neonCyan });
-    const roomEast  = makeSquareRoom({ name: "Room_East",       x: eastX, z: 0,     doorSide: "W", trimMat: neonPink });
+    // Room naming: South/front is spawn lobby, West is store
+    const roomSouth = makeSquareRoom({ name: "Room_South_Lobby", x: 0, z: frontZ, doorSide: "S" }); // door faces hub (south wall open toward hub? actually hub is "south" from that room)
+    const roomNorth = makeSquareRoom({ name: "Room_North_Event", x: 0, z: backZ, doorSide: "N" });
+    const roomWest  = makeSquareRoom({ name: "Room_West_Store", x: leftX, z: 0, doorSide: "E" });
+    const roomEast  = makeSquareRoom({ name: "Room_East_Poker", x: rightX, z: 0, doorSide: "W" });
 
-    // Corridors between hub and rooms
-    makeCorridor({ name: "Corridor_South", x: 0, z: (HUB_R + CORRIDOR_L/2), yaw: 0 });
-    makeCorridor({ name: "Corridor_North", x: 0, z: -(HUB_R + CORRIDOR_L/2), yaw: 0 });
-    makeCorridor({ name: "Corridor_West",  x: -(HUB_R + CORRIDOR_L/2), z: 0, yaw: Math.PI/2 });
-    makeCorridor({ name: "Corridor_East",  x: (HUB_R + CORRIDOR_L/2),  z: 0, yaw: Math.PI/2 });
+    // Corridors centers
+    makeCorridor({ name: "Corridor_South", x: 0, z: snap(HUB_R + CORR_L/2), yaw: 0 });
+    makeCorridor({ name: "Corridor_North", x: 0, z: snap(-(HUB_R + CORR_L/2)), yaw: 0 });
+    makeCorridor({ name: "Corridor_West",  x: snap(-(HUB_R + CORR_L/2)), z: 0, yaw: Math.PI/2 });
+    makeCorridor({ name: "Corridor_East",  x: snap( (HUB_R + CORR_L/2)), z: 0, yaw: Math.PI/2 });
 
-    // -----------------------------
-    // Spawn point in SOUTH room facing toward hub
-    // -----------------------------
-    const spawnZ = southZ - 5.0;
-
-    const spawnPad = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.95, 0.95, 0.16, 36),
-      new THREE.MeshStandardMaterial({ color: 0x081018, emissive: 0x00ffff, emissiveIntensity: 2.4 })
-    );
-    spawnPad.name = "SpawnPad";
-    spawnPad.position.set(0, 0.14, spawnZ);
-    scene.add(spawnPad);
-
+    // -------------------------
+    // SpawnPoint (south/lobby room) — clear path to hub
+    // -------------------------
     const sp = new THREE.Object3D();
     sp.name = "SpawnPoint";
-    sp.position.set(0, 0, spawnZ);
-    sp.rotation.y = Math.PI; // face -Z toward hub
+    sp.position.set(0, 0, snap(frontZ - 3.0));
     scene.add(sp);
 
-    // Teleport machine behind spawn (visual landmark, moved back a bit)
+    const spawnMarker = new THREE.Mesh(
+      new THREE.CircleGeometry(0.85, 48),
+      new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0x00ffff, emissiveIntensity: 1.2 })
+    );
+    spawnMarker.rotation.x = -Math.PI / 2;
+    spawnMarker.position.set(0, 0.01, snap(frontZ - 3.0));
+    scene.add(spawnMarker);
+
+    // -------------------------
+    // Store room anchor + labeled glass hoods
+    // -------------------------
+    const storeAnchor = new THREE.Object3D();
+    storeAnchor.name = "StoreAnchor";
+    storeAnchor.position.set(snap(leftX), 0, 0);
+    scene.add(storeAnchor);
+
+    function makeGlassHood(label, x, z, facingYaw) {
+      const hood = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.6, 0.35), glassMat);
+      hood.position.set(snap(x), 1.25, snap(z));
+      hood.rotation.y = facingYaw;
+      hood.name = `GlassHood_${label.replace(/\s+/g,"_")}`;
+      scene.add(hood);
+
+      const glow = new THREE.PointLight(0x00ffff, 1.35, 10);
+      glow.position.set(snap(x), 1.35, snap(z));
+      scene.add(glow);
+
+      const tag = makeLabelSprite(label);
+      tag.position.set(snap(x), 2.2, snap(z));
+      tag.material.opacity = 0.95;
+      scene.add(tag);
+    }
+
+    // Place 3 hoods in Store room near the inner wall (facing inward)
+    // Store room center is (leftX, 0). Inner wall is toward hub (east direction).
+    makeGlassHood("HOOD A", leftX + 4.8,  2.0, Math.PI / 2);
+    makeGlassHood("HOOD B", leftX + 4.8,  0.0, Math.PI / 2);
+    makeGlassHood("HOOD C", leftX + 4.8, -2.0, Math.PI / 2);
+
+    // -------------------------
+    // Teleport machine moved back (behind spawn)
+    // -------------------------
     const tm = new THREE.Mesh(
       new THREE.CylinderGeometry(0.35, 0.35, 2.2, 22),
       new THREE.MeshStandardMaterial({
         color: 0x090b14,
         emissive: new THREE.Color(0x9b5cff),
-        emissiveIntensity: 1.35,
+        emissiveIntensity: 1.55,
         roughness: 0.35
       })
     );
     tm.name = "TeleportMachineFallback";
-    tm.position.set(0, 1.1, spawnZ + 3.6);
+    tm.position.set(0, 1.1, snap((frontZ - 3.0) + 3.6));
     scene.add(tm);
 
-    // VIP statues in spawn room (simple pedestals + bots)
-    function makeStatue(name, tint) {
-      const g = new THREE.Group();
-      g.name = name;
+    // -------------------------
+    // Clear signage / anchors for later HUD walls
+    // -------------------------
+    const hubHudAnchor = new THREE.Object3D();
+    hubHudAnchor.name = "HubHUDAttach";
+    hubHudAnchor.position.set(0, 1.8, HUB_R - 0.8);
+    scene.add(hubHudAnchor);
 
-      const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.65, 0.55, 20), darkMetal);
-      ped.position.y = 0.28;
-      g.add(ped);
-
-      const mat = new THREE.MeshStandardMaterial({
-        color: tint,
-        emissive: tint,
-        emissiveIntensity: 0.35,
-        roughness: 0.55,
-        metalness: 0.2,
-        flatShading: true
-      });
-
-      const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.55, 4, 8), mat);
-      torso.position.y = 1.05;
-      g.add(torso);
-
-      const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.13, 1), mat);
-      head.position.set(0, 0.45, 0);
-      torso.add(head);
-
-      return g;
-    }
-
-    const s1 = makeStatue("VIP_Statue_A", 0x7fe7ff);
-    const s2 = makeStatue("VIP_Statue_B", 0xff2d7a);
-
-    s1.position.set(-4.0, 0, spawnZ + 0.8);
-    s2.position.set( 4.0, 0, spawnZ + 0.8);
-
-    scene.add(s1, s2);
-
-    // -----------------------------
-    // LEFT/WEST STORE build (procedural)
-    // -----------------------------
-    function createDisplayCase({ x, y, z, label, accent = 0x00ffff }) {
-      const caseG = new THREE.Group();
-      caseG.position.set(x, y, z);
-
-      // base
-      const base = new THREE.Mesh(
-        new THREE.BoxGeometry(1.25, 0.45, 0.85),
-        darkMetal
-      );
-      base.position.y = 0.225;
-      caseG.add(base);
-
-      // glass box
-      const glass = new THREE.Mesh(
-        new THREE.BoxGeometry(1.15, 0.75, 0.75),
-        new THREE.MeshPhysicalMaterial({
-          color: new THREE.Color(0x08202a),
-          transparent: true,
-          opacity: 0.22,
-          roughness: 0.08,
-          metalness: 0.0,
-          transmission: 0.9,
-          thickness: 0.25,
-          ior: 1.35
-        })
-      );
-      glass.position.y = 0.78;
-      caseG.add(glass);
-
-      // glow trim
-      const trimMat = new THREE.MeshStandardMaterial({
-        color: 0x05060a,
-        emissive: new THREE.Color(accent),
-        emissiveIntensity: 2.1,
-        roughness: 0.3
-      });
-
-      const trim = new THREE.Mesh(new THREE.BoxGeometry(1.22, 0.03, 0.82), trimMat);
-      trim.position.y = 0.46;
-      caseG.add(trim);
-
-      // interior light
-      const l = new THREE.PointLight(accent, 1.7, 6);
-      l.position.set(0, 1.25, 0);
-      caseG.add(l);
-
-      // label sprite
-      const spr = makeTextSprite(label, { fg: "#bffcff", bg: "rgba(0,0,0,0.38)" });
-      spr.position.set(0, 1.9, 0);
-      spr.scale.set(1.85, 1.0, 1);
-      caseG.add(spr);
-
-      return caseG;
-    }
-
-    function createStoreRoom(roomAnchor) {
-      // Put store near the room center, but leave door path clear
-      const ax = roomAnchor.position.x;
-      const az = roomAnchor.position.z;
-
-      // Big sign inside store
-      const sign = makeTextSprite("STORE\nDISPLAY CASES", { fg: "#00ffff", bg: "rgba(0,10,20,0.55)" });
-      sign.position.set(ax, 2.35, az - 3.2);
-      sign.scale.set(4.2, 2.1, 1);
-      scene.add(sign);
-
-      // Display cases along back wall
-      const c1 = createDisplayCase({ x: ax - 2.2, y: 0, z: az - 2.0, label: "CHIPS\nPACK", accent: 0x00ffff });
-      const c2 = createDisplayCase({ x: ax + 0.0, y: 0, z: az - 2.0, label: "TABLE\nSKINS", accent: 0xff2d7a });
-      const c3 = createDisplayCase({ x: ax + 2.2, y: 0, z: az - 2.0, label: "VIP\nITEMS", accent: 0x9b5cff });
-      scene.add(c1, c2, c3);
-
-      // “Kiosk” pad near center
-      const kiosk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.65, 0.65, 0.14, 24),
-        new THREE.MeshStandardMaterial({ color: 0x070812, emissive: 0x00ffff, emissiveIntensity: 0.65 })
-      );
-      kiosk.position.set(ax, 0.10, az + 1.4);
-      kiosk.name = "StoreKiosk";
-      scene.add(kiosk);
-
-      const kioskLabel = makeTextSprite("STORE\nKIOSK", { fg: "#e8ecff", bg: "rgba(0,0,0,0.35)" });
-      kioskLabel.position.set(ax, 1.6, az + 1.4);
-      kioskLabel.scale.set(2.0, 1.1, 1);
-      scene.add(kioskLabel);
-
-      // extra room lights
-      const pl = new THREE.PointLight(0xffffff, 2.2, 32);
-      pl.position.set(ax, 5.0, az);
-      scene.add(pl);
-    }
-
-    // Attach store to WEST room
-    createStoreRoom(roomWest);
-
-    console.log("[world] v3.9 ✅ pit hub + trims + glass hoods + store(left) built");
+    console.log("[world] 4.0 ALIGN-FIRST ✅ grids only, sealed walls, clear doors, sunken table, west store anchor");
   },
 
-  update(ctx, dt) {}
+  update(ctx, dt) {
+    // alignment-first mode keeps update light
+    // (your poker sim / bots can be wired back in after alignment is locked)
+  }
 };

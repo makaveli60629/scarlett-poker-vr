@@ -1,4 +1,4 @@
-// /boot.js — Quest/Oculus-SAFE Diagnostic Boot vQ1
+// /js/boot.js — Scarlett Diagnostic Boot (ALL JS IN /js)
 window.__BOOT_OK__ = true;
 
 const now = () => new Date().toTimeString().slice(0, 8);
@@ -13,76 +13,74 @@ function log(msg){
     logEl.scrollTop = logEl.scrollHeight;
   }
 }
-
 function setStatus(){
   if (xrEl) xrEl.textContent = `XR: ${navigator.xr ? "supported" : "not found"}`;
-  if (modeEl) modeEl.textContent = `Mode: running`;
+  if (modeEl) modeEl.textContent = "Mode: running";
 }
+function url(path){ return new URL(path, location.href).toString(); }
 
-async function ping(url){
+async function ping(u){
   try{
-    const r = await fetch(url, { cache: "no-store" });
-    log(`[${now()}] [PING] ${url} -> ${r.status}`);
+    const r = await fetch(u, { cache: "no-store" });
+    log(`[${now()}] [PING] ${u} -> ${r.status}`);
     return r.ok;
   }catch(e){
-    log(`[${now()}] [PING] ${url} FAILED ❌ ${e?.message || e}`);
+    log(`[${now()}] [PING] ${u} FAILED ❌ ${e?.message || e}`);
     return false;
   }
 }
 
-// Resolve URLs safely for GitHub Pages project sites
-function resolve(path){
-  // Ensures correct base even if you are on /scarlett-poker-vr/
-  return new URL(path, location.href).toString();
-}
+// Global error capture (so it never goes silent)
+window.addEventListener("error", (e) => {
+  log(`[${now()}] [GLOBAL] error ❌ ${e.message}`);
+  if (e.filename) log(`[${now()}] [GLOBAL] at ${e.filename}:${e.lineno}:${e.colno}`);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  const msg = e?.reason?.message || String(e?.reason || "unknown");
+  log(`[${now()}] [GLOBAL] unhandledrejection ❌ ${msg}`);
+});
+
+log(`[${now()}] [BOOT] boot.js loaded ✅`);
+log(`[${now()}] [BOOT] href=${location.href}`);
+log(`[${now()}] [BOOT] secureContext=${window.isSecureContext}`);
+log(`[${now()}] [BOOT] ua=${navigator.userAgent}`);
+log(`[${now()}] [BOOT] navigator.xr=${!!navigator.xr}`);
+setStatus();
+
+// Buttons work even if runtime fails
+document.getElementById("copyBtn")?.addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(logEl?.textContent || ""); } catch {}
+});
+document.getElementById("clearBtn")?.addEventListener("click", () => {
+  if (logEl) logEl.textContent = "";
+  log(`[${now()}] [BOOT] log cleared ✅`);
+});
+
+document.getElementById("diagBtn")?.addEventListener("click", async () => {
+  log(`[${now()}] [DIAG] click ✅`);
+  await ping(url("./js/boot.js"));
+  await ping(url("./js/index.js"));
+  await ping(url("./js/world.js"));
+  await ping(url("./js/VRButton.js"));
+  log(`[${now()}] [DIAG] done ✅`);
+});
 
 (async () => {
-  log(`[${now()}] [BOOT] boot.js loaded ✅ (Quest-safe)`);
-  log(`[${now()}] [BOOT] href=${location.href}`);
-  log(`[${now()}] [BOOT] origin=${location.origin}`);
-  log(`[${now()}] [BOOT] pathname=${location.pathname}`);
-  log(`[${now()}] [BOOT] secureContext=${window.isSecureContext}`);
-  log(`[${now()}] [BOOT] ua=${navigator.userAgent}`);
-  log(`[${now()}] [BOOT] navigator.xr=${!!navigator.xr}`);
+  // Pre-flight file existence
+  await ping(url("./js/index.js"));
+  await ping(url("./js/world.js"));
+  await ping(url("./js/VRButton.js"));
 
-  setStatus();
-
-  // Buttons should work even if imports fail
-  document.getElementById("copyBtn")?.addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText(logEl?.textContent || ""); } catch {}
-  });
-  document.getElementById("clearBtn")?.addEventListener("click", () => {
-    if (logEl) logEl.textContent = "";
-    log(`[${now()}] [BOOT] log cleared ✅`);
-  });
-
-  // IMPORTANT: resolve to absolute URLs
-  const urlIndex = resolve("./js/index.js");
-  const urlWorld = resolve("./js/world.js");
-  const urlVRBtn = resolve("./js/VRButton.js");
-
-  log(`[${now()}] [BOOT] RESOLVED index=${urlIndex}`);
-  log(`[${now()}] [BOOT] RESOLVED world=${urlWorld}`);
-  log(`[${now()}] [BOOT] RESOLVED vrbtn=${urlVRBtn}`);
-
-  // Pre-flight pings (shows if Quest can reach the files)
-  await ping(resolve("./boot.js"));
-  await ping(urlIndex);
-  await ping(urlWorld);
-  await ping(urlVRBtn);
-
-  // Cache-busted import (Quest caches aggressively)
+  // Cache-bust runtime import (Quest caches modules hard)
   const v = Date.now();
-  const importUrl = `${urlIndex}${urlIndex.includes("?") ? "&" : "?"}v=${v}`;
+  const runtime = url(`./js/index.js?v=${v}`);
 
-  log(`[${now()}] [BOOT] importing ${importUrl} …`);
+  log(`[${now()}] [BOOT] importing ${runtime} …`);
   try{
-    await import(importUrl);
+    await import(runtime);
     log(`[${now()}] [BOOT] index.js imported ✅`);
   }catch(e){
     log(`[${now()}] [BOOT] index.js import FAILED ❌ ${e?.message || e}`);
-    // extra hint
-    log(`[${now()}] [BOOT] If status=404 above → file missing or wrong folder on GitHub Pages.`);
     console.error(e);
   }
 })();

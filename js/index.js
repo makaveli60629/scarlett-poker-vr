@@ -1,6 +1,4 @@
-// /js/index.js — Scarlett VR Poker Hybrid 1.0 (FULL Diagnostics + Quest-safe XR)
-// Works with index.html you pasted AND /js/world.js exporting HybridWorld
-
+// /js/index.js — Scarlett Hybrid 1.0 (FULL + Streaming + Quest-safe XR)
 import { HybridWorld } from "./world.js";
 
 const $ = (id) => document.getElementById(id);
@@ -14,6 +12,7 @@ const exitVrBtn = $("exitVrBtn");
 const rebuildBtn = $("rebuildBtn");
 const safeModeBtn = $("safeModeBtn");
 const hardResetBtn = $("hardResetBtn");
+const startAudioBtn = $("startAudioBtn");
 
 const copyLogsBtn = $("copyLogsBtn");
 const downloadLogsBtn = $("downloadLogsBtn");
@@ -25,6 +24,7 @@ const opt_nonvrControls = $("opt_nonvrControls");
 const opt_allowTeleport = $("opt_allowTeleport");
 const opt_allowBots = $("opt_allowBots");
 const opt_allowPoker = $("opt_allowPoker");
+const opt_allowStream = $("opt_allowStream");
 
 function setStatus(html) {
   console.log("[ui]", html);
@@ -32,13 +32,8 @@ function setStatus(html) {
 }
 
 const LOGS = [];
-function safeJson(x) {
-  try { return JSON.stringify(x); } catch { return String(x); }
-}
-function stamp() {
-  const d = new Date();
-  return d.toLocaleTimeString();
-}
+function safeJson(x) { try { return JSON.stringify(x); } catch { return String(x); } }
+function stamp() { return new Date().toLocaleTimeString(); }
 function log(...a) {
   console.log(...a);
   const line = `[${stamp()}] ` + a.map(x => (typeof x === "string" ? x : safeJson(x))).join(" ");
@@ -56,6 +51,7 @@ function readOPTS() {
     allowTeleport: opt_allowTeleport ? !!opt_allowTeleport.checked : true,
     allowBots: opt_allowBots ? !!opt_allowBots.checked : true,
     allowPoker: opt_allowPoker ? !!opt_allowPoker.checked : true,
+    allowStream: opt_allowStream ? !!opt_allowStream.checked : true,
     safeMode: false
   };
 }
@@ -64,38 +60,7 @@ function kvRow(k, v, cls = "") {
   return `<div class="k">${k}</div><div class="v ${cls}">${v}</div>`;
 }
 
-async function refreshDiagnostics() {
-  const hasXR = !!navigator.xr;
-  const presenting = !!renderer.xr.isPresenting;
-
-  let supported = "unknown";
-  if (hasXR) {
-    try { supported = (await navigator.xr.isSessionSupported("immersive-vr")) ? "yes" : "no"; }
-    catch { supported = "error"; }
-  }
-
-  const xrCam = renderer.xr.getCamera(camera);
-  const camPos = xrCam?.position
-    ? `${xrCam.position.x.toFixed(2)}, ${xrCam.position.y.toFixed(2)}, ${xrCam.position.z.toFixed(2)}`
-    : "n/a";
-
-  const handJoints =
-    (controllers.handLeft?.joints ? "yes" : "no") + " / " + (controllers.handRight?.joints ? "yes" : "no");
-
-  const rows = [
-    kvRow("WebXR", hasXR ? "available" : "missing", hasXR ? "good" : "bad"),
-    kvRow("immersive-vr", supported, supported === "yes" ? "good" : (supported === "no" ? "bad" : "warn")),
-    kvRow("XR presenting", presenting ? "true" : "false", presenting ? "good" : "warn"),
-    kvRow("Hand joints", handJoints, "warn"),
-    kvRow("Camera", camPos, ""),
-    kvRow("URL", location.hostname || location.href, ""),
-  ];
-  if (diagKv) diagKv.innerHTML = rows.join("");
-}
-
-// ---------------------
 // Renderer + rig
-// ---------------------
 log("[main] boot", "v=" + Date.now());
 log("href=" + location.href);
 log("ua=" + navigator.userAgent);
@@ -128,9 +93,39 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
 });
 
-// ---------------------
+// Diagnostics
+async function refreshDiagnostics() {
+  const hasXR = !!navigator.xr;
+  const presenting = !!renderer.xr.isPresenting;
+
+  let supported = "unknown";
+  if (hasXR) {
+    try { supported = (await navigator.xr.isSessionSupported("immersive-vr")) ? "yes" : "no"; }
+    catch { supported = "error"; }
+  }
+
+  const xrCam = renderer.xr.getCamera(camera);
+  const camPos = xrCam?.position
+    ? `${xrCam.position.x.toFixed(2)}, ${xrCam.position.y.toFixed(2)}, ${xrCam.position.z.toFixed(2)}`
+    : "n/a";
+
+  const handJoints =
+    (controllers.handLeft?.joints ? "yes" : "no") + " / " + (controllers.handRight?.joints ? "yes" : "no");
+
+  const rows = [
+    kvRow("WebXR", hasXR ? "available" : "missing", hasXR ? "good" : "bad"),
+    kvRow("immersive-vr", supported, supported === "yes" ? "good" : (supported === "no" ? "bad" : "warn")),
+    kvRow("XR presenting", presenting ? "true" : "false", presenting ? "good" : "warn"),
+    kvRow("Hand joints", handJoints, "warn"),
+    kvRow("Camera", camPos, ""),
+    kvRow("URL", location.hostname || location.href, ""),
+  ];
+  if (diagKv) diagKv.innerHTML = rows.join("");
+}
+refreshDiagnostics();
+setInterval(refreshDiagnostics, 800);
+
 // Quest-safe XR
-// ---------------------
 const sessionInit = { optionalFeatures: ["local-floor", "hand-tracking"] };
 let xrSession = null;
 let xrStarting = false;
@@ -174,13 +169,12 @@ async function enterVR() {
     renderer.xr.setSession(xrSession);
 
     const OPTS = readOPTS();
-
     if (OPTS.autobuild) {
-      setStatus("Entered VR ✅ Building world…<br/>In VR: <b>LEFT pinch</b> toggles the VR panel, <b>RIGHT pinch</b> clicks.");
+      setStatus("Entered VR ✅ Building world…<br/>In VR: <b>LEFT pinch</b> toggles panel, <b>RIGHT pinch</b> clicks.");
       await HybridWorld.build({ THREE, renderer, camera, player, controllers, log, OPTS });
-      setStatus("Ready ✅<br/>In VR: <b>LEFT pinch</b> toggles panel, <b>RIGHT pinch</b> clicks.");
+      setStatus("Ready ✅<br/>Tap <b>Start Audio</b> once if you want stream sound.");
     } else {
-      setStatus("Entered VR ✅ (Auto-build OFF). Tap Rebuild World (outside VR).");
+      setStatus("Entered VR ✅ (Auto-build OFF). Tap Rebuild World outside VR.");
     }
   } finally {
     xrStarting = false;
@@ -200,16 +194,15 @@ async function rebuildWorld() {
   const OPTS = readOPTS();
   setStatus("Rebuilding world…");
   await HybridWorld.rebuild({ THREE, renderer, camera, player, controllers, log, OPTS });
-  setStatus("Rebuilt ✅<br/>In VR: <b>LEFT pinch</b> toggles panel, <b>RIGHT pinch</b> clicks.");
+  setStatus("Rebuilt ✅");
 }
 
 function enableSafeMode() {
-  // Safe mode = disable optional systems then rebuild
   if (opt_allowTeleport) opt_allowTeleport.checked = false;
   if (opt_allowBots) opt_allowBots.checked = false;
   if (opt_allowPoker) opt_allowPoker.checked = false;
-
-  setStatus("Safe Mode armed ✅ (disabled bots/poker/teleport). Tap Rebuild World.");
+  if (opt_allowStream) opt_allowStream.checked = false;
+  setStatus("Safe Mode armed ✅. Tap Rebuild World.");
   log("[mode] safe mode armed (ui)");
 }
 
@@ -218,12 +211,22 @@ function hardReset() {
   location.reload();
 }
 
-// Buttons (work before VR; in VR use the 3D panel)
+async function startAudioGesture() {
+  try {
+    await HybridWorld.startAudio(); // must be user gesture
+    setStatus("Audio started ✅ (spatial volume active).");
+  } catch (err) {
+    log("[audio] startAudio ❌", err?.name, err?.message, err);
+    setStatus(`Audio blocked: <b>${err?.name || "Error"}</b> (tap again)`);
+  }
+}
+
 enterVrBtn?.addEventListener("click", enterVR);
 exitVrBtn?.addEventListener("click", exitVR);
 rebuildBtn?.addEventListener("click", rebuildWorld);
 safeModeBtn?.addEventListener("click", enableSafeMode);
 hardResetBtn?.addEventListener("click", hardReset);
+startAudioBtn?.addEventListener("click", startAudioGesture);
 
 // Log tools
 clearLogsBtn?.addEventListener("click", () => {
@@ -260,9 +263,4 @@ renderer.setAnimationLoop(() => {
   HybridWorld.frame({ renderer, camera });
 });
 
-// Diagnostics refresh
-refreshDiagnostics();
-setInterval(refreshDiagnostics, 800);
-
-// Boot status
 setStatus("Ready. Tap <b>Enter VR</b>.");

@@ -1,12 +1,9 @@
-// /js/world.js — Scarlett VR Poker HybridWorld RESTORE 1.5 (FULL)
-// Goal: bring back YOUR real lobby/store/rooms, while permanently disabling the stuck face panel in 2D.
-// ✅ Uses your existing modules if they exist (World v11 style):
-//    textures.js, lights_pack.js, solid_walls.js, spectator_rail.js, teleport_machine.js,
-//    store.js, scorpion_room.js, spawn_points.js, room_manager.js, poker_sim.js, bots.js,
-//    boss_table.js, table_factory.js
-// ✅ Android touch controls + keyboard movement
-// ✅ 2D Panel Killer: removes any camera-attached panel/HUD/menu every frame (non-XR)
-// ✅ Quest-safe: doesn’t break XR; just avoids 2D stuck menu
+// /js/world.js — Scarlett VR Poker HybridWorld RESTORE 1.6 (FULL)
+// ✅ Restores YOUR world: circular lobby + spawn area + store + scorpion + decor + teleport + bots + poker + room manager
+// ✅ Android movement: TouchControls + keyboard
+// ✅ SAFE SPAWN: raycasts down, prevents spawning under/inside geometry
+// ✅ 2D PANEL KILLER: removes any camera-attached panel/HUD/menu every frame (non-XR)
+// ✅ Modular: if a module is missing, it logs and continues (won't black screen)
 
 import { TouchControls } from "./touch_controls.js";
 
@@ -33,21 +30,17 @@ export const HybridWorld = (() => {
     root: null,
     floor: null,
 
-    // systems
     systems: {},
     mods: {},
 
-    // spawn
+    // spawn defaults (SpawnPoints can override)
     spawn: { x: 0, y: 0, z: 26 },
     facing: { x: 0, y: 1.5, z: 0 },
 
     __betTimer: 0
   };
 
-  // ----------------------
-  // helpers
-  // ----------------------
-  const safeLog = (...a) => { try { state.log?.(...a); } catch (e) {} };
+  const safeLog = (...a) => { try { state.log?.(...a); } catch(e) {} };
 
   async function tryImport(path) {
     try {
@@ -73,33 +66,23 @@ export const HybridWorld = (() => {
     } catch(e) {}
   }
 
-  // ✅ Hard disable any face panel in 2D
+  // ✅ Kills any 3D face panel in 2D (Android/Desktop)
   function killFacePanels2D() {
-    // Only kill when NOT in XR
     if (state.renderer?.xr?.isPresenting) return;
     const cam = state.camera;
     if (!cam) return;
 
-    // Remove suspicious camera children
     for (let i = cam.children.length - 1; i >= 0; i--) {
       const ch = cam.children[i];
       const n = (ch?.name || "").toLowerCase();
-      if (
-        n.includes("vrpanel") ||
-        n.includes("panel") ||
-        n.includes("hud") ||
-        n.includes("menu") ||
-        n.includes("uipanel")
-      ) {
+      if (n.includes("vrpanel") || n.includes("panel") || n.includes("hud") || n.includes("menu") || n.includes("uipanel")) {
         try { cam.remove(ch); } catch(e) {}
         try { disposeObject3D(ch); } catch(e) {}
       }
     }
 
-    // Remove nested objects with userData.label (old UI buttons)
     try {
       cam.traverse?.((o) => {
-        if (!o) return;
         if (typeof o?.userData?.label === "string") {
           try { o.parent?.remove(o); } catch(e) {}
           try { disposeObject3D(o); } catch(e) {}
@@ -108,9 +91,6 @@ export const HybridWorld = (() => {
     } catch(e) {}
   }
 
-  // ----------------------
-  // base scene
-  // ----------------------
   function makeBaseScene() {
     const THREE = state.THREE;
     const scene = new THREE.Scene();
@@ -122,7 +102,7 @@ export const HybridWorld = (() => {
     scene.add(dir);
 
     const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(200, 200),
+      new THREE.PlaneGeometry(220, 220),
       new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.96, metalness: 0.0 })
     );
     floor.rotation.x = -Math.PI / 2;
@@ -131,7 +111,7 @@ export const HybridWorld = (() => {
     scene.add(floor);
     state.floor = floor;
 
-    // landmark (so never-black, never-empty)
+    // landmark so never-black
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(1.2, 0.08, 12, 64),
       new THREE.MeshStandardMaterial({ color: 0x7fe7ff, roughness: 0.35, metalness: 0.25 })
@@ -153,42 +133,75 @@ export const HybridWorld = (() => {
     return root;
   }
 
-  function applySpawn() {
-    const { player, camera, spawn, facing, THREE } = state;
+  // ✅ Best spawn fix: raycast down to floor; never under map
+  function safeSpawn(reason = "post-build") {
+    const { THREE, scene, player, camera } = state;
+    if (!THREE || !scene || !player || !camera) return;
 
-    player.position.set(spawn.x, spawn.y, spawn.z);
-    camera.position.set(0, 1.65, 0);
+    const x = Number.isFinite(state.spawn?.x) ? state.spawn.x : 0;
+    const z = Number.isFinite(state.spawn?.z) ? state.spawn.z : 26;
+    const eye = 1.65;
 
-    // Face toward target
-    const target = new THREE.Vector3(facing.x, facing.y, facing.z);
-    const camWorld = new THREE.Vector3();
-    camera.getWorldPosition(camWorld);
-    const look = target.sub(camWorld).normalize();
-    const yaw = Math.atan2(look.x, look.z);
-    player.rotation.set(0, yaw, 0);
+    let floorY = 0;
+    try {
+      const ray = new THREE.Raycaster(
+        new THREE.Vector3(x, 50, z),
+        new THREE.Vector3(0, -1, 0),
+        0,
+        200
+      );
 
-    safeLog("[spawn] set", spawn);
+      const hits = ray.intersectObjects(scene.children, true);
+      let best = null;
+      for (const h of hits) {
+        const name = (h.object?.name || "").toLowerCase();
+        if (name.includes("floor")) { best = h; break; }
+        // accept other geometry if no floor tag
+        best = best || h;
+      }
+      if (best) floorY = best.point.y;
+    } catch(e){}
+
+    player.position.set(x, floorY + 0.02, z);
+    camera.position.set(0, eye, 0);
+
+    // face lobby center
+    try {
+      const target = new THREE.Vector3(0, eye, 0);
+      const camWorld = new THREE.Vector3();
+      camera.getWorldPosition(camWorld);
+      const dir = target.sub(camWorld).normalize();
+      player.rotation.set(0, Math.atan2(dir.x, dir.z), 0);
+    } catch(e){}
+
+    safeLog(`[spawn] SAFE ✅ (${reason}) x=${x.toFixed(2)} y=${player.position.y.toFixed(2)} z=${z.toFixed(2)}`);
   }
 
-  // ----------------------
-  // Android / Desktop controls
-  // ----------------------
+  function attachHandsToRig() {
+    try {
+      const L = state.controllers?.handLeft;
+      const R = state.controllers?.handRight;
+      if (L && L.parent !== state.player) state.player.add(L);
+      if (R && R.parent !== state.player) state.player.add(R);
+    } catch(e) {}
+  }
+
   function installNonVRControls() {
     if (state.systems.nonvr?.__installed) return;
 
     const { camera, player } = state;
     const keys = new Set();
 
-    // Desktop pointer look
     let dragging = false;
     let lastX = 0, lastY = 0;
-    let yaw = 0, pitch = 0;
+    let yaw = player.rotation.y || 0;
+    let pitch = camera.rotation.x || 0;
 
     window.addEventListener("keydown", (e) => keys.add(e.code));
     window.addEventListener("keyup", (e) => keys.delete(e.code));
 
-    window.addEventListener("pointerdown", (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
-    window.addEventListener("pointerup", () => { dragging = false; });
+    window.addEventListener("pointerdown", (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; }, { passive:true });
+    window.addEventListener("pointerup", () => { dragging = false; }, { passive:true });
     window.addEventListener("pointermove", (e) => {
       if (!dragging) return;
       const dx = e.clientX - lastX;
@@ -199,9 +212,8 @@ export const HybridWorld = (() => {
       pitch = Math.max(-1.2, Math.min(1.2, pitch));
       player.rotation.y = yaw;
       camera.rotation.x = pitch;
-    });
+    }, { passive:true });
 
-    // Touch UI (Android)
     const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
 
     const touchAPI = {
@@ -211,7 +223,8 @@ export const HybridWorld = (() => {
         if (hud) hud.style.display = (hud.style.display === "none" ? "" : "none");
         else document.getElementById("overlay")?.classList.toggle("hide");
       },
-      gotoTable: () => { player.position.set(0, 0, 4.2); player.rotation.set(0, Math.PI, 0); },
+      gotoTable: () => { player.position.set(0, player.position.y, 4.2); player.rotation.set(0, Math.PI, 0); },
+      respawn: () => safeSpawn("touch"),
       safeMode: () => {
         state.OPTS.safeMode = true;
         state.OPTS.allowBots = false;
@@ -249,7 +262,6 @@ export const HybridWorld = (() => {
 
         const fwd = moveY + fwdKB;
         const str = moveX + strKB;
-
         if (!fwd && !str) return;
 
         const speed = (keys.has("ShiftLeft") ? 6 : 3) * dt;
@@ -263,28 +275,13 @@ export const HybridWorld = (() => {
         player.position.addScaledVector(right, str * speed);
       }
     };
-
-    safeLog("[nonvr] controls ✅");
   }
 
-  function attachHandsToRig() {
-    // harmless in 2D; helpful in XR
-    try {
-      const L = state.controllers?.handLeft;
-      const R = state.controllers?.handRight;
-      if (L && L.parent !== state.player) state.player.add(L);
-      if (R && R.parent !== state.player) state.player.add(R);
-    } catch(e) {}
-  }
-
-  // ----------------------
-  // restore your world modules
-  // ----------------------
   async function buildYourWorld() {
     const THREE = state.THREE;
     const root = ensureRoot();
 
-    // Clear previous root
+    // clear root
     if (root.children.length) {
       for (let i = root.children.length - 1; i >= 0; i--) {
         const c = root.children[i];
@@ -293,8 +290,7 @@ export const HybridWorld = (() => {
       }
     }
 
-    // Import the modules you previously used (if they exist)
-    const texturesMod      = await tryImport("./textures.js");
+    // imports (your world modules)
     const lightsPackMod    = await tryImport("./lights_pack.js");
     const solidWallsMod    = await tryImport("./solid_walls.js");
     const spectatorRailMod = await tryImport("./spectator_rail.js");
@@ -304,6 +300,7 @@ export const HybridWorld = (() => {
 
     const bossTableMod     = await tryImport("./boss_table.js");
     const tableFactoryMod  = await tryImport("./table_factory.js");
+
     const botsMod          = await tryImport("./bots.js");
     const pokerSimMod      = await tryImport("./poker_sim.js");
     const roomMgrMod       = await tryImport("./room_manager.js");
@@ -311,20 +308,15 @@ export const HybridWorld = (() => {
     const tpMachineMod     = await tryImport("./teleport_machine.js");
     const tpMod            = await tryImport("./teleport.js");
 
-    // Also allow newer decor modules if present
     const lobbyDecorMod    = await tryImport("./lobby_decor.js");
-    const storeRoomMod     = await tryImport("./store_room.js");
-    const spectatorMod2    = await tryImport("./spectator.js");
-    const seatingMod       = await tryImport("./seating.js");
-    const chipsMod         = await tryImport("./chips.js");
 
     state.mods = {
-      texturesMod, lightsPackMod, solidWallsMod, spectatorRailMod, storeMod, scorpionMod, spawnPointsMod,
+      lightsPackMod, solidWallsMod, spectatorRailMod, storeMod, scorpionMod, spawnPointsMod,
       bossTableMod, tableFactoryMod, botsMod, pokerSimMod, roomMgrMod, tpMachineMod, tpMod,
-      lobbyDecorMod, storeRoomMod, spectatorMod2, seatingMod, chipsMod
+      lobbyDecorMod
     };
 
-    // Spawn points (if you have them)
+    // SpawnPoints (if present)
     try {
       const SP = spawnPointsMod?.SpawnPoints || spawnPointsMod?.default;
       if (SP?.lobby) {
@@ -340,16 +332,16 @@ export const HybridWorld = (() => {
       safeLog("[spawn] SpawnPoints applied ✅");
     } catch(e){}
 
-    // Lights pack (if your pack exists)
+    // LightsPack
     try {
       const LP = lightsPackMod?.LightsPack || lightsPackMod?.default;
       if (LP?.init) {
         state.systems.lights = LP.init({ THREE, scene: state.scene, root, log: state.log });
         safeLog("[lights] LightsPack ✅");
       }
-    } catch(e){ safeLog("[lights] pack FAIL", e?.message || e); }
+    } catch(e){ safeLog("[lights] FAIL", e?.message || e); }
 
-    // Walls / lobby build (if you have it)
+    // SolidWalls (your lobby/hallways)
     try {
       const SW = solidWallsMod?.SolidWalls || solidWallsMod?.default;
       if (SW?.init) {
@@ -358,16 +350,16 @@ export const HybridWorld = (() => {
       }
     } catch(e){ safeLog("[walls] FAIL", e?.message || e); }
 
-    // Spectator rail (old or new)
+    // LobbyDecor (circular lobby visuals)
     try {
-      const SR = spectatorRailMod?.SpectatorRail || spectatorMod2?.SpectatorRail || spectatorRailMod?.default;
-      if (SR?.init) {
-        state.systems.spectator = SR.init({ THREE, scene: state.scene, root, log: state.log });
-        safeLog("[spectator] ✅");
+      const Decor = lobbyDecorMod?.LobbyDecor || lobbyDecorMod?.default;
+      if (Decor?.init) {
+        state.systems.decor = Decor.init({ THREE, root, log: state.log });
+        safeLog("[decor] LobbyDecor ✅");
       }
-    } catch(e){ safeLog("[spectator] FAIL", e?.message || e); }
+    } catch(e){ safeLog("[decor] FAIL", e?.message || e); }
 
-    // Store (old store.js system or new store_room.js)
+    // StoreSystem
     try {
       const StoreSystem = storeMod?.StoreSystem || storeMod?.default;
       if (StoreSystem?.init) {
@@ -377,13 +369,10 @@ export const HybridWorld = (() => {
           log: state.log
         });
         safeLog("[store] StoreSystem ✅");
-      } else if (storeRoomMod?.StoreRoom?.init) {
-        state.systems.store = storeRoomMod.StoreRoom.init({ THREE, root, log: state.log });
-        safeLog("[store] StoreRoom ✅");
       }
     } catch(e){ safeLog("[store] FAIL", e?.message || e); }
 
-    // Scorpion room (if exists)
+    // Scorpion room
     try {
       const ScorpionRoom = scorpionMod?.ScorpionRoom || scorpionMod?.default;
       if (ScorpionRoom?.init) {
@@ -392,17 +381,18 @@ export const HybridWorld = (() => {
       }
     } catch(e){ safeLog("[scorpion] FAIL", e?.message || e); }
 
-    // Hallways / lobby decor (if exists)
+    // SpectatorRail
     try {
-      const LobbyDecor = lobbyDecorMod?.LobbyDecor || lobbyDecorMod?.default;
-      if (LobbyDecor?.init) {
-        state.systems.decor = LobbyDecor.init({ THREE, root, log: state.log });
-        safeLog("[decor] LobbyDecor ✅");
+      const SR = spectatorRailMod?.SpectatorRail || spectatorRailMod?.default;
+      if (SR?.init) {
+        state.systems.spectator = SR.init({ THREE, scene: state.scene, root, log: state.log });
+        safeLog("[spectator] ✅");
       }
-    } catch(e){ safeLog("[decor] FAIL", e?.message || e); }
+    } catch(e){ safeLog("[spectator] FAIL", e?.message || e); }
 
-    // TABLE (prefer BossTable, then TableFactory) — keeps your real orientation/branding
+    // Table: prefer BossTable then TableFactory
     let tableObj = null;
+
     try {
       const BossTable = bossTableMod?.BossTable || bossTableMod?.default;
       if (BossTable?.init) {
@@ -421,8 +411,8 @@ export const HybridWorld = (() => {
       } catch(e){ safeLog("[table] TableFactory FAIL", e?.message || e); }
     }
 
-    // Final fallback table (only if both missing)
     if (!tableObj) {
+      // only if both missing
       tableObj = new THREE.Mesh(
         new THREE.CylinderGeometry(2.25, 2.25, 0.25, 40),
         new THREE.MeshStandardMaterial({ color: 0x102018, roughness: 0.9 })
@@ -433,63 +423,7 @@ export const HybridWorld = (() => {
       safeLog("[table] fallback placeholder (missing BossTable/TableFactory)");
     }
 
-    // If table orientation is “wrong”, snap it to face player (gentle fix)
-    try {
-      // Some builds load table rotated weird; align “front” toward player initial facing.
-      // This won’t break good tables; it only applies a 90/180 correction if needed.
-      const yaw = state.player.rotation.y;
-      const ry = tableObj.rotation?.y ?? 0;
-      // normalize to [-PI, PI]
-      const norm = (v) => {
-        while (v > Math.PI) v -= Math.PI * 2;
-        while (v < -Math.PI) v += Math.PI * 2;
-        return v;
-      };
-      const d = Math.abs(norm(ry - yaw));
-      // If table is basically sideways (~90deg) or backwards (~180deg), rotate to match player
-      if (d > 1.2) {
-        tableObj.rotation.y = yaw;
-        safeLog("[table] orientation corrected ✅");
-      }
-    } catch(e){}
-
-    // Seating & chips (optional)
-    try {
-      const tablePos = new THREE.Vector3();
-      tableObj.getWorldPosition(tablePos);
-
-      if (seatingMod?.SeatingSystem?.init) {
-        state.systems.seating = seatingMod.SeatingSystem.init({
-          THREE, scene: state.scene, root,
-          camera: state.camera, player: state.player,
-          log: state.log, tablePos, seatCount: 8
-        });
-        safeLog("[seat] ✅");
-      }
-
-      if (chipsMod?.ChipSystem?.init) {
-        const seatPositions = [];
-        const count = 8;
-        const radius = 3.35;
-        for (let i=0; i<count; i++){
-          const a = (i/count) * Math.PI*2;
-          seatPositions.push(new THREE.Vector3(
-            tablePos.x + Math.sin(a)*radius,
-            0,
-            tablePos.z + Math.cos(a)*radius
-          ));
-        }
-
-        state.systems.chips = chipsMod.ChipSystem.init({
-          THREE, root, log: state.log, seatPositions,
-          potPos: new THREE.Vector3(tablePos.x, 0, tablePos.z)
-        });
-        state.__betTimer = 0;
-        safeLog("[chips] ✅");
-      }
-    } catch(e){ safeLog("[seat/chips] FAIL", e?.message || e); }
-
-    // Teleport (optional) — prefer TeleportMachine then Teleport
+    // Teleport
     if (!state.OPTS.safeMode && state.OPTS.allowTeleport) {
       try {
         const TP = tpMachineMod?.TeleportMachine || tpMachineMod?.default || tpMod?.Teleport || tpMod?.default;
@@ -509,18 +443,15 @@ export const HybridWorld = (() => {
       } catch(e){ safeLog("[teleport] FAIL", e?.message || e); }
     }
 
-    // Bots (optional)
+    // Bots
     if (!state.OPTS.safeMode && state.OPTS.allowBots && botsMod?.Bots?.init) {
       try {
-        state.systems.bots = await botsMod.Bots.init({
-          THREE, scene: state.scene, root,
-          player: state.player, log: state.log
-        });
+        state.systems.bots = await botsMod.Bots.init({ THREE, scene: state.scene, root, player: state.player, log: state.log });
         safeLog("[bots] ✅");
       } catch(e){ safeLog("[bots] FAIL", e?.message || e); }
     }
 
-    // PokerSim (optional)
+    // Poker
     if (!state.OPTS.safeMode && state.OPTS.allowPoker && pokerSimMod?.PokerSim?.init) {
       try {
         state.systems.poker = await pokerSimMod.PokerSim.init({
@@ -532,14 +463,13 @@ export const HybridWorld = (() => {
       } catch(e){ safeLog("[poker] FAIL", e?.message || e); }
     }
 
-    // RoomManager (optional)
+    // Room manager
     if (roomMgrMod?.RoomManager?.init) {
       try {
         state.systems.room = await roomMgrMod.RoomManager.init({
           THREE, scene: state.scene, root,
           player: state.player, camera: state.camera,
-          systems: state.systems,
-          log: state.log
+          systems: state.systems, log: state.log
         });
         safeLog("[rm] ✅");
       } catch(e){ safeLog("[rm] FAIL", e?.message || e); }
@@ -548,9 +478,6 @@ export const HybridWorld = (() => {
     safeLog("[world] YOUR world restored ✅");
   }
 
-  // ----------------------
-  // Public API
-  // ----------------------
   return {
     async build({ THREE, renderer, camera, player, controllers, log, OPTS }) {
       state.THREE = THREE;
@@ -563,39 +490,39 @@ export const HybridWorld = (() => {
 
       state.clock = new THREE.Clock();
 
-      // Base scene
       state.scene = makeBaseScene();
       if (!state.scene.children.includes(player)) state.scene.add(player);
 
       attachHandsToRig();
 
-      // Android controls
       if (state.OPTS.nonvrControls !== false) installNonVRControls();
 
-      // Kill any stuck panels immediately (2D)
+      // remove any stuck 3D panel in 2D immediately
       killFacePanels2D();
 
-      // Try to rebuild your world using your modules
       await buildYourWorld();
 
-      // Apply spawn after modules (SpawnPoints may have updated it)
-      applySpawn();
+      // ✅ safest: apply safe spawn AFTER build (prevents spawning inside new geometry)
+      safeSpawn("post-build");
 
       safeLog("[world] build complete ✅");
     },
 
     frame({ renderer, camera }) {
       if (!state.scene) return;
+
       const dt = state.clock ? state.clock.getDelta() : 0.016;
 
-      // ✅ Always kill face panels in 2D, every frame
+      // always kill face panels in 2D
       killFacePanels2D();
 
-      // Updates
-      try { state.systems.nonvr?.update?.(dt); } catch(e) {}
-      try { state.systems.__touch?.update?.(dt); } catch(e) {}
+      // auto-unstuck if we fall under map in 2D
+      if (!state.renderer?.xr?.isPresenting) {
+        const y = state.player?.position?.y;
+        if (!Number.isFinite(y) || y < -5) safeSpawn("auto-unstuck");
+      }
 
-      try { state.systems.seating?.update?.(dt); } catch(e) {}
+      try { state.systems.nonvr?.update?.(dt); } catch(e) {}
       try { state.systems.store?.update?.(dt); } catch(e) {}
       try { state.systems.decor?.update?.(dt); } catch(e) {}
       try { state.systems.scorpion?.update?.(dt); } catch(e) {}
@@ -605,18 +532,6 @@ export const HybridWorld = (() => {
       try { state.systems.poker?.update?.(dt); } catch(e) {}
       try { state.systems.room?.update?.(dt); } catch(e) {}
       try { state.systems.teleport?.update?.(dt); } catch(e) {}
-
-      // Simple chip demo loop (only if ChipSystem exists)
-      try {
-        if (state.systems.chips?.bet) {
-          state.__betTimer += dt;
-          if (state.__betTimer > 2.0) {
-            state.__betTimer = 0;
-            const seatId = "P" + (1 + Math.floor(Math.random() * 8));
-            state.systems.chips.bet(seatId, 1 + Math.floor(Math.random() * 3));
-          }
-        }
-      } catch(e) {}
 
       renderer.render(state.scene, camera);
     }

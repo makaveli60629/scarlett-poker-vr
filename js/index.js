@@ -2,7 +2,12 @@
 // ✅ Always visible: cube + floor + render loop (never blind)
 // ✅ VRButton (Quest compatible)
 // ✅ Imports ./world.js safely
-// ✅ Calls HybridWorld.init with the expected argument shape
+// ✅ AUTO-DETECTS how HybridWorld should be called:
+//    - HybridWorld(ctx) function
+//    - HybridWorld.init(ctx)
+//    - HybridWorld.start(ctx)
+//    - HybridWorld.boot(ctx)
+//    - or default export
 // ✅ On success: removes testRoot so real world shows
 // ✅ On failure: keeps cube + prints exact error
 
@@ -139,20 +144,21 @@ async function safeImport(rel) {
   }
 }
 
-// ---------------- start HybridWorld (CORRECT ADAPTER) ----------------
+// ---------------- start HybridWorld (AUTO-DETECT ADAPTER) ----------------
 (async () => {
   try {
     const worldMod = await safeImport("./world.js");
     log("world module keys:", Object.keys(worldMod));
 
-    const HybridWorld = worldMod?.HybridWorld;
-    if (!HybridWorld || typeof HybridWorld.init !== "function") {
-      log("❌ HybridWorld.init not found");
+    // Resolve HybridWorld in all known shapes
+    const HW = (worldMod?.HybridWorld ?? worldMod?.default ?? null);
+    if (!HW) {
+      log("❌ No HybridWorld export found (HybridWorld or default).");
       log("✅ Staying in cube test mode.");
       return;
     }
 
-    // ctx-like values your game historically expects
+    // Build expected ctx (matches your historical init signatures)
     const BUILD = {
       stamp: Date.now(),
       mode: "hybrid",
@@ -166,10 +172,7 @@ async function safeImport(rel) {
 
     const controllers = { left: null, right: null, hands: [] };
 
-    log("▶ HybridWorld.init START");
-
-    // Call with the exact destructured argument style your world versions used
-    await HybridWorld.init({
+    const ctx = {
       THREE,
       scene,
       renderer,
@@ -178,19 +181,48 @@ async function safeImport(rel) {
       controllers,
       log,
       BUILD,
-    });
+    };
 
-    log("✅ HybridWorld.init DONE");
+    log("▶ HybridWorld detected type:", typeof HW);
 
-    // Remove test visuals so we see the real world
+    // ---- CALL STRATEGY ----
+    if (typeof HW === "function") {
+      log("▶ Calling HybridWorld(ctx) as function");
+      const res = HW(ctx);
+      if (res instanceof Promise) await res;
+
+    } else if (typeof HW.init === "function") {
+      log("▶ Calling HybridWorld.init(ctx)");
+      const res = HW.init(ctx);
+      if (res instanceof Promise) await res;
+
+    } else if (typeof HW.start === "function") {
+      log("▶ Calling HybridWorld.start(ctx)");
+      const res = HW.start(ctx);
+      if (res instanceof Promise) await res;
+
+    } else if (typeof HW.boot === "function") {
+      log("▶ Calling HybridWorld.boot(ctx)");
+      const res = HW.boot(ctx);
+      if (res instanceof Promise) await res;
+
+    } else {
+      log("❌ HybridWorld found but no callable entry point");
+      log("HybridWorld keys:", Object.keys(HW));
+      log("✅ Staying in cube test mode.");
+      return;
+    }
+
+    // Success: remove test visuals
     scene.remove(testRoot);
     testRoot.clear();
 
-    log("🌍 HybridWorld is now active");
+    log("🌍 HybridWorld is now ACTIVE ✅");
+
   } catch (e) {
     log("❌ HybridWorld boot failed:");
     log(e?.message || String(e));
     log(e?.stack || "");
-    log("✅ Staying in cube test mode so you are never blind.");
+    log("✅ Staying in cube test mode.");
   }
 })();

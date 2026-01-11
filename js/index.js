@@ -1,7 +1,12 @@
-// /js/index.js — Scarlett VR Poker Boot v1.1 (FULL)
-// ✅ Always loads Three.js module
-// ✅ Boots HybridWorld
-// ✅ Adds Emergency Android controls (D-pad move + lookpad drag) that bypass TouchControls
+// /js/index.js — Scarlett VR Poker Boot v2.0 (FULL)
+// ✅ Works with the new index.html top dock + debug drawer + COPY LOG
+// ✅ Writes logs into #overlay (the diagnostics panel)
+// ✅ Creates renderer + PlayerRig + Camera
+// ✅ Adds VRButton (Quest + WebXR)
+// ✅ Imports and runs HybridWorld from /js/world.js
+// ✅ Exposes window.SCARLETT actions for UI buttons:
+//    - gotoTable(), respawnSafe(), rebuild(), setSafeMode(true/false), copyLog()
+// ✅ Android-safe: disables touch gestures stealing input
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -10,26 +15,51 @@ import { HybridWorld } from "./world.js";
 const BUILD_STAMP = Date.now();
 const overlay = document.getElementById("overlay");
 
-function logLine(msg, cls="muted") {
-  const div = document.createElement("div");
-  div.className = "row " + cls;
-  div.textContent = msg;
-  overlay?.appendChild(div);
-  if (overlay) overlay.scrollTop = overlay.scrollHeight;
+// --------------------
+// Logging utilities
+// --------------------
+function logLine(msg, cls = "muted") {
+  try {
+    if (overlay) {
+      const div = document.createElement("div");
+      div.className = `row ${cls}`;
+      div.textContent = msg;
+      overlay.appendChild(div);
+      overlay.scrollTop = overlay.scrollHeight;
+    }
+  } catch (e) {}
   console.log(msg);
 }
-const ok = (m)=>logLine("✅ "+m,"ok");
-const warn=(m)=>logLine("⚠️ "+m,"warn");
-const bad =(m)=>logLine("❌ "+m,"bad");
+const ok = (m) => logLine(`✅ ${m}`, "ok");
+const warn = (m) => logLine(`⚠️ ${m}`, "warn");
+const bad = (m) => logLine(`❌ ${m}`, "bad");
 
-function showBootHeader() {
+function bootHeader() {
   logLine(`BUILD_STAMP: ${BUILD_STAMP}`);
+  logLine(`TIME: ${new Date().toLocaleString()}`);
   logLine(`HREF: ${location.href}`);
   logLine(`UA: ${navigator.userAgent}`);
   logLine(`NAVIGATOR_XR: ${!!navigator.xr}`);
-  logLine(`THREE: ${THREE ? "module ok" : "missing"}`);
+  logLine(`THREE: module ok`);
 }
 
+// --------------------
+// Anti-gesture (Android)
+// --------------------
+function lockTouchGestures() {
+  try {
+    document.documentElement.style.touchAction = "none";
+    document.body.style.touchAction = "none";
+    window.addEventListener("contextmenu", (e) => e.preventDefault(), { passive: false });
+    window.addEventListener("gesturestart", (e) => e.preventDefault(), { passive: false });
+    window.addEventListener("gesturechange", (e) => e.preventDefault(), { passive: false });
+    window.addEventListener("gestureend", (e) => e.preventDefault(), { passive: false });
+  } catch (e) {}
+}
+
+// --------------------
+// THREE boot
+// --------------------
 function createRenderer() {
   logLine("WEBGL_CANVAS: creating renderer…");
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -42,6 +72,7 @@ function createRenderer() {
 
   window.addEventListener("resize", () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
+    // camera aspect updated below in boot() where camera exists
   });
 
   ok("Renderer created");
@@ -52,16 +83,16 @@ function makeRig() {
   const player = new THREE.Group();
   player.name = "PlayerRig";
 
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 500);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 600);
   camera.position.set(0, 1.65, 0);
   camera.name = "MainCamera";
-  player.add(camera);
 
+  player.add(camera);
   ok("PlayerRig + Camera created");
   return { player, camera };
 }
 
-function makeControllers(renderer) {
+function makeXRHands(renderer) {
   const handLeft = renderer.xr.getHand(0);
   const handRight = renderer.xr.getHand(1);
   handLeft.name = "HandLeft";
@@ -70,128 +101,145 @@ function makeControllers(renderer) {
   return { handLeft, handRight };
 }
 
-// ----------------------------------------------------
-// ✅ Emergency controls (works even if touch_controls.js fails)
-// ----------------------------------------------------
-function installEmergencyControls({ player, camera }) {
-  const state = {
-    fwd: 0, str: 0,
-    yaw: player.rotation.y || 0,
-    pitch: camera.rotation.x || 0,
-    looking: false,
-    lastX: 0,
-    lastY: 0
-  };
-
-  const dpad = document.getElementById("dpad");
-  const lookpad = document.getElementById("lookpad");
-
-  if (!dpad || !lookpad) {
-    warn("Emergency controls missing DOM nodes");
-    return { update(){} };
-  }
-
-  const setDir = (dir, down) => {
-    // forward/back
-    if (dir === "up") state.fwd = down ? 1 : 0;
-    if (dir === "down") state.fwd = down ? -1 : 0;
-    // strafe
-    if (dir === "left") state.str = down ? -1 : 0;
-    if (dir === "right") state.str = down ? 1 : 0;
-    // center = stop
-    if (dir === "mid" && down) { state.fwd = 0; state.str = 0; }
-  };
-
-  const downHandler = (e) => {
-    const btn = e.target.closest?.(".btn");
-    if (!btn) return;
-    e.preventDefault(); e.stopPropagation();
-    setDir(btn.dataset.dir, true);
-  };
-
-  const upHandler = (e) => {
-    const btn = e.target.closest?.(".btn");
-    if (!btn) return;
-    e.preventDefault(); e.stopPropagation();
-    setDir(btn.dataset.dir, false);
-  };
-
-  dpad.addEventListener("pointerdown", downHandler, { passive:false });
-  dpad.addEventListener("pointerup", upHandler, { passive:false });
-  dpad.addEventListener("pointercancel", upHandler, { passive:false });
-  dpad.addEventListener("pointerleave", (e)=>{ /* stop movement if finger slides off */
-    state.fwd = 0; state.str = 0;
-  }, { passive:false });
-
-  // look pad drag
-  lookpad.addEventListener("pointerdown", (e) => {
-    e.preventDefault(); e.stopPropagation();
-    state.looking = true;
-    state.lastX = e.clientX;
-    state.lastY = e.clientY;
-    lookpad.setPointerCapture?.(e.pointerId);
-  }, { passive:false });
-
-  window.addEventListener("pointermove", (e) => {
-    if (!state.looking) return;
-    e.preventDefault();
-
-    const dx = e.clientX - state.lastX;
-    const dy = e.clientY - state.lastY;
-    state.lastX = e.clientX;
-    state.lastY = e.clientY;
-
-    state.yaw -= dx * 0.003;
-    state.pitch -= dy * 0.003;
-    state.pitch = Math.max(-1.2, Math.min(1.2, state.pitch));
-
-    player.rotation.y = state.yaw;
-    camera.rotation.x = state.pitch;
-  }, { passive:false });
-
-  window.addEventListener("pointerup", () => { state.looking = false; }, { passive:false });
-  window.addEventListener("pointercancel", () => { state.looking = false; }, { passive:false });
-
-  ok("Emergency controls installed ✅");
-
-  return {
-    update(dt) {
-      // do not fight XR
-      // (in XR, movement should be teleport/roomscale)
-      // but leave it harmless
-      if (!dt) dt = 0.016;
-      if (state.fwd === 0 && state.str === 0) return;
-
-      const speed = 2.6 * dt;
-
-      const dir = new THREE.Vector3();
-      player.getWorldDirection(dir);
-      dir.y = 0; dir.normalize();
-
-      const right = new THREE.Vector3(dir.z, 0, -dir.x);
-      player.position.addScaledVector(dir, state.fwd * speed);
-      player.position.addScaledVector(right, state.str * speed);
-    }
-  };
-}
-
-async function boot() {
-  overlay.innerHTML = "";
-  showBootHeader();
-
-  const renderer = createRenderer();
-  const { player, camera } = makeRig();
-  const controllers = makeControllers(renderer);
-
+function attachVRButton(renderer) {
   try {
-    document.body.appendChild(VRButton.createButton(renderer));
+    const btn = VRButton.createButton(renderer);
+    btn.id = btn.id || "VRButton";
+    document.body.appendChild(btn);
     ok("VRButton appended");
   } catch (e) {
     warn("VRButton failed (non-fatal): " + (e?.message || e));
   }
+}
 
-  // Emergency movement
-  const emergency = installEmergencyControls({ player, camera });
+// --------------------
+// Clipboard helpers
+// --------------------
+async function copyLogToClipboard() {
+  const text = overlay?.innerText || "";
+  if (!text.trim()) {
+    warn("Nothing to copy");
+    return { ok: false, reason: "empty" };
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    ok("Copied log to clipboard");
+    return { ok: true };
+  } catch (e) {
+    // Fallback: select the log so user can manually copy
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(overlay);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      warn("Clipboard blocked — selected text (use Copy)");
+      return { ok: false, reason: "clipboard-blocked" };
+    } catch (e2) {
+      bad("Copy failed");
+      return { ok: false, reason: "copy-failed" };
+    }
+  }
+}
+
+// --------------------
+// Global controls for UI buttons
+// --------------------
+function installGlobalScarlettAPI(ctx) {
+  const { renderer, player, camera } = ctx;
+
+  window.SCARLETT = window.SCARLETT || {};
+
+  window.SCARLETT.copyLog = copyLogToClipboard;
+
+  window.SCARLETT.gotoTable = () => {
+    try {
+      player.position.set(0, player.position.y, 4.2);
+      player.rotation.set(0, Math.PI, 0);
+      ok("gotoTable()");
+    } catch (e) {
+      bad("gotoTable() failed: " + (e?.message || e));
+    }
+  };
+
+  // Prefer world.js safe spawn if present; fallback to hard lobby
+  window.SCARLETT.respawnSafe = () => {
+    try {
+      // If HybridWorld exposes respawnSafe in your build later, call it.
+      if (typeof HybridWorld?.respawnSafe === "function") {
+        HybridWorld.respawnSafe();
+        ok("respawnSafe() via HybridWorld");
+        return;
+      }
+    } catch (e) {}
+
+    try {
+      player.position.set(0, 0, 26);
+      camera.position.set(0, 1.65, 0);
+      ok("respawnSafe() fallback to lobby");
+    } catch (e) {
+      bad("respawnSafe() failed: " + (e?.message || e));
+    }
+  };
+
+  window.SCARLETT.setSafeMode = async (v = true) => {
+    try {
+      ok(`SAFE MODE requested: ${!!v}`);
+      // If your HybridWorld reads OPTS.safeMode, rebuild with it:
+      await window.SCARLETT.rebuild({ safeMode: !!v });
+    } catch (e) {
+      bad("setSafeMode failed: " + (e?.message || e));
+    }
+  };
+
+  window.SCARLETT.rebuild = async (opts = {}) => {
+    try {
+      ok("Rebuild requested…");
+      await HybridWorld.build({
+        THREE,
+        renderer,
+        camera,
+        player,
+        controllers: ctx.controllers,
+        log: (m) => logLine(String(m)),
+        OPTS: {
+          nonvrControls: true,
+          allowTeleport: true,
+          allowBots: true,
+          allowPoker: true,
+          safeMode: !!opts.safeMode
+        }
+      });
+      ok("Rebuild done ✅");
+    } catch (e) {
+      bad("Rebuild failed: " + (e?.message || e));
+      console.error(e);
+    }
+  };
+}
+
+// --------------------
+// Boot sequence
+// --------------------
+async function boot() {
+  lockTouchGestures();
+  overlay && (overlay.innerHTML = "");
+  bootHeader();
+
+  const renderer = createRenderer();
+  const { player, camera } = makeRig();
+  const controllers = makeXRHands(renderer);
+
+  attachVRButton(renderer);
+
+  // Keep camera aspect in sync
+  window.addEventListener("resize", () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+  });
+
+  const ctx = { renderer, player, camera, controllers };
+  installGlobalScarlettAPI(ctx);
 
   // Build world
   try {
@@ -207,7 +255,7 @@ async function boot() {
         allowTeleport: true,
         allowBots: true,
         allowPoker: true,
-        allowStream: false
+        safeMode: false
       }
     });
     ok("HybridWorld.build ✅");
@@ -216,9 +264,9 @@ async function boot() {
     console.error(e);
   }
 
+  // Animation loop
   renderer.setAnimationLoop(() => {
     try {
-      emergency.update(1/60);
       HybridWorld.frame({ renderer, camera });
     } catch (e) {
       bad("frame crash: " + (e?.message || e));
@@ -230,4 +278,8 @@ async function boot() {
   ok("Animation loop running");
 }
 
-boot().catch(e => bad("BOOT fatal: " + (e?.message || e)));
+// Go
+boot().catch((e) => {
+  bad("BOOT fatal: " + (e?.message || e));
+  console.error(e);
+});

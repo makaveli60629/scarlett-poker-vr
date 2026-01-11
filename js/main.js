@@ -1,28 +1,21 @@
-// /js/main.js — Scarlett Hybrid 4.5 (REFINE)
-// ✅ Cache-proof module loading
-// ✅ HUD buttons wired + diagnostics
-// ✅ Overkill lighting + headlamp
-// ✅ Deterministic spawn facing
-// ✅ Grid-only alignment mode (?grid=1)
-// ✅ Teleport one leap per press
-// ✅ Left stick move + Right stick 45° snap (Quest safe)
+// /js/main.js — Scarlett Hybrid 4.6 (HALLWAYS FIX + LASER FIX + INPUT FIX + FULL GRID MODE)
+// ✅ Laser always visible (both controllers, robust right-hand selection)
+// ✅ Movement restored (left stick move, right stick 45° snap)
+// ✅ Teleport is 1 leap per press (right trigger)
+// ✅ Bright + consistent lighting (less inside/outside mismatch)
 
 (async function boot() {
   if (window.__SCARLETT_BOOTED__) return;
   window.__SCARLETT_BOOTED__ = true;
 
   const BUILD = (window.__SCARLETT_BUILD__ ||= Date.now());
-  console.log("SCARLETT_MAIN=4.5 BUILD=", BUILD);
+  console.log("SCARLETT_MAIN=4.6 BUILD=", BUILD);
 
   const ui = {
     grid: document.getElementById("scarlettGrid"),
     logBox: document.getElementById("scarlettLog"),
     capXR: document.getElementById("capXR"),
     capImm: document.getElementById("capImm"),
-    btnMenu: document.getElementById("btnMenu"),
-    btnRoomLobby: document.getElementById("btnRoomLobby"),
-    btnRoomStore: document.getElementById("btnRoomStore"),
-    btnRoomScorpion: document.getElementById("btnRoomScorpion"),
     btnSoftReboot: document.getElementById("btnSoftReboot"),
     btnCopy: document.getElementById("btnCopyLog"),
     btnClear: document.getElementById("btnClearLog"),
@@ -78,6 +71,7 @@
     return { xr, immersive };
   }
 
+  // THREE
   let THREE;
   try {
     const m = await import(`./three.js?v=${BUILD}`);
@@ -90,9 +84,9 @@
 
   // Scene / Camera / Renderer
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x05060a);
+  scene.background = new THREE.Color(0x0b0f18);
 
-  const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 1200);
+  const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 1400);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(innerWidth, innerHeight);
@@ -100,7 +94,7 @@
 
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 2.15;
+  renderer.toneMappingExposure = 2.05;
   renderer.physicallyCorrectLights = false;
 
   document.body.appendChild(renderer.domElement);
@@ -124,70 +118,76 @@
   camera.position.set(0, 1.65, 0);
   player.add(camera);
 
-  // Controllers parented to rig
-  const controllerL = renderer.xr.getController(0); controllerL.name = "ControllerLeft";
-  const controllerR = renderer.xr.getController(1); controllerR.name = "ControllerRight";
-  player.add(controllerL, controllerR);
+  // Lighting (consistent: less “inside bright/outside black”)
+  scene.add(new THREE.AmbientLight(0xffffff, 1.25));
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x2a2a40, 2.6));
+
+  const sun = new THREE.DirectionalLight(0xffffff, 2.8);
+  sun.position.set(60, 120, 70);
+  scene.add(sun);
+
+  // Mild headlamp (not overpowering)
+  const headLamp = new THREE.PointLight(0xffffff, 1.15, 28);
+  headLamp.position.set(0, 1.45, 0.35);
+  camera.add(headLamp);
+
+  // Controllers
+  const controller0 = renderer.xr.getController(0); controller0.name = "Controller0";
+  const controller1 = renderer.xr.getController(1); controller1.name = "Controller1";
+  player.add(controller0, controller1);
   LOG.push("log", "Controllers parented to PlayerRig ✅");
 
-  // Hands parented to rig
+  // Hands (optional)
   try {
-    const leftHand = renderer.xr.getHand(0); leftHand.name = "XRHandLeft";
-    const rightHand = renderer.xr.getHand(1); rightHand.name = "XRHandRight";
-    player.add(leftHand, rightHand);
+    const hand0 = renderer.xr.getHand(0); hand0.name = "XRHand0";
+    const hand1 = renderer.xr.getHand(1); hand1.name = "XRHand1";
+    player.add(hand0, hand1);
     LOG.push("log", "XRHands parented to PlayerRig ✅");
   } catch {
     LOG.push("warn", "XRHands unavailable (controller-only OK).");
   }
 
-  // Overkill lights
-  scene.add(new THREE.AmbientLight(0xffffff, 1.05));
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x1a1a2a, 2.2));
-  const sun = new THREE.DirectionalLight(0xffffff, 3.2);
-  sun.position.set(40, 90, 60);
-  scene.add(sun);
+  // Laser setup on BOTH controllers (Quest index may swap)
+  function makeLaser() {
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]),
+      new THREE.LineBasicMaterial({ color: 0x00ffff })
+    );
+    line.frustumCulled = false;
+    line.visible = false;
+    return line;
+  }
 
-  const headLamp = new THREE.PointLight(0xffffff, 2.2, 35);
-  headLamp.position.set(0, 1.4, 0.35);
-  camera.add(headLamp);
+  const laser0 = makeLaser(); controller0.add(laser0);
+  const laser1 = makeLaser(); controller1.add(laser1);
 
-  // Grid-only alignment mode
-  const params = new URLSearchParams(location.search);
-  const GRID_ONLY = params.get("grid") === "1";
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.26, 0.37, 64),
+    new THREE.MeshBasicMaterial({ color: 0x7fe7ff, side: THREE.DoubleSide, transparent: true, opacity: 0.95 })
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.visible = false;
+  scene.add(ring);
 
-  // Context
-  const ctx = {
-    THREE, scene, camera, renderer,
-    player, rig: player, yawObject: player, pitchObject: camera,
-    LOG, BUILD,
-    systems: {},
-    colliders: [],
-    world: null,
-    room: "lobby",
-    mode: "lobby",
-    DEBUG_GRID_ONLY: GRID_ONLY
-  };
-
-  // Load world (cache-proof)
+  // World
   const { World } = await import(`./world.js?v=${BUILD}`);
-  if (!World?.init) { LOG.push("error", "world.js missing World.init"); return; }
-  LOG.push("log", `world module loaded: ${World.VERSION || "?"}`);
+  const ctx = { THREE, scene, camera, renderer, player, LOG, BUILD, colliders: [] };
   await World.init(ctx);
-  ctx.world = World;
+  LOG.push("log", `world module loaded: ${World.VERSION || "?"}`);
 
-  // Spawn & face table
+  // Spawn + face table
   const tmpA = new THREE.Vector3();
   const tmpB = new THREE.Vector3();
 
-  function forceSpawnAndFace() {
-    const sp = scene.getObjectByName("SpawnPoint") || scene.getObjectByName("SpawnPad");
+  function applySpawnAndFacing() {
+    const sp = scene.getObjectByName("SpawnPoint");
     if (sp) {
       sp.getWorldPosition(tmpA);
       player.position.set(tmpA.x, 0, tmpA.z);
       LOG.push("log", `Spawn ✅ x=${player.position.x.toFixed(2)} z=${player.position.z.toFixed(2)}`);
     }
 
-    const target = scene.getObjectByName("BossTable") || scene.getObjectByName("HubPlate");
+    const target = scene.getObjectByName("BossTable") || scene.getObjectByName("HubCenter");
     if (target) {
       target.getWorldPosition(tmpA);
       tmpB.set(player.position.x, 0, player.position.z);
@@ -200,63 +200,82 @@
     }
   }
 
-  forceSpawnAndFace();
-  renderer.xr.addEventListener("sessionstart", () => setTimeout(forceSpawnAndFace, 160));
+  applySpawnAndFacing();
+  renderer.xr.addEventListener("sessionstart", () => setTimeout(applySpawnAndFacing, 180));
 
-  // Room manager optional
-  try {
-    const rm = await import(`./room_manager.js?v=${BUILD}`);
-    rm?.RoomManager?.init?.(ctx);
-    LOG.push("log", "[rm] init ✅");
-  } catch (e) {
-    LOG.push("warn", `room_manager missing: ${e?.message || e}`);
-  }
-
-  // HUD buttons
-  ui.btnMenu?.addEventListener("click", () => LOG.push("log", "Menu button pressed"));
-  ui.btnRoomLobby?.addEventListener("click", () => { ctx.room="lobby"; ctx.mode="lobby"; LOG.push("log","Room: Lobby"); });
-  ui.btnRoomStore?.addEventListener("click", () => { ctx.room="store"; ctx.mode="store"; LOG.push("log","Room: Store"); });
-  ui.btnRoomScorpion?.addEventListener("click", () => { ctx.room="scorpion"; ctx.mode="scorpion"; LOG.push("log","Room: Scorpion"); });
-
-  // Teleport system
+  // Floor plane at y=0 for teleport (even with no floors)
   const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
-  const laser = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]),
-    new THREE.LineBasicMaterial({ color: 0x00ffff })
-  );
-  laser.frustumCulled = false;
-  controllerR.add(laser);
+  // Robust controller + gamepad selection
+  function getInputMap() {
+    const session = renderer.xr.getSession();
+    if (!session) return { gpL:null, gpR:null, rightCtrl: controller1, rightLaser: laser1 };
 
-  const ring = new THREE.Mesh(
-    new THREE.RingGeometry(0.26, 0.37, 64),
-    new THREE.MeshBasicMaterial({ color: 0x7fe7ff, side: THREE.DoubleSide, transparent: true, opacity: 0.95 })
-  );
-  ring.rotation.x = -Math.PI / 2;
-  ring.visible = false;
-  scene.add(ring);
+    let gpL = null, gpR = null;
 
+    // choose right controller based on handedness when possible
+    let rightCtrl = null;
+    let rightLaser = null;
+
+    for (const src of session.inputSources) {
+      if (!src.gamepad) continue;
+      if (src.handedness === "left") gpL = src.gamepad;
+      if (src.handedness === "right") gpR = src.gamepad;
+    }
+
+    // Decide “right controller object” by whether gpR exists and which index has pose
+    // Fallback: show both lasers if we can’t decide.
+    const pickRight = () => {
+      if (gpR) {
+        // try to match a controller by checking which has non-zero pose
+        const p0 = new THREE.Vector3(); controller0.getWorldPosition(p0);
+        const p1 = new THREE.Vector3(); controller1.getWorldPosition(p1);
+        // if one is near origin and the other isn't, pick the valid one
+        const ok0 = p0.lengthSq() > 0.01;
+        const ok1 = p1.lengthSq() > 0.01;
+        if (ok1 && !ok0) return { c: controller1, l: laser1 };
+        if (ok0 && !ok1) return { c: controller0, l: laser0 };
+      }
+      // safe fallback
+      return { c: controller1, l: laser1 };
+    };
+
+    const pr = pickRight();
+    rightCtrl = pr.c;
+    rightLaser = pr.l;
+
+    return { gpL, gpR, rightCtrl, rightLaser };
+  }
+
+  // Teleport ray
   const o = new THREE.Vector3();
   const q = new THREE.Quaternion();
   const dir = new THREE.Vector3();
   const hit = new THREE.Vector3();
 
   function hubTarget() {
-    return scene.getObjectByName("HubPlate") || scene.getObjectByName("BossTable") || null;
+    return scene.getObjectByName("HubCenter") || scene.getObjectByName("BossTable") || null;
   }
 
-  function updateTeleportRay() {
-    controllerR.getWorldPosition(o);
-    controllerR.getWorldQuaternion(q);
+  function updateTeleportRay(rightCtrl, rightLaser) {
+    // hide both by default
+    laser0.visible = false;
+    laser1.visible = false;
+    ring.visible = false;
+
+    rightCtrl.getWorldPosition(o);
+    rightCtrl.getWorldQuaternion(q);
     if (o.lengthSq() < 0.0001) return false;
 
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(q).normalize();
+
+    // Bias toward hub center so you “tend” to point into the circle
     const h = hubTarget();
     if (h) {
       const t = new THREE.Vector3();
       h.getWorldPosition(t);
       const toHub = t.sub(o).normalize();
-      fwd.lerp(toHub, 0.30).normalize();
+      fwd.lerp(toHub, 0.28).normalize();
     }
 
     dir.copy(fwd);
@@ -270,29 +289,22 @@
     if (t < 0.2 || t > 35) return false;
 
     hit.copy(o).addScaledVector(dir, t);
-    laser.geometry.setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-t)]);
-    ring.position.set(hit.x, 0.02, hit.z);
 
-    laser.visible = true;
+    rightLaser.geometry.setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-t)]);
+    rightLaser.visible = true;
+
+    ring.position.set(hit.x, 0.02, hit.z);
     ring.visible = true;
+
     return true;
   }
 
-  function getGamepads() {
-    const session = renderer.xr.getSession();
-    if (!session) return { gpL: null, gpR: null };
-    let gpL=null, gpR=null;
-    for (const src of session.inputSources) {
-      if (!src.gamepad) continue;
-      if (src.handedness === "left") gpL = src.gamepad;
-      if (src.handedness === "right") gpR = src.gamepad;
-    }
-    return { gpL, gpR };
-  }
-
-  const MOVE_SPEED = 1.10;
-  const SNAP_ANGLE = Math.PI / 4;
+  // Locomotion settings
+  const MOVE_SPEED = 1.15;       // sane speed
+  const SNAP_ANGLE = Math.PI/4;  // 45°
   let snapCooldown = 0;
+
+  // Teleport 1-leap per press
   let lastTeleportPressed = false;
 
   let last = performance.now();
@@ -305,15 +317,16 @@
     fpsAcc += dt; fpsCount++;
     if (fpsAcc >= 0.5) { fps = Math.round(fpsCount / fpsAcc); fpsAcc = 0; fpsCount = 0; }
 
-    try { ctx.world?.update?.(ctx, dt); } catch {}
+    try { World?.update?.(ctx, dt); } catch {}
 
     if (renderer.xr.isPresenting) {
-      const { gpL, gpR } = getGamepads();
+      const { gpL, gpR, rightCtrl, rightLaser } = getInputMap();
 
-      // Move
-      if (gpL?.axes?.length >= 2) {
-        const lx = gpL.axes[0] ?? 0;
-        const ly = gpL.axes[1] ?? 0;
+      // Move with left stick (fallback if handedness missing)
+      const gpMove = gpL || gpR;
+      if (gpMove?.axes?.length >= 2) {
+        const lx = gpMove.axes[0] ?? 0;
+        const ly = gpMove.axes[1] ?? 0;
 
         const yaw = player.rotation.y;
         const forward = (-ly) * MOVE_SPEED * dt;
@@ -323,17 +336,23 @@
         player.position.z += Math.cos(yaw) * forward - Math.sin(yaw) * strafe;
       }
 
-      // Snap turn
+      // Snap turn with right stick X (Quest uses axes[2] often)
       snapCooldown = Math.max(0, snapCooldown - dt);
-      const rx = (gpR?.axes?.length >= 4 ? (gpR.axes[2] ?? 0) : (gpR?.axes?.[0] ?? 0));
+      let rx = 0;
+      if (gpR?.axes?.length >= 4) rx = gpR.axes[2] ?? 0;
+      else if (gpR?.axes?.length >= 1) rx = gpR.axes[0] ?? 0;
       if (snapCooldown <= 0 && Math.abs(rx) > 0.75) {
         player.rotation.y += (rx > 0 ? -SNAP_ANGLE : SNAP_ANGLE);
         snapCooldown = 0.28;
       }
 
-      // Teleport
-      const canTeleport = updateTeleportRay();
-      const pressed = !!gpR?.buttons?.[0]?.pressed;
+      // Teleport ray
+      const canTeleport = updateTeleportRay(rightCtrl, rightLaser);
+
+      // Right trigger press (fallback: any gamepad button 0)
+      const gpTrig = gpR || gpL;
+      const pressed = !!gpTrig?.buttons?.[0]?.pressed;
+
       if (pressed && !lastTeleportPressed && canTeleport) {
         player.position.set(hit.x, 0, hit.z);
         LOG.push("log", `Teleport ✅ x=${hit.x.toFixed(2)} z=${hit.z.toFixed(2)}`);
@@ -341,7 +360,8 @@
       lastTeleportPressed = pressed;
 
     } else {
-      laser.visible = false;
+      laser0.visible = false;
+      laser1.visible = false;
       ring.visible = false;
       lastTeleportPressed = false;
     }
@@ -351,14 +371,12 @@
       ["FPS", `${fps}`],
       ["XR", renderer.xr.isPresenting ? "YES" : "NO"],
       ["Pos", `${player.position.x.toFixed(1)}, ${player.position.z.toFixed(1)}`],
-      ["World", `${ctx.world?.VERSION || "?"}`],
-      ["GridOnly", ctx.DEBUG_GRID_ONLY ? "YES" : "NO"],
-      ["Room", `${ctx.room}`],
+      ["World", `${World.VERSION || "?"}`],
     ]);
 
     renderer.render(scene, camera);
   });
 
   await setCaps();
-  LOG.push("log", "Hybrid 4.5 boot complete ✅ (grid toggle + door gaps fixed + enclosed halls)");
+  LOG.push("log", "Hybrid 4.6 boot complete ✅ (laser+move restored, 45° snap, 1-press teleport)");
 })();

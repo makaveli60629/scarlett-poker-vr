@@ -1,314 +1,243 @@
-// /js/index.js — Scarlett Runtime MASTER (Clean Build)
-// ✅ No debug grids, no probe helpers, no pink square, no green ball
-// ✅ Keeps controller laser line
-// ✅ Android dual-stick locomotion (touch) + desktop WASD
-// ✅ VR-ready with VRButton
-// ✅ Calls world.build() and world.frame()
-import { World } from "./world.js?v=4_8_3_radial_fix";
-import * as THREE from "three";
+// /js/index.js — Scarlett VR Poker Runtime (FULL) Update 4.8.4
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { VRButton } from "./VRButton.js";
+import { World } from "./world.js";
 
-const log = (...a) => console.log(...a);
+const now = () => new Date().toTimeString().slice(0, 8);
 
-const STATE = {
-  THREE,
-  scene: null,
-  renderer: null,
-  camera: null,
-  player: null,
-  controllers: [],
-  clock: new THREE.Clock(),
+function uiLog(msg) {
+  console.log(msg);
+  const el = document.getElementById("log");
+  if (!el) return;
+  el.textContent += `${msg}\n`;
+  el.scrollTop = el.scrollHeight;
+}
 
-  // movement
-  move: { x: 0, z: 0, yaw: 0 },
-  speed: 2.1,          // meters/sec
-  turnSpeed: 2.0,      // rad/sec
+function logTag(tag, msg) {
+  uiLog(`[${now()}] [${tag}] ${msg}`);
+}
 
-  // android sticks
-  sticks: { left: null, right: null },
-  keys: new Set(),
+function safe(tag, fn) {
+  try { return fn(); }
+  catch (e) {
+    console.error(e);
+    logTag(tag, `ERROR ❌ ${e?.message || e}`);
+    return null;
+  }
+}
 
-  // rays
-  rayLines: [],
+const BUILD = "4.8.4 (HALLWAYS + spawn safe)";
 
-  // config
-  NO_DEBUG_VISUALS: true
-};
+logTag("index", "runtime start ✅");
 
-// -----------------------------
-// Helpers
-// -----------------------------
-function makeRenderer() {
-  const r = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-  r.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+// Renderer
+const renderer = safe("index", () => {
+  const r = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  r.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
   r.setSize(window.innerWidth, window.innerHeight);
-  r.outputColorSpace = THREE.SRGBColorSpace;
-
   r.xr.enabled = true;
   document.body.appendChild(r.domElement);
-
-  document.body.appendChild(VRButton.createButton(r));
-  log("[index] VRButton appended ✅");
   return r;
-}
+});
 
-function makeScene() {
-  const s = new THREE.Scene();
-  // ✅ Fix: no blue void
-  s.background = new THREE.Color(0x05060a);
-  s.fog = new THREE.Fog(0x05060a, 10, 55);
-  return s;
-}
+// Scene + camera
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05060a);
 
-function makePlayerRig(camera) {
-  const player = new THREE.Group();
-  player.name = "PlayerRig";
-  player.add(camera);
-  return player;
-}
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 500);
+camera.position.set(0, 1.6, 6);
 
-function makeCamera() {
-  const cam = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.02, 200);
-  cam.position.set(0, 1.65, 0);
-  return cam;
-}
+// Player rig
+const player = new THREE.Group();
+player.name = "PlayerRig";
+player.position.set(0, 0, 0);
+player.add(camera);
+scene.add(player);
 
-// -----------------------------
-// Controller Rays (laser only, NO markers)
-// -----------------------------
-function installControllerRays(renderer, controllers, scene) {
-  const makeRayLine = () => {
-    const geo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, -1.2)
-    ]);
-    const mat = new THREE.LineBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.9 });
-    const line = new THREE.Line(geo, mat);
-    line.name = "ControllerRayLine";
-    return line;
-  };
+// Lights (simple + safe)
+safe("index", () => {
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.9);
+  scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.85);
+  dir.position.set(6, 12, 4);
+  scene.add(dir);
+});
 
+// VR Button
+safe("index", () => {
+  document.body.appendChild(VRButton.createButton(renderer));
+  logTag("index", "VRButton appended ✅");
+});
+
+// Controllers (laser-only)
+const controllers = [];
+safe("index", () => {
   for (let i = 0; i < 2; i++) {
     const c = renderer.xr.getController(i);
-    c.name = `XRController_${i}`;
-    scene.add(c);
-    controllers[i] = c;
+    c.name = `controller_${i}`;
+    player.add(c);
+    controllers.push(c);
 
-    // Laser line only (no spheres, no quads, no debug markers)
-    const line = makeRayLine();
+    // laser line (visual)
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 0, -1)
+    ]);
+    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x7fe7ff }));
+    line.name = "laser";
+    line.scale.z = 10;
     c.add(line);
-    STATE.rayLines[i] = line;
   }
+  logTag("index", "controller rays installed ✅ (laser only)");
+});
 
-  log("[index] controller rays installed ✅ (laser only)");
-}
-
-// -----------------------------
-// Desktop WASD + Arrow keys
-// -----------------------------
-function installKeyboard() {
-  window.addEventListener("keydown", (e) => STATE.keys.add(e.code));
-  window.addEventListener("keyup", (e) => STATE.keys.delete(e.code));
-}
-
-// -----------------------------
 // Android dual-stick (touch)
-// Left stick: move (x,z)
-// Right stick: turn yaw
-// -----------------------------
-function installAndroidDualStick() {
-  const isTouch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
-  if (!isTouch) return;
+const touch = {
+  left: { id: null, x0: 0, y0: 0, x: 0, y: 0, active: false },
+  right:{ id: null, x0: 0, y0: 0, x: 0, y: 0, active: false }
+};
 
-  const mkStick = (side) => {
-    const root = document.createElement("div");
-    root.style.position = "fixed";
-    root.style.bottom = "18px";
-    root.style.width = "160px";
-    root.style.height = "160px";
-    root.style.borderRadius = "999px";
-    root.style.border = "1px solid rgba(255,255,255,0.18)";
-    root.style.background = "rgba(10,12,18,0.25)";
-    root.style.backdropFilter = "blur(6px)";
-    root.style.touchAction = "none";
-    root.style.zIndex = "99999";
-    root.style.userSelect = "none";
-    root.style.webkitUserSelect = "none";
+function setupAndroidDualStick() {
+  const leftPad = document.getElementById("stickL");
+  const rightPad = document.getElementById("stickR");
+  if (!leftPad || !rightPad) return;
 
-    if (side === "left") root.style.left = "18px";
-    if (side === "right") root.style.right = "18px";
-
-    const nub = document.createElement("div");
-    nub.style.position = "absolute";
-    nub.style.left = "50%";
-    nub.style.top = "50%";
-    nub.style.transform = "translate(-50%,-50%)";
-    nub.style.width = "64px";
-    nub.style.height = "64px";
-    nub.style.borderRadius = "999px";
-    nub.style.background = "rgba(127,231,255,0.22)";
-    nub.style.border = "1px solid rgba(127,231,255,0.45)";
-    nub.style.boxShadow = "0 0 18px rgba(127,231,255,0.25)";
-    root.appendChild(nub);
-
-    document.body.appendChild(root);
-
-    const stick = {
-      side,
-      root,
-      nub,
-      active: false,
-      id: -1,
-      cx: 0,
-      cy: 0,
-      x: 0,
-      y: 0
+  const bind = (el, side) => {
+    const s = touch[side];
+    const rectOf = () => el.getBoundingClientRect();
+    const norm = (cx, cy) => {
+      const r = rectOf();
+      const x = (cx - (r.left + r.width * 0.5)) / (r.width * 0.5);
+      const y = (cy - (r.top  + r.height * 0.5)) / (r.height * 0.5);
+      s.x = Math.max(-1, Math.min(1, x));
+      s.y = Math.max(-1, Math.min(1, y));
     };
 
-    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    el.addEventListener("touchstart", (e) => {
+      const t = e.changedTouches[0];
+      s.id = t.identifier;
+      s.active = true;
+      norm(t.clientX, t.clientY);
+      e.preventDefault();
+    }, { passive: false });
 
-    root.addEventListener("pointerdown", (e) => {
-      stick.active = true;
-      stick.id = e.pointerId;
-      const r = root.getBoundingClientRect();
-      stick.cx = r.left + r.width / 2;
-      stick.cy = r.top + r.height / 2;
-      root.setPointerCapture(e.pointerId);
-    });
-
-    root.addEventListener("pointermove", (e) => {
-      if (!stick.active || e.pointerId !== stick.id) return;
-      const dx = e.clientX - stick.cx;
-      const dy = e.clientY - stick.cy;
-      const max = 52;
-
-      const nx = clamp(dx / max, -1, 1);
-      const ny = clamp(dy / max, -1, 1);
-
-      stick.x = nx;
-      stick.y = ny;
-
-      nub.style.transform = `translate(${nx * 42 - 50}%, ${ny * 42 - 50}%)`;
-    });
+    el.addEventListener("touchmove", (e) => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === s.id) {
+          norm(t.clientX, t.clientY);
+          break;
+        }
+      }
+      e.preventDefault();
+    }, { passive: false });
 
     const end = (e) => {
-      if (e.pointerId !== stick.id) return;
-      stick.active = false;
-      stick.id = -1;
-      stick.x = 0;
-      stick.y = 0;
-      nub.style.transform = "translate(-50%,-50%)";
+      for (const t of e.changedTouches) {
+        if (t.identifier === s.id) {
+          s.id = null;
+          s.active = false;
+          s.x = 0; s.y = 0;
+          break;
+        }
+      }
+      e.preventDefault();
     };
 
-    root.addEventListener("pointerup", end);
-    root.addEventListener("pointercancel", end);
-
-    return stick;
+    el.addEventListener("touchend", end, { passive: false });
+    el.addEventListener("touchcancel", end, { passive: false });
   };
 
-  STATE.sticks.left = mkStick("left");
-  STATE.sticks.right = mkStick("right");
-  log("[android] dual-stick ready ✅");
+  bind(leftPad, "left");
+  bind(rightPad, "right");
+  logTag("android", "dual-stick ready ✅");
+}
+setupAndroidDualStick();
+
+// Resize
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// Build world
+logTag("index", "calling world.build() …");
+
+const world = {
+  group: new THREE.Group()
+};
+scene.add(world.group);
+
+safe("world", () => {
+  World.build({ THREE, scene, renderer, camera, player, controllers, world, logTag, BUILD });
+});
+
+// Movement (Android + VR)
+const tmpV = new THREE.Vector3();
+const tmpQ = new THREE.Quaternion();
+const euler = new THREE.Euler(0, 0, 0, "YXZ");
+
+let lastT = performance.now();
+
+function getYawFromCamera() {
+  // Use camera world quaternion; yaw only
+  camera.getWorldQuaternion(tmpQ);
+  euler.setFromQuaternion(tmpQ);
+  return euler.y;
 }
 
-// -----------------------------
-// Movement update (player rig, not camera)
-// -----------------------------
-function updateLocomotion(dt) {
-  // Touch sticks
-  let mx = 0, mz = 0, yaw = 0;
+function tick() {
+  const t = performance.now();
+  const dt = Math.min(0.033, (t - lastT) / 1000);
+  lastT = t;
 
-  if (STATE.sticks.left) {
-    mx += STATE.sticks.left.x;
-    mz += STATE.sticks.left.y;
+  // Android move/look
+  const moveX = touch.left.x;    // strafe
+  const moveZ = -touch.left.y;   // forward
+  const lookX = touch.right.x;   // yaw
+  const lookY = touch.right.y;   // pitch
+
+  // Apply look to camera when NOT in XR, for phone debugging
+  if (!renderer.xr.isPresenting) {
+    const yawSpeed = 1.8;
+    const pitchSpeed = 1.2;
+
+    const yaw = getYawFromCamera() - lookX * yawSpeed * dt;
+    const pitch = THREE.MathUtils.clamp(euler.x - lookY * pitchSpeed * dt, -1.2, 1.2);
+
+    euler.set(pitch, yaw, 0);
+    camera.quaternion.setFromEuler(euler);
   }
-  if (STATE.sticks.right) {
-    yaw += STATE.sticks.right.x; // horizontal turn
-  }
 
-  // Keyboard fallback
-  if (STATE.keys.has("KeyA") || STATE.keys.has("ArrowLeft"))  mx -= 1;
-  if (STATE.keys.has("KeyD") || STATE.keys.has("ArrowRight")) mx += 1;
-  if (STATE.keys.has("KeyW") || STATE.keys.has("ArrowUp"))    mz -= 1;
-  if (STATE.keys.has("KeyS") || STATE.keys.has("ArrowDown"))  mz += 1;
+  // Apply movement in XZ relative to yaw
+  const speed = 3.0;
+  const yaw = getYawFromCamera();
+  const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+  const right = new THREE.Vector3(forward.z, 0, -forward.x);
 
-  // Apply yaw turn
-  STATE.player.rotation.y -= yaw * STATE.turnSpeed * dt;
+  tmpV.set(0, 0, 0);
+  tmpV.addScaledVector(forward, moveZ);
+  tmpV.addScaledVector(right, moveX);
+  if (tmpV.lengthSq() > 1e-6) tmpV.normalize().multiplyScalar(speed * dt);
 
-  // Move relative to player yaw
-  const speed = STATE.speed * dt;
-  const yawAngle = STATE.player.rotation.y;
+  // Keep player on ground plane (y=0), camera at ~1.6
+  player.position.add(tmpV);
+  player.position.y = 0;
 
-  const vx = (mx * Math.cos(yawAngle) - mz * Math.sin(yawAngle)) * speed;
-  const vz = (mx * Math.sin(yawAngle) + mz * Math.cos(yawAngle)) * speed;
+  // Allow world systems update
+  safe("world", () => World.update?.({ dt, t: t / 1000 }));
 
-  // Don't drift if tiny inputs
-  if (Math.abs(vx) > 0.00001 || Math.abs(vz) > 0.00001) {
-    STATE.player.position.x += vx;
-    STATE.player.position.z += vz;
-  }
+  renderer.render(scene, camera);
 }
 
-// -----------------------------
-// Boot
-// -----------------------------
-async function boot() {
-  log("[index] runtime start ✅");
+renderer.setAnimationLoop(tick);
 
-  const scene = makeScene();
-  const camera = makeCamera();
-  const renderer = makeRenderer();
+logTag("index", "world start ✅");
 
-  const player = makePlayerRig(camera);
-  scene.add(player);
-
-  STATE.scene = scene;
-  STATE.camera = camera;
-  STATE.renderer = renderer;
-  STATE.player = player;
-
-  installKeyboard();
-  installAndroidDualStick();
-
-  // ✅ Controllers + lasers (no debug markers)
-  installControllerRays(renderer, STATE.controllers, scene);
-
-  // ✅ Build world
-  log("[index] calling world.build() …");
-  await World.build({
-    THREE,
-    scene,
-    renderer,
-    camera,
-    player,
-    controllers: STATE.controllers,
-    log
-  });
-
-  // Resize
-  window.addEventListener("resize", () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-
-  // Render loop
-  renderer.setAnimationLoop(() => {
-    const dt = STATE.clock.getDelta();
-
-    // Move the player rig if not in XR, OR if you want move in XR too (we DO)
-    updateLocomotion(dt);
-
-    // World frame
-    World.frame({ THREE, scene, renderer, camera, player, controllers: STATE.controllers }, dt);
-
-    renderer.render(scene, camera);
-  });
-
-  log("[index] world start ✅");
-}
-
-boot().catch((e) => {
-  console.error(e);
-  alert("Boot error. Check console.");
+// XR support log (matches your screenshot)
+safe("VRButton", async () => {
+  if (navigator.xr?.isSessionSupported) {
+    const ok = await navigator.xr.isSessionSupported("immersive-vr");
+    logTag("VRButton", `isSessionSupported(immersive-vr) = ${ok}`);
+  }
 });

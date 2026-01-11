@@ -5,7 +5,7 @@
 // ✅ Quest-safe: no XR calls here
 // ✅ In-VR “buttons”: pinch-driven VR panel (LEFT pinch toggle, RIGHT pinch click)
 // ✅ StartAudio() exported on HybridWorld (must be triggered by user gesture)
-
+import { HybridWorld } from "./World.js";
 export const HybridWorld = (() => {
   const state = {
     THREE: null,

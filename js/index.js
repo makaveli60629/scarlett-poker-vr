@@ -1,200 +1,136 @@
-// /js/index.js — Scarlett VR Poker Boot (FULL, PATH-SAFE, CRASH-PROOF)
-// ✅ Always visible: cube + floor + render loop (never blind)
-// ✅ VRButton (Quest compatible)
-// ✅ Imports ./world.js safely
-// ✅ Calls HybridWorld(ctx) as a FUNCTION (NO .init anywhere)
-// ✅ On success: removes testRoot so real world shows
-// ✅ On failure: keeps cube + prints exact error/type/keys
+// /js/index.js — Scarlett VR Poker Boot v1.0 (FULL, Quest + Android safe)
+// Loads Three.js as a module (never "THREE undefined") and boots HybridWorld.
 
-import * as THREE from "three";
-window.THREE = THREE;
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
 
-// ---------------- overlay logger (CRASH-PROOF) ----------------
+// Your world (you created this)
+import { HybridWorld } from "./world.js";
+
+const BUILD_STAMP = Date.now();
 const overlay = document.getElementById("overlay");
-function safeJson(x) { try { return JSON.stringify(x); } catch { return String(x); } }
-function log(...a) {
-  try {
-    console.log(...a);
-    if (!overlay) return;
-    const s = a.map(x => (typeof x === "string" ? x : safeJson(x))).join(" ");
-    overlay.textContent += (overlay.textContent ? "\n" : "") + s;
-  } catch (err) {
-    console.log("[log-failed]", err);
-  }
+
+function logLine(msg, cls="muted") {
+  const div = document.createElement("div");
+  div.className = "row " + cls;
+  div.textContent = msg;
+  overlay?.appendChild(div);
+  if (overlay) overlay.scrollTop = overlay.scrollHeight;
+  console.log(msg);
 }
 
-// ---------------- global error taps ----------------
-window.addEventListener("error", (e) => {
-  log("❌ window.error:", e?.message || String(e));
-});
-window.addEventListener("unhandledrejection", (e) => {
-  const r = e?.reason;
-  log("❌ unhandledrejection:", r?.message || String(r || e));
-});
+function ok(msg){ logLine("✅ " + msg, "ok"); }
+function warn(msg){ logLine("⚠️ " + msg, "warn"); }
+function bad(msg){ logLine("❌ " + msg, "bad"); }
 
-// ---------------- boot header ----------------
-log("boot…");
-log("BOOT index.js ✅");
-log("href=" + location.href);
-log("THREE version=" + THREE.REVISION);
-log("ua=" + navigator.userAgent);
-log("navigator.xr=" + (!!navigator.xr));
+function qs(s){ return document.querySelector(s); }
 
-// Build URLs relative to THIS file (/js/index.js)
-const here = (rel) => new URL(rel, import.meta.url).toString();
+function showBootHeader() {
+  logLine(`BUILD_STAMP: ${BUILD_STAMP}`);
+  logLine(`HREF: ${location.href}`);
+  logLine(`UA: ${navigator.userAgent}`);
+  logLine(`NAVIGATOR_XR: ${!!navigator.xr}`);
+  logLine(`THREE: ${THREE ? "module ok" : "missing"}`);
+}
 
-// ---------------- create renderer ----------------
-log("STARTING VISIBILITY TEST ⏬");
-
-const app = document.getElementById("app") || document.body;
-
-let renderer;
-try {
-  renderer = new THREE.WebGLRenderer({
-    antialias: true,
-    alpha: false,
-    powerPreference: "high-performance",
-  });
+function createRenderer() {
+  logLine("WEBGL_CANVAS: creating renderer…");
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
   renderer.xr.enabled = true;
-  app.appendChild(renderer.domElement);
-  log("renderer created ✅");
-} catch (e) {
-  log("FATAL: renderer failed:", e?.message || String(e));
-  throw e;
+  document.body.appendChild(renderer.domElement);
+
+  window.addEventListener("resize", () => {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  ok("Renderer created");
+  return renderer;
 }
 
-// ---------------- test scene (always visible) ----------------
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x101020);
+function makeRig() {
+  const player = new THREE.Group();
+  player.name = "PlayerRig";
 
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 400);
-camera.position.set(0, 1.6, 2);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 400);
+  camera.position.set(0, 1.65, 0);
+  camera.name = "MainCamera";
+  player.add(camera);
 
-// Keep a “testRoot” group so we can remove it when the real world starts.
-const testRoot = new THREE.Group();
-scene.add(testRoot);
+  ok("PlayerRig + Camera created");
+  return { player, camera };
+}
 
-// lights
-testRoot.add(new THREE.HemisphereLight(0xffffff, 0x303040, 1.2));
-const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-dir.position.set(3, 6, 2);
-testRoot.add(dir);
+function makeControllers(renderer) {
+  // Hands-only on Quest is fine, but keep these placeholders so world.js can parent them
+  const handLeft = renderer.xr.getHand(0);
+  const handRight = renderer.xr.getHand(1);
+  handLeft.name = "HandLeft";
+  handRight.name = "HandRight";
+  ok("XR Hands placeholders ready");
+  return { handLeft, handRight };
+}
 
-// floor
-const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(30, 30),
-  new THREE.MeshStandardMaterial({ color: 0x202028, roughness: 1, metalness: 0 })
-);
-floor.rotation.x = -Math.PI / 2;
-floor.position.y = 0;
-testRoot.add(floor);
+async function boot() {
+  overlay.innerHTML = "";
+  showBootHeader();
 
-// cube
-const cube = new THREE.Mesh(
-  new THREE.BoxGeometry(1, 1, 1),
-  new THREE.MeshStandardMaterial({ color: 0xff2d7a })
-);
-cube.position.set(0, 1.5, -2);
-testRoot.add(cube);
+  // Quick sanity check: index path correctness
+  // (this prevents the old bug where it tried loading from https://makaveli60629.github.io/js/...)
+  if (!location.pathname.includes("scarlett-poker-vr")) {
+    warn("Path note: If files 404, confirm this is the /scarlett-poker-vr/ GitHub Pages URL.");
+  }
 
-// resize
-window.addEventListener("resize", () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+  const renderer = createRenderer();
+  const { player, camera } = makeRig();
+  const controllers = makeControllers(renderer);
 
-// loop
-renderer.setAnimationLoop(() => {
-  cube.rotation.y += 0.01;
-  cube.rotation.x += 0.004;
-  renderer.render(scene, camera);
-});
-log("render loop running ✅");
-
-// ---------------- VRButton ----------------
-(async () => {
+  // VRButton
   try {
-    const { VRButton } = await import("https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js");
     document.body.appendChild(VRButton.createButton(renderer));
-    log("VRButton added ✅");
+    ok("VRButton appended");
   } catch (e) {
-    log("❌ VRButton failed:", e?.message || String(e));
+    warn("VRButton failed (non-fatal): " + (e?.message || e));
   }
-})();
 
-// ---------------- safe import ----------------
-async function safeImport(rel) {
-  const url = here(rel);
+  // Build world
   try {
-    const mod = await import(url);
-    log("import ok:", rel);
-    return mod;
-  } catch (e) {
-    log("❌ import failed:", rel);
-    log(String(e?.stack || e));
-    throw e;
-  }
-}
-
-// ---------------- start HybridWorld (FUNCTION EXPORT ONLY) ----------------
-(async () => {
-  try {
-    const worldMod = await safeImport("./world.js");
-    log("world module keys:", Object.keys(worldMod));
-
-    const HybridWorld = worldMod?.HybridWorld;
-    log("HybridWorld typeof:", typeof HybridWorld);
-
-    if (typeof HybridWorld !== "function") {
-      // Print whatever it is, so we can adapt instantly.
-      if (HybridWorld && typeof HybridWorld === "object") {
-        log("HybridWorld keys:", Object.keys(HybridWorld));
-      }
-      log("❌ HybridWorld is not a function — cannot call it yet.");
-      log("✅ Staying in cube test mode.");
-      return;
-    }
-
-    const BUILD = {
-      stamp: Date.now(),
-      mode: "hybrid",
-      platform: navigator.userAgent,
-    };
-
-    const player = new THREE.Group();
-    player.add(camera);
-    scene.add(player);
-
-    const controllers = { left: null, right: null, hands: [] };
-
-    log("▶ Calling HybridWorld(ctx)");
-
-    const res = HybridWorld({
+    await HybridWorld.build({
       THREE,
-      scene,
       renderer,
       camera,
       player,
       controllers,
-      log,
-      BUILD,
+      log: (m) => logLine(String(m)),
+      OPTS: {
+        nonvrControls: true,
+        allowTeleport: true,
+        allowBots: true,
+        allowPoker: true,
+        allowStream: false // default off for offline Android dev
+      }
     });
-
-    if (res instanceof Promise) await res;
-
-    log("🌍 HybridWorld ACTIVE ✅");
-
-    // remove cube test
-    scene.remove(testRoot);
-    testRoot.clear();
-
+    ok("HybridWorld.build ✅");
   } catch (e) {
-    log("❌ HybridWorld failed:");
-    log(e?.message || String(e));
-    log(e?.stack || "");
-    log("✅ Staying in cube test mode.");
+    bad("HybridWorld.build FAILED: " + (e?.message || e));
+    console.error(e);
   }
-})();
+
+  // Render loop
+  renderer.setAnimationLoop(() => {
+    try {
+      HybridWorld.frame({ renderer, camera });
+    } catch (e) {
+      bad("frame crash: " + (e?.message || e));
+      console.error(e);
+      renderer.setAnimationLoop(null);
+    }
+  });
+
+  ok("Animation loop running");
+}
+
+boot().catch(e => bad("BOOT fatal: " + (e?.message || e)));

@@ -3,7 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
-  <title>Scarlett VR Poker — Hybrid 1.0 (Full Diagnostics)</title>
+  <title>Scarlett VR Poker — Hybrid 1.0 (Full + Streaming)</title>
+
+  <!-- Three.js global (Quest-safe) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r152/three.min.js"></script>
+  <!-- HLS.js for m3u8 playback -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 
   <style>
     :root{
@@ -23,7 +28,6 @@
     html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;color:var(--text)}
     #canvas{position:fixed;inset:0}
 
-    /* HUD frame vibe */
     #hudWrap{
       position:fixed; inset:10px; pointer-events:none;
       border-radius:22px;
@@ -33,7 +37,7 @@
       pointer-events:auto;
       position:fixed;
       left:12px; top:12px;
-      width:min(520px, calc(100vw - 24px));
+      width:min(560px, calc(100vw - 24px));
       max-height: calc(100vh - 24px);
       overflow:auto;
       background:var(--panel);
@@ -54,7 +58,6 @@
       background:rgba(10,12,20,.35);
       white-space:nowrap;
     }
-
     .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
     button{
       border:0;
@@ -124,15 +127,6 @@
       user-select:none;
     }
     input[type="checkbox"]{transform:scale(1.2)}
-    select, input[type="text"]{
-      width:100%;
-      border-radius:12px;
-      border:1px solid rgba(127,231,255,.14);
-      background:rgba(10,12,20,.35);
-      color:var(--text);
-      padding:10px 10px;
-      outline:none;
-    }
     .log{
       margin-top:10px;
       background:#070910;
@@ -155,14 +149,19 @@
   <div id="canvas"></div>
   <div id="hudWrap"></div>
 
+  <!-- Hidden media element for VideoTexture -->
+  <div style="display:none">
+    <video id="streamSource" crossorigin="anonymous" playsinline></video>
+  </div>
+
   <div id="hud">
     <div class="titleRow">
       <div class="brand"><b>Scarlett</b> VR Poker — Hybrid 1.0</div>
-      <div class="pill" id="buildPill">BUILD: full</div>
+      <div class="pill" id="buildPill">BUILD: full+stream</div>
     </div>
 
     <div class="status" id="status">
-      Ready. Tap <b>Enter VR</b>. If VR fails, you’ll see the exact error here and in logs.
+      Ready. Tap <b>Enter VR</b>. Then tap <b>Start Audio</b> once (browser rule).
     </div>
 
     <div class="row">
@@ -171,6 +170,7 @@
       <button id="rebuildBtn" class="secondary">Rebuild World</button>
       <button id="safeModeBtn" class="secondary">Safe Mode</button>
       <button id="hardResetBtn" class="danger">Hard Reset</button>
+      <button id="startAudioBtn" class="secondary">Start Audio</button>
     </div>
 
     <div class="grid">
@@ -207,6 +207,11 @@
           Enable PokerSim if module exists
         </label>
 
+        <label class="opt">
+          <input type="checkbox" id="opt_allowStream" checked />
+          Enable lobby streaming screen + spatial audio
+        </label>
+
         <div class="tiny">Quest-safe: XR features are locked to local-floor + hand-tracking.</div>
       </div>
     </div>
@@ -225,11 +230,11 @@
     </div>
 
     <div class="tiny">
-      Tip: On Quest, open the browser Dev Tools console to see the same logs.
-      If you ever see “VR failed”, the line <b>[xr] requestSession ❌</b> will include the real reason.
+      In VR, HTML buttons won’t click (Quest limitation). Use VR panel:
+      <b>LEFT pinch</b> toggles it, <b>RIGHT pinch</b> clicks.
     </div>
   </div>
 
   <script type="module" src="./index.js"></script>
 </body>
-          </html>
+</html>

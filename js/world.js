@@ -1,15 +1,18 @@
-// /js/world.js — Scarlett VR Poker HybridWorld 1.1 (FULL, Quest-safe, modular)
-// ✅ Exports: { HybridWorld }
+// /js/world.js — Scarlett VR Poker HybridWorld 1.2 (FULL, Quest-safe, Android-dev friendly)
 // ✅ Entry: HybridWorld.build(...), HybridWorld.frame(...)
-// ✅ Never-black: base scene always has lights + floor + landmark
-// ✅ Optional modules (won't crash if missing):
+// ✅ Never-black base scene always
+// ✅ Optional core modules:
 //    ./boss_table.js, ./table_factory.js, ./bots.js, ./poker_sim.js, ./room_manager.js,
 //    ./teleport_machine.js OR ./teleport.js
-// ✅ Added in 1.1 (optional):
-//    ./seating.js, ./chips.js, ./lobby_decor.js, ./spectator.js, ./store_room.js
-// ✅ In-VR control: VRPanel (LEFT pinch toggle, RIGHT pinch click)
-// ✅ Seat click: when VR panel hidden, RIGHT pinch selects seat rings
-// ✅ Demo chips: chips bet into pot every ~2s (until you wire PokerSim events)
+// ✅ Added modules (optional):
+//    ./touch_controls.js, ./lobby_decor.js, ./store_room.js, ./spectator.js, ./seating.js, ./chips.js
+// ✅ Android: left joystick move, right drag look, buttons: DBG/HUD/TABLE/REBUILD/SAFE
+// ✅ Debug overlay minimizable (adds CSS class 'min' / 'hide')
+// ✅ VR: VRPanel left pinch toggle, right pinch click
+// ✅ Seat rings: when VRPanel hidden, right pinch selects seat ring
+// ✅ Demo chips bet loop (until PokerSim events wired)
+
+import { TouchControls } from "./touch_controls.js";
 
 export const HybridWorld = (() => {
   const state = {
@@ -97,13 +100,11 @@ export const HybridWorld = (() => {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x05060a);
 
-    // lights
     scene.add(new THREE.HemisphereLight(0x9fb3ff, 0x0b0d14, 1.0));
     const dir = new THREE.DirectionalLight(0xffffff, 0.85);
     dir.position.set(4, 10, 3);
     scene.add(dir);
 
-    // floor
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(140, 140),
       new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.95, metalness: 0.0 })
@@ -114,7 +115,6 @@ export const HybridWorld = (() => {
     scene.add(floor);
     state.floor = floor;
 
-    // landmark ring
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(1.2, 0.08, 12, 64),
       new THREE.MeshStandardMaterial({ color: 0x7fe7ff, roughness: 0.35, metalness: 0.25 })
@@ -362,7 +362,7 @@ export const HybridWorld = (() => {
         state.OPTS.allowPoker = false;
         state.OPTS.allowTeleport = false;
         state.OPTS.allowStream = false;
-        safeLog("[mode] SAFE MODE ✅ (toggle options then rebuild)");
+        safeLog("[mode] SAFE MODE ✅ (press Rebuild)");
         return;
       }
 
@@ -441,244 +441,15 @@ export const HybridWorld = (() => {
   }
 
   // -----------------------
-  // Optional module build
-  // -----------------------
-  async function buildModules() {
-    const THREE = state.THREE;
-    const root = ensureRoot();
-
-    // Clear root children safely
-    if (root.children.length) {
-      for (let i = root.children.length - 1; i >= 0; i--) {
-        const c = root.children[i];
-        root.remove(c);
-        disposeObject3D(c);
-      }
-    }
-
-    // Core optional imports
-    const bossTableMod    = await tryImport("./boss_table.js");
-    const tableFactoryMod = await tryImport("./table_factory.js");
-    const botsMod         = await tryImport("./bots.js");
-    const pokerSimMod     = await tryImport("./poker_sim.js");
-    const roomMgrMod      = await tryImport("./room_manager.js");
-    const tpMachineMod    = await tryImport("./teleport_machine.js");
-    const tpMod           = await tryImport("./teleport.js");
-
-    // New optional imports (HybridWorld 1.1)
-    const seatingMod      = await tryImport("./seating.js");
-    const chipsMod        = await tryImport("./chips.js");
-    const decorMod        = await tryImport("./lobby_decor.js");
-    const spectatorMod    = await tryImport("./spectator.js");
-    const storeRoomMod    = await tryImport("./store_room.js");
-
-    state.mods = {
-      bossTableMod, tableFactoryMod, botsMod, pokerSimMod, roomMgrMod, tpMachineMod, tpMod,
-      seatingMod, chipsMod, decorMod, spectatorMod, storeRoomMod
-    };
-
-    // STREAM
-    if (optsAllow("allowStream")) {
-      try {
-        Stream.enable(true);
-        Stream.init({ THREE, root });
-      } catch (e) {
-        safeLog("[stream] init FAIL", e?.message || e);
-      }
-    } else {
-      Stream.enable(false);
-      Stream.dispose();
-      safeLog("[stream] skipped by options");
-    }
-
-    // TABLE
-    let tableObj = null;
-
-    const BossTableAPI =
-      bossTableMod?.BossTable ||
-      bossTableMod?.default ||
-      (typeof bossTableMod?.init === "function" ? bossTableMod : null);
-
-    if (BossTableAPI?.init) {
-      try {
-        tableObj = await BossTableAPI.init({ THREE, scene: state.scene, root, log: state.log });
-        safeLog("[table] BossTable.init ✅");
-      } catch (e) {
-        safeLog("[table] BossTable.init FAIL", e?.message || e);
-      }
-    }
-
-    if (!tableObj && tableFactoryMod?.TableFactory?.create) {
-      try {
-        tableObj = await tableFactoryMod.TableFactory.create({ THREE, root, log: state.log });
-        safeLog("[table] TableFactory.create ✅");
-      } catch (e) {
-        safeLog("[table] TableFactory.create FAIL", e?.message || e);
-      }
-    }
-
-    if (!tableObj) {
-      const t = new THREE.Mesh(
-        new THREE.CylinderGeometry(2.25, 2.25, 0.25, 40),
-        new THREE.MeshStandardMaterial({ color: 0x102018, roughness: 0.9 })
-      );
-      t.position.set(0, 1.05, 0);
-      t.name = "PlaceholderTable";
-      root.add(t);
-      safeLog("[table] placeholder ✅");
-      tableObj = t;
-    }
-
-    // Compute table position (for seating/chips/etc)
-    const tablePos = new THREE.Vector3(0,0,0);
-    try { tableObj.getWorldPosition(tablePos); } catch(e) {}
-
-    // DECOR
-    if (decorMod?.LobbyDecor?.init) {
-      try {
-        state.systems.decor = decorMod.LobbyDecor.init({ THREE, root, log: state.log });
-        safeLog("[decor] init ✅");
-      } catch (e) { safeLog("[decor] init FAIL", e?.message || e); }
-    }
-
-    // SPECTATOR RAIL
-    if (spectatorMod?.SpectatorRail?.init) {
-      try {
-        state.systems.spectator = spectatorMod.SpectatorRail.init({ THREE, root, log: state.log });
-        safeLog("[spectator] init ✅");
-      } catch (e) { safeLog("[spectator] init FAIL", e?.message || e); }
-    }
-
-    // STORE ROOM
-    if (storeRoomMod?.StoreRoom?.init) {
-      try {
-        state.systems.store = storeRoomMod.StoreRoom.init({ THREE, root, log: state.log });
-        safeLog("[store] init ✅");
-      } catch (e) { safeLog("[store] init FAIL", e?.message || e); }
-    }
-
-    // SEATING
-    if (seatingMod?.SeatingSystem?.init) {
-      try {
-        state.systems.seating = seatingMod.SeatingSystem.init({
-          THREE, scene: state.scene, root,
-          camera: state.camera, player: state.player,
-          log: state.log,
-          tablePos,
-          seatCount: 8
-        });
-        safeLog("[seat] init ✅");
-      } catch (e) { safeLog("[seat] init FAIL", e?.message || e); }
-    }
-
-    // CHIPS
-    if (chipsMod?.ChipSystem?.init) {
-      try {
-        const seatPositions = [];
-        const count = 8;
-        const radius = 3.35;
-        for (let i=0; i<count; i++){
-          const a = (i/count) * Math.PI*2;
-          seatPositions.push(new THREE.Vector3(
-            tablePos.x + Math.sin(a)*radius,
-            0,
-            tablePos.z + Math.cos(a)*radius
-          ));
-        }
-
-        state.systems.chips = chipsMod.ChipSystem.init({
-          THREE, root, log: state.log,
-          seatPositions,
-          potPos: new THREE.Vector3(tablePos.x, 0, tablePos.z)
-        });
-
-        // demo bet loop timer
-        state.systems.__betTimer = 0;
-
-        safeLog("[chips] init ✅");
-      } catch (e) { safeLog("[chips] init FAIL", e?.message || e); }
-    }
-
-    // BOTS
-    if (optsAllow("allowBots") && botsMod?.Bots?.init) {
-      try {
-        state.systems.bots = await botsMod.Bots.init({
-          THREE, scene: state.scene, root, player: state.player, log: state.log
-        });
-        safeLog("[bots] Bots.init ✅");
-      } catch (e) {
-        safeLog("[bots] Bots.init FAIL", e?.message || e);
-      }
-    } else {
-      safeLog("[bots] skipped");
-    }
-
-    // POKER
-    if (optsAllow("allowPoker") && pokerSimMod?.PokerSim?.init) {
-      try {
-        state.systems.poker = await pokerSimMod.PokerSim.init({
-          THREE, scene: state.scene, root,
-          table: tableObj, player: state.player, camera: state.camera, log: state.log
-        });
-        safeLog("[poker] PokerSim.init ✅");
-      } catch (e) {
-        safeLog("[poker] PokerSim.init FAIL", e?.message || e);
-      }
-    } else {
-      safeLog("[poker] skipped");
-    }
-
-    // ROOM MANAGER
-    if (roomMgrMod?.RoomManager?.init) {
-      try {
-        state.systems.room = await roomMgrMod.RoomManager.init({
-          THREE, scene: state.scene, root,
-          player: state.player, camera: state.camera,
-          systems: state.systems, log: state.log
-        });
-        safeLog("[rm] init ✅");
-      } catch (e) {
-        safeLog("[rm] init FAIL", e?.message || e);
-      }
-    }
-
-    // TELEPORT
-    if (optsAllow("allowTeleport")) {
-      const tp = tpMachineMod?.TeleportMachine || tpMod?.Teleport || tpMod?.default;
-      if (tp?.init) {
-        try {
-          state.systems.teleport = await tp.init({
-            THREE,
-            scene: state.scene,
-            renderer: state.renderer,
-            camera: state.camera,
-            player: state.player,
-            controllers: state.controllers,
-            log: state.log,
-            world: { floor: state.floor, root }
-          });
-          safeLog("[teleport] init ✅");
-        } catch (e) {
-          safeLog("[teleport] init FAIL", e?.message || e);
-        }
-      } else {
-        safeLog("[teleport] module missing — skipped");
-      }
-    } else {
-      safeLog("[teleport] skipped");
-    }
-
-    return { tableObj };
-  }
-
-  // -----------------------
-  // Non-VR controls (Android/Desktop)
+  // Android/Non-VR controls (touch + keyboard)
   // -----------------------
   function installNonVRControls() {
     if (state.systems.nonvr?.__installed) return;
 
     const { camera, player } = state;
     const keys = new Set();
+
+    // Desktop pointer look
     let dragging = false;
     let lastX = 0, lastY = 0;
     let yaw = 0, pitch = 0;
@@ -700,15 +471,73 @@ export const HybridWorld = (() => {
       camera.rotation.x = pitch;
     });
 
+    // Touch controls UI (Android)
+    const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
+    const touchAPI = {
+      toggleDebug: () => {
+        const o = document.getElementById("overlay");
+        if (!o) return;
+        o.classList.toggle("min");
+      },
+      toggleHUD: () => {
+        const hud = document.getElementById("hud");
+        if (hud) hud.style.display = (hud.style.display === "none" ? "" : "none");
+        else {
+          const o = document.getElementById("overlay");
+          if (o) o.classList.toggle("hide");
+        }
+      },
+      gotoTable: () => {
+        // Safe snap for debugging
+        player.position.set(0, 0, 4.2);
+        player.rotation.set(0, Math.PI, 0);
+      },
+      rebuild: async () => {
+        try { await state.systems.vrpanel?.rebuildFromPanel?.(); }
+        catch (e) { state.log?.("[touch] rebuild failed", e?.message || e); }
+      },
+      safeMode: () => {
+        state.OPTS.safeMode = true;
+        state.OPTS.allowBots = false;
+        state.OPTS.allowPoker = false;
+        state.OPTS.allowTeleport = false;
+        state.OPTS.allowStream = false;
+        state.log?.("[touch] SAFE MODE ✅ then press REBUILD");
+      }
+    };
+
+    if (isTouch) {
+      try {
+        TouchControls.init({ THREE: state.THREE, player, camera, log: state.log, api: touchAPI });
+        state.systems.__touch = TouchControls;
+        safeLog("[touch] init ✅");
+      } catch (e) {
+        safeLog("[touch] init FAIL", e?.message || e);
+      }
+    }
+
     state.systems.nonvr = {
       __installed: true,
       update(dt) {
         if (state.renderer?.xr?.isPresenting) return;
 
-        const speed = (keys.has("ShiftLeft") ? 6 : 3) * dt;
-        const fwd = (keys.has("KeyW") ? 1 : 0) + (keys.has("KeyS") ? -1 : 0);
-        const str = (keys.has("KeyD") ? 1 : 0) + (keys.has("KeyA") ? -1 : 0);
+        // Touch movement
+        let moveX = 0, moveY = 0;
+        try {
+          const out = state.systems.__touch?.update?.(dt);
+          if (out) { moveX = out.moveX || 0; moveY = out.moveY || 0; }
+        } catch(e){}
+
+        // Keyboard movement
+        const fwdKB = (keys.has("KeyW") ? 1 : 0) + (keys.has("KeyS") ? -1 : 0);
+        const strKB = (keys.has("KeyD") ? 1 : 0) + (keys.has("KeyA") ? -1 : 0);
+
+        const fwd = moveY + fwdKB;
+        const str = moveX + strKB;
+
         if (!fwd && !str) return;
+
+        const speed = (keys.has("ShiftLeft") ? 6 : 3) * dt;
 
         const dir = new state.THREE.Vector3();
         player.getWorldDirection(dir);
@@ -720,7 +549,7 @@ export const HybridWorld = (() => {
       }
     };
 
-    safeLog("[nonvr] controls ✅");
+    safeLog("[nonvr] controls ✅ (touch+keyboard)");
   }
 
   function attachHandsToRig() {
@@ -730,6 +559,200 @@ export const HybridWorld = (() => {
       if (L && L.parent !== state.player) state.player.add(L);
       if (R && R.parent !== state.player) state.player.add(R);
     } catch(e) {}
+  }
+
+  // -----------------------
+  // Optional module build
+  // -----------------------
+  async function buildModules() {
+    const THREE = state.THREE;
+    const root = ensureRoot();
+
+    // Clear root
+    if (root.children.length) {
+      for (let i = root.children.length - 1; i >= 0; i--) {
+        const c = root.children[i];
+        root.remove(c);
+        disposeObject3D(c);
+      }
+    }
+
+    // Core optional imports
+    const bossTableMod    = await tryImport("./boss_table.js");
+    const tableFactoryMod = await tryImport("./table_factory.js");
+    const botsMod         = await tryImport("./bots.js");
+    const pokerSimMod     = await tryImport("./poker_sim.js");
+    const roomMgrMod      = await tryImport("./room_manager.js");
+    const tpMachineMod    = await tryImport("./teleport_machine.js");
+    const tpMod           = await tryImport("./teleport.js");
+
+    // Added optional imports
+    const decorMod        = await tryImport("./lobby_decor.js");
+    const spectatorMod    = await tryImport("./spectator.js");
+    const storeRoomMod    = await tryImport("./store_room.js");
+    const seatingMod      = await tryImport("./seating.js");
+    const chipsMod        = await tryImport("./chips.js");
+
+    state.mods = {
+      bossTableMod, tableFactoryMod, botsMod, pokerSimMod, roomMgrMod, tpMachineMod, tpMod,
+      decorMod, spectatorMod, storeRoomMod, seatingMod, chipsMod
+    };
+
+    // STREAM
+    if (optsAllow("allowStream")) {
+      try { Stream.enable(true); Stream.init({ THREE, root }); }
+      catch (e) { safeLog("[stream] init FAIL", e?.message || e); }
+    } else {
+      Stream.enable(false);
+      Stream.dispose();
+      safeLog("[stream] skipped by options");
+    }
+
+    // TABLE
+    let tableObj = null;
+
+    const BossTableAPI =
+      bossTableMod?.BossTable ||
+      bossTableMod?.default ||
+      (typeof bossTableMod?.init === "function" ? bossTableMod : null);
+
+    if (BossTableAPI?.init) {
+      try {
+        tableObj = await BossTableAPI.init({ THREE, scene: state.scene, root, log: state.log });
+        safeLog("[table] BossTable.init ✅");
+      } catch (e) { safeLog("[table] BossTable.init FAIL", e?.message || e); }
+    }
+
+    if (!tableObj && tableFactoryMod?.TableFactory?.create) {
+      try {
+        tableObj = await tableFactoryMod.TableFactory.create({ THREE, root, log: state.log });
+        safeLog("[table] TableFactory.create ✅");
+      } catch (e) { safeLog("[table] TableFactory.create FAIL", e?.message || e); }
+    }
+
+    if (!tableObj) {
+      const t = new THREE.Mesh(
+        new THREE.CylinderGeometry(2.25, 2.25, 0.25, 40),
+        new THREE.MeshStandardMaterial({ color: 0x102018, roughness: 0.9 })
+      );
+      t.position.set(0, 1.05, 0);
+      t.name = "PlaceholderTable";
+      root.add(t);
+      safeLog("[table] placeholder ✅");
+      tableObj = t;
+    }
+
+    const tablePos = new THREE.Vector3(0,0,0);
+    try { tableObj.getWorldPosition(tablePos); } catch(e) {}
+
+    // DECOR / hallways vibe
+    if (decorMod?.LobbyDecor?.init) {
+      try { state.systems.decor = decorMod.LobbyDecor.init({ THREE, root, log: state.log }); safeLog("[decor] init ✅"); }
+      catch (e) { safeLog("[decor] init FAIL", e?.message || e); }
+    }
+
+    // Spectator rail
+    if (spectatorMod?.SpectatorRail?.init) {
+      try { state.systems.spectator = spectatorMod.SpectatorRail.init({ THREE, root, log: state.log }); safeLog("[spectator] init ✅"); }
+      catch (e) { safeLog("[spectator] init FAIL", e?.message || e); }
+    }
+
+    // Store room
+    if (storeRoomMod?.StoreRoom?.init) {
+      try { state.systems.store = storeRoomMod.StoreRoom.init({ THREE, root, log: state.log }); safeLog("[store] init ✅"); }
+      catch (e) { safeLog("[store] init FAIL", e?.message || e); }
+    }
+
+    // Seating rings
+    if (seatingMod?.SeatingSystem?.init) {
+      try {
+        state.systems.seating = seatingMod.SeatingSystem.init({
+          THREE, scene: state.scene, root,
+          camera: state.camera, player: state.player,
+          log: state.log, tablePos, seatCount: 8
+        });
+        safeLog("[seat] init ✅");
+      } catch (e) { safeLog("[seat] init FAIL", e?.message || e); }
+    }
+
+    // Chips
+    if (chipsMod?.ChipSystem?.init) {
+      try {
+        const seatPositions = [];
+        const count = 8;
+        const radius = 3.35;
+        for (let i=0; i<count; i++){
+          const a = (i/count) * Math.PI*2;
+          seatPositions.push(new THREE.Vector3(
+            tablePos.x + Math.sin(a)*radius,
+            0,
+            tablePos.z + Math.cos(a)*radius
+          ));
+        }
+
+        state.systems.chips = chipsMod.ChipSystem.init({
+          THREE, root, log: state.log,
+          seatPositions,
+          potPos: new THREE.Vector3(tablePos.x, 0, tablePos.z)
+        });
+
+        state.systems.__betTimer = 0;
+        safeLog("[chips] init ✅");
+      } catch (e) { safeLog("[chips] init FAIL", e?.message || e); }
+    }
+
+    // BOTS
+    if (optsAllow("allowBots") && botsMod?.Bots?.init) {
+      try {
+        state.systems.bots = await botsMod.Bots.init({
+          THREE, scene: state.scene, root, player: state.player, log: state.log
+        });
+        safeLog("[bots] Bots.init ✅");
+      } catch (e) { safeLog("[bots] Bots.init FAIL", e?.message || e); }
+    } else safeLog("[bots] skipped");
+
+    // POKER
+    if (optsAllow("allowPoker") && pokerSimMod?.PokerSim?.init) {
+      try {
+        state.systems.poker = await pokerSimMod.PokerSim.init({
+          THREE, scene: state.scene, root,
+          table: tableObj, player: state.player, camera: state.camera, log: state.log
+        });
+        safeLog("[poker] PokerSim.init ✅");
+      } catch (e) { safeLog("[poker] PokerSim.init FAIL", e?.message || e); }
+    } else safeLog("[poker] skipped");
+
+    // ROOM MANAGER
+    if (roomMgrMod?.RoomManager?.init) {
+      try {
+        state.systems.room = await roomMgrMod.RoomManager.init({
+          THREE, scene: state.scene, root,
+          player: state.player, camera: state.camera,
+          systems: state.systems, log: state.log
+        });
+        safeLog("[rm] init ✅");
+      } catch (e) { safeLog("[rm] init FAIL", e?.message || e); }
+    }
+
+    // TELEPORT
+    if (optsAllow("allowTeleport")) {
+      const tp = tpMachineMod?.TeleportMachine || tpMod?.Teleport || tpMod?.default;
+      if (tp?.init) {
+        try {
+          state.systems.teleport = await tp.init({
+            THREE,
+            scene: state.scene,
+            renderer: state.renderer,
+            camera: state.camera,
+            player: state.player,
+            controllers: state.controllers,
+            log: state.log,
+            world: { floor: state.floor, root }
+          });
+          safeLog("[teleport] init ✅");
+        } catch (e) { safeLog("[teleport] init FAIL", e?.message || e); }
+      } else safeLog("[teleport] module missing — skipped");
+    } else safeLog("[teleport] skipped");
   }
 
   // -----------------------
@@ -751,21 +774,17 @@ export const HybridWorld = (() => {
       state.clock = new THREE.Clock();
       initAnchorsIfNeeded();
 
-      // fresh base scene each build
       state.scene = makeBaseScene();
       if (!state.scene.children.includes(player)) state.scene.add(player);
 
       attachHandsToRig();
       setSpawnAndFacing();
 
-      // non-vr movement
       if (state.OPTS.nonvrControls !== false) installNonVRControls();
 
-      // VR panel attached to camera
       state.systems.vrpanel = makeVRPanel();
       state.camera.add(state.systems.vrpanel.group);
 
-      // allow VR panel to trigger rebuild
       state.systems.vrpanel.rebuildFromPanel = async () => {
         await this.rebuild({
           THREE: state.THREE,
@@ -778,7 +797,6 @@ export const HybridWorld = (() => {
         });
       };
 
-      // build modules
       await buildModules();
 
       state.built = true;
@@ -798,7 +816,6 @@ export const HybridWorld = (() => {
       try { state.systems.store?.dispose?.(); } catch(e) {}
       try { state.systems.chips?.dispose?.(); } catch(e) {}
 
-      // remove VR panel
       try {
         if (state.systems.vrpanel?.group?.parent) {
           state.systems.vrpanel.group.parent.remove(state.systems.vrpanel.group);
@@ -807,7 +824,6 @@ export const HybridWorld = (() => {
 
       Stream.dispose();
 
-      // dispose root
       try {
         if (state.root) {
           state.scene?.remove(state.root);
@@ -816,7 +832,6 @@ export const HybridWorld = (() => {
       } catch(e) {}
       state.root = null;
 
-      // reset registries
       const keepNonVR = state.systems.nonvr;
       state.mods = {};
       state.systems = {};
@@ -830,9 +845,10 @@ export const HybridWorld = (() => {
 
       const dt = state.clock ? state.clock.getDelta() : 0.016;
 
-      // Updates
+      // updates
       try { state.systems.vrpanel?.update?.(dt); } catch(e) {}
       try { state.systems.nonvr?.update?.(dt); } catch(e) {}
+
       try { state.systems.seating?.update?.(dt); } catch(e) {}
       try { state.systems.store?.update?.(dt); } catch(e) {}
       try { state.systems.chips?.update?.(dt); } catch(e) {}
@@ -842,7 +858,7 @@ export const HybridWorld = (() => {
       try { state.systems.room?.update?.(dt); } catch(e) {}
       try { state.systems.teleport?.update?.(dt); } catch(e) {}
 
-      // Demo bet loop (until PokerSim events are wired)
+      // demo bet loop
       try {
         if (state.systems.__betTimer !== undefined && state.systems.chips?.bet) {
           state.systems.__betTimer += dt;
@@ -854,7 +870,7 @@ export const HybridWorld = (() => {
         }
       } catch(e) {}
 
-      // VR Seat click: if panel is hidden, RIGHT pinch triggers seating.click()
+      // VR seat click (panel hidden)
       try {
         if (state.renderer?.xr?.isPresenting) {
           const panelVisible = !!state.systems.vrpanel?.group?.visible;
@@ -867,14 +883,13 @@ export const HybridWorld = (() => {
               const b = new state.THREE.Vector3();
               jt.getWorldPosition(a);
               ji.getWorldPosition(b);
-              const isPinch = a.distanceTo(b) < 0.02;
-              if (isPinch) state.systems.seating.click();
+              if (a.distanceTo(b) < 0.02) state.systems.seating.click();
             }
           }
         }
       } catch(e) {}
 
-      // spatial audio from XR camera position
+      // spatial audio
       try {
         const xrCam = renderer.xr.getCamera(camera);
         Stream.updateSpatial(xrCam.position);

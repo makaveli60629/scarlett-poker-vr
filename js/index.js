@@ -1,15 +1,14 @@
-// /js/index.js — Scarlett Runtime (Three + VR + World)
-// ✅ NO bare imports like "three"
-// ✅ Uses CDN so GitHub Pages + Android + Quest works
+// /js/index.js — Runtime entry
+// Can use either CDN imports OR bare "three" now because boot.js injects importmap.
 
-import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
-import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
+import * as THREE from "three";
+import { VRButton } from "three/examples/jsm/webxr/VRButton.js";
 import { World } from "./world.js";
 
-const log = window.ScarlettLog?.push || console.log;
+const L = window.ScarlettLog?.push || console.log;
 window.ScarlettLog?.setMode?.("init");
 
-log("[index] runtime start ✅", "ok");
+L("[index] runtime start ✅", "ok");
 
 const app = document.getElementById("app");
 if (!app) throw new Error("FATAL: #app missing");
@@ -20,8 +19,6 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.xr.enabled = true;
 app.appendChild(renderer.domElement);
-
-log("[index] Renderer created ✅","ok");
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x05060a);
@@ -36,51 +33,46 @@ scene.add(player);
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.85));
 
-log("[index] PlayerRig + Camera ✅","ok");
+L("[index] renderer/camera/rig ✅","ok");
 
-// VR button
 try{
   const b = VRButton.createButton(renderer);
   document.getElementById("vrSlot")?.appendChild(b);
-  log("[index] VRButton appended ✅","ok");
+  L("[index] VRButton appended ✅","ok");
 }catch(e){
-  log("[index] VRButton failed: " + (e?.message||e), "warn");
+  L("[index] VRButton failed: " + (e?.message||e), "warn");
 }
 
-// resize
 window.addEventListener("resize", ()=>{
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth/window.innerHeight;
   camera.updateProjectionMatrix();
 });
 
-// controllers placeholder compatible with your world
 const controllers = { left:null, right:null, lasers:[] };
 
-// world init
 (async ()=>{
   try{
     window.ScarlettLog?.setMode?.("loading world");
-    log("[index] World.init …");
+    L("[index] World.init …");
     await World.init({
       THREE, scene, renderer, camera, player, controllers,
       log: console.log,
       BUILD: Date.now()
     });
-    log("[index] World init ✅","ok");
+    L("[index] World init ✅","ok");
     window.ScarlettLog?.setMode?.("ready");
   }catch(e){
-    log("[index] World init FAIL ❌","bad");
-    log(String(e?.stack || e), "muted");
+    L("[index] World init FAIL ❌","bad");
+    L(String(e?.stack||e),"muted");
     window.ScarlettLog?.setMode?.("world fail");
   }
 })();
 
-// render loop
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(()=>{
   clock.getDelta();
   renderer.render(scene, camera);
 });
 
-log("[index] Animation loop running ✅","ok");
+L("[index] animation loop running ✅","ok");

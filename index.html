@@ -2,40 +2,152 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
+  <meta name="viewport"
+        content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
   <title>Scarlett VR Poker</title>
 
   <style>
-    html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; }
-    #app { position:fixed; inset:0; }
+    :root{
+      --bg:#05060a;
+      --panel:#0b0d14cc;
+      --panel2:#0b0d14f2;
+      --text:#e8ecff;
+      --muted:#98a0c7;
+      --aqua:#7fe7ff;
+      --pink:#ff2d7a;
+      --ok:#4cd964;
+      --warn:#ffcc00;
+      --bad:#ff6b6b;
+      --shadow: 0 12px 40px rgba(0,0,0,.45);
+      --radius: 16px;
+    }
+
+    html, body {
+      margin:0; padding:0; height:100%;
+      background:var(--bg);
+      overflow:hidden;
+      font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      color:var(--text);
+    }
+
+    canvas { display:block; width:100vw; height:100vh; }
+
+    /* HUD header (optional) */
+    #hud {
+      position:fixed; left:0; top:0; right:0;
+      padding:10px 12px;
+      display:flex; gap:10px; align-items:center;
+      pointer-events:none;
+      z-index: 9990;
+    }
+    #badge {
+      pointer-events:none;
+      background: linear-gradient(90deg, rgba(127,231,255,.18), rgba(255,45,122,.12));
+      border: 1px solid rgba(127,231,255,.22);
+      padding:8px 10px;
+      border-radius: 999px;
+      font-weight:800;
+      letter-spacing:.3px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(6px);
+    }
+    #hint {
+      pointer-events:none;
+      opacity:.75;
+      font-weight:700;
+    }
+
+    /* Debug overlay */
     #overlay {
-      position: fixed; left: 12px; right: 12px; bottom: 12px;
-      padding: 10px 12px; border-radius: 12px;
-      background: rgba(0,0,0,.70); color: #fff;
-      font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      max-height: 45vh; overflow:auto; white-space: pre-wrap;
-      box-shadow: 0 12px 40px rgba(0,0,0,.45);
+      position: fixed;
+      left: 12px;
+      bottom: 12px;
+      width: min(560px, calc(100vw - 24px));
+      max-height: 46vh;
+      overflow: auto;
+      padding: 10px 12px;
+      border-radius: var(--radius);
+      background: var(--panel2);
+      border: 1px solid rgba(127,231,255,.22);
+      box-shadow: var(--shadow);
+      z-index: 9999;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    #overlay .row { margin: 2px 0; }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--bad); }
+    .muted { color: var(--muted); }
+
+    /* overlay minimize/hide (requested) */
+    #overlay.min{
+      max-height: 84px !important;
+      overflow: hidden !important;
+      opacity: .72 !important;
+    }
+    #overlay.hide{
+      display:none !important;
+    }
+
+    /* tiny floating buttons (works even without TouchControls) */
+    #miniBtns {
+      position: fixed;
+      right: 12px;
+      top: 12px;
+      display: flex;
+      gap: 10px;
+      z-index: 9998;
+      pointer-events: auto;
+    }
+    #miniBtns button{
+      border: 1px solid rgba(127,231,255,.22);
+      background: rgba(11,13,20,.78);
+      color: var(--text);
+      font-weight: 900;
+      padding: 10px 12px;
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      letter-spacing:.2px;
+    }
+
+    /* Keep DOM overlay compatible if you later enable WebXR dom-overlay */
+    #domOverlayRoot {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9997;
     }
   </style>
-
-  <!-- ES module shim for importmaps -->
-  <script async src="https://unpkg.com/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
-
-  <!-- Three.js as module -->
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
-    }
-  }
-  </script>
 </head>
 
 <body>
-  <div id="app"></div>
-  <div id="overlay">boot…</div>
+  <div id="domOverlayRoot"></div>
 
-  <!-- IMPORTANT: use boot.js (new filename) -->
-  <script type="module" src="./js/boot.js"></script>
+  <div id="hud">
+    <div id="badge">SCARLETT VR POKER</div>
+    <div id="hint">Android: left move + right look (Touch UI). Quest: Enter VR.</div>
+  </div>
+
+  <div id="miniBtns">
+    <button id="btnMin">DBG</button>
+    <button id="btnHide">HUD</button>
+  </div>
+
+  <div id="overlay"></div>
+
+  <script type="module" src="./js/index.js"></script>
+
+  <script>
+    // Fallback buttons always available (even if JS crashes early)
+    const o = document.getElementById("overlay");
+    document.getElementById("btnMin").onclick = () => o?.classList.toggle("min");
+    document.getElementById("btnHide").onclick = () => {
+      const hud = document.getElementById("hud");
+      if (hud) hud.style.display = (hud.style.display === "none" ? "" : "none");
+      else o?.classList.toggle("hide");
+    };
+  </script>
 </body>
 </html>

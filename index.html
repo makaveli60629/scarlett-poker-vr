@@ -17,6 +17,7 @@
 
   <style>
     html, body { margin:0; padding:0; height:100%; background:#05060a; overflow:hidden; }
+
     #VRButton, button#VRButton{
       position:fixed !important;
       right:max(14px, env(safe-area-inset-right)) !important;
@@ -46,6 +47,7 @@
     .kv{ display:flex; justify-content:space-between; gap:10px; }
     .k{ opacity:.75; }
     .v{ text-align:right; }
+
     #scarlettBtns{ margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
     #scarlettBtns button{
       background: rgba(0,255,255,.10);
@@ -57,6 +59,7 @@
       font-size:12px;
       cursor:pointer;
     }
+
     #scarlettLog{
       margin-top:10px;
       border: 1px solid rgba(0,255,255,.14);
@@ -70,6 +73,39 @@
       white-space: pre-wrap;
       word-break: break-word;
     }
+
+    /* ---- World Debug Box ---- */
+    #worldDebug{
+      margin-top:10px;
+      border: 1px solid rgba(255,45,122,.18);
+      border-radius: 12px;
+      padding: 8px 10px;
+      background: rgba(12,6,14,.28);
+    }
+    #worldDebug .hdr{
+      display:flex; justify-content:space-between; align-items:center;
+      font-weight:900; color:#ff2d7a; font-size:12px;
+      margin-bottom:6px;
+    }
+    #worldDebug .grid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:6px 10px;
+      font-size:12px;
+    }
+    #worldDebug .pill{
+      display:inline-block;
+      padding:2px 8px;
+      border-radius:999px;
+      border:1px solid rgba(255,45,122,.22);
+      background: rgba(255,45,122,.08);
+      color:#ffd3e2;
+      font-size:11px;
+      font-weight:900;
+    }
+    #worldDebug .ok { color:#b8ffcf; border-color: rgba(77,255,140,.25); background: rgba(77,255,140,.10); }
+    #worldDebug .bad{ color:#ffd0d0; border-color: rgba(255,107,107,.25); background: rgba(255,107,107,.10); }
+    #worldDebug .muted{ opacity:.8; font-size:11px; margin-top:6px; line-height:1.25; }
   </style>
 </head>
 
@@ -98,6 +134,35 @@
       <button id="btnClearLog">Clear Logs</button>
     </div>
 
+    <!-- ✅ World Debug Panel -->
+    <div id="worldDebug">
+      <div class="hdr">
+        <div>World Debug</div>
+        <div>
+          <span id="dbgPose" class="pill">pose: ?</span>
+          <span id="dbgRoom" class="pill">room: ?</span>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="kv"><div class="k">floorY</div><div class="v" id="dbgFloorY">?</div></div>
+        <div class="kv"><div class="k">teleHit</div><div class="v" id="dbgTeleHit">?</div></div>
+
+        <div class="kv"><div class="k">R axes</div><div class="v" id="dbgAxesR">?</div></div>
+        <div class="kv"><div class="k">L axes</div><div class="v" id="dbgAxesL">?</div></div>
+
+        <div class="kv"><div class="k">R buttons</div><div class="v" id="dbgBtnsR">?</div></div>
+        <div class="kv"><div class="k">L buttons</div><div class="v" id="dbgBtnsL">?</div></div>
+
+        <div class="kv"><div class="k">rig</div><div class="v" id="dbgRig">?</div></div>
+        <div class="kv"><div class="k">yaw°</div><div class="v" id="dbgYaw">?</div></div>
+      </div>
+
+      <div class="muted">
+        Tip: If axes look swapped (e.g., your right stick shows up under L axes), we’ll remap in <code>main.js</code> instantly.
+      </div>
+    </div>
+
     <div id="scarlettLog"></div>
   </div>
 
@@ -106,6 +171,23 @@
     document.getElementById("build").textContent = `v=${v}`;
     setInterval(()=>document.getElementById("clock").textContent = new Date().toLocaleString(), 250);
     import(`./js/main.js?v=${v}`);
+  </script>
+
+  <!-- ✅ Tiny optional helper: expose debug setters if main.js wants them -->
+  <script>
+    window.__SCARLETT_DBG__ = {
+      set(id, text){
+        const el = document.getElementById(id);
+        if (el) el.textContent = String(text);
+      },
+      pill(id, ok, text){
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = String(text);
+        el.classList.remove("ok","bad");
+        el.classList.add(ok ? "ok" : "bad");
+      }
+    };
   </script>
 </body>
 </html>

@@ -1,338 +1,321 @@
-// /js/world.js — Scarlett MASTER WORLD ORCHESTRATOR v7
-// Uses your existing modules when available. Safe imports. No hanging awaits.
-
-import { safeImport } from "./safe_import.js";
+// /js/world.js — Scarlett MASTER WORLD (FULL: Lobby + 4 Rooms + Halls + Divot + Jumbotrons)
+// ✅ No dependencies. Safe on GitHub Pages.
+// ✅ Always builds something visible.
+// ✅ Logs build steps.
 
 export const World = (() => {
-  let THREE, scene, renderer, camera, player, controllers, log;
-
-  const state = {
+  const S = {
+    THREE: null,
+    scene: null,
+    renderer: null,
+    camera: null,
+    player: null,
+    controllers: null,
+    log: console.log,
     root: null,
     t: 0,
-    options: {
-      hudVisible: true,
-      A_worldPolish: true,
-      B_pokerSim: true,
-      C_storeMeta: true
-    },
-
-    // geometry settings (your requests)
-    lobbyR: 24.0,      // expanded
-    wallH: 12.0,
-    pitInner: 10.8,    // bigger pit radius (expanded)
-    pitDepth: 1.55,
-
-    targets: {},
-    tags: [],
-
-    // loaded systems
-    sys: {
-      lights: null,
-      solidWalls: null,
-      tableFactory: null,
-      teleportMachine: null,
-      storeRoom: null,
-      jumbotron: null,
-      bots: null,
-      pokerEngine: null,
-      pokerSim: null,
-      uiHud: null,
-      nametags: null
-    }
+    colliders: []
   };
 
-  const THEME = {
-    bg: 0x05060a,
-    wall: 0x222b3a,
-    wall2: 0x141a24,
-    pit: 0x0b1420,
-    neon: 0x3cf2ff
-  };
+  const log = (m) => S.log?.(m);
 
-  const add = (o) => (state.root.add(o), o);
-
-  function matStd(color, rough=0.9, metal=0.08) {
-    return new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
+  function add(obj, collider = false) {
+    S.root.add(obj);
+    if (collider) S.colliders.push(obj);
+    return obj;
   }
 
-  // ---------- SAFE MODULE LOADER ----------
-  async function loadModules() {
-    // Each is optional. If missing, we keep going.
-    const LightsPack     = await safeImport("./lights_pack.js", "LightsPack");
-    const SolidWalls     = await safeImport("./solid_walls.js", "SolidWalls");
-    const TableFactory   = await safeImport("./table_factory.js", "TableFactory");
-    const TeleportMachine= await safeImport("./teleport_machine.js", "TeleportMachine");
-    const StoreRoom      = await safeImport("./store_room.js", "StoreRoom");
-    const Jumbotron      = await safeImport("./JumbotronModule.js", "JumbotronModule"); // note capital J in your list
-    const Bots           = await safeImport("./bots.js", "Bots");
-    const PokerEngine    = await safeImport("./poker_engine.js", "PokerEngine");
-    const PokerSim       = await safeImport("./poker_sim.js", "PokerSim");
-    const UIHUD          = await safeImport("./ui_hud.js", "UIHUD");
-    const NameTags       = await safeImport("./nametags.js", "NameTags");
-
-    state.sys.lights = LightsPack;
-    state.sys.solidWalls = SolidWalls;
-    state.sys.tableFactory = TableFactory;
-    state.sys.teleportMachine = TeleportMachine;
-    state.sys.storeRoom = StoreRoom;
-    state.sys.jumbotron = Jumbotron;
-    state.sys.bots = Bots;
-    state.sys.pokerEngine = PokerEngine;
-    state.sys.pokerSim = PokerSim;
-    state.sys.uiHud = UIHUD;
-    state.sys.nametags = NameTags;
+  function mat(color, rough = 1, metal = 0) {
+    return new S.THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
   }
 
-  // ---------- A: BASE WORLD (stable, no shimmer) ----------
-  function buildBaseWorld() {
-    // lights (fallback if module missing)
-    if (state.sys.lights?.init) {
-      state.sys.lights.init({ THREE, scene: state.root, log });
-      log?.("[world] lights_pack ✅");
-    } else {
-      add(new THREE.AmbientLight(0xffffff, 1.15));
-      add(new THREE.HemisphereLight(0xdfe9ff, 0x0b0d14, 1.10));
-      const sun = new THREE.DirectionalLight(0xffffff, 2.0);
-      sun.position.set(18, 20, 12);
-      add(sun);
-      log?.("[world] lights fallback ✅");
-    }
+  function buildLights() {
+    const { THREE } = S;
 
-    // lobby ring floor
-    const floorMat = matStd(0x2e3747, 0.95, 0.03);
-    floorMat.polygonOffset = true;
-    floorMat.polygonOffsetFactor = 2;
-    floorMat.polygonOffsetUnits = 2;
+    add(new THREE.HemisphereLight(0xeef2ff, 0x12131a, 1.15));
 
-    const lobbyFloor = new THREE.Mesh(
-      new THREE.RingGeometry(state.pitInner, state.lobbyR, 260),
-      floorMat
+    const key = new THREE.DirectionalLight(0xffffff, 1.0);
+    key.position.set(10, 14, 6);
+    add(key);
+
+    const fill = new THREE.DirectionalLight(0xaad5ff, 0.45);
+    fill.position.set(-10, 8, -12);
+    add(fill);
+
+    log("[world] lights ✅");
+  }
+
+  function buildFloorAndSky() {
+    const { THREE } = S;
+
+    const sky = new THREE.Mesh(
+      new THREE.SphereGeometry(260, 32, 16),
+      new THREE.MeshBasicMaterial({ color: 0x05060a, side: THREE.BackSide })
     );
-    lobbyFloor.rotation.x = -Math.PI/2;
-    lobbyFloor.position.y = 0.01;
-    add(lobbyFloor);
+    add(sky);
 
-    // pit floor
-    const pitFloor = new THREE.Mesh(
-      new THREE.CircleGeometry(state.pitInner - 0.2, 240),
-      matStd(THEME.pit, 0.98, 0.02)
+    const floor = new THREE.Mesh(
+      new THREE.CircleGeometry(60, 96),
+      mat(0x171926, 1, 0)
     );
-    pitFloor.rotation.x = -Math.PI/2;
-    pitFloor.position.y = -state.pitDepth;
-    add(pitFloor);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = 0;
+    add(floor, true);
 
-    // pit wall
-    const pitWall = new THREE.Mesh(
-      new THREE.CylinderGeometry(state.pitInner, state.pitInner, state.pitDepth, 240, 1, true),
-      matStd(THEME.wall2, 0.92, 0.08)
+    log("[world] floor ✅");
+  }
+
+  function buildLobbyRing() {
+    const { THREE } = S;
+
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(10, 18, 96),
+      mat(0x0f1120, 0.9, 0.05)
     );
-    pitWall.position.y = -state.pitDepth/2;
-    pitWall.material.side = THREE.DoubleSide;
-    add(pitWall);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.01;
+    add(ring, true);
 
-    // outer wall
-    const wall = new THREE.Mesh(
-      new THREE.CylinderGeometry(state.lobbyR, state.lobbyR, state.wallH, 260, 1, true),
-      matStd(THEME.wall, 0.92, 0.06)
+    const trim1 = new THREE.Mesh(
+      new THREE.RingGeometry(9.7, 10.0, 96),
+      mat(0x1b1e33, 0.7, 0.2)
     );
-    wall.position.y = state.wallH/2;
-    wall.material.side = THREE.DoubleSide;
-    add(wall);
+    trim1.rotation.x = -Math.PI / 2;
+    trim1.position.y = 0.015;
+    add(trim1);
 
-    // simple neon trim (helps orientation)
-    const trim = new THREE.Mesh(
-      new THREE.TorusGeometry(state.lobbyR - 0.35, 0.11, 18, 260),
-      new THREE.MeshStandardMaterial({
-        color: THEME.neon,
-        emissive: THEME.neon,
-        emissiveIntensity: 1.05,
-        roughness: 0.25,
-        metalness: 0.95
-      })
+    const trim2 = new THREE.Mesh(
+      new THREE.RingGeometry(18.0, 18.3, 96),
+      mat(0x1b1e33, 0.7, 0.2)
     );
-    trim.rotation.x = Math.PI/2;
-    trim.position.y = state.wallH - 0.55;
-    add(trim);
+    trim2.rotation.x = -Math.PI / 2;
+    trim2.position.y = 0.015;
+    add(trim2);
 
-    // stairs down to pit
-    buildStairs();
-
-    // targets
-    state.targets.lobby = new THREE.Vector3(0, 0, 0);
-    state.targets.pit = new THREE.Vector3(0, 0, state.pitInner - 1.2);
+    log("[world] lobby ring ✅");
   }
 
-  function buildStairs() {
-    const openingW = 5.8;
-    const stepCount = 10;
-    const stepH = state.pitDepth / stepCount;
-    const stepD = 0.72;
-    const stepMat = matStd(0x2e3747, 0.92, 0.05);
+  function buildCenterDivotAndTable() {
+    const { THREE } = S;
 
-    for (let i=0;i<stepCount;i++){
-      const step = new THREE.Mesh(new THREE.BoxGeometry(openingW, stepH*0.95, stepD), stepMat);
-      step.position.set(0, -stepH*(i+0.5), state.pitInner + 0.55 + i*stepD);
-      add(step);
-    }
-  }
+    const rimY = 0.05;
+    const pitY = -0.55;
+    const pitRadius = 6.2;
+    const rimInner = 6.2;
+    const rimOuter = 8.8;
 
-  // ---------- ROOMS (no doorway blocking walls) ----------
-  function buildRooms() {
-    const roomDist = state.lobbyR + 11.2;
-    state.targets.vipInside   = new THREE.Vector3(0, 0,  roomDist);
-    state.targets.storeInside = new THREE.Vector3(roomDist, 0, 0);
-    state.targets.eventInside = new THREE.Vector3(0, 0, -roomDist);
-    state.targets.pokerInside = new THREE.Vector3(-roomDist, 0, 0);
+    const rim = new THREE.Mesh(
+      new THREE.RingGeometry(rimInner, rimOuter, 96),
+      mat(0x0b0d14, 0.85, 0.15)
+    );
+    rim.rotation.x = -Math.PI / 2;
+    rim.position.y = rimY;
+    add(rim, true);
 
-    // Let your solid_walls module handle clean cutouts if it exists:
-    if (state.sys.solidWalls?.build) {
-      state.sys.solidWalls.build({
-        THREE,
-        scene: state.root,
-        lobbyRadius: state.lobbyR,
-        wallHeight: state.wallH,
-        pitRadius: state.pitInner,
-        log
-      });
-      log?.("[world] solid_walls ✅");
-    }
+    const slope = new THREE.Mesh(
+      new THREE.RingGeometry(pitRadius, rimInner, 96),
+      mat(0x131629, 1, 0.05)
+    );
+    slope.rotation.x = -Math.PI / 2;
+    slope.position.y = (rimY + pitY) * 0.5;
+    add(slope, true);
 
-    // If you don’t have solid_walls.build(), we still give you reachable rooms using pads/teleport.
-  }
+    const pit = new THREE.Mesh(
+      new THREE.CircleGeometry(pitRadius, 96),
+      mat(0x0a0c18, 1, 0)
+    );
+    pit.rotation.x = -Math.PI / 2;
+    pit.position.y = pitY;
+    add(pit, true);
 
-  // ---------- TABLE / POKER ----------
-  function buildTableAndPoker() {
-    // Prefer your real table factory:
-    if (state.sys.tableFactory?.create) {
-      const table = state.sys.tableFactory.create({ THREE, log });
-      table.position.set(0, -state.pitDepth, 0);
-      state.root.add(table);
-      log?.("[world] table_factory ✅");
-    } else {
-      // fallback simple table so you always see *something*
-      const top = new THREE.Mesh(new THREE.CylinderGeometry(4.3, 4.45, 0.2, 90), matStd(0x0f5a3f, 0.92, 0.02));
-      top.position.set(0, -state.pitDepth + 1.0, 0);
-      add(top);
-      log?.("[world] table fallback ✅");
-    }
+    const tableTop = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.8, 3.0, 0.25, 40),
+      mat(0x0f5a3a, 0.9, 0.05)
+    );
+    tableTop.position.set(0, pitY + 0.65, 0);
+    add(tableTop, true);
 
-    // Poker sim/engine (use what exists)
-    if (state.options.B_pokerSim) {
-      if (state.sys.pokerSim?.init) {
-        state.sys.pokerSim.init({ THREE, scene: state.root, player, camera, log });
-        log?.("[world] poker_sim ✅");
-      } else if (state.sys.pokerEngine?.init) {
-        state.sys.pokerEngine.init({ THREE, scene: state.root, player, camera, log });
-        log?.("[world] poker_engine ✅");
-      }
-    }
-  }
+    const tableBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.55, 0.85, 0.9, 20),
+      mat(0x11131b, 0.8, 0.2)
+    );
+    tableBase.position.set(0, pitY + 0.15, 0);
+    add(tableBase);
 
-  // ---------- STORE ----------
-  function buildStore() {
-    if (!state.options.C_storeMeta) return;
+    const railRadius = 8.4;
+    const railCount = 24;
 
-    if (state.sys.storeRoom?.init) {
-      state.sys.storeRoom.init({ THREE, scene: state.root, log });
-      log?.("[world] store_room ✅");
-    } else {
-      log?.("[world] store_room missing (ok)");
-    }
-  }
-
-  // ---------- BOTS + SMALL GAZE TAGS ----------
-  function initBotsAndTags() {
-    if (state.sys.bots?.init) {
-      state.sys.bots.init({ THREE, scene: state.root, log });
-      log?.("[world] bots ✅");
+    for (let i = 0; i < railCount; i++) {
+      const a = (i / railCount) * Math.PI * 2;
+      const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.06, 0.06, 1.0, 10),
+        mat(0x1f2440, 0.7, 0.2)
+      );
+      post.position.set(Math.cos(a) * railRadius, pitY + 0.75, Math.sin(a) * railRadius);
+      add(post);
     }
 
-    // If your nametags module exists, force “small + gaze only” behavior
-    if (state.sys.nametags?.setMode) {
-      state.sys.nametags.setMode("gaze_only");
-      state.sys.nametags.setScale?.(0.35);   // small but legible
-      state.sys.nametags.setMaxDistance?.(12);
-      state.sys.nametags.setUpright?.(true); // no tilt with your head
-      log?.("[world] nametags tuned ✅");
+    const rail = new THREE.Mesh(
+      new THREE.TorusGeometry(railRadius, 0.06, 10, 120),
+      mat(0x2a2f52, 0.5, 0.35)
+    );
+    rail.rotation.x = Math.PI / 2;
+    rail.position.y = pitY + 1.2;
+    add(rail);
+
+    log("[world] center divot + table ✅");
+  }
+
+  function buildFourRoomsAndHalls() {
+    const { THREE } = S;
+
+    const roomDist = 30;
+    const roomSize = { w: 18, h: 7, d: 18 };
+    const hall = { w: 6, h: 4, len: roomDist - 18 };
+
+    const makeRoom = (name, x, z, color) => {
+      const g = new THREE.Group();
+      g.name = name;
+      g.position.set(x, 0, z);
+
+      const floor = new THREE.Mesh(
+        new THREE.BoxGeometry(roomSize.w, 0.3, roomSize.d),
+        mat(color, 1, 0.05)
+      );
+      floor.position.y = 0.15;
+      g.add(floor);
+
+      const walls = new THREE.Mesh(
+        new THREE.BoxGeometry(roomSize.w, roomSize.h, roomSize.d),
+        new THREE.MeshStandardMaterial({
+          color: 0x0b0d14, roughness: 1, metalness: 0,
+          transparent: true, opacity: 0.22
+        })
+      );
+      walls.position.y = roomSize.h / 2;
+      g.add(walls);
+
+      add(g, true);
+      return g;
+    };
+
+    const makeHall = (name, x, z, rotY) => {
+      const g = new THREE.Group();
+      g.name = name;
+      g.position.set(x, 0, z);
+      g.rotation.y = rotY;
+
+      const tube = new THREE.Mesh(
+        new THREE.BoxGeometry(hall.w, hall.h, hall.len),
+        new THREE.MeshStandardMaterial({
+          color: 0x0a0c18, roughness: 1, metalness: 0.05,
+          transparent: true, opacity: 0.25
+        })
+      );
+      tube.position.y = hall.h / 2;
+      tube.position.z = -hall.len / 2;
+      g.add(tube);
+
+      const floor = new THREE.Mesh(
+        new THREE.BoxGeometry(hall.w, 0.25, hall.len),
+        mat(0x14172a, 1, 0.05)
+      );
+      floor.position.y = 0.125;
+      floor.position.z = -hall.len / 2;
+      g.add(floor);
+
+      add(g, true);
+      return g;
+    };
+
+    makeRoom("Room_North", 0, -roomDist, 0x141b33);
+    makeRoom("Room_South", 0, roomDist, 0x141b33);
+    makeRoom("Room_East", roomDist, 0, 0x141b33);
+    makeRoom("Room_West", -roomDist, 0, 0x141b33);
+
+    makeHall("Hall_North", 0, -18.3, 0);
+    makeHall("Hall_South", 0, 18.3, Math.PI);
+    makeHall("Hall_East", 18.3, 0, -Math.PI / 2);
+    makeHall("Hall_West", -18.3, 0, Math.PI / 2);
+
+    log("[world] 4 rooms + halls ✅");
+  }
+
+  function buildJumbotrons() {
+    const { THREE } = S;
+
+    const makeScreen = (x, y, z, rotY) => {
+      const frame = new THREE.Mesh(
+        new THREE.BoxGeometry(10, 5.5, 0.35),
+        mat(0x10142a, 0.7, 0.2)
+      );
+      frame.position.set(x, y, z);
+      frame.rotation.y = rotY;
+      add(frame);
+
+      const screen = new THREE.Mesh(
+        new THREE.PlaneGeometry(9.2, 4.7),
+        new THREE.MeshStandardMaterial({
+          color: 0x0b1026,
+          emissive: new THREE.Color(0x1b2cff),
+          emissiveIntensity: 0.6,
+          roughness: 0.8,
+          metalness: 0.1
+        })
+      );
+      const dz = 0.19;
+      if (rotY === 0) screen.position.set(x, y, z + dz);
+      else if (rotY === Math.PI) screen.position.set(x, y, z - dz);
+      else if (rotY === -Math.PI / 2) screen.position.set(x + dz, y, z);
+      else screen.position.set(x - dz, y, z);
+
+      screen.rotation.y = rotY;
+      add(screen);
+    };
+
+    makeScreen(0, 4.2, -12.5, 0);
+    makeScreen(0, 4.2, 12.5, Math.PI);
+    makeScreen(12.5, 4.2, 0, -Math.PI / 2);
+    makeScreen(-12.5, 4.2, 0, Math.PI / 2);
+
+    log("[world] jumbotrons ✅");
+  }
+
+  async function init({ THREE, scene, renderer, camera, player, controllers, log: logFn }) {
+    S.THREE = THREE;
+    S.scene = scene;
+    S.renderer = renderer;
+    S.camera = camera;
+    S.player = player;
+    S.controllers = controllers;
+    S.log = logFn || console.log;
+
+    S.root = new THREE.Group();
+    S.root.name = "WorldRoot";
+    scene.add(S.root);
+
+    log("[world] init …");
+
+    buildLights();
+    buildFloorAndSky();
+    buildLobbyRing();
+    buildCenterDivotAndTable();
+    buildFourRoomsAndHalls();
+    buildJumbotrons();
+
+    if (player) {
+      player.position.y = 0;
+      player.position.x = 0;
+      player.position.z = 8.5;
     }
+
+    log("[world] build complete ✅ (MASTER)");
   }
 
-  // ---------- TELEPORT ----------
-  function initTeleport() {
-    // Prefer teleport_machine if you have it:
-    if (state.sys.teleportMachine?.init) {
-      state.sys.teleportMachine.init({
-        THREE,
-        scene: state.root,
-        renderer,
-        camera,
-        player,
-        controllers,
-        log,
-        targets: state.targets
-      });
-      log?.("[world] teleport_machine ✅");
-    }
+  function update(dt) {
+    S.t += dt;
+    // (kept light intentionally)
   }
 
-  // ---------- UI HUD ----------
-  function initHUD() {
-    if (state.sys.uiHud?.init) {
-      state.sys.uiHud.init({ THREE, scene: state.root, camera, player, log });
-      log?.("[world] ui_hud ✅");
-    }
-  }
-
-  // ---------- API ----------
-  function setOption(k, v) { state.options[k] = v; }
-  function teleport(key) {
-    const t = state.targets[key];
-    if (!t) return false;
-    player.position.set(t.x, 0, t.z);
-    return true;
-  }
-
-  async function init(ctx) {
-    THREE = ctx.THREE;
-    scene = ctx.scene;
-    renderer = ctx.renderer;
-    camera = ctx.camera;
-    player = ctx.player;
-    controllers = ctx.controllers || [];
-    log = ctx.log || console.log;
-
-    state.options = { ...state.options, ...(ctx.options || {}) };
-
-    state.root = new THREE.Group();
-    state.root.name = "WorldRoot";
-    scene.add(state.root);
-
-    await loadModules();
-
-    buildBaseWorld();
-    buildRooms();
-    buildTableAndPoker();
-    buildStore();
-    initBotsAndTags();
-    initTeleport();
-    initHUD();
-
-    // Spawn into VIP by default
-    teleport("vipInside");
-
-    log?.("[world] init ✅ MASTER ORCHESTRATOR v7");
-  }
-
-  function update({ dt, t }) {
-    state.t = t;
-    // Let modules tick if they have update()
-    state.sys.pokerSim?.update?.({ dt, t });
-    state.sys.pokerEngine?.update?.({ dt, t });
-    state.sys.bots?.update?.({ dt, t });
-    state.sys.storeRoom?.update?.({ dt, t });
-    state.sys.teleportMachine?.update?.({ dt, t });
-    state.sys.uiHud?.update?.({ dt, t });
-  }
-
-  return { init, update, setOption, teleport };
+  return { init, update, get colliders() { return S.colliders; } };
 })();

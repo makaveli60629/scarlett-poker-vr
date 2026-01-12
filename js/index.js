@@ -1,10 +1,10 @@
-// /js/index.js — Scarlett INDEX MASTER (FULL) v1.0.1 (Quest-safe)
-// ✅ FIXED: removed invalid `new Something?.()` optional-chain syntax (was breaking Android/Quest)
-// ✅ No bare imports like "three"
-// ✅ VRButton + WebXR
-// ✅ PlayerRig movement + teleport ring + controller lasers
-// ✅ Thumbstick locomotion + seated-mode guard
-// ✅ Loads ./world.js and passes ctx; falls back if it fails
+// /js/index.js — Scarlett INDEX MASTER (FULL) v1.0.3 (Quest fixes)
+// ✅ Controllers parented to PlayerRig (laser follows you; teleport/move no longer leaves lasers behind)
+// ✅ Right stick forward/back fixed (invert corrected)
+// ✅ Turning separated from strafing (can angle yourself)
+// ✅ Left stick = strafe, Right stick = forward/back, Right stick X = turn
+// ✅ Seated mode guard remains
+// ✅ World loader + fallback
 
 const BUILD = `INDEX_MASTER_${Date.now()}`;
 
@@ -39,7 +39,6 @@ $log(`[env] secureContext=${String(window.isSecureContext)}`);
 $log(`[env] ua=${navigator.userAgent}`);
 $log(`[env] navigator.xr=${String(!!navigator.xr)}`);
 
-// ---------- loaders (no bare "three") ----------
 async function loadThree() {
   if (window.THREE && window.THREE.Scene) return window.THREE;
   const ver = "0.164.1";
@@ -57,16 +56,14 @@ async function loadVRButton() {
   }
 }
 
-// ---------- utils ----------
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 function deadzone(v, dz = 0.12) { return Math.abs(v) < dz ? 0 : v; }
 
-// ---------- globals ----------
 let THREE = null;
 let scene = null;
 let renderer = null;
 let camera = null;
-let player = null; // PlayerRig
+let player = null;
 let clock = null;
 
 let controllers = { left: null, right: null };
@@ -85,7 +82,7 @@ let teleport = {
 let locomotion = {
   speed: 3.25,
   strafeSpeed: 3.0,
-  turnSpeed: 2.4,      // smooth turn rad/s
+  turnSpeed: 2.6, // more responsive
   snapTurn: false,
   snapAngle: Math.PI / 6,
   snapCooldown: 220,
@@ -96,7 +93,6 @@ let world = null;
 let worldState = { colliders: [] };
 let isXR = false;
 
-// ---------- HUD (lightweight) ----------
 (function ensureHUD() {
   if (document.getElementById("hud-log")) return;
 
@@ -153,7 +149,6 @@ let isXR = false;
   document.body.appendChild(hud);
 })();
 
-// ---------- init three ----------
 async function initThree() {
   THREE = await loadThree();
   $log("[index] three init ✅");
@@ -186,24 +181,23 @@ async function initThree() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x05060a, 0.8));
-
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x05060a, 0.9));
   teleport.raycaster = new THREE.Raycaster();
 }
 
-// ---------- controllers + lasers ----------
 function makeLaser(color = 0x7fe7ff) {
   const geo = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(0, 0, 0),
     new THREE.Vector3(0, 0, -1),
   ]);
-  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 });
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95 });
   const line = new THREE.Line(geo, mat);
   line.scale.z = 14;
   line.name = "LaserLine";
   return line;
 }
 
+// ✅ BIG FIX: controllers must be parented to PlayerRig, not scene
 function installControllers() {
   const c0 = renderer.xr.getController(0);
   const c1 = renderer.xr.getController(1);
@@ -217,8 +211,9 @@ function installControllers() {
   c0.add(lasers.left);
   c1.add(lasers.right);
 
-  scene.add(c0);
-  scene.add(c1);
+  // ⬇️ parent to player so lasers follow your rig movement/teleport
+  player.add(c0);
+  player.add(c1);
 
   $log("[index] controllers ready ✅");
 
@@ -226,7 +221,6 @@ function installControllers() {
   c1.addEventListener("selectstart", () => onSelectStart("right"));
 }
 
-// ---------- teleport ring ----------
 function ensureTeleportRing() {
   if (teleport.ring) return;
   const g = new THREE.RingGeometry(0.22, 0.30, 28);
@@ -251,6 +245,17 @@ function getXRInputSource(handedness) {
   return null;
 }
 
+function getGamepadAxes(handedness) {
+  const src = getXRInputSource(handedness);
+  const gp = src?.gamepad;
+  const a = gp?.axes || [];
+  if (!a.length) return { x: 0, y: 0 };
+
+  // best default for Quest controllers is usually 2/3
+  if (a.length >= 4) return { x: a[2] ?? 0, y: a[3] ?? 0 };
+  return { x: a[0] ?? 0, y: a[1] ?? 0 };
+}
+
 function computeTeleportTarget(fromObj) {
   teleport.valid = false;
   teleport.target = null;
@@ -269,14 +274,11 @@ function computeTeleportTarget(fromObj) {
   if (!hits || hits.length === 0) return;
 
   const hit = hits[0];
-
   const n = hit.face?.normal
     ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld)
     : null;
 
-  // floor-like only
   if (n && n.y < 0.45) return;
-
   teleport.valid = true;
   teleport.target = hit.point.clone();
 }
@@ -311,18 +313,6 @@ function onSelectStart(which) {
   if (teleport.valid) doTeleport();
 }
 
-// ---------- locomotion ----------
-function getGamepadAxes(handedness) {
-  const src = getXRInputSource(handedness);
-  const gp = src?.gamepad;
-  const a = gp?.axes;
-  if (!a || !a.length) return { x: 0, y: 0 };
-
-  // prefer last two axes if present
-  if (a.length >= 4) return { x: a[2] ?? 0, y: a[3] ?? 0 };
-  return { x: a[0] ?? 0, y: a[1] ?? 0 };
-}
-
 function getYawQuat() {
   const q = camera.getWorldQuaternion(new THREE.Quaternion());
   const e = new THREE.Euler().setFromQuaternion(q, "YXZ");
@@ -333,34 +323,32 @@ function getYawQuat() {
 }
 
 function updateLocomotion(dt) {
-  // ✅ your seated-mode requirement
+  // Standing always in lobby: we DO NOT change headset height ever.
+  // Only seated mode disables movement.
   if (window.__SEATED_MODE) return;
   if (!isXR) return;
 
-  const left = getGamepadAxes("left");
-  const right = getGamepadAxes("right");
+  const L = getGamepadAxes("left");
+  const R = getGamepadAxes("right");
 
-  const lx = deadzone(left.x, 0.15);
-  const ly = deadzone(left.y, 0.15);
-  const rx = deadzone(right.x, 0.15);
-  const ry = deadzone(right.y, 0.15);
+  const lx = deadzone(L.x, 0.15);
+  const rx = deadzone(R.x, 0.15);
+  const ry = deadzone(R.y, 0.15);
 
-  // Your mapping:
-  // Right stick: forward/back + diagonal (so x strafe + y forward)
-  // Left stick: left/right strafe (x) (y optional)
-  const forward = -ry;
-  const strafeR = rx;
-  const strafeL = lx;
+  // ✅ FIX: forward/back sign corrected
+  // You reported: pressing back moves forward -> invert
+  const forward = ry; // (was -ry)
+  const strafe = lx;
 
   const moveZ = forward * locomotion.speed;
-  const moveX = (strafeR * locomotion.strafeSpeed) + (strafeL * locomotion.strafeSpeed);
+  const moveX = strafe * locomotion.strafeSpeed;
 
   const yawQ = getYawQuat();
   const dir = new THREE.Vector3(moveX, 0, moveZ).applyQuaternion(yawQ);
 
   player.position.addScaledVector(dir, dt);
 
-  // Turn
+  // ✅ Turning uses right stick X ONLY (so you can angle yourself)
   if (locomotion.snapTurn) {
     const now = performance.now();
     if (Math.abs(rx) > 0.65 && now - locomotion.lastSnapAt > locomotion.snapCooldown) {
@@ -388,7 +376,6 @@ function updateTeleportAim() {
   showTeleportRing();
 }
 
-// ---------- Android dev look (non-XR) ----------
 let dev = { dragging: false, lastX: 0, lastY: 0, yaw: 0, pitch: 0 };
 function installAndroidDevControls() {
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -423,7 +410,6 @@ function installAndroidDevControls() {
   $log("[android] dev controls ready ✅");
 }
 
-// ---------- world loader ----------
 async function loadWorld() {
   try {
     const mod = await import(`./world.js?v=${Date.now()}`);
@@ -447,31 +433,10 @@ function buildFallbackWorld() {
   floor.rotation.x = -Math.PI / 2;
   g.add(floor);
 
-  const wall = new THREE.Mesh(
-    new THREE.CylinderGeometry(20, 20, 8, 96, 1, true),
-    new THREE.MeshStandardMaterial({
-      color: 0x0b0d14,
-      roughness: 1,
-      metalness: 0.05,
-      side: THREE.DoubleSide,
-    })
-  );
-  wall.position.y = 4;
-  g.add(wall);
-
-  const l1 = new THREE.PointLight(0x7fe7ff, 12, 60);
-  l1.position.set(0, 6, 10);
-  scene.add(l1);
-
-  const l2 = new THREE.PointLight(0xff2d7a, 10, 60);
-  l2.position.set(-10, 5, 0);
-  scene.add(l2);
-
   worldState.colliders = [floor];
   $log("[index] fallback world added ✅");
 }
 
-// ---------- XR hooks ----------
 function installXRHooks() {
   renderer.xr.addEventListener("sessionstart", () => {
     isXR = true;
@@ -483,38 +448,26 @@ function installXRHooks() {
   });
 }
 
-// ---------- main loop ----------
 function animate() {
   renderer.setAnimationLoop(() => {
     const dt = clock.getDelta();
-
     updateTeleportAim();
     updateLocomotion(dt);
 
-    try {
-      world?.update?.(dt);
-    } catch (e) {
-      $log("[world] update error ❌ " + (e?.message || e));
-      world = null;
-    }
+    try { world?.update?.(dt); } catch (e) { $log("[world] update error ❌ " + (e?.message || e)); world = null; }
 
     renderer.render(scene, camera);
   });
 }
 
-// ---------- boot ----------
 (async function boot() {
   try {
     await initThree();
     installXRHooks();
 
     const VRButton = await loadVRButton();
-    try {
-      document.body.appendChild(VRButton.createButton(renderer));
-      $log("[index] VRButton appended ✅");
-    } catch (e) {
-      $log("[index] VRButton append failed ❌ " + (e?.message || e));
-    }
+    document.body.appendChild(VRButton.createButton(renderer));
+    $log("[index] VRButton appended ✅");
 
     installControllers();
     ensureTeleportRing();
@@ -524,22 +477,10 @@ function animate() {
     world = await loadWorld();
 
     if (world) {
-      await world.init({
-        THREE,
-        scene,
-        renderer,
-        camera,
-        player,
-        controllers,
-        log: (m) => $log(m),
-        BUILD,
-      });
-
-      // colliders (World v7 exposes getter)
+      await world.init({ THREE, scene, renderer, camera, player, controllers, log: (m) => $log(m), BUILD });
       if (Array.isArray(world.colliders)) worldState.colliders = world.colliders;
       else if (typeof world.colliders === "function") worldState.colliders = world.colliders();
       else worldState.colliders = world.colliders || [];
-
       $log("[index] world init ✅");
     } else {
       buildFallbackWorld();

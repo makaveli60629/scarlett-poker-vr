@@ -1,10 +1,12 @@
-// /js/index.js — Scarlett INDEX MASTER (FULL) v1.0.3 (Quest fixes)
+// /js/index.js — Scarlett INDEX MASTER (FULL) v1.0.4 (Quest + Android Dual-Stick)
 // ✅ Controllers parented to PlayerRig (laser follows you; teleport/move no longer leaves lasers behind)
 // ✅ Right stick forward/back fixed (invert corrected)
 // ✅ Turning separated from strafing (can angle yourself)
 // ✅ Left stick = strafe, Right stick = forward/back, Right stick X = turn
 // ✅ Seated mode guard remains
 // ✅ World loader + fallback
+// ✅ Android: drag-look dev controls (non-XR)
+// ✅ Android: dual-stick move+look (non-XR), auto-hides in XR
 
 const BUILD = `INDEX_MASTER_${Date.now()}`;
 
@@ -82,7 +84,7 @@ let teleport = {
 let locomotion = {
   speed: 3.25,
   strafeSpeed: 3.0,
-  turnSpeed: 2.6, // more responsive
+  turnSpeed: 2.6,
   snapTurn: false,
   snapAngle: Math.PI / 6,
   snapCooldown: 220,
@@ -92,6 +94,9 @@ let locomotion = {
 let world = null;
 let worldState = { colliders: [] };
 let isXR = false;
+
+// ✅ Android dual-stick instance (non-XR)
+let androidSticks = null;
 
 (function ensureHUD() {
   if (document.getElementById("hud-log")) return;
@@ -323,8 +328,6 @@ function getYawQuat() {
 }
 
 function updateLocomotion(dt) {
-  // Standing always in lobby: we DO NOT change headset height ever.
-  // Only seated mode disables movement.
   if (window.__SEATED_MODE) return;
   if (!isXR) return;
 
@@ -335,9 +338,8 @@ function updateLocomotion(dt) {
   const rx = deadzone(R.x, 0.15);
   const ry = deadzone(R.y, 0.15);
 
-  // ✅ FIX: forward/back sign corrected
-  // You reported: pressing back moves forward -> invert
-  const forward = ry; // (was -ry)
+  // ✅ forward/back sign corrected
+  const forward = ry;
   const strafe = lx;
 
   const moveZ = forward * locomotion.speed;
@@ -348,7 +350,7 @@ function updateLocomotion(dt) {
 
   player.position.addScaledVector(dir, dt);
 
-  // ✅ Turning uses right stick X ONLY (so you can angle yourself)
+  // ✅ Turning uses right stick X ONLY
   if (locomotion.snapTurn) {
     const now = performance.now();
     if (Math.abs(rx) > 0.65 && now - locomotion.lastSnapAt > locomotion.snapCooldown) {
@@ -376,6 +378,7 @@ function updateTeleportAim() {
   showTeleportRing();
 }
 
+// ---------------- Android Dev Controls (look only, non-XR) ----------------
 let dev = { dragging: false, lastX: 0, lastY: 0, yaw: 0, pitch: 0 };
 function installAndroidDevControls() {
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -410,6 +413,119 @@ function installAndroidDevControls() {
   $log("[android] dev controls ready ✅");
 }
 
+// ---------------- Android Dual-Stick (move + look, non-XR) ----------------
+function installAndroidDualStick() {
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (!isMobile) return null;
+
+  const ui = document.createElement("div");
+  ui.id = "android-dualstick";
+  ui.style.cssText = `
+    position:fixed; inset:0; z-index:9998;
+    pointer-events:none; user-select:none;
+  `;
+  document.body.appendChild(ui);
+
+  function makeStick(side) {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = `
+      position:absolute; bottom:18px; ${side === "L" ? "left:18px" : "right:18px"};
+      width:150px; height:150px; border-radius:999px;
+      background:rgba(255,255,255,0.06);
+      border:1px solid rgba(255,255,255,0.18);
+      backdrop-filter: blur(6px);
+      pointer-events:auto; touch-action:none;
+    `;
+
+    const nub = document.createElement("div");
+    nub.style.cssText = `
+      position:absolute; left:50%; top:50%;
+      width:58px; height:58px; margin-left:-29px; margin-top:-29px;
+      border-radius:999px;
+      background:rgba(127,231,255,0.16);
+      border:1px solid rgba(255,255,255,0.22);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+    `;
+    wrap.appendChild(nub);
+    ui.appendChild(wrap);
+
+    const s = { ax: 0, ay: 0, down: false, cx: 0, cy: 0, nub };
+    const rad = 54;
+
+    const down = (e) => {
+      if (isXR) return;
+      s.down = true;
+      const t = e.touches ? e.touches[0] : e;
+      s.cx = t.clientX;
+      s.cy = t.clientY;
+      e.preventDefault();
+    };
+    const move = (e) => {
+      if (isXR) return;
+      if (!s.down) return;
+      const t = e.touches ? e.touches[0] : e;
+      let dx = t.clientX - s.cx;
+      let dy = t.clientY - s.cy;
+      const len = Math.hypot(dx, dy);
+      if (len > rad) { dx = dx / len * rad; dy = dy / len * rad; }
+      s.nub.style.transform = `translate(${dx}px, ${dy}px)`;
+      s.ax = dx / rad;
+      s.ay = dy / rad;
+      e.preventDefault();
+    };
+    const up = () => {
+      s.down = false;
+      s.nub.style.transform = `translate(0px, 0px)`;
+      s.ax = 0; s.ay = 0;
+    };
+
+    wrap.addEventListener("touchstart", down, { passive: false });
+    wrap.addEventListener("touchmove", move, { passive: false });
+    wrap.addEventListener("touchend", up);
+    wrap.addEventListener("touchcancel", up);
+
+    return s;
+  }
+
+  const L = makeStick("L"); // move
+  const R = makeStick("R"); // look
+
+  const state = { L, R, yaw: 0, pitch: 0 };
+
+  const api = {
+    setVisible(v) { ui.style.display = v ? "block" : "none"; },
+    tick(dt) {
+      if (isXR) { api.setVisible(false); return; }
+      api.setVisible(true);
+
+      const speed = 2.6;
+      const strafe = L.ax;
+      const forward = -L.ay;
+
+      const move = new THREE.Vector3(strafe, 0, forward);
+      if (move.lengthSq() > 0.0001) {
+        move.normalize().multiplyScalar(speed * dt);
+        const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), state.yaw);
+        move.applyQuaternion(q);
+        player.position.add(move);
+      }
+
+      const lookSpeed = 2.2;
+      state.yaw += R.ax * lookSpeed * dt;
+      state.pitch += (-R.ay) * lookSpeed * dt;
+      state.pitch = clamp(state.pitch, -1.1, 1.1);
+
+      player.rotation.y = state.yaw;
+      camera.rotation.set(state.pitch, 0, 0, "YXZ");
+    },
+    destroy() { ui.remove(); }
+  };
+
+  $log("[android] dual-stick installed ✅");
+  return api;
+}
+
+// ---------------- World loader + fallback ----------------
 async function loadWorld() {
   try {
     const mod = await import(`./world.js?v=${Date.now()}`);
@@ -451,10 +567,15 @@ function installXRHooks() {
 function animate() {
   renderer.setAnimationLoop(() => {
     const dt = clock.getDelta();
+
     updateTeleportAim();
     updateLocomotion(dt);
 
-    try { world?.update?.(dt); } catch (e) { $log("[world] update error ❌ " + (e?.message || e)); world = null; }
+    // ✅ mobile move/look when NOT in XR
+    androidSticks?.tick?.(dt);
+
+    try { world?.update?.(dt); }
+    catch (e) { $log("[world] update error ❌ " + (e?.message || e)); world = null; }
 
     renderer.render(scene, camera);
   });
@@ -471,7 +592,9 @@ function animate() {
 
     installControllers();
     ensureTeleportRing();
+
     installAndroidDevControls();
+    androidSticks = installAndroidDualStick();
 
     $log("[index] calling world.init() …");
     world = await loadWorld();

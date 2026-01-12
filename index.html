@@ -1,49 +1,119 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
-  <title>Scarlett Poker VR</title>
+// /js/index.js — Scarlett INDEX (MODULAR) v2.0
+// Small boot file. Heavy logic moved into /core modules.
+// Works on Android dev (dual-stick visible) + Quest XR.
 
-  <style>
-    html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#000; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; }
-    canvas { display:block; }
+import { createLogger } from "../core/logger.js";
+import { initThree } from "../core/three_boot.js";
+import { loadVRButtonAndAppend } from "../core/xr_controls.js";
+import { installAndroidControls } from "../core/android_controls.js";
+import { installXRControls } from "../core/xr_controls.js";
+import { createTeleportArcSystem } from "../core/teleport_arc.js";
 
-    /* Debug HUD */
-    #dbg {
-      position: fixed; left: 12px; top: 12px; right: 12px;
-      max-height: 44vh;
-      overflow: auto;
-      padding: 10px 12px;
-      border-radius: 14px;
-      background: rgba(10,12,18,.72);
-      color: #e8ecff;
-      font-size: 12px;
-      line-height: 1.35;
-      border: 1px solid rgba(255,255,255,.10);
-      box-shadow: 0 12px 40px rgba(0,0,0,.45);
-      white-space: pre-wrap;
-      z-index: 9999;
-      user-select: text;
+const BUILD = `INDEX_MODULAR_${Date.now()}`;
+
+const log = createLogger({ title: "Scarlett VR Poker — HUD" });
+log(`[index] runtime start ✅ build=${BUILD}`);
+log(`[env] href=${location.href}`);
+log(`[env] secureContext=${String(window.isSecureContext)}`);
+log(`[env] ua=${navigator.userAgent}`);
+log(`[env] navigator.xr=${String(!!navigator.xr)}`);
+
+let world = null;
+let worldState = { colliders: [] };
+
+(async function boot() {
+  try {
+    const core = await initThree({ log });
+    const { THREE, scene, renderer, camera, player, clock } = core;
+
+    // XR session tracking
+    let isXR = false;
+    renderer.xr.addEventListener("sessionstart", () => { isXR = true; log("[xr] sessionstart ✅"); });
+    renderer.xr.addEventListener("sessionend", () => { isXR = false; log("[xr] sessionend ✅"); });
+
+    // VRButton
+    await loadVRButtonAndAppend({ renderer, log });
+
+    // XR controllers + locomotion
+    const xr = installXRControls({ THREE, renderer, scene, camera, player, log });
+
+    // Android controls (ALWAYS visible in non-XR)
+    const android = installAndroidControls({ THREE, renderer, camera, player, log });
+
+    // Teleport arc system (ARC collision targeting)
+    const teleport = createTeleportArcSystem({
+      THREE, scene, camera, player, renderer,
+      controllers: xr.controllers,
+      getColliders: () => worldState.colliders,
+      log
+    });
+
+    // World loader
+    log("[index] calling world.init() …");
+    world = await loadWorld({ log });
+
+    if (world) {
+      await world.init({
+        THREE, scene, renderer, camera, player,
+        controllers: xr.controllers,
+        log: (m) => log(m),
+        BUILD
+      });
+
+      // colliders handshake
+      if (Array.isArray(world.colliders)) worldState.colliders = world.colliders;
+      else if (typeof world.colliders === "function") worldState.colliders = world.colliders();
+      else worldState.colliders = world.colliders || [];
+
+      log("[index] world init ✅");
+    } else {
+      buildFallbackWorld({ THREE, scene, log, worldState });
     }
-    #dbg .ok { color:#4cd964; }
-    #dbg .warn { color:#ffcc00; }
-    #dbg .bad { color:#ff6b6b; }
 
-    /* Mobile sticks space – you already use touch controls, keep room */
-    #touchpad {
-      position: fixed; left: 0; right: 0; bottom: 0;
-      height: 40vh;
-      pointer-events: none;
-      z-index: 10;
-    }
-  </style>
-</head>
+    // Main loop
+    renderer.setAnimationLoop(() => {
+      const dt = clock.getDelta();
 
-<body>
-  <div id="dbg">[HTML] loaded ✅ (waiting for /js/boot.js…)</div>
-  <div id="touchpad"></div>
+      // Update systems
+      teleport.update({ seated: window.__SEATED_MODE === true });
+      xr.update(dt, { seated: window.__SEATED_MODE === true, isXR });
+      android.update(dt, { isXR });
 
-  <script type="module" src="./js/boot.js"></script>
-</body>
-</html>
+      try { world?.update?.(dt); } catch (e) {
+        log("[world] update error ❌ " + (e?.message || e));
+      }
+
+      renderer.render(scene, camera);
+    });
+
+  } catch (e) {
+    log("[index] fatal boot error ❌ " + (e?.message || e));
+  }
+})();
+
+async function loadWorld({ log }) {
+  try {
+    const mod = await import(`./world.js?v=${Date.now()}`);
+    if (!mod?.World?.init) throw new Error("World module missing init()");
+    return mod.World;
+  } catch (e) {
+    log(`[index] world init failed ❌ ${e?.message || e}`);
+    return null;
+  }
+}
+
+function buildFallbackWorld({ THREE, scene, log, worldState }) {
+  const g = new THREE.Group();
+  g.name = "FallbackWorld";
+  scene.add(g);
+
+  const floor = new THREE.Mesh(
+    new THREE.CircleGeometry(30, 96),
+    new THREE.MeshStandardMaterial({ color: 0x111326, roughness: 1, metalness: 0.05 })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  g.add(floor);
+
+  worldState.colliders = [floor];
+  log("[index] fallback world added ✅");
+}

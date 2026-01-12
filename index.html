@@ -1,105 +1,115 @@
-<!-- /index.html — Scarlett Poker VR (MODULAR) FULL -->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
   <title>Scarlett Poker VR</title>
-  <meta name="theme-color" content="#05060a" />
 
   <style>
-    html, body { margin:0; padding:0; height:100%; background:#05060a; overflow:hidden; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; color:#e8ecff; }
-    canvas { display:block; width:100vw; height:100vh; }
+    html, body { margin:0; padding:0; height:100%; background:#05060a; overflow:hidden; }
+    canvas { display:block; }
 
     /* HUD log */
     #hud {
-      position: fixed; left: 10px; bottom: 10px;
+      position: fixed;
+      left: 10px; bottom: 10px;
       width: min(560px, 92vw);
       max-height: 42vh;
-      background: rgba(10,12,18,0.65);
+      background: rgba(10,12,18,0.70);
       border: 1px solid rgba(255,255,255,0.12);
       border-radius: 14px;
       padding: 10px;
-      z-index: 9999;
-      backdrop-filter: blur(6px);
-      box-shadow: 0 12px 40px rgba(0,0,0,0.45);
-      pointer-events: auto;
-    }
-    #hudTop { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
-    #hudTitle { font-weight:700; flex:1; }
-    #hudBtn {
-      padding: 7px 10px; border-radius: 12px;
-      border: 1px solid rgba(255,255,255,0.18);
-      background: rgba(127,231,255,0.14);
-      color:#e8ecff; cursor:pointer;
-    }
-    #hudLog {
-      margin:0;
-      white-space:pre-wrap;
-      line-height:1.25;
-      max-height: 32vh;
-      overflow:auto;
+      color: #e8ecff;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 12px;
+      z-index: 9999;
+      backdrop-filter: blur(6px);
     }
+    #hud .row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+    #hud .title { font-weight:800; flex:1; }
+    #hud button {
+      padding: 6px 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(127,231,255,0.12);
+      color: #e8ecff;
+      cursor: pointer;
+    }
+    #hud pre { margin:0; white-space:pre-wrap; line-height:1.25; max-height:32vh; overflow:auto; }
 
-    /* Android sticks */
-    #touchUI {
-      position: fixed; left:0; top:0; right:0; bottom:0;
-      pointer-events:none; z-index: 9998;
+    /* Android sticks UI (always non-tilting, fixed on screen) */
+    #sticks {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      height: 44vh;
+      pointer-events: none; /* only children capture */
+      z-index: 9998;
     }
     .stick {
-      position:absolute;
-      width: 150px; height: 150px;
+      position: absolute;
+      bottom: 18px;
+      width: 140px; height: 140px;
+      pointer-events: auto;
+      touch-action: none;
+      user-select: none;
+    }
+    #stickL { left: 14px; }
+    #stickR { right: 14px; }
+
+    .base {
+      position:absolute; inset:0;
       border-radius: 999px;
       background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.12);
-      backdrop-filter: blur(6px);
-      pointer-events:auto;
-      touch-action:none;
+      border: 1px solid rgba(255,255,255,0.14);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
     }
-    .stick .nub {
+    .nub {
       position:absolute;
-      width: 62px; height: 62px;
-      left: 50%; top: 50%;
-      transform: translate(-50%, -50%);
+      left:50%; top:50%;
+      width: 56px; height: 56px;
+      margin-left: -28px; margin-top: -28px;
       border-radius: 999px;
-      background: rgba(127,231,255,0.14);
-      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(127,231,255,0.18);
+      border: 1px solid rgba(127,231,255,0.40);
+      box-shadow: 0 12px 28px rgba(0,0,0,0.35);
+      transform: translate(0px, 0px);
+    }
+    .label {
+      position:absolute;
+      left: 50%; transform: translateX(-50%);
+      top: -24px;
+      font: 600 12px system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      color: rgba(232,236,255,0.75);
+      letter-spacing: .3px;
     }
 
-    #stickLeft { left: 16px; bottom: 16px; }
-    #stickRight { right: 16px; bottom: 16px; }
-
-    #touchHint {
-      position: fixed; left: 50%; top: 10px;
-      transform: translateX(-50%);
-      background: rgba(10,12,18,0.6);
-      border: 1px solid rgba(255,255,255,0.12);
-      padding: 8px 12px;
-      border-radius: 14px;
-      font-size: 12px;
-      z-index: 9997;
-      pointer-events:none;
+    /* Hide sticks on non-mobile */
+    @media (min-width: 900px) {
+      #sticks { display:none; }
     }
-
-    .hidden { display:none !important; }
   </style>
 </head>
 <body>
-  <div id="touchHint" class="hidden">Android Dev: Left stick strafe, Right stick move/turn</div>
-
-  <div id="touchUI" class="hidden">
-    <div id="stickLeft" class="stick"><div class="nub"></div></div>
-    <div id="stickRight" class="stick"><div class="nub"></div></div>
-  </div>
 
   <div id="hud">
-    <div id="hudTop">
-      <div id="hudTitle">Scarlett Poker VR — HUD</div>
-      <button id="hudBtn">Copy Log</button>
+    <div class="row">
+      <div class="title">Scarlett VR Poker — HUD</div>
+      <button id="copyBtn">Copy Log</button>
     </div>
-    <pre id="hudLog"></pre>
+    <pre id="hud-log"></pre>
+  </div>
+
+  <div id="sticks">
+    <div id="stickL" class="stick">
+      <div class="label">MOVE</div>
+      <div class="base"></div>
+      <div class="nub"></div>
+    </div>
+    <div id="stickR" class="stick">
+      <div class="label">LOOK</div>
+      <div class="base"></div>
+      <div class="nub"></div>
+    </div>
   </div>
 
   <script type="module" src="./js/index.js"></script>

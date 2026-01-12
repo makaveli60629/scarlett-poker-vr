@@ -2,121 +2,55 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Scarlett VR Poker</title>
-<!-- REQUIRED: allow any leftover `import "three"` to resolve -->
-<script async src="https://unpkg.com/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
-
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/examples/jsm/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-  }
-}
-</script>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
+  <title>Scarlett Poker VR</title>
   <style>
-    :root{
-      --bg:#05060a;
-      --text:#e8ecff;
-      --muted:#98a0c7;
-      --aqua:#7fe7ff;
-      --ok:#4cd964;
-      --bad:#ff6b6b;
-    }
-    html, body {
-      margin:0; padding:0; height:100%;
-      background:var(--bg);
-      overflow:hidden;
-      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      color:var(--text);
-    }
-    canvas{ display:block; }
-
-    #hud{
+    html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; font-family:system-ui,Segoe UI,Roboto,Arial; }
+    #stage { position:fixed; inset:0; }
+    #bootlog{
       position:fixed; left:12px; right:12px; top:12px;
-      border-radius:22px;
-      padding:12px;
-      z-index:10;
-      background:rgba(8,10,18,.82);
-      border:1px solid rgba(127,231,255,.14);
-      backdrop-filter: blur(10px);
-      box-shadow: 0 14px 40px rgba(0,0,0,.55);
+      max-height:44vh; overflow:auto;
+      background:rgba(10,12,18,.65); color:#e8ecff;
+      border:1px solid rgba(127,231,255,.25);
+      border-radius:14px; padding:10px 12px; z-index:99999;
+      backdrop-filter: blur(8px);
+      font-size:12px; line-height:1.35;
+      white-space:pre-wrap;
     }
-    #row1{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-    .pill{
-      padding:8px 12px;
-      border-radius:999px;
-      border:1px solid rgba(255,255,255,.12);
-      background:rgba(10,14,24,.55);
-      font-weight:900;
-      font-size:13px;
-    }
-    #perf{ color:var(--muted); font-weight:800; }
-    button{
-      border-radius:14px;
-      border:1px solid rgba(255,255,255,.14);
-      background:rgba(10,14,24,.55);
-      color:var(--text);
-      padding:10px 12px;
-      font-weight:900;
-      font-size:13px;
-      cursor:pointer;
-    }
-    #log{
-      margin-top:10px;
-      white-space:pre;
-      font-size:12px;
-      line-height:1.25;
-      max-height:260px;
-      overflow:auto;
-      padding:10px;
-      border-radius:16px;
-      background:rgba(0,0,0,.35);
-      border:1px solid rgba(255,255,255,.10);
-    }
-
-    /* Android sticks */
-    #stickL,#stickR{
-      position:fixed; bottom:18px;
-      width:132px; height:132px;
-      border-radius:50%;
-      background:rgba(127,231,255,.08);
-      border:1px solid rgba(127,231,255,.22);
-      z-index:9;
-      touch-action:none;
-      user-select:none;
-      -webkit-user-select:none;
-    }
-    #stickL{ left:18px; }
-    #stickR{ right:18px; }
   </style>
 </head>
 <body>
-  <div id="hud">
-    <div id="row1">
-      <span class="pill">Scarlett VR Poker</span>
-      <span class="pill" id="xrstat">XR</span>
-      <span class="pill" id="modestat">Mode</span>
-      <span class="pill" id="perf">Perf</span>
+  <div id="stage"></div>
+  <div id="bootlog">[HTML] loaded ✅ (waiting for ./js/boot.js…)\n</div>
 
-      <button id="diagBtn">🩺 Diagnostics</button>
-      <button id="dumpBtn">🌳 Dump</button>
-      <button id="copyBtn">📋 Copy</button>
-      <button id="clearBtn">🧹 Clear</button>
+  <script>
+    // On-screen logger (works in Quest)
+    (function(){
+      const el = document.getElementById('bootlog');
+      window.__BOOTLOG__ = function(msg){
+        try{
+          const t = new Date().toLocaleTimeString();
+          el.textContent += `[${t}] ${msg}\n`;
+          el.scrollTop = el.scrollHeight;
+        }catch(e){}
+      };
+      __BOOTLOG__(`href=${location.href}`);
+      __BOOTLOG__(`secureContext=${window.isSecureContext}`);
+      __BOOTLOG__(`ua=${navigator.userAgent}`);
+    })();
+  </script>
 
-      <label class="pill" style="display:flex;gap:8px;align-items:center;">
-        <input type="checkbox" id="safeMode" />
-        SAFE MODE
-      </label>
-    </div>
-    <div id="log">[HTML] loaded ✅ (waiting for /js/boot.js…)</div>
-  </div>
-
-  <div id="stickL"></div>
-  <div id="stickR"></div>
-
-  <!-- This is the ONLY script tag. All JS lives in /js -->
-  <script type="module" src="./js/boot.js"></script>
+  <!-- IMPORTANT: RELATIVE path (./js/boot.js), NOT /js/boot.js -->
+  <script type="module">
+    const v = Date.now();
+    const url = `./js/boot.js?v=${v}`;
+    __BOOTLOG__(`importing ${url} …`);
+    import(url).then(() => {
+      __BOOTLOG__(`boot.js imported ✅`);
+    }).catch((e) => {
+      __BOOTLOG__(`boot.js import FAILED ❌ ${e?.message || e}`);
+      console.error(e);
+    });
+  </script>
 </body>
 </html>

@@ -1,17 +1,27 @@
-// /js/index.js — Scarlett MASTER 6.5 (FULL)
-// ✅ Permanent: uses default THREE import from ./three.js (no bare "three" anywhere)
-// ✅ Quest: thumbstick locomotion + 45° snap-turn + laser + floor teleport ring + trigger teleports
+// /js/index.js — Scarlett MASTER 6.6 (FULL, TDZ-FIXED)
+// ✅ No bare "three" imports (uses ./three.js wrapper)
+// ✅ FIXED: welcomeEl TDZ crash (declared BEFORE any use)
+// ✅ Quest: laser + floor ring teleport + trigger teleport
+// ✅ Quest: left stick move + right stick 45° snap-turn
 // ✅ Android: dual touch sticks (move + turn)
 // ✅ Desktop: WASD + mouse look (pointer lock)
-// ✅ HUD: Welcome + Diagnostics + Copy + Spawn buttons
-// ✅ Clean Mode: HIDE EVERYTHING (HUD + VR button + touch sticks + bootlog)
+// ✅ HUD: Welcome + Diagnostics + Copy + Spawn + Clean Mode ("HIDE EVERYTHING")
 
-import THREE, { VRButton } from "./three.js";
+import { THREE, VRButton } from "./three.js";
 import { World } from "./world.js";
 
-const BUILD = "MASTER 6.5 (Laser Teleport + 45° Snap Turn + VIP Spawn + HUD Pack)";
+const BUILD = "MASTER 6.6 (TDZ fixed + Laser Teleport + 45° Snap + VIP Spawn + HUD)";
 const log = (...a) => console.log(...a);
 
+// ======================
+// WELCOME HUD STATE (MUST BE DECLARED EARLY)
+// ======================
+let welcomeEl = null;
+let welcomeT = 0;
+
+// ======================
+// CORE
+// ======================
 let scene, camera, renderer, player, clock;
 
 // UI handles
@@ -36,7 +46,7 @@ const touch = {
 
 const MOVE_SPEED = 2.6;
 
-// Snap turn config (Quest)
+// Quest snap turn
 let snapCooldown = 0;
 const SNAP_ANGLE = Math.PI / 4; // 45°
 const SNAP_DEAD = 0.75;
@@ -79,7 +89,7 @@ function init() {
   renderer.xr.enabled = true;
   document.body.appendChild(renderer.domElement);
 
-  // VR button (store handle for clean mode)
+  // VR button
   vrBtnEl = VRButton.createButton(renderer);
   document.body.appendChild(vrBtnEl);
 
@@ -94,7 +104,7 @@ function init() {
   // Teleport laser (Quest)
   installTeleportLaser();
 
-  // Spawn in VIP (pink) facing table (world sets yaw)
+  // Spawn in VIP (pink) facing table (world provides yaw)
   resetToVIP();
 
   renderer.xr.addEventListener("sessionstart", () => {
@@ -119,7 +129,7 @@ function init() {
   writeHUD("build", BUILD);
   writeHUD("secure", String(window.isSecureContext));
   writeHUD("ua", navigator.userAgent);
-  writeHUD("controls", "Quest: LeftStick=Move, RightStick=SnapTurn 45°, Trigger=Teleport | H=Hide UI");
+  writeHUD("controls", "Quest: LStick=Move, RStick=SnapTurn 45°, Trigger=Teleport | H=Hide UI");
 
   showWelcome("Scarlett VR Poker — Loading VIP Lobby…");
 
@@ -208,11 +218,11 @@ function moveTick(dt) {
         // pick stronger stick as move
         const mx = (m23 > m01) ? a2 : a0;
         const my = (m23 > m01) ? a3 : a1;
-        const mag = Math.abs(mx) + Math.abs(my);
 
         // other stick X becomes turn input
         const tx = (m23 > m01) ? a0 : a2;
 
+        const mag = Math.abs(mx) + Math.abs(my);
         if (mag > best.mag) best = { mag, mx, my, tx, axes: a.slice(0, 6) };
       }
 
@@ -311,7 +321,7 @@ function installTeleportLaser() {
   tp.c1 = renderer.xr.getController(1);
   scene.add(tp.c0, tp.c1);
 
-  // laser lines
+  // visible laser lines
   const pts = [new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)];
   const geo = new THREE.BufferGeometry().setFromPoints(pts);
   const mat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.9 });
@@ -376,10 +386,10 @@ function updateTeleportLaser() {
 // ======================
 // HUD (Welcome + Diagnostics)
 // ======================
-let welcomeEl = null;
-let welcomeT = 0;
-
 function showWelcome(text) {
+  // Bulletproof guards
+  if (!document.body) return;
+
   if (!welcomeEl) {
     welcomeEl = document.createElement("div");
     welcomeEl.style.position = "fixed";
@@ -397,11 +407,13 @@ function showWelcome(text) {
     welcomeEl.style.fontSize = "13px";
     welcomeEl.style.fontWeight = "700";
     welcomeEl.style.userSelect = "none";
+    welcomeEl.style.pointerEvents = "none";
     document.body.appendChild(welcomeEl);
   }
+
   welcomeEl.textContent = text;
   welcomeEl.style.opacity = "1";
-  welcomeT = 6.0; // seconds
+  welcomeT = 6.0;
 }
 
 function installHUD() {
@@ -481,13 +493,15 @@ function installHUD() {
     const k = e.key.toLowerCase();
     if (k === "r") resetToVIP();
     if (k === "h") setCleanMode(!cleanMode);
-    if (k === "t") tp.enabled = !tp.enabled;
+    if (k === "t") {
+      tp.enabled = !tp.enabled;
+      const b = hud.querySelector("#btnTp");
+      if (b) b.textContent = tp.enabled ? "Teleport: ON" : "Teleport: OFF";
+    }
   });
 }
 
-function writeHUD(key, value) {
-  hudLines.set(key, value);
-}
+function writeHUD(key, value) { hudLines.set(key, value); }
 
 function updateHUD(dt) {
   // welcome fade
@@ -502,7 +516,7 @@ function updateHUD(dt) {
   writeHUD("mode", renderer.xr.isPresenting ? "XR" : "2D");
   writeHUD("pos", `${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)}`);
   writeHUD("yaw", `${player.rotation.y.toFixed(2)}`);
-  writeHUD("snap", `45° (cooldown ${(Math.max(0,snapCooldown)).toFixed(2)}s)`);
+  writeHUD("snap", `45° (cooldown ${Math.max(0,snapCooldown).toFixed(2)}s)`);
 
   if (hudBody) hudBody.textContent = [...hudLines.entries()].map(([k,v]) => `${k}: ${v}`).join("\n");
 }

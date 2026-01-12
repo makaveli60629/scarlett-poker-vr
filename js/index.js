@@ -2,7 +2,8 @@
 import { createLogger } from "../core/logger.js";
 import { initThree } from "../core/three_boot.js";
 import { installControls, updateControls } from "../core/controls.js";
-
+import { installControls, updateControls } from "../core/controls.js";
+import { createLogger } from "../core/logger.js";
 const BUILD = `INDEX_MODULAR_${Date.now()}`;
 const log = createLogger({ maxLines: 90 });
 

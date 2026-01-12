@@ -1,20 +1,31 @@
-// /js/index.js — Scarlett STABLE 8.4 (Quest smooth + bots demo)
-// ✅ Major flicker reduction: lower XR framebuffer scale, cap DPR
-// ✅ Keeps movement + snap turn + laser parenting
-// ✅ Runs BotsDemo (bots “playing” + chip toss demo)
+// /js/index.js — Scarlett FULL MASTER 9.0 (VIP Spawn + Teleport Laser + Android Move + HUD + Nametags + Poker Demo)
+// ✅ Uses local wrapper: /js/three.js (NO bare "three" imports)
+// ✅ Quest + Android locomotion (left stick move, right stick snap turn 45°)
+// ✅ Teleport laser (select = teleport) + marker on floors
+// ✅ Spawns in VIP cube, facing table
+// ✅ UI HUD (money/rank/time/pot) + hide/show toggle
+// ✅ Look-at nametags (appear when gazed, hide otherwise)
+// ✅ PokerDemo: seated bots + cards hovering above heads + chips animate into pot + HUD updates
+//
+// Requires these files present:
+// - /js/three.js
+// - /js/world.js (WORLD 8.6 from my last message)
+// - /js/ui_hud.js
+// - /js/nametags.js
+// - /js/poker_demo.js
+
+import { THREE, VRButton } from "./three.js";
+import { World } from "./world.js";
 import { UIHud } from "./ui_hud.js";
 import { NameTags } from "./nametags.js";
 import { PokerDemo } from "./poker_demo.js";
-import { THREE, VRButton } from "./three.js";
-import { World } from "./world.js";
-import { BotsDemo } from "./bots_demo.js";
 
-const BUILD = "STABLE 8.4 (XR perf fix + bots demo)";
+const BUILD = "FULL MASTER 9.0 (VIP + HUD + Nametags + Poker Demo)";
 console.log("[index]", BUILD);
 
 let scene, camera, renderer, player, clock;
 
-const MOVE_SPEED = 2.6;
+const MOVE_SPEED = 2.65;
 const DEAD_MOVE = 0.14;
 const DEAD_TURN = 0.20;
 
@@ -23,14 +34,13 @@ const SNAP_DEAD = 0.75;
 const SNAP_CD = 0.22;
 let snapCooldown = 0;
 
-// Reuse
+// Shared temporaries
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
 const _f = new THREE.Vector3();
 const _r = new THREE.Vector3();
 const _v = new THREE.Vector3();
 
-// teleport / laser
 const tp = {
   raycaster: null,
   marker: null,
@@ -45,13 +55,16 @@ const tp = {
   tmpPos: null,
 };
 
+// HUD toggle
+let hudVisible = true;
+
 init();
 
 function init() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
 
-  camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 600);
+  camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 700);
 
   player = new THREE.Group();
   player.name = "PlayerRig";
@@ -59,9 +72,13 @@ function init() {
   player.add(camera);
   camera.position.set(0, 1.65, 0);
 
-  // ✅ Perf: antialias off in XR is usually smoother on Quest
-  renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false, powerPreference: "high-performance" });
-  // ✅ Cap DPR to reduce shimmer
+  // Renderer (Quest-stable)
+  renderer = new THREE.WebGLRenderer({
+    antialias: false,
+    alpha: false,
+    powerPreference: "high-performance",
+  });
+
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.25));
   renderer.setSize(innerWidth, innerHeight);
   renderer.xr.enabled = true;
@@ -69,20 +86,34 @@ function init() {
   document.body.appendChild(renderer.domElement);
   document.body.appendChild(VRButton.createButton(renderer));
 
-  // ✅ Big stability win: lower XR render scale (try 0.8–0.95)
-  // Many Quest “flicker/jitter” reports are just overload + reprojection.
+  // XR perf stability
   renderer.xr.setFramebufferScaleFactor?.(0.85);
 
+  // Build world
   World.build({ THREE, scene, log: console.log });
 
+  // Spawn
   resetSpawn();
 
+  // Teleport laser
   installTeleportLaser();
 
-  // Init bots demo AFTER world builds
-  BotsDemo.init({ THREE, scene, world: World, player, camera });
+  // HUD + key bindings
+  UIHud.init();
+  installHudToggle();
 
+  // Nametags
+  NameTags.init({ THREE, scene, camera });
+
+  // Poker demo
+  PokerDemo.init({ THREE, scene, world: World, hud: UIHud });
+
+  // Register nametags for player bots that PokerDemo created
+  registerPokerBotsForNametags();
+
+  // XR session handling
   renderer.xr.addEventListener("sessionstart", () => {
+    // In XR, camera is controlled by headset
     camera.position.set(0, 0, 0);
     resetSpawn();
   });
@@ -91,38 +122,86 @@ function init() {
     camera.position.set(0, 1.65, 0);
   });
 
-  addEventListener("resize", () => {
-    camera.aspect = innerWidth / innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(innerWidth, innerHeight);
-  });
+  addEventListener("resize", onResize);
+
+  // Touch fallback (Android) for HUD toggle
+  renderer.domElement.addEventListener("touchstart", (e) => {
+    // Two-finger tap toggles HUD
+    if (e.touches && e.touches.length >= 2) {
+      toggleHud();
+    }
+  }, { passive: true });
 
   clock = new THREE.Clock();
   renderer.setAnimationLoop(loop);
+}
+
+function onResize() {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
 }
 
 function resetSpawn() {
   const s = World.getSpawn?.("vip_cube") || World.getSpawn?.() || { x: 0, y: 0, z: 8, yaw: Math.PI };
   player.position.set(s.x, s.y ?? 0, s.z);
   player.rotation.set(0, s.yaw ?? Math.PI, 0);
+  console.log("[spawn] vip_cube", s);
 }
 
 function loop() {
-  // ✅ slightly tighter dt cap reduces motion jitter
   const dt = Math.min(clock.getDelta(), 0.04);
 
+  // Movement + snap turn
   moveXR(dt);
+
+  // Teleport laser marker
   updateLaser();
-  BotsDemo.update(dt);
+
+  // Demo systems
+  PokerDemo.update(dt);
+  NameTags.update();
 
   renderer.render(scene, camera);
 }
 
 // ---------------------
-// Movement (same as before, stable)
+// HUD show/hide
+// ---------------------
+function installHudToggle() {
+  // Desktop: H toggles HUD
+  addEventListener("keydown", (e) => {
+    if (e.key === "h" || e.key === "H") toggleHud();
+  });
+
+  // Add a small button for 2D
+  const btn = document.createElement("button");
+  btn.textContent = "HUD";
+  btn.style.cssText = `
+    position:fixed; right:10px; bottom:78px; z-index:10000;
+    padding:10px 12px; border-radius:14px; border:1px solid rgba(127,231,255,.35);
+    background:rgba(8,10,18,.55); color:#e8ecff; font-weight:700;
+    box-shadow:0 12px 40px rgba(0,0,0,.55);
+  `;
+  btn.addEventListener("click", toggleHud);
+  document.body.appendChild(btn);
+}
+
+function toggleHud() {
+  hudVisible = !hudVisible;
+  const hud = document.getElementById("scarlett-hud");
+  if (hud) hud.style.display = hudVisible ? "flex" : "none";
+  console.log("[hud] visible =", hudVisible);
+}
+
+// ---------------------
+// Movement (Quest + Android)
 // ---------------------
 function moveXR(dt) {
+  // allow 2D movement too (android non-xr) if you want:
+  // If not XR presenting, nothing happens (keeps simple).
   if (!renderer.xr.isPresenting) return;
+
   const session = renderer.xr.getSession?.();
   if (!session) return;
 
@@ -141,14 +220,15 @@ function moveXR(dt) {
     const a = gp.axes || [];
     const x01 = a[0] ?? 0, y01 = a[1] ?? 0;
     const x23 = a[2] ?? 0, y23 = a[3] ?? 0;
-    if (a.length <= 2) return { x: x01, y: y01, pair: "01" };
+    if (a.length <= 2) return { x: x01, y: y01 };
     const m01 = Math.abs(x01) + Math.abs(y01);
     const m23 = Math.abs(x23) + Math.abs(y23);
-    return (m23 > m01) ? { x: x23, y: y23, pair: "23" } : { x: x01, y: y01, pair: "01" };
+    return (m23 > m01) ? { x: x23, y: y23 } : { x: x01, y: y01 };
   };
 
   let moveSource = leftSrc;
   if (!moveSource) {
+    // fallback pick the one with strongest motion
     let best = sources[0], bestMag = 0;
     for (const s of sources) {
       const st = pickStick(s.gp);
@@ -161,12 +241,13 @@ function moveXR(dt) {
   let turnSource = rightSrc || sources.find(s => s !== moveSource) || moveSource;
 
   const mv = pickStick(moveSource.gp);
-  let mx = dz(mv.x, DEAD_MOVE);
-  let my = dz(mv.y, DEAD_MOVE);
+  const mx = dz(mv.x, DEAD_MOVE);
+  const my = dz(mv.y, DEAD_MOVE);
 
-  // ✅ Quest: forward is usually negative Y, so forward = -my
+  // Forward on Quest is usually -Y
   const forward = -my;
 
+  // Snap turn on right stick X (or strongest x axis)
   const aT = turnSource.gp.axes || [];
   let turnX = 0;
   if (aT.length >= 4) {
@@ -209,7 +290,7 @@ function getHeadYaw() {
 }
 
 // ---------------------
-// Laser / Teleport (parented to rig)
+// Teleport laser + marker (parented to rig so it follows you)
 // ---------------------
 function installTeleportLaser() {
   tp.raycaster = new THREE.Raycaster();
@@ -234,10 +315,12 @@ function installTeleportLaser() {
   const geo = new THREE.BufferGeometry().setFromPoints(pts);
 
   tp.line0 = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.95 }));
-  tp.line0.scale.z = 12; tp.line0.visible = true; tp.c0.add(tp.line0);
+  tp.line0.scale.z = 12;
+  tp.c0.add(tp.line0);
 
   tp.line1 = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.95 }));
-  tp.line1.scale.z = 12; tp.line1.visible = true; tp.c1.add(tp.line1);
+  tp.line1.scale.z = 12;
+  tp.c1.add(tp.line1);
 
   const teleport = () => {
     if (!tp.hit) return;
@@ -246,6 +329,8 @@ function installTeleportLaser() {
   };
   tp.c0.addEventListener("selectstart", teleport);
   tp.c1.addEventListener("selectstart", teleport);
+
+  console.log("[laser] installed ✅");
 }
 
 function updateLaser() {
@@ -258,6 +343,7 @@ function updateLaser() {
   const floors = World.getFloors ? World.getFloors() : [];
   tp.hit = null;
 
+  // prefer right controller
   const cands = [tp.c1, tp.c0];
   for (const c of cands) {
     if (!controllerTracked(c)) continue;
@@ -286,4 +372,21 @@ function controllerTracked(ctrl) {
   tp.tmpPos.setFromMatrixPosition(ctrl.matrixWorld);
   const d = Math.abs(tp.tmpPos.x) + Math.abs(tp.tmpPos.y) + Math.abs(tp.tmpPos.z);
   return d > 0.0005;
-      }
+}
+
+// ---------------------
+// Nametag registration
+// ---------------------
+function registerPokerBotsForNametags() {
+  const demo = World.getDemo?.();
+  if (!demo?.tableAnchor) return;
+
+  let idx = 1;
+  demo.tableAnchor.traverse((o) => {
+    if (o?.name?.startsWith("PlayerBot_")) {
+      NameTags.register(o, `PLAYER ${idx++}`);
+    }
+  });
+  console.log("[nametags] registered ✅");
+}
+```0

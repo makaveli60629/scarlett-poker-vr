@@ -1,119 +1,256 @@
-// /js/index.js — Scarlett INDEX (MODULAR) v2.0
-// Small boot file. Heavy logic moved into /core modules.
-// Works on Android dev (dual-stick visible) + Quest XR.
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta
+    name="viewport"
+    content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"
+  />
+  <meta name="theme-color" content="#05060a" />
+  <title>Scarlett Poker VR</title>
 
-import { createLogger } from "../core/logger.js";
-import { initThree } from "../core/three_boot.js";
-import { loadVRButtonAndAppend } from "../core/xr_controls.js";
-import { installAndroidControls } from "../core/android_controls.js";
-import { installXRControls } from "../core/xr_controls.js";
-import { createTeleportArcSystem } from "../core/teleport_arc.js";
-
-const BUILD = `INDEX_MODULAR_${Date.now()}`;
-
-const log = createLogger({ title: "Scarlett VR Poker — HUD" });
-log(`[index] runtime start ✅ build=${BUILD}`);
-log(`[env] href=${location.href}`);
-log(`[env] secureContext=${String(window.isSecureContext)}`);
-log(`[env] ua=${navigator.userAgent}`);
-log(`[env] navigator.xr=${String(!!navigator.xr)}`);
-
-let world = null;
-let worldState = { colliders: [] };
-
-(async function boot() {
-  try {
-    const core = await initThree({ log });
-    const { THREE, scene, renderer, camera, player, clock } = core;
-
-    // XR session tracking
-    let isXR = false;
-    renderer.xr.addEventListener("sessionstart", () => { isXR = true; log("[xr] sessionstart ✅"); });
-    renderer.xr.addEventListener("sessionend", () => { isXR = false; log("[xr] sessionend ✅"); });
-
-    // VRButton
-    await loadVRButtonAndAppend({ renderer, log });
-
-    // XR controllers + locomotion
-    const xr = installXRControls({ THREE, renderer, scene, camera, player, log });
-
-    // Android controls (ALWAYS visible in non-XR)
-    const android = installAndroidControls({ THREE, renderer, camera, player, log });
-
-    // Teleport arc system (ARC collision targeting)
-    const teleport = createTeleportArcSystem({
-      THREE, scene, camera, player, renderer,
-      controllers: xr.controllers,
-      getColliders: () => worldState.colliders,
-      log
-    });
-
-    // World loader
-    log("[index] calling world.init() …");
-    world = await loadWorld({ log });
-
-    if (world) {
-      await world.init({
-        THREE, scene, renderer, camera, player,
-        controllers: xr.controllers,
-        log: (m) => log(m),
-        BUILD
-      });
-
-      // colliders handshake
-      if (Array.isArray(world.colliders)) worldState.colliders = world.colliders;
-      else if (typeof world.colliders === "function") worldState.colliders = world.colliders();
-      else worldState.colliders = world.colliders || [];
-
-      log("[index] world init ✅");
-    } else {
-      buildFallbackWorld({ THREE, scene, log, worldState });
+  <style>
+    :root{
+      --bg:#05060a;
+      --panel:#0b0d14cc;
+      --panel2:#0b0d14f2;
+      --text:#e8ecff;
+      --muted:#98a0c7;
+      --aqua:#7fe7ff;
+      --pink:#ff2d7a;
+      --ok:#4cd964;
+      --warn:#ffcc00;
+      --bad:#ff6b6b;
+      --shadow: 0 12px 40px rgba(0,0,0,.45);
+      --radius: 18px;
     }
 
-    // Main loop
-    renderer.setAnimationLoop(() => {
-      const dt = clock.getDelta();
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: var(--bg);
+      overflow: hidden;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color: var(--text);
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
 
-      // Update systems
-      teleport.update({ seated: window.__SEATED_MODE === true });
-      xr.update(dt, { seated: window.__SEATED_MODE === true, isXR });
-      android.update(dt, { isXR });
+    /* Canvas full screen */
+    canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
 
-      try { world?.update?.(dt); } catch (e) {
-        log("[world] update error ❌ " + (e?.message || e));
-      }
+    /* Boot overlay */
+    #boot {
+      position: fixed;
+      left: 14px;
+      top: 14px;
+      right: 14px;
+      max-width: 720px;
+      padding: 14px 14px 12px 14px;
+      background: var(--panel);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      z-index: 9998;
+    }
 
-      renderer.render(scene, camera);
-    });
+    #boot .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
 
-  } catch (e) {
-    log("[index] fatal boot error ❌ " + (e?.message || e));
-  }
-})();
+    #boot .title {
+      font-weight: 800;
+      letter-spacing: 0.2px;
+    }
 
-async function loadWorld({ log }) {
-  try {
-    const mod = await import(`./world.js?v=${Date.now()}`);
-    if (!mod?.World?.init) throw new Error("World module missing init()");
-    return mod.World;
-  } catch (e) {
-    log(`[index] world init failed ❌ ${e?.message || e}`);
-    return null;
-  }
-}
+    #boot .sub {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
 
-function buildFallbackWorld({ THREE, scene, log, worldState }) {
-  const g = new THREE.Group();
-  g.name = "FallbackWorld";
-  scene.add(g);
+    #boot .pill {
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(127,231,255,0.10);
+      color: var(--text);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
 
-  const floor = new THREE.Mesh(
-    new THREE.CircleGeometry(30, 96),
-    new THREE.MeshStandardMaterial({ color: 0x111326, roughness: 1, metalness: 0.05 })
-  );
-  floor.rotation.x = -Math.PI / 2;
-  g.add(floor);
+    #boot .pill b { color: var(--aqua); }
 
-  worldState.colliders = [floor];
-  log("[index] fallback world added ✅");
-}
+    #boot .btns {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 8px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 650;
+      font-size: 12px;
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn.primary { background: rgba(127,231,255,0.12); border-color: rgba(127,231,255,0.28); }
+
+    /* HUD log container (index.js writes here) */
+    #hud {
+      position: fixed;
+      left: 10px;
+      bottom: 10px;
+      width: min(520px, 92vw);
+      max-height: 42vh;
+      background: rgba(10,12,18,0.66);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px;
+      padding: 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      color: var(--text);
+      z-index: 9999;
+      backdrop-filter: blur(6px);
+      display: none; /* index.js can show it or you can toggle */
+    }
+
+    #hud .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    #hud .row .t {
+      font-weight: 800;
+      flex: 1;
+    }
+
+    #hud-log {
+      margin: 0;
+      white-space: pre-wrap;
+      line-height: 1.25;
+      max-height: 32vh;
+      overflow: auto;
+    }
+
+    /* XR DOM overlay root */
+    #xr-overlay-root {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9000;
+    }
+
+    /* If you want UI panels later, you can set pointer-events:auto on children */
+  </style>
+</head>
+
+<body>
+  <!-- XR dom-overlay root (safe even if you don’t use it yet) -->
+  <div id="xr-overlay-root"></div>
+
+  <!-- Boot/status overlay -->
+  <div id="boot">
+    <div class="row">
+      <div class="title">Scarlett Poker VR</div>
+      <div class="pill"><b>BOOT</b> <span id="boot-status">loading…</span></div>
+      <div class="btns">
+        <button class="btn" id="toggle-hud">Show HUD</button>
+        <button class="btn primary" id="reload">Reload</button>
+      </div>
+    </div>
+    <div class="sub" id="boot-sub">
+      If you see a black screen, open the HUD log and copy it to debug.
+    </div>
+  </div>
+
+  <!-- HUD log panel (index.js writes to #hud-log) -->
+  <div id="hud">
+    <div class="row">
+      <div class="t">HUD Log</div>
+      <button class="btn" id="copy-log">Copy Log</button>
+      <button class="btn" id="hide-hud">Hide</button>
+    </div>
+    <pre id="hud-log">[HTML] loaded ✅ (waiting for /js/boot.js…)</pre>
+  </div>
+
+  <script>
+    // Small UI helpers (no dependency on your engine)
+    (function () {
+      const $ = (id) => document.getElementById(id);
+      const hud = $("hud");
+      const logEl = $("hud-log");
+      const statusEl = $("boot-status");
+
+      const log = (m) => {
+        const prev = logEl.textContent || "";
+        logEl.textContent = (prev + "\n" + m).trim();
+      };
+
+      $("toggle-hud").onclick = () => {
+        hud.style.display = (hud.style.display === "none" || !hud.style.display) ? "block" : "none";
+      };
+      $("hide-hud").onclick = () => { hud.style.display = "none"; };
+      $("reload").onclick = () => { location.reload(); };
+
+      $("copy-log").onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(logEl.textContent || "");
+          log("[HUD] copied ✅");
+        } catch (e) {
+          log("[HUD] copy failed ❌ " + (e?.message || e));
+        }
+      };
+
+      // Expose a tiny hook in case boot.js wants it
+      window.__HTML_LOG = log;
+      window.__SET_BOOT_STATUS = (t) => { statusEl.textContent = t; };
+      statusEl.textContent = "waiting for /js/boot.js…";
+    })();
+  </script>
+
+  <!-- Boot loader (imports /js/index.js internally) -->
+  <script type="module">
+    const v = Date.now();
+    try {
+      window.__SET_BOOT_STATUS?.("loading boot.js…");
+      window.__HTML_LOG?.(`[BOOT] href=${location.href}`);
+      window.__HTML_LOG?.(`[BOOT] secureContext=${String(window.isSecureContext)}`);
+      window.__HTML_LOG?.(`[BOOT] ua=${navigator.userAgent}`);
+      window.__HTML_LOG?.(`[BOOT] path=${location.pathname}`);
+
+      // IMPORTANT: keep this as /js/boot.js so GitHub Pages pathing is stable.
+      await import(`/scarlett-poker-vr/js/boot.js?v=${v}`);
+      window.__SET_BOOT_STATUS?.("boot.js loaded ✅");
+      window.__HTML_LOG?.("[BOOT] boot.js loaded ✅");
+    } catch (e) {
+      window.__SET_BOOT_STATUS?.("boot failed ❌");
+      window.__HTML_LOG?.("[BOOT] boot.js import FAILED ❌ " + (e?.message || e));
+      // Show HUD automatically on failure
+      const hud = document.getElementById("hud");
+      if (hud) hud.style.display = "block";
+    }
+  </script>
+</body>
+</html>

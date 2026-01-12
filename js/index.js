@@ -1,3 +1,4 @@
+if (window.__SEATED_MODE) return;
 // /js/index.js — Scarlett INDEX_MASTER v3
 // ✅ Dynamic-import world.js (cache-bust)
 // ✅ XR thumbsticks: robust mapping via XRSession.inputSources (supports axes 0/1 and 2/3)

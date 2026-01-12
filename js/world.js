@@ -8,7 +8,7 @@
 // ✅ Bots: walkers + display case bots (simple elbows)
 // ✅ Chips: simple toss animation into pot
 // ✅ Cards: aligned on table in a clean dealing loop (not scattered)
-
+import { PokerSim } from "./poker_sim.js";
 export const World = (() => {
   const S = {
     THREE: null,

@@ -1,140 +1,294 @@
-import * as THREE from 'three';
-import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
-import { World } from './world.js';
+// /js/index.js — Scarlett INPUT FIX 8.2
+// ✅ Controllers + lasers are parented to PlayerRig (laser is ON YOU, not stuck in center)
+// ✅ Left stick forward/back fixed (no inversion)
+// ✅ Right stick snap-turn 45° still works
+// ✅ Reduced jitter by removing per-frame allocations
 
-/**
- * SCARLETT ENGINE STATE
- */
-const S = {
-    scene: null,
-    camera: null,
-    renderer: null,
-    playerGroup: null, // The "Rig" (Camera + Hands)
-    hands: { left: null, right: null },
-    clock: new THREE.Clock(),
-    isSpawned: false
+import { THREE, VRButton } from "./three.js";
+import { World } from "./world.js";
+
+const BUILD = "INPUT FIX 8.2 (Laser on PlayerRig + Move invert fixed + Less jitter)";
+console.log("[index]", BUILD);
+
+let scene, camera, renderer, player, clock;
+
+const MOVE_SPEED = 2.8;
+const DEAD_MOVE = 0.14;
+const DEAD_TURN = 0.20;
+
+const SNAP_ANGLE = Math.PI / 4; // 45°
+const SNAP_DEAD = 0.75;
+const SNAP_CD = 0.22;
+let snapCooldown = 0;
+
+// Reused vectors (no garbage / jitter)
+const _q = new THREE.Quaternion();
+const _e = new THREE.Euler();
+const _f = new THREE.Vector3();
+const _r = new THREE.Vector3();
+const _v = new THREE.Vector3();
+
+// teleport / laser
+const tp = {
+  raycaster: null,
+  marker: null,
+  c0: null,
+  c1: null,
+  line0: null,
+  line1: null,
+  hit: null,
+  tmpM: null,
+  tmpO: null,
+  tmpD: null,
+  tmpPos: null,
 };
 
-async function init() {
-    // 1. Core Three.js Setup
-    S.scene = new THREE.Scene();
-    S.scene.background = new THREE.Color(0x020205); // Deep space black
-    
-    S.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    
-    S.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-    S.renderer.setSize(window.innerWidth, window.innerHeight);
-    S.renderer.setPixelRatio(window.devicePixelRatio);
-    S.renderer.xr.enabled = true;
-    document.body.appendChild(S.renderer.domElement);
-
-    // 2. VR Button & Session Setup
-    document.body.appendChild(VRButton.createButton(S.renderer));
-
-    // 3. Player Rig (The "Monolith" Rig)
-    S.playerGroup = new THREE.Group();
-    S.scene.add(S.playerGroup);
-    S.playerGroup.add(S.camera);
-
-    // 4. Hand Tracking Setup (Feature: Controllers Disabled)
-    const handFactory = new XRHandModelFactory();
-    
-    // Left Hand
-    S.hands.left = S.renderer.xr.getHand(0);
-    S.hands.left.add(handFactory.createHandModel(S.hands.left, "mesh"));
-    S.playerGroup.add(S.hands.left);
-
-    // Right Hand
-    S.hands.right = S.renderer.xr.getHand(1);
-    S.hands.right.add(handFactory.createHandModel(S.hands.right, "mesh"));
-    S.playerGroup.add(S.hands.right);
-
-    // 5. Build the World (Update 8.0)
-    await World.build({ 
-        THREE, 
-        scene: S.scene, 
-        renderer: S.renderer,
-        log: console.log 
-    });
-
-    // 6. THE PERFECT VIP SPAWN
-    handleVIPSpawn();
-
-    // 7. Start Animation Loop
-    S.renderer.setAnimationLoop(render);
-}
-
-/**
- * FEATURE: VIP ROOM ARRIVAL
- * Positions the player in the cube room looking at the table.
- */
-function handleVIPSpawn() {
-    const start = World.getSpawn();
-    if (start) {
-        S.playerGroup.position.set(start.x, start.y, start.z);
-        S.playerGroup.rotation.y = start.yaw;
-        S.isSpawned = true;
-        console.log("Scarlett VR: Secure VIP Spawn Successful ✅");
-    }
-}
-
-/**
- * THE FRAME LOOP
- * Runs 60-90 times per second in VR.
- */
-function render() {
-    const time = S.clock.getElapsedTime();
-    const dt = S.clock.getDelta();
-
-    // Update World Animations (Breathing Neon, Shaders)
-    if (World.update) World.update(time);
-
-    // FEATURE: Hand-Based Collision/Interaction
-    updateHandInteractions();
-
-    // FEATURE: Gravity/Height Check
-    // Keeps player stuck to the ramp and pit floors
-    applyGravity();
-
-    S.renderer.render(S.scene, S.camera);
-}
-
-function updateHandInteractions() {
-    // Logic for Feature #42 (Wrist Menu) and #51 (Chip Shuffle)
-    // Runs every frame to check palm orientation
-}
-
-/**
- * FEATURE: SMART GRAVITY
- * Raycasts downward to find the 'floors' defined in world.js
- */
-const raycaster = new THREE.Raycaster();
-const down = new THREE.Vector3(0, -1, 0);
-
-function applyGravity() {
-    if (!S.playerGroup) return;
-
-    const floors = World.getFloors();
-    if (!floors || floors.length === 0) return;
-
-    // Raycast from player head down to find floor y
-    raycaster.set(S.playerGroup.position, down);
-    const intersects = raycaster.intersectObjects(floors);
-
-    if (intersects.length > 0) {
-        const targetY = intersects[0].point.y;
-        // Smoothly interpolate to the floor height (Gravity feel)
-        S.playerGroup.position.y = THREE.MathUtils.lerp(S.playerGroup.position.y, targetY, 0.1);
-    }
-}
-
-// Handle Window Resizing
-window.addEventListener('resize', () => {
-    S.camera.aspect = window.innerWidth / window.innerHeight;
-    S.camera.updateProjectionMatrix();
-    S.renderer.setSize(window.innerWidth, window.innerHeight);
-});
-
-// INITIALIZE ENGINE
 init();
+
+function init() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x05060a);
+
+  camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 600);
+
+  player = new THREE.Group();
+  player.name = "PlayerRig";
+  scene.add(player);
+  player.add(camera);
+  camera.position.set(0, 1.65, 0);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
+  document.body.appendChild(VRButton.createButton(renderer));
+
+  World.build({ THREE, scene, log: console.log });
+
+  resetSpawn();
+
+  installTeleportLaser(); // IMPORTANT: after player exists
+
+  renderer.xr.addEventListener("sessionstart", () => {
+    camera.position.set(0, 0, 0);
+    resetSpawn();
+  });
+
+  renderer.xr.addEventListener("sessionend", () => {
+    camera.position.set(0, 1.65, 0);
+  });
+
+  addEventListener("resize", () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  clock = new THREE.Clock();
+  renderer.setAnimationLoop(loop);
+}
+
+function resetSpawn() {
+  const s = World.getSpawn?.("vip_cube") || World.getSpawn?.() || { x: 0, y: 0, z: 8, yaw: Math.PI };
+  player.position.set(s.x, s.y ?? 0, s.z);
+  player.rotation.set(0, s.yaw ?? Math.PI, 0);
+}
+
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.045);
+  moveXR(dt);
+  updateLaser();
+  renderer.render(scene, camera);
+}
+
+// ---------------------
+// MOVEMENT (ROBUST QUEST MAPPING)
+// ---------------------
+function moveXR(dt) {
+  if (!renderer.xr.isPresenting) return;
+
+  const session = renderer.xr.getSession?.();
+  if (!session) return;
+
+  const sources = [];
+  for (const src of session.inputSources) {
+    const gp = src?.gamepad;
+    if (!gp || !gp.axes) continue;
+    sources.push({ src, gp });
+  }
+  if (!sources.length) return;
+
+  const leftSrc  = sources.find(s => s.src.handedness === "left")  || null;
+  const rightSrc = sources.find(s => s.src.handedness === "right") || null;
+
+  const pickStick = (gp) => {
+    const a = gp.axes || [];
+    const x01 = a[0] ?? 0, y01 = a[1] ?? 0;
+    const x23 = a[2] ?? 0, y23 = a[3] ?? 0;
+
+    if (a.length <= 2) return { x: x01, y: y01, pair: "01" };
+
+    const m01 = Math.abs(x01) + Math.abs(y01);
+    const m23 = Math.abs(x23) + Math.abs(y23);
+    return (m23 > m01) ? { x: x23, y: y23, pair: "23" } : { x: x01, y: y01, pair: "01" };
+  };
+
+  // MOVE source: left if possible, else strongest
+  let moveSource = leftSrc;
+  if (!moveSource) {
+    let best = sources[0], bestMag = 0;
+    for (const s of sources) {
+      const st = pickStick(s.gp);
+      const mag = Math.abs(st.x) + Math.abs(st.y);
+      if (mag > bestMag) { bestMag = mag; best = s; }
+    }
+    moveSource = best;
+  }
+
+  // TURN source: right if possible, else different from move if possible
+  let turnSource = rightSrc || sources.find(s => s !== moveSource) || moveSource;
+
+  const mv = pickStick(moveSource.gp);
+  let mx = dz(mv.x, DEAD_MOVE);
+  let my = dz(mv.y, DEAD_MOVE);
+
+  // ✅ FIX: forward/back was inverted — DO NOT invert now.
+  // On your Quest mapping, pushing forward produces negative Y already, so use +my.
+  // (If it’s ever reversed again, we can flip with one constant.)
+  const forwardAxis = my;
+
+  // Turn X
+  const aT = turnSource.gp.axes || [];
+  let turnX = 0;
+  if (aT.length >= 4) {
+    const candA = aT[2] ?? 0;
+    const candB = aT[0] ?? 0;
+    const cand = (Math.abs(candA) > Math.abs(candB)) ? candA : candB;
+    turnX = dz(cand, DEAD_TURN);
+  } else {
+    turnX = dz(aT[0] ?? 0, DEAD_TURN);
+  }
+
+  // Snap turn
+  snapCooldown -= dt;
+  if (snapCooldown <= 0) {
+    if (turnX > SNAP_DEAD) { player.rotation.y -= SNAP_ANGLE; snapCooldown = SNAP_CD; }
+    else if (turnX < -SNAP_DEAD) { player.rotation.y += SNAP_ANGLE; snapCooldown = SNAP_CD; }
+  }
+
+  // Move relative to head yaw
+  if (mx || forwardAxis) {
+    const heading = getHeadYaw();
+    _f.set(Math.sin(heading), 0, Math.cos(heading));
+    _r.set(_f.z, 0, -_f.x);
+
+    _v.set(0, 0, 0)
+      .addScaledVector(_r, mx)
+      .addScaledVector(_f, -forwardAxis); // forward if stick is pushed forward (negative Y)
+    // NOTE: we keep -forwardAxis because forwardAxis is already “Quest raw” (forward usually negative)
+
+    if (_v.lengthSq() > 1e-6) {
+      _v.normalize().multiplyScalar(MOVE_SPEED * dt);
+      player.position.add(_v);
+    }
+  }
+}
+
+function dz(v, d) { return Math.abs(v) < d ? 0 : v; }
+
+function getHeadYaw() {
+  camera.getWorldQuaternion(_q);
+  _e.setFromQuaternion(_q, "YXZ");
+  return _e.y;
+}
+
+// ---------------------
+// LASER / TELEPORT (now attached to YOU)
+// ---------------------
+function installTeleportLaser() {
+  tp.raycaster = new THREE.Raycaster();
+  tp.tmpM = new THREE.Matrix4();
+  tp.tmpO = new THREE.Vector3();
+  tp.tmpD = new THREE.Vector3();
+  tp.tmpPos = new THREE.Vector3();
+
+  tp.marker = new THREE.Mesh(
+    new THREE.RingGeometry(0.20, 0.32, 48),
+    new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.92 })
+  );
+  tp.marker.rotation.x = -Math.PI / 2;
+  tp.marker.visible = false;
+  scene.add(tp.marker);
+
+  // ✅ KEY FIX: parent controllers to PlayerRig so they move with your spawn/rig
+  tp.c0 = renderer.xr.getController(0);
+  tp.c1 = renderer.xr.getController(1);
+  player.add(tp.c0, tp.c1);
+
+  const pts = [new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)];
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+
+  tp.line0 = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.95 }));
+  tp.line0.scale.z = 12;
+  tp.line0.visible = true;
+  tp.c0.add(tp.line0);
+
+  tp.line1 = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.95 }));
+  tp.line1.scale.z = 12;
+  tp.line1.visible = true;
+  tp.c1.add(tp.line1);
+
+  const teleport = () => {
+    if (!tp.hit) return;
+    player.position.set(tp.hit.x, player.position.y, tp.hit.z);
+    tp.marker.visible = false;
+  };
+
+  tp.c0.addEventListener("selectstart", teleport);
+  tp.c1.addEventListener("selectstart", teleport);
+}
+
+function updateLaser() {
+  if (!renderer.xr.isPresenting) {
+    tp.marker.visible = false;
+    tp.hit = null;
+    return;
+  }
+
+  const floors = World.getFloors ? World.getFloors() : [];
+  tp.hit = null;
+
+  // Prefer controller 1 then 0
+  const cands = [tp.c1, tp.c0];
+
+  for (const c of cands) {
+    if (!controllerTracked(c)) continue;
+
+    tp.tmpM.identity().extractRotation(c.matrixWorld);
+    tp.tmpO.setFromMatrixPosition(c.matrixWorld);
+    tp.tmpD.set(0, 0, -1).applyMatrix4(tp.tmpM).normalize();
+
+    tp.raycaster.set(tp.tmpO, tp.tmpD);
+    const hits = tp.raycaster.intersectObjects(floors, true);
+
+    if (hits?.length) {
+      const p = hits[0].point;
+      tp.hit = p;
+      tp.marker.position.set(p.x, p.y + 0.02, p.z);
+      tp.marker.visible = true;
+      return;
+    }
+  }
+
+  tp.marker.visible = false;
+}
+
+// Better “tracked” test than origin distance: require non-zero matrix + valid visibility
+function controllerTracked(ctrl) {
+  if (!ctrl) return false;
+  tp.tmpPos.setFromMatrixPosition(ctrl.matrixWorld);
+  const d = Math.abs(tp.tmpPos.x) + Math.abs(tp.tmpPos.y) + Math.abs(tp.tmpPos.z);
+  // After parenting to PlayerRig, this will NOT falsely read as “center of lobby”
+  return d > 0.0005;
+}

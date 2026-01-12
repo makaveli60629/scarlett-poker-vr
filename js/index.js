@@ -1,13 +1,11 @@
-// /js/index.js — Scarlett INDEX MASTER (FULL) v1.0.5 (Quest + Android Dual-Stick + Rainbow Teleport Arc)
+// /js/index.js — Scarlett INDEX MASTER (FULL) v1.0.6 (Arc-based Teleport Targeting)
 // ✅ Controllers parented to PlayerRig (laser follows you; teleport/move no longer leaves lasers behind)
-// ✅ Right stick forward/back fixed (invert corrected)
-// ✅ Turning separated from strafing (can angle yourself)
-// ✅ Left stick = strafe, Right stick = forward/back, Right stick X = turn
+// ✅ XR locomotion: Left stick strafe, Right stick forward/back, Right stick X turn
 // ✅ Seated mode guard remains
 // ✅ World loader + fallback
 // ✅ Android: drag-look dev controls (non-XR)
 // ✅ Android: dual-stick move+look (non-XR), auto-hides in XR
-// ✅ Teleport: curved rainbow arc that bends to target + ring
+// ✅ Teleport: rainbow curved arc + RING TARGETING based on ARC COLLISION (NOT straight ray)
 
 const BUILD = `INDEX_MASTER_${Date.now()}`;
 
@@ -80,6 +78,17 @@ let teleport = {
   lastTeleportAt: 0,
   cooldown: 250,
   raycaster: null,
+
+  // ✅ Arc-based targeting settings
+  useArcTargeting: true,
+  arc: {
+    // These control the curve (visual + collision use same numbers)
+    speed: 11.0,     // forward velocity magnitude
+    lift: 6.7,       // upward velocity
+    gravity:  -14.0, // gravity (negative is down)
+    timeMax:  1.75,  // arc duration in seconds
+    steps:    38,    // collision samples along arc
+  },
 };
 
 // ✅ Rainbow teleport arc state
@@ -265,7 +274,6 @@ function makeRainbowArc(points = 34) {
 function ensureTeleportArc() {
   if (teleportArc.mesh) return;
   teleportArc.mesh = makeRainbowArc(teleportArc.points);
-  // attach to right controller (preferred)
   if (controllers.right) controllers.right.add(teleportArc.mesh);
 }
 
@@ -275,112 +283,84 @@ function setArcVisible(v) {
   teleportArc.visible = !!v;
 }
 
-function updateTeleportArcShape(controllerObj) {
-  if (!teleportArc.mesh) return;
-  if (!controllerObj) return;
-
-  if (!teleport.valid || !teleport.target) {
-    setArcVisible(false);
-    return;
-  }
-
-  setArcVisible(true);
-
-  const origin = controllerObj.getWorldPosition(new THREE.Vector3());
-  const target = teleport.target.clone();
-
-  const dist = origin.distanceTo(target);
-  const bend = clamp(dist * 0.18, 0.6, 3.2);
-
+// ----------- Arc math (used by BOTH collision + visuals) -----------
+function getControllerForward(controllerObj) {
   const q = controllerObj.getWorldQuaternion(new THREE.Quaternion());
-  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(q).normalize();
+  return new THREE.Vector3(0, 0, -1).applyQuaternion(q).normalize();
+}
 
-  const pts = teleportArc.points;
-  const posAttr = teleportArc.mesh.geometry.getAttribute("position");
+function arcPointWorld(origin, forward, t) {
+  // ballistic: p = origin + v*t + 0.5*g*t^2
+  const A = teleport.arc;
+  const v = forward.clone().multiplyScalar(A.speed);
+  v.y += A.lift;
 
-  const inv = controllerObj.matrixWorld.clone().invert();
+  const p = origin.clone().addScaledVector(v, t);
+  p.y += 0.5 * A.gravity * t * t;
+  return p;
+}
 
-  for (let i = 0; i < pts; i++) {
-    const t = i / (pts - 1);
+function segmentCast(p0, p1, colliders) {
+  const dir = p1.clone().sub(p0);
+  const len = dir.length();
+  if (len < 1e-6) return null;
+  dir.multiplyScalar(1 / len);
 
-    const p = origin.clone().lerp(target, t);
+  teleport.raycaster.ray.origin.copy(p0);
+  teleport.raycaster.ray.direction.copy(dir);
+  teleport.raycaster.far = len;
 
-    const bump = Math.sin(Math.PI * t) * bend;
-    p.y += bump;
+  const hits = teleport.raycaster.intersectObjects(colliders, true);
+  if (!hits || hits.length === 0) return null;
+  return hits[0];
+}
 
-    const bias = (1 - t) * 0.35 * clamp(dist / 12, 0, 1);
-    p.addScaledVector(forward, bias);
+// ✅ Arc-based teleport targeting (collision along curve)
+function computeTeleportTargetArc(fromObj) {
+  teleport.valid = false;
+  teleport.target = null;
 
-    p.applyMatrix4(inv);
+  if (!fromObj) return;
+  const colliders = worldState.colliders || [];
+  if (!colliders.length) return;
 
-    posAttr.setXYZ(i, p.x, p.y, p.z);
+  const origin = fromObj.getWorldPosition(new THREE.Vector3());
+  const forward = getControllerForward(fromObj);
+
+  const A = teleport.arc;
+  const steps = Math.max(10, A.steps | 0);
+  const dt = A.timeMax / steps;
+
+  let prev = arcPointWorld(origin, forward, 0);
+
+  for (let i = 1; i <= steps; i++) {
+    const t = i * dt;
+    const cur = arcPointWorld(origin, forward, t);
+
+    const hit = segmentCast(prev, cur, colliders);
+    if (hit) {
+      const n = hit.face?.normal
+        ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld)
+        : null;
+
+      // reject steep/vertical surfaces
+      if (n && n.y < 0.45) {
+        // keep scanning (could hit floor after a wall skim)
+        prev.copy(cur);
+        continue;
+      }
+
+      teleport.valid = true;
+      teleport.target = hit.point.clone();
+      return;
+    }
+
+    prev.copy(cur);
   }
-
-  posAttr.needsUpdate = true;
 }
 
-// ✅ BIG FIX: controllers must be parented to PlayerRig, not scene
-function installControllers() {
-  const c0 = renderer.xr.getController(0);
-  const c1 = renderer.xr.getController(1);
-
-  controllers.left = c0;
-  controllers.right = c1;
-
-  lasers.left = makeLaser(0x7fe7ff);
-  lasers.right = makeLaser(0xff2d7a);
-
-  c0.add(lasers.left);
-  c1.add(lasers.right);
-
-  player.add(c0);
-  player.add(c1);
-
-  $log("[index] controllers ready ✅");
-
-  // ✅ rainbow arc attached to right controller
-  ensureTeleportArc();
-  $log("[teleport] rainbow arc ready ✅");
-
-  c0.addEventListener("selectstart", () => onSelectStart("left"));
-  c1.addEventListener("selectstart", () => onSelectStart("right"));
-}
-
-function ensureTeleportRing() {
-  if (teleport.ring) return;
-  const g = new THREE.RingGeometry(0.22, 0.30, 28);
-  const m = new THREE.MeshBasicMaterial({
-    color: 0x7fe7ff,
-    transparent: true,
-    opacity: 0.85,
-    side: THREE.DoubleSide,
-  });
-  const ring = new THREE.Mesh(g, m);
-  ring.rotation.x = -Math.PI / 2;
-  ring.visible = false;
-  ring.name = "TeleportRing";
-  scene.add(ring);
-  teleport.ring = ring;
-}
-
-function getXRInputSource(handedness) {
-  const sess = renderer.xr.getSession();
-  const sources = sess?.inputSources || [];
-  for (const s of sources) if (s?.handedness === handedness) return s;
-  return null;
-}
-
-function getGamepadAxes(handedness) {
-  const src = getXRInputSource(handedness);
-  const gp = src?.gamepad;
-  const a = gp?.axes || [];
-  if (!a.length) return { x: 0, y: 0 };
-
-  if (a.length >= 4) return { x: a[2] ?? 0, y: a[3] ?? 0 };
-  return { x: a[0] ?? 0, y: a[1] ?? 0 };
-}
-
-function computeTeleportTarget(fromObj) {
+// (optional) Straight ray targeting retained as fallback
+function computeTeleportTargetRay(fromObj) {
   teleport.valid = false;
   teleport.target = null;
   if (!fromObj) return;
@@ -405,6 +385,98 @@ function computeTeleportTarget(fromObj) {
   if (n && n.y < 0.45) return;
   teleport.valid = true;
   teleport.target = hit.point.clone();
+}
+
+// ✅ Rainbow arc visuals now use SAME ballistic curve (and can optionally clamp to target)
+function updateTeleportArcShape(controllerObj) {
+  if (!teleportArc.mesh || !controllerObj) return;
+
+  if (!teleport.valid || !teleport.target) {
+    setArcVisible(false);
+    return;
+  }
+
+  setArcVisible(true);
+
+  const origin = controllerObj.getWorldPosition(new THREE.Vector3());
+  const forward = getControllerForward(controllerObj);
+
+  const pts = teleportArc.points;
+  const posAttr = teleportArc.mesh.geometry.getAttribute("position");
+
+  const inv = controllerObj.matrixWorld.clone().invert();
+
+  // We draw the same arc; when we have a target, we shorten the visible portion
+  // by finding approximate time where arc gets closest to target.
+  const A = teleport.arc;
+  const steps = Math.max(12, A.steps | 0);
+  const dt = A.timeMax / steps;
+
+  let bestT = A.timeMax;
+  let bestD = Infinity;
+  for (let i = 0; i <= steps; i++) {
+    const t = i * dt;
+    const p = arcPointWorld(origin, forward, t);
+    const d = p.distanceTo(teleport.target);
+    if (d < bestD) { bestD = d; bestT = t; }
+  }
+
+  const drawMax = clamp(bestT + dt * 0.5, 0.4, A.timeMax); // slight overshoot for nicer landing
+
+  for (let i = 0; i < pts; i++) {
+    const u = i / (pts - 1);
+    const t = u * drawMax;
+    const pW = arcPointWorld(origin, forward, t);
+
+    // convert WORLD -> controller LOCAL (since arc is parented to controller)
+    pW.applyMatrix4(inv);
+    posAttr.setXYZ(i, pW.x, pW.y, pW.z);
+  }
+
+  posAttr.needsUpdate = true;
+}
+
+// ✅ BIG FIX: controllers must be parented to PlayerRig, not scene
+function installControllers() {
+  const c0 = renderer.xr.getController(0);
+  const c1 = renderer.xr.getController(1);
+
+  controllers.left = c0;
+  controllers.right = c1;
+
+  lasers.left = makeLaser(0x7fe7ff);
+  lasers.right = makeLaser(0xff2d7a);
+
+  c0.add(lasers.left);
+  c1.add(lasers.right);
+
+  player.add(c0);
+  player.add(c1);
+
+  $log("[index] controllers ready ✅");
+
+  ensureTeleportArc();
+  $log("[teleport] rainbow arc ready ✅");
+
+  c0.addEventListener("selectstart", () => onSelectStart("left"));
+  c1.addEventListener("selectstart", () => onSelectStart("right"));
+}
+
+function ensureTeleportRing() {
+  if (teleport.ring) return;
+  const g = new THREE.RingGeometry(0.22, 0.30, 28);
+  const m = new THREE.MeshBasicMaterial({
+    color: 0x7fe7ff,
+    transparent: true,
+    opacity: 0.85,
+    side: THREE.DoubleSide,
+  });
+  const ring = new THREE.Mesh(g, m);
+  ring.rotation.x = -Math.PI / 2;
+  ring.visible = false;
+  ring.name = "TeleportRing";
+  scene.add(ring);
+  teleport.ring = ring;
 }
 
 function showTeleportRing() {
@@ -435,6 +507,22 @@ function onSelectStart(which) {
   if (!teleport.active) return;
   if (window.__SEATED_MODE) return;
   if (teleport.valid) doTeleport();
+}
+
+function getXRInputSource(handedness) {
+  const sess = renderer.xr.getSession();
+  const sources = sess?.inputSources || [];
+  for (const s of sources) if (s?.handedness === handedness) return s;
+  return null;
+}
+
+function getGamepadAxes(handedness) {
+  const src = getXRInputSource(handedness);
+  const gp = src?.gamepad;
+  const a = gp?.axes || [];
+  if (!a.length) return { x: 0, y: 0 };
+  if (a.length >= 4) return { x: a[2] ?? 0, y: a[3] ?? 0 };
+  return { x: a[0] ?? 0, y: a[1] ?? 0 };
 }
 
 function getYawQuat() {
@@ -493,10 +581,13 @@ function updateTeleportAim() {
   const c = controllers.right || controllers.left;
   if (!c) return;
 
-  computeTeleportTarget(c);
+  // ✅ Target using arc collision (fallback to ray if disabled)
+  if (teleport.useArcTargeting) computeTeleportTargetArc(c);
+  else computeTeleportTargetRay(c);
+
   showTeleportRing();
 
-  // ✅ rainbow arc
+  // ✅ rainbow arc visuals follow same ballistic curve
   ensureTeleportArc();
   updateTeleportArcShape(c);
 }

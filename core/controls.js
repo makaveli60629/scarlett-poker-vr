@@ -1,8 +1,8 @@
-// /core/controls.js — Scarlett Controls v4 (FULL)
+// /core/controls.js — Scarlett Controls v5 (FULL)
 // ✅ Android dual sticks (MOVE + LOOK) in flat mode
-// ✅ XR lasers only in XR session
-// ✅ Hide DOM HUD + sticks in XR to avoid overlap
-// ✅ Teleport ring only visible while aiming (no random blue circle behind you)
+// ✅ Moves the CORRECT rig (playerRig/player/camera parent fallback)
+// ✅ HUD + sticks auto-hide in XR (no overlap)
+// ✅ No teleport ring shown unless you explicitly enable it later
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const deadzone = (v, dz = 0.12) => (Math.abs(v) < dz ? 0 : v);
@@ -69,74 +69,30 @@ function ensureSticksUI() {
   const L = stickBase("L");
   const R = stickBase("R");
   document.body.appendChild(wrap);
-
   return { wrap, L, R };
 }
 
-function makeRing(THREE) {
-  const g = new THREE.RingGeometry(0.22, 0.30, 28);
-  const m = new THREE.MeshBasicMaterial({
-    color: 0x7fe7ff,
-    transparent: true,
-    opacity: 0.85,
-    side: THREE.DoubleSide,
-  });
-  const ring = new THREE.Mesh(g, m);
-  ring.rotation.x = -Math.PI / 2;
-  ring.visible = false;
-  ring.name = "TeleportRing";
-  return ring;
-}
-
-function makeLaser(THREE, color) {
-  const geo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, 0, -1),
-  ]);
-  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95 });
-  const line = new THREE.Line(geo, mat);
-  line.scale.z = 14;
-  line.name = "LaserLine";
-  return line;
+function getMoveRig(ctx) {
+  // Move the thing that actually carries the camera.
+  // Priority: ctx.playerRig -> ctx.player -> camera.parent -> ctx.camera
+  return ctx.playerRig || ctx.player || ctx.camera?.parent || ctx.camera;
 }
 
 export function installControls(ctx) {
-  const { THREE, renderer, camera, player, log } = ctx;
+  const { renderer, log } = ctx;
 
   ctx.__controls = {
     isXR: false,
-    // Android sticks state
     mobile: /Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
     L: { active: false, id: null, x: 0, y: 0, sx: 0, sy: 0 },
     R: { active: false, id: null, x: 0, y: 0, sx: 0, sy: 0 },
     yaw: 0,
     pitch: 0,
-    // movement tuning
-    moveSpeed: 3.2,
-    strafeSpeed: 3.0,
-    turnSpeed: 2.4,
-    // teleport
-    teleport: {
-      ring: null,
-      raycaster: new THREE.Raycaster(),
-      target: null,
-      valid: false,
-      lastAt: 0,
-      cooldown: 250,
-      aiming: false, // IMPORTANT: ring only shows while aiming
-    },
-    // lasers
-    laserL: null,
-    laserR: null,
+    moveSpeed: 3.4,
+    strafeSpeed: 3.1,
   };
 
-  // DOM UI (sticks)
   const sticksUI = ctx.__controls.mobile ? ensureSticksUI() : null;
-
-  // Create teleport ring (but keep hidden unless aiming)
-  const ring = makeRing(THREE);
-  ctx.scene.add(ring);
-  ctx.__controls.teleport.ring = ring;
 
   // Hide DOM UI in XR (prevents overlap)
   const hud = document.getElementById("hud");
@@ -146,34 +102,16 @@ export function installControls(ctx) {
     if (sticks) sticks.style.display = isXR ? "none" : "";
   }
 
-  // XR hooks + lasers only in XR
   renderer.xr.addEventListener("sessionstart", () => {
     ctx.__controls.isXR = true;
     setUIForXR(true);
-
-    // attach lasers only now
-    if (ctx.controllers?.left && !ctx.__controls.laserL) {
-      ctx.__controls.laserL = makeLaser(THREE, 0x7fe7ff);
-      ctx.controllers.left.add(ctx.__controls.laserL);
-    }
-    if (ctx.controllers?.right && !ctx.__controls.laserR) {
-      ctx.__controls.laserR = makeLaser(THREE, 0xff2d7a);
-      ctx.controllers.right.add(ctx.__controls.laserR);
-    }
-    log?.("[xr] sessionstart ✅ (UI hidden + lasers on)");
+    log?.("[xr] sessionstart ✅ (UI hidden)");
   });
 
   renderer.xr.addEventListener("sessionend", () => {
     ctx.__controls.isXR = false;
     setUIForXR(false);
-
-    // detach lasers so they never show in flat mode
-    try { ctx.__controls.laserL && ctx.controllers?.left?.remove(ctx.__controls.laserL); } catch {}
-    try { ctx.__controls.laserR && ctx.controllers?.right?.remove(ctx.__controls.laserR); } catch {}
-    ctx.__controls.laserL = null;
-    ctx.__controls.laserR = null;
-
-    log?.("[xr] sessionend ✅ (UI restored + lasers off)");
+    log?.("[xr] sessionend ✅ (UI restored)");
   });
 
   setUIForXR(false);
@@ -183,7 +121,6 @@ export function installControls(ctx) {
     const bindStick = (stickObj, state) => {
       const base = stickObj.base;
       const nub = stickObj.nub;
-
       const radius = 55;
 
       const onDown = (e) => {
@@ -232,47 +169,44 @@ export function installControls(ctx) {
   }
 }
 
-function getYawQuat(THREE, camera) {
-  const q = camera.getWorldQuaternion(new THREE.Quaternion());
-  const e = new THREE.Euler().setFromQuaternion(q, "YXZ");
-  const yaw = e.y;
-  const out = new THREE.Quaternion();
-  out.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-  return out;
-}
-
 export function updateControls(ctx, dt) {
-  const { THREE, camera, player, log } = ctx;
   const C = ctx.__controls;
   if (!C) return;
 
-  // ---- Flat mode Android movement/look ----
+  // Flat mode only
   if (!C.isXR && C.mobile) {
+    const rig = getMoveRig(ctx);
+    if (!rig) return;
+
     const lx = deadzone(C.L.x, 0.12);
     const ly = deadzone(C.L.y, 0.12);
     const rx = deadzone(C.R.x, 0.12);
     const ry = deadzone(C.R.y, 0.12);
 
-    // MOVE (left stick): forward is -y
-    const forward = -ly * C.moveSpeed;
-    const strafe = lx * C.strafeSpeed;
-
-    // LOOK (right stick): yaw + pitch
+    // LOOK
     C.yaw -= rx * 2.3 * dt;
     C.pitch -= ry * 1.8 * dt;
     C.pitch = clamp(C.pitch, -1.1, 1.1);
 
-    camera.rotation.set(C.pitch, C.yaw, 0, "YXZ");
+    // Apply yaw to rig (so movement matches), pitch to camera
+    rig.rotation.y = C.yaw;
+    if (ctx.camera) ctx.camera.rotation.x = C.pitch;
 
-    const yawQ = getYawQuat(THREE, camera);
-    const dir = new THREE.Vector3(strafe, 0, forward).applyQuaternion(yawQ);
-    player.position.addScaledVector(dir, dt);
+    // MOVE relative to rig yaw
+    const forward = -ly * C.moveSpeed;
+    const strafe = lx * C.strafeSpeed;
+
+    const sin = Math.sin(rig.rotation.y);
+    const cos = Math.cos(rig.rotation.y);
+
+    // forward along -Z in local space
+    const dx = (strafe * cos) + (forward * sin);
+    const dz = (-strafe * sin) + (forward * cos);
+
+    rig.position.x += dx * dt;
+    rig.position.z += dz * dt;
   }
 
-  // ---- Teleport ring visibility control ----
-  // Never show ring unless aiming
-  if (!C.teleport.aiming && C.teleport.ring) C.teleport.ring.visible = false;
-
-  // diagnostics update hook (from logger)
+  // diagnostics hook (from logger)
   ctx.log?.diag?.(ctx, dt);
-}
+                               }

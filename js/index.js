@@ -466,4 +466,4 @@ function installTouchSticks() {
   bind(touch.right, R);
 
   log("[android] dual-stick ready ✅");
-                               }
+          }

@@ -1,5 +1,4 @@
-// /js/VRButton.js — Standalone VRButton (NO imports, no "three" dependency)
-// Works on Quest / WebXR. Creates a button that starts immersive-vr.
+// /js/VRButton.js — Standalone VRButton (NO imports)
 
 export const VRButton = {
   createButton(renderer) {
@@ -19,9 +18,7 @@ export const VRButton = {
     button.style.backdropFilter = "blur(8px)";
     button.textContent = "ENTER VR";
 
-    const isSupported = !!(navigator.xr && navigator.xr.isSessionSupported);
-
-    if (!isSupported) {
+    if (!navigator.xr || !navigator.xr.isSessionSupported) {
       button.textContent = "VR NOT AVAILABLE";
       button.disabled = true;
       button.style.opacity = "0.6";
@@ -32,12 +29,10 @@ export const VRButton = {
 
     async function onSessionStarted(session) {
       currentSession = session;
-
       session.addEventListener("end", onSessionEnded);
 
       renderer.xr.enabled = true;
       await renderer.xr.setSession(session);
-
       button.textContent = "EXIT VR";
     }
 
@@ -47,31 +42,26 @@ export const VRButton = {
     }
 
     async function requestSession() {
-      try {
-        const sessionInit = {
-          optionalFeatures: [
-            "local-floor",
-            "bounded-floor",
-            "local",
-            "viewer",
-            "hand-tracking",
-            "layers",
-            "dom-overlay"
-          ],
-          domOverlay: { root: document.body }
-        };
+      const sessionInit = {
+        optionalFeatures: [
+          "local-floor",
+          "bounded-floor",
+          "local",
+          "viewer",
+          "hand-tracking",
+          "layers",
+          "dom-overlay"
+        ],
+        domOverlay: { root: document.body }
+      };
 
-        const session = await navigator.xr.requestSession("immersive-vr", sessionInit);
-        await onSessionStarted(session);
-      } catch (e) {
-        console.warn("[VRButton] requestSession failed:", e);
-      }
+      const session = await navigator.xr.requestSession("immersive-vr", sessionInit);
+      await onSessionStarted(session);
     }
 
     button.onclick = async () => {
-      if (currentSession) {
-        await currentSession.end();
-      } else {
+      try {
+        if (currentSession) return await currentSession.end();
         const ok = await navigator.xr.isSessionSupported("immersive-vr");
         if (!ok) {
           button.textContent = "VR NOT SUPPORTED";
@@ -79,10 +69,11 @@ export const VRButton = {
           return;
         }
         await requestSession();
+      } catch (e) {
+        console.warn("[VRButton] requestSession failed:", e);
       }
     };
 
-    // Pre-check support
     navigator.xr.isSessionSupported("immersive-vr").then((supported) => {
       if (!supported) {
         button.textContent = "VR NOT SUPPORTED";

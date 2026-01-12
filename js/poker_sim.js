@@ -1,176 +1,334 @@
-// /js/poker_sim.js — PokerSim v2 (FULL)
-// Visual poker loop: card meshes, community cards, hole cards.
-// Modes: "lobby_demo" and "scorpion_table".
+// /js/poker_sim.js — Scarlett PokerSim v1 (NO imports; injected THREE)
+// ✅ 6 seats around the table
+// ✅ 52-card deck + shuffle
+// ✅ Deal 2 hole cards to each seat
+// ✅ Flop / Turn / River (5 community cards)
+// ✅ Simple "Deal Hand" cycle you can trigger from world.js
+// ✅ Cards are aligned, face-up, and placed cleanly
 
-export const PokerSim = {
-  async init(ctx) {
-    this.ctx = ctx;
-    this.mode = "lobby_demo";
-    this.humanSeat = 0;
+export const PokerSim = (() => {
+  const S = {
+    THREE: null,
+    scene: null,
+    root: null,
+    log: console.log,
 
-    this._buildCardAssets(ctx);
-    this._buildLobbyDemoTable(ctx);
+    // table anchor
+    tableCenter: null,
+    tableY: 0,
+    tableR: 3.05,
 
-    ctx.log?.("[poker] init ✅ (cards + loop ready)");
-  },
+    // seats
+    seatCount: 6,
+    seats: [],
 
-  setMode(mode) {
-    this.mode = mode || "lobby_demo";
-    this.ctx?.log?.(`[poker] mode=${this.mode}`);
+    // deck
+    deck: [],
+    dealtIndex: 0,
 
-    if (this.lobbyGroup) this.lobbyGroup.visible = (this.mode === "lobby_demo");
+    // visuals
+    cardGeo: null,
+    mats: null,
 
-    if (this.mode === "scorpion_table") {
-      if (!this.scorpionCardsBuilt) this._buildScorpionCards(this.ctx);
-      this._startLoop();
+    // piles
+    deckAnchor: null,
+    community: [],
+
+    // state
+    phase: "idle", // idle, dealing, flop, turn, river
+    t: 0
+  };
+
+  const log = (m) => S.log?.(m);
+
+  // ----- helpers -----
+  function dz(n){ return (n<10?"0":"")+n; }
+
+  function makeDeck() {
+    // We don't need full rank/suit rendering yet; just names + face color changes later.
+    const suits = ["S","H","D","C"];
+    const ranks = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
+    const deck = [];
+    for (const s of suits) for (const r of ranks) deck.push({ id:`${r}${s}`, r, s });
+    return deck;
+  }
+
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      [arr[i], arr[j]] = [arr[j], arr[i]];
     }
-  },
+    return arr;
+  }
 
-  setHumanSeat(i) {
-    this.humanSeat = i | 0;
-  },
+  function makeCardMesh(cardId) {
+    const { THREE } = S;
 
-  _buildCardAssets(ctx) {
-    const { THREE } = ctx;
+    // group: front/back planes
+    const g = new THREE.Group();
 
-    const cardCanvas = document.createElement("canvas");
-    cardCanvas.width = 256; cardCanvas.height = 356;
-    const g = cardCanvas.getContext("2d");
+    const front = new THREE.Mesh(S.cardGeo, S.mats.front);
+    front.position.z = 0.002;
+    g.add(front);
 
-    g.fillStyle = "#f8fafc";
-    g.fillRect(0, 0, 256, 356);
-    g.strokeStyle = "#111827";
-    g.lineWidth = 8;
-    g.strokeRect(8, 8, 240, 340);
-    g.fillStyle = "#111827";
-    g.font = "bold 54px system-ui, Arial";
-    g.fillText("A♠", 24, 72);
+    const back = new THREE.Mesh(S.cardGeo, S.mats.back);
+    back.rotation.y = Math.PI;
+    back.position.z = -0.002;
+    g.add(back);
 
-    const frontTex = new THREE.CanvasTexture(cardCanvas);
+    g.userData.cardId = cardId;
 
-    const backCanvas = document.createElement("canvas");
-    backCanvas.width = 256; backCanvas.height = 356;
-    const b = backCanvas.getContext("2d");
-    b.fillStyle = "#0b1220";
-    b.fillRect(0, 0, 256, 356);
-    b.fillStyle = "#7fe7ff";
-    for (let y = 18; y < 356; y += 26) {
-      for (let x = 18; x < 256; x += 26) b.fillRect(x, y, 8, 8);
+    // lay flat on table by default
+    g.rotation.x = -Math.PI / 2;
+    return g;
+  }
+
+  function seatPose(i) {
+    // 6 seats around the table
+    const a = (i / S.seatCount) * Math.PI * 2;
+    const r = 3.35; // just outside table edge
+    const x = Math.cos(a) * r;
+    const z = Math.sin(a) * r;
+    const rotY = -a + Math.PI / 2; // face toward center
+    return { a, x, z, rotY };
+  }
+
+  function cardSlotsForSeat(i) {
+    // two hole cards per seat, slightly fanned
+    const p = seatPose(i);
+    const base = new S.THREE.Vector3(p.x, S.tableY + 0.18, p.z);
+
+    // offset toward center
+    const toward = new S.THREE.Vector3(-p.x, 0, -p.z).normalize().multiplyScalar(0.35);
+
+    const right = new S.THREE.Vector3(Math.cos(p.a + Math.PI/2), 0, Math.sin(p.a + Math.PI/2)).normalize().multiplyScalar(0.16);
+
+    const c1 = base.clone().add(toward).add(right.clone().multiplyScalar(-1));
+    const c2 = base.clone().add(toward).add(right.clone().multiplyScalar(1));
+
+    return [
+      { pos: c1, rotY: p.rotY + 0.10 },
+      { pos: c2, rotY: p.rotY - 0.10 }
+    ];
+  }
+
+  function communitySlots() {
+    // 5 community slots centered
+    const slots = [];
+    const y = S.tableY + 0.18;
+    const startX = -0.72;
+    const step = 0.36;
+    for (let i=0;i<5;i++){
+      slots.push({
+        pos: new S.THREE.Vector3(startX + i*step, y, 0.0),
+        rotY: Math.PI // face "south" by default
+      });
     }
-    b.strokeStyle = "#e8ecff";
-    b.lineWidth = 8;
-    b.strokeRect(8, 8, 240, 340);
+    return slots;
+  }
 
-    const backTex = new THREE.CanvasTexture(backCanvas);
+  // ----- public API -----
+  function init({ THREE, scene, root, log: logFn, tableCenter, tableY, tableR, seatCount = 6 }) {
+    S.THREE = THREE;
+    S.scene = scene;
+    S.root = root;
+    S.log = logFn || console.log;
 
-    this.cardGeo = new THREE.PlaneGeometry(0.18, 0.25);
-    this.cardFrontMat = new THREE.MeshStandardMaterial({ map: frontTex, roughness: 0.6, metalness: 0.05 });
-    this.cardBackMat = new THREE.MeshStandardMaterial({ map: backTex, roughness: 0.6, metalness: 0.05 });
-  },
+    S.tableCenter = tableCenter || new THREE.Vector3(0,0,0);
+    S.tableY = tableY ?? 0;
+    S.tableR = tableR ?? 3.05;
+    S.seatCount = seatCount;
 
-  _buildLobbyDemoTable(ctx) {
-    const { THREE, scene } = ctx;
-
-    const group = new THREE.Group();
-    group.name = "LobbyDemoPoker";
-    scene.add(group);
-    this.lobbyGroup = group;
-
-    const t = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.05, 1.05, 0.12, 48),
-      new THREE.MeshStandardMaterial({ color: 0x0f2a1d, roughness: 0.9, metalness: 0.05 })
-    );
-    t.position.set(0, 0.75, -2.8);
-    group.add(t);
-
-    this.lobbyCards = [];
-    for (let i = 0; i < 5; i++) {
-      const c = new THREE.Mesh(this.cardGeo, this.cardFrontMat);
-      c.position.set(-0.36 + i * 0.18, 0.83, -2.8);
-      c.rotation.x = -Math.PI / 2;
-      group.add(c);
-      this.lobbyCards.push(c);
-    }
-  },
-
-  _buildScorpionCards(ctx) {
-    const room = ctx?.scorpion;
-    if (!room?.group || !room?.tableTop) return;
-
-    this.scorpionCommunity = [];
-    for (let i = 0; i < 5; i++) {
-      const c = new ctx.THREE.Mesh(this.cardGeo, this.cardBackMat);
-      c.position.set(-0.32 + i * 0.16, 0.86, 0);
-      c.rotation.x = -Math.PI / 2;
-      room.group.add(c);
-      this.scorpionCommunity.push(c);
-    }
-
-    this.scorpionHole = [];
-    for (let s = 0; s < 5; s++) {
-      const arr = [];
-      for (let k = 0; k < 2; k++) {
-        const c = new ctx.THREE.Mesh(this.cardGeo, this.cardBackMat);
-        c.rotation.x = -Math.PI / 2;
-        room.group.add(c);
-        arr.push(c);
-      }
-      this.scorpionHole.push(arr);
-    }
-
-    this.scorpionCardsBuilt = true;
-    this._layoutScorpionCards(ctx);
-    this._startLoop();
-    ctx.log?.("[poker] scorpion cards built ✅");
-  },
-
-  _layoutScorpionCards(ctx) {
-    const room = ctx.scorpion;
-    const seats = room?.seats;
-    if (!seats) return;
-
-    for (let i = 0; i < 5; i++) {
-      const seat = seats[i];
-      const forward = new ctx.THREE.Vector3(0, 0, -1).applyEuler(seat.rotation);
-      const right = new ctx.THREE.Vector3(1, 0, 0).applyEuler(seat.rotation);
-
-      const base = room.tableTop.position.clone()
-        .add(forward.multiplyScalar(0.65))
-        .add(new ctx.THREE.Vector3(0, 0.09, 0));
-
-      const c0 = this.scorpionHole[i][0];
-      const c1 = this.scorpionHole[i][1];
-
-      c0.position.copy(base.clone().add(right.clone().multiplyScalar(-0.09)));
-      c1.position.copy(base.clone().add(right.clone().multiplyScalar(0.09)));
-
-      c0.rotation.y = seat.rotation.y;
-      c1.rotation.y = seat.rotation.y;
-    }
-  },
-
-  _startLoop() {
-    if (this._looping) return;
-    this._looping = true;
-
-    const tick = () => {
-      if (!this._looping) return;
-      if (this.mode === "scorpion_table" && this.scorpionCardsBuilt) this._cycleDeal();
-      setTimeout(tick, 1600);
+    S.cardGeo = new THREE.PlaneGeometry(0.55, 0.78);
+    S.mats = {
+      front: new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        emissive: new THREE.Color(0xffffff),
+        emissiveIntensity: 0.10,
+        roughness: 0.55,
+        metalness: 0.05
+      }),
+      back: new THREE.MeshStandardMaterial({
+        color: 0x1b2cff,
+        emissive: new THREE.Color(0x1b2cff),
+        emissiveIntensity: 0.70,
+        roughness: 0.55,
+        metalness: 0.12
+      })
     };
-    tick();
-  },
 
-  _cycleDeal() {
-    this._step = (this._step || 0) + 1;
+    // create deck anchor on table
+    S.deckAnchor = new THREE.Object3D();
+    S.deckAnchor.position.set(-0.9, S.tableY + 0.19, -0.35);
+    root.add(S.deckAnchor);
 
-    const n = Math.min(5, Math.floor(this._step / 2));
-    for (let i = 0; i < 5; i++) {
-      this.scorpionCommunity[i].material = (i < n) ? this.cardFrontMat : this.cardBackMat;
+    // seat markers (visual alignment check)
+    S.seats.length = 0;
+    for (let i=0;i<S.seatCount;i++){
+      const p = seatPose(i);
+
+      const marker = new THREE.Mesh(
+        new THREE.RingGeometry(0.22, 0.30, 24),
+        new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent:true, opacity:0.35, side: THREE.DoubleSide })
+      );
+      marker.rotation.x = -Math.PI/2;
+      marker.position.set(p.x, 0.06, p.z);
+      root.add(marker);
+
+      S.seats.push({
+        i,
+        angle: p.a,
+        marker,
+        hole: []
+      });
     }
 
-    const hs = this.humanSeat || 0;
-    this.scorpionHole[hs][0].material = this.cardFrontMat;
-    this.scorpionHole[hs][1].material = this.cardFrontMat;
-  },
-};
+    log("[poker] init ✅ seats=" + S.seatCount);
+  }
+
+  function clearTable() {
+    // remove hole cards + community cards
+    for (const s of S.seats) {
+      for (const c of s.hole) {
+        if (c?.parent) c.parent.remove(c);
+      }
+      s.hole.length = 0;
+    }
+    for (const c of S.community) {
+      if (c?.parent) c.parent.remove(c);
+    }
+    S.community.length = 0;
+  }
+
+  function startNewHand() {
+    clearTable();
+
+    S.deck = shuffle(makeDeck());
+    S.dealtIndex = 0;
+    S.phase = "dealing";
+    S.t = 0;
+
+    log("[poker] new hand ✅ deck shuffled");
+  }
+
+  function drawCard() {
+    const c = S.deck[S.dealtIndex++];
+    return c;
+  }
+
+  function dealHoleCards() {
+    // 2 rounds, 1 card each seat
+    for (let round=0; round<2; round++) {
+      for (let i=0;i<S.seatCount;i++){
+        const c = drawCard();
+        const mesh = makeCardMesh(c.id);
+
+        // start at deck
+        mesh.position.copy(S.deckAnchor.position);
+        mesh.rotation.y = Math.PI;
+        S.root.add(mesh);
+
+        S.seats[i].hole.push(mesh);
+      }
+    }
+
+    S.phase = "flop";
+    S.t = 0;
+    log("[poker] hole cards dealt ✅");
+  }
+
+  function dealCommunity(n) {
+    const slots = communitySlots();
+    const start = S.community.length;
+
+    for (let k=0;k<n;k++){
+      const c = drawCard();
+      const mesh = makeCardMesh(c.id);
+      mesh.position.copy(S.deckAnchor.position);
+      mesh.rotation.y = Math.PI;
+      S.root.add(mesh);
+      S.community.push(mesh);
+
+      // store target slot index
+      mesh.userData._slotIndex = start + k;
+      mesh.userData._slotPos = slots[start + k].pos.clone();
+      mesh.userData._slotRotY = slots[start + k].rotY;
+    }
+
+    log(`[poker] community +${n} ✅`);
+  }
+
+  function tickAnimations(dt) {
+    // animate all cards toward their assigned positions, if present
+    // hole cards: compute targets each frame (stable)
+    for (let i=0;i<S.seatCount;i++){
+      const slots = cardSlotsForSeat(i);
+      const hole = S.seats[i].hole;
+
+      for (let j=0;j<hole.length;j++){
+        const mesh = hole[j];
+        const tgt = slots[j] || slots[slots.length-1];
+        const target = tgt.pos;
+        mesh.position.lerp(target, 0.10);
+        mesh.rotation.y += (tgt.rotY - mesh.rotation.y) * 0.10;
+      }
+    }
+
+    // community cards to fixed slots
+    const comSlots = communitySlots();
+    for (let i=0;i<S.community.length;i++){
+      const mesh = S.community[i];
+      const tgt = comSlots[i];
+      mesh.position.lerp(tgt.pos, 0.10);
+      mesh.rotation.y += (tgt.rotY - mesh.rotation.y) * 0.10;
+    }
+  }
+
+  function update(dt) {
+    S.t += dt;
+
+    // auto progression for now
+    if (S.phase === "idle") {
+      tickAnimations(dt);
+      return;
+    }
+
+    if (S.phase === "dealing") {
+      // after a short beat, deal holes
+      if (S.t > 0.35) dealHoleCards();
+      tickAnimations(dt);
+      return;
+    }
+
+    if (S.phase === "flop") {
+      if (S.t < 0.35) { tickAnimations(dt); return; }
+      // burn is implicit; deal 3
+      dealCommunity(3);
+      S.phase = "turn";
+      S.t = 0;
+      tickAnimations(dt);
+      return;
+    }
+
+    if (S.phase === "turn") {
+      if (S.t < 0.95) { tickAnimations(dt); return; }
+      dealCommunity(1);
+      S.phase = "river";
+      S.t = 0;
+      tickAnimations(dt);
+      return;
+    }
+
+    if (S.phase === "river") {
+      if (S.t < 0.95) { tickAnimations(dt); return; }
+      dealCommunity(1);
+      S.phase = "idle";
+      S.t = 0;
+      log("[poker] river ✅ hand complete");
+      tickAnimations(dt);
+      return;
+    }
+  }
+
+  return { init, startNewHand, update };
+})();

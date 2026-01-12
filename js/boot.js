@@ -1,70 +1,45 @@
-// /js/boot.js — Scarlett Boot v2.2 (YES: full boot.js)
-// ✅ Always shows bootlog overlay (unless Clean Mode hides it)
-// ✅ Detects repo base path (GitHub Pages subfolder safe)
-// ✅ Imports /js/index.js with cache-bust
-// ✅ Catches and prints import errors clearly
+// /js/boot.js — Scarlett Poker VR Boot (FULL + fail-safe)
+// - Detects base path for GitHub Pages
+// - Imports /js/index.js with cache-bust
+// - Shows readable errors in #dbg
 
-(() => {
-  const now = () => new Date().toLocaleTimeString();
-  const stamp = Date.now();
+const $dbg = document.getElementById("dbg");
+const log = (m, cls="") => {
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = m;
+  $dbg?.appendChild(line);
+  $dbg && ($dbg.scrollTop = $dbg.scrollHeight);
+  console.log(m);
+};
 
-  function ensureBootlog() {
-    let el = document.getElementById("bootlog");
-    if (el) return el;
+(function main(){
+  try {
+    log(`[BOOT] href=${location.href}`);
+    log(`[BOOT] secureContext=${window.isSecureContext}`);
+    log(`[BOOT] ua=${navigator.userAgent}`);
 
-    el = document.createElement("div");
-    el.id = "bootlog";
-    el.style.position = "fixed";
-    el.style.left = "12px";
-    el.style.top = "12px";
-    el.style.right = "12px";
-    el.style.maxWidth = "720px";
-    el.style.zIndex = "999999";
-    el.style.background = "rgba(10,12,18,0.72)";
-    el.style.color = "#e8ecff";
-    el.style.border = "1px solid rgba(127,231,255,0.22)";
-    el.style.borderRadius = "16px";
-    el.style.padding = "12px 14px";
-    el.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
-    el.style.fontSize = "12px";
-    el.style.whiteSpace = "pre-wrap";
-    el.style.backdropFilter = "blur(10px)";
-    el.style.pointerEvents = "auto";
-    document.body.appendChild(el);
-    return el;
-  }
+    // Base path for GitHub Pages repo: /scarlett-poker-vr/
+    // If you ever rename repo, this still works.
+    const parts = location.pathname.split("/").filter(Boolean);
+    const repo = parts.length ? parts[0] : "";
+    const base = repo ? `/${repo}/` : "/";
+    window.__BASE_PATH__ = base;
+    log(`[BOOT] path=${base}`);
 
-  const bootlog = ensureBootlog();
+    const v = Date.now();
+    const entry = `${base}js/index.js?v=${v}`;
+    log(`[BOOT] importing ${entry} …`);
 
-  function line(s) {
-    bootlog.textContent += s + "\n";
-    console.log(s);
-  }
-
-  line(`[HTML] loaded ✅ (waiting for /js/boot.js…)\n[${now()}] href=${location.href}`);
-  line(`[${now()}] secureContext=${String(isSecureContext)}`);
-  line(`[${now()}] ua=${navigator.userAgent}`);
-  line(`[${now()}] importing ./js/boot.js?v=${stamp} …`);
-  line(`[${now()}] [BOOT] boot.js loaded ✅`);
-
-  // Derive base path for GitHub Pages subfolder deployments
-  // Example: https://user.github.io/scarlett-poker-vr/ -> base "/scarlett-poker-vr/"
-  const parts = location.pathname.split("/").filter(Boolean);
-  const base = parts.length ? `/${parts[0]}/` : "/";
-  line(`[${now()}] [BOOT] path=${base}`);
-
-  // Build URL to index.js relative to base
-  const indexURL = `${base}js/index.js?v=${stamp}`;
-
-  // Import index.js
-  line(`[${now()}] [BOOT] importing ${indexURL} …`);
-
-  import(indexURL)
-    .then(() => {
-      line(`[${now()}] [BOOT] index.js imported ✅`);
-    })
-    .catch((err) => {
-      line(`[${now()}] [BOOT] index.js import FAILED ❌ ${err?.message || err}`);
-      if (err?.stack) line(err.stack);
+    import(entry).then(() => {
+      log(`[BOOT] index.js imported ✅`, "ok");
+    }).catch((err) => {
+      log(`[BOOT] index.js import FAILED ❌ ${err?.message || err}`, "bad");
+      if (err?.stack) log(err.stack, "bad");
     });
+
+  } catch (e) {
+    log(`[BOOT] fatal ❌ ${e?.message || e}`, "bad");
+    if (e?.stack) log(e.stack, "bad");
+  }
 })();

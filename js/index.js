@@ -2,7 +2,9 @@
 // ✅ Major flicker reduction: lower XR framebuffer scale, cap DPR
 // ✅ Keeps movement + snap turn + laser parenting
 // ✅ Runs BotsDemo (bots “playing” + chip toss demo)
-
+import { UIHud } from "./ui_hud.js";
+import { NameTags } from "./nametags.js";
+import { PokerDemo } from "./poker_demo.js";
 import { THREE, VRButton } from "./three.js";
 import { World } from "./world.js";
 import { BotsDemo } from "./bots_demo.js";

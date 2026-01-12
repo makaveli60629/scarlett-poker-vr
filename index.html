@@ -6,25 +6,23 @@
   <title>Scarlett Poker VR</title>
   <style>
     html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; font-family:system-ui,Segoe UI,Roboto,Arial; }
-    #stage { position:fixed; inset:0; }
     #bootlog{
       position:fixed; left:12px; right:12px; top:12px;
       max-height:44vh; overflow:auto;
       background:rgba(10,12,18,.65); color:#e8ecff;
       border:1px solid rgba(127,231,255,.25);
-      border-radius:14px; padding:10px 12px; z-index:99999;
+      border-radius:14px; padding:10px 12px; z-index:999999;
       backdrop-filter: blur(8px);
       font-size:12px; line-height:1.35;
       white-space:pre-wrap;
+      user-select:text;
     }
   </style>
 </head>
 <body>
-  <div id="stage"></div>
   <div id="bootlog">[HTML] loaded ✅ (waiting for ./js/boot.js…)\n</div>
 
   <script>
-    // On-screen logger (works in Quest)
     (function(){
       const el = document.getElementById('bootlog');
       window.__BOOTLOG__ = function(msg){
@@ -40,7 +38,6 @@
     })();
   </script>
 
-  <!-- IMPORTANT: RELATIVE path (./js/boot.js), NOT /js/boot.js -->
   <script type="module">
     const v = Date.now();
     const url = `./js/boot.js?v=${v}`;

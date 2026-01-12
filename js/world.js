@@ -1,7 +1,8 @@
-// /js/world.js — Scarlett MASTER WORLD (FULL: Lobby + 4 Rooms + Halls + Divot + Jumbotrons)
-// ✅ No dependencies. Safe on GitHub Pages.
-// ✅ Always builds something visible.
-// ✅ Logs build steps.
+// /js/world.js — Scarlett MASTER WORLD (NO "three" imports; uses injected THREE)
+// ✅ Works on GitHub Pages
+// ✅ No module imports at all
+// ✅ Lobby + 4 rooms + halls + divot + jumbotrons
+// ✅ Logs build steps
 
 export const World = (() => {
   const S = {
@@ -59,7 +60,6 @@ export const World = (() => {
       mat(0x171926, 1, 0)
     );
     floor.rotation.x = -Math.PI / 2;
-    floor.position.y = 0;
     add(floor, true);
 
     log("[world] floor ✅");
@@ -263,6 +263,7 @@ export const World = (() => {
           metalness: 0.1
         })
       );
+
       const dz = 0.19;
       if (rotY === 0) screen.position.set(x, y, z + dz);
       else if (rotY === Math.PI) screen.position.set(x, y, z - dz);
@@ -295,7 +296,6 @@ export const World = (() => {
     scene.add(S.root);
 
     log("[world] init …");
-
     buildLights();
     buildFloorAndSky();
     buildLobbyRing();
@@ -304,18 +304,14 @@ export const World = (() => {
     buildJumbotrons();
 
     if (player) {
-      player.position.y = 0;
-      player.position.x = 0;
-      player.position.z = 8.5;
+      player.position.set(0, 0, 8.5);
+      player.rotation.set(0, 0, 0);
     }
 
-    log("[world] build complete ✅ (MASTER)");
+    log("[world] build complete ✅ (NO-IMPORT MASTER)");
   }
 
-  function update(dt) {
-    S.t += dt;
-    // (kept light intentionally)
-  }
+  function update(dt) { S.t += dt; }
 
   return { init, update, get colliders() { return S.colliders; } };
 })();

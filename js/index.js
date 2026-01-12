@@ -1,6 +1,6 @@
 // /js/index.js — MASTER FIX (NO "three" bare imports anywhere)
 // Uses your wrapper: /js/three.js
-
+import { THREE, VRButton } from "./three.js";
 import { THREE, VRButton } from "./three.js";
 import { World } from "./world.js";
 

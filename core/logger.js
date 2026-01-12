@@ -1,36 +1,25 @@
-// /core/logger.js — Scarlett Logger (FULL)
-// Minimal, fast, Android friendly. Writes to #hud-log if present.
+// /core/logger.js — FULL SAFE LOGGER (HUD + console)
+export function createLogger({ maxLines = 120 } = {}) {
+  const lines = [];
+  const el = () => document.getElementById("hudLog");
 
-export function createLogger({ maxLines = 80 } = {}) {
-  const pad = (n) => String(n).padStart(2, "0");
-  const now = () => {
-    const d = new Date();
-    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  };
-
-  const out = [];
-  function write(m) {
-    const line = `[${now()}] ${m}`;
-    out.push(line);
-    if (out.length > maxLines * 3) out.splice(0, out.length - maxLines * 2);
+  function log(msg) {
+    const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    lines.push(line);
+    if (lines.length > maxLines) lines.shift();
     console.log(line);
-
-    const el = document.getElementById("hud-log");
-    if (el) el.textContent = out.slice(-maxLines).join("\n");
-
-    if (typeof window.__HTML_LOG === "function") {
-      try { window.__HTML_LOG(line); } catch {}
-    }
+    const node = el();
+    if (node) node.textContent = lines.slice(-maxLines).join("\n");
   }
 
-  write.copy = async () => {
+  log.copy = async () => {
     try {
-      await navigator.clipboard.writeText(out.join("\n"));
-      write("[HUD] copied ✅");
+      await navigator.clipboard.writeText(lines.join("\n"));
+      log("[HUD] copied ✅");
     } catch (e) {
-      write("[HUD] copy failed ❌ " + (e?.message || e));
+      log("[HUD] copy failed ❌ " + (e?.message || e));
     }
   };
 
-  return write;
+  return log;
 }

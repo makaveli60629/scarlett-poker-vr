@@ -1,321 +1,300 @@
-// /js/index.js — Scarlett MASTER Runtime (FAIL-SAFE, VRButton ALWAYS, VIP SPAWN)
-// Uses /js/three.js wrapper: exports { THREE, VRButton }
-
+// /js/index.js — Scarlett MASTER (DIAG HUD + COPY + NO HANG + ROBUST MOVE)
 import { THREE, VRButton } from "./three.js";
 
 const VERSION = Date.now();
-const log = (...a) => console.log(...a);
+const BASE = (location.pathname.includes("/scarlett-poker-vr/") ? "/scarlett-poker-vr/" : "/");
 
-// ---------- UI: on-screen log/status ----------
-function makeStatus() {
-  const el = document.createElement("div");
-  el.id = "scarlettStatus";
-  el.style.cssText = `
-    position:fixed;left:12px;top:12px;z-index:999999;
-    font:13px/1.35 system-ui,Segoe UI,Roboto,Arial;
-    color:#d7e6ff;background:rgba(0,0,0,.62);
-    padding:10px 12px;border-radius:14px;max-width:88vw;
-    box-shadow: 0 10px 30px rgba(0,0,0,.35);
-    white-space:pre-wrap;
-  `;
-  el.textContent = "[index] booting…";
-  document.body.appendChild(el);
-  return (t) => (el.textContent = t);
+const LogBuf = [];
+function LOG(...a) {
+  const s = a.map(x => (typeof x === "string" ? x : JSON.stringify(x))).join(" ");
+  console.log(s);
+  LogBuf.push(s);
+  if (LogBuf.length > 1200) LogBuf.shift();
+  if (ui.log) {
+    ui.log.textContent = LogBuf.slice(-220).join("\n");
+    ui.log.scrollTop = ui.log.scrollHeight;
+  }
 }
-const setStatus = makeStatus();
+LOG(`[index] start v=${VERSION} base=${BASE}`);
 
-// ---------- base path helper ----------
-const BASE = (() => {
-  // supports github pages subfolder
-  const p = location.pathname;
-  if (p.includes("/scarlett-poker-vr/")) return "/scarlett-poker-vr/";
-  return "/";
-})();
-
-setStatus(`[index] runtime start ✅ base=${BASE}`);
+const ui = makeDiagUI();
 
 const S = {
-  THREE,
-  BASE,
   scene: null,
   camera: null,
   renderer: null,
+  player: null,
+  head: null,
   clock: null,
-  player: null,      // player rig (Group)
-  head: null,        // camera parent
-  controllers: [],   // { obj, ray, line, grip, gamepad }
-  pads: [],          // teleport pads registered by world
+  controllers: [],
+  pads: [],
   world: null,
 };
 
-// ---------- safe import ----------
-async function safeImport(path) {
-  try {
-    return await import(`${path}?v=${VERSION}`);
-  } catch (e) {
-    console.warn("[safeImport] failed:", path, e);
-    return null;
-  }
-}
+function makeDiagUI() {
+  const wrap = document.createElement("div");
+  wrap.style.cssText = `
+    position:fixed; left:12px; top:12px; z-index:999999;
+    width:min(520px, 92vw);
+    background:rgba(0,0,0,.62); color:#d7e6ff;
+    border:1px solid rgba(127,231,255,.35);
+    border-radius:14px; padding:10px; font:12px/1.35 system-ui,Segoe UI,Roboto,Arial;
+    box-shadow:0 12px 40px rgba(0,0,0,.45);
+  `;
 
-// ---------- core init ----------
-(async function init() {
-  try {
-    // renderer
-    S.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    S.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
-    S.renderer.setSize(innerWidth, innerHeight);
-    S.renderer.xr.enabled = true;
-    document.body.style.margin = "0";
-    document.body.style.overflow = "hidden";
-    document.body.style.background = "#05060a";
-    document.body.appendChild(S.renderer.domElement);
+  const row = document.createElement("div");
+  row.style.cssText = "display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap;";
 
-    // VRButton ALWAYS
-    document.body.appendChild(VRButton.createButton(S.renderer));
-    log("[index] VRButton appended ✅");
-
-    // scene/camera
-    S.scene = new THREE.Scene();
-    S.scene.fog = new THREE.Fog(0x05060a, 8, 80);
-
-    S.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 300);
-
-    // Player rig (standing default)
-    S.player = new THREE.Group();
-    S.player.name = "PlayerRig";
-    S.player.position.set(0, 0, 0);
-
-    S.head = new THREE.Group();
-    S.head.name = "Head";
-    S.head.add(S.camera);
-    S.player.add(S.head);
-    S.scene.add(S.player);
-
-    // clock
-    S.clock = new THREE.Clock();
-
-    // lighting baseline so you never see black
-    const amb = new THREE.AmbientLight(0xffffff, 0.8);
-    S.scene.add(amb);
-    const key = new THREE.DirectionalLight(0xffffff, 1.2);
-    key.position.set(6, 10, 4);
-    S.scene.add(key);
-
-    // controllers + lasers
-    setupControllers();
-
-    // WORLD INIT watchdog — NEVER hang the render loop
-    S.renderer.setAnimationLoop(tick);
-
-    setStatus("[index] importing world.js…");
-    const worldMod = await safeImport("./world.js");
-    if (!worldMod?.World?.init) throw new Error("world.js missing export World.init");
-
-    S.world = worldMod.World;
-
-    setStatus("[index] World.init()…");
-    const WORLD_TIMEOUT_MS = 12000;
-
-    let timedOut = false;
-    await Promise.race([
-      (async () => {
-        await S.world.init({
-          THREE,
-          scene: S.scene,
-          renderer: S.renderer,
-          camera: S.camera,
-          player: S.player,
-          controllers: S.controllers,
-          log: (...a) => console.log("[world]", ...a),
-          BASE,
-          registerTeleportPad: (pad) => S.pads.push(pad),
-          setSpawn: (pos, yawRad = 0) => {
-            // yaw rotate player rig
-            S.player.position.copy(pos);
-            S.player.rotation.set(0, yawRad, 0);
-          },
-        });
-        if (!timedOut) setStatus("[index] world init ✅ (running)");
-      })(),
-      new Promise((resolve) =>
-        setTimeout(() => {
-          timedOut = true;
-          setStatus("[index] WORLD INIT TIMEOUT ❌ (scene still running)\n→ world.js has a hanging await/import");
-          resolve();
-        }, WORLD_TIMEOUT_MS)
-      ),
-    ]);
-
-    addResize();
-
-  } catch (e) {
-    console.error(e);
-    setStatus(`[index] init FAILED ❌\n${e?.message || e}`);
-  }
-})();
-
-// ---------- controllers ----------
-function setupControllers() {
-  const makeLaser = () => {
-    const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
-    const m = new THREE.LineBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.9 });
-    const line = new THREE.Line(g, m);
-    line.name = "laser";
-    line.scale.z = 8;
-    return line;
+  const btnCopy = document.createElement("button");
+  btnCopy.textContent = "COPY LOG";
+  btnCopy.style.cssText = btnStyle();
+  btnCopy.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(LogBuf.join("\n"));
+      LOG("[HUD] copied ✅");
+    } catch {
+      // fallback
+      const ta = document.createElement("textarea");
+      ta.value = LogBuf.join("\n");
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+      LOG("[HUD] copied (fallback) ✅");
+    }
   };
 
-  for (let i = 0; i < 2; i++) {
-    const c = S.renderer.xr.getController(i);
-    c.name = `Controller${i}`;
-    c.userData.index = i;
+  const btnHide = document.createElement("button");
+  btnHide.textContent = "HIDE";
+  btnHide.style.cssText = btnStyle();
+  btnHide.onclick = () => {
+    const isHidden = wrap.dataset.hidden === "1";
+    wrap.dataset.hidden = isHidden ? "0" : "1";
+    logArea.style.display = isHidden ? "block" : "none";
+  };
 
-    const laser = makeLaser();
-    c.add(laser);
+  const status = document.createElement("div");
+  status.textContent = "status: booting…";
+  status.style.cssText = "opacity:.95; font-weight:700;";
 
-    // cursor dot
-    const dot = new THREE.Mesh(
-      new THREE.SphereGeometry(0.02, 16, 16),
-      new THREE.MeshBasicMaterial({ color: 0x7fe7ff })
-    );
-    dot.position.z = -1;
-    dot.visible = false;
-    c.add(dot);
+  row.appendChild(btnCopy);
+  row.appendChild(btnHide);
+  row.appendChild(status);
 
-    c.addEventListener("selectstart", () => onSelectStart(i));
-    S.scene.add(c);
+  const logArea = document.createElement("pre");
+  logArea.style.cssText = `
+    margin:0; padding:10px; border-radius:10px;
+    background:rgba(10,12,18,.65); max-height:38vh; overflow:auto;
+    border:1px solid rgba(255,255,255,.08);
+    white-space:pre-wrap;
+  `;
+  logArea.textContent = "";
 
-    S.controllers.push({ obj: c, laser, dot });
-  }
+  wrap.appendChild(row);
+  wrap.appendChild(logArea);
+  document.body.appendChild(wrap);
 
-  log("[index] controllers ready ✅");
+  return { wrap, status, log: logArea };
 }
 
-// ---------- teleport selection ----------
-const raycaster = new THREE.Raycaster();
-const tempMat = new THREE.Matrix4();
-const tempDir = new THREE.Vector3();
-
-function onSelectStart(handIndex) {
-  const ctrl = S.controllers[handIndex];
-  if (!ctrl) return;
-
-  // build ray from controller
-  tempMat.identity().extractRotation(ctrl.obj.matrixWorld);
-  tempDir.set(0, 0, -1).applyMatrix4(tempMat).normalize();
-  const origin = new THREE.Vector3().setFromMatrixPosition(ctrl.obj.matrixWorld);
-  raycaster.set(origin, tempDir);
-
-  // intersect pads
-  const padMeshes = S.pads.map((p) => p.mesh).filter(Boolean);
-  const hits = raycaster.intersectObjects(padMeshes, false);
-  if (!hits?.length) return;
-
-  const hit = hits[0].object;
-  const pad = S.pads.find((p) => p.mesh === hit);
-  if (!pad) return;
-
-  // teleport: set player rig to target
-  if (pad.target) {
-    S.player.position.copy(pad.target);
-    if (typeof pad.yaw === "number") S.player.rotation.y = pad.yaw;
-    console.log("[teleport] ->", pad.name, pad.target.toArray());
-  }
+function btnStyle() {
+  return `
+    padding:8px 10px; border-radius:12px;
+    border:1px solid rgba(127,231,255,.5);
+    background:rgba(10,12,18,.75);
+    color:#e8ecff; font-weight:800;
+  `;
 }
 
-// ---------- locomotion (sticks) ----------
-function applyLocomotion(dt) {
-  // Quest/VR controllers: inputSources contain gamepads
-  const session = S.renderer.xr.getSession?.();
-  if (!session) return;
-
-  // gather gamepads
-  const sources = session.inputSources || [];
-  let left = null, right = null;
-
-  for (const src of sources) {
-    if (!src?.gamepad) continue;
-    // heuristics: left = handedness left
-    if (src.handedness === "left") left = src.gamepad;
-    if (src.handedness === "right") right = src.gamepad;
-  }
-
-  // move with left stick
-  if (left?.axes?.length >= 2) {
-    const x = dead(left.axes[0]);
-    const y = dead(left.axes[1]);
-
-    // FIX: forward should move forward (invert y because many pads give -1 forward)
-    const forward = -y;
-    const strafe = x;
-
-    const speed = 2.2; // m/s
-    const move = new THREE.Vector3(strafe, 0, -forward).multiplyScalar(speed * dt);
-
-    // rotate move by player yaw
-    move.applyAxisAngle(new THREE.Vector3(0, 1, 0), S.player.rotation.y);
-    S.player.position.add(move);
-  }
-
-  // rotate with right stick (snap-ish smooth)
-  if (right?.axes?.length >= 2) {
-    const rx = dead(right.axes[0]);
-    const rotSpeed = 1.6; // rad/s
-    S.player.rotation.y -= rx * rotSpeed * dt;
-  }
+function setStatus(t) {
+  ui.status.textContent = "status: " + t;
+  LOG("[status]", t);
 }
 
-function dead(v, dz = 0.15) {
-  return Math.abs(v) < dz ? 0 : v;
+function setSpawn(pos, yaw = 0) {
+  S.player.position.copy(pos);
+  S.player.rotation.set(0, yaw, 0);
 }
 
-// ---------- tick ----------
-function tick() {
-  const dt = Math.min(S.clock?.getDelta?.() || 0.016, 0.05);
+function init() {
+  document.body.style.margin = "0";
+  document.body.style.overflow = "hidden";
+  document.body.style.background = "#05060a";
 
-  applyLocomotion(dt);
+  S.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+  S.renderer.setSize(innerWidth, innerHeight);
+  S.renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+  S.renderer.xr.enabled = true;
+  document.body.appendChild(S.renderer.domElement);
 
-  // update lasers to show hit dots on pads
-  updateLasers();
+  document.body.appendChild(VRButton.createButton(S.renderer));
+  LOG("[index] VRButton appended ✅");
 
-  // world update if exists
-  try {
-    S.world?.update?.(dt);
-  } catch (e) {
-    console.warn("[world.update] error", e);
-  }
+  S.scene = new THREE.Scene();
+  S.scene.fog = new THREE.Fog(0x05060a, 8, 80);
 
-  S.renderer.render(S.scene, S.camera);
-}
+  S.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 250);
 
-function updateLasers() {
-  // show dot when aiming at a pad
-  const padMeshes = S.pads.map((p) => p.mesh).filter(Boolean);
-  if (!padMeshes.length) return;
+  S.player = new THREE.Group();
+  S.player.name = "PlayerRig";
 
-  for (const ctrl of S.controllers) {
-    tempMat.identity().extractRotation(ctrl.obj.matrixWorld);
-    tempDir.set(0, 0, -1).applyMatrix4(tempMat).normalize();
-    const origin = new THREE.Vector3().setFromMatrixPosition(ctrl.obj.matrixWorld);
-    raycaster.set(origin, tempDir);
+  S.head = new THREE.Group();
+  S.head.add(S.camera);
+  S.player.add(S.head);
 
-    const hits = raycaster.intersectObjects(padMeshes, false);
-    if (hits?.length) {
-      const p = hits[0].point;
-      ctrl.dot.visible = true;
-      ctrl.dot.position.copy(ctrl.obj.worldToLocal(p.clone()));
-    } else {
-      ctrl.dot.visible = false;
-    }
-  }
-}
+  S.scene.add(S.player);
 
-// ---------- resize ----------
-function addResize() {
+  S.clock = new THREE.Clock();
+
+  setupControllers();
+
   addEventListener("resize", () => {
     S.camera.aspect = innerWidth / innerHeight;
     S.camera.updateProjectionMatrix();
     S.renderer.setSize(innerWidth, innerHeight);
   });
-                                                           }
+
+  // Render loop ALWAYS starts
+  S.renderer.setAnimationLoop(tick);
+
+  // Init world with a watchdog (but this world.js should finish instantly now)
+  startWorld();
+}
+
+function setupControllers() {
+  const rayGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
+  const rayMat = new THREE.LineBasicMaterial({ color: 0x7fe7ff });
+
+  for (let i = 0; i < 2; i++) {
+    const c = S.renderer.xr.getController(i);
+    c.userData.index = i;
+    const line = new THREE.Line(rayGeo, rayMat);
+    line.scale.z = 8;
+    c.add(line);
+    S.scene.add(c);
+    S.controllers.push(c);
+  }
+  LOG("[index] controllers ready ✅", S.controllers.length);
+}
+
+async function startWorld() {
+  setStatus("importing world.js…");
+  const mod = await import(`./world.js?v=${VERSION}`);
+  if (!mod?.World?.init) {
+    setStatus("world.js missing World.init ❌");
+    return;
+  }
+
+  const World = mod.World;
+  S.world = World;
+
+  setStatus("World.init()…");
+
+  let done = false;
+  setTimeout(() => {
+    if (!done) setStatus("WORLD INIT TIMEOUT ❌ (but loop still running)");
+  }, 8000);
+
+  try {
+    // NOTE: World.init is synchronous in the new world.js
+    World.init({
+      THREE,
+      scene: S.scene,
+      renderer: S.renderer,
+      camera: S.camera,
+      player: S.player,
+      controllers: S.controllers,
+      BASE,
+      log: (...a) => LOG("[world]", ...a),
+      registerTeleportPad: (p) => S.pads.push(p),
+      setSpawn,
+    });
+    done = true;
+    setStatus("world init ✅");
+  } catch (e) {
+    done = true;
+    setStatus("world init FAILED ❌");
+    LOG("[world] init crash:", e?.message || e);
+  }
+}
+
+// --------- ROBUST MOVE (Quest) ---------
+function tick() {
+  const dt = Math.min(S.clock.getDelta(), 0.05);
+
+  applyMove(dt);
+
+  // keep standing height (no crouch)
+  if (S.camera.position.y < 1.2) S.camera.position.y = 1.65;
+
+  // world update hook
+  try {
+    S.scene.userData.WORLD_UPDATE?.(dt);
+  } catch (e) {
+    LOG("[WORLD_UPDATE] error:", e?.message || e);
+  }
+
+  S.renderer.render(S.scene, S.camera);
+}
+
+function dead(v, dz = 0.12) {
+  return Math.abs(v) < dz ? 0 : v;
+}
+
+function applyMove(dt) {
+  // prefer WebXR inputSources
+  const session = S.renderer.xr.getSession?.();
+  let leftAxes = null;
+  let rightAxes = null;
+
+  if (session?.inputSources) {
+    for (const src of session.inputSources) {
+      const gp = src?.gamepad;
+      if (!gp || !gp.axes) continue;
+
+      const axes = gp.axes;
+      // Some controllers report 4 axes; use first pair
+      const pair = [axes[0] ?? 0, axes[1] ?? 0];
+
+      if (src.handedness === "left") leftAxes = pair;
+      if (src.handedness === "right") rightAxes = pair;
+    }
+  }
+
+  // fallback: navigator.getGamepads (some builds only populate here)
+  if (!leftAxes || !rightAxes) {
+    const gps = navigator.getGamepads?.() || [];
+    for (const gp of gps) {
+      if (!gp?.axes) continue;
+      const id = (gp.id || "").toLowerCase();
+      const pair = [gp.axes[0] ?? 0, gp.axes[1] ?? 0];
+      if (!leftAxes && (id.includes("oculus") || id.includes("quest"))) leftAxes = pair;
+      // if we can’t distinguish, reuse for right as well
+      if (!rightAxes && (id.includes("oculus") || id.includes("quest"))) rightAxes = pair;
+    }
+  }
+
+  // movement with left stick
+  if (leftAxes) {
+    const x = dead(leftAxes[0]);
+    const y = dead(leftAxes[1]);
+
+    // IMPORTANT: forward should move forward; many pads give -1 forward so invert
+    const forward = -y;
+    const strafe = x;
+
+    const speed = 2.3;
+    const move = new THREE.Vector3(strafe, 0, -forward).multiplyScalar(speed * dt);
+    move.applyAxisAngle(new THREE.Vector3(0, 1, 0), S.player.rotation.y);
+    S.player.position.add(move);
+  }
+
+  // rotate with right stick x
+  if (rightAxes) {
+    const rx = dead(rightAxes[0]);
+    const rotSpeed = 1.8;
+    S.player.rotation.y -= rx * rotSpeed * dt;
+  }
+}
+
+init();

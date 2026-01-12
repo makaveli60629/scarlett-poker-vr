@@ -1,339 +1,286 @@
 // /js/index.js — Scarlett Poker VR (FULL, crash-proof)
-// ✅ Fixes: THREE.Clock is not a constructor (wrapper-safe)
-// ✅ Ensures: ENTER VR button shows (VRButton appended)
-// ✅ Works: Android + Quest (controllers + basic locomotion)
-// ✅ World: loads ./world.js safely (init/build fallback)
-// ✅ Logs: to console + on-screen (#log) if present
+// Fixes: "THREE wrapper missing constructor: Clock" + restores ENTER buttons.
 
-import * as THREE_NS from "./three.js";
 import { VRButton } from "./VRButton.js";
+import { World } from "./world.js";
 
-// ---------- LOG ----------
-const $log = () => document.getElementById("log");
-function logLine(...args) {
-  const msg = args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
-  console.log(msg);
-  const el = $log();
-  if (el) {
-    el.textContent += msg + "\n";
-    el.scrollTop = el.scrollHeight;
-  }
-}
-const ok = (s) => logLine(`%c${s}`, "color:#4cd964");
-const warn = (s) => logLine(`%c${s}`, "color:#ffcc00");
-const bad = (s) => logLine(`%c${s}`, "color:#ff6b6b");
-
-// ---------- THREE NORMALIZATION (WRAPPER-SAFE) ----------
-const THREE = (THREE_NS && (THREE_NS.default || THREE_NS)) || {};
-const T = {
-  Clock: THREE.Clock || THREE_NS.Clock || THREE_NS.default?.Clock,
-  Scene: THREE.Scene || THREE_NS.Scene || THREE_NS.default?.Scene,
-  Color: THREE.Color || THREE_NS.Color || THREE_NS.default?.Color,
-  Group: THREE.Group || THREE_NS.Group || THREE_NS.default?.Group,
-  Vector3: THREE.Vector3 || THREE_NS.Vector3 || THREE_NS.default?.Vector3,
-  Quaternion: THREE.Quaternion || THREE_NS.Quaternion || THREE_NS.default?.Quaternion,
-  Matrix4: THREE.Matrix4 || THREE_NS.Matrix4 || THREE_NS.default?.Matrix4,
-  WebGLRenderer: THREE.WebGLRenderer || THREE_NS.WebGLRenderer || THREE_NS.default?.WebGLRenderer,
-  PerspectiveCamera: THREE.PerspectiveCamera || THREE_NS.PerspectiveCamera || THREE_NS.default?.PerspectiveCamera,
-  HemisphereLight: THREE.HemisphereLight || THREE_NS.HemisphereLight || THREE_NS.default?.HemisphereLight,
-  DirectionalLight: THREE.DirectionalLight || THREE_NS.DirectionalLight || THREE_NS.default?.DirectionalLight,
-  Raycaster: THREE.Raycaster || THREE_NS.Raycaster || THREE_NS.default?.Raycaster,
+// ---------- LOG PANEL ----------
+const LOG = (...a) => {
+  console.log(...a);
+  const el = document.getElementById("log");
+  if (!el) return;
+  const line = a.map(x => (typeof x === "string" ? x : JSON.stringify(x))).join(" ");
+  el.textContent += line + "\n";
+  el.scrollTop = el.scrollHeight;
 };
+const BAD = (...a) => LOG("❌", ...a);
+const OK  = (...a) => LOG("✅", ...a);
 
-function assertCtor(name) {
-  if (!T[name]) throw new Error(`THREE wrapper missing constructor: ${name}`);
-}
-["Clock", "Scene", "Color", "Group", "Vector3", "Quaternion", "Matrix4", "WebGLRenderer", "PerspectiveCamera", "Raycaster"].forEach(assertCtor);
+// ---------- SAFE THREE LOADER ----------
+// Your project uses a "three wrapper" in some builds.
+// We support either: window.THREE, or ESM import from ./three.module.js if you have it.
+async function getTHREE() {
+  if (window.THREE) return window.THREE;
 
-// ---------- GLOBAL STATE ----------
-const S = {
-  THREE,
-  T,
-  base: (new URL(".", location.href)).pathname,
-  scene: null,
-  camera: null,
-  renderer: null,
-  player: null,
-  clock: null,
-  controllers: [],
-  controllerGrips: [],
-  tmpV: null,
-  tmpQ: null,
+  // If you have a local module, uncomment one of these and ensure file exists:
+  // const mod = await import("./three.module.js");
+  // return mod;
 
-  // locomotion
-  moveSpeed: 2.2,      // m/s
-  turnSpeed: 1.6,      // rad/s
-  deadZone: 0.15,
-  smooth: 0.18,        // smoothing factor
-  vMove: { x: 0, z: 0 },
-  vTurn: 0,
+  // If you have a wrapper file that exports THREE object:
+  // const wrap = await import("./three_wrap.js");
+  // return wrap.THREE || wrap.default || wrap;
 
-  // world hook
-  world: null,
-  tickers: [],
-};
-
-// ---------- HELPERS ----------
-function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-function lerp(a, b, t) { return a + (b - a) * t; }
-function applyDeadZone(v, dz) {
-  if (Math.abs(v) < dz) return 0;
-  const sign = Math.sign(v);
-  const x = (Math.abs(v) - dz) / (1 - dz);
-  return sign * clamp(x, 0, 1);
-}
-function ensureCanvasFull() {
-  const c = S.renderer.domElement;
-  c.style.width = "100%";
-  c.style.height = "100%";
-  c.style.display = "block";
+  return null;
 }
 
-// ---------- XR CONTROLLERS ----------
-function setupControllers() {
-  const r = S.renderer;
-  const sc = S.scene;
+// ---------- CLOCK POLYFILL (THE FIX) ----------
+function ensureClock(THREE) {
+  if (!THREE) return;
+  if (THREE.Clock) return;
 
-  // controller 0/1 (rays can be added by your existing controller modules if desired)
-  for (let i = 0; i < 2; i++) {
-    const c = r.xr.getController(i);
-    c.userData.index = i;
-    sc.add(c);
-    S.controllers.push(c);
-  }
-
-  ok("[index] controllers ready ✅");
-}
-
-function getGamepad(i) {
-  try {
-    const c = S.controllers[i];
-    const src = c?.userData?.inputSource;
-    const gp = src?.gamepad;
-    return gp || null;
-  } catch {
-    return null;
-  }
-}
-
-// ---------- BASIC SMOOTH LOCOMOTION ----------
-function updateLocomotion(dt) {
-  // Prefer XR gamepads if in session
-  const session = S.renderer.xr.getSession?.();
-  let gpL = null, gpR = null;
-
-  if (session) {
-    // Map input sources into controller.userData.inputSource
-    const sources = session.inputSources || [];
-    for (const src of sources) {
-      if (!src || !src.gamepad) continue;
-      if (src.handedness === "left") gpL = src.gamepad;
-      if (src.handedness === "right") gpR = src.gamepad;
+  class ClockPolyfill {
+    constructor(autoStart = true) {
+      this.autoStart = autoStart;
+      this.startTime = 0;
+      this.oldTime = 0;
+      this.elapsedTime = 0;
+      this.running = false;
+      if (autoStart) this.start();
     }
-  }
-
-  // Left stick = move
-  let mx = 0, mz = 0;
-  if (gpL && gpL.axes && gpL.axes.length >= 2) {
-    mx = applyDeadZone(gpL.axes[0], S.deadZone);
-    mz = applyDeadZone(gpL.axes[1], S.deadZone);
-  }
-
-  // Right stick = turn (yaw)
-  let tx = 0;
-  if (gpR && gpR.axes && gpR.axes.length >= 2) {
-    tx = applyDeadZone(gpR.axes[0], S.deadZone);
-  }
-
-  // IMPORTANT: Fix the "forward/back inverted" feel
-  // Many XR sticks report forward as -1 on Y axis, so moveZ should be -mz
-  const targetMoveX = mx;
-  const targetMoveZ = -mz;
-  const targetTurn = -tx;
-
-  S.vMove.x = lerp(S.vMove.x, targetMoveX, S.smooth);
-  S.vMove.z = lerp(S.vMove.z, targetMoveZ, S.smooth);
-  S.vTurn = lerp(S.vTurn, targetTurn, S.smooth);
-
-  // apply translation in camera-facing direction, but move the PLAYER RIG
-  const cam = S.camera;
-  const rig = S.player;
-
-  // forward and right vectors from camera yaw only
-  const fwd = new T.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
-  fwd.y = 0; fwd.normalize();
-
-  const right = new T.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
-  right.y = 0; right.normalize();
-
-  const move = new T.Vector3();
-  move.addScaledVector(right, S.vMove.x);
-  move.addScaledVector(fwd, S.vMove.z);
-
-  const len = move.length();
-  if (len > 1) move.multiplyScalar(1 / len);
-
-  rig.position.addScaledVector(move, S.moveSpeed * dt);
-
-  // yaw rotate rig
-  if (Math.abs(S.vTurn) > 0.001) {
-    rig.rotation.y += S.vTurn * S.turnSpeed * dt;
-  }
-}
-
-// ---------- WORLD LOADER ----------
-async function loadWorld() {
-  try {
-    const mod = await import("./world.js");
-    const World = mod.World || mod.default || mod;
-
-    if (!World) {
-      warn("[index] world.js loaded but no export found (World/default). Using empty world.");
-      return null;
+    start() {
+      this.startTime = performance.now();
+      this.oldTime = this.startTime;
+      this.elapsedTime = 0;
+      this.running = true;
     }
-    S.world = World;
-
-    // Provide a build context that matches your existing architecture
-    const ctx = {
-      THREE: S.THREE,
-      scene: S.scene,
-      renderer: S.renderer,
-      camera: S.camera,
-      player: S.player,
-      controllers: S.controllers,
-      log: logLine,
-      BUILD: { base: S.base },
-    };
-
-    // init / build fallback
-    if (typeof World.init === "function") {
-      await World.init(ctx);
-      ok("[index] world init ✅");
-    } else if (typeof World.build === "function") {
-      await World.build(ctx);
-      ok("[index] world build ✅");
-    } else {
-      warn("[index] World export has no init/build. Loaded but not executed.");
-    }
-
-    // ticker hookup (optional)
-    if (typeof World.update === "function") {
-      S.tickers.push((dt) => World.update(ctx, dt));
-    }
-
-    return World;
-  } catch (e) {
-    bad(`[index] world load FAILED ❌ ${e?.message || e}`);
-    console.error(e);
-    return null;
-  }
-}
-
-// ---------- INIT ----------
-async function init() {
-  logLine(`[index] runtime start ✅ base=${S.base}`);
-
-  // Scene / Camera / Player Rig
-  S.scene = new T.Scene();
-  S.scene.background = new (T.Color)(0x05060a);
-
-  S.camera = new T.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 2000);
-
-  // Player rig = move/rotate this (camera rides inside)
-  S.player = new T.Group();
-  S.player.name = "PlayerRig";
-  S.player.position.set(0, 1.65, 0); // standing height default
-  S.player.add(S.camera);
-  S.scene.add(S.player);
-
-  // Renderer
-  S.renderer = new T.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
-  S.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-  S.renderer.setSize(window.innerWidth, window.innerHeight);
-  S.renderer.xr.enabled = true;
-  ensureCanvasFull();
-  document.body.appendChild(S.renderer.domElement);
-
-  // Clock (FIXED: wrapper-safe)
-  S.clock = new T.Clock();
-
-  // Simple base lights (bright enough to not look black even if world lights fail)
-  const hemi = new (T.HemisphereLight)(0xffffff, 0x202040, 1.15);
-  hemi.position.set(0, 10, 0);
-  S.scene.add(hemi);
-
-  const dir = new (T.DirectionalLight)(0xffffff, 1.35);
-  dir.position.set(6, 12, 4);
-  dir.castShadow = false;
-  S.scene.add(dir);
-
-  ok("[index] renderer ready ✅");
-
-  // VR Button
-  try {
-    const btn = VRButton.createButton(S.renderer);
-    btn.style.position = "fixed";
-    btn.style.left = "50%";
-    btn.style.transform = "translateX(-50%)";
-    btn.style.bottom = "18px";
-    btn.style.zIndex = "9999";
-    document.body.appendChild(btn);
-    ok("[index] VRButton appended ✅");
-  } catch (e) {
-    bad(`[index] VRButton failed ❌ ${e?.message || e}`);
-  }
-
-  // XR controller wiring
-  setupControllers();
-
-  // Keep controller inputSource mapped (some browsers don’t fill controller.userData.inputSource automatically)
-  S.renderer.xr.addEventListener("sessionstart", () => {
-    const session = S.renderer.xr.getSession();
-    ok("[index] XR session start ✅");
-
-    // map input sources to controllers for convenience
-    const syncSources = () => {
-      const sources = session.inputSources || [];
-      // attach by handedness
-      for (const src of sources) {
-        if (!src) continue;
-        if (src.handedness === "left" && S.controllers[0]) S.controllers[0].userData.inputSource = src;
-        if (src.handedness === "right" && S.controllers[1]) S.controllers[1].userData.inputSource = src;
+    getDelta() {
+      if (!this.running) {
+        if (this.autoStart) this.start();
+        return 0;
       }
-    };
-    syncSources();
-    session.addEventListener("inputsourceschange", syncSources);
-  });
-
-  // Load World
-  await loadWorld();
-
-  // Resize
-  window.addEventListener("resize", () => {
-    S.camera.aspect = window.innerWidth / window.innerHeight;
-    S.camera.updateProjectionMatrix();
-    S.renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-
-  // Render loop
-  S.renderer.setAnimationLoop(() => {
-    const dt = Math.min(0.05, S.clock.getDelta());
-
-    // locomotion always (works in XR session)
-    updateLocomotion(dt);
-
-    // tickers
-    for (const fn of S.tickers) {
-      try { fn(dt); } catch (e) { console.warn(e); }
+      const newTime = performance.now();
+      const diff = (newTime - this.oldTime) / 1000;
+      this.oldTime = newTime;
+      this.elapsedTime += diff;
+      return diff;
     }
+    getElapsedTime() {
+      this.getDelta();
+      return this.elapsedTime;
+    }
+  }
 
-    S.renderer.render(S.scene, S.camera);
-  });
-  ok("[index] ready ✅");
+  THREE.Clock = ClockPolyfill;
+  OK("[index] Clock polyfilled ✅");
 }
 
-// ---------- BOOT ----------
-init().catch((e) => {
-  bad(`[index] init FAILED ❌ ${e?.message || e}`);
-  console.error(e);
-});
+// ---------- UI (ENTER / ENTER VR) ----------
+function ensureOverlayUI() {
+  let hud = document.getElementById("hud");
+  if (!hud) {
+    hud = document.createElement("div");
+    hud.id = "hud";
+    hud.style.cssText = `
+      position:fixed; left:0; top:0; right:0;
+      display:flex; gap:10px; padding:12px;
+      align-items:center; justify-content:center;
+      z-index:9999; pointer-events:none;
+      font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    `;
+    document.body.appendChild(hud);
+  }
+
+  const mkBtn = (id, text) => {
+    let b = document.getElementById(id);
+    if (!b) {
+      b = document.createElement("button");
+      b.id = id;
+      b.textContent = text;
+      b.style.cssText = `
+        pointer-events:auto;
+        padding:12px 14px; border-radius:14px;
+        border:1px solid rgba(127,231,255,.55);
+        background:rgba(10,12,18,.75);
+        color:#e8ecff; font-weight:800;
+        box-shadow:0 10px 30px rgba(0,0,0,.45);
+      `;
+      hud.appendChild(b);
+    }
+    return b;
+  };
+
+  const enter2D = mkBtn("enter2d", "ENTER");
+  const rebuild = mkBtn("rebuild", "REBUILD");
+  return { enter2D, rebuild };
+}
+
+// ---------- INPUT (ANDROID DUAL STICK BASIC) ----------
+function installMobileLookMove({ camera, player, log }) {
+  // Minimal: swipe to look + two-finger drag to move
+  const state = { dragging: false, two: false, lx: 0, ly: 0, yaw: 0, pitch: 0 };
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+
+  const onTouchStart = (e) => {
+    state.dragging = true;
+    state.two = e.touches.length >= 2;
+    state.lx = e.touches[0].clientX;
+    state.ly = e.touches[0].clientY;
+  };
+  const onTouchMove = (e) => {
+    if (!state.dragging) return;
+    const x = e.touches[0].clientX;
+    const y = e.touches[0].clientY;
+    const dx = x - state.lx;
+    const dy = y - state.ly;
+    state.lx = x; state.ly = y;
+
+    if (!state.two) {
+      state.yaw   -= dx * 0.0032;
+      state.pitch -= dy * 0.0032;
+      state.pitch = clamp(state.pitch, -1.2, 1.2);
+      player.rotation.y = state.yaw;
+      camera.rotation.x = state.pitch;
+    } else {
+      // two finger = move forward/back + strafe
+      const fwd = -dy * 0.01;
+      const str = dx * 0.01;
+      const dir = new THREE.Vector3(0,0,-1).applyAxisAngle(new THREE.Vector3(0,1,0), player.rotation.y);
+      const right = new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0), player.rotation.y);
+      player.position.addScaledVector(dir, fwd);
+      player.position.addScaledVector(right, str);
+    }
+  };
+  const onTouchEnd = () => { state.dragging = false; state.two = false; };
+
+  window.addEventListener("touchstart", onTouchStart, { passive: true });
+  window.addEventListener("touchmove", onTouchMove, { passive: true });
+  window.addEventListener("touchend", onTouchEnd, { passive: true });
+
+  log?.("[index] android touch look/move ✅ (1 finger look, 2 finger move)");
+}
+
+// ---------- MAIN ----------
+let THREE = null;
+let renderer = null;
+let scene = null;
+let camera = null;
+let player = null;
+let controllers = [];
+let clock = null;
+let running = false;
+
+async function boot() {
+  LOG("[index] runtime start ✅");
+
+  THREE = await getTHREE();
+  if (!THREE) {
+    BAD("[index] THREE not found. Ensure your boot.js sets window.THREE or add a module import in index.js.");
+    return;
+  }
+
+  ensureClock(THREE);
+
+  // renderer
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
+
+  // scene/camera
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x05060a);
+
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
+  camera.position.set(0, 1.65, 6);
+
+  // player rig
+  player = new THREE.Group();
+  player.name = "PlayerRig";
+  player.position.set(0, 0, 0);
+  player.add(camera);
+  scene.add(player);
+
+  // basic controllers (safe even if none)
+  const c0 = renderer.xr.getController(0);
+  const c1 = renderer.xr.getController(1);
+  player.add(c0); player.add(c1);
+  controllers = [c0, c1];
+
+  // UI
+  const { enter2D, rebuild } = ensureOverlayUI();
+
+  // VRButton (restores Enter VR)
+  try {
+    const vrBtn = VRButton.createButton(renderer);
+    vrBtn.style.marginLeft = "10px";
+    document.body.appendChild(vrBtn);
+    OK("[index] VRButton appended ✅");
+  } catch (e) {
+    BAD("[index] VRButton failed:", e?.message || e);
+  }
+
+  // Android movement (so you can debug away from Quest)
+  try { installMobileLookMove({ camera, player, log: LOG }); } catch {}
+
+  // World init
+  await buildWorld();
+
+  // Buttons
+  enter2D.onclick = () => {
+    running = true;
+    enter2D.textContent = "IN WORLD ✅";
+    OK("[index] ENTER 2D ✅");
+  };
+
+  rebuild.onclick = async () => {
+    OK("[index] REBUILD requested…");
+    await buildWorld(true);
+  };
+
+  // resize
+  window.addEventListener("resize", () => {
+    if (!renderer || !camera) return;
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // clock + loop
+  clock = new THREE.Clock(true);
+  running = true;
+
+  renderer.setAnimationLoop(() => {
+    const dt = clock.getDelta();
+    if (running) {
+      try {
+        World?.update?.({ THREE, scene, renderer, camera, player, controllers, log: LOG }, dt);
+      } catch (e) {
+        BAD("[index] World.update crashed:", e?.message || e);
+      }
+    }
+    renderer.render(scene, camera);
+  });
+
+  OK("[index] ready ✅");
+}
+
+async function buildWorld(clear = false) {
+  try {
+    if (clear && scene) {
+      // remove everything except player rig
+      const keep = new Set([player]);
+      const toRemove = [];
+      scene.children.forEach(ch => { if (!keep.has(ch)) toRemove.push(ch); });
+      toRemove.forEach(ch => scene.remove(ch));
+      OK("[index] scene cleared ✅");
+    }
+
+    await World.init({ THREE, scene, renderer, camera, player, controllers, log: LOG });
+    OK("[index] world init ✅");
+  } catch (e) {
+    BAD("[index] world init FAILED:", e?.message || e);
+  }
+}
+
+boot().catch(e => BAD("[index] boot FAILED:", e?.message || e));

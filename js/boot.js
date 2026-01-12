@@ -1,10 +1,13 @@
-// /js/boot.js — MINIMAL PROOF BOOT
+// /js/boot.js — Scarlett BOOT MASTER (Permanent)
+// ✅ Uses relative paths for GitHub Pages
+// ✅ Imports index.js with cache-buster
+// ✅ Writes to on-screen boot log if present
+
 const say = (m) => (window.__BOOTLOG__ ? window.__BOOTLOG__(m) : console.log(m));
 
 say("[BOOT] boot.js loaded ✅");
 say(`[BOOT] path=${location.pathname}`);
 
-// Now import your app
 const url = `./index.js?v=${Date.now()}`;
 say(`[BOOT] importing ${url} …`);
 

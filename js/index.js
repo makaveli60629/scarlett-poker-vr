@@ -1,8 +1,10 @@
-// /js/index.js — Scarlett INDEX_MASTER (FULL + XR Locomotion + Teleport)
+// /js/index.js — Scarlett INDEX_MASTER v3
 // ✅ Dynamic-import world.js (cache-bust)
-// ✅ Quest thumbstick locomotion (left stick move, right stick turn)
-// ✅ Teleport (right controller trigger/select)
-// ✅ Android touch move/look + desktop WASD
+// ✅ XR thumbsticks: robust mapping via XRSession.inputSources (supports axes 0/1 and 2/3)
+// ✅ Right stick: forward/back + strafe (45° works naturally). Also snap-turn on X axis.
+// ✅ Left stick: left/right strafe + forward/back move (as requested)
+// ✅ Teleport: pinch/select/squeeze + rainbow curved arc + landing ring marker
+// ✅ Desktop WASD + Android touch sticks when NOT in XR
 // ✅ Hard fallback world if world fails
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
@@ -12,8 +14,7 @@ const BUILD = `INDEX_MASTER_${Date.now()}`;
 
 // ---------------- HUD / LOG ----------------
 const HUD = (() => {
-  const state = { lines: [], max: 320 };
-
+  const state = { lines: [], max: 360 };
   const pad2 = (n) => (n < 10 ? "0" + n : "" + n);
   const timeStr = () => {
     const d = new Date();
@@ -24,21 +25,14 @@ const HUD = (() => {
   };
 
   const root = document.createElement("div");
-  root.style.cssText = `
-    position:fixed; inset:0; pointer-events:none;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    z-index:9999;
-  `;
+  root.style.cssText = `position:fixed; inset:0; pointer-events:none; font-family:ui-monospace,Menlo,Consolas,monospace; z-index:9999;`;
 
   const panel = document.createElement("div");
   panel.style.cssText = `
-    position:fixed; left:16px; top:16px; width:min(820px, calc(100vw - 32px));
-    background:rgba(10,12,18,.78);
-    border:1px solid rgba(255,255,255,.08);
-    border-radius:14px;
-    box-shadow:0 14px 45px rgba(0,0,0,.5);
-    color:#e8ecff; padding:12px;
-    pointer-events:auto;
+    position:fixed; left:16px; top:16px; width:min(860px, calc(100vw - 32px));
+    background:rgba(10,12,18,.78); border:1px solid rgba(255,255,255,.08);
+    border-radius:14px; box-shadow:0 14px 45px rgba(0,0,0,.5);
+    color:#e8ecff; padding:12px; pointer-events:auto;
   `;
 
   const title = document.createElement("div");
@@ -78,22 +72,14 @@ const HUD = (() => {
   let visible = true;
   let leftLaserOn = false;
 
-  const hooks = {
-    onResetSpawn: null,
-    onToggleLeftLaser: null
-  };
+  const hooks = { onResetSpawn: null, onToggleLeftLaser: null };
 
-  btnHide.onclick = () => {
-    visible = !visible;
-    panel.style.display = visible ? "block" : "none";
-  };
-
+  btnHide.onclick = () => { visible = !visible; panel.style.display = visible ? "block" : "none"; };
   btnCopy.onclick = async () => {
     const text = state.lines.join("\n");
     try { await navigator.clipboard.writeText(text); log("[HUD] copied ✅"); }
     catch { log("[HUD] copy failed ❌"); }
   };
-
   btnResetSpawn.onclick = () => hooks.onResetSpawn?.();
 
   btnLeftLaser.onclick = () => {
@@ -112,7 +98,6 @@ const HUD = (() => {
 
   return { log, hooks };
 })();
-
 const LOG = (m) => HUD.log(m);
 
 // ---------------- BOOT LOGS ----------------
@@ -126,7 +111,7 @@ LOG(`[env] navigator.xr=${!!navigator.xr}`);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x05060a);
 
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.02, 1200);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.02, 1500);
 camera.position.set(0, 1.65, 4);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -159,24 +144,20 @@ const controllers = {
   left: renderer.xr.getController(0),
   right: renderer.xr.getController(1),
   gripLeft: renderer.xr.getControllerGrip(0),
-  gripRight: renderer.xr.getControllerGrip(1)
+  gripRight: renderer.xr.getControllerGrip(1),
 };
 player.add(controllers.left, controllers.right, controllers.gripLeft, controllers.gripRight);
 LOG("[index] controllers ready ✅");
 
 // ---------------- LASERS ----------------
 function makeLaser(color) {
-  const geo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, 0, -1)
-  ]);
+  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
   const mat = new THREE.LineBasicMaterial({ color });
   const line = new THREE.Line(geo, mat);
   line.scale.z = 14;
   line.name = "laser";
   return line;
 }
-
 const rightLaser = makeLaser(0x7fe7ff);
 controllers.right.add(rightLaser);
 LOG("[laser] attached -> right host=PerspectiveCamera");
@@ -193,7 +174,7 @@ HUD.hooks.onToggleLeftLaser = (on) => {
   }
 };
 
-// ---------------- DEV CONTROLS (ANDROID + DESKTOP) ----------------
+// ---------------- NON-XR DEV CONTROLS (Android + Desktop) ----------------
 const DevControls = (() => {
   const keys = {};
   let yaw = 0, pitch = 0;
@@ -230,25 +211,19 @@ const DevControls = (() => {
 
     const setNub = (dx, dy) => { nub.style.transform = `translate(${dx - 27}px, ${dy - 27}px)`; };
     const reset = () => {
-      active = false;
-      setNub(70, 70);
+      active = false; setNub(70, 70);
       if (side === "left") move = { x: 0, z: 0 };
       else look = { x: 0, y: 0 };
     };
 
-    el.addEventListener("pointerdown", (e) => {
-      active = true; sx = e.clientX; sy = e.clientY;
-      el.setPointerCapture(e.pointerId);
-    });
+    el.addEventListener("pointerdown", (e) => { active = true; sx = e.clientX; sy = e.clientY; el.setPointerCapture(e.pointerId); });
     el.addEventListener("pointermove", (e) => {
       if (!active) return;
-      const dx = e.clientX - sx;
-      const dy = e.clientY - sy;
+      const dx = e.clientX - sx, dy = e.clientY - sy;
       const r = 52;
       const clx = Math.max(-r, Math.min(r, dx));
       const cly = Math.max(-r, Math.min(r, dy));
       setNub(70 + clx, 70 + cly);
-
       if (side === "left") { move.x = clx / r; move.z = cly / r; }
       else { look.x = clx / r; look.y = cly / r; }
     });
@@ -260,10 +235,9 @@ const DevControls = (() => {
   if (isMobile) { makeStick("left"); makeStick("right"); }
 
   function update(dt) {
-    // Desktop/mobile only (XR uses controller locomotion below)
     if (renderer.xr.isPresenting) return;
 
-    const speed = 2.8;
+    const speed = 2.9;
     const rotSpeed = 1.8;
 
     let mx = 0, mz = 0;
@@ -292,129 +266,209 @@ const DevControls = (() => {
 
   return { update };
 })();
-
 LOG("[android] dev controls ready ✅");
 
-// ---------------- XR LOCOMOTION + TELEPORT ----------------
+// ---------------- XR INPUT (ROBUST) ----------------
 const raycaster = new THREE.Raycaster();
 const tmpMat = new THREE.Matrix4();
 const tmpPos = new THREE.Vector3();
 const tmpDir = new THREE.Vector3();
 const tmpV = new THREE.Vector3();
+const up = new THREE.Vector3(0,1,0);
 
 let WorldRef = null;
+
+// Pull gamepad axes from XRSession inputSources (most reliable across Quest builds)
+function getXRGamepads() {
+  const session = renderer.xr.getSession?.();
+  if (!session) return { left: null, right: null };
+
+  let left = null, right = null;
+  for (const src of session.inputSources) {
+    if (!src?.gamepad) continue;
+    if (src.handedness === "left") left = src.gamepad;
+    if (src.handedness === "right") right = src.gamepad;
+  }
+  return { left, right };
+}
+
+function pickAxes(gp) {
+  // Supports common layouts:
+  // - (0,1) = stick
+  // - (2,3) = stick
+  // We'll choose the pair with the bigger magnitude.
+  if (!gp?.axes || gp.axes.length < 2) return { x: 0, y: 0 };
+  const a01 = { x: gp.axes[0] ?? 0, y: gp.axes[1] ?? 0 };
+  const a23 = { x: gp.axes[2] ?? 0, y: gp.axes[3] ?? 0 };
+  const m01 = a01.x*a01.x + a01.y*a01.y;
+  const m23 = a23.x*a23.x + a23.y*a23.y;
+  return (m23 > m01 && (gp.axes.length >= 4)) ? a23 : a01;
+}
+
+function dz(v, dead=0.14) { return Math.abs(v) < dead ? 0 : v; }
+
+// ---------------- TELEPORT MARKER + RAINBOW ARC ----------------
 let teleportMarker = null;
-let lastTurn = 0;
+let arcLine = null;
+let arcPoints = [];
+let canTeleport = false;
 
-function getGamepad(ctrl) {
-  // WebXR controllers often expose gamepad
-  return ctrl?.gamepad || ctrl?.inputSource?.gamepad || null;
+function ensureTeleportVisuals() {
+  if (!teleportMarker) {
+    const geo = new THREE.RingGeometry(0.18, 0.28, 40);
+    const mat = new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.95, side: THREE.DoubleSide });
+    teleportMarker = new THREE.Mesh(geo, mat);
+    teleportMarker.rotation.x = -Math.PI / 2;
+    teleportMarker.visible = false;
+    scene.add(teleportMarker);
+  }
+
+  if (!arcLine) {
+    const N = 48;
+    arcPoints = new Array(N).fill(0).map(() => new THREE.Vector3());
+    const geo = new THREE.BufferGeometry().setFromPoints(arcPoints);
+
+    // Rainbow gradient via vertex colors
+    const colors = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      const t = i / (N - 1);
+      const c = new THREE.Color().setHSL(0.85 * (1 - t), 1.0, 0.55); // purple->red-ish rainbow
+      colors[i*3+0] = c.r;
+      colors[i*3+1] = c.g;
+      colors[i*3+2] = c.b;
+    }
+    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95 });
+    arcLine = new THREE.Line(geo, mat);
+    arcLine.frustumCulled = false;
+    scene.add(arcLine);
+  }
 }
 
-function ensureTeleportMarker() {
-  if (teleportMarker) return;
-  const geo = new THREE.RingGeometry(0.18, 0.26, 32);
-  const mat = new THREE.MeshBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.95, side: THREE.DoubleSide });
-  teleportMarker = new THREE.Mesh(geo, mat);
-  teleportMarker.rotation.x = -Math.PI / 2;
-  teleportMarker.visible = false;
-  scene.add(teleportMarker);
-}
-
-function rayFromObject(obj) {
-  tmpMat.identity().extractRotation(obj.matrixWorld);
+function rayFromController(ctrl) {
+  tmpMat.identity().extractRotation(ctrl.matrixWorld);
   tmpDir.set(0, 0, -1).applyMatrix4(tmpMat).normalize();
-  tmpPos.setFromMatrixPosition(obj.matrixWorld);
+  tmpPos.setFromMatrixPosition(ctrl.matrixWorld);
   raycaster.set(tmpPos, tmpDir);
 }
 
 function updateTeleportPreview() {
-  if (!renderer.xr.isPresenting || !WorldRef?.colliders) {
-    if (teleportMarker) teleportMarker.visible = false;
+  ensureTeleportVisuals();
+
+  if (!renderer.xr.isPresenting || !WorldRef?.colliders?.length) {
+    teleportMarker.visible = false;
+    arcLine.visible = false;
+    canTeleport = false;
     return;
   }
 
-  ensureTeleportMarker();
-  rayFromObject(controllers.right);
+  rayFromController(controllers.right);
   const hits = raycaster.intersectObjects(WorldRef.colliders, true);
-  if (hits && hits.length) {
-    const h = hits[0];
-    teleportMarker.position.copy(h.point);
-    teleportMarker.position.y += 0.01;
-    teleportMarker.visible = true;
-  } else {
+
+  if (!hits?.length) {
     teleportMarker.visible = false;
+    arcLine.visible = false;
+    canTeleport = false;
+    return;
   }
+
+  const hit = hits[0];
+  const target = hit.point.clone();
+  target.y = Math.max(target.y, 0) + 0.01;
+
+  teleportMarker.position.copy(target);
+  teleportMarker.visible = true;
+
+  // Curved arc (parabola): start at controller, end at target, elevated midpoint
+  const start = tmpPos.clone();
+  const end = target.clone();
+
+  const dist = start.distanceTo(end);
+  const lift = Math.min(3.5, 0.8 + dist * 0.18);
+
+  const mid = start.clone().lerp(end, 0.5);
+  mid.y += lift;
+
+  const N = arcPoints.length;
+  for (let i = 0; i < N; i++) {
+    const t = i / (N - 1);
+    // Quadratic Bezier
+    const a = start.clone().lerp(mid, t);
+    const b = mid.clone().lerp(end, t);
+    arcPoints[i].copy(a.lerp(b, t));
+  }
+  arcLine.geometry.setFromPoints(arcPoints);
+  arcLine.visible = true;
+  canTeleport = true;
 }
 
 function doTeleportNow() {
-  if (!teleportMarker?.visible) return;
+  if (!canTeleport || !teleportMarker?.visible) return;
   player.position.x = teleportMarker.position.x;
   player.position.z = teleportMarker.position.z;
-  // keep y at 0 (world uses y=0 floor plane)
   player.position.y = 0;
   LOG("[teleport] ✅");
 }
 
-// Trigger/select to teleport
-controllers.right.addEventListener("selectstart", () => doTeleportNow());
-controllers.right.addEventListener("squeezestart", () => doTeleportNow());
+// Teleport events (controllers + hand pinch maps to select on some runtimes)
+controllers.right.addEventListener("selectstart", doTeleportNow);
+controllers.right.addEventListener("squeezestart", doTeleportNow);
 
-// XR thumbstick locomotion
+// ---------------- XR LOCOMOTION (YOUR REQUESTED FEEL) ----------------
+let lastTurn = 0;
+
 function updateXRLocomotion(dt) {
   if (!renderer.xr.isPresenting) return;
 
-  const gpL = getGamepad(controllers.left);
-  const gpR = getGamepad(controllers.right);
+  const { left: gpL, right: gpR } = getXRGamepads();
 
-  // Many headsets: axes[2], axes[3] or axes[0], axes[1]
-  const ax = (gpL?.axes?.length >= 2) ? gpL.axes[0] : 0;
-  const az = (gpL?.axes?.length >= 2) ? gpL.axes[1] : 0;
+  const L = pickAxes(gpL);
+  const R = pickAxes(gpR);
 
-  const rx = (gpR?.axes?.length >= 2) ? gpR.axes[0] : 0;
+  // Deadzone
+  const lx = dz(L.x), ly = dz(L.y);
+  const rx = dz(R.x), ry = dz(R.y);
 
-  // deadzone
-  const dz = 0.14;
-  const mx = Math.abs(ax) > dz ? ax : 0;
-  const mz = Math.abs(az) > dz ? az : 0;
+  // You asked:
+  // - Right controller: forward/back + 45° (so: move forward/back + strafe from stick X)
+  // - Left controller: left/right for strafe + also allow forward/back for comfort
+  // We'll combine both sticks into one movement vector (smooth).
+  const strafe = (lx * 0.85) + (rx * 0.85);
+  const forward = (-ly * 1.0) + (-ry * 1.0); // negative because stick up is -Y
 
-  // movement
-  const speed = 2.0; // comfy
-  tmpV.set(mx, 0, mz);
-  if (tmpV.lengthSq() > 0.0001) {
+  const speed = 2.25;
+  tmpV.set(strafe, 0, forward);
+
+  if (tmpV.lengthSq() > 0.0002) {
     tmpV.normalize().multiplyScalar(speed * dt);
-    // move relative to player yaw (not headset)
-    tmpV.applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotation.y);
+    tmpV.applyAxisAngle(up, player.rotation.y);
     player.position.add(tmpV);
   }
 
-  // snap-turn (or smooth)
-  const turnDead = 0.35;
+  // Snap turn from RIGHT stick X if pushed hard and not moving much
   const now = performance.now() / 1000;
-  if (Math.abs(rx) > turnDead && (now - lastTurn) > 0.22) {
-    const step = (rx > 0 ? -1 : 1) * (Math.PI / 8); // 22.5°
-    player.rotation.y += step;
+  if (Math.abs(rx) > 0.72 && (now - lastTurn) > 0.22) {
+    player.rotation.y += (rx > 0 ? -1 : 1) * (Math.PI / 8);
     lastTurn = now;
     LOG("[turn] snap");
   }
 }
 
-// HUD hook
+// ---------------- HUD RESET ----------------
 HUD.hooks.onResetSpawn = () => {
-  player.position.set(0, 0, 8.5);
-  player.rotation.set(0, 0, 0);
+  player.position.set(0, 0, 12.5);
+  player.rotation.set(0, Math.PI, 0);
   camera.position.set(0, 1.65, 0);
   camera.rotation.set(0, 0, 0);
   LOG("[index] reset spawn ✅");
 };
 
-// ---------------- HARD-FORCED WORLD BOOT ----------------
+// ---------------- WORLD BOOT ----------------
 (async function bootWorld() {
   try {
     LOG("[index] world boot start …");
-
     const url = new URL("./world.js", import.meta.url);
-    url.searchParams.set("v", Date.now()); // cache-bust
+    url.searchParams.set("v", Date.now());
 
     const mod = await import(url.toString());
     WorldRef = mod?.World;
@@ -426,30 +480,17 @@ HUD.hooks.onResetSpawn = () => {
     }
 
     LOG("[index] calling world.init() …");
-
-    await WorldRef.init({
-      THREE,
-      scene,
-      renderer,
-      camera,
-      player,
-      controllers,
-      log: (m) => LOG(m),
-      BUILD
-    });
-
+    await WorldRef.init({ THREE, scene, renderer, camera, player, controllers, log: (m) => LOG(m), BUILD });
     LOG("[index] world init ✅");
-    window.__WORLD_OK = true;
 
   } catch (e) {
     LOG("[index] world init failed ❌ " + (e?.message || e));
 
-    // Never-black fallback
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 1.4);
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 1.6);
     scene.add(hemi);
 
     const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(120, 120),
+      new THREE.PlaneGeometry(140, 140),
       new THREE.MeshStandardMaterial({ color: 0x20222b, roughness: 1, metalness: 0 })
     );
     floor.rotation.x = -Math.PI / 2;
@@ -459,7 +500,7 @@ HUD.hooks.onResetSpawn = () => {
   }
 })();
 
-// ---------------- RENDER LOOP ----------------
+// ---------------- LOOP ----------------
 let last = performance.now();
 renderer.setAnimationLoop(() => {
   const now = performance.now();
@@ -471,7 +512,6 @@ renderer.setAnimationLoop(() => {
   updateTeleportPreview();
 
   WorldRef?.update?.(dt);
-
   renderer.render(scene, camera);
 });
 

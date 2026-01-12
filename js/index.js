@@ -1,18 +1,16 @@
-// /js/index.js — Scarlett INDEX (MODULAR) v3 FULL (Android sticks + XR)
+// /js/index.js — Scarlett INDEX (MODULAR) v4 FULL (Android sticks + XR + fallback)
 import { createLogger } from "../core/logger.js";
 import { initThree } from "../core/three_boot.js";
 import { installControls, updateControls } from "../core/controls.js";
 
 const BUILD = `INDEX_MODULAR_${Date.now()}`;
-const log = createLogger({ maxLines: 120 });
+const log = createLogger({ maxLines: 90 });
 
 log(`[index] runtime start ✅ build=${BUILD}`);
 log(`[env] href=${location.href}`);
 log(`[env] secureContext=${String(window.isSecureContext)}`);
 log(`[env] ua=${navigator.userAgent}`);
 log(`[env] navigator.xr=${String(!!navigator.xr)}`);
-
-document.getElementById("hudBtn")?.addEventListener("click", () => log.copy());
 
 async function loadVRButton() {
   const ver = "0.164.1";
@@ -25,7 +23,7 @@ async function loadVRButton() {
   }
 }
 
-async function loadWorld() {
+async function loadWorld(log) {
   try {
     const mod = await import(`./world.js?v=${Date.now()}`);
     if (!mod?.World?.init) throw new Error("World missing World.init()");
@@ -39,6 +37,7 @@ async function loadWorld() {
 function buildFallbackWorld(ctx) {
   const { THREE, scene } = ctx;
   const g = new THREE.Group();
+  g.name = "FallbackWorld";
   scene.add(g);
 
   const floor = new THREE.Mesh(
@@ -63,14 +62,17 @@ function buildFallbackWorld(ctx) {
       worldState: { colliders: [] },
     };
 
+    // VR button
     const VRButton = await loadVRButton();
     document.body.appendChild(VRButton.createButton(ctx.renderer));
     log("[index] VRButton appended ✅");
 
+    // controls (Android sticks + desktop + XR)
     installControls(ctx);
 
+    // world
     log("[index] calling world.init() …");
-    const world = await loadWorld();
+    const world = await loadWorld(log);
     ctx.world = world;
 
     if (world) {
@@ -85,6 +87,7 @@ function buildFallbackWorld(ctx) {
         BUILD,
       });
 
+      // colliders hook
       if (Array.isArray(world.colliders)) ctx.worldState.colliders = world.colliders;
       else if (typeof world.colliders === "function") ctx.worldState.colliders = world.colliders();
       else ctx.worldState.colliders = world.colliders || [];
@@ -94,9 +97,11 @@ function buildFallbackWorld(ctx) {
       buildFallbackWorld(ctx);
     }
 
+    // loop
     const clock = new ctx.THREE.Clock();
     ctx.renderer.setAnimationLoop(() => {
       const dt = clock.getDelta();
+
       updateControls(ctx, dt);
 
       try { ctx.world?.update?.(dt); }

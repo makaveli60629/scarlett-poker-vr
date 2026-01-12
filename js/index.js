@@ -1,4 +1,4 @@
-// /js/index.js — Scarlett INDEX MASTER (FULL) v1.0.4 (Quest + Android Dual-Stick)
+// /js/index.js — Scarlett INDEX MASTER (FULL) v1.0.5 (Quest + Android Dual-Stick + Rainbow Teleport Arc)
 // ✅ Controllers parented to PlayerRig (laser follows you; teleport/move no longer leaves lasers behind)
 // ✅ Right stick forward/back fixed (invert corrected)
 // ✅ Turning separated from strafing (can angle yourself)
@@ -7,6 +7,7 @@
 // ✅ World loader + fallback
 // ✅ Android: drag-look dev controls (non-XR)
 // ✅ Android: dual-stick move+look (non-XR), auto-hides in XR
+// ✅ Teleport: curved rainbow arc that bends to target + ring
 
 const BUILD = `INDEX_MASTER_${Date.now()}`;
 
@@ -79,6 +80,13 @@ let teleport = {
   lastTeleportAt: 0,
   cooldown: 250,
   raycaster: null,
+};
+
+// ✅ Rainbow teleport arc state
+let teleportArc = {
+  mesh: null,
+  points: 34,
+  visible: false,
 };
 
 let locomotion = {
@@ -202,6 +210,115 @@ function makeLaser(color = 0x7fe7ff) {
   return line;
 }
 
+// ---------------- Rainbow Arc Helpers ----------------
+function hsvToRgb(h, s, v) {
+  const i = Math.floor(h * 6);
+  const f = h * 6 - i;
+  const p = v * (1 - s);
+  const q = v * (1 - f * s);
+  const t = v * (1 - (1 - f) * s);
+  let r, g, b;
+  switch (i % 6) {
+    case 0: r = v; g = t; b = p; break;
+    case 1: r = q; g = v; b = p; break;
+    case 2: r = p; g = v; b = t; break;
+    case 3: r = p; g = q; b = v; break;
+    case 4: r = t; g = p; b = v; break;
+    case 5: r = v; g = p; b = q; break;
+  }
+  return { r, g, b };
+}
+
+function makeRainbowArc(points = 34) {
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(points * 3);
+  const col = new Float32Array(points * 3);
+
+  for (let i = 0; i < points; i++) {
+    pos[i * 3 + 0] = 0;
+    pos[i * 3 + 1] = 0;
+    pos[i * 3 + 2] = -i * (1 / (points - 1));
+
+    const h = i / (points - 1);
+    const rgb = hsvToRgb(h, 0.95, 1.0);
+    col[i * 3 + 0] = rgb.r;
+    col[i * 3 + 1] = rgb.g;
+    col[i * 3 + 2] = rgb.b;
+  }
+
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+
+  const mat = new THREE.LineBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.95,
+  });
+
+  const line = new THREE.Line(geo, mat);
+  line.frustumCulled = false;
+  line.visible = false;
+  line.name = "TeleportRainbowArc";
+  return line;
+}
+
+function ensureTeleportArc() {
+  if (teleportArc.mesh) return;
+  teleportArc.mesh = makeRainbowArc(teleportArc.points);
+  // attach to right controller (preferred)
+  if (controllers.right) controllers.right.add(teleportArc.mesh);
+}
+
+function setArcVisible(v) {
+  if (!teleportArc.mesh) return;
+  teleportArc.mesh.visible = !!v;
+  teleportArc.visible = !!v;
+}
+
+function updateTeleportArcShape(controllerObj) {
+  if (!teleportArc.mesh) return;
+  if (!controllerObj) return;
+
+  if (!teleport.valid || !teleport.target) {
+    setArcVisible(false);
+    return;
+  }
+
+  setArcVisible(true);
+
+  const origin = controllerObj.getWorldPosition(new THREE.Vector3());
+  const target = teleport.target.clone();
+
+  const dist = origin.distanceTo(target);
+  const bend = clamp(dist * 0.18, 0.6, 3.2);
+
+  const q = controllerObj.getWorldQuaternion(new THREE.Quaternion());
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(q).normalize();
+
+  const pts = teleportArc.points;
+  const posAttr = teleportArc.mesh.geometry.getAttribute("position");
+
+  const inv = controllerObj.matrixWorld.clone().invert();
+
+  for (let i = 0; i < pts; i++) {
+    const t = i / (pts - 1);
+
+    const p = origin.clone().lerp(target, t);
+
+    const bump = Math.sin(Math.PI * t) * bend;
+    p.y += bump;
+
+    const bias = (1 - t) * 0.35 * clamp(dist / 12, 0, 1);
+    p.addScaledVector(forward, bias);
+
+    p.applyMatrix4(inv);
+
+    posAttr.setXYZ(i, p.x, p.y, p.z);
+  }
+
+  posAttr.needsUpdate = true;
+}
+
 // ✅ BIG FIX: controllers must be parented to PlayerRig, not scene
 function installControllers() {
   const c0 = renderer.xr.getController(0);
@@ -216,11 +333,14 @@ function installControllers() {
   c0.add(lasers.left);
   c1.add(lasers.right);
 
-  // ⬇️ parent to player so lasers follow your rig movement/teleport
   player.add(c0);
   player.add(c1);
 
   $log("[index] controllers ready ✅");
+
+  // ✅ rainbow arc attached to right controller
+  ensureTeleportArc();
+  $log("[teleport] rainbow arc ready ✅");
 
   c0.addEventListener("selectstart", () => onSelectStart("left"));
   c1.addEventListener("selectstart", () => onSelectStart("right"));
@@ -256,7 +376,6 @@ function getGamepadAxes(handedness) {
   const a = gp?.axes || [];
   if (!a.length) return { x: 0, y: 0 };
 
-  // best default for Quest controllers is usually 2/3
   if (a.length >= 4) return { x: a[2] ?? 0, y: a[3] ?? 0 };
   return { x: a[0] ?? 0, y: a[1] ?? 0 };
 }
@@ -338,7 +457,6 @@ function updateLocomotion(dt) {
   const rx = deadzone(R.x, 0.15);
   const ry = deadzone(R.y, 0.15);
 
-  // ✅ forward/back sign corrected
   const forward = ry;
   const strafe = lx;
 
@@ -350,7 +468,6 @@ function updateLocomotion(dt) {
 
   player.position.addScaledVector(dir, dt);
 
-  // ✅ Turning uses right stick X ONLY
   if (locomotion.snapTurn) {
     const now = performance.now();
     if (Math.abs(rx) > 0.65 && now - locomotion.lastSnapAt > locomotion.snapCooldown) {
@@ -366,8 +483,10 @@ function updateLocomotion(dt) {
 
 function updateTeleportAim() {
   if (!teleport.active) return;
+
   if (window.__SEATED_MODE) {
     if (teleport.ring) teleport.ring.visible = false;
+    setArcVisible(false);
     return;
   }
 
@@ -376,6 +495,10 @@ function updateTeleportAim() {
 
   computeTeleportTarget(c);
   showTeleportRing();
+
+  // ✅ rainbow arc
+  ensureTeleportArc();
+  updateTeleportArcShape(c);
 }
 
 // ---------------- Android Dev Controls (look only, non-XR) ----------------
@@ -487,8 +610,8 @@ function installAndroidDualStick() {
     return s;
   }
 
-  const L = makeStick("L"); // move
-  const R = makeStick("R"); // look
+  const L = makeStick("L");
+  const R = makeStick("R");
 
   const state = { L, R, yaw: 0, pitch: 0 };
 

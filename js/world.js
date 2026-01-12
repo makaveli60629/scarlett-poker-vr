@@ -1,9 +1,15 @@
-// /js/world.js — Scarlett WORLD 7.6 (FULL: doors + bigger lobby + pit + rail aligned + signs + jumbotrons + bots)
+// /js/world.js — Scarlett WORLD 7.7 (REAL PIT TERRAIN + ROOM DOORS OPEN + MORE LIGHTS + PIT GUARDRAIL)
+// ✅ Top floor is now a RING with a hole (you can see the divot)
+// ✅ Adds a sloped ramp ring down into the pit (true “terrain” feel)
+// ✅ Pit floor stays down below
+// ✅ Adds PIT GUARDRAIL around the pit edge (prevents falling vibe)
+// ✅ Cuts door openings into ALL 4 square rooms (hallway -> room entrances open)
+// ✅ Adds lots more lights + 2 overhead circles + table/pit lighting
+// ✅ Keeps hallways + lobby walls + jumbotrons + signage + store case + bots
 
 export const World = (() => {
   let floors = [];
   const spawns = new Map();
-  const state = { root: null };
 
   function build({ THREE, scene, log }) {
     floors = [];
@@ -12,9 +18,8 @@ export const World = (() => {
     const root = new THREE.Group();
     root.name = "WorldRoot";
     scene.add(root);
-    state.root = root;
 
-    // ---------- COLORS / MATS ----------
+    // ---------- THEME ----------
     const colFloor = 0x0b0d14;
     const colWall  = 0x14182a;
     const colTrim  = 0x222a4a;
@@ -23,7 +28,7 @@ export const World = (() => {
     const colAqua  = 0x7fe7ff;
     const colPink  = 0xff2d7a;
 
-    const matFloor = new THREE.MeshStandardMaterial({ color: colFloor, roughness: 0.95, metalness: 0.05 });
+    const matFloor = new THREE.MeshStandardMaterial({ color: colFloor, roughness: 0.95, metalness: 0.05, side: THREE.DoubleSide });
     const matWall  = new THREE.MeshStandardMaterial({ color: colWall,  roughness: 0.90, metalness: 0.07 });
     const matTrim  = new THREE.MeshStandardMaterial({ color: colTrim,  roughness: 0.65, metalness: 0.10 });
     const matGold  = new THREE.MeshStandardMaterial({ color: colGold,  roughness: 0.25, metalness: 0.90 });
@@ -32,36 +37,9 @@ export const World = (() => {
     const matNeonA = new THREE.MeshStandardMaterial({ color: 0x05060a, emissive: colAqua, emissiveIntensity: 2.4, roughness: 0.3 });
     const matNeonP = new THREE.MeshStandardMaterial({ color: 0x05060a, emissive: colPink, emissiveIntensity: 2.4, roughness: 0.3 });
 
-    // ---------- LIGHTS (BRIGHTER + ELEGANT) ----------
-    root.add(new THREE.AmbientLight(0xffffff, 0.55));
-
-    const sun = new THREE.DirectionalLight(0xffffff, 0.95);
-    sun.position.set(14, 28, 10);
-    root.add(sun);
-
-    // Two big circular ring lights above the lobby
-    const ringLightMat = new THREE.MeshStandardMaterial({ color: 0x0b0d14, emissive: 0xffffff, emissiveIntensity: 1.25, roughness: 0.2, metalness: 0.1 });
-    const ring1 = new THREE.Mesh(new THREE.TorusGeometry(9.4, 0.15, 12, 180), ringLightMat);
-    ring1.position.set(0, 8.8, 0);
-    ring1.rotation.x = Math.PI / 2;
-    root.add(ring1);
-
-    const ring2 = new THREE.Mesh(new THREE.TorusGeometry(6.6, 0.14, 12, 180), ringLightMat);
-    ring2.position.set(0, 8.2, 0);
-    ring2.rotation.x = Math.PI / 2;
-    root.add(ring2);
-
-    // Extra fill lights
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2;
-      const p = new THREE.PointLight(0xffffff, 1.2, 34);
-      p.position.set(Math.sin(a) * 8.6, 7.0, Math.cos(a) * 8.6);
-      root.add(p);
-    }
-
-    // ---------- LOBBY DIMENSIONS ----------
-    const LOBBY_R = 17;        // +1 bigger than before (you asked)
-    const WALL_H  = 10.5;      // tall for jumbotrons
+    // ---------- DIMENSIONS ----------
+    const LOBBY_R = 17;        // lobby radius
+    const WALL_H  = 10.5;
     const WALL_T  = 0.35;
 
     const HALL_W  = 4.4;
@@ -71,49 +49,110 @@ export const World = (() => {
     const ROOM_D  = 12;
     const ROOM_H  = 6.5;
 
-    // ---------- MAIN LOBBY FLOOR ----------
-    const lobbyFloor = new THREE.Mesh(
-      new THREE.CylinderGeometry(LOBBY_R, LOBBY_R, 0.26, 96),
-      matFloor
-    );
-    lobbyFloor.position.y = -0.13;
-    root.add(lobbyFloor);
-    floors.push(lobbyFloor);
-
-    // ---------- PIT / DIVOT + TABLE (VISIBLE) ----------
+    // PIT terrain params
     const pitR = 6.4;
-    const pitDepth = 1.35;
+    const pitDepth = 1.55;     // deeper so it’s obvious
+    const rimR = pitR + 0.20;  // rim radius
+    const rampOuterR = pitR + 2.1; // where the slope starts
 
-    const pitFloor = new THREE.Mesh(
-      new THREE.CylinderGeometry(pitR, pitR, 0.22, 90),
+    // ---------- LIGHTS (LOTS) ----------
+    root.add(new THREE.AmbientLight(0xffffff, 0.62));
+
+    const sun = new THREE.DirectionalLight(0xffffff, 1.05);
+    sun.position.set(14, 28, 10);
+    root.add(sun);
+
+    // Two overhead circular “fixtures”
+    const ringLightMat = new THREE.MeshStandardMaterial({
+      color: 0x0b0d14,
+      emissive: 0xffffff,
+      emissiveIntensity: 1.35,
+      roughness: 0.2,
+      metalness: 0.1
+    });
+
+    const ceilingRing1 = new THREE.Mesh(new THREE.TorusGeometry(9.7, 0.16, 12, 200), ringLightMat);
+    ceilingRing1.position.set(0, 9.2, 0);
+    ceilingRing1.rotation.x = Math.PI / 2;
+    root.add(ceilingRing1);
+
+    const ceilingRing2 = new THREE.Mesh(new THREE.TorusGeometry(6.8, 0.15, 12, 200), ringLightMat);
+    ceilingRing2.position.set(0, 8.5, 0);
+    ceilingRing2.rotation.x = Math.PI / 2;
+    root.add(ceilingRing2);
+
+    // Lobby fill lights
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const p = new THREE.PointLight(0xffffff, 1.25, 38);
+      p.position.set(Math.sin(a) * 9.2, 7.3, Math.cos(a) * 9.2);
+      root.add(p);
+    }
+
+    // Pit/table focused lights (so you SEE the divot)
+    const pitKey = new THREE.SpotLight(0xffffff, 2.0, 35, Math.PI / 6, 0.45, 1.2);
+    pitKey.position.set(0, 9.0, 0);
+    pitKey.target.position.set(0, -pitDepth, 0);
+    root.add(pitKey);
+    root.add(pitKey.target);
+
+    const pitGlow = new THREE.PointLight(0x7fe7ff, 1.4, 18);
+    pitGlow.position.set(0, 1.6, 0);
+    root.add(pitGlow);
+
+    // ---------- TERRAIN: TOP RING FLOOR (HOLE IN MIDDLE) ----------
+    // This is the big fix: you can now SEE the pit and walk to the edge.
+    const topRing = new THREE.Mesh(
+      new THREE.RingGeometry(rampOuterR, LOBBY_R, 128),
       matFloor
     );
-    pitFloor.position.set(0, -pitDepth - 0.11, 0);
+    topRing.rotation.x = -Math.PI / 2;
+    topRing.position.y = 0;
+    root.add(topRing);
+    floors.push(topRing);
+
+    // ---------- TERRAIN: RAMP RING (SLOPED DOWN) ----------
+    // Custom geometry: outer edge at y=0, inner edge at y=-pitDepth
+    const ramp = new THREE.Mesh(
+      makeRampRing(THREE, rimR, rampOuterR, -pitDepth, 0, 140),
+      matFloor
+    );
+    root.add(ramp);
+    floors.push(ramp);
+
+    // ---------- TERRAIN: PIT FLOOR ----------
+    const pitFloor = new THREE.Mesh(
+      new THREE.CircleGeometry(rimR, 96),
+      matFloor
+    );
+    pitFloor.rotation.x = -Math.PI / 2;
+    pitFloor.position.y = -pitDepth;
     root.add(pitFloor);
     floors.push(pitFloor);
 
+    // Pit inner wall (visual)
     const pitWall = new THREE.Mesh(
-      new THREE.CylinderGeometry(pitR + 0.14, pitR + 0.14, pitDepth, 90, 1, true),
+      new THREE.CylinderGeometry(rimR, rimR, pitDepth, 96, 1, true),
       matWall
     );
     pitWall.position.set(0, -pitDepth / 2, 0);
     root.add(pitWall);
 
-    // pit rim trim
+    // Pit rim trim
     const pitRim = new THREE.Mesh(
-      new THREE.TorusGeometry(pitR + 0.17, 0.08, 12, 180),
+      new THREE.TorusGeometry(rimR, 0.09, 14, 200),
       matTrim
     );
-    pitRim.position.set(0, 0.02, 0);
+    pitRim.position.set(0, 0.05, 0);
     pitRim.rotation.x = Math.PI / 2;
     root.add(pitRim);
 
-    // felt table top inside pit
+    // ---------- TABLE (DOWN IN PIT, VISIBLE) ----------
     const tableTop = new THREE.Mesh(
       new THREE.CylinderGeometry(2.95, 2.95, 0.25, 56),
       matFelt
     );
-    tableTop.position.set(0, -pitDepth + 0.62, 0);
+    tableTop.position.set(0, -pitDepth + 0.70, 0);
     root.add(tableTop);
 
     const tableRail = new THREE.Mesh(
@@ -124,20 +163,20 @@ export const World = (() => {
     tableRail.rotation.x = Math.PI / 2;
     root.add(tableRail);
 
-    // ---------- GOLD GUARD RAIL (FIXED SIZE + ALIGNED) ----------
-    // Smaller and centered so it does NOT intersect walls.
-    const guardR = 12.2; // tuned for LOBBY_R=17
-    const goldRail = new THREE.Mesh(
-      new THREE.TorusGeometry(guardR, 0.12, 18, 220),
+    // ---------- PIT GUARDRAIL (THE IMPORTANT ONE) ----------
+    // This is the “don’t fall into pit” rail (not the giant lobby ring).
+    const pitGuardR = rampOuterR - 0.25;
+    const pitGuard = new THREE.Mesh(
+      new THREE.TorusGeometry(pitGuardR, 0.10, 16, 220),
       matGold
     );
-    goldRail.position.set(0, 1.05, 0);
-    goldRail.rotation.x = Math.PI / 2;
-    root.add(goldRail);
+    pitGuard.position.set(0, 1.05, 0);
+    pitGuard.rotation.x = Math.PI / 2;
+    root.add(pitGuard);
 
-    // ---------- LOBBY WALL WITH 4 DOOR GAPS ----------
+    // ---------- LOBBY WALL WITH 4 GAPS FOR HALLWAYS ----------
     const gapAngles = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
-    const gapWidth = 0.28; // slightly wider doorways
+    const gapWidth = 0.28;
 
     function nearGap(a) {
       return gapAngles.some(g => {
@@ -164,20 +203,25 @@ export const World = (() => {
       root.add(trim);
     }
 
-    // ---------- HALLWAYS + ROOMS + GLOW SIGNS ----------
-    const rooms = [
-      { key: "STORE",    ax:  0,            neon: matNeonA },
-      { key: "SCORPION", ax:  Math.PI / 2,  neon: matNeonP },
-      { key: "SPECTATE", ax:  Math.PI,      neon: matNeonA },
-      { key: "LOUNGE",   ax: -Math.PI / 2,  neon: matNeonP },
+    // ---------- HALLWAYS + ROOMS ----------
+    // We will CUT a doorway in the room wall that faces the hallway.
+    const doorW = 2.6;
+    const doorH = 2.9;
+    const doorT = 0.25;
+
+    const roomDefs = [
+      { label: "STORE",    ax:  0,            neon: matNeonA },
+      { label: "SCORPION", ax:  Math.PI / 2,  neon: matNeonP },
+      { label: "SPECTATE", ax:  Math.PI,      neon: matNeonA },
+      { label: "LOUNGE",   ax: -Math.PI / 2,  neon: matNeonP },
     ];
 
-    rooms.forEach((r) => {
+    roomDefs.forEach((r) => {
       const dir = new THREE.Vector3(Math.sin(r.ax), 0, Math.cos(r.ax));
 
+      // hallway
       const hallCenter = dir.clone().multiplyScalar(LOBBY_R + HALL_L / 2 - 0.25);
 
-      // hallway floor
       const hallFloor = new THREE.Mesh(new THREE.BoxGeometry(HALL_W, 0.22, HALL_L), matFloor);
       hallFloor.position.set(hallCenter.x, -0.11, hallCenter.z);
       hallFloor.rotation.y = r.ax;
@@ -185,38 +229,45 @@ export const World = (() => {
       floors.push(hallFloor);
 
       // hallway walls
-      const wallH = 4.4;
-      const leftWall = new THREE.Mesh(new THREE.BoxGeometry(0.22, wallH, HALL_L), matWall);
-      leftWall.position.set(hallCenter.x, wallH / 2, hallCenter.z);
+      const hWallH = 4.4;
+      const leftWall = new THREE.Mesh(new THREE.BoxGeometry(0.22, hWallH, HALL_L), matWall);
+      leftWall.position.set(hallCenter.x, hWallH / 2, hallCenter.z);
       leftWall.rotation.y = r.ax;
       leftWall.translateX(-HALL_W / 2);
       root.add(leftWall);
 
-      const rightWall = new THREE.Mesh(new THREE.BoxGeometry(0.22, wallH, HALL_L), matWall);
-      rightWall.position.set(hallCenter.x, wallH / 2, hallCenter.z);
+      const rightWall = new THREE.Mesh(new THREE.BoxGeometry(0.22, hWallH, HALL_L), matWall);
+      rightWall.position.set(hallCenter.x, hWallH / 2, hallCenter.z);
       rightWall.rotation.y = r.ax;
       rightWall.translateX(HALL_W / 2);
       root.add(rightWall);
 
-      // neon ceiling strip
+      // hallway neon strip + lights
       const strip = new THREE.Mesh(new THREE.BoxGeometry(HALL_W - 0.6, 0.12, HALL_L - 0.6), r.neon);
-      strip.position.set(hallCenter.x, wallH - 0.35, hallCenter.z);
+      strip.position.set(hallCenter.x, hWallH - 0.35, hallCenter.z);
       strip.rotation.y = r.ax;
       root.add(strip);
 
-      // entrance sign (glowing) right at the lobby doorway
-      const sign = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.5, 0.18), r.neon);
+      for (let k = 0; k < 4; k++) {
+        const t = (k / 3) - 0.5;
+        const p = new THREE.PointLight(0xffffff, 1.15, 18);
+        const pos = hallCenter.clone().add(dir.clone().multiplyScalar(t * HALL_L));
+        p.position.set(pos.x, 3.7, pos.z);
+        root.add(p);
+      }
+
+      // entrance sign at lobby door
       const signPos = dir.clone().multiplyScalar(LOBBY_R - 0.9);
+      const sign = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.55, 0.18), r.neon);
       sign.position.set(signPos.x, 3.0, signPos.z);
       sign.rotation.y = r.ax;
       root.add(sign);
 
-      // small light above sign
-      const signLight = new THREE.PointLight(0xffffff, 1.2, 12);
-      signLight.position.set(signPos.x, 3.5, signPos.z);
+      const signLight = new THREE.PointLight(0xffffff, 1.3, 12);
+      signLight.position.set(signPos.x, 3.6, signPos.z);
       root.add(signLight);
 
-      // room center
+      // room
       const roomCenter = dir.clone().multiplyScalar(LOBBY_R + HALL_L + ROOM_D / 2 - 0.7);
 
       const roomFloor = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W, 0.25, ROOM_D), matFloor);
@@ -225,62 +276,72 @@ export const World = (() => {
       root.add(roomFloor);
       floors.push(roomFloor);
 
-      // room walls
-      const vt = 0.25;
-      const mk = (w,h,d)=> new THREE.Mesh(new THREE.BoxGeometry(w,h,d), matWall);
+      // room walls: back, sides, and FRONT wall (toward hallway) HAS DOOR OPENING.
+      const mkWall = (w,h,d)=> new THREE.Mesh(new THREE.BoxGeometry(w,h,d), matWall);
 
-      const front = mk(ROOM_W, ROOM_H, vt);
-      front.position.set(roomCenter.x, ROOM_H/2, roomCenter.z);
-      front.rotation.y = r.ax;
-      front.translateZ(ROOM_D/2);
-      root.add(front);
-
-      const back = mk(ROOM_W, ROOM_H, vt);
+      // back wall (far side)
+      const back = mkWall(ROOM_W, ROOM_H, doorT);
       back.position.set(roomCenter.x, ROOM_H/2, roomCenter.z);
       back.rotation.y = r.ax;
-      back.translateZ(-ROOM_D/2);
+      back.translateZ(ROOM_D/2);
       root.add(back);
 
-      const sl = mk(vt, ROOM_H, ROOM_D);
+      // left/right walls
+      const sl = mkWall(doorT, ROOM_H, ROOM_D);
       sl.position.set(roomCenter.x, ROOM_H/2, roomCenter.z);
       sl.rotation.y = r.ax;
       sl.translateX(-ROOM_W/2);
       root.add(sl);
 
-      const sr = mk(vt, ROOM_H, ROOM_D);
+      const sr = mkWall(doorT, ROOM_H, ROOM_D);
       sr.position.set(roomCenter.x, ROOM_H/2, roomCenter.z);
       sr.rotation.y = r.ax;
       sr.translateX(ROOM_W/2);
       root.add(sr);
 
+      // FRONT wall toward hallway: build 3 parts leaving doorway
+      const frontCenter = new THREE.Vector3(roomCenter.x, 0, roomCenter.z);
+      const doorWallParts = wallWithDoorLocal({
+        THREE,
+        center: frontCenter,
+        rotY: r.ax,
+        zEdge: -ROOM_D/2,
+        totalW: ROOM_W,
+        thickness: doorT,
+        height: ROOM_H,
+        doorWidth: doorW,
+        doorHeight: doorH,
+        mat: matWall
+      });
+      root.add(doorWallParts.top, doorWallParts.left, doorWallParts.right);
+
       // room light
-      const roomLight = new THREE.PointLight(0xffffff, 1.6, 30);
+      const roomLight = new THREE.PointLight(0xffffff, 1.8, 32);
       roomLight.position.set(roomCenter.x, 5.3, roomCenter.z);
       root.add(roomLight);
 
-      // store display case placeholder in STORE room
-      if (r.key === "STORE") {
-        const caseBase = new THREE.Mesh(new THREE.BoxGeometry(5.4, 0.35, 2.2), matTrim);
+      // Store display case placeholder
+      if (r.label === "STORE") {
+        const caseBase = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.35, 2.3), matTrim);
         caseBase.position.set(roomCenter.x, 0.18, roomCenter.z);
         caseBase.rotation.y = r.ax;
         root.add(caseBase);
 
         const glass = new THREE.Mesh(
-          new THREE.BoxGeometry(5.2, 1.6, 2.0),
+          new THREE.BoxGeometry(5.4, 1.6, 2.1),
           new THREE.MeshPhysicalMaterial({ color: 0xffffff, transparent: true, opacity: 0.12, roughness: 0.05, metalness: 0.0 })
         );
         glass.position.copy(caseBase.position).add(new THREE.Vector3(0, 0.95, 0));
         glass.rotation.y = r.ax;
         root.add(glass);
 
-        const glow = new THREE.PointLight(0x7fe7ff, 1.6, 14);
+        const glow = new THREE.PointLight(0x7fe7ff, 1.9, 14);
         glow.position.copy(caseBase.position).add(new THREE.Vector3(0, 1.7, 0));
         root.add(glow);
       }
     });
 
-    // ---------- VIP CUBE ROOM (WITH DOOR OPENING) ----------
-    // Put VIP cube near east side, with an opening toward the lobby (you asked: cube VIP spawn).
+    // ---------- VIP CUBE ROOM (SPAWN) ----------
     const vipSize = 6.8;
     const vipH = 4.4;
     const vipT = 0.22;
@@ -295,56 +356,26 @@ export const World = (() => {
     vipRoom.add(vipFloor);
     floors.push(vipFloor);
 
-    // Door opening on the -Z wall (toward lobby-ish)
-    const doorW = 2.2;
-    const doorH = 2.6;
+    // VIP walls with a doorway on -Z wall
+    const vipDoorW = 2.4;
+    const vipDoorH = 2.9;
 
-    // Helper: build wall as two segments leaving a doorway gap
-    function wallWithDoor({ center, axis, totalW, thickness, height, doorWidth, doorHeight, mat }) {
-      // axis: "x" wall spans X, placed at Z edge; "z" spans Z, placed at X edge
-      const topH = Math.max(0.1, height - doorHeight);
-      const sideW = (totalW - doorWidth) / 2;
+    const backW = new THREE.Mesh(new THREE.BoxGeometry(vipSize, vipH, vipT), matWall);
+    backW.position.copy(vipBase).add(new THREE.Vector3(0, vipH/2, vipSize/2));
+    vipRoom.add(backW);
 
-      // top piece
-      const top = new THREE.Mesh(
-        new THREE.BoxGeometry(totalW, topH, thickness),
-        mat
-      );
-      top.position.copy(center).add(new THREE.Vector3(0, doorHeight + topH/2, 0));
-
-      // left piece
-      const left = new THREE.Mesh(
-        new THREE.BoxGeometry(sideW, doorHeight, thickness),
-        mat
-      );
-      left.position.copy(center).add(new THREE.Vector3(-(doorWidth/2 + sideW/2), doorHeight/2, 0));
-
-      // right piece
-      const right = new THREE.Mesh(
-        new THREE.BoxGeometry(sideW, doorHeight, thickness),
-        mat
-      );
-      right.position.copy(center).add(new THREE.Vector3((doorWidth/2 + sideW/2), doorHeight/2, 0));
-
-      return { top, left, right };
-    }
-
-    // Back wall (no door)
-    const wBack = new THREE.Mesh(new THREE.BoxGeometry(vipSize, vipH, vipT), matWall);
-    wBack.position.copy(vipBase).add(new THREE.Vector3(0, vipH/2, vipSize/2));
-    vipRoom.add(wBack);
-
-    // Front wall with door opening (at -Z edge)
-    const wallCenterFront = vipBase.clone().add(new THREE.Vector3(0, 0, -vipSize/2));
-    const frontParts = wallWithDoor({
-      center: wallCenterFront, axis: "x",
-      totalW: vipSize, thickness: vipT, height: vipH,
-      doorWidth: doorW, doorHeight: doorH,
+    const frontParts = wallWithDoorSimple({
+      THREE,
+      base: vipBase.clone().add(new THREE.Vector3(0, 0, -vipSize/2)),
+      totalW: vipSize,
+      thickness: vipT,
+      height: vipH,
+      doorWidth: vipDoorW,
+      doorHeight: vipDoorH,
       mat: matWall
     });
     vipRoom.add(frontParts.top, frontParts.left, frontParts.right);
 
-    // Side walls
     const wR = new THREE.Mesh(new THREE.BoxGeometry(vipT, vipH, vipSize), matWall);
     wR.position.copy(vipBase).add(new THREE.Vector3(vipSize/2, vipH/2, 0));
     vipRoom.add(wR);
@@ -353,22 +384,20 @@ export const World = (() => {
     wL.position.copy(vipBase).add(new THREE.Vector3(-vipSize/2, vipH/2, 0));
     vipRoom.add(wL);
 
-    // VIP neon ceiling + light
     const vipStrip = new THREE.Mesh(new THREE.BoxGeometry(vipSize - 0.6, 0.12, vipSize - 0.6), matNeonP);
     vipStrip.position.copy(vipBase).add(new THREE.Vector3(0, vipH - 0.35, 0));
     vipRoom.add(vipStrip);
 
-    const vipLight = new THREE.PointLight(0xff2d7a, 2.8, 20);
+    const vipLight = new THREE.PointLight(0xff2d7a, 2.8, 22);
     vipLight.position.copy(vipBase).add(new THREE.Vector3(0, 3.2, 0));
     vipRoom.add(vipLight);
 
-    // VIP spawn inside cube, facing the table
+    // Spawn inside VIP cube facing table (0,0,0)
     const spawnPos = vipBase.clone().add(new THREE.Vector3(0, 0, -1.3));
     const yawToTable = Math.atan2(0 - spawnPos.x, 0 - spawnPos.z);
     spawns.set("vip_cube", { x: spawnPos.x, y: 0, z: spawnPos.z, yaw: yawToTable });
 
-    // ---------- JUMBOTRONS (HIGHER + “CONTENT”) ----------
-    // Put them higher and add a glowing “panel” behind to look active.
+    // ---------- JUMBOTRONS HIGHER ----------
     const screenW = 7.6, screenH = 3.3;
     for (let i = 0; i < 4; i++) {
       const a = i * (Math.PI / 2);
@@ -380,12 +409,12 @@ export const World = (() => {
         roughness: 0.25,
         metalness: 0.1,
         emissive: 0x101428,
-        emissiveIntensity: 1.1
+        emissiveIntensity: 1.15
       });
 
       const screen = new THREE.Mesh(new THREE.PlaneGeometry(screenW, screenH), screenMat);
-      screen.position.set(sx, 8.4, sz); // higher than before
-      screen.lookAt(0, 8.4, 0);
+      screen.position.set(sx, 8.7, sz);
+      screen.lookAt(0, 8.7, 0);
       root.add(screen);
 
       const frame = new THREE.Mesh(new THREE.BoxGeometry(screenW + 0.3, screenH + 0.3, 0.18), matTrim);
@@ -394,22 +423,13 @@ export const World = (() => {
       frame.translateZ(-0.10);
       root.add(frame);
 
-      // glow bar under screen
-      const glowBar = new THREE.Mesh(new THREE.BoxGeometry(screenW, 0.18, 0.20), matNeonA);
-      glowBar.position.copy(screen.position);
-      glowBar.quaternion.copy(screen.quaternion);
-      glowBar.translateY(-screenH/2 - 0.25);
-      glowBar.translateZ(-0.08);
-      root.add(glowBar);
-
-      const glowLight = new THREE.PointLight(0x7fe7ff, 1.8, 16);
+      const glowLight = new THREE.PointLight(0x7fe7ff, 2.0, 18);
       glowLight.position.copy(screen.position);
-      glowLight.translateZ(-0.5);
+      glowLight.translateZ(-0.6);
       root.add(glowLight);
     }
 
-    // ---------- BOTS + CHAIRS (PLACEHOLDERS) ----------
-    // Simple seated bots around the pit table so it feels alive.
+    // ---------- SIMPLE BOTS + CHAIRS (IN PIT LEVEL) ----------
     const chairMat = matTrim;
     const botMat = new THREE.MeshStandardMaterial({ color: 0x3a4a7a, roughness: 0.65, metalness: 0.1 });
 
@@ -420,7 +440,6 @@ export const World = (() => {
       const z = Math.cos(a) * r;
       const y = -pitDepth + 0.20;
 
-      // chair
       const seat = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.12, 0.6), chairMat);
       seat.position.set(x, y, z);
       seat.lookAt(0, y, 0);
@@ -433,7 +452,6 @@ export const World = (() => {
       back.translateZ(-0.30);
       root.add(back);
 
-      // bot body
       const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.55, 6, 12), botMat);
       body.position.copy(seat.position).add(new THREE.Vector3(0, 0.55, -0.18));
       body.lookAt(0, body.position.y, 0);
@@ -444,7 +462,112 @@ export const World = (() => {
       root.add(head);
     }
 
-    log?.("[world] built ✅ (FULL: doors+larger lobby+pit+rail aligned+signs+jumbotrons+bots)");
+    log?.("[world] built ✅ (7.7: REAL pit terrain + room doors open + more lights)");
+  }
+
+  // ----- helpers -----
+
+  // Creates a sloped “terrain” ring: inner edge at yInner, outer edge at yOuter
+  function makeRampRing(THREE, innerR, outerR, yInner, yOuter, segments = 128) {
+    const positions = [];
+    const normals = [];
+    const uvs = [];
+    const indices = [];
+
+    const addV = (x,y,z, nx,ny,nz, u,v) => {
+      positions.push(x,y,z);
+      normals.push(nx,ny,nz);
+      uvs.push(u,v);
+    };
+
+    // We'll build quads around the ring: (inner_i, outer_i, inner_{i+1}, outer_{i+1})
+    // Approx normal: we’ll compute from two edges (good enough visually)
+    for (let i = 0; i <= segments; i++) {
+      const t = (i / segments) * Math.PI * 2;
+      const cx = Math.sin(t), cz = Math.cos(t);
+
+      const xi = cx * innerR, zi = cz * innerR;
+      const xo = cx * outerR, zo = cz * outerR;
+
+      // approximate normal points “up-ish” and outward; OK for our slope
+      const nx = 0, ny = 1, nz = 0;
+
+      // inner vertex
+      addV(xi, yInner, zi, nx, ny, nz, 0, i / segments);
+      // outer vertex
+      addV(xo, yOuter, zo, nx, ny, nz, 1, i / segments);
+    }
+
+    // indices
+    for (let i = 0; i < segments; i++) {
+      const a = i * 2;
+      const b = a + 1;
+      const c = a + 2;
+      const d = a + 3;
+
+      // two triangles: a-b-c and b-d-c
+      indices.push(a, b, c);
+      indices.push(b, d, c);
+    }
+
+    const g = new THREE.BufferGeometry();
+    g.setIndex(indices);
+    g.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    g.computeVertexNormals();
+    return g;
+  }
+
+  // Room wall doorway in local space (rotY + zEdge)
+  function wallWithDoorLocal({ THREE, center, rotY, zEdge, totalW, thickness, height, doorWidth, doorHeight, mat }) {
+    const sideW = (totalW - doorWidth) / 2;
+    const topH = Math.max(0.1, height - doorHeight);
+
+    const top = new THREE.Mesh(new THREE.BoxGeometry(totalW, topH, thickness), mat);
+    const left = new THREE.Mesh(new THREE.BoxGeometry(sideW, doorHeight, thickness), mat);
+    const right = new THREE.Mesh(new THREE.BoxGeometry(sideW, doorHeight, thickness), mat);
+
+    // start at room center
+    top.position.copy(center);
+    left.position.copy(center);
+    right.position.copy(center);
+
+    top.rotation.y = rotY;
+    left.rotation.y = rotY;
+    right.rotation.y = rotY;
+
+    // move to wall edge
+    top.translateZ(zEdge);
+    left.translateZ(zEdge);
+    right.translateZ(zEdge);
+
+    // set heights
+    top.position.y = doorHeight + topH / 2;
+    left.position.y = doorHeight / 2;
+    right.position.y = doorHeight / 2;
+
+    // split left/right
+    left.translateX(-(doorWidth/2 + sideW/2));
+    right.translateX((doorWidth/2 + sideW/2));
+
+    return { top, left, right };
+  }
+
+  // Simple wall-with-door for VIP cube front (no rotation needed)
+  function wallWithDoorSimple({ THREE, base, totalW, thickness, height, doorWidth, doorHeight, mat }) {
+    const sideW = (totalW - doorWidth) / 2;
+    const topH = Math.max(0.1, height - doorHeight);
+
+    const top = new THREE.Mesh(new THREE.BoxGeometry(totalW, topH, thickness), mat);
+    const left = new THREE.Mesh(new THREE.BoxGeometry(sideW, doorHeight, thickness), mat);
+    const right = new THREE.Mesh(new THREE.BoxGeometry(sideW, doorHeight, thickness), mat);
+
+    top.position.copy(base).add(new THREE.Vector3(0, doorHeight + topH/2, 0));
+    left.position.copy(base).add(new THREE.Vector3(-(doorWidth/2 + sideW/2), doorHeight/2, 0));
+    right.position.copy(base).add(new THREE.Vector3((doorWidth/2 + sideW/2), doorHeight/2, 0));
+
+    return { top, left, right };
   }
 
   function getSpawn() {

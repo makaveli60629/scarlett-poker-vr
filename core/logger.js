@@ -1,5 +1,7 @@
-// /core/logger.js — Scarlett Logger v2 (FULL)
-// HUD log + small diagnostics overlay (FPS / pos / rot / mode) + Copy Log
+// /core/logger.js — Scarlett Logger v3 (FULL)
+// ✅ Hide HUD / Show HUD buttons
+// ✅ HUD doesn't block touches (sticks work) except on buttons
+// ✅ Copy Log button stays
 
 export function createLogger({ maxLines = 120 } = {}) {
   const pad = (n) => String(n).padStart(2, "0");
@@ -9,25 +11,8 @@ export function createLogger({ maxLines = 120 } = {}) {
   };
 
   const out = [];
-  function log(m) {
-    const line = `[${now()}] ${m}`;
-    out.push(line);
-    console.log(line);
-    const pre = document.getElementById("hud-log");
-    if (pre) pre.textContent = out.slice(-maxLines).join("\n");
-  }
 
-  log.copy = async () => {
-    try {
-      await navigator.clipboard.writeText(out.join("\n"));
-      log("[HUD] copied ✅");
-    } catch (e) {
-      log("[HUD] copy failed ❌ " + (e?.message || e));
-    }
-  };
-
-  // HUD container
-  (function ensureHUD() {
+  function ensureHUD() {
     if (document.getElementById("hud")) return;
 
     const hud = document.createElement("div");
@@ -47,48 +32,66 @@ export function createLogger({ maxLines = 120 } = {}) {
     hud.style.zIndex = "9999";
     hud.style.backdropFilter = "blur(6px)";
 
+    // CRITICAL: HUD should NOT block touches to sticks.
+    hud.style.pointerEvents = "none";
+
     const row = document.createElement("div");
     row.className = "row";
     row.style.display = "flex";
     row.style.gap = "8px";
     row.style.alignItems = "center";
     row.style.marginBottom = "8px";
+    row.style.pointerEvents = "auto"; // buttons clickable
 
     const title = document.createElement("div");
     title.textContent = "Scarlett VR Poker — HUD";
-    title.style.fontWeight = "700";
+    title.style.fontWeight = "800";
     title.style.flex = "1";
 
-    const copy = document.createElement("button");
-    copy.textContent = "Copy Log";
-    copy.style.padding = "6px 10px";
-    copy.style.borderRadius = "10px";
-    copy.style.border = "1px solid rgba(255,255,255,0.18)";
-    copy.style.background = "rgba(127,231,255,0.12)";
-    copy.style.color = "#e8ecff";
-    copy.style.cursor = "pointer";
-    copy.onclick = () => log.copy();
+    const btn = (label) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.style.padding = "6px 10px";
+      b.style.borderRadius = "10px";
+      b.style.border = "1px solid rgba(255,255,255,0.18)";
+      b.style.background = "rgba(127,231,255,0.12)";
+      b.style.color = "#e8ecff";
+      b.style.cursor = "pointer";
+      b.style.pointerEvents = "auto";
+      return b;
+    };
 
-    const toggle = document.createElement("button");
-    toggle.textContent = "Hide HUD";
-    toggle.style.padding = "6px 10px";
-    toggle.style.borderRadius = "10px";
-    toggle.style.border = "1px solid rgba(255,255,255,0.18)";
-    toggle.style.background = "rgba(255,45,122,0.10)";
-    toggle.style.color = "#e8ecff";
-    toggle.style.cursor = "pointer";
-    toggle.onclick = () => {
+    const copyBtn = btn("Copy Log");
+    copyBtn.onclick = () => log.copy();
+
+    const hideBtn = btn("Hide HUD");
+    const showBtn = btn("Show HUD");
+    showBtn.style.display = "none";
+
+    hideBtn.onclick = () => {
       const pre = document.getElementById("hud-log");
       const diag = document.getElementById("hud-diag");
-      const hidden = pre.style.display === "none";
-      pre.style.display = hidden ? "" : "none";
-      diag.style.display = hidden ? "" : "none";
-      toggle.textContent = hidden ? "Hide HUD" : "Show HUD";
+      if (pre) pre.style.display = "none";
+      if (diag) diag.style.display = "none";
+      hideBtn.style.display = "none";
+      showBtn.style.display = "";
+      log("[HUD] hidden ✅");
+    };
+
+    showBtn.onclick = () => {
+      const pre = document.getElementById("hud-log");
+      const diag = document.getElementById("hud-diag");
+      if (pre) pre.style.display = "";
+      if (diag) diag.style.display = "";
+      showBtn.style.display = "none";
+      hideBtn.style.display = "";
+      log("[HUD] shown ✅");
     };
 
     row.appendChild(title);
-    row.appendChild(copy);
-    row.appendChild(toggle);
+    row.appendChild(copyBtn);
+    row.appendChild(hideBtn);
+    row.appendChild(showBtn);
 
     const diag = document.createElement("div");
     diag.id = "hud-diag";
@@ -97,6 +100,7 @@ export function createLogger({ maxLines = 120 } = {}) {
     diag.style.borderRadius = "10px";
     diag.style.border = "1px solid rgba(255,255,255,0.10)";
     diag.style.background = "rgba(0,0,0,0.25)";
+    diag.style.pointerEvents = "none";
     diag.textContent = "diag: (waiting…)";
 
     const pre = document.createElement("pre");
@@ -106,14 +110,34 @@ export function createLogger({ maxLines = 120 } = {}) {
     pre.style.lineHeight = "1.25";
     pre.style.maxHeight = "28vh";
     pre.style.overflow = "auto";
+    pre.style.pointerEvents = "none";
 
     hud.appendChild(row);
     hud.appendChild(diag);
     hud.appendChild(pre);
     document.body.appendChild(hud);
-  })();
+  }
 
-  // diagnostics updater hook
+  ensureHUD();
+
+  function log(msg) {
+    const line = `[${now()}] ${msg}`;
+    out.push(line);
+    console.log(line);
+    const pre = document.getElementById("hud-log");
+    if (pre) pre.textContent = out.slice(-maxLines).join("\n");
+  }
+
+  log.copy = async () => {
+    try {
+      await navigator.clipboard.writeText(out.join("\n"));
+      log("[HUD] copied ✅");
+    } catch (e) {
+      log("[HUD] copy failed ❌ " + (e?.message || e));
+    }
+  };
+
+  // diag updater hook
   let fps = 0, acc = 0, frames = 0, last = performance.now();
   log.diag = (ctx, dt) => {
     frames++;
@@ -130,8 +154,7 @@ export function createLogger({ maxLines = 120 } = {}) {
     const mode = ctx.__controls?.isXR ? "XR" : "FLAT";
     d.textContent =
       `mode=${mode} fps=${fps}\n` +
-      `player=(${(p?.x ?? 0).toFixed(2)}, ${(p?.y ?? 0).toFixed(2)}, ${(p?.z ?? 0).toFixed(2)}) yaw=${rY.toFixed(2)}\n` +
-      `room=${ctx.world?.room || "lobby"} build=${ctx.BUILD || ""}`;
+      `player=(${(p?.x ?? 0).toFixed(2)}, ${(p?.y ?? 0).toFixed(2)}, ${(p?.z ?? 0).toFixed(2)}) yaw=${rY.toFixed(2)}`;
   };
 
   return log;

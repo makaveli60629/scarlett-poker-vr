@@ -389,4 +389,3 @@ function registerPokerBotsForNametags() {
   });
   console.log("[nametags] registered ✅");
 }
-```0

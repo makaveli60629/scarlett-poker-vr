@@ -5,7 +5,7 @@
 // ✅ Shows fatal errors on-screen (no silent black)
 
 import { VRButton } from "./VRButton.js";
-
+await import("./world.js?v=4_8_6_failsafe");
 // ---- HUD logger (always visible) ----
 const HUD = (() => {
   const state = { lines: [], max: 2000 };

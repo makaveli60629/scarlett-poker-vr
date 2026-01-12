@@ -1,16 +1,25 @@
-// /core/three_boot.js
-export async function initThree({ log, bg = 0x05060a } = {}) {
-  const ver = "0.164.1";
-  const THREE = (window.THREE && window.THREE.Scene)
-    ? window.THREE
-    : await import(`https://unpkg.com/three@${ver}/build/three.module.js`);
+// /core/three_boot.js — Scarlett Three Boot (FULL)
+// Creates scene, camera, PlayerRig, renderer, basic light, resize handling.
 
-  log?.("[three] loaded ✅");
+async function loadThree() {
+  if (window.THREE && window.THREE.Scene) return window.THREE;
+  const ver = "0.164.1";
+  return await import(`https://unpkg.com/three@${ver}/build/three.module.js`);
+}
+
+export async function initThree({ log } = {}) {
+  const THREE = await loadThree();
+  if (log) log("[index] three init ✅");
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(bg);
+  scene.background = new THREE.Color(0x05060a);
 
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 400);
+  const camera = new THREE.PerspectiveCamera(
+    70,
+    window.innerWidth / window.innerHeight,
+    0.05,
+    350
+  );
 
   const player = new THREE.Group();
   player.name = "PlayerRig";
@@ -27,14 +36,18 @@ export async function initThree({ log, bg = 0x05060a } = {}) {
   renderer.xr.enabled = true;
   document.body.appendChild(renderer.domElement);
 
+  // Basic light so you never see full black if world fails
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x05060a, 0.95));
+
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // base light
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x05060a, 0.95));
+  // Controls bucket expected by your index.js/world.js
+  const controllers = { left: null, right: null };
+  const lasers = { left: null, right: null };
 
-  return { THREE, scene, camera, player, renderer };
+  return { THREE, scene, camera, player, renderer, controllers, lasers };
 }

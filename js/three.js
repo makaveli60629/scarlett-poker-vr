@@ -1,8 +1,6 @@
-// /js/three.js — SINGLE SOURCE OF THREE (PERMANENT)
-// ✅ Default export THREE
-// ✅ Local VRButton (no CDN examples)
+// /js/three.js — Scarlett Three Wrapper (FINAL)
 
-import * as _THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
 
-export default _THREE;
-export { VRButton } from "./VRButton.js";
+export { THREE, VRButton };

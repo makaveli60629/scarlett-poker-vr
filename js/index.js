@@ -329,7 +329,6 @@ async function init() {
 
     S.renderer.render(S.scene, S.camera);
   });
-
   ok("[index] ready ✅");
 }
 
@@ -338,4 +337,3 @@ init().catch((e) => {
   bad(`[index] init FAILED ❌ ${e?.message || e}`);
   console.error(e);
 });
-```0

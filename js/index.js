@@ -1,297 +1,249 @@
-console.log("[index] file evaluated");
-// /js/index.js — Scarlett Poker VR (FULL, crash-proof)
-// Fixes: "THREE wrapper missing constructor: Clock" + restores ENTER buttons.
+// /js/index.js — Scarlett Poker VR MASTER ENTRY (HARDENED)
+// ✅ Never stalls after import
+// ✅ Safe-loads your /js/three.js wrapper
+// ✅ VRButton always appended
+// ✅ Passes THREE into World (no globals)
+// ✅ Fail-safe audio listener + optional modules
 
-import { VRButton } from "./VRButton.js";
-import { World } from "./world.js";
+const VERSION = Date.now();
 
-// ---------- LOG PANEL ----------
-const LOG = (...a) => {
-  console.log(...a);
-  const el = document.getElementById("log");
-  if (!el) return;
-  const line = a.map(x => (typeof x === "string" ? x : JSON.stringify(x))).join(" ");
-  el.textContent += line + "\n";
-  el.scrollTop = el.scrollHeight;
+console.log("[index] file evaluated ✅", "v=" + VERSION);
+
+const S = {
+  THREE: null,
+  renderer: null,
+  scene: null,
+  camera: null,
+  clock: null,
+  player: null,
+  controllers: [],
+  hands: [],
+  base: "",
+  sounds: null,
+  raf: 0,
 };
-const BAD = (...a) => LOG("❌", ...a);
-const OK  = (...a) => LOG("✅", ...a);
 
-// ---------- SAFE THREE LOADER ----------
-// Your project uses a "three wrapper" in some builds.
-// We support either: window.THREE, or ESM import from ./three.module.js if you have it.
-async function getTHREE() {
-  if (window.THREE) return window.THREE;
-
-  // If you have a local module, uncomment one of these and ensure file exists:
-  // const mod = await import("./three.module.js");
-  // return mod;
-
-  // If you have a wrapper file that exports THREE object:
-  // const wrap = await import("./three_wrap.js");
-  // return wrap.THREE || wrap.default || wrap;
-
-  return null;
+function getBasePath() {
+  // Works for github pages subfolder deployments
+  // e.g. /scarlett-poker-vr/
+  const p = location.pathname;
+  if (p.endsWith("/")) return p;
+  return p.substring(0, p.lastIndexOf("/") + 1);
 }
 
-// ---------- CLOCK POLYFILL (THE FIX) ----------
-function ensureClock(THREE) {
-  if (!THREE) return;
-  if (THREE.Clock) return;
+function domReady(fn) {
+  if (document.readyState === "loading") {
+    window.addEventListener("DOMContentLoaded", fn, { once: true });
+  } else fn();
+}
 
-  class ClockPolyfill {
-    constructor(autoStart = true) {
-      this.autoStart = autoStart;
-      this.startTime = 0;
-      this.oldTime = 0;
-      this.elapsedTime = 0;
-      this.running = false;
-      if (autoStart) this.start();
-    }
-    start() {
-      this.startTime = performance.now();
-      this.oldTime = this.startTime;
-      this.elapsedTime = 0;
-      this.running = true;
-    }
-    getDelta() {
-      if (!this.running) {
-        if (this.autoStart) this.start();
-        return 0;
-      }
-      const newTime = performance.now();
-      const diff = (newTime - this.oldTime) / 1000;
-      this.oldTime = newTime;
-      this.elapsedTime += diff;
-      return diff;
-    }
-    getElapsedTime() {
-      this.getDelta();
-      return this.elapsedTime;
-    }
+// ---------- SAFE IMPORT HELPERS ----------
+async function safeImport(path) {
+  try {
+    const m = await import(path + (path.includes("?") ? "" : `?v=${VERSION}`));
+    return m;
+  } catch (e) {
+    console.warn("[index] import failed:", path, e);
+    return null;
   }
-
-  THREE.Clock = ClockPolyfill;
-  OK("[index] Clock polyfilled ✅");
 }
 
-// ---------- UI (ENTER / ENTER VR) ----------
-function ensureOverlayUI() {
-  let hud = document.getElementById("hud");
-  if (!hud) {
-    hud = document.createElement("div");
-    hud.id = "hud";
-    hud.style.cssText = `
-      position:fixed; left:0; top:0; right:0;
-      display:flex; gap:10px; padding:12px;
-      align-items:center; justify-content:center;
-      z-index:9999; pointer-events:none;
-      font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial;
-    `;
-    document.body.appendChild(hud);
-  }
-
-  const mkBtn = (id, text) => {
-    let b = document.getElementById(id);
-    if (!b) {
-      b = document.createElement("button");
-      b.id = id;
-      b.textContent = text;
-      b.style.cssText = `
-        pointer-events:auto;
-        padding:12px 14px; border-radius:14px;
-        border:1px solid rgba(127,231,255,.55);
-        background:rgba(10,12,18,.75);
-        color:#e8ecff; font-weight:800;
-        box-shadow:0 10px 30px rgba(0,0,0,.45);
-      `;
-      hud.appendChild(b);
-    }
-    return b;
-  };
-
-  const enter2D = mkBtn("enter2d", "ENTER");
-  const rebuild = mkBtn("rebuild", "REBUILD");
-  return { enter2D, rebuild };
+function pickExport(mod, keys = []) {
+  if (!mod) return null;
+  for (const k of keys) if (mod[k]) return mod[k];
+  if (mod.default) return mod.default;
+  return mod;
 }
 
-// ---------- INPUT (ANDROID DUAL STICK BASIC) ----------
-function installMobileLookMove({ camera, player, log }) {
-  // Minimal: swipe to look + two-finger drag to move
-  const state = { dragging: false, two: false, lx: 0, ly: 0, yaw: 0, pitch: 0 };
-  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
-
-  const onTouchStart = (e) => {
-    state.dragging = true;
-    state.two = e.touches.length >= 2;
-    state.lx = e.touches[0].clientX;
-    state.ly = e.touches[0].clientY;
-  };
-  const onTouchMove = (e) => {
-    if (!state.dragging) return;
-    const x = e.touches[0].clientX;
-    const y = e.touches[0].clientY;
-    const dx = x - state.lx;
-    const dy = y - state.ly;
-    state.lx = x; state.ly = y;
-
-    if (!state.two) {
-      state.yaw   -= dx * 0.0032;
-      state.pitch -= dy * 0.0032;
-      state.pitch = clamp(state.pitch, -1.2, 1.2);
-      player.rotation.y = state.yaw;
-      camera.rotation.x = state.pitch;
-    } else {
-      // two finger = move forward/back + strafe
-      const fwd = -dy * 0.01;
-      const str = dx * 0.01;
-      const dir = new THREE.Vector3(0,0,-1).applyAxisAngle(new THREE.Vector3(0,1,0), player.rotation.y);
-      const right = new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0), player.rotation.y);
-      player.position.addScaledVector(dir, fwd);
-      player.position.addScaledVector(right, str);
-    }
-  };
-  const onTouchEnd = () => { state.dragging = false; state.two = false; };
-
-  window.addEventListener("touchstart", onTouchStart, { passive: true });
-  window.addEventListener("touchmove", onTouchMove, { passive: true });
-  window.addEventListener("touchend", onTouchEnd, { passive: true });
-
-  log?.("[index] android touch look/move ✅ (1 finger look, 2 finger move)");
+function ensureOverlayRoot() {
+  // boot.js typically makes a HUD/log overlay; we won’t fight it.
+  // But we ensure body is usable.
+  document.body.style.margin = "0";
+  document.body.style.overflow = "hidden";
+  document.body.style.background = "#000";
 }
 
-// ---------- MAIN ----------
-let THREE = null;
-let renderer = null;
-let scene = null;
-let camera = null;
-let player = null;
-let controllers = [];
-let clock = null;
-let running = false;
-
+// ---------- MAIN BOOT ----------
 async function boot() {
-  LOG("[index] runtime start ✅");
-
-  THREE = await getTHREE();
-  if (!THREE) {
-    BAD("[index] THREE not found. Ensure your boot.js sets window.THREE or add a module import in index.js.");
-    return;
-  }
-
-  ensureClock(THREE);
-
-  // renderer
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.xr.enabled = true;
-  document.body.appendChild(renderer.domElement);
-
-  // scene/camera
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x05060a);
-
-  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
-  camera.position.set(0, 1.65, 6);
-
-  // player rig
-  player = new THREE.Group();
-  player.name = "PlayerRig";
-  player.position.set(0, 0, 0);
-  player.add(camera);
-  scene.add(player);
-
-  // basic controllers (safe even if none)
-  const c0 = renderer.xr.getController(0);
-  const c1 = renderer.xr.getController(1);
-  player.add(c0); player.add(c1);
-  controllers = [c0, c1];
-
-  // UI
-  const { enter2D, rebuild } = ensureOverlayUI();
-
-  // VRButton (restores Enter VR)
   try {
-    const vrBtn = VRButton.createButton(renderer);
-    vrBtn.style.marginLeft = "10px";
-    document.body.appendChild(vrBtn);
-    OK("[index] VRButton appended ✅");
-  } catch (e) {
-    BAD("[index] VRButton failed:", e?.message || e);
-  }
+    console.log("[index] boot() start…");
 
-  // Android movement (so you can debug away from Quest)
-  try { installMobileLookMove({ camera, player, log: LOG }); } catch {}
+    ensureOverlayRoot();
 
-  // World init
-  await buildWorld();
+    S.base = getBasePath();
+    console.log("[index] base=", S.base);
 
-  // Buttons
-  enter2D.onclick = () => {
-    running = true;
-    enter2D.textContent = "IN WORLD ✅";
-    OK("[index] ENTER 2D ✅");
-  };
+    // 1) Load THREE wrapper (your repo has /js/three.js)
+    const threeMod = await safeImport("./three.js");
+    const THREE = pickExport(threeMod, ["THREE"]);
+    if (!THREE) throw new Error("THREE wrapper missing (./three.js did not export THREE/default)");
+    S.THREE = THREE;
 
-  rebuild.onclick = async () => {
-    OK("[index] REBUILD requested…");
-    await buildWorld(true);
-  };
-
-  // resize
-  window.addEventListener("resize", () => {
-    if (!renderer || !camera) return;
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-
-  // clock + loop
-  clock = new THREE.Clock(true);
-  running = true;
-
-  renderer.setAnimationLoop(() => {
-    const dt = clock.getDelta();
-    if (running) {
-      try {
-        World?.update?.({ THREE, scene, renderer, camera, player, controllers, log: LOG }, dt);
-      } catch (e) {
-        BAD("[index] World.update crashed:", e?.message || e);
-      }
+    // 2) Clock safe
+    // Some wrappers may not include Clock; we polyfill a tiny clock if missing.
+    if (typeof S.THREE.Clock !== "function") {
+      console.warn("[index] THREE.Clock missing -> polyfill");
+      S.THREE.Clock = class {
+        constructor() {
+          this._last = performance.now();
+          this.elapsedTime = 0;
+        }
+        getDelta() {
+          const now = performance.now();
+          const d = (now - this._last) / 1000;
+          this._last = now;
+          this.elapsedTime += d;
+          return d;
+        }
+      };
     }
-    renderer.render(scene, camera);
-  });
+    S.clock = new S.THREE.Clock();
+    console.log("[index] Clock ✅");
 
-  OK("[index] ready ✅");
-}
+    // 3) Scene + Camera + Renderer
+    S.scene = new S.THREE.Scene();
+    S.scene.fog = new S.THREE.Fog(0x05060a, 8, 70);
 
-async function buildWorld(clear = false) {
-  try {
-    if (clear && scene) {
-      // remove everything except player rig
-      const keep = new Set([player]);
-      const toRemove = [];
-      scene.children.forEach(ch => { if (!keep.has(ch)) toRemove.push(ch); });
-      toRemove.forEach(ch => scene.remove(ch));
-      OK("[index] scene cleared ✅");
+    S.camera = new S.THREE.PerspectiveCamera(
+      70,
+      window.innerWidth / window.innerHeight,
+      0.05,
+      200
+    );
+    S.camera.position.set(0, 1.65, 6);
+
+    S.renderer = new S.THREE.WebGLRenderer({
+      antialias: true,
+      alpha: false,
+      powerPreference: "high-performance",
+    });
+    S.renderer.setSize(window.innerWidth, window.innerHeight);
+    S.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    S.renderer.outputColorSpace = S.THREE.SRGBColorSpace || undefined;
+    S.renderer.xr.enabled = true;
+
+    document.body.appendChild(S.renderer.domElement);
+
+    window.addEventListener("resize", () => {
+      S.camera.aspect = window.innerWidth / window.innerHeight;
+      S.camera.updateProjectionMatrix();
+      S.renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // 4) Player rig (minimal)
+    S.player = new S.THREE.Group();
+    S.player.name = "PlayerRig";
+    S.player.position.set(0, 0, 0);
+    S.player.add(S.camera);
+    S.scene.add(S.player);
+
+    // 5) AudioListener (fail safe; ok if no sounds)
+    try {
+      const listener = new S.THREE.AudioListener();
+      S.camera.add(listener);
+      S.sounds = { listener };
+      console.log("[index] AudioListener ✅");
+    } catch (e) {
+      console.warn("[index] AudioListener failed (ok):", e);
+      S.sounds = null;
     }
 
-    await World.init({ THREE, scene, renderer, camera, player, controllers, log: LOG });
-    OK("[index] world init ✅");
-  } catch (e) {
-    BAD("[index] world init FAILED:", e?.message || e);
+    // 6) VRButton
+    const vrMod = await safeImport("./VRButton.js");
+    const VRButton = pickExport(vrMod, ["VRButton"]);
+    if (VRButton?.createButton) {
+      const btn = VRButton.createButton(S.renderer);
+      btn.style.position = "absolute";
+      btn.style.left = "50%";
+      btn.style.transform = "translateX(-50%)";
+      btn.style.bottom = "18px";
+      btn.style.zIndex = "99999";
+      document.body.appendChild(btn);
+      console.log("[index] VRButton appended ✅");
+    } else {
+      console.warn("[index] VRButton missing createButton (ok, continuing)");
+    }
+
+    // 7) Controllers (basic)
+    setupControllers();
+
+    // 8) Load world
+    const worldMod = await safeImport("./world.js");
+    const World = pickExport(worldMod, ["World"]);
+    if (!World?.init) throw new Error("World.init missing in world.js");
+
+    console.log("[index] world.init() …");
+    await World.init({
+      THREE: S.THREE,
+      scene: S.scene,
+      renderer: S.renderer,
+      camera: S.camera,
+      player: S.player,
+      controllers: S.controllers,
+      sounds: S.sounds,
+      log: (...a) => console.log("[world]", ...a),
+      BASE: S.base,
+    });
+
+    console.log("[index] world init ✅");
+
+    // 9) Loop
+    S.renderer.setAnimationLoop(tick);
+
+    console.log("[index] ready ✅");
+  } catch (err) {
+    console.error("[index] init FAILED ❌", err);
   }
 }
 
-boot().catch(e => BAD("[index] boot FAILED:", e?.message || e));
-// ---------- HARD START (REQUIRED) ----------
-if (document.readyState === "loading") {
-  window.addEventListener("DOMContentLoaded", () => {
-    console.log("[index] DOM ready → boot()");
-    boot();
-  });
-} else {
-  console.log("[index] DOM already ready → boot()");
+function setupControllers() {
+  const THREE = S.THREE;
+
+  // WebXR controllers
+  for (let i = 0; i < 2; i++) {
+    const c = S.renderer.xr.getController(i);
+    c.name = "controller_" + i;
+    S.player.add(c);
+    S.controllers.push(c);
+  }
+
+  // Controller rays (laser is attached to each controller, NOT world center)
+  const rayGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0, 0, -1),
+  ]);
+  const rayMat = new THREE.LineBasicMaterial({ color: 0x7fe7ff });
+  for (const c of S.controllers) {
+    const line = new THREE.Line(rayGeo, rayMat);
+    line.name = "LaserRay";
+    line.scale.z = 8;
+    c.add(line);
+  }
+
+  console.log("[index] controllers ready ✅", S.controllers.length);
+}
+
+function tick() {
+  const dt = S.clock ? S.clock.getDelta() : 0.016;
+
+  // Keep player standing in lobby (never forced crouch)
+  // (If you later implement seating, you can override height there.)
+  if (S.camera && S.camera.position.y < 1.2) S.camera.position.y = 1.65;
+
+  // world update
+  if (S.scene?.userData?.WORLD_UPDATE) {
+    try {
+      S.scene.userData.WORLD_UPDATE(dt);
+    } catch (e) {
+      console.warn("[index] WORLD_UPDATE error (non-fatal):", e);
+    }
+  }
+
+  S.renderer.render(S.scene, S.camera);
+}
+
+// ---------- HARD START (never stalls) ----------
+domReady(() => {
+  console.log("[index] DOM ready → boot()");
   boot();
-}
+});

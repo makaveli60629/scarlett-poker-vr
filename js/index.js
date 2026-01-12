@@ -1,17 +1,12 @@
-// /js/index.js — Scarlett FULL MASTER 9.2 (VIP spawn + stable controls + laser + poker demo + nametags)
-// ✅ NO bare "three" imports (uses ./three.js wrapper)
-// ✅ Spawn ALWAYS in VIP cube
-// ✅ Locomotion: left stick move, right stick snap turn 45°
-// ✅ Teleport laser on controllers
-// ✅ PokerDemo: seated bots + big/high hole cards + big community cards + visible chip throws
-// ✅ NameTags: reliable look-at tags
-import { Sound } from "./sound_manager.js";
+// /js/index.js — Scarlett FULL MASTER 9.4 (Pads teleport into rooms + poker + tags + audio fail-safe)
+
 import { THREE, VRButton } from "./three.js";
 import { World } from "./world.js";
 import { NameTags } from "./nametags.js";
 import { PokerDemo } from "./poker_demo.js";
+import { Sound } from "./sound_manager.js";
 
-const BUILD = "FULL MASTER 9.2 (VIP spawn + sealed pit + poker demo + tags)";
+const BUILD = "FULL MASTER 9.4 (pads->rooms + poker session + tags + audio fail-safe)";
 console.log("[index]", BUILD);
 
 let scene, camera, renderer, player, clock;
@@ -39,6 +34,7 @@ const tp = {
   line0: null,
   line1: null,
   hit: null,
+  hitObj: null,
   tmpM: null,
   tmpO: null,
   tmpD: null,
@@ -59,39 +55,36 @@ function init() {
   player.add(camera);
   camera.position.set(0, 1.65, 0);
 
-  renderer = new THREE.WebGLRenderer({
-    antialias: false,
-    alpha: false,
-    powerPreference: "high-performance",
-  });
-
+  renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.25));
   renderer.setSize(innerWidth, innerHeight);
   renderer.xr.enabled = true;
 
   document.body.appendChild(renderer.domElement);
   document.body.appendChild(VRButton.createButton(renderer));
-
-  // XR perf stability
   renderer.xr.setFramebufferScaleFactor?.(0.85);
 
-  // Build world
   World.build({ THREE, scene, log: console.log });
-
-  // Spawn in VIP
   resetSpawn();
-
-  // Teleport laser
   installTeleportLaser();
 
-  // Nametags
   NameTags.init({ THREE, scene, camera });
 
-  // Poker demo
-  PokerDemo.init({ THREE, scene, world: World });
+  Sound.init({ THREE, camera, scene, log: console.log });
+  const base = "assets/sounds/";
+  Sound.create("chipThrow", base + "chip_throw.mp3", { volume: 0.70, refDistance: 2.2, rolloffFactor: 1.6, maxDistance: 40 });
+  Sound.create("chipStack", base + "chip_stack.mp3", { volume: 0.85, refDistance: 1.6, rolloffFactor: 1.7, maxDistance: 32 });
+  Sound.create("cardDeal",  base + "card_slide.mp3", { volume: 0.55, refDistance: 1.2, rolloffFactor: 1.8, maxDistance: 28 });
+  Sound.create("ambient",   base + "lounge_hum.mp3", { volume: 0.22, refDistance: 10.0, rolloffFactor: 1.0, maxDistance: 120, loop: true });
 
-  // Register player bots for tags (PokerDemo names them PlayerBot_1..)
-  registerPokerBotsForNametags();
+  const demo = World.getDemo?.();
+  if (demo?.tableAnchor) {
+    Sound.attach("ambient", demo.tableAnchor);
+    Sound.startAmbientWhenReady("ambient");
+  }
+
+  PokerDemo.init({ THREE, scene, world: World, Sound });
+  registerPokerBotsForNametags(PokerDemo);
 
   renderer.xr.addEventListener("sessionstart", () => {
     camera.position.set(0, 0, 0);
@@ -123,19 +116,14 @@ function resetSpawn() {
 
 function loop() {
   const dt = Math.min(clock.getDelta(), 0.04);
-
   moveXR(dt);
   updateLaser();
-
   PokerDemo.update(dt);
-  NameTags.update();
-
+  NameTags.update(); // tags billboard in nametags.js (updated below)
   renderer.render(scene, camera);
 }
 
-// ---------------------
-// Movement (Quest + Android in XR)
-// ---------------------
+// ---------- movement ----------
 function moveXR(dt) {
   if (!renderer.xr.isPresenting) return;
   const session = renderer.xr.getSession?.();
@@ -149,7 +137,7 @@ function moveXR(dt) {
   }
   if (!sources.length) return;
 
-  const leftSrc  = sources.find(s => s.src.handedness === "left")  || null;
+  const leftSrc = sources.find(s => s.src.handedness === "left") || null;
   const rightSrc = sources.find(s => s.src.handedness === "right") || null;
 
   const pickStick = (gp) => {
@@ -178,7 +166,6 @@ function moveXR(dt) {
   const mv = pickStick(moveSource.gp);
   const mx = dz(mv.x, DEAD_MOVE);
   const my = dz(mv.y, DEAD_MOVE);
-
   const forward = -my;
 
   const aT = turnSource.gp.axes || [];
@@ -194,8 +181,8 @@ function moveXR(dt) {
 
   snapCooldown -= dt;
   if (snapCooldown <= 0) {
-    if (turnX > SNAP_DEAD) { player.rotation.y -= SNAP_ANGLE; snapCooldown = SNAP_CD; }
-    else if (turnX < -SNAP_DEAD) { player.rotation.y += SNAP_ANGLE; snapCooldown = SNAP_CD; }
+    if (turnX > 0.75) { player.rotation.y -= Math.PI / 4; snapCooldown = 0.22; }
+    else if (turnX < -0.75) { player.rotation.y += Math.PI / 4; snapCooldown = 0.22; }
   }
 
   if (mx || forward) {
@@ -203,9 +190,7 @@ function moveXR(dt) {
     _f.set(Math.sin(heading), 0, Math.cos(heading));
     _r.set(_f.z, 0, -_f.x);
 
-    _v.set(0, 0, 0)
-      .addScaledVector(_r, mx)
-      .addScaledVector(_f, forward);
+    _v.set(0, 0, 0).addScaledVector(_r, mx).addScaledVector(_f, forward);
 
     if (_v.lengthSq() > 1e-6) {
       _v.normalize().multiplyScalar(MOVE_SPEED * dt);
@@ -215,16 +200,13 @@ function moveXR(dt) {
 }
 
 function dz(v, d) { return Math.abs(v) < d ? 0 : v; }
-
 function getHeadYaw() {
   camera.getWorldQuaternion(_q);
   _e.setFromQuaternion(_q, "YXZ");
   return _e.y;
 }
 
-// ---------------------
-// Teleport laser
-// ---------------------
+// ---------- laser + select ----------
 function installTeleportLaser() {
   tp.raycaster = new THREE.Raycaster();
   tp.tmpM = new THREE.Matrix4();
@@ -244,7 +226,7 @@ function installTeleportLaser() {
   tp.c1 = renderer.xr.getController(1);
   player.add(tp.c0, tp.c1);
 
-  const pts = [new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)];
+  const pts = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)];
   const geo = new THREE.BufferGeometry().setFromPoints(pts);
 
   tp.line0 = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.95 }));
@@ -255,26 +237,38 @@ function installTeleportLaser() {
   tp.line1.scale.z = 12;
   tp.c1.add(tp.line1);
 
-  const teleport = () => {
+  const onSelect = () => {
+    // ✅ Priority 1: teleport pads (enter rooms)
+    if (tp.hitObj?.userData?.teleportTo) {
+      const to = tp.hitObj.userData.teleportTo;
+      player.position.set(to.x, player.position.y, to.z);
+      if (typeof to.yaw === "number") player.rotation.y = to.yaw;
+      tp.marker.visible = false;
+      return;
+    }
+    // Priority 2: normal floor teleport
     if (!tp.hit) return;
     player.position.set(tp.hit.x, player.position.y, tp.hit.z);
     tp.marker.visible = false;
   };
-  tp.c0.addEventListener("selectstart", teleport);
-  tp.c1.addEventListener("selectstart", teleport);
 
-  console.log("[laser] installed ✅");
+  tp.c0.addEventListener("selectstart", onSelect);
+  tp.c1.addEventListener("selectstart", onSelect);
+
+  console.log("[laser] installed ✅ (pads supported)");
 }
 
 function updateLaser() {
   if (!renderer.xr.isPresenting) {
     tp.marker.visible = false;
     tp.hit = null;
+    tp.hitObj = null;
     return;
   }
 
   const floors = World.getFloors ? World.getFloors() : [];
   tp.hit = null;
+  tp.hitObj = null;
 
   const cands = [tp.c1, tp.c0];
   for (const c of cands) {
@@ -288,9 +282,11 @@ function updateLaser() {
     const hits = tp.raycaster.intersectObjects(floors, true);
 
     if (hits?.length) {
-      const p = hits[0].point;
-      tp.hit = p;
-      tp.marker.position.set(p.x, p.y + 0.02, p.z);
+      const h = hits[0];
+      tp.hit = h.point;
+      tp.hitObj = h.object;
+
+      tp.marker.position.set(h.point.x, h.point.y + 0.02, h.point.z);
       tp.marker.visible = true;
       return;
     }
@@ -306,18 +302,24 @@ function controllerTracked(ctrl) {
   return d > 0.0005;
 }
 
-// ---------------------
-// Register nametags
-// ---------------------
-function registerPokerBotsForNametags() {
+// ---------- nametags registration with rank/cash ----------
+function registerPokerBotsForNametags(PokerDemo) {
   const demo = World.getDemo?.();
   if (!demo?.tableAnchor) return;
 
+  // Give each bot a stack + rank for display
+  let idx = 1;
   demo.tableAnchor.traverse((o) => {
     if (o?.name?.startsWith("PlayerBot_")) {
-      NameTags.register(o, o.name.replace("PlayerBot_", "PLAYER "));
+      const stack = PokerDemo?.getStackFor?.(o.name) ?? 100000;
+      const rank = PokerDemo?.getRankFor?.(o.name) ?? "VIP";
+      NameTags.register(o, {
+        title: o.name.replace("PlayerBot_", "PLAYER "),
+        sub: `Rank: ${rank}  |  Stack: $${stack.toLocaleString()}`
+      });
+      idx++;
     }
   });
 
-  console.log("[nametags] registered ✅");
-}
+  console.log("[nametags] registered ✅ (rank+stack)");
+              }

@@ -1,3 +1,4 @@
+console.log("[index] file evaluated");
 // /js/index.js — Scarlett Poker VR (FULL, crash-proof)
 // Fixes: "THREE wrapper missing constructor: Clock" + restores ENTER buttons.
 

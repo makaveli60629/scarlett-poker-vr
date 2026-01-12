@@ -1,27 +1,27 @@
-// /js/index.js — Scarlett INPUT FIX 8.2
-// ✅ Controllers + lasers are parented to PlayerRig (laser is ON YOU, not stuck in center)
-// ✅ Left stick forward/back fixed (no inversion)
-// ✅ Right stick snap-turn 45° still works
-// ✅ Reduced jitter by removing per-frame allocations
+// /js/index.js — Scarlett STABLE 8.4 (Quest smooth + bots demo)
+// ✅ Major flicker reduction: lower XR framebuffer scale, cap DPR
+// ✅ Keeps movement + snap turn + laser parenting
+// ✅ Runs BotsDemo (bots “playing” + chip toss demo)
 
 import { THREE, VRButton } from "./three.js";
 import { World } from "./world.js";
+import { BotsDemo } from "./bots_demo.js";
 
-const BUILD = "INPUT FIX 8.2 (Laser on PlayerRig + Move invert fixed + Less jitter)";
+const BUILD = "STABLE 8.4 (XR perf fix + bots demo)";
 console.log("[index]", BUILD);
 
 let scene, camera, renderer, player, clock;
 
-const MOVE_SPEED = 2.8;
+const MOVE_SPEED = 2.6;
 const DEAD_MOVE = 0.14;
 const DEAD_TURN = 0.20;
 
-const SNAP_ANGLE = Math.PI / 4; // 45°
+const SNAP_ANGLE = Math.PI / 4;
 const SNAP_DEAD = 0.75;
 const SNAP_CD = 0.22;
 let snapCooldown = 0;
 
-// Reused vectors (no garbage / jitter)
+// Reuse
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
 const _f = new THREE.Vector3();
@@ -57,18 +57,28 @@ function init() {
   player.add(camera);
   camera.position.set(0, 1.65, 0);
 
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+  // ✅ Perf: antialias off in XR is usually smoother on Quest
+  renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false, powerPreference: "high-performance" });
+  // ✅ Cap DPR to reduce shimmer
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.25));
   renderer.setSize(innerWidth, innerHeight);
   renderer.xr.enabled = true;
+
   document.body.appendChild(renderer.domElement);
   document.body.appendChild(VRButton.createButton(renderer));
+
+  // ✅ Big stability win: lower XR render scale (try 0.8–0.95)
+  // Many Quest “flicker/jitter” reports are just overload + reprojection.
+  renderer.xr.setFramebufferScaleFactor?.(0.85);
 
   World.build({ THREE, scene, log: console.log });
 
   resetSpawn();
 
-  installTeleportLaser(); // IMPORTANT: after player exists
+  installTeleportLaser();
+
+  // Init bots demo AFTER world builds
+  BotsDemo.init({ THREE, scene, world: World, player, camera });
 
   renderer.xr.addEventListener("sessionstart", () => {
     camera.position.set(0, 0, 0);
@@ -96,18 +106,21 @@ function resetSpawn() {
 }
 
 function loop() {
-  const dt = Math.min(clock.getDelta(), 0.045);
+  // ✅ slightly tighter dt cap reduces motion jitter
+  const dt = Math.min(clock.getDelta(), 0.04);
+
   moveXR(dt);
   updateLaser();
+  BotsDemo.update(dt);
+
   renderer.render(scene, camera);
 }
 
 // ---------------------
-// MOVEMENT (ROBUST QUEST MAPPING)
+// Movement (same as before, stable)
 // ---------------------
 function moveXR(dt) {
   if (!renderer.xr.isPresenting) return;
-
   const session = renderer.xr.getSession?.();
   if (!session) return;
 
@@ -126,15 +139,12 @@ function moveXR(dt) {
     const a = gp.axes || [];
     const x01 = a[0] ?? 0, y01 = a[1] ?? 0;
     const x23 = a[2] ?? 0, y23 = a[3] ?? 0;
-
     if (a.length <= 2) return { x: x01, y: y01, pair: "01" };
-
     const m01 = Math.abs(x01) + Math.abs(y01);
     const m23 = Math.abs(x23) + Math.abs(y23);
     return (m23 > m01) ? { x: x23, y: y23, pair: "23" } : { x: x01, y: y01, pair: "01" };
   };
 
-  // MOVE source: left if possible, else strongest
   let moveSource = leftSrc;
   if (!moveSource) {
     let best = sources[0], bestMag = 0;
@@ -146,19 +156,15 @@ function moveXR(dt) {
     moveSource = best;
   }
 
-  // TURN source: right if possible, else different from move if possible
   let turnSource = rightSrc || sources.find(s => s !== moveSource) || moveSource;
 
   const mv = pickStick(moveSource.gp);
   let mx = dz(mv.x, DEAD_MOVE);
   let my = dz(mv.y, DEAD_MOVE);
 
-  // ✅ FIX: forward/back was inverted — DO NOT invert now.
-  // On your Quest mapping, pushing forward produces negative Y already, so use +my.
-  // (If it’s ever reversed again, we can flip with one constant.)
-  const forwardAxis = my;
+  // ✅ Quest: forward is usually negative Y, so forward = -my
+  const forward = -my;
 
-  // Turn X
   const aT = turnSource.gp.axes || [];
   let turnX = 0;
   if (aT.length >= 4) {
@@ -170,23 +176,20 @@ function moveXR(dt) {
     turnX = dz(aT[0] ?? 0, DEAD_TURN);
   }
 
-  // Snap turn
   snapCooldown -= dt;
   if (snapCooldown <= 0) {
     if (turnX > SNAP_DEAD) { player.rotation.y -= SNAP_ANGLE; snapCooldown = SNAP_CD; }
     else if (turnX < -SNAP_DEAD) { player.rotation.y += SNAP_ANGLE; snapCooldown = SNAP_CD; }
   }
 
-  // Move relative to head yaw
-  if (mx || forwardAxis) {
+  if (mx || forward) {
     const heading = getHeadYaw();
     _f.set(Math.sin(heading), 0, Math.cos(heading));
     _r.set(_f.z, 0, -_f.x);
 
     _v.set(0, 0, 0)
       .addScaledVector(_r, mx)
-      .addScaledVector(_f, -forwardAxis); // forward if stick is pushed forward (negative Y)
-    // NOTE: we keep -forwardAxis because forwardAxis is already “Quest raw” (forward usually negative)
+      .addScaledVector(_f, forward);
 
     if (_v.lengthSq() > 1e-6) {
       _v.normalize().multiplyScalar(MOVE_SPEED * dt);
@@ -204,7 +207,7 @@ function getHeadYaw() {
 }
 
 // ---------------------
-// LASER / TELEPORT (now attached to YOU)
+// Laser / Teleport (parented to rig)
 // ---------------------
 function installTeleportLaser() {
   tp.raycaster = new THREE.Raycaster();
@@ -221,7 +224,6 @@ function installTeleportLaser() {
   tp.marker.visible = false;
   scene.add(tp.marker);
 
-  // ✅ KEY FIX: parent controllers to PlayerRig so they move with your spawn/rig
   tp.c0 = renderer.xr.getController(0);
   tp.c1 = renderer.xr.getController(1);
   player.add(tp.c0, tp.c1);
@@ -230,21 +232,16 @@ function installTeleportLaser() {
   const geo = new THREE.BufferGeometry().setFromPoints(pts);
 
   tp.line0 = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.95 }));
-  tp.line0.scale.z = 12;
-  tp.line0.visible = true;
-  tp.c0.add(tp.line0);
+  tp.line0.scale.z = 12; tp.line0.visible = true; tp.c0.add(tp.line0);
 
   tp.line1 = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x7fe7ff, transparent: true, opacity: 0.95 }));
-  tp.line1.scale.z = 12;
-  tp.line1.visible = true;
-  tp.c1.add(tp.line1);
+  tp.line1.scale.z = 12; tp.line1.visible = true; tp.c1.add(tp.line1);
 
   const teleport = () => {
     if (!tp.hit) return;
     player.position.set(tp.hit.x, player.position.y, tp.hit.z);
     tp.marker.visible = false;
   };
-
   tp.c0.addEventListener("selectstart", teleport);
   tp.c1.addEventListener("selectstart", teleport);
 }
@@ -259,9 +256,7 @@ function updateLaser() {
   const floors = World.getFloors ? World.getFloors() : [];
   tp.hit = null;
 
-  // Prefer controller 1 then 0
   const cands = [tp.c1, tp.c0];
-
   for (const c of cands) {
     if (!controllerTracked(c)) continue;
 
@@ -284,11 +279,9 @@ function updateLaser() {
   tp.marker.visible = false;
 }
 
-// Better “tracked” test than origin distance: require non-zero matrix + valid visibility
 function controllerTracked(ctrl) {
   if (!ctrl) return false;
   tp.tmpPos.setFromMatrixPosition(ctrl.matrixWorld);
   const d = Math.abs(tp.tmpPos.x) + Math.abs(tp.tmpPos.y) + Math.abs(tp.tmpPos.z);
-  // After parenting to PlayerRig, this will NOT falsely read as “center of lobby”
   return d > 0.0005;
-}
+      }

@@ -1,12 +1,16 @@
 // /core/three_boot.js
-export async function initThree({ log }) {
-  const THREE = await loadThree();
-  log("[index] three init ✅");
+export async function initThree({ log, bg = 0x05060a } = {}) {
+  const ver = "0.164.1";
+  const THREE = (window.THREE && window.THREE.Scene)
+    ? window.THREE
+    : await import(`https://unpkg.com/three@${ver}/build/three.module.js`);
+
+  log?.("[three] loaded ✅");
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x05060a);
+  scene.background = new THREE.Color(bg);
 
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 300);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 400);
 
   const player = new THREE.Group();
   player.name = "PlayerRig";
@@ -23,21 +27,14 @@ export async function initThree({ log }) {
   renderer.xr.enabled = true;
   document.body.appendChild(renderer.domElement);
 
-  const clock = new THREE.Clock();
-
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x05060a, 0.9));
+  // base light
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x05060a, 0.95));
 
-  return { THREE, scene, renderer, camera, player, clock };
-}
-
-async function loadThree() {
-  if (window.THREE && window.THREE.Scene) return window.THREE;
-  const ver = "0.164.1";
-  return await import(`https://unpkg.com/three@${ver}/build/three.module.js`);
+  return { THREE, scene, camera, player, renderer };
 }

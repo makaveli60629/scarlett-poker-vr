@@ -5,7 +5,7 @@
 // ✅ Teleport laser on controllers
 // ✅ PokerDemo: seated bots + big/high hole cards + big community cards + visible chip throws
 // ✅ NameTags: reliable look-at tags
-
+import { Sound } from "./sound_manager.js";
 import { THREE, VRButton } from "./three.js";
 import { World } from "./world.js";
 import { NameTags } from "./nametags.js";

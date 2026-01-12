@@ -1,4 +1,5 @@
 // /js/VRButton.js — Standalone VRButton (NO imports)
+// Works on Quest/WebXR. No dependency on three/examples.
 
 export const VRButton = {
   createButton(renderer) {
@@ -14,7 +15,7 @@ export const VRButton = {
     button.style.fontFamily = "system-ui,Segoe UI,Roboto,Arial";
     button.style.fontSize = "14px";
     button.style.cursor = "pointer";
-    button.style.zIndex = "9999";
+    button.style.zIndex = "99999";
     button.style.backdropFilter = "blur(8px)";
     button.textContent = "ENTER VR";
 
@@ -33,6 +34,7 @@ export const VRButton = {
 
       renderer.xr.enabled = true;
       await renderer.xr.setSession(session);
+
       button.textContent = "EXIT VR";
     }
 

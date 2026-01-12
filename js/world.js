@@ -1,980 +1,1471 @@
-// /js/world.js — Scarlett MASTER WORLD v7 (FULL)
-// ✅ Lobby: pit + rail+gate+stairs + round table + chairs + jumbotrons + bright lighting
-// ✅ Store: sign + big case (3 mannequins) + 2 side cases + tries shirt texture
-// ✅ Teleport Arch: purple portal glow
-// ✅ Scorpion Room: elongated oval 6-seat table + 4 seated bots + auto-sit + auto-start poker
-// ✅ Chips: from ALL seats, flat, pot HUD visible from far away
-// ✅ Two PokerSim instances: lobby + scorpion
-// ✅ Colliders tightened (floors, ring, steps, etc.)
-// ⚠️ Needs index.js seated mode guard: if (window.__SEATED_MODE) return;
-
-import { PokerSim } from "./poker_sim.js";
+// /js/world.js — Scarlett MASTER WORLD v8 (FULL, stable, no bare "three" imports)
+// ✅ No `import ... from "three"` anywhere (index injects THREE)
+// ✅ FULL lobby: floor + walls + pit divot + rail + stairs + guard opening
+// ✅ FULL table: lowered into pit, chairs around, tightened geometry
+// ✅ Jumbotrons embedded into walls (not floating)
+// ✅ Teleport Arch + pad (room portal)
+// ✅ Store: sign + 3 mannequins in display + shirt material applied (if texture exists)
+// ✅ Scorpion room: elongated 6-seat oval table + auto-seat zone + 4 bots seated
+// ✅ PokerSim: single instance, deals, community hover only when looked at, showdown visual
+// ✅ Pot HUD: faces camera + slight tilt down + shows POT / TURN / BET / ACTION / WINNER
+// ✅ Chips: flat on table (no sideways) + thrown animation that lands flat
+// ✅ Lobby bots: full body (shoulders/hips/knees/feet) + walk cycle (no sliding)
+// ✅ Colliders exposed for teleport ring
 
 export const World = (() => {
   const S = {
-    THREE:null, scene:null, renderer:null, camera:null, player:null, controllers:null, log:console.log,
-    root:null, colliders:[], t:0,
+    THREE: null,
+    scene: null,
+    renderer: null,
+    camera: null,
+    player: null,
+    controllers: null,
+    log: console.log,
 
-    ringIn:10, ringOut:18,
-    wallR:20.0, wallH:9.0,
+    root: null,
 
-    pitR:6.35, pitY:-1.10, rimY:0.08, rimOut:9.0,
+    // groups
+    lobby: null,
+    store: null,
+    scorpion: null,
 
-    tableY:0, tableTop:null,
-    tex:null,
+    // colliders for teleport
+    colliders: [],
 
-    // Poker instances
-    pokerLobby:null,
-    pokerScorpion:null,
+    // time
+    t: 0,
 
-    // Chips + pot HUD
-    chipSources:[],
-    chipMeshes:[],
-    potValue:0,
-    potHUD:null,
+    // teleport pad / room
+    room: "lobby",
+    roomTargets: {
+      lobby: { pos: [0, 0, 8], yaw: 0 },
+      store: { pos: [10, 0, 6], yaw: -Math.PI / 2 },
+      scorpion: { pos: [-10, 0, 6], yaw: Math.PI / 2 },
+    },
 
-    // Bots & store
-    bots:[],
-    mannequins:[],
-    storeRoot:null,
+    // pit/table
+    pit: {
+      center: [0, 0, 0],
+      radiusOuter: 10.5,
+      radiusInner: 6.2,
+      depth: 1.35,
+    },
 
-    // Teleport arch
-    arch:null,
+    // HUD + chips
+    pot: {
+      value: 0,
+      root: null,
+      text: null,
+      last: { pot: -1, turn: -1, bet: -1, action: "", winner: "" },
+      chipsRoot: null,
+      chipPool: [],
+      seatChipTargets: [],
+      fly: [],
+    },
 
-    // Scorpion room
-    scorpion:{ root:null, tableY:0, tableTop:null, seats:[], spawn:null },
+    // bots
+    bots: {
+      lobby: [],
+      scorpion: [],
+      mannequins: [],
+    },
 
-    // Simple room state
-    room:"lobby"
+    // poker
+    poker: {
+      seats: 6,
+      seatPos: [],
+      activeSeat: 0,
+      stage: "idle",
+      stageT: 0,
+      pot: 0,
+      bet: 0,
+      winner: "",
+      // visuals
+      table: null,
+      cardsRoot: null,
+      community: [],
+      hole: [], // [seat][2]
+      hoverOnlyCommunity: true,
+      hoverFocusDist: 1.8,
+      // simple “hand reveal” visual
+      showdown: false,
+    },
+
+    // lighting
+    lights: [],
   };
 
-  const log = (m)=>S.log?.(m);
+  // ---------------- utils ----------------
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const lerp = (a, b, t) => a + (b - a) * t;
 
-  function add(obj, collider=false){
-    S.root.add(obj);
-    if (collider) S.colliders.push(obj);
-    return obj;
+  function v3(x = 0, y = 0, z = 0) {
+    return new S.THREE.Vector3(x, y, z);
   }
 
-  function mkProceduralTexture(){
-    const { THREE } = S;
-    const c=document.createElement("canvas");
-    c.width=256; c.height=256;
-    const g=c.getContext("2d");
-    g.fillStyle="#0b0d14"; g.fillRect(0,0,256,256);
-    g.strokeStyle="rgba(127,231,255,0.10)";
-    g.lineWidth=2;
-    for(let i=0;i<=16;i++){
-      const p=i*(256/16);
-      g.beginPath(); g.moveTo(p,0); g.lineTo(p,256); g.stroke();
-      g.beginPath(); g.moveTo(0,p); g.lineTo(256,p); g.stroke();
-    }
-    g.strokeStyle="rgba(255,45,122,0.08)";
-    g.lineWidth=3;
-    g.beginPath(); g.moveTo(0,0); g.lineTo(256,256); g.stroke();
-    g.beginPath(); g.moveTo(256,0); g.lineTo(0,256); g.stroke();
-
-    const tex=new THREE.CanvasTexture(c);
-    tex.wrapS=tex.wrapT=THREE.RepeatWrapping;
-    tex.repeat.set(2.5,2.5);
-    tex.anisotropy=4;
-    return tex;
+  function setMat(mesh, mat) {
+    mesh.material = mat;
+    mesh.material.needsUpdate = true;
   }
 
-  function mat(color, rough=1, metal=0, emissive=0x000000, emiI=0, map=null){
-    const { THREE } = S;
-    return new THREE.MeshStandardMaterial({
-      color, roughness:rough, metalness:metal,
-      emissive:new THREE.Color(emissive), emissiveIntensity:emiI,
-      map: map || null
+  function safeColor(hex) {
+    return new S.THREE.Color(hex);
+  }
+
+  function makeStandard(hex, rough = 0.95, metal = 0.05, emissive = 0x000000, emissiveIntensity = 0) {
+    return new S.THREE.MeshStandardMaterial({
+      color: safeColor(hex),
+      roughness: rough,
+      metalness: metal,
+      emissive: safeColor(emissive),
+      emissiveIntensity,
     });
   }
 
-  function makeTextTag(text, accent=0x7fe7ff){
-    const { THREE } = S;
-    const c=document.createElement("canvas");
-    c.width=512; c.height=128;
-    const g=c.getContext("2d");
-    g.clearRect(0,0,c.width,c.height);
-
-    g.fillStyle="rgba(10,12,18,0.75)";
-    g.strokeStyle="rgba(255,255,255,0.12)";
-    g.lineWidth=6;
-    roundRect(10,10,492,108,24);
-    g.fill(); g.stroke();
-
-    g.strokeStyle="rgba(127,231,255,0.9)";
-    g.lineWidth=6;
-    g.beginPath(); g.moveTo(26,96); g.lineTo(486,96); g.stroke();
-
-    g.font="bold 56px system-ui, Arial";
-    g.fillStyle="#e8ecff";
-    g.textAlign="center";
-    g.textBaseline="middle";
-    g.fillText(text,256,56);
-
-    const tex=new THREE.CanvasTexture(c);
-    const m=new THREE.MeshBasicMaterial({ map:tex, transparent:true });
-    const p=new THREE.Mesh(new THREE.PlaneGeometry(0.85,0.22), m);
-    p.userData._tag=true;
-    return p;
-
-    function roundRect(x,y,w,h,r){
-      g.beginPath();
-      g.moveTo(x+r,y);
-      g.arcTo(x+w,y,x+w,y+h,r);
-      g.arcTo(x+w,y+h,x,y+h,r);
-      g.arcTo(x,y+h,x,y,r);
-      g.arcTo(x,y,x+w,y,r);
-      g.closePath();
-    }
+  function makePanelMaterial() {
+    return new S.THREE.MeshStandardMaterial({
+      color: safeColor(0x0b0d14),
+      roughness: 1,
+      metalness: 0.05,
+    });
   }
 
-  // -------- Lighting --------
-  function buildLights(){
-    const { THREE } = S;
-    add(new THREE.HemisphereLight(0xffffff, 0x05060a, 1.8));
-
-    const key=new THREE.DirectionalLight(0xffffff, 1.25);
-    key.position.set(14,18,10);
-    add(key);
-
-    const pts=[
-      [0,10.8,0,60],
-      [12,9.8,0,40],
-      [-12,9.8,0,40],
-      [0,9.8,12,40],
-      [0,9.8,-12,40],
-      [8,9.2,8,28],
-      [-8,9.2,-8,28],
-    ];
-    for(const [x,y,z,i] of pts){
-      const l=new THREE.PointLight(0xffffff, i, 110);
-      l.position.set(x,y,z);
-      add(l);
-    }
-
-    const aqua=new THREE.PointLight(0x7fe7ff, 16, 65);
-    aqua.position.set(0,3.5,16);
-    add(aqua);
-
-    const pink=new THREE.PointLight(0xff2d7a, 14, 65);
-    pink.position.set(-16,3.5,0);
-    add(pink);
-
-    log("[world] lights ✅");
+  function addCollider(obj) {
+    if (!obj) return;
+    S.colliders.push(obj);
   }
 
-  // -------- Lobby structure --------
-  function buildFloorRing(){
-    const { THREE } = S;
+  // Simple text sprite using canvas
+  function makeTextTag(text, colorHex = 0x2dfcff, bgAlpha = 0.35) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1024;
+    canvas.height = 256;
+    const ctx = canvas.getContext("2d");
 
-    const base=new THREE.Mesh(new THREE.CircleGeometry(72,160), mat(0x141626,1,0,0x000000,0,S.tex));
-    base.rotation.x=-Math.PI/2;
-    add(base,true);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = `rgba(10,12,18,${bgAlpha})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    const ring=new THREE.Mesh(new THREE.RingGeometry(S.ringIn,S.ringOut,180), mat(0x0f1224,0.85,0.08,0x000000,0,S.tex));
-    ring.rotation.x=-Math.PI/2;
-    ring.position.y=0.03;
-    add(ring,true);
+    ctx.font = "bold 72px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    ctx.fillStyle = "#e8ecff";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, 36, canvas.height / 2);
 
-    const neon=new THREE.Mesh(new THREE.RingGeometry(S.ringOut-0.22,S.ringOut+0.10,180), mat(0x121428,0.35,0.25,0x2dfcff,1.1));
-    neon.rotation.x=-Math.PI/2;
-    neon.position.y=0.06;
-    add(neon);
+    ctx.strokeStyle = `rgba(255,255,255,0.22)`;
+    ctx.lineWidth = 6;
+    ctx.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
 
-    log("[world] floor ✅");
+    const tex = new S.THREE.CanvasTexture(canvas);
+    tex.colorSpace = S.THREE.SRGBColorSpace;
+
+    const mat = new S.THREE.MeshBasicMaterial({ map: tex, transparent: true });
+    const geo = new S.THREE.PlaneGeometry(2.8, 0.7);
+    const mesh = new S.THREE.Mesh(geo, mat);
+    mesh.userData._tagCanvas = canvas;
+    mesh.userData._tagCtx = ctx;
+    mesh.userData._tagTex = tex;
+    mesh.userData._tagColor = colorHex;
+    mesh.userData._tagBg = bgAlpha;
+
+    mesh.userData.setText = (t) => {
+      const c = mesh.userData._tagCanvas;
+      const g = mesh.userData._tagCtx;
+      g.clearRect(0, 0, c.width, c.height);
+      g.fillStyle = `rgba(10,12,18,${mesh.userData._tagBg})`;
+      g.fillRect(0, 0, c.width, c.height);
+      g.font = "bold 72px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+      g.fillStyle = "#e8ecff";
+      g.textBaseline = "middle";
+      g.fillText(t, 36, c.height / 2);
+      g.strokeStyle = `rgba(255,255,255,0.22)`;
+      g.lineWidth = 6;
+      g.strokeRect(8, 8, c.width - 16, c.height - 16);
+      mesh.userData._tagTex.needsUpdate = true;
+    };
+
+    return mesh;
   }
 
-  function buildOuterWallsPreserved(){
-    const { THREE } = S;
-    const R=S.wallR, H=S.wallH, gap=Math.PI/6;
-
-    function makeSegment(a0,a1){
-      const segs=60;
-      const inner=R-0.35, outer=R+0.35;
-
-      const shape=new THREE.Shape();
-      const pts=[];
-      for(let i=0;i<=segs;i++){
-        const t=i/segs, a=a0+(a1-a0)*t;
-        pts.push(new THREE.Vector2(Math.cos(a)*outer, Math.sin(a)*outer));
-      }
-      shape.moveTo(pts[0].x, pts[0].y);
-      for(let i=1;i<pts.length;i++) shape.lineTo(pts[i].x, pts[i].y);
-      for(let i=segs;i>=0;i--){
-        const t=i/segs, a=a0+(a1-a0)*t;
-        shape.lineTo(Math.cos(a)*inner, Math.sin(a)*inner);
-      }
-      shape.closePath();
-
-      const geo=new THREE.ExtrudeGeometry(shape, { depth:H, bevelEnabled:false, curveSegments:24 });
-      geo.rotateX(Math.PI/2);
-
-      const wall=new THREE.Mesh(geo, mat(0x0b0d14,0.95,0.07,0x000000,0,S.tex));
-      add(wall,true);
-
-      const band=new THREE.Mesh(
-        new THREE.TorusGeometry(R,0.16,10,220,Math.abs(a1-a0)),
-        mat(0x141a33,0.45,0.25,0xff2d7a,0.65)
+  async function tryLoadTexture(url) {
+    return await new Promise((resolve) => {
+      const loader = new S.THREE.TextureLoader();
+      loader.load(
+        url,
+        (tex) => {
+          tex.colorSpace = S.THREE.SRGBColorSpace;
+          resolve(tex);
+        },
+        undefined,
+        () => resolve(null)
       );
-      band.rotation.x=Math.PI/2;
-      band.rotation.z=(a0+a1)/2;
-      band.position.y=H-0.35;
-      add(band);
-
-      return wall;
-    }
-
-    makeSegment(gap, Math.PI/2-gap);
-    makeSegment(Math.PI/2+gap, Math.PI-gap);
-    makeSegment(Math.PI+gap, 3*Math.PI/2-gap);
-    makeSegment(3*Math.PI/2+gap, 2*Math.PI-gap);
-
-    log("[world] walls ✅");
+    });
   }
 
-  function buildPitTableRailStairsAndChairs(){
-    const { THREE } = S;
+  // ---------------- build: lights ----------------
+  function buildLights() {
+    // Clear old
+    for (const l of S.lights) S.scene.remove(l);
+    S.lights = [];
 
-    const rim=new THREE.Mesh(new THREE.RingGeometry(S.pitR,S.rimOut,200), mat(0x0a0c18,0.85,0.18,0x2dfcff,0.22,S.tex));
-    rim.rotation.x=-Math.PI/2;
-    rim.position.y=S.rimY;
-    add(rim,true);
+    // Bright but not washed out
+    const hemi = new S.THREE.HemisphereLight(0xffffff, 0x05060a, 0.95);
+    S.scene.add(hemi);
+    S.lights.push(hemi);
 
-    const innerWall=new THREE.Mesh(
-      new THREE.CylinderGeometry(S.pitR,S.pitR,(S.rimY-S.pitY),120,1,true),
-      new THREE.MeshStandardMaterial({ color:0x0b0d14, roughness:1, metalness:0.1, side:THREE.DoubleSide })
+    const key = new S.THREE.DirectionalLight(0xffffff, 1.2);
+    key.position.set(6, 12, 8);
+    key.castShadow = false;
+    S.scene.add(key);
+    S.lights.push(key);
+
+    const fill1 = new S.THREE.PointLight(0x7fe7ff, 18, 70);
+    fill1.position.set(0, 6.5, 10);
+    S.scene.add(fill1);
+    S.lights.push(fill1);
+
+    const fill2 = new S.THREE.PointLight(0xff2d7a, 14, 70);
+    fill2.position.set(-10, 6.5, 0);
+    S.scene.add(fill2);
+    S.lights.push(fill2);
+
+    const rim = new S.THREE.PointLight(0xb56bff, 10, 70);
+    rim.position.set(10, 7, -6);
+    S.scene.add(rim);
+    S.lights.push(rim);
+
+    S.log("[world] lights ✅");
+  }
+
+  // ---------------- build: lobby shell ----------------
+  function buildLobbyShell() {
+    const G = new S.THREE.Group();
+    G.name = "Lobby";
+    S.root.add(G);
+    S.lobby = G;
+
+    // Main floor
+    const floor = new S.THREE.Mesh(
+      new S.THREE.CircleGeometry(22, 128),
+      makeStandard(0x111326, 1, 0.05)
     );
-    innerWall.position.y=(S.rimY+S.pitY)/2;
-    add(innerWall,true);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = false;
+    G.add(floor);
+    addCollider(floor);
 
-    const pitFloor=new THREE.Mesh(new THREE.CircleGeometry(S.pitR-0.05,200), mat(0x070812,1,0.02,0x1b2cff,0.20));
-    pitFloor.rotation.x=-Math.PI/2;
-    pitFloor.position.y=S.pitY;
-    add(pitFloor,true);
+    // Walls cylinder
+    const wall = new S.THREE.Mesh(
+      new S.THREE.CylinderGeometry(22, 22, 10, 128, 1, true),
+      new S.THREE.MeshStandardMaterial({
+        color: safeColor(0x0b0d14),
+        roughness: 1,
+        metalness: 0.05,
+        side: S.THREE.DoubleSide,
+      })
+    );
+    wall.position.y = 5;
+    G.add(wall);
 
-    const seam=new THREE.Mesh(new THREE.RingGeometry(S.pitR-0.10,S.pitR+0.10,200), mat(0x121428,0.35,0.3,0x2dfcff,1.35));
-    seam.rotation.x=-Math.PI/2;
-    seam.position.y=S.rimY+0.01;
-    add(seam);
+    // Crown/arch glow accent ring near top
+    const ring = new S.THREE.Mesh(
+      new S.THREE.TorusGeometry(21.6, 0.08, 16, 140),
+      makeStandard(0x2b2f52, 0.9, 0.2, 0x6d3bff, 0.9)
+    );
+    ring.position.y = 9.2;
+    ring.rotation.x = Math.PI / 2;
+    G.add(ring);
 
-    // table
-    S.tableY=S.pitY+1.05;
+    S.log("[world] floor ✅");
+    S.log("[world] walls ✅");
 
-    const top=new THREE.Mesh(new THREE.CylinderGeometry(3.05,3.28,0.30,56), mat(0x0f6a42,0.85,0.05,0x0f6a42,0.10));
-    top.position.set(0,S.tableY,0);
-    add(top,true);
-    S.tableTop=top;
+    return { floor, wall };
+  }
 
-    const leather=new THREE.Mesh(new THREE.TorusGeometry(3.18,0.11,14,120), mat(0x3a2518,0.65,0.15,0x3a2518,0.05));
-    leather.rotation.x=Math.PI/2;
-    leather.position.y=S.tableY+0.16;
-    add(leather);
+  // ---------------- build: pit + rail + stairs + chairs ----------------
+  function buildPitAndTable() {
+    const pitG = new S.THREE.Group();
+    pitG.name = "PitSystem";
+    S.lobby.add(pitG);
 
-    const base=new THREE.Mesh(new THREE.CylinderGeometry(0.7,1.0,1.1,26), mat(0x10131c,0.8,0.22));
-    base.position.set(0,S.tableY-0.75,0);
-    add(base);
+    const { radiusOuter, radiusInner, depth } = S.pit;
+    const pitCenter = v3(0, 0, 0);
 
-    // rail + posts + gate + stairs
-    const railR=S.rimOut-0.25;
-    const openingCenter=-Math.PI/2;
-    const openingHalf=0.18;
+    // Outer platform ring (tight join)
+    const ringFloor = new S.THREE.Mesh(
+      new S.THREE.RingGeometry(radiusInner + 0.06, radiusOuter, 128),
+      makeStandard(0x121634, 1, 0.05)
+    );
+    ringFloor.rotation.x = -Math.PI / 2;
+    ringFloor.position.copy(pitCenter);
+    pitG.add(ringFloor);
+    addCollider(ringFloor);
 
-    const rail=new THREE.Mesh(new THREE.TorusGeometry(railR,0.09,12,240), mat(0x2a2f52,0.5,0.35,0xff2d7a,0.40));
-    rail.rotation.x=Math.PI/2;
-    rail.position.y=S.rimY+1.18;
-    add(rail);
+    // Pit inner floor (down)
+    const pitFloor = new S.THREE.Mesh(
+      new S.THREE.CircleGeometry(radiusInner, 128),
+      makeStandard(0x0c0f22, 1, 0.06)
+    );
+    pitFloor.rotation.x = -Math.PI / 2;
+    pitFloor.position.set(0, -depth, 0);
+    pitG.add(pitFloor);
+    addCollider(pitFloor);
 
-    const postCount=30;
-    for(let i=0;i<postCount;i++){
-      const a=(i/postCount)*Math.PI*2;
-      const da=Math.atan2(Math.sin(a-openingCenter), Math.cos(a-openingCenter));
-      if (Math.abs(da) < openingHalf) continue;
+    // Pit wall cylinder to visually connect
+    const pitWall = new S.THREE.Mesh(
+      new S.THREE.CylinderGeometry(radiusInner, radiusInner, depth, 128, 1, true),
+      new S.THREE.MeshStandardMaterial({
+        color: safeColor(0x0a0c16),
+        roughness: 1,
+        metalness: 0.05,
+        side: S.THREE.DoubleSide,
+      })
+    );
+    pitWall.position.set(0, -depth / 2, 0);
+    pitG.add(pitWall);
 
-      const post=new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.07,1.08,12), mat(0x1f2440,0.7,0.2));
-      post.position.set(Math.cos(a)*railR, S.rimY+0.64, Math.sin(a)*railR);
-      add(post);
+    // Rail (guardrail) around inner edge
+    const railG = new S.THREE.Group();
+    railG.name = "GuardRail";
+    pitG.add(railG);
+
+    const railRadius = radiusInner + 0.22;
+    const railHeight = 1.05;
+
+    const railRing = new S.THREE.Mesh(
+      new S.THREE.TorusGeometry(railRadius, 0.06, 18, 140),
+      makeStandard(0x30385f, 0.6, 0.25, 0x3b7cff, 0.35)
+    );
+    railRing.position.y = 0.95;
+    railRing.rotation.x = Math.PI / 2;
+    railG.add(railRing);
+
+    // Posts
+    const postGeo = new S.THREE.CylinderGeometry(0.045, 0.055, railHeight, 10);
+    const postMat = makeStandard(0x3a4470, 0.7, 0.18);
+    for (let i = 0; i < 24; i++) {
+      const a = (i / 24) * Math.PI * 2;
+      const p = new S.THREE.Mesh(postGeo, postMat);
+      p.position.set(Math.cos(a) * railRadius, railHeight / 2, Math.sin(a) * railRadius);
+      railG.add(p);
     }
 
-    const gate=new THREE.Mesh(new THREE.BoxGeometry(1.35,1.0,0.12), mat(0x141a33,0.55,0.25,0x2dfcff,1.1));
-    gate.position.set(Math.cos(openingCenter)*railR, S.rimY+0.80, Math.sin(openingCenter)*railR);
-    gate.lookAt(0, gate.position.y, 0);
-    add(gate);
+    // "Gate" opening (visual) at angle 0 (front)
+    const gate = new S.THREE.Mesh(
+      new S.THREE.BoxGeometry(0.8, 0.9, 0.08),
+      makeStandard(0x151a33, 0.9, 0.1, 0x7fe7ff, 0.2)
+    );
+    gate.position.set(railRadius, 0.55, 0);
+    gate.rotation.y = -Math.PI / 2;
+    railG.add(gate);
 
-    const steps=10;
-    const stepW=1.9;
-    const stepH=(S.rimY-(S.pitY+0.05))/steps;
-    const stepD=0.55;
+    // Stairs down through gate (short, doesn't collide with seats)
+    const stairsG = new S.THREE.Group();
+    stairsG.name = "Stairs";
+    pitG.add(stairsG);
 
-    for(let i=0;i<steps;i++){
-      const y=S.rimY-(i+1)*stepH;
-      const r=railR-0.75-i*0.12;
-      const x=Math.cos(openingCenter)*r;
-      const z=Math.sin(openingCenter)*r;
+    const steps = 8;
+    const stepW = 1.25;
+    const stepH = depth / steps;
+    const stepD = 0.55;
+    const stairMat = makeStandard(0x1a1f3a, 1, 0.05);
 
-      const step=new THREE.Mesh(new THREE.BoxGeometry(stepW, Math.max(0.05,stepH), stepD), mat(0x111326,1,0.08,0x2dfcff,0.14,S.tex));
-      step.position.set(x,y,z);
-      step.lookAt(0,y,0);
-      add(step,true);
+    for (let i = 0; i < steps; i++) {
+      const s = new S.THREE.Mesh(new S.THREE.BoxGeometry(stepW, stepH, stepD), stairMat);
+      s.position.set(radiusInner + 0.72 + i * 0.05, -i * stepH - stepH / 2, -0.25 - i * stepD);
+      s.rotation.y = -Math.PI / 2;
+      stairsG.add(s);
+      addCollider(s);
     }
 
-    // chairs 6 around table in pit
-    const seatN=6;
-    for(let i=0;i<seatN;i++){
-      const a=(i/seatN)*Math.PI*2;
-      const r=4.05;
-      const x=Math.cos(a)*r;
-      const z=Math.sin(a)*r;
+    // Table in pit (lowered)
+    const tableG = new S.THREE.Group();
+    tableG.name = "MainPokerTable";
+    pitG.add(tableG);
 
-      const chair=new THREE.Group();
-      chair.position.set(x, S.pitY+0.12, z);
-      chair.lookAt(0, chair.position.y+0.2, 0);
+    const tableY = -depth + 0.18; // ✅ dead down into pit
+    tableG.position.set(0, tableY, 0);
 
-      const seat=new THREE.Mesh(new THREE.BoxGeometry(0.62,0.10,0.62), mat(0x141a33,0.85,0.12));
-      seat.position.y=0.55;
-      chair.add(seat);
+    // Table base
+    const base = new S.THREE.Mesh(
+      new S.THREE.CylinderGeometry(1.1, 1.5, 0.8, 24),
+      makeStandard(0x141a2f, 0.9, 0.1)
+    );
+    base.position.y = 0.4;
+    tableG.add(base);
 
-      const back=new THREE.Mesh(new THREE.BoxGeometry(0.62,0.72,0.10), mat(0x141a33,0.85,0.12));
-      back.position.set(0,0.92,-0.26);
-      chair.add(back);
+    // Table top (felt + leather rim)
+    const top = new S.THREE.Mesh(
+      new S.THREE.CylinderGeometry(3.1, 3.1, 0.22, 56),
+      makeStandard(0x0f5b3f, 0.92, 0.05)
+    );
+    top.position.y = 0.9;
+    tableG.add(top);
 
-      const legMat=mat(0x1f2440,0.7,0.25);
-      const legGeo=new THREE.CylinderGeometry(0.04,0.05,0.55,10);
-      const off=[[-0.25,-0.25],[0.25,-0.25],[-0.25,0.25],[0.25,0.25]];
-      for(const [ox,oz] of off){
-        const leg=new THREE.Mesh(legGeo, legMat);
-        leg.position.set(ox,0.25,oz);
-        chair.add(leg);
+    const rim = new S.THREE.Mesh(
+      new S.THREE.TorusGeometry(3.12, 0.18, 14, 64),
+      makeStandard(0x2b1b12, 0.55, 0.08)
+    );
+    rim.position.y = 0.96;
+    rim.rotation.x = Math.PI / 2;
+    tableG.add(rim);
+
+    // Chairs (6)
+    const chairG = new S.THREE.Group();
+    chairG.name = "Chairs";
+    tableG.add(chairG);
+
+    const chairSeatGeo = new S.THREE.BoxGeometry(0.7, 0.12, 0.7);
+    const chairBackGeo = new S.THREE.BoxGeometry(0.7, 0.75, 0.12);
+    const chairLegGeo = new S.THREE.CylinderGeometry(0.04, 0.05, 0.5, 10);
+    const chairMat = makeStandard(0x22284a, 0.9, 0.08);
+
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const r = 4.2;
+      const c = new S.THREE.Group();
+      c.position.set(Math.cos(a) * r, 0.1, Math.sin(a) * r);
+      c.rotation.y = -a + Math.PI;
+
+      const seat = new S.THREE.Mesh(chairSeatGeo, chairMat);
+      seat.position.y = 0.35;
+
+      const back = new S.THREE.Mesh(chairBackGeo, chairMat);
+      back.position.set(0, 0.8, -0.29);
+
+      c.add(seat);
+      c.add(back);
+
+      for (let k = 0; k < 4; k++) {
+        const lx = k < 2 ? -0.28 : 0.28;
+        const lz = (k % 2 === 0) ? -0.28 : 0.28;
+        const leg = new S.THREE.Mesh(chairLegGeo, chairMat);
+        leg.position.set(lx, 0.1, lz);
+        c.add(leg);
       }
 
-      add(chair,true);
+      chairG.add(c);
     }
 
-    log("[world] pit/table/rail/stairs/chairs ✅");
+    // Expose main table for poker
+    S.poker.table = tableG;
+
+    S.log("[world] pit/table/rail/stairs/chairs ✅");
   }
 
-  function buildJumbotronsEmbedded(){
-    const { THREE } = S;
-    const y=S.wallH-2.1;
-    const R=S.wallR-0.32;
-    const w=10.8, h=5.9, t=0.18;
+  // ---------------- build: jumbotrons embedded ----------------
+  function buildJumbotrons() {
+    const G = new S.THREE.Group();
+    G.name = "Jumbotrons";
+    S.lobby.add(G);
 
-    function screenAt(angle){
-      const x=Math.cos(angle)*R;
-      const z=Math.sin(angle)*R;
-      const rotY=-angle+Math.PI/2;
+    // 4 panels embedded into wall
+    const panelGeo = new S.THREE.PlaneGeometry(6.4, 3.6);
+    const frameGeo = new S.THREE.BoxGeometry(6.7, 3.9, 0.18);
 
-      const frame=new THREE.Mesh(new THREE.BoxGeometry(w,h,t), mat(0x10142a,0.55,0.25,0xff2d7a,0.20));
-      frame.position.set(x,y,z);
-      frame.rotation.y=rotY;
-      add(frame);
+    const screenMat = new S.THREE.MeshStandardMaterial({
+      color: safeColor(0x071023),
+      roughness: 0.25,
+      metalness: 0.05,
+      emissive: safeColor(0x1133ff),
+      emissiveIntensity: 0.65, // bright
+    });
 
-      const screen=new THREE.Mesh(
-        new THREE.PlaneGeometry(w-0.9, h-0.9),
-        new THREE.MeshStandardMaterial({
-          color:0x081027,
-          emissive:new THREE.Color(0x1b2cff),
-          emissiveIntensity:1.75,
-          roughness:0.75,
-          metalness:0.1
-        })
-      );
-      screen.position.set(x,y,z+0.095);
-      screen.rotation.y=rotY;
-      add(screen);
+    const frameMat = makeStandard(0x141a2f, 0.9, 0.18);
+
+    const r = 21.8;
+    const y = 6.3; // high on wall
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      const x = Math.cos(a) * r;
+      const z = Math.sin(a) * r;
+
+      const frame = new S.THREE.Mesh(frameGeo, frameMat);
+      frame.position.set(x, y, z);
+      frame.lookAt(0, y, 0);
+
+      const screen = new S.THREE.Mesh(panelGeo, screenMat.clone());
+      screen.position.set(0, 0, 0.1);
+      frame.add(screen);
+
+      // If a screen ever goes "blue", this keeps it emissive not broken
+      screen.userData._isJumbo = true;
+
+      G.add(frame);
     }
 
-    screenAt(0);
-    screenAt(Math.PI/2);
-    screenAt(Math.PI);
-    screenAt(3*Math.PI/2);
-
-    log("[world] jumbotrons ✅");
+    S.log("[world] jumbotrons ✅");
   }
 
-  // -------- Teleport Arch --------
-  function buildTeleportArchMachine(){
-    const { THREE } = S;
-    const g=new THREE.Group();
-    g.position.set(0,0,17.2); // south-ish
+  // ---------------- build: teleport arch + pads ----------------
+  function buildTeleportArch() {
+    const archG = new S.THREE.Group();
+    archG.name = "TeleportArch";
+    S.lobby.add(archG);
 
-    const frame=new THREE.Mesh(new THREE.TorusGeometry(1.65,0.12,18,80,Math.PI), mat(0x141a33,0.55,0.35,0xff2d7a,0.35));
-    frame.rotation.y=Math.PI;
-    frame.position.y=1.3;
-    g.add(frame);
+    archG.position.set(0, 0, 14);
+    archG.rotation.y = Math.PI;
 
-    const base=new THREE.Mesh(new THREE.CylinderGeometry(1.55,1.65,0.22,36), mat(0x111326,0.9,0.25,0x2dfcff,0.15,S.tex));
-    base.position.y=0.11;
-    g.add(base);
+    const arch = new S.THREE.Mesh(
+      new S.THREE.TorusGeometry(2.4, 0.18, 16, 80, Math.PI),
+      makeStandard(0x1b2242, 0.7, 0.18, 0xb56bff, 0.8)
+    );
+    arch.rotation.z = Math.PI;
+    arch.position.y = 2.25;
+    archG.add(arch);
 
-    const portal=new THREE.Mesh(new THREE.CircleGeometry(1.28,64), mat(0x0b0d14,0.25,0.15,0x8a2bff,1.75));
-    portal.position.set(0,1.25,0.01);
-    portal.rotation.y=Math.PI;
-    g.add(portal);
+    const p1 = new S.THREE.PointLight(0xb56bff, 10, 18);
+    p1.position.set(0, 2.4, 0.4);
+    archG.add(p1);
 
-    const l1=new THREE.PointLight(0x8a2bff,16,18); l1.position.set(0,1.35,0.35); g.add(l1);
-    const l2=new THREE.PointLight(0xff2d7a,10,14); l2.position.set(0.8,0.8,0.2); g.add(l2);
+    // Pad (portal trigger visual)
+    const pad = new S.THREE.Mesh(
+      new S.THREE.CircleGeometry(1.25, 48),
+      new S.THREE.MeshStandardMaterial({
+        color: safeColor(0x0a0c16),
+        roughness: 1,
+        metalness: 0.05,
+        emissive: safeColor(0x7fe7ff),
+        emissiveIntensity: 0.25,
+      })
+    );
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.y = 0.02;
+    pad.name = "TeleportPad";
+    archG.add(pad);
+    addCollider(pad);
 
-    add(g,true);
-    S.arch={ root:g, portal };
+    archG.userData.pad = pad;
+    archG.userData.radius = 1.3;
 
-    // invisible pad to enter scorpion
-    const pad=new THREE.Mesh(new THREE.CylinderGeometry(1.25,1.25,0.10,24), new THREE.MeshBasicMaterial({ color:0x8a2bff, transparent:true, opacity:0.15 }));
-    pad.position.set(0,0.06,17.2);
-    add(pad,true);
-    pad.userData.action="enter_scorpion";
-
-    const txt=makeTextTag("ENTER SCORPION", 0x8a2bff);
-    txt.position.set(0,2.25,17.0);
-    add(txt);
-
-    log("[world] teleport arch ✅ (pad added)");
+    S.log("[world] teleport arch ✅ (pad added)");
   }
 
-  // -------- Full-body bot --------
-  function makeFullBodyBot(name="Bot", accent=0x7fe7ff){
-    const { THREE } = S;
-    const g=new THREE.Group(); g.name=name;
+  // ---------------- build: store ----------------
+  async function buildStore() {
+    const G = new S.THREE.Group();
+    G.name = "Store";
+    S.root.add(G);
+    S.store = G;
 
-    const skin=mat(0x141a33,0.7,0.25,accent,0.12);
-    const suit=mat(0x111326,0.9,0.2,accent,0.05);
-    const limb=mat(0x1f2440,0.8,0.2);
+    // Place store “room” to the right
+    G.position.set(10, 0, 6);
+    G.rotation.y = -Math.PI / 2;
 
-    const hips=new THREE.Mesh(new THREE.BoxGeometry(0.42,0.18,0.22), suit);
-    hips.position.y=0.92; g.add(hips);
+    const floor = new S.THREE.Mesh(
+      new S.THREE.PlaneGeometry(10, 8),
+      makeStandard(0x0f1327, 1, 0.06)
+    );
+    floor.rotation.x = -Math.PI / 2;
+    G.add(floor);
+    addCollider(floor);
 
-    const waist=new THREE.Mesh(new THREE.CylinderGeometry(0.18,0.22,0.38,12), suit);
-    waist.position.y=1.14; g.add(waist);
+    const back = new S.THREE.Mesh(
+      new S.THREE.BoxGeometry(10, 4.5, 0.3),
+      makePanelMaterial()
+    );
+    back.position.set(0, 2.25, -4);
+    G.add(back);
 
-    const chest=new THREE.Mesh(new THREE.BoxGeometry(0.48,0.42,0.26), suit);
-    chest.position.y=1.40; g.add(chest);
+    const side = new S.THREE.Mesh(
+      new S.THREE.BoxGeometry(0.3, 4.5, 8),
+      makePanelMaterial()
+    );
+    side.position.set(-5, 2.25, 0);
+    G.add(side);
 
-    const shoulderBar=new THREE.Mesh(new THREE.BoxGeometry(0.62,0.14,0.22), suit);
-    shoulderBar.position.y=1.56; g.add(shoulderBar);
+    const sign = makeTextTag("SCARLETT STORE", 0xff2d7a, 0.25);
+    sign.position.set(0, 3.55, -3.85);
+    sign.scale.setScalar(1.0);
+    G.add(sign);
 
-    const head=new THREE.Mesh(new THREE.SphereGeometry(0.22,14,12), skin);
-    head.position.y=1.82; g.add(head);
+    const glow = new S.THREE.PointLight(0xff2d7a, 12, 20);
+    glow.position.set(0, 3.2, -2.5);
+    G.add(glow);
 
-    function leg(side=1){
-      const L=new THREE.Group();
-      L.position.set(0.14*side,0.90,0);
+    // Display case platform
+    const caseBase = new S.THREE.Mesh(
+      new S.THREE.BoxGeometry(8.8, 0.35, 2.6),
+      makeStandard(0x121734, 1, 0.06, 0x7fe7ff, 0.15)
+    );
+    caseBase.position.set(0, 0.18, -1.3);
+    G.add(caseBase);
 
-      const thigh=new THREE.Mesh(new THREE.CylinderGeometry(0.075,0.085,0.42,10), limb);
-      thigh.position.y=-0.18; L.add(thigh);
+    // Mannequins (3)
+    const tex = await tryLoadTexture("./assets/textures/shirt.png");
+    const shirtMat = tex
+      ? new S.THREE.MeshStandardMaterial({ map: tex, roughness: 0.9, metalness: 0.05 })
+      : makeStandard(0x2230ff, 0.9, 0.05, 0x2230ff, 0.25);
 
-      const knee=new THREE.Mesh(new THREE.SphereGeometry(0.07,10,10), mat(0x2a2f52,0.7,0.25,accent,0.10));
-      knee.position.y=-0.42; L.add(knee);
+    for (let i = 0; i < 3; i++) {
+      const man = makeMannequin();
+      man.position.set(-2.6 + i * 2.6, 0.35, -1.15);
+      man.rotation.y = Math.PI;
+      G.add(man);
+      S.bots.mannequins.push(man);
 
-      const calf=new THREE.Mesh(new THREE.CylinderGeometry(0.065,0.075,0.40,10), limb);
-      calf.position.y=-0.62; L.add(calf);
-
-      const foot=new THREE.Mesh(new THREE.BoxGeometry(0.14,0.06,0.22), mat(0x141a33,0.7,0.25));
-      foot.position.set(0,-0.85,0.05); L.add(foot);
-
-      return L;
+      // Apply shirt to torso
+      const torso = man.getObjectByName("Torso");
+      if (torso) {
+        torso.material = shirtMat.clone();
+        S.log(`[store] shirt applied ✅ (Mannequin_${i + 1})`);
+      }
     }
-    g.add(leg(1)); g.add(leg(-1));
 
-    function arm(side=1){
-      const A=new THREE.Group();
-      A.position.set(0.34*side,1.52,0);
+    // Keep a collider surface in store
+    S.log("[world] store ✅");
+  }
 
-      const upper=new THREE.Mesh(new THREE.CylinderGeometry(0.055,0.06,0.34,10), limb);
-      upper.rotation.z=side*0.65; upper.position.y=-0.12; A.add(upper);
+  function makeMannequin() {
+    const G = new S.THREE.Group();
+    G.name = "Mannequin";
 
-      const elbow=new THREE.Mesh(new THREE.SphereGeometry(0.06,10,10), mat(0x2a2f52,0.7,0.25,accent,0.12));
-      elbow.position.set(0.16*side,-0.30,0); A.add(elbow);
+    const skin = makeStandard(0x1a1f3a, 0.95, 0.05);
 
-      const fore=new THREE.Mesh(new THREE.CylinderGeometry(0.048,0.052,0.32,10), limb);
-      fore.rotation.z=side*1.05; fore.position.set(0.26*side,-0.44,0); A.add(fore);
+    const torso = new S.THREE.Mesh(new S.THREE.BoxGeometry(0.6, 0.75, 0.35), skin);
+    torso.name = "Torso";
+    torso.position.y = 1.25;
+    G.add(torso);
 
-      const hand=new THREE.Mesh(new THREE.SphereGeometry(0.055,10,10), skin);
-      hand.position.set(0.36*side,-0.60,0); A.add(hand);
+    const head = new S.THREE.Mesh(new S.THREE.SphereGeometry(0.22, 18, 18), skin);
+    head.position.y = 1.75;
+    G.add(head);
 
-      return A;
+    const pelvis = new S.THREE.Mesh(new S.THREE.BoxGeometry(0.5, 0.25, 0.3), skin);
+    pelvis.position.y = 0.9;
+    G.add(pelvis);
+
+    const legGeo = new S.THREE.CylinderGeometry(0.08, 0.09, 0.75, 12);
+    const footGeo = new S.THREE.BoxGeometry(0.22, 0.1, 0.38);
+
+    const lLeg = new S.THREE.Mesh(legGeo, skin);
+    lLeg.position.set(-0.15, 0.45, 0);
+    G.add(lLeg);
+
+    const rLeg = new S.THREE.Mesh(legGeo, skin);
+    rLeg.position.set(0.15, 0.45, 0);
+    G.add(rLeg);
+
+    const lFoot = new S.THREE.Mesh(footGeo, skin);
+    lFoot.position.set(-0.15, 0.06, 0.06);
+    G.add(lFoot);
+
+    const rFoot = new S.THREE.Mesh(footGeo, skin);
+    rFoot.position.set(0.15, 0.06, 0.06);
+    G.add(rFoot);
+
+    const armGeo = new S.THREE.CylinderGeometry(0.06, 0.07, 0.6, 10);
+    const lArm = new S.THREE.Mesh(armGeo, skin);
+    lArm.position.set(-0.42, 1.25, 0);
+    lArm.rotation.z = 0.35;
+    G.add(lArm);
+
+    const rArm = new S.THREE.Mesh(armGeo, skin);
+    rArm.position.set(0.42, 1.25, 0);
+    rArm.rotation.z = -0.35;
+    G.add(rArm);
+
+    return G;
+  }
+
+  // ---------------- build: scorpion room + elongated table ----------------
+  function buildScorpionRoom() {
+    const G = new S.THREE.Group();
+    G.name = "ScorpionRoom";
+    S.root.add(G);
+    S.scorpion = G;
+
+    // Place scorpion room to left
+    G.position.set(-10, 0, 6);
+    G.rotation.y = Math.PI / 2;
+
+    // Floor and walls
+    const floor = new S.THREE.Mesh(
+      new S.THREE.PlaneGeometry(12, 10),
+      makeStandard(0x0c1024, 1, 0.06)
+    );
+    floor.rotation.x = -Math.PI / 2;
+    G.add(floor);
+    addCollider(floor);
+
+    const back = new S.THREE.Mesh(new S.THREE.BoxGeometry(12, 5, 0.3), makePanelMaterial());
+    back.position.set(0, 2.5, -5);
+    G.add(back);
+
+    const left = new S.THREE.Mesh(new S.THREE.BoxGeometry(0.3, 5, 10), makePanelMaterial());
+    left.position.set(-6, 2.5, 0);
+    G.add(left);
+
+    const right = new S.THREE.Mesh(new S.THREE.BoxGeometry(0.3, 5, 10), makePanelMaterial());
+    right.position.set(6, 2.5, 0);
+    G.add(right);
+
+    // Neon scorpion glow
+    const arch = new S.THREE.Mesh(
+      new S.THREE.TorusGeometry(3.2, 0.18, 16, 90, Math.PI),
+      makeStandard(0x1b2242, 0.65, 0.2, 0xff2d7a, 1.0)
+    );
+    arch.rotation.z = Math.PI;
+    arch.position.set(0, 3.2, -4.2);
+    G.add(arch);
+
+    const scLight = new S.THREE.PointLight(0xff2d7a, 18, 22);
+    scLight.position.set(0, 3.2, -3.2);
+    G.add(scLight);
+
+    // Table: elongated oval (6 seats)
+    const tableG = new S.THREE.Group();
+    tableG.name = "ScorpionTable";
+    tableG.position.set(0, 0, 0);
+    G.add(tableG);
+
+    const top = new S.THREE.Mesh(
+      new S.THREE.CapsuleGeometry(3.0, 2.1, 8, 20), // oval-ish
+      makeStandard(0x0f5b3f, 0.92, 0.05)
+    );
+    top.scale.set(1.0, 0.15, 1.0);
+    top.position.y = 0.95;
+    tableG.add(top);
+
+    const rim = new S.THREE.Mesh(
+      new S.THREE.TorusGeometry(3.05, 0.18, 14, 64),
+      makeStandard(0x2b1b12, 0.55, 0.08)
+    );
+    rim.position.y = 0.98;
+    rim.rotation.x = Math.PI / 2;
+    tableG.add(rim);
+
+    const base = new S.THREE.Mesh(
+      new S.THREE.CylinderGeometry(1.2, 1.6, 0.85, 20),
+      makeStandard(0x141a2f, 0.9, 0.1)
+    );
+    base.position.y = 0.42;
+    tableG.add(base);
+
+    // Seat positions around elongated table
+    const seats = [];
+    const seatR = 3.9;
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      seats.push([Math.cos(a) * seatR, 0, Math.sin(a) * seatR]);
     }
-    g.add(arm(1)); g.add(arm(-1));
+    S.poker.seatPos = seats;
+
+    // Seat markers (invisible)
+    for (let i = 0; i < 6; i++) {
+      const m = new S.THREE.Object3D();
+      m.position.set(seats[i][0], 0, seats[i][2]);
+      m.lookAt(0, 0, 0);
+      tableG.add(m);
+    }
+
+    // Auto-seat zone (stand on it -> seated)
+    const sitPad = new S.THREE.Mesh(
+      new S.THREE.CircleGeometry(1.1, 36),
+      new S.THREE.MeshStandardMaterial({
+        color: safeColor(0x0a0c16),
+        roughness: 1,
+        metalness: 0.05,
+        emissive: safeColor(0x7fe7ff),
+        emissiveIntensity: 0.18,
+      })
+    );
+    sitPad.rotation.x = -Math.PI / 2;
+    sitPad.position.set(0, 0.02, 3.8);
+    sitPad.name = "ScorpionSitPad";
+    tableG.add(sitPad);
+    addCollider(sitPad);
+    tableG.userData.sitPad = { obj: sitPad, r: 1.1 };
+
+    // 4 bots seated (seats 1..4)
+    for (let i = 1; i <= 4; i++) {
+      const bot = makeFullBodyBot(i);
+      bot.position.set(seats[i][0], 0, seats[i][2]);
+      bot.lookAt(0, 0.9, 0);
+      bot.userData.seat = i;
+      bot.userData.seated = true;
+      bot.userData.walk = { speed: 0 };
+      tableG.add(bot);
+      S.bots.scorpion.push(bot);
+    }
+
+    S.log("[world] scorpion ✅");
+    S.log("[world] scorpion bots ✅ (4 seated)");
+
+    // Attach poker visuals to scorpion table (main play area)
+    S.poker.table = tableG;
+  }
+
+  // ---------------- bots: full body with limbs + animation tags ----------------
+  function makeFullBodyBot(seed = 1) {
+    const G = new S.THREE.Group();
+    G.name = `Bot_${seed}`;
+
+    const body = makeStandard(0x2a2f52, 0.9, 0.08);
+    const trim = makeStandard(0x151a33, 0.9, 0.08, 0x7fe7ff, 0.12);
+
+    const torso = new S.THREE.Mesh(new S.THREE.BoxGeometry(0.52, 0.75, 0.32), body);
+    torso.name = "Torso";
+    torso.position.y = 1.25;
+    G.add(torso);
+
+    const shoulder = new S.THREE.Mesh(new S.THREE.BoxGeometry(0.66, 0.18, 0.34), trim);
+    shoulder.position.y = 1.62;
+    G.add(shoulder);
+
+    const head = new S.THREE.Mesh(new S.THREE.SphereGeometry(0.22, 18, 18), trim);
+    head.position.y = 1.85;
+    G.add(head);
+
+    const pelvis = new S.THREE.Mesh(new S.THREE.BoxGeometry(0.52, 0.22, 0.3), body);
+    pelvis.position.y = 0.92;
+    G.add(pelvis);
+
+    // Arms (tagged for anim)
+    function arm(side) {
+      const a = new S.THREE.Group();
+      a.position.set(0.38 * side, 1.55, 0);
+
+      const upper = new S.THREE.Mesh(new S.THREE.CylinderGeometry(0.06, 0.07, 0.35, 10), body);
+      upper.position.y = -0.18;
+      upper.rotation.z = 0.25 * side;
+      upper.userData._arm = side;
+      a.add(upper);
+
+      const fore = new S.THREE.Mesh(new S.THREE.CylinderGeometry(0.055, 0.06, 0.32, 10), body);
+      fore.position.y = -0.52;
+      fore.rotation.z = 0.1 * side;
+      fore.userData._fore = side;
+      a.add(fore);
+
+      const hand = new S.THREE.Mesh(new S.THREE.BoxGeometry(0.12, 0.08, 0.14), trim);
+      hand.position.y = -0.72;
+      a.add(hand);
+      return a;
+    }
+    G.add(arm(-1));
+    G.add(arm(1));
+
+    // Legs (tagged for anim)
+    function leg(side) {
+      const l = new S.THREE.Group();
+      l.position.set(0.16 * side, 0.85, 0);
+
+      const thigh = new S.THREE.Mesh(new S.THREE.CylinderGeometry(0.08, 0.09, 0.42, 10), body);
+      thigh.position.y = -0.25;
+      thigh.userData._leg = side;
+      l.add(thigh);
+
+      const calf = new S.THREE.Mesh(new S.THREE.CylinderGeometry(0.07, 0.08, 0.42, 10), body);
+      calf.position.y = -0.68;
+      calf.userData._calf = side;
+      l.add(calf);
+
+      const foot = new S.THREE.Mesh(new S.THREE.BoxGeometry(0.22, 0.08, 0.34), trim);
+      foot.position.set(0, -0.9, 0.07);
+      l.add(foot);
+
+      return l;
+    }
+    G.add(leg(-1));
+    G.add(leg(1));
 
     // name tag
-    const tag=makeTextTag(name, accent);
-    tag.position.set(0,2.18,0);
-    g.add(tag);
+    const tag = makeTextTag(`BOT ${seed}`, 0x7fe7ff, 0.22);
+    tag.position.set(0, 2.35, 0);
+    tag.scale.setScalar(0.42);
+    G.add(tag);
 
-    // shirt overlay mesh (texture swap target)
-    const shirt=new THREE.Mesh(new THREE.BoxGeometry(0.50,0.42,0.27), suit);
-    shirt.position.y=1.40;
-    shirt.userData._shirt=true;
-    g.add(shirt);
+    // walk params
+    G.userData.walk = { speed: 0.25 + (seed % 4) * 0.05 };
+    G.userData.seated = false;
 
-    g.userData.accent=accent;
-    return g;
+    return G;
   }
 
-  function tryLoadShirtTexture(onDone){
-    const { THREE } = S;
-    const loader=new THREE.TextureLoader();
-    const candidates=[
-      "assets/textures/tshirt.png",
-      "assets/textures/tshirt_diffuse.png",
-      "assets/textures/shirt.png",
-      "assets/textures/shirt_diffuse.png"
-    ];
-    let idx=0;
-    const next=()=>{
-      if(idx>=candidates.length) return onDone(null);
-      const url=candidates[idx++];
-      loader.load(url, (tex)=>onDone(tex), undefined, ()=>next());
-    };
-    next();
+  function buildLobbyBots() {
+    const botsG = new S.THREE.Group();
+    botsG.name = "LobbyBots";
+    S.lobby.add(botsG);
+
+    for (let i = 0; i < 6; i++) {
+      const bot = makeFullBodyBot(i + 1);
+      const a = (i / 6) * Math.PI * 2;
+      bot.position.set(Math.cos(a) * 13.5, 0, Math.sin(a) * 13.5);
+      bot.lookAt(0, 1.3, 0);
+      bot.userData.pathA = a;
+      bot.userData.seated = false;
+      botsG.add(bot);
+      S.bots.lobby.push(bot);
+    }
+
+    S.log("[world] lobby bots ✅");
   }
 
-  function buildLobbyBots(){
-    const walkers=3;
-    for(let i=0;i<walkers;i++){
-      const bot=makeFullBodyBot(`Bot_${i+1}`, i%2===0?0x7fe7ff:0xff2d7a);
-      bot.userData.walk={ a:(i/walkers)*Math.PI*2, r:14.8, speed:0.22+i*0.03 };
-      add(bot,true);
-      S.bots.push(bot);
+  // ---------------- poker visuals + sim ----------------
+  function initPoker() {
+    const P = S.poker;
+    P.seats = 6;
+    P.activeSeat = 0;
+    P.stage = "idle";
+    P.stageT = 0;
+    P.pot = 0;
+    P.bet = 0;
+    P.winner = "";
+    P.showdown = false;
+
+    // Cards root
+    P.cardsRoot = new S.THREE.Group();
+    P.cardsRoot.name = "CardsRoot";
+    P.table.add(P.cardsRoot);
+
+    // Build community placeholders
+    P.community = [];
+    for (let i = 0; i < 5; i++) {
+      const c = makeCardMesh();
+      c.position.set(-1.6 + i * 0.8, 1.07, 0);
+      c.rotation.x = -Math.PI / 2;
+      c.userData.isCommunity = true;
+      c.visible = false;
+      P.cardsRoot.add(c);
+      P.community.push(c);
     }
-    log("[world] lobby bots ✅");
+
+    // Hole cards
+    P.hole = [];
+    for (let s = 0; s < P.seats; s++) {
+      const seatArr = [];
+      for (let k = 0; k < 2; k++) {
+        const c = makeCardMesh();
+        c.userData.isCommunity = false;
+        c.userData.seat = s;
+        c.visible = false;
+        P.cardsRoot.add(c);
+        seatArr.push(c);
+      }
+      P.hole.push(seatArr);
+    }
+
+    layoutHoleCards();
+
+    S.log("[poker] init ✅ seats=6");
+    newHand();
   }
 
-  // -------- Store --------
-  function buildStore(){
-    const { THREE } = S;
-    const store=new THREE.Group();
-    store.name="StoreRoom";
-    store.position.set(0,0,-32); // north
-    add(store,true);
-    S.storeRoot=store;
-
-    const floor=new THREE.Mesh(new THREE.BoxGeometry(20,0.30,20), mat(0x0f1224,0.95,0.1,0x2dfcff,0.10,S.tex));
-    floor.position.y=0.15;
-    store.add(floor);
-
-    const walls=new THREE.Mesh(
-      new THREE.BoxGeometry(20,8.5,20),
-      new THREE.MeshStandardMaterial({ color:0x0b0d14, roughness:1, metalness:0.05, transparent:true, opacity:0.22, map:S.tex })
-    );
-    walls.position.y=4.25;
-    store.add(walls);
-
-    const sign=makeTextTag("SCARLETT STORE", 0x2dfcff);
-    sign.position.set(0,6.6,9.8);
-    sign.rotation.y=Math.PI;
-    store.add(sign);
-
-    const sl1=new THREE.PointLight(0x7fe7ff,22,55); sl1.position.set(0,6.8,0); store.add(sl1);
-    const sl2=new THREE.PointLight(0xff2d7a,16,45); sl2.position.set(-6,5.8,4); store.add(sl2);
-
-    function makeCase(w,h,d,x,z){
-      const c=new THREE.Group();
-      c.position.set(x,0,z);
-
-      const base=new THREE.Mesh(new THREE.BoxGeometry(w,0.25,d), mat(0x111326,0.9,0.2,0x2dfcff,0.12));
-      base.position.y=0.125; c.add(base);
-
-      const glass=new THREE.Mesh(
-        new THREE.BoxGeometry(w-0.2,h,d-0.2),
-        new THREE.MeshStandardMaterial({ color:0x7fe7ff, roughness:0.1, metalness:0.05, transparent:true, opacity:0.12 })
-      );
-      glass.position.y=h/2+0.25; c.add(glass);
-
-      const strip=new THREE.Mesh(new THREE.BoxGeometry(w-0.6,0.08,d-0.6), mat(0x111326,0.3,0.2,0x8a2bff,1.25));
-      strip.position.y=0.29; c.add(strip);
-
-      store.add(c);
-      return c;
-    }
-
-    const big=makeCase(9.0,2.6,2.4, 0,0);
-    const left=makeCase(3.6,2.4,1.8, -7.2,8.2);
-    const right=makeCase(3.6,2.4,1.8, 7.2,8.2);
-
-    const manColors=[0x7fe7ff,0xff2d7a,0x8a2bff];
-    for(let i=0;i<3;i++){
-      const m=makeFullBodyBot(`Mannequin_${i+1}`, manColors[i]);
-      m.position.set(-2.4+i*2.4,0,0);
-      m.scale.set(0.95,0.95,0.95);
-      big.add(m);
-      S.mannequins.push(m);
-    }
-
-    const ml=makeFullBodyBot("Mannequin_L",0x2dfcff);
-    left.add(ml); S.mannequins.push(ml);
-
-    const mr=makeFullBodyBot("Mannequin_R",0xff2d7a);
-    right.add(mr); S.mannequins.push(mr);
-
-    // apply shirt texture to mannequin 1 if found
-    tryLoadShirtTexture((tex)=>{
-      if(!tex){ log("[store] shirt texture not found (fallback)"); return; }
-      const shirtMat=new THREE.MeshStandardMaterial({ map:tex, roughness:0.9, metalness:0.02 });
-      const target=S.mannequins[0];
-      target?.traverse?.((o)=>{ if(o?.isMesh && o.userData?._shirt) o.material=shirtMat; });
-      log("[store] shirt applied ✅ (Mannequin_1)");
+  function makeCardMesh() {
+    // low-poly card
+    const geo = new S.THREE.BoxGeometry(0.55, 0.02, 0.78);
+    const mat = new S.THREE.MeshStandardMaterial({
+      color: safeColor(0xe8ecff),
+      roughness: 0.8,
+      metalness: 0.05,
+      emissive: safeColor(0x000000),
+      emissiveIntensity: 0,
     });
-
-    log("[world] store ✅");
+    const edge = new S.THREE.MeshStandardMaterial({
+      color: safeColor(0x0b0d14),
+      roughness: 1,
+      metalness: 0.05,
+    });
+    const mesh = new S.THREE.Mesh(geo, [edge, edge, edge, edge, mat, mat]);
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.userData.faceUp = true;
+    return mesh;
   }
 
-  // -------- Scorpion Room --------
-  function buildScorpionRoom(){
-    const { THREE } = S;
-    const R=new THREE.Group();
-    R.name="ScorpionRoom";
-    R.position.set(32,0,0); // EAST
-    add(R,true);
-    S.scorpion.root=R;
+  function layoutHoleCards() {
+    const P = S.poker;
+    // Place hole cards near each seat, facing table center
+    for (let s = 0; s < P.seats; s++) {
+      const seat = P.seatPos[s] || [0, 0, 0];
+      const base = v3(seat[0], 1.05, seat[2]);
+      const dir = base.clone().normalize().multiplyScalar(-0.55);
 
-    const floor=new THREE.Mesh(new THREE.BoxGeometry(18,0.25,18), mat(0x0f1224,0.95,0.1,0x8a2bff,0.12,S.tex));
-    floor.position.y=0.125; R.add(floor);
+      const c0 = P.hole[s][0];
+      const c1 = P.hole[s][1];
 
-    const walls=new THREE.Mesh(
-      new THREE.BoxGeometry(18,8.2,18),
-      new THREE.MeshStandardMaterial({ color:0x0b0d14, roughness:1, metalness:0.06, map:S.tex })
-    );
-    walls.position.y=4.1; R.add(walls);
+      c0.position.copy(base.clone().add(dir).add(v3(-0.18, 0, 0.0)));
+      c1.position.copy(base.clone().add(dir).add(v3(0.18, 0, 0.0)));
 
-    const l1=new THREE.PointLight(0x8a2bff,26,60); l1.position.set(0,6.8,0); R.add(l1);
-    const l2=new THREE.PointLight(0xff2d7a,16,45); l2.position.set(-5,5.5,5); R.add(l2);
+      // Face toward center
+      c0.lookAt(0, 1.05, 0);
+      c1.lookAt(0, 1.05, 0);
 
-    const sign=makeTextTag("SCORPION ROOM",0x8a2bff);
-    sign.position.set(0,6.4,8.7);
-    sign.rotation.y=Math.PI;
-    R.add(sign);
-
-    // elongated oval table
-    const tableY=0.95;
-    S.scorpion.tableY=tableY;
-
-    const top=new THREE.Mesh(new THREE.CapsuleGeometry(2.2,2.2,10,24), mat(0x0f6a42,0.85,0.05,0x0f6a42,0.10));
-    top.scale.set(1.25,0.18,1.85);
-    top.position.set(0,tableY,0);
-    R.add(top);
-    S.scorpion.tableTop=top;
-
-    const trim=new THREE.Mesh(new THREE.TorusGeometry(2.25,0.10,14,120), mat(0x3a2518,0.65,0.15,0x3a2518,0.05));
-    trim.rotation.x=Math.PI/2;
-    trim.scale.set(1.45,1.0,2.05);
-    trim.position.y=tableY+0.18;
-    R.add(trim);
-
-    // seats + chairs
-    S.scorpion.seats.length=0;
-    const seatN=6;
-    for(let i=0;i<seatN;i++){
-      const a=(i/seatN)*Math.PI*2;
-      const rx=4.0, rz=3.0;
-      const x=Math.cos(a)*rx;
-      const z=Math.sin(a)*rz;
-      const rotY=(-a+Math.PI/2);
-
-      S.scorpion.seats.push({ x,z,rotY });
-
-      const chair=new THREE.Group();
-      chair.position.set(x,0,z);
-      chair.rotation.y=rotY;
-
-      const seat=new THREE.Mesh(new THREE.BoxGeometry(0.62,0.10,0.62), mat(0x141a33,0.85,0.12));
-      seat.position.y=0.55; chair.add(seat);
-
-      const back=new THREE.Mesh(new THREE.BoxGeometry(0.62,0.72,0.10), mat(0x141a33,0.85,0.12));
-      back.position.set(0,0.92,-0.26); chair.add(back);
-
-      R.add(chair);
-    }
-
-    // spawn at seat 0 (you)
-    S.scorpion.spawn={ x:S.scorpion.seats[0].x, z:S.scorpion.seats[0].z, rotY:S.scorpion.seats[0].rotY };
-
-    // exit pad
-    const exit=new THREE.Mesh(new THREE.CylinderGeometry(1.0,1.0,0.10,24), new THREE.MeshBasicMaterial({ color:0x7fe7ff, transparent:true, opacity:0.16 }));
-    exit.position.set(0,0.06,8.0);
-    R.add(exit);
-    exit.userData.action="exit_to_lobby";
-
-    const et=makeTextTag("EXIT",0x7fe7ff);
-    et.position.set(0,2.0,7.6);
-    R.add(et);
-
-    log("[world] scorpion ✅");
-  }
-
-  function seatScorpionBots(){
-    const R=S.scorpion.root;
-    if(!R) return;
-
-    // seat 1..4 are bots (4 bots total)
-    for(let i=1;i<=4;i++){
-      const seat=S.scorpion.seats[i];
-      const bot=makeFullBodyBot(`ScorpionBot_${i}`, i%2?0xff2d7a:0x8a2bff);
-      bot.position.set(seat.x,0,seat.z);
-      bot.rotation.y=seat.rotY;
-      R.add(bot);
-    }
-
-    log("[world] scorpion bots ✅ (4 seated)");
-  }
-
-  function enterScorpionRoom(){
-    const sp=S.scorpion.spawn;
-    if(!sp || !S.player) return;
-
-    // seated mode lock (sticks disabled)
-    window.__SEATED_MODE = true;
-
-    // move rig to scorpion seat (world position)
-    const ox=S.scorpion.root.position.x;
-    const oz=S.scorpion.root.position.z;
-
-    S.player.position.set(ox+sp.x, 0, oz+sp.z);
-    S.player.rotation.y = sp.rotY;
-
-    S.room="scorpion";
-    S.pokerScorpion?.startNewHand?.();
-
-    log("[room] enter scorpion ✅");
-  }
-
-  function exitToLobby(){
-    if(!S.player) return;
-
-    window.__SEATED_MODE = false;
-    S.player.position.set(0,0,12.5);
-    S.player.rotation.y = Math.PI;
-    S.room="lobby";
-    log("[room] exit to lobby ✅");
-  }
-
-  // -------- Chips & Pot HUD --------
-  function buildPotHUDandChips(){
-    const { THREE } = S;
-
-    const hud=new THREE.Group();
-    hud.position.set(0, S.tableY+2.8, 0);
-    add(hud);
-
-    const panel=new THREE.Mesh(new THREE.PlaneGeometry(1.6,0.55), new THREE.MeshBasicMaterial({ color:0x0b0d14, transparent:true, opacity:0.75 }));
-    hud.add(panel);
-
-    const label=makeTextTag("POT: 0", 0x2dfcff);
-    label.position.set(0,0,0.01);
-    hud.add(label);
-
-    S.potHUD={ root:hud, label, set:(v)=>{
-      hud.remove(S.potHUD.label);
-      const next=makeTextTag(`POT: ${v}`, 0x2dfcff);
-      next.position.set(0,0,0.01);
-      hud.add(next);
-      S.potHUD.label=next;
-    }};
-
-    // chip pool
-    const chipGeo=new THREE.CylinderGeometry(0.09,0.09,0.035,18);
-    for(let i=0;i<42;i++){
-      const chip=new THREE.Mesh(chipGeo, mat(0xff2d7a,0.6,0.15));
-      add(chip);
-      S.chipMeshes.push(chip);
-    }
-
-    // 6 seat sources around table
-    S.chipSources.length=0;
-    const n=6;
-    for(let i=0;i<n;i++){
-      const a=(i/n)*Math.PI*2;
-      const r=2.85;
-      const pos=new THREE.Vector3(Math.cos(a)*r, S.tableY+0.22, Math.sin(a)*r);
-      const color=(i%2===0)?0x7fe7ff:0xff2d7a;
-      S.chipSources.push({ pos, color });
-    }
-
-    log("[world] pot HUD + chips ✅");
-  }
-
-  function updatePotAndChips(dt){
-    if(!S.tableTop) return;
-
-    if(S.potHUD?.root && S.camera){
-      S.potHUD.root.lookAt(S.camera.position.x, S.camera.position.y, S.camera.position.z);
-    }
-
-    const to=new S.THREE.Vector3(0, S.tableY+0.22, 0);
-    const period=1.35;
-    const totalSeats=S.chipSources.length;
-    const active=Math.min(S.chipMeshes.length, totalSeats*5);
-
-    for(let i=0;i<active;i++){
-      const seat=i%totalSeats;
-      const wave=Math.floor(i/totalSeats);
-      const src=S.chipSources[seat];
-
-      const t=(S.t/period + seat*0.12 + wave*0.20) % 1;
-      const k=smoothstep(0.15, 0.70, t);
-
-      const p=src.pos.clone().lerp(to, k);
-      p.y += Math.sin(k*Math.PI)*0.65;
-
-      const chip=S.chipMeshes[i];
-      chip.material = mat(src.color,0.6,0.15);
-      chip.position.copy(p);
-      chip.rotation.set(Math.PI/2, 0, 0); // flat
-    }
-
-    for(let i=active;i<S.chipMeshes.length;i++){
-      const idx=i-active;
-      const chip=S.chipMeshes[i];
-      chip.position.set((idx%5)*0.11-0.22, S.tableY+0.22 + Math.floor(idx/5)*0.04, (Math.floor(idx/5)%2)*0.11 - 0.055);
-      chip.rotation.set(Math.PI/2, 0, 0);
-    }
-
-    const newPot=Math.floor(S.t*18);
-    if(newPot!==S.potValue){
-      S.potValue=newPot;
-      S.potHUD?.set?.(S.potValue);
-    }
-
-    function smoothstep(a,b,x){
-      const t=Math.max(0, Math.min(1, (x-a)/(b-a)));
-      return t*t*(3-2*t);
+      // Lay flat
+      c0.rotation.x = -Math.PI / 2;
+      c1.rotation.x = -Math.PI / 2;
     }
   }
 
-  // -------- Simple pad interactions (laser/hand) --------
-  // We can’t guarantee your controller code’s “select” event naming, so we do a safe proximity trigger:
-  // If player gets close to a pad, it triggers.
-  function updateRoomPads(){
-    if(!S.player) return;
+  function newHand() {
+    const P = S.poker;
+    P.stage = "preflop";
+    P.stageT = 0;
+    P.showdown = false;
+    P.pot = 0;
+    P.bet = 0;
+    P.winner = "";
 
-    const p=S.player.position;
-    // check all colliders for action pads
-    for(const o of S.colliders){
-      if(!o?.userData?.action) continue;
-      const d=o.position.distanceTo(p);
-      if(d < 1.15){
-        if(o.userData.action==="enter_scorpion" && S.room!=="scorpion"){
-          enterScorpionRoom();
+    // Deal hole cards
+    for (let s = 0; s < P.seats; s++) {
+      for (let k = 0; k < 2; k++) {
+        const c = P.hole[s][k];
+        c.visible = true;
+        c.material[4].color.setHex(0xe8ecff);
+        c.material[5].color.setHex(0xe8ecff);
+        c.material[4].emissive.setHex(0x000000);
+        c.material[5].emissive.setHex(0x000000);
+        c.userData.used = false;
+        c.scale.set(1, 1, 1);
+      }
+    }
+
+    // Reset community
+    for (let i = 0; i < 5; i++) {
+      const c = P.community[i];
+      c.visible = false;
+      c.userData.revealed = false;
+      c.position.y = 1.07;
+      c.scale.set(1, 1, 1);
+    }
+
+    layoutHoleCards();
+    S.log("[poker] new hand ✅");
+    S.log("[poker] hole dealt ✅");
+  }
+
+  function stepPoker(dt) {
+    const P = S.poker;
+    P.stageT += dt;
+
+    // Simple staged dealing to match your logs
+    if (P.stage === "preflop" && P.stageT > 1.0) {
+      // flop
+      for (let i = 0; i < 3; i++) {
+        P.community[i].visible = true;
+        P.community[i].userData.revealed = true;
+      }
+      P.stage = "flop";
+      P.stageT = 0;
+      S.log("[poker] community +3 ✅");
+    }
+
+    if (P.stage === "flop" && P.stageT > 0.9) {
+      P.community[3].visible = true;
+      P.community[3].userData.revealed = true;
+      P.stage = "turn";
+      P.stageT = 0;
+      S.log("[poker] community +1 ✅");
+    }
+
+    if (P.stage === "turn" && P.stageT > 0.9) {
+      P.community[4].visible = true;
+      P.community[4].userData.revealed = true;
+      P.stage = "river";
+      P.stageT = 0;
+      S.log("[poker] community +1 ✅");
+    }
+
+    if (P.stage === "river" && P.stageT > 0.7) {
+      P.stage = "complete";
+      P.stageT = 0;
+      S.log("[poker] hand complete ✅ (idle)");
+    }
+
+    if (P.stage === "complete" && P.stageT > 0.9) {
+      doShowdown();
+      P.stage = "idle";
+      P.stageT = 0;
+      S.log("[poker] showdown ✅");
+    }
+  }
+
+  function doShowdown() {
+    const P = S.poker;
+    P.showdown = true;
+
+    // Fake a “winning hand” selection: pick one seat and mark both hole cards used
+    const winSeat = 1 + Math.floor(Math.random() * 4); // one of the 4 bots
+    P.winner = `BOT ${winSeat}`;
+    const used0 = P.hole[winSeat][0];
+    const used1 = P.hole[winSeat][1];
+
+    used0.userData.used = true;
+    used1.userData.used = true;
+
+    // Move used cards forward to be visible
+    used0.position.y += 0.14;
+    used1.position.y += 0.14;
+    used0.position.z += 0.25;
+    used1.position.z += 0.25;
+
+    // Dim all other hole cards
+    for (let s = 0; s < P.seats; s++) {
+      for (let k = 0; k < 2; k++) {
+        const c = P.hole[s][k];
+        if (s === winSeat) {
+          c.material[4].emissive.setHex(0x2dfcff);
+          c.material[5].emissive.setHex(0x2dfcff);
+          c.material[4].emissiveIntensity = 0.7;
+          c.material[5].emissiveIntensity = 0.7;
+          c.scale.set(1.05, 1.0, 1.05);
+        } else {
+          c.material[4].color.setHex(0x6a6f87);
+          c.material[5].color.setHex(0x6a6f87);
+          c.material[4].emissive.setHex(0x000000);
+          c.material[5].emissive.setHex(0x000000);
+          c.scale.set(0.98, 1.0, 0.98);
         }
       }
     }
 
-    // scorpion exit pad: check within scorpion root
-    if(S.scorpion.root){
-      S.scorpion.root.traverse((o)=>{
-        if(!o?.userData?.action) return;
-        const wp=o.getWorldPosition(new S.THREE.Vector3());
-        const d=wp.distanceTo(p);
-        if(d < 1.15){
-          if(o.userData.action==="exit_to_lobby" && S.room==="scorpion"){
-            exitToLobby();
-          }
-        }
+    // pot changes
+    S.pot.value = Math.floor(800 + Math.random() * 2400);
+  }
+
+  // Community hover only when looked at
+  function updateCardHover(dt) {
+    const P = S.poker;
+    if (!P.hoverOnlyCommunity) return;
+    if (!S.camera) return;
+
+    const camPos = S.camera.getWorldPosition(v3());
+    const camDir = v3(0, 0, -1).applyQuaternion(S.camera.getWorldQuaternion(new S.THREE.Quaternion())).normalize();
+
+    // Only community cards hover and glow when in focus
+    for (const c of P.community) {
+      if (!c.visible) continue;
+
+      const wpos = c.getWorldPosition(v3());
+      const to = wpos.clone().sub(camPos);
+      const dist = to.length();
+      const dot = to.normalize().dot(camDir);
+
+      const focused = dist < 6.5 && dot > 0.985;
+      const targetY = focused ? 1.22 : 1.07;
+      c.position.y = lerp(c.position.y, targetY, clamp(dt * 6, 0, 1));
+
+      const e = focused ? 0.6 : 0.0;
+      c.material[4].emissive.setHex(0x7fe7ff);
+      c.material[5].emissive.setHex(0x7fe7ff);
+      c.material[4].emissiveIntensity = e;
+      c.material[5].emissiveIntensity = e;
+    }
+  }
+
+  // ---------------- pot HUD + chips ----------------
+  function buildPotHUDandChips() {
+    const G = new S.THREE.Group();
+    G.name = "PotHUD";
+    S.poker.table.add(G);
+    S.pot.root = G;
+
+    G.position.set(0, 1.9, -0.65); // visible from outside
+    const tag = makeTextTag("POT: 0 | TURN: 1 | BET: 0 | ACTION: CHECK", 0x2dfcff, 0.22);
+    tag.name = "PotText";
+    tag.scale.setScalar(0.95);
+    G.add(tag);
+    S.pot.text = tag;
+
+    // Chips root
+    const chips = new S.THREE.Group();
+    chips.name = "ChipsRoot";
+    S.poker.table.add(chips);
+    S.pot.chipsRoot = chips;
+
+    // chip pool
+    const chipGeo = new S.THREE.CylinderGeometry(0.09, 0.09, 0.03, 18);
+    const chipMat = new S.THREE.MeshStandardMaterial({
+      color: safeColor(0xff2d7a),
+      roughness: 0.55,
+      metalness: 0.12,
+      emissive: safeColor(0xff2d7a),
+      emissiveIntensity: 0.15,
+    });
+
+    for (let i = 0; i < 140; i++) {
+      const c = new S.THREE.Mesh(chipGeo, chipMat.clone());
+      c.visible = false;
+      c.rotation.set(0, 0, 0); // ✅ flat (no sideways)
+      chips.add(c);
+      S.pot.chipPool.push(c);
+    }
+
+    // seat chip targets on scorpion table
+    const P = S.poker;
+    S.pot.seatChipTargets = [];
+    for (let s = 0; s < P.seats; s++) {
+      const p = P.seatPos[s] || [0, 0, 0];
+      const t = v3(p[0] * 0.45, 1.05, p[2] * 0.45);
+      S.pot.seatChipTargets.push(t);
+    }
+
+    S.log("[world] pot HUD + chips ✅");
+  }
+
+  function setPotHUD({ pot, turn, bet, action, winner }) {
+    const L = S.pot.last;
+    if (pot === L.pot && turn === L.turn && bet === L.bet && action === L.action && winner === L.winner) return;
+    L.pot = pot; L.turn = turn; L.bet = bet; L.action = action; L.winner = winner;
+
+    const win = winner ? ` | WINNER: ${winner}` : "";
+    S.pot.text?.userData?.setText?.(`POT: ${pot} | TURN: ${turn} | BET: ${bet} | ACTION: ${action}${win}`);
+  }
+
+  function throwChip(from, to, colorHex = 0xff2d7a) {
+    const chip = S.pot.chipPool.find((c) => !c.visible);
+    if (!chip) return;
+
+    chip.visible = true;
+    chip.position.copy(from);
+    chip.rotation.set(0, 0, 0); // ✅ flat
+    chip.material.color.setHex(colorHex);
+    chip.material.emissive.setHex(colorHex);
+
+    S.pot.fly.push({
+      chip,
+      t: 0,
+      dur: 0.38 + Math.random() * 0.18,
+      from: from.clone(),
+      to: to.clone(),
+      arc: 0.35 + Math.random() * 0.25,
+    });
+  }
+
+  function updateChipFlights(dt) {
+    const fly = S.pot.fly;
+    if (!fly.length) return;
+
+    for (let i = fly.length - 1; i >= 0; i--) {
+      const f = fly[i];
+      f.t += dt;
+      const u = clamp(f.t / f.dur, 0, 1);
+      const yArc = Math.sin(u * Math.PI) * f.arc;
+
+      f.chip.position.set(
+        lerp(f.from.x, f.to.x, u),
+        lerp(f.from.y, f.to.y, u) + yArc,
+        lerp(f.from.z, f.to.z, u)
+      );
+
+      // little spin around Y only (still flat)
+      f.chip.rotation.y += dt * 6.0;
+
+      if (u >= 1) {
+        // land flat on table
+        f.chip.position.copy(f.to);
+        f.chip.rotation.set(0, f.chip.rotation.y, 0);
+        fly.splice(i, 1);
+      }
+    }
+  }
+
+  // ---------------- update: room portal + seating ----------------
+  function updateRoomTransitions(dt) {
+    // Simple proximity triggers: teleport pad in lobby goes to scorpion (for now)
+    // and player can return to lobby by stepping near scorpion back wall.
+
+    if (!S.player) return;
+
+    const p = S.player.position;
+    // Lobby arch pad at (0,0,14) radius ~1.3 (in lobby space)
+    if (S.room === "lobby") {
+      const dx = p.x - 0;
+      const dz = p.z - 14;
+      const d = Math.hypot(dx, dz);
+      if (d < 1.15) {
+        // enter scorpion
+        gotoRoom("scorpion");
+      }
+    }
+
+    if (S.room === "scorpion") {
+      // auto-seat if stand on sitPad (near tableG local z=3.8 in scorpion space)
+      const target = S.roomTargets.scorpion.pos;
+      // compute player pos relative to scorpion table world: easiest just check scorpion world coords near (-10,6)
+      const sx = -10;
+      const sz = 6;
+      // Rough check for sit zone (world)
+      const sitX = sx + 0;
+      const sitZ = sz + 3.8;
+      const d2 = Math.hypot(p.x - sitX, p.z - sitZ);
+      if (d2 < 1.05 && !window.__SEATED_MODE) {
+        // sit down: lock movement
+        window.__SEATED_MODE = true;
+        // move player to “seat 0” (front)
+        const seat0 = S.poker.seatPos[0] || [0, 0, 3.9];
+        S.player.position.set(sx + seat0[0], 0, sz + seat0[2]);
+        S.player.rotation.y = S.roomTargets.scorpion.yaw + Math.PI;
+      }
+
+      // return to lobby if move back near scorpion entrance area
+      const backD = Math.hypot(p.x - (sx + 0), p.z - (sz - 4.0));
+      if (backD < 1.25) {
+        window.__SEATED_MODE = false;
+        gotoRoom("lobby");
+      }
+    }
+  }
+
+  function gotoRoom(room) {
+    if (!S.roomTargets[room]) return;
+    S.room = room;
+
+    const t = S.roomTargets[room];
+    S.player.position.set(t.pos[0], t.pos[1], t.pos[2]);
+    S.player.rotation.y = t.yaw;
+
+    // Standing in lobby always
+    if (room === "lobby") window.__SEATED_MODE = false;
+
+    S.log(`[rm] room=${room}`);
+  }
+
+  // ---------------- update: bots ----------------
+  function updateLobbyBots(dt) {
+    const bots = S.bots.lobby;
+    if (!bots.length) return;
+
+    const R = 13.5;
+    for (let i = 0; i < bots.length; i++) {
+      const b = bots[i];
+      const sp = b.userData.walk?.speed || 0.25;
+      b.userData.pathA += dt * sp * 0.45;
+
+      const a = b.userData.pathA;
+      const x = Math.cos(a) * R;
+      const z = Math.sin(a) * R;
+      b.position.x = x;
+      b.position.z = z;
+
+      // face direction of travel
+      const nx = Math.cos(a + 0.02) * R;
+      const nz = Math.sin(a + 0.02) * R;
+      b.lookAt(nx, 1.25, nz);
+
+      // walk cycle
+      const phase = S.t * (2.8 + sp * 4.0);
+      b.traverse((o) => {
+        if (o.userData?._leg) o.rotation.x = Math.sin(phase) * 0.55 * o.userData._leg;
+        if (o.userData?._calf) o.rotation.x = Math.sin(phase + 0.8) * 0.35 * o.userData._calf;
+        if (o.userData?._arm) o.rotation.x = Math.sin(phase + Math.PI) * 0.45 * o.userData._arm;
+        if (o.userData?._fore) o.rotation.x = Math.sin(phase + Math.PI + 0.8) * 0.25 * o.userData._fore;
       });
     }
   }
 
-  // -------- init / update --------
-  async function init({ THREE, scene, renderer, camera, player, controllers, log: logFn }){
-    S.THREE=THREE; S.scene=scene; S.renderer=renderer; S.camera=camera; S.player=player; S.controllers=controllers;
-    S.log=logFn || console.log;
+  function updateScorpionBots(dt) {
+    // seated bots: subtle idle arm motion
+    const bots = S.bots.scorpion;
+    if (!bots.length) return;
 
-    S.root=new THREE.Group();
-    S.root.name="WorldRoot";
+    for (const b of bots) {
+      const phase = S.t * 1.25 + (b.userData.seat || 0);
+      b.traverse((o) => {
+        if (o.userData?._arm) o.rotation.x = Math.sin(phase) * 0.12 * o.userData._arm;
+        if (o.userData?._fore) o.rotation.x = Math.sin(phase + 0.8) * 0.08 * o.userData._fore;
+      });
+    }
+  }
+
+  // ---------------- update: pot HUD + chips behavior ----------------
+  function updatePot(dt) {
+    // Face camera + slight tilt down (your requirement)
+    if (S.pot.root && S.camera) {
+      const cam = S.camera.getWorldPosition(v3());
+      S.pot.root.lookAt(cam.x, cam.y, cam.z);
+      S.pot.root.rotation.x -= 0.18;
+    }
+
+    // Drive HUD from poker state
+    const turn = (S.poker.activeSeat % S.poker.seats) + 1;
+    const bet = S.poker.bet | 0;
+    const action = S.poker.stage === "idle" ? "SHOWDOWN" : "BETTING";
+    const winner = S.poker.winner || "";
+    setPotHUD({ pot: S.pot.value | 0, turn, bet, action, winner });
+
+    // Chip throws (everyone, flat landing)
+    // On each stage tick, toss a few chips from random seats toward center.
+    if (S.poker.stage !== "idle") {
+      if (Math.random() < 0.08) {
+        const s = 1 + Math.floor(Math.random() * 4);
+        const from = S.pot.seatChipTargets[s].clone();
+        from.y = 1.05;
+        // center pot location
+        const to = v3(0, 1.05, -0.15);
+        throwChip(from, to, 0xff2d7a);
+        S.pot.value += 25 + (Math.random() * 75) | 0;
+        S.poker.bet = 25 + (Math.random() * 200) | 0;
+      }
+    }
+
+    updateChipFlights(dt);
+  }
+
+  // ---------------- init pipeline ----------------
+  async function init({ THREE, scene, renderer, camera, player, controllers, log }) {
+    S.THREE = THREE;
+    S.scene = scene;
+    S.renderer = renderer;
+    S.camera = camera;
+    S.player = player;
+    S.controllers = controllers;
+    S.log = log || console.log;
+
+    S.root = new THREE.Group();
+    S.root.name = "WorldRoot";
     scene.add(S.root);
 
-    scene.fog=new THREE.Fog(0x05060a, 18, 140);
+    S.colliders = [];
 
-    S.tex=mkProceduralTexture();
-    log("[world] init v7 …");
+    S.log("[world] init v8 …");
 
     buildLights();
-    buildFloorRing();
-    buildOuterWallsPreserved();
-    buildPitTableRailStairsAndChairs();
-    buildJumbotronsEmbedded();
-
-    buildTeleportArchMachine();
+    buildLobbyShell();
+    buildPitAndTable();
+    buildJumbotrons();
+    buildTeleportArch();
     buildLobbyBots();
-    buildStore();
 
+    await buildStore();
     buildScorpionRoom();
-    seatScorpionBots();
 
-    // Lobby poker
-    S.pokerLobby = PokerSim;
-    S.pokerLobby.init({
-      THREE, scene, root: S.root,
-      log: (m)=>log(m),
-      tableCenter: new THREE.Vector3(0,0,0),
-      tableY: S.tableY,
-      tableR: 3.05,
-      seatCount: 6,
-      camera: S.camera,
-      hoverCommunityOnly: true
-    });
-    S.pokerLobby.startNewHand();
-
-    // Scorpion poker (separate instance)
-    S.pokerScorpion = PokerSim;
-    S.pokerScorpion.init({
-      THREE, scene, root: S.scorpion.root,
-      log: (m)=>log(m),
-      tableCenter: new THREE.Vector3(0,0,0),
-      tableY: S.scorpion.tableY,
-      tableR: 3.05,
-      seatCount: 6,
-      camera: S.camera,
-      hoverCommunityOnly: true
-    });
-
-    // Pot HUD + chips (lobby)
+    initPoker();
     buildPotHUDandChips();
 
-    // spawn to lobby
-    if(S.player){
-      window.__SEATED_MODE = false;
-      S.player.position.set(0,0,12.5);
-      S.player.rotation.y = Math.PI;
-    }
+    // Start in lobby, standing
+    window.__SEATED_MODE = false;
+    gotoRoom("lobby");
 
-    log("[world] build complete ✅ (MASTER v7)");
+    S.log("[world] build complete ✅ (MASTER v8)");
   }
 
-  function update(dt){
+  // ---------------- update loop ----------------
+  function update(dt) {
     S.t += dt;
 
-    // bots walk (lobby only)
-    for(const bot of S.bots){
-      const w=bot.userData.walk;
-      if(!w) continue;
-      w.a += dt*w.speed;
-      bot.position.set(Math.cos(w.a)*w.r, 0, Math.sin(w.a)*w.r);
-      bot.lookAt(0,1.3,0);
+    // Room transitions + seat logic
+    updateRoomTransitions(dt);
+
+    // Poker progression only in scorpion room (or when seated)
+    if (S.room === "scorpion" || window.__SEATED_MODE) {
+      stepPoker(dt);
+      updateCardHover(dt);
     }
 
-    // keep tags facing camera
-    for(const b of [...S.bots, ...S.mannequins]){
-      b?.traverse?.((o)=>{ if(o?.userData?._tag && S.camera) o.lookAt(S.camera.position); });
-    }
-    // scorpion bots tag face
-    S.scorpion.root?.traverse?.((o)=>{ if(o?.userData?._tag && S.camera) o.lookAt(S.camera.position); });
+    updatePot(dt);
+    updateLobbyBots(dt);
+    updateScorpionBots(dt);
 
-    updatePotAndChips(dt);
-
-    // poker updates
-    S.pokerLobby?.update?.(dt);
-    S.pokerScorpion?.update?.(dt);
-
-    // portal pulse
-    if(S.arch?.portal){
-      const pulse=1.55 + Math.sin(S.t*2.2)*0.25;
-      S.arch.portal.material.emissiveIntensity = pulse;
-    }
-
-    // pad triggers (enter/exit)
-    updateRoomPads();
+    // keep hole cards layout stable if table moved
+    // (cheap, but stable)
+    if ((S.t % 2.0) < dt) layoutHoleCards();
   }
 
-  return { init, update, get colliders(){ return S.colliders; } };
+  // Expose colliders for teleport
+  function colliders() {
+    return S.colliders;
+  }
+
+  return { init, update, colliders };
 })();

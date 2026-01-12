@@ -1,72 +1,55 @@
-// /js/index.js — Scarlett MASTER 6.6 (FULL, TDZ-FIXED)
-// ✅ No bare "three" imports (uses ./three.js wrapper)
-// ✅ FIXED: welcomeEl TDZ crash (declared BEFORE any use)
-// ✅ Quest: laser + floor ring teleport + trigger teleport
-// ✅ Quest: left stick move + right stick 45° snap-turn
-// ✅ Android: dual touch sticks (move + turn)
-// ✅ Desktop: WASD + mouse look (pointer lock)
-// ✅ HUD: Welcome + Diagnostics + Copy + Spawn + Clean Mode ("HIDE EVERYTHING")
+// /js/index.js — Scarlett MASTER 6.7 (VIP-only spawn + Laser fix)
+// ✅ Laser no longer “stuck in middle” (laser only visible when controller is connected/visible)
+// ✅ VIP spawn is permanent (no lobby-center spawn used)
+// ✅ Teleport ring works (trigger to teleport)
+// ✅ 45° snap turn + move stick
+// ✅ HUD + Clean Mode
 
 import { THREE, VRButton } from "./three.js";
 import { World } from "./world.js";
 
-const BUILD = "MASTER 6.6 (TDZ fixed + Laser Teleport + 45° Snap + VIP Spawn + HUD)";
+const BUILD = "MASTER 6.7 (VIP Spawn Permanent + Laser Fix + Lights Ready)";
 const log = (...a) => console.log(...a);
 
-// ======================
-// WELCOME HUD STATE (MUST BE DECLARED EARLY)
-// ======================
+// WELCOME (declared early; TDZ-safe)
 let welcomeEl = null;
 let welcomeT = 0;
 
-// ======================
-// CORE
-// ======================
 let scene, camera, renderer, player, clock;
 
-// UI handles
+// UI
 let hud = null, hudBody = null;
 let vrBtnEl = null;
-let touchWrapEl = null;
 let cleanMode = false;
+const hudLines = new Map();
 
-// desktop look
+// Desktop look (kept for 2D)
 let yaw = 0, pitch = 0;
 let pointerLocked = false;
-
-// keyboard move
 let keyX = 0, keyY = 0;
 const keys = new Set();
 
-// touch sticks
-const touch = {
-  left: { id: null, x0: 0, y0: 0, x: 0, y: 0, active: false },
-  right:{ id: null, x0: 0, y0: 0, x: 0, y: 0, active: false },
-};
-
+// Movement
 const MOVE_SPEED = 2.6;
-
-// Quest snap turn
 let snapCooldown = 0;
 const SNAP_ANGLE = Math.PI / 4; // 45°
 const SNAP_DEAD = 0.75;
 const SNAP_COOLDOWN = 0.22;
 
-// HUD data
-const hudLines = new Map();
-
-// Teleport laser state
-let tp = {
+// Teleport Laser
+const tp = {
+  enabled: true,
+  installed: false,
   raycaster: null,
   marker: null,
   c0: null,
   c1: null,
+  line0: null,
+  line1: null,
   tmpM: null,
   tmpO: null,
   tmpD: null,
   hit: null,
-  installed: false,
-  enabled: true
 };
 
 init();
@@ -75,7 +58,7 @@ function init() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
 
-  camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 250);
+  camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 500);
 
   player = new THREE.Group();
   player.name = "PlayerRig";
@@ -89,29 +72,26 @@ function init() {
   renderer.xr.enabled = true;
   document.body.appendChild(renderer.domElement);
 
-  // VR button
   vrBtnEl = VRButton.createButton(renderer);
   document.body.appendChild(vrBtnEl);
 
-  // HUD + controls
   installHUD();
   installDesktopControls();
-  installTouchSticks();
 
-  // World
+  // Build world (includes floors + VIP pad)
   World.build({ THREE, scene, log, BUILD });
 
-  // Teleport laser (Quest)
+  // Teleport laser after world exists
   installTeleportLaser();
 
-  // Spawn in VIP (pink) facing table (world provides yaw)
+  // VIP spawn ONLY (permanent)
   resetToVIP();
 
   renderer.xr.addEventListener("sessionstart", () => {
     camera.position.set(0, 0, 0);
     resetToVIP();
     writeHUD("xr", "sessionstart ✅");
-    showWelcome("Welcome to Scarlett VR Poker — VIP Spawn Active");
+    showWelcome("VIP Spawn Active ✅");
   });
 
   renderer.xr.addEventListener("sessionend", () => {
@@ -125,13 +105,10 @@ function init() {
     renderer.setSize(innerWidth, innerHeight);
   });
 
-  // Seed HUD
   writeHUD("build", BUILD);
-  writeHUD("secure", String(window.isSecureContext));
-  writeHUD("ua", navigator.userAgent);
-  writeHUD("controls", "Quest: LStick=Move, RStick=SnapTurn 45°, Trigger=Teleport | H=Hide UI");
+  writeHUD("controls", "Quest: LStick move, RStick 45° snap, Trigger teleport | H = Hide UI");
 
-  showWelcome("Scarlett VR Poker — Loading VIP Lobby…");
+  showWelcome("Scarlett Poker VR — Loading VIP…");
 
   clock = new THREE.Clock();
   renderer.setAnimationLoop(loop);
@@ -139,35 +116,17 @@ function init() {
 
 function loop() {
   const dt = Math.min(clock.getDelta(), 0.05);
-
   moveTick(dt);
   updateTeleportLaser();
   updateHUD(dt);
-
   renderer.render(scene, camera);
 }
 
-// ======================
-// CLEAN MODE (HIDE EVERYTHING)
-// ======================
-function setCleanMode(on) {
-  cleanMode = !!on;
-
-  if (hud) hud.style.display = cleanMode ? "none" : "";
-  if (vrBtnEl) vrBtnEl.style.display = cleanMode ? "none" : "";
-  if (touchWrapEl) touchWrapEl.style.display = cleanMode ? "none" : "";
-
-  const bootlog = document.getElementById("bootlog");
-  if (bootlog) bootlog.style.display = cleanMode ? "none" : "";
-
-  log(cleanMode ? "[ui] CLEAN MODE ✅" : "[ui] UI shown ✅");
-}
-
-// ======================
-// SPAWNS
-// ======================
+// --------------------
+// VIP SPAWN ONLY
+// --------------------
 function resetToVIP() {
-  const s = World.getSpawn("lobby_vip_A");
+  const s = World.getSpawn("lobby_vip_A"); // permanent
   player.position.set(s.x, s.y, s.z);
   player.rotation.set(0, s.yaw ?? Math.PI, 0);
 
@@ -175,78 +134,58 @@ function resetToVIP() {
     yaw = player.rotation.y;
     pitch = 0;
   }
-
-  writeHUD("spawn", `VIP (${s.x.toFixed(2)}, ${s.z.toFixed(2)}) facing table`);
+  writeHUD("spawn", "VIP (permanent)");
 }
 
-function resetToLobby() {
-  const s = World.getSpawn("lobby_center");
-  player.position.set(s.x, s.y, s.z);
-  player.rotation.set(0, s.yaw ?? Math.PI, 0);
-
-  if (!renderer.xr.isPresenting) {
-    yaw = player.rotation.y;
-    pitch = 0;
-  }
-
-  writeHUD("spawn", `Lobby (${s.x.toFixed(2)}, ${s.z.toFixed(2)})`);
-}
-
-// ======================
+// --------------------
 // MOVEMENT
-// ======================
+// --------------------
 function moveTick(dt) {
   const presenting = renderer.xr.isPresenting;
 
   let moveX = 0, moveY = 0, turn = 0;
 
   if (presenting) {
-    // XR sticks (Quest)
     const session = renderer.xr.getSession?.();
     if (session) {
-      let best = { mag: 0, mx: 0, my: 0, tx: 0, axes: [] };
+      let best = { mag: 0, mx: 0, my: 0, tx: 0 };
 
       for (const src of session.inputSources) {
         const gp = src?.gamepad;
         if (!gp || !gp.axes) continue;
-
         const a = gp.axes;
         const a0 = a[0] ?? 0, a1 = a[1] ?? 0, a2 = a[2] ?? 0, a3 = a[3] ?? 0;
+
         const m01 = Math.abs(a0) + Math.abs(a1);
         const m23 = Math.abs(a2) + Math.abs(a3);
 
-        // pick stronger stick as move
+        // stronger stick = move
         const mx = (m23 > m01) ? a2 : a0;
         const my = (m23 > m01) ? a3 : a1;
 
-        // other stick X becomes turn input
+        // other stick X = turn
         const tx = (m23 > m01) ? a0 : a2;
 
         const mag = Math.abs(mx) + Math.abs(my);
-        if (mag > best.mag) best = { mag, mx, my, tx, axes: a.slice(0, 6) };
+        if (mag > best.mag) best = { mag, mx, my, tx };
       }
 
       moveX = best.mx;
       moveY = best.my;
-      turn  = best.tx;
-
-      writeHUD("axes", best.axes.map(v => (v ?? 0).toFixed(2)).join(", "));
-      writeHUD("inputs", `XR sources=${session.inputSources?.length ?? 0}`);
+      turn = best.tx;
     }
   } else {
-    // Android + Desktop
-    moveX += touch.left.x + keyX;
-    moveY += touch.left.y + keyY;
-    turn  += touch.right.x;
+    // desktop
+    moveX = keyX;
+    moveY = keyY;
   }
 
   moveX = deadzone(moveX, 0.12);
   moveY = deadzone(moveY, 0.12);
-  turn  = deadzone(turn,  0.18);
+  turn  = deadzone(turn, 0.18);
 
-  // Turning
+  // turn
   if (presenting) {
-    // 45° snap-turn on right stick
     snapCooldown -= dt;
     if (snapCooldown <= 0) {
       if (turn > SNAP_DEAD) {
@@ -258,14 +197,13 @@ function moveTick(dt) {
       }
     }
   } else {
-    // smooth turn for phone/desktop
     if (turn) {
       yaw -= turn * 2.0 * dt;
       player.rotation.y = yaw;
     }
   }
 
-  // Move relative to heading
+  // move relative to heading
   if (moveX || moveY) {
     const heading = getHeadingYaw(presenting);
     const forward = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading));
@@ -281,7 +219,7 @@ function moveTick(dt) {
     }
   }
 
-  // Desktop look
+  // desktop pitch
   if (!presenting) {
     camera.rotation.set(pitch, 0, 0);
     player.rotation.y = yaw;
@@ -298,9 +236,9 @@ function getHeadingYaw(presenting) {
   return e.y;
 }
 
-// ======================
-// TELEPORT LASER (Quest)
-// ======================
+// --------------------
+// TELEPORT LASER (FIXED: no “stuck in middle”)
+// --------------------
 function installTeleportLaser() {
   tp.raycaster = new THREE.Raycaster();
   tp.tmpM = new THREE.Matrix4();
@@ -309,8 +247,8 @@ function installTeleportLaser() {
 
   // marker ring
   tp.marker = new THREE.Mesh(
-    new THREE.RingGeometry(0.22, 0.34, 48),
-    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.85 })
+    new THREE.RingGeometry(0.22, 0.36, 48),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.90 })
   );
   tp.marker.rotation.x = -Math.PI / 2;
   tp.marker.visible = false;
@@ -321,56 +259,72 @@ function installTeleportLaser() {
   tp.c1 = renderer.xr.getController(1);
   scene.add(tp.c0, tp.c1);
 
-  // visible laser lines
+  // Laser lines (start hidden; only show when controller is actually connected)
   const pts = [new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)];
   const geo = new THREE.BufferGeometry().setFromPoints(pts);
-  const mat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.9 });
 
-  const line0 = new THREE.Line(geo, mat);
-  line0.scale.z = 12;
-  tp.c0.add(line0);
+  tp.line0 = new THREE.Line(geo, new THREE.LineBasicMaterial({ transparent:true, opacity: 0.95 }));
+  tp.line0.scale.z = 12;
+  tp.line0.visible = false;
+  tp.c0.add(tp.line0);
 
-  const line1 = new THREE.Line(geo, mat.clone());
-  line1.scale.z = 12;
-  tp.c1.add(line1);
+  tp.line1 = new THREE.Line(geo, new THREE.LineBasicMaterial({ transparent:true, opacity: 0.95 }));
+  tp.line1.scale.z = 12;
+  tp.line1.visible = false;
+  tp.c1.add(tp.line1);
 
-  // teleport on trigger (select)
+  // Connected/disconnected events toggle visibility correctly
+  tp.c0.addEventListener("connected", () => { tp.line0.visible = true; });
+  tp.c0.addEventListener("disconnected", () => { tp.line0.visible = false; });
+  tp.c1.addEventListener("connected", () => { tp.line1.visible = true; });
+  tp.c1.addEventListener("disconnected", () => { tp.line1.visible = false; });
+
+  // Teleport on trigger
   const doTeleport = () => {
     if (!tp.enabled || !tp.hit) return;
     player.position.set(tp.hit.x, player.position.y, tp.hit.z);
     tp.marker.visible = false;
     writeHUD("tp", `teleport -> ${tp.hit.x.toFixed(2)}, ${tp.hit.z.toFixed(2)}`);
   };
-
   tp.c0.addEventListener("selectstart", doTeleport);
   tp.c1.addEventListener("selectstart", doTeleport);
 
   tp.installed = true;
-  writeHUD("tp", "laser ✅ (Trigger teleports)");
+  writeHUD("tp", "laser ✅ (hidden until controller connects)");
 }
 
 function updateTeleportLaser() {
   if (!tp.installed || !tp.enabled) return;
-  if (!renderer.xr.isPresenting || !tp.raycaster) {
-    if (tp.marker) tp.marker.visible = false;
+
+  // Only operate in XR
+  if (!renderer.xr.isPresenting) {
+    tp.marker.visible = false;
+    return;
+  }
+
+  // CRITICAL FIX:
+  // If controller isn't visible/connected, do NOT render marker/hits from origin.
+  const cands = [];
+  if (tp.c1?.visible && tp.line1?.visible) cands.push(tp.c1);
+  if (tp.c0?.visible && tp.line0?.visible) cands.push(tp.c0);
+
+  if (!cands.length) {
+    tp.marker.visible = false;
+    tp.hit = null;
     return;
   }
 
   const floors = World.getFloors ? World.getFloors() : [];
   tp.hit = null;
 
-  // prefer right then left
-  const controllers = [tp.c1, tp.c0];
-
-  for (const c of controllers) {
-    if (!c) continue;
-
+  for (const c of cands) {
     tp.tmpM.identity().extractRotation(c.matrixWorld);
     tp.tmpO.setFromMatrixPosition(c.matrixWorld);
     tp.tmpD.set(0, 0, -1).applyMatrix4(tp.tmpM).normalize();
 
     tp.raycaster.set(tp.tmpO, tp.tmpD);
     const hits = tp.raycaster.intersectObjects(floors, true);
+
     if (hits && hits.length) {
       const p = hits[0].point;
       tp.hit = p;
@@ -383,46 +337,16 @@ function updateTeleportLaser() {
   tp.marker.visible = false;
 }
 
-// ======================
-// HUD (Welcome + Diagnostics)
-// ======================
-function showWelcome(text) {
-  // Bulletproof guards
-  if (!document.body) return;
-
-  if (!welcomeEl) {
-    welcomeEl = document.createElement("div");
-    welcomeEl.style.position = "fixed";
-    welcomeEl.style.left = "50%";
-    welcomeEl.style.top = "14px";
-    welcomeEl.style.transform = "translateX(-50%)";
-    welcomeEl.style.zIndex = "99999";
-    welcomeEl.style.background = "rgba(10,12,18,0.66)";
-    welcomeEl.style.color = "#e8ecff";
-    welcomeEl.style.border = "1px solid rgba(127,231,255,0.25)";
-    welcomeEl.style.borderRadius = "14px";
-    welcomeEl.style.padding = "10px 14px";
-    welcomeEl.style.backdropFilter = "blur(8px)";
-    welcomeEl.style.fontFamily = "system-ui,Segoe UI,Roboto,Arial";
-    welcomeEl.style.fontSize = "13px";
-    welcomeEl.style.fontWeight = "700";
-    welcomeEl.style.userSelect = "none";
-    welcomeEl.style.pointerEvents = "none";
-    document.body.appendChild(welcomeEl);
-  }
-
-  welcomeEl.textContent = text;
-  welcomeEl.style.opacity = "1";
-  welcomeT = 6.0;
-}
-
+// --------------------
+// HUD + CLEAN MODE
+// --------------------
 function installHUD() {
   hud = document.createElement("div");
   hud.style.position = "fixed";
   hud.style.left = "12px";
   hud.style.top = "12px";
   hud.style.zIndex = "99998";
-  hud.style.maxWidth = "440px";
+  hud.style.maxWidth = "480px";
   hud.style.background = "rgba(10,12,18,0.62)";
   hud.style.color = "#e8ecff";
   hud.style.border = "1px solid rgba(127,231,255,0.25)";
@@ -441,18 +365,16 @@ function installHUD() {
 
     <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
       <button id="btnVip">Spawn VIP</button>
-      <button id="btnLobby">Spawn Lobby</button>
-      <button id="btnCopy">Copy</button>
       <button id="btnTp">Teleport: ON</button>
+      <button id="btnCopy">Copy Log</button>
     </div>
 
     <div id="hudBody" style="margin-top:10px;opacity:.92;line-height:1.35;white-space:pre-wrap;"></div>
   `;
   document.body.appendChild(hud);
-
   hudBody = hud.querySelector("#hudBody");
 
-  // style buttons
+  // Style buttons
   [...hud.querySelectorAll("button")].forEach(b => {
     b.style.background = "rgba(127,231,255,0.14)";
     b.style.color = "#e8ecff";
@@ -462,20 +384,7 @@ function installHUD() {
     b.style.cursor = "pointer";
   });
 
-  hud.querySelector("#btnVip").onclick = () => { resetToVIP(); showWelcome("VIP Spawn (Pink) — Facing Table"); };
-  hud.querySelector("#btnLobby").onclick = () => { resetToLobby(); showWelcome("Lobby Spawn"); };
-
-  hud.querySelector("#btnCopy").onclick = async () => {
-    const txt = [...hudLines.entries()].map(([k,v]) => `${k}: ${v}`).join("\n");
-    try {
-      await navigator.clipboard.writeText(txt);
-      writeHUD("copy", "copied ✅");
-      showWelcome("Diagnostics copied ✅");
-    } catch {
-      writeHUD("copy", "copy failed ❌");
-      showWelcome("Copy failed ❌");
-    }
-  };
+  hud.querySelector("#btnVip").onclick = () => { resetToVIP(); showWelcome("VIP Spawn ✅"); };
 
   hud.querySelector("#btnTp").onclick = () => {
     tp.enabled = !tp.enabled;
@@ -483,25 +392,33 @@ function installHUD() {
     showWelcome(tp.enabled ? "Teleport enabled" : "Teleport disabled");
   };
 
-  hud.querySelector("#btnClean").onclick = () => {
-    setCleanMode(!cleanMode);
-    showWelcome(cleanMode ? "Clean Mode ON (UI hidden)" : "UI visible");
+  hud.querySelector("#btnCopy").onclick = async () => {
+    const txt = [...hudLines.entries()].map(([k,v]) => `${k}: ${v}`).join("\n");
+    try { await navigator.clipboard.writeText(txt); showWelcome("Copied ✅"); }
+    catch { showWelcome("Copy failed ❌"); }
   };
 
-  // hotkeys
+  hud.querySelector("#btnClean").onclick = () => {
+    cleanMode = !cleanMode;
+    setCleanMode(cleanMode);
+    showWelcome(cleanMode ? "Clean Mode ON" : "Clean Mode OFF");
+  };
+
   addEventListener("keydown", (e) => {
     const k = e.key.toLowerCase();
+    if (k === "h") setCleanMode(!(cleanMode = !cleanMode));
     if (k === "r") resetToVIP();
-    if (k === "h") setCleanMode(!cleanMode);
-    if (k === "t") {
-      tp.enabled = !tp.enabled;
-      const b = hud.querySelector("#btnTp");
-      if (b) b.textContent = tp.enabled ? "Teleport: ON" : "Teleport: OFF";
-    }
   });
 }
 
-function writeHUD(key, value) { hudLines.set(key, value); }
+function setCleanMode(on) {
+  if (hud) hud.style.display = on ? "none" : "";
+  if (vrBtnEl) vrBtnEl.style.display = on ? "none" : "";
+  const bootlog = document.getElementById("bootlog");
+  if (bootlog) bootlog.style.display = on ? "none" : "";
+}
+
+function writeHUD(k, v) { hudLines.set(k, v); }
 
 function updateHUD(dt) {
   // welcome fade
@@ -514,16 +431,42 @@ function updateHUD(dt) {
   if (cleanMode) return;
 
   writeHUD("mode", renderer.xr.isPresenting ? "XR" : "2D");
-  writeHUD("pos", `${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)}`);
-  writeHUD("yaw", `${player.rotation.y.toFixed(2)}`);
-  writeHUD("snap", `45° (cooldown ${Math.max(0,snapCooldown).toFixed(2)}s)`);
+  writeHUD("pos", `${player.position.x.toFixed(2)}, ${player.position.z.toFixed(2)}`);
+  writeHUD("laser", tp.enabled ? "ON" : "OFF");
+  writeHUD("walls", "tall ✅ (jumbotron-ready)");
 
   if (hudBody) hudBody.textContent = [...hudLines.entries()].map(([k,v]) => `${k}: ${v}`).join("\n");
 }
 
-// ======================
-// DESKTOP CONTROLS (WASD + MOUSE LOOK)
-// ======================
+function showWelcome(text) {
+  if (!document.body) return;
+  if (!welcomeEl) {
+    welcomeEl = document.createElement("div");
+    welcomeEl.style.position = "fixed";
+    welcomeEl.style.left = "50%";
+    welcomeEl.style.top = "14px";
+    welcomeEl.style.transform = "translateX(-50%)";
+    welcomeEl.style.zIndex = "99999";
+    welcomeEl.style.background = "rgba(10,12,18,0.66)";
+    welcomeEl.style.color = "#e8ecff";
+    welcomeEl.style.border = "1px solid rgba(127,231,255,0.25)";
+    welcomeEl.style.borderRadius = "14px";
+    welcomeEl.style.padding = "10px 14px";
+    welcomeEl.style.backdropFilter = "blur(8px)";
+    welcomeEl.style.fontFamily = "system-ui,Segoe UI,Roboto,Arial";
+    welcomeEl.style.fontSize = "13px";
+    welcomeEl.style.fontWeight = "700";
+    welcomeEl.style.pointerEvents = "none";
+    document.body.appendChild(welcomeEl);
+  }
+  welcomeEl.textContent = text;
+  welcomeEl.style.opacity = "1";
+  welcomeT = 5.5;
+}
+
+// --------------------
+// Desktop controls (kept)
+// --------------------
 function installDesktopControls() {
   addEventListener("keydown", (e) => {
     keys.add(e.key.toLowerCase());
@@ -557,93 +500,4 @@ function installDesktopControls() {
     pitch -= (e.movementY || 0) * 0.0020;
     pitch = Math.max(-1.25, Math.min(1.25, pitch));
   });
-}
-
-// ======================
-// ANDROID TOUCH STICKS (auto)
-// ======================
-function installTouchSticks() {
-  const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
-  if (!isTouch) return;
-
-  const wrap = document.createElement("div");
-  wrap.style.position = "fixed";
-  wrap.style.left = "0";
-  wrap.style.right = "0";
-  wrap.style.bottom = "0";
-  wrap.style.height = "48%";
-  wrap.style.pointerEvents = "none";
-  wrap.style.zIndex = "99997";
-  document.body.appendChild(wrap);
-  touchWrapEl = wrap;
-
-  const mk = (side) => {
-    const el = document.createElement("div");
-    el.style.position = "absolute";
-    el.style.bottom = "18px";
-    el.style.width = "140px";
-    el.style.height = "140px";
-    el.style.borderRadius = "999px";
-    el.style.border = "1px solid rgba(255,255,255,0.18)";
-    el.style.background = "rgba(0,0,0,0.10)";
-    el.style.pointerEvents = "auto";
-    el.style.touchAction = "none";
-    if (side === "left") el.style.left = "18px";
-    else el.style.right = "18px";
-    wrap.appendChild(el);
-
-    const nub = document.createElement("div");
-    nub.style.position = "absolute";
-    nub.style.left = "50%";
-    nub.style.top = "50%";
-    nub.style.width = "54px";
-    nub.style.height = "54px";
-    nub.style.transform = "translate(-50%,-50%)";
-    nub.style.borderRadius = "999px";
-    nub.style.background = "rgba(127,231,255,0.18)";
-    nub.style.border = "1px solid rgba(127,231,255,0.35)";
-    el.appendChild(nub);
-
-    return { el, nub };
-  };
-
-  const L = mk("left");
-  const R = mk("right");
-
-  const bind = (stick, ui) => {
-    ui.el.addEventListener("pointerdown", (e) => {
-      stick.id = e.pointerId;
-      stick.active = true;
-      stick.x0 = e.clientX;
-      stick.y0 = e.clientY;
-      stick.x = 0; stick.y = 0;
-      ui.el.setPointerCapture(e.pointerId);
-    });
-
-    ui.el.addEventListener("pointermove", (e) => {
-      if (!stick.active || e.pointerId !== stick.id) return;
-      const dx = (e.clientX - stick.x0) / 55;
-      const dy = (e.clientY - stick.y0) / 55;
-      stick.x = Math.max(-1, Math.min(1, dx));
-      stick.y = Math.max(-1, Math.min(1, -dy));
-      ui.nub.style.transform =
-        `translate(calc(-50% + ${stick.x * 28}px), calc(-50% + ${-stick.y * 28}px))`;
-    });
-
-    const end = (e) => {
-      if (e.pointerId !== stick.id) return;
-      stick.active = false;
-      stick.id = null;
-      stick.x = 0; stick.y = 0;
-      ui.nub.style.transform = "translate(-50%,-50%)";
-    };
-
-    ui.el.addEventListener("pointerup", end);
-    ui.el.addEventListener("pointercancel", end);
-  };
-
-  bind(touch.left, L);
-  bind(touch.right, R);
-
-  writeHUD("android", "dual-stick ✅");
-}
+    }

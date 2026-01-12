@@ -1,8 +1,11 @@
-// /js/world.js — Scarlett MASTER WORLD v6.2
-// ✅ Circular lobby with perimeter walls (segmented) + 4 doorway openings
-// ✅ Hallways + rooms with real doorway gaps (no blocked entrances)
-// ✅ Strong lighting + neon strips
-// ✅ Divot + table zone + VIP spawn machine + pads
+// /js/world.js — Scarlett MASTER WORLD v6.3 (Beautification Pass 1)
+// ✅ Doorways open (no blocked hallways)
+// ✅ Perimeter walls (no outside void)
+// ✅ BRIGHT casino lighting + neon trims
+// ✅ Ceiling canopy + hanging lights
+// ✅ Hallway signs + room signs
+// ✅ Jumbotrons (4) facing lobby center
+// ✅ Divot clearly visible + table zone
 // ✅ Exposes floors[] for teleport raycast
 
 export const World = (() => {
@@ -10,7 +13,7 @@ export const World = (() => {
     group: null,
     floors: [],
     spawns: {},
-    tableZone: null,
+    tableZone: null
   };
 
   function _mat(THREE, hex, opts = {}) {
@@ -20,7 +23,7 @@ export const World = (() => {
       roughness: opts.roughness ?? 0.9,
       emissive: opts.emissive ?? 0x000000,
       emissiveIntensity: opts.emissiveIntensity ?? 0.0,
-      side: opts.side ?? THREE.FrontSide,
+      side: opts.side ?? THREE.FrontSide
     });
   }
 
@@ -38,50 +41,50 @@ export const World = (() => {
   }
 
   function build({ THREE, scene, log = console.log }) {
-    // Root
     const root = new THREE.Group();
     root.name = "ScarlettWorld";
     scene.add(root);
     state.group = root;
 
+    // Atmosphere: subtle fog = depth + mood (still bright)
+    scene.fog = new THREE.FogExp2(0x05060a, 0.015);
+
     // Materials
     const matFloor = _mat(THREE, 0x0b0f1a, { roughness: 0.98 });
     const matWall  = _mat(THREE, 0x121a2b, { roughness: 0.92 });
-    const matTrim  = _mat(THREE, 0x1a2a44, { roughness: 0.75, metalness: 0.25 });
-    const matNeon  = _mat(THREE, 0x101820, { roughness: 0.55, metalness: 0.35, emissive: 0x7fe7ff, emissiveIntensity: 1.2 });
-    const matPink  = _mat(THREE, 0x101018, { roughness: 0.55, metalness: 0.35, emissive: 0xff2d7a, emissiveIntensity: 1.25 });
+    const matTrim  = _mat(THREE, 0x1a2a44, { roughness: 0.70, metalness: 0.28 });
+    const matNeon  = _mat(THREE, 0x101820, { roughness: 0.55, metalness: 0.35, emissive: 0x7fe7ff, emissiveIntensity: 1.25 });
+    const matPink  = _mat(THREE, 0x101018, { roughness: 0.55, metalness: 0.35, emissive: 0xff2d7a, emissiveIntensity: 1.35 });
+    const matGold  = _mat(THREE, 0x2a2414, { roughness: 0.45, metalness: 0.75, emissive: 0xffcc66, emissiveIntensity: 0.15 });
 
-    // =========================
-    // LIGHTING PACK (BRIGHT)
-    // =========================
-    const hemi = new THREE.HemisphereLight(0xbfd5ff, 0x141526, 0.55);
+    // ===== Lighting Pack (BRIGHT) =====
+    const hemi = new THREE.HemisphereLight(0xbfd5ff, 0x141526, 0.65);
     root.add(hemi);
 
-    const sun = new THREE.DirectionalLight(0xffffff, 1.25);
+    const sun = new THREE.DirectionalLight(0xffffff, 1.35);
     sun.position.set(10, 18, 8);
     root.add(sun);
 
-    // Lobby lights (bright, soft)
-    const lobbyLightA = new THREE.PointLight(0xbfd5ff, 12.0, 60, 2.0);
-    lobbyLightA.position.set(0, 8.5, 0);
-    root.add(lobbyLightA);
+    const fillA = new THREE.PointLight(0xbfd5ff, 9.0, 70, 2.0);
+    fillA.position.set(0, 8.0, 0);
+    root.add(fillA);
 
-    const lobbyLightB = new THREE.PointLight(0x7fe7ff, 7.0, 45, 2.0);
-    lobbyLightB.position.set(0, 4.5, 10);
-    root.add(lobbyLightB);
+    const fillB = new THREE.PointLight(0x7fe7ff, 6.0, 55, 2.0);
+    fillB.position.set(-9, 4.0, 6);
+    root.add(fillB);
 
-    const lobbyLightC = new THREE.PointLight(0xff2d7a, 5.0, 35, 2.0);
-    lobbyLightC.position.set(6.5, 3.0, 8.5);
-    root.add(lobbyLightC);
+    const fillC = new THREE.PointLight(0xff2d7a, 4.5, 45, 2.0);
+    fillC.position.set(9, 3.5, 6);
+    root.add(fillC);
 
-    // =========================
-    // MAIN LOBBY (CIRCLE)
-    // =========================
+    // ===== Main Lobby =====
     const lobby = new THREE.Group();
     lobby.name = "Lobby";
     root.add(lobby);
 
     const LOBBY_R = 18;
+    const WALL_H = 4.2;
+    const WALL_T = 0.35;
 
     const lobbyFloor = new THREE.Mesh(
       new THREE.CylinderGeometry(LOBBY_R, LOBBY_R, 0.2, 96),
@@ -91,62 +94,45 @@ export const World = (() => {
     lobby.add(lobbyFloor);
     _addFloor(lobbyFloor);
 
-    const rim = new THREE.Mesh(
-      new THREE.TorusGeometry(LOBBY_R - 0.6, 0.22, 16, 96),
-      matTrim
-    );
+    // Rim + guidance rings
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(LOBBY_R - 0.6, 0.22, 16, 96), matTrim);
     rim.rotation.x = Math.PI / 2;
     rim.position.y = 0.02;
     lobby.add(rim);
 
-    // Neon guidance ring
     lobby.add(_ring(THREE, LOBBY_R - 2.2, LOBBY_R - 2.0, 0.03, matNeon));
+    lobby.add(_ring(THREE, 12.2, 12.0, 0.03, matPink));
 
-    // =========================
-    // PERIMETER WALLS (SEGMENTS WITH 4 OPEN DOORS)
-    // =========================
-    // We build many wall panels around the circle and SKIP panels near the 4 hallway directions.
-    const WALL_H = 4.2;
-    const WALL_T = 0.35;
+    // ===== Ceiling Canopy (casino vibe) =====
+    const canopy = new THREE.Mesh(
+      new THREE.CylinderGeometry(LOBBY_R - 1.0, LOBBY_R - 1.0, 0.18, 96),
+      _mat(THREE, 0x0c101c, { roughness: 0.75, metalness: 0.15 })
+    );
+    canopy.position.y = 4.45;
+    lobby.add(canopy);
+
+    const canopyNeon = _ring(THREE, LOBBY_R - 2.8, LOBBY_R - 2.55, 4.36, matNeon);
+    lobby.add(canopyNeon);
+
+    // Hanging lights (gold pucks) around canopy
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2;
+      const x = Math.sin(a) * (LOBBY_R - 4.5);
+      const z = Math.cos(a) * (LOBBY_R - 4.5);
+
+      const puck = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 0.12, 18), matGold);
+      puck.position.set(x, 4.05, z);
+      lobby.add(puck);
+
+      const puckLight = new THREE.PointLight(0xfff1cc, 2.6, 18, 2.0);
+      puckLight.position.set(x, 4.0, z);
+      lobby.add(puckLight);
+    }
+
+    // ===== Perimeter Walls (segmented, with 4 door openings) =====
     const PANEL_COUNT = 40;
     const doorAngles = [0, Math.PI/2, Math.PI, -Math.PI/2]; // +Z, +X, -Z, -X
-    const doorHalfWidth = 0.23; // radians (~ door opening width)
-
-    for (let i = 0; i < PANEL_COUNT; i++) {
-      const a = (i / PANEL_COUNT) * Math.PI * 2;
-      // skip panels near door angles
-      let skip = false;
-      for (const da of doorAngles) {
-        const d = wrapAngle(a - da);
-        if (Math.abs(d) < doorHalfWidth) { skip = true; break; }
-      }
-      if (skip) continue;
-
-      // panel size approximates arc length
-      const arc = (2 * Math.PI * LOBBY_R) / PANEL_COUNT;
-      const panelW = arc * 0.98;
-
-      const panel = new THREE.Mesh(
-        new THREE.BoxGeometry(panelW, WALL_H, WALL_T),
-        matWall
-      );
-
-      const r = LOBBY_R - 0.15;
-      panel.position.set(Math.sin(a) * r, WALL_H/2, Math.cos(a) * r);
-
-      // face inward
-      panel.rotation.y = a;
-      lobby.add(panel);
-
-      // neon trim strip on top
-      const strip = new THREE.Mesh(
-        new THREE.BoxGeometry(panelW * 0.92, 0.14, 0.12),
-        matNeon
-      );
-      strip.position.set(panel.position.x, WALL_H - 0.35, panel.position.z);
-      strip.rotation.y = a;
-      lobby.add(strip);
-    }
+    const doorHalfWidth = 0.23;
 
     function wrapAngle(x){
       while (x > Math.PI) x -= Math.PI*2;
@@ -154,9 +140,32 @@ export const World = (() => {
       return x;
     }
 
-    // =========================
-    // CENTER DIVOT + TABLE ZONE
-    // =========================
+    for (let i = 0; i < PANEL_COUNT; i++) {
+      const a = (i / PANEL_COUNT) * Math.PI * 2;
+
+      let skip = false;
+      for (const da of doorAngles) {
+        const d = wrapAngle(a - da);
+        if (Math.abs(d) < doorHalfWidth) { skip = true; break; }
+      }
+      if (skip) continue;
+
+      const arc = (2 * Math.PI * LOBBY_R) / PANEL_COUNT;
+      const panelW = arc * 0.98;
+
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(panelW, WALL_H, WALL_T), matWall);
+      const r = LOBBY_R - 0.15;
+      panel.position.set(Math.sin(a) * r, WALL_H/2, Math.cos(a) * r);
+      panel.rotation.y = a;
+      lobby.add(panel);
+
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(panelW * 0.92, 0.14, 0.12), matNeon);
+      strip.position.set(panel.position.x, WALL_H - 0.35, panel.position.z);
+      strip.rotation.y = a;
+      lobby.add(strip);
+    }
+
+    // ===== Divot + Table Zone =====
     const divot = new THREE.Mesh(
       new THREE.CylinderGeometry(7.2, 9.2, 1.4, 96),
       matFloor
@@ -165,15 +174,11 @@ export const World = (() => {
     lobby.add(divot);
     _addFloor(divot);
 
-    const divotRim = new THREE.Mesh(
-      new THREE.TorusGeometry(9.2, 0.14, 14, 96),
-      matTrim
-    );
+    const divotRim = new THREE.Mesh(new THREE.TorusGeometry(9.2, 0.14, 14, 96), matTrim);
     divotRim.rotation.x = Math.PI / 2;
     divotRim.position.y = -0.02;
     lobby.add(divotRim);
 
-    // extra downlight into divot (so you SEE it)
     const divotLight = new THREE.SpotLight(0xbfd5ff, 18, 50, Math.PI/6, 0.35, 1.6);
     divotLight.position.set(0, 10, 0);
     divotLight.target.position.set(0, -0.6, 0);
@@ -182,24 +187,48 @@ export const World = (() => {
 
     const table = new THREE.Mesh(
       new THREE.CylinderGeometry(2.6, 2.6, 0.35, 48),
-      _mat(THREE, 0x1b2233, { roughness: 0.65, metalness: 0.2 })
+      _mat(THREE, 0x1b2233, { roughness: 0.62, metalness: 0.22 })
     );
     table.position.set(0, -0.35, 0);
     lobby.add(table);
 
-    const rail = new THREE.Mesh(
-      new THREE.TorusGeometry(3.6, 0.08, 12, 96),
-      matNeon
-    );
+    const rail = new THREE.Mesh(new THREE.TorusGeometry(3.6, 0.08, 12, 96), matNeon);
     rail.rotation.x = Math.PI / 2;
     rail.position.y = -0.18;
     lobby.add(rail);
 
     state.tableZone = { x: 0, z: 0, r: 4.3 };
 
-    // =========================
-    // VIP SPAWN AREA (Machine + Pads)
-    // =========================
+    // ===== 4 JUMBOTRONS (simple, vivid) =====
+    // These are emissive panels facing the lobby center.
+    function addJumbotron(angle, colorMat) {
+      const dir = new THREE.Vector3(Math.sin(angle), 0, Math.cos(angle));
+      const p = dir.clone().multiplyScalar(LOBBY_R - 2.6);
+
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.9, 0.18), matTrim);
+      frame.position.set(p.x, 3.0, p.z);
+      frame.lookAt(0, 3.0, 0);
+      lobby.add(frame);
+
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(2.85, 1.55), colorMat);
+      screen.position.copy(frame.position);
+      screen.position.add(dir.clone().multiplyScalar(-0.11));
+      screen.lookAt(0, 3.0, 0);
+      lobby.add(screen);
+
+      const glow = new THREE.PointLight(
+        (colorMat === matPink) ? 0xff2d7a : 0x7fe7ff,
+        2.8, 18, 2.0
+      );
+      glow.position.copy(frame.position);
+      lobby.add(glow);
+    }
+    addJumbotron(0, matNeon);
+    addJumbotron(Math.PI/2, matPink);
+    addJumbotron(Math.PI, matNeon);
+    addJumbotron(-Math.PI/2, matNeon);
+
+    // ===== VIP Spawn Area =====
     const vip = new THREE.Group();
     vip.name = "VIP_SpawnArea";
     lobby.add(vip);
@@ -207,25 +236,16 @@ export const World = (() => {
     const VIP_X = 6.5;
     const VIP_Z = 8.5;
 
-    const vipPlate = new THREE.Mesh(
-      new THREE.BoxGeometry(7.5, 0.18, 7.5),
-      matTrim
-    );
+    const vipPlate = new THREE.Mesh(new THREE.BoxGeometry(7.5, 0.18, 7.5), matTrim);
     vipPlate.position.set(VIP_X, -0.01, VIP_Z);
     vip.add(vipPlate);
     _addFloor(vipPlate);
 
-    const pedestal = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.25, 1.45, 0.45, 32),
-      matTrim
-    );
+    const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(1.25, 1.45, 0.45, 32), matTrim);
     pedestal.position.set(VIP_X, 0.225, VIP_Z);
     vip.add(pedestal);
 
-    const machine = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.65, 0.85, 1.8, 24),
-      matPink
-    );
+    const machine = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.85, 1.8, 24), matPink);
     machine.position.set(VIP_X, 1.35, VIP_Z);
     vip.add(machine);
 
@@ -233,6 +253,10 @@ export const World = (() => {
     machineGlow.position.x = VIP_X;
     machineGlow.position.z = VIP_Z;
     vip.add(machineGlow);
+
+    const vipLight = new THREE.PointLight(0xff2d7a, 7.0, 35, 2.0);
+    vipLight.position.set(VIP_X, 3.2, VIP_Z);
+    vip.add(vipLight);
 
     function makePad(ix, iz, mat) {
       const pad = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.08, 1.4), mat);
@@ -255,14 +279,12 @@ export const World = (() => {
       lobby_center:{ x: 0, y: 0, z: 10, yaw: Math.PI },
     };
 
-    // =========================
-    // 4 ROOMS + HALLWAYS (WITH REAL DOOR OPENINGS)
-    // =========================
+    // ===== 4 Rooms + Hallways (with real door gaps) =====
     const roomDefs = [
-      { name: "Store",    angle: 0,             color: matNeon },
-      { name: "Scorpion", angle: Math.PI / 2,   color: matPink },
-      { name: "Spectate", angle: Math.PI,       color: matNeon },
-      { name: "VIP2",     angle: -Math.PI / 2,  color: matNeon },
+      { name: "STORE",    angle: 0,            neon: matNeon },
+      { name: "SCORPION", angle: Math.PI/2,    neon: matPink },
+      { name: "SPECTATE", angle: Math.PI,      neon: matNeon },
+      { name: "VIP",      angle: -Math.PI/2,   neon: matNeon },
     ];
 
     const HALL_LEN = 14;
@@ -270,95 +292,103 @@ export const World = (() => {
     const ROOM_D = 12;
     const ROOM_H = 4.2;
 
+    // Simple “sign” plate above each hallway entrance
+    function addHallSign(angle, label, neonMat) {
+      const dir = new THREE.Vector3(Math.sin(angle), 0, Math.cos(angle));
+      const p = dir.clone().multiplyScalar(LOBBY_R - 0.6);
+
+      const back = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.9, 0.16), matTrim);
+      back.position.set(p.x, 3.15, p.z);
+      back.lookAt(0, 3.15, 0);
+      lobby.add(back);
+
+      const face = new THREE.Mesh(new THREE.PlaneGeometry(3.35, 0.65), neonMat);
+      face.position.copy(back.position);
+      face.position.add(dir.clone().multiplyScalar(-0.09));
+      face.lookAt(0, 3.15, 0);
+      lobby.add(face);
+
+      const glow = new THREE.PointLight(neonMat === matPink ? 0xff2d7a : 0x7fe7ff, 2.2, 16, 2.0);
+      glow.position.copy(back.position);
+      lobby.add(glow);
+
+      // Note: text rendering is optional; this is a clean sign plate for now.
+      // Next pass can add canvas-text labels.
+    }
+
     function addHallAndRoom(def) {
-      const dir = new THREE.Vector3(Math.sin(def.angle), 0, Math.cos(def.angle));
+      const angle = def.angle;
+      const dir = new THREE.Vector3(Math.sin(angle), 0, Math.cos(angle));
       const side = new THREE.Vector3(dir.z, 0, -dir.x);
+
+      addHallSign(angle, def.name, def.neon);
 
       const hallCenter = dir.clone().multiplyScalar(LOBBY_R - 1.0 + (HALL_LEN / 2));
       const roomCenter = dir.clone().multiplyScalar(LOBBY_R - 1.0 + HALL_LEN + (ROOM_D / 2));
 
-      // Hall floor
-      const hallFloor = new THREE.Mesh(
-        new THREE.BoxGeometry(5.4, 0.2, HALL_LEN),
-        matFloor
-      );
+      // hall floor
+      const hallFloor = new THREE.Mesh(new THREE.BoxGeometry(5.4, 0.2, HALL_LEN), matFloor);
       hallFloor.position.set(hallCenter.x, -0.1, hallCenter.z);
-      hallFloor.rotation.y = def.angle;
+      hallFloor.rotation.y = angle;
       root.add(hallFloor);
       _addFloor(hallFloor);
 
-      // Hall walls (left/right)
+      // hall walls
       const wallL = new THREE.Mesh(new THREE.BoxGeometry(0.25, ROOM_H, HALL_LEN), matWall);
       const wallR = wallL.clone();
       wallL.position.set(hallCenter.x, ROOM_H/2, hallCenter.z);
       wallR.position.set(hallCenter.x, ROOM_H/2, hallCenter.z);
       wallL.position.add(side.clone().multiplyScalar(2.85));
       wallR.position.add(side.clone().multiplyScalar(-2.85));
-      wallL.rotation.y = def.angle;
-      wallR.rotation.y = def.angle;
+      wallL.rotation.y = angle;
+      wallR.rotation.y = angle;
       root.add(wallL, wallR);
 
-      // Hall neon ceiling strips + lights
-      const strip = new THREE.Mesh(
-        new THREE.BoxGeometry(4.9, 0.12, HALL_LEN * 0.92),
-        def.color
-      );
-      strip.position.set(hallCenter.x, 3.8, hallCenter.z);
-      strip.rotation.y = def.angle;
+      // hall neon ceiling strip + light
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(4.9, 0.12, HALL_LEN * 0.92), def.neon);
+      strip.position.set(hallCenter.x, 3.85, hallCenter.z);
+      strip.rotation.y = angle;
       root.add(strip);
 
-      const hallLight = new THREE.PointLight(def.name === "Scorpion" ? 0xff2d7a : 0x7fe7ff, 6.0, 28, 2.0);
+      const hallLight = new THREE.PointLight(def.neon === matPink ? 0xff2d7a : 0x7fe7ff, 6.2, 30, 2.0);
       hallLight.position.set(hallCenter.x, 3.2, hallCenter.z);
       root.add(hallLight);
 
-      // ROOM FLOOR
-      const roomFloor = new THREE.Mesh(
-        new THREE.BoxGeometry(ROOM_W, 0.2, ROOM_D),
-        matFloor
-      );
+      // room floor
+      const roomFloor = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W, 0.2, ROOM_D), matFloor);
       roomFloor.position.set(roomCenter.x, -0.1, roomCenter.z);
-      roomFloor.rotation.y = def.angle;
+      roomFloor.rotation.y = angle;
       root.add(roomFloor);
       _addFloor(roomFloor);
 
-      // ROOM WALLS (build 4 walls with a DOOR GAP on the hallway-facing side)
-      // Door is centered on the "front" side facing the hallway.
+      // room walls with door gap on front
       const doorW = 3.4;
       const doorH = 3.0;
       const t = 0.3;
 
-      // Helper to place wall segment on front face with gap
       function addFrontWallWithDoorGap() {
-        // front face center
         const frontCenter = roomCenter.clone().add(dir.clone().multiplyScalar(-ROOM_D/2));
-        // left segment
         const leftW = (ROOM_W - doorW) / 2;
+
         const segL = new THREE.Mesh(new THREE.BoxGeometry(leftW, ROOM_H, t), matWall);
         segL.position.copy(frontCenter).add(side.clone().multiplyScalar((doorW/2 + leftW/2)));
-        segL.position.y = ROOM_H/2;
-        segL.rotation.y = def.angle;
-        root.add(segL);
+        segL.position.y = ROOM_H/2; segL.rotation.y = angle; root.add(segL);
 
-        // right segment
         const segR = new THREE.Mesh(new THREE.BoxGeometry(leftW, ROOM_H, t), matWall);
         segR.position.copy(frontCenter).add(side.clone().multiplyScalar(-(doorW/2 + leftW/2)));
-        segR.position.y = ROOM_H/2;
-        segR.rotation.y = def.angle;
-        root.add(segR);
+        segR.position.y = ROOM_H/2; segR.rotation.y = angle; root.add(segR);
 
-        // top lintel
         const lintelH = ROOM_H - doorH;
         const lintel = new THREE.Mesh(new THREE.BoxGeometry(doorW, lintelH, t), matWall);
         lintel.position.copy(frontCenter);
         lintel.position.y = doorH + lintelH/2;
-        lintel.rotation.y = def.angle;
+        lintel.rotation.y = angle;
         root.add(lintel);
 
-        // neon frame
-        const frame = new THREE.Mesh(new THREE.BoxGeometry(doorW + 0.5, 0.18, 0.18), def.color);
+        const frame = new THREE.Mesh(new THREE.BoxGeometry(doorW + 0.5, 0.18, 0.18), def.neon);
         frame.position.copy(frontCenter);
         frame.position.y = doorH + 0.15;
-        frame.rotation.y = def.angle;
+        frame.rotation.y = angle;
         root.add(frame);
       }
 
@@ -366,7 +396,7 @@ export const World = (() => {
         const backCenter = roomCenter.clone().add(dir.clone().multiplyScalar(ROOM_D/2));
         const wall = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W, ROOM_H, t), matWall);
         wall.position.copy(backCenter); wall.position.y = ROOM_H/2;
-        wall.rotation.y = def.angle;
+        wall.rotation.y = angle;
         root.add(wall);
       }
 
@@ -377,47 +407,36 @@ export const World = (() => {
         const wall = new THREE.Mesh(new THREE.BoxGeometry(t, ROOM_H, ROOM_D), matWall);
 
         const wl = wall.clone();
-        wl.position.copy(leftCenter); wl.position.y = ROOM_H/2;
-        wl.rotation.y = def.angle;
-        root.add(wl);
+        wl.position.copy(leftCenter); wl.position.y = ROOM_H/2; wl.rotation.y = angle; root.add(wl);
 
         const wr = wall.clone();
-        wr.position.copy(rightCenter); wr.position.y = ROOM_H/2;
-        wr.rotation.y = def.angle;
-        root.add(wr);
+        wr.position.copy(rightCenter); wr.position.y = ROOM_H/2; wr.rotation.y = angle; root.add(wr);
       }
 
       addFrontWallWithDoorGap();
       addBackWall();
       addSideWalls();
 
-      // room lighting
-      const roomLight = new THREE.PointLight(def.name === "Scorpion" ? 0xff2d7a : 0x7fe7ff, 8.0, 40, 2.0);
+      // room neon ceiling + light
+      const roomLight = new THREE.PointLight(def.neon === matPink ? 0xff2d7a : 0x7fe7ff, 8.2, 42, 2.0);
       roomLight.position.set(roomCenter.x, 3.4, roomCenter.z);
       root.add(roomLight);
 
-      const roomCeil = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W * 0.8, 0.12, ROOM_D * 0.8), def.color);
+      const roomCeil = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W * 0.8, 0.12, ROOM_D * 0.8), def.neon);
       roomCeil.position.set(roomCenter.x, 4.05, roomCenter.z);
-      roomCeil.rotation.y = def.angle;
+      roomCeil.rotation.y = angle;
       root.add(roomCeil);
 
-      // Spawn inside room (just inside door)
+      // spawn inside room
       const spawn = roomCenter.clone().add(dir.clone().multiplyScalar(-ROOM_D/2 + 2.0));
-      state.spawns[`room_${def.name.toLowerCase()}`] = {
-        x: spawn.x, y: 0, z: spawn.z, yaw: def.angle + Math.PI
-      };
+      state.spawns[`room_${def.name.toLowerCase()}`] = { x: spawn.x, y: 0, z: spawn.z, yaw: angle + Math.PI };
     }
 
-    roomDefs.forEach(addHallAndRoom);
+    roomDefs.forEach((d) => addHallAndRoom(d));
 
-    log("[world] built ✅ (Perimeter walls + Doorways + Lighting + Divot)");
+    log("[world] built ✅ (Beautification Pass 1: canopy + jumbotrons + signs + brighter lights)");
 
-    return {
-      group: state.group,
-      floors: state.floors,
-      spawns: state.spawns,
-      tableZone: state.tableZone,
-    };
+    return { group: state.group, floors: state.floors, spawns: state.spawns, tableZone: state.tableZone };
   }
 
   function getSpawn(name = "lobby_vip_A") {

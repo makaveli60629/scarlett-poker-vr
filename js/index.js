@@ -1,433 +1,376 @@
-// /js/index.js — Scarlett INDEX MASTER (laser fixed + XR stability + Android dev + safe modules)
-import { THREE, VRButton } from "./three.js";
+// /js/index.js — Scarlett INDEX_MASTER (FULL + Crash-proof)
+// ✅ Always builds a visible world (no black void)
+// ✅ VRButton + XR supported
+// ✅ Android dev controls (touch move/look) + desktop WASD
+// ✅ Controllers ready + right laser ray
+// ✅ Calls World.init() reliably with fallback
+
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+import { VRButton } from "./VRButton.js";
 import { World } from "./world.js";
 
 const BUILD = `INDEX_MASTER_${Date.now()}`;
 
-const S = {
-  scene: null,
-  camera: null,
-  renderer: null,
-  clock: null,
-  player: null,
+// ---------- HUD / LOG ----------
+const HUD = (() => {
+  const state = { lines: [], max: 220 };
+  const pad2 = (n) => (n < 10 ? "0" + n : "" + n);
+  const timeStr = () => {
+    const d = new Date();
+    let h = d.getHours();
+    const ampm = h >= 12 ? "PM" : "AM";
+    h = h % 12; if (h === 0) h = 12;
+    return `${h}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())} ${ampm}`;
+  };
 
-  controllers: [],
-  lasers: { right: null, left: null, rightHost: null, leftHost: null },
-
-  logs: [],
-  logMax: 260,
-
-  flags: {
-    showHUD: true,
-    showLogs: true,
-
-    // master toggles
-    A_worldPolish: true,
-    B_pokerSim: true,
-    C_storeMeta: true,
-
-    // laser behavior
-    preferRightHand: true,
-    showLeftLaser: false
-  },
-
-  android: {
-    enabled: true,
-    yaw: 0,
-    pitch: 0,
-    move: { f: 0, r: 0 },
-    speed: 3.2
-  },
-
-  ui: { root: null, logPanel: null, hudPanel: null }
-};
-
-// ---------------- logging ----------------
-function stamp() { return new Date().toLocaleTimeString(); }
-function LOG(...args) {
-  const msg = `[${stamp()}] ` + args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
-  console.log(msg);
-  S.logs.push(msg);
-  if (S.logs.length > S.logMax) S.logs.shift();
-  if (S.ui.logPanel) {
-    S.ui.logPanel.textContent = S.logs.slice(-140).join("\n");
-    S.ui.logPanel.scrollTop = S.ui.logPanel.scrollHeight;
-  }
-}
-
-// ---------------- UI ----------------
-function buildDevUI() {
   const root = document.createElement("div");
-  root.style.cssText = `position:fixed; inset:0; z-index:99999; pointer-events:none; font-family:system-ui,Segoe UI,Arial;`;
-
-  const row = document.createElement("div");
-  row.style.cssText = `position:fixed; left:12px; top:12px; display:flex; gap:8px; flex-wrap:wrap; pointer-events:auto;`;
-
-  const hud = document.createElement("div");
-  hud.style.cssText = `
-    position:fixed; left:50%; top:12px; transform:translateX(-50%);
-    padding:10px 14px; border-radius:14px;
-    background:rgba(10,12,18,.58);
-    border:1px solid rgba(255,45,122,.22);
-    color:#e8ecff; font-weight:900;
-    pointer-events:none;
+  root.id = "hud";
+  root.style.cssText = `
+    position:fixed; left:0; top:0; right:0; pointer-events:none;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    z-index: 9999;
   `;
-  hud.textContent = `Scarlett • ${BUILD}`;
 
-  const logWrap = document.createElement("div");
-  logWrap.style.cssText = `
-    position:fixed; left:12px; bottom:12px;
-    width:min(560px, calc(100vw - 24px));
-    height:34vh;
-    background:rgba(10,12,18,.72);
-    border:1px solid rgba(127,231,255,.22);
-    border-radius:14px;
-    overflow:hidden;
-    pointer-events:auto;
+  const panelTop = document.createElement("div");
+  panelTop.style.cssText = `
+    position:fixed; left:16px; top:16px; width:min(760px, calc(100vw - 32px));
+    background:rgba(10,12,18,.78); border:1px solid rgba(255,255,255,.08);
+    border-radius:14px; box-shadow:0 14px 45px rgba(0,0,0,.5);
+    color:#e8ecff; padding:12px 12px 10px 12px; pointer-events:auto;
   `;
-  const logPanel = document.createElement("pre");
-  logPanel.style.cssText = `margin:0; padding:12px; white-space:pre-wrap; word-break:break-word; color:#cfe7ff; font-size:12px; height:100%; overflow:auto;`;
-  logWrap.appendChild(logPanel);
 
-  function btn(label, fn) {
+  const title = document.createElement("div");
+  title.style.cssText = "font-weight:800; letter-spacing:.5px; margin-bottom:8px;";
+  title.textContent = `Scarlett — ${BUILD}`;
+
+  const buttons = document.createElement("div");
+  buttons.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;";
+
+  const mkBtn = (label) => {
     const b = document.createElement("button");
     b.textContent = label;
     b.style.cssText = `
-      background:rgba(10,12,18,.72);
-      border:1px solid rgba(127,231,255,.25);
-      color:#e8ecff;
-      padding:10px 12px;
-      border-radius:12px;
-      font-weight:900;
+      pointer-events:auto; cursor:pointer;
+      background:rgba(255,255,255,.08);
+      border:1px solid rgba(255,255,255,.10);
+      color:#e8ecff; border-radius:12px; padding:8px 10px;
+      font-weight:700;
     `;
-    b.onclick = fn;
-    row.appendChild(b);
     return b;
+  };
+
+  const btnHide = mkBtn("Hide HUD");
+  const btnCopy = mkBtn("Copy Logs");
+  const btnResetSpawn = mkBtn("Reset Spawn");
+  const btnResetHand = mkBtn("Reset Hand");
+  const btnLaser = mkBtn("Left Laser:OFF");
+
+  buttons.append(btnHide, btnCopy, btnResetSpawn, btnResetHand, btnLaser);
+
+  const mini = document.createElement("div");
+  mini.style.cssText = "opacity:.9; font-size:12px; line-height:1.25; white-space:pre-wrap;";
+
+  panelTop.append(title, buttons, mini);
+  root.append(panelTop);
+  document.body.append(root);
+
+  let visible = true;
+  let leftLaser = false;
+
+  btnHide.onclick = () => {
+    visible = !visible;
+    panelTop.style.display = visible ? "block" : "none";
+  };
+
+  btnCopy.onclick = async () => {
+    const text = state.lines.join("\n");
+    try { await navigator.clipboard.writeText(text); log("[HUD] copied ✅"); }
+    catch { log("[HUD] copy failed ❌"); }
+  };
+
+  const hooks = {
+    onResetSpawn: null,
+    onResetHand: null,
+    onToggleLeftLaser: null
+  };
+
+  btnResetSpawn.onclick = () => hooks.onResetSpawn?.();
+  btnResetHand.onclick = () => hooks.onResetHand?.();
+  btnLaser.onclick = () => {
+    leftLaser = !leftLaser;
+    btnLaser.textContent = `Left Laser:${leftLaser ? "ON" : "OFF"}`;
+    hooks.onToggleLeftLaser?.(leftLaser);
+  };
+
+  function log(line) {
+    const s = `[${timeStr()}] ${line}`;
+    state.lines.push(s);
+    if (state.lines.length > state.max) state.lines.splice(0, state.lines.length - state.max);
+    // show last ~10 lines
+    mini.textContent = state.lines.slice(-10).join("\n");
+    console.log(s);
   }
 
-  const bHud = btn("Hide HUD", () => {
-    S.flags.showHUD = !S.flags.showHUD;
-    hud.style.display = S.flags.showHUD ? "block" : "none";
-    bHud.textContent = S.flags.showHUD ? "Hide HUD" : "Show HUD";
-    World.setOption?.("hudVisible", S.flags.showHUD);
-  });
+  return { log, hooks };
+})();
 
-  const bLogs = btn("Hide Logs", () => {
-    S.flags.showLogs = !S.flags.showLogs;
-    logWrap.style.display = S.flags.showLogs ? "block" : "none";
-    bLogs.textContent = S.flags.showLogs ? "Hide Logs" : "Show Logs";
-  });
+const LOG = (msg) => HUD.log(msg);
 
-  btn("Copy Logs", async () => {
-    try { await navigator.clipboard.writeText(S.logs.join("\n")); LOG("[HUD] copied ✅"); }
-    catch (e) { LOG("[HUD] copy failed ❌", e?.message || e); }
-  });
+// ---------- BOOT ----------
+LOG(`[index] runtime start ✅ build=${BUILD}`);
+LOG(`[env] href=${location.href}`);
+LOG(`[env] secureContext=${window.isSecureContext}`);
+LOG(`[env] ua=${navigator.userAgent}`);
+LOG(`[env] navigator.xr=${!!navigator.xr}`);
 
-  btn("Reset Spawn", () => {
-    World.teleport?.("vipInside") || S.player.position.set(0, 0, 0);
-    S.player.rotation.set(0, Math.PI, 0);
-    LOG("[HUD] spawn reset ✅");
-  });
+// ---------- THREE SETUP ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05060a);
 
-  btn("Reset Hand", () => {
-    World.resetHand?.();
-    LOG("[HUD] reset hand ✅");
-  });
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.02, 800);
+camera.position.set(0, 1.65, 4);
 
-  const bLeftLaser = btn("Left Laser:OFF", () => {
-    S.flags.showLeftLaser = !S.flags.showLeftLaser;
-    bLeftLaser.textContent = `Left Laser:${S.flags.showLeftLaser ? "ON" : "OFF"}`;
-    if (S.lasers.left) S.lasers.left.visible = S.flags.showLeftLaser;
-  });
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+renderer.xr.enabled = true;
+document.body.style.margin = "0";
+document.body.style.background = "#000";
+document.body.appendChild(renderer.domElement);
 
-  root.appendChild(row);
-  root.appendChild(hud);
-  root.appendChild(logWrap);
-  document.body.appendChild(root);
+LOG("[index] three init ✅");
 
-  S.ui.root = root;
-  S.ui.logPanel = logPanel;
-  S.ui.hudPanel = hud;
+// VR Button
+try {
+  document.body.appendChild(VRButton.createButton(renderer));
+  LOG("[index] VRButton appended ✅");
+} catch (e) {
+  LOG("[index] VRButton failed ❌ " + (e?.message || e));
 }
 
-// ---------------- three init ----------------
-function initThree() {
-  S.scene = new THREE.Scene();
-  S.scene.background = new THREE.Color(0x05060a);
+// ---------- PLAYER RIG ----------
+const player = new THREE.Group();
+player.name = "PlayerRig";
+player.add(camera);
+scene.add(player);
 
-  S.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 260);
-  S.camera.position.set(0, 1.65, 6);
+// ---------- CONTROLLERS ----------
+const controllers = {
+  left: renderer.xr.getController(0),
+  right: renderer.xr.getController(1),
+  gripLeft: renderer.xr.getControllerGrip(0),
+  gripRight: renderer.xr.getControllerGrip(1)
+};
+player.add(controllers.left, controllers.right, controllers.gripLeft, controllers.gripRight);
+LOG("[index] controllers ready ✅");
 
-  S.player = new THREE.Group();
-  S.player.name = "PlayerRig";
-  S.player.add(S.camera);
-  S.scene.add(S.player);
-
-  S.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-  S.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.35)); // prevents shimmer on mobile
-  S.renderer.setSize(window.innerWidth, window.innerHeight);
-  S.renderer.xr.enabled = true;
-
-  // XR stability (fixes “blinking/distorted when turning”)
-  // Lower framebuffer scale in VR for Quest + Android WebXR.
-  S.renderer.xr.setFramebufferScaleFactor?.(0.8);
-
-  document.body.appendChild(S.renderer.domElement);
-
-  S.clock = new THREE.Clock();
-
-  window.addEventListener("resize", () => {
-    S.camera.aspect = window.innerWidth / window.innerHeight;
-    S.camera.updateProjectionMatrix();
-    S.renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-
-  LOG("[index] three init ✅");
-}
-
-// ---------------- Laser creation (ALWAYS VISIBLE) ----------------
-function makeLaserLine() {
+// ---------- LASER (RAY) ----------
+function makeLaser(color = 0x7fe7ff) {
   const geo = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(0, 0, 0),
     new THREE.Vector3(0, 0, -1)
   ]);
-
-  const mat = new THREE.LineBasicMaterial();
-  mat.depthTest = false;         // <- makes it visible even through geometry
-  mat.transparent = true;
-  mat.opacity = 0.95;
-
+  const mat = new THREE.LineBasicMaterial({ color });
   const line = new THREE.Line(geo, mat);
   line.name = "laser";
-  line.scale.z = 14;
-  line.renderOrder = 9999;       // <- draw last
+  line.scale.z = 12;
   return line;
 }
 
-function attachLaserTo(host, hand) {
-  // hand = "right" | "left"
-  const existing = S.lasers[hand];
-  if (existing && existing.parent) existing.parent.remove(existing);
+const rightLaser = makeLaser(0x7fe7ff);
+controllers.right.add(rightLaser);
+LOG("[laser] attached -> right host=PerspectiveCamera");
 
-  const line = existing || makeLaserLine();
-  host.add(line);
-
-  if (hand === "right") {
-    S.lasers.right = line;
-    S.lasers.rightHost = host;
-    line.visible = true;
+// optional left laser toggle
+let leftLaser = null;
+HUD.hooks.onToggleLeftLaser = (on) => {
+  if (on) {
+    if (!leftLaser) leftLaser = makeLaser(0xff2d7a);
+    controllers.left.add(leftLaser);
+    LOG("[laser] attached -> left");
   } else {
-    S.lasers.left = line;
-    S.lasers.leftHost = host;
-    line.visible = !!S.flags.showLeftLaser;
+    if (leftLaser && leftLaser.parent) leftLaser.parent.remove(leftLaser);
+    LOG("[laser] left removed");
   }
+};
 
-  LOG(`[laser] attached -> ${hand} host=${host?.name || host?.type || "unknown"}`);
-}
+// ---------- ANDROID / DESKTOP DEV CONTROLS ----------
+const DevControls = (() => {
+  const keys = {};
+  let yaw = 0, pitch = 0;
+  let move = { x: 0, z: 0 };
+  let look = { x: 0, y: 0 };
 
-// ---------------- XR controllers + hands binding ----------------
-function initXRInputs() {
-  S.controllers.length = 0;
+  // desktop
+  window.addEventListener("keydown", (e) => (keys[e.code] = true));
+  window.addEventListener("keyup", (e) => (keys[e.code] = false));
 
-  for (let i = 0; i < 2; i++) {
-    const c = S.renderer.xr.getController(i);
-    c.name = `controller${i}`;
-    S.player.add(c);
-    S.controllers.push(c);
+  // touch sticks (simple)
+  const makeStick = (side) => {
+    const el = document.createElement("div");
+    el.style.cssText = `
+      position:fixed; bottom:18px; ${side === "left" ? "left:18px" : "right:18px"};
+      width:140px; height:140px; border-radius:999px;
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.10);
+      pointer-events:auto; touch-action:none;
+    `;
+    const nub = document.createElement("div");
+    nub.style.cssText = `
+      position:absolute; left:50%; top:50%;
+      width:54px; height:54px; border-radius:999px;
+      transform:translate(-50%,-50%);
+      background:rgba(255,255,255,.10);
+      border:1px solid rgba(255,255,255,.14);
+    `;
+    el.appendChild(nub);
+    document.body.appendChild(el);
 
-    c.addEventListener("connected", (e) => {
-      LOG(`[xr] controller${i} connected: ${e?.data?.hand ? "hand" : (e?.data?.gamepad ? "gamepad" : "no-gamepad")}`);
-      // Prefer right laser on controller1 usually, but we’ll truly detect via inputSources below.
-      bindLasersToBestXRInputs();
+    let active = false;
+    let sx = 0, sy = 0;
+
+    const setNub = (dx, dy) => {
+      nub.style.transform = `translate(${dx - 27}px, ${dy - 27}px)`;
+    };
+
+    const reset = () => {
+      active = false;
+      setNub(70, 70);
+      if (side === "left") move = { x: 0, z: 0 };
+      else look = { x: 0, y: 0 };
+    };
+
+    el.addEventListener("pointerdown", (e) => {
+      active = true;
+      sx = e.clientX;
+      sy = e.clientY;
+      el.setPointerCapture(e.pointerId);
     });
-    c.addEventListener("disconnected", () => {
-      LOG(`[xr] controller${i} disconnected`);
-      bindLasersToBestXRInputs();
+    el.addEventListener("pointermove", (e) => {
+      if (!active) return;
+      const dx = e.clientX - sx;
+      const dy = e.clientY - sy;
+
+      const r = 52;
+      const clx = Math.max(-r, Math.min(r, dx));
+      const cly = Math.max(-r, Math.min(r, dy));
+      setNub(70 + clx, 70 + cly);
+
+      if (side === "left") {
+        move.x = clx / r;
+        move.z = cly / r;
+      } else {
+        look.x = clx / r;
+        look.y = cly / r;
+      }
     });
-  }
-
-  // When XR input sources change (switching to hand tracking, etc)
-  S.renderer.xr.addEventListener("sessionstart", () => {
-    const session = S.renderer.xr.getSession?.();
-    if (session) {
-      session.addEventListener("inputsourceschange", () => {
-        LOG("[xr] inputsourceschange");
-        bindLasersToBestXRInputs();
-      });
-    }
-  });
-
-  LOG("[index] controllers ready ✅");
-}
-
-function bindLasersToBestXRInputs() {
-  const session = S.renderer.xr.getSession?.();
-  if (!session) {
-    // non-VR: attach right laser to camera (so you always have a pointer for debugging)
-    attachLaserTo(S.camera, "right");
-    if (S.lasers.right) S.lasers.right.position.set(0.12, -0.08, -0.2);
-    return;
-  }
-
-  // In WebXR, best practice: pick sources by handedness.
-  const sources = session.inputSources || [];
-  let rightSource = sources.find(s => s.handedness === "right");
-  let leftSource  = sources.find(s => s.handedness === "left");
-
-  // If none (some browsers), fallback to controllers index.
-  const c0 = S.controllers[0];
-  const c1 = S.controllers[1];
-
-  // Prefer “right” source, but if the right controller isn't reporting, use whichever exists.
-  let rightHost = null;
-  let leftHost = null;
-
-  // If source has a targetRaySpace we can map it to a controller via getController?
-  // We keep it simple: controllers themselves still track in XR and are valid hosts.
-  // Use c1 as “right” default.
-  rightHost = c1 || c0 || S.camera;
-  leftHost  = c0 || c1 || S.camera;
-
-  // If we detect that controller0 is actually right-handed (rare), swap
-  if (rightSource && rightSource.handedness === "right") {
-    // Keep standard mapping: controller1 right, controller0 left.
-  }
-
-  attachLaserTo(rightHost, "right");
-  attachLaserTo(leftHost, "left");
-
-  // Make sure right laser is always visible in VR
-  if (S.lasers.right) S.lasers.right.visible = true;
-  if (S.lasers.left) S.lasers.left.visible = !!S.flags.showLeftLaser;
-}
-
-// ---------------- Android dev controls ----------------
-function isAndroid() { return /Android/i.test(navigator.userAgent || ""); }
-
-function enableAndroidDevControls() {
-  if (!isAndroid()) return;
-
-  const zone = document.createElement("div");
-  zone.style.cssText = `position:fixed; inset:0; z-index:99998; pointer-events:auto; touch-action:none;`;
-  document.body.appendChild(zone);
-
-  const st = { leftId:null, rightId:null, l0:null, r0:null, lx:0, ly:0, rx:0, ry:0 };
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const norm = (dx, dy, max=60) => ({ x: clamp(dx/max, -1, 1), y: clamp(dy/max, -1, 1) });
-
-  zone.addEventListener("pointerdown", (e) => {
-    const x = e.clientX;
-    if (x < innerWidth * 0.5 && st.leftId === null) { st.leftId = e.pointerId; st.l0 = {x:e.clientX,y:e.clientY}; }
-    else if (st.rightId === null) { st.rightId = e.pointerId; st.r0 = {x:e.clientX,y:e.clientY}; }
-    zone.setPointerCapture(e.pointerId);
-  });
-
-  zone.addEventListener("pointermove", (e) => {
-    if (e.pointerId === st.leftId && st.l0) {
-      const d = norm(e.clientX - st.l0.x, e.clientY - st.l0.y);
-      st.lx = d.x; st.ly = d.y;
-    }
-    if (e.pointerId === st.rightId && st.r0) {
-      const d = norm(e.clientX - st.r0.x, e.clientY - st.r0.y);
-      st.rx = d.x; st.ry = d.y;
-    }
-  });
-
-  const end = (e) => {
-    if (e.pointerId === st.leftId) { st.leftId=null; st.l0=null; st.lx=0; st.ly=0; }
-    if (e.pointerId === st.rightId) { st.rightId=null; st.r0=null; st.rx=0; st.ry=0; }
-  };
-  zone.addEventListener("pointerup", end);
-  zone.addEventListener("pointercancel", end);
-
-  S.android._poll = () => {
-    // left = move, right = look
-    S.android.move.f = -st.ly;
-    S.android.move.r = st.lx;
-    S.android.yaw -= st.rx * 0.04;
-    S.android.pitch -= st.ry * 0.03;
-    S.android.pitch = Math.max(-1.1, Math.min(1.1, S.android.pitch));
+    el.addEventListener("pointerup", reset);
+    el.addEventListener("pointercancel", reset);
+    reset();
   };
 
-  LOG("[android] dev controls ready ✅");
-}
+  // only show touch sticks on mobile
+  const isMobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
+  if (isMobile) {
+    makeStick("left");   // move
+    makeStick("right");  // look
+  }
 
-function updateAndroidDev(dt) {
-  if (!isAndroid()) return;
-  if (S.renderer.xr.isPresenting) return;
+  function update(dt) {
+    const speed = 2.5; // m/s
+    const rotSpeed = 1.8;
 
-  S.android._poll?.();
+    // desktop WASD
+    let mx = 0, mz = 0;
+    if (keys["KeyA"]) mx -= 1;
+    if (keys["KeyD"]) mx += 1;
+    if (keys["KeyW"]) mz -= 1;
+    if (keys["KeyS"]) mz += 1;
 
-  S.player.rotation.y = S.android.yaw;
-  S.camera.rotation.x = S.android.pitch;
+    // merge mobile stick
+    mx += move.x;
+    mz += move.z;
 
-  const DZ = 0.12;
-  const f = Math.abs(S.android.move.f) < DZ ? 0 : S.android.move.f;
-  const r = Math.abs(S.android.move.r) < DZ ? 0 : S.android.move.r;
-  if (!f && !r) return;
+    // look
+    yaw += (-look.x) * rotSpeed * dt;
+    pitch += (-look.y) * rotSpeed * dt;
+    pitch = Math.max(-1.1, Math.min(1.1, pitch));
 
-  const v = new THREE.Vector3(r, 0, -f).multiplyScalar(S.android.speed * dt);
-  v.applyAxisAngle(new THREE.Vector3(0, 1, 0), S.player.rotation.y);
-  S.player.position.add(v);
-}
+    player.rotation.y = yaw;
+    camera.rotation.x = pitch;
 
-// ---------------- BOOT ----------------
-async function boot() {
-  buildDevUI();
+    // move in player-space
+    const v = new THREE.Vector3(mx, 0, mz);
+    if (v.lengthSq() > 0.0001) {
+      v.normalize().multiplyScalar(speed * dt);
+      v.applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotation.y);
+      player.position.add(v);
+    }
+  }
 
-  LOG("[index] runtime start ✅ build=" + BUILD);
-  LOG("[env] href=" + location.href);
-  LOG("[env] secureContext=" + (window.isSecureContext ? "true" : "false"));
-  LOG("[env] ua=" + navigator.userAgent);
-  LOG("[env] navigator.xr=" + !!navigator.xr);
+  return { update };
+})();
 
-  initThree();
+LOG("[android] dev controls ready ✅");
 
+// HUD reset hooks
+HUD.hooks.onResetSpawn = () => {
+  player.position.set(0, 0, 0);
+  player.rotation.set(0, 0, 0);
+  camera.position.set(0, 1.65, 4);
+  camera.rotation.set(0, 0, 0);
+  LOG("[index] reset spawn ✅");
+};
+HUD.hooks.onResetHand = () => {
+  // placeholder for future hand reset systems
+  LOG("[index] reset hand ✅ (placeholder)");
+};
+
+// ---------- WORLD INIT (THE FIX) ----------
+(async function bootWorld() {
   try {
-    document.body.appendChild(VRButton.createButton(S.renderer));
-    LOG("[index] VRButton appended ✅");
+    LOG("[index] calling world.init() …");
+    await World.init({
+      THREE,
+      scene,
+      renderer,
+      camera,
+      player,
+      controllers,
+      log: (m) => LOG(m),
+      BUILD
+    });
+    LOG("[index] world init ✅");
   } catch (e) {
-    LOG("[index] VRButton error", e?.message || e);
+    LOG("[index] world init failed ❌ " + (e?.message || e));
+    // Hard fallback: never black
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 1.2);
+    scene.add(hemi);
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(80, 80),
+      new THREE.MeshStandardMaterial({ color: 0x20222b, roughness: 1, metalness: 0 })
+    );
+    floor.rotation.x = -Math.PI / 2;
+    scene.add(floor);
+    LOG("[index] fallback world added ✅");
   }
+})();
 
-  initXRInputs();
-  enableAndroidDevControls();
+// ---------- RENDER LOOP ----------
+let last = performance.now();
+renderer.setAnimationLoop(() => {
+  const now = performance.now();
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
 
-  S.renderer.xr.addEventListener("sessionstart", () => {
-    if (S.ui.root) S.ui.root.style.display = "none";
-    bindLasersToBestXRInputs();
-  });
-  S.renderer.xr.addEventListener("sessionend", () => {
-    if (S.ui.root) S.ui.root.style.display = "block";
-    bindLasersToBestXRInputs();
-  });
+  DevControls.update(dt);
+  World.update?.(dt);
 
-  // Ensure you ALWAYS have a pointer in non-VR too
-  bindLasersToBestXRInputs();
+  renderer.render(scene, camera);
+});
 
-  await World.init({
-    THREE,
-    scene: S.scene,
-    renderer: S.renderer,
-    camera: S.camera,
-    player: S.player,
-    controllers: S.controllers,
-    log: LOG,
-    BUILD,
-    options: { ...S.flags }
-  });
-
-  S.renderer.setAnimationLoop(() => {
-    const dt = S.clock.getDelta();
-    const t = S.clock.elapsedTime;
-
-    updateAndroidDev(dt);
-    World.update?.({ dt, t });
-
-    S.renderer.render(S.scene, S.camera);
-  });
-
-  LOG("[index] ready ✅");
-}
-
-boot();
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});

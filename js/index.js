@@ -284,3 +284,13 @@ async function buildWorld(clear = false) {
 }
 
 boot().catch(e => BAD("[index] boot FAILED:", e?.message || e));
+// ---------- HARD START (REQUIRED) ----------
+if (document.readyState === "loading") {
+  window.addEventListener("DOMContentLoaded", () => {
+    console.log("[index] DOM ready → boot()");
+    boot();
+  });
+} else {
+  console.log("[index] DOM already ready → boot()");
+  boot();
+}

@@ -1,19 +1,24 @@
-// /js/index.js — Scarlett MASTER (Permanent Diagnostics + Controls + HUD Toggle)
-// ✅ wrapper-only imports
-import { THREE, VRButton } from "./three.js";
+// /js/index.js — Scarlett MASTER 6.1 (Permanent)
+// ✅ Default import THREE from ./three.js
+// ✅ Quest + Android + Desktop movement
+// ✅ Diagnostics HUD + Copy + Spawn buttons
+// ✅ Clean Mode = HIDE EVERYTHING (HUD + VR button + sticks + bootlog)
+
+import THREE, { VRButton } from "./three.js";
 import { World } from "./world.js";
 
-const BUILD = "MASTER 6.0 (Diagnostics HUD + Quest/Android/Desktop Controls)";
+const BUILD = "MASTER 6.1 (Clean Mode: Hide Everything + Diagnostics)";
 const log = (...a) => console.log(...a);
 
 let scene, camera, renderer, player, clock;
-let hud, hudBody, hudVisible = true;
+
+let hud = null, hudBody = null;
+let vrBtnEl = null;
+let touchWrapEl = null;
+let cleanMode = false;
 
 let yaw = 0, pitch = 0;
 let pointerLocked = false;
-
-const MOVE_SPEED = 2.6;
-const TURN_SPEED = 2.0;
 
 // keyboard
 let keyX = 0, keyY = 0;
@@ -24,6 +29,11 @@ const touch = {
   left: { id: null, x0: 0, y0: 0, x: 0, y: 0, active: false },
   right:{ id: null, x0: 0, y0: 0, x: 0, y: 0, active: false },
 };
+
+const MOVE_SPEED = 2.6;
+const TURN_SPEED = 2.0;
+
+const hudLines = new Map();
 
 init();
 
@@ -45,37 +55,36 @@ function init() {
   renderer.xr.enabled = true;
   document.body.appendChild(renderer.domElement);
 
-  // Lights
+  // lights
   scene.add(new THREE.AmbientLight(0xffffff, 0.35));
   const sun = new THREE.DirectionalLight(0xffffff, 0.95);
   sun.position.set(10, 18, 8);
   scene.add(sun);
 
-  // VR button
-  document.body.appendChild(VRButton.createButton(renderer));
+  // VR button (store handle for clean mode)
+  vrBtnEl = VRButton.createButton(renderer);
+  document.body.appendChild(vrBtnEl);
 
-  // HUD
+  // HUD + controls
   installHUD();
-
-  // World
-  World.build({ THREE, scene, log, BUILD });
-
-  // Controls
   installDesktopControls();
   installTouchSticks();
 
-  // Spawn
+  // world
+  World.build({ THREE, scene, log, BUILD });
+
+  // spawn
   resetToVIP();
 
   renderer.xr.addEventListener("sessionstart", () => {
     camera.position.set(0, 0, 0);
     resetToVIP();
-    writeHUDLine("xr", "sessionstart ✅");
+    writeHUD("xr", "sessionstart ✅");
   });
 
   renderer.xr.addEventListener("sessionend", () => {
     camera.position.set(0, 1.65, 0);
-    writeHUDLine("xr", "sessionend ✅");
+    writeHUD("xr", "sessionend ✅");
   });
 
   addEventListener("resize", () => {
@@ -84,20 +93,36 @@ function init() {
     renderer.setSize(innerWidth, innerHeight);
   });
 
+  // seed HUD
+  writeHUD("build", BUILD);
+  writeHUD("secure", String(window.isSecureContext));
+  writeHUD("ua", navigator.userAgent);
+
   clock = new THREE.Clock();
   renderer.setAnimationLoop(loop);
-
-  // Initial HUD info
-  writeHUDLine("build", BUILD);
-  writeHUDLine("ua", navigator.userAgent);
-  writeHUDLine("secure", String(window.isSecureContext));
 }
 
 function loop() {
   const dt = Math.min(clock.getDelta(), 0.05);
   moveTick(dt);
-  updateHUD(dt);
+  updateHUD();
   renderer.render(scene, camera);
+}
+
+// ======================
+// CLEAN MODE (HIDE EVERYTHING)
+// ======================
+function setCleanMode(on) {
+  cleanMode = !!on;
+
+  if (hud) hud.style.display = cleanMode ? "none" : "";
+  if (vrBtnEl) vrBtnEl.style.display = cleanMode ? "none" : "";
+  if (touchWrapEl) touchWrapEl.style.display = cleanMode ? "none" : "";
+
+  const bootlog = document.getElementById("bootlog");
+  if (bootlog) bootlog.style.display = cleanMode ? "none" : "";
+
+  log(cleanMode ? "[ui] CLEAN MODE ✅" : "[ui] UI shown ✅");
 }
 
 // ======================
@@ -107,22 +132,16 @@ function resetToVIP() {
   const s = World.getSpawn("lobby_vip_A");
   player.position.set(s.x, s.y, s.z);
   player.rotation.set(0, s.yaw ?? Math.PI, 0);
-  if (!renderer.xr.isPresenting) {
-    yaw = player.rotation.y;
-    pitch = 0;
-  }
-  writeHUDLine("spawn", `VIP (${s.x.toFixed(2)}, ${s.z.toFixed(2)})`);
+  if (!renderer.xr.isPresenting) { yaw = player.rotation.y; pitch = 0; }
+  writeHUD("spawn", `VIP (${s.x.toFixed(2)}, ${s.z.toFixed(2)})`);
 }
 
-function resetToLobbyCenter() {
+function resetToLobby() {
   const s = World.getSpawn("lobby_center");
   player.position.set(s.x, s.y, s.z);
   player.rotation.set(0, s.yaw ?? Math.PI, 0);
-  if (!renderer.xr.isPresenting) {
-    yaw = player.rotation.y;
-    pitch = 0;
-  }
-  writeHUDLine("spawn", `Lobby (${s.x.toFixed(2)}, ${s.z.toFixed(2)})`);
+  if (!renderer.xr.isPresenting) { yaw = player.rotation.y; pitch = 0; }
+  writeHUD("spawn", `Lobby (${s.x.toFixed(2)}, ${s.z.toFixed(2)})`);
 }
 
 // ======================
@@ -133,12 +152,10 @@ function moveTick(dt) {
 
   let moveX = 0, moveY = 0, turn = 0;
 
-  // XR sticks (Quest)
   if (presenting) {
     const session = renderer.xr.getSession?.();
     if (session) {
       let best = { mag: 0, mx: 0, my: 0, tx: 0, axes: [] };
-
       for (const src of session.inputSources) {
         const gp = src?.gamepad;
         if (!gp || !gp.axes) continue;
@@ -151,7 +168,6 @@ function moveTick(dt) {
         const mx = (m23 > m01) ? a2 : a0;
         const my = (m23 > m01) ? a3 : a1;
         const mag = Math.abs(mx) + Math.abs(my);
-
         const tx = (m23 > m01) ? a0 : a2;
 
         if (mag > best.mag) best = { mag, mx, my, tx, axes: a.slice(0, 6) };
@@ -161,31 +177,24 @@ function moveTick(dt) {
       moveY = best.my;
       turn  = best.tx * 0.85;
 
-      // show live axes (diagnostic)
-      writeHUDLine("axes", best.axes.map(v => (v ?? 0).toFixed(2)).join(", "));
+      writeHUD("axes", best.axes.map(v => (v ?? 0).toFixed(2)).join(", "));
+      writeHUD("inputs", `XR sources=${session.inputSources?.length ?? 0}`);
     }
   } else {
-    // Android sticks + desktop keys
     moveX += touch.left.x + keyX;
     moveY += touch.left.y + keyY;
     turn  += touch.right.x;
   }
 
-  // deadzones
-  moveX = dz(moveX, 0.12);
-  moveY = dz(moveY, 0.12);
-  turn  = dz(turn,  0.18);
+  moveX = deadzone(moveX, 0.12);
+  moveY = deadzone(moveY, 0.12);
+  turn  = deadzone(turn,  0.18);
 
-  // turning
   if (turn) {
     if (presenting) player.rotation.y -= turn * TURN_SPEED * dt;
-    else {
-      yaw -= turn * TURN_SPEED * dt;
-      player.rotation.y = yaw;
-    }
+    else { yaw -= turn * TURN_SPEED * dt; player.rotation.y = yaw; }
   }
 
-  // movement relative to heading
   if (moveX || moveY) {
     const heading = getHeadingYaw(presenting);
     const forward = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading));
@@ -201,14 +210,13 @@ function moveTick(dt) {
     }
   }
 
-  // desktop look
   if (!presenting) {
     camera.rotation.set(pitch, 0, 0);
     player.rotation.y = yaw;
   }
 }
 
-function dz(v, d) { return Math.abs(v) < d ? 0 : v; }
+function deadzone(v, dz) { return Math.abs(v) < dz ? 0 : v; }
 
 function getHeadingYaw(presenting) {
   if (!presenting) return yaw;
@@ -219,14 +227,14 @@ function getHeadingYaw(presenting) {
 }
 
 // ======================
-// HUD (Hide/Show + buttons)
+// HUD
 // ======================
 function installHUD() {
   hud = document.createElement("div");
   hud.style.position = "fixed";
   hud.style.left = "12px";
   hud.style.top = "12px";
-  hud.style.zIndex = "99999";
+  hud.style.zIndex = "99998";
   hud.style.maxWidth = "420px";
   hud.style.background = "rgba(10,12,18,0.62)";
   hud.style.color = "#e8ecff";
@@ -241,22 +249,21 @@ function installHUD() {
   hud.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
       <div style="font-weight:800;">Scarlett VR Poker</div>
-      <div style="display:flex;gap:8px;">
-        <button id="hudHide">HIDE HUD</button>
-      </div>
+      <button id="btnClean">HIDE EVERYTHING</button>
     </div>
+
     <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
       <button id="btnVip">Spawn VIP</button>
       <button id="btnLobby">Spawn Lobby</button>
       <button id="btnCopy">Copy</button>
     </div>
-    <div id="hudBody" style="margin-top:10px;opacity:.92;line-height:1.35;"></div>
+
+    <div id="hudBody" style="margin-top:10px;opacity:.92;line-height:1.35;white-space:pre-wrap;"></div>
   `;
   document.body.appendChild(hud);
 
   hudBody = hud.querySelector("#hudBody");
 
-  // style buttons
   [...hud.querySelectorAll("button")].forEach(b => {
     b.style.background = "rgba(127,231,255,0.14)";
     b.style.color = "#e8ecff";
@@ -267,61 +274,41 @@ function installHUD() {
   });
 
   hud.querySelector("#btnVip").onclick = resetToVIP;
-  hud.querySelector("#btnLobby").onclick = resetToLobbyCenter;
+  hud.querySelector("#btnLobby").onclick = resetToLobby;
 
   hud.querySelector("#btnCopy").onclick = async () => {
-    const txt = getHUDText();
+    const txt = [...hudLines.entries()].map(([k,v]) => `${k}: ${v}`).join("\n");
     try {
       await navigator.clipboard.writeText(txt);
-      writeHUDLine("copy", "copied ✅");
+      writeHUD("copy", "copied ✅");
     } catch {
-      writeHUDLine("copy", "copy failed ❌");
+      writeHUD("copy", "copy failed ❌");
     }
   };
 
-  hud.querySelector("#hudHide").onclick = () => {
-    hudVisible = !hudVisible;
-    if (hudVisible) {
-      hudBody.style.display = "";
-      hud.querySelector("#hudHide").textContent = "HIDE HUD";
-    } else {
-      hudBody.style.display = "none";
-      hud.querySelector("#hudHide").textContent = "SHOW HUD";
-    }
+  hud.querySelector("#btnClean").onclick = () => {
+    setCleanMode(!cleanMode);
   };
 
-  // hotkeys
   addEventListener("keydown", (e) => {
     const k = e.key.toLowerCase();
     if (k === "r") resetToVIP();
-    if (k === "h") hud.querySelector("#hudHide").click();
+    if (k === "h") setCleanMode(!cleanMode);
   });
 }
 
-const hudLines = new Map();
-function writeHUDLine(key, value) {
+function writeHUD(key, value) {
   hudLines.set(key, value);
 }
 
 function updateHUD() {
-  if (!hudVisible) return;
+  if (cleanMode) return;
 
-  const presenting = renderer.xr.isPresenting;
-  const p = player.position;
+  writeHUD("mode", renderer.xr.isPresenting ? "XR" : "2D");
+  writeHUD("pos", `${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)}`);
+  writeHUD("yaw", `${player.rotation.y.toFixed(2)}`);
 
-  writeHUDLine("mode", presenting ? "XR" : "2D");
-  writeHUDLine("pos", `${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`);
-  writeHUDLine("yaw", `${player.rotation.y.toFixed(2)}`);
-
-  const lines = [];
-  for (const [k, v] of hudLines.entries()) lines.push(`${k}: ${v}`);
-  hudBody.textContent = lines.join("\n");
-}
-
-function getHUDText() {
-  const lines = [];
-  for (const [k, v] of hudLines.entries()) lines.push(`${k}: ${v}`);
-  return lines.join("\n");
+  hudBody.textContent = [...hudLines.entries()].map(([k,v]) => `${k}: ${v}`).join("\n");
 }
 
 // ======================
@@ -363,7 +350,7 @@ function installDesktopControls() {
 }
 
 // ======================
-// ANDROID TOUCH STICKS (auto)
+// ANDROID TOUCH STICKS
 // ======================
 function installTouchSticks() {
   const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
@@ -376,8 +363,9 @@ function installTouchSticks() {
   wrap.style.bottom = "0";
   wrap.style.height = "48%";
   wrap.style.pointerEvents = "none";
-  wrap.style.zIndex = "99998";
+  wrap.style.zIndex = "99997";
   document.body.appendChild(wrap);
+  touchWrapEl = wrap;
 
   const mk = (side) => {
     const el = document.createElement("div");
@@ -447,5 +435,5 @@ function installTouchSticks() {
   bind(touch.left, L);
   bind(touch.right, R);
 
-  writeHUDLine("android", "dual-stick ✅");
+  writeHUD("android", "dual-stick ✅");
 }

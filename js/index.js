@@ -1,21 +1,12 @@
-// /js/index.js — Scarlett INDEX MASTER (FULL) v1.0.0
-// ✅ No bare imports like "three" (prevents: Failed to resolve module specifier "three")
+// /js/index.js — Scarlett INDEX MASTER (FULL) v1.0.1 (Quest-safe)
+// ✅ FIXED: removed invalid `new Something?.()` optional-chain syntax (was breaking Android/Quest)
+// ✅ No bare imports like "three"
 // ✅ VRButton + WebXR
-// ✅ PlayerRig (camera parent) so we can move/teleport safely
-// ✅ Controllers + lasers
-// ✅ Teleport ring on floor + ray teleport (trigger)
-// ✅ Thumbstick locomotion:
-//    - Right stick: forward/back + strafe at 45° (x) + snap/ smooth turn (x/y configurable)
-//    - Left stick: left/right strafe (x) + optional forward/back (y)
-// ✅ Seated mode support: if (window.__SEATED_MODE) locomotion stops
-// ✅ Loads World from ./world.js and passes ctx; falls back if it fails
-// ✅ Android dev controls (drag look + on-screen sticks if you want later) — kept light
-//
-// NOTE: You requested a 1-line patch earlier: this file already includes the seated guard.
-// Just replace your /js/index.js with this.
+// ✅ PlayerRig movement + teleport ring + controller lasers
+// ✅ Thumbstick locomotion + seated-mode guard
+// ✅ Loads ./world.js and passes ctx; falls back if it fails
 
 const BUILD = `INDEX_MASTER_${Date.now()}`;
-const TZ = "America/Chicago";
 
 const $log = (() => {
   const pad = (n) => String(n).padStart(2, "0");
@@ -23,17 +14,13 @@ const $log = (() => {
     const d = new Date();
     return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   };
-  const fmt = (m) => `[${now()}] ${m}`;
   const out = [];
   function push(m) {
-    const line = fmt(m);
+    const line = `[${now()}] ${m}`;
     out.push(line);
     console.log(line);
-    // HUD logger if present
     const el = document.getElementById("hud-log");
-    if (el) {
-      el.textContent = out.slice(-40).join("\n");
-    }
+    if (el) el.textContent = out.slice(-40).join("\n");
   }
   push.copy = async () => {
     try {
@@ -52,54 +39,37 @@ $log(`[env] secureContext=${String(window.isSecureContext)}`);
 $log(`[env] ua=${navigator.userAgent}`);
 $log(`[env] navigator.xr=${String(!!navigator.xr)}`);
 
-// --- Safe Three.js loader (no bare specifiers) ---
+// ---------- loaders (no bare "three") ----------
 async function loadThree() {
-  // Prefer already-provided THREE (some boot.js wrappers set window.THREE)
   if (window.THREE && window.THREE.Scene) return window.THREE;
-
-  // Otherwise import from CDN by full URL
-  const ver = "0.164.1"; // stable-ish; you can bump later
-  const mod = await import(`https://unpkg.com/three@${ver}/build/three.module.js`);
-  return mod;
+  const ver = "0.164.1";
+  return await import(`https://unpkg.com/three@${ver}/build/three.module.js`);
 }
 
 async function loadVRButton() {
-  // Use your local VRButton.js if you have it (recommended for GitHub Pages)
-  // It must export VRButton.
   try {
     const m = await import(`./VRButton.js?v=${Date.now()}`);
     return m.VRButton || m.default || m;
   } catch (e) {
-    // Fallback to Three examples CDN (full URL)
     const ver = "0.164.1";
     const m = await import(`https://unpkg.com/three@${ver}/examples/jsm/webxr/VRButton.js`);
     return m.VRButton;
   }
 }
 
-function clamp(v, a, b) {
-  return Math.max(a, Math.min(b, v));
-}
+// ---------- utils ----------
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function deadzone(v, dz = 0.12) { return Math.abs(v) < dz ? 0 : v; }
 
-function deadzone(v, dz = 0.12) {
-  return Math.abs(v) < dz ? 0 : v;
-}
-
-function easeOutCubic(t) {
-  t = clamp(t, 0, 1);
-  return 1 - Math.pow(1 - t, 3);
-}
-
-// --- Core globals ---
+// ---------- globals ----------
 let THREE = null;
 let scene = null;
 let renderer = null;
 let camera = null;
-let player = null; // PlayerRig Group
+let player = null; // PlayerRig
 let clock = null;
 
 let controllers = { left: null, right: null };
-let controllerGrips = { left: null, right: null };
 let lasers = { left: null, right: null };
 
 let teleport = {
@@ -110,34 +80,24 @@ let teleport = {
   lastTeleportAt: 0,
   cooldown: 250,
   raycaster: null,
-  tmpV: null,
-  tmpDir: null,
 };
 
 let locomotion = {
-  // User preference:
-  // Right stick: forward/back + diagonal/strafe (x)
-  // Left stick: left/right strafe (x) (+ optional y)
   speed: 3.25,
   strafeSpeed: 3.0,
-  turnSpeed: 2.4, // radians/sec (smooth)
+  turnSpeed: 2.4,      // smooth turn rad/s
   snapTurn: false,
-  snapAngle: Math.PI / 6, // 30°
+  snapAngle: Math.PI / 6,
   snapCooldown: 220,
   lastSnapAt: 0,
 };
 
-let world = null; // module object with init/update/colliders
-let worldState = {
-  colliders: [],
-};
-
+let world = null;
+let worldState = { colliders: [] };
 let isXR = false;
-let lastFrame = performance.now();
 
-// --- HUD helper (optional) ---
+// ---------- HUD (lightweight) ----------
 (function ensureHUD() {
-  // If you already have your HUD in HTML, we won't override it.
   if (document.getElementById("hud-log")) return;
 
   const hud = document.createElement("div");
@@ -146,7 +106,6 @@ let lastFrame = performance.now();
   hud.style.bottom = "10px";
   hud.style.width = "min(520px, 92vw)";
   hud.style.maxHeight = "40vh";
-  hud.style.overflow = "hidden";
   hud.style.background = "rgba(10,12,18,0.65)";
   hud.style.border = "1px solid rgba(255,255,255,0.12)";
   hud.style.borderRadius = "12px";
@@ -194,7 +153,7 @@ let lastFrame = performance.now();
   document.body.appendChild(hud);
 })();
 
-// --- Create basic Three scene ---
+// ---------- init three ----------
 async function initThree() {
   THREE = await loadThree();
   $log("[index] three init ✅");
@@ -204,7 +163,6 @@ async function initThree() {
 
   camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 300);
 
-  // PlayerRig so we can move camera in XR and non-XR consistently
   player = new THREE.Group();
   player.name = "PlayerRig";
   player.position.set(0, 0, 8);
@@ -228,15 +186,12 @@ async function initThree() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // Minimal ambient to avoid black while loading world
   scene.add(new THREE.HemisphereLight(0xffffff, 0x05060a, 0.8));
 
   teleport.raycaster = new THREE.Raycaster();
-  teleport.tmpV = new THREE.Vector3();
-  teleport.tmpDir = new THREE.Vector3();
 }
 
-// --- Controllers + lasers ---
+// ---------- controllers + lasers ----------
 function makeLaser(color = 0x7fe7ff) {
   const geo = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(0, 0, 0),
@@ -250,15 +205,12 @@ function makeLaser(color = 0x7fe7ff) {
 }
 
 function installControllers() {
-  // XR controllers (works in VR; gracefully does nothing in non-XR)
   const c0 = renderer.xr.getController(0);
   const c1 = renderer.xr.getController(1);
 
-  // We will infer left/right by handedness when available
   controllers.left = c0;
   controllers.right = c1;
 
-  // Add laser lines
   lasers.left = makeLaser(0x7fe7ff);
   lasers.right = makeLaser(0xff2d7a);
 
@@ -270,36 +222,11 @@ function installControllers() {
 
   $log("[index] controllers ready ✅");
 
-  // selection events for teleport
   c0.addEventListener("selectstart", () => onSelectStart("left"));
   c1.addEventListener("selectstart", () => onSelectStart("right"));
-  c0.addEventListener("selectend", () => onSelectEnd("left"));
-  c1.addEventListener("selectend", () => onSelectEnd("right"));
-
-  // Grip (optional)
-  const factory = new THREE.XRControllerModelFactory?.() || null;
-  if (factory) {
-    const g0 = renderer.xr.getControllerGrip(0);
-    const g1 = renderer.xr.getControllerGrip(1);
-    g0.add(factory.createControllerModel(g0));
-    g1.add(factory.createControllerModel(g1));
-    scene.add(g0); scene.add(g1);
-    controllerGrips.left = g0;
-    controllerGrips.right = g1;
-  }
-
-  // In some browsers, inputSources come later; keep updating mapping each frame.
 }
 
-function getXRInputSource(handedness) {
-  const sources = renderer.xr.getSession()?.inputSources || [];
-  for (const s of sources) {
-    if (s && s.handedness === handedness) return s;
-  }
-  return null;
-}
-
-// --- Teleport ring ---
+// ---------- teleport ring ----------
 function ensureTeleportRing() {
   if (teleport.ring) return;
   const g = new THREE.RingGeometry(0.22, 0.30, 28);
@@ -317,14 +244,22 @@ function ensureTeleportRing() {
   teleport.ring = ring;
 }
 
+function getXRInputSource(handedness) {
+  const sess = renderer.xr.getSession();
+  const sources = sess?.inputSources || [];
+  for (const s of sources) if (s?.handedness === handedness) return s;
+  return null;
+}
+
 function computeTeleportTarget(fromObj) {
   teleport.valid = false;
   teleport.target = null;
   if (!fromObj) return;
 
-  // Ray origin + direction
-  const origin = fromObj.getWorldPosition(teleport.tmpV);
-  const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(fromObj.getWorldQuaternion(new THREE.Quaternion())).normalize();
+  const origin = fromObj.getWorldPosition(new THREE.Vector3());
+  const dir = new THREE.Vector3(0, 0, -1)
+    .applyQuaternion(fromObj.getWorldQuaternion(new THREE.Quaternion()))
+    .normalize();
 
   teleport.raycaster.set(origin, dir);
   teleport.raycaster.far = 30;
@@ -334,8 +269,12 @@ function computeTeleportTarget(fromObj) {
   if (!hits || hits.length === 0) return;
 
   const hit = hits[0];
-  // Basic rule: only allow teleport to surfaces that are roughly "floor-like"
-  const n = hit.face?.normal ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : null;
+
+  const n = hit.face?.normal
+    ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld)
+    : null;
+
+  // floor-like only
   if (n && n.y < 0.45) return;
 
   teleport.valid = true;
@@ -358,44 +297,33 @@ function doTeleport() {
   if (now - teleport.lastTeleportAt < teleport.cooldown) return;
   if (!teleport.valid || !teleport.target) return;
 
-  // Teleport PlayerRig so camera ends up at target
-  // We move player so camera's current offset lands on target.
   const camWorld = camera.getWorldPosition(new THREE.Vector3());
   const delta = teleport.target.clone().sub(camWorld);
-
-  // Keep delta.y = 0 so we don't mess with head height
   delta.y = 0;
 
   player.position.add(delta);
   teleport.lastTeleportAt = now;
 }
 
-// --- Selection events ---
 function onSelectStart(which) {
-  // Teleport on selectstart if valid
   if (!teleport.active) return;
-  if (window.__SEATED_MODE) return; // no teleport while seated (unless you want)
+  if (window.__SEATED_MODE) return;
   if (teleport.valid) doTeleport();
 }
 
-function onSelectEnd(which) {
-  // no-op for now
-}
-
-// --- Locomotion ---
+// ---------- locomotion ----------
 function getGamepadAxes(handedness) {
   const src = getXRInputSource(handedness);
   const gp = src?.gamepad;
-  if (!gp || !gp.axes) return { x: 0, y: 0 };
-  // Most XR controllers use axes[2]/[3] or [0]/[1] depending.
-  // We'll choose best guess: last two axes if available, else first two.
-  const a = gp.axes;
+  const a = gp?.axes;
+  if (!a || !a.length) return { x: 0, y: 0 };
+
+  // prefer last two axes if present
   if (a.length >= 4) return { x: a[2] ?? 0, y: a[3] ?? 0 };
   return { x: a[0] ?? 0, y: a[1] ?? 0 };
 }
 
 function getYawQuat() {
-  // Use camera yaw for movement direction
   const q = camera.getWorldQuaternion(new THREE.Quaternion());
   const e = new THREE.Euler().setFromQuaternion(q, "YXZ");
   const yaw = e.y;
@@ -405,54 +333,47 @@ function getYawQuat() {
 }
 
 function updateLocomotion(dt) {
-  // ✅ Seated guard (your request)
+  // ✅ your seated-mode requirement
   if (window.__SEATED_MODE) return;
-
-  // If not in XR, allow basic WASD? (kept off by default)
   if (!isXR) return;
 
   const left = getGamepadAxes("left");
   const right = getGamepadAxes("right");
 
-  let lx = deadzone(left.x, 0.15);
-  let ly = deadzone(left.y, 0.15);
-  let rx = deadzone(right.x, 0.15);
-  let ry = deadzone(right.y, 0.15);
+  const lx = deadzone(left.x, 0.15);
+  const ly = deadzone(left.y, 0.15);
+  const rx = deadzone(right.x, 0.15);
+  const ry = deadzone(right.y, 0.15);
 
-  // User spec:
-  // Right stick: forward/back + 45 degree angles (means allow x strafe + y forward)
-  // Left stick: left/right for strafe (we'll let y be optional tiny forward too but mostly x)
-  const forward = -ry; // typical: up is -1
+  // Your mapping:
+  // Right stick: forward/back + diagonal (so x strafe + y forward)
+  // Left stick: left/right strafe (x) (y optional)
+  const forward = -ry;
   const strafeR = rx;
   const strafeL = lx;
 
   const moveZ = forward * locomotion.speed;
   const moveX = (strafeR * locomotion.strafeSpeed) + (strafeL * locomotion.strafeSpeed);
 
-  // direction relative to yaw
   const yawQ = getYawQuat();
   const dir = new THREE.Vector3(moveX, 0, moveZ).applyQuaternion(yawQ);
 
-  // Apply movement
   player.position.addScaledVector(dir, dt);
 
-  // Turning: if snapTurn -> snap using right stick x (or left x if you prefer)
+  // Turn
   if (locomotion.snapTurn) {
     const now = performance.now();
     if (Math.abs(rx) > 0.65 && now - locomotion.lastSnapAt > locomotion.snapCooldown) {
-      const sgn = rx > 0 ? -1 : 1; // right stick right -> turn right (negative yaw)
+      const sgn = rx > 0 ? -1 : 1;
       player.rotation.y += sgn * locomotion.snapAngle;
       locomotion.lastSnapAt = now;
     }
   } else {
-    // Smooth turn using right stick x, but only if you're not using it heavily for strafing
-    // If you prefer: map turn to left stick x instead, change here.
     const turn = -rx * locomotion.turnSpeed;
     player.rotation.y += turn * dt;
   }
 }
 
-// --- Teleport aim + ring update ---
 function updateTeleportAim() {
   if (!teleport.active) return;
   if (window.__SEATED_MODE) {
@@ -460,7 +381,6 @@ function updateTeleportAim() {
     return;
   }
 
-  // Prefer right controller for teleport
   const c = controllers.right || controllers.left;
   if (!c) return;
 
@@ -468,17 +388,9 @@ function updateTeleportAim() {
   showTeleportRing();
 }
 
-// --- Minimal non-XR camera control (Android dev) ---
-let dev = {
-  enabled: true,
-  dragging: false,
-  lastX: 0,
-  lastY: 0,
-  yaw: 0,
-  pitch: 0,
-};
+// ---------- Android dev look (non-XR) ----------
+let dev = { dragging: false, lastX: 0, lastY: 0, yaw: 0, pitch: 0 };
 function installAndroidDevControls() {
-  // Only enable if not XR and likely mobile
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   if (!isMobile) return;
 
@@ -511,7 +423,7 @@ function installAndroidDevControls() {
   $log("[android] dev controls ready ✅");
 }
 
-// --- World loader ---
+// ---------- world loader ----------
 async function loadWorld() {
   try {
     const mod = await import(`./world.js?v=${Date.now()}`);
@@ -524,7 +436,6 @@ async function loadWorld() {
 }
 
 function buildFallbackWorld() {
-  // Super simple fallback so you can still teleport and see something
   const g = new THREE.Group();
   g.name = "FallbackWorld";
   scene.add(g);
@@ -538,42 +449,48 @@ function buildFallbackWorld() {
 
   const wall = new THREE.Mesh(
     new THREE.CylinderGeometry(20, 20, 8, 96, 1, true),
-    new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 1, metalness: 0.05, side: THREE.DoubleSide })
+    new THREE.MeshStandardMaterial({
+      color: 0x0b0d14,
+      roughness: 1,
+      metalness: 0.05,
+      side: THREE.DoubleSide,
+    })
   );
   wall.position.y = 4;
   g.add(wall);
 
-  scene.add(new THREE.PointLight(0x7fe7ff, 12, 60)).position.set(0, 6, 10);
-  scene.add(new THREE.PointLight(0xff2d7a, 10, 60)).position.set(-10, 5, 0);
+  const l1 = new THREE.PointLight(0x7fe7ff, 12, 60);
+  l1.position.set(0, 6, 10);
+  scene.add(l1);
+
+  const l2 = new THREE.PointLight(0xff2d7a, 10, 60);
+  l2.position.set(-10, 5, 0);
+  scene.add(l2);
 
   worldState.colliders = [floor];
   $log("[index] fallback world added ✅");
 }
 
-// --- XR session events ---
+// ---------- XR hooks ----------
 function installXRHooks() {
   renderer.xr.addEventListener("sessionstart", () => {
     isXR = true;
     $log("[xr] sessionstart ✅");
-    // When entering XR, camera pose comes from headset; keep rig at its current location
   });
   renderer.xr.addEventListener("sessionend", () => {
     isXR = false;
     $log("[xr] sessionend ✅");
-    // Return to non-XR view
   });
 }
 
-// --- Main loop ---
+// ---------- main loop ----------
 function animate() {
   renderer.setAnimationLoop(() => {
     const dt = clock.getDelta();
-    lastFrame = performance.now();
 
     updateTeleportAim();
     updateLocomotion(dt);
 
-    // World update
     try {
       world?.update?.(dt);
     } catch (e) {
@@ -585,13 +502,12 @@ function animate() {
   });
 }
 
-// --- Boot ---
+// ---------- boot ----------
 (async function boot() {
   try {
     await initThree();
     installXRHooks();
 
-    // VRButton
     const VRButton = await loadVRButton();
     try {
       document.body.appendChild(VRButton.createButton(renderer));
@@ -604,9 +520,9 @@ function animate() {
     ensureTeleportRing();
     installAndroidDevControls();
 
-    // Load world
     $log("[index] calling world.init() …");
     world = await loadWorld();
+
     if (world) {
       await world.init({
         THREE,
@@ -619,7 +535,7 @@ function animate() {
         BUILD,
       });
 
-      // Colliders: expose from world if provided
+      // colliders (World v7 exposes getter)
       if (Array.isArray(world.colliders)) worldState.colliders = world.colliders;
       else if (typeof world.colliders === "function") worldState.colliders = world.colliders();
       else worldState.colliders = world.colliders || [];
@@ -632,16 +548,5 @@ function animate() {
     animate();
   } catch (e) {
     $log("[index] fatal boot error ❌ " + (e?.message || e));
-    // last resort
-    try {
-      THREE = THREE || (await loadThree());
-      scene = new THREE.Scene();
-      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
-      renderer = new THREE.WebGLRenderer({ antialias: true });
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      document.body.appendChild(renderer.domElement);
-      scene.add(new THREE.HemisphereLight(0xffffff, 0x05060a, 1));
-      renderer.setAnimationLoop(() => renderer.render(scene, camera));
-    } catch (_) {}
   }
 })();

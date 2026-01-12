@@ -1,26 +1,17 @@
-// /js/index.js — Scarlett FULL MASTER 9.0 (VIP Spawn + Teleport Laser + Android Move + HUD + Nametags + Poker Demo)
-// ✅ Uses local wrapper: /js/three.js (NO bare "three" imports)
-// ✅ Quest + Android locomotion (left stick move, right stick snap turn 45°)
-// ✅ Teleport laser (select = teleport) + marker on floors
-// ✅ Spawns in VIP cube, facing table
-// ✅ UI HUD (money/rank/time/pot) + hide/show toggle
-// ✅ Look-at nametags (appear when gazed, hide otherwise)
-// ✅ PokerDemo: seated bots + cards hovering above heads + chips animate into pot + HUD updates
-//
-// Requires these files present:
-// - /js/three.js
-// - /js/world.js (WORLD 8.6 from my last message)
-// - /js/ui_hud.js
-// - /js/nametags.js
-// - /js/poker_demo.js
+// /js/index.js — Scarlett FULL MASTER 9.2 (VIP spawn + stable controls + laser + poker demo + nametags)
+// ✅ NO bare "three" imports (uses ./three.js wrapper)
+// ✅ Spawn ALWAYS in VIP cube
+// ✅ Locomotion: left stick move, right stick snap turn 45°
+// ✅ Teleport laser on controllers
+// ✅ PokerDemo: seated bots + big/high hole cards + big community cards + visible chip throws
+// ✅ NameTags: reliable look-at tags
 
 import { THREE, VRButton } from "./three.js";
 import { World } from "./world.js";
-import { UIHud } from "./ui_hud.js";
 import { NameTags } from "./nametags.js";
 import { PokerDemo } from "./poker_demo.js";
 
-const BUILD = "FULL MASTER 9.0 (VIP + HUD + Nametags + Poker Demo)";
+const BUILD = "FULL MASTER 9.2 (VIP spawn + sealed pit + poker demo + tags)";
 console.log("[index]", BUILD);
 
 let scene, camera, renderer, player, clock;
@@ -34,7 +25,6 @@ const SNAP_DEAD = 0.75;
 const SNAP_CD = 0.22;
 let snapCooldown = 0;
 
-// Shared temporaries
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
 const _f = new THREE.Vector3();
@@ -55,9 +45,6 @@ const tp = {
   tmpPos: null,
 };
 
-// HUD toggle
-let hudVisible = true;
-
 init();
 
 function init() {
@@ -72,7 +59,6 @@ function init() {
   player.add(camera);
   camera.position.set(0, 1.65, 0);
 
-  // Renderer (Quest-stable)
   renderer = new THREE.WebGLRenderer({
     antialias: false,
     alpha: false,
@@ -92,28 +78,22 @@ function init() {
   // Build world
   World.build({ THREE, scene, log: console.log });
 
-  // Spawn
+  // Spawn in VIP
   resetSpawn();
 
   // Teleport laser
   installTeleportLaser();
 
-  // HUD + key bindings
-  UIHud.init();
-  installHudToggle();
-
   // Nametags
   NameTags.init({ THREE, scene, camera });
 
   // Poker demo
-  PokerDemo.init({ THREE, scene, world: World, hud: UIHud });
+  PokerDemo.init({ THREE, scene, world: World });
 
-  // Register nametags for player bots that PokerDemo created
+  // Register player bots for tags (PokerDemo names them PlayerBot_1..)
   registerPokerBotsForNametags();
 
-  // XR session handling
   renderer.xr.addEventListener("sessionstart", () => {
-    // In XR, camera is controlled by headset
     camera.position.set(0, 0, 0);
     resetSpawn();
   });
@@ -123,14 +103,6 @@ function init() {
   });
 
   addEventListener("resize", onResize);
-
-  // Touch fallback (Android) for HUD toggle
-  renderer.domElement.addEventListener("touchstart", (e) => {
-    // Two-finger tap toggles HUD
-    if (e.touches && e.touches.length >= 2) {
-      toggleHud();
-    }
-  }, { passive: true });
 
   clock = new THREE.Clock();
   renderer.setAnimationLoop(loop);
@@ -146,19 +118,15 @@ function resetSpawn() {
   const s = World.getSpawn?.("vip_cube") || World.getSpawn?.() || { x: 0, y: 0, z: 8, yaw: Math.PI };
   player.position.set(s.x, s.y ?? 0, s.z);
   player.rotation.set(0, s.yaw ?? Math.PI, 0);
-  console.log("[spawn] vip_cube", s);
+  console.log("[spawn] VIP ✅", s);
 }
 
 function loop() {
   const dt = Math.min(clock.getDelta(), 0.04);
 
-  // Movement + snap turn
   moveXR(dt);
-
-  // Teleport laser marker
   updateLaser();
 
-  // Demo systems
   PokerDemo.update(dt);
   NameTags.update();
 
@@ -166,42 +134,10 @@ function loop() {
 }
 
 // ---------------------
-// HUD show/hide
-// ---------------------
-function installHudToggle() {
-  // Desktop: H toggles HUD
-  addEventListener("keydown", (e) => {
-    if (e.key === "h" || e.key === "H") toggleHud();
-  });
-
-  // Add a small button for 2D
-  const btn = document.createElement("button");
-  btn.textContent = "HUD";
-  btn.style.cssText = `
-    position:fixed; right:10px; bottom:78px; z-index:10000;
-    padding:10px 12px; border-radius:14px; border:1px solid rgba(127,231,255,.35);
-    background:rgba(8,10,18,.55); color:#e8ecff; font-weight:700;
-    box-shadow:0 12px 40px rgba(0,0,0,.55);
-  `;
-  btn.addEventListener("click", toggleHud);
-  document.body.appendChild(btn);
-}
-
-function toggleHud() {
-  hudVisible = !hudVisible;
-  const hud = document.getElementById("scarlett-hud");
-  if (hud) hud.style.display = hudVisible ? "flex" : "none";
-  console.log("[hud] visible =", hudVisible);
-}
-
-// ---------------------
-// Movement (Quest + Android)
+// Movement (Quest + Android in XR)
 // ---------------------
 function moveXR(dt) {
-  // allow 2D movement too (android non-xr) if you want:
-  // If not XR presenting, nothing happens (keeps simple).
   if (!renderer.xr.isPresenting) return;
-
   const session = renderer.xr.getSession?.();
   if (!session) return;
 
@@ -228,7 +164,6 @@ function moveXR(dt) {
 
   let moveSource = leftSrc;
   if (!moveSource) {
-    // fallback pick the one with strongest motion
     let best = sources[0], bestMag = 0;
     for (const s of sources) {
       const st = pickStick(s.gp);
@@ -244,10 +179,8 @@ function moveXR(dt) {
   const mx = dz(mv.x, DEAD_MOVE);
   const my = dz(mv.y, DEAD_MOVE);
 
-  // Forward on Quest is usually -Y
   const forward = -my;
 
-  // Snap turn on right stick X (or strongest x axis)
   const aT = turnSource.gp.axes || [];
   let turnX = 0;
   if (aT.length >= 4) {
@@ -290,7 +223,7 @@ function getHeadYaw() {
 }
 
 // ---------------------
-// Teleport laser + marker (parented to rig so it follows you)
+// Teleport laser
 // ---------------------
 function installTeleportLaser() {
   tp.raycaster = new THREE.Raycaster();
@@ -343,7 +276,6 @@ function updateLaser() {
   const floors = World.getFloors ? World.getFloors() : [];
   tp.hit = null;
 
-  // prefer right controller
   const cands = [tp.c1, tp.c0];
   for (const c of cands) {
     if (!controllerTracked(c)) continue;
@@ -375,17 +307,17 @@ function controllerTracked(ctrl) {
 }
 
 // ---------------------
-// Nametag registration
+// Register nametags
 // ---------------------
 function registerPokerBotsForNametags() {
   const demo = World.getDemo?.();
   if (!demo?.tableAnchor) return;
 
-  let idx = 1;
   demo.tableAnchor.traverse((o) => {
     if (o?.name?.startsWith("PlayerBot_")) {
-      NameTags.register(o, `PLAYER ${idx++}`);
+      NameTags.register(o, o.name.replace("PlayerBot_", "PLAYER "));
     }
   });
+
   console.log("[nametags] registered ✅");
 }

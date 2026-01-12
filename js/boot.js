@@ -68,4 +68,3 @@
       if (err?.stack) line(err.stack);
     });
 })();
-```0

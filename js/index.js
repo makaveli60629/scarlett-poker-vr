@@ -1,38 +1,43 @@
-// /js/index.js — Scarlett MASTER (FULL)
-// ✅ TDZ-safe diagnostics + Copy Log
-// ✅ VRButton + Manual Enter VR fallback
-// ✅ RIGHT-hand laser (always)
-// ✅ Correct locomotion mapping:
-//    - Left stick: move forward/back + strafe left/right (true left/right, not 45°)
-//    - Right stick: turn left/right
-// ✅ Stable HUD: yaw-only facing (no wild pitch/roll)
-// ✅ Works on Quest + Android (fallback sticks if XR gamepad missing)
+// /js/index.js — Scarlett MASTER XR v2 (RIGHT LASER + HANDS + GRIPS + STABLE)
+// ✅ Right-hand laser anchored to controller GRIP (fixes "laser stuck in center")
+// ✅ Visible controller models (hands) + XR hand tracking models (if supported)
+// ✅ Left stick move/strafe, Right stick smooth turn
+// ✅ Y toggles World menu
+// ✅ Diagnostics + COPY LOG + Manual Enter VR
+// ❗ No bare "three" imports. Uses ./three.js wrapper + unpkg example modules.
 
 import { THREE, VRButton } from "./three.js";
 
-const BUILD = `SCARLETT_MASTER_INDEX_${Date.now()}`;
+const BUILD = `SCARLETT_INDEX_MASTER_V2_${Date.now()}`;
 
-// -------------------- DIAGNOSTICS (TDZ SAFE) --------------------
+// -------------------- DIAGNOSTICS UI --------------------
 const LogBuf = [];
-let ui = null;
+let UI = null;
 
+function safeJson(x) { try { return JSON.stringify(x); } catch { return String(x); } }
 function LOG(...a) {
-  const s = a.map(x => (typeof x === "string" ? x : safeJson(x))).join(" ");
+  const s = a.map(v => (typeof v === "string" ? v : safeJson(v))).join(" ");
   console.log(s);
   LogBuf.push(s);
   if (LogBuf.length > 1600) LogBuf.shift();
-  if (ui?.log) {
-    ui.log.textContent = LogBuf.slice(-280).join("\n");
-    ui.log.scrollTop = ui.log.scrollHeight;
+  if (UI?.log) {
+    UI.log.textContent = LogBuf.slice(-280).join("\n");
+    UI.log.scrollTop = UI.log.scrollHeight;
   }
 }
-function safeJson(x) { try { return JSON.stringify(x); } catch { return String(x); } }
+
+function btnStyle(kind) {
+  const base = "padding:8px 10px;border-radius:12px;font-weight:900;cursor:pointer;";
+  if (kind === "aqua") return base + "background:rgba(127,231,255,.14);color:#dff8ff;border:1px solid rgba(127,231,255,.35);";
+  if (kind === "pink") return base + "background:rgba(255,45,122,.14);color:#ffe1ec;border:1px solid rgba(255,45,122,.35);";
+  return base + "background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.18);";
+}
 
 function makeDiagUI() {
   const wrap = document.createElement("div");
   wrap.style.cssText = `
     position:fixed; left:10px; top:10px; z-index:999999;
-    width:min(620px, calc(100vw - 20px));
+    width:min(640px, calc(100vw - 20px));
     background:rgba(10,12,18,.82); color:#e8ecff;
     border:1px solid rgba(127,231,255,.22);
     border-radius:14px; padding:10px;
@@ -44,8 +49,8 @@ function makeDiagUI() {
   row.style.cssText = "display:flex; gap:8px; align-items:center; flex-wrap:wrap;";
 
   const title = document.createElement("div");
-  title.textContent = "Scarlett Poker VR — Diagnostics";
-  title.style.cssText = "font-weight:800; opacity:.95; margin-right:auto;";
+  title.textContent = "Scarlett VR Poker — Diagnostics";
+  title.style.cssText = "font-weight:900; opacity:.95; margin-right:auto;";
 
   const btnCopy = document.createElement("button");
   btnCopy.textContent = "COPY LOG";
@@ -69,9 +74,6 @@ function makeDiagUI() {
   const btnHide = document.createElement("button");
   btnHide.textContent = "HIDE";
   btnHide.style.cssText = btnStyle("dim");
-  btnHide.onclick = () => {
-    pre.style.display = (pre.style.display === "none") ? "block" : "none";
-  };
 
   const btnEnter = document.createElement("button");
   btnEnter.textContent = "ENTER VR (MANUAL)";
@@ -84,6 +86,10 @@ function makeDiagUI() {
     max-height:40vh; overflow:auto; white-space:pre-wrap;
   `;
 
+  btnHide.onclick = () => {
+    pre.style.display = (pre.style.display === "none") ? "block" : "none";
+  };
+
   row.appendChild(title);
   row.appendChild(btnCopy);
   row.appendChild(btnHide);
@@ -95,14 +101,7 @@ function makeDiagUI() {
   return { wrap, log: pre, btnEnter };
 }
 
-function btnStyle(kind) {
-  const base = "padding:8px 10px; border-radius:12px; font-weight:900; cursor:pointer;";
-  if (kind === "aqua") return base + "background:rgba(127,231,255,.14); color:#dff8ff; border:1px solid rgba(127,231,255,.35);";
-  if (kind === "pink") return base + "background:rgba(255,45,122,.14); color:#ffe1ec; border:1px solid rgba(255,45,122,.35);";
-  return base + "background:rgba(255,255,255,.08); color:#fff; border:1px solid rgba(255,255,255,.18);";
-}
-
-ui = makeDiagUI();
+UI = makeDiagUI();
 
 LOG(`[index] runtime start ✅ build=${BUILD}`);
 LOG(`[env] href=${location.href}`);
@@ -110,42 +109,31 @@ LOG(`[env] secureContext=${window.isSecureContext}`);
 LOG(`[env] ua=${navigator.userAgent}`);
 LOG(`[env] navigator.xr=${!!navigator.xr}`);
 
-// -------------------- SAFE IMPORT --------------------
-function withTimeout(promise, ms, label) {
-  let t = null;
-  const timeout = new Promise((_, rej) => (t = setTimeout(() => rej(new Error(`timeout: ${label}`)), ms)));
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
-}
-async function safeImport(path, { timeout = 2500, silent = true } = {}) {
-  try {
-    const mod = await withTimeout(import(path), timeout, path);
-    LOG(`[import] ok: ${path}`);
-    return mod;
-  } catch (e) {
-    LOG(silent ? `[import] skip: ${path}` : `[import] FAIL: ${path} -> ${e?.message || e}`);
-    return null;
-  }
-}
-
 // -------------------- STATE --------------------
-const S = নিশ্চিত();
-function নিশ্চিত() {
-  return {
-    THREE,
-    scene: null,
-    camera: null,
-    renderer: null,
-    clock: new THREE.Clock(),
-    player: new THREE.Group(),
-    rig: new THREE.Group(),
-    controllers: [],
-    controllerRays: [],
-    world: null,
-    hudRoot: null,
-  };
-}
+const S = {
+  scene: null,
+  camera: null,
+  renderer: null,
+  clock: new THREE.Clock(),
+  player: new THREE.Group(),
+  rig: new THREE.Group(),
 
-// -------------------- INIT THREE --------------------
+  // controllers + grips + hands
+  controllers: [],
+  grips: [],
+  hands: [],
+
+  world: null,
+  hudRoot: null,
+
+  inXR: false,
+  lastButtons: { y: false },
+
+  // optional factories
+  XRControllerModelFactory: null,
+  XRHandModelFactory: null,
+};
+
 function initThree() {
   document.body.style.margin = "0";
   document.body.style.overflow = "hidden";
@@ -155,15 +143,19 @@ function initThree() {
   S.renderer.setSize(innerWidth, innerHeight);
   S.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
   S.renderer.xr.enabled = true;
+
+  // Quest stability
+  S.renderer.xr.setFoveation?.(1.0);
+
   document.body.appendChild(S.renderer.domElement);
 
   S.scene = new THREE.Scene();
   S.scene.background = new THREE.Color(0x05060a);
-  S.scene.fog = new THREE.Fog(0x05060a, 10, 140);
+  S.scene.fog = new THREE.Fog(0x05060a, 10, 180);
 
-  S.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 260);
-  S.camera.position.set(0, 1.65, 3);
+  S.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 300);
 
+  // IMPORTANT: camera is inside rig; player moves rig
   S.rig.add(S.camera);
   S.player.add(S.rig);
   S.scene.add(S.player);
@@ -177,7 +169,6 @@ function initThree() {
   LOG("[index] three init ✅");
 }
 
-// -------------------- VR BUTTON + MANUAL ENTER --------------------
 function initVRButtons() {
   try {
     const b = VRButton.createButton(S.renderer);
@@ -192,17 +183,19 @@ function initVRButtons() {
     LOG("[index] VRButton failed ❌ " + (e?.message || e));
   }
 
-  ui.btnEnter.onclick = async () => {
+  UI.btnEnter.onclick = async () => {
     try {
       if (!navigator.xr) return LOG("[vr] navigator.xr missing");
       const ok = await navigator.xr.isSessionSupported("immersive-vr");
       LOG(`[vr] isSessionSupported=${ok}`);
       if (!ok) return;
+
       const session = await navigator.xr.requestSession("immersive-vr", {
         optionalFeatures: ["local-floor", "bounded-floor", "local", "viewer", "hand-tracking", "layers", "dom-overlay"],
         domOverlay: { root: document.body }
       });
-      S.renderer.xr.setSession(session);
+
+      await S.renderer.xr.setSession(session);
       LOG("[vr] session started ✅");
     } catch (e) {
       LOG("[vr] manual enter FAIL ❌ " + (e?.message || e));
@@ -210,104 +203,190 @@ function initVRButtons() {
   };
 }
 
-// -------------------- RIGHT-HAND LASER (ALWAYS) --------------------
+// -------------------- SAFE IMPORT (NO HANG) --------------------
+function withTimeout(promise, ms, label) {
+  let t = null;
+  const timeout = new Promise((_, rej) => (t = setTimeout(() => rej(new Error(`timeout: ${label}`)), ms)));
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
+}
+async function safeImport(url, timeout = 8000) {
+  try {
+    const mod = await withTimeout(import(url), timeout, url);
+    LOG(`[import] ok: ${url}`);
+    return mod;
+  } catch (e) {
+    LOG(`[import] FAIL: ${url} -> ${e?.message || e}`);
+    return null;
+  }
+}
+
+// -------------------- LASER (GRIP-ANCHORED) --------------------
 function buildLaser(color = 0x7fe7ff) {
-  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
+  const geo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0, 0, -1),
+  ]);
   const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95 });
   const line = new THREE.Line(geo, mat);
-  line.name = "RightLaser";
+  line.name = "ScarlettLaser";
   line.scale.z = 18;
+
+  // tiny tip dot
+  const dot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.01, 10, 10),
+    new THREE.MeshBasicMaterial({ color })
+  );
+  dot.position.z = -1;
+  dot.name = "ScarlettLaserDot";
+  line.add(dot);
+
   return line;
 }
 
-function installRightHandLaser() {
-  // remove any existing
-  S.controllers.forEach(c => {
-    const old = c.getObjectByName?.("RightLaser");
-    if (old) c.remove(old);
-  });
+function attachLaserToGrip(grip, isRight) {
+  if (!grip) return;
+  // wipe old
+  const old = grip.getObjectByName?.("ScarlettLaser");
+  if (old) grip.remove(old);
 
-  // right is typically controller 1
-  const right = S.controllers[1] || S.controllers[0];
-  if (!right) return;
+  const laser = buildLaser(isRight ? 0x7fe7ff : 0xff2d7a);
+  // slight offset so it's not inside hand mesh
+  laser.position.set(0.0, -0.01, 0.02);
+  grip.add(laser);
+}
 
-  const laser = buildLaser(0x7fe7ff);
-  right.add(laser);
-  LOG("[laser] RIGHT laser attached ✅");
+function enforceLasers() {
+  // right grip = index 1 (usually), but we hard-force:
+  const g0 = S.grips[0] || null;
+  const g1 = S.grips[1] || null;
+
+  // Prefer mapping: grip1 = right, grip0 = left
+  if (g0) attachLaserToGrip(g0, false);
+  if (g1) attachLaserToGrip(g1, true);
+
+  LOG("[laser] grips laser enforced ✅");
+}
+
+// -------------------- CONTROLLERS + GRIPS + HANDS --------------------
+async function initInputModels() {
+  // controller models
+  const cmf = await safeImport("https://unpkg.com/three@0.160.0/examples/jsm/webxr/XRControllerModelFactory.js");
+  if (cmf?.XRControllerModelFactory) {
+    S.XRControllerModelFactory = cmf.XRControllerModelFactory;
+    LOG("[xr] XRControllerModelFactory ✅");
+  }
+
+  // hand tracking models
+  const hmf = await safeImport("https://unpkg.com/three@0.160.0/examples/jsm/webxr/XRHandModelFactory.js");
+  if (hmf?.XRHandModelFactory) {
+    S.XRHandModelFactory = hmf.XRHandModelFactory;
+    LOG("[xr] XRHandModelFactory ✅");
+  }
 }
 
 function initControllers() {
   S.controllers.length = 0;
+  S.grips.length = 0;
+  S.hands.length = 0;
+
+  // controllers (for select events)
   for (let i = 0; i < 2; i++) {
     const c = S.renderer.xr.getController(i);
     c.userData.index = i;
-
-    c.addEventListener("connected", (ev) => {
-      LOG(`[xr] controller${i} connected: ${ev?.data?.gamepad ? "gamepad" : "no-gamepad"} ${ev?.data?.hand ? "hand" : ""}`);
-    });
-    c.addEventListener("disconnected", () => LOG(`[xr] controller${i} disconnected`));
-
     S.scene.add(c);
     S.controllers.push(c);
+
+    c.addEventListener("connected", (ev) => {
+      LOG(`[xr] controller${i} connected: ${ev?.data?.gamepad ? "gamepad" : "no-gamepad"}`);
+      setTimeout(enforceLasers, 120);
+    });
+    c.addEventListener("disconnected", () => {
+      LOG(`[xr] controller${i} disconnected`);
+      setTimeout(enforceLasers, 120);
+    });
   }
 
-  installRightHandLaser();
+  // grips (for visible models + lasers)
+  const factory = S.XRControllerModelFactory ? new S.XRControllerModelFactory() : null;
+  for (let i = 0; i < 2; i++) {
+    const g = S.renderer.xr.getControllerGrip(i);
+    g.userData.index = i;
+    if (factory) {
+      const model = factory.createControllerModel(g);
+      g.add(model);
+    } else {
+      // fallback “hand blob”
+      const blob = new THREE.Mesh(
+        new THREE.SphereGeometry(0.035, 16, 16),
+        new THREE.MeshStandardMaterial({ color: 0x9aa3ff, roughness: 0.5, metalness: 0.1, emissive: 0x121a55, emissiveIntensity: 0.6 })
+      );
+      blob.position.set(0, 0, 0);
+      g.add(blob);
+    }
+    S.scene.add(g);
+    S.grips.push(g);
+  }
 
-  // re-attach laser once session starts (controllers can “refresh”)
-  S.renderer.xr.addEventListener("sessionstart", () => {
-    setTimeout(installRightHandLaser, 250);
-  });
+  // hand tracking (optional)
+  if (S.XRHandModelFactory) {
+    const handFactory = new S.XRHandModelFactory();
+    for (let i = 0; i < 2; i++) {
+      const h = S.renderer.xr.getHand(i);
+      h.userData.index = i;
+      const handModel = handFactory.createHandModel(h, "mesh");
+      h.add(handModel);
+      S.scene.add(h);
+      S.hands.push(h);
+    }
+  }
 
-  LOG("[index] controllers installed ✅");
+  S.renderer.xr.addEventListener("sessionstart", () => setTimeout(enforceLasers, 200));
+  S.renderer.xr.addEventListener("sessionend", () => setTimeout(enforceLasers, 200));
+
+  enforceLasers();
+  LOG("[index] controllers + grips + hands installed ✅");
 }
 
 // -------------------- LOCOMOTION (CORRECT) --------------------
-// Left stick: move/strafe (true left/right)
-// Right stick: turn
 function applyXRLocomotion(dt) {
   const session = S.renderer.xr.getSession?.();
   if (!session?.inputSources) return;
 
-  let left = null;
-  let right = null;
+  let leftPad = null, rightPad = null;
 
   for (const src of session.inputSources) {
     if (!src?.gamepad) continue;
-    if (src.handedness === "left") left = src.gamepad;
-    if (src.handedness === "right") right = src.gamepad;
+    if (src.handedness === "left") leftPad = src.gamepad;
+    if (src.handedness === "right") rightPad = src.gamepad;
   }
 
-  // fallback if handedness not provided
-  if (!left || !right) {
+  // fallback for weird inputSources order
+  if (!leftPad || !rightPad) {
     const pads = [];
     for (const src of session.inputSources) if (src?.gamepad) pads.push(src.gamepad);
-    left = left || pads[0] || null;
-    right = right || pads[1] || pads[0] || null;
+    leftPad = leftPad || pads[0] || null;
+    rightPad = rightPad || pads[1] || pads[0] || null;
   }
 
   const DZ = 0.16;
-  const dz = v => (Math.abs(v) < DZ ? 0 : v);
+  const dz = (v) => (Math.abs(v) < DZ ? 0 : v);
 
-  const getAxes = (gp) => gp?.axes || [];
+  const la = leftPad?.axes || [];
+  const ra = rightPad?.axes || [];
 
-  const la = getAxes(left);
-  const ra = getAxes(right);
+  // left: move/strafe
+  const lx = dz((la[0] ?? 0) || (la[2] ?? 0));
+  const ly = dz((la[1] ?? 0) || (la[3] ?? 0));
 
-  // left stick axes: prefer [0,1]; fallback [2,3]
-  const lx = dz(la[0] ?? 0) || dz(la[2] ?? 0);
-  const ly = dz(la[1] ?? 0) || dz(la[3] ?? 0);
+  // right: turn (x)
+  const rx = dz((ra[2] ?? 0) || (ra[0] ?? 0));
 
-  // right stick x for turn: prefer [2]; fallback [0]
-  const rx = dz(ra[2] ?? 0) || dz(ra[0] ?? 0);
+  const moveSpeed = 3.0;
+  const turnSpeed = 2.3;
 
-  const moveSpeed = 2.8;
-  const turnSpeed = 2.2;
-
-  // Forward: pushing stick forward yields negative Y on most controllers -> invert
   const forward = -ly;
   const strafe = lx;
 
-  // turn
   if (rx) S.player.rotation.y -= rx * turnSpeed * dt;
 
   if (forward || strafe) {
@@ -317,52 +396,82 @@ function applyXRLocomotion(dt) {
   }
 }
 
-// -------------------- STABLE HUD (yaw-only) --------------------
-function faceYawOnly(obj, camera, tilt = -0.10) {
-  const dx = camera.position.x - obj.position.x;
-  const dz = camera.position.z - obj.position.z;
+// -------------------- Y BUTTON MENU TOGGLE --------------------
+function readYPressed() {
+  const session = S.renderer.xr.getSession?.();
+  if (!session?.inputSources) return false;
+
+  // Prefer left controller "Y"
+  for (const src of session.inputSources) {
+    if (!src?.gamepad) continue;
+    if (src.handedness !== "left") continue;
+    const b = src.gamepad.buttons || [];
+    // common: Y = buttons[3]
+    return !!(b[3]?.pressed || b[4]?.pressed);
+  }
+
+  // fallback: any controller buttons[3]
+  for (const src of session.inputSources) {
+    if (!src?.gamepad) continue;
+    const b = src.gamepad.buttons || [];
+    if (b[3]?.pressed) return true;
+  }
+  return false;
+}
+
+function handleMenuToggle() {
+  const yNow = readYPressed();
+  const yPrev = S.lastButtons.y;
+
+  if (yNow && !yPrev) {
+    S.world?.toggleMenu?.();
+    LOG("[input] Y -> toggleMenu");
+  }
+  S.lastButtons.y = yNow;
+}
+
+// -------------------- HUD STABILITY (YAW ONLY) --------------------
+function faceYawOnly(obj, tilt = -0.10) {
+  const dx = S.camera.position.x - obj.position.x;
+  const dz = S.camera.position.z - obj.position.z;
   const yaw = Math.atan2(dx, dz);
   obj.rotation.set(tilt, yaw, 0);
 }
 
-// -------------------- WORLD LOADER --------------------
+// -------------------- WORLD LOAD --------------------
 async function initWorld() {
-  const mod = await safeImport("./world.js?v=" + Date.now(), { timeout: 8000, silent: false });
+  const mod = await safeImport("./world.js?v=" + Date.now(), 12000);
   if (!mod?.World?.init) {
-    LOG("[index] world.js invalid -> fallback");
+    LOG("[index] world.js invalid ❌");
     return;
   }
+
   S.world = mod.World;
 
-  const start = performance.now();
   let resolved = false;
-
   const p = Promise.resolve(
     S.world.init({
-      THREE: S.THREE,
+      THREE,
       scene: S.scene,
       renderer: S.renderer,
       camera: S.camera,
       player: S.player,
       controllers: S.controllers,
+      grips: S.grips,
       log: LOG,
       BUILD
     })
   ).then(() => {
     resolved = true;
-    LOG(`[index] world init ✅ ${(performance.now() - start).toFixed(0)}ms`);
+    LOG("[index] world init ✅");
   }).catch((e) => {
     resolved = true;
     LOG("[index] world init FAIL ❌ " + (e?.message || e));
   });
 
-  setTimeout(() => {
-    if (!resolved) LOG("[index] WORLD INIT TIMEOUT ❌ (world init still running)");
-  }, 6000);
+  setTimeout(() => { if (!resolved) LOG("[index] WORLD INIT TIMEOUT ❌"); }, 9000);
 
   await p;
-
-  // Grab HUD root if world exposed it
   S.hudRoot = S.scene.getObjectByName?.("ScarlettHUDRoot") || null;
 }
 
@@ -370,21 +479,25 @@ async function initWorld() {
 function startLoop() {
   S.renderer.setAnimationLoop(() => {
     const dt = Math.min(S.clock.getDelta(), 0.05);
+    S.inXR = !!S.renderer.xr.isPresenting;
 
-    applyXRLocomotion(dt);
-
-    // keep hud stable
-    if (S.hudRoot) faceYawOnly(S.hudRoot, S.camera, -0.10);
-
-    // world update
-    try {
-      S.world?.update?.({ dt, t: S.clock.elapsedTime });
-    } catch (e) {
-      LOG("[index] world.update crash ❌ " + (e?.message || e));
+    // XR safety lock: don't fight headset pose
+    if (S.inXR) {
+      S.camera.position.set(0, 0, 0);
+      S.camera.rotation.set(0, 0, 0);
+      S.renderer.setPixelRatio(1.0);
+      applyXRLocomotion(dt);
+      handleMenuToggle();
     }
+
+    if (S.hudRoot) faceYawOnly(S.hudRoot, -0.10);
+
+    try { S.world?.update?.({ dt, t: S.clock.elapsedTime }); }
+    catch (e) { LOG("[index] world.update crash ❌ " + (e?.message || e)); }
 
     S.renderer.render(S.scene, S.camera);
   });
+
   LOG("[index] loop ✅");
 }
 
@@ -393,17 +506,10 @@ function startLoop() {
   try {
     initThree();
     initVRButtons();
+    await initInputModels();
     initControllers();
-
-    // optional helpers (won't break)
-    await safeImport("./vr_locomotion.js?v=" + Date.now());
-    await safeImport("./xr_locomotion.js?v=" + Date.now());
-    await safeImport("./touch_controls.js?v=" + Date.now());
-    await safeImport("./android_controls.js?v=" + Date.now());
-
     await initWorld();
     startLoop();
-
     LOG("[index] ready ✅");
   } catch (e) {
     LOG("[index] FATAL ❌ " + (e?.message || e));

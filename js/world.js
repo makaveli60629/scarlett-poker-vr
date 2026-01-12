@@ -8,7 +8,7 @@
 // ✅ Store stub + VIP hallway + spawn arch
 // ✅ Bright lights + marble-ish floor + embedded jumbotrons
 // ✅ Teleport colliders exported
-
+import { buildStoreStub, buildVIPEntrance, buildSpawnArch } from "./store_vip.js";
 import { buildPitAndTable } from "./pit_table.js";
 import { createBot } from "./bot_rig.js";
 import { createPokerPresenter } from "./poker_presenter.js";

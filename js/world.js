@@ -1,6 +1,6 @@
-// /js/world.js — ScarlettVR FULL THROTTLE v6 (Beautified + Poker + Watch + Hands)
-// Requires: /js/controls.js
-import { Controls } from "./controls.js";
+// /js/world.js — ScarlettVR FULL WORLD v8 (Beautified + Watch + Poker + Hover Cars)
+// ✅ Uses your structure: /core is core, /js is gameplay
+import { ControlsExt } from "./controls_ext.js";
 
 export const World = {
   async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD }) {
@@ -16,49 +16,39 @@ export const World = {
       diagonal45: true,
       diagonalAmount: 0.85,
 
-      anchors: {},
-      room: "lobby",
-
-      // interaction / rays
+      // ray + temp
       raycaster: new THREE.Raycaster(),
       tmpM: new THREE.Matrix4(),
       tmpV: new THREE.Vector3(),
       tmpDir: new THREE.Vector3(),
-      tmpQ: new THREE.Quaternion(),
-      tmpP: new THREE.Vector3(),
 
+      // ground for teleport targeting
       groundMeshes: [],
 
-      // controller visuals
-      lasers: [],                // { controller, line, hand }
-      reticles: [],              // { hand, mesh }
+      // XR visuals
+      lasers: [],
+      reticles: [],
       arcs: { left: null, right: null },
       arcPts: { left: [], right: [] },
       lastTeleportPointL: null,
       lastTeleportPointR: null,
 
       // watch
-      watch: {
-        root: null,
-        visible: true,
-        buttons: [],             // meshes
-        hover: null,
-        labels: [],
-      },
+      watch: { root: null, visible: true, buttons: [], labels: [] },
 
-      // grab
-      grab: {
-        interactables: [],
-        held: { left: null, right: null }
-      },
+      // grab (right hand only in this build — left grip reserved for watch toggle)
+      grab: { interactables: [], heldRight: null },
 
       // ambience
       hoverCars: [],
-      holoPanels: [],
       neonMats: [],
       dashLines: [],
 
-      // settings
+      // navigation
+      anchors: {},
+      room: "lobby",
+
+      // toggles
       showArcs: true,
       showLasers: true,
     };
@@ -66,25 +56,24 @@ export const World = {
     s.root.name = "WORLD_ROOT";
     scene.add(s.root);
 
-    // =======================
-    // BEAUTIFICATION PASS
-    // =======================
+    // ====== BUILD WORLD ======
     addSkyAndFog(s);
     addLightsCinematic(s);
+
     buildLobbyShell(s);
     buildLobbyFloorCarpet(s);
     buildPitAndDownstairs(s);
     buildRoomsAndHallways(s);
     buildPortals(s);
+
     buildStore(s);
     buildScorpion(s);
     buildSpectate(s);
+
     buildHoverCars(s);
     buildHoloJumbotrons(s);
 
-    // =======================
-    // XR VISUALS + UI
-    // =======================
+    // ====== XR VISUALS + UI ======
     setupXRLasers(s);
     setupFloorReticles(s);
     setupTeleportArcs(s);
@@ -92,45 +81,36 @@ export const World = {
     setupControllerHandMeshes(s);
     setupPrettyWatch(s);
 
-    // =======================
-    // POKER ROOM (playable foundation)
-    // =======================
+    // ====== POKER ROOM (foundation) ======
     buildPokerRoom(s);
 
-    // =======================
-    // Anchors
-    // =======================
-    s.anchors.lobby = { pos: new THREE.Vector3(0, 0, 13.5), yaw: Math.PI };
-    s.anchors.poker = { pos: new THREE.Vector3(0, 0, -9.5), yaw: 0 };
-    s.anchors.store = { pos: new THREE.Vector3(-26, 0, 0), yaw: Math.PI / 2 };
-    s.anchors.scorpion = { pos: new THREE.Vector3(26, 0, 0), yaw: -Math.PI / 2 };
+    // ====== ANCHORS ======
+    s.anchors.lobby    = { pos: new THREE.Vector3(0, 0, 13.5),  yaw: Math.PI };
+    s.anchors.poker    = { pos: new THREE.Vector3(0, 0, -9.5),  yaw: 0 };
+    s.anchors.store    = { pos: new THREE.Vector3(-26, 0, 0),   yaw: Math.PI / 2 };
+    s.anchors.scorpion = { pos: new THREE.Vector3(26, 0, 0),    yaw: -Math.PI / 2 };
     s.anchors.spectate = { pos: new THREE.Vector3(0, 3.0, -14), yaw: 0 };
 
     setRigToAnchor(s, s.anchors.lobby);
 
-    // =======================
-    // INPUT EVENTS
-    // =======================
-
-    // Teleport: right trigger/select always teleports
+    // ====== INPUT EVENTS ======
+    // Right trigger = teleport
     controllers.c1.addEventListener("selectstart", () => teleportNow(s, "right"));
 
-    // Left trigger/select: if pointing at watch button => click; else teleport
+    // Left trigger = watch click if aiming; otherwise teleport
     controllers.c0.addEventListener("selectstart", () => {
       if (tryClickWatch(s)) return;
       teleportNow(s, "left");
     });
 
-    // Watch toggle: left grip
+    // Left grip = toggle watch (reserved)
     controllers.c0.addEventListener("squeezestart", () => toggleWatch(s));
 
-    // Grab cards: squeeze hold on either hand
-    controllers.c0.addEventListener("squeezestart", () => tryGrab(s, "left"));
-    controllers.c0.addEventListener("squeezeend",   () => releaseGrab(s, "left"));
-    controllers.c1.addEventListener("squeezestart", () => tryGrab(s, "right"));
-    controllers.c1.addEventListener("squeezeend",   () => releaseGrab(s, "right"));
+    // Right grip = grab/release cards
+    controllers.c1.addEventListener("squeezestart", () => tryGrabRight(s));
+    controllers.c1.addEventListener("squeezeend",   () => releaseGrabRight(s));
 
-    log?.(`[world] FULL THROTTLE v6 ✅ build=${BUILD}`);
+    log?.(`[world] FULL WORLD v8 ✅ build=${BUILD}`);
     return {
       setRoom: (room) => {
         s.room = room;
@@ -189,7 +169,6 @@ function matFloor(THREE, color = 0x111a28) {
 function buildLobbyShell(s) {
   const { THREE, root } = s;
 
-  // translucent cylinder shell
   const shell = new THREE.Mesh(
     new THREE.CylinderGeometry(22, 22, 10, 64, 1, true),
     new THREE.MeshStandardMaterial({
@@ -200,21 +179,19 @@ function buildLobbyShell(s) {
   shell.position.set(0, 4.2, 0);
   root.add(shell);
 
-  // ceiling glow ring
-  const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(16.5, 0.12, 12, 96),
-    new THREE.MeshStandardMaterial({
-      color: 0x66ccff,
-      roughness: 0.3, metalness: 0.6,
-      emissive: new THREE.Color(0x66ccff),
-      emissiveIntensity: 0.45
-    })
-  );
+  const ringMat = new THREE.MeshStandardMaterial({
+    color: 0x66ccff,
+    roughness: 0.3, metalness: 0.6,
+    emissive: new THREE.Color(0x66ccff),
+    emissiveIntensity: 0.45
+  });
+  s.neonMats.push(ringMat);
+
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(16.5, 0.12, 12, 96), ringMat);
   ring.rotation.x = Math.PI / 2;
   ring.position.set(0, 8.8, 0);
   root.add(ring);
 
-  // pillars
   const pillarMat = new THREE.MeshStandardMaterial({ color: 0x121c2c, roughness: 0.8, metalness: 0.15 });
   for (let i = 0; i < 10; i++) {
     const ang = (i / 10) * Math.PI * 2;
@@ -227,7 +204,6 @@ function buildLobbyShell(s) {
 function buildLobbyFloorCarpet(s) {
   const { THREE, root } = s;
 
-  // base lobby floor
   const lobbyFloor = new THREE.Mesh(
     new THREE.CylinderGeometry(18, 18, 0.35, 64),
     matFloor(THREE, 0x121c2c)
@@ -236,7 +212,6 @@ function buildLobbyFloorCarpet(s) {
   root.add(lobbyFloor);
   s.groundMeshes.push(lobbyFloor);
 
-  // carpet disc (visual only)
   const carpet = new THREE.Mesh(
     new THREE.CircleGeometry(14.8, 64),
     new THREE.MeshStandardMaterial({
@@ -249,7 +224,6 @@ function buildLobbyFloorCarpet(s) {
   carpet.position.y = 0.002;
   root.add(carpet);
 
-  // floor decals / compass wedges
   const decalMat = new THREE.MeshBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.28, side: THREE.DoubleSide });
   for (let i = 0; i < 4; i++) {
     const wedge = new THREE.Mesh(new THREE.RingGeometry(10.2, 14.4, 32, 1, i*Math.PI/2, Math.PI/4), decalMat);
@@ -281,20 +255,7 @@ function buildPitAndDownstairs(s) {
   pitWall.position.set(0, pitFloorY/2, 0);
   root.add(pitWall);
 
-  // rail
-  const rail = new THREE.Mesh(
-    new THREE.TorusGeometry(pitRadius + 0.35, 0.08, 12, 64),
-    new THREE.MeshStandardMaterial({
-      color: 0xc8d3ff, roughness: 0.3, metalness: 0.55,
-      emissive: new THREE.Color(0x223cff),
-      emissiveIntensity: 0.14
-    })
-  );
-  rail.rotation.x = Math.PI / 2;
-  rail.position.y = 0.85;
-  root.add(rail);
-
-  // downstairs ramp (visual)
+  // Downstairs ramp
   const stairW = 2.1;
   const stairL = 7.6;
   const ramp = new THREE.Mesh(
@@ -307,7 +268,7 @@ function buildPitAndDownstairs(s) {
 }
 
 // =======================
-// ROOMS + PORTALS + HOLOS
+// ROOMS + PORTALS
 // =======================
 
 function buildRoomsAndHallways(s) {
@@ -377,43 +338,7 @@ function buildPortals(s) {
     ring.rotation.y = p.ry;
     ring.rotation.x = Math.PI/2;
     root.add(ring);
-
-    const plate = makeLabelPlate(s.THREE, "PORTAL", 0x0a1020, 0x66ccff);
-    plate.position.set(p.x, 2.75, p.z);
-    plate.rotation.y = p.ry;
-    root.add(plate);
   }
-}
-
-function buildHoloJumbotrons(s) {
-  const { THREE, root, BUILD } = s;
-
-  const mkPanel = (text, x, y, z, ry) => {
-    const panel = new THREE.Group();
-
-    const frame = new THREE.Mesh(
-      new THREE.BoxGeometry(4.2, 1.6, 0.12),
-      new THREE.MeshStandardMaterial({ color: 0x121c2c, roughness: 0.55, metalness: 0.25 })
-    );
-    panel.add(frame);
-
-    const face = makeLabelPlate(THREE, text, 0x0b1220, 0x66ccff, 1024, 256);
-    face.position.z = 0.07;
-    panel.add(face);
-
-    const glow = new THREE.PointLight(0x66ccff, 0.7, 18, 2);
-    glow.position.set(0, 0, 0.7);
-    panel.add(glow);
-
-    panel.position.set(x, y, z);
-    panel.rotation.y = ry;
-
-    root.add(panel);
-    s.holoPanels.push(panel);
-  };
-
-  mkPanel(`SCARLETT VR POKER`, 0, 6.0, 13.0, Math.PI);
-  mkPanel(`BUILD: ${String(BUILD).slice(-10)}`, 0, 4.2, 13.0, Math.PI);
 }
 
 // =======================
@@ -422,7 +347,6 @@ function buildHoloJumbotrons(s) {
 
 function buildStore(s) {
   const { THREE, root } = s;
-
   const store = new THREE.Group();
   store.position.set(-26, 0, 0);
   root.add(store);
@@ -447,7 +371,6 @@ function buildStore(s) {
 
 function buildScorpion(s) {
   const { THREE, root } = s;
-
   const sc = new THREE.Group();
   sc.position.set(26, 0, 0);
   root.add(sc);
@@ -507,8 +430,38 @@ function buildHoverCars(s) {
   }
 }
 
+function buildHoloJumbotrons(s) {
+  const { THREE, root, BUILD } = s;
+
+  const mkPanel = (text, x, y, z, ry) => {
+    const panel = new THREE.Group();
+
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(4.2, 1.6, 0.12),
+      new THREE.MeshStandardMaterial({ color: 0x121c2c, roughness: 0.55, metalness: 0.25 })
+    );
+    panel.add(frame);
+
+    const face = makeLabelPlate(THREE, text, 0x0b1220, 0x66ccff, 1024, 256);
+    face.position.z = 0.07;
+    panel.add(face);
+
+    const glow = new THREE.PointLight(0x66ccff, 0.7, 18, 2);
+    glow.position.set(0, 0, 0.7);
+    panel.add(glow);
+
+    panel.position.set(x, y, z);
+    panel.rotation.y = ry;
+
+    root.add(panel);
+  };
+
+  mkPanel(`SCARLETT VR POKER`, 0, 6.0, 13.0, Math.PI);
+  mkPanel(`BUILD: ${String(BUILD).slice(-10)}`, 0, 4.2, 13.0, Math.PI);
+}
+
 // =======================
-// XR VISUALS: lasers, reticle, rainbow arc
+// XR: lasers, reticle, arc
 // =======================
 
 function setupXRLasers(s) {
@@ -636,22 +589,14 @@ function setupPrettyWatch(s) {
   face.position.z = 0.012;
   watchRoot.add(face);
 
-  const rim = new THREE.Mesh(
-    new THREE.RingGeometry(0.05, 0.058, 32),
-    new THREE.MeshBasicMaterial({ color: 0x66ccff, side: THREE.DoubleSide, transparent: true, opacity: 0.85 })
-  );
-  rim.rotation.x = -Math.PI / 2;
-  rim.position.set(-0.05, 0.0, 0.02);
-  watchRoot.add(rim);
-
   const items = [
     { label: "POKER", room: "poker" },
     { label: "LOBBY", room: "lobby" },
     { label: "STORE", room: "store" },
     { label: "SPECT", room: "spectate" },
     { label: "SCORP", room: "scorpion" },
-    { label: "ARC",   room: null, action: (st)=>{ st.showArcs = !st.showArcs; } },
-    { label: "LASER", room: null, action: (st)=>{ st.showLasers = !st.showLasers; } },
+    { label: "ARC",   action: (st)=>{ st.showArcs = !st.showArcs; } },
+    { label: "LASER", action: (st)=>{ st.showLasers = !st.showLasers; } },
   ];
 
   const btnGeo = new THREE.BoxGeometry(0.14, 0.02, 0.012);
@@ -689,7 +634,6 @@ function toggleWatch(s) {
   if (!s.watch.root) return;
   s.watch.visible = !s.watch.visible;
   s.watch.root.visible = s.watch.visible;
-  s.log?.(`[watch] ${s.watch.visible ? "shown" : "hidden"}`);
 }
 
 function tryClickWatch(s) {
@@ -707,36 +651,19 @@ function tryClickWatch(s) {
   const btn = hits[0].object;
   const item = btn.userData.watchItem;
 
-  // haptics if available
-  pulseHaptics(s, "left", 0.35, 30);
-
-  // action
   if (item?.action) item.action(s);
   if (item?.room) setRigToAnchor(s, s.anchors[item.room] || s.anchors.lobby);
 
-  // visual feedback
   if (btn.material?.emissive) {
     btn.material.emissive.setHex(0x223cff);
     btn.material.emissiveIntensity = 0.7;
   }
 
-  s.log?.(`[watch] click ${item?.label || "?"}`);
   return true;
 }
 
-function pulseHaptics(s, hand, intensity = 0.3, ms = 25) {
-  const session = s.renderer.xr.getSession?.();
-  if (!session) return;
-
-  const src = Array.from(session.inputSources || []).find(is => is?.handedness === hand && is?.gamepad);
-  const h = src?.gamepad?.hapticActuators?.[0];
-  if (h?.pulse) {
-    try { h.pulse(intensity, ms); } catch {}
-  }
-}
-
 // =======================
-// POKER ROOM (upgraded foundation)
+// POKER ROOM (foundation)
 // =======================
 
 function buildPokerRoom(s) {
@@ -753,7 +680,6 @@ function buildPokerRoom(s) {
   room.add(pad);
   s.groundMeshes.push(pad);
 
-  // Table
   const felt = new THREE.Mesh(
     new THREE.CylinderGeometry(2.75, 2.95, 0.35, 64),
     new THREE.MeshStandardMaterial({ color: 0x134536, roughness: 0.78, metalness: 0.04 })
@@ -769,61 +695,7 @@ function buildPokerRoom(s) {
   rail.position.y = 1.03;
   room.add(rail);
 
-  // Community card slots
-  const slotMat = new THREE.MeshStandardMaterial({
-    color: 0x0a1020, roughness: 0.85, metalness: 0.05,
-    emissive: new THREE.Color(0x66ccff),
-    emissiveIntensity: 0.08
-  });
-  for (let i = 0; i < 5; i++) {
-    const slot = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.003, 0.10), slotMat);
-    slot.position.set(-0.18 + i*0.09, 1.08, 0.0);
-    room.add(slot);
-  }
-
-  // Betting spots
-  const betMat = new THREE.MeshBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.20, side: THREE.DoubleSide });
-  for (let i = 0; i < 6; i++) {
-    const ang = (i/6)*Math.PI*2;
-    const spot = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.28, 32), betMat);
-    spot.rotation.x = -Math.PI/2;
-    spot.position.set(Math.cos(ang)*2.6, 1.07, Math.sin(ang)*2.6);
-    room.add(spot);
-  }
-
-  // Dealer button
-  const dealer = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.18, 0.18, 0.02, 24),
-    new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.4, metalness: 0.1 })
-  );
-  dealer.rotation.x = Math.PI/2;
-  dealer.position.set(0.9, 1.08, 0.0);
-  dealer.userData.spin = true;
-  room.add(dealer);
-
-  // Chip stacks
-  const chipColors = [0xff3b3b, 0x2fd4ff, 0x7cff2f, 0xf2f2f2, 0xff6bd6, 0xc8d3ff];
-  for (let i = 0; i < 6; i++) {
-    const mat = new THREE.MeshStandardMaterial({ color: chipColors[i], roughness: 0.35, metalness: 0.25 });
-    const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.14, 24), mat);
-    const ang = (i / 6) * Math.PI * 2;
-    stack.position.set(Math.cos(ang)*3.6, 0.07, Math.sin(ang)*3.6);
-    room.add(stack);
-  }
-
-  // Seats
-  for (let i = 0; i < 6; i++) {
-    const chair = new THREE.Mesh(
-      new THREE.BoxGeometry(0.6, 0.6, 0.6),
-      new THREE.MeshStandardMaterial({ color: 0x121c2c, roughness: 0.9, metalness: 0.08 })
-    );
-    const ang = (i / 6) * Math.PI * 2;
-    chair.position.set(Math.cos(ang)*4.2, 0.3, Math.sin(ang)*4.2);
-    chair.lookAt(0, 0.3, 0);
-    room.add(chair);
-  }
-
-  // Deck + grabbable cards
+  // Deck + loose cards (grabbable)
   const deckPos = new THREE.Vector3(-1.1, 1.05, 0.0);
 
   const deck = new THREE.Mesh(
@@ -833,7 +705,6 @@ function buildPokerRoom(s) {
   deck.position.copy(deckPos);
   room.add(deck);
 
-  // 12 loose cards
   for (let i = 0; i < 12; i++) {
     const card = new THREE.Mesh(
       new THREE.BoxGeometry(0.06, 0.004, 0.09),
@@ -842,27 +713,20 @@ function buildPokerRoom(s) {
     card.position.set(deckPos.x + (i % 6)*0.07, deckPos.y + 0.02 + Math.floor(i/6)*0.01, deckPos.z + 0.14);
     card.rotation.y = -0.2;
     card.userData.grabbable = true;
-    card.userData.kind = "card";
     room.add(card);
     s.grab.interactables.push(card);
   }
-
-  // sign
-  const sign = makeLabelPlate(THREE, "POKER ROOM", 0x0a1020, 0x66ccff);
-  sign.position.set(0, 3.4, 6.5);
-  sign.rotation.y = Math.PI;
-  room.add(sign);
 }
 
 // =======================
-// GRAB SYSTEM
+// GRAB (right-hand only)
 // =======================
 
-function tryGrab(s, hand) {
+function tryGrabRight(s) {
   if (!s.renderer.xr.isPresenting) return;
-  if (s.grab.held[hand]) return;
+  if (s.grab.heldRight) return;
 
-  const ctrl = hand === "right" ? s.controllers.c1 : s.controllers.c0;
+  const ctrl = s.controllers.c1;
 
   s.tmpM.identity().extractRotation(ctrl.matrixWorld);
   const origin = s.tmpV.setFromMatrixPosition(ctrl.matrixWorld);
@@ -875,23 +739,16 @@ function tryGrab(s, hand) {
   const obj = hits[0].object;
   if (!obj?.userData?.grabbable) return;
 
-  // attach
   ctrl.attach(obj);
   obj.position.set(0.0, -0.01, -0.06);
-
-  s.grab.held[hand] = obj;
-  pulseHaptics(s, hand, 0.25, 18);
-  s.log?.(`[grab] ${hand} picked ${obj.userData.kind || "object"}`);
+  s.grab.heldRight = obj;
 }
 
-function releaseGrab(s, hand) {
-  const obj = s.grab.held[hand];
+function releaseGrabRight(s) {
+  const obj = s.grab.heldRight;
   if (!obj) return;
-
   s.root.attach(obj);
-  s.grab.held[hand] = null;
-  pulseHaptics(s, hand, 0.18, 12);
-  s.log?.(`[grab] ${hand} released`);
+  s.grab.heldRight = null;
 }
 
 // =======================
@@ -899,42 +756,31 @@ function releaseGrab(s, hand) {
 // =======================
 
 function update(s, dt, t) {
-  // Cars hover + spin
+  // Hover cars
   for (const c of s.hoverCars) {
     c.obj.position.y = c.baseY + Math.sin(t*1.3 + c.phase) * 0.25;
     c.obj.rotation.y += dt * 0.10;
   }
 
-  // animate neon / arcs
-  animateNeon(s, t);
-
-  // update rays/reticles/arcs/watch hover
-  updateRays(s, t);
-
-  // locomotion
-  if (s.renderer.xr.isPresenting) {
-    Controls.applyLocomotion(s, dt);
-  }
-}
-
-function animateNeon(s, t) {
-  // pulse emissive intensity on neon mats
-  const pulse = 0.45 + Math.sin(t*1.7)*0.12;
-  for (const m of s.neonMats) {
-    if (m.emissive) m.emissiveIntensity = pulse;
-  }
-  // animate dashed arcs
+  // Animate dashed arc
   for (const l of s.dashLines) {
     if (l.material) l.material.dashOffset = -(t * 0.9);
-    // gently shift color
     if (l.material?.color) {
       const c = hsvToRgb((t*0.08) % 1, 0.45, 1.0);
       l.material.color.setRGB(c.r, c.g, c.b);
     }
   }
+
+  // Update rays/reticles/arcs
+  updateRays(s);
+
+  // Locomotion
+  if (s.renderer.xr.isPresenting) {
+    ControlsExt.applyLocomotion(s, dt);
+  }
 }
 
-function updateRays(s, t) {
+function updateRays(s) {
   const { renderer, raycaster, tmpM, tmpV, tmpDir } = s;
 
   for (const L of s.lasers) {
@@ -956,9 +802,8 @@ function updateRays(s, t) {
     tmpDir.set(0, 0, -1).applyMatrix4(tmpM).normalize();
     raycaster.set(origin, tmpDir);
 
-    // watch hover
+    // Watch hover highlight (left hand)
     if (hand === "left" && s.watch.visible && s.watch.buttons.length) {
-      // reset hover glow
       for (const b of s.watch.buttons) {
         if (b.material?.emissive) { b.material.emissive.setHex(0x000000); b.material.emissiveIntensity = 0; }
       }
@@ -973,7 +818,7 @@ function updateRays(s, t) {
       }
     }
 
-    // floor hit
+    // Floor hit
     const hits = raycaster.intersectObjects(s.groundMeshes, false);
     if (hits.length) {
       const h = hits[0];
@@ -998,8 +843,6 @@ function teleportNow(s, hand) {
   const p = hand === "right" ? s.lastTeleportPointR : s.lastTeleportPointL;
   if (!p) return;
   s.player.position.set(p.x, 0, p.z);
-  pulseHaptics(s, hand, 0.35, 22);
-  s.log?.(`[tp] ${hand} -> (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`);
 }
 
 function setReticle(s, hand, point) {
@@ -1008,9 +851,6 @@ function setReticle(s, hand, point) {
   r.visible = true;
   r.position.copy(point);
   r.position.y += 0.01;
-
-  // subtle pulsing opacity
-  if (r.material) r.material.opacity = 0.75 + Math.sin(perfNow()*0.004)*0.2;
 }
 
 function setReticleVisible(s, hand, v) {
@@ -1070,12 +910,10 @@ function makeLabelPlate(THREE, text, bg = 0x0a1020, fg = 0x66ccff, w = 768, h = 
   ctx.fillStyle = hex(bg);
   ctx.fillRect(0, 0, w, h);
 
-  // glow border
   ctx.strokeStyle = "rgba(102,204,255,0.55)";
   ctx.lineWidth = Math.max(6, Math.floor(w * 0.01));
   ctx.strokeRect(10, 10, w-20, h-20);
 
-  // text
   ctx.fillStyle = hex(fg);
   ctx.font = `900 ${Math.floor(h*0.48)}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
   ctx.textAlign = "center";
@@ -1112,8 +950,4 @@ function hsvToRgb(h, s, v) {
     case 5: r=v; g=p; b=q; break;
   }
   return { r, g, b };
-}
-
-function perfNow() {
-  return (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
-                                                                     }
+      }

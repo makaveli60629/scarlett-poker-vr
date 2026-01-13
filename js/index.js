@@ -1,8 +1,10 @@
-// /js/index.js — FULL FIX: no 3-dots load screen (Quest)
+// /js/index.js — FULL FIX: no 3-dots load screen (Quest) + Locomotion Patch (sticks fixed)
 // ✅ starts render loop immediately
 // ✅ loads world async AFTER loop is running
 // ✅ avoids top-level await
 // ✅ catches render errors + prints to HUD
+// ✅ adds locomotion in index.js (NO core touch, NO extensions)
+
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
 
@@ -97,6 +99,124 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+// =======================================================
+// ✅ LOCOMOTION PATCH (INDEX-LEVEL, NO CORE, NO EXTENSIONS)
+// =======================================================
+
+const MOVE_SPEED = 2.9;                 // meters/sec
+const DEADZONE = 0.14;
+const DIAGONAL_45 = true;
+const DIAGONAL_AMOUNT = 0.85;
+const SNAP_TURN_DEG = 30;
+const SNAP_TURN_RAD = THREE.MathUtils.degToRad(SNAP_TURN_DEG);
+let turnCooldown = 0;
+
+// ✅ Your exact stick fixes:
+// - Left controller: everything reversed (x and y)
+// - Right controller: forward/back reversed (y)
+function patchAxes(handedness, x, y) {
+  if (handedness === "left") { x = -x; y = -y; }
+  if (handedness === "right") { y = -y; }
+  return { x, y };
+}
+
+function getHeadYaw(cam) {
+  const q = cam.quaternion;
+  // yaw from quaternion (stable)
+  return Math.atan2(
+    2 * (q.w * q.y + q.z * q.x),
+    1 - 2 * (q.y * q.y + q.x * q.x)
+  );
+}
+
+function readBestStick(gamepad) {
+  if (!gamepad) return { active: false, x: 0, y: 0, pair: "none" };
+  const a = gamepad.axes || [];
+
+  // choose the most active of (0,1) or (2,3)
+  let x = 0, y = 0;
+  if (a.length >= 4) {
+    const mag01 = Math.abs(a[0] || 0) + Math.abs(a[1] || 0);
+    const mag23 = Math.abs(a[2] || 0) + Math.abs(a[3] || 0);
+    if (mag23 > mag01) { x = a[2] || 0; y = a[3] || 0; return { active: true, x, y, pair: "23" }; }
+  }
+  if (a.length >= 2) { x = a[0] || 0; y = a[1] || 0; return { active: true, x, y, pair: "01" }; }
+  return { active: false, x: 0, y: 0, pair: "none" };
+}
+
+function readTurnAxis(gamepad) {
+  if (!gamepad) return 0;
+  const a = gamepad.axes || [];
+  // common: right stick X at axes[2] (or axes[0] fallback)
+  return (a.length >= 3 ? (a[2] || 0) : (a[0] || 0));
+}
+
+// This runs every frame during XR
+function applyLocomotion(dt) {
+  if (!renderer.xr.isPresenting) return;
+
+  const session = renderer.xr.getSession?.();
+  if (!session) return;
+
+  const sources = Array.from(session.inputSources || []).filter(s => s?.gamepad);
+  if (!sources.length) return;
+
+  const right = sources.find(s => s.handedness === "right") || sources[0];
+  const left  = sources.find(s => s.handedness === "left")  || sources[0];
+
+  // Movement: prefer right stick; fallback left stick
+  let src = right;
+  let stick = readBestStick(right.gamepad);
+
+  if (!stick.active || (Math.abs(stick.x) < DEADZONE && Math.abs(stick.y) < DEADZONE)) {
+    src = left;
+    stick = readBestStick(left.gamepad);
+  }
+
+  let x = stick.x || 0;
+  let y = stick.y || 0;
+
+  // deadzone
+  if (Math.abs(x) < DEADZONE) x = 0;
+  if (Math.abs(y) < DEADZONE) y = 0;
+
+  // apply your inversion fixes
+  ({ x, y } = patchAxes(src.handedness, x, y));
+
+  // diagonal shaping (optional)
+  if (DIAGONAL_45 && x !== 0) {
+    const sign = y !== 0 ? Math.sign(y) : 1;
+    y += sign * Math.abs(x) * DIAGONAL_AMOUNT;
+    x *= 0.65;
+    const len = Math.hypot(x, y);
+    if (len > 1e-4) { x /= len; y /= len; }
+  }
+
+  // head-relative movement
+  if (x !== 0 || y !== 0) {
+    const yaw = getHeadYaw(camera);
+    const cos = Math.cos(yaw), sin = Math.sin(yaw);
+
+    // y is forward/back
+    const mx = x * cos - y * sin;
+    const mz = x * sin + y * cos;
+
+    player.position.x += mx * MOVE_SPEED * dt;
+    player.position.z += mz * MOVE_SPEED * dt;
+  }
+
+  // Snap turn: prefer right controller turn axis
+  turnCooldown = Math.max(0, turnCooldown - dt);
+  let tx = readTurnAxis(right.gamepad || left.gamepad);
+  if (Math.abs(tx) < DEADZONE) tx = 0;
+
+  if (turnCooldown === 0 && tx !== 0) {
+    // tx>0 => turn right; tx<0 => turn left
+    player.rotation.y += (tx > 0 ? -1 : 1) * SNAP_TURN_RAD;
+    turnCooldown = 0.22;
+  }
+}
+
 // --- IMPORTANT: START THE RENDER LOOP IMMEDIATELY ---
 // This prevents Quest from getting stuck on the Oculus loader.
 let worldApi = null;
@@ -108,8 +228,12 @@ renderer.setAnimationLoop(() => {
   const t = clock.elapsedTime;
 
   try {
-    // keep rendering even if world hasn't loaded yet
+    // ✅ locomotion always works, even if world fails to load
+    applyLocomotion(dt);
+
+    // world update (if loaded)
     if (worldReady && worldApi?.update) worldApi.update(dt, t);
+
     renderer.render(scene, camera);
   } catch (e) {
     log("[FATAL] render loop crashed:", String(e?.stack || e));

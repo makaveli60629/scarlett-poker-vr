@@ -1,445 +1,497 @@
-// /js/poker_system.js — PokerSystem v2 (Textures + Smooth Deal + Hover-Peek + Winner Overlay + Pot)
-// ✅ Update-driven (no requestAnimationFrame spam)
-// ✅ Safe texture loader (missing files won't crash)
+// /js/systems/poker_system.js — ScarlettVR Prime 10.0
+// Instanced Dealer (FULL)
+// ✅ InstancedMesh cards/chips (performance)
+// ✅ Signals bus integration only
+// ✅ Repo-safe textures via manifest.resolve()
+// ✅ No XR controller models (Hands Only rule is enforced elsewhere)
+// ✅ Zero per-frame allocations (reuses temps)
 
 export const PokerSystem = (() => {
+  // ---- constants ----
+  const CARD_COUNT = 52;
+  const MAX_COMMUNITY = 5;
+  const DEFAULT_SEATS = 6;
+  const DEG2RAD = Math.PI / 180;
+
+  // ---- helpers ----
   const clamp01 = (v) => Math.max(0, Math.min(1, v));
   const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 
-  const bezier2 = (out, p0, p1, p2, t) => {
-    const a = (1 - t) * (1 - t);
-    const b = 2 * (1 - t) * t;
-    const c = t * t;
-    out.set(
-      p0.x * a + p1.x * b + p2.x * c,
-      p0.y * a + p1.y * b + p2.y * c,
-      p0.z * a + p1.z * b + p2.z * c
-    );
-    return out;
-  };
-
-  function safeLoadTexture(THREE, url, log) {
-    // Safe: returns null if missing; never throws
+  function safeTex(THREE, url, log) {
     try {
       const loader = new THREE.TextureLoader();
       const tex = loader.load(
         url,
         () => log?.(`[tex] loaded ✅ ${url}`),
         undefined,
-        () => log?.(`[tex] missing ⚠️ ${url} (fallback material used)`)
+        () => log?.(`[tex] missing ⚠️ ${url} (fallback used)`)
       );
       tex.anisotropy = 2;
       return tex;
     } catch (e) {
-      log?.(`[tex] load failed ⚠️ ${url}`, String(e?.message || e));
+      log?.(`[tex] load failed ⚠️ ${url} ${e?.message || String(e)}`);
       return null;
     }
   }
 
-  function makeCardMesh(THREE, mats) {
-    const geo = new THREE.BoxGeometry(0.062, 0.0016, 0.092);
-
-    // BoxGeometry material order:
-    // [ +x, -x, +y, -y, +z, -z ] (varies by build, but we'll keep consistent)
-    // We'll treat +y as "face" and -y as "back" by rotating cards flat.
-    const card = new THREE.Mesh(geo, mats);
-    card.castShadow = false;
-    card.receiveShadow = false;
-
-    // Lay flat
-    card.rotation.x = -Math.PI / 2;
-    return card;
+  // Creates a CanvasTexture banner (lightweight)
+  function makeBannerTex(THREE, text, bg = "#0a1020", fg = "#ffd36b") {
+    const c = document.createElement("canvas");
+    c.width = 768; c.height = 256;
+    const g = c.getContext("2d");
+    g.fillStyle = bg; g.fillRect(0, 0, c.width, c.height);
+    g.strokeStyle = "rgba(255,211,107,0.55)";
+    g.lineWidth = 10;
+    g.strokeRect(14, 14, c.width - 28, c.height - 28);
+    g.fillStyle = fg;
+    g.font = `900 120px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillText(text, c.width / 2, c.height / 2);
+    const tex = new THREE.CanvasTexture(c);
+    tex.anisotropy = 2;
+    return tex;
   }
 
-  function makeChipMesh(THREE, color = 0xffd36b, chipTex = null) {
-    const geo = new THREE.CylinderGeometry(0.022, 0.022, 0.010, 18);
-    let mat;
-    if (chipTex) {
-      chipTex.wrapS = chipTex.wrapT = THREE.RepeatWrapping;
-      chipTex.repeat.set(1, 1);
-      mat = new THREE.MeshStandardMaterial({
-        map: chipTex,
-        color,
-        roughness: 0.45,
-        metalness: 0.25,
-        emissive: new THREE.Color(color),
-        emissiveIntensity: 0.10
-      });
-    } else {
-      mat = new THREE.MeshStandardMaterial({
-        color,
-        roughness: 0.45,
-        metalness: 0.25,
-        emissive: new THREE.Color(color),
-        emissiveIntensity: 0.10
-      });
-    }
-    const chip = new THREE.Mesh(geo, mat);
-    chip.rotation.x = Math.PI / 2;
-    return chip;
-  }
-
+  // ---- main ----
   return {
-    init(ctx, opt = {}) {
-      const { THREE, root, scene, log, camera } = ctx;
+    init(world) {
+      const { THREE, root, Signals, manifest, log } = world;
 
-      const state = {
-        THREE,
-        root: root || scene,
-        camera,
+      // ----- config -----
+      const seatCount = manifest?.get?.("poker.seats") ?? DEFAULT_SEATS;
+      const seatRadius = manifest?.get?.("poker.seatRadius") ?? 2.35;
 
-        tableCenter: opt.tableCenter || new THREE.Vector3(0, 0.95, -9.5),
+      const tableCenter = (manifest?.get?.("poker.tableCenter")) || { x: 0, y: 0.95, z: -9.5 };
+      const deckPos = (manifest?.get?.("poker.deckPos")) || { x: tableCenter.x - 1.1, y: tableCenter.y + 0.10, z: tableCenter.z - 0.05 };
+      const potPos  = (manifest?.get?.("poker.potPos"))  || { x: tableCenter.x, y: tableCenter.y + 0.06, z: tableCenter.z + 0.10 };
 
-        deckPos: null,
-        potPos: null,
+      const chipsPool = manifest?.get?.("poker.chipsPool") ?? 512;
 
-        seats: [],
-        seatCount: opt.seatCount ?? 6,
-        seatRadius: opt.seatRadius ?? 2.35,
+      // ----- reusable temps (no allocations per frame) -----
+      const tmpV = new THREE.Vector3();
+      const tmpV2 = new THREE.Vector3();
+      const tmpV3 = new THREE.Vector3();
+      const dummy = new THREE.Object3D();
 
-        // cards & chips
-        cards: [],
-        chips: [],
-        motions: [],
-
-        // community cards
-        community: [],
-        communityFaceUp: [],
-
-        // hover-peek settings
-        hoverPeek: true,
-        peekDistance: 0.16,
-
-        // winner overlay
-        winnerBanner: null,
-        winnerActive: false,
-
-        // materials/textures
-        tex: {
-          cardBack: null,
-          tableTop: null,
-          chip: null
-        },
-        mats: {
-          cardMats: null,
-          deckMat: null
-        },
-
-        // temp
-        tmpV: new THREE.Vector3(),
-        tmpQ: new THREE.Quaternion(),
-
-        // anim config
-        dealHop: opt.dealHop ?? 0.16,
-        dealDur: opt.dealDur ?? 0.52,
-        chipDur: opt.chipDur ?? 0.45
-      };
-
-      // Paths (safe)
-      const base = opt.assetBase || "./assets/textures";
-      state.tex.cardBack = safeLoadTexture(THREE, `${base}/card_back.png`, log);
-      state.tex.tableTop = safeLoadTexture(THREE, `${base}/table_top.png`, log);
-      state.tex.chip = safeLoadTexture(THREE, `${base}/chip_stack.png`, log);
-
-      // Deck & pot positions
-      state.deckPos = opt.deckPos || new THREE.Vector3(
-        state.tableCenter.x - 1.1,
-        state.tableCenter.y + 0.10,
-        state.tableCenter.z - 0.05
-      );
-      state.potPos = opt.potPos || new THREE.Vector3(
-        state.tableCenter.x,
-        state.tableCenter.y + 0.06,
-        state.tableCenter.z + 0.10
-      );
-
-      // Seats around table
-      for (let i = 0; i < state.seatCount; i++) {
-        const ang = (i / state.seatCount) * Math.PI * 2 + Math.PI;
-        const pos = new THREE.Vector3(
-          state.tableCenter.x + Math.cos(ang) * state.seatRadius,
-          state.tableCenter.y + 0.03,
-          state.tableCenter.z + Math.sin(ang) * state.seatRadius
-        );
-        const yaw = -ang + Math.PI / 2;
-        state.seats.push({ pos, yaw });
+      // ----- computed seats -----
+      const seats = new Array(seatCount);
+      for (let i = 0; i < seatCount; i++) {
+        const ang = (i / seatCount) * Math.PI * 2 + Math.PI;
+        seats[i] = {
+          x: tableCenter.x + Math.cos(ang) * seatRadius,
+          y: tableCenter.y + 0.03,
+          z: tableCenter.z + Math.sin(ang) * seatRadius,
+          yaw: -ang + Math.PI / 2
+        };
       }
 
-      // Card materials (face/back + edges)
-      const edgeMat = new THREE.MeshStandardMaterial({ color: 0xe6e6e6, roughness: 0.8, metalness: 0.05 });
-      const faceMat = new THREE.MeshStandardMaterial({
+      // ----- textures/materials -----
+      const texCardBackUrl = manifest?.resolve?.("textures.cardBack") ?? "./assets/textures/card_back.png";
+      const texChipUrl     = manifest?.resolve?.("textures.chip")     ?? "./assets/textures/chip_stack.png";
+      const texTableUrl    = manifest?.resolve?.("textures.tableTop") ?? "./assets/textures/table_top.png";
+
+      const cardBackTex = safeTex(THREE, texCardBackUrl, log);
+      const chipTex     = safeTex(THREE, texChipUrl, log);
+      const tableTex    = safeTex(THREE, texTableUrl, log);
+
+      // cards: one material (we keep it simple for instancing)
+      const cardMat = new THREE.MeshStandardMaterial({
         color: 0xffffff,
         roughness: 0.65,
         metalness: 0.05,
-        emissive: new THREE.Color(0x000000),
-        emissiveIntensity: 0
+        map: cardBackTex || null
       });
 
-      const backMat = state.tex.cardBack
-        ? new THREE.MeshStandardMaterial({ map: state.tex.cardBack, roughness: 0.65, metalness: 0.05 })
-        : new THREE.MeshStandardMaterial({ color: 0x1a2a48, roughness: 0.65, metalness: 0.05 });
+      // felt/table mat (non-instanced)
+      const tableMat = new THREE.MeshStandardMaterial({
+        color: 0x134536,
+        roughness: 0.78,
+        metalness: 0.04,
+        map: tableTex || null
+      });
 
-      // We’ll map:
-      // +y = face, -y = back, edges = everything else
-      state.mats.cardMats = [edgeMat, edgeMat, faceMat, backMat, edgeMat, edgeMat];
+      // chips instanced mat
+      if (chipTex) {
+        chipTex.wrapS = chipTex.wrapT = THREE.RepeatWrapping;
+        chipTex.repeat.set(1, 1);
+      }
+      const chipMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        roughness: 0.45,
+        metalness: 0.25,
+        map: chipTex || null,
+        emissive: new THREE.Color(0xffffff),
+        emissiveIntensity: 0.08
+      });
 
-      // Deck placeholder (uses backMat if exists)
-      const deckMat = state.tex.cardBack
-        ? new THREE.MeshStandardMaterial({ map: state.tex.cardBack, roughness: 0.55, metalness: 0.15 })
-        : new THREE.MeshStandardMaterial({ color: 0x0a1020, roughness: 0.6, metalness: 0.2 });
+      // ----- geometry -----
+      const cardGeom = new THREE.BoxGeometry(0.062, 0.0016, 0.092);
+      const chipGeom = new THREE.CylinderGeometry(0.022, 0.022, 0.010, 18);
 
-      const deck = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.06, 0.26), deckMat);
-      deck.position.copy(state.deckPos);
-      state.root.add(deck);
+      // ----- world visuals (table + pot ring) -----
+      const felt = new THREE.Mesh(new THREE.CylinderGeometry(3.05, 3.25, 0.35, 64), tableMat);
+      felt.position.set(tableCenter.x, tableCenter.y + 0.10, tableCenter.z);
+      felt.name = "POKER_FELT";
+      root.add(felt);
 
-      // Pot ring
       const potRing = new THREE.Mesh(
         new THREE.RingGeometry(0.24, 0.30, 36),
         new THREE.MeshBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.55, side: THREE.DoubleSide })
       );
       potRing.rotation.x = -Math.PI / 2;
-      potRing.position.copy(state.potPos);
-      potRing.position.y += 0.003;
-      state.root.add(potRing);
+      potRing.position.set(potPos.x, potPos.y + 0.003, potPos.z);
+      potRing.userData.noRay = true;
+      root.add(potRing);
 
-      // Winner banner
-      state.winnerBanner = makeBanner(THREE, "WINNER", 0x0a1020, 0xffd36b);
-      state.winnerBanner.position.set(state.tableCenter.x, state.tableCenter.y + 0.75, state.tableCenter.z + 0.15);
-      state.winnerBanner.visible = false;
-      state.root.add(state.winnerBanner);
+      // ----- instanced meshes -----
+      const deckIM = new THREE.InstancedMesh(cardGeom, cardMat, CARD_COUNT);
+      deckIM.frustumCulled = false;
+      deckIM.name = "DECK_INST";
+      root.add(deckIM);
 
-      // Community card spots (5)
-      const c0 = new THREE.Vector3(state.tableCenter.x - 0.32, state.tableCenter.y + 0.02, state.tableCenter.z + 0.08);
-      const dx = 0.16;
-      for (let i = 0; i < 5; i++) {
-        const p = c0.clone().add(new THREE.Vector3(i * dx, 0, 0));
-        const card = makeCardMesh(THREE, state.mats.cardMats);
-        card.position.copy(p);
-        card.userData.kind = "community";
-        card.userData.index = i;
-        card.userData.faceUp = false;
-        card.userData.peek = false;
-        card.userData.baseYaw = 0;
-        // start face-down
-        card.rotation.z = 0;
-        card.rotation.y = 0;
-        card.material[2].color.setHex(0x1b1b1b); // face dark until "revealed"
-        state.root.add(card);
-        state.community.push(card);
-        state.communityFaceUp.push(false);
+      // hole cards pool (seatCount * 2)
+      const holeCount = seatCount * 2;
+      const holeIM = new THREE.InstancedMesh(cardGeom, cardMat, holeCount);
+      holeIM.frustumCulled = false;
+      holeIM.name = "HOLE_INST";
+      root.add(holeIM);
+
+      // community (5)
+      const commIM = new THREE.InstancedMesh(cardGeom, cardMat, MAX_COMMUNITY);
+      commIM.frustumCulled = false;
+      commIM.name = "COMM_INST";
+      root.add(commIM);
+
+      // chips pool (instanced)
+      const chipsIM = new THREE.InstancedMesh(chipGeom, chipMat, chipsPool);
+      chipsIM.frustumCulled = false;
+      chipsIM.name = "CHIPS_INST";
+      root.add(chipsIM);
+
+      // ----- banner -----
+      const bannerTex = makeBannerTex(THREE, "WINNER");
+      const bannerMat = new THREE.MeshBasicMaterial({ map: bannerTex, transparent: true });
+      const banner = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.55), bannerMat);
+      banner.position.set(tableCenter.x, tableCenter.y + 0.75, tableCenter.z + 0.15);
+      banner.visible = false;
+      banner.userData.noRay = true;
+      root.add(banner);
+
+      // ----- state -----
+      const S = {
+        seatCount,
+        seats,
+        tableCenter: { ...tableCenter },
+        deckPos: { ...deckPos },
+        potPos: { ...potPos },
+
+        deckIM, holeIM, commIM, chipsIM,
+        holeUsed: 0,
+        chipsUsed: 0,
+
+        commFaceUp: new Array(MAX_COMMUNITY).fill(false),
+        commTint: new Array(MAX_COMMUNITY).fill(0xffffff),
+
+        motions: [], // motion jobs pooled-ish
+        t: 0,
+
+        banner,
+        bannerOn: false,
+
+        // deal animation tuning
+        dealHop: manifest?.get?.("poker.dealHop") ?? 0.16,
+        dealDur: manifest?.get?.("poker.dealDur") ?? 0.52,
+        chipDur: manifest?.get?.("poker.chipDur") ?? 0.45
+      };
+
+      // ----- init transforms -----
+      function setCardMatrixAt(inst, idx, x, y, z, yaw = 0, pitch = -90, roll = 0, scale = 1) {
+        dummy.position.set(x, y, z);
+        dummy.rotation.set(pitch * DEG2RAD, yaw, roll);
+        dummy.scale.set(scale, scale, scale);
+        dummy.updateMatrix();
+        inst.setMatrixAt(idx, dummy.matrix);
       }
 
-      log?.("[poker] PokerSystem v2 init ✅");
+      function initDeckStack() {
+        for (let i = 0; i < CARD_COUNT; i++) {
+          setCardMatrixAt(deckIM, i, S.deckPos.x, S.deckPos.y + i * 0.001, S.deckPos.z, 0, -90, 0, 1);
+        }
+        deckIM.instanceMatrix.needsUpdate = true;
+      }
 
-      const api = {
-        state,
-        resetRound() {
-          state.winnerActive = false;
-          state.winnerBanner.visible = false;
-          // reset community
-          for (let i = 0; i < state.community.length; i++) {
-            const c = state.community[i];
-            c.userData.faceUp = false;
-            c.userData.peek = false;
-            c.material[2].color.setHex(0x1b1b1b);
-          }
-          // clean motions (safe)
-          state.motions.length = 0;
-        },
+      function initHolesHidden() {
+        // park below floor
+        for (let i = 0; i < holeCount; i++) {
+          setCardMatrixAt(holeIM, i, 0, -50, 0, 0, -90, 0, 1);
+        }
+        holeIM.instanceMatrix.needsUpdate = true;
+        S.holeUsed = 0;
+      }
 
-        // Deal a facedown card to seat index
-        dealToSeat(seatIndex = 0) {
-          const seat = state.seats[(seatIndex | 0) % state.seats.length];
-          const targetPos = seat.pos.clone().add(new THREE.Vector3(0, 0.04, -0.18));
-          const targetYaw = seat.yaw;
+      function initCommunitySpots() {
+        const baseX = S.tableCenter.x - 0.32;
+        const y = S.tableCenter.y + 0.02;
+        const z = S.tableCenter.z + 0.08;
+        const dx = 0.16;
+        for (let i = 0; i < MAX_COMMUNITY; i++) {
+          setCardMatrixAt(commIM, i, baseX + i * dx, y, z, 0, -90, 0, 1);
+          S.commFaceUp[i] = false;
+          S.commTint[i] = 0xffffff;
+        }
+        commIM.instanceMatrix.needsUpdate = true;
+      }
 
-          const card = makeCardMesh(THREE, state.mats.cardMats);
-          card.position.copy(state.deckPos);
-          card.rotation.y = 0;
-          card.userData.kind = "hole";
-          card.userData.seatIndex = seatIndex | 0;
-          card.userData.faceUp = false; // never show opponent cards by default
-          state.root.add(card);
-          state.cards.push(card);
+      function initChipsHidden() {
+        for (let i = 0; i < chipsPool; i++) {
+          dummy.position.set(0, -50, 0);
+          dummy.rotation.set(Math.PI / 2, 0, 0);
+          dummy.scale.set(1, 1, 1);
+          dummy.updateMatrix();
+          chipsIM.setMatrixAt(i, dummy.matrix);
+        }
+        chipsIM.instanceMatrix.needsUpdate = true;
+        S.chipsUsed = 0;
+      }
 
-          const job = {
-            kind: "card",
-            obj: card,
-            active: true,
-            t: 0,
-            duration: state.dealDur,
-            p0: state.deckPos.clone(),
-            p1: state.deckPos.clone().lerp(targetPos, 0.5).add(new THREE.Vector3(0, state.dealHop, 0)),
-            p2: targetPos.clone(),
-            yaw: targetYaw
-          };
-          state.motions.push(job);
-          return card;
-        },
+      initDeckStack();
+      initHolesHidden();
+      initCommunitySpots();
+      initChipsHidden();
 
-        // Reveal community cards (flop/turn/river)
-        revealCommunity(count = 3) {
-          for (let i = 0; i < Math.min(count, 5); i++) {
-            state.communityFaceUp[i] = true;
-            // brighten face (placeholder “revealed”)
-            state.community[i].material[2].color.setHex(0xffffff);
-          }
-        },
+      // ----- Signals integration -----
+      // We listen for GAME_STATE and render accordingly when needed.
+      // We also listen for animation requests (DEAL_REQUEST / BET_REQUEST / REVEAL_REQUEST / WINNER)
 
-        // Smooth chip bet from seat to pot
-        bet(amount = 1, seatIndex = 0) {
-          const seat = state.seats[(seatIndex | 0) % state.seats.length];
-          const color = amount >= 100 ? 0xffd36b : amount >= 25 ? 0x66ccff : 0xff6bd6;
+      function resetRound() {
+        S.motions.length = 0;
+        S.bannerOn = false;
+        S.banner.visible = false;
+        initDeckStack();
+        initHolesHidden();
+        initCommunitySpots();
+        initChipsHidden();
+        log?.("[poker] reset ✅");
+      }
 
-          const chip = makeChipMesh(THREE, color, state.tex.chip);
-          chip.position.copy(seat.pos);
-          chip.position.y += 0.04;
-          chip.position.add(new THREE.Vector3(0, 0, -0.25));
-          state.root.add(chip);
-          state.chips.push(chip);
+      Signals?.on?.("GAME_RESET", resetRound);
 
-          const job = {
-            kind: "chip",
-            obj: chip,
-            active: true,
-            t: 0,
-            duration: state.chipDur,
-            p0: chip.position.clone(),
-            p1: chip.position.clone().lerp(state.potPos, 0.5).add(new THREE.Vector3(0, 0.18, 0)),
-            p2: state.potPos.clone()
-          };
-          state.motions.push(job);
-          return chip;
-        },
+      Signals?.on?.("DEAL_REQUEST", (p) => {
+        const seat = (p?.toSeat ?? 0) | 0;
+        const count = (p?.count ?? 1) | 0;
+        for (let i = 0; i < count; i++) dealToSeat(seat);
+      });
 
-        // Winner overlay demo: highlight winners by “overlaying” community cards
-        setWinner(winnerSeatIndex = 0) {
-          state.winnerActive = true;
-          state.winnerBanner.visible = true;
+      Signals?.on?.("BET_REQUEST", (p) => {
+        const seat = (p?.seat ?? 0) | 0;
+        const amt  = (p?.amount ?? 25) | 0;
+        bet(amt, seat);
+      });
 
-          // overlay effect: tint non-winning community darker, winning brighter
-          for (let i = 0; i < 5; i++) {
-            const c = state.community[i];
-            if (state.communityFaceUp[i]) {
-              c.material[2].color.setHex(i % 2 === 0 ? 0xfff2c2 : 0xd8f0ff);
+      Signals?.on?.("REVEAL_REQUEST", (p) => {
+        const street = String(p?.street || "FLOP");
+        if (street === "FLOP") revealCommunity(3);
+        if (street === "TURN") revealCommunity(4);
+        if (street === "RIVER") revealCommunity(5);
+      });
+
+      Signals?.on?.("WINNER", (p) => {
+        const seat = (p?.seat ?? 0) | 0;
+        setWinner(seat);
+      });
+
+      // Optional: When rules emit GAME_STATE, you can sync visuals (future)
+      Signals?.on?.("GAME_STATE", (p) => {
+        // Keep light: no heavy work here unless needed.
+        // This exists so the rules engine can drive visuals later.
+        // p.state could include communityUpTo, pot, etc.
+      });
+
+      // ----- animation jobs -----
+      // Job structure:
+      // { kind:'card'|'chip', inst:InstancedMesh, idx:number, t:number, dur:number, p0:{x,y,z}, p1:{x,y,z}, p2:{x,y,z}, yaw:number }
+
+      function bez2(out, p0, p1, p2, t) {
+        const a = (1 - t) * (1 - t);
+        const b = 2 * (1 - t) * t;
+        const c = t * t;
+        out.x = p0.x * a + p1.x * b + p2.x * c;
+        out.y = p0.y * a + p1.y * b + p2.y * c;
+        out.z = p0.z * a + p1.z * b + p2.z * c;
+        return out;
+      }
+
+      function dealToSeat(seatIndex = 0) {
+        if (S.holeUsed >= holeCount) {
+          log?.("[poker] hole pool exhausted ⚠️ (increase seats or pool)");
+          return;
+        }
+        const seat = S.seats[(seatIndex | 0) % S.seatCount];
+        const idx = S.holeUsed++;
+        const tgtX = seat.x;
+        const tgtY = seat.y + 0.04;
+        const tgtZ = seat.z - 0.18;
+
+        // start from deck
+        setCardMatrixAt(holeIM, idx, S.deckPos.x, S.deckPos.y, S.deckPos.z, 0, -90, 0, 1);
+        holeIM.instanceMatrix.needsUpdate = true;
+
+        // motion
+        const p0 = { x: S.deckPos.x, y: S.deckPos.y, z: S.deckPos.z };
+        const p2 = { x: tgtX, y: tgtY, z: tgtZ };
+        const p1 = { x: (p0.x + p2.x) * 0.5, y: (p0.y + p2.y) * 0.5 + S.dealHop, z: (p0.z + p2.z) * 0.5 };
+
+        S.motions.push({
+          kind: "card",
+          inst: holeIM,
+          idx,
+          t: 0,
+          dur: S.dealDur,
+          p0, p1, p2,
+          yaw: seat.yaw
+        });
+      }
+
+      function revealCommunity(count = 3) {
+        // We simulate reveal by "lifting" slightly and tint effect.
+        // True face mapping can be added later with a sprite atlas.
+        const n = Math.max(0, Math.min(MAX_COMMUNITY, count | 0));
+        for (let i = 0; i < n; i++) S.commFaceUp[i] = true;
+      }
+
+      function bet(amount = 25, seatIndex = 0) {
+        if (S.chipsUsed >= chipsPool) {
+          log?.("[poker] chip pool exhausted ⚠️ (increase poker.chipsPool)");
+          return;
+        }
+        const seat = S.seats[(seatIndex | 0) % S.seatCount];
+        const idx = S.chipsUsed++;
+
+        const start = { x: seat.x, y: seat.y + 0.04, z: seat.z - 0.25 };
+        const end   = { x: S.potPos.x, y: S.potPos.y + 0.01, z: S.potPos.z };
+
+        const mid = {
+          x: (start.x + end.x) * 0.5,
+          y: (start.y + end.y) * 0.5 + 0.18,
+          z: (start.z + end.z) * 0.5
+        };
+
+        // place at start
+        dummy.position.set(start.x, start.y, start.z);
+        dummy.rotation.set(Math.PI / 2, 0, 0);
+        dummy.updateMatrix();
+        chipsIM.setMatrixAt(idx, dummy.matrix);
+        chipsIM.instanceMatrix.needsUpdate = true;
+
+        S.motions.push({
+          kind: "chip",
+          inst: chipsIM,
+          idx,
+          t: 0,
+          dur: S.chipDur,
+          p0: start, p1: mid, p2: end,
+          yaw: 0
+        });
+      }
+
+      function setWinner(winnerSeatIndex = 0) {
+        S.bannerOn = true;
+        S.banner.visible = true;
+        // simple shimmer; tint community (optional)
+        for (let i = 0; i < MAX_COMMUNITY; i++) {
+          S.commTint[i] = (i % 2 === 0) ? 0xfff2c2 : 0xd8f0ff;
+        }
+        log?.(`[poker] winner seat=${winnerSeatIndex}`);
+      }
+
+      // ----- tick/update -----
+      function updateMotions(dt) {
+        // iterate backwards to remove finished jobs
+        for (let i = S.motions.length - 1; i >= 0; i--) {
+          const m = S.motions[i];
+          m.t += dt;
+          const u = clamp01(m.t / m.dur);
+          const eu = easeInOut(u);
+
+          // bezier
+          const p = bez2(tmpV, m.p0, m.p1, m.p2, eu);
+
+          if (m.kind === "card") {
+            setCardMatrixAt(m.inst, m.idx, p.x, p.y, p.z, m.yaw, -90, Math.sin(u * Math.PI) * 0.22, 1);
+            if (u >= 1) {
+              setCardMatrixAt(m.inst, m.idx, m.p2.x, m.p2.y, m.p2.z, m.yaw, -90, 0, 1);
+              S.motions.splice(i, 1);
             }
-          }
-        },
-
-        // Hover-peek for community cards (faces player only while hovered)
-        updateHoverPeek() {
-          if (!state.hoverPeek || !state.camera) return;
-
-          const camPos = state.tmpV.setFromMatrixPosition(state.camera.matrixWorld);
-
-          for (let i = 0; i < state.community.length; i++) {
-            const card = state.community[i];
-
-            // Only peek if card is "revealed"
-            if (!state.communityFaceUp[i]) continue;
-
-            const d = camPos.distanceTo(card.position);
-            const shouldPeek = d < 2.2; // broad comfort range
-
-            // "aim" requirement simplified: if close enough, peek
-            card.userData.peek = shouldPeek;
-
-            if (shouldPeek) {
-              // face the player (yaw only)
-              const dx = camPos.x - card.position.x;
-              const dz = camPos.z - card.position.z;
-              const yaw = Math.atan2(dx, dz);
-              card.rotation.y = yaw;
-              card.rotation.z = 0;
-              card.userData.faceUp = true;
-            } else {
-              // relax back down
-              card.rotation.y *= 0.90;
-              card.userData.faceUp = false;
-            }
-          }
-        },
-
-        update(dt, t) {
-          // update motions
-          for (let i = state.motions.length - 1; i >= 0; i--) {
-            const m = state.motions[i];
-            if (!m.active) { state.motions.splice(i, 1); continue; }
-
-            m.t += dt;
-            const u = clamp01(m.t / m.duration);
-            const eu = easeInOut(u);
-
-            if (m.kind === "card") {
-              bezier2(state.tmpV, m.p0, m.p1, m.p2, eu);
-              m.obj.position.copy(state.tmpV);
-
-              // slight travel wobble
-              m.obj.rotation.z = Math.sin(u * Math.PI) * 0.22;
-
-              // settle yaw
-              m.obj.rotation.y = m.yaw;
-
-              if (u >= 1) {
-                m.obj.position.copy(m.p2);
-                m.obj.rotation.z = 0;
-                m.active = false;
-              }
-            }
-
-            if (m.kind === "chip") {
-              bezier2(state.tmpV, m.p0, m.p1, m.p2, eu);
-              m.obj.position.copy(state.tmpV);
-              m.obj.rotation.z += dt * 4.0;
-              if (u >= 1) {
-                m.obj.position.copy(m.p2);
-                m.active = false;
-              }
-            }
+            m.inst.instanceMatrix.needsUpdate = true;
           }
 
-          // hover-peek
-          api.updateHoverPeek();
-
-          // winner banner shimmer
-          if (state.winnerActive && state.winnerBanner) {
-            state.winnerBanner.position.y = state.tableCenter.y + 0.75 + Math.sin(t * 2.2) * 0.02;
+          if (m.kind === "chip") {
+            dummy.position.set(p.x, p.y, p.z);
+            dummy.rotation.set(Math.PI / 2, 0, 0);
+            dummy.updateMatrix();
+            m.inst.setMatrixAt(m.idx, dummy.matrix);
+            if (u >= 1) {
+              dummy.position.set(m.p2.x, m.p2.y, m.p2.z);
+              dummy.updateMatrix();
+              m.inst.setMatrixAt(m.idx, dummy.matrix);
+              S.motions.splice(i, 1);
+            }
+            m.inst.instanceMatrix.needsUpdate = true;
           }
         }
+      }
+
+      function updateCommunity(dt, t) {
+        // "Reveal" effect: slight lift + pulse
+        const baseX = S.tableCenter.x - 0.32;
+        const baseY = S.tableCenter.y + 0.02;
+        const baseZ = S.tableCenter.z + 0.08;
+        const dx = 0.16;
+
+        for (let i = 0; i < MAX_COMMUNITY; i++) {
+          const up = S.commFaceUp[i] ? 0.010 + Math.sin(t * 2.2 + i) * 0.002 : 0.0;
+          const x = baseX + i * dx;
+          const y = baseY + up;
+          const z = baseZ;
+
+          // Note: material tinting per instance needs instanceColor (optional).
+          // We keep it matrix-only here for performance. You can add instanceColor later.
+          setCardMatrixAt(commIM, i, x, y, z, 0, -90, 0, 1);
+        }
+        commIM.instanceMatrix.needsUpdate = true;
+      }
+
+      function updateBanner(t) {
+        if (!S.bannerOn) return;
+        S.banner.position.y = S.tableCenter.y + 0.75 + Math.sin(t * 2.2) * 0.02;
+      }
+
+      const api = {
+        // For debugging/tools
+        reset: resetRound,
+
+        // Tick called by world
+        update(dt, t) {
+          S.t = t;
+          if (dt) updateMotions(dt);
+          updateCommunity(dt, t);
+          updateBanner(t);
+        },
+
+        // Optional direct command helpers (still Signals-first recommended)
+        commands: {
+          dealToSeat,
+          bet,
+          revealCommunity,
+          setWinner
+        }
       };
+
+      log?.("[poker] PokerSystem Prime 10.0 init ✅ (instanced)");
+      Signals?.emit?.("UI_MESSAGE", { text: "PokerSystem Prime 10.0 online", level: "info" });
 
       return api;
     }
   };
-
-  function makeBanner(THREE, text, bg = 0x0a1020, fg = 0xffd36b) {
-    const canvas = document.createElement("canvas");
-    canvas.width = 768; canvas.height = 256;
-    const ctx = canvas.getContext("2d");
-
-    ctx.fillStyle = hex(bg);
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    ctx.strokeStyle = "rgba(255,211,107,0.55)";
-    ctx.lineWidth = 10;
-    ctx.strokeRect(14, 14, canvas.width - 28, canvas.height - 28);
-
-    ctx.fillStyle = hex(fg);
-    ctx.font = `900 120px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.anisotropy = 2;
-
-    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.55), mat);
-    return mesh;
-  }
-
-  function hex(n) {
-    const c = Number(n >>> 0).toString(16).padStart(6, "0");
-    return `#${c}`;
-  }
 })();

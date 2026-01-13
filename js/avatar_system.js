@@ -1,151 +1,94 @@
-// /js/avatar_system.js — AvatarSystem v1 (Stylized Low-Poly Humanoid)
-// ✅ Lightweight (pure geometry, no GLTF)
-// ✅ Works with controllers (hands attached to controllers)
-// ✅ Optional "body" attached to player rig (non-XR + XR)
-// ✅ Watch stays wherever your world.js attaches it (left controller)
+// /js/avatar_system.js — AvatarSystem v2 (Humanoid Factory)
+// ✅ Player uses SAME mesh style as bots
+// ✅ Better hands attached to controllers (not weird blocks)
+// ✅ XR-safe: hides head/torso if you want (prevents camera clipping)
+
+import { createHumanoid } from "./humanoid_factory.js";
 
 export const AvatarSystem = (() => {
-  function init(ctx) {
-    const { THREE, player, controllers, log } = ctx;
+  function init(ctx, opt = {}) {
+    const { THREE, player, controllers, renderer, log } = ctx;
 
     const root = new THREE.Group();
     root.name = "AVATAR_ROOT";
     player.add(root);
 
-    // ===== Materials (low-poly elegant) =====
-    const matSkin = new THREE.MeshStandardMaterial({
-      color: 0xd9c7b3, roughness: 0.85, metalness: 0.02
-    });
-    const matCloth = new THREE.MeshStandardMaterial({
-      color: 0x1c2433, roughness: 0.95, metalness: 0.02
-    });
-    const matAccent = new THREE.MeshStandardMaterial({
-      color: 0x66ccff, roughness: 0.35, metalness: 0.55,
-      emissive: new THREE.Color(0x66ccff), emissiveIntensity: 0.10
-    });
+    // Materials tuned for "player"
+    const mats = {
+      skin: new THREE.MeshStandardMaterial({ color: 0xd9c7b3, roughness: 0.82, metalness: 0.02 }),
+      cloth: new THREE.MeshStandardMaterial({ color: 0x141c2a, roughness: 0.95, metalness: 0.05 }),
+      accent: new THREE.MeshStandardMaterial({
+        color: 0x66ccff, roughness: 0.30, metalness: 0.60,
+        emissive: new THREE.Color(0x66ccff), emissiveIntensity: 0.10
+      })
+    };
 
-    // ===== Body (stylized, low poly) =====
-    // Note: We keep body subtle so it doesn't fight with camera.
-    const body = new THREE.Group();
-    body.name = "AVATAR_BODY";
-    root.add(body);
+    const humanoid = createHumanoid(THREE, { scale: 1.0, materials: mats });
+    humanoid.root.position.set(0, 0, 0);
+    root.add(humanoid.root);
 
-    const chest = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.23, 0), // low poly
-      matCloth
-    );
-    chest.scale.set(1.15, 1.4, 0.85);
-    chest.position.set(0, 1.35, 0.05);
-    body.add(chest);
+    // In first-person XR, body can clip camera. Default: hide head (and optionally torso).
+    const settings = {
+      hideHeadInXR: opt.hideHeadInXR ?? true,
+      hideTorsoInXR: opt.hideTorsoInXR ?? false
+    };
 
-    const shoulders = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.17, 0),
-      matCloth
-    );
-    shoulders.scale.set(1.55, 0.65, 0.85);
-    shoulders.position.set(0, 1.50, 0.02);
-    body.add(shoulders);
-
-    const hips = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.18, 0),
-      matCloth
-    );
-    hips.scale.set(1.1, 0.7, 0.9);
-    hips.position.set(0, 1.10, 0.03);
-    body.add(hips);
-
-    // neck + head (kept subtle so it doesn't clip camera too much)
-    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.10, 8), matSkin);
-    neck.position.set(0, 1.60, 0.06);
-    body.add(neck);
-
-    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.16, 0), matSkin);
-    head.scale.set(1.0, 1.05, 0.95);
-    head.position.set(0, 1.78, 0.06);
-    body.add(head);
-
-    // tiny crown/halo accent (optional style)
-    const halo = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.02, 6, 18), matAccent);
-    halo.rotation.x = Math.PI / 2;
-    halo.position.set(0, 1.95, 0.06);
-    body.add(halo);
-
-    // ===== Hands (better silhouette than blocky) =====
-    // We attach to controllers so it follows your lasers.
-    const leftHand = makeHand(THREE, matSkin, matCloth, true);
-    const rightHand = makeHand(THREE, matSkin, matCloth, false);
-
+    // Hands: attach small faceted “glove” to controller so lasers still feel right
+    const leftHand = makeControllerHand(THREE, mats.cloth, mats.accent, true);
+    const rightHand = makeControllerHand(THREE, mats.cloth, mats.accent, false);
     controllers?.c0?.add(leftHand);
     controllers?.c1?.add(rightHand);
 
-    // Save refs in ctx so world can toggle if needed
-    ctx.avatar = ctx.avatar || {};
-    ctx.avatar.root = root;
-    ctx.avatar.body = body;
-    ctx.avatar.leftHand = leftHand;
-    ctx.avatar.rightHand = rightHand;
+    // Nice placement relative to controller
+    leftHand.position.set(-0.01, -0.015, -0.03);
+    rightHand.position.set(0.01, -0.015, -0.03);
+    leftHand.rotation.set(-0.25, 0.0, 0.0);
+    rightHand.rotation.set(-0.25, 0.0, 0.0);
 
-    log?.("[avatar] AvatarSystem v1 init ✅");
+    log?.("[avatar] AvatarSystem v2 init ✅ (humanoid factory)");
 
     return {
-      setVisible(v) {
-        root.visible = !!v;
-      },
-      setHandsVisible(v) {
-        leftHand.visible = !!v;
-        rightHand.visible = !!v;
-      },
-      setBodyVisible(v) {
-        body.visible = !!v;
-      },
+      setVisible(v) { root.visible = !!v; },
       update(dt, t) {
-        // subtle idle so it feels alive (but not annoying)
-        const bob = Math.sin(t * 1.6) * 0.01;
-        body.position.y = bob;
-        halo.rotation.z += dt * 0.35;
+        // Gentle breathing
+        humanoid.parts.body.position.y = Math.sin(t * 1.6) * 0.01;
+
+        // XR visibility rules
+        const inXR = !!renderer?.xr?.isPresenting;
+        if (settings.hideHeadInXR) humanoid.parts.head.visible = !inXR;
+        if (settings.hideTorsoInXR) {
+          humanoid.parts.chest.visible = !inXR;
+          humanoid.parts.abs.visible = !inXR;
+          humanoid.parts.hips.visible = !inXR;
+        }
       }
     };
   }
 
-  function makeHand(THREE, matSkin, matCloth, isLeft) {
+  function makeControllerHand(THREE, matCloth, matAccent, isLeft) {
     const g = new THREE.Group();
-    g.name = isLeft ? "HAND_L" : "HAND_R";
+    g.name = isLeft ? "CTRL_HAND_L" : "CTRL_HAND_R";
 
-    // Palm (rounded low-poly)
-    const palm = new THREE.Mesh(new THREE.IcosahedronGeometry(0.05, 0), matCloth);
-    palm.scale.set(1.15, 0.65, 1.35);
-    palm.position.set(0, -0.005, -0.03);
+    const palm = new THREE.Mesh(new THREE.IcosahedronGeometry(0.045, 0), matCloth);
+    palm.scale.set(1.2, 0.65, 1.35);
+    palm.position.set(0, -0.005, -0.02);
     g.add(palm);
 
-    // Back-of-hand (skin hint)
-    const back = new THREE.Mesh(new THREE.IcosahedronGeometry(0.035, 0), matSkin);
-    back.scale.set(1.2, 0.55, 1.0);
-    back.position.set(0, 0.015, -0.045);
-    g.add(back);
+    const kn = new THREE.Mesh(new THREE.IcosahedronGeometry(0.03, 0), matAccent);
+    kn.scale.set(1.4, 0.55, 1.0);
+    kn.position.set(0, 0.015, -0.045);
+    g.add(kn);
 
-    // Fingers (three low-poly “segments”)
-    for (let i = 0; i < 3; i++) {
-      const f = new THREE.Mesh(new THREE.IcosahedronGeometry(0.018, 0), matSkin);
-      f.scale.set(0.9, 0.65, 1.45);
-      f.position.set(-0.02 + i * 0.02, 0.01, -0.075);
-      g.add(f);
-    }
+    const thumb = new THREE.Mesh(new THREE.IcosahedronGeometry(0.018, 0), matCloth);
+    thumb.scale.set(1.0, 0.7, 1.2);
+    thumb.position.set(isLeft ? -0.05 : 0.05, 0.0, -0.03);
+    thumb.rotation.y = isLeft ? 0.6 : -0.6;
+    g.add(thumb);
 
-    // Thumb
-    const th = new THREE.Mesh(new THREE.IcosahedronGeometry(0.016, 0), matSkin);
-    th.scale.set(0.9, 0.65, 1.25);
-    th.position.set(isLeft ? -0.05 : 0.05, 0.005, -0.045);
-    th.rotation.y = isLeft ? 0.6 : -0.6;
-    g.add(th);
-
-    // Wrist cuff
-    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.038, 0.04, 10), matCloth);
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.030, 0.038, 0.04, 7), matCloth);
     cuff.position.set(0, -0.03, -0.01);
     g.add(cuff);
 
-    // Position/orient relative to controller
-    g.position.set(isLeft ? -0.012 : 0.012, -0.012, -0.02);
-    g.rotation.set(-0.25, 0, 0);
     return g;
   }
 

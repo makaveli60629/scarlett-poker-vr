@@ -1,115 +1,84 @@
+<!-- /index.html -->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, user-scalable=no, maximum-scale=1"
+  />
   <title>Scarlett Poker VR</title>
-
   <style>
-    html, body { margin:0; padding:0; height:100%; background:#05060a; overflow:hidden; }
-    canvas { display:block; }
+    html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    #app { position:fixed; inset:0; }
+    canvas { display:block; width:100%; height:100%; }
 
-    /* HUD log */
+    /* Debug HUD (Android + Desktop) */
     #hud {
       position: fixed;
-      left: 10px; bottom: 10px;
-      width: min(560px, 92vw);
-      max-height: 42vh;
-      background: rgba(10,12,18,0.70);
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 14px;
+      left: 10px; top: 10px;
+      width: 340px;
+      max-width: calc(100vw - 20px);
+      background: rgba(0,0,0,.65);
+      color: #fff;
       padding: 10px;
-      color: #e8ecff;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
-      z-index: 9999;
+      border-radius: 12px;
+      z-index: 10;
       backdrop-filter: blur(6px);
     }
-    #hud .row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
-    #hud .title { font-weight:800; flex:1; }
+    #hud h3 { margin:0 0 8px; font-size: 14px; font-weight: 700; letter-spacing:.2px; }
+    #hud .row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
     #hud button {
-      padding: 6px 10px;
+      appearance:none; border:none;
+      background:#1f2a44; color:#fff;
+      padding:10px 12px; border-radius: 10px;
+      font-weight: 700; cursor:pointer;
+    }
+    #hud button:active { transform: translateY(1px); }
+    #hud .small { font-size:12px; opacity:.9; line-height:1.25; }
+    #hudlog {
+      margin-top:8px;
+      padding:8px;
+      background: rgba(255,255,255,.06);
       border-radius: 10px;
-      border: 1px solid rgba(255,255,255,0.18);
-      background: rgba(127,231,255,0.12);
-      color: #e8ecff;
-      cursor: pointer;
+      max-height: 30vh;
+      overflow:auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 11px;
+      white-space: pre-wrap;
     }
-    #hud pre { margin:0; white-space:pre-wrap; line-height:1.25; max-height:32vh; overflow:auto; }
 
-    /* Android sticks UI (always non-tilting, fixed on screen) */
-    #sticks {
+    /* Hidden HUD toggle button */
+    #hudToggle {
       position: fixed;
-      left: 0; right: 0; bottom: 0;
-      height: 44vh;
-      pointer-events: none; /* only children capture */
-      z-index: 9998;
-    }
-    .stick {
-      position: absolute;
-      bottom: 18px;
-      width: 140px; height: 140px;
-      pointer-events: auto;
-      touch-action: none;
-      user-select: none;
-    }
-    #stickL { left: 14px; }
-    #stickR { right: 14px; }
-
-    .base {
-      position:absolute; inset:0;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.14);
-      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
-    }
-    .nub {
-      position:absolute;
-      left:50%; top:50%;
-      width: 56px; height: 56px;
-      margin-left: -28px; margin-top: -28px;
-      border-radius: 999px;
-      background: rgba(127,231,255,0.18);
-      border: 1px solid rgba(127,231,255,0.40);
-      box-shadow: 0 12px 28px rgba(0,0,0,0.35);
-      transform: translate(0px, 0px);
-    }
-    .label {
-      position:absolute;
-      left: 50%; transform: translateX(-50%);
-      top: -24px;
-      font: 600 12px system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      color: rgba(232,236,255,0.75);
-      letter-spacing: .3px;
-    }
-
-    /* Hide sticks on non-mobile */
-    @media (min-width: 900px) {
-      #sticks { display:none; }
+      left: 10px; top: 10px;
+      z-index: 11;
+      display:none;
     }
   </style>
 </head>
 <body>
+  <div id="app"></div>
+
+  <button id="hudToggle">Show HUD</button>
 
   <div id="hud">
+    <h3>ScarlettVR Debug HUD</h3>
     <div class="row">
-      <div class="title">Scarlett VR Poker — HUD</div>
-      <button id="copyBtn">Copy Log</button>
+      <button id="btnEnterVR">Enter VR</button>
+      <button id="btnRecenter">Recenter</button>
+      <button id="btnToggleHUD">Hide HUD</button>
     </div>
-    <pre id="hud-log"></pre>
-  </div>
-
-  <div id="sticks">
-    <div id="stickL" class="stick">
-      <div class="label">MOVE</div>
-      <div class="base"></div>
-      <div class="nub"></div>
+    <div class="row">
+      <button id="btnRoomLobby">Lobby</button>
+      <button id="btnRoomStore">Store</button>
+      <button id="btnRoomScorpion">Scorpion</button>
+      <button id="btnRoomSpectate">Spectate</button>
     </div>
-    <div id="stickR" class="stick">
-      <div class="label">LOOK</div>
-      <div class="base"></div>
-      <div class="nub"></div>
+    <div class="small">
+      Touch controls work on Android. If HUD blocks touch, hit <b>Hide HUD</b>.
     </div>
+    <div id="hudlog"></div>
   </div>
 
   <script type="module" src="./js/index.js"></script>

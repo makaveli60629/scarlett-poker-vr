@@ -1,160 +1,95 @@
-// /core/controls.js — Scarlett Controls v7 (QUEST CONTROLLERS FIX) FULL
-// ✅ Shows controllers/lasers in XR (sessionstart attaches rays)
-// ✅ Logs XR inputSources so we KNOW if Quest sees controllers
-// ✅ Reads sticks from either axes [0/1] or [2/3]
-// ✅ Moves correct rig
+// /core/controls.js — ScarlettVR Core Controls (XR) v1.0
+// This file is intentionally self-contained and exports BOTH:
+//   - named export: Controls
+//   - default export: Controls
+// So imports like: import { Controls } from "../core/controls.js" work.
+// ✅ XR gamepad locomotion + snap turn
+// ✅ Does not depend on other modules
 
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const deadzone = (v, dz = 0.12) => (Math.abs(v) < dz ? 0 : v);
-
-function getMoveRig(ctx) {
-  return ctx.playerRig || ctx.player || ctx.camera?.parent || ctx.camera;
-}
-
-function getSession(renderer) {
-  try { return renderer?.xr?.getSession?.() || null; } catch { return null; }
-}
-
-function readAxesSmart(gp) {
-  const a = gp?.axes || [];
-  if (a.length < 2) return { x: 0, y: 0 };
-
-  const p01 = { x: a[0] ?? 0, y: a[1] ?? 0, e: Math.abs(a[0] ?? 0) + Math.abs(a[1] ?? 0) };
-  const p23 = { x: a[2] ?? 0, y: a[3] ?? 0, e: Math.abs(a[2] ?? 0) + Math.abs(a[3] ?? 0) };
-
-  if (a.length >= 4 && p23.e > p01.e + 0.01) return { x: p23.x, y: p23.y };
-  return { x: p01.x, y: p01.y };
-}
-
-function makeLaser(THREE, color) {
-  const geo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, 0, -1),
-  ]);
-  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95 });
-  const line = new THREE.Line(geo, mat);
-  line.scale.z = 14;
-  line.name = "LaserLine";
-  return line;
-}
-
-export function installControls(ctx) {
-  const { THREE, renderer, log } = ctx;
-
-  ctx.__controls = {
-    isXR: false,
-    moveSpeed: 3.25,
-    strafeSpeed: 3.0,
-    turnSpeed: 2.6,
-
-    snapTurn: true,
-    snapAngle: Math.PI / 6,
-    snapCooldown: 220,
-    lastSnapAt: 0,
-
-    laserL: null,
-    laserR: null,
-
-    lastBeat: 0,
+export const Controls = (() => {
+  const S = {
+    deadzone: 0.14,
+    moveSpeed: 2.9,
+    snapTurnRad: Math.PI / 6, // 30deg
+    snapCooldown: 0.22,
+    _turnTimer: 0
   };
 
-  const hud = document.getElementById("hud");
-  const sticks = document.getElementById("sticks");
-  const setUIForXR = (isXR) => {
-    if (hud) hud.style.display = isXR ? "none" : "";
-    if (sticks) sticks.style.display = isXR ? "none" : "";
-  };
-
-  renderer.xr.addEventListener("sessionstart", () => {
-    ctx.__controls.isXR = true;
-    setUIForXR(true);
-    log?.("[xr] sessionstart ✅");
-
-    // Attach lasers to controllers 0/1 (Quest standard)
-    const c0 = renderer.xr.getController(0);
-    const c1 = renderer.xr.getController(1);
-
-    // Parent to rig so they follow you
-    const rig = getMoveRig(ctx);
-    if (rig) { rig.add(c0); rig.add(c1); }
-
-    ctx.__controls.laserL = makeLaser(THREE, 0x7fe7ff);
-    ctx.__controls.laserR = makeLaser(THREE, 0xff2d7a);
-    c0.add(ctx.__controls.laserL);
-    c1.add(ctx.__controls.laserR);
-
-    // Log inputSources list (this is the KEY debug)
-    const sess = getSession(renderer);
-    const srcs = sess?.inputSources || [];
-    log?.(`[xr] inputSources=${srcs.length}`);
-    srcs.forEach((s, i) => {
-      log?.(`[xr] src#${i} hand=${s.handedness} gp=${!!s.gamepad} axes=${s.gamepad?.axes?.length || 0}`);
-    });
-  });
-
-  renderer.xr.addEventListener("sessionend", () => {
-    ctx.__controls.isXR = false;
-    setUIForXR(false);
-    log?.("[xr] sessionend ✅");
-  });
-
-  setUIForXR(false);
-}
-
-export function updateControls(ctx, dt) {
-  const C = ctx.__controls;
-  if (!C) return;
-
-  if (!C.isXR) { ctx.log?.diag?.(ctx, dt); return; }
-
-  const rig = getMoveRig(ctx);
-  if (!rig) return;
-
-  const sess = getSession(ctx.renderer);
-  const srcs = sess?.inputSources || [];
-
-  let left = null, right = null;
-  for (const s of srcs) {
-    if (s?.handedness === "left") left = s;
-    if (s?.handedness === "right") right = s;
+  function setTuning({ deadzone, moveSpeed, snapTurnRad, snapCooldown } = {}) {
+    if (typeof deadzone === "number") S.deadzone = deadzone;
+    if (typeof moveSpeed === "number") S.moveSpeed = moveSpeed;
+    if (typeof snapTurnRad === "number") S.snapTurnRad = snapTurnRad;
+    if (typeof snapCooldown === "number") S.snapCooldown = snapCooldown;
   }
 
-  const LA = readAxesSmart(left?.gamepad);
-  const RA = readAxesSmart(right?.gamepad);
+  function _dz(v) { return Math.abs(v) < S.deadzone ? 0 : v; }
 
-  const lx = deadzone(LA.x, 0.15);
-  const ly = deadzone(LA.y, 0.15);
-  const rx = deadzone(RA.x, 0.15);
+  function applyLocomotion(ctx, dt) {
+    // ctx expects: renderer, player, controllers, camera (optional), diagonal45 (optional)
+    const { renderer, player, controllers } = ctx;
+    if (!renderer?.xr?.isPresenting) return;
 
-  const forward = -ly * C.moveSpeed;
-  const strafe = lx * C.strafeSpeed;
+    // Try both controllers; prefer right for move
+    const srcR = controllers?.c1?.inputSource?.gamepad || controllers?.c1?.gamepad || null;
+    const srcL = controllers?.c0?.inputSource?.gamepad || controllers?.c0?.gamepad || null;
 
-  const yaw = rig.rotation.y;
-  const sin = Math.sin(yaw);
-  const cos = Math.cos(yaw);
+    // On Quest: axes typically: [x,y] on stick; sometimes reversed in older builds
+    const gp = srcR || srcL;
+    if (!gp || !gp.axes) return;
 
-  const dx = (strafe * cos) + (forward * sin);
-  const dz = (-strafe * sin) + (forward * cos);
+    // Move stick: usually axes[2]/[3] or [0]/[1] depending on browser
+    const ax = gp.axes;
+    const candidates = [
+      { x: ax[2], y: ax[3] },
+      { x: ax[0], y: ax[1] },
+    ];
 
-  rig.position.x += dx * dt;
-  rig.position.z += dz * dt;
-
-  if (C.snapTurn) {
-    const now = performance.now();
-    if (Math.abs(rx) > 0.70 && (now - C.lastSnapAt) > C.snapCooldown) {
-      rig.rotation.y += (rx > 0 ? -1 : 1) * C.snapAngle;
-      C.lastSnapAt = now;
+    // pick pair with bigger magnitude
+    let best = candidates[0];
+    let bestMag = (best.x*best.x + best.y*best.y);
+    for (const c of candidates) {
+      const m = (c.x*c.x + c.y*c.y);
+      if (m > bestMag) { best = c; bestMag = m; }
     }
-  } else {
-    rig.rotation.y += (-rx * C.turnSpeed) * dt;
+
+    // Invert forward/back to match expected: up on stick = forward
+    let mx = _dz(best.x);
+    let my = _dz(best.y);
+    let forward = -my;
+    let strafe = mx;
+
+    // Optional 45-degree quantize
+    if (ctx.diagonal45) {
+      const ang = Math.atan2(forward, strafe);
+      const step = Math.PI / 4;
+      const snapped = Math.round(ang / step) * step;
+      const mag = Math.min(1, Math.hypot(forward, strafe));
+      forward = Math.sin(snapped) * mag;
+      strafe = Math.cos(snapped) * mag;
+    }
+
+    // Movement in yaw space
+    const yaw = player.rotation.y;
+    const sin = Math.sin(yaw), cos = Math.cos(yaw);
+    player.position.x += (strafe * cos + forward * sin) * S.moveSpeed * dt;
+    player.position.z += (forward * cos - strafe * sin) * S.moveSpeed * dt;
+
+    // Snap turn (use left stick if available)
+    const gpTurn = srcL || gp;
+    if (gpTurn?.axes?.length) {
+      let tx = _dz(gpTurn.axes[2] ?? gpTurn.axes[0] ?? 0);
+      // if move stick uses [2]/[3], turn could be [0]/[1] on some configs
+      if (Math.abs(tx) < 0.01) tx = _dz(gpTurn.axes[0] ?? 0);
+
+      S._turnTimer = Math.max(0, S._turnTimer - dt);
+      if (S._turnTimer === 0 && Math.abs(tx) > 0.65) {
+        player.rotation.y += (tx > 0 ? -S.snapTurnRad : S.snapTurnRad);
+        S._turnTimer = S.snapCooldown;
+      }
+    }
   }
 
-  // Heartbeat so we know sticks are being read
-  const t = performance.now();
-  if (t - C.lastBeat > 1200) {
-    C.lastBeat = t;
-    ctx.log?.(`[xr] axes L=(${LA.x.toFixed(2)},${LA.y.toFixed(2)}) R=(${RA.x.toFixed(2)},${RA.y.toFixed(2)})`);
-  }
+  return { setTuning, applyLocomotion };
+})();
 
-  ctx.log?.diag?.(ctx, dt);
-}
+export default Controls;

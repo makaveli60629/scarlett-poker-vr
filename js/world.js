@@ -1,7 +1,7 @@
-// /js/world.js — ScarlettVR FULL WORLD v8.1 (Beautified + Watch + Poker + Hover Cars)
-// ✅ /core stays untouched
+// /js/world.js — ScarlettVR FULL WORLD v8.2 (Beautified + Watch + Poker + Hover Cars)
+// ✅ NO controls_ext import (deleted)
 // ✅ locomotion handled in /js/index.js
-// ✅ NO imports (prevents missing-module crashes)
+// ✅ FIXED dashed teleport arcs (no computeLineDistances crash)
 
 export const World = {
   async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD }) {
@@ -103,7 +103,7 @@ export const World = {
     controllers.c1.addEventListener("squeezestart", () => tryGrabRight(s));
     controllers.c1.addEventListener("squeezeend",   () => releaseGrabRight(s));
 
-    log?.(`[world] FULL WORLD v8.1 ✅ build=${BUILD}`);
+    log?.(`[world] FULL WORLD v8.2 ✅ build=${BUILD}`);
     return {
       setRoom: (room) => {
         s.room = room;
@@ -497,15 +497,29 @@ function setupFloorReticles(s) {
   s.reticles.push({ hand: "right", mesh: makeReticle() });
 }
 
+// ✅ FIXED: dashed arc geometry starts valid; computeLineDistances only when safe.
 function setupTeleportArcs(s) {
   const { THREE, root } = s;
 
   const makeArc = () => {
-    const geom = new THREE.BufferGeometry();
-    const mat = new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 0.18, gapSize: 0.10 });
+    const geom = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 0, -0.001)
+    ]);
+
+    const mat = new THREE.LineDashedMaterial({
+      color: 0xffffff,
+      dashSize: 0.18,
+      gapSize: 0.10
+    });
+
     const line = new THREE.Line(geom, mat);
-    line.computeLineDistances();
     line.visible = false;
+
+    if (line.geometry?.attributes?.position?.count >= 2) {
+      line.computeLineDistances();
+    }
+
     root.add(line);
     s.dashLines.push(line);
     return line;
@@ -613,7 +627,6 @@ function setupPrettyWatch(s) {
     s.watch.labels.push(label);
   }
 
-  // attach to LEFT controller
   watchRoot.position.set(0.055, 0.015, -0.075);
   watchRoot.rotation.set(-0.7, 0.0, 0.25);
   controllers.c0.add(watchRoot);
@@ -632,7 +645,7 @@ function toggleWatch(s) {
 function tryClickWatch(s) {
   if (!s.watch.visible || !s.watch.buttons.length) return false;
 
-  const ctrl = s.controllers.c0; // left
+  const ctrl = s.controllers.c0;
   s.tmpM.identity().extractRotation(ctrl.matrixWorld);
   const origin = s.tmpV.setFromMatrixPosition(ctrl.matrixWorld);
   s.tmpDir.set(0, 0, -1).applyMatrix4(s.tmpM).normalize();
@@ -687,7 +700,6 @@ function buildPokerRoom(s) {
   rail.position.y = 1.03;
   room.add(rail);
 
-  // Deck + loose cards (grabbable)
   const deckPos = new THREE.Vector3(-1.1, 1.05, 0.0);
 
   const deck = new THREE.Mesh(
@@ -748,13 +760,11 @@ function releaseGrabRight(s) {
 // =======================
 
 function update(s, dt, t) {
-  // Hover cars
   for (const c of s.hoverCars) {
     c.obj.position.y = c.baseY + Math.sin(t*1.3 + c.phase) * 0.25;
     c.obj.rotation.y += dt * 0.10;
   }
 
-  // Animate dashed arc
   for (const l of s.dashLines) {
     if (l.material) l.material.dashOffset = -(t * 0.9);
     if (l.material?.color) {
@@ -763,10 +773,8 @@ function update(s, dt, t) {
     }
   }
 
-  // Update rays/reticles/arcs
   updateRays(s);
-
-  // Locomotion is handled in /js/index.js
+  // locomotion handled in /js/index.js
 }
 
 function updateRays(s) {
@@ -847,6 +855,7 @@ function setReticleVisible(s, hand, v) {
   if (r) r.visible = v;
 }
 
+// ✅ FIXED: safe dashed arc update (no empty-geometry crash)
 function updateArc(s, hand, from, to) {
   const arc = s.arcs[hand];
   const pts = s.arcPts[hand];
@@ -863,17 +872,27 @@ function updateArc(s, hand, from, to) {
     const a = (1 - u) * (1 - u);
     const b = 2 * (1 - u) * u;
     const c = u * u;
+
     pts[i].set(
-      from.x*a + mid.x*b + to.x*c,
-      from.y*a + mid.y*b + to.y*c,
-      from.z*a + mid.z*b + to.z*c
+      from.x * a + mid.x * b + to.x * c,
+      from.y * a + mid.y * b + to.y * c,
+      from.z * a + mid.z * b + to.z * c
     );
   }
 
-  const geom = new s.THREE.BufferGeometry().setFromPoints(pts);
-  arc.geometry?.dispose?.();
-  arc.geometry = geom;
-  arc.computeLineDistances?.();
+  const geom = arc.geometry;
+  if (!geom?.attributes?.position || geom.attributes.position.count !== N) {
+    geom?.dispose?.();
+    arc.geometry = new s.THREE.BufferGeometry().setFromPoints(pts);
+  } else {
+    const pos = geom.attributes.position;
+    for (let i = 0; i < N; i++) pos.setXYZ(i, pts[i].x, pts[i].y, pts[i].z);
+    pos.needsUpdate = true;
+  }
+
+  if (arc.geometry?.attributes?.position?.count >= 2) {
+    arc.computeLineDistances();
+  }
 }
 
 function setArcVisible(s, hand, v) {
@@ -938,4 +957,4 @@ function hsvToRgb(h, s, v) {
     case 5: r=v; g=p; b=q; break;
   }
   return { r, g, b };
-                                        }
+    }

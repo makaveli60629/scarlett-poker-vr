@@ -1,20 +1,16 @@
-// /js/index.js — Scarlett FAILSAFE FULL (Update 4.8.6)
-// ✅ No bare "three" import (CDN load)
-// ✅ Always-on HUD log + Copy/Clear + Hide/Show (HUD never blocks sticks)
+// /js/index.js — Scarlett FAILSAFE FULL (Update 4.8.7)
+// ✅ CDN THREE (no bare import)
+// ✅ HUD always visible + Copy/Clear + Hide/Show
 // ✅ VRButton always appended if possible
-// ✅ Shows fatal errors on-screen (no silent black)
+// ✅ XR locomotion works even if handedness is missing (fallback)
+// ✅ Imports ./world.js as a separate file and calls World.build()
 
 import { VRButton } from "./VRButton.js";
-await import("./world.js?v=4_8_6_failsafe");
+
 // ---- HUD logger (always visible) ----
 const HUD = (() => {
   const state = { lines: [], max: 2000 };
-
-  function el(tag, css) {
-    const e = document.createElement(tag);
-    if (css) e.style.cssText = css;
-    return e;
-  }
+  const el = (tag, css) => { const e = document.createElement(tag); if (css) e.style.cssText = css; return e; };
 
   const root = el("div", `
     position:fixed; left:10px; top:10px; right:10px;
@@ -26,13 +22,8 @@ const HUD = (() => {
     pointer-events:none;
   `);
 
-  const bar = el("div", `
-    display:flex; gap:10px; align-items:center; margin-bottom:10px;
-    pointer-events:auto;
-  `);
-
-  const title = el("div", `font-weight:700;`);
-  title.textContent = "Scarlett VR Poker";
+  const bar = el("div", `display:flex; gap:10px; align-items:center; margin-bottom:10px; pointer-events:auto;`);
+  const title = el("div", `font-weight:700;`); title.textContent = "Scarlett VR Poker";
 
   const pill = (txt) => {
     const p = el("div", `
@@ -41,8 +32,7 @@ const HUD = (() => {
       background:rgba(11,13,20,.6);
       font-size:12px; opacity:.95;
     `);
-    p.textContent = txt;
-    return p;
+    p.textContent = txt; return p;
   };
 
   const btn = (txt) => {
@@ -74,10 +64,7 @@ const HUD = (() => {
   badges.appendChild(badgeXR);
   badges.appendChild(badgeMode);
 
-  const logBox = el("pre", `
-    margin:0; white-space:pre-wrap; word-break:break-word;
-    font-size:13px; line-height:1.25;
-  `);
+  const logBox = el("pre", `margin:0; white-space:pre-wrap; word-break:break-word; font-size:13px; line-height:1.25;`);
 
   bar.appendChild(title);
   bar.appendChild(badges);
@@ -90,10 +77,7 @@ const HUD = (() => {
   document.body.appendChild(root);
   document.body.appendChild(showBtn);
 
-  function render() {
-    logBox.textContent = state.lines.join("\n");
-    root.scrollTop = root.scrollHeight;
-  }
+  function render() { logBox.textContent = state.lines.join("\n"); root.scrollTop = root.scrollHeight; }
 
   function log(...a) {
     const t = new Date();
@@ -104,48 +88,26 @@ const HUD = (() => {
     console.log(...a);
   }
 
-  function setXR(supported) {
-    badgeXR.textContent = `XR: ${supported ? "supported" : "no"}`;
-  }
-
-  function setMode(txt) {
-    badgeMode.textContent = `Mode: ${txt}`;
-  }
-
-  function setHidden(v) {
-    root.style.display = v ? "none" : "block";
-    showBtn.style.display = v ? "block" : "none";
-  }
+  function setXR(supported) { badgeXR.textContent = `XR: ${supported ? "supported" : "no"}`; }
+  function setMode(txt) { badgeMode.textContent = `Mode: ${txt}`; }
 
   copyBtn.onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(state.lines.join("\n"));
-      log("[hud] copied ✅");
-    } catch (e) {
-      log("[hud] copy failed:", e?.message || e);
-    }
+    try { await navigator.clipboard.writeText(state.lines.join("\n")); log("[hud] copied ✅"); }
+    catch (e) { log("[hud] copy failed:", e?.message || e); }
   };
 
-  clearBtn.onclick = () => {
-    state.lines = [];
-    render();
-  };
+  clearBtn.onclick = () => { state.lines = []; render(); };
 
-  hideBtn.onclick = () => setHidden(true);
-  showBtn.onclick = () => setHidden(false);
+  hideBtn.onclick = () => { root.style.display = "none"; showBtn.style.display = "block"; };
+  showBtn.onclick = () => { root.style.display = "block"; showBtn.style.display = "none"; };
 
-  // global error surfaces
-  window.addEventListener("error", (e) => {
-    log("[FATAL]", e.message || e.error || e);
-  });
-  window.addEventListener("unhandledrejection", (e) => {
-    log("[FATAL promise]", e.reason?.message || e.reason || e);
-  });
+  window.addEventListener("error", (e) => log("[FATAL]", e.message || e.error || e));
+  window.addEventListener("unhandledrejection", (e) => log("[FATAL promise]", e.reason?.message || e.reason || e));
 
   return { log, setXR, setMode };
 })();
 
-// ---- Android dual stick (simple; HUD does not block touches) ----
+// ---- Android dual stick ----
 function installAndroidDualStick() {
   const isTouch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
   if (!isTouch) return null;
@@ -205,26 +167,18 @@ function installAndroidDualStick() {
   return { left, right };
 }
 
-// ---- Three.js loader (CDN; no bare imports) ----
 async function loadTHREE() {
-  // You can pin versions if you want. This is stable.
-  const url = "https://unpkg.com/three@0.160.0/build/three.module.js";
-  return await import(url);
+  return await import("https://unpkg.com/three@0.160.0/build/three.module.js");
 }
 
-// ---- XR controller lasers ----
 function installControllerRays(THREE, renderer, scene) {
   const controllers = [];
   for (let i=0;i<2;i++){
     const c = renderer.xr.getController(i);
-    c.name = `XRController_${i}`;
     scene.add(c);
     controllers.push(c);
 
-    const geo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0,0,0),
-      new THREE.Vector3(0,0,-1.6)
-    ]);
+    const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1.6)]);
     const mat = new THREE.LineBasicMaterial({ color: 0x7fe7ff, transparent:true, opacity:0.9 });
     c.add(new THREE.Line(geo, mat));
   }
@@ -232,26 +186,34 @@ function installControllerRays(THREE, renderer, scene) {
   return controllers;
 }
 
-// ---- XR + Android locomotion ----
 function deadzone(v, dz) { return Math.abs(v) < dz ? 0 : v; }
 
+// ✅ FIXED: handedness fallback so movement always works
 function getXRGamepads(renderer) {
   const session = renderer.xr.getSession?.();
-  if (!session) return { left:null, right:null };
+  if (!session) return { left:null, right:null, any:[] };
+
+  const any = [];
   let left = null, right = null;
+
   for (const src of session.inputSources) {
     if (!src?.gamepad) continue;
+    any.push(src);
     if (src.handedness === "left") left = src;
     if (src.handedness === "right") right = src;
   }
-  return { left, right };
+
+  if (!left && any[0]) left = any[0];
+  if (!right && any[1]) right = any[1];
+
+  return { left, right, any };
 }
 
 function bootLoop(THREE, STATE) {
   const { renderer, scene, camera, player, controllers } = STATE;
   const clock = new THREE.Clock();
 
-  renderer.setAnimationLoop((t) => {
+  renderer.setAnimationLoop(() => {
     const dt = Math.min(0.05, clock.getDelta());
 
     // locomotion
@@ -264,8 +226,6 @@ function bootLoop(THREE, STATE) {
       if (lgp?.axes?.length >= 2) {
         mx = deadzone(lgp.axes[0] || 0, 0.14);
         mz = deadzone(lgp.axes[1] || 0, 0.14);
-        // IMPORTANT: Quest axes[1] typically: forward = -1, back = +1
-        // This is correct as-is.
       }
       if (rgp?.axes?.length >= 2) {
         turn = deadzone(rgp.axes[0] || 0, 0.14);
@@ -279,6 +239,7 @@ function bootLoop(THREE, STATE) {
       player.rotation.y -= turn * 2.2 * dt;
       player.position.x += vx;
       player.position.z += vz;
+
     } else if (STATE.sticks) {
       const mx = STATE.sticks.left?.x || 0;
       const mz = STATE.sticks.left?.y || 0;
@@ -294,33 +255,20 @@ function bootLoop(THREE, STATE) {
       player.position.z += vz;
     }
 
-    // world frame
     STATE.World?.frame?.({ THREE, scene, renderer, camera, player, controllers }, dt);
-
     renderer.render(scene, camera);
   });
 }
 
-// ---- MAIN BOOT ----
 (async function boot() {
   HUD.log("[BOOT] booting…");
   HUD.setMode("booting");
-
-  // XR support badge
   HUD.setXR(!!navigator.xr);
 
-  // Load THREE
   let THREE;
-  try {
-    THREE = await loadTHREE();
-    HUD.log("[BOOT] THREE loaded ✅");
-  } catch (e) {
-    HUD.log("[FATAL] THREE load failed:", e?.message || e);
-    HUD.setMode("fatal");
-    return;
-  }
+  try { THREE = await loadTHREE(); HUD.log("[BOOT] THREE loaded ✅"); }
+  catch (e) { HUD.log("[FATAL] THREE load failed:", e?.message || e); HUD.setMode("fatal"); return; }
 
-  // Basic scene
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
   scene.fog = new THREE.Fog(0x05060a, 10, 65);
@@ -340,24 +288,15 @@ function bootLoop(THREE, STATE) {
   renderer.xr.enabled = true;
   document.body.appendChild(renderer.domElement);
 
-  // VR button
-  try {
-    document.body.appendChild(VRButton.createButton(renderer));
-    HUD.log("[index] VRButton appended ✅");
-  } catch (e) {
-    HUD.log("[VRButton] failed:", e?.message || e);
-  }
+  try { document.body.appendChild(VRButton.createButton(renderer)); HUD.log("[index] VRButton appended ✅"); }
+  catch (e) { HUD.log("[VRButton] failed:", e?.message || e); }
 
-  // touch sticks
   const sticks = installAndroidDualStick();
-
-  // controllers + rays
   const controllers = installControllerRays(THREE, renderer, scene);
 
-  // Load world with cache-bust so you ALWAYS get latest
   let WorldMod;
   try {
-    WorldMod = await import("./world.js?v=4_8_6_failsafe");
+    WorldMod = await import("./world.js?v=4_8_7_full");
     HUD.log("[index] world.js imported ✅");
   } catch (e) {
     HUD.log("[FATAL] world.js import failed:", e?.message || e);
@@ -372,7 +311,6 @@ function bootLoop(THREE, STATE) {
     return;
   }
 
-  // Build world
   try {
     HUD.log("[index] calling world.build() …");
     await World.build({ THREE, scene, renderer, camera, player, controllers, log: HUD.log });
@@ -383,16 +321,13 @@ function bootLoop(THREE, STATE) {
     return;
   }
 
-  // Resize
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // Start loop
   HUD.setMode("running");
   bootLoop(THREE, { THREE, scene, renderer, camera, player, controllers, sticks, World });
-
   HUD.log("[index] runtime running ✅");
 })();

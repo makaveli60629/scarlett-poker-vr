@@ -1,353 +1,219 @@
-// /js/index.js — Scarlett FULL v6.0
-// ✅ Quest: left stick move, right stick smooth turn
-// ✅ Teleport confirm: trigger (selectstart) -> passed to world as pads.teleport
-// ✅ Lasers installed on controllers in index, teleport ray is computed in world from RIGHT controller matrixWorld
-// ✅ Android dual-stick stays working
-// ✅ HUD hide/show never blocks sticks (pointer-events none on root)
+// /js/index.js
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
+import { World } from "./world.js";
 
-import { VRButton } from "./VRButton.js";
+const BUILD = `INDEX_FULL_${Date.now()}`;
 
-const HUD = (() => {
-  const state = { lines: [], max: 1600 };
+const $ = (sel) => document.querySelector(sel);
 
-  const el = (tag, css) => {
-    const e = document.createElement(tag);
-    if (css) e.style.cssText = css;
-    return e;
-  };
+const hud = $("#hud");
+const hudToggle = $("#hudToggle");
+const hudlog = $("#hudlog");
 
-  const root = el("div", `
-    position:fixed; left:10px; top:10px; right:10px;
-    max-height:44vh; overflow:auto; z-index:99999;
-    padding:12px; border-radius:16px;
-    background:rgba(5,6,10,.62); backdrop-filter:blur(10px);
-    border:1px solid rgba(127,231,255,.2);
-    color:#e8ecff; font-family:system-ui,Segoe UI,Roboto,Arial;
-    pointer-events:none;
-  `);
-
-  const bar = el("div", `display:flex; gap:10px; align-items:center; margin-bottom:10px; pointer-events:auto;`);
-  const title = el("div", `font-weight:900;`); title.textContent = "Scarlett VR Poker";
-  const badgeXR = el("div", `padding:6px 10px;border-radius:999px;border:1px solid rgba(127,231,255,.18);background:rgba(11,13,20,.6);font-size:12px;`);
-  const badgeMode = el("div", `padding:6px 10px;border-radius:999px;border:1px solid rgba(127,231,255,.18);background:rgba(11,13,20,.6);font-size:12px;`);
-
-  const btn = (txt) => {
-    const b = el("button", `
-      padding:8px 10px; border-radius:12px;
-      border:1px solid rgba(127,231,255,.32);
-      background:rgba(11,13,20,.85);
-      color:#e8ecff; cursor:pointer;
-    `);
-    b.style.pointerEvents = "auto";
-    b.textContent = txt;
-    return b;
-  };
-
-  const copyBtn = btn("Copy");
-  const clearBtn = btn("Clear");
-  const hideBtn = btn("Hide HUD");
-
-  const showBtn = btn("Show HUD");
-  showBtn.style.position = "fixed";
-  showBtn.style.top = "10px";
-  showBtn.style.right = "10px";
-  showBtn.style.zIndex = "999999";
-  showBtn.style.display = "none";
-
-  const logBox = el("pre", `margin:0; white-space:pre-wrap; word-break:break-word; font-size:13px; line-height:1.25;`);
-
-  bar.appendChild(title);
-  bar.appendChild(badgeXR);
-  bar.appendChild(badgeMode);
-  bar.appendChild(copyBtn);
-  bar.appendChild(clearBtn);
-  bar.appendChild(hideBtn);
-
-  root.appendChild(bar);
-  root.appendChild(logBox);
-  document.body.appendChild(root);
-  document.body.appendChild(showBtn);
-
-  function render(){
-    logBox.textContent = state.lines.join("\n");
-    root.scrollTop = root.scrollHeight;
+function log(...args) {
+  const msg = args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
+  console.log(msg);
+  if (hudlog) {
+    hudlog.textContent += msg + "\n";
+    hudlog.scrollTop = hudlog.scrollHeight;
   }
+}
 
-  function log(...a){
-    const t = new Date();
-    const ts = `[${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}:${String(t.getSeconds()).padStart(2,"0")}]`;
-    state.lines.push(`${ts} ${a.join(" ")}`);
-    if (state.lines.length > state.max) state.lines.splice(0, state.lines.length - state.max);
-    render();
-    console.log(...a);
+log(`[index] boot ✅ build=${BUILD}`);
+log(`[env] secureContext=${window.isSecureContext}`);
+log(`[env] ua=${navigator.userAgent}`);
+log(`[env] navigator.xr=${!!navigator.xr}`);
+
+const app = document.getElementById("app");
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+app.appendChild(renderer.domElement);
+
+// XR optional features
+renderer.xr.setReferenceSpaceType("local-floor");
+
+// Scene + Camera
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05070d);
+
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 2500);
+
+// PlayerRig: we move this for locomotion (desktop + mobile)
+const player = new THREE.Group();
+player.name = "PlayerRig";
+scene.add(player);
+player.add(camera);
+camera.position.set(0, 1.65, 3.5);
+
+// Controllers (XR)
+const controllers = {
+  c0: renderer.xr.getController(0),
+  c1: renderer.xr.getController(1),
+  g0: renderer.xr.getControllerGrip(0),
+  g1: renderer.xr.getControllerGrip(1),
+};
+player.add(controllers.c0, controllers.c1, controllers.g0, controllers.g1);
+
+// Desktop/Mobile look controls (simple)
+const keys = new Set();
+window.addEventListener("keydown", (e) => keys.add(e.code));
+window.addEventListener("keyup", (e) => keys.delete(e.code));
+
+let isPointerDown = false;
+let lastX = 0, lastY = 0;
+let yaw = 0, pitch = 0;
+
+renderer.domElement.addEventListener("pointerdown", (e) => {
+  isPointerDown = true;
+  lastX = e.clientX; lastY = e.clientY;
+  renderer.domElement.setPointerCapture?.(e.pointerId);
+});
+renderer.domElement.addEventListener("pointerup", () => { isPointerDown = false; });
+renderer.domElement.addEventListener("pointermove", (e) => {
+  if (!isPointerDown) return;
+  const dx = e.clientX - lastX;
+  const dy = e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+
+  yaw -= dx * 0.0035;
+  pitch -= dy * 0.0035;
+  pitch = Math.max(-1.2, Math.min(1.2, pitch));
+
+  camera.rotation.set(pitch, yaw, 0, "YXZ");
+}, { passive: true });
+
+// Mobile touch joystick (very simple)
+let touchMove = { active:false, id:null, sx:0, sy:0, dx:0, dy:0 };
+window.addEventListener("touchstart", (e) => {
+  // left side touch = move
+  for (const t of e.changedTouches) {
+    if (t.clientX < window.innerWidth * 0.45 && !touchMove.active) {
+      touchMove.active = true;
+      touchMove.id = t.identifier;
+      touchMove.sx = t.clientX;
+      touchMove.sy = t.clientY;
+      touchMove.dx = 0; touchMove.dy = 0;
+      break;
+    }
   }
-
-  function setXR(v){ badgeXR.textContent = `XR: ${v ? "supported" : "no"}`; }
-  function setMode(v){ badgeMode.textContent = `Mode: ${v}`; }
-
-  function setHidden(v){
-    root.style.display = v ? "none" : "block";
-    showBtn.style.display = v ? "block" : "none";
+}, { passive: true });
+window.addEventListener("touchmove", (e) => {
+  if (!touchMove.active) return;
+  for (const t of e.changedTouches) {
+    if (t.identifier === touchMove.id) {
+      touchMove.dx = (t.clientX - touchMove.sx) / 90;
+      touchMove.dy = (t.clientY - touchMove.sy) / 90;
+      touchMove.dx = Math.max(-1, Math.min(1, touchMove.dx));
+      touchMove.dy = Math.max(-1, Math.min(1, touchMove.dy));
+      break;
+    }
   }
+}, { passive: true });
+window.addEventListener("touchend", (e) => {
+  for (const t of e.changedTouches) {
+    if (t.identifier === touchMove.id) {
+      touchMove.active = false;
+      touchMove.id = null;
+      touchMove.dx = 0; touchMove.dy = 0;
+    }
+  }
+}, { passive: true });
 
-  copyBtn.onclick = async () => {
-    try { await navigator.clipboard.writeText(state.lines.join("\n")); log("[hud] copied ✅"); }
-    catch(e){ log("[hud] copy failed:", e?.message || e); }
-  };
-  clearBtn.onclick = () => { state.lines=[]; render(); };
-  hideBtn.onclick = () => setHidden(true);
-  showBtn.onclick = () => setHidden(false);
+// VR Button
+const vrBtn = VRButton.createButton(renderer);
+document.body.appendChild(vrBtn);
+log("[index] VRButton appended ✅");
 
-  window.addEventListener("error", (e)=>log("[FATAL]", e.message || e.error || e));
-  window.addEventListener("unhandledrejection", (e)=>log("[FATAL promise]", e.reason?.message || e.reason || e));
+// HUD actions
+$("#btnEnterVR").onclick = async () => {
+  // VRButton handles the session; this is just UX
+  log("[hud] Use the VR button (or headset prompt) to enter VR.");
+};
+$("#btnRecenter").onclick = () => {
+  // recenter by resetting rig yaw and position
+  player.position.set(0, 0, 0);
+  yaw = 0; pitch = 0;
+  camera.rotation.set(0,0,0);
+  camera.position.set(0, 1.65, 3.5);
+  log("[hud] recenter ✅");
+};
 
-  return { log, setXR, setMode };
+function setHUDVisible(on) {
+  hud.style.display = on ? "block" : "none";
+  hudToggle.style.display = on ? "none" : "block";
+}
+$("#btnToggleHUD").onclick = () => { setHUDVisible(false); log("[hud] hidden"); };
+hudToggle.onclick = () => { setHUDVisible(true); log("[hud] shown"); };
+
+let world = null;
+
+(async () => {
+  try {
+    world = await World.init({
+      THREE, scene, renderer, camera, player, controllers, log, BUILD
+    });
+    log("[world] init ✅");
+  } catch (e) {
+    log("[world] init ❌", String(e?.stack || e));
+  }
 })();
 
-// --- Android dual-stick (touch) ---
-function installAndroidDualStick(){
-  const isTouch = "ontouchstart" in window || (navigator.maxTouchPoints|0) > 0;
-  if(!isTouch) return null;
+// room buttons
+$("#btnRoomLobby").onclick = () => world?.setRoom?.("lobby");
+$("#btnRoomStore").onclick = () => world?.setRoom?.("store");
+$("#btnRoomScorpion").onclick = () => world?.setRoom?.("scorpion");
+$("#btnRoomSpectate").onclick = () => world?.setRoom?.("spectate");
 
-  const mk = (side) => {
-    const root = document.createElement("div");
-    root.style.cssText = `
-      position:fixed; bottom:18px; ${side==="left"?"left:18px":"right:18px"};
-      width:160px; height:160px; border-radius:999px;
-      border:1px solid rgba(255,255,255,0.18);
-      background:rgba(10,12,18,0.25); backdrop-filter:blur(6px);
-      touch-action:none; z-index:99999; user-select:none;
-      pointer-events:auto;
-    `;
-    const nub = document.createElement("div");
-    nub.style.cssText = `
-      position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-      width:64px; height:64px; border-radius:999px;
-      background:rgba(127,231,255,0.22);
-      border:1px solid rgba(127,231,255,0.45);
-      box-shadow:0 0 18px rgba(127,231,255,0.25);
-    `;
-    root.appendChild(nub);
-    document.body.appendChild(root);
-
-    const st = { x:0, y:0, active:false, id:-1, cx:0, cy:0, nub };
-    const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
-
-    root.addEventListener("pointerdown",(e)=>{
-      st.active=true; st.id=e.pointerId;
-      const r=root.getBoundingClientRect();
-      st.cx=r.left+r.width/2; st.cy=r.top+r.height/2;
-      root.setPointerCapture(e.pointerId);
-    });
-    root.addEventListener("pointermove",(e)=>{
-      if(!st.active||e.pointerId!==st.id) return;
-      const dx=e.clientX-st.cx, dy=e.clientY-st.cy;
-      const max=52;
-      st.x=clamp(dx/max,-1,1);
-      st.y=clamp(dy/max,-1,1);
-      st.nub.style.transform=`translate(${st.x*42-50}%, ${st.y*42-50}%)`;
-    });
-    const end=(e)=>{
-      if(e.pointerId!==st.id) return;
-      st.active=false; st.id=-1; st.x=0; st.y=0;
-      st.nub.style.transform="translate(-50%,-50%)";
-    };
-    root.addEventListener("pointerup",end);
-    root.addEventListener("pointercancel",end);
-
-    return st;
-  };
-
-  const left = mk("left");
-  const right = mk("right");
-  HUD.log("[android] dual-stick ready ✅");
-  return { left, right };
-}
-
-async function loadTHREE(){
-  return await import("https://unpkg.com/three@0.160.0/build/three.module.js");
-}
-
-function installControllerLasers(THREE, renderer, scene){
-  const controllers = [];
-  for(let i=0;i<2;i++){
-    const c = renderer.xr.getController(i);
-    c.name = `XRController_${i}`;
-    scene.add(c);
-    controllers.push(c);
-
-    const geo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0,0,0),
-      new THREE.Vector3(0,0,-2.4)
-    ]);
-    const mat = new THREE.LineBasicMaterial({ color:0x7fe7ff, transparent:true, opacity:0.92 });
-    const line = new THREE.Line(geo, mat);
-    line.name = "LaserLine";
-    c.add(line);
-  }
-  HUD.log("[index] controller lasers installed ✅");
-  return controllers;
-}
-
-function deadzone(v,dz){ return Math.abs(v)<dz ? 0 : v; }
-
-function getXRGamepads(renderer){
-  const session = renderer.xr.getSession?.();
-  if(!session) return { left:null, right:null };
-  let left=null, right=null;
-  for(const src of session.inputSources){
-    if(!src?.gamepad) continue;
-    if(src.handedness==="left") left=src;
-    if(src.handedness==="right") right=src;
-  }
-  return { left, right };
-}
-
-function bootLoop(THREE, STATE){
-  const { renderer, scene, camera, player, controllers, World, sticks } = STATE;
-  const clock = new THREE.Clock();
-
-  const pads = { teleport:false };
-
-  // trigger => teleport confirm
-  renderer.xr.addEventListener("sessionstart", ()=>{
-    for(let i=0;i<2;i++){
-      const c = renderer.xr.getController(i);
-      c.addEventListener("selectstart", ()=>{
-        pads.teleport = true;
-        setTimeout(()=>pads.teleport=false, 70);
-      });
-    }
-    HUD.log("[xr] sessionstart ✅");
-  });
-
-  renderer.setAnimationLoop(()=>{
-    const dt = Math.min(0.05, clock.getDelta());
-
-    // Quest sticks
-    if(renderer.xr.isPresenting){
-      const gp = getXRGamepads(renderer);
-      const lgp = gp.left?.gamepad;
-      const rgp = gp.right?.gamepad;
-
-      let mx=0, mz=0;
-      if(lgp?.axes?.length>=2){
-        mx = deadzone(lgp.axes[0]||0, 0.14);
-        mz = deadzone(lgp.axes[1]||0, 0.14);
-      }
-
-      let turn=0;
-      if(rgp?.axes?.length>=2){
-        turn = deadzone(rgp.axes[0]||0, 0.18);
-      }
-
-      const yaw = player.rotation.y;
-      const speed = 2.2*dt;
-      const vx = (mx*Math.cos(yaw) - mz*Math.sin(yaw))*speed;
-      const vz = (mx*Math.sin(yaw) + mz*Math.cos(yaw))*speed;
-
-      player.rotation.y -= turn*2.25*dt;
-      player.position.x += vx;
-      player.position.z += vz;
-    } else if(sticks){
-      // Android
-      const mx = sticks.left?.x || 0;
-      const mz = sticks.left?.y || 0;
-      const turn = sticks.right?.x || 0;
-
-      const yaw = player.rotation.y;
-      const speed = 2.0*dt;
-      const vx = (mx*Math.cos(yaw) - mz*Math.sin(yaw))*speed;
-      const vz = (mx*Math.sin(yaw) + mz*Math.cos(yaw))*speed;
-
-      player.rotation.y -= turn*2.0*dt;
-      player.position.x += vx;
-      player.position.z += vz;
-    }
-
-    World?.frame?.({ THREE, scene, renderer, camera, player, controllers, pads }, dt);
-    renderer.render(scene, camera);
-  });
-}
-
-(async function boot(){
-  HUD.log("[BOOT] boot.js loaded ✅");
-  HUD.setXR(!!navigator.xr);
-  HUD.setMode("booting");
-
-  let THREE;
-  try{
-    THREE = await loadTHREE();
-    HUD.log("[BOOT] THREE loaded ✅");
-  }catch(e){
-    HUD.log("[FATAL] THREE load failed:", e?.message||e);
-    HUD.setMode("fatal");
-    return;
-  }
-
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x05060a);
-  scene.fog = new THREE.Fog(0x05060a, 12, 120);
-
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.02, 500);
-  camera.position.set(0,1.65,0);
-
-  const player = new THREE.Group();
-  player.name = "PlayerRig";
-  player.add(camera);
-  scene.add(player);
-
-  const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
+// Resize
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.xr.enabled = true;
-  document.body.appendChild(renderer.domElement);
+});
 
-  try{
-    document.body.appendChild(VRButton.createButton(renderer));
-    HUD.log("[index] VRButton appended ✅");
-  }catch(e){
-    HUD.log("[VRButton] failed:", e?.message||e);
+// Animate loop
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(0.05, clock.getDelta());
+  const t = clock.elapsedTime;
+
+  // Desktop/Mobile locomotion when NOT in XR
+  if (!renderer.xr.isPresenting) {
+    const speed = (keys.has("ShiftLeft") || keys.has("ShiftRight")) ? 5.4 : 2.6;
+
+    // WASD
+    let x = 0, z = 0;
+    if (keys.has("KeyW")) z -= 1;
+    if (keys.has("KeyS")) z += 1;
+    if (keys.has("KeyA")) x -= 1;
+    if (keys.has("KeyD")) x += 1;
+
+    // Mobile touch move
+    if (touchMove.active) {
+      x += touchMove.dx;
+      z += touchMove.dy;
+    }
+
+    const len = Math.hypot(x, z);
+    if (len > 0.0001) {
+      x /= len; z /= len;
+
+      // move relative to camera yaw
+      const yrot = yaw;
+      const cos = Math.cos(yrot), sin = Math.sin(yrot);
+      const mx = x * cos - z * sin;
+      const mz = x * sin + z * cos;
+
+      player.position.x += mx * speed * dt;
+      player.position.z += mz * speed * dt;
+    }
   }
 
-  const sticks = installAndroidDualStick();
-  const controllers = installControllerLasers(THREE, renderer, scene);
+  world?.update?.(dt, t);
 
-  let WorldMod;
-  try{
-    WorldMod = await import(`./world.js?v=${Date.now()}`);
-    HUD.log("[index] world.js imported ✅");
-  }catch(e){
-    HUD.log("[FATAL] world.js import failed:", e?.message||e);
-    HUD.setMode("fatal");
-    return;
-  }
-
-  const World = WorldMod.World;
-  if(!World?.build){
-    HUD.log("[FATAL] world.js missing export World.build()");
-    HUD.setMode("fatal");
-    return;
-  }
-
-  try{
-    HUD.log("[index] calling world.build() …");
-    await World.build({ THREE, scene, renderer, camera, player, controllers, log: HUD.log });
-    HUD.log("[world] build complete ✅");
-  }catch(e){
-    HUD.log("[FATAL] world.build failed:", e?.message||e);
-    HUD.setMode("fatal");
-    return;
-  }
-
-  window.addEventListener("resize", ()=>{
-    camera.aspect = window.innerWidth/window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-
-  HUD.setMode("running");
-  bootLoop(THREE, { THREE, scene, renderer, camera, player, controllers, World, sticks });
-  HUD.log("[index] runtime start ✅");
-})();
+  renderer.render(scene, camera);
+});

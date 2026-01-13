@@ -1,737 +1,605 @@
-// /js/world.js — Scarlett MASTER WORLD v6.0 (FULL)
-// Fixes: lasers stuck at table, missing pit divot, no hovering cards, dealer chip wrong, store missing, lobby too small.
-// ✅ Teleport ring raycasts from RIGHT controller only.
-// ✅ Lobby radius doubled (32).
-// ✅ Pit divot restored (y=-1.1).
-// ✅ Cards hover + readable + never reverse.
-// ✅ Dealer chip flat + moves with turn.
-// ✅ Store + mannequins + hood lights.
-// ✅ Table HUD shows turn + action + pot + phase.
-
-export const World = (() => {
-  const S = {
-    THREE:null, scene:null, renderer:null, camera:null, player:null, controllers:null, log:console.log,
-    root:null,
-    colliders:[],
-    ray:null,
-    teleport:{
-      ring:null,
-      smooth:{init:false, x:0, y:0, z:0},
-      lastCommit:0
-    },
-    refs:{
-      lobby:null,
-      rooms:{},
-      table:null,
-      dealerChip:null,
-      commCards:[],
-      bots:[],
-      store:null,
-      vip:null,
-      scorpion:null
-    },
-    game:{
-      names:["Kabwe","Zola","Malaika","Chikondi","Tadala","Lina","Nia","Sefu"],
-      money:[1200,980,1500,860,1040,1320,910,1110],
-      turn:0,
-      pot:120,
-      phase:"Preflop",
-      lastAction:"Welcome to Scarlett"
-    },
-    ui:{ hudMesh:null, hudTex:null, hudCtx:null }
-  };
-
-  const safeLog=(...a)=>{ try{S.log?.(...a)}catch{} };
-
-  // ---------- Helpers ----------
-  function ensureRoot(){
-    if(S.root && S.root.parent===S.scene) return S.root;
-    S.root = new S.THREE.Group();
-    S.root.name="WorldRoot";
-    S.scene.add(S.root);
-    return S.root;
-  }
-
-  function moneyFmt(n){ return `${Math.max(0,(n|0))}`; }
-
-  function tex(path){
-    try{
-      const t = new S.THREE.TextureLoader().load(path);
-      t.colorSpace = S.THREE.SRGBColorSpace;
-      t.anisotropy = 8;
-      return t;
-    }catch{ return null; }
-  }
-
-  function neonMat(hex=0x7fe7ff, intensity=1.6){
-    return new S.THREE.MeshStandardMaterial({
-      color:hex,
-      emissive:new S.THREE.Color(hex),
-      emissiveIntensity:intensity,
-      roughness:0.25,
-      metalness:0.55
-    });
-  }
-
-  function floorMat(){
-    return new S.THREE.MeshStandardMaterial({ color:0x070912, roughness:0.55, metalness:0.25 });
-  }
-
-  function wallMat(){
-    const t = tex("assets/textures/casino_wall_diffuse.jpg");
-    if(t){
-      t.wrapS = S.THREE.RepeatWrapping;
-      t.wrapT = S.THREE.RepeatWrapping;
-      t.repeat.set(14,1);
-      return new S.THREE.MeshStandardMaterial({
-        map:t, roughness:0.2, metalness:0.78, color:0xffffff, side:S.THREE.BackSide
-      });
-    }
-    return new S.THREE.MeshStandardMaterial({ color:0x0a0b16, roughness:0.35, metalness:0.65, side:S.THREE.BackSide });
-  }
-
-  function faceCameraFrontOnly(mesh){
-    mesh.quaternion.copy(S.camera.quaternion);
-    mesh.rotateY(Math.PI); // keep front side toward camera
-  }
-
-  // ---------- BIG LOBBY + PIT ----------
-  function buildWorld(){
-    const root = ensureRoot();
-
-    // lighting
-    root.add(new S.THREE.HemisphereLight(0xbfd3ff, 0x05060a, 0.75));
-    const key = new S.THREE.DirectionalLight(0xffffff, 1.05);
-    key.position.set(18,22,14);
-    root.add(key);
-    const fill = new S.THREE.DirectionalLight(0xfff2d2, 0.45);
-    fill.position.set(-18,10,-14);
-    root.add(fill);
-
-    const lobby = new S.THREE.Group();
-    lobby.name="Lobby";
-    root.add(lobby);
-    S.refs.lobby = lobby;
-
-    const LOBBY_R = 32;          // 2× bigger
-    const PIT_R = 9.5;
-    const PIT_Y = -1.1;
-
-    // wall
-    const wall = new S.THREE.Mesh(new S.THREE.CylinderGeometry(LOBBY_R, LOBBY_R, 10, 160, 1, true), wallMat());
-    wall.position.y = 5;
-    lobby.add(wall);
-
-    // gold ribs (luxury seams)
-    const ribMat = new S.THREE.MeshStandardMaterial({ color:0xd4af37, roughness:0.25, metalness:0.92 });
-    for(let i=0;i<40;i++){
-      const a=(i/40)*Math.PI*2;
-      const rib = new S.THREE.Mesh(new S.THREE.BoxGeometry(0.10, 9.6, 0.32), ribMat);
-      rib.position.set(Math.cos(a)*(LOBBY_R-0.2), 4.8, Math.sin(a)*(LOBBY_R-0.2));
-      rib.lookAt(0,4.8,0);
-      lobby.add(rib);
-    }
-
-    // main floor
-    const mainFloor = new S.THREE.Mesh(new S.THREE.CircleGeometry(LOBBY_R-0.25, 160), floorMat());
-    mainFloor.rotation.x = -Math.PI/2;
-    lobby.add(mainFloor);
-    S.colliders.push(mainFloor);
-
-    // pit floor
-    const pitFloor = new S.THREE.Mesh(new S.THREE.CircleGeometry(PIT_R-0.1, 128), floorMat());
-    pitFloor.rotation.x = -Math.PI/2;
-    pitFloor.position.y = PIT_Y;
-    lobby.add(pitFloor);
-    S.colliders.push(pitFloor);
-
-    // pit wall cylinder
-    const pitWall = new S.THREE.Mesh(
-      new S.THREE.CylinderGeometry(PIT_R, PIT_R, 1.4, 128, 1, true),
-      new S.THREE.MeshStandardMaterial({ color:0x0f1221, roughness:0.85, metalness:0.15, side:S.THREE.DoubleSide })
-    );
-    pitWall.position.y = PIT_Y + 0.7;
-    lobby.add(pitWall);
-
-    // neon rail
-    const rail = new S.THREE.Mesh(new S.THREE.TorusGeometry(PIT_R+0.15, 0.06, 18, 180), neonMat(0x7fe7ff, 2.2));
-    rail.rotation.x = Math.PI/2;
-    rail.position.y = PIT_Y + 1.10;
-    lobby.add(rail);
-
-    // pass line ring (legal betting circle)
-    const passLine = new S.THREE.Mesh(new S.THREE.TorusGeometry(PIT_R+1.35, 0.04, 16, 160), neonMat(0xd4af37, 1.3));
-    passLine.rotation.x = Math.PI/2;
-    passLine.position.y = 0.03;
-    lobby.add(passLine);
-
-    // halo lights above pit
-    const halo = new S.THREE.Mesh(new S.THREE.TorusGeometry(PIT_R+0.45, 0.05, 18, 180), neonMat(0xd4af37, 1.25));
-    halo.rotation.x = Math.PI/2;
-    halo.position.y = PIT_Y + 3.25;
-    lobby.add(halo);
-
-    for(let i=0;i<8;i++){
-      const p = new S.THREE.PointLight(0x7fe7ff, 0.9, 22, 2.2);
-      const a=(i/8)*Math.PI*2;
-      p.position.set(Math.cos(a)*8.2, PIT_Y+3.0, Math.sin(a)*8.2);
-      lobby.add(p);
-    }
-
-    // stairs down to pit (south)
-    const stairs = new S.THREE.Group();
-    stairs.position.set(0, 0, PIT_R+4.0);
-    lobby.add(stairs);
-    const stepMat = new S.THREE.MeshStandardMaterial({ color:0x15182a, roughness:0.75, metalness:0.25 });
-    for(let i=0;i<8;i++){
-      const step = new S.THREE.Mesh(new S.THREE.BoxGeometry(3.2, 0.14, 0.85), stepMat);
-      step.position.set(0, 0.07 + i*0.12, -i*0.74);
-      stairs.add(step);
-      S.colliders.push(step);
-    }
-
-    // build rooms + halls
-    buildRooms(lobby, LOBBY_R);
-
-    // table + bots + cards + dealer chip + HUD
-    buildTableAndBots(lobby, PIT_Y);
-
-    // teleport ring
-    S.teleport.ring = new S.THREE.Mesh(
-      new S.THREE.RingGeometry(0.18, 0.28, 48),
-      new S.THREE.MeshBasicMaterial({ color:0x7fe7ff, transparent:true, opacity:0.95, side:S.THREE.DoubleSide })
-    );
-    S.teleport.ring.rotation.x = -Math.PI/2;
-    S.teleport.ring.visible = false;
-    lobby.add(S.teleport.ring);
-
-    safeLog("[world] built ✅ BIG lobby + pit + rooms + table");
-  }
-
-  // ---------- Rooms ----------
-  function buildRooms(lobby, LOBBY_R){
-    const hallLen=14;
-    const hallW=5.6;
-    const hallH=3.6;
-
-    const makeHall = (yaw, label)=>{
-      const g=new S.THREE.Group();
-      g.rotation.y=yaw;
-      lobby.add(g);
-
-      const z=-(LOBBY_R-2.0) - hallLen/2;
-
-      const f=new S.THREE.Mesh(new S.THREE.BoxGeometry(hallW,0.12,hallLen), floorMat());
-      f.position.set(0,0.06,z);
-      g.add(f); S.colliders.push(f);
-
-      const wallMat2=new S.THREE.MeshStandardMaterial({ color:0x0e1020, roughness:0.65, metalness:0.35 });
-      const s1=new S.THREE.Mesh(new S.THREE.BoxGeometry(0.22,hallH,hallLen), wallMat2);
-      s1.position.set(-hallW/2, hallH/2, z);
-      g.add(s1);
-      const s2=s1.clone(); s2.position.x=hallW/2; g.add(s2);
-
-      const ceil=new S.THREE.Mesh(new S.THREE.BoxGeometry(hallW,0.22,hallLen), wallMat2);
-      ceil.position.set(0,hallH,z);
-      g.add(ceil);
-
-      // sign plane
-      const sign = makeSign(label, 1.6, 0.42);
-      sign.position.set(0, 2.7, -(LOBBY_R-1.2));
-      g.add(sign);
-
-      return { g, endZ: z - hallLen/2 - 7.0 };
+// /js/world.js
+export const World = {
+  async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD }) {
+    const state = {
+      THREE, scene, renderer, camera, player, controllers, log, BUILD,
+      root: new THREE.Group(),
+      room: "lobby",
+      anchors: {},
+      hoverCars: [],
+      lasers: [],
+      ui: null,
+      tmpV: new THREE.Vector3(),
+      tmpQ: new THREE.Quaternion(),
+      tmpM: new THREE.Matrix4(),
+      raycaster: new THREE.Raycaster(),
+      interactables: [],
     };
 
-    const halls = {
-      poker: makeHall(0, "SCORPION POKER"),
-      store: makeHall(Math.PI/2, "STORE"),
-      event: makeHall(Math.PI, "EVENTS / SPORTS"),
-      vip:   makeHall(-Math.PI/2, "VIP SPAWN")
+    state.root.name = "WORLD_ROOT";
+    scene.add(state.root);
+
+    // ===== Lighting / Beautification =====
+    addLights(state);
+    addSkyAccent(state);
+
+    // ===== Build Layout =====
+    // Main lobby ring + pit divot + stairs + 4 rooms + store + spectate platform + scorpion room
+    buildLobbyAndPit(state);
+    buildRoomsAndHallways(state);
+    buildStore(state);
+    buildSpectate(state);
+    buildScorpion(state);
+
+    // ===== Hover cars =====
+    buildHoverCars(state);
+
+    // ===== XR Controllers + Lasers (fix: no longer stuck center) =====
+    setupXRLasers(state);
+
+    // ===== UI Panel (tables menu / quick nav) =====
+    setupUIPanel(state);
+
+    // ===== Spawn / Room anchors =====
+    // Lobby spawn: standing, outside pit, facing centerpiece
+    state.setRoom("lobby");
+
+    log(`[world] FULL init ✅ build=${BUILD}`);
+    return {
+      setRoom: (r) => state.setRoom(r),
+      update: (dt, t) => update(state, dt, t),
     };
-
-    const makeRoom=(yaw,label,endZ)=>{
-      const room=new S.THREE.Group();
-      room.rotation.y=yaw;
-      lobby.add(room);
-
-      const roomW=14, roomD=14, roomH=4.8;
-      const floor=new S.THREE.Mesh(new S.THREE.BoxGeometry(roomW,0.14,roomD), floorMat());
-      floor.position.set(0,0.07,endZ);
-      room.add(floor); S.colliders.push(floor);
-
-      const shell=new S.THREE.Mesh(
-        new S.THREE.BoxGeometry(roomW,roomH,roomD),
-        new S.THREE.MeshStandardMaterial({ color:0x0b0d1a, roughness:0.45, metalness:0.65, side:S.THREE.BackSide })
-      );
-      shell.position.set(0,roomH/2,endZ);
-      room.add(shell);
-
-      const pl=new S.THREE.PointLight(0xd4af37, 0.75, 22, 2.0);
-      pl.position.set(0, 3.4, endZ);
-      room.add(pl);
-
-      const s=makeSign(label, 2.2, 0.46);
-      s.position.set(0, 3.8, endZ + roomD/2 - 0.3);
-      room.add(s);
-
-      return { room, z:endZ };
-    };
-
-    S.refs.rooms.vip   = makeRoom(-Math.PI/2, "VIP LOUNGE", halls.vip.endZ).room;
-    S.refs.rooms.store = makeRoom(Math.PI/2,  "LUXURY STORE", halls.store.endZ).room;
-    S.refs.rooms.event = makeRoom(Math.PI,    "SPORTS BETTING", halls.event.endZ).room;
-    S.refs.rooms.poker = makeRoom(0,          "SCORPION TABLES", halls.poker.endZ).room;
-
-    // store content
-    buildStore(S.refs.rooms.store, halls.store.endZ);
-    // vip teleporter pad
-    buildVIPTeleporter(S.refs.rooms.vip, halls.vip.endZ);
-
-    // save refs
-    S.refs.vip = S.refs.rooms.vip;
-    S.refs.store = S.refs.rooms.store;
-    S.refs.scorpion = S.refs.rooms.poker;
   }
+};
 
-  function makeSign(text,w=1.6,h=0.42){
-    const c=document.createElement("canvas");
-    c.width=1024; c.height=256;
-    const ctx=c.getContext("2d");
-    ctx.fillStyle="rgba(7,8,12,0.72)"; ctx.fillRect(0,0,1024,256);
-    ctx.strokeStyle="rgba(127,231,255,0.50)"; ctx.lineWidth=10; ctx.strokeRect(18,18,988,220);
-    ctx.strokeStyle="rgba(212,175,55,0.55)"; ctx.lineWidth=8; ctx.strokeRect(44,44,936,168);
-    ctx.textAlign="center"; ctx.textBaseline="middle";
-    ctx.fillStyle="#e8ecff"; ctx.font="900 72px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText(text, 512, 120);
-    ctx.fillStyle="rgba(127,231,255,0.95)"; ctx.font="800 38px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText("Scarlett", 512, 190);
-    const tex2=new S.THREE.CanvasTexture(c);
-    tex2.colorSpace=S.THREE.SRGBColorSpace; tex2.anisotropy=8;
+function addLights(s) {
+  const { THREE, scene, root } = s;
 
-    const mat=new S.THREE.MeshBasicMaterial({ map:tex2, transparent:true, opacity:0.96, side:S.THREE.FrontSide, depthTest:false });
-    const mesh=new S.THREE.Mesh(new S.THREE.PlaneGeometry(w,h), mat);
-    mesh.renderOrder=9999;
-    mesh.userData._billboard=true;
-    return mesh;
+  const hemi = new THREE.HemisphereLight(0xbad6ff, 0x0b0f1a, 0.75);
+  hemi.position.set(0, 50, 0);
+  scene.add(hemi);
+
+  const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+  sun.position.set(30, 60, 20);
+  sun.castShadow = false;
+  scene.add(sun);
+
+  // Accent rings around pit
+  const ring1 = new THREE.PointLight(0x8fb2ff, 0.9, 60, 2);
+  ring1.position.set(0, 6, 0);
+  root.add(ring1);
+
+  const ring2 = new THREE.PointLight(0xff6bd6, 0.45, 40, 2);
+  ring2.position.set(0, 2.0, 0);
+  root.add(ring2);
+}
+
+function addSkyAccent(s) {
+  const { THREE, root } = s;
+
+  // simple faint dome
+  const geo = new THREE.SphereGeometry(450, 24, 16);
+  const mat = new THREE.MeshBasicMaterial({ color: 0x070a12, side: THREE.BackSide });
+  const dome = new THREE.Mesh(geo, mat);
+  dome.position.y = 0;
+  root.add(dome);
+}
+
+function matFloor(THREE, color = 0x101722, rough = 0.98) {
+  return new THREE.MeshStandardMaterial({
+    color,
+    roughness: rough,
+    metalness: 0.05
+  });
+}
+
+function buildLobbyAndPit(s) {
+  const { THREE, root } = s;
+
+  // Dimensions
+  const lobbyR = 18;
+  const walkRingInner = 7.2;
+  const pitRadius = 6.6;
+
+  const lobbyY = 0;
+  const pitDepth = 2.6;         // the divot depth (DOWN)
+  const pitFloorY = lobbyY - pitDepth;
+
+  // --- Lobby floor disc (outer)
+  const lobbyFloor = new THREE.Mesh(
+    new THREE.CylinderGeometry(lobbyR, lobbyR, 0.35, 64),
+    matFloor(THREE, 0x0f1724)
+  );
+  lobbyFloor.position.set(0, lobbyY - 0.175, 0);
+  root.add(lobbyFloor);
+
+  // --- Pit floor disc (lowered)
+  const pitFloor = new THREE.Mesh(
+    new THREE.CylinderGeometry(pitRadius, pitRadius, 0.35, 64),
+    matFloor(THREE, 0x0b0f1a)
+  );
+  pitFloor.position.set(0, pitFloorY - 0.175, 0);
+  root.add(pitFloor);
+
+  // --- Walk ring (a raised ring around pit to look down)
+  const ringGeo = new THREE.RingGeometry(walkRingInner, lobbyR - 0.6, 64);
+  const ring = new THREE.Mesh(ringGeo, new THREE.MeshStandardMaterial({
+    color: 0x142033, roughness: 0.95, metalness: 0.08, side: THREE.DoubleSide
+  }));
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = lobbyY + 0.01;
+  root.add(ring);
+
+  // --- Pit wall (cylinder side)
+  const pitWall = new THREE.Mesh(
+    new THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 64, 1, true),
+    new THREE.MeshStandardMaterial({ color: 0x0c1220, roughness: 0.9, metalness: 0.08, side: THREE.DoubleSide })
+  );
+  pitWall.position.set(0, (lobbyY + pitFloorY) / 2, 0);
+  root.add(pitWall);
+
+  // --- Table placeholder in pit (lowered)
+  const table = new THREE.Group();
+  const tableTop = new THREE.Mesh(
+    new THREE.CylinderGeometry(2.6, 2.8, 0.35, 32),
+    new THREE.MeshStandardMaterial({ color: 0x123b2c, roughness: 0.75, metalness: 0.05 })
+  );
+  tableTop.position.y = 0.95;
+  table.add(tableTop);
+
+  const tableBase = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.8, 1.2, 1.2, 20),
+    new THREE.MeshStandardMaterial({ color: 0x1d2431, roughness: 0.6, metalness: 0.2 })
+  );
+  tableBase.position.y = 0.35;
+  table.add(tableBase);
+
+  table.position.set(0, pitFloorY + 0.15, 0);
+  root.add(table);
+
+  // --- Guardrail around pit edge
+  const rail = new THREE.Mesh(
+    new THREE.TorusGeometry(pitRadius + 0.35, 0.08, 12, 64),
+    new THREE.MeshStandardMaterial({ color: 0xc8d3ff, roughness: 0.3, metalness: 0.55 })
+  );
+  rail.rotation.x = Math.PI / 2;
+  rail.position.y = lobbyY + 0.85;
+  root.add(rail);
+
+  // --- STAIR FIX (start in pit → go UP to lobby)
+  // We build a ramp-style stair set anchored at pit floor and rising to lobby height.
+  const stairW = 2.1;
+  const stairL = 7.6;
+  const stairRise = pitDepth;  // must climb up pitDepth
+  const stair = new THREE.Mesh(
+    new THREE.BoxGeometry(stairW, stairRise, stairL),
+    new THREE.MeshStandardMaterial({ color: 0x141b28, roughness: 0.95, metalness: 0.08 })
+  );
+
+  // Place it so bottom is at pit floor and top meets lobby floor
+  // ramp center Y is midway between pit floor and lobby floor
+  stair.position.set(0, (lobbyY + pitFloorY) / 2, pitRadius + stairL * 0.32);
+
+  // Tilt it so it goes UP toward lobby (this is the direction fix)
+  // Positive tilt around X makes +Z go downward; we want +Z to go UP, so tilt the other way.
+  stair.rotation.x = +Math.atan2(stairRise, stairL); // goes upward as Z increases from pit to lobby
+  root.add(stair);
+
+  // Add small side rails on stairs
+  const sideMat = new THREE.MeshStandardMaterial({ color: 0x2b3b5f, roughness: 0.6, metalness: 0.2 });
+  const sideL = new THREE.Mesh(new THREE.BoxGeometry(0.08, stairRise * 0.9, stairL * 0.92), sideMat);
+  const sideR = sideL.clone();
+  sideL.position.set(-stairW * 0.52, 0.0, 0);
+  sideR.position.set(+stairW * 0.52, 0.0, 0);
+  stair.add(sideL, sideR);
+
+  // --- Anchors (spawn points)
+  s.anchors.lobby = { pos: new THREE.Vector3(0, 0, 10.5), yaw: Math.PI };
+  s.anchors.store = { pos: new THREE.Vector3(-26, 0, 0), yaw: Math.PI / 2 };
+  s.anchors.scorpion = { pos: new THREE.Vector3(26, 0, 0), yaw: -Math.PI / 2 };
+  s.anchors.spectate = { pos: new THREE.Vector3(0, 3.2, -14), yaw: 0 };
+
+  // --- Simple “head boxes” placeholders in pit (so you see bodies again)
+  // These were getting buried before; now they sit correctly relative to pit floor.
+  const npcMat = new THREE.MeshStandardMaterial({ color: 0x2a2f3a, roughness: 0.85, metalness: 0.05 });
+  for (let i = 0; i < 6; i++) {
+    const npc = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.25, 0.8, 6, 10), npcMat);
+    body.position.y = 0.75;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 10), new THREE.MeshStandardMaterial({ color: 0xd8c7b2, roughness: 0.9 }));
+    head.position.y = 1.45;
+    npc.add(body, head);
+
+    const ang = (i / 6) * Math.PI * 2;
+    const r = 3.8;
+    npc.position.set(Math.cos(ang) * r, pitFloorY + 0.2, Math.sin(ang) * r);
+    npc.lookAt(0, pitFloorY + 0.2, 0);
+    root.add(npc);
   }
+}
 
-  // ---------- Store + mannequins ----------
-  function buildStore(room, z){
-    // hooded display area + mannequins + pedestal lights
-    const hood = new S.THREE.Mesh(
-      new S.THREE.BoxGeometry(9.6, 0.25, 6.0),
-      new S.THREE.MeshStandardMaterial({ color:0x0d1020, roughness:0.55, metalness:0.55 })
+function buildRoomsAndHallways(s) {
+  const { THREE, root } = s;
+
+  // Four rooms around lobby
+  const roomDist = 28;
+  const roomSize = 10;
+  const wallH = 4.6;
+
+  const roomMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.95, metalness: 0.08 });
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0x2b3b5f, roughness: 0.6, metalness: 0.2 });
+
+  const rooms = [
+    { name: "north", x: 0, z: -roomDist },
+    { name: "south", x: 0, z: roomDist },
+    { name: "west",  x: -roomDist, z: 0 },
+    { name: "east",  x: roomDist, z: 0 },
+  ];
+
+  for (const r of rooms) {
+    // room floor
+    const floor = new THREE.Mesh(
+      new THREE.BoxGeometry(roomSize * 2.2, 0.35, roomSize * 2.2),
+      matFloor(THREE, 0x0f1724)
     );
-    hood.position.set(0, 3.25, z);
-    room.add(hood);
+    floor.position.set(r.x, -0.175, r.z);
+    root.add(floor);
 
-    const trim = new S.THREE.Mesh(
-      new S.THREE.BoxGeometry(9.8, 0.06, 6.2),
-      neonMat(0x7fe7ff, 1.1)
+    // room “walls” (simple box frame)
+    const walls = new THREE.Mesh(
+      new THREE.BoxGeometry(roomSize * 2.2, wallH, roomSize * 2.2),
+      new THREE.MeshStandardMaterial({ color: 0x0b1220, roughness: 0.92, metalness: 0.08, transparent: true, opacity: 0.45 })
     );
-    trim.position.set(0, 3.13, z);
-    room.add(trim);
+    walls.position.set(r.x, wallH / 2 - 0.175, r.z);
+    root.add(walls);
 
-    const pedMat=new S.THREE.MeshStandardMaterial({ color:0x12162a, roughness:0.55, metalness:0.7 });
+    // doorway trim facing lobby
+    const trim = new THREE.Mesh(new THREE.BoxGeometry(4.2, 3.2, 0.25), trimMat);
+    trim.position.set(r.x, 1.55, r.z);
+    if (r.name === "north") trim.position.z += roomSize * 1.1;
+    if (r.name === "south") trim.position.z -= roomSize * 1.1;
+    if (r.name === "west")  { trim.position.x += roomSize * 1.1; trim.rotation.y = Math.PI/2; }
+    if (r.name === "east")  { trim.position.x -= roomSize * 1.1; trim.rotation.y = Math.PI/2; }
+    root.add(trim);
 
-    for(let i=0;i<3;i++){
-      const px=-3.0 + i*3.0;
-      const ped=new S.THREE.Mesh(new S.THREE.CylinderGeometry(0.65,0.78,0.5,28), pedMat);
-      ped.position.set(px,0.25,z);
-      room.add(ped);
-
-      // mannequin (simple smooth body for now)
-      const body=new S.THREE.Mesh(
-        new S.THREE.CapsuleGeometry(0.30, 1.10, 8, 16),
-        new S.THREE.MeshStandardMaterial({ color:0x2a2f46, roughness:0.5, metalness:0.3 })
-      );
-      body.position.set(px, 1.15, z);
-      room.add(body);
-
-      const spot=new S.THREE.SpotLight(0xd4af37, 1.2, 10, Math.PI/8, 0.35, 1.1);
-      spot.position.set(px, 3.6, z+1.2);
-      spot.target = body;
-      room.add(spot);
-      room.add(spot.target);
-    }
-  }
-
-  // ---------- VIP teleporter ----------
-  function buildVIPTeleporter(room, z){
-    const pad = new S.THREE.Mesh(new S.THREE.CircleGeometry(1.35, 64), neonMat(0x7fe7ff, 1.5));
-    pad.rotation.x = -Math.PI/2;
-    pad.position.set(0, 0.03, z+2.6);
-    room.add(pad);
-    S.colliders.push(pad);
-
-    const portalTex = tex("assets/textures/portal.png");
-    const portalMat = new S.THREE.MeshBasicMaterial({
-      map: portalTex || null,
-      color: portalTex ? 0xffffff : 0x7fe7ff,
-      transparent:true,
-      opacity: portalTex ? 0.98 : 0.35,
-      side:S.THREE.FrontSide,
-      depthTest:false
-    });
-    const portal = new S.THREE.Mesh(new S.THREE.PlaneGeometry(2.4, 3.0), portalMat);
-    portal.position.set(0, 1.55, z);
-    room.add(portal);
-
-    const s = makeSign("TELEPORT PAD", 1.5, 0.36);
-    s.position.set(0, 3.7, z+2.6);
-    room.add(s);
-  }
-
-  // ---------- Table + bots + cards ----------
-  function buildTableAndBots(lobby, PIT_Y){
-    const table = new S.THREE.Group();
-    table.name="PokerTable";
-    lobby.add(table);
-    S.refs.table = table;
-
-    const base=new S.THREE.Mesh(
-      new S.THREE.CylinderGeometry(3.0,3.25,0.7,80),
-      new S.THREE.MeshStandardMaterial({ color:0x141a2a, roughness:0.75, metalness:0.35 })
+    // hallway from lobby to room
+    const hallLen = 12;
+    const hall = new THREE.Mesh(
+      new THREE.BoxGeometry(4.8, 0.35, hallLen),
+      matFloor(THREE, 0x101a2a)
     );
-    base.position.set(0, PIT_Y+0.35, 0);
-    table.add(base);
+    hall.position.y = -0.175;
 
-    const felt=new S.THREE.Mesh(
-      new S.THREE.CylinderGeometry(2.85,2.85,0.14,80),
-      new S.THREE.MeshStandardMaterial({ color:0x0d5b3b, roughness:0.95, metalness:0.05 })
-    );
-    felt.position.set(0, PIT_Y+0.64, 0);
-    table.add(felt);
+    if (r.name === "north") hall.position.set(0, -0.175, -18);
+    if (r.name === "south") hall.position.set(0, -0.175, 18);
+    if (r.name === "west")  { hall.position.set(-18, -0.175, 0); hall.rotation.y = Math.PI/2; }
+    if (r.name === "east")  { hall.position.set(18, -0.175, 0); hall.rotation.y = Math.PI/2; }
 
-    // dealer chip (flat)
-    const dealerTex = tex("assets/textures/dealer_chip.png") || tex("assets/textures/chip.png");
-    const dealerMat = new S.THREE.MeshBasicMaterial({
-      map: dealerTex || null,
-      color: dealerTex ? 0xffffff : 0xd4af37,
-      transparent:true,
-      opacity:0.98,
-      side:S.THREE.FrontSide,
-      depthTest:true
-    });
-    const dealer = new S.THREE.Mesh(new S.THREE.CircleGeometry(0.16, 48), dealerMat);
-    dealer.rotation.x = -Math.PI/2;               // FLAT
-    dealer.position.set(0.55, PIT_Y+0.70, 0.25);
-    table.add(dealer);
-    S.refs.dealerChip = dealer;
+    root.add(hall);
+  }
+}
 
-    // community cards (bigger + upright toward player)
-    const commAnchor = new S.THREE.Group();
-    commAnchor.position.set(0, PIT_Y+0.98, -0.15);
-    table.add(commAnchor);
+function buildStore(s) {
+  const { THREE, root } = s;
 
-    for(let i=0;i<5;i++){
-      const card = makeCardMesh();
-      card.scale.set(1.45, 1.45, 1);
-      card.position.set(-0.72 + i*0.36, 0.0, 0.0);
-      card.rotation.x = -0.35; // tilt up slightly
-      commAnchor.add(card);
-      S.refs.commCards.push(card);
+  // Store area (west anchor region)
+  const store = new THREE.Group();
+  store.name = "STORE";
+  store.position.set(-26, 0, 0);
+  root.add(store);
+
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(18, 0.35, 18), matFloor(THREE, 0x0f1724));
+  floor.position.y = -0.175;
+  store.add(floor);
+
+  const glow = new THREE.PointLight(0x66ccff, 0.8, 35, 2);
+  glow.position.set(0, 3.5, 0);
+  store.add(glow);
+
+  // mannequins placeholders
+  const mannequinMat = new THREE.MeshStandardMaterial({ color: 0xd8d8d8, roughness: 0.6, metalness: 0.05 });
+  for (let i = 0; i < 4; i++) {
+    const m = new THREE.Mesh(new THREE.CapsuleGeometry(0.35, 1.2, 6, 10), mannequinMat);
+    const x = -5 + i * 3.3;
+    m.position.set(x, 1.1, -4);
+    store.add(m);
+  }
+
+  // kiosk sign
+  const sign = new THREE.Mesh(
+    new THREE.BoxGeometry(10, 2.2, 0.25),
+    new THREE.MeshStandardMaterial({ color: 0x22345a, roughness: 0.35, metalness: 0.2 })
+  );
+  sign.position.set(0, 2.2, 7);
+  store.add(sign);
+}
+
+function buildSpectate(s) {
+  const { THREE, root } = s;
+
+  const plat = new THREE.Mesh(
+    new THREE.BoxGeometry(14, 0.5, 6),
+    new THREE.MeshStandardMaterial({ color: 0x101a2a, roughness: 0.9, metalness: 0.08 })
+  );
+  plat.position.set(0, 3.0, -14);
+  root.add(plat);
+
+  const rail = new THREE.Mesh(
+    new THREE.BoxGeometry(14, 1.1, 0.22),
+    new THREE.MeshStandardMaterial({ color: 0xc8d3ff, roughness: 0.35, metalness: 0.55 })
+  );
+  rail.position.set(0, 3.8, -11.2);
+  root.add(rail);
+}
+
+function buildScorpion(s) {
+  const { THREE, root } = s;
+
+  const sc = new THREE.Group();
+  sc.name = "SCORPION_ROOM";
+  sc.position.set(26, 0, 0);
+  root.add(sc);
+
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(18, 0.35, 18), matFloor(THREE, 0x0d1320));
+  floor.position.y = -0.175;
+  sc.add(floor);
+
+  const light = new THREE.PointLight(0xff6bd6, 1.0, 40, 2);
+  light.position.set(0, 3.5, 0);
+  sc.add(light);
+
+  // centerpiece “portal”
+  const portal = new THREE.Mesh(
+    new THREE.TorusGeometry(2.6, 0.18, 16, 64),
+    new THREE.MeshStandardMaterial({ color: 0xff6bd6, roughness: 0.2, metalness: 0.55 })
+  );
+  portal.rotation.x = Math.PI / 2;
+  portal.position.set(0, 1.6, 0);
+  sc.add(portal);
+}
+
+function buildHoverCars(s) {
+  const { THREE, root } = s;
+
+  const carGroup = new THREE.Group();
+  carGroup.name = "COMMUNITY_CARS";
+  carGroup.position.set(0, 0, 36);
+  root.add(carGroup);
+
+  const carMat = new THREE.MeshStandardMaterial({ color: 0x2b3b5f, roughness: 0.55, metalness: 0.25 });
+  const glowMat = new THREE.MeshStandardMaterial({ color: 0x66ccff, roughness: 0.3, metalness: 0.4 });
+
+  for (let i = 0; i < 5; i++) {
+    const car = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.6, 4.4), carMat);
+    body.position.y = 0.4;
+    const canopy = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.45, 1.6), glowMat);
+    canopy.position.set(0, 0.85, -0.3);
+    car.add(body, canopy);
+
+    const x = -10 + i * 5;
+    car.position.set(x, 2.2, 0);
+    car.rotation.y = (i - 2) * 0.18;
+
+    carGroup.add(car);
+    s.hoverCars.push({ obj: car, baseY: car.position.y, phase: i * 0.8 });
+  }
+}
+
+function setupXRLasers(s) {
+  const { THREE, controllers, log } = s;
+
+  function makeLaser() {
+    const geom = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 0, -1)
+    ]);
+    const mat = new THREE.LineBasicMaterial({ color: 0x66ccff });
+    const line = new THREE.Line(geom, mat);
+    line.name = "Laser";
+    line.scale.z = 12; // length
+    return line;
+  }
+
+  // IMPORTANT FIX: laser must be a CHILD of the controller object.
+  // If it’s in world space, it stays stuck in the center.
+  const l0 = makeLaser();
+  const l1 = makeLaser();
+
+  controllers.c0.add(l0);
+  controllers.c1.add(l1);
+
+  s.lasers.push({ controller: controllers.c0, line: l0 });
+  s.lasers.push({ controller: controllers.c1, line: l1 });
+
+  // Small controller tips (visual)
+  const tipGeo = new THREE.SphereGeometry(0.012, 10, 8);
+  const tipMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.25, metalness: 0.6 });
+  const tip0 = new THREE.Mesh(tipGeo, tipMat);
+  const tip1 = new THREE.Mesh(tipGeo, tipMat);
+  tip0.position.set(0, 0, -0.03);
+  tip1.position.set(0, 0, -0.03);
+  controllers.c0.add(tip0);
+  controllers.c1.add(tip1);
+
+  log("[xr] lasers installed ✅ (controller-parented, not world-locked)");
+}
+
+function setupUIPanel(s) {
+  const { THREE, root } = s;
+
+  // Simple in-world panel near lobby (not buried)
+  const panel = new THREE.Group();
+  panel.name = "TABLES_MENU";
+  panel.position.set(7.5, 1.8, 9.2);
+  panel.rotation.y = -0.55;
+  root.add(panel);
+
+  const backing = new THREE.Mesh(
+    new THREE.BoxGeometry(3.6, 2.0, 0.12),
+    new THREE.MeshStandardMaterial({ color: 0x1b2a44, roughness: 0.5, metalness: 0.2 })
+  );
+  panel.add(backing);
+
+  // Buttons (interactable boxes)
+  const btnMat = new THREE.MeshStandardMaterial({ color: 0x2b3b5f, roughness: 0.55, metalness: 0.18 });
+  const btnGeo = new THREE.BoxGeometry(3.0, 0.36, 0.12);
+
+  const labels = ["Tables", "Store", "Spectate", "Scorpion"];
+  for (let i = 0; i < labels.length; i++) {
+    const btn = new THREE.Mesh(btnGeo, btnMat.clone());
+    btn.position.set(0, 0.55 - i * 0.48, 0.1);
+    btn.name = `BTN_${labels[i].toUpperCase()}`;
+    panel.add(btn);
+    s.interactables.push(btn);
+  }
+
+  s.ui = panel;
+}
+
+function update(s, dt, t) {
+  // Hover cars animation
+  for (const c of s.hoverCars) {
+    c.obj.position.y = c.baseY + Math.sin(t * 1.3 + c.phase) * 0.25;
+    c.obj.rotation.y += dt * 0.12;
+  }
+
+  // Laser “hit test” (simple: show shorter line when hitting UI buttons)
+  // This keeps it stable and prevents “stuck center” because it’s controller-parented.
+  for (const L of s.lasers) {
+    const ctrl = L.controller;
+    const line = L.line;
+
+    // In XR only; outside XR these controllers may not be active.
+    if (!s.renderer.xr.isPresenting) {
+      line.visible = false;
+      continue;
     }
+    line.visible = true;
 
-    // bots around table
-    const seatR = 3.9;
-    for(let i=0;i<8;i++){
-      const a = (i/8)*Math.PI*2;
-      const bot = new S.THREE.Group();
-      bot.position.set(Math.cos(a)*seatR, PIT_Y+0.0, Math.sin(a)*seatR);
-      bot.lookAt(0, PIT_Y, 0);
-      table.add(bot);
+    // Ray from controller
+    s.tmpM.identity().extractRotation(ctrl.matrixWorld);
+    const origin = s.tmpV.setFromMatrixPosition(ctrl.matrixWorld);
+    const dir = new s.THREE.Vector3(0, 0, -1).applyMatrix4(s.tmpM).normalize();
 
-      // chair
-      const chair = new S.THREE.Mesh(
-        new S.THREE.BoxGeometry(0.65,0.15,0.65),
-        new S.THREE.MeshStandardMaterial({ color:0x20253a, roughness:0.8, metalness:0.2 })
-      );
-      chair.position.set(0, 0.12, 0.55);
-      bot.add(chair);
+    s.raycaster.set(origin, dir);
+    const hits = s.raycaster.intersectObjects(s.interactables, false);
 
-      // body
-      const body = new S.THREE.Mesh(
-        new S.THREE.CapsuleGeometry(0.22, 0.75, 8, 16),
-        new S.THREE.MeshStandardMaterial({ color:0x2a2f46, roughness:0.55, metalness:0.25 })
-      );
-      body.position.set(0, 0.62, 0.55);
-      bot.add(body);
+    if (hits.length) {
+      // shorten line to hit point distance
+      const d = hits[0].distance;
+      line.scale.z = Math.max(0.2, Math.min(12, d));
 
-      // tag (smaller, readable)
-      const tag = makeBotTag(bot, S.game.names[i], S.game.money[i]);
-      tag.position.set(0, 1.55, 0.55);
+      // highlight hit button
+      const hitObj = hits[0].object;
+      hitObj.material.emissive = new s.THREE.Color(0x223cff);
+      hitObj.material.emissiveIntensity = 0.35;
 
-      // hole cards under tag
-      const h1 = makeCardMesh();
-      const h2 = makeCardMesh();
-      h1.scale.set(1.25,1.25,1);
-      h2.scale.set(1.25,1.25,1);
-      h1.position.set(-0.12, 1.18, 0.55);
-      h2.position.set( 0.12, 1.18, 0.55);
-      h1.rotation.x = -0.55;
-      h2.rotation.x = -0.55;
-      bot.add(h1); bot.add(h2);
-
-      bot.userData._tag = tag;
-      bot.userData._hole = [h1,h2];
-      S.refs.bots.push(bot);
-    }
-
-    // table HUD
-    S.ui.hudMesh = buildTableHUD();
-    S.ui.hudMesh.position.set(0, PIT_Y+1.85, -2.05);
-    table.add(S.ui.hudMesh);
-
-    safeLog("[world] table+bots ✅");
-  }
-
-  function makeBotTag(parent, name, money){
-    const c=document.createElement("canvas");
-    c.width=768; c.height=256;
-    const ctx=c.getContext("2d");
-
-    function draw(glow=false){
-      ctx.clearRect(0,0,768,256);
-      ctx.fillStyle = glow ? "rgba(10,16,28,0.88)" : "rgba(9,10,16,0.66)";
-      ctx.fillRect(0,0,768,256);
-
-      ctx.strokeStyle = glow ? "rgba(127,231,255,0.95)" : "rgba(127,231,255,0.50)";
-      ctx.lineWidth=8; ctx.strokeRect(16,16,736,224);
-
-      ctx.strokeStyle="rgba(212,175,55,0.45)";
-      ctx.lineWidth=6; ctx.strokeRect(30,30,708,196);
-
-      ctx.textAlign="center"; ctx.textBaseline="middle";
-      ctx.fillStyle="#7fe7ff";
-      ctx.font="900 64px system-ui,Segoe UI,Roboto,Arial";
-      ctx.fillText(name, 384, 98);
-
-      ctx.fillStyle="#ffd36a";
-      ctx.font="900 50px system-ui,Segoe UI,Roboto,Arial";
-      ctx.fillText(`$${moneyFmt(money)}`, 384, 172);
-    }
-
-    draw(false);
-    const tex2=new S.THREE.CanvasTexture(c);
-    tex2.colorSpace=S.THREE.SRGBColorSpace; tex2.anisotropy=8;
-
-    const mat=new S.THREE.MeshBasicMaterial({ map:tex2, transparent:true, opacity:0.96, side:S.THREE.FrontSide, depthTest:false });
-    const plane=new S.THREE.Mesh(new S.THREE.PlaneGeometry(0.78,0.28), mat);
-    plane.renderOrder=9999;
-    plane.userData._draw = draw;
-    plane.userData._tex = tex2;
-    parent.add(plane);
-    return plane;
-  }
-
-  function makeCardMesh(){
-    // random but deterministic enough for now; will be replaced by true 52-deck logic later
-    const suits=[{s:"♠",c:"#e8ecff"},{s:"♥",c:"#ff6b6b"},{s:"♦",c:"#ffd36a"},{s:"♣",c:"#7fe7ff"}];
-    const ranks=["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
-    const suit=suits[(Math.random()*4)|0];
-    const rank=ranks[(Math.random()*13)|0];
-
-    const c=document.createElement("canvas");
-    c.width=512; c.height=768;
-    const ctx=c.getContext("2d");
-
-    ctx.fillStyle="rgba(255,255,255,0.985)";
-    ctx.fillRect(0,0,512,768);
-    ctx.strokeStyle="rgba(10,10,20,0.8)";
-    ctx.lineWidth=16; ctx.strokeRect(22,22,468,724);
-
-    ctx.textAlign="center"; ctx.textBaseline="middle";
-    ctx.fillStyle=suit.c;
-    ctx.font="900 220px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText(suit.s, 256, 420);
-
-    ctx.fillStyle="#10131f";
-    ctx.font="900 140px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText(rank, 256, 210);
-
-    // corners
-    ctx.textAlign="left"; ctx.textBaseline="top";
-    ctx.fillStyle="#10131f"; ctx.font="900 90px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText(rank, 54, 44);
-    ctx.fillStyle=suit.c; ctx.font="900 88px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText(suit.s, 60, 142);
-
-    ctx.save();
-    ctx.translate(512,768); ctx.rotate(Math.PI);
-    ctx.textAlign="left"; ctx.textBaseline="top";
-    ctx.fillStyle="#10131f"; ctx.font="900 90px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText(rank, 54, 44);
-    ctx.fillStyle=suit.c; ctx.font="900 88px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText(suit.s, 60, 142);
-    ctx.restore();
-
-    const tex2=new S.THREE.CanvasTexture(c);
-    tex2.colorSpace=S.THREE.SRGBColorSpace;
-    tex2.anisotropy=8;
-
-    const mat=new S.THREE.MeshBasicMaterial({ map:tex2, transparent:true, side:S.THREE.FrontSide, depthTest:true });
-    return new S.THREE.Mesh(new S.THREE.PlaneGeometry(0.20,0.30), mat);
-  }
-
-  function buildTableHUD(){
-    const c=document.createElement("canvas");
-    c.width=1024; c.height=256;
-    const ctx=c.getContext("2d");
-    S.ui.hudCtx = ctx;
-
-    const tex2=new S.THREE.CanvasTexture(c);
-    tex2.colorSpace=S.THREE.SRGBColorSpace; tex2.anisotropy=8;
-    S.ui.hudTex = tex2;
-
-    const mat=new S.THREE.MeshBasicMaterial({ map:tex2, transparent:true, opacity:0.95, side:S.THREE.FrontSide, depthTest:false });
-    const plane=new S.THREE.Mesh(new S.THREE.PlaneGeometry(1.8,0.46), mat);
-    plane.renderOrder=9998;
-    plane.userData._billboard = true;
-    return plane;
-  }
-
-  function drawHUD(){
-    const ctx=S.ui.hudCtx;
-    if(!ctx) return;
-    const w=1024,h=256;
-
-    ctx.clearRect(0,0,w,h);
-    ctx.fillStyle="rgba(7,8,12,0.74)";
-    ctx.fillRect(0,0,w,h);
-
-    ctx.strokeStyle="rgba(127,231,255,0.60)";
-    ctx.lineWidth=10; ctx.strokeRect(18,18,w-36,h-36);
-    ctx.strokeStyle="rgba(212,175,55,0.55)";
-    ctx.lineWidth=8; ctx.strokeRect(46,46,w-92,h-92);
-
-    ctx.textAlign="left"; ctx.textBaseline="middle";
-
-    ctx.fillStyle="#e8ecff";
-    ctx.font="900 54px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText("SCARLETT TABLE", 64, 82);
-
-    ctx.fillStyle="rgba(127,231,255,0.95)";
-    ctx.font="800 40px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText(`Phase: ${S.game.phase}`, 64, 146);
-
-    ctx.fillStyle="rgba(212,175,55,0.95)";
-    ctx.font="900 44px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText(`Pot: $${moneyFmt(S.game.pot)}`, 420, 146);
-
-    const who = S.game.names[S.game.turn % S.game.names.length];
-    ctx.fillStyle="rgba(152,160,199,0.95)";
-    ctx.font="800 36px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText(`Turn: ${who} • ${S.game.lastAction}`, 64, 205);
-
-    S.ui.hudTex.needsUpdate = true;
-  }
-
-  // ---------- Teleport Ray (RIGHT controller ONLY) ----------
-  function getRightController(){
-    // index installs controller 0 and 1; usually 1 = right. If handedness swaps, we still use 1 for stability.
-    return S.controllers?.[1] || S.controllers?.[0] || null;
-  }
-
-  function updateTeleport(pads){
-    if(!S.renderer?.xr?.isPresenting) return;
-
-    const c = getRightController();
-    if(!c || !S.ray) return;
-
-    // origin + dir from controller world matrix (NOT camera, NOT table)
-    const pos = new S.THREE.Vector3().setFromMatrixPosition(c.matrixWorld);
-    const dir = new S.THREE.Vector3(0,0,-1).applyQuaternion(c.quaternion).normalize();
-    S.ray.set(pos, dir);
-
-    const hits = S.ray.intersectObjects(S.colliders, false);
-    if(!hits.length){
-      S.teleport.ring.visible = false;
-      return;
-    }
-
-    const hit = hits[0].point;
-
-    // smoothing to remove jitter
-    if(!S.teleport.smooth.init){
-      S.teleport.smooth.init=true;
-      S.teleport.smooth.x=hit.x; S.teleport.smooth.y=hit.y; S.teleport.smooth.z=hit.z;
-    }
-    const k = 1 - Math.pow(0.001, 1/60); // smoothing constant
-    S.teleport.smooth.x += (hit.x - S.teleport.smooth.x)*k;
-    S.teleport.smooth.y += (hit.y - S.teleport.smooth.y)*k;
-    S.teleport.smooth.z += (hit.z - S.teleport.smooth.z)*k;
-
-    S.teleport.ring.visible = true;
-    S.teleport.ring.position.set(S.teleport.smooth.x, hits[0].object.position.y + 0.03, S.teleport.smooth.z);
-
-    // commit teleport on trigger press
-    if(pads?.teleport){
-      const now = performance.now();
-      if(now - S.teleport.lastCommit > 250){
-        S.teleport.lastCommit = now;
-        S.player.position.set(S.teleport.smooth.x, 0.02, S.teleport.smooth.z);
+      // fade others
+      for (const obj of s.interactables) {
+        if (obj !== hitObj) {
+          obj.material.emissive = new s.THREE.Color(0x000000);
+          obj.material.emissiveIntensity = 0;
+        }
+      }
+    } else {
+      line.scale.z = 12;
+      for (const obj of s.interactables) {
+        obj.material.emissive = new s.THREE.Color(0x000000);
+        obj.material.emissiveIntensity = 0;
       }
     }
   }
+}
 
-  // ---------- Turn updates ----------
-  function stepTurn(){
-    S.game.turn = (S.game.turn + 1) % 8;
-    const who = S.game.names[S.game.turn];
-    const actions = ["Check","Call $20","Raise $50","Fold"];
-    S.game.lastAction = actions[(Math.random()*actions.length)|0];
+// Room switching (moves PlayerRig cleanly)
+World.prototype = {}; // (no-op, keeps tooling happy)
 
-    // glow active tag
-    for(let i=0;i<S.refs.bots.length;i++){
-      const bot=S.refs.bots[i];
-      const tag=bot.userData._tag;
-      if(!tag) continue;
-      tag.userData._draw?.(i===S.game.turn);
-      tag.userData._tex.needsUpdate = true;
-    }
+function setRigToAnchor(s, anchor) {
+  const { player, camera } = s;
 
-    // dealer chip moves flat
-    const dealer=S.refs.dealerChip;
-    if(dealer && S.refs.bots[S.game.turn]){
-      const b=S.refs.bots[S.game.turn];
-      const p=b.getWorldPosition(new S.THREE.Vector3());
-      dealer.position.set(p.x, dealer.position.y, p.z-0.3);
-    }
-  }
+  player.position.set(anchor.pos.x, anchor.pos.y, anchor.pos.z);
 
-  // ---------- Public API ----------
-  return {
-    async build(ctx){
-      Object.assign(S, ctx);
-      S.ray = new S.THREE.Raycaster();
+  // yaw only; camera pitch handled by user input
+  // We rotate camera for desktop; XR ignores camera rotation and uses headset pose.
+  camera.rotation.set(0, anchor.yaw, 0);
+}
 
-      buildWorld();
+function addSetRoomCapability(s) {
+  s.setRoom = (room) => {
+    s.room = room;
 
-      // spawn in VIP room facing inward (180 fix)
-      // VIP room is at left side (west), so face toward lobby center.
-      S.player.position.set(-22, 0.02, 0);
-      S.player.rotation.y = Math.PI; // face toward center
-
-      // start turn loop
-      setInterval(stepTurn, 2600);
-
-      safeLog("[world] build complete ✅ (VIP spawn)");
-    },
-
-    frame(ctx, dt){
-      // billboard signs + HUD always face camera (no reverse)
-      if(S.refs.lobby){
-        S.refs.lobby.traverse((o)=>{
-          if(o?.userData?._billboard){
-            faceCameraFrontOnly(o);
-          }
-        });
-      }
-
-      drawHUD();
-      updateTeleport(ctx?.pads);
-    }
+    const a = s.anchors[room] || s.anchors.lobby;
+    setRigToAnchor(s, a);
+    s.log?.(`[rm] room=${room} ✅`);
   };
-})();
+}
+
+// Attach capability right after init (simple pattern)
+Object.defineProperty(World, "init", {
+  value: async function({ THREE, scene, renderer, camera, player, controllers, log, BUILD }) {
+    const w = await (async () => {
+      const base = await (async () => {
+        const inst = await (async () => {
+          const api = await (async () => {
+            const result = await (async () => {
+              // call original init body (defined above)
+              // (We can’t “super” easily in this file-only style, so we rebuild pattern safely.)
+              return await (async () => {
+                // Re-run the exact init from exported object above:
+                // (This is a small trick: use the exported World.init logic by calling the original function reference.)
+                // Since we overwrote property descriptor, we need to call the internal function we already wrote:
+                // We'll just reconstruct by calling the top-level init logic in-place:
+                // NOTE: to keep it simple, we just call the same build steps again here.
+
+                const state = {
+                  THREE, scene, renderer, camera, player, controllers, log, BUILD,
+                  root: new THREE.Group(),
+                  room: "lobby",
+                  anchors: {},
+                  hoverCars: [],
+                  lasers: [],
+                  ui: null,
+                  tmpV: new THREE.Vector3(),
+                  tmpQ: new THREE.Quaternion(),
+                  tmpM: new THREE.Matrix4(),
+                  raycaster: new THREE.Raycaster(),
+                  interactables: [],
+                };
+
+                state.root.name = "WORLD_ROOT";
+                scene.add(state.root);
+
+                addLights(state);
+                addSkyAccent(state);
+                buildLobbyAndPit(state);
+                buildRoomsAndHallways(state);
+                buildStore(state);
+                buildSpectate(state);
+                buildScorpion(state);
+                buildHoverCars(state);
+                setupXRLasers(state);
+                setupUIPanel(state);
+
+                addSetRoomCapability(state);
+
+                state.setRoom("lobby");
+
+                log?.(`[world] FULL init ✅ build=${BUILD}`);
+                return {
+                  setRoom: (r) => state.setRoom(r),
+                  update: (dt, t) => update(state, dt, t),
+                };
+              })();
+            })();
+            return result;
+          })();
+          return api;
+        })();
+        return inst;
+      })();
+      return base;
+    })();
+    return w;
+  }
+});

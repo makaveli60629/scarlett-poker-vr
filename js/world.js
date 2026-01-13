@@ -1,7 +1,12 @@
-// /js/world.js — ScarlettVR FULL WORLD v8.2 (Beautified + Watch + Poker + Hover Cars)
-// ✅ NO controls_ext import (deleted)
+// /js/world.js — ScarlettVR FULL WORLD v8.3
+// ✅ NO controls_ext import
 // ✅ locomotion handled in /js/index.js
 // ✅ FIXED dashed teleport arcs (no computeLineDistances crash)
+// ✅ Centered + deeper sunken poker pit/table
+// ✅ Proper rail w/ single entrance gap + guard post
+// ✅ Balcony spectator lounge upstairs (replaces extra jumbotron concept)
+// ✅ Watch UI smaller + hands toggle
+// ✅ Better lighting + navigation clarity
 
 export const World = {
   async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD }) {
@@ -29,7 +34,10 @@ export const World = {
       // watch
       watch: { root: null, visible: true, buttons: [], labels: [] },
 
-      // grab (right hand only in this build — left grip reserved for watch toggle)
+      // hands
+      handMeshes: { left: null, right: null, visible: true },
+
+      // grab
       grab: { interactables: [], heldRight: null },
 
       // ambience
@@ -44,6 +52,7 @@ export const World = {
       // toggles
       showArcs: true,
       showLasers: true,
+      showHands: true,
     };
 
     s.root.name = "WORLD_ROOT";
@@ -55,7 +64,10 @@ export const World = {
 
     buildLobbyShell(s);
     buildLobbyFloorCarpet(s);
+
+    // ✅ deeper pit + rail + guard + proper entrance
     buildPitAndDownstairs(s);
+
     buildRoomsAndHallways(s);
     buildPortals(s);
 
@@ -63,8 +75,13 @@ export const World = {
     buildScorpion(s);
     buildSpectate(s);
 
+    // ✅ upstairs spectator lounge balcony
+    buildBalconySpectator(s);
+
     buildHoverCars(s);
-    buildHoloJumbotrons(s);
+
+    // keep one main jumbotron (not clutter)
+    buildMainJumbotron(s);
 
     // ====== XR VISUALS + UI ======
     setupXRLasers(s);
@@ -75,35 +92,29 @@ export const World = {
     setupPrettyWatch(s);
 
     // ====== POKER ROOM (foundation) ======
-    buildPokerRoom(s);
+    buildPokerRoom(s); // ✅ centered, sunken
 
     // ====== ANCHORS ======
-    s.anchors.lobby    = { pos: new THREE.Vector3(0, 0, 13.5),  yaw: Math.PI };
-    s.anchors.poker    = { pos: new THREE.Vector3(0, 0, -9.5),  yaw: 0 };
-    s.anchors.store    = { pos: new THREE.Vector3(-26, 0, 0),   yaw: Math.PI / 2 };
-    s.anchors.scorpion = { pos: new THREE.Vector3(26, 0, 0),    yaw: -Math.PI / 2 };
-    s.anchors.spectate = { pos: new THREE.Vector3(0, 3.0, -14), yaw: 0 };
+    s.anchors.lobby    = { pos: new THREE.Vector3(0, 0, 13.5),   yaw: Math.PI };
+    s.anchors.poker    = { pos: new THREE.Vector3(0, -3.2, 0.0), yaw: 0 };       // ✅ pit center
+    s.anchors.store    = { pos: new THREE.Vector3(-26, 0, 0),    yaw: Math.PI / 2 };
+    s.anchors.scorpion = { pos: new THREE.Vector3(26, 0, 0),     yaw: -Math.PI / 2 };
+    s.anchors.spectate = { pos: new THREE.Vector3(0, 5.2, 12.0), yaw: Math.PI }; // ✅ balcony lounge
 
     setRigToAnchor(s, s.anchors.lobby);
 
     // ====== INPUT EVENTS ======
-    // Right trigger = teleport
     controllers.c1.addEventListener("selectstart", () => teleportNow(s, "right"));
-
-    // Left trigger = watch click if aiming; otherwise teleport
     controllers.c0.addEventListener("selectstart", () => {
       if (tryClickWatch(s)) return;
       teleportNow(s, "left");
     });
 
-    // Left grip = toggle watch
     controllers.c0.addEventListener("squeezestart", () => toggleWatch(s));
-
-    // Right grip = grab/release cards
     controllers.c1.addEventListener("squeezestart", () => tryGrabRight(s));
     controllers.c1.addEventListener("squeezeend",   () => releaseGrabRight(s));
 
-    log?.(`[world] FULL WORLD v8.2 ✅ build=${BUILD}`);
+    log?.(`[world] FULL WORLD v8.3 ✅ build=${BUILD}`);
     return {
       setRoom: (room) => {
         s.room = room;
@@ -122,33 +133,37 @@ export const World = {
 function addSkyAndFog(s) {
   const { THREE, scene } = s;
   scene.background = new THREE.Color(0x05070d);
-  scene.fog = new THREE.Fog(0x05070d, 12, 85);
+  scene.fog = new THREE.Fog(0x05070d, 10, 110);
 }
 
 function addLightsCinematic(s) {
   const { THREE, scene, root } = s;
 
-  const hemi = new THREE.HemisphereLight(0xdaf0ff, 0x0b0f1a, 1.05);
+  const hemi = new THREE.HemisphereLight(0xdaf0ff, 0x0b0f1a, 1.2);
   hemi.position.set(0, 70, 0);
   scene.add(hemi);
 
-  const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+  const sun = new THREE.DirectionalLight(0xffffff, 1.35);
   sun.position.set(35, 70, 35);
   scene.add(sun);
 
-  const lobbyGlow = new THREE.PointLight(0x7fb2ff, 1.15, 95, 2);
-  lobbyGlow.position.set(0, 9.0, 0);
+  // stronger lobby glow (so you can navigate)
+  const lobbyGlow = new THREE.PointLight(0x7fb2ff, 1.35, 110, 2);
+  lobbyGlow.position.set(0, 9.5, 0);
   root.add(lobbyGlow);
 
-  const magenta = new THREE.PointLight(0xff6bd6, 0.7, 80, 2);
-  magenta.position.set(0, 2.6, 0);
+  // warm fill so it isn't “too dark”
+  const warmFill = new THREE.PointLight(0xffe6b0, 0.35, 65, 2);
+  warmFill.position.set(0, 3.2, 10);
+  root.add(warmFill);
+
+  const magenta = new THREE.PointLight(0xff6bd6, 0.85, 95, 2);
+  magenta.position.set(0, 2.8, 0);
   root.add(magenta);
 
-  const pokerSpot = new THREE.SpotLight(0xffffff, 1.15, 40, Math.PI / 4, 0.35, 1);
-  pokerSpot.position.set(0, 8.5, -9.5);
-  pokerSpot.target.position.set(0, 1.0, -9.5);
-  root.add(pokerSpot);
-  root.add(pokerSpot.target);
+  const pitGlow = new THREE.PointLight(0x66ccff, 0.75, 55, 2);
+  pitGlow.position.set(0, 1.0, 0);
+  root.add(pitGlow);
 }
 
 function matFloor(THREE, color = 0x111a28) {
@@ -176,7 +191,7 @@ function buildLobbyShell(s) {
     color: 0x66ccff,
     roughness: 0.3, metalness: 0.6,
     emissive: new THREE.Color(0x66ccff),
-    emissiveIntensity: 0.45
+    emissiveIntensity: 0.5
   });
   s.neonMats.push(ringMat);
 
@@ -184,14 +199,6 @@ function buildLobbyShell(s) {
   ring.rotation.x = Math.PI / 2;
   ring.position.set(0, 8.8, 0);
   root.add(ring);
-
-  const pillarMat = new THREE.MeshStandardMaterial({ color: 0x121c2c, roughness: 0.8, metalness: 0.15 });
-  for (let i = 0; i < 10; i++) {
-    const ang = (i / 10) * Math.PI * 2;
-    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.4, 8.6, 16), pillarMat);
-    p.position.set(Math.cos(ang) * 16.8, 4.2, Math.sin(ang) * 16.8);
-    root.add(p);
-  }
 }
 
 function buildLobbyFloorCarpet(s) {
@@ -210,14 +217,14 @@ function buildLobbyFloorCarpet(s) {
     new THREE.MeshStandardMaterial({
       color: 0x0f1a2d, roughness: 1.0, metalness: 0.0,
       emissive: new THREE.Color(0x0b1220),
-      emissiveIntensity: 0.06
+      emissiveIntensity: 0.07
     })
   );
   carpet.rotation.x = -Math.PI / 2;
   carpet.position.y = 0.002;
   root.add(carpet);
 
-  const decalMat = new THREE.MeshBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.28, side: THREE.DoubleSide });
+  const decalMat = new THREE.MeshBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.26, side: THREE.DoubleSide });
   for (let i = 0; i < 4; i++) {
     const wedge = new THREE.Mesh(new THREE.RingGeometry(10.2, 14.4, 32, 1, i*Math.PI/2, Math.PI/4), decalMat);
     wedge.rotation.x = -Math.PI/2;
@@ -226,38 +233,102 @@ function buildLobbyFloorCarpet(s) {
   }
 }
 
+// =======================
+// PIT + RAIL + STAIRS (fixed)
+// =======================
+
 function buildPitAndDownstairs(s) {
   const { THREE, root } = s;
 
-  const pitRadius = 6.6;
-  const pitDepth = 2.6;
+  // ✅ deeper pit + table can sit “sunken”
+  const pitRadius = 7.2;
+  const pitDepth = 3.4;
   const pitFloorY = -pitDepth;
 
+  // pit floor
   const pitFloor = new THREE.Mesh(
-    new THREE.CylinderGeometry(pitRadius, pitRadius, 0.35, 64),
+    new THREE.CylinderGeometry(pitRadius, pitRadius, 0.35, 72),
     matFloor(THREE, 0x0c1220)
   );
   pitFloor.position.set(0, pitFloorY - 0.175, 0);
   root.add(pitFloor);
   s.groundMeshes.push(pitFloor);
 
+  // pit wall (inside)
   const pitWall = new THREE.Mesh(
-    new THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 64, 1, true),
+    new THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 72, 1, true),
     new THREE.MeshStandardMaterial({ color: 0x0a101e, roughness: 0.95, metalness: 0.06, side: THREE.DoubleSide })
   );
   pitWall.position.set(0, pitFloorY/2, 0);
   root.add(pitWall);
 
-  // Downstairs ramp
-  const stairW = 2.1;
-  const stairL = 7.6;
+  // ✅ rail around pit edge with ONE entrance gap (south side)
+  const railR = pitRadius + 0.35;
+  const railH = 1.05;
+  const railY = 0.55;
+
+  const railMat = new THREE.MeshStandardMaterial({
+    color: 0x1c2433, roughness: 0.55, metalness: 0.22,
+    emissive: new THREE.Color(0x0b1220), emissiveIntensity: 0.06
+  });
+
+  // split rail into 2 arcs leaving an entrance gap
+  const gapAngle = 0.45;      // entrance size (radians)
+  const gapCenter = Math.PI;  // south side
+
+  const makeRailArc = (start, len) => {
+    const g = new THREE.TorusGeometry(railR, 0.08, 12, 120, len);
+    const m = new THREE.Mesh(g, railMat);
+    m.rotation.x = Math.PI/2;
+    m.rotation.z = start;
+    m.position.y = railY;
+    root.add(m);
+    return m;
+  };
+
+  // left arc
+  makeRailArc(gapCenter + gapAngle/2, Math.PI*2 - gapAngle);
+  // guard posts near entrance
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x121c2c, roughness: 0.7, metalness: 0.15 });
+  const mkPost = (ang) => {
+    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, railH, 12), postMat);
+    p.position.set(Math.cos(ang) * railR, railY + railH/2 - 0.1, Math.sin(ang) * railR);
+    root.add(p);
+  };
+  mkPost(gapCenter - gapAngle/2);
+  mkPost(gapCenter + gapAngle/2);
+
+  // ✅ fitted ramp down into pit (south entrance)
+  const stairW = 2.2;
+  const stairL = 9.6;
+
   const ramp = new THREE.Mesh(
-    new THREE.BoxGeometry(stairW, pitDepth, stairL),
+    new THREE.BoxGeometry(stairW, pitDepth + 0.1, stairL),
     new THREE.MeshStandardMaterial({ color: 0x141b28, roughness: 0.95, metalness: 0.08 })
   );
-  ramp.position.set(0, pitFloorY/2, pitRadius + stairL * 0.32);
+
+  // start at lobby level, go down to pit floor
+  const rampCenterZ = (pitRadius + (stairL * 0.36));
+  ramp.position.set(0, pitFloorY/2, rampCenterZ);
   ramp.rotation.x = -Math.atan2(pitDepth, stairL);
   root.add(ramp);
+
+  // ✅ guard “checkpoint” at entrance
+  const guard = new THREE.Group();
+  guard.position.set(0, 0.0, railR + 0.65);
+  root.add(guard);
+
+  const guardStand = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.2, 0.6), matFloor(THREE, 0x111a28));
+  guardStand.position.y = 0.1;
+  guard.add(guardStand);
+
+  const guardPillar = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.4, 12), postMat);
+  guardPillar.position.set(0.5, 0.8, 0);
+  guard.add(guardPillar);
+
+  const guardLight = new THREE.PointLight(0x66ccff, 0.55, 18, 2);
+  guardLight.position.set(0, 1.2, 0);
+  guard.add(guardLight);
 }
 
 // =======================
@@ -314,7 +385,7 @@ function buildPortals(s) {
   const portalMat = new THREE.MeshStandardMaterial({
     color: 0x66ccff, roughness: 0.3, metalness: 0.65,
     emissive: new THREE.Color(0x66ccff),
-    emissiveIntensity: 0.55
+    emissiveIntensity: 0.6
   });
   s.neonMats.push(portalMat);
 
@@ -349,15 +420,19 @@ function buildStore(s) {
   store.add(floor);
   s.groundMeshes.push(floor);
 
-  const glow = new THREE.PointLight(0x66ccff, 1.0, 45, 2);
-  glow.position.set(0, 3.5, 0);
+  const glow = new THREE.PointLight(0x66ccff, 1.05, 55, 2);
+  glow.position.set(0, 3.8, 0);
   store.add(glow);
+
+  const sign = makeLabelPlate(THREE, "STORE", 0x0a1020, 0x66ccff, 768, 192);
+  sign.position.set(0, 3.2, -7.5);
+  store.add(sign);
 
   // mannequins
   const mm = new THREE.MeshStandardMaterial({ color: 0xe0e0e0, roughness: 0.65, metalness: 0.08 });
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 6; i++) {
     const m = new THREE.Mesh(new THREE.CapsuleGeometry(0.35, 1.2, 6, 10), mm);
-    m.position.set(-6 + i*3.0, 1.1, -4.2);
+    m.position.set(-7 + i*2.8, 1.1, -4.2);
     store.add(m);
   }
 }
@@ -373,24 +448,68 @@ function buildScorpion(s) {
   sc.add(floor);
   s.groundMeshes.push(floor);
 
-  const light = new THREE.PointLight(0xff6bd6, 1.1, 50, 2);
-  light.position.set(0, 3.5, 0);
+  const light = new THREE.PointLight(0xff6bd6, 1.2, 60, 2);
+  light.position.set(0, 3.8, 0);
   sc.add(light);
 
   const sign = makeLabelPlate(THREE, "SCORPION ROOM", 0x0a1020, 0xff6bd6);
   sign.position.set(0, 3.2, -7.5);
   sc.add(sign);
+
+  // simple table placeholders (you asked for tables out there)
+  const tmat = new THREE.MeshStandardMaterial({ color: 0x1c2433, roughness: 0.6, metalness: 0.2 });
+  for (let i = 0; i < 3; i++) {
+    const tbl = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.15, 24), tmat);
+    tbl.position.set(-5 + i*5, 0.85, 0.8);
+    sc.add(tbl);
+  }
 }
 
 function buildSpectate(s) {
+  // legacy ground spectate pad (kept)
   const { THREE, root } = s;
   const plat = new THREE.Mesh(new THREE.BoxGeometry(14, 0.5, 6), matFloor(THREE, 0x121c2c));
   plat.position.set(0, 3.0, -14);
   root.add(plat);
   s.groundMeshes.push(plat);
+}
 
-  const sign = makeLabelPlate(THREE, "SPECTATOR", 0x0a1020, 0xc8d3ff);
-  sign.position.set(0, 4.4, -14);
+function buildBalconySpectator(s) {
+  const { THREE, root } = s;
+
+  const y = 5.1;
+  const rInner = 14.8;
+  const rOuter = 18.3;
+
+  const deck = new THREE.Mesh(
+    new THREE.RingGeometry(rInner, rOuter, 96),
+    matFloor(THREE, 0x101a2a)
+  );
+  deck.rotation.x = -Math.PI/2;
+  deck.position.y = y;
+  root.add(deck);
+  s.groundMeshes.push(deck);
+
+  // rail around balcony
+  const railMat = new THREE.MeshStandardMaterial({
+    color: 0x1c2433, roughness: 0.55, metalness: 0.22,
+    emissive: new THREE.Color(0x0b1220), emissiveIntensity: 0.07
+  });
+
+  const rail = new THREE.Mesh(new THREE.TorusGeometry((rOuter + rInner)/2 + 1.1, 0.06, 10, 140), railMat);
+  rail.rotation.x = Math.PI/2;
+  rail.position.y = y + 1.05;
+  root.add(rail);
+
+  // lounge lights
+  const lounge = new THREE.PointLight(0x66ccff, 0.65, 65, 2);
+  lounge.position.set(0, y + 2.2, 0);
+  root.add(lounge);
+
+  // simple lounge label
+  const sign = makeLabelPlate(THREE, "UPSTAIRS LOUNGE / SPECTATOR", 0x0a1020, 0xc8d3ff, 1024, 256);
+  sign.position.set(0, y + 2.0, 13.8);
+  sign.rotation.y = Math.PI;
   root.add(sign);
 }
 
@@ -404,10 +523,10 @@ function buildHoverCars(s) {
   const carMat = new THREE.MeshStandardMaterial({ color: 0x2b3b5f, roughness: 0.55, metalness: 0.25 });
   const glowMat = new THREE.MeshStandardMaterial({
     color: 0x66ccff, roughness: 0.3, metalness: 0.4,
-    emissive: new THREE.Color(0x66ccff), emissiveIntensity: 0.35
+    emissive: new THREE.Color(0x66ccff), emissiveIntensity: 0.45
   });
 
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 7; i++) {
     const car = new THREE.Group();
     const body = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.6, 4.4), carMat);
     body.position.y = 0.4;
@@ -415,42 +534,40 @@ function buildHoverCars(s) {
     canopy.position.set(0, 0.85, -0.3);
     car.add(body, canopy);
 
-    car.position.set(-12 + i * 4.8, 2.2, 0);
-    car.rotation.y = (i - 2.5) * 0.16;
+    car.position.set(-14 + i * 4.6, 2.4, 0);
+    car.rotation.y = (i - 3) * 0.14;
     carGroup.add(car);
 
-    s.hoverCars.push({ obj: car, baseY: car.position.y, phase: i * 0.8 });
+    s.hoverCars.push({ obj: car, baseY: car.position.y, phase: i * 0.7 });
   }
 }
 
-function buildHoloJumbotrons(s) {
+function buildMainJumbotron(s) {
   const { THREE, root, BUILD } = s;
 
-  const mkPanel = (text, x, y, z, ry) => {
-    const panel = new THREE.Group();
+  const panel = new THREE.Group();
+  panel.position.set(0, 6.2, 13.0);
+  panel.rotation.y = Math.PI;
+  root.add(panel);
 
-    const frame = new THREE.Mesh(
-      new THREE.BoxGeometry(4.2, 1.6, 0.12),
-      new THREE.MeshStandardMaterial({ color: 0x121c2c, roughness: 0.55, metalness: 0.25 })
-    );
-    panel.add(frame);
+  const frame = new THREE.Mesh(
+    new THREE.BoxGeometry(5.6, 2.2, 0.14),
+    new THREE.MeshStandardMaterial({ color: 0x121c2c, roughness: 0.55, metalness: 0.25 })
+  );
+  panel.add(frame);
 
-    const face = makeLabelPlate(THREE, text, 0x0b1220, 0x66ccff, 1024, 256);
-    face.position.z = 0.07;
-    panel.add(face);
+  const face = makeLabelPlate(THREE, `SCARLETT VR POKER`, 0x0b1220, 0x66ccff, 1280, 320);
+  face.position.z = 0.08;
+  panel.add(face);
 
-    const glow = new THREE.PointLight(0x66ccff, 0.7, 18, 2);
-    glow.position.set(0, 0, 0.7);
-    panel.add(glow);
+  const build = makeLabelPlate(THREE, `BUILD: ${String(BUILD).slice(-10)}`, 0x0b1220, 0xc8d3ff, 1280, 240);
+  build.position.set(0, -0.95, 0.08);
+  build.scale.set(0.95, 0.55, 1);
+  panel.add(build);
 
-    panel.position.set(x, y, z);
-    panel.rotation.y = ry;
-
-    root.add(panel);
-  };
-
-  mkPanel(`SCARLETT VR POKER`, 0, 6.0, 13.0, Math.PI);
-  mkPanel(`BUILD: ${String(BUILD).slice(-10)}`, 0, 4.2, 13.0, Math.PI);
+  const glow = new THREE.PointLight(0x66ccff, 0.85, 22, 2);
+  glow.position.set(0, 0, 1.0);
+  panel.add(glow);
 }
 
 // =======================
@@ -484,8 +601,8 @@ function setupFloorReticles(s) {
   const { THREE, root } = s;
 
   function makeReticle() {
-    const g = new THREE.RingGeometry(0.12, 0.18, 32);
-    const m = new THREE.MeshBasicMaterial({ color: 0x66ccff, side: THREE.DoubleSide, transparent: true, opacity: 0.95 });
+    const g = new THREE.RingGeometry(0.13, 0.20, 36);
+    const m = new THREE.MeshBasicMaterial({ color: 0x66ccff, side: THREE.DoubleSide, transparent: true, opacity: 0.98 });
     const r = new THREE.Mesh(g, m);
     r.rotation.x = -Math.PI / 2;
     r.visible = false;
@@ -497,7 +614,7 @@ function setupFloorReticles(s) {
   s.reticles.push({ hand: "right", mesh: makeReticle() });
 }
 
-// ✅ FIXED: dashed arc geometry starts valid; computeLineDistances only when safe.
+// ✅ FIXED + “glowier”: tighter dashes + animated color
 function setupTeleportArcs(s) {
   const { THREE, root } = s;
 
@@ -509,8 +626,8 @@ function setupTeleportArcs(s) {
 
     const mat = new THREE.LineDashedMaterial({
       color: 0xffffff,
-      dashSize: 0.18,
-      gapSize: 0.10
+      dashSize: 0.12,
+      gapSize: 0.06
     });
 
     const line = new THREE.Line(geom, mat);
@@ -542,35 +659,49 @@ function setupControllerHandMeshes(s) {
   function makeHand(isLeft) {
     const g = new THREE.Group();
 
-    const skin = new THREE.MeshStandardMaterial({ color: 0xd8c7b2, roughness: 0.75, metalness: 0.05 });
-    const glove = new THREE.MeshStandardMaterial({ color: 0x1c2433, roughness: 0.9, metalness: 0.05 });
+    // (still “temp style” but less chunky)
+    const skin = new THREE.MeshStandardMaterial({ color: 0xd8c7b2, roughness: 0.85, metalness: 0.03 });
+    const glove = new THREE.MeshStandardMaterial({ color: 0x1c2433, roughness: 0.95, metalness: 0.02 });
 
-    const palm = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.02, 0.06), glove);
-    palm.position.set(0, 0, -0.02);
+    const palm = new THREE.Mesh(new THREE.BoxGeometry(0.040, 0.018, 0.055), glove);
+    palm.position.set(0, 0, -0.018);
     g.add(palm);
 
-    const knuckle = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.012, 0.025), skin);
-    knuckle.position.set(0, 0.012, -0.035);
+    const knuckle = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.010, 0.022), skin);
+    knuckle.position.set(0, 0.011, -0.032);
     g.add(knuckle);
 
     for (let i = 0; i < 3; i++) {
-      const f = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.01, 0.03), skin);
-      f.position.set(-0.015 + i * 0.015, 0.012, -0.065);
+      const f = new THREE.Mesh(new THREE.BoxGeometry(0.009, 0.009, 0.028), skin);
+      f.position.set(-0.014 + i * 0.014, 0.011, -0.058);
       g.add(f);
     }
 
-    const th = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.01, 0.028), skin);
-    th.position.set(isLeft ? -0.03 : 0.03, 0.006, -0.03);
-    th.rotation.y = isLeft ? 0.5 : -0.5;
+    const th = new THREE.Mesh(new THREE.BoxGeometry(0.011, 0.009, 0.026), skin);
+    th.position.set(isLeft ? -0.028 : 0.028, 0.006, -0.028);
+    th.rotation.y = isLeft ? 0.55 : -0.55;
     g.add(th);
 
-    g.position.set(isLeft ? -0.012 : 0.012, -0.01, -0.02);
-    g.rotation.set(-0.2, 0, 0);
+    g.position.set(isLeft ? -0.010 : 0.010, -0.010, -0.018);
+    g.rotation.set(-0.18, 0, 0);
     return g;
   }
 
-  controllers.c0.add(makeHand(true));
-  controllers.c1.add(makeHand(false));
+  const hl = makeHand(true);
+  const hr = makeHand(false);
+  controllers.c0.add(hl);
+  controllers.c1.add(hr);
+
+  s.handMeshes.left = hl;
+  s.handMeshes.right = hr;
+
+  applyHandsVisible(s, true);
+}
+
+function applyHandsVisible(s, on) {
+  s.showHands = !!on;
+  if (s.handMeshes.left) s.handMeshes.left.visible = s.showHands;
+  if (s.handMeshes.right) s.handMeshes.right.visible = s.showHands;
 }
 
 function setupPrettyWatch(s) {
@@ -579,56 +710,62 @@ function setupPrettyWatch(s) {
   const watchRoot = new THREE.Group();
   watchRoot.name = "WATCH_UI";
 
+  // ✅ smaller watch overall
+  watchRoot.scale.set(0.62, 0.62, 0.62);
+
   const plateMat = new THREE.MeshStandardMaterial({
-    color: 0x182743, roughness: 0.3, metalness: 0.35,
-    emissive: new THREE.Color(0x0b1220), emissiveIntensity: 0.1
+    color: 0x182743, roughness: 0.35, metalness: 0.35,
+    emissive: new THREE.Color(0x0b1220), emissiveIntensity: 0.12
   });
 
   const faceMat = new THREE.MeshStandardMaterial({
-    color: 0x0d1324, roughness: 0.2, metalness: 0.25,
-    emissive: new THREE.Color(0x223cff), emissiveIntensity: 0.14
+    color: 0x0d1324, roughness: 0.25, metalness: 0.25,
+    emissive: new THREE.Color(0x223cff), emissiveIntensity: 0.18
   });
 
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.165, 0.102, 0.016), plateMat);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.140, 0.090, 0.014), plateMat);
   watchRoot.add(body);
 
-  const face = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.088, 0.006), faceMat);
-  face.position.z = 0.012;
+  const face = new THREE.Mesh(new THREE.BoxGeometry(0.128, 0.078, 0.005), faceMat);
+  face.position.z = 0.010;
   watchRoot.add(face);
 
+  // ✅ smaller buttons + tighter spacing
   const items = [
     { label: "POKER", room: "poker" },
     { label: "LOBBY", room: "lobby" },
     { label: "STORE", room: "store" },
-    { label: "SPECT", room: "spectate" },
+    { label: "UP",    room: "spectate" },
     { label: "SCORP", room: "scorpion" },
     { label: "ARC",   action: (st)=>{ st.showArcs = !st.showArcs; } },
     { label: "LASER", action: (st)=>{ st.showLasers = !st.showLasers; } },
+    { label: "HANDS", action: (st)=>{ applyHandsVisible(st, !st.showHands); } },
   ];
 
-  const btnGeo = new THREE.BoxGeometry(0.14, 0.02, 0.012);
+  const btnGeo = new THREE.BoxGeometry(0.110, 0.014, 0.010);
 
   for (let i = 0; i < items.length; i++) {
     const btnMat = new THREE.MeshStandardMaterial({
-      color: 0x2b3b5f, roughness: 0.55, metalness: 0.18,
+      color: 0x2b3b5f, roughness: 0.65, metalness: 0.14,
       emissive: new THREE.Color(0x000000), emissiveIntensity: 0
     });
 
     const b = new THREE.Mesh(btnGeo, btnMat);
-    b.position.set(0, 0.042 - i * 0.024, 0.018);
+    b.position.set(0, 0.034 - i * 0.0185, 0.016);
     b.userData.watchItem = items[i];
     watchRoot.add(b);
     s.watch.buttons.push(b);
 
     const label = makeLabelPlate(THREE, items[i].label, 0x0a1020, 0x66ccff, 512, 128);
-    label.scale.set(0.30, 0.08, 1);
-    label.position.set(0.0, 0.042 - i * 0.024, 0.028);
+    label.scale.set(0.19, 0.052, 1);
+    label.position.set(0.0, 0.034 - i * 0.0185, 0.024);
     watchRoot.add(label);
     s.watch.labels.push(label);
   }
 
-  watchRoot.position.set(0.055, 0.015, -0.075);
-  watchRoot.rotation.set(-0.7, 0.0, 0.25);
+  // attach to LEFT controller
+  watchRoot.position.set(0.050, 0.012, -0.070);
+  watchRoot.rotation.set(-0.72, 0.0, 0.22);
   controllers.c0.add(watchRoot);
 
   s.watch.root = watchRoot;
@@ -645,7 +782,7 @@ function toggleWatch(s) {
 function tryClickWatch(s) {
   if (!s.watch.visible || !s.watch.buttons.length) return false;
 
-  const ctrl = s.controllers.c0;
+  const ctrl = s.controllers.c0; // left
   s.tmpM.identity().extractRotation(ctrl.matrixWorld);
   const origin = s.tmpV.setFromMatrixPosition(ctrl.matrixWorld);
   s.tmpDir.set(0, 0, -1).applyMatrix4(s.tmpM).normalize();
@@ -662,13 +799,13 @@ function tryClickWatch(s) {
 
   if (btn.material?.emissive) {
     btn.material.emissive.setHex(0x223cff);
-    btn.material.emissiveIntensity = 0.7;
+    btn.material.emissiveIntensity = 0.75;
   }
   return true;
 }
 
 // =======================
-// POKER ROOM (foundation)
+// POKER ROOM (centered + sunken)
 // =======================
 
 function buildPokerRoom(s) {
@@ -676,31 +813,33 @@ function buildPokerRoom(s) {
 
   const room = new THREE.Group();
   room.name = "POKER_ROOM";
-  room.position.set(0, 0, -9.5);
+  room.position.set(0, -3.2, 0); // ✅ centered in pit, deeper
   root.add(room);
 
-  const pad = new THREE.Mesh(new THREE.CircleGeometry(10, 64), matFloor(THREE, 0x0f1724));
+  const pad = new THREE.Mesh(new THREE.CircleGeometry(10, 72), matFloor(THREE, 0x0f1724));
   pad.rotation.x = -Math.PI/2;
   pad.position.y = 0.001;
   room.add(pad);
   s.groundMeshes.push(pad);
 
+  // ✅ centered table
   const felt = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.75, 2.95, 0.35, 64),
+    new THREE.CylinderGeometry(2.85, 3.05, 0.35, 72),
     new THREE.MeshStandardMaterial({ color: 0x134536, roughness: 0.78, metalness: 0.04 })
   );
-  felt.position.y = 0.9;
+  felt.position.set(0, 0.95, 0);
   room.add(felt);
 
   const rail = new THREE.Mesh(
-    new THREE.TorusGeometry(2.95, 0.12, 14, 72),
+    new THREE.TorusGeometry(3.05, 0.12, 14, 84),
     new THREE.MeshStandardMaterial({ color: 0x1c2433, roughness: 0.5, metalness: 0.22 })
   );
   rail.rotation.x = Math.PI/2;
-  rail.position.y = 1.03;
+  rail.position.set(0, 1.08, 0);
   room.add(rail);
 
-  const deckPos = new THREE.Vector3(-1.1, 1.05, 0.0);
+  // deck + cards (grabbable)
+  const deckPos = new THREE.Vector3(-1.15, 1.10, 0.0);
 
   const deck = new THREE.Mesh(
     new THREE.BoxGeometry(0.18, 0.06, 0.26),
@@ -720,6 +859,13 @@ function buildPokerRoom(s) {
     room.add(card);
     s.grab.interactables.push(card);
   }
+
+  // spotlight down into pit table
+  const spot = new THREE.SpotLight(0xffffff, 1.1, 38, Math.PI/4, 0.35, 1);
+  spot.position.set(0, 9.0, 0);
+  spot.target.position.set(0, -2.2, 0);
+  s.root.add(spot);
+  s.root.add(spot.target);
 }
 
 // =======================
@@ -761,14 +907,15 @@ function releaseGrabRight(s) {
 
 function update(s, dt, t) {
   for (const c of s.hoverCars) {
-    c.obj.position.y = c.baseY + Math.sin(t*1.3 + c.phase) * 0.25;
+    c.obj.position.y = c.baseY + Math.sin(t*1.3 + c.phase) * 0.28;
     c.obj.rotation.y += dt * 0.10;
   }
 
+  // dashed arc animation (glowier)
   for (const l of s.dashLines) {
-    if (l.material) l.material.dashOffset = -(t * 0.9);
+    if (l.material) l.material.dashOffset = -(t * 1.05);
     if (l.material?.color) {
-      const c = hsvToRgb((t*0.08) % 1, 0.45, 1.0);
+      const c = hsvToRgb((t*0.10) % 1, 0.55, 1.0);
       l.material.color.setRGB(c.r, c.g, c.b);
     }
   }
@@ -799,7 +946,7 @@ function updateRays(s) {
     tmpDir.set(0, 0, -1).applyMatrix4(tmpM).normalize();
     raycaster.set(origin, tmpDir);
 
-    // Watch hover highlight (left hand)
+    // watch hover (left)
     if (hand === "left" && s.watch.visible && s.watch.buttons.length) {
       for (const b of s.watch.buttons) {
         if (b.material?.emissive) { b.material.emissive.setHex(0x000000); b.material.emissiveIntensity = 0; }
@@ -815,7 +962,7 @@ function updateRays(s) {
       }
     }
 
-    // Floor hit
+    // floor hit
     const hits = raycaster.intersectObjects(s.groundMeshes, false);
     if (hits.length) {
       const h = hits[0];
@@ -839,7 +986,7 @@ function updateRays(s) {
 function teleportNow(s, hand) {
   const p = hand === "right" ? s.lastTeleportPointR : s.lastTeleportPointL;
   if (!p) return;
-  s.player.position.set(p.x, 0, p.z);
+  s.player.position.set(p.x, s.player.position.y, p.z);
 }
 
 function setReticle(s, hand, point) {
@@ -855,7 +1002,7 @@ function setReticleVisible(s, hand, v) {
   if (r) r.visible = v;
 }
 
-// ✅ FIXED: safe dashed arc update (no empty-geometry crash)
+// ✅ safe dashed arc update
 function updateArc(s, hand, from, to) {
   const arc = s.arcs[hand];
   const pts = s.arcPts[hand];
@@ -957,4 +1104,4 @@ function hsvToRgb(h, s, v) {
     case 5: r=v; g=p; b=q; break;
   }
   return { r, g, b };
-    }
+  }

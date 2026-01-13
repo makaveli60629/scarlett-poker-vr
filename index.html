@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <meta name="theme-color" content="#000000" />
-  <title>Scarlett Poker VR — Audit Boot</title>
+  <title>Scarlett Poker VR — Boot</title>
 
-  <!-- Import map so modules can import 'three' safely -->
+  <!-- Import map (so modules can import 'three') -->
   <script type="importmap">
   {
     "imports": {
@@ -17,66 +17,61 @@
   </script>
 
   <style>
-    html, body { margin:0; padding:0; width:100%; height:100%; background:#000; overflow:hidden; }
-    #app { position:fixed; inset:0; }
-
-    #bootHud{
-      position:fixed; left:8px; top:8px; z-index:999999;
-      width:calc(100vw - 16px); max-width:980px; max-height:56vh;
-      overflow:auto; padding:10px 12px;
-      border:1px solid rgba(0,255,120,.85);
-      background:rgba(0,0,0,.72);
+    html,body{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+    #app{position:fixed;inset:0;}
+    #hud{
+      position:fixed;left:10px;top:10px;z-index:999999;
+      width:calc(100vw - 20px);max-width:980px;max-height:56vh;overflow:auto;
+      padding:10px 12px;border-radius:12px;
+      background:rgba(0,0,0,.72);border:1px solid rgba(0,255,120,.75);
       color:rgba(0,255,120,.95);
-      font:12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      white-space:pre-wrap; word-break:break-word;
-      border-radius:10px;
+      font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      white-space:pre-wrap;word-break:break-word;
     }
-    #bootBar{
-      position:fixed; left:8px; top:calc(56vh + 18px); z-index:999999;
-      display:flex; flex-wrap:wrap; gap:8px;
-      padding:8px; border-radius:12px;
-      background:rgba(0,0,0,.55);
-      border:1px solid rgba(255,255,255,.15);
+    #bar{
+      position:fixed;left:10px;top:calc(56vh + 22px);z-index:999999;
+      display:flex;flex-wrap:wrap;gap:8px;
+      padding:8px;border-radius:14px;
+      background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.15);
       backdrop-filter: blur(6px);
     }
     .btn{
-      appearance:none; border:1px solid rgba(255,255,255,.18);
-      background:rgba(255,255,255,.08); color:#fff;
-      padding:10px 12px; border-radius:12px;
-      font-size:14px; font-weight:650; cursor:pointer;
-      touch-action: manipulation;
+      appearance:none;cursor:pointer;touch-action:manipulation;
+      padding:10px 12px;border-radius:12px;
+      background:rgba(255,255,255,.08);color:#fff;
+      border:1px solid rgba(255,255,255,.18);
+      font-weight:650;font-size:14px;
     }
-    .btn:active{ transform: translateY(1px); }
     .pill{
-      color:rgba(255,255,255,.85); font-size:12px;
-      padding:7px 10px; border-radius:999px;
+      align-self:center;
+      padding:7px 10px;border-radius:999px;
       border:1px solid rgba(255,255,255,.15);
       background:rgba(255,255,255,.06);
-      align-self:center;
+      color:rgba(255,255,255,.85);
+      font-size:12px;
     }
   </style>
 </head>
-
 <body>
   <div id="app"></div>
 
-  <div id="bootHud">BOOT HUD: starting…</div>
+  <div id="hud">BOOT HUD: starting…</div>
 
-  <div id="bootBar">
-    <button id="btnReload" class="btn">Reload (fresh)</button>
-    <button id="btnClear" class="btn">Clear HUD</button>
-    <button id="btnAudit" class="btn">Run Audit</button>
+  <div id="bar">
+    <button id="reload" class="btn">Reload (fresh)</button>
+    <button id="clear" class="btn">Clear HUD</button>
+    <button id="audit" class="btn">Audit</button>
     <span id="pill" class="pill">status: booting</span>
   </div>
 
   <script>
     (function(){
-      const hud = document.getElementById('bootHud');
+      const hud = document.getElementById('hud');
       const pill = document.getElementById('pill');
       const ts = () => new Date().toISOString().slice(11,19);
 
-      function log(msg){
-        hud.textContent += `\n[${ts()}] ${msg}`;
+      function log(m){
+        hud.textContent += `\n[${ts()}] ${m}`;
         hud.scrollTop = hud.scrollHeight;
       }
       function status(s){ pill.textContent = `status: ${s}`; }
@@ -95,37 +90,36 @@
         status('promise error');
       });
 
-      document.getElementById('btnReload').addEventListener('click', ()=>{
+      document.getElementById('reload').addEventListener('click', ()=>{
         const u = new URL(location.href);
         u.searchParams.set('v', String(Date.now()));
         location.replace(u.toString());
       });
-      document.getElementById('btnClear').addEventListener('click', ()=>{
+      document.getElementById('clear').addEventListener('click', ()=>{
         hud.textContent = 'BOOT HUD: cleared';
         log('Cleared.');
       });
-      document.getElementById('btnAudit').addEventListener('click', ()=>{
+      document.getElementById('audit').addEventListener('click', ()=>{
         if (typeof window.__runAudit === 'function') window.__runAudit();
         else log('Audit not ready yet.');
       });
 
-      log('BOOT START');
-      log('href=' + location.href);
-      log('ua=' + navigator.userAgent);
-      log('xr=' + ('xr' in navigator));
-      status('loading index.js');
+      log('[index] boot ✅');
+      log('[env] secureContext=' + (location.protocol === 'https:' || location.hostname === 'localhost'));
+      log('[env] ua=' + navigator.userAgent);
+      log('[env] navigator.xr=' + ('xr' in navigator));
+      status('loading boot.js');
     })();
   </script>
 
-  <!-- IMPORTANT: we now load index.js (not main.js) -->
   <script type="module">
-    __bootlog('Importing ./index.js …');
-    import('./index.js?v=' + Date.now())
-      .then(()=> { __bootlog('index.js loaded ✅'); __bootstatus('running'); })
-      .catch((err)=> {
-        __bootlog('index.js FAILED ❌ ' + (err?.message || err));
-        console.error(err);
-        __bootstatus('index.js failed');
+    __bootlog('[index] importing /boot.js …');
+    import('./boot.js?v=' + Date.now())
+      .then(()=> { __bootlog('[index] boot.js loaded ✅'); __bootstatus('running'); })
+      .catch((e)=> {
+        __bootlog('[index] boot.js FAILED ❌ ' + (e?.message || e));
+        console.error(e);
+        __bootstatus('boot failed');
       });
   </script>
 </body>

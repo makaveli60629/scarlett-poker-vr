@@ -1,8 +1,7 @@
 // /js/world.js — ScarlettVR World v9.5 ULT (FULL)
-// ✅ Builds lobby ring + pit table + balcony + rooms + store + scorpion + spectate + poker pad
-// ✅ Safe dynamic-load Poker/Bots/Scorpion modules
-// ✅ Repo-safe asset base: `${window.SCARLETT_BASE}assets/textures/`
-// ✅ Provides api: tick(dt), setRoom(room), room getter
+// World + rooms + pit + balcony + store + scorpion
+// Safe dynamic-load Poker/Bots/Scorpion
+// Adds interactable teleport pillars you can laser-click in VR
 
 export const World = {
   async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD, flags }) {
@@ -34,6 +33,7 @@ export const World = {
     buildSpectate(s);
     buildPokerArea(s);
 
+    // Anchors
     s.anchors.lobby    = { pos: new THREE.Vector3(0, 0, 13.5),  yaw: Math.PI };
     s.anchors.poker    = { pos: new THREE.Vector3(0, 0, -9.5),  yaw: 0 };
     s.anchors.store    = { pos: new THREE.Vector3(-26, 0, 0),   yaw: Math.PI / 2 };
@@ -42,7 +42,10 @@ export const World = {
 
     setRigToAnchor(s, s.anchors.lobby);
 
-    // ---------- Safe systems ----------
+    // Teleport pillars you can click with lasers
+    buildTeleportPillars(s);
+
+    // Systems (safe dynamic)
     const Systems = await loadSystemsSafe(log);
     const assetBase = `${(window.SCARLETT_BASE || "/")}assets/textures/`;
 
@@ -140,22 +143,70 @@ function matFloor(THREE, color = 0x121c2c) {
   return new THREE.MeshStandardMaterial({ color, roughness: 0.95, metalness: 0.06 });
 }
 
+// ---------- TELEPORT PILLARS (laser interact) ----------
+function buildTeleportPillars(s) {
+  const { THREE, root } = s;
+
+  const spots = [
+    { name:"lobby",    pos:new THREE.Vector3(0, 0, 11.8), color:0x66ccff },
+    { name:"poker",    pos:new THREE.Vector3(0, 0, -7.8), color:0xffd36b },
+    { name:"store",    pos:new THREE.Vector3(-23.6,0, 0), color:0x66ccff },
+    { name:"scorpion", pos:new THREE.Vector3(23.6, 0, 0), color:0xff6bd6 },
+    { name:"spectate", pos:new THREE.Vector3(0, 3.0, -12.2), color:0xffffff }
+  ];
+
+  for (const sp of spots) {
+    const pillar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.18, 0.22, 1.15, 18),
+      new THREE.MeshStandardMaterial({ color:0x0b1220, roughness:0.55, metalness:0.25, emissive:new THREE.Color(sp.color), emissiveIntensity:0.18 })
+    );
+    pillar.position.copy(sp.pos);
+    pillar.position.y += 0.58;
+    pillar.name = `TP_${sp.name.toUpperCase()}`;
+    pillar.userData.onSelect = () => {
+      s.room = sp.name;
+      setRigToAnchor(s, s.anchors[sp.name] || s.anchors.lobby);
+      s.log?.(`[tp] ${sp.name}`);
+      if (sp.name === "scorpion") s.scorpion?.enter?.();
+      else s.scorpion?.exit?.();
+    };
+    root.add(pillar);
+
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.55, 0.05, 10, 32),
+      new THREE.MeshStandardMaterial({ color:sp.color, emissive:new THREE.Color(sp.color), emissiveIntensity:0.35, roughness:0.3, metalness:0.2 })
+    );
+    ring.rotation.x = Math.PI/2;
+    ring.position.copy(sp.pos);
+    ring.position.y += 0.03;
+    ring.userData.noRay = true;
+    root.add(ring);
+  }
+}
+
 // ---------- WORLD BUILDS ----------
 function buildLobbyRing(s) {
   const { THREE, root, flags } = s;
+
   const shell = new THREE.Mesh(
     new THREE.CylinderGeometry(22, 22, 10, 64, 1, true),
-    new THREE.MeshStandardMaterial({ color: 0x0b1220, roughness: 0.9, metalness: 0.1, side: THREE.DoubleSide, transparent:true, opacity: flags.safeMode ? 0.35 : 0.55 })
+    new THREE.MeshStandardMaterial({ color:0x0b1220, roughness:0.9, metalness:0.1, side: THREE.DoubleSide, transparent:true, opacity: flags.safeMode ? 0.35 : 0.55 })
   );
-  shell.position.set(0, 4.2, 0); root.add(shell);
+  shell.position.set(0, 4.2, 0);
+  shell.userData.noRay = true;
+  root.add(shell);
 
   const lobbyFloor = new THREE.Mesh(new THREE.CylinderGeometry(18, 18, 0.35, 64), matFloor(THREE, 0x121c2c));
-  lobbyFloor.position.set(0, -0.175, 0); root.add(lobbyFloor);
+  lobbyFloor.position.set(0, -0.175, 0);
+  root.add(lobbyFloor);
 
   if (!flags.safeMode && flags.fx) {
-    const ringMat = new THREE.MeshStandardMaterial({ color: 0x66ccff, roughness:0.3, metalness:0.6, emissive:new THREE.Color(0x66ccff), emissiveIntensity:0.45 });
+    const ringMat = new THREE.MeshStandardMaterial({ color:0x66ccff, roughness:0.3, metalness:0.6, emissive:new THREE.Color(0x66ccff), emissiveIntensity:0.45 });
     const ring = new THREE.Mesh(new THREE.TorusGeometry(16.5, 0.12, 12, 96), ringMat);
-    ring.rotation.x = Math.PI/2; ring.position.set(0, 8.8, 0); root.add(ring);
+    ring.rotation.x = Math.PI/2;
+    ring.position.set(0, 8.8, 0);
+    ring.userData.noRay = true;
+    root.add(ring);
   }
 }
 
@@ -164,58 +215,45 @@ function buildPitCenterpiece(s) {
   const pitRadius = 7.1, pitDepth = 3.0, pitFloorY = -pitDepth;
 
   const pitFloor = new THREE.Mesh(new THREE.CylinderGeometry(pitRadius, pitRadius, 0.35, 64), matFloor(THREE, 0x0c1220));
-  pitFloor.position.set(0, pitFloorY - 0.175, 0); root.add(pitFloor);
+  pitFloor.position.set(0, pitFloorY - 0.175, 0);
+  root.add(pitFloor);
 
-  const pitWall = new THREE.Mesh(new THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 64, 1, true),
-    new THREE.MeshStandardMaterial({ color: 0x0a101e, roughness: 0.95, metalness: 0.06, side: THREE.DoubleSide }));
-  pitWall.position.set(0, pitFloorY / 2, 0); root.add(pitWall);
+  const pitWall = new THREE.Mesh(
+    new THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 64, 1, true),
+    new THREE.MeshStandardMaterial({ color:0x0a101e, roughness:0.95, metalness:0.06, side: THREE.DoubleSide })
+  );
+  pitWall.position.set(0, pitFloorY / 2, 0);
+  pitWall.userData.noRay = true;
+  root.add(pitWall);
 
   const stairW = 2.2, stairL = 8.4;
-  const ramp = new THREE.Mesh(new THREE.BoxGeometry(stairW, pitDepth, stairL),
-    new THREE.MeshStandardMaterial({ color: 0x141b28, roughness: 0.95, metalness: 0.08 }));
+  const ramp = new THREE.Mesh(
+    new THREE.BoxGeometry(stairW, pitDepth, stairL),
+    new THREE.MeshStandardMaterial({ color:0x141b28, roughness:0.95, metalness:0.08 })
+  );
   ramp.position.set(0, pitFloorY / 2, pitRadius + stairL * 0.32);
   ramp.rotation.x = -Math.atan2(pitDepth, stairL);
+  ramp.userData.noRay = true;
   root.add(ramp);
 
-  const railR = pitRadius + 1.35, railY = 0.95, segs = 40;
-  const railMat = new THREE.MeshStandardMaterial({
-    color: 0x1c2433, roughness: 0.5, metalness: 0.22,
-    emissive: flags.safeMode ? new THREE.Color(0x000000) : new THREE.Color(0x223cff),
-    emissiveIntensity: flags.safeMode ? 0 : 0.12
-  });
-
-  const entranceAngle = Math.PI/2, entranceHalfWidth = 0.32;
-  for (let i=0;i<segs;i++){
-    const a0 = (i/segs)*Math.PI*2;
-    const a1 = ((i+1)/segs)*Math.PI*2;
-    const amid=(a0+a1)*0.5;
-    const d=angleDelta(amid, entranceAngle);
-    if (Math.abs(d)<entranceHalfWidth) continue;
-    const x=Math.cos(amid)*railR, z=Math.sin(amid)*railR;
-    const railSeg=new THREE.Mesh(new THREE.BoxGeometry(1.05,0.18,0.32), railMat);
-    railSeg.position.set(x,railY,z); railSeg.rotation.y=-amid;
-    // Let lasers ignore rail if you want
-    railSeg.userData.noRay = true;
-    root.add(railSeg);
-  }
-
-  const guard = new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.28,1.25,18),
-    new THREE.MeshStandardMaterial({ color:0x0b1220, roughness:0.8, metalness:0.12 }));
-  guard.position.set(0.0,0.62,railR+0.35); root.add(guard);
-
-  const felt = new THREE.Mesh(new THREE.CylinderGeometry(3.05,3.25,0.35,64),
-    new THREE.MeshStandardMaterial({ color:0x134536, roughness:0.78, metalness:0.04 }));
+  // pit table
+  const felt = new THREE.Mesh(
+    new THREE.CylinderGeometry(3.05, 3.25, 0.35, 64),
+    new THREE.MeshStandardMaterial({ color:0x134536, roughness:0.78, metalness:0.04 })
+  );
   felt.position.set(0, pitFloorY + 1.05, 0);
   felt.name = "PIT_FELT";
   root.add(felt);
 
-  const rail = new THREE.Mesh(new THREE.TorusGeometry(3.25,0.14,14,72),
-    new THREE.MeshStandardMaterial({ color:0x1c2433, roughness:0.5, metalness:0.22 }));
-  rail.rotation.x=Math.PI/2; rail.position.set(0,pitFloorY+1.18,0);
+  const rail = new THREE.Mesh(
+    new THREE.TorusGeometry(3.25, 0.14, 14, 72),
+    new THREE.MeshStandardMaterial({ color:0x1c2433, roughness:0.5, metalness:0.22 })
+  );
+  rail.rotation.x = Math.PI/2;
+  rail.position.set(0, pitFloorY + 1.18, 0);
+  rail.userData.noRay = true;
   root.add(rail);
 }
-
-function angleDelta(a,b){ let d=a-b; while(d>Math.PI)d-=Math.PI*2; while(d<-Math.PI)d+=Math.PI*2; return d; }
 
 function buildBalconySpectator(s) {
   const { THREE, root, flags } = s;
@@ -327,4 +365,4 @@ function makeSeatRing(THREE, center, radius, count) {
     seats.push({pos,yaw});
   }
   return seats;
-                                  }
+      }

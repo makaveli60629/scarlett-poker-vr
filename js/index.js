@@ -1,9 +1,20 @@
-// /js/index.js — Scarlett FULL XR Runtime v5.1 (Controllers Parent to Rig + Admin Buttons)
+// /js/index.js — Scarlett FULL XR Runtime v5.3 (FULL)
+// ✅ HUD Copy/Clear/Hide + Admin + Mute + News overlay
+// ✅ THREE from CDN
+// ✅ Controllers parented to PlayerRig (lasers move with player)
+// ✅ Quest sticks: left move, right turn (robust gamepad pick)
+// ✅ World.frame gets {pads:{lgp,rgp}} for correct teleport button mapping
+
 import { VRButton } from "./VRButton.js";
 
 const HUD = (() => {
-  const state = { lines: [], max: 2500, muted: false };
-  const el = (tag, css) => { const e = document.createElement(tag); if (css) e.style.cssText = css; return e; };
+  const state = { lines: [], max: 2500 };
+
+  const el = (tag, css) => {
+    const e = document.createElement(tag);
+    if (css) e.style.cssText = css;
+    return e;
+  };
 
   const root = el("div", `
     position:fixed; left:10px; top:10px; right:10px;
@@ -15,18 +26,28 @@ const HUD = (() => {
     pointer-events:none;
   `);
 
-  const bar = el("div", `display:flex; gap:10px; align-items:center; margin-bottom:10px; pointer-events:auto; flex-wrap:wrap;`);
-  const title = el("div", `font-weight:800;`); title.textContent = "Scarlett VR Poker";
-  const pill = (txt)=>{ const p=el("div",`
-    padding:6px 10px; border-radius:999px;
-    border:1px solid rgba(127,231,255,.18);
-    background:rgba(11,13,20,.6);
-    font-size:12px; opacity:.95;
-  `); p.textContent=txt; return p; };
+  const bar = el("div", `
+    display:flex; gap:10px; align-items:center; margin-bottom:10px;
+    pointer-events:auto; flex-wrap:wrap;
+  `);
 
+  const title = el("div", `font-weight:900; letter-spacing:.2px;`);
+  title.textContent = "Scarlett VR Poker";
+
+  const pill = (txt) => {
+    const p = el("div", `
+      padding:6px 10px; border-radius:999px;
+      border:1px solid rgba(127,231,255,.18);
+      background:rgba(11,13,20,.6);
+      font-size:12px; opacity:.95;
+    `);
+    p.textContent = txt;
+    return p;
+  };
+
+  const badgeXR = pill("XR: ?");
   const badgeMode = pill("Mode: boot");
   const badgeInput = pill("Input: ?");
-  const badgeXR = pill("XR: ?");
 
   const btn = (txt) => {
     const b = el("button", `
@@ -44,6 +65,7 @@ const HUD = (() => {
   const clearBtn = btn("Clear");
   const hideBtn = btn("Hide HUD");
   const muteBtn = btn("Mute");
+  const newsBtn = btn("News");
   const resetBtn = btn("Reset Hand");
   const vipBtn = btn("TP VIP");
   const storeBtn = btn("TP Store");
@@ -57,7 +79,10 @@ const HUD = (() => {
   showBtn.style.zIndex = "999999";
   showBtn.style.display = "none";
 
-  const logBox = el("pre", `margin:0; white-space:pre-wrap; word-break:break-word; font-size:13px; line-height:1.25;`);
+  const logBox = el("pre", `
+    margin:0; white-space:pre-wrap; word-break:break-word;
+    font-size:13px; line-height:1.25;
+  `);
 
   bar.appendChild(title);
   bar.appendChild(badgeXR);
@@ -66,6 +91,7 @@ const HUD = (() => {
   bar.appendChild(copyBtn);
   bar.appendChild(clearBtn);
   bar.appendChild(muteBtn);
+  bar.appendChild(newsBtn);
   bar.appendChild(resetBtn);
   bar.appendChild(vipBtn);
   bar.appendChild(storeBtn);
@@ -75,39 +101,51 @@ const HUD = (() => {
 
   root.appendChild(bar);
   root.appendChild(logBox);
+
   document.body.appendChild(root);
   document.body.appendChild(showBtn);
 
-  function render(){ logBox.textContent = state.lines.join("\n"); root.scrollTop = root.scrollHeight; }
-  function log(...a){
-    const t=new Date();
-    const ts=`[${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}:${String(t.getSeconds()).padStart(2,"0")}]`;
+  function render() {
+    logBox.textContent = state.lines.join("\n");
+    root.scrollTop = root.scrollHeight;
+  }
+
+  function log(...a) {
+    const t = new Date();
+    const ts = `[${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}:${String(t.getSeconds()).padStart(2,"0")}]`;
     state.lines.push(`${ts} ${a.join(" ")}`);
-    if(state.lines.length>state.max) state.lines.splice(0,state.lines.length-state.max);
+    if (state.lines.length > state.max) state.lines.splice(0, state.lines.length - state.max);
     render();
     console.log(...a);
   }
 
-  copyBtn.onclick = async ()=>{ try{ await navigator.clipboard.writeText(state.lines.join("\n")); log("[hud] copied ✅"); } catch(e){ log("[hud] copy failed:", e?.message||e); } };
-  clearBtn.onclick = ()=>{ state.lines=[]; render(); };
-  hideBtn.onclick = ()=>{ root.style.display="none"; showBtn.style.display="block"; };
-  showBtn.onclick = ()=>{ root.style.display="block"; showBtn.style.display="none"; };
+  copyBtn.onclick = async () => {
+    try { await navigator.clipboard.writeText(state.lines.join("\n")); log("[hud] copied ✅"); }
+    catch (e) { log("[hud] copy failed:", e?.message || e); }
+  };
+  clearBtn.onclick = () => { state.lines = []; render(); };
+  hideBtn.onclick = () => { root.style.display="none"; showBtn.style.display="block"; };
+  showBtn.onclick = () => { root.style.display="block"; showBtn.style.display="none"; };
 
-  window.addEventListener("error",(e)=>log("[FATAL]", e.message||e.error||e));
-  window.addEventListener("unhandledrejection",(e)=>log("[FATAL promise]", e.reason?.message||e.reason||e));
+  window.addEventListener("error", (e)=>log("[FATAL]", e.message || e.error || e));
+  window.addEventListener("unhandledrejection", (e)=>log("[FATAL promise]", e.reason?.message || e.reason || e));
 
   const api = {
     log,
-    setMode:(v)=>badgeMode.textContent=`Mode: ${v}`,
-    setXR:(v)=>badgeXR.textContent=`XR: ${v?"supported":"no"}`,
-    setInput:(v)=>badgeInput.textContent=`Input: ${v}`,
+    setXR:(supported)=>badgeXR.textContent = `XR: ${supported ? "supported" : "no"}`,
+    setMode:(txt)=>badgeMode.textContent = `Mode: ${txt}`,
+    setInput:(txt)=>badgeInput.textContent = `Input: ${txt}`,
     bindWorld(World){
+      let muted = false;
+
       muteBtn.onclick = ()=>{
-        state.muted = !state.muted;
-        muteBtn.textContent = state.muted ? "Unmute" : "Mute";
-        World?.setMuted?.(state.muted);
-        log(`[admin] muted=${state.muted}`);
+        muted = !muted;
+        muteBtn.textContent = muted ? "Unmute" : "Mute";
+        World?.setMuted?.(muted);
+        log(`[admin] muted=${muted}`);
       };
+
+      newsBtn.onclick = ()=> window.ScarlettNews?.toggle?.();
       resetBtn.onclick = ()=> World?.admin?.resetHand?.();
       vipBtn.onclick   = ()=> World?.admin?.teleportTo?.("vip");
       storeBtn.onclick = ()=> World?.admin?.teleportTo?.("store");
@@ -115,11 +153,97 @@ const HUD = (() => {
       eventBtn.onclick = ()=> World?.admin?.teleportTo?.("event");
     }
   };
+
   return api;
 })();
 
+// --- NEWS DOM OVERLAY (YouTube Live via Channel ID, no server) ---
+function installNewsOverlay(HUD){
+  const wrap = document.createElement("div");
+  wrap.id = "news-wrap";
+  wrap.style.cssText = `
+    position:fixed; left:50%; top:58%;
+    transform:translate(-50%,-50%);
+    width:min(92vw, 980px);
+    aspect-ratio:16/9;
+    z-index:99998;
+    border-radius:18px;
+    overflow:hidden;
+    border:1px solid rgba(127,231,255,.28);
+    box-shadow:0 18px 60px rgba(0,0,0,.55);
+    background:rgba(0,0,0,.25);
+    display:none;
+    pointer-events:auto;
+  `;
+
+  const iframe = document.createElement("iframe");
+  iframe.id = "jumbo-iframe";
+  iframe.allow = "autoplay; encrypted-media; picture-in-picture";
+  iframe.referrerPolicy = "origin";
+  iframe.style.cssText = `width:100%; height:100%; border:0; background:#000;`;
+  wrap.appendChild(iframe);
+
+  const picker = document.createElement("div");
+  picker.style.cssText = `
+    position:absolute; left:10px; top:10px; z-index:2;
+    display:flex; gap:8px; flex-wrap:wrap;
+    pointer-events:auto;
+  `;
+
+  const btn = (txt)=>{
+    const b=document.createElement("button");
+    b.textContent=txt;
+    b.style.cssText=`
+      padding:8px 10px; border-radius:12px;
+      border:1px solid rgba(127,231,255,.32);
+      background:rgba(11,13,20,.85);
+      color:#e8ecff; cursor:pointer;
+    `;
+    return b;
+  };
+
+  const B_ABC = btn("ABC");
+  const B_NBC = btn("NBC");
+  const B_CBS = btn("CBS");
+  const B_FOX = btn("FOX");
+  const B_CLOSE = btn("Close");
+
+  picker.appendChild(B_ABC);
+  picker.appendChild(B_NBC);
+  picker.appendChild(B_CBS);
+  picker.appendChild(B_FOX);
+  picker.appendChild(B_CLOSE);
+
+  wrap.appendChild(picker);
+  document.body.appendChild(wrap);
+
+  const API = {
+    visible:false,
+    show(){ wrap.style.display="block"; API.visible=true; },
+    hide(){ wrap.style.display="none"; API.visible=false; },
+    toggle(){ (wrap.style.display==="none") ? API.show() : API.hide(); },
+    setChannel(channelId){
+      const src = `https://www.youtube.com/embed/live_stream?channel=${encodeURIComponent(channelId)}&autoplay=1&mute=0`;
+      iframe.src = src;
+      API.show();
+      HUD?.log?.(`[news] channel=${channelId}`);
+    }
+  };
+
+  B_ABC.onclick = ()=> API.setChannel("UCICw6A99vJj7-EdfzHIsS2A");
+  B_NBC.onclick = ()=> API.setChannel("UCeY0bbntWzzVIaj2z3QigXg");
+  B_CBS.onclick = ()=> API.setChannel("UC8p1vwvWtl6tTNnaQjve2Xg");
+  B_FOX.onclick = ()=> API.setChannel("UCpVm7bg6pXKo1Pr6k5kxG9A");
+  B_CLOSE.onclick = ()=> API.hide();
+
+  window.ScarlettNews = API;
+  HUD?.log?.("[news] overlay installed ✅");
+  return API;
+}
+
 function isTouch(){ return ("ontouchstart" in window) || (navigator.maxTouchPoints > 0); }
-function installAndroidDualStick(){
+
+function installAndroidDualStick(HUD){
   if(!isTouch()) return null;
 
   const mk=(side)=>{
@@ -177,8 +301,7 @@ async function loadTHREE(){
   return await import("https://unpkg.com/three@0.160.0/build/three.module.js");
 }
 
-// ✅ FIX: parent controllers to PlayerRig so they move with teleport rig
-function installLasers(THREE, renderer, player){
+function installLasers(THREE, renderer, player, HUD){
   const controllers=[];
   const makeLaser=()=>{
     const geo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-2.2)]);
@@ -191,7 +314,7 @@ function installLasers(THREE, renderer, player){
     const c=renderer.xr.getController(i);
     c.name=`XRController_${i}`;
     c.add(makeLaser());
-    player.add(c); // ✅ attach to rig
+    player.add(c);
     controllers.push(c);
   }
   HUD.log("[xr] lasers installed ✅ (rig-parented)");
@@ -200,37 +323,30 @@ function installLasers(THREE, renderer, player){
 
 function deadzone(v,dz){ return Math.abs(v)<dz?0:v; }
 
-function resolveSticks(renderer){
-  const out={ left:null, right:null, srcCount:0, navCount:0 };
-  const session=renderer.xr.getSession?.();
-  const sources=[];
-  if(session){
+// Robust pick for Quest inputSources
+function pickXRGamepads(renderer){
+  const session = renderer.xr.getSession?.();
+  const out = { leftGp:null, rightGp:null };
+  if(!session) return out;
+
+  for(const src of session.inputSources){
+    if(!src?.gamepad) continue;
+    if(src.handedness === "left") out.leftGp = src.gamepad;
+    if(src.handedness === "right") out.rightGp = src.gamepad;
+  }
+
+  if(!out.leftGp || !out.rightGp){
+    const gps=[];
     for(const src of session.inputSources){
-      if(src?.gamepad && src.gamepad.axes?.length>=2) sources.push(src);
+      if(src?.gamepad) gps.push(src.gamepad);
     }
-    out.srcCount = sources.length;
-    out.left  = sources.find(s=>s.handedness==="left")  || null;
-    out.right = sources.find(s=>s.handedness==="right") || null;
-    if(!out.left && sources[0]) out.left = sources[0];
-    if(!out.right && sources[1]) out.right = sources[1];
+    if(!out.leftGp) out.leftGp = gps[0] || null;
+    if(!out.rightGp) out.rightGp = gps[1] || out.leftGp || null;
   }
-
-  const nav=[];
-  if(navigator.getGamepads){
-    for(const gp of navigator.getGamepads()){
-      if(gp && gp.axes && gp.axes.length>=2) nav.push(gp);
-    }
-  }
-  out.navCount = nav.length;
-
-  if(!out.left && nav[0]) out.left = { gamepad: nav[0], handedness:"left" };
-  if(!out.right && nav[1]) out.right = { gamepad: nav[1], handedness:"right" };
-  if(out.left && !out.right) out.right = out.left;
-
   return out;
 }
 
-function bootLoop(THREE, STATE){
+function bootLoop(THREE, STATE, HUD){
   const { renderer, scene, camera, player, controllers } = STATE;
   const clock = new THREE.Clock();
   let dbgT = 0;
@@ -239,24 +355,23 @@ function bootLoop(THREE, STATE){
     const dt = Math.min(0.05, clock.getDelta());
 
     if(renderer.xr.isPresenting){
-      const sticks = resolveSticks(renderer);
-      const lgp = sticks.left?.gamepad;
-      const rgp = sticks.right?.gamepad;
+      const pads = pickXRGamepads(renderer);
+      const lgp = pads.leftGp;
+      const rgp = pads.rightGp;
 
-      // movement (best effort)
       let mx=0,mz=0,turn=0;
-      if(lgp?.axes?.length>=2){
-        mx = deadzone(lgp.axes[0]||0, 0.14);
-        mz = deadzone(lgp.axes[1]||0, 0.14);
+      if(lgp?.axes?.length >= 2){
+        mx = deadzone(lgp.axes[0] || 0, 0.14);
+        mz = deadzone(lgp.axes[1] || 0, 0.14);
       }
-      if(rgp?.axes?.length>=2){
-        turn = deadzone(rgp.axes[0]||0, 0.14);
+      if(rgp?.axes?.length >= 2){
+        turn = deadzone(rgp.axes[0] || 0, 0.14);
       }
 
-      // if axes are totally dead, no smooth move (teleport still works)
       const yaw = player.rotation.y;
-      const speed = 2.1 * dt;
-      player.rotation.y -= turn * 2.1 * dt;
+      const speed = 2.05 * dt;
+
+      player.rotation.y -= turn * 2.05 * dt;
 
       const vx = (mx * Math.cos(yaw) - mz * Math.sin(yaw)) * speed;
       const vz = (mx * Math.sin(yaw) + mz * Math.cos(yaw)) * speed;
@@ -266,19 +381,18 @@ function bootLoop(THREE, STATE){
       dbgT += dt;
       if(dbgT > 0.8){
         dbgT = 0;
-        HUD.setInput(`XR src=${sticks.srcCount} nav=${sticks.navCount} L(${(lgp?.axes?.[0]||0).toFixed(2)},${(lgp?.axes?.[1]||0).toFixed(2)}) R(${(rgp?.axes?.[0]||0).toFixed(2)},${(rgp?.axes?.[1]||0).toFixed(2)})`);
+        HUD.setInput(`XR Laxes=${lgp?.axes?.length||0} Raxes=${rgp?.axes?.length||0} L(${(lgp?.axes?.[0]||0).toFixed(2)},${(lgp?.axes?.[1]||0).toFixed(2)}) R(${(rgp?.axes?.[0]||0).toFixed(2)},${(rgp?.axes?.[1]||0).toFixed(2)})`);
       }
 
-      STATE.World?.frame?.({ THREE, scene, renderer, camera, player, controllers, sticks }, dt);
-    } else if(STATE.sticks){
-      // Android
-      const mx = STATE.sticks.left?.x || 0;
-      const mz = STATE.sticks.left?.y || 0;
-      const turn = STATE.sticks.right?.x || 0;
+      STATE.World?.frame?.({ THREE, scene, renderer, camera, player, controllers, pads:{lgp, rgp} }, dt);
+    } else if(STATE.touchSticks){
+      const mx = STATE.touchSticks.left?.x || 0;
+      const mz = STATE.touchSticks.left?.y || 0;
+      const turn = STATE.touchSticks.right?.x || 0;
 
       const yaw = player.rotation.y;
-      const speed = 2.05 * dt;
-      player.rotation.y -= turn * 2.05 * dt;
+      const speed = 2.0 * dt;
+      player.rotation.y -= turn * 2.0 * dt;
 
       const vx = (mx * Math.cos(yaw) - mz * Math.sin(yaw)) * speed;
       const vz = (mx * Math.sin(yaw) + mz * Math.cos(yaw)) * speed;
@@ -303,6 +417,8 @@ function bootLoop(THREE, STATE){
   const THREE = await loadTHREE();
   HUD.log("[BOOT] THREE loaded ✅");
 
+  installNewsOverlay(HUD);
+
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
   scene.fog = new THREE.Fog(0x05060a, 10, 95);
@@ -325,8 +441,8 @@ function bootLoop(THREE, STATE){
   document.body.appendChild(VRButton.createButton(renderer));
   HUD.log("[index] VRButton appended ✅");
 
-  const sticks = installAndroidDualStick();
-  const controllers = installLasers(THREE, renderer, player);
+  const touchSticks = installAndroidDualStick(HUD);
+  const controllers = installLasers(THREE, renderer, player, HUD);
 
   const WorldMod = await import(`./world.js?v=${Date.now()}`);
   HUD.log("[index] world.js imported ✅");
@@ -342,6 +458,6 @@ function bootLoop(THREE, STATE){
   });
 
   HUD.setMode("running");
-  bootLoop(THREE, { THREE, scene, renderer, camera, player, controllers, sticks, World });
+  bootLoop(THREE, { THREE, scene, renderer, camera, player, controllers, touchSticks, World }, HUD);
   HUD.log("[index] runtime running ✅");
 })();

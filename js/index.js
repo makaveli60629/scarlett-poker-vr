@@ -1,249 +1,225 @@
-// index.js — Scarlett Poker VR Audit Boot v1
-// ✅ Runs an automatic repo audit (checks common paths)
-// ✅ Boots a visible VR scene even if your old core files are missing
-// ✅ Prints every failure to the on-screen HUD (Quest/Android safe)
+// /js/index.js — Scarlett Runtime (FULL) v1.2
+// ✅ Three.js via CDN (module)
+// ✅ VRButton + XR init
+// ✅ Android touch look + WASD flycam (debug)
+// ✅ Imports world via relative path
+// ✅ Logs to HUD + exposes safe hooks
 
-import * as THREE from 'three';
-import { VRButton } from 'three/addons/webxr/VRButton.js';
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
 
-const LOG = (m) => (window.__bootlog ? window.__bootlog(m) : console.log(m));
-const STATUS = (s) => (window.__bootstatus ? window.__bootstatus(s) : null);
+import { World } from "./world.js"; // IMPORTANT: relative import
 
-function nowBust(url) {
-  return url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now();
-}
+const pad = (n) => String(n).padStart(2, "0");
+const now = () => {
+  const d = new Date();
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
 
-async function headOk(path) {
-  try {
-    const r = await fetch(path, { method: 'HEAD', cache: 'no-store' });
-    return { ok: r.ok, status: r.status, path };
-  } catch (e) {
-    return { ok: false, status: 'ERR', path, err: e?.message || String(e) };
+const out = [];
+function log(m) {
+  const line = `[${now()}] ${m}`;
+  out.push(line);
+  console.log(line);
+
+  const el = document.getElementById("hud-log");
+  if (el) el.textContent = out.slice(-120).join("\n");
+
+  if (typeof window.__HTML_LOG === "function") {
+    try { window.__HTML_LOG(line); } catch {}
   }
 }
 
-async function tryImport(path) {
-  try {
-    LOG(`↳ import ${path}`);
-    const mod = await import(nowBust(path));
-    LOG(`✅ import ok: ${path}`);
-    return mod;
-  } catch (e) {
-    LOG(`❌ import fail: ${path} :: ${e?.message || e}`);
-    return null;
+function setStatus(t) {
+  if (typeof window.__SET_BOOT_STATUS === "function") {
+    try { window.__SET_BOOT_STATUS(t); } catch {}
   }
 }
 
-// ---- AUDIT ----
-// This is the “audit before we do this” — it checks your likely structure:
-// - root index.js / index.html
-// - js/ entry variants
-// - core/ variants
-// - known files you’ve used before (world.js, ui.js, controls.js, etc.)
+log(`[index] runtime start ✅ base=${window.SCARLETT_BASE || "/"}`);
+setStatus("index init…");
 
-async function runAudit() {
-  STATUS('auditing');
-  LOG('==============================');
-  LOG('AUDIT: scanning common paths…');
-  LOG('==============================');
+// ---------- Renderer / Scene / Camera ----------
+const app = document.getElementById("app") || document.body;
 
-  const candidates = [
-    './index.html',
-    './index.js',
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.xr.enabled = true;
 
-    // common entry folders
-    './js/index.js',
-    './js/main.js',
+app.appendChild(renderer.domElement);
 
-    // common project structure
-    './js/world.js',
-    './js/ui.js',
-    './js/controls.js',
-    './js/interactions.js',
-    './js/spawn_points.js',
-    './js/table.js',
-    './js/chair.js',
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
 
-    // core variants (you mentioned “core files”)
-    './core/index.js',
-    './core/boot.js',
-    './core/world.js',
-    './core/ui.js',
-    './core/controls.js',
-    './core/network.js',
-    './core/bots.js',
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.03, 500);
+camera.position.set(0, 1.6, 2.0);
 
-    // assets folders (HEAD on folders may return 403/404 depending; still useful)
-    './assets/',
-    './assets/textures/',
-    './assets/audio/',
-  ];
+// Player rig so XR can move it cleanly
+const player = new THREE.Group();
+player.position.set(0, 0, 0);
+player.add(camera);
+scene.add(player);
 
-  for (const p of candidates) {
-    const res = await headOk(p);
-    if (res.ok) LOG(`OK  ${res.status}  ${p}`);
-    else LOG(`BAD ${res.status}  ${p}${res.err ? ' :: ' + res.err : ''}`);
-  }
-
-  LOG('==============================');
-  LOG('AUDIT COMPLETE ✅');
-  LOG('If you see BAD 404 on your core files, we rebuild them clean.');
-  LOG('==============================');
-  STATUS('audit done');
-}
-
-// Make audit callable from the HTML button
-window.__runAudit = runAudit;
-
-// ---- BOOT SAFE SCENE ----
-// This guarantees you see *something* and controllers show up,
-// so even if your old code is broken, the deploy is alive.
-
-async function bootSafeScene() {
-  STATUS('booting scene');
-  LOG('[boot] starting safe scene…');
-
-  const app = document.getElementById('app');
-  if (!app) throw new Error('Missing #app container in index.html');
-
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.xr.enabled = true;
-
-  app.innerHTML = '';
-  app.appendChild(renderer.domElement);
-  document.body.appendChild(VRButton.createButton(renderer));
-  LOG('[boot] VRButton ready ✅');
-
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x050507);
-  scene.fog = new THREE.Fog(0x050507, 2, 60);
-
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
-  camera.position.set(0, 1.6, 3);
-
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 1.25);
+// lights (basic fallback even if world fails)
+{
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 0.9);
   scene.add(hemi);
-
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(60, 60),
-    new THREE.MeshStandardMaterial({ color: 0x1f1f1f, roughness: 1 })
-  );
-  floor.rotation.x = -Math.PI / 2;
-  scene.add(floor);
-
-  const anchor = new THREE.Mesh(
-    new THREE.TorusKnotGeometry(0.35, 0.12, 120, 16),
-    new THREE.MeshStandardMaterial({ color: 0x00ff88, roughness: 0.55, metalness: 0.05 })
-  );
-  anchor.position.set(0, 1.6, -1.8);
-  scene.add(anchor);
-
-  // Controllers with rays
-  function addController(i) {
-    const c = renderer.xr.getController(i);
-    const geom = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, -1),
-    ]);
-    const line = new THREE.Line(geom, new THREE.LineBasicMaterial());
-    line.name = 'ray';
-    line.scale.z = 6;
-    c.add(line);
-
-    c.addEventListener('connected', (e) => LOG(`🎮 controller${i} connected: ${e?.data?.targetRayMode || 'unknown'}`));
-    c.addEventListener('disconnected', () => LOG(`🎮 controller${i} disconnected`));
-
-    scene.add(c);
-  }
-  addController(0);
-  addController(1);
-
-  window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-
-  const clock = new THREE.Clock();
-  renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.05);
-    anchor.rotation.y += dt * 0.8;
-    anchor.rotation.x += dt * 0.35;
-    renderer.render(scene, camera);
-  });
-
-  LOG('[boot] safe scene running ✅');
-  STATUS('running');
-
-  return { THREE, renderer, scene, camera };
+  const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+  dir.position.set(3, 8, 4);
+  scene.add(dir);
 }
 
-// ---- OPTIONAL: Try to restore your old structure automatically ----
-// After the safe scene is running, we attempt to import your “core” entry points.
-// If they exist, they will load; if not, HUD will tell you exactly what’s missing.
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
 
-async function tryRestoreCore(ctx) {
-  STATUS('restore attempt');
-  LOG('[restore] attempting to load your existing core files…');
-
-  const entryCandidates = [
-    './core/index.js',
-    './js/index.js',
-    './js/main.js',
-    './core/boot.js'
-  ];
-
-  for (const path of entryCandidates) {
-    const ok = await headOk(path);
-    if (!ok.ok) continue;
-
-    const mod = await tryImport(path);
-    if (!mod) continue;
-
-    // If your core exports a start/init, call it.
-    const fn = mod.start || mod.init || mod.boot;
-    if (typeof fn === 'function') {
-      LOG(`[restore] calling ${path} -> ${fn.name || 'start/init/boot'}()`);
-      try {
-        await fn({ ...ctx, log: LOG, status: STATUS });
-        LOG('[restore] core started ✅');
-        STATUS('core running');
-        return true;
-      } catch (e) {
-        LOG('[restore] core start failed ❌ ' + (e?.message || e));
-      }
-    } else {
-      LOG(`[restore] ${path} loaded, but no start/init/boot export found (ok).`);
-      STATUS('restore loaded');
-      return true;
-    }
-  }
-
-  LOG('[restore] no core entry found. That means it’s missing or renamed.');
-  LOG('Next step: you tell me what your core folder/file names are, OR we rebuild core clean.');
-  STATUS('restore none');
-  return false;
+// ---------- VR Button ----------
+try {
+  const btn = VRButton.createButton(renderer);
+  document.body.appendChild(btn);
+  log("[index] VRButton appended ✅");
+} catch (e) {
+  log(`[index] VRButton failed ❌ ${e?.message || String(e)}`);
 }
 
-// ---- STARTUP ----
-(async function main() {
+// Optional: manual Enter VR button in HUD
+const enterVrBtn = document.getElementById("enterVrBtn");
+enterVrBtn?.addEventListener("click", async () => {
   try {
-    LOG('[index.js] entered ✅');
-
-    // Run audit immediately so you see what exists right away
-    await runAudit();
-
-    // Always boot a visible scene (proves deploy + rendering + controllers)
-    const ctx = await bootSafeScene();
-
-    // Then attempt to restore your old core system if present
-    await tryRestoreCore(ctx);
-
+    if (!navigator.xr) throw new Error("navigator.xr missing");
+    const sessionInit = {
+      optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking", "layers", "dom-overlay"],
+      domOverlay: { root: document.body }
+    };
+    const session = await navigator.xr.requestSession("immersive-vr", sessionInit);
+    renderer.xr.setSession(session);
+    log("[index] manual XR session start ✅");
   } catch (e) {
-    LOG('FATAL ❌ ' + (e?.message || e));
-    console.error(e);
-    STATUS('fatal');
+    log(`[index] manual XR failed ❌ ${e?.message || String(e)}`);
+  }
+});
+
+// ---------- Android / Desktop Debug Controls ----------
+const input = {
+  keys: new Set(),
+  dragging: false,
+  lastX: 0,
+  lastY: 0,
+  yaw: 0,
+  pitch: 0
+};
+
+window.addEventListener("keydown", (e) => input.keys.add(e.key.toLowerCase()));
+window.addEventListener("keyup", (e) => input.keys.delete(e.key.toLowerCase()));
+
+renderer.domElement.addEventListener("pointerdown", (e) => {
+  // only for non-XR debug look
+  if (renderer.xr.isPresenting) return;
+  input.dragging = true;
+  input.lastX = e.clientX;
+  input.lastY = e.clientY;
+  renderer.domElement.setPointerCapture?.(e.pointerId);
+});
+
+renderer.domElement.addEventListener("pointerup", () => {
+  input.dragging = false;
+});
+
+renderer.domElement.addEventListener("pointermove", (e) => {
+  if (renderer.xr.isPresenting) return;
+  if (!input.dragging) return;
+
+  const dx = e.clientX - input.lastX;
+  const dy = e.clientY - input.lastY;
+  input.lastX = e.clientX;
+  input.lastY = e.clientY;
+
+  // touch look
+  input.yaw -= dx * 0.003;
+  input.pitch -= dy * 0.003;
+  input.pitch = Math.max(-1.2, Math.min(1.2, input.pitch));
+});
+
+// ---------- World Load ----------
+let worldApi = null;
+
+(async () => {
+  try {
+    setStatus("loading world…");
+    log("[index] importing + init world…");
+
+    // Your world.js should export World.init({ ... }) safely
+    worldApi = await World.init?.({
+      THREE,
+      scene,
+      renderer,
+      camera,
+      player,
+      controllers: null,
+      log,
+      BUILD: Date.now()
+    });
+
+    log("[index] world init ✅");
+    setStatus("ready");
+  } catch (e) {
+    log(`[index] world init FAILED ❌ ${e?.message || String(e)}`);
+    setStatus("world failed ❌ (see log)");
   }
 })();
+
+// ---------- Animate ----------
+const v3 = new THREE.Vector3();
+const forward = new THREE.Vector3();
+
+function updateDebugControls(dt) {
+  if (renderer.xr.isPresenting) return;
+
+  // apply look
+  player.rotation.y = input.yaw;
+  camera.rotation.x = input.pitch;
+
+  const speed = input.keys.has("shift") ? 4.5 : 2.2;
+
+  // WASD move in facing direction (flat)
+  forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
+  forward.y = 0;
+  forward.normalize();
+
+  const right = v3.set(1, 0, 0).applyQuaternion(camera.quaternion);
+  right.y = 0;
+  right.normalize();
+
+  const move = v3.set(0, 0, 0);
+  if (input.keys.has("w")) move.add(forward);
+  if (input.keys.has("s")) move.sub(forward);
+  if (input.keys.has("a")) move.sub(right);
+  if (input.keys.has("d")) move.add(right);
+  if (input.keys.has("q")) move.y -= 1;
+  if (input.keys.has("e")) move.y += 1;
+
+  if (move.lengthSq() > 0) {
+    move.normalize().multiplyScalar(speed * dt);
+    player.position.add(move);
+  }
+}
+
+let last = performance.now();
+renderer.setAnimationLoop(() => {
+  const t = performance.now();
+  const dt = Math.min(0.05, (t - last) / 1000);
+  last = t;
+
+  try {
+    updateDebugControls(dt);
+    worldApi?.tick?.(dt);
+  } catch (e) {
+    log(`[index] tick error ❌ ${e?.message || String(e)}`);
+  }
+
+  renderer.render(scene, camera);
+});

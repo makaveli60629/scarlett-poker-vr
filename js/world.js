@@ -1,20 +1,13 @@
-// /js/world.js — ScarlettVR FULL WORLD v8 (Beautified + Watch + Poker + Hover Cars)
-// ✅ Uses your structure: /core is core, /js is gameplay
-import { ControlsExt } from "./controls_ext.js";
+// /js/world.js — ScarlettVR FULL WORLD v8.1 (Beautified + Watch + Poker + Hover Cars)
+// ✅ /core stays untouched
+// ✅ locomotion handled in /js/index.js
+// ✅ NO imports (prevents missing-module crashes)
 
 export const World = {
   async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD }) {
     const s = {
       THREE, scene, renderer, camera, player, controllers, log, BUILD,
       root: new THREE.Group(),
-
-      // locomotion
-      moveSpeed: 2.9,
-      deadzone: 0.14,
-      snapTurnRad: THREE.MathUtils.degToRad(30),
-      turnCooldown: 0,
-      diagonal45: true,
-      diagonalAmount: 0.85,
 
       // ray + temp
       raycaster: new THREE.Raycaster(),
@@ -103,14 +96,14 @@ export const World = {
       teleportNow(s, "left");
     });
 
-    // Left grip = toggle watch (reserved)
+    // Left grip = toggle watch
     controllers.c0.addEventListener("squeezestart", () => toggleWatch(s));
 
     // Right grip = grab/release cards
     controllers.c1.addEventListener("squeezestart", () => tryGrabRight(s));
     controllers.c1.addEventListener("squeezeend",   () => releaseGrabRight(s));
 
-    log?.(`[world] FULL WORLD v8 ✅ build=${BUILD}`);
+    log?.(`[world] FULL WORLD v8.1 ✅ build=${BUILD}`);
     return {
       setRoom: (room) => {
         s.room = room;
@@ -658,7 +651,6 @@ function tryClickWatch(s) {
     btn.material.emissive.setHex(0x223cff);
     btn.material.emissiveIntensity = 0.7;
   }
-
   return true;
 }
 
@@ -774,10 +766,7 @@ function update(s, dt, t) {
   // Update rays/reticles/arcs
   updateRays(s);
 
-  // Locomotion
-  if (s.renderer.xr.isPresenting) {
-    ControlsExt.applyLocomotion(s, dt);
-  }
+  // Locomotion is handled in /js/index.js
 }
 
 function updateRays(s) {
@@ -925,8 +914,7 @@ function makeLabelPlate(THREE, text, bg = 0x0a1020, fg = 0x66ccff, w = 768, h = 
   tex.needsUpdate = true;
 
   const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.65), mat);
-  return mesh;
+  return new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.65), mat);
 }
 
 function hex(n) {
@@ -950,4 +938,4 @@ function hsvToRgb(h, s, v) {
     case 5: r=v; g=p; b=q; break;
   }
   return { r, g, b };
-      }
+                                        }

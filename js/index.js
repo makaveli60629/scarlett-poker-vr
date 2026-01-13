@@ -1,39 +1,152 @@
-// /js/index.js — Scarlett Runtime v9.5 ULT (FULL)
-// ✅ Full diagnostics
-// ✅ Android dual-stick overlay (move + look)
-// ✅ Quest controllers + lasers + select
-// ✅ Smooth move + snap turn in VR
-// ✅ HUD rooms + safemode toggle + dump state
-// ✅ Passes controllers into world
+// /js/index.js — ScarlettVR Prime 10.0 DRIVER (FULL)
+// ✅ Three.js via CDN (module)
+// ✅ VRButton + optional manual XR
+// ✅ Hands Only (no controller models)
+// ✅ Android dual sticks (move+look)
+// ✅ HUD toggle + Copy logs
+// ✅ Loads World orchestrator
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
+
 import { World } from "./world.js";
 
 const pad = (n) => String(n).padStart(2, "0");
-const now = () => { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
+const now = () => {
+  const d = new Date();
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
 
-const out = [];
+const LOG_BUF = [];
 function log(m) {
   const line = `[${now()}] ${m}`;
-  out.push(line);
+  LOG_BUF.push(line);
+  if (LOG_BUF.length > 260) LOG_BUF.splice(0, LOG_BUF.length - 260);
   console.log(line);
+
   const el = document.getElementById("hud-log");
-  if (el) el.textContent = out.slice(-220).join("\n");
-  if (typeof window.__HTML_LOG === "function") { try { window.__HTML_LOG(line); } catch {} }
+  if (el) el.textContent = LOG_BUF.slice(-120).join("\n");
+
+  if (typeof window.__HTML_LOG === "function") {
+    try { window.__HTML_LOG(line); } catch {}
+  }
 }
-function setStatus(t) { if (typeof window.__SET_BOOT_STATUS === "function") { try { window.__SET_BOOT_STATUS(t); } catch {} } }
 
-log(`[index] runtime start ✅ base=${window.SCARLETT_BASE || "/"}`);
+function setStatus(t) {
+  if (typeof window.__SET_BOOT_STATUS === "function") {
+    try { window.__SET_BOOT_STATUS(t); } catch {}
+  }
+}
+
+// --- ensure minimal HUD exists even if index.html is minimal ---
+function ensureHUD() {
+  let hud = document.getElementById("hud");
+  if (!hud) {
+    hud = document.createElement("div");
+    hud.id = "hud";
+    hud.style.cssText = `
+      position:fixed; left:10px; top:10px; z-index:9999;
+      background:rgba(0,0,0,0.55); color:#fff; padding:10px;
+      font:12px/1.25 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      max-width: 92vw; border-radius:10px;
+    `;
+    document.body.appendChild(hud);
+  }
+
+  let logEl = document.getElementById("hud-log");
+  if (!logEl) {
+    logEl = document.createElement("pre");
+    logEl.id = "hud-log";
+    logEl.style.cssText = `white-space:pre-wrap; margin:8px 0 0 0; max-height: 40vh; overflow:auto;`;
+    hud.appendChild(logEl);
+  }
+
+  // control row
+  let row = document.getElementById("hud-row");
+  if (!row) {
+    row = document.createElement("div");
+    row.id = "hud-row";
+    row.style.cssText = `display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px;`;
+    hud.insertBefore(row, hud.firstChild);
+  }
+
+  function btn(id, text) {
+    let b = document.getElementById(id);
+    if (!b) {
+      b = document.createElement("button");
+      b.id = id;
+      b.textContent = text;
+      b.style.cssText = `
+        padding:6px 10px; border-radius:10px; border:1px solid rgba(255,255,255,0.25);
+        background:rgba(20,25,40,0.7); color:#fff;
+      `;
+      row.appendChild(b);
+    }
+    return b;
+  }
+
+  const bHide = btn("btnHud", "HUD");
+  const bCopy = btn("btnCopy", "COPY LOG");
+  const bHand = btn("btnNewHand", "NEW HAND");
+
+  const rooms = [
+    ["btnLobby","LOBBY","lobby"],
+    ["btnPoker","POKER","poker"],
+    ["btnStore","STORE","store"],
+    ["btnScorpion","SCORPION","scorpion"],
+    ["btnSpectate","SPECTATE","spectate"],
+  ];
+  for (const [id,label] of rooms) btn(id, label);
+
+  // manual XR (optional)
+  let enterVrBtn = document.getElementById("enterVrBtn");
+  if (!enterVrBtn) {
+    enterVrBtn = btn("enterVrBtn", "ENTER VR");
+  }
+
+  // UI hooks for DebugHUD
+  window.SCARLETT_UI = window.SCARLETT_UI || {};
+  window.SCARLETT_UI.setPerf = (s) => {};
+  window.SCARLETT_UI.setHealth = (s) => {};
+  window.SCARLETT_UI.setRoom = (s) => {};
+  window.SCARLETT_UI.setPos = (s) => {};
+  window.SCARLETT_UI.setXR = (s) => {};
+  window.SCARLETT_UI.setBots = (s) => {};
+
+  // HUD toggle
+  let hudOn = true;
+  function toggleHUD(force) {
+    hudOn = (typeof force === "boolean") ? force : !hudOn;
+    hud.style.display = hudOn ? "block" : "none";
+  }
+
+  bHide.onclick = () => toggleHUD();
+  bCopy.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(LOG_BUF.join("\n"));
+      log("[hud] copied ✅");
+    } catch {
+      log("[hud] copy failed ⚠️ (clipboard blocked)");
+    }
+  };
+
+  // allow keyboard H toggle
+  window.addEventListener("keydown", (e) => {
+    if (e.key.toLowerCase() === "h") toggleHUD();
+  });
+
+  return { hud, toggleHUD };
+}
+
+const { toggleHUD } = ensureHUD();
+
+log(`[index] Prime 10.0 start ✅ base=${window.SCARLETT_BASE || "/"}`);
 setStatus("index init…");
-
-window.SCARLETT = window.SCARLETT || {};
-window.SCARLETT.flags = window.SCARLETT.flags || { safeMode:false, poker:true, bots:true, fx:true };
-window.SCARLETT.botsSpeed = window.SCARLETT.botsSpeed ?? 1.0;
 
 // ---------- Renderer / Scene / Camera ----------
 const app = document.getElementById("app") || document.body;
-const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -44,15 +157,22 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.03, 600);
-camera.position.set(0, 1.6, 2);
+camera.position.set(0, 1.6, 2.0);
 
+// Player rig
 const player = new THREE.Group();
+player.position.set(0, 0, 0);
 player.add(camera);
 scene.add(player);
 
-// fallback lights
-scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 0.9));
-const dir = new THREE.DirectionalLight(0xffffff, 0.9); dir.position.set(3,8,4); scene.add(dir);
+// fallback light
+{
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 0.9);
+  scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+  dir.position.set(3, 10, 4);
+  scene.add(dir);
+}
 
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -62,409 +182,138 @@ window.addEventListener("resize", () => {
 
 // ---------- VR Button ----------
 try {
-  document.body.appendChild(VRButton.createButton(renderer));
+  const btn = VRButton.createButton(renderer);
+  document.body.appendChild(btn);
   log("[index] VRButton appended ✅");
 } catch (e) {
   log(`[index] VRButton failed ❌ ${e?.message || String(e)}`);
 }
 
-// ---------- Controllers + Lasers + Raycast ----------
-const controllers = {
-  left: null, right: null,
-  grips: { left:null, right:null },
-  lines: { left:null, right:null },
-  raycaster: new THREE.Raycaster(),
-  tmpMat: new THREE.Matrix4(),
-  stick: { lx:0, ly:0, rx:0, ry:0 },
-  snapReady: true
-};
-
-function makeLaserLine() {
-  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
-  const mat = new THREE.LineBasicMaterial({ transparent:true, opacity:0.9 });
-  const line = new THREE.Line(geo, mat);
-  line.name = "XR_LASER";
-  line.scale.z = 10;
-  return line;
-}
-
-function setupXRControllers() {
-  controllers.left = renderer.xr.getController(0);
-  controllers.right = renderer.xr.getController(1);
-  controllers.lines.left = makeLaserLine();
-  controllers.lines.right = makeLaserLine();
-  controllers.left.add(controllers.lines.left);
-  controllers.right.add(controllers.lines.right);
-  scene.add(controllers.left);
-  scene.add(controllers.right);
-
-  controllers.grips.left = renderer.xr.getControllerGrip(0);
-  controllers.grips.right = renderer.xr.getControllerGrip(1);
-  scene.add(controllers.grips.left);
-  scene.add(controllers.grips.right);
-
-  controllers.left.addEventListener("selectstart", (e)=>onSelectStart(e,"left"));
-  controllers.right.addEventListener("selectstart", (e)=>onSelectStart(e,"right"));
-
-  log("[xr] controllers + lasers installed ✅");
-}
-
-function worldRootForRaycast() {
-  return scene.getObjectByName("WORLD_ROOT") || scene;
-}
-
-function getRayHit(hand) {
-  const ctrl = hand === "left" ? controllers.left : controllers.right;
-  if (!ctrl) return null;
-
-  controllers.tmpMat.identity().extractRotation(ctrl.matrixWorld);
-  controllers.raycaster.ray.origin.setFromMatrixPosition(ctrl.matrixWorld);
-  controllers.raycaster.ray.direction.set(0,0,-1).applyMatrix4(controllers.tmpMat);
-
-  const root = worldRootForRaycast();
-  const hits = controllers.raycaster.intersectObjects(root.children, true);
-  for (const h of hits) {
-    if (h.object?.name === "XR_LASER") continue;
-    if (h.object?.userData?.noRay) continue;
-    return h;
-  }
-  return null;
-}
-
-function updateLasers() {
-  ["left","right"].forEach((hand)=>{
-    const line = hand==="left" ? controllers.lines.left : controllers.lines.right;
-    if (!line) return;
-    const hit = getRayHit(hand);
-    const dist = hit ? hit.distance : 10;
-    line.scale.z = Math.max(0.3, Math.min(25, dist));
-  });
-}
-
-function onSelectStart(e, hand) {
-  const hit = getRayHit(hand);
-  if (hit?.object?.userData?.onSelect) {
-    try { hit.object.userData.onSelect({ hand, hit, event: e }); } catch {}
-  }
-}
-
-// ---------- VR Locomotion ----------
-function sampleGamepads() {
-  controllers.stick.lx = controllers.stick.ly = controllers.stick.rx = controllers.stick.ry = 0;
-  const session = renderer.xr.getSession?.();
-  if (!session) return;
-
-  for (const src of session.inputSources) {
-    const gp = src.gamepad;
-    if (!gp || !gp.axes) continue;
-
-    const ax0 = gp.axes[0] ?? 0;
-    const ax1 = gp.axes[1] ?? 0;
-    const ax2 = gp.axes[2] ?? 0;
-    const ax3 = gp.axes[3] ?? 0;
-
-    if (src.handedness === "left") {
-      controllers.stick.lx = ax0; controllers.stick.ly = ax1;
-      controllers.stick.rx = ax2; controllers.stick.ry = ax3;
-    } else if (src.handedness === "right") {
-      controllers.stick.rx = ax0; controllers.stick.ry = ax1;
-    } else {
-      controllers.stick.lx = ax0; controllers.stick.ly = ax1;
-      controllers.stick.rx = ax2; controllers.stick.ry = ax3;
-    }
-  }
-}
-
-function applyVRLocomotion(dt) {
-  if (!renderer.xr.isPresenting) return;
-  sampleGamepads();
-
-  const dz = 0.15;
-  const lx = Math.abs(controllers.stick.lx) > dz ? controllers.stick.lx : 0;
-  const ly = Math.abs(controllers.stick.ly) > dz ? controllers.stick.ly : 0;
-  const rx = Math.abs(controllers.stick.rx) > dz ? controllers.stick.rx : 0;
-
-  const speed = 2.1;
-  if (lx || ly) {
-    const dir = new THREE.Vector3(lx, 0, ly);
-    const eul = new THREE.Euler(0,0,0,"YXZ");
-    eul.setFromQuaternion(camera.quaternion);
-    dir.applyAxisAngle(new THREE.Vector3(0,1,0), eul.y);
-    dir.multiplyScalar(speed * dt);
-    player.position.add(dir);
-  }
-
-  const snap = 30 * (Math.PI/180);
-  if (Math.abs(rx) < 0.35) controllers.snapReady = true;
-  if (controllers.snapReady && Math.abs(rx) >= 0.6) {
-    player.rotation.y += (rx > 0 ? -snap : snap);
-    controllers.snapReady = false;
-  }
-}
-
-// ---------- Android Dual Stick (Move + Look) ----------
-const mobile = {
-  mode: "auto", // auto|on|off
-  move: { x:0, y:0 },
-  look: { x:0, y:0 },
-  yaw: 0,
-  pitch: 0
-};
-
-const isTouch = (window.SCARLETT_DIAG?.touch) ?? (("ontouchstart" in window) || (navigator.maxTouchPoints>0));
-const stickL = document.getElementById("stickL");
-const stickR = document.getElementById("stickR");
-
-function showSticks(show) {
-  if (!stickL || !stickR) return;
-  stickL.style.display = show ? "block" : "none";
-  stickR.style.display = show ? "block" : "none";
-  window.SCARLETT_UI?.setMobileTag?.(show ? "MOBILE: sticks ON" : "MOBILE: sticks OFF");
-}
-
-function applyStickBehavior(el, which) {
-  const knob = el.querySelector(".knob");
-  const state = { active:false, id:null, cx:0, cy:0, dx:0, dy:0 };
-
-  const setKnob = (dx, dy) => {
-    const max = 52;
-    const len = Math.hypot(dx, dy) || 1;
-    const k = Math.min(1, len / max);
-    const nx = (dx / len) * (max * k);
-    const ny = (dy / len) * (max * k);
-    knob.style.transform = `translate(${nx}px, ${ny}px)`;
-    return { x: nx / max, y: ny / max };
-  };
-
-  const reset = () => {
-    knob.style.transform = `translate(0px, 0px)`;
-    if (which === "move") { mobile.move.x = 0; mobile.move.y = 0; }
-    if (which === "look") { mobile.look.x = 0; mobile.look.y = 0; }
-  };
-
-  el.addEventListener("pointerdown", (e) => {
-    if (renderer.xr.isPresenting) return; // not needed in VR
-    state.active = true; state.id = e.pointerId;
-    el.setPointerCapture(e.pointerId);
-    const r = el.getBoundingClientRect();
-    state.cx = r.left + r.width/2;
-    state.cy = r.top + r.height/2;
-    reset();
-  });
-
-  el.addEventListener("pointermove", (e) => {
-    if (!state.active || e.pointerId !== state.id) return;
-    const dx = e.clientX - state.cx;
-    const dy = e.clientY - state.cy;
-    const v = setKnob(dx, dy);
-    if (which === "move") { mobile.move.x = v.x; mobile.move.y = v.y; }
-    if (which === "look") { mobile.look.x = v.x; mobile.look.y = v.y; }
-  });
-
-  el.addEventListener("pointerup", (e) => {
-    if (e.pointerId !== state.id) return;
-    state.active = false; state.id = null;
-    reset();
-  });
-}
-
-applyStickBehavior(stickL, "move");
-applyStickBehavior(stickR, "look");
-
-// Mobile sticks button behavior
-const mobileSticksBtn = document.getElementById("mobileSticksBtn");
-function updateMobileModeUI() {
-  if (!mobileSticksBtn) return;
-  mobileSticksBtn.textContent = `Sticks: ${mobile.mode.toUpperCase()}`;
-}
-mobileSticksBtn?.addEventListener("click", () => {
-  mobile.mode = (mobile.mode === "auto") ? "on" : (mobile.mode === "on" ? "off" : "auto");
-  updateMobileModeUI();
-  const show = (mobile.mode === "on") || (mobile.mode === "auto" && isTouch);
-  showSticks(show);
-});
-updateMobileModeUI();
-showSticks(isTouch);
-
-// Desktop drag look (still allowed when sticks are off)
-const desktopLook = { dragging:false, lastX:0, lastY:0 };
-renderer.domElement.addEventListener("pointerdown", (e)=> {
-  if (renderer.xr.isPresenting) return;
-  if (isTouch) return; // mobile uses sticks
-  desktopLook.dragging = true;
-  desktopLook.lastX = e.clientX; desktopLook.lastY = e.clientY;
-  renderer.domElement.setPointerCapture?.(e.pointerId);
-});
-renderer.domElement.addEventListener("pointerup", ()=> desktopLook.dragging=false);
-renderer.domElement.addEventListener("pointermove", (e)=>{
-  if (renderer.xr.isPresenting) return;
-  if (!desktopLook.dragging) return;
-  const dx = e.clientX - desktopLook.lastX;
-  const dy = e.clientY - desktopLook.lastY;
-  desktopLook.lastX = e.clientX; desktopLook.lastY = e.clientY;
-  mobile.yaw -= dx * 0.003;
-  mobile.pitch -= dy * 0.003;
-  mobile.pitch = Math.max(-1.2, Math.min(1.2, mobile.pitch));
-});
-
-// keyboard WASD still works
-const keys = new Set();
-window.addEventListener("keydown",(e)=>keys.add(e.key.toLowerCase()));
-window.addEventListener("keyup",(e)=>keys.delete(e.key.toLowerCase()));
-
-function applyNonVRMovement(dt) {
-  if (renderer.xr.isPresenting) return;
-
-  // apply look from sticks (right) + desktop look
-  const lookSpeed = 1.9;
-  if (isTouch) {
-    mobile.yaw -= mobile.look.x * lookSpeed * dt;
-    mobile.pitch -= mobile.look.y * lookSpeed * dt;
-    mobile.pitch = Math.max(-1.2, Math.min(1.2, mobile.pitch));
-  }
-  player.rotation.y = mobile.yaw;
-  camera.rotation.x = mobile.pitch;
-
-  const move = new THREE.Vector3(0,0,0);
-  const speed = keys.has("shift") ? 4.3 : 2.2;
-
-  // keyboard
-  if (keys.has("w")) move.z -= 1;
-  if (keys.has("s")) move.z += 1;
-  if (keys.has("a")) move.x -= 1;
-  if (keys.has("d")) move.x += 1;
-
-  // left stick move on touch
-  if (isTouch) {
-    move.x += mobile.move.x;
-    move.z += mobile.move.y;
-  }
-
-  if (keys.has("q")) move.y -= 1;
-  if (keys.has("e")) move.y += 1;
-
-  if (move.lengthSq() > 0) {
-    move.normalize();
-    // move relative to camera yaw
-    const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); fwd.y=0; fwd.normalize();
-    const right = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion); right.y=0; right.normalize();
-
-    const dir = new THREE.Vector3();
-    dir.addScaledVector(right, move.x);
-    dir.addScaledVector(fwd, -move.z);
-    dir.y += move.y;
-
-    dir.multiplyScalar(speed * dt);
-    player.position.add(dir);
-  }
-}
-
-// ---------- HUD Controls (SafeMode + Rooms + Dump) ----------
-const safeModeBtn = document.getElementById("safeModeBtn");
-safeModeBtn?.addEventListener("click", () => {
-  window.SCARLETT.flags.safeMode = !window.SCARLETT.flags.safeMode;
-  safeModeBtn.textContent = `SafeMode: ${window.SCARLETT.flags.safeMode ? "ON" : "OFF"}`;
-  log(`[ui] safeMode=${window.SCARLETT.flags.safeMode} (reload page to apply fully)`);
-});
-
-document.querySelectorAll("[data-room]")?.forEach(btn => {
-  btn.addEventListener("click", () => {
-    const room = btn.getAttribute("data-room");
-    worldApi?.setRoom?.(room);
-  });
-});
-
-document.getElementById("dumpBtn")?.addEventListener("click", () => {
-  const dump = {
-    base: window.SCARLETT_BASE,
-    diag: window.SCARLETT_DIAG,
-    flags: window.SCARLETT.flags,
-    botsSpeed: window.SCARLETT.botsSpeed,
-    pos: { x:player.position.x, y:player.position.y, z:player.position.z },
-    rotY: player.rotation.y
-  };
-  log(`[dump] ${JSON.stringify(dump)}`);
-});
-
-// Manual Enter VR
+// Manual XR button (backup)
 document.getElementById("enterVrBtn")?.addEventListener("click", async () => {
   try {
     if (!navigator.xr) throw new Error("navigator.xr missing");
     const sessionInit = {
-      optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking", "layers", "dom-overlay"],
+      optionalFeatures: [
+        "local-floor","bounded-floor","local","viewer",
+        "hand-tracking","layers","dom-overlay"
+      ],
       domOverlay: { root: document.body }
     };
     const session = await navigator.xr.requestSession("immersive-vr", sessionInit);
-    renderer.xr.setSession(session);
+    await renderer.xr.setSession(session);
     log("[index] manual XR session start ✅");
   } catch (e) {
     log(`[index] manual XR failed ❌ ${e?.message || String(e)}`);
   }
 });
 
-// XR hooks
-renderer.xr.addEventListener("sessionstart", () => { log("[xr] sessionstart ✅"); setupXRControllers(); });
-renderer.xr.addEventListener("sessionend", () => { log("[xr] sessionend ✅"); });
+// ---------- Desktop debug look/move (fallback) ----------
+const input = {
+  keys: new Set(),
+  dragging: false,
+  lastX: 0,
+  lastY: 0,
+  yaw: 0,
+  pitch: 0
+};
 
-// ---------- World Load ----------
-let worldApi = null;
+window.addEventListener("keydown", (e) => input.keys.add(e.key.toLowerCase()));
+window.addEventListener("keyup", (e) => input.keys.delete(e.key.toLowerCase()));
+
+renderer.domElement.addEventListener("pointerdown", (e) => {
+  if (renderer.xr.isPresenting) return;
+  input.dragging = true;
+  input.lastX = e.clientX;
+  input.lastY = e.clientY;
+  renderer.domElement.setPointerCapture?.(e.pointerId);
+});
+
+renderer.domElement.addEventListener("pointerup", () => { input.dragging = false; });
+
+renderer.domElement.addEventListener("pointermove", (e) => {
+  if (renderer.xr.isPresenting) return;
+  if (!input.dragging) return;
+  const dx = e.clientX - input.lastX;
+  const dy = e.clientY - input.lastY;
+  input.lastX = e.clientX;
+  input.lastY = e.clientY;
+  input.yaw -= dx * 0.003;
+  input.pitch -= dy * 0.003;
+  input.pitch = Math.max(-1.2, Math.min(1.2, input.pitch));
+});
+
+const v3 = new THREE.Vector3();
+const forward = new THREE.Vector3();
+const right = new THREE.Vector3();
+
+function applyWASD(dt) {
+  if (renderer.xr.isPresenting) return;
+
+  // look
+  player.rotation.y = input.yaw;
+  camera.rotation.x = input.pitch;
+
+  const speed = input.keys.has("shift") ? 4.5 : 2.2;
+
+  forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
+  forward.y = 0; forward.normalize();
+
+  right.set(1, 0, 0).applyQuaternion(camera.quaternion);
+  right.y = 0; right.normalize();
+
+  v3.set(0, 0, 0);
+  if (input.keys.has("w")) v3.add(forward);
+  if (input.keys.has("s")) v3.sub(forward);
+  if (input.keys.has("a")) v3.sub(right);
+  if (input.keys.has("d")) v3.add(right);
+  if (input.keys.has("q")) v3.y -= 1;
+  if (input.keys.has("e")) v3.y += 1;
+
+  if (v3.lengthSq() > 0) {
+    v3.normalize().multiplyScalar(speed * dt);
+    player.position.add(v3);
+  }
+}
+
+// ---------- Load World ----------
+let world = null;
 
 (async () => {
   try {
     setStatus("loading world…");
-    log("[index] importing + init world…");
+    log("[index] init world…");
 
-    worldApi = await World.init?.({
-      THREE, scene, renderer, camera, player,
-      controllers,
-      log,
-      BUILD: Date.now(),
-      flags: window.SCARLETT.flags
+    world = await World.init({
+      THREE,
+      scene,
+      renderer,
+      camera,
+      player,
+      log
     });
 
     log("[index] world init ✅");
-    setStatus("ready");
-    window.SCARLETT_UI?.setHealth?.("OK");
+    setStatus("ready ✅");
   } catch (e) {
     log(`[index] world init FAILED ❌ ${e?.message || String(e)}`);
     setStatus("world failed ❌");
-    window.SCARLETT_UI?.setHealth?.("WORLD_FAIL");
+    toggleHUD(true);
   }
 })();
 
-// ---------- Perf + Loop ----------
-let frames = 0, lastFpsT = performance.now();
+// ---------- Animate ----------
 let last = performance.now();
-
 renderer.setAnimationLoop(() => {
   const t = performance.now();
   const dt = Math.min(0.05, (t - last) / 1000);
   last = t;
 
   try {
-    applyNonVRMovement(dt);
-    applyVRLocomotion(dt);
-    if (renderer.xr.isPresenting) updateLasers();
-
-    // throttle bots if systems honor dt
-    const speed = window.SCARLETT.botsSpeed ?? 1.0;
-    worldApi?.tick?.(dt * speed);
-
-    // ui pills
-    if (window.SCARLETT_UI) {
-      window.SCARLETT_UI.setPos?.(`pos: ${player.position.x.toFixed(2)},${player.position.y.toFixed(2)},${player.position.z.toFixed(2)}`);
-      window.SCARLETT_UI.setRoom?.(worldApi?.room || "lobby");
-    }
-
-    frames++;
-    if (t - lastFpsT > 500) {
-      const fps = Math.round(frames * 1000 / (t - lastFpsT));
-      frames = 0; lastFpsT = t;
-      window.SCARLETT_UI?.setPerf?.(`fps: ${fps}`);
-    }
+    applyWASD(dt);
+    world?.tick?.(dt, t / 1000);
   } catch (e) {
-    log(`[index] loop error ❌ ${e?.message || String(e)}`);
-    window.SCARLETT_UI?.setHealth?.("LOOP_ERR");
+    log(`[index] tick error ❌ ${e?.message || String(e)}`);
   }
 
   renderer.render(scene, camera);

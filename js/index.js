@@ -1,9 +1,9 @@
-// /js/index.js — FULL FIX: no 3-dots load screen (Quest) + Locomotion Patch (sticks fixed)
-// ✅ starts render loop immediately
-// ✅ loads world async AFTER loop is running
-// ✅ avoids top-level await
-// ✅ catches render errors + prints to HUD
-// ✅ adds locomotion in index.js (NO core touch, NO extensions)
+// /js/index.js — FULL MASTER (Quest-safe + Android/2D controls + HUD)
+// ✅ render loop starts immediately (prevents Quest 3-dots)
+// ✅ world loads async AFTER loop is running (no top-level await)
+// ✅ XR: controllers + lasers supported by world.js
+// ✅ Android/2D: on-screen joystick + swipe-look (only when NOT in XR)
+// ✅ Desktop: WASD + mouse drag look (only when NOT in XR)
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -73,14 +73,16 @@ player.add(controllers.c0, controllers.c1, controllers.g0, controllers.g1);
 document.body.appendChild(VRButton.createButton(renderer));
 log("[index] VRButton appended ✅");
 
-// Auto-hide DOM HUD in VR (prevents that floating “highlight thing”)
+// Auto-hide DOM HUD in VR (prevents floating DOM in face)
 renderer.xr.addEventListener("sessionstart", () => {
   setHUDVisible(false);
-  log("[xr] sessionstart ✅ HUD hidden");
+  Mobile2D.setEnabled(false);
+  log("[xr] sessionstart ✅ HUD hidden, 2D controls disabled");
 });
 renderer.xr.addEventListener("sessionend", () => {
   setHUDVisible(true);
-  log("[xr] sessionend ✅ HUD shown");
+  Mobile2D.setEnabled(true);
+  log("[xr] sessionend ✅ HUD shown, 2D controls enabled");
 });
 
 // Recenter
@@ -99,126 +101,315 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// =======================================================
-// ✅ LOCOMOTION PATCH (INDEX-LEVEL, NO CORE, NO EXTENSIONS)
-// =======================================================
+// ============================
+// 2D ANDROID / MOBILE CONTROLS
+// ============================
+// ✅ Only active when NOT in XR
+// ✅ Left joystick = move (forward/back/strafe)
+// ✅ Right-side swipe = look (yaw + pitch)
+// ✅ Desktop: WASD + mouse-drag look
+const Mobile2D = (() => {
+  const state = {
+    enabled: true,
+    uiBuilt: false,
 
-const MOVE_SPEED = 2.9;                 // meters/sec
-const DEADZONE = 0.14;
-const DIAGONAL_45 = true;
-const DIAGONAL_AMOUNT = 0.85;
-const SNAP_TURN_DEG = 30;
-const SNAP_TURN_RAD = THREE.MathUtils.degToRad(SNAP_TURN_DEG);
-let turnCooldown = 0;
+    // joystick
+    leftId: null,
+    leftCenter: { x: 0, y: 0 },
+    leftVec: { x: 0, y: 0 }, // -1..1
 
-// ✅ Your exact stick fixes:
-// - Left controller: everything reversed (x and y)
-// - Right controller: forward/back reversed (y)
-function patchAxes(handedness, x, y) {
-  if (handedness === "left") { x = -x; y = -y; }
-  if (handedness === "right") { y = -y; }
-  return { x, y };
-}
+    // look touch
+    rightId: null,
+    lookDX: 0,
+    lookDY: 0,
+    lastTouchPos: new Map(), // id -> {x,y}
 
-function getHeadYaw(cam) {
-  const q = cam.quaternion;
-  // yaw from quaternion (stable)
-  return Math.atan2(
-    2 * (q.w * q.y + q.z * q.x),
-    1 - 2 * (q.y * q.y + q.x * q.x)
-  );
-}
+    // desktop
+    keys: new Set(),
+    mouseDown: false,
+    mouseDX: 0,
+    mouseDY: 0,
 
-function readBestStick(gamepad) {
-  if (!gamepad) return { active: false, x: 0, y: 0, pair: "none" };
-  const a = gamepad.axes || [];
+    // tuning
+    moveSpeed: 2.8,
+    strafeSpeed: 2.6,
+    lookSpeed: 0.0022,
+    pitchMin: -1.15,
+    pitchMax: 1.15,
 
-  // choose the most active of (0,1) or (2,3)
-  let x = 0, y = 0;
-  if (a.length >= 4) {
-    const mag01 = Math.abs(a[0] || 0) + Math.abs(a[1] || 0);
-    const mag23 = Math.abs(a[2] || 0) + Math.abs(a[3] || 0);
-    if (mag23 > mag01) { x = a[2] || 0; y = a[3] || 0; return { active: true, x, y, pair: "23" }; }
-  }
-  if (a.length >= 2) { x = a[0] || 0; y = a[1] || 0; return { active: true, x, y, pair: "01" }; }
-  return { active: false, x: 0, y: 0, pair: "none" };
-}
+    // refs
+    wrap: null,
+    joy: null,
+    nub: null,
+    hint: null,
+  };
 
-function readTurnAxis(gamepad) {
-  if (!gamepad) return 0;
-  const a = gamepad.axes || [];
-  // common: right stick X at axes[2] (or axes[0] fallback)
-  return (a.length >= 3 ? (a[2] || 0) : (a[0] || 0));
-}
-
-// This runs every frame during XR
-function applyLocomotion(dt) {
-  if (!renderer.xr.isPresenting) return;
-
-  const session = renderer.xr.getSession?.();
-  if (!session) return;
-
-  const sources = Array.from(session.inputSources || []).filter(s => s?.gamepad);
-  if (!sources.length) return;
-
-  const right = sources.find(s => s.handedness === "right") || sources[0];
-  const left  = sources.find(s => s.handedness === "left")  || sources[0];
-
-  // Movement: prefer right stick; fallback left stick
-  let src = right;
-  let stick = readBestStick(right.gamepad);
-
-  if (!stick.active || (Math.abs(stick.x) < DEADZONE && Math.abs(stick.y) < DEADZONE)) {
-    src = left;
-    stick = readBestStick(left.gamepad);
+  function setEnabled(on) {
+    state.enabled = !!on;
+    if (state.wrap) state.wrap.style.display = state.enabled ? "block" : "none";
+    if (!state.enabled) {
+      state.leftId = null;
+      state.rightId = null;
+      state.leftVec.x = 0; state.leftVec.y = 0;
+      state.lookDX = 0; state.lookDY = 0;
+      state.mouseDX = 0; state.mouseDY = 0;
+      state.lastTouchPos.clear();
+      setNub(0, 0);
+    }
   }
 
-  let x = stick.x || 0;
-  let y = stick.y || 0;
-
-  // deadzone
-  if (Math.abs(x) < DEADZONE) x = 0;
-  if (Math.abs(y) < DEADZONE) y = 0;
-
-  // apply your inversion fixes
-  ({ x, y } = patchAxes(src.handedness, x, y));
-
-  // diagonal shaping (optional)
-  if (DIAGONAL_45 && x !== 0) {
-    const sign = y !== 0 ? Math.sign(y) : 1;
-    y += sign * Math.abs(x) * DIAGONAL_AMOUNT;
-    x *= 0.65;
-    const len = Math.hypot(x, y);
-    if (len > 1e-4) { x /= len; y /= len; }
+  function setNub(nx, ny) {
+    if (!state.nub) return;
+    const maxPx = 44;
+    const tx = nx * maxPx;
+    const ty = ny * maxPx;
+    state.nub.style.transform = `translate(-50%, -50%) translate(${tx}px, ${ty}px)`;
   }
 
-  // head-relative movement
-  if (x !== 0 || y !== 0) {
-    const yaw = getHeadYaw(camera);
-    const cos = Math.cos(yaw), sin = Math.sin(yaw);
+  function buildUI(logFn) {
+    if (state.uiBuilt) return;
+    state.uiBuilt = true;
 
-    // y is forward/back
-    const mx = x * cos - y * sin;
-    const mz = x * sin + y * cos;
+    const wrap = document.createElement("div");
+    wrap.id = "mobile2d";
+    wrap.style.cssText = `
+      position: fixed; inset: 0; z-index: 9998;
+      user-select: none; -webkit-user-select: none;
+      touch-action: none;
+      display: block;
+    `;
+    document.body.appendChild(wrap);
 
-    player.position.x += mx * MOVE_SPEED * dt;
-    player.position.z += mz * MOVE_SPEED * dt;
+    const joy = document.createElement("div");
+    joy.id = "joyL";
+    joy.style.cssText = `
+      position: absolute; left: 18px; bottom: 18px;
+      width: 140px; height: 140px; border-radius: 999px;
+      background: rgba(102,204,255,0.10);
+      border: 2px solid rgba(102,204,255,0.28);
+      box-shadow: 0 0 18px rgba(102,204,255,0.12);
+      pointer-events: auto;
+    `;
+    wrap.appendChild(joy);
+
+    const nub = document.createElement("div");
+    nub.id = "joyNub";
+    nub.style.cssText = `
+      position: absolute; left: 50%; top: 50%;
+      width: 56px; height: 56px; border-radius: 999px;
+      transform: translate(-50%, -50%);
+      background: rgba(102,204,255,0.22);
+      border: 2px solid rgba(102,204,255,0.45);
+      pointer-events: none;
+    `;
+    joy.appendChild(nub);
+
+    const hint = document.createElement("div");
+    hint.textContent = "Left: MOVE • Right: LOOK";
+    hint.style.cssText = `
+      position:absolute; left: 14px; top: 10px;
+      padding: 8px 10px;
+      font: 700 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      letter-spacing: 0.4px;
+      color: rgba(200,211,255,0.88);
+      background: rgba(5,7,13,0.55);
+      border: 1px solid rgba(102,204,255,0.22);
+      border-radius: 10px;
+      pointer-events: none;
+    `;
+    wrap.appendChild(hint);
+
+    state.wrap = wrap;
+    state.joy = joy;
+    state.nub = nub;
+    state.hint = hint;
+
+    // Touch
+    wrap.addEventListener("touchstart", (e) => {
+      if (!state.enabled) return;
+      const w = window.innerWidth;
+
+      for (const t of Array.from(e.changedTouches)) {
+        const x = t.clientX, y = t.clientY;
+
+        // left side -> joystick
+        if (x < w * 0.45 && state.leftId === null) {
+          state.leftId = t.identifier;
+          state.leftCenter.x = x;
+          state.leftCenter.y = y;
+          state.leftVec.x = 0;
+          state.leftVec.y = 0;
+
+          // position joystick base under finger (visual)
+          const clampedLeft = Math.max(12, Math.min(x - 70, w - 152));
+          const clampedBottom = Math.max(12, Math.min((window.innerHeight - y) - 70, window.innerHeight - 152));
+          joy.style.left = `${clampedLeft}px`;
+          joy.style.bottom = `${clampedBottom}px`;
+          setNub(0, 0);
+          continue;
+        }
+
+        // right side -> look
+        if (x >= w * 0.45 && state.rightId === null) {
+          state.rightId = t.identifier;
+          state.lastTouchPos.set(t.identifier, { x, y });
+          continue;
+        }
+      }
+
+      e.preventDefault();
+    }, { passive: false });
+
+    wrap.addEventListener("touchmove", (e) => {
+      if (!state.enabled) return;
+
+      for (const t of Array.from(e.changedTouches)) {
+        const x = t.clientX, y = t.clientY;
+
+        if (t.identifier === state.leftId) {
+          const dx = x - state.leftCenter.x;
+          const dy = y - state.leftCenter.y;
+          const max = 60;
+          const nx = Math.max(-1, Math.min(1, dx / max));
+          const ny = Math.max(-1, Math.min(1, dy / max));
+          state.leftVec.x = nx;
+          state.leftVec.y = ny;
+          setNub(nx, ny);
+        }
+
+        if (t.identifier === state.rightId) {
+          const last = state.lastTouchPos.get(t.identifier);
+          if (last) {
+            state.lookDX += (x - last.x);
+            state.lookDY += (y - last.y);
+            last.x = x; last.y = y;
+          } else {
+            state.lastTouchPos.set(t.identifier, { x, y });
+          }
+        }
+      }
+
+      e.preventDefault();
+    }, { passive: false });
+
+    wrap.addEventListener("touchend", (e) => {
+      if (!state.enabled) return;
+
+      for (const t of Array.from(e.changedTouches)) {
+        if (t.identifier === state.leftId) {
+          state.leftId = null;
+          state.leftVec.x = 0;
+          state.leftVec.y = 0;
+          setNub(0, 0);
+        }
+        if (t.identifier === state.rightId) {
+          state.rightId = null;
+          state.lastTouchPos.delete(t.identifier);
+        }
+      }
+
+      e.preventDefault();
+    }, { passive: false });
+
+    wrap.addEventListener("touchcancel", (e) => {
+      state.leftId = null;
+      state.rightId = null;
+      state.leftVec.x = 0;
+      state.leftVec.y = 0;
+      state.lastTouchPos.clear();
+      setNub(0, 0);
+      e.preventDefault();
+    }, { passive: false });
+
+    // Desktop keyboard
+    window.addEventListener("keydown", (e) => state.keys.add(String(e.key).toLowerCase()));
+    window.addEventListener("keyup", (e) => state.keys.delete(String(e.key).toLowerCase()));
+
+    // Desktop mouse drag look
+    renderer.domElement.addEventListener("mousedown", (e) => {
+      if (!state.enabled) return;
+      if (renderer.xr.isPresenting) return;
+      state.mouseDown = true;
+      state.mouseDX = 0;
+      state.mouseDY = 0;
+      e.preventDefault();
+    });
+    window.addEventListener("mouseup", () => { state.mouseDown = false; });
+    window.addEventListener("mousemove", (e) => {
+      if (!state.enabled) return;
+      if (!state.mouseDown) return;
+      if (renderer.xr.isPresenting) return;
+      state.mouseDX += e.movementX || 0;
+      state.mouseDY += e.movementY || 0;
+    });
+
+    logFn?.("[2d] mobile joystick + swipe-look ready ✅");
   }
 
-  // Snap turn: prefer right controller turn axis
-  turnCooldown = Math.max(0, turnCooldown - dt);
-  let tx = readTurnAxis(right.gamepad || left.gamepad);
-  if (Math.abs(tx) < DEADZONE) tx = 0;
+  function apply(dt) {
+    if (!state.enabled) return;
+    if (renderer.xr.isPresenting) return;
 
-  if (turnCooldown === 0 && tx !== 0) {
-    // tx>0 => turn right; tx<0 => turn left
-    player.rotation.y += (tx > 0 ? -1 : 1) * SNAP_TURN_RAD;
-    turnCooldown = 0.22;
+    // movement vector
+    let mx = 0, mz = 0;
+
+    // touch joystick
+    mx += state.leftVec.x * state.strafeSpeed;
+    mz += state.leftVec.y * state.moveSpeed; // +down is forward-ish; we invert below
+
+    // keyboard WASD
+    const k = state.keys;
+    if (k.has("w")) mz -= state.moveSpeed;
+    if (k.has("s")) mz += state.moveSpeed;
+    if (k.has("a")) mx -= state.strafeSpeed;
+    if (k.has("d")) mx += state.strafeSpeed;
+
+    // apply movement relative to yaw
+    if (mx !== 0 || mz !== 0) {
+      const yaw = player.rotation.y;
+
+      // joystick Y: dragging up gives ny negative, so invert so up = forward
+      // (for touch: state.leftVec.y positive means finger moved down)
+      const forward = -mz;
+      const strafe = mx;
+
+      const sin = Math.sin(yaw);
+      const cos = Math.cos(yaw);
+
+      const vx = (strafe * cos + forward * sin) * dt;
+      const vz = (forward * cos - strafe * sin) * dt;
+
+      player.position.x += vx;
+      player.position.z += vz;
+    }
+
+    // apply look (touch + mouse)
+    const dx = state.lookDX + state.mouseDX;
+    const dy = state.lookDY + state.mouseDY;
+
+    if (dx !== 0 || dy !== 0) {
+      player.rotation.y -= dx * state.lookSpeed;
+
+      // pitch on camera (clamped)
+      const pitch = camera.rotation.x - dy * state.lookSpeed;
+      camera.rotation.x = Math.max(state.pitchMin, Math.min(state.pitchMax, pitch));
+    }
+
+    // decay / reset deltas each frame
+    state.lookDX = 0;
+    state.lookDY = 0;
+    state.mouseDX = 0;
+    state.mouseDY = 0;
   }
-}
+
+  return { buildUI, apply, setEnabled };
+})();
+
+// Build 2D controls UI immediately (only shows when not in XR)
+Mobile2D.buildUI(log);
+Mobile2D.setEnabled(true);
 
 // --- IMPORTANT: START THE RENDER LOOP IMMEDIATELY ---
-// This prevents Quest from getting stuck on the Oculus loader.
 let worldApi = null;
 let worldReady = false;
 
@@ -228,16 +419,13 @@ renderer.setAnimationLoop(() => {
   const t = clock.elapsedTime;
 
   try {
-    // ✅ locomotion always works, even if world fails to load
-    applyLocomotion(dt);
+    // 2D controls (Android/desktop) only when NOT in XR
+    Mobile2D.apply(dt);
 
-    // world update (if loaded)
     if (worldReady && worldApi?.update) worldApi.update(dt, t);
-
     renderer.render(scene, camera);
   } catch (e) {
     log("[FATAL] render loop crashed:", String(e?.stack || e));
-    // If loop crashes, Quest will show 3 dots forever — keep loop alive:
     try { renderer.render(scene, camera); } catch {}
   }
 });
@@ -261,6 +449,7 @@ log("[index] render loop started ✅");
     $("#btnRoomStore")?.addEventListener("click", () => worldApi?.setRoom?.("store"));
     $("#btnRoomScorpion")?.addEventListener("click", () => worldApi?.setRoom?.("scorpion"));
     $("#btnRoomSpectate")?.addEventListener("click", () => worldApi?.setRoom?.("spectate"));
+    $("#btnRoomPoker")?.addEventListener("click", () => worldApi?.setRoom?.("poker"));
 
   } catch (e) {
     log("[world] init ❌", String(e?.stack || e));

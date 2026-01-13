@@ -3,19 +3,19 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Scarlett Poker VR</title>
+  <title>ScarlettVR Poker 9.5 Ultimate</title>
 
   <style>
     html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
     #app { position:fixed; inset:0; }
-    canvas { display:block; }
+    canvas { display:block; touch-action:none; }
 
-    /* HUD */
+    /* ===== HUD ===== */
     #hud {
       position: fixed;
       left: 10px; top: 10px;
-      width: min(520px, calc(100vw - 20px));
-      max-height: 55vh;
+      width: min(620px, calc(100vw - 20px));
+      max-height: 62vh;
       overflow: auto;
       padding: 10px 10px;
       border-radius: 12px;
@@ -28,119 +28,173 @@
       user-select: text;
       pointer-events: auto;
     }
+    #hud.hidden { display:none; }
     #hud .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
-    #hud .pill {
-      padding: 4px 8px;
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,.18);
-      background: rgba(255,255,255,.06);
-    }
+    #hud .pill { padding:4px 8px; border-radius:999px; border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.06); }
     #hud pre { margin:0; white-space:pre-wrap; word-break:break-word; }
-    #hud .btn {
-      padding: 6px 10px;
+
+    .btn {
+      padding: 7px 10px;
       border-radius: 10px;
       border: 1px solid rgba(255,255,255,.22);
       background: rgba(255,255,255,.06);
       color: #fff;
       cursor: pointer;
-      font: 600 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      font: 800 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
     }
-    #hud .btn:active { transform: translateY(1px); }
+    .btn:active { transform: translateY(1px); }
 
-    /* Always-visible HUD toggle button */
     #hudToggleBtn{
       position:fixed; right:12px; top:12px; z-index:999999;
       padding:10px 12px; border-radius:10px;
       background:rgba(0,0,0,.55); color:#fff; border:1px solid rgba(255,255,255,.25);
-      font:600 14px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      font:900 14px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      backdrop-filter: blur(6px);
+      pointer-events:auto;
+    }
+
+    /* ===== Android Dual Stick Overlay ===== */
+    #mobilePad {
+      position: fixed; inset: 0;
+      z-index: 999998;
+      pointer-events: none; /* buttons inside will turn it on */
+    }
+    .stick {
+      position: absolute;
+      width: 160px; height: 160px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.22);
+      background: rgba(0,0,0,.18);
+      backdrop-filter: blur(6px);
+      pointer-events: auto;
+      touch-action: none;
+      display: none; /* only show on mobile unless forced */
+    }
+    .stick .knob {
+      position: absolute;
+      left: 50%; top: 50%;
+      width: 62px; height: 62px;
+      margin-left: -31px; margin-top: -31px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.30);
+      background: rgba(255,255,255,.14);
+    }
+    #stickL { left: 18px; bottom: 22px; }
+    #stickR { right: 18px; bottom: 22px; }
+
+    #mobileBar{
+      position: fixed;
+      left: 12px; bottom: 12px;
+      z-index: 999999;
+      display:flex; gap:8px; flex-wrap:wrap;
+      pointer-events:auto;
+    }
+
+    .tag {
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,.22);
+      background: rgba(0,0,0,.35);
+      color: #fff;
+      font: 900 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
       backdrop-filter: blur(6px);
     }
-    #hudToggleBtn:active{ transform: translateY(1px); }
   </style>
 </head>
 
 <body>
   <div id="app"></div>
 
-  <!-- Diagnostics HUD -->
+  <!-- HUD -->
   <div id="hud">
     <div class="row">
       <span class="pill" id="boot-status">boot…</span>
+      <span class="pill" id="health-pill">health: --</span>
+      <span class="pill" id="perf-pill">fps: --</span>
+      <span class="pill" id="pos-pill">pos: --</span>
+      <span class="pill" id="room-pill">room: lobby</span>
+    </div>
+
+    <div class="row">
       <button class="btn" id="copyLogBtn" type="button">Copy Log</button>
       <button class="btn" id="clearLogBtn" type="button">Clear</button>
       <button class="btn" id="enterVrBtn" type="button">Enter VR</button>
+      <button class="btn" id="safeModeBtn" type="button">SafeMode: OFF</button>
+      <button class="btn" id="mobileSticksBtn" type="button">Sticks: AUTO</button>
+      <button class="btn" id="dumpBtn" type="button">Dump State</button>
     </div>
+
+    <div class="row">
+      <button class="btn" data-room="lobby" type="button">Lobby</button>
+      <button class="btn" data-room="poker" type="button">Poker</button>
+      <button class="btn" data-room="store" type="button">Store</button>
+      <button class="btn" data-room="scorpion" type="button">Scorpion</button>
+      <button class="btn" data-room="spectate" type="button">Spectate</button>
+    </div>
+
     <pre id="hud-log">Loading…</pre>
   </div>
 
-  <!-- Always-visible toggle -->
   <button id="hudToggleBtn" type="button" title="Toggle HUD (H)">HUD</button>
 
+  <!-- Android Dual Stick Layer -->
+  <div id="mobilePad">
+    <div id="stickL" class="stick"><div class="knob"></div></div>
+    <div id="stickR" class="stick"><div class="knob"></div></div>
+  </div>
+
+  <!-- Quick mobile bar (always usable even if HUD hidden) -->
+  <div id="mobileBar">
+    <span class="tag" id="mobileTag">MOBILE: auto</span>
+    <button class="btn" id="mHudBtn" type="button">HUD</button>
+  </div>
+
   <script>
-    // HTML-side log hooks (boot.js + index.js use these safely)
     (() => {
       const logEl = document.getElementById("hud-log");
       const statusEl = document.getElementById("boot-status");
       const buf = [];
 
+      // shared globals for JS core
+      window.SCARLETT_UI = {
+        setHealth: (t) => { const el = document.getElementById("health-pill"); if (el) el.textContent = `health: ${t}`; },
+        setPerf: (t) => { const el = document.getElementById("perf-pill"); if (el) el.textContent = t; },
+        setPos: (t) => { const el = document.getElementById("pos-pill"); if (el) el.textContent = t; },
+        setRoom: (t) => { const el = document.getElementById("room-pill"); if (el) el.textContent = `room: ${t}`; },
+        setMobileTag: (t) => { const el = document.getElementById("mobileTag"); if (el) el.textContent = t; }
+      };
+
       window.__HTML_LOG = (line) => {
         buf.push(line);
-        if (buf.length > 120) buf.splice(0, buf.length - 120);
+        if (buf.length > 220) buf.splice(0, buf.length - 220);
         if (logEl) logEl.textContent = buf.join("\n");
       };
+      window.__SET_BOOT_STATUS = (t) => { if (statusEl) statusEl.textContent = t; };
 
-      window.__SET_BOOT_STATUS = (t) => {
-        if (statusEl) statusEl.textContent = t;
-      };
-
-      // buttons
-      const copyBtn = document.getElementById("copyLogBtn");
-      const clearBtn = document.getElementById("clearLogBtn");
-
-      copyBtn?.addEventListener("click", async () => {
-        try {
-          const text = logEl?.textContent || "";
-          await navigator.clipboard.writeText(text);
-          window.__SET_BOOT_STATUS("log copied ✅");
-          setTimeout(() => window.__SET_BOOT_STATUS("ready"), 900);
-        } catch (e) {
-          window.__HTML_LOG(`[HTML] Copy failed: ${e?.message || String(e)}`);
-        }
+      // log buttons
+      document.getElementById("copyLogBtn")?.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(logEl?.textContent || ""); window.__SET_BOOT_STATUS("log copied ✅"); }
+        catch (e) { window.__HTML_LOG(`[HTML] Copy failed: ${e?.message || String(e)}`); }
       });
+      document.getElementById("clearLogBtn")?.addEventListener("click", () => { buf.length = 0; if (logEl) logEl.textContent = ""; });
 
-      clearBtn?.addEventListener("click", () => {
-        buf.length = 0;
-        if (logEl) logEl.textContent = "";
-        window.__SET_BOOT_STATUS("cleared");
-        setTimeout(() => window.__SET_BOOT_STATUS("ready"), 500);
-      });
-
-      // HUD toggle (H key + button)
+      // HUD toggle
       const hud = document.getElementById("hud");
       const toggleBtn = document.getElementById("hudToggleBtn");
+      const mHudBtn = document.getElementById("mHudBtn");
       let hidden = false;
-
       const apply = () => {
-        if (hud) hud.style.display = hidden ? "none" : "block";
+        if (hud) hud.classList.toggle("hidden", hidden);
         if (toggleBtn) toggleBtn.textContent = hidden ? "HUD (off)" : "HUD";
       };
-
       const toggle = () => { hidden = !hidden; apply(); };
-
       toggleBtn?.addEventListener("click", toggle);
-      window.addEventListener("keydown", (e) => {
-        if (e.key === "h" || e.key === "H") toggle();
-      });
-
-      window.addEventListener("load", () => {
-        apply();
-        setTimeout(apply, 250);
-        setTimeout(apply, 1000);
-      });
+      mHudBtn?.addEventListener("click", toggle);
+      window.addEventListener("keydown", (e) => { if (e.key === "h" || e.key === "H") toggle(); });
+      window.addEventListener("load", () => { apply(); setTimeout(apply, 250); setTimeout(apply, 1000); });
     })();
   </script>
 
-  <!-- ONLY entry point -->
   <script type="module" src="./js/boot.js"></script>
 </body>
 </html>

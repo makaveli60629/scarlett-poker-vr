@@ -1,4 +1,4 @@
-// /js/index.js — Scarlett FULL XR Runtime v4.9.2
+// /js/index.js — Scarlett FULL XR Runtime v5.0
 import { VRButton } from "./VRButton.js";
 
 const HUD = (() => {
@@ -17,7 +17,6 @@ const HUD = (() => {
 
   const bar = el("div", `display:flex; gap:10px; align-items:center; margin-bottom:10px; pointer-events:auto; flex-wrap:wrap;`);
   const title = el("div", `font-weight:800;`); title.textContent = "Scarlett VR Poker";
-
   const pill = (txt)=>{ const p=el("div",`
     padding:6px 10px; border-radius:999px;
     border:1px solid rgba(127,231,255,.18);
@@ -153,7 +152,7 @@ async function loadTHREE(){
   return await import("https://unpkg.com/three@0.160.0/build/three.module.js");
 }
 
-// ✅ ONLY 2 lasers: attach to getController(i) only
+// 2 lasers total, one per controller
 function installLasers(THREE, renderer, scene){
   const controllers=[];
   const makeLaser=()=>{
@@ -163,7 +162,6 @@ function installLasers(THREE, renderer, scene){
     line.name="LaserLine";
     return line;
   };
-
   for(let i=0;i<2;i++){
     const c=renderer.xr.getController(i);
     c.name=`XRController_${i}`;
@@ -177,40 +175,35 @@ function installLasers(THREE, renderer, scene){
 
 function deadzone(v,dz){ return Math.abs(v)<dz?0:v; }
 
-// best-stick resolver (inputSources first, then navigator pads)
+// Best-effort pad resolver with last-resort "single pad controls both"
 function resolveSticks(renderer){
-  const session=renderer.xr.getSession?.();
   const out={ left:null, right:null, srcCount:0, navCount:0 };
 
+  const session=renderer.xr.getSession?.();
+  const sources=[];
   if(session){
-    const sources=[];
     for(const src of session.inputSources){
-      if(src?.gamepad) sources.push(src);
+      if(src?.gamepad && src.gamepad.axes?.length>=2) sources.push(src);
     }
     out.srcCount = sources.length;
-
-    // prefer explicit handedness, else first two
-    let L = sources.find(s=>s.handedness==="left") || sources[0] || null;
-    let R = sources.find(s=>s.handedness==="right") || sources[1] || null;
-
-    // some profiles put move on "right" only; we still accept whatever exists
-    out.left = L;
-    out.right = R;
+    out.left  = sources.find(s=>s.handedness==="left")  || null;
+    out.right = sources.find(s=>s.handedness==="right") || null;
+    if(!out.left && sources[0]) out.left = sources[0];
+    if(!out.right && sources[1]) out.right = sources[1];
   }
 
-  // fallback
+  const nav=[];
   if(navigator.getGamepads){
-    const gps = navigator.getGamepads();
-    const list=[];
-    for(const gp of gps){
-      if(gp && gp.axes && gp.axes.length>=2) list.push(gp);
+    for(const gp of navigator.getGamepads()){
+      if(gp && gp.axes && gp.axes.length>=2) nav.push(gp);
     }
-    out.navCount = list.length;
-
-    if(!out.left && list[0]) out.left = { gamepad:list[0], handedness:"left" };
-    if(!out.right && list[1]) out.right = { gamepad:list[1], handedness:"right" };
   }
+  out.navCount = nav.length;
 
+  if(!out.left && nav[0]) out.left = { gamepad: nav[0], handedness:"left" };
+  if(!out.right && nav[1]) out.right = { gamepad: nav[1], handedness:"right" };
+
+  if(out.left && !out.right) out.right = out.left;
   return out;
 }
 
@@ -227,7 +220,7 @@ function bootLoop(THREE, STATE){
       const lgp = sticks.left?.gamepad;
       const rgp = sticks.right?.gamepad;
 
-      // Default mapping: left stick move, right stick turn
+      // Left = move, Right = turn. If left dead but right live, swap.
       let mx=0,mz=0,turn=0;
 
       if(lgp?.axes?.length>=2){
@@ -238,32 +231,31 @@ function bootLoop(THREE, STATE){
         turn = deadzone(rgp.axes[0]||0, 0.14);
       }
 
-      // If left axes are dead but right has axes, swap (some headsets map differently)
       const leftLive = Math.abs(mx)+Math.abs(mz) > 0.01;
       const rightLive = Math.abs(rgp?.axes?.[0]||0)+Math.abs(rgp?.axes?.[1]||0) > 0.01;
       if(!leftLive && rightLive){
         mx = deadzone(rgp.axes[0]||0, 0.14);
         mz = deadzone(rgp.axes[1]||0, 0.14);
-        // keep turn from left if available
         if(lgp?.axes?.length>=2) turn = deadzone(lgp.axes[0]||0, 0.14);
       }
 
       const yaw = player.rotation.y;
-      const speed = 2.35 * dt;
+      const speed = 2.25 * dt;
       const vx = (mx * Math.cos(yaw) - mz * Math.sin(yaw)) * speed;
       const vz = (mx * Math.sin(yaw) + mz * Math.cos(yaw)) * speed;
 
-      player.rotation.y -= turn * 2.35 * dt;
+      player.rotation.y -= turn * 2.25 * dt;
       player.position.x += vx;
       player.position.z += vz;
 
       dbgT += dt;
-      if(dbgT > 0.6){
+      if(dbgT > 0.7){
         dbgT = 0;
         HUD.setInput(`XR src=${sticks.srcCount} nav=${sticks.navCount} L(${(lgp?.axes?.[0]||0).toFixed(2)},${(lgp?.axes?.[1]||0).toFixed(2)}) R(${(rgp?.axes?.[0]||0).toFixed(2)},${(rgp?.axes?.[1]||0).toFixed(2)})`);
       }
 
       STATE.World?.frame?.({ THREE, scene, renderer, camera, player, controllers, sticks }, dt);
+
     } else if(STATE.sticks){
       // Android
       const mx = STATE.sticks.left?.x || 0;
@@ -271,11 +263,11 @@ function bootLoop(THREE, STATE){
       const turn = STATE.sticks.right?.x || 0;
 
       const yaw = player.rotation.y;
-      const speed = 2.1 * dt;
+      const speed = 2.05 * dt;
       const vx = (mx * Math.cos(yaw) - mz * Math.sin(yaw)) * speed;
       const vz = (mx * Math.sin(yaw) + mz * Math.cos(yaw)) * speed;
 
-      player.rotation.y -= turn * 2.1 * dt;
+      player.rotation.y -= turn * 2.05 * dt;
       player.position.x += vx;
       player.position.z += vz;
 
@@ -299,9 +291,9 @@ function bootLoop(THREE, STATE){
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
-  scene.fog = new THREE.Fog(0x05060a, 10, 80);
+  scene.fog = new THREE.Fog(0x05060a, 10, 90);
 
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.02, 300);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.02, 350);
   camera.position.set(0,1.65,0);
 
   const player = new THREE.Group();

@@ -1,14 +1,15 @@
-// /js/index.js — Scarlett FULL (Stable Quest Controls) v5.2
-// ✅ VRButton + Quest controllers
-// ✅ Left stick move, Right stick smooth turn
-// ✅ Teleport = Right-hand laser + Trigger (select)
-// ✅ Android dual-stick still works
-// ✅ HUD Hide/Show (never blocks controls)
+// /js/index.js — Scarlett FULL (Quest + Android) v5.3
+// ✅ Quest controllers: Left stick move, Right stick smooth turn
+// ✅ Controllers + lasers PARENTED TO PlayerRig (fixes “lasers stuck at table”)
+// ✅ Teleport commit: RIGHT trigger (selectstart) -> moves PlayerRig to ring hit
+// ✅ Android dual-stick works
+// ✅ HUD hide/show so it never blocks touch
 
 import { VRButton } from "./VRButton.js";
 
+// ---------------- HUD ----------------
 const HUD = (() => {
-  const state = { lines: [], max: 1500, hidden: false };
+  const state = { lines: [], max: 1800, hidden: false };
 
   const el = (tag, css) => {
     const e = document.createElement(tag);
@@ -27,7 +28,7 @@ const HUD = (() => {
   `);
 
   const bar = el("div", `display:flex; gap:10px; align-items:center; margin-bottom:10px; pointer-events:auto;`);
-  const title = el("div", `font-weight:800;`); title.textContent = "Scarlett VR Poker";
+  const title = el("div", `font-weight:900;`); title.textContent = "Scarlett VR Poker";
 
   const pill = (txt) => {
     const p = el("div", `
@@ -121,7 +122,7 @@ const HUD = (() => {
   return { log, setXR, setMode, setHidden };
 })();
 
-// ---------- Android dual-stick ----------
+// --------------- Android dual stick ---------------
 function installAndroidDualStick(HUD){
   const isTouch = "ontouchstart" in window || (navigator.maxTouchPoints|0) > 0;
   if (!isTouch) return null;
@@ -181,33 +182,36 @@ function installAndroidDualStick(HUD){
   return { left, right };
 }
 
-// ---------- THREE loader ----------
+// --------------- THREE loader ---------------
 async function loadTHREE(){
   const url = "https://unpkg.com/three@0.160.0/build/three.module.js";
   return await import(url);
 }
 
-// ---------- Lasers ----------
-function installControllerLasers(THREE, renderer, scene, HUD){
+// --------------- Controllers + lasers (PARENT TO PLAYER) ---------------
+function installControllersAndLasers(THREE, renderer, player, HUD){
   const controllers = [];
   for(let i=0;i<2;i++){
     const c = renderer.xr.getController(i);
     c.name = `XRController_${i}`;
-    scene.add(c);
+    // IMPORTANT: parent to player rig so they move with locomotion
+    player.add(c);
     controllers.push(c);
 
-    // laser line
-    const geo = new THREE.BufferGeometry().setFromPoints([ new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-2.2) ]);
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0,0,0),
+      new THREE.Vector3(0,0,-2.4)
+    ]);
     const mat = new THREE.LineBasicMaterial({ color:0x7fe7ff, transparent:true, opacity:0.92 });
     const line = new THREE.Line(geo, mat);
     line.name = "LaserLine";
     c.add(line);
   }
-  HUD.log("[index] controller lasers installed ✅");
+  HUD.log("[index] controllers + lasers installed ✅ (parented to PlayerRig)");
   return controllers;
 }
 
-// ---------- Gamepads ----------
+// --------------- Locomotion ---------------
 function deadzone(v, dz){ return Math.abs(v) < dz ? 0 : v; }
 
 function getXRGamepads(renderer){
@@ -222,96 +226,86 @@ function getXRGamepads(renderer){
   return { left, right };
 }
 
-// ---------- Main loop ----------
 function bootLoop(THREE, STATE){
   const { renderer, scene, camera, player, controllers, World, sticks, HUD } = STATE;
   const clock = new THREE.Clock();
 
-  // button state for teleport
-  const padsState = { btnA:false, btnX:false };
+  // one-frame trigger pulse for teleport commit
+  const padsState = { trigger: false, triggerLeft:false, triggerRight:false };
 
-  function hookTeleportButtons(){
-    const session = renderer.xr.getSession?.();
-    if(!session) return;
-
-    // Right controller trigger => teleport confirm (select)
+  function hookControllerSelect(){
     for(let i=0;i<2;i++){
       const c = renderer.xr.getController(i);
-      c.removeEventListener("selectstart", c.userData._selStart || (()=>{}));
-      c.userData._selStart = () => {
-        // map to btnA so world can read one boolean
-        padsState.btnA = true;
-        setTimeout(()=>padsState.btnA=false, 60);
+      const onStart = () => {
+        padsState.trigger = true;
+        if(i===0) padsState.triggerLeft = true;
+        if(i===1) padsState.triggerRight = true;
+        setTimeout(()=>{
+          padsState.trigger = false;
+          padsState.triggerLeft = false;
+          padsState.triggerRight = false;
+        }, 60);
       };
-      c.addEventListener("selectstart", c.userData._selStart);
+      c.addEventListener("selectstart", onStart);
     }
   }
 
   renderer.xr.addEventListener("sessionstart", () => {
     HUD.log("[xr] sessionstart ✅");
-    hookTeleportButtons();
-  });
-
-  renderer.xr.addEventListener("sessionend", () => {
-    HUD.log("[xr] sessionend");
+    hookControllerSelect();
   });
 
   renderer.setAnimationLoop(() => {
     const dt = Math.min(0.05, clock.getDelta());
 
-    // movement (Quest sticks)
     if(renderer.xr.isPresenting){
       const pads = getXRGamepads(renderer);
       const lgp = pads.left?.gamepad;
       const rgp = pads.right?.gamepad;
 
-      // left stick: move
+      // Quest: left axes[0]=x, axes[1]=y (forward=-1)
       let mx=0, mz=0;
       if(lgp?.axes?.length >= 2){
         mx = deadzone(lgp.axes[0] || 0, 0.14);
-        mz = deadzone(lgp.axes[1] || 0, 0.14); // forward usually -1
+        mz = deadzone(lgp.axes[1] || 0, 0.14);
       }
 
-      // right stick: smooth turn
+      // right: smooth turn on x
       let turn=0;
       if(rgp?.axes?.length >= 2){
         turn = deadzone(rgp.axes[0] || 0, 0.18);
       }
 
       const yaw = player.rotation.y;
-      const speed = 2.15 * dt;
+      const speed = 2.35 * dt;
       const vx = (mx * Math.cos(yaw) - mz * Math.sin(yaw)) * speed;
       const vz = (mx * Math.sin(yaw) + mz * Math.cos(yaw)) * speed;
 
-      player.rotation.y -= turn * 2.25 * dt;
+      player.rotation.y -= turn * 2.35 * dt;
       player.position.x += vx;
       player.position.z += vz;
     } else if(sticks){
-      // Android fallback
+      // Android: left stick move, right stick turn
       const mx = sticks.left?.x || 0;
       const mz = sticks.left?.y || 0;
       const turn = sticks.right?.x || 0;
 
       const yaw = player.rotation.y;
-      const speed = 2.0 * dt;
+      const speed = 2.15 * dt;
       const vx = (mx * Math.cos(yaw) - mz * Math.sin(yaw)) * speed;
       const vz = (mx * Math.sin(yaw) + mz * Math.cos(yaw)) * speed;
 
-      player.rotation.y -= turn * 2.0 * dt;
+      player.rotation.y -= turn * 2.2 * dt;
       player.position.x += vx;
       player.position.z += vz;
     }
 
-    // world update
-    World?.frame?.({
-      THREE, scene, renderer, camera, player, controllers,
-      pads: padsState
-    }, dt);
-
+    World?.frame?.({ THREE, scene, renderer, camera, player, controllers, pads: padsState }, dt);
     renderer.render(scene, camera);
   });
 }
 
+// ---------------- MAIN BOOT ----------------
 (async function boot(){
   HUD.log("[BOOT] boot.js loaded ✅");
   HUD.setXR(!!navigator.xr);
@@ -328,12 +322,11 @@ function bootLoop(THREE, STATE){
     return;
   }
 
-  // scene
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
-  scene.fog = new THREE.Fog(0x05060a, 10, 70);
+  scene.fog = new THREE.Fog(0x05060a, 12, 110);
 
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.02, 300);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.02, 450);
   camera.position.set(0, 1.65, 0);
 
   const player = new THREE.Group();
@@ -348,7 +341,6 @@ function bootLoop(THREE, STATE){
   renderer.xr.enabled = true;
   document.body.appendChild(renderer.domElement);
 
-  // VRButton
   try{
     document.body.appendChild(VRButton.createButton(renderer));
     HUD.log("[index] VRButton appended ✅");
@@ -356,16 +348,12 @@ function bootLoop(THREE, STATE){
     HUD.log("[VRButton] failed:", e?.message || e);
   }
 
-  // sticks
   const sticks = installAndroidDualStick(HUD);
+  const controllers = installControllersAndLasers(THREE, renderer, player, HUD);
 
-  // controllers + lasers
-  const controllers = installControllerLasers(THREE, renderer, scene, HUD);
-
-  // world
   let WorldMod;
   try{
-    HUD.log("[index] importing world.js …");
+    HUD.log("[index] importing ./world.js …");
     WorldMod = await import(`./world.js?v=${Date.now()}`);
     HUD.log("[index] world.js imported ✅");
   }catch(e){

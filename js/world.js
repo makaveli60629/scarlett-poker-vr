@@ -1,216 +1,190 @@
-// /js/world.js — ScarlettVR FULL WORLD v10 (STABLE + Humanoids + Pit/Divot + Rooms + Store + Scorpion + Spectate)
-// ✅ NO core edits. NO ControlsExt dependency.
-// ✅ Fixes dashed-arc crash (computeLineDistances) by seeding geometry properly.
-// ✅ XR: Teleport (both hands) + Laser + Reticle + Rainbow Arc
-// ✅ XR: Smooth move (LEFT stick) + Snap turn (RIGHT stick) with inversion fixes
-// ✅ Android/2D works via your new index.js (joystick + look)
-// ✅ Adds Humanoid bots + player avatar if files exist (safe fallback)
-import { PokerSystem } from "./poker_system.js";
-let AvatarSystem = null;
-let BotSystem = null;
+// /js/world.js — ScarlettVR MASTER WORLD v4.1 (Pit Table + Upgrades + PokerJS + Humanoids)
+// ✅ Center lobby + SUNKEN PIT poker table (your centerpiece)
+// ✅ Guard-rail fully enclosed with a single entrance
+// ✅ Upstairs spectator balcony ring
+// ✅ Watch UI (smaller) on left controller
+// ✅ Teleport arcs fixed (no Line.computeLineDistances crash)
+// ✅ PokerJS smooth dealing + chips (module)
+// ✅ Humanoid bots (low-poly elegant placeholders)
+// ✅ Uses core/controls.js for XR locomotion (does not interfere with Android controls)
 
-// Safe optional imports (won't crash if files missing)
-try { ({ AvatarSystem } = await import("./avatar_system.js")); } catch {}
-try { ({ BotSystem } = await import("./bot_system.js")); } catch {}
+import Controls from "../core/controls.js";
+import { applyLighting } from "./lighting.js";
+import { PokerJS } from "./poker.js";
+import { Humanoids } from "./humanoids.js";
+import { ScorpionSystem } from "./scorpion.js";
 
 export const World = {
-  async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD }) {
+  async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD, FLAGS }) {
     const s = {
+      flags: { safeMode: false, poker: true, bots: true, fx: true, ...(FLAGS||{}) },
       THREE, scene, renderer, camera, player, controllers, log, BUILD,
-
       root: new THREE.Group(),
+
+      // movement tuning
+      diagonal45: true,
+
+      // ray + temp
+      raycaster: new THREE.Raycaster(),
+      tmpM: new THREE.Matrix4(),
+      tmpV: new THREE.Vector3(),
+      tmpDir: new THREE.Vector3(),
+
+      // teleport surfaces
       groundMeshes: [],
 
-      // XR visuals
+      // visuals
       lasers: [],
       reticles: [],
       arcs: { left: null, right: null },
       arcPts: { left: [], right: [] },
       dashLines: [],
+
       lastTeleportPointL: null,
       lastTeleportPointR: null,
-      showArcs: true,
-      showLasers: true,
 
-      // Locomotion (XR sticks)
-      loco: {
-        enabled: true,
-        deadzone: 0.14,
-        moveSpeed: 2.6,
-        snapTurnDeg: 30,
-        snapCooldown: 0,
-        snapCooldownS: 0.18,
-        diagonal45: true,
-
-        // IMPORTANT: inversion fixes you reported
-        invertLeftX: true,
-        invertLeftY: true,
-        invertRightX: false,
-        invertRightY: true
-      },
-
-      // Watch UI
+      // watch
       watch: { root: null, visible: true, buttons: [] },
 
-      // Rooms/anchors
+      // anchors
       anchors: {},
       room: "lobby",
 
-      // Ambient
-      hoverCars: [],
-      neonMats: [],
+      // modules
+      poker: null,
+      bots: null,
 
-      // Systems
-      systems: {}
+      // ambience
+      hoverCars: [],
     };
 
     s.root.name = "WORLD_ROOT";
     scene.add(s.root);
 
-    // ===== ENV / LIGHTING =====
+    // build environment
     addSkyAndFog(s);
-    addLightsCinematic(s);
+    applyLighting({ THREE, scene, root: s.root });
 
-    // ===== WORLD GEOMETRY =====
     buildLobbyShell(s);
-    buildLobbyFloorCarpet(s);
+    buildLobbyFloor(s);
 
-    // Pit + correct "down" ramp into pit (no protruding)
-    buildPitAndDownstairs(s);
+    buildPitAndTable(s);         // ✅ your pit + centered table
+    buildDownStairs(s);          // ✅ ramp down into pit
 
-    // Four rooms + hallways
-    buildRoomsAndHallways(s);
-
-    // Store + Scorpion + Spectate platform
+    buildRoomsAndHallways(s);    // store/scorpion
     buildStore(s);
     buildScorpion(s);
-    buildSpectate(s);
+    buildSpectateBalcony(s);     // ✅ upstairs spectator ring
 
-    // Hover cars + jumbotrons
     buildHoverCars(s);
-    buildHoloJumbotrons(s);
 
-    // ===== XR VISUALS =====
+    // XR visuals
     setupXRLasers(s);
     setupFloorReticles(s);
     setupTeleportArcs(s);
-    // ===== POKER SYSTEM (Smooth Dealing + Event Chips) =====
-s.poker = PokerSystem.init(s, {
-  tableCenter: new THREE.Vector3(0, 0.95, -9.5),   // match your table anchor
-  // deckPos: new THREE.Vector3(-1.1, 1.05, -9.55), // optional override
-  // potPos:  new THREE.Vector3(0, 1.01, -9.40),    // optional override
-  enableZones: true
-});
 
-// quick demo (remove later)
-s.poker.dealNext();
-s.poker.dealNext();
-s.poker.dealNext();
+    // small watch (left)
+    setupWatch(s);
 
-    // ===== WATCH (smaller, cleaner) =====
-    setupPrettyWatch(s);
+    // PokerJS module bound to pit table (toggle-safe)
+    s.poker = null;
+    if (!s.flags.safeMode && s.flags.poker) {
+      s.poker = PokerJS.init({
+        THREE,
+        scene,
+        root: s.root,
+        log,
+        camera,
+        deckPos: new THREE.Vector3(-1.10, s._tableY + 0.16, 0.10),
+        potPos:  new THREE.Vector3(0.00,  s._tableY + 0.13, 0.00),
+        textures: {
+          cardBack: new THREE.TextureLoader().load("./assets/textures/card_back.png"),
+          tableTop: new THREE.TextureLoader().load("./assets/textures/table_top.png"),
+          chips: new THREE.TextureLoader().load("./assets/textures/chips.png"),
+        }
+      });
+    }
+// chips on pit table for interaction demo
+    s._chipStack = s.poker.createChipStack({ pos: new THREE.Vector3(1.15, s._tableY + 0.13, 0.15), count: 14, value: 25 });
 
-    // ===== HUMANOIDS (optional) =====
-    // If you created the humanoid files I provided, these will load; otherwise no crash.
-    try {
-      if (AvatarSystem?.init) {
-        s.systems.avatar = AvatarSystem.init({ THREE, player, controllers, renderer, log }, { hideHeadInXR: true });
-      }
-    } catch (e) { log?.("[avatar] init ❌", String(e?.stack || e)); }
+    // Bots
+    // Bots (toggle-safe)
+    s.bots = null;
+    if (!s.flags.safeMode && s.flags.bots) {
+      s.bots = Humanoids.init({ THREE, root: s.root });
+      // 6 bots around the pit table
+      s.bots.spawnBots({
+        count: 6,
+        center: new THREE.Vector3(0, 0, 0),
+        radius: 2.35,
+        y: 0,
+        lookAt: new THREE.Vector3(0, 1.1, 0)
+      });
+    }
+    // anchors (lobby ring is at z=13.5 so you face inward)
+    s.anchors.lobby    = { pos: new THREE.Vector3(0, 0, 13.5), yaw: Math.PI };
+    s.anchors.store    = { pos: new THREE.Vector3(-26, 0, 0),  yaw: Math.PI/2 };
+    s.anchors.scorpion = { pos: new THREE.Vector3(26, 0, 0),   yaw: -Math.PI/2 };
+    s.anchors.spectate = { pos: new THREE.Vector3(0, 4.0, -6.0), yaw: 0 };
 
-    try {
-      if (BotSystem?.init) {
-        s.systems.bots = BotSystem.init(
-          { THREE, root: s.root, log },
-          { count: 10, zone: { center: { x: 0, y: 0, z: 0 }, radius: 15 } }
-        );
-      }
-    } catch (e) { log?.("[bots] init ❌", String(e?.stack || e)); }
+    s.scorpion = ScorpionSystem.init({ THREE, root: s.root, log, seatAnchor: s.anchors.scorpion });
 
-    // ===== ANCHORS =====
-    s.anchors.lobby    = { pos: new THREE.Vector3(0, 0, 13.5),  yaw: Math.PI };
-    s.anchors.poker    = { pos: new THREE.Vector3(0, 0, -9.5),  yaw: 0 };
-    s.anchors.store    = { pos: new THREE.Vector3(-26, 0, 0),   yaw: Math.PI / 2 };
-    s.anchors.scorpion = { pos: new THREE.Vector3(26, 0, 0),    yaw: -Math.PI / 2 };
-    s.anchors.spectate = { pos: new THREE.Vector3(0, 3.0, -14), yaw: 0 };
-
-    // Spawn lobby facing inward
     setRigToAnchor(s, s.anchors.lobby);
 
-    // ===== INPUT EVENTS =====
-    // Right trigger = teleport (always)
-    controllers.c1?.addEventListener("selectstart", () => teleportNow(s, "right"));
-
-    // Left trigger = watch click first, else teleport
-    controllers.c0?.addEventListener("selectstart", () => {
+    // input events (teleport + watch)
+    controllers.c1.addEventListener("selectstart", () => teleportNow(s, "right"));
+    controllers.c0.addEventListener("selectstart", () => {
       if (tryClickWatch(s)) return;
       teleportNow(s, "left");
     });
 
-    // Left grip = toggle watch
-    controllers.c0?.addEventListener("squeezestart", () => toggleWatch(s));
+    // Optional: right squeeze -> quick bet demo (moves 3 chips to pot)
+    controllers.c1.addEventListener("squeezestart", () => {
+      try { s.poker.betToPot({ stack: s._chipStack, amount: 3 }); } catch {}
+    });
 
-    log?.(`[world] FULL WORLD v10 STABLE ✅ build=${BUILD}`);
+    log?.(`[world] MASTER WORLD v4.1 ✅ build=${BUILD}`);
     return {
       setRoom: (room) => {
+        const prev = s.room;
         s.room = room;
+        if (prev === "scorpion" && room !== "scorpion") s.scorpion?.onExit?.({ player, camera });
         setRigToAnchor(s, s.anchors[room] || s.anchors.lobby);
+        if (room === "scorpion") s.scorpion?.onEnter?.({ player, camera });
         log?.(`[rm] room=${room}`);
+      },
+      setFlags: (flags) => {
+        s.flags = { ...s.flags, ...(flags || {}) };
+        log?.(`[flags] safeMode=${s.flags.safeMode} poker=${s.flags.poker} bots=${s.flags.bots} fx=${s.flags.fx}`);
       },
       update: (dt, t) => update(s, dt, t),
     };
   }
 };
 
-// =======================
-// ENV + LIGHTING
-// =======================
+// ----------------------
+// ENV
+// ----------------------
 
 function addSkyAndFog(s) {
   const { THREE, scene } = s;
   scene.background = new THREE.Color(0x05070d);
-  scene.fog = new THREE.Fog(0x05070d, 12, 90);
-}
-
-function addLightsCinematic(s) {
-  const { THREE, scene, root } = s;
-
-  const hemi = new THREE.HemisphereLight(0xdaf0ff, 0x0b0f1a, 1.05);
-  hemi.position.set(0, 70, 0);
-  scene.add(hemi);
-
-  const sun = new THREE.DirectionalLight(0xffffff, 1.15);
-  sun.position.set(35, 70, 35);
-  scene.add(sun);
-
-  const lobbyGlow = new THREE.PointLight(0x7fb2ff, 1.15, 95, 2);
-  lobbyGlow.position.set(0, 9.0, 0);
-  root.add(lobbyGlow);
-
-  const magenta = new THREE.PointLight(0xff6bd6, 0.65, 80, 2);
-  magenta.position.set(0, 2.6, 0);
-  root.add(magenta);
-
-  const pokerSpot = new THREE.SpotLight(0xffffff, 1.05, 40, Math.PI / 4, 0.35, 1);
-  pokerSpot.position.set(0, 8.5, -9.5);
-  pokerSpot.target.position.set(0, 1.0, -9.5);
-  root.add(pokerSpot);
-  root.add(pokerSpot.target);
+  scene.fog = new THREE.Fog(0x05070d, 16, 110);
 }
 
 function matFloor(THREE, color = 0x111a28) {
   return new THREE.MeshStandardMaterial({ color, roughness: 0.95, metalness: 0.06 });
 }
 
-// =======================
-// LOBBY BEAUTY
-// =======================
+// ----------------------
+// LOBBY
+// ----------------------
 
 function buildLobbyShell(s) {
   const { THREE, root } = s;
 
   const shell = new THREE.Mesh(
-    new THREE.CylinderGeometry(22, 22, 10, 64, 1, true),
+    new THREE.CylinderGeometry(24, 24, 10, 72, 1, true),
     new THREE.MeshStandardMaterial({
       color: 0x0b1220, roughness: 0.9, metalness: 0.1,
       side: THREE.DoubleSide, transparent: true, opacity: 0.55
@@ -225,27 +199,18 @@ function buildLobbyShell(s) {
     emissive: new THREE.Color(0x66ccff),
     emissiveIntensity: 0.45
   });
-  s.neonMats.push(ringMat);
 
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(16.5, 0.12, 12, 96), ringMat);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(17.4, 0.12, 12, 120), ringMat);
   ring.rotation.x = Math.PI / 2;
-  ring.position.set(0, 8.8, 0);
+  ring.position.set(0, 8.9, 0);
   root.add(ring);
-
-  const pillarMat = new THREE.MeshStandardMaterial({ color: 0x121c2c, roughness: 0.8, metalness: 0.15 });
-  for (let i = 0; i < 10; i++) {
-    const ang = (i / 10) * Math.PI * 2;
-    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.4, 8.6, 16), pillarMat);
-    p.position.set(Math.cos(ang) * 16.8, 4.2, Math.sin(ang) * 16.8);
-    root.add(p);
-  }
 }
 
-function buildLobbyFloorCarpet(s) {
+function buildLobbyFloor(s) {
   const { THREE, root } = s;
 
   const lobbyFloor = new THREE.Mesh(
-    new THREE.CylinderGeometry(18, 18, 0.35, 64),
+    new THREE.CylinderGeometry(19, 19, 0.35, 72),
     matFloor(THREE, 0x121c2c)
   );
   lobbyFloor.position.set(0, -0.175, 0);
@@ -253,107 +218,145 @@ function buildLobbyFloorCarpet(s) {
   s.groundMeshes.push(lobbyFloor);
 
   const carpet = new THREE.Mesh(
-    new THREE.CircleGeometry(14.8, 64),
+    new THREE.CircleGeometry(15.3, 72),
     new THREE.MeshStandardMaterial({
       color: 0x0f1a2d, roughness: 1.0, metalness: 0.0,
       emissive: new THREE.Color(0x0b1220),
-      emissiveIntensity: 0.06
+      emissiveIntensity: 0.07
     })
   );
   carpet.rotation.x = -Math.PI / 2;
   carpet.position.y = 0.002;
   root.add(carpet);
-
-  const decalMat = new THREE.MeshBasicMaterial({
-    color: 0x66ccff, transparent: true, opacity: 0.22, side: THREE.DoubleSide
-  });
-  for (let i = 0; i < 4; i++) {
-    const wedge = new THREE.Mesh(new THREE.RingGeometry(10.2, 14.4, 32, 1, i*Math.PI/2, Math.PI/4), decalMat);
-    wedge.rotation.x = -Math.PI/2;
-    wedge.position.y = 0.004;
-    root.add(wedge);
-  }
 }
 
-// =======================
-// PIT / DIVOT + DOWNSTAIRS
-// =======================
+// ----------------------
+// PIT + TABLE (CENTERPIECE)
+// ----------------------
 
-function buildPitAndDownstairs(s) {
+function buildPitAndTable(s) {
   const { THREE, root } = s;
 
-  const pitRadius = 7.2;
-  const pitDepth = 2.8;
+  const pitRadius = 7.0;
+  const pitDepth = 3.1;
   const pitFloorY = -pitDepth;
 
-  // Pit floor
+  s._pit = { pitRadius, pitDepth, pitFloorY };
+
+  // pit floor
   const pitFloor = new THREE.Mesh(
-    new THREE.CylinderGeometry(pitRadius, pitRadius, 0.35, 64),
+    new THREE.CylinderGeometry(pitRadius, pitRadius, 0.35, 72),
     matFloor(THREE, 0x0c1220)
   );
   pitFloor.position.set(0, pitFloorY - 0.175, 0);
   root.add(pitFloor);
   s.groundMeshes.push(pitFloor);
 
-  // Pit wall (sunken)
+  // pit wall
   const pitWall = new THREE.Mesh(
-    new THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 64, 1, true),
+    new THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 72, 1, true),
     new THREE.MeshStandardMaterial({ color: 0x0a101e, roughness: 0.95, metalness: 0.06, side: THREE.DoubleSide })
   );
-  pitWall.position.set(0, pitFloorY/2, 0);
+  pitWall.position.set(0, pitFloorY / 2, 0);
   root.add(pitWall);
 
-  // Guard rail around pit with ONE opening (entry)
-  const railMat = new THREE.MeshStandardMaterial({
-    color: 0x1c2433, roughness: 0.5, metalness: 0.22,
-    emissive: new THREE.Color(0x0b1220), emissiveIntensity: 0.04
-  });
+  // centered poker table in pit (sunken)
+  const tableY = pitFloorY + 1.10;
+  s._tableY = tableY;
 
-  // Build rail as segmented arcs leaving an opening on +Z side
+  const tableGroup = new THREE.Group();
+  tableGroup.name = "PIT_TABLE";
+  tableGroup.position.set(0, 0, 0);
+  root.add(tableGroup);
+
+  const felt = new THREE.Mesh(
+    new THREE.CylinderGeometry(3.0, 3.1, 0.35, 72),
+    new THREE.MeshStandardMaterial({ color: 0x134536, roughness: 0.78, metalness: 0.04 })
+  );
+  felt.position.set(0, tableY, 0);
+  tableGroup.add(felt);
+
+  // top texture panel (table_top.png)
+  const texPlane = new THREE.Mesh(
+    new THREE.CircleGeometry(3.0, 96),
+    new THREE.MeshStandardMaterial({
+      map: new THREE.TextureLoader().load("./assets/textures/table_top.png"),
+      roughness: 0.9,
+      metalness: 0.05
+    })
+  );
+  texPlane.rotation.x = -Math.PI / 2;
+  texPlane.position.set(0, tableY + 0.18, 0);
+  tableGroup.add(texPlane);
+
+  const rail = new THREE.Mesh(
+    new THREE.TorusGeometry(3.15, 0.14, 16, 96),
+    new THREE.MeshStandardMaterial({ color: 0x1c2433, roughness: 0.5, metalness: 0.22 })
+  );
+  rail.rotation.x = Math.PI / 2;
+  rail.position.set(0, tableY + 0.20, 0);
+  tableGroup.add(rail);
+
+  // pit guard-rail ring (at main floor height)
   const railY = 0.95;
-  const railR = pitRadius + 0.35;
-  const openingAng = Math.PI / 9; // opening size
-  const segments = 28;
+  const railR = pitRadius + 0.65;
+  const railMat = new THREE.MeshStandardMaterial({ color: 0x0f1724, roughness: 0.5, metalness: 0.2 });
 
-  for (let i = 0; i < segments; i++) {
-    const a0 = (i / segments) * Math.PI * 2;
-    const a1 = ((i+1) / segments) * Math.PI * 2;
-    const mid = (a0 + a1) * 0.5;
+  // build segmented rail with an opening at +Z (south)
+  const segs = 20;
+  const openAng = Math.PI / 8; // opening width
+  for (let i = 0; i < segs; i++) {
+    const a0 = (i / segs) * Math.PI * 2;
+    const a1 = ((i + 1) / segs) * Math.PI * 2;
+    const am = (a0 + a1) / 2;
 
-    // skip opening (centered near +Z)
-    const zSide = Math.abs(wrapAngle(mid - Math.PI/2));
-    if (zSide < openingAng) continue;
+    // skip opening region around +Z
+    const inOpen = Math.abs(normalizeAngle(am - 0)) < openAng; // +Z is angle 0 in our layout (since sin/cos usage)
+    if (inOpen) continue;
 
-    const len = railR * (a1 - a0);
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(len, 0.12, 0.10), railMat);
-    rail.position.set(Math.cos(mid) * railR, railY, Math.sin(mid) * railR);
-    rail.rotation.y = -mid;
-    root.add(rail);
+    const len = 2 * railR * Math.sin((a1 - a0) / 2);
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.05, len), railMat);
+    bar.position.set(Math.sin(am) * railR, railY, Math.cos(am) * railR);
+    bar.rotation.y = am;
+    root.add(bar);
   }
 
-  // Downstairs ramp (goes FROM lobby floor DOWN into pit) aligned to opening at +Z
-  const rampW = 2.2;
-  const rampL = 8.6;
-  const ramp = new THREE.Mesh(
-    new THREE.BoxGeometry(rampW, 0.35, rampL),
-    matFloor(THREE, 0x141b28)
-  );
+  // guard post at entrance
+  const guard = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 1.2, 16), new THREE.MeshStandardMaterial({ color: 0x66ccff, emissive: 0x112244, emissiveIntensity: 0.35, roughness: 0.35 }));
+  guard.position.set(0.75, 0.60, railR - 0.2);
+  root.add(guard);
 
-  // Place it so top is at y≈0, bottom reaches pit floor
-  ramp.position.set(0, -pitDepth * 0.5, pitRadius + rampL * 0.20);
+  // walk ring around pit edge
+  const ringWalk = new THREE.Mesh(
+    new THREE.RingGeometry(pitRadius + 0.15, pitRadius + 3.0, 96),
+    matFloor(THREE, 0x101a2c)
+  );
+  ringWalk.rotation.x = -Math.PI/2;
+  ringWalk.position.y = 0.001;
+  root.add(ringWalk);
+  s.groundMeshes.push(ringWalk);
+}
+
+function buildDownStairs(s) {
+  const { THREE, root } = s;
+  const { pitRadius, pitDepth } = s._pit;
+
+  // Ramp from main floor down into pit at entrance (+Z)
+  const rampW = 2.2;
+  const rampL = 9.2;
+  const ramp = new THREE.Mesh(
+    new THREE.BoxGeometry(rampW, pitDepth, rampL),
+    new THREE.MeshStandardMaterial({ color: 0x141b28, roughness: 0.95, metalness: 0.08 })
+  );
+  ramp.position.set(0, -pitDepth / 2, pitRadius + (rampL * 0.34));
   ramp.rotation.x = -Math.atan2(pitDepth, rampL);
   root.add(ramp);
   s.groundMeshes.push(ramp);
-
-  // Simple "guard" post at entry
-  const guard = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.6, 10), railMat);
-  guard.position.set(1.2, 0.8, pitRadius + 0.2);
-  root.add(guard);
 }
 
-// =======================
-// ROOMS + HALLWAYS
-// =======================
+// ----------------------
+// ROOMS (FOUR-WAY)
+// ----------------------
 
 function buildRoomsAndHallways(s) {
   const { THREE, root } = s;
@@ -368,7 +371,7 @@ function buildRoomsAndHallways(s) {
 
   for (const r of rooms) {
     const floor = new THREE.Mesh(
-      new THREE.BoxGeometry(roomSize * 2.2, 0.35, roomSize * 2.2),
+      new THREE.BoxGeometry(roomSize * 2.3, 0.35, roomSize * 2.3),
       matFloor(THREE, 0x111a28)
     );
     floor.position.set(r.x, -0.175, r.z);
@@ -376,18 +379,18 @@ function buildRoomsAndHallways(s) {
     s.groundMeshes.push(floor);
 
     const walls = new THREE.Mesh(
-      new THREE.BoxGeometry(roomSize * 2.2, wallH, roomSize * 2.2),
+      new THREE.BoxGeometry(roomSize * 2.3, wallH, roomSize * 2.3),
       new THREE.MeshStandardMaterial({
         color: 0x0b1220, roughness: 0.92, metalness: 0.08,
-        transparent: true, opacity: 0.42
+        transparent: true, opacity: 0.40
       })
     );
     walls.position.set(r.x, wallH / 2 - 0.175, r.z);
     root.add(walls);
 
-    // hallways from lobby ring outward
-    const hallLen = 12;
-    const hall = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.35, hallLen), matFloor(THREE, 0x121c2c));
+    // hallway to lobby
+    const hallLen = 12.5;
+    const hall = new THREE.Mesh(new THREE.BoxGeometry(5.0, 0.35, hallLen), matFloor(THREE, 0x121c2c));
     hall.position.y = -0.175;
 
     if (r.name === "north") hall.position.set(0, -0.175, -18);
@@ -400,13 +403,10 @@ function buildRoomsAndHallways(s) {
   }
 }
 
-// =======================
-// STORE / SCORPION / SPECTATE
-// =======================
-
 function buildStore(s) {
   const { THREE, root } = s;
   const store = new THREE.Group();
+  store.name = "STORE_ROOM";
   store.position.set(-26, 0, 0);
   root.add(store);
 
@@ -415,27 +415,34 @@ function buildStore(s) {
   store.add(floor);
   s.groundMeshes.push(floor);
 
-  const glow = new THREE.PointLight(0x66ccff, 1.0, 45, 2);
+  const glow = new THREE.PointLight(0x66ccff, 1.05, 55, 2);
   glow.position.set(0, 3.6, 0);
   store.add(glow);
 
-  // Mannequins (NOT pills)
-  const mm = new THREE.MeshStandardMaterial({ color: 0xe3e3e3, roughness: 0.65, metalness: 0.06 });
+  const sign = makeLabelPlate(THREE, "STORE", 0x0a1020, 0x66ccff, 768, 192);
+  sign.position.set(0, 3.2, -7.5);
+  store.add(sign);
+
+  // mannequins (elegant low-poly)
+  const mm = new THREE.MeshStandardMaterial({ color: 0xe7e7e7, roughness: 0.6, metalness: 0.1 });
   for (let i = 0; i < 6; i++) {
-    const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.45, 0), mm);
-    m.scale.set(0.65, 1.65, 0.55);
-    m.position.set(-6.8 + i*2.7, 1.15, -4.4);
+    const m = new THREE.Group();
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.25, 0.65, 6, 10), mm);
+    torso.position.y = 1.1;
+    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.15, 0), mm);
+    head.position.y = 1.75;
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.35, 0.10, 18), mm);
+    base.position.y = 0.05;
+    m.add(torso, head, base);
+    m.position.set(-6.0 + i*2.4, 0, -3.8);
     store.add(m);
   }
-
-  const sign = makeLabelPlate(THREE, "STORE", 0x0a1020, 0x66ccff);
-  sign.position.set(0, 3.4, -7.4);
-  store.add(sign);
 }
 
 function buildScorpion(s) {
   const { THREE, root } = s;
   const sc = new THREE.Group();
+  sc.name = "SCORPION_ROOM";
   sc.position.set(26, 0, 0);
   root.add(sc);
 
@@ -444,44 +451,61 @@ function buildScorpion(s) {
   sc.add(floor);
   s.groundMeshes.push(floor);
 
-  const light = new THREE.PointLight(0xff6bd6, 1.05, 50, 2);
+  const light = new THREE.PointLight(0xff6bd6, 1.15, 60, 2);
   light.position.set(0, 3.6, 0);
   sc.add(light);
 
-  const sign = makeLabelPlate(THREE, "SCORPION ROOM", 0x0a1020, 0xff6bd6);
+  const sign = makeLabelPlate(THREE, "SCORPION ROOM", 0x0a1020, 0xff6bd6, 1024, 256);
   sign.position.set(0, 3.2, -7.5);
   sc.add(sign);
 
-  // Placeholder tables (you said you see tables here—keeping them)
-  const tmat = new THREE.MeshStandardMaterial({ color: 0x1c2433, roughness: 0.55, metalness: 0.22 });
+  // quick table placeholders (two)
+  const tMat = new THREE.MeshStandardMaterial({ color: 0x1a2a3f, roughness: 0.7, metalness: 0.15 });
   for (let i = 0; i < 2; i++) {
-    const table = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.0, 0.25, 32), tmat);
-    table.position.set(-4 + i*8, 1.0, 0.0);
-    sc.add(table);
+    const t = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.9, 0.35, 48), tMat);
+    t.position.set(-3.0 + i*6.0, 0.9, 0.8);
+    sc.add(t);
   }
 }
 
-function buildSpectate(s) {
+function buildSpectateBalcony(s) {
   const { THREE, root } = s;
-  const plat = new THREE.Mesh(new THREE.BoxGeometry(14, 0.5, 6), matFloor(THREE, 0x121c2c));
-  plat.position.set(0, 3.0, -14);
-  root.add(plat);
-  s.groundMeshes.push(plat);
 
-  const sign = makeLabelPlate(THREE, "SPECTATOR", 0x0a1020, 0xc8d3ff);
-  sign.position.set(0, 4.4, -14);
+  // Balcony ring above lobby, angled toward pit
+  const y = 4.0;
+  const inner = 10.8;
+  const outer = 13.8;
+
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(inner, outer, 96),
+    matFloor(THREE, 0x0f1a2d)
+  );
+  ring.rotation.x = -Math.PI/2;
+  ring.position.y = y;
+  root.add(ring);
+  s.groundMeshes.push(ring);
+
+  // simple barrier
+  const barMat = new THREE.MeshStandardMaterial({ color: 0x101a2c, roughness: 0.55, metalness: 0.22 });
+  const barrier = new THREE.Mesh(new THREE.TorusGeometry((inner+outer)/2, 0.12, 12, 96), barMat);
+  barrier.rotation.x = Math.PI/2;
+  barrier.position.y = y + 1.0;
+  root.add(barrier);
+
+  const sign = makeLabelPlate(THREE, "SPECTATOR LOUNGE", 0x0a1020, 0xc8d3ff, 1024, 256);
+  sign.position.set(0, y + 1.8, -10.5);
   root.add(sign);
 }
 
-// =======================
-// HOVER CARS + JUMBOTRONS
-// =======================
+// ----------------------
+// AMBIENCE
+// ----------------------
 
 function buildHoverCars(s) {
   const { THREE, root } = s;
 
   const carGroup = new THREE.Group();
-  carGroup.position.set(0, 0, 36);
+  carGroup.position.set(0, 0, 38);
   root.add(carGroup);
 
   const carMat = new THREE.MeshStandardMaterial({ color: 0x2b3b5f, roughness: 0.55, metalness: 0.25 });
@@ -506,48 +530,15 @@ function buildHoverCars(s) {
   }
 }
 
-function buildHoloJumbotrons(s) {
-  const { THREE, root, BUILD } = s;
-
-  const mkPanel = (text, x, y, z, ry) => {
-    const panel = new THREE.Group();
-
-    const frame = new THREE.Mesh(
-      new THREE.BoxGeometry(4.2, 1.6, 0.12),
-      new THREE.MeshStandardMaterial({ color: 0x121c2c, roughness: 0.55, metalness: 0.25 })
-    );
-    panel.add(frame);
-
-    const face = makeLabelPlate(THREE, text, 0x0b1220, 0x66ccff, 1024, 256);
-    face.position.z = 0.07;
-    panel.add(face);
-
-    const glow = new THREE.PointLight(0x66ccff, 0.65, 18, 2);
-    glow.position.set(0, 0, 0.7);
-    panel.add(glow);
-
-    panel.position.set(x, y, z);
-    panel.rotation.y = ry;
-
-    root.add(panel);
-  };
-
-  mkPanel(`SCARLETT VR POKER`, 0, 6.0, 13.0, Math.PI);
-  mkPanel(`BUILD: ${String(BUILD).slice(-10)}`, 0, 4.2, 13.0, Math.PI);
-}
-
-// =======================
-// XR: LASERS / RETICLE / ARC
-// =======================
+// ----------------------
+// XR VISUALS
+// ----------------------
 
 function setupXRLasers(s) {
   const { THREE, controllers } = s;
 
   function makeLaser() {
-    const geom = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, -1)
-    ]);
+    const geom = new THREE.BufferGeometry().setFromPoints([ new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1) ]);
     const mat = new THREE.LineBasicMaterial({ color: 0x66ccff });
     const line = new THREE.Line(geom, mat);
     line.scale.z = 12;
@@ -567,7 +558,7 @@ function setupFloorReticles(s) {
   const { THREE, root } = s;
 
   function makeReticle() {
-    const g = new THREE.RingGeometry(0.16, 0.24, 32);
+    const g = new THREE.RingGeometry(0.18, 0.26, 40);
     const m = new THREE.MeshBasicMaterial({ color: 0x66ccff, side: THREE.DoubleSide, transparent: true, opacity: 0.95 });
     const r = new THREE.Mesh(g, m);
     r.rotation.x = -Math.PI / 2;
@@ -584,19 +575,13 @@ function setupTeleportArcs(s) {
   const { THREE, root } = s;
 
   const makeArc = () => {
-    // Seed geometry with 2 points so computeLineDistances NEVER throws
-    const seedPts = [new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-0.01)];
-    const geom = new THREE.BufferGeometry().setFromPoints(seedPts);
-
-    const mat = new THREE.LineDashedMaterial({
-      color: 0xffffff,
-      dashSize: 0.18,
-      gapSize: 0.10
-    });
-
+    // init with 2 points so computeLineDistances never crashes
+    const pts = [new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-0.01)];
+    const geom = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 0.18, gapSize: 0.10 });
     const line = new THREE.Line(geom, mat);
     line.visible = false;
-    line.computeLineDistances(); // safe now
+    line.computeLineDistances();
     root.add(line);
     s.dashLines.push(line);
     return line;
@@ -609,11 +594,11 @@ function setupTeleportArcs(s) {
   s.arcPts.right = new Array(28).fill(0).map(() => new THREE.Vector3());
 }
 
-// =======================
-// WATCH (SMALLER)
-// =======================
+// ----------------------
+// WATCH UI (SMALLER)
+// ----------------------
 
-function setupPrettyWatch(s) {
+function setupWatch(s) {
   const { THREE, controllers } = s;
 
   const watchRoot = new THREE.Group();
@@ -621,56 +606,41 @@ function setupPrettyWatch(s) {
 
   const plateMat = new THREE.MeshStandardMaterial({
     color: 0x182743, roughness: 0.35, metalness: 0.35,
-    emissive: new THREE.Color(0x0b1220), emissiveIntensity: 0.1
+    emissive: new THREE.Color(0x0b1220), emissiveIntensity: 0.12
   });
-
-  const faceMat = new THREE.MeshStandardMaterial({
-    color: 0x0d1324, roughness: 0.25, metalness: 0.25,
-    emissive: new THREE.Color(0x223cff), emissiveIntensity: 0.12
-  });
-
-  // Smaller watch body
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.075, 0.014), plateMat);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.105, 0.070, 0.013), plateMat);
   watchRoot.add(body);
 
-  const face = new THREE.Mesh(new THREE.BoxGeometry(0.108, 0.066, 0.006), faceMat);
-  face.position.z = 0.010;
-  watchRoot.add(face);
-
   const items = [
-    { label: "POKER", room: "poker" },
-    { label: "LOBBY", room: "lobby" },
-    { label: "STORE", room: "store" },
-    { label: "SPECT", room: "spectate" },
-    { label: "SCORP", room: "scorpion" },
-    { label: "ARC",   action: (st)=>{ st.showArcs = !st.showArcs; } },
-    { label: "LASER", action: (st)=>{ st.showLasers = !st.showLasers; } },
-    { label: "LOCO",  action: (st)=>{ st.loco.enabled = !st.loco.enabled; } },
+    { label: "LOBBY",    room: "lobby" },
+    { label: "STORE",    room: "store" },
+    { label: "SCORP",    room: "scorpion" },
+    { label: "SPECT",    room: "spectate" },
+    { label: "DEAL",     action: (st)=>demoDeal(st) },
+    { label: "BET",      action: (st)=>{ try { st.poker.betToPot({ stack: st._chipStack, amount: 2 }); } catch {} } },
   ];
 
-  const btnGeo = new THREE.BoxGeometry(0.095, 0.016, 0.010);
-
+  const btnGeo = new THREE.BoxGeometry(0.092, 0.010, 0.010);
   for (let i = 0; i < items.length; i++) {
     const btnMat = new THREE.MeshStandardMaterial({
       color: 0x2b3b5f, roughness: 0.55, metalness: 0.18,
       emissive: new THREE.Color(0x000000), emissiveIntensity: 0
     });
-
     const b = new THREE.Mesh(btnGeo, btnMat);
-    b.position.set(0, 0.032 - i * 0.020, 0.014);
+    b.position.set(0, 0.025 - i * 0.012, 0.014);
     b.userData.watchItem = items[i];
     watchRoot.add(b);
     s.watch.buttons.push(b);
 
     const label = makeLabelPlate(THREE, items[i].label, 0x0a1020, 0x66ccff, 512, 128);
-    label.scale.set(0.23, 0.06, 1);
-    label.position.set(0.0, 0.032 - i * 0.020, 0.022);
+    label.scale.set(0.18, 0.045, 1);
+    label.position.set(0.0, 0.025 - i * 0.012, 0.021);
     watchRoot.add(label);
   }
 
-  // Attach to LEFT controller (wrist)
-  watchRoot.position.set(0.048, 0.010, -0.070);
-  watchRoot.rotation.set(-0.72, 0.0, 0.25);
+  // attach to LEFT controller, subtle
+  watchRoot.position.set(0.048, 0.013, -0.062);
+  watchRoot.rotation.set(-0.75, 0.0, 0.28);
   controllers.c0.add(watchRoot);
 
   s.watch.root = watchRoot;
@@ -678,21 +648,24 @@ function setupPrettyWatch(s) {
   watchRoot.visible = true;
 }
 
-function toggleWatch(s) {
-  if (!s.watch.root) return;
-  s.watch.visible = !s.watch.visible;
-  s.watch.root.visible = s.watch.visible;
+function demoDeal(s) {
+  // deal 5 community cards in an arc line
+  const y = s._tableY + 0.14;
+  const zs = [-0.50, -0.25, 0.0, 0.25, 0.50];
+  for (let i = 0; i < zs.length; i++) {
+    s.poker.dealCardTo({
+      toPos: new s.THREE.Vector3(-0.55 + i*0.28, y, -0.15),
+      faceUp: true,
+      duration: 0.55 + i*0.05,
+      arcHeight: 0.32
+    });
+  }
 }
 
 function tryClickWatch(s) {
   if (!s.watch.visible || !s.watch.buttons.length) return false;
 
   const ctrl = s.controllers.c0; // left
-  s.tmpM = s.tmpM || new s.THREE.Matrix4();
-  s.tmpV = s.tmpV || new s.THREE.Vector3();
-  s.tmpDir = s.tmpDir || new s.THREE.Vector3();
-  s.raycaster = s.raycaster || new s.THREE.Raycaster();
-
   s.tmpM.identity().extractRotation(ctrl.matrixWorld);
   const origin = s.tmpV.setFromMatrixPosition(ctrl.matrixWorld);
   s.tmpDir.set(0, 0, -1).applyMatrix4(s.tmpM).normalize();
@@ -710,58 +683,58 @@ function tryClickWatch(s) {
   if (btn.material?.emissive) {
     btn.material.emissive.setHex(0x223cff);
     btn.material.emissiveIntensity = 0.7;
+    setTimeout(() => {
+      try { btn.material.emissive.setHex(0x000000); btn.material.emissiveIntensity = 0; } catch {}
+    }, 120);
   }
 
   return true;
 }
 
-// =======================
-// UPDATE LOOP
-// =======================
+// ----------------------
+// UPDATE
+// ----------------------
 
 function update(s, dt, t) {
-  // Systems
-  s.systems?.avatar?.update?.(dt, t);
-  s.systems?.bots?.update?.(dt, t);
-
-  // Hover cars
-  for (const c of s.hoverCars) {
+  // hover cars
+  if (!s.flags.safeMode && s.flags.fx) {
+    for (const c of s.hoverCars) {
     c.obj.position.y = c.baseY + Math.sin(t*1.3 + c.phase) * 0.25;
-    c.obj.rotation.y += dt * 0.10;
-  }
-
-  // Animate dashed arcs + rainbow tint
-  for (const l of s.dashLines) {
-    if (l.material) l.material.dashOffset = -(t * 0.9);
-    if (l.material?.color) {
-      const c = hsvToRgb((t*0.08) % 1, 0.50, 1.0);
-      l.material.color.setRGB(c.r, c.g, c.b);
+      c.obj.rotation.y += dt * 0.10;
     }
   }
 
-  // XR rays/reticles/arcs
+  // dashed arcs animation
+  if (!s.flags.safeMode && s.flags.fx) {
+    for (const l of s.dashLines) {
+      if (l.material) l.material.dashOffset = -(t * 0.9);
+    }
+  }
+
   updateRays(s);
 
-  // XR stick locomotion
-  if (s.renderer.xr.isPresenting) {
-    applyXRLocomotion(s, dt);
-  }
+  // poker animations
+  if (!s.flags.safeMode && s.flags.poker) s.poker?.update?.(dt, t);
+
+  // scorpion room behaviors
+  s.scorpion?.update?.({ player: s.player, camera: s.camera }, dt, t);
+
+  // bots idle
+  if (!s.flags.safeMode && s.flags.bots) s.bots?.update?.(dt, t);
+
+  // XR locomotion
+  Controls.applyLocomotion(s, dt);
 }
 
 function updateRays(s) {
-  const { renderer, raycaster, controllers } = s;
-
-  s.tmpM = s.tmpM || new s.THREE.Matrix4();
-  s.tmpV = s.tmpV || new s.THREE.Vector3();
-  s.tmpDir = s.tmpDir || new s.THREE.Vector3();
-  s.raycaster = s.raycaster || new s.THREE.Raycaster();
+  const { renderer, raycaster, tmpM, tmpV, tmpDir } = s;
 
   for (const L of s.lasers) {
     const ctrl = L.controller;
     const line = L.line;
     const hand = L.hand;
 
-    const showLaser = s.showLasers && renderer.xr.isPresenting;
+    const showLaser = renderer.xr.isPresenting;
     line.visible = showLaser;
 
     if (!renderer.xr.isPresenting) {
@@ -770,37 +743,35 @@ function updateRays(s) {
       continue;
     }
 
-    s.tmpM.identity().extractRotation(ctrl.matrixWorld);
-    const origin = s.tmpV.setFromMatrixPosition(ctrl.matrixWorld);
-    s.tmpDir.set(0, 0, -1).applyMatrix4(s.tmpM).normalize();
-    s.raycaster.set(origin, s.tmpDir);
+    tmpM.identity().extractRotation(ctrl.matrixWorld);
+    const origin = tmpV.setFromMatrixPosition(ctrl.matrixWorld);
+    tmpDir.set(0, 0, -1).applyMatrix4(tmpM).normalize();
+    raycaster.set(origin, tmpDir);
 
-    // Watch hover highlight (left hand)
+    // Watch hover highlight (left)
     if (hand === "left" && s.watch.visible && s.watch.buttons.length) {
       for (const b of s.watch.buttons) {
         if (b.material?.emissive) { b.material.emissive.setHex(0x000000); b.material.emissiveIntensity = 0; }
       }
-      const uiHits = s.raycaster.intersectObjects(s.watch.buttons, false);
+      const uiHits = raycaster.intersectObjects(s.watch.buttons, false);
       if (uiHits.length) {
         const b = uiHits[0].object;
         if (b.material?.emissive) { b.material.emissive.setHex(0x223cff); b.material.emissiveIntensity = 0.55; }
-        if (showLaser) line.scale.z = Math.min(1.8, uiHits[0].distance);
+        if (showLaser) line.scale.z = Math.min(2.0, uiHits[0].distance);
         setReticleVisible(s, hand, false);
         setArcVisible(s, hand, false);
         continue;
       }
     }
 
-    // Floor hit
-    const hits = s.raycaster.intersectObjects(s.groundMeshes, false);
+    // Ground hit
+    const hits = raycaster.intersectObjects(s.groundMeshes, false);
     if (hits.length) {
       const h = hits[0];
       if (showLaser) line.scale.z = Math.min(12, h.distance);
 
       setReticle(s, hand, h.point);
-
-      if (s.showArcs) updateArc(s, hand, origin, h.point);
-      else setArcVisible(s, hand, false);
+      updateArc(s, hand, origin, h.point);
 
       if (hand === "right") s.lastTeleportPointR = h.point.clone();
       else s.lastTeleportPointL = h.point.clone();
@@ -839,7 +810,7 @@ function updateArc(s, hand, from, to) {
   arc.visible = true;
 
   const mid = new s.THREE.Vector3().addVectors(from, to).multiplyScalar(0.5);
-  mid.y += 1.15;
+  mid.y += 1.20;
 
   const N = pts.length;
   for (let i = 0; i < N; i++) {
@@ -857,7 +828,9 @@ function updateArc(s, hand, from, to) {
   const geom = new s.THREE.BufferGeometry().setFromPoints(pts);
   arc.geometry?.dispose?.();
   arc.geometry = geom;
-  arc.computeLineDistances?.(); // safe now (has positions)
+
+  // computeLineDistances safely
+  try { arc.computeLineDistances(); } catch {}
 }
 
 function setArcVisible(s, hand, v) {
@@ -865,97 +838,14 @@ function setArcVisible(s, hand, v) {
   if (arc) arc.visible = v;
 }
 
-// =======================
-// XR STICK LOCOMOTION (no core dependency)
-// =======================
-
-function applyXRLocomotion(s, dt) {
-  if (!s.loco.enabled) return;
-
-  // Prefer left controller for movement, right for turning
-  const left = readAxes(s.controllers.c0);
-  const right = readAxes(s.controllers.c1);
-
-  // If axes missing on c0 (some devices swap), fallback to c1
-  const moveAxes = left ? left : right;
-  const turnAxes = right ? right : left;
-
-  if (moveAxes) {
-    let x = moveAxes.x;
-    let y = moveAxes.y;
-
-    if (s.loco.invertLeftX) x *= -1;
-    if (s.loco.invertLeftY) y *= -1;
-
-    // deadzone
-    const dz = s.loco.deadzone;
-    if (Math.abs(x) < dz) x = 0;
-    if (Math.abs(y) < dz) y = 0;
-
-    if (x !== 0 || y !== 0) {
-      // optional 45-degree “grid” movement
-      let vx = x;
-      let vz = y; // y = forward/back
-
-      if (s.loco.diagonal45) {
-        const ang = Math.atan2(vx, vz); // x first (left/right), z forward/back
-        const step = Math.PI / 4;
-        const snapped = Math.round(ang / step) * step;
-        const mag = Math.min(1, Math.hypot(vx, vz));
-        vx = Math.sin(snapped) * mag;
-        vz = Math.cos(snapped) * mag;
-      }
-
-      // apply relative to rig yaw
-      const yaw = s.player.rotation.y;
-      const sin = Math.sin(yaw), cos = Math.cos(yaw);
-      const speed = s.loco.moveSpeed;
-
-      s.player.position.x += (vx * cos + vz * sin) * speed * dt;
-      s.player.position.z += (vz * cos - vx * sin) * speed * dt;
-    }
-  }
-
-  // Snap turn on right stick X
-  if (turnAxes) {
-    let tx = turnAxes.x;
-    if (s.loco.invertRightX) tx *= -1;
-
-    const dz = s.loco.deadzone;
-    if (Math.abs(tx) < dz) tx = 0;
-
-    s.loco.snapCooldown = Math.max(0, s.loco.snapCooldown - dt);
-    if (tx !== 0 && s.loco.snapCooldown === 0) {
-      const dir = tx > 0 ? -1 : 1; // right stick right => turn right
-      s.player.rotation.y += dir * s.THREE.MathUtils.degToRad(s.loco.snapTurnDeg);
-      s.loco.snapCooldown = s.loco.snapCooldownS;
-    }
-  }
-}
-
-function readAxes(controller) {
-  const src = controller?.inputSource;
-  const gp = src?.gamepad;
-  const axes = gp?.axes;
-  if (!axes || axes.length < 2) return null;
-  // Standard: axes[0]=x, axes[1]=y
-  return { x: axes[0] ?? 0, y: axes[1] ?? 0 };
-}
-
-// =======================
+// ----------------------
 // UTIL
-// =======================
+// ----------------------
 
 function setRigToAnchor(s, anchor) {
   s.player.position.set(anchor.pos.x, anchor.pos.y, anchor.pos.z);
   s.player.rotation.set(0, 0, 0);
   if (!s.renderer.xr.isPresenting) s.camera.rotation.set(0, anchor.yaw, 0);
-}
-
-function wrapAngle(a) {
-  while (a > Math.PI) a -= Math.PI*2;
-  while (a < -Math.PI) a += Math.PI*2;
-  return a;
 }
 
 function makeLabelPlate(THREE, text, bg = 0x0a1020, fg = 0x66ccff, w = 768, h = 192) {
@@ -971,7 +861,7 @@ function makeLabelPlate(THREE, text, bg = 0x0a1020, fg = 0x66ccff, w = 768, h = 
   ctx.strokeRect(10, 10, w-20, h-20);
 
   ctx.fillStyle = hex(fg);
-  ctx.font = `900 ${Math.floor(h*0.48)}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
+  ctx.font = `900 ${Math.floor(h*0.52)}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(text, w/2, h/2);
@@ -990,20 +880,8 @@ function hex(n) {
   return `#${c}`;
 }
 
-function hsvToRgb(h, s, v) {
-  let r=0,g=0,b=0;
-  const i = Math.floor(h*6);
-  const f = h*6 - i;
-  const p = v*(1-s);
-  const q = v*(1-f*s);
-  const t = v*(1-(1-f)*s);
-  switch (i % 6) {
-    case 0: r=v; g=t; b=p; break;
-    case 1: r=q; g=v; b=p; break;
-    case 2: r=p; g=v; b=t; break;
-    case 3: r=p; g=q; b=v; break;
-    case 4: r=t; g=p; b=v; break;
-    case 5: r=v; g=p; b=q; break;
-  }
-  return { r, g, b };
-      }
+function normalizeAngle(a) {
+  while (a > Math.PI) a -= Math.PI*2;
+  while (a < -Math.PI) a += Math.PI*2;
+  return a;
+}

@@ -1,418 +1,217 @@
-// /js/poker.js — Scarlett PokerSim v1.2 (SHOWDOWN CARD SOURCES)
-// ✅ Adds best5Detailed: tells DealingMix which winning cards came from HOLE vs COMMUNITY
-// ✅ Keeps watch-set (maxHands) behavior
+// /js/poker.js — PokerJS System v1.0 (Smooth Deal + Chips)
+// Designed to be imported by world.js.
+// ✅ Bezier + lerp feel (no teleport)
+// ✅ No dependencies on core controls
 
-export const PokerSim = (() => {
-  function makeEmitter() {
-    const map = new Map();
+export const PokerJS = (() => {
+  const S = {
+    THREE: null,
+    root: null,
+    scene: null,
+    log: console.log,
+    tex: { cardBack: null, tableTop: null, chips: null },
+    deckPos: null,
+    activeAnims: [],
+    cards: [],
+    chips: [],
+    potPos: null,
+    community: [],
+    winnerDemoDone: false,
+    cam: null,
+    tmpV: null,
+    tmpDir: null,
+
+  };
+
+  function init({ THREE, scene, root, log, deckPos, potPos, textures = {}, camera = null }) {
+    S.THREE = THREE;
+    S.scene = scene;
+    S.root = root;
+    S.log = log || console.log;
+    S.deckPos = deckPos?.clone?.() || new THREE.Vector3(0, 1.05, 0);
+    S.potPos = potPos?.clone?.() || new THREE.Vector3(0, 1.02, 0);
+    S.cam = camera;
+    S.tmpV = new THREE.Vector3();
+    S.tmpDir = new THREE.Vector3();
+    S.tex = { ...S.tex, ...textures };
+
+    S.log?.("[poker] PokerJS init ✅");
+    return api();
+  }
+
+  function api() {
     return {
-      on(type, fn) {
-        if (!map.has(type)) map.set(type, new Set());
-        map.get(type).add(fn);
-        return () => map.get(type)?.delete(fn);
-      },
-      emit(type, payload) {
-        const set = map.get(type);
-        if (!set) return;
-        for (const fn of set) { try { fn(payload); } catch (e) { console.error(e); } }
-      }
+      createCard,
+      dealCardTo,
+      createChipStack,
+      betToPot,
+      update,
+      state: S
     };
   }
 
-  const RANKS = [2,3,4,5,6,7,8,9,10,11,12,13,14];
-  const SUITS = [0,1,2,3];
-  const SUIT_CH = ["♠","♥","♦","♣"];
-  const RANK_CH = { 11:"J", 12:"Q", 13:"K", 14:"A" };
+  function _cardMaterials(frontMap = null) {
+    const THREE = S.THREE;
+    const edge = new THREE.MeshStandardMaterial({ color: 0xcfcfcf, roughness: 0.8, metalness: 0.05 });
+    const back = new THREE.MeshStandardMaterial({ map: S.tex.cardBack || null, color: 0xffffff, roughness: 0.6, metalness: 0.1 });
+    const front = new THREE.MeshStandardMaterial({ map: frontMap || null, color: 0xffffff, roughness: 0.6, metalness: 0.1 });
 
-  function cardToString(c) {
-    const r = RANK_CH[c.r] || String(c.r);
-    const s = SUIT_CH[c.s] || "?";
-    return r + s;
-  }
-  function cardKey(c){ return `${c.r}_${c.s}`; }
-
-  function makeDeck() {
-    const deck = [];
-    for (const s of SUITS) for (const r of RANKS) deck.push({ r, s });
-    return deck;
+    // BoxGeometry material order: +x,-x,+y,-y,+z,-z (varies by three version).
+    // We'll set all faces and accept minor mapping differences; visual still good.
+    return [edge, edge, front, back, edge, edge];
   }
 
-  function shuffle(a) {
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = (Math.random() * (i + 1)) | 0;
-      const t = a[i]; a[i] = a[j]; a[j] = t;
-    }
-    return a;
+  function createCard({ frontMap = null } = {}) {
+    const THREE = S.THREE;
+    const geo = new THREE.BoxGeometry(0.06, 0.0018, 0.09);
+    const card = new THREE.Mesh(geo, _cardMaterials(frontMap));
+    card.castShadow = true;
+    card.receiveShadow = true;
+    card.position.copy(S.deckPos);
+    card.userData.isCard = true;
+    S.root.add(card);
+    S.cards.push(card);
+    return card;
   }
 
-  function score5(cards5) {
-    const rs = cards5.map(c => c.r).sort((a,b)=>b-a);
-    const ss = cards5.map(c => c.s);
-
-    const counts = new Map();
-    for (const r of rs) counts.set(r, (counts.get(r) || 0) + 1);
-
-    const groups = Array.from(counts.entries())
-      .map(([rank, count]) => [count, rank])
-      .sort((a,b)=> (b[0]-a[0]) || (b[1]-a[1]));
-
-    const isFlush = ss.every(s => s === ss[0]);
-
-    const uniq = Array.from(new Set(rs)).sort((a,b)=>b-a);
-    let isStraight = false;
-    let straightHigh = 0;
-
-    if (uniq.length === 5) {
-      const max = uniq[0], min = uniq[4];
-      if (max - min === 4) { isStraight = true; straightHigh = max; }
-      if (!isStraight && uniq[0] === 14 && uniq[1] === 5 && uniq[2] === 4 && uniq[3] === 3 && uniq[4] === 2) {
-        isStraight = true; straightHigh = 5;
-      }
-    }
-
-    if (isFlush && isStraight) return { cat: 9, kickers: [straightHigh], cards: cards5 };
-    if (groups[0][0] === 4) return { cat: 8, kickers: [groups[0][1], groups[1][1]], cards: cards5 };
-    if (groups[0][0] === 3 && groups[1][0] === 2) return { cat: 7, kickers: [groups[0][1], groups[1][1]], cards: cards5 };
-    if (isFlush) return { cat: 6, kickers: rs.slice(), cards: cards5 };
-    if (isStraight) return { cat: 5, kickers: [straightHigh], cards: cards5 };
-    if (groups[0][0] === 3) {
-      const trips = groups[0][1];
-      const kick = groups.slice(1).map(g => g[1]).sort((a,b)=>b-a);
-      return { cat: 4, kickers: [trips, ...kick], cards: cards5 };
-    }
-    if (groups[0][0] === 2 && groups[1][0] === 2) {
-      const highPair = Math.max(groups[0][1], groups[1][1]);
-      const lowPair = Math.min(groups[0][1], groups[1][1]);
-      const kicker = groups[2][1];
-      return { cat: 3, kickers: [highPair, lowPair, kicker], cards: cards5 };
-    }
-    if (groups[0][0] === 2) {
-      const pair = groups[0][1];
-      const kick = groups.slice(1).map(g => g[1]).sort((a,b)=>b-a);
-      return { cat: 2, kickers: [pair, ...kick], cards: cards5 };
-    }
-    return { cat: 1, kickers: rs.slice(), cards: cards5 };
-  }
-
-  function compareScore(a, b) {
-    if (a.cat !== b.cat) return a.cat - b.cat;
-    const n = Math.max(a.kickers.length, b.kickers.length);
-    for (let i=0;i<n;i++){
-      const da = a.kickers[i] || 0;
-      const db = b.kickers[i] || 0;
-      if (da !== db) return da - db;
-    }
-    return 0;
-  }
-
-  function bestOf7(cards7) {
-    let best = null, bestIdx = null, bestFive = null;
-    for (let a=0;a<3;a++){
-      for (let b=a+1;b<4;b++){
-        for (let c=b+1;c<5;c++){
-          for (let d=c+1;d<6;d++){
-            for (let e=d+1;e<7;e++){
-              const five = [cards7[a], cards7[b], cards7[c], cards7[d], cards7[e]];
-              const sc = score5(five);
-              if (!best || compareScore(sc, best) > 0) { best = sc; bestIdx = [a,b,c,d,e]; bestFive = five; }
-            }
-          }
-        }
-      }
-    }
-    return { score: best, usedIdx: bestIdx, bestFive };
-  }
-
-  function catName(cat) {
-    switch (cat) {
-      case 9: return "STRAIGHT FLUSH";
-      case 8: return "FOUR OF A KIND";
-      case 7: return "FULL HOUSE";
-      case 6: return "FLUSH";
-      case 5: return "STRAIGHT";
-      case 4: return "THREE OF A KIND";
-      case 3: return "TWO PAIR";
-      case 2: return "ONE PAIR";
-      default: return "HIGH CARD";
-    }
-  }
-
-  // Map the 5 winning cards back to their source (hole/community).
-  // Returns array of { card, label, from:"HOLE"|"COMM", index } where index is 0..1 for hole, 0..4 for community
-  function mapBest5ToSources(cards7, best5) {
-    // build multimap of key -> [indices]
-    const bins = new Map();
-    for (let i=0;i<cards7.length;i++){
-      const k = cardKey(cards7[i]);
-      if (!bins.has(k)) bins.set(k, []);
-      bins.get(k).push(i);
-    }
-
-    const used = new Set();
-    const out = [];
-    for (const c of best5) {
-      const k = cardKey(c);
-      const arr = bins.get(k) || [];
-      let pick = -1;
-      for (const idx of arr) {
-        if (!used.has(idx)) { pick = idx; break; }
-      }
-      if (pick < 0) pick = arr[0] ?? -1;
-      used.add(pick);
-
-      if (pick <= 1) out.push({ card: c, label: cardToString(c), from: "HOLE", index: pick });
-      else out.push({ card: c, label: cardToString(c), from: "COMM", index: pick - 2 });
-    }
-
+  function _bezier3(p0, p1, p2, t, out) {
+    // quadratic bezier
+    const u = 1 - t;
+    out.set(
+      u*u*p0.x + 2*u*t*p1.x + t*t*p2.x,
+      u*u*p0.y + 2*u*t*p1.y + t*t*p2.y,
+      u*u*p0.z + 2*u*t*p1.z + t*t*p2.z
+    );
     return out;
   }
 
-  function create(opts = {}) {
-    const log = opts.log || console.log;
-    const E = makeEmitter();
+  function dealCardTo({ card = null, toPos, faceUp = false, duration = 0.55, arcHeight = 0.25 } = {}) {
+    const THREE = S.THREE;
+    if (!card) card = createCard();
 
-    const S = {
-      seats: Math.max(2, Math.min(9, opts.seats || 6)),
-      smallBlind: opts.smallBlind ?? 5,
-      bigBlind: opts.bigBlind ?? 10,
-      startingStack: opts.startingStack ?? 1000,
+    const from = card.position.clone();
+    const to = toPos.clone();
+    const mid = from.clone().lerp(to, 0.5);
+    mid.y += arcHeight;
 
-      tDealHole: opts.tDealHole ?? 1.2,
-      tFlop: opts.tFlop ?? 1.4,
-      tTurn: opts.tTurn ?? 1.3,
-      tRiver: opts.tRiver ?? 1.3,
-      tShowdown: opts.tShowdown ?? 2.2,
-      tNextHand: opts.tNextHand ?? 1.2,
+    // start face-down; flip near end if faceUp
+    card.rotation.set(-Math.PI / 2, 0, 0);
+    const tmp = new THREE.Vector3();
 
-      toyBetting: opts.toyBetting ?? true,
-      maxHands: opts.maxHands ?? 12,
+    const anim = {
+      t: 0,
+      duration,
+      update(dt) {
+        this.t = Math.min(1, this.t + dt / duration);
 
-      phase: "IDLE",
-      street: "PREFLOP",
-      timer: 0,
+        _bezier3(from, mid, to, this.t, tmp);
+        card.position.copy(tmp);
 
-      dealer: 0,
-      deck: [],
-      community: [],
-      players: [],
-      pot: 0,
-      handsPlayed: 0,
-      finished: false,
+        // subtle travel spin
+        card.rotation.z = (1 - this.t) * 0.25;
+
+        // flip
+        if (faceUp) {
+          const flipT = Math.max(0, (this.t - 0.65) / 0.35);
+          card.rotation.x = -Math.PI / 2 + flipT * (Math.PI);
+        }
+
+        if (this.t >= 1) return true;
+        return false;
+      }
     };
 
-    function resetPlayersIfNeeded() {
-      if (S.players.length !== S.seats) {
-        S.players = [];
-        for (let i=0;i<S.seats;i++){
-          S.players.push({
-            seat: i,
-            name: opts.names?.[i] || `BOT ${i+1}`,
-            stack: S.startingStack,
-            inHand: true,
-            folded: false,
-            hole: [],
-            bet: 0
-          });
-        }
-      }
-    }
-
-    function rotateDealer() { S.dealer = (S.dealer + 1) % S.seats; }
-    function burnOne() { S.deck.pop(); }
-    function drawOne() { return S.deck.pop(); }
-
-    function postBlinds() {
-      const sb = (S.dealer + 1) % S.seats;
-      const bb = (S.dealer + 2) % S.seats;
-      const pSB = S.players[sb];
-      const pBB = S.players[bb];
-
-      const a = Math.min(pSB.stack, S.smallBlind);
-      const b = Math.min(pBB.stack, S.bigBlind);
-
-      pSB.stack -= a; pSB.bet += a; S.pot += a;
-      pBB.stack -= b; pBB.bet += b; S.pot += b;
-
-      E.emit("blinds", { sb, bb, small: a, big: b, pot: S.pot });
-    }
-
-    function clearBets() { for (const p of S.players) p.bet = 0; }
-    function activePlayers() { return S.players.filter(p => p.inHand && !p.folded); }
-
-    function maybeToyBetting() {
-      if (!S.toyBetting) return;
-      const alive = activePlayers();
-      if (alive.length <= 1) return;
-
-      const who = alive[(Math.random() * alive.length) | 0];
-      const doFold = Math.random() < 0.05;
-
-      if (doFold && alive.length > 2) {
-        who.folded = true;
-        E.emit("action", { type:"FOLD", seat: who.seat, name: who.name, pot: S.pot });
-      } else {
-        const bump = 10 + ((Math.random()*18)|0);
-        const amt = Math.min(who.stack, bump);
-        who.stack -= amt;
-        who.bet += amt;
-        S.pot += amt;
-        E.emit("action", { type:"BET", seat: who.seat, name: who.name, amount: amt, pot: S.pot });
-      }
-    }
-
-    function dealHole() {
-      for (const p of S.players) {
-        p.inHand = (p.stack > 0);
-        p.folded = false;
-        p.hole = [];
-        p.bet = 0;
-      }
-      S.community = [];
-      S.pot = 0;
-
-      S.deck = shuffle(makeDeck());
-      postBlinds();
-
-      for (let r=0;r<2;r++){
-        for (let i=1;i<=S.seats;i++){
-          const seat = (S.dealer + i) % S.seats;
-          const p = S.players[seat];
-          if (!p.inHand) continue;
-          p.hole.push(drawOne());
-        }
-      }
-
-      // Provide hole labels per seat for DealingMix “above head cards”
-      E.emit("deal", {
-        type: "HOLE",
-        hole: S.players.map(p => ({ seat: p.seat, name: p.name, cards: p.hole.map(cardToString), raw: p.hole.slice() }))
-      });
-    }
-
-    function dealFlop() { burnOne(); S.community.push(drawOne(), drawOne(), drawOne()); E.emit("deal", { type:"FLOP", communityRaw: S.community.slice(), community: S.community.map(cardToString) }); }
-    function dealTurn() { burnOne(); S.community.push(drawOne()); E.emit("deal", { type:"TURN", communityRaw: S.community.slice(), community: S.community.map(cardToString) }); }
-    function dealRiver(){ burnOne(); S.community.push(drawOne()); E.emit("deal", { type:"RIVER", communityRaw: S.community.slice(), community: S.community.map(cardToString) }); }
-
-    function earlyWinIfOneLeft() {
-      const alive = activePlayers();
-      if (alive.length === 1) {
-        const w = alive[0];
-        w.stack += S.pot;
-        E.emit("showdown", {
-          winners: [{ seat: w.seat, name: w.name, amount: S.pot, handName: "—", best5: [], best5Detailed: [] }],
-          pot: S.pot,
-          community: S.community.map(cardToString),
-          communityRaw: S.community.slice()
-        });
-        return true;
-      }
-      return false;
-    }
-
-    function showdown() {
-      const alive = activePlayers();
-      if (alive.length === 0) return;
-
-      const results = [];
-      for (const p of alive) {
-        const cards7 = [...p.hole, ...S.community];
-        const { score, bestFive } = bestOf7(cards7);
-        const detailed = mapBest5ToSources(cards7, bestFive);
-
-        results.push({
-          seat: p.seat,
-          name: p.name,
-          score,
-          handName: catName(score.cat),
-          best5: bestFive.map(cardToString),
-          best5Raw: bestFive.slice(),
-          best5Detailed: detailed, // ✅ what we need
-          hole: p.hole.map(cardToString),
-          holeRaw: p.hole.slice()
-        });
-      }
-
-      let best = results[0];
-      for (let i=1;i<results.length;i++) if (compareScore(results[i].score, best.score) > 0) best = results[i];
-      const winners = results.filter(r => compareScore(r.score, best.score) === 0);
-
-      const share = Math.floor(S.pot / winners.length);
-      let remainder = S.pot - share * winners.length;
-      for (const w of winners) {
-        const add = share + (remainder > 0 ? 1 : 0);
-        remainder = Math.max(0, remainder - 1);
-        S.players[w.seat].stack += add;
-        w.amount = add;
-      }
-
-      E.emit("showdown", {
-        winners: winners.map(w => ({
-          seat: w.seat,
-          name: w.name,
-          amount: w.amount,
-          handName: w.handName,
-          best5: w.best5,
-          best5Raw: w.best5Raw,
-          best5Detailed: w.best5Detailed,
-          hole: w.hole,
-          holeRaw: w.holeRaw
-        })),
-        pot: S.pot,
-        community: S.community.map(cardToString),
-        communityRaw: S.community.slice()
-      });
-    }
-
-    function setPhase(phase, street, actionText) {
-      S.phase = phase;
-      if (street) S.street = street;
-      S.timer = 0;
-      E.emit("state", { phase: S.phase, street: S.street, pot: S.pot, actionText: actionText || "—" });
-    }
-
-    function startHand() {
-      if (S.finished) return;
-      resetPlayersIfNeeded();
-      rotateDealer();
-      dealHole();
-      setPhase("HOLE", "PREFLOP", `HAND ${S.handsPlayed + 1} / ${S.maxHands}`);
-      log(`[PokerSim] Hand ${S.handsPlayed + 1} start — dealer=${S.dealer+1}`);
-    }
-
-    function update(dt) {
-      if (S.finished) return;
-      if (S.phase === "IDLE") return;
-
-      S.timer += dt;
-      if (S.toyBetting && S.timer > 0.45 && S.timer < 0.50) maybeToyBetting();
-
-      if (S.phase === "HOLE" && S.timer >= S.tDealHole) {
-        if (earlyWinIfOneLeft()) return setPhase("END", "SHOWDOWN", "END");
-        clearBets(); dealFlop(); setPhase("FLOP", "FLOP", "FLOP");
-      } else if (S.phase === "FLOP" && S.timer >= S.tFlop) {
-        if (earlyWinIfOneLeft()) return setPhase("END", "SHOWDOWN", "END");
-        clearBets(); dealTurn(); setPhase("TURN", "TURN", "TURN");
-      } else if (S.phase === "TURN" && S.timer >= S.tTurn) {
-        if (earlyWinIfOneLeft()) return setPhase("END", "SHOWDOWN", "END");
-        clearBets(); dealRiver(); setPhase("RIVER", "RIVER", "RIVER");
-      } else if (S.phase === "RIVER" && S.timer >= S.tRiver) {
-        setPhase("SHOWDOWN", "SHOWDOWN", "SHOWDOWN");
-        showdown();
-      } else if (S.phase === "SHOWDOWN" && S.timer >= S.tShowdown) {
-        setPhase("END", "SHOWDOWN", "NEXT");
-      } else if (S.phase === "END" && S.timer >= S.tNextHand) {
-        S.handsPlayed++;
-        if (S.handsPlayed >= S.maxHands) {
-          S.finished = true;
-          E.emit("finished", { handsPlayed: S.handsPlayed });
-          return;
-        }
-        startHand();
-      }
-    }
-
-    return { on: E.on, startHand, update };
+    S.activeAnims.push(anim);
+    return card;
   }
 
-  return { create };
+  function createChipStack({ pos, count = 10, value = 25 } = {}) {
+    const THREE = S.THREE;
+    const group = new THREE.Group();
+    group.position.copy(pos || new THREE.Vector3(1.0, 1.02, 0.0));
+    group.userData.isChipStack = true;
+    group.userData.value = value;
+
+    const geo = new THREE.CylinderGeometry(0.022, 0.022, 0.007, 28);
+    const mat = new THREE.MeshStandardMaterial({
+      color: value >= 100 ? 0xffd36a : value >= 25 ? 0x66ccff : 0xff6bd6,
+      emissive: value >= 100 ? 0x553300 : 0x001a33,
+      emissiveIntensity: 0.35,
+      roughness: 0.35,
+      metalness: 0.25
+    });
+
+    for (let i = 0; i < count; i++) {
+      const chip = new THREE.Mesh(geo, mat);
+      chip.position.y = i * 0.0075;
+      chip.castShadow = true;
+      chip.receiveShadow = true;
+      group.add(chip);
+    }
+
+    S.root.add(group);
+    S.chips.push(group);
+    return group;
+  }
+
+  function betToPot({ stack, amount = 1 } = {}) {
+    const THREE = S.THREE;
+    if (!stack || !stack.children?.length) return;
+
+    const chipsToMove = [];
+    for (let i = 0; i < amount; i++) {
+      const chip = stack.children.pop();
+      if (!chip) break;
+      chipsToMove.push(chip);
+    }
+    if (!chipsToMove.length) return;
+
+    const from = new THREE.Vector3();
+    stack.getWorldPosition(from);
+
+    const to = S.potPos.clone();
+    to.y += 0.01 + (S.root.children.length % 6) * 0.004;
+
+    // move chips as a mini-group
+    const g = new THREE.Group();
+    g.position.copy(from);
+    for (const c of chipsToMove) g.add(c);
+    S.root.add(g);
+
+    const mid = from.clone().lerp(to, 0.5);
+    mid.y += 0.20;
+
+    const tmp = new THREE.Vector3();
+    const anim = {
+      t: 0,
+      duration: 0.45,
+      update(dt) {
+        this.t = Math.min(1, this.t + dt / this.duration);
+        _bezier3(from, mid, to, this.t, tmp);
+        g.position.copy(tmp);
+        if (this.t >= 1) {
+          // drop chips into pot area (detach)
+          const pot = new THREE.Group();
+          pot.position.copy(to);
+          for (const c of [...g.children]) pot.add(c);
+          S.root.add(pot);
+          S.root.remove(g);
+          return true;
+        }
+        return false;
+      }
+    };
+    S.activeAnims.push(anim);
+  }
+
+  function update(dt) {
+    // run animations
+    const a = S.activeAnims;
+    for (let i = a.length - 1; i >= 0; i--) {
+      const done = a[i].update(dt);
+      if (done) a.splice(i, 1);
+    }
+  }
+
+  return { init };
 })();

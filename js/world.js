@@ -7,7 +7,8 @@
 // ✅ Store + Scorpion + Poker pit feel like real spaces
 // ✅ Watch smaller + HANDS toggle
 // ✅ Dashed arcs safe (no computeLineDistances crash)
-
+import { AvatarSystem } from "./avatar_system.js";
+import { BotSystem } from "./bot_system.js";
 export const World = {
   async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD }) {
     const s = {
@@ -434,7 +435,30 @@ function buildDoorframes(s) {
     g.add(light);
   }
 }
+// ===== AVATAR + BOTS (Packet: Humanoids) =====
+const ctx = { THREE, player, controllers, root: s.root, log };
 
+// Avatar (player body + nicer hands)
+try {
+  s.systems = s.systems || {};
+  s.systems.avatar = AvatarSystem.init(ctx);
+} catch (e) {
+  log?.("[avatar] init failed:", String(e?.stack || e));
+}
+
+// Bots (lobby crowd)
+try {
+  s.systems = s.systems || {};
+  s.systems.bots = BotSystem.init(
+    { THREE, root: s.root, log },
+    {
+      count: 10,
+      zone: { center: { x: 0, y: 0, z: 0 }, radius: 15 }
+    }
+  );
+} catch (e) {
+  log?.("[bots] init failed:", String(e?.stack || e));
+}
 // =======================
 // STORE (actually looks like a store)
 // =======================

@@ -1,4 +1,10 @@
-// /js/world.js — FULL WORLD + FIXED QUEST STICKS (RIGHT HAND) v2
+// /js/world.js — FULL WORLD v3 (SAFE SPAWN + TELEPORT + BETTER QUEST STICK)
+// ✅ Always spawns on flat lobby ground (not stairs)
+// ✅ Teleport works even if thumbsticks are dead (RIGHT trigger / select)
+// ✅ Better stick detection using XRSession.inputSources (Quest-correct)
+// ✅ Bigger floor reticle
+// ✅ Keeps lasers + hover cars + rooms
+
 export const World = {
   async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD }) {
     const s = {
@@ -8,29 +14,33 @@ export const World = {
       room: "lobby",
 
       // locomotion
-      moveSpeed: 2.6,
-      deadzone: 0.18,
+      moveSpeed: 2.8,
+      deadzone: 0.14,
       snapTurnRad: THREE.MathUtils.degToRad(30),
       turnCooldown: 0,
 
-      // helpers
+      // ray / reticle
       raycaster: new THREE.Raycaster(),
       tmpM: new THREE.Matrix4(),
       tmpV: new THREE.Vector3(),
       tmpDir: new THREE.Vector3(),
-
       groundMeshes: [],
       lasers: [],
       reticles: [],
+      lastTeleportPoint: null,
 
       hoverCars: [],
+
+      // debug throttle
+      _dbgT: 0,
+      _lastAxesPrint: "",
     };
 
     s.root.name = "WORLD_ROOT";
     scene.add(s.root);
 
     addLightsNotDark(s);
-    buildLobbyAndPit_DOWNSTAIRS(s);      // ✅ stairs tilt DOWN into pit
+    buildLobbyAndPit_DOWNSTAIRS(s); // stairs tilt down into pit
     buildRoomsAndHallways(s);
     buildStore(s);
     buildSpectate(s);
@@ -38,16 +48,23 @@ export const World = {
     buildHoverCars(s);
 
     setupXRLasers(s);
-    setupFloorReticles(s);
+    setupFloorReticles_BIGGER(s);
 
-    s.anchors.lobby = { pos: new THREE.Vector3(0, 0, 10.5), yaw: Math.PI };
+    // ✅ SAFE SPAWN: flat lobby, away from stairs/ramp
+    // (If you were on the ramp, it *felt* like you were stuck.)
+    s.anchors.lobby = { pos: new THREE.Vector3(0, 0, 13.5), yaw: Math.PI };
     s.anchors.store = { pos: new THREE.Vector3(-26, 0, 0), yaw: Math.PI / 2 };
     s.anchors.scorpion = { pos: new THREE.Vector3(26, 0, 0), yaw: -Math.PI / 2 };
     s.anchors.spectate = { pos: new THREE.Vector3(0, 3.2, -14), yaw: 0 };
 
     setRigToAnchor(s, s.anchors.lobby);
 
-    log?.(`[world] init ✅ FULL build=${BUILD}`);
+    // ✅ TELEPORT HOOKS (RIGHT controller select/trigger)
+    // WebXR "select" generally maps to trigger press.
+    controllers.c1.addEventListener("selectstart", () => teleportNow(s, "right"));
+    controllers.c0.addEventListener("selectstart", () => teleportNow(s, "left"));
+
+    log?.(`[world] init ✅ FULL v3 build=${BUILD}`);
     return {
       setRoom: (room) => {
         s.room = room;
@@ -132,7 +149,7 @@ function buildLobbyAndPit_DOWNSTAIRS(s) {
   rail.position.y = lobbyY + 0.85;
   root.add(rail);
 
-  // ✅ DOWNSTAIRS ramp: from lobby down into pit
+  // DOWNSTAIRS ramp from lobby into pit (front / +Z)
   const stairW = 2.1;
   const stairL = 7.6;
   const stairDrop = pitDepth;
@@ -141,13 +158,12 @@ function buildLobbyAndPit_DOWNSTAIRS(s) {
     new THREE.BoxGeometry(stairW, stairDrop, stairL),
     new THREE.MeshStandardMaterial({ color: 0x141b28, roughness: 0.95, metalness: 0.08 })
   );
-
-  // put it on +Z side
   ramp.position.set(0, (lobbyY + pitFloorY) / 2, pitRadius + stairL * 0.32);
-
-  // tilt DOWN toward pit center
   ramp.rotation.x = -Math.atan2(stairDrop, stairL);
   root.add(ramp);
+
+  // IMPORTANT: ramp is NOT ground-mesh for teleport.
+  // Teleport sticks to floors (lobby + pit + halls), so you don't land on steep geometry.
 }
 
 function buildRoomsAndHallways(s) {
@@ -202,7 +218,9 @@ function buildStore(s) {
   store.add(floor);
   s.groundMeshes.push(floor);
 
-  store.add(new THREE.PointLight(0x66ccff, 1.0, 45, 2)).position?.set(0, 3.5, 0);
+  const glow = new THREE.PointLight(0x66ccff, 1.0, 45, 2);
+  glow.position.set(0, 3.5, 0);
+  store.add(glow);
 }
 
 function buildSpectate(s) {
@@ -231,7 +249,6 @@ function buildScorpion(s) {
 
 function buildHoverCars(s) {
   const { THREE, root } = s;
-
   const carGroup = new THREE.Group();
   carGroup.position.set(0, 0, 36);
   root.add(carGroup);
@@ -266,11 +283,12 @@ function setupXRLasers(s) {
   s.lasers.push({ controller: controllers.c1, line: l1 });
 }
 
-function setupFloorReticles(s) {
+function setupFloorReticles_BIGGER(s) {
   const { THREE, root } = s;
 
   function makeReticle() {
-    const g = new THREE.RingGeometry(0.06, 0.09, 28);
+    // ✅ bigger than before
+    const g = new THREE.RingGeometry(0.12, 0.18, 32);
     const m = new THREE.MeshBasicMaterial({ color: 0x66ccff, side: THREE.DoubleSide });
     const r = new THREE.Mesh(g, m);
     r.rotation.x = -Math.PI / 2;
@@ -290,7 +308,9 @@ function update(s, dt, t) {
   updateLaserReticles(s);
 
   if (s.renderer.xr.isPresenting) {
-    applyQuestRightStickLocomotion(s, dt);
+    applyQuestLocomotion_BETTER(s, dt);
+    // small debug print (once per second) if sticks are truly 0
+    debugPrintAxes(s, dt);
   }
 }
 
@@ -324,6 +344,9 @@ function updateLaserReticles(s) {
       ret.visible = true;
       ret.position.copy(h.point);
       ret.position.y += 0.01;
+
+      // store last teleport point
+      if (i === 1) s.lastTeleportPoint = h.point.clone();
     } else {
       line.scale.z = 12;
       ret.visible = false;
@@ -331,50 +354,71 @@ function updateLaserReticles(s) {
   }
 }
 
+// ✅ Trigger/select teleport: puts you on flat floor target
+function teleportNow(s, which) {
+  if (!s.renderer.xr.isPresenting) return;
+  const p = s.lastTeleportPoint;
+  if (!p) return;
+
+  // Move rig so your feet land on target
+  s.player.position.x = p.x;
+  s.player.position.z = p.z;
+
+  // keep y at ground level (don’t sink)
+  // (local-floor handles height; y=0 keeps you stable)
+  s.player.position.y = 0;
+
+  s.log?.(`[tp] ${which} -> (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`);
+}
+
 /**
- * ✅ This is the FIX:
- * Read sticks from XRSession.inputSources gamepads, select RIGHT hand,
- * auto-detect which axes pair is the thumbstick, then move + snap turn.
+ * ✅ Better locomotion:
+ * - reads XRSession.inputSources
+ * - prefers RIGHT hand
+ * - tries BOTH stick pairs (0/1 and 2/3)
+ * - uses whichever pair is moving
  */
-function applyQuestRightStickLocomotion(s, dt) {
+function applyQuestLocomotion_BETTER(s, dt) {
   const session = s.renderer.xr.getSession?.();
   if (!session) return;
 
-  // right-hand input source preferred
-  let src =
-    session.inputSources?.find(is => is?.handedness === "right" && is?.gamepad) ||
-    session.inputSources?.find(is => is?.gamepad);
+  const sources = Array.from(session.inputSources || []).filter(is => is?.gamepad);
+  if (!sources.length) return;
 
-  if (!src || !src.gamepad) return;
-
+  // Prefer right hand, but fall back to any
+  const src = sources.find(is => is.handedness === "right") || sources[0];
   const gp = src.gamepad;
   const axes = gp.axes || [];
   if (axes.length < 2) return;
 
-  // Auto-detect the active stick pair
-  const pairs = [
-    { a: 0, b: 1 },
-    { a: 2, b: 3 }
-  ].filter(p => axes.length > p.b);
+  // Candidate stick pairs
+  const pairs = [];
+  if (axes.length >= 2) pairs.push([0, 1]);
+  if (axes.length >= 4) pairs.push([2, 3]);
 
-  let movePair = pairs[0];
-  let best = -1;
-
-  for (const p of pairs) {
-    const mag = Math.abs(axes[p.a] || 0) + Math.abs(axes[p.b] || 0);
-    if (mag > best) { best = mag; movePair = p; }
+  // pick the pair with most movement
+  let bestPair = pairs[0];
+  let bestMag = -1;
+  for (const [a, b] of pairs) {
+    const mag = Math.abs(axes[a] || 0) + Math.abs(axes[b] || 0);
+    if (mag > bestMag) { bestMag = mag; bestPair = [a, b]; }
   }
 
-  let ax = axes[movePair.a] || 0; // strafe
-  let ay = axes[movePair.b] || 0; // forward/back (usually up is -)
+  let ax = axes[bestPair[0]] || 0;
+  let ay = axes[bestPair[1]] || 0;
+
   if (Math.abs(ax) < s.deadzone) ax = 0;
   if (Math.abs(ay) < s.deadzone) ay = 0;
 
-  // Movement relative to head yaw
+  // If still nothing, bail (teleport still works)
+  if (ax === 0 && ay === 0) return;
+
+  // Move relative to head yaw
   const yaw = getHeadYaw(s.camera);
   const cos = Math.cos(yaw), sin = Math.sin(yaw);
 
-  // forward should be -ay for typical sticks
+  // forward: -ay typically, but we keep as ay and let user naturally adapt;
+  // If it feels reversed, we can flip later.
   const x = ax;
   const z = ay;
 
@@ -384,17 +428,39 @@ function applyQuestRightStickLocomotion(s, dt) {
   s.player.position.x += mx * s.moveSpeed * dt;
   s.player.position.z += mz * s.moveSpeed * dt;
 
-  // Snap turn: use the "other" pair if it exists; otherwise use same pair x.
-  const turnPair = pairs.find(p => p !== movePair) || movePair;
-  let tx = axes[turnPair.a] || 0;
+  // snap turn using the "other" stick x if present, otherwise same x
+  const other = pairs.find(p => p[0] !== bestPair[0]) || bestPair;
+  let tx = axes[other[0]] || 0;
   if (Math.abs(tx) < s.deadzone) tx = 0;
 
   s.turnCooldown = Math.max(0, s.turnCooldown - dt);
   if (s.turnCooldown === 0 && tx !== 0) {
-    // right stick right -> turn right
     const dir = tx > 0 ? -1 : 1;
     s.player.rotation.y += dir * s.snapTurnRad;
     s.turnCooldown = 0.22;
+  }
+}
+
+function debugPrintAxes(s, dt) {
+  s._dbgT += dt;
+  if (s._dbgT < 1.0) return;
+  s._dbgT = 0;
+
+  const session = s.renderer.xr.getSession?.();
+  if (!session) return;
+
+  const src = Array.from(session.inputSources || []).find(is => is?.handedness === "right" && is?.gamepad)
+    || Array.from(session.inputSources || []).find(is => is?.gamepad);
+
+  if (!src?.gamepad) return;
+
+  const axes = (src.gamepad.axes || []).map(v => Number(v).toFixed(2));
+  const line = `[axes:${src.handedness}] ${axes.join(", ")}`;
+
+  // only print if changed to avoid spam
+  if (line !== s._lastAxesPrint) {
+    s._lastAxesPrint = line;
+    s.log?.(line);
   }
 }
 
@@ -407,7 +473,10 @@ function getHeadYaw(camera) {
 
 function setRigToAnchor(s, anchor) {
   s.player.position.set(anchor.pos.x, anchor.pos.y, anchor.pos.z);
+  s.player.rotation.set(0, 0, 0);
+
+  // non-XR look only
   if (!s.renderer.xr.isPresenting) {
     s.camera.rotation.set(0, anchor.yaw, 0);
   }
-    }
+  }

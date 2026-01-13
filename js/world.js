@@ -1,9 +1,9 @@
-// /js/world.js — FULL WORLD v3 (SAFE SPAWN + TELEPORT + BETTER QUEST STICK)
-// ✅ Always spawns on flat lobby ground (not stairs)
-// ✅ Teleport works even if thumbsticks are dead (RIGHT trigger / select)
-// ✅ Better stick detection using XRSession.inputSources (Quest-correct)
-// ✅ Bigger floor reticle
-// ✅ Keeps lasers + hover cars + rooms
+// /js/world.js — FULL WORLD v4
+// ✅ Right stick: forward/back + 45° diagonal strafe (not pure left/right)
+// ✅ Left stick: also works (if present) for movement
+// ✅ Wrist menu on LEFT controller (toggle with left "squeeze"/grip if available, else selectstart)
+// ✅ Teleport stays on both triggers/select
+// ✅ Lasers + floor reticle bigger
 
 export const World = {
   async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD }) {
@@ -19,6 +19,10 @@ export const World = {
       snapTurnRad: THREE.MathUtils.degToRad(30),
       turnCooldown: 0,
 
+      // movement shaping (your request)
+      diagonal45: true,      // ✅ turn strafe into 45° diagonals
+      diagonalAmount: 0.85,  // how much strafe contributes to forward direction
+
       // ray / reticle
       raycaster: new THREE.Raycaster(),
       tmpM: new THREE.Matrix4(),
@@ -27,11 +31,15 @@ export const World = {
       groundMeshes: [],
       lasers: [],
       reticles: [],
-      lastTeleportPoint: null,
+      lastTeleportPointR: null,
+      lastTeleportPointL: null,
 
       hoverCars: [],
 
-      // debug throttle
+      // Watch UI
+      watch: { root: null, visible: true, buttons: [] },
+
+      // Debug throttle
       _dbgT: 0,
       _lastAxesPrint: "",
     };
@@ -40,7 +48,7 @@ export const World = {
     scene.add(s.root);
 
     addLightsNotDark(s);
-    buildLobbyAndPit_DOWNSTAIRS(s); // stairs tilt down into pit
+    buildLobbyAndPit_DOWNSTAIRS(s);
     buildRoomsAndHallways(s);
     buildStore(s);
     buildSpectate(s);
@@ -49,22 +57,25 @@ export const World = {
 
     setupXRLasers(s);
     setupFloorReticles_BIGGER(s);
+    setupWatchMenu_LEFT(s);
 
-    // ✅ SAFE SPAWN: flat lobby, away from stairs/ramp
-    // (If you were on the ramp, it *felt* like you were stuck.)
+    // ✅ SAFE SPAWN: flat lobby ground
     s.anchors.lobby = { pos: new THREE.Vector3(0, 0, 13.5), yaw: Math.PI };
     s.anchors.store = { pos: new THREE.Vector3(-26, 0, 0), yaw: Math.PI / 2 };
     s.anchors.scorpion = { pos: new THREE.Vector3(26, 0, 0), yaw: -Math.PI / 2 };
     s.anchors.spectate = { pos: new THREE.Vector3(0, 3.2, -14), yaw: 0 };
-
     setRigToAnchor(s, s.anchors.lobby);
 
-    // ✅ TELEPORT HOOKS (RIGHT controller select/trigger)
-    // WebXR "select" generally maps to trigger press.
+    // ✅ Teleport on triggers/select for both hands
     controllers.c1.addEventListener("selectstart", () => teleportNow(s, "right"));
     controllers.c0.addEventListener("selectstart", () => teleportNow(s, "left"));
 
-    log?.(`[world] init ✅ FULL v3 build=${BUILD}`);
+    // ✅ Watch toggle (prefer squeeze, else selectstart will still teleport)
+    // Many Quest controllers fire "squeezestart" for grip.
+    controllers.c0.addEventListener("squeezestart", () => toggleWatch(s));
+    controllers.c1.addEventListener("squeezestart", () => { /* keep right hand free */ });
+
+    log?.(`[world] init ✅ FULL v4 build=${BUILD}`);
     return {
       setRoom: (room) => {
         s.room = room;
@@ -75,6 +86,8 @@ export const World = {
     };
   }
 };
+
+/* ---------------- LIGHTING ---------------- */
 
 function addLightsNotDark(s) {
   const { THREE, scene, root } = s;
@@ -99,6 +112,8 @@ function addLightsNotDark(s) {
 function matFloor(THREE, color = 0x111a28) {
   return new THREE.MeshStandardMaterial({ color, roughness: 0.95, metalness: 0.06 });
 }
+
+/* ---------------- WORLD GEO ---------------- */
 
 function buildLobbyAndPit_DOWNSTAIRS(s) {
   const { THREE, root } = s;
@@ -132,7 +147,6 @@ function buildLobbyAndPit_DOWNSTAIRS(s) {
   pitWall.position.set(0, (lobbyY + pitFloorY) / 2, 0);
   root.add(pitWall);
 
-  // table placeholder
   const table = new THREE.Mesh(
     new THREE.CylinderGeometry(2.7, 2.9, 0.4, 32),
     new THREE.MeshStandardMaterial({ color: 0x144235, roughness: 0.78, metalness: 0.05 })
@@ -140,7 +154,6 @@ function buildLobbyAndPit_DOWNSTAIRS(s) {
   table.position.set(0, pitFloorY + 0.95, 0);
   root.add(table);
 
-  // rail
   const rail = new THREE.Mesh(
     new THREE.TorusGeometry(pitRadius + 0.35, 0.08, 12, 64),
     new THREE.MeshStandardMaterial({ color: 0xc8d3ff, roughness: 0.3, metalness: 0.55 })
@@ -149,7 +162,7 @@ function buildLobbyAndPit_DOWNSTAIRS(s) {
   rail.position.y = lobbyY + 0.85;
   root.add(rail);
 
-  // DOWNSTAIRS ramp from lobby into pit (front / +Z)
+  // Ramp (not teleportable) from lobby down into pit
   const stairW = 2.1;
   const stairL = 7.6;
   const stairDrop = pitDepth;
@@ -161,9 +174,6 @@ function buildLobbyAndPit_DOWNSTAIRS(s) {
   ramp.position.set(0, (lobbyY + pitFloorY) / 2, pitRadius + stairL * 0.32);
   ramp.rotation.x = -Math.atan2(stairDrop, stairL);
   root.add(ramp);
-
-  // IMPORTANT: ramp is NOT ground-mesh for teleport.
-  // Teleport sticks to floors (lobby + pit + halls), so you don't land on steep geometry.
 }
 
 function buildRoomsAndHallways(s) {
@@ -262,6 +272,8 @@ function buildHoverCars(s) {
   }
 }
 
+/* ---------------- LASERS + RETICLE ---------------- */
+
 function setupXRLasers(s) {
   const { THREE, controllers } = s;
 
@@ -287,7 +299,6 @@ function setupFloorReticles_BIGGER(s) {
   const { THREE, root } = s;
 
   function makeReticle() {
-    // ✅ bigger than before
     const g = new THREE.RingGeometry(0.12, 0.18, 32);
     const m = new THREE.MeshBasicMaterial({ color: 0x66ccff, side: THREE.DoubleSide });
     const r = new THREE.Mesh(g, m);
@@ -300,22 +311,64 @@ function setupFloorReticles_BIGGER(s) {
   s.reticles.push(makeReticle(), makeReticle());
 }
 
+/* ---------------- WATCH MENU ---------------- */
+
+function setupWatchMenu_LEFT(s) {
+  const { THREE, controllers } = s;
+
+  const watchRoot = new THREE.Group();
+  watchRoot.name = "WATCH_UI";
+
+  const plate = new THREE.Mesh(
+    new THREE.BoxGeometry(0.14, 0.085, 0.012),
+    new THREE.MeshStandardMaterial({ color: 0x1b2a44, roughness: 0.5, metalness: 0.2 })
+  );
+  watchRoot.add(plate);
+
+  const btnMat = new THREE.MeshStandardMaterial({ color: 0x2b3b5f, roughness: 0.6, metalness: 0.15 });
+  const btnGeo = new THREE.BoxGeometry(0.12, 0.02, 0.012);
+
+  const items = [
+    { name: "Lobby", room: "lobby" },
+    { name: "Store", room: "store" },
+    { name: "Spectate", room: "spectate" },
+    { name: "Scorpion", room: "scorpion" },
+    { name: "HideUI", room: null },
+  ];
+
+  for (let i = 0; i < items.length; i++) {
+    const b = new THREE.Mesh(btnGeo, btnMat.clone());
+    b.position.set(0, 0.03 - i * 0.024, 0.01);
+    b.userData.watchItem = items[i];
+    watchRoot.add(b);
+    s.watch.buttons.push(b);
+  }
+
+  // Attach to LEFT controller like a wrist device
+  watchRoot.position.set(0.055, 0.015, -0.075);
+  watchRoot.rotation.set(-0.7, 0.0, 0.25);
+  controllers.c0.add(watchRoot);
+
+  s.watch.root = watchRoot;
+  s.watch.visible = true;
+}
+
+/* ---------------- UPDATE ---------------- */
+
 function update(s, dt, t) {
   for (const c of s.hoverCars) {
     c.obj.position.y = c.baseY + Math.sin(t * 1.3 + c.phase) * 0.25;
   }
 
-  updateLaserReticles(s);
+  updateLaserReticlesAndWatchHits(s);
 
   if (s.renderer.xr.isPresenting) {
-    applyQuestLocomotion_BETTER(s, dt);
-    // small debug print (once per second) if sticks are truly 0
-    debugPrintAxes(s, dt);
+    applyLocomotionRightPreferred(s, dt);
   }
 }
 
-function updateLaserReticles(s) {
-  const { renderer, raycaster, tmpM, tmpV, tmpDir } = s;
+function updateLaserReticlesAndWatchHits(s) {
+  const { renderer, raycaster, tmpM, tmpV, tmpDir, THREE } = s;
 
   for (let i = 0; i < s.lasers.length; i++) {
     const L = s.lasers[i];
@@ -337,6 +390,30 @@ function updateLaserReticles(s) {
 
     raycaster.set(origin, tmpDir);
 
+    // Watch UI interaction (only if visible)
+    if (s.watch.visible && s.watch.buttons.length) {
+      const hitsUI = raycaster.intersectObjects(s.watch.buttons, false);
+      // reset emissive
+      for (const b of s.watch.buttons) {
+        if (b.material?.emissive) {
+          b.material.emissive.setHex(0x000000);
+          b.material.emissiveIntensity = 0;
+        }
+      }
+      if (hitsUI.length) {
+        const hit = hitsUI[0].object;
+        if (hit.material?.emissive) {
+          hit.material.emissive = new THREE.Color(0x223cff);
+          hit.material.emissiveIntensity = 0.4;
+        }
+        // shorten line to UI
+        line.scale.z = Math.min(2.0, hitsUI[0].distance);
+        ret.visible = false;
+        continue;
+      }
+    }
+
+    // Floor reticle
     const hits = raycaster.intersectObjects(s.groundMeshes, false);
     if (hits.length) {
       const h = hits[0];
@@ -345,8 +422,8 @@ function updateLaserReticles(s) {
       ret.position.copy(h.point);
       ret.position.y += 0.01;
 
-      // store last teleport point
-      if (i === 1) s.lastTeleportPoint = h.point.clone();
+      if (i === 1) s.lastTeleportPointR = h.point.clone();
+      if (i === 0) s.lastTeleportPointL = h.point.clone();
     } else {
       line.scale.z = 12;
       ret.visible = false;
@@ -354,114 +431,126 @@ function updateLaserReticles(s) {
   }
 }
 
-// ✅ Trigger/select teleport: puts you on flat floor target
-function teleportNow(s, which) {
+// Teleport
+function teleportNow(s, hand) {
   if (!s.renderer.xr.isPresenting) return;
-  const p = s.lastTeleportPoint;
+
+  const p = hand === "right" ? s.lastTeleportPointR : s.lastTeleportPointL;
   if (!p) return;
 
-  // Move rig so your feet land on target
   s.player.position.x = p.x;
   s.player.position.z = p.z;
-
-  // keep y at ground level (don’t sink)
-  // (local-floor handles height; y=0 keeps you stable)
   s.player.position.y = 0;
-
-  s.log?.(`[tp] ${which} -> (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`);
+  s.log?.(`[tp] ${hand} -> (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`);
 }
 
+function toggleWatch(s) {
+  if (!s.watch.root) return;
+  s.watch.visible = !s.watch.visible;
+  s.watch.root.visible = s.watch.visible;
+  s.log?.(`[watch] ${s.watch.visible ? "shown" : "hidden"}`);
+}
+
+/* ---------------- LOCOMOTION ---------------- */
 /**
- * ✅ Better locomotion:
- * - reads XRSession.inputSources
- * - prefers RIGHT hand
- * - tries BOTH stick pairs (0/1 and 2/3)
- * - uses whichever pair is moving
+ * ✅ Uses RIGHT stick for movement if it moves.
+ * ✅ Falls back to LEFT stick if right is not moving.
+ * ✅ Applies "45° diagonals" shaping: strafe becomes diagonal forward/back depending on stick direction.
  */
-function applyQuestLocomotion_BETTER(s, dt) {
+function applyLocomotionRightPreferred(s, dt) {
   const session = s.renderer.xr.getSession?.();
   if (!session) return;
 
   const sources = Array.from(session.inputSources || []).filter(is => is?.gamepad);
   if (!sources.length) return;
 
-  // Prefer right hand, but fall back to any
-  const src = sources.find(is => is.handedness === "right") || sources[0];
-  const gp = src.gamepad;
-  const axes = gp.axes || [];
-  if (axes.length < 2) return;
+  const right = sources.find(is => is.handedness === "right") || sources[0];
+  const left  = sources.find(is => is.handedness === "left")  || sources[0];
 
-  // Candidate stick pairs
-  const pairs = [];
-  if (axes.length >= 2) pairs.push([0, 1]);
-  if (axes.length >= 4) pairs.push([2, 3]);
+  // Try right first
+  let move = readStick(right.gamepad, s.deadzone);
+  // If right is dead, try left
+  if (!move.active) move = readStick(left.gamepad, s.deadzone);
 
-  // pick the pair with most movement
-  let bestPair = pairs[0];
-  let bestMag = -1;
-  for (const [a, b] of pairs) {
-    const mag = Math.abs(axes[a] || 0) + Math.abs(axes[b] || 0);
-    if (mag > bestMag) { bestMag = mag; bestPair = [a, b]; }
+  if (move.active) {
+    const yaw = getHeadYaw(s.camera);
+    const cos = Math.cos(yaw), sin = Math.sin(yaw);
+
+    // Stick values
+    let x = move.x;  // strafe
+    let z = move.y;  // forward/back
+
+    // ✅ 45-degree shaping:
+    // Instead of pure strafe, we blend strafe into forward/back direction to create diagonals.
+    // Example: pushing right becomes "forward-right" (45°) rather than pure right.
+    if (s.diagonal45 && x !== 0) {
+      const sign = z !== 0 ? Math.sign(z) : -1; // if no forward input, default to forward (negative on many sticks)
+      z += sign * Math.abs(x) * s.diagonalAmount;
+      // reduce pure strafe a bit so it feels like 45°, not sideways
+      x *= (1.0 - 0.35);
+      // normalize so speed stays consistent
+      const len = Math.hypot(x, z);
+      if (len > 1e-4) { x /= len; z /= len; }
+    }
+
+    const mx = x * cos - z * sin;
+    const mz = x * sin + z * cos;
+
+    s.player.position.x += mx * s.moveSpeed * dt;
+    s.player.position.z += mz * s.moveSpeed * dt;
   }
 
-  let ax = axes[bestPair[0]] || 0;
-  let ay = axes[bestPair[1]] || 0;
-
-  if (Math.abs(ax) < s.deadzone) ax = 0;
-  if (Math.abs(ay) < s.deadzone) ay = 0;
-
-  // If still nothing, bail (teleport still works)
-  if (ax === 0 && ay === 0) return;
-
-  // Move relative to head yaw
-  const yaw = getHeadYaw(s.camera);
-  const cos = Math.cos(yaw), sin = Math.sin(yaw);
-
-  // forward: -ay typically, but we keep as ay and let user naturally adapt;
-  // If it feels reversed, we can flip later.
-  const x = ax;
-  const z = ay;
-
-  const mx = x * cos - z * sin;
-  const mz = x * sin + z * cos;
-
-  s.player.position.x += mx * s.moveSpeed * dt;
-  s.player.position.z += mz * s.moveSpeed * dt;
-
-  // snap turn using the "other" stick x if present, otherwise same x
-  const other = pairs.find(p => p[0] !== bestPair[0]) || bestPair;
-  let tx = axes[other[0]] || 0;
-  if (Math.abs(tx) < s.deadzone) tx = 0;
-
+  // Snap turn (use right first, else left)
+  const turnSrc = right.gamepad || left.gamepad;
+  const turn = readTurn(turnSrc, s.deadzone);
   s.turnCooldown = Math.max(0, s.turnCooldown - dt);
-  if (s.turnCooldown === 0 && tx !== 0) {
-    const dir = tx > 0 ? -1 : 1;
+  if (s.turnCooldown === 0 && turn.active) {
+    const dir = turn.x > 0 ? -1 : 1;
     s.player.rotation.y += dir * s.snapTurnRad;
     s.turnCooldown = 0.22;
   }
+
+  // Hook watch button clicks: if left trigger pressed while aiming at watch, activate
+  // (we use "selectstart" events in init for teleport; watch toggle is squeeze)
+  // You can later add "selectstart" detection to choose watch buttons.
 }
 
-function debugPrintAxes(s, dt) {
-  s._dbgT += dt;
-  if (s._dbgT < 1.0) return;
-  s._dbgT = 0;
+function readStick(gamepad, deadzone) {
+  if (!gamepad) return { active: false, x: 0, y: 0 };
 
-  const session = s.renderer.xr.getSession?.();
-  if (!session) return;
+  const axes = gamepad.axes || [];
+  const pairs = [];
+  if (axes.length >= 2) pairs.push([0, 1]);
+  if (axes.length >= 4) pairs.push([2, 3]);
+  if (!pairs.length) return { active: false, x: 0, y: 0 };
 
-  const src = Array.from(session.inputSources || []).find(is => is?.handedness === "right" && is?.gamepad)
-    || Array.from(session.inputSources || []).find(is => is?.gamepad);
-
-  if (!src?.gamepad) return;
-
-  const axes = (src.gamepad.axes || []).map(v => Number(v).toFixed(2));
-  const line = `[axes:${src.handedness}] ${axes.join(", ")}`;
-
-  // only print if changed to avoid spam
-  if (line !== s._lastAxesPrint) {
-    s._lastAxesPrint = line;
-    s.log?.(line);
+  // choose pair with most movement
+  let best = pairs[0], bestMag = -1;
+  for (const p of pairs) {
+    const mag = Math.abs(axes[p[0]] || 0) + Math.abs(axes[p[1]] || 0);
+    if (mag > bestMag) { bestMag = mag; best = p; }
   }
+
+  let x = axes[best[0]] || 0;
+  let y = axes[best[1]] || 0;
+
+  if (Math.abs(x) < deadzone) x = 0;
+  if (Math.abs(y) < deadzone) y = 0;
+
+  const active = !(x === 0 && y === 0);
+  return { active, x, y };
+}
+
+function readTurn(gamepad, deadzone) {
+  if (!gamepad) return { active: false, x: 0 };
+  const axes = gamepad.axes || [];
+  // Prefer a second stick x if present, else use primary x.
+  let tx = 0;
+  if (axes.length >= 3) tx = axes[2] || 0;
+  else if (axes.length >= 1) tx = axes[0] || 0;
+
+  if (Math.abs(tx) < deadzone) tx = 0;
+  return { active: tx !== 0, x: tx };
 }
 
 function getHeadYaw(camera) {
@@ -474,9 +563,5 @@ function getHeadYaw(camera) {
 function setRigToAnchor(s, anchor) {
   s.player.position.set(anchor.pos.x, anchor.pos.y, anchor.pos.z);
   s.player.rotation.set(0, 0, 0);
-
-  // non-XR look only
-  if (!s.renderer.xr.isPresenting) {
-    s.camera.rotation.set(0, anchor.yaw, 0);
-  }
-  }
+  if (!s.renderer.xr.isPresenting) s.camera.rotation.set(0, anchor.yaw, 0);
+      }

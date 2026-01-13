@@ -1,13 +1,13 @@
-// /js/index.js — Scarlett FULL XR Runtime v5.0
+// /js/index.js — Scarlett FULL XR Runtime v5.1 (Controllers Parent to Rig + Admin Buttons)
 import { VRButton } from "./VRButton.js";
 
 const HUD = (() => {
-  const state = { lines: [], max: 2500 };
+  const state = { lines: [], max: 2500, muted: false };
   const el = (tag, css) => { const e = document.createElement(tag); if (css) e.style.cssText = css; return e; };
 
   const root = el("div", `
     position:fixed; left:10px; top:10px; right:10px;
-    max-height:44vh; overflow:auto; z-index:99999;
+    max-height:46vh; overflow:auto; z-index:99999;
     padding:12px; border-radius:16px;
     background:rgba(5,6,10,.62); backdrop-filter:blur(10px);
     border:1px solid rgba(127,231,255,.2);
@@ -43,6 +43,12 @@ const HUD = (() => {
   const copyBtn = btn("Copy");
   const clearBtn = btn("Clear");
   const hideBtn = btn("Hide HUD");
+  const muteBtn = btn("Mute");
+  const resetBtn = btn("Reset Hand");
+  const vipBtn = btn("TP VIP");
+  const storeBtn = btn("TP Store");
+  const pokerBtn = btn("TP Poker");
+  const eventBtn = btn("TP Event");
 
   const showBtn = btn("Show HUD");
   showBtn.style.position = "fixed";
@@ -59,6 +65,12 @@ const HUD = (() => {
   bar.appendChild(badgeInput);
   bar.appendChild(copyBtn);
   bar.appendChild(clearBtn);
+  bar.appendChild(muteBtn);
+  bar.appendChild(resetBtn);
+  bar.appendChild(vipBtn);
+  bar.appendChild(storeBtn);
+  bar.appendChild(pokerBtn);
+  bar.appendChild(eventBtn);
   bar.appendChild(hideBtn);
 
   root.appendChild(bar);
@@ -84,16 +96,29 @@ const HUD = (() => {
   window.addEventListener("error",(e)=>log("[FATAL]", e.message||e.error||e));
   window.addEventListener("unhandledrejection",(e)=>log("[FATAL promise]", e.reason?.message||e.reason||e));
 
-  return {
+  const api = {
     log,
     setMode:(v)=>badgeMode.textContent=`Mode: ${v}`,
     setXR:(v)=>badgeXR.textContent=`XR: ${v?"supported":"no"}`,
-    setInput:(v)=>badgeInput.textContent=`Input: ${v}`
+    setInput:(v)=>badgeInput.textContent=`Input: ${v}`,
+    bindWorld(World){
+      muteBtn.onclick = ()=>{
+        state.muted = !state.muted;
+        muteBtn.textContent = state.muted ? "Unmute" : "Mute";
+        World?.setMuted?.(state.muted);
+        log(`[admin] muted=${state.muted}`);
+      };
+      resetBtn.onclick = ()=> World?.admin?.resetHand?.();
+      vipBtn.onclick   = ()=> World?.admin?.teleportTo?.("vip");
+      storeBtn.onclick = ()=> World?.admin?.teleportTo?.("store");
+      pokerBtn.onclick = ()=> World?.admin?.teleportTo?.("poker");
+      eventBtn.onclick = ()=> World?.admin?.teleportTo?.("event");
+    }
   };
+  return api;
 })();
 
 function isTouch(){ return ("ontouchstart" in window) || (navigator.maxTouchPoints > 0); }
-
 function installAndroidDualStick(){
   if(!isTouch()) return null;
 
@@ -152,8 +177,8 @@ async function loadTHREE(){
   return await import("https://unpkg.com/three@0.160.0/build/three.module.js");
 }
 
-// 2 lasers total, one per controller
-function installLasers(THREE, renderer, scene){
+// ✅ FIX: parent controllers to PlayerRig so they move with teleport rig
+function installLasers(THREE, renderer, player){
   const controllers=[];
   const makeLaser=()=>{
     const geo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-2.2)]);
@@ -166,19 +191,17 @@ function installLasers(THREE, renderer, scene){
     const c=renderer.xr.getController(i);
     c.name=`XRController_${i}`;
     c.add(makeLaser());
-    scene.add(c);
+    player.add(c); // ✅ attach to rig
     controllers.push(c);
   }
-  HUD.log("[xr] lasers installed ✅ (2 total)");
+  HUD.log("[xr] lasers installed ✅ (rig-parented)");
   return controllers;
 }
 
 function deadzone(v,dz){ return Math.abs(v)<dz?0:v; }
 
-// Best-effort pad resolver with last-resort "single pad controls both"
 function resolveSticks(renderer){
   const out={ left:null, right:null, srcCount:0, navCount:0 };
-
   const session=renderer.xr.getSession?.();
   const sources=[];
   if(session){
@@ -202,8 +225,8 @@ function resolveSticks(renderer){
 
   if(!out.left && nav[0]) out.left = { gamepad: nav[0], handedness:"left" };
   if(!out.right && nav[1]) out.right = { gamepad: nav[1], handedness:"right" };
-
   if(out.left && !out.right) out.right = out.left;
+
   return out;
 }
 
@@ -220,9 +243,8 @@ function bootLoop(THREE, STATE){
       const lgp = sticks.left?.gamepad;
       const rgp = sticks.right?.gamepad;
 
-      // Left = move, Right = turn. If left dead but right live, swap.
+      // movement (best effort)
       let mx=0,mz=0,turn=0;
-
       if(lgp?.axes?.length>=2){
         mx = deadzone(lgp.axes[0]||0, 0.14);
         mz = deadzone(lgp.axes[1]||0, 0.14);
@@ -231,31 +253,23 @@ function bootLoop(THREE, STATE){
         turn = deadzone(rgp.axes[0]||0, 0.14);
       }
 
-      const leftLive = Math.abs(mx)+Math.abs(mz) > 0.01;
-      const rightLive = Math.abs(rgp?.axes?.[0]||0)+Math.abs(rgp?.axes?.[1]||0) > 0.01;
-      if(!leftLive && rightLive){
-        mx = deadzone(rgp.axes[0]||0, 0.14);
-        mz = deadzone(rgp.axes[1]||0, 0.14);
-        if(lgp?.axes?.length>=2) turn = deadzone(lgp.axes[0]||0, 0.14);
-      }
-
+      // if axes are totally dead, no smooth move (teleport still works)
       const yaw = player.rotation.y;
-      const speed = 2.25 * dt;
+      const speed = 2.1 * dt;
+      player.rotation.y -= turn * 2.1 * dt;
+
       const vx = (mx * Math.cos(yaw) - mz * Math.sin(yaw)) * speed;
       const vz = (mx * Math.sin(yaw) + mz * Math.cos(yaw)) * speed;
-
-      player.rotation.y -= turn * 2.25 * dt;
       player.position.x += vx;
       player.position.z += vz;
 
       dbgT += dt;
-      if(dbgT > 0.7){
+      if(dbgT > 0.8){
         dbgT = 0;
         HUD.setInput(`XR src=${sticks.srcCount} nav=${sticks.navCount} L(${(lgp?.axes?.[0]||0).toFixed(2)},${(lgp?.axes?.[1]||0).toFixed(2)}) R(${(rgp?.axes?.[0]||0).toFixed(2)},${(rgp?.axes?.[1]||0).toFixed(2)})`);
       }
 
       STATE.World?.frame?.({ THREE, scene, renderer, camera, player, controllers, sticks }, dt);
-
     } else if(STATE.sticks){
       // Android
       const mx = STATE.sticks.left?.x || 0;
@@ -264,10 +278,10 @@ function bootLoop(THREE, STATE){
 
       const yaw = player.rotation.y;
       const speed = 2.05 * dt;
+      player.rotation.y -= turn * 2.05 * dt;
+
       const vx = (mx * Math.cos(yaw) - mz * Math.sin(yaw)) * speed;
       const vz = (mx * Math.sin(yaw) + mz * Math.cos(yaw)) * speed;
-
-      player.rotation.y -= turn * 2.05 * dt;
       player.position.x += vx;
       player.position.z += vz;
 
@@ -291,9 +305,9 @@ function bootLoop(THREE, STATE){
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
-  scene.fog = new THREE.Fog(0x05060a, 10, 90);
+  scene.fog = new THREE.Fog(0x05060a, 10, 95);
 
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.02, 350);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.02, 380);
   camera.position.set(0,1.65,0);
 
   const player = new THREE.Group();
@@ -312,13 +326,14 @@ function bootLoop(THREE, STATE){
   HUD.log("[index] VRButton appended ✅");
 
   const sticks = installAndroidDualStick();
-  const controllers = installLasers(THREE, renderer, scene);
+  const controllers = installLasers(THREE, renderer, player);
 
   const WorldMod = await import(`./world.js?v=${Date.now()}`);
   HUD.log("[index] world.js imported ✅");
 
   const World = WorldMod.World;
   await World.build({ THREE, scene, renderer, camera, player, controllers, log: HUD.log });
+  HUD.bindWorld(World);
 
   window.addEventListener("resize", ()=>{
     camera.aspect = window.innerWidth/window.innerHeight;

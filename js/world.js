@@ -1,12 +1,10 @@
-// /js/world.js — Scarlett MASTER WORLD v5.3 (FULL)
-// ✅ Quest sticks supported (handled in index.js)
-// ✅ Teleport ring restored + stabilized (smooth + deadband)
-// ✅ Teleport button = A/X only (NOT trigger/grip)
-// ✅ Teleport clamp prevents disappearing
-// ✅ Community cards face camera, hole cards above heads
-// ✅ Bigger nametags + active glow
-// ✅ Action tile "YOUR TURN: CHECK / BET / RAISE"
-// ✅ Winner display held longer
+// /js/world.js — Scarlett MASTER WORLD v5.4 (FULL)
+// ✅ Real playing cards (rank+suit drawn to CanvasTexture)
+// ✅ Community + Hole cards show actual card identities
+// ✅ HUD includes Turn + Last Action + Amounts (call/raise)
+// ✅ Storefront returned + extra signage + better lighting
+// ✅ Teleport ring stabilized + clamp safe
+// ✅ A/X teleport only (no trigger/grip teleport)
 
 export const World = (() => {
   const S = {
@@ -19,19 +17,25 @@ export const World = (() => {
     bots:{ seated:[], guard:null },
     poker:{
       t:0, phase:"deal", hand:0, pot:0,
-      table:null, community:[], potStack:null,
+      table:null, community:[], communityIds:[],
+      potStack:null,
       hud:null, winner:"", winText:"",
-      chipKit:null,
       actionTile:null,
-      activeIdx:0
+      chipKit:null,
+      activeIdx:0,
+      lastAction:"", lastAmount:0,
+      minCall:10,
+      turnName:""
     },
     audio:{ muted:false },
     tp:null,
-    dust:{ points:null }
+    dust:{ points:null },
+    cardTexCache:new Map() // key => CanvasTexture
   };
 
   const log=(...a)=>{ try{S.log?.(...a);}catch{} };
 
+  // ----------------- helpers -----------------
   function ensureRoot(){
     const THREE=S.THREE;
     if(S.root && S.root.parent===S.scene) return S.root;
@@ -39,12 +43,10 @@ export const World = (() => {
     S.scene.add(S.root);
     return S.root;
   }
+  function dirFromYaw(yaw){ return new S.THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw)); }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
 
-  function dirFromYaw(yaw){
-    return new S.THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));
-  }
-
-  // ---------- materials ----------
+  // ----------------- materials -----------------
   function wallMat(){
     const THREE=S.THREE;
     const tex=new THREE.TextureLoader().load("assets/textures/casino_wall_diffuse.jpg");
@@ -57,13 +59,13 @@ export const World = (() => {
     });
   }
   const matFloor=()=>new S.THREE.MeshStandardMaterial({ color:0x050508, roughness:0.92, metalness:0.05 });
-  const matGold=()=>new S.THREE.MeshStandardMaterial({ color:0xd4af37, roughness:0.22, metalness:0.95 });
-  const matFelt=()=>new S.THREE.MeshStandardMaterial({ color:0x0a3a2a, roughness:0.9, metalness:0.04 });
-  const matDark=()=>new S.THREE.MeshStandardMaterial({ color:0x0a0b12, roughness:0.95, metalness:0.06, side:S.THREE.DoubleSide });
-  const matHall=()=>new S.THREE.MeshStandardMaterial({ color:0x090a12, roughness:0.9, metalness:0.1, side:S.THREE.BackSide, emissive:0x05060a, emissiveIntensity:0.65 });
-  const matRoom=()=>new S.THREE.MeshStandardMaterial({ color:0x070711, roughness:0.86, metalness:0.1, side:S.THREE.BackSide, emissive:0x05060a, emissiveIntensity:0.65 });
+  const matGold =()=>new S.THREE.MeshStandardMaterial({ color:0xd4af37, roughness:0.22, metalness:0.95 });
+  const matFelt =()=>new S.THREE.MeshStandardMaterial({ color:0x0a3a2a, roughness:0.9, metalness:0.04 });
+  const matDark =()=>new S.THREE.MeshStandardMaterial({ color:0x0a0b12, roughness:0.95, metalness:0.06, side:S.THREE.DoubleSide });
+  const matHall =()=>new S.THREE.MeshStandardMaterial({ color:0x090a12, roughness:0.9, metalness:0.1, side:S.THREE.BackSide, emissive:0x05060a, emissiveIntensity:0.65 });
+  const matRoom =()=>new S.THREE.MeshStandardMaterial({ color:0x070711, roughness:0.86, metalness:0.1, side:S.THREE.BackSide, emissive:0x05060a, emissiveIntensity:0.65 });
 
-  // ---------- text canvases ----------
+  // ----------------- text canvases -----------------
   function makeCanvasTex(lines, big=false){
     const THREE=S.THREE;
     const canvas=document.createElement("canvas");
@@ -87,11 +89,11 @@ export const World = (() => {
     ctx.font = big ? "bold 96px system-ui,Segoe UI,Roboto,Arial" : "bold 82px system-ui,Segoe UI,Roboto,Arial";
     ctx.fillText(lines[0]||"", 512, 175);
 
-    ctx.font = "600 58px system-ui,Segoe UI,Roboto,Arial";
+    ctx.font = "700 58px system-ui,Segoe UI,Roboto,Arial";
     ctx.fillStyle="rgba(232,236,255,0.92)";
     ctx.fillText(lines[1]||"", 512, 300);
 
-    ctx.font = "500 46px system-ui,Segoe UI,Roboto,Arial";
+    ctx.font = "600 46px system-ui,Segoe UI,Roboto,Arial";
     ctx.fillStyle="rgba(152,160,199,0.95)";
     ctx.fillText(lines[2]||"", 512, 410);
 
@@ -111,19 +113,160 @@ export const World = (() => {
     S.lobby.add(plane);
   }
 
+  function addSign(text1, text2, pos, yaw, scale=1){
+    const tex=makeCanvasTex([text1, text2||"", ""], true);
+    const mat=new S.THREE.MeshBasicMaterial({ map:tex, transparent:true, opacity:0.95, side:S.THREE.DoubleSide, depthTest:false });
+    const plane=new S.THREE.Mesh(new S.THREE.PlaneGeometry(4.4*scale, 2.2*scale), mat);
+    plane.position.copy(pos);
+    plane.rotation.y = yaw;
+    plane.renderOrder=9999;
+    S.lobby.add(plane);
+    return plane;
+  }
+
   function addNameTag(parent, name){
-    const THREE=S.THREE;
     const tex=makeCanvasTex([name,"",""], false);
-    const mat=new THREE.MeshBasicMaterial({ map:tex, transparent:true, opacity:0.92, side:THREE.DoubleSide, depthTest:false });
-    const plane=new THREE.Mesh(new THREE.PlaneGeometry(1.25,0.62), mat);
-    plane.position.set(0, 1.42, 0);
+    const mat=new S.THREE.MeshBasicMaterial({ map:tex, transparent:true, opacity:0.92, side:S.THREE.DoubleSide, depthTest:false });
+    const plane=new S.THREE.Mesh(new S.THREE.PlaneGeometry(1.35,0.66), mat);
+    plane.position.set(0, 1.45, 0);
     plane.userData._tag = true;
     plane.renderOrder = 9999;
     parent.add(plane);
     return plane;
   }
 
-  // ---------- stream ----------
+  // ----------------- CARD TEXTURES (rank/suit) -----------------
+  const SUITS = ["♠","♥","♦","♣"];
+  const RANKS = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
+
+  function cardKey(rank, suit){ return `${rank}${suit}`; }
+
+  function makeCardTexture(rank, suit){
+    const THREE=S.THREE;
+    const key=cardKey(rank, suit);
+    if(S.cardTexCache.has(key)) return S.cardTexCache.get(key);
+
+    const canvas=document.createElement("canvas");
+    canvas.width=512; canvas.height=768;
+    const ctx=canvas.getContext("2d");
+
+    // base
+    ctx.fillStyle="#f7f7fb";
+    ctx.fillRect(0,0,512,768);
+
+    // border
+    ctx.strokeStyle="rgba(0,0,0,0.25)";
+    ctx.lineWidth=10;
+    ctx.strokeRect(14,14,484,740);
+
+    // inner gold accent
+    ctx.strokeStyle="rgba(212,175,55,0.55)";
+    ctx.lineWidth=6;
+    ctx.strokeRect(28,28,456,712);
+
+    const red = (suit==="♥" || suit==="♦");
+    const ink = red ? "#d3173a" : "#10131c";
+
+    // corner text
+    ctx.fillStyle=ink;
+    ctx.textAlign="left";
+    ctx.textBaseline="top";
+    ctx.font="900 82px system-ui,Segoe UI,Roboto,Arial";
+    ctx.fillText(rank, 44, 40);
+    ctx.font="900 88px system-ui,Segoe UI,Roboto,Arial";
+    ctx.fillText(suit, 44, 130);
+
+    // mirrored corner
+    ctx.save();
+    ctx.translate(512,768);
+    ctx.rotate(Math.PI);
+    ctx.textAlign="left";
+    ctx.textBaseline="top";
+    ctx.font="900 82px system-ui,Segoe UI,Roboto,Arial";
+    ctx.fillText(rank, 44, 40);
+    ctx.font="900 88px system-ui,Segoe UI,Roboto,Arial";
+    ctx.fillText(suit, 44, 130);
+    ctx.restore();
+
+    // center suit
+    ctx.textAlign="center";
+    ctx.textBaseline="middle";
+    ctx.font="900 260px system-ui,Segoe UI,Roboto,Arial";
+    ctx.globalAlpha=0.88;
+    ctx.fillText(suit, 256, 396);
+    ctx.globalAlpha=1;
+
+    const tex=new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 8;
+    S.cardTexCache.set(key, tex);
+    return tex;
+  }
+
+  function makeCardMaterials(rank, suit){
+    const tex = makeCardTexture(rank, suit);
+    const backTex = makeCardBackTexture();
+    const THREE=S.THREE;
+
+    const front = new THREE.MeshStandardMaterial({
+      map:tex, roughness:0.55, metalness:0.0, side:THREE.DoubleSide
+    });
+    const back = new THREE.MeshStandardMaterial({
+      map:backTex, roughness:0.6, metalness:0.05, side:THREE.DoubleSide
+    });
+
+    // We’ll apply “front” only for simplicity (DoubleSide shows both).
+    // If later you want true front/back, we can use an array material + UV layout.
+    return { front, back };
+  }
+
+  function makeCardBackTexture(){
+    const THREE=S.THREE;
+    if(S.cardTexCache.has("__BACK__")) return S.cardTexCache.get("__BACK__");
+
+    const c=document.createElement("canvas");
+    c.width=512; c.height=768;
+    const ctx=c.getContext("2d");
+
+    ctx.fillStyle="#0b0d14";
+    ctx.fillRect(0,0,512,768);
+
+    // neon lattice
+    ctx.strokeStyle="rgba(127,231,255,0.35)";
+    ctx.lineWidth=6;
+    for(let y=40;y<768;y+=70){
+      ctx.beginPath(); ctx.moveTo(40,y); ctx.lineTo(472,y); ctx.stroke();
+    }
+    for(let x=40;x<512;x+=70){
+      ctx.beginPath(); ctx.moveTo(x,40); ctx.lineTo(x,728); ctx.stroke();
+    }
+
+    // gold border
+    ctx.strokeStyle="rgba(212,175,55,0.65)";
+    ctx.lineWidth=10;
+    ctx.strokeRect(16,16,480,736);
+
+    ctx.fillStyle="rgba(127,231,255,0.55)";
+    ctx.font="900 92px system-ui,Segoe UI,Roboto,Arial";
+    ctx.textAlign="center";
+    ctx.textBaseline="middle";
+    ctx.fillText("SCARLETT", 256, 370);
+
+    const tex=new THREE.CanvasTexture(c);
+    tex.colorSpace=THREE.SRGBColorSpace;
+    tex.anisotropy=8;
+    S.cardTexCache.set("__BACK__", tex);
+    return tex;
+  }
+
+  // Make a random card id like {r:"K", s:"♦"}
+  function randCard(){
+    const r = RANKS[Math.floor(Math.random()*RANKS.length)];
+    const s = SUITS[Math.floor(Math.random()*SUITS.length)];
+    return { r, s };
+  }
+
+  // ----------------- stream (music + jumbotrons) -----------------
   function initStream(){
     const THREE=S.THREE;
     const video=document.createElement("video");
@@ -149,7 +292,7 @@ export const World = (() => {
     return tex;
   }
 
-  // ---------- teleport ring ----------
+  // ----------------- teleport -----------------
   function ensureAimRing(){
     const THREE=S.THREE;
     const existing=S.scene.getObjectByName("TeleportAimRing");
@@ -173,17 +316,12 @@ export const World = (() => {
     S.aimRing=ring;
   }
 
-  // A/X only (no trigger/grip teleport)
+  // A/X only (no trigger/grip)
   function teleportPressed(ctx){
     try{
       const lgp = ctx?.pads?.lgp;
       const rgp = ctx?.pads?.rgp;
-
-      const pressedAX = (gp)=>{
-        if(!gp?.buttons) return false;
-        return !!gp.buttons[0]?.pressed;
-      };
-
+      const pressedAX=(gp)=>!!gp?.buttons?.[0]?.pressed;
       return pressedAX(lgp) || pressedAX(rgp);
     } catch { return false; }
   }
@@ -234,7 +372,6 @@ export const World = (() => {
 
       const dest = S.tp.lastValid;
 
-      // clamp to prevent disappearing
       const clampR = 26;
       const r = Math.hypot(dest.x, dest.z);
       if(!Number.isFinite(r) || r > clampR){
@@ -260,7 +397,7 @@ export const World = (() => {
     v.volume = Math.max(0, Math.min(1, 1 - dist/24));
   }
 
-  // ---------- beauty ----------
+  // ----------------- ambience / beauty -----------------
   function buildVelvetGoldRibs(root, radius, height){
     const THREE=S.THREE;
     const velvet = new THREE.MeshStandardMaterial({
@@ -284,16 +421,16 @@ export const World = (() => {
 
   function buildDust(root){
     const THREE=S.THREE;
-    const count=650;
+    const count=700;
     const geo=new THREE.BufferGeometry();
     const arr=new Float32Array(count*3);
     for(let i=0;i<count;i++){
-      arr[i*3+0] = (Math.random()-0.5)*22;
-      arr[i*3+1] = 0.6 + Math.random()*6.5;
-      arr[i*3+2] = (Math.random()-0.5)*22;
+      arr[i*3+0] = (Math.random()-0.5)*24;
+      arr[i*3+1] = 0.6 + Math.random()*7.0;
+      arr[i*3+2] = (Math.random()-0.5)*24;
     }
     geo.setAttribute("position", new THREE.BufferAttribute(arr,3));
-    const mat=new THREE.PointsMaterial({ size:0.03, transparent:true, opacity:0.35 });
+    const mat=new THREE.PointsMaterial({ size:0.03, transparent:true, opacity:0.32 });
     const pts=new THREE.Points(geo, mat);
     pts.name="DustMotes";
     root.add(pts);
@@ -310,7 +447,7 @@ export const World = (() => {
     const THREE=S.THREE;
     const railMat=new THREE.MeshStandardMaterial({
       color:0x1a1b25, roughness:0.35, metalness:0.75,
-      emissive:0x00ff7f, emissiveIntensity:0.25
+      emissive:0x00ff7f, emissiveIntensity:0.28
     });
     const rail=new THREE.Mesh(new THREE.TorusGeometry(radius, 0.095, 18, 280), railMat);
     rail.rotation.x=Math.PI/2;
@@ -319,17 +456,9 @@ export const World = (() => {
 
     for(let i=0;i<16;i++){
       const a=(i/16)*Math.PI*2;
-      const p=new THREE.PointLight(0x00ff7f, 0.08, 3.0);
+      const p=new THREE.PointLight(0x00ff7f, 0.09, 3.0);
       p.position.set(Math.cos(a)*radius, 0.95, Math.sin(a)*radius);
       root.add(p);
-    }
-
-    const postMat=new THREE.MeshStandardMaterial({ color:0x15161d, roughness:0.65, metalness:0.55 });
-    for(let i=0;i<24;i++){
-      const a=(i/24)*Math.PI*2;
-      const post=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,0.8,16), postMat);
-      post.position.set(Math.cos(a)*(radius-0.02), 0.4, Math.sin(a)*(radius-0.02));
-      root.add(post);
     }
   }
 
@@ -348,6 +477,7 @@ export const World = (() => {
     return g;
   }
 
+  // ----------------- table + hud -----------------
   function buildTable(root, y){
     const THREE=S.THREE;
     const table=new THREE.Group();
@@ -374,41 +504,15 @@ export const World = (() => {
     return table;
   }
 
-  function buildTableHood(root){
-    const THREE=S.THREE;
-    const hood=new THREE.Group();
-    hood.name="TableHood";
-    hood.position.set(0, 4.9, 0);
-
-    const ring=new THREE.Mesh(
-      new THREE.TorusGeometry(3.1, 0.08, 16, 300),
-      new THREE.MeshStandardMaterial({ color:0x0c0c14, emissive:0x7fe7ff, emissiveIntensity:0.12, roughness:0.6, metalness:0.3 })
-    );
-    ring.rotation.x=Math.PI/2;
-    hood.add(ring);
-
-    for(let i=0;i<8;i++){
-      const a=(i/8)*Math.PI*2;
-      const spot=new THREE.SpotLight(0xffffff, 0.55, 16, Math.PI/7, 0.6, 1.3);
-      spot.position.set(Math.cos(a)*2.2, 0.25, Math.sin(a)*2.2);
-      spot.target.position.set(0,-3.8,0);
-      hood.add(spot);
-      hood.add(spot.target);
-    }
-
-    root.add(hood);
-    return hood;
-  }
-
   function buildPokerHUD(root){
     const THREE=S.THREE;
     const g=new THREE.Group();
     g.name="PokerHUD";
-    g.position.set(0, 3.55, -1.6);
+    g.position.set(0, 3.65, -1.6);
 
-    const tex=makeCanvasTex(["POT: 0","PHASE: DEAL",""], false);
+    const tex=makeCanvasTex(["POT: 0","TURN: —","ACTION: —"], false);
     const mat=new THREE.MeshBasicMaterial({ map:tex, transparent:true, opacity:0.95, side:THREE.DoubleSide, depthTest:false });
-    const plane=new THREE.Mesh(new THREE.PlaneGeometry(3.2,1.6), mat);
+    const plane=new THREE.Mesh(new THREE.PlaneGeometry(3.6,1.75), mat);
     plane.renderOrder=9999;
     g.add(plane);
 
@@ -419,17 +523,23 @@ export const World = (() => {
   function updatePokerHUD(){
     const hud=S.poker.hud;
     if(!hud) return;
+
+    const turn = S.poker.turnName || "—";
+    const act = S.poker.lastAction ? `${S.poker.lastAction}${S.poker.lastAmount?` ${S.poker.lastAmount}`:""}` : "—";
+
     const lines = [
       `POT: ${S.poker.pot}`,
-      `PHASE: ${S.poker.phase.toUpperCase()}`,
-      S.poker.winner ? `WIN: ${S.poker.winner} (${S.poker.winText})` : ""
+      `TURN: ${turn}`,
+      `ACTION: ${act}`
     ];
+
     const newTex = makeCanvasTex(lines, false);
     hud.plane.material.map?.dispose?.();
     hud.plane.material.map = newTex;
     hud.plane.material.needsUpdate = true;
   }
 
+  // ----------------- bots + name tags -----------------
   function buildSeatedBots(table){
     const THREE=S.THREE;
     const seatMat=new THREE.MeshStandardMaterial({ color:0x12121a, roughness:0.84, metalness:0.12 });
@@ -468,7 +578,14 @@ export const World = (() => {
       addNameTag(bot, names[i]);
       table.add(bot);
 
-      seated.push({ name:names[i], group:bot, seatAngle:a, chips:[], hole:[] });
+      seated.push({
+        name:names[i],
+        group:bot,
+        seatAngle:a,
+        chips:[],
+        hole:[],
+        holeIds:[]
+      });
     }
     S.bots.seated = seated;
   }
@@ -484,8 +601,10 @@ export const World = (() => {
       bot.userData.active = (i===idx);
     }
     S.poker.activeIdx = idx;
+    S.poker.turnName = S.bots.seated[idx]?.name || "—";
   }
 
+  // ----------------- action tile -----------------
   function ensureActionTile(){
     if(S.poker.actionTile) return;
     const tex = makeCanvasTex(["YOUR TURN","CHECK / BET / RAISE",""], true);
@@ -510,6 +629,7 @@ export const World = (() => {
     S.poker.actionTile.visible = true;
   }
 
+  // ----------------- chips -----------------
   function buildChipKit(){
     const THREE=S.THREE;
     const chipGeo=new THREE.CylinderGeometry(0.06,0.06,0.018,28);
@@ -520,6 +640,178 @@ export const World = (() => {
       new THREE.MeshStandardMaterial({ color:0x00ff7f, roughness:0.35, metalness:0.2 }),
     ];
     return { chipGeo, mats };
+  }
+
+  function spawnChipMover(fromBot, amount){
+    const { chipGeo, mats } = S.poker.chipKit;
+    const chip = new S.THREE.Mesh(chipGeo, mats[Math.floor(Math.random()*mats.length)]);
+    chip.rotation.x = Math.PI/2;
+
+    const a=fromBot.seatAngle;
+    chip.position.set(Math.cos(a)*2.5, -0.95 + 1.03, Math.sin(a)*2.5);
+
+    chip.userData.mode="toPot";
+    chip.userData.t=0;
+    chip.userData.from = chip.position.clone();
+    chip.userData.to = new S.THREE.Vector3(0, -0.95 + 1.03, 0);
+    chip.userData.amount = amount;
+
+    S.lobby.add(chip);
+    fromBot.chips.push(chip);
+    return chip;
+  }
+
+  function addChipToPotStack(){
+    const { chipGeo, mats } = S.poker.chipKit;
+    const chip = new S.THREE.Mesh(chipGeo, mats[Math.floor(Math.random()*mats.length)]);
+    chip.rotation.x = Math.PI/2;
+    const k = S.poker.potStack.children.length;
+    chip.position.set(0, k*0.02, 0);
+    S.poker.potStack.add(chip);
+  }
+
+  function updateChipAnimations(dt){
+    for(const b of S.bots.seated){
+      for(const chip of b.chips){
+        chip.userData.t += dt;
+        const t = Math.min(1, chip.userData.t * 1.35);
+        chip.position.lerpVectors(chip.userData.from, chip.userData.to, t);
+        chip.rotation.x = Math.PI/2;
+
+        if(t>=1 && chip.userData.mode==="toPot"){
+          const amt = chip.userData.amount || 10;
+          if(chip.parent) chip.parent.remove(chip);
+          chip.userData.mode="done";
+          S.poker.pot += amt;
+          addChipToPotStack();
+          updatePokerHUD();
+        }
+      }
+      b.chips = b.chips.filter(c=>c.userData.mode!=="done");
+    }
+  }
+
+  // ----------------- cards placement -----------------
+  function clearHand(){
+    for(const c of S.poker.community) c.visible=false;
+    S.poker.communityIds = [];
+
+    for(const b of S.bots.seated){
+      for(const card of b.hole){ if(card.parent) card.parent.remove(card); }
+      b.hole.length=0;
+      b.holeIds = [];
+
+      for(const chip of b.chips){ if(chip.parent) chip.parent.remove(chip); }
+      b.chips.length=0;
+    }
+
+    const pot=S.poker.potStack;
+    if(pot){
+      while(pot.children.length) pot.remove(pot.children[0]);
+      pot.position.set(0, -0.95 + 0.56, 0);
+    }
+
+    S.poker.pot=0;
+    S.poker.lastAction="";
+    S.poker.lastAmount=0;
+    updatePokerHUD();
+  }
+
+  function spawnHoleCards(){
+    const THREE=S.THREE;
+
+    for(const b of S.bots.seated){
+      const a = b.seatAngle;
+
+      // pick 2 random cards (demo)
+      const id1 = randCard();
+      const id2 = randCard();
+      b.holeIds = [id1, id2];
+
+      const mats1 = makeCardMaterials(id1.r, id1.s);
+      const mats2 = makeCardMaterials(id2.r, id2.s);
+
+      const r = 3.55;
+      const x = Math.cos(a)*r;
+      const z = Math.sin(a)*r;
+      const y = 2.18; // above head
+
+      const c1=new THREE.Mesh(new THREE.PlaneGeometry(0.42,0.60), mats1.front);
+      const c2=new THREE.Mesh(new THREE.PlaneGeometry(0.42,0.60), mats2.front);
+
+      c1.position.set(x-0.28, y, z);
+      c2.position.set(x+0.28, y, z);
+
+      // face camera
+      const camPos=new THREE.Vector3().setFromMatrixPosition(S.camera.matrixWorld);
+      c1.lookAt(camPos.x, y, camPos.z);
+      c2.lookAt(camPos.x, y, camPos.z);
+
+      c1.rotateX(0.08);
+      c2.rotateX(0.08);
+
+      S.lobby.add(c1); S.lobby.add(c2);
+      b.hole.push(c1,c2);
+    }
+  }
+
+  function setCommunityCards(n){
+    // create IDs if not set
+    while(S.poker.communityIds.length < 5) S.poker.communityIds.push(randCard());
+
+    const camPos = new S.THREE.Vector3().setFromMatrixPosition(S.camera.matrixWorld);
+
+    for(let i=0;i<5;i++){
+      const c = S.poker.community[i];
+      const id = S.poker.communityIds[i];
+      c.material.map?.dispose?.();
+      c.material = makeCardMaterials(id.r, id.s).front;
+
+      c.visible = i < n;
+      if(!c.visible) continue;
+
+      c.position.y = -0.95 + 1.55;
+      c.position.z = -0.25;
+
+      c.lookAt(camPos.x, c.position.y, camPos.z);
+      c.rotateY(Math.PI);
+      c.rotateX(0.12);
+    }
+  }
+
+  // ----------------- store front / room content -----------------
+  function buildStoreFront(doorPos, yaw){
+    const THREE=S.THREE;
+
+    // storefront wall panel just inside the lobby by the store door
+    const wall = new THREE.Mesh(
+      new THREE.BoxGeometry(5.4, 3.2, 0.18),
+      new THREE.MeshStandardMaterial({
+        color:0x0b0b16, roughness:0.5, metalness:0.25,
+        emissive:0x7fe7ff, emissiveIntensity:0.12
+      })
+    );
+    const inward = dirFromYaw(yaw).multiplyScalar(-1);
+    wall.position.set(doorPos.x + inward.x*0.9, 1.65, doorPos.z + inward.z*0.9);
+    wall.rotation.y = yaw;
+    S.lobby.add(wall);
+
+    // neon sign
+    const signPos = wall.position.clone();
+    signPos.y = 3.25;
+    addSign("SCARLETT STORE","Skins • Chips • Gear", signPos, yaw, 0.95);
+
+    // kiosks
+    const kioskMat=new THREE.MeshStandardMaterial({
+      color:0x0c0d14, roughness:0.55, metalness:0.25,
+      emissive:0x7fe7ff, emissiveIntensity:0.08
+    });
+    for(let i=0;i<2;i++){
+      const kiosk=new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.0, 1.0), kioskMat);
+      kiosk.position.copy(wall.position).add(new THREE.Vector3( (i?1:-1)*1.3, -0.4, -1.2 ));
+      kiosk.rotation.y = yaw;
+      S.lobby.add(kiosk);
+    }
   }
 
   function buildStoreShell(roomGroup){
@@ -547,183 +839,24 @@ export const World = (() => {
 
     const signTex=makeCanvasTex(["SCARLETT STORE","Mannequins • Skins • Chips",""], true);
     const signMat=new THREE.MeshBasicMaterial({ map:signTex, transparent:true, opacity:0.95, side:THREE.DoubleSide, depthTest:false });
-    const sign=new THREE.Mesh(new THREE.PlaneGeometry(4.6,2.3), signMat);
+    const sign=new THREE.Mesh(new THREE.PlaneGeometry(4.8,2.4), signMat);
     sign.position.set(0,3.6,-5.8);
     roomGroup.add(sign);
   }
 
-  function buildGuard(root, pos, lookAt){
-    const THREE=S.THREE;
-    const g=new THREE.Group();
-    g.name="VIP_Guard";
-    g.position.copy(pos);
-    g.lookAt(lookAt);
-
-    const bodyMat=new THREE.MeshStandardMaterial({ color:0x111122, roughness:0.65, metalness:0.2 });
-    const headMat=new THREE.MeshStandardMaterial({ color:0x1f2030, roughness:0.55, metalness:0.12 });
-    const body=new THREE.Mesh(new THREE.CapsuleGeometry(0.22,0.7,6,12), bodyMat);
-    body.position.y=0.95;
-    const head=new THREE.Mesh(new THREE.SphereGeometry(0.18,18,14), headMat);
-    head.position.y=1.65;
-    g.add(body); g.add(head);
-
-    addNameTag(g, "GUARD");
-    root.add(g);
-    S.bots.guard = g;
-  }
-
-  // ---------- poker visuals ----------
-  function clearHand(){
-    for(const c of S.poker.community) c.visible=false;
-
-    for(const b of S.bots.seated){
-      for(const card of b.hole){ if(card.parent) card.parent.remove(card); }
-      b.hole.length=0;
-
-      for(const chip of b.chips){ if(chip.parent) chip.parent.remove(chip); }
-      b.chips.length=0;
+  // ----------------- chips + actions feed (fold/call/raise) -----------------
+  function doRandomAction(bot){
+    const r = Math.random();
+    if(r < 0.25) return { act:"FOLD", amt:0 };
+    if(r < 0.75){
+      const call = S.poker.minCall + Math.floor(Math.random()*5)*10;
+      return { act:"CALL", amt:call };
     }
-
-    const pot=S.poker.potStack;
-    if(pot){
-      while(pot.children.length) pot.remove(pot.children[0]);
-      pot.userData.vac = null;
-      pot.position.set(0, -0.95 + 0.56, 0);
-    }
-
-    S.poker.pot=0;
-    S.poker.winner="";
-    S.poker.winText="";
-    updatePokerHUD();
+    const raise = S.poker.minCall + 40 + Math.floor(Math.random()*8)*10;
+    return { act:"RAISE", amt:raise };
   }
 
-  function spawnHoleCards(){
-    const THREE=S.THREE;
-
-    const front = new THREE.MeshStandardMaterial({
-      color:0xf2f2f2, roughness:0.5, metalness:0.0, side:THREE.DoubleSide
-    });
-
-    for(const b of S.bots.seated){
-      const a = b.seatAngle;
-
-      const r = 3.55;
-      const x = Math.cos(a)*r;
-      const z = Math.sin(a)*r;
-      const y = 2.15; // above head
-
-      const c1=new THREE.Mesh(new THREE.PlaneGeometry(0.42,0.60), front);
-      const c2=new THREE.Mesh(new THREE.PlaneGeometry(0.42,0.60), front);
-
-      c1.position.set(x-0.28, y, z);
-      c2.position.set(x+0.28, y, z);
-
-      const camPos=new THREE.Vector3().setFromMatrixPosition(S.camera.matrixWorld);
-      c1.lookAt(camPos.x, y, camPos.z);
-      c2.lookAt(camPos.x, y, camPos.z);
-
-      c1.rotateX(0.08);
-      c2.rotateX(0.08);
-
-      S.lobby.add(c1); S.lobby.add(c2);
-      b.hole.push(c1,c2);
-    }
-  }
-
-  function showCommunity(n){
-    const camPos = new S.THREE.Vector3().setFromMatrixPosition(S.camera.matrixWorld);
-    for(let i=0;i<5;i++){
-      const c = S.poker.community[i];
-      c.visible = i < n;
-      if(!c.visible) continue;
-
-      c.position.y = -0.95 + 1.55;
-      c.position.z = -0.25;
-
-      c.lookAt(camPos.x, c.position.y, camPos.z);
-      c.rotateY(Math.PI);
-      c.rotateX(0.12);
-    }
-  }
-
-  function spawnChipMover(fromBot){
-    const { chipGeo, mats } = S.poker.chipKit;
-    const chip = new S.THREE.Mesh(chipGeo, mats[Math.floor(Math.random()*mats.length)]);
-    chip.rotation.x = Math.PI/2;
-
-    const a=fromBot.seatAngle;
-    chip.position.set(Math.cos(a)*2.5, -0.95 + 1.03, Math.sin(a)*2.5);
-
-    chip.userData.mode="toPot";
-    chip.userData.t=0;
-    chip.userData.from = chip.position.clone();
-    chip.userData.to = new S.THREE.Vector3(0, -0.95 + 1.03, 0);
-
-    S.lobby.add(chip);
-    fromBot.chips.push(chip);
-    return chip;
-  }
-
-  function addChipToPotStack(){
-    const { chipGeo, mats } = S.poker.chipKit;
-    const chip = new S.THREE.Mesh(chipGeo, mats[Math.floor(Math.random()*mats.length)]);
-    chip.rotation.x = Math.PI/2;
-    const k = S.poker.potStack.children.length;
-    chip.position.set(0, k*0.02, 0);
-    S.poker.potStack.add(chip);
-  }
-
-  function vacuumPotToWinner(winnerName){
-    const winner = S.bots.seated.find(b=>b.name===winnerName);
-    if(!winner) return;
-
-    const pot = S.poker.potStack;
-    const target = winner.group.getWorldPosition(new S.THREE.Vector3());
-    pot.userData.vac = {
-      t:0,
-      from: pot.position.clone(),
-      to: new S.THREE.Vector3(target.x*0.65, pot.position.y, target.z*0.65)
-    };
-  }
-
-  function updateChipAnimations(dt){
-    for(const b of S.bots.seated){
-      for(const chip of b.chips){
-        chip.userData.t += dt;
-        const t = Math.min(1, chip.userData.t * 1.35);
-        chip.position.lerpVectors(chip.userData.from, chip.userData.to, t);
-        chip.rotation.x = Math.PI/2;
-
-        if(t>=1 && chip.userData.mode==="toPot"){
-          if(chip.parent) chip.parent.remove(chip);
-          chip.userData.mode="done";
-          S.poker.pot += 10;
-          addChipToPotStack();
-          updatePokerHUD();
-        }
-      }
-      b.chips = b.chips.filter(c=>c.userData.mode!=="done");
-    }
-
-    const pot=S.poker.potStack;
-    if(pot?.userData?.vac){
-      const v=pot.userData.vac;
-      v.t += dt;
-      const t=Math.min(1, v.t*0.85);
-      pot.position.lerpVectors(v.from, v.to, t);
-      if(t>=1){
-        pot.userData.vac=null;
-        pot.position.set(0, -0.95 + 0.56, 0);
-        while(pot.children.length) pot.remove(pot.children[0]);
-      }
-    }
-  }
-
-  function randomWinText(){
-    const list=["Flush","Straight","Full House","Trips","Two Pair","Top Pair","Set","Rivered Flush"];
-    return list[Math.floor(Math.random()*list.length)];
-  }
-
+  // ----------------- poker loop -----------------
   function stepPoker(dt){
     S.poker.t += dt;
 
@@ -732,48 +865,56 @@ export const World = (() => {
     setActivePlayer(active);
     updateActionTile(active);
 
+    // every ~1.1s: new action
+    S.poker._actT = (S.poker._actT || 0) + dt;
+    if(S.poker._actT > 1.1){
+      S.poker._actT = 0;
+
+      const bot = S.bots.seated[active];
+      const a = doRandomAction(bot);
+      S.poker.lastAction = a.act;
+      S.poker.lastAmount = a.amt;
+      updatePokerHUD();
+
+      if(a.act === "CALL" || a.act === "RAISE"){
+        spawnChipMover(bot, a.amt || 10);
+      }
+    }
+
+    updateChipAnimations(dt);
+
     if(S.poker.phase==="deal"){
-      if(S.poker.t>1.2){
+      if(S.poker.t>1.1){
         S.poker.t=0;
         clearHand();
         spawnHoleCards();
-        showCommunity(3);
+        setCommunityCards(3);
         S.poker.phase="bet";
         updatePokerHUD();
       }
     } else if(S.poker.phase==="bet"){
-      if(Math.random() < 0.08){
-        const b = S.bots.seated[Math.floor(Math.random()*S.bots.seated.length)];
-        spawnChipMover(b);
-      }
-      updateChipAnimations(dt);
-
-      if(S.poker.t>6.5){
+      if(S.poker.t>6.2){
         S.poker.t=0;
         S.poker.phase="turn";
-        showCommunity(4);
+        setCommunityCards(4);
         updatePokerHUD();
       }
     } else if(S.poker.phase==="turn"){
-      if(S.poker.t>4.5){
+      if(S.poker.t>4.3){
         S.poker.t=0;
         S.poker.phase="river";
-        showCommunity(5);
+        setCommunityCards(5);
         updatePokerHUD();
       }
     } else if(S.poker.phase==="river"){
       if(S.poker.t>4.0){
         S.poker.t=0;
         S.poker.phase="showdown";
-        const winner=S.bots.seated[Math.floor(Math.random()*S.bots.seated.length)];
-        S.poker.winner=winner.name;
-        S.poker.winText=randomWinText();
+        // (winner logic later)
         updatePokerHUD();
-        vacuumPotToWinner(winner.name);
       }
     } else if(S.poker.phase==="showdown"){
-      updateChipAnimations(dt);
-      if(S.poker.t>6.0){ // ✅ hold winner longer
+      if(S.poker.t>6.0){
         S.poker.t=0;
         S.poker.phase="deal";
         S.poker.hand += 1;
@@ -787,7 +928,7 @@ export const World = (() => {
     S.lobby?.traverse?.((o)=>{ if(o.userData?._tag) o.lookAt(camPos); });
   }
 
-  // ---------- world build ----------
+  // ----------------- world build -----------------
   function buildWorld(){
     const THREE=S.THREE;
     const root=ensureRoot();
@@ -800,32 +941,31 @@ export const World = (() => {
     root.add(W);
     S.lobby=W;
 
-    W.add(new THREE.AmbientLight(0xffffff, 0.14));
-    const key=new THREE.DirectionalLight(0xffffff, 1.05);
+    // richer lighting
+    W.add(new THREE.AmbientLight(0xffffff, 0.18));
+
+    const key=new THREE.DirectionalLight(0xffffff, 1.15);
     key.position.set(7,15,6);
     W.add(key);
 
-    const cyan=new THREE.PointLight(0x7fe7ff, 0.24, 80);
-    cyan.position.set(0,6.2,0);
-    W.add(cyan);
+    const rim=new THREE.DirectionalLight(0x7fe7ff, 0.35);
+    rim.position.set(-9, 10, -8);
+    W.add(rim);
 
-    const warm=new THREE.PointLight(0xffc890, 0.16, 60);
+    const centerGlow=new THREE.PointLight(0x7fe7ff, 0.28, 80);
+    centerGlow.position.set(0,6.2,0);
+    W.add(centerGlow);
+
+    const warm=new THREE.PointLight(0xffc890, 0.18, 60);
     warm.position.set(0,4.2,0);
     W.add(warm);
-
-    for(let i=0;i<6;i++){
-      const a=(i/6)*Math.PI*2;
-      const sp=new THREE.SpotLight(0x7fe7ff, 0.22, 40, Math.PI/8, 0.7, 1.4);
-      sp.position.set(Math.cos(a)*9.5, 7.2, Math.sin(a)*9.5);
-      sp.target.position.set(0,0,0);
-      W.add(sp); W.add(sp.target);
-    }
 
     const lobbyRadius=12.0, wallHeight=8.0, doorGap=THREE.MathUtils.degToRad(30);
     const pitRadius=4.6, pitDepth=0.95;
     const hallLen=10.0, hallW=4.2, hallH=4.8;
     const roomW=13.0, roomD=13.0, roomH=6.6;
 
+    // segmented wall with 4 door gaps
     const q=(Math.PI*2)/4;
     for(let i=0;i<4;i++){
       const thetaStart=i*q + doorGap/2;
@@ -835,9 +975,9 @@ export const World = (() => {
       wall.position.y=wallHeight/2;
       W.add(wall);
     }
-
     buildVelvetGoldRibs(W, lobbyRadius, wallHeight);
 
+    // floors
     const ring=new THREE.Mesh(new THREE.RingGeometry(pitRadius, lobbyRadius, 256), matFloor());
     ring.rotation.x=-Math.PI/2;
     W.add(ring);
@@ -849,6 +989,7 @@ export const World = (() => {
     W.add(pitFloor);
     S.floorPit=pitFloor;
 
+    // invisible plane target
     const ground=new THREE.Mesh(new THREE.PlaneGeometry(320,320), new THREE.MeshBasicMaterial({ transparent:true, opacity:0.0 }));
     ground.rotation.x=-Math.PI/2;
     ground.position.y=0;
@@ -856,6 +997,7 @@ export const World = (() => {
     W.add(ground);
     S.ground=ground;
 
+    // pit wall
     const pitWall=new THREE.Mesh(new THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 180, 1, true), matDark());
     pitWall.position.y=-pitDepth/2;
     W.add(pitWall);
@@ -863,11 +1005,12 @@ export const World = (() => {
     buildNeonRail(W, pitRadius+0.35);
     buildStairs(W, 18.0, 11, pitDepth, 3.4);
 
+    // table + hood + hud
     const table = buildTable(W, -pitDepth + 0.02);
     S.poker.table = table;
-    buildTableHood(W);
     buildPokerHUD(W);
 
+    // pot stack
     S.poker.chipKit = buildChipKit();
     const potStack=new THREE.Group();
     potStack.name="PotStack";
@@ -875,17 +1018,19 @@ export const World = (() => {
     W.add(potStack);
     S.poker.potStack = potStack;
 
+    // bots
     buildSeatedBots(table);
 
-    const cardMat=new THREE.MeshStandardMaterial({ color:0xf2f2f2, roughness:0.55, metalness:0.0, side:THREE.DoubleSide });
+    // community cards (start blank, will assign textures in setCommunityCards)
     for(let i=0;i<5;i++){
-      const c=new THREE.Mesh(new THREE.PlaneGeometry(0.58,0.84), cardMat);
+      const c=new THREE.Mesh(new THREE.PlaneGeometry(0.58,0.84), new THREE.MeshStandardMaterial({ color:0xffffff, roughness:0.6, metalness:0.0, side:THREE.DoubleSide }));
       c.position.set((i-2)*0.70, -pitDepth + 1.55, -0.25);
       c.visible=false;
       W.add(c);
       S.poker.community.push(c);
     }
 
+    // rooms + halls
     const defs=[
       { key:"poker", yaw:0,            label:"POKER" },
       { key:"store", yaw:Math.PI/2,    label:"STORE" },
@@ -930,6 +1075,7 @@ export const World = (() => {
       const doorPos = dir.clone().multiplyScalar(lobbyRadius - 0.15);
       addDoorLabel(d.label, doorPos, d.yaw);
 
+      // frame
       const frame=new THREE.Mesh(
         new THREE.BoxGeometry(hallW+0.6, 3.2, 0.08),
         new THREE.MeshStandardMaterial({ color:0x0b0b16, emissive:0x7fe7ff, emissiveIntensity:0.22, roughness:0.6, metalness:0.2 })
@@ -937,13 +1083,23 @@ export const World = (() => {
       frame.position.set(doorPos.x, 2.1, doorPos.z);
       frame.rotation.y=d.yaw;
       W.add(frame);
+
+      // extra sign above hallway entry
+      addSign(`${d.label} HALL`, "WELCOME", new THREE.Vector3(doorPos.x, 6.6, doorPos.z), d.yaw + Math.PI, 0.62);
+
+      // store front added at store door
+      if(d.key === "store"){
+        buildStoreFront(doorPos, d.yaw);
+      }
     }
 
+    // store room interior props
     buildStoreShell(S.rooms.store);
 
-    const vipDoor = dirFromYaw(-Math.PI/2).multiplyScalar(lobbyRadius - 1.4);
-    buildGuard(W, new THREE.Vector3(vipDoor.x, 0.02, vipDoor.z), new THREE.Vector3(0,0,0));
+    // center banner sign
+    addSign("SCARLETT CASINO", "MIDNIGHT • GOLD • VIP", new THREE.Vector3(0, 7.3, 0), 0, 1.05);
 
+    // jumbotrons (music texture)
     const streamTex=initStream();
     const jumboMat=new THREE.MeshStandardMaterial({ map:streamTex, emissive:0xffffff, emissiveIntensity:0.35, roughness:0.6, metalness:0.1, side:THREE.DoubleSide });
     const jumboGeo=new THREE.PlaneGeometry(7.8, 4.4);
@@ -958,15 +1114,16 @@ export const World = (() => {
       S.refs.jumbotrons.push(j);
     }
 
+    // dust
     buildDust(W);
 
-    // spawn
+    // spawn in lobby facing table
     S.player.position.set(0,0.02,7.5);
     S.player.rotation.y = Math.PI;
 
     ensureActionTile();
     updatePokerHUD();
-    log("[world] built ✅ v5.3");
+    log("[world] built ✅ v5.4");
   }
 
   function teleportTo(key){
@@ -979,6 +1136,7 @@ export const World = (() => {
     async build(ctx){
       Object.assign(S, ctx);
       ensureRoot();
+
       S.ray = new S.THREE.Raycaster();
       ensureAimRing();
 
@@ -989,7 +1147,7 @@ export const World = (() => {
       };
 
       buildWorld();
-      log("[world] build complete ✅ v5.3");
+      log("[world] build complete ✅ v5.4");
     },
 
     frame(ctx, dt){

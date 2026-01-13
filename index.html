@@ -4,18 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <meta name="theme-color" content="#000000" />
-  <title>Scarlett Poker VR — Boot Debug</title>
+  <title>Scarlett Poker VR — Audit Boot</title>
 
-  <!--
-    ✅ QUEST SAFE + GITHUB PAGES SAFE
-    - Always-visible on-screen log (works in Quest/Android even when console is hidden)
-    - Catches JS errors + promise errors
-    - Imports your ./js/main.js with cache-bust
-    - Has a built-in fallback "Emergency Scene" if main.js fails to load
-    - Importmap included so your modules can: import * as THREE from 'three'
-  -->
-
-  <!-- Import map so your project can use "import 'three'" -->
+  <!-- Import map so modules can import 'three' safely -->
   <script type="importmap">
   {
     "imports": {
@@ -26,92 +17,43 @@
   </script>
 
   <style>
-    html, body {
-      margin: 0; padding: 0;
-      width: 100%; height: 100%;
-      background: #000;
-      overflow: hidden;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    html, body { margin:0; padding:0; width:100%; height:100%; background:#000; overflow:hidden; }
+    #app { position:fixed; inset:0; }
+
+    #bootHud{
+      position:fixed; left:8px; top:8px; z-index:999999;
+      width:calc(100vw - 16px); max-width:980px; max-height:56vh;
+      overflow:auto; padding:10px 12px;
+      border:1px solid rgba(0,255,120,.85);
+      background:rgba(0,0,0,.72);
+      color:rgba(0,255,120,.95);
+      font:12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space:pre-wrap; word-break:break-word;
+      border-radius:10px;
     }
-    #app {
-      position: fixed;
-      inset: 0;
-      display: block;
-    }
-    /* Boot HUD (always on) */
-    #bootHud {
-      position: fixed;
-      left: 8px; top: 8px;
-      z-index: 999999;
-      width: calc(100vw - 16px);
-      max-width: 940px;
-      max-height: 52vh;
-      overflow: auto;
-      padding: 10px 12px;
-      border: 1px solid rgba(0,255,120,.85);
-      background: rgba(0,0,0,.72);
-      color: rgba(0,255,120,.95);
-      font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-      white-space: pre-wrap;
-      word-break: break-word;
-      border-radius: 10px;
-      box-shadow: 0 0 0 1px rgba(0,0,0,.5);
-      user-select: text;
-    }
-    #bootBar {
-      position: fixed;
-      left: 8px;
-      top: calc(52vh + 18px);
-      z-index: 999999;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      padding: 8px;
-      border-radius: 12px;
-      background: rgba(0,0,0,.55);
-      border: 1px solid rgba(255,255,255,.15);
+    #bootBar{
+      position:fixed; left:8px; top:calc(56vh + 18px); z-index:999999;
+      display:flex; flex-wrap:wrap; gap:8px;
+      padding:8px; border-radius:12px;
+      background:rgba(0,0,0,.55);
+      border:1px solid rgba(255,255,255,.15);
       backdrop-filter: blur(6px);
     }
-    .btn {
-      appearance: none;
-      border: 1px solid rgba(255,255,255,.18);
-      background: rgba(255,255,255,.08);
-      color: #fff;
-      padding: 10px 12px;
-      border-radius: 12px;
-      font-size: 14px;
-      font-weight: 600;
-      letter-spacing: .2px;
-      cursor: pointer;
+    .btn{
+      appearance:none; border:1px solid rgba(255,255,255,.18);
+      background:rgba(255,255,255,.08); color:#fff;
+      padding:10px 12px; border-radius:12px;
+      font-size:14px; font-weight:650; cursor:pointer;
       touch-action: manipulation;
     }
-    .btn:active { transform: translateY(1px); }
-    .btn.ok { border-color: rgba(0,255,120,.35); }
-    .btn.warn { border-color: rgba(255,180,0,.35); }
-    .btn.danger { border-color: rgba(255,70,70,.45); }
-    .pill {
-      color: rgba(255,255,255,.85);
-      font-size: 12px;
-      padding: 7px 10px;
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,.15);
-      background: rgba(255,255,255,.06);
-      align-self: center;
+    .btn:active{ transform: translateY(1px); }
+    .pill{
+      color:rgba(255,255,255,.85); font-size:12px;
+      padding:7px 10px; border-radius:999px;
+      border:1px solid rgba(255,255,255,.15);
+      background:rgba(255,255,255,.06);
+      align-self:center;
     }
-    #hint {
-      position: fixed;
-      right: 8px; bottom: 8px;
-      z-index: 999999;
-      max-width: min(520px, calc(100vw - 16px));
-      padding: 10px 12px;
-      border-radius: 12px;
-      border: 1px solid rgba(255,255,255,.15);
-      background: rgba(0,0,0,.55);
-      color: rgba(255,255,255,.85);
-      font-size: 13px;
-      line-height: 1.35;
-    }
-    #hint b { color: #fff; }
   </style>
 </head>
 
@@ -121,228 +63,69 @@
   <div id="bootHud">BOOT HUD: starting…</div>
 
   <div id="bootBar">
-    <button id="btnReload" class="btn ok">Reload (fresh)</button>
-    <button id="btnClear" class="btn warn">Clear HUD</button>
-    <button id="btnCheck" class="btn">Check Files</button>
-    <button id="btnEmergency" class="btn danger">Emergency Scene</button>
+    <button id="btnReload" class="btn">Reload (fresh)</button>
+    <button id="btnClear" class="btn">Clear HUD</button>
+    <button id="btnAudit" class="btn">Run Audit</button>
     <span id="pill" class="pill">status: booting</span>
   </div>
 
-  <div id="hint">
-    <b>Tip:</b> If you see a black screen with controllers, this HUD will still show the real error (404, bad import, case mismatch, etc.).
-  </div>
-
   <script>
-    (function () {
+    (function(){
       const hud = document.getElementById('bootHud');
       const pill = document.getElementById('pill');
+      const ts = () => new Date().toISOString().slice(11,19);
 
-      function ts() {
-        const d = new Date();
-        return d.toISOString().slice(11, 19);
+      function log(msg){
+        hud.textContent += `\n[${ts()}] ${msg}`;
+        hud.scrollTop = hud.scrollHeight;
       }
-      function log(msg) {
-        try {
-          hud.textContent += `\n[${ts()}] ${msg}`;
-          hud.scrollTop = hud.scrollHeight;
-        } catch (_) {}
-      }
-      function setStatus(s) {
-        pill.textContent = `status: ${s}`;
-      }
+      function status(s){ pill.textContent = `status: ${s}`; }
 
-      // expose for modules
       window.__bootlog = log;
-      window.__bootstatus = setStatus;
+      window.__bootstatus = status;
 
-      // capture errors
-      window.addEventListener('error', (e) => {
+      window.addEventListener('error', (e)=>{
         log('ERROR: ' + (e?.message || e?.error || e));
         if (e?.filename) log('FILE: ' + e.filename + (e.lineno ? `:${e.lineno}:${e.colno}` : ''));
-        setStatus('error');
+        status('error');
       });
-      window.addEventListener('unhandledrejection', (e) => {
+      window.addEventListener('unhandledrejection', (e)=>{
         const r = e?.reason;
         log('PROMISE: ' + (r?.message || r || e));
-        setStatus('promise error');
+        status('promise error');
       });
 
-      // mirror console.* into HUD (so you always see logs)
-      const orig = {
-        log: console.log.bind(console),
-        warn: console.warn.bind(console),
-        error: console.error.bind(console),
-      };
-      console.log = (...a) => { orig.log(...a); log('[log] ' + a.map(x => (typeof x === 'string' ? x : JSON.stringify(x))).join(' ')); };
-      console.warn = (...a) => { orig.warn(...a); log('[warn] ' + a.map(x => (typeof x === 'string' ? x : JSON.stringify(x))).join(' ')); };
-      console.error = (...a) => { orig.error(...a); log('[err] ' + a.map(x => (typeof x === 'string' ? x : JSON.stringify(x))).join(' ')); };
-
-      // UI buttons
-      document.getElementById('btnReload').addEventListener('click', () => {
-        // force a truly fresh reload in GitHub Pages cache situations
+      document.getElementById('btnReload').addEventListener('click', ()=>{
         const u = new URL(location.href);
         u.searchParams.set('v', String(Date.now()));
         location.replace(u.toString());
       });
-      document.getElementById('btnClear').addEventListener('click', () => {
+      document.getElementById('btnClear').addEventListener('click', ()=>{
         hud.textContent = 'BOOT HUD: cleared';
         log('Cleared.');
       });
-
-      // quick HEAD checks to expose 404/case mismatch
-      document.getElementById('btnCheck').addEventListener('click', async () => {
-        setStatus('checking');
-        log('--- CHECK FILES ---');
-        const checks = [
-          './js/main.js',
-          './js/world.js',
-          './js/ui.js',
-          './assets/',
-          './assets/textures/',
-          './assets/audio/'
-        ];
-        for (const path of checks) {
-          try {
-            const r = await fetch(path, { method: 'HEAD', cache: 'no-store' });
-            log(`${r.ok ? 'OK ' : 'BAD'} ${r.status} ${path}`);
-          } catch (e) {
-            log(`ERR ${path}: ${(e && e.message) ? e.message : e}`);
-          }
-        }
-        log('--- END CHECK ---');
-        setStatus('ready');
+      document.getElementById('btnAudit').addEventListener('click', ()=>{
+        if (typeof window.__runAudit === 'function') window.__runAudit();
+        else log('Audit not ready yet.');
       });
 
-      // boot banner
       log('BOOT START');
       log('href=' + location.href);
       log('ua=' + navigator.userAgent);
       log('xr=' + ('xr' in navigator));
-      log('secure=' + (location.protocol === 'https:' || location.hostname === 'localhost'));
-      setStatus('loading main');
-
-      // Emergency Scene trigger button (fallback renderer)
-      window.__startEmergencyScene = async function () {
-        setStatus('emergency scene');
-        log('Starting Emergency Scene (fallback)…');
-
-        const app = document.getElementById('app');
-        app.innerHTML = ''; // clear anything
-        try {
-          const THREE = await import('three');
-          const { VRButton } = await import('three/addons/webxr/VRButton.js');
-
-          const renderer = new THREE.WebGLRenderer({ antialias: true });
-          renderer.setSize(window.innerWidth, window.innerHeight);
-          renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-          renderer.xr.enabled = true;
-          app.appendChild(renderer.domElement);
-          document.body.appendChild(VRButton.createButton(renderer));
-          log('VRButton ready ✅');
-
-          const scene = new THREE.Scene();
-          scene.background = new THREE.Color(0x050507);
-
-          const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
-          camera.position.set(0, 1.6, 3);
-
-          const light = new THREE.HemisphereLight(0xffffff, 0x222233, 1.2);
-          scene.add(light);
-
-          const floorGeo = new THREE.PlaneGeometry(20, 20);
-          const floorMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 1 });
-          const floor = new THREE.Mesh(floorGeo, floorMat);
-          floor.rotation.x = -Math.PI / 2;
-          scene.add(floor);
-
-          const box = new THREE.Mesh(
-            new THREE.BoxGeometry(0.5, 0.5, 0.5),
-            new THREE.MeshStandardMaterial({ color: 0x00ff88, roughness: 0.6 })
-          );
-          box.position.set(0, 1.5, -1.5);
-          scene.add(box);
-
-          // show controller rays (so you know input is alive)
-          function addController(i) {
-            const c = renderer.xr.getController(i);
-            const geom = new THREE.BufferGeometry().setFromPoints([
-              new THREE.Vector3(0, 0, 0),
-              new THREE.Vector3(0, 0, -1)
-            ]);
-            const line = new THREE.Line(geom, new THREE.LineBasicMaterial());
-            line.name = 'ray';
-            line.scale.z = 6;
-            c.add(line);
-            scene.add(c);
-
-            c.addEventListener('connected', (e) => log(`controller${i} connected: ${e.data?.targetRayMode || 'unknown'}`));
-            c.addEventListener('disconnected', () => log(`controller${i} disconnected`));
-          }
-          addController(0);
-          addController(1);
-
-          window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-          });
-
-          renderer.setAnimationLoop(() => {
-            box.rotation.y += 0.01;
-            renderer.render(scene, camera);
-          });
-
-          log('Emergency Scene running ✅');
-        } catch (e) {
-          log('Emergency Scene FAILED ❌ ' + (e?.message || e));
-          console.error(e);
-          setStatus('emergency failed');
-        }
-      };
-
-      document.getElementById('btnEmergency').addEventListener('click', () => {
-        window.__startEmergencyScene();
-      });
+      status('loading index.js');
     })();
   </script>
 
-  <!-- Boot module that imports your game -->
+  <!-- IMPORTANT: we now load index.js (not main.js) -->
   <script type="module">
-    __bootlog('Importing ./js/main.js …');
-    __bootstatus('importing main');
-
-    // Cache-bust to avoid stale GH Pages loads
-    const mainUrl = './js/main.js?v=' + Date.now();
-
-    import(mainUrl)
-      .then((mod) => {
-        __bootlog('main.js loaded ✅');
-        __bootstatus('main loaded');
-
-        // If your main exports a start/init function, we’ll call it.
-        // (This is safe: if it doesn't exist, nothing breaks.)
-        if (mod && typeof mod.start === 'function') {
-          __bootlog('Calling main.start() …');
-          mod.start();
-          __bootlog('main.start() called ✅');
-          __bootstatus('running');
-        } else if (mod && typeof mod.init === 'function') {
-          __bootlog('Calling main.init() …');
-          mod.init();
-          __bootlog('main.init() called ✅');
-          __bootstatus('running');
-        } else {
-          __bootlog('No start()/init() export detected (this is OK if main auto-runs).');
-          __bootstatus('running');
-        }
-      })
-      .catch((err) => {
-        __bootlog('main.js FAILED ❌ ' + (err?.message || err));
+    __bootlog('Importing ./index.js …');
+    import('./index.js?v=' + Date.now())
+      .then(()=> { __bootlog('index.js loaded ✅'); __bootstatus('running'); })
+      .catch((err)=> {
+        __bootlog('index.js FAILED ❌ ' + (err?.message || err));
         console.error(err);
-        __bootstatus('main failed');
-
-        __bootlog('Auto-starting Emergency Scene so you still see something…');
-        window.__startEmergencyScene();
+        __bootstatus('index.js failed');
       });
   </script>
 </body>

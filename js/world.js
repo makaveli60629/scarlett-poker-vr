@@ -1,122 +1,136 @@
-// /js/world.js — FULL THROTTLE v5
-// ✅ Keeps: right-stick movement + teleport + lasers + floor reticle + watch
-// ✅ Adds: pretty watch (labels + glow + optional texture), controller-hand meshes
-// ✅ Adds: rainbow teleport arc + pinch teleport (hand tracking if available)
-// ✅ Adds: poker room + grab cards with grip (controller grab)
-// NOTE: This is still "safe core"—we can layer your full legacy systems next.
+// /js/world.js — ScarlettVR FULL THROTTLE v6 (Beautified + Poker + Watch + Hands)
+// Requires: /js/controls.js
+import { Controls } from "./controls.js";
 
 export const World = {
   async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD }) {
     const s = {
       THREE, scene, renderer, camera, player, controllers, log, BUILD,
       root: new THREE.Group(),
-      anchors: {},
-      room: "lobby",
 
       // locomotion
-      moveSpeed: 2.8,
+      moveSpeed: 2.9,
       deadzone: 0.14,
       snapTurnRad: THREE.MathUtils.degToRad(30),
       turnCooldown: 0,
-
-      // diagonal shaping
       diagonal45: true,
       diagonalAmount: 0.85,
 
-      // ray / reticle
+      anchors: {},
+      room: "lobby",
+
+      // interaction / rays
       raycaster: new THREE.Raycaster(),
       tmpM: new THREE.Matrix4(),
       tmpV: new THREE.Vector3(),
       tmpDir: new THREE.Vector3(),
+      tmpQ: new THREE.Quaternion(),
+      tmpP: new THREE.Vector3(),
+
       groundMeshes: [],
-      lasers: [],
-      reticles: [],
-      lastTeleportPointR: null,
+
+      // controller visuals
+      lasers: [],                // { controller, line, hand }
+      reticles: [],              // { hand, mesh }
+      arcs: { left: null, right: null },
+      arcPts: { left: [], right: [] },
       lastTeleportPointL: null,
+      lastTeleportPointR: null,
 
-      // teleport arcs
-      arcs: { right: null, left: null },
-      arcPts: { right: [], left: [] },
-
-      // world
-      hoverCars: [],
-
-      // Watch UI
-      watch: { root: null, visible: true, buttons: [], labelSprites: [] },
-
-      // controller hands
-      handMeshes: { left: null, right: null },
-
-      // hand tracking visuals + pinch teleport
-      handTrack: {
-        enabled: true,
-        left: { joints: new Map(), pinch: false, pinchHold: 0 },
-        right:{ joints: new Map(), pinch: false, pinchHold: 0 },
-        pinchDist: 0.028, // meters
-        pinchHoldTime: 0.06, // seconds to commit
+      // watch
+      watch: {
+        root: null,
+        visible: true,
+        buttons: [],             // meshes
+        hover: null,
+        labels: [],
       },
 
-      // grab system
+      // grab
       grab: {
         interactables: [],
-        held: { left: null, right: null },
-        tmpHit: null,
+        held: { left: null, right: null }
       },
 
-      // textures (optional)
-      textures: { watchFace: null, watchPlate: null },
+      // ambience
+      hoverCars: [],
+      holoPanels: [],
+      neonMats: [],
+      dashLines: [],
 
-      // debug
-      _dbgT: 0,
-      _lastAxesPrint: "",
+      // settings
+      showArcs: true,
+      showLasers: true,
     };
 
     s.root.name = "WORLD_ROOT";
     scene.add(s.root);
 
+    // =======================
+    // BEAUTIFICATION PASS
+    // =======================
+    addSkyAndFog(s);
     addLightsCinematic(s);
-    buildLobbyAndPit_DOWNSTAIRS(s);
+    buildLobbyShell(s);
+    buildLobbyFloorCarpet(s);
+    buildPitAndDownstairs(s);
     buildRoomsAndHallways(s);
+    buildPortals(s);
     buildStore(s);
-    buildSpectate(s);
     buildScorpion(s);
+    buildSpectate(s);
     buildHoverCars(s);
+    buildHoloJumbotrons(s);
 
+    // =======================
+    // XR VISUALS + UI
+    // =======================
     setupXRLasers(s);
-    setupFloorReticles_BIGGER(s);
+    setupFloorReticles(s);
     setupTeleportArcs(s);
 
-    // Pretty watch + controller hands
-    await tryLoadWatchTextures(s);
-    setupPrettyWatch_LEFT(s);
-    addControllerHandMeshes(s);
+    setupControllerHandMeshes(s);
+    setupPrettyWatch(s);
 
-    // Poker room (full throttle start)
+    // =======================
+    // POKER ROOM (playable foundation)
+    // =======================
     buildPokerRoom(s);
 
-    // SAFE SPAWN (flat lobby)
+    // =======================
+    // Anchors
+    // =======================
     s.anchors.lobby = { pos: new THREE.Vector3(0, 0, 13.5), yaw: Math.PI };
+    s.anchors.poker = { pos: new THREE.Vector3(0, 0, -9.5), yaw: 0 };
     s.anchors.store = { pos: new THREE.Vector3(-26, 0, 0), yaw: Math.PI / 2 };
     s.anchors.scorpion = { pos: new THREE.Vector3(26, 0, 0), yaw: -Math.PI / 2 };
-    s.anchors.spectate = { pos: new THREE.Vector3(0, 3.2, -14), yaw: 0 };
-    s.anchors.poker = { pos: new THREE.Vector3(0, 0, -9.5), yaw: 0 };
+    s.anchors.spectate = { pos: new THREE.Vector3(0, 3.0, -14), yaw: 0 };
 
     setRigToAnchor(s, s.anchors.lobby);
 
-    // Teleport: both select/trigger
-    controllers.c1.addEventListener("selectstart", () => teleportNow(s, "right"));
-    controllers.c0.addEventListener("selectstart", () => teleportNow(s, "left"));
+    // =======================
+    // INPUT EVENTS
+    // =======================
 
-    // Watch toggle: left squeeze
+    // Teleport: right trigger/select always teleports
+    controllers.c1.addEventListener("selectstart", () => teleportNow(s, "right"));
+
+    // Left trigger/select: if pointing at watch button => click; else teleport
+    controllers.c0.addEventListener("selectstart", () => {
+      if (tryClickWatch(s)) return;
+      teleportNow(s, "left");
+    });
+
+    // Watch toggle: left grip
     controllers.c0.addEventListener("squeezestart", () => toggleWatch(s));
 
-    // Grab cards: grip/squeeze (both hands)
-    controllers.c1.addEventListener("squeezestart", () => tryGrab(s, "right"));
-    controllers.c1.addEventListener("squeezeend",   () => releaseGrab(s, "right"));
+    // Grab cards: squeeze hold on either hand
     controllers.c0.addEventListener("squeezestart", () => tryGrab(s, "left"));
     controllers.c0.addEventListener("squeezeend",   () => releaseGrab(s, "left"));
+    controllers.c1.addEventListener("squeezestart", () => tryGrab(s, "right"));
+    controllers.c1.addEventListener("squeezeend",   () => releaseGrab(s, "right"));
 
-    log?.(`[world] init ✅ FULL THROTTLE v5 build=${BUILD}`);
+    log?.(`[world] FULL THROTTLE v6 ✅ build=${BUILD}`);
     return {
       setRoom: (room) => {
         s.room = room;
@@ -128,62 +142,129 @@ export const World = {
   }
 };
 
-/* =========================
-   LIGHTING
-========================= */
+// =======================
+// ENV + LIGHTING
+// =======================
+
+function addSkyAndFog(s) {
+  const { THREE, scene } = s;
+  scene.background = new THREE.Color(0x05070d);
+  scene.fog = new THREE.Fog(0x05070d, 12, 85);
+}
 
 function addLightsCinematic(s) {
   const { THREE, scene, root } = s;
 
-  const hemi = new THREE.HemisphereLight(0xdaf0ff, 0x0b0f1a, 1.1);
+  const hemi = new THREE.HemisphereLight(0xdaf0ff, 0x0b0f1a, 1.05);
   hemi.position.set(0, 70, 0);
   scene.add(hemi);
 
-  const sun = new THREE.DirectionalLight(0xffffff, 1.25);
+  const sun = new THREE.DirectionalLight(0xffffff, 1.2);
   sun.position.set(35, 70, 35);
   scene.add(sun);
 
-  // Lobby accents
-  const p1 = new THREE.PointLight(0x7fb2ff, 1.1, 90, 2);
-  p1.position.set(0, 8.5, 0);
-  root.add(p1);
+  const lobbyGlow = new THREE.PointLight(0x7fb2ff, 1.15, 95, 2);
+  lobbyGlow.position.set(0, 9.0, 0);
+  root.add(lobbyGlow);
 
-  const p2 = new THREE.PointLight(0xff6bd6, 0.65, 70, 2);
-  p2.position.set(0, 2.8, 0);
-  root.add(p2);
+  const magenta = new THREE.PointLight(0xff6bd6, 0.7, 80, 2);
+  magenta.position.set(0, 2.6, 0);
+  root.add(magenta);
 
-  // Poker table spotlight
-  const spot = new THREE.SpotLight(0xffffff, 1.1, 40, Math.PI/4, 0.35, 1);
-  spot.position.set(0, 8.5, -9.5);
-  spot.target.position.set(0, 0.9, -9.5);
-  root.add(spot);
-  root.add(spot.target);
+  const pokerSpot = new THREE.SpotLight(0xffffff, 1.15, 40, Math.PI / 4, 0.35, 1);
+  pokerSpot.position.set(0, 8.5, -9.5);
+  pokerSpot.target.position.set(0, 1.0, -9.5);
+  root.add(pokerSpot);
+  root.add(pokerSpot.target);
 }
 
 function matFloor(THREE, color = 0x111a28) {
   return new THREE.MeshStandardMaterial({ color, roughness: 0.95, metalness: 0.06 });
 }
 
-/* =========================
-   LOBBY / ROOMS
-========================= */
+// =======================
+// LOBBY BEAUTY
+// =======================
 
-function buildLobbyAndPit_DOWNSTAIRS(s) {
+function buildLobbyShell(s) {
   const { THREE, root } = s;
 
-  const lobbyR = 18;
-  const pitRadius = 6.6;
-  const pitDepth = 2.6;
-  const lobbyY = 0;
-  const pitFloorY = lobbyY - pitDepth;
+  // translucent cylinder shell
+  const shell = new THREE.Mesh(
+    new THREE.CylinderGeometry(22, 22, 10, 64, 1, true),
+    new THREE.MeshStandardMaterial({
+      color: 0x0b1220, roughness: 0.9, metalness: 0.1,
+      side: THREE.DoubleSide, transparent: true, opacity: 0.55
+    })
+  );
+  shell.position.set(0, 4.2, 0);
+  root.add(shell);
 
+  // ceiling glow ring
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(16.5, 0.12, 12, 96),
+    new THREE.MeshStandardMaterial({
+      color: 0x66ccff,
+      roughness: 0.3, metalness: 0.6,
+      emissive: new THREE.Color(0x66ccff),
+      emissiveIntensity: 0.45
+    })
+  );
+  ring.rotation.x = Math.PI / 2;
+  ring.position.set(0, 8.8, 0);
+  root.add(ring);
+
+  // pillars
+  const pillarMat = new THREE.MeshStandardMaterial({ color: 0x121c2c, roughness: 0.8, metalness: 0.15 });
+  for (let i = 0; i < 10; i++) {
+    const ang = (i / 10) * Math.PI * 2;
+    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.4, 8.6, 16), pillarMat);
+    p.position.set(Math.cos(ang) * 16.8, 4.2, Math.sin(ang) * 16.8);
+    root.add(p);
+  }
+}
+
+function buildLobbyFloorCarpet(s) {
+  const { THREE, root } = s;
+
+  // base lobby floor
   const lobbyFloor = new THREE.Mesh(
-    new THREE.CylinderGeometry(lobbyR, lobbyR, 0.35, 64),
+    new THREE.CylinderGeometry(18, 18, 0.35, 64),
     matFloor(THREE, 0x121c2c)
   );
-  lobbyFloor.position.set(0, lobbyY - 0.175, 0);
+  lobbyFloor.position.set(0, -0.175, 0);
   root.add(lobbyFloor);
   s.groundMeshes.push(lobbyFloor);
+
+  // carpet disc (visual only)
+  const carpet = new THREE.Mesh(
+    new THREE.CircleGeometry(14.8, 64),
+    new THREE.MeshStandardMaterial({
+      color: 0x0f1a2d, roughness: 1.0, metalness: 0.0,
+      emissive: new THREE.Color(0x0b1220),
+      emissiveIntensity: 0.06
+    })
+  );
+  carpet.rotation.x = -Math.PI / 2;
+  carpet.position.y = 0.002;
+  root.add(carpet);
+
+  // floor decals / compass wedges
+  const decalMat = new THREE.MeshBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.28, side: THREE.DoubleSide });
+  for (let i = 0; i < 4; i++) {
+    const wedge = new THREE.Mesh(new THREE.RingGeometry(10.2, 14.4, 32, 1, i*Math.PI/2, Math.PI/4), decalMat);
+    wedge.rotation.x = -Math.PI/2;
+    wedge.position.y = 0.004;
+    root.add(wedge);
+  }
+}
+
+function buildPitAndDownstairs(s) {
+  const { THREE, root } = s;
+
+  const pitRadius = 6.6;
+  const pitDepth = 2.6;
+  const pitFloorY = -pitDepth;
 
   const pitFloor = new THREE.Mesh(
     new THREE.CylinderGeometry(pitRadius, pitRadius, 0.35, 64),
@@ -197,29 +278,37 @@ function buildLobbyAndPit_DOWNSTAIRS(s) {
     new THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 64, 1, true),
     new THREE.MeshStandardMaterial({ color: 0x0a101e, roughness: 0.95, metalness: 0.06, side: THREE.DoubleSide })
   );
-  pitWall.position.set(0, (lobbyY + pitFloorY) / 2, 0);
+  pitWall.position.set(0, pitFloorY/2, 0);
   root.add(pitWall);
 
   // rail
   const rail = new THREE.Mesh(
     new THREE.TorusGeometry(pitRadius + 0.35, 0.08, 12, 64),
-    new THREE.MeshStandardMaterial({ color: 0xc8d3ff, roughness: 0.3, metalness: 0.55 })
+    new THREE.MeshStandardMaterial({
+      color: 0xc8d3ff, roughness: 0.3, metalness: 0.55,
+      emissive: new THREE.Color(0x223cff),
+      emissiveIntensity: 0.14
+    })
   );
   rail.rotation.x = Math.PI / 2;
-  rail.position.y = lobbyY + 0.85;
+  rail.position.y = 0.85;
   root.add(rail);
 
-  // ramp down into pit (not teleport target)
+  // downstairs ramp (visual)
   const stairW = 2.1;
   const stairL = 7.6;
   const ramp = new THREE.Mesh(
     new THREE.BoxGeometry(stairW, pitDepth, stairL),
     new THREE.MeshStandardMaterial({ color: 0x141b28, roughness: 0.95, metalness: 0.08 })
   );
-  ramp.position.set(0, (lobbyY + pitFloorY) / 2, pitRadius + stairL * 0.32);
+  ramp.position.set(0, pitFloorY/2, pitRadius + stairL * 0.32);
   ramp.rotation.x = -Math.atan2(pitDepth, stairL);
   root.add(ramp);
 }
+
+// =======================
+// ROOMS + PORTALS + HOLOS
+// =======================
 
 function buildRoomsAndHallways(s) {
   const { THREE, root } = s;
@@ -243,7 +332,10 @@ function buildRoomsAndHallways(s) {
 
     const walls = new THREE.Mesh(
       new THREE.BoxGeometry(roomSize * 2.2, wallH, roomSize * 2.2),
-      new THREE.MeshStandardMaterial({ color: 0x0b1220, roughness: 0.92, metalness: 0.08, transparent: true, opacity: 0.5 })
+      new THREE.MeshStandardMaterial({
+        color: 0x0b1220, roughness: 0.92, metalness: 0.08,
+        transparent: true, opacity: 0.45
+      })
     );
     walls.position.set(r.x, wallH / 2 - 0.175, r.z);
     root.add(walls);
@@ -262,8 +354,75 @@ function buildRoomsAndHallways(s) {
   }
 }
 
+function buildPortals(s) {
+  const { THREE, root } = s;
+
+  const portalMat = new THREE.MeshStandardMaterial({
+    color: 0x66ccff, roughness: 0.3, metalness: 0.65,
+    emissive: new THREE.Color(0x66ccff),
+    emissiveIntensity: 0.55
+  });
+  s.neonMats.push(portalMat);
+
+  const portals = [
+    { x: 0, z: -18, ry: 0 },
+    { x: 0, z: 18, ry: Math.PI },
+    { x: -18, z: 0, ry: Math.PI/2 },
+    { x: 18, z: 0, ry: -Math.PI/2 },
+  ];
+
+  for (const p of portals) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(2.2, 0.08, 12, 64), portalMat);
+    ring.position.set(p.x, 2.0, p.z);
+    ring.rotation.y = p.ry;
+    ring.rotation.x = Math.PI/2;
+    root.add(ring);
+
+    const plate = makeLabelPlate(s.THREE, "PORTAL", 0x0a1020, 0x66ccff);
+    plate.position.set(p.x, 2.75, p.z);
+    plate.rotation.y = p.ry;
+    root.add(plate);
+  }
+}
+
+function buildHoloJumbotrons(s) {
+  const { THREE, root, BUILD } = s;
+
+  const mkPanel = (text, x, y, z, ry) => {
+    const panel = new THREE.Group();
+
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(4.2, 1.6, 0.12),
+      new THREE.MeshStandardMaterial({ color: 0x121c2c, roughness: 0.55, metalness: 0.25 })
+    );
+    panel.add(frame);
+
+    const face = makeLabelPlate(THREE, text, 0x0b1220, 0x66ccff, 1024, 256);
+    face.position.z = 0.07;
+    panel.add(face);
+
+    const glow = new THREE.PointLight(0x66ccff, 0.7, 18, 2);
+    glow.position.set(0, 0, 0.7);
+    panel.add(glow);
+
+    panel.position.set(x, y, z);
+    panel.rotation.y = ry;
+
+    root.add(panel);
+    s.holoPanels.push(panel);
+  };
+
+  mkPanel(`SCARLETT VR POKER`, 0, 6.0, 13.0, Math.PI);
+  mkPanel(`BUILD: ${String(BUILD).slice(-10)}`, 0, 4.2, 13.0, Math.PI);
+}
+
+// =======================
+// ROOMS
+// =======================
+
 function buildStore(s) {
   const { THREE, root } = s;
+
   const store = new THREE.Group();
   store.position.set(-26, 0, 0);
   root.add(store);
@@ -276,18 +435,19 @@ function buildStore(s) {
   const glow = new THREE.PointLight(0x66ccff, 1.0, 45, 2);
   glow.position.set(0, 3.5, 0);
   store.add(glow);
-}
 
-function buildSpectate(s) {
-  const { THREE, root } = s;
-  const plat = new THREE.Mesh(new THREE.BoxGeometry(14, 0.5, 6), matFloor(THREE, 0x121c2c));
-  plat.position.set(0, 3.0, -14);
-  root.add(plat);
-  s.groundMeshes.push(plat);
+  // mannequins
+  const mm = new THREE.MeshStandardMaterial({ color: 0xe0e0e0, roughness: 0.65, metalness: 0.08 });
+  for (let i = 0; i < 5; i++) {
+    const m = new THREE.Mesh(new THREE.CapsuleGeometry(0.35, 1.2, 6, 10), mm);
+    m.position.set(-6 + i*3.0, 1.1, -4.2);
+    store.add(m);
+  }
 }
 
 function buildScorpion(s) {
   const { THREE, root } = s;
+
   const sc = new THREE.Group();
   sc.position.set(26, 0, 0);
   root.add(sc);
@@ -300,32 +460,65 @@ function buildScorpion(s) {
   const light = new THREE.PointLight(0xff6bd6, 1.1, 50, 2);
   light.position.set(0, 3.5, 0);
   sc.add(light);
+
+  const sign = makeLabelPlate(THREE, "SCORPION ROOM", 0x0a1020, 0xff6bd6);
+  sign.position.set(0, 3.2, -7.5);
+  sc.add(sign);
+}
+
+function buildSpectate(s) {
+  const { THREE, root } = s;
+  const plat = new THREE.Mesh(new THREE.BoxGeometry(14, 0.5, 6), matFloor(THREE, 0x121c2c));
+  plat.position.set(0, 3.0, -14);
+  root.add(plat);
+  s.groundMeshes.push(plat);
+
+  const sign = makeLabelPlate(THREE, "SPECTATOR", 0x0a1020, 0xc8d3ff);
+  sign.position.set(0, 4.4, -14);
+  root.add(sign);
 }
 
 function buildHoverCars(s) {
   const { THREE, root } = s;
+
   const carGroup = new THREE.Group();
   carGroup.position.set(0, 0, 36);
   root.add(carGroup);
 
   const carMat = new THREE.MeshStandardMaterial({ color: 0x2b3b5f, roughness: 0.55, metalness: 0.25 });
-  for (let i = 0; i < 5; i++) {
-    const car = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.6, 4.4), carMat);
-    car.position.set(-10 + i * 5, 2.2, 0);
+  const glowMat = new THREE.MeshStandardMaterial({
+    color: 0x66ccff, roughness: 0.3, metalness: 0.4,
+    emissive: new THREE.Color(0x66ccff), emissiveIntensity: 0.35
+  });
+
+  for (let i = 0; i < 6; i++) {
+    const car = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.6, 4.4), carMat);
+    body.position.y = 0.4;
+    const canopy = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.45, 1.6), glowMat);
+    canopy.position.set(0, 0.85, -0.3);
+    car.add(body, canopy);
+
+    car.position.set(-12 + i * 4.8, 2.2, 0);
+    car.rotation.y = (i - 2.5) * 0.16;
     carGroup.add(car);
+
     s.hoverCars.push({ obj: car, baseY: car.position.y, phase: i * 0.8 });
   }
 }
 
-/* =========================
-   LASERS / RETICLE / ARC
-========================= */
+// =======================
+// XR VISUALS: lasers, reticle, rainbow arc
+// =======================
 
 function setupXRLasers(s) {
   const { THREE, controllers } = s;
 
   function makeLaser() {
-    const geom = new THREE.BufferGeometry().setFromPoints([ new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1) ]);
+    const geom = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 0, -1)
+    ]);
     const mat = new THREE.LineBasicMaterial({ color: 0x66ccff });
     const line = new THREE.Line(geom, mat);
     line.scale.z = 12;
@@ -334,7 +527,6 @@ function setupXRLasers(s) {
 
   const l0 = makeLaser();
   const l1 = makeLaser();
-
   controllers.c0.add(l0);
   controllers.c1.add(l1);
 
@@ -342,12 +534,12 @@ function setupXRLasers(s) {
   s.lasers.push({ controller: controllers.c1, line: l1, hand: "right" });
 }
 
-function setupFloorReticles_BIGGER(s) {
+function setupFloorReticles(s) {
   const { THREE, root } = s;
 
   function makeReticle() {
     const g = new THREE.RingGeometry(0.12, 0.18, 32);
-    const m = new THREE.MeshBasicMaterial({ color: 0x66ccff, side: THREE.DoubleSide });
+    const m = new THREE.MeshBasicMaterial({ color: 0x66ccff, side: THREE.DoubleSide, transparent: true, opacity: 0.95 });
     const r = new THREE.Mesh(g, m);
     r.rotation.x = -Math.PI / 2;
     r.visible = false;
@@ -355,139 +547,135 @@ function setupFloorReticles_BIGGER(s) {
     return r;
   }
 
-  s.reticles.push({ mesh: makeReticle(), hand: "left" });
-  s.reticles.push({ mesh: makeReticle(), hand: "right" });
+  s.reticles.push({ hand: "left", mesh: makeReticle() });
+  s.reticles.push({ hand: "right", mesh: makeReticle() });
 }
 
 function setupTeleportArcs(s) {
   const { THREE, root } = s;
 
-  function makeArc() {
+  const makeArc = () => {
     const geom = new THREE.BufferGeometry();
-    const mat = new THREE.LineBasicMaterial({ color: 0xffffff }); // “rainbow vibe” comes from motion + bright reticle; we’ll keep it clean/safe
+    const mat = new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 0.18, gapSize: 0.10 });
     const line = new THREE.Line(geom, mat);
+    line.computeLineDistances();
     line.visible = false;
     root.add(line);
+    s.dashLines.push(line);
     return line;
-  }
+  };
 
   s.arcs.left = makeArc();
   s.arcs.right = makeArc();
 
-  s.arcPts.left = new Array(24).fill(0).map(() => new THREE.Vector3());
-  s.arcPts.right = new Array(24).fill(0).map(() => new THREE.Vector3());
+  s.arcPts.left = new Array(28).fill(0).map(() => new THREE.Vector3());
+  s.arcPts.right = new Array(28).fill(0).map(() => new THREE.Vector3());
 }
 
-/* =========================
-   WATCH (PRETTY)
-========================= */
+// =======================
+// HANDS + WATCH
+// =======================
 
-async function tryLoadWatchTextures(s) {
-  // Optional: if you already have texture files, name them like:
-  // assets/textures/watch_face.png
-  // assets/textures/watch_plate.png
-  // If they don’t exist, it just falls back gracefully.
-  const { THREE } = s;
-  const loader = new THREE.TextureLoader();
+function setupControllerHandMeshes(s) {
+  const { THREE, controllers } = s;
 
-  const load = (url) => new Promise((resolve) => {
-    loader.load(url, (tex) => resolve(tex), undefined, () => resolve(null));
-  });
+  function makeHand(isLeft) {
+    const g = new THREE.Group();
 
-  s.textures.watchFace = await load("assets/textures/watch_face.png");
-  s.textures.watchPlate = await load("assets/textures/watch_plate.png");
+    const skin = new THREE.MeshStandardMaterial({ color: 0xd8c7b2, roughness: 0.75, metalness: 0.05 });
+    const glove = new THREE.MeshStandardMaterial({ color: 0x1c2433, roughness: 0.9, metalness: 0.05 });
+
+    const palm = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.02, 0.06), glove);
+    palm.position.set(0, 0, -0.02);
+    g.add(palm);
+
+    const knuckle = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.012, 0.025), skin);
+    knuckle.position.set(0, 0.012, -0.035);
+    g.add(knuckle);
+
+    for (let i = 0; i < 3; i++) {
+      const f = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.01, 0.03), skin);
+      f.position.set(-0.015 + i * 0.015, 0.012, -0.065);
+      g.add(f);
+    }
+
+    const th = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.01, 0.028), skin);
+    th.position.set(isLeft ? -0.03 : 0.03, 0.006, -0.03);
+    th.rotation.y = isLeft ? 0.5 : -0.5;
+    g.add(th);
+
+    g.position.set(isLeft ? -0.012 : 0.012, -0.01, -0.02);
+    g.rotation.set(-0.2, 0, 0);
+    return g;
+  }
+
+  controllers.c0.add(makeHand(true));
+  controllers.c1.add(makeHand(false));
 }
 
-function setupPrettyWatch_LEFT(s) {
+function setupPrettyWatch(s) {
   const { THREE, controllers } = s;
 
   const watchRoot = new THREE.Group();
   watchRoot.name = "WATCH_UI";
 
   const plateMat = new THREE.MeshStandardMaterial({
-    color: 0x182743,
-    roughness: 0.35,
-    metalness: 0.35,
-    map: s.textures.watchPlate || null
+    color: 0x182743, roughness: 0.3, metalness: 0.35,
+    emissive: new THREE.Color(0x0b1220), emissiveIntensity: 0.1
   });
 
   const faceMat = new THREE.MeshStandardMaterial({
-    color: 0x0d1324,
-    roughness: 0.2,
-    metalness: 0.25,
-    emissive: new THREE.Color(0x223cff),
-    emissiveIntensity: 0.12,
-    map: s.textures.watchFace || null
+    color: 0x0d1324, roughness: 0.2, metalness: 0.25,
+    emissive: new THREE.Color(0x223cff), emissiveIntensity: 0.14
   });
 
-  // Main body
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.155, 0.095, 0.016), plateMat);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.165, 0.102, 0.016), plateMat);
   watchRoot.add(body);
 
-  // Face inset
-  const face = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.082, 0.006), faceMat);
+  const face = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.088, 0.006), faceMat);
   face.position.z = 0.012;
   watchRoot.add(face);
 
-  // Side buttons (cosmetic)
-  const sideMat = new THREE.MeshStandardMaterial({ color: 0x2b3b5f, roughness: 0.3, metalness: 0.4 });
-  const knob = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.02, 12), sideMat);
-  knob.rotation.x = Math.PI/2;
-  knob.position.set(0.08, 0.0, 0.0);
-  watchRoot.add(knob);
-
-  // Glow rim
   const rim = new THREE.Mesh(
-    new THREE.RingGeometry(0.04, 0.048, 28),
-    new THREE.MeshBasicMaterial({ color: 0x66ccff, side: THREE.DoubleSide })
+    new THREE.RingGeometry(0.05, 0.058, 32),
+    new THREE.MeshBasicMaterial({ color: 0x66ccff, side: THREE.DoubleSide, transparent: true, opacity: 0.85 })
   );
-  rim.rotation.x = -Math.PI/2;
-  rim.position.set(-0.045, 0.0, 0.02);
+  rim.rotation.x = -Math.PI / 2;
+  rim.position.set(-0.05, 0.0, 0.02);
   watchRoot.add(rim);
-
-  // Menu buttons
-  const btnMat = new THREE.MeshStandardMaterial({
-    color: 0x2b3b5f,
-    roughness: 0.55,
-    metalness: 0.18,
-    emissive: new THREE.Color(0x000000),
-    emissiveIntensity: 0
-  });
-  const btnGeo = new THREE.BoxGeometry(0.125, 0.02, 0.012);
 
   const items = [
     { label: "POKER", room: "poker" },
     { label: "LOBBY", room: "lobby" },
     { label: "STORE", room: "store" },
     { label: "SPECT", room: "spectate" },
-    { label: "HIDE",  room: null },
+    { label: "SCORP", room: "scorpion" },
+    { label: "ARC",   room: null, action: (st)=>{ st.showArcs = !st.showArcs; } },
+    { label: "LASER", room: null, action: (st)=>{ st.showLasers = !st.showLasers; } },
   ];
 
+  const btnGeo = new THREE.BoxGeometry(0.14, 0.02, 0.012);
+
   for (let i = 0; i < items.length; i++) {
-    const b = new THREE.Mesh(btnGeo, btnMat.clone());
-    b.position.set(0, 0.03 - i * 0.024, 0.018);
+    const btnMat = new THREE.MeshStandardMaterial({
+      color: 0x2b3b5f, roughness: 0.55, metalness: 0.18,
+      emissive: new THREE.Color(0x000000), emissiveIntensity: 0
+    });
+
+    const b = new THREE.Mesh(btnGeo, btnMat);
+    b.position.set(0, 0.042 - i * 0.024, 0.018);
     b.userData.watchItem = items[i];
     watchRoot.add(b);
     s.watch.buttons.push(b);
 
-    // Tiny “label plate” (no external fonts)
-    const tag = new THREE.Mesh(
-      new THREE.BoxGeometry(0.13, 0.018, 0.002),
-      new THREE.MeshBasicMaterial({ color: 0x0a1020 })
-    );
-    tag.position.set(0, 0.03 - i * 0.024, 0.025);
-    watchRoot.add(tag);
-
-    // Simple “ticks” to visually distinguish buttons
-    const tick = new THREE.Mesh(
-      new THREE.BoxGeometry(0.01, 0.01, 0.002),
-      new THREE.MeshBasicMaterial({ color: 0x66ccff })
-    );
-    tick.position.set(-0.06, 0.03 - i * 0.024, 0.026);
-    watchRoot.add(tick);
+    const label = makeLabelPlate(THREE, items[i].label, 0x0a1020, 0x66ccff, 512, 128);
+    label.scale.set(0.30, 0.08, 1);
+    label.position.set(0.0, 0.042 - i * 0.024, 0.028);
+    watchRoot.add(label);
+    s.watch.labels.push(label);
   }
 
-  // Attach to LEFT controller wrist
+  // attach to LEFT controller
   watchRoot.position.set(0.055, 0.015, -0.075);
   watchRoot.rotation.set(-0.7, 0.0, 0.25);
   controllers.c0.add(watchRoot);
@@ -504,60 +692,52 @@ function toggleWatch(s) {
   s.log?.(`[watch] ${s.watch.visible ? "shown" : "hidden"}`);
 }
 
-/* =========================
-   CONTROLLER HAND MESHES
-========================= */
+function tryClickWatch(s) {
+  if (!s.watch.visible || !s.watch.buttons.length) return false;
 
-function addControllerHandMeshes(s) {
-  const { THREE, controllers } = s;
+  const ctrl = s.controllers.c0; // left
+  s.tmpM.identity().extractRotation(ctrl.matrixWorld);
+  const origin = s.tmpV.setFromMatrixPosition(ctrl.matrixWorld);
+  s.tmpDir.set(0, 0, -1).applyMatrix4(s.tmpM).normalize();
 
-  // Simple stylized hand: palm + 3 finger blocks + thumb
-  function makeHand(isLeft) {
-    const g = new THREE.Group();
+  s.raycaster.set(origin, s.tmpDir);
+  const hits = s.raycaster.intersectObjects(s.watch.buttons, false);
+  if (!hits.length) return false;
 
-    const skin = new THREE.MeshStandardMaterial({ color: 0xd8c7b2, roughness: 0.75, metalness: 0.05 });
-    const glove = new THREE.MeshStandardMaterial({ color: 0x1c2433, roughness: 0.9, metalness: 0.05 });
+  const btn = hits[0].object;
+  const item = btn.userData.watchItem;
 
-    const palm = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.02, 0.06), glove);
-    palm.position.set(0, 0, -0.02);
-    g.add(palm);
+  // haptics if available
+  pulseHaptics(s, "left", 0.35, 30);
 
-    const knuckle = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.012, 0.025), skin);
-    knuckle.position.set(0, 0.012, -0.035);
-    g.add(knuckle);
+  // action
+  if (item?.action) item.action(s);
+  if (item?.room) setRigToAnchor(s, s.anchors[item.room] || s.anchors.lobby);
 
-    // fingers
-    for (let i = 0; i < 3; i++) {
-      const f = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.01, 0.03), skin);
-      f.position.set(-0.015 + i * 0.015, 0.012, -0.065);
-      g.add(f);
-    }
-
-    // thumb
-    const th = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.01, 0.028), skin);
-    th.position.set(isLeft ? -0.03 : 0.03, 0.006, -0.03);
-    th.rotation.y = isLeft ? 0.5 : -0.5;
-    g.add(th);
-
-    // place relative to controller
-    g.position.set(isLeft ? -0.012 : 0.012, -0.01, -0.02);
-    g.rotation.set(-0.2, 0, 0);
-    return g;
+  // visual feedback
+  if (btn.material?.emissive) {
+    btn.material.emissive.setHex(0x223cff);
+    btn.material.emissiveIntensity = 0.7;
   }
 
-  const leftHand = makeHand(true);
-  const rightHand = makeHand(false);
-
-  controllers.c0.add(leftHand);
-  controllers.c1.add(rightHand);
-
-  s.handMeshes.left = leftHand;
-  s.handMeshes.right = rightHand;
+  s.log?.(`[watch] click ${item?.label || "?"}`);
+  return true;
 }
 
-/* =========================
-   POKER ROOM (GRAB START)
-========================= */
+function pulseHaptics(s, hand, intensity = 0.3, ms = 25) {
+  const session = s.renderer.xr.getSession?.();
+  if (!session) return;
+
+  const src = Array.from(session.inputSources || []).find(is => is?.handedness === hand && is?.gamepad);
+  const h = src?.gamepad?.hapticActuators?.[0];
+  if (h?.pulse) {
+    try { h.pulse(intensity, ms); } catch {}
+  }
+}
+
+// =======================
+// POKER ROOM (upgraded foundation)
+// =======================
 
 function buildPokerRoom(s) {
   const { THREE, root } = s;
@@ -567,73 +747,83 @@ function buildPokerRoom(s) {
   room.position.set(0, 0, -9.5);
   root.add(room);
 
-  // floor pad
-  const pad = new THREE.Mesh(new THREE.CircleGeometry(10, 48), matFloor(THREE, 0x0f1724));
+  const pad = new THREE.Mesh(new THREE.CircleGeometry(10, 64), matFloor(THREE, 0x0f1724));
   pad.rotation.x = -Math.PI/2;
   pad.position.y = 0.001;
   room.add(pad);
   s.groundMeshes.push(pad);
 
-  // table
-  const table = new THREE.Group();
+  // Table
   const felt = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.75, 2.95, 0.35, 48),
+    new THREE.CylinderGeometry(2.75, 2.95, 0.35, 64),
     new THREE.MeshStandardMaterial({ color: 0x134536, roughness: 0.78, metalness: 0.04 })
   );
   felt.position.y = 0.9;
-  table.add(felt);
+  room.add(felt);
 
   const rail = new THREE.Mesh(
-    new THREE.TorusGeometry(2.95, 0.12, 14, 64),
+    new THREE.TorusGeometry(2.95, 0.12, 14, 72),
     new THREE.MeshStandardMaterial({ color: 0x1c2433, roughness: 0.5, metalness: 0.22 })
   );
   rail.rotation.x = Math.PI/2;
   rail.position.y = 1.03;
-  table.add(rail);
+  room.add(rail);
 
-  const base = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.7, 1.1, 1.0, 24),
-    new THREE.MeshStandardMaterial({ color: 0x1c2433, roughness: 0.65, metalness: 0.18 })
-  );
-  base.position.y = 0.35;
-  table.add(base);
+  // Community card slots
+  const slotMat = new THREE.MeshStandardMaterial({
+    color: 0x0a1020, roughness: 0.85, metalness: 0.05,
+    emissive: new THREE.Color(0x66ccff),
+    emissiveIntensity: 0.08
+  });
+  for (let i = 0; i < 5; i++) {
+    const slot = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.003, 0.10), slotMat);
+    slot.position.set(-0.18 + i*0.09, 1.08, 0.0);
+    room.add(slot);
+  }
 
-  table.position.set(0, 0, 0);
-  room.add(table);
+  // Betting spots
+  const betMat = new THREE.MeshBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.20, side: THREE.DoubleSide });
+  for (let i = 0; i < 6; i++) {
+    const ang = (i/6)*Math.PI*2;
+    const spot = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.28, 32), betMat);
+    spot.rotation.x = -Math.PI/2;
+    spot.position.set(Math.cos(ang)*2.6, 1.07, Math.sin(ang)*2.6);
+    room.add(spot);
+  }
 
-  // dealer button
+  // Dealer button
   const dealer = new THREE.Mesh(
     new THREE.CylinderGeometry(0.18, 0.18, 0.02, 24),
     new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.4, metalness: 0.1 })
   );
   dealer.rotation.x = Math.PI/2;
   dealer.position.set(0.9, 1.08, 0.0);
+  dealer.userData.spin = true;
   room.add(dealer);
 
-  // chip stacks placeholders
+  // Chip stacks
+  const chipColors = [0xff3b3b, 0x2fd4ff, 0x7cff2f, 0xf2f2f2, 0xff6bd6, 0xc8d3ff];
   for (let i = 0; i < 6; i++) {
-    const stack = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.12, 0.12, 0.14, 20),
-      new THREE.MeshStandardMaterial({ color: 0x2b3b5f, roughness: 0.5, metalness: 0.2 })
-    );
+    const mat = new THREE.MeshStandardMaterial({ color: chipColors[i], roughness: 0.35, metalness: 0.25 });
+    const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.14, 24), mat);
     const ang = (i / 6) * Math.PI * 2;
-    stack.position.set(Math.cos(ang) * 3.6, 0.07, Math.sin(ang) * 3.6);
+    stack.position.set(Math.cos(ang)*3.6, 0.07, Math.sin(ang)*3.6);
     room.add(stack);
   }
 
-  // seats
+  // Seats
   for (let i = 0; i < 6; i++) {
     const chair = new THREE.Mesh(
       new THREE.BoxGeometry(0.6, 0.6, 0.6),
       new THREE.MeshStandardMaterial({ color: 0x121c2c, roughness: 0.9, metalness: 0.08 })
     );
     const ang = (i / 6) * Math.PI * 2;
-    chair.position.set(Math.cos(ang) * 4.2, 0.3, Math.sin(ang) * 4.2);
+    chair.position.set(Math.cos(ang)*4.2, 0.3, Math.sin(ang)*4.2);
     chair.lookAt(0, 0.3, 0);
     room.add(chair);
   }
 
-  // deck + grabbable cards
+  // Deck + grabbable cards
   const deckPos = new THREE.Vector3(-1.1, 1.05, 0.0);
 
   const deck = new THREE.Mesh(
@@ -643,24 +833,30 @@ function buildPokerRoom(s) {
   deck.position.copy(deckPos);
   room.add(deck);
 
-  // 10 loose cards you can grab
-  for (let i = 0; i < 10; i++) {
+  // 12 loose cards
+  for (let i = 0; i < 12; i++) {
     const card = new THREE.Mesh(
       new THREE.BoxGeometry(0.06, 0.004, 0.09),
       new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.65, metalness: 0.05 })
     );
-    card.position.set(deckPos.x + (i % 5) * 0.07, deckPos.y + 0.02 + Math.floor(i/5)*0.01, deckPos.z + 0.14);
+    card.position.set(deckPos.x + (i % 6)*0.07, deckPos.y + 0.02 + Math.floor(i/6)*0.01, deckPos.z + 0.14);
     card.rotation.y = -0.2;
     card.userData.grabbable = true;
     card.userData.kind = "card";
     room.add(card);
     s.grab.interactables.push(card);
   }
+
+  // sign
+  const sign = makeLabelPlate(THREE, "POKER ROOM", 0x0a1020, 0x66ccff);
+  sign.position.set(0, 3.4, 6.5);
+  sign.rotation.y = Math.PI;
+  room.add(sign);
 }
 
-/* =========================
-   GRAB SYSTEM
-========================= */
+// =======================
+// GRAB SYSTEM
+// =======================
 
 function tryGrab(s, hand) {
   if (!s.renderer.xr.isPresenting) return;
@@ -668,31 +864,23 @@ function tryGrab(s, hand) {
 
   const ctrl = hand === "right" ? s.controllers.c1 : s.controllers.c0;
 
-  // Ray from controller forward
   s.tmpM.identity().extractRotation(ctrl.matrixWorld);
   const origin = s.tmpV.setFromMatrixPosition(ctrl.matrixWorld);
   s.tmpDir.set(0, 0, -1).applyMatrix4(s.tmpM).normalize();
 
   s.raycaster.set(origin, s.tmpDir);
   const hits = s.raycaster.intersectObjects(s.grab.interactables, false);
-
   if (!hits.length) return;
 
   const obj = hits[0].object;
   if (!obj?.userData?.grabbable) return;
 
-  // Attach to controller
-  const worldPos = obj.getWorldPosition(new s.THREE.Vector3());
-  const worldQuat = obj.getWorldQuaternion(new s.THREE.Quaternion());
-
+  // attach
   ctrl.attach(obj);
-  obj.position.copy(ctrl.worldToLocal(worldPos));
-  obj.quaternion.copy(worldQuat);
-
-  // small offset so it sits in “fingers”
   obj.position.set(0.0, -0.01, -0.06);
 
   s.grab.held[hand] = obj;
+  pulseHaptics(s, hand, 0.25, 18);
   s.log?.(`[grab] ${hand} picked ${obj.userData.kind || "object"}`);
 }
 
@@ -700,100 +888,118 @@ function releaseGrab(s, hand) {
   const obj = s.grab.held[hand];
   if (!obj) return;
 
-  // Drop it into the world at current position
   s.root.attach(obj);
-
   s.grab.held[hand] = null;
+  pulseHaptics(s, hand, 0.18, 12);
   s.log?.(`[grab] ${hand} released`);
 }
 
-/* =========================
-   UPDATE LOOP
-========================= */
+// =======================
+// UPDATE LOOP
+// =======================
 
 function update(s, dt, t) {
-  // hover cars
+  // Cars hover + spin
   for (const c of s.hoverCars) {
-    c.obj.position.y = c.baseY + Math.sin(t * 1.3 + c.phase) * 0.25;
+    c.obj.position.y = c.baseY + Math.sin(t*1.3 + c.phase) * 0.25;
+    c.obj.rotation.y += dt * 0.10;
   }
 
-  // update reticles + arcs + watch hover glow
-  updateLaserReticlesArcsAndWatch(s);
+  // animate neon / arcs
+  animateNeon(s, t);
+
+  // update rays/reticles/arcs/watch hover
+  updateRays(s, t);
 
   // locomotion
   if (s.renderer.xr.isPresenting) {
-    applyLocomotionRightPreferred(s, dt);
-
-    // Hand tracking pinch teleport (optional)
-    updateHandTrackingPinchTeleport(s, dt);
+    Controls.applyLocomotion(s, dt);
   }
 }
 
-function updateLaserReticlesArcsAndWatch(s) {
-  const { renderer, raycaster, tmpM, tmpV, tmpDir, THREE } = s;
+function animateNeon(s, t) {
+  // pulse emissive intensity on neon mats
+  const pulse = 0.45 + Math.sin(t*1.7)*0.12;
+  for (const m of s.neonMats) {
+    if (m.emissive) m.emissiveIntensity = pulse;
+  }
+  // animate dashed arcs
+  for (const l of s.dashLines) {
+    if (l.material) l.material.dashOffset = -(t * 0.9);
+    // gently shift color
+    if (l.material?.color) {
+      const c = hsvToRgb((t*0.08) % 1, 0.45, 1.0);
+      l.material.color.setRGB(c.r, c.g, c.b);
+    }
+  }
+}
+
+function updateRays(s, t) {
+  const { renderer, raycaster, tmpM, tmpV, tmpDir } = s;
 
   for (const L of s.lasers) {
     const ctrl = L.controller;
     const line = L.line;
     const hand = L.hand;
 
+    const showLaser = s.showLasers && renderer.xr.isPresenting;
+    line.visible = showLaser;
+
     if (!renderer.xr.isPresenting) {
-      line.visible = false;
       setReticleVisible(s, hand, false);
       setArcVisible(s, hand, false);
       continue;
     }
 
-    line.visible = true;
-
     tmpM.identity().extractRotation(ctrl.matrixWorld);
     const origin = tmpV.setFromMatrixPosition(ctrl.matrixWorld);
     tmpDir.set(0, 0, -1).applyMatrix4(tmpM).normalize();
-
     raycaster.set(origin, tmpDir);
 
-    // Watch hover highlight (no click yet—keeps stable with teleport)
-    if (s.watch.visible && s.watch.buttons.length && hand === "left") {
+    // watch hover
+    if (hand === "left" && s.watch.visible && s.watch.buttons.length) {
+      // reset hover glow
       for (const b of s.watch.buttons) {
-        if (b.material?.emissive) {
-          b.material.emissive.setHex(0x000000);
-          b.material.emissiveIntensity = 0;
-        }
+        if (b.material?.emissive) { b.material.emissive.setHex(0x000000); b.material.emissiveIntensity = 0; }
       }
-      const hitsUI = raycaster.intersectObjects(s.watch.buttons, false);
-      if (hitsUI.length) {
-        const hit = hitsUI[0].object;
-        if (hit.material?.emissive) {
-          hit.material.emissive = new THREE.Color(0x223cff);
-          hit.material.emissiveIntensity = 0.55;
-        }
-        line.scale.z = Math.min(2.0, hitsUI[0].distance);
+      const uiHits = raycaster.intersectObjects(s.watch.buttons, false);
+      if (uiHits.length) {
+        const b = uiHits[0].object;
+        if (b.material?.emissive) { b.material.emissive.setHex(0x223cff); b.material.emissiveIntensity = 0.55; }
+        if (showLaser) line.scale.z = Math.min(2.0, uiHits[0].distance);
         setReticleVisible(s, hand, false);
         setArcVisible(s, hand, false);
         continue;
       }
     }
 
-    // Floor target
+    // floor hit
     const hits = raycaster.intersectObjects(s.groundMeshes, false);
     if (hits.length) {
       const h = hits[0];
-      line.scale.z = Math.min(12, h.distance);
+      if (showLaser) line.scale.z = Math.min(12, h.distance);
 
-      // reticle
       setReticle(s, hand, h.point);
 
-      // arc
-      updateArc(s, hand, origin, h.point);
+      if (s.showArcs) updateArc(s, hand, origin, h.point);
+      else setArcVisible(s, hand, false);
 
       if (hand === "right") s.lastTeleportPointR = h.point.clone();
-      if (hand === "left")  s.lastTeleportPointL = h.point.clone();
+      else s.lastTeleportPointL = h.point.clone();
     } else {
-      line.scale.z = 12;
+      if (showLaser) line.scale.z = 12;
       setReticleVisible(s, hand, false);
       setArcVisible(s, hand, false);
     }
   }
+}
+
+function teleportNow(s, hand) {
+  const p = hand === "right" ? s.lastTeleportPointR : s.lastTeleportPointL;
+  if (!p) return;
+  s.player.position.set(p.x, 0, p.z);
+  pulseHaptics(s, hand, 0.35, 22);
+  s.log?.(`[tp] ${hand} -> (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`);
 }
 
 function setReticle(s, hand, point) {
@@ -802,6 +1008,9 @@ function setReticle(s, hand, point) {
   r.visible = true;
   r.position.copy(point);
   r.position.y += 0.01;
+
+  // subtle pulsing opacity
+  if (r.material) r.material.opacity = 0.75 + Math.sin(perfNow()*0.004)*0.2;
 }
 
 function setReticleVisible(s, hand, v) {
@@ -816,27 +1025,26 @@ function updateArc(s, hand, from, to) {
 
   arc.visible = true;
 
-  // quadratic-ish arc: raise midpoint
   const mid = new s.THREE.Vector3().addVectors(from, to).multiplyScalar(0.5);
-  mid.y += 1.1;
+  mid.y += 1.15;
 
   const N = pts.length;
   for (let i = 0; i < N; i++) {
     const u = i / (N - 1);
-    // Bezier: (1-u)^2*from + 2(1-u)u*mid + u^2*to
     const a = (1 - u) * (1 - u);
     const b = 2 * (1 - u) * u;
     const c = u * u;
     pts[i].set(
-      from.x * a + mid.x * b + to.x * c,
-      from.y * a + mid.y * b + to.y * c,
-      from.z * a + mid.z * b + to.z * c
+      from.x*a + mid.x*b + to.x*c,
+      from.y*a + mid.y*b + to.y*c,
+      from.z*a + mid.z*b + to.z*c
     );
   }
 
   const geom = new s.THREE.BufferGeometry().setFromPoints(pts);
-  arc.geometry.dispose?.();
+  arc.geometry?.dispose?.();
   arc.geometry = geom;
+  arc.computeLineDistances?.();
 }
 
 function setArcVisible(s, hand, v) {
@@ -844,108 +1052,9 @@ function setArcVisible(s, hand, v) {
   if (arc) arc.visible = v;
 }
 
-// Teleport
-function teleportNow(s, hand) {
-  if (!s.renderer.xr.isPresenting) return;
-
-  const p = hand === "right" ? s.lastTeleportPointR : s.lastTeleportPointL;
-  if (!p) return;
-
-  s.player.position.x = p.x;
-  s.player.position.z = p.z;
-  s.player.position.y = 0;
-  s.log?.(`[tp] ${hand} -> (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`);
-}
-
-/* =========================
-   LOCOMOTION
-========================= */
-
-function applyLocomotionRightPreferred(s, dt) {
-  const session = s.renderer.xr.getSession?.();
-  if (!session) return;
-
-  const sources = Array.from(session.inputSources || []).filter(is => is?.gamepad);
-  if (!sources.length) return;
-
-  const right = sources.find(is => is.handedness === "right") || sources[0];
-  const left  = sources.find(is => is.handedness === "left")  || sources[0];
-
-  let move = readStick(right.gamepad, s.deadzone);
-  if (!move.active) move = readStick(left.gamepad, s.deadzone);
-  if (move.active) {
-    const yaw = getHeadYaw(s.camera);
-    const cos = Math.cos(yaw), sin = Math.sin(yaw);
-
-    let x = move.x;
-    let z = move.y;
-
-    // 45-degree shaping
-    if (s.diagonal45 && x !== 0) {
-      const sign = z !== 0 ? Math.sign(z) : -1;
-      z += sign * Math.abs(x) * s.diagonalAmount;
-      x *= (1.0 - 0.35);
-      const len = Math.hypot(x, z);
-      if (len > 1e-4) { x /= len; z /= len; }
-    }
-
-    const mx = x * cos - z * sin;
-    const mz = x * sin + z * cos;
-
-    s.player.position.x += mx * s.moveSpeed * dt;
-    s.player.position.z += mz * s.moveSpeed * dt;
-  }
-
-  // snap turn
-  const turnSrc = right.gamepad || left.gamepad;
-  const turn = readTurn(turnSrc, s.deadzone);
-  s.turnCooldown = Math.max(0, s.turnCooldown - dt);
-  if (s.turnCooldown === 0 && turn.active) {
-    const dir = turn.x > 0 ? -1 : 1;
-    s.player.rotation.y += dir * s.snapTurnRad;
-    s.turnCooldown = 0.22;
-  }
-}
-
-function readStick(gamepad, deadzone) {
-  if (!gamepad) return { active: false, x: 0, y: 0 };
-  const axes = gamepad.axes || [];
-  const pairs = [];
-  if (axes.length >= 2) pairs.push([0, 1]);
-  if (axes.length >= 4) pairs.push([2, 3]);
-  if (!pairs.length) return { active: false, x: 0, y: 0 };
-
-  let best = pairs[0], bestMag = -1;
-  for (const p of pairs) {
-    const mag = Math.abs(axes[p[0]] || 0) + Math.abs(axes[p[1]] || 0);
-    if (mag > bestMag) { bestMag = mag; best = p; }
-  }
-
-  let x = axes[best[0]] || 0;
-  let y = axes[best[1]] || 0;
-
-  if (Math.abs(x) < deadzone) x = 0;
-  if (Math.abs(y) < deadzone) y = 0;
-
-  return { active: !(x === 0 && y === 0), x, y };
-}
-
-function readTurn(gamepad, deadzone) {
-  if (!gamepad) return { active: false, x: 0 };
-  const axes = gamepad.axes || [];
-  let tx = 0;
-  if (axes.length >= 3) tx = axes[2] || 0;
-  else if (axes.length >= 1) tx = axes[0] || 0;
-  if (Math.abs(tx) < deadzone) tx = 0;
-  return { active: tx !== 0, x: tx };
-}
-
-function getHeadYaw(camera) {
-  const q = camera.quaternion;
-  const t3 = +2.0 * (q.w * q.y + q.z * q.x);
-  const t4 = +1.0 - 2.0 * (q.y * q.y + q.x * q.x);
-  return Math.atan2(t3, t4);
-}
+// =======================
+// UTIL
+// =======================
 
 function setRigToAnchor(s, anchor) {
   s.player.position.set(anchor.pos.x, anchor.pos.y, anchor.pos.z);
@@ -953,78 +1062,58 @@ function setRigToAnchor(s, anchor) {
   if (!s.renderer.xr.isPresenting) s.camera.rotation.set(0, anchor.yaw, 0);
 }
 
-/* =========================
-   HAND TRACKING PINCH TELEPORT (OPTIONAL)
-========================= */
+function makeLabelPlate(THREE, text, bg = 0x0a1020, fg = 0x66ccff, w = 768, h = 192) {
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
 
-function updateHandTrackingPinchTeleport(s, dt) {
-  if (!s.handTrack.enabled) return;
+  ctx.fillStyle = hex(bg);
+  ctx.fillRect(0, 0, w, h);
 
-  const session = s.renderer.xr.getSession?.();
-  if (!session) return;
+  // glow border
+  ctx.strokeStyle = "rgba(102,204,255,0.55)";
+  ctx.lineWidth = Math.max(6, Math.floor(w * 0.01));
+  ctx.strokeRect(10, 10, w-20, h-20);
 
-  // Find hand inputSources
-  const hands = Array.from(session.inputSources || []).filter(src => src?.hand);
-  if (!hands.length) return;
+  // text
+  ctx.fillStyle = hex(fg);
+  ctx.font = `900 ${Math.floor(h*0.48)}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, w/2, h/2);
 
-  // We render simple joint spheres and detect pinch between thumb-tip and index-tip.
-  for (const src of hands) {
-    const handedness = src.handedness || "none";
-    const state = handedness === "left" ? s.handTrack.left : s.handTrack.right;
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.anisotropy = 2;
+  tex.needsUpdate = true;
 
-    // build joint visuals once
-    if (!state.joints.size) {
-      for (const [name, joint] of src.hand.entries()) {
-        const j = makeJointSphere(s.THREE);
-        j.userData.jointName = name;
-        s.root.add(j);
-        state.joints.set(name, j);
-      }
-    }
-
-    // update joint positions
-    for (const [name, joint] of src.hand.entries()) {
-      const mesh = state.joints.get(name);
-      if (!mesh) continue;
-
-      const pose = s.renderer.xr.getFrame?.()?.getJointPose?.(joint, s.renderer.xr.getReferenceSpace?.());
-      // Some browsers don’t expose getFrame() here; we fall back by hiding visuals if pose unavailable.
-      if (!pose) { mesh.visible = false; continue; }
-
-      mesh.visible = true;
-      mesh.position.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z);
-    }
-
-    // pinch detect (thumb-tip & index-finger-tip are common names; if missing, skip)
-    const thumb = state.joints.get("thumb-tip");
-    const index = state.joints.get("index-finger-tip");
-    if (!thumb || !index || !thumb.visible || !index.visible) continue;
-
-    const d = thumb.position.distanceTo(index.position);
-    const pinching = d < s.handTrack.pinchDist;
-
-    if (pinching) state.pinchHold += dt;
-    else state.pinchHold = 0;
-
-    // commit teleport on pinch hold
-    if (state.pinchHold >= s.handTrack.pinchHoldTime) {
-      // Use nearest controller reticle target as teleport point
-      const p = handedness === "left" ? s.lastTeleportPointL : s.lastTeleportPointR;
-      if (p) {
-        s.player.position.x = p.x;
-        s.player.position.z = p.z;
-        s.player.position.y = 0;
-        s.log?.(`[pinch-tp] ${handedness}`);
-      }
-      state.pinchHold = 0; // reset
-    }
-  }
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.65), mat);
+  return mesh;
 }
 
-function makeJointSphere(THREE) {
-  const g = new THREE.SphereGeometry(0.006, 10, 8);
-  const m = new THREE.MeshBasicMaterial({ color: 0x66ccff });
-  const s = new THREE.Mesh(g, m);
-  s.visible = false;
-  return s;
-                 }
+function hex(n) {
+  const c = Number(n >>> 0).toString(16).padStart(6, "0");
+  return `#${c}`;
+}
+
+function hsvToRgb(h, s, v) {
+  let r=0,g=0,b=0;
+  const i = Math.floor(h*6);
+  const f = h*6 - i;
+  const p = v*(1-s);
+  const q = v*(1-f*s);
+  const t = v*(1-(1-f)*s);
+  switch (i % 6) {
+    case 0: r=v; g=t; b=p; break;
+    case 1: r=q; g=v; b=p; break;
+    case 2: r=p; g=v; b=t; break;
+    case 3: r=p; g=q; b=v; break;
+    case 4: r=t; g=p; b=v; break;
+    case 5: r=v; g=p; b=q; break;
+  }
+  return { r, g, b };
+}
+
+function perfNow() {
+  return (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+                                                                     }

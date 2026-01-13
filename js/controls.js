@@ -1,11 +1,12 @@
-// /js/controls.js — ScarlettVR Controls v1
-// Centralized XR locomotion + axis correction
+// /js/controls.js — ScarlettVR Controls v2 (Quest-correct + axis fixes)
+// ✅ Right stick: forward/back corrected (invert Y)
+// ✅ Left stick: fully corrected (invert X & Y) when used
+// ✅ 45° diagonal shaping support
+// ✅ Snap turn support
 
 export const Controls = {
   applyLocomotion(ctx, dt) {
-    const { renderer, camera, player, deadzone, moveSpeed,
-            diagonal45, diagonalAmount,
-            snapTurnRad } = ctx;
+    const { renderer, camera, player, deadzone, moveSpeed, diagonal45, diagonalAmount, snapTurnRad } = ctx;
 
     const session = renderer.xr.getSession?.();
     if (!session) return;
@@ -16,7 +17,7 @@ export const Controls = {
     const rightSrc = sources.find(is => is.handedness === "right") || sources[0];
     const leftSrc  = sources.find(is => is.handedness === "left")  || sources[0];
 
-    // Prefer right stick
+    // Movement: prefer right, fall back to left
     let move = this.readStick(rightSrc.gamepad, deadzone, "right");
     if (!move.active) move = this.readStick(leftSrc.gamepad, deadzone, "left");
 
@@ -27,9 +28,9 @@ export const Controls = {
       let x = move.x;
       let z = move.y;
 
-      // 45° diagonal shaping (your signature movement)
+      // 45° diagonal shaping
       if (diagonal45 && x !== 0) {
-        const sign = z !== 0 ? Math.sign(z) : -1;
+        const sign = z !== 0 ? Math.sign(z) : 1;
         z += sign * Math.abs(x) * diagonalAmount;
         x *= (1.0 - 0.35);
         const len = Math.hypot(x, z);
@@ -43,7 +44,7 @@ export const Controls = {
       player.position.z += mz * moveSpeed * dt;
     }
 
-    // Snap turn (right preferred)
+    // Snap turn: right preferred
     const turn = this.readTurn(rightSrc.gamepad || leftSrc.gamepad, deadzone);
     ctx.turnCooldown = Math.max(0, ctx.turnCooldown - dt);
     if (ctx.turnCooldown === 0 && turn.active) {
@@ -62,6 +63,7 @@ export const Controls = {
     if (axes.length >= 4) pairs.push([2, 3]);
     if (!pairs.length) return { active: false, x: 0, y: 0 };
 
+    // pick most active pair
     let best = pairs[0], bestMag = -1;
     for (const p of pairs) {
       const mag = Math.abs(axes[p[0]] || 0) + Math.abs(axes[p[1]] || 0);
@@ -74,13 +76,10 @@ export const Controls = {
     if (Math.abs(x) < deadzone) x = 0;
     if (Math.abs(y) < deadzone) y = 0;
 
-    // ✅ Axis correction (based on your exact report)
-    if (handedness === "left") {
-      x = -x;
-      y = -y;
-    } else if (handedness === "right") {
-      y = -y;
-    }
+    // ✅ Your exact axis corrections:
+    // Left controller was fully reversed; right controller forward/back reversed
+    if (handedness === "left") { x = -x; y = -y; }
+    else if (handedness === "right") { y = -y; }
 
     return { active: !(x === 0 && y === 0), x, y };
   },
@@ -89,6 +88,7 @@ export const Controls = {
     if (!gamepad) return { active: false, x: 0 };
     const axes = gamepad.axes || [];
 
+    // prefer secondary x if present
     let tx = 0;
     if (axes.length >= 3) tx = axes[2] || 0;
     else if (axes.length >= 1) tx = axes[0] || 0;
@@ -103,4 +103,4 @@ function getHeadYaw(camera) {
   const t3 = +2.0 * (q.w * q.y + q.z * q.x);
   const t4 = +1.0 - 2.0 * (q.y * q.y + q.x * q.x);
   return Math.atan2(t3, t4);
-    }
+  }

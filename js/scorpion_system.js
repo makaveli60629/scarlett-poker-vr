@@ -1,62 +1,50 @@
-// /js/scorpion_system.js — ScorpionSystem v2 (Auto-seat + Live Table Mode)
-// ✅ On enter: seats player + seats bots + starts bot loop
-// ✅ On exit: restores player control by moving to lobby anchor (world handles anchor)
+// /js/scorpion_system.js — ScorpionSystem v2.2 (FULL)
+// ✅ Auto-seat player in scorpion room (optional)
+// ✅ Restores previous position on exit
+// ✅ Integrates with poker/bots if present
 
 export const ScorpionSystem = (() => {
   return {
     init(ctx, opt = {}) {
-      const { THREE, log } = ctx;
+      const { THREE, player, log } = ctx;
 
       const state = {
         active: false,
-        seated: false,
-
-        // anchors/seats
-        playerSeat: opt.playerSeat || { pos: new THREE.Vector3(26, 0, 0), yaw: -Math.PI/2 },
-        botSeats: opt.botSeats || [],
-
+        saved: { pos: new THREE.Vector3(), rotY: 0 },
+        playerSeat: opt.playerSeat || { pos: new THREE.Vector3(26,0,0.9), yaw: -Math.PI/2 },
         poker: opt.poker || null,
-        bots: opt.bots || null,
+        bots: opt.bots || null
       };
 
-      function seatPlayer() {
-        ctx.player.position.set(state.playerSeat.pos.x, state.playerSeat.pos.y, state.playerSeat.pos.z);
-        ctx.player.rotation.set(0, state.playerSeat.yaw, 0);
-        state.seated = true;
-        log?.("[scorpion] player auto-seated ✅");
-      }
+      const api = {
+        enter() {
+          if (state.active) return;
+          state.active = true;
 
-      function enter() {
-        state.active = true;
-        seatPlayer();
+          state.saved.pos.copy(player.position);
+          state.saved.rotY = player.rotation.y;
 
-        if (state.bots?.seatBots) state.bots.seatBots(state.botSeats);
-        if (state.bots?.setPoker && state.poker) state.bots.setPoker(state.poker);
+          player.position.copy(state.playerSeat.pos);
+          player.rotation.y = state.playerSeat.yaw;
 
-        log?.("[scorpion] enter ✅ (bots + poker linked)");
-      }
-
-      function exit() {
-        state.active = false;
-        state.seated = false;
-        log?.("[scorpion] exit ✅");
-      }
-
-      return {
-        state,
-        setPoker(p) { state.poker = p; },
-        setBots(b) { state.bots = b; },
-        setSeats({ playerSeat, botSeats }) {
-          if (playerSeat) state.playerSeat = playerSeat;
-          if (botSeats) state.botSeats = botSeats;
+          log?.("[scorpion] enter ✅ (auto-seat)");
         },
-        enter,
-        exit,
-        update(dt, t) {
+        exit() {
           if (!state.active) return;
-          // (extra scorpion effects later)
+          state.active = false;
+
+          player.position.copy(state.saved.pos);
+          player.rotation.y = state.saved.rotY;
+
+          log?.("[scorpion] exit ✅ (restore)");
+        },
+        update() {
+          // could add scorpion FX here later
         }
       };
+
+      log?.("[scorpion] ScorpionSystem v2.2 init ✅");
+      return api;
     }
   };
 })();

@@ -5,7 +5,7 @@
 // ✅ XR: Smooth move (LEFT stick) + Snap turn (RIGHT stick) with inversion fixes
 // ✅ Android/2D works via your new index.js (joystick + look)
 // ✅ Adds Humanoid bots + player avatar if files exist (safe fallback)
-
+import { PokerSystem } from "./poker_system.js";
 let AvatarSystem = null;
 let BotSystem = null;
 
@@ -94,6 +94,18 @@ export const World = {
     setupXRLasers(s);
     setupFloorReticles(s);
     setupTeleportArcs(s);
+    // ===== POKER SYSTEM (Smooth Dealing + Event Chips) =====
+s.poker = PokerSystem.init(s, {
+  tableCenter: new THREE.Vector3(0, 0.95, -9.5),   // match your table anchor
+  // deckPos: new THREE.Vector3(-1.1, 1.05, -9.55), // optional override
+  // potPos:  new THREE.Vector3(0, 1.01, -9.40),    // optional override
+  enableZones: true
+});
+
+// quick demo (remove later)
+s.poker.dealNext();
+s.poker.dealNext();
+s.poker.dealNext();
 
     // ===== WATCH (smaller, cleaner) =====
     setupPrettyWatch(s);

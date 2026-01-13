@@ -1,59 +1,412 @@
-// /js/world.js — Scarlett MASTER WORLD v5.6 LUX (FULL)
-// ✅ Circular lobby + sunken poker pit + neon rail + stairs
-// ✅ 4 hallways + 4 rooms (POKER / STORE / EVENT / VIP) + door signage
-// ✅ Storefront inside lobby + store interior shell + mannequins
-// ✅ 4 jumbotrons fed by HLS stream (SomaFM Groove Salad) + positional volume
-// ✅ Teleport aim ring ALWAYS visible + smoothed (stable, less jitter)
-// ✅ Bots seated + small clean tags + hole cards under tags (readable)
-// ✅ Big card rank/suit textures (CanvasTexture) + community cards readable
-// ✅ Poker HUD: POT / TURN / ACTION (with amounts) + action tile + table marker
-// ✅ Clean lighting: midnight velvet + gold ribs + soft cyan accents + dust motes
-// ✅ Exposes World.setMuted(true/false) and World.admin.teleportTo(roomKey)
+// /js/world.js — Scarlett MASTER WORLD (Update 4.8 FULL, v5.0 polish)
+// ✅ Single-scene, modular factories, no reverse text, VIP spawn + pad
+// ✅ Right-hand teleport ring (stable + smoothed), 52-card deck (no dupes)
+// ✅ Luxury lighting: pillars, halo lights, fountain, colored rooms
+// ✅ VIP Legends display, welcome panel, bot tags w/ money, wrist OS
 
 export const World = (() => {
   const S = {
-    THREE:null, scene:null, renderer:null, camera:null, player:null, controllers:null, log:console.log,
-    root:null, lobby:null,
-
-    floorMain:null, floorPit:null, ground:null,
+    THREE:null, scene:null, renderer:null, camera:null, player:null, controllers:null,
+    log:console.log,
+    root:null,
     ray:null,
+    floorHits:[],
+    marker:null,
+    markerTarget:null,
+    markerVel:null,
 
-    aimRing:null,
-    tp:{ smooth:null, lastValid:null, cooldown:0 },
-    _teleLatch:false,
+    refs:{ lobby:null, rooms:{}, hallways:{}, jumbos:[] },
+    roomDefs: [
+      { key:"vip",   name:"VIP",   yaw:0 },
+      { key:"store", name:"STORE", yaw:Math.PI/2 },
+      { key:"event", name:"EVENT", yaw:Math.PI },
+      { key:"poker", name:"POKER", yaw:-Math.PI/2 },
+    ],
 
-    refs:{ stream:null, jumbotrons:[] },
-    rooms:{},
-    dust:{ points:null },
+    // systems
+    uiWrist:null,
+    playerStats:{ name:"Player One", rank:"Bronze I", money:100000, eventChips:12 },
 
-    cardTexCache:new Map(),
-
-    bots:{ seated:[] },
-
+    // poker
     poker:{
-      t:0, phase:"deal", hand:0, pot:0,
-      table:null,
-      community:[], communityIds:[],
-      potStack:null,
-      hud:null,
-      chipKit:null,
-      activeIdx:0,
-      lastAction:"", lastAmount:0,
-      turnName:"",
-      actionTile:null,
-      turnMarker:null
+      bots:[],
+      deck:[],
+      community:[],
+      phase:"preflop",
+      pot:0,
+      t:0,
+      turn:0,
+      heroSeat:0,
+      seats:[]
     },
 
-    audio:{ muted:false }
+    // audio
+    audio:{ el:null, gain:1, started:false },
+
+    // visuals
+    _vipTimeAcc:0,
+    _vipWelcomePlane:null,
+    _fountainWater:null
   };
 
-  const log=(...a)=>{ try{S.log?.(...a);}catch{} };
-
-  // ---------- utils ----------
+  const log = (...a)=>{ try{ S.log?.(...a); }catch{} };
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-  const dirFromYaw=(yaw)=>new S.THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));
-  const lerpAlpha=(dt,halfLife)=> 1 - Math.pow(0.5, dt/halfLife);
+  const lerp=(a,b,t)=>a+(b-a)*t;
 
+  // ---------- Materials ----------
+  function matGold(){
+    return new S.THREE.MeshStandardMaterial({
+      color:0xd4af37, roughness:0.22, metalness:0.92,
+      emissive:0x140f04, emissiveIntensity:0.15
+    });
+  }
+  function matMidnight(){
+    return new S.THREE.MeshStandardMaterial({
+      color:0x070812, roughness:0.65, metalness:0.25,
+      emissive:0x05060a, emissiveIntensity:0.10
+    });
+  }
+
+  function getCasinoWallMaterial(){
+    const THREE=S.THREE;
+    const tl=new THREE.TextureLoader();
+    const tex=tl.load("assets/textures/casino_wall_diffuse.jpg", ()=>{}, ()=>{}, ()=>{});
+    tex.wrapS=THREE.RepeatWrapping;
+    tex.wrapT=THREE.ClampToEdgeWrapping;
+    tex.repeat.set(12,1);
+    tex.anisotropy=16;
+    return new THREE.MeshStandardMaterial({
+      map:tex,
+      roughness:0.18,
+      metalness:0.75,
+      color:0xffffff,
+      side:THREE.BackSide
+    });
+  }
+
+  // ---------- UI Canvas Tex ----------
+  function moneyFmt(n){ return `${Math.max(0, (n|0))}`; }
+
+  function makeMiniHUDTex(lines){
+    const THREE=S.THREE;
+    const c=document.createElement("canvas");
+    c.width=1024; c.height=384;
+    const ctx=c.getContext("2d");
+
+    ctx.fillStyle="rgba(8,10,16,0.58)";
+    ctx.fillRect(0,0,c.width,c.height);
+
+    ctx.strokeStyle="rgba(212,175,55,0.55)";
+    ctx.lineWidth=8;
+    ctx.strokeRect(18,18,c.width-36,c.height-36);
+
+    ctx.strokeStyle="rgba(127,231,255,0.38)";
+    ctx.lineWidth=6;
+    ctx.strokeRect(34,34,c.width-68,c.height-68);
+
+    ctx.textAlign="left";
+    ctx.textBaseline="middle";
+
+    ctx.fillStyle="#e8ecff";
+    ctx.font="900 58px system-ui,Segoe UI,Roboto,Arial";
+    ctx.fillText(lines[0]||"", 58, 92);
+
+    ctx.fillStyle="rgba(127,231,255,0.95)";
+    ctx.font="800 44px system-ui,Segoe UI,Roboto,Arial";
+    ctx.fillText(lines[1]||"", 58, 166);
+
+    ctx.fillStyle="rgba(212,175,55,0.95)";
+    ctx.font="800 44px system-ui,Segoe UI,Roboto,Arial";
+    ctx.fillText(lines[2]||"", 58, 232);
+
+    ctx.fillStyle="rgba(152,160,199,0.95)";
+    ctx.font="700 40px system-ui,Segoe UI,Roboto,Arial";
+    ctx.fillText(lines[3]||"", 58, 302);
+
+    const tex=new THREE.CanvasTexture(c);
+    tex.colorSpace=THREE.SRGBColorSpace;
+    tex.anisotropy=8;
+    return tex;
+  }
+
+  function makeBotTagTex(name, money){
+    const THREE=S.THREE;
+    const c=document.createElement("canvas");
+    c.width=768; c.height=256;
+    const ctx=c.getContext("2d");
+
+    ctx.fillStyle="rgba(9,10,16,0.62)";
+    ctx.fillRect(0,0,768,256);
+
+    ctx.strokeStyle="rgba(127,231,255,0.45)";
+    ctx.lineWidth=8;
+    ctx.strokeRect(16,16,736,224);
+
+    ctx.strokeStyle="rgba(212,175,55,0.35)";
+    ctx.lineWidth=6;
+    ctx.strokeRect(30,30,708,196);
+
+    ctx.textAlign="center";
+    ctx.textBaseline="middle";
+
+    ctx.fillStyle="#7fe7ff";
+    ctx.font="900 70px system-ui,Segoe UI,Roboto,Arial";
+    ctx.fillText(name, 384, 104);
+
+    ctx.fillStyle="#ffd36a";
+    ctx.font="900 52px system-ui,Segoe UI,Roboto,Arial";
+    ctx.fillText(`$${moneyFmt(money)}`, 384, 176);
+
+    const tex=new THREE.CanvasTexture(c);
+    tex.colorSpace=THREE.SRGBColorSpace;
+    tex.anisotropy=8;
+    return tex;
+  }
+
+  function addNameTag(parent, name, money=1000){
+    const tex=makeBotTagTex(name, money);
+    const mat=new S.THREE.MeshBasicMaterial({
+      map:tex, transparent:true, opacity:0.95,
+      side:S.THREE.FrontSide, // NO REVERSE EVER
+      depthTest:false
+    });
+    const plane=new S.THREE.Mesh(new S.THREE.PlaneGeometry(0.95,0.36), mat);
+    plane.position.set(0,1.36,0);
+    plane.userData._tag=true;
+    plane.renderOrder=9999;
+    parent.add(plane);
+    parent.userData._money=money;
+    parent.userData._name=name;
+    parent.userData._tagPlane=plane;
+    return plane;
+  }
+
+  function updateBotTag(parent, money){
+    const plane=parent.userData?._tagPlane;
+    if(!plane) return;
+    plane.material.map?.dispose?.();
+    plane.material.map = makeBotTagTex(parent.userData._name||"BOT", money);
+    plane.material.needsUpdate=true;
+    parent.userData._money=money;
+  }
+
+  function makePanelTex(lines, big=false){
+    const THREE=S.THREE;
+    const c=document.createElement("canvas");
+    c.width=1024; c.height=512;
+    const ctx=c.getContext("2d");
+
+    ctx.fillStyle="rgba(8,10,16,0.55)";
+    ctx.fillRect(0,0,c.width,c.height);
+
+    ctx.strokeStyle="rgba(127,231,255,0.40)";
+    ctx.lineWidth=10;
+    ctx.strokeRect(26,26,c.width-52,c.height-52);
+
+    ctx.strokeStyle="rgba(212,175,55,0.45)";
+    ctx.lineWidth=8;
+    ctx.strokeRect(48,48,c.width-96,c.height-96);
+
+    ctx.textAlign="center";
+    ctx.textBaseline="middle";
+
+    ctx.fillStyle="#e8ecff";
+    ctx.font=`900 ${big?84:72}px system-ui,Segoe UI,Roboto,Arial`;
+    ctx.fillText(lines[0]||"", c.width/2, 165);
+
+    ctx.fillStyle="rgba(127,231,255,0.95)";
+    ctx.font=`900 ${big?68:56}px system-ui,Segoe UI,Roboto,Arial`;
+    ctx.fillText(lines[1]||"", c.width/2, 275);
+
+    ctx.fillStyle="rgba(212,175,55,0.95)";
+    ctx.font=`800 ${big?56:46}px system-ui,Segoe UI,Roboto,Arial`;
+    ctx.fillText(lines[2]||"", c.width/2, 375);
+
+    const tex=new THREE.CanvasTexture(c);
+    tex.colorSpace=THREE.SRGBColorSpace;
+    tex.anisotropy=8;
+    return tex;
+  }
+
+  // ---------- Wrist OS ----------
+  function makeWristMenuTex(){
+    const THREE=S.THREE;
+    const c=document.createElement("canvas");
+    c.width=1024; c.height=1024;
+    const ctx=c.getContext("2d");
+
+    ctx.fillStyle="rgba(7,8,12,0.74)";
+    ctx.fillRect(0,0,1024,1024);
+
+    ctx.strokeStyle="rgba(127,231,255,0.55)";
+    ctx.lineWidth=10;
+    ctx.strokeRect(40,40,944,944);
+
+    ctx.strokeStyle="rgba(212,175,55,0.55)";
+    ctx.lineWidth=8;
+    ctx.strokeRect(70,70,884,884);
+
+    ctx.textAlign="left";
+    ctx.textBaseline="top";
+
+    ctx.fillStyle="#e8ecff";
+    ctx.font="900 68px system-ui,Segoe UI,Roboto,Arial";
+    ctx.fillText("WATCH MENU", 110, 120);
+
+    ctx.fillStyle="rgba(127,231,255,0.95)";
+    ctx.font="800 54px system-ui,Segoe UI,Roboto,Arial";
+    ctx.fillText("• Mute Music", 110, 260);
+    ctx.fillText("• Teleport: VIP / Store / Poker", 110, 340);
+    ctx.fillText("• Leaderboards", 110, 420);
+
+    ctx.fillStyle="rgba(212,175,55,0.95)";
+    ctx.font="800 50px system-ui,Segoe UI,Roboto,Arial";
+    ctx.fillText("Hint: Look at palm to show", 110, 560);
+
+    const tex=new THREE.CanvasTexture(c);
+    tex.colorSpace=THREE.SRGBColorSpace;
+    tex.anisotropy=8;
+    return tex;
+  }
+
+  function attachWristMenu(){
+    const THREE=S.THREE;
+    const hand=S.renderer?.xr?.getHand?.(0); // left
+    const menu=new THREE.Group();
+    menu.name="WristMenu";
+
+    const plane=new THREE.Mesh(
+      new THREE.PlaneGeometry(0.18,0.18),
+      new THREE.MeshBasicMaterial({
+        map:makeWristMenuTex(),
+        transparent:true, opacity:0.95,
+        side:THREE.FrontSide,
+        depthTest:false
+      })
+    );
+    plane.rotation.x=-Math.PI/2;
+    plane.position.set(0,0.02,0);
+    menu.add(plane);
+    menu.visible=false;
+
+    if(hand){
+      hand.add(menu);
+      S.scene.add(hand);
+      S.uiWrist={ mode:"hand", hand, menu };
+      log("[ui] wrist menu attached to XR hand ✅");
+    }else{
+      menu.position.set(0.12,-0.18,-0.38);
+      S.camera.add(menu);
+      S.uiWrist={ mode:"camera", hand:null, menu };
+      log("[ui] wrist menu fallback attached to camera ✅");
+    }
+  }
+
+  function updateWristMenu(){
+    if(!S.uiWrist?.menu) return;
+    const menu=S.uiWrist.menu;
+
+    if(S.uiWrist.mode==="hand" && S.uiWrist.hand){
+      const palmUp=new S.THREE.Vector3(0,1,0).applyQuaternion(S.uiWrist.hand.quaternion).normalize();
+      const viewDir=new S.THREE.Vector3().subVectors(
+        new S.THREE.Vector3().setFromMatrixPosition(S.camera.matrixWorld),
+        new S.THREE.Vector3().setFromMatrixPosition(S.uiWrist.hand.matrixWorld)
+      ).normalize();
+      menu.visible = palmUp.dot(viewDir) > 0.35;
+    }else{
+      menu.visible=true;
+    }
+  }
+
+  // ---------- Audio (lobby radio) ----------
+  function initRadio(){
+    const el=document.createElement("audio");
+    el.crossOrigin="anonymous";
+    el.loop=true;
+    el.src="https://ice4.somafm.com/groovesalad-128-mp3"; // stable MP3 stream
+    el.volume=0.65;
+    el.preload="auto";
+    document.body.appendChild(el);
+    S.audio.el=el;
+    log("[audio] radio ready ✅");
+  }
+
+  function ensureAudioStart(){
+    if(S.audio.started) return;
+    const el=S.audio.el;
+    if(!el) return;
+    el.play().then(()=>{ S.audio.started=true; log("[audio] playing ✅"); }).catch(()=>{});
+  }
+
+  // ---------- Teleport (RIGHT HAND) ----------
+  function getRightHandRay(){
+    const c=S.controllers?.[1] || S.controllers?.[0] || null; // usually right is 1
+    if(c){
+      const pos=new S.THREE.Vector3().setFromMatrixPosition(c.matrixWorld);
+      const dir=new S.THREE.Vector3(0,0,-1).applyQuaternion(c.quaternion).normalize();
+      return { pos, dir, src:"controller" };
+    }
+    S.camera.updateMatrixWorld(true);
+    const camPos=new S.THREE.Vector3().setFromMatrixPosition(S.camera.matrixWorld);
+    const camDir=new S.THREE.Vector3(0,0,-1).applyQuaternion(S.camera.quaternion).normalize();
+    return { pos:camPos, dir:camDir, src:"camera" };
+  }
+
+  function ensureMarker(){
+    if(S.marker) return;
+    const THREE=S.THREE;
+    S.markerTarget=new THREE.Vector3();
+    S.markerVel=new THREE.Vector3();
+
+    const ring=new THREE.Mesh(
+      new THREE.RingGeometry(0.18,0.26,48),
+      new THREE.MeshBasicMaterial({ color:0x7fe7ff, transparent:true, opacity:0.95, side:THREE.DoubleSide })
+    );
+    ring.rotation.x=-Math.PI/2;
+    ring.visible=false;
+    ring.renderOrder=9998;
+    S.scene.add(ring);
+    S.marker=ring;
+  }
+
+  function updateTeleport(ctx, dt){
+    if(!S.ray || !S.marker) return;
+
+    const R=getRightHandRay();
+    R.dir.y = clamp(R.dir.y - 0.10, -0.65, 0.20);
+    R.dir.normalize();
+
+    S.ray.set(R.pos, R.dir);
+    const hits=S.ray.intersectObjects(S.floorHits, true);
+
+    if(hits.length){
+      const p=hits[0].point;
+
+      // smooth marker (reduces jitter)
+      S.markerTarget.copy(p);
+      S.markerVel.lerp(new S.THREE.Vector3(
+        (S.markerTarget.x - S.marker.position.x),
+        (S.markerTarget.y - S.marker.position.y),
+        (S.markerTarget.z - S.marker.position.z)
+      ), clamp(dt*10, 0, 1));
+      S.marker.position.x += S.markerVel.x * clamp(dt*8, 0, 1);
+      S.marker.position.y = p.y + 0.02;
+      S.marker.position.z += S.markerVel.z * clamp(dt*8, 0, 1);
+
+      S.marker.visible=true;
+
+      const pads=ctx?.pads;
+      const teleportPressed = !!pads?.btnA || !!pads?.btnX;
+      if(teleportPressed){
+        ensureAudioStart();
+        S.player.position.set(p.x, 0.02, p.z);
+      }
+    }else{
+      S.marker.visible=false;
+    }
+  }
+
+  // ---------- Rooms & Beautification ----------
   function ensureRoot(){
     if(S.root && S.root.parent===S.scene) return S.root;
     const g=new S.THREE.Group();
@@ -63,1055 +416,656 @@ export const World = (() => {
     return g;
   }
 
-  // ---------- textures / materials ----------
-  function casinoWallMaterial(){
-    const THREE=S.THREE;
-    const tex=new THREE.TextureLoader().load("assets/textures/casino_wall_diffuse.jpg");
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.repeat.set(12,1);
-    tex.anisotropy = 16;
-    return new THREE.MeshStandardMaterial({
-      map:tex,
-      roughness:0.18,
-      metalness:0.55,
-      color:0xffffff,
-      side:THREE.BackSide
-    });
+  function addRoomColorLights(anchor, key){
+    const colors={ vip:0xffd36a, store:0x7fe7ff, event:0xff2d7a, poker:0x00ff7f };
+    const c=colors[key]||0x7fe7ff;
+
+    const p1=new S.THREE.PointLight(c, 0.35, 22);
+    p1.position.set(0,3.4,0); anchor.add(p1);
+
+    const p2=new S.THREE.PointLight(0xffffff, 0.15, 18);
+    p2.position.set(3,2.4,-3); anchor.add(p2);
+
+    const glow=new S.THREE.Mesh(
+      new S.THREE.PlaneGeometry(8,8),
+      new S.THREE.MeshBasicMaterial({ color:c, transparent:true, opacity:0.06, side:S.THREE.DoubleSide })
+    );
+    glow.rotation.x=-Math.PI/2;
+    glow.position.y=0.02;
+    anchor.add(glow);
   }
 
-  const matFloor = ()=> new S.THREE.MeshStandardMaterial({ color:0x050508, roughness:0.93, metalness:0.05 });
-  const matVelvet= ()=> new S.THREE.MeshStandardMaterial({ color:0x060612, roughness:0.95, metalness:0.1, emissive:0x05060a, emissiveIntensity:0.55 });
-  const matGold  = ()=> new S.THREE.MeshStandardMaterial({ color:0xd4af37, roughness:0.22, metalness:0.95 });
-  const matDark  = ()=> new S.THREE.MeshStandardMaterial({ color:0x0a0b12, roughness:0.95, metalness:0.06, side:S.THREE.DoubleSide });
-  const matHall  = ()=> new S.THREE.MeshStandardMaterial({ color:0x090a12, roughness:0.9, metalness:0.1, side:S.THREE.BackSide, emissive:0x05060a, emissiveIntensity:0.65 });
-  const matRoom  = ()=> new S.THREE.MeshStandardMaterial({ color:0x070711, roughness:0.86, metalness:0.1, side:S.THREE.BackSide, emissive:0x05060a, emissiveIntensity:0.65 });
-  const matFelt  = ()=> new S.THREE.MeshStandardMaterial({ color:0x0a3a2a, roughness:0.9, metalness:0.04 });
+  function buildVIPWelcome(anchor){
+    const group=new S.THREE.Group();
+    group.name="VIP_Welcome";
 
-  // ---------- signage canvases ----------
-  function makePanelTex(lines, big=false){
-    const THREE=S.THREE;
-    const c=document.createElement("canvas");
-    c.width=1024; c.height=512;
-    const ctx=c.getContext("2d");
+    const st=S.playerStats;
+    const tex=makeMiniHUDTex([
+      `WELCOME ${st.name.toUpperCase()}`,
+      `RANK: ${st.rank}   EVENT: ${st.eventChips}`,
+      `BANK: $${moneyFmt(st.money)}`,
+      `TIME: ${new Date().toLocaleTimeString()}`
+    ]);
 
-    ctx.fillStyle="rgba(8,10,16,0.78)";
-    ctx.fillRect(0,0,1024,512);
+    const plane=new S.THREE.Mesh(
+      new S.THREE.PlaneGeometry(3.1,1.15),
+      new S.THREE.MeshBasicMaterial({ map:tex, transparent:true, opacity:0.95, side:S.THREE.FrontSide, depthTest:false })
+    );
+    plane.position.set(0,3.9,-5.9);
+    group.add(plane);
 
-    ctx.strokeStyle="rgba(127,231,255,0.55)";
-    ctx.lineWidth=10;
-    ctx.strokeRect(18,18,988,476);
+    const headerTex=makePanelTex(["VIP LOUNGE","WELCOME HOME",""], true);
+    const header=new S.THREE.Mesh(
+      new S.THREE.PlaneGeometry(4.8,2.1),
+      new S.THREE.MeshBasicMaterial({ map:headerTex, transparent:true, opacity:0.95, side:S.THREE.FrontSide, depthTest:false })
+    );
+    header.position.set(0,5.2,-5.9);
+    group.add(header);
 
-    ctx.strokeStyle="rgba(212,175,55,0.35)";
-    ctx.lineWidth=6;
-    ctx.strokeRect(28,28,968,456);
-
-    ctx.textAlign="center";
-    ctx.textBaseline="middle";
-
-    ctx.fillStyle="#e8ecff";
-    ctx.font = big ? "900 96px system-ui,Segoe UI,Roboto,Arial" : "900 78px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText(lines[0]||"", 512, 170);
-
-    ctx.fillStyle="rgba(232,236,255,0.92)";
-    ctx.font="800 56px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText(lines[1]||"", 512, 300);
-
-    ctx.fillStyle="rgba(152,160,199,0.95)";
-    ctx.font="700 44px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText(lines[2]||"", 512, 410);
-
-    const tex=new THREE.CanvasTexture(c);
-    tex.colorSpace=THREE.SRGBColorSpace;
-    return tex;
+    anchor.add(group);
+    S._vipTimeAcc=0;
+    S._vipWelcomePlane=plane;
   }
 
-  function addSign(text1, text2, pos, yaw, scale=1){
-    const tex=makePanelTex([text1, text2||"", ""], true);
-    const mat=new S.THREE.MeshBasicMaterial({ map:tex, transparent:true, opacity:0.95, side:S.THREE.DoubleSide, depthTest:false });
-    const plane=new S.THREE.Mesh(new S.THREE.PlaneGeometry(4.4*scale, 2.2*scale), mat);
-    plane.position.copy(pos);
-    plane.rotation.y=yaw;
-    plane.renderOrder=9999;
-    S.lobby.add(plane);
-    return plane;
+  function updateVIPWelcome(dt){
+    if(!S._vipWelcomePlane) return;
+    S._vipTimeAcc += dt;
+    if(S._vipTimeAcc < 1.0) return;
+    S._vipTimeAcc = 0;
+
+    const st=S.playerStats;
+    const tex=makeMiniHUDTex([
+      `WELCOME ${st.name.toUpperCase()}`,
+      `RANK: ${st.rank}   EVENT: ${st.eventChips}`,
+      `BANK: $${moneyFmt(st.money)}`,
+      `TIME: ${new Date().toLocaleTimeString()}`
+    ]);
+    S._vipWelcomePlane.material.map?.dispose?.();
+    S._vipWelcomePlane.material.map = tex;
+    S._vipWelcomePlane.material.needsUpdate=true;
   }
 
-  function addDoorLabel(text, pos, yaw){
-    const tex=makePanelTex([text,"ENTER",""], true);
-    const mat=new S.THREE.MeshBasicMaterial({ map:tex, transparent:true, opacity:0.96, side:S.THREE.DoubleSide, depthTest:false });
-    const plane=new S.THREE.Mesh(new S.THREE.PlaneGeometry(3.4,1.7), mat);
-    plane.position.copy(pos);
-    plane.position.y += 2.65;
-    plane.rotation.y = yaw + Math.PI;
-    plane.renderOrder=9999;
-    S.lobby.add(plane);
+  function buildTeleportPad(anchor){
+    const pad=new S.THREE.Group();
+    pad.name="TeleportPad";
+
+    const base=new S.THREE.Mesh(
+      new S.THREE.CylinderGeometry(0.75,0.75,0.10,64),
+      new S.THREE.MeshStandardMaterial({ color:0x0c0d14, roughness:0.35, metalness:0.6, emissive:0x00ff7f, emissiveIntensity:0.18 })
+    );
+    base.position.y=0.05;
+    pad.add(base);
+
+    const ring=new S.THREE.Mesh(
+      new S.THREE.TorusGeometry(0.75,0.06,16,180),
+      new S.THREE.MeshStandardMaterial({ color:0x00ff7f, roughness:0.35, metalness:0.2, emissive:0x00ff7f, emissiveIntensity:0.35 })
+    );
+    ring.rotation.x=Math.PI/2;
+    ring.position.y=0.11;
+    pad.add(ring);
+
+    const light=new S.THREE.PointLight(0x00ff7f, 0.35, 6);
+    light.position.set(0,1.0,0);
+    pad.add(light);
+
+    pad.position.set(0,0.0,-3.8);
+    anchor.add(pad);
+    pad.userData._telePad=true;
+    return pad;
   }
 
-  function addNameTag(parent, name){
-    const tex=makePanelTex([name,"",""], false);
-    const mat=new S.THREE.MeshBasicMaterial({ map:tex, transparent:true, opacity:0.92, side:S.THREE.DoubleSide, depthTest:false });
-    const plane=new S.THREE.Mesh(new S.THREE.PlaneGeometry(0.92,0.40), mat);
-    plane.position.set(0,1.36,0);
-    plane.userData._tag = true;
-    plane.renderOrder=9999;
-    parent.add(plane);
-    return plane;
-  }
+  function buildVIPLegends(anchor){
+    const g=new S.THREE.Group();
+    g.name="VIP_Legends";
 
-  // ---------- CARD textures (large readable) ----------
-  const SUITS=["♠","♥","♦","♣"];
-  const RANKS=["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
-  function randCard(){ return { r:RANKS[(Math.random()*RANKS.length)|0], s:SUITS[(Math.random()*SUITS.length)|0] }; }
-
-  function makeCardBackTexture(){
-    const THREE=S.THREE;
-    if(S.cardTexCache.has("__BACK__")) return S.cardTexCache.get("__BACK__");
-    const c=document.createElement("canvas");
-    c.width=512; c.height=768;
-    const ctx=c.getContext("2d");
-
-    ctx.fillStyle="#0b0d14"; ctx.fillRect(0,0,512,768);
-
-    ctx.strokeStyle="rgba(127,231,255,0.35)";
-    ctx.lineWidth=6;
-    for(let y=40;y<768;y+=72){ ctx.beginPath(); ctx.moveTo(42,y); ctx.lineTo(470,y); ctx.stroke(); }
-    for(let x=40;x<512;x+=72){ ctx.beginPath(); ctx.moveTo(x,42); ctx.lineTo(x,726); ctx.stroke(); }
-
-    ctx.strokeStyle="rgba(212,175,55,0.65)";
-    ctx.lineWidth=10;
-    ctx.strokeRect(16,16,480,736);
-
-    ctx.fillStyle="rgba(127,231,255,0.62)";
-    ctx.font="900 92px system-ui,Segoe UI,Roboto,Arial";
-    ctx.textAlign="center"; ctx.textBaseline="middle";
-    ctx.fillText("SCARLETT", 256, 380);
-
-    const tex=new THREE.CanvasTexture(c);
-    tex.colorSpace=THREE.SRGBColorSpace;
-    tex.anisotropy=8;
-    S.cardTexCache.set("__BACK__", tex);
-    return tex;
-  }
-
-  function makeCardTexture(rank, suit){
-    const THREE=S.THREE;
-    const key=`${rank}${suit}`;
-    if(S.cardTexCache.has(key)) return S.cardTexCache.get(key);
-
-    const c=document.createElement("canvas");
-    c.width=512; c.height=768;
-    const ctx=c.getContext("2d");
-
-    ctx.fillStyle="#f7f7fb";
-    ctx.fillRect(0,0,512,768);
-
-    ctx.strokeStyle="rgba(0,0,0,0.22)";
-    ctx.lineWidth=10;
-    ctx.strokeRect(14,14,484,740);
-
-    ctx.strokeStyle="rgba(212,175,55,0.55)";
-    ctx.lineWidth=6;
-    ctx.strokeRect(28,28,456,712);
-
-    const red=(suit==="♥"||suit==="♦");
-    const ink=red?"#d3173a":"#10131c";
-
-    // TOP-LEFT (BIG)
-    ctx.fillStyle=ink;
-    ctx.textAlign="left";
-    ctx.textBaseline="top";
-    ctx.font="900 118px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText(rank, 42, 28);
-    ctx.font="900 122px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText(suit, 42, 150);
-
-    // BOTTOM-RIGHT mirrored
-    ctx.save();
-    ctx.translate(512,768);
-    ctx.rotate(Math.PI);
-    ctx.textAlign="left";
-    ctx.textBaseline="top";
-    ctx.font="900 118px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText(rank, 42, 28);
-    ctx.font="900 122px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText(suit, 42, 150);
-    ctx.restore();
-
-    // center suit HUGE
-    ctx.textAlign="center";
-    ctx.textBaseline="middle";
-    ctx.globalAlpha=0.88;
-    ctx.font="900 360px system-ui,Segoe UI,Roboto,Arial";
-    ctx.fillText(suit, 256, 408);
-    ctx.globalAlpha=1;
-
-    const tex=new THREE.CanvasTexture(c);
-    tex.colorSpace=THREE.SRGBColorSpace;
-    tex.anisotropy=8;
-    S.cardTexCache.set(key, tex);
-    return tex;
-  }
-
-  function cardFrontMat(rank, suit){
-    return new S.THREE.MeshStandardMaterial({
-      map:makeCardTexture(rank,suit),
-      roughness:0.55, metalness:0.0, side:S.THREE.DoubleSide
-    });
-  }
-
-  // ---------- HLS stream for jumbotrons + music ----------
-  function initStream(){
-    const THREE=S.THREE;
-    const video=document.createElement("video");
-    video.crossOrigin="anonymous";
-    video.playsInline=true;
-    video.loop=true;
-    video.preload="auto";
-    video.muted=false;
-    const url="https://hls.somafm.com/hls/groovesalad/128k/program.m3u8";
-
-    const HlsGlobal=(typeof window!=="undefined")?window.Hls:undefined;
-    if(HlsGlobal && HlsGlobal.isSupported && HlsGlobal.isSupported()){
-      const hls=new HlsGlobal();
-      hls.loadSource(url);
-      hls.attachMedia(video);
-    } else {
-      video.src=url;
-    }
-
-    const tex=new THREE.VideoTexture(video);
-    tex.colorSpace=THREE.SRGBColorSpace;
-    S.refs.stream={ video, texture:tex };
-    return tex;
-  }
-
-  function updateAudio(){
-    const v=S.refs.stream?.video;
-    if(!v) return;
-    v.muted = !!S.audio.muted;
-    if(S.audio.muted) return;
-
-    const dist = Math.hypot(S.player.position.x, S.player.position.z);
-    v.volume = clamp(1 - dist/24, 0, 1);
-
-    if(v.paused) v.play().catch(()=>{});
-  }
-
-  // ---------- beauty: ribs, dust, neon rail, stairs ----------
-  function buildVelvetGoldRibs(root, radius, height){
-    const inner=new S.THREE.Mesh(new S.THREE.CylinderGeometry(radius+0.06, radius+0.06, height, 120, 1, true), matVelvet());
-    inner.position.y = height/2;
-    root.add(inner);
-
-    const gold=matGold();
-    for(let i=0;i<28;i++){
-      const a=(i/28)*Math.PI*2;
-      const rib=new S.THREE.Mesh(new S.THREE.BoxGeometry(0.09, height*0.92, 0.12), gold);
-      rib.position.set(Math.cos(a)*(radius+0.02), height/2, Math.sin(a)*(radius+0.02));
-      rib.lookAt(0, height/2, 0);
-      root.add(rib);
-    }
-  }
-
-  function buildDust(root){
-    const count=680;
-    const geo=new S.THREE.BufferGeometry();
-    const arr=new Float32Array(count*3);
-    for(let i=0;i<count;i++){
-      arr[i*3+0]=(Math.random()-0.5)*24;
-      arr[i*3+1]=0.7+Math.random()*6.5;
-      arr[i*3+2]=(Math.random()-0.5)*24;
-    }
-    geo.setAttribute("position", new S.THREE.BufferAttribute(arr,3));
-    const mat=new S.THREE.PointsMaterial({ size:0.03, transparent:true, opacity:0.26 });
-    const pts=new S.THREE.Points(geo, mat);
-    pts.name="DustMotes";
-    root.add(pts);
-    S.dust.points=pts;
-  }
-  function updateDust(dt){ if(S.dust.points) S.dust.points.rotation.y += dt*0.05; }
-
-  function buildNeonRail(root, radius){
-    const railMat=new S.THREE.MeshStandardMaterial({
-      color:0x1a1b25, roughness:0.35, metalness:0.75,
-      emissive:0x00ff7f, emissiveIntensity:0.28
-    });
-    const rail=new S.THREE.Mesh(new S.THREE.TorusGeometry(radius, 0.095, 18, 280), railMat);
+    const rail=new S.THREE.Mesh(
+      new S.THREE.TorusGeometry(3.2,0.07,14,220),
+      new S.THREE.MeshStandardMaterial({ color:0xff2d2d, roughness:0.35, metalness:0.3, emissive:0xff2d2d, emissiveIntensity:0.12 })
+    );
     rail.rotation.x=Math.PI/2;
-    rail.position.y=0.95;
-    root.add(rail);
+    rail.position.set(0,0.22,0.2);
+    g.add(rail);
 
-    for(let i=0;i<16;i++){
-      const a=(i/16)*Math.PI*2;
-      const p=new S.THREE.PointLight(0x00ff7f, 0.09, 3.0);
-      p.position.set(Math.cos(a)*radius, 0.95, Math.sin(a)*radius);
+    const names=["LEGEND I","LEGEND II","LEGEND III","LEGEND IV"];
+    for(let i=0;i<4;i++){
+      const a=(i/4)*Math.PI*2;
+      const r=2.5;
+
+      const ped=new S.THREE.Mesh(
+        new S.THREE.CylinderGeometry(0.55,0.65,0.35,48),
+        new S.THREE.MeshStandardMaterial({ color:0x12121a, roughness:0.55, metalness:0.6, emissive:0x7fe7ff, emissiveIntensity:0.08 })
+      );
+      ped.position.set(Math.cos(a)*r,0.18,Math.sin(a)*r);
+      g.add(ped);
+
+      const bot=new S.THREE.Group();
+      bot.position.set(ped.position.x,0.0,ped.position.z);
+      bot.lookAt(0,0,0);
+
+      const body=new S.THREE.Mesh(new S.THREE.CapsuleGeometry(0.20,0.70,6,12), new S.THREE.MeshStandardMaterial({ color:0x1c1c28, roughness:0.7, metalness:0.12 }));
+      body.position.y=0.95; bot.add(body);
+      const head=new S.THREE.Mesh(new S.THREE.SphereGeometry(0.18,18,14), new S.THREE.MeshStandardMaterial({ color:0x262636, roughness:0.65, metalness:0.12 }));
+      head.position.y=1.58; bot.add(head);
+
+      addNameTag(bot, names[i], 999999);
+      g.add(bot);
+
+      const spot=new S.THREE.SpotLight(0xffd36a,0.65,10,Math.PI/5,0.35,1.1);
+      spot.position.set(bot.position.x,3.9,bot.position.z);
+      spot.target=bot;
+      g.add(spot);
+    }
+
+    g.position.set(0,0.0,0.5);
+    anchor.add(g);
+  }
+
+  function buildTableHaloLights(root){
+    const halo=new S.THREE.Mesh(
+      new S.THREE.TorusGeometry(3.2,0.08,18,260),
+      new S.THREE.MeshStandardMaterial({ color:0xd4af37, roughness:0.25, metalness:0.85, emissive:0xffd36a, emissiveIntensity:0.18 })
+    );
+    halo.rotation.x=Math.PI/2;
+    halo.position.set(0,4.8,0);
+    root.add(halo);
+
+    for(let i=0;i<8;i++){
+      const a=(i/8)*Math.PI*2;
+      const p=new S.THREE.PointLight(0xffd36a,0.18,9);
+      p.position.set(Math.cos(a)*2.6,4.6,Math.sin(a)*2.6);
       root.add(p);
     }
   }
 
-  function buildStairs(root, startZ, steps, totalDrop, width){
-    const g=new S.THREE.Group();
-    g.name="PitStairs";
-    const m=new S.THREE.MeshStandardMaterial({ color:0x141622, roughness:0.9, metalness:0.12 });
-    for(let i=0;i<steps;i++){
-      const step=new S.THREE.Mesh(new S.THREE.BoxGeometry(width, 0.14, 0.85), m);
-      const y=0.07 - (totalDrop/(steps-1))*i;
-      step.position.set(0, y, startZ - 0.85*i);
-      g.add(step);
+  function buildLobbyPillars(root, radius){
+    const m=new S.THREE.MeshStandardMaterial({ color:0x0f1018, roughness:0.55, metalness:0.55, emissive:0x05060a, emissiveIntensity:0.25 });
+    for(let i=0;i<8;i++){
+      const a=(i/8)*Math.PI*2;
+      const p=new S.THREE.Mesh(new S.THREE.CylinderGeometry(0.22,0.28,6.6,22), m);
+      p.position.set(Math.cos(a)*radius,3.3,Math.sin(a)*radius);
+      root.add(p);
+
+      const cap=new S.THREE.PointLight(0x7fe7ff,0.10,6);
+      cap.position.set(p.position.x,6.2,p.position.z);
+      root.add(cap);
     }
+  }
+
+  function buildFountain(root){
+    const g=new S.THREE.Group();
+    g.name="Fountain";
+
+    const bowl=new S.THREE.Mesh(
+      new S.THREE.CylinderGeometry(1.6,1.9,0.55,64),
+      new S.THREE.MeshStandardMaterial({ color:0x0f1018, roughness:0.3, metalness:0.75 })
+    );
+    bowl.position.y=0.28;
+    g.add(bowl);
+
+    const water=new S.THREE.Mesh(
+      new S.THREE.CircleGeometry(1.45,64),
+      new S.THREE.MeshStandardMaterial({ color:0x7fe7ff, roughness:0.15, metalness:0.1, transparent:true, opacity:0.22, emissive:0x7fe7ff, emissiveIntensity:0.25 })
+    );
+    water.rotation.x=-Math.PI/2;
+    water.position.y=0.56;
+    g.add(water);
+
+    const glow=new S.THREE.PointLight(0x7fe7ff,0.25,10);
+    glow.position.set(0,1.4,0);
+    g.add(glow);
+
+    g.position.set(0,0,7.8);
     root.add(g);
+
+    S._fountainWater=water;
+  }
+
+  function updateFountain(dt){
+    if(!S._fountainWater) return;
+    S._fountainWater.material.opacity = 0.18 + 0.06*Math.sin((performance.now()*0.001)*1.3);
+  }
+
+  function buildSportsBettingZone(anchor){
+    const counter=new S.THREE.Mesh(
+      new S.THREE.BoxGeometry(7.8,1.1,1.2),
+      new S.THREE.MeshStandardMaterial({ color:0x0c0d14, roughness:0.4, metalness:0.7, emissive:0x7fe7ff, emissiveIntensity:0.08 })
+    );
+    counter.position.set(0,0.55,3.2);
+    anchor.add(counter);
+
+    const boardTex=makePanelTex(["SPORTS BETTING","LEADERBOARD","1) Kabwe  2) Zola  3) Nina"], true);
+    const board=new S.THREE.Mesh(
+      new S.THREE.PlaneGeometry(6.2,2.7),
+      new S.THREE.MeshBasicMaterial({ map:boardTex, transparent:true, opacity:0.95, side:S.THREE.FrontSide, depthTest:false })
+    );
+    board.position.set(0,3.8,-5.9);
+    anchor.add(board);
+
+    const glow=new S.THREE.PointLight(0x7fe7ff,0.35,16);
+    glow.position.set(0,3.4,0);
+    anchor.add(glow);
+  }
+
+  // ---------- Poker (52-card) ----------
+  const SUITS=["S","H","D","C"];
+  const RANKS=["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
+
+  function buildDeck52(){
+    const deck=[];
+    for(const s of SUITS) for(const r of RANKS) deck.push({ r,s });
+    for(let i=deck.length-1;i>0;i--){
+      const j=(Math.random()*(i+1))|0;
+      const t=deck[i]; deck[i]=deck[j]; deck[j]=t;
+    }
+    return deck;
+  }
+  function dealOne(){
+    if(!S.poker.deck || S.poker.deck.length===0) S.poker.deck=buildDeck52();
+    return S.poker.deck.pop();
+  }
+
+  function cardLabel(id){ return `${id.r}${id.s}`; }
+
+  function makeCardTex(id){
+    const THREE=S.THREE;
+    const c=document.createElement("canvas");
+    c.width=512; c.height=768;
+    const ctx=c.getContext("2d");
+
+    ctx.fillStyle="rgba(255,255,255,0.98)";
+    ctx.fillRect(0,0,c.width,c.height);
+
+    ctx.strokeStyle="rgba(0,0,0,0.25)";
+    ctx.lineWidth=10;
+    ctx.strokeRect(14,14,c.width-28,c.height-28);
+
+    const suitColor = (id.s==="H"||id.s==="D") ? "#ff2d2d" : "#12121a";
+
+    ctx.fillStyle=suitColor;
+    ctx.font="900 140px system-ui,Segoe UI,Roboto,Arial";
+    ctx.textAlign="left";
+    ctx.textBaseline="top";
+    ctx.fillText(id.r, 44, 44);
+
+    ctx.font="900 120px system-ui,Segoe UI,Roboto,Arial";
+    const suitChar = id.s==="S"?"♠":id.s==="H"?"♥":id.s==="D"?"♦":"♣";
+    ctx.fillText(suitChar, 58, 210);
+
+    ctx.textAlign="center";
+    ctx.textBaseline="middle";
+    ctx.font="900 240px system-ui,Segoe UI,Roboto,Arial";
+    ctx.fillText(suitChar, 256, 420);
+
+    ctx.textAlign="right";
+    ctx.textBaseline="bottom";
+    ctx.font="900 140px system-ui,Segoe UI,Roboto,Arial";
+    ctx.fillText(id.r, 468, 724);
+
+    ctx.font="900 120px system-ui,Segoe UI,Roboto,Arial";
+    ctx.fillText(suitChar, 454, 556);
+
+    const tex=new THREE.CanvasTexture(c);
+    tex.colorSpace=THREE.SRGBColorSpace;
+    tex.anisotropy=8;
+    return tex;
+  }
+
+  function buildCardMesh(id, w=0.38, h=0.54){
+    const tex=makeCardTex(id);
+    const mat=new S.THREE.MeshBasicMaterial({ map:tex, transparent:true, opacity:0.98, side:S.THREE.FrontSide, depthTest:true });
+    const geo=new S.THREE.PlaneGeometry(w,h);
+    const m=new S.THREE.Mesh(geo, mat);
+    m.userData._cardId = id;
+    return m;
+  }
+
+  function clearHand(){
+    for(const b of S.poker.bots){
+      const hc=b.userData._holeCards||[];
+      hc.forEach(x=>x.parent&&x.parent.remove(x));
+      b.userData._holeCards=[];
+    }
+    for(const c of S.poker.community){
+      c.parent && c.parent.remove(c);
+    }
+    S.poker.community=[];
+    S.poker.pot=0;
+    S.poker.phase="preflop";
+    S.poker.turn=0;
+    S.poker.deck=buildDeck52();
+  }
+
+  function buildTable(root){
+    const g=new S.THREE.Group();
+    g.name="PokerTableRoot";
+    g.position.set(0,-0.55,0);
+    root.add(g);
+
+    const felt=new S.THREE.Mesh(
+      new S.THREE.CylinderGeometry(2.8,2.8,0.20,64),
+      new S.THREE.MeshStandardMaterial({ color:0x0b4a2a, roughness:0.95, metalness:0.05 })
+    );
+    felt.position.y=0.90;
+    g.add(felt);
+
+    const rim=new S.THREE.Mesh(
+      new S.THREE.TorusGeometry(2.8,0.18,18,260),
+      new S.THREE.MeshStandardMaterial({ color:0x1a1210, roughness:0.65, metalness:0.35 })
+    );
+    rim.rotation.x=Math.PI/2;
+    rim.position.y=1.02;
+    g.add(rim);
+
+    // simple pot chip pile placeholder
+    const pot=new S.THREE.Mesh(
+      new S.THREE.CylinderGeometry(0.35,0.35,0.10,26),
+      new S.THREE.MeshStandardMaterial({ color:0xd4af37, roughness:0.25, metalness:0.8, emissive:0x140f04, emissiveIntensity:0.12 })
+    );
+    pot.position.set(0,1.02,0);
+    g.add(pot);
+    g.userData._potMesh = pot;
+
+    // seats in a ring
+    const seats=[];
+    for(let i=0;i<8;i++){
+      const a=(i/8)*Math.PI*2;
+      const seat=new S.THREE.Group();
+      seat.position.set(Math.cos(a)*3.6, 0.0, Math.sin(a)*3.6);
+      seat.lookAt(0,0,0);
+      g.add(seat);
+      seats.push(seat);
+
+      // chair
+      const chair=new S.THREE.Mesh(
+        new S.THREE.BoxGeometry(0.55,0.55,0.55),
+        new S.THREE.MeshStandardMaterial({ color:0x141622, roughness:0.8, metalness:0.12 })
+      );
+      chair.position.set(0,0.45,0);
+      seat.add(chair);
+    }
+    S.poker.seats=seats;
+
     return g;
   }
 
-  // ---------- teleport aim ring (always visible & smooth) ----------
-  function ensureAimRing(){
-    if(S.aimRing && S.aimRing.parent) return;
-    const geo=new S.THREE.RingGeometry(0.22,0.32,180);
-    const mat=new S.THREE.MeshBasicMaterial({ color:0x00ff7f, transparent:true, opacity:0.93, side:S.THREE.DoubleSide, depthTest:false });
-    const ring=new S.THREE.Mesh(geo, mat);
-    ring.name="TeleportAimRing";
-    ring.rotation.x=-Math.PI/2;
-    ring.visible=true;
-    ring.renderOrder=9999;
-    S.scene.add(ring);
-    S.aimRing=ring;
-  }
-
-  function teleportPressed(ctx){
-    try{
-      const lgp=ctx?.pads?.lgp;
-      const rgp=ctx?.pads?.rgp;
-      const ax=(gp)=>!!gp?.buttons?.[0]?.pressed; // A/X
-      return ax(lgp)||ax(rgp);
-    }catch{ return false; }
-  }
-
-  function updateTeleport(ctx, dt){
-    if(!S.ray) return;
-    ensureAimRing();
-
-    // cooldown
-    if(S.tp.cooldown>0) S.tp.cooldown=Math.max(0, S.tp.cooldown-dt);
-
-    // ray from camera (stable)
-    S.camera.updateMatrixWorld(true);
-    const camPos=new S.THREE.Vector3().setFromMatrixPosition(S.camera.matrixWorld);
-    const camDir=new S.THREE.Vector3(0,0,-1).applyQuaternion(S.camera.quaternion).normalize();
-
-    // slight downward bias so you hit floor more often
-    camDir.y = clamp(camDir.y - 0.10, -0.6, 0.25);
-    camDir.normalize();
-
-    S.ray.set(camPos, camDir);
-
-    const targets=[S.floorMain,S.floorPit,S.ground].filter(Boolean);
-    let hit=null;
-    if(targets.length){
-      const hits=S.ray.intersectObjects(targets,false);
-      if(hits.length) hit=hits[0].point.clone();
-    }
-
-    // fallback plane at y=0.01 if no hit
-    if(!hit){
-      const planeY=0.01;
-      const dir=S.ray.ray.direction;
-      const org=S.ray.ray.origin;
-      if(Math.abs(dir.y)>0.0001){
-        const t=(planeY-org.y)/dir.y;
-        if(t>0) hit=org.clone().add(dir.clone().multiplyScalar(t));
-      }
-    }
-
-    if(!hit){
-      S.aimRing.visible=false;
-      S._teleLatch=false;
-      return;
-    }
-
-    hit.y=0.01;
-
-    // smooth & stabilize
-    const a=lerpAlpha(dt, 0.08); // 80ms half-life ~ stable
-    S.tp.smooth.lerp(hit, a);
-
-    // deadband clamp to reduce micro jitter
-    if(S.tp.smooth.distanceTo(S.tp.lastValid) > 0.01){
-      S.tp.lastValid.copy(S.tp.smooth);
-    }
-
-    S.aimRing.visible=true;
-    S.aimRing.position.copy(S.tp.lastValid);
-
-    const press=teleportPressed(ctx);
-    if(press && !S._teleLatch && S.tp.cooldown===0){
-      S._teleLatch=true;
-      S.tp.cooldown=0.25;
-
-      const dest=S.tp.lastValid;
-      const r=Math.hypot(dest.x,dest.z);
-      if(!Number.isFinite(r) || r>28){
-        log("[tp] blocked dest", dest.x, dest.z);
-        S._teleLatch=false;
-        return;
-      }
-
-      S.player.position.set(dest.x, 0.02, dest.z);
-      const v=S.refs.stream?.video;
-      if(v && v.paused && !S.audio.muted) v.play().catch(()=>{});
-    }
-    if(!press) S._teleLatch=false;
-  }
-
-  // ---------- table & poker HUD ----------
-  function buildTable(root, y){
-    const table=new S.THREE.Group();
-    table.name="CenterTable";
-    table.position.set(0,y,0);
-
-    const base=new S.THREE.Mesh(
-      new S.THREE.CylinderGeometry(1.5,1.85,0.34,96),
-      new S.THREE.MeshStandardMaterial({ color:0x0d0d14, roughness:0.65, metalness:0.22 })
-    );
-    base.position.y=0.16; table.add(base);
-
-    const top=new S.THREE.Mesh(new S.THREE.CylinderGeometry(2.6,2.6,0.22,140), matFelt());
-    top.position.y=0.44; table.add(top);
-
-    const edge=new S.THREE.Mesh(new S.THREE.TorusGeometry(2.55,0.06,16,260), matGold());
-    edge.rotation.x=Math.PI/2;
-    edge.position.y=0.54;
-    table.add(edge);
-
-    root.add(table);
-    return table;
-  }
-
-  function buildPokerHUD(root){
-    const g=new S.THREE.Group();
-    g.name="PokerHUD";
-    g.position.set(0, 3.55, -1.55);
-
-    const tex=makePanelTex(["POT: 0","TURN: —","ACTION: —"], false);
-    const mat=new S.THREE.MeshBasicMaterial({ map:tex, transparent:true, opacity:0.95, side:S.THREE.DoubleSide, depthTest:false });
-    const plane=new S.THREE.Mesh(new S.THREE.PlaneGeometry(3.2,1.55), mat);
-    plane.renderOrder=9999;
-    g.add(plane);
-
-    root.add(g);
-    S.poker.hud={ group:g, plane };
-  }
-
-  function updatePokerHUD(){
-    const hud=S.poker.hud;
-    if(!hud) return;
-    const turn=S.poker.turnName||"—";
-    const act=S.poker.lastAction ? `${S.poker.lastAction}${S.poker.lastAmount?` ${S.poker.lastAmount}`:""}` : "—";
-    const tex=makePanelTex([`POT: ${S.poker.pot}`,`TURN: ${turn}`,`ACTION: ${act}`], false);
-    hud.plane.material.map?.dispose?.();
-    hud.plane.material.map=tex;
-    hud.plane.material.needsUpdate=true;
-  }
-
-  function ensureActionTile(){
-    if(S.poker.actionTile) return;
-    const tex=makePanelTex(["TURN","CHECK / CALL / RAISE",""], false);
-    const mat=new S.THREE.MeshBasicMaterial({ map:tex, transparent:true, opacity:0.92, side:S.THREE.DoubleSide, depthTest:false });
-    const plane=new S.THREE.Mesh(new S.THREE.PlaneGeometry(1.25,0.62), mat);
-    plane.visible=false;
-    plane.renderOrder=9999;
-    S.lobby.add(plane);
-    S.poker.actionTile=plane;
-  }
-
-  function ensureTurnMarker(){
-    if(S.poker.turnMarker) return;
-    const m=new S.THREE.Mesh(
-      new S.THREE.PlaneGeometry(0.34,0.22),
-      new S.THREE.MeshBasicMaterial({ color:0xffd36a, transparent:true, opacity:0.85, side:S.THREE.DoubleSide, depthTest:false })
-    );
-    m.rotation.x=-Math.PI/2;
-    m.position.set(0, 0.14, 0);
-    m.renderOrder=9999;
-    S.lobby.add(m);
-    S.poker.turnMarker=m;
-  }
-
-  // ---------- bots ----------
-  function buildSeatedBots(table){
-    const seatMat=new S.THREE.MeshStandardMaterial({ color:0x12121a, roughness:0.84, metalness:0.12 });
-    const bodyMat=new S.THREE.MeshStandardMaterial({ color:0x181827, roughness:0.85, metalness:0.08 });
-    const headMat=new S.THREE.MeshStandardMaterial({ color:0x232336, roughness:0.78, metalness:0.08 });
-    const handMat=new S.THREE.MeshStandardMaterial({ color:0x2b2b40, roughness:0.7, metalness:0.1 });
-
-    const names=["Kabwe","Zola","Mya","Tasha","Rafi","Nina","Jett","Omar"];
-    const seated=[];
+  function spawnBots(tableRoot){
+    S.poker.bots=[];
+    const botNames=["Kabwe","Zola","Nina","Tariq","Mila","Owen","Sage","Rhea"];
 
     for(let i=0;i<8;i++){
-      const a=(i/8)*Math.PI*2;
-      const r=3.35;
-
-      const chair=new S.THREE.Mesh(new S.THREE.BoxGeometry(0.62,0.86,0.62), seatMat);
-      chair.position.set(Math.cos(a)*r, 0.43, Math.sin(a)*r);
-      chair.lookAt(0,0.43,0);
-      table.add(chair);
-
+      const seat=S.poker.seats[i];
       const bot=new S.THREE.Group();
-      bot.name=`SeatedBot_${names[i]}`;
-      bot.position.set(Math.cos(a)*(r+0.38), 0.02, Math.sin(a)*(r+0.38));
-      bot.lookAt(0,0.02,0);
+      bot.position.copy(seat.position);
+      bot.rotation.copy(seat.rotation);
 
-      const body=new S.THREE.Mesh(new S.THREE.CapsuleGeometry(0.18,0.5,6,12), bodyMat);
-      body.position.y=0.68; bot.add(body);
+      const body=new S.THREE.Mesh(new S.THREE.CapsuleGeometry(0.22,0.72,6,12), new S.THREE.MeshStandardMaterial({ color:0x1c1c28, roughness:0.7, metalness:0.12 }));
+      body.position.y=0.95; bot.add(body);
+      const head=new S.THREE.Mesh(new S.THREE.SphereGeometry(0.19,18,14), new S.THREE.MeshStandardMaterial({ color:0x262636, roughness:0.65, metalness:0.12 }));
+      head.position.y=1.60; bot.add(head);
 
-      const head=new S.THREE.Mesh(new S.THREE.SphereGeometry(0.16,18,14), headMat);
-      head.position.y=1.12; bot.add(head);
+      // money
+      const bankroll = 5000 + ((Math.random()*7000)|0);
+      addNameTag(bot, botNames[i], bankroll);
 
-      const hL=new S.THREE.Mesh(new S.THREE.SphereGeometry(0.055,14,12), handMat);
-      const hR=new S.THREE.Mesh(new S.THREE.SphereGeometry(0.055,14,12), handMat);
-      hL.position.set(-0.14, 0.70, -0.22);
-      hR.position.set( 0.14, 0.70, -0.22);
-      bot.add(hL); bot.add(hR);
-
-      addNameTag(bot, names[i]);
-      table.add(bot);
-
-      seated.push({ name:names[i], group:bot, seatAngle:a, chips:[], hole:[], holeIds:[] });
-    }
-    S.bots.seated=seated;
-  }
-
-  function faceTags(){
-    const camPos=new S.THREE.Vector3().setFromMatrixPosition(S.camera.matrixWorld);
-    S.lobby?.traverse?.((o)=>{ if(o.userData?._tag) o.lookAt(camPos); });
-  }
-
-  function setActivePlayer(idx){
-    S.poker.activeIdx=idx;
-    S.poker.turnName=S.bots.seated[idx]?.name || "—";
-  }
-
-  // ---------- chips ----------
-  function buildChipKit(){
-    const chipGeo=new S.THREE.CylinderGeometry(0.06,0.06,0.018,28);
-    const mats=[
-      new S.THREE.MeshStandardMaterial({ color:0xff2d7a, roughness:0.35, metalness:0.2 }),
-      new S.THREE.MeshStandardMaterial({ color:0x7fe7ff, roughness:0.35, metalness:0.2 }),
-      new S.THREE.MeshStandardMaterial({ color:0xffffff, roughness:0.35, metalness:0.2 }),
-      new S.THREE.MeshStandardMaterial({ color:0x00ff7f, roughness:0.35, metalness:0.2 }),
-    ];
-    return { chipGeo, mats };
-  }
-
-  function addChipToPotStack(){
-    const { chipGeo, mats }=S.poker.chipKit;
-    const chip=new S.THREE.Mesh(chipGeo, mats[(Math.random()*mats.length)|0]);
-    chip.rotation.x=Math.PI/2;
-    const k=S.poker.potStack.children.length;
-    chip.position.set(0,k*0.02,0);
-    S.poker.potStack.add(chip);
-  }
-
-  function spawnChipMover(fromBot, amount){
-    const { chipGeo, mats }=S.poker.chipKit;
-    const chip=new S.THREE.Mesh(chipGeo, mats[(Math.random()*mats.length)|0]);
-    chip.rotation.x=Math.PI/2;
-
-    const a=fromBot.seatAngle;
-    chip.position.set(Math.cos(a)*2.5, 0.14, Math.sin(a)*2.5);
-
-    chip.userData.mode="toPot";
-    chip.userData.t=0;
-    chip.userData.from=chip.position.clone();
-    chip.userData.to=new S.THREE.Vector3(0,0.14,0);
-    chip.userData.amount=amount;
-
-    S.lobby.add(chip);
-    fromBot.chips.push(chip);
-  }
-
-  function updateChipAnimations(dt){
-    for(const b of S.bots.seated){
-      for(const chip of b.chips){
-        chip.userData.t += dt;
-        const t=Math.min(1, chip.userData.t*1.35);
-        chip.position.lerpVectors(chip.userData.from, chip.userData.to, t);
-        chip.rotation.x=Math.PI/2;
-
-        if(t>=1 && chip.userData.mode==="toPot"){
-          const amt=chip.userData.amount||10;
-          if(chip.parent) chip.parent.remove(chip);
-          chip.userData.mode="done";
-          S.poker.pot += amt;
-          addChipToPotStack();
-          updatePokerHUD();
-        }
-      }
-      b.chips=b.chips.filter(c=>c.userData.mode!=="done");
-    }
-  }
-
-  // ---------- cards ----------
-  function clearHand(){
-    for(const c of S.poker.community) c.visible=false;
-    S.poker.communityIds=[];
-
-    for(const b of S.bots.seated){
-      for(const card of b.hole){ if(card.parent) card.parent.remove(card); }
-      b.hole.length=0; b.holeIds=[];
-      for(const chip of b.chips){ if(chip.parent) chip.parent.remove(chip); }
-      b.chips.length=0;
+      // hole cards under tag (as you requested)
+      bot.userData._holeCards=[];
+      S.root.add(bot);
+      S.poker.bots.push(bot);
     }
 
-    if(S.poker.potStack){
-      while(S.poker.potStack.children.length) S.poker.potStack.remove(S.poker.potStack.children[0]);
-    }
-
-    S.poker.pot=0;
-    S.poker.lastAction="";
-    S.poker.lastAmount=0;
-    updatePokerHUD();
+    // hero seat reference
+    S.poker.heroSeat = 0;
   }
 
   function spawnHoleCards(){
-    for(const b of S.bots.seated){
-      const a=b.seatAngle;
-      const r=3.55;
+    // each bot gets 2 unique cards
+    for(const b of S.poker.bots){
+      const id1=dealOne();
+      const id2=dealOne();
 
-      const id1=randCard();
-      const id2=randCard();
-      b.holeIds=[id1,id2];
+      const c1=buildCardMesh(id1, 0.22, 0.30);
+      const c2=buildCardMesh(id2, 0.22, 0.30);
 
-      const x=Math.cos(a)*r;
-      const z=Math.sin(a)*r;
-      const y=0.98; // under tag
+      // place right under the tag and facing player center
+      c1.position.set(-0.13, 1.05, 0.08);
+      c2.position.set(+0.13, 1.05, 0.08);
 
-      const c1=new S.THREE.Mesh(new S.THREE.PlaneGeometry(0.44,0.64), cardFrontMat(id1.r,id1.s));
-      const c2=new S.THREE.Mesh(new S.THREE.PlaneGeometry(0.44,0.64), cardFrontMat(id2.r,id2.s));
+      c1.rotation.y = Math.PI; // face inward
+      c2.rotation.y = Math.PI;
 
-      c1.position.set(x-0.22,y,z);
-      c2.position.set(x+0.22,y,z);
-
-      const camPos=new S.THREE.Vector3().setFromMatrixPosition(S.camera.matrixWorld);
-      c1.lookAt(camPos.x,y,camPos.z);
-      c2.lookAt(camPos.x,y,camPos.z);
-      c1.rotateX(0.06); c2.rotateX(0.06);
-
-      S.lobby.add(c1); S.lobby.add(c2);
-      b.hole.push(c1,c2);
+      b.add(c1); b.add(c2);
+      b.userData._holeCards=[c1,c2];
     }
   }
 
-  function setCommunityCards(n){
-    while(S.poker.communityIds.length<5) S.poker.communityIds.push(randCard());
-    const camPos=new S.THREE.Vector3().setFromMatrixPosition(S.camera.matrixWorld);
-
-    for(let i=0;i<5;i++){
-      const c=S.poker.community[i];
-      const id=S.poker.communityIds[i];
-
-      c.material?.map?.dispose?.();
-      c.material = cardFrontMat(id.r,id.s);
-
-      c.visible = i < n;
-      if(!c.visible) continue;
-
-      c.position.y = 0.18;
-      c.position.z = -0.15;
-
-      c.lookAt(camPos.x, c.position.y, camPos.z);
-      c.rotateY(Math.PI);
-      c.rotateX(0.12);
+  function setCommunity(n, tableRoot){
+    while(S.poker.community.length < n){
+      const id=dealOne();
+      const m=buildCardMesh(id, 0.32, 0.46);
+      m.position.set(-0.72 + S.poker.community.length*0.36, 1.18, 0.0);
+      m.rotation.x = -Math.PI/2;
+      m.rotation.z = Math.PI; // ensure upright facing VIP side
+      tableRoot.add(m);
+      S.poker.community.push(m);
     }
-  }
-
-  // ---------- action tile + marker ----------
-  function updateActionUI(activeIdx){
-    ensureActionTile();
-    ensureTurnMarker();
-
-    const b=S.bots.seated[activeIdx];
-    if(!b){ S.poker.actionTile.visible=false; return; }
-
-    // small tile floats near the active player's spot
-    const p=b.group.getWorldPosition(new S.THREE.Vector3());
-    S.poker.actionTile.position.set(p.x*0.78, 1.00, p.z*0.78);
-    const camPos=new S.THREE.Vector3().setFromMatrixPosition(S.camera.matrixWorld);
-    S.poker.actionTile.lookAt(camPos.x, S.poker.actionTile.position.y, camPos.z);
-    S.poker.actionTile.visible=true;
-
-    // marker sits on table in front of active player
-    const a=b.seatAngle;
-    const rr=1.85;
-    S.poker.turnMarker.position.set(Math.cos(a)*rr, 0.14, Math.sin(a)*rr);
-  }
-
-  // ---------- simple demo poker engine ----------
-  function doRandomAction(){
-    const r=Math.random();
-    if(r<0.25) return { act:"FOLD", amt:0 };
-    if(r<0.75){
-      const call=10+((Math.random()*5)|0)*10;
-      return { act:"CALL", amt:call };
-    }
-    const raise=50+((Math.random()*8)|0)*10;
-    return { act:"RAISE", amt:raise };
   }
 
   function stepPoker(dt){
     S.poker.t += dt;
+    if(S.poker.t < 3.0) return;
+    S.poker.t = 0;
 
-    const active = ((S.poker.t*0.75)|0) % S.bots.seated.length;
-    setActivePlayer(active);
-    updateActionUI(active);
-
-    S.poker._actT = (S.poker._actT||0) + dt;
-    if(S.poker._actT > 1.15){
-      S.poker._actT = 0;
-      const b=S.bots.seated[active];
-      const a=doRandomAction();
-
-      S.poker.lastAction=a.act;
-      S.poker.lastAmount=a.amt;
-      updatePokerHUD();
-
-      if(a.act==="CALL" || a.act==="RAISE"){
-        spawnChipMover(b, a.amt || 10);
-      }
-    }
-
-    updateChipAnimations(dt);
-
-    if(S.poker.phase==="deal"){
-      if(S.poker.t>1.1){
-        S.poker.t=0;
-        clearHand();
-        spawnHoleCards();
-        setCommunityCards(3);
-        S.poker.phase="bet";
-        updatePokerHUD();
-      }
-    } else if(S.poker.phase==="bet"){
-      if(S.poker.t>6.2){
-        S.poker.t=0;
-        S.poker.phase="turn";
-        setCommunityCards(4);
-        updatePokerHUD();
-      }
+    // quick demo loop
+    if(S.poker.phase==="preflop"){
+      setCommunity(3, S.refs.tableRoot);
+      S.poker.phase="flop";
+      S.poker.pot += 120;
+    } else if(S.poker.phase==="flop"){
+      setCommunity(4, S.refs.tableRoot);
+      S.poker.phase="turn";
+      S.poker.pot += 80;
     } else if(S.poker.phase==="turn"){
-      if(S.poker.t>4.3){
-        S.poker.t=0;
-        S.poker.phase="river";
-        setCommunityCards(5);
-        updatePokerHUD();
-      }
-    } else if(S.poker.phase==="river"){
-      if(S.poker.t>4.2){
-        S.poker.t=0;
-        S.poker.phase="showdown";
-        updatePokerHUD();
-      }
-    } else if(S.poker.phase==="showdown"){
-      if(S.poker.t>6.0){
-        S.poker.t=0;
-        S.poker.phase="deal";
-        S.poker.hand += 1;
-        updatePokerHUD();
-      }
+      setCommunity(5, S.refs.tableRoot);
+      S.poker.phase="river";
+      S.poker.pot += 110;
+    } else {
+      // reset
+      clearHand();
+      spawnHoleCards();
+      setCommunity(0, S.refs.tableRoot);
+    }
+
+    // update pot mesh scale (visual)
+    const pot = S.refs.tableRoot?.userData?._potMesh;
+    if(pot){
+      const s = clamp(0.9 + S.poker.pot/1200, 0.9, 1.6);
+      pot.scale.set(s, 1, s);
     }
   }
 
-  // ---------- storefront + store interior ----------
-  function buildStoreFront(doorPos, yaw){
-    // storefront wall panel
-    const wall=new S.THREE.Mesh(
-      new S.THREE.BoxGeometry(5.4, 3.2, 0.18),
-      new S.THREE.MeshStandardMaterial({
-        color:0x0b0b16, roughness:0.5, metalness:0.25,
-        emissive:0x7fe7ff, emissiveIntensity:0.12
-      })
-    );
-    const inward=dirFromYaw(yaw).multiplyScalar(-1);
-    wall.position.set(doorPos.x+inward.x*0.9, 1.65, doorPos.z+inward.z*0.9);
-    wall.rotation.y=yaw;
-    S.lobby.add(wall);
-
-    addSign("SCARLETT STORE","Skins • Chips • Gear", wall.position.clone().add(new S.THREE.Vector3(0,1.75,0)), yaw, 0.95);
-
-    // kiosks
-    const kioskMat=new S.THREE.MeshStandardMaterial({
-      color:0x0c0d14, roughness:0.55, metalness:0.25,
-      emissive:0x7fe7ff, emissiveIntensity:0.08
-    });
-    for(let i=0;i<2;i++){
-      const kiosk=new S.THREE.Mesh(new S.THREE.BoxGeometry(1.8, 1.0, 1.0), kioskMat);
-      kiosk.position.copy(wall.position).add(new S.THREE.Vector3((i?1:-1)*1.3, -0.4, -1.2));
-      kiosk.rotation.y=yaw;
-      S.lobby.add(kiosk);
-    }
-  }
-
-  function buildStoreInterior(roomAnchor){
-    const kioskMat=new S.THREE.MeshStandardMaterial({
-      color:0x0c0d14, roughness:0.55, metalness:0.25,
-      emissive:0x7fe7ff, emissiveIntensity:0.08
-    });
-    const kiosk=new S.THREE.Mesh(new S.THREE.BoxGeometry(2.8, 1.2, 1.2), kioskMat);
-    kiosk.position.set(0,0.6,2.0);
-    roomAnchor.add(kiosk);
-
-    const manMat=new S.THREE.MeshStandardMaterial({ color:0x1a1a25, roughness:0.6, metalness:0.1 });
-    for(let i=0;i<4;i++){
-      const m=new S.THREE.Group();
-      m.position.set(-3 + i*2, 0, -1.5);
-      const body=new S.THREE.Mesh(new S.THREE.CapsuleGeometry(0.22,0.65,6,12), manMat);
-      body.position.y=0.95;
-      const head=new S.THREE.Mesh(new S.THREE.SphereGeometry(0.18,18,14), manMat);
-      head.position.y=1.55;
-      m.add(body); m.add(head);
-      roomAnchor.add(m);
-    }
-
-    const signTex=makePanelTex(["SCARLETT STORE","Mannequins • Skins • Chips",""], true);
-    const signMat=new S.THREE.MeshBasicMaterial({ map:signTex, transparent:true, opacity:0.95, side:S.THREE.DoubleSide, depthTest:false });
-    const sign=new S.THREE.Mesh(new S.THREE.PlaneGeometry(4.8,2.4), signMat);
-    sign.position.set(0,3.6,-5.8);
-    roomAnchor.add(sign);
-  }
-
-  // ---------- world build ----------
+  // ---------- Build World ----------
   function buildWorld(){
     const root=ensureRoot();
+    root.clear();
 
-    const old=root.getObjectByName("ScarlettLobbyWorld");
-    if(old) root.remove(old);
+    // lights
+    const hemi=new S.THREE.HemisphereLight(0xffffff, 0x05060a, 0.85);
+    root.add(hemi);
+    const sun=new S.THREE.DirectionalLight(0xffffff, 0.85);
+    sun.position.set(12,18,6);
+    root.add(sun);
 
+    // lobby group
     const W=new S.THREE.Group();
     W.name="ScarlettLobbyWorld";
     root.add(W);
-    S.lobby=W;
+    S.refs.lobby=W;
 
-    // lighting (lux)
-    W.add(new S.THREE.AmbientLight(0xffffff, 0.18));
+    // lobby walls
+    const lobbyRadius=12.0;
+    const wallGeo=new S.THREE.CylinderGeometry(lobbyRadius+0.1, lobbyRadius+0.1, 8, 128, 1, true);
+    const wall=new S.THREE.Mesh(wallGeo, getCasinoWallMaterial());
+    wall.position.y=4;
+    W.add(wall);
 
-    const key=new S.THREE.DirectionalLight(0xffffff, 1.15);
-    key.position.set(7,15,6);
-    W.add(key);
+    // floor
+    const floorMat=new S.THREE.MeshStandardMaterial({ color:0x0a0b10, roughness:0.85, metalness:0.12 });
+    const floor=new S.THREE.Mesh(new S.THREE.CircleGeometry(lobbyRadius, 96), floorMat);
+    floor.rotation.x=-Math.PI/2;
+    W.add(floor);
+    S.floorHits=[floor];
 
-    const rim=new S.THREE.DirectionalLight(0x7fe7ff, 0.35);
-    rim.position.set(-9,10,-8);
-    W.add(rim);
-
-    const centerGlow=new S.THREE.PointLight(0x7fe7ff, 0.28, 80);
-    centerGlow.position.set(0,6.2,0);
-    W.add(centerGlow);
-
-    const warm=new S.THREE.PointLight(0xffc890, 0.18, 60);
-    warm.position.set(0,4.2,0);
-    W.add(warm);
-
-    // geometry parameters
-    const lobbyRadius=12.0, wallHeight=8.0;
-    const pitRadius=4.6, pitDepth=0.95;
-    const hallLen=10.0, hallW=4.2, hallH=4.8;
-    const roomW=13.0, roomD=13.0, roomH=6.6;
-
-    // segmented wall with door gaps
-    const q=(Math.PI*2)/4;
-    const doorGap=S.THREE.MathUtils.degToRad(30);
-    for(let i=0;i<4;i++){
-      const thetaStart=i*q + doorGap/2;
-      const thetaLen=q - doorGap;
-      const geo=new S.THREE.CylinderGeometry(lobbyRadius+0.1, lobbyRadius+0.1, wallHeight, 180, 1, true, thetaStart, thetaLen);
-      const wall=new S.THREE.Mesh(geo, casinoWallMaterial());
-      wall.position.y=wallHeight/2;
-      W.add(wall);
-    }
-    buildVelvetGoldRibs(W, lobbyRadius, wallHeight);
-
-    // floors + pit
-    const ring=new S.THREE.Mesh(new S.THREE.RingGeometry(pitRadius, lobbyRadius, 256), matFloor());
-    ring.rotation.x=-Math.PI/2;
-    W.add(ring);
-    S.floorMain=ring;
-
-    const pitFloor=new S.THREE.Mesh(new S.THREE.CircleGeometry(pitRadius, 180), matFloor());
-    pitFloor.rotation.x=-Math.PI/2;
-    pitFloor.position.y=-pitDepth;
-    W.add(pitFloor);
-    S.floorPit=pitFloor;
-
-    const pitWall=new S.THREE.Mesh(new S.THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 180, 1, true), matDark());
-    pitWall.position.y=-pitDepth/2;
+    // pit divot
+    const pitR=4.4;
+    const pitWall=new S.THREE.Mesh(
+      new S.THREE.CylinderGeometry(pitR, pitR, 1.2, 96, 1, true),
+      matMidnight()
+    );
+    pitWall.position.y=-0.55;
     W.add(pitWall);
 
-    // invisible ground plane (ray fallback)
-    const ground=new S.THREE.Mesh(new S.THREE.PlaneGeometry(340,340), new S.THREE.MeshBasicMaterial({ transparent:true, opacity:0.0 }));
-    ground.rotation.x=-Math.PI/2;
-    ground.position.y=0;
-    ground.visible=false;
-    W.add(ground);
-    S.ground=ground;
+    const pitFloor=new S.THREE.Mesh(new S.THREE.CircleGeometry(pitR-0.05, 72), floorMat);
+    pitFloor.rotation.x=-Math.PI/2;
+    pitFloor.position.y=-1.15;
+    W.add(pitFloor);
+    S.floorHits.push(pitFloor);
 
-    buildNeonRail(W, pitRadius+0.35);
-    buildStairs(W, 18.0, 11, pitDepth, 3.4);
+    // neon rail around pit
+    const rail=new S.THREE.Mesh(
+      new S.THREE.TorusGeometry(pitR+0.35, 0.06, 16, 220),
+      new S.THREE.MeshStandardMaterial({ color:0x7fe7ff, roughness:0.25, metalness:0.2, emissive:0x7fe7ff, emissiveIntensity:0.30 })
+    );
+    rail.rotation.x=Math.PI/2;
+    rail.position.y=0.12;
+    W.add(rail);
 
-    // table + HUD
-    const table=buildTable(W, -pitDepth + 0.02);
-    S.poker.table=table;
+    // hall mouths + rooms
+    const hallLen=7.0, hallW=3.8, roomSize=10.0;
 
-    buildPokerHUD(W);
+    for(const d of S.roomDefs){
+      const yaw=d.yaw;
 
-    // pot stack
-    S.poker.chipKit=buildChipKit();
-    const potStack=new S.THREE.Group();
-    potStack.name="PotStack";
-    potStack.position.set(0, 0.14, 0);
-    W.add(potStack);
-    S.poker.potStack=potStack;
-
-    // bots
-    buildSeatedBots(table);
-
-    // community cards (5)
-    S.poker.community.length=0;
-    for(let i=0;i<5;i++){
-      const c=new S.THREE.Mesh(new S.THREE.PlaneGeometry(0.62,0.90), new S.THREE.MeshStandardMaterial({ map:makeCardBackTexture(), roughness:0.6, metalness:0.0, side:S.THREE.DoubleSide }));
-      c.position.set((i-2)*0.72, 0.18, -0.15);
-      c.visible=false;
-      W.add(c);
-      S.poker.community.push(c);
-    }
-
-    // rooms
-    const defs=[
-      { key:"poker", yaw:0,          label:"POKER" },
-      { key:"store", yaw:Math.PI/2,  label:"STORE" },
-      { key:"event", yaw:Math.PI,    label:"EVENT" },
-      { key:"vip",   yaw:-Math.PI/2, label:"VIP" }
-    ];
-
-    for(const d of defs){
-      const dir=dirFromYaw(d.yaw);
-      const hallCenter=dir.clone().multiplyScalar(lobbyRadius + hallLen/2);
-      const roomCenter=dir.clone().multiplyScalar(lobbyRadius + hallLen + roomD/2);
-
-      // hall
-      const hall=new S.THREE.Mesh(new S.THREE.BoxGeometry(hallW, hallH, hallLen), matHall());
-      hall.position.set(hallCenter.x, hallH/2, hallCenter.z);
-      hall.rotation.y=d.yaw;
+      // hallway
+      const hall=new S.THREE.Group();
+      hall.name=`Hall_${d.key}`;
+      hall.rotation.y=yaw;
+      hall.position.set(0,0,0);
       W.add(hall);
+      S.refs.hallways[d.key]=hall;
 
-      const hallFloor=new S.THREE.Mesh(new S.THREE.PlaneGeometry(hallW-0.2, hallLen-0.2), matFloor());
+      const hallFloor=new S.THREE.Mesh(new S.THREE.PlaneGeometry(hallW, hallLen), floorMat);
       hallFloor.rotation.x=-Math.PI/2;
-      hallFloor.position.set(hallCenter.x, 0.01, hallCenter.z);
-      hallFloor.rotation.y=d.yaw;
-      W.add(hallFloor);
+      hallFloor.position.set(0,0.01,-(lobbyRadius + hallLen/2));
+      hall.add(hallFloor);
+      S.floorHits.push(hallFloor);
 
-      // room box
-      const room=new S.THREE.Mesh(new S.THREE.BoxGeometry(roomW, roomH, roomD), matRoom());
-      room.position.set(roomCenter.x, roomH/2, roomCenter.z);
-      room.rotation.y=d.yaw;
-      W.add(room);
+      const hallWalls=new S.THREE.Mesh(
+        new S.THREE.BoxGeometry(hallW, 3.2, hallLen),
+        new S.THREE.MeshStandardMaterial({ color:0x0f1018, roughness:0.7, metalness:0.2 })
+      );
+      hallWalls.position.set(0,1.6,-(lobbyRadius + hallLen/2));
+      hall.add(hallWalls);
 
-      const roomFloor=new S.THREE.Mesh(new S.THREE.PlaneGeometry(roomW-0.2, roomD-0.2), matFloor());
-      roomFloor.rotation.x=-Math.PI/2;
-      roomFloor.position.set(roomCenter.x, 0.01, roomCenter.z);
-      roomFloor.rotation.y=d.yaw;
-      W.add(roomFloor);
-
+      // room
       const anchor=new S.THREE.Group();
       anchor.name=`Room_${d.key}`;
-      anchor.position.copy(roomCenter);
-      anchor.rotation.y=d.yaw;
+      anchor.rotation.y=yaw;
+      anchor.position.set(0,0,-(lobbyRadius + hallLen + roomSize/2));
       W.add(anchor);
-      S.rooms[d.key]=anchor;
+      S.refs.rooms[d.key]=anchor;
 
-      // doorway signs
-      const doorPos=dir.clone().multiplyScalar(lobbyRadius - 0.15);
-      addDoorLabel(d.label, doorPos, d.yaw);
+      const roomBox=new S.THREE.Mesh(
+        new S.THREE.BoxGeometry(roomSize, 4.6, roomSize),
+        new S.THREE.MeshStandardMaterial({ color:0x0b0d14, roughness:0.85, metalness:0.18, side:S.THREE.BackSide })
+      );
+      roomBox.position.y=2.3;
+      anchor.add(roomBox);
 
-      // hall header sign
-      addSign(`${d.label} HALL`, "WELCOME", new S.THREE.Vector3(doorPos.x, 6.6, doorPos.z), d.yaw + Math.PI, 0.62);
+      const roomFloor=new S.THREE.Mesh(new S.THREE.PlaneGeometry(roomSize, roomSize), floorMat);
+      roomFloor.rotation.x=-Math.PI/2;
+      roomFloor.position.y=0.01;
+      anchor.add(roomFloor);
+      S.floorHits.push(roomFloor);
 
-      // store front
-      if(d.key==="store") buildStoreFront(doorPos, d.yaw);
+      // label above doorway (frontside only)
+      const labelTex=makePanelTex([d.name,"ENTER",""], true);
+      const label=new S.THREE.Mesh(
+        new S.THREE.PlaneGeometry(2.8,1.2),
+        new S.THREE.MeshBasicMaterial({ map:labelTex, transparent:true, opacity:0.95, side:S.THREE.FrontSide, depthTest:false })
+      );
+      label.position.set(0,2.8,-(lobbyRadius-0.2));
+      label.rotation.y=yaw;
+      W.add(label);
+
+      addRoomColorLights(anchor, d.key);
+
+      if(d.key==="vip"){
+        buildVIPWelcome(anchor);
+        buildTeleportPad(anchor);
+        buildVIPLegends(anchor);
+      }
+      if(d.key==="event"){
+        buildSportsBettingZone(anchor);
+      }
     }
 
-    // store interior
-    if(S.rooms.store) buildStoreInterior(S.rooms.store);
+    // jumbotron(s)
+    const jumboTex=makePanelTex(["SPORTS / NEWS","JUMBOTRON","LIVE"], true);
+    const jumbo=new S.THREE.Mesh(
+      new S.THREE.PlaneGeometry(8.5,4.2),
+      new S.THREE.MeshBasicMaterial({ map:jumboTex, transparent:true, opacity:0.95, side:S.THREE.FrontSide, depthTest:false })
+    );
+    jumbo.position.set(0,4.2,-(lobbyRadius-0.6));
+    W.add(jumbo);
+    S.refs.jumbos=[jumbo];
 
-    // center banner
-    addSign("SCARLETT CASINO","MIDNIGHT • GOLD • VIP", new S.THREE.Vector3(0,7.3,0), 0, 1.02);
+    // table
+    const tableRoot=buildTable(W);
+    S.refs.tableRoot=tableRoot;
+    spawnBots(tableRoot);
+    clearHand();
+    spawnHoleCards();
 
-    // jumbotrons
-    const streamTex=initStream();
-    const jumboMat=new S.THREE.MeshStandardMaterial({ map:streamTex, emissive:0xffffff, emissiveIntensity:0.35, roughness:0.6, metalness:0.1, side:S.THREE.DoubleSide });
-    const jumboGeo=new S.THREE.PlaneGeometry(7.8, 4.4);
+    // beautification
+    buildTableHaloLights(W);
+    buildLobbyPillars(W, lobbyRadius-1.1);
+    buildFountain(W);
 
-    for(const d of defs){
-      const dir=dirFromYaw(d.yaw);
-      const doorPos=dir.clone().multiplyScalar(lobbyRadius - 0.15);
-      const j=new S.THREE.Mesh(jumboGeo, jumboMat);
-      j.position.set(doorPos.x*0.98, 5.85, doorPos.z*0.98);
-      j.rotation.y=d.yaw + Math.PI;
-      W.add(j);
-      S.refs.jumbotrons.push(j);
+    // marker + wrist + audio
+    ensureMarker();
+    attachWristMenu();
+    initRadio();
+
+    // spawn in VIP
+    if(S.refs.rooms.vip){
+      const p=S.refs.rooms.vip.position;
+      S.player.position.set(p.x, 0.02, p.z + 2.6);
+      S.player.rotation.y = S.refs.rooms.vip.rotation.y;
+    } else {
+      S.player.position.set(0,0.02,7.5);
+      S.player.rotation.y=Math.PI;
     }
 
-    buildDust(W);
-
-    // teleport UI objects
-    ensureAimRing();
-    ensureActionTile();
-    ensureTurnMarker();
-    updatePokerHUD();
-
-    // spawn: face the table (toward center)
-    S.player.position.set(0, 0.02, 7.5);
-    S.player.rotation.y = Math.PI; // facing inward
-
-    log("[world] built ✅ v5.6 LUX");
-  }
-
-  function teleportTo(key){
-    const p=S.rooms[key]?.position;
-    if(!p) return;
-    S.player.position.set(p.x, 0.02, p.z + 2.5);
+    log("[world] built ✅ VIP spawn + rooms + poker + wrist + luxury");
   }
 
   return {
     async build(ctx){
       Object.assign(S, ctx);
+      S.THREE = ctx.THREE;
+      S.ray = new S.THREE.Raycaster();
       ensureRoot();
-
-      S.ray=new S.THREE.Raycaster();
-      S.tp.smooth=new S.THREE.Vector3(0,0.01,0);
-      S.tp.lastValid=new S.THREE.Vector3(0,0.01,0);
-
       buildWorld();
-      log("[world] build complete ✅ v5.6 LUX");
+      log("[world] Update 4.8 FULL ready ✅");
     },
 
     frame(ctx, dt){
       updateTeleport(ctx, dt);
-      updateAudio();
-      faceTags();
+      updateWristMenu();
+      updateVIPWelcome(dt);
+      updateFountain(dt);
       stepPoker(dt);
-      updateDust(dt);
-    },
-
-    setMuted(v){
-      S.audio.muted=!!v;
-      const vid=S.refs.stream?.video;
-      if(vid){
-        vid.muted=!!v;
-        if(!v && vid.paused) vid.play().catch(()=>{});
-      }
-    },
-
-    admin:{
-      teleportTo,
-      resetHand: ()=>{ S.poker.phase="deal"; S.poker.t=0; clearHand(); updatePokerHUD(); }
+      ensureAudioStart(); // safe; browser may ignore until gesture
     }
   };
 })();

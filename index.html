@@ -2,114 +2,193 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <title>Scarlett Poker VR</title>
   <style>
-    html, body { margin:0; height:100%; background:#05070d; overflow:hidden; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; }
+    html, body { margin:0; padding:0; height:100%; background:#05060a; overflow:hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
     #app { position:fixed; inset:0; }
+    canvas { display:block; width:100%; height:100%; }
+
     /* HUD */
     #hud {
-      position: fixed; left: 14px; top: 14px; z-index: 10;
-      width: min(560px, calc(100vw - 28px));
-      background: rgba(8,10,16,0.70);
-      border: 1px solid rgba(140,170,255,0.18);
-      border-radius: 18px;
-      padding: 14px;
-      backdrop-filter: blur(10px);
-      color: #e9eefc;
-      box-shadow: 0 18px 60px rgba(0,0,0,0.45);
+      position:fixed; left:0; right:0; top:0;
+      display:flex; gap:10px; align-items:center; justify-content:space-between;
+      padding:10px;
+      pointer-events:none;
     }
-    #hud h1 { margin:0 0 10px 0; font-size: 18px; font-weight: 800; letter-spacing: .2px; }
-    .row { display:flex; flex-wrap:wrap; gap:10px; margin-bottom: 10px; }
-    button {
-      border: 0; padding: 10px 14px; border-radius: 16px;
-      color: #e9eefc; background: rgba(33,45,80,0.55);
-      box-shadow: inset 0 0 0 1px rgba(160,190,255,0.14);
-      font-weight: 750; font-size: 14px;
-    }
-    button:active { transform: translateY(1px); }
-    #hudlog {
-      width: 100%; height: 220px; overflow:auto;
-      background: rgba(0,0,0,0.35);
-      border-radius: 14px;
-      padding: 12px;
-      white-space: pre-wrap;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 13px;
-      border: 1px solid rgba(140,170,255,0.12);
-    }
-    /* HUD toggle */
-    #hudToggle {
-      position: fixed; right: 14px; top: 14px; z-index: 11;
-      display:none;
-    }
-
-    /* Android touch controls */
-    #touchUI {
-      position: fixed; inset:0; z-index: 12; pointer-events:none;
-    }
-    #stick {
-      position:absolute; left: 18px; bottom: 22px;
-      width: 170px; height: 170px; border-radius: 999px;
-      background: rgba(255,255,255,0.07);
-      border: 1px solid rgba(160,190,255,0.18);
+    .pill {
       pointer-events:auto;
+      background:rgba(0,0,0,.55);
+      color:#fff;
+      border:1px solid rgba(255,255,255,.15);
+      border-radius:999px;
+      padding:8px 12px;
+      font-size:13px;
+      display:flex; gap:10px; align-items:center;
+      backdrop-filter: blur(8px);
+    }
+    .btn {
+      cursor:pointer;
+      background:rgba(255,255,255,.10);
+      border:1px solid rgba(255,255,255,.18);
+      color:#fff;
+      border-radius:10px;
+      padding:8px 10px;
+      font-size:13px;
+    }
+    .btn:active { transform: translateY(1px); }
+
+    /* Debug panel */
+    #debug {
+      position:fixed; left:10px; top:60px; width:min(520px, calc(100vw - 20px));
+      max-height:55vh;
+      background:rgba(0,0,0,.70);
+      border:1px solid rgba(255,255,255,.15);
+      border-radius:14px;
+      color:#fff;
+      padding:10px;
+      display:none;
+      overflow:hidden;
+      backdrop-filter: blur(8px);
+      z-index:10;
+    }
+    #debugHeader { display:flex; justify-content:space-between; gap:10px; align-items:center; }
+    #debugBody { margin-top:8px; font-size:12px; line-height:1.3; }
+    #log {
+      margin-top:8px;
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:10px;
+      padding:8px;
+      height:26vh;
+      overflow:auto;
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
+    .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+
+    /* Mobile controls */
+    #touch {
+      position:fixed; left:0; right:0; bottom:0;
+      padding:10px;
+      display:none; /* auto-enabled on touch devices */
+      justify-content:space-between;
+      align-items:flex-end;
+      gap:10px;
+      pointer-events:none;
+      z-index:9;
+    }
+    .pad {
+      pointer-events:auto;
+      width:160px; height:160px;
+      border-radius:18px;
+      background:rgba(0,0,0,.40);
+      border:1px solid rgba(255,255,255,.15);
+      display:flex; align-items:center; justify-content:center;
+      position:relative;
+      touch-action:none;
+      backdrop-filter: blur(8px);
+    }
+    .stick {
+      width:56px; height:56px;
+      border-radius:999px;
+      background:rgba(255,255,255,.18);
+      border:1px solid rgba(255,255,255,.25);
+      position:absolute;
+      left:50%; top:50%;
+      transform:translate(-50%,-50%);
+    }
+    .actionCol {
+      pointer-events:auto;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      align-items:flex-end;
+    }
+    .bigBtn {
+      pointer-events:auto;
+      width:140px;
+      padding:14px 12px;
+      border-radius:16px;
+      font-size:15px;
+      font-weight:700;
+      background:rgba(255,255,255,.14);
+      border:1px solid rgba(255,255,255,.22);
+      color:#fff;
       touch-action:none;
     }
-    #knob {
-      position:absolute; left: 50%; top: 50%;
-      width: 74px; height: 74px; margin-left:-37px; margin-top:-37px;
-      border-radius: 999px;
-      background: rgba(120,170,255,0.22);
-      border: 1px solid rgba(180,210,255,0.25);
-    }
-    #enterVR {
-      position:absolute; left: 50%; transform: translateX(-50%);
-      bottom: 26px; pointer-events:auto;
-      padding: 14px 18px; border-radius: 18px;
-      background: rgba(33,45,80,0.6);
-      border: 1px solid rgba(160,190,255,0.16);
-      font-weight: 850;
-    }
-    #recenterBtn {
-      position:absolute; right: 18px; bottom: 26px;
-      pointer-events:auto;
-      padding: 14px 18px; border-radius: 18px;
-      background: rgba(33,45,80,0.6);
-      border: 1px solid rgba(160,190,255,0.16);
-      font-weight: 850;
-    }
+    .smallBtn { width:140px; }
   </style>
 </head>
+
 <body>
   <div id="app"></div>
 
   <div id="hud">
-    <h1>ScarlettVR Debug HUD</h1>
-    <div class="row">
-      <button id="btnRecenter">Recenter</button>
-      <button id="btnToggleHUD">Hide HUD</button>
+    <div class="pill">
+      <strong>Scarlett Poker VR</strong>
+      <span id="status">booting…</span>
     </div>
-    <div class="row">
-      <button id="btnRoomLobby">Lobby</button>
-      <button id="btnRoomStore">Store</button>
-      <button id="btnRoomScorpion">Scorpion</button>
-      <button id="btnRoomSpectate">Spectate</button>
+
+    <div class="pill row">
+      <button class="btn" id="btnEnterVR">Enter VR</button>
+      <button class="btn" id="btnDebug">Debug</button>
+      <button class="btn" id="btnReset">Reset</button>
     </div>
-    <div style="opacity:.85; margin: 6px 0 10px 0;">
-      In VR this HUD auto-hides so it won’t float in your face.
-    </div>
-    <div id="hudlog"></div>
   </div>
 
-  <button id="hudToggle">HUD ON</button>
-
-  <div id="touchUI">
-    <div id="stick"><div id="knob"></div></div>
-    <button id="enterVR">ENTER VR</button>
-    <button id="recenterBtn">RECENTER</button>
+  <div id="debug">
+    <div id="debugHeader">
+      <div class="row">
+        <strong>Diagnostics</strong>
+        <span id="meta"></span>
+      </div>
+      <div class="row">
+        <button class="btn" id="btnCopyLog">Copy Log</button>
+        <button class="btn" id="btnCloseDebug">Close</button>
+      </div>
+    </div>
+    <div id="debugBody">
+      <div class="row" id="flags"></div>
+      <div id="log"></div>
+    </div>
   </div>
 
-  <script type="module" src="./js/index.js"></script>
+  <div id="touch">
+    <div class="pad" id="padMove"><div class="stick" id="stickMove"></div></div>
+
+    <div class="actionCol">
+      <button class="bigBtn" id="btnAction">ACTION (Grip)</button>
+      <button class="bigBtn smallBtn" id="btnJump">JUMP / UP</button>
+    </div>
+
+    <div class="pad" id="padTurn"><div class="stick" id="stickTurn"></div></div>
+  </div>
+
+  <script type="module">
+    import { boot } from "./js/main.js";
+    boot({
+      appEl: document.getElementById("app"),
+      ui: {
+        statusEl: document.getElementById("status"),
+        debugEl: document.getElementById("debug"),
+        logEl: document.getElementById("log"),
+        metaEl: document.getElementById("meta"),
+        flagsEl: document.getElementById("flags"),
+        btnEnterVR: document.getElementById("btnEnterVR"),
+        btnDebug: document.getElementById("btnDebug"),
+        btnReset: document.getElementById("btnReset"),
+        btnCopyLog: document.getElementById("btnCopyLog"),
+        btnCloseDebug: document.getElementById("btnCloseDebug"),
+        touchRoot: document.getElementById("touch"),
+        padMove: document.getElementById("padMove"),
+        stickMove: document.getElementById("stickMove"),
+        padTurn: document.getElementById("padTurn"),
+        stickTurn: document.getElementById("stickTurn"),
+        btnAction: document.getElementById("btnAction"),
+        btnJump: document.getElementById("btnJump"),
+      }
+    });
+  </script>
 </body>
 </html>

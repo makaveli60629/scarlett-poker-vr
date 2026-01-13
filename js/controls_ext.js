@@ -1,10 +1,7 @@
-// /js/controls_ext.js — ScarlettVR Controls Extension v1
-// ✅ Respects your structure: core lives in /core, gameplay lives in /js
+// /js/controls_ext.js — ScarlettVR Controls Extension v1.1 (NO core import)
 // ✅ Fixes: left stick reversed (invert X+Y), right stick forward/back reversed (invert Y)
 // ✅ Adds: 45° diagonal shaping + snap turn
-// NOTE: We import core to "anchor" architecture (no need to modify it)
-
-import { Controls as CoreControls } from "../core/controls.js"; // intentionally unused but keeps dependency explicit
+// ✅ Does NOT depend on /core exports (prevents your current error)
 
 export const ControlsExt = {
   applyLocomotion(ctx, dt) {
@@ -30,7 +27,7 @@ export const ControlsExt = {
       let x = move.x;
       let z = move.y;
 
-      // 45° diagonal feel
+      // 45° diagonal shaping
       if (diagonal45 && x !== 0) {
         const sign = z !== 0 ? Math.sign(z) : 1;
         z += sign * Math.abs(x) * diagonalAmount;
@@ -39,7 +36,7 @@ export const ControlsExt = {
         if (len > 1e-4) { x /= len; z /= len; }
       }
 
-      // Head-relative
+      // head-relative movement
       const mx = x * cos - z * sin;
       const mz = x * sin + z * cos;
 
@@ -47,10 +44,9 @@ export const ControlsExt = {
       player.position.z += mz * moveSpeed * dt;
     }
 
-    // Snap turn (right preferred)
+    // Snap turn
     const turn = readTurn(right.gamepad || left.gamepad, deadzone);
     ctx.turnCooldown = Math.max(0, ctx.turnCooldown - dt);
-
     if (ctx.turnCooldown === 0 && turn.active) {
       player.rotation.y += (turn.x > 0 ? -1 : 1) * snapTurnRad;
       ctx.turnCooldown = 0.22;
@@ -62,7 +58,7 @@ function readStick(gamepad, deadzone, hand) {
   if (!gamepad) return { active: false, x: 0, y: 0 };
   const a = gamepad.axes || [];
 
-  // Pick best pair (0/1 or 2/3)
+  // Pick best axis pair (0/1 or 2/3)
   const pairs = [];
   if (a.length >= 2) pairs.push([0, 1]);
   if (a.length >= 4) pairs.push([2, 3]);

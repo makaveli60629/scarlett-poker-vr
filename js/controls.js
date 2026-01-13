@@ -1,290 +1,106 @@
-// /js/controls.js — Scarlett Controls v4.0 (FULL)
-// FIXES (v4.0):
-// ✅ Works with BOTH systems:
-//    - old SpawnPoints (ctx.spawns.apply)
-//    - new World anchors (world.movePlayerTo / world.seatPlayer)
-// ✅ Keeps REAL VR locomotion + snap turn + XR height fix
-// ✅ Seated mode locks locomotion without breaking XR height
-// ✅ Leave mapping is deliberate (press+hold style using "justPressed" still works)
-// ✅ leaveSeat() routes through RoomManager when available (ctx.rooms.setRoom)
+// /js/controls.js — ScarlettVR Controls v1
+// Centralized XR locomotion + axis correction
 
 export const Controls = {
-  init(ctx) {
-    const { THREE, renderer, player, log } = ctx;
-    const world = ctx.world || ctx; // some builds return ctx as world
+  applyLocomotion(ctx, dt) {
+    const { renderer, camera, player, deadzone, moveSpeed,
+            diagonal45, diagonalAmount,
+            snapTurnRad } = ctx;
 
-    const state = {
-      ctx, THREE, renderer, player, world,
+    const session = renderer.xr.getSession?.();
+    if (!session) return;
 
-      seated: false,
-      seatedAt: null,
+    const sources = Array.from(session.inputSources || []).filter(is => is?.gamepad);
+    if (!sources.length) return;
 
-      moveEnabled: true,
-      enabled: true,
+    const rightSrc = sources.find(is => is.handedness === "right") || sources[0];
+    const leftSrc  = sources.find(is => is.handedness === "left")  || sources[0];
 
-      speed: 2.0,
-      strafeSpeed: 2.0,
-      snapTurn: Math.PI / 6, // 30°
-      _keys: new Set(),
-      _lastSnap: 0,
+    // Prefer right stick
+    let move = this.readStick(rightSrc.gamepad, deadzone, "right");
+    if (!move.active) move = this.readStick(leftSrc.gamepad, deadzone, "left");
 
-      _gpPrev: { left: {}, right: {} },
+    if (move.active) {
+      const yaw = getHeadYaw(camera);
+      const cos = Math.cos(yaw), sin = Math.sin(yaw);
 
-      // seated height for NON-XR only
-      seatHeadY: 1.05,
+      let x = move.x;
+      let z = move.y;
 
-      dead: 0.18,
-    };
-
-    // mirror seated flag safely
-    world.seated = !!world.seated;
-
-    window.addEventListener("keydown", (e) => state._keys.add(e.code));
-    window.addEventListener("keyup", (e) => state._keys.delete(e.code));
-
-    function isXRPresenting() {
-      try { return !!renderer?.xr?.isPresenting; } catch { return false; }
-    }
-
-    function getXRGamepads() {
-      const session = renderer?.xr?.getSession?.();
-      const sources = session?.inputSources || [];
-      let left = null, right = null;
-
-      for (const s of sources) {
-        const gp = s.gamepad;
-        if (!gp) continue;
-        if (s.handedness === "left") left = gp;
-        if (s.handedness === "right") right = gp;
-      }
-      return { left, right };
-    }
-
-    function buttonPressed(gp, idx) {
-      const b = gp?.buttons?.[idx];
-      return !!(b && (b.pressed || b.value > 0.75));
-    }
-
-    function justPressed(hand, name, isDownNow) {
-      const prev = state._gpPrev[hand]?.[name] || false;
-      state._gpPrev[hand][name] = !!isDownNow;
-      return !!isDownNow && !prev;
-    }
-
-    function resetVelocity() {
-      if (player?.userData?.velocity?.set) player.userData.velocity.set(0, 0, 0);
-    }
-
-    function setEnabled(v) { state.enabled = !!v; }
-
-    // ---------------- spawn / teleport compatibility ----------------
-    function teleportToSpawn(key, opts = {}) {
-      let ok = false;
-
-      // Old system: SpawnPoints
-      if (ctx.spawns?.apply) {
-        ok = !!ctx.spawns.apply(key, player, opts);
-      }
-      // New system: World anchors
-      else if (world?.movePlayerTo) {
-        world.movePlayerTo(key, ctx);
-        ok = true;
+      // 45° diagonal shaping (your signature movement)
+      if (diagonal45 && x !== 0) {
+        const sign = z !== 0 ? Math.sign(z) : -1;
+        z += sign * Math.abs(x) * diagonalAmount;
+        x *= (1.0 - 0.35);
+        const len = Math.hypot(x, z);
+        if (len > 1e-4) { x /= len; z /= len; }
       }
 
-      // Height fix:
-      if (isXRPresenting()) {
-        player.position.y = 0;
-      } else {
-        if (typeof opts.standY === "number") player.position.y = opts.standY;
-      }
+      const mx = x * cos - z * sin;
+      const mz = x * sin + z * cos;
 
-      return ok;
+      player.position.x += mx * moveSpeed * dt;
+      player.position.z += mz * moveSpeed * dt;
     }
 
-    function forceStanding(spawnKey = "lobby_spawn") {
-      state.seated = false;
-      state.seatedAt = null;
-      state.moveEnabled = true;
-      world.seated = false;
-
-      resetVelocity();
-      teleportToSpawn(spawnKey, { standY: 1.65 });
-
-      log?.(`[controls] ✅ standing @ ${spawnKey} (xr=${isXRPresenting()})`);
+    // Snap turn (right preferred)
+    const turn = this.readTurn(rightSrc.gamepad || leftSrc.gamepad, deadzone);
+    ctx.turnCooldown = Math.max(0, ctx.turnCooldown - dt);
+    if (ctx.turnCooldown === 0 && turn.active) {
+      const dir = turn.x > 0 ? -1 : 1;
+      player.rotation.y += dir * snapTurnRad;
+      ctx.turnCooldown = 0.22;
     }
-
-    // New seating path: use world.seatPlayer when possible
-    function sitAt(where = "scorpion", seatIndex = 0) {
-      state.seated = true;
-      state.seatedAt = `${where}:${seatIndex}`;
-      state.moveEnabled = false;
-      world.seated = true;
-
-      resetVelocity();
-
-      if (world?.seatPlayer && where === "scorpion") {
-        world.seatPlayer(seatIndex, ctx);
-      } else {
-        // fallback to old spawn key style
-        teleportToSpawn(where, { standY: state.seatHeadY });
-      }
-
-      log?.(`[controls] 🪑 seated @ ${state.seatedAt} (xr=${isXRPresenting()})`);
-    }
-
-    function leaveSeat() {
-      state.seated = false;
-      state.seatedAt = null;
-      state.moveEnabled = true;
-      world.seated = false;
-
-      resetVelocity();
-      window.dispatchEvent(new CustomEvent("scarlett-leave-table"));
-
-      // Prefer RoomManager to return you to lobby (also turns off scorpion room)
-      if (ctx.rooms?.setRoom) {
-        ctx.rooms.setRoom(ctx, "lobby");
-      } else {
-        teleportToSpawn("lobby_spawn", { standY: 1.65 });
-      }
-
-      log?.("[controls] ✅ leave -> lobby");
-    }
-
-    // ---------------- movement helpers ----------------
-    function applyDeadzone(v) {
-      const d = state.dead;
-      if (Math.abs(v) < d) return 0;
-      const s = (Math.abs(v) - d) / (1 - d);
-      return Math.sign(v) * s;
-    }
-
-    function moveLocal(dx, dz, dt) {
-      const yaw = player.rotation.y;
-      const cos = Math.cos(yaw);
-      const sin = Math.sin(yaw);
-
-      const vx = (dx * cos - dz * sin);
-      const vz = (dx * sin + dz * cos);
-
-      player.position.x += vx * state.speed * dt;
-      player.position.z += vz * state.speed * dt;
-    }
-
-    function snapTurn(dir) {
-      const now = performance.now();
-      if (now - state._lastSnap < 180) return;
-      player.rotation.y += dir * state.snapTurn;
-      state._lastSnap = now;
-    }
-
-    function update(dt) {
-      if (!state.enabled) return;
-
-      // keyboard leave
-      if (state._keys.has("Escape") || state._keys.has("KeyL")) {
-        state._keys.delete("Escape");
-        state._keys.delete("KeyL");
-        leaveSeat();
-      }
-
-      const gps = getXRGamepads();
-
-      // Leave mapping: keep it deliberate, but preserve your robust mappings
-      if (gps.right) {
-        const leaveNow =
-          buttonPressed(gps.right, 5) || // B
-          buttonPressed(gps.right, 4) || // A
-          buttonPressed(gps.right, 1) ||
-          buttonPressed(gps.right, 3) ||
-          buttonPressed(gps.right, 2);
-        if (justPressed("right", "leave", leaveNow)) leaveSeat();
-      }
-      if (gps.left) {
-        const leaveNow =
-          buttonPressed(gps.left, 3) || // Y
-          buttonPressed(gps.left, 4) || // X
-          buttonPressed(gps.left, 1) ||
-          buttonPressed(gps.left, 2) ||
-          buttonPressed(gps.left, 0);
-        if (justPressed("left", "leave", leaveNow)) leaveSeat();
-      }
-
-      // XR height sanity always
-      if (isXRPresenting()) player.position.y = 0;
-
-      // seated => no locomotion
-      if (!state.moveEnabled || world.seated) return;
-
-      // Keyboard locomotion (desktop)
-      let kdx = 0, kdz = 0;
-      if (state._keys.has("KeyW") || state._keys.has("ArrowUp")) kdz -= 1;
-      if (state._keys.has("KeyS") || state._keys.has("ArrowDown")) kdz += 1;
-      if (state._keys.has("KeyA") || state._keys.has("ArrowLeft")) kdx -= 1;
-      if (state._keys.has("KeyD") || state._keys.has("ArrowRight")) kdx += 1;
-
-      if (kdx || kdz) moveLocal(kdx, kdz, dt);
-
-      // keyboard snap turn
-      const now = performance.now();
-      if (now - state._lastSnap > 180) {
-        if (state._keys.has("KeyQ")) snapTurn(+1);
-        if (state._keys.has("KeyE")) snapTurn(-1);
-      }
-
-      // VR thumbstick locomotion
-      if (gps.left?.axes?.length) {
-        const ax = gps.left.axes;
-        const pairA = { x: ax[0] ?? 0, y: ax[1] ?? 0 };
-        const pairB = { x: ax[2] ?? 0, y: ax[3] ?? 0 };
-        const magA = pairA.x * pairA.x + pairA.y * pairA.y;
-        const magB = pairB.x * pairB.x + pairB.y * pairB.y;
-        const stick = magB > magA ? pairB : pairA;
-
-        const sx = applyDeadzone(stick.x);
-        const sy = applyDeadzone(stick.y);
-
-        // forward is -y
-        if (sx || sy) {
-          moveLocal(sx * state.strafeSpeed / state.speed, sy, dt);
-        }
-      }
-
-      if (gps.right?.axes?.length) {
-        const ax = gps.right.axes;
-        const pairA = { x: ax[0] ?? 0, y: ax[1] ?? 0 };
-        const pairB = { x: ax[2] ?? 0, y: ax[3] ?? 0 };
-        const magA = pairA.x * pairA.x + pairA.y * pairA.y;
-        const magB = pairB.x * pairB.x + pairB.y * pairB.y;
-        const stick = magB > magA ? pairB : pairA;
-
-        const rx = applyDeadzone(stick.x);
-
-        if (rx > 0.75) snapTurn(-1);
-        if (rx < -0.75) snapTurn(+1);
-      }
-    }
-
-    // publish API
-    Controls.update = update;
-    Controls.teleportToSpawn = teleportToSpawn;
-    Controls.sitAt = sitAt;
-    Controls.forceStanding = forceStanding;
-    Controls.leaveSeat = leaveSeat;
-    Controls.resetVelocity = resetVelocity;
-    Controls.clearMotion = () => {};
-    Controls.setEnabled = setEnabled;
-
-    log?.("[controls] init ✅ v4.0 (anchors + seating compatible)");
-    return Controls;
   },
 
-  update() {},
-  teleportToSpawn() { return false; },
-  sitAt() {},
-  forceStanding() {},
-  leaveSeat() {},
-  resetVelocity() {},
-  clearMotion() {},
-  setEnabled() {},
+  readStick(gamepad, deadzone, handedness) {
+    if (!gamepad) return { active: false, x: 0, y: 0 };
+    const axes = gamepad.axes || [];
+
+    const pairs = [];
+    if (axes.length >= 2) pairs.push([0, 1]);
+    if (axes.length >= 4) pairs.push([2, 3]);
+    if (!pairs.length) return { active: false, x: 0, y: 0 };
+
+    let best = pairs[0], bestMag = -1;
+    for (const p of pairs) {
+      const mag = Math.abs(axes[p[0]] || 0) + Math.abs(axes[p[1]] || 0);
+      if (mag > bestMag) { bestMag = mag; best = p; }
+    }
+
+    let x = axes[best[0]] || 0;
+    let y = axes[best[1]] || 0;
+
+    if (Math.abs(x) < deadzone) x = 0;
+    if (Math.abs(y) < deadzone) y = 0;
+
+    // ✅ Axis correction (based on your exact report)
+    if (handedness === "left") {
+      x = -x;
+      y = -y;
+    } else if (handedness === "right") {
+      y = -y;
+    }
+
+    return { active: !(x === 0 && y === 0), x, y };
+  },
+
+  readTurn(gamepad, deadzone) {
+    if (!gamepad) return { active: false, x: 0 };
+    const axes = gamepad.axes || [];
+
+    let tx = 0;
+    if (axes.length >= 3) tx = axes[2] || 0;
+    else if (axes.length >= 1) tx = axes[0] || 0;
+
+    if (Math.abs(tx) < deadzone) tx = 0;
+    return { active: tx !== 0, x: tx };
+  }
 };
+
+function getHeadYaw(camera) {
+  const q = camera.quaternion;
+  const t3 = +2.0 * (q.w * q.y + q.z * q.x);
+  const t4 = +1.0 - 2.0 * (q.y * q.y + q.x * q.x);
+  return Math.atan2(t3, t4);
+    }

@@ -1,9 +1,8 @@
-// /js/index.js — FULL MASTER (Quest-safe + Android/2D controls + HUD)
-// ✅ render loop starts immediately (prevents Quest 3-dots)
-// ✅ world loads async AFTER loop is running (no top-level await)
-// ✅ XR: controllers + lasers supported by world.js
-// ✅ Android/2D: on-screen joystick + swipe-look (only when NOT in XR)
-// ✅ Desktop: WASD + mouse drag look (only when NOT in XR)
+// /js/index.js — ScarlettVR INDEX v11 (XR-safe + Android controls fixed + HUD hide/show)
+// ✅ Keeps Oculus/XR controls unchanged
+// ✅ Adds stable Android (2D) touch controls: move joystick + look drag
+// ✅ HUD hide/show always available (and auto-hides in XR)
+// ✅ Render loop starts immediately (prevents Quest 3-dots)
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
@@ -16,12 +15,16 @@ const hudToggle = $("#hudToggle");
 const hudlog = $("#hudlog");
 
 function log(...args) {
-  const msg = args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
+  const msg = args.map(a => (typeof a === "string" ? a : safeJson(a))).join(" ");
   console.log(msg);
   if (hudlog) {
     hudlog.textContent += msg + "\n";
     hudlog.scrollTop = hudlog.scrollHeight;
   }
+}
+
+function safeJson(x) {
+  try { return JSON.stringify(x); } catch { return String(x); }
 }
 
 function setHUDVisible(on) {
@@ -30,6 +33,7 @@ function setHUDVisible(on) {
   hudToggle.style.display = on ? "none" : "block";
 }
 
+// Ensure these exist even if HTML changes
 $("#btnToggleHUD")?.addEventListener("click", () => setHUDVisible(false));
 hudToggle?.addEventListener("click", () => setHUDVisible(true));
 
@@ -58,9 +62,19 @@ const player = new THREE.Group();
 player.name = "PlayerRig";
 scene.add(player);
 player.add(camera);
+
+// For 2D (non-XR) camera control
+const cameraPitch = new THREE.Group();
+cameraPitch.name = "CameraPitch";
+cameraPitch.add(camera);
+player.add(cameraPitch);
+
+// Default spawn
+player.position.set(0, 0, 0);
+player.rotation.set(0, 0, 0);
 camera.position.set(0, 1.65, 3.5);
 
-// Controllers
+// Controllers (XR only)
 const controllers = {
   c0: renderer.xr.getController(0),
   c1: renderer.xr.getController(1),
@@ -73,22 +87,23 @@ player.add(controllers.c0, controllers.c1, controllers.g0, controllers.g1);
 document.body.appendChild(VRButton.createButton(renderer));
 log("[index] VRButton appended ✅");
 
-// Auto-hide DOM HUD in VR (prevents floating DOM in face)
+// Auto-hide DOM HUD in VR (prevents floating overlay)
 renderer.xr.addEventListener("sessionstart", () => {
   setHUDVisible(false);
-  Mobile2D.setEnabled(false);
-  log("[xr] sessionstart ✅ HUD hidden, 2D controls disabled");
+  androidControls.setEnabled(false); // IMPORTANT: don't fight XR
+  log("[xr] sessionstart ✅ HUD hidden, android controls disabled");
 });
 renderer.xr.addEventListener("sessionend", () => {
   setHUDVisible(true);
-  Mobile2D.setEnabled(true);
-  log("[xr] sessionend ✅ HUD shown, 2D controls enabled");
+  androidControls.setEnabled(true);
+  log("[xr] sessionend ✅ HUD shown, android controls enabled");
 });
 
-// Recenter
+// Recenter button (HUD)
 $("#btnRecenter")?.addEventListener("click", () => {
   player.position.set(0, 0, 0);
   player.rotation.set(0, 0, 0);
+  cameraPitch.rotation.set(0, 0, 0);
   camera.position.set(0, 1.65, 3.5);
   camera.rotation.set(0, 0, 0);
   log("[hud] recenter ✅");
@@ -101,315 +116,266 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// ============================
-// 2D ANDROID / MOBILE CONTROLS
-// ============================
-// ✅ Only active when NOT in XR
-// ✅ Left joystick = move (forward/back/strafe)
-// ✅ Right-side swipe = look (yaw + pitch)
-// ✅ Desktop: WASD + mouse-drag look
-const Mobile2D = (() => {
+// ------------------------------
+// ANDROID / 2D TOUCH CONTROLS
+// ------------------------------
+// ✅ Move joystick (left) + Look drag (right half screen)
+// ✅ Only active when NOT presenting XR
+// ✅ Will not break Oculus
+const androidControls = (() => {
   const state = {
     enabled: true,
-    uiBuilt: false,
+    ui: null,
+    joyBase: null,
+    joyStick: null,
+    joyActive: false,
+    joyId: null,
+    joyCenter: { x: 0, y: 0 },
+    joyVec: { x: 0, y: 0 }, // -1..1
 
-    // joystick
-    leftId: null,
-    leftCenter: { x: 0, y: 0 },
-    leftVec: { x: 0, y: 0 }, // -1..1
+    lookActive: false,
+    lookId: null,
+    lookLast: { x: 0, y: 0 },
+    yaw: 0,
+    pitch: 0,
 
-    // look touch
-    rightId: null,
-    lookDX: 0,
-    lookDY: 0,
-    lastTouchPos: new Map(), // id -> {x,y}
+    moveSpeed: 2.4,
+    lookSpeed: 0.0032,
+    pitchClamp: 1.15, // ~66 deg
 
-    // desktop
-    keys: new Set(),
-    mouseDown: false,
-    mouseDX: 0,
-    mouseDY: 0,
-
-    // tuning
-    moveSpeed: 2.8,
-    strafeSpeed: 2.6,
-    lookSpeed: 0.0022,
-    pitchMin: -1.15,
-    pitchMax: 1.15,
-
-    // refs
-    wrap: null,
-    joy: null,
-    nub: null,
-    hint: null,
+    isMobile: /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
   };
 
-  function setEnabled(on) {
-    state.enabled = !!on;
-    if (state.wrap) state.wrap.style.display = state.enabled ? "block" : "none";
+  function setEnabled(v) {
+    state.enabled = !!v;
+    if (state.ui) state.ui.style.display = (state.enabled && state.isMobile) ? "block" : "none";
     if (!state.enabled) {
-      state.leftId = null;
-      state.rightId = null;
-      state.leftVec.x = 0; state.leftVec.y = 0;
-      state.lookDX = 0; state.lookDY = 0;
-      state.mouseDX = 0; state.mouseDY = 0;
-      state.lastTouchPos.clear();
-      setNub(0, 0);
+      state.joyActive = false;
+      state.lookActive = false;
+      state.joyVec.x = 0; state.joyVec.y = 0;
     }
   }
 
-  function setNub(nx, ny) {
-    if (!state.nub) return;
-    const maxPx = 44;
-    const tx = nx * maxPx;
-    const ty = ny * maxPx;
-    state.nub.style.transform = `translate(-50%, -50%) translate(${tx}px, ${ty}px)`;
-  }
+  function ensureUI() {
+    if (!state.isMobile) return;
+    if (state.ui) return;
 
-  function buildUI(logFn) {
-    if (state.uiBuilt) return;
-    state.uiBuilt = true;
+    const ui = document.createElement("div");
+    ui.id = "androidControls";
+    ui.style.position = "fixed";
+    ui.style.left = "0";
+    ui.style.top = "0";
+    ui.style.width = "100vw";
+    ui.style.height = "100vh";
+    ui.style.pointerEvents = "none";
+    ui.style.zIndex = "9998"; // below HUD but above canvas
+    ui.style.touchAction = "none";
+    document.body.appendChild(ui);
 
-    const wrap = document.createElement("div");
-    wrap.id = "mobile2d";
-    wrap.style.cssText = `
-      position: fixed; inset: 0; z-index: 9998;
-      user-select: none; -webkit-user-select: none;
-      touch-action: none;
-      display: block;
-    `;
-    document.body.appendChild(wrap);
+    // Left joystick base
+    const base = document.createElement("div");
+    base.style.position = "absolute";
+    base.style.left = "6vw";
+    base.style.bottom = "10vh";
+    base.style.width = "22vmin";
+    base.style.height = "22vmin";
+    base.style.borderRadius = "999px";
+    base.style.background = "rgba(20,30,50,0.22)";
+    base.style.border = "1px solid rgba(102,204,255,0.25)";
+    base.style.pointerEvents = "auto";
+    base.style.touchAction = "none";
+    ui.appendChild(base);
 
-    const joy = document.createElement("div");
-    joy.id = "joyL";
-    joy.style.cssText = `
-      position: absolute; left: 18px; bottom: 18px;
-      width: 140px; height: 140px; border-radius: 999px;
-      background: rgba(102,204,255,0.10);
-      border: 2px solid rgba(102,204,255,0.28);
-      box-shadow: 0 0 18px rgba(102,204,255,0.12);
-      pointer-events: auto;
-    `;
-    wrap.appendChild(joy);
+    const stick = document.createElement("div");
+    stick.style.position = "absolute";
+    stick.style.left = "50%";
+    stick.style.top = "50%";
+    stick.style.transform = "translate(-50%,-50%)";
+    stick.style.width = "10vmin";
+    stick.style.height = "10vmin";
+    stick.style.borderRadius = "999px";
+    stick.style.background = "rgba(102,204,255,0.25)";
+    stick.style.border = "1px solid rgba(102,204,255,0.35)";
+    stick.style.pointerEvents = "none";
+    base.appendChild(stick);
 
-    const nub = document.createElement("div");
-    nub.id = "joyNub";
-    nub.style.cssText = `
-      position: absolute; left: 50%; top: 50%;
-      width: 56px; height: 56px; border-radius: 999px;
-      transform: translate(-50%, -50%);
-      background: rgba(102,204,255,0.22);
-      border: 2px solid rgba(102,204,255,0.45);
-      pointer-events: none;
-    `;
-    joy.appendChild(nub);
+    // Right side “look area” hint (invisible, just for input)
+    const look = document.createElement("div");
+    look.style.position = "absolute";
+    look.style.right = "0";
+    look.style.top = "0";
+    look.style.width = "55vw";
+    look.style.height = "100vh";
+    look.style.pointerEvents = "auto";
+    look.style.touchAction = "none";
+    look.style.background = "rgba(0,0,0,0)"; // invisible
+    ui.appendChild(look);
 
-    const hint = document.createElement("div");
-    hint.textContent = "Left: MOVE • Right: LOOK";
-    hint.style.cssText = `
-      position:absolute; left: 14px; top: 10px;
-      padding: 8px 10px;
-      font: 700 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      letter-spacing: 0.4px;
-      color: rgba(200,211,255,0.88);
-      background: rgba(5,7,13,0.55);
-      border: 1px solid rgba(102,204,255,0.22);
-      border-radius: 10px;
-      pointer-events: none;
-    `;
-    wrap.appendChild(hint);
+    // Quick buttons (always accessible)
+    const btnBar = document.createElement("div");
+    btnBar.style.position = "absolute";
+    btnBar.style.right = "2vw";
+    btnBar.style.bottom = "10vh";
+    btnBar.style.display = "flex";
+    btnBar.style.flexDirection = "column";
+    btnBar.style.gap = "10px";
+    btnBar.style.pointerEvents = "auto";
+    ui.appendChild(btnBar);
 
-    state.wrap = wrap;
-    state.joy = joy;
-    state.nub = nub;
-    state.hint = hint;
+    const mkBtn = (label, onClick) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.style.padding = "10px 12px";
+      b.style.borderRadius = "12px";
+      b.style.border = "1px solid rgba(102,204,255,0.35)";
+      b.style.background = "rgba(10,16,32,0.55)";
+      b.style.color = "rgba(230,245,255,0.95)";
+      b.style.fontWeight = "700";
+      b.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Arial";
+      b.style.backdropFilter = "blur(6px)";
+      b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); onClick?.(); });
+      return b;
+    };
 
-    // Touch
-    wrap.addEventListener("touchstart", (e) => {
-      if (!state.enabled) return;
-      const w = window.innerWidth;
+    btnBar.appendChild(mkBtn("HUD OFF", () => setHUDVisible(false)));
+    btnBar.appendChild(mkBtn("HUD ON",  () => setHUDVisible(true)));
+    btnBar.appendChild(mkBtn("RECENTER", () => {
+      player.position.set(0, 0, 0);
+      state.yaw = 0; state.pitch = 0;
+      player.rotation.y = 0;
+      cameraPitch.rotation.x = 0;
+      log("[android] recenter ✅");
+    }));
 
-      for (const t of Array.from(e.changedTouches)) {
-        const x = t.clientX, y = t.clientY;
-
-        // left side -> joystick
-        if (x < w * 0.45 && state.leftId === null) {
-          state.leftId = t.identifier;
-          state.leftCenter.x = x;
-          state.leftCenter.y = y;
-          state.leftVec.x = 0;
-          state.leftVec.y = 0;
-
-          // position joystick base under finger (visual)
-          const clampedLeft = Math.max(12, Math.min(x - 70, w - 152));
-          const clampedBottom = Math.max(12, Math.min((window.innerHeight - y) - 70, window.innerHeight - 152));
-          joy.style.left = `${clampedLeft}px`;
-          joy.style.bottom = `${clampedBottom}px`;
-          setNub(0, 0);
-          continue;
-        }
-
-        // right side -> look
-        if (x >= w * 0.45 && state.rightId === null) {
-          state.rightId = t.identifier;
-          state.lastTouchPos.set(t.identifier, { x, y });
-          continue;
-        }
-      }
-
-      e.preventDefault();
-    }, { passive: false });
-
-    wrap.addEventListener("touchmove", (e) => {
-      if (!state.enabled) return;
-
-      for (const t of Array.from(e.changedTouches)) {
-        const x = t.clientX, y = t.clientY;
-
-        if (t.identifier === state.leftId) {
-          const dx = x - state.leftCenter.x;
-          const dy = y - state.leftCenter.y;
-          const max = 60;
-          const nx = Math.max(-1, Math.min(1, dx / max));
-          const ny = Math.max(-1, Math.min(1, dy / max));
-          state.leftVec.x = nx;
-          state.leftVec.y = ny;
-          setNub(nx, ny);
-        }
-
-        if (t.identifier === state.rightId) {
-          const last = state.lastTouchPos.get(t.identifier);
-          if (last) {
-            state.lookDX += (x - last.x);
-            state.lookDY += (y - last.y);
-            last.x = x; last.y = y;
-          } else {
-            state.lastTouchPos.set(t.identifier, { x, y });
-          }
-        }
-      }
-
-      e.preventDefault();
-    }, { passive: false });
-
-    wrap.addEventListener("touchend", (e) => {
-      if (!state.enabled) return;
-
-      for (const t of Array.from(e.changedTouches)) {
-        if (t.identifier === state.leftId) {
-          state.leftId = null;
-          state.leftVec.x = 0;
-          state.leftVec.y = 0;
-          setNub(0, 0);
-        }
-        if (t.identifier === state.rightId) {
-          state.rightId = null;
-          state.lastTouchPos.delete(t.identifier);
-        }
-      }
-
-      e.preventDefault();
-    }, { passive: false });
-
-    wrap.addEventListener("touchcancel", (e) => {
-      state.leftId = null;
-      state.rightId = null;
-      state.leftVec.x = 0;
-      state.leftVec.y = 0;
-      state.lastTouchPos.clear();
-      setNub(0, 0);
-      e.preventDefault();
-    }, { passive: false });
-
-    // Desktop keyboard
-    window.addEventListener("keydown", (e) => state.keys.add(String(e.key).toLowerCase()));
-    window.addEventListener("keyup", (e) => state.keys.delete(String(e.key).toLowerCase()));
-
-    // Desktop mouse drag look
-    renderer.domElement.addEventListener("mousedown", (e) => {
-      if (!state.enabled) return;
-      if (renderer.xr.isPresenting) return;
-      state.mouseDown = true;
-      state.mouseDX = 0;
-      state.mouseDY = 0;
-      e.preventDefault();
-    });
-    window.addEventListener("mouseup", () => { state.mouseDown = false; });
-    window.addEventListener("mousemove", (e) => {
-      if (!state.enabled) return;
-      if (!state.mouseDown) return;
-      if (renderer.xr.isPresenting) return;
-      state.mouseDX += e.movementX || 0;
-      state.mouseDY += e.movementY || 0;
+    // Joystick pointer logic
+    base.addEventListener("pointerdown", (e) => {
+      if (!state.enabled || renderer.xr.isPresenting) return;
+      state.joyActive = true;
+      state.joyId = e.pointerId;
+      base.setPointerCapture(e.pointerId);
+      const r = base.getBoundingClientRect();
+      state.joyCenter.x = r.left + r.width / 2;
+      state.joyCenter.y = r.top + r.height / 2;
+      updateJoyFromPointer(e.clientX, e.clientY, r.width * 0.38);
     });
 
-    logFn?.("[2d] mobile joystick + swipe-look ready ✅");
-  }
+    base.addEventListener("pointermove", (e) => {
+      if (!state.joyActive || e.pointerId !== state.joyId) return;
+      const r = base.getBoundingClientRect();
+      updateJoyFromPointer(e.clientX, e.clientY, r.width * 0.38);
+    });
 
-  function apply(dt) {
-    if (!state.enabled) return;
-    if (renderer.xr.isPresenting) return;
+    base.addEventListener("pointerup", (e) => {
+      if (e.pointerId !== state.joyId) return;
+      state.joyActive = false;
+      state.joyId = null;
+      state.joyVec.x = 0; state.joyVec.y = 0;
+      stick.style.left = "50%";
+      stick.style.top = "50%";
+    });
 
-    // movement vector
-    let mx = 0, mz = 0;
+    base.addEventListener("pointercancel", () => {
+      state.joyActive = false;
+      state.joyId = null;
+      state.joyVec.x = 0; state.joyVec.y = 0;
+      stick.style.left = "50%";
+      stick.style.top = "50%";
+    });
 
-    // touch joystick
-    mx += state.leftVec.x * state.strafeSpeed;
-    mz += state.leftVec.y * state.moveSpeed; // +down is forward-ish; we invert below
+    function updateJoyFromPointer(px, py, maxR) {
+      const dx = px - state.joyCenter.x;
+      const dy = py - state.joyCenter.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const nx = dx / d;
+      const ny = dy / d;
+      const mag = Math.min(1, d / maxR);
+      state.joyVec.x = nx * mag;
+      state.joyVec.y = ny * mag; // up is negative dy, we keep raw for now
 
-    // keyboard WASD
-    const k = state.keys;
-    if (k.has("w")) mz -= state.moveSpeed;
-    if (k.has("s")) mz += state.moveSpeed;
-    if (k.has("a")) mx -= state.strafeSpeed;
-    if (k.has("d")) mx += state.strafeSpeed;
-
-    // apply movement relative to yaw
-    if (mx !== 0 || mz !== 0) {
-      const yaw = player.rotation.y;
-
-      // joystick Y: dragging up gives ny negative, so invert so up = forward
-      // (for touch: state.leftVec.y positive means finger moved down)
-      const forward = -mz;
-      const strafe = mx;
-
-      const sin = Math.sin(yaw);
-      const cos = Math.cos(yaw);
-
-      const vx = (strafe * cos + forward * sin) * dt;
-      const vz = (forward * cos - strafe * sin) * dt;
-
-      player.position.x += vx;
-      player.position.z += vz;
+      // Move stick UI
+      stick.style.left = `${50 + (state.joyVec.x * 35)}%`;
+      stick.style.top = `${50 + (state.joyVec.y * 35)}%`;
     }
 
-    // apply look (touch + mouse)
-    const dx = state.lookDX + state.mouseDX;
-    const dy = state.lookDY + state.mouseDY;
+    // Look drag (right side)
+    look.addEventListener("pointerdown", (e) => {
+      if (!state.enabled || renderer.xr.isPresenting) return;
+      state.lookActive = true;
+      state.lookId = e.pointerId;
+      look.setPointerCapture(e.pointerId);
+      state.lookLast.x = e.clientX;
+      state.lookLast.y = e.clientY;
+    });
 
-    if (dx !== 0 || dy !== 0) {
-      player.rotation.y -= dx * state.lookSpeed;
+    look.addEventListener("pointermove", (e) => {
+      if (!state.lookActive || e.pointerId !== state.lookId) return;
+      const dx = e.clientX - state.lookLast.x;
+      const dy = e.clientY - state.lookLast.y;
+      state.lookLast.x = e.clientX;
+      state.lookLast.y = e.clientY;
 
-      // pitch on camera (clamped)
-      const pitch = camera.rotation.x - dy * state.lookSpeed;
-      camera.rotation.x = Math.max(state.pitchMin, Math.min(state.pitchMax, pitch));
-    }
+      state.yaw -= dx * state.lookSpeed;
+      state.pitch -= dy * state.lookSpeed;
+      state.pitch = Math.max(-state.pitchClamp, Math.min(state.pitchClamp, state.pitch));
 
-    // decay / reset deltas each frame
-    state.lookDX = 0;
-    state.lookDY = 0;
-    state.mouseDX = 0;
-    state.mouseDY = 0;
+      player.rotation.y = state.yaw;
+      cameraPitch.rotation.x = state.pitch;
+    });
+
+    look.addEventListener("pointerup", (e) => {
+      if (e.pointerId !== state.lookId) return;
+      state.lookActive = false;
+      state.lookId = null;
+    });
+
+    look.addEventListener("pointercancel", () => {
+      state.lookActive = false;
+      state.lookId = null;
+    });
+
+    state.ui = ui;
+    state.joyBase = base;
+    state.joyStick = stick;
+
+    // show now
+    setEnabled(true);
+    log("[android] touch controls UI ready ✅");
   }
 
-  return { buildUI, apply, setEnabled };
+  function update(dt) {
+    if (!state.enabled || renderer.xr.isPresenting) return;
+    if (!state.isMobile) return;
+
+    // joyVec: x=strafe, y=forward/back (dy positive means down)
+    let x = state.joyVec.x;
+    let y = state.joyVec.y;
+
+    // Convert to forward/back: pushing up gives negative y; we want forward positive
+    const forward = -y;
+    const strafe = x;
+
+    const dead = 0.08;
+    const f = Math.abs(forward) < dead ? 0 : forward;
+    const s2 = Math.abs(strafe) < dead ? 0 : strafe;
+    if (f === 0 && s2 === 0) return;
+
+    const yaw = player.rotation.y;
+    const sin = Math.sin(yaw), cos = Math.cos(yaw);
+
+    const speed = state.moveSpeed;
+    player.position.x += (s2 * cos + f * sin) * speed * dt;
+    player.position.z += (f * cos - s2 * sin) * speed * dt;
+  }
+
+  return { ensureUI, update, setEnabled };
 })();
 
-// Build 2D controls UI immediately (only shows when not in XR)
-Mobile2D.buildUI(log);
-Mobile2D.setEnabled(true);
+// Build touch UI ASAP (but won’t show on desktop)
+androidControls.ensureUI();
 
-// --- IMPORTANT: START THE RENDER LOOP IMMEDIATELY ---
+// ------------------------------
+// Render loop starts immediately
+// ------------------------------
 let worldApi = null;
 let worldReady = false;
 
@@ -419,8 +385,8 @@ renderer.setAnimationLoop(() => {
   const t = clock.elapsedTime;
 
   try {
-    // 2D controls (Android/desktop) only when NOT in XR
-    Mobile2D.apply(dt);
+    // Update Android controls only in non-XR
+    androidControls.update(dt);
 
     if (worldReady && worldApi?.update) worldApi.update(dt, t);
     renderer.render(scene, camera);
@@ -444,13 +410,11 @@ log("[index] render loop started ✅");
     worldReady = true;
     log("[world] init ✅");
 
-    // Room buttons
+    // Room buttons (HUD)
     $("#btnRoomLobby")?.addEventListener("click", () => worldApi?.setRoom?.("lobby"));
     $("#btnRoomStore")?.addEventListener("click", () => worldApi?.setRoom?.("store"));
     $("#btnRoomScorpion")?.addEventListener("click", () => worldApi?.setRoom?.("scorpion"));
     $("#btnRoomSpectate")?.addEventListener("click", () => worldApi?.setRoom?.("spectate"));
-    $("#btnRoomPoker")?.addEventListener("click", () => worldApi?.setRoom?.("poker"));
-
   } catch (e) {
     log("[world] init ❌", String(e?.stack || e));
   }

@@ -1,11 +1,9 @@
-// /js/world.js — ScarlettVR World v2 (Pit + Rail + Balcony + Rooms + Poker v2 + Scorpion v2 + Bots v2)
-// ✅ Safe Mode compatible (flags.safeMode disables poker/bots/fx)
-// ✅ Uses safe texture loader inside PokerSystem (won't crash if missing assets)
-// ✅ Auto-seat Scorpion mode + bot loop
-
-import { PokerSystem } from "./poker_system.js";
-import { BotSystem } from "./bot_system.js";
-import { ScorpionSystem } from "./scorpion_system.js";
+// /js/world.js — ScarlettVR World v2.1 (Pit + Rail + Balcony + Rooms + Poker/Scorpion/Bots SAFE)
+// ✅ Will NOT crash if poker_system / bot_system / scorpion_system missing
+// ✅ GitHub Pages safe asset paths (window.SCARLETT_BASE)
+// ✅ Returns BOTH tick() and update() (compat with older index.js)
+// ✅ Correctly applies yaw on player rig (not camera)
+// ✅ SafeMode supported
 
 export const World = {
   async init({ THREE, scene, renderer, camera, player, controllers, log, BUILD, flags }) {
@@ -16,13 +14,13 @@ export const World = {
       anchors: {},
       room: "lobby",
 
-      // systems
+      // systems (may be stubs)
       poker: null,
       bots: null,
       scorpion: null,
 
-      // scorpion seats
       scorpionSeats: [],
+      t: 0
     };
 
     s.root.name = "WORLD_ROOT";
@@ -31,18 +29,17 @@ export const World = {
     setupEnv(s);
     setupLights(s);
 
-    // World layout
+    // World layout (always builds even in safe mode)
     buildLobbyRing(s);
     buildPitCenterpiece(s);     // divot/pit table is back
     buildBalconySpectator(s);   // upstairs ring
-
     buildRoomsAndHallways(s);
     buildStore(s);
     buildScorpion(s);
     buildSpectate(s);
     buildPokerArea(s);
 
-    // Anchors (setRoom teleport points)
+    // Anchors (teleport points)
     s.anchors.lobby    = { pos: new THREE.Vector3(0, 0, 13.5),  yaw: Math.PI };
     s.anchors.poker    = { pos: new THREE.Vector3(0, 0, -9.5),  yaw: 0 };
     s.anchors.store    = { pos: new THREE.Vector3(-26, 0, 0),   yaw: Math.PI / 2 };
@@ -52,36 +49,45 @@ export const World = {
     // spawn start
     setRigToAnchor(s, s.anchors.lobby);
 
-    // Systems init (safe mode kills heavy stuff)
+    // ---- SAFE dynamic-load systems ----
+    const Systems = await loadSystemsSafe(log);
+
+    // Asset base MUST be repo-safe (GitHub Pages)
+    const assetBase = `${(window.SCARLETT_BASE || "/")}assets/textures/`;
+
+    // Poker
     if (!s.flags.safeMode && s.flags.poker) {
-      s.poker = PokerSystem.init(s, {
+      s.poker = Systems.PokerSystem?.init?.(s, {
         tableCenter: new THREE.Vector3(0, 0.95, -9.5),
-        assetBase: "./assets/textures",
-      });
+        assetBase
+      }) || null;
     }
 
+    // Bots
     if (!s.flags.safeMode && s.flags.bots) {
-      // bot seats for scorpion room (around a table at x=26)
       s.scorpionSeats = makeSeatRing(THREE, new THREE.Vector3(26, 0, 0), 2.0, 6);
-
-      s.bots = BotSystem.init(s, {
+      s.bots = Systems.BotSystem?.init?.(s, {
         count: 6,
         poker: s.poker,
         seats: s.scorpionSeats
-      });
+      }) || null;
     }
 
-    // Scorpion system ties player seating + bots + poker
-    s.scorpion = ScorpionSystem.init(s, {
+    // Scorpion (always allowed, but it can be a stub)
+    s.scorpion = Systems.ScorpionSystem?.init?.(s, {
       playerSeat: { pos: new THREE.Vector3(26, 0, 0.9), yaw: -Math.PI / 2 },
       botSeats: s.scorpionSeats,
       poker: s.poker,
       bots: s.bots
-    });
+    }) || makeScorpionStub(log);
 
-    log?.(`[world] World v2 init ✅ build=${BUILD} safe=${!!s.flags.safeMode} poker=${!!s.flags.poker} bots=${!!s.flags.bots} fx=${!!s.flags.fx}`);
+    log?.(
+      `[world] World v2.1 init ✅ build=${BUILD} safe=${!!s.flags.safeMode} ` +
+      `poker=${!!s.flags.poker} bots=${!!s.flags.bots} fx=${!!s.flags.fx} assetBase=${assetBase}`
+    );
 
-    return {
+    // Return API (support BOTH tick/update)
+    const api = {
       setRoom: (room) => {
         // exit scorpion mode if leaving it
         if (s.room === "scorpion" && room !== "scorpion") {
@@ -89,20 +95,85 @@ export const World = {
         }
 
         s.room = room;
-
-        // move rig
         setRigToAnchor(s, s.anchors[room] || s.anchors.lobby);
+
         log?.(`[rm] room=${room}`);
 
         // enter scorpion mode
-        if (room === "scorpion") {
-          s.scorpion?.enter?.();
-        }
+        if (room === "scorpion") s.scorpion?.enter?.();
       },
-      update: (dt, t) => update(s, dt, t),
+
+      tick: (dt) => {
+        s.t += dt;
+        update(s, dt, s.t);
+      },
+
+      // backwards compat with older callers
+      update: (dt, t) => update(s, dt, t ?? s.t)
     };
+
+    return api;
   }
 };
+
+// -------------------- SAFE SYSTEM LOADER --------------------
+async function loadSystemsSafe(log) {
+  const stub = {
+    PokerSystem: makePokerStub(log),
+    BotSystem: makeBotsStub(log),
+    ScorpionSystem: { init: () => makeScorpionStub(log) }
+  };
+
+  // Try imports individually so one bad file doesn't kill the world
+  const out = { ...stub };
+
+  try {
+    const m = await import("./poker_system.js");
+    if (m?.PokerSystem) out.PokerSystem = m.PokerSystem;
+    log?.("[world] poker_system.js loaded ✅");
+  } catch (e) {
+    log?.(`[world] poker_system.js missing/bad → stub ✅ (${e?.message || String(e)})`);
+  }
+
+  try {
+    const m = await import("./bot_system.js");
+    if (m?.BotSystem) out.BotSystem = m.BotSystem;
+    log?.("[world] bot_system.js loaded ✅");
+  } catch (e) {
+    log?.(`[world] bot_system.js missing/bad → stub ✅ (${e?.message || String(e)})`);
+  }
+
+  try {
+    const m = await import("./scorpion_system.js");
+    if (m?.ScorpionSystem) out.ScorpionSystem = m.ScorpionSystem;
+    log?.("[world] scorpion_system.js loaded ✅");
+  } catch (e) {
+    log?.(`[world] scorpion_system.js missing/bad → stub ✅ (${e?.message || String(e)})`);
+  }
+
+  return out;
+}
+
+function makePokerStub(log) {
+  return {
+    init() {
+      log?.("[poker] STUB active (PokerSystem not loaded)");
+      return { update(){} };
+    }
+  };
+}
+function makeBotsStub(log) {
+  return {
+    init() {
+      log?.("[bots] STUB active (BotSystem not loaded)");
+      return { update(){} };
+    }
+  };
+}
+function makeScorpionStub(log) {
+  log?.("[scorpion] STUB active (ScorpionSystem not loaded)");
+  return { enter(){}, exit(){}, update(){} };
+}
 
 // -------------------- ENV + LIGHT --------------------
 function setupEnv(s) {
@@ -185,7 +256,6 @@ function buildPitCenterpiece(s) {
   const pitDepth = 3.0;
   const pitFloorY = -pitDepth;
 
-  // pit floor
   const pitFloor = new THREE.Mesh(
     new THREE.CylinderGeometry(pitRadius, pitRadius, 0.35, 64),
     matFloor(THREE, 0x0c1220)
@@ -193,7 +263,6 @@ function buildPitCenterpiece(s) {
   pitFloor.position.set(0, pitFloorY - 0.175, 0);
   root.add(pitFloor);
 
-  // pit walls
   const pitWall = new THREE.Mesh(
     new THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 64, 1, true),
     new THREE.MeshStandardMaterial({ color: 0x0a101e, roughness: 0.95, metalness: 0.06, side: THREE.DoubleSide })
@@ -225,6 +294,7 @@ function buildPitCenterpiece(s) {
 
   const entranceAngle = Math.PI / 2; // +Z
   const entranceHalfWidth = 0.32;
+
   for (let i = 0; i < segs; i++) {
     const a0 = (i / segs) * Math.PI * 2;
     const a1 = ((i + 1) / segs) * Math.PI * 2;
@@ -242,7 +312,6 @@ function buildPitCenterpiece(s) {
     root.add(railSeg);
   }
 
-  // guard post at entrance
   const guard = new THREE.Mesh(
     new THREE.CylinderGeometry(0.22, 0.28, 1.25, 18),
     new THREE.MeshStandardMaterial({ color: 0x0b1220, roughness: 0.8, metalness: 0.12 })
@@ -282,9 +351,12 @@ function buildBalconySpectator(s) {
   const outerR = 16.8;
   const innerR = 14.2;
 
+  const balconyMat = matFloor(THREE, 0x10192a);
+  balconyMat.side = THREE.DoubleSide;
+
   const balcony = new THREE.Mesh(
     new THREE.RingGeometry(innerR, outerR, 96),
-    matFloor(THREE, 0x10192a)
+    balconyMat
   );
   balcony.rotation.x = -Math.PI / 2;
   balcony.position.y = y;
@@ -329,14 +401,17 @@ function buildRoomsAndHallways(s) {
       new THREE.BoxGeometry(roomSize * 2.2, wallH, roomSize * 2.2),
       new THREE.MeshStandardMaterial({
         color: 0x0b1220, roughness: 0.92, metalness: 0.08,
-        transparent: true, opacity: 0.35
+        transparent: true, opacity: 0.30
       })
     );
     walls.position.set(r.x, wallH / 2 - 0.175, r.z);
     root.add(walls);
 
     const hallLen = 12;
-    const hall = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.35, hallLen), matFloor(THREE, 0x121c2c));
+    const hall = new THREE.Mesh(
+      new THREE.BoxGeometry(4.8, 0.35, hallLen),
+      matFloor(THREE, 0x121c2c)
+    );
     hall.position.y = -0.175;
 
     if (r.name === "north") hall.position.set(0, -0.175, -18);
@@ -364,7 +439,6 @@ function buildStore(s) {
   glow.position.set(0, 3.5, 0);
   store.add(glow);
 
-  // mannequin pads
   const padMat = new THREE.MeshStandardMaterial({ color: 0x0b1220, roughness: 0.9, metalness: 0.1 });
   const manMat = new THREE.MeshStandardMaterial({ color: 0xe0e0e0, roughness: 0.65, metalness: 0.08 });
 
@@ -394,7 +468,6 @@ function buildScorpion(s) {
   light.position.set(0, 3.5, 0);
   sc.add(light);
 
-  // simple scorpion tables
   const tblMat = new THREE.MeshStandardMaterial({ color: 0x1b2a46, roughness: 0.7, metalness: 0.12 });
   for (let i = 0; i < 3; i++) {
     const t = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.7, 0.22, 32), tblMat);
@@ -426,16 +499,21 @@ function buildPokerArea(s) {
 
 // -------------------- UPDATE --------------------
 function update(s, dt, t) {
-  if (!s.flags.safeMode && s.flags.poker) s.poker?.update(dt, t);
+  if (!s.flags.safeMode && s.flags.poker) s.poker?.update?.(dt, t);
   if (!s.flags.safeMode && s.flags.bots) s.bots?.update?.(dt, t);
   s.scorpion?.update?.(dt, t);
 }
 
 // -------------------- UTIL --------------------
 function setRigToAnchor(s, anchor) {
+  // Set player position + yaw (works in XR and non-XR)
   s.player.position.set(anchor.pos.x, anchor.pos.y, anchor.pos.z);
-  s.player.rotation.set(0, 0, 0);
-  if (!s.renderer.xr.isPresenting) s.camera.rotation.set(0, anchor.yaw, 0);
+  s.player.rotation.set(0, anchor.yaw || 0, 0);
+
+  // Keep camera pitch neutral outside XR
+  if (!s.renderer?.xr?.isPresenting) {
+    s.camera.rotation.set(0, 0, 0);
+  }
 }
 
 function makeSeatRing(THREE, center, radius, count) {
@@ -451,4 +529,4 @@ function makeSeatRing(THREE, center, radius, count) {
     seats.push({ pos, yaw });
   }
   return seats;
-         }
+      }

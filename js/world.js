@@ -1,8 +1,13 @@
-// /js/world.js — Scarlett MASTER WORLD v5.2 (FULL)
-// ✅ Stable teleport ring (smooth + deadband + cooldown) — no jitter
-// ✅ Beauty pass: velvet/gold ribs, neon rail, dust motes, signage
-// ✅ Poker alive: floating cards, chips->pot, vacuum payout, HUD
-// ✅ Stairs, guard, store shell, 4 hallways + 4 rooms
+// /js/world.js — Scarlett MASTER WORLD v5.3 (FULL)
+// ✅ Quest sticks supported (handled in index.js)
+// ✅ Teleport ring restored + stabilized (smooth + deadband)
+// ✅ Teleport button = A/X only (NOT trigger/grip)
+// ✅ Teleport clamp prevents disappearing
+// ✅ Community cards face camera, hole cards above heads
+// ✅ Bigger nametags + active glow
+// ✅ Action tile "YOUR TURN: CHECK / BET / RAISE"
+// ✅ Winner display held longer
+
 export const World = (() => {
   const S = {
     THREE:null, scene:null, renderer:null, camera:null, player:null, controllers:null, log:console.log,
@@ -16,10 +21,12 @@ export const World = (() => {
       t:0, phase:"deal", hand:0, pot:0,
       table:null, community:[], potStack:null,
       hud:null, winner:"", winText:"",
-      chipKit:null
+      chipKit:null,
+      actionTile:null,
+      activeIdx:0
     },
     audio:{ muted:false },
-    tp:null, // teleport smoothing state (set in build)
+    tp:null,
     dust:{ points:null }
   };
 
@@ -70,7 +77,6 @@ export const World = (() => {
     ctx.lineWidth=10;
     ctx.strokeRect(18,18,988,476);
 
-    // glow line
     ctx.strokeStyle="rgba(212,175,55,0.35)";
     ctx.lineWidth=6;
     ctx.strokeRect(28,28,968,456);
@@ -78,10 +84,10 @@ export const World = (() => {
     ctx.fillStyle="#e8ecff";
     ctx.textAlign="center";
     ctx.textBaseline="middle";
-    ctx.font = big ? "bold 92px system-ui,Segoe UI,Roboto,Arial" : "bold 72px system-ui,Segoe UI,Roboto,Arial";
+    ctx.font = big ? "bold 96px system-ui,Segoe UI,Roboto,Arial" : "bold 82px system-ui,Segoe UI,Roboto,Arial";
     ctx.fillText(lines[0]||"", 512, 175);
 
-    ctx.font = "600 54px system-ui,Segoe UI,Roboto,Arial";
+    ctx.font = "600 58px system-ui,Segoe UI,Roboto,Arial";
     ctx.fillStyle="rgba(232,236,255,0.92)";
     ctx.fillText(lines[1]||"", 512, 300);
 
@@ -108,16 +114,16 @@ export const World = (() => {
   function addNameTag(parent, name){
     const THREE=S.THREE;
     const tex=makeCanvasTex([name,"",""], false);
-    const mat=new THREE.MeshBasicMaterial({ map:tex, transparent:true, opacity:0.98, side:THREE.DoubleSide, depthTest:false });
-    const plane=new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.45), mat);
-    plane.position.set(0, 1.38, 0);
+    const mat=new THREE.MeshBasicMaterial({ map:tex, transparent:true, opacity:0.92, side:THREE.DoubleSide, depthTest:false });
+    const plane=new THREE.Mesh(new THREE.PlaneGeometry(1.25,0.62), mat);
+    plane.position.set(0, 1.42, 0);
     plane.userData._tag = true;
     plane.renderOrder = 9999;
     parent.add(plane);
     return plane;
   }
 
-  // ---------- stream (kept as HLS-compatible “radio feel”) ----------
+  // ---------- stream ----------
   function initStream(){
     const THREE=S.THREE;
     const video=document.createElement("video");
@@ -143,7 +149,7 @@ export const World = (() => {
     return tex;
   }
 
-  // ---------- teleport ring (stable) ----------
+  // ---------- teleport ring ----------
   function ensureAimRing(){
     const THREE=S.THREE;
     const existing=S.scene.getObjectByName("TeleportAimRing");
@@ -167,35 +173,34 @@ export const World = (() => {
     S.aimRing=ring;
   }
 
-  function pressed(sticks){
+  // A/X only (no trigger/grip teleport)
+  function teleportPressed(ctx){
     try{
-      const lgp=sticks?.left?.gamepad;
-      const rgp=sticks?.right?.gamepad;
-      const any = (gp)=>{
+      const lgp = ctx?.pads?.lgp;
+      const rgp = ctx?.pads?.rgp;
+
+      const pressedAX = (gp)=>{
         if(!gp?.buttons) return false;
-        // A/X(0), B/Y(1), Trigger(0 or 1 on some devices), Grip(2/3/4)
-        return !!(gp.buttons[0]?.pressed || gp.buttons[1]?.pressed || gp.buttons[4]?.pressed || gp.buttons[5]?.pressed);
+        return !!gp.buttons[0]?.pressed;
       };
-      return any(lgp) || any(rgp);
+
+      return pressedAX(lgp) || pressedAX(rgp);
     } catch { return false; }
   }
 
-  function updateTeleport(sticks, dt){
+  function updateTeleport(ctx, dt){
     if(!S.ray) return;
     ensureAimRing();
 
     if (S.tp.cooldown > 0) S.tp.cooldown = Math.max(0, S.tp.cooldown - dt);
 
-    // floors only (stable)
     const targets=[S.floorMain, S.floorPit, S.ground].filter(Boolean);
     if(!targets.length) return;
 
-    // Aim from headset, but stabilize direction
     S.camera.updateMatrixWorld(true);
     const camPos = new S.THREE.Vector3().setFromMatrixPosition(S.camera.matrixWorld);
     const camDir = new S.THREE.Vector3(0,0,-1).applyQuaternion(S.camera.quaternion).normalize();
 
-    // flatten vertical jitter
     camDir.y *= 0.15;
     camDir.normalize();
 
@@ -211,11 +216,9 @@ export const World = (() => {
     const p = hits[0].point;
     p.y = 0.01;
 
-    // low-pass smoothing (framerate independent)
     const alpha = 1 - Math.pow(0.0008, dt);
     S.tp.smooth.lerp(p, alpha);
 
-    // deadband against shimmer (2cm)
     const dead=0.02;
     if(S.tp.smooth.distanceTo(S.tp.lastValid) > dead){
       S.tp.lastValid.copy(S.tp.smooth);
@@ -224,12 +227,22 @@ export const World = (() => {
     S.aimRing.visible=true;
     S.aimRing.position.copy(S.tp.lastValid);
 
-    const press = pressed(sticks);
+    const press = teleportPressed(ctx);
     if(press && !S._teleLatch && S.tp.cooldown === 0){
       S._teleLatch = true;
       S.tp.cooldown = 0.25;
 
       const dest = S.tp.lastValid;
+
+      // clamp to prevent disappearing
+      const clampR = 26;
+      const r = Math.hypot(dest.x, dest.z);
+      if(!Number.isFinite(r) || r > clampR){
+        log("[tp] blocked invalid dest", dest.x, dest.z);
+        S._teleLatch = false;
+        return;
+      }
+
       S.player.position.set(dest.x, 0.02, dest.z);
 
       const v=S.refs.stream?.video;
@@ -247,7 +260,7 @@ export const World = (() => {
     v.volume = Math.max(0, Math.min(1, 1 - dist/24));
   }
 
-  // ---------- beauty helpers ----------
+  // ---------- beauty ----------
   function buildVelvetGoldRibs(root, radius, height){
     const THREE=S.THREE;
     const velvet = new THREE.MeshStandardMaterial({
@@ -256,12 +269,10 @@ export const World = (() => {
     });
     const gold = matGold();
 
-    // inner velvet ring (subtle)
     const inner = new THREE.Mesh(new THREE.CylinderGeometry(radius+0.06, radius+0.06, height, 120, 1, true), velvet);
     inner.position.y = height/2;
     root.add(inner);
 
-    // gold ribs hide seams (vertical bars)
     for(let i=0;i<28;i++){
       const a=(i/28)*Math.PI*2;
       const rib = new THREE.Mesh(new THREE.BoxGeometry(0.09, height*0.92, 0.12), gold);
@@ -295,7 +306,6 @@ export const World = (() => {
     pts.rotation.y += dt*0.05;
   }
 
-  // ---------- geometry ----------
   function buildNeonRail(root, radius){
     const THREE=S.THREE;
     const railMat=new THREE.MeshStandardMaterial({
@@ -463,6 +473,43 @@ export const World = (() => {
     S.bots.seated = seated;
   }
 
+  function setActivePlayer(idx){
+    for(let i=0;i<S.bots.seated.length;i++){
+      const bot = S.bots.seated[i].group;
+      bot.traverse((o)=>{
+        if(o.userData?._tag){
+          o.material.opacity = (i===idx) ? 1.0 : 0.90;
+        }
+      });
+      bot.userData.active = (i===idx);
+    }
+    S.poker.activeIdx = idx;
+  }
+
+  function ensureActionTile(){
+    if(S.poker.actionTile) return;
+    const tex = makeCanvasTex(["YOUR TURN","CHECK / BET / RAISE",""], true);
+    const mat = new S.THREE.MeshBasicMaterial({ map:tex, transparent:true, opacity:0.95, side:S.THREE.DoubleSide, depthTest:false });
+    const plane = new S.THREE.Mesh(new S.THREE.PlaneGeometry(1.8, 0.9), mat);
+    plane.renderOrder = 9999;
+    plane.visible = false;
+    S.lobby.add(plane);
+    S.poker.actionTile = plane;
+  }
+
+  function updateActionTile(activeIdx){
+    ensureActionTile();
+    const b = S.bots.seated[activeIdx];
+    if(!b) { S.poker.actionTile.visible=false; return; }
+
+    const p = b.group.getWorldPosition(new S.THREE.Vector3());
+    S.poker.actionTile.position.set(p.x*0.78, 1.05, p.z*0.78);
+
+    const camPos = new S.THREE.Vector3().setFromMatrixPosition(S.camera.matrixWorld);
+    S.poker.actionTile.lookAt(camPos.x, S.poker.actionTile.position.y, camPos.z);
+    S.poker.actionTile.visible = true;
+  }
+
   function buildChipKit(){
     const THREE=S.THREE;
     const chipGeo=new THREE.CylinderGeometry(0.06,0.06,0.018,28);
@@ -552,24 +599,31 @@ export const World = (() => {
 
   function spawnHoleCards(){
     const THREE=S.THREE;
-    const mat=new THREE.MeshStandardMaterial({ color:0xf2f2f2, roughness:0.55, metalness:0.0, side:THREE.DoubleSide });
+
+    const front = new THREE.MeshStandardMaterial({
+      color:0xf2f2f2, roughness:0.5, metalness:0.0, side:THREE.DoubleSide
+    });
+
     for(const b of S.bots.seated){
-      const a=b.seatAngle;
-      const px = Math.cos(a)*2.15;
-      const pz = Math.sin(a)*2.15;
+      const a = b.seatAngle;
 
-      const c1=new THREE.Mesh(new THREE.PlaneGeometry(0.32,0.46), mat);
-      const c2=new THREE.Mesh(new THREE.PlaneGeometry(0.32,0.46), mat);
+      const r = 3.55;
+      const x = Math.cos(a)*r;
+      const z = Math.sin(a)*r;
+      const y = 2.15; // above head
 
-      c1.position.set(px-0.18, -0.95 + 1.20, pz-0.18);
-      c2.position.set(px+0.18, -0.95 + 1.20, pz-0.18);
+      const c1=new THREE.Mesh(new THREE.PlaneGeometry(0.42,0.60), front);
+      const c2=new THREE.Mesh(new THREE.PlaneGeometry(0.42,0.60), front);
 
-      const look = b.group.getWorldPosition(new THREE.Vector3());
-      c1.lookAt(look.x, c1.position.y, look.z);
-      c2.lookAt(look.x, c2.position.y, look.z);
+      c1.position.set(x-0.28, y, z);
+      c2.position.set(x+0.28, y, z);
 
-      c1.rotation.x = -0.35;
-      c2.rotation.x = -0.35;
+      const camPos=new THREE.Vector3().setFromMatrixPosition(S.camera.matrixWorld);
+      c1.lookAt(camPos.x, y, camPos.z);
+      c2.lookAt(camPos.x, y, camPos.z);
+
+      c1.rotateX(0.08);
+      c2.rotateX(0.08);
 
       S.lobby.add(c1); S.lobby.add(c2);
       b.hole.push(c1,c2);
@@ -577,12 +631,18 @@ export const World = (() => {
   }
 
   function showCommunity(n){
+    const camPos = new S.THREE.Vector3().setFromMatrixPosition(S.camera.matrixWorld);
     for(let i=0;i<5;i++){
-      S.poker.community[i].visible = i < n;
-      if(S.poker.community[i].visible){
-        S.poker.community[i].rotation.x = -Math.PI/2;
-        S.poker.community[i].position.y = -0.95 + 1.40;
-      }
+      const c = S.poker.community[i];
+      c.visible = i < n;
+      if(!c.visible) continue;
+
+      c.position.y = -0.95 + 1.55;
+      c.position.z = -0.25;
+
+      c.lookAt(camPos.x, c.position.y, camPos.z);
+      c.rotateY(Math.PI);
+      c.rotateX(0.12);
     }
   }
 
@@ -667,6 +727,11 @@ export const World = (() => {
   function stepPoker(dt){
     S.poker.t += dt;
 
+    // active player cycling (visual)
+    const active = Math.floor((S.poker.t*0.8) % S.bots.seated.length);
+    setActivePlayer(active);
+    updateActionTile(active);
+
     if(S.poker.phase==="deal"){
       if(S.poker.t>1.2){
         S.poker.t=0;
@@ -708,7 +773,7 @@ export const World = (() => {
       }
     } else if(S.poker.phase==="showdown"){
       updateChipAnimations(dt);
-      if(S.poker.t>4.2){
+      if(S.poker.t>6.0){ // ✅ hold winner longer
         S.poker.t=0;
         S.poker.phase="deal";
         S.poker.hand += 1;
@@ -735,7 +800,6 @@ export const World = (() => {
     root.add(W);
     S.lobby=W;
 
-    // elegant lighting
     W.add(new THREE.AmbientLight(0xffffff, 0.14));
     const key=new THREE.DirectionalLight(0xffffff, 1.05);
     key.position.set(7,15,6);
@@ -757,13 +821,11 @@ export const World = (() => {
       W.add(sp); W.add(sp.target);
     }
 
-    // dimensions
     const lobbyRadius=12.0, wallHeight=8.0, doorGap=THREE.MathUtils.degToRad(30);
     const pitRadius=4.6, pitDepth=0.95;
     const hallLen=10.0, hallW=4.2, hallH=4.8;
     const roomW=13.0, roomD=13.0, roomH=6.6;
 
-    // wall texture arcs (with door gaps)
     const q=(Math.PI*2)/4;
     for(let i=0;i<4;i++){
       const thetaStart=i*q + doorGap/2;
@@ -774,10 +836,8 @@ export const World = (() => {
       W.add(wall);
     }
 
-    // velvet + gold ribs (beauty)
     buildVelvetGoldRibs(W, lobbyRadius, wallHeight);
 
-    // lobby floors
     const ring=new THREE.Mesh(new THREE.RingGeometry(pitRadius, lobbyRadius, 256), matFloor());
     ring.rotation.x=-Math.PI/2;
     W.add(ring);
@@ -796,22 +856,18 @@ export const World = (() => {
     W.add(ground);
     S.ground=ground;
 
-    // pit wall
     const pitWall=new THREE.Mesh(new THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 180, 1, true), matDark());
     pitWall.position.y=-pitDepth/2;
     W.add(pitWall);
 
-    // neon rail + stairs
     buildNeonRail(W, pitRadius+0.35);
     buildStairs(W, 18.0, 11, pitDepth, 3.4);
 
-    // table, hood, HUD
     const table = buildTable(W, -pitDepth + 0.02);
     S.poker.table = table;
     buildTableHood(W);
     buildPokerHUD(W);
 
-    // chips + pot stack
     S.poker.chipKit = buildChipKit();
     const potStack=new THREE.Group();
     potStack.name="PotStack";
@@ -819,21 +875,17 @@ export const World = (() => {
     W.add(potStack);
     S.poker.potStack = potStack;
 
-    // seated bots
     buildSeatedBots(table);
 
-    // community cards (big + floating)
     const cardMat=new THREE.MeshStandardMaterial({ color:0xf2f2f2, roughness:0.55, metalness:0.0, side:THREE.DoubleSide });
     for(let i=0;i<5;i++){
       const c=new THREE.Mesh(new THREE.PlaneGeometry(0.58,0.84), cardMat);
-      c.position.set((i-2)*0.70, -pitDepth + 1.40, 0);
-      c.rotation.x = -Math.PI/2;
+      c.position.set((i-2)*0.70, -pitDepth + 1.55, -0.25);
       c.visible=false;
       W.add(c);
       S.poker.community.push(c);
     }
 
-    // halls + rooms + labels
     const defs=[
       { key:"poker", yaw:0,            label:"POKER" },
       { key:"store", yaw:Math.PI/2,    label:"STORE" },
@@ -887,14 +939,11 @@ export const World = (() => {
       W.add(frame);
     }
 
-    // store shell
     buildStoreShell(S.rooms.store);
 
-    // guard near VIP doorway
     const vipDoor = dirFromYaw(-Math.PI/2).multiplyScalar(lobbyRadius - 1.4);
     buildGuard(W, new THREE.Vector3(vipDoor.x, 0.02, vipDoor.z), new THREE.Vector3(0,0,0));
 
-    // jumbotrons + music
     const streamTex=initStream();
     const jumboMat=new THREE.MeshStandardMaterial({ map:streamTex, emissive:0xffffff, emissiveIntensity:0.35, roughness:0.6, metalness:0.1, side:THREE.DoubleSide });
     const jumboGeo=new THREE.PlaneGeometry(7.8, 4.4);
@@ -909,24 +958,23 @@ export const World = (() => {
       S.refs.jumbotrons.push(j);
     }
 
-    // dust motes
     buildDust(W);
 
-    // spawn (VIP-ish side but inside lobby, stable)
+    // spawn
     S.player.position.set(0,0.02,7.5);
     S.player.rotation.y = Math.PI;
 
-    log("[world] built ✅ v5.2");
+    ensureActionTile();
+    updatePokerHUD();
+    log("[world] built ✅ v5.3");
   }
 
-  // ---------- admin ----------
   function teleportTo(key){
     const p = S.rooms[key]?.position;
     if(!p) return;
     S.player.position.set(p.x, 0.02, p.z + 2.5);
   }
 
-  // ---------- public ----------
   return {
     async build(ctx){
       Object.assign(S, ctx);
@@ -934,7 +982,6 @@ export const World = (() => {
       S.ray = new S.THREE.Raycaster();
       ensureAimRing();
 
-      // teleport smoothing state
       S.tp = {
         smooth: new S.THREE.Vector3(0, 0.01, 0),
         lastValid: new S.THREE.Vector3(0, 0.01, 0),
@@ -942,12 +989,11 @@ export const World = (() => {
       };
 
       buildWorld();
-      updatePokerHUD();
-      log("[world] build complete ✅ v5.2");
+      log("[world] build complete ✅ v5.3");
     },
 
     frame(ctx, dt){
-      updateTeleport(ctx?.sticks, dt);
+      updateTeleport(ctx, dt);
       updateAudio();
       faceTags();
       stepPoker(dt);

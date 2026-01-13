@@ -2,94 +2,93 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <title>ScarlettVR Poker</title>
   <style>
-    html, body { margin:0; padding:0; width:100%; height:100%; background:#05070d; overflow:hidden;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
-    #app { position:fixed; inset:0; }
+    html, body { margin:0; padding:0; width:100%; height:100%; background:#060812; overflow:hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    #app { width:100vw; height:100vh; }
 
-    /* Debug HUD */
+    /* HUD */
     #hud {
-      position: fixed;
-      left: 12px; top: 12px;
-      width: min(560px, calc(100vw - 24px));
-      color: rgba(240,248,255,0.95);
-      z-index: 9999;
-      background: rgba(10,16,32,0.55);
+      position: fixed; left: 10px; top: 10px; z-index: 9999;
+      width: min(440px, 92vw);
+      background: rgba(8,12,22,0.62);
       border: 1px solid rgba(102,204,255,0.22);
-      border-radius: 18px;
-      padding: 14px;
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-      user-select: none;
-    }
-    #hud h1 { margin:0 0 10px 0; font-size: 18px; letter-spacing: 0.2px; }
-    .row { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
-    .btn {
-      appearance:none;
-      border: 1px solid rgba(102,204,255,0.25);
-      background: rgba(10,16,32,0.65);
-      color: rgba(240,248,255,0.95);
       border-radius: 14px;
-      padding: 10px 14px;
-      font-weight: 700;
-      cursor: pointer;
+      padding: 10px;
+      backdrop-filter: blur(8px);
+      color: rgba(235,245,255,0.95);
     }
-    .btn:active { transform: translateY(1px); }
+    #hud h3 { margin: 0 0 8px 0; font-size: 14px; letter-spacing: .5px; }
+    #hud .row { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px; }
+    #hud button {
+      padding: 8px 10px; border-radius: 12px;
+      border: 1px solid rgba(102,204,255,0.24);
+      background: rgba(10,16,32,0.55);
+      color: rgba(235,245,255,0.95);
+      font-weight: 800; cursor:pointer;
+    }
+    #hud button:active { transform: translateY(1px); }
     #hudlog {
       width: 100%;
-      height: 170px;
+      height: 150px;
+      background: rgba(0,0,0,0.35);
+      border: 1px solid rgba(102,204,255,0.16);
+      border-radius: 10px;
+      padding: 8px;
       overflow: auto;
-      white-space: pre-wrap;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-size: 12px;
-      line-height: 1.2;
-      background: rgba(0,0,0,0.22);
-      border-radius: 12px;
-      padding: 10px;
+      font-size: 11px;
+      white-space: pre-wrap;
       box-sizing: border-box;
-      border: 1px solid rgba(255,255,255,0.06);
     }
 
-    /* HUD Toggle button when hidden */
+    /* HUD Toggle Button (shows when HUD hidden) */
     #hudToggle {
-      position: fixed;
-      left: 12px; top: 12px;
-      z-index: 9999;
+      position: fixed; left: 10px; top: 10px; z-index: 9999;
       display: none;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(102,204,255,0.24);
+      background: rgba(10,16,32,0.55);
+      color: rgba(235,245,255,0.95);
+      font-weight: 900;
+      backdrop-filter: blur(8px);
+      cursor: pointer;
     }
-
-    /* Make the VRButton not overlap */
-    .webxr-button { position: fixed !important; left: 50% !important; transform: translateX(-50%); bottom: 18px !important; }
   </style>
 </head>
 <body>
   <div id="app"></div>
 
   <div id="hud">
-    <h1>ScarlettVR Debug HUD</h1>
+    <h3>SCARLETTVR HUD</h3>
 
     <div class="row">
-      <button class="btn" id="btnRecenter">Recenter</button>
-      <button class="btn" id="btnToggleHUD">Hide HUD</button>
+      <button id="btnToggleHUD">HUD OFF</button>
+      <button id="btnRecenter">RECENTER</button>
+      <button id="btnCopyLog">COPY LOG</button>
     </div>
 
     <div class="row">
-      <button class="btn" id="btnRoomLobby">Lobby</button>
-      <button class="btn" id="btnRoomStore">Store</button>
-      <button class="btn" id="btnRoomScorpion">Scorpion</button>
-      <button class="btn" id="btnRoomSpectate">Spectate</button>
+      <button id="btnSafeMode">SAFE MODE</button>
+      <button id="btnTogglePoker">POKER: ON</button>
+      <button id="btnToggleBots">BOTS: ON</button>
+      <button id="btnToggleFX">FX: ON</button>
     </div>
 
-    <div style="opacity:0.85; margin: 6px 0 10px 0;">
-      In VR this HUD auto-hides so it won’t float in your face.
+    <div class="row">
+      <button id="btnRoomLobby">LOBBY</button>
+      <button id="btnRoomPoker">POKER</button>
+      <button id="btnRoomStore">STORE</button>
+      <button id="btnRoomScorpion">SCORPION</button>
+      <button id="btnRoomSpectate">SPECTATE</button>
     </div>
 
-    <pre id="hudlog"></pre>
+    <div id="hudlog"></div>
   </div>
 
-  <button class="btn" id="hudToggle">Show HUD</button>
+  <button id="hudToggle">SHOW HUD</button>
 
   <script type="module" src="./index.js"></script>
 </body>

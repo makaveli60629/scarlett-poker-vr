@@ -1,15 +1,17 @@
-// /js/index.js — Scarlett Runtime (FULL) v1.2
+// /js/index.js — Scarlett Runtime (FULL) v1.3
 // ✅ Three.js via CDN (module)
 // ✅ VRButton + XR init
+// ✅ Quest controllers + lasers + select
+// ✅ Smooth locomotion (left stick) + snap turn (right stick)
 // ✅ Android touch look + WASD flycam (debug)
 // ✅ Imports world via relative path
 // ✅ Logs to HUD + exposes safe hooks
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
+import { World } from "./world.js";
 
-import { World } from "./world.js"; // IMPORTANT: relative import
-
+// -------------------- LOG --------------------
 const pad = (n) => String(n).padStart(2, "0");
 const now = () => {
   const d = new Date();
@@ -23,7 +25,7 @@ function log(m) {
   console.log(line);
 
   const el = document.getElementById("hud-log");
-  if (el) el.textContent = out.slice(-120).join("\n");
+  if (el) el.textContent = out.slice(-140).join("\n");
 
   if (typeof window.__HTML_LOG === "function") {
     try { window.__HTML_LOG(line); } catch {}
@@ -39,7 +41,7 @@ function setStatus(t) {
 log(`[index] runtime start ✅ base=${window.SCARLETT_BASE || "/"}`);
 setStatus("index init…");
 
-// ---------- Renderer / Scene / Camera ----------
+// -------------------- Renderer / Scene / Camera --------------------
 const app = document.getElementById("app") || document.body;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -47,7 +49,6 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.xr.enabled = true;
-
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -56,13 +57,13 @@ scene.background = new THREE.Color(0x000000);
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.03, 500);
 camera.position.set(0, 1.6, 2.0);
 
-// Player rig so XR can move it cleanly
+// Player rig: move this for locomotion + teleports
 const player = new THREE.Group();
 player.position.set(0, 0, 0);
 player.add(camera);
 scene.add(player);
 
-// lights (basic fallback even if world fails)
+// lights fallback
 {
   const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 0.9);
   scene.add(hemi);
@@ -77,7 +78,7 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// ---------- VR Button ----------
+// -------------------- VR Button --------------------
 try {
   const btn = VRButton.createButton(renderer);
   document.body.appendChild(btn);
@@ -86,7 +87,7 @@ try {
   log(`[index] VRButton failed ❌ ${e?.message || String(e)}`);
 }
 
-// Optional: manual Enter VR button in HUD
+// Manual Enter VR button in HUD
 const enterVrBtn = document.getElementById("enterVrBtn");
 enterVrBtn?.addEventListener("click", async () => {
   try {
@@ -103,7 +104,188 @@ enterVrBtn?.addEventListener("click", async () => {
   }
 });
 
-// ---------- Android / Desktop Debug Controls ----------
+// -------------------- Controllers + Lasers --------------------
+const controllers = {
+  left: null,
+  right: null,
+  grips: { left: null, right: null },
+  lines: { left: null, right: null },
+  raycaster: new THREE.Raycaster(),
+  tmpMat: new THREE.Matrix4(),
+  hit: new THREE.Vector3(),
+  stick: { lx: 0, ly: 0, rx: 0, ry: 0 },
+  snapReady: true
+};
+
+// laser line helper
+function makeLaserLine() {
+  const geo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0, 0, -1)
+  ]);
+  const mat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.9 });
+  const line = new THREE.Line(geo, mat);
+  line.name = "XR_LASER";
+  line.scale.z = 10;
+  return line;
+}
+
+function setupXRControllers() {
+  controllers.left = renderer.xr.getController(0);
+  controllers.right = renderer.xr.getController(1);
+
+  controllers.lines.left = makeLaserLine();
+  controllers.lines.right = makeLaserLine();
+
+  controllers.left.add(controllers.lines.left);
+  controllers.right.add(controllers.lines.right);
+
+  scene.add(controllers.left);
+  scene.add(controllers.right);
+
+  // optional grips (for models later)
+  controllers.grips.left = renderer.xr.getControllerGrip(0);
+  controllers.grips.right = renderer.xr.getControllerGrip(1);
+  scene.add(controllers.grips.left);
+  scene.add(controllers.grips.right);
+
+  // events
+  controllers.left.addEventListener("selectstart", (e) => onSelectStart(e, "left"));
+  controllers.right.addEventListener("selectstart", (e) => onSelectStart(e, "right"));
+  controllers.left.addEventListener("selectend", (e) => onSelectEnd(e, "left"));
+  controllers.right.addEventListener("selectend", (e) => onSelectEnd(e, "right"));
+
+  log("[xr] controllers + lasers installed ✅");
+}
+
+function onSelectStart(e, hand) {
+  // If something is hit and has onSelect(), call it
+  const hit = getRayHit(hand);
+  if (hit?.object?.userData?.onSelect) {
+    try { hit.object.userData.onSelect({ hand, hit, event: e }); } catch {}
+  }
+}
+function onSelectEnd() {}
+
+function getRayHit(hand) {
+  const ctrl = hand === "left" ? controllers.left : controllers.right;
+  if (!ctrl) return null;
+
+  controllers.tmpMat.identity().extractRotation(ctrl.matrixWorld);
+  controllers.raycaster.ray.origin.setFromMatrixPosition(ctrl.matrixWorld);
+  controllers.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(controllers.tmpMat);
+
+  // Intersect everything in the world root (best) or scene (fallback)
+  const root = worldRootForRaycast() || scene;
+  const hits = controllers.raycaster.intersectObjects(root.children, true);
+
+  // ignore lasers themselves
+  for (const h of hits) {
+    if (h.object?.name === "XR_LASER") continue;
+    return h;
+  }
+  return null;
+}
+
+function worldRootForRaycast() {
+  // If world created WORLD_ROOT group, use it
+  const wr = scene.getObjectByName("WORLD_ROOT");
+  return wr || null;
+}
+
+function updateLasers() {
+  // scale laser to hit distance, otherwise default length
+  ["left", "right"].forEach((hand) => {
+    const ctrl = hand === "left" ? controllers.left : controllers.right;
+    const line = hand === "left" ? controllers.lines.left : controllers.lines.right;
+    if (!ctrl || !line) return;
+
+    const hit = getRayHit(hand);
+    const dist = hit ? hit.distance : 10;
+    line.scale.z = Math.max(0.3, Math.min(25, dist));
+  });
+}
+
+// -------------------- VR Locomotion --------------------
+function sampleGamepads() {
+  controllers.stick.lx = 0; controllers.stick.ly = 0;
+  controllers.stick.rx = 0; controllers.stick.ry = 0;
+
+  const session = renderer.xr.getSession?.();
+  if (!session) return;
+
+  for (const src of session.inputSources) {
+    const gp = src.gamepad;
+    if (!gp || !gp.axes) continue;
+
+    // Most Quest controllers: axes[2,3] = right stick, axes[0,1] = left stick
+    // Some browsers use [0,1] for primary regardless of hand. We'll handle both.
+    const hand = src.handedness;
+
+    const ax0 = gp.axes[0] ?? 0;
+    const ax1 = gp.axes[1] ?? 0;
+    const ax2 = gp.axes[2] ?? 0;
+    const ax3 = gp.axes[3] ?? 0;
+
+    if (hand === "left") {
+      controllers.stick.lx = ax0;
+      controllers.stick.ly = ax1;
+      controllers.stick.rx = ax2;
+      controllers.stick.ry = ax3;
+    } else if (hand === "right") {
+      // Some implementations: right controller has primary on [0,1]
+      controllers.stick.rx = ax0;
+      controllers.stick.ry = ax1;
+    } else {
+      // no handedness: assume [0,1]=move [2,3]=turn
+      controllers.stick.lx = ax0;
+      controllers.stick.ly = ax1;
+      controllers.stick.rx = ax2;
+      controllers.stick.ry = ax3;
+    }
+  }
+}
+
+function applyVRLocomotion(dt) {
+  if (!renderer.xr.isPresenting) return;
+
+  sampleGamepads();
+
+  // deadzones
+  const dz = 0.15;
+  const lx = Math.abs(controllers.stick.lx) > dz ? controllers.stick.lx : 0;
+  const ly = Math.abs(controllers.stick.ly) > dz ? controllers.stick.ly : 0;
+  const rx = Math.abs(controllers.stick.rx) > dz ? controllers.stick.rx : 0;
+
+  // Smooth move based on headset yaw
+  const speed = 2.0; // m/s
+  if (lx || ly) {
+    const dir = new THREE.Vector3(lx, 0, ly); // note ly is forward/back (usually -forward)
+    // Convert to forward motion: invert Y axis
+    dir.z = ly;
+    dir.x = lx;
+
+    // Headset yaw
+    const eul = new THREE.Euler(0, 0, 0, "YXZ");
+    eul.setFromQuaternion(camera.quaternion);
+    const yaw = eul.y;
+
+    dir.applyAxisAngle(new THREE.Vector3(0,1,0), yaw);
+    dir.multiplyScalar(speed * dt);
+
+    player.position.add(dir);
+  }
+
+  // Snap turn on right stick
+  const snap = 30 * (Math.PI / 180);
+  if (Math.abs(rx) < 0.35) controllers.snapReady = true;
+  if (controllers.snapReady && Math.abs(rx) >= 0.6) {
+    player.rotation.y += (rx > 0 ? -snap : snap);
+    controllers.snapReady = false;
+  }
+}
+
+// -------------------- Android / Desktop Debug Controls --------------------
 const input = {
   keys: new Set(),
   dragging: false,
@@ -117,7 +299,6 @@ window.addEventListener("keydown", (e) => input.keys.add(e.key.toLowerCase()));
 window.addEventListener("keyup", (e) => input.keys.delete(e.key.toLowerCase()));
 
 renderer.domElement.addEventListener("pointerdown", (e) => {
-  // only for non-XR debug look
   if (renderer.xr.isPresenting) return;
   input.dragging = true;
   input.lastX = e.clientX;
@@ -125,9 +306,7 @@ renderer.domElement.addEventListener("pointerdown", (e) => {
   renderer.domElement.setPointerCapture?.(e.pointerId);
 });
 
-renderer.domElement.addEventListener("pointerup", () => {
-  input.dragging = false;
-});
+renderer.domElement.addEventListener("pointerup", () => { input.dragging = false; });
 
 renderer.domElement.addEventListener("pointermove", (e) => {
   if (renderer.xr.isPresenting) return;
@@ -138,54 +317,22 @@ renderer.domElement.addEventListener("pointermove", (e) => {
   input.lastX = e.clientX;
   input.lastY = e.clientY;
 
-  // touch look
   input.yaw -= dx * 0.003;
   input.pitch -= dy * 0.003;
   input.pitch = Math.max(-1.2, Math.min(1.2, input.pitch));
 });
 
-// ---------- World Load ----------
-let worldApi = null;
-
-(async () => {
-  try {
-    setStatus("loading world…");
-    log("[index] importing + init world…");
-
-    // Your world.js should export World.init({ ... }) safely
-    worldApi = await World.init?.({
-      THREE,
-      scene,
-      renderer,
-      camera,
-      player,
-      controllers: null,
-      log,
-      BUILD: Date.now()
-    });
-
-    log("[index] world init ✅");
-    setStatus("ready");
-  } catch (e) {
-    log(`[index] world init FAILED ❌ ${e?.message || String(e)}`);
-    setStatus("world failed ❌ (see log)");
-  }
-})();
-
-// ---------- Animate ----------
 const v3 = new THREE.Vector3();
 const forward = new THREE.Vector3();
 
 function updateDebugControls(dt) {
   if (renderer.xr.isPresenting) return;
 
-  // apply look
   player.rotation.y = input.yaw;
   camera.rotation.x = input.pitch;
 
   const speed = input.keys.has("shift") ? 4.5 : 2.2;
 
-  // WASD move in facing direction (flat)
   forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
   forward.y = 0;
   forward.normalize();
@@ -208,6 +355,45 @@ function updateDebugControls(dt) {
   }
 }
 
+// -------------------- XR session hooks --------------------
+renderer.xr.addEventListener("sessionstart", () => {
+  log("[xr] sessionstart ✅");
+  setupXRControllers();
+});
+
+renderer.xr.addEventListener("sessionend", () => {
+  log("[xr] sessionend ✅");
+});
+
+// -------------------- World Load --------------------
+let worldApi = null;
+
+(async () => {
+  try {
+    setStatus("loading world…");
+    log("[index] importing + init world…");
+
+    worldApi = await World.init?.({
+      THREE,
+      scene,
+      renderer,
+      camera,
+      player,
+      controllers, // ✅ now provided
+      log,
+      BUILD: Date.now(),
+      flags: { safeMode: false, poker: true, bots: true, fx: true }
+    });
+
+    log("[index] world init ✅");
+    setStatus("ready");
+  } catch (e) {
+    log(`[index] world init FAILED ❌ ${e?.message || String(e)}`);
+    setStatus("world failed ❌ (see log)");
+  }
+})();
+
+// -------------------- Animate --------------------
 let last = performance.now();
 renderer.setAnimationLoop(() => {
   const t = performance.now();
@@ -216,9 +402,13 @@ renderer.setAnimationLoop(() => {
 
   try {
     updateDebugControls(dt);
+    applyVRLocomotion(dt);
+    if (renderer.xr.isPresenting) updateLasers();
+
     worldApi?.tick?.(dt);
+    worldApi?.update?.(dt, t);
   } catch (e) {
-    log(`[index] tick error ❌ ${e?.message || String(e)}`);
+    log(`[index] loop error ❌ ${e?.message || String(e)}`);
   }
 
   renderer.render(scene, camera);

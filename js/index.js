@@ -1,30 +1,21 @@
-// /index.js — ScarlettVR Boot v4.1 (XR-safe + Android controls)
-// ✅ Render loop starts immediately (Quest 3-dots prevention)
-// ✅ Loads world async after loop
-// ✅ Auto-hides HUD in VR
-// ✅ Android touch controls are isolated in /core/android_controls.js
+// /index.js — ScarlettVR Index (Quest-safe XR + Android Debug Controls + HUD Toggles)
+// ✅ XR controls unaffected (we don't remap XR gamepads here)
+// ✅ Android touch joystick + look drag
+// ✅ HUD hide/show, Safe Mode, Poker/Bots/FX toggles
+// ✅ Render loop starts immediately (prevents Quest 3-dots)
+
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
-import { AndroidControls } from "./core/android_controls.js";
 
-const BUILD = `INDEX_${Date.now()}`;
-
-// Runtime feature flags (safe to toggle from HUD)
-const FLAGS = {
-  safeMode: false,
-  poker: true,
-  bots: true,
-  fx: true,
-};
-window.__SCARLETT_FLAGS = FLAGS;
-
+const BUILD = `BUILD_${Date.now()}`;
 const $ = (sel) => document.querySelector(sel);
 
 const hud = $("#hud");
 const hudToggle = $("#hudToggle");
 const hudlog = $("#hudlog");
 
-function safeJson(x){ try { return JSON.stringify(x); } catch { return String(x); } }
+function safeJson(x) { try { return JSON.stringify(x); } catch { return String(x); } }
+
 function log(...args) {
   const msg = args.map(a => (typeof a === "string" ? a : safeJson(a))).join(" ");
   console.log(msg);
@@ -33,15 +24,26 @@ function log(...args) {
     hudlog.scrollTop = hudlog.scrollHeight;
   }
 }
+
 function setHUDVisible(on) {
   if (!hud || !hudToggle) return;
   hud.style.display = on ? "block" : "none";
   hudToggle.style.display = on ? "none" : "block";
 }
+
 $("#btnToggleHUD")?.addEventListener("click", () => setHUDVisible(false));
 hudToggle?.addEventListener("click", () => setHUDVisible(true));
 
-log(`[index] boot ✅ build=${BUILD}`);
+$("#btnCopyLog")?.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(hudlog?.textContent || "");
+    log("[hud] log copied ✅");
+  } catch (e) {
+    log("[hud] copy failed:", String(e?.message || e));
+  }
+});
+
+log(`[index] boot ✅ ${BUILD}`);
 log(`[env] secureContext=${window.isSecureContext}`);
 log(`[env] ua=${navigator.userAgent}`);
 log(`[env] navigator.xr=${!!navigator.xr}`);
@@ -56,25 +58,25 @@ renderer.xr.enabled = true;
 renderer.xr.setReferenceSpaceType("local-floor");
 app.appendChild(renderer.domElement);
 
-// Scene + Rig
+// Scene + Camera + Rig
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x05070d);
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 2500);
 
-// Rig: yaw on player, pitch on cameraPitch
 const player = new THREE.Group();
 player.name = "PlayerRig";
 scene.add(player);
 
+// pitch group (for Android look)
 const cameraPitch = new THREE.Group();
 cameraPitch.name = "CameraPitch";
-player.add(cameraPitch);
 cameraPitch.add(camera);
+player.add(cameraPitch);
 
 camera.position.set(0, 1.65, 3.5);
 
-// XR controllers (World uses these for lasers/teleport)
+// Controllers (XR only)
 const controllers = {
   c0: renderer.xr.getController(0),
   c1: renderer.xr.getController(1),
@@ -87,85 +89,46 @@ player.add(controllers.c0, controllers.c1, controllers.g0, controllers.g1);
 document.body.appendChild(VRButton.createButton(renderer));
 log("[index] VRButton appended ✅");
 
-// Android controls (2D debug)
-const android = AndroidControls.init({
-  renderer, player, cameraPitch,
-  setHUDVisible,
-  log
-});
+// Flags (Safe Mode + toggles)
+const FLAGS = {
+  safeMode: false,
+  poker: true,
+  bots: true,
+  fx: true,
+};
+window.__SCARLETT_FLAGS__ = FLAGS;
 
-// Auto-hide HUD in XR; disable android controls in XR
+function syncButtons() {
+  $("#btnTogglePoker").textContent = `POKER: ${FLAGS.poker ? "ON" : "OFF"}`;
+  $("#btnToggleBots").textContent = `BOTS: ${FLAGS.bots ? "ON" : "OFF"}`;
+  $("#btnToggleFX").textContent = `FX: ${FLAGS.fx ? "ON" : "OFF"}`;
+  $("#btnSafeMode").textContent = `SAFE MODE${FLAGS.safeMode ? " (ON)" : ""}`;
+}
+syncButtons();
+
+$("#btnSafeMode")?.addEventListener("click", () => {
+  FLAGS.safeMode = !FLAGS.safeMode;
+  if (FLAGS.safeMode) { FLAGS.poker = false; FLAGS.bots = false; FLAGS.fx = false; }
+  syncButtons();
+  log(`[flags] safeMode=${FLAGS.safeMode} poker=${FLAGS.poker} bots=${FLAGS.bots} fx=${FLAGS.fx}`);
+});
+$("#btnTogglePoker")?.addEventListener("click", () => { if (!FLAGS.safeMode) FLAGS.poker = !FLAGS.poker; syncButtons(); log(`[flags] poker=${FLAGS.poker}`); });
+$("#btnToggleBots")?.addEventListener("click", () => { if (!FLAGS.safeMode) FLAGS.bots = !FLAGS.bots; syncButtons(); log(`[flags] bots=${FLAGS.bots}`); });
+$("#btnToggleFX")?.addEventListener("click", () => { if (!FLAGS.safeMode) FLAGS.fx = !FLAGS.fx; syncButtons(); log(`[flags] fx=${FLAGS.fx}`); });
+
+// Auto-hide HUD in VR (prevents floating UI in face)
 renderer.xr.addEventListener("sessionstart", () => {
   setHUDVisible(false);
-  android.setEnabled(false);
-  log("[xr] sessionstart ✅ HUD hidden, android controls disabled");
+  androidControls.setEnabled(false);
+  log("[xr] sessionstart ✅ HUD hidden / Android controls disabled");
 });
 renderer.xr.addEventListener("sessionend", () => {
   setHUDVisible(true);
-  android.setEnabled(true);
-  log("[xr] sessionend ✅ HUD shown, android controls enabled");
+  androidControls.setEnabled(true);
+  log("[xr] sessionend ✅ HUD shown / Android controls enabled");
 });
 
 // Recenter
-
-// Feature toggles
-const btnSafeMode = $("#btnSafeMode");
-const btnTogglePoker = $("#btnTogglePoker");
-const btnToggleBots = $("#btnToggleBots");
-const btnToggleFX = $("#btnToggleFX");
-const btnCopyLog = $("#btnCopyLog");
-
-function refreshFlagButtons() {
-  if (btnTogglePoker) btnTogglePoker.textContent = `Poker: ${FLAGS.poker ? "ON" : "OFF"}`;
-  if (btnToggleBots) btnToggleBots.textContent = `Bots: ${FLAGS.bots ? "ON" : "OFF"}`;
-  if (btnToggleFX) btnToggleFX.textContent = `FX: ${FLAGS.fx ? "ON" : "OFF"}`;
-  if (btnSafeMode) btnSafeMode.textContent = FLAGS.safeMode ? "Safe Mode: ON" : "Safe Mode";
-}
-refreshFlagButtons();
-
-btnSafeMode?.addEventListener("click", () => {
-  FLAGS.safeMode = !FLAGS.safeMode;
-  // In safe mode we force-disable heavy modules
-  if (FLAGS.safeMode) { FLAGS.poker = false; FLAGS.bots = false; FLAGS.fx = false; }
-  refreshFlagButtons();
-  worldApi?.setFlags?.(FLAGS);
-  log(`[hud] safeMode=${FLAGS.safeMode} poker=${FLAGS.poker} bots=${FLAGS.bots} fx=${FLAGS.fx}`);
-});
-
-btnTogglePoker?.addEventListener("click", () => {
-  if (FLAGS.safeMode) return; // locked
-  FLAGS.poker = !FLAGS.poker;
-  refreshFlagButtons();
-  worldApi?.setFlags?.(FLAGS);
-  log(`[hud] poker=${FLAGS.poker}`);
-});
-
-btnToggleBots?.addEventListener("click", () => {
-  if (FLAGS.safeMode) return;
-  FLAGS.bots = !FLAGS.bots;
-  refreshFlagButtons();
-  worldApi?.setFlags?.(FLAGS);
-  log(`[hud] bots=${FLAGS.bots}`);
-});
-
-btnToggleFX?.addEventListener("click", () => {
-  if (FLAGS.safeMode) return;
-  FLAGS.fx = !FLAGS.fx;
-  refreshFlagButtons();
-  worldApi?.setFlags?.(FLAGS);
-  log(`[hud] fx=${FLAGS.fx}`);
-});
-
-btnCopyLog?.addEventListener("click", async () => {
-  try {
-    const text = (hudlog?.textContent || "").trim();
-    await navigator.clipboard.writeText(text);
-    log("[hud] log copied ✅");
-  } catch (e) {
-    log("[hud] copy failed:", String(e?.message || e));
-  }
-});
-
 $("#btnRecenter")?.addEventListener("click", () => {
   player.position.set(0, 0, 0);
   player.rotation.set(0, 0, 0);
@@ -181,7 +144,216 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Render loop first (Quest stability)
+// ------------------------------
+// ANDROID / 2D TOUCH CONTROLS
+// ------------------------------
+const androidControls = (() => {
+  const state = {
+    enabled: true,
+    isMobile: /Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
+    ui: null,
+
+    joyActive: false,
+    joyId: null,
+    joyCenter: { x: 0, y: 0 },
+    joyVec: { x: 0, y: 0 },
+
+    lookActive: false,
+    lookId: null,
+    lookLast: { x: 0, y: 0 },
+
+    yaw: 0,
+    pitch: 0,
+
+    moveSpeed: 2.6,
+    lookSpeed: 0.0032,
+    pitchClamp: 1.15,
+  };
+
+  function setEnabled(v) {
+    state.enabled = !!v;
+    if (state.ui) state.ui.style.display = (state.enabled && state.isMobile) ? "block" : "none";
+    if (!state.enabled) {
+      state.joyActive = false;
+      state.lookActive = false;
+      state.joyVec.x = 0; state.joyVec.y = 0;
+    }
+  }
+
+  function ensureUI() {
+    if (!state.isMobile) return;
+    if (state.ui) return;
+
+    const ui = document.createElement("div");
+    ui.style.position = "fixed";
+    ui.style.left = "0";
+    ui.style.top = "0";
+    ui.style.width = "100vw";
+    ui.style.height = "100vh";
+    ui.style.pointerEvents = "none";
+    ui.style.zIndex = "9998";
+    ui.style.touchAction = "none";
+    document.body.appendChild(ui);
+
+    // joystick base
+    const base = document.createElement("div");
+    base.style.position = "absolute";
+    base.style.left = "6vw";
+    base.style.bottom = "10vh";
+    base.style.width = "22vmin";
+    base.style.height = "22vmin";
+    base.style.borderRadius = "999px";
+    base.style.background = "rgba(20,30,50,0.22)";
+    base.style.border = "1px solid rgba(102,204,255,0.25)";
+    base.style.pointerEvents = "auto";
+    base.style.touchAction = "none";
+    ui.appendChild(base);
+
+    const stick = document.createElement("div");
+    stick.style.position = "absolute";
+    stick.style.left = "50%";
+    stick.style.top = "50%";
+    stick.style.transform = "translate(-50%,-50%)";
+    stick.style.width = "10vmin";
+    stick.style.height = "10vmin";
+    stick.style.borderRadius = "999px";
+    stick.style.background = "rgba(102,204,255,0.25)";
+    stick.style.border = "1px solid rgba(102,204,255,0.35)";
+    stick.style.pointerEvents = "none";
+    base.appendChild(stick);
+
+    // look zone (right side)
+    const look = document.createElement("div");
+    look.style.position = "absolute";
+    look.style.right = "0";
+    look.style.top = "0";
+    look.style.width = "55vw";
+    look.style.height = "100vh";
+    look.style.pointerEvents = "auto";
+    look.style.touchAction = "none";
+    look.style.background = "rgba(0,0,0,0)";
+    ui.appendChild(look);
+
+    // joystick handlers
+    base.addEventListener("pointerdown", (e) => {
+      if (!state.enabled || renderer.xr.isPresenting) return;
+      state.joyActive = true;
+      state.joyId = e.pointerId;
+      base.setPointerCapture(e.pointerId);
+      const r = base.getBoundingClientRect();
+      state.joyCenter.x = r.left + r.width / 2;
+      state.joyCenter.y = r.top + r.height / 2;
+      updateJoy(e.clientX, e.clientY, r.width * 0.38);
+    });
+
+    base.addEventListener("pointermove", (e) => {
+      if (!state.joyActive || e.pointerId !== state.joyId) return;
+      const r = base.getBoundingClientRect();
+      updateJoy(e.clientX, e.clientY, r.width * 0.38);
+    });
+
+    base.addEventListener("pointerup", (e) => {
+      if (e.pointerId !== state.joyId) return;
+      state.joyActive = false;
+      state.joyId = null;
+      state.joyVec.x = 0; state.joyVec.y = 0;
+      stick.style.left = "50%";
+      stick.style.top = "50%";
+    });
+
+    base.addEventListener("pointercancel", () => {
+      state.joyActive = false;
+      state.joyId = null;
+      state.joyVec.x = 0; state.joyVec.y = 0;
+      stick.style.left = "50%";
+      stick.style.top = "50%";
+    });
+
+    function updateJoy(px, py, maxR) {
+      const dx = px - state.joyCenter.x;
+      const dy = py - state.joyCenter.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const nx = dx / d, ny = dy / d;
+      const mag = Math.min(1, d / maxR);
+
+      state.joyVec.x = nx * mag;
+      state.joyVec.y = ny * mag;
+
+      stick.style.left = `${50 + state.joyVec.x * 35}%`;
+      stick.style.top  = `${50 + state.joyVec.y * 35}%`;
+    }
+
+    // look handlers
+    look.addEventListener("pointerdown", (e) => {
+      if (!state.enabled || renderer.xr.isPresenting) return;
+      state.lookActive = true;
+      state.lookId = e.pointerId;
+      look.setPointerCapture(e.pointerId);
+      state.lookLast.x = e.clientX;
+      state.lookLast.y = e.clientY;
+    });
+
+    look.addEventListener("pointermove", (e) => {
+      if (!state.lookActive || e.pointerId !== state.lookId) return;
+      const dx = e.clientX - state.lookLast.x;
+      const dy = e.clientY - state.lookLast.y;
+      state.lookLast.x = e.clientX;
+      state.lookLast.y = e.clientY;
+
+      state.yaw   -= dx * state.lookSpeed;
+      state.pitch -= dy * state.lookSpeed;
+      state.pitch = Math.max(-state.pitchClamp, Math.min(state.pitchClamp, state.pitch));
+
+      player.rotation.y = state.yaw;
+      cameraPitch.rotation.x = state.pitch;
+    });
+
+    look.addEventListener("pointerup", (e) => {
+      if (e.pointerId !== state.lookId) return;
+      state.lookActive = false;
+      state.lookId = null;
+    });
+
+    look.addEventListener("pointercancel", () => {
+      state.lookActive = false;
+      state.lookId = null;
+    });
+
+    state.ui = ui;
+    setEnabled(true);
+    log("[android] touch controls UI ready ✅");
+  }
+
+  function update(dt) {
+    if (!state.enabled || renderer.xr.isPresenting) return;
+    if (!state.isMobile) return;
+
+    const dead = 0.08;
+
+    // y is dy; up is negative -> forward should be positive
+    const forward = -state.joyVec.y;
+    const strafe  =  state.joyVec.x;
+
+    const f = Math.abs(forward) < dead ? 0 : forward;
+    const s = Math.abs(strafe)  < dead ? 0 : strafe;
+    if (f === 0 && s === 0) return;
+
+    const yaw = player.rotation.y;
+    const sin = Math.sin(yaw), cos = Math.cos(yaw);
+
+    const speed = state.moveSpeed;
+    player.position.x += (s * cos + f * sin) * speed * dt;
+    player.position.z += (f * cos - s * sin) * speed * dt;
+  }
+
+  return { ensureUI, update, setEnabled };
+})();
+
+androidControls.ensureUI();
+
+// ------------------------------
+// Render loop first (Quest safe)
+// ------------------------------
 let worldApi = null;
 let worldReady = false;
 
@@ -191,7 +363,7 @@ renderer.setAnimationLoop(() => {
   const t = clock.elapsedTime;
 
   try {
-    android.update(dt);
+    androidControls.update(dt);
 
     if (worldReady && worldApi?.update) worldApi.update(dt, t);
     renderer.render(scene, camera);
@@ -200,9 +372,10 @@ renderer.setAnimationLoop(() => {
     try { renderer.render(scene, camera); } catch {}
   }
 });
+
 log("[index] render loop started ✅");
 
-// Load world async AFTER loop is running
+// Load world after loop starts
 (async () => {
   try {
     log("[world] importing…");
@@ -210,14 +383,17 @@ log("[index] render loop started ✅");
     log("[world] import ✅");
 
     log("[world] init…");
-    worldApi = await mod.World.init({ THREE, scene, renderer, camera, player, controllers, log, BUILD, FLAGS });
-    worldApi?.setFlags?.(FLAGS);
-    refreshFlagButtons();
+    worldApi = await mod.World.init({
+      THREE, scene, renderer, camera, player, controllers, log,
+      BUILD,
+      flags: FLAGS
+    });
     worldReady = true;
     log("[world] init ✅");
 
     // Room buttons
     $("#btnRoomLobby")?.addEventListener("click", () => worldApi?.setRoom?.("lobby"));
+    $("#btnRoomPoker")?.addEventListener("click", () => worldApi?.setRoom?.("poker"));
     $("#btnRoomStore")?.addEventListener("click", () => worldApi?.setRoom?.("store"));
     $("#btnRoomScorpion")?.addEventListener("click", () => worldApi?.setRoom?.("scorpion"));
     $("#btnRoomSpectate")?.addEventListener("click", () => worldApi?.setRoom?.("spectate"));

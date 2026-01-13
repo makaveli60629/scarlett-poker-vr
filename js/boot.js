@@ -1,7 +1,4 @@
 // /js/boot.js — Scarlett Boot Loader v9.5 ULT (FULL)
-// ✅ Base detect for GitHub Pages
-// ✅ Preflight environment diagnostics
-// ✅ Exposes window.SCARLETT_BASE + window.SCARLETT_DIAG
 
 (() => {
   const pad = (n) => String(n).padStart(2, "0");
@@ -13,7 +10,7 @@
     out.push(line);
     console.log(line);
     const el = document.getElementById("hud-log");
-    if (el) el.textContent = out.slice(-220).join("\n");
+    if (el) el.textContent = out.slice(-260).join("\n");
     if (typeof window.__HTML_LOG === "function") { try { window.__HTML_LOG(line); } catch {} }
   };
   const setStatus = (t) => { if (typeof window.__SET_BOOT_STATUS === "function") { try { window.__SET_BOOT_STATUS(t); } catch {} } };

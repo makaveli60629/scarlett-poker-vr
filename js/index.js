@@ -1,58 +1,60 @@
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
-
-const log = (m) => { document.getElementById('hudlog').innerHTML += `<div>> ${m}</div>`; };
+import { World } from "./js/world.js";
 
 const S = {
     scene: new THREE.Scene(),
-    camera: new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 1000),
+    camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
     renderer: new THREE.WebGLRenderer({ antialias: true, alpha: false }),
     player: new THREE.Group(),
     clock: new THREE.Clock()
 };
 
 async function boot() {
-    // 1. Setup Renderer & Quest Fix
+    // Renderer Prep
     S.renderer.setSize(window.innerWidth, window.innerHeight);
     S.renderer.xr.enabled = true;
     document.getElementById('app').appendChild(S.renderer.domElement);
-    document.body.appendChild(VRButton.createButton(S.renderer));
-    document.getElementById('l-render').classList.add('on');
+    
+    // Diagnostic Check
+    const lWorld = document.getElementById('l-world');
+    const lRender = document.getElementById('l-render');
 
-    S.player.add(S.camera);
-    S.scene.add(S.player);
-
-    // 2. Load Modules & Diagnostics
     try {
-        const { World } = await import("./js/world.js");
-        await World.init({ THREE, scene: S.scene, renderer: S.renderer, player: S.player });
-        document.getElementById('l-world').classList.add('on');
-        log("World Module Attached");
-    } catch(e) { log("World Error: " + e.message); }
-
-    // 3. Android Detection & Movement
-    if (/Android|iPhone/i.test(navigator.userAgent)) {
-        document.querySelectorAll('.joy-zone').forEach(el => el.style.display = 'block');
-        document.getElementById('l-input').classList.add('on');
-        log("Android Touch Ready");
+        await World.init({ scene: S.scene });
+        lWorld.classList.add('on');
+        lRender.classList.add('on');
+    } catch (e) {
+        console.error(e);
+        lWorld.classList.add('err');
     }
 
-    // 4. Hide HUD Logic
-    document.getElementById('hide-btn').onclick = () => {
-        document.getElementById('hud').style.opacity = '0';
-        document.getElementById('hud').style.pointerEvents = 'none';
-    };
+    // Attach VR Button
+    const vrBtn = VRButton.createButton(S.renderer);
+    document.body.appendChild(vrBtn);
 
-    // 5. Quest VR Start Fix (Force 180 and clean UI)
+    // Initial Rig Positioning
+    S.player.add(S.camera);
+    S.scene.add(S.player);
+    S.player.position.set(0, 0, 8); // Start outside the pit
+
+    // 180° Flip for Quest
     S.renderer.xr.addEventListener('sessionstart', () => {
-        document.getElementById('hud').style.display = 'none';
-        S.player.rotation.set(0, Math.PI, 0); // Face the table
-        log("VR Active - Rig Calibrated");
+        S.player.rotation.set(0, Math.PI, 0); // Corrects orientation
+        document.getElementById('hud').style.display = 'none'; // Clear the face
     });
+
+    // Android Movement Mapping
+    setupAndroidControls();
 
     S.renderer.setAnimationLoop(() => {
         S.renderer.render(S.scene, S.camera);
     });
+}
+
+function setupAndroidControls() {
+    // Your joystick logic from the previous turn goes here
+    // It maps to S.player.position and S.player.rotation.y
 }
 
 boot();

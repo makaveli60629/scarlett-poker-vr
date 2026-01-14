@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8"><title>Scarlett VR - Modular</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ScarlettVR Ultimate Monolith</title>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
-        #overlay { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 1000; display: flex; gap: 10px; }
-        button { padding: 12px 20px; background: #00ffff; border: none; font-weight: bold; cursor: pointer; border-radius: 5px; }
+        body { margin: 0; background: #05070d; overflow: hidden; font-family: monospace; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #00ffff; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 8px; border: 1px solid #00ffff; }
+        .webxr-button { border: 1px solid #00ffff !important; background: rgba(0,0,0,0.8) !important; color: #00ffff !important; }
     </style>
     <script type="importmap">
     {
@@ -17,9 +19,161 @@
     </script>
 </head>
 <body>
-    <div id="overlay">
-        <button id="recenterBtn">RE-CENTER CAMERA</button>
+    <div id="ui">
+        <b>SCARLETT_ULTIMATE_V10.5</b><br>
+        L-Stick: Move | R-Stick: Turn<br>
+        Status: <span id="status">INITIALIZING</span>
     </div>
-    <script type="module" src="./js/index.js"></script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
+        import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+
+        // --- GLOBAL ENGINE STATE ---
+        const S = {
+            scene: new THREE.Scene(),
+            camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
+            renderer: new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" }),
+            player: new THREE.Group(),
+            clock: new THREE.Clock(),
+            hands: [],
+            controllers: [],
+            bots: [],
+            floors: []
+        };
+
+        // --- CORE CONTROLS v1.0 (INTEGRATED) ---
+        const Controls = {
+            moveSpeed: 2.5,
+            snapAngle: Math.PI / 4,
+            snapCooldown: 0.25,
+            _snapTimer: 0,
+            deadzone: 0.18,
+            
+            update(dt) {
+                const session = S.renderer.xr.getSession();
+                if (!session) return;
+
+                this._snapTimer = Math.max(0, this._snapTimer - dt);
+
+                for (const source of session.inputSources) {
+                    if (!source.gamepad) continue;
+                    const axes = source.gamepad.axes;
+
+                    // LEFT STICK: MOVEMENT (Axes 2/3 or 0/1)
+                    if (source.handedness === 'left') {
+                        const lx = axes[2] || axes[0] || 0;
+                        const ly = axes[3] || axes[1] || 0;
+                        
+                        if (Math.abs(lx) > this.deadzone || Math.abs(ly) > this.deadzone) {
+                            const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(S.camera.quaternion);
+                            fwd.y = 0; fwd.normalize();
+                            const side = new THREE.Vector3(1, 0, 0).applyQuaternion(S.camera.quaternion);
+                            side.y = 0; side.normalize();
+
+                            S.player.position.addScaledVector(fwd, -ly * this.moveSpeed * dt);
+                            S.player.position.addScaledVector(side, lx * this.moveSpeed * dt);
+                        }
+                    }
+
+                    // RIGHT STICK: SNAP TURN
+                    if (source.handedness === 'right' && this._snapTimer <= 0) {
+                        const rx = axes[2] || axes[0] || 0;
+                        if (Math.abs(rx) > 0.7) {
+                            S.player.rotation.y -= Math.sign(rx) * this.snapAngle;
+                            this._snapTimer = this.snapCooldown;
+                        }
+                    }
+                }
+            }
+        };
+
+        // --- WORLD & HUMANOIDS ---
+        function buildWorld() {
+            // Lighting
+            const hemi = new THREE.HemisphereLight(0xdaf0ff, 0x0b0f1a, 1.2);
+            S.scene.add(hemi);
+            const pitSpot = new THREE.PointLight(0xffffff, 1.5, 20);
+            pitSpot.position.set(0, 5, 0);
+            S.scene.add(pitSpot);
+
+            // Ground
+            const floorGeo = new THREE.PlaneGeometry(100, 100);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x0a0c12 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            S.scene.add(floor);
+
+            // Sunken Pit Table
+            const table = new THREE.Mesh(
+                new THREE.CylinderGeometry(3, 3, 0.4, 32),
+                new THREE.MeshStandardMaterial({ color: 0xd2b46a, metalness: 0.8, roughness: 0.2 })
+            );
+            table.position.set(0, 0.2, 0);
+            S.scene.add(table);
+
+            // Spawn 6 Humanoids (Your humanoids.js logic)
+            const botMat = new THREE.MeshStandardMaterial({ color: 0xe6e6e6 });
+            for (let i = 0; i < 6; i++) {
+                const angle = (i / 6) * Math.PI * 2;
+                const bot = new THREE.Group();
+                const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.42, 6, 10), botMat);
+                torso.position.y = 1.15;
+                bot.add(torso);
+                bot.position.set(Math.cos(angle) * 4.5, 0, Math.sin(angle) * 4.5);
+                bot.lookAt(0, 0, 0);
+                S.scene.add(bot);
+                S.bots.push(bot);
+            }
+        }
+
+        async function init() {
+            S.renderer.setSize(window.innerWidth, window.innerHeight);
+            S.renderer.xr.enabled = true;
+            document.body.appendChild(S.renderer.domElement);
+            document.body.appendChild(VRButton.createButton(S.renderer));
+
+            S.scene.add(S.player);
+            S.player.add(S.camera);
+            S.player.position.set(0, 0, 8); // Start back from table
+
+            // Lasers & Hands
+            const handFactory = new XRHandModelFactory();
+            for (let i = 0; i < 2; i++) {
+                const controller = S.renderer.xr.getController(i);
+                const laser = new THREE.Line(
+                    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]),
+                    new THREE.LineBasicMaterial({ color: 0x00ffff })
+                );
+                controller.add(laser);
+                S.player.add(controller);
+
+                const hand = S.renderer.xr.getHand(i);
+                hand.add(handFactory.createHandModel(hand, 'mesh'));
+                S.player.add(hand);
+            }
+
+            buildWorld();
+
+            // RE-CENTER ON VR START
+            S.renderer.xr.addEventListener('sessionstart', () => {
+                document.getElementById('status').innerText = "VR ACTIVE";
+                setTimeout(() => { S.player.lookAt(0, 0, 0); }, 1000);
+            });
+
+            S.renderer.setAnimationLoop(() => {
+                const dt = S.clock.getDelta();
+                Controls.update(dt);
+                // Idle bot motion
+                S.bots.forEach((b, i) => {
+                    b.position.y = Math.sin(S.clock.elapsedTime + i) * 0.05;
+                });
+                S.renderer.render(S.scene, S.camera);
+            });
+        }
+
+        init();
+    </script>
 </body>
 </html>

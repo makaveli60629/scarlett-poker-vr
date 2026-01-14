@@ -1,9 +1,10 @@
 export const Tables = {
-    build(scene) {
-        const geo = new THREE.CylinderGeometry(1.2, 1.2, 0.1, 32);
-        const mat = new THREE.MeshStandardMaterial({ color: 0x004400 });
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.position.y = 0.8;
-        scene.add(mesh);
-    }
-};
+  build(scene) {
+    const table = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.5,1.5,0.2,32),
+      new THREE.MeshStandardMaterial({ color: 0x006600 })
+    )
+    table.position.y = 0.75
+    scene.add(table)
+  }
+}

@@ -2,12 +2,36 @@
 <html lang="en">
 <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ScarlettVR Ultimate V18</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>ScarlettVR Diagnostic Hub</title>
     <style>
-        body { margin: 0; background: #05070d; overflow: hidden; font-family: monospace; }
-        #ui { position: absolute; top: 10px; left: 10px; color: #00ffff; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.6); padding: 10px; border: 1px solid #00ffff; border-radius: 8px; }
+        body { margin: 0; background: #05070d; color: #00ffff; font-family: 'Courier New', monospace; overflow: hidden; }
+        #diag-hud { position: absolute; top: 10px; left: 10px; width: 300px; background: rgba(0, 20, 40, 0.8); border: 1px solid #00ffff; padding: 15px; z-index: 100; border-radius: 8px; pointer-events: auto; }
+        .status-item { display: flex; justify-content: space-between; margin-bottom: 5px; }
+        .lamp { width: 12px; height: 12px; border-radius: 50%; display: inline-block; background: #333; }
+        .on { background: #00ff00; box-shadow: 0 0 10px #00ff00; }
+        .err { background: #ff0000; box-shadow: 0 0 10px #ff0000; }
+        #log-window { height: 150px; overflow-y: auto; background: #000; font-size: 10px; padding: 5px; margin-top: 10px; border: 1px solid #333; }
+        /* Touch Joysticks for Android Debugging */
+        .joystick { position: fixed; bottom: 40px; width: 100px; height: 100px; background: rgba(255,255,255,0.1); border-radius: 50%; display: none; z-index: 1000; border: 1px solid rgba(0,255,255,0.3); }
+        #left-stick { left: 40px; }
+        #right-stick { right: 40px; }
     </style>
+</head>
+<body>
+    <div id="diag-hud">
+        <h2 style="margin:0 0 10px 0; font-size: 16px;">SYSTEM DIAGNOSTICS</h2>
+        <div class="status-item">THREE.js <span id="lamp-three" class="lamp"></span></div>
+        <div class="status-item">World Module <span id="lamp-world" class="lamp"></span></div>
+        <div class="status-item">VR Controls <span id="lamp-controls" class="lamp"></span></div>
+        <div class="status-item">Android Touch <span id="lamp-android" class="lamp"></span></div>
+        <div id="log-window">Initializing Scarlett_OS...</div>
+        <button onclick="location.reload()" style="margin-top:10px; width:100%; cursor:pointer;">REBOOT SYSTEM</button>
+    </div>
+
+    <div id="left-stick" class="joystick"></div>
+    <div id="right-stick" class="joystick"></div>
+
     <script type="importmap">
     {
         "imports": {
@@ -16,186 +40,6 @@
         }
     }
     </script>
-</head>
-<body>
-    <div id="ui"><b>V18_TELEPORT_ACTIVATE</b><br>Right Stick: Fwd/Back Move<br>Right Trigger: Teleport Jump</div>
-
-    <script type="module">
-        import * as THREE from 'three';
-        import { VRButton } from 'three/addons/webxr/VRButton.js';
-        import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
-
-        const S = {
-            scene: new THREE.Scene(),
-            camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
-            renderer: new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" }),
-            player: new THREE.Group(), 
-            clock: new THREE.Clock(),
-            bots: [],
-            rightReticle: null,
-            rightController: null,
-            canTeleport: false,
-            teleportTarget: new THREE.Vector3()
-        };
-
-        const Controls = {
-            moveSpeed: 2.8,
-            snapAngle: Math.PI / 4,
-            snapCooldown: 0.35,
-            _snapTimer: 0,
-            deadzone: 0.18,
-            
-            update(dt) {
-                const session = S.renderer.xr.getSession();
-                if (!session) return;
-                this._snapTimer = Math.max(0, this._snapTimer - dt);
-
-                for (const source of session.inputSources) {
-                    if (!source.gamepad) continue;
-                    const axes = source.gamepad.axes;
-                    const buttons = source.gamepad.buttons;
-
-                    // --- LEFT HAND: (PERFECT - DO NOT TOUCH) ---
-                    if (source.handedness === 'left') {
-                        const lx = axes[2] || axes[0] || 0;
-                        const ly = axes[3] || axes[1] || 0;
-                        if (Math.abs(lx) > this.deadzone || Math.abs(ly) > this.deadzone) {
-                            const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(S.camera.quaternion);
-                            fwd.y = 0; fwd.normalize();
-                            const side = new THREE.Vector3(1, 0, 0).applyQuaternion(S.camera.quaternion);
-                            side.y = 0; side.normalize();
-                            S.player.position.addScaledVector(fwd, ly * this.moveSpeed * dt);
-                            S.player.position.addScaledVector(side, -lx * this.moveSpeed * dt);
-                        }
-                    }
-
-                    // --- RIGHT HAND: FORWARD/BACK & TELEPORT ---
-                    if (source.handedness === 'right') {
-                        const rx = axes[2] || axes[0] || 0;
-                        const ry = axes[3] || axes[1] || 0;
-
-                        // 1. Smooth Forward/Back on Right Stick
-                        if (Math.abs(ry) > this.deadzone) {
-                            const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(S.camera.quaternion);
-                            fwd.y = 0; fwd.normalize();
-                            // Inverted ry to make stick forward move forward
-                            S.player.position.addScaledVector(fwd, -ry * this.moveSpeed * dt);
-                        }
-
-                        // 2. Snap Turn Left/Right on Right Stick
-                        if (Math.abs(rx) > 0.6 && this._snapTimer <= 0) {
-                            S.player.rotation.y += -Math.sign(rx) * this.snapAngle;
-                            this._snapTimer = this.snapCooldown;
-                        }
-
-                        // 3. Teleport Trigger (Index finger pull)
-                        if (buttons[0].pressed && S.canTeleport) {
-                            // Instant jump to the reticle position
-                            S.player.position.copy(S.teleportTarget);
-                            S.canTeleport = false; // Prevent double-jumps
-                        }
-                    }
-                }
-            }
-        };
-
-        function buildWorld() {
-            S.scene.background = new THREE.Color(0x05070d);
-            S.scene.add(new THREE.HemisphereLight(0xdaf0ff, 0x0b0f1a, 1.2));
-            S.scene.add(new THREE.GridHelper(100, 50, 0x00ffff, 0x112222));
-
-            // Gold Poker Table
-            const table = new THREE.Mesh(
-                new THREE.CylinderGeometry(3, 3, 0.4, 32), 
-                new THREE.MeshStandardMaterial({ color: 0xd2b46a, metalness: 0.8 })
-            );
-            table.position.set(0, 0.2, 0);
-            S.scene.add(table);
-
-            // Seated Bots
-            const botMat = new THREE.MeshStandardMaterial({ color: 0xe6e6e6 });
-            for (let i = 0; i < 6; i++) {
-                const angle = (i / 6) * Math.PI * 2;
-                const bot = new THREE.Group();
-                bot.add(new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.42, 6, 10), botMat));
-                bot.position.set(Math.cos(angle) * 4.5, 1.15, Math.sin(angle) * 4.5);
-                bot.lookAt(0, 1.15, 0);
-                S.scene.add(bot);
-                S.bots.push(bot);
-            }
-        }
-
-        async function init() {
-            S.renderer.setSize(window.innerWidth, window.innerHeight);
-            S.renderer.xr.enabled = true;
-            document.body.appendChild(S.renderer.domElement);
-            document.body.appendChild(VRButton.createButton(S.renderer));
-
-            S.scene.add(S.player);
-            S.player.add(S.camera);
-
-            const handFactory = new XRHandModelFactory();
-            for (let i = 0; i < 2; i++) {
-                const controller = S.renderer.xr.getController(i);
-                S.player.add(controller);
-                const hand = S.renderer.xr.getHand(i);
-                hand.add(handFactory.createHandModel(hand, 'mesh'));
-                S.player.add(hand);
-
-                controller.addEventListener('connected', (event) => {
-                    if (event.data.handedness === 'right') {
-                        S.rightController = controller;
-                        const laser = new THREE.Line(
-                            new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-10)]),
-                            new THREE.LineBasicMaterial({ color: 0x00ffff })
-                        );
-                        controller.add(laser);
-                    }
-                });
-            }
-
-            S.rightReticle = new THREE.Mesh(
-                new THREE.RingGeometry(0.15, 0.2, 32),
-                new THREE.MeshBasicMaterial({ color: 0x00ffff, side: THREE.DoubleSide })
-            );
-            S.rightReticle.rotation.x = -Math.PI / 2;
-            S.scene.add(S.rightReticle);
-
-            buildWorld();
-
-            S.renderer.xr.addEventListener('sessionstart', () => {
-                S.player.position.set(0, 0, 8);
-                S.player.rotation.set(0, Math.PI, 0); 
-            });
-
-            S.renderer.setAnimationLoop(() => {
-                const dt = S.clock.getDelta();
-                Controls.update(dt);
-
-                if (S.rightController) {
-                    const worldPos = new THREE.Vector3();
-                    const worldDir = new THREE.Vector3(0, 0, -1);
-                    S.rightController.getWorldPosition(worldPos);
-                    worldDir.applyQuaternion(S.rightController.getWorldQuaternion(new THREE.Quaternion()));
-                    
-                    if (worldDir.y < -0.1) {
-                        const t = -worldPos.y / worldDir.y;
-                        const hitX = worldPos.x + worldDir.x * t;
-                        const hitZ = worldPos.z + worldDir.z * t;
-                        
-                        S.teleportTarget.set(hitX, 0, hitZ);
-                        S.rightReticle.position.set(hitX, 0.05, hitZ);
-                        S.rightReticle.visible = true;
-                        S.canTeleport = true;
-                    } else {
-                        S.rightReticle.visible = false;
-                        S.canTeleport = false;
-                    }
-                }
-                S.renderer.render(S.scene, S.camera);
-            });
-        }
-        init();
-    </script>
+    <script type="module" src="./index.js"></script>
 </body>
 </html>

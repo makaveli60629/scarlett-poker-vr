@@ -1,94 +1,61 @@
-// /js/index.js — Scarlett SAFE ENTRY v12.1 (FULL)
-// ✅ Upload-proof (short)
-// ✅ Hides loader automatically once world starts
-// ✅ Keeps Controls + World stable on Quest/Android/Desktop
+/**
+ * Update 4.0 - Permanent Fix: Reticle Direction Alignment
+ * This replaces the previous updateReticleFromRightGrip to ensure 
+ * the green circle matches the hand's forward direction on Quest.
+ */
+function updateReticleFromRightGrip() {
+  const grip = state.grip.right || state.ctrl.right;
+  const reticle = state.reticle;
+  if (!grip || !reticle) return;
 
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js";
-import { VRButton } from "./VRButton.js";
-import { World } from "./world.js";
-import { Controls } from "./controls.js";
+  // 1. Get starting position of the hand
+  grip.getWorldPosition(tmp.origin);
 
-const log = (...a) => console.log("[index]", ...a);
-const err = (...a) => console.error("[index]", ...a);
+  // 2. Set direction: Quest hand tracking often uses +Z as forward.
+  // We start with +Z and then verify against the headset orientation.
+  tmp.dir.set(0, 0, 1); 
+  grip.getWorldQuaternion(tmp.q);
+  tmp.dir.applyQuaternion(tmp.q).normalize();
 
-let renderer, scene, camera, player;
+  // 3. Alignment Check: Compare hand direction with HMD forward
+  const hmdFwd = tmp.v.set(0, 0, -1).applyQuaternion(camera.quaternion);
+  hmdFwd.y = 0; 
+  hmdFwd.normalize();
 
-function hideAnyLoader() {
-  // Try common ids first
-  const ids = ["loader", "loading", "boot", "overlay"];
-  for (const id of ids) {
-    const el = document.getElementById(id);
-    if (el) el.style.display = "none";
+  const dFlat = tmp.dir.clone();
+  dFlat.y = 0; 
+  dFlat.normalize();
+
+  // If the hand is pointing "backwards" relative to the face, flip it
+  if (dFlat.lengthSq() > 1e-6 && dFlat.dot(hmdFwd) < 0) {
+    tmp.dir.multiplyScalar(-1);
   }
-  // Also hide any full-screen element that contains "Loading Scarlett"
-  for (const el of Array.from(document.querySelectorAll("div"))) {
-    const txt = (el.textContent || "").toLowerCase();
-    if (txt.includes("loading scarlett")) el.style.display = "none";
+
+  // 4. Raycast to Floor (y=0)
+  const y0 = 0;
+  if (Math.abs(tmp.dir.y) < 1e-5) {
+    reticle.visible = false;
+    return;
   }
+
+  const t = (y0 - tmp.origin.y) / tmp.dir.y;
+  
+  // Only show if pointing downward and within a reasonable range
+  if (t <= 0) {
+    reticle.visible = false;
+    return;
+  }
+
+  const hit = tmp.origin.clone().add(tmp.dir.clone().multiplyScalar(t));
+  const dist = hit.distanceTo(tmp.origin);
+
+  // Limit teleport/aim distance to 12 units for gameplay balance
+  if (dist > 12) {
+    reticle.visible = false;
+    return;
+  }
+
+  // 5. Final Placement
+  reticle.position.copy(hit);
+  reticle.visible = true;
 }
-
-function init() {
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-  renderer.xr.enabled = true;
-  document.body.appendChild(renderer.domElement);
-
-  // VR button
-  document.body.appendChild(VRButton.createButton(renderer));
-  log("VRButton ✅");
-
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x000000);
-
-  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 900);
-  camera.position.set(0, 1.6, 2);
-
-  player = new THREE.Group();
-  player.name = "PlayerRig";
-  player.add(camera);
-  scene.add(player);
-
-  window.addEventListener("resize", () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-
-  // INIT CONTROLS
-  try {
-    Controls.init({ THREE, renderer, scene, camera, player, log });
-    log("Controls init ✅");
-  } catch (e) {
-    err("Controls init FAILED ❌", e);
-  }
-
-  // INIT WORLD
-  Promise.resolve()
-    .then(() => World.init({ THREE, scene, renderer, camera, player, log }))
-    .then(() => {
-      log("World init ✅");
-      hideAnyLoader(); // <-- PERMANENT: loader will not trap you anymore
-    })
-    .catch((e) => err("World init FAILED ❌", e));
-
-  // LOOP
-  let last = 0;
-  renderer.setAnimationLoop((t) => {
-    const dt = Math.min(0.05, (t - last) / 1000);
-    last = t;
-
-    try { Controls.update?.(dt); } catch {}
-    try { World.update?.(dt, t); } catch {}
-
-    renderer.render(scene, camera);
-  });
-
-  log("INIT OK ✅");
-}
-
-try {
-  init();
-} catch (e) {
-  err("INIT FAILED ❌", e);
-          }

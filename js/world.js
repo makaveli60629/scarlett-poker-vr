@@ -3,56 +3,72 @@ import * as THREE from 'three';
 export class World {
     constructor(scene) {
         this.scene = scene;
-        this.textureLoader = new THREE.TextureLoader();
-        this.objects = []; // Track interactive items
-        
-        this.initEnvironment();
-        this.addInteractiveCube();
+        this.loader = new THREE.TextureLoader();
+        this.interactiveObjects = [];
+        this.grabbing = { left: null, right: null };
+
+        this.initContent();
     }
 
-    initEnvironment() {
-        // Example of using your assets folder
-        const floorTex = this.textureLoader.load('assets/textures/floor_diffuse.jpg');
+    initContent() {
+        // --- Floor Configuration ---
+        const floorTex = this.loader.load('assets/textures/floor.jpg'); // Adjust to your filename
+        floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+        floorTex.repeat.set(4, 4);
+        
         const floorGeo = new THREE.PlaneGeometry(10, 10);
         const floorMat = new THREE.MeshStandardMaterial({ map: floorTex });
         const floor = new THREE.Mesh(floorGeo, floorMat);
         floor.rotation.x = -Math.PI / 2;
         this.scene.add(floor);
+
+        // --- Create Grabable Objects ---
+        this.createBox("CardBox", 0, 1, -0.5);
     }
 
-    addInteractiveCube() {
-        // A placeholder for event chips/logic
-        const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
-        const material = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
-        const cube = new THREE.Mesh(geometry, material);
-        cube.position.set(0, 1.2, -0.5);
-        this.scene.add(cube);
-        this.objects.push(cube);
+    createBox(name, x, y, z) {
+        const tex = this.loader.load('assets/textures/box_skin.jpg');
+        const geo = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+        const mat = new THREE.MeshStandardMaterial({ map: tex, color: 0xffffff });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(x, y, z);
+        mesh.name = name;
+        
+        this.scene.add(mesh);
+        this.interactiveObjects.push(mesh);
     }
 
-    // This runs every frame
     update(hand1, hand2) {
-        // Logic for Hand Interaction (Collision detection)
-        this.checkHandProximity(hand1);
-        this.checkHandProximity(hand2);
-        
-        // Constant world updates (e.g. floating animations)
-        this.objects.forEach(obj => {
-            obj.rotation.y += 0.01;
-        });
+        this.handleHand(hand1, 'left');
+        this.handleHand(hand2, 'right');
     }
 
-    checkHandProximity(hand) {
-        if (!hand) return;
-        
-        // Simple distance-based interaction logic
-        this.objects.forEach(obj => {
-            const distance = hand.position.distanceTo(obj.position);
-            if (distance < 0.1) {
-                obj.material.color.setHex(0xff0000); // Visual feedback
+    handleHand(hand, side) {
+        if (!hand || !hand.visible) return;
+
+        const indexTip = hand.joints['index-finger-tip'];
+        const thumbTip = hand.joints['thumb-tip'];
+
+        if (indexTip && thumbTip) {
+            const distance = indexTip.position.distanceTo(thumbTip.position);
+            const isPinching = distance < 0.02;
+
+            if (isPinching) {
+                if (!this.grabbing[side]) {
+                    // Try to pick up object
+                    this.interactiveObjects.forEach(obj => {
+                        if (indexTip.position.distanceTo(obj.position) < 0.1) {
+                            this.grabbing[side] = obj;
+                        }
+                    });
+                } else {
+                    // Object follows hand
+                    this.grabbing[side].position.copy(indexTip.position);
+                }
             } else {
-                obj.material.color.setHex(0x00ff00);
+                // Release
+                this.grabbing[side] = null;
             }
-        });
+        }
     }
 }

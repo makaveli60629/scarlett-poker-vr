@@ -3,34 +3,53 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-    <title>ScarlettVR Diagnostic Hub</title>
+    <title>ScarlettVR Mission Control</title>
     <style>
-        body { margin: 0; background: #05070d; color: #00ffff; font-family: 'Courier New', monospace; overflow: hidden; }
-        #diag-hud { position: absolute; top: 10px; left: 10px; width: 300px; background: rgba(0, 20, 40, 0.8); border: 1px solid #00ffff; padding: 15px; z-index: 100; border-radius: 8px; pointer-events: auto; }
-        .status-item { display: flex; justify-content: space-between; margin-bottom: 5px; }
-        .lamp { width: 12px; height: 12px; border-radius: 50%; display: inline-block; background: #333; }
-        .on { background: #00ff00; box-shadow: 0 0 10px #00ff00; }
+        body { margin: 0; background: #05070d; color: #00ffff; font-family: monospace; overflow: hidden; }
+        
+        /* Mission Control HUD */
+        #diag-hud { 
+            position: absolute; top: 20px; left: 20px; width: 320px; 
+            background: rgba(10, 20, 40, 0.9); border: 2px solid #00ffff; 
+            padding: 20px; z-index: 1000; border-radius: 12px;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
+        }
+        .status-item { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; }
+        .lamp { width: 14px; height: 14px; border-radius: 50%; background: #222; border: 1px solid #444; }
+        .on { background: #00ff00; box-shadow: 0 0 10px #00ff00; border-color: #fff; }
         .err { background: #ff0000; box-shadow: 0 0 10px #ff0000; }
-        #log-window { height: 150px; overflow-y: auto; background: #000; font-size: 10px; padding: 5px; margin-top: 10px; border: 1px solid #333; }
-        /* Touch Joysticks for Android Debugging */
-        .joystick { position: fixed; bottom: 40px; width: 100px; height: 100px; background: rgba(255,255,255,0.1); border-radius: 50%; display: none; z-index: 1000; border: 1px solid rgba(0,255,255,0.3); }
-        #left-stick { left: 40px; }
-        #right-stick { right: 40px; }
+        
+        #log-window { 
+            height: 120px; overflow-y: auto; background: #000; 
+            font-size: 11px; padding: 10px; margin-top: 15px; 
+            border: 1px solid #00ffff; color: #aaa;
+        }
+        h2 { margin: 0 0 15px 0; color: #00ffff; text-transform: uppercase; letter-spacing: 2px; }
+
+        /* Joysticks for Android */
+        .joystick { 
+            position: fixed; bottom: 50px; width: 100px; height: 100px; 
+            background: rgba(0, 255, 255, 0.1); border: 1px solid #00ffff; 
+            border-radius: 50%; display: none; z-index: 500; 
+        }
+        #l-stick { left: 50px; } #r-stick { right: 50px; }
     </style>
 </head>
 <body>
+
     <div id="diag-hud">
-        <h2 style="margin:0 0 10px 0; font-size: 16px;">SYSTEM DIAGNOSTICS</h2>
-        <div class="status-item">THREE.js <span id="lamp-three" class="lamp"></span></div>
-        <div class="status-item">World Module <span id="lamp-world" class="lamp"></span></div>
-        <div class="status-item">VR Controls <span id="lamp-controls" class="lamp"></span></div>
-        <div class="status-item">Android Touch <span id="lamp-android" class="lamp"></span></div>
-        <div id="log-window">Initializing Scarlett_OS...</div>
-        <button onclick="location.reload()" style="margin-top:10px; width:100%; cursor:pointer;">REBOOT SYSTEM</button>
+        <h2>System Diagnostics</h2>
+        <div class="status-item">ENGINE (THREE.JS) <span id="lamp-three" class="lamp"></span></div>
+        <div class="status-item">ENVIRONMENT (WORLD) <span id="lamp-world" class="lamp"></span></div>
+        <div class="status-item">INPUTS (CONTROLS) <span id="lamp-controls" class="lamp"></span></div>
+        <div class="status-item">ANDROID MODE <span id="lamp-android" class="lamp"></span></div>
+        
+        <div id="log-window">System Initializing...</div>
+        <div id="vr-btn-container" style="margin-top: 15px;"></div>
     </div>
 
-    <div id="left-stick" class="joystick"></div>
-    <div id="right-stick" class="joystick"></div>
+    <div id="l-stick" class="joystick"></div>
+    <div id="r-stick" class="joystick"></div>
 
     <script type="importmap">
     {
@@ -40,6 +59,109 @@
         }
     }
     </script>
-    <script type="module" src="./index.js"></script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
+
+        const log = (m) => {
+            const win = document.getElementById('log-window');
+            win.innerHTML += `<div>> ${m}</div>`;
+            win.scrollTop = win.scrollHeight;
+        };
+
+        const S = {
+            scene: new THREE.Scene(),
+            camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
+            renderer: new THREE.WebGLRenderer({ antialias: true, alpha: true }),
+            player: new THREE.Group(),
+            clock: new THREE.Clock()
+        };
+
+        async function startEngine() {
+            try {
+                // 1. Check Three.js
+                document.getElementById('lamp-three').classList.add('on');
+                log("Three.js Library Loaded");
+
+                // 2. Setup Renderer
+                S.renderer.setSize(window.innerWidth, window.innerHeight);
+                S.renderer.xr.enabled = true;
+                document.body.appendChild(S.renderer.domElement);
+                
+                // Add VR Button to our HUD container
+                const vBtn = VRButton.createButton(S.renderer);
+                document.getElementById('vr-btn-container').appendChild(vBtn);
+
+                S.scene.add(S.player);
+                S.player.add(S.camera);
+                S.player.position.set(0, 0, 8);
+
+                // 3. Force Build World (No separate file needed for this test)
+                buildWorld();
+                document.getElementById('lamp-world').classList.add('on');
+                log("World: Poker Table & Bots Rendered");
+
+                // 4. Android Detection
+                if (/Android|iPhone/i.test(navigator.userAgent)) {
+                    document.getElementById('lamp-android').classList.add('on');
+                    document.getElementById('l-stick').style.display = 'block';
+                    document.getElementById('r-stick').style.display = 'block';
+                    log("Android UI Active");
+                }
+
+                document.getElementById('lamp-controls').classList.add('on');
+
+                // 5. 180 Flip on VR Start
+                S.renderer.xr.addEventListener('sessionstart', () => {
+                    document.getElementById('diag-hud').style.display = 'none';
+                    S.player.rotation.set(0, Math.PI, 0); // FACE TABLE
+                    log("VR Session: Rig Flipped 180°");
+                });
+
+                S.renderer.setAnimationLoop(() => {
+                    const t = S.clock.getElapsedTime();
+                    // Subtle animations
+                    S.scene.traverse(obj => {
+                        if(obj.isBot) obj.position.y += Math.sin(t + obj.offset) * 0.001;
+                    });
+                    S.renderer.render(S.scene, S.camera);
+                });
+
+            } catch (e) {
+                log("CRITICAL ERROR: " + e.message);
+                document.querySelectorAll('.lamp').forEach(l => l.classList.add('err'));
+            }
+        }
+
+        function buildWorld() {
+            S.scene.background = new THREE.Color(0x05070d);
+            S.scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
+            S.scene.add(new THREE.GridHelper(100, 50, 0x00ffff, 0x112222));
+
+            // Gold Poker Table
+            const table = new THREE.Mesh(
+                new THREE.CylinderGeometry(3, 3, 0.4, 32),
+                new THREE.MeshStandardMaterial({ color: 0xd2b46a, metalness: 0.8 })
+            );
+            table.position.y = 0.2;
+            S.scene.add(table);
+
+            // Bots
+            for (let i = 0; i < 6; i++) {
+                const angle = (i / 6) * Math.PI * 2;
+                const bot = new THREE.Group();
+                const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.5, 4, 8), new THREE.MeshStandardMaterial({color: 0xcccccc}));
+                body.position.y = 1;
+                bot.add(body);
+                bot.position.set(Math.cos(angle) * 4.5, 0, Math.sin(angle) * 4.5);
+                bot.lookAt(0, 1, 0);
+                bot.isBot = true; bot.offset = i;
+                S.scene.add(bot);
+            }
+        }
+
+        startEngine();
+    </script>
 </body>
 </html>

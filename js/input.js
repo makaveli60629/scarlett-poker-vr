@@ -1,18 +1,16 @@
 export const Input = {
     init(ctx) {
-        const { scene, renderer } = ctx.world;
+        const { renderer, scene } = ctx.world;
         
-        // Initialize VR Hands (Hand Tracking)
+        // Setup Hand Tracking
         this.hand1 = renderer.xr.getHand(0);
         this.hand2 = renderer.xr.getHand(1);
+        scene.add(this.hand1, this.hand2);
         
-        scene.add(this.hand1);
-        scene.add(this.hand2);
-
-        // Standard Interaction Listeners
-        window.addEventListener('mousedown', () => ctx.Diagnostics.log('Mouse Event Detected'));
-        window.addEventListener('touchstart', () => ctx.Diagnostics.log('Touch Event Detected'));
-        
-        ctx.Diagnostics.ok('Hand Tracking Ready');
+        // Add visual cues for hands (simple cubes for now)
+        const geo = new THREE.BoxGeometry(0.05, 0.05, 0.05);
+        const mat = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
+        this.hand1.add(new THREE.Mesh(geo, mat));
+        this.hand2.add(new THREE.Mesh(geo, mat));
     }
 };

@@ -1,200 +1,85 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-    <title>ScarlettVR Mission Control V19</title>
-    <style>
-        body { margin: 0; background: #05070d; color: #00ffff; font-family: monospace; overflow: hidden; touch-action: none; }
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
+
+const vLog = (m) => { document.getElementById('v-log').innerText = m; console.log(m); };
+
+// 1. Initial State
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+
+// 2. The Rig (Crucial for 180 flip)
+const player = new THREE.Group();
+player.add(camera);
+scene.add(player);
+
+const clock = new THREE.Clock();
+const moveState = { fwd: 0, side: 0, turn: 0 };
+
+async function boot() {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    document.getElementById('app').appendChild(renderer.domElement);
+    document.body.appendChild(VRButton.createButton(renderer));
+    document.getElementById('l1').classList.add('active');
+
+    // Load World Module
+    try {
+        const { World } = await import("./js/world.js");
+        await World.init({ THREE, scene, renderer });
+        document.getElementById('l2').classList.add('active');
+        vLog("WORLD_READY");
+    } catch (e) { vLog("WORLD_ERR: " + e.message); }
+
+    // Android Movement Logic
+    setupAndroidMove();
+
+    // The Fix: Auto-Flip and Hide HUD
+    renderer.xr.addEventListener('sessionstart', () => {
+        // Remove the HUD from face
+        document.getElementById('ghost-diag').style.display = 'none';
+        document.getElementById('joy-left').style.display = 'none';
+        document.getElementById('joy-right').style.display = 'none';
         
-        /* Diagnostic HUD */
-        #diag-hud { 
-            position: absolute; top: 20px; left: 20px; width: 300px; 
-            background: rgba(10, 20, 40, 0.9); border: 2px solid #00ffff; 
-            padding: 15px; z-index: 1000; border-radius: 12px;
-        }
-        .status-item { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
-        .lamp { width: 12px; height: 12px; border-radius: 50%; background: #222; border: 1px solid #444; }
-        .on { background: #00ff00; box-shadow: 0 0 10px #00ff00; }
-        #log-window { height: 100px; overflow-y: auto; background: #000; font-size: 10px; padding: 8px; margin-top: 10px; border: 1px solid #333; color: #00ff00; }
+        // Force 180 Turn (Face the table immediately)
+        player.position.set(0, 0, 8);
+        player.rotation.set(0, Math.PI, 0); 
+    });
 
-        /* Android Joysticks */
-        .joystick-zone { 
-            position: fixed; bottom: 20px; width: 150px; height: 150px; 
-            background: rgba(0, 255, 255, 0.05); border-radius: 50%; 
-            border: 1px solid rgba(0, 255, 255, 0.2); z-index: 2000;
-            display: flex; align-items: center; justify-content: center;
-        }
-        #l-zone { left: 20px; } 
-        #r-zone { right: 20px; }
-        .stick { width: 50px; height: 50px; background: #00ffff; border-radius: 50%; opacity: 0.4; }
-    </style>
-</head>
-<body>
-
-    <div id="diag-hud">
-        <h2 style="margin:0; font-size: 16px;">SCARLETT_OS V19</h2>
-        <div class="status-item">RENDER ENGINE <span id="lamp-three" class="lamp"></span></div>
-        <div class="status-item">FULL WORLD <span id="lamp-world" class="lamp"></span></div>
-        <div class="status-item">VR INPUTS <span id="lamp-controls" class="lamp"></span></div>
-        <div class="status-item">ANDROID TOUCH <span id="lamp-android" class="lamp"></span></div>
-        <div id="log-window">System Booting...</div>
-        <div id="vr-btn-container" style="margin-top:10px;"></div>
-    </div>
-
-    <div id="l-zone" class="joystick-zone"><div id="l-stick" class="stick"></div></div>
-    <div id="r-zone" class="joystick-zone"><div id="r-stick" class="stick"></div></div>
-
-    <script type="importmap">
-    {
-        "imports": {
-            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-        }
-    }
-    </script>
-
-    <script type="module">
-        import * as THREE from 'three';
-        import { VRButton } from 'three/addons/webxr/VRButton.js';
-
-        const diag = (m) => {
-            const w = document.getElementById('log-window');
-            w.innerHTML += `<div>> ${m}</div>`;
-            w.scrollTop = w.scrollHeight;
-        };
-
-        const S = {
-            scene: new THREE.Scene(),
-            camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
-            renderer: new THREE.WebGLRenderer({ antialias: true }),
-            player: new THREE.Group(),
-            clock: new THREE.Clock(),
-            touch: { lx: 0, ly: 0, rx: 0, ry: 0 }
-        };
-
-        function init() {
-            // 1. Engine
-            S.renderer.setSize(window.innerWidth, window.innerHeight);
-            S.renderer.xr.enabled = true;
-            document.body.appendChild(S.renderer.domElement);
-            document.getElementById('vr-btn-container').appendChild(VRButton.createButton(S.renderer));
-            document.getElementById('lamp-three').classList.add('on');
-
-            S.scene.add(S.player);
-            S.player.add(S.camera);
-            S.player.position.set(0, 0, 10); // Spawn further back to see the whole world
-
-            // 2. Build Full Environment
-            buildEnvironment();
-            document.getElementById('lamp-world').classList.add('on');
-
-            // 3. Android Setup
-            setupTouch();
-            document.getElementById('lamp-android').classList.add('on');
-
-            // 4. VR Orientation Fix
-            S.renderer.xr.addEventListener('sessionstart', () => {
-                document.getElementById('diag-hud').style.display = 'none';
-                S.player.rotation.set(0, Math.PI, 0); // Face the table
-                diag("VR Started: 180 Flip Active");
-            });
-
-            diag("System Ready. Joysticks Active.");
-            animate();
-        }
-
-        function buildEnvironment() {
-            S.scene.background = new THREE.Color(0x020408);
-            S.scene.add(new THREE.HemisphereLight(0xffffff, 0x111111, 1.2));
+    renderer.setAnimationLoop(() => {
+        const dt = clock.getDelta();
+        
+        // Apply Android Movement
+        if (moveState.fwd !== 0 || moveState.side !== 0) {
+            const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            dir.y = 0; dir.normalize();
+            const side = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+            side.y = 0; side.normalize();
             
-            // Grid
-            const grid = new THREE.GridHelper(100, 50, 0x00ffff, 0x051515);
-            S.scene.add(grid);
-
-            // The Pit
-            const pitFloor = new THREE.Mesh(
-                new THREE.CircleGeometry(12, 32),
-                new THREE.MeshStandardMaterial({ color: 0x0a0a0a })
-            );
-            pitFloor.rotation.x = -Math.PI / 2;
-            S.scene.add(pitFloor);
-
-            // Neon Railings
-            const rail = new THREE.Mesh(
-                new THREE.TorusGeometry(6.5, 0.05, 16, 100),
-                new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff })
-            );
-            rail.rotation.x = Math.PI / 2;
-            rail.position.y = 1.1;
-            S.scene.add(rail);
-
-            // Gold Poker Table
-            const table = new THREE.Mesh(
-                new THREE.CylinderGeometry(3, 3, 0.4, 32),
-                new THREE.MeshStandardMaterial({ color: 0xd2b46a, metalness: 0.8 })
-            );
-            table.position.y = 0.2;
-            S.scene.add(table);
-
-            // Humanoids
-            for (let i = 0; i < 6; i++) {
-                const angle = (i / 6) * Math.PI * 2;
-                const bot = new THREE.Group();
-                bot.add(new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.5, 4, 8), new THREE.MeshStandardMaterial({color: 0xcccccc})));
-                bot.position.set(Math.cos(angle) * 4.5, 0, Math.sin(angle) * 4.5);
-                bot.lookAt(0, 1, 0);
-                S.scene.add(bot);
-            }
+            player.position.addScaledVector(dir, -moveState.fwd * 4 * dt);
+            player.position.addScaledVector(side, moveState.side * 4 * dt);
         }
+        player.rotation.y -= moveState.turn * 2 * dt;
 
-        function setupTouch() {
-            const handleTouch = (zoneId, stickId, callback) => {
-                const zone = document.getElementById(zoneId);
-                const stick = document.getElementById(stickId);
-                zone.addEventListener('touchstart', (e) => e.preventDefault());
-                zone.addEventListener('touchmove', (e) => {
-                    const rect = zone.getBoundingClientRect();
-                    const touch = e.targetTouches[0];
-                    const x = (touch.clientX - rect.left - 75) / 75;
-                    const y = (touch.clientY - rect.top - 75) / 75;
-                    callback(x, y);
-                    stick.style.transform = `translate(${x*30}px, ${y*30}px)`;
-                });
-                zone.addEventListener('touchend', () => {
-                    callback(0, 0);
-                    stick.style.transform = `translate(0,0)`;
-                });
-            };
+        renderer.render(scene, camera);
+    });
+}
 
-            handleTouch('l-zone', 'l-stick', (x, y) => { S.touch.lx = x; S.touch.ly = y; });
-            handleTouch('r-zone', 'r-stick', (x, y) => { S.touch.rx = x; S.touch.ry = y; });
-        }
+function setupAndroidMove() {
+    const handle = (id, cb) => {
+        const el = document.getElementById(id);
+        el.addEventListener('touchstart', (e) => e.preventDefault());
+        el.addEventListener('touchmove', (e) => {
+            const r = el.getBoundingClientRect();
+            const t = e.targetTouches[0];
+            cb((t.clientX - r.left - 70)/70, (t.clientY - r.top - 70)/70);
+        });
+        el.addEventListener('touchend', () => cb(0, 0));
+    };
 
-        function animate() {
-            S.renderer.setAnimationLoop(() => {
-                const dt = S.clock.getDelta();
-                
-                // Android Movement
-                if (S.touch.ly !== 0 || S.touch.lx !== 0) {
-                    const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(S.camera.quaternion);
-                    fwd.y = 0; fwd.normalize();
-                    const side = new THREE.Vector3(1,0,0).applyQuaternion(S.camera.quaternion);
-                    side.y = 0; side.normalize();
-                    S.player.position.addScaledVector(fwd, -S.touch.ly * 5 * dt);
-                    S.player.position.addScaledVector(side, S.touch.lx * 5 * dt);
-                }
-                
-                // Android Rotation (Right Stick)
-                if (Math.abs(S.touch.rx) > 0.1) {
-                    S.player.rotation.y -= S.touch.rx * 2 * dt;
-                }
+    handle('joy-left', (x, y) => { moveState.side = x; moveState.fwd = y; });
+    handle('joy-right', (x, y) => { moveState.turn = x; });
+    document.getElementById('l3').classList.add('active');
+}
 
-                S.renderer.render(S.scene, S.camera);
-            });
-        }
-
-        init();
-    </script>
-</body>
-</html>
+boot();

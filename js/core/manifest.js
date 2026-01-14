@@ -1,78 +1,68 @@
 // /js/core/manifest.js — ScarlettVR Prime 10.0 (FULL)
-// Global config + base-path resolver. No systems hardcode ./assets paths.
+// Config + global toggles + canonical asset paths (GitHub Pages safe)
 
 export const Manifest = (() => {
-  const state = {
-    base: "/", // resolved from window.SCARLETT_BASE
-    flags: { safeMode:false },
-
-    poker: {
-      seats: 6,
-      seatRadius: 2.35,
-      tableCenter: { x:0, y:0.95, z:-9.5 },
-      deckPos: null,
-      potPos: null,
-      dealHop: 0.16,
-      dealDur: 0.52,
-      chipDur: 0.45,
-      chipsPool: 512
+  const data = {
+    version: "Prime 10.0",
+    flags: {
+      safeMode: false,   // disables heavy stuff if needed
+      fx: true,
+      bots: true,
+      poker: true
     },
-
+    paths: {
+      textures: "./assets/textures"
+    },
     textures: {
-      cardBack: "assets/textures/card_back.png",
-      tableTop: "assets/textures/table_top.png",
-      chip: "assets/textures/chip_stack.png"
+      cardBack: "./assets/textures/card_back.png",
+      chip: "./assets/textures/chip_stack.png",
+      tableTop: "./assets/textures/table_top.png"
     }
   };
 
-  function init() {
-    state.base = window.SCARLETT_BASE || "/";
-    // compute defaults that depend on tableCenter
-    const tc = state.poker.tableCenter;
-    state.poker.deckPos = state.poker.deckPos || { x: tc.x - 1.1, y: tc.y + 0.10, z: tc.z - 0.05 };
-    state.poker.potPos  = state.poker.potPos  || { x: tc.x,      y: tc.y + 0.06, z: tc.z + 0.10 };
-    return api;
-  }
-
-  function resolve(keyOrPath) {
-    // resolve("textures.cardBack") OR resolve("assets/textures/foo.png") OR full URL
-    const s = String(keyOrPath || "").trim();
-    if (!s) return state.base;
-
-    if (/^https?:\/\//i.test(s)) return s;
-    if (s.startsWith("/")) return s;
-
-    // dot path lookup like textures.cardBack
-    if (s.includes(".")) {
-      const v = get(s);
-      if (typeof v === "string") return resolve(v);
-    }
-
-    const cleaned = s.replace(/^(\.\/)+/, "").replace(/^\/+/, "");
-    return `${state.base}${cleaned}`;
-  }
-
-  function get(dotPath) {
-    const parts = String(dotPath || "").split(".");
-    let cur = state;
+  const deepGet = (obj, path) => {
+    if (!path) return obj;
+    const parts = String(path).split(".");
+    let cur = obj;
     for (const p of parts) {
       if (!cur || typeof cur !== "object") return undefined;
       cur = cur[p];
     }
     return cur;
-  }
+  };
 
-  function set(dotPath, value) {
-    const parts = String(dotPath || "").split(".");
-    let cur = state;
-    for (let i=0;i<parts.length-1;i++){
-      const p = parts[i];
-      if (!cur[p] || typeof cur[p] !== "object") cur[p] = {};
-      cur = cur[p];
+  const deepSet = (obj, path, value) => {
+    const parts = String(path).split(".");
+    let cur = obj;
+    while (parts.length > 1) {
+      const k = parts.shift();
+      if (!cur[k] || typeof cur[k] !== "object") cur[k] = {};
+      cur = cur[k];
     }
-    cur[parts[parts.length-1]] = value;
-  }
+    cur[parts[0]] = value;
+  };
 
-  const api = { init, resolve, get, set, state };
-  return api;
+  return {
+    init() {
+      // future: could read query params like ?safe=1
+      try {
+        const u = new URL(location.href);
+        if (u.searchParams.get("safe") === "1") data.flags.safeMode = true;
+        if (u.searchParams.get("fx") === "0") data.flags.fx = false;
+        if (u.searchParams.get("bots") === "0") data.flags.bots = false;
+      } catch {}
+    },
+
+    get(path) {
+      return deepGet(data, path);
+    },
+
+    set(path, value) {
+      deepSet(data, path, value);
+    },
+
+    dump() {
+      return JSON.parse(JSON.stringify(data));
+    }
+  };
 })();

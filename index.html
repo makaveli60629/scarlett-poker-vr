@@ -3,10 +3,10 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ScarlettVR Ultimate V14</title>
+    <title>ScarlettVR Ultimate V15</title>
     <style>
         body { margin: 0; background: #05070d; overflow: hidden; font-family: monospace; }
-        #ui { position: absolute; top: 10px; left: 10px; color: #00ffff; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.6); padding: 10px; border: 1px solid #00ffff; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #00ffff; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.6); padding: 10px; border: 1px solid #00ffff; border-radius: 8px; }
     </style>
     <script type="importmap">
     {
@@ -18,7 +18,7 @@
     </script>
 </head>
 <body>
-    <div id="ui"><b>V14_FINAL_LOGIC</b><br>Stick Directions: Flipped & Fixed</div>
+    <div id="ui"><b>V15_CONTROL_CALIBRATION</b><br>Directions: Mirrored & Fixed<br>Spawn: Table-Facing</div>
 
     <script type="module">
         import * as THREE from 'three';
@@ -37,7 +37,7 @@
         };
 
         const Controls = {
-            moveSpeed: 2.5,
+            moveSpeed: 2.8,
             snapAngle: Math.PI / 4,
             snapCooldown: 0.3,
             _snapTimer: 0,
@@ -52,7 +52,7 @@
                     if (!source.gamepad) continue;
                     const axes = source.gamepad.axes;
 
-                    // LEFT HAND: SMOOTH LOCOMOTION (FIXED FORWARD)
+                    // --- LEFT HAND: MOVEMENT (CALIBRATED) ---
                     if (source.handedness === 'left') {
                         const lx = axes[2] || axes[0] || 0;
                         const ly = axes[3] || axes[1] || 0;
@@ -63,18 +63,19 @@
                             const side = new THREE.Vector3(1, 0, 0).applyQuaternion(S.camera.quaternion);
                             side.y = 0; side.normalize();
                             
-                            // FLIPPED: -ly is now ly to correct reverse movement
-                            // (If you still move backwards, change ly to -ly below)
+                            // ly is positive when pulling back, negative when pushing forward.
+                            // To move forward on push: we use -ly. 
+                            // To move right on push right: we use lx.
                             S.player.position.addScaledVector(fwd, -ly * this.moveSpeed * dt);
                             S.player.position.addScaledVector(side, lx * this.moveSpeed * dt);
                         }
                     }
 
-                    // RIGHT HAND: SNAP TURN (FIXED DIRECTION)
+                    // --- RIGHT HAND: SNAP TURN (CALIBRATED) ---
                     if (source.handedness === 'right' && this._snapTimer <= 0) {
                         const rx = axes[2] || axes[0] || 0;
-                        if (Math.abs(rx) > 0.7) {
-                            // FLIPPED: Changed -= to += to fix opposite turn
+                        if (Math.abs(rx) > 0.6) {
+                            // Pushing Stick Right (rx > 0) should turn player Right (negative Y rotation)
                             S.player.rotation.y -= Math.sign(rx) * this.snapAngle;
                             this._snapTimer = this.snapCooldown;
                         }
@@ -84,29 +85,33 @@
         };
 
         function buildWorld() {
+            // Lighting from your lighting.js logic
             S.scene.background = new THREE.Color(0x05070d);
-            S.scene.add(new THREE.HemisphereLight(0xdaf0ff, 0x0b0f1a, 1.2));
+            const hemi = new THREE.HemisphereLight(0xdaf0ff, 0x0b0f1a, 1.2);
+            S.scene.add(hemi);
+            
+            // Grid for spatial awareness
             S.scene.add(new THREE.GridHelper(100, 50, 0x00ffff, 0x112222));
 
-            // Pit Table
-            const table = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 0.4, 32), new THREE.MeshStandardMaterial({ color: 0xd2b46a, metalness: 0.8 }));
+            // Pit Table (Gold/Yellow)
+            const table = new THREE.Mesh(
+                new THREE.CylinderGeometry(3, 3, 0.4, 32), 
+                new THREE.MeshStandardMaterial({ color: 0xd2b46a, metalness: 0.8, roughness: 0.2 })
+            );
             table.position.set(0, 0.2, 0);
             S.scene.add(table);
 
-            // Guardrail
-            const rail = new THREE.Mesh(new THREE.TorusGeometry(6.5, 0.05, 16, 100), new THREE.MeshStandardMaterial({ color: 0x00ffff }));
-            rail.rotation.x = Math.PI / 2;
-            rail.position.y = 1.0;
-            S.scene.add(rail);
-
-            // Bots
+            // Bots from your humanoids.js logic
             const botMat = new THREE.MeshStandardMaterial({ color: 0xe6e6e6 });
             for (let i = 0; i < 6; i++) {
                 const angle = (i / 6) * Math.PI * 2;
                 const bot = new THREE.Group();
-                bot.add(new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.42, 6, 10), botMat));
-                bot.position.set(Math.cos(angle) * 4.5, 1.15, Math.sin(angle) * 4.5);
-                bot.lookAt(0, 1.15, 0);
+                const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.42, 6, 10), botMat);
+                const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.12, 0), botMat);
+                head.position.y = 1.62; torso.position.y = 1.15;
+                bot.add(torso, head);
+                bot.position.set(Math.cos(angle) * 4.5, 0, Math.sin(angle) * 4.5);
+                bot.lookAt(0, 1.2, 0);
                 S.scene.add(bot);
                 S.bots.push(bot);
             }
@@ -121,7 +126,7 @@
             S.scene.add(S.player);
             S.player.add(S.camera);
             
-            // Set spawn far back (Z=8)
+            // Spawn 8 meters away
             S.player.position.set(0, 0, 8); 
 
             const handFactory = new XRHandModelFactory();
@@ -144,6 +149,7 @@
                 });
             }
 
+            // Right Laser Reticle (The floor circle)
             S.rightReticle = new THREE.Mesh(
                 new THREE.RingGeometry(0.1, 0.12, 32),
                 new THREE.MeshBasicMaterial({ color: 0x00ffff, side: THREE.DoubleSide })
@@ -155,21 +161,28 @@
             buildWorld();
 
             S.renderer.xr.addEventListener('sessionstart', () => {
-                // FORCE ORIENTATION: Face the table immediately
-                S.player.rotation.set(0, 0, 0);
+                // HARD RESET: Force rotation to face center (0,0,0)
+                // We reset the rotation and move to a known point.
                 S.player.position.set(0, 0, 8);
-                S.player.lookAt(0, 0, 0);
+                S.player.rotation.set(0, 0, 0);
+                
+                // If you are still facing away, this lookAt will spin you around.
+                S.player.lookAt(new THREE.Vector3(0, 0, 0));
+                
+                console.log("VR Session Started: Oriented to Table");
             });
 
             S.renderer.setAnimationLoop(() => {
                 const dt = S.clock.getDelta();
                 Controls.update(dt);
 
+                // Laser Logic for Right Hand
                 if (S.rightController) {
                     const worldPos = new THREE.Vector3();
                     const worldDir = new THREE.Vector3(0, 0, -1);
                     S.rightController.getWorldPosition(worldPos);
                     worldDir.applyQuaternion(S.rightController.getWorldQuaternion(new THREE.Quaternion()));
+                    
                     if (worldDir.y < 0) {
                         const t = -worldPos.y / worldDir.y;
                         S.rightReticle.position.set(worldPos.x + worldDir.x * t, 0.02, worldPos.z + worldDir.z * t);

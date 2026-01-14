@@ -1,140 +1,221 @@
-// /js/core/ui_sticks.js — Prime 10.0 (FULL, mobile joysticks)
-// Left stick = move (lx, ly) | Right stick = look (rx, ry)
-// Safe: if DOM missing, returns zeros.
+// /js/core/ui_sticks.js — Scarlett UI Sticks (FULL) v2.0
+// ✅ Dual virtual sticks: Left=move, Right=look
+// ✅ Works on Android + Quest Browser DOM Overlay
+// ✅ Proper z-index + touch-action + pointer capture
+// ✅ Toggle visibility (Signals: UI_STICKS_SHOW / UI_STICKS_HIDE / UI_STICKS_TOGGLE)
 
 export const UISticks = (() => {
-  let state = {
+  const state = {
+    el: null,
+    left: null,
+    right: null,
+    visible: true,
+
+    // axes
     lx: 0, ly: 0,
     rx: 0, ry: 0,
-    enabled: true
+
+    // pointers
+    lp: null,
+    rp: null,
+
+    // config
+    dead: 0.08,
+    max: 48,        // radius px for full deflection
+    lookScale: 1.0,
+    moveScale: 1.0,
+    log: console.log
   };
 
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function len(x, y) { return Math.sqrt(x*x + y*y); }
 
-  function makeStick(id, side) {
+  function mkStick(id, side) {
     const wrap = document.createElement("div");
     wrap.id = id;
     wrap.style.position = "fixed";
-    wrap.style.bottom = "18px";
-    wrap.style[side] = "18px";
-    wrap.style.width = "160px";
-    wrap.style.height = "160px";
+    wrap.style.bottom = "14px";
+    wrap.style[side] = "14px";
+    wrap.style.width = "140px";
+    wrap.style.height = "140px";
     wrap.style.borderRadius = "999px";
-    wrap.style.background = "rgba(0,0,0,0.25)";
-    wrap.style.border = "2px solid rgba(102,204,255,0.35)";
+    wrap.style.background = "rgba(10,16,30,0.30)";
+    wrap.style.border = "1px solid rgba(102,204,255,0.35)";
     wrap.style.backdropFilter = "blur(6px)";
-    wrap.style.zIndex = "9999";
+    wrap.style.webkitBackdropFilter = "blur(6px)";
     wrap.style.touchAction = "none";
-    wrap.style.userSelect = "none";
+    wrap.style.pointerEvents = "auto";
+
+    const ring = document.createElement("div");
+    ring.style.position = "absolute";
+    ring.style.inset = "14px";
+    ring.style.borderRadius = "999px";
+    ring.style.border = "1px solid rgba(255,255,255,0.10)";
+    ring.style.background = "rgba(0,0,0,0.10)";
+    wrap.appendChild(ring);
 
     const knob = document.createElement("div");
     knob.style.position = "absolute";
     knob.style.left = "50%";
     knob.style.top = "50%";
-    knob.style.transform = "translate(-50%,-50%)";
-    knob.style.width = "72px";
-    knob.style.height = "72px";
+    knob.style.width = "56px";
+    knob.style.height = "56px";
+    knob.style.marginLeft = "-28px";
+    knob.style.marginTop = "-28px";
     knob.style.borderRadius = "999px";
-    knob.style.background = "rgba(255,211,107,0.22)";
-    knob.style.border = "2px solid rgba(255,211,107,0.45)";
-    knob.style.boxShadow = "0 0 18px rgba(102,204,255,0.18)";
+    knob.style.background = "rgba(102,204,255,0.35)";
+    knob.style.border = "1px solid rgba(255,255,255,0.15)";
+    knob.style.boxShadow = "0 8px 22px rgba(0,0,0,0.35)";
+    knob.style.touchAction = "none";
     wrap.appendChild(knob);
 
-    document.body.appendChild(wrap);
+    return { wrap, knob };
+  }
 
-    const stick = {
-      wrap, knob,
-      active: false,
-      pid: null,
-      cx: 0, cy: 0,
-      x: 0, y: 0
+  function setKnob(st, dx, dy) {
+    // dx,dy in px relative to center
+    const r = state.max;
+    const L = len(dx, dy);
+    if (L > r) {
+      dx = dx / L * r;
+      dy = dy / L * r;
+    }
+    st.knob.style.transform = `translate(${dx}px, ${dy}px)`;
+  }
+
+  function axesFromDelta(dx, dy) {
+    // normalized [-1..1], with y positive UP for look stick,
+    // but we’ll map move y so pushing up means forward (negative Z) later.
+    const r = state.max;
+    let x = clamp(dx / r, -1, 1);
+    let y = clamp(dy / r, -1, 1);
+
+    // deadzone
+    const L = len(x, y);
+    if (L < state.dead) return { x: 0, y: 0 };
+
+    // rescale after deadzone (smooth)
+    const t = (L - state.dead) / (1 - state.dead);
+    const nx = (x / L) * t;
+    const ny = (y / L) * t;
+    return { x: nx, y: ny };
+  }
+
+  function centerOf(el) {
+    const r = el.getBoundingClientRect();
+    return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+  }
+
+  function bindStick(st, which /*"left"|"right"*/) {
+    const onDown = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      st.wrap.setPointerCapture?.(e.pointerId);
+
+      const c = centerOf(st.wrap);
+      const dx = e.clientX - c.cx;
+      const dy = e.clientY - c.cy;
+
+      if (which === "left") state.lp = { id: e.pointerId, cx: c.cx, cy: c.cy };
+      else state.rp = { id: e.pointerId, cx: c.cx, cy: c.cy };
+
+      setKnob(st, dx, dy);
+
+      const a = axesFromDelta(dx, dy);
+      if (which === "left") { state.lx = a.x * state.moveScale; state.ly = a.y * state.moveScale; }
+      else { state.rx = a.x * state.lookScale; state.ry = a.y * state.lookScale; }
     };
 
-    const radius = 54;
-
-    const setKnob = (x, y) => {
-      stick.x = clamp(x, -1, 1);
-      stick.y = clamp(y, -1, 1);
-      const px = stick.x * radius;
-      const py = stick.y * radius;
-      knob.style.transform = `translate(${px}px, ${py}px) translate(-50%,-50%)`;
-    };
-
-    const begin = (e) => {
-      if (!state.enabled) return;
-      stick.active = true;
-      stick.pid = e.pointerId;
-      wrap.setPointerCapture?.(e.pointerId);
-      const r = wrap.getBoundingClientRect();
-      stick.cx = r.left + r.width / 2;
-      stick.cy = r.top + r.height / 2;
-      move(e);
-    };
-
-    const move = (e) => {
-      if (!stick.active || stick.pid !== e.pointerId) return;
-      const dx = (e.clientX - stick.cx) / radius;
-      const dy = (e.clientY - stick.cy) / radius;
-
-      // deadzone
-      const mag = Math.hypot(dx, dy);
-      let nx = dx, ny = dy;
-      if (mag > 1) { nx /= mag; ny /= mag; }
-      if (mag < 0.08) { nx = 0; ny = 0; }
-
-      setKnob(nx, ny);
-
-      if (side === "left") {
-        state.lx = nx;
-        state.ly = ny;
+    const onMove = (e) => {
+      if (which === "left") {
+        if (!state.lp || e.pointerId !== state.lp.id) return;
+        e.preventDefault();
+        const dx = e.clientX - state.lp.cx;
+        const dy = e.clientY - state.lp.cy;
+        setKnob(st, dx, dy);
+        const a = axesFromDelta(dx, dy);
+        state.lx = a.x * state.moveScale;
+        state.ly = a.y * state.moveScale;
       } else {
-        state.rx = nx;
-        state.ry = ny;
+        if (!state.rp || e.pointerId !== state.rp.id) return;
+        e.preventDefault();
+        const dx = e.clientX - state.rp.cx;
+        const dy = e.clientY - state.rp.cy;
+        setKnob(st, dx, dy);
+        const a = axesFromDelta(dx, dy);
+        state.rx = a.x * state.lookScale;
+        state.ry = a.y * state.lookScale;
       }
     };
 
-    const end = (e) => {
-      if (stick.pid !== e.pointerId) return;
-      stick.active = false;
-      stick.pid = null;
-      setKnob(0, 0);
-      if (side === "left") { state.lx = 0; state.ly = 0; }
-      else { state.rx = 0; state.ry = 0; }
+    const onUp = (e) => {
+      if (which === "left" && state.lp && e.pointerId === state.lp.id) {
+        state.lp = null;
+        state.lx = 0; state.ly = 0;
+        setKnob(st, 0, 0);
+      }
+      if (which === "right" && state.rp && e.pointerId === state.rp.id) {
+        state.rp = null;
+        state.rx = 0; state.ry = 0;
+        setKnob(st, 0, 0);
+      }
     };
 
-    wrap.addEventListener("pointerdown", begin);
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", end);
-    window.addEventListener("pointercancel", end);
+    st.wrap.addEventListener("pointerdown", onDown, { passive: false });
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", onUp, { passive: true });
+    window.addEventListener("pointercancel", onUp, { passive: true });
+  }
 
-    return stick;
+  function setVisible(v) {
+    state.visible = !!v;
+    if (state.el) state.el.style.display = state.visible ? "block" : "none";
+    if (!state.visible) {
+      state.lx = state.ly = state.rx = state.ry = 0;
+      state.lp = state.rp = null;
+    }
   }
 
   return {
-    init({ Signals, log }) {
-      try {
-        // Avoid duplicates on hot reload
-        document.getElementById("stickL")?.remove?.();
-        document.getElementById("stickR")?.remove?.();
+    init({ Signals, log } = {}) {
+      state.log = log || console.log;
 
-        makeStick("stickL", "left");
-        makeStick("stickR", "right");
+      // container
+      const el = document.createElement("div");
+      el.id = "scarlett-sticks";
+      el.style.position = "fixed";
+      el.style.left = "0";
+      el.style.top = "0";
+      el.style.width = "100%";
+      el.style.height = "100%";
+      el.style.pointerEvents = "none";           // only the sticks themselves capture
+      el.style.zIndex = "999999";                // ABOVE everything
+      el.style.touchAction = "none";
+      document.body.appendChild(el);
+      state.el = el;
 
-        log?.("[sticks] enabled ✅");
+      // sticks
+      const L = mkStick("stick-left", "left");
+      const R = mkStick("stick-right", "right");
+      el.appendChild(L.wrap);
+      el.appendChild(R.wrap);
 
-        // Optional toggle via signal
-        Signals?.on?.("STICKS_ENABLE", (p) => {
-          state.enabled = p?.enabled !== false;
-          log?.(`[sticks] enabled=${state.enabled}`);
-        });
+      state.left = L;
+      state.right = R;
 
-        return {
-          getAxes() { return { lx: state.lx, ly: state.ly, rx: state.rx, ry: state.ry }; }
-        };
-      } catch (e) {
-        log?.(`[sticks] init failed ⚠️ ${e?.message || String(e)}`);
-        return { getAxes() { return { lx:0, ly:0, rx:0, ry:0 }; } };
-      }
+      bindStick(L, "left");
+      bindStick(R, "right");
+
+      // signals
+      Signals?.on?.("UI_STICKS_SHOW", () => setVisible(true));
+      Signals?.on?.("UI_STICKS_HIDE", () => setVisible(false));
+      Signals?.on?.("UI_STICKS_TOGGLE", () => setVisible(!state.visible));
+
+      state.log?.("[sticks] enabled ✅");
+      return {
+        setVisible,
+        getAxes() { return { lx: state.lx, ly: state.ly, rx: state.rx, ry: state.ry }; }
+      };
     }
   };
 })();

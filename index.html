@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ScarlettVR Ultimate V17</title>
+    <title>ScarlettVR Ultimate V18</title>
     <style>
         body { margin: 0; background: #05070d; overflow: hidden; font-family: monospace; }
         #ui { position: absolute; top: 10px; left: 10px; color: #00ffff; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.6); padding: 10px; border: 1px solid #00ffff; border-radius: 8px; }
@@ -18,7 +18,7 @@
     </script>
 </head>
 <body>
-    <div id="ui"><b>V17_QUEST_CALIBRATED</b><br>Left: Perfect (Saved)<br>Right: Reversed Math Fixed</div>
+    <div id="ui"><b>V18_TELEPORT_ACTIVATE</b><br>Right Stick: Fwd/Back Move<br>Right Trigger: Teleport Jump</div>
 
     <script type="module">
         import * as THREE from 'three';
@@ -33,13 +33,15 @@
             clock: new THREE.Clock(),
             bots: [],
             rightReticle: null,
-            rightController: null
+            rightController: null,
+            canTeleport: false,
+            teleportTarget: new THREE.Vector3()
         };
 
         const Controls = {
             moveSpeed: 2.8,
             snapAngle: Math.PI / 4,
-            snapCooldown: 0.35, // Slightly longer cooldown for stability
+            snapCooldown: 0.35,
             _snapTimer: 0,
             deadzone: 0.18,
             
@@ -51,31 +53,46 @@
                 for (const source of session.inputSources) {
                     if (!source.gamepad) continue;
                     const axes = source.gamepad.axes;
+                    const buttons = source.gamepad.buttons;
 
-                    // --- LEFT HAND: (AS REQUESTED: NO CHANGES TO LEFT/RIGHT) ---
+                    // --- LEFT HAND: (PERFECT - DO NOT TOUCH) ---
                     if (source.handedness === 'left') {
                         const lx = axes[2] || axes[0] || 0;
                         const ly = axes[3] || axes[1] || 0;
-                        
                         if (Math.abs(lx) > this.deadzone || Math.abs(ly) > this.deadzone) {
                             const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(S.camera.quaternion);
                             fwd.y = 0; fwd.normalize();
                             const side = new THREE.Vector3(1, 0, 0).applyQuaternion(S.camera.quaternion);
                             side.y = 0; side.normalize();
-                            
-                            // Left side logic kept from previous version as requested
                             S.player.position.addScaledVector(fwd, ly * this.moveSpeed * dt);
                             S.player.position.addScaledVector(side, -lx * this.moveSpeed * dt);
                         }
                     }
 
-                    // --- RIGHT HAND: SNAP TURN (FIXED FOR 45° OPPOSITES) ---
-                    if (source.handedness === 'right' && this._snapTimer <= 0) {
+                    // --- RIGHT HAND: FORWARD/BACK & TELEPORT ---
+                    if (source.handedness === 'right') {
                         const rx = axes[2] || axes[0] || 0;
-                        if (Math.abs(rx) > 0.6) {
-                            // Swapped -= to += to fix the "opposite" rotation on Quest
+                        const ry = axes[3] || axes[1] || 0;
+
+                        // 1. Smooth Forward/Back on Right Stick
+                        if (Math.abs(ry) > this.deadzone) {
+                            const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(S.camera.quaternion);
+                            fwd.y = 0; fwd.normalize();
+                            // Inverted ry to make stick forward move forward
+                            S.player.position.addScaledVector(fwd, -ry * this.moveSpeed * dt);
+                        }
+
+                        // 2. Snap Turn Left/Right on Right Stick
+                        if (Math.abs(rx) > 0.6 && this._snapTimer <= 0) {
                             S.player.rotation.y += -Math.sign(rx) * this.snapAngle;
                             this._snapTimer = this.snapCooldown;
+                        }
+
+                        // 3. Teleport Trigger (Index finger pull)
+                        if (buttons[0].pressed && S.canTeleport) {
+                            // Instant jump to the reticle position
+                            S.player.position.copy(S.teleportTarget);
+                            S.canTeleport = false; // Prevent double-jumps
                         }
                     }
                 }
@@ -87,10 +104,10 @@
             S.scene.add(new THREE.HemisphereLight(0xdaf0ff, 0x0b0f1a, 1.2));
             S.scene.add(new THREE.GridHelper(100, 50, 0x00ffff, 0x112222));
 
-            // Gold Poker Table Centerpiece
+            // Gold Poker Table
             const table = new THREE.Mesh(
                 new THREE.CylinderGeometry(3, 3, 0.4, 32), 
-                new THREE.MeshStandardMaterial({ color: 0xd2b46a, metalness: 0.8, roughness: 0.2 })
+                new THREE.MeshStandardMaterial({ color: 0xd2b46a, metalness: 0.8 })
             );
             table.position.set(0, 0.2, 0);
             S.scene.add(table);
@@ -129,7 +146,7 @@
                     if (event.data.handedness === 'right') {
                         S.rightController = controller;
                         const laser = new THREE.Line(
-                            new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]),
+                            new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-10)]),
                             new THREE.LineBasicMaterial({ color: 0x00ffff })
                         );
                         controller.add(laser);
@@ -138,7 +155,7 @@
             }
 
             S.rightReticle = new THREE.Mesh(
-                new THREE.RingGeometry(0.1, 0.12, 32),
+                new THREE.RingGeometry(0.15, 0.2, 32),
                 new THREE.MeshBasicMaterial({ color: 0x00ffff, side: THREE.DoubleSide })
             );
             S.rightReticle.rotation.x = -Math.PI / 2;
@@ -147,7 +164,6 @@
             buildWorld();
 
             S.renderer.xr.addEventListener('sessionstart', () => {
-                // FIXED SPAWN: Teleport far back and rotate 180 so the table is in front
                 S.player.position.set(0, 0, 8);
                 S.player.rotation.set(0, Math.PI, 0); 
             });
@@ -162,12 +178,18 @@
                     S.rightController.getWorldPosition(worldPos);
                     worldDir.applyQuaternion(S.rightController.getWorldQuaternion(new THREE.Quaternion()));
                     
-                    if (worldDir.y < 0) {
+                    if (worldDir.y < -0.1) {
                         const t = -worldPos.y / worldDir.y;
-                        S.rightReticle.position.set(worldPos.x + worldDir.x * t, 0.02, worldPos.z + worldDir.z * t);
+                        const hitX = worldPos.x + worldDir.x * t;
+                        const hitZ = worldPos.z + worldDir.z * t;
+                        
+                        S.teleportTarget.set(hitX, 0, hitZ);
+                        S.rightReticle.position.set(hitX, 0.05, hitZ);
                         S.rightReticle.visible = true;
+                        S.canTeleport = true;
                     } else {
                         S.rightReticle.visible = false;
+                        S.canTeleport = false;
                     }
                 }
                 S.renderer.render(S.scene, S.camera);

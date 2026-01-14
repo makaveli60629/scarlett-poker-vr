@@ -313,4 +313,3 @@ function wireHud({ renderer, Signals, player }) {
     bootStatus("Fatal ❌");
   }
 })();
-```0

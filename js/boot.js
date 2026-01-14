@@ -1,3 +1,15 @@
+import { Core } from './core.js';
+
+window.addEventListener('DOMContentLoaded', async () => {
+    console.log('%c[BOOT] Initializing Scarlett Spine...', 'color: #00ffff');
+    try {
+        await Core.start();
+    } catch (e) {
+        console.error('[BOOT ERROR]', e);
+    }
+});
+
+
 // /js/boot.js — Scarlett Boot Diagnostics (FULL, GitHub Pages safe)
 (() => {
   const stamp = Date.now();

@@ -1,9 +1,9 @@
-// /js/world.js — ScarlettVR Prime 10.0 WORLD (FULL) v10.0.1
-// ✅ Clean guaranteed spawn (no clipping)
-// ✅ UNSTUCK system + button hook
-// ✅ Movement works even if sticks fail (tick+update + drag fallback)
-// ✅ More lights + walls + glass (kept away from spawn)
-// ✅ Keeps Signals architecture + Poker/Bots/Rules
+// /js/world.js — ScarlettVR Prime 10.0 WORLD (FULL) v10.0.2
+// ✅ Dedicated Spawn Room + Hallway into Lobby (no wall spawns)
+// ✅ Safe telepads aligned to empty space
+// ✅ UNSTUCK + SPAWN hooks
+// ✅ Sticks movement works on Android AND Quest (XR too, for diagnostics)
+// ✅ Uses your /js/core + /js/systems structure
 
 import { Signals } from "./core/signals.js";
 import { Manifest } from "./core/manifest.js";
@@ -15,414 +15,208 @@ import { Healthcheck } from "./core/healthcheck.js";
 import { UISticks } from "./core/ui_sticks.js";
 
 import { PokerSystem } from "./systems/poker_system.js";
-import { PokerRules } from "./core/poker_rules.js";
 import { BotSystem } from "./systems/bot_system.js";
+
+// NOTE: you currently have poker_rules in /js/core in your repo screenshots.
+// If you moved it to /js/systems, change the import accordingly.
+import { PokerRules } from "./core/poker_rules.js";
+
+import { WorldBuilders } from "./world_builders.js";
 
 export const World = {
   async init({ THREE, scene, renderer, camera, player, log }) {
-    // ---------------- CORE INIT ----------------
     Manifest.init();
+
+    // default flags (keep safe)
+    if (Manifest.get("flags.xrSticks") === undefined) Manifest.set("flags.xrSticks", true);
+    if (Manifest.get("flags.safeMode") === undefined) Manifest.set("flags.safeMode", false);
+
     const saved = Persistence.load() || {};
     if (saved.flags?.safeMode === true) Manifest.set("flags.safeMode", true);
-    const safe = !!Manifest.get("flags.safeMode");
 
     const ctx = {
-      THREE, scene, renderer, camera, player,
+      THREE,
+      scene,
+      renderer,
+      camera,
+      player,
       root: new THREE.Group(),
       Signals,
       manifest: Manifest,
       log: (m) => { DebugHUD.log(m); log?.(m); }
     };
+
     ctx.root.name = "WORLD_ROOT";
     scene.add(ctx.root);
 
-    // ---------------- VISIBILITY ----------------
-    camera.near = 0.06;
-    camera.far = 800;
-    camera.updateProjectionMatrix();
+    // --- env ---
+    scene.background = new THREE.Color(0x05070d);
+    scene.fog = new THREE.Fog(0x05070d, 10, 110);
 
-    scene.background = new THREE.Color(0x03050b);
-    scene.fog = new THREE.Fog(0x03050b, 55, 420);
+    // --- lights ---
+    WorldBuilders.lights(ctx);
 
-    addLights(ctx, safe);
+    // --- build world ---
+    const build = WorldBuilders.build(ctx);
+    // build returns: { anchors, pads, safeUnstuck }
 
-    // ---------------- WORLD GEOMETRY ----------------
-    // Keep heavy geometry near origin, NOT near spawn.
-    buildLobbyShell(ctx, safe);
-    buildLobbyFloor(ctx);
-    buildPit(ctx);
-    buildBalcony(ctx);
-    buildRooms(ctx);
-    buildGlassAccents(ctx, safe);
+    // XR hands + interaction
+    const hands = XRHands.init({ THREE, scene, renderer, Signals, log: ctx.log });
+    Interaction.init({ THREE, Signals, hands, log: ctx.log });
 
-    // ---------------- ANCHORS ----------------
-    // IMPORTANT: spawn is FAR from any geometry (z=40) so you never clip.
-    const anchors = {
-      spawn:    { name: "spawn",    pos: new THREE.Vector3(0, 0, 40),   yaw: Math.PI },
-      lobby:    { name: "lobby",    pos: new THREE.Vector3(0, 0, 13.5), yaw: Math.PI },
-      poker:    { name: "poker",    pos: new THREE.Vector3(0, 0, -9.5), yaw: 0 },
-      store:    { name: "store",    pos: new THREE.Vector3(-26, 0, 0),  yaw: Math.PI / 2 },
-      scorpion: { name: "scorpion", pos: new THREE.Vector3(26, 0, 0),   yaw: -Math.PI / 2 },
-      spectate: { name: "spectate", pos: new THREE.Vector3(0, 3.0, -14),yaw: 0 }
-    };
-
-    // ---------------- RIG CONTROL ----------------
-    function setRig(a) {
-      player.position.copy(a.pos);
-      player.rotation.set(0, 0, 0);
-      if (!renderer.xr.isPresenting) camera.rotation.set(0, a.yaw, 0);
-      DebugHUD.setRoom(a.name || "room");
-      ctx.log(`[rm] room=${a.name || "?"}`);
-    }
-
-    // ---------------- UNSTUCK (GUARANTEED) ----------------
-    let unstuckPad = null;
-    function hardUnstuck(reason = "manual") {
-      // Remove old pad to prevent clutter
-      if (unstuckPad) {
-        try { ctx.root.remove(unstuckPad); } catch {}
-        unstuckPad = null;
-      }
-
-      const safePos = anchors.spawn.pos.clone();
-
-      player.position.copy(safePos);
-      player.rotation.set(0, 0, 0);
-      if (!renderer.xr.isPresenting) camera.rotation.set(0, anchors.spawn.yaw, 0);
-
-      // Bright pad so you KNOW you are safe
-      unstuckPad = new THREE.Mesh(
-        new THREE.CylinderGeometry(1.55, 1.55, 0.14, 36),
-        new THREE.MeshStandardMaterial({
-          color: 0x10192a,
-          roughness: 0.45,
-          metalness: 0.25,
-          emissive: new THREE.Color(0xffd36b),
-          emissiveIntensity: 0.70
-        })
-      );
-      unstuckPad.position.set(safePos.x, 0.07, safePos.z);
-      unstuckPad.name = "UNSTUCK_PAD";
-      ctx.root.add(unstuckPad);
-
-      const ring = new THREE.Mesh(
-        new THREE.RingGeometry(2.0, 2.25, 54),
-        new THREE.MeshBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
-      );
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.set(safePos.x, 0.01, safePos.z);
-      ctx.root.add(ring);
-
-      ctx.log(`[spawn] hardUnstuck ✅ reason=${reason} pos=${safePos.x},${safePos.y},${safePos.z}`);
-    }
-
-    // Auto-unstuck on load so you never spawn inside geometry
-    hardUnstuck("auto");
-
-    // ---------------- INPUT ----------------
-    XRHands.init({ THREE, scene, renderer, Signals, log: ctx.log });
-    Interaction.init({ THREE, Signals, log: ctx.log });
-
-    // UI sticks (if module exists)
+    // Android + XR diagnostic sticks
     const sticks = UISticks.init({ Signals, log: ctx.log });
 
-    // ---------------- SYSTEMS ----------------
-    const poker = PokerSystem.init({ THREE, root: ctx.root, Signals, manifest: Manifest, log: ctx.log });
-    PokerRules.init({ Signals, manifest: Manifest, log: ctx.log });
-    const bots = BotSystem.init({ Signals, manifest: Manifest, log: ctx.log });
-
-    Healthcheck.init({ Signals, manifest: Manifest, log: ctx.log });
-
-    // ---------------- ROOM SET ----------------
-    let room = saved.room || "spawn";
-
-    Signals.on("ROOM_SET", (p) => {
-      const r = String(p?.room || "spawn");
-      room = anchors[r] ? r : "spawn";
-      setRig(anchors[room]);
-      Persistence.save({ ...saved, room, flags: Manifest.get("flags") });
+    // systems
+    const poker = PokerSystem?.init?.({
+      THREE,
+      root: ctx.root,
+      Signals,
+      manifest: Manifest,
+      log: ctx.log
     });
 
-    // HUD buttons if they exist
-    hook("btnUnstuck", () => hardUnstuck("button"));
-    hook("btnSpawn", () => Signals.emit("ROOM_SET", { room: "spawn" }));
-    hook("btnLobby", () => Signals.emit("ROOM_SET", { room: "lobby" }));
-    hook("btnPoker", () => Signals.emit("ROOM_SET", { room: "poker" }));
-    hook("btnStore", () => Signals.emit("ROOM_SET", { room: "store" }));
-    hook("btnScorpion", () => Signals.emit("ROOM_SET", { room: "scorpion" }));
-    hook("btnSpectate", () => Signals.emit("ROOM_SET", { room: "spectate" }));
+    const rules = PokerRules?.init?.({ Signals, manifest: Manifest, log: ctx.log });
+    const bots = BotSystem?.init?.({ Signals, manifest: Manifest, log: ctx.log });
 
-    // Always start at spawn (your request)
-    Signals.emit("ROOM_SET", { room: "spawn" });
+    // --- helpers ---
+    const anchors = build.anchors;
 
-    // Start game
-    Signals.emit("GAME_INIT", { seed: Date.now(), tableId: "main" });
+    function setRig(anchor) {
+      if (!anchor) return;
+      // anchor.pos is guaranteed clear space (we keep it away from walls)
+      player.position.copy(anchor.pos);
+      player.rotation.set(0, 0, 0);
 
-    ctx.log("[world] Prime 10.0 FULL ✅ (unstuck + movement fallbacks)");
+      // yaw on desktop; XR head handles yaw
+      if (!renderer.xr.isPresenting) camera.rotation.set(0, anchor.yaw || 0, 0);
 
-    // ---------------- MOVEMENT ----------------
-    const tmpF = new THREE.Vector3();
-    const tmpR = new THREE.Vector3();
-    const tmpM = new THREE.Vector3();
-
-    function applySticks(dt) {
-      // For now: move only in non-XR so you can diagnose.
-      if (renderer.xr.isPresenting) return;
-
-      const ax = sticks?.getAxes?.() || { lx: 0, ly: 0, rx: 0, ry: 0 };
-
-      // Look
-      player.rotation.y -= (ax.rx || 0) * 1.8 * dt;
-      camera.rotation.x -= (ax.ry || 0) * 1.2 * dt;
-      camera.rotation.x = Math.max(-1.15, Math.min(1.15, camera.rotation.x));
-
-      // Move (camera plane)
-      tmpF.set(0, 0, -1).applyQuaternion(camera.quaternion);
-      tmpF.y = 0; tmpF.normalize();
-      tmpR.set(1, 0, 0).applyQuaternion(camera.quaternion);
-      tmpR.y = 0; tmpR.normalize();
-
-      tmpM.set(0, 0, 0);
-      tmpM.addScaledVector(tmpR, ax.lx || 0);
-      tmpM.addScaledVector(tmpF, -(ax.ly || 0));
-
-      const len = tmpM.length();
-      if (len > 0.001) {
-        tmpM.multiplyScalar((2.6 * dt) / len);
-        player.position.add(tmpM);
-      }
+      // slight lift to avoid spawning exactly on a surface seam
+      player.position.y += 0.02;
     }
 
-    // ---------------- DRAG FALLBACK (works even if sticks fail) ----------------
-    let drag = { on: false, x: 0, y: 0 };
-    window.addEventListener("pointerdown", (e) => {
-      if (renderer.xr.isPresenting) return;
-      drag.on = true; drag.x = e.clientX; drag.y = e.clientY;
-    }, { passive: true });
+    function setRoom(roomName) {
+      const r = anchors[roomName] ? roomName : "spawn";
+      setRig(anchors[r]);
+      DebugHUD.setRoom(r);
+      Persistence.save({ ...saved, room: r, flags: Manifest.get("flags") });
+      ctx.log(`[rm] room=${r}`);
+    }
 
-    window.addEventListener("pointerup", () => { drag.on = false; }, { passive: true });
-    window.addEventListener("pointercancel", () => { drag.on = false; }, { passive: true });
+    function unstuck() {
+      // always snap to a known safe open spot (spawn pad center)
+      const p = build.safeUnstuck();
+      player.position.copy(p);
+      player.position.y += 0.05;
+      if (!renderer.xr.isPresenting) camera.rotation.set(0, anchors.spawn.yaw || 0, 0);
+      ctx.log("[rm] UNSTUCK ✅");
+    }
 
-    window.addEventListener("pointermove", (e) => {
-      if (renderer.xr.isPresenting) return;
-      if (!drag.on) return;
+    // --- Signals wiring ---
+    Signals.on("ROOM_SET", (p) => setRoom(String(p?.room || "spawn")));
+    Signals.on("UNSTUCK", () => unstuck());
 
-      const dx = e.clientX - drag.x;
-      const dy = e.clientY - drag.y;
-      drag.x = e.clientX;
-      drag.y = e.clientY;
+    Signals.on("UI_CLICK", (p) => {
+      const id = String(p?.id || "");
+      if (id === "NEW_HAND") Signals.emit("GAME_INIT", { seed: Date.now(), tableId: "main" });
+      if (id === "HEALTHCHECK") Signals.emit("DEBUG_DUMP", {});
+      if (id === "SPAWN") Signals.emit("ROOM_SET", { room: "spawn" });
+      if (id === "UNSTUCK") Signals.emit("UNSTUCK", {});
 
-      // yaw with horizontal drag
-      player.rotation.y -= dx * 0.003;
+      if (id === "LOBBY") Signals.emit("ROOM_SET", { room: "lobby" });
+      if (id === "POKER") Signals.emit("ROOM_SET", { room: "poker" });
+      if (id === "STORE") Signals.emit("ROOM_SET", { room: "store" });
+      if (id === "SCORPION") Signals.emit("ROOM_SET", { room: "scorpion" });
+      if (id === "SPECTATE") Signals.emit("ROOM_SET", { room: "spectate" });
+    });
 
-      // forward/back with vertical drag
-      const fwd = tmpF.set(0, 0, -1).applyQuaternion(camera.quaternion);
-      fwd.y = 0; fwd.normalize();
-      player.position.addScaledVector(fwd, dy * 0.008);
-    }, { passive: true });
+    // Hook HUD buttons (id list must match your index.html)
+    hookButton("btnNewHand",   () => Signals.emit("UI_CLICK", { id: "NEW_HAND" }));
+    hookButton("btnHealthcheck", () => Signals.emit("UI_CLICK", { id: "HEALTHCHECK" }));
 
-    // ---------------- API (tick + update alias) ----------------
-    const api = {
-      tick(dt, t) {
-        DebugHUD.perfTick();
+    hookButton("btnSpawn",     () => Signals.emit("UI_CLICK", { id: "SPAWN" }));
+    hookButton("btnUnstuck",   () => Signals.emit("UI_CLICK", { id: "UNSTUCK" }));
 
-        applySticks(dt);
+    hookButton("btnLobby",     () => Signals.emit("UI_CLICK", { id: "LOBBY" }));
+    hookButton("btnPoker",     () => Signals.emit("UI_CLICK", { id: "POKER" }));
+    hookButton("btnStore",     () => Signals.emit("UI_CLICK", { id: "STORE" }));
+    hookButton("btnScorpion",  () => Signals.emit("UI_CLICK", { id: "SCORPION" }));
+    hookButton("btnSpectate",  () => Signals.emit("UI_CLICK", { id: "SPECTATE" }));
 
-        DebugHUD.setXR(renderer.xr.isPresenting ? "XR:on" : "XR:off");
-        DebugHUD.setPos(`x:${player.position.x.toFixed(2)} y:${player.position.y.toFixed(2)} z:${player.position.z.toFixed(2)}`);
-
-        poker?.update?.(dt, t);
-        bots?.update?.(dt);
-
-        if (((t | 0) % 10) === 0) {
-          Persistence.save({ room, flags: Manifest.get("flags") });
-        }
-      },
-
-      // ✅ Compatibility: some index.js uses update()
-      update(dt, t) { api.tick(dt, t); }
-    };
-
-    window.__WORLD = api;
-    return api;
-
-    function hook(id, fn) {
+    function hookButton(id, fn) {
       const el = document.getElementById(id);
       if (el) el.addEventListener("click", fn);
     }
+
+    // healthcheck (after DOM exists)
+    Healthcheck.init({ Signals, manifest: Manifest, log: ctx.log });
+
+    // start a hand
+    Signals.emit("GAME_INIT", { seed: Date.now(), tableId: "main" });
+
+    // apply saved room (default spawn room)
+    const startRoom = saved.room || "spawn";
+    setRoom(startRoom);
+
+    ctx.log("[world] Prime 10.0 FULL init ✅ (SpawnRoom + Hallway aligned)");
+
+    // movement (sticks) — also works in XR for diagnostics if flags.xrSticks true
+    const tmpForward = new THREE.Vector3();
+    const tmpRight = new THREE.Vector3();
+    const tmpMove = new THREE.Vector3();
+
+    function applySticks(dt) {
+      const allowXR = !!Manifest.get("flags.xrSticks");
+      if (renderer.xr.isPresenting && !allowXR) return;
+
+      const ax = sticks.getAxes?.() || { lx:0, ly:0, rx:0, ry:0 };
+      const moveX = ax.lx;
+      const moveY = ax.ly;
+      const lookX = ax.rx;
+      const lookY = ax.ry;
+
+      // look
+      player.rotation.y -= lookX * 1.6 * dt;
+      camera.rotation.x -= lookY * 1.2 * dt;
+      camera.rotation.x = Math.max(-1.2, Math.min(1.2, camera.rotation.x));
+
+      // move (flat)
+      tmpForward.set(0, 0, -1).applyQuaternion(camera.quaternion);
+      tmpForward.y = 0; tmpForward.normalize();
+      tmpRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
+      tmpRight.y = 0; tmpRight.normalize();
+
+      tmpMove.set(0, 0, 0);
+      tmpMove.addScaledVector(tmpRight, moveX);
+      tmpMove.addScaledVector(tmpForward, -moveY);
+
+      const len = tmpMove.length();
+      if (len > 0.001) {
+        tmpMove.multiplyScalar((2.2 * dt) / len);
+        player.position.add(tmpMove);
+      }
+    }
+
+    return {
+      tick(dt, t) {
+        DebugHUD.perfTick();
+
+        // apply sticks (Android + Quest diagnostics)
+        applySticks(dt);
+
+        // hud labels
+        DebugHUD.setXR(renderer.xr.isPresenting ? "XR:on" : "XR:off");
+        DebugHUD.setPos(`x:${player.position.x.toFixed(2)} y:${player.position.y.toFixed(2)} z:${player.position.z.toFixed(2)}`);
+
+        // systems
+        poker?.update?.(dt, t);
+        bots?.update?.(dt);
+
+        // autosave
+        if (((t * 0.001) | 0) % 10 === 0) {
+          Persistence.save({ room: startRoom, flags: Manifest.get("flags") });
+        }
+      }
+    };
   }
 };
-
-// =================== WORLD BUILD HELPERS ===================
-
-function addLights(ctx, safe) {
-  const { THREE, scene, root } = ctx;
-
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x121a2e, safe ? 1.1 : 1.45);
-  hemi.position.set(0, 80, 0);
-  scene.add(hemi);
-
-  const sun = new THREE.DirectionalLight(0xffffff, safe ? 1.05 : 1.25);
-  sun.position.set(35, 80, 35);
-  scene.add(sun);
-
-  const lobbyGlow = new THREE.PointLight(0x66ccff, safe ? 0.9 : 1.3, 200, 2);
-  lobbyGlow.position.set(0, 11, 0);
-  root.add(lobbyGlow);
-
-  const warm = new THREE.PointLight(0xffd36b, safe ? 0.35 : 0.70, 160, 2);
-  warm.position.set(0, 6, 14);
-  root.add(warm);
-
-  const spawn = new THREE.PointLight(0xffd36b, 1.2, 80, 2);
-  spawn.position.set(0, 6, 40);
-  root.add(spawn);
-}
-
-function matFloor(THREE, c) {
-  return new THREE.MeshStandardMaterial({ color: c, roughness: 0.92, metalness: 0.08 });
-}
-
-function matWall(THREE, c) {
-  return new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, metalness: 0.14 });
-}
-
-function buildLobbyShell(ctx, safe) {
-  const { THREE, root } = ctx;
-  const shell = new THREE.Mesh(
-    new THREE.CylinderGeometry(22, 22, 10, 64, 1, true),
-    new THREE.MeshStandardMaterial({
-      color: 0x0b1220,
-      roughness: 0.85,
-      metalness: 0.15,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: safe ? 0.35 : 0.60
-    })
-  );
-  shell.position.set(0, 4.2, 0);
-  root.add(shell);
-}
-
-function buildLobbyFloor(ctx) {
-  const { THREE, root } = ctx;
-  const floor = new THREE.Mesh(
-    new THREE.CylinderGeometry(18, 18, 0.35, 64),
-    matFloor(THREE, 0x1b2a46)
-  );
-  floor.position.set(0, -0.175, 0);
-  root.add(floor);
-
-  const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(16.4, 0.16, 12, 96),
-    new THREE.MeshStandardMaterial({
-      color: 0x66ccff,
-      roughness: 0.35,
-      metalness: 0.6,
-      emissive: new THREE.Color(0x66ccff),
-      emissiveIntensity: 0.40
-    })
-  );
-  ring.rotation.x = Math.PI / 2;
-  ring.position.set(0, 0.18, 0);
-  root.add(ring);
-}
-
-function buildPit(ctx) {
-  const { THREE, root } = ctx;
-  const pitRadius = 7.1;
-  const pitDepth = 3.0;
-  const pitFloorY = -pitDepth;
-
-  const pitFloor = new THREE.Mesh(
-    new THREE.CylinderGeometry(pitRadius, pitRadius, 0.35, 64),
-    matFloor(THREE, 0x0c1220)
-  );
-  pitFloor.position.set(0, pitFloorY - 0.175, 0);
-  root.add(pitFloor);
-
-  const pitWall = new THREE.Mesh(
-    new THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 64, 1, true),
-    matWall(THREE, 0x0a101e)
-  );
-  pitWall.material.side = THREE.DoubleSide;
-  pitWall.position.set(0, pitFloorY / 2, 0);
-  root.add(pitWall);
-
-  const felt = new THREE.Mesh(
-    new THREE.CylinderGeometry(3.05, 3.25, 0.35, 64),
-    new THREE.MeshStandardMaterial({ color: 0x134536, roughness: 0.78, metalness: 0.04 })
-  );
-  felt.position.set(0, pitFloorY + 1.05, 0);
-  root.add(felt);
-}
-
-function buildBalcony(ctx) {
-  const { THREE, root } = ctx;
-  const y = 3.0;
-  const balcony = new THREE.Mesh(
-    new THREE.RingGeometry(14.2, 16.8, 96),
-    matFloor(THREE, 0x111a28)
-  );
-  balcony.rotation.x = -Math.PI / 2;
-  balcony.position.y = y;
-  root.add(balcony);
-}
-
-function buildRooms(ctx) {
-  const { THREE, root } = ctx;
-  const roomDist = 28, roomSize = 10, wallH = 4.6;
-
-  const rooms = [
-    { x: 0, z: -roomDist },
-    { x: 0, z: roomDist },
-    { x: -roomDist, z: 0 },
-    { x: roomDist, z: 0 },
-  ];
-
-  for (const r of rooms) {
-    const floor = new THREE.Mesh(
-      new THREE.BoxGeometry(roomSize * 2.2, 0.35, roomSize * 2.2),
-      matFloor(THREE, 0x111a28)
-    );
-    floor.position.set(r.x, -0.175, r.z);
-    root.add(floor);
-
-    const walls = new THREE.Mesh(
-      new THREE.BoxGeometry(roomSize * 2.2, wallH, roomSize * 2.2),
-      new THREE.MeshStandardMaterial({
-        color: 0x0b1220,
-        roughness: 0.92,
-        metalness: 0.08,
-        transparent: true,
-        opacity: 0.45
-      })
-    );
-    walls.position.set(r.x, wallH / 2 - 0.175, r.z);
-    root.add(walls);
-  }
-}
-
-function buildGlassAccents(ctx, safe) {
-  if (safe) return;
-  const { THREE, root } = ctx;
-
-  const glass = new THREE.MeshPhysicalMaterial({
-    color: 0x66ccff,
-    roughness: 0.08,
-    metalness: 0.0,
-    transmission: 0.85,
-    transparent: true,
-    opacity: 0.18,
-    thickness: 0.2
-  });
-
-  // Put glass accents near lobby, NOT at spawn.
-  const g1 = new THREE.Mesh(new THREE.BoxGeometry(10, 4.5, 0.18), glass);
-  g1.position.set(0, 2.2, 6.5);
-  root.add(g1);
-
-  const g2 = new THREE.Mesh(new THREE.BoxGeometry(10, 4.5, 0.18), glass);
-  g2.position.set(0, 2.2, -6.5);
-  root.add(g2);
-  }

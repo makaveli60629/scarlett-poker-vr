@@ -1,12 +1,9 @@
-// /js/boot.js — Scarlett Boot Diagnostics v2 (FULL)
-// ✅ Logs base path + UA + secureContext + import status
-// ✅ Writes to #logBox
-// ✅ Imports /js/index.js with cache-buster
+// /js/boot.js — Scarlett Boot Diagnostics v3 (FULL)
 (() => {
   const stamp = Date.now();
-
   const logEl = () => document.getElementById("logBox");
-  const loaderSub = () => document.getElementById("loaderSub");
+  const subEl = () => document.getElementById("loaderSub");
+  const hintEl = () => document.getElementById("loaderHint");
 
   function write(line) {
     console.log(line);
@@ -16,35 +13,32 @@
       el.scrollTop = el.scrollHeight;
     }
   }
-
-  function setSub(t) {
-    const el = loaderSub();
-    if (el) el.textContent = t;
-  }
+  function setSub(t){ const el=subEl(); if(el) el.textContent=t; }
+  function setHint(t){ const el=hintEl(); if(el) el.textContent=t; }
 
   const path = location.pathname;
   const base = path.includes("/scarlett-poker-vr/") ? "/scarlett-poker-vr/" :
                (path.endsWith("/") ? path : path.replace(/[^/]+$/, ""));
 
-  write("[BOOT LOG]");
+  write("[BOOT] start ✅");
   write(`href=${location.href}`);
   write(`secureContext=${window.isSecureContext}`);
   write(`ua=${navigator.userAgent}`);
   write(`base=${base}`);
+  write(`navigator.xr=${!!navigator.xr}`);
 
   setSub("Importing index.js…");
 
   const entry = new URL(`${base}js/index.js?v=${stamp}`, location.origin).toString();
-  write(`importing ${entry}`);
+  write(`[BOOT] importing ${entry}`);
 
-  import(entry)
-    .then(() => {
-      write("index.js imported ✅");
-      setSub("Boot OK ✅");
-      // index.js/world.js will hide loader when ready
-    })
-    .catch((e) => {
-      write(`ERR: index.js import FAILED ❌ ${e?.message || e}`);
-      setSub("Import failed ❌ (see BOOT log)");
-    });
+  import(entry).then(() => {
+    write("[BOOT] index.js imported ✅");
+    setSub("Boot OK ✅");
+    setHint("If you still see loader, World will kill it when ready.");
+  }).catch((e) => {
+    write(`[BOOT] import FAILED ❌ ${e?.message || e}`);
+    setSub("Import failed ❌");
+    setHint("Fix path or syntax. The log above tells you exactly what.");
+  });
 })();

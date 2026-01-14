@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Scarlett Empire VR - Monolith V10</title>
+    <title>Scarlett Empire - VR Movement Fix</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: monospace; }
-        #debug { position: absolute; top: 10px; left: 10px; color: #0f0; background: rgba(0,0,0,0.7); padding: 8px; z-index: 100; pointer-events: none; border-radius: 4px; border: 1px solid #0f0; }
+        #vr-ui { position: absolute; top: 10px; left: 10px; color: #0f0; background: rgba(0,0,0,0.8); padding: 10px; z-index: 10; border: 1px solid #0f0; pointer-events: none; }
     </style>
     <script type="importmap">
     {
@@ -17,10 +17,11 @@
     </script>
 </head>
 <body>
-    <div id="debug">
-        DIAGNOSTICS: <span id="xr-status">READY</span><br>
-        HANDS: <span id="hand-status">SEARCHING...</span><br>
-        VIEW: <span id="view-status">CALIBRATING...</span>
+    <div id="vr-ui">
+        <b>DIAGNOSTICS</b><br>
+        XR: <span id="xr-stat">OFFLINE</span><br>
+        HANDS: <span id="hand-stat">WAITING</span><br>
+        POS: <span id="pos-stat">0,0,0</span>
     </div>
 
     <script type="module">
@@ -28,19 +29,17 @@
         import { VRButton } from 'three/addons/webxr/VRButton.js';
         import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
-        // --- GLOBAL ENGINE STATE ---
         const S = {
             scene: new THREE.Scene(),
             camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
-            renderer: new THREE.WebGLRenderer({ antialias: true, alpha: true }),
-            player: new THREE.Group(), // The "Rig"
+            renderer: new THREE.WebGLRenderer({ antialias: true }),
+            player: new THREE.Group(), // This is the 'Rig' we move
             handFactory: new XRHandModelFactory(),
             floors: [],
-            bots: [],
-            clock: new THREE.Clock()
+            raycaster: new THREE.Raycaster(),
+            down: new THREE.Vector3(0, -1, 0)
         };
 
-        // --- 1. INITIALIZATION ---
         async function init() {
             S.renderer.setSize(window.innerWidth, window.innerHeight);
             S.renderer.xr.enabled = true;
@@ -50,113 +49,79 @@
             S.scene.add(S.player);
             S.player.add(S.camera);
 
-            // INITIAL SPAWN: VIP ROOM
+            // 1. INITIAL SPAWN (VIP Room)
             S.player.position.set(14, 0, 6); 
 
-            setupLighting();
-            setupHands();
-            buildWorld();
-            spawnHumanoids(); // PLUGGING IN YOUR MOD
-            
-            // --- THE "FIX THE WALL" LOGIC ---
+            // 2. THE FORCE-CALIBRATION FIX
             S.renderer.xr.addEventListener('sessionstart', () => {
-                document.getElementById('xr-status').innerText = "VR ACTIVE";
+                document.getElementById('xr-stat').innerText = "VR ACTIVE";
+                
+                // Wait 1 second for the headset to finish its internal reset
                 setTimeout(() => {
-                    // Force the rig to look at the Poker Table (0, -1.6, 0)
-                    const tablePos = new THREE.Vector3(0, -1.6, 0);
-                    S.player.lookAt(tablePos.x, S.player.position.y, tablePos.z);
-                    document.getElementById('view-status').innerText = "LOCKED TO TABLE ✅";
-                }, 1000); 
+                    // Force the player to look at the center of the Poker Pit (0, -1.6, 0)
+                    const target = new THREE.Vector3(0, -1.6, 0);
+                    S.player.lookAt(target.x, S.player.position.y, target.z);
+                    console.log("Diagnostics: View snapped to table.");
+                }, 1000);
             });
 
+            setupHands();
+            buildWorld();
             S.renderer.setAnimationLoop(tick);
         }
 
-        // --- 2. LIGHTING (From lighting.js) ---
-        function setupLighting() {
-            S.scene.fog = new THREE.FogExp2(0x0b0d14, 0.02);
-            const hemi = new THREE.HemisphereLight(0xdaf0ff, 0x0b0f1a, 1.2);
-            S.scene.add(hemi);
-            
-            const pitSpot = new THREE.SpotLight(0xffffff, 2, 30);
-            pitSpot.position.set(0, 10, 0);
-            S.scene.add(pitSpot);
-        }
-
-        // --- 3. HAND CONTROLS (Fixing "No Controls") ---
         function setupHands() {
             for (let i = 0; i < 2; i++) {
-                // Attach both Hands AND Controllers
                 const hand = S.renderer.xr.getHand(i);
                 hand.add(S.handFactory.createHandModel(hand, "mesh"));
                 S.player.add(hand);
 
+                // Add controller support for Android devices without hand-tracking
                 const controller = S.renderer.xr.getController(i);
                 S.player.add(controller);
 
                 hand.addEventListener('connected', () => {
-                    document.getElementById('hand-status').innerText = "CONNECTED ✅";
+                    document.getElementById('hand-stat').innerText = "CONNECTED ✅";
                 });
             }
         }
 
-        // --- 4. WORLD GEOMETRY (From world.js) ---
         function buildWorld() {
-            const matFloor = new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.1, metalness: 0.5 });
-            const matGold = new THREE.MeshStandardMaterial({ color: 0xd2b46a, metalness: 0.9 });
-
-            // Top Lobby
-            const top = new THREE.Mesh(new THREE.RingGeometry(9, 25, 64), matFloor);
+            const mat = new THREE.MeshStandardMaterial({ color: 0x0b0d14 });
+            
+            // Top Floor
+            const top = new THREE.Mesh(new THREE.RingGeometry(9, 25, 64), mat);
             top.rotation.x = -Math.PI/2;
             S.scene.add(top); S.floors.push(top);
 
-            // Sunken Pit
-            const pit = new THREE.Mesh(new THREE.CircleGeometry(6.4, 64), matFloor);
+            // Pit Floor
+            const pit = new THREE.Mesh(new THREE.CircleGeometry(6.4, 64), mat);
             pit.position.y = -1.6; pit.rotation.x = -Math.PI/2;
             S.scene.add(pit); S.floors.push(pit);
 
-            // The Ramp (Bridge between Top and Pit)
-            const ramp = new THREE.Mesh(new THREE.CylinderGeometry(6.4, 9, 1.6, 64, 1, true), matFloor);
+            // Ramp (The part you walk down)
+            const ramp = new THREE.Mesh(new THREE.CylinderGeometry(6.4, 9, 1.6, 64, 1, true), mat);
             ramp.position.y = -0.8;
             S.scene.add(ramp); S.floors.push(ramp);
 
-            // Table centerpiece
-            const table = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 0.25, 32), matGold);
-            table.position.set(0, -0.85, 0);
-            S.scene.add(table);
+            // Lighting
+            S.scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+            const p = new THREE.PointLight(0x7fe7ff, 2, 20); p.position.set(0,5,0); S.scene.add(p);
         }
-
-        // --- 5. HUMANOIDS MOD (From humanoids.js) ---
-        function spawnHumanoids() {
-            const botMat = new THREE.MeshStandardMaterial({ color: 0xe6e6e6 });
-            for (let i = 0; i < 6; i++) {
-                const angle = (i / 6) * Math.PI * 2;
-                const bot = new THREE.Group();
-                const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.42, 6, 10), botMat);
-                torso.position.y = 1.15;
-                bot.add(torso);
-                
-                bot.position.set(Math.cos(angle) * 4.5, -1.6, Math.sin(angle) * 4.5);
-                bot.lookAt(0, -1.6, 0);
-                S.scene.add(bot);
-                S.bots.push(bot);
-            }
-        }
-
-        // --- 6. CORE ENGINE LOOP ---
-        const raycaster = new THREE.Raycaster();
-        const down = new THREE.Vector3(0, -1, 0);
 
         function tick() {
-            const dt = S.clock.getDelta();
-
-            // GRAVITY: Makes sure you "fall" down the ramp into the pit
-            raycaster.set(S.player.position, down);
-            const intersects = raycaster.intersectObjects(S.floors);
-            if (intersects.length > 0) {
-                const targetY = intersects[0].point.y;
-                S.player.position.y = THREE.MathUtils.lerp(S.player.position.y, targetY, 0.1);
+            // GRAVITY & MOVEMENT LOGIC
+            // We cast a ray down from your head to find the floor
+            S.raycaster.set(S.player.position, S.down);
+            const hit = S.raycaster.intersectObjects(S.floors);
+            
+            if (hit.length > 0) {
+                // Smoothly adjust your height as you walk down the ramp
+                S.player.position.y = THREE.MathUtils.lerp(S.player.position.y, hit[0].point.y, 0.1);
             }
+
+            document.getElementById('pos-stat').innerText = 
+                `${Math.round(S.player.position.x)}, ${Math.round(S.player.position.y)}, ${Math.round(S.player.position.z)}`;
 
             S.renderer.render(S.scene, S.camera);
         }

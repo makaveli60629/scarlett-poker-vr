@@ -1,9 +1,8 @@
-// /js/core/xr_hands.js — Scarlett XR Input + Rays (FULL) v3.0
-// ✅ Hands-only (NO controller models)
-// ✅ Creates XR controllers + hands (if available)
-// ✅ Emits reliable events from XR:
-//    XR_SELECT { hand:"left|right|none", index:0|1, down:boolean }
-// ✅ Always-on gaze ray + controller rays (so you always see a pointer)
+// /js/core/xr_hands.js — Scarlett XR Input + Rays (FULL) v3.1
+// ✅ Hands-only: NO controller models
+// ✅ Controller rays show ONLY if a matching inputSource exists
+// ✅ Always-on gaze ray (so you never lose pointer)
+// ✅ Emits XR_SELECT reliably
 
 export const XRHands = (() => {
   const S = {
@@ -14,13 +13,11 @@ export const XRHands = (() => {
     log: console.log,
 
     controllers: [null, null],
-    hands: [null, null],
     rays: [null, null],
     gazeRay: null,
 
+    tracked: [false, false], // track presence of inputSources
     tmpQ: null,
-    tmpV: null,
-    tmpDir: null
   };
 
   function makeRay(THREE, color) {
@@ -36,12 +33,11 @@ export const XRHands = (() => {
   }
 
   function emitSelect(i, down) {
-    // Attempt to map handedness from XR input sources
     let hand = "none";
     try {
       const session = S.renderer?.xr?.getSession?.();
       const src = session?.inputSources?.[i];
-      if (src?.handedness) hand = src.handedness; // "left" | "right" | "none"
+      if (src?.handedness) hand = src.handedness;
     } catch {}
 
     S.Signals?.emit?.("XR_SELECT", { hand, index: i, down: !!down });
@@ -54,9 +50,10 @@ export const XRHands = (() => {
     const c = renderer.xr.getController(i);
     c.name = `XR_CONTROLLER_${i}`;
 
-    // NO models added. Only our ray.
     const ray = makeRay(THREE, i === 0 ? 0x66ccff : 0xff6bd6);
     ray.name = `XR_RAY_${i}`;
+    ray.position.set(0, 0, 0); // local
+    ray.rotation.set(0, 0, 0);
     c.add(ray);
 
     c.addEventListener("selectstart", () => emitSelect(i, true));
@@ -65,20 +62,6 @@ export const XRHands = (() => {
     scene.add(c);
     S.controllers[i] = c;
     S.rays[i] = ray;
-
-    // Optional hand object (visual marker only)
-    try {
-      const h = renderer.xr.getHand(i);
-      h.name = `XR_HAND_${i}`;
-      // small visible bead so you can see *something* if hand is tracked
-      const bead = new THREE.Mesh(
-        new THREE.SphereGeometry(0.015, 10, 8),
-        new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.2 })
-      );
-      h.add(bead);
-      scene.add(h);
-      S.hands[i] = h;
-    } catch {}
   }
 
   function ensureGazeRay(camera) {
@@ -91,38 +74,37 @@ export const XRHands = (() => {
     return g;
   }
 
-  function updateRayFrom(obj, line, maxDist) {
-    const origin = S.tmpV.setFromMatrixPosition(obj.matrixWorld);
-    const q = obj.getWorldQuaternion(S.tmpQ);
-    const dir = S.tmpDir.set(0, 0, -1).applyQuaternion(q).normalize();
+  function updateTrackedFlags() {
+    // Map session inputSources to controller indices 0/1 by handedness when possible.
+    // If unknown, we still hide those rays unless something exists.
+    const session = S.renderer?.xr?.getSession?.();
+    if (!session) {
+      S.tracked[0] = S.tracked[1] = false;
+      return;
+    }
 
-    line.position.copy(origin);
-    line.quaternion.copy(q);
-    line.scale.z = maxDist;
+    let hasAny0 = false, hasAny1 = false;
 
-    // emit ray updates if you want interaction later
-    S.Signals?.emit?.("RAY_UPDATE", {
-      kind: line.name,
-      origin: { x: origin.x, y: origin.y, z: origin.z },
-      dir: { x: dir.x, y: dir.y, z: dir.z },
-      maxDist
-    });
-  }
+    // Try to detect anything that looks like a ray-producing input source
+    const sources = session.inputSources || [];
+    for (let k = 0; k < sources.length; k++) {
+      const src = sources[k];
+      const hr = src?.handedness || "none";
+      const mode = src?.targetRayMode || "tracked-pointer"; // gaze/tracked-pointer/screen
 
-  function logInputSourcesOnce() {
-    try {
-      const session = S.renderer?.xr?.getSession?.();
-      if (!session) return;
-      const arr = session.inputSources?.map((s) => ({
-        handedness: s.handedness,
-        targetRayMode: s.targetRayMode,
-        hasGamepad: !!s.gamepad,
-        axes: s.gamepad?.axes?.length || 0,
-        buttons: s.gamepad?.buttons?.length || 0,
-        hasHand: !!s.hand
-      })) || [];
-      S.log?.(`[xr] inputSources=${JSON.stringify(arr)}`);
-    } catch {}
+      if (mode === "gaze") continue; // gaze handled separately
+
+      // If handedness known, map
+      if (hr === "left") hasAny0 = true;
+      else if (hr === "right") hasAny1 = true;
+      else {
+        // unknown: allow both if something exists
+        hasAny0 = true; hasAny1 = true;
+      }
+    }
+
+    S.tracked[0] = hasAny0;
+    S.tracked[1] = hasAny1;
   }
 
   return {
@@ -134,40 +116,37 @@ export const XRHands = (() => {
       S.log = log || console.log;
 
       S.tmpQ = new THREE.Quaternion();
-      S.tmpV = new THREE.Vector3();
-      S.tmpDir = new THREE.Vector3();
 
       installController(0);
       installController(1);
 
-      // log sources when XR session starts
       renderer.xr.addEventListener("sessionstart", () => {
-        S.log?.("[xr] sessionstart ✅");
-        logInputSourcesOnce();
+        S.log?.("[xr] sessionstart ✅ (rays armed)");
+        updateTrackedFlags();
       });
 
       renderer.xr.addEventListener("sessionend", () => {
         S.log?.("[xr] sessionend ✅");
+        S.tracked[0] = S.tracked[1] = false;
       });
 
-      S.log?.("[hands] init ✅ (select locomotion ready)");
+      S.log?.("[hands] init ✅ v3.1");
       return {
         update(camera) {
           // Always-on gaze ray
           const gaze = ensureGazeRay(camera);
           gaze.visible = true;
-          updateRayFrom(camera, gaze, 12);
+          gaze.position.setFromMatrixPosition(camera.matrixWorld);
+          gaze.quaternion.copy(camera.getWorldQuaternion(S.tmpQ));
+          gaze.scale.z = 12;
 
-          // Controller rays (these exist even in hand-tracking mode)
+          // Controller rays only if input sources exist
+          updateTrackedFlags();
           for (let i = 0; i < 2; i++) {
-            const c = S.controllers[i];
-            const r = S.rays[i];
-            if (!c || !r) continue;
-
-            // If controller object is tracked, show it; if not, hide ray
-            // (Still keep gaze ray visible always)
-            r.visible = c.visible === true;
-            if (r.visible) updateRayFrom(c, r, 10);
+            const ray = S.rays[i];
+            if (!ray) continue;
+            ray.visible = !!S.tracked[i];
+            if (ray.visible) ray.scale.z = 10;
           }
         }
       };

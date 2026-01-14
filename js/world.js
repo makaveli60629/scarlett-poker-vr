@@ -1,28 +1,19 @@
 export const World = {
-    async init({ THREE, scene, root }) {
-        // Lighting
-        const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-        scene.add(ambient);
-
-        const mat = new THREE.MeshStandardMaterial({ color: 0x111122, roughness: 0.2 });
-        
-        // 1. TOP FLOOR
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), mat);
+    async init({ THREE, scene, player }) {
+        // Floor Mesh
+        const floorGeo = new THREE.PlaneGeometry(100, 100);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
         floor.rotation.x = -Math.PI / 2;
-        floor.position.y = 0;
+        floor.name = "ground"; // Required for your controls.js logic
         scene.add(floor);
 
-        // 2. THE PIT (The centerpiece)
-        const pitGeo = new THREE.CylinderGeometry(6, 6, 2, 32);
-        const pitMat = new THREE.MeshStandardMaterial({ color: 0x000000, wireframe: false });
-        const pit = new THREE.Mesh(pitGeo, pitMat);
-        pit.position.set(0, -1, 0); // Sunken
-        scene.add(pit);
-
-        // 3. TABLE
-        const table = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 0.2, 32), 
-            new THREE.MeshStandardMaterial({ color: 0xd2b46a, metalness: 0.8 }));
-        table.position.set(0, -0.8, 0);
-        scene.add(table);
+        // A Bright Cube at the center (So you know where you are)
+        const box = new THREE.Mesh(
+            new THREE.BoxGeometry(1, 1, 1), 
+            new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff })
+        );
+        box.position.set(0, 0.5, 0);
+        scene.add(box);
     }
 };

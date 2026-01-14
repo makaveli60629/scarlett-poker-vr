@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Scarlett Stability Build - V10.1</title>
+    <title>Scarlett Empire - Stability 10.2</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: monospace; }
-        #debug-gui { position: absolute; top: 10px; left: 10px; color: #0f0; background: rgba(0,0,0,0.8); padding: 10px; z-index: 100; border: 1px solid #0f0; pointer-events: none; }
+        #vr-ui { position: absolute; top: 10px; left: 10px; color: #0f0; background: rgba(0,0,0,0.8); padding: 10px; z-index: 10; border: 1px solid #0f0; pointer-events: none; }
     </style>
     <script type="importmap">
     {
@@ -17,31 +17,25 @@
     </script>
 </head>
 <body>
-    <div id="debug-gui">
-        VR STATUS: <span id="vr-status">OFFLINE</span><br>
-        HANDS: <span id="hand-status">SEARCHING...</span><br>
-        POS: <span id="pos-stat">14, 0, 6</span>
-    </div>
+    <div id="vr-ui"><b>DIAGNOSTICS</b><br>XR: <span id="xr-stat">OFFLINE</span><br>LASERS: <span id="laser-stat">WAITING</span></div>
 
     <script type="module">
         import * as THREE from 'three';
         import { VRButton } from 'three/addons/webxr/VRButton.js';
         import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
-        // --- CORE ENGINE ---
         const S = {
             scene: new THREE.Scene(),
             camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
             renderer: new THREE.WebGLRenderer({ antialias: true }),
-            player: new THREE.Group(), // Your "Body"
-            floors: [],
+            player: new THREE.Group(), // The 'Rig' or 'Body'
             handFactory: new XRHandModelFactory(),
-            clock: new THREE.Clock(),
+            floors: [],
             raycaster: new THREE.Raycaster(),
             down: new THREE.Vector3(0, -1, 0)
         };
 
-        function init() {
+        async function init() {
             S.renderer.setSize(window.innerWidth, window.innerHeight);
             S.renderer.xr.enabled = true;
             document.body.appendChild(S.renderer.domElement);
@@ -50,93 +44,75 @@
             S.scene.add(S.player);
             S.player.add(S.camera);
 
-            // 1. SET SPAWN (Facing the Pit)
-            S.player.position.set(14, 0, 6);
-            
-            // 2. THE VISION FIX: Force Look-at Table
+            // 1. SET POSITION: VIP ROOM (14, 0, 6)
+            S.player.position.set(14, 1.6, 6); 
+
+            // 2. THE ORIENTATION FIX (Wait for session to start, then rotate)
             S.renderer.xr.addEventListener('sessionstart', () => {
-                document.getElementById('vr-status').innerText = "VR ACTIVE";
+                document.getElementById('xr-stat').innerText = "VR ACTIVE";
                 setTimeout(() => {
-                    const pit = new THREE.Vector3(0, -1.6, 0);
-                    S.player.lookAt(pit.x, S.player.position.y, pit.z);
-                }, 800);
+                    // Turn the whole body to face the center (0, 0, 0)
+                    const target = new THREE.Vector3(0, 0, 0);
+                    S.player.lookAt(target.x, S.player.position.y, target.z);
+                }, 1000); // 1-second delay for calibration
             });
 
-            setupLighting();
-            setupHands();
-            buildWorld();
-            spawnLegs(); // Adding visual legs as requested
-            
+            setupHandsAndLasers();
+            buildVisibleWorld();
             S.renderer.setAnimationLoop(tick);
         }
 
-        // --- THE LASER & HAND FIX ---
-        function setupHands() {
+        function setupHandsAndLasers() {
+            const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]);
+            const laserMat = new THREE.LineBasicMaterial({ color: 0x00ffcc });
+
             for (let i = 0; i < 2; i++) {
+                // Hand Mesh
                 const hand = S.renderer.xr.getHand(i);
                 hand.add(S.handFactory.createHandModel(hand, "mesh"));
                 S.player.add(hand);
 
-                // Add Lasers (The "Pointers")
-                const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]);
-                const laser = new THREE.Line(laserGeo, new THREE.LineBasicMaterial({ color: 0x7fe7ff }));
+                // Controller & Laser Pointer
                 const controller = S.renderer.xr.getController(i);
+                const laser = new THREE.Line(laserGeo, laserMat);
+                laser.name = 'laser';
                 controller.add(laser);
                 S.player.add(controller);
 
-                hand.addEventListener('connected', () => document.getElementById('hand-status').innerText = "LIVE ✅");
+                controller.addEventListener('connected', () => {
+                    document.getElementById('laser-stat').innerText = "LASERS LIVE ✅";
+                });
             }
         }
 
-        // --- THE "LEG" VISUALS ---
-        function spawnLegs() {
-            const legMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
-            const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.8, 0.15), legMat);
-            const rightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.8, 0.15), legMat);
+        function buildVisibleWorld() {
+            // Bright Lighting so we don't have a black void
+            S.scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+            const sun = new THREE.DirectionalLight(0xffffff, 1);
+            sun.position.set(5, 10, 5);
+            S.scene.add(sun);
+
+            const matFloor = new THREE.MeshStandardMaterial({ color: 0x1a1a2e, roughness: 0.1 });
             
-            leftLeg.position.set(-0.2, -0.8, 0);
-            rightLeg.position.set(0.2, -0.8, 0);
-            
-            S.player.add(leftLeg);
-            S.player.add(rightLeg);
-        }
+            // Top Floor (Large enough to walk on)
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), matFloor);
+            floor.rotation.x = -Math.PI / 2;
+            S.scene.add(floor);
+            S.floors.push(floor);
 
-        function buildWorld() {
-            S.scene.fog = new THREE.FogExp2(0x0b0d14, 0.05);
-            const mat = new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.1, metalness: 0.5 });
-            
-            // Ramp & Pit
-            const top = new THREE.Mesh(new THREE.RingGeometry(9, 25, 64), mat);
-            top.rotation.x = -Math.PI/2;
-            S.scene.add(top); S.floors.push(top);
-
-            const pit = new THREE.Mesh(new THREE.CircleGeometry(6.4, 64), mat);
-            pit.position.y = -1.6; pit.rotation.x = -Math.PI/2;
-            S.scene.add(pit); S.floors.push(pit);
-
-            const ramp = new THREE.Mesh(new THREE.CylinderGeometry(6.4, 9, 1.6, 64, 1, true), mat);
-            ramp.position.y = -0.8;
-            S.scene.add(ramp); S.floors.push(ramp);
-        }
-
-        function setupLighting() {
-            S.scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-            const p = new THREE.PointLight(0xffffff, 2, 30);
-            p.position.set(0, 10, 0);
-            S.scene.add(p);
+            // Central Pit Table (The "white thing")
+            const table = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 0.5, 32), new THREE.MeshStandardMaterial({color: 0xffffff, emissive: 0x444444}));
+            table.position.set(0, 0.25, 0);
+            S.scene.add(table);
         }
 
         function tick() {
-            // GRAVITY: Stick player to whatever floor is below them
+            // MOVEMENT GRAVITY: Keep you on the floor
             S.raycaster.set(S.player.position, S.down);
             const hit = S.raycaster.intersectObjects(S.floors);
             if (hit.length > 0) {
-                S.player.position.y = THREE.MathUtils.lerp(S.player.position.y, hit[0].point.y, 0.1);
+                S.player.position.y = THREE.MathUtils.lerp(S.player.position.y, hit[0].point.y + 1.6, 0.1);
             }
-
-            document.getElementById('pos-stat').innerText = 
-                `${Math.round(S.player.position.x)}, ${Math.round(S.player.position.y)}, ${Math.round(S.player.position.z)}`;
-
             S.renderer.render(S.scene, S.camera);
         }
 

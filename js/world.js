@@ -1,27 +1,33 @@
-import { SpawnPoints } from './spawn_points.js';
-import { Tables } from './tables.js';
+import { SpawnPoints } from './spawn_points.js'
+import { Tables } from './tables.js'
 
 export const World = {
-    async init(ctx) {
-        this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x050505);
+  async init(ctx) {
+    const scene = new THREE.Scene()
+    scene.background = new THREE.Color(0x101010)
 
-        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        this.renderer = new THREE.WebGLRenderer({ antialias: true });
-        this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.xr.enabled = true;
-        
-        document.body.appendChild(this.renderer.domElement);
-        document.body.appendChild(VRButton.createButton(this.renderer));
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100)
+    const renderer = new THREE.WebGLRenderer({ antialias: true })
+    renderer.setSize(window.innerWidth, window.innerHeight)
+    renderer.xr.enabled = true
+    document.body.appendChild(renderer.domElement)
+    document.body.appendChild(VRButton.createButton(renderer))
 
-        const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5);
-        this.scene.add(light);
+    const light = new THREE.HemisphereLight(0xffffff, 0x444444)
+    scene.add(light)
 
-        Tables.build(this.scene);
-        SpawnPoints.apply(this.camera);
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(50,50),
+      new THREE.MeshStandardMaterial({ color: 0x222222 })
+    )
+    floor.rotation.x = -Math.PI/2
+    scene.add(floor)
 
-        this.renderer.setAnimationLoop(() => {
-            this.renderer.render(this.scene, this.camera);
-        });
-    }
-};
+    SpawnPoints.apply(camera)
+    Tables.build(scene)
+
+    renderer.setAnimationLoop(() => renderer.render(scene, camera))
+
+    return { scene, camera, renderer }
+  }
+}

@@ -1,24 +1,21 @@
-// /js/controls.js — Scarlett PERMANENT QUEST FIX v3 (FULL)
-// Fixes:
-// ✅ Laser stuck at table center -> lasers are parented to controller GRIP space
-// ✅ Can't walk -> robust XR gamepad axis mapping for Quest
-// ✅ Shows floor reticle where right-hand laser hits y=0 plane
+// /js/controls.js — Scarlett PERMANENT QUEST FIX v4 (FULL)
+// Fixes permanently:
+// ✅ Laser stuck at table center -> lasers parented to controller GRIP space
+// ✅ Green floor reticle from right hand (y=0)
+// ✅ Movement works even when Quest axes are [0,1] OR [2,3]
 // ✅ Snap turn on right stick X
-// ✅ Trigger/grip events (select/squeeze) confirmed on Quest
-//
-// Exports: Controls { init(), update(dt), getControllers() }
+// ✅ Trigger/grip events wired (select/squeeze)
+// Export: Controls { init(), update(dt), getControllers() }
 
 export const Controls = (() => {
   let THREE, renderer, scene, camera, player;
   let log = console.log, warn = console.warn, err = console.error;
 
-  // We keep both controller + grip references (Quest often prefers grip for pose)
   const state = {
     ctrl: { left: null, right: null },
     grip: { left: null, right: null },
     laser: { left: null, right: null },
     reticle: null,
-
     yaw: 0,
     pitch: 0,
     snapCooldown: 0
@@ -33,9 +30,11 @@ export const Controls = (() => {
   };
 
   const tmp = {
-    v3a: null,
-    v3b: null,
-    q: null
+    origin: null,
+    dir: null,
+    up: null,
+    q: null,
+    v: null
   };
 
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -51,54 +50,49 @@ export const Controls = (() => {
     warn = ctx.warn || warn;
     err = ctx.err || err;
 
-    tmp.v3a = new THREE.Vector3();
-    tmp.v3b = new THREE.Vector3();
+    tmp.origin = new THREE.Vector3();
+    tmp.dir = new THREE.Vector3();
+    tmp.up = new THREE.Vector3(0, 1, 0);
     tmp.q = new THREE.Quaternion();
+    tmp.v = new THREE.Vector3();
 
     state.yaw = player.rotation.y;
     state.pitch = camera.rotation.x;
 
-    // Always install controller objects (even before session starts)
-    installControllers();
+    installControllers(false);
+    installReticle();
 
-    // Re-bind correctly when XR starts (this is the “permanent fix” moment)
     renderer.xr.addEventListener?.("sessionstart", () => {
       installControllers(true);
-      log("sessionstart: controllers/grips/lasers rebound ✅");
+      log("sessionstart: rebound controllers/grips/lasers ✅");
     });
 
     renderer.xr.addEventListener?.("sessionend", () => {
-      // keep things safe
       state.snapCooldown = 0;
       log("sessionend ✅");
     });
 
-    installReticle();
-
-    log("Controls init ✅ (Quest permanent laser + walk fix)");
+    log("Controls init ✅ (v4)");
   }
 
-  // --- Controller setup (controller + grip) ---
-  function installControllers(force = false) {
+  // ---------------- Controllers / Grips ----------------
+  function installControllers(force) {
     try {
-      // Controller (for events + ray direction)
       const c0 = renderer.xr.getController(0);
       const c1 = renderer.xr.getController(1);
-
-      // Grip (best pose space for Quest; matches physical hand)
       const g0 = renderer.xr.getControllerGrip(0);
       const g1 = renderer.xr.getControllerGrip(1);
-
-      // Parent to player so locomotion moves them with you
-      if (force || !c0.parent) player.add(c0);
-      if (force || !c1.parent) player.add(c1);
-      if (force || !g0.parent) player.add(g0);
-      if (force || !g1.parent) player.add(g1);
 
       c0.name = "XRController0";
       c1.name = "XRController1";
       g0.name = "XRGrip0";
       g1.name = "XRGrip1";
+
+      // Parent to player rig so locomotion moves them with you
+      if (force || !c0.parent) player.add(c0);
+      if (force || !c1.parent) player.add(c1);
+      if (force || !g0.parent) player.add(g0);
+      if (force || !g1.parent) player.add(g1);
 
       // Quest default: 0=left, 1=right
       state.ctrl.left = c0;
@@ -106,27 +100,15 @@ export const Controls = (() => {
       state.grip.left = g0;
       state.grip.right = g1;
 
-      // Wire events (trigger/grip)
       wireXRPressEvents(c0);
       wireXRPressEvents(c1);
 
-      // Laser visuals MUST be parented to GRIP, not scene/table/world root
+      // Lasers must be on GRIP space
       ensureLaser("left");
       ensureLaser("right");
 
-      // Attach laser to grip (permanent fix)
-      if (state.laser.left.parent !== g0) {
-        safeRemove(state.laser.left);
-        g0.add(state.laser.left);
-      }
-      if (state.laser.right.parent !== g1) {
-        safeRemove(state.laser.right);
-        g1.add(state.laser.right);
-      }
-
-      // Reset laser local transform so it originates from the controller grip
-      resetLaserTransform(state.laser.left);
-      resetLaserTransform(state.laser.right);
+      attachLaserToGrip("left", g0);
+      attachLaserToGrip("right", g1);
 
       log("controllers+grips+lasers installed ✅");
     } catch (e) {
@@ -135,7 +117,6 @@ export const Controls = (() => {
   }
 
   function wireXRPressEvents(controller) {
-    // Avoid double-binding
     if (controller.__scarlettBound) return;
     controller.__scarlettBound = true;
 
@@ -146,13 +127,12 @@ export const Controls = (() => {
   }
 
   function safeRemove(obj) {
-    try { obj.parent?.remove(obj); } catch {}
+    try { obj?.parent?.remove(obj); } catch {}
   }
 
-  // --- Laser + Reticle ---
+  // ---------------- Laser / Reticle ----------------
   function ensureLaser(side) {
     if (state.laser[side]) return;
-
     const geom = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(0, 0, 0),
       new THREE.Vector3(0, 0, -1)
@@ -164,8 +144,16 @@ export const Controls = (() => {
     state.laser[side] = line;
   }
 
-  function resetLaserTransform(laser) {
-    if (!laser) return;
+  function attachLaserToGrip(side, gripObj) {
+    const laser = state.laser[side];
+    if (!laser || !gripObj) return;
+
+    if (laser.parent !== gripObj) {
+      safeRemove(laser);
+      gripObj.add(laser);
+    }
+
+    // reset local transform
     laser.position.set(0, 0, 0);
     laser.rotation.set(0, 0, 0);
     laser.scale.z = cfg.laserLength;
@@ -185,38 +173,31 @@ export const Controls = (() => {
     scene.add(state.reticle);
   }
 
-  function updateReticleFromRightLaser() {
+  function updateReticleFromRightGrip() {
     const grip = state.grip.right || state.ctrl.right;
     const reticle = state.reticle;
     if (!grip || !reticle) return;
 
-    // Ray origin = grip world position
-    grip.getWorldPosition(tmp.v3a);
-
-    // Ray direction = grip forward (-Z) in world
-    tmp.v3b.set(0, 0, -1);
+    grip.getWorldPosition(tmp.origin);
+    tmp.dir.set(0, 0, -1);
     grip.getWorldQuaternion(tmp.q);
-    tmp.v3b.applyQuaternion(tmp.q).normalize();
+    tmp.dir.applyQuaternion(tmp.q).normalize();
 
-    // Intersect with floor plane y=0
-    const dir = tmp.v3b;
-    const origin = tmp.v3a;
+    // intersect floor y=0
     const y0 = 0;
-
-    if (Math.abs(dir.y) < 1e-5) {
+    if (Math.abs(tmp.dir.y) < 1e-5) {
       reticle.visible = false;
       return;
     }
 
-    const t = (y0 - origin.y) / dir.y;
+    const t = (y0 - tmp.origin.y) / tmp.dir.y;
     if (t <= 0) {
       reticle.visible = false;
       return;
     }
 
-    const hit = origin.clone().add(dir.clone().multiplyScalar(t));
-    const dist = hit.distanceTo(origin);
-
+    const hit = tmp.origin.clone().add(tmp.dir.clone().multiplyScalar(t));
+    const dist = hit.distanceTo(tmp.origin);
     if (dist > 12) {
       reticle.visible = false;
       return;
@@ -226,26 +207,42 @@ export const Controls = (() => {
     reticle.visible = true;
   }
 
-  // --- Movement ---
+  // ---------------- Movement (PERMANENT axis fallback) ----------------
+  function pickStickXY(gp) {
+    if (!gp || !gp.axes) return { x: 0, y: 0 };
+    const a = gp.axes;
+
+    // candidate A
+    const ax0 = a[0] ?? 0, ay0 = a[1] ?? 0;
+    // candidate B
+    const ax2 = a[2] ?? 0, ay3 = a[3] ?? 0;
+
+    const magA = Math.abs(ax0) + Math.abs(ay0);
+    const magB = Math.abs(ax2) + Math.abs(ay3);
+
+    return (magB > magA) ? { x: ax2, y: ay3 } : { x: ax0, y: ay0 };
+  }
+
   function applyLook() {
     player.rotation.y = state.yaw;
     camera.rotation.x = state.pitch;
+    camera.rotation.x = clamp(camera.rotation.x, -1.2, 1.2);
   }
 
   function moveLocal(strafe, forward, dt) {
-    const v = tmp.v3a.set(strafe, 0, forward);
-    if (v.lengthSq() < 1e-6) return;
+    tmp.v.set(strafe, 0, forward);
+    if (tmp.v.lengthSq() < 1e-6) return;
 
-    v.normalize().multiplyScalar(cfg.moveSpeed * dt);
-    v.applyAxisAngle(tmp.v3b.set(0, 1, 0), player.rotation.y);
-    player.position.add(v);
+    tmp.v.normalize().multiplyScalar(cfg.moveSpeed * dt);
+    tmp.v.applyAxisAngle(tmp.up, player.rotation.y);
+    player.position.add(tmp.v);
   }
 
   function updateXR(dt) {
     const session = renderer.xr.getSession();
     if (!session) return;
 
-    // Find left/right gamepads by handedness
+    // find left/right gamepads
     let leftGP = null, rightGP = null;
     for (const src of session.inputSources) {
       if (!src?.gamepad) continue;
@@ -253,24 +250,23 @@ export const Controls = (() => {
       if (src.handedness === "right") rightGP = src.gamepad;
     }
 
-    // Fallback if handedness missing
     if (!leftGP || !rightGP) {
       const gps = session.inputSources.filter(s => s?.gamepad).map(s => s.gamepad);
       leftGP = leftGP || gps[0] || null;
       rightGP = rightGP || gps[1] || null;
     }
 
-    // Quest mapping: each controller usually has axes[0]=x, axes[1]=y
-    const lx = leftGP ? dz(leftGP.axes[0] ?? 0) : 0;
-    const ly = leftGP ? dz(leftGP.axes[1] ?? 0) : 0;
+    // MOVE: left stick
+    const L = pickStickXY(leftGP);
+    const lx = dz(L.x);
+    const ly = dz(L.y);
 
-    // FIX: forward is -ly (stick up is negative)
-    const forward = (-ly);
-    const strafe = (lx);
-    moveLocal(strafe, forward, dt);
+    // forward is -ly (stick up negative)
+    moveLocal(lx, -ly, dt);
 
-    // Snap turn: right stick X
-    const rx = rightGP ? dz(rightGP.axes[0] ?? 0) : 0;
+    // SNAP TURN: right stick X
+    const R = pickStickXY(rightGP);
+    const rx = dz(R.x);
 
     state.snapCooldown = Math.max(0, state.snapCooldown - dt);
     if (Math.abs(rx) > 0.65 && state.snapCooldown <= 0) {
@@ -284,13 +280,11 @@ export const Controls = (() => {
   function update(dt) {
     dt = Math.max(0.0, Math.min(0.05, dt || 0.016));
 
-    // If XR is active, use XR gamepads
     if (renderer?.xr?.isPresenting) {
       updateXR(dt);
-      updateReticleFromRightLaser();
+      updateReticleFromRightGrip();
     } else {
-      // Non-XR: do nothing here (your desktop/mobile controls can live elsewhere if you want)
-      state.reticle && (state.reticle.visible = false);
+      if (state.reticle) state.reticle.visible = false;
     }
   }
 

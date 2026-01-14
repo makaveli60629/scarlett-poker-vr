@@ -1,12 +1,12 @@
-// /js/index.js — Scarlett Quest-Stable Entry (FULL) v13.0
-// ✅ GitHub Pages project-base safe
-// ✅ Quest safe: loud diagnostics, no silent hangs
+// /js/index.js — ScarlettVR Prime Entry (FULL) v14.0
+// ✅ Uses ONLY core controls: /js/core/controls.js
+// ✅ Does NOT import /js/controls.js (you deleted it — correct)
 // ✅ VRButton + Manual ENTER VR fallback
-// ✅ Loads /js/world.js + /js/controls.js (optional)
-// ✅ Fixes common spawn-inside-geometry with UNSTUCK
-// ✅ Keeps HUD buttons working
+// ✅ Wires HUD buttons (ROOM_SET / UNSTUCK / DEBUG_DUMP) via Signals
+// ✅ Runs World.tick() + Controls.update() every frame
+// ✅ Loud diagnostics in BOOT log + console
 
-const BUILD = "INDEX_FULL_v13_0";
+const BUILD = "INDEX_FULL_v14_0";
 const stamp = Date.now();
 
 const log = (...a) => console.log("[index]", ...a);
@@ -15,323 +15,302 @@ const err = (...a) => console.error("[index]", ...a);
 
 function $(id) { return document.getElementById(id); }
 function on(id, ev, fn) { const el = $(id); if (el) el.addEventListener(ev, fn); }
-
-function detectBase() {
-  // GitHub project pages: https://makaveli60629.github.io/scarlett-poker-vr/
-  const p = location.pathname || "/";
-  if (p.includes("/scarlett-poker-vr/")) return "/scarlett-poker-vr/";
-  return "/";
+function bootAppend(line) {
+  const el = document.getElementById("bootLog");
+  if (el) el.textContent += "\n" + line;
+  console.log(line);
 }
-const base = detectBase();
-
-function setBootStatus(txt) {
+function bootStatus(txt) {
   const el = document.getElementById("bootStatus");
   if (el) el.textContent = txt;
 }
-function appendBoot(txt) {
-  const el = document.getElementById("bootLog");
-  if (!el) return;
-  el.textContent += "\n" + txt;
+
+function detectBase() {
+  const p = location.pathname || "/";
+  return p.includes("/scarlett-poker-vr/") ? "/scarlett-poker-vr/" : "/";
 }
+const base = detectBase();
 
-appendBoot(`[index] runtime start ✅ build=${BUILD}`);
-appendBoot(`[env] href=${location.href}`);
-appendBoot(`[env] secureContext=${!!window.isSecureContext}`);
-appendBoot(`[env] ua=${navigator.userAgent}`);
-appendBoot(`[env] base=${base}`);
+bootAppend(`[index] runtime start ✅ build=${BUILD}`);
+bootAppend(`[env] href=${location.href}`);
+bootAppend(`[env] secureContext=${!!window.isSecureContext}`);
+bootAppend(`[env] ua=${navigator.userAgent}`);
+bootAppend(`[env] base=${base}`);
 
-setBootStatus("Starting three…");
-
-// ------------------------------------------------------------
-// SAFE IMPORT helper (never hard-crashes the whole app)
-// ------------------------------------------------------------
-async function safeImport(relPath, label) {
-  const url = `${base}js/${relPath}?v=${stamp}`;
+async function safeImport(rel, label) {
+  const url = `${base}js/${rel}?v=${stamp}`;
+  bootAppend(`[import] ${label} -> ${url}`);
   try {
-    appendBoot(`[import] ${label} -> ${url}`);
     const mod = await import(url);
-    appendBoot(`[import] ${label} ✅`);
+    bootAppend(`[import] ${label} ✅`);
     return mod;
   } catch (e) {
-    appendBoot(`[import] ${label} ❌ ${e?.message || e}`);
-    warn(`Import failed: ${label}`, e);
+    bootAppend(`[import] ${label} ❌ ${e?.message || e}`);
+    warn("import failed:", label, e);
     return null;
   }
 }
 
-// ------------------------------------------------------------
-// Load THREE and VRButton from your repo first.
-// If missing, fallback to CDN.
-// ------------------------------------------------------------
 async function loadThree() {
-  // Try your local wrapper first: /js/three.js
-  const local = await safeImport("three.js", "three(local wrapper)");
-  if (local && (local.THREE || local.default || local)) {
-    // your wrapper might export {THREE} or default
+  // Prefer local wrapper if present
+  const local = await safeImport("three.js", "three(local)");
+  if (local) {
     const THREE = local.THREE || local.default || local;
     if (THREE?.Scene) return THREE;
   }
-
-  // Fallback to CDN (works on GitHub Pages + Quest)
-  appendBoot("[three] local missing; using CDN ✅");
+  // CDN fallback
+  bootAppend("[three] local missing; using CDN ✅");
   try {
-    const THREE = await import(`https://unpkg.com/three@0.160.0/build/three.module.js`);
-    appendBoot("[three] CDN loaded ✅");
+    const THREE = await import("https://unpkg.com/three@0.160.0/build/three.module.js");
+    bootAppend("[three] CDN loaded ✅");
     return THREE;
   } catch (e) {
-    err("THREE CDN import failed", e);
-    appendBoot(`[three] CDN failed ❌ ${e?.message || e}`);
+    bootAppend(`[three] CDN failed ❌ ${e?.message || e}`);
     return null;
   }
 }
 
-async function loadVRButton(THREE) {
-  // Try your local VRButton first
+async function loadVRButton() {
   const local = await safeImport("VRButton.js", "VRButton(local)");
-  if (local?.VRButton) return local.VRButton;
+  if (local?.VRButton?.createButton) return local.VRButton;
 
-  // Fallback to CDN example VRButton
-  appendBoot("[VRButton] local missing; using CDN ✅");
+  bootAppend("[VRButton] local missing; using CDN ✅");
   try {
-    const mod = await import(`https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js`);
-    appendBoot("[VRButton] CDN loaded ✅");
+    const mod = await import("https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js");
     return mod?.VRButton || null;
   } catch (e) {
-    appendBoot(`[VRButton] CDN failed ❌ ${e?.message || e}`);
+    bootAppend(`[VRButton] CDN failed ❌ ${e?.message || e}`);
     return null;
   }
 }
 
-// ------------------------------------------------------------
-// Minimal Scene Setup
-// ------------------------------------------------------------
 function ensureCanvasHost() {
-  const wrap = document.getElementById("canvasWrap");
+  let wrap = document.getElementById("canvasWrap");
   if (!wrap) {
-    const d = document.createElement("div");
-    d.id = "canvasWrap";
-    d.style.position = "fixed";
-    d.style.inset = "0";
-    document.body.appendChild(d);
-    return d;
+    wrap = document.createElement("div");
+    wrap.id = "canvasWrap";
+    wrap.style.position = "fixed";
+    wrap.style.inset = "0";
+    document.body.appendChild(wrap);
   }
   return wrap;
 }
 
-function createRenderer(THREE) {
+function makeRenderer(THREE) {
   const wrap = ensureCanvasHost();
+  wrap.innerHTML = "";
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
-  wrap.innerHTML = "";
   wrap.appendChild(renderer.domElement);
   return renderer;
 }
 
-function createRig(THREE) {
-  // PlayerRig holds camera + controller rays + locomotion transforms.
+function makeRig(THREE) {
   const player = new THREE.Group();
   player.name = "PlayerRig";
 
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 500);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 600);
   camera.position.set(0, 1.65, 0);
   player.add(camera);
 
   return { player, camera };
 }
 
-// ------------------------------------------------------------
-// World + Controls wiring
-// ------------------------------------------------------------
-async function initWorldAndControls({ THREE, scene, renderer, camera, player }) {
-  setBootStatus("Loading world…");
-
-  // World
-  const worldMod = await safeImport("world.js", "world");
-  if (!worldMod) {
-    appendBoot("[world] missing ❌ (world.js did not import)");
-    setBootStatus("World import failed ❌");
-    return { worldApi: null, controlsApi: null };
-  }
-
-  const World = worldMod.World || worldMod.default || worldMod;
-  if (!World?.init) {
-    appendBoot("[world] invalid export ❌ (expected export const World = { init(){} })");
-    setBootStatus("World export invalid ❌");
-    return { worldApi: null, controlsApi: null };
-  }
-
-  let worldApi = null;
-  try {
-    worldApi = await World.init({ THREE, scene, renderer, camera, player, log, BUILD });
-    appendBoot("[world] init ✅");
-  } catch (e) {
-    appendBoot(`[world] init FAILED ❌ ${e?.message || e}`);
-    err("World.init failed", e);
-  }
-
-  // Controls (optional)
-  setBootStatus("Loading controls…");
-  const controlsMod = await safeImport("controls.js", "controls");
-  let controlsApi = null;
-  if (controlsMod) {
-    const Controls = controlsMod.Controls || controlsMod.default || controlsMod;
-    if (Controls?.init) {
-      try {
-        controlsApi = await Controls.init({ THREE, scene, renderer, camera, player, log, BUILD, world: worldApi });
-        appendBoot("[controls] init ✅");
-      } catch (e) {
-        appendBoot(`[controls] init FAILED ❌ ${e?.message || e}`);
-        warn("Controls.init failed", e);
-      }
-    } else {
-      appendBoot("[controls] missing init() (skipping)");
-    }
-  } else {
-    appendBoot("[controls] not found (skipping) ✅");
-  }
-
-  setBootStatus("Ready ✅");
-  return { worldApi, controlsApi };
-}
-
-// ------------------------------------------------------------
-// Manual ENTER VR button fallback
-// ------------------------------------------------------------
-function wireHudButtons({ renderer }) {
-  // HUD toggle
+function wireHud({ renderer, Signals, player }) {
+  // Hide HUD button (index.html may implement its own; safe here too)
   on("btnHud", "click", () => {
-    const hud = document.getElementById("hud");
+    const hud = document.getElementById("hud") || document.getElementById("ui");
     if (!hud) return;
     const next = hud.style.display === "none" ? "block" : "none";
     hud.style.display = next;
-    appendBoot(`[hud] display=${next}`);
+    bootAppend(`[hud] display=${next}`);
   });
 
-  // Manual enter VR button (uses WebXR directly)
+  // Manual ENTER VR fallback (works even if VRButton fails)
   on("btnEnterVR", "click", async () => {
     try {
-      if (!navigator.xr) {
-        appendBoot("[VR] navigator.xr missing ❌");
-        return;
-      }
+      if (!navigator.xr) return bootAppend("[VR] navigator.xr missing ❌");
       const ok = await navigator.xr.isSessionSupported("immersive-vr");
-      if (!ok) {
-        appendBoot("[VR] immersive-vr not supported ❌");
-        return;
-      }
-      // This triggers the VR session via three renderer
-      await renderer.xr.setSession(await navigator.xr.requestSession("immersive-vr", {
+      if (!ok) return bootAppend("[VR] immersive-vr not supported ❌");
+
+      const session = await navigator.xr.requestSession("immersive-vr", {
         optionalFeatures: [
           "local-floor","bounded-floor","local","viewer",
           "hand-tracking","layers","dom-overlay",
           "hit-test","anchors"
         ],
         domOverlay: { root: document.body }
-      }));
-      appendBoot("[VR] session started ✅");
+      });
+
+      await renderer.xr.setSession(session);
+      bootAppend("[VR] session started ✅");
     } catch (e) {
-      appendBoot(`[VR] session FAILED ❌ ${e?.message || e}`);
+      bootAppend(`[VR] session FAILED ❌ ${e?.message || e}`);
     }
   });
+
+  // World navigation buttons -> Signals
+  const emitRoom = (room) => Signals?.emit?.("ROOM_SET", { room });
+  on("btnSpawn", "click", () => emitRoom("spawn"));
+  on("btnLobby", "click", () => emitRoom("lobby"));
+  on("btnPoker", "click", () => emitRoom("poker"));
+  on("btnStore", "click", () => emitRoom("store"));
+  on("btnScorpion", "click", () => emitRoom("scorpion"));
+  on("btnSpectate", "click", () => emitRoom("spectate"));
+
+  on("btnUnstuck", "click", () => {
+    // Prefer world handler if present
+    Signals?.emit?.("UNSTUCK", {});
+    // Fallback nudge to escape being spawned inside geometry
+    player.position.y = Math.max(0, player.position.y);
+    player.position.z += 0.65;
+    bootAppend("[rm] UNSTUCK ✅");
+  });
+
+  on("btnHealthcheck", "click", () => Signals?.emit?.("DEBUG_DUMP", {}));
 
   // Resize
   window.addEventListener("resize", () => {
-    try {
-      const cam = renderer.__scarlett_camera;
-      if (cam) {
-        cam.aspect = window.innerWidth / window.innerHeight;
-        cam.updateProjectionMatrix();
-      }
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    } catch {}
+    const cam = renderer.__scarlett_camera;
+    if (cam) {
+      cam.aspect = window.innerWidth / window.innerHeight;
+      cam.updateProjectionMatrix();
+    }
+    renderer.setSize(window.innerWidth, window.innerHeight);
   });
 }
 
-// ------------------------------------------------------------
-// Main boot
-// ------------------------------------------------------------
 (async function main() {
   try {
-    log("runtime start", BUILD);
+    bootStatus("Loading THREE…");
 
     const THREE = await loadThree();
     if (!THREE) {
-      setBootStatus("THREE failed ❌");
-      appendBoot("[fatal] THREE not available");
+      bootStatus("THREE failed ❌");
       return;
     }
 
-    const renderer = createRenderer(THREE);
-    const scene = new THREE.Scene();
-    scene.name = "SCENE";
+    bootStatus("Creating renderer…");
+    const renderer = makeRenderer(THREE);
 
-    // basic background so you always see something
+    const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x05070d);
 
-    const { player, camera } = createRig(THREE);
+    const { player, camera } = makeRig(THREE);
     renderer.__scarlett_camera = camera;
-
     scene.add(player);
 
-    // tiny default light (world usually adds real lights)
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.8);
+    // baseline light so you always see something
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.9);
     hemi.position.set(0, 10, 0);
     scene.add(hemi);
 
     // VRButton
-    const VRButton = await loadVRButton(THREE);
+    bootStatus("Installing VRButton…");
+    const VRButton = await loadVRButton();
     if (VRButton?.createButton) {
       try {
-        document.body.appendChild(VRButton.createButton(renderer));
-        appendBoot("[index] VRButton appended ✅");
+        const btn = VRButton.createButton(renderer);
+        btn.style.position = "fixed";
+        btn.style.left = "12px";
+        btn.style.bottom = "12px";
+        btn.style.zIndex = "9999";
+        document.body.appendChild(btn);
+        bootAppend("[index] VRButton appended ✅");
       } catch (e) {
-        appendBoot(`[index] VRButton append FAILED ❌ ${e?.message || e}`);
+        bootAppend(`[index] VRButton append FAILED ❌ ${e?.message || e}`);
       }
     } else {
-      appendBoot("[index] VRButton missing (manual ENTER VR still works) ✅");
+      bootAppend("[index] VRButton missing (manual ENTER VR works) ✅");
     }
 
-    wireHudButtons({ renderer });
+    // Core signals + debug hud (optional but recommended)
+    bootStatus("Loading core…");
+    const signalsMod = await safeImport("core/signals.js", "core/signals");
+    const debugMod   = await safeImport("core/debug_hud.js", "core/debug_hud");
 
-    // Start the world + controls
-    const { worldApi, controlsApi } = await initWorldAndControls({ THREE, scene, renderer, camera, player });
+    const Signals = signalsMod?.Signals || signalsMod?.default || signalsMod || null;
+    const DebugHUD = debugMod?.DebugHUD || debugMod?.default || debugMod || null;
 
-    // Helpful: UNSTUCK always available even if world lacks it
-    on("btnUnstuck", "click", () => {
-      // crude unstuck: lift + small forward
-      player.position.y = 0;
-      player.position.x += 0.0;
-      player.position.z += 0.6;
-      appendBoot("[rm] UNSTUCK ✅ (index fallback)");
-    });
+    // If DebugHUD exists and supports log, mirror boot logs there too
+    const coreLog = (m) => { try { DebugHUD?.log?.(m); } catch {} log(m); };
 
-    // Animation loop
+    // Controls (CORE ONLY)
+    bootStatus("Loading core controls…");
+    const controlsMod = await safeImport("core/controls.js", "core/controls");
+    const Controls = controlsMod?.Controls || controlsMod?.default || controlsMod;
+    if (!Controls?.init) {
+      bootAppend("[core/controls] invalid export ❌ (expected export const Controls = …)");
+      bootStatus("Controls export invalid ❌");
+      return;
+    }
+    Controls.init({ THREE, renderer, camera, player, scene, Signals, log: coreLog });
+
+    // World
+    bootStatus("Loading world…");
+    const worldMod = await safeImport("world.js", "world");
+    const World = worldMod?.World || worldMod?.default || worldMod;
+    if (!World?.init) {
+      bootAppend("[world] invalid export ❌ (expected export const World = { init(){} })");
+      bootStatus("World export invalid ❌");
+      return;
+    }
+
+    const worldApi = await World.init({ THREE, scene, renderer, camera, player, Signals, log: coreLog, BUILD });
+    bootAppend("[world] init ✅");
+
+    // HUD wiring (buttons -> signals)
+    wireHud({ renderer, Signals, player });
+
+    // Global error hooks
+    window.addEventListener("error", (e) => bootAppend(`[ERR] ${e?.message || e}`));
+    window.addEventListener("unhandledrejection", (e) => bootAppend(`[PROMISE ERR] ${e?.reason?.message || e?.reason || e}`));
+
+    bootStatus("Running ✅");
+
+    // Loop
     let last = performance.now();
     renderer.setAnimationLoop((now) => {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
 
       try {
-        // tick modules
-        worldApi?.tick?.(dt, now / 1000);
-        controlsApi?.tick?.(dt, now / 1000);
+        Controls.update(dt);
+
+        // Prefer tick(dt,t) style, but allow update(dt,t) too
+        if (worldApi?.tick) worldApi.tick(dt, now / 1000);
+        else if (worldApi?.update) worldApi.update(dt, now / 1000);
+
+        // HUD live
+        if (DebugHUD?.setXR) DebugHUD.setXR(renderer.xr.isPresenting ? "XR:on" : "XR:off");
+        if (DebugHUD?.setPos) DebugHUD.setPos(`x:${player.position.x.toFixed(2)} y:${player.position.y.toFixed(2)} z:${player.position.z.toFixed(2)}`);
+
+        const hudStatus = document.getElementById("hudStatus");
+        if (hudStatus) {
+          const pad = Controls.getPadDebug?.() || "";
+          const btns = Controls.getButtonDebug?.() || "";
+          hudStatus.textContent =
+            `XR:${renderer.xr.isPresenting ? "on" : "off"}  ` +
+            `pos x:${player.position.x.toFixed(2)} y:${player.position.y.toFixed(2)} z:${player.position.z.toFixed(2)}\n` +
+            `${pad}\n${btns}`;
+        }
 
         renderer.render(scene, camera);
       } catch (e) {
-        err("tick/render error", e);
-        appendBoot(`[loop] error ❌ ${e?.message || e}`);
-        setBootStatus("Runtime error ❌");
+        err("loop error", e);
+        bootAppend(`[loop] error ❌ ${e?.message || e}`);
+        bootStatus("Runtime error ❌");
         renderer.setAnimationLoop(null);
       }
     });
 
-    appendBoot("[index] setAnimationLoop ✅");
-    setBootStatus("Running ✅");
+    bootAppend("[index] setAnimationLoop ✅");
   } catch (e) {
-    err("FATAL", e);
-    appendBoot(`[fatal] ${e?.message || e}`);
-    setBootStatus("Fatal ❌");
+    err("fatal", e);
+    bootAppend(`[fatal] ${e?.message || e}`);
+    bootStatus("Fatal ❌");
   }
 })();
+```0

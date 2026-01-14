@@ -1,60 +1,98 @@
-import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
-import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
-import { World } from "./js/world.js";
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
-const S = {
-    scene: new THREE.Scene(),
-    camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
-    renderer: new THREE.WebGLRenderer({ antialias: true, alpha: false }),
-    player: new THREE.Group(),
-    clock: new THREE.Clock()
+const logBox = document.getElementById("log");
+function log(...a) {
+  const msg = a.join(" ");
+  console.log(msg);
+  logBox.textContent += msg + "\n";
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+log("BOOT START");
+
+log("UA:", navigator.userAgent);
+log("SecureContext:", window.isSecureContext);
+log("WebXR:", !!navigator.xr);
+
+// Renderer
+const app = document.getElementById("app");
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+renderer.xr.enabled = true;
+app.appendChild(renderer.domElement);
+log("Renderer OK");
+
+// Scene + Camera
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05070d);
+
+const camera = new THREE.PerspectiveCamera(
+  70, window.innerWidth/window.innerHeight, 0.05, 2000
+);
+
+const player = new THREE.Group();
+scene.add(player);
+player.add(camera);
+camera.position.set(0, 1.65, 3.5);
+
+// XR Controllers
+const controllers = {
+  c0: renderer.xr.getController(0),
+  c1: renderer.xr.getController(1)
 };
+player.add(controllers.c0, controllers.c1);
+log("Controllers OK");
 
-async function boot() {
-    // Renderer Prep
-    S.renderer.setSize(window.innerWidth, window.innerHeight);
-    S.renderer.xr.enabled = true;
-    document.getElementById('app').appendChild(S.renderer.domElement);
-    
-    // Diagnostic Check
-    const lWorld = document.getElementById('l-world');
-    const lRender = document.getElementById('l-render');
-
-    try {
-        await World.init({ scene: S.scene });
-        lWorld.classList.add('on');
-        lRender.classList.add('on');
-    } catch (e) {
-        console.error(e);
-        lWorld.classList.add('err');
-    }
-
-    // Attach VR Button
-    const vrBtn = VRButton.createButton(S.renderer);
-    document.body.appendChild(vrBtn);
-
-    // Initial Rig Positioning
-    S.player.add(S.camera);
-    S.scene.add(S.player);
-    S.player.position.set(0, 0, 8); // Start outside the pit
-
-    // 180° Flip for Quest
-    S.renderer.xr.addEventListener('sessionstart', () => {
-        S.player.rotation.set(0, Math.PI, 0); // Corrects orientation
-        document.getElementById('hud').style.display = 'none'; // Clear the face
-    });
-
-    // Android Movement Mapping
-    setupAndroidControls();
-
-    S.renderer.setAnimationLoop(() => {
-        S.renderer.render(S.scene, S.camera);
-    });
+// VR Button (GUARDED)
+if (navigator.xr && window.VRButton) {
+  try {
+    document.body.appendChild(VRButton.createButton(renderer));
+    log("VRButton OK");
+  } catch (e) {
+    log("VRButton FAILED:", e.message);
+  }
+} else {
+  log("VRButton skipped (Android OK)");
 }
 
-function setupAndroidControls() {
-    // Your joystick logic from the previous turn goes here
-    // It maps to S.player.position and S.player.rotation.y
-}
+// Resize
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
 
-boot();
+// Render loop (NEVER FAIL SILENTLY)
+const clock = new THREE.Clock();
+let worldAPI = null;
+
+renderer.setAnimationLoop(() => {
+  try {
+    const dt = clock.getDelta();
+    if (worldAPI?.update) worldAPI.update(dt);
+    renderer.render(scene, camera);
+  } catch (e) {
+    log("RENDER ERROR:", e.message);
+  }
+});
+log("Render loop running");
+
+// Load world
+(async () => {
+  try {
+    log("Loading world…");
+    const mod = await import("./js/world.js");
+    worldAPI = await mod.World.init({
+      THREE, scene, renderer, camera, player, controllers, log
+    });
+    log("World INIT OK");
+  } catch (e) {
+    log("WORLD FAILED:", e.stack || e.message);
+  }
+})();
+
+// HUD toggle
+document.getElementById("btnHide").onclick = () => {
+  document.getElementById("hud").style.display = "none";
+};

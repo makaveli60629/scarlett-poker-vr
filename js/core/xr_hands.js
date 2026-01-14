@@ -1,11 +1,9 @@
-// /js/core/xr_hands.js — Scarlett XR Hands + Lasers + Pinch Locomotion (FULL) v2.2
-// ✅ Hands-only visuals (simple spheres)
-// ✅ ALWAYS-on gaze laser fallback (works even in XR)
-// ✅ Hand lasers if hands are visible
-// ✅ Pinch detection (thumb-tip + index-tip distance)
-// ✅ Emits:
-//    HAND_PINCH { hand:"left|right", down:boolean, strength:0..1 }
-//    RAY_UPDATE  { origin, dir, maxDist, kind }
+// /js/core/xr_hands.js — Scarlett XR Input + Rays (FULL) v3.0
+// ✅ Hands-only (NO controller models)
+// ✅ Creates XR controllers + hands (if available)
+// ✅ Emits reliable events from XR:
+//    XR_SELECT { hand:"left|right|none", index:0|1, down:boolean }
+// ✅ Always-on gaze ray + controller rays (so you always see a pointer)
 
 export const XRHands = (() => {
   const S = {
@@ -15,110 +13,116 @@ export const XRHands = (() => {
     Signals: null,
     log: console.log,
 
+    controllers: [null, null],
     hands: [null, null],
-    lasers: [null, null],
-    gazeLaser: null,
+    rays: [null, null],
+    gazeRay: null,
 
-    pinch: {
-      left:  { down:false, strength:0 },
-      right: { down:false, strength:0 }
-    },
-
+    tmpQ: null,
     tmpV: null,
-    tmpDir: null,
-    tmpQ: null
+    tmpDir: null
   };
 
-  function makeLaser(THREE, color) {
+  function makeRay(THREE, color) {
     const geo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0,0,0),
-      new THREE.Vector3(0,0,-1)
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 0, -1)
     ]);
-    const mat = new THREE.LineBasicMaterial({ color, transparent:true, opacity:0.9 });
+    const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95 });
     const line = new THREE.Line(geo, mat);
     line.frustumCulled = false;
     line.scale.z = 10;
     return line;
   }
 
-  function attachHand(i) {
+  function emitSelect(i, down) {
+    // Attempt to map handedness from XR input sources
+    let hand = "none";
+    try {
+      const session = S.renderer?.xr?.getSession?.();
+      const src = session?.inputSources?.[i];
+      if (src?.handedness) hand = src.handedness; // "left" | "right" | "none"
+    } catch {}
+
+    S.Signals?.emit?.("XR_SELECT", { hand, index: i, down: !!down });
+    S.log?.(`[xr] select ${down ? "down" : "up"} hand=${hand} idx=${i}`);
+  }
+
+  function installController(i) {
     const { THREE, renderer, scene } = S;
-    const hand = renderer.xr.getHand(i);
-    hand.name = `XR_HAND_${i}`;
 
-    const palm = new THREE.Mesh(
-      new THREE.SphereGeometry(0.02, 12, 10),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness:0.6, metalness:0.2 })
-    );
-    hand.add(palm);
+    const c = renderer.xr.getController(i);
+    c.name = `XR_CONTROLLER_${i}`;
 
-    const laser = makeLaser(THREE, i === 0 ? 0x66ccff : 0xff6bd6);
-    laser.name = i === 0 ? "HAND_LASER_L" : "HAND_LASER_R";
-    hand.add(laser);
+    // NO models added. Only our ray.
+    const ray = makeRay(THREE, i === 0 ? 0x66ccff : 0xff6bd6);
+    ray.name = `XR_RAY_${i}`;
+    c.add(ray);
 
-    scene.add(hand);
-    S.hands[i] = hand;
-    S.lasers[i] = laser;
+    c.addEventListener("selectstart", () => emitSelect(i, true));
+    c.addEventListener("selectend", () => emitSelect(i, false));
+
+    scene.add(c);
+    S.controllers[i] = c;
+    S.rays[i] = ray;
+
+    // Optional hand object (visual marker only)
+    try {
+      const h = renderer.xr.getHand(i);
+      h.name = `XR_HAND_${i}`;
+      // small visible bead so you can see *something* if hand is tracked
+      const bead = new THREE.Mesh(
+        new THREE.SphereGeometry(0.015, 10, 8),
+        new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.2 })
+      );
+      h.add(bead);
+      scene.add(h);
+      S.hands[i] = h;
+    } catch {}
   }
 
-  function ensureGazeLaser(camera) {
+  function ensureGazeRay(camera) {
     const { THREE, scene } = S;
-    if (S.gazeLaser) return S.gazeLaser;
-    const laser = makeLaser(THREE, 0xffd36b);
-    laser.name = "GAZE_LASER";
-    scene.add(laser);
-    S.gazeLaser = laser;
-    return laser;
+    if (S.gazeRay) return S.gazeRay;
+    const g = makeRay(THREE, 0xffd36b);
+    g.name = "GAZE_RAY";
+    scene.add(g);
+    S.gazeRay = g;
+    return g;
   }
 
-  function emitRay(kind, origin, dir, maxDist) {
+  function updateRayFrom(obj, line, maxDist) {
+    const origin = S.tmpV.setFromMatrixPosition(obj.matrixWorld);
+    const q = obj.getWorldQuaternion(S.tmpQ);
+    const dir = S.tmpDir.set(0, 0, -1).applyQuaternion(q).normalize();
+
+    line.position.copy(origin);
+    line.quaternion.copy(q);
+    line.scale.z = maxDist;
+
+    // emit ray updates if you want interaction later
     S.Signals?.emit?.("RAY_UPDATE", {
-      kind,
+      kind: line.name,
       origin: { x: origin.x, y: origin.y, z: origin.z },
-      dir:    { x: dir.x,    y: dir.y,    z: dir.z },
+      dir: { x: dir.x, y: dir.y, z: dir.z },
       maxDist
     });
   }
 
-  function updateRayFromObject(line, obj3d, maxDist) {
-    const origin = S.tmpV.setFromMatrixPosition(obj3d.matrixWorld);
-    const q = obj3d.getWorldQuaternion(S.tmpQ);
-    S.tmpDir.set(0,0,-1).applyQuaternion(q).normalize();
-    line.scale.z = maxDist;
-    emitRay(line.name || "RAY", origin, S.tmpDir, maxDist);
-  }
-
-  // --- pinch detection helpers ---
-  function getJoint(hand, name) {
-    // Three.js WebXRHand joint naming: "index-finger-tip", "thumb-tip", etc.
-    return hand?.joints?.[name] || hand?.getObjectByName?.(name) || null;
-  }
-
-  function detectPinch(handObj, handName /*left|right*/) {
-    // If joints aren’t available, do nothing.
-    const thumb = getJoint(handObj, "thumb-tip");
-    const index = getJoint(handObj, "index-finger-tip");
-    if (!thumb || !index) return;
-
-    const a = S.tmpV.setFromMatrixPosition(thumb.matrixWorld);
-    const b = new S.THREE.Vector3().setFromMatrixPosition(index.matrixWorld);
-    const d = a.distanceTo(b);
-
-    // Tune thresholds (meters)
-    const downAt = 0.022;  // pinch closed
-    const upAt   = 0.032;  // pinch open
-    const strength = Math.max(0, Math.min(1, (upAt - d) / (upAt - downAt)));
-
-    const prev = S.pinch[handName].down;
-    let down = prev;
-
-    if (!prev && d < downAt) down = true;
-    if (prev && d > upAt) down = false;
-
-    S.pinch[handName].down = down;
-    S.pinch[handName].strength = strength;
-
-    S.Signals?.emit?.("HAND_PINCH", { hand: handName, down, strength });
+  function logInputSourcesOnce() {
+    try {
+      const session = S.renderer?.xr?.getSession?.();
+      if (!session) return;
+      const arr = session.inputSources?.map((s) => ({
+        handedness: s.handedness,
+        targetRayMode: s.targetRayMode,
+        hasGamepad: !!s.gamepad,
+        axes: s.gamepad?.axes?.length || 0,
+        buttons: s.gamepad?.buttons?.length || 0,
+        hasHand: !!s.hand
+      })) || [];
+      S.log?.(`[xr] inputSources=${JSON.stringify(arr)}`);
+    } catch {}
   }
 
   return {
@@ -129,39 +133,41 @@ export const XRHands = (() => {
       S.Signals = Signals;
       S.log = log || console.log;
 
+      S.tmpQ = new THREE.Quaternion();
       S.tmpV = new THREE.Vector3();
       S.tmpDir = new THREE.Vector3();
-      S.tmpQ = new THREE.Quaternion();
 
-      try { attachHand(0); attachHand(1); } catch (e) {
-        S.log?.(`[hands] attach failed ⚠️ ${e?.message || String(e)}`);
-      }
+      installController(0);
+      installController(1);
 
-      S.log?.("[hands] init ✅");
+      // log sources when XR session starts
+      renderer.xr.addEventListener("sessionstart", () => {
+        S.log?.("[xr] sessionstart ✅");
+        logInputSourcesOnce();
+      });
+
+      renderer.xr.addEventListener("sessionend", () => {
+        S.log?.("[xr] sessionend ✅");
+      });
+
+      S.log?.("[hands] init ✅ (select locomotion ready)");
       return {
-        getPinch() { return S.pinch; },
-
         update(camera) {
-          // ALWAYS show gaze laser (in XR too) so you never “lose pointer”
-          const gaze = ensureGazeLaser(camera);
+          // Always-on gaze ray
+          const gaze = ensureGazeRay(camera);
           gaze.visible = true;
-          gaze.position.setFromMatrixPosition(camera.matrixWorld);
-          gaze.quaternion.copy(camera.getWorldQuaternion(S.tmpQ));
-          updateRayFromObject(gaze, camera, 12);
+          updateRayFrom(camera, gaze, 12);
 
-          // Hand lasers if hands are visible
+          // Controller rays (these exist even in hand-tracking mode)
           for (let i = 0; i < 2; i++) {
-            const h = S.hands[i];
-            const l = S.lasers[i];
-            if (!h || !l) continue;
+            const c = S.controllers[i];
+            const r = S.rays[i];
+            if (!c || !r) continue;
 
-            const isVisible = h.visible === true; // three sets this when tracking
-            l.visible = isVisible;
-
-            if (isVisible) updateRayFromObject(l, h, 10);
-
-            // Pinch detect
-            detectPinch(h, i === 0 ? "left" : "right");
+            // If controller object is tracked, show it; if not, hide ray
+            // (Still keep gaze ray visible always)
+            r.visible = c.visible === true;
+            if (r.visible) updateRayFrom(c, r, 10);
           }
         }
       };

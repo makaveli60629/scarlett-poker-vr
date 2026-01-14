@@ -1,23 +1,289 @@
+<!-- /index.html — Scarlett Poker VR (FULL) v1.0
+     ✅ GitHub Pages safe (base path auto via boot.js)
+     ✅ Full Diagnostics HUD + Copy button
+     ✅ VR Button + ENTER VR button
+     ✅ Android Buttons + Hide HUD
+     ✅ Loads /js/boot.js only (boot imports /js/index.js safely)
+-->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
   <title>Scarlett Poker VR</title>
+
   <style>
-    html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui}
-    #logBox{white-space:pre-wrap;font:12px/1.35 ui-monospace; color:#86ff86; padding:12px}
-    #loader{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column}
+    :root{
+      --bg:#05070d;
+      --panel:#0b1220cc;
+      --panel2:#0b1220f2;
+      --line:#66ccff66;
+      --txt:#e9f2ff;
+      --muted:#9fb3d6;
+      --good:#43ff9b;
+      --bad:#ff4d6d;
+      --warn:#ffd36b;
+      --btn:#0f1a2f;
+      --btn2:#132241;
+      --shadow: 0 10px 30px rgba(0,0,0,.45);
+      --r:18px;
+    }
+    html,body{ height:100%; margin:0; background:var(--bg); overflow:hidden; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; color:var(--txt); }
+    #app{ position:fixed; inset:0; }
+    canvas{ display:block; width:100%; height:100%; touch-action:none; }
+
+    /* HUD */
+    #hud{
+      position:fixed;
+      left:10px; right:10px; bottom:10px;
+      background:var(--panel);
+      border:1px solid var(--line);
+      border-radius:var(--r);
+      padding:10px 10px 12px;
+      box-shadow:var(--shadow);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      max-height:48vh;
+      overflow:auto;
+      z-index:50;
+    }
+    #hudTop{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:space-between;
+      flex-wrap:wrap;
+      margin-bottom:8px;
+    }
+    #hudTitle{
+      font-weight:800;
+      letter-spacing:.3px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    #hudTitle .dot{ width:10px; height:10px; border-radius:99px; background:var(--warn); box-shadow:0 0 18px rgba(255,211,107,.35); }
+    #hudSub{
+      font-size:12px;
+      color:var(--muted);
+    }
+    #hudBtns{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .btn{
+      appearance:none;
+      border:1px solid var(--line);
+      background:linear-gradient(180deg,var(--btn),var(--btn2));
+      color:var(--txt);
+      padding:10px 12px;
+      border-radius:14px;
+      font-weight:800;
+      letter-spacing:.25px;
+      cursor:pointer;
+      user-select:none;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .btn:active{ transform: translateY(1px); }
+    .btn.good{ border-color: rgba(67,255,155,.5); }
+    .btn.warn{ border-color: rgba(255,211,107,.55); }
+    .btn.bad{ border-color: rgba(255,77,109,.55); }
+    .btn.mini{ padding:8px 10px; font-weight:800; font-size:13px; }
+
+    #hudGrid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:8px;
+      margin-top:8px;
+    }
+    @media (max-width: 720px){
+      #hudGrid{ grid-template-columns: 1fr; }
+    }
+    .card{
+      border:1px solid var(--line);
+      border-radius:16px;
+      padding:10px;
+      background:var(--panel2);
+    }
+    .card h3{
+      margin:0 0 6px 0;
+      font-size:13px;
+      color:var(--muted);
+      font-weight:900;
+      letter-spacing:.3px;
+    }
+    .mono{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size:12px;
+      white-space:pre-wrap;
+      word-break:break-word;
+      line-height:1.25rem;
+    }
+    #bootLog{
+      padding:10px;
+      margin:10px 10px 0;
+      border:1px solid var(--line);
+      border-radius:var(--r);
+      background:rgba(0,0,0,.35);
+      box-shadow:var(--shadow);
+      position:fixed;
+      left:0; right:0;
+      top:0;
+      z-index:60;
+      max-height:32vh;
+      overflow:auto;
+    }
+    #bootLog.hidden{ display:none; }
+    #bootLog .hdr{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      margin-bottom:6px;
+      flex-wrap:wrap;
+    }
+    #bootLog .hdr strong{ letter-spacing:.25px; }
+    #bootLog .status{ font-weight:900; }
+    #bootLog .status.good{ color:var(--good); }
+    #bootLog .status.bad{ color:var(--bad); }
+    #bootLog .status.warn{ color:var(--warn); }
+    #bootLogText{ margin:0; }
+
+    /* VR entry button (big) */
+    #enterVrWrap{
+      position:fixed;
+      left:16px;
+      bottom: calc(56vh + 18px);
+      z-index:55;
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+    @media (max-width: 720px){
+      #enterVrWrap{ bottom: calc(50vh + 18px); }
+    }
   </style>
 </head>
-<body>
-  <div id="loader">
-    <div>Loading Scarlett Poker VR…</div>
-    <div id="loaderSub" style="opacity:.7;margin-top:8px">Booting…</div>
-  </div>
-  <div id="logBox">[BOOT LOG]</div>
 
-  <!-- This must be MODULE -->
-  <script type="module" src="./js/boot.js"></script>
+<body>
+  <div id="app">
+    <!-- Boot overlay log (boot.js writes here) -->
+    <div id="bootLog">
+      <div class="hdr">
+        <strong>[BOOT LOG]</strong>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn mini" id="btnHideBoot">Hide Boot</button>
+          <button class="btn mini" id="btnCopyBoot">Copy Boot</button>
+        </div>
+      </div>
+      <div class="status warn" id="bootStatus">Loading…</div>
+      <pre class="mono" id="bootLogText">[HTML] loaded ✅ (waiting for /js/boot.js…)</pre>
+    </div>
+
+    <!-- The renderer canvas will be injected by index.js -->
+  </div>
+
+  <!-- Enter VR + Quick buttons (works even if HUD hidden) -->
+  <div id="enterVrWrap">
+    <button class="btn good" id="btnEnterVR">ENTER VR</button>
+    <button class="btn" id="btnHud">HIDE HUD</button>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div id="hudTop">
+      <div>
+        <div id="hudTitle"><span class="dot"></span> Scarlett Poker VR</div>
+        <div id="hudSub">Diagnostics + Controls (Quest + Android)</div>
+      </div>
+      <div id="hudBtns">
+        <button class="btn mini warn" id="btnSpawn">SPAWN</button>
+        <button class="btn mini" id="btnLobby">LOBBY</button>
+        <button class="btn mini" id="btnPoker">POKER</button>
+        <button class="btn mini" id="btnStore">STORE</button>
+        <button class="btn mini" id="btnScorpion">SCORPION</button>
+        <button class="btn mini" id="btnSpectate">SPECTATE</button>
+        <button class="btn mini" id="btnUnstuck">UNSTUCK</button>
+        <button class="btn mini" id="btnHealthcheck">HEALTHCHECK</button>
+      </div>
+    </div>
+
+    <div id="hudGrid">
+      <div class="card">
+        <h3>Status</h3>
+        <div class="mono" id="hudStatus">
+room: ?   pos: ?   XR: ?
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Controls</h3>
+        <div class="mono" id="hudControls">
+left stick: move + strafe
+right stick: snap turn (45°) + fallback forward
+trigger/grip: logged (used by interaction)
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Live Diagnostics</h3>
+        <div class="mono" id="hudDiag">
+waiting…
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Notes</h3>
+        <div class="mono" id="hudNotes">
+If anything breaks:
+1) Copy Boot log
+2) Copy HUD diag
+3) Send both
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Simple HTML-side helpers (boot.js also writes logs)
+    (function(){
+      const hud = document.getElementById("hud");
+      const boot = document.getElementById("bootLog");
+
+      const btnHud = document.getElementById("btnHud");
+      const btnHideBoot = document.getElementById("btnHideBoot");
+      const btnCopyBoot = document.getElementById("btnCopyBoot");
+
+      if (btnHud) btnHud.addEventListener("click", () => {
+        const next = hud.style.display === "none" ? "block" : "none";
+        hud.style.display = next;
+        btnHud.textContent = (next === "none") ? "SHOW HUD" : "HIDE HUD";
+      });
+
+      if (btnHideBoot) btnHideBoot.addEventListener("click", () => {
+        boot.classList.toggle("hidden");
+      });
+
+      if (btnCopyBoot) btnCopyBoot.addEventListener("click", async () => {
+        const t = (document.getElementById("bootLogText")?.textContent || "").trim();
+        try{
+          await navigator.clipboard.writeText(t);
+          console.log("[hud] copied ✅");
+        }catch(e){
+          console.log("[hud] copy failed:", e);
+        }
+      });
+
+      // VR entry button is wired by index.js (it will attach the real VRButton + start session)
+      // We still keep a visible button in HTML so the user always has an entry point.
+    })();
+  </script>
+
+  <!-- Boot loader (the ONLY required script in HTML) -->
+  <script src="./js/boot.js?v=SCARLETT_BOOT_2026_01_13" defer></script>
 </body>
 </html>
+```0

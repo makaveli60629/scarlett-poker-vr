@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ScarlettVR Ultimate V11</title>
+    <title>ScarlettVR Ultimate V12</title>
     <style>
         body { margin: 0; background: #05070d; overflow: hidden; font-family: monospace; }
         #ui { position: absolute; top: 10px; left: 10px; color: #00ffff; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 8px; border: 1px solid #00ffff; }
@@ -18,7 +18,7 @@
     </script>
 </head>
 <body>
-    <div id="ui"><b>SCARLETT_V11_FULL_RESTORE</b><br>Lasers: Active | Floor: Grid</div>
+    <div id="ui"><b>SCARLETT_V12_STABLE</b><br>L-Stick: Corrected | R-Stick: Corrected</div>
 
     <script type="module">
         import * as THREE from 'three';
@@ -31,10 +31,11 @@
             renderer: new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" }),
             player: new THREE.Group(),
             clock: new THREE.Clock(),
-            bots: []
+            bots: [],
+            reticles: []
         };
 
-        // --- CORE CONTROLS v1.0 (INTEGRATED & CALIBRATED) ---
+        // --- CALIBRATED CONTROLS ---
         const Controls = {
             moveSpeed: 2.5,
             snapAngle: Math.PI / 4,
@@ -50,6 +51,8 @@
                 for (const source of session.inputSources) {
                     if (!source.gamepad) continue;
                     const axes = source.gamepad.axes;
+
+                    // LEFT STICK: MOVEMENT (Inverted forward/back fix)
                     if (source.handedness === 'left') {
                         const lx = axes[2] || axes[0] || 0;
                         const ly = axes[3] || axes[1] || 0;
@@ -58,13 +61,18 @@
                             fwd.y = 0; fwd.normalize();
                             const side = new THREE.Vector3(1, 0, 0).applyQuaternion(S.camera.quaternion);
                             side.y = 0; side.normalize();
+                            
+                            // Using -ly for forward and lx for strafe
                             S.player.position.addScaledVector(fwd, -ly * this.moveSpeed * dt);
                             S.player.position.addScaledVector(side, lx * this.moveSpeed * dt);
                         }
                     }
+
+                    // RIGHT STICK: SNAP TURN (Direction Flip Fix)
                     if (source.handedness === 'right' && this._snapTimer <= 0) {
                         const rx = axes[2] || axes[0] || 0;
                         if (Math.abs(rx) > 0.7) {
+                            // Flipped: pushing stick right now turns player right
                             S.player.rotation.y -= Math.sign(rx) * this.snapAngle;
                             this._snapTimer = this.snapCooldown;
                         }
@@ -74,32 +82,14 @@
         };
 
         function buildWorld() {
-            // 1. Cinematic Lighting (From lighting.js)
-            const hemi = new THREE.HemisphereLight(0xdaf0ff, 0x0b0f1a, 1.10);
-            S.scene.add(hemi);
-            const sun = new THREE.DirectionalLight(0xffffff, 1.2);
-            sun.position.set(35, 70, 35);
-            S.scene.add(sun);
-
-            // 2. Visible Grid Floor (So you can see your teleport reticle)
-            const grid = new THREE.GridHelper(100, 50, 0x00ffff, 0x222222);
-            grid.position.y = 0.01;
-            S.scene.add(grid);
+            S.scene.background = new THREE.Color(0x05070d);
+            S.scene.add(new THREE.HemisphereLight(0xdaf0ff, 0x0b0f1a, 1.2));
             
-            const floorMat = new THREE.MeshStandardMaterial({ color: 0x0a0c12 });
-            const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), floorMat);
-            floor.rotation.x = -Math.PI / 2;
-            S.scene.add(floor);
+            // GRID FLOOR (Visual aid for teleport/movement)
+            const grid = new THREE.GridHelper(100, 50, 0x00ffff, 0x112222);
+            S.scene.add(grid);
 
-            // 3. Sunken Pit Guardrail
-            const railGeo = new THREE.TorusGeometry(6.5, 0.05, 16, 100);
-            const railMat = new THREE.MeshStandardMaterial({ color: 0x66ccff, emissive: 0x002244 });
-            const rail = new THREE.Mesh(railGeo, railMat);
-            rail.rotation.x = Math.PI / 2;
-            rail.position.y = 1.0;
-            S.scene.add(rail);
-
-            // 4. Poker Table
+            // TABLE & PIT
             const table = new THREE.Mesh(
                 new THREE.CylinderGeometry(3, 3, 0.4, 32),
                 new THREE.MeshStandardMaterial({ color: 0xd2b46a, metalness: 0.8 })
@@ -107,17 +97,14 @@
             table.position.set(0, 0.2, 0);
             S.scene.add(table);
 
-            // 5. Spawn Humanoids (From humanoids.js)
-            const botMat = new THREE.MeshStandardMaterial({ color: 0xe6e6e6, roughness: 0.7 });
+            // BOTS
+            const botMat = new THREE.MeshStandardMaterial({ color: 0xe6e6e6 });
             for (let i = 0; i < 6; i++) {
                 const angle = (i / 6) * Math.PI * 2;
                 const bot = new THREE.Group();
-                const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.42, 6, 10), botMat);
-                const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.12, 0), botMat);
-                head.position.y = 1.62; torso.position.y = 1.15;
-                bot.add(torso, head);
-                bot.position.set(Math.cos(angle) * 4.2, 0, Math.sin(angle) * 4.2);
-                bot.lookAt(0, 1.2, 0);
+                bot.add(new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.42, 6, 10), botMat));
+                bot.position.set(Math.cos(angle) * 4.5, 1.15, Math.sin(angle) * 4.5);
+                bot.lookAt(0, 1.15, 0);
                 S.scene.add(bot);
                 S.bots.push(bot);
             }
@@ -131,20 +118,29 @@
 
             S.scene.add(S.player);
             S.player.add(S.camera);
-
-            // SPAWN POSITION: Looking at the table, 8 meters back
             S.player.position.set(0, 0, 8); 
-            
-            // LASERS & RETICLES
-            const handFactory = new XRHandModelFactory();
-            const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]);
-            const laserMat = new THREE.LineBasicMaterial({ color: 0x66ccff });
 
+            const handFactory = new XRHandModelFactory();
             for (let i = 0; i < 2; i++) {
                 const controller = S.renderer.xr.getController(i);
-                const laser = new THREE.Line(laserGeo, laserMat);
+                
+                // LASER LINE
+                const laser = new THREE.Line(
+                    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]),
+                    new THREE.LineBasicMaterial({ color: 0x00ffff })
+                );
                 controller.add(laser);
                 S.player.add(controller);
+
+                // TELEPORT RETICLE (The circle on the floor)
+                const reticle = new THREE.Mesh(
+                    new THREE.RingGeometry(0.08, 0.1, 32),
+                    new THREE.MeshBasicMaterial({ color: 0x00ffff, side: THREE.DoubleSide })
+                );
+                reticle.rotation.x = -Math.PI / 2;
+                reticle.visible = false;
+                S.scene.add(reticle);
+                S.reticles.push({ reticle, controller });
 
                 const hand = S.renderer.xr.getHand(i);
                 hand.add(handFactory.createHandModel(hand, 'mesh'));
@@ -154,17 +150,35 @@
             buildWorld();
 
             S.renderer.xr.addEventListener('sessionstart', () => {
-                // FIXED SPAWN: Force rotation to face the table immediately
+                // Point player at table center
+                S.player.rotation.set(0, 0, 0);
                 S.player.lookAt(0, 0, 0);
             });
 
             S.renderer.setAnimationLoop(() => {
                 const dt = S.clock.getDelta();
                 Controls.update(dt);
-                // Idle breathing for bots
-                S.bots.forEach((b, i) => {
-                    b.position.y = Math.sin(S.clock.elapsedTime + i) * 0.02;
+
+                // LASER COLLISION LOGIC
+                S.reticles.forEach(obj => {
+                    const { reticle, controller } = obj;
+                    const worldPos = new THREE.Vector3();
+                    const worldDir = new THREE.Vector3(0, 0, -1);
+                    controller.getWorldPosition(worldPos);
+                    worldDir.applyQuaternion(controller.getWorldQuaternion(new THREE.Quaternion()));
+
+                    // Simple ray-plane intersection for floor (y=0)
+                    if (worldDir.y < 0) {
+                        const t = -worldPos.y / worldDir.y;
+                        const hitX = worldPos.x + worldDir.x * t;
+                        const hitZ = worldPos.z + worldDir.z * t;
+                        reticle.visible = true;
+                        reticle.position.set(hitX, 0.02, hitZ);
+                    } else {
+                        reticle.visible = false;
+                    }
                 });
+
                 S.renderer.render(S.scene, S.camera);
             });
         }

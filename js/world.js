@@ -1,50 +1,23 @@
-// /js/world.js — ScarlettVR PRIME WORLD (FULL) v11.0
-// ✅ Single World module (no duplicate exports)
+// /js/world.js — ScarlettVR PRIME WORLD v11.1 (FULL + GitHub-safe optional hands)
+// ✅ NO bare imports (no `import 'three'`)
+// ✅ Works with your index.js passing THREE into World.init()
 // ✅ Circular lobby + pit divot + balcony + pads + anchors
-// ✅ Floor ring follows player (NOT parented to player)
-// ✅ Button hooks: Spawn/Lobby/Poker/Store/Scorpion/Spectate/Unstuck/Healthcheck
-// ✅ Compatible with Quest-safe index.js (World.init + World.update)
+// ✅ Optional hand tracking models via CDN (same version as index.js), but does NOT break controllers
 
 export const World = (() => {
-  let _inst = null;
+  let inst = null;
 
-  // tiny HUD helpers (optional)
-  function setText(id, txt) {
-    const el = document.getElementById(id);
-    if (el) el.textContent = txt;
-  }
-  function hudLog(msg) {
-    // if you have a HUD log element, you can wire it here
-    // but we keep it safe and console-only by default:
-    console.log(msg);
-  }
-
+  // ---------- small DOM helpers ----------
   function hook(id, fn) {
     const el = document.getElementById(id);
     if (el) el.addEventListener("click", fn);
   }
-
-  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-
-  // --------- builders ----------
-  function addLights(THREE, root, scene) {
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x132044, 1.15);
-    hemi.position.set(0, 60, 0);
-    scene.add(hemi);
-
-    const sun = new THREE.DirectionalLight(0xffffff, 1.1);
-    sun.position.set(35, 60, 25);
-    scene.add(sun);
-
-    const cyan = new THREE.PointLight(0x66ccff, 1.0, 140, 2);
-    cyan.position.set(0, 10, 0);
-    root.add(cyan);
-
-    const warm = new THREE.PointLight(0xffd36b, 0.55, 90, 2);
-    warm.position.set(0, 4.5, 10);
-    root.add(warm);
+  function setText(id, txt) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = txt;
   }
 
+  // ---------- materials ----------
   function matStd(THREE, color, rough = 0.88, metal = 0.12) {
     return new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
   }
@@ -74,12 +47,30 @@ export const World = (() => {
     return mesh;
   }
 
+  // ---------- lights ----------
+  function addLights(THREE, root, scene) {
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x132044, 1.15);
+    hemi.position.set(0, 60, 0);
+    scene.add(hemi);
+
+    const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+    sun.position.set(35, 60, 25);
+    scene.add(sun);
+
+    const cyan = new THREE.PointLight(0x66ccff, 1.0, 140, 2);
+    cyan.position.set(0, 10, 0);
+    root.add(cyan);
+
+    const warm = new THREE.PointLight(0xffd36b, 0.55, 90, 2);
+    warm.position.set(0, 4.5, 10);
+    root.add(warm);
+  }
+
+  // ---------- world geometry ----------
   function buildLobby(THREE, root, scene) {
-    // background + fog
     scene.background = new THREE.Color(0x05070d);
     scene.fog = new THREE.Fog(0x05070d, 18, 220);
 
-    // outer shell
     const shell = new THREE.Mesh(
       new THREE.CylinderGeometry(23, 23, 11, 72, 1, true),
       new THREE.MeshStandardMaterial({
@@ -94,7 +85,6 @@ export const World = (() => {
     shell.position.set(0, 4.6, 0);
     root.add(shell);
 
-    // lobby floor
     const floor = new THREE.Mesh(
       new THREE.CylinderGeometry(18.5, 18.5, 0.35, 72),
       matStd(THREE, 0x1b2a46, 0.92, 0.06)
@@ -102,7 +92,6 @@ export const World = (() => {
     floor.position.set(0, -0.175, 0);
     root.add(floor);
 
-    // glowing ring
     const ringMat = new THREE.MeshStandardMaterial({
       color: 0x66ccff,
       roughness: 0.35,
@@ -115,13 +104,12 @@ export const World = (() => {
     ring.position.set(0, 0.18, 0);
     root.add(ring);
 
-    // simple “door” markers for 4 hallways
+    // door markers
     const doorMat = new THREE.MeshStandardMaterial({
       color: 0x0a1326, roughness: 0.4, metalness: 0.25,
       emissive: new THREE.Color(0x66ccff), emissiveIntensity: 0.18
     });
     const doorGeo = new THREE.BoxGeometry(3.2, 3.0, 0.25);
-
     const doors = [
       { x: 0, z: 18.0, r: Math.PI },
       { x: 0, z: -18.0, r: 0 },
@@ -141,7 +129,6 @@ export const World = (() => {
     const pitDepth = 3.25;
     const pitFloorY = -pitDepth;
 
-    // pit floor
     const pitFloor = new THREE.Mesh(
       new THREE.CylinderGeometry(pitRadius, pitRadius, 0.35, 72),
       matStd(THREE, 0x0c1220, 0.95, 0.04)
@@ -149,7 +136,6 @@ export const World = (() => {
     pitFloor.position.set(0, pitFloorY - 0.175, 0);
     root.add(pitFloor);
 
-    // pit walls
     const pitWall = new THREE.Mesh(
       new THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 72, 1, true),
       new THREE.MeshStandardMaterial({ color: 0x0a101e, roughness: 0.95, metalness: 0.05, side: THREE.DoubleSide })
@@ -157,7 +143,6 @@ export const World = (() => {
     pitWall.position.set(0, pitFloorY / 2, 0);
     root.add(pitWall);
 
-    // table pad (center reference)
     const felt = new THREE.Mesh(
       new THREE.CylinderGeometry(3.35, 3.55, 0.35, 72),
       new THREE.MeshStandardMaterial({ color: 0x134536, roughness: 0.78, metalness: 0.04 })
@@ -166,7 +151,6 @@ export const World = (() => {
     felt.name = "TABLE_PAD";
     root.add(felt);
 
-    // “table spotlight”
     const spot = new THREE.PointLight(0x66ccff, 0.75, 35, 2);
     spot.position.set(0, 3.5, 0);
     root.add(spot);
@@ -175,7 +159,6 @@ export const World = (() => {
   }
 
   function buildBalcony(THREE, root) {
-    // balcony ring up top where you can walk around and look down
     const y = 2.9;
     const balcony = new THREE.Mesh(
       new THREE.RingGeometry(13.8, 17.0, 128),
@@ -185,7 +168,6 @@ export const World = (() => {
     balcony.position.y = y;
     root.add(balcony);
 
-    // simple rail wall ring for “guardrail feel”
     const rail = new THREE.Mesh(
       new THREE.CylinderGeometry(14.05, 14.05, 1.0, 96, 1, true),
       new THREE.MeshStandardMaterial({ color: 0x0a1326, roughness: 0.55, metalness: 0.22, side: THREE.DoubleSide })
@@ -194,7 +176,7 @@ export const World = (() => {
     root.add(rail);
   }
 
-  function buildPadsAndLabels(THREE, root) {
+  function buildPads(THREE, root) {
     const pads = [
       { room: "lobby",    label: "LOBBY",    x: -4.2, z: 10.9 },
       { room: "poker",    label: "POKER",    x: -1.4, z: 10.9 },
@@ -224,30 +206,44 @@ export const World = (() => {
     }
   }
 
-  function buildSpawnMarker(THREE, root, spawnPos) {
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.95, 1.15, 48),
-      new THREE.MeshBasicMaterial({ color: 0xffd36b, transparent: true, opacity: 0.55, side: THREE.DoubleSide })
-    );
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.set(spawnPos.x, 0.02, spawnPos.z);
-    ring.name = "SPAWN_RING";
-    root.add(ring);
+  // ---------- OPTIONAL HAND TRACKING ----------
+  async function tryInstallHandModels({ THREE, renderer, scene, player, log }) {
+    // Only attempt if session supports hands; safe to ignore if not.
+    // Use the SAME three version as index.js: 0.158.0
+    try {
+      // Lazy import from CDN (GitHub-safe)
+      const mod = await import("https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/webxr/XRHandModelFactory.js");
+      const XRHandModelFactory = mod?.XRHandModelFactory;
+      if (!XRHandModelFactory) return;
 
-    const label = makeBillboardText(THREE, "SPAWN");
-    label.position.set(spawnPos.x, 1.25, spawnPos.z);
-    root.add(label);
+      const factory = new XRHandModelFactory();
+
+      const hand0 = renderer.xr.getHand(0);
+      const hand1 = renderer.xr.getHand(1);
+
+      // Parent hands to player rig (so they move with locomotion)
+      player.add(hand0);
+      player.add(hand1);
+
+      const model0 = factory.createHandModel(hand0, "mesh");
+      const model1 = factory.createHandModel(hand1, "mesh");
+      hand0.add(model0);
+      hand1.add(model1);
+
+      log?.("[world] hand models installed ✅");
+    } catch (e) {
+      // Not fatal. Most sessions will still use controllers.
+      log?.("[world] hand models not available (ok): " + (e?.message || e));
+    }
   }
 
-  // --------- main world ----------
+  // ---------- init / update ----------
   async function init({ THREE, scene, renderer, camera, player, log }) {
     const root = new THREE.Group();
     root.name = "WORLD_ROOT";
     scene.add(root);
 
-    const _log = (m) => { hudLog(m); log?.(m); };
-
-    // render safety
+    // camera safety
     camera.near = 0.05;
     camera.far = 650;
     camera.updateProjectionMatrix();
@@ -256,47 +252,55 @@ export const World = (() => {
     buildLobby(THREE, root, scene);
     const pit = buildPit(THREE, root);
     buildBalcony(THREE, root);
-    buildPadsAndLabels(THREE, root);
+    buildPads(THREE, root);
 
-    // Anchors (where ROOM_SET will teleport you)
     const anchors = {
       spawn:    { pos: new THREE.Vector3(0, 0, 16.5), yaw: Math.PI },
       lobby:    { pos: new THREE.Vector3(0, 0, 12.5), yaw: Math.PI },
-      poker:    { pos: new THREE.Vector3(0, pit.pitFloorY + 0.15, 3.0), yaw: Math.PI }, // inside pit edge
+      poker:    { pos: new THREE.Vector3(0, pit.pitFloorY + 0.15, 3.0), yaw: Math.PI },
       store:    { pos: new THREE.Vector3(-14.0, 0, 0), yaw: -Math.PI / 2 },
       scorpion: { pos: new THREE.Vector3(14.0, 0, 0), yaw: Math.PI / 2 },
-      spectate: { pos: new THREE.Vector3(0, 2.9, 14.2), yaw: Math.PI } // balcony
+      spectate: { pos: new THREE.Vector3(0, 2.9, 14.2), yaw: Math.PI }
     };
 
-    buildSpawnMarker(THREE, root, anchors.spawn.pos);
+    // spawn marker
+    const spawnRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.95, 1.15, 48),
+      new THREE.MeshBasicMaterial({ color: 0xffd36b, transparent: true, opacity: 0.55, side: THREE.DoubleSide })
+    );
+    spawnRing.rotation.x = -Math.PI / 2;
+    spawnRing.position.set(anchors.spawn.pos.x, 0.02, anchors.spawn.pos.z);
+    root.add(spawnRing);
 
-    // Floor-follow ring (NOT parented to player)
+    const spawnLabel = makeBillboardText(THREE, "SPAWN");
+    spawnLabel.position.set(anchors.spawn.pos.x, 1.25, anchors.spawn.pos.z);
+    root.add(spawnLabel);
+
+    // floor-follow ring (not parented)
     const floorRing = new THREE.Mesh(
       new THREE.RingGeometry(0.16, 0.22, 36),
       new THREE.MeshBasicMaterial({ color: 0xffd36b, transparent: true, opacity: 0.72, side: THREE.DoubleSide })
     );
     floorRing.rotation.x = -Math.PI / 2;
     floorRing.position.set(0, 0.02, 0);
-    floorRing.name = "FLOOR_RING";
     root.add(floorRing);
 
-    function setRig(anchorName) {
-      const a = anchors[anchorName] || anchors.spawn;
+    function setRig(name) {
+      const a = anchors[name] || anchors.spawn;
       player.position.copy(a.pos);
       player.position.y += 0.08;
       player.rotation.set(0, 0, 0);
       if (!renderer.xr.isPresenting) camera.rotation.set(0, a.yaw || 0, 0);
-      _log(`[rm] room=${anchorName}`);
+      log?.(`[rm] room=${name}`);
     }
 
     function unstuck() {
-      // Always place you back at spawn safely
       setRig("spawn");
       player.position.y += 0.10;
-      _log("[rm] UNSTUCK ✅");
+      log?.("[rm] UNSTUCK ✅");
     }
 
-    // Hook your HUD buttons (works with your existing UI)
+    // buttons
     hook("btnSpawn", () => setRig("spawn"));
     hook("btnLobby", () => setRig("lobby"));
     hook("btnPoker", () => setRig("poker"));
@@ -304,20 +308,22 @@ export const World = (() => {
     hook("btnScorpion", () => setRig("scorpion"));
     hook("btnSpectate", () => setRig("spectate"));
     hook("btnUnstuck", () => unstuck());
-    hook("btnHealthcheck", () => _log("[health] ok ✅ (world v11.0)"));
+    hook("btnHealthcheck", () => log?.("[health] ok ✅ (world v11.1)"));
 
-    // Start at spawn
+    // start
     setRig("spawn");
-    _log("[world] PRIME v11.0 init ✅ (lobby + pit + balcony + pads)");
+    log?.("[world] PRIME v11.1 init ✅ (full world restored)");
 
-    // tick loop
+    // optional hands: install when XR session starts
+    // (won’t break controllers; only adds models if available)
+    renderer.xr.addEventListener?.("sessionstart", () => {
+      tryInstallHandModels({ THREE, renderer, scene, player, log });
+    });
+
     const tmp = new THREE.Vector3();
     return {
       tick(dt, t) {
-        // follow ring to your feet, but keep it on floor
         floorRing.position.set(player.position.x, 0.02, player.position.z);
-
-        // optional status fields if you have them
         setText("debugXR", renderer.xr.isPresenting ? "XR:on" : "XR:off");
         tmp.copy(player.position);
         setText("debugPos", `x:${tmp.x.toFixed(2)} y:${tmp.y.toFixed(2)} z:${tmp.z.toFixed(2)}`);
@@ -327,11 +333,11 @@ export const World = (() => {
 
   return {
     async init(args) {
-      _inst = await init(args);
-      return _inst;
+      inst = await init(args);
+      return inst;
     },
     update(dt, t) {
-      _inst?.tick?.(dt, t);
+      inst?.tick?.(dt, t);
     }
   };
 })();

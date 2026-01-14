@@ -1,143 +1,58 @@
-// /js/world.js
-// SCARLETT VR POKER — MASTER WORLD
-// Guaranteed visible on Android + Quest
-// v1.0
+import * as THREE from 'three';
 
-import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
+export class World {
+    constructor(scene) {
+        this.scene = scene;
+        this.textureLoader = new THREE.TextureLoader();
+        this.objects = []; // Track interactive items
+        
+        this.initEnvironment();
+        this.addInteractiveCube();
+    }
 
-export function buildWorld(ctx) {
-  const {
-    scene,
-    camera,
-    rig,
-    log = console.log
-  } = ctx;
+    initEnvironment() {
+        // Example of using your assets folder
+        const floorTex = this.textureLoader.load('assets/textures/floor_diffuse.jpg');
+        const floorGeo = new THREE.PlaneGeometry(10, 10);
+        const floorMat = new THREE.MeshStandardMaterial({ map: floorTex });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        this.scene.add(floor);
+    }
 
-  log("[world] buildWorld() start");
+    addInteractiveCube() {
+        // A placeholder for event chips/logic
+        const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+        const material = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
+        const cube = new THREE.Mesh(geometry, material);
+        cube.position.set(0, 1.2, -0.5);
+        this.scene.add(cube);
+        this.objects.push(cube);
+    }
 
-  /* -------------------------------------------------
-     SAFETY CHECKS
-  ------------------------------------------------- */
-  if (!scene) throw new Error("World: scene missing");
-  if (!camera) throw new Error("World: camera missing");
+    // This runs every frame
+    update(hand1, hand2) {
+        // Logic for Hand Interaction (Collision detection)
+        this.checkHandProximity(hand1);
+        this.checkHandProximity(hand2);
+        
+        // Constant world updates (e.g. floating animations)
+        this.objects.forEach(obj => {
+            obj.rotation.y += 0.01;
+        });
+    }
 
-  /* -------------------------------------------------
-     SKY / BACKGROUND  (CRITICAL – prevents black)
-  ------------------------------------------------- */
-  scene.background = new THREE.Color(0x0b1020);
-
-  const skyGeo = new THREE.SphereGeometry(100, 32, 32);
-  const skyMat = new THREE.MeshBasicMaterial({
-    color: 0x111833,
-    side: THREE.BackSide
-  });
-  const sky = new THREE.Mesh(skyGeo, skyMat);
-  scene.add(sky);
-
-  /* -------------------------------------------------
-     LIGHTING (ABSOLUTELY REQUIRED)
-  ------------------------------------------------- */
-  const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-  scene.add(ambient);
-
-  const sun = new THREE.DirectionalLight(0xffffff, 0.8);
-  sun.position.set(5, 10, 3);
-  sun.castShadow = false;
-  scene.add(sun);
-
-  log("[world] lights added");
-
-  /* -------------------------------------------------
-     FLOOR (REFERENCE + SCALE CHECK)
-  ------------------------------------------------- */
-  const floorGeo = new THREE.CircleGeometry(20, 64);
-  const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x222222,
-    roughness: 1,
-    metalness: 0
-  });
-
-  const floor = new THREE.Mesh(floorGeo, floorMat);
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.y = 0;
-  scene.add(floor);
-
-  log("[world] floor added");
-
-  /* -------------------------------------------------
-     POKER PIT (DIVOT STYLE)
-  ------------------------------------------------- */
-  const pitGeo = new THREE.CylinderGeometry(6, 6, 0.4, 48, 1, true);
-  const pitMat = new THREE.MeshStandardMaterial({
-    color: 0x111111,
-    side: THREE.DoubleSide
-  });
-
-  const pit = new THREE.Mesh(pitGeo, pitMat);
-  pit.position.y = -0.2;
-  scene.add(pit);
-
-  /* -------------------------------------------------
-     POKER TABLE (CENTERPIECE)
-  ------------------------------------------------- */
-  const tableGeo = new THREE.CylinderGeometry(3, 3, 0.6, 48);
-  const tableMat = new THREE.MeshStandardMaterial({
-    color: 0x0a5c3b,
-    roughness: 0.9
-  });
-
-  const table = new THREE.Mesh(tableGeo, tableMat);
-  table.position.y = 0.3;
-  scene.add(table);
-
-  /* -------------------------------------------------
-     TABLE RAIL
-  ------------------------------------------------- */
-  const railGeo = new THREE.TorusGeometry(3.05, 0.15, 16, 64);
-  const railMat = new THREE.MeshStandardMaterial({
-    color: 0x3a2a1a
-  });
-
-  const rail = new THREE.Mesh(railGeo, railMat);
-  rail.rotation.x = Math.PI / 2;
-  rail.position.y = 0.6;
-  scene.add(rail);
-
-  /* -------------------------------------------------
-     DEBUG AXES (YOU CAN REMOVE LATER)
-  ------------------------------------------------- */
-  const axes = new THREE.AxesHelper(2);
-  axes.position.y = 0.01;
-  scene.add(axes);
-
-  /* -------------------------------------------------
-     PLAYER SPAWN FIX (QUEST SAFE)
-  ------------------------------------------------- */
-  if (rig) {
-    rig.position.set(0, 1.6, 4);
-    log("[world] rig positioned", rig.position.toArray());
-  } else {
-    camera.position.set(0, 1.6, 4);
-    log("[world] camera positioned");
-  }
-
-  /* -------------------------------------------------
-     WORLD ROOT (FOR FUTURE SYSTEMS)
-  ------------------------------------------------- */
-  const worldRoot = new THREE.Group();
-  worldRoot.name = "WORLD_ROOT";
-  scene.add(worldRoot);
-
-  worldRoot.add(floor, pit, table, rail);
-
-  log("[world] build complete ✅");
-
-  return {
-    floor,
-    pit,
-    table,
-    rail,
-    sky,
-    lights: { ambient, sun }
-  };
+    checkHandProximity(hand) {
+        if (!hand) return;
+        
+        // Simple distance-based interaction logic
+        this.objects.forEach(obj => {
+            const distance = hand.position.distanceTo(obj.position);
+            if (distance < 0.1) {
+                obj.material.color.setHex(0xff0000); // Visual feedback
+            } else {
+                obj.material.color.setHex(0x00ff00);
+            }
+        });
+    }
 }

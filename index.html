@@ -1,47 +1,25 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <title>ScarlettVR Mission Control</title>
+  <title>Scarlett Poker VR - Update 4.0</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js"></script>
   <style>
-    body { margin:0; background:#000; overflow:hidden; touch-action:none; font-family: monospace; }
-    #app { position:fixed; inset:0; z-index: 1; }
-    
-    /* Transparent Diagnostic Overlay */
-    #hud {
-      position: fixed; top: 10px; left: 10px; z-index: 1000;
-      background: rgba(10, 20, 40, 0.8); border: 1px solid #00ffff;
-      padding: 15px; border-radius: 10px; color: #00ffff;
-      pointer-events: auto; width: 280px; transition: opacity 0.3s;
+    body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+    #hud { 
+      position: absolute; top: 10px; left: 10px; z-index: 100; 
+      color: #0f0; background: rgba(0,0,0,0.7); padding: 10px; 
+      border-radius: 5px; pointer-events: auto; max-height: 80vh; overflow-y: auto;
     }
-    .status { display:flex; justify-content:space-between; margin-bottom:5px; font-size:12px; }
-    .lamp { width:10px; height:10px; border-radius:50%; background:#222; }
-    .on { background:#00ff00; box-shadow: 0 0 8px #00ff00; }
-    .err { background:#ff0000; }
-    
-    #hudlog { height:80px; overflow-y:auto; background:#000; font-size:10px; margin-top:10px; padding:5px; border:1px solid #333; }
-    
-    /* Joysticks (Hidden by default, shown on mobile) */
-    .joy-zone { position:fixed; bottom:30px; width:120px; height:120px; background:rgba(0,255,255,0.05); border-radius:50%; border:1px solid rgba(0,255,255,0.2); z-index:2000; display:none; }
-    #joy-l { left:20px; } #joy-r { right:20px; }
+    #hud.hidden { display: none; }
+    .diag-err { color: #ff4444; }
+    .diag-ok { color: #44ff44; }
   </style>
 </head>
 <body>
-  <div id="app"></div>
-  
-  <div id="hud">
-    <h2 style="margin:0 0 10px 0; font-size:14px;">SYSTEM DIAGNOSTICS</h2>
-    <div class="status">RENDERER <span id="l-render" class="lamp"></span></div>
-    <div class="status">WORLD MOD <span id="l-world" class="lamp"></span></div>
-    <div class="status">CONTROLS <span id="l-input" class="lamp"></span></div>
-    <div id="hudlog">Booting Scarlett_OS...</div>
-    <button id="hide-btn" style="width:100%; margin-top:10px; cursor:pointer;">PLAY (HIDE HUD)</button>
-  </div>
-
-  <div id="joy-l" class="joy-zone"></div>
-  <div id="joy-r" class="joy-zone"></div>
-
-  <script type="module" src="./index.js"></script>
+  <div id="hud">--- Scarlett System Diagnostic ---</div>
+  <script type="module" src="./js/boot.js"></script>
 </body>
 </html>

@@ -1,306 +1,266 @@
-// /js/core/controls.js — Scarlett CORE Controls (FULL) v2.0
-// Single source of truth for Quest controller locomotion + XR select signals.
-// ✅ Uses XR gamepads (Quest Touch) for movement + snap turn
-// ✅ Auto-fixes “forward/backwards inverted” (calibrates once)
-// ✅ Right stick: snap turn 45° (X). Right stick Y can be optional forward fallback
-// ✅ Emits Signals "XR_SELECT" on trigger (selectstart/selectend)
-// ✅ Provides debug strings for HUD: getPadDebug(), getButtonDebug()
-// ✅ DOES NOT create lasers (keep lasers/rays in core/xr_hands.js if you want)
-//
-// Usage (index.js):
-//   import { Controls } from "./core/controls.js";
-//   Controls.init({ THREE, renderer, camera, player, Signals, log });
-//   in loop: Controls.update(dt);
+// /js/core/controls.js — ScarlettVR CORE Controls v1.0 (FULL)
+// ✅ Quest controllers supported (XR controllers)
+// ✅ Left stick: move/strafe (forward/back correct)
+// ✅ Right stick: snap turn 45° (works reliably)
+// ✅ Laser rays: always forward (-Z), fixes "pointing up" bug
+// ✅ Reticle: green ring only when ray hits floor plane (y=0)
+// ✅ Trigger/grip listeners included
+// ✅ Debug helpers for HUD
 
 export const Controls = (() => {
-  let THREE, renderer, camera, player, Signals;
-  let log = console.log, warn = console.warn;
-
-  const cfg = {
-    deadzoneMove: 0.12,
-    deadzoneTurn: 0.18,
-    speedXR: 1.65,
-    speed2D: 2.35,
-    snapDeg: 45,
-    snapThreshold: 0.65,
-    snapCooldownSec: 0.22,
-
-    // If left stick Y is dead on your right controller, allow right Y to move
-    allowRightYForwardFallback: true
-  };
+  let THREE, renderer, camera, player;
 
   const state = {
-    inXR: false,
+    enabled: true,
 
-    // stick axes
-    lx: 0, ly: 0,
-    rx: 0, ry: 0,
+    // locomotion
+    moveSpeed: 2.0,       // meters/sec in XR
+    strafeSpeed: 2.0,
+    deadzone: 0.18,
 
-    // buttons
-    btn: {
-      left:  { trigger:false, grip:false },
-      right: { trigger:false, grip:false }
+    // turning
+    snapAngle: Math.PI / 4,   // 45°
+    snapCooldown: 0.22,
+    _snapTimer: 0,
+
+    // input
+    pads: { left: null, right: null },
+    axes: { lx: 0, ly: 0, rx: 0, ry: 0 },
+    btns: {
+      left: { trigger: 0, squeeze: 0 },
+      right: { trigger: 0, squeeze: 0 }
     },
 
-    // calibration: forward sign
-    moveFlipY: 1,
-    moveCalibrated: false,
-    calibScore: 0,
-
-    // snap
-    yaw: 0,
-    snapCooldown: 0,
-
-    // cached refs
-    ctrl: [null, null],
-    grip: [null, null],
-    gp: { left:null, right:null },
-
-    // temps
-    vForward: null,
-    vRight: null,
-    vMove: null,
-    vUp: null
+    // visuals
+    controllers: [],
+    rays: [],
+    reticles: []
   };
 
-  const dz = (v, d) => (Math.abs(v) < d ? 0 : v);
+  // ---------- helpers ----------
+  const clampDeadzone = (v, dz) => (Math.abs(v) < dz ? 0 : v);
 
-  function emit(name, payload) {
-    try { Signals?.emit?.(name, payload); } catch {}
+  function getGamepadByHand(handedness) {
+    const session = renderer?.xr?.getSession?.();
+    if (!session) return null;
+
+    for (const src of session.inputSources || []) {
+      if (src && src.handedness === handedness && src.gamepad) return src.gamepad;
+    }
+    return null;
   }
 
+  function makeRay() {
+    // Ray points down -Z in controller local space.
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 0, -1.6)
+    ]);
+    const mat = new THREE.LineBasicMaterial({ color: 0x66ccff });
+    const line = new THREE.Line(geo, mat);
+    line.name = "XR_RAY";
+    return line;
+  }
+
+  function makeReticle() {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.06, 0.09, 36),
+      new THREE.MeshBasicMaterial({
+        color: 0x4cff4c,
+        transparent: true,
+        opacity: 0.85,
+        side: THREE.DoubleSide
+      })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.visible = false;
+    ring.name = "XR_RETICLE";
+    return ring;
+  }
+
+  function worldRayFromController(ctrl) {
+    // Controller forward is -Z.
+    const origin = new THREE.Vector3();
+    const dir = new THREE.Vector3(0, 0, -1);
+
+    ctrl.getWorldPosition(origin);
+    dir.applyQuaternion(ctrl.getWorldQuaternion(new THREE.Quaternion())).normalize();
+
+    return { origin, dir };
+  }
+
+  function intersectFloorPlane(origin, dir, y = 0) {
+    // Ray/plane intersection for plane y = constant.
+    // origin + t*dir, solve for y.
+    const denom = dir.y;
+    if (Math.abs(denom) < 1e-5) return null;
+
+    const t = (y - origin.y) / denom;
+    if (t <= 0) return null;
+
+    return origin.clone().addScaledVector(dir, t);
+  }
+
+  function forwardOnFloor() {
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    fwd.y = 0;
+    const len = fwd.length();
+    if (len < 1e-6) return new THREE.Vector3(0, 0, -1);
+    return fwd.multiplyScalar(1 / len);
+  }
+
+  function rightOnFloor() {
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    right.y = 0;
+    const len = right.length();
+    if (len < 1e-6) return new THREE.Vector3(1, 0, 0);
+    return right.multiplyScalar(1 / len);
+  }
+
+  // ---------- init ----------
   function init(ctx) {
     THREE = ctx.THREE;
     renderer = ctx.renderer;
     camera = ctx.camera;
     player = ctx.player;
 
-    Signals = ctx.Signals || ctx.signals || null;
-    log = ctx.log || log;
-    warn = ctx.warn || warn;
+    // Create 2 controllers (0,1) and attach rays.
+    const c0 = renderer.xr.getController(0);
+    const c1 = renderer.xr.getController(1);
 
-    state.vForward = new THREE.Vector3();
-    state.vRight   = new THREE.Vector3();
-    state.vMove    = new THREE.Vector3();
-    state.vUp      = new THREE.Vector3(0,1,0);
+    c0.name = "XR_CONTROLLER_0";
+    c1.name = "XR_CONTROLLER_1";
 
-    state.yaw = player.rotation.y || 0;
+    const ray0 = makeRay();
+    const ray1 = makeRay();
+    c0.add(ray0);
+    c1.add(ray1);
 
-    bindXRControllers();
-    renderer?.xr?.addEventListener?.("sessionstart", () => {
-      bindXRControllers();
-      state.moveCalibrated = false;
-      state.calibScore = 0;
-      log("[core/controls] sessionstart: rebound ✅");
-    });
+    const ret0 = makeReticle();
+    const ret1 = makeReticle();
 
-    log("[core/controls] init ✅ v2.0");
-    return api;
+    // reticles are world-space objects (not parented to controllers)
+    player.parent?.add?.(ret0) || ctx.scene?.add?.(ret0);
+    player.parent?.add?.(ret1) || ctx.scene?.add?.(ret1);
+
+    // Basic button events (will work on Quest)
+    c0.addEventListener("selectstart", () => (state.btns.left.trigger = 1));
+    c0.addEventListener("selectend", () => (state.btns.left.trigger = 0));
+    c1.addEventListener("selectstart", () => (state.btns.right.trigger = 1));
+    c1.addEventListener("selectend", () => (state.btns.right.trigger = 0));
+
+    c0.addEventListener("squeezestart", () => (state.btns.left.squeeze = 1));
+    c0.addEventListener("squeezeend", () => (state.btns.left.squeeze = 0));
+    c1.addEventListener("squeezestart", () => (state.btns.right.squeeze = 1));
+    c1.addEventListener("squeezeend", () => (state.btns.right.squeeze = 0));
+
+    // Add to player rig
+    player.add(c0);
+    player.add(c1);
+
+    state.controllers = [c0, c1];
+    state.rays = [ray0, ray1];
+    state.reticles = [ret0, ret1];
+
+    // If your rig scale is weird, keep the controllers normal size
+    c0.scale.set(1, 1, 1);
+    c1.scale.set(1, 1, 1);
+
+    console.log("[core/controls] init ✅");
   }
 
-  function bindXRControllers() {
-    try {
-      state.ctrl[0] = renderer.xr.getController(0);
-      state.ctrl[1] = renderer.xr.getController(1);
-      state.grip[0] = renderer.xr.getControllerGrip(0);
-      state.grip[1] = renderer.xr.getControllerGrip(1);
-
-      // Parent to player so transforms follow rig
-      for (let i = 0; i < 2; i++) {
-        if (state.ctrl[i] && !state.ctrl[i].parent) player.add(state.ctrl[i]);
-        if (state.grip[i] && !state.grip[i].parent) player.add(state.grip[i]);
-      }
-
-      // Ensure events only bound once
-      bindSelectEvents(state.ctrl[0], 0);
-      bindSelectEvents(state.ctrl[1], 1);
-
-      log("[core/controls] controllers bound ✅");
-    } catch (e) {
-      warn("[core/controls] bindXRControllers failed:", e?.message || e);
-    }
-  }
-
-  function bindSelectEvents(ctrl, idx) {
-    if (!ctrl || ctrl.__scarlettSelectBound) return;
-    ctrl.__scarlettSelectBound = true;
-
-    const hand = idx === 0 ? "left" : "right";
-
-    ctrl.addEventListener("selectstart", () => {
-      state.btn[hand].trigger = true;
-      emit("XR_SELECT", { hand, index: idx, down: true });
-    });
-
-    ctrl.addEventListener("selectend", () => {
-      state.btn[hand].trigger = false;
-      emit("XR_SELECT", { hand, index: idx, down: false });
-    });
-
-    ctrl.addEventListener("squeezestart", () => {
-      state.btn[hand].grip = true;
-    });
-
-    ctrl.addEventListener("squeezeend", () => {
-      state.btn[hand].grip = false;
-    });
-  }
-
-  function refreshGamepads() {
-    state.gp.left = null;
-    state.gp.right = null;
-
-    const s = renderer?.xr?.getSession?.();
-    if (!s) return;
-
-    for (const src of s.inputSources) {
-      if (!src?.gamepad) continue;
-      if (src.handedness === "left") state.gp.left = src.gamepad;
-      if (src.handedness === "right") state.gp.right = src.gamepad;
-    }
-
-    // fallback: first 2 gamepads
-    if (!state.gp.left || !state.gp.right) {
-      const gps = s.inputSources.filter(x => x?.gamepad).map(x => x.gamepad);
-      state.gp.left = state.gp.left || gps[0] || null;
-      state.gp.right = state.gp.right || gps[1] || null;
-    }
-  }
-
-  function pickStickXY(gp) {
-    if (!gp || !gp.axes) return { x: 0, y: 0 };
-    const a = gp.axes;
-
-    // Some browsers map thumbstick to (0,1); some to (2,3).
-    const ax0 = a[0] ?? 0, ay0 = a[1] ?? 0;
-    const ax2 = a[2] ?? 0, ay3 = a[3] ?? 0;
-
-    const magA = Math.abs(ax0) + Math.abs(ay0);
-    const magB = Math.abs(ax2) + Math.abs(ay3);
-
-    return (magB > magA) ? { x: ax2, y: ay3 } : { x: ax0, y: ay0 };
-  }
-
-  function readAxes() {
-    refreshGamepads();
-
-    const L = pickStickXY(state.gp.left);
-    const R = pickStickXY(state.gp.right);
-
-    state.lx = L.x || 0;
-    state.ly = L.y || 0;
-    state.rx = R.x || 0;
-    state.ry = R.y || 0;
-  }
-
-  function autoCalibrateForwardSign() {
-    // We watch the first strong push on either stick Y and set flip accordingly.
-    // Many controllers report forward as negative Y; we want forward movement when pushing up.
-    const yCandidate = Math.abs(state.ly) >= Math.abs(state.ry) ? state.ly : state.ry;
-
-    state.calibScore += Math.abs(state.ly) + Math.abs(state.ry);
-
-    if (!state.moveCalibrated && Math.abs(yCandidate) > 0.35 && state.calibScore > 0.6) {
-      // If the first strong push is positive, that means "up" is positive -> flip to make forward positive.
-      // If first strong push is negative, keep as-is.
-      state.moveFlipY = (yCandidate > 0) ? -1 : 1;
-      state.moveCalibrated = true;
-      log(`[core/controls] calibrated ✅ flipY=${state.moveFlipY}`);
-    }
-  }
-
-  function applyMovement(dt) {
-    // Move relative to camera (ground plane)
-    const inXR = state.inXR;
-
-    const lx = dz(state.lx, cfg.deadzoneMove);
-    const ly = dz(state.ly, cfg.deadzoneMove);
-
-    const ry = dz(state.ry, cfg.deadzoneMove);
-
-    // Forward/back: primarily left Y, fallback to right Y if left is weak
-    let forward = (-ly) * state.moveFlipY;
-    if (cfg.allowRightYForwardFallback && Math.abs(forward) < 0.10 && Math.abs(ry) > 0.12) {
-      forward = (-ry) * state.moveFlipY;
-    }
-
-    // Strafe: left X
-    const strafe = lx;
-
-    state.vForward.set(0,0,-1).applyQuaternion(camera.quaternion);
-    state.vForward.y = 0; state.vForward.normalize();
-
-    state.vRight.set(1,0,0).applyQuaternion(camera.quaternion);
-    state.vRight.y = 0; state.vRight.normalize();
-
-    state.vMove.set(0,0,0);
-    state.vMove.addScaledVector(state.vForward, forward);
-    state.vMove.addScaledVector(state.vRight, strafe);
-
-    const L = state.vMove.length();
-    if (L > 0.001) {
-      state.vMove.multiplyScalar(1 / L);
-      const speed = inXR ? cfg.speedXR : cfg.speed2D;
-      player.position.addScaledVector(state.vMove, speed * dt);
-    }
-  }
-
-  function applySnapTurn(dt) {
-    state.snapCooldown = Math.max(0, state.snapCooldown - dt);
-
-    const rx = dz(state.rx, cfg.deadzoneTurn);
-
-    if (state.snapCooldown > 0) return;
-
-    if (rx > cfg.snapThreshold) {
-      state.yaw -= (cfg.snapDeg * Math.PI / 180);
-      player.rotation.y = state.yaw;
-      state.snapCooldown = cfg.snapCooldownSec;
-    } else if (rx < -cfg.snapThreshold) {
-      state.yaw += (cfg.snapDeg * Math.PI / 180);
-      player.rotation.y = state.yaw;
-      state.snapCooldown = cfg.snapCooldownSec;
-    }
-  }
-
+  // ---------- update ----------
   function update(dt) {
-    dt = Math.max(0, Math.min(0.05, dt || 0.016));
-    state.inXR = !!renderer?.xr?.isPresenting;
+    if (!state.enabled) return;
 
-    // If not in XR, let Android sticks handle movement (core/ui_sticks.js)
-    // We still keep snap/move off when not presenting.
-    if (!state.inXR) return;
+    // Pull gamepads each frame (Quest updates inputSources live)
+    state.pads.left = getGamepadByHand("left");
+    state.pads.right = getGamepadByHand("right");
 
-    readAxes();
-    autoCalibrateForwardSign();
-    applySnapTurn(dt);
-    applyMovement(dt);
+    // Read axes safely
+    const lp = state.pads.left;
+    const rp = state.pads.right;
+
+    // Standard mapping:
+    // left stick: axes[0]=x, axes[1]=y
+    // right stick: axes[2]=x, axes[3]=y (sometimes also [0],[1] depending device)
+    let lx = lp?.axes?.[0] ?? 0;
+    let ly = lp?.axes?.[1] ?? 0;
+
+    let rx = rp?.axes?.[2] ?? rp?.axes?.[0] ?? 0;
+    let ry = rp?.axes?.[3] ?? rp?.axes?.[1] ?? 0;
+
+    // Deadzone
+    lx = clampDeadzone(lx, state.deadzone);
+    ly = clampDeadzone(ly, state.deadzone);
+    rx = clampDeadzone(rx, state.deadzone);
+    ry = clampDeadzone(ry, state.deadzone);
+
+    // IMPORTANT FIX:
+    // In WebXR, pushing stick "up" usually gives negative Y.
+    // Forward must be (-ly), NOT (ly).
+    state.axes.lx = lx;
+    state.axes.ly = ly;
+    state.axes.rx = rx;
+    state.axes.ry = ry;
+
+    // ---- locomotion (left stick) ----
+    // forward/back
+    const fwd = forwardOnFloor();
+    const right = rightOnFloor();
+
+    // forward amount: -ly (fixes your inverted forward/back)
+    const forwardAmt = -ly;
+    const strafeAmt = lx;
+
+    if (Math.abs(forwardAmt) > 0 || Math.abs(strafeAmt) > 0) {
+      player.position.addScaledVector(fwd, forwardAmt * state.moveSpeed * dt);
+      player.position.addScaledVector(right, strafeAmt * state.strafeSpeed * dt);
+    }
+
+    // ---- snap turn (right stick X) ----
+    state._snapTimer = Math.max(0, state._snapTimer - dt);
+    if (state._snapTimer <= 0) {
+      if (rx > 0.65) {
+        player.rotation.y -= state.snapAngle;
+        state._snapTimer = state.snapCooldown;
+      } else if (rx < -0.65) {
+        player.rotation.y += state.snapAngle;
+        state._snapTimer = state.snapCooldown;
+      }
+    }
+
+    // ---- lasers + reticle ----
+    for (let i = 0; i < state.controllers.length; i++) {
+      const ctrl = state.controllers[i];
+      const ret = state.reticles[i];
+
+      const { origin, dir } = worldRayFromController(ctrl);
+      const hit = intersectFloorPlane(origin, dir, 0);
+
+      if (hit) {
+        ret.visible = true;
+        ret.position.set(hit.x, 0.02, hit.z);
+      } else {
+        ret.visible = false;
+      }
+    }
   }
 
   function getPadDebug() {
-    const L = state.gp.left ? "L" : "-";
-    const R = state.gp.right ? "R" : "-";
-    return `pad:${L}${R} lx:${state.lx.toFixed(2)} ly:${state.ly.toFixed(2)} rx:${state.rx.toFixed(2)} ry:${state.ry.toFixed(2)} flipY:${state.moveFlipY}${state.moveCalibrated ? "*" : ""}`;
+    const L = state.pads.left;
+    const R = state.pads.right;
+    return `pads: L:${!!L} R:${!!R} axes: lx:${state.axes.lx.toFixed(2)} ly:${state.axes.ly.toFixed(2)} rx:${state.axes.rx.toFixed(2)} ry:${state.axes.ry.toFixed(2)}`;
   }
 
   function getButtonDebug() {
-    const lt = state.btn.left.trigger ? "T" : "-";
-    const lg = state.btn.left.grip ? "G" : "-";
-    const rt = state.btn.right.trigger ? "T" : "-";
-    const rg = state.btn.right.grip ? "G" : "-";
-    return `btns:L[${lt}${lg}] R[${rt}${rg}]`;
+    return `btns: LT:${state.btns.left.trigger} LG:${state.btns.left.squeeze} RT:${state.btns.right.trigger} RG:${state.btns.right.squeeze}`;
   }
 
-  const api = {
+  return {
     init,
     update,
     getPadDebug,
-    getButtonDebug,
-
-    // optional knobs
-    setSpeedXR(v){ cfg.speedXR = Math.max(0.1, Number(v)||cfg.speedXR); },
-    setDeadzone(v){ cfg.deadzoneMove = Math.max(0.01, Math.min(0.4, Number(v)||cfg.deadzoneMove)); }
+    getButtonDebug
   };
-
-  return api;
 })();

@@ -1,113 +1,59 @@
-// /js/boot.js — Scarlett Boot Diagnostics v4 (FULL)
-// ✅ Always logs immediately
-// ✅ GitHub Pages base-path safe
-// ✅ Imports /js/index.js with cache-bust
-// ✅ If import fails, fetches file + prints preview + common causes
-
+// /js/boot.js — Scarlett Boot Diagnostics (FULL, GitHub Pages safe)
 (() => {
   const stamp = Date.now();
 
-  // --- DOM refs (optional) ---
-  const $log = document.getElementById("bootLogText");
-  const $status = document.getElementById("bootStatus");
+  const elLog = () => document.getElementById("bootLog");
+  const elStatus = () => document.getElementById("bootStatus");
 
-  const writeLine = (s) => {
-    console.log(s);
-    if ($log) {
-      $log.textContent += (s + "\n");
-      $log.scrollTop = $log.scrollHeight;
-    }
+  const write = (m) => {
+    console.log(m);
+    const el = elLog();
+    if (el) el.textContent += "\n" + m;
   };
 
-  const setStatus = (txt, cls) => {
-    if (!$status) return;
-    $status.textContent = txt;
-    $status.className = "status " + (cls || "");
+  const setStatus = (m) => {
+    const el = elStatus();
+    if (el) el.textContent = m;
   };
 
-  // --- Immediate proof boot ran ---
-  writeLine(`[BOOT] boot.js loaded ✅ v4 stamp=${stamp}`);
+  // Buttons (safe even if not present)
+  const hook = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener("click", fn); };
+  hook("btnHideBoot", () => { const b = document.getElementById("bootBox"); if (b) b.style.display = "none"; });
+  hook("btnCopyBoot", async () => {
+    const txt = elLog()?.textContent || "";
+    try { await navigator.clipboard.writeText(txt); write("[hud] copied ✅"); } catch (e) { write("[hud] copy FAILED ❌ " + e.message); }
+  });
 
-  // --- Base path detection (GitHub pages safe) ---
-  // Example: https://makaveli60629.github.io/scarlett-poker-vr/  -> base "/scarlett-poker-vr/"
+  // --- base path (project page safe) ---
+  // If the site is /scarlett-poker-vr/ then base = "/scarlett-poker-vr/"
   const path = location.pathname || "/";
-  let base = "/";
+  const base = path.includes("/scarlett-poker-vr/") ? "/scarlett-poker-vr/" : "/";
 
-  // If repo pages, path starts with "/scarlett-poker-vr/"
-  if (path.includes("/scarlett-poker-vr/")) {
-    base = "/scarlett-poker-vr/";
-  } else {
-    // best-effort: take first segment
-    // "/myrepo/something" -> "/myrepo/"
-    const seg = path.split("/").filter(Boolean)[0];
-    base = seg ? `/${seg}/` : "/";
-  }
+  write(`[BOOT] href=${location.href}`);
+  write(`[BOOT] secureContext=${!!window.isSecureContext}`);
+  write(`[BOOT] ua=${navigator.userAgent}`);
+  write(`[BOOT] base=${base}`);
 
-  writeLine(`[BOOT] href=${location.href}`);
-  writeLine(`[BOOT] secureContext=${window.isSecureContext}`);
-  writeLine(`[BOOT] ua=${navigator.userAgent}`);
-  writeLine(`[BOOT] base=${base}`);
+  // Always import using absolute base so Quest never gets confused
+  const entry = `${base}js/index.js?v=${stamp}`;
+  write(`[BOOT] importing ${location.origin}${entry} …`);
+  setStatus("Importing index.js…");
 
-  // --- Helpers ---
-  async function fetchMeta(url) {
+  import(entry).then(() => {
+    write("[BOOT] index.js imported ✅");
+    setStatus("Boot OK ✅");
+  }).catch(async (e) => {
+    write(`[BOOT] import FAILED ❌ ${e?.message || e}`);
+    setStatus("Import failed ❌ (see BOOT log)");
+
+    // Extra: prove whether the file fetches and what came back
     try {
-      const res = await fetch(url, { cache: "no-store" });
-      const ct = res.headers.get("content-type") || "";
-      const txt = await res.text();
-      return {
-        ok: res.ok,
-        status: res.status,
-        ct,
-        preview: txt.slice(0, 260).replace(/\s+/g, " ").trim(),
-        text: txt
-      };
-    } catch (e) {
-      return { ok: false, status: 0, ct: "", preview: String(e), text: "" };
+      const r = await fetch(entry, { cache: "no-store" });
+      write(`[BOOT] index.js fetch: ok=${r.ok} status=${r.status} ct=${r.headers.get("content-type") || ""}`);
+      const t = await r.text();
+      write(`[BOOT] index.js preview: ${t.slice(0, 180).replace(/\s+/g, " ")}`);
+    } catch (ee) {
+      write(`[BOOT] fetch failed ❌ ${ee?.message || ee}`);
     }
-  }
-
-  // --- MAIN ---
-  (async () => {
-    setStatus("Loading…", "warn");
-
-    const indexUrl = new URL(`${base}js/index.js?v=${stamp}`, location.origin).toString();
-    writeLine(`[BOOT] importing ${indexUrl}`);
-
-    try {
-      await import(indexUrl);
-      writeLine(`[BOOT] index.js imported ✅`);
-      setStatus("Boot OK ✅", "good");
-      return;
-    } catch (e) {
-      writeLine(`[BOOT] index.js import FAILED ❌ ${e?.message || e}`);
-      setStatus("Import failed ❌ (see BOOT log)", "bad");
-    }
-
-    // If import fails, fetch file and show what GitHub actually served
-    const meta = await fetchMeta(indexUrl);
-    writeLine(`[BOOT] index.js fetch: ok=${meta.ok} status=${meta.status} ct=${meta.ct}`);
-    writeLine(`[BOOT] index.js preview: ${meta.preview}`);
-
-    // Common causes hints
-    if (!meta.ok || meta.status === 404) {
-      writeLine(`[HINT] 404: file path wrong OR file not in /js/ folder OR case mismatch (GitHub is case-sensitive).`);
-    } else if (/text\/html/i.test(meta.ct) || /<!doctype|<html/i.test(meta.preview)) {
-      writeLine(`[HINT] HTML returned (wrong path or 404 page). Check base path + filename case.`);
-    } else {
-      writeLine(`[HINT] JS served but import still failed. Usually: syntax error in index.js OR one dependency import 404.`);
-      writeLine(`[HINT] Open DevTools console for the first syntax error line.`);
-    }
-
-    // Optional: attempt module script load to surface a clearer error in some browsers
-    try {
-      writeLine(`[BOOT] attempting fallback <script type="module"> load…`);
-      const s = document.createElement("script");
-      s.type = "module";
-      s.src = indexUrl;
-      s.onerror = () => writeLine(`[BOOT] module <script> onerror ❌ (dependency or syntax issue)`);
-      document.head.appendChild(s);
-    } catch (e) {
-      writeLine(`[BOOT] fallback script failed: ${e?.message || e}`);
-    }
-  })();
+  });
 })();

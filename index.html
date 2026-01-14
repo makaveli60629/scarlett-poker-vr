@@ -5,7 +5,7 @@
     <title>Scarlett Empire VR - Full Diagnostics</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: monospace; }
-        #debug-ui { position: absolute; top: 10px; left: 10px; color: #0f0; z-index: 10; pointer-events: none; font-size: 12px; }
+        #debug-ui { position: absolute; top: 10px; left: 10px; color: #0f0; z-index: 10; pointer-events: none; font-size: 14px; background: rgba(0,0,0,0.5); padding: 5px; border-radius: 5px; }
     </style>
     <script type="importmap">
     {
@@ -18,10 +18,11 @@
 </head>
 <body>
     <div id="debug-ui">
-        SCARLETT_DIAGNOSTICS_V9.2<br>
-        Oculus/Android Build: ACTIVE<br>
-        FPS: <span id="fps">0</span><br>
-        Hands: <span id="hand-status">Searching...</span>
+        <b>SCARLETT_ENGINE_V9.5_FULL</b><br>
+        Oculus/Android: <span id="xr-status">READY</span><br>
+        Hands: <span id="hand-status">Searching...</span><br>
+        Room: <span id="room-id">VIP_SPAWN</span><br>
+        FPS: <span id="fps">0</span>
     </div>
 
     <script type="module">
@@ -29,33 +30,39 @@
         import { VRButton } from 'three/addons/webxr/VRButton.js';
         import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
-        // --- ENGINE STATE ---
+        // --- CORE STATE ---
         const S = {
             scene: new THREE.Scene(),
             camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
-            renderer: new THREE.WebGLRenderer({ antialias: true }),
+            renderer: new THREE.WebGLRenderer({ antialias: true, alpha: true }),
             player: new THREE.Group(),
             handFactory: new XRHandModelFactory(),
             floors: [],
-            bots: []
+            bots: [],
+            chips: [],
+            deck: [],
+            clock: new THREE.Clock()
         };
 
         // --- INITIALIZATION ---
-        function init() {
+        async function init() {
             S.renderer.setSize(window.innerWidth, window.innerHeight);
+            S.renderer.setPixelRatio(window.devicePixelRatio);
             S.renderer.xr.enabled = true;
-            S.renderer.setClearColor(0x05050a);
             document.body.appendChild(S.renderer.domElement);
             document.body.appendChild(VRButton.createButton(S.renderer));
 
             S.scene.add(S.player);
             S.player.add(S.camera);
-            S.player.position.set(14, 0, 6); // VIP SPAWN
+            
+            // SPAWN IN VIP ROOM LOOKING AT TABLE
+            S.player.position.set(14, 0, 6); 
+            S.player.rotation.y = -Math.PI / 1.5;
 
             setupLighting();
             setupHands();
-            buildWorld();
-            initAI();
+            buildFullWorld();
+            spawnPokerLogic();
             
             S.renderer.setAnimationLoop(tick);
         }
@@ -63,74 +70,91 @@
         // --- MODULE: LIGHTING & ATMOSPHERE ---
         function setupLighting() {
             S.scene.fog = new THREE.FogExp2(0x0b0d14, 0.02);
-            const ambient = new THREE.HemisphereLight(0xffffff, 0x111122, 1.0);
-            S.scene.add(ambient);
+            const hemi = new THREE.HemisphereLight(0xdaf0ff, 0x0b0f1a, 1.1);
+            S.scene.add(hemi);
             
-            const pitLight = new THREE.PointLight(0x7fe7ff, 2, 20);
-            pitLight.position.set(0, 5, 0);
-            S.scene.add(pitLight);
+            const pitSpot = new THREE.SpotLight(0xffffff, 1.5, 20);
+            pitSpot.position.set(0, 8, 0);
+            S.scene.add(pitSpot);
         }
 
-        // --- MODULE: VR HANDS (Oculus Optimized) ---
+        // --- MODULE: VR HANDS & ANDROID CONTROLLERS ---
         function setupHands() {
             for (let i = 0; i < 2; i++) {
                 const hand = S.renderer.xr.getHand(i);
                 hand.add(S.handFactory.createHandModel(hand, "mesh"));
                 S.player.add(hand);
                 
-                hand.addEventListener('connected', () => {
-                    document.getElementById('hand-status').innerText = "Hands Connected";
+                hand.addEventListener('connected', (e) => {
+                    document.getElementById('hand-status').innerText = `Hand ${i} Active`;
                 });
             }
         }
 
-        // --- MODULE: WORLD ARCHITECTURE (The Pit & Ramp) ---
-        function buildWorld() {
-            const matFloor = new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.1, metalness: 0.5 });
+        // --- MODULE: WORLD GEOMETRY ---
+        function buildFullWorld() {
+            const matFloor = new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.1, metalness: 0.6 });
             const matGold = new THREE.MeshStandardMaterial({ color: 0xd2b46a, metalness: 0.9 });
 
-            // Top Floor
+            // 1. Top Lobby Ring
             const top = new THREE.Mesh(new THREE.RingGeometry(9, 25, 64), matFloor);
             top.rotation.x = -Math.PI/2;
             S.scene.add(top); S.floors.push(top);
 
-            // Pit Floor (y = -1.6)
+            // 2. Sunken Pit Floor
             const pit = new THREE.Mesh(new THREE.CircleGeometry(6.4, 64), matFloor);
             pit.position.y = -1.6; pit.rotation.x = -Math.PI/2;
             S.scene.add(pit); S.floors.push(pit);
 
-            // The Ramp (Physics Bridge)
+            // 3. The Ramp
             const ramp = new THREE.Mesh(new THREE.CylinderGeometry(6.4, 9, 1.6, 64, 1, true), matFloor);
             ramp.position.y = -0.8;
             S.scene.add(ramp); S.floors.push(ramp);
 
-            // Poker Table
-            const table = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 0.2, 32), matGold);
-            table.position.y = -0.9; // Center of pit
+            // 4. Poker Table
+            const table = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 0.25, 32), matGold);
+            table.position.y = -0.85;
             S.scene.add(table);
         }
 
-        // --- MODULE: STONE-FACE AI ---
-        function initAI() {
-            const botMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+        // --- MODULE: POKER & CARDS ---
+        function spawnPokerLogic() {
+            const cardMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+            const chipMat = new THREE.MeshStandardMaterial({ color: 0xff2d7a, emissive: 0xff2d7a, emissiveIntensity: 0.5 });
+
+            // Spawn 52 Cards in Deck position
+            for(let i=0; i<5; i++) {
+                const card = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.002, 0.18), cardMat);
+                card.position.set(-0.5, -0.72 + (i*0.005), 0);
+                S.scene.add(card);
+                S.deck.push(card);
+            }
+
+            // Spawn 6 Humanoid Bots
             for (let i = 0; i < 6; i++) {
                 const angle = (i/6) * Math.PI * 2;
-                const bot = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.5, 0.4), botMat);
-                bot.position.set(Math.cos(angle)*4, -0.8, Math.sin(angle)*4);
+                const bot = new THREE.Group();
+                const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.42, 6, 10), new THREE.MeshStandardMaterial({color: 0xe6e6e6}));
+                torso.position.y = 1.15;
+                bot.add(torso);
+                bot.position.set(Math.cos(angle)*4, -1.6, Math.sin(angle)*4);
+                bot.lookAt(0, -1.6, 0);
                 S.scene.add(bot);
                 S.bots.push(bot);
             }
         }
 
-        // --- THE TICK (Loop) ---
-        let lastTime = 0;
-        function tick(time) {
-            const dt = time - lastTime;
-            lastTime = time;
-            document.getElementById('fps').innerText = Math.round(1000/dt);
+        // --- CORE LOOP & GRAVITY ---
+        let lastT = 0;
+        const raycaster = new THREE.Raycaster();
+        const down = new THREE.Vector3(0,-1,0);
 
-            // Simple Gravity: Raycast Down
-            const raycaster = new THREE.Raycaster(S.player.position, new THREE.Vector3(0,-1,0));
+        function tick(time) {
+            const dt = S.clock.getDelta();
+            document.getElementById('fps').innerText = Math.round(1/dt);
+
+            // Gravity Logic: Follow Ramp/Floors
+            raycaster.set(S.player.position, down);
             const hit = raycaster.intersectObjects(S.floors);
             if(hit.length > 0) {
                 S.player.position.y = THREE.MathUtils.lerp(S.player.position.y, hit[0].point.y, 0.1);
@@ -138,12 +162,6 @@
 
             S.renderer.render(S.scene, S.camera);
         }
-
-        window.addEventListener('resize', () => {
-            S.camera.aspect = window.innerWidth / window.innerHeight;
-            S.camera.updateProjectionMatrix();
-            S.renderer.setSize(window.innerWidth, window.innerHeight);
-        });
 
         init();
     </script>

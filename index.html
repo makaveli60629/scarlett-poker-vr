@@ -3,10 +3,10 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ScarlettVR Ultimate V12</title>
+    <title>ScarlettVR Ultimate V13</title>
     <style>
         body { margin: 0; background: #05070d; overflow: hidden; font-family: monospace; }
-        #ui { position: absolute; top: 10px; left: 10px; color: #00ffff; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 8px; border: 1px solid #00ffff; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #00ffff; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.6); padding: 10px; border: 1px solid #00ffff; }
     </style>
     <script type="importmap">
     {
@@ -18,7 +18,7 @@
     </script>
 </head>
 <body>
-    <div id="ui"><b>SCARLETT_V12_STABLE</b><br>L-Stick: Corrected | R-Stick: Corrected</div>
+    <div id="ui"><b>V13_SPLIT_CONTROLS</b><br>Left: Move | Right: Turn & Laser</div>
 
     <script type="module">
         import * as THREE from 'three';
@@ -32,16 +32,16 @@
             player: new THREE.Group(),
             clock: new THREE.Clock(),
             bots: [],
-            reticles: []
+            rightReticle: null,
+            rightController: null
         };
 
-        // --- CALIBRATED CONTROLS ---
         const Controls = {
             moveSpeed: 2.5,
             snapAngle: Math.PI / 4,
             snapCooldown: 0.25,
             _snapTimer: 0,
-            deadzone: 0.18,
+            deadzone: 0.15,
             
             update(dt) {
                 const session = S.renderer.xr.getSession();
@@ -52,7 +52,7 @@
                     if (!source.gamepad) continue;
                     const axes = source.gamepad.axes;
 
-                    // LEFT STICK: MOVEMENT (Inverted forward/back fix)
+                    // LEFT HAND: SMOOTH LOCOMOTION
                     if (source.handedness === 'left') {
                         const lx = axes[2] || axes[0] || 0;
                         const ly = axes[3] || axes[1] || 0;
@@ -62,17 +62,16 @@
                             const side = new THREE.Vector3(1, 0, 0).applyQuaternion(S.camera.quaternion);
                             side.y = 0; side.normalize();
                             
-                            // Using -ly for forward and lx for strafe
                             S.player.position.addScaledVector(fwd, -ly * this.moveSpeed * dt);
                             S.player.position.addScaledVector(side, lx * this.moveSpeed * dt);
                         }
                     }
 
-                    // RIGHT STICK: SNAP TURN (Direction Flip Fix)
+                    // RIGHT HAND: SNAP TURN (Corrected Direction)
                     if (source.handedness === 'right' && this._snapTimer <= 0) {
                         const rx = axes[2] || axes[0] || 0;
                         if (Math.abs(rx) > 0.7) {
-                            // Flipped: pushing stick right now turns player right
+                            // Pushing right (positive rx) now turns you right (negative rotation)
                             S.player.rotation.y -= Math.sign(rx) * this.snapAngle;
                             this._snapTimer = this.snapCooldown;
                         }
@@ -84,20 +83,14 @@
         function buildWorld() {
             S.scene.background = new THREE.Color(0x05070d);
             S.scene.add(new THREE.HemisphereLight(0xdaf0ff, 0x0b0f1a, 1.2));
-            
-            // GRID FLOOR (Visual aid for teleport/movement)
-            const grid = new THREE.GridHelper(100, 50, 0x00ffff, 0x112222);
-            S.scene.add(grid);
+            S.scene.add(new THREE.GridHelper(100, 50, 0x00ffff, 0x112222));
 
-            // TABLE & PIT
-            const table = new THREE.Mesh(
-                new THREE.CylinderGeometry(3, 3, 0.4, 32),
-                new THREE.MeshStandardMaterial({ color: 0xd2b46a, metalness: 0.8 })
-            );
+            // Table
+            const table = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 0.4, 32), new THREE.MeshStandardMaterial({ color: 0xd2b46a, metalness: 0.8 }));
             table.position.set(0, 0.2, 0);
             S.scene.add(table);
 
-            // BOTS
+            // Bots
             const botMat = new THREE.MeshStandardMaterial({ color: 0xe6e6e6 });
             for (let i = 0; i < 6; i++) {
                 const angle = (i / 6) * Math.PI * 2;
@@ -121,37 +114,41 @@
             S.player.position.set(0, 0, 8); 
 
             const handFactory = new XRHandModelFactory();
+
+            // Setup 2 Controllers
             for (let i = 0; i < 2; i++) {
                 const controller = S.renderer.xr.getController(i);
-                
-                // LASER LINE
-                const laser = new THREE.Line(
-                    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]),
-                    new THREE.LineBasicMaterial({ color: 0x00ffff })
-                );
-                controller.add(laser);
                 S.player.add(controller);
-
-                // TELEPORT RETICLE (The circle on the floor)
-                const reticle = new THREE.Mesh(
-                    new THREE.RingGeometry(0.08, 0.1, 32),
-                    new THREE.MeshBasicMaterial({ color: 0x00ffff, side: THREE.DoubleSide })
-                );
-                reticle.rotation.x = -Math.PI / 2;
-                reticle.visible = false;
-                S.scene.add(reticle);
-                S.reticles.push({ reticle, controller });
 
                 const hand = S.renderer.xr.getHand(i);
                 hand.add(handFactory.createHandModel(hand, 'mesh'));
                 S.player.add(hand);
+
+                // We'll identify the Right Controller specifically for the laser
+                controller.addEventListener('connected', (event) => {
+                    if (event.data.handedness === 'right') {
+                        S.rightController = controller;
+                        const laser = new THREE.Line(
+                            new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]),
+                            new THREE.LineBasicMaterial({ color: 0x00ffff })
+                        );
+                        controller.add(laser);
+                    }
+                });
             }
+
+            // RIGHT HAND ONLY RETICLE
+            S.rightReticle = new THREE.Mesh(
+                new THREE.RingGeometry(0.1, 0.12, 32),
+                new THREE.MeshBasicMaterial({ color: 0x00ffff, side: THREE.DoubleSide })
+            );
+            S.rightReticle.rotation.x = -Math.PI / 2;
+            S.rightReticle.visible = false;
+            S.scene.add(S.rightReticle);
 
             buildWorld();
 
             S.renderer.xr.addEventListener('sessionstart', () => {
-                // Point player at table center
-                S.player.rotation.set(0, 0, 0);
                 S.player.lookAt(0, 0, 0);
             });
 
@@ -159,25 +156,21 @@
                 const dt = S.clock.getDelta();
                 Controls.update(dt);
 
-                // LASER COLLISION LOGIC
-                S.reticles.forEach(obj => {
-                    const { reticle, controller } = obj;
+                // Right Hand Laser Tracking
+                if (S.rightController) {
                     const worldPos = new THREE.Vector3();
                     const worldDir = new THREE.Vector3(0, 0, -1);
-                    controller.getWorldPosition(worldPos);
-                    worldDir.applyQuaternion(controller.getWorldQuaternion(new THREE.Quaternion()));
+                    S.rightController.getWorldPosition(worldPos);
+                    worldDir.applyQuaternion(S.rightController.getWorldQuaternion(new THREE.Quaternion()));
 
-                    // Simple ray-plane intersection for floor (y=0)
                     if (worldDir.y < 0) {
                         const t = -worldPos.y / worldDir.y;
-                        const hitX = worldPos.x + worldDir.x * t;
-                        const hitZ = worldPos.z + worldDir.z * t;
-                        reticle.visible = true;
-                        reticle.position.set(hitX, 0.02, hitZ);
+                        S.rightReticle.position.set(worldPos.x + worldDir.x * t, 0.02, worldPos.z + worldDir.z * t);
+                        S.rightReticle.visible = true;
                     } else {
-                        reticle.visible = false;
+                        S.rightReticle.visible = false;
                     }
-                });
+                }
 
                 S.renderer.render(S.scene, S.camera);
             });

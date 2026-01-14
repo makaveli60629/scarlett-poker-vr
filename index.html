@@ -7,11 +7,11 @@
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js"></script>
   <style>
-    body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+    body { margin: 0; overflow: hidden; background: #000; font-family: monospace; }
     #hud { 
       position: absolute; top: 10px; left: 10px; z-index: 100; 
-      color: #0f0; background: rgba(0,0,0,0.7); padding: 10px; 
-      border-radius: 5px; pointer-events: auto; max-height: 80vh; overflow-y: auto;
+      color: #0f0; background: rgba(0,0,0,0.8); padding: 15px; 
+      border: 1px solid #0f0; border-radius: 5px; pointer-events: auto;
     }
     #hud.hidden { display: none; }
     .diag-err { color: #ff4444; }
@@ -20,6 +20,6 @@
 </head>
 <body>
   <div id="hud">--- Scarlett System Diagnostic ---</div>
-  <script type="module" src="./js/boot.js"></script>
+  <script type="module" src="js/boot.js"></script>
 </body>
 </html>

@@ -1,10 +1,13 @@
-// /js/index.js — ScarlettVR Prime Entry (FULL) v15.2
-// SINGLE ENTRY • CORE XR + ANDROID DEV CONTROLS • WORLD IMPORT PROBE • DIAGNOSTICS
-// ✅ Fixes “Quest XR black screen” guards
-// ✅ Adds HARD PROBE for world.js import/export/runtime errors (shows on HUD)
-// ✅ No main.js
+// /js/index.js — ScarlettVR Prime Entry (FULL) v15.3
+// SINGLE ENTRY • CORE XR + ANDROID DEV CONTROLS • WORLD IMPORT PROBE • TELEPORT PADS • BOTS ROAM
+// ✅ Fixes Quest black: alpha=false, clearColor opaque, safety lights
+// ✅ Fixes “lasers stuck on table”: controllers+grips+lasers parented to PlayerRig
+// ✅ World import probe: shows exact reason if world fails
+// ✅ Android touch movement + keyboard movement
+// ✅ Teleport pads: step onto pad to teleport
+// ✅ Bots roam (if world provides bots group)
 
-const BUILD = "INDEX_FULL_v15_2";
+const BUILD = "INDEX_FULL_v15_3";
 
 const log = (...a) => console.log(`[index ${BUILD}]`, ...a);
 const warn = (...a) => console.warn(`[index ${BUILD}]`, ...a);
@@ -25,13 +28,14 @@ const state = {
   touch: { forward: 0, strafe: 0, turn: 0 },
   moveSpeed: 2.0,
   turnSpeed: 1.6,
-  debug: {
-    cube: null,
-    lastHud: 0,
-    hudEl: null,
-    hudVisible: true
-  }
+  debug: { cube: null, lastHud: 0, hudEl: null, hudVisible: true }
 };
+
+// XR controllers/lasers
+let xr = { c0: null, c1: null, g0: null, g1: null, ray0: null, ray1: null };
+const _ray = new THREE.Raycaster();
+const _tmpM = new THREE.Matrix4();
+let _hitDot = null;
 
 boot().catch((e) => err("boot fatal", e));
 
@@ -57,10 +61,10 @@ async function boot() {
   playerRig.add(camera);
   scene.add(playerRig);
 
-  // Renderer
+  // Renderer (XR-safe defaults)
   renderer = new THREE.WebGLRenderer({
     antialias: true,
-    alpha: false, // IMPORTANT: avoid XR alpha black issues
+    alpha: false,
     powerPreference: "high-performance"
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -74,54 +78,56 @@ async function boot() {
   document.body.style.overflow = "hidden";
   document.body.appendChild(renderer.domElement);
 
+  // Always-on safety lights + fallback floor
   ensureSafetyLights(scene);
+  scene.add(makeFloor());
 
-  // Debug cube (always visible if render works)
+  // Debug cube (comment out later if you want)
   state.debug.cube = makeDebugCube();
   scene.add(state.debug.cube);
 
-  scene.add(new THREE.AxesHelper(0.6));
-
-  // Basic floor (so you always see *something*)
-  scene.add(makeFloor());
+  // Hit dot (laser intersection marker)
+  _hitDot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.03, 12, 10),
+    new THREE.MeshBasicMaterial({ color: 0xffff00 })
+  );
+  _hitDot.visible = false;
+  scene.add(_hitDot);
 
   // HUD + controls
   initDevHud();
   wireKeyboard();
   wireTouchControls();
 
-  // ✅ WORLD LOAD (PROBE)
+  // World load (probe)
   await loadWorld_PROBE();
 
   // XR
   installXR();
 
+  // Resize
   window.addEventListener("resize", onResize);
   onResize();
 
+  // Animate
   renderer.setAnimationLoop(tick);
   log("animation loop ✅");
 }
 
 // ============================================================================
-// WORLD LOAD — HARD PROBE (prints exact reason hasWorld=false)
+// WORLD LOAD — HARD PROBE
 // ============================================================================
 async function loadWorld_PROBE() {
   try {
     log("world: loading (probe)…");
 
-    // Dynamic import with cache-bust so GitHub Pages cache can’t lie
+    // Cache-bust import
     const mod = await import(`./world.js?v=${Date.now()}`);
-
     log("world: module keys=", Object.keys(mod));
 
-    // Support multiple export styles
     const W = mod.World || mod.default || mod.world || null;
-    if (!W) {
-      throw new Error("world.js loaded but no export found. Expected: export const World = {...} or default export.");
-    }
+    if (!W) throw new Error("world.js loaded but no export found (expected export const World or default).");
 
-    // Call World.create(ctx) OR World(ctx)
     const ctx = { THREE, scene, camera, renderer, playerRig, log, warn, err };
 
     let w = null;
@@ -132,26 +138,21 @@ async function loadWorld_PROBE() {
       w = await W(ctx);
       log("world: function(ctx) returned ✅");
     } else {
-      throw new Error("World export exists, but has no create(ctx) and is not callable.");
+      throw new Error("World export exists but has no create(ctx) and is not callable.");
     }
 
     world = w || {};
     world.group = world.group || world.root || world.scene || world.world || null;
+    if (!world.group) throw new Error("World returned but no group/root/scene found. Return { group }.");
 
-    if (!world.group) {
-      throw new Error("World returned but no group/root/scene found. Return { group } from create(ctx).");
-    }
-
-    // Attach
-    if (!scene.children.includes(world.group)) {
-      scene.add(world.group);
-    }
+    if (!scene.children.includes(world.group)) scene.add(world.group);
 
     log("world: added to scene ✅", { worldChildren: world.group.children?.length ?? "?" });
 
-    // Update HUD line immediately
-    if (state.debug.hudEl) state.debug.hudEl.textContent = buildHudText();
+    // If world has no lights, keep ours; if it has, that's fine too.
+    ensureSafetyLights(scene);
 
+    if (state.debug.hudEl) state.debug.hudEl.textContent = buildHudText();
   } catch (e) {
     err("world: failed ❌", e);
     showHudError(`WORLD LOAD FAILED:\n${e?.message || e}\n\nOpen console for stack.`);
@@ -187,8 +188,13 @@ function installXR() {
       log("XR: world re-added ✅");
     }
 
+    // Ensure lights
     ensureSafetyLights(scene);
 
+    // Controllers/lasers (only install once)
+    if (!xr.c0) installControllersAndLasers();
+
+    // Put debug cube in front each XR entry
     if (state.debug.cube) state.debug.cube.position.set(0, 1.5, -1.0);
   });
 
@@ -199,11 +205,95 @@ function installXR() {
 }
 
 function getSessionInit() {
+  // Keep it safe (no dom-overlay requested here)
   const optionalFeatures = ["local-floor", "bounded-floor", "local", "viewer", "hand-tracking"];
-
-  // Only enable dom-overlay if hudRoot exists AND you decide to use it later.
-  // For now: we DO NOT request dom-overlay to avoid XR issues.
   return { optionalFeatures };
+}
+
+// ============================================================================
+// CONTROLLERS + LASERS (Quest) — parented to PlayerRig
+// ============================================================================
+function installControllersAndLasers() {
+  const controller0 = renderer.xr.getController(0);
+  const controller1 = renderer.xr.getController(1);
+  controller0.name = "XRController0";
+  controller1.name = "XRController1";
+
+  const grip0 = renderer.xr.getControllerGrip(0);
+  const grip1 = renderer.xr.getControllerGrip(1);
+  grip0.name = "XRGrip0";
+  grip1.name = "XRGrip1";
+
+  // Parent everything to PlayerRig (fix stuck lasers / wrong origin)
+  playerRig.add(controller0, controller1, grip0, grip1);
+
+  // Wands
+  const wandGeo = new THREE.CylinderGeometry(0.01, 0.01, 0.18, 10);
+  const wandMat0 = new THREE.MeshStandardMaterial({ color: 0x66ccff, emissive: 0x112233, emissiveIntensity: 1.0 });
+  const wandMat1 = new THREE.MeshStandardMaterial({ color: 0xff66cc, emissive: 0x331122, emissiveIntensity: 1.0 });
+
+  const wand0 = new THREE.Mesh(wandGeo, wandMat0);
+  const wand1 = new THREE.Mesh(wandGeo, wandMat1);
+  wand0.rotation.x = -Math.PI / 2;
+  wand1.rotation.x = -Math.PI / 2;
+  wand0.position.z = -0.06;
+  wand1.position.z = -0.06;
+
+  controller0.add(wand0);
+  controller1.add(wand1);
+
+  // Lasers
+  const makeLaser = (colorHex) => {
+    const pts = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)];
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineBasicMaterial({ color: colorHex });
+    const line = new THREE.Line(geo, mat);
+    line.name = "Laser";
+    line.scale.z = 10;
+    return line;
+  };
+
+  const ray0 = makeLaser(0x66ccff);
+  const ray1 = makeLaser(0xff66cc);
+  controller0.add(ray0);
+  controller1.add(ray1);
+
+  controller0.addEventListener("selectstart", () => log("c0 selectstart"));
+  controller0.addEventListener("selectend", () => log("c0 selectend"));
+  controller1.addEventListener("selectstart", () => log("c1 selectstart"));
+  controller1.addEventListener("selectend", () => log("c1 selectend"));
+
+  xr = { c0: controller0, c1: controller1, g0: grip0, g1: grip1, ray0, ray1 };
+  log("controllers + lasers installed ✅ (parented to PlayerRig)");
+}
+
+function updateLaserHits() {
+  if (!xr?.c0 || !world?.group) return;
+
+  let anyHit = false;
+
+  testController(xr.c0, xr.ray0);
+  testController(xr.c1, xr.ray1);
+
+  _hitDot.visible = anyHit;
+
+  function testController(ctrl, rayLine) {
+    if (!ctrl || !rayLine) return;
+
+    _tmpM.identity().extractRotation(ctrl.matrixWorld);
+    _ray.ray.origin.setFromMatrixPosition(ctrl.matrixWorld);
+    _ray.ray.direction.set(0, 0, -1).applyMatrix4(_tmpM);
+
+    const hits = _ray.intersectObject(world.group, true);
+    if (hits && hits.length) {
+      anyHit = true;
+      const h = hits[0];
+      _hitDot.position.copy(h.point);
+      rayLine.scale.z = Math.max(0.25, Math.min(10, h.distance));
+    } else {
+      rayLine.scale.z = 10;
+    }
+  }
 }
 
 // ============================================================================
@@ -213,13 +303,25 @@ function tick(t) {
   state.dt = Math.min((t - state.last) / 1000, 0.05);
   state.last = t;
 
+  // Movement
   applyMovement(state.dt);
 
+  // Teleport pads by stepping on them
+  handleTeleports();
+
+  // Bots roam (if provided)
+  animateBots(t);
+
+  // Lasers hit test
+  updateLaserHits();
+
+  // Debug cube pulse
   if (state.debug.cube) {
     state.debug.cube.rotation.y += 0.6 * state.dt;
     state.debug.cube.rotation.x += 0.25 * state.dt;
   }
 
+  // HUD refresh
   if (state.debug.hudEl && (t - state.debug.lastHud) > 160) {
     state.debug.lastHud = t;
     state.debug.hudEl.textContent = buildHudText();
@@ -229,7 +331,7 @@ function tick(t) {
 }
 
 // ============================================================================
-// MOVEMENT
+// MOVEMENT (keyboard + touch)
 // ============================================================================
 function applyMovement(dt) {
   if (!playerRig) return;
@@ -273,6 +375,54 @@ function applyMovement(dt) {
 }
 
 // ============================================================================
+// TELEPORT PADS (step on pad to teleport)
+// Requires: world.group.userData.teleports is a Group of pads
+// ============================================================================
+function handleTeleports() {
+  const tp = world?.group?.userData?.teleports;
+  if (!tp || !playerRig) return;
+
+  const pads = tp.children || [];
+  const px = playerRig.position.x;
+  const pz = playerRig.position.z;
+
+  for (const pad of pads) {
+    const to = pad?.userData?.teleportTo;
+    if (!to) continue;
+
+    const dx = pad.position.x - px;
+    const dz = pad.position.z - pz;
+    const d2 = dx * dx + dz * dz;
+
+    // Stand on pad to teleport (radius ~0.55m)
+    if (d2 < 0.55 * 0.55) {
+      playerRig.position.set(to.x, 1.6, to.z);
+      log("teleport ✅", pad.name, "->", to, "label=", pad.userData?.label || "");
+      break;
+    }
+  }
+}
+
+// ============================================================================
+// BOTS ROAM (if world provides userData.bots)
+// ============================================================================
+function animateBots(tMs) {
+  const bots = world?.group?.userData?.bots;
+  if (!bots) return;
+
+  const t = tMs * 0.001;
+  for (const b of bots.children) {
+    const r = b.userData?.roamRadius || 7.2;
+    const sp = b.userData?.speed || 0.4;
+    const ph = b.userData?.phase || 0;
+    const a = (t * sp) + ph;
+    b.position.x = Math.cos(a) * r;
+    b.position.z = Math.sin(a) * r;
+    b.rotation.y = -a + Math.PI / 2;
+  }
+}
+
+// ============================================================================
 // HUD
 // ============================================================================
 function initDevHud() {
@@ -294,7 +444,7 @@ function initDevHud() {
   panel.style.pointerEvents = "auto";
   panel.style.margin = "8px";
   panel.style.padding = "8px";
-  panel.style.maxWidth = "560px";
+  panel.style.maxWidth = "620px";
   panel.style.background = "rgba(0,0,0,0.55)";
   panel.style.border = "1px solid rgba(255,255,255,0.15)";
   panel.style.borderRadius = "10px";
@@ -386,7 +536,10 @@ function buildHudText() {
     `Scene children: ${scene?.children?.length ?? "?"}  |  Lights: ${hasLight ? "YES" : "NO"}`,
     `World: ${hasWorld ? "attached ✅" : (world?.group ? "detached ⚠️" : "none ❌")}`,
     `Rig: x=${rig.x.toFixed(2)} y=${rig.y.toFixed(2)} z=${rig.z.toFixed(2)}`,
-    `Tip: If you see MAGENTA CUBE, rendering works. If World is none, world.js import/export is failing.`
+    `Controllers: ${xr?.c0 ? "YES" : "no"}  |  Lasers: ${xr?.ray0 ? "YES" : "no"}`,
+    `Teleports: ${world?.group?.userData?.teleports?.children?.length ?? 0}`,
+    `Bots: ${world?.group?.userData?.bots?.children?.length ?? 0}`,
+    `Tip: Step on teleport pads to warp. In XR, lasers should follow hands (not stuck).`
   ].join("\n");
 }
 
@@ -536,4 +689,4 @@ function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-}
+  }

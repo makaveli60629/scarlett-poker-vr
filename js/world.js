@@ -1,22 +1,47 @@
-// /js/world.js — ScarlettVR FULL WORLD v12.0 (UPLOAD-SAFE, GitHub Pages safe)
-// ✅ No bare imports (index.js passes THREE in)
-// ✅ Guaranteed clear spawn (never inside geometry / never standing on sign)
+// /js/world.js — ScarlettVR FULL WORLD v12.2 (FULL, boot-proof)
+// ✅ Always hides loader (no more stuck “Loading…”)
 // ✅ Circular lobby + pit divot + balcony rail
-// ✅ Original pads restored (POKER/STORE/SCORPION/SPECTATE/LOBBY + SPAWN)
-// ✅ UNSTUCK always works
-// ✅ Floor-follow ring (prevents “circle in face”)
-// ✅ Does NOT touch lasers (Controls owns lasers + reticle)
+// ✅ Pads + room anchors + UNSTUCK
+// ✅ Floor-follow ring (NOT in face)
+// ✅ Does NOT touch lasers (Controls owns lasers/reticle)
+// ✅ Upload-safe (single file, no external deps)
 
 export const World = (() => {
   let inst = null;
 
-  let THREE, scene, renderer, camera, player, log;
+  let THREE, scene, renderer, camera, player;
+  let log = console.log;
 
   const ANCHORS = {};
   let root = null;
   let floorRing = null;
 
-  // ---------- helpers ----------
+  // ---------- DOM helpers ----------
+  function hideLoaderPermanent() {
+    // Hide common loader ids/classes
+    try {
+      const selectors = [
+        "#loader", "#loading", "#boot", "#overlay",
+        ".loader", ".loading", ".overlay", ".boot"
+      ];
+      document.querySelectorAll(selectors.join(",")).forEach(el => {
+        el.style.display = "none";
+        el.style.pointerEvents = "none";
+      });
+
+      // Also hide any full-screen div containing “Loading Scarlett”
+      for (const el of Array.from(document.querySelectorAll("div"))) {
+        const txt = (el.textContent || "").toLowerCase();
+        if (txt.includes("loading scarlett")) {
+          el.style.display = "none";
+          el.style.pointerEvents = "none";
+        }
+      }
+
+      document.body.classList.add("world-ready");
+    } catch {}
+  }
+
   const hook = (id, fn) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener("click", fn);
@@ -27,13 +52,13 @@ export const World = (() => {
     if (el) el.textContent = txt;
   };
 
+  // ---------- materials ----------
   const matStd = (color, rough = 0.9, metal = 0.08) =>
     new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
 
   function makeBillboardText(text) {
     const canvas = document.createElement("canvas");
-    canvas.width = 512;
-    canvas.height = 256;
+    canvas.width = 512; canvas.height = 256;
     const g = canvas.getContext("2d");
 
     g.fillStyle = "rgba(0,0,0,0.55)";
@@ -58,10 +83,45 @@ export const World = (() => {
 
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.9), mat);
     mesh.rotation.y = Math.PI;
-    mesh.renderOrder = 9999; // always visible
+    mesh.renderOrder = 9999;
     return mesh;
   }
 
+  // ---------- anchors / rig ----------
+  function buildAnchors() {
+    // SAFE open spawn (never on pads / never in pit)
+    ANCHORS.spawn    = { pos: new THREE.Vector3(0, 0, 15.0), yaw: Math.PI };
+    ANCHORS.lobby    = { pos: new THREE.Vector3(0, 0, 12.5), yaw: Math.PI };
+
+    // Poker: inside pit, not near wall
+    ANCHORS.poker    = { pos: new THREE.Vector3(0, 0, 3.6),  yaw: Math.PI };
+
+    // Rooms (stubs for now)
+    ANCHORS.store    = { pos: new THREE.Vector3(-14.0, 0, 0), yaw: -Math.PI / 2 };
+    ANCHORS.scorpion = { pos: new THREE.Vector3(14.0, 0, 0),  yaw:  Math.PI / 2 };
+
+    // Spectate on balcony
+    ANCHORS.spectate = { pos: new THREE.Vector3(0, 3.0, 14.2), yaw: Math.PI };
+  }
+
+  function setRig(name) {
+    const a = ANCHORS[name] || ANCHORS.spawn;
+
+    player.position.set(a.pos.x, 0.10, a.pos.z);
+    player.rotation.set(0, 0, 0);
+
+    if (!renderer.xr.isPresenting) camera.rotation.set(0, a.yaw || 0, 0);
+
+    log?.(`[rm] room=${name}`);
+  }
+
+  function unstuck() {
+    setRig("spawn");
+    player.position.y = 0.22;
+    log?.("[rm] UNSTUCK ✅");
+  }
+
+  // ---------- build world ----------
   function addLights() {
     const hemi = new THREE.HemisphereLight(0xffffff, 0x132044, 1.2);
     hemi.position.set(0, 60, 0);
@@ -80,47 +140,11 @@ export const World = (() => {
     root.add(warm);
   }
 
-  // ---------- anchors / rig ----------
-  function buildAnchors() {
-    // Spawn is CLEAR open space on the main floor, not on pads, not inside pit walls.
-    ANCHORS.spawn    = { pos: new THREE.Vector3(0, 0, 15.0), yaw: Math.PI };
-    ANCHORS.lobby    = { pos: new THREE.Vector3(0, 0, 12.5), yaw: Math.PI };
-
-    // Poker anchor puts you inside the pit but above pit floor, with clear radius.
-    // Pit floor will be at y = -3.1, so y here is 0.08 (player y) but z/x inside.
-    ANCHORS.poker    = { pos: new THREE.Vector3(0, 0, 3.6), yaw: Math.PI };
-
-    // Side rooms (stubs for now, still useful for teleport/debug)
-    ANCHORS.store    = { pos: new THREE.Vector3(-14.0, 0, 0), yaw: -Math.PI / 2 };
-    ANCHORS.scorpion = { pos: new THREE.Vector3(14.0, 0, 0),  yaw: Math.PI / 2 };
-    ANCHORS.spectate = { pos: new THREE.Vector3(0, 3.0, 14.2), yaw: Math.PI };
-  }
-
-  function setRig(name) {
-    const a = ANCHORS[name] || ANCHORS.spawn;
-
-    // “Always safe”: keep you slightly above floor so you never clip.
-    player.position.set(a.pos.x, 0.10, a.pos.z);
-    player.rotation.set(0, 0, 0);
-
-    // Only set camera yaw when not in XR (XR head pose owns view)
-    if (!renderer.xr.isPresenting) camera.rotation.set(0, a.yaw || 0, 0);
-
-    log?.(`[rm] room=${name}`);
-  }
-
-  function unstuck() {
-    setRig("spawn");
-    player.position.y = 0.22;
-    log?.("[rm] UNSTUCK ✅");
-  }
-
-  // ---------- geometry ----------
   function buildLobby() {
     scene.background = new THREE.Color(0x05070d);
     scene.fog = new THREE.Fog(0x05070d, 18, 260);
 
-    // Main open floor
+    // Open floor
     const floor = new THREE.Mesh(
       new THREE.CircleGeometry(26, 96),
       matStd(0x1b2a46, 0.95, 0.04)
@@ -130,7 +154,7 @@ export const World = (() => {
     floor.name = "FLOOR_MAIN";
     root.add(floor);
 
-    // Lobby wall shell (visual only)
+    // Lobby wall shell (visual)
     const shell = new THREE.Mesh(
       new THREE.CylinderGeometry(28, 28, 10, 96, 1, true),
       new THREE.MeshStandardMaterial({
@@ -143,9 +167,10 @@ export const World = (() => {
       })
     );
     shell.position.set(0, 4.8, 0);
+    shell.name = "LOBBY_SHELL";
     root.add(shell);
 
-    // Bright ring (orientation)
+    // Orientation ring
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(16.8, 0.16, 12, 120),
       new THREE.MeshStandardMaterial({
@@ -158,6 +183,7 @@ export const World = (() => {
     );
     ring.rotation.x = Math.PI / 2;
     ring.position.set(0, 0.18, 0);
+    ring.name = "LOBBY_RING";
     root.add(ring);
   }
 
@@ -166,7 +192,6 @@ export const World = (() => {
     const pitDepth = 3.1;
     const pitFloorY = -pitDepth;
 
-    // Pit floor
     const pitFloor = new THREE.Mesh(
       new THREE.CylinderGeometry(pitRadius, pitRadius, 0.35, 96),
       matStd(0x0c1220, 0.95, 0.04)
@@ -175,7 +200,6 @@ export const World = (() => {
     pitFloor.name = "PIT_FLOOR";
     root.add(pitFloor);
 
-    // Pit wall
     const pitWall = new THREE.Mesh(
       new THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 96, 1, true),
       new THREE.MeshStandardMaterial({
@@ -189,26 +213,24 @@ export const World = (() => {
     pitWall.name = "PIT_WALL";
     root.add(pitWall);
 
-    // Felt/table marker pad (visual, centered)
+    // Table marker pad
     const felt = new THREE.Mesh(
       new THREE.CylinderGeometry(3.35, 3.55, 0.35, 96),
-      new THREE.MeshStandardMaterial({
-        color: 0x134536,
-        roughness: 0.78,
-        metalness: 0.04
-      })
+      new THREE.MeshStandardMaterial({ color: 0x134536, roughness: 0.78, metalness: 0.04 })
     );
     felt.position.set(0, pitFloorY + 1.05, 0);
     felt.name = "TABLE_PAD";
     root.add(felt);
 
-    // Pit glow
-    const pitGlow = new THREE.PointLight(0x66ccff, 0.75, 45, 2);
-    pitGlow.position.set(0, 3.5, 0);
-    root.add(pitGlow);
-
-    // IMPORTANT: Keep spawn CLEAR of pit area. We already do spawn at z=15.
-    // Poker anchor at z=3.6 is inside pit but not against wall.
+    // Guardrail lip (walkable edge)
+    const lip = new THREE.Mesh(
+      new THREE.RingGeometry(pitRadius + 0.15, pitRadius + 0.55, 128),
+      matStd(0x0d1627, 0.88, 0.12)
+    );
+    lip.rotation.x = -Math.PI / 2;
+    lip.position.y = 0.03;
+    lip.name = "PIT_LIP";
+    root.add(lip);
   }
 
   function buildBalcony() {
@@ -268,7 +290,7 @@ export const World = (() => {
       root.add(label);
     }
 
-    // Spawn marker ring (visual only)
+    // Spawn marker ring + high label
     const spawnRing = new THREE.Mesh(
       new THREE.RingGeometry(0.95, 1.15, 48),
       new THREE.MeshBasicMaterial({
@@ -280,11 +302,12 @@ export const World = (() => {
     );
     spawnRing.rotation.x = -Math.PI / 2;
     spawnRing.position.set(ANCHORS.spawn.pos.x, 0.01, ANCHORS.spawn.pos.z);
+    spawnRing.name = "SPAWN_RING";
     root.add(spawnRing);
 
-    // Spawn label: lifted high, cannot be “stood on”
     const spawnText = makeBillboardText("SPAWN");
     spawnText.position.set(ANCHORS.spawn.pos.x, 1.7, ANCHORS.spawn.pos.z);
+    spawnText.name = "SPAWN_TEXT";
     root.add(spawnText);
   }
 
@@ -317,22 +340,19 @@ export const World = (() => {
     root.name = "WORLD_ROOT";
     scene.add(root);
 
-    // camera safety
     camera.near = 0.05;
     camera.far = 900;
     camera.updateProjectionMatrix();
 
     buildAnchors();
     addLights();
-
     buildLobby();
     buildPit();
     buildBalcony();
-
     buildPads();
     buildFloorFollowerRing();
 
-    // Buttons (your HUD already has these ids in earlier builds)
+    // HUD buttons (if present)
     hook("btnSpawn", () => setRig("spawn"));
     hook("btnLobby", () => setRig("lobby"));
     hook("btnPoker", () => setRig("poker"));
@@ -340,20 +360,23 @@ export const World = (() => {
     hook("btnScorpion", () => setRig("scorpion"));
     hook("btnSpectate", () => setRig("spectate"));
     hook("btnUnstuck", () => unstuck());
-    hook("btnHealthcheck", () => log("[health] ok ✅ (world v12.0)"));
+    hook("btnHealthcheck", () => log("[health] ok ✅ (world v12.2)"));
 
     // Start safe
     setRig("spawn");
-    log("[world] FULL v12.0 init ✅ (lobby + pit + pads)");
+    log("[world] FULL v12.2 init ✅");
+
+    // IMPORTANT: kill loader forever
+    hideLoaderPermanent();
+    console.log("[world] READY ✅");
+    log("[world] READY ✅");
 
     const tmpPos = new THREE.Vector3();
 
     return {
       tick(dt, t) {
-        // floor ring follows player (prevents face-ring bug)
         if (floorRing) floorRing.position.set(player.position.x, 0.02, player.position.z);
 
-        // optional debug labels if they exist
         tmpPos.copy(player.position);
         setText("debugXR", renderer.xr.isPresenting ? "XR:on" : "XR:off");
         setText("debugPos", `x:${tmpPos.x.toFixed(2)} y:${tmpPos.y.toFixed(2)} z:${tmpPos.z.toFixed(2)}`);
@@ -371,3 +394,4 @@ export const World = (() => {
     }
   };
 })();
+```0

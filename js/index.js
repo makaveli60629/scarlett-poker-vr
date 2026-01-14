@@ -1,13 +1,13 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
-import Controls from '../core/controls.js';
+import { Controls } from './core/controls.js'; // Using your old code
 import { World } from './world.js';
 
 const S = {
     scene: new THREE.Scene(),
     camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
     renderer: new THREE.WebGLRenderer({ antialias: true }),
-    player: new THREE.Group(), // Your "Rig"
+    player: new THREE.Group(),
     clock: new THREE.Clock()
 };
 
@@ -20,23 +20,40 @@ async function init() {
     S.scene.add(S.player);
     S.player.add(S.camera);
 
-    // Initial Position (In the VIP Room)
-    S.player.position.set(14, 0, 6);
+    // Initial position in the Lobby
+    S.player.position.set(10, 0, 10);
 
-    // Initialize Modules
-    const controls = new Controls(S);
-    await World.init(S);
+    // 1. Initialize YOUR Controls
+    Controls.init({
+        THREE,
+        renderer: S.renderer,
+        camera: S.camera,
+        player: S.player,
+        scene: S.scene
+    });
 
-    // VISION FIX: Turn 180 on start
+    // 2. Build the World
+    await World.init({ 
+        THREE, 
+        scene: S.scene, 
+        renderer: S.renderer, 
+        camera: S.camera, 
+        player: S.player 
+    });
+
+    // 3. THE "VISION FIX"
     S.renderer.xr.addEventListener('sessionstart', () => {
         setTimeout(() => {
-            S.player.lookAt(0, 0, 0); // Face the center pit
+            // Force face the center pit (0,0,0)
+            S.player.lookAt(0, 0, 0); 
+            console.log("Controls: Vision Calibrated");
         }, 1000);
     });
 
     S.renderer.setAnimationLoop(() => {
         const dt = S.clock.getDelta();
-        controls.update(dt);
+        // Run your update loop for movement/turning
+        Controls.update(dt);
         S.renderer.render(S.scene, S.camera);
     });
 }

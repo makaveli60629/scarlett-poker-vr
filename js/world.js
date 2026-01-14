@@ -1,57 +1,50 @@
-import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+import { SpawnPoints } from './spawn_points.js';
+import { Tables } from './tables.js';
 
 export const World = {
-    loader: new THREE.TextureLoader(),
-    bots: [],
+    async init(ctx) {
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050505);
 
-    async init({ scene }) {
-        // 1. Load Textures from your assets/textures folder
-        const tableTex = this.loader.load('assets/textures/table_top.jpg');
-        const floorTex = this.loader.load('assets/textures/floor_grid.png');
-        floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
-        floorTex.repeat.set(10, 10);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.xr.enabled = true;
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+        document.body.appendChild(VRButton.createButton(renderer));
 
-        // 2. The Sunken Pit Floor
-        const pitGeo = new THREE.CircleGeometry(12, 64);
-        const pitMat = new THREE.MeshStandardMaterial({ color: 0x111111, map: floorTex });
-        const pit = new THREE.Mesh(pitGeo, pitMat);
-        pit.rotation.x = -Math.PI / 2;
-        scene.add(pit);
+        // Lighting
+        const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+        const point = new THREE.PointLight(0xffffff, 1);
+        point.position.set(5, 5, 5);
+        scene.add(ambient, point);
 
-        // 3. Neon Rails (The "Divot" Circle)
-        const railGeo = new THREE.TorusGeometry(6.5, 0.08, 16, 100);
-        const railMat = new THREE.MeshStandardMaterial({ 
-            color: 0x00ffff, 
-            emissive: 0x00ffff, 
-            emissiveIntensity: 2 
-        });
-        const rail = new THREE.Mesh(railGeo, railMat);
-        rail.rotation.x = Math.PI / 2;
-        rail.position.y = 1.1; // Waist height
-        scene.add(rail);
-
-        // 4. Textured Gold Table
-        const table = new THREE.Mesh(
-            new THREE.CylinderGeometry(3, 3, 0.4, 32),
-            new THREE.MeshStandardMaterial({ map: tableTex, color: 0xd2b46a, metalness: 0.7 })
+        // Floor
+        const floor = new THREE.Mesh(
+            new THREE.PlaneGeometry(20, 20),
+            new THREE.MeshStandardMaterial({ color: 0x111111 })
         );
-        table.position.y = 0.2;
-        scene.add(table);
+        floor.rotation.x = -Math.PI / 2;
+        scene.add(floor);
 
-        this.spawnBots(scene);
-        console.log("WORLD_ASSETS: OK");
-    },
+        // Build Table
+        Tables.build(scene);
+        
+        // Spawn Player
+        SpawnPoints.apply(camera);
 
-    spawnBots(scene) {
-        const botMat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.1, metalness: 0.5 });
-        for (let i = 0; i < 6; i++) {
-            const angle = (i / 6) * Math.PI * 2;
-            const bot = new THREE.Group();
-            bot.add(new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.5, 4, 8), botMat));
-            bot.position.set(Math.cos(angle) * 4.5, 0, Math.sin(angle) * 4.5);
-            bot.lookAt(0, 1, 0);
-            scene.add(bot);
-            this.bots.push(bot);
-        }
+        renderer.setAnimationLoop(() => {
+            renderer.render(scene, camera);
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        return { scene, camera, renderer };
     }
 };

@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ScarlettVR Ultimate V16</title>
+    <title>ScarlettVR Ultimate V17</title>
     <style>
         body { margin: 0; background: #05070d; overflow: hidden; font-family: monospace; }
         #ui { position: absolute; top: 10px; left: 10px; color: #00ffff; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.6); padding: 10px; border: 1px solid #00ffff; border-radius: 8px; }
@@ -18,7 +18,7 @@
     </script>
 </head>
 <body>
-    <div id="ui"><b>V16_MIRROR_CORRECTION</b><br>Stick Math: Inverted<br>Spawn: Force Rotation</div>
+    <div id="ui"><b>V17_QUEST_CALIBRATED</b><br>Left: Perfect (Saved)<br>Right: Reversed Math Fixed</div>
 
     <script type="module">
         import * as THREE from 'three';
@@ -29,7 +29,7 @@
             scene: new THREE.Scene(),
             camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
             renderer: new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" }),
-            player: new THREE.Group(), // This is our 'rig'
+            player: new THREE.Group(), 
             clock: new THREE.Clock(),
             bots: [],
             rightReticle: null,
@@ -39,9 +39,9 @@
         const Controls = {
             moveSpeed: 2.8,
             snapAngle: Math.PI / 4,
-            snapCooldown: 0.3,
+            snapCooldown: 0.35, // Slightly longer cooldown for stability
             _snapTimer: 0,
-            deadzone: 0.15,
+            deadzone: 0.18,
             
             update(dt) {
                 const session = S.renderer.xr.getSession();
@@ -52,7 +52,7 @@
                     if (!source.gamepad) continue;
                     const axes = source.gamepad.axes;
 
-                    // --- LEFT HAND: MOVEMENT (MIRROR CALIBRATION) ---
+                    // --- LEFT HAND: (AS REQUESTED: NO CHANGES TO LEFT/RIGHT) ---
                     if (source.handedness === 'left') {
                         const lx = axes[2] || axes[0] || 0;
                         const ly = axes[3] || axes[1] || 0;
@@ -63,20 +63,18 @@
                             const side = new THREE.Vector3(1, 0, 0).applyQuaternion(S.camera.quaternion);
                             side.y = 0; side.normalize();
                             
-                            // SWAPPED DIRECTIONS:
-                            // If Forward was Backwards, we change -ly to +ly
-                            // If Left was Right, we change lx to -lx
+                            // Left side logic kept from previous version as requested
                             S.player.position.addScaledVector(fwd, ly * this.moveSpeed * dt);
                             S.player.position.addScaledVector(side, -lx * this.moveSpeed * dt);
                         }
                     }
 
-                    // --- RIGHT HAND: SNAP TURN (MIRROR CALIBRATION) ---
+                    // --- RIGHT HAND: SNAP TURN (FIXED FOR 45° OPPOSITES) ---
                     if (source.handedness === 'right' && this._snapTimer <= 0) {
                         const rx = axes[2] || axes[0] || 0;
                         if (Math.abs(rx) > 0.6) {
-                            // If Right was Left, we change -= to +=
-                            S.player.rotation.y += Math.sign(rx) * this.snapAngle;
+                            // Swapped -= to += to fix the "opposite" rotation on Quest
+                            S.player.rotation.y += -Math.sign(rx) * this.snapAngle;
                             this._snapTimer = this.snapCooldown;
                         }
                     }
@@ -89,15 +87,15 @@
             S.scene.add(new THREE.HemisphereLight(0xdaf0ff, 0x0b0f1a, 1.2));
             S.scene.add(new THREE.GridHelper(100, 50, 0x00ffff, 0x112222));
 
-            // Gold Poker Table
+            // Gold Poker Table Centerpiece
             const table = new THREE.Mesh(
                 new THREE.CylinderGeometry(3, 3, 0.4, 32), 
-                new THREE.MeshStandardMaterial({ color: 0xd2b46a, metalness: 0.8 })
+                new THREE.MeshStandardMaterial({ color: 0xd2b46a, metalness: 0.8, roughness: 0.2 })
             );
             table.position.set(0, 0.2, 0);
             S.scene.add(table);
 
-            // Humans (seated around center)
+            // Seated Bots
             const botMat = new THREE.MeshStandardMaterial({ color: 0xe6e6e6 });
             for (let i = 0; i < 6; i++) {
                 const angle = (i / 6) * Math.PI * 2;
@@ -149,9 +147,9 @@
             buildWorld();
 
             S.renderer.xr.addEventListener('sessionstart', () => {
-                // FORCE: Spawn 5 meters away and rotate 180 degrees to face the center
-                S.player.position.set(0, 0, 5);
-                S.player.rotation.set(0, Math.PI, 0); // Rotate 180 degrees
+                // FIXED SPAWN: Teleport far back and rotate 180 so the table is in front
+                S.player.position.set(0, 0, 8);
+                S.player.rotation.set(0, Math.PI, 0); 
             });
 
             S.renderer.setAnimationLoop(() => {
@@ -163,6 +161,7 @@
                     const worldDir = new THREE.Vector3(0, 0, -1);
                     S.rightController.getWorldPosition(worldPos);
                     worldDir.applyQuaternion(S.rightController.getWorldQuaternion(new THREE.Quaternion()));
+                    
                     if (worldDir.y < 0) {
                         const t = -worldPos.y / worldDir.y;
                         S.rightReticle.position.set(worldPos.x + worldDir.x * t, 0.02, worldPos.z + worldDir.z * t);

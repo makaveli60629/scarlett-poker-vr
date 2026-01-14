@@ -1,145 +1,216 @@
 // /js/index.js
-// SCARLETT VR POKER — MASTER INDEX
-// BUILD: INDEX_FULL_v15_5
-// WORLD + MOVEMENT ENABLED
+// SCARLETT VR POKER — PERMANENT SPINE
+// BUILD: INDEX_FULL_v16_0
+// DO NOT REWRITE — ONLY EXTEND
 
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
+import { XRControllerModelFactory } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/XRControllerModelFactory.js";
 import { VRButton } from "./VRButton.js";
 import { buildWorld } from "./world.js";
 
-const BUILD = "INDEX_FULL_v15_5";
+/* =================================================
+   LOGGING
+================================================= */
+const BUILD = "INDEX_FULL_v16_0";
 const log = (...a) => console.log("[index]", ...a);
+const err = (...a) => console.error("[index]", ...a);
 
 log("BUILD=", BUILD);
-
-/* -------------------------------------------------
-   CONTEXT
-------------------------------------------------- */
-const ctx = {
-  world: null,
-  hasWorld: false
-};
-
-/* -------------------------------------------------
-   ENV LOG
-------------------------------------------------- */
 log("href=", location.href);
 log("secureContext=", window.isSecureContext);
 log("ua=", navigator.userAgent);
 log("navigator.xr=", !!navigator.xr);
 
-/* -------------------------------------------------
+/* =================================================
+   STATE
+================================================= */
+const state = {
+  xr: false,
+  uiVisible: true,
+  move: { fwd: 0, turn: 0 },
+  fps: 0
+};
+
+/* =================================================
    RENDERER
-------------------------------------------------- */
-const renderer = new THREE.WebGLRenderer({
-  antialias: true,
-  alpha: false
-});
-renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setSize(window.innerWidth, window.innerHeight);
+================================================= */
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(devicePixelRatio);
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
 
-/* -------------------------------------------------
-   SCENE & CAMERA
-------------------------------------------------- */
+/* =================================================
+   SCENE / CAMERA / RIG
+================================================= */
 const scene = new THREE.Scene();
 
-const camera = new THREE.PerspectiveCamera(
-  70,
-  window.innerWidth / window.innerHeight,
-  0.01,
-  200
-);
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 500);
 
-/* -------------------------------------------------
-   PLAYER RIG (DO NOT MOVE CAMERA DIRECTLY)
-------------------------------------------------- */
 const rig = new THREE.Group();
 rig.position.set(0, 1.6, 2);
 rig.add(camera);
 scene.add(rig);
 
-/* -------------------------------------------------
+/* =================================================
    VR BUTTON
-------------------------------------------------- */
+================================================= */
 if (navigator.xr) {
   document.body.appendChild(VRButton.createButton(renderer));
-  log("VRButton added ✅");
 }
 
-/* -------------------------------------------------
-   BUILD WORLD (CRITICAL)
-------------------------------------------------- */
+/* =================================================
+   WORLD (LOCKED)
+================================================= */
+let world = null;
 try {
-  ctx.world = buildWorld({
-    scene,
-    camera,
-    rig,
-    log
-  });
-  ctx.hasWorld = true;
+  world = buildWorld({ scene, camera, rig, log });
   log("world built ✅");
 } catch (e) {
-  console.error("WORLD BUILD FAILED ❌", e);
-  ctx.hasWorld = false;
+  err("WORLD BUILD FAILED ❌", e);
 }
 
-/* -------------------------------------------------
-   DIAGNOSTICS
-------------------------------------------------- */
-log(
-  "isXR=" + renderer.xr.isPresenting,
-  "sceneChildren=" + scene.children.length,
-  "hasWorld=" + ctx.hasWorld,
-  "rig=" + rig.position.toArray()
-);
+/* =================================================
+   CONTROLLERS (QUEST / OCULUS)
+================================================= */
+const controllerModelFactory = new XRControllerModelFactory();
+const controllers = [];
 
-/* -------------------------------------------------
-   BASIC LOCOMOTION STATE
-------------------------------------------------- */
-const move = {
-  forward: 0
-};
+for (let i = 0; i < 2; i++) {
+  const c = renderer.xr.getController(i);
+  const g = renderer.xr.getControllerGrip(i);
 
-/* -------------------------------------------------
-   ANDROID TOUCH MOVE (DRAG UP/DOWN)
-------------------------------------------------- */
-let touchStartY = 0;
+  g.add(controllerModelFactory.createControllerModel(g));
+  scene.add(g);
+  scene.add(c);
+
+  // Laser
+  const laserGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0, 0, -10)
+  ]);
+  const laserMat = new THREE.LineBasicMaterial({
+    color: i === 0 ? 0xff00ff : 0x00ffff
+  });
+  const laser = new THREE.Line(laserGeo, laserMat);
+  c.add(laser);
+
+  controllers.push({ c, g, laser });
+}
+
+/* =================================================
+   XR INPUT (JOYSTICKS)
+================================================= */
+renderer.xr.addEventListener("sessionstart", () => {
+  state.xr = true;
+});
+
+renderer.xr.addEventListener("sessionend", () => {
+  state.xr = false;
+});
+
+function pollXRInput() {
+  const session = renderer.xr.getSession();
+  if (!session) return;
+
+  for (const src of session.inputSources) {
+    if (!src.gamepad) continue;
+    const gp = src.gamepad;
+
+    // Left stick forward/back
+    if (gp.axes.length >= 2) {
+      state.move.fwd = -gp.axes[1] * 0.05;
+      state.move.turn = -gp.axes[0] * 0.03;
+    }
+  }
+}
+
+/* =================================================
+   ANDROID TOUCH CONTROLS
+================================================= */
+let touchStart = null;
 
 window.addEventListener("touchstart", e => {
-  touchStartY = e.touches[0].clientY;
+  if (!state.uiVisible) return;
+  touchStart = e.touches[0];
 });
 
 window.addEventListener("touchmove", e => {
-  const dy = e.touches[0].clientY - touchStartY;
-  move.forward = -dy * 0.002;
+  if (!touchStart || !state.uiVisible) return;
+  const t = e.touches[0];
+  const dy = t.clientY - touchStart.clientY;
+  state.move.fwd = -dy * 0.002;
 });
 
 window.addEventListener("touchend", () => {
-  move.forward = 0;
+  touchStart = null;
+  state.move.fwd = 0;
 });
 
-/* -------------------------------------------------
-   RESIZE
-------------------------------------------------- */
-window.addEventListener("resize", () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+/* =================================================
+   UI OVERLAY (DIAGNOSTICS + CONTROLS)
+================================================= */
+const ui = document.createElement("div");
+ui.style.cssText = `
+position:fixed;left:0;top:0;width:100%;
+color:#0f0;background:rgba(0,0,0,0.6);
+font:12px monospace;z-index:10;padding:6px;
+`;
+document.body.appendChild(ui);
 
-/* -------------------------------------------------
-   RENDER LOOP + MOVEMENT
-------------------------------------------------- */
+const toggleBtn = document.createElement("button");
+toggleBtn.textContent = "HIDE UI";
+toggleBtn.onclick = () => {
+  state.uiVisible = !state.uiVisible;
+  ui.style.display = state.uiVisible ? "block" : "none";
+};
+ui.appendChild(toggleBtn);
+
+const diag = document.createElement("pre");
+ui.appendChild(diag);
+
+/* =================================================
+   LOOP
+================================================= */
+let last = performance.now();
 renderer.setAnimationLoop(() => {
-  if (move.forward !== 0) {
+  const now = performance.now();
+  state.fps = Math.round(1000 / (now - last));
+  last = now;
+
+  pollXRInput();
+
+  // Move forward
+  if (state.move.fwd !== 0) {
     const dir = new THREE.Vector3();
     camera.getWorldDirection(dir);
     dir.y = 0;
     dir.normalize();
-    rig.position.addScaledVector(dir, move.forward);
+    rig.position.addScaledVector(dir, state.move.fwd);
   }
 
+  // Turn
+  if (state.move.turn !== 0) {
+    rig.rotation.y += state.move.turn;
+  }
+
+  diag.textContent = `
+BUILD: ${BUILD}
+XR: ${state.xr}
+FPS: ${state.fps}
+Rig: ${rig.position.x.toFixed(2)}, ${rig.position.y.toFixed(2)}, ${rig.position.z.toFixed(2)}
+Scene children: ${scene.children.length}
+World: ${!!world}
+  `.trim();
+
   renderer.render(scene, camera);
+});
+
+/* =================================================
+   RESIZE
+================================================= */
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
 });

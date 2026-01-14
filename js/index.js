@@ -1,6 +1,6 @@
 // /js/index.js — Scarlett Deploy-Proof Entry v1 (FULL)
 // VRButton + diagnostics + calls Controls then World.
-
+import { Controls } from "./core/controls.js";
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js";
 import { VRButton } from "./VRButton.js";
 import { Controls } from "./controls.js";

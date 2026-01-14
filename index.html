@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Scarlett Poker VR - Update 4.0</title>
+  <title>Scarlett Poker VR</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js"></script>
@@ -10,12 +10,12 @@
     body { margin: 0; overflow: hidden; background: #000; font-family: monospace; }
     #hud { 
       position: absolute; top: 10px; left: 10px; z-index: 100; 
-      color: #0f0; background: rgba(0,0,0,0.8); padding: 15px; 
-      border: 1px solid #0f0; border-radius: 5px; pointer-events: auto;
+      color: #0f0; background: rgba(0,0,0,0.85); padding: 10px; 
+      border-radius: 4px; pointer-events: auto; font-size: 14px;
     }
     #hud.hidden { display: none; }
-    .diag-err { color: #ff4444; }
     .diag-ok { color: #44ff44; }
+    .diag-err { color: #ff4444; }
   </style>
 </head>
 <body>

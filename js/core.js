@@ -1,32 +1,18 @@
-import { World } from './world.js';
-import { Diagnostics } from './diagnostics.js';
-import { Input } from './input.js';
-import { HUD } from './hud.js';
-import { Store } from './store.js';
-import { Admin } from './admin.js';
+import { Core } from './core.js';
 
-export const Core = {
-    async start() {
-        this.modules = {};
-        Diagnostics.init(this);
-        HUD.init(this);
-
-        const loadModule = async (name, mod) => {
-            try {
-                await mod.init(this);
-                this.modules[name] = true;
-                Diagnostics.ok(name);
-            } catch (e) {
-                Diagnostics.fail(name, e);
-                this.modules[name] = false;
-            }
-        };
-
-        await loadModule('World', World);
-        await loadModule('Input', Input);
-        await loadModule('Store', Store);
-        await loadModule('Admin', Admin);
-
-        Diagnostics.report();
+const startApp = async () => {
+    if (window.ScarlettLoaded) return;
+    try {
+        await Core.start();
+        window.ScarlettLoaded = true;
+    } catch (e) {
+        console.error('[BOOT ERROR]', e);
     }
 };
+
+// Start on load
+window.addEventListener('DOMContentLoaded', startApp);
+
+// Mobile Kickstart: If it's stuck on black, tap the screen
+window.addEventListener('touchstart', startApp, { once: true });
+window.addEventListener('mousedown', startApp, { once: true });

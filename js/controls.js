@@ -1,21 +1,20 @@
-// /js/controls.js — Scarlett Controller Baseline v7 (FULL)
-// ✅ Quest: lasers + reticle correct
-// ✅ Movement: left stick forward/back correct (auto-cal)
-// ✅ Snap-turn: right stick X (45°)
-// ✅ Triggers/grips: work (events + gamepad fallback)
-// ✅ Diagnostics: getPadDebug(), getButtonDebug()
+// /js/controls.js — Scarlett Controller Baseline v8 (FULL)
+// ✅ Reticle always works when pointing DOWN (fixes “only shows when pointing up”)
+// ✅ Movement: lower deadzone + more reliable forward/back
+// ✅ Right stick: X = snap-turn, Y = forward/back (so your right controller can move)
+// ✅ Left stick: X = strafe, Y = forward/back (primary)
 
 export const Controls = (() => {
   let THREE, renderer, scene, camera, player;
   let log = console.log, warn = console.warn, err = console.error;
 
   const cfg = {
-    moveSpeed: 2.25,
-    deadzone: 0.12,
+    moveSpeed: 2.35,
+    deadzone: 0.08,            // was too high; made “forward barely works”
     snapDeg: 45,
     snapCooldownSec: 0.22,
     laserLength: 8.0,
-    maxReticleDist: 14
+    maxReticleDist: 18
   };
 
   const state = {
@@ -27,11 +26,13 @@ export const Controls = (() => {
     yaw: 0,
     snapCooldown: 0,
 
+    // auto-flip for forward/back if device reports inverted Y
     moveFlipY: 1,
     moveCalibrated: false,
     calibAccum: 0,
 
     gp: { left:null, right:null },
+
     btn: {
       left:  { trigger:false, grip:false },
       right: { trigger:false, grip:false }
@@ -39,7 +40,7 @@ export const Controls = (() => {
   };
 
   const tmp = {
-    o: null, q: null, dir: null, v: null, hmd: null
+    o: null, q: null, dir: null, v: null
   };
 
   const dz = (v) => (Math.abs(v) < cfg.deadzone ? 0 : v);
@@ -50,6 +51,7 @@ export const Controls = (() => {
     scene = ctx.scene;
     camera = ctx.camera;
     player = ctx.player;
+
     log = ctx.log || log;
     warn = ctx.warn || warn;
     err = ctx.err || err;
@@ -58,12 +60,11 @@ export const Controls = (() => {
     tmp.q = new THREE.Quaternion();
     tmp.dir = new THREE.Vector3();
     tmp.v = new THREE.Vector3();
-    tmp.hmd = new THREE.Vector3();
 
     state.yaw = player.rotation.y;
 
     installReticle();
-    installControllers(false);
+    installControllers(true);
 
     renderer.xr.addEventListener?.("sessionstart", () => {
       installControllers(true);
@@ -72,7 +73,7 @@ export const Controls = (() => {
       log("sessionstart: controllers rebound ✅");
     });
 
-    log("Controls init ✅ v7");
+    log("Controls init ✅ v8");
   }
 
   function installControllers(force){
@@ -128,15 +129,18 @@ export const Controls = (() => {
   function attachLaser(side, grip){
     const laser = state.laser[side];
     if (!laser || !grip) return;
+
     if (laser.parent !== grip) {
       try { laser.parent?.remove(laser); } catch {}
       grip.add(laser);
     }
+
     laser.position.set(0,0,0);
     laser.rotation.set(0,0,0);
     laser.scale.z = cfg.laserLength;
 
-    // Permanent Quest pose fix (no more pointing straight up)
+    // Visual “Quest pose” fix so the line looks like it shoots forward
+    // (does NOT control reticle math; reticle uses world quaternion below)
     laser.rotation.x = -Math.PI / 2;
   }
 
@@ -152,6 +156,7 @@ export const Controls = (() => {
   function pickStickXY(gp){
     if (!gp || !gp.axes) return {x:0,y:0};
     const a = gp.axes;
+    // Some headsets map sticks to (0,1) and some to (2,3). Choose the stronger pair.
     const ax0 = a[0] ?? 0, ay0 = a[1] ?? 0;
     const ax2 = a[2] ?? 0, ay3 = a[3] ?? 0;
     const magA = Math.abs(ax0)+Math.abs(ay0);
@@ -181,14 +186,15 @@ export const Controls = (() => {
     const L = state.gp.left, R = state.gp.right;
     if (L?.buttons) {
       state.btn.left.trigger = state.btn.left.trigger || !!L.buttons[0]?.pressed;
-      state.btn.left.grip = state.btn.left.grip || !!L.buttons[1]?.pressed;
+      state.btn.left.grip    = state.btn.left.grip    || !!L.buttons[1]?.pressed;
     }
     if (R?.buttons) {
       state.btn.right.trigger = state.btn.right.trigger || !!R.buttons[0]?.pressed;
-      state.btn.right.grip = state.btn.right.grip || !!R.buttons[1]?.pressed;
+      state.btn.right.grip    = state.btn.right.grip    || !!R.buttons[1]?.pressed;
     }
   }
 
+  // ✅ FIX: reticle ray always points DOWN to hit the floor
   function updateReticle(){
     const grip = state.grip.right || state.ctrl.right;
     const r = state.reticle;
@@ -197,59 +203,63 @@ export const Controls = (() => {
     grip.getWorldPosition(tmp.o);
     grip.getWorldQuaternion(tmp.q);
 
-    // HMD forward (flat)
-    tmp.hmd.set(0,0,-1).applyQuaternion(camera.quaternion);
-    tmp.hmd.y = 0; tmp.hmd.normalize();
+    // Start with controller -Z (typical “forward”)
+    tmp.dir.set(0,0,-1).applyQuaternion(tmp.q).normalize();
 
-    // Candidate directions: -Z and +Z
-    const dirA = tmp.v.set(0,0,-1).applyQuaternion(tmp.q).normalize();
-    const dirB = tmp.dir.set(0,0, 1).applyQuaternion(tmp.q).normalize();
+    // If it's pointing UP (dir.y > 0), flip it so it points DOWN.
+    // This removes the “only visible when I point up” bug permanently.
+    if (tmp.dir.y > 0) tmp.dir.multiplyScalar(-1);
 
-    const aFlat = dirA.clone(); aFlat.y=0; aFlat.normalize();
-    const bFlat = dirB.clone(); bFlat.y=0; bFlat.normalize();
+    // If still almost flat, hide
+    if (Math.abs(tmp.dir.y) < 1e-4) { r.visible = false; return; }
 
-    const dotA = aFlat.lengthSq() ? aFlat.dot(tmp.hmd) : -999;
-    const dotB = bFlat.lengthSq() ? bFlat.dot(tmp.hmd) : -999;
+    // Intersect floor y=0
+    const t = (0 - tmp.o.y) / tmp.dir.y;
+    if (t <= 0) { r.visible = false; return; }
 
-    const dir = (dotB > dotA) ? dirB : dirA;
+    tmp.v.copy(tmp.o).addScaledVector(tmp.dir, t);
+    const dist = tmp.v.distanceTo(tmp.o);
+    if (dist > cfg.maxReticleDist) { r.visible = false; return; }
 
-    // intersect floor y=0
-    if (Math.abs(dir.y) < 1e-5) { r.visible=false; return; }
-    const t = (0 - tmp.o.y) / dir.y;
-    if (t <= 0) { r.visible=false; return; }
-
-    const hit = tmp.o.clone().add(dir.clone().multiplyScalar(t));
-    const dist = hit.distanceTo(tmp.o);
-    if (dist > cfg.maxReticleDist) { r.visible=false; return; }
-
-    r.position.copy(hit);
+    r.position.set(tmp.v.x, 0.02, tmp.v.z);
     r.visible = true;
   }
 
   function move(dt){
-    const s = renderer.xr.isPresenting;
-    if (!s) return;
+    if (!renderer.xr.isPresenting) return;
 
     refreshGamepads();
     readButtons();
 
-    // left stick move
-    const L = pickStickXY(state.gp.left);
-    const lx = dz(L.x);
-    const ly = dz(L.y);
+    // Left stick = primary move (strafe + forward/back)
+    const LS = pickStickXY(state.gp.left);
+    let lx = dz(LS.x);
+    let ly = dz(LS.y);
 
+    // Right stick: keep X for snap-turn, but ALSO allow Y for forward/back
+    const RS = pickStickXY(state.gp.right);
+    const rx = dz(RS.x);
+    const ry = dz(RS.y);
+
+    // Auto-calibrate forward/back sign (based on first strong push)
     if (!state.moveCalibrated) {
-      state.calibAccum += Math.abs(ly);
-      if (Math.abs(ly) > 0.35 && state.calibAccum > 0.6) {
-        state.moveFlipY = (ly > 0) ? -1 : 1;
+      state.calibAccum += Math.abs(ly) + Math.abs(ry);
+      const testY = Math.abs(ly) > Math.abs(ry) ? ly : ry;
+      if (Math.abs(testY) > 0.35 && state.calibAccum > 0.6) {
+        state.moveFlipY = (testY > 0) ? -1 : 1;
         state.moveCalibrated = true;
         log(`[move] calibrated ✅ flipY=${state.moveFlipY}`);
       }
     }
 
-    const forward = (-ly) * state.moveFlipY;
+    // If left forward/back is weak, let right-stick Y contribute
+    let forward = (-ly) * state.moveFlipY;
+    if (Math.abs(forward) < 0.10 && Math.abs(ry) > 0.12) {
+      forward = (-ry) * state.moveFlipY;
+    }
 
-    const mv = new THREE.Vector3(lx,0,forward);
+    // Move vector (strafe from left X, forward from left/right Y)
+    const mv = new THREE.Vector3(lx, 0, forward);
     const Lm = mv.length();
     if (Lm > 0.001) {
       mv.normalize().multiplyScalar(cfg.moveSpeed * dt);
@@ -257,10 +267,7 @@ export const Controls = (() => {
       player.position.add(mv);
     }
 
-    // right stick snap-turn
-    const R = pickStickXY(state.gp.right);
-    const rx = dz(R.x);
-
+    // Snap turn from right X
     state.snapCooldown = Math.max(0, state.snapCooldown - dt);
     if (Math.abs(rx) > 0.65 && state.snapCooldown <= 0) {
       const dir = rx > 0 ? -1 : 1;

@@ -1,137 +1,63 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<meta name="color-scheme" content="dark" />
-<title>Scarlett Poker VR</title>
-
-<style>
-html,body{
-  margin:0;
-  padding:0;
-  width:100%;
-  height:100%;
-  background:#05070d;
-  color:#e9f2ff;
-  font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
-  overflow:hidden;
-}
-canvas{display:block;width:100%;height:100%;touch-action:none}
-
-#boot{
-  position:fixed;
-  inset:0;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  background:#05070d;
-  z-index:100;
-}
-
-#bootPanel{
-  width:min(94vw,720px);
-  max-height:70vh;
-  overflow:auto;
-  background:#0b1220ee;
-  border:1px solid #66ccff55;
-  border-radius:18px;
-  padding:14px;
-  box-shadow:0 20px 40px rgba(0,0,0,.55);
-}
-
-#bootTitle{
-  font-weight:900;
-  margin-bottom:6px;
-}
-
-#bootStatus{
-  font-weight:800;
-  margin-bottom:8px;
-}
-
-#bootLog{
-  font-family:ui-monospace,monospace;
-  font-size:12px;
-  white-space:pre-wrap;
-  line-height:1.25em;
-}
-
-#ui{
-  position:fixed;
-  left:10px;
-  right:10px;
-  bottom:10px;
-  background:#0b1220cc;
-  border:1px solid #66ccff55;
-  border-radius:16px;
-  padding:10px;
-  z-index:50;
-}
-
-#ui.hidden{display:none}
-
-.row{display:flex;gap:8px;flex-wrap:wrap}
-
-button{
-  background:#132241;
-  color:#fff;
-  border:1px solid #66ccff55;
-  border-radius:14px;
-  padding:10px 12px;
-  font-weight:800;
-}
-
-button.good{border-color:#43ff9b}
-button.warn{border-color:#ffd36b}
-button.bad{border-color:#ff4d6d}
-
-#enterVR{
-  position:fixed;
-  left:12px;
-  bottom:calc(45vh + 12px);
-  z-index:60;
-}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Scarlett Poker VR</title>
+  <style>
+    html,body { margin:0; padding:0; height:100%; background:#000; color:#fff; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    #hud { position:fixed; inset:auto 12px 12px 12px; max-width:760px; background:rgba(8,12,18,.78); border:1px solid rgba(120,200,255,.25); border-radius:18px; padding:14px; backdrop-filter: blur(10px); }
+    #row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    button { appearance:none; border:1px solid rgba(120,200,255,.35); background:rgba(20,35,60,.55); color:#fff; padding:10px 14px; border-radius:999px; font-weight:700; }
+    button:active { transform: translateY(1px); }
+    #bootBox { position:fixed; top:12px; left:12px; right:12px; max-width:980px; background:rgba(8,12,18,.78); border:1px solid rgba(120,200,255,.25); border-radius:18px; padding:12px 14px; backdrop-filter: blur(10px); }
+    #bootLog { white-space:pre-wrap; font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; color:#cfe9ff; margin-top:8px; max-height:34vh; overflow:auto; }
+    #bootStatus { font-weight:800; }
+    #canvasWrap { position:fixed; inset:0; }
+    canvas { width:100%; height:100%; display:block; }
+  </style>
 </head>
-
 <body>
 
-<div id="boot">
-  <div id="bootPanel">
-    <div id="bootTitle">[BOOT LOG]</div>
-    <div id="bootStatus">Waiting for boot.js…</div>
-    <pre id="bootLog">[HTML] loaded ✅ (waiting for /js/boot.js…)</pre>
+  <div id="canvasWrap"></div>
+
+  <div id="bootBox">
+    <div id="row">
+      <div style="font-weight:900">[BOOT LOG]</div>
+      <div id="bootStatus">Loading…</div>
+      <div style="flex:1"></div>
+      <button id="btnHideBoot">Hide Boot</button>
+      <button id="btnCopyBoot">Copy Boot</button>
+    </div>
+    <div id="bootLog">[HTML] loaded ✅ (waiting for /js/boot.js…)</div>
   </div>
-</div>
 
-<button id="enterVR" class="good">ENTER VR</button>
+  <div id="hud">
+    <div style="font-weight:900; font-size:18px;">🟡 Scarlett Poker VR</div>
+    <div style="opacity:.75; margin:4px 0 10px;">Diagnostics + Controls (Quest + Android)</div>
 
-<div id="ui">
-  <div class="row">
-    <button id="btnHud">HIDE HUD</button>
-    <button id="btnSpawn">SPAWN</button>
-    <button id="btnLobby">LOBBY</button>
-    <button id="btnPoker">POKER</button>
-    <button id="btnStore">STORE</button>
-    <button id="btnScorpion">SCORPION</button>
-    <button id="btnSpectate">SPECTATE</button>
-    <button id="btnUnstuck" class="warn">UNSTUCK</button>
-    <button id="btnHealthcheck">HEALTHCHECK</button>
+    <div id="row" style="margin-bottom:10px;">
+      <button id="btnEnterVR">ENTER VR</button>
+      <button id="btnHud">HIDE HUD</button>
+    </div>
+
+    <div id="row" style="margin-bottom:10px;">
+      <button id="btnSpawn">SPAWN</button>
+      <button id="btnLobby">LOBBY</button>
+      <button id="btnPoker">POKER</button>
+      <button id="btnStore">STORE</button>
+      <button id="btnScorpion">SCORPION</button>
+      <button id="btnSpectate">SPECTATE</button>
+      <button id="btnUnstuck">UNSTUCK</button>
+      <button id="btnHealthcheck">HEALTHCHECK</button>
+    </div>
+
+    <div style="opacity:.75; font-size:13px;">
+      left stick: move + strafe • right stick: snap turn (45°)
+    </div>
   </div>
-  <pre id="hudStatus">room:?  pos:?  XR:?</pre>
-</div>
 
-<script>
-(() => {
-  const ui = document.getElementById("ui");
-  const hudBtn = document.getElementById("btnHud");
-  hudBtn.onclick = () => ui.classList.toggle("hidden");
-})();
-</script>
-
-<!-- 🔥 ONLY SCRIPT LOADED 🔥 -->
-<script src="./js/boot.js?v=SCARLETT_BOOT_FINAL" defer></script>
-
+  <!-- ✅ THIS IS THE IMPORTANT PART: FORCE PROJECT PATH -->
+  <script src="/scarlett-poker-vr/js/boot.js?v=SCARLETT_BOOT_FINAL" defer></script>
 </body>
 </html>

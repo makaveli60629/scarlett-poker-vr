@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8"><title>Scarlett VR - Modular</title>
-    <style>body { margin: 0; background: #000; overflow: hidden; }</style>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
+        #overlay { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 1000; display: flex; gap: 10px; }
+        button { padding: 12px 20px; background: #00ffff; border: none; font-weight: bold; cursor: pointer; border-radius: 5px; }
+    </style>
     <script type="importmap">
     {
         "imports": {
@@ -13,6 +17,9 @@
     </script>
 </head>
 <body>
+    <div id="overlay">
+        <button id="recenterBtn">RE-CENTER CAMERA</button>
+    </div>
     <script type="module" src="./js/index.js"></script>
 </body>
 </html>

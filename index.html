@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Scarlett Empire VR - Full Diagnostics</title>
+    <title>Scarlett Empire VR - Monolith V10</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: monospace; }
-        #debug-ui { position: absolute; top: 10px; left: 10px; color: #0f0; z-index: 10; pointer-events: none; font-size: 14px; background: rgba(0,0,0,0.5); padding: 5px; border-radius: 5px; }
+        #debug { position: absolute; top: 10px; left: 10px; color: #0f0; background: rgba(0,0,0,0.7); padding: 8px; z-index: 100; pointer-events: none; border-radius: 4px; border: 1px solid #0f0; }
     </style>
     <script type="importmap">
     {
@@ -17,12 +17,10 @@
     </script>
 </head>
 <body>
-    <div id="debug-ui">
-        <b>SCARLETT_ENGINE_V9.5_FULL</b><br>
-        Oculus/Android: <span id="xr-status">READY</span><br>
-        Hands: <span id="hand-status">Searching...</span><br>
-        Room: <span id="room-id">VIP_SPAWN</span><br>
-        FPS: <span id="fps">0</span>
+    <div id="debug">
+        DIAGNOSTICS: <span id="xr-status">READY</span><br>
+        HANDS: <span id="hand-status">SEARCHING...</span><br>
+        VIEW: <span id="view-status">CALIBRATING...</span>
     </div>
 
     <script type="module">
@@ -30,134 +28,134 @@
         import { VRButton } from 'three/addons/webxr/VRButton.js';
         import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
-        // --- CORE STATE ---
+        // --- GLOBAL ENGINE STATE ---
         const S = {
             scene: new THREE.Scene(),
             camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
             renderer: new THREE.WebGLRenderer({ antialias: true, alpha: true }),
-            player: new THREE.Group(),
+            player: new THREE.Group(), // The "Rig"
             handFactory: new XRHandModelFactory(),
             floors: [],
             bots: [],
-            chips: [],
-            deck: [],
             clock: new THREE.Clock()
         };
 
-        // --- INITIALIZATION ---
+        // --- 1. INITIALIZATION ---
         async function init() {
             S.renderer.setSize(window.innerWidth, window.innerHeight);
-            S.renderer.setPixelRatio(window.devicePixelRatio);
             S.renderer.xr.enabled = true;
             document.body.appendChild(S.renderer.domElement);
             document.body.appendChild(VRButton.createButton(S.renderer));
 
             S.scene.add(S.player);
             S.player.add(S.camera);
-            
-            // SPAWN IN VIP ROOM LOOKING AT TABLE
+
+            // INITIAL SPAWN: VIP ROOM
             S.player.position.set(14, 0, 6); 
-            S.player.rotation.y = -Math.PI / 1.5;
 
             setupLighting();
             setupHands();
-            buildFullWorld();
-            spawnPokerLogic();
+            buildWorld();
+            spawnHumanoids(); // PLUGGING IN YOUR MOD
             
+            // --- THE "FIX THE WALL" LOGIC ---
+            S.renderer.xr.addEventListener('sessionstart', () => {
+                document.getElementById('xr-status').innerText = "VR ACTIVE";
+                setTimeout(() => {
+                    // Force the rig to look at the Poker Table (0, -1.6, 0)
+                    const tablePos = new THREE.Vector3(0, -1.6, 0);
+                    S.player.lookAt(tablePos.x, S.player.position.y, tablePos.z);
+                    document.getElementById('view-status').innerText = "LOCKED TO TABLE ✅";
+                }, 1000); 
+            });
+
             S.renderer.setAnimationLoop(tick);
         }
 
-        // --- MODULE: LIGHTING & ATMOSPHERE ---
+        // --- 2. LIGHTING (From lighting.js) ---
         function setupLighting() {
             S.scene.fog = new THREE.FogExp2(0x0b0d14, 0.02);
-            const hemi = new THREE.HemisphereLight(0xdaf0ff, 0x0b0f1a, 1.1);
+            const hemi = new THREE.HemisphereLight(0xdaf0ff, 0x0b0f1a, 1.2);
             S.scene.add(hemi);
             
-            const pitSpot = new THREE.SpotLight(0xffffff, 1.5, 20);
-            pitSpot.position.set(0, 8, 0);
+            const pitSpot = new THREE.SpotLight(0xffffff, 2, 30);
+            pitSpot.position.set(0, 10, 0);
             S.scene.add(pitSpot);
         }
 
-        // --- MODULE: VR HANDS & ANDROID CONTROLLERS ---
+        // --- 3. HAND CONTROLS (Fixing "No Controls") ---
         function setupHands() {
             for (let i = 0; i < 2; i++) {
+                // Attach both Hands AND Controllers
                 const hand = S.renderer.xr.getHand(i);
                 hand.add(S.handFactory.createHandModel(hand, "mesh"));
                 S.player.add(hand);
-                
-                hand.addEventListener('connected', (e) => {
-                    document.getElementById('hand-status').innerText = `Hand ${i} Active`;
+
+                const controller = S.renderer.xr.getController(i);
+                S.player.add(controller);
+
+                hand.addEventListener('connected', () => {
+                    document.getElementById('hand-status').innerText = "CONNECTED ✅";
                 });
             }
         }
 
-        // --- MODULE: WORLD GEOMETRY ---
-        function buildFullWorld() {
-            const matFloor = new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.1, metalness: 0.6 });
+        // --- 4. WORLD GEOMETRY (From world.js) ---
+        function buildWorld() {
+            const matFloor = new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 0.1, metalness: 0.5 });
             const matGold = new THREE.MeshStandardMaterial({ color: 0xd2b46a, metalness: 0.9 });
 
-            // 1. Top Lobby Ring
+            // Top Lobby
             const top = new THREE.Mesh(new THREE.RingGeometry(9, 25, 64), matFloor);
             top.rotation.x = -Math.PI/2;
             S.scene.add(top); S.floors.push(top);
 
-            // 2. Sunken Pit Floor
+            // Sunken Pit
             const pit = new THREE.Mesh(new THREE.CircleGeometry(6.4, 64), matFloor);
             pit.position.y = -1.6; pit.rotation.x = -Math.PI/2;
             S.scene.add(pit); S.floors.push(pit);
 
-            // 3. The Ramp
+            // The Ramp (Bridge between Top and Pit)
             const ramp = new THREE.Mesh(new THREE.CylinderGeometry(6.4, 9, 1.6, 64, 1, true), matFloor);
             ramp.position.y = -0.8;
             S.scene.add(ramp); S.floors.push(ramp);
 
-            // 4. Poker Table
+            // Table centerpiece
             const table = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 0.25, 32), matGold);
-            table.position.y = -0.85;
+            table.position.set(0, -0.85, 0);
             S.scene.add(table);
         }
 
-        // --- MODULE: POKER & CARDS ---
-        function spawnPokerLogic() {
-            const cardMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
-            const chipMat = new THREE.MeshStandardMaterial({ color: 0xff2d7a, emissive: 0xff2d7a, emissiveIntensity: 0.5 });
-
-            // Spawn 52 Cards in Deck position
-            for(let i=0; i<5; i++) {
-                const card = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.002, 0.18), cardMat);
-                card.position.set(-0.5, -0.72 + (i*0.005), 0);
-                S.scene.add(card);
-                S.deck.push(card);
-            }
-
-            // Spawn 6 Humanoid Bots
+        // --- 5. HUMANOIDS MOD (From humanoids.js) ---
+        function spawnHumanoids() {
+            const botMat = new THREE.MeshStandardMaterial({ color: 0xe6e6e6 });
             for (let i = 0; i < 6; i++) {
-                const angle = (i/6) * Math.PI * 2;
+                const angle = (i / 6) * Math.PI * 2;
                 const bot = new THREE.Group();
-                const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.42, 6, 10), new THREE.MeshStandardMaterial({color: 0xe6e6e6}));
+                const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.42, 6, 10), botMat);
                 torso.position.y = 1.15;
                 bot.add(torso);
-                bot.position.set(Math.cos(angle)*4, -1.6, Math.sin(angle)*4);
+                
+                bot.position.set(Math.cos(angle) * 4.5, -1.6, Math.sin(angle) * 4.5);
                 bot.lookAt(0, -1.6, 0);
                 S.scene.add(bot);
                 S.bots.push(bot);
             }
         }
 
-        // --- CORE LOOP & GRAVITY ---
-        let lastT = 0;
+        // --- 6. CORE ENGINE LOOP ---
         const raycaster = new THREE.Raycaster();
-        const down = new THREE.Vector3(0,-1,0);
+        const down = new THREE.Vector3(0, -1, 0);
 
-        function tick(time) {
+        function tick() {
             const dt = S.clock.getDelta();
-            document.getElementById('fps').innerText = Math.round(1/dt);
 
-            // Gravity Logic: Follow Ramp/Floors
+            // GRAVITY: Makes sure you "fall" down the ramp into the pit
             raycaster.set(S.player.position, down);
-            const hit = raycaster.intersectObjects(S.floors);
-            if(hit.length > 0) {
-                S.player.position.y = THREE.MathUtils.lerp(S.player.position.y, hit[0].point.y, 0.1);
+            const intersects = raycaster.intersectObjects(S.floors);
+            if (intersects.length > 0) {
+                const targetY = intersects[0].point.y;
+                S.player.position.y = THREE.MathUtils.lerp(S.player.position.y, targetY, 0.1);
             }
 
             S.renderer.render(S.scene, S.camera);

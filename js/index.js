@@ -1,73 +1,74 @@
-// /js/index.js — Scarlett Single-Baseline Entry v14 (FULL)
-// ✅ VRButton always appended
-// ✅ On-screen green log + status pills
-// ✅ Hide/Show HUD + Copy log
-// ✅ Uses core/ui_sticks.js (no duplicates)
-// ✅ Calls Controls first, then World, then kills loader
+// /js/index.js — Scarlett Deploy-Proof Entry v1 (FULL)
+// VRButton + diagnostics + calls Controls then World.
 
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js";
 import { VRButton } from "./VRButton.js";
 import { Controls } from "./controls.js";
 import { World } from "./world.js";
-import { UISticks } from "./core/ui_sticks.js"; // <-- YOUR CORE FOLDER
 
-const logBox = () => document.getElementById("logBox");
-const setText = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+function $(id){ return document.getElementById(id); }
+function setText(id, txt){ var el=$(id); if(el) el.textContent = txt; }
 
-function hudLog(...a){
-  const line = a.map(x => (typeof x === "string" ? x : JSON.stringify(x))).join(" ");
-  console.log(line);
-  const el = logBox();
-  if (el) { el.textContent += "\n" + line; el.scrollTop = el.scrollHeight; }
+function hudLog(){
+  var el = $("logBox");
+  var msg = Array.prototype.slice.call(arguments).join(" ");
+  console.log(msg);
+  if (el) { el.textContent += "\n" + msg; el.scrollTop = el.scrollHeight; }
 }
 
 function hideLoader(){
-  const el = document.getElementById("loader");
+  var el = $("loader");
   if (el) { el.style.display = "none"; el.style.pointerEvents = "none"; }
 }
 
 function toggleHud(){
-  const hud = document.getElementById("hud");
-  const diag = document.getElementById("diag");
-  const btn = document.getElementById("btnHud");
-  const hidden = hud?.classList.contains("hidden");
-
+  var hud = $("hud");
+  var diag = $("diag");
+  var btn = $("btnHud");
+  var hidden = hud && hud.classList.contains("hidden");
   if (hidden) {
     hud.classList.remove("hidden");
-    diag?.classList.remove("hidden");
+    if (diag) diag.classList.remove("hidden");
     if (btn) btn.textContent = "HIDE HUD";
   } else {
-    hud?.classList.add("hidden");
-    diag?.classList.add("hidden");
+    if (hud) hud.classList.add("hidden");
+    if (diag) diag.classList.add("hidden");
     if (btn) btn.textContent = "SHOW HUD";
   }
 }
 
 function copyLog(){
-  const txt = logBox()?.textContent || "";
-  navigator.clipboard?.writeText(txt)
-    .then(() => hudLog("[hud] copied ✅"))
-    .catch(() => hudLog("[hud] copy failed ❌"));
+  var el = $("logBox");
+  var txt = el ? el.textContent : "";
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(function(){
+      hudLog("[hud] copied ✅");
+    }).catch(function(){
+      hudLog("[hud] copy failed ❌");
+    });
+  } else {
+    hudLog("[hud] clipboard not available");
+  }
 }
 
-let renderer, scene, camera, player;
-let worldReady = false;
+var renderer, scene, camera, player;
+var lastT = 0;
+var fpsAcc = 0, fpsN = 0, fpsT0 = 0;
 
 function init(){
   hudLog("[index] start ✅");
-  hudLog(`href=${location.href}`);
-  hudLog(`secureContext=${window.isSecureContext}`);
-  hudLog(`ua=${navigator.userAgent}`);
-  hudLog(`navigator.xr=${!!navigator.xr}`);
+  hudLog("href=" + location.href);
+  hudLog("secureContext=" + window.isSecureContext);
+  hudLog("ua=" + navigator.userAgent);
+  hudLog("navigator.xr=" + (!!navigator.xr));
 
-  renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
   document.body.appendChild(renderer.domElement);
 
-  // VR button (guaranteed)
-  const vrBtn = VRButton.createButton(renderer);
+  var vrBtn = VRButton.createButton(renderer);
   vrBtn.style.position = "fixed";
   vrBtn.style.left = "20px";
   vrBtn.style.bottom = "20px";
@@ -76,8 +77,6 @@ function init(){
   hudLog("[index] VRButton ✅");
 
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x000000);
-
   camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 900);
   camera.position.set(0, 1.6, 0);
 
@@ -86,97 +85,64 @@ function init(){
   player.add(camera);
   scene.add(player);
 
-  window.addEventListener("resize", () => {
+  window.addEventListener("resize", function(){
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // HUD buttons
-  document.getElementById("btnHud")?.addEventListener("click", toggleHud);
-  document.getElementById("btnCopy")?.addEventListener("click", copyLog);
+  if ($("btnHud")) $("btnHud").addEventListener("click", toggleHud);
+  if ($("btnCopy")) $("btnCopy").addEventListener("click", copyLog);
 
-  // Android sticks (from core) — safe even if your core file is “no-op” on Quest
   try {
-    UISticks?.init?.({
-      leftZoneId: "stickL", rightZoneId: "stickR",
-      leftNubId: "nubL", rightNubId: "nubR",
-      touchRootId: "touchSticks",
-      log: (...a) => hudLog("[ui]", ...a)
+    Controls.init({ THREE: THREE, renderer: renderer, scene: scene, camera: camera, player: player,
+      log: function(){ hudLog.apply(null, ["[ctrl]"].concat([].slice.call(arguments))); },
+      warn: function(){ hudLog.apply(null, ["[ctrl][warn]"].concat([].slice.call(arguments))); },
+      err: function(){ hudLog.apply(null, ["[ctrl][err]"].concat([].slice.call(arguments))); }
     });
-  } catch (e) {
-    hudLog("[ui] init skipped:", e?.message || e);
+    hudLog("[index] Controls init ✅");
+  } catch(e) {
+    hudLog("[index] Controls init FAILED ❌", e && e.message ? e.message : e);
   }
 
-  // Controls FIRST (single baseline)
-  Controls.init({
-    THREE, renderer, scene, camera, player,
-    log: (...a)=>hudLog("[ctrl]", ...a),
-    warn:(...a)=>hudLog("[ctrl][warn]", ...a),
-    err: (...a)=>hudLog("[ctrl][err]", ...a)
-  });
-
-  // World SECOND (safe; does not own controls)
-  World.init({
-    THREE, scene, renderer, camera, player,
-    log: (...a)=>hudLog("[world]", ...a)
-  }).then(() => {
-    worldReady = true;
+  World.init({ THREE: THREE, scene: scene, renderer: renderer, camera: camera, player: player,
+    log: function(){ hudLog.apply(null, ["[world]"].concat([].slice.call(arguments))); }
+  }).then(function(){
+    hudLog("[index] World READY ✅");
     hideLoader();
-    hudLog("[index] World READY ✅ loader hidden");
-  }).catch((e) => {
-    hudLog("[index] World init FAILED ❌", e?.message || e);
+  }).catch(function(e){
+    hudLog("[index] World init FAILED ❌", e && e.message ? e.message : e);
   });
 
-  // Global errors to HUD
-  window.addEventListener("error", (e) => hudLog("[ERR]", e?.message || e));
-  window.addEventListener("unhandledrejection", (e) => hudLog("[PROMISE ERR]", e?.reason?.message || e?.reason || e));
+  window.addEventListener("error", function(e){
+    hudLog("[ERR]", e && e.message ? e.message : e);
+  });
+  window.addEventListener("unhandledrejection", function(e){
+    hudLog("[PROMISE ERR]", e && e.reason ? (e.reason.message || e.reason) : e);
+  });
 
-  // Render loop + diagnostics
-  let lastT = performance.now();
-  let fpsAcc = 0, fpsN = 0, fpsT0 = performance.now();
+  lastT = performance.now();
+  fpsT0 = lastT;
 
-  renderer.setAnimationLoop((t) => {
-    const dt = Math.min(0.05, (t - lastT) / 1000);
+  renderer.setAnimationLoop(function(t){
+    var dt = Math.min(0.05, (t - lastT) / 1000);
     lastT = t;
 
-    // Android move/look only when NOT in XR
-    if (!renderer.xr.isPresenting && UISticks?.getAxes) {
-      const ax = UISticks.getAxes();
-      player.rotation.y -= (ax.rx || 0) * 1.6 * dt;
-      camera.rotation.x -= (ax.ry || 0) * 1.2 * dt;
-      camera.rotation.x = Math.max(-1.2, Math.min(1.2, camera.rotation.x));
-
-      const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); fwd.y=0; fwd.normalize();
-      const rgt = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion); rgt.y=0; rgt.normalize();
-
-      const mv = new THREE.Vector3();
-      mv.addScaledVector(rgt, (ax.lx || 0));
-      mv.addScaledVector(fwd, -(ax.ly || 0));
-      const L = mv.length();
-      if (L > 0.001) {
-        mv.multiplyScalar((2.35 * dt) / L);
-        player.position.add(mv);
-      }
-    }
-
-    Controls.update?.(dt);
-    World.update?.(dt, t);
+    try { Controls.update(dt); } catch(_e){}
+    try { World.update(dt, t); } catch(_e){}
 
     renderer.render(scene, camera);
 
-    // HUD pills
     setText("debugXR", renderer.xr.isPresenting ? "XR:on" : "XR:off");
-    setText("debugPos", `pos x:${player.position.x.toFixed(2)} y:${player.position.y.toFixed(2)} z:${player.position.z.toFixed(2)}`);
+    setText("debugPos", "pos x:" + player.position.x.toFixed(2) + " y:" + player.position.y.toFixed(2) + " z:" + player.position.z.toFixed(2));
 
-    const pad = Controls.getPadDebug?.() || "pad:?";
-    const btns = Controls.getButtonDebug?.() || "btns:?";
-    setText("debugPad", pad);
-    setText("debugBtns", btns);
+    if (Controls.getPadDebug) setText("debugPad", Controls.getPadDebug());
+    if (Controls.getButtonDebug) setText("debugBtns", Controls.getButtonDebug());
 
-    fpsAcc += 1 / Math.max(0.0001, dt); fpsN++;
+    fpsAcc += 1 / Math.max(0.0001, dt);
+    fpsN++;
     if ((t - fpsT0) > 500) {
-      setText("debugPerf", `fps:${(fpsAcc / fpsN).toFixed(0)}`);
+      setText("debugPerf", "fps:" + (fpsAcc / fpsN).toFixed(0));
       fpsAcc = 0; fpsN = 0; fpsT0 = t;
     }
   });

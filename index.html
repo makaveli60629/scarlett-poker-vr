@@ -1,44 +1,23 @@
-// /js/boot.js — Scarlett Boot Diagnostics v3 (FULL)
-(() => {
-  const stamp = Date.now();
-  const logEl = () => document.getElementById("logBox");
-  const subEl = () => document.getElementById("loaderSub");
-  const hintEl = () => document.getElementById("loaderHint");
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Scarlett Poker VR</title>
+  <style>
+    html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui}
+    #logBox{white-space:pre-wrap;font:12px/1.35 ui-monospace; color:#86ff86; padding:12px}
+    #loader{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column}
+  </style>
+</head>
+<body>
+  <div id="loader">
+    <div>Loading Scarlett Poker VR…</div>
+    <div id="loaderSub" style="opacity:.7;margin-top:8px">Booting…</div>
+  </div>
+  <div id="logBox">[BOOT LOG]</div>
 
-  function write(line) {
-    console.log(line);
-    const el = logEl();
-    if (el) {
-      el.textContent += "\n" + line;
-      el.scrollTop = el.scrollHeight;
-    }
-  }
-  function setSub(t){ const el=subEl(); if(el) el.textContent=t; }
-  function setHint(t){ const el=hintEl(); if(el) el.textContent=t; }
-
-  const path = location.pathname;
-  const base = path.includes("/scarlett-poker-vr/") ? "/scarlett-poker-vr/" :
-               (path.endsWith("/") ? path : path.replace(/[^/]+$/, ""));
-
-  write("[BOOT] start ✅");
-  write(`href=${location.href}`);
-  write(`secureContext=${window.isSecureContext}`);
-  write(`ua=${navigator.userAgent}`);
-  write(`base=${base}`);
-  write(`navigator.xr=${!!navigator.xr}`);
-
-  setSub("Importing index.js…");
-
-  const entry = new URL(`${base}js/index.js?v=${stamp}`, location.origin).toString();
-  write(`[BOOT] importing ${entry}`);
-
-  import(entry).then(() => {
-    write("[BOOT] index.js imported ✅");
-    setSub("Boot OK ✅");
-    setHint("If you still see loader, World will kill it when ready.");
-  }).catch((e) => {
-    write(`[BOOT] import FAILED ❌ ${e?.message || e}`);
-    setSub("Import failed ❌");
-    setHint("Fix path or syntax. The log above tells you exactly what.");
-  });
-})();
+  <!-- This must be MODULE -->
+  <script type="module" src="./js/boot.js"></script>
+</body>
+</html>

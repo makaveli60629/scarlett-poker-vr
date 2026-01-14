@@ -1,350 +1,187 @@
-// /js/controls.js — Scarlett PERMANENT QUEST FIX v6 (FULL)
-// Fixes (permanent):
-// ✅ Laser orientation (no more pointing up)
-// ✅ Green reticle direction matches laser (no opposite)
-// ✅ Left stick forward/back auto-calibrates + stays correct
-// ✅ Trigger/grip works (events + gamepad fallback)
-// ✅ Snap-turn on right stick X
-//
-// Drop-in replacement for /js/controls.js
+// /js/index.js — Scarlett Single-Baseline Entry v14 (FULL)
+// ✅ VRButton always appended
+// ✅ On-screen green log + status pills
+// ✅ Hide/Show HUD + Copy log
+// ✅ Uses core/ui_sticks.js (no duplicates)
+// ✅ Calls Controls first, then World, then kills loader
 
-export const Controls = (() => {
-  let THREE, renderer, scene, camera, player;
-  let log = console.log, warn = console.warn, err = console.error;
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js";
+import { VRButton } from "./VRButton.js";
+import { Controls } from "./controls.js";
+import { World } from "./world.js";
+import { UISticks } from "./core/ui_sticks.js"; // <-- YOUR CORE FOLDER
 
-  const state = {
-    ctrl: { left: null, right: null },
-    grip: { left: null, right: null },
-    laser: { left: null, right: null },
-    reticle: null,
+const logBox = () => document.getElementById("logBox");
+const setText = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
 
-    buttons: {
-      left:  { trigger:false, grip:false },
-      right: { trigger:false, grip:false }
-    },
+function hudLog(...a){
+  const line = a.map(x => (typeof x === "string" ? x : JSON.stringify(x))).join(" ");
+  console.log(line);
+  const el = logBox();
+  if (el) { el.textContent += "\n" + line; el.scrollTop = el.scrollHeight; }
+}
 
-    yaw: 0,
-    snapCooldown: 0,
+function hideLoader(){
+  const el = document.getElementById("loader");
+  if (el) { el.style.display = "none"; el.style.pointerEvents = "none"; }
+}
 
-    // movement calibration
-    moveFlipY: 1,
-    moveCalibrated: false,
-    _calibAccum: 0
-  };
+function toggleHud(){
+  const hud = document.getElementById("hud");
+  const diag = document.getElementById("diag");
+  const btn = document.getElementById("btnHud");
+  const hidden = hud?.classList.contains("hidden");
 
-  const cfg = {
-    moveSpeed: 2.25,
-    deadzone: 0.12,
-    snapDeg: 45,
-    snapCooldownSec: 0.22,
-    laserLength: 8.0,
-    maxReticleDist: 14
-  };
+  if (hidden) {
+    hud.classList.remove("hidden");
+    diag?.classList.remove("hidden");
+    if (btn) btn.textContent = "HIDE HUD";
+  } else {
+    hud?.classList.add("hidden");
+    diag?.classList.add("hidden");
+    if (btn) btn.textContent = "SHOW HUD";
+  }
+}
 
-  const tmp = {
-    origin: null,
-    dir: null,
-    q: null,
-    v: null,
-    hmdFwd: null
-  };
+function copyLog(){
+  const txt = logBox()?.textContent || "";
+  navigator.clipboard?.writeText(txt)
+    .then(() => hudLog("[hud] copied ✅"))
+    .catch(() => hudLog("[hud] copy failed ❌"));
+}
 
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const dz = (v) => (Math.abs(v) < cfg.deadzone ? 0 : v);
+let renderer, scene, camera, player;
+let worldReady = false;
 
-  function init(ctx) {
-    THREE = ctx.THREE;
-    renderer = ctx.renderer;
-    scene = ctx.scene;
-    camera = ctx.camera;
-    player = ctx.player;
-    log = ctx.log || log;
-    warn = ctx.warn || warn;
-    err = ctx.err || err;
+function init(){
+  hudLog("[index] start ✅");
+  hudLog(`href=${location.href}`);
+  hudLog(`secureContext=${window.isSecureContext}`);
+  hudLog(`ua=${navigator.userAgent}`);
+  hudLog(`navigator.xr=${!!navigator.xr}`);
 
-    tmp.origin = new THREE.Vector3();
-    tmp.dir = new THREE.Vector3();
-    tmp.q = new THREE.Quaternion();
-    tmp.v = new THREE.Vector3();
-    tmp.hmdFwd = new THREE.Vector3();
+  renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
 
-    state.yaw = player.rotation.y;
+  // VR button (guaranteed)
+  const vrBtn = VRButton.createButton(renderer);
+  vrBtn.style.position = "fixed";
+  vrBtn.style.left = "20px";
+  vrBtn.style.bottom = "20px";
+  vrBtn.style.zIndex = "9999";
+  document.body.appendChild(vrBtn);
+  hudLog("[index] VRButton ✅");
 
-    installControllers(false);
-    installReticle();
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x000000);
 
-    renderer.xr.addEventListener?.("sessionstart", () => {
-      installControllers(true);
-      state.moveCalibrated = false;
-      state._calibAccum = 0;
-      log("sessionstart: rebound controllers/grips/lasers ✅");
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 900);
+  camera.position.set(0, 1.6, 0);
+
+  player = new THREE.Group();
+  player.name = "PlayerRig";
+  player.add(camera);
+  scene.add(player);
+
+  window.addEventListener("resize", () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // HUD buttons
+  document.getElementById("btnHud")?.addEventListener("click", toggleHud);
+  document.getElementById("btnCopy")?.addEventListener("click", copyLog);
+
+  // Android sticks (from core) — safe even if your core file is “no-op” on Quest
+  try {
+    UISticks?.init?.({
+      leftZoneId: "stickL", rightZoneId: "stickR",
+      leftNubId: "nubL", rightNubId: "nubR",
+      touchRootId: "touchSticks",
+      log: (...a) => hudLog("[ui]", ...a)
     });
-
-    renderer.xr.addEventListener?.("sessionend", () => {
-      state.snapCooldown = 0;
-      state.moveCalibrated = false;
-      state._calibAccum = 0;
-      log("sessionend ✅");
-    });
-
-    log("Controls init ✅ (v6)");
+  } catch (e) {
+    hudLog("[ui] init skipped:", e?.message || e);
   }
 
-  // ---------------- Controllers / Grips ----------------
-  function installControllers(force) {
-    try {
-      const c0 = renderer.xr.getController(0);
-      const c1 = renderer.xr.getController(1);
-      const g0 = renderer.xr.getControllerGrip(0);
-      const g1 = renderer.xr.getControllerGrip(1);
+  // Controls FIRST (single baseline)
+  Controls.init({
+    THREE, renderer, scene, camera, player,
+    log: (...a)=>hudLog("[ctrl]", ...a),
+    warn:(...a)=>hudLog("[ctrl][warn]", ...a),
+    err: (...a)=>hudLog("[ctrl][err]", ...a)
+  });
 
-      c0.name = "XRController0";
-      c1.name = "XRController1";
-      g0.name = "XRGrip0";
-      g1.name = "XRGrip1";
+  // World SECOND (safe; does not own controls)
+  World.init({
+    THREE, scene, renderer, camera, player,
+    log: (...a)=>hudLog("[world]", ...a)
+  }).then(() => {
+    worldReady = true;
+    hideLoader();
+    hudLog("[index] World READY ✅ loader hidden");
+  }).catch((e) => {
+    hudLog("[index] World init FAILED ❌", e?.message || e);
+  });
 
-      if (force || !c0.parent) player.add(c0);
-      if (force || !c1.parent) player.add(c1);
-      if (force || !g0.parent) player.add(g0);
-      if (force || !g1.parent) player.add(g1);
+  // Global errors to HUD
+  window.addEventListener("error", (e) => hudLog("[ERR]", e?.message || e));
+  window.addEventListener("unhandledrejection", (e) => hudLog("[PROMISE ERR]", e?.reason?.message || e?.reason || e));
 
-      state.ctrl.left = c0;
-      state.ctrl.right = c1;
-      state.grip.left = g0;
-      state.grip.right = g1;
+  // Render loop + diagnostics
+  let lastT = performance.now();
+  let fpsAcc = 0, fpsN = 0, fpsT0 = performance.now();
 
-      // Bind events on BOTH controller + grip (Quest variations)
-      bindPressEvents("left", c0);
-      bindPressEvents("right", c1);
-      bindPressEvents("left", g0);
-      bindPressEvents("right", g1);
+  renderer.setAnimationLoop((t) => {
+    const dt = Math.min(0.05, (t - lastT) / 1000);
+    lastT = t;
 
-      ensureLaser("left");
-      ensureLaser("right");
+    // Android move/look only when NOT in XR
+    if (!renderer.xr.isPresenting && UISticks?.getAxes) {
+      const ax = UISticks.getAxes();
+      player.rotation.y -= (ax.rx || 0) * 1.6 * dt;
+      camera.rotation.x -= (ax.ry || 0) * 1.2 * dt;
+      camera.rotation.x = Math.max(-1.2, Math.min(1.2, camera.rotation.x));
 
-      attachLaserToGrip("left", g0);
-      attachLaserToGrip("right", g1);
+      const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); fwd.y=0; fwd.normalize();
+      const rgt = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion); rgt.y=0; rgt.normalize();
 
-      log("controllers+grips+lasers installed ✅");
-    } catch (e) {
-      warn("installControllers failed (non-fatal):", e?.message || e);
-    }
-  }
-
-  function bindPressEvents(side, obj) {
-    if (!obj || obj.__scarlettBound) return;
-    obj.__scarlettBound = true;
-
-    obj.addEventListener("selectstart", () => { state.buttons[side].trigger = true;  log(`${side} trigger down ✅`); });
-    obj.addEventListener("selectend",   () => { state.buttons[side].trigger = false; log(`${side} trigger up ✅`); });
-    obj.addEventListener("squeezestart",() => { state.buttons[side].grip = true;     log(`${side} grip down ✅`); });
-    obj.addEventListener("squeezeend",  () => { state.buttons[side].grip = false;    log(`${side} grip up ✅`); });
-  }
-
-  function safeRemove(obj) {
-    try { obj?.parent?.remove(obj); } catch {}
-  }
-
-  // ---------------- Laser / Reticle ----------------
-  function ensureLaser(side) {
-    if (state.laser[side]) return;
-
-    const geom = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, -1)
-    ]);
-    const mat = new THREE.LineBasicMaterial({ color: 0x00aaff });
-    const line = new THREE.Line(geom, mat);
-    line.name = `HandLaser_${side}`;
-    line.scale.z = cfg.laserLength;
-
-    state.laser[side] = line;
-  }
-
-  function attachLaserToGrip(side, gripObj) {
-    const laser = state.laser[side];
-    if (!laser || !gripObj) return;
-
-    if (laser.parent !== gripObj) {
-      safeRemove(laser);
-      gripObj.add(laser);
-    }
-
-    // reset local transform
-    laser.position.set(0, 0, 0);
-    laser.rotation.set(0, 0, 0);
-    laser.scale.z = cfg.laserLength;
-
-    // PERMANENT: Quest grip pose can be rotated; force visible ray forward/down.
-    // This rotation makes the line visually usable even if grip axes are weird.
-    laser.rotation.x = -Math.PI / 2;
-  }
-
-  function installReticle() {
-    const g = new THREE.RingGeometry(0.06, 0.085, 24);
-    const m = new THREE.MeshBasicMaterial({
-      color: 0x00ff88,
-      transparent: true,
-      opacity: 0.9,
-      side: THREE.DoubleSide
-    });
-    state.reticle = new THREE.Mesh(g, m);
-    state.reticle.rotation.x = -Math.PI / 2;
-    state.reticle.visible = false;
-    scene.add(state.reticle);
-  }
-
-  // Reticle must match LASER direction, not "opposite".
-  // We compute BOTH possible forward vectors (+Z and -Z), then choose the one that best aligns
-  // with camera forward (flat) so the reticle always appears in front of you.
-  function updateReticleFromRightGrip() {
-    const grip = state.grip.right || state.ctrl.right;
-    const reticle = state.reticle;
-    if (!grip || !reticle) return;
-
-    grip.getWorldPosition(tmp.origin);
-    grip.getWorldQuaternion(tmp.q);
-
-    // HMD forward (flattened)
-    tmp.hmdFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
-    tmp.hmdFwd.y = 0;
-    tmp.hmdFwd.normalize();
-
-    // Candidate A: -Z forward
-    const dirA = tmp.v.set(0, 0, -1).applyQuaternion(tmp.q).normalize();
-    const flatA = dirA.clone(); flatA.y = 0; flatA.normalize();
-
-    // Candidate B: +Z forward
-    const dirB = tmp.dir.set(0, 0, 1).applyQuaternion(tmp.q).normalize();
-    const flatB = dirB.clone(); flatB.y = 0; flatB.normalize();
-
-    // Choose whichever points more "forward" relative to HMD
-    const dotA = flatA.lengthSq() > 1e-6 ? flatA.dot(tmp.hmdFwd) : -999;
-    const dotB = flatB.lengthSq() > 1e-6 ? flatB.dot(tmp.hmdFwd) : -999;
-
-    const dir = (dotB > dotA) ? dirB : dirA;
-
-    // intersect floor y=0
-    const y0 = 0;
-    if (Math.abs(dir.y) < 1e-5) {
-      reticle.visible = false;
-      return;
-    }
-
-    const t = (y0 - tmp.origin.y) / dir.y;
-    if (t <= 0) {
-      reticle.visible = false;
-      return;
-    }
-
-    const hit = tmp.origin.clone().add(dir.clone().multiplyScalar(t));
-    const dist = hit.distanceTo(tmp.origin);
-    if (dist > cfg.maxReticleDist) {
-      reticle.visible = false;
-      return;
-    }
-
-    reticle.position.copy(hit);
-    reticle.visible = true;
-  }
-
-  // ---------------- Movement ----------------
-  function pickStickXY(gp) {
-    if (!gp || !gp.axes) return { x: 0, y: 0 };
-    const a = gp.axes;
-    const ax0 = a[0] ?? 0, ay0 = a[1] ?? 0;
-    const ax2 = a[2] ?? 0, ay3 = a[3] ?? 0;
-
-    const magA = Math.abs(ax0) + Math.abs(ay0);
-    const magB = Math.abs(ax2) + Math.abs(ay3);
-
-    return (magB > magA) ? { x: ax2, y: ay3 } : { x: ax0, y: ay0 };
-  }
-
-  function moveLocal(strafe, forward, dt) {
-    tmp.v.set(strafe, 0, forward);
-    if (tmp.v.lengthSq() < 1e-6) return;
-
-    tmp.v.normalize().multiplyScalar(cfg.moveSpeed * dt);
-    tmp.v.applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotation.y);
-    player.position.add(tmp.v);
-  }
-
-  function readButtons(side, gp) {
-    if (!gp || !gp.buttons) return;
-    // fallback: gamepad button states
-    const trig = !!gp.buttons[0]?.pressed;
-    const grip = !!gp.buttons[1]?.pressed;
-    state.buttons[side].trigger = state.buttons[side].trigger || trig;
-    state.buttons[side].grip = state.buttons[side].grip || grip;
-  }
-
-  function updateXR(dt) {
-    const session = renderer.xr.getSession();
-    if (!session) return;
-
-    let leftGP = null, rightGP = null;
-    for (const src of session.inputSources) {
-      if (!src?.gamepad) continue;
-      if (src.handedness === "left") leftGP = src.gamepad;
-      if (src.handedness === "right") rightGP = src.gamepad;
-    }
-    if (!leftGP || !rightGP) {
-      const gps = session.inputSources.filter(s => s?.gamepad).map(s => s.gamepad);
-      leftGP = leftGP || gps[0] || null;
-      rightGP = rightGP || gps[1] || null;
-    }
-
-    readButtons("left", leftGP);
-    readButtons("right", rightGP);
-
-    // MOVE (left stick) with auto-calibration of Y sign
-    const L = pickStickXY(leftGP);
-    const lx = dz(L.x);
-    const lyRaw = dz(L.y);
-
-    if (!state.moveCalibrated) {
-      state._calibAccum += Math.abs(lyRaw);
-      if (Math.abs(lyRaw) > 0.35 && state._calibAccum > 0.6) {
-        // If pushing forward yields positive, flip so forward becomes +lyRaw
-        state.moveFlipY = (lyRaw > 0) ? -1 : 1;
-        state.moveCalibrated = true;
-        log(`[move] calibrated ✅ moveFlipY=${state.moveFlipY}`);
+      const mv = new THREE.Vector3();
+      mv.addScaledVector(rgt, (ax.lx || 0));
+      mv.addScaledVector(fwd, -(ax.ly || 0));
+      const L = mv.length();
+      if (L > 0.001) {
+        mv.multiplyScalar((2.35 * dt) / L);
+        player.position.add(mv);
       }
     }
 
-    const forward = (-lyRaw) * state.moveFlipY;
-    moveLocal(lx, forward, dt);
+    Controls.update?.(dt);
+    World.update?.(dt, t);
 
-    // SNAP TURN (right stick X)
-    const R = pickStickXY(rightGP);
-    const rx = dz(R.x);
+    renderer.render(scene, camera);
 
-    state.snapCooldown = Math.max(0, state.snapCooldown - dt);
-    if (Math.abs(rx) > 0.65 && state.snapCooldown <= 0) {
-      const dir = rx > 0 ? -1 : 1;
-      state.yaw += dir * (cfg.snapDeg * Math.PI / 180);
-      player.rotation.y = state.yaw;
-      state.snapCooldown = cfg.snapCooldownSec;
+    // HUD pills
+    setText("debugXR", renderer.xr.isPresenting ? "XR:on" : "XR:off");
+    setText("debugPos", `pos x:${player.position.x.toFixed(2)} y:${player.position.y.toFixed(2)} z:${player.position.z.toFixed(2)}`);
+
+    const pad = Controls.getPadDebug?.() || "pad:?";
+    const btns = Controls.getButtonDebug?.() || "btns:?";
+    setText("debugPad", pad);
+    setText("debugBtns", btns);
+
+    fpsAcc += 1 / Math.max(0.0001, dt); fpsN++;
+    if ((t - fpsT0) > 500) {
+      setText("debugPerf", `fps:${(fpsAcc / fpsN).toFixed(0)}`);
+      fpsAcc = 0; fpsN = 0; fpsT0 = t;
     }
-  }
+  });
 
-  function update(dt) {
-    dt = Math.max(0.0, Math.min(0.05, dt || 0.016));
-    if (renderer?.xr?.isPresenting) {
-      updateXR(dt);
-      updateReticleFromRightGrip();
-    } else {
-      if (state.reticle) state.reticle.visible = false;
-    }
-  }
+  hudLog("[index] init done ✅");
+}
 
-  function getControllers() {
-    return { ...state.ctrl, grip: { ...state.grip } };
-  }
-  function getButtons() {
-    return state.buttons;
-  }
-
-  return { init, update, getControllers, getButtons };
-})();
+init();

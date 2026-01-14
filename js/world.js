@@ -1,33 +1,60 @@
-import { SpawnPoints } from './spawn_points.js'
-import { Tables } from './tables.js'
+import { applyLighting } from "./lighting.js";
+import { Humanoids } from "./humanoids.js";
+import { PokerJS } from "./poker.js";
 
 export const World = {
   async init(ctx) {
-    const scene = new THREE.Scene()
-    scene.background = new THREE.Color(0x101010)
+    const { THREE, scene, log } = ctx;
 
-    const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100)
-    const renderer = new THREE.WebGLRenderer({ antialias: true })
-    renderer.setSize(window.innerWidth, window.innerHeight)
-    renderer.xr.enabled = true
-    document.body.appendChild(renderer.domElement)
-    document.body.appendChild(VRButton.createButton(renderer))
+    const root = new THREE.Group();
+    scene.add(root);
 
-    const light = new THREE.HemisphereLight(0xffffff, 0x444444)
-    scene.add(light)
-
+    // Floor (guaranteed visual)
     const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(50,50),
-      new THREE.MeshStandardMaterial({ color: 0x222222 })
-    )
-    floor.rotation.x = -Math.PI/2
-    scene.add(floor)
+      new THREE.PlaneGeometry(60,60),
+      new THREE.MeshStandardMaterial({ color:0x0a0f1f })
+    );
+    floor.rotation.x = -Math.PI/2;
+    root.add(floor);
+    log("Floor OK");
 
-    SpawnPoints.apply(camera)
-    Tables.build(scene)
+    // Lighting
+    applyLighting({ THREE, scene, root });
+    log("Lighting OK");
 
-    renderer.setAnimationLoop(() => renderer.render(scene, camera))
+    // Table
+    const table = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.6,1.6,0.22,36),
+      new THREE.MeshStandardMaterial({ color:0x0b6b3a })
+    );
+    table.position.y = 0.75;
+    root.add(table);
+    log("Table OK");
 
-    return { scene, camera, renderer }
+    // Humanoids
+    const humanoids = Humanoids.init({ THREE, root });
+    humanoids.spawnBots({
+      count:6,
+      center:new THREE.Vector3(0,0,0),
+      radius:2.3,
+      y:0,
+      lookAt:new THREE.Vector3(0,1.2,0)
+    });
+    log("Humanoids OK");
+
+    // Poker
+    const poker = PokerJS.init({
+      THREE, scene, root, log,
+      deckPos:new THREE.Vector3(0,1.05,0),
+      potPos:new THREE.Vector3(0,1.02,0)
+    });
+    log("Poker OK");
+
+    return {
+      update(dt) {
+        humanoids.update(dt, performance.now()/1000);
+        poker.update(dt);
+      }
+    };
   }
-}
+};

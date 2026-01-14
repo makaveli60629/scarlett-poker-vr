@@ -1,147 +1,106 @@
-// /js/index.js — Scarlett Runtime (FULL) v10.7.1
-// ✅ Three.js CDN module
-// ✅ VRButton + XR init
-// ✅ local-floor reference space
-// ✅ Camera baseline set to (0,1.6,0) (NOT z=2) to prevent face-ring / rig weirdness
-// ✅ World tick loop
+// /js/index.js — Scarlett VR Poker Boot (FULL) — Quest Cache-Bust + Build Overlay
+import * as THREE from "./three.module.js";
 
-import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
-import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
-import { World } from "./world.js";
+// ✅ Cache-bust EVERYTHING that matters on Quest:
+import { BUILD } from "./build.js?v=SCARLETT_CTRL_FIX_2026_01_13_001";
+import { World } from "./world.js?v=SCARLETT_CTRL_FIX_2026_01_13_001";
+import { Control } from "./control.js?v=SCARLETT_CTRL_FIX_2026_01_13_001";
+import { VRButton } from "./VRButton.js?v=SCARLETT_CTRL_FIX_2026_01_13_001";
 
-const pad = (n) => String(n).padStart(2, "0");
-const now = () => {
-  const d = new Date();
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-};
+const log = (...a) => console.log(...a);
 
-const out = [];
-function log(m) {
-  const line = `[${now()}] ${m}`;
-  out.push(line);
-  console.log(line);
-  const el = document.getElementById("hud-log");
-  if (el) el.textContent = out.slice(-140).join("\n");
-  if (typeof window.__HTML_LOG === "function") { try { window.__HTML_LOG(line); } catch {} }
+let scene, camera, renderer;
+let playerRig;
+let overlay;
+
+boot();
+
+async function boot() {
+  scene = new THREE.Scene();
+
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 2000);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
+
+  // ✅ Player rig
+  playerRig = new THREE.Group();
+  playerRig.name = "PlayerRig";
+  playerRig.add(camera);
+  scene.add(playerRig);
+
+  // ✅ Build overlay (so we KNOW what Quest loaded)
+  overlay = makeBuildOverlay(BUILD.ID);
+  document.body.appendChild(overlay);
+
+  // ✅ INIT CONTROLS FIRST (Quest likes this ordering)
+  Control.init({
+    THREE,
+    renderer,
+    camera,
+    playerRig,
+    log,
+  });
+
+  // ✅ Build world
+  await World.init({
+    THREE,
+    scene,
+    renderer,
+    camera,
+    player: playerRig,
+    controllers: null,
+    log,
+    BUILD: BUILD.ID
+  });
+
+  // ✅ Spawn fix (higher + closer to center circle)
+  Control.setSpawn(0, 1.65, 2.2, Math.PI);
+
+  // ✅ VR button last
+  document.body.appendChild(VRButton.createButton(renderer));
+
+  window.addEventListener("resize", onResize);
+  onResize();
+
+  log("[index] boot ✅", BUILD.ID);
+
+  // ✅ animation loop
+  let last = performance.now();
+  renderer.setAnimationLoop(() => {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+
+    Control.update(dt);
+    renderer.render(scene, camera);
+
+    // keep overlay updated
+    overlay.querySelector("#build_id").textContent = BUILD.ID;
+  });
 }
 
-function setStatus(t) {
-  if (typeof window.__SET_BOOT_STATUS === "function") { try { window.__SET_BOOT_STATUS(t); } catch {} }
-}
-
-log(`[index] start ✅ href=${location.href}`);
-setStatus("index init…");
-
-// ---------- Renderer / Scene / Camera ----------
-const app = document.getElementById("app") || document.body;
-
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.xr.enabled = true;
-
-// Important: floor space
-try { renderer.xr.setReferenceSpaceType("local-floor"); } catch {}
-
-app.appendChild(renderer.domElement);
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x000000);
-
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.03, 500);
-// ✅ baseline: no forward z offset (this was causing weird offsets in XR)
-camera.position.set(0, 1.6, 0);
-
-const player = new THREE.Group();
-player.name = "PLAYER_RIG";
-player.position.set(0, 0, 0);
-player.add(camera);
-scene.add(player);
-
-// basic fallback lights
-{
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 0.95);
-  scene.add(hemi);
-  const dir = new THREE.DirectionalLight(0xffffff, 0.95);
-  dir.position.set(3, 8, 4);
-  scene.add(dir);
-}
-
-window.addEventListener("resize", () => {
+function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-});
-
-// ---------- VR Button ----------
-try {
-  const btn = VRButton.createButton(renderer);
-  document.body.appendChild(btn);
-  log("[index] VRButton appended ✅");
-} catch (e) {
-  log(`[index] VRButton failed ❌ ${e?.message || String(e)}`);
 }
 
-// Manual Enter VR (if you have a HUD button)
-const enterVrBtn = document.getElementById("enterVrBtn");
-enterVrBtn?.addEventListener("click", async () => {
-  try {
-    if (!navigator.xr) throw new Error("navigator.xr missing");
-    const sessionInit = {
-      optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking", "layers", "dom-overlay"],
-      domOverlay: { root: document.body }
-    };
-    const session = await navigator.xr.requestSession("immersive-vr", sessionInit);
-    renderer.xr.setSession(session);
-    log("[index] manual XR session start ✅");
-  } catch (e) {
-    log(`[index] manual XR failed ❌ ${e?.message || String(e)}`);
-  }
-});
-
-// Log session events
-renderer.xr.addEventListener("sessionstart", () => log("[xr] sessionstart ✅"));
-renderer.xr.addEventListener("sessionend", () => log("[xr] sessionend ✅"));
-
-// ---------- World Load ----------
-let worldApi = null;
-
-(async () => {
-  try {
-    setStatus("loading world…");
-    log("[index] init world…");
-
-    worldApi = await World.init({
-      THREE,
-      scene,
-      renderer,
-      camera,
-      player,
-      log,
-      BUILD: Date.now()
-    });
-
-    log("[index] world init ✅");
-    setStatus("ready ✅");
-  } catch (e) {
-    log(`[index] world init FAILED ❌ ${e?.message || String(e)}`);
-    setStatus("world failed ❌");
-  }
-})();
-
-// ---------- Animate ----------
-let last = performance.now();
-renderer.setAnimationLoop(() => {
-  const t = performance.now();
-  const dt = Math.min(0.05, (t - last) / 1000);
-  last = t;
-
-  try {
-    worldApi?.tick?.(dt, t * 0.001);
-  } catch (e) {
-    log(`[index] tick error ❌ ${e?.message || String(e)}`);
-  }
-
-  renderer.render(scene, camera);
-});
+function makeBuildOverlay(id) {
+  const el = document.createElement("div");
+  el.style.position = "fixed";
+  el.style.left = "10px";
+  el.style.bottom = "10px";
+  el.style.padding = "8px 10px";
+  el.style.background = "rgba(0,0,0,0.55)";
+  el.style.color = "#fff";
+  el.style.fontFamily = "monospace";
+  el.style.fontSize = "12px";
+  el.style.borderRadius = "10px";
+  el.style.zIndex = "99999";
+  el.style.pointerEvents = "none";
+  el.innerHTML = `BUILD: <span id="build_id">${id}</span>`;
+  return el;
+               }

@@ -1,27 +1,18 @@
-// /js/index.js — ScarlettVR Prime Entry (FULL) v15.0
-// SINGLE ENTRY • CORE XR + ANDROID DEV CONTROLS • BLACK-SCREEN GUARDS • DIAGNOSTICS
-// ✅ Fixes “Quest XR black screen” by forcing: safety lights, non-transparent clear, safe spawn,
-// ✅ Re-adds world on XR session start if it got lost,
-// ✅ DOM Overlay is OPTIONAL + gated (won’t break XR if missing),
-// ✅ Minimal dev HUD + log copy for Android debugging,
-// ✅ No main.js, no duplicates.
+// /js/index.js — ScarlettVR Prime Entry (FULL) v15.2
+// SINGLE ENTRY • CORE XR + ANDROID DEV CONTROLS • WORLD IMPORT PROBE • DIAGNOSTICS
+// ✅ Fixes “Quest XR black screen” guards
+// ✅ Adds HARD PROBE for world.js import/export/runtime errors (shows on HUD)
+// ✅ No main.js
 
-const BUILD = "INDEX_FULL_v15_0";
+const BUILD = "INDEX_FULL_v15_2";
 
 const log = (...a) => console.log(`[index ${BUILD}]`, ...a);
 const warn = (...a) => console.warn(`[index ${BUILD}]`, ...a);
 const err = (...a) => console.error(`[index ${BUILD}]`, ...a);
 
-// -----------------------------
-// Imports (Three via CDN ESM)
-// -----------------------------
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { VRButton } from "./VRButton.js";
-import { World } from "./world.js"; // must export { World } with create(ctx) returning { group } or { root/group }
 
-// -----------------------------
-// Globals
-// -----------------------------
 let renderer, scene, camera;
 let playerRig = null;
 let world = null;
@@ -42,13 +33,10 @@ const state = {
   }
 };
 
-// -----------------------------
-// Boot
-// -----------------------------
 boot().catch((e) => err("boot fatal", e));
 
 async function boot() {
-  log("runtime start ✅");
+  log("runtime start ✅ build=", BUILD);
   log("href=", location.href);
   log("secureContext=", window.isSecureContext);
   log("ua=", navigator.userAgent);
@@ -62,7 +50,7 @@ async function boot() {
   camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.02, 500);
   camera.position.set(0, 1.6, 2.0);
 
-  // Player rig (camera parent)
+  // Player rig
   playerRig = new THREE.Group();
   playerRig.name = "PlayerRig";
   playerRig.position.set(0, 1.6, 2.0);
@@ -72,14 +60,12 @@ async function boot() {
   // Renderer
   renderer = new THREE.WebGLRenderer({
     antialias: true,
-    alpha: false,                 // IMPORTANT: avoid XR alpha black surprises
+    alpha: false, // IMPORTANT: avoid XR alpha black issues
     powerPreference: "high-performance"
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
-
-  // IMPORTANT: non-transparent clear in XR
   renderer.setClearColor(0x000000, 1);
   renderer.autoClear = true;
   renderer.toneMappingExposure = 1.0;
@@ -88,90 +74,94 @@ async function boot() {
   document.body.style.overflow = "hidden";
   document.body.appendChild(renderer.domElement);
 
-  // Safety lights (this is THE #1 fix for “XR black screen” on standard materials)
   ensureSafetyLights(scene);
 
-  // Always-visible debug cube (proves XR render is working even if world is missing)
+  // Debug cube (always visible if render works)
   state.debug.cube = makeDebugCube();
   scene.add(state.debug.cube);
 
-  // Tiny origin axes for sanity
-  scene.add(makeAxes(0.6));
+  scene.add(new THREE.AxesHelper(0.6));
 
-  // Floor (prevents “floating in void”)
+  // Basic floor (so you always see *something*)
   scene.add(makeFloor());
 
-  // Dev HUD (Android + desktop)
+  // HUD + controls
   initDevHud();
-
-  // Input (keyboard + touch)
   wireKeyboard();
   wireTouchControls();
 
-  // World load (kept resilient)
-  await loadWorld();
+  // ✅ WORLD LOAD (PROBE)
+  await loadWorld_PROBE();
 
-  // XR Button + session hooks
+  // XR
   installXR();
 
-  // Resize
   window.addEventListener("resize", onResize);
   onResize();
 
-  // Animate
   renderer.setAnimationLoop(tick);
   log("animation loop ✅");
 }
 
-async function loadWorld() {
+// ============================================================================
+// WORLD LOAD — HARD PROBE (prints exact reason hasWorld=false)
+// ============================================================================
+async function loadWorld_PROBE() {
   try {
-    log("world: loading…");
+    log("world: loading (probe)…");
 
-    const ctx = {
-      THREE,
-      scene,
-      camera,
-      renderer,
-      playerRig,
-      log,
-      warn,
-      err
-    };
+    // Dynamic import with cache-bust so GitHub Pages cache can’t lie
+    const mod = await import(`./world.js?v=${Date.now()}`);
 
-    // World module can be either:
-    // 1) World.create(ctx) -> { group }
-    // 2) World(ctx) -> { group }
-    // 3) exports const World = { create() {} }
+    log("world: module keys=", Object.keys(mod));
+
+    // Support multiple export styles
+    const W = mod.World || mod.default || mod.world || null;
+    if (!W) {
+      throw new Error("world.js loaded but no export found. Expected: export const World = {...} or default export.");
+    }
+
+    // Call World.create(ctx) OR World(ctx)
+    const ctx = { THREE, scene, camera, renderer, playerRig, log, warn, err };
+
     let w = null;
+    if (typeof W.create === "function") {
+      w = await W.create(ctx);
+      log("world: create(ctx) returned ✅");
+    } else if (typeof W === "function") {
+      w = await W(ctx);
+      log("world: function(ctx) returned ✅");
+    } else {
+      throw new Error("World export exists, but has no create(ctx) and is not callable.");
+    }
 
-    if (World?.create) w = await World.create(ctx);
-    else if (typeof World === "function") w = await World(ctx);
-    else throw new Error("World export not found. Ensure world.js exports { World } with create(ctx).");
-
-    // normalize
     world = w || {};
     world.group = world.group || world.root || world.scene || world.world || null;
 
     if (!world.group) {
-      warn("world: no group/root found — only debug cube + floor will show");
-      return;
+      throw new Error("World returned but no group/root/scene found. Return { group } from create(ctx).");
     }
 
-    // Ensure in scene
+    // Attach
     if (!scene.children.includes(world.group)) {
       scene.add(world.group);
-      log("world: added to scene ✅");
     }
 
-    log("world: ready ✅", { children: world.group.children?.length ?? "?" });
+    log("world: added to scene ✅", { worldChildren: world.group.children?.length ?? "?" });
+
+    // Update HUD line immediately
+    if (state.debug.hudEl) state.debug.hudEl.textContent = buildHudText();
+
   } catch (e) {
     err("world: failed ❌", e);
-    // leave debug cube + floor + lights so you can still see something in XR
+    showHudError(`WORLD LOAD FAILED:\n${e?.message || e}\n\nOpen console for stack.`);
   }
 }
 
+// ============================================================================
+// XR
+// ============================================================================
 function installXR() {
-  // Create VR button
   const vrBtn = VRButton.createButton(renderer, getSessionInit());
   vrBtn.style.position = "absolute";
   vrBtn.style.left = "10px";
@@ -180,7 +170,6 @@ function installXR() {
   document.body.appendChild(vrBtn);
   log("VRButton appended ✅");
 
-  // XR session lifecycle
   renderer.xr.addEventListener("sessionstart", () => {
     state.isXR = true;
     log("XR sessionstart ✅", {
@@ -189,19 +178,17 @@ function installXR() {
       rigPos: playerRig?.position?.toArray?.()
     });
 
-    // Force safe spawn (prevents “inside floor” / “inside geometry” black)
+    // Safe spawn
     if (playerRig) playerRig.position.set(0, 1.6, 2.0);
 
-    // Re-attach world if XR path recreated/cleared it
+    // Reattach world if needed
     if (world?.group && !scene.children.includes(world.group)) {
       scene.add(world.group);
       log("XR: world re-added ✅");
     }
 
-    // Guarantee lights still exist
     ensureSafetyLights(scene);
 
-    // Put debug cube in front of user each XR entry
     if (state.debug.cube) state.debug.cube.position.set(0, 1.5, -1.0);
   });
 
@@ -211,45 +198,28 @@ function installXR() {
   });
 }
 
-// DOM Overlay is the #1 “maybe breaks XR” feature: gate it hard.
 function getSessionInit() {
-  const optionalFeatures = [
-    "local-floor",
-    "bounded-floor",
-    "local",
-    "viewer",
-    "hand-tracking"
-  ];
+  const optionalFeatures = ["local-floor", "bounded-floor", "local", "viewer", "hand-tracking"];
 
-  // Optional DOM Overlay (ONLY if root exists)
-  const root = document.getElementById("hudRoot");
-  if (root) {
-    optionalFeatures.push("dom-overlay");
-    log("dom-overlay: enabled (hudRoot found) ✅");
-    return { optionalFeatures, domOverlay: { root } };
-  } else {
-    log("dom-overlay: disabled (no hudRoot) ✅");
-    return { optionalFeatures };
-  }
+  // Only enable dom-overlay if hudRoot exists AND you decide to use it later.
+  // For now: we DO NOT request dom-overlay to avoid XR issues.
+  return { optionalFeatures };
 }
 
-// -----------------------------
-// Render loop
-// -----------------------------
+// ============================================================================
+// LOOP
+// ============================================================================
 function tick(t) {
   state.dt = Math.min((t - state.last) / 1000, 0.05);
   state.last = t;
 
-  // Simple dev locomotion for non-XR + XR (rig movement)
   applyMovement(state.dt);
 
-  // Debug cube slow pulse (proves loop runs)
   if (state.debug.cube) {
     state.debug.cube.rotation.y += 0.6 * state.dt;
     state.debug.cube.rotation.x += 0.25 * state.dt;
   }
 
-  // Update HUD at ~6fps
   if (state.debug.hudEl && (t - state.debug.lastHud) > 160) {
     state.debug.lastHud = t;
     state.debug.hudEl.textContent = buildHudText();
@@ -258,13 +228,12 @@ function tick(t) {
   renderer.render(scene, camera);
 }
 
-// -----------------------------
-// Movement (keyboard + touch)
-// -----------------------------
+// ============================================================================
+// MOVEMENT
+// ============================================================================
 function applyMovement(dt) {
   if (!playerRig) return;
 
-  // Keyboard
   const forward =
     (state.keys.has("KeyW") ? 1 : 0) +
     (state.keys.has("ArrowUp") ? 1 : 0) -
@@ -277,11 +246,8 @@ function applyMovement(dt) {
     (state.keys.has("KeyA") ? 1 : 0) -
     (state.keys.has("ArrowLeft") ? 1 : 0);
 
-  const turn =
-    (state.keys.has("KeyE") ? 1 : 0) -
-    (state.keys.has("KeyQ") ? 1 : 0);
+  const turn = (state.keys.has("KeyE") ? 1 : 0) - (state.keys.has("KeyQ") ? 1 : 0);
 
-  // Touch (mobile)
   const f = forward + state.touch.forward;
   const s = strafe + state.touch.strafe;
   const r = turn + state.touch.turn;
@@ -293,7 +259,6 @@ function applyMovement(dt) {
     const dir = new THREE.Vector3(s, 0, -f);
     dir.normalize();
 
-    // Move in rig-forward space
     const yaw = playerRig.rotation.y;
     const cos = Math.cos(yaw);
     const sin = Math.sin(yaw);
@@ -303,68 +268,16 @@ function applyMovement(dt) {
     playerRig.position.x += dx * speed;
     playerRig.position.z += dz * speed;
 
-    // keep above floor
     if (playerRig.position.y < 0.2) playerRig.position.y = 1.6;
   }
 }
 
-// -----------------------------
-// Helpers (lights, debug, floor)
-// -----------------------------
-function ensureSafetyLights(scene) {
-  const hasLight = scene.children.some((o) => o.isLight);
-  if (hasLight) return;
-
-  const amb = new THREE.AmbientLight(0xffffff, 0.7);
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 0.8);
-  const dir = new THREE.DirectionalLight(0xffffff, 1.1);
-  dir.position.set(3, 6, 3);
-  dir.castShadow = false;
-
-  scene.add(amb, hemi, dir);
-  log("safety lights added ✅");
-}
-
-function makeDebugCube() {
-  const g = new THREE.BoxGeometry(0.25, 0.25, 0.25);
-  const m = new THREE.MeshBasicMaterial({ color: 0xff00ff });
-  const cube = new THREE.Mesh(g, m);
-  cube.name = "DebugCube";
-  cube.position.set(0, 1.5, -1.0);
-  return cube;
-}
-
-function makeAxes(size = 1) {
-  const axes = new THREE.AxesHelper(size);
-  axes.name = "AxesHelper";
-  axes.position.set(0, 0.01, 0);
-  return axes;
-}
-
-function makeFloor() {
-  const g = new THREE.PlaneGeometry(50, 50);
-  const m = new THREE.MeshStandardMaterial({ color: 0x0b0f14, roughness: 1, metalness: 0 });
-  const floor = new THREE.Mesh(g, m);
-  floor.name = "Floor";
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.y = 0;
-  floor.receiveShadow = false;
-  return floor;
-}
-
-function onResize() {
-  if (!camera || !renderer) return;
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-}
-
-// -----------------------------
-// Dev HUD (Android friendly)
-// -----------------------------
+// ============================================================================
+// HUD
+// ============================================================================
 function initDevHud() {
   const hudRoot = document.createElement("div");
-  hudRoot.id = "hudRoot"; // if you want dom-overlay later, keep this.
+  hudRoot.id = "hudRoot";
   hudRoot.style.position = "fixed";
   hudRoot.style.left = "0";
   hudRoot.style.top = "0";
@@ -381,7 +294,7 @@ function initDevHud() {
   panel.style.pointerEvents = "auto";
   panel.style.margin = "8px";
   panel.style.padding = "8px";
-  panel.style.maxWidth = "520px";
+  panel.style.maxWidth = "560px";
   panel.style.background = "rgba(0,0,0,0.55)";
   panel.style.border = "1px solid rgba(255,255,255,0.15)";
   panel.style.borderRadius = "10px";
@@ -413,20 +326,15 @@ function initDevHud() {
     panel.style.display = state.debug.hudVisible ? "block" : "none";
   });
 
-  btn("Re-Add World", () => {
-    if (world?.group && !scene.children.includes(world.group)) {
-      scene.add(world.group);
-      log("manual: world re-added ✅");
-    } else {
-      warn("manual: world missing or already attached");
-    }
+  btn("Safe Spawn", () => {
+    if (playerRig) playerRig.position.set(0, 1.6, 2.0);
+    log("manual: safe spawn ✅");
   });
 
   btn("Safety Lights", () => ensureSafetyLights(scene));
 
-  btn("Safe Spawn", () => {
-    if (playerRig) playerRig.position.set(0, 1.6, 2.0);
-    log("manual: safe spawn ✅");
+  btn("Re-Load World", async () => {
+    await loadWorld_PROBE();
   });
 
   btn("Copy Logs", async () => {
@@ -435,8 +343,8 @@ function initDevHud() {
       await navigator.clipboard.writeText(text);
       log("logs copied ✅");
     } catch (e) {
-      warn("clipboard blocked (ok).", e);
-      alert("Clipboard blocked. Open DevTools console and copy logs manually.");
+      warn("clipboard blocked", e);
+      alert("Clipboard blocked. Copy from console instead.");
     }
   });
 
@@ -447,8 +355,24 @@ function initDevHud() {
   panel.appendChild(pre);
 
   state.debug.hudEl = pre;
-
   log("dev HUD ready ✅");
+}
+
+function showHudError(message) {
+  const hud = document.getElementById("hudRoot");
+  if (!hud) return;
+
+  const box = document.createElement("div");
+  box.style.pointerEvents = "auto";
+  box.style.margin = "8px";
+  box.style.padding = "10px";
+  box.style.background = "rgba(120,0,0,0.65)";
+  box.style.border = "1px solid rgba(255,255,255,0.25)";
+  box.style.borderRadius = "10px";
+  box.style.whiteSpace = "pre-wrap";
+  box.style.fontFamily = "monospace";
+  box.textContent = message;
+  hud.prepend(box);
 }
 
 function buildHudText() {
@@ -462,12 +386,10 @@ function buildHudText() {
     `Scene children: ${scene?.children?.length ?? "?"}  |  Lights: ${hasLight ? "YES" : "NO"}`,
     `World: ${hasWorld ? "attached ✅" : (world?.group ? "detached ⚠️" : "none ❌")}`,
     `Rig: x=${rig.x.toFixed(2)} y=${rig.y.toFixed(2)} z=${rig.z.toFixed(2)}`,
-    `Clear: alpha=false, clearColor=black(1.0)`,
-    `Tip: If Quest is black, ensure you can see the MAGENTA CUBE. If you can, world/materials/lights/spawn are the issue.`
+    `Tip: If you see MAGENTA CUBE, rendering works. If World is none, world.js import/export is failing.`
   ].join("\n");
 }
 
-// Minimal “copy logs” helper (not real console scraping — gives quick state summary)
 function collectConsoleHint() {
   const rig = playerRig?.position ? playerRig.position.toArray() : null;
   return [
@@ -483,9 +405,9 @@ function collectConsoleHint() {
   ].join("\n");
 }
 
-// -----------------------------
-// Input wiring
-// -----------------------------
+// ============================================================================
+// INPUT
+// ============================================================================
 function wireKeyboard() {
   window.addEventListener("keydown", (e) => state.keys.add(e.code));
   window.addEventListener("keyup", (e) => state.keys.delete(e.code));
@@ -493,7 +415,6 @@ function wireKeyboard() {
 }
 
 function wireTouchControls() {
-  // Simple 4-corner touch pads for mobile
   const pad = document.createElement("div");
   pad.style.position = "fixed";
   pad.style.left = "0";
@@ -547,7 +468,7 @@ function wireTouchControls() {
   bindHold(left, () => (state.touch.strafe = -1), () => (state.touch.strafe = 0));
   bindHold(right, () => (state.touch.strafe = 1), () => (state.touch.strafe = 0));
 
-  // Two-finger drag anywhere = turn (basic)
+  // Two-finger drag to turn
   let turning = false;
   let lastX = 0;
 
@@ -573,4 +494,46 @@ function wireTouchControls() {
   });
 
   log("touch controls ✅");
-      }
+}
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+function ensureSafetyLights(scene) {
+  const hasLight = scene.children.some((o) => o.isLight);
+  if (hasLight) return;
+
+  const amb = new THREE.AmbientLight(0xffffff, 0.7);
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 0.8);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.1);
+  dir.position.set(3, 6, 3);
+
+  scene.add(amb, hemi, dir);
+  log("safety lights added ✅");
+}
+
+function makeDebugCube() {
+  const g = new THREE.BoxGeometry(0.25, 0.25, 0.25);
+  const m = new THREE.MeshBasicMaterial({ color: 0xff00ff });
+  const cube = new THREE.Mesh(g, m);
+  cube.name = "DebugCube";
+  cube.position.set(0, 1.5, -1.0);
+  return cube;
+}
+
+function makeFloor() {
+  const g = new THREE.PlaneGeometry(50, 50);
+  const m = new THREE.MeshStandardMaterial({ color: 0x0b0f14, roughness: 1, metalness: 0 });
+  const floor = new THREE.Mesh(g, m);
+  floor.name = "Floor";
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = 0;
+  return floor;
+}
+
+function onResize() {
+  if (!camera || !renderer) return;
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}

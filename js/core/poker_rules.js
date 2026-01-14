@@ -1,143 +1,82 @@
-// /js/systems/poker_rules.js — Prime 10.0 (FULL)
-// Pure logic state machine. No rendering. Emits GAME_STATE + deal/reveal/bet requests.
-// Driven by Signals (BOT_ACTION, GAME_INIT, GAME_RESET).
+// /js/core/poker_rules.js — ScarlettVR Prime 10.0 (FULL)
+// Lightweight Texas Hold'em round state machine for demo play.
+// Real hand evaluation can be added later; this focuses on flow + events.
 
 export const PokerRules = (() => {
   const STREETS = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"];
 
-  function init({ Signals, manifest, log }) {
-    const seats = manifest.get("poker.seats") ?? 6;
+  return {
+    init({ Signals, manifest, log }) {
+      const state = {
+        street: "PREFLOP",
+        handId: 0,
+        seed: 0,
+        pot: 0,
+        button: 0,
+        players: Array.from({ length: 6 }).map((_, i) => ({
+          seat: i,
+          stack: 1000,
+          inHand: true,
+          bet: 0
+        }))
+      };
 
-    const state = {
-      seats,
-      street: "PREFLOP",
-      dealer: 0,
-      turn: 0,
-      pot: 0,
-      toCall: 0,
-      stacks: Array(seats).fill(1000),
-      inHand: Array(seats).fill(true),
-      acted: Array(seats).fill(false),
-      communityUpTo: 0,
-      round: 0,
-      minRaise: 25
-    };
-
-    function emitState() {
-      Signals.emit("GAME_STATE", { state: { ...state, stacks:[...state.stacks], inHand:[...state.inHand] } });
-    }
-
-    function resetRound() {
-      state.round++;
-      state.street = "PREFLOP";
-      state.pot = 0;
-      state.toCall = 25;
-      state.inHand.fill(true);
-      state.acted.fill(false);
-      state.communityUpTo = 0;
-      state.turn = (state.dealer + 1) % state.seats;
-
-      // ask visuals to reset
-      Signals.emit("GAME_RESET", {});
-      // deal 2 to each
-      for (let s = 0; s < state.seats; s++) Signals.emit("DEAL_REQUEST", { toSeat: s, count: 2 });
-
-      Signals.emit("UI_MESSAGE", { text: `New hand #${state.round}`, level:"info" });
-      emitState();
-    }
-
-    function nextActive(from) {
-      for (let i=1;i<=state.seats;i++){
-        const k = (from + i) % state.seats;
-        if (state.inHand[k]) return k;
-      }
-      return from;
-    }
-
-    function allActedOrFolded() {
-      for (let i=0;i<state.seats;i++){
-        if (!state.inHand[i]) continue;
-        if (!state.acted[i]) return false;
-      }
-      return true;
-    }
-
-    function advanceStreet() {
-      const idx = STREETS.indexOf(state.street);
-      const next = STREETS[Math.min(idx + 1, STREETS.length - 1)];
-      state.street = next;
-      state.acted.fill(false);
-      state.toCall = 0;
-
-      if (next === "FLOP") { state.communityUpTo = 3; Signals.emit("REVEAL_REQUEST", { street:"FLOP" }); }
-      if (next === "TURN") { state.communityUpTo = 4; Signals.emit("REVEAL_REQUEST", { street:"TURN" }); }
-      if (next === "RIVER") { state.communityUpTo = 5; Signals.emit("REVEAL_REQUEST", { street:"RIVER" }); }
-
-      if (next === "SHOWDOWN") {
-        const winner = pickWinner();
-        Signals.emit("WINNER", { seat: winner, pot: state.pot });
-        Signals.emit("UI_MESSAGE", { text:`Winner: seat ${winner}`, level:"info" });
-        // start new hand shortly (bots will keep flow)
-        return;
+      function resetHand(seed = Date.now()) {
+        state.handId++;
+        state.seed = seed;
+        state.street = "PREFLOP";
+        state.pot = 0;
+        state.players.forEach(p => { p.inHand = true; p.bet = 0; });
+        Signals.emit("POKER_RESET", { handId: state.handId, seed });
+        Signals.emit("POKER_STREET", { street: state.street });
+        log?.(`[rules] reset hand=${state.handId} seed=${seed}`);
       }
 
-      state.turn = nextActive(state.dealer);
-      emitState();
-    }
+      function nextStreet() {
+        const idx = STREETS.indexOf(state.street);
+        if (idx < 0) return;
+        const next = STREETS[Math.min(idx + 1, STREETS.length - 1)];
+        state.street = next;
+        Signals.emit("POKER_STREET", { street: state.street });
+        log?.(`[rules] street=${state.street}`);
 
-    function pickWinner() {
-      // placeholder winner selection among active seats
-      const alive = [];
-      for (let i=0;i<state.seats;i++) if (state.inHand[i]) alive.push(i);
-      if (!alive.length) return 0;
-      return alive[(Math.random() * alive.length) | 0];
-    }
+        if (state.street === "SHOWDOWN") {
+          // pick winner seat naïvely (demo)
+          const alive = state.players.filter(p => p.inHand);
+          const winner = alive[(Math.random() * alive.length) | 0]?.seat ?? 0;
+          Signals.emit("POKER_WINNER", { seat: winner });
+          log?.(`[rules] winner seat=${winner}`);
+        }
+      }
 
-    function applyAction(seat, action, amount = 0) {
-      if (!state.inHand[seat]) return;
-      if (action === "FOLD") {
-        state.inHand[seat] = false;
-        state.acted[seat] = true;
-      } else if (action === "CHECK") {
-        state.acted[seat] = true;
-      } else if (action === "CALL") {
-        const pay = Math.min(state.toCall, state.stacks[seat]);
-        state.stacks[seat] -= pay;
+      function addToPot(seat, amount) {
+        const p = state.players[seat | 0];
+        if (!p || !p.inHand) return;
+        const a = Math.max(0, amount | 0);
+        const pay = Math.min(p.stack, a);
+        p.stack -= pay;
+        p.bet += pay;
         state.pot += pay;
-        Signals.emit("BET_REQUEST", { seat, amount: pay });
-        state.acted[seat] = true;
-      } else if (action === "RAISE") {
-        const raiseTo = Math.max(state.minRaise, amount|0);
-        state.toCall = raiseTo;
-        const pay = Math.min(raiseTo, state.stacks[seat]);
-        state.stacks[seat] -= pay;
-        state.pot += pay;
-        Signals.emit("BET_REQUEST", { seat, amount: pay });
-        // reset acted for others
-        for (let i=0;i<state.seats;i++) if (i!==seat && state.inHand[i]) state.acted[i] = false;
-        state.acted[seat] = true;
+        Signals.emit("POKER_BET", { seat: p.seat, amount: pay, pot: state.pot });
       }
 
-      state.turn = nextActive(seat);
-      if (allActedOrFolded()) advanceStreet();
-      emitState();
+      Signals.on("GAME_INIT", (p) => {
+        resetHand(p?.seed ?? Date.now());
+        // start dealing (system handles visuals)
+        Signals.emit("POKER_DEAL", { seatCount: state.players.length });
+      });
+
+      Signals.on("RULES_NEXT", () => nextStreet());
+      Signals.on("RULES_BET", (p) => addToPot(p?.seat ?? 0, p?.amount ?? 0));
+
+      log?.("[rules] PokerRules Prime 10.0 init ✅");
+
+      return {
+        state,
+        resetHand,
+        nextStreet,
+        bet: addToPot
+      };
     }
-
-    Signals.on("GAME_INIT", resetRound);
-    Signals.on("GAME_RESET", () => { /* visuals reset already handled */ });
-
-    Signals.on("BOT_ACTION", (p) => {
-      applyAction(p.seat|0, String(p.action||"CHECK"), p.amount|0);
-    });
-
-    // Manual UI actions (optional)
-    Signals.on("UI_CLICK", (p) => {
-      if (p?.id === "NEW_HAND") resetRound();
-    });
-
-    log?.("[rules] PokerRules Prime 10.0 init ✅");
-    return { state, resetRound };
-  }
-
-  return { init };
+  };
 })();

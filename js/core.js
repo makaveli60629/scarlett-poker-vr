@@ -8,27 +8,25 @@ import { Admin } from './admin.js';
 export const Core = {
     async start() {
         this.modules = {};
-        
         Diagnostics.init(this);
         HUD.init(this);
 
-        const load = async (name, module) => {
+        const loadModule = async (name, mod) => {
             try {
-                await module.init(this);
+                await mod.init(this);
                 this.modules[name] = true;
-                this[name.toLowerCase()] = module;
-                Diagnostics.ok(`${name} Module`);
+                Diagnostics.ok(name);
             } catch (e) {
                 Diagnostics.fail(name, e);
                 this.modules[name] = false;
             }
         };
 
-        await load('World', World);
-        await load('Input', Input);
-        await load('Store', Store);
-        await load('Admin', Admin);
+        await loadModule('World', World);
+        await loadModule('Input', Input);
+        await loadModule('Store', Store);
+        await loadModule('Admin', Admin);
 
-        Diagnostics.report(this.modules);
+        Diagnostics.report();
     }
 };

@@ -1,25 +1,14 @@
 {
-  "version": "scarlett1.0",
-  "modules": [
-    {
-      "name": "world",
-      "src": "./js/scarlett1/world.js",
-      "enabled": true
-    },
-    {
-      "name": "xr",
-      "src": "./js/scarlett1/spine_xr.js",
-      "enabled": true
-    },
-    {
-      "name": "android",
-      "src": "./js/scarlett1/spine_android.js",
-      "enabled": true
-    },
-    {
-      "name": "hud",
-      "src": "./js/scarlett1/spine_hud.js",
-      "enabled": true
+  "activeProfile": "scarlett1",
+  "profiles": {
+    "scarlett1": {
+      "boot": "/js/scarlett1/boot2.js",
+      "world": "/js/scarlett1/world.js",
+      "modules": [
+        "/js/scarlett1/spine_xr.js",
+        "/js/scarlett1/spine_android.js",
+        "/js/scarlett1/spine_modules.js"
+      ]
     }
-  ]
+  }
 }

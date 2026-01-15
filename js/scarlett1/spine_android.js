@@ -1,37 +1,34 @@
-// /js/scarlett1/spine_android.js — Scarlett Android Spine (exports initAndroidSticks)
-// ✅ Named export: initAndroidSticks
-// ✅ ONLY active when NOT in XR (renderer.xr.isPresenting === false)
+// /js/scarlett1/spine_android.js — Scarlett Android Spine (FULL) v1.1
+// ✅ Exports initAndroidSticks (matches boot2 expectation)
+// ✅ Android sticks only active when NOT in XR
+// ✅ Uses /js/core/android_controls.js
 
-export async function initAndroidSticks({
-  renderer,
-  player,
-  cameraPitch,
-  setHUDVisible,
-  log = console.log
-} = {}) {
-  // Import AndroidControls from /js/android_controls.js (recommended)
-  // This file MUST exist at: /js/android_controls.js
-  const mod = await import(new URL("../android_controls.js", import.meta.url).toString());
-  const AndroidControls = mod.AndroidControls || mod.default || null;
+import { AndroidControls } from "../core/android_controls.js";
 
-  if (!AndroidControls?.init) {
-    log?.("[android] AndroidControls missing init() (skipping)");
+let _api = null;
+
+export function initAndroidSticks({ renderer, player, cameraPitch, log, setHUDVisible } = {}){
+  try{
+    _api = AndroidControls.init({
+      renderer,
+      player,
+      cameraPitch,
+      log: log || console.log,
+      setHUDVisible
+    });
+    return _api;
+  }catch(e){
+    (log||console.log)("[spine_android] init failed ❌", e?.message||e);
+    _api = null;
     return null;
   }
+}
 
-  if (!/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
-    log?.("[android] not mobile UA (skipping)");
-    return null;
+// called each frame by boot2 (safe even if not initialized)
+export function updateAndroidSticks(dt){
+  try{
+    _api?.update?.(dt);
+  }catch(e){
+    // swallow to avoid killing render loop
   }
-
-  const api = AndroidControls.init({
-    renderer,
-    player,
-    cameraPitch,
-    setHUDVisible,
-    log
-  });
-
-  log?.("[android] Android sticks READY ✅");
-  return api; // { setEnabled, update }
 }

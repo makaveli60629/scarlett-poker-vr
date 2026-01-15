@@ -1,90 +1,118 @@
+// /js/scarlett1/index.js — Scarlett 1.0 Permanent Spine (FORCED CDN THREE)
+// ✅ One stable entry
+// ✅ HUD hide/show + log copy (from spine_hud.js)
+// ✅ Android move/look (touch) + Quest lasers/locomotion
+// ✅ Safe module loader (modules.json) so broken modules never kill the core
+
 import { makeHUD } from "./spine_hud.js";
 import { makeDiag } from "./spine_diag.js";
 import { makeXR } from "./spine_xr.js";
 import { makeAndroid } from "./spine_android.js";
 import { makeSafeModules } from "./spine_modules.js";
 
-async function loadThree(ROOT, log) {
-  // Prefer your repo’s /js/three.js (you have it)
-  const local = `${ROOT}three.js?v=${Date.now()}`;
-  try {
-    log("THREE import(local):", local);
-    return await import(local);
-  } catch (e) {
-    const cdn = `https://unpkg.com/three@0.158.0/build/three.module.js`;
-    log("THREE local failed, fallback CDN:", e?.message || e);
-    log("THREE import(cdn):", cdn);
-    return await import(cdn);
-  }
+async function loadThree(log) {
+  // FORCED CDN (ESM) — avoids local non-ESM three.js issues
+  const cdn = "https://unpkg.com/three@0.158.0/build/three.module.js";
+  log("THREE import (FORCED CDN):", cdn);
+  return await import(cdn);
 }
 
 export async function start(ctx) {
   const { V, ROOT, log } = ctx;
 
-  // HUD (DOM overlay) with hide/show + copy logs
+  // --- HUD (DOM diagnostics overlay) ---
   makeHUD({ log });
 
-  const THREE = await loadThree(ROOT, log);
+  // --- THREE (forced CDN) ---
+  const THREE = await loadThree(log);
 
-  // Scene basics
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  // --- Renderer ---
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
   renderer.xr.enabled = true;
-  document.getElementById("app").innerHTML = "";
-  document.getElementById("app").appendChild(renderer.domElement);
 
+  const app = document.getElementById("app");
+  app.innerHTML = "";
+  app.appendChild(renderer.domElement);
+
+  // --- Scene / Camera / Rig ---
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
 
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.03, 300);
+  const camera = new THREE.PerspectiveCamera(
+    70,
+    window.innerWidth / window.innerHeight,
+    0.03,
+    300
+  );
 
   const rig = new THREE.Group();
   rig.name = "PlayerRig";
   rig.add(camera);
   scene.add(rig);
 
-  // Light
+  // Default spawn (safe, neutral). World module can reposition later.
+  rig.position.set(0, 1.65, 2.4);
+  rig.rotation.set(0, 0, 0);
+
+  // --- Lighting (stable baseline) ---
   scene.add(new THREE.HemisphereLight(0xffffff, 0x1a1a1a, 0.9));
   const dir = new THREE.DirectionalLight(0xffffff, 0.85);
   dir.position.set(3, 6, 2);
   scene.add(dir);
 
-  // Diagnostics core
+  // --- Diagnostics ---
   const diag = makeDiag({ log });
 
-  // Controls: Android + XR (both active, but only one drives at a time)
+  // --- Controls (both present; only active source drives at a time) ---
   const android = makeAndroid({ THREE, rig, camera, log });
   const xr = makeXR({ THREE, scene, renderer, rig, camera, log });
 
-  // World/Game is loaded SAFELY as modules (so it can’t crash the spine)
+  // --- Safe Modules Loader ---
   const modules = makeSafeModules({
-    ROOT,
+    ROOT,           // points to /js/
     log,
     THREE,
     scene,
     renderer,
     camera,
     rig,
-    diag
+    diag,
+    android,
+    xr
   });
 
-  // Load module list
+  // Load module list from /js/scarlett1/modules.json
   await modules.loadList(`./modules.json?v=${V}`);
 
-  // Render loop
+  // --- Resize handling ---
+  window.addEventListener("resize", () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // --- Render Loop ---
   const clock = new THREE.Clock();
+
+  // Optional: uncomment for one-time confirmation that the loop is running
+  // let firstFrame = true;
+
   renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.05);
 
-    // Update control stacks
+    // Optional: confirm loop tick in logs once
+    // if (firstFrame) { firstFrame = false; log("frame tick ✅"); }
+
+    // Update controls
     xr.update(dt);
     android.update(dt);
 
-    // Update modules
+    // Update safe-loaded modules
     modules.update(dt);
 
-    // Update diagnostics
+    // Update diagnostics overlay text
     diag.update({
       dt,
       renderer,
@@ -94,14 +122,12 @@ export async function start(ctx) {
       modules
     });
 
+    // Render
     renderer.render(scene, camera);
   });
 
-  window.addEventListener("resize", () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
+  // Expose a simple debug handle
+  window.__SCARLETT1__ = { THREE, scene, renderer, camera, rig, android, xr, modules };
 
   log("Scarlett 1.0 Spine running ✅");
 }

@@ -1,115 +1,80 @@
-// /js/scarlett1/world.js — Orchestrator (BOOT2 compatible)
-// Exports: initWorld() ✅ required by BOOT2, plus createWorld() for internal use.
+// /js/scarlett1/world.js — Scarlett World (Module Spine) v3.0
+import { C } from "./world_constants.js";
+import { makeMaterials } from "./world_materials.js";
+import { addLights } from "./world_lights.js";
+import { buildLayout } from "./world_layout.js";
+import { buildSignage } from "./world_signage.js";
+import { buildPads } from "./world_pads.js";
+import { buildDecor } from "./world_decor.js";
+import { tagTeleportSurface, tagCollider } from "./world_utils.js";
 
-import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
-import { BUILD, DEFAULT_QUALITY, getSpawns } from "./world_constants.js";
-import { createMaterials } from "./world_materials.js";
-import { buildLobby } from "./world_lobby.js";
-import { buildHallsAndRooms } from "./world_halls_rooms.js";
-import { buildFeatures } from "./world_features.js";
-import { buildLights } from "./world_lights.js";
+export async function initWorld({ THREE, scene, renderer, camera, playerRig, log = console.log, quality = "quest" } = {}) {
+  const BUILD = "WORLD_SCARLETT1_v3_0_MODULE";
+  log("[world] build start ✅ build=", BUILD);
 
-if (!THREE || !THREE.MeshStandardMaterial) {
-  throw new Error("[world] THREE missing or incomplete (MeshStandardMaterial not found)");
-}
+  const group = new THREE.Group();
+  group.name = "WorldRoot";
+  scene.add(group);
 
-export { BUILD, getSpawns };
+  const mats = makeMaterials(THREE, { quality });
 
-/**
- * BOOT2 REQUIRED EXPORT ✅
- * BOOT2 calls: worldMod.initWorld({ THREE, scene, renderer, camera, playerRig, log, quality })
- */
-export async function initWorld(ctx = {}) {
-  // BOOT2 might pass THREE, but we intentionally ignore it and use our imported THREE.
-  // This avoids scope issues and keeps the module self-contained.
-  return await createWorld(ctx);
-}
+  // Lighting
+  const lightState = addLights(THREE, group, { quality });
 
-/**
- * Internal API
- */
-export async function createWorld(ctx = {}) {
-  const {
-    scene,
-    renderer,
-    camera,
-    playerRig,
-    log = (...a) => console.log("[world]", ...a),
-    quality = DEFAULT_QUALITY
-  } = ctx;
+  // Layout (lobby + halls + rooms shells)
+  const layout = buildLayout(THREE, group, mats);
 
-  if (!scene) throw new Error("[world] initWorld/createWorld requires { scene }");
+  // Signage (animated neon)
+  const signage = buildSignage(THREE, group, mats);
 
-  const world = {
-    group: new THREE.Group(),
-    colliders: [],
-    anchors: {},
-    rooms: {},
-    pads: [],
-    signs: [],
-    jumbotrons: [],
-    mannequins: [],
-    lights: [],
-    update(dt) {},
-    dispose() {}
-  };
+  // Pads (teleport pads + targets)
+  const padsState = buildPads(THREE, group, mats, layout);
 
-  world.group.name = "ScarlettWorld";
-  scene.add(world.group);
+  // Decor (rails, trims, grid floor accents)
+  const decor = buildDecor(THREE, group, mats, layout);
 
-  log("build start ✅", "build=", BUILD);
+  // Collect colliders + teleport surfaces
+  const colliders = [];
+  const teleportSurfaces = [];
 
-  const mats = createMaterials(quality);
-
-  buildLobby(world, mats, quality);
-  buildHallsAndRooms(world, mats, quality);
-  buildFeatures(world, mats, quality);
-  buildLights(world, renderer, quality);
-
-  // spawns
-  const spawns = getSpawns();
-  world.anchors.spawns = spawns;
-  world.spawn = spawns.SPAWN_N;
-  log("spawn ✅", "SPAWN_N");
-
-  // update loop (centralized)
-  let t = 0;
-  world.update = (dt = 0.016) => {
-    t += dt;
-
-    // jumbotron pulse
-    for (const j of world.jumbotrons) {
-      j.t += dt;
-      const p = 0.75 + 0.25 * Math.sin(j.t * 1.4);
-      if (j.screen?.material) j.screen.material.emissiveIntensity = 1.0 + p;
-    }
-
-    // neon pulse
-    mats.matTrim.emissiveIntensity = 0.55 + 0.15 * Math.sin(t * 1.8);
-    mats.matNeonPink.emissiveIntensity = 0.75 + 0.25 * Math.sin(t * 2.2);
-    mats.matNeonCyan.emissiveIntensity = 0.75 + 0.25 * Math.sin(t * 2.0);
-  };
-
-  world.getTeleportTargets = () =>
-    world.pads.map(p => ({ label: p.userData.label, position: p.userData.target.clone() }));
-
-  world.dispose = () => {
-    scene.remove(world.group);
-    mats.carpetTex?.dispose?.();
-  };
-
-  // optional: auto-position rig
-  if (playerRig && world.spawn) {
-    playerRig.position.copy(world.spawn.pos);
-    playerRig.rotation.y = world.spawn.yaw;
+  // 1) Tag floor + room floors as teleport surfaces
+  for (const m of layout.teleportMeshes) {
+    tagTeleportSurface(m);
+    teleportSurfaces.push(m);
   }
-  if (camera) camera.lookAt(0, 1.6, 0);
 
-  log("world ready ✅", "colliders=", world.colliders.length, "pads=", world.pads.length);
+  // 2) Tag colliders (walls/rails)
+  for (const m of layout.colliderMeshes) {
+    tagCollider(m);
+    colliders.push(m);
+  }
 
-  // BOOT2 sometimes expects world.group and world.colliders at minimum
-  return world;
+  // 3) Pads are already tagged
+  const pads = padsState.pads;
+
+  // Spawn points (north default)
+  const spawnPoints = layout.spawnPoints;
+
+  // Pick spawn: SPAWN_N
+  const spawn = spawnPoints.SPAWN_N || { pos: new THREE.Vector3(0, 0, C.LOBBY_R + 4), yaw: Math.PI };
+  playerRig.position.set(spawn.pos.x, spawn.pos.y, spawn.pos.z);
+  playerRig.rotation.y = spawn.yaw;
+
+  log("[world] spawn ✅", "SPAWN_N");
+  log("[world] world ready ✅ colliders=", String(colliders.length), "pads=", String(pads.length));
+
+  const state = {
+    group,
+    colliders,
+    teleportSurfaces,
+    pads,
+    spawnPoints,
+    update(dt) {
+      signage.update(dt);
+      lightState.update?.(dt);
+      decor.update?.(dt);
+    }
+  };
+
+  return state;
 }
-
-// Back-compat default export
-export default { initWorld, createWorld, getSpawns, BUILD };

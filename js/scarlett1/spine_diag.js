@@ -1,16 +1,15 @@
-// /js/scarlett1/spine_diag.js — Scarlett Diagnostics HUD (FULL • PERMANENT)
-// ✅ Always visible HUD (Hide/Show)
-// ✅ Captures window.onerror + unhandledrejection
-// ✅ Loads boot.js via dynamic import() so failures show real error text
-// ✅ Auto-detects correct GitHub Pages base path
+// js/scarlett1/spine_diag.js — Scarlett Diagnostics HUD (FULL • PERMANENT)
+// - Always visible HUD with Hide/Show + Copy Logs + Clear + Reload
+// - Captures window.onerror + unhandledrejection
+// - Loads boot via dynamic import so execution is real (not fake "loaded")
 
 (() => {
-  const ID = "scarlettDiagHud";
+  const ID = "ScarlettDiagHud";
   const state = {
     visible: true,
     logs: [],
     status: "Booting…",
-    bootUrl: null
+    bootUrl: null,
   };
 
   const pad2 = (n) => String(n).padStart(2, "0");
@@ -22,7 +21,7 @@
   function log(line) {
     const msg = `${stamp()} ${line}`;
     state.logs.push(msg);
-    if (state.logs.length > 600) state.logs.shift();
+    if (state.logs.length > 700) state.logs.shift();
     try { console.log(line); } catch {}
     renderLogs();
   }
@@ -30,28 +29,22 @@
   function setStatus(s) {
     state.status = s;
     renderStatus();
-    log(`STATUS: ${s}`);
   }
 
-  // Expose hooks for other files (boot/world) to log into HUD safely
-  window.__SCARLETT_DIAG_LOG__ = (s) => log(s);
-  window.__SCARLETT_DIAG_STATUS__ = (s) => setStatus(s);
+  // Expose hooks
+  window.__SCARLETT_DIAG_LOG__ = (s) => log(String(s));
+  window.__SCARLETT_DIAG_STATUS__ = (s) => setStatus(String(s));
 
-  // Capture runtime errors
+  // Capture errors
   window.addEventListener("error", (e) => {
-    const m = (e && (e.message || e.error?.message)) || "unknown error";
-    log(`WINDOW ERROR ❌ ${m}`);
-    if (e && e.error && e.error.stack) log(String(e.error.stack));
+    log(`WINDOW ERROR: ${e.message || e}`);
   });
-
   window.addEventListener("unhandledrejection", (e) => {
-    const r = e && e.reason;
-    const m = (r && (r.message || String(r))) || "unknown rejection";
-    log(`PROMISE REJECT ❌ ${m}`);
-    if (r && r.stack) log(String(r.stack));
+    const r = e?.reason;
+    log(`PROMISE REJECT: ${r?.message || r || e}`);
   });
 
-  // HUD
+  // HUD UI
   const hud = document.createElement("div");
   hud.id = ID;
   hud.style.cssText = `
@@ -61,20 +54,23 @@
     border:1px solid rgba(120,160,255,0.25);
     border-radius:18px;
     color:#dbe6ff;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+    box-shadow:0 20px 60px rgba(0,0,0,0.45);
     padding:16px;
   `;
 
   hud.innerHTML = `
-    <div style="font-size:28px;font-weight:900;letter-spacing:0.2px;">Scarlett Diagnostics</div>
-    <div id="sd_status" style="margin-top:6px;opacity:0.88;">Booting…</div>
+    <div style="font-size:28px;font-weight:900;letter-spacing:0.3px;">Scarlett Diagnostics</div>
+    <div style="margin-top:6px;opacity:0.85;">
+      <span style="font-weight:800;">STATUS:</span>
+      <span id="sd_status">Booting…</span>
+    </div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;">
-      <button id="sd_hide" style="padding:14px;border-radius:14px;border:1px solid rgba(120,160,255,0.18);background:rgba(40,60,120,0.40);color:#eaf2ff;font-weight:800;">Hide HUD</button>
-      <button id="sd_copy" style="padding:14px;border-radius:14px;border:1px solid rgba(120,160,255,0.18);background:rgba(40,60,120,0.40);color:#eaf2ff;font-weight:800;">Copy Logs</button>
-      <button id="sd_clear" style="padding:14px;border-radius:14px;border:1px solid rgba(120,160,255,0.18);background:rgba(40,60,120,0.25);color:#eaf2ff;font-weight:800;">Clear</button>
-      <button id="sd_reload" style="padding:14px;border-radius:14px;border:1px solid rgba(120,160,255,0.18);background:rgba(40,60,120,0.25);color:#eaf2ff;font-weight:800;">Reload</button>
+      <button id="sd_hide" style="padding:14px;border-radius:14px;border:1px solid rgba(120,160,255,0.2);background:rgba(40,60,120,0.65);color:#eaf2ff;font-weight:900;">Hide HUD</button>
+      <button id="sd_copy" style="padding:14px;border-radius:14px;border:1px solid rgba(120,160,255,0.2);background:rgba(40,60,120,0.35);color:#eaf2ff;font-weight:900;">Copy Logs</button>
+      <button id="sd_clear" style="padding:14px;border-radius:14px;border:1px solid rgba(120,160,255,0.2);background:rgba(40,60,120,0.35);color:#eaf2ff;font-weight:900;">Clear</button>
+      <button id="sd_reload" style="padding:14px;border-radius:14px;border:1px solid rgba(120,160,255,0.2);background:rgba(40,60,120,0.35);color:#eaf2ff;font-weight:900;">Reload</button>
     </div>
 
     <pre id="sd_logs" style="
@@ -82,9 +78,9 @@
       background:rgba(0,0,0,0.25);
       border-radius:14px;
       border:1px solid rgba(120,160,255,0.18);
-      height:240px; overflow:auto;
-      white-space:pre-wrap;
+      height:260px; overflow:auto;
       font-size:13px; line-height:1.35;
+      white-space:pre-wrap;
     "></pre>
   `;
 
@@ -93,45 +89,45 @@
   const elStatus = hud.querySelector("#sd_status");
   const elLogs = hud.querySelector("#sd_logs");
 
-  function renderStatus() {
-    elStatus.textContent = state.status;
-  }
+  function renderStatus() { elStatus.textContent = state.status; }
   function renderLogs() {
     elLogs.textContent = state.logs.join("\n");
     elLogs.scrollTop = elLogs.scrollHeight;
   }
 
-  // Hide / Show
+  // Buttons
   hud.querySelector("#sd_hide").onclick = () => {
     state.visible = !state.visible;
     hud.style.opacity = state.visible ? "1" : "0.04";
     hud.style.pointerEvents = state.visible ? "auto" : "none";
 
+    // Add tiny show button when hidden
     if (!state.visible) {
-      const show = document.createElement("button");
-      show.id = "sd_show_btn";
-      show.textContent = "Show HUD";
-      show.style.cssText = `
-        position:fixed; left:16px; top:16px; z-index:999999;
-        padding:12px 14px; border-radius:12px;
-        border:1px solid rgba(120,160,255,0.22);
-        background:rgba(40,60,120,0.65);
-        color:#eaf2ff; font-weight:900;
-      `;
-      show.onclick = () => {
-        state.visible = true;
-        hud.style.opacity = "1";
-        hud.style.pointerEvents = "auto";
-        show.remove();
-      };
-      document.body.appendChild(show);
+      if (!document.getElementById("sd_show_btn")) {
+        const show = document.createElement("button");
+        show.id = "sd_show_btn";
+        show.textContent = "Show HUD";
+        show.style.cssText = `
+          position:fixed;left:16px;top:16px;z-index:999999;
+          padding:12px 14px;border-radius:12px;
+          border:1px solid rgba(120,160,255,0.22);
+          background:rgba(40,60,120,0.65);
+          color:#eaf2ff;font-weight:900;
+        `;
+        show.onclick = () => {
+          state.visible = true;
+          hud.style.opacity = "1";
+          hud.style.pointerEvents = "auto";
+          show.remove();
+        };
+        document.body.appendChild(show);
+      }
     } else {
       const show = document.getElementById("sd_show_btn");
       if (show) show.remove();
     }
   };
 
-  // Copy
   hud.querySelector("#sd_copy").onclick = async () => {
     const text = state.logs.join("\n");
     try {
@@ -149,67 +145,53 @@
     }
   };
 
-  // Clear / Reload
   hud.querySelector("#sd_clear").onclick = () => {
     state.logs.length = 0;
     renderLogs();
     log("logs cleared");
   };
+
   hud.querySelector("#sd_reload").onclick = () => location.reload();
 
-  // ---- Base path detection (NO hardcode) ----
-  function computeBase() {
-    // GitHub Pages project: /scarlett-poker-vr/
-    // Ensure trailing slash
-    let p = location.pathname || "/";
-    // If on /scarlett-poker-vr/index.html or /scarlett-poker-vr/
-    // reduce to "/scarlett-poker-vr/"
-    if (!p.endsWith("/")) {
-      p = p.replace(/\/[^\/]*$/, "/");
-    }
-    return p; // includes project root with trailing slash
+  // Base resolver
+  function getBase() {
+    // Works for https://makaveli60629.github.io/scarlett-poker-vr/
+    const p = location.pathname || "/";
+    const seg = p.split("/").filter(Boolean);
+    // seg[0] should be "scarlett-poker-vr"
+    if (seg.length > 0) return `/${seg[0]}/`;
+    return "/";
   }
 
-  // ---- BOOT LOADER (dynamic import so we SEE the real error) ----
+  // Boot loader: REAL EXECUTION via dynamic import
   async function loadBoot() {
-    const base = computeBase();
-
-    const bootUrl = `${base}js/scarlett1/boot.js?v=${Date.now()}`;
+    const base = getBase();
+    const bootUrl = `${base}js/scarlett1/boot2.js?v=${Date.now()}`;
     state.bootUrl = bootUrl;
 
     log(`href=${location.href}`);
     log(`path=${location.pathname}`);
     log(`base=${base}`);
-    log(`secureContext=${window.isSecureContext}`);
+    log(`secureContext=${!!window.isSecureContext}`);
     log(`ua=${navigator.userAgent}`);
     log(`navigator.xr=${!!navigator.xr}`);
-    log(`importing boot: ${bootUrl}`);
+    log(`loading boot: ${bootUrl}`);
 
     setStatus("Booting…");
 
-    // Clear boot flag so we can detect fresh execution
-    window.__SCARLETT_BOOT_STARTED__ = false;
-
     try {
-      // IMPORTANT: dynamic import gives us the REAL error
       await import(bootUrl);
+      log("boot executed ✅");
+      setStatus("Boot executed ✅");
 
-      if (window.__SCARLETT_BOOT_STARTED__) {
-        log("boot executed ✅");
-        setStatus("Boot running ✅");
-      } else {
-        log("boot imported but flag not set ⚠️");
-        setStatus("Boot imported but not started (boot.js didn't set flag)");
-      }
-    } catch (err) {
-      const msg = (err && (err.message || String(err))) || "unknown error";
-      log(`BOOT IMPORT FAILED ❌ ${msg}`);
-      if (err && err.stack) log(String(err.stack));
-      setStatus("BOOT FAILED ❌ (see log)");
+      // If world starts, it will update status again
+    } catch (e) {
+      log(`BOOT FAILED ❌ ${e?.message || e}`);
+      setStatus("BOOT FAILED ❌ (import error)");
+      console.error(e);
     }
   }
 
-  // Kick off
   renderStatus();
   renderLogs();
   loadBoot();

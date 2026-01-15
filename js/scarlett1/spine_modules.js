@@ -1,18 +1,29 @@
 // /js/scarlett1/spine_modules.js — Scarlett 1.0 Safe Module Loader (FULL • PERMANENT)
+// IMPORTANT: boot2.js expects initModules(ctx). We provide it here.
+
+export async function initModules(ctx = {}) {
+  // boot2 compatibility entrypoint
+  return init(ctx);
+}
+
 export async function init(ctx = {}) {
   const log = ctx?.log || console.log;
+
   const diagLog = (s) => {
     try { window.__SCARLETT_DIAG_LOG__?.(String(s)); } catch {}
-    try { log(s); } catch {}
+    try { log(String(s)); } catch {}
   };
 
-  const base = window.__SCARLETT_BASE__ || (location.pathname.includes("/scarlett-poker-vr/") ? "/scarlett-poker-vr/" : "/");
+  const base =
+    window.__SCARLETT_BASE__ ||
+    (location.pathname.includes("/scarlett-poker-vr/") ? "/scarlett-poker-vr/" : "/");
+
   const urlMods = `${base}modules.json?v=${Date.now()}`;
 
   function normalizeList(json) {
     // supports:
-    // { modules: [ "url", {id, enabled, urls:[...]}, ... ] }
-    // { core:[...], addons:[...] } etc
+    // { modules:[ "url", {id, enabled, urls:[...]}, ... ] }
+    // also supports legacy: { core:[...], addons:[...] }
     let list = [];
     if (Array.isArray(json?.modules)) list = json.modules;
     else {
@@ -22,7 +33,6 @@ export async function init(ctx = {}) {
       if (maybe.length) list = maybe;
     }
 
-    // normalize to objects: {id, enabled, urls:[...]}
     const out = [];
     for (const entry of list) {
       if (typeof entry === "string") {
@@ -31,7 +41,9 @@ export async function init(ctx = {}) {
       }
       if (entry && typeof entry === "object") {
         const enabled = entry.enabled !== false;
-        const urls = Array.isArray(entry.urls) ? entry.urls.slice() : (typeof entry.url === "string" ? [entry.url] : []);
+        const urls = Array.isArray(entry.urls)
+          ? entry.urls.slice()
+          : (typeof entry.url === "string" ? [entry.url] : []);
         const id = entry.id || entry.name || (urls[0] || "module");
         if (urls.length) out.push({ id, enabled, urls });
       }
@@ -40,7 +52,6 @@ export async function init(ctx = {}) {
   }
 
   function resolve(u) {
-    // allow absolute, root-relative, or relative
     if (!u) return "";
     if (u.startsWith("http")) return u;
     if (u.startsWith("/")) return u;
@@ -67,6 +78,7 @@ export async function init(ctx = {}) {
       diagLog(`[mods] ${id}: loaded but no init() found (skipping)`);
       return;
     }
+
     try {
       fn(ctx);
       diagLog(`[mods] ${id}: init() ✅`);
@@ -76,10 +88,10 @@ export async function init(ctx = {}) {
   }
 
   try {
-    diagLog(`loading modules.json: ${urlMods}`);
+    diagLog(`[mods] loading modules.json: ${urlMods}`);
     const res = await fetch(urlMods, { cache: "no-store" });
     const json = await res.json();
-    diagLog(`modules.json OK ✅`);
+    diagLog(`[mods] modules.json OK ✅`);
 
     const list = normalizeList(json);
     let loaded = 0, failed = 0;
@@ -99,7 +111,7 @@ export async function init(ctx = {}) {
       }
     }
 
-    diagLog(`addons/modules done ✅ loaded=${loaded} failed=${failed}`);
+    diagLog(`[mods] done ✅ loaded=${loaded} failed=${failed}`);
   } catch (e) {
     diagLog(`[mods] modules.json load failed ❌ ${e?.message || e}`);
   }

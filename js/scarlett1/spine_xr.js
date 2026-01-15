@@ -1,9 +1,8 @@
-// /js/scarlett1/spine_xr.js — XR Controls v4 (HOOK-BASED, UNCRASHABLE)
-// ✅ Rig-based locomotion
-// ✅ Teleport to pads (trigger) + arc + reticle
-// ✅ Left stick: move + strafe (slow)
-// ✅ Right stick: snap turn 45°
-// ✅ Y toggles menu
+// /js/scarlett1/spine_xr.js — XR Controls v5 (SESSION INPUTS FIX)
+// ✅ Rig-based smooth move + strafe
+// ✅ Snap turn 45°
+// ✅ Teleport pads + arc + reticle
+// ✅ Uses xrSession.inputSources (most reliable)
 
 export async function installXR({ THREE, DIAG }) {
   const D = DIAG || console;
@@ -14,7 +13,7 @@ export async function installXR({ THREE, DIAG }) {
     return;
   }
 
-  const { renderer, scene, camera, rig, player, spawnPads, teleportTo, safetySnapIfBlocked, addFrameHook } = W;
+  const { renderer, scene, camera, rig, player, spawnPads, teleportTo, addFrameHook } = W;
 
   // VRButton
   let VRButton;
@@ -36,18 +35,17 @@ export async function installXR({ THREE, DIAG }) {
     return;
   }
 
-  // Controllers + Lasers
+  // Controllers (visual rays)
   const controller1 = renderer.xr.getController(0);
   const controller2 = renderer.xr.getController(1);
   rig.add(controller1);
   rig.add(controller2);
 
   const rayGeo = new THREE.BufferGeometry().setFromPoints([ new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1) ]);
-  const makeRay = (color) => new THREE.Line(rayGeo, new THREE.LineBasicMaterial({ color }));
-  const l1 = makeRay(0xff33aa); l1.scale.z = 12; controller1.add(l1);
-  const l2 = makeRay(0x33aaff); l2.scale.z = 12; controller2.add(l2);
+  const l1 = new THREE.Line(rayGeo, new THREE.LineBasicMaterial({ color: 0xff33aa })); l1.scale.z = 12; controller1.add(l1);
+  const l2 = new THREE.Line(rayGeo, new THREE.LineBasicMaterial({ color: 0x33aaff })); l2.scale.z = 12; controller2.add(l2);
 
-  // Raycast helpers
+  // Raycasting
   const raycaster = new THREE.Raycaster();
   const tmpMat = new THREE.Matrix4();
   const tmpO = new THREE.Vector3();
@@ -70,12 +68,12 @@ export async function installXR({ THREE, DIAG }) {
 
   function teleportToPad(pad) {
     if (!pad?.userData?.teleportPos) return;
-    const yaw = (pad.userData.yaw != null) ? pad.userData.yaw : (player?.yaw ?? Math.PI);
+    const yaw = (pad.userData.yaw != null) ? pad.userData.yaw : (player?.yaw ?? rig.rotation.y ?? 0);
     teleportTo(pad.userData.teleportPos, yaw);
     D.log("[teleport] →", pad.userData.label || "PAD");
   }
 
-  // Teleport visuals (arc + reticle)
+  // Teleport visuals
   const ARC_SEG = 32;
   const arcPos = new Float32Array((ARC_SEG + 1) * 3);
   const arcCol = new Float32Array((ARC_SEG + 1) * 3);
@@ -103,11 +101,9 @@ export async function installXR({ THREE, DIAG }) {
 
   function buildArc(ctrl) {
     const { origin, dir } = getRay(ctrl);
-
-    const speed = 10.0, gravity = 18.0, dt = 0.06;
+    const speed = 10.0, gravity = 18.0, step = 0.06;
     let p = origin.clone();
     let v = dir.clone().multiplyScalar(speed);
-
     let hitPoint = null;
 
     for (let i = 0; i <= ARC_SEG; i++) {
@@ -118,16 +114,15 @@ export async function installXR({ THREE, DIAG }) {
 
       if (i > 0 && p.y <= 0.02) { hitPoint = new THREE.Vector3(p.x, 0.02, p.z); break; }
 
-      v.y -= gravity * dt;
-      p = p.clone().add(v.clone().multiplyScalar(dt));
+      v.y -= gravity * step;
+      p = p.clone().add(v.clone().multiplyScalar(step));
     }
 
     arcGeo2.attributes.position.needsUpdate = true;
     arcGeo2.attributes.color.needsUpdate = true;
 
-    if (!hitPoint) { arcLine.visible = false; reticle.visible = false; return { hitPad:null }; }
+    if (!hitPoint) { arcLine.visible = false; reticle.visible = false; return { hitPad: null }; }
 
-    // Check pad under hitPoint
     const downO = hitPoint.clone().add(new THREE.Vector3(0, 1.0, 0));
     const downD = new THREE.Vector3(0, -1, 0);
     const hitPad = hitPadFromRay(downO, downD);
@@ -140,40 +135,29 @@ export async function installXR({ THREE, DIAG }) {
     return { hitPad };
   }
 
-  // Teleport events
   controller1.addEventListener("selectstart", () => {
-    try { const { hitPad } = buildArc(controller1); if (hitPad) teleportToPad(hitPad); }
-    catch (e) { D.error("[teleport] select error:", e?.message || e); }
+    try { const { hitPad } = buildArc(controller1); if (hitPad) teleportToPad(hitPad); } catch {}
   });
   controller2.addEventListener("selectstart", () => {
-    try { const { hitPad } = buildArc(controller2); if (hitPad) teleportToPad(hitPad); }
-    catch (e) { D.error("[teleport] select error:", e?.message || e); }
+    try { const { hitPad } = buildArc(controller2); if (hitPad) teleportToPad(hitPad); } catch {}
   });
-
-  // Menu (Y)
-  const menu = new THREE.Group();
-  menu.visible = false;
-  scene.add(menu);
-  menu.add(new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.7), new THREE.MeshBasicMaterial({ color: 0x0b142a, transparent:true, opacity:0.92 })));
-
-  function toggleMenu() { menu.visible = !menu.visible; D.log("[menu] visible=", menu.visible); }
-  function updateMenuPose() {
-    if (!menu.visible) return;
-    const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion).normalize();
-    const pos = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld).add(fwd.multiplyScalar(1.2));
-    pos.y -= 0.2;
-    menu.position.copy(pos);
-    menu.quaternion.copy(camera.quaternion);
-  }
 
   // Movement
   const MOVE_SPEED = 1.25, STRAFE_SPEED = 1.05, DEAD = 0.18;
   const TURN_ANGLE = (45 * Math.PI) / 180;
   const TURN_COOLDOWN = 0.35;
   let turnCD = 0;
-  let prevY = false;
 
-  function getGamepad(ctrl) { return ctrl?.gamepad || ctrl?.inputSource?.gamepad || null; }
+  // Get gamepads reliably from the XR session
+  function getXRGamepads() {
+    const s = renderer.xr.getSession?.();
+    if (!s) return [];
+    const out = [];
+    for (const src of s.inputSources) {
+      if (src && src.gamepad) out.push(src.gamepad);
+    }
+    return out;
+  }
 
   function applyMove(dt, ax, ay) {
     const yaw = player?.yaw ?? rig.rotation.y ?? 0;
@@ -190,26 +174,31 @@ export async function installXR({ THREE, DIAG }) {
   }
 
   renderer.xr.addEventListener("sessionstart", () => {
-    try { safetySnapIfBlocked?.("STORE_CENTER"); }
-    catch {}
+    // When XR starts, camera height comes from floor.
+    // Ensure yaw is applied on rig.
     rig.rotation.y = player?.yaw ?? rig.rotation.y;
-    D.log("[xr] sessionstart ✅ safe spawn");
+    D.log("[xr] sessionstart ✅ floor-correct");
   });
 
-  // ✅ Hook into world-owned animation loop
-  addFrameHook(({ t, dt }) => {
-    // Only show arc in VR
+  // Hook into world loop
+  addFrameHook(({ dt }) => {
+    // arc preview
     if (renderer.xr.isPresenting) {
       try { buildArc(controller2); } catch {}
     } else {
-      arcLine.visible = false; reticle.visible = false;
+      arcLine.visible = false;
+      reticle.visible = false;
     }
 
-    // Sticks
-    const gpL = getGamepad(controller1) || getGamepad(controller2);
-    const gpR = getGamepad(controller2) || getGamepad(controller1);
+    const gps = getXRGamepads();
+    if (!gps.length) return; // no gamepads -> no movement
 
-    if (gpL?.axes?.length >= 2) {
+    // Heuristic: first gamepad = left, second = right (good enough for Quest)
+    const gpL = gps[0];
+    const gpR = gps[gps.length > 1 ? 1 : 0];
+
+    // Left stick
+    if (gpL.axes?.length >= 2) {
       const lx = gpL.axes[0] || 0;
       const ly = gpL.axes[1] || 0;
       const ax = Math.abs(lx) > DEAD ? lx : 0;
@@ -217,7 +206,8 @@ export async function installXR({ THREE, DIAG }) {
       applyMove(dt, ax, -ay);
     }
 
-    if (gpR?.axes?.length >= 4) {
+    // Right stick snap turn
+    if (gpR.axes?.length >= 4) {
       const rx = gpR.axes[2] || 0;
       const ax = Math.abs(rx) > DEAD ? rx : 0;
       turnCD -= dt;
@@ -226,19 +216,7 @@ export async function installXR({ THREE, DIAG }) {
         turnCD = TURN_COOLDOWN;
       }
     }
-
-    // Y button menu (buttons[3])
-    let yDown = false;
-    for (const gp of [getGamepad(controller1), getGamepad(controller2)]) {
-      const b = gp?.buttons?.[3];
-      if (b?.pressed) yDown = true;
-    }
-    if (yDown && !prevY) toggleMenu();
-    prevY = yDown;
-
-    updateMenuPose();
-    camera.rotation.x = player?.pitch ?? 0;
   });
 
-  D.log("[xr] installed ✅ (hook-based, cannot green-screen)");
-    }
+  D.log("[xr] installed ✅ (floor-correct spawn + session inputSources)");
+                                                          }

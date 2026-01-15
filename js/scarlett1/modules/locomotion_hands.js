@@ -1,112 +1,178 @@
-// /js/scarlett1/modules/locomotion_hands.js
-export class HandsLocomotion {
-  constructor({ THREE, renderer, rig, camera }) {
+// /js/scarlett1/world.js — Update 4.1 World Brain (FULL)
+// ✅ Modular bus
+// ✅ Hands-only XR (WebXR Hands)
+// ✅ LoadingStage + MetaStyleAvatar (Quest-like toon)
+// ✅ HandsLocomotion (pinch teleport + snap turn)
+// ✅ Ultimate World + Ultimate Props
+// ✅ Poker Layer: Table + Dealer Button + Chips + Cards + Turn UI (CanvasTexture, no Sprites)
+
+import { ModuleBus } from "./modules/module_bus.js";
+import { LoadingStage } from "./modules/loading_stage.js";
+import { HandInput } from "./modules/hand_input.js";
+import { HandsLocomotion } from "./modules/locomotion_hands.js";
+import { MetaStyleAvatar } from "./modules/meta_style_avatar.js";
+
+import { PokerTableSystem } from "./modules/poker_table_system.js";
+import { DealerSystem } from "./modules/dealer_system.js";
+import { ChipsSystem } from "./modules/chips_system.js";
+import { CardsSystem } from "./modules/cards_system.js";
+import { TurnUISystem } from "./modules/turn_ui_system.js";
+
+import { buildUltimateWorld } from "./world_ultimate.js";
+import { buildUltimateProps } from "./world_props_ultimate.js";
+
+export class World {
+  constructor({ THREE, renderer }) {
     this.THREE = THREE;
     this.renderer = renderer;
-    this.rig = rig;
-    this.camera = camera;
 
-    this.surfaces = [];
-    this.pads = [];
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x05070a);
 
-    this.ray = new THREE.Raycaster();
-    this.ray.far = 30;
-    this.ray.camera = camera;
+    this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 260);
+    this.camera.position.set(0, 1.6, 10);
 
-    this.reticle = null;
+    this.rig = new THREE.Group();
+    this.rig.name = "PlayerRig";
+    this.rig.position.set(0, 0, 10);
+    this.rig.add(this.camera);
+    this.scene.add(this.rig);
 
-    this.snapDeg = 30;
-    this.lastSnap = 999;
-    this.snapCooldown = 0.25;
+    this.bus = new ModuleBus();
 
-    this._pinchQueue = []; // {handedness, jointPos, jointQuat, t}
+    this.state = {
+      phase: "loading",
+      xrActive: false,
+      dt: 0,
+      t: 0
+    };
+
+    // world builders
+    this.worldData = null;
+    this.propsData = null;
+
+    // module refs
+    this.loading = null;
+    this.hands = null;
+    this.loco = null;
+    this.avatar = null;
+
+    this.tableSys = null;
+    this.dealerSys = null;
+    this.chipsSys = null;
+    this.cardsSys = null;
+    this.turnUISys = null;
+
+    // shared namespace for systems to find each other
+    this.poker = {};
   }
 
-  async init({ world }) {
-    const THREE = this.THREE;
+  async init() {
+    const { THREE } = this;
 
-    // Reticle ring
-    const geo = new THREE.RingGeometry(0.18, 0.22, 32);
-    const mat = new THREE.MeshBasicMaterial({ color: 0x55aaff, side: THREE.DoubleSide });
-    this.reticle = new THREE.Mesh(geo, mat);
-    this.reticle.rotation.x = -Math.PI / 2;
-    this.reticle.visible = false;
-    world.scene.add(this.reticle);
+    // --- Lighting (Quest-safe but readable)
+    const amb = new THREE.AmbientLight(0xffffff, 0.92);
+    const hemi = new THREE.HemisphereLight(0x99bbff, 0x05070a, 0.6);
+    const key = new THREE.DirectionalLight(0xffffff, 0.55);
+    key.position.set(8, 18, 10);
+    this.scene.add(amb, hemi, key);
 
-    // Connect to HandInput (module bus keeps it modular; we discover it)
-    const handMod = world.bus.mods.find(m => m?.constructor?.name === "HandInput");
-    if (handMod) {
-      handMod.onPinch = (e) => this.queuePinch(e);
-    }
+    // Fog (nice depth, still cheap)
+    this.scene.fog = new THREE.Fog(0x05070a, 18, 120);
+
+    // Safety floor (never black)
+    const safetyFloor = new THREE.Mesh(
+      new THREE.CylinderGeometry(12, 12, 0.2, 48),
+      new THREE.MeshStandardMaterial({ color: 0x070b10, roughness: 0.95, metalness: 0.05 })
+    );
+    safetyFloor.position.set(0, -0.1, 0);
+    safetyFloor.userData.teleportSurface = true;
+    this.scene.add(safetyFloor);
+
+    // --- Build world + props (Ultimate)
+    this.worldData = buildUltimateWorld({ THREE, scene: this.scene });
+    this.propsData = buildUltimateProps({ THREE, scene: this.scene, worldData: this.worldData });
+
+    // --- Modules (core)
+    this.loading = new LoadingStage({ THREE, scene: this.scene, rig: this.rig, camera: this.camera });
+    this.hands = new HandInput({ THREE, renderer: this.renderer, rig: this.rig, camera: this.camera, scene: this.scene });
+    this.loco = new HandsLocomotion({ THREE, renderer: this.renderer, rig: this.rig, camera: this.camera });
+
+    this.avatar = new MetaStyleAvatar({
+      THREE,
+      scene: this.scene,
+      rig: this.rig,
+      camera: this.camera
+    });
+
+    // --- Modules (poker)
+    this.tableSys = new PokerTableSystem({ THREE, scene: this.scene });
+    this.dealerSys = new DealerSystem({ THREE, scene: this.scene });
+    this.chipsSys = new ChipsSystem({ THREE, scene: this.scene });
+    this.cardsSys = new CardsSystem({ THREE, scene: this.scene });
+    this.turnUISys = new TurnUISystem({ THREE, scene: this.scene, camera: this.camera });
+
+    // Register modules (order matters: hands before listeners, table before dealer/cards/chips)
+    this.bus.add(this.loading);
+    this.bus.add(this.hands);
+    this.bus.add(this.loco);
+    this.bus.add(this.avatar);
+
+    this.bus.add(this.tableSys);
+    this.bus.add(this.dealerSys);
+    this.bus.add(this.chipsSys);
+    this.bus.add(this.cardsSys);
+    this.bus.add(this.turnUISys);
+
+    // Init modules
+    await this.bus.initAll({
+      renderer: this.renderer,
+      world: this,
+      worldData: this.worldData
+    });
+
+    // Connect locomotion targets
+    this.loco.setTeleportTargets({
+      pads: this.worldData?.pads || [],
+      surfaces: this.worldData?.teleportSurfaces?.length ? this.worldData.teleportSurfaces : [safetyFloor]
+    });
+
+    // --- Loading phase
+    this.state.phase = "loading";
+    this.loading.show("Loading…", "Hands-only XR • pinch to teleport");
+    this.avatar.setMode("loading");
+
+    // Transition to active (replace later with real asset loading)
+    setTimeout(() => {
+      this.state.phase = "active";
+      this.loading.hide();
+      this.avatar.setMode("world");
+
+      // Ensure the Turn UI draws at least once
+      if (this.turnUISys?._draw) this.turnUISys._draw(this);
+    }, 900);
+
+    return true;
   }
 
-  setTeleportTargets({ pads = [], surfaces = [] }) {
-    this.pads = pads || [];
-    this.surfaces = surfaces || [];
+  tick(t, frame) {
+    const dt = this.state.t ? Math.min(0.05, (t - this.state.t) / 1000) : 0;
+    this.state.t = t;
+    this.state.dt = dt;
+
+    const session = this.renderer.xr.getSession?.() || null;
+    this.state.xrActive = !!session;
+
+    // update world visuals
+    if (this.worldData?.update) this.worldData.update(dt);
+    if (this.propsData?.update) this.propsData.update(dt);
+
+    // update modules
+    this.bus.updateAll({
+      t, dt, frame,
+      xrSession: session,
+      phase: this.state.phase,
+      world: this
+    });
   }
-
-  queuePinch(e) {
-    this._pinchQueue.push({ ...e, t: performance.now() * 0.001 });
-    if (this._pinchQueue.length > 8) this._pinchQueue.shift();
   }
-
-  update({ dt, t }) {
-    this.lastSnap += dt;
-
-    // Compute a center-screen ray hit so reticle always exists
-    const hit = this._centerRayHit();
-    if (hit) {
-      this.reticle.position.copy(hit.point);
-      this.reticle.position.y += 0.01;
-      this.reticle.visible = true;
-    } else {
-      this.reticle.visible = false;
-    }
-
-    // Process pinches
-    while (this._pinchQueue.length) {
-      const e = this._pinchQueue.shift();
-
-      // Right pinch can snap-turn if you pinch while looking off-center
-      if (e.handedness === "right") {
-        const turn = this._computeSnapFromLook();
-        if (turn !== 0 && this.lastSnap >= this.snapCooldown) {
-          this.lastSnap = 0;
-          this.rig.rotation.y += this.THREE.MathUtils.degToRad(turn * this.snapDeg);
-          continue;
-        }
-      }
-
-      // Teleport to hit point
-      if (hit?.point) {
-        this.rig.position.set(hit.point.x, this.rig.position.y, hit.point.z);
-      }
-    }
-  }
-
-  _computeSnapFromLook() {
-    // If user is looking left/right enough, snap that direction
-    const dir = new this.THREE.Vector3();
-    this.camera.getWorldDirection(dir);
-    // Use X component as a crude “look offset”
-    if (dir.x > 0.35) return -1;
-    if (dir.x < -0.35) return +1;
-    return 0;
-  }
-
-  _centerRayHit() {
-    this.ray.setFromCamera({ x: 0, y: 0 }, this.camera);
-
-    // pads first
-    if (this.pads?.length) {
-      const hits = this.ray.intersectObjects(this.pads, true);
-      if (hits?.length) return hits[0];
-    }
-    // surfaces next
-    if (this.surfaces?.length) {
-      const hits = this.ray.intersectObjects(this.surfaces, true);
-      if (hits?.length) return hits[0];
-    }
-    return null;
-  }
-}

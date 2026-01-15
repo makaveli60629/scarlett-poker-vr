@@ -488,4 +488,3 @@ export function initWorld(ctx = {}) {
   log("initWorld() completed ✅");
   return world;
 }
-```0

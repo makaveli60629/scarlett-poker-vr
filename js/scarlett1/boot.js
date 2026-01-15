@@ -1,7 +1,7 @@
-// /js/scarlett1/boot.js — Scarlett 1.0 Boot (FULL • PERMANENT SPINE)
+// /js/scarlett1/boot.js — Scarlett 1.0 Boot (FULL • PERMANENT • WORLD-INIT FLEX)
 // ✅ HUD Diagnostics + Hide/Show + Copy Log
-// ✅ Loads THREE (CDN) -> world.js -> spine_xr.js
-// ✅ Safe module loader (bots + store hook) — never breaks core if missing
+// ✅ Loads THREE (CDN) -> world.js (flex init) -> spine_xr.js
+// ✅ Safe module loader (bots + store hook) — never breaks core
 
 (() => {
   // ------------------------------
@@ -26,6 +26,10 @@
       color: #d9e6ff; font-size: 12px;
       border: 1px solid rgba(47,107,255,0.35);
     `;
+  }
+
+  function safeJson(x) {
+    try { return JSON.stringify(x); } catch { return String(x); }
   }
 
   function hudAppend(line) {
@@ -69,7 +73,7 @@
       try {
         await navigator.clipboard.writeText(LOGS.join("\n"));
         alert("Copied diagnostics log ✅");
-      } catch (e) {
+      } catch {
         alert("Clipboard blocked. Long-press to copy is required on this device.");
       }
     };
@@ -140,8 +144,27 @@
     getLogs: () => LOGS.join("\n")
   };
 
-  function safeJson(x) {
-    try { return JSON.stringify(x); } catch { return String(x); }
+  // ------------------------------
+  // World init resolver (PERMANENT)
+  // ------------------------------
+  function resolveWorldInit(worldMod) {
+    if (!worldMod) return null;
+
+    // Preferred
+    if (typeof worldMod.initWorld === "function") return worldMod.initWorld;
+
+    // Default export function
+    if (typeof worldMod.default === "function") return worldMod.default;
+
+    // Default export object with initWorld/init
+    if (worldMod.default && typeof worldMod.default.initWorld === "function") return worldMod.default.initWorld;
+    if (worldMod.default && typeof worldMod.default.init === "function") return worldMod.default.init;
+
+    // Named object patterns
+    if (worldMod.World && typeof worldMod.World.initWorld === "function") return worldMod.World.initWorld;
+    if (worldMod.World && typeof worldMod.World.init === "function") return worldMod.World.init;
+
+    return null;
   }
 
   // ------------------------------
@@ -159,12 +182,8 @@
     }
 
     // Surface runtime errors to HUD
-    window.addEventListener("error", (e) => {
-      DIAG.error("window error:", e?.message || e);
-    });
-    window.addEventListener("unhandledrejection", (e) => {
-      DIAG.error("unhandledrejection:", e?.reason?.message || e?.reason || e);
-    });
+    window.addEventListener("error", (e) => DIAG.error("window error:", e?.message || e));
+    window.addEventListener("unhandledrejection", (e) => DIAG.error("unhandledrejection:", e?.reason?.message || e?.reason || e));
 
     // Env
     DIAG.log(`href=${location.href}`);
@@ -179,16 +198,12 @@
     try {
       DIAG.log("boot start ✅");
 
-      // ------------------------------
-      // Load THREE (CDN)
-      // ------------------------------
+      // Load THREE
       DIAG.status("Loading three.js (CDN)…");
       const THREE = await import("https://unpkg.com/three@0.158.0/build/three.module.js");
-      DIAG.log("three import ✅", "https://unpkg.com/three@0.158.0/build/three.module.js");
+      DIAG.log("three import ✅ https://unpkg.com/three@0.158.0/build/three.module.js");
 
-      // ------------------------------
-      // Load World
-      // ------------------------------
+      // Load world
       DIAG.status("Loading world.js…");
       const worldUrl = `/scarlett-poker-vr/js/scarlett1/world.js?v=${Date.now()}`;
       DIAG.log("world url=", worldUrl);
@@ -196,14 +211,19 @@
       const worldMod = await import(worldUrl);
       DIAG.log("world import ✅");
 
+      const initFn = resolveWorldInit(worldMod);
+      if (!initFn) {
+        DIAG.error("World init not found. Exports=", Object.keys(worldMod));
+        if (worldMod.default) DIAG.error("World default export keys=", Object.keys(worldMod.default));
+        throw new Error("world module has no initWorld/default init");
+      }
+
       DIAG.status("Starting world…");
-      await worldMod.initWorld({ THREE, DIAG });
+      await initFn({ THREE, DIAG });
       DIAG.log("world init ✅");
       DIAG.status("World running ✅");
 
-      // ------------------------------
-      // Load XR Spine (PERMANENT CONTROLS)
-      // ------------------------------
+      // Load XR spine
       DIAG.status("Loading spine_xr.js…");
       const spineUrl = `/scarlett-poker-vr/js/scarlett1/spine_xr.js?v=${Date.now()}`;
       DIAG.log("spine url=", spineUrl);
@@ -211,13 +231,16 @@
       const spineMod = await import(spineUrl);
       DIAG.log("spine import ✅");
 
+      if (typeof spineMod.installXR !== "function") {
+        DIAG.error("spine_xr missing installXR. Exports=", Object.keys(spineMod));
+        throw new Error("spine_xr.installXR missing");
+      }
+
       await spineMod.installXR({ THREE, DIAG });
       DIAG.log("spine install ✅");
       DIAG.status("XR spine ready ✅ (press Enter VR)");
 
-      // ------------------------------
-      // SAFE MODULE LOADS (never break core)
-      // ------------------------------
+      // Optional modules
       DIAG.status("Loading optional modules…");
 
       // Bots
@@ -249,7 +272,6 @@
       }
 
       DIAG.status("All systems ready ✅");
-
     } catch (e) {
       DIAG.error("BOOT FAILED:", e?.message || e);
       DIAG.status("BOOT FAILED ❌ (see log)");

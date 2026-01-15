@@ -1,9 +1,10 @@
-// /js/scarlett1/spine_xr.js — Scarlett XR Spine v2.3 (LOOK-DIRECTION MOVE)
-// ✅ Forward/back ALWAYS follows where you LOOK (camera forward, flattened to XZ)
-// ✅ Snap turn 45° still works (right stick X)
-// ✅ Teleport trigger works via polling (right trigger)
-// ✅ Teleport arc + glow
-// ✅ On XR sessionstart, auto-face toward the lobby/table (so you don't start staring at a wall)
+// /js/scarlett1/spine_xr.js — Scarlett XR Spine v2.4 (LOCKED)
+// ✅ Trigger teleport works (polling)
+// ✅ Right stick X = snap turn 45°
+// ✅ Right stick Y = forward/back (FIXED: inverted back to match your controller)
+// ✅ Move follows LOOK direction (camera forward flattened)
+// ✅ No menu (no black blocker)
+// ✅ Does NOT override facing anymore (world spawn handles facing toward table)
 
 export async function installXR({ THREE, DIAG }) {
   const D = DIAG || console;
@@ -14,11 +15,7 @@ export async function installXR({ THREE, DIAG }) {
     return;
   }
 
-  const {
-    renderer, scene, camera, rig, player,
-    spawnPads, teleportTo, addFrameHook,
-    blockedXZ
-  } = W;
+  const { renderer, scene, camera, rig, player, spawnPads, teleportTo, addFrameHook, blockedXZ } = W;
 
   // VRButton
   let VRButton;
@@ -55,9 +52,7 @@ export async function installXR({ THREE, DIAG }) {
     const line = new THREE.Line(rayGeo, new THREE.LineBasicMaterial({ color }));
     line.scale.z = 12;
 
-    const spr = new THREE.Sprite(new THREE.SpriteMaterial({
-      color, transparent: true, opacity: 0.95
-    }));
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ color, transparent: true, opacity: 0.95 }));
     spr.scale.set(0.12, 0.12, 0.12);
     spr.position.set(0, 0, -1);
     line.add(spr);
@@ -68,7 +63,7 @@ export async function installXR({ THREE, DIAG }) {
   controllerL.add(makeLaser(0xff33aa));
   controllerR.add(makeLaser(0x33aaff));
 
-  // Raycasting
+  // Raycasting helpers
   const raycaster = new THREE.Raycaster();
   const tmpMat = new THREE.Matrix4();
   const tmpO = new THREE.Vector3();
@@ -96,7 +91,6 @@ export async function installXR({ THREE, DIAG }) {
 
   function teleportToPad(pad) {
     if (!pad?.userData?.teleportPos) return false;
-    // Keep your current rig yaw when teleporting, unless pad has yaw
     const yaw = (pad.userData.yaw != null) ? pad.userData.yaw : (rig.rotation.y ?? 0);
     teleportTo(pad.userData.teleportPos, yaw);
     D.log("[teleport] →", pad.userData.label || "PAD");
@@ -110,7 +104,7 @@ export async function installXR({ THREE, DIAG }) {
     return true;
   }
 
-  // Teleport visuals
+  // Teleport visuals (arc + reticle glow)
   const ARC_SEG = 32;
   const arcPos = new Float32Array((ARC_SEG + 1) * 3);
   const arcCol = new Float32Array((ARC_SEG + 1) * 3);
@@ -144,7 +138,7 @@ export async function installXR({ THREE, DIAG }) {
 
   const reticleGlow = new THREE.Mesh(
     new THREE.CircleGeometry(0.22, 48),
-    new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.20 })
+    new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.18 })
   );
   reticleGlow.rotation.x = -Math.PI / 2;
   reticleGlow.visible = false;
@@ -208,9 +202,9 @@ export async function installXR({ THREE, DIAG }) {
 
     arcLine.visible = true;
     arcGlow.visible = true;
+
     reticleRing.visible = true;
     reticleGlow.visible = true;
-
     reticleRing.position.copy(hitPoint);
     reticleGlow.position.copy(hitPoint);
 
@@ -220,7 +214,7 @@ export async function installXR({ THREE, DIAG }) {
     reticleGlow.material.opacity = ok ? 0.28 : 0.12;
   }
 
-  // Gamepad (right)
+  // Right gamepad (Quest reliable)
   function getRightGamepad() {
     const s = renderer.xr.getSession?.();
     if (!s) return null;
@@ -239,7 +233,7 @@ export async function installXR({ THREE, DIAG }) {
     return !!(gp.buttons[0]?.pressed || gp.buttons[1]?.pressed);
   }
 
-  // Controls
+  // Movement (LOOK direction)
   const DEAD = 0.18;
   const MOVE_SPEED = 1.35;
   const TURN_ANGLE = (45 * Math.PI) / 180;
@@ -255,10 +249,8 @@ export async function installXR({ THREE, DIAG }) {
     return true;
   }
 
-  // ✅ MOVE BASED ON CAMERA LOOK DIRECTION (flattened)
   const camForward = new THREE.Vector3();
   function moveLookForward(dt, amt) {
-    // camera world forward
     camera.getWorldDirection(camForward);
     camForward.y = 0;
     if (camForward.lengthSq() < 1e-6) return;
@@ -271,27 +263,14 @@ export async function installXR({ THREE, DIAG }) {
 
   function snapTurn(dir) {
     rig.rotation.y += dir * TURN_ANGLE;
-    // keep player yaw in sync (optional)
     player.yaw = rig.rotation.y;
   }
 
-  function faceTowardLobby() {
-    // Table is at (0,0). Face from current rig position to origin.
-    const dx = 0 - rig.position.x;
-    const dz = 0 - rig.position.z;
-    const yaw = Math.atan2(dx, -dz);
-    rig.rotation.y = yaw;
-    player.yaw = yaw;
-    D.log("[xr] auto-faced toward lobby/table ✅");
-  }
-
   renderer.xr.addEventListener("sessionstart", () => {
-    // On entering VR, auto-face toward the table/lobby
-    faceTowardLobby();
-    D.log("[xr] sessionstart ✅");
+    // Do NOT override facing here anymore. World spawn faces the table.
+    D.log("[xr] sessionstart ✅ (world controls facing)");
   });
 
-  // Hook loop
   addFrameHook(({ dt }) => {
     if (!renderer.xr.isPresenting) {
       arcLine.visible = false;
@@ -307,16 +286,16 @@ export async function installXR({ THREE, DIAG }) {
     const gpR = getRightGamepad();
     if (!gpR) return;
 
-    // Right stick axes
+    // Right stick axes (prefer 2/3)
     let rX = 0, rY = 0;
     if (gpR.axes?.length >= 4) { rX = gpR.axes[2] || 0; rY = gpR.axes[3] || 0; }
     else if (gpR.axes?.length >= 2) { rX = gpR.axes[0] || 0; rY = gpR.axes[1] || 0; }
 
-    // Forward/back follows LOOK direction
-    const fwdAmt = axis(rY);
+    // ✅ FIX: Forward/back flipped — invert here
+    const fwdAmt = axis(-rY);
     if (fwdAmt) moveLookForward(dt, fwdAmt);
 
-    // Snap turn from right stick X
+    // Snap turn 45°
     const turnAmt = axis(rX);
     turnCD -= dt;
     if (turnCD <= 0 && turnAmt !== 0) {
@@ -335,5 +314,5 @@ export async function installXR({ THREE, DIAG }) {
     camera.rotation.x = player.pitch ?? 0;
   });
 
-  D.log("[xr] installed ✅ (look-direction forward)");
-    }
+  D.log("[xr] installed ✅ (fwd/back fixed + facing handled by world)");
+  }

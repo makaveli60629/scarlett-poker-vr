@@ -1,75 +1,37 @@
 {
-  "version": "SCARLETT1_MODULES_v1",
-  "notes": "Scarlett 1.0 modular loader list. Addons are optional and will not break spine if missing.",
+  "version": "scarlett1.0",
+  "notes": "Scarlett 1.0 module loader list. Safe: modules load independently; failures do not break boot.",
   "modules": [
     {
-      "name": "spine_xr",
-      "type": "core",
+      "id": "spine_diag",
       "enabled": true,
-      "paths": [
-        "/scarlett-poker-vr/js/scarlett1/spine_xr.js"
-      ]
+      "urls": ["./js/scarlett1/spine_diag.js"]
     },
     {
-      "name": "spine_android",
-      "type": "core",
+      "id": "spine_modules",
       "enabled": true,
-      "paths": [
-        "/scarlett-poker-vr/js/scarlett1/spine_android.js"
-      ]
+      "urls": ["./js/scarlett1/spine_modules.js"]
     },
     {
-      "name": "spine_modules",
-      "type": "core",
+      "id": "spine_xr",
       "enabled": true,
-      "paths": [
-        "/scarlett-poker-vr/js/scarlett1/spine_modules.js"
-      ]
+      "urls": ["./js/scarlett1/spine_xr.js"]
+    },
+    {
+      "id": "spine_android",
+      "enabled": true,
+      "urls": ["./js/scarlett1/spine_android.js"]
     },
 
     {
-      "name": "addon_lighting",
-      "type": "addon",
+      "id": "addon_lighting",
       "enabled": true,
-      "optional": true,
-      "paths": [
-        "/scarlett-poker-vr/js/scarlett1/addons/lighting.js",
-        "/scarlett-poker-vr/js/lighting.js",
-        "/scarlett-poker-vr/lighting.js"
-      ]
+      "urls": ["./js/lighting.js"]
     },
     {
-      "name": "addon_humanoids",
-      "type": "addon",
+      "id": "addon_humanoids",
       "enabled": true,
-      "optional": true,
-      "paths": [
-        "/scarlett-poker-vr/js/scarlett1/addons/humanoids.js",
-        "/scarlett-poker-vr/js/humanoids.js",
-        "/scarlett-poker-vr/humanoids.js"
-      ]
-    },
-    {
-      "name": "addon_poker",
-      "type": "addon",
-      "enabled": false,
-      "optional": true,
-      "paths": [
-        "/scarlett-poker-vr/js/scarlett1/addons/poker.js",
-        "/scarlett-poker-vr/js/poker.js",
-        "/scarlett-poker-vr/poker.js"
-      ]
-    },
-    {
-      "name": "addon_scorpion",
-      "type": "addon",
-      "enabled": false,
-      "optional": true,
-      "paths": [
-        "/scarlett-poker-vr/js/scarlett1/addons/scorpion.js",
-        "/scarlett-poker-vr/js/scorpion.js",
-        "/scarlett-poker-vr/scorpion.js"
-      ]
+      "urls": ["./js/humanoids.js"]
     }
   ]
 }

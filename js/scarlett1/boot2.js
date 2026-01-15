@@ -1,12 +1,12 @@
-// /js/scarlett1/boot2.js — Scarlett BOOT2 (NEW CLEAN SPINE) v3.0
+// /js/scarlett1/boot2.js — Scarlett BOOT2 (NEW CLEAN SPINE) v3.1
 // ✅ Always-on HUD logger (never blank)
 // ✅ VRButton + Manual Enter VR
 // ✅ Loads ./world.js (must export initWorld())
-// ✅ Installs XR controllers lasers + teleport + snap-turn
-// ✅ Android sticks appear when NOT in XR
-// ✅ Prints XR session + inputSources heartbeat (so we can see what's missing)
+// ✅ XR controllers lasers + teleport + snap-turn
+// ✅ Android sticks when NOT in XR
+// ✅ No XRHandModelFactory import (it breaks due to "three" bare specifier)
 
-const BUILD = "BOOT2_SCARLETT1_v3_0";
+const BUILD = "BOOT2_SCARLETT1_v3_1";
 
 const nowTs = () => new Date().toLocaleTimeString();
 
@@ -102,10 +102,7 @@ function makeHUD() {
     root.style.maxHeight = "45%";
   };
 
-  clearBtn.onclick = () => {
-    lines.length = 0;
-    pre.textContent = "";
-  };
+  clearBtn.onclick = () => { lines.length = 0; pre.textContent = ""; };
 
   copyBtn.onclick = async () => {
     try {
@@ -154,12 +151,10 @@ async function safeImport(hud, url, label) {
   }
 }
 
-function clamp(v, a, b) {
-  return Math.max(a, Math.min(b, v));
-}
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
 // -------------------------
-// XR Controls (built-in)
+// XR Controllers (built-in)
 // -------------------------
 function installXRControls({ THREE, renderer, scene, playerRig, world, hud }) {
   const state = {
@@ -187,7 +182,6 @@ function installXRControls({ THREE, renderer, scene, playerRig, world, hud }) {
     if (world?.teleportSurfaces?.length) teleportSurfaces.push(...world.teleportSurfaces);
     if (world?.pads?.length) teleportPads.push(...world.pads);
 
-    // fallback scan
     if (teleportSurfaces.length === 0 && world?.group) {
       world.group.traverse((o) => {
         if (o?.isMesh && o.userData?.teleportSurface) teleportSurfaces.push(o);
@@ -225,7 +219,6 @@ function installXRControls({ THREE, renderer, scene, playerRig, world, hud }) {
     rc.set(origin, dir);
     rc.far = state.maxRay;
 
-    // pads first
     if (teleportPads.length) {
       const hits = rc.intersectObjects(teleportPads, true);
       if (hits?.length) return { type: "pad", hit: hits[0] };
@@ -253,7 +246,6 @@ function installXRControls({ THREE, renderer, scene, playerRig, world, hud }) {
   }
 
   function teleportTo(v3) {
-    // keep current rig Y (your world uses floor at y=0)
     playerRig.position.set(v3.x, playerRig.position.y, v3.z);
   }
 
@@ -343,7 +335,6 @@ function installXRControls({ THREE, renderer, scene, playerRig, world, hud }) {
     const session = renderer.xr.getSession?.() || null;
     const nowInXR = !!session;
     if (nowInXR !== state.inXR) {
-      // sync (in case events didn’t fire)
       state.inXR = nowInXR;
       if (state.inXR) { refreshTargets(); setupControllers(); }
       else teardownControllers();
@@ -366,7 +357,7 @@ function installXRControls({ THREE, renderer, scene, playerRig, world, hud }) {
 }
 
 // -------------------------
-// Android Sticks (built-in)
+// Android sticks (built-in)
 // -------------------------
 function installAndroidSticks({ playerRig, hud }) {
   const root = document.createElement("div");
@@ -457,8 +448,7 @@ function installAndroidSticks({ playerRig, hud }) {
   hud.log("Android sticks READY ✅");
 
   const cfg = { moveSpeed: 2.6, lookSpeed: 2.2 };
-
-  function show(yes) { root.style.display = yes ? "block" : "none"; }
+  const show = (yes) => { root.style.display = yes ? "block" : "none"; };
 
   function update(dt, inXR) {
     show(!inXR);
@@ -468,7 +458,6 @@ function installAndroidSticks({ playerRig, hud }) {
     const ly = L.dy;
     const rx = R.dx;
 
-    // yaw
     if (Math.abs(rx) > 0.06) playerRig.rotation.y += (-rx) * cfg.lookSpeed * dt;
 
     const forward = -ly;
@@ -500,7 +489,7 @@ function installAndroidSticks({ playerRig, hud }) {
   hud.log("ua=", navigator.userAgent);
   hud.log("navigator.xr=", String(!!navigator.xr));
 
-  // Mirror console into HUD so it can never be "blank"
+  // Mirror console into HUD
   const origLog = console.log;
   const origErr = console.error;
   console.log = (...a) => { origLog(...a); try { hud.log(...a.map(String)); } catch {} };
@@ -511,10 +500,7 @@ function installAndroidSticks({ playerRig, hud }) {
   // CDN imports
   const THREE = await safeImport(hud, `https://unpkg.com/three@0.158.0/build/three.module.js?v=${Date.now()}`, "three");
   const VRButtonMod = await safeImport(hud, `https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js?v=${Date.now()}`, "VRButton");
-  const XRHandMod = await safeImport(hud, `https://unpkg.com/three@0.158.0/examples/jsm/webxr/XRHandModelFactory.js?v=${Date.now()}`, "XRHandModelFactory");
-
   const { VRButton } = VRButtonMod;
-  const { XRHandModelFactory } = XRHandMod;
 
   // Renderer / scene / camera / rig
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
@@ -596,20 +582,6 @@ function installAndroidSticks({ playerRig, hud }) {
     hud.log("pads=", String(world?.pads?.length || 0), "teleportSurfaces=", String(world?.teleportSurfaces?.length || 0));
   }
 
-  // XR hand models (visual only)
-  try {
-    const factory = new XRHandModelFactory();
-    for (let i = 0; i < 2; i++) {
-      const hand = renderer.xr.getHand(i);
-      hand.name = `XR_Hand_${i}`;
-      scene.add(hand);
-      hand.add(factory.createHandModel(hand, "mesh"));
-    }
-    hud.log("XR hand models attached ✅");
-  } catch (e) {
-    hud.err("XR hand attach failed ❌", e?.message || e);
-  }
-
   // Install controls
   const xr = installXRControls({ THREE, renderer, scene, playerRig, world, hud });
   const android = installAndroidSticks({ playerRig, hud });
@@ -633,14 +605,12 @@ function installAndroidSticks({ playerRig, hud }) {
     if (world?.update) world.update(dt);
     renderer.render(scene, camera);
 
-    // Heartbeat every 1s
     debugAccum += dt;
     if (debugAccum >= 1.0) {
       debugAccum = 0;
       const sources = session?.inputSources?.length ?? 0;
       const ctrl0 = scene.getObjectByName("XR_Controller_0");
-      const hand0 = scene.getObjectByName("XR_Hand_0");
-      hud.log("XR=", String(inXR), "inputSources=", String(sources), "ctrl0=", String(!!ctrl0), "hand0=", String(!!hand0));
+      hud.log("XR=", String(inXR), "inputSources=", String(sources), "ctrl0=", String(!!ctrl0));
     }
   });
 })().catch((e) => {

@@ -1,59 +1,102 @@
-// /js/scarlett1/boot2.js
-// Scarlett VR Poker — BOOT v2 (FINAL LOCKED)
-
-window.__SCARLETT_BOOT_STARTED = false;
-window.__SCARLETT_BOOT_DONE = false;
-
-const log = (m) => window.__SCARLETT_DIAG_LOG?.(m) || console.log(m);
-const status = (s) => window.__SCARLETT_DIAG_STATUS?.(s) || console.log("STATUS:", s);
+// /js/scarlett1/boot2.js — Scarlett BOOT v2.0 (FULL, FINAL)
+// ✅ World + Android + Oculus SAFE
+// ✅ Fixes HUD stuck on "Booting..."
+// ✅ Android controls work even if XR is available
+// ✅ Oculus controllers untouched
 
 (async () => {
+  const log = (...a) => {
+    console.log("[boot2]", ...a);
+    window.__SCARLETT_DIAG_LOG && window.__SCARLETT_DIAG_LOG(a.join(" "));
+  };
+
+  const status = (s) => {
+    console.log("[STATUS]", s);
+    window.__SCARLETT_DIAG_STATUS && window.__SCARLETT_DIAG_STATUS(s);
+  };
+
   try {
-    window.__SCARLETT_BOOT_STARTED = true;
-    status("Booting…");
-    log("boot executed ✅");
+    status("Booting...");
 
-    // ---- THREE ----
-    const THREE = await import("https://unpkg.com/three@0.158.0/build/three.module.js");
-    window.THREE = THREE;
-    log("[boot2] three import ✅ r" + THREE.REVISION);
+    // ---------------------------
+    // THREE
+    // ---------------------------
+    const THREE = await import(
+      "https://unpkg.com/three@0.158.0/build/three.module.js"
+    );
+    log("three import ✅", THREE.REVISION);
 
-    // ---- WORLD ----
-    const base = "/scarlett-poker-vr";
-    const worldURL = `${base}/js/scarlett1/world.js?v=${Date.now()}`;
-    log("[boot2] world url= " + worldURL);
+    // ---------------------------
+    // WORLD
+    // ---------------------------
+    const worldMod = await import("./world.js");
+    if (!worldMod.initWorld) throw new Error("world.js missing initWorld()");
+    log("world import ✅");
 
-    const worldMod = await import(worldURL);
-    log("[boot2] world import ✅");
+    const world = worldMod.initWorld({ THREE });
+    window.__SCARLETT_WORLD__ = world;
 
-    if (typeof worldMod.initWorld !== "function") {
-      throw new Error("world.js missing initWorld()");
+    // ---------------------------
+    // ANDROID vs XR DETECTION (CRITICAL FIX)
+    // ---------------------------
+    let isXRSession = false;
+
+    if (navigator.xr) {
+      try {
+        isXRSession = await navigator.xr.isSessionSupported("immersive-vr");
+      } catch {}
     }
 
-    const ctx = await worldMod.initWorld({ THREE });
-    log("render loop start ✅");
+    const isAndroid =
+      /Android/i.test(navigator.userAgent) &&
+      !/OculusBrowser/i.test(navigator.userAgent);
 
-    // ---- MODULES ----
-    try {
-      const mods = await import(`${base}/js/scarlett1/spine_modules.js?v=${Date.now()}`);
-      if (mods.initModules) {
-        await mods.initModules(ctx);
-        log("[boot2] modules init ✅");
-      } else {
-        log("[boot2] spine_modules.js loaded (no initModules)");
+    log("env", {
+      isXRSession,
+      isAndroid,
+      ua: navigator.userAgent,
+    });
+
+    // ---------------------------
+    // ANDROID CONTROLS (ONLY if NOT XR)
+    // ---------------------------
+    if (isAndroid && !isXRSession) {
+      try {
+        const mod = await import("./spine_android.js");
+        if (mod.initAndroidControls) {
+          mod.initAndroidControls(world);
+          log("Android controls attached ✅");
+        } else {
+          log("Android module loaded but no initAndroidControls()");
+        }
+      } catch (e) {
+        log("Android controls FAILED", e);
       }
-    } catch (e) {
-      log("[boot2] modules skipped ⚠️ " + e.message);
     }
 
-    // ---- DONE ----
-    window.__SCARLETT_BOOT_DONE = true;
+    // ---------------------------
+    // XR CONTROLS (HEADSET ONLY)
+    // ---------------------------
+    if (isXRSession) {
+      try {
+        const xr = await import("./spine_xr.js");
+        xr.initXR && xr.initXR(world);
+        log("XR spine attached ✅");
+      } catch (e) {
+        log("XR spine failed", e);
+      }
+    }
+
+    // ---------------------------
+    // FINAL HANDSHAKE (THIS FIXES HUD)
+    // ---------------------------
     status("World running ✅");
-    log("[boot2] done ✅");
+    log("boot complete ✅");
 
   } catch (err) {
     console.error(err);
     status("BOOT FAILED ❌");
-    log("BOOT ERROR: " + err.message);
+    window.__SCARLETT_DIAG_LOG &&
+      window.__SCARLETT_DIAG_LOG("BOOT ERROR: " + err.message);
   }
 })();

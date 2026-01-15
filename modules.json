@@ -1,18 +1,11 @@
 {
-  "activeProfile": "scarlett1",
-
-  "profiles": {
-    "scarlett1": {
-      "description": "Scarlett VR Poker – XR + Android + Modular World",
-
-      "modules": [
-        "js/scarlett1/spine_diag.js",
-        "js/scarlett1/spine_xr.js",
-        "js/scarlett1/spine_android.js",
-        "js/scarlett1/spine_modules.js",
-
-        "js/scarlett1/mod_world_upgrade.js"
-      ]
-    }
-  }
+  "name": "scarlett-poker-vr",
+  "channel": "scarlett1",
+  "base": "/scarlett-poker-vr/",
+  "boot": "/scarlett-poker-vr/js/scarlett1/boot2.js",
+  "modules": [
+    "/scarlett-poker-vr/js/scarlett1/spine_xr.js",
+    "/scarlett-poker-vr/js/scarlett1/spine_android.js",
+    "/scarlett-poker-vr/js/scarlett1/spine_modules.js"
+  ]
 }

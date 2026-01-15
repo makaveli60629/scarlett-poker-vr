@@ -1,14 +1,10 @@
-// /js/core/controls.js — Scarlett Core Controls v3.0 (XR + Android + Desktop)
-// ✅ XR Controllers: lasers + teleport + snap turn (Quest)
-// ✅ Hands can exist; controllers take over automatically when present
-// ✅ Android (non-XR): dual-stick move + look
-// ✅ Desktop: WASD + arrows, mouse optional (light)
-// ✅ BOOT2-safe exports: initControls(), init(), default
+// /js/core/controls.js — Scarlett Core Controls v3.1 (FULL)
+// ✅ Quest XR Controllers: lasers + teleport + snap turn
+// ✅ Android (NOT in XR): dual sticks move + turn
+// ✅ Desktop fallback: WASD + arrows
+// ✅ Works when BOOT2 calls controls.update(dt) every frame
 //
-// BOOT2 expected usage (typical):
-//   const Controls = await import("/js/core/controls.js");
-//   const controls = await Controls.init({ THREE, renderer, scene, camera, playerRig, world, log });
-//   // in loop: controls.update(dt)
+// Exports: initControls(), init(), default
 
 export function initControls(ctx = {}) {
   const {
@@ -23,27 +19,20 @@ export function initControls(ctx = {}) {
   } = ctx;
 
   if (!THREE || !renderer || !scene || !camera || !playerRig) {
-    throw new Error("[controls] initControls missing required params {THREE, renderer, scene, camera, playerRig}");
+    throw new Error("[controls] initControls missing {THREE, renderer, scene, camera, playerRig}");
   }
 
-  // -----------------------
-  // Config
-  // -----------------------
   const cfg = {
-    // XR
     xrMaxRay: 30,
     xrSnapDeg: 30,
     xrSnapCooldown: 0.25,
     xrTeleportKeepY: true,
 
-    // Movement
-    moveSpeed: 2.2,        // meters/sec
+    moveSpeed: 2.2,
     runSpeed: 4.0,
     lookSpeed: 1.8,
 
-    // Android stick UI
     sticksEnabled: true,
-
     ...options
   };
 
@@ -51,7 +40,9 @@ export function initControls(ctx = {}) {
     enabled: true,
     inXR: false,
 
-    // XR controllers
+    teleportSurfaces: [],
+    teleportPads: [],
+
     xr: {
       controllers: [null, null],
       lines: [null, null],
@@ -60,33 +51,19 @@ export function initControls(ctx = {}) {
       lastSnapT: 999,
       tmpMat: new THREE.Matrix4(),
       tmpDir: new THREE.Vector3(),
-      tmpPos: new THREE.Vector3(),
-      tmpV: new THREE.Vector3()
+      tmpPos: new THREE.Vector3()
     },
 
-    // Teleport targets
-    teleportSurfaces: [],
-    teleportPads: [],
-
-    // Desktop keys
     keys: new Set(),
     shift: false,
 
-    // Android sticks
     sticks: {
-      active: false,
+      root: null,
       left: { id: null, x: 0, y: 0, dx: 0, dy: 0, el: null, knob: null },
-      right:{ id: null, x: 0, y: 0, dx: 0, dy: 0, el: null, knob: null },
-      root: null
-    },
-
-    // Timing
-    t: performance.now()
+      right:{ id: null, x: 0, y: 0, dx: 0, dy: 0, el: null, knob: null }
+    }
   };
 
-  // -----------------------
-  // Helpers
-  // -----------------------
   function getSession() {
     return renderer.xr?.getSession?.() || null;
   }
@@ -98,7 +75,7 @@ export function initControls(ctx = {}) {
     if (world?.teleportSurfaces?.length) state.teleportSurfaces.push(...world.teleportSurfaces);
     if (world?.pads?.length) state.teleportPads.push(...world.pads);
 
-    // fallback: scan for userData.teleportSurface
+    // fallback scan
     if (state.teleportSurfaces.length === 0 && world?.group) {
       world.group.traverse((o) => {
         if (o?.isMesh && o.userData?.teleportSurface) state.teleportSurfaces.push(o);
@@ -108,26 +85,6 @@ export function initControls(ctx = {}) {
     log("teleport targets", "surfaces=", state.teleportSurfaces.length, "pads=", state.teleportPads.length);
   }
 
-  function getRigYaw() {
-    // camera might be offset; rig yaw is authoritative
-    return playerRig.rotation.y;
-  }
-
-  function getCameraYaw() {
-    // yaw from camera world direction
-    const dir = new THREE.Vector3();
-    camera.getWorldDirection(dir);
-    return Math.atan2(dir.x, dir.z); // note: x,z swapped for yaw
-  }
-
-  function moveRigXZ(vx, vz, dt) {
-    playerRig.position.x += vx * dt;
-    playerRig.position.z += vz * dt;
-  }
-
-  // -----------------------
-  // XR: build lasers + teleport
-  // -----------------------
   function makeLaserLine() {
     const geo = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(0, 0, 0),
@@ -141,7 +98,6 @@ export function initControls(ctx = {}) {
   }
 
   function getRayOriginDir(controller) {
-    // forward is -Z in controller local space
     state.xr.tmpMat.identity().extractRotation(controller.matrixWorld);
     state.xr.tmpDir.set(0, 0, -1).applyMatrix4(state.xr.tmpMat).normalize();
     state.xr.tmpPos.setFromMatrixPosition(controller.matrixWorld);
@@ -163,7 +119,7 @@ export function initControls(ctx = {}) {
       if (hits?.length) return { type: "pad", hit: hits[0] };
     }
 
-    // surfaces
+    // floors
     if (state.teleportSurfaces.length) {
       const hits = rc.intersectObjects(state.teleportSurfaces, true);
       if (hits?.length) return { type: "floor", hit: hits[0] };
@@ -189,10 +145,9 @@ export function initControls(ctx = {}) {
     state.xr.lastHit[i] = res;
   }
 
-  function teleportTo(vec3) {
-    // keep Y unless we want to drop onto target Y
-    const y = cfg.xrTeleportKeepY ? playerRig.position.y : vec3.y;
-    playerRig.position.set(vec3.x, y, vec3.z);
+  function teleportTo(v3) {
+    const y = cfg.xrTeleportKeepY ? playerRig.position.y : v3.y;
+    playerRig.position.set(v3.x, y, v3.z);
   }
 
   function onSelectStart(i) {
@@ -200,19 +155,16 @@ export function initControls(ctx = {}) {
     if (!res) return;
 
     if (res.type === "pad") {
-      // climb parents until pad root
       let n = res.hit.object;
       while (n && !n.userData?.teleport) n = n.parent;
-      if (n?.userData?.target) {
-        teleportTo(n.userData.target);
-        return;
-      }
+      if (n?.userData?.target) return teleportTo(n.userData.target);
     }
 
     teleportTo(res.hit.point);
   }
 
   function setupXRControllers() {
+    // create controllers once per session
     for (let i = 0; i < 2; i++) {
       const c = renderer.xr.getController(i);
       c.name = `XR_Controller_${i}`;
@@ -224,7 +176,6 @@ export function initControls(ctx = {}) {
       const rc = new THREE.Raycaster();
       rc.far = cfg.xrMaxRay;
 
-      // attach select event
       c.addEventListener("selectstart", () => onSelectStart(i));
 
       state.xr.controllers[i] = c;
@@ -237,8 +188,7 @@ export function initControls(ctx = {}) {
   function teardownXRControllers() {
     for (let i = 0; i < 2; i++) {
       const c = state.xr.controllers[i];
-      if (!c) continue;
-      scene.remove(c);
+      if (c) scene.remove(c);
       state.xr.controllers[i] = null;
       state.xr.lines[i] = null;
       state.xr.raycasters[i] = null;
@@ -253,14 +203,13 @@ export function initControls(ctx = {}) {
     const session = getSession();
     if (!session) return;
 
-    // Find any gamepad x axis
     const sources = session.inputSources || [];
     let xAxis = 0;
 
     for (const src of sources) {
       const gp = src?.gamepad;
       if (!gp?.axes?.length) continue;
-      xAxis = gp.axes[0] ?? 0; // left stick X usually
+      xAxis = gp.axes[0] ?? 0;
       if (Math.abs(xAxis) > 0.65) break;
     }
 
@@ -268,12 +217,12 @@ export function initControls(ctx = {}) {
     if (state.xr.lastSnapT < cfg.xrSnapCooldown) return;
 
     state.xr.lastSnapT = 0;
+
     const angle = THREE.MathUtils.degToRad(cfg.xrSnapDeg);
     const dir = xAxis > 0 ? -1 : 1;
     playerRig.rotation.y += angle * dir;
   }
 
-  // XR session hooks (this is the piece most cores forget)
   function bindXRSessionEvents() {
     renderer.xr.addEventListener("sessionstart", () => {
       state.inXR = true;
@@ -289,14 +238,13 @@ export function initControls(ctx = {}) {
     });
   }
 
-  // -----------------------
-  // Android sticks (non-XR)
-  // -----------------------
+  // ---------------- Android sticks ----------------
   function buildSticksUI() {
     if (!cfg.sticksEnabled) return;
     if (state.sticks.root) return;
 
     const root = document.createElement("div");
+    root.id = "scarlett-sticks";
     root.style.position = "fixed";
     root.style.left = "0";
     root.style.top = "0";
@@ -304,7 +252,6 @@ export function initControls(ctx = {}) {
     root.style.height = "100%";
     root.style.pointerEvents = "none";
     root.style.zIndex = "99999";
-    root.id = "scarlett-sticks";
     document.body.appendChild(root);
     state.sticks.root = root;
 
@@ -349,12 +296,11 @@ export function initControls(ctx = {}) {
     state.sticks.right.el = R.pad;
     state.sticks.right.knob = R.knob;
 
-    const bindStick = (stick) => {
+    function bindStick(stick) {
       const el = stick.el;
       const knob = stick.knob;
 
       function setKnob(dx, dy) {
-        // clamp to circle radius 55
         const r = 55;
         const len = Math.hypot(dx, dy);
         if (len > r) {
@@ -392,7 +338,7 @@ export function initControls(ctx = {}) {
         stick.id = null;
         setKnob(0, 0);
       });
-    };
+    }
 
     bindStick(state.sticks.left);
     bindStick(state.sticks.right);
@@ -405,9 +351,7 @@ export function initControls(ctx = {}) {
     state.sticks.root.style.display = yes ? "block" : "none";
   }
 
-  // -----------------------
-  // Desktop keyboard
-  // -----------------------
+  // ---------------- Desktop keys ----------------
   function bindKeyboard() {
     window.addEventListener("keydown", (e) => {
       state.keys.add(e.code);
@@ -419,11 +363,12 @@ export function initControls(ctx = {}) {
     });
   }
 
-  // -----------------------
-  // Update loops
-  // -----------------------
+  function moveRigXZ(vx, vz, dt) {
+    playerRig.position.x += vx * dt;
+    playerRig.position.z += vz * dt;
+  }
+
   function updateXR(dt) {
-    // update rays + lasers
     for (let i = 0; i < 2; i++) {
       const c = state.xr.controllers[i];
       const line = state.xr.lines[i];
@@ -432,28 +377,23 @@ export function initControls(ctx = {}) {
       const res = intersectTeleport(i);
       setLaserVisual(i, res);
     }
-
     applyXRSnapTurn(dt);
   }
 
   function updateAndroid(dt) {
-    if (!cfg.sticksEnabled) return;
-
     const lx = state.sticks.left.dx;
-    const ly = state.sticks.left.dy;   // forward is -dy (screen up is negative)
+    const ly = state.sticks.left.dy;
     const rx = state.sticks.right.dx;
-    const ry = state.sticks.right.dy;
 
-    // Look with right stick (yaw only)
+    // right stick yaw
     if (Math.abs(rx) > 0.06) {
       playerRig.rotation.y += (-rx) * cfg.lookSpeed * dt;
     }
 
-    // Move with left stick relative to camera yaw (or rig yaw)
     const forward = -ly;
     const strafe = lx;
 
-    const yaw = getRigYaw();
+    const yaw = playerRig.rotation.y;
     const s = Math.sin(yaw);
     const c = Math.cos(yaw);
 
@@ -487,7 +427,7 @@ export function initControls(ctx = {}) {
 
     if (!forward && !strafe) return;
 
-    const yaw = getRigYaw();
+    const yaw = playerRig.rotation.y;
     const s = Math.sin(yaw);
     const c = Math.cos(yaw);
 
@@ -500,11 +440,9 @@ export function initControls(ctx = {}) {
   function update(dt = 0.016) {
     if (!state.enabled) return;
 
-    // detect XR live session each frame
-    const session = getSession();
-    const nowInXR = !!session;
+    const nowInXR = !!getSession();
     if (nowInXR !== state.inXR) {
-      // if session started/ended but events didn’t fire (rare), sync
+      // sync if session events didn’t fire
       state.inXR = nowInXR;
       if (state.inXR) {
         refreshTeleportTargets();
@@ -514,7 +452,7 @@ export function initControls(ctx = {}) {
       }
     }
 
-    // show sticks only when not in XR
+    // sticks only when not in XR
     showSticks(!state.inXR);
 
     if (state.inXR) updateXR(dt);
@@ -531,23 +469,19 @@ export function initControls(ctx = {}) {
     state.sticks.root = null;
   }
 
-  // -----------------------
-  // Boot
-  // -----------------------
+  // boot
   refreshTeleportTargets();
   bindXRSessionEvents();
   bindKeyboard();
   buildSticksUI();
 
-  log("core controls ready ✅", "xr=", !!renderer.xr, "sticks=", !!state.sticks.root);
+  log("core controls ready ✅");
 
   return { update, dispose, refreshTeleportTargets, state };
 }
 
-// BOOT2 may call init()
 export async function init(ctx = {}) {
   return initControls(ctx);
 }
 
-// Default export for compatibility
 export default { initControls, init };

@@ -1,321 +1,347 @@
-// /js/scarlett1/world.js — Scarlett World (Modular Core)
-// ✅ Lobby + pit + table + rails + balcony + stairs
-// ✅ XR locomotion (Quest sticks) via /core/controls.js
-// ✅ Android sticks via ./spine_android.js (ONLY when not in XR)
-// ✅ Optional modules: poker / humanoids / lighting (won't crash)
+// /js/scarlett1/world.js — Scarlett World (Modular) v2.0
+// 🚫 NO imports from "three" (Boot2 injects THREE)
+// ✅ Modular build pieces
+// ✅ Uses addons if available (lighting/poker/humanoids/scorpion) but never requires them
 
-import Controls from "../core/controls.js";
-import { initAndroidSticks } from "./spine_android.js";
+function u(rel){ return new URL(rel, import.meta.url).toString(); }
 
-export async function initWorld({
-  THREE,
-  scene,
-  renderer,
-  camera,
-  cameraPitch,
-  player,
-  controllers,
-  hands,
-  log = console.log,
-  BUILD
-} = {}) {
-  log("initWorld() start");
+async function tryImport(label, url, log){
+  try{
+    const m = await import(url);
+    log?.(`${label}: loaded ✅`);
+    return m;
+  }catch(e){
+    log?.(`${label}: missing (ok) :: ${e?.message||e}`);
+    return null;
+  }
+}
 
-  const S = {
-    THREE, scene, renderer, camera, cameraPitch, player, controllers, hands, log, BUILD,
-    root: new THREE.Group(),
-    ground: [],
-    android: null,
-    flags: { poker: true, bots: true, lighting: true },
-    t: 0
+export async function initWorld(ctx){
+  const { THREE, scene, renderer, camera, player, cameraPitch, controllers, log } = ctx;
+
+  // ---------- WORLD TUNING ----------
+  const T = {
+    lobbyRadius: 18,     // make bigger/smaller here
+    wallHeight: 7.5,     // walls higher
+    floorY: 0,
+
+    pitRadius: 7.5,
+    pitDepth: 1.25,
+
+    balconyHeight: 3.4,
+    balconyDepth: 6.0,
+
+    lightBoost: 1.25
   };
 
-  scene.add(S.root);
+  // ---------- OPTIONAL ADDONS ----------
+  const lightingMod  = await tryImport("addon_lighting",  u("../lighting.js"), log);
+  const pokerMod     = await tryImport("addon_poker",     u("../poker.js"), log);
+  const humanoidsMod = await tryImport("addon_humanoids", u("../humanoids.js"), log);
+  const scorpionMod  = await tryImport("addon_scorpion",  u("../scorpion.js"), log);
 
-  // --- base environment ---
-  setEnv(S);
-  buildLobby(S);
-  buildPitAndTable(S);
-  buildRails(S);
-  buildBalconyAndStairs(S);
+  // ---------- ROOT GROUP ----------
+  const root = new THREE.Group();
+  root.name = "WORLD_ROOT";
+  scene.add(root);
 
-  // --- optional: lighting module (won't crash) ---
-  if (S.flags.lighting) await tryLighting(S);
+  // ---------- HELPERS ----------
+  const mat = {
+    floor: new THREE.MeshStandardMaterial({ color: 0x0b1326, roughness: 0.95, metalness: 0.02 }),
+    wall:  new THREE.MeshStandardMaterial({ color: 0x111a32, roughness: 0.9,  metalness: 0.08 }),
+    rail:  new THREE.MeshStandardMaterial({ color: 0x1b2a55, roughness: 0.35, metalness: 0.45, emissive: 0x0a2a44, emissiveIntensity: 0.25 }),
+    pad:   new THREE.MeshStandardMaterial({ color: 0x0c1a2f, roughness: 0.3,  metalness: 0.55, emissive: 0x146cff, emissiveIntensity: 0.55 }),
+    felt:  new THREE.MeshStandardMaterial({ color: 0x0f5a4f, roughness: 0.95, metalness: 0.02 }),
+    chair: new THREE.MeshStandardMaterial({ color: 0x1b2a55, roughness: 0.65, metalness: 0.18 })
+  };
 
-  // --- optional: poker module ---
-  if (S.flags.poker) await tryPoker(S);
-
-  // --- optional: humanoid bots ---
-  if (S.flags.bots) await tryBots(S);
-
-  // --- Android sticks (only when not in XR) ---
-  S.android = await initAndroidSticks({
-    renderer,
-    player,
-    cameraPitch,
-    setHUDVisible: (v) => {
-      // if you later want to hide the diag HUD from Android buttons,
-      // you can wire this into boot2; for now just a no-op.
-    },
-    log
-  });
-
-  // XR select events can remain for teleport systems in other modules,
-  // but locomotion will be handled every frame by Controls.applyLocomotion.
-
-  log("initWorld() completed ✅");
-
-  return {
-    update(dt, t) {
-      S.t = t;
-
-      // XR locomotion (Quest sticks)
-      Controls.applyLocomotion(
-        { renderer, player, controllers, diagonal45: true },
-        dt
-      );
-
-      // Android update (only active when not in XR)
-      S.android?.update?.(dt);
-
-      // simple ambience pulse
-      pulseNeon(S, t);
+  function addLightRig(){
+    // addon lighting
+    if (lightingMod?.createLighting){
+      lightingMod.createLighting({ THREE, scene: root, intensity: T.lightBoost });
+      return;
     }
-  };
-}
+    // fallback lighting
+    const hemi = new THREE.HemisphereLight(0xbfd9ff, 0x0b0f18, 0.8 * T.lightBoost);
+    root.add(hemi);
+    const dir = new THREE.DirectionalLight(0xffffff, 1.2 * T.lightBoost);
+    dir.position.set(8, 14, 6);
+    dir.castShadow = false;
+    root.add(dir);
 
-// ------------------- world pieces -------------------
+    const fill = new THREE.PointLight(0x66ccff, 0.7 * T.lightBoost, 80);
+    fill.position.set(0, 6, 0);
+    root.add(fill);
+  }
 
-function setEnv(S) {
-  const { THREE, scene } = S;
-  scene.background = new THREE.Color(0x05070d);
-  scene.fog = new THREE.Fog(0x05070d, 18, 150);
+  function buildFloor(){
+    const floor = new THREE.Mesh(
+      new THREE.CylinderGeometry(T.lobbyRadius, T.lobbyRadius, 0.35, 72),
+      mat.floor
+    );
+    floor.position.y = T.floorY - 0.175;
+    floor.receiveShadow = true;
+    root.add(floor);
+  }
 
-  const hemi = new THREE.HemisphereLight(0xaaccff, 0x080a12, 0.55);
-  scene.add(hemi);
+  function buildWalls(){
+    const wall = new THREE.Mesh(
+      new THREE.CylinderGeometry(T.lobbyRadius, T.lobbyRadius, T.wallHeight, 72, 1, true),
+      mat.wall
+    );
+    wall.position.y = T.wallHeight/2;
+    root.add(wall);
 
-  const key = new THREE.DirectionalLight(0xffffff, 0.65);
-  key.position.set(10, 18, 8);
-  key.castShadow = false;
-  scene.add(key);
-}
+    // ceiling ring glow
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(T.lobbyRadius-0.5, 0.18, 10, 96),
+      new THREE.MeshStandardMaterial({
+        color: 0x0d1730,
+        emissive: 0x146cff,
+        emissiveIntensity: 0.35,
+        roughness: 0.4,
+        metalness: 0.2
+      })
+    );
+    ring.position.y = T.wallHeight - 0.3;
+    ring.rotation.x = Math.PI/2;
+    root.add(ring);
+  }
 
-function mat(THREE, c, e = 0, metal = 0.1, rough = 0.85) {
-  return new THREE.MeshStandardMaterial({
-    color: c,
-    emissive: new THREE.Color(c),
-    emissiveIntensity: e,
-    metalness: metal,
-    roughness: rough
-  });
-}
+  function buildPit(){
+    // Pit floor down
+    const pit = new THREE.Mesh(
+      new THREE.CylinderGeometry(T.pitRadius, T.pitRadius, 0.2, 64),
+      new THREE.MeshStandardMaterial({ color: 0x070b14, roughness: 0.95, metalness: 0.05 })
+    );
+    pit.position.y = -T.pitDepth;
+    root.add(pit);
 
-function buildLobby(S) {
-  const { THREE, root } = S;
+    // Pit wall (inner)
+    const pitWall = new THREE.Mesh(
+      new THREE.CylinderGeometry(T.pitRadius, T.pitRadius, T.pitDepth+0.35, 64, 1, true),
+      new THREE.MeshStandardMaterial({
+        color: 0x0a1020,
+        emissive: 0x082a44,
+        emissiveIntensity: 0.2,
+        roughness: 0.85,
+        metalness: 0.1
+      })
+    );
+    pitWall.position.y = -(T.pitDepth)/2;
+    root.add(pitWall);
 
-  // Floor
-  const floor = new THREE.Mesh(
-    new THREE.CircleGeometry(18, 72),
-    mat(THREE, 0x111a28, 0.0, 0.05, 0.95)
-  );
-  floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = false;
-  root.add(floor);
-  S.ground.push(floor);
+    // Guardrail ring
+    const rail = new THREE.Mesh(
+      new THREE.TorusGeometry(T.pitRadius + 0.6, 0.10, 10, 96),
+      mat.rail
+    );
+    rail.position.y = 0.12;
+    rail.rotation.x = Math.PI/2;
+    root.add(rail);
 
-  // Walls (twice as high feel)
-  const wall = new THREE.Mesh(
-    new THREE.CylinderGeometry(18, 18, 12, 80, 1, true),
-    new THREE.MeshStandardMaterial({
-      color: 0x0b1220,
-      roughness: 0.9,
-      metalness: 0.15,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.45
-    })
-  );
-  wall.position.y = 6;
-  root.add(wall);
+    // Posts
+    const postGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.0, 12);
+    for (let i=0;i<24;i++){
+      const a = (i/24)*Math.PI*2;
+      const p = new THREE.Mesh(postGeo, mat.rail);
+      p.position.set(Math.cos(a)*(T.pitRadius+0.6), 0.5, Math.sin(a)*(T.pitRadius+0.6));
+      root.add(p);
+    }
+  }
 
-  // Neon ring
-  const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(15.5, 0.10, 10, 96),
-    mat(THREE, 0x66ccff, 0.6, 0.7, 0.35)
-  );
-  ring.position.y = 3.2;
-  ring.rotation.x = Math.PI / 2;
-  ring.name = "NEON_RING";
-  root.add(ring);
+  function buildStairsToPit(){
+    // short stair run to pit edge
+    const steps = 8;
+    const startR = T.pitRadius + 2.8;
+    const endR   = T.pitRadius + 0.9;
+    const startY = 0.0;
+    const endY   = -T.pitDepth + 0.15;
 
-  // Spawn (face inward)
-  player.position.set(0, 0, 12.5);
-  player.rotation.y = Math.PI;
-  S.log("spawn ✅ SPAWN_N");
-}
+    const stepGeo = new THREE.BoxGeometry(1.2, 0.18, 0.6);
+    const a0 = Math.PI; // place at "south" side
+    for (let i=0;i<steps;i++){
+      const t = i/(steps-1);
+      const r = startR + (endR-startR)*t;
+      const y = startY + (endY-startY)*t;
+      const s = new THREE.Mesh(stepGeo, mat.wall);
+      s.position.set(Math.cos(a0)*r, y, Math.sin(a0)*r);
+      s.rotation.y = -a0;
+      root.add(s);
+    }
+  }
 
-function buildPitAndTable(S) {
-  const { THREE, root } = S;
+  function buildBalcony(){
+    // balcony above "store" side (north)
+    const balcony = new THREE.Mesh(
+      new THREE.BoxGeometry(10, 0.35, T.balconyDepth),
+      mat.wall
+    );
+    balcony.position.set(0, T.balconyHeight, -(T.lobbyRadius - T.balconyDepth/2 - 1.0));
+    root.add(balcony);
 
-  // Pit “divot”
-  const pit = new THREE.Mesh(
-    new THREE.CylinderGeometry(7.5, 7.5, 1.2, 80),
-    mat(THREE, 0x08101c, 0.0, 0.08, 0.98)
-  );
-  pit.position.y = -0.6;
-  root.add(pit);
+    // balcony rail
+    const rail = new THREE.Mesh(
+      new THREE.BoxGeometry(10, 0.9, 0.12),
+      mat.rail
+    );
+    rail.position.copy(balcony.position).add(new THREE.Vector3(0, 0.6, T.balconyDepth/2 - 0.12));
+    root.add(rail);
 
-  const pitFloor = new THREE.Mesh(
-    new THREE.CircleGeometry(7.2, 80),
-    mat(THREE, 0x0b1426, 0.02, 0.06, 0.9)
-  );
-  pitFloor.rotation.x = -Math.PI / 2;
-  pitFloor.position.y = -1.2;
-  root.add(pitFloor);
-  S.ground.push(pitFloor);
+    // short stairs up to balcony (right side)
+    const steps = 7;
+    const stepGeo = new THREE.BoxGeometry(1.0, 0.18, 0.6);
+    const baseX = 5.5;
+    const baseZ = balcony.position.z + 1.8;
+    for (let i=0;i<steps;i++){
+      const t = i/(steps-1);
+      const y = 0.0 + (T.balconyHeight-0.2)*t;
+      const z = baseZ + 2.8*t;
+      const s = new THREE.Mesh(stepGeo, mat.wall);
+      s.position.set(baseX, y, z);
+      root.add(s);
+    }
 
-  // Main table (simple placeholder; poker module can replace/augment)
-  const tableTop = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.8, 2.8, 0.18, 72),
-    mat(THREE, 0x145a3a, 0.05, 0.05, 0.95)
-  );
-  tableTop.position.y = -0.95;
-  root.add(tableTop);
+    // telepad on balcony
+    const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.55,0.55,0.12,28), mat.pad);
+    pad.position.set(0, balcony.position.y + 0.22, balcony.position.z);
+    pad.name = "TELEPAD_BALCONY";
+    root.add(pad);
 
-  const tableEdge = new THREE.Mesh(
-    new THREE.TorusGeometry(2.85, 0.14, 14, 90),
-    mat(THREE, 0x1b2b44, 0.2, 0.6, 0.35)
-  );
-  tableEdge.position.y = -0.86;
-  tableEdge.rotation.x = Math.PI / 2;
-  root.add(tableEdge);
+    return { balconyPad: pad };
+  }
 
-  // “Pass line” extra circle marker you asked for (bet circle)
-  const pass = new THREE.Mesh(
-    new THREE.RingGeometry(0.9, 1.05, 48),
-    mat(THREE, 0x66ccff, 0.65, 0.2, 0.35)
-  );
-  pass.rotation.x = -Math.PI / 2;
-  pass.position.set(0, -0.94, 1.7);
-  root.add(pass);
-}
+  function buildTelepads(){
+    const mk = (name,x,y,z)=>{
+      const p = new THREE.Mesh(new THREE.CylinderGeometry(0.55,0.55,0.12,28), mat.pad);
+      p.position.set(x,y,z);
+      p.name = name;
+      root.add(p);
+      return p;
+    };
+    const padNorth = mk("TELEPAD_N", 0, 0.06, -(T.lobbyRadius-2.2));
+    const padSouth = mk("TELEPAD_S", 0, 0.06,  (T.lobbyRadius-2.2));
+    const padEast  = mk("TELEPAD_E", (T.lobbyRadius-2.2), 0.06, 0);
+    const padWest  = mk("TELEPAD_W",-(T.lobbyRadius-2.2), 0.06, 0);
+    return { padNorth, padSouth, padEast, padWest };
+  }
 
-function buildRails(S) {
-  const { THREE, root } = S;
+  function buildTableAndChairs(){
+    // Use poker addon if exists, else fallback
+    let tableGroup = null;
+    if (pokerMod?.createPokerTable){
+      tableGroup = pokerMod.createPokerTable({ THREE, log, style:"ROUND_8", withChairs:true });
+      tableGroup.position.y = -T.pitDepth + 0.25;
+      root.add(tableGroup);
+    }else{
+      tableGroup = new THREE.Group();
+      const felt = new THREE.Mesh(new THREE.CylinderGeometry(3.6,3.6,0.25,64), mat.felt);
+      felt.position.y = -T.pitDepth + 0.35;
+      tableGroup.add(felt);
 
-  const rail = new THREE.Mesh(
-    new THREE.TorusGeometry(7.8, 0.10, 10, 120),
-    mat(THREE, 0x66ccff, 0.55, 0.75, 0.35)
-  );
-  rail.rotation.x = Math.PI / 2;
-  rail.position.y = -0.15;
-  root.add(rail);
+      // chairs
+      const chairGeo = new THREE.BoxGeometry(0.7, 0.8, 0.7);
+      for (let i=0;i<8;i++){
+        const a = (i/8)*Math.PI*2;
+        const c = new THREE.Mesh(chairGeo, mat.chair);
+        c.position.set(Math.cos(a)*5.1, -T.pitDepth + 0.4, Math.sin(a)*5.1);
+        c.rotation.y = -a + Math.PI;
+        tableGroup.add(c);
+      }
+      root.add(tableGroup);
+    }
+    return tableGroup;
+  }
 
-  // Simple posts
-  const postGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.1, 10);
-  for (let i = 0; i < 18; i++) {
-    const a = (i / 18) * Math.PI * 2;
-    const p = new THREE.Mesh(postGeo, mat(THREE, 0x0f1a2b, 0.02));
-    p.position.set(Math.cos(a) * 7.8, -0.7, Math.sin(a) * 7.8);
+  function spawnBotsFacingTable(tableGroup){
+    if (!tableGroup) return;
+    if (!humanoidsMod?.createHumanoidBot){
+      // fallback cubes
+      const geo = new THREE.BoxGeometry(0.35, 1.2, 0.35);
+      const m = new THREE.MeshStandardMaterial({ color: 0x2b79ff, roughness: 0.75, metalness: 0.2 });
+      for (let i=0;i<4;i++){
+        const a = (i/4)*Math.PI*2;
+        const b = new THREE.Mesh(geo, m);
+        b.position.set(Math.cos(a)*4.2, -T.pitDepth + 0.65, Math.sin(a)*4.2);
+        b.lookAt(0, -T.pitDepth + 0.65, 0);
+        root.add(b);
+      }
+      return;
+    }
+
+    for (let i=0;i<5;i++){
+      const a = (i/5)*Math.PI*2;
+      const bot = humanoidsMod.createHumanoidBot({ THREE, style:"VIP", scale:1.0 });
+      bot.position.set(Math.cos(a)*4.2, -T.pitDepth + 0.05, Math.sin(a)*4.2);
+      bot.lookAt(0, -T.pitDepth + 0.9, 0);
+      root.add(bot);
+    }
+  }
+
+  function buildRoomSigns(){
+    // simple glowing sign blocks
+    const mk = (label,x,z)=>{
+      log?.(`sign: ${label}`);
+      const g = new THREE.BoxGeometry(2.6, 0.65, 0.15);
+      const m = new THREE.MeshStandardMaterial({
+        color: 0x0d1730,
+        emissive: 0x146cff,
+        emissiveIntensity: 0.6,
+        roughness: 0.3,
+        metalness: 0.2
+      });
+      const s = new THREE.Mesh(g,m);
+      s.position.set(x, 2.3, z);
+      root.add(s);
+    };
+
+    mk("STORE",  0, -(T.lobbyRadius-0.6));
+    mk("VIP",    (T.lobbyRadius-0.6), 0);
+    mk("SCORP",  -(T.lobbyRadius-0.6), 0);
+    mk("GAMES",  0, (T.lobbyRadius-0.6));
+  }
+
+  function buildScorpionPortal(){
+    if (!scorpionMod?.createScorpionPortal) return;
+    const p = scorpionMod.createScorpionPortal({ THREE, log });
+    p.position.set(-(T.lobbyRadius-3.0), 0.0, 0);
     root.add(p);
   }
-}
 
-function buildBalconyAndStairs(S) {
-  const { THREE, root } = S;
+  // ---------- BUILD ORDER ----------
+  log?.("initWorld() start");
+  addLightRig();
+  buildFloor();
+  buildWalls();
+  buildPit();
+  buildStairsToPit();
+  const pads = buildTelepads();
+  const { balconyPad } = buildBalcony();
+  buildRoomSigns();
 
-  // Balcony ring above store height (spectator look-down)
-  const balcony = new THREE.Mesh(
-    new THREE.RingGeometry(12.5, 15.5, 100),
-    new THREE.MeshStandardMaterial({
-      color: 0x0b1220,
-      roughness: 0.95,
-      metalness: 0.08,
-      side: THREE.DoubleSide
-    })
-  );
-  balcony.rotation.x = -Math.PI / 2;
-  balcony.position.y = 4.2;
-  root.add(balcony);
-  S.ground.push(balcony);
+  const tableGroup = buildTableAndChairs();
+  spawnBotsFacingTable(tableGroup);
+  buildScorpionPortal();
 
-  // Small stairs (not too long)
-  const steps = 10;
-  const stepW = 2.6;
-  const stepH = 0.45;
-  const stepD = 0.6;
-  for (let i = 0; i < steps; i++) {
-    const st = new THREE.Mesh(
-      new THREE.BoxGeometry(stepW, stepH, stepD),
-      mat(THREE, 0x101a2b, 0.02)
-    );
-    st.position.set(-10 + i * 0.55, i * stepH * 0.55, 10.5 - i * 0.35);
-    root.add(st);
-    S.ground.push(st);
+  // spawn point (north)
+  const SPAWN_N = new THREE.Vector3(0, 0, (T.lobbyRadius - 4.0));
+  player.position.copy(SPAWN_N);
+  log?.("spawn ✅ SPAWN_N");
+
+  // ---------- UPDATE LOOP ----------
+  let t = 0;
+  function update(dt){
+    t += dt;
+
+    // gentle glow pulse on pads
+    const pulse = 0.45 + 0.25*Math.sin(t*2.2);
+    root.traverse(o=>{
+      if (o?.material?.emissive && (o.name||"").startsWith("TELEPAD")){
+        o.material.emissiveIntensity = pulse;
+      }
+    });
   }
 
-  // Telepad up there (teleport target marker)
-  const pad = new THREE.Mesh(
-    new THREE.CircleGeometry(1.15, 48),
-    mat(THREE, 0x66ccff, 0.8, 0.2, 0.35)
-  );
-  pad.rotation.x = -Math.PI / 2;
-  pad.position.set(-4.5, 4.25, 6.0);
-  root.add(pad);
-}
-
-// ------------------- optional modules (safe) -------------------
-
-async function tryLighting(S) {
-  try {
-    // /js/lighting.js
-    const mod = await import(new URL("../lighting.js", import.meta.url).toString());
-    if (typeof mod.applyLighting === "function") {
-      mod.applyLighting({ THREE: S.THREE, scene: S.scene, root: S.root });
-      S.log("lighting ✅");
-    } else {
-      S.log("lighting loaded but no applyLighting() (skip)");
-    }
-  } catch (e) {
-    S.log(`lighting skip ❌ ${e?.message || e}`);
-  }
-}
-
-async function tryPoker(S) {
-  try {
-    const mod = await import(new URL("../poker.js", import.meta.url).toString());
-    const PokerJS = mod.PokerJS || mod.default || null;
-    if (!PokerJS?.init) {
-      S.log("poker loaded but missing PokerJS.init() (skip)");
-      return;
-    }
-    PokerJS.init({ THREE: S.THREE, scene: S.scene, root: S.root, log: S.log, camera: S.camera });
-    S.log("poker ✅");
-  } catch (e) {
-    S.log(`poker skip ❌ ${e?.message || e}`);
-  }
-}
-
-async function tryBots(S) {
-  try {
-    const mod = await import(new URL("../humanoids.js", import.meta.url).toString());
-    const Humanoids = mod.Humanoids || mod.default || null;
-    if (!Humanoids?.init) {
-      S.log("humanoids loaded but missing init() (skip)");
-      return;
-    }
-    const bots = Humanoids.init({ THREE: S.THREE, root: S.root });
-    bots?.spawnBots?.({ count: 6, center: new S.THREE.Vector3(0, 0, 0), radius: 2.8, y: -1.2 });
-    S.log("bots ✅");
-  } catch (e) {
-    S.log(`bots skip ❌ ${e?.message || e}`);
-  }
-}
-
-// ------------------- small ambience -------------------
-
-function pulseNeon(S, t) {
-  const ring = S.root.getObjectByName("NEON_RING");
-  if (!ring?.material) return;
-  ring.material.emissiveIntensity = 0.35 + Math.sin(t * 1.4) * 0.15;
-}
+  log?.("initWorld() completed ✅");
+  return { update };
+                        }

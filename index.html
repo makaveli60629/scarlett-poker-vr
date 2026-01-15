@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
 
-  <!-- Mobile / XR friendly viewport -->
+  <!-- Mobile + Quest safe viewport -->
   <meta name="viewport"
         content="width=device-width,
                  height=device-height,
@@ -11,14 +11,14 @@
                  maximum-scale=1.0,
                  user-scalable=no" />
 
-  <title>Scarlett VR Poker</title>
+  <title>Scarlett Poker VR</title>
 
-  <!-- Required for WebXR on some browsers -->
+  <!-- Required for WebXR -->
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
 
   <style>
-    /* HARD RESET — prevents hidden overlays blocking input */
+    /* Hard reset to avoid invisible blockers */
     html, body {
       margin: 0;
       padding: 0;
@@ -31,7 +31,7 @@
       -webkit-user-select: none;
     }
 
-    /* Canvas host */
+    /* Three.js mount */
     #app {
       position: fixed;
       inset: 0;
@@ -40,22 +40,20 @@
       overflow: hidden;
     }
 
-    /* Safety: hide any accidental legacy UI */
-    .legacy-ui,
-    #hud,
-    #overlay {
+    /* Kill any legacy UI that could steal input */
+    #hud, #overlay, .legacy-ui {
       display: none !important;
     }
   </style>
 </head>
 
 <body>
-  <!-- Renderer mounts here -->
+  <!-- Renderer host -->
   <div id="app"></div>
 
-  <!-- 🚨 ONLY BOOT ENTRY 🚨 -->
-  <!-- freshbooting.js FORWARDS to /js/boot2.js -->
-  <script type="module" src="./js/freshbooting.js"></script>
+  <!-- 🚨 SINGLE SOURCE OF TRUTH 🚨 -->
+  <!-- DO NOT add any other boot scripts -->
+  <script type="module" src="./js/scarlett1/boot2.js"></script>
 
 </body>
 </html>

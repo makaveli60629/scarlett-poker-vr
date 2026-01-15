@@ -1,4 +1,7 @@
-// /js/scarlett1/modules/hand_input.js
+// /js/scarlett1/modules/hand_input.js — Update 4.1 (MULTI LISTENERS)
+// WebXR Hands only. Emits pinch via selectstart.
+// ✅ addPinchListener(fn) so multiple modules can subscribe.
+
 import { XRHandModelFactory } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/XRHandModelFactory.js";
 
 export class HandInput {
@@ -13,12 +16,14 @@ export class HandInput {
     this.handMeshes = [null, null];
     this.factory = null;
 
-    this.onPinch = null; // callback({handedness, jointPos, jointQuat})
+    this._pinchListeners = [];
+  }
+
+  addPinchListener(fn) {
+    if (typeof fn === "function") this._pinchListeners.push(fn);
   }
 
   async init() {
-    const THREE = this.THREE;
-
     this.factory = new XRHandModelFactory();
 
     for (let i = 0; i < 2; i++) {
@@ -31,24 +36,30 @@ export class HandInput {
       hand.add(mesh);
       this.handMeshes[i] = mesh;
 
-      // Pinch = select (Quest hand tracking emits “selectstart” on pinch)
       hand.addEventListener("selectstart", () => {
         const info = this._getIndexTip(hand);
-        if (this.onPinch && info) this.onPinch({ handedness: this._guessHandedness(hand), ...info });
+        if (!info) return;
+
+        const payload = {
+          handedness: this._guessHandedness(hand),
+          ...info
+        };
+
+        for (const fn of this._pinchListeners) {
+          try { fn(payload); } catch (e) { /* no crash */ }
+        }
       });
     }
   }
 
   _guessHandedness(hand) {
-    // Heuristic: if the XR inputSource exists we can map handedness; otherwise label by index
-    // In practice, this is “good enough” to differentiate behaviors.
+    // Heuristic (Three hand index order is consistent enough in Quest Browser)
     if (hand.name.includes("_0")) return "left";
     if (hand.name.includes("_1")) return "right";
     return "unknown";
   }
 
   _getIndexTip(hand) {
-    // Use WebXR Hand joint API through Three.js hand.joints
     const jt = hand.joints?.["index-finger-tip"];
     if (!jt) return null;
 

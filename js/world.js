@@ -1,292 +1,230 @@
-// world.js - Scarlett 1.0 VR Poker Game World Initialization
-(function() {
-    "use strict";
-    // Safe stub for Diagnostics module (for boot logging and diagnostics)
-    if (typeof window.Diagnostics === "undefined") {
-        window.Diagnostics = {
-            isStub: true,
-            log: function(msg) { console.log("[Diagnostics] " + msg); },
-            warn: function(msg) { console.warn("[Diagnostics] " + msg); },
-            error: function(msg) { console.error("[Diagnostics] " + msg); }
-        };
-    } else {
-        window.Diagnostics.isStub = false;
-    }
-    // Safe stub for HUD module (for in-game heads-up display)
-    if (typeof window.HUD === "undefined") {
-        window.HUD = {
-            isStub: true,
-            show: function() {},
-            hide: function() {},
-            toggle: function() {}
-        };
-    } else {
-        window.HUD.isStub = false;
-    }
-    // Safe stub for Teleport module (VR teleportation)
-    if (typeof window.Teleport === "undefined") {
-        window.Teleport = {
-            isStub: true,
-            init: function(scene, rig, renderer) {},
-            teleportTo: function(target) {}
-        };
-    } else {
-        window.Teleport.isStub = false;
-    }
-    // Safe stub for Movement/Controls module (player movement control)
-    if (typeof window.Movement === "undefined") {
-        window.Movement = {
-            isStub: true,
-            init: function(params) {},
-            update: function() {}
-        };
-    } else {
-        window.Movement.isStub = false;
-    }
-    // Logging utility uses Diagnostics if available, otherwise console
-    function log(msg) {
-        if (window.Diagnostics && typeof window.Diagnostics.log === "function") {
-            window.Diagnostics.log(msg);
-        } else {
-            console.log(msg);
-        }
-    }
-    log("Scarlett VR World: Starting initialization...");
-    // Load Three.js from CDN if not already present, then initialize world
-    function loadThreeAndInit() {
-        if (typeof window.THREE !== "undefined") {
-            log("Three.js already loaded.");
-            initWorld();
-        } else {
-            log("Three.js not found, loading from CDN...");
-            var script = document.createElement("script");
-            script.src = "https://cdnjs.cloudflare.com/ajax/libs/three.js/r150/three.min.js";
-            script.onload = function() {
-                log("Three.js loaded from CDN.");
-                initWorld();
-            };
-            script.onerror = function() {
-                log("Error: Three.js failed to load.");
-            };
-            document.head.appendChild(script);
-        }
-    }
-    // Main world initialization function (called after Three.js is ready)
-    function initWorld() {
-        log("Initializing Three.js scene...");
-        // Create scene
-        var scene = new THREE.Scene();
-        // Basic lighting setup
-        var ambientLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
-        scene.add(ambientLight);
-        var directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
-        directionalLight.position.set(0, 1, 0);
-        scene.add(directionalLight);
-        // Camera and player rig
-        var camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 1.6, 0); // set camera at player eye height (~1.6m)
-        var playerRig = new THREE.Group();
-        playerRig.add(camera);
-        scene.add(playerRig);
-        log("Scene, camera, and player rig created.");
-        // Renderer (WebGL) setup
-        var renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setPixelRatio(window.devicePixelRatio || 1);
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.outputEncoding = THREE.sRGBEncoding;
-        renderer.xr.enabled = true;
-        document.body.appendChild(renderer.domElement);
-        // Enable VR (WebXR) if supported and add VR button
-        if (navigator.xr && navigator.xr.isSessionSupported) {
-            navigator.xr.isSessionSupported('immersive-vr').then(function(supported) {
-                if (supported) {
-                    document.body.appendChild(THREE.VRButton.createButton(renderer));
-                    log("WebXR supported: VR mode enabled.");
-                } else {
-                    log("WebXR not supported: Running in non-VR mode.");
-                }
-            });
-        } else {
-            log("WebXR not available: Running in non-VR (debug) mode.");
-        }
-        // Handle optional modules initialization (Movement, Teleport, etc.)
-        if (!window.Movement.isStub && typeof window.Movement.init === "function") {
-            try {
-                window.Movement.init({ scene: scene, rig: playerRig, camera: camera, renderer: renderer });
-                log("Custom Movement module initialized.");
-            } catch (e) {
-                log("Movement module initialization error: " + e);
+"use strict";
+/**
+ * Scarlett 1.0 - world.js
+ * Initializes and manages the A-Frame 3D scene, dynamically loads enabled modules,
+ * and sets up event hooks and diagnostics integration (XR, HUD, etc.).
+ * Ensures compatibility with Oculus Quest and Android input via core integrations.
+ * Resilient to load errors: modules failing to load will be skipped without stopping the app.
+ */
+(function(){
+    // Start world initialization after DOM is ready
+    function startWorld() {
+        // Verify A-Frame is present
+        if (typeof AFRAME === "undefined") {
+            console.error("A-Frame not found. world.js aborted.");
+            if (window.SpineDiag && typeof window.SpineDiag.error === "function") {
+                window.SpineDiag.error("A-Frame not loaded - cannot initialize world.");
             }
-        } else {
-            // Basic WASD controls for movement as fallback (desktop or debug use)
-            window.addEventListener("keydown", function(event) {
-                var step = 0.2;
-                switch (event.key) {
-                    case "ArrowUp":
-                    case "w":
-                        playerRig.translateZ(-step);
-                        break;
-                    case "ArrowDown":
-                    case "s":
-                        playerRig.translateZ(step);
-                        break;
-                    case "ArrowLeft":
-                    case "a":
-                        playerRig.translateX(-step);
-                        break;
-                    case "ArrowRight":
-                    case "d":
-                        playerRig.translateX(step);
-                        break;
-                    case "q":
-                        playerRig.rotation.y += Math.PI / 18; // rotate left (~10°)
-                        break;
-                    case "e":
-                        playerRig.rotation.y -= Math.PI / 18; // rotate right (~10°)
-                        break;
-                }
-            });
-            log("Fallback keyboard controls (WASD + QE) enabled for movement.");
+            return;
         }
-        if (!window.Teleport.isStub && typeof window.Teleport.init === "function") {
-            try {
-                window.Teleport.init(scene, playerRig, renderer);
-                log("Custom Teleport module initialized.");
-            } catch (e) {
-                log("Teleport module initialization error: " + e);
-            }
+        // Get or create the A-Frame scene element
+        var sceneEl = document.querySelector("a-scene");
+        if (!sceneEl) {
+            sceneEl = document.createElement("a-scene");
+            // sceneEl.setAttribute("embedded", ""); // If needed, uncomment to embed scene in an overlay
+            document.body.appendChild(sceneEl);
         }
-        // VR controllers and input setup
-        var controller1, controller2;
-        if (renderer.xr.enabled) {
-            controller1 = renderer.xr.getController(0);
-            controller2 = renderer.xr.getController(1);
-            // Mark controller handedness when connected
-            controller1.addEventListener('connected', function(event) {
-                controller1.userData.handedness = event.data.handedness;
-            });
-            controller2.addEventListener('connected', function(event) {
-                controller2.userData.handedness = event.data.handedness;
-            });
-            // Teleport on controller select (trigger press) - use right hand by default
-            var onSelect = function() {
-                var hand = this.userData.handedness || "unknown";
-                if (hand === "right" || hand === "unknown") {
-                    if (!window.Teleport.isStub && typeof window.Teleport.teleportTo === "function") {
-                        // If Teleport module present, delegate to it
-                        window.Teleport.teleportTo(playerRig);
-                        log("Teleport module invoked for teleport.");
-                    } else {
-                        // Fallback: simple teleport forward
-                        var forwardDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-                        forwardDir.y = 0;
-                        forwardDir.normalize();
-                        playerRig.position.add(forwardDir.multiplyScalar(3));
-                        log("Fallback teleport: moved player rig forward.");
-                    }
-                }
-            };
-            controller1.addEventListener('select', onSelect);
-            controller2.addEventListener('select', onSelect);
-            scene.add(controller1);
-            scene.add(controller2);
-            // Add controller models (optional, if XRControllerModelFactory is available)
-            if (THREE.XRControllerModelFactory) {
-                var controllerModelFactory = new THREE.XRControllerModelFactory();
-                var grip1 = renderer.xr.getControllerGrip(0);
-                grip1.add(controllerModelFactory.createControllerModel(grip1));
-                scene.add(grip1);
-                var grip2 = renderer.xr.getControllerGrip(1);
-                grip2.add(controllerModelFactory.createControllerModel(grip2));
-                scene.add(grip2);
-            }
-            log("VR controllers initialized.");
+        // Global World event hooks for modules
+        window.World = window.World || {};
+        World.onStart = World.onStart || [];
+        World.onTick = World.onTick || [];
+        World.onXRSessionStart = World.onXRSessionStart || [];
+        World.onXRSessionEnd = World.onXRSessionEnd || [];
+        World.addOnStart = function(fn) { if (typeof fn === "function") World.onStart.push(fn); };
+        World.addOnTick = function(fn) { if (typeof fn === "function") World.onTick.push(fn); };
+        World.addOnXRSessionStart = function(fn) { if (typeof fn === "function") World.onXRSessionStart.push(fn); };
+        World.addOnXRSessionEnd = function(fn) { if (typeof fn === "function") World.onXRSessionEnd.push(fn); };
+        // Integrate existing core systems if present
+        if (window.SpineModules && typeof window.SpineModules.init === "function") {
+            try { window.SpineModules.init(World); } catch(e) { console.error("SpineModules.init error:", e); }
         }
-        // HUD toggle (using 'H' key) for diagnostics or debugging
-        window.addEventListener("keydown", function(event) {
-            if (event.key === "h" || event.key === "H") {
-                if (!window.HUD.isStub && typeof window.HUD.toggle === "function") {
-                    window.HUD.toggle();
-                    log("HUD toggle triggered.");
-                } else {
-                    // If no HUD module, toggle the debug overlay (if exists)
-                    var debugPanel = document.getElementById("debugHUD");
-                    if (debugPanel) {
-                        var isVisible = debugPanel.style.display !== "none";
-                        debugPanel.style.display = isVisible ? "none" : "block";
-                        log("Debug HUD overlay " + (isVisible ? "hidden" : "shown") + ".");
+        if (window.SpineAndroid && typeof window.SpineAndroid.init === "function") {
+            try { window.SpineAndroid.init(sceneEl); } catch(e) { console.error("SpineAndroid.init error:", e); }
+        }
+        if (window.SpineXR && typeof window.SpineXR.init === "function") {
+            try { window.SpineXR.init(sceneEl); } catch(e) { console.error("SpineXR.init error:", e); }
+        }
+        if (window.SpineHUD && typeof window.SpineHUD.init === "function") {
+            try { window.SpineHUD.init(sceneEl); } catch(e) { console.error("SpineHUD.init error:", e); }
+        }
+        if (window.SpineDiag && typeof window.SpineDiag.init === "function") {
+            try { window.SpineDiag.init(sceneEl); } catch(e) { console.error("SpineDiag.init error:", e); }
+        }
+        // Register a component to dispatch tick events to modules each frame
+        AFRAME.registerComponent("world-listener", {
+            tick: function(time, timeDelta) {
+                for (var i = 0; i < World.onTick.length; i++) {
+                    try {
+                        World.onTick[i](time, timeDelta);
+                    } catch (err) {
+                        console.error("Error in onTick handler:", err);
                     }
                 }
             }
         });
-        // On-screen debug message element (to confirm boot)
-        var debugMsg = document.createElement("div");
-        debugMsg.id = "debugHUD";
-        debugMsg.style.position = "absolute";
-        debugMsg.style.bottom = "10px";
-        debugMsg.style.left = "10px";
-        debugMsg.style.padding = "5px 10px";
-        debugMsg.style.backgroundColor = "rgba(0,0,0,0.5)";
-        debugMsg.style.color = "#0f0";
-        debugMsg.style.font = "12px monospace";
-        debugMsg.textContent = "Scarlett VR World booted successfully.";
-        // Append debug message overlay only if no custom HUD is present
-        if (window.HUD.isStub) {
-            document.body.appendChild(debugMsg);
+        var tickEntity = document.createElement("a-entity");
+        tickEntity.setAttribute("world-listener", "");
+        // Track initialization status
+        var sceneLoaded = false;
+        var modulesLoaded = false;
+        // Invoke all onStart listeners and update HUD status when initialization is complete
+        function tryCallOnStart() {
+            if (sceneLoaded && modulesLoaded) {
+                for (var i = 0; i < World.onStart.length; i++) {
+                    try {
+                        World.onStart[i]();
+                    } catch (err) {
+                        console.error("Error in onStart handler:", err);
+                    }
+                }
+                // Set diagnostics HUD status to "Booted"
+                if (window.SpineDiag && typeof window.SpineDiag.setStatus === "function") {
+                    window.SpineDiag.setStatus("Booted");
+                } else if (window.SpineHUD && typeof window.SpineHUD.setStatus === "function") {
+                    window.SpineHUD.setStatus("Booted");
+                }
+                console.log("World initialization complete. System Booted.");
+            }
         }
-        log("World initialization complete. Entering render loop...");
-        // Animation loop (renderer.setAnimationLoop handles VR and desktop rendering)
-        function renderLoop() {
-            // If VR is active and no custom movement module, handle controller thumbstick movement
-            if (renderer.xr.isPresenting && window.Movement.isStub) {
-                var session = renderer.xr.getSession();
-                if (session) {
-                    session.inputSources.forEach(function(input) {
-                        if (input.gamepad && input.handedness === "left") {
-                            var gp = input.gamepad;
-                            var axes = gp.axes;
-                            if (axes.length >= 2) {
-                                var ax = 0, ay = 0;
-                                if (axes.length >= 4) {
-                                    // Oculus Quest (axes: [padX, padY, thumbX, thumbY])
-                                    ax = axes[2];
-                                    ay = axes[3];
-                                } else {
-                                    // Only two axes (e.g., single joystick or touchpad)
-                                    ax = axes[0];
-                                    ay = axes[1];
-                                }
-                                // Determine movement vector from axes
-                                var moveSpeed = 0.1;
-                                var forward = -ay * moveSpeed;
-                                var strafe = ax * moveSpeed;
-                                // Move relative to camera orientation (on horizontal plane)
-                                var dir = new THREE.Vector3();
-                                camera.getWorldDirection(dir);
-                                dir.y = 0;
-                                dir.normalize();
-                                var right = new THREE.Vector3();
-                                right.crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize();
-                                playerRig.position.addScaledVector(dir, forward);
-                                playerRig.position.addScaledVector(right, strafe);
-                            }
+        // Handle scene load event (or immediately if already loaded)
+        if (sceneEl.hasLoaded) {
+            sceneLoaded = true;
+            sceneEl.appendChild(tickEntity);
+            // No tryCallOnStart here; wait for modules to finish loading
+        } else {
+            sceneEl.addEventListener("loaded", function() {
+                sceneLoaded = true;
+                sceneEl.appendChild(tickEntity);
+                tryCallOnStart();
+            });
+        }
+        // Attach XR session event listeners for VR/AR enter and exit
+        sceneEl.addEventListener("enter-vr", function(evt) {
+            for (var i = 0; i < World.onXRSessionStart.length; i++) {
+                try { World.onXRSessionStart[i](evt); } catch (err) {
+                    console.error("Error in onXRSessionStart handler:", err);
+                }
+            }
+        });
+        sceneEl.addEventListener("exit-vr", function(evt) {
+            for (var i = 0; i < World.onXRSessionEnd.length; i++) {
+                try { World.onXRSessionEnd[i](evt); } catch (err) {
+                    console.error("Error in onXRSessionEnd handler:", err);
+                }
+            }
+        });
+        // Load enabled modules from modules.json configuration
+        var configUrl = "modules.json";
+        var loadModulesPromise;
+        if (window.fetch) {
+            // Use Fetch API if available
+            loadModulesPromise = fetch(configUrl).then(function(res) {
+                if (!res.ok) throw new Error("HTTP " + res.status + " while fetching " + configUrl);
+                return res.json();
+            });
+        } else {
+            // Fallback to XHR for older browsers without fetch
+            loadModulesPromise = new Promise(function(resolve, reject) {
+                var xhr = new XMLHttpRequest();
+                xhr.open("GET", configUrl, true);
+                xhr.onload = function() {
+                    if (xhr.status === 0 || (xhr.status >= 200 && xhr.status < 300)) {
+                        try {
+                            resolve(JSON.parse(xhr.responseText));
+                        } catch (e) {
+                            reject(new Error("Invalid JSON in " + configUrl + ": " + e));
                         }
-                        // (Optional) Could handle right stick for rotation here
-                    });
-                }
-            }
-            // Update custom movement module each frame if present
-            if (!window.Movement.isStub && typeof window.Movement.update === "function") {
+                    } else {
+                        reject(new Error("HTTP " + xhr.status + " while fetching " + configUrl));
+                    }
+                };
+                xhr.onerror = function() {
+                    reject(new Error("Network error while fetching " + configUrl));
+                };
                 try {
-                    window.Movement.update();
+                    xhr.send();
                 } catch (err) {
-                    console.error("Movement module update error:", err);
+                    reject(err);
+                }
+            });
+        }
+        // Once modules configuration is retrieved, load each enabled module script
+        loadModulesPromise.then(function(modulesData) {
+            var modulesList;
+            if (Array.isArray(modulesData)) {
+                modulesList = modulesData;
+            } else if (modulesData && Array.isArray(modulesData.modules)) {
+                modulesList = modulesData.modules;
+            } else if (modulesData && typeof modulesData === "object") {
+                modulesList = [];
+                for (var key in modulesData) {
+                    if (modulesData.hasOwnProperty(key)) {
+                        var m = modulesData[key];
+                        if (m && typeof m === "object") {
+                            m.name = m.name || key;
+                            modulesList.push(m);
+                        }
+                    }
+                }
+            } else {
+                console.warn("No modules found in configuration.");
+                modulesList = [];
+            }
+            // Helper to load modules sequentially (ensures order if needed)
+            function loadModuleAt(index) {
+                if (index >= modulesList.length) {
+                    // All modules processed
+                    modulesLoaded = true;
+                    console.log("All modules loaded.");
+                    tryCallOnStart();
+                    return;
+                }
+                var mod = modulesList[index];
+                var enabled = true;
+                if (mod.enabled === false || mod.disabled === true) {
+                    enabled = false;
+                }
+                var src = mod.src || mod.path || mod.url;
+                if (enabled && src) {
+                    var script = document.createElement("script");
+                    script.src = src;
+                    script.async = true;
+                    script.onload = function() {
+                        console.log("Loaded module:", mod.name || src);
+                        if (window.SpineDiag && typeof window.SpineDiag.log === "function") {
+                            window.SpineDiag.log("Module loaded: " + (mod.name || src));
+                        }
+                        loadModuleAt(index + 1);
+                    };
+                    script.onerror = function(err) {
+                        console.error("Error loading module:", mod.name || src, err);
+                        if (window.SpineDiag && typeof window.SpineDiag.warn === "function") {
+                            window.SpineDiag.warn("Module failed: " + (mod.name || src));
+                        }
+                        // Continue loading next modules even if one fails
+                        loadModuleAt(index + 1);
+                    };
+                    document.head.appendChild(script);
+                } else {
+                    // Skip this module if not enabled or no source
+                    loadModuleAt(index + 1);
                 }
             }
-            renderer.render(scene, camera);
-        }
-        renderer.setAnimationLoop(renderLoop);
+            loadModuleAt(0);
+        }).catch(function(err) {
+            console.error("Modules configuration load error:", err);
+            if (window.SpineDiag && typeof window.SpineDiag.error === "function") {
+                window.SpineDiag.error("Modules config failed to load.");
+            }
+            // No modules loaded (or config failed) - mark modules as loaded to finish startup
+            modulesLoaded = true;
+            tryCallOnStart();
+        });
     }
-    // Start loading and initialization process
-    loadThreeAndInit();
+    // Run startWorld when DOM is ready
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", startWorld);
+    } else {
+        startWorld();
+    }
 })();

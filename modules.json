@@ -1,0 +1,25 @@
+{
+  "version": "scarlett1.0",
+  "modules": [
+    {
+      "name": "world",
+      "src": "./js/scarlett1/world.js",
+      "enabled": true
+    },
+    {
+      "name": "xr",
+      "src": "./js/scarlett1/spine_xr.js",
+      "enabled": true
+    },
+    {
+      "name": "android",
+      "src": "./js/scarlett1/spine_android.js",
+      "enabled": true
+    },
+    {
+      "name": "hud",
+      "src": "./js/scarlett1/spine_hud.js",
+      "enabled": true
+    }
+  ]
+}

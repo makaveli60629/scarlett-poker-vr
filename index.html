@@ -1,73 +1,20 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Scarlett Poker VR – Diagnostics Core</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-<script type="module" src="./js/scarlett1/boot.js"></script>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>ScarlettVR Poker — Scarlett 1.0 Spine</title>
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-      background: #05070b;
-      font-family: system-ui, sans-serif;
-      color: #e6e6e6;
-    }
-
-    #hud {
-      position: fixed;
-      top: 10px;
-      left: 10px;
-      width: 90vw;
-      max-width: 420px;
-      background: rgba(10,14,25,0.92);
-      border: 1px solid rgba(80,120,255,0.25);
-      border-radius: 12px;
-      padding: 12px;
-      z-index: 9999;
-    }
-
-    #hud h2 {
-      margin: 0 0 6px 0;
-      font-size: 16px;
-    }
-
-    #log {
-      font-size: 12px;
-      line-height: 1.4;
-      max-height: 45vh;
-      overflow-y: auto;
-      white-space: pre-wrap;
-    }
-
-    #toggleHUD {
-      margin-top: 8px;
-      width: 100%;
-      padding: 8px;
-      border-radius: 8px;
-      border: none;
-      background: #1d2b5a;
-      color: white;
-      font-size: 14px;
-    }
-
-    canvas {
-      display: block;
-    }
+    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
+    #app { position:fixed; inset:0; }
+    canvas { display:block; width:100%; height:100%; }
   </style>
 </head>
-
 <body>
-  <div id="hud">
-    <h2>Scarlett Diagnostics</h2>
-    <div id="log">Booting…</div>
-    <button id="toggleHUD">Hide HUD</button>
-  </div>
+  <div id="app"></div>
 
-  <!-- THREE.JS CDN (MODULE SAFE) -->
-  <script type="module" src="./index.js"></script>
+  <!-- Diagnostics must load BEFORE module boot so it can capture early errors -->
+  <script src="./js/scarlett1/spine_diag.js"></script>
+  <script type="module" src="./js/scarlett1/boot.js"></script>
 </body>
 </html>

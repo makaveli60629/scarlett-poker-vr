@@ -1,62 +1,53 @@
-// /js/scarlett1/boot.js — Scarlett 1.0 Boot (FULL • PERMANENT)
-// ✅ Always sets __SCARLETT_BOOT_STARTED__ immediately
-// ✅ Loads Three.js via CDN (no bare "three" import)
-// ✅ Loads world.js and calls initWorld()
-// ✅ Separates Android debug controls from XR controls (no interference)
+// /js/scarlett1/boot.js — Scarlett 1.0 SAFE BOOT (ANDROID + OCULUS)
 
+// 🔒 CRITICAL: set this immediately, before ANYTHING else
 window.__SCARLETT_BOOT_STARTED__ = true;
 
-const LOG = (msg) => {
-  try {
-    if (window.__SCARLETT_DIAG_LOG__) window.__SCARLETT_DIAG_LOG__(msg);
-  } catch {}
-  console.log(msg);
-};
+(function () {
+  const safeLog = (m) => {
+    try { window.__SCARLETT_DIAG_LOG__ && window.__SCARLETT_DIAG_LOG__(m); }
+    catch {}
+    console.log(m);
+  };
 
-const STATUS = (msg) => {
-  try {
-    if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__(msg);
-  } catch {}
-  console.log("[STATUS]", msg);
-};
+  const safeStatus = (m) => {
+    try { window.__SCARLETT_DIAG_STATUS__ && window.__SCARLETT_DIAG_STATUS__(m); }
+    catch {}
+    console.log("[STATUS]", m);
+  };
 
-(async () => {
-  try {
-    LOG("boot start ✅");
+  safeLog("boot start ✅");
 
-    // --- Load THREE from CDN ---
-    STATUS("Loading three.js…");
-    const THREE_URL = "https://unpkg.com/three@0.158.0/build/three.module.js";
-    const THREE = await import(THREE_URL);
-    LOG("three import ✅ " + THREE_URL);
+  (async () => {
+    try {
+      safeStatus("Loading three.js…");
 
-    // --- Load world.js ---
-    STATUS("Loading world.js…");
-    const base = "/scarlett-poker-vr/";
-    const worldUrl = `${base}js/scarlett1/world.js?v=${Date.now()}`;
-    LOG("world url= " + worldUrl);
+      const THREE = await import(
+        "https://unpkg.com/three@0.158.0/build/three.module.js"
+      );
 
-    const worldMod = await import(worldUrl);
-    LOG("world import ✅");
+      safeLog("three import ✅");
 
-    // Make sure initWorld exists
-    if (!worldMod || typeof worldMod.initWorld !== "function") {
-      throw new Error("worldMod.initWorld is not a function");
+      safeStatus("Loading world.js…");
+
+      const base = "/scarlett-poker-vr/";
+      const worldUrl = `${base}js/scarlett1/world.js?v=${Date.now()}`;
+      safeLog("world url= " + worldUrl);
+
+      const worldMod = await import(worldUrl);
+
+      if (!worldMod || typeof worldMod.initWorld !== "function") {
+        throw new Error("initWorld() missing from world.js");
+      }
+
+      safeStatus("Starting world…");
+      await worldMod.initWorld({ THREE, base, LOG: safeLog, STATUS: safeStatus });
+
+      safeStatus("World running ✅");
+    } catch (err) {
+      safeStatus("BOOT FAILED ❌");
+      safeLog("ERROR BOOT FAILED: " + err.message);
+      console.error(err);
     }
-
-    // --- Start world ---
-    STATUS("Starting world…");
-    LOG("initWorld() start");
-
-    // initWorld contract:
-    // initWorld({ THREE, LOG, STATUS, base })
-    await worldMod.initWorld({ THREE, LOG, STATUS, base });
-
-    STATUS("World running ✅");
-  } catch (e) {
-    const msg = (e && e.message) ? e.message : String(e);
-    STATUS("BOOT FAILED ❌");
-    LOG("ERROR BOOT FAILED: " + msg);
-    console.error(e);
-  }
+  })();
 })();

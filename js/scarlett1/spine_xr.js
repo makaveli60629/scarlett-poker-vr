@@ -1,14 +1,11 @@
-// /js/scarlett1/spine_xr.js — Scarlett 1.0 XR Spine (FULL)
-// ✅ Hook-based (never owns setAnimationLoop)
-// ✅ Lasers
-// ✅ Teleport pads (trigger/select) + rainbow arc + reticle circle
-// ✅ Your control mapping EXACT:
-//   - RIGHT stick Y = forward/back
-//   - LEFT stick X = strafe
-//   - RIGHT stick X = 45° snap turn
-//   - Trigger = teleport
-//   - Y button = menu toggle
-// ✅ Simple collision: prevents walking through solid walls (world.blockedXZ)
+// /js/scarlett1/spine_xr.js — Scarlett 1.0 XR Spine v2.1 (FULL FIX)
+// FIXES:
+// ✅ Right stick forward/back inverted fixed
+// ✅ Glow/flare for reticle + rainbow arc (no postprocessing)
+// ✅ Removes the black HUD/screen (menu disabled for now)
+// ✅ Left controller mapping stays: left stick X strafe (with better fallback)
+// ✅ Right stick X = 45° snap turn, Right stick Y = forward/back
+// ✅ Trigger = teleport pads
 
 export async function installXR({ THREE, DIAG }) {
   const D = DIAG || console;
@@ -56,15 +53,29 @@ export async function installXR({ THREE, DIAG }) {
     new THREE.Vector3(0, 0, -1)
   ]);
 
-  const laserL = new THREE.Line(rayGeo, new THREE.LineBasicMaterial({ color: 0xff33aa }));
-  laserL.scale.z = 12;
-  controllerL.add(laserL);
+  // Laser line + bright flare sprite at tip
+  function makeLaser(color) {
+    const line = new THREE.Line(rayGeo, new THREE.LineBasicMaterial({ color }));
+    line.scale.z = 12;
 
-  const laserR = new THREE.Line(rayGeo, new THREE.LineBasicMaterial({ color: 0x33aaff }));
-  laserR.scale.z = 12;
-  controllerR.add(laserR);
+    // Glow sprite (simple flare)
+    const sprMat = new THREE.SpriteMaterial({
+      color,
+      transparent: true,
+      opacity: 0.95
+    });
+    const spr = new THREE.Sprite(sprMat);
+    spr.scale.set(0.12, 0.12, 0.12);
+    spr.position.set(0, 0, -1); // at end of unit ray; we scale line.z
+    line.add(spr);
 
-  // Raycast
+    return line;
+  }
+
+  controllerL.add(makeLaser(0xff33aa)); // pink
+  controllerR.add(makeLaser(0x33aaff)); // blue
+
+  // Raycasting
   const raycaster = new THREE.Raycaster();
   const tmpMat = new THREE.Matrix4();
   const tmpO = new THREE.Vector3();
@@ -92,7 +103,7 @@ export async function installXR({ THREE, DIAG }) {
     D.log("[teleport] →", pad.userData.label || "PAD");
   }
 
-  // Teleport visuals (arc + reticle)
+  // Teleport visuals (arc + reticle) — brighter + “glow”
   const ARC_SEG = 32;
   const arcPos = new Float32Array((ARC_SEG + 1) * 3);
   const arcCol = new Float32Array((ARC_SEG + 1) * 3);
@@ -101,23 +112,50 @@ export async function installXR({ THREE, DIAG }) {
   arcGeo.setAttribute("position", new THREE.BufferAttribute(arcPos, 3));
   arcGeo.setAttribute("color", new THREE.BufferAttribute(arcCol, 3));
 
-  const arcLine = new THREE.Line(arcGeo, new THREE.LineBasicMaterial({ vertexColors: true }));
+  const arcMat = new THREE.LineBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.95
+  });
+
+  const arcLine = new THREE.Line(arcGeo, arcMat);
   arcLine.visible = false;
   scene.add(arcLine);
 
-  const reticle = new THREE.Mesh(
-    new THREE.RingGeometry(0.25, 0.35, 48),
-    new THREE.MeshBasicMaterial({ color: 0xffffff })
+  // Soft glow duplicate (slightly thicker look by layering)
+  const arcGlow = new THREE.Line(
+    arcGeo,
+    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.35 })
   );
-  reticle.rotation.x = -Math.PI / 2;
-  reticle.visible = false;
-  scene.add(reticle);
+  arcGlow.visible = false;
+  arcGlow.scale.set(1.002, 1.002, 1.002);
+  scene.add(arcGlow);
+
+  // Reticle ring + glowing disk
+  const reticleRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.25, 0.38, 64),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95 })
+  );
+  reticleRing.rotation.x = -Math.PI / 2;
+  reticleRing.visible = false;
+  scene.add(reticleRing);
+
+  const reticleGlow = new THREE.Mesh(
+    new THREE.CircleGeometry(0.22, 48),
+    new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.25 })
+  );
+  reticleGlow.rotation.x = -Math.PI / 2;
+  reticleGlow.visible = false;
+  scene.add(reticleGlow);
 
   function rainbow(i, t) {
     const a = t * Math.PI * 2;
-    arcCol[i * 3 + 0] = 0.5 + 0.5 * Math.sin(a + 0.0);
-    arcCol[i * 3 + 1] = 0.5 + 0.5 * Math.sin(a + 2.1);
-    arcCol[i * 3 + 2] = 0.5 + 0.5 * Math.sin(a + 4.2);
+    const r = 0.55 + 0.45 * Math.sin(a + 0.0);
+    const g = 0.55 + 0.45 * Math.sin(a + 2.1);
+    const b = 0.55 + 0.45 * Math.sin(a + 4.2);
+    arcCol[i * 3 + 0] = r;
+    arcCol[i * 3 + 1] = g;
+    arcCol[i * 3 + 2] = b;
   }
 
   function buildArc(ctrl) {
@@ -151,7 +189,9 @@ export async function installXR({ THREE, DIAG }) {
 
     if (!hitPoint) {
       arcLine.visible = false;
-      reticle.visible = false;
+      arcGlow.visible = false;
+      reticleRing.visible = false;
+      reticleGlow.visible = false;
       return { hitPad: null };
     }
 
@@ -160,14 +200,22 @@ export async function installXR({ THREE, DIAG }) {
     const hitPad = hitPadFromRay(downO, downD);
 
     arcLine.visible = true;
-    reticle.visible = true;
-    reticle.position.copy(hitPoint);
-    reticle.material.color.set(hitPad ? 0x00ffcc : 0xffffff);
+    arcGlow.visible = true;
+
+    reticleRing.visible = true;
+    reticleGlow.visible = true;
+    reticleRing.position.copy(hitPoint);
+    reticleGlow.position.copy(hitPoint);
+
+    const ok = !!hitPad;
+    reticleRing.material.color.set(ok ? 0x00ffcc : 0xffffff);
+    reticleGlow.material.color.set(ok ? 0x00ffcc : 0xffffff);
+    reticleGlow.material.opacity = ok ? 0.28 : 0.12;
 
     return { hitPad };
   }
 
-  // Teleport on trigger/select (Quest trigger maps to selectstart)
+  // Teleport on trigger/select
   controllerL.addEventListener("selectstart", () => {
     try {
       const { hitPad } = buildArc(controllerL);
@@ -186,56 +234,37 @@ export async function installXR({ THREE, DIAG }) {
     }
   });
 
-  // Menu
-  const menu = new THREE.Group();
-  menu.visible = false;
-  scene.add(menu);
+  // ✅ MENU DISABLED to remove black screen following camera
+  // (We will re-add later once left controller mapping is confirmed)
+  const MENU_ENABLED = false;
 
-  const menuBg = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.2, 0.7),
-    new THREE.MeshBasicMaterial({ color: 0x0b142a, transparent: true, opacity: 0.92 })
-  );
-  menu.add(menuBg);
-
-  function toggleMenu() {
-    menu.visible = !menu.visible;
-    D.log("[menu] visible=", menu.visible);
-  }
-
-  function updateMenuPose() {
-    if (!menu.visible) return;
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
-    const pos = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld).add(forward.multiplyScalar(1.2));
-    pos.y -= 0.2;
-    menu.position.copy(pos);
-    menu.quaternion.copy(camera.quaternion);
-  }
-
-  // --- InputSources Gamepads (reliable) ---
+  // InputSources Gamepads
   function getPadsByHandedness() {
     const s = renderer.xr.getSession?.();
     if (!s) return { left: null, right: null };
+
     let left = null, right = null;
+    const gps = [];
 
     for (const src of s.inputSources) {
       if (!src?.gamepad) continue;
+      gps.push({ gp: src.gamepad, hand: src.handedness || "none" });
       if (src.handedness === "left") left = src.gamepad;
       if (src.handedness === "right") right = src.gamepad;
     }
 
-    // Fallback if handedness isn't set: pick first/second
+    // fallback if handedness missing
     if (!left || !right) {
-      const gps = [];
-      for (const src of s.inputSources) if (src?.gamepad) gps.push(src.gamepad);
-      if (!left) left = gps[0] || null;
-      if (!right) right = gps[gps.length > 1 ? 1 : 0] || null;
+      if (!left) left = gps[0]?.gp || null;
+      if (!right) right = gps[gps.length > 1 ? 1 : 0]?.gp || null;
     }
 
     return { left, right };
   }
 
-  // --- Movement mapping EXACT ---
+  // Movement mapping (your layout)
   const DEAD = 0.18;
+
   const MOVE_SPEED = 1.35;     // slow walk
   const STRAFE_SPEED = 1.15;
 
@@ -243,6 +272,7 @@ export async function installXR({ THREE, DIAG }) {
   const TURN_COOLDOWN = 0.30;
   let turnCD = 0;
 
+  // Y button state (left controller button[3])
   let prevY = false;
 
   function axis(v) {
@@ -250,9 +280,7 @@ export async function installXR({ THREE, DIAG }) {
   }
 
   function tryMove(newX, newZ) {
-    if (typeof blockedXZ === "function" && blockedXZ(newX, newZ)) {
-      return false;
-    }
+    if (typeof blockedXZ === "function" && blockedXZ(newX, newZ)) return false;
     rig.position.x = newX;
     rig.position.z = newZ;
     return true;
@@ -260,17 +288,19 @@ export async function installXR({ THREE, DIAG }) {
 
   function moveForward(dt, amt) {
     const yaw = player.yaw ?? rig.rotation.y ?? 0;
-    const fwd = new THREE.Vector3(Math.sin(yaw), 0, -Math.cos(yaw));
-    const dx = fwd.x * (amt * MOVE_SPEED * dt);
-    const dz = fwd.z * (amt * MOVE_SPEED * dt);
+    const fwdX = Math.sin(yaw);
+    const fwdZ = -Math.cos(yaw);
+    const dx = fwdX * (amt * MOVE_SPEED * dt);
+    const dz = fwdZ * (amt * MOVE_SPEED * dt);
     tryMove(rig.position.x + dx, rig.position.z + dz);
   }
 
   function strafe(dt, amt) {
     const yaw = player.yaw ?? rig.rotation.y ?? 0;
-    const right = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
-    const dx = right.x * (amt * STRAFE_SPEED * dt);
-    const dz = right.z * (amt * STRAFE_SPEED * dt);
+    const rightX = Math.cos(yaw);
+    const rightZ = Math.sin(yaw);
+    const dx = rightX * (amt * STRAFE_SPEED * dt);
+    const dz = rightZ * (amt * STRAFE_SPEED * dt);
     tryMove(rig.position.x + dx, rig.position.z + dz);
   }
 
@@ -281,45 +311,49 @@ export async function installXR({ THREE, DIAG }) {
   }
 
   renderer.xr.addEventListener("sessionstart", () => {
-    // Ensure yaw applied
     rig.rotation.y = player.yaw ?? rig.rotation.y;
     D.log("[xr] sessionstart ✅");
   });
 
-  // Hook into world loop (never green-screen)
+  // Hook into world loop
   addFrameHook(({ dt }) => {
     // Arc preview from RIGHT controller
     if (renderer.xr.isPresenting) {
       try { buildArc(controllerR); } catch {}
     } else {
       arcLine.visible = false;
-      reticle.visible = false;
+      arcGlow.visible = false;
+      reticleRing.visible = false;
+      reticleGlow.visible = false;
     }
 
     const { left: gpL, right: gpR } = getPadsByHandedness();
     if (!gpL || !gpR) return;
 
-    // RIGHT stick:
-    // - Y forward/back
-    // - X snap turn 45°
+    // Read right stick axes
     let rX = 0, rY = 0;
-    if (gpR.axes?.length >= 4) { rX = gpR.axes[2] || 0; rY = gpR.axes[3] || 0; }
-    else if (gpR.axes?.length >= 2) { rX = gpR.axes[0] || 0; rY = gpR.axes[1] || 0; }
+    if (gpR.axes?.length >= 4) {
+      rX = gpR.axes[2] || 0;
+      rY = gpR.axes[3] || 0;
+    } else if (gpR.axes?.length >= 2) {
+      rX = gpR.axes[0] || 0;
+      rY = gpR.axes[1] || 0;
+    }
 
-    // LEFT stick:
-    // - X strafe
+    // Read left stick X for strafe
     let lX = 0;
     if (gpL.axes?.length >= 2) lX = gpL.axes[0] || 0;
 
-    // Forward/back from RIGHT stick Y (invert so forward is up)
-    const fwdAmt = axis(-rY);
+    // ✅ FIX: you reported forward/back is reversed.
+    // Previously we inverted (-rY). Now we DO NOT invert.
+    // If your hardware reports forward as negative, this will now feel correct.
+    const fwdAmt = axis(rY);
     if (fwdAmt) moveForward(dt, fwdAmt);
 
-    // Strafe from LEFT stick X
     const strafeAmt = axis(lX);
     if (strafeAmt) strafe(dt, strafeAmt);
 
-    // Snap turn from RIGHT stick X
+    // Snap turn from right stick X
     const turnAmt = axis(rX);
     turnCD -= dt;
     if (turnCD <= 0 && turnAmt !== 0) {
@@ -327,16 +361,17 @@ export async function installXR({ THREE, DIAG }) {
       turnCD = TURN_COOLDOWN;
     }
 
-    // Y button menu toggle (LEFT controller button[3])
-    const yDown = !!gpL.buttons?.[3]?.pressed;
-    if (yDown && !prevY) toggleMenu();
-    prevY = yDown;
+    // Y button (menu disabled)
+    if (MENU_ENABLED) {
+      const yDown = !!gpL.buttons?.[3]?.pressed;
+      if (yDown && !prevY) {
+        // toggleMenu();
+      }
+      prevY = yDown;
+    }
 
-    updateMenuPose();
-
-    // keep pitch (optional)
     camera.rotation.x = player.pitch ?? 0;
   });
 
-  D.log("[xr] installed ✅ (your mapping locked)");
-              }
+  D.log("[xr] installed ✅ (invert fixed + glow + no head-blocker)");
+           }

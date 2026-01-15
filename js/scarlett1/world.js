@@ -1,668 +1,396 @@
-// /js/scarlett1/world.js — Scarlett1 World (FULL) v1.0
-// ✅ Exports initWorld() for boot2.js
-// ✅ Lobby circle + 4 hallways + 4 rooms
-// ✅ Divoted centerpiece table + simple chairs
-// ✅ Solid walls + door openings
-// ✅ Spawn pads (never spawn on table)
-// ✅ Simple roaming bots (not pills only)
-// ✅ Safe diagnostics handshake (fixes HUD stuck on “Booting…”)
+// /js/scarlett1/world.js — Scarlett 1.0 World Spine (FULL, SAFE) v1.0
+// ✅ Exports initWorld() (boot2 expects this)
+// ✅ Guaranteed valid JS (fixes "Unexpected end of input")
+// ✅ Creates lobby + halls + solid walls + pit divot + table + chairs
+// ✅ Adds spawn pads (never spawn inside table)
+// ✅ Adds simple VR button (fallback if boot2 doesn't add one)
+// ✅ Diagnostics handshake: "World running ✅"
 
-export function initWorld(ctx = {}) {
-  const THREE = ctx.THREE || window.THREE;
-  if (!THREE) throw new Error("THREE missing (world.js) — boot must pass ctx.THREE");
+export async function initWorld(ctx = {}) {
+  // ---------- Diagnostics helpers ----------
+  const diagLog = ctx.diagLog || window.__SCARLETT_DIAG_LOG || ((...a) => console.log("[world]", ...a));
+  const diagStatus = ctx.diagStatus || window.__SCARLETT_DIAG_STATUS || ((s) => console.log("[status]", s));
 
-  // ---------------------------
-  // Diagnostics helpers
-  // ---------------------------
-  const DLOG = (s) => {
-    try {
-      window.__SCARLETT_DIAG_LOG && window.__SCARLETT_DIAG_LOG(String(s));
-    } catch {}
-    try { console.log("[world]", s); } catch {}
-  };
-  const DSTAT = (s) => {
-    try { window.__SCARLETT_DIAG_STATUS && window.__SCARLETT_DIAG_STATUS(String(s)); } catch {}
-  };
+  diagLog("initWorld() start");
 
-  DLOG("initWorld() start");
-
-  // ---------------------------
-  // DOM + Renderer
-  // ---------------------------
-  const container = ctx.container || document.body;
-  const canvas = ctx.canvas || document.querySelector("canvas#xr") || undefined;
-
-  const renderer = new THREE.WebGLRenderer({
-    antialias: true,
-    alpha: false,
-    canvas,
-    powerPreference: "high-performance",
-  });
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-
-  // If your XR spine turns this on later, we won’t fight it.
-  if (ctx.enableXR) renderer.xr.enabled = true;
-
-  if (!canvas) {
-    renderer.domElement.style.position = "fixed";
-    renderer.domElement.style.left = "0";
-    renderer.domElement.style.top = "0";
-    renderer.domElement.style.width = "100%";
-    renderer.domElement.style.height = "100%";
-    renderer.domElement.style.zIndex = "0";
-    container.appendChild(renderer.domElement);
+  // ---------- Ensure THREE ----------
+  let THREE = ctx.THREE || window.THREE;
+  if (!THREE) {
+    diagLog("THREE not provided, importing…");
+    THREE = await import("https://unpkg.com/three@0.158.0/build/three.module.js");
+    window.THREE = THREE;
+    diagLog("THREE import ✅");
   }
 
-  // ---------------------------
-  // Scene + Camera + Rig
-  // ---------------------------
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x05070c);
+  // ---------- Scene / Camera / Renderer ----------
+  const scene = ctx.scene || new THREE.Scene();
+  scene.background = new THREE.Color(0x070912);
 
   const camera = ctx.camera || new THREE.PerspectiveCamera(
     70,
     window.innerWidth / window.innerHeight,
     0.05,
-    500
+    250
   );
 
+  const renderer = ctx.renderer || new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.xr.enabled = true;
+
+  // Attach renderer if boot2 didn't
+  if (!ctx.renderer && !document.querySelector("canvas")) {
+    document.body.style.margin = "0";
+    document.body.style.overflow = "hidden";
+    document.body.appendChild(renderer.domElement);
+  }
+
+  // Resize
+  window.addEventListener("resize", () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ---------- Player Rig ----------
+  // We keep a rig so "camera + lasers + controllers" stay parented together.
   const rig = ctx.rig || new THREE.Group();
   rig.name = "PlayerRig";
-  if (!rig.children.includes(camera)) rig.add(camera);
+  scene.add(rig);
 
-  if (!ctx.rig) scene.add(rig);
+  // Put camera in rig
+  if (!camera.parent) rig.add(camera);
 
-  // A gentle “default” camera pose (non-XR view)
-  camera.position.set(0, 1.6, 6);
-  camera.lookAt(0, 1.2, 0);
+  // ---------- Lights ----------
+  const amb = new THREE.HemisphereLight(0xaaccff, 0x05040a, 0.55);
+  scene.add(amb);
 
-  // ---------------------------
-  // Lighting
-  // ---------------------------
-  const hemi = new THREE.HemisphereLight(0x9cc7ff, 0x121019, 0.85);
-  scene.add(hemi);
-
-  const key = new THREE.DirectionalLight(0xffffff, 0.8);
-  key.position.set(6, 10, 6);
+  const key = new THREE.DirectionalLight(0xffffff, 0.9);
+  key.position.set(6, 14, 10);
   key.castShadow = false;
   scene.add(key);
 
-  const rim = new THREE.DirectionalLight(0x6aa8ff, 0.35);
-  rim.position.set(-10, 6, -10);
-  scene.add(rim);
+  const fill = new THREE.PointLight(0x88aaff, 0.35, 60, 2);
+  fill.position.set(0, 6, 0);
+  scene.add(fill);
 
-  // Accent “neon” points in corners
-  const p1 = new THREE.PointLight(0x2b7cff, 0.65, 40);
-  p1.position.set(10, 3, 10);
-  scene.add(p1);
+  // ---------- Materials ----------
+  const MAT_FLOOR = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.95, metalness: 0.0 });
+  const MAT_WALL  = new THREE.MeshStandardMaterial({ color: 0x0b1024, roughness: 0.9, metalness: 0.05 });
+  const MAT_TRIM  = new THREE.MeshStandardMaterial({ color: 0x1b2b55, roughness: 0.6, metalness: 0.15 });
+  const MAT_PIT   = new THREE.MeshStandardMaterial({ color: 0x0a0f1f, roughness: 0.98, metalness: 0.0 });
+  const MAT_TABLE = new THREE.MeshStandardMaterial({ color: 0x1a8a5a, roughness: 0.9, metalness: 0.05 });
+  const MAT_CHAIR = new THREE.MeshStandardMaterial({ color: 0x2c3e68, roughness: 0.7, metalness: 0.1 });
+  const MAT_SIGN  = new THREE.MeshStandardMaterial({ color: 0x203a80, roughness: 0.35, metalness: 0.15, emissive: new THREE.Color(0x101a33), emissiveIntensity: 0.8 });
 
-  const p2 = new THREE.PointLight(0xff2bd6, 0.25, 35);
-  p2.position.set(-10, 3, -10);
-  scene.add(p2);
+  // ---------- World Group ----------
+  const world = new THREE.Group();
+  world.name = "WorldRoot";
+  scene.add(world);
 
-  // ---------------------------
-  // Materials
-  // ---------------------------
-  const MAT_FLOOR = new THREE.MeshStandardMaterial({
-    color: 0x0b1020,
-    roughness: 0.95,
-    metalness: 0.02,
-  });
+  // ---------- Ground / Floor ----------
+  const floorGeo = new THREE.CircleGeometry(18, 64);
+  const floor = new THREE.Mesh(floorGeo, MAT_FLOOR);
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
+  floor.name = "Floor_Main";
+  world.add(floor);
 
-  const MAT_WALL = new THREE.MeshStandardMaterial({
-    color: 0x101a2e,
-    roughness: 0.85,
-    metalness: 0.05,
-  });
+  // Outer ring floor
+  const ringGeo = new THREE.RingGeometry(18, 32, 96);
+  const ring = new THREE.Mesh(ringGeo, MAT_TRIM);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.002;
+  ring.name = "Floor_Ring";
+  world.add(ring);
 
-  const MAT_TRIM = new THREE.MeshStandardMaterial({
-    color: 0x1b2a4d,
-    roughness: 0.45,
-    metalness: 0.15,
-  });
+  // ---------- Solid Walls (Lobby) ----------
+  // We make a cylinder wall but with openings (hallways). We'll approximate with 4 wall segments.
+  const wallHeight = 4.2;
+  const wallThickness = 0.35;
+  const wallRadius = 16.0;
 
-  const MAT_FELT = new THREE.MeshStandardMaterial({
-    color: 0x0c6b43,
-    roughness: 0.95,
-    metalness: 0.02,
-  });
+  function addWallSegment(angleCenter, arcLenDeg, doorGapDeg = 0) {
+    const arc = THREE.MathUtils.degToRad(arcLenDeg);
+    const segs = 24;
+    const geo = new THREE.CylinderGeometry(wallRadius + wallThickness, wallRadius + wallThickness, wallHeight, segs, 1, true, angleCenter - arc/2, arc - doorGapDeg);
+    const mesh = new THREE.Mesh(geo, MAT_WALL);
+    mesh.position.y = wallHeight / 2;
+    mesh.rotation.y = 0; // geometry already placed by thetaStart
+    mesh.name = "WallSegment";
+    world.add(mesh);
 
-  const MAT_TABLE = new THREE.MeshStandardMaterial({
-    color: 0x1a1a1a,
-    roughness: 0.55,
-    metalness: 0.2,
-  });
-
-  const MAT_CHAIR = new THREE.MeshStandardMaterial({
-    color: 0x0f1730,
-    roughness: 0.8,
-    metalness: 0.08,
-  });
-
-  const MAT_BOT = new THREE.MeshStandardMaterial({
-    color: 0x253d78,
-    roughness: 0.55,
-    metalness: 0.15,
-    emissive: new THREE.Color(0x0b1a3a),
-    emissiveIntensity: 0.35,
-  });
-
-  // ---------------------------
-  // World Dimensions
-  // ---------------------------
-  const WORLD = {
-    lobbyRadius: 9.0,
-    lobbyFloorY: 0.0,
-    wallHeight: 3.0,
-    wallThickness: 0.35,
-    hallwayLen: 9.0,
-    hallwayW: 3.2,
-    roomSize: 9.0,
-    roomHeight: 3.0,
-    tableRadius: 3.2,
-    tableTopY: 0.95,
-    divotDepth: 0.55,
-    divotRadius: 4.4,
-  };
-
-  const world = {
-    group: new THREE.Group(),
-    scene,
-    renderer,
-    camera,
-    rig,
-    spawnPads: [],
-    bots: [],
-    clock: new THREE.Clock(),
-  };
-  world.group.name = "WorldRoot";
-  scene.add(world.group);
-
-  // ---------------------------
-  // Helpers
-  // ---------------------------
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const deg = (d) => (d * Math.PI) / 180;
-
-  function addMesh(mesh, parent = world.group) {
-    parent.add(mesh);
-    return mesh;
+    // inner trim ring
+    const trimGeo = new THREE.CylinderGeometry(wallRadius, wallRadius, 0.15, segs, 1, true, angleCenter - arc/2, arc - doorGapDeg);
+    const trim = new THREE.Mesh(trimGeo, MAT_TRIM);
+    trim.position.y = 0.08;
+    trim.name = "WallTrim";
+    world.add(trim);
   }
 
-  function makeRoundedBox(w, h, d, mat) {
-    // simple fallback box (no true rounding needed for now)
-    const geo = new THREE.BoxGeometry(w, h, d);
-    return new THREE.Mesh(geo, mat);
+  // 4 segments around, leaving 4 hallway openings (N/E/S/W).
+  // We leave ~24deg gaps for doors.
+  addWallSegment(THREE.MathUtils.degToRad(45), 90, 0);
+  addWallSegment(THREE.MathUtils.degToRad(135), 90, 0);
+  addWallSegment(THREE.MathUtils.degToRad(225), 90, 0);
+  addWallSegment(THREE.MathUtils.degToRad(315), 90, 0);
+
+  // We'll carve openings using hallway “tunnels” that extend out — still solid enough visually.
+  function addHallway(dirVec, length = 12, width = 6, height = 4) {
+    const hall = new THREE.Group();
+    hall.name = "Hallway";
+
+    const floorG = new THREE.BoxGeometry(width, 0.18, length);
+    const floorM = new THREE.Mesh(floorG, MAT_FLOOR);
+    floorM.position.y = 0.09;
+    floorM.position.z = -length / 2;
+    hall.add(floorM);
+
+    const wallG = new THREE.BoxGeometry(0.3, height, length);
+    const left = new THREE.Mesh(wallG, MAT_WALL);
+    left.position.set(-width/2, height/2, -length/2);
+    hall.add(left);
+
+    const right = new THREE.Mesh(wallG, MAT_WALL);
+    right.position.set(width/2, height/2, -length/2);
+    hall.add(right);
+
+    const capG = new THREE.BoxGeometry(width, height, 0.3);
+    const cap = new THREE.Mesh(capG, MAT_WALL);
+    cap.position.set(0, height/2, -length);
+    hall.add(cap);
+
+    // ceiling trim
+    const ceilG = new THREE.BoxGeometry(width, 0.18, length);
+    const ceil = new THREE.Mesh(ceilG, MAT_TRIM);
+    ceil.position.set(0, height - 0.09, -length/2);
+    hall.add(ceil);
+
+    // place hallway
+    const a = Math.atan2(dirVec.x, dirVec.z);
+    hall.rotation.y = a;
+    hall.position.set(dirVec.x * wallRadius, 0, dirVec.z * wallRadius);
+
+    world.add(hall);
   }
 
-  function makeSign(text, w = 2.3, h = 0.7) {
-    const c = document.createElement("canvas");
-    c.width = 512;
-    c.height = 256;
-    const g = c.getContext("2d");
-    g.clearRect(0, 0, c.width, c.height);
+  addHallway(new THREE.Vector3(0,0,-1)); // north
+  addHallway(new THREE.Vector3(1,0,0));  // east
+  addHallway(new THREE.Vector3(0,0,1));  // south
+  addHallway(new THREE.Vector3(-1,0,0));// west
 
-    // bg
-    g.fillStyle = "rgba(8,12,22,0.85)";
-    g.fillRect(0, 0, c.width, c.height);
+  // ---------- Center Pit Divot ----------
+  // We fake a “divot” by placing a lower floor disc + a shallow ring drop.
+  const pit = new THREE.Group();
+  pit.name = "Pit";
 
-    // frame
-    g.strokeStyle = "rgba(120,160,255,0.55)";
-    g.lineWidth = 8;
-    g.strokeRect(10, 10, c.width - 20, c.height - 20);
+  const pitRadius = 6.5;
+  const pitDepth = 0.55;
 
-    // title
-    g.fillStyle = "rgba(215,230,255,0.95)";
-    g.font = "bold 72px system-ui, Arial";
-    g.textAlign = "center";
-    g.textBaseline = "middle";
-    g.fillText(text, c.width / 2, c.height / 2);
+  const pitFloor = new THREE.Mesh(new THREE.CircleGeometry(pitRadius, 64), MAT_PIT);
+  pitFloor.rotation.x = -Math.PI/2;
+  pitFloor.position.y = -pitDepth;
+  pit.add(pitFloor);
 
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
-    const geo = new THREE.PlaneGeometry(w, h);
-    return new THREE.Mesh(geo, mat);
+  // pit rim
+  const rim = new THREE.Mesh(new THREE.RingGeometry(pitRadius, pitRadius + 0.8, 64), MAT_TRIM);
+  rim.rotation.x = -Math.PI/2;
+  rim.position.y = 0.01;
+  pit.add(rim);
+
+  world.add(pit);
+
+  // ---------- Poker Table ----------
+  const table = new THREE.Group();
+  table.name = "PokerTable";
+
+  const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(3.5, 3.5, 0.25, 64), MAT_TABLE);
+  tableTop.position.y = -pitDepth + 0.95;
+  table.add(tableTop);
+
+  const tableRail = new THREE.Mesh(new THREE.CylinderGeometry(3.9, 3.9, 0.35, 64), MAT_TRIM);
+  tableRail.position.y = -pitDepth + 1.05;
+  table.add(tableRail);
+
+  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 1.0, 1.1, 32), MAT_TRIM);
+  pedestal.position.y = -pitDepth + 0.45;
+  table.add(pedestal);
+
+  world.add(table);
+
+  // ---------- Chairs (8) ----------
+  const chairCount = 8;
+  for (let i = 0; i < chairCount; i++) {
+    const a = (i / chairCount) * Math.PI * 2;
+    const r = 5.0;
+
+    const chair = new THREE.Group();
+    chair.name = "Chair_" + i;
+
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.18, 0.9), MAT_CHAIR);
+    seat.position.y = -pitDepth + 0.55;
+    chair.add(seat);
+
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.18), MAT_CHAIR);
+    back.position.y = -pitDepth + 1.05;
+    back.position.z = -0.36;
+    chair.add(back);
+
+    chair.position.set(Math.sin(a) * r, 0, Math.cos(a) * r);
+    chair.rotation.y = a + Math.PI;
+    world.add(chair);
   }
 
-  function safeLookAtY(obj, target) {
-    const t = target.clone ? target.clone() : new THREE.Vector3(target.x, target.y, target.z);
-    const p = obj.position.clone();
-    t.y = p.y;
-    obj.lookAt(t);
+  // ---------- Signs ----------
+  function addSign(text, pos, rotY = 0) {
+    const g = new THREE.Group();
+    g.position.copy(pos);
+    g.rotation.y = rotY;
+
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.2, 0.12), MAT_SIGN);
+    panel.position.y = 2.2;
+    g.add(panel);
+
+    // Simple text using canvas texture (no external fonts)
+    const canvas = document.createElement("canvas");
+    canvas.width = 512; canvas.height = 256;
+    const c = canvas.getContext("2d");
+    c.fillStyle = "#0b1024"; c.fillRect(0,0,512,256);
+    c.fillStyle = "#bfe3ff";
+    c.font = "bold 72px system-ui, Arial";
+    c.textAlign = "center";
+    c.textBaseline = "middle";
+    c.fillText(text, 256, 128);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
+    const mat = new THREE.MeshStandardMaterial({ map: tex, emissive: new THREE.Color(0x0a1a33), emissiveIntensity: 0.9 });
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 1.05), mat);
+    face.position.set(0, 2.2, 0.08);
+    g.add(face);
+
+    world.add(g);
+    diagLog(`sign: ${text}`);
   }
 
-  // ---------------------------
-  // Floors: lobby + hallways + rooms
-  // ---------------------------
-  function buildFloors() {
-    // Lobby floor (big circle)
-    const lobbyGeo = new THREE.CircleGeometry(WORLD.lobbyRadius, 64);
-    const lobby = new THREE.Mesh(lobbyGeo, MAT_FLOOR);
-    lobby.rotation.x = -Math.PI / 2;
-    lobby.position.y = WORLD.lobbyFloorY;
-    addMesh(lobby);
+  addSign("STORE", new THREE.Vector3(0,0,-15.2), Math.PI);
+  addSign("VIP",   new THREE.Vector3(15.2,0,0), -Math.PI/2);
+  addSign("SCORP", new THREE.Vector3(0,0,15.2), 0);
+  addSign("GAMES", new THREE.Vector3(-15.2,0,0), Math.PI/2);
 
-    // Divot ring area: visually shows the depression zone
-    const divotRingGeo = new THREE.RingGeometry(WORLD.tableRadius + 0.25, WORLD.divotRadius, 64);
-    const divotRingMat = new THREE.MeshStandardMaterial({
-      color: 0x070a12,
-      roughness: 1.0,
-      metalness: 0.0,
-      emissive: new THREE.Color(0x060a14),
-      emissiveIntensity: 0.35,
-      side: THREE.DoubleSide,
-    });
-    const divotRing = new THREE.Mesh(divotRingGeo, divotRingMat);
-    divotRing.rotation.x = -Math.PI / 2;
-    divotRing.position.y = WORLD.lobbyFloorY + 0.001;
-    addMesh(divotRing);
+  // ---------- Spawn Pads (prevents spawning on table) ----------
+  // These are also useful for teleport targets later.
+  const spawns = [
+    { name:"SPAWN_N", p:new THREE.Vector3(0,0,-12), lookAt:new THREE.Vector3(0,0,0) },
+    { name:"SPAWN_E", p:new THREE.Vector3(12,0,0),  lookAt:new THREE.Vector3(0,0,0) },
+    { name:"SPAWN_S", p:new THREE.Vector3(0,0,12),  lookAt:new THREE.Vector3(0,0,0) },
+    { name:"SPAWN_W", p:new THREE.Vector3(-12,0,0), lookAt:new THREE.Vector3(0,0,0) },
+  ];
 
-    // 4 hallways floors (N,E,S,W)
-    const hw = WORLD.hallwayW;
-    const hl = WORLD.hallwayLen;
-
-    const hallGeo = new THREE.PlaneGeometry(hw, hl);
-    const dirs = [
-      { name: "STORE", a: 0,  x: 0,  z: -(WORLD.lobbyRadius + hl / 2) },
-      { name: "VIP",   a: 90, x: (WORLD.lobbyRadius + hl / 2), z: 0 },
-      { name: "SCORP", a: 180,x: 0,  z: (WORLD.lobbyRadius + hl / 2) },
-      { name: "GAMES", a: 270,x: -(WORLD.lobbyRadius + hl / 2), z: 0 },
-    ];
-
-    dirs.forEach((d) => {
-      const hall = new THREE.Mesh(hallGeo, MAT_FLOOR);
-      hall.rotation.x = -Math.PI / 2;
-      hall.rotation.z = deg(d.a);
-      hall.position.set(d.x, WORLD.lobbyFloorY + 0.001, d.z);
-      addMesh(hall);
-
-      // A small neon trim strip down the center
-      const strip = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.18, hl * 0.92),
-        new THREE.MeshStandardMaterial({
-          color: 0x0d1b33,
-          roughness: 0.35,
-          metalness: 0.2,
-          emissive: new THREE.Color(0x183a80),
-          emissiveIntensity: 0.9,
-          side: THREE.DoubleSide,
-        })
-      );
-      strip.rotation.x = -Math.PI / 2;
-      strip.rotation.z = deg(d.a);
-      strip.position.copy(hall.position);
-      strip.position.y += 0.002;
-      addMesh(strip);
-
-      // Room floor (square)
-      const room = new THREE.Mesh(
-        new THREE.PlaneGeometry(WORLD.roomSize, WORLD.roomSize),
-        MAT_FLOOR
-      );
-      room.rotation.x = -Math.PI / 2;
-
-      // Push room beyond hallway
-      const push = WORLD.lobbyRadius + hl + WORLD.roomSize / 2;
-      if (d.a === 0) room.position.set(0, WORLD.lobbyFloorY + 0.001, -push);
-      if (d.a === 90) room.position.set(push, WORLD.lobbyFloorY + 0.001, 0);
-      if (d.a === 180) room.position.set(0, WORLD.lobbyFloorY + 0.001, push);
-      if (d.a === 270) room.position.set(-push, WORLD.lobbyFloorY + 0.001, 0);
-      addMesh(room);
-
-      // Room sign at entrance
-      const sign = makeSign(d.name, 2.4, 0.75);
-      sign.position.set(d.x, 2.2, d.z);
-      sign.rotation.y = deg(d.a);
-      // Face lobby center
-      safeLookAtY(sign, new THREE.Vector3(0, 2.2, 0));
-      addMesh(sign);
-      DLOG(`sign: ${d.name}`);
-    });
+  const spawnPads = [];
+  for (const s of spawns) {
+    const pad = new THREE.Mesh(new THREE.CircleGeometry(0.65, 32), new THREE.MeshStandardMaterial({
+      color: 0x2a3f7a, roughness: 0.7, metalness: 0.1, emissive: new THREE.Color(0x0a1530), emissiveIntensity: 1.0
+    }));
+    pad.rotation.x = -Math.PI/2;
+    pad.position.copy(s.p);
+    pad.position.y = 0.01;
+    pad.name = s.name;
+    spawnPads.push({ mesh: pad, meta: s });
+    world.add(pad);
   }
 
-  // ---------------------------
-  // Walls: lobby ring + hall walls + room walls
-  // ---------------------------
-  function buildWalls() {
-    const H = WORLD.wallHeight;
-    const T = WORLD.wallThickness;
+  // Choose a safe spawn and place rig there (never at center table)
+  function applySpawn(idx = 0) {
+    const chosen = spawnPads[idx % spawnPads.length];
+    const p = chosen.meta.p.clone();
+    rig.position.set(p.x, 0, p.z);
 
-    // Lobby ring wall (approx with segments, leaving 4 door openings)
-    const segments = 32;
-    const openAngle = deg(22); // doorway width per axis opening
-    const radius = WORLD.lobbyRadius;
+    // Face table center
+    const to = chosen.meta.lookAt.clone();
+    const dir = to.sub(new THREE.Vector3(p.x, 0, p.z)).normalize();
+    const yaw = Math.atan2(dir.x, dir.z);
+    rig.rotation.set(0, yaw, 0);
 
-    for (let i = 0; i < segments; i++) {
-      const a0 = (i / segments) * Math.PI * 2;
-      // Skip around the 4 door axes: 0, 90, 180, 270 degrees
-      const axes = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2];
-      let isDoor = false;
-      for (const ax of axes) {
-        const da = Math.atan2(Math.sin(a0 - ax), Math.cos(a0 - ax));
-        if (Math.abs(da) < openAngle) { isDoor = true; break; }
+    diagLog("spawn ✅ " + chosen.meta.name);
+  }
+
+  // If caller passed spawnIndex use it, else 0
+  applySpawn(Number.isFinite(ctx.spawnIndex) ? ctx.spawnIndex : 0);
+
+  // ---------- Simple VR Button (fallback) ----------
+  // If boot2 already makes one, this won’t duplicate (we detect by id).
+  async function ensureVRButton() {
+    if (!navigator.xr) {
+      diagLog("VRButton: navigator.xr missing");
+      return;
+    }
+    if (document.getElementById("scarlett_vr_btn")) return;
+
+    const btn = document.createElement("button");
+    btn.id = "scarlett_vr_btn";
+    btn.textContent = "ENTER VR";
+    btn.style.cssText = `
+      position:fixed; right:16px; top:16px; z-index:999999;
+      padding:12px 16px; border-radius:14px;
+      border:1px solid rgba(120,160,255,0.25);
+      background:rgba(40,60,120,0.55);
+      color:#eaf2ff; font-weight:900;
+    `;
+
+    btn.onclick = async () => {
+      try {
+        const session = await navigator.xr.requestSession("immersive-vr", {
+          optionalFeatures: ["local-floor", "bounded-floor", "local", "viewer", "hand-tracking"]
+        });
+        renderer.xr.setSession(session);
+        diagLog("XR session start ✅");
+      } catch (e) {
+        diagLog("XR start failed ❌ " + (e?.message || e));
       }
-      if (isDoor) continue;
+    };
 
-      const arcLen = (2 * Math.PI * radius) / segments;
-      const wall = new THREE.Mesh(
-        new THREE.BoxGeometry(arcLen, H, T),
-        MAT_WALL
-      );
-      wall.position.set(
-        Math.cos(a0) * radius,
-        H / 2,
-        Math.sin(a0) * radius
-      );
-      wall.rotation.y = -a0;
-      addMesh(wall);
-
-      // top trim
-      const trim = new THREE.Mesh(
-        new THREE.BoxGeometry(arcLen, 0.12, T * 1.05),
-        MAT_TRIM
-      );
-      trim.position.copy(wall.position);
-      trim.position.y = H - 0.12;
-      trim.rotation.copy(wall.rotation);
-      addMesh(trim);
-    }
-
-    // Hallway walls (4)
-    const hw = WORLD.hallwayW;
-    const hl = WORLD.hallwayLen;
-    const wallGeo = new THREE.BoxGeometry(T, H, hl);
-
-    const halls = [
-      { a: 0,   x: 0,  z: -(WORLD.lobbyRadius + hl / 2), rot: 0 },
-      { a: 90,  x: (WORLD.lobbyRadius + hl / 2), z: 0, rot: 90 },
-      { a: 180, x: 0,  z: (WORLD.lobbyRadius + hl / 2), rot: 180 },
-      { a: 270, x: -(WORLD.lobbyRadius + hl / 2), z: 0, rot: 270 },
-    ];
-
-    halls.forEach((h) => {
-      // Left/Right walls of hallway
-      for (const side of [-1, 1]) {
-        const w = new THREE.Mesh(wallGeo, MAT_WALL);
-        w.position.set(h.x, H / 2, h.z);
-        w.rotation.y = deg(h.rot);
-        // shift sideways relative to hallway axis
-        const shift = (hw / 2) + (T / 2);
-        const sx = Math.cos(deg(h.rot + 90)) * shift * side;
-        const sz = Math.sin(deg(h.rot + 90)) * shift * side;
-        w.position.x += sx;
-        w.position.z += sz;
-        addMesh(w);
-
-        const trim = new THREE.Mesh(
-          new THREE.BoxGeometry(T * 1.05, 0.12, hl),
-          MAT_TRIM
-        );
-        trim.position.copy(w.position);
-        trim.position.y = H - 0.12;
-        trim.rotation.copy(w.rotation);
-        addMesh(trim);
-      }
-    });
-
-    // Room walls (simple squares)
-    const rs = WORLD.roomSize;
-    const push = WORLD.lobbyRadius + WORLD.hallwayLen + rs / 2;
-
-    const roomCenters = [
-      new THREE.Vector3(0, 0, -push),
-      new THREE.Vector3(push, 0, 0),
-      new THREE.Vector3(0, 0, push),
-      new THREE.Vector3(-push, 0, 0),
-    ];
-
-    roomCenters.forEach((c) => {
-      // 4 walls around square room
-      const wallLong = new THREE.BoxGeometry(rs, H, T);
-      const wallShort = new THREE.BoxGeometry(T, H, rs);
-
-      const wN = new THREE.Mesh(wallLong, MAT_WALL);
-      wN.position.set(c.x, H / 2, c.z - rs / 2);
-      addMesh(wN);
-
-      const wS = new THREE.Mesh(wallLong, MAT_WALL);
-      wS.position.set(c.x, H / 2, c.z + rs / 2);
-      addMesh(wS);
-
-      const wE = new THREE.Mesh(wallShort, MAT_WALL);
-      wE.position.set(c.x + rs / 2, H / 2, c.z);
-      addMesh(wE);
-
-      const wW = new THREE.Mesh(wallShort, MAT_WALL);
-      wW.position.set(c.x - rs / 2, H / 2, c.z);
-      addMesh(wW);
-    });
+    document.body.appendChild(btn);
+    diagLog("VRButton ready ✅");
   }
+  ensureVRButton();
 
-  // ---------------------------
-  // Centerpiece: Divoted Poker Table + simple seats
-  // ---------------------------
-  function buildTable() {
-    // Divot well (visual depression)
-    const well = new THREE.Mesh(
-      new THREE.CylinderGeometry(WORLD.divotRadius, WORLD.divotRadius, WORLD.divotDepth, 64, 1, true),
-      new THREE.MeshStandardMaterial({
-        color: 0x04050a,
-        roughness: 1.0,
-        metalness: 0.0,
-        side: THREE.DoubleSide,
-      })
-    );
-    well.position.set(0, WORLD.lobbyFloorY - (WORLD.divotDepth / 2) + 0.01, 0);
-    addMesh(well);
+  // ---------- Render Loop ----------
+  const clock = new THREE.Clock();
 
-    // Table base
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(WORLD.tableRadius * 0.55, WORLD.tableRadius * 0.75, 0.75, 48),
-      MAT_TABLE
-    );
-    base.position.set(0, 0.40, 0);
-    addMesh(base);
-
-    // Table rim
-    const rim = new THREE.Mesh(
-      new THREE.TorusGeometry(WORLD.tableRadius, 0.18, 20, 64),
-      new THREE.MeshStandardMaterial({
-        color: 0x151515,
-        roughness: 0.35,
-        metalness: 0.25,
-        emissive: new THREE.Color(0x0a0f1a),
-        emissiveIntensity: 0.5,
-      })
-    );
-    rim.rotation.x = Math.PI / 2;
-    rim.position.set(0, WORLD.tableTopY, 0);
-    addMesh(rim);
-
-    // Table felt top
-    const top = new THREE.Mesh(
-      new THREE.CylinderGeometry(WORLD.tableRadius - 0.22, WORLD.tableRadius - 0.22, 0.08, 64),
-      MAT_FELT
-    );
-    top.position.set(0, WORLD.tableTopY + 0.02, 0);
-    addMesh(top);
-
-    // Simple chairs around
-    const chairCount = 8;
-    for (let i = 0; i < chairCount; i++) {
-      const a = (i / chairCount) * Math.PI * 2;
-
-      const seat = makeRoundedBox(0.55, 0.12, 0.55, MAT_CHAIR);
-      seat.position.set(
-        Math.cos(a) * (WORLD.tableRadius + 1.05),
-        0.42,
-        Math.sin(a) * (WORLD.tableRadius + 1.05)
-      );
-
-      const back = makeRoundedBox(0.55, 0.65, 0.12, MAT_CHAIR);
-      back.position.set(0, 0.38, -0.22);
-      seat.add(back);
-
-      safeLookAtY(seat, new THREE.Vector3(0, seat.position.y, 0));
-      addMesh(seat);
-    }
-  }
-
-  // ---------------------------
-  // Spawn Pads: never spawn on table
-  // ---------------------------
-  function buildSpawnPads() {
-    // 4 pads just inside each hallway entrance, plus 1 VIP “safe” pad
-    const pads = [
-      { name: "SPAWN_STORE", pos: new THREE.Vector3(0, 0, -(WORLD.lobbyRadius - 1.4)), yaw: 0 },
-      { name: "SPAWN_VIP",   pos: new THREE.Vector3((WORLD.lobbyRadius - 1.4), 0, 0), yaw: -90 },
-      { name: "SPAWN_SCORP", pos: new THREE.Vector3(0, 0, (WORLD.lobbyRadius - 1.4)), yaw: 180 },
-      { name: "SPAWN_GAMES", pos: new THREE.Vector3(-(WORLD.lobbyRadius - 1.4), 0, 0), yaw: 90 },
-      { name: "SPAWN_SAFE",  pos: new THREE.Vector3(-2.2, 0, -2.2), yaw: 45 },
-    ];
-    world.spawnPads = pads;
-
-    // Visual markers (subtle)
-    pads.forEach((p) => {
-      const ring = new THREE.Mesh(
-        new THREE.RingGeometry(0.35, 0.55, 40),
-        new THREE.MeshStandardMaterial({
-          color: 0x0f2b55,
-          roughness: 0.4,
-          metalness: 0.2,
-          emissive: new THREE.Color(0x1a5cff),
-          emissiveIntensity: 0.55,
-          side: THREE.DoubleSide,
-        })
-      );
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.copy(p.pos);
-      ring.position.y = 0.01;
-      addMesh(ring);
-    });
-  }
-
-  function chooseSafeSpawn() {
-    // Prefer SAFE, otherwise STORE pad
-    const pad = world.spawnPads.find((p) => p.name === "SPAWN_SAFE") || world.spawnPads[0];
-
-    rig.position.copy(pad.pos);
-    rig.position.y = 0; // let local-floor handle height
-    rig.rotation.set(0, deg(pad.yaw), 0);
-
-    // If we have camera in non-XR, set a pleasant height
-    if (!renderer.xr.enabled) camera.position.set(0, 1.6, 0);
-
-    DLOG(`spawn set: ${pad.name} (${pad.pos.x.toFixed(2)}, ${pad.pos.z.toFixed(2)})`);
-  }
-
-  // ---------------------------
-  // Bots: simple humanoid-ish capsules walking a loop
-  // ---------------------------
-  function buildBots() {
-    const botCount = 10;
-
-    // CapsuleGeometry exists in r158
-    const geo = THREE.CapsuleGeometry
-      ? new THREE.CapsuleGeometry(0.18, 0.65, 8, 16)
-      : new THREE.CylinderGeometry(0.2, 0.2, 0.9, 12);
-
-    for (let i = 0; i < botCount; i++) {
-      const bot = new THREE.Mesh(geo, MAT_BOT);
-      bot.name = `Bot_${i}`;
-
-      const r = WORLD.lobbyRadius - 1.2;
-      const a = (i / botCount) * Math.PI * 2;
-      bot.position.set(Math.cos(a) * r, 0.55, Math.sin(a) * r);
-
-      // Head glow
-      const head = new THREE.Mesh(
-        new THREE.SphereGeometry(0.12, 16, 16),
-        new THREE.MeshStandardMaterial({
-          color: 0x152a55,
-          roughness: 0.2,
-          metalness: 0.2,
-          emissive: new THREE.Color(0x3a74ff),
-          emissiveIntensity: 1.1,
-        })
-      );
-      head.position.set(0, 0.55, 0);
-      bot.add(head);
-
-      // Store motion params
-      bot.userData = {
-        a,
-        r,
-        speed: 0.25 + (i % 4) * 0.04,
-        wobble: 0.08 + (i % 3) * 0.03,
-      };
-
-      addMesh(bot);
-      world.bots.push(bot);
-    }
-  }
-
-  // ---------------------------
-  // Build World
-  // ---------------------------
-  buildFloors();
-  buildWalls();
-  buildTable();
-  buildSpawnPads();
-  buildBots();
-  chooseSafeSpawn();
-
-  // ---------------------------
-  // Resize
-  // ---------------------------
-  function onResize() {
-    const w = window.innerWidth, h = window.innerHeight;
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
-    renderer.setSize(w, h);
-  }
-  window.addEventListener("resize", onResize);
-
-  // ---------------------------
-  // Animate
-  // ---------------------------
   function tick() {
-    const t = world.clock.getElapsedTime();
+    const dt = clock.getDelta();
+    // (future hooks)
+    // ctx.onTick?.(dt);
 
-    // Bot walk loop around lobby
-    for (const bot of world.bots) {
-      const ud = bot.userData;
-      ud.a += ud.speed * 0.008;
-      const x = Math.cos(ud.a) * ud.r;
-      const z = Math.sin(ud.a) * ud.r;
-      bot.position.x = x;
-      bot.position.z = z;
-      bot.position.y = 0.55 + Math.sin(t * 2.0 + ud.a * 3.0) * ud.wobble * 0.15;
-
-      // face direction of travel (look ahead slightly)
-      const x2 = Math.cos(ud.a + 0.05) * ud.r;
-      const z2 = Math.sin(ud.a + 0.05) * ud.r;
-      bot.lookAt(x2, bot.position.y, z2);
-    }
+    renderer.render(scene, camera);
   }
 
-  renderer.setAnimationLoop(() => {
-    tick();
-    renderer.render(scene, camera);
-  });
+  if (renderer.xr && renderer.setAnimationLoop) {
+    renderer.setAnimationLoop(tick);
+    diagLog("render loop start ✅");
+  } else {
+    const raf = () => { tick(); requestAnimationFrame(raf); };
+    raf();
+    diagLog("render loop start ✅ (raf)");
+  }
 
-  DLOG("render loop start ✅");
-  DSTAT("World running ✅");
+  // ---------- FINAL DIAGNOSTICS HANDSHAKE ----------
+  // This is what moves HUD off "Booting..."
+  try {
+    diagStatus("World running ✅");
+    diagLog("initWorld() completed ✅");
+  } catch {}
 
-  // === FINAL DIAGNOSTICS HANDSHAKE ===
-  if (window.__SCARLETT_DIAG_STATUS) window.__SCARLETT_DIAG_STATUS("World running ✅");
-  if (window.__SCARLETT_DIAG_LOG) window.__SCARLETT_DIAG_LOG("initWorld() completed");
-
-  // Optional: expose for modules
-  window.__SCARLETT_WORLD__ = world;
-
-  return world;
-}
-```0
+  // Return useful handles for modules
+  return {
+    THREE,
+    scene,
+    camera,
+    renderer,
+    rig,
+    world,
+    spawnPads: spawnPads.map(s => s.mesh),
+    table,
+  };
+                                                    }

@@ -1,4 +1,7 @@
-// /js/scarlett1/world.js — Scarlett 1 World v2 (XR-safe animation loop + global exports)
+// /js/scarlett1/world.js — Scarlett 1 World v3
+// ✅ XR-safe animation loop (setAnimationLoop)
+// ✅ Spawn Pads (teleportable targets)
+// ✅ Anti-stuck safety snap if you spawn in pit/table area
 // Exports initWorld({ THREE, DIAG })
 
 export async function initWorld({ THREE, DIAG }) {
@@ -13,7 +16,7 @@ export async function initWorld({ THREE, DIAG }) {
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.xr.enabled = true; // IMPORTANT: allow XR
+  renderer.xr.enabled = true;
   app.innerHTML = "";
   app.appendChild(renderer.domElement);
 
@@ -28,12 +31,13 @@ export async function initWorld({ THREE, DIAG }) {
     500
   );
 
-  // Spawn: slightly forward of center circle
+  // Player state
   const player = {
-    pos: new THREE.Vector3(0, 1.65, 6.5),
-    yaw: Math.PI, // facing toward center
+    pos: new THREE.Vector3(0, 1.65, 10.5), // moved farther away from pit
+    yaw: Math.PI,
     pitch: 0
   };
+
   camera.position.copy(player.pos);
   camera.rotation.order = "YXZ";
   camera.rotation.y = player.yaw;
@@ -46,7 +50,6 @@ export async function initWorld({ THREE, DIAG }) {
   dir.position.set(8, 14, 6);
   scene.add(dir);
 
-  // Accent lights
   const blue = new THREE.PointLight(0x3366ff, 1.1, 40);
   blue.position.set(0, 6, 0);
   scene.add(blue);
@@ -137,7 +140,10 @@ export async function initWorld({ THREE, DIAG }) {
   );
   ring.rotation.x = -Math.PI / 2;
 
-  // Pit
+  // Pit + rim
+  const PIT_R = 6.25;          // used for anti-stuck
+  const SAFE_R = 8.25;         // minimum safe radius away from pit
+
   const pit = addMesh(
     new THREE.CircleGeometry(6.2, 80),
     new THREE.MeshStandardMaterial({ color: 0x070a12, roughness: 1, metalness: 0 }),
@@ -147,15 +153,10 @@ export async function initWorld({ THREE, DIAG }) {
   );
   pit.rotation.x = -Math.PI / 2;
 
-  const pitRim = addMesh(
-    new THREE.RingGeometry(6.15, 6.5, 96),
-    MAT_TRIM,
-    0,
-    -0.10,
-    0
-  );
+  const pitRim = addMesh(new THREE.RingGeometry(6.15, 6.5, 96), MAT_TRIM, 0, -0.10, 0);
   pitRim.rotation.x = -Math.PI / 2;
 
+  // Center platform
   const platform = addMesh(
     new THREE.CylinderGeometry(2.2, 2.2, 0.18, 64),
     new THREE.MeshStandardMaterial({ color: 0x0b2a22, roughness: 0.85, metalness: 0.05 }),
@@ -272,9 +273,12 @@ export async function initWorld({ THREE, DIAG }) {
     const pl = new THREE.PointLight(accent, 1.2, 40);
     pl.position.set(rx, 3.2, rz);
     scene.add(pl);
+
+    return { roomCenter: new THREE.Vector3(rx, 0, rz) };
   }
 
-  for (const d of dirs) buildHallAndRoom(d.angle, d.name, d.color);
+  const roomCenters = [];
+  for (const d of dirs) roomCenters.push(buildHallAndRoom(d.angle, d.name, d.color));
 
   // Center table placeholder
   const table = new THREE.Mesh(
@@ -283,6 +287,101 @@ export async function initWorld({ THREE, DIAG }) {
   );
   table.position.set(0, 1.05, 0);
   scene.add(table);
+
+  // ----------------------------
+  // SPAWN PADS (teleportable)
+  // ----------------------------
+  const spawnPads = [];
+  const padGeo = new THREE.CylinderGeometry(0.75, 0.75, 0.06, 48);
+
+  function makePad(x, z, color, label) {
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x0b142a,
+      roughness: 0.4,
+      metalness: 0.2,
+      emissive: color,
+      emissiveIntensity: 1.1
+    });
+
+    const pad = new THREE.Mesh(padGeo, mat);
+    pad.position.set(x, 0.035, z);
+    pad.name = "spawn_pad";
+    pad.userData.teleportPos = new THREE.Vector3(x, 1.65, z);
+    pad.userData.label = label || "";
+    scene.add(pad);
+
+    // small “beacon”
+    const beacon = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.06, 0.7, 16),
+      new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.2, emissive: color, emissiveIntensity: 0.8 })
+    );
+    beacon.position.set(x, 0.45, z);
+    scene.add(beacon);
+
+    spawnPads.push(pad);
+    return pad;
+  }
+
+  // Lobby safe pads (4 around the pit)
+  makePad(0, 10.5, 0x2f6bff, "LOBBY_N");
+  makePad(10.5, 0, 0xaa44ff, "LOBBY_E");
+  makePad(0, -10.5, 0xffcc44, "LOBBY_S");
+  makePad(-10.5, 0, 0x44ffaa, "LOBBY_W");
+
+  // Room entrance pads (near each hallway end)
+  // Angles: 0, 90, 180, -90
+  const entranceR = LOBBY_RADIUS + 4.8;
+  makePad(Math.cos(0) * entranceR, Math.sin(0) * entranceR, 0x2f6bff, "STORE_ENT");
+  makePad(Math.cos(Math.PI / 2) * entranceR, Math.sin(Math.PI / 2) * entranceR, 0xaa44ff, "VIP_ENT");
+  makePad(Math.cos(Math.PI) * entranceR, Math.sin(Math.PI) * entranceR, 0xffcc44, "SCORP_ENT");
+  makePad(Math.cos(-Math.PI / 2) * entranceR, Math.sin(-Math.PI / 2) * entranceR, 0x44ffaa, "GAMES_ENT");
+
+  // Deep room pads (room centers)
+  for (let i = 0; i < roomCenters.length; i++) {
+    const c = roomCenters[i].roomCenter;
+    const col = dirs[i].color;
+    makePad(c.x, c.z, col, dirs[i].name + "_CENTER");
+  }
+
+  // Helper to teleport
+  function teleportTo(vec3) {
+    player.pos.set(vec3.x, vec3.y, vec3.z);
+    // keep current yaw/pitch
+    camera.position.copy(player.pos);
+  }
+
+  // Anti-stuck: if inside pit/table zone -> snap to nearest lobby pad
+  function safetySnapIfInsidePit() {
+    const dx = player.pos.x;
+    const dz = player.pos.z;
+    const r = Math.hypot(dx, dz);
+
+    if (r < SAFE_R) {
+      // find nearest pad
+      let best = null;
+      let bestD = Infinity;
+      for (const p of spawnPads) {
+        // prefer lobby pads first (labels start with LOBBY)
+        const isLobby = (p.userData.label || "").startsWith("LOBBY");
+        const px = p.userData.teleportPos.x;
+        const pz = p.userData.teleportPos.z;
+        const d2 = (dx - px) * (dx - px) + (dz - pz) * (dz - pz) + (isLobby ? -5 : 0);
+        if (d2 < bestD) {
+          bestD = d2;
+          best = p;
+        }
+      }
+      if (best) {
+        D.warn("[spawn] safety snap →", best.userData.label);
+        teleportTo(best.userData.teleportPos);
+      } else {
+        teleportTo(new THREE.Vector3(0, 1.65, 10.5));
+      }
+    }
+  }
+
+  // Run safety snap once at start (and also if needed later)
+  safetySnapIfInsidePit();
 
   // Resize
   window.addEventListener(
@@ -295,7 +394,7 @@ export async function initWorld({ THREE, DIAG }) {
     { passive: true }
   );
 
-  // Basic touch look (kept)
+  // Touch look (kept)
   let looking = false;
   let lastX = 0, lastY = 0;
 
@@ -330,11 +429,22 @@ export async function initWorld({ THREE, DIAG }) {
   window.addEventListener("touchend", () => { looking = false; }, { passive: true });
 
   // Expose to XR module
-  window.__SCARLETT1__ = { THREE, scene, camera, renderer, player };
+  window.__SCARLETT1__ = {
+    THREE,
+    scene,
+    camera,
+    renderer,
+    player,
+    spawnPads,
+    teleportTo
+  };
 
   // XR-safe render loop
   D.log("render loop start ✅");
   renderer.setAnimationLoop((t) => {
+    // safety snap if somehow you got moved into pit
+    safetySnapIfInsidePit();
+
     table.rotation.y = t * 0.0004;
     camera.position.copy(player.pos);
     renderer.render(scene, camera);

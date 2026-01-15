@@ -1,289 +1,228 @@
-// /js/scarlett1/boot2.js — Scarlett Boot2 (Diagnostics + XR + Android-safe)
-// ✅ FIXED: cache-bust keeps absolute URLs (unpkg stays unpkg)
-// ✅ VRButton from three/examples
-// ✅ Diagnostics HUD with status + logs
-// ✅ World import cache-busted safely
+// /js/scarlett1/boot2.js — Scarlett Boot2 (FULL) v2.0
+// ✅ No bare "three" imports anywhere except unpkg absolute
+// ✅ World gets THREE injected (world.js must NOT import "three")
+// ✅ Android controls only when NOT in XR
+// ✅ Oculus controllers locomotion supported via /js/core/controls.js
+// ✅ Handles failures -> updates HUD status instead of hanging "Booting…"
 
-const BUILD = `BOOT2_${Date.now()}`;
+const DIAG = window.SCARLETT_DIAG || {
+  log: (...a)=>console.log("[diag]",...a),
+  setStatus: ()=>{},
+  setHUDVisible: ()=>{}
+};
 
-// ---------- tiny logger / HUD ----------
-const Diag = (() => {
-  const S = { root: null, box: null, statusEl: null, logsEl: null, shown: true, lines: [] };
+const log = (...a)=>DIAG.log(...a);
 
-  const stamp = () => {
-    const d = new Date();
-    const hh = String(d.getHours()).padStart(2, "0");
-    const mm = String(d.getMinutes()).padStart(2, "0");
-    const ss = String(d.getSeconds()).padStart(2, "0");
-    return `[${hh}:${mm}:${ss}]`;
-  };
-
-  function ensure() {
-    if (S.root) return;
-
-    const root = document.createElement("div");
-    root.style.position = "fixed";
-    root.style.left = "10px";
-    root.style.top = "10px";
-    root.style.zIndex = "9999";
-    root.style.width = "min(520px, calc(100vw - 20px))";
-    root.style.maxHeight = "70vh";
-    root.style.pointerEvents = "auto";
-    root.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace";
-
-    const panel = document.createElement("div");
-    panel.style.background = "rgba(5,10,20,0.72)";
-    panel.style.border = "1px solid rgba(120,190,255,0.25)";
-    panel.style.borderRadius = "16px";
-    panel.style.padding = "12px";
-    panel.style.backdropFilter = "blur(10px)";
-    panel.style.color = "rgba(230,245,255,0.95)";
-
-    const title = document.createElement("div");
-    title.style.display = "flex";
-    title.style.justifyContent = "space-between";
-    title.style.alignItems = "center";
-    title.style.gap = "10px";
-
-    const h = document.createElement("div");
-    h.textContent = "SCARLETT BOOT2 DIAGNOSTICS";
-    h.style.fontWeight = "900";
-    h.style.letterSpacing = "0.06em";
-    h.style.color = "rgba(160,220,255,0.95)";
-
-    const hide = document.createElement("button");
-    hide.textContent = "Hide";
-    hide.style.borderRadius = "12px";
-    hide.style.border = "1px solid rgba(120,190,255,0.25)";
-    hide.style.background = "rgba(10,16,32,0.55)";
-    hide.style.color = "rgba(230,245,255,0.95)";
-    hide.style.padding = "8px 10px";
-    hide.style.fontWeight = "800";
-    hide.onclick = () => {
-      S.shown = !S.shown;
-      box.style.display = S.shown ? "block" : "none";
-      hide.textContent = S.shown ? "Hide" : "Show";
-    };
-
-    title.appendChild(h);
-    title.appendChild(hide);
-
-    const status = document.createElement("div");
-    status.style.marginTop = "8px";
-    status.innerHTML = `STATUS: <span style="color:#9ef0b0;font-weight:900;">Booting...</span>`;
-
-    const btnRow = document.createElement("div");
-    btnRow.style.display = "grid";
-    btnRow.style.gridTemplateColumns = "1fr 1fr";
-    btnRow.style.gap = "10px";
-    btnRow.style.marginTop = "10px";
-
-    const mkBtn = (txt, fn) => {
-      const b = document.createElement("button");
-      b.textContent = txt;
-      b.style.borderRadius = "14px";
-      b.style.border = "1px solid rgba(120,190,255,0.18)";
-      b.style.background = "rgba(16,24,48,0.55)";
-      b.style.color = "rgba(230,245,255,0.95)";
-      b.style.padding = "12px 10px";
-      b.style.fontWeight = "900";
-      b.onclick = fn;
-      return b;
-    };
-
-    const copy = mkBtn("Copy Logs", async () => {
-      const text = S.lines.join("\n");
-      try { await navigator.clipboard.writeText(text); log("copied ✅"); }
-      catch { log("copy failed ❌"); }
-    });
-
-    const clear = mkBtn("Clear", () => {
-      S.lines.length = 0;
-      render();
-    });
-
-    const reload = mkBtn("Reload", () => location.reload());
-
-    btnRow.appendChild(mkBtn("Hide HUD", () => { root.style.display = "none"; }));
-    btnRow.appendChild(copy);
-    btnRow.appendChild(clear);
-    btnRow.appendChild(reload);
-
-    const box = document.createElement("div");
-    box.style.marginTop = "10px";
-    box.style.padding = "10px";
-    box.style.borderRadius = "14px";
-    box.style.border = "1px solid rgba(120,190,255,0.18)";
-    box.style.background = "rgba(0,0,0,0.35)";
-    box.style.maxHeight = "42vh";
-    box.style.overflow = "auto";
-    box.style.whiteSpace = "pre-wrap";
-    box.style.fontSize = "12px";
-    box.style.lineHeight = "1.25";
-
-    panel.appendChild(title);
-    panel.appendChild(status);
-    panel.appendChild(btnRow);
-    panel.appendChild(box);
-
-    root.appendChild(panel);
-    document.body.appendChild(root);
-
-    S.root = root;
-    S.box = box;
-    S.statusEl = status;
-    S.logsEl = box;
-  }
-
-  function render() {
-    ensure();
-    S.logsEl.textContent = S.lines.join("\n");
-    S.logsEl.scrollTop = S.logsEl.scrollHeight;
-  }
-
-  function log(...a) {
-    const msg = `${stamp()} ${a.map(x => (typeof x === "string" ? x : JSON.stringify(x))).join(" ")}`;
-    S.lines.push(msg);
-    if (S.lines.length > 600) S.lines.splice(0, S.lines.length - 600);
-    render();
-    console.log(msg);
-  }
-
-  function status(html) {
-    ensure();
-    S.statusEl.innerHTML = `STATUS: <span style="font-weight:900;">${html}</span>`;
-  }
-
-  return { log, status };
-})();
-
-// ✅ FIXED: bust keeps ABSOLUTE urls as absolute (does NOT strip origin)
-function bust(url) {
-  // new URL() supports absolute or relative. For relative, it uses current page origin.
-  const u = new URL(url, location.href);
-  u.searchParams.set("v", String(Date.now()));
-  return u.toString(); // <-- IMPORTANT: keep full URL (includes https://unpkg.com when used)
+function urlRel(rel){
+  return new URL(rel, import.meta.url).toString();
 }
 
-async function safeImport(url, label) {
-  try {
-    Diag.log(`[boot2] import ${url}`);
-    const mod = await import(url);
-    Diag.log(`[boot2] ok ✅ ${label || url}`);
-    return mod;
-  } catch (e) {
-    Diag.log(`[boot2] fail ❌ ${label || url} :: ${e?.message || e}`);
+async function safeImport(label, u){
+  try{
+    log(`[boot2] import ${u}`);
+    const m = await import(u);
+    log(`[boot2] ok ✅ ${label}`);
+    return m;
+  }catch(e){
+    log(`[boot2] fail ❌ ${label} :: ${e?.message||e}`);
     throw e;
   }
 }
 
-// ---------- BOOT ----------
-(async function main() {
-  Diag.log("diag start ✅");
-  Diag.log(`href=${location.href}`);
-  Diag.log(`path=${location.pathname}`);
-  Diag.log(`secureContext=${window.isSecureContext}`);
-  Diag.log(`ua=${navigator.userAgent}`);
-  Diag.log(`navigator.xr=${!!navigator.xr}`);
+let THREE, VRButton;
+let renderer, scene, camera, player, cameraPitch;
+let controllers = { c0:null, c1:null, g0:null, g1:null };
+let updateWorld = null;
+let controlsMod = null;
+let androidMod = null;
 
-  try {
-    // Three (CDN)
-    const threeUrl = bust("https://unpkg.com/three@0.158.0/build/three.module.js");
-    const THREE = await safeImport(threeUrl, "three");
-    Diag.log(`[boot2] three import ✅ r${THREE.REVISION}`);
+function makeRenderer(){
+  renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
 
-    // VRButton (CDN)
-    const { VRButton } = await safeImport(
-      bust("https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js"),
-      "VRButton"
-    );
-
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  window.addEventListener("resize", ()=>{
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-    renderer.xr.enabled = true;
-    document.body.style.margin = "0";
-    document.body.style.background = "#02040a";
-    document.body.appendChild(renderer.domElement);
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+  });
+}
 
-    // Scene / Rig
-    const scene = new THREE.Scene();
+function makeRig(){
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x05070c);
 
-    const player = new THREE.Group();
-    player.name = "PlayerRig";
-    scene.add(player);
+  // Player rig
+  player = new THREE.Group();
+  scene.add(player);
 
-    const cameraPitch = new THREE.Group();
-    cameraPitch.name = "CameraPitch";
-    player.add(cameraPitch);
+  cameraPitch = new THREE.Group();
+  player.add(cameraPitch);
 
-    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
-    camera.position.set(0, 1.6, 3.2);
-    cameraPitch.add(camera);
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.05, 600);
+  camera.position.set(0, 1.6, 0);
+  cameraPitch.add(camera);
 
-    // Controllers + Hands
-    const c0 = renderer.xr.getController(0);
-    const c1 = renderer.xr.getController(1);
-    player.add(c0); player.add(c1);
+  // small ambient to avoid black
+  const amb = new THREE.AmbientLight(0xffffff, 0.35);
+  scene.add(amb);
+}
 
-    const h0 = renderer.xr.getHand(0);
-    const h1 = renderer.xr.getHand(1);
-    player.add(h0); player.add(h1);
+function installControllers(){
+  // controller grips / pointers
+  controllers.c0 = renderer.xr.getController(0);
+  controllers.c1 = renderer.xr.getController(1);
+  controllers.g0 = renderer.xr.getControllerGrip(0);
+  controllers.g1 = renderer.xr.getControllerGrip(1);
 
-    const controllers = { c0, c1 };
-    const hands = { h0, h1 };
+  scene.add(controllers.c0, controllers.c1, controllers.g0, controllers.g1);
 
-    // VR Button
-    const btn = VRButton.createButton(renderer);
-    btn.style.position = "fixed";
-    btn.style.left = "10px";
-    btn.style.bottom = "10px";
-    btn.style.zIndex = "9999";
-    document.body.appendChild(btn);
-    Diag.log("VRButton ready ✅");
+  // visible rays
+  const rayGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0,0,0),
+    new THREE.Vector3(0,0,-1)
+  ]);
+  const rayMat = new THREE.LineBasicMaterial({ color: 0x66ccff });
+  const mkRay = ()=>{
+    const line = new THREE.Line(rayGeo, rayMat);
+    line.name = "laser";
+    line.scale.z = 6;
+    return line;
+  };
+  controllers.c0.add(mkRay());
+  controllers.c1.add(mkRay());
+}
 
-    // Resize
-    window.addEventListener("resize", () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+async function installXRHands(){
+  // Optional: hands (won’t crash if not supported)
+  try{
+    const XRHandModelFactory = (await import("https://unpkg.com/three@0.158.0/examples/jsm/webxr/XRHandModelFactory.js")).XRHandModelFactory;
+    const factory = new XRHandModelFactory();
+
+    const hand0 = renderer.xr.getHand(0);
+    const hand1 = renderer.xr.getHand(1);
+    hand0.add(factory.createHandModel(hand0, "mesh"));
+    hand1.add(factory.createHandModel(hand1, "mesh"));
+    scene.add(hand0, hand1);
+
+    log("XR hands ready ✅");
+  }catch(e){
+    log("XR hands skipped (ok) ::", e?.message||e);
+  }
+}
+
+async function main(){
+  DIAG.setStatus("Booting…", null);
+
+  try{
+    // THREE
+    const threeURL = "https://unpkg.com/three@0.158.0/build/three.module.js";
+    THREE = (await safeImport("three", threeURL));
+    THREE = THREE.default || THREE;
+    log(`[boot2] three import ✅ r${THREE.REVISION||"?"}`);
+
+    // VRButton
+    const vrURL = "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
+    ({ VRButton } = await safeImport("VRButton", vrURL));
+    log("VRButton ready ✅");
+
+    makeRenderer();
+    makeRig();
+    installControllers();
+    await installXRHands();
+
+    // Add VRButton
+    document.body.appendChild(VRButton.createButton(renderer));
+
+    // Core controls (Quest thumbsticks locomotion)
+    controlsMod = await safeImport("controls", urlRel("../core/controls.js"));
+    log("core controls loaded ✅");
+
+    // Android sticks (only 2D)
+    try{
+      androidMod = await safeImport("spine_android", urlRel("./spine_android.js"));
+    }catch(e){
+      androidMod = null;
+    }
+
+    // World (must NOT import "three")
+    const worldURL = urlRel("./world.js");
+    log(`[boot2] world url=${worldURL}`);
+    const worldMod = await safeImport("world", worldURL);
+
+    if (!worldMod?.initWorld) throw new Error("world.js missing export initWorld()");
+    const out = await worldMod.initWorld({
+      THREE,
+      scene,
+      renderer,
+      camera,
+      player,
+      cameraPitch,
+      controllers,
+      log
     });
 
-    // World (LOCAL module, cache-busted)
-    const worldUrl = bust(new URL("./world.js", import.meta.url).toString());
-    Diag.log(`[boot2] world url=${worldUrl}`);
+    updateWorld = out?.update || null;
 
-    Diag.status(`<span style="color:#9ef0b0;">World loading...</span>`);
+    // Android init
+    if (androidMod?.initAndroidSticks){
+      androidMod.initAndroidSticks({
+        renderer,
+        player,
+        cameraPitch,
+        log,
+        setHUDVisible: DIAG.setHUDVisible
+      });
+      log("Android sticks READY ✅");
+    }else{
+      log("Android sticks skipped (no initAndroidSticks export)");
+    }
 
-    const worldMod = await safeImport(worldUrl, "world.js");
-    const initWorld = worldMod.initWorld || worldMod.default?.initWorld;
+    // XR session logging
+    renderer.xr.addEventListener("sessionstart", ()=>log("XR session start ✅"));
+    renderer.xr.addEventListener("sessionend", ()=>log("XR session end ✅"));
 
-    if (typeof initWorld !== "function") throw new Error("world.js missing initWorld()");
-
-    const api = await initWorld({
-      THREE, scene, renderer, camera, cameraPitch, player,
-      controllers, hands,
-      log: Diag.log,
-      BUILD
-    });
+    DIAG.setStatus("World running ✅", true);
 
     // Render loop
     let last = performance.now();
-    renderer.setAnimationLoop((t) => {
-      const dt = Math.min(0.05, (t - last) / 1000);
-      last = t;
+    renderer.setAnimationLoop((t)=>{
+      const now = t || performance.now();
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
 
-      api?.update?.(dt, t / 1000);
+      // Update world
+      if (updateWorld) updateWorld(dt);
+
+      // Oculus thumbstick locomotion (only in XR)
+      try{
+        controlsMod?.Controls?.applyLocomotion?.({
+          renderer,
+          player,
+          controllers,
+          camera,
+          diagonal45: false // you can turn this on later if you want 45° snapping
+        }, dt);
+      }catch(e){ /* keep loop alive */ }
+
+      // Android movement (only not in XR)
+      try{
+        androidMod?.updateAndroidSticks?.(dt);
+      }catch(e){ /* keep loop alive */ }
+
       renderer.render(scene, camera);
     });
 
-    Diag.status(`<span style="color:#9ef0b0;">World running ✅</span>`);
-    Diag.log("[boot2] done ✅");
+    log("render loop start ✅");
+    log("[boot2] done ✅");
 
-  } catch (e) {
-    Diag.status(`<span style="color:#ff6b6b;">BOOT FAILED ❌</span>`);
-    Diag.log(`BOOT ERROR: ${e?.message || e}`);
-    console.error(e);
+  }catch(e){
+    DIAG.setStatus("BOOT FAILED ❌", false);
+    log("BOOT ERROR:", e?.message||e);
+    // keep page responsive; do not throw further
   }
-})();
+}
+
+main();

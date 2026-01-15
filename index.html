@@ -2,151 +2,19 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Scarlett VR Poker — Scarlett 1.0</title>
-  <meta name="theme-color" content="#05070d" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>Scarlett VR Poker</title>
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      background: #000;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      touch-action: none;
-      user-select: none;
-    }
-    canvas { display:block; width:100vw; height:100vh; }
-
-    /* Diagnostics / Boot HUD */
-    #scarlett_diag {
-      position: fixed;
-      left: 10px; top: 10px;
-      width: min(92vw, 760px);
-      max-height: 74vh;
-      overflow: auto;
-      z-index: 999999;
-      background: rgba(0,0,0,0.72);
-      border: 1px solid rgba(120,180,255,0.25);
-      border-radius: 14px;
-      padding: 10px 12px;
-      color: #dcecff;
-      font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      white-space: pre-wrap;
-    }
-    #scarlett_diag_head {
-      font-weight: 900;
-      margin-bottom: 8px;
-      color: #9fd1ff;
-    }
-    #scarlett_diag_btn {
-      position: absolute;
-      right: 10px; top: 10px;
-      padding: 6px 10px;
-      border-radius: 10px;
-      border: 1px solid rgba(120,180,255,0.25);
-      background: rgba(40,70,130,0.55);
-      color: #eaf3ff;
-      font-weight: 800;
-      cursor: pointer;
-    }
-    #scarlett_diag_body { margin-top: 6px; }
-    #scarlett_hint {
-      position: fixed;
-      left: 12px;
-      bottom: 12px;
-      z-index: 999998;
-      background: rgba(0,0,0,0.55);
-      border: 1px solid rgba(120,180,255,0.15);
-      border-radius: 12px;
-      padding: 8px 10px;
-      color: rgba(220, 240, 255, 0.85);
-      font-size: 12px;
-      max-width: min(92vw, 620px);
-    }
+    html, body { margin:0; height:100%; overflow:hidden; background:#02040a; }
+    canvas { display:block; }
   </style>
 </head>
 <body>
-
-  <!-- Diagnostics HUD -->
-  <div id="scarlett_diag">
-    <div id="scarlett_diag_head">SCARLETT DIAGNOSTICS</div>
-    <button id="scarlett_diag_btn">Hide</button>
-    <div id="scarlett_diag_body"></div>
-  </div>
-
-  <div id="scarlett_hint">
-    Android debug: sticks appear when NOT in XR session. Quest: press “Enter VR”.
-  </div>
-
-  <script>
-    // --- Scarlett Diagnostics helpers (boot + world use these) ---
-    (function () {
-      const body = document.getElementById("scarlett_diag_body");
-      const btn = document.getElementById("scarlett_diag_btn");
-
-      function ts() {
-        const d = new Date();
-        return d.toLocaleTimeString();
-      }
-
-      window.__SCARLETT_DIAG_LOG = function (...args) {
-        const msg = args.map(a => {
-          if (typeof a === "string") return a;
-          try { return JSON.stringify(a); } catch { return String(a); }
-        }).join(" ");
-        const line = document.createElement("div");
-        line.textContent = `[${ts()}] ${msg}`;
-        body.appendChild(line);
-        body.parentElement.scrollTop = body.parentElement.scrollHeight;
-        console.log(`[${ts()}]`, ...args);
-      };
-
-      window.__SCARLETT_DIAG_STATUS = function (s) {
-        window.__SCARLETT_DIAG_LOG(`STATUS: ${s}`);
-      };
-
-      btn.addEventListener("click", () => {
-        const hidden = body.style.display === "none";
-        body.style.display = hidden ? "block" : "none";
-        btn.textContent = hidden ? "Hide" : "Show";
-      });
-
-      // Global error hooks
-      window.addEventListener("error", (e) => {
-        window.__SCARLETT_DIAG_LOG("JS ERROR:", e.message || e);
-      });
-      window.addEventListener("unhandledrejection", (e) => {
-        window.__SCARLETT_DIAG_LOG("PROMISE REJECT:", (e.reason && (e.reason.stack || e.reason.message)) || e.reason || e);
-      });
-
-      // Initial env log
-      window.__SCARLETT_DIAG_LOG("diag start ✅");
-      window.__SCARLETT_DIAG_LOG("href=" + location.href);
-      window.__SCARLETT_DIAG_LOG("path=" + location.pathname);
-      window.__SCARLETT_DIAG_LOG("base=/scarlett-poker-vr/");
-      window.__SCARLETT_DIAG_LOG("secureContext=" + window.isSecureContext);
-      window.__SCARLETT_DIAG_LOG("ua=" + navigator.userAgent);
-      window.__SCARLETT_DIAG_LOG("navigator.xr=" + !!navigator.xr);
-    })();
-  </script>
-
-  <!-- IMPORTANT: boot2 must be loaded as module -->
   <script type="module">
-    const v = Date.now();
-    const base = "/scarlett-poker-vr/";
-    const boot = base + "js/scarlett1/boot2.js?v=" + v;
-
-    window.__SCARLETT_DIAG_LOG("loading boot(module): " + boot);
-
-    import(boot)
-      .then(() => window.__SCARLETT_DIAG_LOG("boot2 imported ✅ (waiting for world)"))
-      .catch((e) => {
-        window.__SCARLETT_DIAG_LOG("BOOT IMPORT FAILED ❌");
-        window.__SCARLETT_DIAG_LOG(String(e?.stack || e));
-      });
+    // IMPORTANT: always cache-bust boot2 so you never get stale code
+    const url = new URL("./js/scarlett1/boot2.js", location.href);
+    url.searchParams.set("v", Date.now());
+    import(url.toString());
   </script>
-
 </body>
 </html>

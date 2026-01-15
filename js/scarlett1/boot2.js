@@ -1,11 +1,15 @@
-// /js/scarlett1/boot2.js — Scarlett BOOT2 v3.4 (RETICLE + SNAP TURN + LOCAL HANDS)
+// /js/scarlett1/boot2.js — Scarlett BOOT2 v3.5 (XR MOVE + SNAP + BUTTONS + RIGHT RETICLE)
+// Fixes:
 // ✅ Teleport reticle ring on floor
-// ✅ Snap turn reads multiple gamepad sources (Quest reliable)
-// ✅ Hands supported via LOCAL XRHandModelFactory (no bare "three" import issues)
+// ✅ Snap turn 45° works (right stick)
+// ✅ Smooth locomotion forward/back + strafe (left stick)
+// ✅ A/B/X/Y buttons work (polled from gamepad)
+// ✅ Reticle prefers RIGHT hand (if available)
 // ✅ Controllers parented to PlayerRig (lasers stay on you)
 // ✅ Gaze teleport fallback if inputSources=0
+// ✅ Android sticks outside XR still
 
-const BUILD = "BOOT2_SCARLETT1_v3_4_RETICLE_SNAP_HANDS";
+const BUILD = "BOOT2_SCARLETT1_v3_5_XR_MOVE_SNAP_BUTTONS";
 const nowTs = () => new Date().toLocaleTimeString();
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
@@ -76,7 +80,7 @@ function makeHUD() {
   const lines = [];
   const push = (s) => {
     lines.push(s);
-    while (lines.length > 700) lines.shift();
+    while (lines.length > 900) lines.shift();
     pre.textContent = lines.join("\n");
     root.scrollTop = root.scrollHeight;
   };
@@ -107,7 +111,18 @@ function makeHUD() {
     catch (e) { push(`[${nowTs()}] HUD: copy failed ❌ ${e?.message || e}`); }
   };
 
+  // simple toggle API we can call from buttons
+  const api = {
+    root,
+    visible: true,
+    toggle() {
+      api.visible = !api.visible;
+      root.style.display = api.visible ? "block" : "none";
+    }
+  };
+
   return {
+    api,
     enterBtn,
     log: (...a) => push(`[${nowTs()}] ${a.join(" ")}`),
     err: (...a) => push(`[${nowTs()}] ERROR: ${a.join(" ")}`)
@@ -172,71 +187,55 @@ function makeTeleportReticle(THREE, scene) {
   mesh.name = "TeleportReticle";
   scene.add(mesh);
   return {
-    showAt(p) {
-      mesh.position.set(p.x, p.y + 0.01, p.z);
-      mesh.visible = true;
-    },
+    showAt(p) { mesh.position.set(p.x, p.y + 0.01, p.z); mesh.visible = true; },
     hide() { mesh.visible = false; }
   };
 }
 
-function installXRHandsLocal({ THREE, renderer, scene, playerRig, hud }) {
-  // Optional: only if local module exists
-  let factory = null;
-  let left = null, right = null;
-
-  return {
-    async init() {
-      try {
-        const mod = await import(`../thirdparty/XRHandModelFactory.js?v=${Date.now()}`);
-        const XRHandModelFactory = mod.XRHandModelFactory || mod.default?.XRHandModelFactory || mod.default;
-        if (!XRHandModelFactory) throw new Error("XRHandModelFactory export missing");
-        factory = new XRHandModelFactory();
-
-        left = renderer.xr.getHand(0);
-        right = renderer.xr.getHand(1);
-
-        // parent to rig so they stay aligned
-        playerRig.add(left);
-        playerRig.add(right);
-
-        const leftModel = factory.createHandModel(left, "mesh");
-        const rightModel = factory.createHandModel(right, "mesh");
-        left.add(leftModel);
-        right.add(rightModel);
-
-        hud.log("XR hand models attached ✅ (local)");
-      } catch (e) {
-        hud.err("XR hands init skipped ❌", e?.message || e);
-      }
-    }
-  };
-}
-
+// ---- XR controls (teleport + reticle + snap + smooth move + buttons) ----
 function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
   const st = {
     inXR: false,
+
     controllers: [null, null],
     lines: [null, null],
     raycasters: [null, null],
     lastHit: [null, null],
-    lastSnap: 999,
-    snapCooldown: 0.25,
-    snapDeg: 30,
-    maxRay: 30,
+
+    teleportSurfaces: [],
+    teleportPads: [],
+
     tmpMat: new THREE.Matrix4(),
     tmpDir: new THREE.Vector3(),
     tmpPos: new THREE.Vector3(),
-    teleportSurfaces: [],
-    teleportPads: [],
+
+    // turning
+    lastSnap: 999,
+    snapCooldown: 0.22,
+    snapDeg: 30,
+
+    // movement
+    moveEnabled: true,
+    moveSpeed: 2.1,
+    strafeSpeed: 1.9,
+    deadzone: 0.18,
+
+    // reticle preference
+    preferRightReticle: true,
+
+    // gaze teleport fallback
     gazeRay: new THREE.Raycaster(),
     gazeHit: null,
     gazeHold: 0,
-    gazeHoldSec: 0.55
+    gazeHoldSec: 0.55,
+
+    // button latch
+    prevButtons: { left: [], right: [] },
+
+    maxRay: 30
   };
 
   st.gazeRay.camera = camera;
-
   const reticle = makeTeleportReticle(THREE, scene);
 
   function setWorld(world) {
@@ -265,6 +264,8 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
     return line;
   }
 
+  function filterTargets(list) { return list.filter(o => o && !o.isSprite); }
+
   function getRay(controller) {
     if (!controller || !controller.matrixWorld) return null;
     st.tmpMat.identity().extractRotation(controller.matrixWorld);
@@ -273,8 +274,6 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
     if (!isFinite(st.tmpPos.x) || !isFinite(st.tmpPos.y) || !isFinite(st.tmpPos.z)) return null;
     return { origin: st.tmpPos.clone(), dir: st.tmpDir.clone() };
   }
-
-  function filterTargets(list) { return list.filter(o => o && !o.isSprite); }
 
   function intersect(i) {
     const c = st.controllers[i];
@@ -327,14 +326,12 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
     teleportTo(r.hit.point);
   }
 
-  // ✅ controllers parented to rig so lasers are on you
   function setupControllers() {
     teardownControllers();
 
     for (let i = 0; i < 2; i++) {
       const c = renderer.xr.getController(i);
       c.name = `XR_Controller_${i}`;
-
       playerRig.add(c);
 
       const line = makeLine();
@@ -365,36 +362,84 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
     }
   }
 
-  function readSnapAxis() {
-    // Try multiple sources (Quest reliable):
-    // 1) session inputSources gamepads
-    const session = renderer.xr.getSession?.();
-    if (!session) return 0;
+  function getSession() { return renderer.xr.getSession?.() || null; }
 
-    let x = 0;
+  function getGamepads() {
+    const session = getSession();
+    if (!session) return { left: null, right: null };
+
+    let left = null, right = null;
+
     for (const src of (session.inputSources || [])) {
       const gp = src?.gamepad;
-      if (gp?.axes?.length) {
-        x = gp.axes[2] ?? gp.axes[0] ?? 0; // Quest sometimes uses axes[2]
-        if (Math.abs(x) > 0.65) return x;
-      }
+      if (!gp) continue;
+
+      const handed = src.handedness || "";
+      if (handed === "left") left = gp;
+      if (handed === "right") right = gp;
+
+      if (!handed && !left) left = gp;
+      else if (!handed && !right && gp !== left) right = gp;
     }
 
-    // 2) controller objects' gamepad (some builds)
-    for (let i = 0; i < 2; i++) {
-      const gp = st.controllers[i]?.gamepad;
-      if (gp?.axes?.length) {
-        x = gp.axes[2] ?? gp.axes[0] ?? 0;
-        if (Math.abs(x) > 0.65) return x;
-      }
-    }
+    if (!left && st.controllers[0]?.gamepad) left = st.controllers[0].gamepad;
+    if (!right && st.controllers[1]?.gamepad) right = st.controllers[1].gamepad;
 
-    return 0;
+    return { left, right };
   }
 
-  function snapTurn(dt) {
+  function dz(v) { return Math.abs(v) < st.deadzone ? 0 : v; }
+
+  function readAxis(gp, primaryIndex, fallbackIndex) {
+    if (!gp?.axes?.length) return 0;
+    const a = gp.axes[primaryIndex];
+    const b = gp.axes[fallbackIndex];
+    return (typeof a === "number") ? a : ((typeof b === "number") ? b : 0);
+  }
+
+  function pollButtons(gp, side) {
+    if (!gp?.buttons?.length) return;
+
+    const prev = st.prevButtons[side];
+    const btn = gp.buttons;
+
+    for (let i = 0; i < Math.min(8, btn.length); i++) {
+      const down = !!btn[i]?.pressed;
+      const was = !!prev[i];
+
+      if (down && !was) {
+        // rising edge
+        if (side === "left" && i === 1) { // Y
+          hud.log("Y pressed: toggle HUD");
+          hud.api.toggle();
+        }
+        if (side === "left" && i === 0) { // X
+          hud.log("X pressed: recenter rig");
+          playerRig.position.y = 0;
+          playerRig.rotation.y = 0;
+        }
+        if (side === "right" && i === 1) { // B
+          st.moveEnabled = !st.moveEnabled;
+          hud.log("B pressed: moveEnabled=", String(st.moveEnabled));
+        }
+        if (side === "right" && i === 0) { // A
+          const p = st.lastHit[1]?.hit?.point || st.lastHit[0]?.hit?.point || st.gazeHit;
+          if (p) {
+            hud.log("A pressed: teleport confirm");
+            teleportTo(p);
+          }
+        }
+      }
+
+      prev[i] = down;
+    }
+  }
+
+  function snapTurn(dt, gpRight) {
     st.lastSnap += dt;
-    const x = readSnapAxis();
+
+    // right stick X is often axes[2] OR axes[0]
+    const x = dz(readAxis(gpRight, 2, 0));
     if (Math.abs(x) < 0.65) return;
     if (st.lastSnap < st.snapCooldown) return;
     st.lastSnap = 0;
@@ -403,17 +448,30 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
     playerRig.rotation.y += (x > 0 ? -ang : ang);
   }
 
-  function updateReticle() {
-    // Prefer controller hit if present, else gaze hit
-    const a = st.lastHit[0]?.hit?.point;
-    const b = st.lastHit[1]?.hit?.point;
-    const p = a || b || st.gazeHit;
-    if (p) reticle.showAt(p);
-    else reticle.hide();
+  function smoothMove(dt, gpLeft) {
+    if (!st.moveEnabled) return;
+
+    // left stick: X strafe, Y forward/back (often axes[0]/[1] or [2]/[3])
+    const lx = dz(readAxis(gpLeft, 0, 2));
+    const ly = dz(readAxis(gpLeft, 1, 3)); // forward is usually -Y
+
+    const forward = -ly;
+    const strafe = lx;
+
+    if (forward === 0 && strafe === 0) return;
+
+    const yaw = playerRig.rotation.y;
+    const s = Math.sin(yaw), c = Math.cos(yaw);
+
+    const vx = (strafe * c + forward * s) * st.strafeSpeed;
+    const vz = (forward * c - strafe * s) * st.moveSpeed;
+
+    playerRig.position.x += vx * dt;
+    playerRig.position.z += vz * dt;
   }
 
   function updateGaze(dt) {
-    const session = renderer.xr.getSession?.();
+    const session = getSession();
     if (!session) return;
 
     const sourcesLen = (session.inputSources?.length ?? 0);
@@ -444,15 +502,23 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
     }
   }
 
+  function updateReticle() {
+    const right = st.lastHit[1]?.hit?.point;
+    const left = st.lastHit[0]?.hit?.point;
+
+    const p = st.preferRightReticle
+      ? (right || left || st.gazeHit)
+      : (left || right || st.gazeHit);
+
+    if (p) reticle.showAt(p);
+    else reticle.hide();
+  }
+
   renderer.xr.addEventListener("sessionstart", () => {
     st.inXR = true;
-
-    // recenter on XR enter
     playerRig.position.y = 0;
-    playerRig.rotation.y = 0;
-
+    hud.log("[xr] sessionstart ✅");
     setupControllers();
-    hud.log("[xr] sessionstart ✅ (recentered)");
   });
 
   renderer.xr.addEventListener("sessionend", () => {
@@ -465,7 +531,7 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
   return {
     setWorld,
     update(dt) {
-      const session = renderer.xr.getSession?.() || null;
+      const session = getSession();
       const inXR = !!session;
 
       if (inXR !== st.inXR) {
@@ -475,19 +541,29 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
       }
       if (!st.inXR) return;
 
+      // Rays / hits
       for (let i = 0; i < 2; i++) {
         if (!st.controllers[i] || !st.lines[i] || !st.raycasters[i]) continue;
         const res = intersect(i);
         setLine(i, res);
       }
 
-      snapTurn(dt);
+      // Input
+      const { left: gpL, right: gpR } = getGamepads();
+      pollButtons(gpL, "left");
+      pollButtons(gpR, "right");
+
+      snapTurn(dt, gpR);
+      smoothMove(dt, gpL);
+
+      // Fallback & visuals
       updateGaze(dt);
       updateReticle();
     }
   };
 }
 
+// ---- Android sticks (non-XR only) ----
 function installAndroidSticks({ playerRig, hud }) {
   const root = document.createElement("div");
   root.id = "scarlett-sticks";
@@ -593,6 +669,7 @@ function installAndroidSticks({ playerRig, hud }) {
   };
 }
 
+// ---------------- MAIN ----------------
 (async function boot() {
   const hud = makeHUD();
   hud.log("diag start ✅");
@@ -643,10 +720,6 @@ function installAndroidSticks({ playerRig, hud }) {
   const xr = installXRControls({ THREE, renderer, scene, playerRig, camera, hud });
   const android = installAndroidSticks({ playerRig, hud });
   const loading = addLoadingPanel(THREE, scene);
-
-  // Local hands loader (won't crash if missing)
-  const hands = installXRHandsLocal({ THREE, renderer, scene, playerRig, hud });
-  renderer.xr.addEventListener("sessionstart", () => { hands.init(); });
 
   hud.enterBtn.onclick = async () => {
     try {
@@ -701,7 +774,11 @@ function installAndroidSticks({ playerRig, hud }) {
   if (!initWorld) throw new Error("world.js missing export initWorld()");
 
   hud.log("importing world…");
-  world = await initWorld({ THREE, scene, renderer, camera, playerRig, log: (...a) => console.log("[world]", ...a), quality: "quest" });
+  world = await initWorld({
+    THREE, scene, renderer, camera, playerRig,
+    log: (...a) => console.log("[world]", ...a),
+    quality: "quest"
+  });
 
   worldReady = true;
   loading.setVisible(false);

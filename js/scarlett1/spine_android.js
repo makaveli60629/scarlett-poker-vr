@@ -404,4 +404,3 @@ export function initAndroidSticks(opts = {}) {
     },
   };
 }
-```0

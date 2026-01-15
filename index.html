@@ -2,19 +2,147 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>Scarlett VR Poker</title>
   <style>
-    html, body { margin:0; height:100%; overflow:hidden; background:#02040a; }
-    canvas { display:block; }
+    html,body{margin:0;height:100%;background:#05070c;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    canvas{display:block;position:fixed;inset:0}
+    /* Diagnostics HUD */
+    #diagRoot{
+      position:fixed; left:18px; top:18px; z-index:9999;
+      width:min(520px, calc(100vw - 36px));
+      border-radius:22px;
+      background:rgba(10,16,32,0.68);
+      border:1px solid rgba(102,204,255,0.22);
+      box-shadow:0 16px 60px rgba(0,0,0,.45);
+      backdrop-filter: blur(10px);
+      color:rgba(235,245,255,.92);
+      padding:18px;
+    }
+    #diagTitle{font-size:28px;font-weight:900;letter-spacing:.5px}
+    #diagStatus{margin-top:6px;font-size:18px;font-weight:800}
+    #diagStatus b{color:#6cffc8}
+    #diagBtns{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+    .dBtn{
+      border-radius:16px;border:1px solid rgba(102,204,255,0.25);
+      background:rgba(12,18,36,0.65); color:rgba(235,245,255,.95);
+      padding:14px 12px; font-weight:900; font-size:16px;
+    }
+    .dBtn:active{transform:scale(.99)}
+    #diagLog{
+      margin-top:14px;
+      height:min(42vh, 420px);
+      overflow:auto;
+      white-space:pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size:13px;
+      border-radius:16px;
+      background:rgba(0,0,0,.35);
+      border:1px solid rgba(255,255,255,0.08);
+      padding:12px;
+    }
+    #diagMiniBtn{
+      position:fixed; left:18px; top:18px; z-index:9999;
+      display:none;
+      border-radius:16px;border:1px solid rgba(102,204,255,0.25);
+      background:rgba(12,18,36,0.65); color:rgba(235,245,255,.95);
+      padding:12px 14px; font-weight:900; font-size:16px;
+      backdrop-filter: blur(10px);
+    }
+    #diagHint{
+      position:fixed; left:18px; bottom:18px; z-index:9999;
+      max-width:min(720px, calc(100vw - 36px));
+      border-radius:14px;
+      background:rgba(0,0,0,.35);
+      border:1px solid rgba(255,255,255,0.08);
+      padding:10px 12px;
+      color:rgba(235,245,255,.85);
+      font-size:13px;
+    }
   </style>
 </head>
 <body>
-  <script type="module">
-    // IMPORTANT: always cache-bust boot2 so you never get stale code
-    const url = new URL("./js/scarlett1/boot2.js", location.href);
-    url.searchParams.set("v", Date.now());
-    import(url.toString());
+
+  <button id="diagMiniBtn">Show HUD</button>
+
+  <div id="diagRoot">
+    <div id="diagTitle">Scarlett Diagnostics</div>
+    <div id="diagStatus">STATUS: <b id="diagStatusText">Booting…</b></div>
+
+    <div id="diagBtns">
+      <button class="dBtn" id="btnHide">Hide HUD</button>
+      <button class="dBtn" id="btnCopy">Copy Logs</button>
+      <button class="dBtn" id="btnClear">Clear</button>
+      <button class="dBtn" id="btnReload">Reload</button>
+    </div>
+
+    <div id="diagLog"></div>
+  </div>
+
+  <div id="diagHint">
+    Android debug: sticks show when NOT in XR session. Quest: press “Enter VR”.
+  </div>
+
+  <script>
+    // Simple diag logger used by boot2
+    (function(){
+      const pad2 = (n)=>String(n).padStart(2,'0');
+      const ts = ()=>{
+        const d=new Date();
+        return `[${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}]`;
+      };
+
+      const root = document.getElementById('diagRoot');
+      const mini = document.getElementById('diagMiniBtn');
+      const logEl = document.getElementById('diagLog');
+      const statusEl = document.getElementById('diagStatusText');
+
+      function setHUDVisible(v){
+        root.style.display = v ? 'block' : 'none';
+        mini.style.display = v ? 'none' : 'block';
+      }
+
+      function setStatus(txt, ok){
+        statusEl.textContent = txt;
+        statusEl.style.color = ok===false ? '#ff6c6c' : (ok===true ? '#6cffc8' : '#6cffc8');
+      }
+
+      function log(...a){
+        const line = `${ts()} ${a.join(' ')}`;
+        logEl.textContent += (logEl.textContent ? "\n" : "") + line;
+        logEl.scrollTop = logEl.scrollHeight;
+        console.log(line);
+      }
+
+      function clear(){ logEl.textContent=""; }
+      async function copy(){
+        try{
+          await navigator.clipboard.writeText(logEl.textContent || "");
+          log("copied ✅");
+        }catch(e){
+          log("copy failed ❌", e?.message||e);
+        }
+      }
+
+      document.getElementById('btnHide').onclick = ()=>setHUDVisible(false);
+      mini.onclick = ()=>setHUDVisible(true);
+      document.getElementById('btnCopy').onclick = copy;
+      document.getElementById('btnClear').onclick = ()=>{ clear(); log("cleared ✅"); };
+      document.getElementById('btnReload').onclick = ()=>location.reload();
+
+      // expose to modules
+      window.SCARLETT_DIAG = { log, setStatus, setHUDVisible };
+
+      log("diag start ✅");
+      log("href="+location.href);
+      log("path="+location.pathname);
+      log("base="+(location.pathname.replace(/[^\/]+$/,'') || "/"));
+      log("secureContext="+(window.isSecureContext));
+      log("ua="+navigator.userAgent);
+      log("navigator.xr="+(!!navigator.xr));
+    })();
   </script>
+
+  <script type="module" src="./js/scarlett1/boot2.js"></script>
 </body>
 </html>

@@ -1,11 +1,147 @@
 {
   "modules": [
-    { "name": "world.js", "enabled": false },
+
+    /* -------------------------------------------------
+       WORLD & ENVIRONMENT (LOAD FIRST)
+       ------------------------------------------------- */
+
+    { "name": "world.js", "enabled": true },
+    { "name": "world_builders.js", "enabled": false },
+    { "name": "spawn_points.js", "enabled": false },
+    { "name": "solid_walls.js", "enabled": false },
+    { "name": "lighting.js", "enabled": false },
+    { "name": "lights_pack.js", "enabled": false },
+    { "name": "billboards.js", "enabled": false },
+    { "name": "water_fountain.js", "enabled": false },
+
+    /* -------------------------------------------------
+       TABLES & ROOM STRUCTURE
+       ------------------------------------------------- */
+
     { "name": "pit_table.js", "enabled": false },
+    { "name": "table.js", "enabled": false },
+    { "name": "table_factory.js", "enabled": false },
+    { "name": "table_6_oval.js", "enabled": false },
+    { "name": "chair.js", "enabled": false },
+    { "name": "seating.js", "enabled": false },
+    { "name": "spectator_rail.js", "enabled": false },
+    { "name": "spectator.js", "enabled": false },
+
+    /* -------------------------------------------------
+       CORE GAME SYSTEMS (SAFE BUT LOGIC-HEAVY)
+       ------------------------------------------------- */
+
     { "name": "poker_system.js", "enabled": false },
-    { "name": "hud.js", "enabled": false },
-    { "name": "wrist-hud.js", "enabled": false },
+    { "name": "poker_engine.js", "enabled": false },
+    { "name": "poker_sim.js", "enabled": false },
+    { "name": "poker_simulation.js", "enabled": false },
+    { "name": "pot.js", "enabled": false },
+    { "name": "dealer_blinds.js", "enabled": false },
+    { "name": "betting_module.js", "enabled": false },
+    { "name": "tournament.js", "enabled": false },
+
+    /* -------------------------------------------------
+       CARDS, CHIPS, & PHYSICS
+       ------------------------------------------------- */
+
+    { "name": "cards.js", "enabled": false },
+    { "name": "chip.js", "enabled": false },
+    { "name": "vr-chip.js", "enabled": false },
+    { "name": "chip_physicality.js", "enabled": false },
+    { "name": "event_chips.js", "enabled": false },
+
+    /* -------------------------------------------------
+       PLAYER / AVATAR / HANDS
+       ------------------------------------------------- */
+
+    { "name": "avatar.js", "enabled": false },
+    { "name": "avatar_system.js", "enabled": false },
+    { "name": "avatar_rig.js", "enabled": false },
+    { "name": "humanoid_factory.js", "enabled": false },
+    { "name": "humanoids.js", "enabled": false },
+    { "name": "hands.js", "enabled": false },
+    { "name": "gesture_engine.js", "enabled": false },
+    { "name": "body_dims.js", "enabled": false },
+
+    /* -------------------------------------------------
+       CONTROLS (KEEP OFF – SPINE OWNS CONTROLS)
+       ------------------------------------------------- */
+
+    { "name": "xr_controls.js", "enabled": false },
+    { "name": "rig_controls.js", "enabled": false },
+    { "name": "vr_locomotion.js", "enabled": false },
     { "name": "xr_locomotion.js", "enabled": false },
-    { "name": "vr_locomotion.js", "enabled": false }
+    { "name": "touch_controls.js", "enabled": false },
+    { "name": "mobile_touch.js", "enabled": false },
+
+    /* -------------------------------------------------
+       UI / HUD (TURN ON LATER, ONE AT A TIME)
+       ------------------------------------------------- */
+
+    { "name": "hud.js", "enabled": false },
+    { "name": "ui.js", "enabled": false },
+    { "name": "ui_hud.js", "enabled": false },
+    { "name": "ui_poke.js", "enabled": false },
+    { "name": "tableHud.js", "enabled": false },
+    { "name": "wrist-hud.js", "enabled": false },
+    { "name": "vr_ui.js", "enabled": false },
+    { "name": "vr_ui_panel.js", "enabled": false },
+    { "name": "watch_ui.js", "enabled": false },
+    { "name": "nametags.js", "enabled": false },
+    { "name": "notify.js", "enabled": false },
+
+    /* -------------------------------------------------
+       STORE / ECONOMY
+       ------------------------------------------------- */
+
+    { "name": "store.js", "enabled": false },
+    { "name": "store_catalog.js", "enabled": false },
+    { "name": "store_kiosk.js", "enabled": false },
+    { "name": "store_room.js", "enabled": false },
+    { "name": "store_vip.js", "enabled": false },
+    { "name": "inventory.js", "enabled": false },
+    { "name": "economy.js", "enabled": false },
+    { "name": "currency.js", "enabled": false },
+
+    /* -------------------------------------------------
+       BOTS / NPCs
+       ------------------------------------------------- */
+
+    { "name": "bots.js", "enabled": false },
+    { "name": "boss_bots.js", "enabled": false },
+    { "name": "bot_system.js", "enabled": false },
+    { "name": "bot_rig.js", "enabled": false },
+    { "name": "bots_demo.js", "enabled": false },
+    { "name": "LobbyCrowd.js", "enabled": false },
+
+    /* -------------------------------------------------
+       ROOMS / SPECIAL AREAS
+       ------------------------------------------------- */
+
+    { "name": "vip_room.js", "enabled": false },
+    { "name": "scorpion_room.js", "enabled": false },
+    { "name": "scorpion_system.js", "enabled": false },
+    { "name": "lobby_decor.js", "enabled": false },
+    { "name": "room_manager.js", "enabled": false },
+    { "name": "room_bridge.js", "enabled": false },
+
+    /* -------------------------------------------------
+       AUDIO / FX
+       ------------------------------------------------- */
+
+    { "name": "sound_manager.js", "enabled": false },
+    { "name": "audio.js", "enabled": false },
+    { "name": "gameplay_fx.js", "enabled": false },
+    { "name": "teleport_fx.js", "enabled": false },
+    { "name": "teleport_burst_fx.js", "enabled": false },
+
+    /* -------------------------------------------------
+       DEV / DEBUG / ADMIN (OPTIONAL)
+       ------------------------------------------------- */
+
+    { "name": "dev_mode.js", "enabled": false },
+    { "name": "dev_touch.js", "enabled": false },
+    { "name": "diag.js", "enabled": false },
+    { "name": "admin.js", "enabled": false }
   ]
-}
+    }

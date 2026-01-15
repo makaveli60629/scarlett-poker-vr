@@ -1,118 +1,66 @@
-// /js/scarlett1/spine_modules.js — Scarlett 1.0 Safe Module Loader (FULL • PERMANENT)
-// IMPORTANT: boot2.js expects initModules(ctx). We provide it here.
+// /js/scarlett1/spine_modules.js — Scarlett Module Loader (FULL • SAFE)
+// Loads /modules.json and initializes modules that expose init(ctx) or default init(ctx)
+// Never breaks XR; Android modules only run when NOT in XR.
 
-export async function initModules(ctx = {}) {
-  // boot2 compatibility entrypoint
-  return init(ctx);
-}
+export async function initModules(ctx) {
+  const log = ctx?.log || ((...a) => console.log("[mods]", ...a));
+  const fail = ctx?.fail || ((...a) => console.warn("[mods]", ...a));
 
-export async function init(ctx = {}) {
-  const log = ctx?.log || console.log;
+  const base = ctx?.base || "/scarlett-poker-vr/";
+  const modulesUrl = `${base}modules.json?v=${Date.now()}`;
 
-  const diagLog = (s) => {
-    try { window.__SCARLETT_DIAG_LOG__?.(String(s)); } catch {}
-    try { log(String(s)); } catch {}
-  };
+  log("loading modules.json:", modulesUrl);
 
-  const base =
-    window.__SCARLETT_BASE__ ||
-    (location.pathname.includes("/scarlett-poker-vr/") ? "/scarlett-poker-vr/" : "/");
-
-  const urlMods = `${base}modules.json?v=${Date.now()}`;
-
-  function normalizeList(json) {
-    // supports:
-    // { modules:[ "url", {id, enabled, urls:[...]}, ... ] }
-    // also supports legacy: { core:[...], addons:[...] }
-    let list = [];
-    if (Array.isArray(json?.modules)) list = json.modules;
-    else {
-      const maybe = [];
-      if (Array.isArray(json?.core)) maybe.push(...json.core);
-      if (Array.isArray(json?.addons)) maybe.push(...json.addons);
-      if (maybe.length) list = maybe;
-    }
-
-    const out = [];
-    for (const entry of list) {
-      if (typeof entry === "string") {
-        out.push({ id: entry, enabled: true, urls: [entry] });
-        continue;
-      }
-      if (entry && typeof entry === "object") {
-        const enabled = entry.enabled !== false;
-        const urls = Array.isArray(entry.urls)
-          ? entry.urls.slice()
-          : (typeof entry.url === "string" ? [entry.url] : []);
-        const id = entry.id || entry.name || (urls[0] || "module");
-        if (urls.length) out.push({ id, enabled, urls });
-      }
-    }
-    return out;
+  let json;
+  try {
+    const res = await fetch(modulesUrl, { cache: "no-store" });
+    if (!res.ok) throw new Error(`modules.json HTTP ${res.status}`);
+    json = await res.json();
+  } catch (e) {
+    fail("modules.json failed:", e?.message || e);
+    return { loaded: 0, failed: 1 };
   }
 
-  function resolve(u) {
-    if (!u) return "";
-    if (u.startsWith("http")) return u;
-    if (u.startsWith("/")) return u;
-    return base + u.replace(/^\.\//, "");
-  }
+  const list = Array.isArray(json?.modules) ? json.modules : [];
+  log("modules.json OK ✅ count=", list.length);
 
-  async function importOne(u) {
-    const full = resolve(u);
-    const bust = full + (full.includes("?") ? "&" : "?") + "v=" + Date.now();
-    diagLog(`[mods] import ${full}`);
-    const mod = await import(bust);
-    diagLog(`[mods] OK ✅ ${full}`);
-    return mod;
-  }
+  let loaded = 0, failedCount = 0;
 
-  function callInit(mod, id) {
-    const fn =
-      (typeof mod?.init === "function" && mod.init) ||
-      (typeof mod?.default?.init === "function" && mod.default.init) ||
-      (typeof mod?.install === "function" && mod.install) ||
-      null;
-
-    if (!fn) {
-      diagLog(`[mods] ${id}: loaded but no init() found (skipping)`);
-      return;
+  for (const entry of list) {
+    const url = (typeof entry === "string") ? entry : entry?.url;
+    if (!url || typeof url !== "string") {
+      fail("skip invalid module entry:", entry);
+      failedCount++;
+      continue;
     }
+
+    // Avoid double-loading this loader itself
+    if (url.includes("/spine_modules.js")) continue;
 
     try {
-      fn(ctx);
-      diagLog(`[mods] ${id}: init() ✅`);
-    } catch (e) {
-      diagLog(`[mods] ${id}: init() failed ❌ ${e?.message || e}`);
-    }
-  }
+      const modUrl = url.includes("?") ? url : `${url}?v=${Date.now()}`;
+      log("import", modUrl);
+      const mod = await import(modUrl);
 
-  try {
-    diagLog(`[mods] loading modules.json: ${urlMods}`);
-    const res = await fetch(urlMods, { cache: "no-store" });
-    const json = await res.json();
-    diagLog(`[mods] modules.json OK ✅`);
+      // If module exposes init(ctx), call it
+      const initFn =
+        (typeof mod.init === "function") ? mod.init :
+        (typeof mod.default === "function") ? mod.default :
+        null;
 
-    const list = normalizeList(json);
-    let loaded = 0, failed = 0;
-
-    for (const m of list) {
-      if (!m.enabled) continue;
-      const id = m.id || "module";
-      for (const u of m.urls) {
-        try {
-          const mod = await importOne(u);
-          loaded++;
-          callInit(mod, id);
-        } catch (e) {
-          failed++;
-          diagLog(`[mods] ${id}: failed ❌ ${e?.message || e}`);
-        }
+      if (initFn) {
+        await initFn(ctx);
+        log("OK ✅", url);
+      } else {
+        log("loaded (no init) — skip", url);
       }
-    }
 
-    diagLog(`[mods] done ✅ loaded=${loaded} failed=${failed}`);
-  } catch (e) {
-    diagLog(`[mods] modules.json load failed ❌ ${e?.message || e}`);
+      loaded++;
+    } catch (e) {
+      fail("module failed ❌", url, e?.message || e);
+      failedCount++;
+    }
   }
+
+  return { loaded, failed: failedCount };
 }

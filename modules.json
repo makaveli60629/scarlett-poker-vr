@@ -1,14 +1,30 @@
 {
-  "version": 1,
-  "modules": [
-    "/scarlett-poker-vr/js/scarlett1/spine_modules.js",
-    "/scarlett-poker-vr/js/scarlett1/spine_android.js",
-    "/scarlett-poker-vr/js/scarlett1/spine_xr.js",
-    "/scarlett-poker-vr/js/scarlett1/spine_diag.js",
+  "version": "scarlett-1.0",
+  "description": "Scarlett VR Poker modular system",
 
-    "/scarlett-poker-vr/js/lighting.js",
-    "/scarlett-poker-vr/js/humanoids.js",
-    "/scarlett-poker-vr/js/poker.js",
-    "/scarlett-poker-vr/js/scorpion.js"
+  "core": [
+    {
+      "name": "XR Controls",
+      "url": "/scarlett-poker-vr/js/scarlett1/spine_xr.js",
+      "enabled": true
+    },
+    {
+      "name": "Android Controls",
+      "url": "/scarlett-poker-vr/js/scarlett1/spine_android.js",
+      "enabled": true
+    }
+  ],
+
+  "addons": [
+    {
+      "name": "Lighting",
+      "url": "/scarlett-poker-vr/js/lighting.js",
+      "enabled": true
+    },
+    {
+      "name": "Humanoids",
+      "url": "/scarlett-poker-vr/js/humanoids.js",
+      "enabled": true
+    }
   ]
 }

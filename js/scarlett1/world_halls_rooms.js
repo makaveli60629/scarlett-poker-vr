@@ -1,6 +1,14 @@
+// /js/scarlett1/world_halls_rooms.js
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
 import { DIMS, getCardinals } from "./world_constants.js";
 import { setReceiveCast, addCollider, makeTextSprite } from "./world_helpers.js";
+
+function markTeleport(world, mesh) {
+  mesh.userData.teleportSurface = true;
+  world.teleportSurfaces = world.teleportSurfaces || [];
+  world.teleportSurfaces.push(mesh);
+  return mesh;
+}
 
 export function buildHallsAndRooms(world, mats, quality = "quest") {
   const { FLOOR_Y, HALL_W, HALL_L, ROOM_W, ROOM_L, ROOM_H, LOBBY_R } = DIMS;
@@ -10,7 +18,9 @@ export function buildHallsAndRooms(world, mats, quality = "quest") {
   g.name = "HallsRooms";
   world.group.add(g);
 
-  // Floors
+  world.teleportSurfaces = world.teleportSurfaces || [];
+
+  // Floors (all TELEPORT ✅)
   function addRectFloor(w, l, x, z, name) {
     const geo = new THREE.PlaneGeometry(w, l);
     const mesh = setReceiveCast(new THREE.Mesh(geo, mats.matCarpet), false, true);
@@ -18,6 +28,8 @@ export function buildHallsAndRooms(world, mats, quality = "quest") {
     mesh.position.set(x, FLOOR_Y, z);
     mesh.name = name;
     g.add(mesh);
+    markTeleport(world, mesh);
+    return mesh;
   }
 
   addRectFloor(HALL_W, HALL_L, hallN.x, hallN.z, "Hall_N_Floor");
@@ -30,7 +42,7 @@ export function buildHallsAndRooms(world, mats, quality = "quest") {
   addRectFloor(ROOM_W, ROOM_L, roomE.x, roomE.z, "Room_SCORP_Floor");
   addRectFloor(ROOM_W, ROOM_L, roomW.x, roomW.z, "Room_GAMES_Floor");
 
-  // Portal frames on lobby wall (visual)
+  // Portal frames on lobby (visual)
   function addPortalFrame(x, z, yaw, label) {
     const frame = new THREE.Group();
     frame.position.set(x, FLOOR_Y + 2.2, z);
@@ -50,6 +62,7 @@ export function buildHallsAndRooms(world, mats, quality = "quest") {
     const sign = makeTextSprite(label, { scale: 0.8 });
     sign.position.set(0, 2.3, 0.35);
     frame.add(sign);
+
     world.signs.push(sign);
   }
 
@@ -58,7 +71,7 @@ export function buildHallsAndRooms(world, mats, quality = "quest") {
   addPortalFrame(LOBBY_R - 0.2, 0, -Math.PI / 2, "SCORP");
   addPortalFrame(-(LOBBY_R - 0.2), 0, Math.PI / 2, "GAMES");
 
-  // Hall walls
+  // Hall walls + colliders
   function addHallWalls(center, axis, name) {
     const hg = new THREE.Group();
     hg.name = name;
@@ -72,23 +85,29 @@ export function buildHallsAndRooms(world, mats, quality = "quest") {
     if (axis === "z") {
       const left = new THREE.Mesh(new THREE.BoxGeometry(t, h, l), mats.matWall);
       left.position.set(center.x - w / 2 - t / 2, FLOOR_Y + h / 2, center.z);
+      left.name = `${name}_Left`;
       const right = left.clone();
       right.position.x = center.x + w / 2 + t / 2;
+      right.name = `${name}_Right`;
 
       setReceiveCast(left, false, true);
       setReceiveCast(right, false, true);
       hg.add(left, right);
+
       addCollider(world, left, "wall");
       addCollider(world, right, "wall");
     } else {
       const left = new THREE.Mesh(new THREE.BoxGeometry(l, h, t), mats.matWall);
       left.position.set(center.x, FLOOR_Y + h / 2, center.z - w / 2 - t / 2);
+      left.name = `${name}_Left`;
       const right = left.clone();
       right.position.z = center.z + w / 2 + t / 2;
+      right.name = `${name}_Right`;
 
       setReceiveCast(left, false, true);
       setReceiveCast(right, false, true);
       hg.add(left, right);
+
       addCollider(world, left, "wall");
       addCollider(world, right, "wall");
     }
@@ -98,6 +117,7 @@ export function buildHallsAndRooms(world, mats, quality = "quest") {
       mats.matTrim
     );
     strip.position.set(center.x, FLOOR_Y + h - 0.1, center.z);
+    strip.name = `${name}_CeilStrip`;
     setReceiveCast(strip, false, true);
     hg.add(strip);
   }
@@ -107,7 +127,7 @@ export function buildHallsAndRooms(world, mats, quality = "quest") {
   addHallWalls(hallE, "x", "Hall_E_Walls");
   addHallWalls(hallW, "x", "Hall_W_Walls");
 
-  // Room boxes
+  // Room boxes + colliders
   function addRoomBox(room, label, theme) {
     const rg = new THREE.Group();
     rg.name = `Room_${label}`;
@@ -118,7 +138,7 @@ export function buildHallsAndRooms(world, mats, quality = "quest") {
     function wallSeg(sx, sz, sw, sl, nm) {
       const m = new THREE.Mesh(new THREE.BoxGeometry(sw, h, sl), mats.matWall);
       m.position.set(room.x + sx, FLOOR_Y + h / 2, room.z + sz);
-      m.name = nm;
+      m.name = `${label}_${nm}`;
       setReceiveCast(m, false, true);
       rg.add(m);
       addCollider(world, m, "wall");
@@ -131,6 +151,7 @@ export function buildHallsAndRooms(world, mats, quality = "quest") {
 
     const ceil = new THREE.Mesh(new THREE.BoxGeometry(w + t * 2, 0.25, l + t * 2), mats.matConcrete);
     ceil.position.set(room.x, FLOOR_Y + h + 0.12, room.z);
+    ceil.name = `${label}_Ceiling`;
     setReceiveCast(ceil, false, true);
     rg.add(ceil);
 
@@ -143,14 +164,20 @@ export function buildHallsAndRooms(world, mats, quality = "quest") {
     const ring = new THREE.Mesh(new THREE.TorusGeometry(6.2, 0.08, 12, quality === "high" ? 140 : 98), themeMat);
     ring.rotation.x = Math.PI / 2;
     ring.position.set(room.x, FLOOR_Y + h - 0.35, room.z);
+    ring.name = `${label}_CeilRing`;
     rg.add(ring);
 
     const spr = makeTextSprite(label, { scale: 1.0 });
     spr.position.set(room.x, FLOOR_Y + 3.8, room.z);
+    spr.name = `${label}_Sign`;
     world.group.add(spr);
     world.signs.push(spr);
 
-    world.rooms[label] = { group: rg, center: new THREE.Vector3(room.x, FLOOR_Y, room.z), theme };
+    world.rooms[label] = {
+      group: rg,
+      center: new THREE.Vector3(room.x, FLOOR_Y, room.z),
+      theme
+    };
   }
 
   addRoomBox(roomN, "STORE", "store");

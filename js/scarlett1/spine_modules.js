@@ -1,62 +1,60 @@
-// /js/scarlett1/spine_modules.js — Scarlett Module Loader (SAFE)
-// Fixes: "Identifier 'init' has already been declared" by avoiding global init collisions.
+// /js/scarlett1/spine_modules.js — SAFE MODULE LOADER v1.0
+// ✅ No duplicate "init" declarations
+// ✅ Exposes window.__SCARLETT_MODULES_INIT__ for world.js to call
+// ✅ Loads /modules.json and imports each module
+// ✅ If module exports init(), it runs it
+// ✅ Failures do NOT break boot/world
 
-export async function initModules(ctx) {
-  const log = ctx?.log || console.log;
-  const base = ctx?.base || "/scarlett-poker-vr/";
+export async function initModules(ctx = {}) {
+  const log = ctx.log || console.log;
 
+  const base = (location.pathname.includes("/scarlett-poker-vr/") ? "/scarlett-poker-vr/" : "/");
   const url = `${base}modules.json?v=${Date.now()}`;
-  log(`[mods] loading ${url}`);
 
-  let data = null;
+  let cfg = null;
   try {
+    log(`[mods] loading ${url}`);
     const r = await fetch(url, { cache: "no-store" });
-    if (!r.ok) throw new Error(`modules.json http ${r.status}`);
-    data = await r.json();
-    log("[mods] modules.json ✅");
+    cfg = await r.json();
+    log("[mods] modules.json OK ✅");
   } catch (e) {
-    log("[mods] modules.json FAILED ❌", e?.message || e);
-    return { loaded: [], failed: ["modules.json"] };
+    log("[mods] modules.json FAILED (skip):", e?.message || e);
+    return { loaded: 0, failed: 0 };
   }
 
-  const loaded = [];
-  const failed = [];
+  const list = Array.isArray(cfg?.modules) ? cfg.modules : [];
+  let loaded = 0, failed = 0;
 
-  async function loadOne(entry, kind) {
+  for (const entry of list) {
+    const modUrl = (typeof entry === "string") ? entry : entry?.url;
+    const name = (typeof entry === "object" && entry?.name) ? entry.name : modUrl;
+
+    if (!modUrl || typeof modUrl !== "string") continue;
+
     try {
-      if (!entry || entry.enabled === false) return;
-      const u = entry.url;
-      if (typeof u !== "string") throw new Error(`${kind}.${entry.id}: url is not string`);
-      log(`[mods] import ${u}`);
-      const mod = await import(`${u}?v=${Date.now()}`);
-      loaded.push(entry.id);
+      log(`[mods] import ${modUrl}`);
+      const mod = await import(modUrl + (modUrl.includes("?") ? "&" : "?") + "v=" + Date.now());
+      loaded++;
 
-      // Convention: module can export init(ctx) or default(ctx)
-      if (typeof mod.init === "function") {
+      if (mod && typeof mod.init === "function") {
         await mod.init(ctx);
-        log(`[mods] ${kind}_${entry.id} init ✅`);
-      } else if (typeof mod.default === "function") {
-        await mod.default(ctx);
-        log(`[mods] ${kind}_${entry.id} default() ✅`);
+        log(`[mods] ${name}: init ✅`);
       } else {
-        log(`[mods] ${kind}_${entry.id}: loaded (no init/default) (skip)`);
+        log(`[mods] ${name}: loaded (no init)`);
       }
     } catch (e) {
-      failed.push(entry?.id || "unknown");
-      log(`[mods] ${kind} FAILED ❌ ${entry?.id}`, e?.message || e);
+      failed++;
+      log(`[mods] ${name}: FAIL`, e?.message || e);
     }
   }
 
-  // Spines first (controls / platform)
-  if (Array.isArray(data.spines)) {
-    for (const s of data.spines) await loadOne(s, "spine");
-  }
-
-  // Addons second (world extras)
-  if (Array.isArray(data.addons)) {
-    for (const a of data.addons) await loadOne(a, "addon");
-  }
-
-  log(`[mods] done ✅ loaded=${loaded.length} failed=${failed.length}`);
+  log(`[mods] done ✅ loaded=${loaded} failed=${failed}`);
   return { loaded, failed };
+}
+
+// Expose SAFE hook for world.js (optional)
+if (typeof window !== "undefined") {
+  window.__SCARLETT_MODULES_INIT__ = async (ctx) => {
+    return initModules(ctx);
+  };
 }

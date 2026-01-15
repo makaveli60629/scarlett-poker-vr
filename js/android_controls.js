@@ -1,257 +1,230 @@
-// /js/android_controls.js — Touch Dual-Stick (Android/Non-XR diagnostic locomotion)
-// ✅ ONLY runs when NOT in XR
-// ✅ Doesn’t modify your VR pipeline
-// ✅ Left stick = move, Right stick = look
-// Usage:
-//   const ac = AndroidControls.init({ renderer, player, camera, log });
-//   in loop: ac.update(dt);
+// /js/android_controls.js — Scarlett Android Debug Controls (FULL • SAFE)
+// Runs ONLY when NOT in XR presenting. Touch joystick + drag-look.
+// Exports: AndroidControls.init(ctx), AndroidControls.update(dt)
 
 export const AndroidControls = (() => {
-  function init({ renderer, player, camera, log = console.log }) {
-    const state = {
-      enabled: true,
-      inXR: false,
+  const S = {
+    enabled: false,
+    THREE: null,
+    renderer: null,
+    camera: null,
+    rig: null,
+    log: console.log,
 
-      // movement tuning
-      moveSpeed: 2.2,      // meters/sec
-      strafeSpeed: 2.0,
-      lookSpeed: 1.8,      // radians/sec scale
-      dead: 0.08,
+    // input
+    joyDown: false,
+    joyId: null,
+    joyCenter: { x: 0, y: 0 },
+    joyVec: { x: 0, y: 0 }, // -1..1
+    lookDown: false,
+    lookId: null,
+    lookPrev: { x: 0, y: 0 },
 
-      // sticks
-      left: makeStick("ac_left", 18, "Move"),
-      right: makeStick("ac_right", 18, "Look"),
+    // tuning
+    moveSpeed: 1.7,      // meters/sec
+    strafeSpeed: 1.4,
+    lookSpeed: 0.0022,   // radians per pixel
 
-      yaw: 0,
-      pitch: 0,
+    // yaw/pitch
+    yaw: 0,
+    pitch: 0,
 
-      // internal
-      tmpV: null
-    };
+    // dom
+    ui: null,
+    joyPad: null,
+    joyKnob: null
+  };
 
-    state.tmpV = new (camera.constructor === Function ? camera.constructor : Object)(); // not used; harmless
-
-    // Overlay container
-    const root = document.createElement("div");
-    root.id = "ac_root";
-    Object.assign(root.style, {
-      position: "fixed",
-      inset: "0",
-      pointerEvents: "none",
-      zIndex: "99998"
-    });
-
-    root.appendChild(state.left.el);
-    root.appendChild(state.right.el);
-    document.body.appendChild(root);
-
-    // Disable selection/scroll while touching sticks
-    const prevent = (e) => { e.preventDefault?.(); };
-    root.addEventListener("touchmove", prevent, { passive: false });
-
-    function setVisible(v) {
-      const d = v ? "block" : "none";
-      state.left.el.style.display = d;
-      state.right.el.style.display = d;
-    }
-
-    // XR session toggles
-    const onStart = () => {
-      state.inXR = true;
-      setVisible(false);
-      log("[android] controls disabled (XR session)");
-    };
-    const onEnd = () => {
-      state.inXR = false;
-      setVisible(true);
-      log("[android] controls enabled (non-XR)");
-    };
-
-    // These events exist even on phone; harmless.
-    try {
-      renderer.xr.addEventListener("sessionstart", onStart);
-      renderer.xr.addEventListener("sessionend", onEnd);
-    } catch {}
-
-    // initial visibility
-    setVisible(true);
-
-    // Initialize yaw/pitch from current camera
-    // We'll rotate PLAYER (yaw) and CAMERA (pitch) to avoid messing with rig transforms.
-    state.yaw = player.rotation.y || 0;
-    state.pitch = clamp(camera.rotation.x || 0, -1.2, 1.2);
-
-    log("[android] dual-stick ready ✅");
-
-    function update(dt) {
-      if (!state.enabled) return;
-      if (state.inXR) return; // never touch VR
-      if (dt > 0.1) dt = 0.1;
-
-      // --- LOOK (right stick) ---
-      const rx = applyDead(state.right.value.x, state.dead);
-      const ry = applyDead(state.right.value.y, state.dead);
-
-      // x = yaw, y = pitch (invert y)
-      state.yaw += rx * state.lookSpeed * dt;
-      state.pitch += (-ry) * state.lookSpeed * dt;
-      state.pitch = clamp(state.pitch, -1.2, 1.2);
-
-      player.rotation.y = state.yaw;
-      camera.rotation.x = state.pitch;
-
-      // --- MOVE (left stick) ---
-      const mx = applyDead(state.left.value.x, state.dead);
-      const my = applyDead(state.left.value.y, state.dead);
-
-      // forward/back = -my, strafe = mx
-      const forward = -my * state.moveSpeed * dt;
-      const strafe = mx * state.strafeSpeed * dt;
-
-      // movement in player yaw space
-      const sin = Math.sin(state.yaw);
-      const cos = Math.cos(state.yaw);
-
-      // Forward vector (0,0,-1) rotated by yaw
-      const dxF = sin * forward;
-      const dzF = cos * forward;
-
-      // Right vector (1,0,0) rotated by yaw
-      const dxR = cos * strafe;
-      const dzR = -sin * strafe;
-
-      player.position.x += (dxF + dxR);
-      player.position.z += (dzF + dzR);
-
-      // Optional: keep head height stable for phone diagnostics
-      if (player.position.y < 0) player.position.y = 0;
-    }
-
-    function destroy() {
-      state.enabled = false;
-      state.left.destroy();
-      state.right.destroy();
-      root.remove();
-    }
-
-    return { update, destroy, state };
+  function isTouchDevice() {
+    return "ontouchstart" in window || navigator.maxTouchPoints > 0;
   }
 
-  function makeStick(id, margin, label) {
-    const el = document.createElement("div");
-    el.id = id;
-    Object.assign(el.style, {
-      position: "fixed",
-      bottom: `${margin}px`,
-      width: "160px",
-      height: "160px",
-      borderRadius: "999px",
-      background: "rgba(0,0,0,.18)",
-      border: "1px solid rgba(127,231,255,.22)",
-      boxShadow: "0 12px 40px rgba(0,0,0,.35)",
-      pointerEvents: "auto",
-      touchAction: "none",
-      userSelect: "none",
-      WebkitUserSelect: "none"
-    });
-
-    // left or right placement
-    if (id.includes("left")) el.style.left = `${margin}px`;
-    else el.style.right = `${margin}px`;
-
-    const cap = document.createElement("div");
-    Object.assign(cap.style, {
-      position: "absolute",
-      left: "50%",
-      top: "50%",
-      width: "64px",
-      height: "64px",
-      borderRadius: "999px",
-      transform: "translate(-50%,-50%)",
-      background: "rgba(127,231,255,.14)",
-      border: "1px solid rgba(127,231,255,.35)"
-    });
-    el.appendChild(cap);
-
-    const txt = document.createElement("div");
-    txt.textContent = label;
-    Object.assign(txt.style, {
-      position: "absolute",
-      left: "0",
-      right: "0",
-      top: "-26px",
-      textAlign: "center",
-      fontSize: "12px",
-      color: "rgba(232,236,255,.75)"
-    });
-    el.appendChild(txt);
-
-    const value = { x: 0, y: 0 };
-    let activeId = null;
-
-    const rectCenter = () => {
-      const r = el.getBoundingClientRect();
-      return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, radius: r.width / 2 };
-    };
-
-    function setCap(nx, ny) {
-      // clamp to circle
-      const len = Math.hypot(nx, ny) || 0;
-      const max = 0.85;
-      if (len > max) { nx = nx / len * max; ny = ny / len * max; }
-      value.x = nx;
-      value.y = ny;
-
-      cap.style.transform = `translate(-50%,-50%) translate(${nx * 60}px, ${ny * 60}px)`;
-    }
-
-    function onStart(e) {
-      if (activeId !== null) return;
-      const t = e.changedTouches[0];
-      activeId = t.identifier;
-      onMove(e);
-    }
-
-    function onMove(e) {
-      if (activeId === null) return;
-      const t = Array.from(e.touches).find(tt => tt.identifier === activeId);
-      if (!t) return;
-      const { cx, cy, radius } = rectCenter();
-      const dx = (t.clientX - cx) / radius;
-      const dy = (t.clientY - cy) / radius;
-      setCap(dx, dy);
-      e.preventDefault?.();
-    }
-
-    function onEnd(e) {
-      if (activeId === null) return;
-      const ended = Array.from(e.changedTouches).some(tt => tt.identifier === activeId);
-      if (!ended) return;
-      activeId = null;
-      setCap(0, 0);
-      e.preventDefault?.();
-    }
-
-    el.addEventListener("touchstart", onStart, { passive: false });
-    el.addEventListener("touchmove", onMove, { passive: false });
-    el.addEventListener("touchend", onEnd, { passive: false });
-    el.addEventListener("touchcancel", onEnd, { passive: false });
-
-    return {
-      el,
-      value,
-      destroy() {
-        el.removeEventListener("touchstart", onStart);
-        el.removeEventListener("touchmove", onMove);
-        el.removeEventListener("touchend", onEnd);
-        el.removeEventListener("touchcancel", onEnd);
-        el.remove();
-      }
-    };
+  function isOculusBrowser() {
+    const ua = navigator.userAgent || "";
+    return ua.includes("OculusBrowser") || ua.includes("Quest");
   }
 
-  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-  function applyDead(v, d) { return Math.abs(v) < d ? 0 : v; }
+  function safeLog(...a) { try { S.log("[android]", ...a); } catch {} }
 
-  return { init };
+  function buildUI() {
+    if (S.ui) return;
+
+    const wrap = document.createElement("div");
+    wrap.id = "scarlett_android_ui";
+    wrap.style.cssText = `
+      position: fixed; left: 0; top: 0; width: 100vw; height: 100vh;
+      pointer-events: none; z-index: 999998;
+    `;
+
+    // Left joystick pad
+    const pad = document.createElement("div");
+    pad.style.cssText = `
+      position: fixed; left: 18px; bottom: 18px;
+      width: 180px; height: 180px; border-radius: 999px;
+      background: rgba(40,60,120,0.18);
+      border: 1px solid rgba(120,160,255,0.28);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+      pointer-events: auto; touch-action: none;
+    `;
+
+    const knob = document.createElement("div");
+    knob.style.cssText = `
+      position: absolute; left: 50%; top: 50%;
+      width: 74px; height: 74px; border-radius: 999px;
+      transform: translate(-50%,-50%);
+      background: rgba(120,160,255,0.22);
+      border: 1px solid rgba(160,200,255,0.35);
+    `;
+
+    pad.appendChild(knob);
+    wrap.appendChild(pad);
+
+    S.ui = wrap;
+    S.joyPad = pad;
+    S.joyKnob = knob;
+
+    document.body.appendChild(wrap);
+
+    // Joystick touch handlers
+    pad.addEventListener("pointerdown", (e) => {
+      S.joyDown = true;
+      S.joyId = e.pointerId;
+      pad.setPointerCapture(e.pointerId);
+      S.joyCenter.x = e.clientX;
+      S.joyCenter.y = e.clientY;
+      S.joyVec.x = 0; S.joyVec.y = 0;
+    });
+
+    pad.addEventListener("pointermove", (e) => {
+      if (!S.joyDown || e.pointerId !== S.joyId) return;
+      const dx = e.clientX - S.joyCenter.x;
+      const dy = e.clientY - S.joyCenter.y;
+      const max = 64;
+      const nx = Math.max(-1, Math.min(1, dx / max));
+      const ny = Math.max(-1, Math.min(1, dy / max));
+      S.joyVec.x = nx;
+      S.joyVec.y = ny;
+
+      const kx = nx * 46;
+      const ky = ny * 46;
+      S.joyKnob.style.transform = `translate(calc(-50% + ${kx}px), calc(-50% + ${ky}px))`;
+    });
+
+    function joyUp(e) {
+      if (e.pointerId !== S.joyId) return;
+      S.joyDown = false;
+      S.joyId = null;
+      S.joyVec.x = 0; S.joyVec.y = 0;
+      S.joyKnob.style.transform = `translate(-50%,-50%)`;
+    }
+    pad.addEventListener("pointerup", joyUp);
+    pad.addEventListener("pointercancel", joyUp);
+
+    // Look drag on the rest of the screen (except joystick area)
+    window.addEventListener("pointerdown", (e) => {
+      // ignore if it started on joystick
+      if (e.target === pad || pad.contains(e.target)) return;
+      // only one look pointer
+      S.lookDown = true;
+      S.lookId = e.pointerId;
+      S.lookPrev.x = e.clientX;
+      S.lookPrev.y = e.clientY;
+    }, { passive: true });
+
+    window.addEventListener("pointermove", (e) => {
+      if (!S.lookDown || e.pointerId !== S.lookId) return;
+      const dx = e.clientX - S.lookPrev.x;
+      const dy = e.clientY - S.lookPrev.y;
+      S.lookPrev.x = e.clientX;
+      S.lookPrev.y = e.clientY;
+
+      S.yaw -= dx * S.lookSpeed;
+      S.pitch -= dy * S.lookSpeed;
+      const lim = Math.PI / 2.2;
+      S.pitch = Math.max(-lim, Math.min(lim, S.pitch));
+    }, { passive: true });
+
+    function lookUp(e) {
+      if (e.pointerId !== S.lookId) return;
+      S.lookDown = false;
+      S.lookId = null;
+    }
+    window.addEventListener("pointerup", lookUp, { passive: true });
+    window.addEventListener("pointercancel", lookUp, { passive: true });
+  }
+
+  function applyLook() {
+    if (!S.camera) return;
+
+    // apply yaw to rig so "body" turns, apply pitch to camera
+    if (S.rig) S.rig.rotation.y = S.yaw;
+    S.camera.rotation.x = S.pitch;
+  }
+
+  function applyMove(dt) {
+    if (!S.rig || !S.camera || !S.THREE) return;
+
+    // NEVER move when XR presenting
+    if (S.renderer?.xr?.isPresenting) return;
+
+    // joystick: y forward (up is negative)
+    const forward = -S.joyVec.y;
+    const strafe = S.joyVec.x;
+
+    const dead = 0.07;
+    const f = Math.abs(forward) < dead ? 0 : forward;
+    const s = Math.abs(strafe) < dead ? 0 : strafe;
+    if (f === 0 && s === 0) return;
+
+    const speedF = S.moveSpeed * dt;
+    const speedS = S.strafeSpeed * dt;
+
+    const yaw = S.rig.rotation.y;
+
+    // forward vector from yaw
+    const sin = Math.sin(yaw);
+    const cos = Math.cos(yaw);
+
+    // move in XZ
+    const dx = (sin * f * speedF) + (cos * s * speedS);
+    const dz = (cos * f * speedF) - (sin * s * speedS);
+
+    S.rig.position.x += dx;
+    S.rig.position.z += dz;
+  }
+
+  function init(opts = {}) {
+    S.THREE = opts.THREE || window.THREE || null;
+    S.renderer = opts.renderer || null;
+    S.camera = opts.camera || null;
+    S.rig = opts.rig || null;
+    S.log = opts.log || console.log;
+
+    // Don’t run on Quest/OculusBrowser for “Android debug”
+    // (Quest should use XR controls)
+    if (isOculusBrowser()) {
+      safeLog("Quest/OculusBrowser detected — AndroidControls disabled.");
+      S.enabled = false;
+      return;
+    }
+
+    if (!isTouchDevice()) {
+      safeLog("No touch device — AndroidControls disabled.");
+      S.enabled = false;
+      return;
+    }
+
+    buildUI();
+    S.enabled = true;
+
+    safeLog("AndroidControls ready ✅");
+  }
+
+  function update(dt) {
+    if (!S.enabled) return;
+    applyLook();
+    applyMove(dt);
+  }
+
+  return { init, update };
 })();

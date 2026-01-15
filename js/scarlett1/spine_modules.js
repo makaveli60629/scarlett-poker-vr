@@ -1,122 +1,106 @@
-// /js/scarlett1/spine_modules.js — Scarlett 1.0 Module Loader (SAFE • PERMANENT)
-// Loads root /modules.json and attempts optional addons without breaking spine.
-
-export const SpineModules = (() => {
-  const state = {
-    loaded: new Map(),   // name -> { url, mod }
-    failed: new Map(),   // name -> error
-    list: null
+// /js/scarlett1/spine_modules.js — Scarlett 1.0 Safe Module Loader (FULL • PERMANENT)
+export async function init(ctx = {}) {
+  const log = ctx?.log || console.log;
+  const diagLog = (s) => {
+    try { window.__SCARLETT_DIAG_LOG__?.(String(s)); } catch {}
+    try { log(s); } catch {}
   };
 
-  function dlog(ctx, ...a) {
-    try {
-      const s = a.join(" ");
-      if (ctx?.diag?.log) ctx.diag.log(s);
-      else if (window.__SCARLETT_DIAG_LOG__) window.__SCARLETT_DIAG_LOG__(s);
-      else console.log("[mods]", s);
-    } catch {}
-  }
+  const base = window.__SCARLETT_BASE__ || (location.pathname.includes("/scarlett-poker-vr/") ? "/scarlett-poker-vr/" : "/");
+  const urlMods = `${base}modules.json?v=${Date.now()}`;
 
-  async function fetchJson(url) {
-    const r = await fetch(url, { cache: "no-store" });
-    if (!r.ok) throw new Error(`fetch failed ${r.status} ${url}`);
-    return await r.json();
-  }
+  function normalizeList(json) {
+    // supports:
+    // { modules: [ "url", {id, enabled, urls:[...]}, ... ] }
+    // { core:[...], addons:[...] } etc
+    let list = [];
+    if (Array.isArray(json?.modules)) list = json.modules;
+    else {
+      const maybe = [];
+      if (Array.isArray(json?.core)) maybe.push(...json.core);
+      if (Array.isArray(json?.addons)) maybe.push(...json.addons);
+      if (maybe.length) list = maybe;
+    }
 
-  async function loadModulesJson(ctx) {
-    // Prefer ROOT modules.json, fallback to js/scarlett1/modules.json if you ever add it.
-    const base = "/scarlett-poker-vr/";
-    const candidates = [
-      `${base}modules.json?v=${Date.now()}`,
-      `${base}js/scarlett1/modules.json?v=${Date.now()}`
-    ];
-
-    for (const u of candidates) {
-      try {
-        dlog(ctx, `loading modules.json: ${u}`);
-        const j = await fetchJson(u);
-        state.list = j;
-        dlog(ctx, `modules.json OK ✅`);
-        return j;
-      } catch (e) {
-        dlog(ctx, `modules.json miss: ${u}`);
+    // normalize to objects: {id, enabled, urls:[...]}
+    const out = [];
+    for (const entry of list) {
+      if (typeof entry === "string") {
+        out.push({ id: entry, enabled: true, urls: [entry] });
+        continue;
+      }
+      if (entry && typeof entry === "object") {
+        const enabled = entry.enabled !== false;
+        const urls = Array.isArray(entry.urls) ? entry.urls.slice() : (typeof entry.url === "string" ? [entry.url] : []);
+        const id = entry.id || entry.name || (urls[0] || "module");
+        if (urls.length) out.push({ id, enabled, urls });
       }
     }
-    throw new Error("No modules.json found (root or /js/scarlett1/).");
+    return out;
   }
 
-  async function tryImport(ctx, urls) {
-    let lastErr = null;
-    for (const url of urls) {
-      try {
-        // cache-bust per run
-        const u = `${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`;
-        dlog(ctx, `import ${u}`);
-        const mod = await import(u);
-        return { url: u, mod };
-      } catch (e) {
-        lastErr = e;
-        dlog(ctx, `fail ${url}`);
-      }
-    }
-    throw lastErr || new Error("import failed");
+  function resolve(u) {
+    // allow absolute, root-relative, or relative
+    if (!u) return "";
+    if (u.startsWith("http")) return u;
+    if (u.startsWith("/")) return u;
+    return base + u.replace(/^\.\//, "");
   }
 
-  async function initAddon(ctx, name, mod, url) {
-    // standard entry points:
-    // - export function init(ctx)
-    // - export default function(ctx) OR default object with init
-    // - export function install(ctx)
-    const api =
+  async function importOne(u) {
+    const full = resolve(u);
+    const bust = full + (full.includes("?") ? "&" : "?") + "v=" + Date.now();
+    diagLog(`[mods] import ${full}`);
+    const mod = await import(bust);
+    diagLog(`[mods] OK ✅ ${full}`);
+    return mod;
+  }
+
+  function callInit(mod, id) {
+    const fn =
       (typeof mod?.init === "function" && mod.init) ||
-      (typeof mod?.install === "function" && mod.install) ||
-      (typeof mod?.default === "function" && mod.default) ||
       (typeof mod?.default?.init === "function" && mod.default.init) ||
+      (typeof mod?.install === "function" && mod.install) ||
       null;
 
-    if (!api) {
-      dlog(ctx, `${name}: loaded but no init() found (skipping)`);
+    if (!fn) {
+      diagLog(`[mods] ${id}: loaded but no init() found (skipping)`);
       return;
     }
-
-    dlog(ctx, `${name}: init…`);
-    await api(ctx);
-    dlog(ctx, `${name}: ready ✅ (${url})`);
-  }
-
-  async function loadAll(ctx) {
     try {
-      const list = await loadModulesJson(ctx);
-      const mods = Array.isArray(list?.modules) ? list.modules : [];
-
-      // Only ADDONS are handled here. Core spine already loads via boot.
-      const addons = mods.filter(m => m && m.type === "addon" && m.enabled);
-
-      for (const m of addons) {
-        const name = m.name || "addon";
-        const paths = Array.isArray(m.paths) ? m.paths : [];
-        if (!paths.length) continue;
-
-        try {
-          const { url, mod } = await tryImport(ctx, paths);
-          state.loaded.set(name, { url, mod });
-          await initAddon(ctx, name, mod, url);
-        } catch (e) {
-          state.failed.set(name, e);
-          dlog(ctx, `${name}: FAILED (optional) ❌ ${e?.message || e}`);
-          // optional means no crash
-        }
-      }
-
-      dlog(ctx, `addons done ✅ loaded=${state.loaded.size} failed=${state.failed.size}`);
+      fn(ctx);
+      diagLog(`[mods] ${id}: init() ✅`);
     } catch (e) {
-      dlog(ctx, `module loader failed (non-fatal) ❌ ${e?.message || e}`);
+      diagLog(`[mods] ${id}: init() failed ❌ ${e?.message || e}`);
     }
   }
 
-  return { state, loadAll };
-})();
+  try {
+    diagLog(`loading modules.json: ${urlMods}`);
+    const res = await fetch(urlMods, { cache: "no-store" });
+    const json = await res.json();
+    diagLog(`modules.json OK ✅`);
 
-export async function initModules(ctx) {
-  return SpineModules.loadAll(ctx);
+    const list = normalizeList(json);
+    let loaded = 0, failed = 0;
+
+    for (const m of list) {
+      if (!m.enabled) continue;
+      const id = m.id || "module";
+      for (const u of m.urls) {
+        try {
+          const mod = await importOne(u);
+          loaded++;
+          callInit(mod, id);
+        } catch (e) {
+          failed++;
+          diagLog(`[mods] ${id}: failed ❌ ${e?.message || e}`);
+        }
+      }
+    }
+
+    diagLog(`addons/modules done ✅ loaded=${loaded} failed=${failed}`);
+  } catch (e) {
+    diagLog(`[mods] modules.json load failed ❌ ${e?.message || e}`);
   }
+}

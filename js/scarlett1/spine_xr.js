@@ -1,22 +1,23 @@
-// /js/scarlett1/spine_xr.js — XR Controls v2
-// ✅ Lasers
-// ✅ Teleport: trigger + rainbow arc + floor circle reticle
-// ✅ Smooth locomotion (slow): LEFT stick = move/strafe
+// /js/scarlett1/spine_xr.js — XR Controls v3 (RIG-BASED, SAFE, PERMANENT)
+// ✅ Whole-rig locomotion (camera + controllers + lasers stay together)
+// ✅ Teleport to Spawn Pads (trigger) + visible arc + reticle circle
+// ✅ Smooth move (slow): LEFT stick = forward/back + strafe
 // ✅ Snap turn 45°: RIGHT stick left/right
-// ✅ Y button toggles menu panel
+// ✅ Y button toggles a simple menu panel
+// Works with world.js v5 which exposes: __SCARLETT1__ { scene, renderer, camera, rig, spawnPads, teleportTo, safetySnapIfBlocked }
 
 export async function installXR({ THREE, DIAG }) {
   const D = DIAG || console;
 
   const W = window.__SCARLETT1__;
-  if (!W || !W.renderer || !W.scene || !W.camera) {
+  if (!W || !W.renderer || !W.scene || !W.camera || !W.rig) {
     D.warn("[xr] world not ready, skipping XR install");
     return;
   }
 
-  const { renderer, scene, camera, player, spawnPads, teleportTo, safetySnapIfInsidePit } = W;
+  const { renderer, scene, camera, rig, player, spawnPads, teleportTo, safetySnapIfBlocked } = W;
 
-  // Import VRButton from your repo
+  // --- VRButton ---
   let VRButton;
   try {
     const mod = await import(`/scarlett-poker-vr/js/VRButton.js?v=${Date.now()}`);
@@ -36,7 +37,7 @@ export async function installXR({ THREE, DIAG }) {
     return;
   }
 
-  // -------- Helpers --------
+  // --- Helpers ---
   const raycaster = new THREE.Raycaster();
   const tmpMat = new THREE.Matrix4();
   const tmpV = new THREE.Vector3();
@@ -50,20 +51,21 @@ export async function installXR({ THREE, DIAG }) {
   }
 
   function findPadHit(origin, dir) {
+    if (!spawnPads || !spawnPads.length) return null;
     raycaster.ray.origin.copy(origin);
     raycaster.ray.direction.copy(dir);
-    const hits = raycaster.intersectObjects(spawnPads || [], false);
+    const hits = raycaster.intersectObjects(spawnPads, false);
     return hits && hits[0] ? hits[0].object : null;
   }
 
   function teleportToPad(pad) {
     if (!pad?.userData?.teleportPos) return;
-    teleportTo(pad.userData.teleportPos);
-    safetySnapIfInsidePit?.();
+    const yaw = (pad.userData.yaw != null) ? pad.userData.yaw : (player?.yaw ?? Math.PI);
+    teleportTo(pad.userData.teleportPos, yaw);
     D.log("[teleport] →", pad.userData.label || "PAD");
   }
 
-  // -------- Teleport Visuals (arc + reticle) --------
+  // --- Teleport Visuals (arc + reticle) ---
   const ARC_SEG = 32;
   const arcPositions = new Float32Array((ARC_SEG + 1) * 3);
   const arcColors = new Float32Array((ARC_SEG + 1) * 3);
@@ -87,10 +89,9 @@ export async function installXR({ THREE, DIAG }) {
   scene.add(reticle);
 
   function setRainbow(i, t) {
-    // simple rainbow using HSV-ish approximation
-    const hue = (t * 0.85) % 1;
-    const a = hue * Math.PI * 2;
-    const r = 0.5 + 0.5 * Math.sin(a + 0);
+    // simple rainbow via phase-shifted sine
+    const a = t * Math.PI * 2;
+    const r = 0.5 + 0.5 * Math.sin(a + 0.0);
     const g = 0.5 + 0.5 * Math.sin(a + 2.1);
     const b = 0.5 + 0.5 * Math.sin(a + 4.2);
     arcColors[i * 3 + 0] = r;
@@ -101,7 +102,7 @@ export async function installXR({ THREE, DIAG }) {
   function buildArcFromController(ctrl) {
     const { origin, dir } = getControllerRay(ctrl);
 
-    // Parabola parameters
+    // Parabola parameters (tune as needed)
     const speed = 10.0;
     const gravity = 18.0;
     const dt = 0.06;
@@ -112,20 +113,17 @@ export async function installXR({ THREE, DIAG }) {
     let p = origin.clone();
     let v = dir.clone().multiplyScalar(speed);
 
-    // Simulate arc
     for (let i = 0; i <= ARC_SEG; i++) {
       arcPositions[i * 3 + 0] = p.x;
       arcPositions[i * 3 + 1] = p.y;
       arcPositions[i * 3 + 2] = p.z;
       setRainbow(i, i / ARC_SEG);
 
-      // Check floor hit at y=0
       if (i > 0 && p.y <= 0.02) {
         hitPoint = new THREE.Vector3(p.x, 0.02, p.z);
         break;
       }
 
-      // step physics
       v.y -= gravity * dt;
       p = p.clone().add(v.clone().multiplyScalar(dt));
     }
@@ -133,29 +131,26 @@ export async function installXR({ THREE, DIAG }) {
     arcGeo.attributes.position.needsUpdate = true;
     arcGeo.attributes.color.needsUpdate = true;
 
-    // If we have a floor point, see if it matches a pad (hit test pads)
     if (hitPoint) {
-      const downOrigin = hitPoint.clone();
+      // hit test pads from this point straight down
+      const downOrigin = hitPoint.clone().add(new THREE.Vector3(0, 1.0, 0));
       const downDir = new THREE.Vector3(0, -1, 0);
       hitPad = findPadHit(downOrigin, downDir);
 
       reticle.position.copy(hitPoint);
       reticle.visible = true;
       arcLine.visible = true;
-
-      // Reticle color = pad hit? brighter
       reticle.material.color.set(hitPad ? 0x00ffcc : 0xffffff);
 
       return { hitPad, hitPoint };
     }
 
-    // No hit
     reticle.visible = false;
     arcLine.visible = false;
     return { hitPad: null, hitPoint: null };
   }
 
-  // -------- Menu Panel (Y button) --------
+  // --- Menu Panel (Y button) ---
   const menuGroup = new THREE.Group();
   menuGroup.visible = false;
   scene.add(menuGroup);
@@ -166,35 +161,32 @@ export async function installXR({ THREE, DIAG }) {
   );
   menuGroup.add(menuBg);
 
-  const menuBorder = new THREE.Mesh(
-    new THREE.RingGeometry(0.58, 0.60, 64),
+  const menuLine = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.15, 0.02),
     new THREE.MeshBasicMaterial({ color: 0x2f6bff })
   );
-  menuBorder.rotation.x = -Math.PI / 2;
-  menuBorder.position.set(0, -0.36, 0.01);
-  menuGroup.add(menuBorder);
+  menuLine.position.set(0, 0.2, 0.01);
+  menuGroup.add(menuLine);
 
   function toggleMenu() {
     menuGroup.visible = !menuGroup.visible;
     D.log("[menu] visible =", menuGroup.visible);
   }
 
-  // Keep menu in front of you
   function updateMenuPose() {
     if (!menuGroup.visible) return;
-    // place ~1.2m in front of camera
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
-    const pos = camera.position.clone().add(forward.multiplyScalar(1.2));
-    pos.y = camera.position.y - 0.2;
+    const pos = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld).add(forward.multiplyScalar(1.2));
+    pos.y -= 0.2;
     menuGroup.position.copy(pos);
     menuGroup.quaternion.copy(camera.quaternion);
   }
 
-  // -------- Controllers + lasers --------
+  // --- Controllers + Lasers ---
   const controller1 = renderer.xr.getController(0);
   const controller2 = renderer.xr.getController(1);
-  scene.add(controller1);
-  scene.add(controller2);
+  rig.add(controller1);
+  rig.add(controller2);
 
   const rayGeo = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(0, 0, 0),
@@ -213,7 +205,7 @@ export async function installXR({ THREE, DIAG }) {
   controller2.add(makeRay(0x33aaff)); // blue
   D.log("[xr] controllers + lasers installed ✅");
 
-  // Teleport on trigger (select)
+  // Teleport on trigger/select
   controller1.addEventListener("selectstart", () => {
     const { hitPad } = buildArcFromController(controller1);
     if (hitPad) teleportToPad(hitPad);
@@ -223,67 +215,62 @@ export async function installXR({ THREE, DIAG }) {
     if (hitPad) teleportToPad(hitPad);
   });
 
-  // -------- Locomotion + Snap Turn --------
+  // --- Locomotion + Snap Turn ---
   const MOVE_SPEED = 1.25;     // slow
   const STRAFE_SPEED = 1.05;   // slow
   const DEAD = 0.18;
 
   const TURN_ANGLE = (45 * Math.PI) / 180;
   const TURN_COOLDOWN = 0.35;
-  let turnT = 0;
+  let turnCooldown = 0;
 
-  // Button edge detection (for Y toggle)
+  // Button edge detection
   let prevY = false;
 
   function getGamepad(ctrl) {
-    // WebXR controller has .gamepad in many runtimes
     return ctrl?.gamepad || ctrl?.inputSource?.gamepad || null;
   }
 
   function applyMove(dt, axisX, axisY) {
-    // axisY forward/back, axisX strafe
-    // Move relative to player yaw (not head pitch)
-    const yaw = player.yaw;
-    const fwd = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw) * -1);
+    // axisY = forward/back, axisX = strafe
+    const yaw = player?.yaw ?? rig.rotation.y ?? 0;
+
+    // Forward vector from yaw (XZ plane)
+    const fwd = new THREE.Vector3(Math.sin(yaw), 0, -Math.cos(yaw));
     const right = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
 
-    // forward/back
-    player.pos.add(fwd.multiplyScalar(axisY * MOVE_SPEED * dt));
-    // strafe
-    player.pos.add(right.multiplyScalar(axisX * STRAFE_SPEED * dt));
+    rig.position.add(fwd.multiplyScalar(axisY * MOVE_SPEED * dt));
+    rig.position.add(right.multiplyScalar(axisX * STRAFE_SPEED * dt));
   }
 
   function snapTurn(dir) {
-    player.yaw += dir * TURN_ANGLE;
+    const yaw = (player?.yaw ?? 0) + dir * TURN_ANGLE;
+    if (player) player.yaw = yaw;
+    rig.rotation.y = yaw;
   }
 
-  // Choose which controller to use for preview arc (usually right hand controller = index 1)
+  // Use right controller for arc preview by default
   let arcController = controller2;
 
   renderer.xr.addEventListener("sessionstart", () => {
-    // Safety: when entering XR, snap to safe spawn pad again
-    if (spawnPads && spawnPads.length) {
-      // Prefer LOBBY_N
-      const pad = spawnPads.find(p => p.userData?.label === "LOBBY_N") || spawnPads[0];
-      teleportTo(pad.userData.teleportPos);
-      safetySnapIfInsidePit?.();
-    }
-    D.log("[xr] sessionstart ✅ forced spawn pad");
+    // Force safe spawn in a room again (STORE_CENTER default)
+    try {
+      safetySnapIfBlocked?.("STORE_CENTER");
+    } catch {}
+    // Ensure rig yaw matches player yaw
+    rig.rotation.y = player?.yaw ?? rig.rotation.y;
+    D.log("[xr] sessionstart ✅ rig-based");
   });
 
-  // Use world render loop via setAnimationLoop already; hook into it by wrapping:
-  const oldLoop = renderer.getAnimationLoop?.() || null;
-
-  // We'll just add our own setAnimationLoop that calls render too.
-  // (world.js already set one; overriding is OK because we still render)
+  // --- Animation loop wrapper ---
   let lastT = 0;
 
-  renderer.setAnimationLoop((t) => {
-    const now = t * 0.001;
-    const dt = Math.min(0.05, Math.max(0.001, now - lastT));
-    lastT = now;
+  renderer.setAnimationLoop((tMs) => {
+    const t = tMs * 0.001;
+    const dt = Math.min(0.05, Math.max(0.001, t - lastT));
+    lastT = t;
 
-    // Teleport arc preview always visible in VR
+    // Teleport arc preview (when presenting)
     if (renderer.xr.isPresenting) {
       buildArcFromController(arcController);
     } else {
@@ -291,60 +278,52 @@ export async function installXR({ THREE, DIAG }) {
       reticle.visible = false;
     }
 
-    // Locomotion reads:
-    // LEFT stick = move/strafe (we'll read from controller1 first, then controller2 fallback)
-    // RIGHT stick = snap turn (we'll read from controller2 first, then controller1 fallback)
+    // Read gamepads
     const gpL = getGamepad(controller1) || getGamepad(controller2);
     const gpR = getGamepad(controller2) || getGamepad(controller1);
 
-    // Left stick smooth locomotion
-    if (gpL && gpL.axes && gpL.axes.length >= 2) {
-      const lx = gpL.axes[0] || 0; // left/right
-      const ly = gpL.axes[1] || 0; // forward/back (typically +down)
+    // LEFT stick smooth locomotion (axes[0], axes[1])
+    if (gpL?.axes?.length >= 2) {
+      const lx = gpL.axes[0] || 0;
+      const ly = gpL.axes[1] || 0;
+
       const ax = Math.abs(lx) > DEAD ? lx : 0;
       const ay = Math.abs(ly) > DEAD ? ly : 0;
 
-      // Many controllers have forward as -Y, so invert
+      // invert Y (typical forward = -Y)
       applyMove(dt, ax, -ay);
     }
 
-    // Right stick snap turn
-    if (gpR && gpR.axes && gpR.axes.length >= 4) {
-      // On many runtimes: axes[2], axes[3] are right stick
+    // RIGHT stick snap turn (axes[2])
+    if (gpR?.axes?.length >= 4) {
       const rx = gpR.axes[2] || 0;
       const ax = Math.abs(rx) > DEAD ? rx : 0;
 
-      turnT -= dt;
-      if (turnT <= 0 && ax !== 0) {
-        snapTurn(ax > 0 ? -1 : 1); // flip if it feels reversed later
-        turnT = TURN_COOLDOWN;
+      turnCooldown -= dt;
+      if (turnCooldown <= 0 && ax !== 0) {
+        // If direction feels reversed, swap the sign here.
+        snapTurn(ax > 0 ? -1 : 1);
+        turnCooldown = TURN_COOLDOWN;
       }
     }
 
-    // Y button toggles menu (try common mapping button[3] for Y)
-    // We'll check both controllers for safety.
+    // Y button toggles menu (common: buttons[3])
     let yDown = false;
-    const gps = [getGamepad(controller1), getGamepad(controller2)].filter(Boolean);
-
-    for (const gp of gps) {
-      const b = gp.buttons || [];
-      const cand = b[3]; // commonly Y/B
-      if (cand && cand.pressed) yDown = true;
+    for (const gp of [getGamepad(controller1), getGamepad(controller2)]) {
+      if (!gp?.buttons) continue;
+      const b = gp.buttons[3];
+      if (b?.pressed) yDown = true;
     }
     if (yDown && !prevY) toggleMenu();
     prevY = yDown;
 
     updateMenuPose();
-    safetySnapIfInsidePit?.();
 
-    // Apply camera from player
-    camera.rotation.order = "YXZ";
-    camera.rotation.y = player.yaw;
-    camera.rotation.x = player.pitch;
-    camera.position.copy(player.pos);
+    // Keep camera pitch (optional; yaw handled by rig)
+    camera.rotation.x = player?.pitch ?? 0;
 
     renderer.render(scene, camera);
   });
 
-  D.log("[xr] locomotion + teleport visuals installed ✅");
-}
+  D.log("[xr] locomotion + teleport visuals + menu installed ✅");
+                          }

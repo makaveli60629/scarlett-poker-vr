@@ -1,37 +1,14 @@
 {
-  "version": "scarlett1.0",
-  "notes": "Scarlett 1.0 module loader list. Safe: modules load independently; failures do not break boot.",
+  "version": 1,
   "modules": [
-    {
-      "id": "spine_diag",
-      "enabled": true,
-      "urls": ["./js/scarlett1/spine_diag.js"]
-    },
-    {
-      "id": "spine_modules",
-      "enabled": true,
-      "urls": ["./js/scarlett1/spine_modules.js"]
-    },
-    {
-      "id": "spine_xr",
-      "enabled": true,
-      "urls": ["./js/scarlett1/spine_xr.js"]
-    },
-    {
-      "id": "spine_android",
-      "enabled": true,
-      "urls": ["./js/scarlett1/spine_android.js"]
-    },
+    "/scarlett-poker-vr/js/scarlett1/spine_modules.js",
+    "/scarlett-poker-vr/js/scarlett1/spine_android.js",
+    "/scarlett-poker-vr/js/scarlett1/spine_xr.js",
+    "/scarlett-poker-vr/js/scarlett1/spine_diag.js",
 
-    {
-      "id": "addon_lighting",
-      "enabled": true,
-      "urls": ["./js/lighting.js"]
-    },
-    {
-      "id": "addon_humanoids",
-      "enabled": true,
-      "urls": ["./js/humanoids.js"]
-    }
+    "/scarlett-poker-vr/js/lighting.js",
+    "/scarlett-poker-vr/js/humanoids.js",
+    "/scarlett-poker-vr/js/poker.js",
+    "/scarlett-poker-vr/js/scorpion.js"
   ]
 }

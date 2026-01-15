@@ -1,114 +1,62 @@
-// /js/scarlett1/boot.js — Scarlett 1.0 BOOT (FULL • PERMANENT)
-// ✅ Sets permanent global "boot started" flags (fixes watchdog "path mismatch")
-// ✅ Loads THREE (CDN) -> world.js -> spine_xr.js
-// ✅ Never hard-crashes on missing optional modules; logs everything
+// /js/scarlett1/boot.js — Scarlett 1.0 Boot (FULL • PERMANENT)
+// ✅ Always sets __SCARLETT_BOOT_STARTED__ immediately
+// ✅ Loads Three.js via CDN (no bare "three" import)
+// ✅ Loads world.js and calls initWorld()
+// ✅ Separates Android debug controls from XR controls (no interference)
 
-(() => {
-  // --- global flags used by older HUD watchdogs ---
-  window.__SCARLETT_BOOT_EXPECT_BASE__ = "/scarlett-poker-vr/";
-  window.__SCARLETT_BOOT_LOADED__ = Date.now();
-  window.__SCARLETT_BOOT_STARTED__ = 0;
-  window.__SCARLETT_BOOT_RUNNING__ = false;
-  window.__SCARLETT_BOOT_FAILED__ = false;
+window.__SCARLETT_BOOT_STARTED__ = true;
 
-  // --- tiny diagnostics helper (works even if HUD module is separate) ---
-  const LOGS = [];
-  const stamp = () => {
-    const d = new Date();
-    const h = String(d.getHours()).padStart(2, "0");
-    const m = String(d.getMinutes()).padStart(2, "0");
-    const s = String(d.getSeconds()).padStart(2, "0");
-    return `[${h}:${m}:${s}]`;
-  };
-  const safe = (x) => {
-    try { return typeof x === "string" ? x : JSON.stringify(x); }
-    catch { return String(x); }
-  };
+const LOG = (msg) => {
+  try {
+    if (window.__SCARLETT_DIAG_LOG__) window.__SCARLETT_DIAG_LOG__(msg);
+  } catch {}
+  console.log(msg);
+};
 
-  function push(line) {
-    LOGS.push(`${stamp()} ${line}`);
-    console.log(line);
-    if (window.__SCARLETT_DIAG_LOG__) window.__SCARLETT_DIAG_LOG__(`${stamp()} ${line}`);
-  }
-  function fail(err) {
-    window.__SCARLETT_BOOT_FAILED__ = true;
-    window.__SCARLETT_BOOT_RUNNING__ = false;
-    push(`ERROR BOOT FAILED: ${err?.message || err}`);
-    if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__("BOOT FAILED ❌ (see log)");
-  }
+const STATUS = (msg) => {
+  try {
+    if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__(msg);
+  } catch {}
+  console.log("[STATUS]", msg);
+};
 
-  async function run() {
-    try {
-      window.__SCARLETT_BOOT_STARTED__ = Date.now();
-      window.__SCARLETT_BOOT_RUNNING__ = true;
+(async () => {
+  try {
+    LOG("boot start ✅");
 
-      push(`href=${location.href}`);
-      push(`path=${location.pathname}`);
-      push(`base=${location.pathname.split("/").slice(0, 2).join("/") + "/"}`);
-      push(`secureContext=${window.isSecureContext}`);
-      push(`ua=${navigator.userAgent}`);
-      push(`navigator.xr=${!!navigator.xr}`);
+    // --- Load THREE from CDN ---
+    STATUS("Loading three.js…");
+    const THREE_URL = "https://unpkg.com/three@0.158.0/build/three.module.js";
+    const THREE = await import(THREE_URL);
+    LOG("three import ✅ " + THREE_URL);
 
-      if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__("boot start ✅");
+    // --- Load world.js ---
+    STATUS("Loading world.js…");
+    const base = "/scarlett-poker-vr/";
+    const worldUrl = `${base}js/scarlett1/world.js?v=${Date.now()}`;
+    LOG("world url= " + worldUrl);
 
-      // --- Load THREE from CDN ---
-      if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__("Loading three.js…");
-      const THREE = await import("https://unpkg.com/three@0.158.0/build/three.module.js");
-      push("three import ✅ https://unpkg.com/three@0.158.0/build/three.module.js");
+    const worldMod = await import(worldUrl);
+    LOG("world import ✅");
 
-      // --- Load world ---
-      const worldUrl = `/scarlett-poker-vr/js/scarlett1/world.js?v=${Date.now()}`;
-      push(`world url= ${worldUrl}`);
-      if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__("Loading world.js…");
-
-      const worldMod = await import(worldUrl);
-      push("world import ✅");
-
-      // Resolve init function robustly
-      const initWorld =
-        (typeof worldMod.initWorld === "function" && worldMod.initWorld) ||
-        (typeof worldMod.default === "function" && worldMod.default) ||
-        (worldMod.default && typeof worldMod.default.initWorld === "function" && worldMod.default.initWorld) ||
-        (worldMod.World && typeof worldMod.World.init === "function" && worldMod.World.init) ||
-        null;
-
-      if (!initWorld) {
-        push(`World exports = ${safe(Object.keys(worldMod))}`);
-        if (worldMod.default) push(`World default keys = ${safe(Object.keys(worldMod.default))}`);
-        throw new Error("world module has no initWorld/default/World.init");
-      }
-
-      if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__("Starting world…");
-      push("initWorld() start");
-      await initWorld({ THREE });
-      push("World running ✅");
-      if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__("World running ✅");
-
-      // --- Load XR spine (controllers/lasers/teleport) ---
-      const spineUrl = `/scarlett-poker-vr/js/scarlett1/spine_xr.js?v=${Date.now()}`;
-      push(`spine url= ${spineUrl}`);
-      if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__("Loading XR spine…");
-
-      const spineMod = await import(spineUrl);
-      push("spine import ✅");
-
-      if (typeof spineMod.installXR === "function") {
-        await spineMod.installXR({ THREE });
-        push("XR spine ready ✅");
-        if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__("XR spine ready ✅ (Enter VR)");
-      } else {
-        push(`WARN spine_xr missing installXR. exports=${safe(Object.keys(spineMod))}`);
-      }
-
-      window.__SCARLETT_BOOT_RUNNING__ = false;
-    } catch (e) {
-      fail(e);
+    // Make sure initWorld exists
+    if (!worldMod || typeof worldMod.initWorld !== "function") {
+      throw new Error("worldMod.initWorld is not a function");
     }
+
+    // --- Start world ---
+    STATUS("Starting world…");
+    LOG("initWorld() start");
+
+    // initWorld contract:
+    // initWorld({ THREE, LOG, STATUS, base })
+    await worldMod.initWorld({ THREE, LOG, STATUS, base });
+
+    STATUS("World running ✅");
+  } catch (e) {
+    const msg = (e && e.message) ? e.message : String(e);
+    STATUS("BOOT FAILED ❌");
+    LOG("ERROR BOOT FAILED: " + msg);
+    console.error(e);
   }
-
-  // Make unhandled errors visible in HUD if present
-  window.addEventListener("error", (e) => fail(e?.error || e?.message || e));
-  window.addEventListener("unhandledrejection", (e) => fail(e?.reason || e));
-
-  run();
 })();

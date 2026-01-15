@@ -1,3 +1,6 @@
+// /js/scarlett1/world.js — Orchestrator (BOOT2 compatible)
+// Exports: initWorld() ✅ required by BOOT2, plus createWorld() for internal use.
+
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
 import { BUILD, DEFAULT_QUALITY, getSpawns } from "./world_constants.js";
 import { createMaterials } from "./world_materials.js";
@@ -12,6 +15,19 @@ if (!THREE || !THREE.MeshStandardMaterial) {
 
 export { BUILD, getSpawns };
 
+/**
+ * BOOT2 REQUIRED EXPORT ✅
+ * BOOT2 calls: worldMod.initWorld({ THREE, scene, renderer, camera, playerRig, log, quality })
+ */
+export async function initWorld(ctx = {}) {
+  // BOOT2 might pass THREE, but we intentionally ignore it and use our imported THREE.
+  // This avoids scope issues and keeps the module self-contained.
+  return await createWorld(ctx);
+}
+
+/**
+ * Internal API
+ */
 export async function createWorld(ctx = {}) {
   const {
     scene,
@@ -22,7 +38,7 @@ export async function createWorld(ctx = {}) {
     quality = DEFAULT_QUALITY
   } = ctx;
 
-  if (!scene) throw new Error("[world] createWorld requires { scene }");
+  if (!scene) throw new Error("[world] initWorld/createWorld requires { scene }");
 
   const world = {
     group: new THREE.Group(),
@@ -60,12 +76,14 @@ export async function createWorld(ctx = {}) {
   let t = 0;
   world.update = (dt = 0.016) => {
     t += dt;
+
     // jumbotron pulse
     for (const j of world.jumbotrons) {
       j.t += dt;
       const p = 0.75 + 0.25 * Math.sin(j.t * 1.4);
       if (j.screen?.material) j.screen.material.emissiveIntensity = 1.0 + p;
     }
+
     // neon pulse
     mats.matTrim.emissiveIntensity = 0.55 + 0.15 * Math.sin(t * 1.8);
     mats.matNeonPink.emissiveIntensity = 0.75 + 0.25 * Math.sin(t * 2.2);
@@ -88,7 +106,10 @@ export async function createWorld(ctx = {}) {
   if (camera) camera.lookAt(0, 1.6, 0);
 
   log("world ready ✅", "colliders=", world.colliders.length, "pads=", world.pads.length);
+
+  // BOOT2 sometimes expects world.group and world.colliders at minimum
   return world;
 }
 
-export default { createWorld, getSpawns, BUILD };
+// Back-compat default export
+export default { initWorld, createWorld, getSpawns, BUILD };

@@ -1,17 +1,17 @@
-// /js/scarlett1/boot2.js — Scarlett BOOT2 v3.2 (XR LOADING FIX)
-// Fixes Quest “stuck in loading room” by:
-// ✅ starting setAnimationLoop immediately (frames ASAP)
-// ✅ loading world asynchronously after loop is running
-// ✅ lightweight in-world loading panel
-// ✅ XR watchdog (auto-end session if frames stall)
+// /js/scarlett1/boot2.js — Scarlett BOOT2 v3.3 (QUEST XR SAFE MODE)
+// Fixes QuestLoader stuck by:
+// ✅ XR SAFE render settings on sessionstart (lower scale + foveation + pixelRatio)
+// ✅ Animation loop try/catch (auto-end XR on frame crash)
+// ✅ Loop starts immediately (frames ASAP)
+// ✅ World loads async after loop starts (never blocks XR start)
+// ✅ NO XRHandModelFactory (breaks on GitHub Pages due to "three" bare specifier)
 
-const BUILD = "BOOT2_SCARLETT1_v3_2_XR_LOADING_FIX";
+const BUILD = "BOOT2_SCARLETT1_v3_3_QUEST_XR_SAFE";
 const nowTs = () => new Date().toLocaleTimeString();
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 function makeHUD() {
   const root = document.createElement("div");
-  root.id = "scarlett-hud";
   root.style.position = "fixed";
   root.style.left = "0";
   root.style.top = "0";
@@ -77,7 +77,7 @@ function makeHUD() {
   const lines = [];
   const push = (s) => {
     lines.push(s);
-    while (lines.length > 500) lines.shift();
+    while (lines.length > 600) lines.shift();
     pre.textContent = lines.join("\n");
     root.scrollTop = root.scrollHeight;
   };
@@ -149,38 +149,35 @@ async function safeImport(hud, url, label) {
   }
 }
 
-// ---------- Simple in-world loading panel (so XR has something to show) ----------
+// Minimal “something to render” so XR has a frame immediately
 function addLoadingPanel(THREE, scene) {
-  const group = new THREE.Group();
-  group.name = "LOADING_PANEL";
-  group.position.set(0, 1.6, 6);
+  const g = new THREE.Group();
+  g.position.set(0, 1.6, 6);
+  g.name = "LOADING_PANEL";
 
-  const geo = new THREE.PlaneGeometry(2.2, 0.8);
-  const mat = new THREE.MeshBasicMaterial({ color: 0x111111 });
-  const panel = new THREE.Mesh(geo, mat);
-  panel.renderOrder = 9999;
+  const panel = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.4, 0.9),
+    new THREE.MeshBasicMaterial({ color: 0x0b0f14 })
+  );
+  panel.position.z = 0;
 
-  // “text” using simple bars (no font loader)
-  const barGeo = new THREE.PlaneGeometry(1.6, 0.08);
   const barMat = new THREE.MeshBasicMaterial({ color: 0x33ff66 });
-  const bar1 = new THREE.Mesh(barGeo, barMat); bar1.position.set(0, 0.18, 0.01);
-  const bar2 = new THREE.Mesh(barGeo, barMat); bar2.position.set(0, 0.00, 0.01);
-  const bar3 = new THREE.Mesh(barGeo, barMat); bar3.position.set(0, -0.18, 0.01);
+  const b1 = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.08), barMat); b1.position.set(0, 0.22, 0.01);
+  const b2 = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.08), barMat); b2.position.set(0, 0.00, 0.01);
+  const b3 = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.08), barMat); b3.position.set(0,-0.22, 0.01);
 
-  group.add(panel, bar1, bar2, bar3);
-  scene.add(group);
+  g.add(panel, b1, b2, b3);
+  scene.add(g);
 
   return {
-    setVisible(v) { group.visible = !!v; },
-    setPulse(t) {
-      const s = 0.9 + Math.sin(t * 4.0) * 0.08;
-      group.scale.set(s, s, s);
-    },
-    dispose() { scene.remove(group); }
+    setVisible(v) { g.visible = !!v; },
+    pulse(t) {
+      const s = 0.92 + Math.sin(t * 4.0) * 0.06;
+      g.scale.set(s, s, s);
+    }
   };
 }
 
-// ---------- XR controllers + teleport + snap turn ----------
 function installXRControls({ THREE, renderer, scene, playerRig, hud }) {
   const st = {
     inXR: false,
@@ -199,7 +196,7 @@ function installXRControls({ THREE, renderer, scene, playerRig, hud }) {
     teleportPads: []
   };
 
-  function refreshTargets(world) {
+  function setWorld(world) {
     st.teleportSurfaces.length = 0;
     st.teleportPads.length = 0;
 
@@ -211,7 +208,6 @@ function installXRControls({ THREE, renderer, scene, playerRig, hud }) {
         if (o?.isMesh && o.userData?.teleportSurface) st.teleportSurfaces.push(o);
       });
     }
-
     hud.log("[xr] targets surfaces=", String(st.teleportSurfaces.length), "pads=", String(st.teleportPads.length));
   }
 
@@ -342,20 +338,11 @@ function installXRControls({ THREE, renderer, scene, playerRig, hud }) {
     playerRig.rotation.y += angle * dir;
   }
 
-  renderer.xr.addEventListener("sessionstart", () => {
-    st.inXR = true;
-    setupControllers();
-    hud.log("[xr] sessionstart ✅");
-  });
-
-  renderer.xr.addEventListener("sessionend", () => {
-    st.inXR = false;
-    teardownControllers();
-    hud.log("[xr] sessionend ✅");
-  });
+  renderer.xr.addEventListener("sessionstart", () => { st.inXR = true; setupControllers(); hud.log("[xr] sessionstart ✅"); });
+  renderer.xr.addEventListener("sessionend", () => { st.inXR = false; teardownControllers(); hud.log("[xr] sessionend ✅"); });
 
   return {
-    setWorld(world) { refreshTargets(world); },
+    setWorld,
     update(dt) {
       const session = renderer.xr.getSession?.() || null;
       const nowInXR = !!session;
@@ -377,7 +364,6 @@ function installXRControls({ THREE, renderer, scene, playerRig, hud }) {
   };
 }
 
-// ---------- Android sticks (2D / not in XR) ----------
 function installAndroidSticks({ playerRig, hud }) {
   const root = document.createElement("div");
   root.id = "scarlett-sticks";
@@ -401,8 +387,7 @@ function installAndroidSticks({ playerRig, hud }) {
     pad.style.border = "2px solid rgba(255,255,255,0.18)";
     pad.style.pointerEvents = "auto";
     pad.style.touchAction = "none";
-    if (side === "left") pad.style.left = "6%";
-    else pad.style.right = "6%";
+    if (side === "left") pad.style.left = "6%"; else pad.style.right = "6%";
 
     const knob = document.createElement("div");
     knob.style.position = "absolute";
@@ -415,7 +400,6 @@ function installAndroidSticks({ playerRig, hud }) {
     knob.style.background = "rgba(85,170,255,0.25)";
     knob.style.border = "2px solid rgba(85,170,255,0.45)";
     pad.appendChild(knob);
-
     root.appendChild(pad);
 
     return { pad, knob, id: null, x: 0, y: 0, dx: 0, dy: 0 };
@@ -462,8 +446,7 @@ function installAndroidSticks({ playerRig, hud }) {
     el.addEventListener("lostpointercapture", () => { stick.id = null; setKnob(0, 0); });
   }
 
-  bind(L);
-  bind(R);
+  bind(L); bind(R);
   hud.log("Android sticks READY ✅");
 
   const cfg = { moveSpeed: 2.6, lookSpeed: 2.2 };
@@ -474,18 +457,11 @@ function installAndroidSticks({ playerRig, hud }) {
       show(!inXR);
       if (inXR) return;
 
-      const lx = L.dx;
-      const ly = L.dy;
-      const rx = R.dx;
-
+      const lx = L.dx, ly = L.dy, rx = R.dx;
       if (Math.abs(rx) > 0.06) playerRig.rotation.y += (-rx) * cfg.lookSpeed * dt;
 
-      const forward = -ly;
-      const strafe = lx;
-
-      const yaw = playerRig.rotation.y;
-      const s = Math.sin(yaw);
-      const c = Math.cos(yaw);
+      const forward = -ly, strafe = lx;
+      const yaw = playerRig.rotation.y, s = Math.sin(yaw), c = Math.cos(yaw);
 
       const vx = (strafe * c + forward * s) * cfg.moveSpeed;
       const vz = (forward * c - strafe * s) * cfg.moveSpeed;
@@ -496,7 +472,6 @@ function installAndroidSticks({ playerRig, hud }) {
   };
 }
 
-// ---------------- MAIN ----------------
 (async function boot() {
   const hud = makeHUD();
   hud.log("diag start ✅");
@@ -505,6 +480,10 @@ function installAndroidSticks({ playerRig, hud }) {
   hud.log("path=", location.pathname);
   hud.log("ua=", navigator.userAgent);
   hud.log("navigator.xr=", String(!!navigator.xr));
+
+  // Capture errors (so we know if XR loop crashes)
+  window.addEventListener("error", (e) => hud.err("window.onerror", e?.message || e));
+  window.addEventListener("unhandledrejection", (e) => hud.err("unhandledrejection", e?.reason?.message || e?.reason || e));
 
   const origLog = console.log, origErr = console.error;
   console.log = (...a) => { origLog(...a); try { hud.log(...a.map(String)); } catch {} };
@@ -517,12 +496,17 @@ function installAndroidSticks({ playerRig, hud }) {
   const VRButtonMod = await safeImport(hud, `https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js?v=${Date.now()}`, "VRButton");
   const { VRButton } = VRButtonMod;
 
-  // Renderer + scene
+  // Renderer + scene + rig
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
   renderer.xr.setReferenceSpaceType("local-floor");
+
+  // XR SAFE defaults (helps Quest)
+  if (renderer.xr.setFramebufferScaleFactor) renderer.xr.setFramebufferScaleFactor(0.75);
+  if (renderer.xr.setFoveation) renderer.xr.setFoveation(1);
+
   host.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
@@ -543,11 +527,44 @@ function installAndroidSticks({ playerRig, hud }) {
     camera.updateProjectionMatrix();
   });
 
-  // Add VRButton
   try { document.body.appendChild(VRButton.createButton(renderer)); hud.log("VRButton appended ✅"); }
   catch (e) { hud.err("VRButton append failed ❌", e?.message || e); }
 
-  // Manual Enter VR
+  // Controls start immediately
+  const xr = installXRControls({ THREE, renderer, scene, playerRig, hud });
+  const android = installAndroidSticks({ playerRig, hud });
+
+  // Always-render loading panel (XR needs frames)
+  const loading = addLoadingPanel(THREE, scene);
+
+  // XR SAFE MODE on sessionstart
+  renderer.xr.addEventListener("sessionstart", () => {
+    hud.log("XR sessionstart ✅ (applying XR safe mode)");
+
+    // Drop pixel ratio in XR
+    renderer.setPixelRatio(1);
+
+    // Lower framebuffer scale + foveation (Quest)
+    if (renderer.xr.setFramebufferScaleFactor) renderer.xr.setFramebufferScaleFactor(0.7);
+    if (renderer.xr.setFoveation) renderer.xr.setFoveation(1);
+
+    // If anything goes wrong, don’t hang in loader forever
+    setTimeout(() => {
+      const s = renderer.xr.getSession?.();
+      if (s && s.inputSources && s.inputSources.length === 0) {
+        // Still okay (hands might not register yet), just log
+        hud.log("XR: inputSources still 0 after 2s (not fatal)");
+      }
+    }, 2000);
+  });
+
+  renderer.xr.addEventListener("sessionend", () => {
+    hud.log("XR sessionend ✅");
+    // Restore 2D quality if you want
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  });
+
+  // Manual Enter VR (kept)
   hud.enterBtn.onclick = async () => {
     try {
       if (!navigator.xr) throw new Error("navigator.xr missing");
@@ -560,7 +577,6 @@ function installAndroidSticks({ playerRig, hud }) {
         optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"],
         requiredFeatures: []
       });
-
       hud.log("requestSession ✅");
       await renderer.xr.setSession(session);
       hud.log("renderer.xr.setSession ✅");
@@ -569,60 +585,44 @@ function installAndroidSticks({ playerRig, hud }) {
     }
   };
 
-  // Controls (installed immediately)
-  const xr = installXRControls({ THREE, renderer, scene, playerRig, hud });
-  const android = installAndroidSticks({ playerRig, hud });
-
-  // Loading panel (VR needs frames + visible content)
-  const loadingPanel = addLoadingPanel(THREE, scene);
-
-  // XR watchdog: if we enter XR and frames “stall”, auto-end session
-  let lastXRFrame = performance.now();
-  renderer.xr.addEventListener("sessionstart", () => {
-    hud.log("XR sessionstart ✅");
-    lastXRFrame = performance.now();
-  });
-  renderer.xr.addEventListener("sessionend", () => hud.log("XR sessionend ✅"));
-
-  // Start loop IMMEDIATELY (this is the key fix)
-  hud.log("render loop start ✅ (immediate)");
-
+  // Start loop immediately + make it crash-proof in XR
+  hud.log("render loop start ✅ (crash-proof)");
   let world = null;
   let worldReady = false;
   let lastT = performance.now();
   let acc = 0;
 
   renderer.setAnimationLoop(() => {
-    const now = performance.now();
-    const dt = clamp((now - lastT) / 1000, 0, 0.05);
-    lastT = now;
+    try {
+      const now = performance.now();
+      const dt = clamp((now - lastT) / 1000, 0, 0.05);
+      lastT = now;
 
-    const session = renderer.xr.getSession?.() || null;
-    const inXR = !!session;
+      const session = renderer.xr.getSession?.() || null;
+      const inXR = !!session;
 
-    if (inXR) lastXRFrame = now;
+      xr.update(dt);
+      android.update(dt, inXR);
 
-    // Watchdog: if XR active but we somehow stop delivering frames, end it
-    if (inXR && (now - lastXRFrame) > 4000) {
-      try { hud.err("XR watchdog: frame stall → ending session"); session.end(); } catch {}
-    }
+      if (!worldReady) loading.pulse(now / 1000);
+      if (worldReady && world?.update) world.update(dt);
 
-    xr.update(dt);
-    android.update(dt, inXR);
+      renderer.render(scene, camera);
 
-    if (!worldReady) loadingPanel.setPulse(now / 1000);
-    if (worldReady && world?.update) world.update(dt);
-
-    renderer.render(scene, camera);
-
-    acc += dt;
-    if (acc >= 1.0) {
-      acc = 0;
-      hud.log("XR=", String(inXR), "inputSources=", String(session?.inputSources?.length ?? 0), "worldReady=", String(worldReady));
+      acc += dt;
+      if (acc >= 1.0) {
+        acc = 0;
+        hud.log("XR=", String(inXR), "inputSources=", String(session?.inputSources?.length ?? 0), "worldReady=", String(worldReady));
+      }
+    } catch (e) {
+      // If XR frame throws, end session so you don’t get stuck in QuestLoader
+      console.error("FRAME CRASH ❌", e?.message || e);
+      const s = renderer.xr.getSession?.();
+      try { if (s) s.end(); } catch {}
     }
   });
 
-  // Now load world AFTER loop has started (so XR never hangs)
+  // Load world AFTER loop has started
   hud.log("begin async world load…");
   const worldMod = await safeImport(hud, `./world.js?v=${Date.now()}`, "world.js");
   const initWorld = worldMod.initWorld || worldMod.default?.initWorld;
@@ -640,7 +640,7 @@ function installAndroidSticks({ playerRig, hud }) {
   });
 
   worldReady = true;
-  loadingPanel.setVisible(false);
+  loading.setVisible(false);
   xr.setWorld(world);
 
   hud.log("initWorld() completed ✅");

@@ -1,8 +1,8 @@
-// /js/scarlett1/world.js — Scarlett 1 World v6 (UNCRASHABLE LOOP)
-// ✅ PlayerRig (camera+controllers move together)
-// ✅ Spawn in ROOM (STORE_CENTER default)
-// ✅ World owns setAnimationLoop (XR safe)
-// ✅ Frame hooks with try/catch so XR never turns green
+// /js/scarlett1/world.js — Scarlett 1 World v7 (FLOOR-CORRECT)
+// ✅ Rig spawns at Y=0 (XR floor handles height)
+// ✅ 2D fallback gives camera a 1.65 eye height
+// ✅ Spawn at "STORE_ENT" and offset slightly forward (in front of teleport machine)
+// ✅ World owns setAnimationLoop + hook system
 
 export async function initWorld({ THREE, DIAG }) {
   const D = DIAG || console;
@@ -33,10 +33,17 @@ export async function initWorld({ THREE, DIAG }) {
   camera.rotation.order = "YXZ";
   rig.add(camera);
 
+  // Player state (yaw affects movement)
   const player = { yaw: Math.PI, pitch: 0 };
 
-  function setRigPose(x, y, z, yaw = player.yaw) {
-    rig.position.set(x, y, z);
+  // ✅ XR floor: rig.y should be 0. In 2D, we fake head height by camera.y = 1.65
+  camera.position.set(0, 1.65, 0); // 2D view
+  rig.position.set(0, 0, 0);
+  rig.rotation.y = player.yaw;
+
+  function setRigPoseFloor(x, z, yaw = player.yaw) {
+    // XR: y must be 0 to avoid floating
+    rig.position.set(x, 0, z);
     player.yaw = yaw;
     rig.rotation.y = player.yaw;
     camera.rotation.x = player.pitch;
@@ -61,7 +68,7 @@ export async function initWorld({ THREE, DIAG }) {
     return m;
   }
 
-  // World geometry (same layout)
+  // World geometry
   const LOBBY_RADIUS = 18;
   const LOBBY_FLOOR_R = 22;
 
@@ -71,14 +78,15 @@ export async function initWorld({ THREE, DIAG }) {
   const ring = addMesh(new THREE.RingGeometry(LOBBY_RADIUS - 0.4, LOBBY_RADIUS + 0.4, 128), MAT_TRIM, 0, 0.01, 0);
   ring.rotation.x = -Math.PI / 2;
 
-  // Pit + platform + table (visual)
+  // Pit + platform + table
   const pit = addMesh(new THREE.CircleGeometry(6.2, 80), new THREE.MeshStandardMaterial({ color: 0x070a12, roughness: 1, metalness: 0 }), 0, -0.12, 0);
   pit.rotation.x = -Math.PI / 2;
 
   const pitRim = addMesh(new THREE.RingGeometry(6.15, 6.5, 96), MAT_TRIM, 0, -0.10, 0);
   pitRim.rotation.x = -Math.PI / 2;
 
-  const platform = addMesh(new THREE.CylinderGeometry(2.2, 2.2, 0.18, 64),
+  addMesh(
+    new THREE.CylinderGeometry(2.2, 2.2, 0.18, 64),
     new THREE.MeshStandardMaterial({ color: 0x0b2a22, roughness: 0.85, metalness: 0.05 }),
     0, 0.15, 0
   );
@@ -90,7 +98,7 @@ export async function initWorld({ THREE, DIAG }) {
   table.position.set(0, 1.05, 0);
   scene.add(table);
 
-  // Lobby wall ring
+  // Walls ring (visual)
   const wallH = 2.8;
   const segCount = 24;
   for (let i = 0; i < segCount; i++) {
@@ -106,7 +114,7 @@ export async function initWorld({ THREE, DIAG }) {
     scene.add(w);
   }
 
-  // Rooms
+  // Rooms (centers only for now)
   const HALL_LEN = 12, ROOM_D = 16;
   const dirs = [
     { name: "STORE", angle: 0, color: 0x2f6bff },
@@ -114,8 +122,8 @@ export async function initWorld({ THREE, DIAG }) {
     { name: "SCORP", angle: Math.PI, color: 0xffcc44 },
     { name: "GAMES", angle: -Math.PI / 2, color: 0x44ffaa }
   ];
-
   const roomCenters = [];
+
   for (const d of dirs) {
     const cx = Math.cos(d.angle), cz = Math.sin(d.angle);
     const hallStartR = LOBBY_RADIUS - 1.2;
@@ -124,7 +132,6 @@ export async function initWorld({ THREE, DIAG }) {
     const rz = cz * roomCenterR;
     roomCenters.push({ name: d.name, x: rx, z: rz, angle: d.angle, color: d.color });
 
-    // simple room floor
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(16, 16),
       new THREE.MeshStandardMaterial({ color: 0x0b1120, roughness: 1, metalness: 0, emissive: d.color, emissiveIntensity: 0.06 })
@@ -146,7 +153,7 @@ export async function initWorld({ THREE, DIAG }) {
     );
     pad.position.set(x, 0.035, z);
     pad.name = "spawn_pad";
-    pad.userData.teleportPos = new THREE.Vector3(x, 1.65, z);
+    pad.userData.teleportPos = new THREE.Vector3(x, 0, z); // ✅ floor coords (y=0)
     pad.userData.yaw = yaw ?? Math.PI;
     pad.userData.label = label || "";
     scene.add(pad);
@@ -154,23 +161,37 @@ export async function initWorld({ THREE, DIAG }) {
     return pad;
   }
 
+  // Entrance pads (in front of “teleport machine” concept)
+  const entranceR = LOBBY_RADIUS + 4.8;
+  const padStoreEnt = makePad(Math.cos(0) * entranceR, Math.sin(0) * entranceR, 0x2f6bff, "STORE_ENT", Math.PI);
+  makePad(Math.cos(Math.PI/2) * entranceR, Math.sin(Math.PI/2) * entranceR, 0xaa44ff, "VIP_ENT", -Math.PI/2);
+  makePad(Math.cos(Math.PI) * entranceR, Math.sin(Math.PI) * entranceR, 0xffcc44, "SCORP_ENT", 0);
+  makePad(Math.cos(-Math.PI/2) * entranceR, Math.sin(-Math.PI/2) * entranceR, 0x44ffaa, "GAMES_ENT", Math.PI/2);
+
   // Room center pads
   for (const rc of roomCenters) {
     makePad(rc.x, rc.z, rc.color, rc.name + "_CENTER", rc.angle + Math.PI);
   }
 
   function teleportTo(vec3, yaw = player.yaw) {
-    setRigPose(vec3.x, vec3.y, vec3.z, yaw);
+    setRigPoseFloor(vec3.x, vec3.z, yaw);
   }
 
-  function safetySnapIfBlocked(preferredLabel = "STORE_CENTER") {
-    const pref = spawnPads.find(p => p.userData?.label === preferredLabel) || spawnPads[0];
-    teleportTo(pref.userData.teleportPos, pref.userData.yaw);
-    D.log("[spawn] forced pad:", pref.userData.label);
+  // ✅ Spawn slightly IN FRONT of STORE_ENT pad (so you’re not on top of it)
+  function spawnInFrontOf(label = "STORE_ENT", forwardMeters = 1.25) {
+    const pad = spawnPads.find(p => p.userData?.label === label) || padStoreEnt;
+    const yaw = pad.userData.yaw ?? Math.PI;
+
+    // Forward direction from yaw
+    const fwd = new THREE.Vector3(Math.sin(yaw), 0, -Math.cos(yaw));
+    const base = pad.userData.teleportPos.clone(); // y=0
+    const pos = base.add(fwd.multiplyScalar(forwardMeters));
+
+    teleportTo(pos, yaw);
+    D.log("[spawn] in front of", label, "pos=", { x: pos.x, z: pos.z, yaw });
   }
 
-  // ✅ Spawn in STORE room (change label if you want)
-  safetySnapIfBlocked("STORE_CENTER");
+  spawnInFrontOf("STORE_ENT", 1.25);
 
   // Resize
   window.addEventListener("resize", () => {
@@ -179,15 +200,14 @@ export async function initWorld({ THREE, DIAG }) {
     renderer.setSize(window.innerWidth, window.innerHeight);
   }, { passive: true });
 
-  // Frame hooks (XR-safe)
+  // Hook system
   const frameHooks = [];
   function addFrameHook(fn) { frameHooks.push(fn); }
 
-  // Expose to XR module
+  // Expose
   window.__SCARLETT1__ = {
     THREE, scene, renderer, camera, rig, player,
-    spawnPads, teleportTo, safetySnapIfBlocked,
-    addFrameHook
+    spawnPads, teleportTo, addFrameHook
   };
 
   D.log("render loop start ✅ (world owns loop)");
@@ -198,18 +218,13 @@ export async function initWorld({ THREE, DIAG }) {
     const dt = Math.min(0.05, Math.max(0.001, t - lastT));
     lastT = t;
 
-    // Keep something animated so we know frames are flowing
     table.rotation.y = t * 0.4;
 
-    // Run hooks safely (NEVER crash XR frames)
     for (const fn of frameHooks) {
       try { fn({ t, dt }); }
-      catch (e) {
-        D.error("[frameHook] error:", e?.message || e);
-      }
+      catch (e) { D.error("[frameHook] error:", e?.message || e); }
     }
 
-    // Always render no matter what
     renderer.render(scene, camera);
   });
-      }
+}

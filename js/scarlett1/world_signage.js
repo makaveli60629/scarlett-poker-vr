@@ -1,47 +1,76 @@
-// /js/scarlett1/world_signage.js
+// /js/scarlett1/world_signage.js — FIXED
+// Must export: buildSignage()
+// Returns: { update(dt) }
+
 import { C } from "./world_constants.js";
 
 export function buildSignage(THREE, group, mats) {
-  const signs = [];
+  const glows = [];
 
-  function addSign(text, pos, rotY, mat) {
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(6, 1.4, 0.2), mats.wall);
+  function addSign(label, pos, rotY, glowMat) {
+    // Frame
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(6.2, 1.6, 0.22),
+      mats.wall
+    );
     frame.position.copy(pos);
     frame.rotation.y = rotY;
 
-    const glow = new THREE.Mesh(new THREE.BoxGeometry(5.6, 1.0, 0.08), mat);
+    // Glow plate
+    const glow = new THREE.Mesh(
+      new THREE.BoxGeometry(5.7, 1.05, 0.08),
+      glowMat
+    );
     glow.position.copy(pos);
     glow.position.y += 0.02;
+    glow.position.z += 0.12;
     glow.rotation.y = rotY;
 
-    // “Text” fake via thin bars (Quest-safe)
-    const bars = new THREE.Group();
-    for (let i = 0; i < Math.min(8, text.length); i++) {
-      const b = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.55, 0.06), mat);
-      b.position.set((-1.6 + i * 0.45), 0, 0.12);
-      bars.add(b);
+    // Fake “text” blocks (Quest-safe)
+    const blocks = new THREE.Group();
+    const n = Math.max(3, Math.min(10, label.length));
+    for (let i = 0; i < n; i++) {
+      const b = new THREE.Mesh(
+        new THREE.BoxGeometry(0.42, 0.55, 0.06),
+        glowMat
+      );
+      b.position.set(-1.9 + i * 0.42, 0, 0.16);
+      blocks.add(b);
     }
-    bars.position.copy(pos);
-    bars.position.y -= 0.02;
-    bars.rotation.y = rotY;
+    blocks.position.copy(pos);
+    blocks.position.y -= 0.04;
+    blocks.rotation.y = rotY;
 
-    group.add(frame, glow, bars);
-    signs.push(glow);
+    group.add(frame, glow, blocks);
+    glows.push(glow);
   }
 
-  // Place signs on the lobby ring near each hallway entrance
-  const r = C.LOBBY_R - 1.5;
+  // Place signs just inside lobby ring, facing inward
+  const r = C.LOBBY_R - 1.6;
+
+  // North (Z negative) faces toward +Z => rotY = 0
   addSign("STORE", new THREE.Vector3(0, 3.2, -r), 0, mats.neonCyan);
-  addSign("VIP",   new THREE.Vector3(r, 3.2, 0), -Math.PI / 2, mats.neonMagenta);
+
+  // East (X positive) faces toward -X => rotY = -PI/2
+  addSign("VIP", new THREE.Vector3(r, 3.2, 0), -Math.PI / 2, mats.neonMagenta);
+
+  // South (Z positive) faces toward -Z => rotY = PI
   addSign("SCORP", new THREE.Vector3(0, 3.2, r), Math.PI, mats.neonGreen);
+
+  // West (X negative) faces toward +X => rotY = +PI/2
   addSign("GAMES", new THREE.Vector3(-r, 3.2, 0), Math.PI / 2, mats.neonCyan);
 
   return {
     update(dt) {
+      // subtle pulse (safe)
       const t = (performance.now() || 0) * 0.001;
       const k = 0.92 + Math.sin(t * 1.8) * 0.08;
-      for (const s of signs) {
-        if (s?.material?.emissiveIntensity != null) s.material.emissiveIntensity = k;
+
+      for (const g of glows) {
+        const m = g?.material;
+        if (m && typeof m.emissiveIntensity === "number") {
+          m.emissiveIntensity = k;
+        }
       }
     }
   };

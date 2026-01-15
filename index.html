@@ -1,51 +1,12 @@
 <!doctype html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Scarlett VR Poker</title>
-  <style>
-    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
-    canvas { display:block; width:100%; height:100%; }
-  </style>
+  <style>html,body{margin:0;height:100%;background:#000;overflow:hidden}</style>
 </head>
-
 <body>
-  <!-- 1) Diagnostics HUD must load FIRST -->
   <script type="module" src="./js/scarlett1/spine_diag.js?v=1"></script>
-
-  <!-- 2) Boot must load SECOND -->
-  <script type="module">
-    // cache-bust every refresh
-    const v = Date.now();
-
-    // IMPORTANT: use relative path from root index.html
-    const bootUrl = `./js/scarlett1/boot2.js?v=${v}`;
-
-    // log into HUD immediately
-    window.__SCARLETT_DIAG_LOG && window.__SCARLETT_DIAG_LOG(`loading boot(module): ${bootUrl}`);
-
-    import(bootUrl)
-      .then(() => {
-        window.__SCARLETT_DIAG_LOG && window.__SCARLETT_DIAG_LOG("boot executed ✅");
-      })
-      .catch((e) => {
-        console.error(e);
-        window.__SCARLETT_DIAG_STATUS && window.__SCARLETT_DIAG_STATUS("BOOT FAILED ❌");
-        window.__SCARLETT_DIAG_LOG && window.__SCARLETT_DIAG_LOG("BOOT IMPORT ERROR: " + (e?.message || e));
-      });
-
-    // capture ALL runtime errors into the HUD
-    window.addEventListener("error", (ev) => {
-      window.__SCARLETT_DIAG_STATUS && window.__SCARLETT_DIAG_STATUS("BOOT FAILED ❌");
-      window.__SCARLETT_DIAG_LOG && window.__SCARLETT_DIAG_LOG("WINDOW ERROR: " + (ev?.message || ev));
-    });
-    window.addEventListener("unhandledrejection", (ev) => {
-      window.__SCARLETT_DIAG_STATUS && window.__SCARLETT_DIAG_STATUS("BOOT FAILED ❌");
-      window.__SCARLETT_DIAG_LOG && window.__SCARLETT_DIAG_LOG("PROMISE REJECT: " + (ev?.reason?.message || ev?.reason || ev));
-    });
-  </script>
 </body>
 </html>

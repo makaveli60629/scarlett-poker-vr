@@ -1,17 +1,18 @@
 // /js/scarlett1/world.js — Update 4.0 World Brain (Permanent)
-// - Scene init, lighting, floor
-// - Module bus (plug-in systems)
-// - Hands-only XR input + locomotion
-// - Avatar module (placeholder now; future Meta native hook point)
-// - Loading stage -> Active game transition
+// ✅ Hands-only XR
+// ✅ Modular ModuleBus
+// ✅ LoadingStage (camera-attached)
+// ✅ HandInput (WebXR Hands)
+// ✅ HandsLocomotion (pinch teleport + pinch snap turn)
+// ✅ MetaStyleAvatar (Quest-like toon avatar: NOT user-private)
+// ✅ Ultimate World builder (big lobby + rooms + pads + pit)
 
 import { ModuleBus } from "./modules/module_bus.js";
 import { LoadingStage } from "./modules/loading_stage.js";
 import { HandInput } from "./modules/hand_input.js";
 import { HandsLocomotion } from "./modules/locomotion_hands.js";
-import { AvatarManager } from "./modules/avatar_manager.js";
+import { MetaStyleAvatar } from "./modules/meta_style_avatar.js";
 
-// OPTIONAL: drop-in “souped” world build (bigger neon lobby, rooms, etc)
 import { buildUltimateWorld } from "./world_ultimate.js";
 
 export class World {
@@ -32,83 +33,99 @@ export class World {
     this.scene.add(this.rig);
 
     this.bus = new ModuleBus();
+
     this.state = {
       phase: "loading",   // loading -> active
       xrActive: false,
       dt: 0,
       t: 0
     };
+
+    // pointers to modules
+    this.loading = null;
+    this.hands = null;
+    this.loco = null;
+    this.avatar = null;
+
+    this.worldData = null;
   }
 
   async init() {
     const { THREE } = this;
 
-    // Core lights (cheap, readable)
-    const amb = new THREE.AmbientLight(0xffffff, 0.9);
-    const hemi = new THREE.HemisphereLight(0x99bbff, 0x05070a, 0.55);
+    // --- Lighting: bright enough to read geometry but still neon vibe
+    const amb = new THREE.AmbientLight(0xffffff, 0.92);
+    const hemi = new THREE.HemisphereLight(0x99bbff, 0x05070a, 0.6);
     const key = new THREE.DirectionalLight(0xffffff, 0.55);
     key.position.set(8, 18, 10);
     this.scene.add(amb, hemi, key);
 
-    // Small base floor so it’s never black
-    const floor = new THREE.Mesh(
+    // Fog (Quest-safe)
+    this.scene.fog = new THREE.Fog(0x05070a, 18, 120);
+
+    // Safety floor so nothing is black even if world builder fails
+    const safetyFloor = new THREE.Mesh(
       new THREE.CylinderGeometry(12, 12, 0.2, 48),
       new THREE.MeshStandardMaterial({ color: 0x070b10, roughness: 0.95, metalness: 0.05 })
     );
-    floor.position.set(0, -0.1, 0);
-    floor.userData.teleportSurface = true;
-    this.scene.add(floor);
+    safetyFloor.position.set(0, -0.1, 0);
+    safetyFloor.userData.teleportSurface = true;
+    this.scene.add(safetyFloor);
 
-    // Build the “ultimate” world (neon lobby + rooms etc)
-    // This stays modular and only touches scene objects.
-    const worldData = buildUltimateWorld({ THREE, scene: this.scene });
-    this.worldData = worldData;
+    // --- Build Ultimate World (souped up)
+    // returns: { group, teleportSurfaces, pads, update(dt) }
+    this.worldData = buildUltimateWorld({ THREE, scene: this.scene });
 
-    // --- MODULES (plug-in) ---
-    const loading = new LoadingStage({ THREE, scene: this.scene, rig: this.rig, camera: this.camera });
-    const hands = new HandInput({ THREE, renderer: this.renderer, rig: this.rig, camera: this.camera, scene: this.scene });
-    const loco = new HandsLocomotion({ THREE, renderer: this.renderer, rig: this.rig, camera: this.camera });
-    const avatar = new AvatarManager({
+    // --- Modules (plug-in)
+    this.loading = new LoadingStage({ THREE, scene: this.scene, rig: this.rig, camera: this.camera });
+    this.hands = new HandInput({ THREE, renderer: this.renderer, rig: this.rig, camera: this.camera, scene: this.scene });
+    this.loco = new HandsLocomotion({ THREE, renderer: this.renderer, rig: this.rig, camera: this.camera });
+
+    // ✅ Quest-like Meta Style Avatar (NOT user-private avatar)
+    this.avatar = new MetaStyleAvatar({
       THREE,
       scene: this.scene,
       rig: this.rig,
-      camera: this.camera,
-      // Future: provide Meta App ID when there is a web pipeline / IWSDK avatar integration
-      metaAppId: null,
-      // Optional: allow a fallback URL for a GLB avatar you own (ReadyPlayerMe/etc)
-      fallbackAvatarUrl: null
+      camera: this.camera
     });
 
-    // Register modules
-    this.bus.add(loading);
-    this.bus.add(hands);
-    this.bus.add(loco);
-    this.bus.add(avatar);
+    // register in bus
+    this.bus.add(this.loading);
+    this.bus.add(this.hands);
+    this.bus.add(this.loco);
+    this.bus.add(this.avatar);
 
-    // Init modules
+    // init modules
     await this.bus.initAll({
       renderer: this.renderer,
       world: this,
-      worldData
+      worldData: this.worldData
     });
 
-    // Connect locomotion targets
-    loco.setTeleportTargets({
-      pads: worldData.pads,
-      surfaces: worldData.teleportSurfaces
+    // connect locomotion targets (pads + teleport surfaces)
+    this.loco.setTeleportTargets({
+      pads: this.worldData?.pads || [],
+      surfaces: this.worldData?.teleportSurfaces || [safetyFloor]
     });
 
-    // Start in loading phase
+    // --- LOADING PHASE
     this.state.phase = "loading";
-    loading.show("Loading…", "Hands-only XR • pinch to teleport");
 
-    // Begin async “game ready”
-    // (This is where you’d load heavy assets, tables, bots, etc.)
+    // show loading panel
+    this.loading.show("Loading…", "Hands-only XR • pinch to teleport");
+
+    // show avatar in loading mode
+    this.avatar.setMode("loading");
+
+    // "Game ready" transition (replace with real async loads later)
+    // When ready:
     setTimeout(() => {
       this.state.phase = "active";
-      loading.hide();
-      avatar.setMode("world");
-    }, 700);
+      this.loading.hide();
+
+      // avatar enters world mode (stays active)
+      this.avatar.setMode("world");
+    }, 900);
 
     return true;
   }
@@ -121,14 +138,14 @@ export class World {
     const session = this.renderer.xr.getSession?.() || null;
     this.state.xrActive = !!session;
 
-    // Update modules
+    // update world visuals
+    if (this.worldData?.update) this.worldData.update(dt);
+
+    // update modules
     this.bus.updateAll({
       t, dt, frame,
       xrSession: session,
       phase: this.state.phase
     });
-
-    // Update world animations (neon pulse)
-    if (this.worldData?.update) this.worldData.update(dt);
   }
-                 }
+  }

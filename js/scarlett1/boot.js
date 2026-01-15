@@ -1,7 +1,12 @@
-// /js/scarlett1/boot.js — Scarlett 1.0 Boot (FULL)
-// Loads THREE (CDN), World, XR Spine. Adds diagnostic HUD with Hide/Show + Copy Log.
+// /js/scarlett1/boot.js — Scarlett 1.0 Boot (FULL • PERMANENT SPINE)
+// ✅ HUD Diagnostics + Hide/Show + Copy Log
+// ✅ Loads THREE (CDN) -> world.js -> spine_xr.js
+// ✅ Safe module loader (bots + store hook) — never breaks core if missing
 
 (() => {
+  // ------------------------------
+  // Diagnostics + HUD
+  // ------------------------------
   const LOGS = [];
   const now = () => {
     const d = new Date();
@@ -11,31 +16,30 @@
     return `[${h}:${m}:${s}]`;
   };
 
-  const DIAG = {
-    log: (...a) => {
-      const line = `${now()} ${a.map(x => (typeof x === "string" ? x : JSON.stringify(x))).join(" ")}`;
-      LOGS.push(line);
-      console.log(...a);
-      hudAppend(line);
-    },
-    warn: (...a) => {
-      const line = `${now()} WARN ${a.map(x => (typeof x === "string" ? x : JSON.stringify(x))).join(" ")}`;
-      LOGS.push(line);
-      console.warn(...a);
-      hudAppend(line);
-    },
-    error: (...a) => {
-      const line = `${now()} ERROR ${a.map(x => (typeof x === "string" ? x : JSON.stringify(x))).join(" ")}`;
-      LOGS.push(line);
-      console.error(...a);
-      hudAppend(line);
-    },
-    status: (s) => hudStatus(s),
-    getLogs: () => LOGS.join("\n")
-  };
-
-  // --- HUD ---
   let hudRoot, hudLog, hudStatusLine, btnHide, btnShow, btnCopy;
+
+  function buttonCss() {
+    return `
+      appearance:none; border:none; cursor:pointer;
+      padding: 8px 10px; border-radius: 8px;
+      background: rgba(47,107,255,0.18);
+      color: #d9e6ff; font-size: 12px;
+      border: 1px solid rgba(47,107,255,0.35);
+    `;
+  }
+
+  function hudAppend(line) {
+    if (!hudLog) return;
+    const div = document.createElement("div");
+    div.textContent = line;
+    hudLog.appendChild(div);
+    hudLog.scrollTop = hudLog.scrollHeight;
+  }
+
+  function hudStatus(s) {
+    if (hudStatusLine) hudStatusLine.textContent = `STATUS: ${s}`;
+  }
+
   function buildHUD() {
     hudRoot = document.createElement("div");
     hudRoot.id = "scarlettHud";
@@ -58,24 +62,24 @@
     hudStatusLine.textContent = "STATUS: boot.js starting…";
     hudStatusLine.style.cssText = `flex:1; font-size:12px; color:#cfe0ff; opacity:0.95;`;
 
+    btnCopy = document.createElement("button");
+    btnCopy.textContent = "Copy Log";
+    btnCopy.style.cssText = buttonCss();
+    btnCopy.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(LOGS.join("\n"));
+        alert("Copied diagnostics log ✅");
+      } catch (e) {
+        alert("Clipboard blocked. Long-press to copy is required on this device.");
+      }
+    };
+
     btnHide = document.createElement("button");
     btnHide.textContent = "Hide HUD";
     btnHide.style.cssText = buttonCss();
     btnHide.onclick = () => {
       hudRoot.style.display = "none";
       btnShow.style.display = "block";
-    };
-
-    btnCopy = document.createElement("button");
-    btnCopy.textContent = "Copy Log";
-    btnCopy.style.cssText = buttonCss();
-    btnCopy.onclick = async () => {
-      try {
-        await navigator.clipboard.writeText(DIAG.getLogs());
-        alert("Copied diagnostics log ✅");
-      } catch (e) {
-        alert("Clipboard blocked. Long-press to copy is required on this device.");
-      }
     };
 
     top.appendChild(hudStatusLine);
@@ -113,55 +117,82 @@
     document.body.appendChild(btnShow);
   }
 
-  function buttonCss() {
-    return `
-      appearance:none; border:none; cursor:pointer;
-      padding: 8px 10px; border-radius: 8px;
-      background: rgba(47,107,255,0.18);
-      color: #d9e6ff; font-size: 12px;
-      border: 1px solid rgba(47,107,255,0.35);
-    `;
+  const DIAG = {
+    log: (...a) => {
+      const line = `${now()} ${a.map(x => (typeof x === "string" ? x : safeJson(x))).join(" ")}`;
+      LOGS.push(line);
+      console.log(...a);
+      hudAppend(line);
+    },
+    warn: (...a) => {
+      const line = `${now()} WARN ${a.map(x => (typeof x === "string" ? x : safeJson(x))).join(" ")}`;
+      LOGS.push(line);
+      console.warn(...a);
+      hudAppend(line);
+    },
+    error: (...a) => {
+      const line = `${now()} ERROR ${a.map(x => (typeof x === "string" ? x : safeJson(x))).join(" ")}`;
+      LOGS.push(line);
+      console.error(...a);
+      hudAppend(line);
+    },
+    status: (s) => hudStatus(s),
+    getLogs: () => LOGS.join("\n")
+  };
+
+  function safeJson(x) {
+    try { return JSON.stringify(x); } catch { return String(x); }
   }
 
-  function hudAppend(line) {
-    if (!hudLog) return;
-    const div = document.createElement("div");
-    div.textContent = line;
-    hudLog.appendChild(div);
-    // Keep scrolled to bottom
-    hudLog.scrollTop = hudLog.scrollHeight;
-  }
-
-  function hudStatus(s) {
-    if (hudStatusLine) hudStatusLine.textContent = `STATUS: ${s}`;
-  }
-
-  // --- Boot ---
+  // ------------------------------
+  // Boot Runner
+  // ------------------------------
   async function run() {
     buildHUD();
 
-    // env
-    DIAG.log(`${now()} href=${location.href}`);
-    DIAG.log(`${now()} path=${location.pathname}`);
-    DIAG.log(`${now()} base=${location.pathname.split("/").slice(0, 2).join("/") + "/"}`);
-    DIAG.log(`${now()} secureContext=${window.isSecureContext}`);
-    DIAG.log(`${now()} ua=${navigator.userAgent}`);
-    DIAG.log(`${now()} navigator.xr=${!!navigator.xr}`);
+    // Ensure #app exists
+    if (!document.getElementById("app")) {
+      const app = document.createElement("div");
+      app.id = "app";
+      app.style.cssText = "position:fixed; inset:0;";
+      document.body.appendChild(app);
+    }
+
+    // Surface runtime errors to HUD
+    window.addEventListener("error", (e) => {
+      DIAG.error("window error:", e?.message || e);
+    });
+    window.addEventListener("unhandledrejection", (e) => {
+      DIAG.error("unhandledrejection:", e?.reason?.message || e?.reason || e);
+    });
+
+    // Env
+    DIAG.log(`href=${location.href}`);
+    DIAG.log(`path=${location.pathname}`);
+    DIAG.log(`base=${location.pathname.split("/").slice(0, 2).join("/") + "/"}`);
+    DIAG.log(`secureContext=${window.isSecureContext}`);
+    DIAG.log(`ua=${navigator.userAgent}`);
+    DIAG.log(`navigator.xr=${!!navigator.xr}`);
 
     DIAG.status("boot.js running…");
 
     try {
       DIAG.log("boot start ✅");
 
-      // Load THREE from CDN
+      // ------------------------------
+      // Load THREE (CDN)
+      // ------------------------------
       DIAG.status("Loading three.js (CDN)…");
       const THREE = await import("https://unpkg.com/three@0.158.0/build/three.module.js");
       DIAG.log("three import ✅", "https://unpkg.com/three@0.158.0/build/three.module.js");
 
-      // World
+      // ------------------------------
+      // Load World
+      // ------------------------------
       DIAG.status("Loading world.js…");
       const worldUrl = `/scarlett-poker-vr/js/scarlett1/world.js?v=${Date.now()}`;
       DIAG.log("world url=", worldUrl);
+
       const worldMod = await import(worldUrl);
       DIAG.log("world import ✅");
 
@@ -170,9 +201,13 @@
       DIAG.log("world init ✅");
       DIAG.status("World running ✅");
 
-      // XR Spine
+      // ------------------------------
+      // Load XR Spine (PERMANENT CONTROLS)
+      // ------------------------------
       DIAG.status("Loading spine_xr.js…");
       const spineUrl = `/scarlett-poker-vr/js/scarlett1/spine_xr.js?v=${Date.now()}`;
+      DIAG.log("spine url=", spineUrl);
+
       const spineMod = await import(spineUrl);
       DIAG.log("spine import ✅");
 
@@ -180,26 +215,45 @@
       DIAG.log("spine install ✅");
       DIAG.status("XR spine ready ✅ (press Enter VR)");
 
-      // Safety: surface unhandled errors into HUD
-      window.addEventListener("error", (e) => {
-        DIAG.error("window error:", e?.message || e);
-      });
-      window.addEventListener("unhandledrejection", (e) => {
-        DIAG.error("unhandledrejection:", e?.reason?.message || e?.reason || e);
-      });
+      // ------------------------------
+      // SAFE MODULE LOADS (never break core)
+      // ------------------------------
+      DIAG.status("Loading optional modules…");
+
+      // Bots
+      try {
+        const botUrl = `/scarlett-poker-vr/js/scarlett1/modules/bots.js?v=${Date.now()}`;
+        const botMod = await import(botUrl);
+        if (botMod?.Bots?.install) {
+          botMod.Bots.install({ THREE, DIAG, WORLD: window.__SCARLETT1__ });
+          DIAG.log("module bots ✅");
+        } else {
+          DIAG.warn("module bots loaded but missing Bots.install");
+        }
+      } catch (e) {
+        DIAG.warn("module bots missing/fail (safe)", e?.message || e);
+      }
+
+      // Store hook
+      try {
+        const storeHookUrl = `/scarlett-poker-vr/js/scarlett1/modules/store_hook.js?v=${Date.now()}`;
+        const storeMod = await import(storeHookUrl);
+        if (storeMod?.StoreHook?.install) {
+          await storeMod.StoreHook.install({ THREE, DIAG, WORLD: window.__SCARLETT1__ });
+          DIAG.log("module store_hook ✅");
+        } else {
+          DIAG.warn("module store_hook loaded but missing StoreHook.install");
+        }
+      } catch (e) {
+        DIAG.warn("module store_hook missing/fail (safe)", e?.message || e);
+      }
+
+      DIAG.status("All systems ready ✅");
 
     } catch (e) {
       DIAG.error("BOOT FAILED:", e?.message || e);
       DIAG.status("BOOT FAILED ❌ (see log)");
     }
-  }
-
-  // Ensure #app exists
-  if (!document.getElementById("app")) {
-    const app = document.createElement("div");
-    app.id = "app";
-    app.style.cssText = "position:fixed; inset:0;";
-    document.body.appendChild(app);
   }
 
   run();

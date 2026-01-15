@@ -1,27 +1,28 @@
-// /js/scarlett1/boot2.js — Scarlett BOOT2 v3.5 (XR MOVE + SNAP + BUTTONS + RIGHT RETICLE)
-// Fixes:
-// ✅ Teleport reticle ring on floor
-// ✅ Snap turn 45° works (right stick)
-// ✅ Smooth locomotion forward/back + strafe (left stick)
-// ✅ A/B/X/Y buttons work (polled from gamepad)
-// ✅ Reticle prefers RIGHT hand (if available)
+// /js/scarlett1/boot2.js — Scarlett BOOT2 v3.6 (ULTIMATE XR + HUD FIX + MOVE + SNAP + BUTTONS)
+// ✅ Teleport + reticle ring
+// ✅ Snap turn 45° (right stick)
+// ✅ Smooth locomotion forward/back + strafe (left stick) — Quest axis-safe
+// ✅ A/B/X/Y menu bindings (polled from gamepad, reliable)
+// ✅ Reticle prefers RIGHT hand
 // ✅ Controllers parented to PlayerRig (lasers stay on you)
-// ✅ Gaze teleport fallback if inputSources=0
-// ✅ Android sticks outside XR still
+// ✅ Auto-hide HTML HUD overlay in VR (fixes “dark invisible HUD in camera”)
+// ✅ Gaze teleport fallback when inputSources=0
+// ✅ Android sticks outside XR (phone debug)
 
-const BUILD = "BOOT2_SCARLETT1_v3_5_XR_MOVE_SNAP_BUTTONS";
+const BUILD = "BOOT2_SCARLETT1_v3_6_ULTIMATE";
 const nowTs = () => new Date().toLocaleTimeString();
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 function makeHUD() {
   const root = document.createElement("div");
+  root.id = "scarlett-hud";
   root.style.position = "fixed";
   root.style.left = "0";
   root.style.top = "0";
   root.style.width = "100%";
   root.style.maxHeight = "45%";
   root.style.overflow = "auto";
-  root.style.background = "rgba(0,0,0,0.72)";
+  root.style.background = "rgba(0,0,0,0.68)";
   root.style.color = "#8CFF8C";
   root.style.fontFamily = "monospace";
   root.style.fontSize = "12px";
@@ -80,7 +81,7 @@ function makeHUD() {
   const lines = [];
   const push = (s) => {
     lines.push(s);
-    while (lines.length > 900) lines.shift();
+    while (lines.length > 1000) lines.shift();
     pre.textContent = lines.join("\n");
     root.scrollTop = root.scrollHeight;
   };
@@ -111,14 +112,15 @@ function makeHUD() {
     catch (e) { push(`[${nowTs()}] HUD: copy failed ❌ ${e?.message || e}`); }
   };
 
-  // simple toggle API we can call from buttons
   const api = {
     root,
     visible: true,
     toggle() {
       api.visible = !api.visible;
       root.style.display = api.visible ? "block" : "none";
-    }
+    },
+    hide() { api.visible = false; root.style.display = "none"; },
+    show() { api.visible = true; root.style.display = "block"; }
   };
 
   return {
@@ -192,7 +194,7 @@ function makeTeleportReticle(THREE, scene) {
   };
 }
 
-// ---- XR controls (teleport + reticle + snap + smooth move + buttons) ----
+// ---------------- XR Controls ----------------
 function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
   const st = {
     inXR: false,
@@ -216,9 +218,9 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
 
     // movement
     moveEnabled: true,
-    moveSpeed: 2.1,
-    strafeSpeed: 1.9,
-    deadzone: 0.18,
+    moveSpeed: 2.25,
+    strafeSpeed: 2.05,
+    deadzone: 0.16,
 
     // reticle preference
     preferRightReticle: true,
@@ -268,10 +270,13 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
 
   function getRay(controller) {
     if (!controller || !controller.matrixWorld) return null;
+
     st.tmpMat.identity().extractRotation(controller.matrixWorld);
     st.tmpDir.set(0, 0, -1).applyMatrix4(st.tmpMat).normalize();
     st.tmpPos.setFromMatrixPosition(controller.matrixWorld);
+
     if (!isFinite(st.tmpPos.x) || !isFinite(st.tmpPos.y) || !isFinite(st.tmpPos.z)) return null;
+
     return { origin: st.tmpPos.clone(), dir: st.tmpDir.clone() };
   }
 
@@ -281,6 +286,7 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
     if (!c || !rc) return null;
 
     rc.camera = camera;
+
     const ray = getRay(c);
     if (!ray) return null;
 
@@ -332,6 +338,8 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
     for (let i = 0; i < 2; i++) {
       const c = renderer.xr.getController(i);
       c.name = `XR_Controller_${i}`;
+
+      // critical: keep in rig space (prevents lasers “floating away”)
       playerRig.add(c);
 
       const line = makeLine();
@@ -348,6 +356,7 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
       st.lines[i] = line;
       st.raycasters[i] = rc;
     }
+
     hud.log("[xr] controllers installed ✅ (rig)");
   }
 
@@ -369,7 +378,6 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
     if (!session) return { left: null, right: null };
 
     let left = null, right = null;
-
     for (const src of (session.inputSources || [])) {
       const gp = src?.gamepad;
       if (!gp) continue;
@@ -390,27 +398,23 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
 
   function dz(v) { return Math.abs(v) < st.deadzone ? 0 : v; }
 
-  function readAxis(gp, primaryIndex, fallbackIndex) {
-    if (!gp?.axes?.length) return 0;
-    const a = gp.axes[primaryIndex];
-    const b = gp.axes[fallbackIndex];
-    return (typeof a === "number") ? a : ((typeof b === "number") ? b : 0);
-  }
-
   function pollButtons(gp, side) {
     if (!gp?.buttons?.length) return;
 
     const prev = st.prevButtons[side];
     const btn = gp.buttons;
 
-    for (let i = 0; i < Math.min(8, btn.length); i++) {
+    // Quest typical:
+    // Left:  X=0, Y=1
+    // Right: A=0, B=1
+    for (let i = 0; i < Math.min(10, btn.length); i++) {
       const down = !!btn[i]?.pressed;
       const was = !!prev[i];
 
       if (down && !was) {
-        // rising edge
         if (side === "left" && i === 1) { // Y
-          hud.log("Y pressed: toggle HUD");
+          hud.log("Y pressed: toggle HUD (2D only, returns on exit)");
+          // In XR we keep HUD hidden anyway; still allow toggle for debugging if you want:
           hud.api.toggle();
         }
         if (side === "left" && i === 0) { // X
@@ -437,9 +441,13 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
 
   function snapTurn(dt, gpRight) {
     st.lastSnap += dt;
+    if (!gpRight?.axes?.length) return;
 
-    // right stick X is often axes[2] OR axes[0]
-    const x = dz(readAxis(gpRight, 2, 0));
+    // Right stick X can be axes[2] or axes[0], choose stronger
+    const ax0 = gpRight.axes[0] ?? 0;
+    const ax2 = gpRight.axes[2] ?? 0;
+    const x = dz(Math.abs(ax2) > Math.abs(ax0) ? ax2 : ax0);
+
     if (Math.abs(x) < 0.65) return;
     if (st.lastSnap < st.snapCooldown) return;
     st.lastSnap = 0;
@@ -450,13 +458,19 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
 
   function smoothMove(dt, gpLeft) {
     if (!st.moveEnabled) return;
+    if (!gpLeft?.axes?.length) return;
 
-    // left stick: X strafe, Y forward/back (often axes[0]/[1] or [2]/[3])
-    const lx = dz(readAxis(gpLeft, 0, 2));
-    const ly = dz(readAxis(gpLeft, 1, 3)); // forward is usually -Y
+    // Quest left stick can be (0,1) or (2,3). Choose the pair with stronger signal.
+    const ax0 = gpLeft.axes[0] ?? 0;
+    const ax1 = gpLeft.axes[1] ?? 0;
+    const ax2 = gpLeft.axes[2] ?? 0;
+    const ax3 = gpLeft.axes[3] ?? 0;
 
-    const forward = -ly;
-    const strafe = lx;
+    const lx = (Math.abs(ax0) >= Math.abs(ax2)) ? ax0 : ax2;
+    const ly = (Math.abs(ax1) >= Math.abs(ax3)) ? ax1 : ax3;
+
+    const strafe = dz(lx);
+    const forward = dz(-ly); // forward usually -Y
 
     if (forward === 0 && strafe === 0) return;
 
@@ -516,16 +530,26 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
 
   renderer.xr.addEventListener("sessionstart", () => {
     st.inXR = true;
+
+    // recenter (keep it simple; you can rotate later with snap)
     playerRig.position.y = 0;
-    hud.log("[xr] sessionstart ✅");
+
+    // ✅ KEY FIX: hide HTML HUD overlay in VR (prevents dark “camera overlay”)
+    hud.api.hide();
+
     setupControllers();
+    hud.log("[xr] sessionstart ✅ (HUD hidden)");
   });
 
   renderer.xr.addEventListener("sessionend", () => {
     st.inXR = false;
     teardownControllers();
     reticle.hide();
-    hud.log("[xr] sessionend ✅");
+
+    // bring HUD back for debugging
+    hud.api.show();
+
+    hud.log("[xr] sessionend ✅ (HUD shown)");
   });
 
   return {
@@ -541,7 +565,7 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
       }
       if (!st.inXR) return;
 
-      // Rays / hits
+      // Ray hits
       for (let i = 0; i < 2; i++) {
         if (!st.controllers[i] || !st.lines[i] || !st.raycasters[i]) continue;
         const res = intersect(i);
@@ -552,7 +576,6 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
       const { left: gpL, right: gpR } = getGamepads();
       pollButtons(gpL, "left");
       pollButtons(gpR, "right");
-
       snapTurn(dt, gpR);
       smoothMove(dt, gpL);
 
@@ -563,7 +586,7 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
   };
 }
 
-// ---- Android sticks (non-XR only) ----
+// ---------------- Android Sticks (non-XR) ----------------
 function installAndroidSticks({ playerRig, hud }) {
   const root = document.createElement("div");
   root.id = "scarlett-sticks";
@@ -691,6 +714,7 @@ function installAndroidSticks({ playerRig, hud }) {
   renderer.xr.enabled = true;
   renderer.xr.setReferenceSpaceType("local-floor");
 
+  // Quest comfort/perf
   if (renderer.xr.setFramebufferScaleFactor) renderer.xr.setFramebufferScaleFactor(0.7);
   if (renderer.xr.setFoveation) renderer.xr.setFoveation(1);
 
@@ -699,7 +723,7 @@ function installAndroidSticks({ playerRig, hud }) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05070a);
 
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 260);
   camera.position.set(0, 1.6, 10);
 
   const playerRig = new THREE.Group();
@@ -769,6 +793,7 @@ function installAndroidSticks({ playerRig, hud }) {
   });
 
   hud.log("begin async world load…");
+  // IMPORTANT: world is in same folder as boot2.js now: /js/scarlett1/
   const worldMod = await safeImport(hud, `./world.js?v=${Date.now()}`, "world.js");
   const initWorld = worldMod.initWorld || worldMod.default?.initWorld;
   if (!initWorld) throw new Error("world.js missing export initWorld()");

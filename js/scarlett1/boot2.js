@@ -1,228 +1,411 @@
-// /js/scarlett1/boot2.js — Scarlett Boot2 (FULL) v2.0
-// ✅ No bare "three" imports anywhere except unpkg absolute
-// ✅ World gets THREE injected (world.js must NOT import "three")
-// ✅ Android controls only when NOT in XR
-// ✅ Oculus controllers locomotion supported via /js/core/controls.js
-// ✅ Handles failures -> updates HUD status instead of hanging "Booting…"
+// /js/scarlett1/boot2.js — Scarlett Boot2 (FULL / GitHub Pages Safe)
+// ✅ CDN imports only (no "three" bare specifier)
+// ✅ Diagnostics HUD
+// ✅ VRButton
+// ✅ Controllers + Hands (best-effort) + Teleport (ray + simple arc hint)
+// ✅ Quest thumbsticks locomotion via /js/core/controls.js (NO three import)
+// ✅ Android sticks overlay via ./spine_android.js (non-XR only)
 
-const DIAG = window.SCARLETT_DIAG || {
-  log: (...a)=>console.log("[diag]",...a),
-  setStatus: ()=>{},
-  setHUDVisible: ()=>{}
+const BUILD = "BOOT2_FULL_v1.0";
+
+const $ = (id) => document.getElementById(id);
+
+const diag = {
+  logEl: $("diagLog"),
+  statusEl: $("diagStatus"),
+  setStatus(text, ok = true) {
+    if (!this.statusEl) return;
+    this.statusEl.innerHTML = `STATUS: <b style="color:${ok ? "#6df29b" : "#ff6d6d"}">${text}</b>`;
+  },
+  ts() {
+    const d = new Date();
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
+    return `[${hh}:${mm}:${ss}]`;
+  },
+  write(...a) {
+    const line = `${this.ts()} ${a.join(" ")}\n`;
+    if (this.logEl) {
+      this.logEl.textContent += line;
+      this.logEl.scrollTop = this.logEl.scrollHeight;
+    }
+    console.log("[diag]", ...a);
+  }
 };
 
-const log = (...a)=>DIAG.log(...a);
+function wireHUD() {
+  const hide = $("btnHideHud");
+  const show = $("btnShowHud");
+  const copy = $("btnCopy");
+  const clear = $("btnClear");
+  const reload = $("btnReload");
 
-function urlRel(rel){
-  return new URL(rel, import.meta.url).toString();
+  hide?.addEventListener("click", () => document.body.classList.add("hudHidden"));
+  show?.addEventListener("click", () => document.body.classList.remove("hudHidden"));
+  clear?.addEventListener("click", () => { if (diag.logEl) diag.logEl.textContent = ""; });
+  reload?.addEventListener("click", () => location.reload());
+
+  copy?.addEventListener("click", async () => {
+    try {
+      const txt = diag.logEl?.textContent || "";
+      await navigator.clipboard.writeText(txt);
+      diag.write("copied ✅");
+    } catch (e) {
+      diag.write("copy failed ❌", e?.message || e);
+    }
+  });
 }
 
-async function safeImport(label, u){
-  try{
-    log(`[boot2] import ${u}`);
-    const m = await import(u);
-    log(`[boot2] ok ✅ ${label}`);
+wireHUD();
+
+diag.write("diag start ✅");
+diag.write("href=" + location.href);
+diag.write("path=" + location.pathname);
+diag.write("base=" + (location.pathname.replace(/\/[^\/]*$/, "/")));
+diag.write("secureContext=" + (window.isSecureContext ? "true" : "false"));
+diag.write("ua=" + navigator.userAgent);
+diag.write("navigator.xr=" + (!!navigator.xr));
+
+let THREE, VRButton;
+let renderer, scene, camera, player;
+let worldAPI = null;
+
+const CDN_THREE = "https://unpkg.com/three@0.158.0/build/three.module.js";
+const CDN_VRBUTTON = "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
+const CDN_XRHAND = "https://unpkg.com/three@0.158.0/examples/jsm/webxr/XRHandModelFactory.js";
+
+async function safeImport(url, label) {
+  try {
+    diag.write(`[boot2] import ${url}`);
+    const m = await import(url);
+    diag.write(`[boot2] ok ✅ ${label || url}`);
     return m;
-  }catch(e){
-    log(`[boot2] fail ❌ ${label} :: ${e?.message||e}`);
+  } catch (e) {
+    diag.write(`[boot2] fail ❌ ${label || url} :: ${e?.message || e}`);
     throw e;
   }
 }
 
-let THREE, VRButton;
-let renderer, scene, camera, player, cameraPitch;
-let controllers = { c0:null, c1:null, g0:null, g1:null };
-let updateWorld = null;
-let controlsMod = null;
-let androidMod = null;
-
-function makeRenderer(){
-  renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+function ensureRenderer() {
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.xr.enabled = true;
   document.body.appendChild(renderer.domElement);
 
-  window.addEventListener("resize", ()=>{
-    renderer.setSize(window.innerWidth, window.innerHeight);
+  window.addEventListener("resize", () => {
+    if (!renderer || !camera) return;
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
   });
 }
 
-function makeRig(){
+function makeCoreScene() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05070c);
 
-  // Player rig
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 400);
+  camera.position.set(0, 1.65, 4);
+
   player = new THREE.Group();
+  player.name = "PlayerRig";
+  player.position.set(0, 0, 0);
+  player.add(camera);
   scene.add(player);
 
-  cameraPitch = new THREE.Group();
-  player.add(cameraPitch);
-
-  camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.05, 600);
-  camera.position.set(0, 1.6, 0);
-  cameraPitch.add(camera);
-
-  // small ambient to avoid black
-  const amb = new THREE.AmbientLight(0xffffff, 0.35);
-  scene.add(amb);
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x203050, 0.8);
+  scene.add(hemi);
 }
 
-function installControllers(){
-  // controller grips / pointers
-  controllers.c0 = renderer.xr.getController(0);
-  controllers.c1 = renderer.xr.getController(1);
-  controllers.g0 = renderer.xr.getControllerGrip(0);
-  controllers.g1 = renderer.xr.getControllerGrip(1);
+function addVRButton() {
+  const btn = VRButton.createButton(renderer);
+  btn.style.position = "fixed";
+  btn.style.right = "14px";
+  btn.style.bottom = "14px";
+  btn.style.zIndex = "99999";
+  document.body.appendChild(btn);
+  diag.write("VRButton ready ✅");
+}
 
-  scene.add(controllers.c0, controllers.c1, controllers.g0, controllers.g1);
-
-  // visible rays
-  const rayGeo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0,0,0),
-    new THREE.Vector3(0,0,-1)
-  ]);
-  const rayMat = new THREE.LineBasicMaterial({ color: 0x66ccff });
-  const mkRay = ()=>{
-    const line = new THREE.Line(rayGeo, rayMat);
-    line.name = "laser";
-    line.scale.z = 6;
-    return line;
+function installControllers() {
+  const controllers = {
+    c0: { grip: null, ctrl: null, gamepad: null },
+    c1: { grip: null, ctrl: null, gamepad: null }
   };
-  controllers.c0.add(mkRay());
-  controllers.c1.add(mkRay());
-}
 
-async function installXRHands(){
-  // Optional: hands (won’t crash if not supported)
-  try{
-    const XRHandModelFactory = (await import("https://unpkg.com/three@0.158.0/examples/jsm/webxr/XRHandModelFactory.js")).XRHandModelFactory;
-    const factory = new XRHandModelFactory();
+  function attach(i) {
+    const ctrl = renderer.xr.getController(i);
+    const grip = renderer.xr.getControllerGrip(i);
 
-    const hand0 = renderer.xr.getHand(0);
-    const hand1 = renderer.xr.getHand(1);
-    hand0.add(factory.createHandModel(hand0, "mesh"));
-    hand1.add(factory.createHandModel(hand1, "mesh"));
-    scene.add(hand0, hand1);
+    ctrl.name = `XRController${i}`;
+    grip.name = `XRGrip${i}`;
 
-    log("XR hands ready ✅");
-  }catch(e){
-    log("XR hands skipped (ok) ::", e?.message||e);
-  }
-}
+    player.add(ctrl);
+    player.add(grip);
 
-async function main(){
-  DIAG.setStatus("Booting…", null);
+    controllers["c" + i].ctrl = ctrl;
+    controllers["c" + i].grip = grip;
 
-  try{
-    // THREE
-    const threeURL = "https://unpkg.com/three@0.158.0/build/three.module.js";
-    THREE = (await safeImport("three", threeURL));
-    THREE = THREE.default || THREE;
-    log(`[boot2] three import ✅ r${THREE.REVISION||"?"}`);
-
-    // VRButton
-    const vrURL = "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
-    ({ VRButton } = await safeImport("VRButton", vrURL));
-    log("VRButton ready ✅");
-
-    makeRenderer();
-    makeRig();
-    installControllers();
-    await installXRHands();
-
-    // Add VRButton
-    document.body.appendChild(VRButton.createButton(renderer));
-
-    // Core controls (Quest thumbsticks locomotion)
-    controlsMod = await safeImport("controls", urlRel("../core/controls.js"));
-    log("core controls loaded ✅");
-
-    // Android sticks (only 2D)
-    try{
-      androidMod = await safeImport("spine_android", urlRel("./spine_android.js"));
-    }catch(e){
-      androidMod = null;
-    }
-
-    // World (must NOT import "three")
-    const worldURL = urlRel("./world.js");
-    log(`[boot2] world url=${worldURL}`);
-    const worldMod = await safeImport("world", worldURL);
-
-    if (!worldMod?.initWorld) throw new Error("world.js missing export initWorld()");
-    const out = await worldMod.initWorld({
-      THREE,
-      scene,
-      renderer,
-      camera,
-      player,
-      cameraPitch,
-      controllers,
-      log
+    ctrl.addEventListener("connected", (e) => {
+      controllers["c" + i].gamepad = e.data?.gamepad || null;
+      diag.write(`controller${i} connected ✅`, controllers["c" + i].gamepad ? "(gamepad ok)" : "(no gamepad)");
     });
 
-    updateWorld = out?.update || null;
+    ctrl.addEventListener("disconnected", () => {
+      controllers["c" + i].gamepad = null;
+      diag.write(`controller${i} disconnected`);
+    });
 
-    // Android init
-    if (androidMod?.initAndroidSticks){
-      androidMod.initAndroidSticks({
-        renderer,
+    return ctrl;
+  }
+
+  attach(0);
+  attach(1);
+
+  return controllers;
+}
+
+function installHandsBestEffort() {
+  // If this fails, we continue (teleport + controllers still work).
+  return (async () => {
+    try {
+      const { XRHandModelFactory } = await safeImport(CDN_XRHAND, "XRHands");
+      const factory = new XRHandModelFactory();
+
+      const hand0 = renderer.xr.getHand(0);
+      const hand1 = renderer.xr.getHand(1);
+      hand0.name = "XRHand0";
+      hand1.name = "XRHand1";
+
+      player.add(hand0);
+      player.add(hand1);
+
+      const m0 = factory.createHandModel(hand0, "mesh");
+      const m1 = factory.createHandModel(hand1, "mesh");
+      hand0.add(m0);
+      hand1.add(m1);
+
+      diag.write("XR hands ready ✅");
+      return { hand0, hand1 };
+    } catch (e) {
+      diag.write("XR hands skipped (ok) :: " + (e?.message || e));
+      return null;
+    }
+  })();
+}
+
+function makeTeleportFX() {
+  const rayMat = new THREE.LineBasicMaterial({ color: 0x66aaff, transparent: true, opacity: 0.9 });
+  const rayGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]);
+  const rayLine = new THREE.Line(rayGeom, rayMat);
+  rayLine.name = "TeleportRay";
+  rayLine.visible = false;
+  scene.add(rayLine);
+
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.16, 0.22, 32),
+    new THREE.MeshBasicMaterial({ color: 0x66aaff, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
+  );
+  ring.name = "TeleportRing";
+  ring.rotation.x = -Math.PI / 2;
+  ring.visible = false;
+  scene.add(ring);
+
+  return { rayLine, ring };
+}
+
+function updateTeleportFX(fx, originObj, hitPoint) {
+  if (!fx || !originObj || !hitPoint) return;
+
+  const o = new THREE.Vector3();
+  originObj.getWorldPosition(o);
+
+  fx.rayLine.visible = true;
+  fx.ring.visible = true;
+
+  const pts = [o, hitPoint.clone()];
+  fx.rayLine.geometry.setFromPoints(pts);
+
+  fx.ring.position.copy(hitPoint);
+  fx.ring.position.y += 0.01;
+}
+
+function hideTeleportFX(fx) {
+  if (!fx) return;
+  fx.rayLine.visible = false;
+  fx.ring.visible = false;
+}
+
+async function main() {
+  diag.setStatus("Booting…", true);
+
+  // Import THREE
+  THREE = await safeImport(CDN_THREE, "three");
+  THREE = THREE.default || THREE;
+  window.THREE = THREE; // ✅ critical: other modules use injected/global THREE
+  diag.write(`[boot2] three import ✅ r${THREE.REVISION}`);
+
+  // Import VRButton
+  ({ VRButton } = await safeImport(CDN_VRBUTTON, "VRButton"));
+
+  ensureRenderer();
+  makeCoreScene();
+  addVRButton();
+
+  // Controllers & hands
+  const controllers = installControllers();
+  const hands = await installHandsBestEffort();
+
+  // Teleport FX
+  const teleportFX = makeTeleportFX();
+  const raycaster = new THREE.Raycaster();
+  const tmpV = new THREE.Vector3();
+  const tmpDir = new THREE.Vector3();
+
+  // Load World
+  const worldURL = new URL("./world.js", import.meta.url).toString();
+  diag.write("[boot2] world url=" + worldURL);
+  const worldMod = await safeImport(worldURL, "world.js");
+
+  if (typeof worldMod.initWorld !== "function") {
+    throw new Error("world.js missing export initWorld()");
+  }
+
+  diag.write("initWorld() start");
+  worldAPI = await worldMod.initWorld({
+    THREE,
+    scene,
+    renderer,
+    camera,
+    player,
+    log: (...a) => diag.write(...a),
+  });
+  diag.write("initWorld() completed ✅");
+
+  // Controls (Quest locomotion)
+  let Controls = null;
+  try {
+    const controlsURL = new URL("../core/controls.js", import.meta.url).toString()
+      .replace("/js/scarlett1/", "/js/"); // ensure /js/core/controls.js
+    const mod = await safeImport(controlsURL, "controls");
+    Controls = mod?.Controls || null;
+    if (Controls?.applyLocomotion) diag.write("Quest locomotion module ready ✅");
+  } catch (e) {
+    diag.write("controls load skipped ❌ " + (e?.message || e));
+  }
+
+  // Android sticks overlay (non-XR)
+  let androidAPI = null;
+  try {
+    const spineAndroidURL = new URL("./spine_android.js", import.meta.url).toString();
+    const m = await safeImport(spineAndroidURL, "spine_android");
+    androidAPI = m || null;
+    if (androidAPI?.initAndroidSticks) {
+      androidAPI.initAndroidSticks({
         player,
-        cameraPitch,
-        log,
-        setHUDVisible: DIAG.setHUDVisible
+        camera,
+        log: (...a) => diag.write(...a),
       });
-      log("Android sticks READY ✅");
-    }else{
-      log("Android sticks skipped (no initAndroidSticks export)");
+      diag.write("Android sticks READY ✅");
     }
+  } catch (e) {
+    diag.write("Android sticks skipped ❌ " + (e?.message || e));
+  }
 
-    // XR session logging
-    renderer.xr.addEventListener("sessionstart", ()=>log("XR session start ✅"));
-    renderer.xr.addEventListener("sessionend", ()=>log("XR session end ✅"));
+  // XR session hooks
+  renderer.xr.addEventListener("sessionstart", () => {
+    diag.write("XR session start ✅");
+    // Hide android overlay once XR starts
+    androidAPI?.setEnabled?.(false);
+  });
+  renderer.xr.addEventListener("sessionend", () => {
+    diag.write("XR session end");
+    androidAPI?.setEnabled?.(true);
+  });
 
-    DIAG.setStatus("World running ✅", true);
+  // Teleport: triggers OR right index pinch (best effort)
+  let pendingTeleport = null;
 
-    // Render loop
-    let last = performance.now();
-    renderer.setAnimationLoop((t)=>{
-      const now = t || performance.now();
-      const dt = Math.min(0.05, (now - last) / 1000);
-      last = now;
+  function tryTeleportFrom(obj) {
+    if (!obj) return null;
+    obj.getWorldPosition(tmpV);
+    obj.getWorldDirection(tmpDir);
+    tmpDir.normalize();
 
-      // Update world
-      if (updateWorld) updateWorld(dt);
+    raycaster.set(tmpV, tmpDir);
+    const hit = worldAPI?.raycastFloor?.(raycaster);
+    if (hit) return hit;
+    return null;
+  }
 
-      // Oculus thumbstick locomotion (only in XR)
-      try{
-        controlsMod?.Controls?.applyLocomotion?.({
-          renderer,
-          player,
-          controllers,
-          camera,
-          diagonal45: false // you can turn this on later if you want 45° snapping
-        }, dt);
-      }catch(e){ /* keep loop alive */ }
+  function bindTeleportController(ctrl) {
+    if (!ctrl) return;
 
-      // Android movement (only not in XR)
-      try{
-        androidMod?.updateAndroidSticks?.(dt);
-      }catch(e){ /* keep loop alive */ }
-
-      renderer.render(scene, camera);
+    ctrl.addEventListener("selectstart", () => {
+      const hit = tryTeleportFrom(ctrl);
+      if (hit) pendingTeleport = hit.clone();
     });
 
-    log("render loop start ✅");
-    log("[boot2] done ✅");
+    ctrl.addEventListener("selectend", () => {
+      if (pendingTeleport) {
+        // Move player so camera lands on hit
+        const camWorld = new THREE.Vector3();
+        camera.getWorldPosition(camWorld);
+        const delta = pendingTeleport.clone().sub(camWorld);
+        delta.y = 0;
+        player.position.add(delta);
 
-  }catch(e){
-    DIAG.setStatus("BOOT FAILED ❌", false);
-    log("BOOT ERROR:", e?.message||e);
-    // keep page responsive; do not throw further
+        pendingTeleport = null;
+        hideTeleportFX(teleportFX);
+      }
+    });
   }
+
+  bindTeleportController(controllers.c0.ctrl);
+  bindTeleportController(controllers.c1.ctrl);
+
+  // Render loop
+  let last = performance.now();
+  diag.write("render loop start ✅");
+  diag.setStatus("World running ✅", true);
+
+  renderer.setAnimationLoop(() => {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+
+    // World updates
+    worldAPI?.update?.(dt);
+
+    // Android controls (non-XR only)
+    if (!renderer.xr.isPresenting) {
+      androidAPI?.update?.(dt);
+    }
+
+    // Quest locomotion (XR only)
+    if (renderer.xr.isPresenting && Controls?.applyLocomotion) {
+      Controls.applyLocomotion({ renderer, player, controllers, camera }, dt);
+    }
+
+    // Teleport FX preview
+    if (renderer.xr.isPresenting) {
+      const src = controllers?.c0?.ctrl || controllers?.c1?.ctrl;
+      const hit = src ? tryTeleportFrom(src) : null;
+      if (hit) updateTeleportFX(teleportFX, src, hit);
+      else hideTeleportFX(teleportFX);
+    } else {
+      hideTeleportFX(teleportFX);
+    }
+
+    renderer.render(scene, camera);
+  });
 }
 
-main();
+main().catch((e) => {
+  diag.setStatus("BOOT FAILED ❌", false);
+  diag.write("BOOT ERROR:", e?.message || e);
+  console.error(e);
+});

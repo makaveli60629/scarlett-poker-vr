@@ -1,5 +1,6 @@
 // /js/scarlett1/world.js — Scarlett World (Module Spine) v3.0
 import { C } from "./world_constants.js";
+import { buildSignage } from "./world_signage.js";
 import { makeMaterials } from "./world_materials.js";
 import { addLights } from "./world_lights.js";
 import { buildLayout } from "./world_layout.js";

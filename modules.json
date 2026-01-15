@@ -2,20 +2,8 @@
   "version": "scarlett-modules-1.0",
   "modules": [
     {
-      "name": "lighting",
-      "url": "/scarlett-poker-vr/js/lighting.js"
-    },
-    {
-      "name": "humanoids",
-      "url": "/scarlett-poker-vr/js/humanoids.js"
-    },
-    {
-      "name": "cards_chips",
-      "url": "/scarlett-poker-vr/js/cards.js"
-    },
-    {
-      "name": "store_system",
-      "url": "/scarlett-poker-vr/js/store.js"
+      "name": "poker_module",
+      "url": "/scarlett-poker-vr/js/scarlett1/addons/poker_module.js"
     }
   ]
 }

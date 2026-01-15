@@ -1,11 +1,9 @@
-// /js/scarlett1/spine_xr.js — Scarlett XR Spine v2.2 (TELEPORT TRIGGER FIX)
-// ✅ Right stick movement correct (no invert)
-// ✅ Right stick X snap turn 45°
-// ✅ Teleport: RIGHT trigger works via GAMEPAD polling (reliable on Quest)
-// ✅ Teleport also still listens for selectstart as fallback
-// ✅ Left controller ignored (fine for now)
-// ✅ Glow arc + reticle
-// ✅ Menu disabled (no black face-blocker)
+// /js/scarlett1/spine_xr.js — Scarlett XR Spine v2.3 (LOOK-DIRECTION MOVE)
+// ✅ Forward/back ALWAYS follows where you LOOK (camera forward, flattened to XZ)
+// ✅ Snap turn 45° still works (right stick X)
+// ✅ Teleport trigger works via polling (right trigger)
+// ✅ Teleport arc + glow
+// ✅ On XR sessionstart, auto-face toward the lobby/table (so you don't start staring at a wall)
 
 export async function installXR({ THREE, DIAG }) {
   const D = DIAG || console;
@@ -42,7 +40,7 @@ export async function installXR({ THREE, DIAG }) {
     return;
   }
 
-  // Controllers + lasers (visual)
+  // Controllers + lasers
   const controllerL = renderer.xr.getController(0);
   const controllerR = renderer.xr.getController(1);
   rig.add(controllerL);
@@ -98,7 +96,8 @@ export async function installXR({ THREE, DIAG }) {
 
   function teleportToPad(pad) {
     if (!pad?.userData?.teleportPos) return false;
-    const yaw = (pad.userData.yaw != null) ? pad.userData.yaw : (player?.yaw ?? rig.rotation.y ?? 0);
+    // Keep your current rig yaw when teleporting, unless pad has yaw
+    const yaw = (pad.userData.yaw != null) ? pad.userData.yaw : (rig.rotation.y ?? 0);
     teleportTo(pad.userData.teleportPos, yaw);
     D.log("[teleport] →", pad.userData.label || "PAD");
     return true;
@@ -106,13 +105,12 @@ export async function installXR({ THREE, DIAG }) {
 
   function teleportToPointXZ(x, z) {
     if (!canStand(x, z)) return false;
-    const yaw = player?.yaw ?? rig.rotation.y ?? 0;
-    teleportTo(new THREE.Vector3(x, 0, z), yaw);
+    teleportTo(new THREE.Vector3(x, 0, z), rig.rotation.y ?? 0);
     D.log("[teleport] → point", { x, z });
     return true;
   }
 
-  // Teleport visuals (arc + reticle)
+  // Teleport visuals
   const ARC_SEG = 32;
   const arcPos = new Float32Array((ARC_SEG + 1) * 3);
   const arcCol = new Float32Array((ARC_SEG + 1) * 3);
@@ -159,9 +157,8 @@ export async function installXR({ THREE, DIAG }) {
     arcCol[i * 3 + 2] = 0.55 + 0.45 * Math.sin(a + 4.2);
   }
 
-  // Store last target so trigger can teleport reliably
   let lastHitPad = null;
-  let lastHitPoint = null; // THREE.Vector3 (y ~ 0)
+  let lastHitPoint = null;
 
   function buildArc(ctrl) {
     const { origin, dir } = getRay(ctrl);
@@ -202,7 +199,6 @@ export async function installXR({ THREE, DIAG }) {
       return;
     }
 
-    // find pad under point
     const downO = hitPoint.clone().add(new THREE.Vector3(0, 1.0, 0));
     const downD = new THREE.Vector3(0, -1, 0);
     const pad = hitPadFromRay(downO, downD);
@@ -212,9 +208,9 @@ export async function installXR({ THREE, DIAG }) {
 
     arcLine.visible = true;
     arcGlow.visible = true;
-
     reticleRing.visible = true;
     reticleGlow.visible = true;
+
     reticleRing.position.copy(hitPoint);
     reticleGlow.position.copy(hitPoint);
 
@@ -224,53 +220,33 @@ export async function installXR({ THREE, DIAG }) {
     reticleGlow.material.opacity = ok ? 0.28 : 0.12;
   }
 
-  // Fallback: still try selectstart if Quest sends it
-  controllerR.addEventListener("selectstart", () => {
-    try {
-      if (lastHitPad) teleportToPad(lastHitPad);
-      else if (lastHitPoint) teleportToPointXZ(lastHitPoint.x, lastHitPoint.z);
-    } catch (e) {
-      D.error("[teleport] selectstart error", e?.message || e);
-    }
-  });
-
-  // --- Reliable RIGHT trigger polling ---
+  // Gamepad (right)
   function getRightGamepad() {
     const s = renderer.xr.getSession?.();
     if (!s) return null;
-    // Prefer handedness=right
     for (const src of s.inputSources) {
       if (src?.handedness === "right" && src?.gamepad) return src.gamepad;
     }
-    // fallback: first available
     for (const src of s.inputSources) {
       if (src?.gamepad) return src.gamepad;
     }
     return null;
   }
 
-  // Trigger edge detect
   let prevTrigger = false;
-
-  function readTriggerPressed(gp) {
+  function triggerPressed(gp) {
     if (!gp?.buttons?.length) return false;
-    // Quest Touch usually: trigger = buttons[0], squeeze = buttons[1]
-    const b0 = gp.buttons[0]?.pressed;
-    const b1 = gp.buttons[1]?.pressed;
-    // Accept either to make it impossible to miss
-    return !!(b0 || b1);
+    return !!(gp.buttons[0]?.pressed || gp.buttons[1]?.pressed);
   }
 
-  function axis(v, dead = 0.18) {
-    return Math.abs(v) > dead ? v : 0;
-  }
-
-  // Movement mapping (RIGHT stick + snap turn)
+  // Controls
+  const DEAD = 0.18;
   const MOVE_SPEED = 1.35;
-  const STRAFE_SPEED = 1.15;
   const TURN_ANGLE = (45 * Math.PI) / 180;
   const TURN_COOLDOWN = 0.30;
   let turnCD = 0;
+
+  function axis(v) { return Math.abs(v) > DEAD ? v : 0; }
 
   function tryMove(newX, newZ) {
     if (typeof blockedXZ === "function" && blockedXZ(newX, newZ)) return false;
@@ -279,38 +255,43 @@ export async function installXR({ THREE, DIAG }) {
     return true;
   }
 
-  function moveForward(dt, amt) {
-    const yaw = player.yaw ?? rig.rotation.y ?? 0;
-    const fwdX = Math.sin(yaw);
-    const fwdZ = -Math.cos(yaw);
-    tryMove(
-      rig.position.x + fwdX * (amt * MOVE_SPEED * dt),
-      rig.position.z + fwdZ * (amt * MOVE_SPEED * dt)
-    );
-  }
+  // ✅ MOVE BASED ON CAMERA LOOK DIRECTION (flattened)
+  const camForward = new THREE.Vector3();
+  function moveLookForward(dt, amt) {
+    // camera world forward
+    camera.getWorldDirection(camForward);
+    camForward.y = 0;
+    if (camForward.lengthSq() < 1e-6) return;
+    camForward.normalize();
 
-  function strafe(dt, amt) {
-    const yaw = player.yaw ?? rig.rotation.y ?? 0;
-    const rightX = Math.cos(yaw);
-    const rightZ = Math.sin(yaw);
-    tryMove(
-      rig.position.x + rightX * (amt * STRAFE_SPEED * dt),
-      rig.position.z + rightZ * (amt * STRAFE_SPEED * dt)
-    );
+    const dx = camForward.x * (amt * MOVE_SPEED * dt);
+    const dz = camForward.z * (amt * MOVE_SPEED * dt);
+    tryMove(rig.position.x + dx, rig.position.z + dz);
   }
 
   function snapTurn(dir) {
-    const yaw = (player.yaw ?? rig.rotation.y ?? 0) + dir * TURN_ANGLE;
-    player.yaw = yaw;
+    rig.rotation.y += dir * TURN_ANGLE;
+    // keep player yaw in sync (optional)
+    player.yaw = rig.rotation.y;
+  }
+
+  function faceTowardLobby() {
+    // Table is at (0,0). Face from current rig position to origin.
+    const dx = 0 - rig.position.x;
+    const dz = 0 - rig.position.z;
+    const yaw = Math.atan2(dx, -dz);
     rig.rotation.y = yaw;
+    player.yaw = yaw;
+    D.log("[xr] auto-faced toward lobby/table ✅");
   }
 
   renderer.xr.addEventListener("sessionstart", () => {
-    rig.rotation.y = player.yaw ?? rig.rotation.y;
+    // On entering VR, auto-face toward the table/lobby
+    faceTowardLobby();
     D.log("[xr] sessionstart ✅");
   });
 
-  // Hook into world loop
+  // Hook loop
   addFrameHook(({ dt }) => {
     if (!renderer.xr.isPresenting) {
       arcLine.visible = false;
@@ -320,25 +301,22 @@ export async function installXR({ THREE, DIAG }) {
       return;
     }
 
-    // Always update arc from RIGHT controller
+    // Arc from RIGHT hand
     try { buildArc(controllerR); } catch {}
 
     const gpR = getRightGamepad();
     if (!gpR) return;
 
-    // RIGHT stick axes: prefer [2],[3]
+    // Right stick axes
     let rX = 0, rY = 0;
     if (gpR.axes?.length >= 4) { rX = gpR.axes[2] || 0; rY = gpR.axes[3] || 0; }
     else if (gpR.axes?.length >= 2) { rX = gpR.axes[0] || 0; rY = gpR.axes[1] || 0; }
 
-    // Forward/back (RIGHT stick Y) — your current correct orientation
+    // Forward/back follows LOOK direction
     const fwdAmt = axis(rY);
-    if (fwdAmt) moveForward(dt, fwdAmt);
+    if (fwdAmt) moveLookForward(dt, fwdAmt);
 
-    // Optional strafe with RIGHT stick X? (you didn’t request this)
-    // We keep strafe OFF here to avoid fighting snap turn.
-
-    // Snap turn from RIGHT stick X
+    // Snap turn from right stick X
     const turnAmt = axis(rX);
     turnCD -= dt;
     if (turnCD <= 0 && turnAmt !== 0) {
@@ -346,10 +324,9 @@ export async function installXR({ THREE, DIAG }) {
       turnCD = TURN_COOLDOWN;
     }
 
-    // ✅ Trigger teleport (press edge)
-    const trig = readTriggerPressed(gpR);
+    // Trigger teleport edge
+    const trig = triggerPressed(gpR);
     if (trig && !prevTrigger) {
-      // Prefer pad teleport; else teleport to point
       if (lastHitPad) teleportToPad(lastHitPad);
       else if (lastHitPoint) teleportToPointXZ(lastHitPoint.x, lastHitPoint.z);
     }
@@ -358,5 +335,5 @@ export async function installXR({ THREE, DIAG }) {
     camera.rotation.x = player.pitch ?? 0;
   });
 
-  D.log("[xr] installed ✅ (trigger teleport via polling)");
-          }
+  D.log("[xr] installed ✅ (look-direction forward)");
+    }

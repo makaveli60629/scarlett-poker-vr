@@ -1,7 +1,9 @@
-// /js/scarlett1/world.js — Scarlett 1 World v4
-// ✅ Force spawn to pad (never table center)
-// ✅ Spawn Pads + Anti-stuck safety snap
-// ✅ Exposes __SCARLETT1__ for XR + locomotion modules
+// /js/scarlett1/world.js — Scarlett 1 World v5
+// ✅ Spawn in ROOM (default STORE_CENTER)
+// ✅ PlayerRig group so camera + controllers/lasers move together
+// ✅ Solid colliders for walls / pit / table
+// ✅ Spawn safety: never spawn inside objects; auto-picks next pad if blocked
+// Exposes window.__SCARLETT1__ for spine_xr.js
 
 export async function initWorld({ THREE, DIAG }) {
   const D = DIAG || console;
@@ -19,9 +21,14 @@ export async function initWorld({ THREE, DIAG }) {
   app.innerHTML = "";
   app.appendChild(renderer.domElement);
 
-  // ---------- Scene / Camera ----------
+  // ---------- Scene ----------
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05070d);
+
+  // ---------- PlayerRig ----------
+  const rig = new THREE.Group();
+  rig.name = "PlayerRig";
+  scene.add(rig);
 
   const camera = new THREE.PerspectiveCamera(
     70,
@@ -29,18 +36,21 @@ export async function initWorld({ THREE, DIAG }) {
     0.05,
     500
   );
+  camera.rotation.order = "YXZ";
+  rig.add(camera);
 
-  // Player state (TEMP; we will override to a pad after pads are created)
+  // Player state
   const player = {
-    pos: new THREE.Vector3(0, 1.65, 0),
     yaw: Math.PI,
     pitch: 0
   };
 
-  camera.position.copy(player.pos);
-  camera.rotation.order = "YXZ";
-  camera.rotation.y = player.yaw;
-  camera.rotation.x = player.pitch;
+  function setRigPose(x, y, z, yaw = player.yaw) {
+    rig.position.set(x, y, z);
+    player.yaw = yaw;
+    camera.rotation.y = player.yaw;
+    camera.rotation.x = player.pitch;
+  }
 
   // ---------- Lights ----------
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223355, 1.0));
@@ -49,11 +59,11 @@ export async function initWorld({ THREE, DIAG }) {
   dir.position.set(8, 14, 6);
   scene.add(dir);
 
-  const blue = new THREE.PointLight(0x3366ff, 1.1, 40);
-  blue.position.set(0, 6, 0);
+  const blue = new THREE.PointLight(0x3366ff, 1.1, 60);
+  blue.position.set(0, 7, 0);
   scene.add(blue);
 
-  const purple = new THREE.PointLight(0xaa44ff, 0.8, 60);
+  const purple = new THREE.PointLight(0xaa44ff, 0.8, 80);
   purple.position.set(-12, 5, -12);
   scene.add(purple);
 
@@ -76,6 +86,12 @@ export async function initWorld({ THREE, DIAG }) {
     metalness: 0.15
   });
 
+  const MAT_PIT = new THREE.MeshStandardMaterial({
+    color: 0x070a12,
+    roughness: 1,
+    metalness: 0
+  });
+
   function addMesh(geo, mat, x, y, z, ry = 0) {
     const m = new THREE.Mesh(geo, mat);
     m.position.set(x, y, z);
@@ -85,24 +101,26 @@ export async function initWorld({ THREE, DIAG }) {
     return m;
   }
 
-  function addTextSign(text, x, y, z) {
-    const g = new THREE.PlaneGeometry(4, 1.2);
-    const m = new THREE.MeshStandardMaterial({
-      color: 0x101a33,
-      roughness: 0.8,
-      metalness: 0.1,
-      emissive: 0x0a1530,
-      emissiveIntensity: 0.6
-    });
-    const p = new THREE.Mesh(g, m);
-    p.position.set(x, y, z);
-    p.lookAt(0, y, 0);
-    scene.add(p);
-
-    D.log("sign:", text);
+  // ---------- COLLIDERS ----------
+  // We'll store Box3 in world-space every frame (static objects so one-time calc is OK)
+  const colliders = [];
+  function addColliderForMesh(mesh, pad = 0.08) {
+    mesh.updateWorldMatrix(true, true);
+    const box = new THREE.Box3().setFromObject(mesh);
+    box.min.x -= pad; box.min.y -= pad; box.min.z -= pad;
+    box.max.x += pad; box.max.y += pad; box.max.z += pad;
+    colliders.push({ mesh, box });
   }
 
-  // ---------- WORLD ----------
+  function pointBlocked(x, y, z) {
+    const p = new THREE.Vector3(x, y, z);
+    for (const c of colliders) {
+      if (c.box.containsPoint(p)) return true;
+    }
+    return false;
+  }
+
+  // ---------- WORLD GEOMETRY ----------
   const LOBBY_RADIUS = 18;
   const LOBBY_FLOOR_R = 22;
 
@@ -110,6 +128,7 @@ export async function initWorld({ THREE, DIAG }) {
   const lobbyFloor = addMesh(new THREE.CircleGeometry(LOBBY_FLOOR_R, 96), MAT_FLOOR, 0, 0, 0);
   lobbyFloor.rotation.x = -Math.PI / 2;
 
+  // Ring trim
   const ring = addMesh(
     new THREE.RingGeometry(LOBBY_RADIUS - 0.4, LOBBY_RADIUS + 0.4, 128),
     MAT_TRIM,
@@ -119,24 +138,16 @@ export async function initWorld({ THREE, DIAG }) {
   );
   ring.rotation.x = -Math.PI / 2;
 
-  // Pit + rim (table center area)
-  const PIT_R = 6.25;
-  const SAFE_R = 8.5;
+  // Pit disc (visual)
+  const pitDisc = addMesh(new THREE.CircleGeometry(6.2, 80), MAT_PIT, 0, -0.12, 0);
+  pitDisc.rotation.x = -Math.PI / 2;
 
-  const pit = addMesh(
-    new THREE.CircleGeometry(6.2, 80),
-    new THREE.MeshStandardMaterial({ color: 0x070a12, roughness: 1, metalness: 0 }),
-    0,
-    -0.12,
-    0
-  );
-  pit.rotation.x = -Math.PI / 2;
-
+  // Pit rim
   const pitRim = addMesh(new THREE.RingGeometry(6.15, 6.5, 96), MAT_TRIM, 0, -0.10, 0);
   pitRim.rotation.x = -Math.PI / 2;
 
-  // Center platform + table placeholder
-  addMesh(
+  // Center platform + table placeholder (solid)
+  const platform = addMesh(
     new THREE.CylinderGeometry(2.2, 2.2, 0.18, 64),
     new THREE.MeshStandardMaterial({ color: 0x0b2a22, roughness: 0.85, metalness: 0.05 }),
     0,
@@ -151,7 +162,7 @@ export async function initWorld({ THREE, DIAG }) {
   table.position.set(0, 1.05, 0);
   scene.add(table);
 
-  // Ring wall segments
+  // Lobby wall ring (solid)
   const wallH = 2.8;
   const segCount = 24;
   for (let i = 0; i < segCount; i++) {
@@ -161,13 +172,13 @@ export async function initWorld({ THREE, DIAG }) {
     const mz = Math.sin((a0 + a1) / 2) * LOBBY_RADIUS;
     const len = (Math.PI * 2 * LOBBY_RADIUS) / segCount;
 
-    const w = new THREE.Mesh(new THREE.BoxGeometry(len, wallH, 0.45), MAT_WALL);
+    const w = new THREE.Mesh(new THREE.BoxGeometry(len, wallH, 0.55), MAT_WALL);
     w.position.set(mx, wallH / 2, mz);
     w.rotation.y = -((a0 + a1) / 2);
     scene.add(w);
   }
 
-  // Rooms (simple blocks)
+  // Rooms + hallways (with SOLID room walls)
   const HALL_LEN = 12;
   const HALL_W = 6;
   const ROOM_W = 16;
@@ -192,6 +203,7 @@ export async function initWorld({ THREE, DIAG }) {
     const hx = cx * hallCenterR;
     const hz = cz * hallCenterR;
 
+    // Hall floor
     const hallFloor = new THREE.Mesh(
       new THREE.PlaneGeometry(HALL_W, HALL_LEN),
       new THREE.MeshStandardMaterial({ color: 0x0b1222, roughness: 1, metalness: 0 })
@@ -201,10 +213,12 @@ export async function initWorld({ THREE, DIAG }) {
     hallFloor.rotation.z = angle;
     scene.add(hallFloor);
 
+    // Room center
     const roomCenterR = hallStartR + HALL_LEN + ROOM_D / 2;
     const rx = cx * roomCenterR;
     const rz = cz * roomCenterR;
 
+    // Room floor
     const roomFloor = new THREE.Mesh(
       new THREE.PlaneGeometry(ROOM_W, ROOM_D),
       new THREE.MeshStandardMaterial({
@@ -212,7 +226,7 @@ export async function initWorld({ THREE, DIAG }) {
         roughness: 1,
         metalness: 0,
         emissive: accent,
-        emissiveIntensity: 0.05
+        emissiveIntensity: 0.06
       })
     );
     roomFloor.rotation.x = -Math.PI / 2;
@@ -220,38 +234,70 @@ export async function initWorld({ THREE, DIAG }) {
     roomFloor.rotation.z = angle;
     scene.add(roomFloor);
 
-    const room = new THREE.Mesh(
-      new THREE.BoxGeometry(ROOM_W, ROOM_H, ROOM_D),
-      new THREE.MeshStandardMaterial({
-        color: 0x131c2f,
-        roughness: 0.95,
-        metalness: 0.05,
-        emissive: accent,
-        emissiveIntensity: 0.04
-      })
-    );
-    room.position.set(rx, ROOM_H / 2, rz);
-    room.rotation.y = angle;
-    scene.add(room);
+    // SOLID room walls: build 4 walls, leaving the hallway opening
+    const wallT = 0.35;
+    const halfW = ROOM_W / 2;
+    const halfD = ROOM_D / 2;
 
-    addTextSign(roomName, rx, 2.6, rz);
+    const wallMat = new THREE.MeshStandardMaterial({
+      color: 0x131c2f,
+      roughness: 0.95,
+      metalness: 0.05,
+      emissive: accent,
+      emissiveIntensity: 0.04
+    });
 
-    const pl = new THREE.PointLight(accent, 1.2, 40);
-    pl.position.set(rx, 3.2, rz);
+    // Helper to place wall in room-local then rotate around room center
+    function addRoomWall(localX, localZ, w, d) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, ROOM_H, d), wallMat);
+      // local -> world
+      const v = new THREE.Vector3(localX, ROOM_H / 2, localZ);
+      v.applyAxisAngle(new THREE.Vector3(0,1,0), angle);
+      m.position.set(rx + v.x, v.y, rz + v.z);
+      m.rotation.y = angle;
+      scene.add(m);
+      return m;
+    }
+
+    // Back wall
+    const back = addRoomWall(0, -halfD, ROOM_W, wallT);
+    // Left wall
+    const left = addRoomWall(-halfW, 0, wallT, ROOM_D);
+    // Right wall
+    const right = addRoomWall(halfW, 0, wallT, ROOM_D);
+    // Front wall (split: leave doorway opening aligned to hallway)
+    const doorW = 5.0;
+    const sideW = (ROOM_W - doorW) / 2;
+    const frontL = addRoomWall(-(doorW/2 + sideW/2), halfD, sideW, wallT);
+    const frontR = addRoomWall((doorW/2 + sideW/2), halfD, sideW, wallT);
+
+    // Accent light inside room
+    const pl = new THREE.PointLight(accent, 1.2, 45);
+    pl.position.set(rx, 3.0, rz);
     scene.add(pl);
 
-    roomCenters.push({ x: rx, z: rz });
+    // Store center
+    roomCenters.push({ name: roomName, x: rx, z: rz, angle });
+
+    // Add colliders for walls
+    addColliderForMesh(back);
+    addColliderForMesh(left);
+    addColliderForMesh(right);
+    addColliderForMesh(frontL);
+    addColliderForMesh(frontR);
   }
 
   for (const d of dirs) buildHallAndRoom(d.angle, d.name, d.color);
 
-  // ----------------------------
-  // SPAWN PADS
-  // ----------------------------
+  // Add colliders for pit/table/platform (so you never spawn on them)
+  addColliderForMesh(platform, 0.15);
+  addColliderForMesh(table, 0.25);
+
+  // ---------- SPAWN PADS ----------
   const spawnPads = [];
   const padGeo = new THREE.CylinderGeometry(0.75, 0.75, 0.06, 48);
 
-  function makePad(x, z, color, label) {
+  function makePad(x, z, color, label, yaw) {
     const mat = new THREE.MeshStandardMaterial({
       color: 0x0b142a,
       roughness: 0.4,
@@ -264,6 +310,7 @@ export async function initWorld({ THREE, DIAG }) {
     pad.position.set(x, 0.035, z);
     pad.name = "spawn_pad";
     pad.userData.teleportPos = new THREE.Vector3(x, 1.65, z);
+    pad.userData.yaw = yaw ?? Math.PI;
     pad.userData.label = label || "";
     scene.add(pad);
 
@@ -278,51 +325,57 @@ export async function initWorld({ THREE, DIAG }) {
     return pad;
   }
 
-  // Lobby safe pads
-  const padLobbyN = makePad(0, 10.5, 0x2f6bff, "LOBBY_N");
-  makePad(10.5, 0, 0xaa44ff, "LOBBY_E");
-  makePad(0, -10.5, 0xffcc44, "LOBBY_S");
-  makePad(-10.5, 0, 0x44ffaa, "LOBBY_W");
+  // Lobby pads (still exist)
+  const padLobbyN = makePad(0, 10.5, 0x2f6bff, "LOBBY_N", Math.PI);
+  makePad(10.5, 0, 0xaa44ff, "LOBBY_E", -Math.PI/2);
+  makePad(0, -10.5, 0xffcc44, "LOBBY_S", 0);
+  makePad(-10.5, 0, 0x44ffaa, "LOBBY_W", Math.PI/2);
 
-  // Room pads
-  const entranceR = LOBBY_RADIUS + 4.8;
-  makePad(Math.cos(0) * entranceR, Math.sin(0) * entranceR, 0x2f6bff, "STORE_ENT");
-  makePad(Math.cos(Math.PI / 2) * entranceR, Math.sin(Math.PI / 2) * entranceR, 0xaa44ff, "VIP_ENT");
-  makePad(Math.cos(Math.PI) * entranceR, Math.sin(Math.PI) * entranceR, 0xffcc44, "SCORP_ENT");
-  makePad(Math.cos(-Math.PI / 2) * entranceR, Math.sin(-Math.PI / 2) * entranceR, 0x44ffaa, "GAMES_ENT");
-
-  for (let i = 0; i < roomCenters.length; i++) {
-    const c = roomCenters[i];
-    const col = dirs[i].color;
-    makePad(c.x, c.z, col, dirs[i].name + "_CENTER");
+  // Room pads (CENTER pads)
+  for (const rc of roomCenters) {
+    const col = dirs.find(d => d.name === rc.name)?.color || 0xffffff;
+    // yaw face toward room interior (opposite of hallway direction)
+    const yaw = rc.angle + Math.PI;
+    makePad(rc.x, rc.z, col, rc.name + "_CENTER", yaw);
   }
 
-  function teleportTo(vec3) {
-    player.pos.set(vec3.x, vec3.y, vec3.z);
-    camera.position.copy(player.pos);
+  // ---------- TELEPORT / SPAWN (rig-based) ----------
+  function teleportTo(vec3, yaw = player.yaw) {
+    setRigPose(vec3.x, vec3.y, vec3.z, yaw);
   }
 
-  function safetySnapIfInsidePit() {
-    const dx = player.pos.x;
-    const dz = player.pos.z;
-    const r = Math.hypot(dx, dz);
+  function safetySnapIfBlocked(preferredLabel = "STORE_CENTER") {
+    // Try preferred first, then all pads
+    const tryPads = [];
+    const pref = spawnPads.find(p => p.userData?.label === preferredLabel);
+    if (pref) tryPads.push(pref);
+    for (const p of spawnPads) if (p !== pref) tryPads.push(p);
 
-    if (r < SAFE_R) {
-      // snap to lobby north pad by default
-      D.warn("[spawn] inside pit → snap LOBBY_N");
-      teleportTo(padLobbyN.userData.teleportPos);
+    for (const p of tryPads) {
+      const v = p.userData.teleportPos;
+      const yaw = p.userData.yaw ?? Math.PI;
+      // Check feet + head clearance points
+      const feetOK = !pointBlocked(v.x, 0.15, v.z);
+      const chestOK = !pointBlocked(v.x, 1.0, v.z);
+      const headOK = !pointBlocked(v.x, 1.65, v.z);
+      if (feetOK && chestOK && headOK) {
+        teleportTo(v, yaw);
+        D.log("[spawn] safe pad:", p.userData.label);
+        return true;
+      }
     }
+
+    // If somehow everything blocked, force lobby N
+    teleportTo(padLobbyN.userData.teleportPos, padLobbyN.userData.yaw);
+    D.warn("[spawn] all pads blocked? forced LOBBY_N");
+    return false;
   }
 
-  // ✅ FORCE INITIAL SPAWN ON A PAD (not table center)
-  teleportTo(padLobbyN.userData.teleportPos);
-  player.yaw = Math.PI; // face toward center
-  player.pitch = 0;
-  camera.rotation.order = "YXZ";
-  camera.rotation.y = player.yaw;
-  camera.rotation.x = player.pitch;
+  // ✅ SPAWN IN A ROOM (NOT LOBBY)
+  // Default = STORE_CENTER (change label if you want VIP_CENTER etc)
+  safetySnapIfBlocked("STORE_CENTER");
 
-  // Resize
+  // ---------- Resize ----------
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -333,19 +386,18 @@ export async function initWorld({ THREE, DIAG }) {
   window.__SCARLETT1__ = {
     THREE,
     scene,
-    camera,
     renderer,
+    camera,
+    rig,
     player,
     spawnPads,
     teleportTo,
-    safetySnapIfInsidePit
+    safetySnapIfBlocked
   };
 
   D.log("render loop start ✅");
   renderer.setAnimationLoop((t) => {
-    safetySnapIfInsidePit();
     table.rotation.y = t * 0.0004;
-    camera.position.copy(player.pos);
     renderer.render(scene, camera);
   });
 }

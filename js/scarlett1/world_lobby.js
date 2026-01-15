@@ -1,6 +1,14 @@
+// /js/scarlett1/world_lobby.js
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
 import { DIMS } from "./world_constants.js";
 import { setReceiveCast, addCollider } from "./world_helpers.js";
+
+function markTeleport(world, mesh) {
+  mesh.userData.teleportSurface = true;
+  world.teleportSurfaces = world.teleportSurfaces || [];
+  world.teleportSurfaces.push(mesh);
+  return mesh;
+}
 
 export function buildLobby(world, mats, quality = "quest") {
   const { FLOOR_Y, LOBBY_R, LOBBY_H, PIT_R_OUT, PIT_R_IN, PIT_DEPTH } = DIMS;
@@ -9,13 +17,18 @@ export function buildLobby(world, mats, quality = "quest") {
   g.name = "LobbyAndPit";
   world.group.add(g);
 
-  // Lobby floor
+  // ensure list exists
+  world.teleportSurfaces = world.teleportSurfaces || [];
+
+  // Lobby floor (TELEPORT ✅)
   {
     const geo = new THREE.CircleGeometry(LOBBY_R, quality === "high" ? 96 : 64);
     const mesh = setReceiveCast(new THREE.Mesh(geo, mats.matCarpet), false, true);
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.y = FLOOR_Y;
+    mesh.name = "LobbyFloor";
     g.add(mesh);
+    markTeleport(world, mesh);
 
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(LOBBY_R - 0.35, LOBBY_R, quality === "high" ? 96 : 64),
@@ -23,14 +36,16 @@ export function buildLobby(world, mats, quality = "quest") {
     );
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = FLOOR_Y + 0.004;
+    ring.name = "LobbyTrim";
     g.add(ring);
   }
 
-  // Lobby wall
+  // Lobby wall (visual)
   {
     const geo = new THREE.CylinderGeometry(LOBBY_R, LOBBY_R, LOBBY_H, quality === "high" ? 96 : 64, 1, true);
     const mesh = setReceiveCast(new THREE.Mesh(geo, mats.matWall), false, true);
     mesh.position.y = FLOOR_Y + LOBBY_H / 2;
+    mesh.name = "LobbyWall";
     g.add(mesh);
 
     const band = new THREE.Mesh(
@@ -39,41 +54,47 @@ export function buildLobby(world, mats, quality = "quest") {
     );
     band.rotation.x = Math.PI / 2;
     band.position.y = FLOOR_Y + 2.3;
+    band.name = "LobbyNeonBand";
     g.add(band);
   }
 
-  // Pit
+  // Pit group
   const pit = new THREE.Group();
   pit.name = "Pit";
   g.add(pit);
 
-  // Walk ring
+  // Walk ring (TELEPORT ✅)
   {
     const geo = new THREE.RingGeometry(PIT_R_IN, PIT_R_OUT, quality === "high" ? 80 : 56);
     const mesh = setReceiveCast(new THREE.Mesh(geo, mats.matCarpet), false, true);
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.y = FLOOR_Y + 0.006;
+    mesh.name = "PitWalkRing";
     pit.add(mesh);
+    markTeleport(world, mesh);
   }
 
-  // Bowl floor (recessed)
+  // Bowl floor (TELEPORT ✅) recessed
   {
     const geo = new THREE.CircleGeometry(PIT_R_IN - 0.1, quality === "high" ? 64 : 48);
     const mesh = setReceiveCast(new THREE.Mesh(geo, mats.matConcrete), false, true);
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.y = FLOOR_Y - PIT_DEPTH;
+    mesh.name = "PitBowlFloor";
     pit.add(mesh);
+    markTeleport(world, mesh);
   }
 
-  // Bowl wall
+  // Bowl wall (visual)
   {
     const geo = new THREE.CylinderGeometry(PIT_R_IN, PIT_R_IN, PIT_DEPTH, quality === "high" ? 80 : 56, 1, true);
     const mesh = setReceiveCast(new THREE.Mesh(geo, mats.matWall), false, true);
     mesh.position.y = FLOOR_Y - PIT_DEPTH / 2;
+    mesh.name = "PitWall";
     pit.add(mesh);
   }
 
-  // Steps (north)
+  // Steps (TELEPORT ✅) so you can teleport down
   {
     const steps = new THREE.Group();
     steps.name = "PitSteps";
@@ -89,12 +110,16 @@ export function buildLobby(world, mats, quality = "quest") {
       const geo = new THREE.BoxGeometry(stepW, stepH, stepD);
       const m = new THREE.Mesh(geo, mats.matConcrete);
       m.position.set(0, FLOOR_Y - stepH * (i + 0.5), baseZ - i * stepD);
+      m.name = `PitStep_${i}`;
       setReceiveCast(m, false, true);
       steps.add(m);
+
+      // tag steps too
+      markTeleport(world, m);
     }
   }
 
-  // Guardrail
+  // Guardrail ring collider
   {
     const rail = new THREE.Group();
     rail.name = "PitRail";
@@ -109,6 +134,7 @@ export function buildLobby(world, mats, quality = "quest") {
 
       const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.05, 10), mats.matTrim);
       post.position.set(x, FLOOR_Y + 0.52, z);
+      post.name = `PitPost_${i}`;
       setReceiveCast(post, true, true);
       rail.add(post);
     }
@@ -119,13 +145,14 @@ export function buildLobby(world, mats, quality = "quest") {
     );
     ring.rotation.x = Math.PI / 2;
     ring.position.y = FLOOR_Y + 1.05;
+    ring.name = "PitRailRing";
     setReceiveCast(ring, true, true);
     rail.add(ring);
 
     addCollider(world, ring, "rail");
   }
 
-  // Center table anchor + placeholder
+  // Center table anchor + placeholder (not teleport surface)
   {
     const tableGroup = new THREE.Group();
     tableGroup.name = "CenterTableAnchor";
@@ -133,27 +160,43 @@ export function buildLobby(world, mats, quality = "quest") {
     world.anchors.table = tableGroup;
     pit.add(tableGroup);
 
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(2.7, 3.2, 0.45, quality === "high" ? 48 : 32), mats.matGold);
-    base.position.y = 0.22; setReceiveCast(base, true, true); tableGroup.add(base);
+    const base = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.7, 3.2, 0.45, quality === "high" ? 48 : 32),
+      mats.matGold
+    );
+    base.position.y = 0.22;
+    base.name = "TableBase";
+    setReceiveCast(base, true, true);
+    tableGroup.add(base);
 
-    const felt = new THREE.Mesh(new THREE.CylinderGeometry(3.1, 3.1, 0.14, quality === "high" ? 64 : 48), mats.matConcrete);
-    felt.position.y = 0.52; setReceiveCast(felt, true, true); tableGroup.add(felt);
+    const felt = new THREE.Mesh(
+      new THREE.CylinderGeometry(3.1, 3.1, 0.14, quality === "high" ? 64 : 48),
+      mats.matConcrete
+    );
+    felt.position.y = 0.52;
+    felt.name = "TableTop";
+    setReceiveCast(felt, true, true);
+    tableGroup.add(felt);
 
     const neon = new THREE.Mesh(
       new THREE.TorusGeometry(3.15, 0.05, 10, quality === "high" ? 120 : 84),
       mats.matNeonCyan
     );
     neon.rotation.x = Math.PI / 2;
-    neon.position.y = 0.6; setReceiveCast(neon, true, true); tableGroup.add(neon);
+    neon.position.y = 0.6;
+    neon.name = "TableNeonRing";
+    setReceiveCast(neon, true, true);
+    tableGroup.add(neon);
   }
 
-  // Lobby boundary collider
+  // Lobby boundary collider (invisible)
   {
     const col = new THREE.Mesh(
       new THREE.CylinderGeometry(LOBBY_R - 0.2, LOBBY_R - 0.2, 3.4, quality === "high" ? 96 : 64, 1, true),
       new THREE.MeshBasicMaterial({ visible: false })
     );
     col.position.y = FLOOR_Y + 1.7;
+    col.name = "LobbyBoundaryCollider";
     col.userData.collider = true;
     col.userData.kind = "boundary";
     world.group.add(col);

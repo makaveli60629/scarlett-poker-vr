@@ -1,137 +1,114 @@
-// /js/scarlett1/boot.js — Scarlett 1.0 Boot (Permanent Spine)
-// Loads THREE (CDN), loads world.js, wires diagnostics + HUD, never hard-crashes.
+// /js/scarlett1/boot.js — Scarlett 1.0 BOOT (FULL • PERMANENT)
+// ✅ Sets permanent global "boot started" flags (fixes watchdog "path mismatch")
+// ✅ Loads THREE (CDN) -> world.js -> spine_xr.js
+// ✅ Never hard-crashes on missing optional modules; logs everything
 
-const BOOT_BUILD = "SCARLETT1_BOOT_v1_0";
+(() => {
+  // --- global flags used by older HUD watchdogs ---
+  window.__SCARLETT_BOOT_EXPECT_BASE__ = "/scarlett-poker-vr/";
+  window.__SCARLETT_BOOT_LOADED__ = Date.now();
+  window.__SCARLETT_BOOT_STARTED__ = 0;
+  window.__SCARLETT_BOOT_RUNNING__ = false;
+  window.__SCARLETT_BOOT_FAILED__ = false;
 
-function qs(sel) { return document.querySelector(sel); }
+  // --- tiny diagnostics helper (works even if HUD module is separate) ---
+  const LOGS = [];
+  const stamp = () => {
+    const d = new Date();
+    const h = String(d.getHours()).padStart(2, "0");
+    const m = String(d.getMinutes()).padStart(2, "0");
+    const s = String(d.getSeconds()).padStart(2, "0");
+    return `[${h}:${m}:${s}]`;
+  };
+  const safe = (x) => {
+    try { return typeof x === "string" ? x : JSON.stringify(x); }
+    catch { return String(x); }
+  };
 
-function nowStamp() {
-  const d = new Date();
-  return d.toLocaleTimeString([], { hour12: true });
-}
-
-// ---- HUD/DIAG bridge (works even if spine_diag/hud changed) ----
-function getDiagAPI() {
-  return window.ScarlettDiag || null;
-}
-
-function diagLog(...a) {
-  try {
-    const msg = a.map(v => (typeof v === "string" ? v : JSON.stringify(v))).join(" ");
-    const line = `[${nowStamp()}] ${msg}`;
+  function push(line) {
+    LOGS.push(`${stamp()} ${line}`);
     console.log(line);
-    const D = getDiagAPI();
-    D?.log?.(line);
-  } catch (e) {
-    console.log("[diagLog fail]", e);
+    if (window.__SCARLETT_DIAG_LOG__) window.__SCARLETT_DIAG_LOG__(`${stamp()} ${line}`);
   }
-}
-
-function diagStatus(s) {
-  try { getDiagAPI()?.status?.(s); } catch {}
-}
-
-async function safeImport(url) {
-  try {
-    return await import(url);
-  } catch (e) {
-    diagLog("IMPORT FAILED:", url);
-    diagLog(String(e?.stack || e));
-    throw e;
-  }
-}
-
-function withCacheBust(url) {
-  const v = Date.now();
-  return `${url}${url.includes("?") ? "&" : "?"}v=${v}`;
-}
-
-(async function boot() {
-  const href = location.href;
-  const path = location.pathname;
-  const base = path.includes("/scarlett-poker-vr/") ? "/scarlett-poker-vr/" : "/";
-  const scarlettBase = `${base}js/scarlett1/`;
-
-  // expose for debugging
-  window.SCARLETT1 = window.SCARLETT1 || {};
-  window.SCARLETT1.base = base;
-  window.SCARLETT1.scarlettBase = scarlettBase;
-  window.SCARLETT1.BOOT_BUILD = BOOT_BUILD;
-
-  diagLog(`href=${href}`);
-  diagLog(`path=${path}`);
-  diagLog(`base=${base}`);
-  diagLog(`secureContext=${window.isSecureContext}`);
-  diagLog(`ua=${navigator.userAgent}`);
-  diagLog(`navigator.xr=${!!navigator.xr}`);
-
-  diagStatus("boot start ✅");
-
-  // Load THREE from CDN
-  diagStatus("Loading three.js…");
-  const THREE_URL = "https://unpkg.com/three@0.158.0/build/three.module.js";
-  let THREE = null;
-
-  try {
-    THREE = await safeImport(THREE_URL);
-    diagLog("three import ✅", THREE_URL);
-  } catch (e) {
-    diagStatus("Boot failed: THREE import");
-    diagLog("ERROR BOOT FAILED: three import");
-    return;
+  function fail(err) {
+    window.__SCARLETT_BOOT_FAILED__ = true;
+    window.__SCARLETT_BOOT_RUNNING__ = false;
+    push(`ERROR BOOT FAILED: ${err?.message || err}`);
+    if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__("BOOT FAILED ❌ (see log)");
   }
 
-  // Load spine_xr (controllers/rig helpers)
-  const xrURL = withCacheBust(`${scarlettBase}spine_xr.js`);
-  let XR = null;
-  try {
-    XR = await safeImport(xrURL);
-    diagLog("xr import ✅", xrURL);
-  } catch (e) {
-    diagLog("xr import failed (continuing safe)");
+  async function run() {
+    try {
+      window.__SCARLETT_BOOT_STARTED__ = Date.now();
+      window.__SCARLETT_BOOT_RUNNING__ = true;
+
+      push(`href=${location.href}`);
+      push(`path=${location.pathname}`);
+      push(`base=${location.pathname.split("/").slice(0, 2).join("/") + "/"}`);
+      push(`secureContext=${window.isSecureContext}`);
+      push(`ua=${navigator.userAgent}`);
+      push(`navigator.xr=${!!navigator.xr}`);
+
+      if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__("boot start ✅");
+
+      // --- Load THREE from CDN ---
+      if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__("Loading three.js…");
+      const THREE = await import("https://unpkg.com/three@0.158.0/build/three.module.js");
+      push("three import ✅ https://unpkg.com/three@0.158.0/build/three.module.js");
+
+      // --- Load world ---
+      const worldUrl = `/scarlett-poker-vr/js/scarlett1/world.js?v=${Date.now()}`;
+      push(`world url= ${worldUrl}`);
+      if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__("Loading world.js…");
+
+      const worldMod = await import(worldUrl);
+      push("world import ✅");
+
+      // Resolve init function robustly
+      const initWorld =
+        (typeof worldMod.initWorld === "function" && worldMod.initWorld) ||
+        (typeof worldMod.default === "function" && worldMod.default) ||
+        (worldMod.default && typeof worldMod.default.initWorld === "function" && worldMod.default.initWorld) ||
+        (worldMod.World && typeof worldMod.World.init === "function" && worldMod.World.init) ||
+        null;
+
+      if (!initWorld) {
+        push(`World exports = ${safe(Object.keys(worldMod))}`);
+        if (worldMod.default) push(`World default keys = ${safe(Object.keys(worldMod.default))}`);
+        throw new Error("world module has no initWorld/default/World.init");
+      }
+
+      if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__("Starting world…");
+      push("initWorld() start");
+      await initWorld({ THREE });
+      push("World running ✅");
+      if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__("World running ✅");
+
+      // --- Load XR spine (controllers/lasers/teleport) ---
+      const spineUrl = `/scarlett-poker-vr/js/scarlett1/spine_xr.js?v=${Date.now()}`;
+      push(`spine url= ${spineUrl}`);
+      if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__("Loading XR spine…");
+
+      const spineMod = await import(spineUrl);
+      push("spine import ✅");
+
+      if (typeof spineMod.installXR === "function") {
+        await spineMod.installXR({ THREE });
+        push("XR spine ready ✅");
+        if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__("XR spine ready ✅ (Enter VR)");
+      } else {
+        push(`WARN spine_xr missing installXR. exports=${safe(Object.keys(spineMod))}`);
+      }
+
+      window.__SCARLETT_BOOT_RUNNING__ = false;
+    } catch (e) {
+      fail(e);
+    }
   }
 
-  // Load world module
-  diagStatus("Loading world.js…");
-  const worldURL = withCacheBust(`${scarlettBase}world.js`);
-  diagLog("world url=", worldURL);
+  // Make unhandled errors visible in HUD if present
+  window.addEventListener("error", (e) => fail(e?.error || e?.message || e));
+  window.addEventListener("unhandledrejection", (e) => fail(e?.reason || e));
 
-  let worldMod = null;
-  try {
-    worldMod = await safeImport(worldURL);
-    diagLog("world import ✅");
-  } catch (e) {
-    diagStatus("BOOT FAILED (world import)");
-    diagLog("ERROR BOOT FAILED:", String(e?.stack || e));
-    return;
-  }
-
-  // Hard requirement: initWorld must exist
-  const initWorld = worldMod?.initWorld || worldMod?.default?.initWorld || null;
-  if (typeof initWorld !== "function") {
-    diagStatus("BOOT FAILED (initWorld missing)");
-    diagLog("ERROR BOOT FAILED: worldMod.initWorld is not a function");
-    return;
-  }
-
-  // Start world
-  diagStatus("Starting world…");
-  diagLog("initWorld() start");
-
-  try {
-    await initWorld({
-      THREE,
-      XR,              // optional helpers
-      base,
-      scarlettBase,
-      build: BOOT_BUILD,
-      log: diagLog,
-      status: diagStatus
-    });
-
-    diagStatus("World running ✅");
-  } catch (e) {
-    diagStatus("BOOT FAILED ❌ (see log)");
-    diagLog("ERROR BOOT FAILED:", String(e?.stack || e));
-  }
+  run();
 })();

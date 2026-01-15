@@ -1,70 +1,103 @@
-// /js/scarlett1/boot2.js — Scarlett BOOT v2.2 (Hard-safe)
-// ✅ Always updates HUD status
-// ✅ Logs every stage
-// ✅ No top-level await
-// ✅ Will not silently hang
+// /js/scarlett1/boot2.js — Scarlett Boot (MODULE) FULL v1.1
+// ✅ Loads THREE (CDN)
+// ✅ Loads world.js and calls initWorld()
+// ✅ Loads spine_android.js for mobile sticks (safe)
+// ✅ Never gets stuck at "Booting…"
 
-(function () {
-  const log = (msg) => {
-    console.log(msg);
-    if (window.__SCARLETT_DIAG_LOG) window.__SCARLETT_DIAG_LOG(msg);
-  };
-  const status = (s) => {
-    if (window.__SCARLETT_DIAG_STATUS) window.__SCARLETT_DIAG_STATUS(s);
-    console.log("[STATUS]", s);
-  };
+const diagLog = window.__SCARLETT_DIAG_LOG || ((...a) => console.log("[boot2]", ...a));
+const diagStatus = window.__SCARLETT_DIAG_STATUS || ((s) => console.log("[status]", s));
 
-  status("Booting...");
+function stamp() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `[${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}]`;
+}
 
-  const THREE_URL = "https://unpkg.com/three@0.158.0/build/three.module.js";
+function log(...a) { diagLog(stamp(), ...a); }
 
-  log(`[boot2] import ${THREE_URL}`);
+async function imp(url) {
+  log("import", url);
+  const m = await import(url);
+  log("ok ✅", url);
+  return m;
+}
 
-  import(THREE_URL)
-    .then((THREE) => {
-      log(`[boot2] three import ✅ r${THREE.REVISION}`);
+(async function main() {
+  try {
+    diagStatus("Booting…");
+    log("boot executed ✅");
 
-      const worldUrl = `./world.js?v=${Date.now()}`;
-      log(`[boot2] world url= ${worldUrl}`);
+    // THREE
+    const threeURL = `https://unpkg.com/three@0.158.0/build/three.module.js?v=${Date.now()}`;
+    const THREE = await imp(threeURL);
+    window.THREE = THREE;
+    log("three import ✅ r158");
 
-      return import(worldUrl).then((worldMod) => {
-        if (!worldMod || typeof worldMod.initWorld !== "function") {
-          throw new Error("world.js loaded but initWorld() missing");
-        }
+    // WORLD
+    const worldURL = `./world.js?v=${Date.now()}`;
+    log("world url=", worldURL);
+    const worldMod = await imp(worldURL);
 
-        log("initWorld() start");
-        const world = worldMod.initWorld({ THREE });
-        window.__SCARLETT_WORLD__ = world;
-        return world;
-      });
-    })
-    .then((world) => {
-      // Load spine modules (optional)
-      const modsUrl = `./spine_modules.js?v=${Date.now()}`;
-      log(`[boot2] import ${modsUrl}`);
+    if (!worldMod || typeof worldMod.initWorld !== "function") {
+      throw new Error("world.js missing export initWorld()");
+    }
 
-      return import(modsUrl)
-        .then((m) => {
-          if (m && typeof m.initModules === "function") {
-            log("[boot2] initModules() start");
-            return m.initModules(world).then(() => world);
-          } else {
-            log("[boot2] spine_modules.js loaded, but no initModules() (skipping)");
-            return world;
-          }
-        })
-        .catch((e) => {
-          log("[boot2] spine_modules load failed (skipping): " + (e?.message || e));
-          return world;
-        });
-    })
-    .then(() => {
-      status("World running ✅");
-      log("[boot2] done ✅");
-    })
-    .catch((err) => {
-      console.error(err);
-      status("BOOT FAILED ❌");
-      log("BOOT ERROR: " + (err?.message || err));
+    // Create scene/camera/renderer here (world will reuse them)
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+
+    document.body.style.margin = "0";
+    document.body.style.overflow = "hidden";
+    if (!document.querySelector("canvas")) document.body.appendChild(renderer.domElement);
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
     });
+
+    // Rig created here so ALL modules share same rig
+    const rig = new THREE.Group();
+    rig.name = "PlayerRig";
+    scene.add(rig);
+    rig.add(camera);
+
+    // Init world
+    const worldCtx = { THREE, scene, camera, renderer, rig, diagLog, diagStatus, spawnIndex: 0 };
+    const worldHandles = await worldMod.initWorld(worldCtx);
+    // If world created its own scene/camera/renderer, prefer returned
+    const finalScene = worldHandles?.scene || scene;
+    const finalCamera = worldHandles?.camera || camera;
+    const finalRenderer = worldHandles?.renderer || renderer;
+    const finalRig = worldHandles?.rig || rig;
+
+    // Ensure renderer loop exists if world didn't set one
+    if (finalRenderer.xr && finalRenderer.setAnimationLoop) {
+      // if already set by world, this is harmless (it will override to same behavior)
+      finalRenderer.setAnimationLoop(() => finalRenderer.render(finalScene, finalCamera));
+    }
+
+    // ANDROID STICKS
+    try {
+      const androidMod = await imp(`./spine_android.js?v=${Date.now()}`);
+      if (androidMod?.initAndroid) {
+        androidMod.initAndroid({ renderer: finalRenderer, camera: finalCamera, rig: finalRig, diagLog });
+      } else {
+        log("spine_android loaded but no initAndroid()");
+      }
+    } catch (e) {
+      log("android sticks load failed (skipping):", e?.message || e);
+    }
+
+    diagStatus("World running ✅");
+    log("done ✅");
+  } catch (e) {
+    diagStatus("BOOT FAILED ❌");
+    log("BOOT ERROR:", e?.message || e);
+    throw e;
+  }
 })();

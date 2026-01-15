@@ -1,49 +1,39 @@
-import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
-import { DIMS, getCardinals } from "./world_constants.js";
+// /js/scarlett1/world_lights.js
+export function addLights(THREE, group, { quality = "quest" } = {}) {
+  const low = (quality === "quest");
 
-export function buildLights(world, renderer, quality = "quest") {
-  const { FLOOR_Y } = DIMS;
-  const { roomN, roomS, roomE, roomW } = getCardinals();
+  const amb = new THREE.AmbientLight(0xffffff, low ? 0.55 : 0.4);
+  group.add(amb);
 
-  if (renderer) {
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  }
+  const key = new THREE.DirectionalLight(0xffffff, low ? 0.55 : 0.9);
+  key.position.set(8, 18, 10);
+  key.castShadow = false;
+  group.add(key);
 
-  const g = new THREE.Group();
-  g.name = "Lights";
-  world.group.add(g);
+  const rim = new THREE.DirectionalLight(0x66aaff, low ? 0.35 : 0.6);
+  rim.position.set(-12, 10, -14);
+  group.add(rim);
 
-  const amb = new THREE.AmbientLight(0xffffff, 0.35);
-  g.add(amb);
-  world.lights.push(amb);
+  // Neon “ceiling” points (cheap, no shadows)
+  const p1 = new THREE.PointLight(0x00e5ff, low ? 0.6 : 1.0, 60);
+  p1.position.set(0, 5.2, 0);
+  group.add(p1);
 
-  const dir = new THREE.DirectionalLight(0xffffff, 0.9);
-  dir.position.set(8, 12, 6);
-  dir.target.position.set(0, 0, 0);
-  g.add(dir);
-  g.add(dir.target);
-  dir.castShadow = true;
-  dir.shadow.mapSize.set(1024, 1024);
-  dir.shadow.camera.near = 1;
-  dir.shadow.camera.far = 60;
-  dir.shadow.camera.left = -25;
-  dir.shadow.camera.right = 25;
-  dir.shadow.camera.top = 25;
-  dir.shadow.camera.bottom = -25;
-  world.lights.push(dir);
+  const p2 = new THREE.PointLight(0xff2bd6, low ? 0.5 : 0.9, 60);
+  p2.position.set(10, 4.6, -8);
+  group.add(p2);
 
-  function addRoomGlow(room, color, intensity = 1.1) {
-    const p = new THREE.PointLight(color, intensity, 22, 2);
-    p.position.set(room.x, FLOOR_Y + 3.2, room.z);
-    g.add(p);
-    world.lights.push(p);
-  }
+  const p3 = new THREE.PointLight(0x33ff66, low ? 0.45 : 0.8, 60);
+  p3.position.set(-10, 4.6, 8);
+  group.add(p3);
 
-  addRoomGlow(roomN, 0x2aa6ff, 1.0);
-  addRoomGlow(roomS, 0xf3c969, 0.95);
-  addRoomGlow(roomE, 0xff2aa6, 1.1);
-  addRoomGlow(roomW, 0x2aa6ff, 1.0);
-
-  return g;
+  return {
+    update(dt) {
+      // subtle pulse (safe)
+      const t = (performance.now() || 0) * 0.001;
+      p1.intensity = (low ? 0.6 : 1.0) * (0.92 + Math.sin(t * 1.2) * 0.08);
+      p2.intensity = (low ? 0.5 : 0.9) * (0.92 + Math.sin(t * 1.05 + 1.7) * 0.08);
+      p3.intensity = (low ? 0.45 : 0.8) * (0.92 + Math.sin(t * 0.95 + 3.1) * 0.08);
+    }
+  };
 }

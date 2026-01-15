@@ -1,182 +1,212 @@
-// /js/scarlett1/boot2.js — Scarlett 1.0 Boot (MODULE SAFE • PERMANENT)
-// ✅ Loads THREE (CDN)
-// ✅ Loads world.js and calls initWorld()
-// ✅ Loads spine_modules.js which loads modules.json safely (objects supported)
-// ✅ NEVER crashes if optional modules fail
+// /js/scarlett1/boot2.js — Scarlett 1.0 Boot (MODULE) • FULL • PERMANENT
+// ✅ Stable for Android + Oculus
+// ✅ Creates ctx and runs world.js
+// ✅ Starts module loader (spine_modules.js) so Android pads + addons load
+// ✅ Updates Scarlett Diagnostics HUD status
 
-(function () {
-  const log = (...a) => console.log("[boot2]", ...a);
+window.__SCARLETT_BOOT_STARTED__ = true;
 
-  const DIAG_LOG = (s) => {
-    try {
-      if (window.__SCARLETT_DIAG_LOG__) window.__SCARLETT_DIAG_LOG__(String(s));
-    } catch {}
-  };
-  const DIAG_STATUS = (s) => {
-    try {
-      if (window.__SCARLETT_DIAG_STATUS__) window.__SCARLETT_DIAG_STATUS__(String(s));
-    } catch {}
+(() => {
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const stamp = () => {
+    const d = new Date();
+    return `[${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}]`;
   };
 
-  function nowV() {
-    return `v=${Date.now()}`;
-  }
+  const diagLog = (msg) => {
+    try { window.__SCARLETT_DIAG_LOG__?.(`${stamp()} ${msg}`); } catch {}
+    try { console.log(`${stamp()} ${msg}`); } catch {}
+  };
 
-  async function importAny(url) {
-    // url MUST be string
-    const u = `${url}${url.includes("?") ? "&" : "?"}${nowV()}`;
-    DIAG_LOG(`[boot2] import ${u}`);
-    log("import", u);
-    const m = await import(u);
-    DIAG_LOG(`[boot2] ok ✅ ${u}`);
-    return m;
-  }
+  const diagStatus = (s) => {
+    try { window.__SCARLETT_DIAG_STATUS__?.(String(s)); } catch {}
+  };
 
-  function makeRenderer(THREE) {
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.xr.enabled = true;
-    renderer.shadowMap.enabled = true;
-    document.body.appendChild(renderer.domElement);
-    return renderer;
-  }
+  const fatal = (e, label = "BOOT2 FAILED") => {
+    const m = e?.message || e;
+    diagLog(`❌ ${label}: ${m}`);
+    diagStatus(`BOOT FAILED ❌ (see log)`);
+    console.error(e);
+  };
 
-  function makeCamera(THREE) {
-    const cam = new THREE.PerspectiveCamera(
-      70,
-      window.innerWidth / window.innerHeight,
-      0.05,
-      200
-    );
-    cam.position.set(0, 1.6, 6);
-    return cam;
-  }
+  const detectBase = () => {
+    // GitHub pages: /scarlett-poker-vr/
+    const p = location.pathname || "/";
+    if (p.includes("/scarlett-poker-vr/")) return "/scarlett-poker-vr/";
+    return "/";
+  };
 
-  function onResize(renderer, camera) {
-    window.addEventListener("resize", () => {
-      try {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-      } catch {}
-    });
-  }
+  const BASE = detectBase();
+  const ROOT = `${BASE}js/scarlett1/`;
 
-  async function main() {
+  diagLog(`href=${location.href}`);
+  diagLog(`path=${location.pathname}`);
+  diagLog(`base=${BASE}`);
+  diagLog(`secureContext=${!!window.isSecureContext}`);
+  diagLog(`ua=${navigator.userAgent}`);
+  diagLog(`navigator.xr=${!!navigator.xr}`);
+
+  diagStatus("Booting…");
+
+  // Global ctx shared by world + modules (PERMANENT)
+  const ctx = {
+    BASE,
+    ROOT,
+    THREE: null,
+    renderer: null,
+    scene: null,
+    camera: null,
+    rig: null,
+    clock: null,
+    updates: [],
+    addUpdate(fn) { if (typeof fn === "function") ctx.updates.push(fn); },
+    log: (s) => diagLog(String(s)),
+    status: (s) => diagStatus(String(s)),
+    state: {
+      startedAt: performance.now(),
+      inXR: false
+    }
+  };
+  window.__SCARLETT_BASE__ = BASE;
+  window.__SCARLETT_ROOT__ = ROOT;
+  window.__SCARLETT_CTX__ = ctx;
+
+  // Ensure we catch runtime errors to HUD (PERMANENT)
+  window.addEventListener("error", (ev) => {
+    diagLog(`WINDOW ERROR: ${ev?.message || ev}`);
+  });
+  window.addEventListener("unhandledrejection", (ev) => {
+    diagLog(`PROMISE REJECT: ${ev?.reason?.message || ev?.reason || ev}`);
+  });
+
+  // Main async boot
+  (async () => {
     try {
-      window.__SCARLETT_BOOT_STARTED__ = true;
+      diagLog(`boot executed ✅`);
+      diagLog(`[boot2] importing three…`);
 
-      DIAG_STATUS("boot2: starting…");
-      DIAG_LOG("boot executed ✅");
-      log("boot executed ✅");
+      // Import THREE (CDN) with cache-bust
+      const THREE_URL = `https://unpkg.com/three@0.158.0/build/three.module.js?v=${Date.now()}`;
+      diagLog(`[boot2] import ${THREE_URL}`);
+      const THREE = await import(THREE_URL);
+      ctx.THREE = THREE;
+      diagLog(`[boot2] three import ✅ r${THREE.REVISION || "?"}`);
 
-      // -------- THREE --------
-      DIAG_STATUS("boot2: loading three.js…");
-      const THREE = await importAny("https://unpkg.com/three@0.158.0/build/three.module.js");
-      window.THREE = THREE;
+      // Renderer
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      document.body.appendChild(renderer.domElement);
 
-      DIAG_LOG(`[boot2] three import ✅ r${THREE.REVISION}`);
-      log("three import ✅", "r" + THREE.REVISION);
-
-      // -------- CORE SCENE --------
-      DIAG_STATUS("boot2: creating renderer/scene…");
+      // Scene
       const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x05070c);
 
-      const renderer = makeRenderer(THREE);
-      const camera = makeCamera(THREE);
+      // Camera + Rig
+      const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 500);
+      camera.position.set(0, 1.65, 2.5);
 
-      // PlayerRig (so everything can move together cleanly later)
-      const playerRig = new THREE.Group();
-      playerRig.name = "PlayerRig";
-      playerRig.add(camera);
-      scene.add(playerRig);
+      const rig = new THREE.Group();
+      rig.name = "PlayerRig";
+      rig.position.set(0, 0, 0);
+      rig.add(camera);
+      scene.add(rig);
 
-      onResize(renderer, camera);
+      // Light baseline (safe)
+      const hemi = new THREE.HemisphereLight(0x99bbff, 0x111122, 0.9);
+      scene.add(hemi);
 
-      // -------- WORLD --------
-      DIAG_STATUS("boot2: loading world.js…");
-      const worldUrl = "/scarlett-poker-vr/js/scarlett1/world.js";
-      DIAG_LOG(`[boot2] world url= ${worldUrl}`);
-      log("world url=", worldUrl);
+      const key = new THREE.DirectionalLight(0xffffff, 0.6);
+      key.position.set(5, 10, 6);
+      scene.add(key);
 
-      const worldMod = await importAny(worldUrl);
-      DIAG_LOG("[boot2] world import ✅");
-      log("world import ✅");
+      // Save to ctx
+      ctx.renderer = renderer;
+      ctx.scene = scene;
+      ctx.camera = camera;
+      ctx.rig = rig;
+      ctx.clock = new THREE.Clock();
 
-      // Support either export initWorld or default.initWorld
-      const initWorld =
-        (typeof worldMod?.initWorld === "function" && worldMod.initWorld) ||
-        (typeof worldMod?.default?.initWorld === "function" && worldMod.default.initWorld);
-
-      if (!initWorld) throw new Error("world.js missing initWorld export");
-
-      DIAG_STATUS("boot2: starting world…");
-      const ctx = {
-        THREE,
-        scene,
-        renderer,
-        camera,
-        playerRig,
-        diag: {
-          log: (s) => DIAG_LOG(s),
-          status: (s) => DIAG_STATUS(s),
-        },
+      // Resize handler
+      const onResize = () => {
+        const w = window.innerWidth, h = window.innerHeight;
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h);
       };
+      window.addEventListener("resize", onResize);
 
-      const worldOut = await initWorld(ctx);
-      // worldOut can be {world, scene} etc. We keep ctx.scene regardless.
-      ctx.worldOut = worldOut;
+      // Import world.js
+      const worldUrl = `${ROOT}world.js?v=${Date.now()}`;
+      diagLog(`[boot2] world url= ${worldUrl}`);
+      diagLog(`[boot2] import ${worldUrl}`);
+      const worldMod = await import(worldUrl);
+      diagLog(`[boot2] world import ✅`);
 
-      // -------- MODULES (SAFE) --------
-      // This is the ONLY place modules.json is processed.
-      // No url.includes errors, because spine_modules handles objects correctly.
-      DIAG_STATUS("boot2: loading modules…");
-      try {
-        const mods = await importAny("/scarlett-poker-vr/js/scarlett1/spine_modules.js");
-        const initModules =
-          (typeof mods?.initModules === "function" && mods.initModules) ||
-          (typeof mods?.default?.initModules === "function" && mods.default.initModules);
+      const initWorld =
+        (typeof worldMod.initWorld === "function" && worldMod.initWorld) ||
+        (typeof worldMod.default === "function" && worldMod.default) ||
+        (typeof worldMod.default?.initWorld === "function" && worldMod.default.initWorld) ||
+        null;
 
-        if (initModules) {
-          await initModules(ctx);
-          DIAG_LOG("[boot2] modules.json ✅");
-          log("modules.json ✅");
-        } else {
-          DIAG_LOG("[boot2] spine_modules.js loaded, but no initModules() (skipping)");
-        }
-      } catch (e) {
-        DIAG_LOG(`[boot2] modules failed (non-fatal) ❌ ${e?.message || e}`);
-        log("modules failed (non-fatal)", e);
+      if (!initWorld) {
+        throw new Error("world.js loaded but no initWorld(ctx) export found");
       }
 
-      // -------- RENDER LOOP --------
-      DIAG_STATUS("boot2: running ✅");
-      let last = performance.now();
-      renderer.setAnimationLoop(() => {
-        const t = performance.now();
-        const dt = Math.min(0.05, (t - last) / 1000);
-        last = t;
+      // Start world
+      ctx.status("Starting world…");
+      diagLog(`initWorld() start`);
+      await initWorld(ctx);
 
-        // If world has tick
-        try {
-          const w = ctx.worldOut?.world || ctx.worldOut?.default?.world || ctx.world;
-          if (w?.tick) w.tick(dt);
-        } catch {}
+      // Render loop
+      renderer.setAnimationLoop(() => {
+        const dt = ctx.clock.getDelta();
+
+        // allow modules to detect XR
+        ctx.state.inXR = !!renderer.xr?.isPresenting;
+
+        // update callbacks
+        for (let i = 0; i < ctx.updates.length; i++) {
+          try { ctx.updates[i](dt, ctx); } catch (e) { /* keep loop alive */ }
+        }
 
         renderer.render(scene, camera);
       });
 
-      DIAG_LOG("render loop start ✅");
-      DIAG_LOG("[boot2] done ✅");
-      log("done ✅");
-    } catch (e) {
-      const msg = e?.message || String(e);
-      DIAG_STATUS(`BOOT2 FAILED ❌ (${msg})`);
-      DIAG_LOG(`[boot2] ERROR ❌ ${msg}`);
-      console.error(e);
-    }
-  }
+      diagLog(`render loop start ✅`);
 
-  main();
+      // -------------------------------
+      // START MODULES (CRITICAL FIX)
+      // -------------------------------
+      try {
+        diagLog(`[boot2] import ${ROOT}spine_modules.js`);
+        const mods = await import(`${ROOT}spine_modules.js?v=${Date.now()}`);
+        diagLog(`[boot2] spine_modules.js loaded ✅`);
+
+        const startMods =
+          (typeof mods.initModules === "function" && mods.initModules) ||
+          (typeof mods.init === "function" && mods.init) ||
+          (typeof mods.default?.initModules === "function" && mods.default.initModules) ||
+          (typeof mods.default?.init === "function" && mods.default.init) ||
+          null;
+
+        if (!startMods) {
+          diagLog(`[boot2] spine_modules.js loaded, but no init/initModules (skipping)`);
+        } else {
+          await startMods(ctx);
+          diagLog(`[boot2] modules started ✅`);
+        }
+      } catch (e) {
+        diagLog(`[boot2] module init failed ❌ ${e?.message || e}`);
+      }
+
+      // Final status
+      ctx.status("World running ✅");
+      diagLog(`[boot2] done ✅`);
+    } catch (e) {
+      fatal(e, "BOOT2 FAILED");
+    }
+  })();
 })();

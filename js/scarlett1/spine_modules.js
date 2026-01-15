@@ -1,7 +1,11 @@
 // /js/scarlett1/spine_modules.js — Scarlett Module Loader (FULL • SAFE)
 // Loads /modules.json and initializes modules that expose init(ctx) or default init(ctx)
 // Never breaks XR; Android modules only run when NOT in XR.
-
+export function init(ctx) {}
+// or
+export function initModule(ctx) {}
+// or
+export default function init(ctx) {}
 export async function initModules(ctx) {
   const log = ctx?.log || ((...a) => console.log("[mods]", ...a));
   const fail = ctx?.fail || ((...a) => console.warn("[mods]", ...a));

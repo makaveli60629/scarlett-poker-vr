@@ -1,103 +1,93 @@
-// /js/scarlett1/boot2.js — Scarlett Boot (MODULE) FULL v1.1
-// ✅ Loads THREE (CDN)
-// ✅ Loads world.js and calls initWorld()
-// ✅ Loads spine_android.js for mobile sticks (safe)
-// ✅ Never gets stuck at "Booting…"
+// /js/scarlett1/boot2.js — Scarlett Boot (MODULE) v2.0 FULL
+// Goals:
+// - Never "Booting..." forever with no logs
+// - Load THREE via CDN
+// - Load world.js (relative to this file)
+// - Load /modules.json via spine_modules.js
+// - Keep Quest working; Android controls work only when NOT in XR session
 
-const diagLog = window.__SCARLETT_DIAG_LOG || ((...a) => console.log("[boot2]", ...a));
-const diagStatus = window.__SCARLETT_DIAG_STATUS || ((s) => console.log("[status]", s));
+const DLOG = (s) => (window.__SCARLETT_DIAG_LOG__ ? window.__SCARLETT_DIAG_LOG__(String(s)) : console.log(s));
+const DSTAT = (s) => (window.__SCARLETT_DIAG_STATUS__ ? window.__SCARLETT_DIAG_STATUS__(String(s)) : null);
 
-function stamp() {
+function nowTag() {
   const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return `[${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}]`;
+  const p = (n) => String(n).padStart(2, "0");
+  return `[${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}]`;
 }
+const log = (...a) => DLOG(`${nowTag()} ${a.join(" ")}`);
 
-function log(...a) { diagLog(stamp(), ...a); }
+DSTAT("Booting...");
+log("[boot2] boot executed ✅");
 
-async function imp(url) {
-  log("import", url);
-  const m = await import(url);
-  log("ok ✅", url);
-  return m;
-}
-
-(async function main() {
+(async () => {
   try {
-    diagStatus("Booting…");
-    log("boot executed ✅");
+    // Import THREE (CDN)
+    const threeUrl = "https://unpkg.com/three@0.158.0/build/three.module.js";
+    log(`[boot2] import ${threeUrl}`);
+    const THREE = await import(threeUrl);
+    log(`[boot2] three import ✅ r${THREE.REVISION}`);
 
-    // THREE
-    const threeURL = `https://unpkg.com/three@0.158.0/build/three.module.js?v=${Date.now()}`;
-    const THREE = await imp(threeURL);
-    window.THREE = THREE;
-    log("three import ✅ r158");
+    // Import world module (same folder)
+    const worldUrl = `./world.js?v=${Date.now()}`;
+    log(`[boot2] world url= ${worldUrl}`);
+    const worldMod = await import(worldUrl);
 
-    // WORLD
-    const worldURL = `./world.js?v=${Date.now()}`;
-    log("world url=", worldURL);
-    const worldMod = await imp(worldURL);
-
-    if (!worldMod || typeof worldMod.initWorld !== "function") {
-      throw new Error("world.js missing export initWorld()");
+    // Run world
+    if (typeof worldMod.initWorld !== "function") {
+      throw new Error("world.js must export function initWorld()");
     }
 
-    // Create scene/camera/renderer here (world will reuse them)
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.xr.enabled = true;
-
-    document.body.style.margin = "0";
-    document.body.style.overflow = "hidden";
-    if (!document.querySelector("canvas")) document.body.appendChild(renderer.domElement);
-
-    window.addEventListener("resize", () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+    log("initWorld() start");
+    const ctx = await worldMod.initWorld({
+      THREE,
+      log,
+      diagLog: log,
+      basePath: "/scarlett-poker-vr/"
     });
 
-    // Rig created here so ALL modules share same rig
-    const rig = new THREE.Group();
-    rig.name = "PlayerRig";
-    scene.add(rig);
-    rig.add(camera);
+    // Normalize context
+    const C = ctx || {};
+    C.THREE = THREE;
+    C.log = log;
+    C.base = "/scarlett-poker-vr/";
+    // addUpdate support
+    if (!C._updates) C._updates = [];
+    C.addUpdate = C.addUpdate || ((fn) => C._updates.push(fn));
 
-    // Init world
-    const worldCtx = { THREE, scene, camera, renderer, rig, diagLog, diagStatus, spawnIndex: 0 };
-    const worldHandles = await worldMod.initWorld(worldCtx);
-    // If world created its own scene/camera/renderer, prefer returned
-    const finalScene = worldHandles?.scene || scene;
-    const finalCamera = worldHandles?.camera || camera;
-    const finalRenderer = worldHandles?.renderer || renderer;
-    const finalRig = worldHandles?.rig || rig;
-
-    // Ensure renderer loop exists if world didn't set one
-    if (finalRenderer.xr && finalRenderer.setAnimationLoop) {
-      // if already set by world, this is harmless (it will override to same behavior)
-      finalRenderer.setAnimationLoop(() => finalRenderer.render(finalScene, finalCamera));
+    // If world provided a render loop hook, great. If not, we’ll create one.
+    // We only create a loop if renderer+scene+camera exist and world didn't already.
+    if (C.renderer && C.scene && C.camera && !C.__hasLoop) {
+      const clock = new THREE.Clock();
+      function loop() {
+        const dt = Math.min(0.05, clock.getDelta());
+        for (const fn of C._updates) {
+          try { fn(dt); } catch (e) { log("[boot2] update err", e?.message || e); }
+        }
+        C.renderer.render(C.scene, C.camera);
+        C.renderer.setAnimationLoop(loop);
+      }
+      C.__hasLoop = true;
+      C.renderer.setAnimationLoop(loop);
+      log("render loop start ✅");
     }
 
-    // ANDROID STICKS
+    // Load modules.json (spines/addons)
     try {
-      const androidMod = await imp(`./spine_android.js?v=${Date.now()}`);
-      if (androidMod?.initAndroid) {
-        androidMod.initAndroid({ renderer: finalRenderer, camera: finalCamera, rig: finalRig, diagLog });
+      const mods = await import(`./spine_modules.js?v=${Date.now()}`);
+      if (typeof mods.initModules === "function") {
+        await mods.initModules(C);
       } else {
-        log("spine_android loaded but no initAndroid()");
+        log("[boot2] spine_modules.js loaded, but no initModules() (skipping)");
       }
     } catch (e) {
-      log("android sticks load failed (skipping):", e?.message || e);
+      log("[boot2] spine_modules load failed (skipping):", e?.message || e);
     }
 
-    diagStatus("World running ✅");
-    log("done ✅");
+    DSTAT("World running ✅");
+    log("[boot2] done ✅");
   } catch (e) {
-    diagStatus("BOOT FAILED ❌");
-    log("BOOT ERROR:", e?.message || e);
-    throw e;
+    DSTAT("BOOT FAILED ❌");
+    log(`BOOT ERROR: ${e?.message || e}`);
+    console.error(e);
   }
 })();

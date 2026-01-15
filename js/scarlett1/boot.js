@@ -1,31 +1,67 @@
-// Scarlett 1.0 — Permanent Spine Boot
-const V = Date.now();
-const ROOT = new URL("../", import.meta.url).toString(); // points to /js/
-const log = (...a) => {
-  const line = a.map(x => (typeof x === "string" ? x : JSON.stringify(x))).join(" ");
-  window.__SCARLETT_LOGS__ = window.__SCARLETT_LOGS__ || [];
-  window.__SCARLETT_LOGS__.push(line);
-  console.log("[S1BOOT]", ...a);
-  const box = document.getElementById("statusBox");
-  if (box) box.textContent += (box.textContent ? "\n" : "") + line;
+// /js/scarlett1/boot.js — Scarlett 1.0 boot (base-path safe)
+// Loads Three.js from CDN, then starts world.
+
+const D = window.SCARLETT_DIAG || {
+  log: console.log.bind(console),
+  err: console.error.bind(console),
+  setStatus: (s)=>console.log('[STATUS]', s)
 };
 
-window.addEventListener("error", (e) => log("window.error:", e?.message || e));
-window.addEventListener("unhandledrejection", (e) => log("unhandledrejection:", e?.reason?.message || String(e?.reason || e)));
+D.setStatus('boot.js running…');
+D.log('boot start ✅');
 
-log(`BOOT v=${V}`);
-log(`href=${location.href}`);
-log(`ua=${navigator.userAgent}`);
-log(`secureContext=${window.isSecureContext}`);
-log(`ROOT(js)=${ROOT}`);
-log(`navigator.xr=${!!navigator.xr}`);
+const THREE_URL = 'https://unpkg.com/three@0.158.0/build/three.module.js';
 
-(async () => {
-  try {
-    const mod = await import(`./index.js?v=${V}`);
-    await mod.start({ V, ROOT, log });
-    log("Spine start ✅");
-  } catch (e) {
-    log("Spine FAILED ❌", e?.message || e);
+async function loadThree() {
+  D.setStatus('Loading three.js…');
+  try{
+    const mod = await import(THREE_URL);
+    D.log('three import ✅', THREE_URL);
+    return mod;
+  }catch(e){
+    D.err('three import FAILED', e?.message || e);
+    D.setStatus('three import failed');
+    throw e;
   }
-})();
+}
+
+async function start() {
+  const THREE = await loadThree();
+
+  D.setStatus('Loading world.js…');
+
+  // Base path (repo-safe)
+  const path = location.pathname;
+  const seg = path.split('/').filter(Boolean)[0];
+  const base = seg ? `/${seg}/` : `/`;
+  const worldUrl = `${base}js/scarlett1/world.js?v=${Date.now()}`;
+
+  D.log('world url=', worldUrl);
+
+  let worldMod;
+  try{
+    worldMod = await import(worldUrl);
+    D.log('world import ✅');
+  }catch(e){
+    D.err('world import FAILED', e?.message || e);
+    D.setStatus('world import failed');
+    return;
+  }
+
+  if(!worldMod || typeof worldMod.initWorld !== 'function'){
+    D.err('world.js missing export initWorld()');
+    D.setStatus('world.js missing initWorld()');
+    return;
+  }
+
+  D.setStatus('Starting world…');
+  try{
+    await worldMod.initWorld({ THREE, DIAG: D });
+    D.setStatus('World running ✅');
+  }catch(e){
+    D.err('initWorld FAILED', e?.message || e);
+    D.setStatus('World crashed');
+  }
+}
+
+start();

@@ -1,13 +1,11 @@
-// /js/scarlett1/boot2.js — Scarlett BOOT2 v3.3.2 (LASER RIG FIX FULL)
-// Fixes:
-// ✅ Lasers stuck in world center -> controllers parented to PlayerRig
-// ✅ Sprite raycast warning -> raycaster.camera = camera + ignore sprites
-// ✅ matrixWorld null crash -> guard early frames
-// ✅ Recenter on XR enter (facing wrong way)
-// ✅ Teleport from correct hand position
+// /js/scarlett1/boot2.js — Scarlett BOOT2 v3.4 (RETICLE + SNAP TURN + LOCAL HANDS)
+// ✅ Teleport reticle ring on floor
+// ✅ Snap turn reads multiple gamepad sources (Quest reliable)
+// ✅ Hands supported via LOCAL XRHandModelFactory (no bare "three" import issues)
+// ✅ Controllers parented to PlayerRig (lasers stay on you)
 // ✅ Gaze teleport fallback if inputSources=0
 
-const BUILD = "BOOT2_SCARLETT1_v3_3_2_LASER_RIG_FIX";
+const BUILD = "BOOT2_SCARLETT1_v3_4_RETICLE_SNAP_HANDS";
 const nowTs = () => new Date().toLocaleTimeString();
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
@@ -78,7 +76,7 @@ function makeHUD() {
   const lines = [];
   const push = (s) => {
     lines.push(s);
-    while (lines.length > 650) lines.shift();
+    while (lines.length > 700) lines.shift();
     pre.textContent = lines.join("\n");
     root.scrollTop = root.scrollHeight;
   };
@@ -165,7 +163,56 @@ function addLoadingPanel(THREE, scene) {
   };
 }
 
-// ---- XR controls with laser rig fix + sprite safe + gaze teleport fallback ----
+function makeTeleportReticle(THREE, scene) {
+  const geo = new THREE.RingGeometry(0.18, 0.22, 32);
+  const mat = new THREE.MeshBasicMaterial({ color: 0x55aaff, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.visible = false;
+  mesh.name = "TeleportReticle";
+  scene.add(mesh);
+  return {
+    showAt(p) {
+      mesh.position.set(p.x, p.y + 0.01, p.z);
+      mesh.visible = true;
+    },
+    hide() { mesh.visible = false; }
+  };
+}
+
+function installXRHandsLocal({ THREE, renderer, scene, playerRig, hud }) {
+  // Optional: only if local module exists
+  let factory = null;
+  let left = null, right = null;
+
+  return {
+    async init() {
+      try {
+        const mod = await import(`../thirdparty/XRHandModelFactory.js?v=${Date.now()}`);
+        const XRHandModelFactory = mod.XRHandModelFactory || mod.default?.XRHandModelFactory || mod.default;
+        if (!XRHandModelFactory) throw new Error("XRHandModelFactory export missing");
+        factory = new XRHandModelFactory();
+
+        left = renderer.xr.getHand(0);
+        right = renderer.xr.getHand(1);
+
+        // parent to rig so they stay aligned
+        playerRig.add(left);
+        playerRig.add(right);
+
+        const leftModel = factory.createHandModel(left, "mesh");
+        const rightModel = factory.createHandModel(right, "mesh");
+        left.add(leftModel);
+        right.add(rightModel);
+
+        hud.log("XR hand models attached ✅ (local)");
+      } catch (e) {
+        hud.err("XR hands init skipped ❌", e?.message || e);
+      }
+    }
+  };
+}
+
 function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
   const st = {
     inXR: false,
@@ -189,6 +236,8 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
   };
 
   st.gazeRay.camera = camera;
+
+  const reticle = makeTeleportReticle(THREE, scene);
 
   function setWorld(world) {
     st.teleportSurfaces.length = 0;
@@ -218,19 +267,14 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
 
   function getRay(controller) {
     if (!controller || !controller.matrixWorld) return null;
-
     st.tmpMat.identity().extractRotation(controller.matrixWorld);
     st.tmpDir.set(0, 0, -1).applyMatrix4(st.tmpMat).normalize();
     st.tmpPos.setFromMatrixPosition(controller.matrixWorld);
-
     if (!isFinite(st.tmpPos.x) || !isFinite(st.tmpPos.y) || !isFinite(st.tmpPos.z)) return null;
-
     return { origin: st.tmpPos.clone(), dir: st.tmpDir.clone() };
   }
 
-  function filterTargets(list) {
-    return list.filter(o => o && !o.isSprite);
-  }
+  function filterTargets(list) { return list.filter(o => o && !o.isSprite); }
 
   function intersect(i) {
     const c = st.controllers[i];
@@ -238,7 +282,6 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
     if (!c || !rc) return null;
 
     rc.camera = camera;
-
     const ray = getRay(c);
     if (!ray) return null;
 
@@ -269,7 +312,6 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
       st.lastHit[i] = null;
       return;
     }
-
     line.scale.z = Math.max(0.05, (res.hit.distance || st.maxRay) / st.maxRay);
     st.lastHit[i] = res;
   }
@@ -282,16 +324,10 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
   function onSelect(i) {
     const r = st.lastHit[i];
     if (!r?.hit?.point) return;
-
-    if (r.type === "pad") {
-      let n = r.hit.object;
-      while (n && !n.userData?.teleport) n = n.parent;
-      if (n?.userData?.target) return teleportTo(n.userData.target);
-    }
     teleportTo(r.hit.point);
   }
 
-  // ✅ LASER RIG FIX: parent controllers to playerRig, not scene
+  // ✅ controllers parented to rig so lasers are on you
   function setupControllers() {
     teardownControllers();
 
@@ -299,26 +335,23 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
       const c = renderer.xr.getController(i);
       c.name = `XR_Controller_${i}`;
 
-      // critical: keep controller transforms in same space as playerRig
       playerRig.add(c);
 
       const line = makeLine();
-      line.position.set(0, 0, 0);
       c.add(line);
 
       const rc = new THREE.Raycaster();
       rc.far = st.maxRay;
       rc.camera = camera;
-      st.raycasters[i] = rc;
 
       c.addEventListener("selectstart", () => onSelect(i));
       c.addEventListener("squeezestart", () => onSelect(i));
 
       st.controllers[i] = c;
       st.lines[i] = line;
+      st.raycasters[i] = rc;
     }
-
-    hud.log("[xr] controllers installed ✅ (parented to PlayerRig)");
+    hud.log("[xr] controllers installed ✅ (rig)");
   }
 
   function teardownControllers() {
@@ -332,21 +365,36 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
     }
   }
 
-  function snap(dt) {
-    st.lastSnap += dt;
+  function readSnapAxis() {
+    // Try multiple sources (Quest reliable):
+    // 1) session inputSources gamepads
     const session = renderer.xr.getSession?.();
-    if (!session) return;
+    if (!session) return 0;
 
-    const sources = session.inputSources || [];
     let x = 0;
-
-    for (const src of sources) {
+    for (const src of (session.inputSources || [])) {
       const gp = src?.gamepad;
-      if (!gp?.axes?.length) continue;
-      x = gp.axes[0] ?? 0;
-      if (Math.abs(x) > 0.65) break;
+      if (gp?.axes?.length) {
+        x = gp.axes[2] ?? gp.axes[0] ?? 0; // Quest sometimes uses axes[2]
+        if (Math.abs(x) > 0.65) return x;
+      }
     }
 
+    // 2) controller objects' gamepad (some builds)
+    for (let i = 0; i < 2; i++) {
+      const gp = st.controllers[i]?.gamepad;
+      if (gp?.axes?.length) {
+        x = gp.axes[2] ?? gp.axes[0] ?? 0;
+        if (Math.abs(x) > 0.65) return x;
+      }
+    }
+
+    return 0;
+  }
+
+  function snapTurn(dt) {
+    st.lastSnap += dt;
+    const x = readSnapAxis();
     if (Math.abs(x) < 0.65) return;
     if (st.lastSnap < st.snapCooldown) return;
     st.lastSnap = 0;
@@ -355,11 +403,21 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
     playerRig.rotation.y += (x > 0 ? -ang : ang);
   }
 
+  function updateReticle() {
+    // Prefer controller hit if present, else gaze hit
+    const a = st.lastHit[0]?.hit?.point;
+    const b = st.lastHit[1]?.hit?.point;
+    const p = a || b || st.gazeHit;
+    if (p) reticle.showAt(p);
+    else reticle.hide();
+  }
+
   function updateGaze(dt) {
     const session = renderer.xr.getSession?.();
     if (!session) return;
 
-    if ((session.inputSources?.length ?? 0) > 0) {
+    const sourcesLen = (session.inputSources?.length ?? 0);
+    if (sourcesLen > 0) {
       st.gazeHold = 0;
       st.gazeHit = null;
       return;
@@ -389,7 +447,7 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
   renderer.xr.addEventListener("sessionstart", () => {
     st.inXR = true;
 
-    // ✅ recenter on XR enter (fix facing wrong way / status wall)
+    // recenter on XR enter
     playerRig.position.y = 0;
     playerRig.rotation.y = 0;
 
@@ -400,6 +458,7 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
   renderer.xr.addEventListener("sessionend", () => {
     st.inXR = false;
     teardownControllers();
+    reticle.hide();
     hud.log("[xr] sessionend ✅");
   });
 
@@ -414,7 +473,6 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
         if (st.inXR) setupControllers();
         else teardownControllers();
       }
-
       if (!st.inXR) return;
 
       for (let i = 0; i < 2; i++) {
@@ -423,8 +481,9 @@ function installXRControls({ THREE, renderer, scene, playerRig, camera, hud }) {
         setLine(i, res);
       }
 
-      snap(dt);
+      snapTurn(dt);
       updateGaze(dt);
+      updateReticle();
     }
   };
 }
@@ -534,7 +593,6 @@ function installAndroidSticks({ playerRig, hud }) {
   };
 }
 
-// ---------------- MAIN ----------------
 (async function boot() {
   const hud = makeHUD();
   hud.log("diag start ✅");
@@ -585,6 +643,10 @@ function installAndroidSticks({ playerRig, hud }) {
   const xr = installXRControls({ THREE, renderer, scene, playerRig, camera, hud });
   const android = installAndroidSticks({ playerRig, hud });
   const loading = addLoadingPanel(THREE, scene);
+
+  // Local hands loader (won't crash if missing)
+  const hands = installXRHandsLocal({ THREE, renderer, scene, playerRig, hud });
+  renderer.xr.addEventListener("sessionstart", () => { hands.init(); });
 
   hud.enterBtn.onclick = async () => {
     try {
@@ -639,15 +701,7 @@ function installAndroidSticks({ playerRig, hud }) {
   if (!initWorld) throw new Error("world.js missing export initWorld()");
 
   hud.log("importing world…");
-  world = await initWorld({
-    THREE,
-    scene,
-    renderer,
-    camera,
-    playerRig,
-    log: (...a) => console.log("[world]", ...a),
-    quality: "quest"
-  });
+  world = await initWorld({ THREE, scene, renderer, camera, playerRig, log: (...a) => console.log("[world]", ...a), quality: "quest" });
 
   worldReady = true;
   loading.setVisible(false);

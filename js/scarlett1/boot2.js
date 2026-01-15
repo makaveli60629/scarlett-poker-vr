@@ -1,61 +1,70 @@
-// /js/scarlett1/boot2.js — Scarlett BOOT v2.1 (GitHub Pages SAFE)
+// /js/scarlett1/boot2.js — Scarlett BOOT v2.2 (Hard-safe)
+// ✅ Always updates HUD status
+// ✅ Logs every stage
 // ✅ No top-level await
-// ✅ Android + Oculus safe
-// ✅ HUD exits Booting
-// ✅ Guaranteed Pages deploy
+// ✅ Will not silently hang
 
 (function () {
-  const log = (...a) => {
-    console.log("[boot2]", ...a);
-    window.__SCARLETT_DIAG_LOG && window.__SCARLETT_DIAG_LOG(a.join(" "));
+  const log = (msg) => {
+    console.log(msg);
+    if (window.__SCARLETT_DIAG_LOG) window.__SCARLETT_DIAG_LOG(msg);
   };
-
   const status = (s) => {
+    if (window.__SCARLETT_DIAG_STATUS) window.__SCARLETT_DIAG_STATUS(s);
     console.log("[STATUS]", s);
-    window.__SCARLETT_DIAG_STATUS && window.__SCARLETT_DIAG_STATUS(s);
   };
 
   status("Booting...");
 
-  import("https://unpkg.com/three@0.158.0/build/three.module.js")
-    .then((THREE) => {
-      log("three import ✅", THREE.REVISION);
+  const THREE_URL = "https://unpkg.com/three@0.158.0/build/three.module.js";
 
-      return import("./world.js").then((worldMod) => {
-        if (!worldMod.initWorld) {
-          throw new Error("world.js missing initWorld()");
+  log(`[boot2] import ${THREE_URL}`);
+
+  import(THREE_URL)
+    .then((THREE) => {
+      log(`[boot2] three import ✅ r${THREE.REVISION}`);
+
+      const worldUrl = `./world.js?v=${Date.now()}`;
+      log(`[boot2] world url= ${worldUrl}`);
+
+      return import(worldUrl).then((worldMod) => {
+        if (!worldMod || typeof worldMod.initWorld !== "function") {
+          throw new Error("world.js loaded but initWorld() missing");
         }
 
+        log("initWorld() start");
         const world = worldMod.initWorld({ THREE });
         window.__SCARLETT_WORLD__ = world;
-
         return world;
       });
     })
     .then((world) => {
-      const ua = navigator.userAgent;
-      const isAndroid =
-        /Android/i.test(ua) && !/OculusBrowser/i.test(ua);
+      // Load spine modules (optional)
+      const modsUrl = `./spine_modules.js?v=${Date.now()}`;
+      log(`[boot2] import ${modsUrl}`);
 
-      if (isAndroid) {
-        return import("./spine_android.js")
-          .then((mod) => {
-            if (mod.initAndroidControls) {
-              mod.initAndroidControls(world);
-              log("Android controls attached ✅");
-            }
-          })
-          .catch((e) => log("Android controls skipped", e));
-      }
+      return import(modsUrl)
+        .then((m) => {
+          if (m && typeof m.initModules === "function") {
+            log("[boot2] initModules() start");
+            return m.initModules(world).then(() => world);
+          } else {
+            log("[boot2] spine_modules.js loaded, but no initModules() (skipping)");
+            return world;
+          }
+        })
+        .catch((e) => {
+          log("[boot2] spine_modules load failed (skipping): " + (e?.message || e));
+          return world;
+        });
     })
     .then(() => {
       status("World running ✅");
-      log("boot complete ✅");
+      log("[boot2] done ✅");
     })
     .catch((err) => {
       console.error(err);
       status("BOOT FAILED ❌");
-      window.__SCARLETT_DIAG_LOG &&
-        window.__SCARLETT_DIAG_LOG("BOOT ERROR: " + err.message);
+      log("BOOT ERROR: " + (err?.message || err));
     });
 })();

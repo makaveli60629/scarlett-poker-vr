@@ -1,8 +1,8 @@
 // /js/scarlett1/boot2.js — Scarlett Boot2 (Diagnostics + XR + Android-safe)
-// ✅ Robust cache-bust for world + modules
+// ✅ FIXED: cache-bust keeps absolute URLs (unpkg stays unpkg)
 // ✅ VRButton from three/examples
-// ✅ Clean diagnostics HUD with status + logs
-// ✅ Never crashes if optional modules fail
+// ✅ Diagnostics HUD with status + logs
+// ✅ World import cache-busted safely
 
 const BUILD = `BOOT2_${Date.now()}`;
 
@@ -144,7 +144,7 @@ const Diag = (() => {
   function log(...a) {
     const msg = `${stamp()} ${a.map(x => (typeof x === "string" ? x : JSON.stringify(x))).join(" ")}`;
     S.lines.push(msg);
-    if (S.lines.length > 500) S.lines.splice(0, S.lines.length - 500);
+    if (S.lines.length > 600) S.lines.splice(0, S.lines.length - 600);
     render();
     console.log(msg);
   }
@@ -157,20 +157,13 @@ const Diag = (() => {
   return { log, status };
 })();
 
-// ---------- helpers ----------
-const BASE = (() => {
-  // Ensure we behave on GitHub pages subpath: /scarlett-poker-vr/
-  const p = location.pathname;
-  if (p.includes("/scarlett-poker-vr/")) return "/scarlett-poker-vr/";
-  // fallback: root folder
-  return p.endsWith("/") ? p : (p.split("/").slice(0, -1).join("/") + "/");
-})();
-
-const bust = (url) => {
-  const u = new URL(url, location.origin);
+// ✅ FIXED: bust keeps ABSOLUTE urls as absolute (does NOT strip origin)
+function bust(url) {
+  // new URL() supports absolute or relative. For relative, it uses current page origin.
+  const u = new URL(url, location.href);
   u.searchParams.set("v", String(Date.now()));
-  return u.pathname + u.search;
-};
+  return u.toString(); // <-- IMPORTANT: keep full URL (includes https://unpkg.com when used)
+}
 
 async function safeImport(url, label) {
   try {
@@ -189,24 +182,23 @@ async function safeImport(url, label) {
   Diag.log("diag start ✅");
   Diag.log(`href=${location.href}`);
   Diag.log(`path=${location.pathname}`);
-  Diag.log(`base=${BASE}`);
   Diag.log(`secureContext=${window.isSecureContext}`);
   Diag.log(`ua=${navigator.userAgent}`);
   Diag.log(`navigator.xr=${!!navigator.xr}`);
 
   try {
-    // Three
+    // Three (CDN)
     const threeUrl = bust("https://unpkg.com/three@0.158.0/build/three.module.js");
     const THREE = await safeImport(threeUrl, "three");
     Diag.log(`[boot2] three import ✅ r${THREE.REVISION}`);
 
-    // VRButton
+    // VRButton (CDN)
     const { VRButton } = await safeImport(
       bust("https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js"),
       "VRButton"
     );
 
-    // Renderer / scene / camera / rig
+    // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
@@ -215,9 +207,9 @@ async function safeImport(url, label) {
     document.body.style.background = "#02040a";
     document.body.appendChild(renderer.domElement);
 
+    // Scene / Rig
     const scene = new THREE.Scene();
 
-    // Rig: player(yaw) -> cameraPitch(pitch) -> camera
     const player = new THREE.Group();
     player.name = "PlayerRig";
     scene.add(player);
@@ -230,21 +222,19 @@ async function safeImport(url, label) {
     camera.position.set(0, 1.6, 3.2);
     cameraPitch.add(camera);
 
-    // Controllers
+    // Controllers + Hands
     const c0 = renderer.xr.getController(0);
     const c1 = renderer.xr.getController(1);
-    player.add(c0);
-    player.add(c1);
-    const controllers = { c0, c1 };
+    player.add(c0); player.add(c1);
 
-    // Hands (Quest hand tracking)
     const h0 = renderer.xr.getHand(0);
     const h1 = renderer.xr.getHand(1);
-    player.add(h0);
-    player.add(h1);
+    player.add(h0); player.add(h1);
+
+    const controllers = { c0, c1 };
     const hands = { h0, h1 };
 
-    // VRButton
+    // VR Button
     const btn = VRButton.createButton(renderer);
     btn.style.position = "fixed";
     btn.style.left = "10px";
@@ -260,28 +250,20 @@ async function safeImport(url, label) {
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    // World import (cache-busted)
+    // World (LOCAL module, cache-busted)
     const worldUrl = bust(new URL("./world.js", import.meta.url).toString());
     Diag.log(`[boot2] world url=${worldUrl}`);
 
-    const worldMod = await safeImport(worldUrl, "world.js");
-    const initWorld = worldMod.initWorld || worldMod.World?.init || worldMod.default?.initWorld;
-
-    if (typeof initWorld !== "function") {
-      throw new Error("world.js missing initWorld()");
-    }
-
     Diag.status(`<span style="color:#9ef0b0;">World loading...</span>`);
 
+    const worldMod = await safeImport(worldUrl, "world.js");
+    const initWorld = worldMod.initWorld || worldMod.default?.initWorld;
+
+    if (typeof initWorld !== "function") throw new Error("world.js missing initWorld()");
+
     const api = await initWorld({
-      THREE,
-      scene,
-      renderer,
-      camera,
-      cameraPitch,
-      player,
-      controllers,
-      hands,
+      THREE, scene, renderer, camera, cameraPitch, player,
+      controllers, hands,
       log: Diag.log,
       BUILD
     });
@@ -293,7 +275,6 @@ async function safeImport(url, label) {
       last = t;
 
       api?.update?.(dt, t / 1000);
-
       renderer.render(scene, camera);
     });
 

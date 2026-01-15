@@ -1,406 +1,244 @@
-// /js/scarlett1/spine_android.js — Scarlett Android Sticks (FULL • SAFE • PERMANENT)
-// ✅ Shows Android sticks on phones/tablets EVEN if navigator.xr=true
-// ✅ Auto-hides ONLY when XR is ACTUALLY PRESENTING (Quest session)
-// ✅ Renders ABOVE Scarlett Diagnostics HUD (z-index fix)
-// ✅ Does NOT interfere with Oculus/Quest controls
-//
-// Usage (boot2 or world):
-//   import { initAndroidSticks } from "./spine_android.js";
-//   const android = initAndroidSticks({ THREE, camera, rig, renderer, onMove, onTurn, onAction, log });
-//
-// Required in your world:
-//  - rig: the PlayerRig/group you move (camera parent)
-//  - camera: THREE camera
-//  - renderer: THREE.WebGLRenderer
-//
-// Optional callbacks:
-//  - onMove({x,z, speed})    // continuous
-//  - onTurn({yawDelta})      // continuous or snap
-//  - onAction({type})        // "teleport" etc
-//
-// If you don't pass callbacks, module will apply movement to rig directly.
+// /js/scarlett1/spine_android.js — Scarlett Android Touch Controls (FULL)
+// Works on mobile Chrome so you can debug without Quest.
+// DOES NOT break Quest: it auto-disables when an XR session is active.
 
-export function initAndroidSticks(opts = {}) {
-  const {
-    THREE,
-    camera,
-    rig,
-    renderer,
-    log = (...a) => console.log("[android]", ...a),
+export async function init(ctx) {
+  const log = ctx?.log || console.log;
 
-    // movement tuning
-    moveSpeed = 1.65,        // meters/sec
-    strafeSpeed = 1.35,      // meters/sec
-    turnSpeed = 1.75,        // rad/sec
-    deadZone = 0.12,
-
-    // behavior
-    snapTurn = false,
-    snapAngleDeg = 45,
-    showToggleButton = true,
-
-    // callbacks
-    onMove = null,
-    onTurn = null,
-    onAction = null,
-  } = opts;
-
-  if (!THREE || !camera || !rig || !renderer) {
-    log("initAndroidSticks missing required {THREE,camera,rig,renderer} — skipping");
-    return null;
+  // Only on touch/mobile
+  const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
+  if (!isTouch) {
+    log("[android] not touch device (skip)");
+    return;
   }
 
-  // ---------------------------
-  // XR Detection (FIX)
-  // ---------------------------
-  const ua = navigator.userAgent || "";
-  const isQuestUA = /OculusBrowser|Quest|Oculus/i.test(ua);
+  // Avoid double init
+  if (window.__SCARLETT_ANDROID_READY) {
+    log("[android] already ready (skip)");
+    return;
+  }
+  window.__SCARLETT_ANDROID_READY = true;
 
-  function isXRPresenting() {
-    // IMPORTANT: we only hide sticks if XR is actually presenting,
-    // not just supported (navigator.xr=true on Android Chrome).
-    try {
-      return !!(renderer && renderer.xr && renderer.xr.isPresenting === true && isQuestUA);
-    } catch (e) {
-      return false;
-    }
+  // We need player + camera pivot references from world
+  const player = ctx.player;
+  const camera = ctx.camera;
+  const cameraPitch = ctx.cameraPitch || ctx.camera; // fallback
+
+  if (!player || !camera) {
+    log("[android] missing player/camera (skip)");
+    return;
   }
 
-  // ---------------------------
-  // DOM + Styles (Z-INDEX FIX)
-  // ---------------------------
-  const root = document.createElement("div");
-  root.id = "scarlett_android_sticks";
-  root.style.cssText = `
-    position: fixed;
-    left: 0;
-    top: 0;
-    width: 100vw;
-    height: 100vh;
-    pointer-events: none;
-    z-index: 1000001; /* ABOVE Scarlett Diagnostics HUD */
+  // ===== UI ROOT =====
+  const ui = document.createElement("div");
+  ui.id = "scarlett_android_ui";
+  ui.style.cssText = `
+    position:fixed; inset:0; z-index:999998;
+    pointer-events:none;
+    user-select:none; -webkit-user-select:none;
   `;
-  document.body.appendChild(root);
+  document.body.appendChild(ui);
 
-  const makePad = (side) => {
-    const wrap = document.createElement("div");
-    wrap.style.cssText = `
-      position: fixed;
-      ${side === "left" ? "left: 16px" : "right: 16px"};
-      bottom: 18px;
-      width: 170px;
-      height: 170px;
-      pointer-events: none;
-      z-index: 1000002;
-    `;
+  // ===== LEFT JOY (move) =====
+  const base = document.createElement("div");
+  base.style.cssText = `
+    position:absolute; left:6vw; bottom:10vh;
+    width:22vmin; height:22vmin; border-radius:999px;
+    background:rgba(20,30,50,0.20);
+    border:1px solid rgba(102,204,255,0.22);
+    pointer-events:auto; touch-action:none;
+  `;
+  ui.appendChild(base);
 
-    const base = document.createElement("div");
-    base.style.cssText = `
-      position: absolute;
-      left: 0; top: 0;
-      width: 170px; height: 170px;
-      border-radius: 26px;
-      background: rgba(20, 26, 44, 0.35);
-      border: 1px solid rgba(120, 160, 255, 0.25);
-      box-shadow: 0 14px 50px rgba(0,0,0,0.35);
-      pointer-events: auto;
-      touch-action: none;
-      backdrop-filter: blur(6px);
-    `;
+  const stick = document.createElement("div");
+  stick.style.cssText = `
+    position:absolute; left:50%; top:50%;
+    width:10vmin; height:10vmin; border-radius:999px;
+    transform:translate(-50%,-50%);
+    background:rgba(60,120,255,0.35);
+    border:1px solid rgba(140,200,255,0.35);
+    box-shadow:0 10px 30px rgba(0,0,0,0.35);
+  `;
+  base.appendChild(stick);
 
-    const nub = document.createElement("div");
-    nub.style.cssText = `
-      position: absolute;
-      left: 50%; top: 50%;
-      width: 74px; height: 74px;
-      margin-left: -37px; margin-top: -37px;
-      border-radius: 22px;
-      background: rgba(70, 90, 140, 0.55);
-      border: 1px solid rgba(180, 210, 255, 0.35);
-      box-shadow: 0 10px 30px rgba(0,0,0,0.30);
-      pointer-events: none;
-    `;
+  // ===== RIGHT PAD (look) =====
+  const look = document.createElement("div");
+  look.style.cssText = `
+    position:absolute; right:6vw; bottom:10vh;
+    width:28vmin; height:18vmin; border-radius:18px;
+    background:rgba(20,30,50,0.16);
+    border:1px solid rgba(102,204,255,0.18);
+    pointer-events:auto; touch-action:none;
+  `;
+  ui.appendChild(look);
 
-    base.appendChild(nub);
-    wrap.appendChild(base);
-    root.appendChild(wrap);
+  const lookLbl = document.createElement("div");
+  lookLbl.textContent = "LOOK";
+  lookLbl.style.cssText = `
+    position:absolute; left:12px; top:10px;
+    font:700 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    letter-spacing:0.14em; color:rgba(180,220,255,0.65);
+    pointer-events:none;
+  `;
+  look.appendChild(lookLbl);
 
-    return { wrap, base, nub };
+  // ===== STATE =====
+  const S = {
+    // stick
+    moveId: null,
+    moveActive: false,
+    moveX: 0,
+    moveY: 0,
+
+    // look
+    lookId: null,
+    lookActive: false,
+    lastLX: 0,
+    lastLY: 0,
+    yaw: player.rotation.y || 0,
+    pitch: 0,
+
+    // tuning
+    dead: 0.08,
+    moveSpeed: 2.0,
+    lookSpeed: 0.008,
+    pitchClamp: Math.PI / 3,
+
+    // xr guard
+    xrActive: false
   };
 
-  const left = makePad("left");
-  const right = makePad("right");
+  // XR guard (disable touch UI while XR session running)
+  const renderer = ctx.renderer;
+  function updateXRFlag() {
+    const sess = renderer?.xr?.getSession?.();
+    S.xrActive = !!sess;
+    ui.style.display = S.xrActive ? "none" : "block";
+  }
+  updateXRFlag();
 
-  // optional toggle button (helps if you want to hide sticks to see world)
-  let toggleBtn = null;
-  const state = {
-    visible: true,
-    activeLeft: false,
-    activeRight: false,
-    leftId: null,
-    rightId: null,
-    leftVec: { x: 0, y: 0 },
-    rightVec: { x: 0, y: 0 },
-    lastSnapTime: 0,
-  };
-
-  if (showToggleButton && showToggleButton !== "off") {
-    toggleBtn = document.createElement("button");
-    toggleBtn.textContent = "Hide Sticks";
-    toggleBtn.style.cssText = `
-      position: fixed;
-      left: 16px;
-      top: 80px;
-      z-index: 1000003;
-      padding: 12px 14px;
-      border-radius: 14px;
-      border: 1px solid rgba(120, 160, 255, 0.25);
-      background: rgba(40, 60, 120, 0.55);
-      color: #eaf2ff;
-      font-weight: 800;
-      letter-spacing: 0.2px;
-      pointer-events: auto;
-    `;
-    toggleBtn.onclick = () => {
-      state.visible = !state.visible;
-      left.wrap.style.display = state.visible ? "block" : "none";
-      right.wrap.style.display = state.visible ? "block" : "none";
-      toggleBtn.textContent = state.visible ? "Hide Sticks" : "Show Sticks";
-      log(`sticks visible=${state.visible}`);
-    };
-    document.body.appendChild(toggleBtn);
+  // ===== INPUT HELPERS =====
+  function setStickVisual(nx, ny) {
+    const r = 0.45; // max radius proportion
+    const dx = nx * (base.clientWidth * r);
+    const dy = ny * (base.clientHeight * r);
+    stick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
   }
 
-  function setHidden(hidden) {
-    const vis = !hidden && state.visible;
-    left.wrap.style.display = vis ? "block" : "none";
-    right.wrap.style.display = vis ? "block" : "none";
-    if (toggleBtn) toggleBtn.style.display = hidden ? "none" : "block";
+  function joyFromEvent(e) {
+    const rect = base.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    let dx = (e.clientX - cx) / (rect.width / 2);
+    let dy = (e.clientY - cy) / (rect.height / 2);
+    const len = Math.hypot(dx, dy);
+    if (len > 1) { dx /= len; dy /= len; }
+    return { dx, dy };
   }
 
-  // ---------------------------
-  // Touch Helpers
-  // ---------------------------
-  function normFromTouch(baseEl, touch) {
-    const r = baseEl.getBoundingClientRect();
-    const cx = r.left + r.width / 2;
-    const cy = r.top + r.height / 2;
-    const dx = (touch.clientX - cx) / (r.width / 2);
-    const dy = (touch.clientY - cy) / (r.height / 2);
-    const mag = Math.sqrt(dx * dx + dy * dy);
-    const clampMag = Math.min(1, mag);
-    const nx = mag > 0 ? (dx / mag) * clampMag : 0;
-    const ny = mag > 0 ? (dy / mag) * clampMag : 0;
-    // deadzone
-    const dz = deadZone;
-    const outMag = clampMag < dz ? 0 : (clampMag - dz) / (1 - dz);
-    return { x: nx * outMag, y: ny * outMag };
+  // Move joystick
+  base.addEventListener("pointerdown", (e) => {
+    if (S.xrActive) return;
+    base.setPointerCapture(e.pointerId);
+    S.moveId = e.pointerId;
+    S.moveActive = true;
+    const { dx, dy } = joyFromEvent(e);
+    S.moveX = dx;
+    S.moveY = dy;
+    setStickVisual(dx, dy);
+  });
+
+  base.addEventListener("pointermove", (e) => {
+    if (S.xrActive) return;
+    if (!S.moveActive || e.pointerId !== S.moveId) return;
+    const { dx, dy } = joyFromEvent(e);
+    S.moveX = dx;
+    S.moveY = dy;
+    setStickVisual(dx, dy);
+  });
+
+  function endMove(e) {
+    if (e && S.moveId !== null && e.pointerId !== S.moveId) return;
+    S.moveActive = false;
+    S.moveId = null;
+    S.moveX = 0;
+    S.moveY = 0;
+    setStickVisual(0, 0);
+  }
+  base.addEventListener("pointerup", endMove);
+  base.addEventListener("pointercancel", endMove);
+
+  // Look pad
+  look.addEventListener("pointerdown", (e) => {
+    if (S.xrActive) return;
+    look.setPointerCapture(e.pointerId);
+    S.lookId = e.pointerId;
+    S.lookActive = true;
+    S.lastLX = e.clientX;
+    S.lastLY = e.clientY;
+  });
+
+  look.addEventListener("pointermove", (e) => {
+    if (S.xrActive) return;
+    if (!S.lookActive || e.pointerId !== S.lookId) return;
+    const dx = e.clientX - S.lastLX;
+    const dy = e.clientY - S.lastLY;
+    S.lastLX = e.clientX;
+    S.lastLY = e.clientY;
+
+    S.yaw -= dx * S.lookSpeed;
+    S.pitch -= dy * S.lookSpeed;
+    S.pitch = Math.max(-S.pitchClamp, Math.min(S.pitchClamp, S.pitch));
+
+    player.rotation.y = S.yaw;
+    if (cameraPitch) cameraPitch.rotation.x = S.pitch;
+  });
+
+  function endLook(e) {
+    if (e && S.lookId !== null && e.pointerId !== S.lookId) return;
+    S.lookActive = false;
+    S.lookId = null;
+  }
+  look.addEventListener("pointerup", endLook);
+  look.addEventListener("pointercancel", endLook);
+
+  // ===== PER-FRAME MOVE =====
+  function tick(dt) {
+    updateXRFlag();
+    if (S.xrActive) return;
+
+    const forward = -S.moveY;
+    const strafe = S.moveX;
+
+    const dead = S.dead;
+    const f = Math.abs(forward) < dead ? 0 : forward;
+    const s = Math.abs(strafe) < dead ? 0 : strafe;
+    if (f === 0 && s === 0) return;
+
+    // Move relative to player yaw
+    const yaw = player.rotation.y;
+    const sin = Math.sin(yaw), cos = Math.cos(yaw);
+
+    const speed = S.moveSpeed;
+    player.position.x += (s * cos + f * sin) * speed * dt;
+    player.position.z += (f * cos - s * sin) * speed * dt;
   }
 
-  function setNub(nubEl, v) {
-    const max = 42;
-    const x = v.x * max;
-    const y = v.y * max;
-    nubEl.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
-    // keep center alignment correct
-    nubEl.style.left = "50%";
-    nubEl.style.top = "50%";
-  }
-
-  function resetPad(pad, which) {
-    pad.nub.style.transform = `translate(-50%, -50%)`;
-    if (which === "left") state.leftVec = { x: 0, y: 0 };
-    if (which === "right") state.rightVec = { x: 0, y: 0 };
-  }
-
-  // ---------------------------
-  // Touch Events (Left = strafe / Right = move+turn)
-  // You can swap later, but this is your requested layout:
-  //   Right stick: forward/back + 45° angles (movement) + teleport on tap/trigger equivalent
-  //   Left stick: left/right strafe (later menu button)
-  // ---------------------------
-
-  // tap on right pad = action (teleport request)
-  let rightTapTimer = 0;
-
-  function onTouchStart(e) {
-    if (isXRPresenting()) return; // don't interfere in XR
-    if (!state.visible) return;
-
-    for (const t of Array.from(e.changedTouches)) {
-      const tX = t.clientX;
-      const half = window.innerWidth / 2;
-      const isLeftSide = tX < half;
-
-      if (isLeftSide && !state.activeLeft) {
-        state.activeLeft = true;
-        state.leftId = t.identifier;
-        const v = normFromTouch(left.base, t);
-        state.leftVec = v;
-        setNub(left.nub, v);
-      } else if (!isLeftSide && !state.activeRight) {
-        state.activeRight = true;
-        state.rightId = t.identifier;
-        const v = normFromTouch(right.base, t);
-        state.rightVec = v;
-        setNub(right.nub, v);
-        rightTapTimer = performance.now();
-      }
+  // Hook into world loop (preferred)
+  if (typeof ctx.addUpdate === "function") {
+    ctx.addUpdate((dt) => tick(dt));
+  } else {
+    // Fallback: RAF loop
+    let last = performance.now();
+    function raf() {
+      const now = performance.now();
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      tick(dt);
+      requestAnimationFrame(raf);
     }
+    requestAnimationFrame(raf);
   }
 
-  function onTouchMove(e) {
-    if (isXRPresenting()) return;
-    if (!state.visible) return;
-
-    for (const t of Array.from(e.changedTouches)) {
-      if (state.activeLeft && t.identifier === state.leftId) {
-        const v = normFromTouch(left.base, t);
-        state.leftVec = v;
-        setNub(left.nub, v);
+  log("Android sticks READY ✅");
       }
-      if (state.activeRight && t.identifier === state.rightId) {
-        const v = normFromTouch(right.base, t);
-        state.rightVec = v;
-        setNub(right.nub, v);
-      }
-    }
-  }
-
-  function onTouchEnd(e) {
-    if (isXRPresenting()) return;
-    if (!state.visible) return;
-
-    for (const t of Array.from(e.changedTouches)) {
-      if (state.activeLeft && t.identifier === state.leftId) {
-        state.activeLeft = false;
-        state.leftId = null;
-        resetPad(left, "left");
-      }
-      if (state.activeRight && t.identifier === state.rightId) {
-        state.activeRight = false;
-        state.rightId = null;
-        resetPad(right, "right");
-
-        // quick tap on right pad = teleport request
-        const dt = performance.now() - rightTapTimer;
-        if (dt < 180) {
-          onAction && onAction({ type: "teleport" });
-        }
-      }
-    }
-  }
-
-  // attach to bases
-  left.base.addEventListener("touchstart", onTouchStart, { passive: false });
-  left.base.addEventListener("touchmove", onTouchMove, { passive: false });
-  left.base.addEventListener("touchend", onTouchEnd, { passive: false });
-  left.base.addEventListener("touchcancel", onTouchEnd, { passive: false });
-
-  right.base.addEventListener("touchstart", onTouchStart, { passive: false });
-  right.base.addEventListener("touchmove", onTouchMove, { passive: false });
-  right.base.addEventListener("touchend", onTouchEnd, { passive: false });
-  right.base.addEventListener("touchcancel", onTouchEnd, { passive: false });
-
-  // prevent page scroll when touching pads
-  const prevent = (e) => {
-    if (e.target === left.base || e.target === right.base) e.preventDefault();
-  };
-  document.addEventListener("touchmove", prevent, { passive: false });
-
-  // ---------------------------
-  // Apply Movement Each Frame
-  // ---------------------------
-  const vForward = new THREE.Vector3();
-  const vRight = new THREE.Vector3();
-  const qYaw = new THREE.Quaternion();
-  const up = new THREE.Vector3(0, 1, 0);
-
-  function applyMove(dt) {
-    // Hide if XR presenting (Quest session)
-    setHidden(isXRPresenting());
-
-    if (isXRPresenting()) return;
-    if (!state.visible) return;
-
-    // camera yaw basis (always move relative to where you look)
-    const cam = camera;
-    const yaw = getYawFromQuaternion(cam.quaternion);
-    qYaw.setFromAxisAngle(up, yaw);
-
-    vForward.set(0, 0, -1).applyQuaternion(qYaw).normalize();
-    vRight.set(1, 0, 0).applyQuaternion(qYaw).normalize();
-
-    // Right stick = forward/back & strafe diagonal via x
-    const rx = state.rightVec.x;
-    const ry = state.rightVec.y;
-
-    // left stick = strafe only
-    const lx = state.leftVec.x;
-
-    // movement values
-    const forwardAmt = (-ry) * moveSpeed; // up is -Z forward
-    const strafeAmt = (rx * strafeSpeed) + (lx * strafeSpeed);
-
-    // turning (optional): if you want, use leftVec.y or a second gesture.
-    // For now: NO TURN on Android sticks (keeps it simple + no nausea)
-    const yawDelta = 0;
-
-    if (onMove) {
-      onMove({ x: strafeAmt, z: forwardAmt, speed: moveSpeed });
-    } else {
-      // default move rig
-      rig.position.addScaledVector(vForward, forwardAmt * dt);
-      rig.position.addScaledVector(vRight, strafeAmt * dt);
-    }
-
-    if (yawDelta !== 0) {
-      if (onTurn) onTurn({ yawDelta });
-      else rig.rotation.y += yawDelta;
-    }
-  }
-
-  function getYawFromQuaternion(q) {
-    // yaw extraction
-    const e = new THREE.Euler().setFromQuaternion(q, "YXZ");
-    return e.y;
-    // (Euler alloc each frame is fine at this scale; can optimize later)
-  }
-
-  // ---------------------------
-  // Public API
-  // ---------------------------
-  let lastT = performance.now();
-  let running = true;
-
-  function tick() {
-    if (!running) return;
-    const now = performance.now();
-    const dt = Math.min(0.05, (now - lastT) / 1000);
-    lastT = now;
-    applyMove(dt);
-    requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
-
-  // initial hide decision
-  setHidden(isXRPresenting());
-
-  log("Android sticks READY ✅ (visible on phone, hidden only during XR presenting)");
-
-  return {
-    root,
-    setVisible: (v) => {
-      state.visible = !!v;
-      left.wrap.style.display = state.visible ? "block" : "none";
-      right.wrap.style.display = state.visible ? "block" : "none";
-      if (toggleBtn) toggleBtn.textContent = state.visible ? "Hide Sticks" : "Show Sticks";
-    },
-    destroy: () => {
-      running = false;
-      document.removeEventListener("touchmove", prevent);
-      if (toggleBtn) toggleBtn.remove();
-      root.remove();
-    },
-  };
-}

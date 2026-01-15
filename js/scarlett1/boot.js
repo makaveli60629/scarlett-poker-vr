@@ -1,67 +1,46 @@
-// /js/scarlett1/boot.js — Scarlett 1.0 boot (base-path safe)
-// Loads Three.js from CDN, then starts world.
+// /js/scarlett1/boot.js — Scarlett1 Boot v2 (loads world + installs XR safely)
 
-const D = window.SCARLETT_DIAG || {
-  log: console.log.bind(console),
-  err: console.error.bind(console),
-  setStatus: (s)=>console.log('[STATUS]', s)
-};
+(async () => {
+  const now = Date.now();
 
-D.setStatus('boot.js running…');
-D.log('boot start ✅');
+  const DIAG = (msg, obj) => {
+    try {
+      console.log(msg, obj ?? "");
+    } catch {}
+  };
 
-const THREE_URL = 'https://unpkg.com/three@0.158.0/build/three.module.js';
-
-async function loadThree() {
-  D.setStatus('Loading three.js…');
-  try{
-    const mod = await import(THREE_URL);
-    D.log('three import ✅', THREE_URL);
-    return mod;
-  }catch(e){
-    D.err('three import FAILED', e?.message || e);
-    D.setStatus('three import failed');
-    throw e;
-  }
-}
-
-async function start() {
-  const THREE = await loadThree();
-
-  D.setStatus('Loading world.js…');
-
-  // Base path (repo-safe)
-  const path = location.pathname;
-  const seg = path.split('/').filter(Boolean)[0];
-  const base = seg ? `/${seg}/` : `/`;
-  const worldUrl = `${base}js/scarlett1/world.js?v=${Date.now()}`;
-
-  D.log('world url=', worldUrl);
-
-  let worldMod;
-  try{
-    worldMod = await import(worldUrl);
-    D.log('world import ✅');
-  }catch(e){
-    D.err('world import FAILED', e?.message || e);
-    D.setStatus('world import failed');
-    return;
+  function setStatus(t) {
+    const el = document.getElementById("status");
+    if (el) el.textContent = t;
+    console.log("STATUS:", t);
   }
 
-  if(!worldMod || typeof worldMod.initWorld !== 'function'){
-    D.err('world.js missing export initWorld()');
-    D.setStatus('world.js missing initWorld()');
-    return;
-  }
+  console.log("boot start ✅");
+  setStatus("boot.js running…");
 
-  D.setStatus('Starting world…');
-  try{
-    await worldMod.initWorld({ THREE, DIAG: D });
-    D.setStatus('World running ✅');
-  }catch(e){
-    D.err('initWorld FAILED', e?.message || e);
-    D.setStatus('World crashed');
-  }
-}
+  // Load three from CDN
+  setStatus("Loading three.js…");
+  const THREE = await import("https://unpkg.com/three@0.158.0/build/three.module.js");
+  console.log("three import ✅", "https://unpkg.com/three@0.158.0/build/three.module.js");
 
-start();
+  // Load world
+  setStatus("Loading world.js…");
+  const worldUrl = `/scarlett-poker-vr/js/scarlett1/world.js?v=${now}`;
+  console.log("world url=", worldUrl);
+
+  const worldMod = await import(worldUrl);
+  console.log("world import ✅");
+
+  setStatus("Starting world…");
+  await worldMod.initWorld({ THREE, DIAG: console });
+  setStatus("World running ✅");
+
+  // Install XR
+  try {
+    const xrUrl = `/scarlett-poker-vr/js/scarlett1/spine_xr.js?v=${Date.now()}`;
+    const xrMod = await import(xrUrl);
+    await xrMod.installXR({ THREE, DIAG: console });
+  } catch (e) {
+    console.error("[boot] XR install failed", e);
+  }
+})();

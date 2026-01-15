@@ -1,0 +1,11 @@
+{
+  "modules": [
+    { "name": "world.js", "enabled": false },
+    { "name": "pit_table.js", "enabled": false },
+    { "name": "poker_system.js", "enabled": false },
+    { "name": "hud.js", "enabled": false },
+    { "name": "wrist-hud.js", "enabled": false },
+    { "name": "xr_locomotion.js", "enabled": false },
+    { "name": "vr_locomotion.js", "enabled": false }
+  ]
+}

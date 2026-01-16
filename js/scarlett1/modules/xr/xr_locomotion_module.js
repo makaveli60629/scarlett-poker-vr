@@ -1,11 +1,10 @@
 // /js/scarlett1/modules/xr/xr_locomotion_module.js
-// Consumes normalized input ONLY. Never reads raw gamepad.
+// Uses normalized input ONLY.
 
 export function createXRLocomotionModule({ speed = 2.25 } = {}) {
   return {
     name: "xr_locomotion",
     update(ctx, { dt, input }) {
-      // prefer left stick, fallback right
       const stickL = Math.hypot(input.left.stickX, input.left.stickY);
       const sx = (stickL > 0.01) ? input.left.stickX : input.right.stickX;
       const sy = (stickL > 0.01) ? input.left.stickY : input.right.stickY;
@@ -13,7 +12,6 @@ export function createXRLocomotionModule({ speed = 2.25 } = {}) {
       const strafe = sx;
       const forward = -sy;
 
-      // head yaw relative movement
       const THREE = ctx.THREE;
       const e = new THREE.Euler().setFromQuaternion(ctx.camera.quaternion, "YXZ");
       const yaw = e.y;
@@ -28,4 +26,4 @@ export function createXRLocomotionModule({ speed = 2.25 } = {}) {
       }
     }
   };
-      }
+}

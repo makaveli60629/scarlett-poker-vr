@@ -1,48 +1,85 @@
-// /js/scarlett1/world.js — Scarlett1 World (FULL)
-// BUILD: WORLD_FULL_v1_0
-// Goal: never black-screen; clear center reference; easy debug.
+// /js/scarlett1/world.js — Scarlett World (FULL + FIXED)
+// BUILD: WORLD_FULL_v1_1
+// This file MUST export buildWorld()
 
 export function buildWorld(ctx) {
   const { THREE, scene, rig, writeHud } = ctx;
 
   writeHud("[world] build starting…");
 
-  // Center marker
-  const center = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.6, 0.6, 0.02, 48),
-    new THREE.MeshStandardMaterial({ color: 0x7a1cff, roughness: 0.65, metalness: 0.15 })
+  // ===== FLOOR =====
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(60, 60),
+    new THREE.MeshStandardMaterial({
+      color: 0x0f1116,
+      roughness: 1,
+      metalness: 0
+    })
   );
-  center.position.set(0, 0.01, 0);
-  scene.add(center);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = 0;
+  scene.add(floor);
 
-  // Outer ring
-  const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(3.0, 0.06, 16, 160),
-    new THREE.MeshStandardMaterial({ color: 0x00e5ff, roughness: 0.8, metalness: 0.1 })
-  );
-  ring.rotation.x = Math.PI / 2;
-  ring.position.y = 0.02;
-  scene.add(ring);
-
-  // Simple “table” so you can instantly confirm scale
+  // ===== CENTER TABLE =====
   const table = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.1, 1.1, 0.12, 64),
-    new THREE.MeshStandardMaterial({ color: 0x243040, roughness: 0.9, metalness: 0.05 })
+    new THREE.CylinderGeometry(1.2, 1.2, 0.15, 64),
+    new THREE.MeshStandardMaterial({
+      color: 0x243040,
+      roughness: 0.85,
+      metalness: 0.05
+    })
   );
   table.position.set(0, 0.75, 0);
   scene.add(table);
 
-  // 4 pillars like “room anchors”
-  const pillarMat = new THREE.MeshStandardMaterial({ color: 0x1a1f2a, roughness: 1, metalness: 0 });
+  // ===== FELT TOP =====
+  const felt = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.15, 1.15, 0.03, 64),
+    new THREE.MeshStandardMaterial({
+      color: 0x1b6b3a,
+      roughness: 0.9
+    })
+  );
+  felt.position.y = 0.84;
+  scene.add(felt);
+
+  // ===== CENTER MARKER =====
+  const marker = new THREE.Mesh(
+    new THREE.RingGeometry(0.4, 0.45, 48),
+    new THREE.MeshStandardMaterial({
+      color: 0x00e5ff,
+      roughness: 0.6,
+      metalness: 0.2,
+      side: THREE.DoubleSide
+    })
+  );
+  marker.rotation.x = -Math.PI / 2;
+  marker.position.y = 0.01;
+  scene.add(marker);
+
+  // ===== ROOM PILLARS =====
+  const pillarMat = new THREE.MeshStandardMaterial({
+    color: 0x1a1f2a,
+    roughness: 1
+  });
+
   for (let i = 0; i < 4; i++) {
-    const a = (i / 4) * Math.PI * 2;
-    const p = new THREE.Mesh(new THREE.BoxGeometry(0.25, 2.5, 0.25), pillarMat);
-    p.position.set(Math.cos(a) * 5.0, 1.25, Math.sin(a) * 5.0);
-    scene.add(p);
+    const angle = (i / 4) * Math.PI * 2;
+    const pillar = new THREE.Mesh(
+      new THREE.BoxGeometry(0.3, 3, 0.3),
+      pillarMat
+    );
+    pillar.position.set(
+      Math.cos(angle) * 6,
+      1.5,
+      Math.sin(angle) * 6
+    );
+    scene.add(pillar);
   }
 
-  // Spawn the rig facing center
-  rig.position.set(0, 1.65, 4.0);
+  // ===== PLAYER SPAWN =====
+  rig.position.set(0, 1.65, 4);
+  rig.lookAt(0, 1.5, 0);
 
   writeHud("[world] build done ✅");
-    }
+}

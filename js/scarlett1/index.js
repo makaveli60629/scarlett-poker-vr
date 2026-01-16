@@ -1,4 +1,4 @@
-// /js/scarlett1/index.js — Scarlett Runtime Entry (Update 4.2 REAL)
+// /js/scarlett1/index.js — Scarlett Runtime Entry (FULL, Quest-safe)
 
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
@@ -7,6 +7,9 @@ import { World } from "./world.js";
 const overlay = document.getElementById("overlay");
 const log = (...a)=> overlay && (overlay.textContent += "\n[LOG] " + a.join(" "));
 const err = (...a)=> overlay && (overlay.textContent += "\n[ERR] " + a.join(" "));
+
+window.addEventListener("error", (e)=> err("window:", e.message));
+window.addEventListener("unhandledrejection", (e)=> err("promise:", e.reason?.message || String(e.reason)));
 
 (async () => {
   try {
@@ -21,16 +24,14 @@ const err = (...a)=> overlay && (overlay.textContent += "\n[ERR] " + a.join(" ")
     renderer.xr.setReferenceSpaceType("local-floor");
     host.appendChild(renderer.domElement);
 
-    addEventListener("resize", () =>
-      renderer.setSize(innerWidth, innerHeight)
-    );
+    addEventListener("resize", () => renderer.setSize(innerWidth, innerHeight));
 
     document.body.appendChild(VRButton.createButton(renderer));
     log("VRButton ready ✅");
 
     const world = new World({ THREE, renderer });
     await world.init();
-    log("world.init complete ✅");
+    log("world.init ✅");
 
     renderer.setAnimationLoop((t, frame) => {
       try {

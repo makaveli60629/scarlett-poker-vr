@@ -1,16 +1,17 @@
 // /js/scarlett1/index.js — Scarlett1 Runtime (FULL)
-// BUILD: SCARLETT1_FULL_v2_5_QUEST_INPUT_AUTOPICK_STICKS_TRIGGERFIX
-// ✅ XR height correct: rig.y = 0 in XR
-// ✅ Sticks: auto-picks a gamepad source for MOVE + SNAP (fixes "left stick dead")
-// ✅ Teleport = RIGHT GRIP (polled) + floor circle marker
-// ✅ Grab = TRIGGER (polled) with stronger fallbacks + lower analog threshold
+// BUILD: SCARLETT1_FULL_v2_6_QUEST_STICK_AUTODETECT_HARDENED
+// ✅ XR height correct
+// ✅ Teleport = RIGHT GRIP (polled) + marker
+// ✅ Grab = TRIGGER (polled) with fallbacks
+// ✅ Movement stick auto-detects whichever source actually reports axes[0/1]
+// ✅ Snap-turn uses best source for axes[2] (fallback axes[0])
 // ✅ Android touch unchanged
 
 export function boot() {
   main().catch((e) => fatal(e));
 }
 
-const BUILD = "SCARLETT1_FULL_v2_5_QUEST_INPUT_AUTOPICK_STICKS_TRIGGERFIX";
+const BUILD = "SCARLETT1_FULL_v2_6_QUEST_STICK_AUTODETECT_HARDENED";
 
 function hud() { return document.getElementById("scarlett-mini-hud"); }
 function writeHud(line) { const el = hud(); if (el && el.dataset.hidden !== "1") el.textContent += `\n${line}`; }
@@ -60,13 +61,11 @@ function ensureHudToggle() {
 async function main() {
   window.addEventListener("error", (e) => {
     const msg = e?.error?.stack || e?.message || String(e);
-    const el = hud();
-    if (el && el.dataset.hidden !== "1") el.textContent += `\n[ERR] window.error: ${msg}`;
+    writeHud(`[ERR] window.error: ${msg}`);
   });
   window.addEventListener("unhandledrejection", (e) => {
     const msg = e?.reason?.stack || e?.reason?.message || String(e?.reason || e);
-    const el = hud();
-    if (el && el.dataset.hidden !== "1") el.textContent += `\n[ERR] unhandledrejection: ${msg}`;
+    writeHud(`[ERR] unhandledrejection: ${msg}`);
   });
 
   ensureHudToggle();
@@ -100,7 +99,6 @@ async function main() {
   document.body.appendChild(VRButton.createButton(renderer));
   writeHud("[LOG] VRButton appended ✅");
 
-  // Bright general light (you asked for brighter "sun" feel)
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.15));
   const sun = new THREE.DirectionalLight(0xffffff, 0.9);
   sun.position.set(6, 10, 4);
@@ -108,7 +106,7 @@ async function main() {
 
   const rig = new THREE.Group();
   rig.name = "PlayerRig";
-  rig.position.set(0, 1.65, 4.2); // 2D default only
+  rig.position.set(0, 1.65, 4.2);
   rig.rotation.set(0, 0, 0);
   rig.add(camera);
   scene.add(rig);
@@ -127,18 +125,19 @@ async function main() {
     new THREE.MeshStandardMaterial({ color: 0x00e5ff, roughness: 0.6, metalness: 0.2, emissive: new THREE.Color(0x00333a) })
   );
   fallback.position.set(0, 1.3, 0);
+  fallback.name = "FALLBACK_BOX";
   scene.add(fallback);
 
   const touch = installTouchControls({ THREE, camera, rig });
   writeHud(touch.enabled ? "[LOG] Android touch controls ✅" : "[LOG] Android touch controls (no touch device)");
 
-  const xr = installXRControllers({ THREE, scene, rig, renderer, floor, camera });
-  writeHud("[LOG] XR installed ✅ (autopick sticks + triggerfix)");
+  const xr = installXR({ THREE, scene, rig, renderer, floor, camera });
+  writeHud("[LOG] XR installed ✅ (stick autodetect hardened)");
 
   renderer.xr.addEventListener("sessionstart", () => {
     writeHud("[LOG] XR session start ✅");
     renderer.setPixelRatio(1.0);
-    rig.position.y = 0; // ✅ correct height in XR
+    rig.position.y = 0; // ✅ correct XR height
   });
 
   renderer.xr.addEventListener("sessionend", () => {
@@ -287,9 +286,9 @@ async function main() {
   }
 
   // -----------------------------
-  // XR controllers + teleport + grab + STICKS (auto-pick)
+  // XR: lasers + teleport + grab + sticks autodetect
   // -----------------------------
-  function installXRControllers({ THREE, scene, rig, renderer, floor, camera }) {
+  function installXR({ THREE, scene, rig, renderer, floor, camera }) {
     const L_BLUE = 0x00e5ff; // RIGHT
     const L_PINK = 0xff2bd6; // LEFT
 
@@ -346,7 +345,7 @@ async function main() {
       else if (h === "right") laser.mat.color.setHex(L_BLUE);
     }
 
-    // Teleport ring marker
+    // Teleport marker
     const marker = new THREE.Mesh(
       new THREE.RingGeometry(0.18, 0.28, 32),
       new THREE.MeshBasicMaterial({ color: L_BLUE, transparent: true, opacity: 0.9, side: THREE.DoubleSide })
@@ -420,20 +419,11 @@ async function main() {
       ctrl.userData.grabParent = null;
     }
 
-    function getSource(ctrl) {
-      if (ctrl.userData.inputSource?.gamepad) return ctrl.userData.inputSource;
-
-      const session = renderer.xr.getSession();
-      if (!session) return null;
-      const sources = Array.from(session.inputSources || []);
-      const hand = ctrl.userData.handedness;
-
-      for (const s of sources) if (s?.gamepad && s.handedness === hand) return s;
-      for (const s of sources) if (s?.gamepad) return s;
-      return null;
+    function getSources(session) {
+      return Array.from(session?.inputSources || []).filter(s => s?.gamepad);
     }
 
-    // Stronger button detection
+    // Strong button detection
     function readButtons(src) {
       const gp = src?.gamepad;
       if (!gp) return { trigger: false, grip: false };
@@ -448,46 +438,52 @@ async function main() {
         return v > thr;
       };
 
-      // Trigger candidates
       const trigger = pressedOrAnalog(0) || pressedOrAnalog(2) || pressedOrAnalog(3) || pressedOrAnalog(5);
-
-      // Grip candidates
       const grip = pressedOrAnalog(1) || pressedOrAnalog(4);
 
       return { trigger, grip };
     }
 
-    // STICKS: auto-pick best sources for move + snap
-    function pickStickSources(session) {
-      const sources = Array.from(session?.inputSources || []).filter(s => s?.gamepad);
-      if (!sources.length) return { moveSrc: null, snapSrc: null };
+    // Find best sources each frame
+    function pickMoveSource(sources, DEADZONE) {
+      // pick the source with biggest |axes0|+|axes1|
+      let best = null;
+      let bestScore = 0;
 
-      // Prefer handedness when available
-      let left = sources.find(s => s.handedness === "left") || null;
-      let right = sources.find(s => s.handedness === "right") || null;
+      for (const s of sources) {
+        const a = s.gamepad?.axes || [];
+        if (a.length < 2) continue;
+        const x = a[0] || 0;
+        const y = a[1] || 0;
+        const score = Math.abs(x) + Math.abs(y);
+        if (score > bestScore) {
+          bestScore = score;
+          best = s;
+        }
+      }
 
-      // If missing, just use first/second
-      if (!left) left = sources[0] || null;
-      if (!right) right = sources[1] || sources[0] || null;
+      // If nothing “active”, still return a stable default so moving starts instantly when touched:
+      if (best) return best;
 
-      return { moveSrc: left, snapSrc: right };
+      // Prefer left-handed if present
+      return sources.find(s => s.handedness === "left") || sources[0] || null;
     }
 
-    function readAxesMove(gp) {
-      const a = gp.axes || [];
-      let x = 0, y = 0;
-      // Move is almost always [0,1]
-      if (a.length >= 2) { x = a[0]; y = a[1]; }
-      return { x, y };
+    function pickSnapSource(sources) {
+      // prefer a source that has axes[2] (common for right stick)
+      const hasA2 = sources.find(s => (s.gamepad?.axes || []).length >= 4);
+      if (hasA2) return hasA2;
+      return sources.find(s => s.handedness === "right") || sources[0] || null;
     }
 
-    function readAxesSnap(gp) {
-      const a = gp.axes || [];
-      // Snap x is usually [2], fallback [0]
-      let x = 0;
-      if (a.length >= 4) x = a[2];
-      else if (a.length >= 2) x = a[0];
-      return { x };
+    function getSourceForController(ctrl, sessionSources) {
+      const hand = ctrl.userData.handedness;
+      if (hand) {
+        const m = sessionSources.find(s => s.handedness === hand);
+        if (m) return m;
+      }
+      // fallback: first
+      return sessionSources[0] || null;
     }
 
     function getCameraYaw() {
@@ -505,16 +501,11 @@ async function main() {
 
     function update(dt) {
       const inXR = renderer.xr.isPresenting;
-
       laser1.line.visible = inXR;
       laser2.line.visible = inXR;
       hoverDot.visible = false;
 
-      if (!inXR) {
-        marker.visible = false;
-        aimingTeleport = false;
-        return;
-      }
+      if (!inXR) { marker.visible = false; aimingTeleport = false; return; }
 
       recolor(c1, laser1);
       recolor(c2, laser2);
@@ -522,13 +513,15 @@ async function main() {
       const session = renderer.xr.getSession();
       snapTimer = Math.max(0, snapTimer - dt);
 
+      const sources = getSources(session);
+
       // ---- Teleport = right grip
       const rc = rightController();
-      const srcR = getSource(rc);
+      const srcR = getSourceForController(rc, sources);
       const btnR = readButtons(srcR);
 
       const gripDown = btnR.grip && !rc.userData.prevGrip;
-      const gripUp = !btnR.grip && rc.userData.prevGrip;
+      const gripUp   = !btnR.grip && rc.userData.prevGrip;
       rc.userData.prevGrip = btnR.grip;
 
       if (gripDown) aimingTeleport = true;
@@ -537,9 +530,7 @@ async function main() {
         const ok = getFloorHit(rc);
         marker.visible = ok;
         if (ok) marker.position.copy(hitPoint);
-      } else {
-        marker.visible = false;
-      }
+      } else marker.visible = false;
 
       if (gripUp) {
         if (getFloorHit(rc)) {
@@ -552,11 +543,11 @@ async function main() {
 
       // ---- Grab = trigger (either hand)
       for (const ctrl of [c1, c2]) {
-        const src = getSource(ctrl);
+        const src = getSourceForController(ctrl, sources);
         const btn = readButtons(src);
 
         const trigDown = btn.trigger && !ctrl.userData.prevTrig;
-        const trigUp = !btn.trigger && ctrl.userData.prevTrig;
+        const trigUp   = !btn.trigger && ctrl.userData.prevTrig;
         ctrl.userData.prevTrig = btn.trigger;
 
         if (trigDown) {
@@ -570,13 +561,14 @@ async function main() {
         }
       }
 
-      // ---- Sticks (auto-pick sources each frame)
-      if (session) {
-        const { moveSrc, snapSrc } = pickStickSources(session);
-
-        // Move
+      // ---- Movement: AUTODETECT the source that actually reports axes[0/1]
+      if (sources.length) {
+        const moveSrc = pickMoveSource(sources, DEADZONE);
         if (moveSrc?.gamepad) {
-          let { x, y } = readAxesMove(moveSrc.gamepad);
+          const a = moveSrc.gamepad.axes || [];
+          let x = a[0] || 0;
+          let y = a[1] || 0;
+
           x = (Math.abs(x) < DEADZONE) ? 0 : x;
           y = (Math.abs(y) < DEADZONE) ? 0 : y;
 
@@ -596,12 +588,17 @@ async function main() {
           }
         }
 
-        // Snap
+        // Snap turn: use best snap source (axes[2] if exists)
+        const snapSrc = pickSnapSource(sources);
         if (snapSrc?.gamepad) {
-          let { x } = readAxesSnap(snapSrc.gamepad);
-          x = (Math.abs(x) < DEADZONE) ? 0 : x;
-          if (Math.abs(x) > 0.6 && snapTimer === 0) {
-            rig.rotation.y += (x > 0 ? -SNAP_ANGLE : SNAP_ANGLE);
+          const a = snapSrc.gamepad.axes || [];
+          let sx = 0;
+          if (a.length >= 4) sx = a[2] || 0;
+          else if (a.length >= 2) sx = a[0] || 0;
+
+          sx = (Math.abs(sx) < DEADZONE) ? 0 : sx;
+          if (Math.abs(sx) > 0.6 && snapTimer === 0) {
+            rig.rotation.y += (sx > 0 ? -SNAP_ANGLE : SNAP_ANGLE);
             snapTimer = SNAP_COOLDOWN;
           }
         }
@@ -619,4 +616,4 @@ async function main() {
 
     return { update };
   }
-                                      }
+                          }

@@ -1,26 +1,22 @@
 // /js/scarlett1/world.js
 // SCARLETT1 WORLD ORCHESTRATOR (FULL) — Modular Forever
-// - Safe spawn (not in walls)
-// - Crash-safe module updates (no black screen)
-// - Android Dev HUD (virtual controllers + hide/show + copy)
-// - XR Quest controller module placeholder hook (if module exists)
-// NOTE: This file assumes your modules live under /js/scarlett1/modules/...
+// ✅ No 404 dependency for Quest controllers (built-in)
+// ✅ No 404 dependency for interactables registry (built-in)
+// ✅ External modules still load if they exist; missing ones are skipped safely
+//
+// URL params handled by index.js pass-through: safeMode/noHud/trace
 
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
 
-export function createWorldOrchestrator({
-  safeMode = false,
-  noHud = false,
-  trace = false,
-} = {}) {
+export function createWorldOrchestrator({ safeMode = false, noHud = false, trace = false } = {}) {
   const log = (...a) => console.log("[world]", ...a);
   const err = (...a) => console.error("[world]", ...a);
 
+  // ---------- Core three.js ----------
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05050a);
 
-  // Camera + player rig
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.02, 250);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.02, 300);
   camera.position.set(0, 1.65, 0);
 
   const playerRig = new THREE.Group();
@@ -28,12 +24,10 @@ export function createWorldOrchestrator({
   scene.add(playerRig);
   playerRig.add(camera);
 
-  // ✅ Spawn: center lobby safe spot, facing inward
-  // Keep you out of walls by staying near center and slightly back.
+  // ✅ Safe spawn: center-ish, not inside walls
   playerRig.position.set(0, 0, 3.25);
   playerRig.rotation.set(0, Math.PI, 0);
 
-  // Renderer
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -43,22 +37,22 @@ export function createWorldOrchestrator({
 
   (document.getElementById("app") || document.body).appendChild(renderer.domElement);
 
-  // Lights (safe defaults; theme modules can add more)
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.65));
+  // Lights (safe baseline)
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.70));
   const key = new THREE.DirectionalLight(0xffffff, 0.55);
   key.position.set(8, 12, 6);
   scene.add(key);
 
-  // Always-present floor so you never see pure black even if world build fails
+  // Always-present floor (prevents black screen if a module fails)
   const baseFloor = new THREE.Mesh(
-    new THREE.PlaneGeometry(120, 120),
+    new THREE.PlaneGeometry(140, 140),
     new THREE.MeshStandardMaterial({ color: 0x101018, roughness: 0.95 })
   );
   baseFloor.rotation.x = -Math.PI / 2;
   baseFloor.position.y = 0;
   scene.add(baseFloor);
 
-  // Shared context (modules read/write here)
+  // ---------- Shared context ----------
   const ctx = {
     THREE,
     scene,
@@ -66,23 +60,27 @@ export function createWorldOrchestrator({
     renderer,
     playerRig,
 
+    safeMode,
+    noHud,
+    trace,
+
     xrSession: null,
     controllers: { left: null, right: null },
 
+    // unified input (what ALL systems should use)
     input: {
       left:  { trigger: 0, squeeze: 0, stickX: 0, stickY: 0, a:false, b:false, x:false, y:false },
       right: { trigger: 0, squeeze: 0, stickX: 0, stickY: 0, a:false, b:false, x:false, y:false },
     },
 
-    safeMode,
-    noHud,
-    trace,
+    // interactables registry (filled by built-in module below)
+    interactables: null,
 
     _enabledModuleNames: [],
     _modules: [],
   };
 
-  // Module system
+  // ---------- Module system ----------
   const modules = [];
   function enable(mod) {
     if (!mod || !mod.name) throw new Error("enable(mod): missing mod.name");
@@ -94,70 +92,246 @@ export function createWorldOrchestrator({
     return mod;
   }
 
-  // Resize
-  function onResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  }
-  window.addEventListener("resize", onResize);
+  // ---------- Built-in module: Interactables Registry (no 404) ----------
+  function createInteractablesRegistryModule() {
+    return {
+      name: "interactables_registry",
+      onEnable(ctx) {
+        const map = new Map(); // object3D -> meta
 
-  // --------- Import modules dynamically (so missing files don't crash everything) ---------
-  async function tryEnable(name, importer, opts) {
+        function toObj(o) {
+          return o && (o.isObject3D ? o : o.object3D || o.mesh || null);
+        }
+
+        ctx.interactables = {
+          register(obj, meta = {}) {
+            const o = toObj(obj);
+            if (!o) return false;
+            map.set(o, { ...meta, object: o });
+            return true;
+          },
+          unregister(obj) {
+            const o = toObj(obj);
+            if (!o) return false;
+            return map.delete(o);
+          },
+          clear() { map.clear(); },
+          list() { return Array.from(map.values()); },
+          objects() { return Array.from(map.keys()); },
+          count() { return map.size; },
+        };
+
+        Object.defineProperty(ctx.interactables, "all", {
+          get() { return Array.from(map.keys()); },
+        });
+
+        console.log("[interactables] ready ✅");
+      },
+    };
+  }
+
+  // ---------- Built-in module: Quest Controller Mapper (no 404) ----------
+  function createXRControllerQuestModule() {
+    return {
+      name: "xr_controller_quest",
+      onEnable(ctx) {
+        const deadzone = 0.18;
+        const invertY = true;
+        const clamp01 = (v) => Math.max(0, Math.min(1, Number(v || 0)));
+
+        function dz(v) {
+          v = Number(v || 0);
+          if (Math.abs(v) < deadzone) return 0;
+          const s = Math.sign(v);
+          const a = (Math.abs(v) - deadzone) / (1 - deadzone);
+          return s * Math.min(1, Math.max(0, a));
+        }
+        function normAxis(v) {
+          v = dz(v);
+          return Math.max(-1, Math.min(1, v));
+        }
+        function ensure(side) {
+          ctx.input = ctx.input || {};
+          if (!ctx.input[side]) {
+            ctx.input[side] = {
+              trigger: 0, squeeze: 0,
+              stickX: 0, stickY: 0,
+              a:false, b:false, x:false, y:false,
+            };
+          }
+          return ctx.input[side];
+        }
+        function getSession() {
+          return ctx.renderer?.xr?.getSession?.() || ctx.xrSession || null;
+        }
+        function findSource(handedness) {
+          const s = getSession();
+          if (!s || !s.inputSources) return null;
+          for (const src of s.inputSources) {
+            if (src && src.handedness === handedness && src.gamepad) return src;
+          }
+          return null;
+        }
+        function read(src, side) {
+          const out = ensure(side);
+          const gp = src?.gamepad;
+          if (!gp) return;
+
+          const b = gp.buttons || [];
+          const ax = gp.axes || [];
+
+          out.trigger = clamp01(b[0]?.value);
+          out.squeeze = clamp01(b[1]?.value);
+
+          // Prefer Quest stick axes [2],[3], fallback [0],[1]
+          let sx = ax[2] ?? 0, sy = ax[3] ?? 0;
+          if (Math.abs(sx) < 0.001 && Math.abs(sy) < 0.001) {
+            sx = ax[0] ?? 0;
+            sy = ax[1] ?? 0;
+          }
+
+          out.stickX = normAxis(sx);
+          out.stickY = normAxis(invertY ? -sy : sy);
+
+          // Face buttons best-effort
+          const btn4 = !!b[4]?.pressed;
+          const btn5 = !!b[5]?.pressed;
+          const btn3 = !!b[3]?.pressed;
+          const btn2 = !!b[2]?.pressed;
+
+          if (side === "right") {
+            out.a = btn4 || btn3;
+            out.b = btn5 || btn2;
+          } else {
+            out.x = btn4 || btn3;
+            out.y = btn5 || btn2;
+          }
+        }
+
+        ctx.controllers = ctx.controllers || { left: null, right: null };
+
+        this._tick = () => {
+          const session = getSession();
+          ctx.xrSession = session;
+
+          const L = findSource("left");
+          const R = findSource("right");
+
+          ctx.controllers.left = L;
+          ctx.controllers.right = R;
+
+          // if not in XR, zero to prevent stuck input
+          if (!session) {
+            const l = ensure("left");
+            const r = ensure("right");
+            l.trigger = l.squeeze = l.stickX = l.stickY = 0; l.x = l.y = false;
+            r.trigger = r.squeeze = r.stickX = r.stickY = 0; r.a = r.b = false;
+            return;
+          }
+
+          if (L) read(L, "left");
+          else {
+            const l = ensure("left");
+            l.trigger = l.squeeze = l.stickX = l.stickY = 0; l.x = l.y = false;
+          }
+
+          if (R) read(R, "right");
+          else {
+            const r = ensure("right");
+            r.trigger = r.squeeze = r.stickX = r.stickY = 0; r.a = r.b = false;
+          }
+        };
+
+        console.log("[xr_controller_quest] ready ✅ (built-in)");
+      },
+      update() {
+        try { this._tick?.(); } catch (e) { console.error("[xr_controller_quest] tick failed", e); }
+      },
+    };
+  }
+
+  // ---------- Safe dynamic import helper (skips missing modules quietly) ----------
+  async function importIfExists(path) {
+    // Prefetch first: avoid "Failed to fetch dynamically imported module"
+    try {
+      const abs = new URL(path, location.href).toString();
+      const res = await fetch(abs, { cache: "no-store" });
+      if (!res.ok) return null;
+      // We do NOT consume the body here; just confirmation. Import uses cache-bust from router anyway.
+      return await import(path);
+    } catch {
+      return null;
+    }
+  }
+
+  async function tryEnable(exportName, importer, opts) {
     try {
       const m = await importer();
-      const factory = m?.[name];
-      if (typeof factory !== "function") throw new Error(`missing export ${name}()`);
+      if (!m) {
+        if (trace) console.warn("[world] skip missing:", exportName);
+        return false;
+      }
+      const factory = m?.[exportName];
+      if (typeof factory !== "function") throw new Error(`missing export ${exportName}()`);
       enable(factory(opts));
       return true;
     } catch (e) {
-      err(`module load failed: ${name}`, e);
+      err(`module load failed: ${exportName}`, e);
       return false;
     }
   }
 
-  // Boot order (dev + diagnostics first)
+  // ---------- Resize ----------
+  window.addEventListener("resize", () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ---------- Boot ----------
   const boot = async () => {
-    // ANDROID DEV HUD (your full diagnostics / virtual controller HUD)
+    // ✅ Built-ins first (never 404)
+    enable(createInteractablesRegistryModule());
+    enable(createXRControllerQuestModule());
+
+    // ✅ Your existing external modules (load only if present)
     if (!noHud) {
       await tryEnable(
         "createAndroidDevHudModule",
-        () => import("./modules/dev/android_dev_hud_module.js"),
+        () => importIfExists("./modules/dev/android_dev_hud_module.js"),
         { onlyWhenNotXR: true }
       );
     }
 
-    // Optional: Health overlay, copy diagnostics, toggle panel
-    await tryEnable("createHealthOverlayModule", () => import("./modules/dev/health_overlay_module.js"));
-    await tryEnable("createCopyDiagnosticsModule", () => import("./modules/dev/copy_diagnostics_module.js"));
-    await tryEnable("createModuleTogglePanelModule", () => import("./modules/dev/module_toggle_panel_module.js"));
+    await tryEnable("createHealthOverlayModule", () => importIfExists("./modules/dev/health_overlay_module.js"));
+    await tryEnable("createCopyDiagnosticsModule", () => importIfExists("./modules/dev/copy_diagnostics_module.js"));
+    await tryEnable("createModuleTogglePanelModule", () => importIfExists("./modules/dev/module_toggle_panel_module.js"));
 
-    // XR controller + locomotion + grab (if present)
-    await tryEnable("createXRControllerQuestModule", () => import("./modules/xr/xr_controller_quest_module.js"));
-    await tryEnable("createXRLocomotionModule", () => import("./modules/xr/xr_locomotion_module.js"), { speed: 2.25 });
-    await tryEnable("createXRGrabModule", () => import("./modules/xr/xr_grab_module.js"));
-    await tryEnable("createXRTeleportBlinkModule", () => import("./modules/xr/xr_teleport_blink_module.js"), { distance: 1.25 });
+    // XR stack (if you have these files)
+    await tryEnable("createXRLocomotionModule", () => importIfExists("./modules/xr/xr_locomotion_module.js"), { speed: 2.25 });
+    await tryEnable("createXRGrabModule", () => importIfExists("./modules/xr/xr_grab_module.js"));
+    await tryEnable("createXRTeleportBlinkModule", () => importIfExists("./modules/xr/xr_teleport_blink_module.js"), { distance: 1.25 });
 
-    // World backbone
-    await tryEnable("createLobbyHallwaysModule", () => import("./modules/world/lobby_hallways_module.js"));
-    await tryEnable("createRoomManagerModule", () => import("./modules/world/room_manager_module.js"));
-    await tryEnable("createRoomPortalsModule", () => import("./modules/world/room_portals_module.js"), { portalCount: 20 });
-    await tryEnable("createDoorTeleportModule", () => import("./modules/world/door_teleport_module.js"), { doorToRoom: [0, 1, 2, 3] });
+    // World stack
+    await tryEnable("createLobbyHallwaysModule", () => importIfExists("./modules/world/lobby_hallways_module.js"));
+    await tryEnable("createRoomManagerModule", () => importIfExists("./modules/world/room_manager_module.js"));
+    await tryEnable("createRoomPortalsModule", () => importIfExists("./modules/world/room_portals_module.js"), { portalCount: 20 });
+    await tryEnable("createDoorTeleportModule", () => importIfExists("./modules/world/door_teleport_module.js"), { doorToRoom: [0, 1, 2, 3] });
 
-    // Centerpiece / show room (Scorpion)
-    await tryEnable("createWorldMasterModule", () => import("./modules/world/world_master_module.js"));
-    await tryEnable("createScorpionThemeModule", () => import("./modules/world/scorpion_theme_module.js"));
-    await tryEnable("createJumbotronsModule", () => import("./modules/world/jumbotrons_module.js"));
+    await tryEnable("createWorldMasterModule", () => importIfExists("./modules/world/world_master_module.js"));
+    await tryEnable("createScorpionThemeModule", () => importIfExists("./modules/world/scorpion_theme_module.js"));
+    await tryEnable("createJumbotronsModule", () => importIfExists("./modules/world/jumbotrons_module.js"));
 
-    // Showgame (bots play continuously)
-    await tryEnable("createShowgameModule", () => import("./modules/game/showgame_module.js"), { dealInterval: 6.0 });
-    await tryEnable("createInteractionPolicyModule", () => import("./modules/game/interaction_policy_module.js"));
+    // Game / show
+    await tryEnable("createShowgameModule", () => importIfExists("./modules/game/showgame_module.js"), { dealInterval: 6.0 });
+    await tryEnable("createInteractionPolicyModule", () => importIfExists("./modules/game/interaction_policy_module.js"));
+
+    log("boot complete ✅");
   };
 
-  // Kick boot (async), but world renders immediately
-  boot().then(() => log("boot complete ✅")).catch((e) => err("boot failed:", e));
+  boot().catch((e) => err("boot failed:", e));
 
-  // Render loop — crash-safe updates
+  // ---------- Render loop ----------
   let last = performance.now() / 1000;
   renderer.setAnimationLoop(() => {
     const now = performance.now() / 1000;
@@ -165,15 +339,13 @@ export function createWorldOrchestrator({
     last = now;
 
     for (const m of modules) {
-      try { m.update?.(ctx, { dt, input: ctx.input }); }
-      catch (e) { err("update failed:", m.name, e); }
+      try { m.update?.(ctx, { dt, input: ctx.input }); } catch (e) { err("update failed:", m.name, e); }
     }
 
-    try { renderer.render(scene, camera); }
-    catch (e) { err("render failed:", e); }
+    try { renderer.render(scene, camera); } catch (e) { err("render failed:", e); }
   });
 
   log("orchestrator running ✅", { safeMode, noHud, trace });
 
   return { ctx, scene, camera, renderer, playerRig, enable, modules };
-    }
+      }

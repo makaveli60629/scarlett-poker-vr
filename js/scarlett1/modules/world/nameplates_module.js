@@ -1,29 +1,23 @@
 // /js/scarlett1/modules/world/nameplates_module.js
-// NAMEPLATES + LOBBY DIRECTORY MAP (FULL) — Modular Forever
-// - Adds emissive sign panels above each hallway door (Hall_1..Hall_4)
-// - Adds a lobby "directory map" panel near the center
-// Quest-safe: no font rendering; uses colored blocks to represent each room identity
+// NAMEPLATES + LOBBY DIRECTORY (FULL) — ROOT PATCHED
 
 export function createNameplatesModule({
-  // Hallway door sign placement (relative to each Hall group)
   doorSignY = 2.85,
-  doorSignZ = 4.6,         // near the end of the hall (hallLength * 0.5 - something)
+  doorSignZ = 4.6,
   doorSignW = 2.6,
   doorSignH = 0.75,
 
-  // Lobby directory panel placement (world space, in lobby)
   directoryPos = { x: 0, y: 1.65, z: 2.2 },
   directoryW = 4.4,
   directoryH = 2.4,
-
 } = {}) {
   let built = false;
 
   const ROOMS = [
-    { key: "SCORPION", label: "SCORPION • MAIN TEST", color: 0x33ffff, glow: 0x112244 },
-    { key: "DEVILS",  label: "DEVILS • TABLE FARM",  color: 0x8833ff, glow: 0x220033 },
-    { key: "STORE",   label: "STORE • MANNEQUINS",   color: 0xff66ff, glow: 0x220011 },
-    { key: "VIP",     label: "VIP • LOUNGE",         color: 0xffcc33, glow: 0x332200 },
+    { key: "SCORPION", color: 0x33ffff },
+    { key: "DEVILS",  color: 0x8833ff },
+    { key: "STORE",   color: 0xff66ff },
+    { key: "VIP",     color: 0xffcc33 },
   ];
 
   function matGlow(ctx, color, emissive, ei) {
@@ -52,9 +46,7 @@ export function createNameplatesModule({
     plate.position.z = 0.07;
     g.add(plate);
 
-    // "Glyph bars" to represent the room label (placeholder for text)
     const bars = new ctx.THREE.Group();
-    bars.name = "GlyphBars";
     const barCount = 7;
     for (let i = 0; i < barCount; i++) {
       const bw = 0.18 + (i % 3) * 0.10;
@@ -79,76 +71,78 @@ export function createNameplatesModule({
     return found;
   }
 
-  function buildDoorSigns(ctx) {
+  function buildDoorSignsWorldSpace(ctx, root) {
+    const THREE = ctx.THREE;
+
     for (let i = 0; i < 4; i++) {
       const hall = findHall(ctx, i + 1);
       if (!hall) continue;
 
-      const info = ROOMS[i];
-      const sign = makeSign(ctx, doorSignW, doorSignH, info.color);
+      const sign = makeSign(ctx, doorSignW, doorSignH, ROOMS[i].color);
       sign.name = `DoorSign_${i + 1}`;
 
-      // Put sign near door end; hall local space faces down its Z axis
-      sign.position.set(0, doorSignY, doorSignZ);
-      hall.add(sign);
+      // Compute world transform of the desired local point in the hall
+      const lp = new THREE.Vector3(0, doorSignY, doorSignZ);
+      const wp = lp.clone();
+      hall.localToWorld(wp);
+      sign.position.copy(wp);
+
+      // Match hall yaw (world)
+      const q = new THREE.Quaternion();
+      hall.getWorldQuaternion(q);
+      sign.quaternion.copy(q);
+
+      root.add(sign);
     }
+
     console.log("[nameplates] door signs ✅");
   }
 
-  function buildDirectory(ctx) {
-    const root = ctx.scene;
+  function buildDirectory(ctx, root) {
+    const THREE = ctx.THREE;
 
-    const panel = new ctx.THREE.Group();
+    const panel = new THREE.Group();
     panel.name = "LobbyDirectory";
-
     panel.position.set(directoryPos.x, directoryPos.y, directoryPos.z);
     root.add(panel);
 
-    // Frame
-    const frame = new ctx.THREE.Mesh(
-      new ctx.THREE.BoxGeometry(directoryW, directoryH, 0.16),
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(directoryW, directoryH, 0.16),
       matGlow(ctx, 0x101020, 0x112244, 0.25)
     );
     panel.add(frame);
 
-    // Screen background
-    const bg = new ctx.THREE.Mesh(
-      new ctx.THREE.PlaneGeometry(directoryW * 0.93, directoryH * 0.83),
+    const bg = new THREE.Mesh(
+      new THREE.PlaneGeometry(directoryW * 0.93, directoryH * 0.83),
       matGlow(ctx, 0x0b0b12, 0x33ffff, 0.15)
     );
     bg.position.z = 0.09;
     panel.add(bg);
 
-    // “Map rows”: colored strips representing the 4 rooms
     for (let i = 0; i < 4; i++) {
-      const info = ROOMS[i];
-
-      const row = new ctx.THREE.Mesh(
-        new ctx.THREE.BoxGeometry(directoryW * 0.86, 0.28, 0.05),
-        matGlow(ctx, 0x0f0f18, info.color, 0.75)
+      const row = new THREE.Mesh(
+        new THREE.BoxGeometry(directoryW * 0.86, 0.28, 0.05),
+        matGlow(ctx, 0x0f0f18, ROOMS[i].color, 0.75)
       );
       row.position.set(0, 0.65 - i * 0.42, 0.10);
       panel.add(row);
 
-      // Small "door number" block (1..4 encoded by height)
       const n = i + 1;
-      const num = new ctx.THREE.Mesh(
-        new ctx.THREE.BoxGeometry(0.16, 0.12 + n * 0.03, 0.05),
+      const num = new THREE.Mesh(
+        new THREE.BoxGeometry(0.16, 0.12 + n * 0.03, 0.05),
         matGlow(ctx, 0x0f0f18, 0xffffff, 0.55)
       );
       num.position.set(-directoryW * 0.36, row.position.y, 0.12);
       panel.add(num);
 
-      // Icon dot
-      const dot = new ctx.THREE.Mesh(
-        new ctx.THREE.SphereGeometry(0.07, 12, 12),
-        matGlow(ctx, 0x0f0f18, info.color, 0.85)
+      const dot = new THREE.Mesh(
+        new THREE.SphereGeometry(0.07, 12, 12),
+        matGlow(ctx, 0x0f0f18, ROOMS[i].color, 0.85)
       );
       dot.position.set(directoryW * 0.36, row.position.y, 0.12);
       panel.add(dot);
     }
 
-    // Face toward player spawn area (rough)
     panel.rotation.y = Math.PI;
     console.log("[nameplates] lobby directory ✅");
   }
@@ -160,12 +154,16 @@ export function createNameplatesModule({
       if (built) return;
       built = true;
 
-      // Delay a bit so lobby module has created halls
-      setTimeout(() => buildDoorSigns(ctx), 100);
-      setTimeout(() => buildDoorSigns(ctx), 600);
+      const THREE = ctx.THREE;
 
-      buildDirectory(ctx);
+      const root = new THREE.Group();
+      root.name = "nameplates_ROOT";
+      ctx.scene.add(root);
 
+      setTimeout(() => buildDoorSignsWorldSpace(ctx, root), 150);
+      setTimeout(() => buildDoorSignsWorldSpace(ctx, root), 800);
+
+      buildDirectory(ctx, root);
       console.log("[nameplates] ready ✅");
     },
   };

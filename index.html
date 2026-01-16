@@ -2,16 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport"
-        content="width=device-width,height=device-height,initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
+  <meta name="viewport" content="width=device-width,height=device-height,initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
   <title>Scarlett Poker VR</title>
   <style>
-    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
+    html, body { margin:0; width:100%; height:100%; overflow:hidden; background:#000; }
     #app { position:fixed; inset:0; }
-    #overlay {
-      position:fixed; left:6px; top:6px; right:6px; max-height:55vh; overflow:auto;
-      background:rgba(0,0,0,.82); color:#33ff66; padding:10px; z-index:99999;
-      font:12px/1.25 monospace; white-space:pre-wrap; border:1px solid #33ff66;
+    #overlay{
+      position:fixed;left:6px;top:6px;right:6px;max-height:55vh;overflow:auto;
+      background:rgba(0,0,0,.82);color:#33ff66;padding:10px;z-index:99999;
+      font:12px/1.25 monospace;white-space:pre-wrap;border:1px solid #33ff66;
     }
   </style>
 </head>
@@ -21,26 +20,21 @@
 
   <script type="module">
     const o = document.getElementById("overlay");
-    const log = (...a) => (o.textContent += "\n[LOG] " + a.join(" "));
-    const err = (...a) => (o.textContent += "\n[ERR] " + a.join(" "));
+    const log = (...a)=> o.textContent += "\n[LOG] " + a.join(" ");
+    const err = (...a)=> o.textContent += "\n[ERR] " + a.join(" ");
 
-    window.addEventListener("error", (e) => err("window.error:", e.message));
-    window.addEventListener("unhandledrejection", (e) => err("promise:", e.reason?.message || String(e.reason)));
-
-    // IMPORTANT: this is the only path you should use right now
-    const entry = "./js/scarlett1/index.js?v=U4_2_html_probe";
+    window.addEventListener("error", (e)=>err("window:", e.message));
+    window.addEventListener("unhandledrejection", (e)=>err("promise:", e.reason?.message || String(e.reason)));
 
     log("href=", location.href);
-    log("secureContext=", String(window.isSecureContext));
+    log("secureContext=", String(isSecureContext));
     log("navigator.xr=", String(!!navigator.xr));
-    log("importing:", entry);
 
     try {
-      await import(entry);
-      log("import OK ✅");
-    } catch (e) {
-      err("IMPORT FAILED ❌");
-      err(e?.message || String(e));
+      await import("./js/index.js?v=router");
+      log("router import OK ✅");
+    } catch(e) {
+      err("router import FAILED ❌", e?.message || String(e));
     }
   </script>
 </body>

@@ -1,7 +1,9 @@
 // /js/scarlett1/index.js
-// SCARLETT1 v17 — Global THREE (CDN chain) + Custom Enter VR + Controllers/Lasers + Right-stick Locomotion
-// + LEFT Y BUTTON (menu toggle) + Minimal VR Menu (music/radio placeholder)
-const BUILD = "SCARLETT1_INDEX_FULL_v17_LEFT_Y_MENU_TOGGLE";
+// SCARLETT1 v18 — Global THREE (CDN chain) + XR + Controllers/Lasers + Right locomotion
+// + LEFT Y menu toggle (robust mapping) + Always-hit laser target plane
+// + Teleport (Left grip hold/release)
+// + HUD: Hide/Show + Module Test (red button) + Copy status
+const BUILD = "SCARLETT1_INDEX_FULL_v18_LEFT_FIX_MENU_TELEPORT_HUD";
 
 const err = (...a) => console.error("[scarlett1]", ...a);
 const proof = (s) => console.log("[router_proof]", s);
@@ -20,69 +22,114 @@ function ensureRoot() {
   return root;
 }
 
-function setBanner(text) {
-  proof(text.replace(/\n/g, " | "));
-  let b = document.getElementById("scarlettBanner");
-  if (!b) {
-    b = document.createElement("div");
-    b.id = "scarlettBanner";
-    b.style.position = "fixed";
-    b.style.left = "10px";
-    b.style.bottom = "10px";
-    b.style.zIndex = "999999";
-    b.style.padding = "10px 12px";
+function ensureHud() {
+  let hud = document.getElementById("scarlettHud");
+  if (hud) return hud;
+
+  hud = document.createElement("div");
+  hud.id = "scarlettHud";
+  hud.style.position = "fixed";
+  hud.style.left = "10px";
+  hud.style.top = "10px";
+  hud.style.zIndex = "1000001";
+  hud.style.padding = "10px 12px";
+  hud.style.borderRadius = "12px";
+  hud.style.background = "rgba(0,0,0,0.70)";
+  hud.style.color = "#fff";
+  hud.style.font = "12px/1.3 system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  hud.style.backdropFilter = "blur(4px)";
+  hud.style.maxWidth = "90vw";
+
+  const row = document.createElement("div");
+  row.style.display = "flex";
+  row.style.gap = "8px";
+  row.style.flexWrap = "wrap";
+  row.style.alignItems = "center";
+  row.style.marginBottom = "8px";
+
+  const btn = (label, bg, onClick) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.style.border = "0";
     b.style.borderRadius = "12px";
-    b.style.background = "rgba(0,0,0,0.82)";
-    b.style.color = "#fff";
-    b.style.font = "12px/1.3 system-ui, -apple-system, Segoe UI, Roboto, Arial";
-    b.style.whiteSpace = "pre-wrap";
-    b.style.maxWidth = "92vw";
-    b.style.pointerEvents = "none";
-    document.body.appendChild(b);
-  }
-  b.textContent = text;
-}
+    b.style.padding = "10px 12px";
+    b.style.cursor = "pointer";
+    b.style.font = "12px system-ui";
+    b.style.background = bg;
+    b.style.color = "#111";
+    b.onclick = onClick;
+    return b;
+  };
 
-function setRed(text) {
-  proof(("RED: " + text).replace(/\n/g, " | "));
-  let p = document.getElementById("scarlettPanic");
-  if (!p) {
-    p = document.createElement("div");
-    p.id = "scarlettPanic";
-    p.style.position = "fixed";
-    p.style.right = "10px";
-    p.style.top = "10px";
-    p.style.zIndex = "1000000";
-    p.style.padding = "10px 12px";
-    p.style.borderRadius = "12px";
-    p.style.background = "rgba(160,0,0,0.88)";
-    p.style.color = "#fff";
-    p.style.font = "12px/1.3 system-ui, -apple-system, Segoe UI, Roboto, Arial";
-    p.style.whiteSpace = "pre-wrap";
-    p.style.maxWidth = "72vw";
-    p.style.pointerEvents = "none";
-    document.body.appendChild(p);
-  }
-  p.textContent = text;
-}
+  const body = document.createElement("div");
+  body.id = "scarlettHudBody";
+  body.textContent = "";
 
-function installGuards() {
-  if (window.__scarlettGuardsInstalled) return;
-  window.__scarlettGuardsInstalled = true;
-
-  window.addEventListener("error", (e) => {
-    const msg = String(e?.message || e);
-    err("window.error:", msg);
-    setRed("❌ ERROR\n" + msg);
-    setBanner("❌ ERROR\n" + msg);
+  const hideBtn = btn("Hide HUD", "rgba(255,255,255,0.92)", () => {
+    hud.style.display = "none";
+    let pill = document.getElementById("scarlettShowHud");
+    if (!pill) {
+      pill = document.createElement("button");
+      pill.id = "scarlettShowHud";
+      pill.textContent = "Show HUD";
+      pill.style.position = "fixed";
+      pill.style.left = "10px";
+      pill.style.top = "10px";
+      pill.style.zIndex = "1000002";
+      pill.style.border = "0";
+      pill.style.borderRadius = "999px";
+      pill.style.padding = "12px 14px";
+      pill.style.background = "rgba(0,0,0,0.70)";
+      pill.style.color = "#fff";
+      pill.style.cursor = "pointer";
+      pill.onclick = () => {
+        pill.remove();
+        hud.style.display = "block";
+      };
+      document.body.appendChild(pill);
+    }
   });
 
-  window.addEventListener("unhandledrejection", (e) => {
-    const msg = String(e?.reason || e);
-    err("unhandledrejection:", msg);
-    setRed("❌ REJECTION\n" + msg);
-    setBanner("❌ REJECTION\n" + msg);
+  const copyBtn = btn("Copy Status", "rgba(255,255,255,0.92)", async () => {
+    try {
+      const txt = body.textContent || "";
+      await navigator.clipboard.writeText(txt);
+      bodyLine("✅ copied");
+    } catch (e) {
+      bodyLine("⚠️ copy failed");
+    }
   });
+
+  const testBtn = btn("Module Test", "rgba(255,80,80,0.92)", () => {
+    // quick, visible module test results
+    const xr = !!navigator.xr;
+    const gl = !!document.getElementById("scarlettCanvas");
+    const secure = !!window.isSecureContext;
+    bodyLine(`TEST: secure=${secure} xr=${xr} canvas=${gl} ua=${navigator.userAgent}`);
+  });
+
+  row.appendChild(hideBtn);
+  row.appendChild(copyBtn);
+  row.appendChild(testBtn);
+
+  hud.appendChild(row);
+  hud.appendChild(body);
+  document.body.appendChild(hud);
+
+  function bodyLine(s) {
+    body.textContent = (body.textContent ? body.textContent + "\n" : "") + s;
+    const lines = body.textContent.split("\n");
+    if (lines.length > 160) body.textContent = lines.slice(lines.length - 160).join("\n");
+  }
+
+  window.__scarlettHudLine = bodyLine;
+  return hud;
+}
+
+function hudLine(s) {
+  const fn = window.__scarlettHudLine;
+  if (typeof fn === "function") fn(s);
+  proof(s);
 }
 
 function loadScript(src) {
@@ -98,23 +145,21 @@ function loadScript(src) {
 
 async function ensureThreeGlobal() {
   if (window.THREE) return "already";
-
   const chain = [
     "https://unpkg.com/three@0.158.0/build/three.min.js",
     "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js",
     "https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js",
   ];
-
   let lastErr = null;
   for (const src of chain) {
     try {
-      setBanner(`✅ Scarlett\n${BUILD}\nloading THREE...\n${src}`);
+      hudLine(`loading THREE… ${src}`);
       const ok = await loadScript(src);
       if (window.THREE) return ok;
       lastErr = new Error("Loaded but window.THREE missing: " + src);
     } catch (e) {
       lastErr = e;
-      setBanner(`⚠️ load failed\n${src}\n${String(e.message || e)}`);
+      hudLine(`⚠️ three load failed: ${src}`);
     }
   }
   throw lastErr || new Error("THREE failed to load");
@@ -144,20 +189,23 @@ function makeEnterVrButton(onClick) {
   return btn;
 }
 
-async function bootWorld2DAndXR() {
+async function boot() {
+  ensureRoot();
+  ensureHud();
+  hudLine(`✅ ${BUILD}`);
+
   const threeSrc = await ensureThreeGlobal();
   if (!window.THREE) throw new Error("window.THREE missing after load");
-
-  setBanner(`✅ Scarlett\n${BUILD}\nTHREE OK from:\n${threeSrc}`);
+  hudLine(`THREE OK: ${threeSrc}`);
 
   const THREE = window.THREE;
   const app = document.getElementById("app") || document.body;
 
-  // --- Scene / Camera / Renderer ---
+  // Scene / Camera / Renderer
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0d0f12);
 
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 300);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 500);
   camera.position.set(0, 1.6, 3);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
@@ -171,19 +219,30 @@ async function bootWorld2DAndXR() {
   renderer.domElement.id = "scarlettCanvas";
   app.appendChild(renderer.domElement);
 
-  // --- Lights + basic world ---
+  // Lights
   scene.add(new THREE.HemisphereLight(0xffffff, 0x222244, 0.9));
   const sun = new THREE.DirectionalLight(0xffffff, 0.9);
   sun.position.set(6, 10, 3);
   scene.add(sun);
 
+  // Floor (visible)
   const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(80, 80),
+    new THREE.PlaneGeometry(200, 200),
     new THREE.MeshStandardMaterial({ color: 0x1c2126, roughness: 1, metalness: 0 })
   );
   floor.rotation.x = -Math.PI / 2;
   scene.add(floor);
 
+  // Laser target plane (invisible, ALWAYS there so lasers always “hit” something)
+  const laserTarget = new THREE.Mesh(
+    new THREE.PlaneGeometry(200, 200),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 })
+  );
+  laserTarget.rotation.x = -Math.PI / 2;
+  laserTarget.position.y = 0.001;
+  scene.add(laserTarget);
+
+  // Table (placeholder)
   const table = new THREE.Mesh(
     new THREE.CylinderGeometry(0.85, 0.95, 0.14, 48),
     new THREE.MeshStandardMaterial({ color: 0x2a7a5e, roughness: 0.95 })
@@ -191,7 +250,7 @@ async function bootWorld2DAndXR() {
   table.position.set(0, 0.85, 0);
   scene.add(table);
 
-  // --- Rig (move this for locomotion) ---
+  // Rig
   const rig = new THREE.Group();
   rig.position.set(0, 0, 3.2);
   rig.add(camera);
@@ -199,47 +258,39 @@ async function bootWorld2DAndXR() {
 
   camera.lookAt(0, 1.0, 0);
 
-  // --- Controllers + lasers ---
-  const controller0 = renderer.xr.getController(0);
-  const controller1 = renderer.xr.getController(1);
-  rig.add(controller0);
-  rig.add(controller1);
+  // Controllers
+  const c0 = renderer.xr.getController(0);
+  const c1 = renderer.xr.getController(1);
+  rig.add(c0);
+  rig.add(c1);
 
   function makeLaser(color) {
-    const geom = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, -1),
-    ]);
+    const geom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
     const mat = new THREE.LineBasicMaterial({ color });
     const line = new THREE.Line(geom, mat);
     line.name = "laser";
     line.scale.z = 5;
     return line;
   }
-  controller0.add(makeLaser(0xff3bd1));
-  controller1.add(makeLaser(0x39b6ff));
+  c0.add(makeLaser(0xff3bd1));
+  c1.add(makeLaser(0x39b6ff));
 
   const ray = new THREE.Raycaster();
   const tmpMat = new THREE.Matrix4();
 
-  // --- Minimal VR Menu (3D panel) ---
-  // Left Y toggles show/hide. Menu stays in front of camera and faces you.
+  // Menu (minimal, toggle only)
   const menu = new THREE.Group();
   menu.visible = false;
-  menu.name = "scarlettMenu";
   scene.add(menu);
 
-  // Panel
-  const panelW = 0.55;
-  const panelH = 0.32;
+  const panelW = 0.55, panelH = 0.32;
   const panel = new THREE.Mesh(
     new THREE.PlaneGeometry(panelW, panelH),
     new THREE.MeshStandardMaterial({ color: 0x101418, roughness: 0.9, metalness: 0.05 })
   );
-  panel.position.set(0, 0, -1); // relative to menu group
+  panel.position.set(0, 0, -1);
   menu.add(panel);
 
-  // Border frame
   const frame = new THREE.Mesh(
     new THREE.PlaneGeometry(panelW + 0.01, panelH + 0.01),
     new THREE.MeshStandardMaterial({ color: 0x05070a, roughness: 1 })
@@ -247,138 +298,122 @@ async function bootWorld2DAndXR() {
   frame.position.set(0, 0, -1.001);
   menu.add(frame);
 
-  // Buttons (simple boxes) — “Music/Radio” + “Close”
-  function makeButton(label, y) {
-    const btn = new THREE.Mesh(
-      new THREE.BoxGeometry(panelW * 0.85, 0.07, 0.02),
-      new THREE.MeshStandardMaterial({ color: 0x1f2a33, roughness: 0.9 })
-    );
-    btn.position.set(0, y, -0.98);
-    btn.userData.label = label;
-    btn.userData.isButton = true;
-    btn.userData.cooldown = 0;
-    return btn;
-  }
-
-  const btnMusic = makeButton("MUSIC", 0.05);
-  const btnClose = makeButton("CLOSE", -0.06);
-  menu.add(btnMusic);
-  menu.add(btnClose);
-
-  // Small “status light” for music
-  const musicDot = new THREE.Mesh(
-    new THREE.SphereGeometry(0.012, 16, 16),
-    new THREE.MeshStandardMaterial({ color: 0x5bff7a, roughness: 0.4 })
-  );
-  musicDot.position.set(panelW * 0.35, 0.05, -0.965);
-  menu.add(musicDot);
-
-  let musicOn = true;
-  function updateMusicDot() {
-    musicDot.material.color.set(musicOn ? 0x5bff7a : 0xff5b5b);
-  }
-  updateMusicDot();
-
   function toggleMenu(force) {
     menu.visible = typeof force === "boolean" ? force : !menu.visible;
-    setBanner(`✅ Scarlett\n${BUILD}\nmenu: ${menu.visible ? "ON" : "OFF"} (Left Y)`);
+    hudLine(`menu: ${menu.visible ? "ON" : "OFF"} (Left Y)`);
   }
 
-  // --- Input: Left Y to toggle menu ---
-  let yWasPressed = false;
+  // Teleport visuals
+  const teleportMarker = new THREE.Mesh(
+    new THREE.RingGeometry(0.12, 0.16, 32),
+    new THREE.MeshBasicMaterial({ color: 0x39b6ff, transparent: true, opacity: 0.9, side: THREE.DoubleSide })
+  );
+  teleportMarker.rotation.x = -Math.PI / 2;
+  teleportMarker.visible = false;
+  scene.add(teleportMarker);
 
-  // --- Simple UI click with lasers (trigger) ---
-  // Right trigger clicks buttons (keeps left as "menu hand").
-  // If you want left trigger too later, we can add it.
-  let rightTriggerWasPressed = false;
+  let teleportActive = false;
+  let teleportPoint = new THREE.Vector3();
 
-  function intersectButtons(controller) {
-    // Raycast from controller forward
+  function updateTeleportFromController(controller) {
     tmpMat.identity().extractRotation(controller.matrixWorld);
     ray.ray.origin.setFromMatrixPosition(controller.matrixWorld);
     ray.ray.direction.set(0, 0, -1).applyMatrix4(tmpMat);
-
-    const objs = [btnMusic, btnClose];
-    const hits = ray.intersectObjects(objs, false);
-    return hits.length ? hits[0] : null;
-  }
-
-  function clickButton(obj) {
-    if (!obj || !obj.userData || !obj.userData.isButton) return;
-
-    const label = obj.userData.label;
-    if (label === "MUSIC") {
-      musicOn = !musicOn;
-      updateMusicDot();
-      setBanner(`✅ Scarlett\n${BUILD}\nMusic: ${musicOn ? "ON" : "OFF"} (placeholder)`);
-    } else if (label === "CLOSE") {
-      toggleMenu(false);
+    const hits = ray.intersectObject(laserTarget, false);
+    if (hits.length) {
+      teleportPoint.copy(hits[0].point);
+      teleportMarker.position.copy(teleportPoint);
+      teleportMarker.visible = true;
+    } else {
+      teleportMarker.visible = false;
     }
   }
 
-  // --- Locomotion (RIGHT HAND ONLY) ---
+  function commitTeleport() {
+    if (!teleportMarker.visible) return;
+    // Move rig to marker, keep camera height
+    rig.position.x = teleportPoint.x;
+    rig.position.z = teleportPoint.z;
+    hudLine("teleport ✅");
+  }
+
+  // XR enter
+  async function enterVR() {
+    if (!navigator.xr) return;
+    const session = await navigator.xr.requestSession("immersive-vr", {
+      optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking", "layers"],
+    });
+    renderer.xr.setReferenceSpaceType("local-floor");
+    await renderer.xr.setSession(session);
+    hudLine("XR sessionstart ✅");
+    session.addEventListener("end", () => hudLine("XR sessionend ✅"));
+  }
+  if (navigator.xr) makeEnterVrButton(enterVR);
+
+  // Robust input mapping
+  // We DO NOT trust handedness alone; we fall back to controller indices.
+  function classifyInputs(session) {
+    let left = null, right = null;
+    const sources = Array.from(session.inputSources || []).filter(s => s && s.gamepad);
+
+    for (const s of sources) {
+      if (s.handedness === "left") left = s;
+      if (s.handedness === "right") right = s;
+    }
+
+    // Fallback: if missing handedness, pick by index order
+    if (!left && sources[0]) left = sources[0];
+    if (!right && sources[1]) right = sources[1];
+
+    return { left, right };
+  }
+
+  // Locomotion (RIGHT ONLY)
   const moveState = { speed: 1.8, snap: Math.PI / 6, snapCooldown: 0 };
 
   function getStickPair(gp) {
     if (!gp || !gp.axes || gp.axes.length < 2) return { x: 0, y: 0 };
     const a = gp.axes;
-    // Choose best pair by magnitude
-    let best = [0, 1];
-    let bestMag = Math.abs(a[0]) + Math.abs(a[1]);
+    let best = [0, 1], bestMag = Math.abs(a[0]) + Math.abs(a[1]);
     for (let i = 0; i + 1 < a.length; i += 2) {
       const mag = Math.abs(a[i]) + Math.abs(a[i + 1]);
-      if (mag > bestMag) {
-        best = [i, i + 1];
-        bestMag = mag;
-      }
+      if (mag > bestMag) { best = [i, i + 1]; bestMag = mag; }
     }
     return { x: a[best[0]] || 0, y: a[best[1]] || 0 };
   }
-
   function getSnapAxis(gp) {
     if (!gp || !gp.axes) return 0;
-    // Prefer axis 2 if present
     return gp.axes.length >= 3 ? (gp.axes[2] || 0) : (gp.axes[0] || 0);
   }
 
-  // --- XR session wiring (custom Enter VR) ---
-  async function enterVR() {
-    if (!navigator.xr) {
-      setBanner(`❌ navigator.xr missing`);
-      return;
+  // Button mapping helpers (Quest can vary)
+  function readYButton(gp) {
+    if (!gp || !gp.buttons) return false;
+    // Common candidates for Y: 3 (typical), sometimes 4 depending on profile
+    const cands = [3, 4];
+    for (const i of cands) {
+      if (gp.buttons[i]) return !!gp.buttons[i].pressed;
     }
-    try {
-      setBanner(`✅ Scarlett\n${BUILD}\nrequesting XR session...`);
-      const session = await navigator.xr.requestSession("immersive-vr", {
-        optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking", "layers"],
-      });
-
-      renderer.xr.setReferenceSpaceType("local-floor");
-      await renderer.xr.setSession(session);
-
-      setBanner(`✅ Scarlett\n${BUILD}\nXR sessionstart ✅`);
-
-      session.addEventListener("end", () => {
-        setBanner(`✅ Scarlett\n${BUILD}\nXR sessionend ✅`);
-      });
-    } catch (e) {
-      setBanner(`❌ XR failed\n${String(e?.message || e)}`);
-    }
+    return false;
+  }
+  function readGrip(gp) {
+    if (!gp || !gp.buttons) return false;
+    // Grip commonly button 1
+    return gp.buttons[1] ? !!gp.buttons[1].pressed : false;
   }
 
-  // show button only if XR is available
-  if (navigator.xr) makeEnterVrButton(enterVR);
+  let yWas = false;
+  let leftGripWas = false;
 
-  // --- Render loop (2D + XR) ---
+  // Render loop
   let last = performance.now();
-
   renderer.setAnimationLoop((t) => {
     const dt = Math.min((t - last) / 1000, 0.05);
     last = t;
 
     const session = renderer.xr.getSession && renderer.xr.getSession();
 
-    // Keep menu positioned 1m in front of camera when visible
+    // Menu follow camera when visible
     if (menu.visible) {
       const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
       const pos = new THREE.Vector3().copy(camera.position).add(forward.multiplyScalar(1.0));
@@ -387,37 +422,39 @@ async function bootWorld2DAndXR() {
     }
 
     if (session) {
-      // Find left & right inputSources
-      let left = null;
-      let right = null;
-      for (const s of session.inputSources || []) {
-        if (!s || !s.gamepad) continue;
-        if (s.handedness === "left") left = s;
-        if (s.handedness === "right") right = s;
-      }
+      const { left, right } = classifyInputs(session);
 
-      // LEFT Y (buttons[3]) toggles menu
-      if (left && left.gamepad && left.gamepad.buttons && left.gamepad.buttons[3]) {
-        const yPressed = !!left.gamepad.buttons[3].pressed;
-        if (yPressed && !yWasPressed) toggleMenu();
-        yWasPressed = yPressed;
+      // --- Left Y toggles menu ---
+      if (left && left.gamepad) {
+        const y = readYButton(left.gamepad);
+        if (y && !yWas) toggleMenu();
+        yWas = y;
       } else {
-        yWasPressed = false;
+        yWas = false;
       }
 
-      // RIGHT trigger click buttons (buttons[0] on Touch is usually trigger)
-      if (menu.visible && right && right.gamepad && right.gamepad.buttons && right.gamepad.buttons[0]) {
-        const trig = !!right.gamepad.buttons[0].pressed;
-        if (trig && !rightTriggerWasPressed) {
-          const hit = intersectButtons(controller1);
-          if (hit && hit.object) clickButton(hit.object);
+      // --- Teleport: LEFT GRIP hold/release ---
+      if (left && left.gamepad) {
+        const grip = readGrip(left.gamepad);
+        if (grip) {
+          teleportActive = true;
+          updateTeleportFromController(c0); // c0 usually maps to left, but even if swapped it still works visually
+        } else {
+          if (leftGripWas && teleportActive) {
+            // released
+            commitTeleport();
+          }
+          teleportActive = false;
+          teleportMarker.visible = false;
         }
-        rightTriggerWasPressed = trig;
+        leftGripWas = grip;
       } else {
-        rightTriggerWasPressed = false;
+        teleportActive = false;
+        leftGripWas = false;
+        teleportMarker.visible = false;
       }
 
-      // RIGHT hand locomotion only (movement + snap)
+      // --- Right locomotion only ---
       if (right && right.gamepad) {
         const gp = right.gamepad;
         const stick = getStickPair(gp);
@@ -425,13 +462,10 @@ async function bootWorld2DAndXR() {
         const sx = Math.abs(stick.x) > dead ? stick.x : 0;
         const sy = Math.abs(stick.y) > dead ? stick.y : 0;
 
-        // If menu is open, keep movement active (you can change this later)
         const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-        forward.y = 0;
-        forward.normalize();
+        forward.y = 0; forward.normalize();
         const strafe = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-        strafe.y = 0;
-        strafe.normalize();
+        strafe.y = 0; strafe.normalize();
 
         rig.position.addScaledVector(forward, (-sy) * moveState.speed * dt);
         rig.position.addScaledVector(strafe, (sx) * moveState.speed * dt);
@@ -444,29 +478,21 @@ async function bootWorld2DAndXR() {
         }
       }
 
-      // Lasers hit floor (and also show menu distance)
-      for (const c of [controller0, controller1]) {
+      // --- Lasers always hit laserTarget (never “dead”) ---
+      for (const c of [c0, c1]) {
         tmpMat.identity().extractRotation(c.matrixWorld);
         ray.ray.origin.setFromMatrixPosition(c.matrixWorld);
         ray.ray.direction.set(0, 0, -1).applyMatrix4(tmpMat);
-
-        // Prefer menu panel intersection if visible; otherwise floor
-        let dist = 5;
-
-        if (menu.visible) {
-          const hitsMenu = ray.intersectObjects([panel, btnMusic, btnClose], false);
-          if (hitsMenu.length) dist = hitsMenu[0].distance;
-          else {
-            const hitsFloor = ray.intersectObject(floor, false);
-            if (hitsFloor.length) dist = hitsFloor[0].distance;
-          }
-        } else {
-          const hitsFloor = ray.intersectObject(floor, false);
-          if (hitsFloor.length) dist = hitsFloor[0].distance;
-        }
-
+        const hits = ray.intersectObject(laserTarget, false);
+        const dist = hits.length ? hits[0].distance : 5;
         const line = c.getObjectByName("laser");
         if (line) line.scale.z = dist;
+      }
+    } else {
+      // 2D mode: show lasers at default length (nice visual)
+      for (const c of [c0, c1]) {
+        const line = c.getObjectByName("laser");
+        if (line) line.scale.z = 3;
       }
     }
 
@@ -479,27 +505,28 @@ async function bootWorld2DAndXR() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  setRed(`✅ STARTED\n${BUILD}\nRight move OK\nLeft Y menu OK`);
-  setBanner(`✅ Scarlett\n${BUILD}\n2D world ready ✅\nLeft Y = Menu\nRight Trigger = Click`);
+  hudLine("READY ✅ Right stick = move");
+  hudLine("Left Y = menu toggle");
+  hudLine("Left Grip = teleport hold/release");
 }
 
 export function start() {
   ensureRoot();
   installGuards();
-  setRed(`SYNC OK\n${BUILD}`);
-  setBanner(`✅ Scarlett\n${BUILD}\nstart()`);
+  ensureHud();
+  hudLine(`SYNC OK ${BUILD}`);
 
   if (window.__scarlettRan) return true;
   window.__scarlettRan = true;
 
-  bootWorld2DAndXR().catch((e) => {
+  boot().catch((e) => {
     const msg = String(e?.message || e);
-    setRed("❌ BOOT FAILED\n" + msg);
-    setBanner("❌ BOOT FAILED\n" + msg);
+    hudLine("❌ BOOT FAILED: " + msg);
+    err(e);
   });
 
   return true;
 }
 
-// fallback if router doesn't call start()
+// fallback
 try { start(); } catch (e) {}

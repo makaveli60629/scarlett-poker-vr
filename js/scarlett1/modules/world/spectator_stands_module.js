@@ -1,42 +1,33 @@
 // /js/scarlett1/modules/world/spectator_stands_module.js
-// SPECTATOR STANDS MODULE (FULL) — Modular Forever
-// - Adds tiered steps around the pit + outer balcony ring + safety rail
-// - Targets Room #1 (Scorpion main test) if available
-// - Quest-safe: simple meshes only
+// SPECTATOR STANDS MODULE (FULL) — ROOT PATCHED
 
 export function createSpectatorStandsModule({
   targetRoomIndex = 0,
 
-  // Layout
-  pitOuterRadius = 7.2,     // should be > pit radius and > inner guard rail radius
+  pitOuterRadius = 7.2,
   tierCount = 3,
   tierHeight = 0.25,
   tierDepth = 0.55,
 
-  // Balcony
   balconyRadius = 9.2,
   balconyThickness = 0.65,
   balconyY = 0.02,
 
-  // Outer safety rail
   railRadius = 9.55,
   railHeight = 1.05,
   railTubeRadius = 0.035,
   postCount = 16,
-
 } = {}) {
   let built = false;
 
-  function getRoot(ctx) {
+  function getRoomGroup(ctx) {
     const r = ctx.rooms?.get?.(targetRoomIndex);
-    if (r?.group) return r.group;
-    return ctx.scene;
+    return r?.group || ctx.scene;
   }
 
   function mat(ctx, color, rough = 0.9, metal = 0.06) {
     return new ctx.THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
   }
-
   function matGlow(ctx, color, emissive, ei) {
     return new ctx.THREE.MeshStandardMaterial({
       color,
@@ -55,18 +46,19 @@ export function createSpectatorStandsModule({
       built = true;
 
       const THREE = ctx.THREE;
-      const root = getRoot(ctx);
+      const room = getRoomGroup(ctx);
 
-      // ---------- Tiered steps (ring segments as stacked cylinders) ----------
-      // We use shallow cylinders as "tiers" to keep poly count low.
+      const root = new THREE.Group();
+      root.name = "spectator_stands_ROOT";
+      room.add(root);
+
       for (let i = 0; i < tierCount; i++) {
         const rOuter = pitOuterRadius + (i + 1) * tierDepth;
         const rInner = pitOuterRadius + i * tierDepth;
 
         const h = tierHeight;
-        const y = i * h; // rising outward
+        const y = i * h;
 
-        // Use a thin cylinder as a step ring (solid disc), then cut center visually by placing a darker disc inside.
         const ring = new THREE.Mesh(
           new THREE.CylinderGeometry(rOuter, rOuter, h, 96, 1, false),
           mat(ctx, 0x0b0b12, 0.92, 0.08)
@@ -81,7 +73,6 @@ export function createSpectatorStandsModule({
         cut.position.y = y + h * 0.5;
         root.add(cut);
 
-        // subtle neon edge
         const edge = new THREE.Mesh(
           new THREE.TorusGeometry(rOuter - 0.08, 0.02, 12, 144),
           matGlow(ctx, 0x0f0f18, (i % 2 === 0) ? 0x33ffff : 0xff66ff, 0.45)
@@ -91,7 +82,6 @@ export function createSpectatorStandsModule({
         root.add(edge);
       }
 
-      // ---------- Balcony walking ring ----------
       const balcony = new THREE.Mesh(
         new THREE.CylinderGeometry(balconyRadius, balconyRadius, balconyThickness, 128, 1, false),
         mat(ctx, 0x090912, 0.92, 0.05)
@@ -99,15 +89,18 @@ export function createSpectatorStandsModule({
       balcony.position.y = balconyY + balconyThickness * 0.5 + tierCount * tierHeight;
       root.add(balcony);
 
-      // Hollow center visual (dark inner disc)
       const balconyCut = new THREE.Mesh(
-        new THREE.CylinderGeometry(pitOuterRadius + tierCount * tierDepth + 0.1, pitOuterRadius + tierCount * tierDepth + 0.1, balconyThickness + 0.02, 128, 1, false),
+        new THREE.CylinderGeometry(
+          pitOuterRadius + tierCount * tierDepth + 0.1,
+          pitOuterRadius + tierCount * tierDepth + 0.1,
+          balconyThickness + 0.02,
+          128, 1, false
+        ),
         mat(ctx, 0x05050a, 0.98, 0.02)
       );
       balconyCut.position.y = balcony.position.y;
       root.add(balconyCut);
 
-      // ---------- Outer safety rail ----------
       const railMat = matGlow(ctx, 0x141424, 0x112244, 0.25);
       const railGlowMat = matGlow(ctx, 0x0f0f18, 0x33ffff, 0.65);
 
@@ -143,4 +136,4 @@ export function createSpectatorStandsModule({
       console.log("[spectator_stands] built ✅");
     },
   };
-}
+          }

@@ -1,70 +1,27 @@
-// /js/scarlett1/index.js — GitHub Pages SAFE (Update 4.2)
-// Shows errors on screen instead of black
+// /js/scarlett1/index.js — MINIMAL PROBE (GUARANTEED LOAD)
+
+console.log("✅ scarlett1/index.js loaded");
 
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
-import { World } from "./world.js";
 
-// --- On-screen error overlay ---
-const overlay = document.createElement("pre");
-overlay.style.cssText = `
-position:fixed;left:6px;top:6px;right:6px;max-height:45vh;
-background:rgba(0,0,0,.8);color:#33ff66;
-padding:10px;z-index:99999;
-font:12px monospace;white-space:pre-wrap;
-border:1px solid #33ff66;
-`;
-document.body.appendChild(overlay);
+const app = document.getElementById("app") || document.body;
 
-const log = (...a) => {
-  console.log("[index]", ...a);
-  overlay.textContent += "[LOG] " + a.join(" ") + "\n";
-};
-const err = (...a) => {
-  console.error("[index]", ...a);
-  overlay.textContent += "[ERR] " + a.join(" ") + "\n";
-};
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.xr.enabled = true;
+app.appendChild(renderer.domElement);
 
-window.addEventListener("error", e => err("window:", e.message));
-window.addEventListener("unhandledrejection", e => err("promise:", e.reason?.message || e.reason));
+document.body.appendChild(VRButton.createButton(renderer));
 
-(async function main() {
-  try {
-    log("start ✅");
-    log("secureContext =", window.isSecureContext);
-    log("navigator.xr =", !!navigator.xr);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05070a);
 
-    const host = document.getElementById("app") || document.body;
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 100);
+camera.position.set(0, 1.6, 3);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
-    renderer.setSize(innerWidth, innerHeight);
-    renderer.xr.enabled = true;
-    renderer.xr.setReferenceSpaceType("local-floor");
-    host.appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x222222, 1));
 
-    window.addEventListener("resize", () => {
-      renderer.setSize(innerWidth, innerHeight);
-    });
-
-    document.body.appendChild(VRButton.createButton(renderer));
-    log("VRButton appended ✅");
-
-    const world = new World({ THREE, renderer });
-    await world.init();
-    log("world.init ✅");
-
-    renderer.setAnimationLoop((t, frame) => {
-      try {
-        world.tick(t, frame);
-        renderer.render(world.scene, world.camera);
-      } catch (e) {
-        err("FRAME CRASH:", e.message || e);
-        renderer.setAnimationLoop(null);
-      }
-    });
-
-  } catch (e) {
-    err("FATAL:", e.message || e);
-  }
-})();
+renderer.setAnimationLoop(() => {
+  renderer.render(scene, camera);
+});

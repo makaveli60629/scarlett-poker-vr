@@ -1,13 +1,13 @@
 // /js/scarlett1/index.js
-// SCARLETT1 ENTRY (FULL) — Start + Diagnostics + Options + WORLD PREFLIGHT
+// SCARLETT1 ENTRY (FULL) — Start + Diagnostics + Options + ABSOLUTE WORLD PREFLIGHT
 // Called by /js/index.js router via start().
 // URL params:
 //  - safe=1   : safe mode (passed to world orchestrator)
 //  - nohud=1  : no hud (passed to world orchestrator)
-//  - trace=1  : verbose console logs
+//  - trace=1  : verbose logs
 //  - v=...    : cacheproof
 
-const BUILD = "SCARLETT1_INDEX_FULL_DIAG_v2_WORLD_PREFLIGHT";
+const BUILD = "SCARLETT1_INDEX_FULL_DIAG_v3_ABS_WORLD_PREFLIGHT";
 
 const log = (...a) => console.log("[scarlett1]", ...a);
 const err = (...a) => console.error("[scarlett1]", ...a);
@@ -143,7 +143,7 @@ function ensureOverlay() {
 function write(line) {
   ensureOverlay();
   lines.push(String(line));
-  if (lines.length > 220) lines.shift();
+  if (lines.length > 240) lines.shift();
   body.textContent = lines.join("\n");
 }
 
@@ -164,11 +164,10 @@ function hookErrors() {
   });
 }
 
-async function preflight(urlRel) {
+async function preflightAbsolute(absUrl) {
   try {
-    const abs = new URL(urlRel, location.href).toString();
-    write(`[preflight] GET ${abs}`);
-    const res = await fetch(abs, { cache: "no-store" });
+    write(`[preflight] GET ${absUrl}`);
+    const res = await fetch(absUrl, { cache: "no-store" });
     write(`[preflight] status=${res.status} ok=${res.ok}`);
     write(`[preflight] ct=${res.headers.get("content-type") || "?"}`);
     const txt = await res.text();
@@ -191,27 +190,32 @@ export async function start(meta = {}) {
   const safe = q.safe === "1";
   const noHud = q.nohud === "1";
 
+  // IMPORTANT: match router cache-bust param if present
+  const vParam = q.v || String(Date.now());
+
   write(`[scarlett1] start()… build=${BUILD}`);
   write(`[meta] routerBuild=${meta.routerBuild || "?"}`);
   write(`[env] href=${location.href}`);
   write(`[env] ua=${navigator.userAgent}`);
   write(`[env] secureContext=${String(window.isSecureContext)}`);
   write(`[env] navigator.xr=${String(!!navigator.xr)}`);
-  write(`[opts] safe=${String(safe)} trace=${String(trace)} nohud=${String(noHud)}`);
+  write(`[opts] safe=${String(safe)} trace=${String(trace)} nohud=${String(noHud)} v=${vParam}`);
 
-  // ✅ Prefetch world.js so we KNOW if it's missing or wrong-case
-  write(`[scarlett1] preflight ./world.js …`);
-  const pf = await preflight("./world.js");
+  // ✅ ABSOLUTE PREFLIGHT — same path router uses
+  const worldAbs = `${location.origin}/scarlett-poker-vr/js/scarlett1/world.js?v=${encodeURIComponent(vParam)}`;
+
+  write(`\n[scarlett1] preflight world.js (ABS) …`);
+  const pf = await preflightAbsolute(worldAbs);
 
   if (!pf.ok) {
-    write(`\nFIX REQUIRED: /js/scarlett1/world.js is missing OR wrong-case OR not deployed.`);
-    write(`Required path: js/scarlett1/world.js (lowercase)`);
+    write(`\nFIX REQUIRED: /js/scarlett1/world.js missing/wrong-case/not deployed.`);
     throw new Error("world.js preflight failed");
   }
 
-  write(`\n[scarlett1] importing ./world.js …`);
+  write(`\n[scarlett1] importing ./world.js?v=${encodeURIComponent(vParam)} …`);
   try {
-    const world = await import("./world.js");
+    // cache-bust import too
+    const world = await import(`./world.js?v=${encodeURIComponent(vParam)}`);
     write(`[scarlett1] world.js import OK ✅`);
 
     if (typeof world.createWorldOrchestrator !== "function") {
@@ -235,4 +239,4 @@ export async function start(meta = {}) {
     if (e?.stack) write(clip(e.stack));
     throw e;
   }
-            }
+}

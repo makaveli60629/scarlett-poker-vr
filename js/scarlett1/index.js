@@ -1,8 +1,7 @@
 // /js/scarlett1/index.js
-// SCARLETT1 ENTRY — INLINE WORLD (NO dynamic import). Router-proof.
-const BUILD = "SCARLETT1_INDEX_FULL_v11_INLINE_WORLD_NOIMPORT";
+// SCARLETT1 ENTRY — SCRIPT LOADER (NO dynamic import). Works when module imports fail.
+const BUILD = "SCARLETT1_INDEX_FULL_v12_SCRIPT_LOADER_GLOBAL_THREE";
 
-const log = (...a) => console.log("[scarlett1]", ...a);
 const err = (...a) => console.error("[scarlett1]", ...a);
 
 function ensureRoot() {
@@ -19,7 +18,7 @@ function ensureRoot() {
   return root;
 }
 
-function setBannerText(text) {
+function setBanner(text) {
   let b = document.getElementById("scarlettBanner");
   if (!b) {
     b = document.createElement("div");
@@ -34,14 +33,14 @@ function setBannerText(text) {
     b.style.color = "#fff";
     b.style.font = "12px/1.3 system-ui, -apple-system, Segoe UI, Roboto, Arial";
     b.style.whiteSpace = "pre-wrap";
-    b.style.maxWidth = "90vw";
+    b.style.maxWidth = "92vw";
     b.style.pointerEvents = "none";
     document.body.appendChild(b);
   }
   b.textContent = text;
 }
 
-function setPanicLabel(text) {
+function setRed(text) {
   let p = document.getElementById("scarlettPanic");
   if (!p) {
     p = document.createElement("div");
@@ -56,7 +55,7 @@ function setPanicLabel(text) {
     p.style.color = "#fff";
     p.style.font = "12px/1.3 system-ui, -apple-system, Segoe UI, Roboto, Arial";
     p.style.whiteSpace = "pre-wrap";
-    p.style.maxWidth = "70vw";
+    p.style.maxWidth = "72vw";
     p.style.pointerEvents = "none";
     document.body.appendChild(p);
   }
@@ -70,26 +69,42 @@ function installGuards() {
   window.addEventListener("error", (e) => {
     const msg = String(e?.message || e);
     err("window.error:", msg);
-    setPanicLabel("❌ ERROR\n" + msg);
-    setBannerText("❌ ERROR\n" + msg);
+    setRed("❌ ERROR\n" + msg);
+    setBanner("❌ ERROR\n" + msg);
   });
 
   window.addEventListener("unhandledrejection", (e) => {
     const msg = String(e?.reason || e);
     err("unhandledrejection:", msg);
-    setPanicLabel("❌ REJECTION\n" + msg);
-    setBannerText("❌ REJECTION\n" + msg);
+    setRed("❌ REJECTION\n" + msg);
+    setBanner("❌ REJECTION\n" + msg);
   });
 }
 
-async function inlineWorld() {
-  setBannerText(`✅ Scarlett\n${BUILD}\nstep: importing three`);
-  const THREE = await import("https://unpkg.com/three@0.158.0/build/three.module.js");
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.async = true;
+    s.onload = () => resolve(true);
+    s.onerror = () => reject(new Error("Failed to load: " + src));
+    document.head.appendChild(s);
+  });
+}
 
-  setBannerText(`✅ Scarlett\n${BUILD}\nstep: importing VRButton`);
-  const VRButton = await import("https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js");
+async function bootGlobalThree() {
+  setBanner(`✅ Scarlett\n${BUILD}\nstep: loading THREE (global)`);
 
-  setBannerText(`✅ Scarlett\n${BUILD}\nstep: building scene`);
+  // Global (non-module) builds (more compatible)
+  // THREE:
+  await loadScript("https://unpkg.com/three@0.158.0/build/three.min.js");
+
+  if (!window.THREE) throw new Error("window.THREE missing after three.min.js");
+
+  setBanner(`✅ Scarlett\n${BUILD}\nstep: THREE ok`);
+
+  // Minimal scene (2D proof)
+  const THREE = window.THREE;
 
   const app = document.getElementById("app") || document.body;
 
@@ -102,31 +117,19 @@ async function inlineWorld() {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.xr.enabled = true;
+  renderer.domElement.id = "scarlettCanvas";
 
-  // replace old canvas if any
+  // replace old
   const old = document.getElementById("scarlettCanvas");
   if (old && old.parentNode) old.parentNode.removeChild(old);
-  renderer.domElement.id = "scarlettCanvas";
+
   app.appendChild(renderer.domElement);
 
-  // VR button
-  try {
-    const btn = VRButton.VRButton.createButton(renderer);
-    btn.style.zIndex = "99998";
-    document.body.appendChild(btn);
-    setBannerText(`✅ Scarlett\n${BUILD}\nstep: VRButton ok`);
-  } catch (e) {
-    setBannerText(`✅ Scarlett\n${BUILD}\nstep: VRButton failed (2D ok)`);
-  }
-
-  // lights
   scene.add(new THREE.HemisphereLight(0xffffff, 0x222244, 0.9));
   const sun = new THREE.DirectionalLight(0xffffff, 0.9);
   sun.position.set(6, 10, 3);
   scene.add(sun);
 
-  // floor + table (always visible)
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(80, 80),
     new THREE.MeshStandardMaterial({ color: 0x1c2126, roughness: 1, metalness: 0 })
@@ -141,20 +144,13 @@ async function inlineWorld() {
   table.position.set(0, 0.85, 0);
   scene.add(table);
 
-  const rig = new THREE.Group();
-  rig.position.set(0, 0, 3.2);
-  rig.add(camera);
-  scene.add(rig);
-
   camera.lookAt(0, 1.0, 0);
 
-  // render loop always
-  renderer.setAnimationLoop(() => {
+  function loop() {
     renderer.render(scene, camera);
-  });
-
-  // immediate render
-  try { renderer.render(scene, camera); } catch (e) {}
+    requestAnimationFrame(loop);
+  }
+  loop();
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -162,23 +158,27 @@ async function inlineWorld() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  setBannerText(`✅ Scarlett\n${BUILD}\nstep: world ready ✅`);
-  setPanicLabel(`✅ STARTED\n${BUILD}`);
+  setBanner(`✅ Scarlett\n${BUILD}\nstep: 2D world ready ✅`);
+  setRed(`✅ STARTED\n${BUILD}\n(2D proof)`);
 }
 
 export function start() {
-  // SYNC proof first
+  // SYNC proof
   ensureRoot();
   installGuards();
-  setBannerText(`✅ Scarlett\n${BUILD}\nstep: SYNC start() ran`);
-  setPanicLabel(`SYNC OK\n${BUILD}`);
+  setBanner(`✅ Scarlett\n${BUILD}\nstep: SYNC start() ran`);
+  setRed(`SYNC OK\n${BUILD}`);
 
-  // run once
-  if (window.__scarlettInlineRan) return true;
-  window.__scarlettInlineRan = true;
+  if (window.__scarlettRan) return true;
+  window.__scarlettRan = true;
 
-  // async continue (but only depends on external CDN imports, not local module import)
-  Promise.resolve().then(() => inlineWorld());
+  // Continue
+  bootGlobalThree().catch((e) => {
+    const msg = String(e?.message || e);
+    setRed("❌ BOOT FAILED\n" + msg);
+    setBanner("❌ BOOT FAILED\n" + msg);
+  });
+
   return true;
 }
 

@@ -1,35 +1,29 @@
 // /js/scarlett1/world.js
-// SCARLETT1 WORLD ORCHESTRATOR (FULL) — Modular Forever
-// ✅ Built-in: VRButton (enter VR)
-// ✅ Built-in: REAL XR controller nodes
-// ✅ Built-in: Quest input mapper (stable thumbsticks/triggers)
-// ✅ Built-in: Interactables registry + policy (cards not grabbable, chips/dealer grabbable)
-// ✅ Android: virtual controllers (sticks + triggers + grip) for 2D testing
-// ✅ External modules load if they exist; missing ones are skipped safely
-//
-// Options (passed from index.js):
-//  - safeMode: bool (you can use to reduce load if needed)
-//  - noHud: bool (hide HUD on start; HUD button still exists)
-//  - trace: bool (verbose logs)
+// SCARLETT1 WORLD ORCHESTRATOR (FULL) — ANDROID DEBUG + MOVEMENT
+// ✅ Android: Virtual controllers + 2D locomotion (move/turn) ALWAYS works
+// ✅ Show-check logs: confirms whether the table/pit world spawned
+// ✅ Auto-snap camera to the table when it exists
+// ✅ Still supports Quest VRButton + XR sessions
+// ✅ Loads external modules if they exist; skips safely if missing
 
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
 import { VRButton } from "./VRButton.js";
 
 export function createWorldOrchestrator({ safeMode = false, noHud = false, trace = false } = {}) {
-  const log = (...a) => (trace ? console.log("[world]", ...a) : console.log("[world]", ...a));
+  const log = (...a) => console.log("[world]", ...a);
   const warn = (...a) => console.warn("[world]", ...a);
   const err = (...a) => console.error("[world]", ...a);
 
-  log("world.js reached ✅", { safeMode, noHud, trace });
+  log("boot ✅", { safeMode, noHud, trace });
 
   // -----------------------------
-  // Core Three.js scene bootstrap
+  // Core Three.js bootstrap
   // -----------------------------
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
 
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.02, 200);
-  camera.position.set(0, 1.65, 2.2);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.02, 250);
+  camera.position.set(0, 1.65, 4.0);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
@@ -38,24 +32,38 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
 
   document.body.appendChild(renderer.domElement);
 
-  // VR button (tagged as HUD so it can be hidden if you want)
-  const btn = VRButton.createButton(renderer);
-  btn.dataset.scarlettHud = "1";
-  document.body.appendChild(btn);
+  // VR Button (tag as HUD so you can hide it if desired)
+  const vrBtn = VRButton.createButton(renderer);
+  vrBtn.dataset.scarlettHud = "1";
+  document.body.appendChild(vrBtn);
 
-  // Resize
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // Some safe global lighting (modules add more later)
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x101024, 0.35);
-  scene.add(hemi);
-  const dir = new THREE.DirectionalLight(0xffffff, 0.35);
-  dir.position.set(4, 8, 2);
-  scene.add(dir);
+  // Lighting
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x101024, 0.45));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.45);
+  sun.position.set(4, 9, 3);
+  scene.add(sun);
+
+  // Fallback floor so never-black
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(60, 60),
+    new THREE.MeshStandardMaterial({ color: 0x0a0c12, roughness: 0.95, metalness: 0.02 })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  scene.add(floor);
+
+  const centerRing = new THREE.Mesh(
+    new THREE.TorusGeometry(1.2, 0.04, 18, 120),
+    new THREE.MeshStandardMaterial({ color: 0x33ffff, roughness: 0.45, metalness: 0.15, emissive: 0x112233 })
+  );
+  centerRing.rotation.x = Math.PI / 2;
+  centerRing.position.y = 0.02;
+  scene.add(centerRing);
 
   // -----------------------------
   // Orchestrator Context
@@ -66,126 +74,117 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
     camera,
     renderer,
 
-    // populated later
     input: {
-      left: { stickX: 0, stickY: 0, trigger: 0, squeeze: 0, a: 0, b: 0, x: 0, y: 0 },
-      right: { stickX: 0, stickY: 0, trigger: 0, squeeze: 0, a: 0, b: 0, x: 0, y: 0 },
+      left:  { stickX: 0, stickY: 0, trigger: 0, squeeze: 0 },
+      right: { stickX: 0, stickY: 0, trigger: 0, squeeze: 0 },
     },
 
-    // real XR controllers (Object3D)
     controllers: { left: null, right: null },
 
-    // interactables registry
     interactables: [],
-
-    // room registry (from room_manager)
     rooms: new Map(),
 
-    // update hooks
     _worldUpdaters: [],
-    registerWorldUpdater(fn) {
-      if (typeof fn === "function") ctx._worldUpdaters.push(fn);
-    },
+    registerWorldUpdater(fn) { if (typeof fn === "function") ctx._worldUpdaters.push(fn); },
 
     registerInteractable(obj) {
       if (!obj || !obj.isObject3D) return;
       if (!ctx.interactables.includes(obj)) ctx.interactables.push(obj);
     },
 
-    // Interaction policy can override this later
+    // Policy: only objects explicitly marked grabbable
     _interactionPolicy: {
-      canGrab(obj /*, hand */) {
-        // default: only if explicitly grabbable
-        return !!obj?.userData?.grabbable;
-      },
+      canGrab(obj) { return !!obj?.userData?.grabbable; }
     },
 
-    // lightweight error buffer for diagnostics panels
+    // Simple log buffer
     lastError: null,
     logBuffer: [],
     pushLog(line, level = "log") {
       const s = `[${level}] ${line}`;
       ctx.logBuffer.push(s);
-      if (ctx.logBuffer.length > 220) ctx.logBuffer.shift();
+      if (ctx.logBuffer.length > 250) ctx.logBuffer.shift();
     },
+
+    // populated by world_master_module
+    _show: null,
   };
 
   // -----------------------------
-  // Built-in: REAL XR Controller Nodes
+  // Built-in: XR Controller Nodes (for Quest)
   // -----------------------------
   function installXRControllers() {
-    // Real XR input sources -> left/right controller objects
     const c0 = renderer.xr.getController(0);
     const c1 = renderer.xr.getController(1);
     c0.name = "XRController0";
     c1.name = "XRController1";
     scene.add(c0);
     scene.add(c1);
-
-    // We’ll map to left/right once we see inputSources; until then, keep both
     ctx.controllers.left = c0;
     ctx.controllers.right = c1;
 
-    // Simple visible “laser” helpers (optional)
+    // Visible lasers (helpful debugging)
     const mkLaser = (color) => {
-      const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
+      const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
       const m = new THREE.LineBasicMaterial({ color });
       const l = new THREE.Line(g, m);
-      l.name = "Laser";
       l.scale.z = 6.5;
       return l;
     };
     c0.add(mkLaser(0xff66ff));
     c1.add(mkLaser(0x33ffff));
 
-    log("XR controllers installed ✅");
+    log("XR controller nodes ready ✅");
   }
+  installXRControllers();
 
   // -----------------------------
-  // Built-in: Quest Input Mapper (stable)
+  // Built-in: Gamepad mapper (XR only)
   // -----------------------------
   function applyDeadzone(v, dz = 0.18) {
     if (Math.abs(v) < dz) return 0;
-    // rescale remaining range
     const s = (Math.abs(v) - dz) / (1 - dz);
     return Math.sign(v) * Math.max(0, Math.min(1, s));
   }
 
-  function readGamepadInputs() {
+  function readXRGamepadsIntoInput() {
     const session = renderer.xr.getSession?.();
     if (!session) return;
 
     const sources = session.inputSources || [];
-    // Fill left/right from any gamepads we find; match handedness if possible
     for (const src of sources) {
       if (!src?.gamepad) continue;
-      const gp = src.gamepad;
       const hand = src.handedness === "left" ? "left" : src.handedness === "right" ? "right" : null;
       if (!hand) continue;
 
+      const gp = src.gamepad;
       const ax = gp.axes || [];
       const bt = gp.buttons || [];
 
-      // Standard: axes[2,3] or [0,1] depending on device. We’ll prefer [2,3] if present.
-      const sx = ax.length >= 4 ? ax[2] : ax[0] || 0;
-      const sy = ax.length >= 4 ? ax[3] : ax[1] || 0;
+      // pick best pair
+      const pairs = [
+        [2, 3],
+        [0, 1],
+        [3, 2],
+        [1, 0],
+      ];
+      let sx = 0, sy = 0;
+      for (const [ix, iy] of pairs) {
+        const tx = ax[ix] ?? 0;
+        const ty = ax[iy] ?? 0;
+        if (Math.abs(tx) + Math.abs(ty) > 0.02) { sx = tx; sy = ty; break; }
+      }
 
       ctx.input[hand].stickX = applyDeadzone(sx);
       ctx.input[hand].stickY = applyDeadzone(sy);
 
-      ctx.input[hand].trigger = bt[0]?.value ?? 0; // index finger
-      ctx.input[hand].squeeze = bt[1]?.value ?? 0; // grip
-
-      // Common buttons (best-effort)
-      ctx.input[hand].a = bt[4]?.pressed ? 1 : 0;
-      ctx.input[hand].b = bt[5]?.pressed ? 1 : 0;
-      ctx.input[hand].x = bt[4]?.pressed ? 1 : 0;
-      ctx.input[hand].y = bt[5]?.pressed ? 1 : 0;
+      ctx.input[hand].trigger = bt[0]?.value ?? 0;
+      ctx.input[hand].squeeze = bt[1]?.value ?? 0;
     }
   }
 
   // -----------------------------
-  // Module system
+  // Module System
   // -----------------------------
   const enabledModules = [];
   const moduleMap = new Map();
@@ -196,10 +195,11 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
       mod.onEnable?.(ctx);
       enabledModules.push(mod);
       moduleMap.set(mod.name, mod);
-      ctx.pushLog(`[world] module enabled ✅ ${mod.name}`);
+      ctx.pushLog(`module enabled ✅ ${mod.name}`);
+      if (trace) log("module enabled ✅", mod.name);
     } catch (e) {
       ctx.lastError = e;
-      ctx.pushLog(`[world] module enable failed ❌ ${mod.name} ${String(e)}`, "error");
+      ctx.pushLog(`module enable failed ❌ ${mod.name} ${String(e)}`, "error");
       err("module enable failed:", mod.name, e);
     }
   }
@@ -208,7 +208,6 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
     try {
       return await import(relPath);
     } catch (e) {
-      // keep silent unless trace
       if (trace) warn("import missing:", relPath, e);
       return null;
     }
@@ -223,78 +222,109 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
       return true;
     } catch (e) {
       ctx.lastError = e;
-      ctx.pushLog(`[world] module load failed: ${factoryName} ${String(e)}`, "error");
+      ctx.pushLog(`module load failed: ${factoryName} ${String(e)}`, "error");
       err("module load failed:", factoryName, e);
       return false;
     }
   }
 
   // -----------------------------
-  // Built-in safe fallback world (never black)
+  // Built-in: ANDROID 2D Locomotion (ALWAYS WORKS)
+  // - left stick: move (forward/back + strafe)
+  // - right stick: turn (yaw)
+  // This is active ONLY when NOT in XR session.
   // -----------------------------
-  function buildFallbackFloor() {
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(40, 40),
-      new THREE.MeshStandardMaterial({ color: 0x0a0c12, roughness: 0.95, metalness: 0.02 })
-    );
-    floor.rotation.x = -Math.PI / 2;
-    scene.add(floor);
+  function createAndroid2DLocomotionModule({
+    moveSpeed = 2.4,   // meters/sec
+    turnSpeed = 1.6,   // radians/sec
+    yLock = 1.65,
+  } = {}) {
+    let yaw = 0;
 
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(1.2, 0.04, 18, 120),
-      new THREE.MeshStandardMaterial({ color: 0x33ffff, roughness: 0.45, metalness: 0.15, emissive: 0x112233 })
-    );
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = 0.02;
-    scene.add(ring);
+    return {
+      name: "android_2d_locomotion",
 
-    log("fallback floor built ✅");
+      onEnable() {
+        // start facing origin
+        yaw = 0;
+        log("[android_2d_locomotion] ready ✅");
+      },
+
+      update(ctx, { dt, input }) {
+        const inXR = !!ctx.renderer?.xr?.getSession?.();
+        if (inXR) return;
+
+        const lx = input?.left?.stickX ?? 0;
+        const ly = input?.left?.stickY ?? 0;
+        const rx = input?.right?.stickX ?? 0;
+
+        // turn
+        yaw += rx * turnSpeed * dt;
+
+        // forward is -Z in camera space
+        const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw) * -1);
+        const right = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
+
+        const move = new THREE.Vector3();
+        move.addScaledVector(forward, ly);
+        move.addScaledVector(right, lx);
+
+        const len = move.length();
+        if (len > 1e-4) {
+          move.normalize().multiplyScalar(moveSpeed * dt);
+          ctx.camera.position.add(move);
+        }
+
+        // lock height
+        ctx.camera.position.y = yLock;
+
+        // apply yaw to look direction
+        const lookTarget = new THREE.Vector3(
+          ctx.camera.position.x + Math.sin(yaw),
+          ctx.camera.position.y,
+          ctx.camera.position.z - Math.cos(yaw)
+        );
+        ctx.camera.lookAt(lookTarget);
+      }
+    };
   }
 
+  // Enable built-in 2D locomotion
+  enableModule(createAndroid2DLocomotionModule());
+
   // -----------------------------
-  // Boot sequence (modules)
+  // Enable Android virtual controllers (sticks/buttons)
   // -----------------------------
-  installXRControllers();
-  buildFallbackFloor();
+  await tryEnable("createAndroidControlsModule", () => importIfExists("./modules/xr/android_controls_module.js"));
 
-  // IMPORTANT: Android controllers (2D testing) — this is what you asked for
-  // File: /js/scarlett1/modules/xr/android_controls_module.js
-  // Factory: createAndroidControlsModule
-  tryEnable("createAndroidControlsModule", () => importIfExists("./modules/xr/android_controls_module.js"));
+  // XR modules (optional)
+  await tryEnable("createXRLocomotionModule", () => importIfExists("./modules/xr/xr_locomotion_module.js"));
+  await tryEnable("createXRGrabModule", () => importIfExists("./modules/xr/xr_grab_module.js"));
+  await tryEnable("createXRTeleportBlinkModule", () => importIfExists("./modules/xr/xr_teleport_blink_module.js"));
 
-  // XR locomotion / grab / teleport (external modules, if present)
-  tryEnable("createXRLocomotionModule", () => importIfExists("./modules/xr/xr_locomotion_module.js"));
-  tryEnable("createXRGrabModule", () => importIfExists("./modules/xr/xr_grab_module.js"));
-  tryEnable("createXRTeleportBlinkModule", () => importIfExists("./modules/xr/xr_teleport_blink_module.js"));
+  // World/Rooms (optional)
+  await tryEnable("createRoomManagerModule", () => importIfExists("./modules/world/room_manager_module.js"));
+  await tryEnable("createLobbyHallwaysModule", () => importIfExists("./modules/world/lobby_hallways_module.js"));
+  await tryEnable("createRoomPortalsModule", () => importIfExists("./modules/world/room_portals_module.js"));
+  await tryEnable("createDoorTeleportModule", () => importIfExists("./modules/world/door_teleport_module.js"));
 
-  // World & room system modules (external modules, if present)
-  tryEnable("createLobbyHallwaysModule", () => importIfExists("./modules/world/lobby_hallways_module.js"));
-  tryEnable("createRoomManagerModule", () => importIfExists("./modules/world/room_manager_module.js"));
-  tryEnable("createRoomPortalsModule", () => importIfExists("./modules/world/room_portals_module.js"));
-  tryEnable("createDoorTeleportModule", () => importIfExists("./modules/world/door_teleport_module.js"));
+  // Your main build (pit + table + bots + chips)
+  await tryEnable("createWorldMasterModule", () => importIfExists("./modules/world/world_master_module.js"));
 
-  // The patched world builder you pasted (make sure path matches)
-  tryEnable("createWorldMasterModule", () => importIfExists("./modules/world/world_master_module.js"));
+  // Optional theme/signage
+  await tryEnable("createScorpionThemeModule", () => importIfExists("./modules/theme/scorpion_theme_module.js"));
+  await tryEnable("createJumbotronModule", () => importIfExists("./modules/theme/jumbotron_module.js"));
 
-  // Theme & signage (optional)
-  tryEnable("createScorpionThemeModule", () => importIfExists("./modules/theme/scorpion_theme_module.js"));
-  tryEnable("createJumbotronModule", () => importIfExists("./modules/theme/jumbotron_module.js"));
+  // Optional diag modules (you can still keep them hidden via index.js default)
+  await tryEnable("createAndroidDevHudModule", () => importIfExists("./modules/diag/android_dev_hud_module.js"));
+  await tryEnable("createHealthOverlayModule", () => importIfExists("./modules/diag/health_overlay_module.js"));
+  await tryEnable("createCopyDiagnosticsModule", () => importIfExists("./modules/diag/copy_diagnostics_module.js"));
+  await tryEnable("createModuleTogglePanelModule", () => importIfExists("./modules/diag/module_toggle_panel_module.js"));
 
-  // Showgame / interaction policy (optional)
-  tryEnable("createShowgameModule", () => importIfExists("./modules/game/showgame_module.js"));
-  tryEnable("createInteractionPolicyModule", () => importIfExists("./modules/game/interaction_policy_module.js"));
-
-  // Diagnostics / HUD modules (optional) — they can exist, but you wanted green HUD hidden by default.
-  tryEnable("createAndroidDevHudModule", () => importIfExists("./modules/diag/android_dev_hud_module.js"));
-  tryEnable("createHealthOverlayModule", () => importIfExists("./modules/diag/health_overlay_module.js"));
-  tryEnable("createCopyDiagnosticsModule", () => importIfExists("./modules/diag/copy_diagnostics_module.js"));
-  tryEnable("createModuleTogglePanelModule", () => importIfExists("./modules/diag/module_toggle_panel_module.js"));
-
-  // If index.js passed noHud=1, hide any HUD modules that tagged themselves properly
+  // If noHud=1, hide tagged HUD (but never controls)
   if (noHud) {
     try {
       document.querySelectorAll("[data-scarlett-hud='1']").forEach((el) => {
-        // never hide controls or the HUD toggle button if they marked themselves
         if (el.dataset.scarlettControls === "1") return;
         el.style.display = "none";
       });
@@ -302,10 +332,46 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
     } catch {}
   }
 
-  log("boot complete ✅ modules=", enabledModules.map((m) => m.name));
+  // -----------------------------
+  // SHOW CHECK + AUTO SNAP TO TABLE (Android)
+  // -----------------------------
+  function snapToTableView() {
+    const inXR = !!renderer.xr.getSession?.();
+    if (inXR) return;
+
+    const target = new THREE.Vector3(0, 1.0, 0);
+    if (ctx._show?.tableGroup) ctx._show.tableGroup.getWorldPosition(target);
+
+    // place camera back and slightly above
+    camera.position.set(target.x, target.y + 1.8, target.z + 4.2);
+    camera.lookAt(target.x, target.y + 0.8, target.z);
+
+    // also align 2D locomotion yaw to face table
+    // (we approximate by looking at target already)
+  }
+
+  setTimeout(() => {
+    const hasShow = !!ctx._show?.tableGroup;
+    const bots = ctx._show?.bots?.length || 0;
+    const chips = ctx._show?.chips?.length || 0;
+    const interactables = ctx.interactables?.length || 0;
+
+    log("SHOW CHECK:", { hasShow, bots, chips, interactables });
+
+    if (hasShow) {
+      const p = new THREE.Vector3();
+      ctx._show.tableGroup.getWorldPosition(p);
+      log("TABLE POS:", p);
+      snapToTableView();
+    } else {
+      warn("world_master_module NOT BUILT (you will only see fallback floor/ring). Check file path + factory name.");
+    }
+  }, 700);
+
+  log("boot complete ✅ modules=", enabledModules.map(m => m.name));
 
   // -----------------------------
-  // Render loop
+  // Main loop
   // -----------------------------
   let lastT = performance.now();
   renderer.setAnimationLoop(() => {
@@ -313,21 +379,21 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
     const dt = Math.min(0.05, (t - lastT) / 1000);
     lastT = t;
 
-    // XR gamepad input if in session
-    readGamepadInputs();
+    // XR input (if session)
+    readXRGamepadsIntoInput();
 
-    // Update modules
+    // Module updates
     for (const m of enabledModules) {
       try {
         m.update?.(ctx, { dt, input: ctx.input });
       } catch (e) {
         ctx.lastError = e;
-        ctx.pushLog(`[world] module update failed: ${m.name} ${String(e)}`, "error");
+        ctx.pushLog(`module update failed: ${m.name} ${String(e)}`, "error");
         err("module update failed:", m.name, e);
       }
     }
 
-    // World updaters (world_master_module uses this)
+    // World updaters (bots/cards)
     for (const fn of ctx._worldUpdaters) {
       try { fn(dt); } catch {}
     }
@@ -335,14 +401,5 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
     renderer.render(scene, camera);
   });
 
-  // expose for debugging
-  return {
-    ctx,
-    scene,
-    camera,
-    renderer,
-    enableModule,
-    enabledModules,
-    moduleMap,
-  };
-          }
+  return { ctx, scene, camera, renderer, enabledModules, moduleMap };
+        }

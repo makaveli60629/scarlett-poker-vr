@@ -1,6 +1,7 @@
 // /js/scarlett1/index.js
-// SCARLETT1 v16 — Global THREE (CDN chain) + Custom Enter VR + Controllers + Lasers + Locomotion
-const BUILD = "SCARLETT1_INDEX_FULL_v16_GLOBAL_THREE_XR_CONTROLLERS";
+// SCARLETT1 v17 — Global THREE (CDN chain) + Custom Enter VR + Controllers/Lasers + Right-stick Locomotion
+// + LEFT Y BUTTON (menu toggle) + Minimal VR Menu (music/radio placeholder)
+const BUILD = "SCARLETT1_INDEX_FULL_v17_LEFT_Y_MENU_TOGGLE";
 
 const err = (...a) => console.error("[scarlett1]", ...a);
 const proof = (s) => console.log("[router_proof]", s);
@@ -162,7 +163,7 @@ async function bootWorld2DAndXR() {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.xr.enabled = true; // important
+  renderer.xr.enabled = true;
 
   // replace old canvas
   const old = document.getElementById("scarlettCanvas");
@@ -170,7 +171,7 @@ async function bootWorld2DAndXR() {
   renderer.domElement.id = "scarlettCanvas";
   app.appendChild(renderer.domElement);
 
-  // Lights + basic world
+  // --- Lights + basic world ---
   scene.add(new THREE.HemisphereLight(0xffffff, 0x222244, 0.9));
   const sun = new THREE.DirectionalLight(0xffffff, 0.9);
   sun.position.set(6, 10, 3);
@@ -190,7 +191,7 @@ async function bootWorld2DAndXR() {
   table.position.set(0, 0.85, 0);
   scene.add(table);
 
-  // Rig for locomotion
+  // --- Rig (move this for locomotion) ---
   const rig = new THREE.Group();
   rig.position.set(0, 0, 3.2);
   rig.add(camera);
@@ -198,7 +199,7 @@ async function bootWorld2DAndXR() {
 
   camera.lookAt(0, 1.0, 0);
 
-  // Controllers + lasers
+  // --- Controllers + lasers ---
   const controller0 = renderer.xr.getController(0);
   const controller1 = renderer.xr.getController(1);
   rig.add(controller0);
@@ -221,27 +222,126 @@ async function bootWorld2DAndXR() {
   const ray = new THREE.Raycaster();
   const tmpMat = new THREE.Matrix4();
 
-  // Locomotion
+  // --- Minimal VR Menu (3D panel) ---
+  // Left Y toggles show/hide. Menu stays in front of camera and faces you.
+  const menu = new THREE.Group();
+  menu.visible = false;
+  menu.name = "scarlettMenu";
+  scene.add(menu);
+
+  // Panel
+  const panelW = 0.55;
+  const panelH = 0.32;
+  const panel = new THREE.Mesh(
+    new THREE.PlaneGeometry(panelW, panelH),
+    new THREE.MeshStandardMaterial({ color: 0x101418, roughness: 0.9, metalness: 0.05 })
+  );
+  panel.position.set(0, 0, -1); // relative to menu group
+  menu.add(panel);
+
+  // Border frame
+  const frame = new THREE.Mesh(
+    new THREE.PlaneGeometry(panelW + 0.01, panelH + 0.01),
+    new THREE.MeshStandardMaterial({ color: 0x05070a, roughness: 1 })
+  );
+  frame.position.set(0, 0, -1.001);
+  menu.add(frame);
+
+  // Buttons (simple boxes) — “Music/Radio” + “Close”
+  function makeButton(label, y) {
+    const btn = new THREE.Mesh(
+      new THREE.BoxGeometry(panelW * 0.85, 0.07, 0.02),
+      new THREE.MeshStandardMaterial({ color: 0x1f2a33, roughness: 0.9 })
+    );
+    btn.position.set(0, y, -0.98);
+    btn.userData.label = label;
+    btn.userData.isButton = true;
+    btn.userData.cooldown = 0;
+    return btn;
+  }
+
+  const btnMusic = makeButton("MUSIC", 0.05);
+  const btnClose = makeButton("CLOSE", -0.06);
+  menu.add(btnMusic);
+  menu.add(btnClose);
+
+  // Small “status light” for music
+  const musicDot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.012, 16, 16),
+    new THREE.MeshStandardMaterial({ color: 0x5bff7a, roughness: 0.4 })
+  );
+  musicDot.position.set(panelW * 0.35, 0.05, -0.965);
+  menu.add(musicDot);
+
+  let musicOn = true;
+  function updateMusicDot() {
+    musicDot.material.color.set(musicOn ? 0x5bff7a : 0xff5b5b);
+  }
+  updateMusicDot();
+
+  function toggleMenu(force) {
+    menu.visible = typeof force === "boolean" ? force : !menu.visible;
+    setBanner(`✅ Scarlett\n${BUILD}\nmenu: ${menu.visible ? "ON" : "OFF"} (Left Y)`);
+  }
+
+  // --- Input: Left Y to toggle menu ---
+  let yWasPressed = false;
+
+  // --- Simple UI click with lasers (trigger) ---
+  // Right trigger clicks buttons (keeps left as "menu hand").
+  // If you want left trigger too later, we can add it.
+  let rightTriggerWasPressed = false;
+
+  function intersectButtons(controller) {
+    // Raycast from controller forward
+    tmpMat.identity().extractRotation(controller.matrixWorld);
+    ray.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+    ray.ray.direction.set(0, 0, -1).applyMatrix4(tmpMat);
+
+    const objs = [btnMusic, btnClose];
+    const hits = ray.intersectObjects(objs, false);
+    return hits.length ? hits[0] : null;
+  }
+
+  function clickButton(obj) {
+    if (!obj || !obj.userData || !obj.userData.isButton) return;
+
+    const label = obj.userData.label;
+    if (label === "MUSIC") {
+      musicOn = !musicOn;
+      updateMusicDot();
+      setBanner(`✅ Scarlett\n${BUILD}\nMusic: ${musicOn ? "ON" : "OFF"} (placeholder)`);
+    } else if (label === "CLOSE") {
+      toggleMenu(false);
+    }
+  }
+
+  // --- Locomotion (RIGHT HAND ONLY) ---
   const moveState = { speed: 1.8, snap: Math.PI / 6, snapCooldown: 0 };
 
-  function getStick(gp) {
+  function getStickPair(gp) {
     if (!gp || !gp.axes || gp.axes.length < 2) return { x: 0, y: 0 };
     const a = gp.axes;
-    // pick best axis pair
-    let best = [0, 1], bestMag = Math.abs(a[0]) + Math.abs(a[1]);
+    // Choose best pair by magnitude
+    let best = [0, 1];
+    let bestMag = Math.abs(a[0]) + Math.abs(a[1]);
     for (let i = 0; i + 1 < a.length; i += 2) {
       const mag = Math.abs(a[i]) + Math.abs(a[i + 1]);
-      if (mag > bestMag) { best = [i, i + 1]; bestMag = mag; }
+      if (mag > bestMag) {
+        best = [i, i + 1];
+        bestMag = mag;
+      }
     }
     return { x: a[best[0]] || 0, y: a[best[1]] || 0 };
   }
 
   function getSnapAxis(gp) {
     if (!gp || !gp.axes) return 0;
+    // Prefer axis 2 if present
     return gp.axes.length >= 3 ? (gp.axes[2] || 0) : (gp.axes[0] || 0);
   }
 
-  // XR session wiring (custom VR button)
+  // --- XR session wiring (custom Enter VR) ---
   async function enterVR() {
     if (!navigator.xr) {
       setBanner(`❌ navigator.xr missing`);
@@ -257,6 +357,7 @@ async function bootWorld2DAndXR() {
       await renderer.xr.setSession(session);
 
       setBanner(`✅ Scarlett\n${BUILD}\nXR sessionstart ✅`);
+
       session.addEventListener("end", () => {
         setBanner(`✅ Scarlett\n${BUILD}\nXR sessionend ✅`);
       });
@@ -266,40 +367,74 @@ async function bootWorld2DAndXR() {
   }
 
   // show button only if XR is available
-  if (navigator.xr) {
-    makeEnterVrButton(enterVR);
-  }
+  if (navigator.xr) makeEnterVrButton(enterVR);
 
-  // Render loop (2D + XR)
+  // --- Render loop (2D + XR) ---
   let last = performance.now();
-  let tick = 0;
 
   renderer.setAnimationLoop((t) => {
     const dt = Math.min((t - last) / 1000, 0.05);
     last = t;
-    tick++;
 
     const session = renderer.xr.getSession && renderer.xr.getSession();
+
+    // Keep menu positioned 1m in front of camera when visible
+    if (menu.visible) {
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      const pos = new THREE.Vector3().copy(camera.position).add(forward.multiplyScalar(1.0));
+      menu.position.set(pos.x, pos.y, pos.z);
+      menu.quaternion.copy(camera.quaternion);
+    }
+
     if (session) {
-      // locomotion from first gamepad found
-      let gp = null;
+      // Find left & right inputSources
+      let left = null;
+      let right = null;
       for (const s of session.inputSources || []) {
-        if (s && s.gamepad) { gp = s.gamepad; break; }
+        if (!s || !s.gamepad) continue;
+        if (s.handedness === "left") left = s;
+        if (s.handedness === "right") right = s;
       }
 
-      if (gp) {
-        const stick = getStick(gp);
+      // LEFT Y (buttons[3]) toggles menu
+      if (left && left.gamepad && left.gamepad.buttons && left.gamepad.buttons[3]) {
+        const yPressed = !!left.gamepad.buttons[3].pressed;
+        if (yPressed && !yWasPressed) toggleMenu();
+        yWasPressed = yPressed;
+      } else {
+        yWasPressed = false;
+      }
+
+      // RIGHT trigger click buttons (buttons[0] on Touch is usually trigger)
+      if (menu.visible && right && right.gamepad && right.gamepad.buttons && right.gamepad.buttons[0]) {
+        const trig = !!right.gamepad.buttons[0].pressed;
+        if (trig && !rightTriggerWasPressed) {
+          const hit = intersectButtons(controller1);
+          if (hit && hit.object) clickButton(hit.object);
+        }
+        rightTriggerWasPressed = trig;
+      } else {
+        rightTriggerWasPressed = false;
+      }
+
+      // RIGHT hand locomotion only (movement + snap)
+      if (right && right.gamepad) {
+        const gp = right.gamepad;
+        const stick = getStickPair(gp);
         const dead = 0.12;
         const sx = Math.abs(stick.x) > dead ? stick.x : 0;
         const sy = Math.abs(stick.y) > dead ? stick.y : 0;
 
+        // If menu is open, keep movement active (you can change this later)
         const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-        forward.y = 0; forward.normalize();
-        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-        right.y = 0; right.normalize();
+        forward.y = 0;
+        forward.normalize();
+        const strafe = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+        strafe.y = 0;
+        strafe.normalize();
 
         rig.position.addScaledVector(forward, (-sy) * moveState.speed * dt);
-        rig.position.addScaledVector(right, (sx) * moveState.speed * dt);
+        rig.position.addScaledVector(strafe, (sx) * moveState.speed * dt);
 
         moveState.snapCooldown = Math.max(0, moveState.snapCooldown - dt);
         const ax = getSnapAxis(gp);
@@ -309,14 +444,29 @@ async function bootWorld2DAndXR() {
         }
       }
 
-      // lasers hit floor
+      // Lasers hit floor (and also show menu distance)
       for (const c of [controller0, controller1]) {
         tmpMat.identity().extractRotation(c.matrixWorld);
         ray.ray.origin.setFromMatrixPosition(c.matrixWorld);
         ray.ray.direction.set(0, 0, -1).applyMatrix4(tmpMat);
-        const hits = ray.intersectObject(floor, false);
+
+        // Prefer menu panel intersection if visible; otherwise floor
+        let dist = 5;
+
+        if (menu.visible) {
+          const hitsMenu = ray.intersectObjects([panel, btnMusic, btnClose], false);
+          if (hitsMenu.length) dist = hitsMenu[0].distance;
+          else {
+            const hitsFloor = ray.intersectObject(floor, false);
+            if (hitsFloor.length) dist = hitsFloor[0].distance;
+          }
+        } else {
+          const hitsFloor = ray.intersectObject(floor, false);
+          if (hitsFloor.length) dist = hitsFloor[0].distance;
+        }
+
         const line = c.getObjectByName("laser");
-        if (line) line.scale.z = hits.length ? hits[0].distance : 5;
+        if (line) line.scale.z = dist;
       }
     }
 
@@ -329,8 +479,8 @@ async function bootWorld2DAndXR() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  setRed(`✅ STARTED\n${BUILD}\n2D + XR ready`);
-  setBanner(`✅ Scarlett\n${BUILD}\n2D world ready ✅\n(ENTER VR button if supported)`);
+  setRed(`✅ STARTED\n${BUILD}\nRight move OK\nLeft Y menu OK`);
+  setBanner(`✅ Scarlett\n${BUILD}\n2D world ready ✅\nLeft Y = Menu\nRight Trigger = Click`);
 }
 
 export function start() {
@@ -351,4 +501,5 @@ export function start() {
   return true;
 }
 
+// fallback if router doesn't call start()
 try { start(); } catch (e) {}

@@ -1,10 +1,13 @@
 // /js/scarlett1/world.js
 // SCARLETT1 WORLD ORCHESTRATOR (FULL) — Modular Forever
-// ✅ Built-in: Quest input mapper, Interactables registry, Interactables policy
-// ✅ Built-in: REAL XR controller nodes (renderer.xr.getController) mapped to left/right
+// ✅ Built-in: VRButton (so you can enter VR)
+// ✅ Built-in: REAL XR controller nodes
+// ✅ Built-in: Quest input mapper
+// ✅ Built-in: Interactables registry + policy
 // ✅ External modules load if they exist; missing ones are skipped safely
 
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
+import { VRButton } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
 
 export function createWorldOrchestrator({ safeMode = false, noHud = false, trace = false } = {}) {
   const log = (...a) => console.log("[world]", ...a);
@@ -22,7 +25,6 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
   scene.add(playerRig);
   playerRig.add(camera);
 
-  // ✅ safe spawn
   playerRig.position.set(0, 0, 3.25);
   playerRig.rotation.set(0, Math.PI, 0);
 
@@ -35,13 +37,13 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
 
   (document.getElementById("app") || document.body).appendChild(renderer.domElement);
 
-  // baseline lighting
+  // Lights
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.70));
   const key = new THREE.DirectionalLight(0xffffff, 0.55);
   key.position.set(8, 12, 6);
   scene.add(key);
 
-  // base floor to avoid black
+  // Base floor
   const baseFloor = new THREE.Mesh(
     new THREE.PlaneGeometry(140, 140),
     new THREE.MeshStandardMaterial({ color: 0x101018, roughness: 0.95 })
@@ -64,10 +66,8 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
 
     xrSession: null,
 
-    // IMPORTANT: these MUST be Object3D controller nodes for grab/teleport rays
     controllers: { left: null, right: null },
 
-    // unified input
     input: {
       left:  { trigger: 0, squeeze: 0, stickX: 0, stickY: 0, a:false, b:false, x:false, y:false },
       right: { trigger: 0, squeeze: 0, stickX: 0, stickY: 0, a:false, b:false, x:false, y:false },
@@ -92,12 +92,53 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
     return mod;
   }
 
+  // ---------- Built-in: VRButton ----------
+  function createVRButtonModule() {
+    return {
+      name: "vr_button",
+      onEnable(ctx) {
+        try {
+          // Remove any old buttons
+          document.querySelectorAll("#VRButton, .vr-button, button#VRButton").forEach(b => b.remove());
+
+          const btn = VRButton.createButton(ctx.renderer);
+          btn.id = "VRButton";
+          btn.style.zIndex = "99999";
+          document.body.appendChild(btn);
+
+          this._btn = btn;
+
+          // Hide/show logic
+          const refresh = () => {
+            const inXR = !!ctx.renderer.xr.getSession?.();
+            btn.style.display = inXR ? "none" : "block";
+          };
+
+          this._refresh = refresh;
+          refresh();
+
+          // Also update on session start/end
+          ctx.renderer.xr.addEventListener("sessionstart", refresh);
+          ctx.renderer.xr.addEventListener("sessionend", refresh);
+
+          console.log("[vr_button] ready ✅");
+        } catch (e) {
+          console.warn("[vr_button] failed (WebXR not supported?)", e);
+        }
+      },
+      update(ctx) {
+        // keep it correct if something changes
+        try { this._refresh?.(); } catch {}
+      }
+    };
+  }
+
   // ---------- Built-in: Interactables Registry ----------
   function createInteractablesRegistryModule() {
     return {
       name: "interactables_registry",
       onEnable(ctx) {
-        const map = new Map(); // object3D -> meta
+        const map = new Map();
 
         ctx.interactables = {
           register(obj, meta = {}) {
@@ -124,7 +165,7 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
     };
   }
 
-  // ---------- Built-in: Interactables Policy + Tagging ----------
+  // ---------- Built-in: Interactables Policy ----------
   function createInteractablesPolicyModule() {
     return {
       name: "interactables_policy",
@@ -139,7 +180,6 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
           const k = String(obj.userData.kind || "unknown");
           if (typeof obj.userData.grabbable !== "boolean") obj.userData.grabbable = !(k.includes("card"));
 
-          // enforce always:
           if (k === "community_card" || k === "bot_card") obj.userData.grabbable = false;
         };
 
@@ -175,23 +215,18 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
     };
   }
 
-  // ---------- Built-in: REAL XR controller nodes (fixes grab rays) ----------
+  // ---------- Built-in: XR Controller Nodes ----------
   function createXRControllerNodesModule() {
     return {
       name: "xr_controller_nodes",
-
       onEnable(ctx) {
-        // Create raw controller nodes (Three.js Groups driven by WebXR)
         const c0 = ctx.renderer.xr.getController(0);
         const c1 = ctx.renderer.xr.getController(1);
-
         c0.name = "XRController0";
         c1.name = "XRController1";
-
         ctx.playerRig.add(c0);
         ctx.playerRig.add(c1);
 
-        // simple visible pointer (debug). You can delete later.
         const makePointer = (color) => {
           const g = new THREE.CylinderGeometry(0.002, 0.002, 0.12, 6);
           const m = new THREE.MeshBasicMaterial({ color });
@@ -203,10 +238,8 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
         c0.add(makePointer(0x33ffff));
         c1.add(makePointer(0xff66ff));
 
-        // Map controller->handedness
         function onConnected(e) {
-          const data = e.data || {};
-          const h = data.handedness;
+          const h = e.data?.handedness;
           if (h === "left") ctx.controllers.left = e.target;
           if (h === "right") ctx.controllers.right = e.target;
           console.log("[xr_controller_nodes] connected", h, e.target?.name);
@@ -223,30 +256,20 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
         c0.addEventListener("disconnected", onDisconnected);
         c1.addEventListener("disconnected", onDisconnected);
 
-        // Fallback mapping if no connected events yet:
-        // We’ll assign left/right once we enter XR by checking inputSources.
         this._fallbackMap = () => {
           const s = ctx.renderer.xr.getSession?.();
           if (!s) return;
-          let leftSet = !!ctx.controllers.left;
-          let rightSet = !!ctx.controllers.right;
-
-          // If not mapped, do best-effort: controller(0)=left, controller(1)=right
-          // (Most Quest setups will connect events properly, this just prevents "null controllers".)
-          if (!leftSet) ctx.controllers.left = c0;
-          if (!rightSet) ctx.controllers.right = c1;
+          if (!ctx.controllers.left) ctx.controllers.left = c0;
+          if (!ctx.controllers.right) ctx.controllers.right = c1;
         };
 
         console.log("[xr_controller_nodes] ready ✅");
       },
-
-      update(ctx) {
-        this._fallbackMap?.();
-      },
+      update(ctx) { this._fallbackMap?.(); },
     };
   }
 
-  // ---------- Built-in: Quest input mapper (sticks/triggers) ----------
+  // ---------- Built-in: Quest Input Mapper ----------
   function createXRControllerQuestModule() {
     return {
       name: "xr_controller_quest",
@@ -267,9 +290,7 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
           return Math.max(-1, Math.min(1, v));
         }
 
-        function getSession() {
-          return ctx.renderer?.xr?.getSession?.() || null;
-        }
+        function getSession() { return ctx.renderer?.xr?.getSession?.() || null; }
         function findSource(handedness) {
           const s = getSession();
           if (!s || !s.inputSources) return null;
@@ -278,6 +299,7 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
           }
           return null;
         }
+
         function read(src, side) {
           const out = ctx.input[side];
           const gp = src?.gamepad;
@@ -289,10 +311,13 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
           out.trigger = clamp01(b[0]?.value);
           out.squeeze = clamp01(b[1]?.value);
 
-          let sx = ax[2] ?? 0, sy = ax[3] ?? 0;
-          if (Math.abs(sx) < 0.001 && Math.abs(sy) < 0.001) {
-            sx = ax[0] ?? 0;
-            sy = ax[1] ?? 0;
+          // Bulletproof axis selection
+          const pairs = [[2,3],[0,1],[3,2],[1,0]];
+          let sx = 0, sy = 0;
+          for (const [ix, iy] of pairs) {
+            const tx = ax[ix] ?? 0;
+            const ty = ax[iy] ?? 0;
+            if (Math.abs(tx) + Math.abs(ty) > 0.02) { sx = tx; sy = ty; break; }
           }
 
           out.stickX = normAxis(sx);
@@ -376,32 +401,19 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
 
   // ---------- Boot ----------
   const boot = async () => {
-    // ✅ Built-ins first
+    enable(createVRButtonModule());               // ✅ this is what you were missing
     enable(createInteractablesRegistryModule());
     enable(createInteractablesPolicyModule());
     enable(createXRControllerNodesModule());
     enable(createXRControllerQuestModule());
 
-    // External modules (if present)
-    if (!noHud) {
-      await tryEnable("createAndroidDevHudModule", () => importIfExists("./modules/dev/android_dev_hud_module.js"));
-    }
-    await tryEnable("createHealthOverlayModule", () => importIfExists("./modules/dev/health_overlay_module.js"));
-    await tryEnable("createCopyDiagnosticsModule", () => importIfExists("./modules/dev/copy_diagnostics_module.js"));
-    await tryEnable("createModuleTogglePanelModule", () => importIfExists("./modules/dev/module_toggle_panel_module.js"));
-
-    // XR stack
+    // External modules
     await tryEnable("createXRLocomotionModule", () => importIfExists("./modules/xr/xr_locomotion_module.js"), { speed: 2.25 });
     await tryEnable("createXRGrabModule", () => importIfExists("./modules/xr/xr_grab_module.js"));
     await tryEnable("createXRTeleportBlinkModule", () => importIfExists("./modules/xr/xr_teleport_blink_module.js"), { distance: 1.25 });
-
-    // World stack
     await tryEnable("createWorldMasterModule", () => importIfExists("./modules/world/world_master_module.js"));
 
-    log("boot complete ✅ controllers=", {
-      left: ctx.controllers.left?.name || null,
-      right: ctx.controllers.right?.name || null,
-    });
+    log("boot complete ✅");
   };
 
   boot().catch((e) => err("boot failed:", e));
@@ -418,17 +430,8 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
     }
 
     renderer.render(scene, camera);
-
-    // light trace: show triggers occasionally
-    if (ctx.trace && ctx.xrSession && (Math.floor(now * 2) % 2 === 0)) {
-      // (don’t spam every frame; this is mild)
-      // You’ll see stick/trigger values change when you press things.
-      // eslint-disable-next-line no-console
-      console.log("[trace input]", "L", ctx.input.left.trigger.toFixed(2), ctx.input.left.stickX.toFixed(2), ctx.input.left.stickY.toFixed(2),
-                  "R", ctx.input.right.trigger.toFixed(2), ctx.input.right.stickX.toFixed(2), ctx.input.right.stickY.toFixed(2));
-    }
   });
 
   log("orchestrator running ✅", { safeMode, noHud, trace });
   return { ctx, scene, camera, renderer, playerRig, enable, modules };
-              }
+      }

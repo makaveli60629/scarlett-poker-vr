@@ -1,5 +1,5 @@
 // /js/scarlett1/modules/xr/xr_grab_module.js
-// Grip = grab/release. No teleport here. Uses ctx.interactables only.
+// Grip = grab/release only. Cards are blocked by userData.grabbable=false.
 
 export function createXRGrabModule({
   distance = 3.25,
@@ -11,7 +11,6 @@ export function createXRGrabModule({
 
   return {
     name: "xr_grab",
-
     update(ctx, { input }) {
       if (!ctx.xrSession) return;
 
@@ -91,9 +90,7 @@ export function createXRGrabModule({
           const obj = findHit(hand);
           if (obj) attach(obj, hand);
         }
-        if (up && held[hand]) {
-          release(hand);
-        }
+        if (up && held[hand]) release(hand);
 
         prev[hand] = g;
       }

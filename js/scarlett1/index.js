@@ -1,55 +1,51 @@
-// /js/scarlett1/index.js — Update 4.0 Execution Spine (Permanent)
-// Boots the world, shows loading stage, enters XR hands-only.
-
+// /js/scarlett1/index.js — CRASH-VISIBLE (shows errors on screen)
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
-
 import { World } from "./world.js";
 
-const BUILD = "INDEX_U4_0";
+const overlay = document.createElement("pre");
+overlay.style.cssText = `
+position:fixed;left:8px;top:8px;right:8px;max-height:45vh;overflow:auto;
+background:rgba(0,0,0,.75);color:#33ff66;padding:10px;z-index:99999;
+font:12px/1.25 monospace;white-space:pre-wrap;border:1px solid #33ff66;`;
+document.body.appendChild(overlay);
 
-const log = (...a) => console.log("[index]", ...a);
-const err = (...a) => console.error("[index]", ...a);
+const log = (...a) => { console.log("[index]", ...a); overlay.textContent += "[LOG] " + a.join(" ") + "\n"; };
+const err = (...a) => { console.error("[index]", ...a); overlay.textContent += "[ERR] " + a.join(" ") + "\n"; };
+
+window.addEventListener("error", (e) => err("window.error:", e.message));
+window.addEventListener("unhandledrejection", (e) => err("promise:", e.reason?.message || String(e.reason)));
 
 (async function main() {
-  log("runtime start ✅ build=", BUILD);
-  log("href=", location.href);
-  log("path=", location.pathname);
-  log("secureContext=", String(window.isSecureContext));
-  log("ua=", navigator.userAgent);
-  log("navigator.xr=", String(!!navigator.xr));
+  log("start ✅ href=", location.href);
+  log("xr=", String(!!navigator.xr), "secure=", String(window.isSecureContext));
 
   const host = document.getElementById("app") || document.body;
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+  renderer.setSize(innerWidth, innerHeight);
   renderer.xr.enabled = true;
   renderer.xr.setReferenceSpaceType("local-floor");
   host.appendChild(renderer.domElement);
 
-  window.addEventListener("resize", () => {
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
+  addEventListener("resize", () => renderer.setSize(innerWidth, innerHeight));
 
-  // VR Button
-  try {
-    document.body.appendChild(VRButton.createButton(renderer));
-    log("VRButton appended ✅");
-  } catch (e) {
-    err("VRButton append failed ❌", e?.message || e);
-  }
+  document.body.appendChild(VRButton.createButton(renderer));
+  log("VRButton ✅");
 
-  // World “Brain”
   const world = new World({ THREE, renderer });
   await world.init();
+  log("world.init ✅");
 
-  // Start render loop (world handles loading->active transition)
   renderer.setAnimationLoop((t, frame) => {
-    world.tick(t, frame);
-    renderer.render(world.scene, world.camera);
+    try {
+      world.tick(t, frame);
+      renderer.render(world.scene, world.camera);
+    } catch (e) {
+      err("FRAME CRASH:", e?.message || e);
+      renderer.setAnimationLoop(null);
+    }
   });
 
-})().catch((e) => {
-  err("FATAL ❌", e?.message || e);
-});
+})().catch((e) => err("FATAL:", e?.message || e));

@@ -1,21 +1,17 @@
 // /js/scarlett1/index.js — Scarlett1 Runtime (FULL)
-// BUILD: SCARLETT1_FULL_v2_3_QUEST_GAMEPAD_GRAB_MARKER_HEIGHTFIX
-// ✅ Quest-safe render loop
-// ✅ World async load
-// ✅ Android: touch move/look
-// ✅ XR: Left laser Pink, Right laser Blue
-// ✅ XR: TELEPORT = RIGHT GRIP (works)
-// ✅ XR: TELEPORT RING marker guaranteed visible while gripping
-// ✅ XR: GRAB = TRIGGER via GAMEPAD polling (works even if select events don't fire)
-// ✅ XR: height fix (prevents hovering)
-// ✅ XR: left stick move + right stick snap 45°
+// BUILD: SCARLETT1_FULL_v2_4_HEIGHTFIX_INPUTSOURCE_LOCK_TRIGGER_FALLBACK
+// ✅ XR height fix (no more giant/hovering): rig.y = 0 in XR
+// ✅ Gamepad polling uses controller's CONNECTED XRInputSource (fixes left buttons)
+// ✅ Robust trigger detection (works even if button index differs)
+// ✅ Teleport = RIGHT GRIP (polled) + floor circle marker
+// ✅ Move = left stick, Snap = right stick
 // ✅ HUD toggle button
 
 export function boot() {
   main().catch((e) => fatal(e));
 }
 
-const BUILD = "SCARLETT1_FULL_v2_3_QUEST_GAMEPAD_GRAB_MARKER_HEIGHTFIX";
+const BUILD = "SCARLETT1_FULL_v2_4_HEIGHTFIX_INPUTSOURCE_LOCK_TRIGGER_FALLBACK";
 
 function hud() { return document.getElementById("scarlett-mini-hud"); }
 function writeHud(line) { const el = hud(); if (el && el.dataset.hidden !== "1") el.textContent += `\n${line}`; }
@@ -112,12 +108,11 @@ async function main() {
 
   const rig = new THREE.Group();
   rig.name = "PlayerRig";
-  rig.position.set(0, 1.65, 4.2);
+  rig.position.set(0, 1.65, 4.2); // 2D default only
   rig.rotation.set(0, 0, 0);
   rig.add(camera);
   scene.add(rig);
 
-  // Floor used for teleport raycast
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(160, 160),
     new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 1, metalness: 0 })
@@ -141,7 +136,7 @@ async function main() {
   writeHud(touch.enabled ? "[LOG] Android touch controls ✅" : "[LOG] Android touch controls (no touch device)");
 
   const xr = installXRControllers({ THREE, scene, rig, renderer, floor });
-  writeHud("[LOG] XR installed ✅ (teleport ring + gamepad grab)");
+  writeHud("[LOG] XR installed ✅ (height fix + inputSource lock)");
 
   const gp = installXRGamepadControls({ THREE, rig, renderer, camera });
   writeHud("[LOG] XR sticks installed ✅");
@@ -150,13 +145,17 @@ async function main() {
     writeHud("[LOG] XR session start ✅");
     renderer.setPixelRatio(1.0);
 
-    // ✅ Height fix: force reasonable player height at session start
-    rig.position.y = 1.65;
+    // ✅ IMPORTANT: In XR, local-floor already includes your head height.
+    // So rig.y must be 0 to avoid "giant hovering".
+    rig.position.y = 0;
   });
 
   renderer.xr.addEventListener("sessionend", () => {
     writeHud("[LOG] XR session end ⚠️");
     renderer.setPixelRatio(basePR);
+
+    // Back to 2D height
+    rig.position.y = 1.65;
   });
 
   window.addEventListener("resize", () => {
@@ -300,7 +299,7 @@ async function main() {
   }
 
   // -----------------------------
-  // XR: lasers + teleport ring + gamepad grab polling
+  // XR: lasers + teleport ring + grab polling
   // -----------------------------
   function installXRControllers({ THREE, scene, rig, renderer, floor }) {
     const L_BLUE = 0x00e5ff; // RIGHT
@@ -316,7 +315,7 @@ async function main() {
 
     function bind(ctrl) {
       ctrl.userData.handedness = "unknown";
-      ctrl.userData.inputSource = null;
+      ctrl.userData.inputSource = null; // IMPORTANT: exact XRInputSource for this ctrl
       ctrl.userData.grabbed = null;
       ctrl.userData.grabParent = null;
       ctrl.userData.prevTrig = false;
@@ -359,7 +358,7 @@ async function main() {
       else if (h === "right") laser.mat.color.setHex(L_BLUE);
     }
 
-    // Teleport marker (RING) — guaranteed
+    // Teleport marker ring (floor circle)
     const marker = new THREE.Mesh(
       new THREE.RingGeometry(0.18, 0.28, 32),
       new THREE.MeshBasicMaterial({ color: L_BLUE, transparent: true, opacity: 0.9, side: THREE.DoubleSide })
@@ -412,7 +411,6 @@ async function main() {
       ctrl.userData.grabbed = obj;
       ctrl.userData.grabParent = obj.parent;
 
-      // Keep world transform, then attach
       obj.getWorldPosition(tmpWorldPos);
       scene.attach(obj);
       ctrl.attach(obj);
@@ -434,33 +432,42 @@ async function main() {
       ctrl.userData.grabParent = null;
     }
 
-    // Gamepad polling helpers
-    function getInputSourceFor(ctrl) {
+    // ✅ Use the controller's connected XRInputSource directly (fixes left buttons)
+    function getSource(ctrl) {
+      if (ctrl.userData.inputSource?.gamepad) return ctrl.userData.inputSource;
+
       const session = renderer.xr.getSession();
       if (!session) return null;
-
       const sources = Array.from(session.inputSources || []);
       const hand = ctrl.userData.handedness;
 
-      // Prefer matching handedness
       for (const s of sources) {
         if (s?.gamepad && s.handedness === hand) return s;
       }
-      // fallback: first with gamepad
       for (const s of sources) {
         if (s?.gamepad) return s;
       }
       return null;
     }
 
+    // ✅ Robust trigger/grip detection (Quest variants)
     function readButtons(src) {
       const gp = src?.gamepad;
       if (!gp) return { trigger: false, grip: false };
 
       const b = gp.buttons || [];
-      // Quest typical: trigger=0, grip=1
-      const trigger = !!b[0]?.pressed;
-      const grip = !!b[1]?.pressed;
+
+      // trigger candidates
+      const t0 = !!b[0]?.pressed || (b[0]?.value || 0) > 0.6;
+      const t2 = !!b[2]?.pressed || (b[2]?.value || 0) > 0.6;
+      const t3 = !!b[3]?.pressed || (b[3]?.value || 0) > 0.6;
+      const trigger = t0 || t2 || t3;
+
+      // grip candidates
+      const g1 = !!b[1]?.pressed || (b[1]?.value || 0) > 0.6;
+      const g4 = !!b[4]?.pressed || (b[4]?.value || 0) > 0.6;
+      const grip = g1 || g4;
+
       return { trigger, grip };
     }
 
@@ -480,15 +487,13 @@ async function main() {
       recolor(c1, laser1);
       recolor(c2, laser2);
 
-      // Height stabilization: keep you from drifting way up
-      rig.position.y = 1.65;
+      // ✅ Do NOT force rig.y here; we already set it on sessionstart.
 
-      // Teleport uses RIGHT GRIP (polled)
+      // Teleport = RIGHT GRIP (polled)
       const rc = rightController();
-      const srcR = getInputSourceFor(rc);
+      const srcR = getSource(rc);
       const btnR = readButtons(srcR);
 
-      // Grip edge detection
       const gripDown = btnR.grip && !rc.userData.prevGrip;
       const gripUp = !btnR.grip && rc.userData.prevGrip;
       rc.userData.prevGrip = btnR.grip;
@@ -512,9 +517,9 @@ async function main() {
         marker.visible = false;
       }
 
-      // GRAB uses TRIGGER on either controller (polled)
+      // GRAB = TRIGGER (polled) either hand
       for (const ctrl of [c1, c2]) {
-        const src = getInputSourceFor(ctrl);
+        const src = getSource(ctrl);
         const btn = readButtons(src);
 
         const trigDown = btn.trigger && !ctrl.userData.prevTrig;
@@ -522,9 +527,7 @@ async function main() {
         ctrl.userData.prevTrig = btn.trigger;
 
         if (trigDown) {
-          if (ctrl.userData.grabbed) {
-            // already holding: ignore down
-          } else {
+          if (!ctrl.userData.grabbed) {
             const hit = getInteractHit(ctrl);
             if (hit?.object) grab(ctrl, hit.object);
           }
@@ -534,7 +537,7 @@ async function main() {
         }
       }
 
-      // Hover dot: show best hit
+      // Hover dot
       const h1 = !c1.userData.grabbed ? getInteractHit(c1) : null;
       const h2 = !c2.userData.grabbed ? getInteractHit(c2) : null;
       const best = (h1 && h2) ? (h1.distance < h2.distance ? h1 : h2) : (h1 || h2);
@@ -548,7 +551,9 @@ async function main() {
   }
 
   // -----------------------------
-  // XR thumbsticks (Quest)
+  // XR sticks
+  // - Left stick move (fallback: if no left source, use first gamepad)
+  // - Right stick snap
   // -----------------------------
   function installXRGamepadControls({ THREE, rig, renderer, camera }) {
     const MOVE_SPEED = 2.5;
@@ -572,19 +577,24 @@ async function main() {
         if (s.handedness === "left") left = s;
         if (s.handedness === "right") right = s;
       }
-      if (!left || !right) {
+
+      // Fallback so we still move even if handedness is missing
+      if (!left) {
+        for (const s of sources) { if (s?.gamepad) { left = s; break; } }
+      }
+      if (!right) {
         const gps = sources.filter(s => s?.gamepad);
-        if (!left && gps[0]) left = gps[0];
-        if (!right && gps[1]) right = gps[1];
+        if (gps[1]) right = gps[1];
+        else if (gps[0]) right = gps[0];
       }
 
+      // Move (left stick)
       if (left?.gamepad) {
-        const { x, y } = readStick(left.gamepad);
+        const { x, y } = readMoveStick(left.gamepad);
         if (Math.abs(x) > DEADZONE || Math.abs(y) > DEADZONE) {
           const yaw = getCameraYaw();
           const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-          const rightv = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-
+          const rightv  = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
           const move = new THREE.Vector3();
           move.addScaledVector(forward, -y);
           move.addScaledVector(rightv, x);
@@ -596,8 +606,9 @@ async function main() {
         }
       }
 
+      // Snap (right stick X)
       if (right?.gamepad) {
-        const { x } = readStick(right.gamepad);
+        const { x } = readSnapStick(right.gamepad);
         if (Math.abs(x) > 0.6 && snapTimer === 0) {
           rig.rotation.y += (x > 0 ? -SNAP_ANGLE : SNAP_ANGLE);
           snapTimer = SNAP_COOLDOWN;
@@ -605,14 +616,24 @@ async function main() {
       }
     }
 
-    function readStick(gamepad) {
+    // Prefer left stick axes[0,1]; if not, fallback
+    function readMoveStick(gamepad) {
       const a = gamepad.axes || [];
       let x = 0, y = 0;
-      if (a.length >= 4) { x = a[2]; y = a[3]; }
-      else if (a.length >= 2) { x = a[0]; y = a[1]; }
+      if (a.length >= 2) { x = a[0]; y = a[1]; }
       x = (Math.abs(x) < DEADZONE) ? 0 : x;
       y = (Math.abs(y) < DEADZONE) ? 0 : y;
       return { x, y };
+    }
+
+    // Prefer right stick axes[2,3]; fallback to [0,1]
+    function readSnapStick(gamepad) {
+      const a = gamepad.axes || [];
+      let x = 0;
+      if (a.length >= 4) x = a[2];
+      else if (a.length >= 2) x = a[0];
+      x = (Math.abs(x) < DEADZONE) ? 0 : x;
+      return { x };
     }
 
     function getCameraYaw() {
@@ -624,4 +645,4 @@ async function main() {
 
     return { update };
   }
-    }
+                   }

@@ -1,5 +1,4 @@
-// /js/scarlett1/index.js — MINIMAL PROBE (GUARANTEED LOAD)
-
+// /js/scarlett1/index.js — PROBE (temporary)
 console.log("✅ scarlett1/index.js loaded");
 
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
@@ -15,13 +14,10 @@ app.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x05070a);
-
-const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 100);
+scene.background = new THREE.Color(0x07070a);
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 100);
 camera.position.set(0, 1.6, 3);
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x222222, 1));
 
-renderer.setAnimationLoop(() => {
-  renderer.render(scene, camera);
-});
+renderer.setAnimationLoop(()=> renderer.render(scene, camera));

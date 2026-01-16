@@ -1,8 +1,9 @@
 // /js/scarlett1/index.js — Scarlett1 Runtime (FULL)
-// BUILD: SCARLETT1_FULL_v1_2_CONTROLS_SAFE
+// BUILD: SCARLETT1_FULL_v1_3_CONTROLS_CACHEPROOF
 // ✅ Android touch move/look (non-XR)
 // ✅ Quest controllers: laser + trigger teleport (XR)
-// 🚫 NO XRControllerModelFactory (prevents "import 'three'" bare specifier crash)
+// ✅ NO XRControllerModelFactory (prevents "three" bare import crash)
+// ✅ Adds extra diagnostics so we SEE the exact failing import if anything breaks
 
 export function boot() {
   main().catch((e) => {
@@ -11,7 +12,7 @@ export function boot() {
   });
 }
 
-const BUILD = "SCARLETT1_FULL_v1_2_CONTROLS_SAFE";
+const BUILD = "SCARLETT1_FULL_v1_3_CONTROLS_CACHEPROOF";
 const log = (...a) => console.log("[scarlett1]", ...a);
 const err = (...a) => console.error("[scarlett1]", ...a);
 
@@ -22,16 +23,23 @@ function writeHud(line) {
 }
 
 async function main() {
-  writeHud(`[LOG] scarlett1 starting… build=${BUILD}`);
+  writeHud(`[LOG] scarlett1 starting…`);
+  writeHud(`build=${BUILD}`);
 
-  // --- Three.js imports (CDN) ---
-  const THREE = await import("https://unpkg.com/three@0.158.0/build/three.module.js");
-  const { VRButton } = await import("https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js");
+  // --- Imports (safe) ---
+  let THREE, VRButton;
+  try {
+    THREE = await import("https://unpkg.com/three@0.158.0/build/three.module.js");
+    ({ VRButton } = await import("https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js"));
+    writeHud("[LOG] three loaded ✅");
+    writeHud("[LOG] VRButton loaded ✅");
+  } catch (e) {
+    writeHud("[ERR] import failed ❌");
+    writeHud("[ERR] " + (e?.stack || e?.message || e));
+    throw e;
+  }
 
-  writeHud("[LOG] three loaded ✅");
-  writeHud("[LOG] VRButton loaded ✅");
-
-  // --- Scene setup ---
+  // --- Scene ---
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
 
@@ -42,50 +50,54 @@ async function main() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
 
-  const mount = document.getElementById("app") || document.body;
-  mount.appendChild(renderer.domElement);
+  (document.getElementById("app") || document.body).appendChild(renderer.domElement);
 
   document.body.appendChild(VRButton.createButton(renderer));
   writeHud("[LOG] VRButton appended ✅");
 
-  // --- Lights ---
+  // Lights
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.0));
   const dir = new THREE.DirectionalLight(0xffffff, 0.8);
   dir.position.set(2, 6, 3);
   scene.add(dir);
 
-  // --- Player rig ---
+  // Rig
   const rig = new THREE.Group();
   rig.name = "PlayerRig";
-  rig.position.set(0, 1.65, 3.8);
+  rig.position.set(0, 1.65, 4.2);
   rig.rotation.set(0, 0, 0);
   rig.add(camera);
   scene.add(rig);
 
-  // --- Always-visible floor fallback (teleport target) ---
-  const floorGeo = new THREE.PlaneGeometry(60, 60);
-  const floorMat = new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 1, metalness: 0 });
-  const floor = new THREE.Mesh(floorGeo, floorMat);
+  // Floor (teleport target)
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(60, 60),
+    new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 1, metalness: 0 })
+  );
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = 0;
   floor.name = "FLOOR";
   scene.add(floor);
 
-  // --- Load world module ---
+  // World
   writeHud("[LOG] importing world.js …");
-  const worldMod = await import("./world.js");
-  if (worldMod?.buildWorld) {
-    worldMod.buildWorld({ THREE, scene, rig, renderer, camera, log, err, writeHud });
-    writeHud("[LOG] world built ✅");
-  } else {
-    writeHud("[ERR] world.js missing export buildWorld()");
+  try {
+    const worldMod = await import(`./world.js?v=WORLD_${Date.now()}`);
+    if (worldMod?.buildWorld) {
+      worldMod.buildWorld({ THREE, scene, rig, renderer, camera, log, err, writeHud });
+      writeHud("[LOG] world built ✅");
+    } else {
+      writeHud("[ERR] world.js missing export buildWorld()");
+    }
+  } catch (e) {
+    writeHud("[ERR] world import failed ❌");
+    writeHud("[ERR] " + (e?.stack || e?.message || e));
   }
 
-  // ===== ANDROID TOUCH CONTROLS (NON-XR) =====
+  // Controls
   const touch = installTouchControls({ THREE, camera, rig });
   if (touch.enabled) writeHud("[LOG] android touch controls ✅");
 
-  // ===== QUEST CONTROLLERS: LASER + TELEPORT =====
   const xr = installXRControllers({ THREE, scene, rig, renderer, floor });
   writeHud("[LOG] XR controllers installed ✅");
 
@@ -96,56 +108,34 @@ async function main() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // Render loop
+  // Loop
   const clock = new THREE.Clock();
   renderer.setAnimationLoop(() => {
     const dt = clock.getDelta();
 
-    // Touch-only movement when NOT in XR
-    if (!renderer.xr.isPresenting) {
-      touch.update(dt);
-    }
-
-    // XR teleport/laser update
+    if (!renderer.xr.isPresenting) touch.update(dt);
     xr.update();
 
     renderer.render(scene, camera);
   });
 
-  if (navigator.xr) {
-    renderer.xr.addEventListener("sessionstart", () => {
-      writeHud("[LOG] XR session start ✅");
-      log("XR session start ✅");
-    });
-    renderer.xr.addEventListener("sessionend", () => {
-      writeHud("[LOG] XR session end ✅");
-      log("XR session end ✅");
-    });
-  }
+  renderer.xr.addEventListener("sessionstart", () => writeHud("[LOG] XR session start ✅"));
+  renderer.xr.addEventListener("sessionend", () => writeHud("[LOG] XR session end ✅"));
 
   writeHud("[LOG] scarlett1 runtime start ✅");
   log("runtime start ✅", BUILD);
 
-  // ==========================================================
-  // TOUCH CONTROLS (Android / mobile browser)
-  // ==========================================================
+  // -----------------------
+  // TOUCH CONTROLS
+  // -----------------------
   function installTouchControls({ THREE, camera, rig }) {
     const isTouch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
     const enabled = !!isTouch;
-
     const ui = enabled ? createTouchUI() : null;
 
-    const state = {
-      enabled,
-      moveX: 0,
-      moveY: 0,
-      lookX: 0,
-      lookY: 0,
-      yaw: rig.rotation.y || 0,
-      pitch: 0
-    };
+    const state = { moveX: 0, moveY: 0, lookX: 0, lookY: 0, yaw: rig.rotation.y || 0, pitch: 0 };
 
-    function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
     function applyLook() {
       rig.rotation.y = state.yaw;
@@ -155,17 +145,14 @@ async function main() {
     function update(dt) {
       if (!enabled) return;
 
-      // Tunables
-      const speed = 2.2;      // meters per second
-      const turnSpeed = 2.0;  // radians per second
+      const speed = 2.2;
+      const turnSpeed = 2.0;
 
-      // Look
       state.yaw -= state.lookX * turnSpeed * dt;
       state.pitch -= state.lookY * turnSpeed * dt;
       state.pitch = clamp(state.pitch, -1.2, 1.2);
       applyLook();
 
-      // Move relative to yaw
       const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), state.yaw);
       const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), state.yaw);
 
@@ -212,6 +199,7 @@ async function main() {
     const right = makePad("right");
 
     let moveCb = null, lookCb = null;
+
     bindPad(left, (x, y) => moveCb && moveCb(x, y));
     bindPad(right, (x, y) => lookCb && lookCb(x, y));
 
@@ -250,9 +238,9 @@ async function main() {
     }
   }
 
-  // ==========================================================
-  // XR CONTROLLERS: LASER + TELEPORT
-  // ==========================================================
+  // -----------------------
+  // XR CONTROLLERS (laser + teleport)
+  // -----------------------
   function installXRControllers({ THREE, scene, rig, renderer, floor }) {
     const raycaster = new THREE.Raycaster();
     const tempMatrix = new THREE.Matrix4();
@@ -262,24 +250,23 @@ async function main() {
     rig.add(c1);
     rig.add(c2);
 
-    // Laser lines (simple + safe)
     const laserGeom = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, -1)
+      new THREE.Vector3(0, 0, -1),
     ]);
     const laserMat = new THREE.LineBasicMaterial();
 
-    function addLaser(ctrl) {
+    const addLaser = (ctrl) => {
       const line = new THREE.Line(laserGeom, laserMat);
       line.name = "laser";
       line.scale.z = 10;
       ctrl.add(line);
       return line;
-    }
+    };
+
     const l1 = addLaser(c1);
     const l2 = addLaser(c2);
 
-    // Teleport marker
     const marker = new THREE.Mesh(
       new THREE.RingGeometry(0.15, 0.22, 24),
       new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })
@@ -345,4 +332,4 @@ async function main() {
 
     return { update };
   }
-        }
+                                                                 }

@@ -1,11 +1,8 @@
 // /js/scarlett1/world.js
 // SCARLETT1 WORLD ORCHESTRATOR (FULL) — Modular Forever
-// ✅ No 404 dependency for Quest controllers (built-in)
-// ✅ No 404 dependency for interactables registry (built-in)
-// ✅ Built-in Interactables Policy (cards not grabbable, chips grabbable)
-// ✅ External modules still load if they exist; missing ones are skipped safely
-//
-// URL params handled by index.js pass-through: safeMode/noHud/trace
+// ✅ Built-in: Quest input mapper, Interactables registry, Interactables policy
+// ✅ Built-in: REAL XR controller nodes (renderer.xr.getController) mapped to left/right
+// ✅ External modules load if they exist; missing ones are skipped safely
 
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
 
@@ -25,7 +22,7 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
   scene.add(playerRig);
   playerRig.add(camera);
 
-  // ✅ Safe spawn: center-ish, not inside walls
+  // ✅ safe spawn
   playerRig.position.set(0, 0, 3.25);
   playerRig.rotation.set(0, Math.PI, 0);
 
@@ -38,13 +35,13 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
 
   (document.getElementById("app") || document.body).appendChild(renderer.domElement);
 
-  // Lights (safe baseline)
+  // baseline lighting
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.70));
   const key = new THREE.DirectionalLight(0xffffff, 0.55);
   key.position.set(8, 12, 6);
   scene.add(key);
 
-  // Always-present floor (prevents black screen if a module fails)
+  // base floor to avoid black
   const baseFloor = new THREE.Mesh(
     new THREE.PlaneGeometry(140, 140),
     new THREE.MeshStandardMaterial({ color: 0x101018, roughness: 0.95 })
@@ -66,18 +63,17 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
     trace,
 
     xrSession: null,
+
+    // IMPORTANT: these MUST be Object3D controller nodes for grab/teleport rays
     controllers: { left: null, right: null },
 
-    // unified input (what ALL systems should use)
+    // unified input
     input: {
       left:  { trigger: 0, squeeze: 0, stickX: 0, stickY: 0, a:false, b:false, x:false, y:false },
       right: { trigger: 0, squeeze: 0, stickX: 0, stickY: 0, a:false, b:false, x:false, y:false },
     },
 
-    // interactables registry (filled by built-in module below)
     interactables: null,
-
-    // helper (filled by policy module below)
     tagInteractable: null,
 
     _enabledModuleNames: [],
@@ -96,28 +92,22 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
     return mod;
   }
 
-  // ---------- Built-in module: Interactables Registry (no 404) ----------
+  // ---------- Built-in: Interactables Registry ----------
   function createInteractablesRegistryModule() {
     return {
       name: "interactables_registry",
       onEnable(ctx) {
         const map = new Map(); // object3D -> meta
 
-        function toObj(o) {
-          return o && (o.isObject3D ? o : o.object3D || o.mesh || null);
-        }
-
         ctx.interactables = {
           register(obj, meta = {}) {
-            const o = toObj(obj);
-            if (!o) return false;
-            map.set(o, { ...meta, object: o });
+            if (!obj || !obj.isObject3D) return false;
+            map.set(obj, { ...meta, object: obj });
             return true;
           },
           unregister(obj) {
-            const o = toObj(obj);
-            if (!o) return false;
-            return map.delete(o);
+            if (!obj || !obj.isObject3D) return false;
+            return map.delete(obj);
           },
           clear() { map.clear(); },
           list() { return Array.from(map.values()); },
@@ -134,7 +124,129 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
     };
   }
 
-  // ---------- Built-in module: Quest Controller Mapper (no 404) ----------
+  // ---------- Built-in: Interactables Policy + Tagging ----------
+  function createInteractablesPolicyModule() {
+    return {
+      name: "interactables_policy",
+      onEnable(ctx) {
+        ctx.tagInteractable = (obj, kind, grabbable) => {
+          if (!obj) return;
+          obj.userData = obj.userData || {};
+          obj.userData.interactable = true;
+          if (kind) obj.userData.kind = kind;
+          if (typeof grabbable === "boolean") obj.userData.grabbable = grabbable;
+
+          const k = String(obj.userData.kind || "unknown");
+          if (typeof obj.userData.grabbable !== "boolean") obj.userData.grabbable = !(k.includes("card"));
+
+          // enforce always:
+          if (k === "community_card" || k === "bot_card") obj.userData.grabbable = false;
+        };
+
+        this._t = 0;
+        this._last = 0;
+        console.log("[interactables_policy] ready ✅");
+      },
+
+      update(ctx, { dt }) {
+        this._t += dt;
+        if (this._t < 0.25) return;
+        this._t = 0;
+
+        if (!ctx.interactables) return;
+
+        ctx.scene.traverse((o) => {
+          if (!o?.isObject3D) return;
+          const ud = o.userData || {};
+          if (!ud.interactable) return;
+
+          const kind = String(ud.kind || "unknown");
+          if (kind === "community_card" || kind === "bot_card") ud.grabbable = false;
+
+          ctx.interactables.register(o, { kind, grabbable: ud.grabbable !== false });
+        });
+
+        const c = ctx.interactables.count();
+        if (ctx.trace && c !== this._last) {
+          console.log("[interactables_policy] registered=", c);
+          this._last = c;
+        }
+      },
+    };
+  }
+
+  // ---------- Built-in: REAL XR controller nodes (fixes grab rays) ----------
+  function createXRControllerNodesModule() {
+    return {
+      name: "xr_controller_nodes",
+
+      onEnable(ctx) {
+        // Create raw controller nodes (Three.js Groups driven by WebXR)
+        const c0 = ctx.renderer.xr.getController(0);
+        const c1 = ctx.renderer.xr.getController(1);
+
+        c0.name = "XRController0";
+        c1.name = "XRController1";
+
+        ctx.playerRig.add(c0);
+        ctx.playerRig.add(c1);
+
+        // simple visible pointer (debug). You can delete later.
+        const makePointer = (color) => {
+          const g = new THREE.CylinderGeometry(0.002, 0.002, 0.12, 6);
+          const m = new THREE.MeshBasicMaterial({ color });
+          const mesh = new THREE.Mesh(g, m);
+          mesh.rotation.x = Math.PI / 2;
+          mesh.position.z = -0.06;
+          return mesh;
+        };
+        c0.add(makePointer(0x33ffff));
+        c1.add(makePointer(0xff66ff));
+
+        // Map controller->handedness
+        function onConnected(e) {
+          const data = e.data || {};
+          const h = data.handedness;
+          if (h === "left") ctx.controllers.left = e.target;
+          if (h === "right") ctx.controllers.right = e.target;
+          console.log("[xr_controller_nodes] connected", h, e.target?.name);
+        }
+        function onDisconnected(e) {
+          const tgt = e.target;
+          if (ctx.controllers.left === tgt) ctx.controllers.left = null;
+          if (ctx.controllers.right === tgt) ctx.controllers.right = null;
+          console.log("[xr_controller_nodes] disconnected", tgt?.name);
+        }
+
+        c0.addEventListener("connected", onConnected);
+        c1.addEventListener("connected", onConnected);
+        c0.addEventListener("disconnected", onDisconnected);
+        c1.addEventListener("disconnected", onDisconnected);
+
+        // Fallback mapping if no connected events yet:
+        // We’ll assign left/right once we enter XR by checking inputSources.
+        this._fallbackMap = () => {
+          const s = ctx.renderer.xr.getSession?.();
+          if (!s) return;
+          let leftSet = !!ctx.controllers.left;
+          let rightSet = !!ctx.controllers.right;
+
+          // If not mapped, do best-effort: controller(0)=left, controller(1)=right
+          // (Most Quest setups will connect events properly, this just prevents "null controllers".)
+          if (!leftSet) ctx.controllers.left = c0;
+          if (!rightSet) ctx.controllers.right = c1;
+        };
+
+        console.log("[xr_controller_nodes] ready ✅");
+      },
+
+      update(ctx) {
+        this._fallbackMap?.();
+      },
+    };
+  }
+
+  // ---------- Built-in: Quest input mapper (sticks/triggers) ----------
   function createXRControllerQuestModule() {
     return {
       name: "xr_controller_quest",
@@ -154,19 +266,9 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
           v = dz(v);
           return Math.max(-1, Math.min(1, v));
         }
-        function ensure(side) {
-          ctx.input = ctx.input || {};
-          if (!ctx.input[side]) {
-            ctx.input[side] = {
-              trigger: 0, squeeze: 0,
-              stickX: 0, stickY: 0,
-              a:false, b:false, x:false, y:false,
-            };
-          }
-          return ctx.input[side];
-        }
+
         function getSession() {
-          return ctx.renderer?.xr?.getSession?.() || ctx.xrSession || null;
+          return ctx.renderer?.xr?.getSession?.() || null;
         }
         function findSource(handedness) {
           const s = getSession();
@@ -177,7 +279,7 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
           return null;
         }
         function read(src, side) {
-          const out = ensure(side);
+          const out = ctx.input[side];
           const gp = src?.gamepad;
           if (!gp) return;
 
@@ -210,125 +312,33 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
           }
         }
 
-        ctx.controllers = ctx.controllers || { left: null, right: null };
-
         this._tick = () => {
-          const session = getSession();
-          ctx.xrSession = session;
+          const s = getSession();
+          ctx.xrSession = s;
 
-          const L = findSource("left");
-          const R = findSource("right");
-
-          ctx.controllers.left = L;
-          ctx.controllers.right = R;
-
-          if (!session) {
-            const l = ensure("left");
-            const r = ensure("right");
-            l.trigger = l.squeeze = l.stickX = l.stickY = 0; l.x = l.y = false;
-            r.trigger = r.squeeze = r.stickX = r.stickY = 0; r.a = r.b = false;
+          if (!s) {
+            ctx.input.left.trigger = ctx.input.left.squeeze = ctx.input.left.stickX = ctx.input.left.stickY = 0;
+            ctx.input.right.trigger = ctx.input.right.squeeze = ctx.input.right.stickX = ctx.input.right.stickY = 0;
+            ctx.input.left.x = ctx.input.left.y = false;
+            ctx.input.right.a = ctx.input.right.b = false;
             return;
           }
 
+          const L = findSource("left");
+          const R = findSource("right");
           if (L) read(L, "left");
-          else {
-            const l = ensure("left");
-            l.trigger = l.squeeze = l.stickX = l.stickY = 0; l.x = l.y = false;
-          }
-
           if (R) read(R, "right");
-          else {
-            const r = ensure("right");
-            r.trigger = r.squeeze = r.stickX = r.stickY = 0; r.a = r.b = false;
-          }
         };
 
         console.log("[xr_controller_quest] ready ✅ (built-in)");
       },
-      update() {
+      update(ctx) {
         try { this._tick?.(); } catch (e) { console.error("[xr_controller_quest] tick failed", e); }
       },
     };
   }
 
-  // ---------- Built-in module: Interactable Tagger + Policy (FULL) ----------
-  // Convention:
-  // - Tag any Object3D:
-  //   obj.userData.interactable = true
-  //   obj.userData.kind = "chip" | "community_card" | "bot_card" | "dealer" | ...
-  //   obj.userData.grabbable = true/false
-  //
-  // Policy:
-  // - community_card + bot_card are NEVER grabbable.
-  // - chips + dealer items default grabbable unless explicitly false.
-  function createInteractablesPolicyModule() {
-    return {
-      name: "interactables_policy",
-
-      onEnable(ctx) {
-        const logp = (...a) => console.log("[interactables_policy]", ...a);
-
-        ctx.tagInteractable = (obj, kind, grabbable) => {
-          if (!obj) return;
-          obj.userData = obj.userData || {};
-          obj.userData.interactable = true;
-          if (kind) obj.userData.kind = kind;
-          if (typeof grabbable === "boolean") obj.userData.grabbable = grabbable;
-
-          // defaults
-          const k = String(obj.userData.kind || "unknown");
-          if (typeof obj.userData.grabbable !== "boolean") {
-            obj.userData.grabbable = !(k.includes("card"));
-          }
-
-          // force policy
-          if (k === "community_card" || k === "bot_card") obj.userData.grabbable = false;
-        };
-
-        this._scanTimer = 0;
-        this._lastCount = 0;
-        logp("ready ✅ (tag + policy)");
-      },
-
-      update(ctx, { dt }) {
-        // scan 4x/sec (cheap and safe)
-        this._scanTimer += dt;
-        if (this._scanTimer < 0.25) return;
-        this._scanTimer = 0;
-
-        if (!ctx.interactables) return;
-
-        // Traverse and register tagged interactables
-        let seen = 0;
-        ctx.scene.traverse((o) => {
-          if (!o || !o.isObject3D) return;
-          const ud = o.userData || {};
-          if (!ud.interactable) return;
-
-          const kind = String(ud.kind || "unknown");
-
-          // enforce policy always
-          if (kind === "community_card" || kind === "bot_card") ud.grabbable = false;
-
-          ctx.interactables.register(o, {
-            kind,
-            grabbable: ud.grabbable !== false,
-          });
-
-          seen++;
-        });
-
-        // log only when count changes
-        const c = ctx.interactables.count();
-        if (c !== this._lastCount && ctx.trace) {
-          console.log("[interactables_policy] registered=", c, "taggedSeen=", seen);
-          this._lastCount = c;
-        }
-      },
-    };
-  }
-
-  // ---------- Safe dynamic import helper (skips missing modules quietly) ----------
+  // ---------- Safe dynamic import helper ----------
   async function importIfExists(path) {
     try {
       const abs = new URL(path, location.href).toString();
@@ -366,44 +376,32 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
 
   // ---------- Boot ----------
   const boot = async () => {
-    // ✅ Built-ins first (never 404)
+    // ✅ Built-ins first
     enable(createInteractablesRegistryModule());
     enable(createInteractablesPolicyModule());
+    enable(createXRControllerNodesModule());
     enable(createXRControllerQuestModule());
 
-    // ✅ External modules (load only if present)
+    // External modules (if present)
     if (!noHud) {
-      await tryEnable(
-        "createAndroidDevHudModule",
-        () => importIfExists("./modules/dev/android_dev_hud_module.js"),
-        { onlyWhenNotXR: true }
-      );
+      await tryEnable("createAndroidDevHudModule", () => importIfExists("./modules/dev/android_dev_hud_module.js"));
     }
-
     await tryEnable("createHealthOverlayModule", () => importIfExists("./modules/dev/health_overlay_module.js"));
     await tryEnable("createCopyDiagnosticsModule", () => importIfExists("./modules/dev/copy_diagnostics_module.js"));
     await tryEnable("createModuleTogglePanelModule", () => importIfExists("./modules/dev/module_toggle_panel_module.js"));
 
-    // XR stack (if you have these files)
+    // XR stack
     await tryEnable("createXRLocomotionModule", () => importIfExists("./modules/xr/xr_locomotion_module.js"), { speed: 2.25 });
     await tryEnable("createXRGrabModule", () => importIfExists("./modules/xr/xr_grab_module.js"));
     await tryEnable("createXRTeleportBlinkModule", () => importIfExists("./modules/xr/xr_teleport_blink_module.js"), { distance: 1.25 });
 
     // World stack
-    await tryEnable("createLobbyHallwaysModule", () => importIfExists("./modules/world/lobby_hallways_module.js"));
-    await tryEnable("createRoomManagerModule", () => importIfExists("./modules/world/room_manager_module.js"));
-    await tryEnable("createRoomPortalsModule", () => importIfExists("./modules/world/room_portals_module.js"), { portalCount: 20 });
-    await tryEnable("createDoorTeleportModule", () => importIfExists("./modules/world/door_teleport_module.js"), { doorToRoom: [0, 1, 2, 3] });
-
     await tryEnable("createWorldMasterModule", () => importIfExists("./modules/world/world_master_module.js"));
-    await tryEnable("createScorpionThemeModule", () => importIfExists("./modules/world/scorpion_theme_module.js"));
-    await tryEnable("createJumbotronsModule", () => importIfExists("./modules/world/jumbotrons_module.js"));
 
-    // Game / show
-    await tryEnable("createShowgameModule", () => importIfExists("./modules/game/showgame_module.js"), { dealInterval: 6.0 });
-    await tryEnable("createInteractionPolicyModule", () => importIfExists("./modules/game/interaction_policy_module.js"));
-
-    log("boot complete ✅");
+    log("boot complete ✅ controllers=", {
+      left: ctx.controllers.left?.name || null,
+      right: ctx.controllers.right?.name || null,
+    });
   };
 
   boot().catch((e) => err("boot failed:", e));
@@ -419,10 +417,18 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
       try { m.update?.(ctx, { dt, input: ctx.input }); } catch (e) { err("update failed:", m.name, e); }
     }
 
-    try { renderer.render(scene, camera); } catch (e) { err("render failed:", e); }
+    renderer.render(scene, camera);
+
+    // light trace: show triggers occasionally
+    if (ctx.trace && ctx.xrSession && (Math.floor(now * 2) % 2 === 0)) {
+      // (don’t spam every frame; this is mild)
+      // You’ll see stick/trigger values change when you press things.
+      // eslint-disable-next-line no-console
+      console.log("[trace input]", "L", ctx.input.left.trigger.toFixed(2), ctx.input.left.stickX.toFixed(2), ctx.input.left.stickY.toFixed(2),
+                  "R", ctx.input.right.trigger.toFixed(2), ctx.input.right.stickX.toFixed(2), ctx.input.right.stickY.toFixed(2));
+    }
   });
 
   log("orchestrator running ✅", { safeMode, noHud, trace });
-
   return { ctx, scene, camera, renderer, playerRig, enable, modules };
-        }
+              }

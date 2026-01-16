@@ -1,13 +1,13 @@
 // /js/scarlett1/index.js
-// SCARLETT1 ENTRY (FULL) — Start + Diagnostics + Options
-// Exported start() is called by /js/index.js router.
-// Supports URL params:
-// - safe=1    -> call orchestrator with "safe" options (if you use them)
-// - nohud=1   -> skip Android dev HUD if your orchestrator honors it
-// - trace=1   -> extra logs
-// - v=...     -> cacheproof
+// SCARLETT1 ENTRY (FULL) — Start + Diagnostics + Options + WORLD PREFLIGHT
+// Called by /js/index.js router via start().
+// URL params:
+//  - safe=1   : safe mode (passed to world orchestrator)
+//  - nohud=1  : no hud (passed to world orchestrator)
+//  - trace=1  : verbose console logs
+//  - v=...    : cacheproof
 
-const BUILD = "SCARLETT1_INDEX_FULL_DIAG_v1";
+const BUILD = "SCARLETT1_INDEX_FULL_DIAG_v2_WORLD_PREFLIGHT";
 
 const log = (...a) => console.log("[scarlett1]", ...a);
 const err = (...a) => console.error("[scarlett1]", ...a);
@@ -19,8 +19,15 @@ function qs() {
   return o;
 }
 
-let overlay, body;
+function clip(s, n = 1400) {
+  s = String(s || "");
+  if (s.length <= n) return s;
+  return s.slice(0, n) + "…";
+}
+
+let overlay, body, btns;
 let lines = [];
+
 function ensureOverlay() {
   if (overlay) return;
 
@@ -37,7 +44,8 @@ function ensureOverlay() {
   overlay.style.border = "1px solid rgba(255,255,255,0.18)";
   overlay.style.background = "rgba(0,0,0,0.45)";
   overlay.style.color = "white";
-  overlay.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace";
+  overlay.style.fontFamily =
+    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace";
   overlay.style.fontSize = "12px";
   overlay.style.lineHeight = "1.25";
   overlay.style.whiteSpace = "pre-wrap";
@@ -50,7 +58,7 @@ function ensureOverlay() {
   header.textContent = `SCARLETT1 ENTRY • ${BUILD}`;
   overlay.appendChild(header);
 
-  const btns = document.createElement("div");
+  btns = document.createElement("div");
   btns.style.display = "flex";
   btns.style.gap = "6px";
   btns.style.flexWrap = "wrap";
@@ -70,30 +78,60 @@ function ensureOverlay() {
     return b;
   };
 
-  btns.appendChild(mkBtn("COPY", async () => {
-    try {
-      await navigator.clipboard.writeText(lines.join("\n"));
-      write("[copy] COPIED ✅");
-    } catch (e) {
-      write("[copy] FAILED ❌ " + String(e));
-    }
-  }));
+  btns.appendChild(
+    mkBtn("COPY", async () => {
+      try {
+        await navigator.clipboard.writeText(lines.join("\n"));
+        write("[copy] COPIED ✅");
+      } catch (e) {
+        write("[copy] FAILED ❌ " + String(e));
+      }
+    })
+  );
 
-  btns.appendChild(mkBtn("SAFE=1", () => {
-    const u = new URL(location.href);
-    u.searchParams.set("safe", "1");
-    u.searchParams.set("v", String(Date.now()));
-    location.href = u.toString();
-  }));
+  btns.appendChild(
+    mkBtn("RELOAD", () => {
+      const u = new URL(location.href);
+      u.searchParams.set("v", String(Date.now()));
+      location.href = u.toString();
+    })
+  );
 
-  btns.appendChild(mkBtn("SAFE=0", () => {
-    const u = new URL(location.href);
-    u.searchParams.delete("safe");
-    u.searchParams.set("v", String(Date.now()));
-    location.href = u.toString();
-  }));
+  btns.appendChild(
+    mkBtn("SAFE=1", () => {
+      const u = new URL(location.href);
+      u.searchParams.set("safe", "1");
+      u.searchParams.set("v", String(Date.now()));
+      location.href = u.toString();
+    })
+  );
 
-  btns.appendChild(mkBtn("RELOAD", () => location.reload(true)));
+  btns.appendChild(
+    mkBtn("SAFE=0", () => {
+      const u = new URL(location.href);
+      u.searchParams.delete("safe");
+      u.searchParams.set("v", String(Date.now()));
+      location.href = u.toString();
+    })
+  );
+
+  btns.appendChild(
+    mkBtn("TRACE=1", () => {
+      const u = new URL(location.href);
+      u.searchParams.set("trace", "1");
+      u.searchParams.set("v", String(Date.now()));
+      location.href = u.toString();
+    })
+  );
+
+  btns.appendChild(
+    mkBtn("TRACE=0", () => {
+      const u = new URL(location.href);
+      u.searchParams.delete("trace");
+      u.searchParams.set("v", String(Date.now()));
+      location.href = u.toString();
+    })
+  );
 
   body = document.createElement("div");
   body.style.marginTop = "10px";
@@ -102,16 +140,10 @@ function ensureOverlay() {
   document.body.appendChild(overlay);
 }
 
-function clip(s, n = 1400) {
-  s = String(s || "");
-  if (s.length <= n) return s;
-  return s.slice(0, n) + "…";
-}
-
 function write(line) {
   ensureOverlay();
   lines.push(String(line));
-  if (lines.length > 200) lines.shift();
+  if (lines.length > 220) lines.shift();
   body.textContent = lines.join("\n");
 }
 
@@ -132,6 +164,23 @@ function hookErrors() {
   });
 }
 
+async function preflight(urlRel) {
+  try {
+    const abs = new URL(urlRel, location.href).toString();
+    write(`[preflight] GET ${abs}`);
+    const res = await fetch(abs, { cache: "no-store" });
+    write(`[preflight] status=${res.status} ok=${res.ok}`);
+    write(`[preflight] ct=${res.headers.get("content-type") || "?"}`);
+    const txt = await res.text();
+    write(`[preflight] bytes=${txt.length}`);
+    write(`[preflight] head:\n${clip(txt.slice(0, 300), 300)}`);
+    return { ok: res.ok, status: res.status, text: txt };
+  } catch (e) {
+    write(`[preflight] FAILED ❌ ${String(e)}`);
+    return { ok: false, status: 0, text: "" };
+  }
+}
+
 // Exported start() for router
 export async function start(meta = {}) {
   ensureOverlay();
@@ -140,6 +189,7 @@ export async function start(meta = {}) {
   const q = qs();
   const trace = q.trace === "1";
   const safe = q.safe === "1";
+  const noHud = q.nohud === "1";
 
   write(`[scarlett1] start()… build=${BUILD}`);
   write(`[meta] routerBuild=${meta.routerBuild || "?"}`);
@@ -147,11 +197,19 @@ export async function start(meta = {}) {
   write(`[env] ua=${navigator.userAgent}`);
   write(`[env] secureContext=${String(window.isSecureContext)}`);
   write(`[env] navigator.xr=${String(!!navigator.xr)}`);
-  write(`[opts] safe=${String(safe)} trace=${String(trace)} nohud=${String(q.nohud === "1")}`);
+  write(`[opts] safe=${String(safe)} trace=${String(trace)} nohud=${String(noHud)}`);
 
-  // IMPORTANT: this is where your world must load
-  // If this import fails, it means /js/scarlett1/world.js path/case or an import inside it is broken.
-  write(`[scarlett1] importing ./world.js …`);
+  // ✅ Prefetch world.js so we KNOW if it's missing or wrong-case
+  write(`[scarlett1] preflight ./world.js …`);
+  const pf = await preflight("./world.js");
+
+  if (!pf.ok) {
+    write(`\nFIX REQUIRED: /js/scarlett1/world.js is missing OR wrong-case OR not deployed.`);
+    write(`Required path: js/scarlett1/world.js (lowercase)`);
+    throw new Error("world.js preflight failed");
+  }
+
+  write(`\n[scarlett1] importing ./world.js …`);
   try {
     const world = await import("./world.js");
     write(`[scarlett1] world.js import OK ✅`);
@@ -160,31 +218,21 @@ export async function start(meta = {}) {
       throw new Error("world.js missing export createWorldOrchestrator()");
     }
 
-    // Start the world
     write(`[scarlett1] creating orchestrator…`);
     const api = world.createWorldOrchestrator({
-      // You can read safe/nohud inside world.js if you want,
-      // but even if you don’t, it won’t break anything.
       safeMode: safe,
-      noHud: q.nohud === "1",
+      noHud,
+      trace,
     });
 
     write(`[scarlett1] orchestrator created ✅`);
     if (trace) log("world api:", api);
-
     return api;
   } catch (e) {
     err("world start failed", e);
     write(`[ERR] world start failed ❌`);
     write(`[ERR] ${String(e?.message || e)}`);
     if (e?.stack) write(clip(e.stack));
-    write(`\nHINT: If router fetch was 200 but this fails, a nested import inside world.js is broken.`);
     throw e;
   }
-}
-
-// Optional auto-start when loaded directly (not via router)
-if (import.meta && import.meta.url) {
-  // Do nothing unless explicitly asked. Router calls start().
-  log("index loaded ✅ (waiting for router start())");
-}
+            }

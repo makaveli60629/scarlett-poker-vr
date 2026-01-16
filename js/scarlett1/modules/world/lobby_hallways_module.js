@@ -1,29 +1,20 @@
 // /js/scarlett1/modules/world/lobby_hallways_module.js
-// LOBBY + 4 HALLWAYS MODULE (FULL) — Modular Forever
-// - Sealed circular lobby (floor + wall)
-// - 4 hallways at cardinal directions
-// - 4 door frames / portals (visual)
-// - Neon trims for readability
-// Safe for Quest: simple meshes only
+// LOBBY + 4 HALLWAYS MODULE (FULL) — ROOT PATCHED
 
 export function createLobbyHallwaysModule({
-  // Lobby
   lobbyRadius = 12.5,
   lobbyWallHeight = 4.2,
   lobbyFloorY = 0.0,
 
-  // Hallways
   hallCount = 4,
   hallLength = 10.5,
   hallWidth = 3.8,
   hallHeight = 3.1,
 
-  // Door frames at end of each hall
   doorWidth = 2.3,
   doorHeight = 2.6,
   doorDepth = 0.25,
 
-  // Neon trim
   trimIntensity = 0.55,
 } = {}) {
   let built = false;
@@ -31,7 +22,6 @@ export function createLobbyHallwaysModule({
   function mat(ctx, color, rough = 0.9, metal = 0.06) {
     return new ctx.THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
   }
-
   function matGlow(ctx, color, emissive, ei) {
     return new ctx.THREE.MeshStandardMaterial({
       color,
@@ -41,7 +31,6 @@ export function createLobbyHallwaysModule({
       emissiveIntensity: ei,
     });
   }
-
   function ringLine(ctx, radius, y, color = 0x33ffff, seg = 160) {
     const pts = [];
     for (let i = 0; i <= seg; i++) {
@@ -63,28 +52,24 @@ export function createLobbyHallwaysModule({
     const frameMat = matGlow(ctx, 0x101020, 0x112244, 0.25);
     const neonMat = matGlow(ctx, 0x0f0f18, labelColor, trimIntensity);
 
-    // Two side posts
     const postGeo = new THREE.BoxGeometry(0.18, doorHeight, doorDepth);
     const left = new THREE.Mesh(postGeo, frameMat);
     const right = new THREE.Mesh(postGeo, frameMat);
     left.position.set(-doorWidth * 0.5, doorHeight * 0.5, 0);
     right.position.set(doorWidth * 0.5, doorHeight * 0.5, 0);
 
-    // Top beam
     const top = new THREE.Mesh(
       new THREE.BoxGeometry(doorWidth + 0.18, 0.18, doorDepth),
       frameMat
     );
     top.position.set(0, doorHeight, 0);
 
-    // Neon strip above
     const strip = new THREE.Mesh(
       new THREE.BoxGeometry(doorWidth + 0.06, 0.06, 0.08),
       neonMat
     );
     strip.position.set(0, doorHeight + 0.10, doorDepth * 0.45);
 
-    // “Portal plane” (invisible hit target for future click-to-teleport)
     const portalPlane = new THREE.Mesh(
       new THREE.PlaneGeometry(doorWidth, doorHeight),
       new THREE.MeshStandardMaterial({ color: 0x000000, transparent: true, opacity: 0.0 })
@@ -94,7 +79,6 @@ export function createLobbyHallwaysModule({
 
     g.add(left, right, top, strip, portalPlane);
     parent.add(g);
-
     return { group: g, portalPlane };
   }
 
@@ -106,9 +90,12 @@ export function createLobbyHallwaysModule({
       built = true;
 
       const THREE = ctx.THREE;
-      const root = ctx.scene;
 
-      // ---- Lobby floor
+      // ROOT GROUP (toggle-safe)
+      const root = new THREE.Group();
+      root.name = "lobby_hallways_ROOT";
+      ctx.scene.add(root);
+
       const floor = new THREE.Mesh(
         new THREE.CircleGeometry(lobbyRadius, 96),
         mat(ctx, 0x08080d, 0.95, 0.02)
@@ -117,7 +104,6 @@ export function createLobbyHallwaysModule({
       floor.position.y = lobbyFloorY;
       root.add(floor);
 
-      // ---- Sealed lobby wall
       const wall = new THREE.Mesh(
         new THREE.CylinderGeometry(lobbyRadius, lobbyRadius, lobbyWallHeight, 128, 1, true),
         mat(ctx, 0x0b0b12, 0.85, 0.08)
@@ -125,12 +111,10 @@ export function createLobbyHallwaysModule({
       wall.position.y = lobbyFloorY + lobbyWallHeight * 0.5;
       root.add(wall);
 
-      // ---- Lobby trim rings
       root.add(ringLine(ctx, lobbyRadius - 0.15, lobbyFloorY + 0.03, 0x33ffff));
       root.add(ringLine(ctx, lobbyRadius - 0.25, lobbyFloorY + 1.80, 0xff66ff));
       root.add(ringLine(ctx, lobbyRadius - 0.35, lobbyFloorY + lobbyWallHeight - 0.35, 0x66aaff));
 
-      // ---- Hallways (4 cardinal)
       const hallwayMat = mat(ctx, 0x0a0a12, 0.92, 0.06);
       const trimA = matGlow(ctx, 0x0f0f18, 0x33ffff, trimIntensity);
       const trimB = matGlow(ctx, 0x0f0f18, 0xff66ff, trimIntensity * 0.9);
@@ -145,7 +129,6 @@ export function createLobbyHallwaysModule({
       for (let i = 0; i < hallCount; i++) {
         const a = angles[i % angles.length];
 
-        // hallway center position starts at lobby edge, extends outward
         const startR = lobbyRadius - 0.2;
         const midR = startR + hallLength * 0.5;
 
@@ -158,7 +141,6 @@ export function createLobbyHallwaysModule({
         hall.position.set(hx, lobbyFloorY, hz);
         hall.rotation.y = yaw;
 
-        // floor
         const hFloor = new THREE.Mesh(
           new THREE.BoxGeometry(hallWidth, 0.08, hallLength),
           hallwayMat
@@ -166,7 +148,6 @@ export function createLobbyHallwaysModule({
         hFloor.position.y = 0.04;
         hall.add(hFloor);
 
-        // ceiling
         const hCeil = new THREE.Mesh(
           new THREE.BoxGeometry(hallWidth, 0.08, hallLength),
           hallwayMat
@@ -174,7 +155,6 @@ export function createLobbyHallwaysModule({
         hCeil.position.y = hallHeight;
         hall.add(hCeil);
 
-        // side walls
         const wallGeo = new THREE.BoxGeometry(0.12, hallHeight, hallLength);
         const wL = new THREE.Mesh(wallGeo, hallwayMat);
         const wR = new THREE.Mesh(wallGeo, hallwayMat);
@@ -182,7 +162,6 @@ export function createLobbyHallwaysModule({
         wR.position.set(hallWidth * 0.5, hallHeight * 0.5, 0);
         hall.add(wL, wR);
 
-        // neon trims along floor edges
         const edgeGeo = new THREE.BoxGeometry(0.06, 0.05, hallLength * 0.98);
         const eL = new THREE.Mesh(edgeGeo, (i % 2 === 0) ? trimA : trimB);
         const eR = new THREE.Mesh(edgeGeo, (i % 2 === 0) ? trimA : trimB);
@@ -190,7 +169,6 @@ export function createLobbyHallwaysModule({
         eR.position.set(hallWidth * 0.45, 0.06, 0);
         hall.add(eL, eR);
 
-        // door frame at the far end
         const doorZ = hallLength * 0.5 - 0.35;
         buildDoor(ctx, hall, 0, 0, doorZ, 0, doorColors[i % doorColors.length]);
 
@@ -200,4 +178,4 @@ export function createLobbyHallwaysModule({
       console.log("[lobby_hallways] built ✅ halls=", hallCount);
     },
   };
-}
+        }

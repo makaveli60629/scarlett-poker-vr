@@ -1,11 +1,17 @@
 // /js/index.js
-// SCARLETT ROUTER + DIAGNOSTICS (FULL) — FIXED PREFLIGHT PATH
+// SCARLETT ROUTER + DIAGNOSTICS (FULL) — Prefight index.js + world.js
 
-const BUILD = "ROUTER_FULL_DIAG_v2_PATHFIX";
+const BUILD = "ROUTER_FULL_DIAG_v3_PREFLIGHT_WORLD";
 
-const log = (...a) => console.log("[router]", ...a);
-const err = (...a) => console.error("[router]", ...a);
-
+function now() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+function clip(s, n = 700) {
+  s = String(s || "");
+  return s.length <= n ? s : s.slice(0, n) + "…";
+}
 function qs() {
   const p = new URLSearchParams(location.search);
   const o = {};
@@ -13,19 +19,8 @@ function qs() {
   return o;
 }
 
-function now() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-
-function clip(s, n = 1400) {
-  s = String(s || "");
-  if (s.length <= n) return s;
-  return s.slice(0, n) + "…";
-}
-
 let overlay, body, btnRow, hiddenBtn;
+let reportLines = [];
 let hidden = false;
 
 function ensureOverlay() {
@@ -75,7 +70,6 @@ function ensureOverlay() {
 
   overlay.appendChild(header);
   overlay.appendChild(body);
-
   document.body.appendChild(overlay);
 
   hiddenBtn = document.createElement("button");
@@ -103,7 +97,23 @@ function setHidden(v) {
   hiddenBtn.style.display = hidden ? "block" : "none";
 }
 
-function mkBtn(label, onClick) {
+function write(line) {
+  reportLines.push(line);
+  if (reportLines.length > 260) reportLines.shift();
+  if (body) body.textContent = reportLines.join("\n");
+}
+
+async function copyReport() {
+  const text = reportLines.join("\n");
+  try {
+    await navigator.clipboard.writeText(text);
+    write(`[${now()}] [copy] COPIED ✅`);
+  } catch (e) {
+    write(`[${now()}] [copy] FAILED ❌ ${String(e)}`);
+  }
+}
+
+function mkBtn(label, fn) {
   const b = document.createElement("button");
   b.textContent = label;
   b.style.padding = "8px 10px";
@@ -113,52 +123,16 @@ function mkBtn(label, onClick) {
   b.style.color = "white";
   b.style.cursor = "pointer";
   b.style.fontSize = "12px";
-  b.onclick = onClick;
+  b.onclick = fn;
   return b;
-}
-
-let reportLines = [];
-function write(line) {
-  reportLines.push(line);
-  if (reportLines.length > 240) reportLines.shift();
-  if (body) body.textContent = reportLines.join("\n");
-}
-
-async function copyReport() {
-  const text = reportLines.join("\n");
-  try { await navigator.clipboard.writeText(text); write(`[${now()}] [copy] COPIED ✅`); }
-  catch (e) { write(`[${now()}] [copy] FAILED ❌ ${String(e)}`); }
 }
 
 function addButtons() {
   btnRow.innerHTML = "";
   btnRow.appendChild(mkBtn("HIDE HUD", () => setHidden(true)));
-  btnRow.appendChild(mkBtn("RETRY IMPORT", () => runRouter().catch(() => {})));
-  btnRow.appendChild(mkBtn("HARD RELOAD", () => location.reload(true)));
+  btnRow.appendChild(mkBtn("RETRY", () => runRouter().catch(() => {})));
   btnRow.appendChild(mkBtn("COPY REPORT", () => copyReport()));
-  btnRow.appendChild(mkBtn("SAFE MODE", () => {
-    const u = new URL(location.href);
-    u.searchParams.set("safe", "1");
-    u.searchParams.set("v", String(Date.now()));
-    location.href = u.toString();
-  }));
-}
-
-function hookErrors() {
-  if (window.__scarlettRouterHooked) return;
-  window.__scarlettRouterHooked = true;
-
-  window.addEventListener("error", (ev) => {
-    write(`[${now()}] [window.error] ${ev?.message || "error"}`);
-    write(clip(`${ev?.filename || ""}:${ev?.lineno || ""}:${ev?.colno || ""}`));
-    if (ev?.error?.stack) write(clip(ev.error.stack));
-  });
-
-  window.addEventListener("unhandledrejection", (ev) => {
-    const r = ev?.reason;
-    write(`[${now()}] [unhandledrejection] ${String(r?.message || r || "unknown")}`);
-    if (r?.stack) write(clip(r.stack));
-  });
+  btnRow.appendChild(mkBtn("HARD RELOAD", () => location.reload(true)));
 }
 
 async function preflight(url) {
@@ -169,7 +143,7 @@ async function preflight(url) {
     write(`[${now()}] [fetch] ct=${res.headers.get("content-type") || "?"}`);
     const txt = await res.text();
     write(`[${now()}] [fetch] bytes=${txt.length}`);
-    write(`[${now()}] [fetch] head:\n${clip(txt.slice(0, 700), 700)}`);
+    write(`[${now()}] [fetch] head:\n${clip(txt.slice(0, 350), 350)}`);
     return { ok: res.ok, status: res.status, text: txt };
   } catch (e) {
     write(`[${now()}] [fetch] FAILED ❌ ${String(e)}`);
@@ -179,9 +153,8 @@ async function preflight(url) {
 
 async function runRouter() {
   ensureOverlay();
-  hookErrors();
-
   reportLines = [];
+
   write(`[${now()}] [HTML] booting…`);
   write(`[${now()}] [router] build=${BUILD}`);
   write(`[${now()}] [env] href=${location.href}`);
@@ -191,15 +164,19 @@ async function runRouter() {
 
   const q = qs();
   const v = q.v || `ROUTER_CACHEPROOF_${Date.now()}`;
-  const entryRel = `./scarlett1/index.js?v=${encodeURIComponent(v)}`;
 
-  // ✅ FIXED: preflight against /js/ correctly
-  const absolute = new URL(`/scarlett-poker-vr/js/scarlett1/index.js?v=${encodeURIComponent(v)}`, location.origin).toString();
-  await preflight(absolute);
+  const idxAbs = new URL(`/scarlett-poker-vr/js/scarlett1/index.js?v=${encodeURIComponent(v)}`, location.origin).toString();
+  const worldAbs = new URL(`/scarlett-poker-vr/js/scarlett1/world.js?v=${encodeURIComponent(v)}`, location.origin).toString();
 
-  write(`[${now()}] [router] importing: ${entryRel}`);
+  write(`\n--- PREFLIGHT: index.js ---`);
+  await preflight(idxAbs);
+
+  write(`\n--- PREFLIGHT: world.js ---`);
+  await preflight(worldAbs);
+
+  write(`\n[${now()}] [router] importing: ./scarlett1/index.js?v=${encodeURIComponent(v)}`);
   try {
-    const mod = await import(entryRel);
+    const mod = await import(`./scarlett1/index.js?v=${encodeURIComponent(v)}`);
     write(`[${now()}] [router] import OK ✅`);
     if (typeof mod.start === "function") {
       write(`[${now()}] [router] calling start()…`);
@@ -211,10 +188,7 @@ async function runRouter() {
   } catch (e) {
     write(`[${now()}] [ERR] scarlett1 runtime FAILED ❌`);
     write(`[${now()}] [ERR] ${String(e?.message || e)}`);
-    if (e?.stack) write(clip(e.stack));
-    write(`\nHINTS:`);
-    write(`- If preflight is 404: file path/case mismatch or not deployed.`);
-    write(`- If preflight is 200 but import fails: a bad import INSIDE index.js/world.js.`);
+    if (e?.stack) write(clip(e.stack, 900));
   }
 }
 

@@ -1,23 +1,48 @@
-// /js/scarlett1/index.js — PROBE (temporary)
-console.log("✅ scarlett1/index.js loaded");
+// /js/scarlett1/index.js — Scarlett Runtime Entry (Update 4.2 REAL)
 
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
+import { World } from "./world.js";
 
-const app = document.getElementById("app") || document.body;
+const overlay = document.getElementById("overlay");
+const log = (...a)=> overlay && (overlay.textContent += "\n[LOG] " + a.join(" "));
+const err = (...a)=> overlay && (overlay.textContent += "\n[ERR] " + a.join(" "));
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(innerWidth, innerHeight);
-renderer.xr.enabled = true;
-app.appendChild(renderer.domElement);
+(async () => {
+  try {
+    log("Scarlett runtime start ✅");
 
-document.body.appendChild(VRButton.createButton(renderer));
+    const host = document.getElementById("app") || document.body;
 
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x07070a);
-const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 100);
-camera.position.set(0, 1.6, 3);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.xr.enabled = true;
+    renderer.xr.setReferenceSpaceType("local-floor");
+    host.appendChild(renderer.domElement);
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x222222, 1));
+    addEventListener("resize", () =>
+      renderer.setSize(innerWidth, innerHeight)
+    );
 
-renderer.setAnimationLoop(()=> renderer.render(scene, camera));
+    document.body.appendChild(VRButton.createButton(renderer));
+    log("VRButton ready ✅");
+
+    const world = new World({ THREE, renderer });
+    await world.init();
+    log("world.init complete ✅");
+
+    renderer.setAnimationLoop((t, frame) => {
+      try {
+        world.tick(t, frame);
+        renderer.render(world.scene, world.camera);
+      } catch (e) {
+        err("FRAME CRASH ❌", e?.message || e);
+        renderer.setAnimationLoop(null);
+      }
+    });
+
+  } catch (e) {
+    err("FATAL ❌", e?.message || e);
+  }
+})();

@@ -1,115 +1,190 @@
 // /js/scarlett1/index.js
-// SCARLETT1 — Modular Entry Spine (FULL)
-// Renderer + XR session hooks + World.tick(dt). Nothing else.
+// SCARLETT1 ENTRY (FULL) — Start + Diagnostics + Options
+// Exported start() is called by /js/index.js router.
+// Supports URL params:
+// - safe=1    -> call orchestrator with "safe" options (if you use them)
+// - nohud=1   -> skip Android dev HUD if your orchestrator honors it
+// - trace=1   -> extra logs
+// - v=...     -> cacheproof
 
-import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
-import { VRButton } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
-import { createWorldOrchestrator } from "./world.js";
+const BUILD = "SCARLETT1_INDEX_FULL_DIAG_v1";
 
-const BUILD = "SCARLETT1_MODULAR_FOREVER_FULL_v1";
-const log = (...a) => console.log("[scarlett1/index]", ...a);
+const log = (...a) => console.log("[scarlett1]", ...a);
+const err = (...a) => console.error("[scarlett1]", ...a);
 
-let renderer, scene, camera;
-let playerRig, head;
-let clock;
-let xrSession = null;
-
-init();
-
-function init() {
-  clock = new THREE.Clock();
-
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x000000);
-
-  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 250);
-  camera.position.set(0, 1.6, 2.5);
-
-  playerRig = new THREE.Group();
-  playerRig.name = "PlayerRig";
-  scene.add(playerRig);
-
-  head = new THREE.Group();
-  head.name = "Head";
-  playerRig.add(head);
-  head.add(camera);
-
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.xr.enabled = true;
-
-  document.body.style.margin = "0";
-  document.body.style.overflow = "hidden";
-  document.body.appendChild(renderer.domElement);
-  document.body.appendChild(VRButton.createButton(renderer));
-
-  // baseline lighting (world module can add more)
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x101020, 0.6));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.55);
-  dir.position.set(4, 8, 2);
-  scene.add(dir);
-
-  // Orchestrator
-  const World = createWorldOrchestrator({ THREE, scene, renderer, camera, playerRig, head });
-
-  // Controller objects + lasers (visual + ray origin only)
-  const controllers = installControllers(renderer, playerRig);
-  World.setControllers(controllers);
-
-  renderer.xr.addEventListener("sessionstart", () => {
-    xrSession = renderer.xr.getSession();
-    World.onXRSessionStart(xrSession);
-    log("XR sessionstart ✅");
-  });
-
-  renderer.xr.addEventListener("sessionend", () => {
-    World.onXRSessionEnd();
-    xrSession = null;
-    log("XR sessionend ✅");
-  });
-
-  window.addEventListener("resize", onResize);
-  renderer.setAnimationLoop(() => loop(World));
-
-  log("runtime start ✅ build=", BUILD);
+function qs() {
+  const p = new URLSearchParams(location.search);
+  const o = {};
+  for (const [k, v] of p.entries()) o[k] = v === "" ? "1" : v;
+  return o;
 }
 
-function loop(World) {
-  const dt = Math.min(clock.getDelta(), 0.033);
-  World.tick(dt);
-  renderer.render(scene, camera);
-}
+let overlay, body;
+let lines = [];
+function ensureOverlay() {
+  if (overlay) return;
 
-function onResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-}
+  overlay = document.createElement("div");
+  overlay.setAttribute("data-hud", "1");
+  overlay.style.position = "fixed";
+  overlay.style.left = "10px";
+  overlay.style.top = "10px";
+  overlay.style.right = "10px";
+  overlay.style.maxWidth = "920px";
+  overlay.style.zIndex = "999998";
+  overlay.style.padding = "12px";
+  overlay.style.borderRadius = "16px";
+  overlay.style.border = "1px solid rgba(255,255,255,0.18)";
+  overlay.style.background = "rgba(0,0,0,0.45)";
+  overlay.style.color = "white";
+  overlay.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace";
+  overlay.style.fontSize = "12px";
+  overlay.style.lineHeight = "1.25";
+  overlay.style.whiteSpace = "pre-wrap";
+  overlay.style.backdropFilter = "blur(8px)";
+  overlay.style.webkitBackdropFilter = "blur(8px)";
 
-function installControllers(renderer, playerRig) {
-  const c0 = renderer.xr.getController(0);
-  const c1 = renderer.xr.getController(1);
-  c0.name = "XRController0";
-  c1.name = "XRController1";
-  playerRig.add(c0);
-  playerRig.add(c1);
+  const header = document.createElement("div");
+  header.style.fontWeight = "900";
+  header.style.letterSpacing = "0.08em";
+  header.textContent = `SCARLETT1 ENTRY • ${BUILD}`;
+  overlay.appendChild(header);
 
-  function addLaser(ctrl, color) {
-    const geom = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, -1),
-    ]);
-    const mat = new THREE.LineBasicMaterial({ color });
-    const line = new THREE.Line(geom, mat);
-    line.name = "Laser";
-    line.scale.z = 6.0;
-    ctrl.add(line);
-  }
+  const btns = document.createElement("div");
+  btns.style.display = "flex";
+  btns.style.gap = "6px";
+  btns.style.flexWrap = "wrap";
+  btns.style.marginTop = "8px";
+  overlay.appendChild(btns);
 
-  addLaser(c0, 0xff66ff);
-  addLaser(c1, 0x66aaff);
+  const mkBtn = (label, fn) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.style.padding = "8px 10px";
+    b.style.borderRadius = "12px";
+    b.style.border = "1px solid rgba(255,255,255,0.18)";
+    b.style.background = "rgba(20,20,30,0.75)";
+    b.style.color = "white";
+    b.style.cursor = "pointer";
+    b.onclick = fn;
+    return b;
+  };
 
-  return { c0, c1 };
+  btns.appendChild(mkBtn("COPY", async () => {
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      write("[copy] COPIED ✅");
+    } catch (e) {
+      write("[copy] FAILED ❌ " + String(e));
     }
+  }));
+
+  btns.appendChild(mkBtn("SAFE=1", () => {
+    const u = new URL(location.href);
+    u.searchParams.set("safe", "1");
+    u.searchParams.set("v", String(Date.now()));
+    location.href = u.toString();
+  }));
+
+  btns.appendChild(mkBtn("SAFE=0", () => {
+    const u = new URL(location.href);
+    u.searchParams.delete("safe");
+    u.searchParams.set("v", String(Date.now()));
+    location.href = u.toString();
+  }));
+
+  btns.appendChild(mkBtn("RELOAD", () => location.reload(true)));
+
+  body = document.createElement("div");
+  body.style.marginTop = "10px";
+  overlay.appendChild(body);
+
+  document.body.appendChild(overlay);
+}
+
+function clip(s, n = 1400) {
+  s = String(s || "");
+  if (s.length <= n) return s;
+  return s.slice(0, n) + "…";
+}
+
+function write(line) {
+  ensureOverlay();
+  lines.push(String(line));
+  if (lines.length > 200) lines.shift();
+  body.textContent = lines.join("\n");
+}
+
+function hookErrors() {
+  if (window.__scarlettEntryHooked) return;
+  window.__scarlettEntryHooked = true;
+
+  window.addEventListener("error", (ev) => {
+    write(`[window.error] ${ev?.message || "error"}`);
+    write(clip(`${ev?.filename || ""}:${ev?.lineno || ""}:${ev?.colno || ""}`));
+    if (ev?.error?.stack) write(clip(ev.error.stack));
+  });
+
+  window.addEventListener("unhandledrejection", (ev) => {
+    const r = ev?.reason;
+    write(`[unhandledrejection] ${String(r?.message || r || "unknown")}`);
+    if (r?.stack) write(clip(r.stack));
+  });
+}
+
+// Exported start() for router
+export async function start(meta = {}) {
+  ensureOverlay();
+  hookErrors();
+
+  const q = qs();
+  const trace = q.trace === "1";
+  const safe = q.safe === "1";
+
+  write(`[scarlett1] start()… build=${BUILD}`);
+  write(`[meta] routerBuild=${meta.routerBuild || "?"}`);
+  write(`[env] href=${location.href}`);
+  write(`[env] ua=${navigator.userAgent}`);
+  write(`[env] secureContext=${String(window.isSecureContext)}`);
+  write(`[env] navigator.xr=${String(!!navigator.xr)}`);
+  write(`[opts] safe=${String(safe)} trace=${String(trace)} nohud=${String(q.nohud === "1")}`);
+
+  // IMPORTANT: this is where your world must load
+  // If this import fails, it means /js/scarlett1/world.js path/case or an import inside it is broken.
+  write(`[scarlett1] importing ./world.js …`);
+  try {
+    const world = await import("./world.js");
+    write(`[scarlett1] world.js import OK ✅`);
+
+    if (typeof world.createWorldOrchestrator !== "function") {
+      throw new Error("world.js missing export createWorldOrchestrator()");
+    }
+
+    // Start the world
+    write(`[scarlett1] creating orchestrator…`);
+    const api = world.createWorldOrchestrator({
+      // You can read safe/nohud inside world.js if you want,
+      // but even if you don’t, it won’t break anything.
+      safeMode: safe,
+      noHud: q.nohud === "1",
+    });
+
+    write(`[scarlett1] orchestrator created ✅`);
+    if (trace) log("world api:", api);
+
+    return api;
+  } catch (e) {
+    err("world start failed", e);
+    write(`[ERR] world start failed ❌`);
+    write(`[ERR] ${String(e?.message || e)}`);
+    if (e?.stack) write(clip(e.stack));
+    write(`\nHINT: If router fetch was 200 but this fails, a nested import inside world.js is broken.`);
+    throw e;
+  }
+}
+
+// Optional auto-start when loaded directly (not via router)
+if (import.meta && import.meta.url) {
+  // Do nothing unless explicitly asked. Router calls start().
+  log("index loaded ✅ (waiting for router start())");
+}

@@ -1,6 +1,6 @@
 // /js/scarlett1/index.js
-// SCARLETT1 ENTRY (FULL) — Start + Diagnostics + Options + ABS WORLD PREFLIGHT + HUD MASTER SWITCH
-const BUILD = "SCARLETT1_INDEX_FULL_DIAG_v5_HUDMASTER";
+// SCARLETT1 ENTRY (FULL) — Minimal by default (no green diag), HUD toggle, ABS preflight
+const BUILD = "SCARLETT1_INDEX_FULL_v6_HIDEGREEN_DEFAULT_ANDROIDREADY";
 
 const log = (...a) => console.log("[scarlett1]", ...a);
 
@@ -15,122 +15,145 @@ function clip(s, n = 300) {
   return s.length > n ? s.slice(0, n) + "…" : s;
 }
 
-let overlay;
+let overlay = null;
+let toggleBtn = null;
+
+function ensureToggleButton() {
+  if (toggleBtn) return toggleBtn;
+
+  toggleBtn = document.createElement("button");
+  toggleBtn.textContent = "SHOW HUD";
+  toggleBtn.style.cssText =
+    "position:fixed;left:10px;top:10px;z-index:999999;" +
+    "padding:10px 14px;border-radius:14px;" +
+    "background:rgba(0,0,0,.65);border:1px solid rgba(0,255,255,.28);" +
+    "color:#8ff;font:14px/1 system-ui;";
+
+  // IMPORTANT: never hide this button when HUD hidden
+  toggleBtn.dataset.scarlettHud = "1";
+  toggleBtn.dataset.scarlettControls = "1";
+
+  toggleBtn.onclick = () => {
+    const cur = window.__scarlettHudVisible === true;
+    setHudVisible(!cur);
+  };
+
+  document.body.appendChild(toggleBtn);
+  return toggleBtn;
+}
+
 function ensureOverlay() {
   if (overlay) return overlay;
   overlay = document.createElement("pre");
   overlay.id = "scarlettDiagOverlay";
+  overlay.dataset.scarlettHud = "1";
   overlay.style.cssText =
-    "position:fixed;left:8px;top:8px;z-index:99999;max-width:95vw;max-height:55vh;overflow:auto;" +
-    "background:rgba(0,0,0,.75);color:#8ff;font:12px/1.25 monospace;padding:10px;border:1px solid rgba(0,255,255,.25);" +
-    "border-radius:10px;white-space:pre-wrap;";
-  overlay.textContent = "=== SCARLETT LOADER ===\n";
+    "position:fixed;left:10px;top:56px;z-index:999998;max-width:95vw;max-height:55vh;overflow:auto;" +
+    "background:rgba(0,0,0,.75);color:#8ff;font:12px/1.25 monospace;padding:10px;" +
+    "border:1px solid rgba(0,255,255,.20);border-radius:12px;white-space:pre-wrap;";
+  overlay.textContent = "=== SCARLETT HUD ===\n";
   document.body.appendChild(overlay);
   return overlay;
 }
+
 function write(s) {
   ensureOverlay();
   overlay.textContent += s + "\n";
 }
 
 function setHudVisible(visible) {
-  // 1) our loader overlay
+  ensureToggleButton();
+
+  window.__scarlettHudVisible = !!visible;
+  toggleBtn.textContent = visible ? "HIDE HUD" : "SHOW HUD";
+
+  // overlay
   const o = document.getElementById("scarlettDiagOverlay");
   if (o) o.style.display = visible ? "block" : "none";
 
-  // 2) Android dev HUD + module panel (anything we tagged)
+  // hide/show all Scarlett HUD except controllers
   document.querySelectorAll("[data-scarlett-hud='1']").forEach((el) => {
+    if (el.dataset.scarlettControls === "1") return; // keep controllers + toggle visible
+    if (el.id === "scarlettDiagOverlay") return;      // handled above
     el.style.display = visible ? "" : "none";
   });
 
-  // 3) legacy toggles (if any old HUDs exist)
-  document.querySelectorAll(".scarlett-hud, .hud, #hud, #HUD, #debugHud").forEach((el) => {
-    el.style.display = visible ? "" : "none";
-  });
-
-  // save state
   try { localStorage.setItem("SCARLETT_HUD_VISIBLE", visible ? "1" : "0"); } catch {}
-  window.__scarlettHudVisible = !!visible;
 }
 
-function getHudVisibleDefault(p) {
+function hudDefault(p) {
   // URL wins
-  if (p.nohud === "1") return false;
-  if (p.hud === "0") return false;
+  if (p.nohud === "1" || p.hud === "0") return false;
   if (p.hud === "1") return true;
 
-  // localstorage fallback
-  try {
-    const v = localStorage.getItem("SCARLETT_HUD_VISIBLE");
-    if (v === "0") return false;
-    if (v === "1") return true;
-  } catch {}
-  return true;
+  // If trace/diag requested, show HUD
+  if (p.trace === "1" || p.diag === "1") return true;
+
+  // Otherwise default OFF (this removes your green diag HUD by default)
+  return false;
 }
 
-function installHudToggleHotkey() {
-  if (window.__scarlettHudHotkeyInstalled) return;
-  window.__scarlettHudHotkeyInstalled = true;
-
-  window.addEventListener("keydown", (e) => {
-    if (e.key?.toLowerCase() === "h") {
-      const cur = window.__scarlettHudVisible !== false;
-      setHudVisible(!cur);
-      console.log("[scarlett1] HUD toggle ->", !cur);
-    }
-  });
-}
-
-async function preflightAbsolute(absUrl) {
+async function preflightAbsolute(absUrl, hudOn) {
   try {
-    write(`[preflight] GET ${absUrl}`);
     const res = await fetch(absUrl, { cache: "no-store" });
-    write(`[preflight] status=${res.status} ok=${res.ok}`);
-    write(`[preflight] ct=${res.headers.get("content-type") || "?"}`);
+
+    if (hudOn) {
+      write(`[preflight] GET ${absUrl}`);
+      write(`[preflight] status=${res.status} ok=${res.ok}`);
+      write(`[preflight] ct=${res.headers.get("content-type") || "?"}`);
+    }
+
     const txt = await res.text();
-    write(`[preflight] bytes=${txt.length}`);
-    write(`[preflight] head:\n${clip(txt.slice(0, 300), 300)}`);
+
+    if (hudOn) {
+      write(`[preflight] bytes=${txt.length}`);
+      write(`[preflight] head:\n${clip(txt.slice(0, 320), 320)}`);
+    }
+
     return { ok: res.ok, status: res.status, text: txt };
   } catch (e) {
-    write(`[preflight] FAILED ❌ ${String(e)}`);
+    if (hudOn) write(`[preflight] FAILED ❌ ${String(e)}`);
     return { ok: false, status: 0, text: "" };
   }
 }
 
 export async function start(meta = {}) {
   const p = qs();
+
   const safeMode = p.safe === "1";
   const noHud = p.nohud === "1";
   const trace = p.trace === "1";
   const v = p.v || String(Date.now());
 
+  ensureToggleButton();
+
+  const hudOn = hudDefault(p);
+  setHudVisible(hudOn);
+
   log(`start()… build=${BUILD}`);
   log("[meta]", meta);
   log("[opts]", { safeMode, noHud, trace, v });
 
-  // HUD initial state
-  installHudToggleHotkey();
-  const hudVisible = getHudVisibleDefault(p);
-  setHudVisible(hudVisible);
-
-  // Absolute preflight for world.js
-  const worldAbs = `${location.origin}/scarlett-poker-vr/js/scarlett1/world.js?v=${encodeURIComponent(v)}`;
-  if (hudVisible) {
-    write("\n[scarlett1] preflight world.js (ABS) …");
+  if (hudOn) {
+    write(`[scarlett1] build=${BUILD}`);
+    write(`[opts] safe=${safeMode} nohud=${noHud} trace=${trace} v=${v}`);
   }
-  const pf = await preflightAbsolute(worldAbs);
+
+  // Absolute preflight (silent if HUD hidden)
+  const worldAbs = `${location.origin}/scarlett-poker-vr/js/scarlett1/world.js?v=${encodeURIComponent(v)}`;
+  const pf = await preflightAbsolute(worldAbs, hudOn);
   if (!pf.ok) throw new Error("world.js preflight failed");
 
-  if (hudVisible) write(`\n[scarlett1] importing ./world.js?v=${v} …`);
+  if (hudOn) write(`[scarlett1] importing ./world.js?v=${v} …`);
   const m = await import(`./world.js?v=${encodeURIComponent(v)}`);
 
   const make = m?.createWorldOrchestrator;
   if (typeof make !== "function") throw new Error("world.js missing createWorldOrchestrator()");
 
-  if (hudVisible) write("[scarlett1] creating orchestrator…");
+  if (hudOn) write("[scarlett1] creating orchestrator…");
   const orch = make({ safeMode, noHud, trace });
 
-  if (hudVisible) write("[scarlett1] orchestrator created ✅");
+  if (hudOn) write("[scarlett1] orchestrator created ✅");
 
   window.__scarlett = { orch, meta, opts: { safeMode, noHud, trace, v } };
   return orch;

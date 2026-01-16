@@ -1,15 +1,13 @@
 // /js/scarlett1/index.js
 // SCARLETT1 — Modular Entry Spine (FULL)
-// - Creates renderer + XR session
-// - Delegates EVERYTHING else to world orchestrator
+// Renderer + XR session hooks + World.tick(dt). Nothing else.
 
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
 import { createWorldOrchestrator } from "./world.js";
 
-const BUILD = "SCARLETT1_MODULAR_FULL_v1";
+const BUILD = "SCARLETT1_MODULAR_FOREVER_FULL_v1";
 const log = (...a) => console.log("[scarlett1/index]", ...a);
-const err = (...a) => console.error("[scarlett1/index]", ...a);
 
 let renderer, scene, camera;
 let playerRig, head;
@@ -53,14 +51,13 @@ function init() {
   dir.position.set(4, 8, 2);
   scene.add(dir);
 
-  // Orchestrator (modules live here)
+  // Orchestrator
   const World = createWorldOrchestrator({ THREE, scene, renderer, camera, playerRig, head });
 
-  // XR controllers (THREE objects + lasers) created once here and handed to World
+  // Controller objects + lasers (visual + ray origin only)
   const controllers = installControllers(renderer, playerRig);
   World.setControllers(controllers);
 
-  // XR session hooks → delegated to World
   renderer.xr.addEventListener("sessionstart", () => {
     xrSession = renderer.xr.getSession();
     World.onXRSessionStart(xrSession);
@@ -91,7 +88,6 @@ function onResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-// Controllers + lasers (pure visuals + ray origin). No input mapping here.
 function installControllers(renderer, playerRig) {
   const c0 = renderer.xr.getController(0);
   const c1 = renderer.xr.getController(1);

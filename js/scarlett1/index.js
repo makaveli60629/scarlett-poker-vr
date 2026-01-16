@@ -1,7 +1,8 @@
 // /js/scarlett1/index.js
-const BUILD = "SCARLETT1_INDEX_FULL_v14_TRIPLE_CDN_CHAIN";
+const BUILD = "SCARLETT1_INDEX_FULL_v15_TRIPLE_CDN_CHAIN_CONSOLE_PROOF";
 
 const err = (...a) => console.error("[scarlett1]", ...a);
+const proof = (s) => console.log("[router_proof]", s);
 
 function ensureRoot() {
   let root = document.getElementById("app");
@@ -18,6 +19,7 @@ function ensureRoot() {
 }
 
 function setBanner(text) {
+  proof(text.replace(/\n/g, " | "));
   let b = document.getElementById("scarlettBanner");
   if (!b) {
     b = document.createElement("div");
@@ -40,6 +42,7 @@ function setBanner(text) {
 }
 
 function setRed(text) {
+  proof(("RED: " + text).replace(/\n/g, " | "));
   let p = document.getElementById("scarlettPanic");
   if (!p) {
     p = document.createElement("div");
@@ -90,6 +93,7 @@ async function ensureThreeGlobal() {
       lastErr = new Error("Loaded but window.THREE missing: " + src);
     } catch (e) {
       lastErr = e;
+      setBanner(`⚠️ load failed\n${src}\n${String(e.message || e)}`);
     }
   }
   throw lastErr || new Error("THREE failed to load");

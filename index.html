@@ -5,11 +5,12 @@
   <meta name="viewport"
         content="width=device-width,height=device-height,initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
   <title>Scarlett Poker VR</title>
+
   <style>
     html, body { margin:0; width:100%; height:100%; overflow:hidden; background:#000; }
     #app { position:fixed; inset:0; }
     #overlay{
-      position:fixed;left:6px;top:6px;right:6px;max-height:55vh;overflow:auto;
+      position:fixed;left:6px;top:6px;right:6px;max-height:60vh;overflow:auto;
       background:rgba(0,0,0,.82);color:#33ff66;padding:10px;z-index:99999;
       font:12px/1.25 monospace;white-space:pre-wrap;border:1px solid #33ff66;
     }
@@ -32,9 +33,9 @@
     log("navigator.xr=", String(!!navigator.xr));
 
     try {
-      await import("./js/index.js?v=router_full");
+      await import("./js/index.js?v=router_probe_full");
       log("router import OK ✅");
-    } catch(e) {
+    } catch (e) {
       err("router import FAILED ❌", e?.message || String(e));
     }
   </script>

@@ -1,6 +1,5 @@
 // /js/scarlett1/index.js
-// SCARLETT1 ENTRY — LOCAL THREE FIRST (GitHub Pages) + hard status banners
-const BUILD = "SCARLETT1_INDEX_FULL_v13_LOCAL_THREE_FIRST";
+const BUILD = "SCARLETT1_INDEX_FULL_v14_TRIPLE_CDN_CHAIN";
 
 const err = (...a) => console.error("[scarlett1]", ...a);
 
@@ -62,25 +61,6 @@ function setRed(text) {
   p.textContent = text;
 }
 
-function installGuards() {
-  if (window.__scarlettGuardsInstalled) return;
-  window.__scarlettGuardsInstalled = true;
-
-  window.addEventListener("error", (e) => {
-    const msg = String(e?.message || e);
-    err("window.error:", msg);
-    setRed("❌ ERROR\n" + msg);
-    setBanner("❌ ERROR\n" + msg);
-  });
-
-  window.addEventListener("unhandledrejection", (e) => {
-    const msg = String(e?.reason || e);
-    err("unhandledrejection:", msg);
-    setRed("❌ REJECTION\n" + msg);
-    setBanner("❌ REJECTION\n" + msg);
-  });
-}
-
 function loadScript(src) {
   return new Promise((resolve, reject) => {
     const s = document.createElement("script");
@@ -95,23 +75,29 @@ function loadScript(src) {
 async function ensureThreeGlobal() {
   if (window.THREE) return "already";
 
-  // 1) LOCAL (your GitHub Pages)
-  const local = "./js/vendor/three.min.js";
-  try {
-    setBanner(`✅ Scarlett\n${BUILD}\nloading THREE local...\n${local}`);
-    return await loadScript(local);
-  } catch (e) {
-    setBanner(`⚠️ local THREE failed\ntrying CDN...\n${e.message}`);
-  }
+  const chain = [
+    "https://unpkg.com/three@0.158.0/build/three.min.js",
+    "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js",
+    "https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js",
+  ];
 
-  // 2) CDN fallback
-  const cdn = "https://unpkg.com/three@0.158.0/build/three.min.js";
-  return await loadScript(cdn);
+  let lastErr = null;
+  for (const src of chain) {
+    try {
+      setBanner(`✅ Scarlett\n${BUILD}\nloading THREE...\n${src}`);
+      const ok = await loadScript(src);
+      if (window.THREE) return ok;
+      lastErr = new Error("Loaded but window.THREE missing: " + src);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("THREE failed to load");
 }
 
 async function boot2D() {
   const src = await ensureThreeGlobal();
-  if (!window.THREE) throw new Error("window.THREE missing after script load");
+  if (!window.THREE) throw new Error("window.THREE missing after load");
 
   setBanner(`✅ Scarlett\n${BUILD}\nTHREE OK from:\n${src}`);
 
@@ -160,21 +146,14 @@ async function boot2D() {
   }
   loop();
 
-  window.addEventListener("resize", () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-
   setRed(`✅ STARTED\n${BUILD}\n2D proof OK`);
   setBanner(`✅ Scarlett\n${BUILD}\n2D world ready ✅`);
 }
 
 export function start() {
   ensureRoot();
-  installGuards();
   setRed(`SYNC OK\n${BUILD}`);
-  setBanner(`✅ Scarlett\n${BUILD}\nstep: start()`);
+  setBanner(`✅ Scarlett\n${BUILD}\nstart()`);
 
   if (window.__scarlettRan) return true;
   window.__scarlettRan = true;

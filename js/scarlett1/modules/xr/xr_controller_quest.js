@@ -1,8 +1,6 @@
 // /js/scarlett1/modules/xr/xr_controller_quest.js
-// ScarlettXR Quest Controller Module (Single Source of Truth)
-// - Reads raw WebXR gamepads
-// - Normalizes stick/buttons
-// - Caches mapping so you stop reconfiguring
+// Quest/Oculus XR Controller Module (FULL)
+// Single source of truth. Caches axis choice so you stop reconfiguring.
 
 export function createXRControllerQuestModule({
   storageKey = "scarlett1.xr.mapping.quest.v1",
@@ -25,7 +23,6 @@ export function createXRControllerQuestModule({
     }
   };
 
-  // Load cached mapping
   try {
     const cached = JSON.parse(localStorage.getItem(storageKey) || "null");
     if (cached && typeof cached === "object") state.mapping = { ...state.mapping, ...cached };

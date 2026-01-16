@@ -1,21 +1,16 @@
 // /js/scarlett1/modules/world/world_master_module.js
-// WORLD MASTER MODULE (FULL PATCHED) — Scorpion Main Test Room
-// - Builds pit/divot + stairs + oval table + chairs + bots + hover cards + community cards + chip stacks
-// - Uses ctx.tagInteractable(obj, kind, grabbable) from world.js built-in policy module
-// - No dependency on ctx.registerInteractable / ctx.registerWorldUpdater
+// WORLD MASTER MODULE (FULL) — Scorpion Main Test Room
+// Builds: expanded pit/divot + stairs + oval table + chairs + show bots + community cards + bot hover cards + chip stacks + dealer button
+// Tags interactables:
+//  - community cards: NOT grabbable
+//  - bot hover cards: NOT grabbable
+//  - chips + dealer button: grabbable
+//
+// Uses ctx.tagInteractable(obj, kind, grabbable) if present, else sets userData directly.
+// Registers interactables via ctx.registerInteractable(obj) if present.
 
 export function createWorldMasterModule() {
   let built = false;
-
-  const runtime = {
-    bots: [],
-    botHoverCards: [],
-    communityCards: [],
-    tableGroup: null,
-    root: null,
-    CFG: null,
-    cardGeo: null,
-  };
 
   return {
     name: "world_master_module",
@@ -38,16 +33,25 @@ export function createWorldMasterModule() {
         SEAT_COUNT: 6,
         BOT_COUNT: 4,
 
-        COMMUNITY_CARD_H: 1.10,
+        COMMUNITY_CARD_H: 0.14,  // height above felt
         BOT_CARD_H: 2.05,
 
         CHIP_STACKS: 5,
         CHIP_STACK_SIZE: 12,
       };
-      runtime.CFG = CFG;
 
       const matStd = (color, rough = 0.85, metal = 0.08) =>
         new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
+
+      // Helper: tag + register
+      function tag(obj, kind, grabbable) {
+        if (!obj) return;
+        if (ctx.tagInteractable) ctx.tagInteractable(obj, kind, grabbable);
+        obj.userData = obj.userData || {};
+        obj.userData.kind = kind;
+        if (typeof grabbable === "boolean") obj.userData.grabbable = grabbable;
+        if (ctx.registerInteractable) ctx.registerInteractable(obj);
+      }
 
       function ringLine(radius, y, color = 0x33ffff, seg = 128) {
         const pts = [];
@@ -59,14 +63,14 @@ export function createWorldMasterModule() {
         return new THREE.Line(geo, new THREE.LineBasicMaterial({ color }));
       }
 
-      // Root: Room #1 if room manager exists
+      // Root: use Room #1 group if room manager exists, else scene root
       let root = ctx.scene;
       const r0 = ctx.rooms?.get?.(0);
       if (r0?.group) root = r0.group;
-      runtime.root = root;
 
-      // Lighting inside room
-      root.add(new THREE.HemisphereLight(0xffffff, 0x101020, 0.35));
+      // Local lighting so it’s visible even if theme modules are off
+      const hemi = new THREE.HemisphereLight(0xffffff, 0x101020, 0.35);
+      root.add(hemi);
       const key = new THREE.DirectionalLight(0xffffff, 0.35);
       key.position.set(4, 8, 2);
       root.add(key);
@@ -92,7 +96,7 @@ export function createWorldMasterModule() {
       // rim trim
       root.add(ringLine(CFG.PIT_RADIUS - 0.12, 0.05, 0x33ffcc));
 
-      // Stairs down
+      // STAIRS
       const stairs = new THREE.Group();
       stairs.name = "PitStairs";
       const steps = 10;
@@ -114,14 +118,13 @@ export function createWorldMasterModule() {
       }
       root.add(stairs);
 
-      // TABLE GROUP
+      // TABLE GROUP (in pit)
       const tableGroup = new THREE.Group();
       tableGroup.name = "MainTableGroup";
       tableGroup.position.set(0, pitFloorY, 0);
       root.add(tableGroup);
-      runtime.tableGroup = tableGroup;
 
-      // Table top (oval feel)
+      // Table top (oval / capsule)
       const tableTop = new THREE.Mesh(
         new THREE.CapsuleGeometry(CFG.TABLE_WID * 0.5, CFG.TABLE_LEN - CFG.TABLE_WID, 10, 32),
         new THREE.MeshStandardMaterial({ color: 0x0b1b14, roughness: 0.95, metalness: 0.05 })
@@ -130,7 +133,7 @@ export function createWorldMasterModule() {
       tableTop.position.y = CFG.TABLE_H;
       tableGroup.add(tableTop);
 
-      // Rail (no poles/ring junk)
+      // Rail (no poles, no ring above)
       const rail = new THREE.Mesh(
         new THREE.TorusGeometry(Math.max(CFG.TABLE_LEN, CFG.TABLE_WID) * 0.52 + 0.22, 0.07, 18, 96),
         matStd(0x151520, 0.75, 0.15)
@@ -147,7 +150,7 @@ export function createWorldMasterModule() {
       base.position.y = CFG.TABLE_H * 0.5;
       tableGroup.add(base);
 
-      // SEATS
+      // SEATS / CHAIRS
       const seats = [];
       const seatRadius = Math.max(CFG.TABLE_LEN, CFG.TABLE_WID) * 0.52 + 0.95;
 
@@ -168,7 +171,7 @@ export function createWorldMasterModule() {
         seats.push({ x, z, yaw });
       }
 
-      // BOTS
+      // SHOW BOTS (simple mannequins for now)
       const bots = [];
       for (let i = 0; i < CFG.BOT_COUNT; i++) {
         const s = seats[i % seats.length];
@@ -206,12 +209,10 @@ export function createWorldMasterModule() {
         tableGroup.add(bot);
         bots.push(bot);
       }
-      runtime.bots = bots;
 
-      // COMMUNITY CARDS (NON-GRABBABLE)
+      // COMMUNITY CARDS (non-grabbable)
+      const communityCards = [];
       const cardGeo = new THREE.PlaneGeometry(0.12, 0.18);
-      runtime.cardGeo = cardGeo;
-
       const commMat = new THREE.MeshStandardMaterial({
         color: 0xffffff,
         roughness: 0.6,
@@ -219,7 +220,6 @@ export function createWorldMasterModule() {
         side: THREE.DoubleSide,
       });
 
-      const communityCards = [];
       const commY = CFG.TABLE_H + CFG.COMMUNITY_CARD_H;
       const commSpread = 0.16;
 
@@ -227,17 +227,12 @@ export function createWorldMasterModule() {
         const c = new THREE.Mesh(cardGeo, commMat.clone());
         c.position.set((i - 2) * commSpread, commY, 0.0);
         c.rotation.x = -Math.PI / 2;
-        c.name = `CommunityCard_${i}`;
-
-        // ✅ policy tag
-        ctx.tagInteractable?.(c, "community_card", false);
-
+        tag(c, "community_card", false);
         tableGroup.add(c);
         communityCards.push(c);
       }
-      runtime.communityCards = communityCards;
 
-      // BOT HOVER CARDS (NON-GRABBABLE)
+      // BOT HOVER CARDS (non-grabbable)
       const botHoverCards = [];
       const botMat = new THREE.MeshStandardMaterial({
         color: 0xddddff,
@@ -249,42 +244,68 @@ export function createWorldMasterModule() {
       for (let b = 0; b < bots.length; b++) {
         for (let k = 0; k < 2; k++) {
           const c = new THREE.Mesh(cardGeo, botMat.clone());
-          c.name = `BotHoverCard_${b}_${k}`;
+          c.userData = c.userData || {};
           c.userData._bot = b;
           c.userData._slot = k;
-
-          // ✅ policy tag
-          ctx.tagInteractable?.(c, "bot_card", false);
-
+          tag(c, "bot_card", false);
           root.add(c);
           botHoverCards.push(c);
         }
       }
-      runtime.botHoverCards = botHoverCards;
 
-      // CHIPS (GRABBABLE)
+      function updateHoverCards() {
+        for (let b = 0; b < bots.length; b++) {
+          const bot = bots[b];
+
+          const headWorld = new THREE.Vector3();
+          bot.getWorldPosition(headWorld);
+          headWorld.y += CFG.BOT_CARD_H;
+
+          const q = new THREE.Quaternion();
+          bot.getWorldQuaternion(q);
+
+          const left = new THREE.Vector3(-0.08, 0, 0).applyQuaternion(q);
+          const right = new THREE.Vector3(0.08, 0, 0).applyQuaternion(q);
+
+          let c0 = null, c1 = null;
+          for (const c of botHoverCards) {
+            if (c.userData._bot === b && c.userData._slot === 0) c0 = c;
+            if (c.userData._bot === b && c.userData._slot === 1) c1 = c;
+          }
+
+          if (c0) {
+            c0.position.copy(headWorld).add(left);
+            c0.lookAt(0, headWorld.y, 0);
+          }
+          if (c1) {
+            c1.position.copy(headWorld).add(right);
+            c1.lookAt(0, headWorld.y, 0);
+          }
+        }
+      }
+
+      // CHIPS (grabbable, stacked flat)
+      const chips = [];
       const chipColors = [0xffffff, 0xff3355, 0x33ff88, 0x66aaff, 0xffcc33];
       const chipGeo = new THREE.CylinderGeometry(0.032, 0.032, 0.012, 28);
 
       const tableY = CFG.TABLE_H + 0.02;
-
       for (let s = 0; s < CFG.CHIP_STACKS; s++) {
         for (let i = 0; i < CFG.CHIP_STACK_SIZE; i++) {
           const chip = new THREE.Mesh(
             chipGeo,
             new THREE.MeshStandardMaterial({ color: chipColors[s], roughness: 0.4, metalness: 0.15 })
           );
-          chip.name = `Chip_${s}_${i}`;
+          chip.rotation.x = 0;
+          chip.rotation.z = 0;
           chip.position.set(-0.45 + s * 0.12, tableY + i * 0.0122, 0.55);
-
-          // ✅ policy tag
-          ctx.tagInteractable?.(chip, "chip", true);
-
+          tag(chip, "chip", true);
           tableGroup.add(chip);
+          chips.push(chip);
         }
       }
 
-      // DEALER BUTTON (GRABBABLE)
+      // DEALER BUTTON (grabbable)
       const dealerButton = new THREE.Mesh(
         new THREE.CylinderGeometry(0.05, 0.05, 0.01, 32),
         new THREE.MeshStandardMaterial({
@@ -295,15 +316,24 @@ export function createWorldMasterModule() {
           emissiveIntensity: 0.15,
         })
       );
-      dealerButton.name = "DealerButton";
+      dealerButton.rotation.x = 0;
+      dealerButton.rotation.z = 0;
       dealerButton.position.set(0.0, tableY + 0.006, -0.35);
-
-      // ✅ policy tag
-      ctx.tagInteractable?.(dealerButton, "dealer", true);
-
+      tag(dealerButton, "dealer", true);
       tableGroup.add(dealerButton);
 
-      // Expose references
+      // Bot “playing” animation + hover cards update
+      ctx.registerWorldUpdater?.((dt) => {
+        for (const b of bots) {
+          b.userData.phase += dt * 1.2;
+          const p = b.userData.phase;
+          b.userData.handL.position.y = 1.10 + Math.sin(p) * 0.02;
+          b.userData.handR.position.y = 1.10 + Math.cos(p) * 0.02;
+        }
+        updateHoverCards();
+      });
+
+      // Expose for debug
       ctx._show = {
         root,
         room: r0 || null,
@@ -311,58 +341,20 @@ export function createWorldMasterModule() {
         pitFloorY,
         seats,
         bots,
+        chips,
         dealerButton,
         communityCards,
         botHoverCards,
       };
 
-      const count = ctx.interactables?.count?.() ?? 0;
-      console.log("[world_master_module] build done ✅ room=", r0?.group?.name || "sceneRoot", "interactables=", count);
-    },
-
-    update(ctx, { dt }) {
-      // Animate bots + keep hover cards above heads facing center
-      const bots = runtime.bots;
-      const cards = runtime.botHoverCards;
-      const CFG = runtime.CFG;
-      if (!bots?.length || !cards?.length || !CFG) return;
-
-      // bot hands bob
-      for (const b of bots) {
-        b.userData.phase += dt * 1.2;
-        const p = b.userData.phase;
-        if (b.userData.handL) b.userData.handL.position.y = 1.10 + Math.sin(p) * 0.02;
-        if (b.userData.handR) b.userData.handR.position.y = 1.10 + Math.cos(p) * 0.02;
-      }
-
-      // hover cards update
-      const headWorld = new ctx.THREE.Vector3();
-      const q = new ctx.THREE.Quaternion();
-      const leftOff = new ctx.THREE.Vector3();
-      const rightOff = new ctx.THREE.Vector3();
-
-      for (let bi = 0; bi < bots.length; bi++) {
-        const bot = bots[bi];
-
-        bot.getWorldPosition(headWorld);
-        headWorld.y += CFG.BOT_CARD_H;
-        bot.getWorldQuaternion(q);
-
-        leftOff.set(-0.08, 0, 0).applyQuaternion(q);
-        rightOff.set(0.08, 0, 0).applyQuaternion(q);
-
-        for (const c of cards) {
-          if (c.userData._bot !== bi) continue;
-
-          if (c.userData._slot === 0) {
-            c.position.copy(headWorld).add(leftOff);
-            c.lookAt(0, headWorld.y, 0);
-          } else {
-            c.position.copy(headWorld).add(rightOff);
-            c.lookAt(0, headWorld.y, 0);
-          }
-        }
-      }
+      console.log(
+        "[world_master_module] build done ✅ room=",
+        r0?.group?.name || "sceneRoot",
+        "chips=",
+        chips.length,
+        "bots=",
+        bots.length
+      );
     },
   };
-        }
+          }

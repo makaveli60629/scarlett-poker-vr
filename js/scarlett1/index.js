@@ -1,6 +1,6 @@
 // /js/scarlett1/index.js
-// SCARLETT1 ENTRY (FULL) — Quest-safe XR loop + controllers + HUD + Android virtual controls
-const BUILD = "SCARLETT1_INDEX_FULL_v7_QUEST_FIX";
+// SCARLETT1 ENTRY (FULL) — Router-compatible: exports start() + idempotent run
+const BUILD = "SCARLETT1_INDEX_FULL_v8_ROUTER_START_EXPORT";
 
 const log = (...a) => console.log("[scarlett1]", ...a);
 const warn = (...a) => console.warn("[scarlett1]", ...a);
@@ -15,26 +15,12 @@ function qs() {
 const Q = qs();
 const DIAG = !!(Q.diag || Q.debug || Q.green);
 
-(function installGlobalGuards() {
-  window.addEventListener("error", (e) => {
-    err("window.error:", e?.message, e?.filename, e?.lineno, e?.colno);
-    window.__scarlettLastError = String(e?.message || e);
-    window.dispatchEvent(new CustomEvent("scarlett:error", { detail: window.__scarlettLastError }));
-  });
-  window.addEventListener("unhandledrejection", (e) => {
-    err("unhandledrejection:", e?.reason);
-    window.__scarlettLastError = String(e?.reason || e);
-    window.dispatchEvent(new CustomEvent("scarlett:error", { detail: window.__scarlettLastError }));
-  });
-})();
-
 function isQuest() {
   const ua = navigator.userAgent || "";
   return /OculusBrowser|Quest/i.test(ua);
 }
 function isAndroidPhone() {
   const ua = navigator.userAgent || "";
-  // Quest is Android too, so we separate it
   return /Android/i.test(ua) && !isQuest();
 }
 
@@ -53,6 +39,10 @@ function ensureRoot() {
 }
 
 function makeHud() {
+  // avoid duplicates
+  const existing = document.getElementById("scarlettHud");
+  if (existing) return { hudLine: (s) => {}, hud: existing };
+
   const hud = document.createElement("div");
   hud.id = "scarlettHud";
   hud.style.position = "fixed";
@@ -95,7 +85,6 @@ function makeHud() {
     body.style.display = visible ? "none" : "block";
     bar.style.display = visible ? "none" : "flex";
     if (visible) {
-      // show tiny "Show" pill
       hud.style.padding = "0";
       hud.style.background = "transparent";
       const pill = document.createElement("button");
@@ -138,7 +127,6 @@ function makeHud() {
 
   function hudLine(s) {
     body.textContent = (body.textContent ? body.textContent + "\n" : "") + s;
-    // keep last ~200 lines
     const lines = body.textContent.split("\n");
     if (lines.length > 220) body.textContent = lines.slice(lines.length - 220).join("\n");
   }
@@ -146,7 +134,35 @@ function makeHud() {
   return { hud, hudLine };
 }
 
-(async function main() {
+function installGlobalGuards(H) {
+  if (window.__scarlettGuardsInstalled) return;
+  window.__scarlettGuardsInstalled = true;
+
+  window.addEventListener("error", (e) => {
+    err("window.error:", e?.message, e?.filename, e?.lineno, e?.colno);
+    const msg = String(e?.message || e);
+    window.__scarlettLastError = msg;
+    window.dispatchEvent(new CustomEvent("scarlett:error", { detail: msg }));
+    if (H) H(`❌ ERROR: ${msg}`);
+  });
+
+  window.addEventListener("unhandledrejection", (e) => {
+    err("unhandledrejection:", e?.reason);
+    const msg = String(e?.reason || e);
+    window.__scarlettLastError = msg;
+    window.dispatchEvent(new CustomEvent("scarlett:error", { detail: msg }));
+    if (H) H(`❌ REJECTION: ${msg}`);
+  });
+}
+
+async function run() {
+  // Idempotent guard (router may call start multiple times)
+  if (window.__scarlettStarted) {
+    log("start() ignored — already started");
+    return;
+  }
+  window.__scarlettStarted = true;
+
   ensureRoot();
   const { hudLine } = makeHud();
 
@@ -156,17 +172,15 @@ function makeHud() {
     log(s);
   };
 
+  installGlobalGuards(H);
+
   H(`boot ✅ build=${BUILD}`);
   H(`env ua=${navigator.userAgent}`);
   H(`env secureContext=${window.isSecureContext}`);
   H(`env navigator.xr=${!!navigator.xr}`);
   H(`mode quest=${isQuest()} androidPhone=${isAndroidPhone()}`);
 
-  window.addEventListener("scarlett:error", (e) => {
-    H(`❌ ERROR: ${String(e.detail || window.__scarlettLastError || "unknown")}`);
-  });
-
-  // Import world orchestrator (module-safe)
+  // Import world orchestrator
   try {
     const mod = await import(`./world.js?v=${Date.now()}`);
     if (typeof mod.bootWorld === "function") {
@@ -181,9 +195,22 @@ function makeHud() {
     H(`❌ world import failed: ${String(e?.message || e)}`);
   }
 
-  // Helpful hint shown even when DIAG is off
   if (!DIAG) {
     const body = document.getElementById("scarlettHudBody");
     if (body) body.textContent = `Scarlett loaded ✅ (${BUILD})\nTip: add ?diag=1 to the URL for green logs.`;
   }
-})();
+}
+
+/**
+ * Router contract:
+ * The router imports this module then calls start().
+ */
+export async function start() {
+  return run();
+}
+
+// Safety: if router DOESN'T call start(), we still try once on next tick.
+// (Idempotent guard prevents double-run)
+setTimeout(() => {
+  try { run(); } catch (e) {}
+}, 0);

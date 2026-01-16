@@ -1,13 +1,9 @@
 // /js/scarlett1/modules/world/room_portals_module.js
-// ROOM PORTALS MODULE (FULL) — Modular Forever
-// - Creates in-lobby portal pylons for Game Rooms
-// - Laser + Trigger teleports to room center
-// - Uses normalized input from xr_controller_quest module
-// - Requires: room_manager_module (ctx.rooms.ensure/get/list)
+// ROOM PORTALS MODULE (FULL) — ROOT PATCHED
 
 export function createRoomPortalsModule({
   portalCount = 20,
-  lobbyRadius = 10.8,     // radius where portals sit inside lobby
+  lobbyRadius = 10.8,
   portalY = 0.0,
   portalHeight = 2.2,
   portalWidth = 0.70,
@@ -29,8 +25,7 @@ export function createRoomPortalsModule({
   }
 
   function ensureRooms(ctx) {
-    if (!ctx.rooms?.ensure) return;
-    ctx.rooms.ensure(portalCount);
+    ctx.rooms?.ensure?.(portalCount);
   }
 
   function build(ctx) {
@@ -40,7 +35,10 @@ export function createRoomPortalsModule({
     ensureRooms(ctx);
 
     const THREE = ctx.THREE;
-    const root = ctx.scene; // portals live in lobby, not inside rooms
+
+    const root = new THREE.Group();
+    root.name = "room_portals_ROOT";
+    ctx.scene.add(root);
 
     const group = new THREE.Group();
     group.name = "RoomPortals";
@@ -65,7 +63,6 @@ export function createRoomPortalsModule({
       p.position.set(x, portalY, z);
       p.rotation.y = yaw;
 
-      // body
       const body = new THREE.Mesh(
         new THREE.BoxGeometry(portalWidth, portalHeight, portalDepth),
         bodyMat
@@ -73,7 +70,6 @@ export function createRoomPortalsModule({
       body.position.y = portalHeight * 0.5;
       p.add(body);
 
-      // glow strip
       const glow = new THREE.Mesh(
         new THREE.BoxGeometry(portalWidth * 0.92, portalHeight * 0.25, portalDepth * 0.65),
         glowMat
@@ -81,8 +77,6 @@ export function createRoomPortalsModule({
       glow.position.set(0, portalHeight * 0.78, portalDepth * 0.55);
       p.add(glow);
 
-      // "Number" tile (simple neon block encoding 1-20 as height bars)
-      // Quest-safe "number substitute" — you can swap for real text later.
       const bars = new THREE.Group();
       bars.name = "NumberBars";
       const n = i + 1;
@@ -98,7 +92,6 @@ export function createRoomPortalsModule({
       }
       p.add(bars);
 
-      // target plate (raycast hit area)
       const plate = new THREE.Mesh(
         new THREE.PlaneGeometry(portalWidth * 1.0, portalHeight * 0.95),
         new THREE.MeshStandardMaterial({ color: 0x000000, transparent: true, opacity: 0.0 })
@@ -143,7 +136,6 @@ export function createRoomPortalsModule({
     const wp = new THREE.Vector3();
     room.group.getWorldPosition(wp);
 
-    // spawn inside room a bit forward
     const q = new THREE.Quaternion();
     room.group.getWorldQuaternion(q);
 
@@ -154,23 +146,22 @@ export function createRoomPortalsModule({
 
     const e = new THREE.Euler().setFromQuaternion(q, "YXZ");
     ctx.playerRig.rotation.set(0, e.y, 0);
+  }
 
-    console.log(`[room_portals] teleport ✅ room #${roomIndex + 1}`);
+  function rootExists(ctx) {
+    let found = false;
+    ctx.scene.traverse(o => { if (o.name === "room_portals_ROOT") found = true; });
+    return found;
   }
 
   return {
     name: "room_portals",
-
-    onEnable(ctx) {
-      // build portals in lobby
-      build(ctx);
-    },
-
+    onEnable(ctx) { build(ctx); },
     update(ctx, { input }) {
+      if (!rootExists(ctx)) return; // toggled OFF
       if (!ctx.xrSession) return;
       if (!portals.length || !ctx.rooms?.get) return;
 
-      // Laser click: if trigger pressed, raycast from whichever hand pressed it
       const hands = [];
       if (trigDown(input, "left")) hands.push("left");
       if (trigDown(input, "right")) hands.push("right");
@@ -185,22 +176,17 @@ export function createRoomPortalsModule({
         if (!r) continue;
 
         raycaster.set(r.origin, r.dir);
-
-        // Collect plates for intersection
         const plates = portals.map(p => p.plate);
         const hits = raycaster.intersectObjects(plates, true);
-
         if (hits.length) {
-          const obj = hits[0].object;
-          const idx = obj?.userData?.portalIndex;
+          const idx = hits[0].object?.userData?.portalIndex;
           if (typeof idx === "number") {
-            // Ensure rooms exist up to this index
             ctx.rooms.ensure?.(Math.max(portalCount, idx + 1));
             teleportToRoom(ctx, idx);
-            return; // one teleport per frame
+            return;
           }
         }
       }
     },
   };
-                         }
+  }

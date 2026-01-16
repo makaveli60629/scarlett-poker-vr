@@ -1,4 +1,4 @@
-// /js/scarlett1/world.js — Scarlett1 World REAL baseline (always visible)
+// /js/scarlett1/world.js — Scarlett1 World v4.3 (teleport surfaces ready)
 
 export class World {
   constructor({ THREE, renderer }) {
@@ -8,7 +8,7 @@ export class World {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x05070a);
 
-    this.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 200);
+    this.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 250);
     this.camera.position.set(0, 1.6, 3);
 
     this.rig = new THREE.Group();
@@ -16,28 +16,30 @@ export class World {
     this.rig.add(this.camera);
     this.scene.add(this.rig);
 
-    this.t = 0;
+    this.teleportSurfaces = [];
   }
 
   async init() {
     const THREE = this.THREE;
 
     // Lights
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x111111, 1.2);
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x101018, 1.25);
     const dir = new THREE.DirectionalLight(0xffffff, 1.0);
-    dir.position.set(5, 10, 5);
+    dir.position.set(6, 10, 5);
     this.scene.add(hemi, dir);
 
-    // BIG FLOOR
+    // Teleportable floor (big)
     const floor = new THREE.Mesh(
       new THREE.CircleGeometry(18, 72),
-      new THREE.MeshStandardMaterial({ color: 0x0b2a2a, roughness: 0.9, metalness: 0.05 })
+      new THREE.MeshStandardMaterial({ color: 0x0b2a2a, roughness: 0.92, metalness: 0.05 })
     );
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = 0;
+    floor.name = "TeleportFloor";
     this.scene.add(floor);
+    this.teleportSurfaces.push(floor);
 
-    // CENTER RING
+    // Center ring marker
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(1.2, 0.06, 16, 80),
       new THREE.MeshStandardMaterial({ color: 0x33ffcc, emissive: 0x006655, emissiveIntensity: 0.7 })
@@ -46,15 +48,16 @@ export class World {
     ring.position.y = 0.02;
     this.scene.add(ring);
 
-    // TABLE PLACEHOLDER
+    // Table placeholder
     const table = new THREE.Mesh(
       new THREE.CylinderGeometry(2.2, 2.2, 0.4, 64),
-      new THREE.MeshStandardMaterial({ color: 0x552200, roughness: 0.8 })
+      new THREE.MeshStandardMaterial({ color: 0x552200, roughness: 0.85 })
     );
     table.position.set(0, 0.2, 0);
+    table.name = "TablePlaceholder";
     this.scene.add(table);
 
-    // SIGN (CanvasTexture) so you KNOW it rendered
+    // Sign (CanvasTexture)
     const canvas = document.createElement("canvas");
     canvas.width = 512;
     canvas.height = 256;
@@ -66,7 +69,7 @@ export class World {
     ctx.fillText("SCARLETT WORLD OK", 40, 110);
     ctx.font = "24px monospace";
     ctx.fillStyle = "#9bbcff";
-    ctx.fillText("Press ENTER VR", 40, 165);
+    ctx.fillText("Enter VR + Move + Teleport", 40, 165);
 
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
@@ -81,13 +84,11 @@ export class World {
   }
 
   tick(t, frame) {
-    this.t = t;
-
-    // Keep camera aspect correct
+    // keep camera aspect correct
     const w = innerWidth, h = innerHeight;
-    const aspect = w / h;
-    if (this.camera.aspect !== aspect) {
-      this.camera.aspect = aspect;
+    const a = w / h;
+    if (this.camera.aspect !== a) {
+      this.camera.aspect = a;
       this.camera.updateProjectionMatrix();
     }
   }

@@ -1,27 +1,14 @@
 // /js/scarlett1/modules/xr/xr_grab_module.js
-// XR GRAB MODULE (FULL) — Modular Forever (Registry + Policy Compatible)
-//
-// - Ray grab + close grab
-// - Uses ctx.controllers.left/right inputSources OR controller Object3D (if your XR rig provides)
-// - Uses ctx.input.left/right.trigger (Quest mapper populates this in world.js)
-// - Honors ctx.canGrab or ctx._interactionPolicy.canGrab if present
-// - Uses ctx.interactables registry (ctx.interactables.all OR .objects())
-// - Respects obj.userData.grabbable=false AND registry meta.grabbable=false
-//
-// NOTE: This module expects ctx.controllers.left/right to be some node with getWorldPosition/getWorldQuaternion.
-// If your system stores inputSources (not Object3D), your locomotion module likely provides nodes.
-// If ctx.controllers.* isn't a 3D node, it will safely do nothing.
+// XR GRAB MODULE (FULL) — Modular Forever
+// Honors ctx._interactionPolicy.canGrab and obj.userData.grabbable
 
 export function createXRGrabModule({
   rayDistance = 8.5,
   closeRadius = 0.28,
   holdDistance = 0.10,
-
   grabDownThreshold = 0.60,
   grabUpThreshold = 0.25,
-
   keepChipsUpright = true,
-
   scanEveryNFrames = 4,
 } = {}) {
   let built = false;
@@ -29,176 +16,110 @@ export function createXRGrabModule({
   const state = {
     frame: 0,
     prevTrig: { left: 0, right: 0 },
-    held: { left: null, right: null }, // { obj, parent }
+    held: { left: null, right: null },
     raycaster: null,
-    v1: null,
-    v2: null,
-    q1: null,
+    tmpP: null,
+    tmpQ: null,
     cachedTargets: [],
   };
 
-  function ensureRoot(ctx) {
+  function ensure(ctx) {
     if (built) return;
     built = true;
-
-    const root = new ctx.THREE.Group();
-    root.name = "xr_grab_ROOT";
-    ctx.scene.add(root);
-
     state.raycaster = new ctx.THREE.Raycaster();
-    state.v1 = new ctx.THREE.Vector3();
-    state.v2 = new ctx.THREE.Vector3();
-    state.q1 = new ctx.THREE.Quaternion();
+    state.tmpP = new ctx.THREE.Vector3();
+    state.tmpQ = new ctx.THREE.Quaternion();
   }
 
-  function rootExists(ctx) {
-    let found = false;
-    ctx.scene.traverse(o => { if (o.name === "xr_grab_ROOT") found = true; });
-    return found;
-  }
-
-  function isTriggerDown(prev, cur) {
-    return cur >= grabDownThreshold && prev < grabDownThreshold;
-  }
-  function isTriggerUp(prev, cur) {
-    return cur <= grabUpThreshold && prev > grabUpThreshold;
-  }
+  function trigDown(prev, cur) { return cur >= grabDownThreshold && prev < grabDownThreshold; }
+  function trigUp(prev, cur) { return cur <= grabUpThreshold && prev > grabUpThreshold; }
 
   function canGrab(ctx, obj, hand) {
     try {
-      if (typeof ctx.canGrab === "function") return !!ctx.canGrab(obj, hand);
       if (ctx._interactionPolicy?.canGrab) return !!ctx._interactionPolicy.canGrab(obj, hand);
     } catch {}
-    return true;
+    return obj?.userData?.grabbable === true;
   }
 
-  function isGrabbableFast(obj) {
-    if (!obj) return false;
-    if (obj.userData?.grabbable === false) return false;
-
-    // If explicitly true, accept.
-    if (obj.userData?.grabbable === true) return true;
-
-    const k = obj.userData?.kind;
-    // Default allow for chips/dealer/props; cards are controlled by policy tagging
-    return (k === "chip" || k === "dealer" || k === "prop");
-  }
-
-  function getRegistryTargets(ctx) {
-    const reg = ctx.interactables;
-    if (!reg) return null;
-
-    // reg.all is a getter returning array of objects
-    if (Array.isArray(reg.all) && reg.all.length) return reg.all;
-    if (typeof reg.objects === "function") return reg.objects();
-    return null;
-  }
-
-  function gatherTargets(ctx) {
-    // Prefer registry objects
-    const regTargets = getRegistryTargets(ctx);
-    if (Array.isArray(regTargets) && regTargets.length) return regTargets;
-
-    // Fallback: scan scene (filtered)
+  function gather(ctx) {
+    // Prefer ctx.interactables list if present
+    if (Array.isArray(ctx.interactables) && ctx.interactables.length) {
+      return ctx.interactables.filter(o => o?.isObject3D);
+    }
     const out = [];
     ctx.scene.traverse((o) => {
-      if (!o?.isObject3D) return;
-      if (!o.visible) return;
-      if (!o.isMesh && !o.isGroup) return;
-      if (!isGrabbableFast(o)) return;
-      out.push(o);
+      if (!o?.isObject3D || !o.visible) return;
+      if (o.userData?.grabbable === true) out.push(o);
     });
     return out;
   }
 
-  function getHandNode(ctx, hand) {
-    const node = hand === "left" ? ctx.controllers?.left : ctx.controllers?.right;
-    // must look like Object3D
-    if (!node || typeof node.getWorldPosition !== "function" || typeof node.getWorldQuaternion !== "function") return null;
-    return node;
+  function handNode(ctx, hand) {
+    return hand === "left" ? ctx.controllers.left : ctx.controllers.right;
   }
 
-  function getRayFromHand(ctx, hand) {
-    const node = getHandNode(ctx, hand);
+  function rayCandidate(ctx, hand, targets) {
+    const node = handNode(ctx, hand);
     if (!node) return null;
 
-    node.getWorldPosition(state.v1);
-    node.getWorldQuaternion(state.q1);
+    node.getWorldPosition(state.tmpP);
+    node.getWorldQuaternion(state.tmpQ);
 
-    const origin = state.v1.clone(); // small alloc, ok
-    const dir = new ctx.THREE.Vector3(0, 0, -1).applyQuaternion(state.q1).normalize(); // alloc, ok
-    return { origin, dir, node };
-  }
-
-  function findCloseCandidate(ctx, hand, targets) {
-    const node = getHandNode(ctx, hand);
-    if (!node) return null;
-
-    node.getWorldPosition(state.v1);
-    const handPos = state.v1;
-
-    let best = null;
-    let bestD = 1e9;
-
-    for (const o of targets) {
-      if (!o) continue;
-      if (!canGrab(ctx, o, hand)) continue;
-
-      // Respect policy: registry meta may mark grabbable=false
-      const meta = ctx.interactables?.list?.().find(m => m.object === o);
-      if (meta && meta.grabbable === false) continue;
-      if (o.userData?.grabbable === false) continue;
-
-      o.getWorldPosition(state.v2);
-      const d = handPos.distanceTo(state.v2);
-      if (d <= closeRadius && d < bestD) {
-        best = o;
-        bestD = d;
-      }
-    }
-    return best;
-  }
-
-  function findRayCandidate(ctx, hand, targets) {
-    const r = getRayFromHand(ctx, hand);
-    if (!r) return null;
-
+    const dir = new ctx.THREE.Vector3(0, 0, -1).applyQuaternion(state.tmpQ).normalize();
     state.raycaster.far = rayDistance;
-    state.raycaster.set(r.origin, r.dir);
+    state.raycaster.set(state.tmpP, dir);
 
     const hits = state.raycaster.intersectObjects(targets, true);
-    if (!hits.length) return null;
-
     for (const h of hits) {
       let o = h.object;
       while (o && o !== ctx.scene) {
-        // policy guard
-        if (o.userData?.grabbable === false) { o = o.parent; continue; }
-
-        // registry meta guard (if registered)
-        const meta = ctx.interactables?.list?.().find(m => m.object === o);
-        if (meta && meta.grabbable === false) { o = o.parent; continue; }
-
-        if (isGrabbableFast(o) && canGrab(ctx, o, hand)) return o;
+        if (o.userData?.grabbable === true && canGrab(ctx, o, hand)) return o;
         o = o.parent;
       }
     }
     return null;
   }
 
-  function attachToHand(ctx, hand, obj) {
-    const node = getHandNode(ctx, hand);
+  function closeCandidate(ctx, hand, targets) {
+    const node = handNode(ctx, hand);
+    if (!node) return null;
+
+    const hp = new ctx.THREE.Vector3();
+    node.getWorldPosition(hp);
+
+    let best = null;
+    let bestD = 1e9;
+
+    for (const o of targets) {
+      if (!o || !canGrab(ctx, o, hand)) continue;
+      const p = new ctx.THREE.Vector3();
+      o.getWorldPosition(p);
+      const d = hp.distanceTo(p);
+      if (d <= closeRadius && d < bestD) { best = o; bestD = d; }
+    }
+    return best;
+  }
+
+  function attach(ctx, hand, obj) {
+    const node = handNode(ctx, hand);
     if (!node || !obj) return;
 
     if (state.held.left?.obj === obj || state.held.right?.obj === obj) return;
 
     const prevParent = obj.parent || ctx.scene;
 
+    obj.updateMatrixWorld(true);
+    const worldPos = new ctx.THREE.Vector3();
+    const worldQuat = new ctx.THREE.Quaternion();
+    const worldScale = new ctx.THREE.Vector3();
+    obj.matrixWorld.decompose(worldPos, worldQuat, worldScale);
+
     prevParent.remove(obj);
     node.add(obj);
 
     obj.position.set(0, 0, -holdDistance);
     obj.quaternion.set(0, 0, 0, 1);
+    obj.scale.copy(worldScale);
 
     obj.userData._held = true;
     obj.userData._heldBy = hand;
@@ -206,28 +127,30 @@ export function createXRGrabModule({
     state.held[hand] = { obj, parent: prevParent };
 
     if (keepChipsUpright && obj.userData?.kind === "chip") obj.userData._keepUpright = true;
-
     console.log("[xr_grab] grabbed ✅", hand, obj.name || obj.uuid);
   }
 
-  function detachFromHand(ctx, hand) {
+  function detach(ctx, hand) {
     const h = state.held[hand];
     if (!h?.obj) return;
 
     const obj = h.obj;
-    const node = getHandNode(ctx, hand);
+    const node = handNode(ctx, hand);
     const parent = h.parent || ctx.scene;
 
-    // preserve world transform
     obj.updateMatrixWorld(true);
-    obj.getWorldPosition(state.v1);
-    obj.getWorldQuaternion(state.q1);
+
+    const worldPos = new ctx.THREE.Vector3();
+    const worldQuat = new ctx.THREE.Quaternion();
+    const worldScale = new ctx.THREE.Vector3();
+    obj.matrixWorld.decompose(worldPos, worldQuat, worldScale);
 
     node?.remove(obj);
     parent.add(obj);
 
-    obj.position.copy(state.v1);
-    obj.quaternion.copy(state.q1);
+    obj.position.copy(worldPos);
+    obj.quaternion.copy(worldQuat);
+    obj.scale.copy(worldScale);
 
     if (keepChipsUpright && obj.userData?.kind === "chip") {
       obj.rotation.x = 0;
@@ -239,11 +162,10 @@ export function createXRGrabModule({
     obj.userData._heldBy = null;
 
     state.held[hand] = null;
-
     console.log("[xr_grab] released ✅", hand, obj.name || obj.uuid);
   }
 
-  function updateHeldUpright() {
+  function keepUpright() {
     if (!keepChipsUpright) return;
     for (const hand of ["left", "right"]) {
       const h = state.held[hand];
@@ -260,48 +182,45 @@ export function createXRGrabModule({
     name: "xr_grab",
 
     onEnable(ctx) {
-      ensureRoot(ctx);
-      state.cachedTargets = gatherTargets(ctx);
+      ensure(ctx);
+      state.cachedTargets = gather(ctx);
       console.log("[xr_grab] ready ✅ targets=", state.cachedTargets.length);
     },
 
     update(ctx, { input }) {
-      if (!rootExists(ctx)) return;
-
+      ensure(ctx);
       state.frame++;
 
-      if (state.frame % scanEveryNFrames === 0) {
-        state.cachedTargets = gatherTargets(ctx);
+      if (state.frame % scanEveryNFrames === 0) state.cachedTargets = gather(ctx);
+
+      const L = input?.left?.trigger ?? 0;
+      const R = input?.right?.trigger ?? 0;
+
+      const Ld = trigDown(state.prevTrig.left, L);
+      const Rd = trigDown(state.prevTrig.right, R);
+
+      const Lu = trigUp(state.prevTrig.left, L);
+      const Ru = trigUp(state.prevTrig.right, R);
+
+      state.prevTrig.left = L;
+      state.prevTrig.right = R;
+
+      if (Lu) detach(ctx, "left");
+      if (Ru) detach(ctx, "right");
+
+      if (Ld && !state.held.left) {
+        const c = closeCandidate(ctx, "left", state.cachedTargets);
+        const r = c || rayCandidate(ctx, "left", state.cachedTargets);
+        if (r) attach(ctx, "left", r);
       }
 
-      const leftTrig = input?.left?.trigger ?? 0;
-      const rightTrig = input?.right?.trigger ?? 0;
-
-      const leftDown = isTriggerDown(state.prevTrig.left, leftTrig);
-      const rightDown = isTriggerDown(state.prevTrig.right, rightTrig);
-
-      const leftUp = isTriggerUp(state.prevTrig.left, leftTrig);
-      const rightUp = isTriggerUp(state.prevTrig.right, rightTrig);
-
-      state.prevTrig.left = leftTrig;
-      state.prevTrig.right = rightTrig;
-
-      if (leftUp) detachFromHand(ctx, "left");
-      if (rightUp) detachFromHand(ctx, "right");
-
-      if (leftDown && !state.held.left) {
-        const close = findCloseCandidate(ctx, "left", state.cachedTargets);
-        const ray = close || findRayCandidate(ctx, "left", state.cachedTargets);
-        if (ray) attachToHand(ctx, "left", ray);
+      if (Rd && !state.held.right) {
+        const c = closeCandidate(ctx, "right", state.cachedTargets);
+        const r = c || rayCandidate(ctx, "right", state.cachedTargets);
+        if (r) attach(ctx, "right", r);
       }
 
-      if (rightDown && !state.held.right) {
-        const close = findCloseCandidate(ctx, "right", state.cachedTargets);
-        const ray = close || findRayCandidate(ctx, "right", state.cachedTargets);
-        if (ray) attachToHand(ctx, "right", ray);
-      }
-
-      updateHeldUpright();
+      keepUpright();
     },
   };
-    }
+  }

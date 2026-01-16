@@ -1,130 +1,144 @@
-// /js/scarlett1/modules/xr/xr_controller_quest.js
-// Quest/Oculus XR Controller Module (FULL)
-// Single source of truth. Caches axis choice so you stop reconfiguring.
+// /js/scarlett1/modules/xr/xr_controller_quest_module.js
+// XR Controller Quest Module (FULL)
+// Goal: Normalize Quest controllers (thumbsticks, triggers, grips, buttons)
+// and provide stable ctx.input.left/right for all other modules.
+// Works even when not in XR; stays idle.
 
-export function createXRControllerQuestModule({
-  storageKey = "scarlett1.xr.mapping.quest.v1",
-  deadzone = 0.18,
-} = {}) {
-  const state = {
-    session: null,
-    sources: { left: null, right: null },
-    gamepads: { left: null, right: null },
-    mapping: {
-      stick: "auto",           // "axes01" | "axes23" | "auto"
-      triggerIdx: [0, 1],
-      gripIdx: [1, 2],
-      primaryIdx: [3, 4, 5],
-    },
-    out: {
-      left:  { stickX: 0, stickY: 0, trigger: 0, grip: 0, primary: 0 },
-      right: { stickX: 0, stickY: 0, trigger: 0, grip: 0, primary: 0 },
-      meta:  { stickMode: "auto", leftOK: false, rightOK: false },
-    }
-  };
-
-  try {
-    const cached = JSON.parse(localStorage.getItem(storageKey) || "null");
-    if (cached && typeof cached === "object") state.mapping = { ...state.mapping, ...cached };
-  } catch {}
-
-  function saveMapping() {
-    try { localStorage.setItem(storageKey, JSON.stringify(state.mapping)); } catch {}
-  }
-
-  function dz(v) {
-    const a = Math.abs(v);
-    if (a < deadzone) return 0;
-    return Math.sign(v) * (a - deadzone) / (1 - deadzone);
-  }
-
-  function pickButton(gp, idxCandidates) {
-    if (!gp?.buttons) return 0;
-    for (const idx of idxCandidates) {
-      const b = gp.buttons[idx];
-      if (!b) continue;
-      return (typeof b.value === "number") ? b.value : (b.pressed ? 1 : 0);
-    }
-    return 0;
-  }
-
-  function updateInputSource(src) {
-    if (!src?.gamepad) return;
-    const hand =
-      src.handedness === "left" ? "left" :
-      src.handedness === "right" ? "right" :
-      null;
-    if (!hand) return;
-
-    state.sources[hand] = src;
-    state.gamepads[hand] = src.gamepad;
-  }
-
-  function rescan() {
-    state.sources.left = state.sources.right = null;
-    state.gamepads.left = state.gamepads.right = null;
-    for (const src of state.session?.inputSources || []) updateInputSource(src);
-  }
-
-  function readStick(gp) {
-    if (!gp?.axes) return { x: 0, y: 0 };
-
-    const a0 = gp.axes[0] ?? 0, a1 = gp.axes[1] ?? 0;
-    const a2 = gp.axes[2] ?? 0, a3 = gp.axes[3] ?? 0;
-
-    let use = state.mapping.stick;
-
-    if (use === "auto") {
-      const m01 = Math.hypot(a0, a1);
-      const m23 = Math.hypot(a2, a3);
-      use = (m23 > m01 + 0.05) ? "axes23" : "axes01";
-      state.mapping.stick = use;
-      saveMapping();
-    }
-
-    let x = 0, y = 0;
-    if (use === "axes23") { x = a2; y = a3; }
-    else { x = a0; y = a1; }
-
-    return { x: dz(x), y: dz(y) };
-  }
-
-  function updateNormalized() {
-    for (const src of state.session?.inputSources || []) updateInputSource(src);
-
-    const L = state.gamepads.left;
-    const R = state.gamepads.right;
-
-    state.out.meta.leftOK = !!L;
-    state.out.meta.rightOK = !!R;
-    state.out.meta.stickMode = state.mapping.stick;
-
-    const ls = readStick(L);
-    const rs = readStick(R);
-
-    state.out.left.stickX = ls.x;
-    state.out.left.stickY = ls.y;
-    state.out.right.stickX = rs.x;
-    state.out.right.stickY = rs.y;
-
-    state.out.left.trigger  = pickButton(L, state.mapping.triggerIdx);
-    state.out.left.grip     = pickButton(L, state.mapping.gripIdx);
-    state.out.left.primary  = pickButton(L, state.mapping.primaryIdx);
-
-    state.out.right.trigger = pickButton(R, state.mapping.triggerIdx);
-    state.out.right.grip    = pickButton(R, state.mapping.gripIdx);
-    state.out.right.primary = pickButton(R, state.mapping.primaryIdx);
-  }
-
+export function createXRControllerQuestModule() {
   return {
     name: "xr_controller_quest",
-    bindSession(session) {
-      state.session = session;
-      rescan();
-      session.addEventListener("inputsourceschange", rescan);
+    onEnable(ctx) {
+      const log = (...a) => console.log("[xr_controller_quest]", ...a);
+      const err = (...a) => console.error("[xr_controller_quest]", ...a);
+
+      const deadzone = 0.18;          // kills drift / 45-degree noise
+      const snapAxis = 0.0;           // set to 0.0 for analog; could use 0.25 if you want snapping later
+      const invertY = true;           // many thumbsticks report up as -1; we normalize to +up
+
+      function dz(v) {
+        v = Number(v || 0);
+        if (Math.abs(v) < deadzone) return 0;
+        // rescale after deadzone so it feels normal
+        const s = Math.sign(v);
+        const a = (Math.abs(v) - deadzone) / (1 - deadzone);
+        return s * Math.min(1, Math.max(0, a));
+      }
+
+      function normAxis(v) {
+        v = dz(v);
+        if (snapAxis > 0) {
+          const step = snapAxis;
+          v = Math.round(v / step) * step;
+        }
+        return Math.max(-1, Math.min(1, v));
+      }
+
+      function ensureHand(side) {
+        if (!ctx.input) ctx.input = {};
+        if (!ctx.input[side]) {
+          ctx.input[side] = {
+            trigger: 0, squeeze: 0,
+            stickX: 0, stickY: 0,
+            a: false, b: false, x: false, y: false,
+          };
+        }
+        return ctx.input[side];
+      }
+
+      // Find input sources for left/right
+      function getSource(handedness) {
+        const s = ctx.renderer?.xr?.getSession?.() || ctx.xrSession;
+        if (!s || !s.inputSources) return null;
+        for (const src of s.inputSources) {
+          if (src && src.handedness === handedness && src.gamepad) return src;
+        }
+        return null;
+      }
+
+      function readGamepad(src, side) {
+        const out = ensureHand(side);
+        const gp = src?.gamepad;
+        if (!gp) return;
+
+        // Buttons (Quest)
+        // 0 trigger, 1 squeeze (grip), 2/3 (touchpad unused), 4 X/A, 5 Y/B depending on side in some mappings
+        // We'll map conservatively and also read standard indices:
+        const b = gp.buttons || [];
+        const ax = gp.axes || [];
+
+        out.trigger = Math.max(0, Math.min(1, b[0]?.value ?? 0));
+        out.squeeze = Math.max(0, Math.min(1, b[1]?.value ?? 0));
+
+        // Thumbstick is usually axes[2], axes[3] on Quest; sometimes [0],[1]
+        // Use a robust fallback: prefer [2],[3] if non-zero
+        let sx = ax[2] ?? 0, sy = ax[3] ?? 0;
+        if (Math.abs(sx) < 0.001 && Math.abs(sy) < 0.001) {
+          sx = ax[0] ?? 0; sy = ax[1] ?? 0;
+        }
+
+        out.stickX = normAxis(sx);
+        out.stickY = normAxis(invertY ? -sy : sy);
+
+        // Face buttons:
+        // Many browsers map primary button at index 4 or 3 depending.
+        // We'll map “A/B” on right, “X/Y” on left using best guesses.
+        const btn4 = !!(b[4]?.pressed);
+        const btn5 = !!(b[5]?.pressed);
+        const btn3 = !!(b[3]?.pressed);
+        const btn2 = !!(b[2]?.pressed);
+
+        if (side === "right") {
+          out.a = btn4 || btn3;
+          out.b = btn5 || btn2;
+        } else {
+          out.x = btn4 || btn3;
+          out.y = btn5 || btn2;
+        }
+      }
+
+      // Public on ctx for debugging / other modules
+      ctx.controllers = ctx.controllers || { left: null, right: null };
+
+      this._tick = () => {
+        // Keep session handle fresh
+        const session = ctx.renderer?.xr?.getSession?.() || ctx.xrSession || null;
+        ctx.xrSession = session;
+
+        const L = getSource("left");
+        const R = getSource("right");
+
+        ctx.controllers.left = L;
+        ctx.controllers.right = R;
+
+        // If no XR, keep values at zero so Android HUD can still display stable values
+        if (!session) {
+          const l = ensureHand("left");
+          const r = ensureHand("right");
+          l.trigger = l.squeeze = l.stickX = l.stickY = 0; l.x = l.y = false;
+          r.trigger = r.squeeze = r.stickX = r.stickY = 0; r.a = r.b = false;
+          return;
+        }
+
+        // Read each hand
+        if (L) readGamepad(L, "left");
+        if (R) readGamepad(R, "right");
+
+        // If a controller disappears, zero it (prevents “stuck input”)
+        if (!L) {
+          const l = ensureHand("left");
+          l.trigger = l.squeeze = l.stickX = l.stickY = 0; l.x = l.y = false;
+        }
+        if (!R) {
+          const r = ensureHand("right");
+          r.trigger = r.squeeze = r.stickX = r.stickY = 0; r.a = r.b = false;
+        }
+      };
+
+      log("ready ✅ (Quest mapper)");
     },
-    update() { updateNormalized(); },
-    getInput() { return state.out; },
-    resetMapping() { state.mapping.stick = "auto"; saveMapping(); },
+
+    update(ctx) {
+      try { this._tick?.(); } catch (e) { console.error("[xr_controller_quest] tick failed", e); }
+    },
   };
 }

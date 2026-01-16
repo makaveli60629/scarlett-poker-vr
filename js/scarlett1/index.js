@@ -1,6 +1,8 @@
 // /js/scarlett1/index.js — Scarlett1 Runtime (FULL)
-// BUILD: SCARLETT1_FULL_v1_1_CONTROLS
-// Adds: Android touch move/look + Quest XR controllers (laser + teleport) baseline.
+// BUILD: SCARLETT1_FULL_v1_2_CONTROLS_SAFE
+// ✅ Android touch move/look (non-XR)
+// ✅ Quest controllers: laser + trigger teleport (XR)
+// 🚫 NO XRControllerModelFactory (prevents "import 'three'" bare specifier crash)
 
 export function boot() {
   main().catch((e) => {
@@ -9,7 +11,7 @@ export function boot() {
   });
 }
 
-const BUILD = "SCARLETT1_FULL_v1_1_CONTROLS";
+const BUILD = "SCARLETT1_FULL_v1_2_CONTROLS_SAFE";
 const log = (...a) => console.log("[scarlett1]", ...a);
 const err = (...a) => console.error("[scarlett1]", ...a);
 
@@ -25,7 +27,6 @@ async function main() {
   // --- Three.js imports (CDN) ---
   const THREE = await import("https://unpkg.com/three@0.158.0/build/three.module.js");
   const { VRButton } = await import("https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js");
-  const { XRControllerModelFactory } = await import("https://unpkg.com/three@0.158.0/examples/jsm/webxr/XRControllerModelFactory.js");
 
   writeHud("[LOG] three loaded ✅");
   writeHud("[LOG] VRButton loaded ✅");
@@ -57,10 +58,11 @@ async function main() {
   const rig = new THREE.Group();
   rig.name = "PlayerRig";
   rig.position.set(0, 1.65, 3.8);
+  rig.rotation.set(0, 0, 0);
   rig.add(camera);
   scene.add(rig);
 
-  // --- Always-visible floor fallback ---
+  // --- Always-visible floor fallback (teleport target) ---
   const floorGeo = new THREE.PlaneGeometry(60, 60);
   const floorMat = new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 1, metalness: 0 });
   const floor = new THREE.Mesh(floorGeo, floorMat);
@@ -79,13 +81,13 @@ async function main() {
     writeHud("[ERR] world.js missing export buildWorld()");
   }
 
-  // ====== ANDROID TOUCH CONTROLS (NON-XR) ======
-  const touch = installTouchControls({ THREE, camera, rig, renderer });
+  // ===== ANDROID TOUCH CONTROLS (NON-XR) =====
+  const touch = installTouchControls({ THREE, camera, rig });
   if (touch.enabled) writeHud("[LOG] android touch controls ✅");
 
-  // ====== QUEST CONTROLLERS + LASERS + TELEPORT ======
+  // ===== QUEST CONTROLLERS: LASER + TELEPORT =====
   const xr = installXRControllers({ THREE, scene, rig, renderer, floor });
-  writeHud("[LOG] XR controllers installed ✅ (if controllers available)");
+  writeHud("[LOG] XR controllers installed ✅");
 
   // Resize
   window.addEventListener("resize", () => {
@@ -99,32 +101,38 @@ async function main() {
   renderer.setAnimationLoop(() => {
     const dt = clock.getDelta();
 
-    // Only move with touch when NOT in XR
+    // Touch-only movement when NOT in XR
     if (!renderer.xr.isPresenting) {
       touch.update(dt);
     }
 
-    // XR teleport updates
+    // XR teleport/laser update
     xr.update();
 
     renderer.render(scene, camera);
   });
 
   if (navigator.xr) {
-    renderer.xr.addEventListener("sessionstart", () => writeHud("[LOG] XR session start ✅"));
-    renderer.xr.addEventListener("sessionend", () => writeHud("[LOG] XR session end ✅"));
+    renderer.xr.addEventListener("sessionstart", () => {
+      writeHud("[LOG] XR session start ✅");
+      log("XR session start ✅");
+    });
+    renderer.xr.addEventListener("sessionend", () => {
+      writeHud("[LOG] XR session end ✅");
+      log("XR session end ✅");
+    });
   }
 
   writeHud("[LOG] scarlett1 runtime start ✅");
   log("runtime start ✅", BUILD);
 
-  // ---- helpers ----
-
-  function installTouchControls({ THREE, camera, rig, renderer }) {
+  // ==========================================================
+  // TOUCH CONTROLS (Android / mobile browser)
+  // ==========================================================
+  function installTouchControls({ THREE, camera, rig }) {
     const isTouch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
-    const enabled = isTouch;
+    const enabled = !!isTouch;
 
-    // Create simple on-screen joystick + look pad
     const ui = enabled ? createTouchUI() : null;
 
     const state = {
@@ -133,25 +141,23 @@ async function main() {
       moveY: 0,
       lookX: 0,
       lookY: 0,
-      yaw: 0,
+      yaw: rig.rotation.y || 0,
       pitch: 0
     };
 
-    // Initialize yaw from rig
-    state.yaw = rig.rotation.y;
+    function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
-    // Apply look to camera (pitch) + rig (yaw)
     function applyLook() {
       rig.rotation.y = state.yaw;
-      camera.rotation.x = state.pitch;
+      camera.rotation.set(state.pitch, 0, 0);
     }
-
-    function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
     function update(dt) {
       if (!enabled) return;
-      const speed = 2.0; // m/s
-      const turnSpeed = 1.8; // rad/s
+
+      // Tunables
+      const speed = 2.2;      // meters per second
+      const turnSpeed = 2.0;  // radians per second
 
       // Look
       state.yaw -= state.lookX * turnSpeed * dt;
@@ -173,7 +179,6 @@ async function main() {
       }
     }
 
-    // Bind UI
     if (ui) {
       ui.onMove = (x, y) => { state.moveX = x; state.moveY = y; };
       ui.onLook = (x, y) => { state.lookX = x; state.lookY = y; };
@@ -183,7 +188,6 @@ async function main() {
   }
 
   function createTouchUI() {
-    // left joystick (move) + right pad (look)
     const wrap = document.createElement("div");
     wrap.style.cssText = `
       position: fixed; left: 0; top: 0; width: 100%; height: 100%;
@@ -208,7 +212,6 @@ async function main() {
     const right = makePad("right");
 
     let moveCb = null, lookCb = null;
-
     bindPad(left, (x, y) => moveCb && moveCb(x, y));
     bindPad(right, (x, y) => lookCb && lookCb(x, y));
 
@@ -247,33 +250,25 @@ async function main() {
     }
   }
 
+  // ==========================================================
+  // XR CONTROLLERS: LASER + TELEPORT
+  // ==========================================================
   function installXRControllers({ THREE, scene, rig, renderer, floor }) {
     const raycaster = new THREE.Raycaster();
     const tempMatrix = new THREE.Matrix4();
 
-    const controllerModelFactory = new XRControllerModelFactory();
-
-    // Grip models
-    const grip1 = renderer.xr.getControllerGrip(0);
-    grip1.add(controllerModelFactory.createControllerModel(grip1));
-    rig.add(grip1);
-
-    const grip2 = renderer.xr.getControllerGrip(1);
-    grip2.add(controllerModelFactory.createControllerModel(grip2));
-    rig.add(grip2);
-
-    // Controllers (for ray)
     const c1 = renderer.xr.getController(0);
     const c2 = renderer.xr.getController(1);
     rig.add(c1);
     rig.add(c2);
 
-    // Laser visuals
+    // Laser lines (simple + safe)
     const laserGeom = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(0, 0, 0),
       new THREE.Vector3(0, 0, -1)
     ]);
     const laserMat = new THREE.LineBasicMaterial();
+
     function addLaser(ctrl) {
       const line = new THREE.Line(laserGeom, laserMat);
       line.name = "laser";
@@ -284,7 +279,7 @@ async function main() {
     const l1 = addLaser(c1);
     const l2 = addLaser(c2);
 
-    // Teleport target marker
+    // Teleport marker
     const marker = new THREE.Mesh(
       new THREE.RingGeometry(0.15, 0.22, 24),
       new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })
@@ -294,9 +289,9 @@ async function main() {
     scene.add(marker);
 
     let aiming = false;
-    let hitPoint = new THREE.Vector3();
+    const hitPoint = new THREE.Vector3();
 
-    function getHitFromController(ctrl) {
+    function getHit(ctrl) {
       tempMatrix.identity().extractRotation(ctrl.matrixWorld);
       raycaster.ray.origin.setFromMatrixPosition(ctrl.matrixWorld);
       raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
@@ -315,8 +310,7 @@ async function main() {
       aiming = false;
 
       const ctrl = e.target;
-      if (getHitFromController(ctrl)) {
-        // Move rig to the hit point, keep Y (player height)
+      if (getHit(ctrl)) {
         rig.position.x = hitPoint.x;
         rig.position.z = hitPoint.z;
       }
@@ -329,26 +323,26 @@ async function main() {
     c2.addEventListener("selectend", onSelectEnd);
 
     function update() {
-      // Only show teleport marker when in XR and aiming
-      if (!renderer.xr.isPresenting) {
+      const inXR = renderer.xr.isPresenting;
+
+      l1.visible = inXR;
+      l2.visible = inXR;
+
+      if (!inXR) {
         marker.visible = false;
+        aiming = false;
         return;
       }
 
       if (aiming) {
-        // Prefer controller 0 hit, else controller 1
-        const ok = getHitFromController(c1) || getHitFromController(c2);
+        const ok = getHit(c1) || getHit(c2);
         marker.visible = ok;
         if (ok) marker.position.copy(hitPoint);
       } else {
         marker.visible = false;
       }
-
-      // Keep lasers visible only in XR
-      l1.visible = renderer.xr.isPresenting;
-      l2.visible = renderer.xr.isPresenting;
     }
 
     return { update };
   }
-                                 }
+        }

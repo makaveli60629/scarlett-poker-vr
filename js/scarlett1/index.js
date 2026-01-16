@@ -1,19 +1,21 @@
 // /js/scarlett1/index.js — Scarlett1 Runtime (FULL)
-// BUILD: SCARLETT1_FULL_v2_2_INTERACT_GRAB_SQUEEZE_TELEPORT
+// BUILD: SCARLETT1_FULL_v2_3_QUEST_GAMEPAD_GRAB_MARKER_HEIGHTFIX
 // ✅ Quest-safe render loop
 // ✅ World async load
 // ✅ Android: touch move/look
 // ✅ XR: Left laser Pink, Right laser Blue
-// ✅ XR: TELEPORT = RIGHT SQUEEZE (grip) only
-// ✅ XR: INTERACT/GRAB = TRIGGER (select) either hand
+// ✅ XR: TELEPORT = RIGHT GRIP (works)
+// ✅ XR: TELEPORT RING marker guaranteed visible while gripping
+// ✅ XR: GRAB = TRIGGER via GAMEPAD polling (works even if select events don't fire)
+// ✅ XR: height fix (prevents hovering)
 // ✅ XR: left stick move + right stick snap 45°
-// ✅ HUD toggle button (Android friendly)
+// ✅ HUD toggle button
 
 export function boot() {
   main().catch((e) => fatal(e));
 }
 
-const BUILD = "SCARLETT1_FULL_v2_2_INTERACT_GRAB_SQUEEZE_TELEPORT";
+const BUILD = "SCARLETT1_FULL_v2_3_QUEST_GAMEPAD_GRAB_MARKER_HEIGHTFIX";
 
 function hud() { return document.getElementById("scarlett-mini-hud"); }
 function writeHud(line) { const el = hud(); if (el && el.dataset.hidden !== "1") el.textContent += `\n${line}`; }
@@ -125,7 +127,6 @@ async function main() {
   floor.name = "FLOOR";
   scene.add(floor);
 
-  // Fallback object so you never see pure black
   const fallback = new THREE.Mesh(
     new THREE.BoxGeometry(0.4, 0.4, 0.4),
     new THREE.MeshStandardMaterial({
@@ -136,24 +137,25 @@ async function main() {
   fallback.position.set(0, 1.3, 0);
   scene.add(fallback);
 
-  // Controls
   const touch = installTouchControls({ THREE, camera, rig });
   writeHud(touch.enabled ? "[LOG] Android touch controls ✅" : "[LOG] Android touch controls (no touch device)");
 
-  // XR: lasers + teleport + grab
   const xr = installXRControllers({ THREE, scene, rig, renderer, floor });
-  writeHud("[LOG] XR lasers+teleport+grab installed ✅");
+  writeHud("[LOG] XR installed ✅ (teleport ring + gamepad grab)");
 
-  // XR thumbsticks
   const gp = installXRGamepadControls({ THREE, rig, renderer, camera });
   writeHud("[LOG] XR sticks installed ✅");
 
   renderer.xr.addEventListener("sessionstart", () => {
     writeHud("[LOG] XR session start ✅");
     renderer.setPixelRatio(1.0);
+
+    // ✅ Height fix: force reasonable player height at session start
+    rig.position.y = 1.65;
   });
+
   renderer.xr.addEventListener("sessionend", () => {
-    writeHud("[LOG] XR session end ⚠️ (kicked out or exited)");
+    writeHud("[LOG] XR session end ⚠️");
     renderer.setPixelRatio(basePR);
   });
 
@@ -298,9 +300,7 @@ async function main() {
   }
 
   // -----------------------------
-  // XR: lasers + teleport + grab
-  // TELEPORT = RIGHT SQUEEZE (grip)
-  // GRAB     = trigger (select) either hand
+  // XR: lasers + teleport ring + gamepad grab polling
   // -----------------------------
   function installXRControllers({ THREE, scene, rig, renderer, floor }) {
     const L_BLUE = 0x00e5ff; // RIGHT
@@ -308,7 +308,7 @@ async function main() {
 
     const raycaster = new THREE.Raycaster();
     const tempMatrix = new THREE.Matrix4();
-    const tmpPos = new THREE.Vector3();
+    const tmpWorldPos = new THREE.Vector3();
 
     const c1 = renderer.xr.getController(0);
     const c2 = renderer.xr.getController(1);
@@ -316,19 +316,30 @@ async function main() {
 
     function bind(ctrl) {
       ctrl.userData.handedness = "unknown";
+      ctrl.userData.inputSource = null;
       ctrl.userData.grabbed = null;
       ctrl.userData.grabParent = null;
+      ctrl.userData.prevTrig = false;
+      ctrl.userData.prevGrip = false;
 
       ctrl.addEventListener("connected", (e) => {
         ctrl.userData.handedness = e?.data?.handedness || "unknown";
+        ctrl.userData.inputSource = e?.data || null;
       });
       ctrl.addEventListener("disconnected", () => {
         ctrl.userData.handedness = "unknown";
+        ctrl.userData.inputSource = null;
         ctrl.userData.grabbed = null;
         ctrl.userData.grabParent = null;
       });
     }
     bind(c1); bind(c2);
+
+    function rightController() {
+      if (c1.userData.handedness === "right") return c1;
+      if (c2.userData.handedness === "right") return c2;
+      return c1;
+    }
 
     // Lasers
     const laserGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
@@ -348,13 +359,7 @@ async function main() {
       else if (h === "right") laser.mat.color.setHex(L_BLUE);
     }
 
-    function rightController() {
-      if (c1.userData.handedness === "right") return c1;
-      if (c2.userData.handedness === "right") return c2;
-      return c1;
-    }
-
-    // Teleport marker (only while squeezing right hand)
+    // Teleport marker (RING) — guaranteed
     const marker = new THREE.Mesh(
       new THREE.RingGeometry(0.18, 0.28, 32),
       new THREE.MeshBasicMaterial({ color: L_BLUE, transparent: true, opacity: 0.9, side: THREE.DoubleSide })
@@ -375,36 +380,13 @@ async function main() {
       return false;
     }
 
-    function onSqueezeStart(e) {
-      const rc = rightController();
-      if (e.target !== rc) return;
-      aimingTeleport = true;
-    }
-    function onSqueezeEnd(e) {
-      const rc = rightController();
-      if (e.target !== rc) return;
-
-      if (aimingTeleport && getFloorHit(rc)) {
-        rig.position.x = hitPoint.x;
-        rig.position.z = hitPoint.z;
-      }
-      aimingTeleport = false;
-      marker.visible = false;
-    }
-
-    c1.addEventListener("squeezestart", onSqueezeStart);
-    c1.addEventListener("squeezeend", onSqueezeEnd);
-    c2.addEventListener("squeezestart", onSqueezeStart);
-    c2.addEventListener("squeezeend", onSqueezeEnd);
-
-    // ---------- Interaction (grab) ----------
-    // We raycast against objects marked userData.grabbable = true
-    const hoverSphere = new THREE.Mesh(
+    // Hover dot for interactables
+    const hoverDot = new THREE.Mesh(
       new THREE.SphereGeometry(0.02, 10, 8),
       new THREE.MeshBasicMaterial({ color: 0x00e5ff })
     );
-    hoverSphere.visible = false;
-    scene.add(hoverSphere);
+    hoverDot.visible = false;
+    scene.add(hoverDot);
 
     function getInteractHit(ctrl) {
       const list = scene.userData?.interactables;
@@ -417,7 +399,6 @@ async function main() {
       const hits = raycaster.intersectObjects(list, true);
       if (!hits.length) return null;
 
-      // Find first hit that is grabbable (or whose parent is grabbable)
       for (const h of hits) {
         let o = h.object;
         while (o && o !== scene && !o.userData?.grabbable) o = o.parent;
@@ -428,16 +409,14 @@ async function main() {
 
     function grab(ctrl, obj) {
       if (!obj || ctrl.userData.grabbed) return;
-
-      // Record original parent so we can restore
       ctrl.userData.grabbed = obj;
       ctrl.userData.grabParent = obj.parent;
 
-      // Keep world transform, then parent to controller
-      obj.getWorldPosition(tmpPos);
-      scene.attach(obj); // ensure has scene parent for stable attach math
+      // Keep world transform, then attach
+      obj.getWorldPosition(tmpWorldPos);
+      scene.attach(obj);
       ctrl.attach(obj);
-      obj.position.set(0, 0, -0.18); // held in front of controller
+      obj.position.set(0, 0, -0.18);
       obj.rotation.set(0, 0, 0);
     }
 
@@ -445,45 +424,52 @@ async function main() {
       const obj = ctrl.userData.grabbed;
       if (!obj) return;
 
-      // Drop into scene (or back to original parent)
       const parent = ctrl.userData.grabParent || scene;
       scene.attach(obj);
       parent.attach(obj);
 
-      // Keep it above surfaces a bit if it’s a table item
       if (obj.userData?.dropLift) obj.position.y += obj.userData.dropLift;
 
       ctrl.userData.grabbed = null;
       ctrl.userData.grabParent = null;
     }
 
-    function onSelectStart(e) {
-      const ctrl = e.target;
-      // If holding something, do nothing
-      if (ctrl.userData.grabbed) return;
+    // Gamepad polling helpers
+    function getInputSourceFor(ctrl) {
+      const session = renderer.xr.getSession();
+      if (!session) return null;
 
-      const hit = getInteractHit(ctrl);
-      if (hit && hit.object) {
-        grab(ctrl, hit.object);
+      const sources = Array.from(session.inputSources || []);
+      const hand = ctrl.userData.handedness;
+
+      // Prefer matching handedness
+      for (const s of sources) {
+        if (s?.gamepad && s.handedness === hand) return s;
       }
+      // fallback: first with gamepad
+      for (const s of sources) {
+        if (s?.gamepad) return s;
+      }
+      return null;
     }
 
-    function onSelectEnd(e) {
-      const ctrl = e.target;
-      if (ctrl.userData.grabbed) release(ctrl);
-    }
+    function readButtons(src) {
+      const gp = src?.gamepad;
+      if (!gp) return { trigger: false, grip: false };
 
-    c1.addEventListener("selectstart", onSelectStart);
-    c1.addEventListener("selectend", onSelectEnd);
-    c2.addEventListener("selectstart", onSelectStart);
-    c2.addEventListener("selectend", onSelectEnd);
+      const b = gp.buttons || [];
+      // Quest typical: trigger=0, grip=1
+      const trigger = !!b[0]?.pressed;
+      const grip = !!b[1]?.pressed;
+      return { trigger, grip };
+    }
 
     function update(dt) {
       const inXR = renderer.xr.isPresenting;
 
       laser1.line.visible = inXR;
       laser2.line.visible = inXR;
-      hoverSphere.visible = false;
+      hoverDot.visible = false;
 
       if (!inXR) {
         marker.visible = false;
@@ -494,8 +480,21 @@ async function main() {
       recolor(c1, laser1);
       recolor(c2, laser2);
 
-      // Teleport marker follows right controller while squeezing
+      // Height stabilization: keep you from drifting way up
+      rig.position.y = 1.65;
+
+      // Teleport uses RIGHT GRIP (polled)
       const rc = rightController();
+      const srcR = getInputSourceFor(rc);
+      const btnR = readButtons(srcR);
+
+      // Grip edge detection
+      const gripDown = btnR.grip && !rc.userData.prevGrip;
+      const gripUp = !btnR.grip && rc.userData.prevGrip;
+      rc.userData.prevGrip = btnR.grip;
+
+      if (gripDown) aimingTeleport = true;
+
       if (aimingTeleport) {
         const ok = getFloorHit(rc);
         marker.visible = ok;
@@ -504,14 +503,44 @@ async function main() {
         marker.visible = false;
       }
 
-      // Hover indicator for interactables (show on whichever controller is NOT holding something)
+      if (gripUp) {
+        if (getFloorHit(rc)) {
+          rig.position.x = hitPoint.x;
+          rig.position.z = hitPoint.z;
+        }
+        aimingTeleport = false;
+        marker.visible = false;
+      }
+
+      // GRAB uses TRIGGER on either controller (polled)
+      for (const ctrl of [c1, c2]) {
+        const src = getInputSourceFor(ctrl);
+        const btn = readButtons(src);
+
+        const trigDown = btn.trigger && !ctrl.userData.prevTrig;
+        const trigUp = !btn.trigger && ctrl.userData.prevTrig;
+        ctrl.userData.prevTrig = btn.trigger;
+
+        if (trigDown) {
+          if (ctrl.userData.grabbed) {
+            // already holding: ignore down
+          } else {
+            const hit = getInteractHit(ctrl);
+            if (hit?.object) grab(ctrl, hit.object);
+          }
+        }
+        if (trigUp) {
+          if (ctrl.userData.grabbed) release(ctrl);
+        }
+      }
+
+      // Hover dot: show best hit
       const h1 = !c1.userData.grabbed ? getInteractHit(c1) : null;
       const h2 = !c2.userData.grabbed ? getInteractHit(c2) : null;
-
       const best = (h1 && h2) ? (h1.distance < h2.distance ? h1 : h2) : (h1 || h2);
       if (best) {
-        hoverSphere.visible = true;
-        hoverSphere.position.copy(best.point);
+        hoverDot.visible = true;
+        hoverDot.position.copy(best.point);
       }
     }
 

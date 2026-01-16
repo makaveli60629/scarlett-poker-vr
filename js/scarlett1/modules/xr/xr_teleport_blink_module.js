@@ -1,5 +1,5 @@
 // /js/scarlett1/modules/xr/xr_teleport_blink_module.js
-// Primary (A/X) = blink forward. Grip never teleports.
+// Primary (A/X) = blink forward. Grip NEVER teleports.
 
 export function createXRTeleportBlinkModule({ distance = 1.25 } = {}) {
   const prev = { left: 0, right: 0 };
@@ -16,7 +16,6 @@ export function createXRTeleportBlinkModule({ distance = 1.25 } = {}) {
         return down;
       }
 
-      // either hand can trigger blink
       if (primaryDown("left") || primaryDown("right")) {
         const THREE = ctx.THREE;
         const q = new THREE.Quaternion();

@@ -1,17 +1,12 @@
 // /js/scarlett1/world.js
-// SCARLETT1 — World Orchestrator (MODULAR FOREVER • FULL)
+// SCARLETT1 — World Orchestrator (FULL)
+// Activates modules + ticks them. World is the orchestrator.
 
 import { createXRControllerQuestModule } from "./modules/xr/xr_controller_quest.js";
 import { createXRLocomotionModule } from "./modules/xr/xr_locomotion_module.js";
 import { createXRGrabModule } from "./modules/xr/xr_grab_module.js";
 import { createXRTeleportBlinkModule } from "./modules/xr/xr_teleport_blink_module.js";
-
 import { createWorldMasterModule } from "./modules/world/world_master_module.js";
-import { createRoomManagerModule } from "./modules/world/room_manager_module.js";
-import { createJumbotronSignageModule } from "./modules/world/jumbotron_signage_module.js";
-
-import { createHUDModule } from "./modules/ui/hud_module.js";
-import { createBotShowGameModule } from "./modules/game/bot_showgame_module.js";
 
 export function createWorldOrchestrator({ THREE, scene, renderer, camera, playerRig, head }) {
   const log = (...a) => console.log("[scarlett1/world]", ...a);
@@ -30,6 +25,8 @@ export function createWorldOrchestrator({ THREE, scene, renderer, camera, player
     interactables: [],
     registerInteractable(obj) { ctx.interactables.push(obj); },
     clearInteractables() { ctx.interactables.length = 0; },
+
+    // gate grabbing (cards can set grabbable:false)
     canGrab(obj) {
       let o = obj;
       while (o) {
@@ -39,9 +36,10 @@ export function createWorldOrchestrator({ THREE, scene, renderer, camera, player
       return true;
     },
 
-    // shared “show” references (filled by world_master_module)
+    // show references (filled by world module)
     _show: null,
-    rooms: null,
+    _worldUpdaters: [],
+    registerWorldUpdater(fn) { ctx._worldUpdaters.push(fn); },
   };
 
   const modules = [];
@@ -52,19 +50,16 @@ export function createWorldOrchestrator({ THREE, scene, renderer, camera, player
     return mod;
   }
 
-  // ✅ Activate all modules (order matters)
-  const XRQuest = enable(createXRControllerQuestModule());         // 1) XR source of truth
-  enable(createHUDModule({ startOn: true }));                      // 2) HUD toggle
-  enable(createRoomManagerModule());                               // 3) Room manager backbone
-  enable(createWorldMasterModule());                               // 4) Build main lobby + main table + interactables
-  enable(createJumbotronSignageModule());                          // 5) Jumbotrons/signage
-  enable(createXRLocomotionModule({ speed: 2.25 }));               // 6) Movement
-  enable(createXRGrabModule());                                    // 7) Grip grab only
-  enable(createXRTeleportBlinkModule({ distance: 1.25 }));         // 8) Primary blink
-  enable(createBotShowGameModule({ dealInterval: 6.0 }));          // 9) Show-bots "playing"
+  // ✅ Modular Forever activation order
+  const XRQuest = enable(createXRControllerQuestModule());         // 1) XR source of truth (never touched)
+  enable(createWorldMasterModule());                               // 2) World build (pit/table/bots/cards/chips)
+  enable(createXRLocomotionModule({ speed: 2.25 }));               // 3) Movement
+  enable(createXRGrabModule());                                    // 4) Grip grabs ONLY
+  enable(createXRTeleportBlinkModule({ distance: 1.25 }));         // 5) Primary blink teleport
 
   return {
     setControllers({ c0, c1 }) {
+      // Visual controllers exist; XRQuest detects handedness via inputSources.
       ctx.controllers.left = c0;
       ctx.controllers.right = c1;
     },
@@ -84,7 +79,13 @@ export function createWorldOrchestrator({ THREE, scene, renderer, camera, player
       if (ctx.xrSession) XRQuest.update();
       const input = XRQuest.getInput();
       const frame = { dt, input };
+
       for (const m of modules) m.update?.(ctx, frame);
+
+      // extra updater bus (world module uses it for hover cards)
+      if (ctx._worldUpdaters.length) {
+        for (const fn of ctx._worldUpdaters) fn(dt);
+      }
     },
   };
 }

@@ -8,10 +8,15 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
 
-  <!-- REQUIRED FOR IMPORT MAPS ON SAFARI / ANDROID -->
+  <!-- Helpful on some browsers (not perfect, but helps) -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+
+  <!-- Import maps need shims on some mobile browsers -->
   <script async src="https://unpkg.com/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
 
-  <!-- 🔑 THIS IS THE FIX -->
+  <!-- ✅ THE PERMANENT FIX: resolves any `import ... from "three"` -->
   <script type="importmap">
   {
     "imports": {
@@ -22,25 +27,27 @@
 
   <style>
     html, body {
-      margin: 0;
-      padding: 0;
+      margin: 0; padding: 0;
+      width: 100%; height: 100%;
       overflow: hidden;
       background: #000;
-      width: 100%;
-      height: 100%;
-      font-family: monospace;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     }
-    canvas {
-      display: block;
-    }
+    #app { width: 100%; height: 100%; }
+    canvas { display: block; }
   </style>
 </head>
 
 <body>
-  <!-- Optional mount point -->
   <div id="app"></div>
 
-  <!-- BOOT ENTRY -->
-  <script type="module" src="./js/index.js"></script>
+  <!-- ✅ HARD CACHE BUST for router boot -->
+  <script type="module">
+    const v = "HTML_FULL_v1_0_" + Date.now();
+    import(`./js/index.js?v=${v}`).catch(e => {
+      console.error("[HTML] boot import failed", e);
+      document.body.innerHTML = "<pre style='color:#fff;padding:12px'>BOOT FAILED:\n" + (e?.stack||e) + "</pre>";
+    });
+  </script>
 </body>
 </html>

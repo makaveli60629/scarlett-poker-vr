@@ -1,8 +1,7 @@
 // /js/index.js
-// SCARLETT ROUTER + DIAGNOSTICS (FULL)
-// Purpose: Always show diagnostics even when dynamic import fails.
+// SCARLETT ROUTER + DIAGNOSTICS (FULL) — FIXED PREFLIGHT PATH
 
-const BUILD = "ROUTER_FULL_DIAG_v1";
+const BUILD = "ROUTER_FULL_DIAG_v2_PATHFIX";
 
 const log = (...a) => console.log("[router]", ...a);
 const err = (...a) => console.error("[router]", ...a);
@@ -26,7 +25,6 @@ function clip(s, n = 1400) {
   return s.slice(0, n) + "…";
 }
 
-// ---- Overlay (always available) ----
 let overlay, body, btnRow, hiddenBtn;
 let hidden = false;
 
@@ -80,7 +78,6 @@ function ensureOverlay() {
 
   document.body.appendChild(overlay);
 
-  // hidden toggle
   hiddenBtn = document.createElement("button");
   hiddenBtn.textContent = "SHOW HUD";
   hiddenBtn.style.position = "fixed";
@@ -123,52 +120,30 @@ function mkBtn(label, onClick) {
 let reportLines = [];
 function write(line) {
   reportLines.push(line);
-  if (reportLines.length > 220) reportLines.shift();
+  if (reportLines.length > 240) reportLines.shift();
   if (body) body.textContent = reportLines.join("\n");
 }
 
 async function copyReport() {
   const text = reportLines.join("\n");
-  try {
-    await navigator.clipboard.writeText(text);
-    write(`[${now()}] [copy] COPIED ✅`);
-  } catch (e) {
-    write(`[${now()}] [copy] FAILED ❌ ${String(e)}`);
-  }
+  try { await navigator.clipboard.writeText(text); write(`[${now()}] [copy] COPIED ✅`); }
+  catch (e) { write(`[${now()}] [copy] FAILED ❌ ${String(e)}`); }
 }
 
 function addButtons() {
   btnRow.innerHTML = "";
-
   btnRow.appendChild(mkBtn("HIDE HUD", () => setHidden(true)));
   btnRow.appendChild(mkBtn("RETRY IMPORT", () => runRouter().catch(() => {})));
   btnRow.appendChild(mkBtn("HARD RELOAD", () => location.reload(true)));
-
   btnRow.appendChild(mkBtn("COPY REPORT", () => copyReport()));
-
   btnRow.appendChild(mkBtn("SAFE MODE", () => {
     const u = new URL(location.href);
     u.searchParams.set("safe", "1");
     u.searchParams.set("v", String(Date.now()));
     location.href = u.toString();
   }));
-
-  btnRow.appendChild(mkBtn("TRACE ON", () => {
-    const u = new URL(location.href);
-    u.searchParams.set("trace", "1");
-    u.searchParams.set("v", String(Date.now()));
-    location.href = u.toString();
-  }));
-
-  btnRow.appendChild(mkBtn("TRACE OFF", () => {
-    const u = new URL(location.href);
-    u.searchParams.delete("trace");
-    u.searchParams.set("v", String(Date.now()));
-    location.href = u.toString();
-  }));
 }
 
-// ---- Error hooks ----
 function hookErrors() {
   if (window.__scarlettRouterHooked) return;
   window.__scarlettRouterHooked = true;
@@ -186,7 +161,6 @@ function hookErrors() {
   });
 }
 
-// ---- Preflight fetch ----
 async function preflight(url) {
   write(`[${now()}] [fetch] GET ${url}`);
   try {
@@ -195,7 +169,7 @@ async function preflight(url) {
     write(`[${now()}] [fetch] ct=${res.headers.get("content-type") || "?"}`);
     const txt = await res.text();
     write(`[${now()}] [fetch] bytes=${txt.length}`);
-    write(`[${now()}] [fetch] head:\n${clip(txt.slice(0, 800), 800)}`);
+    write(`[${now()}] [fetch] head:\n${clip(txt.slice(0, 700), 700)}`);
     return { ok: res.ok, status: res.status, text: txt };
   } catch (e) {
     write(`[${now()}] [fetch] FAILED ❌ ${String(e)}`);
@@ -203,7 +177,6 @@ async function preflight(url) {
   }
 }
 
-// ---- Main Router ----
 async function runRouter() {
   ensureOverlay();
   hookErrors();
@@ -218,15 +191,15 @@ async function runRouter() {
 
   const q = qs();
   const v = q.v || `ROUTER_CACHEPROOF_${Date.now()}`;
-  const entry = `./scarlett1/index.js?v=${encodeURIComponent(v)}`;
+  const entryRel = `./scarlett1/index.js?v=${encodeURIComponent(v)}`;
 
-  // Preflight so we can see 404 vs import error
-  const absolute = new URL(entry, location.href).toString();
+  // ✅ FIXED: preflight against /js/ correctly
+  const absolute = new URL(`/scarlett-poker-vr/js/scarlett1/index.js?v=${encodeURIComponent(v)}`, location.origin).toString();
   await preflight(absolute);
 
-  write(`[${now()}] [router] importing: ${entry}`);
+  write(`[${now()}] [router] importing: ${entryRel}`);
   try {
-    const mod = await import(entry);
+    const mod = await import(entryRel);
     write(`[${now()}] [router] import OK ✅`);
     if (typeof mod.start === "function") {
       write(`[${now()}] [router] calling start()…`);
@@ -239,14 +212,10 @@ async function runRouter() {
     write(`[${now()}] [ERR] scarlett1 runtime FAILED ❌`);
     write(`[${now()}] [ERR] ${String(e?.message || e)}`);
     if (e?.stack) write(clip(e.stack));
-    // extra hint:
     write(`\nHINTS:`);
-    write(`- If fetch status above is 404: path/case mismatch or file not deployed.`);
-    write(`- If fetch is 200 but import fails: a bad import INSIDE index.js/world.js.`);
-    write(`- GitHub Pages is case-sensitive: /scarlett1/ != /Scarlett1/`);
+    write(`- If preflight is 404: file path/case mismatch or not deployed.`);
+    write(`- If preflight is 200 but import fails: a bad import INSIDE index.js/world.js.`);
   }
 }
 
-runRouter().catch((e) => {
-  console.error("[router] fatal", e);
-});
+runRouter().catch((e) => console.error("[router] fatal", e));

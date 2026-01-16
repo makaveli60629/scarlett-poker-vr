@@ -1,33 +1,31 @@
-// xr_locomotion_module.js
-import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
+// /js/scarlett1/modules/xr/xr_locomotion_module.js
+// Consumes normalized input ONLY. Never reads raw gamepad.
 
 export function createXRLocomotionModule({ speed = 2.25 } = {}) {
-  const eul = new THREE.Euler();
-
   return {
     name: "xr_locomotion",
-    update({ dt, input, camera, playerRig }) {
+    update(ctx, { dt, input }) {
       // prefer left stick, fallback right
       const stickL = Math.hypot(input.left.stickX, input.left.stickY);
-      const stickR = Math.hypot(input.right.stickX, input.right.stickY);
       const sx = (stickL > 0.01) ? input.left.stickX : input.right.stickX;
       const sy = (stickL > 0.01) ? input.left.stickY : input.right.stickY;
 
-      // forward is typically -Y
       const strafe = sx;
       const forward = -sy;
 
-      eul.setFromQuaternion(camera.quaternion, "YXZ");
-      const yaw = eul.y;
+      // head yaw relative movement
+      const THREE = ctx.THREE;
+      const e = new THREE.Euler().setFromQuaternion(ctx.camera.quaternion, "YXZ");
+      const yaw = e.y;
 
       const cos = Math.cos(yaw), sin = Math.sin(yaw);
       const wx = (strafe * cos) - (forward * sin);
       const wz = (strafe * sin) + (forward * cos);
 
       if (Math.hypot(wx, wz) > 0.001) {
-        playerRig.position.x += wx * speed * dt;
-        playerRig.position.z += wz * speed * dt;
+        ctx.playerRig.position.x += wx * speed * dt;
+        ctx.playerRig.position.z += wz * speed * dt;
       }
     }
   };
-}
+      }

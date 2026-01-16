@@ -1,19 +1,21 @@
 // /js/scarlett1/index.js — Scarlett1 Runtime (FULL)
-// BUILD: SCARLETT1_FULL_v1_8_XR_NO_BLACKSCREEN
+// BUILD: SCARLETT1_FULL_v1_8_XR_NO_BLACKSCREEN_FIX_INPUTSOURCES
 // ✅ Always renders immediately (prevents Quest XR black-screen kickout)
 // ✅ World loads async after render loop starts (world errors won't kill XR)
 // ✅ Android: touch move/look
 // ✅ Quest: lasers + teleport + left stick move + right stick snap 45°
 // ✅ HUD shows world/module load status clearly
+// ✅ FIX: XRSession.inputSources is XRInputSourceArray (iterable) on Quest → normalize via Array.from()
 
 export function boot() {
   main().catch((e) => fatal(e));
 }
 
-const BUILD = "SCARLETT1_FULL_v1_8_XR_NO_BLACKSCREEN";
+const BUILD = "SCARLETT1_FULL_v1_8_XR_NO_BLACKSCREEN_FIX_INPUTSOURCES";
 
 function hud() { return document.getElementById("scarlett-mini-hud"); }
 function writeHud(line) { const el = hud(); if (el) el.textContent += `\n${line}`; }
+
 function fatal(e) {
   const msg = e?.stack || e?.message || String(e);
   console.error("[scarlett1] fatal ❌", msg);
@@ -90,7 +92,12 @@ async function main() {
   // Fallback object so you NEVER see pure black in XR
   const fallback = new THREE.Mesh(
     new THREE.BoxGeometry(0.4, 0.4, 0.4),
-    new THREE.MeshStandardMaterial({ color: 0x00e5ff, roughness: 0.6, metalness: 0.2, emissive: new THREE.Color(0x00333a) })
+    new THREE.MeshStandardMaterial({
+      color: 0x00e5ff,
+      roughness: 0.6,
+      metalness: 0.2,
+      emissive: new THREE.Color(0x00333a)
+    })
   );
   fallback.position.set(0, 1.3, 0);
   fallback.name = "FALLBACK_BOX";
@@ -103,7 +110,7 @@ async function main() {
   const xr = installXRControllers({ THREE, scene, rig, renderer, floor });
   writeHud("[LOG] XR lasers+teleport installed ✅");
 
-  const gp = installXRGamepadControls({ THREE, rig, renderer, camera, xr });
+  const gp = installXRGamepadControls({ THREE, rig, renderer, camera });
   writeHud("[LOG] XR sticks installed ✅");
 
   // XR lifecycle
@@ -240,10 +247,8 @@ async function main() {
     const right = makePad("right");
 
     const api = { onMove: null, onLook: null };
-
     bindPad(left, (x, y) => api.onMove && api.onMove(x, y));
     bindPad(right, (x, y) => api.onLook && api.onLook(x, y));
-
     return api;
 
     function bindPad(el, cb) {
@@ -363,7 +368,7 @@ async function main() {
   // -----------------------------
   // XR thumbsticks (Quest)
   // -----------------------------
-  function installXRGamepadControls({ THREE, rig, renderer, camera, xr }) {
+  function installXRGamepadControls({ THREE, rig, renderer, camera }) {
     const MOVE_SPEED = 2.4;
     const DEADZONE = 0.18;
     const SNAP_ANGLE = Math.PI / 4;
@@ -377,13 +382,19 @@ async function main() {
       const session = renderer.xr.getSession();
       if (!session) return;
 
-      const sources = session.inputSources || [];
+      // ✅ FIX: XRInputSourceArray -> real Array (so .filter works on Quest)
+      const sources = Array.from(session.inputSources || []);
+
       let left = null, right = null;
+
+      // Prefer handedness
       for (const s of sources) {
         if (!s?.gamepad) continue;
         if (s.handedness === "left") left = s;
         if (s.handedness === "right") right = s;
       }
+
+      // Fallback: first two gamepads
       if (!left || !right) {
         const gps = sources.filter(s => s?.gamepad);
         if (!left && gps[0]) left = gps[0];

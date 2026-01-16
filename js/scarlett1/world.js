@@ -2,6 +2,7 @@
 // SCARLETT1 WORLD ORCHESTRATOR (FULL) — Modular Forever
 // ✅ No 404 dependency for Quest controllers (built-in)
 // ✅ No 404 dependency for interactables registry (built-in)
+// ✅ Built-in Interactables Policy (cards not grabbable, chips grabbable)
 // ✅ External modules still load if they exist; missing ones are skipped safely
 //
 // URL params handled by index.js pass-through: safeMode/noHud/trace
@@ -75,6 +76,9 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
 
     // interactables registry (filled by built-in module below)
     interactables: null,
+
+    // helper (filled by policy module below)
+    tagInteractable: null,
 
     _enabledModuleNames: [],
     _modules: [],
@@ -183,7 +187,6 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
           out.trigger = clamp01(b[0]?.value);
           out.squeeze = clamp01(b[1]?.value);
 
-          // Prefer Quest stick axes [2],[3], fallback [0],[1]
           let sx = ax[2] ?? 0, sy = ax[3] ?? 0;
           if (Math.abs(sx) < 0.001 && Math.abs(sy) < 0.001) {
             sx = ax[0] ?? 0;
@@ -193,7 +196,6 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
           out.stickX = normAxis(sx);
           out.stickY = normAxis(invertY ? -sy : sy);
 
-          // Face buttons best-effort
           const btn4 = !!b[4]?.pressed;
           const btn5 = !!b[5]?.pressed;
           const btn3 = !!b[3]?.pressed;
@@ -220,7 +222,6 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
           ctx.controllers.left = L;
           ctx.controllers.right = R;
 
-          // if not in XR, zero to prevent stuck input
           if (!session) {
             const l = ensure("left");
             const r = ensure("right");
@@ -250,14 +251,89 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
     };
   }
 
+  // ---------- Built-in module: Interactable Tagger + Policy (FULL) ----------
+  // Convention:
+  // - Tag any Object3D:
+  //   obj.userData.interactable = true
+  //   obj.userData.kind = "chip" | "community_card" | "bot_card" | "dealer" | ...
+  //   obj.userData.grabbable = true/false
+  //
+  // Policy:
+  // - community_card + bot_card are NEVER grabbable.
+  // - chips + dealer items default grabbable unless explicitly false.
+  function createInteractablesPolicyModule() {
+    return {
+      name: "interactables_policy",
+
+      onEnable(ctx) {
+        const logp = (...a) => console.log("[interactables_policy]", ...a);
+
+        ctx.tagInteractable = (obj, kind, grabbable) => {
+          if (!obj) return;
+          obj.userData = obj.userData || {};
+          obj.userData.interactable = true;
+          if (kind) obj.userData.kind = kind;
+          if (typeof grabbable === "boolean") obj.userData.grabbable = grabbable;
+
+          // defaults
+          const k = String(obj.userData.kind || "unknown");
+          if (typeof obj.userData.grabbable !== "boolean") {
+            obj.userData.grabbable = !(k.includes("card"));
+          }
+
+          // force policy
+          if (k === "community_card" || k === "bot_card") obj.userData.grabbable = false;
+        };
+
+        this._scanTimer = 0;
+        this._lastCount = 0;
+        logp("ready ✅ (tag + policy)");
+      },
+
+      update(ctx, { dt }) {
+        // scan 4x/sec (cheap and safe)
+        this._scanTimer += dt;
+        if (this._scanTimer < 0.25) return;
+        this._scanTimer = 0;
+
+        if (!ctx.interactables) return;
+
+        // Traverse and register tagged interactables
+        let seen = 0;
+        ctx.scene.traverse((o) => {
+          if (!o || !o.isObject3D) return;
+          const ud = o.userData || {};
+          if (!ud.interactable) return;
+
+          const kind = String(ud.kind || "unknown");
+
+          // enforce policy always
+          if (kind === "community_card" || kind === "bot_card") ud.grabbable = false;
+
+          ctx.interactables.register(o, {
+            kind,
+            grabbable: ud.grabbable !== false,
+          });
+
+          seen++;
+        });
+
+        // log only when count changes
+        const c = ctx.interactables.count();
+        if (c !== this._lastCount && ctx.trace) {
+          console.log("[interactables_policy] registered=", c, "taggedSeen=", seen);
+          this._lastCount = c;
+        }
+      },
+    };
+  }
+
   // ---------- Safe dynamic import helper (skips missing modules quietly) ----------
   async function importIfExists(path) {
-    // Prefetch first: avoid "Failed to fetch dynamically imported module"
     try {
       const abs = new URL(path, location.href).toString();
       const res = await fetch(abs, { cache: "no-store" });
       if (!res.ok) return null;
-      // We do NOT consume the body here; just confirmation. Import uses cache-bust from router anyway.
       return await import(path);
     } catch {
       return null;
@@ -292,9 +368,10 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
   const boot = async () => {
     // ✅ Built-ins first (never 404)
     enable(createInteractablesRegistryModule());
+    enable(createInteractablesPolicyModule());
     enable(createXRControllerQuestModule());
 
-    // ✅ Your existing external modules (load only if present)
+    // ✅ External modules (load only if present)
     if (!noHud) {
       await tryEnable(
         "createAndroidDevHudModule",
@@ -348,4 +425,4 @@ export function createWorldOrchestrator({ safeMode = false, noHud = false, trace
   log("orchestrator running ✅", { safeMode, noHud, trace });
 
   return { ctx, scene, camera, renderer, playerRig, enable, modules };
-      }
+        }

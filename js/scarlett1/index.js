@@ -1,4 +1,4 @@
-// Scarlett Poker VR — Scarlett1 Runtime v4.2 (SAFE BASE)
+// /js/scarlett1/index.js — Scarlett1 Runtime REAL (safe baseline)
 
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
@@ -8,49 +8,44 @@ const o = document.getElementById("overlay");
 const log = (...a)=> o && (o.textContent += "\n[LOG] " + a.join(" "));
 const err = (...a)=> o && (o.textContent += "\n[ERR] " + a.join(" "));
 
-log("Scarlett1 runtime starting…");
+window.addEventListener("error", (e)=> err("window:", e.message));
+window.addEventListener("unhandledrejection", (e)=> err("promise:", e.reason?.message || String(e.reason)));
 
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x05080d);
+(async () => {
+  try {
+    log("scarlett1 runtime start ✅");
 
-const camera = new THREE.PerspectiveCamera(
-  70,
-  window.innerWidth / window.innerHeight,
-  0.1,
-  1000
-);
+    const host = document.getElementById("app") || document.body;
 
-const renderer = new THREE.WebGLRenderer({ antialias:true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.xr.enabled = true;
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.xr.enabled = true;
+    renderer.xr.setReferenceSpaceType("local-floor");
+    host.appendChild(renderer.domElement);
 
-document.getElementById("app").appendChild(renderer.domElement);
-document.body.appendChild(VRButton.createButton(renderer));
+    addEventListener("resize", () => renderer.setSize(innerWidth, innerHeight));
 
-log("Renderer + VRButton ready");
+    document.body.appendChild(VRButton.createButton(renderer));
+    log("VRButton ready ✅");
 
-const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 1.2);
-scene.add(hemi);
+    const world = new World({ THREE, renderer });
+    await world.init();
+    log("world.init OK ✅");
 
-const dir = new THREE.DirectionalLight(0xffffff, 1);
-dir.position.set(5, 10, 5);
-scene.add(dir);
+    renderer.setAnimationLoop((t, frame) => {
+      try {
+        world.tick(t, frame);
+        renderer.render(world.scene, world.camera);
+      } catch (e) {
+        err("FRAME CRASH ❌", e?.message || String(e));
+        renderer.setAnimationLoop(null);
+      }
+    });
 
-// === WORLD INIT ===
-let world;
-try {
-  world = new World({ THREE, scene });
-  await world.init();
-  log("World init OK ✅");
-} catch (e) {
-  err("World init FAILED ❌");
-  err(e.message);
-}
+    log("render loop started ✅");
 
-// === RENDER LOOP ===
-renderer.setAnimationLoop(() => {
-  if (world?.update) world.update();
-  renderer.render(scene, camera);
-});
-
-log("Render loop started ✅");
+  } catch (e) {
+    err("FATAL ❌", e?.message || String(e));
+  }
+})();

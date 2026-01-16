@@ -1,26 +1,18 @@
-// js/scarlett1/index.js — existence probe
-console.log("✅ js/scarlett1/index.js FOUND AND RUNNING");
+// /js/index.js — Router Entry (ALWAYS LOADS scarlett1)
+// If scarlett1 is missing, you’ll see it on-screen.
 
-import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
-import { VRButton } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
+const o = document.getElementById("overlay");
+const log = (...a)=> o && (o.textContent += "\n[LOG] " + a.join(" "));
+const err = (...a)=> o && (o.textContent += "\n[ERR] " + a.join(" "));
 
-const app = document.getElementById("app") || document.body;
+const entry = "./scarlett1/index.js?v=U4_2_router";
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.xr.enabled = true;
-app.appendChild(renderer.domElement);
+log("router -> importing:", entry);
 
-document.body.appendChild(VRButton.createButton(renderer));
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x101010);
-
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.set(0, 1.6, 3);
-
-scene.add(new THREE.HemisphereLight(0xffffff, 0x222222, 1));
-
-renderer.setAnimationLoop(() => {
-  renderer.render(scene, camera);
-});
+try {
+  await import(entry);
+  log("scarlett1 import OK ✅");
+} catch (e) {
+  err("scarlett1 import FAILED ❌");
+  err(e?.message || String(e));
+}

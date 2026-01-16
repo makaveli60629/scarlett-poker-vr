@@ -1,11 +1,16 @@
 // /js/scarlett1/world.js
-// SCARLETT1 — World Orchestrator (FULL)
-// Activates modules + ticks them. World is the orchestrator.
+// SCARLETT1 — World Orchestrator (FULL PATCHED)
+// - Activates modules in safe order
+// - Room Manager first
+// - World builds into Room #1 by default
+// - XR is modular forever
 
 import { createXRControllerQuestModule } from "./modules/xr/xr_controller_quest.js";
 import { createXRLocomotionModule } from "./modules/xr/xr_locomotion_module.js";
 import { createXRGrabModule } from "./modules/xr/xr_grab_module.js";
 import { createXRTeleportBlinkModule } from "./modules/xr/xr_teleport_blink_module.js";
+
+import { createRoomManagerModule } from "./modules/world/room_manager_module.js";
 import { createWorldMasterModule } from "./modules/world/world_master_module.js";
 
 export function createWorldOrchestrator({ THREE, scene, renderer, camera, playerRig, head }) {
@@ -36,10 +41,15 @@ export function createWorldOrchestrator({ THREE, scene, renderer, camera, player
       return true;
     },
 
-    // show references (filled by world module)
-    _show: null,
+    // optional update bus (world uses for hover cards / show anim)
     _worldUpdaters: [],
     registerWorldUpdater(fn) { ctx._worldUpdaters.push(fn); },
+
+    // world module will fill this
+    _show: null,
+
+    // room manager will fill this
+    rooms: null,
   };
 
   const modules = [];
@@ -50,12 +60,15 @@ export function createWorldOrchestrator({ THREE, scene, renderer, camera, player
     return mod;
   }
 
-  // ✅ Modular Forever activation order
-  const XRQuest = enable(createXRControllerQuestModule());         // 1) XR source of truth (never touched)
-  enable(createWorldMasterModule());                               // 2) World build (pit/table/bots/cards/chips)
-  enable(createXRLocomotionModule({ speed: 2.25 }));               // 3) Movement
-  enable(createXRGrabModule());                                    // 4) Grip grabs ONLY
-  enable(createXRTeleportBlinkModule({ distance: 1.25 }));         // 5) Primary blink teleport
+  // ✅ Activation order (important)
+  const XRQuest = enable(createXRControllerQuestModule());  // 1) XR input source of truth
+
+  enable(createRoomManagerModule());                        // 2) Rooms exist first (Room #1 = Scorpion Main Test)
+  enable(createWorldMasterModule());                        // 3) World builds into Room #1 automatically
+
+  enable(createXRLocomotionModule({ speed: 2.25 }));        // 4) Locomotion
+  enable(createXRGrabModule());                             // 5) Grip grab only
+  enable(createXRTeleportBlinkModule({ distance: 1.25 }));  // 6) Primary blink
 
   return {
     setControllers({ c0, c1 }) {
@@ -76,13 +89,14 @@ export function createWorldOrchestrator({ THREE, scene, renderer, camera, player
     },
 
     tick(dt) {
+      // update XR first so other modules consume stable normalized input
       if (ctx.xrSession) XRQuest.update();
       const input = XRQuest.getInput();
       const frame = { dt, input };
 
       for (const m of modules) m.update?.(ctx, frame);
 
-      // extra updater bus (world module uses it for hover cards)
+      // extra update bus (hover cards, show animations, etc.)
       if (ctx._worldUpdaters.length) {
         for (const fn of ctx._worldUpdaters) fn(dt);
       }

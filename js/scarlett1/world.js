@@ -1,374 +1,241 @@
 // /js/scarlett1/world.js
-// SCARLETT1 WORLD ORCHESTRATOR (FULL) — ANDROID DEBUG + MOVEMENT (NO AWAIT)
-// ✅ Android: Virtual controllers + 2D locomotion ALWAYS works
-// ✅ Show-check logs + auto-snap camera to table
-// ✅ Quest VRButton + XR sessions supported
-// ✅ External modules load if present; missing ones are skipped safely
-
-import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
-import { VRButton } from "./VRButton.js";
-
-export function createWorldOrchestrator({ safeMode = false, noHud = false, trace = false } = {}) {
+// SCARLETT1 WORLD ORCHESTRATOR (FULL) — Quest XR loop + controllers + lasers + locomotion fallback
+export async function bootWorld({ DIAG, H }) {
   const log = (...a) => console.log("[world]", ...a);
   const warn = (...a) => console.warn("[world]", ...a);
   const err = (...a) => console.error("[world]", ...a);
 
-  log("boot ✅", { safeMode, noHud, trace });
+  const stamp = () => new Date().toLocaleTimeString();
+  const HUD = (s) => (typeof H === "function" ? H(s) : log(s));
 
-  // -----------------------------
-  // Core Three.js bootstrap
-  // -----------------------------
+  HUD(`world start ✅ ${stamp()}`);
+
+  // --- Imports (NO bare specifiers; Quest-safe) ---
+  let THREE, VRButton;
+  try {
+    THREE = await import("https://unpkg.com/three@0.158.0/build/three.module.js");
+    VRButton = await import("https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js");
+    HUD("three + VRButton import ✅");
+  } catch (e) {
+    err(e);
+    throw new Error("Failed to import three/VRButton from unpkg");
+  }
+
+  // --- Scene setup ---
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x05060a);
+  scene.background = new THREE.Color(0x101214);
 
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.02, 250);
-  camera.position.set(0, 1.65, 4.0);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
+  camera.position.set(0, 1.6, 3);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.xr.enabled = true;
 
-  document.body.appendChild(renderer.domElement);
+  document.getElementById("app")?.appendChild(renderer.domElement);
 
-  // VR Button
-  const vrBtn = VRButton.createButton(renderer);
-  vrBtn.dataset.scarlettHud = "1";
-  document.body.appendChild(vrBtn);
+  // Add VR button
+  try {
+    const btn = VRButton.VRButton.createButton(renderer);
+    btn.style.zIndex = "99998";
+    document.body.appendChild(btn);
+    HUD("VRButton appended ✅");
+  } catch (e) {
+    warn("VRButton failed", e);
+  }
 
+  // Lights
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 0.9));
+  const dl = new THREE.DirectionalLight(0xffffff, 0.8);
+  dl.position.set(5, 10, 2);
+  scene.add(dl);
+
+  // Floor
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(80, 80),
+    new THREE.MeshStandardMaterial({ color: 0x1b1f22, roughness: 1, metalness: 0 })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = 0;
+  floor.receiveShadow = true;
+  scene.add(floor);
+
+  // Table marker (so you ALWAYS see something)
+  const table = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.8, 0.9, 0.12, 48),
+    new THREE.MeshStandardMaterial({ color: 0x2a7a5e, roughness: 0.95, metalness: 0.05 })
+  );
+  table.position.set(0, 0.85, 0);
+  scene.add(table);
+
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(1.05, 0.03, 16, 64),
+    new THREE.MeshStandardMaterial({ color: 0x0f0f12, roughness: 0.8 })
+  );
+  ring.position.set(0, 0.92, 0);
+  ring.rotation.x = Math.PI / 2;
+  scene.add(ring);
+
+  // Player rig (move this for locomotion)
+  const rig = new THREE.Group();
+  rig.add(camera);
+  rig.position.set(0, 0, 3.2);
+  scene.add(rig);
+
+  // --- Controllers + lasers ---
+  const controller0 = renderer.xr.getController(0);
+  const controller1 = renderer.xr.getController(1);
+  rig.add(controller0);
+  rig.add(controller1);
+
+  const grip0 = renderer.xr.getControllerGrip(0);
+  const grip1 = renderer.xr.getControllerGrip(1);
+  rig.add(grip0);
+  rig.add(grip1);
+
+  function makeLaser() {
+    const geom = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 0, -1),
+    ]);
+    const mat = new THREE.LineBasicMaterial({ color: 0xff3bd1 });
+    const line = new THREE.Line(geom, mat);
+    line.name = "laser";
+    line.scale.z = 5;
+    return line;
+  }
+
+  controller0.add(makeLaser());
+  controller1.add(makeLaser());
+
+  const tmpMat = new THREE.Matrix4();
+  const ray = new THREE.Raycaster();
+
+  // --- Locomotion fallback (Quest thumbstick move + snap turn) ---
+  const moveState = {
+    speed: 1.8, // m/s
+    snap: Math.PI / 6, // 30deg
+    snapCooldown: 0,
+  };
+
+  function getBestStickAxes(gamepad) {
+    if (!gamepad || !gamepad.axes) return null;
+    const a = gamepad.axes;
+    // Common layouts:
+    // - Some give [xL,yL,xR,yR]
+    // - Others: [xL,yL] only
+    // We'll choose the first pair with meaningful range.
+    const pairs = [];
+    for (let i = 0; i + 1 < a.length; i += 2) pairs.push([i, i + 1]);
+    if (!pairs.length) return null;
+    // pick pair with largest magnitude
+    let best = pairs[0], bestMag = 0;
+    for (const [i, j] of pairs) {
+      const mag = Math.abs(a[i]) + Math.abs(a[j]);
+      if (mag > bestMag) { bestMag = mag; best = [i, j]; }
+    }
+    return { x: a[best[0]] || 0, y: a[best[1]] || 0 };
+  }
+
+  function getSnapAxis(gamepad) {
+    if (!gamepad || !gamepad.axes) return 0;
+    // prefer right stick x if present, else any axis with movement
+    const a = gamepad.axes;
+    if (a.length >= 3) return a[2] || 0;
+    return a[0] || 0;
+  }
+
+  // --- XR session diagnostics ---
+  renderer.xr.addEventListener("sessionstart", () => {
+    HUD("XR sessionstart ✅");
+  });
+  renderer.xr.addEventListener("sessionend", () => {
+    HUD("XR sessionend ✅");
+  });
+
+  // Resize
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // Lighting + fallback world (never black)
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x101024, 0.45));
-  const sun = new THREE.DirectionalLight(0xffffff, 0.45);
-  sun.position.set(4, 9, 3);
-  scene.add(sun);
+  // --- Render loop: THIS IS THE IMPORTANT PART FOR QUEST BLACK-SCREEN BUGS ---
+  let lastT = performance.now();
+  let tick = 0;
 
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(60, 60),
-    new THREE.MeshStandardMaterial({ color: 0x0a0c12, roughness: 0.95, metalness: 0.02 })
-  );
-  floor.rotation.x = -Math.PI / 2;
-  scene.add(floor);
+  renderer.setAnimationLoop((t) => {
+    const dt = Math.min((t - lastT) / 1000, 0.05);
+    lastT = t;
+    tick++;
 
-  const centerRing = new THREE.Mesh(
-    new THREE.TorusGeometry(1.2, 0.04, 18, 120),
-    new THREE.MeshStandardMaterial({ color: 0x33ffff, roughness: 0.45, metalness: 0.15, emissive: 0x112233 })
-  );
-  centerRing.rotation.x = Math.PI / 2;
-  centerRing.position.y = 0.02;
-  scene.add(centerRing);
-
-  // -----------------------------
-  // Orchestrator Context
-  // -----------------------------
-  const ctx = {
-    THREE,
-    scene,
-    camera,
-    renderer,
-
-    input: {
-      left:  { stickX: 0, stickY: 0, trigger: 0, squeeze: 0 },
-      right: { stickX: 0, stickY: 0, trigger: 0, squeeze: 0 },
-    },
-
-    controllers: { left: null, right: null },
-
-    interactables: [],
-    rooms: new Map(),
-
-    _worldUpdaters: [],
-    registerWorldUpdater(fn) { if (typeof fn === "function") ctx._worldUpdaters.push(fn); },
-
-    registerInteractable(obj) {
-      if (!obj || !obj.isObject3D) return;
-      if (!ctx.interactables.includes(obj)) ctx.interactables.push(obj);
-    },
-
-    _interactionPolicy: { canGrab(obj) { return !!obj?.userData?.grabbable; } },
-
-    lastError: null,
-    logBuffer: [],
-    pushLog(line, level = "log") {
-      const s = `[${level}] ${line}`;
-      ctx.logBuffer.push(s);
-      if (ctx.logBuffer.length > 250) ctx.logBuffer.shift();
-    },
-
-    _show: null,
-  };
-
-  // -----------------------------
-  // XR Controller Nodes (Quest)
-  // -----------------------------
-  function installXRControllers() {
-    const c0 = renderer.xr.getController(0);
-    const c1 = renderer.xr.getController(1);
-    c0.name = "XRController0";
-    c1.name = "XRController1";
-    scene.add(c0);
-    scene.add(c1);
-    ctx.controllers.left = c0;
-    ctx.controllers.right = c1;
-
-    const mkLaser = (color) => {
-      const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
-      const m = new THREE.LineBasicMaterial({ color });
-      const l = new THREE.Line(g, m);
-      l.scale.z = 6.5;
-      return l;
-    };
-    c0.add(mkLaser(0xff66ff));
-    c1.add(mkLaser(0x33ffff));
-
-    log("XR controller nodes ready ✅");
-  }
-  installXRControllers();
-
-  // -----------------------------
-  // XR gamepad mapper -> ctx.input (XR only)
-  // -----------------------------
-  function applyDeadzone(v, dz = 0.18) {
-    if (Math.abs(v) < dz) return 0;
-    const s = (Math.abs(v) - dz) / (1 - dz);
-    return Math.sign(v) * Math.max(0, Math.min(1, s));
-  }
-
-  function readXRGamepadsIntoInput() {
     const session = renderer.xr.getSession?.();
-    if (!session) return;
+    if (session && tick % 30 === 0) {
+      // every ~0.5s at 60fps
+      const src = session.inputSources || [];
+      HUD(`XR inputSources=${src.length}`);
+    }
 
-    const sources = session.inputSources || [];
-    for (const src of sources) {
-      if (!src?.gamepad) continue;
-      const hand = src.handedness === "left" ? "left" : src.handedness === "right" ? "right" : null;
-      if (!hand) continue;
-
-      const gp = src.gamepad;
-      const ax = gp.axes || [];
-      const bt = gp.buttons || [];
-
-      const pairs = [[2,3],[0,1],[3,2],[1,0]];
-      let sx = 0, sy = 0;
-      for (const [ix, iy] of pairs) {
-        const tx = ax[ix] ?? 0;
-        const ty = ax[iy] ?? 0;
-        if (Math.abs(tx) + Math.abs(ty) > 0.02) { sx = tx; sy = ty; break; }
+    // locomotion from first gamepad we find (usually right controller)
+    if (session) {
+      const src = session.inputSources || [];
+      let gp = null;
+      for (const s of src) {
+        if (s && s.gamepad) { gp = s.gamepad; break; }
       }
 
-      ctx.input[hand].stickX = applyDeadzone(sx);
-      ctx.input[hand].stickY = applyDeadzone(sy);
+      if (gp) {
+        const stick = getBestStickAxes(gp);
+        if (stick) {
+          // forward is -Z in camera space
+          const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+          forward.y = 0;
+          forward.normalize();
 
-      ctx.input[hand].trigger = bt[0]?.value ?? 0;
-      ctx.input[hand].squeeze = bt[1]?.value ?? 0;
-    }
-  }
+          const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+          right.y = 0;
+          right.normalize();
 
-  // -----------------------------
-  // Module system (promise-based, no await)
-  // -----------------------------
-  const enabledModules = [];
-  const moduleMap = new Map();
+          const dead = 0.12;
+          const sx = Math.abs(stick.x) > dead ? stick.x : 0;
+          const sy = Math.abs(stick.y) > dead ? stick.y : 0;
 
-  function enableModule(mod) {
-    if (!mod || !mod.name) return;
-    try {
-      mod.onEnable?.(ctx);
-      enabledModules.push(mod);
-      moduleMap.set(mod.name, mod);
-      ctx.pushLog(`module enabled ✅ ${mod.name}`);
-      if (trace) log("module enabled ✅", mod.name);
-    } catch (e) {
-      ctx.lastError = e;
-      ctx.pushLog(`module enable failed ❌ ${mod.name} ${String(e)}`, "error");
-      err("module enable failed:", mod.name, e);
-    }
-  }
+          // stick.y usually up=-1, down=+1, so invert for forward
+          const moveF = -sy;
+          const moveR = sx;
 
-  function importIfExists(relPath) {
-    return import(relPath).catch((e) => {
-      if (trace) warn("import missing:", relPath, e);
-      return null;
-    });
-  }
-
-  function tryEnable(factoryName, importer) {
-    return importer()
-      .then((m) => {
-        const fn = m?.[factoryName];
-        if (typeof fn !== "function") return false;
-        enableModule(fn());
-        return true;
-      })
-      .catch((e) => {
-        ctx.lastError = e;
-        ctx.pushLog(`module load failed: ${factoryName} ${String(e)}`, "error");
-        err("module load failed:", factoryName, e);
-        return false;
-      });
-  }
-
-  // -----------------------------
-  // Built-in ANDROID 2D locomotion (ALWAYS works when not in XR)
-  // -----------------------------
-  function createAndroid2DLocomotionModule({
-    moveSpeed = 2.4,
-    turnSpeed = 1.6,
-    yLock = 1.65,
-  } = {}) {
-    let yaw = 0;
-
-    return {
-      name: "android_2d_locomotion",
-      onEnable() { log("[android_2d_locomotion] ready ✅"); },
-      update(ctx, { dt, input }) {
-        const inXR = !!ctx.renderer?.xr?.getSession?.();
-        if (inXR) return;
-
-        const lx = input?.left?.stickX ?? 0;
-        const ly = input?.left?.stickY ?? 0;
-        const rx = input?.right?.stickX ?? 0;
-
-        yaw += rx * turnSpeed * dt;
-
-        const forward = new THREE.Vector3(Math.sin(yaw), 0, -Math.cos(yaw));
-        const right = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
-
-        const move = new THREE.Vector3();
-        move.addScaledVector(forward, ly);
-        move.addScaledVector(right, lx);
-
-        if (move.length() > 1e-4) {
-          move.normalize().multiplyScalar(moveSpeed * dt);
-          ctx.camera.position.add(move);
+          rig.position.addScaledVector(forward, moveF * moveState.speed * dt);
+          rig.position.addScaledVector(right, moveR * moveState.speed * dt);
         }
 
-        ctx.camera.position.y = yLock;
-
-        const lookTarget = new THREE.Vector3(
-          ctx.camera.position.x + Math.sin(yaw),
-          ctx.camera.position.y,
-          ctx.camera.position.z - Math.cos(yaw)
-        );
-        ctx.camera.lookAt(lookTarget);
-      }
-    };
-  }
-
-  enableModule(createAndroid2DLocomotionModule());
-
-  // -----------------------------
-  // Kick off module loads (non-blocking)
-  // -----------------------------
-  const loadPromises = [];
-
-  // Android virtual controls (sticks/buttons)
-  loadPromises.push(
-    tryEnable("createAndroidControlsModule", () => importIfExists("./modules/xr/android_controls_module.js"))
-  );
-
-  // XR modules (optional)
-  loadPromises.push(tryEnable("createXRLocomotionModule", () => importIfExists("./modules/xr/xr_locomotion_module.js")));
-  loadPromises.push(tryEnable("createXRGrabModule", () => importIfExists("./modules/xr/xr_grab_module.js")));
-  loadPromises.push(tryEnable("createXRTeleportBlinkModule", () => importIfExists("./modules/xr/xr_teleport_blink_module.js")));
-
-  // Rooms/world
-  loadPromises.push(tryEnable("createRoomManagerModule", () => importIfExists("./modules/world/room_manager_module.js")));
-  loadPromises.push(tryEnable("createLobbyHallwaysModule", () => importIfExists("./modules/world/lobby_hallways_module.js")));
-  loadPromises.push(tryEnable("createRoomPortalsModule", () => importIfExists("./modules/world/room_portals_module.js")));
-  loadPromises.push(tryEnable("createDoorTeleportModule", () => importIfExists("./modules/world/door_teleport_module.js")));
-
-  // Main table build
-  loadPromises.push(tryEnable("createWorldMasterModule", () => importIfExists("./modules/world/world_master_module.js")));
-
-  // Theme/signage optional
-  loadPromises.push(tryEnable("createScorpionThemeModule", () => importIfExists("./modules/theme/scorpion_theme_module.js")));
-  loadPromises.push(tryEnable("createJumbotronModule", () => importIfExists("./modules/theme/jumbotron_module.js")));
-
-  // Diag modules optional
-  loadPromises.push(tryEnable("createAndroidDevHudModule", () => importIfExists("./modules/diag/android_dev_hud_module.js")));
-  loadPromises.push(tryEnable("createHealthOverlayModule", () => importIfExists("./modules/diag/health_overlay_module.js")));
-  loadPromises.push(tryEnable("createCopyDiagnosticsModule", () => importIfExists("./modules/diag/copy_diagnostics_module.js")));
-  loadPromises.push(tryEnable("createModuleTogglePanelModule", () => importIfExists("./modules/diag/module_toggle_panel_module.js")));
-
-  // Hide HUD if requested (but never hide controls)
-  if (noHud) {
-    try {
-      document.querySelectorAll("[data-scarlett-hud='1']").forEach((el) => {
-        if (el.dataset.scarlettControls === "1") return;
-        el.style.display = "none";
-      });
-      log("noHud=1 -> HUD hidden ✅");
-    } catch {}
-  }
-
-  // After module loads settle, do show-check + snap camera
-  function snapToTableView() {
-    const inXR = !!renderer.xr.getSession?.();
-    if (inXR) return;
-
-    const target = new THREE.Vector3(0, 1.0, 0);
-    if (ctx._show?.tableGroup) ctx._show.tableGroup.getWorldPosition(target);
-
-    camera.position.set(target.x, target.y + 1.8, target.z + 4.2);
-    camera.lookAt(target.x, target.y + 0.8, target.z);
-  }
-
-  Promise.allSettled(loadPromises).then(() => {
-    const hasShow = !!ctx._show?.tableGroup;
-    const bots = ctx._show?.bots?.length || 0;
-    const chips = ctx._show?.chips?.length || 0;
-    const interactables = ctx.interactables?.length || 0;
-
-    log("SHOW CHECK:", { hasShow, bots, chips, interactables });
-
-    if (hasShow) {
-      const p = new THREE.Vector3();
-      ctx._show.tableGroup.getWorldPosition(p);
-      log("TABLE POS:", p);
-      snapToTableView();
-    } else {
-      warn("world_master_module NOT BUILT (fallback only). Check ./modules/world/world_master_module.js exists + exports createWorldMasterModule");
-    }
-
-    log("boot complete ✅ modules=", enabledModules.map((m) => m.name));
-  });
-
-  // -----------------------------
-  // Main loop
-  // -----------------------------
-  let lastT = performance.now();
-  renderer.setAnimationLoop(() => {
-    const t = performance.now();
-    const dt = Math.min(0.05, (t - lastT) / 1000);
-    lastT = t;
-
-    // XR input (if XR session)
-    readXRGamepadsIntoInput();
-
-    // Update modules
-    for (const m of enabledModules) {
-      try {
-        m.update?.(ctx, { dt, input: ctx.input });
-      } catch (e) {
-        ctx.lastError = e;
-        ctx.pushLog(`module update failed: ${m.name} ${String(e)}`, "error");
-        err("module update failed:", m.name, e);
+        // snap turn from another axis
+        moveState.snapCooldown = Math.max(0, moveState.snapCooldown - dt);
+        const ax = getSnapAxis(gp);
+        if (moveState.snapCooldown === 0 && Math.abs(ax) > 0.7) {
+          rig.rotation.y += (ax > 0 ? -1 : 1) * moveState.snap;
+          moveState.snapCooldown = 0.25;
+        }
       }
     }
 
-    // World updaters
-    for (const fn of ctx._worldUpdaters) {
-      try { fn(dt); } catch {}
+    // simple “laser hits floor” so you can see ray is alive
+    const controllers = [controller0, controller1];
+    for (const c of controllers) {
+      tmpMat.identity().extractRotation(c.matrixWorld);
+      ray.ray.origin.setFromMatrixPosition(c.matrixWorld);
+      ray.ray.direction.set(0, 0, -1).applyMatrix4(tmpMat);
+      const hits = ray.intersectObject(floor, false);
+      const line = c.getObjectByName("laser");
+      if (line) line.scale.z = hits.length ? hits[0].distance : 5;
     }
 
     renderer.render(scene, camera);
   });
 
-  return { ctx, scene, camera, renderer, enabledModules, moduleMap };
-                         }
+  HUD("render loop installed ✅");
+
+  // Quick camera snap toward table
+  camera.lookAt(0, 1.0, 0);
+  HUD("camera snapped to table ✅");
+}

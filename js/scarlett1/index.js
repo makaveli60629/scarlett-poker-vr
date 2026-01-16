@@ -1,31 +1,28 @@
 // /js/scarlett1/index.js — Scarlett1 Runtime (FULL)
-// BUILD: SCARLETT1_FULL_v1_5_XR_LOADER_SAFE
-// Goal: prevent Quest "stuck on loader" by trapping XR-loop exceptions and logging them.
+// BUILD: SCARLETT1_FULL_v1_6_STABLE_XR_STICKS_WATCH
+// ✅ Android touch move/look (non-XR)
+// ✅ Quest: lasers + teleport (trigger)
+// ✅ Quest: left stick smooth move, right stick snap-turn 45°
+// ✅ Y button toggles watch menu (3D panel) on left controller
+// ✅ Calls scene.userData.worldTick(dt) so world glow pulses
+// ✅ Global error traps so Quest won't silently hang
 
 export function boot() {
   main().catch((e) => fatal(e));
 }
 
-const BUILD = "SCARLETT1_FULL_v1_5_XR_LOADER_SAFE";
-const log = (...a) => console.log("[scarlett1]", ...a);
-const err = (...a) => console.error("[scarlett1]", ...a);
+const BUILD = "SCARLETT1_FULL_v1_6_STABLE_XR_STICKS_WATCH";
 
-function hud() {
-  return document.getElementById("scarlett-mini-hud");
-}
-function writeHud(line) {
-  const el = hud();
-  if (!el) return;
-  el.textContent += `\n${line}`;
-}
+function hud() { return document.getElementById("scarlett-mini-hud"); }
+function writeHud(line) { const el = hud(); if (el) el.textContent += `\n${line}`; }
 function fatal(e) {
   const msg = e?.stack || e?.message || String(e);
-  err("fatal ❌", msg);
+  console.error("[scarlett1] fatal ❌", msg);
   writeHud(`[ERR] ${msg}`);
 }
 
 async function main() {
-  // Global traps so Quest never “silently” dies into loader.
+  // Hard safety: never silent loader hang
   window.addEventListener("error", (e) => {
     const msg = e?.error?.stack || e?.message || String(e);
     writeHud(`[ERR] window.error: ${msg}`);
@@ -35,11 +32,12 @@ async function main() {
     writeHud(`[ERR] unhandledrejection: ${msg}`);
   });
 
-  writeHud(`[LOG] scarlett1 starting…`);
+  writeHud("[LOG] scarlett1 starting…");
   writeHud(`build=${BUILD}`);
 
   const THREE = await import("https://unpkg.com/three@0.158.0/build/three.module.js");
   const { VRButton } = await import("https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js");
+
   writeHud("[LOG] three loaded ✅");
   writeHud("[LOG] VRButton loaded ✅");
 
@@ -47,7 +45,7 @@ async function main() {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05060a);
 
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 200);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 300);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
@@ -60,7 +58,7 @@ async function main() {
 
   // Lights
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.0));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.85);
   dir.position.set(2, 6, 3);
   scene.add(dir);
 
@@ -72,9 +70,9 @@ async function main() {
   rig.add(camera);
   scene.add(rig);
 
-  // Floor (teleport target)
+  // Fallback floor (teleport target)
   const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(60, 60),
+    new THREE.PlaneGeometry(80, 80),
     new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 1, metalness: 0 })
   );
   floor.rotation.x = -Math.PI / 2;
@@ -87,7 +85,7 @@ async function main() {
   try {
     const worldMod = await import(`./world.js?v=WORLD_${Date.now()}`);
     if (worldMod?.buildWorld) {
-      worldMod.buildWorld({ THREE, scene, rig, renderer, camera, log, err, writeHud });
+      worldMod.buildWorld({ THREE, scene, rig, renderer, camera, writeHud });
       writeHud("[LOG] world built ✅");
     } else {
       writeHud("[ERR] world.js missing export buildWorld()");
@@ -97,17 +95,15 @@ async function main() {
     writeHud("[ERR] " + (e?.stack || e?.message || e));
   }
 
-  // Android touch controls (only used outside XR)
+  // Controls
   const touch = installTouchControls({ THREE, camera, rig });
   if (touch.enabled) writeHud("[LOG] android touch controls ✅");
 
-  // XR: laser + teleport
   const xr = installXRControllers({ THREE, scene, rig, renderer, floor });
-  writeHud("[LOG] XR controllers installed ✅");
+  writeHud("[LOG] XR lasers+teleport installed ✅");
 
-  // XR: sticks + snap-turn + watch toggle (lazy init)
-  const gp = installXRGamepadControls({ THREE, scene, rig, renderer, camera, xr });
-  writeHud("[LOG] XR gamepad controls installed ✅");
+  const gp = installXRGamepadControls({ THREE, rig, renderer, camera, xr, writeHud });
+  writeHud("[LOG] XR sticks+watch installed ✅");
 
   // Resize
   window.addEventListener("resize", () => {
@@ -118,7 +114,6 @@ async function main() {
 
   renderer.xr.addEventListener("sessionstart", () => {
     writeHud("[LOG] XR session start ✅");
-    // Small delay helps Quest stabilize before we do anything “extra”
     gp.onSessionStart();
   });
   renderer.xr.addEventListener("sessionend", () => {
@@ -126,11 +121,14 @@ async function main() {
     gp.onSessionEnd();
   });
 
-  // Render loop (WRAPPED)
+  // Loop (wrapped so Quest can't hang silently)
   const clock = new THREE.Clock();
   renderer.setAnimationLoop(() => {
     try {
       const dt = clock.getDelta();
+
+      // Run world tick if provided (glows/pulses/spins)
+      scene.userData.worldTick?.(dt);
 
       if (!renderer.xr.isPresenting) {
         touch.update(dt);
@@ -141,29 +139,23 @@ async function main() {
       xr.update();
       renderer.render(scene, camera);
     } catch (e) {
-      // If something throws in XR, Quest can get stuck on loader.
-      // We log it so you see the exact cause.
       fatal(e);
-
-      // Try to end XR session to recover automatically
-      try {
-        const s = renderer.xr.getSession?.();
-        if (s) s.end();
-      } catch (_) {}
+      try { renderer.xr.getSession?.()?.end(); } catch (_) {}
     }
   });
 
   writeHud("[LOG] scarlett1 runtime start ✅");
 
-  // ==========================================================
-  // TOUCH CONTROLS (Android / mobile)
-  // ==========================================================
+  // -----------------------------
+  // Android Touch Controls
+  // -----------------------------
   function installTouchControls({ THREE, camera, rig }) {
     const isTouch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
     const enabled = !!isTouch;
     const ui = enabled ? createTouchUI() : null;
 
     const state = { moveX: 0, moveY: 0, lookX: 0, lookY: 0, yaw: rig.rotation.y || 0, pitch: 0 };
+
     const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
     function applyLook() {
@@ -173,6 +165,7 @@ async function main() {
 
     function update(dt) {
       if (!enabled) return;
+
       const speed = 2.2;
       const turnSpeed = 2.0;
 
@@ -227,14 +220,10 @@ async function main() {
     const right = makePad("right");
 
     let moveCb = null, lookCb = null;
-
     bindPad(left, (x, y) => moveCb && moveCb(x, y));
     bindPad(right, (x, y) => lookCb && lookCb(x, y));
 
-    return {
-      set onMove(fn) { moveCb = fn; },
-      set onLook(fn) { lookCb = fn; }
-    };
+    return { set onMove(fn) { moveCb = fn; }, set onLook(fn) { lookCb = fn; } };
 
     function bindPad(el, cb) {
       let active = false;
@@ -266,9 +255,9 @@ async function main() {
     }
   }
 
-  // ==========================================================
-  // XR Controllers: Lasers + Teleport marker glow
-  // ==========================================================
+  // -----------------------------
+  // XR Lasers + Teleport
+  // -----------------------------
   function installXRControllers({ THREE, scene, rig, renderer, floor }) {
     const raycaster = new THREE.Raycaster();
     const tempMatrix = new THREE.Matrix4();
@@ -280,13 +269,12 @@ async function main() {
 
     const laserGeom = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, -1)
+      new THREE.Vector3(0, 0, -1),
     ]);
 
     function addLaser(ctrl, colorHex) {
-      const mat = new THREE.LineBasicMaterial({ color: colorHex, transparent: true, opacity: 0.9 });
+      const mat = new THREE.LineBasicMaterial({ color: colorHex, transparent: true, opacity: 0.95 });
       const line = new THREE.Line(laserGeom, mat);
-      line.name = "laser";
       line.scale.z = 12;
       ctrl.add(line);
 
@@ -322,6 +310,7 @@ async function main() {
       tempMatrix.identity().extractRotation(ctrl.matrixWorld);
       raycaster.ray.origin.setFromMatrixPosition(ctrl.matrixWorld);
       raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+
       const hits = raycaster.intersectObject(floor, false);
       if (hits.length) {
         hitPoint.copy(hits[0].point);
@@ -334,6 +323,7 @@ async function main() {
     function onSelectEnd(e) {
       if (!aiming) return;
       aiming = false;
+
       const ctrl = e.target;
       if (getHit(ctrl)) {
         rig.position.x = hitPoint.x;
@@ -377,25 +367,23 @@ async function main() {
     return { update, controllers: { c1, c2 } };
   }
 
-  // ==========================================================
-  // XR Gamepad: left stick move, right stick snap turn, Y watch toggle (lazy)
-  // ==========================================================
-  function installXRGamepadControls({ THREE, scene, rig, renderer, camera, xr }) {
-    const MOVE_SPEED = 2.4;
+  // -----------------------------
+  // XR Gamepad Controls (sticks + watch)
+  // -----------------------------
+  function installXRGamepadControls({ THREE, rig, renderer, camera, xr, writeHud }) {
+    const MOVE_SPEED = 2.5;
     const DEADZONE = 0.18;
 
     const SNAP_ANGLE = Math.PI / 4;
     const SNAP_COOLDOWN = 0.22;
     let snapTimer = 0;
 
-    // Lazy watch creation to avoid loader-stall edge cases
     let watch = null;
     let lastMenuPressed = false;
     let allowExtras = false;
 
     function onSessionStart() {
       allowExtras = false;
-      // Enable extras after Quest is already rendering a bit
       setTimeout(() => { allowExtras = true; }, 500);
     }
     function onSessionEnd() {
@@ -411,7 +399,6 @@ async function main() {
       const session = renderer.xr.getSession();
       if (!session) return;
 
-      // Map by handedness if available
       const sources = session.inputSources || [];
       let left = null, right = null;
       for (const s of sources) {
@@ -420,3 +407,139 @@ async function main() {
         if (s.handedness === "right") right = s;
       }
       if (!left || !right) {
+        const gps = sources.filter(s => s?.gamepad);
+        if (!left && gps[0]) left = gps[0];
+        if (!right && gps[1]) right = gps[1];
+      }
+
+      // Attach / create watch lazily and safely
+      if (allowExtras && !watch && xr?.controllers?.c1) {
+        watch = createWatchPanel({ THREE });
+        watch.visible = false;
+        xr.controllers.c1.add(watch);
+        watch.position.set(-0.06, -0.04, -0.10);
+        watch.rotation.set(-0.6, 0.3, 0.2);
+        writeHud("[LOG] watch menu ready ✅");
+      }
+
+      // Move with left stick
+      if (left?.gamepad) {
+        const { x, y } = readStick(left.gamepad);
+        if (Math.abs(x) > DEADZONE || Math.abs(y) > DEADZONE) {
+          const yaw = getCameraYaw();
+          const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+          const rightv = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+
+          const move = new THREE.Vector3();
+          move.addScaledVector(forward, -y);
+          move.addScaledVector(rightv, x);
+
+          if (move.lengthSq() > 0.0001) {
+            move.normalize().multiplyScalar(MOVE_SPEED * dt);
+            rig.position.add(move);
+          }
+        }
+
+        // Y toggles watch (try indices 3/4/5)
+        const menuPressed = isMenuPressed(left.gamepad);
+        if (menuPressed && !lastMenuPressed) {
+          if (watch) watch.visible = !watch.visible;
+        }
+        lastMenuPressed = menuPressed;
+      }
+
+      // Snap turn with right stick X
+      if (right?.gamepad) {
+        const { x } = readStick(right.gamepad);
+        if (Math.abs(x) > 0.6 && snapTimer === 0) {
+          rig.rotation.y += (x > 0 ? -SNAP_ANGLE : SNAP_ANGLE);
+          snapTimer = SNAP_COOLDOWN;
+        }
+      }
+    }
+
+    function readStick(gamepad) {
+      const a = gamepad.axes || [];
+      let x = 0, y = 0;
+      if (a.length >= 4) { x = a[2]; y = a[3]; }
+      else if (a.length >= 2) { x = a[0]; y = a[1]; }
+
+      x = (Math.abs(x) < DEADZONE) ? 0 : x;
+      y = (Math.abs(y) < DEADZONE) ? 0 : y;
+      return { x, y };
+    }
+
+    function getCameraYaw() {
+      const q = new THREE.Quaternion();
+      camera.getWorldQuaternion(q);
+      const e = new THREE.Euler().setFromQuaternion(q, "YXZ");
+      return e.y;
+    }
+
+    function isMenuPressed(gamepad) {
+      const b = gamepad.buttons || [];
+      const idxs = [3, 4, 5];
+      for (const i of idxs) {
+        if (b[i] && b[i].pressed) return true;
+      }
+      return false;
+    }
+
+    function createWatchPanel({ THREE }) {
+      const g = new THREE.Group();
+      g.name = "WatchMenu";
+
+      const plane = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.18, 0.12),
+        new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.92 })
+      );
+
+      const canvas = document.createElement("canvas");
+      canvas.width = 512;
+      canvas.height = 384;
+      const ctx2d = canvas.getContext("2d");
+
+      ctx2d.fillStyle = "rgba(0,0,0,0.75)";
+      ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx2d.strokeStyle = "rgba(0,229,255,0.6)";
+      ctx2d.lineWidth = 6;
+      ctx2d.strokeRect(14, 14, canvas.width - 28, canvas.height - 28);
+
+      ctx2d.fillStyle = "rgba(0,229,255,0.95)";
+      ctx2d.font = "bold 44px monospace";
+      ctx2d.fillText("SCARLETT WATCH", 40, 90);
+
+      ctx2d.fillStyle = "rgba(255,255,255,0.92)";
+      ctx2d.font = "28px monospace";
+      const lines = [
+        "Y: Toggle Watch",
+        "Left Stick: Move",
+        "Right Stick: Snap Turn 45°",
+        "Right Trigger: Teleport"
+      ];
+      let y = 150;
+      for (const line of lines) {
+        ctx2d.fillText(line, 40, y);
+        y += 44;
+      }
+
+      const tex = new THREE.CanvasTexture(canvas);
+      plane.material.map = tex;
+      plane.material.needsUpdate = true;
+
+      g.add(plane);
+
+      const border = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.19, 0.13),
+        new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.12 })
+      );
+      border.position.z = -0.001;
+      g.add(border);
+
+      return g;
+    }
+
+    return { update, onSessionStart, onSessionEnd };
+  }
+          }

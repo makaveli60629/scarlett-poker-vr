@@ -1,48 +1,44 @@
-// xr_controller_quest.js
-// Single source of truth for Quest/Oculus WebXR input normalization.
-// Goal: never touch mapping again.
+// /js/scarlett1/modules/xr/xr_controller_quest.js
+// ScarlettXR Quest Controller Module (Single Source of Truth)
+// - Reads raw WebXR gamepads
+// - Normalizes stick/buttons
+// - Caches mapping so you stop reconfiguring
 
-import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
-
-export function createXRControllerQuestModule() {
+export function createXRControllerQuestModule({
+  storageKey = "scarlett1.xr.mapping.quest.v1",
+  deadzone = 0.18,
+} = {}) {
   const state = {
     session: null,
     sources: { left: null, right: null },
     gamepads: { left: null, right: null },
-
-    // Normalized outputs (all modules consume ONLY these)
-    out: {
-      left:  { stickX: 0, stickY: 0, trigger: 0, grip: 0, primary: 0 },
-      right: { stickX: 0, stickY: 0, trigger: 0, grip: 0, primary: 0 },
-      // convenience
-      moveX: 0, // world-relative computed elsewhere OR keep as local
-      moveY: 0,
-    },
-
-    // mapping cache (so we stop guessing every session)
     mapping: {
-      stick: "auto",           // "axes01" or "axes23" or "auto"
+      stick: "auto",           // "axes01" | "axes23" | "auto"
       triggerIdx: [0, 1],
       gripIdx: [1, 2],
       primaryIdx: [3, 4, 5],
+    },
+    out: {
+      left:  { stickX: 0, stickY: 0, trigger: 0, grip: 0, primary: 0 },
+      right: { stickX: 0, stickY: 0, trigger: 0, grip: 0, primary: 0 },
+      meta:  { stickMode: "auto", leftOK: false, rightOK: false },
     }
   };
 
-  // Load cached mapping per device/runtime if available
-  const mapKey = "scarlett1.xr.mapping.quest.v1";
+  // Load cached mapping
   try {
-    const cached = JSON.parse(localStorage.getItem(mapKey) || "null");
+    const cached = JSON.parse(localStorage.getItem(storageKey) || "null");
     if (cached && typeof cached === "object") state.mapping = { ...state.mapping, ...cached };
   } catch {}
 
   function saveMapping() {
-    try { localStorage.setItem(mapKey, JSON.stringify(state.mapping)); } catch {}
+    try { localStorage.setItem(storageKey, JSON.stringify(state.mapping)); } catch {}
   }
 
-  function deadzone(v, dz = 0.18) {
+  function dz(v) {
     const a = Math.abs(v);
-    if (a < dz) return 0;
-    return Math.sign(v) * (a - dz) / (1 - dz);
+    if (a < deadzone) return 0;
+    return Math.sign(v) * (a - deadzone) / (1 - deadzone);
   }
 
   function pickButton(gp, idxCandidates) {
@@ -57,8 +53,12 @@ export function createXRControllerQuestModule() {
 
   function updateInputSource(src) {
     if (!src?.gamepad) return;
-    const hand = src.handedness === "left" ? "left" : (src.handedness === "right" ? "right" : null);
+    const hand =
+      src.handedness === "left" ? "left" :
+      src.handedness === "right" ? "right" :
+      null;
     if (!hand) return;
+
     state.sources[hand] = src;
     state.gamepads[hand] = src.gamepad;
   }
@@ -75,13 +75,11 @@ export function createXRControllerQuestModule() {
     const a0 = gp.axes[0] ?? 0, a1 = gp.axes[1] ?? 0;
     const a2 = gp.axes[2] ?? 0, a3 = gp.axes[3] ?? 0;
 
-    // Decide once and cache (unless "auto")
     let use = state.mapping.stick;
 
     if (use === "auto") {
       const m01 = Math.hypot(a0, a1);
       const m23 = Math.hypot(a2, a3);
-      // choose whichever actually moves more
       use = (m23 > m01 + 0.05) ? "axes23" : "axes01";
       state.mapping.stick = use;
       saveMapping();
@@ -91,18 +89,18 @@ export function createXRControllerQuestModule() {
     if (use === "axes23") { x = a2; y = a3; }
     else { x = a0; y = a1; }
 
-    x = deadzone(x);
-    y = deadzone(y);
-
-    return { x, y };
+    return { x: dz(x), y: dz(y) };
   }
 
   function updateNormalized() {
-    // keep refs fresh
     for (const src of state.session?.inputSources || []) updateInputSource(src);
 
     const L = state.gamepads.left;
     const R = state.gamepads.right;
+
+    state.out.meta.leftOK = !!L;
+    state.out.meta.rightOK = !!R;
+    state.out.meta.stickMode = state.mapping.stick;
 
     const ls = readStick(L);
     const rs = readStick(R);
@@ -112,9 +110,9 @@ export function createXRControllerQuestModule() {
     state.out.right.stickX = rs.x;
     state.out.right.stickY = rs.y;
 
-    state.out.left.trigger = pickButton(L, state.mapping.triggerIdx);
-    state.out.left.grip    = pickButton(L, state.mapping.gripIdx);
-    state.out.left.primary = pickButton(L, state.mapping.primaryIdx);
+    state.out.left.trigger  = pickButton(L, state.mapping.triggerIdx);
+    state.out.left.grip     = pickButton(L, state.mapping.gripIdx);
+    state.out.left.primary  = pickButton(L, state.mapping.primaryIdx);
 
     state.out.right.trigger = pickButton(R, state.mapping.triggerIdx);
     state.out.right.grip    = pickButton(R, state.mapping.gripIdx);
@@ -129,11 +127,7 @@ export function createXRControllerQuestModule() {
       session.addEventListener("inputsourceschange", rescan);
     },
     update() { updateNormalized(); },
-    get() { return state.out; },
-    // if you ever want to force reset mappings:
-    resetMapping() {
-      state.mapping.stick = "auto";
-      saveMapping();
-    }
+    getInput() { return state.out; },
+    resetMapping() { state.mapping.stick = "auto"; saveMapping(); },
   };
-      }
+}

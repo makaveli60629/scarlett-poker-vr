@@ -1,111 +1,116 @@
 // /js/modules/avatars.module.js
-// SOUPED placeholder avatars (6-max) + showcase avatar near spawn (FULL)
+// Bots + showcase (SOUPED) (FULL)
 
 export default {
-  id: "avatars.module.js",
+  id: 'avatars.module.js',
 
-  async init({ THREE, anchors, tableData, log }) {
+  async init({ THREE, anchors, log }) {
+    const tableData = window.SCARLETT?.table?.data;
     const root = new THREE.Group();
-    root.name = "AVATARS_ROOT";
+    root.name = 'AVATARS_ROOT';
     anchors.avatars.add(root);
 
-    const seatCount = tableData.seats || 6;
-    const seatRadius = (tableData.railRadius || 1.45) + 0.65;
+    const seatCount = tableData?.seats || 6;
+    const seatRadius = (tableData?.railRadius || 1.42) + 0.70;
+    const cx = tableData?.center?.x ?? 0;
+    const cz = tableData?.center?.z ?? -2.0;
+
+    const bodyMats = [
+      new THREE.MeshStandardMaterial({ color: 0x2a2f44, roughness: 0.95 }),
+      new THREE.MeshStandardMaterial({ color: 0x1f3a52, roughness: 0.95 }),
+      new THREE.MeshStandardMaterial({ color: 0x3a2a44, roughness: 0.95 }),
+      new THREE.MeshStandardMaterial({ color: 0x253a2a, roughness: 0.95 }),
+      new THREE.MeshStandardMaterial({ color: 0x3a2f20, roughness: 0.95 }),
+      new THREE.MeshStandardMaterial({ color: 0x2a3a3a, roughness: 0.95 })
+    ];
+    const skinMat = new THREE.MeshStandardMaterial({ color: 0xf3f3f3, roughness: 0.55 });
 
     const avatars = [];
 
-    function makeAvatar(i, colorHex) {
+    function makeBot(i) {
       const g = new THREE.Group();
-      g.name = `AVATAR_${i}`;
+      const mat = bodyMats[i % bodyMats.length];
 
-      const bodyMat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.92 });
-      const skinMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55 });
-
-      const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.45, 6, 14), bodyMat);
-      torso.position.y = 1.10;
-      torso.name = "TORSO";
+      const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.45, 8, 16), mat);
+      torso.position.y = 1.15;
       g.add(torso);
 
-      const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 18, 14), skinMat);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 18, 14), skinMat);
       head.position.y = 1.55;
-      head.name = "HEAD";
+      head.name = 'HEAD';
       g.add(head);
 
-      // arms
-      const armGeo = new THREE.CapsuleGeometry(0.05, 0.22, 4, 10);
-      const la = new THREE.Mesh(armGeo, bodyMat);
-      la.position.set(-0.24, 1.18, 0.05);
-      la.rotation.z = 0.35;
-      la.name = "L_ARM";
-      g.add(la);
+      const shoulders = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.10, 0.18), mat);
+      shoulders.position.y = 1.35;
+      g.add(shoulders);
 
-      const ra = new THREE.Mesh(armGeo, bodyMat);
-      ra.position.set(0.24, 1.18, 0.05);
-      ra.rotation.z = -0.35;
-      ra.name = "R_ARM";
-      g.add(ra);
+      const upperGeo = new THREE.CapsuleGeometry(0.06, 0.18, 6, 12);
+      const lowerGeo = new THREE.CapsuleGeometry(0.05, 0.18, 6, 12);
+      const handGeo  = new THREE.SphereGeometry(0.05, 14, 12);
 
-      const handMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35 });
-      const lh = new THREE.Mesh(new THREE.SphereGeometry(0.045, 14, 10), handMat);
-      lh.position.set(-0.34, 1.05, 0.10);
-      lh.name = "LEFT_HAND";
-      g.add(lh);
+      const lUpper = new THREE.Mesh(upperGeo, mat);
+      const lLower = new THREE.Mesh(lowerGeo, mat);
+      const lHand  = new THREE.Mesh(handGeo, skinMat);
+      const rUpper = new THREE.Mesh(upperGeo, mat);
+      const rLower = new THREE.Mesh(lowerGeo, mat);
+      const rHand  = new THREE.Mesh(handGeo, skinMat);
 
-      const rh = new THREE.Mesh(new THREE.SphereGeometry(0.045, 14, 10), handMat);
-      rh.position.set(0.34, 1.05, 0.10);
-      rh.name = "RIGHT_HAND";
-      g.add(rh);
+      lUpper.position.set(-0.24, 1.30, 0.02);
+      rUpper.position.set( 0.24, 1.30, 0.02);
+      lLower.position.set(-0.28, 1.12, 0.10);
+      rLower.position.set( 0.28, 1.12, 0.10);
+      lHand.position.set(-0.30, 0.98, 0.18);
+      rHand.position.set( 0.30, 0.98, 0.18);
+      lUpper.rotation.z =  0.35;
+      rUpper.rotation.z = -0.35;
 
-      g.userData = { head, lh, rh, baseY: 0 };
-      return { g, head, lh, rh };
+      g.add(lUpper, lLower, lHand, rUpper, rLower, rHand);
+
+      return { g, head, lHand, rHand };
     }
-
-    const palette = [0x202738, 0x2a2f44, 0x2f3a55, 0x1f2a3a, 0x33425a, 0x26324a];
 
     for (let i = 0; i < seatCount; i++) {
       const t = (i / seatCount) * Math.PI * 2;
-      const x = tableData.center.x + Math.cos(t) * seatRadius;
-      const z = tableData.center.z + Math.sin(t) * seatRadius;
+      const x = cx + Math.cos(t) * seatRadius;
+      const z = cz + Math.sin(t) * seatRadius;
 
-      const av = makeAvatar(i, palette[i % palette.length]);
-      av.g.position.set(x, 0, z);
-      av.g.lookAt(tableData.center.x, 1.3, tableData.center.z);
-      root.add(av.g);
-      avatars.push(av);
+      const bot = makeBot(i);
+      bot.g.name = `BOT_${i}`;
+      bot.g.position.set(x, 0, z);
+      bot.g.lookAt(cx, 1.3, cz);
+      root.add(bot.g);
+      avatars.push(bot);
     }
 
-    // Showcase avatar (bigger, closer)
-    const showcase = makeAvatar(999, 0x3a3f55);
-    showcase.g.name = "AVATAR_SHOWCASE";
-    showcase.g.position.set(1.2, 0, -0.6);
-    showcase.g.scale.setScalar(1.35);
-    root.add(showcase.g);
+    // showcase
+    const show = makeBot(999);
+    show.g.name = 'SHOWCASE_BOT';
+    show.g.scale.set(1.25, 1.25, 1.25);
+    show.g.position.set(0.55, 0, -0.55);
+    show.g.lookAt(0, 1.2, -1.2);
+    anchors.room.add(show.g);
 
     window.SCARLETT = window.SCARLETT || {};
-    window.SCARLETT.avatars = { root, avatars, showcase: showcase.g };
+    window.SCARLETT.avatars = { root, avatars, showcase: show.g };
 
-    log?.("avatars.module ✅ (SOUPED + showcase)");
+    this._rt = { avatars };
+    log?.('avatars.module ✅');
   },
 
-  update(dt, { tableData }) {
-    const pack = window.SCARLETT?.avatars;
-    if (!pack?.avatars) return;
-
+  update(dt) {
+    const r = this._rt;
+    if (!r?.avatars) return;
     const t = performance.now() * 0.001;
-    for (let i = 0; i < pack.avatars.length; i++) {
-      const av = pack.avatars[i];
+    for (let i = 0; i < r.avatars.length; i++) {
+      const av = r.avatars[i];
       if (!av?.head) continue;
-      av.head.position.y = 1.55 + Math.sin(t * 0.8 + i) * 0.012;
-      av.g.lookAt(tableData.center.x, 1.3, tableData.center.z);
-    }
-
-    if (pack.showcase) {
-      pack.showcase.rotation.y = Math.sin(t * 0.4) * 0.25 + Math.PI * 0.15;
+      av.head.position.y = 1.55 + Math.sin(t * 0.9 + i) * 0.012;
+      av.g.rotation.y += Math.sin(t * 0.25 + i) * 0.0003;
     }
   },
 
   test() {
-    const ok = !!window.SCARLETT?.avatars?.avatars?.length && !!window.SCARLETT?.avatars?.showcase;
-    return { ok, note: ok ? "avatars SOUPED + showcase" : "avatars missing" };
+    const ok = !!window.SCARLETT?.avatars?.avatars?.length;
+    return { ok, note: ok ? 'avatars present' : 'avatars missing' };
   }
 };

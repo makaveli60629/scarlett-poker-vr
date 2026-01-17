@@ -1,8 +1,7 @@
-// /js/scarlett1/index.js — SCARLETT1 RUNTIME (ULTIMATE DIAG)
-// BUILD: SCARLETT1_RUNTIME_ULT_DIAG_v4_3
+// /js/scarlett1/index.js — SCARLETT1 RUNTIME (ULTIMATE SURGICAL DIAG)
+// BUILD: SCARLETT1_RUNTIME_SURGICAL_v4_3
 
-const BUILD = "SCARLETT1_RUNTIME_ULT_DIAG_v4_3";
-
+const BUILD = "SCARLETT1_RUNTIME_SURGICAL_v4_3";
 const $ = (id) => document.getElementById(id);
 
 const ui = {
@@ -12,6 +11,7 @@ const ui = {
   btnHideHud: $("btnHideHud"),
   btnTeleport: $("btnTeleport"),
   btnDiag: $("btnDiag"),
+
   diagPanel: $("diagPanel"),
   btnDiagClose: $("btnDiagClose"),
   btnTestModules: $("btnTestModules"),
@@ -20,9 +20,18 @@ const ui = {
   btnCopyLogs: $("btnCopyLogs"),
   btnClearLogs: $("btnClearLogs"),
   btnPanicClose: $("btnPanicClose"),
+
+  btnTouch: $("btnTouch"),
+
   diagControllers: $("diagControllers"),
   diagModules: $("diagModules"),
   diagLogs: $("diagLogs"),
+
+  touchControls: $("touchControls"),
+  touchLeft: $("touchLeft"),
+  touchRight: $("touchRight"),
+
+  btnShowHudMini: $("btnShowHudMini"),
 };
 
 function setStatus(s) {
@@ -30,14 +39,22 @@ function setStatus(s) {
   console.log("[status]", s);
 }
 
-// ----- log capture (surgical debugging) -----
-const LOG_MAX = 180;
+// --------- Log capture + error capture (surgical) ----------
+const LOG_MAX = 220;
 const logBuf = [];
+const errBuf = [];
 function pushLog(line) {
   logBuf.push(line);
   if (logBuf.length > LOG_MAX) logBuf.shift();
   if (ui.diagLogs) ui.diagLogs.textContent = logBuf.join("\n");
 }
+function pushErr(line) {
+  errBuf.push(line);
+  if (errBuf.length > 40) errBuf.shift();
+  // Prepend errors to log view for quick spotting
+  pushLog(line);
+}
+
 (function patchConsole(){
   const origLog = console.log.bind(console);
   const origWarn = console.warn.bind(console);
@@ -45,26 +62,32 @@ function pushLog(line) {
 
   console.log = (...a) => { origLog(...a); pushLog(formatLine("LOG", a)); };
   console.warn = (...a) => { origWarn(...a); pushLog(formatLine("WRN", a)); };
-  console.error = (...a) => { origErr(...a); pushLog(formatLine("ERR", a)); };
+  console.error = (...a) => { origErr(...a); const line = formatLine("ERR", a); pushLog(line); };
 })();
-function formatLine(tag, args) {
-  const t = new Date().toISOString().slice(11,19);
-  return `[${t}] ${tag} ${args.map(safeStr).join(" ")}`;
-}
-function safeStr(v) {
-  if (typeof v === "string") return v;
-  try { return JSON.stringify(v); } catch { return String(v); }
-}
 
-// ----- imports -----
+window.addEventListener("error", (e) => {
+  const msg = `[${now()}] JS_ERR ${e.message || "error"} @ ${e.filename || ""}:${e.lineno || ""}`;
+  pushErr(msg);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  const msg = `[${now()}] PROMISE_REJECT ${safeStr(e.reason)}`;
+  pushErr(msg);
+});
+
+function now(){ return new Date().toISOString().slice(11,19); }
+function formatLine(tag, args) { return `[${now()}] ${tag} ${args.map(safeStr).join(" ")}`; }
+function safeStr(v) { if (typeof v === "string") return v; try { return JSON.stringify(v); } catch { return String(v); } }
+
+// --------- Imports ----------
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
 import { buildWorld } from "./world.js";
 
-// ----- runtime state -----
+// --------- Runtime ----------
 let renderer, scene, camera, clock;
 let player, head;
 let world = null;
 let floorMeshes = [];
+
 let teleportEnabled = false;
 let snapTurnCooldown = 0;
 
@@ -72,9 +95,10 @@ const state = {
   inXR: false,
   diagOpen: false,
   hudHidden: false,
+  touchOn: false,
 };
 
-// Controller objects (Quest + Android + WebXR)
+// Controllers
 const controllers = {
   left: null,
   right: null,
@@ -84,6 +108,12 @@ const controllers = {
   rightRay: null,
   teleportMarker: null,
   teleportTarget: null,
+};
+
+// Touch sticks values
+const touch = {
+  ldx: 0, ldy: 0,
+  rdx: 0, rdy: 0,
 };
 
 boot().catch((e) => {
@@ -120,44 +150,44 @@ async function boot() {
   hookUI();
   hookXR();
   initControllers();
+  initTouchControls();
 
   setStatus(`renderer OK ✅\nBUILD=${BUILD}\nbuilding world…`);
 
-  try {
-    world = await buildWorld({
-      THREE,
-      scene,
-      player,
-      renderer,
-      onRegisterFloors: (meshes) => { floorMeshes = meshes || []; },
-      onStatus: (s) => setStatus(s),
-      log: (...a) => console.log("[world]", ...a),
-      warn: (...a) => console.warn("[world]", ...a),
-      err: (...a) => console.error("[world]", ...a),
-    });
-  } catch (e) {
-    console.error("WORLD BUILD FAIL", e);
-    setStatus("WORLD BUILD FAIL ❌\n" + (e?.stack || e?.message || String(e)));
-    world = null;
-  }
+  world = await buildWorld({
+    THREE,
+    scene,
+    player,
+    renderer,
+    onRegisterFloors: (meshes) => { floorMeshes = meshes || []; },
+    onStatus: (s) => setStatus(s),
+    log: (...a) => console.log("[world]", ...a),
+    warn: (...a) => console.warn("[world]", ...a),
+    err: (...a) => console.error("[world]", ...a),
+  });
 
-  // Render initial module list
   renderModuleList();
-
   window.addEventListener("resize", onResize);
+
   renderer.setAnimationLoop(tick);
 
   setStatus(
-    `ready ✅\nBUILD=${BUILD}\nTeleport: ${teleportEnabled ? "ON" : "OFF"}\nEnter VR uses requestSession (no VRButton)`
+    `ready ✅\nBUILD=${BUILD}\nTeleport: ${teleportEnabled ? "ON" : "OFF"}\nTouch: ${state.touchOn ? "ON" : "OFF"}`
   );
 }
 
 // ---------------- UI / DIAG ----------------
 function hookUI() {
+  // Hide HUD but keep a mini "Show HUD" so you never get stuck
   ui.btnHideHud?.addEventListener("click", () => {
-    state.hudHidden = !state.hudHidden;
-    ui.hud.style.display = state.hudHidden ? "none" : "block";
-    ui.btnHideHud.textContent = state.hudHidden ? "Show HUD" : "Hide HUD";
+    state.hudHidden = true;
+    if (ui.hud) ui.hud.style.display = "none";
+    if (ui.btnShowHudMini) ui.btnShowHudMini.style.display = "block";
+  });
+  ui.btnShowHudMini?.addEventListener("click", () => {
+    state.hudHidden = false;
+    if (ui.hud) ui.hud.style.display = "block";
+    if (ui.btnShowHudMini) ui.btnShowHudMini.style.display = "none";
   });
 
   ui.btnTeleport?.addEventListener("click", () => {
@@ -167,10 +197,13 @@ function hookUI() {
 
   ui.btnDiag?.addEventListener("click", () => toggleDiag());
   ui.btnDiagClose?.addEventListener("click", () => toggleDiag(false));
-  ui.btnPanicClose?.addEventListener("click", () => {
-    // hard close even if something weird happens
-    state.diagOpen = false;
-    if (ui.diagPanel) ui.diagPanel.style.display = "none";
+  ui.btnPanicClose?.addEventListener("click", () => toggleDiag(false));
+
+  ui.btnTouch?.addEventListener("click", () => {
+    state.touchOn = !state.touchOn;
+    if (ui.btnTouch) ui.btnTouch.textContent = state.touchOn ? "Touch: ON" : "Touch: OFF";
+    if (ui.touchControls) ui.touchControls.style.display = state.touchOn ? "block" : "none";
+    setStatus(`Touch controls ${state.touchOn ? "ON ✅" : "OFF"}`);
   });
 
   ui.btnTestModules?.addEventListener("click", () => {
@@ -181,10 +214,12 @@ function hookUI() {
       world: !!world,
       floors: floorMeshes.length,
       inXR: state.inXR,
+      touch: state.touchOn,
       build: BUILD,
     };
     setStatus("MODULE TEST ✅\n" + Object.entries(summary).map(([k,v]) => `${k}=${v}`).join("\n"));
     renderModuleList();
+    renderControllersDiag();
   });
 
   ui.btnResetPlayer?.addEventListener("click", () => resetPlayer());
@@ -192,13 +227,8 @@ function hookUI() {
 
   ui.btnCopyLogs?.addEventListener("click", async () => {
     const text = logBuf.join("\n");
-    try {
-      await navigator.clipboard.writeText(text);
-      setStatus("logs copied ✅");
-    } catch {
-      // fallback: show in status
-      setStatus("copy failed ❌\n(clipboard blocked)");
-    }
+    try { await navigator.clipboard.writeText(text); setStatus("logs copied ✅"); }
+    catch { setStatus("copy failed ❌ (clipboard blocked)"); }
   });
 
   ui.btnClearLogs?.addEventListener("click", () => {
@@ -242,34 +272,39 @@ function renderControllersDiag() {
   lines.push(`BUILD=${BUILD}`);
   lines.push(`inXR=${state.inXR}`);
   lines.push(`teleportEnabled=${teleportEnabled}`);
+  lines.push(`touchOn=${state.touchOn}`);
+  lines.push(`floors=${floorMeshes.length}`);
   lines.push("");
+
   lines.push(`[LEFT] connected=${!!controllers.left} gamepad=${!!l}`);
   if (l) {
     lines.push(`buttons=${l.buttons?.length ?? 0} axes=${l.axes?.length ?? 0}`);
     lines.push(`axes=${(l.axes||[]).map(n => (n??0).toFixed(2)).join(", ")}`);
+    lines.push(`btnPressed=${(l.buttons||[]).map((b,i)=>b?.pressed?i:null).filter(v=>v!==null).join(", ") || "-"}`);
   }
   lines.push("");
+
   lines.push(`[RIGHT] connected=${!!controllers.right} gamepad=${!!r}`);
   if (r) {
     lines.push(`buttons=${r.buttons?.length ?? 0} axes=${r.axes?.length ?? 0}`);
     lines.push(`axes=${(r.axes||[]).map(n => (n??0).toFixed(2)).join(", ")}`);
+    lines.push(`btnPressed=${(r.buttons||[]).map((b,i)=>b?.pressed?i:null).filter(v=>v!==null).join(", ") || "-"}`);
   }
+
+  lines.push("");
+  lines.push(`[TOUCH] l=(${touch.ldx.toFixed(2)},${touch.ldy.toFixed(2)}) r=(${touch.rdx.toFixed(2)},${touch.rdy.toFixed(2)})`);
 
   if (ui.diagControllers) ui.diagControllers.textContent = lines.join("\n");
 }
 
 function renderModuleList() {
-  const items = world?.registry?.items || [];
   if (!ui.diagModules) return;
+  if (!world) { ui.diagModules.textContent = "world not ready"; return; }
 
-  if (!world) {
-    ui.diagModules.textContent = "world not ready";
-    return;
-  }
-
+  const items = world?.registry?.items || [];
   if (!items.length) {
     ui.diagModules.textContent =
-      "No registry found.\nTip: in world.js return { registry } and add registry.add(...) entries.";
+      "No registry found.\nTip: world.js returns { registry } and modules call registry.add(...)";
     return;
   }
 
@@ -285,14 +320,8 @@ function renderModuleList() {
 
 // ---------------- XR + Controllers ----------------
 function hookXR() {
-  renderer.xr.addEventListener("sessionstart", () => {
-    state.inXR = true;
-    setStatus(`XR session started ✅\nBUILD=${BUILD}`);
-  });
-  renderer.xr.addEventListener("sessionend", () => {
-    state.inXR = false;
-    setStatus(`XR session ended.\nBUILD=${BUILD}`);
-  });
+  renderer.xr.addEventListener("sessionstart", () => { state.inXR = true; setStatus(`XR session started ✅\nBUILD=${BUILD}`); });
+  renderer.xr.addEventListener("sessionend", () => { state.inXR = false; setStatus(`XR session ended.\nBUILD=${BUILD}`); });
 }
 
 function initControllers() {
@@ -324,13 +353,7 @@ function onControllerConnected(hand, e) {
   const gp = e?.data?.gamepad || null;
   if (hand === "left") controllers.leftGamepad = gp;
   if (hand === "right") controllers.rightGamepad = gp;
-
-  setStatus(
-    `controller ${hand} connected ✅\n` +
-    `Teleport: ${teleportEnabled ? "ON" : "OFF"}\n` +
-    `Left Y: menu • Right stick move • Left stick snap`
-  );
-
+  setStatus(`controller ${hand} connected ✅`);
   renderControllersDiag();
 }
 
@@ -352,8 +375,8 @@ function makeTeleportMarker() {
 }
 
 let teleportAiming = false;
-function onGripStart() { if (teleportEnabled) teleportAiming = true; }
-function onGripEnd() {
+function onGripStart(){ if (teleportEnabled) teleportAiming = true; }
+function onGripEnd(){
   if (!teleportEnabled) return;
   teleportAiming = false;
   if (controllers.teleportTarget) {
@@ -364,6 +387,45 @@ function onGripEnd() {
   controllers.teleportTarget = null;
   controllers.teleportMarker.visible = false;
 }
+
+// ---------------- Touch Controls (Android fallback) ----------------
+function initTouchControls() {
+  const left = ui.touchLeft;
+  const right = ui.touchRight;
+  if (!left || !right) return;
+
+  bindStick(left,  (dx,dy) => { touch.ldx = dx; touch.ldy = dy; });
+  bindStick(right, (dx,dy) => { touch.rdx = dx; touch.rdy = dy; });
+}
+
+function bindStick(el, onMove) {
+  let active = false;
+  let startX = 0, startY = 0;
+
+  const max = () => Math.min(el.clientWidth, el.clientHeight) * 0.35;
+
+  el.addEventListener("pointerdown", (e) => {
+    active = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    el.setPointerCapture(e.pointerId);
+  });
+
+  el.addEventListener("pointermove", (e) => {
+    if (!active) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    const m = max();
+    const ndx = clamp(dx / m, -1, 1);
+    const ndy = clamp(dy / m, -1, 1);
+    onMove(ndx, ndy);
+  });
+
+  el.addEventListener("pointerup", () => { active = false; onMove(0,0); });
+  el.addEventListener("pointercancel", () => { active = false; onMove(0,0); });
+}
+
+function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
 
 // ---------------- Movement + Teleport ----------------
 const tmpDir = new THREE.Vector3();
@@ -387,43 +449,54 @@ function pollGamepads(dt) {
 
   // Left Y toggles diag (best-effort)
   if (l?.buttons?.length) {
-    handleEdgeButton(l, 3, () => toggleDiag()); // typical Y
-    handleEdgeButton(l, 4, () => toggleDiag()); // fallback
+    handleEdgeButton(l, 3, () => toggleDiag());
+    handleEdgeButton(l, 4, () => toggleDiag());
   }
 
-  // Right stick move
+  // Movement vector sources:
+  // - Right stick on controller
+  // - Touch left stick fallback
+  let moveX = 0, moveY = 0;
+
   if (r?.axes?.length >= 2) {
     const x = r.axes[2] ?? r.axes[0] ?? 0;
     const y = r.axes[3] ?? r.axes[1] ?? 0;
-
-    const dz = 0.18;
-    const ax = Math.abs(x) > dz ? x : 0;
-    const ay = Math.abs(y) > dz ? y : 0;
-
-    if (ax || ay) {
-      camera.getWorldDirection(tmpDir);
-      tmpDir.y = 0;
-      tmpDir.normalize();
-
-      tmpVec.copy(tmpDir).cross(new THREE.Vector3(0,1,0)).normalize();
-
-      const speed = 2.0;
-      const move = new THREE.Vector3();
-      move.addScaledVector(tmpDir, -ay * speed * dt);
-      move.addScaledVector(tmpVec, ax * speed * dt);
-      player.position.add(move);
-    }
+    moveX = x;
+    moveY = y;
+  } else if (state.touchOn) {
+    moveX = touch.ldx;
+    moveY = touch.ldy;
   }
 
-  // Left stick snap turn 45
-  if (l?.axes?.length >= 2) {
-    const lx = l.axes[2] ?? l.axes[0] ?? 0;
-    const dz = 0.35;
-    if (snapTurnCooldown === 0 && Math.abs(lx) > dz) {
-      const dir = lx > 0 ? -1 : 1;
-      player.rotation.y += dir * (Math.PI / 4);
-      snapTurnCooldown = 0.28;
-    }
+  const dz = 0.18;
+  const ax = Math.abs(moveX) > dz ? moveX : 0;
+  const ay = Math.abs(moveY) > dz ? moveY : 0;
+
+  if (ax || ay) {
+    camera.getWorldDirection(tmpDir);
+    tmpDir.y = 0;
+    tmpDir.normalize();
+    tmpVec.copy(tmpDir).cross(new THREE.Vector3(0,1,0)).normalize();
+
+    const speed = 2.0;
+    const move = new THREE.Vector3();
+    move.addScaledVector(tmpDir, -ay * speed * dt);
+    move.addScaledVector(tmpVec, ax * speed * dt);
+    player.position.add(move);
+  }
+
+  // Snap turn:
+  // - Left stick if present
+  // - Touch right stick fallback
+  let turnX = 0;
+  if (l?.axes?.length >= 2) turnX = l.axes[2] ?? l.axes[0] ?? 0;
+  else if (state.touchOn) turnX = touch.rdx;
+
+  const tdz = 0.35;
+  if (snapTurnCooldown === 0 && Math.abs(turnX) > tdz) {
+    const dir = turnX > 0 ? -1 : 1;
+    player.rotation.y += dir * (Math.PI / 4);
+    snapTurnCooldown = 0.28;
   }
 }
 
@@ -452,7 +525,9 @@ function updateTeleportAim() {
   }
 }
 
-// ---------------- Frame loop ----------------
+// ---------------- Frame loop + perf ----------------
+let fpsTimer = 0, frames = 0, fps = 0;
+
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.033);
   snapTurnCooldown = Math.max(0, snapTurnCooldown - dt);
@@ -464,7 +539,21 @@ function tick() {
 
   if (world?.update) world.update(dt);
 
-  if (state.diagOpen) renderControllersDiag();
+  // perf
+  fpsTimer += dt; frames++;
+  if (fpsTimer >= 1.0) { fps = frames; frames = 0; fpsTimer = 0; }
+
+  if (state.diagOpen) {
+    renderControllersDiag();
+    // append fps into module panel header line for quick glance
+    if (ui.diagModules && world?.registry?.items) {
+      // keep current list, just prefix line 1
+      const text = ui.diagModules.textContent || "";
+      const lines = text.split("\n");
+      if (lines.length) lines[0] = `WORLD REGISTRY (${world.registry.items.length})  |  FPS=${fps}`;
+      ui.diagModules.textContent = lines.join("\n");
+    }
+  }
 
   renderer.render(scene, camera);
 }
@@ -479,4 +568,4 @@ function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-}
+                                       }

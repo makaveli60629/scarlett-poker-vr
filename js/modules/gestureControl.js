@@ -1,6 +1,7 @@
 // /js/modules/gestureControl.js
-// SCARLETT VR POKER — Gesture ↔ Audio bridge (FULL) v1.3
-// IMPORTANT: Provides a NAMED export: GestureControl
+// SCARLETT VR POKER — Gesture ↔ Audio bridge (FULL) v1.4 RIGHT-HAND-ONLY
+// IMPORTANT: Provides NAMED export GestureControl + default export
+// Right hand only enforced via handedness gate.
 
 import { PokerAudio } from "./audioLogic.js";
 
@@ -16,6 +17,9 @@ export const GestureControl = {
 
   update(handData) {
     if (!handData || !handData.position || !handData.velocity) return;
+
+    // ✅ Right hand only
+    if (handData.handedness && handData.handedness !== "right") return;
 
     const y = handData.position.y;
     const vy = handData.velocity.y;
@@ -45,5 +49,4 @@ export const GestureControl = {
   }
 };
 
-// Optional default export for flexibility (does not break named export)
 export default GestureControl;

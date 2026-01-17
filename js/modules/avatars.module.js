@@ -1,5 +1,5 @@
 // /js/modules/avatars.module.js
-// Placeholder avatars around table + local "showcase" near spawn (FULL) 6-MAX
+// SOUPED placeholders: body + head + shoulders + forearms + hands + idle + showcase (FULL)
 
 export default {
   id: "avatars.module.js",
@@ -10,47 +10,70 @@ export default {
     anchors.avatars.add(root);
 
     const seatCount = tableData.seats || 6;
-    const seatRadius = (tableData.railRadius || 1.45) + 0.65;
+    const seatRadius = (tableData.railRadius || 1.45) + 0.70;
 
     const avatars = [];
 
-    function makeAvatar(i, color = 0x202738) {
+    const matBody = new THREE.MeshStandardMaterial({ color: 0x1f2a3a, roughness: 0.95 });
+    const matHead = new THREE.MeshStandardMaterial({ color: 0x3a3f55, roughness: 0.70 });
+    const matHand = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.40 });
+
+    function makeAvatar(name) {
       const g = new THREE.Group();
-      g.name = `AVATAR_${i}`;
+      g.name = `AVATAR_${name}`;
 
-      const body = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.14, 0.16, 0.55, 16),
-        new THREE.MeshStandardMaterial({ color, roughness: 0.9 })
+      // torso
+      const torso = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.16, 0.18, 0.60, 18),
+        matBody
       );
-      body.position.y = 1.05;
-      body.name = "BODY";
-      g.add(body);
+      torso.position.y = 1.05;
+      torso.name = "TORSO";
+      g.add(torso);
 
+      // shoulders
+      const shoulders = new THREE.Mesh(
+        new THREE.BoxGeometry(0.46, 0.14, 0.20),
+        matBody
+      );
+      shoulders.position.set(0, 1.32, 0.02);
+      shoulders.name = "SHOULDERS";
+      g.add(shoulders);
+
+      // head
       const head = new THREE.Mesh(
-        new THREE.SphereGeometry(0.12, 18, 14),
-        new THREE.MeshStandardMaterial({ color: 0x3a3f55, roughness: 0.7 })
+        new THREE.SphereGeometry(0.13, 20, 16),
+        matHead
       );
-      head.position.y = 1.45;
+      head.position.y = 1.52;
       head.name = "HEAD";
       g.add(head);
 
-      const lh = new THREE.Mesh(
-        new THREE.SphereGeometry(0.04, 14, 10),
-        new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 })
-      );
-      lh.position.set(-0.18, 1.15, 0.10);
+      // arms
+      const armGeo = new THREE.CylinderGeometry(0.035, 0.040, 0.34, 14);
+      const leftArm = new THREE.Mesh(armGeo, matBody);
+      const rightArm = new THREE.Mesh(armGeo, matBody);
+
+      leftArm.position.set(-0.23, 1.18, 0.12);
+      rightArm.position.set(0.23, 1.18, 0.12);
+      leftArm.rotation.z = 0.45;
+      rightArm.rotation.z = -0.45;
+      leftArm.rotation.x = 0.65;
+      rightArm.rotation.x = 0.65;
+      leftArm.name = "LEFT_ARM";
+      rightArm.name = "RIGHT_ARM";
+      g.add(leftArm, rightArm);
+
+      // hands
+      const lh = new THREE.Mesh(new THREE.SphereGeometry(0.045, 16, 12), matHand);
+      const rh = new THREE.Mesh(new THREE.SphereGeometry(0.045, 16, 12), matHand);
+      lh.position.set(-0.34, 1.02, 0.30);
+      rh.position.set(0.34, 1.02, 0.30);
       lh.name = "LEFT_HAND";
-      g.add(lh);
-
-      const rh = new THREE.Mesh(
-        new THREE.SphereGeometry(0.04, 14, 10),
-        new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 })
-      );
-      rh.position.set(0.18, 1.15, 0.10);
       rh.name = "RIGHT_HAND";
-      g.add(rh);
+      g.add(lh, rh);
 
-      return { g, head, lh, rh };
+      return { g, head, lh, rh, torso, leftArm, rightArm };
     }
 
     // Table avatars
@@ -59,25 +82,29 @@ export default {
       const x = tableData.center.x + Math.cos(t) * seatRadius;
       const z = tableData.center.z + Math.sin(t) * seatRadius;
 
-      const av = makeAvatar(i, 0x202738);
+      const av = makeAvatar(i);
       av.g.position.set(x, 0, z);
-      av.g.lookAt(tableData.center.x, 1.3, tableData.center.z);
+
+      // seated lean
+      av.g.lookAt(tableData.center.x, 1.25, tableData.center.z);
+      av.g.rotateX(-0.08);
 
       root.add(av.g);
       avatars.push(av);
     }
 
-    // Showcase avatar near spawn (close by for inspection)
-    const showcase = makeAvatar("SHOWCASE", 0x2b3a55);
+    // Showcase avatar near spawn (bigger + closer)
+    const showcase = makeAvatar("SHOWCASE");
     showcase.g.name = "AVATAR_SHOWCASE";
-    showcase.g.position.set(0.9, 0, -0.9); // near you
-    showcase.g.lookAt(0, 1.3, -2);
+    showcase.g.position.set(0.75, 0, -0.65);
+    showcase.g.scale.setScalar(1.25);
+    showcase.g.lookAt(0, 1.35, -2);
     root.add(showcase.g);
 
     window.SCARLETT = window.SCARLETT || {};
     window.SCARLETT.avatars = { root, avatars, showcase };
 
-    log?.("avatars.module ✅ (6-max + showcase)");
+    log?.("avatars.module ✅ (SOUPED + showcase)");
   },
 
   update(dt, { tableData }) {
@@ -86,23 +113,29 @@ export default {
 
     const t = performance.now() * 0.001;
 
-    // idle motion on table avatars
+    // table avatars idle: breathe + subtle head movement
     for (let i = 0; i < (pack.avatars?.length || 0); i++) {
       const av = pack.avatars[i];
-      if (!av?.head) continue;
-      av.head.position.y = 1.45 + Math.sin(t * 0.8 + i) * 0.01;
-      av.g.lookAt(tableData.center.x, 1.3, tableData.center.z);
+      if (!av) continue;
+
+      const breathe = 0.01 + Math.sin(t * 0.9 + i) * 0.01;
+      av.torso.scale.y = 1.0 + breathe * 0.2;
+      av.head.position.y = 1.52 + Math.sin(t * 0.8 + i) * 0.012;
+
+      // subtle hand rest wobble
+      av.lh.position.y = 1.02 + Math.sin(t * 1.3 + i) * 0.006;
+      av.rh.position.y = 1.02 + Math.sin(t * 1.2 + i + 1.7) * 0.006;
+
+      av.g.lookAt(tableData.center.x, 1.25, tableData.center.z);
     }
 
-    // showroom slightly animated too
+    // showcase slow turn so you can inspect
     const s = pack.showcase;
-    if (s?.head) {
-      s.head.position.y = 1.45 + Math.sin(t * 0.9) * 0.012;
-    }
+    if (s?.g) s.g.rotation.y = Math.sin(t * 0.35) * 0.25;
   },
 
   test() {
     const ok = !!window.SCARLETT?.avatars?.avatars?.length && !!window.SCARLETT?.avatars?.showcase;
-    return { ok, note: ok ? "avatars+showcase present" : "avatars missing" };
+    return { ok, note: ok ? "avatars SOUPED + showcase" : "avatars missing" };
   }
 };

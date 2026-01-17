@@ -1,6 +1,8 @@
-// js/world.js — Scarlett MASTER Adapter v4 (FULL)
-// Fixes RoomManager.init() "this" binding + supports exported objects like WorldBuilders.build()
-// Keeps safe fallback world if anything fails so you can still move.
+// js/world.js — Scarlett MASTER Adapter v5 (FULL)
+// Fixes:
+// 1) Preserves `this` for exported object methods (RoomManager.init, WorldBuilders.build, etc.)
+// 2) Calls SpawnPoints.apply() with CAMERA (because your SpawnPoints.apply(camera) expects a camera)
+// 3) Keeps safe fallback world if anything fails so you can still move.
 
 import * as THREE from "three";
 
@@ -12,8 +14,8 @@ async function safeImport(rel, log) {
 function isFn(v){ return typeof v === "function"; }
 function isObj(v){ return v && typeof v === "object"; }
 
-// IMPORTANT: if a callable is inside an exported object (RoomManager.init),
-// we store thisArg so we can call with .call(thisArg, ctx)
+// If a callable is inside an exported object (RoomManager.init),
+// store thisArg so we can call with .call(thisArg, ...)
 function listCallable(mod) {
   const out = [];
   if (!mod) return out;
@@ -37,10 +39,11 @@ function score(path) {
   if (n.includes("builders")) s += 2;
   if (n.endsWith(".build") || n.includes("build")) s += 4;
   if (n.includes("lights")) s += 1;
-  if (n.includes("init")) s += 2;
+  if (n.includes("init") || n.includes("setup") || n.includes("start")) s += 2;
   if (n.includes("room")) s += 2;
   if (n.includes("spawn")) s += 2;
   if (n.includes("safe")) s += 1;
+  if (n.includes("apply")) s += 1;
   return s;
 }
 
@@ -54,11 +57,11 @@ function getPath(mod, path) {
 function pickBest(mod, preferredPaths = []) {
   if (!mod) return null;
 
-  // preferred exact paths first
+  // Preferred exact paths first
   for (const p of preferredPaths) {
     const cur = getPath(mod, p);
     if (isFn(cur)) {
-      // if it's in an object path, bind thisArg to that object
+      // If it's a method inside an object, bind that object as `this`
       const parts = p.split(".");
       if (parts.length >= 2) {
         const objPath = parts.slice(0, -1).join(".");
@@ -69,11 +72,12 @@ function pickBest(mod, preferredPaths = []) {
     }
   }
 
+  // Otherwise pick highest-scoring callable found anywhere in module
   const cands = listCallable(mod);
   if (cands.length === 0) return null;
   if (cands.length === 1) return cands[0];
 
-  cands.sort((a,b) => score(b.path) - score(a.path));
+  cands.sort((a, b) => score(b.path) - score(a.path));
   return cands[0];
 }
 
@@ -117,34 +121,35 @@ function ensureFallbackWorld({ scene, rig, log }) {
 
 export async function build(ctx) {
   const { scene, rig, log } = ctx;
-  log("[world] adapter v4 build starting…");
+  log("[world] adapter v5 build starting…");
 
-  // Your builders sometimes expect ctx.root + ctx.manifest
+  // Compatibility: some of your modules expect ctx.root + ctx.manifest
   if (!ctx.root) ctx.root = scene;
   if (!ctx.manifest) {
     const map = new Map();
     ctx.manifest = { get: (k) => map.get(k), set: (k,v) => map.set(k,v) };
   }
 
-  // Import your real modules (if they exist)
+  // Import your real modules
   const wb   = await safeImport("./world_builders.js", log);
-  const rm   = await safeImport("./room_manager.js", log);
-  const sp   = await safeImport("./spawn_points.js", log);
   const sw   = await safeImport("./solid_walls.js", log);
   const lt   = await safeImport("./lighting.js", log);
   const lp   = await safeImport("./lights_pack.js", log);
   const tx   = await safeImport("./textures.js", log);
   const deco = await safeImport("./lobby_decor.js", log);
   const wf   = await safeImport("./water_fountain.js", log);
+  const rm   = await safeImport("./room_manager.js", log);
+  const sp   = await safeImport("./spawn_points.js", log);
 
   const steps = [];
 
-  // Known WorldBuilders object from your file
+  // WorldBuilders (your file exports an object: WorldBuilders.lights / WorldBuilders.build)
   const lightsFn = pickBest(wb, ["WorldBuilders.lights", "lights"]);
   const buildFn  = pickBest(wb, ["WorldBuilders.build", "buildWorld", "build", "initWorld", "createWorld", "makeWorld"]);
   if (lightsFn) steps.push({ label: `world_builders.${lightsFn.path}()`, ...lightsFn });
   if (buildFn)  steps.push({ label: `world_builders.${buildFn.path}()`, ...buildFn });
 
+  // Walls / lighting packs / textures / decor / fountain
   const swFn = pickBest(sw, ["SolidWalls.init", "SolidWalls.build", "buildSolidWalls", "build", "init", "apply"]);
   if (swFn) steps.push({ label: `solid_walls.${swFn.path}()`, ...swFn });
 
@@ -163,12 +168,19 @@ export async function build(ctx) {
   const wfFn = pickBest(wf, ["WaterFountain.build", "buildWaterFountain", "init", "build", "setup"]);
   if (wfFn) steps.push({ label: `water_fountain.${wfFn.path}()`, ...wfFn });
 
-  // This one was failing because of `this` — v4 binds it correctly
+  // Room manager (was failing before because of `this` binding; fixed now)
   const rmFn = pickBest(rm, ["RoomManager.init", "RoomManager.initRooms", "initRooms", "init", "build", "setup", "start"]);
   if (rmFn) steps.push({ label: `room_manager.${rmFn.path}()`, ...rmFn });
 
-  const spFn = pickBest(sp, ["SpawnPoints.build", "initSpawnPoints", "build", "init", "setup", "apply"]);
-  if (spFn) steps.push({ label: `spawn_points.${spFn.path}()`, ...spFn });
+  // SpawnPoints (IMPORTANT: your SpawnPoints.apply(camera) expects a camera)
+  const spFn = pickBest(sp, ["SpawnPoints.apply", "SpawnPoints.build", "initSpawnPoints", "build", "init", "setup", "apply"]);
+  if (spFn) {
+    steps.push({
+      label: `spawn_points.${spFn.path}()`,
+      ...spFn,
+      _callWithCamera: true
+    });
+  }
 
   if (steps.length === 0) {
     log("[world] ⚠️ No callable functions found in your world modules. Using fallback world.");
@@ -180,8 +192,19 @@ export async function build(ctx) {
     try {
       log(`[world] ▶ ${s.label}`);
 
-      // KEY FIX: preserve `this` for object methods
-      const out = s.thisArg ? await s.fn.call(s.thisArg, ctx) : await s.fn(ctx);
+      let out;
+
+      if (s._callWithCamera) {
+        // SpawnPoints.apply(camera) compatibility
+        const cam = ctx.camera;
+        if (!cam || !cam.position || typeof cam.position.set !== "function") {
+          throw new Error("SpawnPoints expected a valid camera with position.set()");
+        }
+        out = s.thisArg ? await s.fn.call(s.thisArg, cam) : await s.fn(cam);
+      } else {
+        // Normal steps receive ctx (with correct `this` binding if needed)
+        out = s.thisArg ? await s.fn.call(s.thisArg, ctx) : await s.fn(ctx);
+      }
 
       if (out && typeof out === "object") ctx.world_out = out;
       log(`[world] ✅ ${s.label}`);
@@ -193,8 +216,9 @@ export async function build(ctx) {
     }
   }
 
+  // Mark ground as floor if returned by builders
   const ground = ctx.world_out?.ground || scene.getObjectByName?.("GROUND");
   if (ground) ground.userData.isFloor = true;
 
   log("[world] Scarlett world ready ✅");
-                                                                   }
+}

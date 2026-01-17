@@ -1,26 +1,23 @@
-// /js/scarlett1/world.js — SCARLETT ULTIMATE WORLD (FULL)
-// BUILD: WORLD_ULTIMATE_FULL_v4_3_ULT
+// /js/scarlett1/world.js — SCARLETT ULTIMATE WORLD (FULL + MODULE LOADER)
+// BUILD: WORLD_ULTIMATE_FULL_v4_3_ULT_MODS
 //
-// Goals:
 // - Big lobby (2x feel), poker pit divot, stairs, table, chairs
-// - Store zone with mannequins + simple shelves
+// - Store zone with mannequins + shelves
 // - Teleport floors registered
-// - World returns a "registry" of modules that diag can list
-// - SAFE geometry (no CapsuleGeometry), Quest/Android safe
-//
-// NOTE: This file does NOT depend on any other modules. It provides "hooks"
-// for modules to attach later without breaking boot.
+// - Returns registry for diag panel
+// - Loads /js/modules/* via /js/modules/_registry.js (safe)
+// - Quest/Android safe geometry (no CapsuleGeometry)
 
-const BUILD = "WORLD_ULTIMATE_FULL_v4_3_ULT";
+import { loadModules } from "../modules/_registry.js";
+
+const BUILD = "WORLD_ULTIMATE_FULL_v4_3_ULT_MODS";
 
 export async function buildWorld(ctx) {
-  const { THREE, scene, player, renderer, onRegisterFloors, onStatus, log } = ctx;
+  const { THREE, scene, player, renderer, onRegisterFloors, onStatus } = ctx;
 
   onStatus?.(`building world…\n${BUILD}`);
 
-  // ---- Module registry (for your diag panel) ----
-  // The idea: every “feature” registers itself here so you can inspect quickly.
-  // You can add/remove entries without touching index/boot.
+  // ---- Module registry (for diag panel) ----
   const registry = createRegistry();
   registry.add("WORLD_CORE", "World root group + lighting + update loop", "ok");
   registry.add("LOBBY", "Circular lobby shell + floor + ceiling glow", "ok");
@@ -35,7 +32,7 @@ export async function buildWorld(ctx) {
   world.name = "ScarlettWorld";
   scene.add(world);
 
-  // ---- Lighting (more contrast than flat gray) ----
+  // ---- Lighting (contrast) ----
   const hemi = new THREE.HemisphereLight(0xffffff, 0x202030, 0.55);
   world.add(hemi);
 
@@ -68,7 +65,6 @@ export async function buildWorld(ctx) {
   lobbyWall.name = "LobbyWall";
   world.add(lobbyWall);
 
-  // Ceiling ring + glow for vibe
   const ceiling = new THREE.Mesh(
     new THREE.RingGeometry(LOBBY_RADIUS - 0.8, LOBBY_RADIUS, 96),
     new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0.08, side: THREE.DoubleSide })
@@ -87,7 +83,7 @@ export async function buildWorld(ctx) {
   glow.name = "CeilingGlow";
   world.add(glow);
 
-  // Center marker (debug landmark; remove later if you want)
+  // Center marker (debug landmark)
   const marker = new THREE.Mesh(
     new THREE.SphereGeometry(0.25, 24, 24),
     new THREE.MeshStandardMaterial({ color: 0xff3333, roughness: 0.4, metalness: 0.1 })
@@ -148,7 +144,7 @@ export async function buildWorld(ctx) {
   chairs.position.set(0, -PIT_DEPTH + 0.02, 0);
   pit.add(chairs);
 
-  // ---- Rail ring around pit (visual boundary) ----
+  // ---- Rail boundary ----
   const rail = new THREE.Mesh(
     new THREE.TorusGeometry(PIT_RADIUS + 2.2, 0.12, 12, 160),
     new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.22 })
@@ -157,7 +153,7 @@ export async function buildWorld(ctx) {
   rail.position.y = 0.95;
   rail.name = "PitRail";
   world.add(rail);
-  registry.add("RAIL", "Rail torus boundary around pit", "ok");
+  registry.add("RAIL", "Rail boundary around pit", "ok");
 
   // ---- Store Zone ----
   const store = new THREE.Group();
@@ -182,7 +178,6 @@ export async function buildWorld(ctx) {
   storeBackWall.name = "StoreBackWall";
   store.add(storeBackWall);
 
-  // Shelves
   const shelfMat = new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0.12 });
   for (let i = 0; i < 3; i++) {
     const shelf = new THREE.Mesh(new THREE.BoxGeometry(5.8, 0.12, 0.5), shelfMat);
@@ -191,26 +186,57 @@ export async function buildWorld(ctx) {
     store.add(shelf);
   }
 
-  // Mannequins
   const manA = buildMannequin({ THREE });
   const manB = buildMannequin({ THREE });
   manA.position.set(-1.6, 0, -0.5);
   manB.position.set( 1.6, 0, -0.5);
   store.add(manA, manB);
 
-  // ---- Teleport floors ----
-  onRegisterFloors?.([lobbyFloor, pitFloor, storePad]);
+  // ---- Module hooks (modules can add floors, anchors, etc.) ----
+  const hooks = {
+    floors: [],
+    addFloor(mesh) {
+      if (mesh) hooks.floors.push(mesh);
+    },
+  };
 
-  // ---- Spawn: face the center and NOT inside wall ----
+  // ---- Load external modules safely ----
+  registry.add("MODULES", "Loading external modules…", "ok");
+
+  const worldApi = {
+    world,
+    anchors: { world, pit, table, store },
+    constants: { LOBBY_RADIUS, LOBBY_HEIGHT, PIT_RADIUS, PIT_DEPTH },
+  };
+
+  const moduleResults = await loadModules({
+    THREE,
+    scene,
+    renderer,
+    player,
+    registry,
+    hooks,
+    worldApi,
+  });
+
+  const loadedCount = moduleResults.filter(r => r.ok && !r.disabled).length;
+  const failCount = moduleResults.filter(r => !r.ok).length;
+  registry.add("MODULES", "External modules loaded", failCount ? "warn" : "ok", `loaded=${loadedCount} fail=${failCount}`);
+
+  // ---- Teleport floors ----
+  const baseFloors = [lobbyFloor, pitFloor, storePad];
+  const allFloors = hooks.floors.length ? [...baseFloors, ...hooks.floors] : baseFloors;
+  onRegisterFloors?.(allFloors);
+
+  // ---- Spawn position ----
   player.position.set(0, 1.6, 14);
   player.rotation.set(0, 0, 0);
 
   onStatus?.(`world ready ✅\n${BUILD}\nmodules=${registry.items.length}`);
 
-  // Return world API to runtime
   return {
-    registry,                 // diag panel can read this
-    anchors: { world, pit, table, store }, // helpful for modules to attach
+    registry,
+    anchors: { world, pit, table, store },
     update(dt) {
       glow.rotation.z += dt * 0.25;
     },
@@ -323,7 +349,7 @@ function buildMannequin({ THREE }) {
 
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.1 });
 
-  // Quest-safe (no CapsuleGeometry)
+  // Quest-safe: cylinder instead of CapsuleGeometry
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.7, 16), mat);
   body.position.y = 1.1;
 
@@ -335,4 +361,4 @@ function buildMannequin({ THREE }) {
 
   g.add(base, body, head);
   return g;
-      }
+}

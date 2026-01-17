@@ -1,13 +1,15 @@
 // /js/scarlett1/index.js
-// BUILD: SCARLETT1_MASTER_GLUE_ROUTER_v5_APPROOM
+// BUILD: SCARLETT1_MASTER_GLUE_ROUTER_v6_MULTIARG
 //
 // ✅ Keeps Android sticks + finger-look
-// ✅ Fixes failing modules by providing ctx.app.room / ctx.app.ui / ctx.app.debug / ctx.app.avatars
+// ✅ Fixes module failures by:
+//    - exposing globalThis.app/room/ui/debug/avatars
+//    - calling module init/start with (ctx, app, Scarlett, room, ui, debug, avatars)
 // ✅ Safe mode ?safe=1
-// ✅ Stable even if modules throw
+// ✅ World stays independent (never breaks visuals)
 
 export async function boot({ Scarlett, BASE, V }) {
-  const BUILD = "SCARLETT1_MASTER_GLUE_ROUTER_v5_APPROOM";
+  const BUILD = "SCARLETT1_MASTER_GLUE_ROUTER_v6_MULTIARG";
   const NOW = () => new Date().toISOString().slice(11, 19);
   const push = (s) => globalThis.SCARLETT_DIAG?.push?.(`[${NOW()}] ${s}`);
 
@@ -55,7 +57,6 @@ export async function boot({ Scarlett, BASE, V }) {
   rig.add(camera);
   scene.add(rig);
 
-  // baseline lights (world adds more)
   scene.add(new THREE.AmbientLight(0xffffff, 0.25));
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.65));
   const key = new THREE.DirectionalLight(0xffffff, 0.9);
@@ -82,7 +83,7 @@ export async function boot({ Scarlett, BASE, V }) {
   const world = await worldMod.createWorld({ THREE, scene, renderer, camera, rig, Scarlett, diag: push, BASE });
   push?.(`[scarlett1] world ready ✅`);
 
-  // ✅ Legacy APP shim — IMPORTANT: modules are reading ctx.app.room (not ctx.room)
+  // Legacy APP shim
   const legacyApp = {
     room: world,
     ui: world.ui || {},
@@ -97,21 +98,28 @@ export async function boot({ Scarlett, BASE, V }) {
     state: {},
     scene, renderer, camera, rig,
   };
+
   Scarlett.app = legacyApp;
   globalThis.SCARLETT_APP = legacyApp;
+
+  // ✅ GLOBAL LEGACY ALIASES (some modules look here)
+  globalThis.app = legacyApp;
+  globalThis.room = legacyApp.room;
+  globalThis.ui = legacyApp.ui;
+  globalThis.debug = legacyApp.debug;
+  globalThis.avatars = legacyApp.avatars;
 
   const ctx = {
     THREE, scene, renderer, camera, rig, world, Scarlett, controllers,
     diag: push, BASE, V,
-    bus: makeBus(push),
-
-    // compat
+    bus: makeBus(),
     app: legacyApp,
     room: world,
     ui: legacyApp.ui,
     debug: legacyApp.debug,
     avatars: legacyApp.avatars,
   };
+
   globalThis.SCARLETT_CTX = ctx;
   globalThis.SCARLETT_REGISTRY = globalThis.SCARLETT_REGISTRY || [];
 
@@ -123,8 +131,7 @@ export async function boot({ Scarlett, BASE, V }) {
   installModulePanel({ Scarlett, push });
 
   const touchLook = createTouchLook({ renderer, rig, camera });
-
-  const fallback = createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett, push, touchLook });
+  const fallback = createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett, push });
   Scarlett.__controls = fallback;
 
   const MODULE_BASE = `${BASE}js/modules/`;
@@ -151,11 +158,8 @@ export async function boot({ Scarlett, BASE, V }) {
   if (!SAFE_MODE) {
     for (const [name, file] of MODULE_MAP) {
       const url = `${MODULE_BASE}${file}?v=${encodeURIComponent(V)}`;
-      const started = await safeLoadAndStartModule({ name, url, ctx, push });
+      const started = await safeLoadAndStartModule({ name, url, ctx, legacyApp, push });
       if (started) liveModules.push(started);
-    }
-    for (const item of (globalThis.SCARLETT_REGISTRY || [])) {
-      liveModules.push({ name: item.name || "registry", inst: item });
     }
   } else {
     push?.(`[mod] SAFE MODE: skipping module start calls`);
@@ -172,16 +176,28 @@ export async function boot({ Scarlett, BASE, V }) {
   push?.(`[scarlett1] started ✅`);
 }
 
-async function safeLoadAndStartModule({ name, url, ctx, push }) {
+async function safeLoadAndStartModule({ name, url, ctx, legacyApp, push }) {
   try {
     push?.(`[mod] import ${name} → ${url}`);
     const m = await import(url);
     const keys = Object.keys(m || {});
     push?.(`[mod] ${name} exports: ${keys.length ? keys.join(", ") : "(none)"}`);
 
+    // Multi-arg pack (covers most legacy signatures)
+    const args = [
+      ctx,
+      legacyApp,
+      ctx.Scarlett,
+      ctx.room,
+      ctx.ui,
+      ctx.debug,
+      ctx.avatars,
+    ];
+
+    // locomotion_xr.js
     if (typeof m.createLocomotionModule === "function") {
       push?.(`[mod] ${name} entry=createLocomotionModule() starting…`);
-      const inst = await m.createLocomotionModule(ctx);
+      const inst = await m.createLocomotionModule(...args);
       push?.(`[mod] ${name} started ✅`);
       return { name, inst: inst || m };
     }
@@ -189,25 +205,39 @@ async function safeLoadAndStartModule({ name, url, ctx, push }) {
     const d = m.default;
 
     if (d && typeof d === "object") {
-      const objEntry =
-        (typeof d.init === "function" && { fn: d.init.bind(d), label: "default.init" }) ||
-        (typeof d.start === "function" && { fn: d.start.bind(d), label: "default.start" }) ||
-        (typeof d.setup === "function" && { fn: d.setup.bind(d), label: "default.setup" }) ||
-        (typeof d.mount === "function" && { fn: d.mount.bind(d), label: "default.mount" }) ||
-        (typeof d.enable === "function" && { fn: d.enable.bind(d), label: "default.enable" }) ||
-        (typeof d.register === "function" && { fn: d.register.bind(d), label: "default.register" }) ||
-        null;
+      const fn =
+        d.init || d.start || d.setup || d.mount || d.enable || d.register || null;
 
-      if (objEntry) {
-        push?.(`[mod] ${name} entry=${objEntry.label}() starting…`);
-        const inst = await objEntry.fn(ctx);
-        push?.(`[mod] ${name} started ✅`);
-        return { name, inst: inst || d };
+      if (typeof fn === "function") {
+        // Try the common permutations without crashing your boot:
+        // 1) fn(ctx)
+        // 2) fn(app)
+        // 3) fn(ctx, app, ...)
+        push?.(`[mod] ${name} entry=default.${fn.name || "lifecycle"}() starting…`);
+        try {
+          const inst = await fn.call(d, ctx);
+          push?.(`[mod] ${name} started ✅`);
+          return { name, inst: inst || d };
+        } catch (e1) {
+          try {
+            const inst = await fn.call(d, legacyApp);
+            push?.(`[mod] ${name} started ✅`);
+            return { name, inst: inst || d };
+          } catch (e2) {
+            const inst = await fn.call(d, ...args);
+            push?.(`[mod] ${name} started ✅`);
+            return { name, inst: inst || d };
+          }
+        }
       }
+
+      // no lifecycle => keep reference
       return { name, inst: d };
     }
 
+    // side-effect module
     return { name, inst: m };
+
   } catch (e) {
     push?.(`[mod] ${name} FAILED ❌ ${String(e?.message || e)}`);
     return null;
@@ -234,7 +264,6 @@ function createTouchLook({ renderer, rig, camera }) {
     const p = e.touches ? e.touches[0] : e;
     st.lastX = p.clientX; st.lastY = p.clientY;
   }
-
   function move(e) {
     if (!st.active) return;
     if (renderer.xr.getSession?.()) return;
@@ -249,7 +278,6 @@ function createTouchLook({ renderer, rig, camera }) {
     }
     e.preventDefault?.();
   }
-
   function up() { st.active = false; st.twoFingerTurnOnly = false; }
 
   el.addEventListener("pointerdown", down, { passive: true });
@@ -271,13 +299,7 @@ function createTouchLook({ renderer, rig, camera }) {
   };
 }
 
-function createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett, push }) {
-  const state = {
-    teleportMode: false,
-    moveSpeed: 2.85,
-    turnSpeed: 2.2,
-  };
-
+function createFallbackControls({ THREE, renderer, camera, rig, Scarlett }) {
   function deadzone(v, dz = 0.15) {
     const a = Math.abs(v);
     if (a < dz) return 0;
@@ -285,39 +307,33 @@ function createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett,
     return Math.sign(v) * Math.max(0, Math.min(1, s));
   }
 
-  function applyMove(moveX, moveY, dt) {
-    const yawQ = new THREE.Quaternion();
-    camera.getWorldQuaternion(yawQ);
-
-    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(yawQ);
-    fwd.y = 0; fwd.normalize();
-    const rightV = new THREE.Vector3(1, 0, 0).applyQuaternion(yawQ);
-    rightV.y = 0; rightV.normalize();
-
-    rig.position.add(
-      new THREE.Vector3()
-        .addScaledVector(fwd, moveY)   // ✅ Up forward
-        .addScaledVector(rightV, moveX)
-        .multiplyScalar(state.moveSpeed * dt)
-    );
-  }
+  const speed = 2.85;
+  const turn = 2.2;
 
   return {
-    toggleTeleport() {
-      state.teleportMode = !state.teleportMode;
-      push?.(`[move] teleport=${state.teleportMode}`);
-    },
     tick() {
-      const dt = 1 / 72;
-      if (renderer.xr.getSession?.()) return; // XR locomotion module handles in VR
-
+      if (renderer.xr.getSession?.()) return;
       const a = Scarlett.ANDROID_INPUT || { moveX: 0, moveY: 0, turnX: 0 };
       const mx = deadzone(a.moveX || 0);
       const my = deadzone(a.moveY || 0);
       const tx = deadzone(a.turnX || 0);
 
-      applyMove(mx, my, dt);
-      if (tx) rig.rotation.y -= tx * state.turnSpeed * dt;
+      const yawQ = new THREE.Quaternion();
+      camera.getWorldQuaternion(yawQ);
+
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(yawQ);
+      fwd.y = 0; fwd.normalize();
+      const rightV = new THREE.Vector3(1, 0, 0).applyQuaternion(yawQ);
+      rightV.y = 0; rightV.normalize();
+
+      rig.position.add(
+        new THREE.Vector3()
+          .addScaledVector(fwd, my)
+          .addScaledVector(rightV, mx)
+          .multiplyScalar(speed / 72)
+      );
+
+      if (tx) rig.rotation.y -= tx * turn * (1 / 72);
     }
   };
 }
@@ -367,4 +383,4 @@ function installModulePanel({ Scarlett, push }) {
   Scarlett.UI.toggleModules = () => globalThis.SCARLETT_MODULES.toggle();
 
   push?.(`[mods] panel ready ✅`);
-}
+        }

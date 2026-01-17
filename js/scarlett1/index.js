@@ -1,7 +1,7 @@
 // /js/scarlett1/index.js — SCARLETT1 PRIME ENTRY (FULL)
 // BUILD: SCARLETT1_INDEX_FULL_v4_3
 // GitHub Pages safe: NO bare specifiers (no "three") — only absolute URLs.
-
+import { buildWorld } from "./world.js";
 const BUILD = "SCARLETT1_INDEX_FULL_v4_3";
 
 const log = (...a) => console.log("[scarlett1]", ...a);

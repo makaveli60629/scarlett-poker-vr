@@ -1,7 +1,10 @@
-// /js/scarlett1/index.js — SCARLETT1 PRIME ENTRY (FULL)
-// BUILD: SCARLETT1_INDEX_FULL_v4_3_FOLDED
+// /js/scarlett1/index.js — Scarlett1 Runtime (FULL)
+// BUILD: SCARLETT1_RUNTIME_v4_3_FINAL
+// ✅ NO examples/jsm imports (Quest/Android safe)
+// ✅ Manual Enter VR
+// ✅ Controllers rays + locomotion + teleport + diag panel
 
-const BUILD = "SCARLETT1_INDEX_FULL_v4_3_FOLDED";
+const BUILD = "SCARLETT1_RUNTIME_v4_3_FINAL";
 
 const log = (...a) => console.log("[scarlett1]", ...a);
 const warn = (...a) => console.warn("[scarlett1]", ...a);
@@ -12,7 +15,7 @@ const $ = (id) => document.getElementById(id);
 const ui = {
   hud: $("hud"),
   status: $("status"),
-  vrMount: $("vrButtonMount"),
+  btnEnterVr: $("btnEnterVr"),
   btnHideHud: $("btnHideHud"),
   btnTeleport: $("btnTeleport"),
   btnDiag: $("btnDiag"),
@@ -27,15 +30,10 @@ function setStatus(s) {
   console.log("[status]", s);
 }
 
-// ---------- Imports (pinned, GitHub-safe) ----------
+// ✅ core three only
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
-import { VRButton } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
-import { XRControllerModelFactory } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/XRControllerModelFactory.js";
-
 import { buildWorld } from "./world.js";
-console.log("[scarlett1] world.js import OK ✅");
 
-// ---------- Core ----------
 let renderer, scene, camera, clock;
 let player, head;
 let world;
@@ -44,11 +42,15 @@ let floorMeshes = [];
 let teleportEnabled = false;
 let snapTurnCooldown = 0;
 
+const state = {
+  inXR: false,
+  diagOpen: false,
+  hudHidden: false,
+};
+
 const controllers = {
   left: null,
   right: null,
-  leftGrip: null,
-  rightGrip: null,
   leftGamepad: null,
   rightGamepad: null,
   leftRay: null,
@@ -57,34 +59,25 @@ const controllers = {
   teleportTarget: null,
 };
 
-const state = {
-  inXR: false,
-  diagOpen: false,
-  hudHidden: false,
-};
-
 boot().catch((e) => {
   err("BOOT FAIL", e);
-  setStatus("BOOT FAIL ❌\n" + (e?.stack || e?.message || String(e)));
+  setStatus("RUNTIME BOOT FAIL ❌\n" + (e?.stack || e?.message || String(e)));
 });
 
 async function boot() {
   setStatus(`booting…\nBUILD=${BUILD}`);
-  log("boot", BUILD);
 
   // Scene
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
 
-  // Camera + player rig
+  // Rig
   camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
   player = new THREE.Group();
   head = new THREE.Group();
   head.add(camera);
   player.add(head);
   scene.add(player);
-
-  player.position.set(0, 1.6, 6);
 
   // Renderer
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -99,61 +92,36 @@ async function boot() {
 
   clock = new THREE.Clock();
 
-  // VR Button
-  const vrBtn = VRButton.createButton(renderer);
-  if (ui.vrMount) ui.vrMount.appendChild(vrBtn);
-
-  // UI
   hookUI();
+  hookXR();
 
-  setStatus(`boot stage: renderer OK ✅\nBUILD=${BUILD}\nloading world…`);
+  setStatus(`renderer OK ✅\nBUILD=${BUILD}\nbuilding world…`);
 
-  // World (FOLDED: hard try/catch with on-screen error)
+  // World
   try {
-    console.log("[scarlett1] calling buildWorld()");
     world = await buildWorld({
       THREE,
       scene,
       player,
       renderer,
-      onRegisterFloors: (meshes) => {
-        floorMeshes = meshes || [];
-      },
+      onRegisterFloors: (meshes) => { floorMeshes = meshes || []; },
       onStatus: (s) => setStatus(s),
-      log,
-      warn,
-      err,
+      log, warn, err,
     });
-    console.log("[scarlett1] buildWorld() returned ✅");
   } catch (e) {
     err("WORLD BUILD FAIL", e);
     setStatus("WORLD BUILD FAIL ❌\n" + (e?.stack || e?.message || String(e)));
-    // Keep running so you still get HUD + VR button
     world = null;
   }
 
-  // Controllers
-  initXRControllers();
-
-  renderer.xr.addEventListener("sessionstart", () => {
-    state.inXR = true;
-    setStatus(`XR session started ✅\nBUILD=${BUILD}`);
-  });
-  renderer.xr.addEventListener("sessionend", () => {
-    state.inXR = false;
-    setStatus(`XR session ended.\nBUILD=${BUILD}`);
-  });
-
+  initControllers();
   window.addEventListener("resize", onResize);
 
   renderer.setAnimationLoop(tick);
 
-  // Final ready status (even if world failed, you’ll see why above)
-  if (world) {
-    setStatus(
-      `ready ✅\nBUILD=${BUILD}\nTeleport: ${teleportEnabled ? "ON" : "OFF"}\nLeft Y: menu • Right stick move • Left stick snap`
-    );
-  }
+  setStatus(
+    `ready ✅\nBUILD=${BUILD}\nTeleport: ${teleportEnabled ? "ON" : "OFF"}\nEnter VR uses requestSession (no VRButton)`
+  );
 }
 
 function hookUI() {
@@ -171,25 +139,46 @@ function hookUI() {
   ui.btnDiag?.addEventListener("click", () => toggleDiag());
 
   ui.btnTestModules?.addEventListener("click", () => {
-    const ok = {
-      three: !!THREE,
-      xr: !!navigator.xr,
-      renderer: !!renderer,
-      world: !!world,
-      floors: floorMeshes.length,
-    };
     setStatus(
       `MODULE TEST ✅\n` +
-      `three=${ok.three}\n` +
-      `navigator.xr=${ok.xr}\n` +
-      `renderer=${ok.renderer}\n` +
-      `world=${ok.world}\n` +
-      `floors=${ok.floors}`
+      `three=${!!THREE}\n` +
+      `navigator.xr=${!!navigator.xr}\n` +
+      `renderer=${!!renderer}\n` +
+      `world=${!!world}\n` +
+      `floors=${floorMeshes.length}`
     );
   });
 
   ui.btnResetPlayer?.addEventListener("click", () => resetPlayer());
   ui.btnReload?.addEventListener("click", () => location.reload());
+
+  ui.btnEnterVr?.addEventListener("click", async () => {
+    try {
+      if (!navigator.xr) { setStatus("WebXR not available ❌"); return; }
+      const ok = await navigator.xr.isSessionSupported("immersive-vr");
+      if (!ok) { setStatus("immersive-vr not supported ❌"); return; }
+
+      const session = await navigator.xr.requestSession("immersive-vr", {
+        optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking", "layers"],
+      });
+      await renderer.xr.setSession(session);
+      setStatus("XR session requested ✅");
+    } catch (e) {
+      err("Enter VR failed", e);
+      setStatus("Enter VR failed ❌\n" + (e?.message || String(e)));
+    }
+  });
+}
+
+function hookXR() {
+  renderer.xr.addEventListener("sessionstart", () => {
+    state.inXR = true;
+    setStatus(`XR session started ✅\nBUILD=${BUILD}`);
+  });
+  renderer.xr.addEventListener("sessionend", () => {
+    state.inXR = false;
+    setStatus(`XR session ended.\nBUILD=${BUILD}`);
+  });
 }
 
 function toggleDiag(force) {
@@ -200,26 +189,19 @@ function toggleDiag(force) {
 function resetPlayer() {
   player.position.set(0, 1.6, 10);
   player.rotation.set(0, Math.PI, 0);
-  setStatus(`player reset ✅\npos=${player.position.x.toFixed(2)},${player.position.y.toFixed(2)},${player.position.z.toFixed(2)}`);
+  setStatus("player reset ✅");
 }
 
-// ---------- XR Controllers ----------
-function initXRControllers() {
-  const controllerModelFactory = new XRControllerModelFactory();
-
+function initControllers() {
   controllers.left = renderer.xr.getController(0);
   controllers.right = renderer.xr.getController(1);
   scene.add(controllers.left);
   scene.add(controllers.right);
 
-  controllers.leftGrip = renderer.xr.getControllerGrip(0);
-  controllers.rightGrip = renderer.xr.getControllerGrip(1);
-
-  controllers.leftGrip.add(controllerModelFactory.createControllerModel(controllers.leftGrip));
-  controllers.rightGrip.add(controllerModelFactory.createControllerModel(controllers.rightGrip));
-
-  scene.add(controllers.leftGrip);
-  scene.add(controllers.rightGrip);
+  controllers.left.addEventListener("connected", (e) => onControllerConnected("left", e));
+  controllers.right.addEventListener("connected", (e) => onControllerConnected("right", e));
+  controllers.left.addEventListener("disconnected", () => (controllers.leftGamepad = null));
+  controllers.right.addEventListener("disconnected", () => (controllers.rightGamepad = null));
 
   controllers.leftRay = makeRay(true);
   controllers.rightRay = makeRay(false);
@@ -229,22 +211,16 @@ function initXRControllers() {
   controllers.teleportMarker = makeTeleportMarker();
   scene.add(controllers.teleportMarker);
 
-  controllers.left.addEventListener("connected", (e) => onControllerConnected("left", e));
-  controllers.right.addEventListener("connected", (e) => onControllerConnected("right", e));
-  controllers.left.addEventListener("disconnected", () => (controllers.leftGamepad = null));
-  controllers.right.addEventListener("disconnected", () => (controllers.rightGamepad = null));
-
-  controllers.left.addEventListener("squeezestart", () => onSqueezeStart());
-  controllers.right.addEventListener("squeezestart", () => onSqueezeStart());
-  controllers.left.addEventListener("squeezeend", () => onSqueezeEnd());
-  controllers.right.addEventListener("squeezeend", () => onSqueezeEnd());
+  controllers.left.addEventListener("squeezestart", () => onGripStart());
+  controllers.right.addEventListener("squeezestart", () => onGripStart());
+  controllers.left.addEventListener("squeezeend", () => onGripEnd());
+  controllers.right.addEventListener("squeezeend", () => onGripEnd());
 }
 
 function onControllerConnected(hand, e) {
   const gp = e?.data?.gamepad || null;
   if (hand === "left") controllers.leftGamepad = gp;
   if (hand === "right") controllers.rightGamepad = gp;
-  log(hand, "connected", { hasGamepad: !!gp, id: gp?.id });
 
   setStatus(
     `controller ${hand} connected ✅\n` +
@@ -274,13 +250,11 @@ function makeTeleportMarker() {
 }
 
 let teleportAiming = false;
-
-function onSqueezeStart() {
+function onGripStart() {
   if (!teleportEnabled) return;
   teleportAiming = true;
 }
-
-function onSqueezeEnd() {
+function onGripEnd() {
   if (!teleportEnabled) return;
   teleportAiming = false;
   if (controllers.teleportTarget) {
@@ -298,14 +272,14 @@ function onResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-// ---------- Frame loop ----------
+// Loop
 const tmpDir = new THREE.Vector3();
 const tmpVec = new THREE.Vector3();
 const raycaster = new THREE.Raycaster();
+const prevPressed = new WeakMap();
 
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.033);
-
   snapTurnCooldown = Math.max(0, snapTurnCooldown - dt);
 
   pollGamepads(dt);
@@ -318,7 +292,6 @@ function tick() {
   renderer.render(scene, camera);
 }
 
-const prevPressed = new WeakMap();
 function handleEdgeButton(gamepad, index, fn) {
   if (!gamepad?.buttons?.[index]) return;
   let m = prevPressed.get(gamepad);
@@ -352,19 +325,17 @@ function pollGamepads(dt) {
       camera.getWorldDirection(tmpDir);
       tmpDir.y = 0;
       tmpDir.normalize();
-
       tmpVec.copy(tmpDir).cross(new THREE.Vector3(0, 1, 0)).normalize();
 
       const speed = 2.0;
       const move = new THREE.Vector3();
       move.addScaledVector(tmpDir, -ay * speed * dt);
       move.addScaledVector(tmpVec, ax * speed * dt);
-
       player.position.add(move);
     }
   }
 
-  // Left stick snap turn 45 degrees
+  // Left stick snap turn 45
   if (l?.axes?.length >= 2) {
     const lx = l.axes[2] ?? l.axes[0] ?? 0;
     const dz = 0.35;

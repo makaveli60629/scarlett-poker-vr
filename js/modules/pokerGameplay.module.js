@@ -1,5 +1,5 @@
 // /js/modules/pokerGameplay.module.js
-// Deterministic demo loop + dealer rotation + pot grow + vacuum (FULL)
+// Deterministic demo loop + pause/step/speed + dealer rotation + pot/vacuum (FULL)
 
 export default {
   id: "pokerGameplay.module.js",
@@ -11,16 +11,15 @@ export default {
 
     const cardMat = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.7 });
     const makeCard = (name) => {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.002, 0.09), cardMat);
-      mesh.name = name;
-      mesh.visible = false;
-      root.add(mesh);
-      return mesh;
+      const m = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.002, 0.09), cardMat);
+      m.name = name;
+      m.visible = false;
+      root.add(m);
+      return m;
     };
 
-    // Community cards
     const community = Array.from({ length: 5 }, (_, i) => makeCard(`COMM_${i}`));
-    // Seat cards
+
     const seatCount = tableData.seats || 6;
     const seatCards = Array.from({ length: seatCount }, (_, s) => [makeCard(`S${s}_0`), makeCard(`S${s}_1`)]);
 
@@ -36,47 +35,19 @@ export default {
     const seatChips = [];
     const potChips = [];
 
-    function spawnSeatStacks() {
-      const table = window.SCARLETT?.table;
-      if (!table?.chipAnchors?.length) return;
-
-      // clear if re-init
-      for (const c of seatChips.flat()) root.remove(c);
-      for (const c of potChips) root.remove(c);
-      seatChips.length = 0; potChips.length = 0;
-
-      for (let s = 0; s < seatCount; s++) {
-        const a = table.chipAnchors[s];
-        const stack = [];
-
-        // 12 chips each seat
-        for (let i = 0; i < 12; i++) {
-          const m = chipMats[(s + i) % chipMats.length];
-          const chip = new THREE.Mesh(chipGeo, m);
-          chip.rotation.x = Math.PI / 2;
-          chip.position.set(0, 0.002 + i * 0.0085, 0);
-          chip.userData = { seat: s, inPot: false };
-          a.add(chip);
-          stack.push(chip);
-        }
-
-        seatChips.push(stack);
-      }
-    }
+    const getTable = () => window.SCARLETT?.table;
 
     function layoutCards() {
       const cx = tableData.center.x;
       const cy = tableData.center.y + 0.085;
       const cz = tableData.center.z;
 
-      // community line
       for (let i = 0; i < 5; i++) {
         const m = community[i];
         m.position.set(cx + (i - 2) * 0.075, cy, cz);
         m.rotation.set(-Math.PI / 2, 0, 0);
       }
 
-      // seat cards near rail
       const seatRadius = (tableData.radius || 1.2) + 0.55;
       for (let s = 0; s < seatCount; s++) {
         const t = (s / seatCount) * Math.PI * 2;
@@ -95,37 +66,49 @@ export default {
       for (const sc of seatCards) { sc[0].visible = false; sc[1].visible = false; }
     }
 
-    function sfx(name) {
-      try { window.SCARLETT?.sfx?.[name]?.(); } catch (_) {}
+    function showHoleCards() {
+      for (let s = 0; s < seatCount; s++) { seatCards[s][0].visible = true; seatCards[s][1].visible = true; }
+    }
+    function showFlop() { community[0].visible = true; community[1].visible = true; community[2].visible = true; }
+    function showTurn() { community[3].visible = true; }
+    function showRiver(){ community[4].visible = true; }
+
+    function sfx(name) { try { window.SCARLETT?.sfx?.[name]?.(); } catch (_) {} }
+
+    function spawnSeatStacks() {
+      const table = getTable();
+      if (!table?.chipAnchors?.length) return;
+
+      // clear old
+      for (const stack of seatChips) for (const c of stack) { try { c.parent?.remove(c); } catch (_) {} }
+      for (const c of potChips) { try { c.parent?.remove(c); } catch (_) {} }
+      seatChips.length = 0; potChips.length = 0;
+
+      for (let s = 0; s < seatCount; s++) {
+        const a = table.chipAnchors[s];
+        const stack = [];
+
+        for (let i = 0; i < 14; i++) {
+          const m = chipMats[(s + i) % chipMats.length];
+          const chip = new THREE.Mesh(chipGeo, m);
+          chip.rotation.x = Math.PI / 2;
+          chip.position.set(0, 0.002 + i * 0.0085, 0);
+          chip.userData = { seat: s, inPot: false };
+          a.add(chip);
+          stack.push(chip);
+        }
+        seatChips.push(stack);
+      }
     }
 
-    spawnSeatStacks();
-    layoutCards();
-    hideAllCards();
-
-    // Timeline state machine (dt-based)
-    const S = { DEAL:0, FLOP:1, TURN:2, RIVER:3, POT:4, VACUUM:5, RESET:6 };
-    let state = S.DEAL;
-    let t = 0;
-
-    function setDealerAndActive(seat) {
-      tableData.dealerIndex = seat;
-      tableData.activeSeat = seat;
-    }
-
-    // helper: move chips to pot
-    function pushToPot(seat, count=4) {
-      const table = window.SCARLETT?.table;
+    function pushToPot(seat, count=2) {
+      const table = getTable();
       if (!table?.potAnchor) return;
-
       const stack = seatChips[seat] || [];
       let moved = 0;
 
       for (let i = stack.length - 1; i >= 0 && moved < count; i--) {
         const chip = stack[i];
-        if (!chip) continue;
-
-        // detach from seat anchor -> attach to root at world position
         const wp = chip.getWorldPosition(new THREE.Vector3());
         chip.parent.remove(chip);
         root.add(chip);
@@ -137,7 +120,7 @@ export default {
         moved++;
       }
 
-      // stack pot chips into a pile
+      // restack pot
       const potWP = table.potAnchor.getWorldPosition(new THREE.Vector3());
       for (let i = 0; i < potChips.length; i++) {
         const c = potChips[i];
@@ -146,38 +129,58 @@ export default {
       }
     }
 
-    // helper: vacuum pot to winner
     function vacuumToSeat(winnerSeat) {
-      const table = window.SCARLETT?.table;
-      if (!table?.chipAnchors?.[winnerSeat]) return;
+      const table = getTable();
+      const target = table?.chipAnchors?.[winnerSeat];
+      if (!target) return;
 
-      const targetWP = table.chipAnchors[winnerSeat].getWorldPosition(new THREE.Vector3());
-
+      const targetWP = target.getWorldPosition(new THREE.Vector3());
       for (let i = 0; i < potChips.length; i++) {
-        const c = potChips[i];
-        c.position.lerp(targetWP, 0.25);
+        potChips[i].position.lerp(targetWP, 0.22);
       }
     }
 
-    // public controls
+    // Deterministic timeline
+    const S = { DEAL:0, FLOP:1, TURN:2, RIVER:3, POT:4, VACUUM:5, RESET:6 };
+    let state = S.DEAL;
+    let clock = 0;
+
+    let paused = false;
+    let speed = 1.0;
+    let stepOnce = false;
+
+    function advanceDealer() {
+      tableData.dealerIndex = ((tableData.dealerIndex ?? 0) + 1) % seatCount;
+      tableData.activeSeat  = tableData.dealerIndex;
+    }
+
+    function resetHand() {
+      clock = 0;
+      state = S.DEAL;
+      hideAllCards();
+      spawnSeatStacks();
+      layoutCards();
+    }
+
+    // Public controls for Menu UI
     window.SCARLETT = window.SCARLETT || {};
     window.SCARLETT.poker = window.SCARLETT.poker || {};
-    window.SCARLETT.poker.startDemo = () => { state = S.DEAL; t = 0; };
-    window.SCARLETT.poker.stopDemo  = () => { hideAllCards(); state = S.DEAL; t = 0; };
+    window.SCARLETT.poker.startDemo = () => { paused = false; resetHand(); };
+    window.SCARLETT.poker.togglePause = () => { paused = !paused; };
+    window.SCARLETT.poker.step = () => { stepOnce = true; paused = true; };
+    window.SCARLETT.poker.setSpeed = (v) => { speed = Math.max(0.1, Math.min(3.0, Number(v) || 1.0)); };
+    window.SCARLETT.poker.getState = () => ({ state, clock, paused, speed });
 
-    log?.("pokerGameplay.module ✅ (dt timeline + pot/vacuum)");
+    resetHand();
 
-    this._rt = {
-      THREE, tableData, S,
-      get state(){return state;}, set state(v){state=v;},
-      get t(){return t;}, set t(v){t=v;},
-      seatCount,
-      layoutCards,
-      hideAllCards,
-      sfx,
-      setDealerAndActive,
-      pushToPot,
-      vacuumToSeat
+    log?.("pokerGameplay.module ✅ (pause/step/speed)");
+
+    this._rt = { THREE, tableData, seatCount, S, get state(){return state;}, set state(v){state=v;},
+      get clock(){return clock;}, set clock(v){clock=v;},
+      get paused(){return paused;}, set paused(v){paused=v;},
+      get speed(){return speed;}, set speed(v){speed=v;},
+      get stepOnce(){return stepOnce;}, set stepOnce(v){stepOnce=v;},
+      hideAllCards, showHoleCards, showFlop, showTurn, showRiver, sfx, advanceDealer, pushToPot, vacuumToSeat
     };
   },
 
@@ -185,103 +188,88 @@ export default {
     const r = this._rt;
     if (!r) return;
 
-    r.t += dt;
+    // gate timeline
+    if (r.paused && !r.stepOnce) return;
 
-    // keep layout stable if table changes later
-    if ((performance.now() % 1500) < 16) r.layoutCards();
+    const scaled = dt * r.speed;
+    r.clock += scaled;
+
+    // if stepping: allow one transition then freeze
+    const doStepFreeze = () => { if (r.stepOnce) { r.stepOnce = false; r.paused = true; } };
 
     const S = r.S;
-    const beat = 1.05;
 
-    if (r.state === S.DEAL && r.t > 0.35) {
+    if (r.state === S.DEAL) {
+      if (r.clock < 0.15) return;
       r.hideAllCards();
-
-      // dealer rotates each hand
-      const nextDealer = ((r.tableData.dealerIndex ?? 0) + 1) % r.seatCount;
-      r.tableData.dealerIndex = nextDealer;
-      r.tableData.activeSeat = nextDealer;
-
-      // show all hole cards (demo)
-      for (let s = 0; s < r.seatCount; s++) {
-        const seatCards = window.__scarlettWorld?.modules?.find(()=>false); // noop safety
-      }
-      // Cards are in scene; just make them visible by name lookup is expensive.
-      // We'll use global references by scanning once quickly:
-      // (safe + simple: toggle by prefix in scene graph each deal)
-      const root = window.SCARLETT?.poker?.root;
-      // root might not exist; if not, just proceed
-
-      // show all seat cards by using stored meshes (we kept them internal)
-      // Easiest: do nothing here; visibility is already controlled in init by mesh refs.
-      // We'll expose in future if you want per-seat logic.
-      // For now: play card sound and advance.
+      r.advanceDealer();
+      r.showHoleCards();
       r.sfx("card");
-
-      // active seat rotates during hand (later: real turn logic)
-      r.t = 0;
+      r.clock = 0;
       r.state = S.FLOP;
+      doStepFreeze();
       return;
     }
 
-    if (r.state === S.FLOP && r.t > beat) {
-      // flip flop sound
+    if (r.state === S.FLOP && r.clock > 0.95) {
+      r.showFlop();
       r.sfx("card");
-      r.tableData.activeSeat = (r.tableData.activeSeat + 1) % r.seatCount;
-      r.t = 0;
+      r.clock = 0;
       r.state = S.TURN;
+      doStepFreeze();
       return;
     }
 
-    if (r.state === S.TURN && r.t > beat) {
+    if (r.state === S.TURN && r.clock > 0.95) {
+      r.showTurn();
       r.sfx("card");
-      r.tableData.activeSeat = (r.tableData.activeSeat + 1) % r.seatCount;
-      r.t = 0;
+      r.clock = 0;
       r.state = S.RIVER;
+      doStepFreeze();
       return;
     }
 
-    if (r.state === S.RIVER && r.t > beat) {
+    if (r.state === S.RIVER && r.clock > 0.95) {
+      r.showRiver();
       r.sfx("card");
-      r.tableData.activeSeat = (r.tableData.activeSeat + 1) % r.seatCount;
-      r.t = 0;
+      r.clock = 0;
       r.state = S.POT;
+      doStepFreeze();
       return;
     }
 
-    if (r.state === S.POT && r.t > 0.65) {
-      // each seat tosses chips into pot
+    if (r.state === S.POT && r.clock > 0.55) {
       for (let s = 0; s < r.seatCount; s++) r.pushToPot(s, 2);
       r.sfx("chip");
-      r.t = 0;
+      r.clock = 0;
       r.state = S.VACUUM;
+      doStepFreeze();
       return;
     }
 
     if (r.state === S.VACUUM) {
-      // winner = dealer (demo)
       const winner = r.tableData.dealerIndex ?? 0;
-
-      // ramp vacuum for 1.2s
       r.vacuumToSeat(winner);
-      if (r.t > 0.15 && r.t < 0.25) r.sfx("vacuum");
+      if (r.clock > 0.12 && r.clock < 0.18) r.sfx("vacuum");
 
-      if (r.t > 1.25) {
-        r.t = 0;
+      if (r.clock > 1.25) {
+        r.clock = 0;
         r.state = S.RESET;
+        doStepFreeze();
       }
       return;
     }
 
-    if (r.state === S.RESET && r.t > 1.0) {
-      // next hand
-      r.t = 0;
+    if (r.state === S.RESET && r.clock > 0.85) {
+      r.clock = 0;
       r.state = S.DEAL;
+      doStepFreeze();
       return;
     }
   },
 
   test() {
-    const ok = !!window.SCARLETT?.table?.chipAnchors?.length;
-    return { ok, note: ok ? "gameplay+chips present" : "missing chip anchors" };
+    const ok = !!window.SCARLETT?.poker?.getState;
+    return { ok, note: ok ? "gameplay controls present" : "missing poker controls" };
   }
 };

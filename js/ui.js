@@ -12,7 +12,6 @@ export const UI = {
 
     function bind(h){
       handlers = h || {};
-
       btnEnterVR.onclick = () => handlers.onEnterVR?.();
       btnHUD.onclick = () => handlers.onToggleHUD?.();
       btnTeleport.onclick = () => handlers.onToggleTeleport?.();
@@ -35,14 +34,8 @@ export const UI = {
       if(panel.style.display === 'block') panel.textContent = diag.render();
     }
 
-    function onSessionStart(){
-      diag.log('[UI] XR started');
-      refreshButtons();
-    }
-    function onSessionEnd(){
-      diag.log('[UI] XR ended');
-      refreshButtons();
-    }
+    function onSessionStart(){ diag.log('[UI] XR started'); refreshButtons(); }
+    function onSessionEnd(){ diag.log('[UI] XR ended'); refreshButtons(); }
 
     return { bind, refreshButtons, toggleHUD, toggleDiagPanel, onSessionStart, onSessionEnd };
   }

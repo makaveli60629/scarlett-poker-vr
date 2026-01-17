@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { VRButton } from 'three/addons/webxr/VRButton.js';
 
 import { World } from './world.js';
 import { UI } from './ui.js';
@@ -7,7 +6,7 @@ import { Diag } from './diag.js';
 import { XRInput } from './xr_input.js';
 import { Teleport } from './teleport.js';
 
-const BUILD = 'SCARLETT1_RUNTIME_SURGICAL_v4_4';
+export const BUILD = 'SCARLETT1_RUNTIME_SURGICAL_v4_4';
 
 const APP_STATE = {
   build: BUILD,
@@ -20,20 +19,26 @@ const APP_STATE = {
   teleportEnabled: false,
   touchOn: false,
 
-  // controller status
   left: { connected:false, gamepad:false },
   right:{ connected:false, gamepad:false },
 
-  floors: [], // teleport raycast targets
+  floors: []
 };
 
 window.APP_STATE = APP_STATE;
+window.BUILD = BUILD;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x05060a);
 
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.05, 200);
+// IMPORTANT: Create a player rig so teleport moves the rig (not the XR camera)
+const playerRig = new THREE.Group();
+playerRig.name = "PLAYER_RIG";
+scene.add(playerRig);
+
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.05, 250);
 camera.position.set(0, 1.6, 3.0);
+playerRig.add(camera);
 
 const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -44,25 +49,21 @@ APP_STATE.renderer = true;
 
 document.body.appendChild(renderer.domElement);
 
-// VRButton (real XR entry)
-const vrBtn = VRButton.createButton(renderer);
-vrBtn.style.display = 'none'; // we use our own button, but this stays in DOM
-document.body.appendChild(vrBtn);
-
-// Basic clock
 const clock = new THREE.Clock();
-
-// World
-const world = World.build({ scene, camera, renderer, APP_STATE });
-APP_STATE.world = true;
 
 // Systems
 const diag = Diag.create(APP_STATE);
 const ui = UI.create(APP_STATE, diag);
-const xrInput = XRInput.create({ scene, renderer, camera, APP_STATE, diag });
-const teleport = Teleport.create({ scene, renderer, camera, APP_STATE, diag });
 
-// Register teleport floors from World
+// World
+const world = World.build({ scene, camera, renderer, APP_STATE, playerRig });
+APP_STATE.world = true;
+
+// XR Input + Teleport
+const xrInput = XRInput.create({ scene, renderer, camera, APP_STATE, diag });
+const teleport = Teleport.create({ scene, renderer, camera, APP_STATE, diag, playerRig });
+
+// Floors for teleport
 APP_STATE.floors = world.floors || [];
 teleport.setFloors(APP_STATE.floors);
 
@@ -90,9 +91,20 @@ renderer.xr.addEventListener('sessionend', () => {
 // UI wiring
 ui.bind({
   onEnterVR: async () => {
-    // programmatically click VRButton
-    // Some browsers require a direct user gesture; this is called from button click -> OK.
-    vrBtn.click();
+    // Quest-safe: requestSession directly (programmatic VRButton click can be blocked)
+    try {
+      if (!navigator.xr) {
+        diag.log('[XR] navigator.xr missing');
+        return;
+      }
+      const session = await navigator.xr.requestSession('immersive-vr', {
+        optionalFeatures: ['local-floor','bounded-floor','hand-tracking','layers']
+      });
+      await renderer.xr.setSession(session);
+      diag.log('[XR] requestSession ✅');
+    } catch (e) {
+      diag.log('[XR] requestSession FAILED: ' + (e?.message || e));
+    }
   },
   onToggleHUD: () => ui.toggleHUD(),
   onToggleTeleport: () => {
@@ -102,7 +114,7 @@ ui.bind({
   },
   onToggleDiag: () => ui.toggleDiagPanel(),
   onPanic: () => {
-    diag.log('[PANIC] resetting world pose + states');
+    diag.log('[PANIC] resetting rig + states');
     world.reset();
     teleport.reset();
     xrInput.reset();
@@ -125,12 +137,10 @@ window.addEventListener('resize', () => {
 function animate() {
   const dt = Math.min(clock.getDelta(), 0.033);
 
-  // Update subsystems
   xrInput.update(dt);
   teleport.update(dt);
   world.update(dt);
 
-  // Update diag panel (lightweight)
   diag.tick(dt);
 
   renderer.render(scene, camera);
@@ -138,10 +148,10 @@ function animate() {
 renderer.setAnimationLoop(animate);
 
 // Boot logs
-diag.log(`[status] booting…`);
+diag.log('[status] booting…');
 diag.log(`BUILD=${BUILD}`);
-diag.log(`[status] renderer OK ✅`);
-diag.log(`[status] building world…`);
-diag.log(`[status] world ready ✅`);
+diag.log('[status] renderer OK ✅');
+diag.log('[status] building world…');
+diag.log('[status] world ready ✅');
 ui.refreshButtons();
 diag.setModuleTest();

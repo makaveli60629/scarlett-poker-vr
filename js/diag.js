@@ -2,8 +2,7 @@ export const Diag = {
   create(APP_STATE){
     const panel = document.getElementById('panel');
     const logs = [];
-    let fps = 60;
-    let acc = 0, frames = 0;
+    let fps = 60, acc = 0, frames = 0;
 
     function ts(){
       const d = new Date();
@@ -12,7 +11,7 @@ export const Diag = {
 
     function log(msg){
       logs.push(`[${ts()}] ${msg}`);
-      if(logs.length > 80) logs.shift();
+      if(logs.length > 100) logs.shift();
       if(panel && panel.style.display === 'block'){
         panel.textContent = render();
       }
@@ -45,7 +44,7 @@ inXR=${APP_STATE.inXR}
 touch=${APP_STATE.touchOn}
 build=${APP_STATE.build}
 
-Scarlett Debug
+XR BASELINE (no-confusion)
 ----------------------------
 BUILD=${APP_STATE.build}
 inXR=${APP_STATE.inXR}
@@ -56,19 +55,10 @@ floors=${(APP_STATE.floors?.length ?? 0)}
 [LEFT]  connected=${APP_STATE.left.connected} gamepad=${APP_STATE.left.gamepad}
 [RIGHT] connected=${APP_STATE.right.connected} gamepad=${APP_STATE.right.gamepad}
 
-WORLD REGISTRY (minimal) | FPS=${fps}
---------------------------------
-OK    WORLD_CORE — World root + lighting + update loop
-OK    LOBBY — Circular shell + floor + ceiling
-OK    POKER_PIT — Pit ring + pit floor + rail
-OK    TABLE — Table placeholder
-OK    CHAIRS — 6 chairs placeholder
-OK    TELEPORT_FLOORS — Floors registered for raycast
-
 Logs
 `;
 
-      return header + logs.slice(-25).join('\n');
+      return header + logs.slice(-40).join('\n');
     }
 
     return { log, tick, render, setModuleTest };

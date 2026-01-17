@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 export const Teleport = {
-  create({ scene, renderer, camera, APP_STATE, diag }){
+  create({ scene, renderer, camera, APP_STATE, diag, playerRig }){
     let floors = [];
     const raycaster = new THREE.Raycaster();
     const tempMat = new THREE.Matrix4();
@@ -15,30 +15,25 @@ export const Teleport = {
     scene.add(reticle);
 
     function setFloors(list){ floors = Array.isArray(list) ? list : []; }
-
     function reset(){ reticle.visible = false; }
 
-    function onSessionStart(){
-      diag.log('[Teleport] session start');
-    }
-    function onSessionEnd(){
-      reset();
-    }
+    function onSessionStart(){ diag.log('[Teleport] session start'); }
+    function onSessionEnd(){ reset(); }
 
     function intersectFromController(ctrl){
       if(!ctrl) return null;
-
       tempMat.identity().extractRotation(ctrl.matrixWorld);
       raycaster.ray.origin.setFromMatrixPosition(ctrl.matrixWorld);
       raycaster.ray.direction.set(0,0,-1).applyMatrix4(tempMat);
-
       const hits = raycaster.intersectObjects(floors, false);
       return hits?.[0] || null;
     }
 
     function update(){
-      if(!APP_STATE.inXR) { reticle.visible = false; return; }
-      if(!APP_STATE.teleportEnabled) { reticle.visible = false; return; }
+      if(!APP_STATE.inXR || !APP_STATE.teleportEnabled){
+        reticle.visible = false;
+        return;
+      }
 
       const ctrlRight = renderer.xr.getController(1);
       const ctrlLeft  = renderer.xr.getController(0);
@@ -62,8 +57,8 @@ export const Teleport = {
         const gp = s.gamepad;
         const trigger = gp.buttons?.[0];
         if(trigger && trigger.pressed && hit){
-          const rig = camera.parent || camera;
-          rig.position.set(hit.point.x, rig.position.y, hit.point.z);
+          // Move rig on XZ; keep Y (height)
+          playerRig.position.set(hit.point.x, playerRig.position.y, hit.point.z);
           diag.log(`[teleport] -> (${hit.point.x.toFixed(2)}, ${hit.point.z.toFixed(2)})`);
         }
       }

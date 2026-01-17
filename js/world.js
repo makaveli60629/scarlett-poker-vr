@@ -9,35 +9,31 @@ export const World = {
     scene.add(root);
 
     // lighting
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 0.8);
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 0.85);
     root.add(hemi);
 
     const dir = new THREE.DirectionalLight(0xffffff, 0.75);
     dir.position.set(4, 8, 2);
     root.add(dir);
 
-    // simple “lobby shell”
+    // floor
     const lobby = new THREE.Group();
     lobby.name = 'LOBBY';
     root.add(lobby);
 
-    // Floor (Teleport target)
     const floorGeo = new THREE.CircleGeometry(10, 64);
     const floorMat = new THREE.MeshStandardMaterial({ color: 0x2b2f3a, roughness: 0.95, metalness: 0.0 });
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI/2;
-    floor.receiveShadow = false;
     floor.name = 'FLOOR_MAIN';
     lobby.add(floor);
 
-    // Rim / lobby wall
     const wallGeo = new THREE.CylinderGeometry(10, 10, 2.8, 96, 1, true);
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x1a1e27, roughness: 0.9, metalness: 0.05, side: THREE.DoubleSide });
     const wall = new THREE.Mesh(wallGeo, wallMat);
     wall.position.y = 1.4;
     lobby.add(wall);
 
-    // Ceiling glow
     const ceilGeo = new THREE.CircleGeometry(10, 64);
     const ceilMat = new THREE.MeshStandardMaterial({ color: 0x0b0e14, emissive: 0x111a33, emissiveIntensity: 0.35, roughness: 1 });
     const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
@@ -45,7 +41,7 @@ export const World = {
     ceiling.position.y = 3.2;
     lobby.add(ceiling);
 
-    // Poker pit “divot”
+    // poker pit
     const pit = new THREE.Group();
     pit.name = 'POKER_PIT';
     root.add(pit);
@@ -56,15 +52,14 @@ export const World = {
     pitRing.position.y = 0.3;
     pit.add(pitRing);
 
-    // Pit floor
     const pitFloorGeo = new THREE.CircleGeometry(4.5, 64);
     const pitFloorMat = new THREE.MeshStandardMaterial({ color: 0x3a3f4c, roughness: 0.95 });
     const pitFloor = new THREE.Mesh(pitFloorGeo, pitFloorMat);
     pitFloor.rotation.x = -Math.PI/2;
     pitFloor.position.y = 0.01;
+    pitFloor.name = 'FLOOR_PIT';
     pit.add(pitFloor);
 
-    // Rail boundary (visual)
     const railGeo = new THREE.TorusGeometry(4.85, 0.08, 16, 128);
     const railMat = new THREE.MeshStandardMaterial({ color: 0x202432, roughness: 0.55, metalness: 0.35 });
     const rail = new THREE.Mesh(railGeo, railMat);
@@ -72,7 +67,7 @@ export const World = {
     rail.position.y = 0.85;
     pit.add(rail);
 
-    // “table placeholder”
+    // table
     const table = new THREE.Group();
     table.name = 'TABLE';
     root.add(table);
@@ -89,7 +84,7 @@ export const World = {
     tableBase.position.set(0, 0.45, 0);
     table.add(tableBase);
 
-    // chairs placeholders
+    // chairs
     const chairs = new THREE.Group();
     chairs.name = 'CHAIRS';
     root.add(chairs);
@@ -105,7 +100,7 @@ export const World = {
       chairs.add(c);
     }
 
-    // A red “test ball”
+    // test ball
     const ball = new THREE.Mesh(
       new THREE.SphereGeometry(0.12, 24, 24),
       new THREE.MeshStandardMaterial({ color: 0xaa2222, roughness: 0.35 })
@@ -113,19 +108,18 @@ export const World = {
     ball.position.set(0, 1.2, 0);
     root.add(ball);
 
-    // safe spawn
     function reset(){
+      // Reset rig position is handled by Teleport; this just resets camera look direction in 2D
       camera.position.set(0, 1.6, 3.0);
       camera.lookAt(0, 1.3, 0);
     }
     reset();
 
-    // Export teleport floors (important)
     const floors = [floor, pitFloor];
 
     function update(){
       const t = performance.now()*0.001;
-      hemi.intensity = 0.75 + Math.sin(t)*0.05;
+      hemi.intensity = 0.8 + Math.sin(t)*0.05;
     }
 
     return { root, floors, update, reset };

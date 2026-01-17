@@ -1,1 +1,1 @@
-export function build(){ return true; }
+export function build(){return true}

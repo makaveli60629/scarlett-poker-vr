@@ -8,10 +8,11 @@ export async function start({ modules, log }) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0b0f14);
 
-  const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 500);
+  const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 800);
   camera.position.set(0, 1.6, 3);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
+  // Quest/Android-friendly cap
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
   renderer.setSize(innerWidth, innerHeight);
   renderer.xr.enabled = true;
@@ -30,14 +31,23 @@ export async function start({ modules, log }) {
   dl.position.set(3, 8, 4);
   scene.add(dl);
 
-  // Default world if user hasn't replaced /js/world.js
-  if (modules.world?.build) await modules.world.build({ scene, rig, THREE, log });
+  // Provide a shared context object for *your* modules
+  const ctx = { scene, rig, camera, renderer, THREE, log, modules };
 
+  // 1) Build world (adapter will try your real world modules first)
+  if (modules.world?.build) await modules.world.build(ctx);
+
+  // 2) Controls + rays
   let ctl = null;
-  if (modules.controls?.setupControls) ctl = await modules.controls.setupControls({ scene, rig, camera, renderer, THREE, log });
+  if (modules.controls?.setupControls) ctl = await modules.controls.setupControls({ ...ctx });
 
+  // 3) Teleport/locomotion (adapter will try your xr_locomotion stack first)
   let tp = null;
-  if (modules.teleport?.setupTeleport) tp = await modules.teleport.setupTeleport({ scene, rig, camera, renderer, THREE, log, controls: ctl });
+  if (modules.teleport?.setupTeleport) tp = await modules.teleport.setupTeleport({ ...ctx, controls: ctl });
+
+  // 4) Optional UI + interactions hooks if you use them
+  try { await modules.ui?.init?.(ctx); } catch (e) { log(`[ui] init failed: ${e.message}`); }
+  try { await modules.interactions?.setup?.(ctx); } catch (e) { log(`[interactions] setup failed: ${e.message}`); }
 
   addEventListener("resize", () => {
     camera.aspect = innerWidth / innerHeight;

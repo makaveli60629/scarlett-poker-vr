@@ -1,5 +1,50 @@
 import * as THREE from "three";
-export async function setupControls({ scene, rig, camera, renderer, THREE, log }) {
+
+async function safeImport(rel, log) {
+  try { return await import(rel); }
+  catch (e) { log?.(`[controls] safeImport fail ${rel}: ${e.message}`); return null; }
+}
+function pickFn(mod, names) {
+  for (const n of names) {
+    const fn = mod?.[n];
+    if (typeof fn === "function") return { name: n, fn };
+  }
+  return null;
+}
+
+export async function setupControls(ctx) {
+  const { scene, renderer, log } = ctx;
+
+  // Try your higher-level input hub first
+  const xri = await safeImport("./xr_input.js", log);
+  const hub = await safeImport("./input_hub.js", log);
+
+  const hubFn = pickFn(hub, ["initInputHub","init","setup","start"]);
+  if (hubFn) {
+    try {
+      log(`[controls] ▶ input_hub.${hubFn.name}()`);
+      const out = await hubFn.fn(ctx);
+      log(`[controls] ✅ input_hub.${hubFn.name}()`);
+      // Provide a minimal tick wrapper if hub returns one
+      return { controllers: out?.controllers, tick: out?.tick };
+    } catch (e) {
+      log(`[controls] ❌ input_hub failed: ${e.message}`);
+    }
+  }
+
+  const xriFn = pickFn(xri, ["setupXRInput","initXRInput","init","setup"]);
+  if (xriFn) {
+    try {
+      log(`[controls] ▶ xr_input.${xriFn.name}()`);
+      const out = await xriFn.fn(ctx);
+      log(`[controls] ✅ xr_input.${xriFn.name}()`);
+      return { controllers: out?.controllers, tick: out?.tick };
+    } catch (e) {
+      log(`[controls] ❌ xr_input failed: ${e.message}`);
+    }
+  }
+
+  // Fallback: raw controllers + rays + button diagnostics
   const ctrls = [], last = [{}, {}];
   const makeRay = () => {
     const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]);
@@ -34,6 +79,6 @@ export async function setupControls({ scene, rig, camera, renderer, THREE, log }
     }
   }
 
-  log("[controls] ready ✓");
+  log("[controls] fallback ready ✓ (controllers + rays)");
   return { controllers: ctrls, tick };
 }

@@ -1,1 +1,1 @@
-export async function init(){return true}
+export async function init(){ return true; }

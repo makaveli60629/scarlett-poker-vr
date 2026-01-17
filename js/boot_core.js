@@ -10,25 +10,10 @@ const add = (m, cls="ok") => {
 };
 
 function detectBasePrefix() {
-  // Works for:
-  // - https://<user>.github.io/<repo>/           (root)
-  // - https://<user>.github.io/<repo>/js/       (wrong, but we support it)
-  // - local file servers
-  //
-  // Goal: compute an absolute prefix like "/<repo>/" when on GitHub Pages,
-  // and then use prefix + "js/" and prefix.
   const p = window.location.pathname || "/";
-  // If we are inside /js/ (or /js/index.html), strip to the repo base.
   const idx = p.indexOf("/js/");
-  if (idx !== -1) {
-    return p.slice(0, idx + 1); // keep trailing "/"
-  }
-  // Otherwise, base is directory of current path.
-  // If path ends with ".html" (like /repo/index.html), use its directory.
-  if (p.endsWith(".html")) {
-    return p.slice(0, p.lastIndexOf("/") + 1);
-  }
-  // If it ends with "/", keep it; else treat as directory.
+  if (idx !== -1) return p.slice(0, idx + 1); // keep trailing "/"
+  if (p.endsWith(".html")) return p.slice(0, p.lastIndexOf("/") + 1);
   return p.endsWith("/") ? p : (p + "/");
 }
 
@@ -38,10 +23,9 @@ export const Boot = {
     const v = Date.now();
     add(`[BOOT] v=${v}`, "ok");
 
-    const prefix = detectBasePrefix();            // e.g. "/scarlett-poker-vr/"
-    const absJS = prefix + "js/";                 // e.g. "/scarlett-poker-vr/js/"
-    const absRoot = prefix;                       // e.g. "/scarlett-poker-vr/"
-    // Also try relative paths for non-GH hosting.
+    const prefix = detectBasePrefix();             // e.g. "/scarlett-poker-vr/"
+    const absJS  = prefix + "js/";                 // e.g. "/scarlett-poker-vr/js/"
+    const absRoot = prefix;                        // e.g. "/scarlett-poker-vr/"
     const basePaths = [absJS, absRoot, "./js/", "./"];
 
     add(`[PATH] prefix=${prefix}`, "ok");

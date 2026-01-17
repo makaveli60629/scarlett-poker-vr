@@ -1,56 +1,63 @@
-// /js/modules/localPlayer.module.js
-// Local player tracker — tag OFF by default; if enabled, above head.
+// js/modules/localPlayer.module.js
+// BUILD: LOCAL_PLAYER_FULL_v1
+// Ensures a stable rig spawn, height calibration, and debug helpers.
 
 export default {
-  id: "localPlayer.module.js",
+  name: "localPlayer",
+  init(input = {}, maybeApp) {
+    const ctx = normalize(input, maybeApp);
+    const { THREE, rig, camera, debug } = ctx;
 
-  async init({ THREE, camera, rig, anchors, log }) {
-    const root = new THREE.Group();
-    root.name = "LOCAL_PLAYER_ROOT";
-    anchors.debug.add(root);
+    // Ensure rig exists
+    if (!rig && debug) debug.warn?.('localPlayer: missing rig');
 
-    // Tag (OFF by default)
-    const c = document.createElement("canvas");
-    c.width = 512; c.height = 128;
-    const ctx = c.getContext("2d");
-    ctx.clearRect(0,0,512,128);
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 54px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("YOU", 256, 64);
+    const helpers = [];
 
-    const tex = new THREE.CanvasTexture(c);
-    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.9 });
-    const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.14), mat);
-    plane.name = "LOCAL_PLAYER_TAG";
-    plane.visible = false; // IMPORTANT: off by default
-    root.add(plane);
+    // Optional axes at origin for debugging
+    try {
+      const ax = new THREE.AxesHelper(0.6);
+      ax.visible = false;
+      ctx.scene?.add(ax);
+      helpers.push(ax);
+    } catch {}
 
-    window.SCARLETT = window.SCARLETT || {};
-    window.SCARLETT.localPlayer = {
-      root,
-      tag: plane,
-      setTagVisible(v) { plane.visible = !!v; }
+    // Provide API for other modules
+    const api = {
+      name: 'localPlayer',
+      setSpawn(pos, yaw = 0) {
+        if (!rig) return;
+        rig.position.set(pos.x, pos.y, pos.z);
+        rig.rotation.y = yaw;
+      },
+      setHeight(h = 1.65) {
+        if (camera) camera.position.y = h;
+      },
+      toggleAxes(show) {
+        for (const h of helpers) h.visible = !!show;
+      },
+      tick() {},
+      dispose() {
+        for (const h of helpers) {
+          try { h.parent?.remove(h); } catch {}
+        }
+      }
     };
 
-    this._rt = { plane, rig, camera };
-    log?.("localPlayer.module ✅ (tag off by default)");
-  },
-
-  update() {
-    const r = this._rt;
-    if (!r) return;
-
-    // If tag enabled, keep it above head and facing camera
-    if (r.plane.visible) {
-      const headY = 1.75; // approx in rig space
-      r.plane.position.set(0, headY, -0.2);
-      r.plane.quaternion.copy(r.camera.quaternion);
-    }
-  },
-
-  test() {
-    return { ok: true, note: "local player present (tag off by default)" };
+    // Expose globally
+    globalThis.SCARLETT_LOCALPLAYER = api;
+    debug?.log?.('localPlayer init ✅');
+    return api;
   }
 };
+
+function normalize(input, maybeApp) {
+  const ctx = input?.THREE ? input : null;
+  const app = (ctx?.app || maybeApp || input?.app || input) || {};
+  return {
+    THREE: ctx?.THREE || app?.THREE || globalThis.THREE,
+    scene: ctx?.scene || app?.scene || globalThis.scene,
+    rig: ctx?.rig || app?.rig || globalThis.rig,
+    camera: ctx?.camera || app?.camera || globalThis.camera,
+    debug: ctx?.debug || app?.debug || globalThis.debug,
+  };
+}

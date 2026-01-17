@@ -1,82 +1,106 @@
-// /js/modules/avatarUI.module.js
-// Nameplates + dealer/action indicators (FULL)
+// js/modules/avatarUI.module.js
+// BUILD: AVATAR_UI_FULL_v1
+// Overlay controls to toggle local/bot avatars and (future) Meta avatar modes.
 
 export default {
-  id: 'avatarUI.module.js',
+  name: "avatarUI",
+  init(input = {}, maybeApp) {
+    const ctx = normalize(input, maybeApp);
+    const { debug } = ctx;
 
-  async init({ THREE, anchors, log }) {
-    const root = new THREE.Group();
-    root.name = 'AVATAR_UI_ROOT';
-    anchors.ui.add(root);
+    const id = "scarlettAvatarUI";
+    const prev = document.getElementById(id);
+    if (prev) prev.remove();
 
-    const plates = [];
+    const el = document.createElement('div');
+    el.id = id;
+    el.style.cssText = [
+      'position:fixed','left:10px','top:10px','z-index:99999',
+      'max-width:260px','border-radius:14px',
+      'border:1px solid rgba(90,255,180,0.35)',
+      'background:rgba(0,0,0,0.55)','color:#baffd7',
+      'font:12px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace',
+      'padding:10px','display:none'
+    ].join(';');
 
-    function makePlate(text) {
-      const c = document.createElement('canvas');
-      c.width = 512; c.height = 128;
-      const ctx = c.getContext('2d');
-      ctx.fillStyle = 'rgba(0,0,0,0.55)';
-      ctx.fillRect(10, 26, 492, 76);
-      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-      ctx.lineWidth = 4;
-      ctx.strokeRect(10, 26, 492, 76);
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 52px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(text, 256, 64);
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+        <div style="font-weight:900;">AVATARS</div>
+        <button id="av_close" style="${btnCss()}">close</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <button id="av_local" style="${btnCss()}">Local</button>
+        <button id="av_bots" style="${btnCss()}">Bots</button>
+      </div>
+      <div style="margin-top:8px;opacity:0.9;">
+        Meta Avatar: <span style="opacity:0.8;">placeholder hook</span>
+      </div>
+    `;
 
-      const tex = new THREE.CanvasTexture(c);
-      const m = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.65, 0.16),
-        new THREE.MeshBasicMaterial({ map: tex, transparent: true })
-      );
-      return m;
+    document.body.appendChild(el);
+
+    const $ = (q) => el.querySelector(q);
+
+    let localOn = false;
+    let botsOn = true;
+
+    function sync() {
+      const av = globalThis.SCARLETT_AVATARS;
+      if (av) {
+        av.setLocalVisible(localOn);
+        av.setBotsVisible(botsOn);
+      }
+      $('#av_local').textContent = `Local: ${localOn ? 'ON' : 'OFF'}`;
+      $('#av_bots').textContent = `Bots: ${botsOn ? 'ON' : 'OFF'}`;
     }
 
-    // build around seats
-    const td = window.SCARLETT?.table?.data;
-    const seatCount = td?.seats || 6;
-    const cx = td?.center?.x ?? 0;
-    const cy = (td?.center?.y ?? 0.78) + 1.65;
-    const cz = td?.center?.z ?? -2.0;
-    const rad = (td?.railRadius || 1.42) + 0.85;
+    $('#av_close').onclick = () => (el.style.display = 'none');
+    $('#av_local').onclick = () => { localOn = !localOn; sync(); };
+    $('#av_bots').onclick = () => { botsOn = !botsOn; sync(); };
 
-    for (let i = 0; i < seatCount; i++) {
-      const t = (i / seatCount) * Math.PI * 2;
-      const p = makePlate(`P${i + 1}`);
-      p.position.set(cx + Math.cos(t) * rad, cy, cz + Math.sin(t) * rad);
-      root.add(p);
-      plates.push(p);
-    }
+    // Show from menu or 4-tap top-left
+    globalThis.SCARLETT_UI = globalThis.SCARLETT_UI || {};
+    globalThis.SCARLETT_UI.showAvatars = () => { el.style.display = 'block'; sync(); };
 
-    // indicator ring for active seat
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.18, 0.02, 12, 40),
-      new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0.65 })
-    );
-    ring.rotation.x = Math.PI / 2;
-    ring.name = 'ACTIVE_SEAT_RING';
-    root.add(ring);
+    let taps = 0, last = 0;
+    window.addEventListener('pointerdown', (e) => {
+      const now = performance.now();
+      if (now - last > 900) taps = 0;
+      last = now;
+      if (e.clientX < 90 && e.clientY < 90) {
+        taps++;
+        if (taps >= 4) {
+          taps = 0;
+          el.style.display = (el.style.display === 'none') ? 'block' : 'none';
+          sync();
+        }
+      }
+    }, { passive: true });
 
-    this._rt = { td, seatCount, cx, cz, rad, ring, plates };
+    sync();
+    debug?.log?.('avatarUI init ✅');
 
-    log?.('avatarUI.module ✅');
-  },
-
-  update(dt, { camera }) {
-    const r = this._rt;
-    if (!r) return;
-
-    // face camera
-    for (const p of r.plates) p.lookAt(camera.position);
-
-    const td = window.SCARLETT?.table?.data;
-    const active = td?.activeSeat ?? 0;
-    const t = (active / r.seatCount) * Math.PI * 2;
-    const y = (td?.center?.y ?? 0.78) + 0.06;
-    r.ring.position.set(r.cx + Math.cos(t) * (r.rad - 0.22), y, r.cz + Math.sin(t) * (r.rad - 0.22));
-  },
-
-  test() { return { ok: true, note: 'avatar UI OK' }; }
+    return {
+      name: 'avatarUI',
+      show() { el.style.display = 'block'; sync(); },
+      hide() { el.style.display = 'none'; },
+      dispose() { try { el.remove(); } catch {} },
+    };
+  }
 };
+
+function btnCss() {
+  return [
+    'cursor:pointer','border-radius:12px','padding:10px 8px',
+    'border:1px solid rgba(90,255,180,0.35)','background:rgba(0,0,0,0.25)',
+    'color:#baffd7','font-weight:800'
+  ].join(';');
+}
+
+function normalize(input, maybeApp) {
+  const ctx = input?.THREE ? input : null;
+  const app = (ctx?.app || maybeApp || input?.app || input) || {};
+  return {
+    debug: ctx?.debug || app?.debug || globalThis.debug,
+  };
+}

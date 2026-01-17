@@ -1,116 +1,107 @@
-// /js/modules/avatars.module.js
-// Bots + showcase (SOUPED) (FULL)
+// js/modules/avatars.module.js
+// BUILD: AVATARS_FULL_v1
+// Lightweight avatar placeholders + hook points for Meta avatar integration.
+// Creates: local avatar proxy + bot avatars for world anchors.
 
 export default {
-  id: 'avatars.module.js',
+  name: "avatars",
+  init(input = {}, maybeApp) {
+    const ctx = normalize(input, maybeApp);
+    const { THREE, scene, rig, room, debug } = ctx;
 
-  async init({ THREE, anchors, log }) {
-    const tableData = window.SCARLETT?.table?.data;
-    const root = new THREE.Group();
-    root.name = 'AVATARS_ROOT';
-    anchors.avatars.add(root);
+    const group = new THREE.Group();
+    group.name = "avatarsGroup";
+    scene?.add(group);
 
-    const seatCount = tableData?.seats || 6;
-    const seatRadius = (tableData?.railRadius || 1.42) + 0.70;
-    const cx = tableData?.center?.x ?? 0;
-    const cz = tableData?.center?.z ?? -2.0;
+    // Local avatar proxy (third-person marker)
+    const local = makeAvatarProxy(THREE, 0x66ffcc);
+    local.name = "avatar_local";
+    local.visible = false; // default hidden in 1st person
+    group.add(local);
 
-    const bodyMats = [
-      new THREE.MeshStandardMaterial({ color: 0x2a2f44, roughness: 0.95 }),
-      new THREE.MeshStandardMaterial({ color: 0x1f3a52, roughness: 0.95 }),
-      new THREE.MeshStandardMaterial({ color: 0x3a2a44, roughness: 0.95 }),
-      new THREE.MeshStandardMaterial({ color: 0x253a2a, roughness: 0.95 }),
-      new THREE.MeshStandardMaterial({ color: 0x3a2f20, roughness: 0.95 }),
-      new THREE.MeshStandardMaterial({ color: 0x2a3a3a, roughness: 0.95 })
-    ];
-    const skinMat = new THREE.MeshStandardMaterial({ color: 0xf3f3f3, roughness: 0.55 });
+    // Bot proxies if world provides bots
+    const bots = [];
+    const botGroup = new THREE.Group();
+    botGroup.name = "avatar_bots";
+    group.add(botGroup);
 
-    const avatars = [];
-
-    function makeBot(i) {
-      const g = new THREE.Group();
-      const mat = bodyMats[i % bodyMats.length];
-
-      const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.45, 8, 16), mat);
-      torso.position.y = 1.15;
-      g.add(torso);
-
-      const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 18, 14), skinMat);
-      head.position.y = 1.55;
-      head.name = 'HEAD';
-      g.add(head);
-
-      const shoulders = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.10, 0.18), mat);
-      shoulders.position.y = 1.35;
-      g.add(shoulders);
-
-      const upperGeo = new THREE.CapsuleGeometry(0.06, 0.18, 6, 12);
-      const lowerGeo = new THREE.CapsuleGeometry(0.05, 0.18, 6, 12);
-      const handGeo  = new THREE.SphereGeometry(0.05, 14, 12);
-
-      const lUpper = new THREE.Mesh(upperGeo, mat);
-      const lLower = new THREE.Mesh(lowerGeo, mat);
-      const lHand  = new THREE.Mesh(handGeo, skinMat);
-      const rUpper = new THREE.Mesh(upperGeo, mat);
-      const rLower = new THREE.Mesh(lowerGeo, mat);
-      const rHand  = new THREE.Mesh(handGeo, skinMat);
-
-      lUpper.position.set(-0.24, 1.30, 0.02);
-      rUpper.position.set( 0.24, 1.30, 0.02);
-      lLower.position.set(-0.28, 1.12, 0.10);
-      rLower.position.set( 0.28, 1.12, 0.10);
-      lHand.position.set(-0.30, 0.98, 0.18);
-      rHand.position.set( 0.30, 0.98, 0.18);
-      lUpper.rotation.z =  0.35;
-      rUpper.rotation.z = -0.35;
-
-      g.add(lUpper, lLower, lHand, rUpper, rLower, rHand);
-
-      return { g, head, lHand, rHand };
+    const worldBots = room?.anchors?.bots || room?.anchors?.botGroup || room?.anchors?.botsGroup;
+    if (worldBots?.children?.length) {
+      for (let i = 0; i < worldBots.children.length; i++) {
+        const b = makeAvatarProxy(THREE, 0x9999ff);
+        b.name = `avatar_bot_${i}`;
+        botGroup.add(b);
+        bots.push({ proxy: b, target: worldBots.children[i] });
+      }
     }
 
-    for (let i = 0; i < seatCount; i++) {
-      const t = (i / seatCount) * Math.PI * 2;
-      const x = cx + Math.cos(t) * seatRadius;
-      const z = cz + Math.sin(t) * seatRadius;
+    // Expose API
+    const api = {
+      name: 'avatars',
+      local,
+      bots,
+      setLocalVisible(v) { local.visible = !!v; },
+      setBotsVisible(v) { botGroup.visible = !!v; },
+      tick() {
+        // follow rig (local)
+        if (rig) {
+          local.position.copy(rig.position);
+          local.position.y = 0.0;
+          local.rotation.y = rig.rotation.y;
+        }
+        // follow bots
+        for (const b of bots) {
+          if (!b.target) continue;
+          b.proxy.position.copy(b.target.position);
+          b.proxy.position.y = 0.0;
+          b.proxy.rotation.y = b.target.rotation?.y || 0;
+        }
+      },
+      dispose() {
+        try { group.parent?.remove(group); } catch {}
+      }
+    };
 
-      const bot = makeBot(i);
-      bot.g.name = `BOT_${i}`;
-      bot.g.position.set(x, 0, z);
-      bot.g.lookAt(cx, 1.3, cz);
-      root.add(bot.g);
-      avatars.push(bot);
+    // legacy compat
+    const legacy = ctx.avatars || globalThis.avatars;
+    if (legacy) {
+      legacy.enabled = true;
+      legacy.local = api.local;
+      legacy.list = [api.local, ...bots.map(b => b.proxy)];
     }
 
-    // showcase
-    const show = makeBot(999);
-    show.g.name = 'SHOWCASE_BOT';
-    show.g.scale.set(1.25, 1.25, 1.25);
-    show.g.position.set(0.55, 0, -0.55);
-    show.g.lookAt(0, 1.2, -1.2);
-    anchors.room.add(show.g);
-
-    window.SCARLETT = window.SCARLETT || {};
-    window.SCARLETT.avatars = { root, avatars, showcase: show.g };
-
-    this._rt = { avatars };
-    log?.('avatars.module ✅');
-  },
-
-  update(dt) {
-    const r = this._rt;
-    if (!r?.avatars) return;
-    const t = performance.now() * 0.001;
-    for (let i = 0; i < r.avatars.length; i++) {
-      const av = r.avatars[i];
-      if (!av?.head) continue;
-      av.head.position.y = 1.55 + Math.sin(t * 0.9 + i) * 0.012;
-      av.g.rotation.y += Math.sin(t * 0.25 + i) * 0.0003;
-    }
-  },
-
-  test() {
-    const ok = !!window.SCARLETT?.avatars?.avatars?.length;
-    return { ok, note: ok ? 'avatars present' : 'avatars missing' };
+    globalThis.SCARLETT_AVATARS = api;
+    debug?.log?.('avatars init ✅');
+    return api;
   }
 };
+
+function makeAvatarProxy(THREE, color = 0xffffff) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.18, 0.8, 6, 12),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.9, metalness: 0.0 })
+  );
+  body.position.y = 0.9;
+  g.add(body);
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.14, 16, 16),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.9, metalness: 0.0 })
+  );
+  head.position.y = 1.55;
+  g.add(head);
+  return g;
+}
+
+function normalize(input, maybeApp) {
+  const ctx = input?.THREE ? input : null;
+  const app = (ctx?.app || maybeApp || input?.app || input) || {};
+  return {
+    THREE: ctx?.THREE || app?.THREE || globalThis.THREE,
+    scene: ctx?.scene || app?.scene || globalThis.scene,
+    rig: ctx?.rig || app?.rig || globalThis.rig,
+    room: ctx?.room || app?.room || globalThis.room,
+    debug: ctx?.debug || app?.debug || globalThis.debug,
+    avatars: ctx?.avatars || app?.avatars || globalThis.avatars,
+  };
+}

@@ -1,9 +1,8 @@
-// js/spawn_points.js — compat v2 (FULL)
-// Works whether called as SpawnPoints.apply(ctx) OR SpawnPoints.apply(camera)
+// js/spawn_points.js — compat v3 (FULL)
+// Supports SpawnPoints.apply(camera) AND SpawnPoints.apply(ctx)
 
 export const SpawnPoints = {
   apply(arg) {
-    // If adapter passes ctx, use ctx.camera.
     const camera = arg?.camera ? arg.camera : arg;
 
     if (!camera || !camera.position || typeof camera.position.set !== "function") {
@@ -11,7 +10,7 @@ export const SpawnPoints = {
       return false;
     }
 
-    // Default safe spawn (feel free to change)
+    // Safe default spawn
     camera.position.set(0, 1.6, 3);
     console.log("[spawn_points] applied ✅");
     return true;

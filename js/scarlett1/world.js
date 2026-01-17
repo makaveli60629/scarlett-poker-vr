@@ -1,11 +1,10 @@
 // /js/scarlett1/world.js
-// SCARLETT1_WORLD_FULL_v4_8_LASER_RETICLE_FIXED
-// - Bright world + grid
-// - Table landmark
-// - Right-hand laser that actually tracks
-// - Reticle + hit dot that follow laser hit
-// - Teleport only when hit is valid (no “stuck under table”)
-// - Snap turn 45° + smooth move + strafe
+// SCARLETT1_WORLD_FULL_v4_9_RIGGED_LASER_TABLE_KNOCK_LOBBY
+// - Laser rigged to right-hand GRIP (never detaches)
+// - Teleport only on valid reticle hit
+// - Knock sound ONLY when right hand is over table
+// - Visible right-hand box
+// - Walkable lobby shell (orientation + scale reference)
 
 import GestureControl from "../modules/gestureControl.js";
 
@@ -15,281 +14,249 @@ export async function bootWorld({ THREE, scene, renderer, camera, engine }) {
     console.log("[world]", s);
   };
 
-  log("bootWorld… SCARLETT1_WORLD_FULL_v4_8_LASER_RETICLE_FIXED");
+  log("bootWorld… SCARLETT1_WORLD_FULL_v4_9_RIGGED_LASER_TABLE_KNOCK_LOBBY");
 
-  // =========================
-  // LIGHTING
-  // =========================
+  /* =========================================================
+   * LIGHTING
+   * ========================================================= */
   scene.background = new THREE.Color(0x0b0e14);
 
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x404060, 1.2);
-  scene.add(hemi);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x303050, 1.2));
 
-  const key = new THREE.DirectionalLight(0xffffff, 1.0);
-  key.position.set(4, 8, 4);
-  scene.add(key);
+  const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+  sun.position.set(6, 10, 4);
+  scene.add(sun);
 
-  const fill = new THREE.DirectionalLight(0xffffff, 0.5);
-  fill.position.set(-4, 3, -4);
-  scene.add(fill);
+  /* =========================================================
+   * RIG (MOVE THIS, NOT CAMERA)
+   * ========================================================= */
+  const rig = new THREE.Group();
+  rig.name = "PLAYER_RIG";
+  rig.add(camera);
+  scene.add(rig);
 
-  // =========================
-  // FLOOR + GRID
-  // =========================
-  const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x1a1f2b, roughness: 1, metalness: 0
-  });
-
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), floorMat);
+  /* =========================================================
+   * FLOOR + GRID
+   * ========================================================= */
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(300, 300),
+    new THREE.MeshStandardMaterial({ color: 0x1a1f2b, roughness: 1 })
+  );
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = 0;
-  floor.name = "SCARLETT_FLOOR";
+  floor.name = "FLOOR";
   scene.add(floor);
 
-  const grid = new THREE.GridHelper(200, 200, 0x3a3f55, 0x23283a);
+  const grid = new THREE.GridHelper(300, 300, 0x3a3f55, 0x23283a);
   grid.position.y = 0.01;
   scene.add(grid);
 
-  // =========================
-  // TABLE (LANDMARK)
-  // =========================
+  /* =========================================================
+   * LOBBY SHELL (WALKABLE ORIENTATION SPACE)
+   * ========================================================= */
+  const lobbyWall = new THREE.Mesh(
+    new THREE.CylinderGeometry(18, 18, 8, 96, 1, true),
+    new THREE.MeshStandardMaterial({
+      color: 0x0f1420,
+      roughness: 0.9,
+      side: THREE.DoubleSide
+    })
+  );
+  lobbyWall.position.y = 4;
+  scene.add(lobbyWall);
+
+  const lobbyRing = new THREE.Mesh(
+    new THREE.TorusGeometry(12, 0.05, 16, 128),
+    new THREE.MeshStandardMaterial({ color: 0x394060, roughness: 0.6 })
+  );
+  lobbyRing.rotation.x = Math.PI / 2;
+  lobbyRing.position.y = 0.02;
+  scene.add(lobbyRing);
+
+  /* =========================================================
+   * TABLE (LANDMARK + KNOCK TARGET)
+   * ========================================================= */
   const table = new THREE.Mesh(
     new THREE.CylinderGeometry(1.2, 1.2, 0.15, 48),
     new THREE.MeshStandardMaterial({ color: 0x145a32, roughness: 0.85 })
   );
-  table.position.set(0, 0.78, -1.5);
+  table.position.set(0, 0.78, -2);
   table.name = "POKER_TABLE";
   scene.add(table);
 
   const tableRing = new THREE.Mesh(
     new THREE.TorusGeometry(0.85, 0.03, 16, 64),
-    new THREE.MeshStandardMaterial({ color: 0xc9a23f, roughness: 0.6 })
+    new THREE.MeshStandardMaterial({ color: 0xc9a23f })
   );
   tableRing.rotation.x = Math.PI / 2;
-  tableRing.position.set(0, 0.86, -1.5);
+  tableRing.position.set(0, 0.86, -2);
   scene.add(tableRing);
 
-  // =========================
-  // RIG (MOVE THIS, NOT CAMERA)
-  // =========================
-  const rig = new THREE.Group();
-  rig.position.set(0, 0, 0);
-  rig.add(camera);
-  scene.add(rig);
-
-  // =========================
-  // GESTURE ALIGNMENT
-  // =========================
+  /* =========================================================
+   * GESTURE CONTROL SETUP
+   * ========================================================= */
   GestureControl.tableHeight = table.position.y;
+  GestureControl.tableCenter = { x: table.position.x, z: table.position.z };
+  GestureControl.tableRadius = 1.35;
+
   window.SCARLETT = window.SCARLETT || {};
   window.SCARLETT.GestureControl = GestureControl;
-  log(`GestureControl ✅ tableHeight=${GestureControl.tableHeight.toFixed(3)}`);
 
-  // =========================
-  // XR CONTROLLERS
-  // =========================
-  const rightCtrl = renderer.xr.getController(1);
-  const leftCtrl  = renderer.xr.getController(0);
-  rightCtrl.name = "XR_CONTROLLER_RIGHT";
-  leftCtrl.name = "XR_CONTROLLER_LEFT";
-  scene.add(rightCtrl);
-  scene.add(leftCtrl);
+  log("GestureControl ✅ table-bound knock enabled");
 
-  // =========================
-  // LASER + RETICLE + HIT DOT
-  // =========================
+  /* =========================================================
+   * XR CONTROLLERS (GRIPS = STAY ATTACHED)
+   * ========================================================= */
+  const rightRay  = renderer.xr.getController(1);
+  const leftRay   = renderer.xr.getController(0);
+  scene.add(rightRay, leftRay);
+
+  const rightGrip = renderer.xr.getControllerGrip(1);
+  const leftGrip  = renderer.xr.getControllerGrip(0);
+  scene.add(rightGrip, leftGrip);
+
+  /* =========================================================
+   * RIGHT HAND VISUAL (BOX)
+   * ========================================================= */
+  const handBox = new THREE.Mesh(
+    new THREE.BoxGeometry(0.06, 0.02, 0.10),
+    new THREE.MeshStandardMaterial({ color: 0xffffff })
+  );
+  handBox.position.set(0, -0.02, -0.05);
+  rightGrip.add(handBox);
+
+  /* =========================================================
+   * LASER + RETICLE
+   * ========================================================= */
   const raycaster = new THREE.Raycaster();
-  const tmpOrigin = new THREE.Vector3();
-  const tmpDir = new THREE.Vector3();
+  const tmpO = new THREE.Vector3();
+  const tmpD = new THREE.Vector3();
+  const tmpQ = new THREE.Quaternion();
   const tmpHit = new THREE.Vector3();
-  const tmpQuat = new THREE.Quaternion();
 
-  // Laser line (attached to right controller)
   const laserGeom = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, 0, -6),
+    new THREE.Vector3(0, 0, -6)
   ]);
-  const laserMat = new THREE.LineBasicMaterial({ color: 0xff3355 });
-  const laserLine = new THREE.Line(laserGeom, laserMat);
-  laserLine.name = "RIGHT_LASER";
-  laserLine.visible = true;
-  rightCtrl.add(laserLine);
+  const laser = new THREE.Line(
+    laserGeom,
+    new THREE.LineBasicMaterial({ color: 0xff3355 })
+  );
+  rightGrip.add(laser);
 
-  // Reticle ring on floor
   const reticle = new THREE.Mesh(
     new THREE.RingGeometry(0.06, 0.085, 32),
     new THREE.MeshBasicMaterial({ color: 0xff3355, side: THREE.DoubleSide })
   );
   reticle.rotation.x = -Math.PI / 2;
-  reticle.position.set(0, 0.02, -2);
   reticle.visible = false;
-  reticle.name = "TELEPORT_RETICLE";
   scene.add(reticle);
 
-  // Hit dot (white) so you can SEE tracking
-  const hitDot = new THREE.Mesh(
-    new THREE.SphereGeometry(0.02, 16, 12),
-    new THREE.MeshBasicMaterial({ color: 0xffffff })
-  );
-  hitDot.visible = false;
-  hitDot.name = "LASER_HIT_DOT";
-  scene.add(hitDot);
-
-  function setLaserLength(dist) {
-    const arr = laserLine.geometry.attributes.position.array;
-    arr[0] = 0; arr[1] = 0; arr[2] = 0;
-    arr[3] = 0; arr[4] = 0; arr[5] = -dist;
-    laserLine.geometry.attributes.position.needsUpdate = true;
+  function setLaserLength(d) {
+    const a = laser.geometry.attributes.position.array;
+    a[5] = -d;
+    laser.geometry.attributes.position.needsUpdate = true;
   }
 
-  function updateLaserAndReticle() {
+  function updateLaser() {
     if (!renderer.xr.isPresenting) {
       reticle.visible = false;
-      hitDot.visible = false;
-      laserLine.visible = false;
-      return { hit: false };
+      return null;
     }
 
-    laserLine.visible = true;
+    rightGrip.getWorldPosition(tmpO);
+    rightGrip.getWorldQuaternion(tmpQ);
+    tmpD.set(0, 0, -1).applyQuaternion(tmpQ).normalize();
 
-    // Origin = controller position
-    rightCtrl.getWorldPosition(tmpOrigin);
-
-    // Direction = controller forward (-Z)
-    rightCtrl.getWorldQuaternion(tmpQuat);
-    tmpDir.set(0, 0, -1).applyQuaternion(tmpQuat).normalize();
-
-    raycaster.set(tmpOrigin, tmpDir);
+    raycaster.set(tmpO, tmpD);
     raycaster.far = 60;
 
     const hits = raycaster.intersectObject(floor, false);
-
-    if (hits && hits.length) {
+    if (hits.length) {
       tmpHit.copy(hits[0].point);
-
-      // Move reticle + dot to hit
       reticle.position.set(tmpHit.x, 0.02, tmpHit.z);
       reticle.visible = true;
-
-      hitDot.position.set(tmpHit.x, 0.03, tmpHit.z);
-      hitDot.visible = true;
-
-      // Laser scales to distance
-      const dist = tmpOrigin.distanceTo(tmpHit);
-      setLaserLength(dist);
-
-      return { hit: true, point: tmpHit.clone(), dist };
+      setLaserLength(tmpO.distanceTo(tmpHit));
+      return tmpHit.clone();
     }
 
-    // No hit => hide reticle/dot, keep a default laser length for visibility
     reticle.visible = false;
-    hitDot.visible = false;
     setLaserLength(6);
-
-    return { hit: false };
+    return null;
   }
 
-  // =========================
-  // INPUT + NAV
-  // =========================
-  const move = { speed: 2.1, strafe: 1.8, deadzone: 0.18 };
-
-  const snap = {
-    angle: THREE.MathUtils.degToRad(45),
-    lock: false,
-    release: 0.25
-  };
-
-  const teleport = {
-    lock: false,
-    release: 0.18
-  };
+  /* =========================================================
+   * NAVIGATION
+   * ========================================================= */
+  const move = { speed: 2.2, strafe: 2.0, deadzone: 0.18 };
+  const snap = { lock: false };
 
   function getRightGamepad(session) {
-    if (!session) return null;
-
     for (const src of session.inputSources) {
       if (src?.handedness === "right" && src?.gamepad) return src.gamepad;
-    }
-    // fallback: any gamepad
-    for (const src of session.inputSources) {
-      if (src?.gamepad) return src.gamepad;
     }
     return null;
   }
 
-  function applySnapTurn(axX) {
-    if (Math.abs(axX) < 0.6) { snap.lock = false; return; }
+  function snapTurn(x) {
     if (snap.lock) return;
-
     snap.lock = true;
-    const dir = axX > 0 ? -1 : 1; // right = negative yaw (feels correct in most rigs)
-    rig.rotation.y += dir * snap.angle;
-
-    setTimeout(() => (snap.lock = false), snap.release * 1000);
+    rig.rotation.y += (x > 0 ? -1 : 1) * THREE.MathUtils.degToRad(45);
+    setTimeout(() => (snap.lock = false), 250);
   }
 
-  function doTeleport(hitPoint) {
-    if (!hitPoint) return;
-
-    const headWorld = new THREE.Vector3();
-    camera.getWorldPosition(headWorld);
-
-    const rigWorld = new THREE.Vector3();
-    rig.getWorldPosition(rigWorld);
-
-    const offset = headWorld.sub(rigWorld);
-
-    rig.position.set(hitPoint.x - offset.x, rig.position.y, hitPoint.z - offset.z);
+  function teleportTo(p) {
+    if (!p) return;
+    const head = new THREE.Vector3();
+    camera.getWorldPosition(head);
+    rig.position.x += p.x - head.x;
+    rig.position.z += p.z - head.z;
   }
 
-  // =========================
-  // UPDATE LOOP
-  // =========================
+  /* =========================================================
+   * UPDATE LOOP
+   * ========================================================= */
   return {
-    tableHeight: table.position.y,
     rig,
+    tableHeight: table.position.y,
     update(dt) {
       const session = renderer.xr.getSession?.();
       if (!session) return;
 
-      const hit = updateLaserAndReticle();
-
+      const hitPoint = updateLaser();
       const gp = getRightGamepad(session);
       if (!gp) return;
 
-      const axX = gp.axes?.[2] ?? 0;
-      const axY = gp.axes?.[3] ?? 0;
+      const axX = gp.axes[2] ?? 0;
+      const axY = gp.axes[3] ?? 0;
+      const trigger = gp.buttons[0]?.value ?? 0;
+      const gripBtn = gp.buttons[1]?.value ?? 0;
 
-      // Buttons (best-effort Quest mapping)
-      const trigger = gp.buttons?.[0]?.value ?? 0;
-      const gripBtn = gp.buttons?.[1]?.value ?? 0;
+      // snap turn
+      if (Math.abs(axX) > 0.6 && !snap.lock) snapTurn(axX);
 
-      // 45° snap turn (right stick X)
-      if (Math.abs(axX) > 0.6) applySnapTurn(axX);
-
-      // Smooth move + strafe
-      const y = Math.abs(axY) > move.deadzone ? axY : 0;
-      const x = Math.abs(axX) > move.deadzone ? axX : 0;
-
+      // smooth move
       const fwd = new THREE.Vector3();
       camera.getWorldDirection(fwd);
       fwd.y = 0; fwd.normalize();
 
-      const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+      const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0,1,0));
+      rig.position.addScaledVector(fwd, -axY * move.speed * dt);
+      rig.position.addScaledVector(right, axX * move.strafe * dt);
 
-      rig.position.addScaledVector(fwd, (-y) * move.speed * dt);
-      rig.position.addScaledVector(right, (x) * move.strafe * dt);
+      // teleport
+      if ((trigger > 0.75 || gripBtn > 0.75) && hitPoint) teleportTo(hitPoint);
 
-      // Teleport only when we have a valid hit point (prevents “stuck reticle teleport”)
-      const wantsTeleport = (trigger > 0.75) || (gripBtn > 0.75);
-      if (!wantsTeleport) teleport.lock = false;
+      // knock gesture (right hand only)
+      rightGrip.getWorldPosition(tmpO);
+      const vY = rightGrip.position.y - (this._lastY ?? rightGrip.position.y);
+      this._lastY = rightGrip.position.y;
 
-      if (wantsTeleport && !teleport.lock && hit.hit && hit.point) {
-        teleport.lock = true;
-        doTeleport(hit.point);
-        setTimeout(() => (teleport.lock = false), teleport.release * 1000);
-      }
+      GestureControl.update({
+        handedness: "right",
+        position: { x: tmpO.x, y: tmpO.y, z: tmpO.z },
+        velocity: { x: 0, y: vY / Math.max(dt, 0.016), z: 0 }
+      });
     }
   };
 }

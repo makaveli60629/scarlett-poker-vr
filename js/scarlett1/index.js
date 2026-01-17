@@ -1,14 +1,15 @@
-// /js/scarlett1/index.js — Scarlett1 Router (FULL) ✅ RESTORE + AUTO-PROBE MODULES
-// KEEP BOOT CHAIN: index.html -> /js/boot.js -> /js/index.js -> /js/scarlett1/index.js -> /js/scarlett1/world.js
-// This file:
-// - imports Three + VRButton via URL (no bare specifiers)
-// - creates renderer/scene/camera/rig
-// - loads /js/scarlett1/world.js
-// - AUTO-PROBES modules from common folders and enables only what exists (no overload)
-// - provides Android UI bridge (Scarlett.UI.*) and fallback controls if no module exists
+// /js/scarlett1/index.js — Scarlett1 Router (FULL)
+// BUILD: SCARLETT1_ROUTER_FULL_MODULEMAP_v4
+//
+// ✅ Keeps your boot chain intact
+// ✅ Fixes “black world” (camera spawn + non-black background + strong lights)
+// ✅ Loads YOUR REAL modules in /js/modules/ using *.module.js naming
+// ✅ Loads locomotion_xr.js (your movement)
+// ✅ Keeps Android sticks + full buttons working (through Scarlett.ANDROID_INPUT + fallback controls)
+// ✅ NO XRControllerModelFactory (it breaks on GitHub Pages due to bare "three")
 
 export async function boot({ Scarlett, BASE, V }) {
-  const BUILD = "SCARLETT1_ROUTER_FULL_AUTOPROBE_v2";
+  const BUILD = "SCARLETT1_ROUTER_FULL_MODULEMAP_v4";
   const NOW = () => new Date().toISOString().slice(11, 19);
   const push = (s) => globalThis.SCARLETT_DIAG?.push?.(`[${NOW()}] ${s}`);
 
@@ -20,9 +21,8 @@ export async function boot({ Scarlett, BASE, V }) {
   // ---------- Imports (NO bare specifiers) ----------
   const THREE_URL = "https://unpkg.com/three@0.158.0/build/three.module.js";
   const VRBTN_URL = "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
-  const XRCMF_URL = "https://unpkg.com/three@0.158.0/examples/jsm/webxr/XRControllerModelFactory.js";
 
-  let THREE, VRButton, XRControllerModelFactory;
+  let THREE, VRButton;
   try {
     push?.(`[scarlett1] import three…`);
     THREE = await import(THREE_URL);
@@ -41,16 +41,6 @@ export async function boot({ Scarlett, BASE, V }) {
     throw e;
   }
 
-  try {
-    push?.(`[scarlett1] import XRControllerModelFactory…`);
-    ({ XRControllerModelFactory } = await import(XRCMF_URL));
-    push?.(`[scarlett1] XRControllerModelFactory ✅`);
-  } catch (e) {
-    // Not fatal — controller models are optional
-    push?.(`[scarlett1] XRControllerModelFactory missing (ok) ⚠️ ${String(e?.message || e)}`);
-    XRControllerModelFactory = null;
-  }
-
   // ---------- Renderer / Scene / Camera / Rig ----------
   const app = document.getElementById("app") || document.body;
 
@@ -61,67 +51,52 @@ export async function boot({ Scarlett, BASE, V }) {
   renderer.xr.enabled = true;
   app.appendChild(renderer.domElement);
 
-  // VR Button
   const vrBtn = VRButton.createButton(renderer);
   vrBtn.style.position = "fixed";
   vrBtn.style.right = "10px";
-  vrBtn.style.bottom = "60px"; // leave space for Android HUD
+  vrBtn.style.bottom = "60px"; // leave room for Android HUD
   vrBtn.style.zIndex = "99999";
   document.body.appendChild(vrBtn);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x050508);
-  scene.fog = new THREE.Fog(0x050508, 10, 80);
+  // Not pure black (helps you see *something* even if lighting module fails)
+  scene.background = new THREE.Color(0x06080b);
 
+  // ✅ Critical camera fix: camera stays at rig origin in Z
   const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 240);
-  camera.position.set(0, 1.65, 3.2);
+  camera.position.set(0, 1.65, 0);
 
-  // Move rig, not XR camera directly
+  // Move the rig (player), not the XR camera directly
   const rig = new THREE.Group();
   rig.name = "playerRig";
   rig.add(camera);
   scene.add(rig);
 
-  // Lights (stable + cheap)
+  // Strong baseline lights (your environmentLighting.module.js can enhance/replace later)
+  scene.add(new THREE.AmbientLight(0xffffff, 0.35));
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.9));
-  const d = new THREE.DirectionalLight(0xffffff, 0.85);
-  d.position.set(7, 12, 6);
-  scene.add(d);
+  const key = new THREE.DirectionalLight(0xffffff, 1.05);
+  key.position.set(7, 12, 6);
+  scene.add(key);
 
-  // Resize
   addEventListener("resize", () => {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight);
   });
 
-  // ---------- XR Controllers (optional visuals) ----------
+  // Controllers (no model factory — avoids GH Pages import error)
   const controllers = {
     c0: renderer.xr.getController(0),
     c1: renderer.xr.getController(1),
-    g0: renderer.xr.getControllerGrip(0),
-    g1: renderer.xr.getControllerGrip(1),
   };
-  scene.add(controllers.c0, controllers.c1, controllers.g0, controllers.g1);
+  scene.add(controllers.c0, controllers.c1);
 
-  if (XRControllerModelFactory) {
-    try {
-      const f = new XRControllerModelFactory();
-      controllers.g0.add(f.createControllerModel(controllers.g0));
-      controllers.g1.add(f.createControllerModel(controllers.g1));
-      push?.(`[scarlett1] controller models ✅`);
-    } catch (e) {
-      push?.(`[scarlett1] controller models failed (ok) ⚠️ ${String(e?.message || e)}`);
-    }
-  }
-
-  // ---------- Load World (Scarlett1 world) ----------
+  // ---------- Load World ----------
   const worldUrl = `${BASE}js/scarlett1/world.js?v=${encodeURIComponent(V)}`;
   push?.(`[scarlett1] importing world ${worldUrl}`);
   const worldMod = await import(worldUrl);
-  if (typeof worldMod.createWorld !== "function") {
-    throw new Error("js/scarlett1/world.js missing createWorld()");
-  }
+  if (typeof worldMod.createWorld !== "function") throw new Error("js/scarlett1/world.js missing createWorld()");
 
   const world = await worldMod.createWorld({
     THREE,
@@ -141,81 +116,60 @@ export async function boot({ Scarlett, BASE, V }) {
   Scarlett.UI.toggleHud = () => world?.ui?.toggleHud?.();
   Scarlett.UI.toggleModules = () => globalThis.SCARLETT_MODULES?.toggle?.();
   Scarlett.UI.toggleTeleport = () => {
-    // Prefer module teleport toggle if present; fallback controls also sets it.
-    if (Scarlett.__controls && typeof Scarlett.__controls.toggleTeleport === "function") {
-      Scarlett.__controls.toggleTeleport();
-    } else {
-      world?.ui?.toggleTeleport?.();
-    }
+    if (Scarlett.__controls?.toggleTeleport) Scarlett.__controls.toggleTeleport();
+    else world?.ui?.toggleTeleport?.();
   };
 
-  // ---------- Module Test Panel (built-in, always available) ----------
+  // Built-in Modules Panel (always available)
   installModulePanel({ Scarlett, push });
 
-  // ---------- AUTO-PROBE MODULE LOADER (no overload, no crash) ----------
+  // ---------- MODULE LOADER (MATCHES YOUR REPO: js/modules/*.module.js + locomotion_xr.js) ----------
   const modules = [];
+  const MODULE_BASE = `${BASE}js/modules/`;
 
-  const candidates = [
-    `${BASE}js/modules/`,
-    `${BASE}js/scarlett1/modules/`,
-    `${BASE}js/scarlett1/`,
+  // This list is based on your screenshot contents.
+  // If you add more .module.js files later, append them here.
+  const MODULE_MAP = [
+    // Lighting & UI
+    ["environmentLighting", "environmentLighting.module.js"],
+    ["hud", "hud.module.js"],
+    ["menuUI", "menuUI.module.js"],
+
+    // Player / avatars
+    ["localPlayer", "localPlayer.module.js"],
+    ["avatars", "avatars.module.js"],
+    ["avatarUI", "avatarUI.module.js"],
+    ["avatarAnimation", "avatarAnimation.module.js"],
+    ["avatarCustomization", "avatarCustomization.module.js"],
+
+    // Input / interaction
+    ["interactionHands", "interactionHands.module.js"],
+    ["gestureControl", "gestureControl.js"],
+
+    // Locomotion (your movement)
+    ["locomotionXR", "locomotion_xr.js"],
+
+    // Gameplay
+    ["cards", "cards.module.js"],
+    ["chips", "chips.module.js"],
+    ["audioLogic", "audioLogic.js"],
+
+    // Lobby
+    ["lobbyStations", "lobbyStations.module.js"],
+    ["lobbyMatchmaking", "lobbyMatchmaking.module.js"],
   ];
 
-  async function tryImport(url) {
+  for (const [name, file] of MODULE_MAP) {
+    const url = `${MODULE_BASE}${file}?v=${encodeURIComponent(V)}`;
     try {
-      return await import(url);
-    } catch {
-      return null;
-    }
-  }
+      push?.(`[mod] importing ${name} → ${file}`);
+      const m = await import(url);
 
-  async function loadFirstWorking(name) {
-    for (const base of candidates) {
-      let url = `${base}${name}.js?v=${encodeURIComponent(V)}`;
-      let m = await tryImport(url);
-      if (m) return { url, m };
+      // record for module panel visibility
+      addModuleStatus(name, true, url);
 
-      url = `${base}${name}/index.js?v=${encodeURIComponent(V)}`;
-      m = await tryImport(url);
-      if (m) return { url, m };
-    }
-    return null;
-  }
-
-  // Stable order: controls first, UI next, then game systems
-  const ordered = [
-    "input",
-    "controls",
-    "controllers",
-    "hud",
-    "world_ui",
-    "teleport",
-    "hands",
-    "hands_only",
-    "avatars",
-    "poker",
-    "cards",
-    "chips",
-    "store",
-  ];
-
-  for (const name of ordered) {
-    push?.(`[mod] probe ${name}…`);
-    const found = await loadFirstWorking(name);
-
-    if (!found) {
-      push?.(`[mod] ${name} (not found)`);
-      addModuleRow(name, false, "");
-      continue;
-    }
-
-    push?.(`[mod] ${name} found ✅ ${found.url}`);
-    addModuleRow(name, true, found.url);
-
-    // Enable if module exposes enable()
-    if (typeof found.m.enable === "function") {
-      try {
-        const inst = await found.m.enable({
+      if (typeof m.enable === "function") {
+        const inst = await m.enable({
           THREE,
           scene,
           renderer,
@@ -230,34 +184,42 @@ export async function boot({ Scarlett, BASE, V }) {
         });
         modules.push({ name, inst });
         push?.(`[mod] enabled ${name} ✅`);
-      } catch (e) {
-        push?.(`[mod] enable fail ${name} ❌ ${String(e?.message || e)}`);
+      } else {
+        push?.(`[mod] ${name} loaded (no enable())`);
       }
-    } else {
-      push?.(`[mod] ${name} loaded (no enable())`);
+    } catch (e) {
+      addModuleStatus(name, false, file);
+      push?.(`[mod] ${name} FAILED ❌ ${file} → ${String(e?.message || e)}`);
     }
   }
 
-  // ---------- Fallback Controls (always) ----------
+  // ---------- Fallback Controls (ALWAYS) ----------
+  // If locomotion_xr.js loads, it will handle movement;
+  // fallback is still useful for Android sticks + basic teleport if modules fail.
   const fallback = createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett, push });
   Scarlett.__controls = fallback;
   modules.push({ name: "__fallbackControls", inst: fallback });
 
-  // XR session logs
   renderer.xr.addEventListener("sessionstart", () => push?.(`[xr] sessionstart ✅`));
   renderer.xr.addEventListener("sessionend", () => push?.(`[xr] sessionend ✅`));
 
-  // ---------- Main loop ----------
   renderer.setAnimationLoop((t) => {
+    // Tick modules
     for (const m of modules) m.inst?.tick?.(t);
+
+    // Tick world
     world?.tick?.(t);
+
+    // Non-XR: keep camera aimed to center so you don’t stare into empty space
+    if (!renderer.xr.getSession?.()) camera.lookAt(0, 1.2, 0);
+
     renderer.render(scene, camera);
   });
 
   push?.(`[scarlett1] started ✅`);
 
-  // ---------- Local helpers for module panel ----------
-  function addModuleRow(name, ok, url) {
+  // ----------------- Module panel helpers -----------------
+  function addModuleStatus(name, ok, urlOrFile) {
     const panel = document.getElementById("scarlettModsPanel");
     if (!panel) return;
     const list = panel.querySelector("#scarlettModsList");
@@ -272,48 +234,27 @@ export async function boot({ Scarlett, BASE, V }) {
     `;
 
     const left = document.createElement("div");
-    left.style.cssText = "display:flex; flex-direction:column; gap:2px; max-width: 78%;";
+    left.style.cssText = "display:flex; flex-direction:column; gap:2px; max-width: 86%;";
+
     const title = document.createElement("div");
-    title.textContent = `${ok ? "✅" : "⬜"} ${name}`;
-    title.style.cssText = "font-weight:700; color:#fff;";
+    title.textContent = `${ok ? "✅" : "❌"} ${name}`;
+    title.style.cssText = "font-weight:800; color:#fff;";
+
     const sub = document.createElement("div");
-    sub.textContent = ok ? url : "(missing)";
+    sub.textContent = ok ? urlOrFile : String(urlOrFile);
     sub.style.cssText = "opacity:0.75; font-size:11px; word-break:break-word;";
+
     left.appendChild(title);
     left.appendChild(sub);
-
-    const right = document.createElement("button");
-    right.textContent = "toggle";
-    right.style.cssText = `
-      cursor:pointer; border-radius:10px; padding:6px 10px;
-      border:1px solid rgba(255,255,255,0.18);
-      background:rgba(0,0,0,0.25); color:#fff;
-      font-size:12px;
-    `;
-    right.onclick = () => {
-      // Minimal: toggle the panel itself; real module toggling depends on module design
-      globalThis.SCARLETT_MODULES?.toggle?.();
-    };
-
     row.appendChild(left);
-    row.appendChild(right);
+
     list.appendChild(row);
   }
 }
 
-// -------------------- Built-in Module Panel (always available) --------------------
+// -------------------- Built-in Module Panel --------------------
 function installModulePanel({ Scarlett, push }) {
-  // Create once
-  if (document.getElementById("scarlettModsPanel")) {
-    globalThis.SCARLETT_MODULES = globalThis.SCARLETT_MODULES || {
-      toggle() {
-        const p = document.getElementById("scarlettModsPanel");
-        if (!p) return;
-        p.style.display = (p.style.display === "none" || !p.style.display) ? "block" : "none";
-      }
-    };
-    return;
-  }
+  if (document.getElementById("scarlettModsPanel")) return;
 
   const panel = document.createElement("div");
   panel.id = "scarlettModsPanel";
@@ -332,19 +273,14 @@ function installModulePanel({ Scarlett, push }) {
 
   panel.innerHTML = `
     <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
-      <div style="font-weight:800;">MODULES</div>
-      <div style="display:flex; gap:8px;">
-        <button id="modsClose" style="cursor:pointer;border-radius:10px;padding:6px 10px;border:1px solid rgba(255,255,255,0.18);background:rgba(0,0,0,0.25);color:#fff;">close</button>
-      </div>
+      <div style="font-weight:900;">MODULES</div>
+      <button id="modsClose" style="cursor:pointer;border-radius:10px;padding:6px 10px;border:1px solid rgba(255,255,255,0.18);background:rgba(0,0,0,0.25);color:#fff;">close</button>
     </div>
-    <div style="opacity:0.8; margin-bottom:10px;">
-      This panel is built-in. It will list modules as they’re discovered. Missing modules won’t crash the game.
-    </div>
+    <div style="opacity:0.8; margin-bottom:10px;">Loaded module status will appear below.</div>
     <div id="scarlettModsList" style="display:flex; flex-direction:column; gap:6px;"></div>
   `;
 
   document.body.appendChild(panel);
-
   panel.querySelector("#modsClose").onclick = () => (panel.style.display = "none");
 
   globalThis.SCARLETT_MODULES = {
@@ -353,20 +289,19 @@ function installModulePanel({ Scarlett, push }) {
     toggle() { panel.style.display = (panel.style.display === "none" || !panel.style.display) ? "block" : "none"; },
   };
 
-  // Also allow Android HUD "MODULES" button to work
   Scarlett.UI = Scarlett.UI || {};
   Scarlett.UI.toggleModules = () => globalThis.SCARLETT_MODULES.toggle();
 
   push?.(`[mods] panel ready ✅`);
 }
 
-// -------------------- Fallback Controls (always on, lightweight) --------------------
+// -------------------- Fallback Controls (XR + Android sticks) --------------------
 function createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett, push }) {
   const state = {
     teleportMode: false,
-    teleportValid: false,
     snapCooldown: 0,
     moveSpeed: 2.2,
+    turnSpeed: 2.0,
     snapAngle: Math.PI / 4,
     _lastY: false,
     _lastX: false,
@@ -374,27 +309,24 @@ function createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett,
     _lastGrip: false,
   };
 
-  // Provide UI toggles even if modules missing
   world.ui = world.ui || {};
   if (typeof world.ui.toggleHud !== "function") {
     world.ui._hudVisible = true;
     world.ui.toggleHud = () => {
       world.ui._hudVisible = !world.ui._hudVisible;
       push?.(`[ui] hud=${world.ui._hudVisible}`);
-      // if world implements setHudVisible, call it
       world.ui.setHudVisible?.(world.ui._hudVisible);
     };
   }
 
+  // Teleport reticle
   const ret = new THREE.Mesh(
     new THREE.RingGeometry(0.08, 0.11, 32),
     new THREE.MeshBasicMaterial({ color: 0x44ff77, transparent: true, opacity: 0.8, side: THREE.DoubleSide })
   );
   ret.rotation.x = -Math.PI / 2;
   ret.visible = false;
-  // add to scene safely
-  try { world.root?.add?.(ret); } catch { /* ignore */ }
-  try { renderer.scene?.add?.(ret); } catch { /* ignore */ }
+  try { world.root?.add?.(ret); } catch {}
 
   const ray = new THREE.Raycaster();
 
@@ -420,9 +352,30 @@ function createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett,
   function toggleTeleport() {
     state.teleportMode = !state.teleportMode;
     push?.(`[move] teleport=${state.teleportMode}`);
-    if (!state.teleportMode) {
-      ret.visible = false;
-      state.teleportValid = false;
+    if (!state.teleportMode) ret.visible = false;
+  }
+
+  function applyMoveTurn(moveX, moveY, turnX, dt) {
+    if (turnX) rig.rotation.y -= turnX * state.turnSpeed * dt;
+
+    const yaw = new THREE.Quaternion();
+    camera.getWorldQuaternion(yaw);
+
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(yaw);
+    fwd.y = 0; fwd.normalize();
+
+    const rightV = new THREE.Vector3(1, 0, 0).applyQuaternion(yaw);
+    rightV.y = 0; rightV.normalize();
+
+    const forward = moveY; // Android joystick outputs +up = forward
+    const strafe = moveX;
+
+    if (forward || strafe) {
+      const v = new THREE.Vector3()
+        .addScaledVector(fwd, forward)
+        .addScaledVector(rightV, strafe)
+        .multiplyScalar(state.moveSpeed * dt);
+      rig.position.add(v);
     }
   }
 
@@ -430,88 +383,86 @@ function createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett,
     toggleTeleport,
     tick() {
       const dt = 1 / 72;
+      const session = renderer.xr.getSession?.();
 
-      const { left, right } = getPads();
-      const la = left?.axes || [];
-      const ra = right?.axes || [];
-      const lb = left?.buttons || [];
-      const rb = right?.buttons || [];
+      const android = Scarlett.ANDROID_INPUT || { moveX: 0, moveY: 0, turnX: 0 };
 
-      // Buttons (best-effort on Quest touch)
-      const btnX = !!lb[3]?.pressed; // X
-      const btnY = !!lb[4]?.pressed; // Y
-      const btnB = !!rb[4]?.pressed; // B
-      const rGrip = !!rb[1]?.pressed; // grip
+      if (session) {
+        const { left, right } = getPads();
+        const la = left?.axes || [];
+        const ra = right?.axes || [];
+        const lb = left?.buttons || [];
+        const rb = right?.buttons || [];
 
-      // Y toggles DIAG
-      if (btnY && !state._lastY) globalThis.SCARLETT_DIAG?.toggle?.();
-      state._lastY = btnY;
+        const btnX = !!lb[3]?.pressed; // X
+        const btnY = !!lb[4]?.pressed; // Y
+        const btnB = !!rb[4]?.pressed; // B
+        const rGrip = !!rb[1]?.pressed; // grip
 
-      // X toggles HUD
-      if (btnX && !state._lastX) world.ui?.toggleHud?.();
-      state._lastX = btnX;
+        if (btnY && !state._lastY) globalThis.SCARLETT_DIAG?.toggle?.();
+        state._lastY = btnY;
 
-      // B toggles teleport
-      if (btnB && !state._lastB) toggleTeleport();
-      state._lastB = btnB;
+        if (btnX && !state._lastX) world.ui?.toggleHud?.();
+        state._lastX = btnX;
 
-      // Move axes (right stick preferred; tolerate different axis lengths)
-      const mx = deadzone(ra.length >= 4 ? ra[2] : (ra[0] || 0));
-      const my = deadzone(ra.length >= 4 ? ra[3] : (ra[1] || 0));
+        if (btnB && !state._lastB) toggleTeleport();
+        state._lastB = btnB;
 
-      // Snap turn on left stick X
-      const tx = deadzone(la[0] || 0);
-      state.snapCooldown = Math.max(0, state.snapCooldown - dt);
+        // If gamepads exist, use them. Otherwise allow Android sticks as fallback in XR.
+        const haveAxes = (ra.length + la.length) > 0;
 
+        if (!state.teleportMode) {
+          if (haveAxes) {
+            const mx = deadzone(ra.length >= 4 ? ra[2] : (ra[0] || 0));
+            const my = deadzone(ra.length >= 4 ? ra[3] : (ra[1] || 0));
+            const tx = deadzone(la[0] || 0);
+
+            applyMoveTurn(mx, -my, 0, dt);
+
+            state.snapCooldown = Math.max(0, state.snapCooldown - dt);
+            if (state.snapCooldown === 0 && Math.abs(tx) > 0.85) {
+              rig.rotation.y -= Math.sign(tx) * state.snapAngle;
+              state.snapCooldown = 0.22;
+            }
+          } else {
+            applyMoveTurn(android.moveX || 0, android.moveY || 0, android.turnX || 0, dt);
+          }
+          ret.visible = false;
+        } else {
+          ray.setFromCamera({ x: 0, y: 0 }, camera);
+          const hits = ray.intersectObjects(world.floorMeshes || [], true);
+          if (hits.length) {
+            ret.visible = true;
+            ret.position.copy(hits[0].point);
+            if (rGrip && !state._lastGrip) {
+              rig.position.set(hits[0].point.x, rig.position.y, hits[0].point.z);
+              toggleTeleport();
+              push?.(`[move] teleported ✅`);
+            }
+            state._lastGrip = rGrip;
+          } else {
+            ret.visible = false;
+            state._lastGrip = rGrip;
+          }
+        }
+
+        return;
+      }
+
+      // Non-XR: Android sticks drive
       if (!state.teleportMode) {
-        // Smooth locomotion in camera yaw
-        const yaw = new THREE.Quaternion();
-        camera.getWorldQuaternion(yaw);
-
-        const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(yaw);
-        fwd.y = 0; fwd.normalize();
-        const rightV = new THREE.Vector3(1, 0, 0).applyQuaternion(yaw);
-        rightV.y = 0; rightV.normalize();
-
-        const forward = -my;
-        const strafe = mx;
-
-        if (forward || strafe) {
-          const v = new THREE.Vector3()
-            .addScaledVector(fwd, forward)
-            .addScaledVector(rightV, strafe)
-            .multiplyScalar(state.moveSpeed * dt);
-          rig.position.add(v);
-        }
-
-        if (state.snapCooldown === 0 && Math.abs(tx) > 0.85) {
-          rig.rotation.y -= Math.sign(tx) * state.snapAngle;
-          state.snapCooldown = 0.22;
-        }
-
+        applyMoveTurn(android.moveX || 0, android.moveY || 0, android.turnX || 0, dt);
         ret.visible = false;
       } else {
-        // Teleport ray from center to floor meshes
         ray.setFromCamera({ x: 0, y: 0 }, camera);
         const hits = ray.intersectObjects(world.floorMeshes || [], true);
-
         if (hits.length) {
-          state.teleportValid = true;
           ret.visible = true;
           ret.position.copy(hits[0].point);
-
-          if (rGrip && state.teleportValid && !state._lastGrip) {
-            rig.position.set(hits[0].point.x, rig.position.y, hits[0].point.z);
-            toggleTeleport(); // turns off + hides reticle
-            push?.(`[move] teleported ✅`);
-          }
-          state._lastGrip = rGrip;
         } else {
-          state.teleportValid = false;
           ret.visible = false;
-          state._lastGrip = rGrip;
         }
       }
     },
   };
-  }
+    }

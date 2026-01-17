@@ -1,26 +1,26 @@
 // /js/scarlett1/world.js
-// SCARLETT1 WORLD ORCHESTRATOR (FULL) v2.0
-// Permanent spine: scene/rig/camera/anchors + module loader + module test runner.
+// SCARLETT1_WORLD_FULL_v3_0_ORCH_MODULE_MANIFEST_PERMA
+// Permanent orchestrator: safe module imports, enable/disable, reload, module test always available.
 
-export async function bootWorld(ctx) {
-  const {
-    THREE,
-    scene,
-    rig,
-    camera,
-    renderer,
-    HUD,        // function(string)
-    DIAG,       // function(...args)
-  } = ctx;
-
-  const log = (s) => (typeof HUD === "function" ? HUD(s) : console.log("[world]", s));
+export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG }) {
+  const log = (s) => (typeof HUD === "function" ? HUD(String(s)) : console.log("[world]", s));
   const warn = (...a) => console.warn("[world]", ...a);
   const err = (...a) => console.error("[world]", ...a);
 
-  log("step: world start");
+  log("world: start");
 
-  // ---------- WORLD SPINE ----------
-  // Lighting (never black)
+  // ---------- SPINE WORLD (never black) ----------
+  // Floor
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(500, 500),
+    new THREE.MeshStandardMaterial({ color: 0x14171c, roughness: 1, metalness: 0 })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = 0;
+  floor.name = "SCARLETT_FLOOR";
+  scene.add(floor);
+
+  // Lights
   const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 0.95);
   hemi.name = "LIGHT_HEMI";
   scene.add(hemi);
@@ -35,17 +35,7 @@ export async function bootWorld(ctx) {
   fill.name = "LIGHT_FILL";
   scene.add(fill);
 
-  // Floor (guaranteed)
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(400, 400),
-    new THREE.MeshStandardMaterial({ color: 0x14171c, roughness: 1, metalness: 0 })
-  );
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.y = 0;
-  floor.name = "SCARLETT_FLOOR";
-  scene.add(floor);
-
-  // Anchors registry (modules can attach to these)
+  // Anchors
   const anchors = {
     root: new THREE.Group(),
     room: new THREE.Group(),
@@ -59,16 +49,14 @@ export async function bootWorld(ctx) {
   };
   anchors.root.name = "ANCHORS_ROOT";
   Object.entries(anchors).forEach(([k, g]) => (g.name = `ANCHOR_${k.toUpperCase()}`));
-
   scene.add(anchors.root);
   anchors.root.add(anchors.room, anchors.stage, anchors.ui, anchors.store, anchors.debug);
   anchors.stage.add(anchors.centerpiece);
   anchors.centerpiece.add(anchors.table);
   anchors.store.add(anchors.mannequins);
 
-  // Big circular room (twice as big / “souped up” but light)
-  // Cylinder as walls + subtle ceiling ring
-  const ROOM_R = 28; // make this bigger whenever you want
+  // Big room
+  const ROOM_R = 28;
   const WALL_H = 10;
 
   const wall = new THREE.Mesh(
@@ -88,8 +76,7 @@ export async function bootWorld(ctx) {
   ceilingRing.name = "ROOM_CEILING_RING";
   anchors.room.add(ceilingRing);
 
-  // Center “stage divot” (placeholder bowl so you can expand later with stairs/rails)
-  // This is just visual now; gameplay collision can come later.
+  // Center stage divot placeholder
   const divot = new THREE.Mesh(
     new THREE.CylinderGeometry(8.5, 9.5, 0.9, 64),
     new THREE.MeshStandardMaterial({ color: 0x10141a, roughness: 1 })
@@ -98,7 +85,7 @@ export async function bootWorld(ctx) {
   divot.name = "STAGE_DIVOT";
   anchors.stage.add(divot);
 
-  // Centerpiece base
+  // Centerpiece base + table
   const base = new THREE.Mesh(
     new THREE.CylinderGeometry(2.2, 2.4, 0.35, 64),
     new THREE.MeshStandardMaterial({ color: 0x202734, roughness: 0.9 })
@@ -107,7 +94,6 @@ export async function bootWorld(ctx) {
   base.name = "CENTER_BASE";
   anchors.centerpiece.add(base);
 
-  // Table top (centerpiece)
   const tableTop = new THREE.Mesh(
     new THREE.CylinderGeometry(1.15, 1.15, 0.10, 72),
     new THREE.MeshStandardMaterial({ color: 0x16382a, roughness: 0.92 })
@@ -116,7 +102,6 @@ export async function bootWorld(ctx) {
   tableTop.name = "POKER_TABLE_TOP";
   anchors.table.add(tableTop);
 
-  // Rail
   const rail = new THREE.Mesh(
     new THREE.TorusGeometry(1.19, 0.075, 16, 90),
     new THREE.MeshStandardMaterial({ color: 0x2c1b12, roughness: 0.85 })
@@ -126,7 +111,6 @@ export async function bootWorld(ctx) {
   rail.name = "POKER_RAIL";
   anchors.table.add(rail);
 
-  // Pass line circle placeholder (you requested)
   const passLine = new THREE.Mesh(
     new THREE.RingGeometry(0.62, 0.68, 64),
     new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
@@ -136,7 +120,7 @@ export async function bootWorld(ctx) {
   passLine.name = "PASS_LINE_RING";
   anchors.table.add(passLine);
 
-  // Store zone placeholder (modules can populate later)
+  // Store pad placeholder
   const storePad = new THREE.Mesh(
     new THREE.CircleGeometry(4.0, 64),
     new THREE.MeshStandardMaterial({ color: 0x151a22, roughness: 1 })
@@ -146,156 +130,212 @@ export async function bootWorld(ctx) {
   storePad.name = "STORE_PAD";
   anchors.store.add(storePad);
 
-  // ---------- MODULE ORCHESTRATOR ----------
-  const registry = [];
-  const status = new Map(); // id -> { ok, stage, error, info }
+  // Debug axes
+  const axes = new THREE.AxesHelper(1.2);
+  axes.position.set(0, 0.02, 0);
+  axes.name = "DEBUG_AXES";
+  anchors.debug.add(axes);
 
-  function register(mod) {
-    if (!mod || !mod.id) throw new Error("Module missing id");
-    registry.push(mod);
-    status.set(mod.id, { ok: false, stage: "registered", error: null, info: "" });
+  // ---------- MODULE ORCHESTRATOR ----------
+  // Your “audit” problem is always the same: missing module import crashes or silently fails.
+  // So: safe import, status map, and module test always exists.
+
+  // IMPORTANT: Put your real module filenames here.
+  // These paths are relative to /js/scarlett1/world.js
+  const MODULE_MANIFEST = [
+    // If you already have a module folder, add the real entries:
+    // "./modules/world.module.js",
+    // "./modules/store.module.js",
+    // "./modules/mannequins.module.js",
+    // "./modules/chips.module.js",
+    // "./modules/dealerButton.module.js",
+    // "./modules/cards.module.js",
+    // "./modules/hands.module.js",
+  ];
+
+  // internal module records
+  const modules = []; // {id, path, api}
+  const status = {};  // id -> { ok, stage, error, info, enabled }
+
+  function setStatus(id, patch) {
+    status[id] = status[id] || { ok: false, stage: "new", error: "", info: "", enabled: true };
+    Object.assign(status[id], patch);
   }
 
-  async function initModule(mod) {
-    const st = status.get(mod.id);
-    st.stage = "init";
-    log(`module:init ${mod.id}`);
+  function getIdFromPath(p) {
+    return p.replace(/^.*\//, "").replace(/\?.*$/, "");
+  }
+
+  async function safeImport(path) {
+    // Cache-bust import so updates always load
+    const url = `${path}${path.includes("?") ? "&" : "?"}v=${Date.now()}`;
+    return import(url);
+  }
+
+  async function loadModule(path) {
+    const id = getIdFromPath(path);
+    setStatus(id, { stage: "importing", error: "", info: "", ok: false });
+
     try {
-      if (typeof mod.init === "function") {
-        const info = await mod.init(ctx);
-        st.ok = true;
-        st.stage = "ready";
-        st.info = info || "";
-        log(`module:ok ${mod.id}`);
+      const mod = await safeImport(path);
+      const api = mod?.default || mod?.module || mod; // flexible
+      if (!api) throw new Error("module export missing (default or named)");
+
+      // Normalize module API
+      const rec = { id: api.id || id, path, api };
+      modules.push(rec);
+      setStatus(rec.id, { stage: "imported", enabled: true });
+
+      // init
+      await initModule(rec);
+      return rec;
+    } catch (e) {
+      setStatus(id, { stage: "failed", ok: false, error: e?.message || String(e), enabled: false });
+      err("module import failed", path, e);
+      return null;
+    }
+  }
+
+  async function initModule(rec) {
+    const id = rec.id;
+    if (status[id]?.enabled === false) {
+      setStatus(id, { stage: "disabled", ok: false });
+      return;
+    }
+
+    setStatus(id, { stage: "init", ok: false, error: "" });
+    try {
+      if (typeof rec.api.init === "function") {
+        const info = await rec.api.init({ THREE, scene, rig, camera, renderer, anchors, HUD, DIAG });
+        setStatus(id, { stage: "ready", ok: true, info: info || "" });
       } else {
-        st.ok = true;
-        st.stage = "ready";
-        st.info = "no init()";
-        log(`module:ok ${mod.id} (no init)`);
+        setStatus(id, { stage: "ready", ok: true, info: "no init()" });
       }
     } catch (e) {
-      st.ok = false;
-      st.stage = "failed";
-      st.error = e?.message || String(e);
-      err(`module:fail ${mod.id}`, e);
-      log(`module:FAIL ${mod.id} :: ${st.error}`);
+      setStatus(id, { stage: "failed", ok: false, error: e?.message || String(e) });
+      err(`module init failed: ${id}`, e);
+    }
+  }
+
+  async function testModule(rec) {
+    const id = rec.id;
+    try {
+      if (typeof rec.api.test === "function") return await rec.api.test({ THREE, scene, rig, camera, renderer, anchors, HUD, DIAG });
+      return { ok: true, note: "no test()" };
+    } catch (e) {
+      return { ok: false, error: e?.message || String(e) };
     }
   }
 
   async function runAllModuleTests() {
     const report = {
-      build: "WORLD_ORCH_v2_0",
+      ok: true,
+      build: "SCARLETT_WORLD_ORCH_v3_0",
       time: new Date().toISOString(),
       modules: [],
     };
 
-    for (const mod of registry) {
-      const st = status.get(mod.id) || { ok: false, stage: "?", error: null, info: "" };
-      let testRes = null;
-      try {
-        if (typeof mod.test === "function") testRes = await mod.test(ctx);
-      } catch (e) {
-        testRes = { ok: false, error: e?.message || String(e) };
+    // Include manifest failures too
+    const knownIds = new Set(modules.map((m) => m.id));
+    for (const p of MODULE_MANIFEST) {
+      const id = getIdFromPath(p);
+      if (!knownIds.has(id) && status[id]) {
+        report.ok = false;
+        report.modules.push({ id, path: p, ...status[id], test: { ok: false, error: status[id].error || "import failed" } });
       }
-      report.modules.push({
-        id: mod.id,
-        stage: st.stage,
-        ok: !!st.ok,
-        info: st.info || "",
-        error: st.error || "",
-        test: testRes,
-      });
     }
 
-    // Also print a compact view to HUD
-    log("MODULE TEST REPORT:");
-    for (const m of report.modules) {
-      log(`${m.ok ? "✅" : "❌"} ${m.id} stage=${m.stage}${m.error ? " err=" + m.error : ""}`);
+    for (const rec of modules) {
+      const st = status[rec.id] || {};
+      const t = await testModule(rec);
+      const row = { id: rec.id, path: rec.path, ...st, test: t };
+      if (!st.ok || t?.ok === false) report.ok = false;
+      report.modules.push(row);
     }
+
+    // Print a compact summary to HUD
+    log("MODULE TEST REPORT:");
+    report.modules.forEach((m) => {
+      const ok = (m.ok && (m.test?.ok !== false));
+      log(`${ok ? "✅" : "❌"} ${m.id} stage=${m.stage}${m.error ? " err=" + m.error : ""}`);
+    });
+
     return report;
   }
 
-  // Expose test runner to the Android MODULE TEST button
-  window.__scarlettRunModuleTest = runAllModuleTests;
+  async function reloadModule(id) {
+    // Soft reload: mark old disabled; re-import same path from manifest if possible
+    const rec = modules.find((m) => m.id === id);
+    const path = rec?.path || MODULE_MANIFEST.find((p) => getIdFromPath(p) === id);
+    if (!path) throw new Error(`No path found for module ${id}`);
 
-  // Expose world pointers for debugging/hotfixing
+    // disable old
+    setStatus(id, { enabled: true, stage: "reloading", error: "", ok: false });
+
+    // Remove old module record entry (keep it simple)
+    for (let i = modules.length - 1; i >= 0; i--) {
+      if (modules[i].id === id) modules.splice(i, 1);
+    }
+
+    // Re-import and init
+    const r = await loadModule(path);
+    return r;
+  }
+
+  function setEnabled(id, enabled) {
+    enabled = !!enabled;
+    setStatus(id, { enabled });
+    // If disabling, just mark; module should respect enabled in update if it has one.
+    if (!enabled) setStatus(id, { stage: "disabled", ok: false });
+    // If enabling, re-init if present
+    const rec = modules.find((m) => m.id === id);
+    if (enabled && rec) initModule(rec);
+  }
+
+  // Update loop for modules
+  const updaters = [];
+  function rebuildUpdaters() {
+    updaters.length = 0;
+    for (const rec of modules) {
+      if (typeof rec.api.update === "function") updaters.push(rec);
+    }
+  }
+
+  // Expose EVERYTHING permanently
   window.__scarlettWorld = {
-    ctx,
     anchors,
-    registry,
+    modules,
     status,
+    manifest: MODULE_MANIFEST,
     runAllModuleTests,
+    reloadModule,
+    setEnabled,
   };
 
-  // ---------- DEFAULT MODULES (starter pack) ----------
-  // These are “always safe” modules. Add more later without touching world.js much.
+  // Always set module test runner (this is what you’re missing right now)
+  window.__scarlettRunModuleTest = runAllModuleTests;
 
-  register({
-    id: "env:labels",
-    init() {
-      // Minimal axis marker at origin to confirm orientation quickly
-      const g = new THREE.AxesHelper(1.2);
-      g.position.set(0, 0.02, 0);
-      g.name = "DEBUG_AXES";
-      anchors.debug.add(g);
-      return "axes helper ok";
-    },
-    test() {
-      const ok = !!scene.getObjectByName("DEBUG_AXES");
-      return { ok, found: ok };
-    },
-  });
+  // Load manifest modules (safe)
+  log(`world: loading manifest (${MODULE_MANIFEST.length})`);
+  for (const p of MODULE_MANIFEST) {
+    const id = getIdFromPath(p);
+    setStatus(id, { enabled: true, stage: "queued", ok: false, error: "", info: "" });
+    await loadModule(p);
+  }
+  rebuildUpdaters();
 
-  register({
-    id: "centerpiece:chips_placeholder",
-    init() {
-      // Cheap chip stacks placeholders
-      const mat = new THREE.MeshStandardMaterial({ color: 0x8b1c1c, roughness: 0.65 });
-      for (let i = 0; i < 6; i++) {
-        const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.07, 18), mat);
-        stack.position.set(-0.25 + i * 0.10, 0.86, -1.3 + (i % 2 ? 0.10 : -0.10));
-        stack.name = `CHIP_STACK_${i}`;
-        anchors.table.add(stack);
-      }
-      return "chip placeholders ok";
-    },
-    test() {
-      const ok = !!anchors.table.getObjectByName("CHIP_STACK_0");
-      return { ok };
-    },
-  });
-
-  register({
-    id: "ui:module_status_beacon",
-    init() {
-      // A simple floating beacon above the table to confirm UI anchor works
-      const beacon = new THREE.Mesh(
-        new THREE.SphereGeometry(0.03, 16, 12),
-        new THREE.MeshBasicMaterial({ color: 0x00ff88 })
-      );
-      beacon.position.set(0, 1.18, -1.3);
-      beacon.name = "UI_BEACON";
-      anchors.ui.add(beacon);
-      return "ui beacon ok";
-    },
-    test() {
-      return { ok: !!anchors.ui.getObjectByName("UI_BEACON") };
-    },
-  });
-
-  // Init modules in order (each logs step)
-  log(`modules: ${registry.length} registering…`);
-  for (const mod of registry) await initModule(mod);
-  log("step: world ready ✅");
-
-  // Return update hooks for index.js render loop
-  const updaters = registry.filter((m) => typeof m.update === "function").map((m) => m.update);
+  log("world: ready ✅");
+  if (typeof window.__scarlettRefreshModuleList === "function") window.__scarlettRefreshModuleList();
 
   return {
     anchors,
     update(dt) {
-      for (const fn of updaters) {
-        try { fn(ctx, dt); } catch (e) { warn("module update err", e); }
+      // run module updaters only if enabled
+      for (const rec of updaters) {
+        const st = status[rec.id];
+        if (st && st.enabled === false) continue;
+        try { rec.api.update({ THREE, scene, rig, camera, renderer, anchors, HUD, DIAG }, dt); }
+        catch (e) { warn(`module update err: ${rec.id}`, e); }
       }
     },
   };

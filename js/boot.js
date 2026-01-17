@@ -1,102 +1,106 @@
-// /js/boot.js
-// SCARLETT_BOOT_FULL_v1_AUTHORITATIVE
-// - Always shows DIAG overlay on mobile/quest
-// - Always defines window.__scarlettRunModuleTest (stub) so button never says "not found"
-// - Imports ./scarlett1/index.js (the real engine)
+// /js/boot.js — Scarlett Boot (FULL RESTORE)
+// Responsibilities: diagnostics overlay + import /js/index.js safely (no bare specifiers)
 
-(() => {
-  const BUILD = "SCARLETT_BOOT_FULL_v1_AUTHORITATIVE";
-  const log = (...a) => console.log("[boot]", ...a);
+const BUILD = "BOOT_FULL_RESTORE_v1";
+const NOW = () => new Date().toISOString().slice(11, 19);
 
-  // --- Always define module test stub (so DIAG never says "not found") ---
-  window.__scarlettRunModuleTest =
-    window.__scarlettRunModuleTest ||
-    (async () => ({
-      ok: false,
-      time: new Date().toISOString(),
-      activeBoot: BUILD,
-      reason: "Scarlett engine not attached yet.",
-      hint: "If this persists, scarlett1/index.js failed to import or crashed.",
-    }));
+function getBasePath() {
+  const parts = location.pathname.split("/").filter(Boolean);
+  // GitHub pages: /<repo>/
+  if (parts.length === 0) return "/";
+  return `/${parts[0]}/`;
+}
+const BASE = getBasePath();
+const Q = new URLSearchParams(location.search);
+const V = Q.get("v") || String(Date.now());
 
-  // --- DIAG overlay (mobile/quest friendly) ---
-  const isMobile = /Android|Oculus|Quest|Mobile/i.test(navigator.userAgent);
+function ensureDiag() {
+  let box = document.getElementById("scarlettDiag");
+  if (box) return box;
 
-  const panel = document.getElementById("scarlettDiagPanel") || (() => {
-    const d = document.createElement("div");
-    d.id = "scarlettDiagPanel";
-    d.style.cssText = `
-      position:fixed;left:10px;right:10px;bottom:10px;z-index:999999;
-      background:rgba(0,0,0,.75);color:#fff;border-radius:14px;
-      padding:10px;font-family:ui-monospace,Menlo,Consolas,monospace;
-      font-size:12px;line-height:1.25;
-      max-height:44vh; overflow:hidden;
-      ${isMobile ? "" : "max-width:520px;"}
-    `;
-    document.body.appendChild(d);
-    return d;
-  })();
+  box = document.createElement("div");
+  box.id = "scarlettDiag";
+  box.style.cssText = `
+    position:fixed; left:10px; top:10px; z-index:99999;
+    max-width:min(560px, calc(100vw - 20px));
+    background:rgba(20,0,0,0.75);
+    color:#ff5a5a;
+    border:1px solid rgba(255,90,90,0.45);
+    border-radius:12px;
+    padding:10px;
+    backdrop-filter: blur(6px);
+    font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;
+    user-select:text;
+  `;
 
-  if (!panel.__init) {
-    panel.__init = true;
-    panel.innerHTML = `
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
-        <button id="d_mod" style="padding:8px 10px;border:0;border-radius:12px;background:#e91e63;color:#fff;font-weight:900">MODULE TEST</button>
-        <button id="d_copy" style="padding:8px 10px;border:0;border-radius:12px;background:#e91e63;color:#fff;font-weight:900">COPY LOG</button>
-        <button id="d_clear" style="padding:8px 10px;border:0;border-radius:12px;background:#444;color:#fff;font-weight:900">CLEAR</button>
-        <button id="d_hide" style="padding:8px 10px;border:0;border-radius:12px;background:#444;color:#fff;font-weight:900">HIDE</button>
-      </div>
-      <pre id="d_pre" style="margin:0;white-space:pre-wrap;word-break:break-word;background:rgba(255,255,255,.06);border-radius:12px;padding:10px;overflow:auto;max-height:32vh"></pre>
-    `;
+  const row = document.createElement("div");
+  row.style.cssText = `display:flex; gap:8px; justify-content:space-between; align-items:center; margin-bottom:6px;`;
+  row.innerHTML = `
+    <div style="font-weight:700;">SCARLETT DIAG</div>
+    <div style="display:flex; gap:6px;">
+      <button id="diagHide" style="cursor:pointer;border-radius:10px;border:1px solid rgba(255,90,90,0.5);background:rgba(80,0,0,0.5);color:#ff8b8b;padding:3px 10px;">hide</button>
+      <button id="diagCopy" style="cursor:pointer;border-radius:10px;border:1px solid rgba(255,90,90,0.5);background:rgba(80,0,0,0.5);color:#ff8b8b;padding:3px 10px;">copy</button>
+    </div>
+  `;
+  box.appendChild(row);
+
+  const pre = document.createElement("pre");
+  pre.id = "scarlettDiagPre";
+  pre.style.cssText = `margin:0; white-space:pre-wrap; word-break:break-word;`;
+  box.appendChild(pre);
+
+  document.body.appendChild(box);
+
+  const lines = [];
+  const push = (s) => {
+    lines.push(s);
+    if (lines.length > 90) lines.shift();
+    pre.textContent = lines.join("\n");
+  };
+
+  globalThis.SCARLETT_DIAG = {
+    push,
+    lines,
+    show() { box.style.display = "block"; },
+    hide() { box.style.display = "none"; },
+    toggle() { box.style.display = (box.style.display === "none") ? "block" : "none"; }
+  };
+
+  document.getElementById("diagHide").onclick = () => globalThis.SCARLETT_DIAG.toggle();
+  document.getElementById("diagCopy").onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      push(`[${NOW()}] [diag] copied ✅`);
+    } catch (e) {
+      push(`[${NOW()}] [diag] copy failed ❌ ${String(e?.message || e)}`);
+    }
+  };
+
+  return box;
+}
+
+ensureDiag();
+SCARLETT_DIAG.push(`[${NOW()}] [HTML] loaded ✅ (waiting for /js/index.js…)`);
+SCARLETT_DIAG.push(`[${NOW()}] [BOOT] build=${BUILD}`);
+SCARLETT_DIAG.push(`[${NOW()}] [BOOT] href=${location.href}`);
+SCARLETT_DIAG.push(`[${NOW()}] [BOOT] base=${BASE}`);
+SCARLETT_DIAG.push(`[${NOW()}] [BOOT] secureContext=${String(globalThis.isSecureContext)}`);
+SCARLETT_DIAG.push(`[${NOW()}] [BOOT] ua=${navigator.userAgent}`);
+SCARLETT_DIAG.push(`[${NOW()}] [BOOT] navigator.xr=${String(!!navigator.xr)}`);
+
+(async () => {
+  const entryUrl = `${BASE}js/index.js?v=${encodeURIComponent(V)}`;
+  try {
+    SCARLETT_DIAG.push(`[${NOW()}] [BOOT] importing ${entryUrl} …`);
+    const mod = await import(entryUrl);
+    SCARLETT_DIAG.push(`[${NOW()}] [BOOT] index.js imported ✅`);
+    if (typeof mod.boot === "function") {
+      await mod.boot({ BASE, V });
+      SCARLETT_DIAG.push(`[${NOW()}] [BOOT] boot() complete ✅`);
+    } else {
+      SCARLETT_DIAG.push(`[${NOW()}] [BOOT] index.js missing boot() ❌`);
+    }
+  } catch (e) {
+    SCARLETT_DIAG.push(`[${NOW()}] [BOOT] import FAILED ❌ ${String(e?.message || e)}`);
   }
-
-  const pre = panel.querySelector("#d_pre");
-  const write = (s) => {
-    const ts = new Date().toISOString().slice(11, 19);
-    pre.textContent += `[${ts}] ${s}\n`;
-    pre.scrollTop = pre.scrollHeight;
-  };
-  window.__scarlettDiagWrite = write;
-
-  panel.querySelector("#d_clear").onclick = () => (pre.textContent = "");
-  panel.querySelector("#d_hide").onclick = () => (panel.style.display = "none");
-
-  panel.querySelector("#d_copy").onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(`=== SCARLETT DIAG ===\n${pre.textContent}\n`);
-      write("Copied ✅");
-    } catch (e) {
-      write(`Copy failed ❌ ${e?.message || e}`);
-    }
-  };
-
-  panel.querySelector("#d_mod").onclick = async () => {
-    write("MODULE TEST pressed…");
-    try {
-      const rep = await window.__scarlettRunModuleTest();
-      write("MODULE TEST done ✅");
-      write(JSON.stringify(rep, null, 2));
-    } catch (e) {
-      write(`MODULE TEST error ❌ ${e?.message || e}`);
-    }
-  };
-
-  write(`booting… build=${BUILD}`);
-  write(`href=${location.href}`);
-  write(`secureContext=${window.isSecureContext}`);
-  write(`xr=${!!navigator.xr}`);
-  write(`ua=${navigator.userAgent}`);
-
-  // --- Import the real engine (cache-busted) ---
-  (async () => {
-    try {
-      const url = `./scarlett1/index.js?v=${Date.now()}`;
-      write(`importing ${url}`);
-      await import(url);
-      write(`engine import OK ✅`);
-    } catch (e) {
-      write(`engine import FAILED ❌ ${e?.message || e}`);
-      log("engine import failed", e);
-    }
-  })();
 })();

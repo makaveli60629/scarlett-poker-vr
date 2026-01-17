@@ -211,7 +211,12 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
     "../modules/pokerGameplay.module.js",
     "../modules/lobbyStations.module.js",
     "../modules/menuUI.module.js",
+ "../modules/interactionHands.module.js",
+  "../modules/tableArt.module.js",
+  "../modules/localPlayer.module.js",
+  "../modules/slotsNet.module.js",
   ];
+  
 
   const modules = [];
   const status = {};

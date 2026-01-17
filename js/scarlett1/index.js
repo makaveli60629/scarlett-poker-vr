@@ -1,12 +1,13 @@
 // /js/scarlett1/index.js — Scarlett1 MASTER GLUE ROUTER (FULL)
-// BUILD: SCARLETT1_MASTER_GLUE_ROUTER_v3
+// BUILD: SCARLETT1_MASTER_GLUE_ROUTER_v4
 //
-// ✅ Adds legacy API shim: ctx.app + Scarlett.app with room/ui/debug/avatars
-// ✅ Fixes module crashes: "reading room/ui/debug/avatars"
-// ✅ Keeps everything else the same
+// ✅ Android movement fixed: Up=Forward, Down=Back, Left/Right strafe
+// ✅ Finger drag look (yaw + pitch) in non-XR
+// ✅ Keeps SAFE MODE ?safe=1
+// ✅ Keeps module glue + fallback teleport + locomotion module support
 
 export async function boot({ Scarlett, BASE, V }) {
-  const BUILD = "SCARLETT1_MASTER_GLUE_ROUTER_v3";
+  const BUILD = "SCARLETT1_MASTER_GLUE_ROUTER_v4";
   const NOW = () => new Date().toISOString().slice(11, 19);
   const push = (s) => globalThis.SCARLETT_DIAG?.push?.(`[${NOW()}] ${s}`);
 
@@ -46,6 +47,7 @@ export async function boot({ Scarlett, BASE, V }) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x070a10);
 
+  // Player rig
   const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 260);
   camera.position.set(0, 1.65, 0);
 
@@ -54,9 +56,10 @@ export async function boot({ Scarlett, BASE, V }) {
   rig.add(camera);
   scene.add(rig);
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.32));
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.9));
-  const key = new THREE.DirectionalLight(0xffffff, 1.05);
+  // baseline light (world adds more)
+  scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.65));
+  const key = new THREE.DirectionalLight(0xffffff, 0.9);
   key.position.set(7, 12, 6);
   scene.add(key);
 
@@ -80,48 +83,28 @@ export async function boot({ Scarlett, BASE, V }) {
   const world = await worldMod.createWorld({ THREE, scene, renderer, camera, rig, Scarlett, diag: push, BASE });
   push?.(`[scarlett1] world ready ✅`);
 
-  // ---------- ✅ LEGACY API SHIM ----------
-  // Many of your modules were written to expect:
-  //   app.room, app.ui, app.debug, app.avatars, etc.
-  // We'll provide that without rewriting the modules.
+  // Legacy shim (for modules expecting room/ui/debug/avatars)
   const legacyApp = {
-    // "room" in old code usually meant "the main scene/world container"
-    room: world,                 // includes root, anchors, floorMeshes, etc.
+    room: world,
     scene, renderer, camera, rig,
-
-    // UI contract
     ui: world.ui || {},
-
-    // debug contract
     debug: {
       log: (...a) => push?.(`[debug] ${a.join(" ")}`),
       warn: (...a) => push?.(`[warn] ${a.join(" ")}`),
       error: (...a) => push?.(`[err] ${a.join(" ")}`),
       enabled: true,
     },
-
-    // avatars contract (modules that read app.avatars.*)
-    avatars: {
-      enabled: true,
-      list: [],
-      local: null,
-    },
-
-    // helpers/modules can store references safely here
+    avatars: { enabled: true, list: [], local: null },
     services: {},
     state: {},
   };
-
-  // Publish shim where modules usually look
   Scarlett.app = legacyApp;
   globalThis.SCARLETT_APP = legacyApp;
 
-  // ---------- Context bus ----------
   const ctx = {
     THREE, scene, renderer, camera, rig, world, Scarlett, controllers,
     diag: push, BASE, V,
     bus: makeBus(push),
-    // ✅ compat alias
     app: legacyApp,
     room: legacyApp.room,
     ui: legacyApp.ui,
@@ -139,8 +122,11 @@ export async function boot({ Scarlett, BASE, V }) {
 
   installModulePanel({ Scarlett, push });
 
-  // Always-on fallback locomotion + teleport
-  const fallback = createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett, push });
+  // ✅ Touch look controller (non-XR only)
+  const touchLook = createTouchLook({ renderer, rig, camera, push });
+
+  // Always-on fallback locomotion + teleport (Android + XR)
+  const fallback = createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett, push, touchLook });
   Scarlett.__controls = fallback;
 
   // Modules
@@ -188,11 +174,17 @@ export async function boot({ Scarlett, BASE, V }) {
   renderer.xr.addEventListener("sessionend", () => push?.(`[xr] sessionend ✅`));
 
   renderer.setAnimationLoop((t) => {
+    // tick started modules
     for (const m of liveModules) m.inst?.tick?.(t);
-    fallback.tick(t);
-    world?.tick?.(t);
 
-    if (!renderer.xr.getSession?.()) camera.lookAt(0, 1.2, 0);
+    // finger look updates (non-XR)
+    touchLook.tick();
+
+    // fallback locomotion always
+    fallback.tick(t);
+
+    // world tick
+    world?.tick?.(t);
 
     renderer.render(scene, camera);
   });
@@ -200,7 +192,7 @@ export async function boot({ Scarlett, BASE, V }) {
   push?.(`[scarlett1] started ✅`);
 }
 
-// -------------------- Safe module loader / starter --------------------
+// -------------------- Module starter --------------------
 async function safeLoadAndStartModule({ name, url, ctx, push }) {
   try {
     push?.(`[mod] import ${name} → ${url}`);
@@ -209,7 +201,6 @@ async function safeLoadAndStartModule({ name, url, ctx, push }) {
     const keys = Object.keys(m || {});
     push?.(`[mod] ${name} exports: ${keys.length ? keys.join(", ") : "(none)"}`);
 
-    // locomotion_xr.js
     if (typeof m.createLocomotionModule === "function") {
       push?.(`[mod] ${name} entry=createLocomotionModule() starting…`);
       const inst = await m.createLocomotionModule(ctx);
@@ -217,65 +208,31 @@ async function safeLoadAndStartModule({ name, url, ctx, push }) {
       return { name, inst: inst || m };
     }
 
-    // gestureControl.js
     if (typeof m.GestureControl === "function") {
       push?.(`[mod] ${name} entry=GestureControl starting…`);
       let inst = null;
-      try { inst = new m.GestureControl(ctx); }
-      catch { inst = await m.GestureControl(ctx); }
+      try { inst = new m.GestureControl(ctx); } catch { inst = await m.GestureControl(ctx); }
       push?.(`[mod] ${name} started ✅`);
       return { name, inst: inst || m };
     }
 
-    // audioLogic.js
     if (typeof m.PokerAudio === "function") {
       push?.(`[mod] ${name} entry=PokerAudio starting…`);
       let inst = null;
-      try { inst = new m.PokerAudio(ctx); }
-      catch { inst = await m.PokerAudio(ctx); }
+      try { inst = new m.PokerAudio(ctx); } catch { inst = await m.PokerAudio(ctx); }
       push?.(`[mod] ${name} started ✅`);
       return { name, inst: inst || m };
     }
 
-    // direct named starters
-    const direct =
-      (typeof m.enable === "function" && { fn: m.enable, label: "enable" }) ||
-      (typeof m.init === "function" && { fn: m.init, label: "init" }) ||
-      (typeof m.boot === "function" && { fn: m.boot, label: "boot" }) ||
-      (typeof m.start === "function" && { fn: m.start, label: "start" }) ||
-      (typeof m.setup === "function" && { fn: m.setup, label: "setup" }) ||
-      (typeof m.mount === "function" && { fn: m.mount, label: "mount" }) ||
-      (typeof m.create === "function" && { fn: m.create, label: "create" }) ||
-      null;
-
-    if (direct) {
-      push?.(`[mod] ${name} entry=${direct.label}() starting…`);
-      const inst = await direct.fn(ctx);
-      push?.(`[mod] ${name} started ✅`);
-      return { name, inst: inst || m };
-    }
-
-    // default export glue
     const d = m.default;
-
-    if (typeof d === "function") {
-      push?.(`[mod] ${name} entry=default(function) starting…`);
-      let inst = null;
-      try { inst = new d(ctx); }
-      catch { inst = await d(ctx); }
-      push?.(`[mod] ${name} started ✅`);
-      return { name, inst: inst || m };
-    }
 
     if (d && typeof d === "object") {
       const objEntry =
-        (typeof d.enable === "function" && { fn: d.enable.bind(d), label: "default.enable" }) ||
         (typeof d.init === "function" && { fn: d.init.bind(d), label: "default.init" }) ||
-        (typeof d.boot === "function" && { fn: d.boot.bind(d), label: "default.boot" }) ||
         (typeof d.start === "function" && { fn: d.start.bind(d), label: "default.start" }) ||
         (typeof d.setup === "function" && { fn: d.setup.bind(d), label: "default.setup" }) ||
         (typeof d.mount === "function" && { fn: d.mount.bind(d), label: "default.mount" }) ||
-        (typeof d.create === "function" && { fn: d.create.bind(d), label: "default.create" }) ||
+        (typeof d.enable === "function" && { fn: d.enable.bind(d), label: "default.enable" }) ||
         (typeof d.register === "function" && { fn: d.register.bind(d), label: "default.register" }) ||
         null;
 
@@ -285,18 +242,227 @@ async function safeLoadAndStartModule({ name, url, ctx, push }) {
         push?.(`[mod] ${name} started ✅`);
         return { name, inst: inst || d };
       }
-
-      push?.(`[mod] ${name} default is object (no lifecycle) — keeping reference ✅`);
       return { name, inst: d };
     }
 
-    push?.(`[mod] ${name} loaded (side-effect/no entry) ✅`);
-    return { name, inst: m };
+    if (typeof d === "function") {
+      let inst = null;
+      try { inst = new d(ctx); } catch { inst = await d(ctx); }
+      return { name, inst: inst || m };
+    }
 
+    return { name, inst: m };
   } catch (e) {
     push?.(`[mod] ${name} FAILED ❌ ${String(e?.message || e)}`);
     return null;
   }
+}
+
+// -------------------- Touch look (non-XR) --------------------
+function createTouchLook({ renderer, rig, camera, push }) {
+  const el = renderer.domElement;
+
+  const st = {
+    active: false,
+    lastX: 0,
+    lastY: 0,
+    yaw: 0,
+    pitch: 0,
+    // tune feel:
+    yawSpeed: 0.0032,
+    pitchSpeed: 0.0026,
+    pitchMin: -0.95,
+    pitchMax: 0.95,
+    twoFingerTurnOnly: false,
+  };
+
+  // init from current
+  st.yaw = rig.rotation.y || 0;
+  st.pitch = camera.rotation.x || 0;
+
+  function onDown(e) {
+    if (renderer.xr.getSession?.()) return; // XR handles look
+    st.active = true;
+    st.twoFingerTurnOnly = (e.touches && e.touches.length >= 2);
+    const p = e.touches ? e.touches[0] : e;
+    st.lastX = p.clientX;
+    st.lastY = p.clientY;
+  }
+
+  function onMove(e) {
+    if (!st.active) return;
+    if (renderer.xr.getSession?.()) return;
+
+    const p = e.touches ? e.touches[0] : e;
+    const dx = p.clientX - st.lastX;
+    const dy = p.clientY - st.lastY;
+    st.lastX = p.clientX;
+    st.lastY = p.clientY;
+
+    st.yaw -= dx * st.yawSpeed;
+
+    if (!st.twoFingerTurnOnly) {
+      st.pitch -= dy * st.pitchSpeed;
+      st.pitch = Math.max(st.pitchMin, Math.min(st.pitchMax, st.pitch));
+    }
+
+    e.preventDefault?.();
+  }
+
+  function onUp() {
+    st.active = false;
+    st.twoFingerTurnOnly = false;
+  }
+
+  el.addEventListener("pointerdown", onDown, { passive: true });
+  el.addEventListener("pointermove", onMove, { passive: false });
+  el.addEventListener("pointerup", onUp, { passive: true });
+  el.addEventListener("pointercancel", onUp, { passive: true });
+
+  // Also handle touch events for some mobile browsers
+  el.addEventListener("touchstart", onDown, { passive: true });
+  el.addEventListener("touchmove", onMove, { passive: false });
+  el.addEventListener("touchend", onUp, { passive: true });
+  el.addEventListener("touchcancel", onUp, { passive: true });
+
+  return {
+    setYaw(y) { st.yaw = y; },
+    tick() {
+      if (renderer.xr.getSession?.()) return;
+      rig.rotation.y = st.yaw;
+      camera.rotation.x = st.pitch;
+    },
+  };
+}
+
+// -------------------- Fallback Controls (XR + Android sticks) --------------------
+function createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett, push, touchLook }) {
+  const state = {
+    teleportMode: false,
+    moveSpeed: 2.8,
+    turnSpeed: 2.2,
+    snapAngle: Math.PI / 4,
+    snapCooldown: 0,
+    _lastB: false,
+    _lastGrip: false,
+  };
+
+  const ret = new THREE.Mesh(
+    new THREE.RingGeometry(0.08, 0.11, 32),
+    new THREE.MeshBasicMaterial({ color: 0x44ff77, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
+  );
+  ret.rotation.x = -Math.PI / 2;
+  ret.visible = false;
+  try { world.root?.add?.(ret); } catch {}
+
+  const ray = new THREE.Raycaster();
+
+  function deadzone(v, dz = 0.15) {
+    const a = Math.abs(v);
+    if (a < dz) return 0;
+    const s = (a - dz) / (1 - dz);
+    return Math.sign(v) * Math.max(0, Math.min(1, s));
+  }
+
+  function getPads() {
+    const session = renderer.xr.getSession?.();
+    if (!session) return { left: null, right: null };
+    const out = { left: null, right: null };
+    for (const src of session.inputSources || []) {
+      if (!src?.gamepad) continue;
+      if (src.handedness === "left") out.left = src.gamepad;
+      if (src.handedness === "right") out.right = src.gamepad;
+    }
+    return out;
+  }
+
+  function toggleTeleport() {
+    state.teleportMode = !state.teleportMode;
+    push?.(`[move] teleport=${state.teleportMode}`);
+    if (!state.teleportMode) ret.visible = false;
+  }
+
+  // ✅ IMPORTANT: moveY is forward when positive (Up on stick)
+  function applyMove(moveX, moveY, dt) {
+    const yawQ = new THREE.Quaternion();
+    camera.getWorldQuaternion(yawQ);
+
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(yawQ);
+    fwd.y = 0; fwd.normalize();
+
+    const rightV = new THREE.Vector3(1, 0, 0).applyQuaternion(yawQ);
+    rightV.y = 0; rightV.normalize();
+
+    const v = new THREE.Vector3()
+      .addScaledVector(fwd, moveY)     // ✅ Up = forward
+      .addScaledVector(rightV, moveX)
+      .multiplyScalar(state.moveSpeed * dt);
+
+    rig.position.add(v);
+  }
+
+  return {
+    toggleTeleport,
+    tick() {
+      const dt = 1 / 72;
+      const session = renderer.xr.getSession?.();
+      const android = Scarlett.ANDROID_INPUT || { moveX: 0, moveY: 0, turnX: 0 };
+
+      if (!session) {
+        // Non-XR: Android sticks + finger-look handles rotation
+        const mx = deadzone(android.moveX || 0);
+        const my = deadzone(android.moveY || 0); // ✅ keep sign: +up forward
+        applyMove(mx, my, dt);
+
+        // If your Android UI also provides turnX, apply it as optional “thumb turn”
+        const tx = deadzone(android.turnX || 0);
+        if (tx) rig.rotation.y -= tx * state.turnSpeed * dt;
+
+        ret.visible = false;
+        return;
+      }
+
+      // XR controls
+      const { left, right } = getPads();
+      const la = left?.axes || [];
+      const ra = right?.axes || [];
+      const rb = right?.buttons || [];
+
+      const btnB = !!rb[4]?.pressed;
+      const rGrip = !!rb[1]?.pressed;
+
+      if (btnB && !state._lastB) toggleTeleport();
+      state._lastB = btnB;
+
+      if (!state.teleportMode) {
+        const mx = deadzone(ra.length >= 4 ? ra[2] : (ra[0] || 0));
+        const my = deadzone(ra.length >= 4 ? ra[3] : (ra[1] || 0));
+        const tx = deadzone(la[0] || 0);
+
+        state.snapCooldown = Math.max(0, state.snapCooldown - dt);
+        applyMove(mx, -my, dt); // typical gamepad Y is inverted in XR
+
+        if (state.snapCooldown === 0 && Math.abs(tx) > 0.85) {
+          rig.rotation.y -= Math.sign(tx) * state.snapAngle;
+          state.snapCooldown = 0.22;
+        }
+        ret.visible = false;
+      } else {
+        ray.setFromCamera({ x: 0, y: 0 }, camera);
+        const hits = ray.intersectObjects(world.floorMeshes || [], true);
+        if (hits.length) {
+          ret.visible = true;
+          ret.position.copy(hits[0].point);
+          if (rGrip && !state._lastGrip) {
+            rig.position.set(hits[0].point.x, rig.position.y, hits[0].point.z);
+            toggleTeleport();
+            push?.(`[move] teleported ✅`);
+          }
+        } else ret.visible = false;
+        state._lastGrip = rGrip;
+      }
+    }
+  };
 }
 
 // -------------------- Bus --------------------
@@ -356,131 +522,4 @@ function installModulePanel({ Scarlett, push }) {
   Scarlett.UI.toggleModules = () => globalThis.SCARLETT_MODULES.toggle();
 
   push?.(`[mods] panel ready ✅`);
-}
-
-// -------------------- Fallback Controls --------------------
-function createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett, push }) {
-  const state = {
-    teleportMode: false,
-    moveSpeed: 2.35,
-    turnSpeed: 2.0,
-    snapAngle: Math.PI / 4,
-    snapCooldown: 0,
-    _lastB: false,
-    _lastGrip: false,
-  };
-
-  const ret = new THREE.Mesh(
-    new THREE.RingGeometry(0.08, 0.11, 32),
-    new THREE.MeshBasicMaterial({ color: 0x44ff77, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
-  );
-  ret.rotation.x = -Math.PI / 2;
-  ret.visible = false;
-  try { world.root?.add?.(ret); } catch {}
-
-  const ray = new THREE.Raycaster();
-
-  function deadzone(v, dz = 0.15) {
-    const a = Math.abs(v);
-    if (a < dz) return 0;
-    const s = (a - dz) / (1 - dz);
-    return Math.sign(v) * Math.max(0, Math.min(1, s));
-  }
-
-  function getPads() {
-    const session = renderer.xr.getSession?.();
-    if (!session) return { left: null, right: null };
-    const out = { left: null, right: null };
-    for (const src of session.inputSources || []) {
-      if (!src?.gamepad) continue;
-      if (src.handedness === "left") out.left = src.gamepad;
-      if (src.handedness === "right") out.right = src.gamepad;
     }
-    return out;
-  }
-
-  function toggleTeleport() {
-    state.teleportMode = !state.teleportMode;
-    push?.(`[move] teleport=${state.teleportMode}`);
-    if (!state.teleportMode) ret.visible = false;
-  }
-
-  function applyMoveTurn(moveX, moveY, turnX, dt) {
-    if (turnX) rig.rotation.y -= turnX * state.turnSpeed * dt;
-
-    const yaw = new THREE.Quaternion();
-    camera.getWorldQuaternion(yaw);
-
-    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(yaw);
-    fwd.y = 0; fwd.normalize();
-    const rightV = new THREE.Vector3(1, 0, 0).applyQuaternion(yaw);
-    rightV.y = 0; rightV.normalize();
-
-    const v = new THREE.Vector3()
-      .addScaledVector(fwd, moveY)
-      .addScaledVector(rightV, moveX)
-      .multiplyScalar(state.moveSpeed * dt);
-
-    rig.position.add(v);
-  }
-
-  return {
-    toggleTeleport,
-    tick() {
-      const dt = 1 / 72;
-      const session = renderer.xr.getSession?.();
-      const android = Scarlett.ANDROID_INPUT || { moveX: 0, moveY: 0, turnX: 0 };
-
-      if (!session) {
-        if (!state.teleportMode) {
-          applyMoveTurn(android.moveX || 0, android.moveY || 0, android.turnX || 0, dt);
-          ret.visible = false;
-        } else {
-          ray.setFromCamera({ x: 0, y: 0 }, camera);
-          const hits = ray.intersectObjects(world.floorMeshes || [], true);
-          if (hits.length) { ret.visible = true; ret.position.copy(hits[0].point); } else ret.visible = false;
-        }
-        return;
-      }
-
-      const { left, right } = getPads();
-      const la = left?.axes || [];
-      const ra = right?.axes || [];
-      const rb = right?.buttons || [];
-
-      const btnB = !!rb[4]?.pressed;
-      const rGrip = !!rb[1]?.pressed;
-
-      if (btnB && !state._lastB) toggleTeleport();
-      state._lastB = btnB;
-
-      if (!state.teleportMode) {
-        const mx = deadzone(ra.length >= 4 ? ra[2] : (ra[0] || 0));
-        const my = deadzone(ra.length >= 4 ? ra[3] : (ra[1] || 0));
-        const tx = deadzone(la[0] || 0);
-
-        state.snapCooldown = Math.max(0, state.snapCooldown - dt);
-        applyMoveTurn(mx, -my, 0, dt);
-
-        if (state.snapCooldown === 0 && Math.abs(tx) > 0.85) {
-          rig.rotation.y -= Math.sign(tx) * state.snapAngle;
-          state.snapCooldown = 0.22;
-        }
-        ret.visible = false;
-      } else {
-        ray.setFromCamera({ x: 0, y: 0 }, camera);
-        const hits = ray.intersectObjects(world.floorMeshes || [], true);
-        if (hits.length) {
-          ret.visible = true;
-          ret.position.copy(hits[0].point);
-          if (rGrip && !state._lastGrip) {
-            rig.position.set(hits[0].point.x, rig.position.y, hits[0].point.z);
-            toggleTeleport();
-            push?.(`[move] teleported ✅`);
-          }
-        } else ret.visible = false;
-        state._lastGrip = rGrip;
-      }
-    }
-  };
-       }

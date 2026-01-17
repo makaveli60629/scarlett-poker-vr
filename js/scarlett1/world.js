@@ -1,13 +1,11 @@
 // /js/scarlett1/world.js
-// SCARLETT1_WORLD_FULL_v4_7_NAV_LASER_TELEPORT_SNAP
-// - Bright world (no black void)
-// - Big floor + grid for orientation
-// - Clear table landmark
-// - Right-hand laser + floor reticle
-// - Teleport: right trigger OR right grip
-// - Snap turn: 45° on right stick X
-// - Smooth move: forward/back + strafe on right stick
-// - Left controller optional support if it reports
+// SCARLETT1_WORLD_FULL_v4_8_LASER_RETICLE_FIXED
+// - Bright world + grid
+// - Table landmark
+// - Right-hand laser that actually tracks
+// - Reticle + hit dot that follow laser hit
+// - Teleport only when hit is valid (no “stuck under table”)
+// - Snap turn 45° + smooth move + strafe
 
 import GestureControl from "../modules/gestureControl.js";
 
@@ -17,7 +15,7 @@ export async function bootWorld({ THREE, scene, renderer, camera, engine }) {
     console.log("[world]", s);
   };
 
-  log("bootWorld… SCARLETT1_WORLD_FULL_v4_7_NAV_LASER_TELEPORT_SNAP");
+  log("bootWorld… SCARLETT1_WORLD_FULL_v4_8_LASER_RETICLE_FIXED");
 
   // =========================
   // LIGHTING
@@ -46,7 +44,6 @@ export async function bootWorld({ THREE, scene, renderer, camera, engine }) {
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = 0;
   floor.name = "SCARLETT_FLOOR";
-  floor.receiveShadow = false;
   scene.add(floor);
 
   const grid = new THREE.GridHelper(200, 200, 0x3a3f55, 0x23283a);
@@ -89,7 +86,7 @@ export async function bootWorld({ THREE, scene, renderer, camera, engine }) {
   log(`GestureControl ✅ tableHeight=${GestureControl.tableHeight.toFixed(3)}`);
 
   // =========================
-  // XR CONTROLLERS (for laser origin)
+  // XR CONTROLLERS
   // =========================
   const rightCtrl = renderer.xr.getController(1);
   const leftCtrl  = renderer.xr.getController(0);
@@ -99,17 +96,18 @@ export async function bootWorld({ THREE, scene, renderer, camera, engine }) {
   scene.add(leftCtrl);
 
   // =========================
-  // LASER + RETICLE
+  // LASER + RETICLE + HIT DOT
   // =========================
   const raycaster = new THREE.Raycaster();
   const tmpOrigin = new THREE.Vector3();
   const tmpDir = new THREE.Vector3();
   const tmpHit = new THREE.Vector3();
+  const tmpQuat = new THREE.Quaternion();
 
-  // Laser line
+  // Laser line (attached to right controller)
   const laserGeom = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, 0, -1),
+    new THREE.Vector3(0, 0, -6),
   ]);
   const laserMat = new THREE.LineBasicMaterial({ color: 0xff3355 });
   const laserLine = new THREE.Line(laserGeom, laserMat);
@@ -128,66 +126,88 @@ export async function bootWorld({ THREE, scene, renderer, camera, engine }) {
   reticle.name = "TELEPORT_RETICLE";
   scene.add(reticle);
 
+  // Hit dot (white) so you can SEE tracking
+  const hitDot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.02, 16, 12),
+    new THREE.MeshBasicMaterial({ color: 0xffffff })
+  );
+  hitDot.visible = false;
+  hitDot.name = "LASER_HIT_DOT";
+  scene.add(hitDot);
+
+  function setLaserLength(dist) {
+    const arr = laserLine.geometry.attributes.position.array;
+    arr[0] = 0; arr[1] = 0; arr[2] = 0;
+    arr[3] = 0; arr[4] = 0; arr[5] = -dist;
+    laserLine.geometry.attributes.position.needsUpdate = true;
+  }
+
   function updateLaserAndReticle() {
     if (!renderer.xr.isPresenting) {
       reticle.visible = false;
+      hitDot.visible = false;
       laserLine.visible = false;
       return { hit: false };
     }
 
     laserLine.visible = true;
 
+    // Origin = controller position
     rightCtrl.getWorldPosition(tmpOrigin);
-    rightCtrl.getWorldDirection(tmpDir);
 
-    // Force direction out the "front" of controller (better than getWorldDirection sometimes)
-    // Use -Z of controller space:
-    tmpDir.set(0, 0, -1).applyQuaternion(rightCtrl.quaternion).normalize();
+    // Direction = controller forward (-Z)
+    rightCtrl.getWorldQuaternion(tmpQuat);
+    tmpDir.set(0, 0, -1).applyQuaternion(tmpQuat).normalize();
 
     raycaster.set(tmpOrigin, tmpDir);
+    raycaster.far = 60;
 
     const hits = raycaster.intersectObject(floor, false);
+
     if (hits && hits.length) {
       tmpHit.copy(hits[0].point);
+
+      // Move reticle + dot to hit
       reticle.position.set(tmpHit.x, 0.02, tmpHit.z);
       reticle.visible = true;
 
-      // Scale laser to hit distance
-      const dist = tmpOrigin.distanceTo(tmpHit);
-      const arr = laserLine.geometry.attributes.position.array;
-      arr[0] = 0; arr[1] = 0; arr[2] = 0;
-      arr[3] = 0; arr[4] = 0; arr[5] = -dist;
-      laserLine.geometry.attributes.position.needsUpdate = true;
+      hitDot.position.set(tmpHit.x, 0.03, tmpHit.z);
+      hitDot.visible = true;
 
-      return { hit: true, point: tmpHit.clone() };
-    } else {
-      reticle.visible = false;
-      return { hit: false };
+      // Laser scales to distance
+      const dist = tmpOrigin.distanceTo(tmpHit);
+      setLaserLength(dist);
+
+      return { hit: true, point: tmpHit.clone(), dist };
     }
+
+    // No hit => hide reticle/dot, keep a default laser length for visibility
+    reticle.visible = false;
+    hitDot.visible = false;
+    setLaserLength(6);
+
+    return { hit: false };
   }
 
   // =========================
-  // INPUT HELPERS
+  // INPUT + NAV
   // =========================
-  const move = {
-    speed: 2.1,       // m/s
-    strafe: 1.8,      // m/s
-    deadzone: 0.18,
-  };
+  const move = { speed: 2.1, strafe: 1.8, deadzone: 0.18 };
 
   const snap = {
     angle: THREE.MathUtils.degToRad(45),
     lock: false,
-    release: 0.25,
+    release: 0.25
   };
 
   const teleport = {
     lock: false,
-    release: 0.15,
+    release: 0.18
   };
 
   function getRightGamepad(session) {
     if (!session) return null;
+
     for (const src of session.inputSources) {
       if (src?.handedness === "right" && src?.gamepad) return src.gamepad;
     }
@@ -199,16 +219,11 @@ export async function bootWorld({ THREE, scene, renderer, camera, engine }) {
   }
 
   function applySnapTurn(axX) {
-    if (Math.abs(axX) < 0.6) {
-      snap.lock = false;
-      return;
-    }
+    if (Math.abs(axX) < 0.6) { snap.lock = false; return; }
     if (snap.lock) return;
 
     snap.lock = true;
-
-    // axX > 0 => turn right, axX < 0 => turn left
-    const dir = axX > 0 ? -1 : 1;
+    const dir = axX > 0 ? -1 : 1; // right = negative yaw (feels correct in most rigs)
     rig.rotation.y += dir * snap.angle;
 
     setTimeout(() => (snap.lock = false), snap.release * 1000);
@@ -216,13 +231,13 @@ export async function bootWorld({ THREE, scene, renderer, camera, engine }) {
 
   function doTeleport(hitPoint) {
     if (!hitPoint) return;
-    // move rig so camera ends up above hit point (keep current head height)
+
     const headWorld = new THREE.Vector3();
     camera.getWorldPosition(headWorld);
 
-    // current head offset within rig
     const rigWorld = new THREE.Vector3();
     rig.getWorldPosition(rigWorld);
+
     const offset = headWorld.sub(rigWorld);
 
     rig.position.set(hitPoint.x - offset.x, rig.position.y, hitPoint.z - offset.z);
@@ -238,47 +253,39 @@ export async function bootWorld({ THREE, scene, renderer, camera, engine }) {
       const session = renderer.xr.getSession?.();
       if (!session) return;
 
-      // Laser / reticle every frame
       const hit = updateLaserAndReticle();
 
-      // Right controller gamepad
       const gp = getRightGamepad(session);
       if (!gp) return;
 
-      // Axes (Quest typically: axes[2]=x, axes[3]=y on right stick)
       const axX = gp.axes?.[2] ?? 0;
       const axY = gp.axes?.[3] ?? 0;
 
-      // Buttons: attempt to map trigger/grip
-      const trigger = gp.buttons?.[0]?.value ?? 0; // common
-      const gripBtn = gp.buttons?.[1]?.value ?? 0; // common
+      // Buttons (best-effort Quest mapping)
+      const trigger = gp.buttons?.[0]?.value ?? 0;
+      const gripBtn = gp.buttons?.[1]?.value ?? 0;
 
-      // Snap turn on stick X (45-degree)
+      // 45° snap turn (right stick X)
       if (Math.abs(axX) > 0.6) applySnapTurn(axX);
 
-      // Smooth move: forward/back + strafe
+      // Smooth move + strafe
       const y = Math.abs(axY) > move.deadzone ? axY : 0;
       const x = Math.abs(axX) > move.deadzone ? axX : 0;
 
-      // Forward direction (flat)
       const fwd = new THREE.Vector3();
       camera.getWorldDirection(fwd);
       fwd.y = 0; fwd.normalize();
 
-      // Right direction (flat)
       const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
 
-      // Move: forward/back (invert y so forward is negative axis)
       rig.position.addScaledVector(fwd, (-y) * move.speed * dt);
-      // Strafe
       rig.position.addScaledVector(right, (x) * move.strafe * dt);
 
-      // Teleport on trigger OR grip (press past threshold)
+      // Teleport only when we have a valid hit point (prevents “stuck reticle teleport”)
       const wantsTeleport = (trigger > 0.75) || (gripBtn > 0.75);
-
       if (!wantsTeleport) teleport.lock = false;
 
-      if (wantsTeleport && !teleport.lock && hit.hit) {
+      if (wantsTeleport && !teleport.lock && hit.hit && hit.point) {
         teleport.lock = true;
         doTeleport(hit.point);
         setTimeout(() => (teleport.lock = false), teleport.release * 1000);

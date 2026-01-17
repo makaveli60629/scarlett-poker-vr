@@ -1,8 +1,8 @@
 // /js/scarlett1/index.js
-// SCARLETT1 — INDEX FRONT CONTROLLER (FULL • XR-SAFE WORLD RESOLVER)
-// Build: SCARLETT1_INDEX_FULL_v25_2_METAURL_WORLD_RESOLVER
+// SCARLETT1 — INDEX FRONT CONTROLLER (FULL • XR-SAFE WORLD RESOLVER + RIGHT-HAND GESTURE FEED)
+// Build: SCARLETT1_INDEX_FULL_v25_4_RIGHT_HAND_GESTURE
 
-const BUILD = "SCARLETT1_INDEX_FULL_v25_2_METAURL_WORLD_RESOLVER";
+const BUILD = "SCARLETT1_INDEX_FULL_v25_4_RIGHT_HAND_GESTURE";
 
 // ---- DIAG + CONSOLE fingerprint (must appear no matter what) ----
 const dwrite = (msg) => { try { window.__scarlettDiagWrite?.(String(msg)); } catch (_) {} };
@@ -29,7 +29,6 @@ window.__SCARLETT_ENGINE__ = window.SCARLETT.engine;
 
 // ---- AUTHORITATIVE PANEL OVERRIDE: module test endpoint (panel-proof) ----
 const forcedModuleTest = async () => {
-  // Prefer world orchestrator if available
   if (typeof window.__scarlettRunModuleTest === "function") {
     try {
       const r = await window.__scarlettRunModuleTest();
@@ -39,7 +38,6 @@ const forcedModuleTest = async () => {
     }
   }
 
-  // Fallback report (always works)
   const eng = window.SCARLETT?.engine;
   return {
     ok: true,
@@ -54,14 +52,12 @@ const forcedModuleTest = async () => {
   };
 };
 
-// Install in every likely name the panel might use
 window.SCARLETT.runModuleTest = forcedModuleTest;
 window.__scarlettRunModuleTest = window.__scarlettRunModuleTest || forcedModuleTest;
 window.__scarlettModuleTest = forcedModuleTest;
 window.__runModuleTest = forcedModuleTest;
 window.runModuleTest = forcedModuleTest;
 
-// Extra: some panels check these exact globals
 window.__scarlettEngineAttached = true;
 window.__scarlettEngine = window.SCARLETT.engine;
 
@@ -73,7 +69,6 @@ const log = (...a) => { console.log("[scarlett1]", ...a); dwrite(`[scarlett1] ${
 const warn = (...a) => { console.warn("[scarlett1]", ...a); dwrite(`[scarlett1][warn] ${a.join(" ")}`); };
 const err  = (...a) => { console.error("[scarlett1]", ...a); dwrite(`[scarlett1][err] ${a.join(" ")}`); };
 
-// ✅ Preflight fetch check so we can see 404 vs JS error
 async function canFetch(url) {
   try {
     const r = await fetch(url, { method: "GET", cache: "no-store" });
@@ -83,12 +78,9 @@ async function canFetch(url) {
   }
 }
 
-// ✅ XR-SAFE world resolver:
-// Uses the real URL of the currently-running index.js and resolves world.js beside it.
-// This defeats base-href/router rewriting issues completely.
 async function safeImportWorld(cacheTag = "") {
-  const base = new URL(import.meta.url);          // actual URL of /js/scarlett1/index.js
-  const worldURL = new URL("world.js", base);     // /js/scarlett1/world.js
+  const base = new URL(import.meta.url);
+  const worldURL = new URL("world.js", base);
   if (cacheTag) worldURL.searchParams.set("v", cacheTag);
 
   const url = worldURL.toString();
@@ -144,7 +136,6 @@ async function main() {
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
   camera.position.set(0, 1.6, 0);
 
-  // Update engine object (still attached)
   const engine = window.SCARLETT.engine = Object.assign(window.SCARLETT.engine || {}, {
     BUILD, THREE, scene, camera, renderer: null, world: null, errors: window.SCARLETT.engine?.errors || []
   });
@@ -172,7 +163,59 @@ async function main() {
     return;
   }
 
-  // World load (XR-safe resolver)
+  // --- Controllers (we will ONLY feed right-hand) ---
+  const ctrl0 = renderer.xr.getController(0);
+  const ctrl1 = renderer.xr.getController(1);
+  ctrl0.name = "XR_CONTROLLER_0";
+  ctrl1.name = "XR_CONTROLLER_1";
+  scene.add(ctrl0);
+  scene.add(ctrl1);
+
+  const motion = {
+    t: performance.now(),
+    last0: new THREE.Vector3(),
+    last1: new THREE.Vector3(),
+    init0: false,
+    init1: false
+  };
+
+  // Most Quests: controller(1) is right. We also pass handedness="right" so GestureControl enforces it.
+  const RIGHT_INDEX = 1;
+
+  function feedRightHand(dt) {
+    const GC = window.SCARLETT?.GestureControl;
+    if (!GC || typeof GC.update !== "function") return;
+
+    const obj = (RIGHT_INDEX === 0) ? ctrl0 : ctrl1;
+
+    const p = new THREE.Vector3();
+    obj.getWorldPosition(p);
+
+    if (RIGHT_INDEX === 0) {
+      if (!motion.init0) { motion.last0.copy(p); motion.init0 = true; return; }
+      const v = new THREE.Vector3().subVectors(p, motion.last0).multiplyScalar(1 / Math.max(dt, 1e-4));
+      motion.last0.copy(p);
+
+      GC.update({
+        handedness: "right",
+        position: { x: p.x, y: p.y, z: p.z },
+        velocity: { x: v.x, y: v.y, z: v.z }
+      });
+      return;
+    }
+
+    if (!motion.init1) { motion.last1.copy(p); motion.init1 = true; return; }
+    const v = new THREE.Vector3().subVectors(p, motion.last1).multiplyScalar(1 / Math.max(dt, 1e-4));
+    motion.last1.copy(p);
+
+    GC.update({
+      handedness: "right",
+      position: { x: p.x, y: p.y, z: p.z },
+      velocity: { x: v.x, y: v.y, z: v.z }
+    });
+  }
+
+  // World load
   const worldMod = await safeImportWorld(Date.now().toString());
   let WORLD;
 
@@ -196,7 +239,17 @@ async function main() {
   window.SCARLETT.world = WORLD;
 
   renderer.setAnimationLoop(() => {
-    try { WORLD?.update?.(0); } catch (_) {}
+    const tNow = performance.now();
+    const dt = (tNow - motion.t) / 1000;
+    motion.t = tNow;
+
+    try { WORLD?.update?.(dt); } catch (_) {}
+
+    // Only feed while XR is active
+    if (renderer.xr.isPresenting) {
+      feedRightHand(dt);
+    }
+
     renderer.render(scene, camera);
   });
 

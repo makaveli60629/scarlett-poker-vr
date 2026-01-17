@@ -1,121 +1,262 @@
-// /js/main.js — App entry (renderer + XR)
+import * as THREE from "three";
+import { VRButton } from "three/addons/webxr/VRButton.js";
 
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
-import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
-
+// MASTER spine: creates renderer, rig, diagnostics, and calls module hooks if present.
 export async function start(ctx) {
-  const { BOOT_VERSION, sessionInit, Diagnostics } = ctx;
+  const { log, modules } = ctx;
 
-  Diagnostics.ok('boot');
+  log(`[XR] navigator.xr = ${!!navigator.xr}`);
+  log(`[XR] secureContext = ${window.isSecureContext}`);
 
-  const app = document.getElementById('app');
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0b0f14);
+
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 500);
+  // IMPORTANT: camera must start at human height for non-VR preview; in VR local-floor takes over.
+  camera.position.set(0, 1.6, 3);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
-  app.appendChild(renderer.domElement);
+  renderer.xr.setReferenceSpaceType("local-floor");
+  document.body.appendChild(renderer.domElement);
 
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x050505);
+  document.body.appendChild(VRButton.createButton(renderer));
+  log("[XR] VRButton injected ✅ (look for 'ENTER VR')");
 
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
-  camera.position.set(0, 1.6, 3.2);
+  // Player rig so teleport / movement can move the world correctly
+  const rig = new THREE.Group();
+  rig.name = "player_rig";
+  rig.add(camera);
+  scene.add(rig);
 
-  const player = new THREE.Group();
-  player.add(camera);
-  scene.add(player);
-
-  // Basic lighting
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 1.0);
-  scene.add(hemi);
-  const dir = new THREE.DirectionalLight(0xffffff, 1.0);
-  dir.position.set(5, 8, 5);
+  // Lights
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x233044, 1.0));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.55);
+  dir.position.set(3, 8, 4);
   scene.add(dir);
 
-  // XR button
-  try {
-    const btn = VRButton.createButton(renderer, sessionInit);
-    document.body.appendChild(btn);
-    Diagnostics.ok('VRButton');
-  } catch (e) {
-    Diagnostics.fail('VRButton', e);
+  // Build world (your module OR our default)
+  const world = modules.world;
+  if (world?.build) {
+    try { await world.build({ scene, rig, camera, renderer, THREE, log, ctx }); }
+    catch(e){ log(`[world] build failed: ${e.message}`, "err"); console.error(e); }
+  } else {
+    defaultWorld({ scene, rig, THREE, log });
   }
 
-  // Safe-load the rest of the modules
-  const safe = async (label, path) => {
-    try {
-      Diagnostics.log('Import', `${label}: ${path}`);
-      const mod = await import(path + `?v=${BOOT_VERSION}`);
-      Diagnostics.ok(label);
-      return mod;
-    } catch (err) {
-      Diagnostics.fail(label, err);
-      return null;
-    }
-  };
+  // Controls / rays
+  let ctl = null;
+  if (modules.controls?.setupControls) {
+    try { ctl = await modules.controls.setupControls({ scene, rig, camera, renderer, THREE, log, ctx }); }
+    catch(e){ log(`[controls] setup failed: ${e.message}`, "err"); console.error(e); }
+  } else {
+    ctl = defaultControls({ scene, rig, camera, renderer, THREE, log });
+  }
 
-  const worldM = await safe('world', './world.js');
-  const tableM = await safe('table', './table.js');
-  const chairM = await safe('chair', './chair.js');
-  const uiM = await safe('ui', './ui.js');
-  const controlsM = await safe('controls', './controls.js');
-  const teleportM = await safe('teleport', './teleport.js');
-  const interactionsM = await safe('interactions', './interactions.js');
+  // Teleport wiring
+  let tp = null;
+  if (modules.teleport?.setupTeleport) {
+    try { tp = await modules.teleport.setupTeleport({ scene, rig, camera, renderer, THREE, log, ctx, controls: ctl }); }
+    catch(e){ log(`[teleport] setup failed: ${e.message}`, "err"); console.error(e); }
+  } else {
+    tp = defaultTeleport({ scene, rig, camera, renderer, THREE, log, controls: ctl });
+  }
 
-  // Build world
-  const world = worldM?.createWorld ? worldM.createWorld({ THREE, scene, Diagnostics }) : null;
-  const table = tableM?.createTable ? tableM.createTable({ THREE, scene, Diagnostics }) : null;
-  const chairs = chairM?.createChairs ? chairM.createChairs({ THREE, scene, Diagnostics }) : [];
+  // UI hook
+  if (modules.ui?.init) {
+    try { await modules.ui.init({ scene, rig, camera, renderer, THREE, log, ctx, controls: ctl }); }
+    catch(e){ log(`[ui] init failed: ${e.message}`, "err"); console.error(e); }
+  }
 
-  const ui = uiM?.createUI ? uiM.createUI({ THREE, scene, camera, Diagnostics }) : null;
-
-  // Controls + teleport + interactions
-  const controls = controlsM?.createControls ? controlsM.createControls({ THREE, renderer, scene, player, camera, Diagnostics }) : null;
-  const teleport = teleportM?.createTeleport ? teleportM.createTeleport({ THREE, renderer, scene, player, camera, Diagnostics }) : null;
-  const interactions = interactionsM?.createInteractions ? interactionsM.createInteractions({ THREE, renderer, scene, camera, Diagnostics }) : null;
-
-  // Spawn safely (never inside table)
-  safeSpawn(player, Diagnostics);
-
-  // Resize handling
-  window.addEventListener('resize', () => {
+  // Resize
+  window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  Diagnostics.kv('app.version', String(BOOT_VERSION));
-  Diagnostics.kv('three', THREE.REVISION);
-
-  // Main loop
-  const clock = new THREE.Clock();
+  // Animation loop (calls module ticks if provided)
   renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.05);
-
-    // update modules (if present)
-    world?.update?.(dt);
-    table?.update?.(dt);
-    chairs?.forEach(c => c?.update?.(dt));
-
-    controls?.update?.(dt);
-
-    // feed controls into teleport + interactions
-    const rays = controls?.getRays?.() || {};
-    const buttons = controls?.getButtons?.() || {};
-    Diagnostics.setButtons(buttons);
-
-    ui?.update?.(dt, { buttons });
-
-    teleport?.update?.(dt, { rays, buttons, floor: world?.floorMesh });
-    interactions?.update?.(dt, { rays, buttons, targets: ui?.targets || [] });
-
+    try { ctl?.tick?.(); } catch {}
+    try { tp?.tick?.(); } catch {}
+    try { modules.world?.tick?.({ scene, rig, camera, renderer, THREE, log, ctx }); } catch {}
     renderer.render(scene, camera);
   });
+
+  log("✅ XR LOOP RUNNING");
 }
 
-function safeSpawn(player, Diagnostics) {
-  // Behind the table, human height, facing toward origin.
-  player.position.set(0, 0, 3.2);
-  player.rotation.set(0, 0, 0);
-  Diagnostics.kv('spawn', JSON.stringify({ x:0, y:0, z:3.2 }));
+function defaultWorld({ scene, rig, THREE, log }) {
+  // Floor + grid
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(30, 30),
+    new THREE.MeshStandardMaterial({ color: 0x1d2430, roughness: 1, metalness: 0 })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.name = "floor";
+  floor.userData.isFloor = true;
+  scene.add(floor);
+
+  const grid = new THREE.GridHelper(30, 30, 0x2a3646, 0x16202b);
+  grid.position.y = 0.002;
+  scene.add(grid);
+
+  // Spawn marker in front of player
+  const marker = new THREE.Mesh(
+    new THREE.SphereGeometry(0.09, 20, 20),
+    new THREE.MeshStandardMaterial({ color: 0x00ff66 })
+  );
+  marker.position.set(0, 1.5, -2.0);
+  marker.name = "spawn_marker";
+  scene.add(marker);
+
+  // Simple "table" placeholder so you feel grounded
+  const tableTop = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.2, 1.2, 0.08, 48),
+    new THREE.MeshStandardMaterial({ color: 0x0e7c3a, roughness: 0.9 })
+  );
+  tableTop.position.set(0, 0.95, -4.2);
+  scene.add(tableTop);
+
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.22, 0.35, 0.9, 24),
+    new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 1 })
+  );
+  base.position.set(0, 0.45, -4.2);
+  scene.add(base);
+
+  // 6 chairs
+  for (let i=0;i<6;i++){
+    const ang = (i/6)*Math.PI*2;
+    const r = 2.2;
+    const x = Math.cos(ang)*r;
+    const z = -4.2 + Math.sin(ang)*r;
+    const seat = new THREE.Mesh(
+      new THREE.BoxGeometry(0.45, 0.06, 0.45),
+      new THREE.MeshStandardMaterial({ color: 0x6f6f6f, roughness: 1 })
+    );
+    seat.position.set(x, 0.55, z);
+    seat.rotation.y = -ang;
+    scene.add(seat);
+  }
+
+  // Safe spawn (behind marker) using rig
+  rig.position.set(0, 0, 0);
+  log("[world] default world ready ✅ (floor + table + chairs)");
+}
+
+function defaultControls({ scene, rig, camera, renderer, THREE, log }) {
+  const controllers = [];
+  const rays = [];
+  const last = [{}, {}];
+
+  const makeRay = () => {
+    const geom = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 0, -1),
+    ]);
+    const line = new THREE.Line(geom, new THREE.LineBasicMaterial());
+    line.scale.z = 6;
+    return line;
+  };
+
+  for (let i=0;i<2;i++){
+    const c = renderer.xr.getController(i);
+    c.userData.index = i;
+    scene.add(c);
+    controllers.push(c);
+
+    const ray = makeRay();
+    c.add(ray);
+    rays.push(ray);
+
+    c.addEventListener("connected", (e) => {
+      c.userData.gamepad = e.data.gamepad || null;
+      log(`🎮 Controller ${i} connected: ${e.data.gamepad?.id || "unknown"}`);
+    });
+    c.addEventListener("disconnected", () => {
+      c.userData.gamepad = null;
+      log(`🎮 Controller ${i} disconnected`);
+    });
+
+    // Standard WebXR events (Quest)
+    c.addEventListener("selectstart", () => log(`🧪 pad${i} selectstart`));
+    c.addEventListener("selectend",   () => log(`🧪 pad${i} selectend`));
+    c.addEventListener("squeezestart",() => log(`🧪 pad${i} squeezestart`));
+    c.addEventListener("squeezeend",  () => log(`🧪 pad${i} squeezeend`));
+  }
+
+  function tick(){
+    // Also poll gamepads to learn button indices (only logs on change)
+    for (let i=0;i<controllers.length;i++){
+      const gp = controllers[i].userData.gamepad;
+      if (!gp?.buttons) continue;
+      for (let b=0;b<gp.buttons.length;b++){
+        const p = !!gp.buttons[b].pressed;
+        if (last[i][b] !== p){
+          last[i][b] = p;
+          log(`🧪 pad${i} button${b}=${p?"DOWN":"UP"}`);
+        }
+      }
+    }
+  }
+
+  log("[controls] default controls ready ✅ (rays + diagnostics)");
+  return { controllers, rays, tick };
+}
+
+function defaultTeleport({ scene, rig, camera, renderer, THREE, log, controls }) {
+  const raycaster = new THREE.Raycaster();
+  const tmpMat = new THREE.Matrix4();
+  const tmpDir = new THREE.Vector3();
+  const tmpPos = new THREE.Vector3();
+  const reticle = new THREE.Mesh(
+    new THREE.RingGeometry(0.18, 0.24, 32),
+    new THREE.MeshStandardMaterial({ color: 0x00ff66, roughness: 0.6 })
+  );
+  reticle.rotation.x = -Math.PI/2;
+  reticle.visible = false;
+  scene.add(reticle);
+
+  const floors = () => scene.children.filter(o => o.userData?.isFloor || o.name==="floor");
+
+  function castFromController(ctrl){
+    if (!ctrl) return null;
+    tmpMat.identity().extractRotation(ctrl.matrixWorld);
+    tmpDir.set(0,0,-1).applyMatrix4(tmpMat).normalize();
+    ctrl.getWorldPosition(tmpPos);
+    raycaster.set(tmpPos, tmpDir);
+    const hits = raycaster.intersectObjects(floors(), true);
+    return hits?.[0] || null;
+  }
+
+  // Bind teleport to RIGHT controller selectend (typical trigger)
+  const right = controls?.controllers?.[1] || renderer.xr.getController(1);
+  right.addEventListener("selectend", () => {
+    const hit = castFromController(right);
+    if (hit){
+      rig.position.x = hit.point.x;
+      rig.position.z = hit.point.z;
+      // keep rig y at 0 for local-floor
+      rig.position.y = 0;
+      log(`✅ Teleport → x=${hit.point.x.toFixed(2)} z=${hit.point.z.toFixed(2)}`);
+    } else {
+      log("⚠️ Teleport: no floor hit", "warn");
+    }
+  });
+
+  function tick(){
+    const hit = castFromController(right);
+    if (hit){
+      reticle.position.copy(hit.point);
+      reticle.visible = true;
+    } else {
+      reticle.visible = false;
+    }
+  }
+
+  log("[teleport] default teleport ready ✅ (right trigger = teleport)");
+  return { tick };
 }

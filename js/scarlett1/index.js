@@ -1,12 +1,11 @@
 // /js/scarlett1/index.js
-// SCARLETT1 — INDEX FULL (ENGINE ATTACH FIRST • NEVER FAIL PANEL)
-// Build: SCARLETT1_INDEX_FULL_v24_1_ENGINE_ATTACH_FIRST
+// SCARLETT1 — INDEX FULL (AUTHORITATIVE: ENGINE ATTACH + WORLD PREFLIGHT + PANEL COMPAT)
+// Build: SCARLETT1_INDEX_FULL_v24_2_PANEL_COMPAT_WORLD_PREFLIGHT
 
-const BUILD = "SCARLETT1_INDEX_FULL_v24_1_ENGINE_ATTACH_FIRST";
+const BUILD = "SCARLETT1_INDEX_FULL_v24_2_PANEL_COMPAT_WORLD_PREFLIGHT";
 
-const dwrite = (msg) => {
-  try { window.__scarlettDiagWrite?.(String(msg)); } catch (_) {}
-};
+// --- diag writer (if boot provides it) ---
+const dwrite = (msg) => { try { window.__scarlettDiagWrite?.(String(msg)); } catch (_) {} };
 
 const log = (...a) => { console.log("[scarlett1]", ...a); dwrite(`[scarlett1] ${a.join(" ")}`); };
 const warn = (...a) => { console.warn("[scarlett1]", ...a); dwrite(`[scarlett1][warn] ${a.join(" ")}`); };
@@ -18,27 +17,66 @@ import { VRButton } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRB
 
 function nowISO() { return new Date().toISOString(); }
 
-// ✅ Create & attach a minimal engine immediately (before WebGL / DOM work)
+// ✅ Attach engine flags in ALL legacy locations so Android Panel never misses it
 function attachEngineStubEarly() {
   window.SCARLETT = window.SCARLETT || {};
   window.SCARLETT.BUILD = BUILD;
   window.SCARLETT.time = nowISO();
-  window.SCARLETT.engineAttached = true;     // ✅ panel check satisfied ASAP
-  window.SCARLETT.indexAlive = true;         // extra breadcrumb
-  window.SCARLETT.engine = window.SCARLETT.engine || { BUILD, startedAt: window.SCARLETT.time };
+
+  // Primary flags
+  window.SCARLETT.engineAttached = true;
+  window.SCARLETT.indexAlive = true;
+
+  // Legacy/alias flags (panel might check any of these)
+  window.__scarlettEngineAttached = true;
+  window.__SCARLETT_ENGINE_ATTACHED__ = true;
+  window.__scarlettIndexAlive = true;
+
+  // Engine object stub
+  window.SCARLETT.engine = window.SCARLETT.engine || { BUILD, startedAt: window.SCARLETT.time, errors: [] };
+
   dwrite(`[scarlett1] engine stub attached ✅ ${BUILD}`);
 }
-
 attachEngineStubEarly();
+
+function broadcastEngineAttached(engine) {
+  window.SCARLETT = window.SCARLETT || {};
+  window.SCARLETT.engine = engine;
+  window.SCARLETT.engineAttached = true;
+  window.SCARLETT.attached = true;
+  window.SCARLETT.ok = true;
+
+  // aliases
+  window.__scarlettEngine = engine;
+  window.__scarlettEngineAttached = true;
+  window.__SCARLETT_ENGINE__ = engine;
+  window.__SCARLETT_ENGINE_ATTACHED__ = true;
+}
+
+// ✅ Preflight fetch check so we can see 404 vs JS error
+async function canFetch(url) {
+  try {
+    const r = await fetch(url, { method: "GET", cache: "no-store" });
+    return { ok: r.ok, status: r.status, ct: r.headers.get("content-type") || "" };
+  } catch (e) {
+    return { ok: false, status: 0, ct: "", error: e?.message || String(e) };
+  }
+}
 
 async function safeImportWorld(cacheTag = "") {
   const url = `./world.js${cacheTag ? `?v=${cacheTag}` : ""}`;
+
+  const check = await canFetch(url);
+  log(`world preflight: ok=${check.ok} status=${check.status} ct=${check.ct}${check.error ? ` err=${check.error}` : ""}`);
+
+  if (!check.ok) return null;
+
   try {
     const mod = await import(url);
     log("world import ✅", url);
     return mod;
   } catch (e) {
-    err("world import FAILED ❌", url, e?.message || e);
+    err("world import FAILED ❌", url, e?.message || String(e));
     return null;
   }
 }
@@ -69,18 +107,33 @@ function buildFallbackWorld(scene) {
   table.position.set(0, 0.80, -1.25);
   scene.add(table);
 
-  return { tableHeight: 0.80, table };
+  return { tableHeight: 0.80, table, update(){} };
 }
+
+// ✅ Fallback module test so Android Panel always gets a response (even without world.js)
+window.__scarlettRunModuleTest = window.__scarlettRunModuleTest || (async () => {
+  const eng = window.SCARLETT?.engine;
+  return {
+    ok: true,
+    time: new Date().toISOString(),
+    build: BUILD,
+    note: "Fallback module test (world.js not loaded or panel not wired to world orchestrator).",
+    engineAttached: !!window.SCARLETT?.engineAttached,
+    renderer: !!eng?.renderer,
+    worldLoaded: !!eng?.world,
+    errors: eng?.errors || []
+  };
+});
 
 async function main() {
   log("booting…", BUILD);
 
-  // Create scene/camera first (safe)
+  // Safe: create scene/camera first
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
   camera.position.set(0, 1.6, 0);
 
-  // ✅ Update the already-attached engine object early
+  // Create engine object early and broadcast it
   const engine = window.SCARLETT.engine = Object.assign(window.SCARLETT.engine || {}, {
     BUILD,
     THREE,
@@ -89,10 +142,13 @@ async function main() {
     renderer: null,
     startedAt: window.SCARLETT.time || nowISO(),
     world: null,
-    errors: []
+    errors: window.SCARLETT.engine?.errors || []
   });
 
-  // Now do the “fragile” stuff in a try/catch so engine stays attached even on failure
+  broadcastEngineAttached(engine);
+  log("engine broadcast ✅");
+
+  // Fragile part: renderer + DOM + VRButton
   let renderer = null;
   try {
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -100,12 +156,10 @@ async function main() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.xr.enabled = true;
 
-    // DOM attach
     document.body.style.margin = "0";
     document.body.style.overflow = "hidden";
     document.body.appendChild(renderer.domElement);
 
-    // VR button
     document.body.appendChild(VRButton.createButton(renderer));
 
     engine.renderer = renderer;
@@ -114,13 +168,10 @@ async function main() {
     const msg = e?.message || String(e);
     engine.errors.push({ stage: "renderer", error: msg });
     err("renderer init failed ❌ (engine still attached)", msg);
-
-    // Even if renderer failed, create a simple fallback render attempt is not possible.
-    // But we keep engineAttached true so your panel can still operate.
     return;
   }
 
-  // --- world import (SAFE) ---
+  // World load (with preflight)
   const worldMod = await safeImportWorld(Date.now().toString());
   let WORLD = null;
 
@@ -143,13 +194,12 @@ async function main() {
   engine.world = WORLD;
   window.SCARLETT.world = WORLD;
 
-  // --- render loop ---
+  // Render loop
   renderer.setAnimationLoop(() => {
     try { WORLD?.update?.(0); } catch (_) {}
     renderer.render(scene, camera);
   });
 
-  // resize
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -162,8 +212,11 @@ async function main() {
 main().catch((e) => {
   const msg = e?.message || String(e);
   window.SCARLETT = window.SCARLETT || {};
-  window.SCARLETT.engineAttached = true; // keep true no matter what
+  window.SCARLETT.engineAttached = true;
+  window.__scarlettEngineAttached = true;
+
   window.SCARLETT.engine = window.SCARLETT.engine || { BUILD, errors: [] };
   window.SCARLETT.engine.errors.push({ stage: "fatal", error: msg });
+
   err("fatal boot error", msg);
 });

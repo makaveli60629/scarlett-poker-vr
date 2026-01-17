@@ -1,196 +1,273 @@
 // /js/modules/audioLogic.js
-// SCARLETT VR POKER — Procedural Poker Audio (FULL)
-// GitHub Pages safe • WebXR safe • Quest safe
+// SCARLETT POKER AUDIO LOGIC (FULL) v1.1
+// - Procedural SFX tuned for Quest/Android
+// - Master bus with gentle limiter (prevents clipping)
+// - Consistent params: { volume, intensity, duration }
+// - Safe init/unlock patterns
 
 export const PokerAudio = {
   ctx: null,
   master: null,
-  sfxBus: null,
   limiter: null,
-  _noiseBuffer: null,
+  post: null,
   _unlocked: false,
 
-  async init({ volume = 0.55 } = {}) {
-    if (this.ctx) return;
+  init(opts = {}) {
+    if (this.ctx) return this.ctx;
 
-    const AC = window.AudioContext || window.webkitAudioContext;
-    this.ctx = new AC();
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    this.ctx = new AudioCtx();
 
+    const volume = typeof opts.volume === "number" ? opts.volume : 0.55;
+
+    // Master gain
     this.master = this.ctx.createGain();
     this.master.gain.value = volume;
 
-    this.sfxBus = this.ctx.createGain();
-    this.sfxBus.gain.value = 1.0;
+    // "Poor-man limiter": waveshaper + post-gain
+    // (WebAudio has no native compressor-limiter that’s truly transparent on all devices;
+    // this combo is stable on Quest.)
+    this.limiter = this.ctx.createWaveShaper();
+    this.limiter.curve = this._makeSoftClipCurve(0.90);
+    this.limiter.oversample = "4x";
 
-    // Quest-friendly soft limiter
-    this.limiter = this.ctx.createDynamicsCompressor();
-    this.limiter.threshold.value = -14;
-    this.limiter.knee.value = 18;
-    this.limiter.ratio.value = 6;
-    this.limiter.attack.value = 0.003;
-    this.limiter.release.value = 0.12;
+    this.post = this.ctx.createGain();
+    this.post.gain.value = 1.0;
 
-    this.sfxBus.connect(this.limiter);
-    this.limiter.connect(this.master);
-    this.master.connect(this.ctx.destination);
+    this.master.connect(this.limiter);
+    this.limiter.connect(this.post);
+    this.post.connect(this.ctx.destination);
 
-    this._noiseBuffer = this._makeNoiseBuffer(1.0);
-    await this.unlock();
+    return this.ctx;
+  },
+
+  setVolume(v = 0.55) {
+    if (!this.master) return;
+    this.master.gain.setTargetAtTime(Math.max(0, Math.min(1, v)), this.ctx.currentTime, 0.01);
   },
 
   async unlock() {
-    if (!this.ctx) return;
-    if (this.ctx.state === "suspended") {
-      try { await this.ctx.resume(); } catch (_) {}
-    }
+    // Call on pointerdown/touchstart to satisfy autoplay policies
+    if (!this.ctx) this.init();
+    if (this._unlocked) return true;
 
-    // Prime graph once to satisfy mobile policies
-    if (!this._unlocked) {
-      const t = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
+    try {
+      if (this.ctx.state === "suspended") await this.ctx.resume();
+
+      // Silent tick to force audio graph start
+      const o = this.ctx.createOscillator();
       const g = this.ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t);
-      osc.frequency.setValueAtTime(30, t);
-      osc.connect(g);
-      g.connect(this.sfxBus);
-      osc.start(t);
-      osc.stop(t + 0.01);
+      g.gain.value = 0.00001;
+      o.connect(g);
+      g.connect(this.master);
+      o.start();
+      o.stop(this.ctx.currentTime + 0.02);
+
       this._unlocked = true;
+      return true;
+    } catch {
+      return false;
     }
   },
 
-  setVolume(v) {
-    if (!this.master || !this.ctx) return;
-    const vv = Math.max(0, Math.min(1, v));
-    this.master.gain.setTargetAtTime(vv, this.ctx.currentTime, 0.02);
+  // ---------- SOUND HELPERS ----------
+  _makeSoftClipCurve(amount = 0.9) {
+    const n = 4096;
+    const curve = new Float32Array(n);
+    const k = amount * 20; // softness
+    for (let i = 0; i < n; i++) {
+      const x = (i * 2) / (n - 1) - 1;
+      curve[i] = (1 + k) * x / (1 + k * Math.abs(x));
+    }
+    return curve;
   },
 
-  // ---------------- helpers ----------------
-  _rand(min, max) { return min + Math.random() * (max - min); },
+  _env(gainNode, t0, a, d, peak) {
+    const g = gainNode.gain;
+    g.cancelScheduledValues(t0);
+    g.setValueAtTime(0.0001, t0);
+    g.linearRampToValueAtTime(peak, t0 + a);
+    g.exponentialRampToValueAtTime(0.0001, t0 + a + d);
+  },
 
-  _makeNoiseBuffer(seconds = 1.0) {
+  _noiseBuffer(seconds = 1.0) {
     const sr = this.ctx.sampleRate;
     const len = Math.max(1, Math.floor(sr * seconds));
-    const buffer = this.ctx.createBuffer(1, len, sr);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1);
-    return buffer;
+    const buf = this.ctx.createBuffer(1, len, sr);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    return buf;
   },
 
-  _env(gainNode, t, a = 0.005, d = 0.12, peak = 0.3, end = 0.0008) {
-    gainNode.gain.cancelScheduledValues(t);
-    gainNode.gain.setValueAtTime(0.00001, t);
-    gainNode.gain.linearRampToValueAtTime(peak, t + a);
-    gainNode.gain.exponentialRampToValueAtTime(end, t + a + d);
-  },
+  // ---------- SFX ----------
+  // Card slide: noise + bandpass sweep + short env
+  playCardSlide(opts = {}) {
+    if (!this.ctx) this.init();
+    const intensity = typeof opts.intensity === "number" ? opts.intensity : 1.0;
+    const duration = typeof opts.duration === "number" ? opts.duration : 0.12;
 
-  // ---------------- SFX ----------------
-  playCardSlide({ intensity = 1.0 } = {}) {
-    if (!this.ctx) return;
-    const t = this.ctx.currentTime;
-
-    const osc = this.ctx.createOscillator();
-    const g = this.ctx.createGain();
-    const lp = this.ctx.createBiquadFilter();
-
-    osc.type = "sawtooth";
-    lp.type = "lowpass";
-    lp.Q.value = 0.6;
-
-    const baseF = 420 * this._rand(0.9, 1.12);
-    osc.frequency.setValueAtTime(baseF, t);
-    osc.frequency.exponentialRampToValueAtTime(140 * this._rand(0.95, 1.1), t + 0.10);
-
-    lp.frequency.setValueAtTime(1200, t);
-    lp.frequency.exponentialRampToValueAtTime(650, t + 0.10);
-
-    this._env(g, t, 0.003, 0.11, 0.06 * intensity, 0.0006);
-
-    osc.connect(lp);
-    lp.connect(g);
-    g.connect(this.sfxBus);
-
-    osc.start(t);
-    osc.stop(t + 0.12);
-  },
-
-  playChipSingle({ intensity = 1.0 } = {}) {
-    if (!this.ctx) return;
-    const t = this.ctx.currentTime;
-
-    const osc = this.ctx.createOscillator();
-    const g = this.ctx.createGain();
-
-    osc.type = "sine";
-    const f = 2600 * this._rand(0.92, 1.12);
-    osc.frequency.setValueAtTime(f, t);
-    osc.frequency.exponentialRampToValueAtTime(f * 0.72, t + 0.06);
-
-    this._env(g, t, 0.002, 0.07, 0.18 * intensity, 0.001);
-
-    osc.connect(g);
-    g.connect(this.sfxBus);
-
-    osc.start(t);
-    osc.stop(t + 0.08);
-  },
-
-  playTableKnock({ intensity = 1.0 } = {}) {
-    if (!this.ctx) return;
-    const t = this.ctx.currentTime;
-
-    const osc = this.ctx.createOscillator();
-    const g = this.ctx.createGain();
-    const lp = this.ctx.createBiquadFilter();
-
-    osc.type = "triangle";
-    lp.type = "lowpass";
-    lp.frequency.value = 260;
-
-    const f0 = 160 * this._rand(0.9, 1.15);
-    osc.frequency.setValueAtTime(f0, t);
-    osc.frequency.exponentialRampToValueAtTime(46, t + 0.14);
-
-    this._env(g, t, 0.002, 0.14, 0.55 * intensity, 0.001);
-
-    osc.connect(lp);
-    lp.connect(g);
-    g.connect(this.sfxBus);
-
-    osc.start(t);
-    osc.stop(t + 0.16);
-  },
-
-  // Vacuum / pot win: looped noise + sweeping bandpass + envelope
-  playPotVacuum({ duration = 1.6, intensity = 1.0 } = {}) {
-    if (!this.ctx) return;
-    const t = this.ctx.currentTime;
+    const t0 = this.ctx.currentTime;
 
     const src = this.ctx.createBufferSource();
-    src.buffer = this._noiseBuffer;
-    src.loop = true;
+    src.buffer = this._noiseBuffer(duration);
+
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.setValueAtTime(500, t0);
 
     const bp = this.ctx.createBiquadFilter();
     bp.type = "bandpass";
-    bp.Q.value = this._rand(2.5, 7.0);
+    bp.Q.value = 0.9;
+    bp.frequency.setValueAtTime(1600, t0);
+    bp.frequency.exponentialRampToValueAtTime(700, t0 + duration);
 
     const g = this.ctx.createGain();
+    this._env(g, t0, 0.005, duration, 0.06 * intensity);
 
-    const fStart = this._rand(160, 260);
-    const fEnd = this._rand(1600, 2800);
-
-    bp.frequency.setValueAtTime(fStart, t);
-    bp.frequency.exponentialRampToValueAtTime(fEnd, t + duration);
-
-    g.gain.setValueAtTime(0.00001, t);
-    g.gain.linearRampToValueAtTime(0.26 * intensity, t + 0.08);
-    g.gain.exponentialRampToValueAtTime(0.0008, t + duration);
-
-    src.connect(bp);
+    src.connect(hp);
+    hp.connect(bp);
     bp.connect(g);
-    g.connect(this.sfxBus);
+    g.connect(this.master);
 
-    src.start(t);
-    src.stop(t + duration + 0.05);
-  }
+    src.start(t0);
+    src.stop(t0 + duration);
+  },
+
+  // Chip clink: two sines + tiny noise click
+  playChipSingle(opts = {}) {
+    if (!this.ctx) this.init();
+    const intensity = typeof opts.intensity === "number" ? opts.intensity : 1.0;
+    const t0 = this.ctx.currentTime;
+
+    const g = this.ctx.createGain();
+    this._env(g, t0, 0.002, 0.09, 0.20 * intensity);
+
+    // Main partial
+    const o1 = this.ctx.createOscillator();
+    o1.type = "sine";
+    o1.frequency.setValueAtTime(2400, t0);
+    o1.frequency.exponentialRampToValueAtTime(1200, t0 + 0.08);
+
+    // Secondary partial
+    const o2 = this.ctx.createOscillator();
+    o2.type = "sine";
+    o2.frequency.setValueAtTime(3200, t0);
+    o2.frequency.exponentialRampToValueAtTime(1600, t0 + 0.07);
+
+    // tiny click noise
+    const n = this.ctx.createBufferSource();
+    n.buffer = this._noiseBuffer(0.02);
+
+    const nlp = this.ctx.createBiquadFilter();
+    nlp.type = "lowpass";
+    nlp.frequency.setValueAtTime(6000, t0);
+
+    const ng = this.ctx.createGain();
+    ng.gain.setValueAtTime(0.06 * intensity, t0);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.02);
+
+    o1.connect(g);
+    o2.connect(g);
+    n.connect(nlp);
+    nlp.connect(ng);
+
+    g.connect(this.master);
+    ng.connect(this.master);
+
+    o1.start(t0); o2.start(t0);
+    n.start(t0);
+
+    o1.stop(t0 + 0.10);
+    o2.stop(t0 + 0.10);
+    n.stop(t0 + 0.03);
+  },
+
+  // Table knock: triangle + low boom
+  playTableKnock(opts = {}) {
+    if (!this.ctx) this.init();
+    const intensity = typeof opts.intensity === "number" ? opts.intensity : 1.0;
+    const t0 = this.ctx.currentTime;
+
+    const g = this.ctx.createGain();
+    this._env(g, t0, 0.002, 0.16, 0.55 * intensity);
+
+    const o = this.ctx.createOscillator();
+    o.type = "triangle";
+    o.frequency.setValueAtTime(170, t0);
+    o.frequency.exponentialRampToValueAtTime(55, t0 + 0.16);
+
+    // Low thump
+    const o2 = this.ctx.createOscillator();
+    o2.type = "sine";
+    o2.frequency.setValueAtTime(90, t0);
+    o2.frequency.exponentialRampToValueAtTime(45, t0 + 0.12);
+
+    const g2 = this.ctx.createGain();
+    this._env(g2, t0, 0.002, 0.12, 0.25 * intensity);
+
+    o.connect(g);
+    o2.connect(g2);
+
+    g.connect(this.master);
+    g2.connect(this.master);
+
+    o.start(t0); o2.start(t0);
+    o.stop(t0 + 0.18);
+    o2.stop(t0 + 0.14);
+  },
+
+  // Pot vacuum: noise through sweeping bandpass + subtle sine “pull”
+  playPotVacuum(opts = {}) {
+    if (!this.ctx) this.init();
+    const intensity = typeof opts.intensity === "number" ? opts.intensity : 1.0;
+    const duration = typeof opts.duration === "number" ? opts.duration : 1.5;
+
+    const t0 = this.ctx.currentTime;
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = this._noiseBuffer(duration);
+
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.setValueAtTime(120, t0);
+
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.Q.value = 1.4;
+
+    // suction sweep
+    bp.frequency.setValueAtTime(220, t0);
+    bp.frequency.exponentialRampToValueAtTime(2400, t0 + duration);
+
+    // gentle resonance gain
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(0.30 * intensity, t0 + 0.10);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+
+    // subtle tonal “pull” layer
+    const tone = this.ctx.createOscillator();
+    tone.type = "sine";
+    tone.frequency.setValueAtTime(140, t0);
+    tone.frequency.exponentialRampToValueAtTime(420, t0 + duration);
+
+    const tg = this.ctx.createGain();
+    tg.gain.setValueAtTime(0.0001, t0);
+    tg.gain.linearRampToValueAtTime(0.07 * intensity, t0 + 0.10);
+    tg.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+
+    src.connect(hp);
+    hp.connect(bp);
+    bp.connect(g);
+    g.connect(this.master);
+
+    tone.connect(tg);
+    tg.connect(this.master);
+
+    src.start(t0);
+    src.stop(t0 + duration);
+
+    tone.start(t0);
+    tone.stop(t0 + duration);
+  },
 };

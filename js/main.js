@@ -1,141 +1,121 @@
-// js/main.js — Scarlett XR Orchestrated Runtime v4.6
-import * as THREE from 'three';
-import { Diag } from './diag.js';
-import { UI } from './ui.js';
-import { XRInput } from './xr_input.js';
-import { Teleport } from './teleport.js';
-import { Locomotion } from './locomotion.js';
-import { World } from './world.js';
+// /js/main.js — App entry (renderer + XR)
 
-const APP_STATE = {
-  build: 'SCARLETT1_RUNTIME_ORCHESTRATED_v4_6',
-  three: true,
-  xr: !!navigator.xr,
-  renderer: false,
-  world: false,
-  floors: 0,
-  inXR: false,
-  teleportEnabled: false,
-  touchOn: false,
-  fps: 0,
-  left: { connected:false, gamepad:false },
-  right: { connected:false, gamepad:false },
-};
-window.APP_STATE = APP_STATE;
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-let scene, camera, renderer, clock;
-let playerRig;
-let xrInput, teleport, locomotion;
-let floors = [];
+export async function start(ctx) {
+  const { BOOT_VERSION, sessionInit, Diagnostics } = ctx;
 
-init();
+  Diagnostics.ok('boot');
 
-function init() {
-  clock = new THREE.Clock();
-
-  scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 120);
-
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  const app = document.getElementById('app');
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
-  document.body.appendChild(renderer.domElement);
+  app.appendChild(renderer.domElement);
 
-  APP_STATE.renderer = true;
-  Diag.log('[status] booting…');
-  Diag.log(`BUILD=${APP_STATE.build}`);
-  Diag.log('[status] renderer OK ✅');
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x050505);
 
-  // Player rig (everything parents under this so teleport/move affects controllers & rays)
-  playerRig = new THREE.Group();
-  playerRig.position.set(0, 0, 0);
-  scene.add(playerRig);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
+  camera.position.set(0, 1.6, 3.2);
 
-  // Camera sits under rig
-  playerRig.add(camera);
+  const player = new THREE.Group();
+  player.add(camera);
+  scene.add(player);
+
+  // Basic lighting
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 1.0);
+  scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+  dir.position.set(5, 8, 5);
+  scene.add(dir);
+
+  // XR button
+  try {
+    const btn = VRButton.createButton(renderer, sessionInit);
+    document.body.appendChild(btn);
+    Diagnostics.ok('VRButton');
+  } catch (e) {
+    Diagnostics.fail('VRButton', e);
+  }
+
+  // Safe-load the rest of the modules
+  const safe = async (label, path) => {
+    try {
+      Diagnostics.log('Import', `${label}: ${path}`);
+      const mod = await import(path + `?v=${BOOT_VERSION}`);
+      Diagnostics.ok(label);
+      return mod;
+    } catch (err) {
+      Diagnostics.fail(label, err);
+      return null;
+    }
+  };
+
+  const worldM = await safe('world', './world.js');
+  const tableM = await safe('table', './table.js');
+  const chairM = await safe('chair', './chair.js');
+  const uiM = await safe('ui', './ui.js');
+  const controlsM = await safe('controls', './controls.js');
+  const teleportM = await safe('teleport', './teleport.js');
+  const interactionsM = await safe('interactions', './interactions.js');
 
   // Build world
-  Diag.log('[status] building world…');
-  const built = World.build({ scene, playerRig, diag: Diag });
-  floors = built.floors || [];
-  APP_STATE.world = true;
-  APP_STATE.floors = floors.length;
-  Diag.log('[status] world ready ✅');
+  const world = worldM?.createWorld ? worldM.createWorld({ THREE, scene, Diagnostics }) : null;
+  const table = tableM?.createTable ? tableM.createTable({ THREE, scene, Diagnostics }) : null;
+  const chairs = chairM?.createChairs ? chairM.createChairs({ THREE, scene, Diagnostics }) : [];
 
-  // XR Input + locomotion + teleport
-  xrInput = XRInput.create({ renderer, scene, playerRig, diag: Diag });
-  locomotion = Locomotion.create({ camera, playerRig, xrInput, diag: Diag });
-  teleport = Teleport.create({ renderer, scene, camera, playerRig, floors, xrInput, diag: Diag });
+  const ui = uiM?.createUI ? uiM.createUI({ THREE, scene, camera, Diagnostics }) : null;
 
-  // UI wiring
-  UI.bind({
-    onEnterVR: enterVR,
-    onToggleTeleport: () => {
-      const v = teleport.toggle();
-      APP_STATE.teleportEnabled = v;
-      xrInput.setRayVisible(v);
-      return v;
-    },
-    onToggleDiag: () => Diag.toggle(),
+  // Controls + teleport + interactions
+  const controls = controlsM?.createControls ? controlsM.createControls({ THREE, renderer, scene, player, camera, Diagnostics }) : null;
+  const teleport = teleportM?.createTeleport ? teleportM.createTeleport({ THREE, renderer, scene, player, camera, Diagnostics }) : null;
+  const interactions = interactionsM?.createInteractions ? interactionsM.createInteractions({ THREE, renderer, scene, camera, Diagnostics }) : null;
+
+  // Spawn safely (never inside table)
+  safeSpawn(player, Diagnostics);
+
+  // Resize handling
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // Default: rays hidden until teleport enabled
-  xrInput.setRayVisible(false);
-
-  window.addEventListener('resize', onResize);
+  Diagnostics.kv('app.version', String(BOOT_VERSION));
+  Diagnostics.kv('three', THREE.REVISION);
 
   // Main loop
-  renderer.setAnimationLoop(loop);
+  const clock = new THREE.Clock();
+  renderer.setAnimationLoop(() => {
+    const dt = Math.min(clock.getDelta(), 0.05);
 
-  Diag.log('[status] MODULE TEST ✅');
+    // update modules (if present)
+    world?.update?.(dt);
+    table?.update?.(dt);
+    chairs?.forEach(c => c?.update?.(dt));
+
+    controls?.update?.(dt);
+
+    // feed controls into teleport + interactions
+    const rays = controls?.getRays?.() || {};
+    const buttons = controls?.getButtons?.() || {};
+    Diagnostics.setButtons(buttons);
+
+    ui?.update?.(dt, { buttons });
+
+    teleport?.update?.(dt, { rays, buttons, floor: world?.floorMesh });
+    interactions?.update?.(dt, { rays, buttons, targets: ui?.targets || [] });
+
+    renderer.render(scene, camera);
+  });
 }
 
-async function enterVR() {
-  try {
-    if (!navigator.xr) {
-      Diag.log('[XR] navigator.xr missing');
-      return;
-    }
-    const session = await navigator.xr.requestSession('immersive-vr', {
-      optionalFeatures: ['local-floor','bounded-floor','hand-tracking','layers']
-    });
-    await renderer.xr.setSession(session);
-    APP_STATE.inXR = true;
-    Diag.log('[XR] requestSession ✅');
-  } catch (e) {
-    Diag.log('[XR] requestSession FAILED: ' + (e?.message || e));
-  }
-}
-
-let fpsAcc = 0, fpsFrames = 0;
-function loop() {
-  const dt = clock.getDelta();
-  xrInput.update();
-
-  // Mirror controller state
-  APP_STATE.left.connected = xrInput.left.connected;
-  APP_STATE.left.gamepad = xrInput.left.gamepad;
-  APP_STATE.right.connected = xrInput.right.connected;
-  APP_STATE.right.gamepad = xrInput.right.gamepad;
-
-  // Update locomotion and teleport
-  locomotion.update(dt);
-  teleport.update();
-
-  // FPS
-  fpsAcc += dt; fpsFrames++;
-  if (fpsAcc >= 0.5) {
-    APP_STATE.fps = Math.round(fpsFrames / fpsAcc);
-    fpsAcc = 0; fpsFrames = 0;
-  }
-
-  Diag.tick(APP_STATE);
-  renderer.render(scene, camera);
-}
-
-function onResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+function safeSpawn(player, Diagnostics) {
+  // Behind the table, human height, facing toward origin.
+  player.position.set(0, 0, 3.2);
+  player.rotation.set(0, 0, 0);
+  Diagnostics.kv('spawn', JSON.stringify({ x:0, y:0, z:3.2 }));
 }

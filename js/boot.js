@@ -1,56 +1,48 @@
-// /js/boot.js — Scarlett Boot Loader (FULL)
-// BUILD: BOOT_FULL_v4_3_FINAL
-// ONLY job: compute base + cachebust import scarlett1/index.js + show visible errors.
+// /js/boot.js — Safe boot loader (never white-screen)
+// Loads modules via dynamic import so failures are captured and reported.
 
-const BUILD = "BOOT_FULL_v4_3_FINAL";
+import { Diagnostics } from './diagnostics.js';
 
-const log = (...a) => console.log("[BOOT]", ...a);
-const err = (...a) => console.error("[BOOT]", ...a);
+const BOOT_VERSION = Date.now();
+const hudEl = document.getElementById('hud');
+Diagnostics.mount(hudEl);
 
-function $(id) { return document.getElementById(id); }
-function setStatus(s) {
-  const el = $("status");
-  if (el) el.textContent = s;
-  console.log("[status]", s);
-}
+Diagnostics.log('BOOT', `v=${BOOT_VERSION}`);
+Diagnostics.kv('href', location.href);
+Diagnostics.kv('ua', navigator.userAgent);
+Diagnostics.kv('navigator.xr', String(!!navigator.xr));
 
-function computeBase() {
-  const p = location.pathname || "/";
-  if (p.endsWith("/")) return p;
-  return p.substring(0, p.lastIndexOf("/") + 1);
-}
+const sessionInit = {
+  optionalFeatures: ['local-floor','bounded-floor','hand-tracking','layers']
+};
+Diagnostics.kv('xr.sessionInit', JSON.stringify(sessionInit));
 
-(async function boot() {
+async function safeImport(label, path) {
   try {
-    const base = computeBase();
-
-    setStatus(
-      `booting…\n` +
-      `build=${BUILD}\n` +
-      `base=${base}\n` +
-      `secureContext=${window.isSecureContext}\n` +
-      `navigator.xr=${!!navigator.xr}\n` +
-      `ua=${navigator.userAgent}`
-    );
-
-    const url = `${base}js/scarlett1/index.js?v=${Date.now()}`;
-    log("import", url);
-
-    setStatus(
-      `booting…\n` +
-      `build=${BUILD}\n` +
-      `importing scarlett1/index.js…`
-    );
-
-    await import(url);
-
-    log("scarlett1 imported ✅");
-  } catch (e) {
-    err("BOOT FAIL", e);
-    setStatus(
-      `BOOT FAIL ❌\n` +
-      `${e?.message || String(e)}\n\n` +
-      `Open DevTools console for stack.`
-    );
+    Diagnostics.log('Import', `${label}: ${path}`);
+    const mod = await import(path + `?v=${BOOT_VERSION}`);
+    Diagnostics.ok(label);
+    return mod;
+  } catch (err) {
+    Diagnostics.fail(label, err);
+    return null;
   }
+}
+
+(async () => {
+  // Always show HUD on first load so you can see what is happening.
+  Diagnostics.show();
+
+  const main = await safeImport('main', './main.js');
+  if (!main || !main.start) {
+    Diagnostics.log('BOOT', 'main.start missing — cannot continue');
+    return;
+  }
+
+  // Start app; main will load the rest using safe plumbing.
+  await main.start({
+    BOOT_VERSION,
+    sessionInit,
+    Diagnostics,
+  });
 })();

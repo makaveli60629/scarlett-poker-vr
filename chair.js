@@ -1,1 +1,1 @@
-export function build(){ return true; }
+export * from './js/chair.js';

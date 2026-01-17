@@ -1,33 +1,9 @@
-const hud = document.getElementById("hud");
-const log = (m) => { console.log(m); hud.textContent += "\n" + m; };
-
-log(`[BOOT] v=${Date.now()}`);
-
-async function load(name, path) {
-  try {
-    log(`[Import] ${name}: ${path}`);
-    const m = await import(path);
-    log(`[OK] ${name}`);
-    return m;
-  } catch (e) {
-    log(`[ERROR] ${name}: ${e.message}`);
-    console.error(e);
-    return null;
-  }
-}
-
+// Root boot (kept stable). Tries /js/boot.js first so you can keep Scarlett modules inside /js/.
 (async () => {
-  const main         = await load("main", "./main.js");
-  const world        = await load("world", "./world.js");
-  const table        = await load("table", "./table.js");
-  const chair        = await load("chair", "./chair.js");
-  const ui           = await load("ui", "./ui.js");
-  const controls     = await load("controls", "./controls.js");
-  const teleport     = await load("teleport", "./teleport.js");
-  const interactions = await load("interactions", "./interactions.js");
-
-  if (!main) { log("❌ MAIN FAILED — HALTING"); return; }
-
-  log("▶ main.start()");
-  main.start({ world, table, chair, ui, controls, teleport, interactions, log });
+  try {
+    await import("./js/boot.js");
+  } catch (e) {
+    console.warn("[root boot] /js/boot.js not found or failed, falling back to ./boot_fallback.js", e);
+    await import("./boot_fallback.js");
+  }
 })();

@@ -1,1 +1,1 @@
-export function setup(){ return true; }
+export * from './js/teleport.js';

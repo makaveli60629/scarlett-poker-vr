@@ -1,18 +1,12 @@
 // /js/scarlett1/index.js — Scarlett1 MASTER GLUE ROUTER (FULL)
-// BUILD: SCARLETT1_MASTER_GLUE_ROUTER_v2
+// BUILD: SCARLETT1_MASTER_GLUE_ROUTER_v3
 //
-// ✅ Boot chain unchanged
-// ✅ MASTER world
-// ✅ Safe Mode: ?safe=1
-// ✅ Movement always available (fallback XR + Android sticks)
-// ✅ Correct module glue for your repo:
-//    - default exports that are OBJECTS (with init/start/setup/mount/etc)
-//    - locomotion_xr.js => createLocomotionModule(ctx)
-//    - gestureControl.js => new GestureControl(ctx) or GestureControl factory
-//    - audioLogic.js => new PokerAudio(ctx)
+// ✅ Adds legacy API shim: ctx.app + Scarlett.app with room/ui/debug/avatars
+// ✅ Fixes module crashes: "reading room/ui/debug/avatars"
+// ✅ Keeps everything else the same
 
 export async function boot({ Scarlett, BASE, V }) {
-  const BUILD = "SCARLETT1_MASTER_GLUE_ROUTER_v2";
+  const BUILD = "SCARLETT1_MASTER_GLUE_ROUTER_v3";
   const NOW = () => new Date().toISOString().slice(11, 19);
   const push = (s) => globalThis.SCARLETT_DIAG?.push?.(`[${NOW()}] ${s}`);
 
@@ -25,7 +19,6 @@ export async function boot({ Scarlett, BASE, V }) {
   push?.(`[scarlett1] build=${BUILD}`);
   push?.(`[scarlett1] safeMode=${SAFE_MODE}`);
 
-  // ---------- Imports (NO bare specifiers) ----------
   const THREE_URL = "https://unpkg.com/three@0.158.0/build/three.module.js";
   const VRBTN_URL = "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
 
@@ -34,15 +27,14 @@ export async function boot({ Scarlett, BASE, V }) {
   const { VRButton } = await import(VRBTN_URL);
   push?.(`[scarlett1] VRButton ✅`);
 
-  // ---------- Renderer / Scene / Camera / Rig ----------
-  const app = document.getElementById("app") || document.body;
+  const appEl = document.getElementById("app") || document.body;
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
   renderer.setSize(innerWidth, innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.xr.enabled = true;
-  app.appendChild(renderer.domElement);
+  appEl.appendChild(renderer.domElement);
 
   const vrBtn = VRButton.createButton(renderer);
   vrBtn.style.position = "fixed";
@@ -62,7 +54,6 @@ export async function boot({ Scarlett, BASE, V }) {
   rig.add(camera);
   scene.add(rig);
 
-  // baseline lighting (modules can enhance)
   scene.add(new THREE.AmbientLight(0xffffff, 0.32));
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.9));
   const key = new THREE.DirectionalLight(0xffffff, 1.05);
@@ -81,7 +72,7 @@ export async function boot({ Scarlett, BASE, V }) {
   };
   scene.add(controllers.c0, controllers.c1);
 
-  // ---------- Load MASTER world ----------
+  // World
   const worldUrl = `${BASE}js/scarlett1/world.js?v=${encodeURIComponent(V)}`;
   push?.(`[scarlett1] importing world ${worldUrl}`);
   const worldMod = await import(worldUrl);
@@ -89,16 +80,58 @@ export async function boot({ Scarlett, BASE, V }) {
   const world = await worldMod.createWorld({ THREE, scene, renderer, camera, rig, Scarlett, diag: push, BASE });
   push?.(`[scarlett1] world ready ✅`);
 
+  // ---------- ✅ LEGACY API SHIM ----------
+  // Many of your modules were written to expect:
+  //   app.room, app.ui, app.debug, app.avatars, etc.
+  // We'll provide that without rewriting the modules.
+  const legacyApp = {
+    // "room" in old code usually meant "the main scene/world container"
+    room: world,                 // includes root, anchors, floorMeshes, etc.
+    scene, renderer, camera, rig,
+
+    // UI contract
+    ui: world.ui || {},
+
+    // debug contract
+    debug: {
+      log: (...a) => push?.(`[debug] ${a.join(" ")}`),
+      warn: (...a) => push?.(`[warn] ${a.join(" ")}`),
+      error: (...a) => push?.(`[err] ${a.join(" ")}`),
+      enabled: true,
+    },
+
+    // avatars contract (modules that read app.avatars.*)
+    avatars: {
+      enabled: true,
+      list: [],
+      local: null,
+    },
+
+    // helpers/modules can store references safely here
+    services: {},
+    state: {},
+  };
+
+  // Publish shim where modules usually look
+  Scarlett.app = legacyApp;
+  globalThis.SCARLETT_APP = legacyApp;
+
   // ---------- Context bus ----------
   const ctx = {
     THREE, scene, renderer, camera, rig, world, Scarlett, controllers,
     diag: push, BASE, V,
     bus: makeBus(push),
+    // ✅ compat alias
+    app: legacyApp,
+    room: legacyApp.room,
+    ui: legacyApp.ui,
+    debug: legacyApp.debug,
+    avatars: legacyApp.avatars,
   };
   globalThis.SCARLETT_CTX = ctx;
   globalThis.SCARLETT_REGISTRY = globalThis.SCARLETT_REGISTRY || [];
 
-  // ---------- UI bridge ----------
+  // UI bridge
   Scarlett.UI = Scarlett.UI || {};
   Scarlett.UI.toggleHud = () => world?.ui?.toggleHud?.();
   Scarlett.UI.toggleModules = () => globalThis.SCARLETT_MODULES?.toggle?.();
@@ -106,11 +139,11 @@ export async function boot({ Scarlett, BASE, V }) {
 
   installModulePanel({ Scarlett, push });
 
-  // ---------- Always-on fallback controls ----------
+  // Always-on fallback locomotion + teleport
   const fallback = createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett, push });
   Scarlett.__controls = fallback;
 
-  // ---------- Safe module integration ----------
+  // Modules
   const MODULE_BASE = `${BASE}js/modules/`;
   const MODULE_MAP = [
     ["environmentLighting", "environmentLighting.module.js"],
@@ -144,8 +177,6 @@ export async function boot({ Scarlett, BASE, V }) {
       const started = await safeLoadAndStartModule({ name, url, ctx, push });
       if (started) liveModules.push(started);
     }
-
-    // Also start any registry items that side-effect modules added
     for (const item of (globalThis.SCARLETT_REGISTRY || [])) {
       liveModules.push({ name: item.name || "registry", inst: item });
     }
@@ -156,18 +187,11 @@ export async function boot({ Scarlett, BASE, V }) {
   renderer.xr.addEventListener("sessionstart", () => push?.(`[xr] sessionstart ✅`));
   renderer.xr.addEventListener("sessionend", () => push?.(`[xr] sessionend ✅`));
 
-  // ---------- Main loop ----------
   renderer.setAnimationLoop((t) => {
-    // tick started modules
     for (const m of liveModules) m.inst?.tick?.(t);
-
-    // fallback controls always
     fallback.tick(t);
-
-    // world tick
     world?.tick?.(t);
 
-    // non-XR: keep camera oriented
     if (!renderer.xr.getSession?.()) camera.lookAt(0, 1.2, 0);
 
     renderer.render(scene, camera);
@@ -176,7 +200,7 @@ export async function boot({ Scarlett, BASE, V }) {
   push?.(`[scarlett1] started ✅`);
 }
 
-// -------------------- Safe module loader / starter (MATCHES YOUR EXPORTS) --------------------
+// -------------------- Safe module loader / starter --------------------
 async function safeLoadAndStartModule({ name, url, ctx, push }) {
   try {
     push?.(`[mod] import ${name} → ${url}`);
@@ -185,7 +209,7 @@ async function safeLoadAndStartModule({ name, url, ctx, push }) {
     const keys = Object.keys(m || {});
     push?.(`[mod] ${name} exports: ${keys.length ? keys.join(", ") : "(none)"}`);
 
-    // 1) Special-case locomotion_xr.js (your real entry)
+    // locomotion_xr.js
     if (typeof m.createLocomotionModule === "function") {
       push?.(`[mod] ${name} entry=createLocomotionModule() starting…`);
       const inst = await m.createLocomotionModule(ctx);
@@ -193,7 +217,7 @@ async function safeLoadAndStartModule({ name, url, ctx, push }) {
       return { name, inst: inst || m };
     }
 
-    // 2) Special-case gestureControl.js
+    // gestureControl.js
     if (typeof m.GestureControl === "function") {
       push?.(`[mod] ${name} entry=GestureControl starting…`);
       let inst = null;
@@ -203,7 +227,7 @@ async function safeLoadAndStartModule({ name, url, ctx, push }) {
       return { name, inst: inst || m };
     }
 
-    // 3) Special-case audioLogic.js
+    // audioLogic.js
     if (typeof m.PokerAudio === "function") {
       push?.(`[mod] ${name} entry=PokerAudio starting…`);
       let inst = null;
@@ -213,7 +237,7 @@ async function safeLoadAndStartModule({ name, url, ctx, push }) {
       return { name, inst: inst || m };
     }
 
-    // 4) Generic starters on named exports (if any exist later)
+    // direct named starters
     const direct =
       (typeof m.enable === "function" && { fn: m.enable, label: "enable" }) ||
       (typeof m.init === "function" && { fn: m.init, label: "init" }) ||
@@ -231,9 +255,7 @@ async function safeLoadAndStartModule({ name, url, ctx, push }) {
       return { name, inst: inst || m };
     }
 
-    // 5) Default export glue:
-    // - if default is a function/class => call/construct
-    // - if default is an object => call one of its lifecycle methods
+    // default export glue
     const d = m.default;
 
     if (typeof d === "function") {
@@ -254,6 +276,7 @@ async function safeLoadAndStartModule({ name, url, ctx, push }) {
         (typeof d.setup === "function" && { fn: d.setup.bind(d), label: "default.setup" }) ||
         (typeof d.mount === "function" && { fn: d.mount.bind(d), label: "default.mount" }) ||
         (typeof d.create === "function" && { fn: d.create.bind(d), label: "default.create" }) ||
+        (typeof d.register === "function" && { fn: d.register.bind(d), label: "default.register" }) ||
         null;
 
       if (objEntry) {
@@ -263,20 +286,10 @@ async function safeLoadAndStartModule({ name, url, ctx, push }) {
         return { name, inst: inst || d };
       }
 
-      // Some modules expect ctx on a property or a register() call.
-      if (typeof d.register === "function") {
-        push?.(`[mod] ${name} entry=default.register() starting…`);
-        const inst = await d.register(ctx);
-        push?.(`[mod] ${name} started ✅`);
-        return { name, inst: inst || d };
-      }
-
-      // If no lifecycle method, treat as side-effect/config but still keep reference
       push?.(`[mod] ${name} default is object (no lifecycle) — keeping reference ✅`);
       return { name, inst: d };
     }
 
-    // 6) Side-effect module fallback
     push?.(`[mod] ${name} loaded (side-effect/no entry) ✅`);
     return { name, inst: m };
 
@@ -286,7 +299,7 @@ async function safeLoadAndStartModule({ name, url, ctx, push }) {
   }
 }
 
-// -------------------- Lightweight bus --------------------
+// -------------------- Bus --------------------
 function makeBus(push) {
   const map = new Map();
   return {
@@ -305,7 +318,7 @@ function makeBus(push) {
   };
 }
 
-// -------------------- Built-in Module Panel --------------------
+// -------------------- Module Panel --------------------
 function installModulePanel({ Scarlett, push }) {
   if (document.getElementById("scarlettModsPanel")) return;
 
@@ -328,7 +341,7 @@ function installModulePanel({ Scarlett, push }) {
       <div style="font-weight:900;">MODULES</div>
       <button id="modsClose" style="cursor:pointer;border-radius:10px;padding:6px 10px;border:1px solid rgba(255,255,255,0.18);background:rgba(0,0,0,0.25);color:#fff;">close</button>
     </div>
-    <div style="opacity:0.8;">If anything breaks, load <b>?safe=1</b> to boot world + movement only.</div>
+    <div style="opacity:0.8;">Recovery: add <b>?safe=1</b> to boot without modules.</div>
   `;
   document.body.appendChild(panel);
   panel.querySelector("#modsClose").onclick = () => (panel.style.display = "none");
@@ -345,7 +358,7 @@ function installModulePanel({ Scarlett, push }) {
   push?.(`[mods] panel ready ✅`);
 }
 
-// -------------------- Fallback Controls (XR + Android sticks) --------------------
+// -------------------- Fallback Controls --------------------
 function createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett, push }) {
   const state = {
     teleportMode: false,
@@ -470,4 +483,4 @@ function createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett,
       }
     }
   };
-}
+       }

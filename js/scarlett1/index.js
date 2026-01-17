@@ -1,345 +1,200 @@
-/* /js/scarlett1/index.js
-   SCARLETT1_INDEX_FULL_v22_0_PERMA_ENGINE_ANDROID_PANEL
-   - Never-black fallback scene
-   - Android full panel (sticks + hide HUD + hide panel + module panel + test + copy)
-   - XR: Move=Right stick (HMD-forward), Teleport=Right grip, Action=Right trigger, Menu=Left Y (auto-bind)
-   - Boots ./world.js and attaches __scarlettRunModuleTest for real
-*/
+// /js/scarlett1/index.js
+// SCARLETT1 — INDEX FULL (AUTHORITATIVE SAFE WORLD IMPORT + AUDIO MODULES)
+// Build: SCARLETT1_INDEX_FULL_v23_0_AUDIO_SAFE_WORLD
 
-(() => {
-  const BUILD = "SCARLETT1_INDEX_FULL_v22_0_PERMA_ENGINE_ANDROID_PANEL";
-  const THREE = window.THREE;
-  const log = (...a) => console.log(`[${BUILD}]`, ...a);
-  const err = (...a) => console.error(`[${BUILD}]`, ...a);
+const BUILD = "SCARLETT1_INDEX_FULL_v23_0_AUDIO_SAFE_WORLD";
 
-  if (!THREE) {
-    window.__scarlettDiagWrite?.("THREE missing ❌ (three.min.js not loaded)");
-    return err("THREE missing");
+const log = (...a) => console.log("[scarlett1]", ...a);
+const warn = (...a) => console.warn("[scarlett1]", ...a);
+const err = (...a) => console.error("[scarlett1]", ...a);
+
+// Three.js (GH Pages safe)
+import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
+import { VRButton } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
+
+// Poker Audio + Gesture
+import { PokerAudio } from "/js/modules/audioLogic.js";
+import { GestureControl } from "/js/modules/gestureControl.js";
+
+function nowISO() { return new Date().toISOString(); }
+
+function attachEngineEarly(engine) {
+  window.SCARLETT = window.SCARLETT || {};
+  window.SCARLETT.BUILD = BUILD;
+  window.SCARLETT.engine = engine;
+  window.SCARLETT.engineAttached = true;
+  window.SCARLETT.time = nowISO();
+  log("engine attached ✅", BUILD);
+}
+
+async function safeImportWorld(cacheTag = "") {
+  const url = `./world.js${cacheTag ? `?v=${cacheTag}` : ""}`;
+  try {
+    const mod = await import(url);
+    log("world import ✅", url);
+    return mod;
+  } catch (e) {
+    err("world import FAILED ❌", url, e);
+    return null;
   }
+}
 
-  // Always-available globals (so router DIAG never breaks)
-  window.__scarlett = window.__scarlett || {};
-  window.__scarlett.build = BUILD;
+// Minimal fallback so you NEVER black-screen if world fails
+function buildFallbackWorld(scene) {
+  warn("USING FALLBACK WORLD (world.js missing or crashing)");
 
-  window.__scarlettRunModuleTest =
-    window.__scarlettRunModuleTest ||
-    (async () => ({
-      ok: false,
-      time: new Date().toISOString(),
-      build: BUILD,
-      reason: "world not ready yet",
-    }));
+  scene.background = new THREE.Color(0x050509);
 
-  // Canvas/renderer
-  const canvas = document.querySelector("canvas") || (() => {
-    const c = document.createElement("canvas");
-    document.body.style.margin = "0";
-    document.body.style.overflow = "hidden";
-    document.body.appendChild(c);
-    return c;
-  })();
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x202040, 1.0);
+  scene.add(hemi);
 
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+  dir.position.set(2, 5, 2);
+  scene.add(dir);
+
+  const floorGeo = new THREE.PlaneGeometry(40, 40);
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0x1e1e1e, roughness: 1.0, metalness: 0.0 });
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = 0;
+  floor.receiveShadow = false;
+  scene.add(floor);
+
+  const tableGeo = new THREE.CylinderGeometry(1.05, 1.05, 0.16, 28);
+  const tableMat = new THREE.MeshStandardMaterial({ color: 0x0f5a2a, roughness: 0.9, metalness: 0.0 });
+  const table = new THREE.Mesh(tableGeo, tableMat);
+  table.position.set(0, 0.80, -1.25);
+  scene.add(table);
+
+  // simple marker ring
+  const ringGeo = new THREE.TorusGeometry(0.7, 0.03, 10, 48);
+  const ringMat = new THREE.MeshStandardMaterial({ color: 0xb59a3a, roughness: 0.6 });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.rotation.x = Math.PI / 2;
+  ring.position.set(0, 0.89, -1.25);
+  scene.add(ring);
+
+  return { tableHeight: 0.80, table };
+}
+
+// Audio unlock (Quest/Android requirement)
+const unlockAudioOnce = async () => {
+  try {
+    await PokerAudio.init({ volume: 0.55 });
+    await PokerAudio.unlock?.();
+    log("audio unlocked ✅");
+  } catch (e) {
+    err("audio unlock failed", e);
+  } finally {
+    window.removeEventListener("pointerdown", unlockAudioOnce);
+    window.removeEventListener("touchstart", unlockAudioOnce);
+  }
+};
+window.addEventListener("pointerdown", unlockAudioOnce, { passive: true });
+window.addEventListener("touchstart", unlockAudioOnce, { passive: true });
+
+function installScarlettAPI() {
+  window.SCARLETT = window.SCARLETT || {};
+
+  // Simple sound triggers for UI / Android Panel
+  window.SCARLETT.audioTest = async () => {
+    await PokerAudio.init({ volume: 0.55 });
+    PokerAudio.playCardSlide();
+    setTimeout(() => PokerAudio.playChipSingle(), 120);
+    setTimeout(() => PokerAudio.playTableKnock(), 240);
+    setTimeout(() => PokerAudio.playPotVacuum({ duration: 1.2 }), 420);
+    return { ok: true, build: BUILD, time: nowISO() };
+  };
+
+  // Hooks you can call from your poker game logic later
+  window.SCARLETT.sfx = {
+    card: () => PokerAudio.playCardSlide(),
+    chip: () => PokerAudio.playChipSingle(),
+    knock: () => PokerAudio.playTableKnock(),
+    vacuum: () => GestureControl.triggerPotVacuum()
+  };
+}
+
+async function main() {
+  log("booting…", BUILD);
+
+  // --- renderer / scene / camera ---
+  const scene = new THREE.Scene();
+
+  const camera = new THREE.PerspectiveCamera(
+    70,
+    window.innerWidth / window.innerHeight,
+    0.05,
+    200
+  );
+  camera.position.set(0, 1.6, 0);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
 
-  // Scene / camera / rig
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x07080a);
+  document.body.style.margin = "0";
+  document.body.style.overflow = "hidden";
+  document.body.appendChild(renderer.domElement);
 
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 3000);
-  const rig = new THREE.Group();
-  rig.add(camera);
-  scene.add(rig);
+  // VR button
+  document.body.appendChild(VRButton.createButton(renderer));
 
-  // Fallback lights + floor (never black)
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.95));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.85);
-  dir.position.set(6, 12, 4);
-  scene.add(dir);
-
-  const fallbackFloor = new THREE.Mesh(
-    new THREE.PlaneGeometry(240, 240),
-    new THREE.MeshStandardMaterial({ color: 0x14171c, roughness: 1, metalness: 0 })
-  );
-  fallbackFloor.rotation.x = -Math.PI / 2;
-  fallbackFloor.position.y = 0;
-  fallbackFloor.name = "SCARLETT_FLOOR_FALLBACK";
-  scene.add(fallbackFloor);
-
-  const marker = new THREE.Mesh(
-    new THREE.BoxGeometry(0.15, 0.15, 0.15),
-    new THREE.MeshStandardMaterial({ color: 0xe91e63 })
-  );
-  marker.position.set(0, 1.2, -1.5);
-  scene.add(marker);
-
-  // HUD
-  const hud = document.getElementById("scarlettHud") || (() => {
-    const d = document.createElement("div");
-    d.id = "scarlettHud";
-    d.style.cssText = `
-      position:fixed;left:10px;top:10px;z-index:99999;
-      font-family:ui-monospace,Menlo,Consolas,monospace;
-      font-size:12px;line-height:1.3;
-      padding:8px 10px;border-radius:10px;
-      background:rgba(0,0,0,.55);color:#fff;
-      max-width: 440px; user-select:none; white-space:pre;
-    `;
-    document.body.appendChild(d);
-    return d;
-  })();
-
-  let hudVisible = true;
-  const setHudVisible = (v) => {
-    hudVisible = !!v;
-    hud.style.display = hudVisible ? "block" : "none";
-  };
-  const HUD = (s) => window.__scarlettDiagWrite?.(String(s));
-
-  // Android full panel
-  const isAndroid = /Android/i.test(navigator.userAgent);
-  window.__scarlettAndroidInput = window.__scarlettAndroidInput || {
-    moveX: 0, moveY: 0, action: false, teleport: false
+  // --- engine object for your panel / HUD ---
+  const engine = {
+    BUILD,
+    THREE,
+    scene,
+    camera,
+    renderer,
+    startedAt: nowISO(),
+    world: null
   };
 
-  function makeAndroidPanel() {
-    if (!isAndroid) return null;
-    if (document.getElementById("scarlettAndroidPanel")) return document.getElementById("scarlettAndroidPanel");
+  attachEngineEarly(engine);
+  installScarlettAPI();
 
-    const panel = document.createElement("div");
-    panel.id = "scarlettAndroidPanel";
-    panel.style.cssText = `
-      position:fixed;left:10px;right:10px;bottom:10px;z-index:999999;
-      background:rgba(0,0,0,.75);color:#fff;border-radius:14px;
-      padding:10px;font-family:ui-monospace,Menlo,Consolas,monospace;
-      font-size:12px;line-height:1.25;
-    `;
-    panel.innerHTML = `
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;align-items:center">
-        <button id="ap_hideHud" style="padding:8px 10px;border:0;border-radius:12px;background:#444;color:#fff;font-weight:900">HIDE HUD</button>
-        <button id="ap_hidePanel" style="padding:8px 10px;border:0;border-radius:12px;background:#444;color:#fff;font-weight:900">HIDE PANEL</button>
-        <button id="ap_modules" style="padding:8px 10px;border:0;border-radius:12px;background:#e91e63;color:#fff;font-weight:900">MODULES</button>
-        <button id="ap_modTest" style="padding:8px 10px;border:0;border-radius:12px;background:#e91e63;color:#fff;font-weight:900">MODULE TEST</button>
-        <button id="ap_copy" style="padding:8px 10px;border:0;border-radius:12px;background:#e91e63;color:#fff;font-weight:900">COPY</button>
-        <button id="ap_reload" style="padding:8px 10px;border:0;border-radius:12px;background:#e91e63;color:#fff;font-weight:900">RELOAD WORLD</button>
-        <button id="ap_action" style="padding:8px 10px;border:0;border-radius:12px;background:#1976d2;color:#fff;font-weight:900">ACTION</button>
-        <button id="ap_teleport" style="padding:8px 10px;border:0;border-radius:12px;background:#0097a7;color:#fff;font-weight:900">TELEPORT</button>
-      </div>
+  // --- world import (SAFE) ---
+  const worldMod = await safeImportWorld(Date.now().toString());
+  let WORLD = null;
 
-      <div id="ap_modPanel" style="display:none;margin-bottom:10px;background:rgba(255,255,255,.06);padding:10px;border-radius:12px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <div style="font-weight:900">MODULE PANEL</div>
-          <button id="ap_modHide" style="padding:6px 10px;border:0;border-radius:10px;background:#444;color:#fff;font-weight:900">HIDE</button>
-        </div>
-        <div id="ap_modList" style="opacity:.9">World not ready…</div>
-      </div>
-
-      <div style="display:flex;gap:10px">
-        <div id="ap_joyL" style="width:44vw;max-width:220px;height:160px;border-radius:14px;background:rgba(255,255,255,.06);position:relative;touch-action:none"></div>
-        <div id="ap_joyR" style="width:44vw;max-width:220px;height:160px;border-radius:14px;background:rgba(255,255,255,.06);position:relative;touch-action:none"></div>
-      </div>
-
-      <pre id="ap_log" style="margin:10px 0 0 0;white-space:pre-wrap;word-break:break-word;background:rgba(255,255,255,.06);padding:10px;border-radius:12px;max-height:22vh;overflow:auto"></pre>
-    `;
-    document.body.appendChild(panel);
-
-    const apLog = panel.querySelector("#ap_log");
-    const write = (s) => {
-      const lines = (apLog.textContent || "").split("\n").slice(-80);
-      lines.push(String(s));
-      apLog.textContent = lines.join("\n");
-      apLog.scrollTop = apLog.scrollHeight;
-    };
-
-    write(`ANDROID PANEL ✅ build=${BUILD}`);
-
-    panel.querySelector("#ap_hideHud").onclick = () => {
-      setHudVisible(!hudVisible);
-      panel.querySelector("#ap_hideHud").textContent = hudVisible ? "HIDE HUD" : "SHOW HUD";
-    };
-
-    panel.querySelector("#ap_hidePanel").onclick = () => {
-      panel.style.display = "none";
-      window.__scarlettAndroidPanelHidden = true;
-    };
-
-    // triple-tap to re-show
-    let taps = 0;
-    window.addEventListener("touchstart", () => {
-      if (!window.__scarlettAndroidPanelHidden) return;
-      taps++;
-      setTimeout(() => (taps = 0), 800);
-      if (taps >= 3) {
-        panel.style.display = "block";
-        window.__scarlettAndroidPanelHidden = false;
-        taps = 0;
-      }
-    }, { passive: true });
-
-    const modPanel = panel.querySelector("#ap_modPanel");
-    panel.querySelector("#ap_modules").onclick = () => {
-      modPanel.style.display = modPanel.style.display === "none" ? "block" : "none";
-      if (modPanel.style.display === "block") window.__scarlettRefreshModuleList?.();
-    };
-    panel.querySelector("#ap_modHide").onclick = () => (modPanel.style.display = "none");
-
-    panel.querySelector("#ap_modTest").onclick = async () => {
-      write("MODULE TEST pressed…");
-      const rep = await window.__scarlettRunModuleTest();
-      write("MODULE TEST done ✅");
-      write(JSON.stringify(rep, null, 2));
-      window.__scarlettRefreshModuleList?.();
-    };
-
-    panel.querySelector("#ap_copy").onclick = async () => {
-      const text = `=== ANDROID PANEL ===\n${apLog.textContent}\n\n=== HUD ===\n${hud.textContent}\n`;
-      try { await navigator.clipboard.writeText(text); write("Copied ✅"); }
-      catch (e) { write(`Copy failed ❌ ${e?.message || e}`); }
-    };
-
-    panel.querySelector("#ap_reload").onclick = async () => {
-      write("Reload world…");
-      if (typeof window.__scarlettReloadWorld === "function") await window.__scarlettReloadWorld();
-      else write("No __scarlettReloadWorld() ❌");
-    };
-
-    const bindHold = (sel, key) => {
-      const b = panel.querySelector(sel);
-      const down = (ev) => { ev.preventDefault(); window.__scarlettAndroidInput[key] = true; };
-      const up = (ev) => { ev.preventDefault(); window.__scarlettAndroidInput[key] = false; };
-      b.addEventListener("touchstart", down, { passive: false });
-      b.addEventListener("touchend", up, { passive: false });
-      b.addEventListener("touchcancel", up, { passive: false });
-    };
-    bindHold("#ap_action", "action");
-    bindHold("#ap_teleport", "teleport");
-
-    // Joysticks (left=move, right=unused for now)
-    function makeJoystick(el, setXY) {
-      const knob = document.createElement("div");
-      knob.style.cssText = `
-        position:absolute;left:50%;top:50%;
-        width:64px;height:64px;border-radius:999px;
-        transform:translate(-50%,-50%);
-        background:rgba(233,30,99,.55);
-      `;
-      el.appendChild(knob);
-
-      let active = false, baseX = 0, baseY = 0;
-
-      const apply = (x, y) => {
-        setXY(x, y);
-        knob.style.left = `${50 + x * 35}%`;
-        knob.style.top  = `${50 + y * 35}%`;
-      };
-
-      el.addEventListener("touchstart", (ev) => {
-        ev.preventDefault();
-        const t = ev.touches[0];
-        const r = el.getBoundingClientRect();
-        baseX = t.clientX - r.left;
-        baseY = t.clientY - r.top;
-        active = true;
-      }, { passive: false });
-
-      el.addEventListener("touchmove", (ev) => {
-        if (!active) return;
-        ev.preventDefault();
-        const t = ev.touches[0];
-        const r = el.getBoundingClientRect();
-        const dx = (t.clientX - r.left) - baseX;
-        const dy = (t.clientY - r.top) - baseY;
-        const max = Math.min(r.width, r.height) * 0.35;
-        let x = dx / max, y = dy / max;
-        const m = Math.hypot(x, y);
-        if (m > 1) { x /= m; y /= m; }
-        apply(x, y);
-      }, { passive: false });
-
-      const end = (ev) => { ev.preventDefault(); active = false; apply(0, 0); };
-      el.addEventListener("touchend", end, { passive: false });
-      el.addEventListener("touchcancel", end, { passive: false });
-
-      apply(0, 0);
-    }
-
-    makeJoystick(panel.querySelector("#ap_joyL"), (x, y) => {
-      window.__scarlettAndroidInput.moveX = x;
-      window.__scarlettAndroidInput.moveY = y;
-    });
-    makeJoystick(panel.querySelector("#ap_joyR"), () => {});
-
-    // Module list render
-    window.__scarlettRefreshModuleList = () => {
-      const list = panel.querySelector("#ap_modList");
-      const W = window.__scarlettWorld;
-      if (!W) { list.textContent = "World not ready…"; return; }
-      const mods = W.modules || [];
-      const st = W.status || {};
-      list.innerHTML = mods.map((m) => {
-        const s = st[m.id] || {};
-        const badge = s.ok ? "✅" : (s.stage === "failed" ? "❌" : "⏳");
-        return `<div style="margin-bottom:6px">${badge} <b>${m.id}</b> <span style="opacity:.75">(${s.stage || "?"})</span>${s.error ? `<div style="opacity:.8">err: ${String(s.error)}</div>` : ""}</div>`;
-      }).join("") || "No modules registered.";
-    };
-
-    return panel;
-  }
-
-  makeAndroidPanel();
-
-  // XR controllers (optional; Android can run without)
-  const controllerL = renderer.xr.getController(0);
-  const controllerR = renderer.xr.getController(1);
-  rig.add(controllerL, controllerR);
-
-  // World boot
-  const state = { worldUpdate: null, worldFloor: null };
-
-  async function bootWorldSafe() {
-    window.__scarlettDiagWrite?.("boot world…");
+  if (worldMod && (worldMod.createWorld || worldMod.default)) {
     try {
-      const mod = await import(`./world.js?v=${Date.now()}`);
-      const world = await mod.bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG: log });
-      state.worldUpdate = world?.update || null;
-      state.worldFloor = scene.getObjectByName("SCARLETT_FLOOR") || fallbackFloor;
-
-      window.__scarlettReloadWorld = bootWorldSafe;
-
-      window.__scarlettDiagWrite?.("world ready ✅");
-      window.__scarlettRefreshModuleList?.();
+      // support either named export createWorld or default export
+      const createWorld = worldMod.createWorld || worldMod.default;
+      WORLD = await createWorld({ THREE, scene, renderer, camera, engine });
+      log("world boot ✅", WORLD);
     } catch (e) {
-      window.__scarlettDiagWrite?.(`world boot failed ❌ ${e?.message || e}`);
-      err(e);
+      err("world boot crashed ❌ (using fallback)", e);
+      WORLD = buildFallbackWorld(scene);
     }
+  } else {
+    WORLD = buildFallbackWorld(scene);
   }
 
-  bootWorldSafe();
+  engine.world = WORLD;
+  window.SCARLETT.world = WORLD;
 
-  window.addEventListener("resize", () => {
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-  });
+  // Set gesture table height from world
+  GestureControl.tableHeight = WORLD?.tableHeight ?? 0.8;
 
-  // Loop
-  let last = performance.now();
+  // --- render loop ---
   renderer.setAnimationLoop(() => {
-    const now = performance.now();
-    const dt = Math.min(0.05, (now - last) / 1000);
-    last = now;
-
-    if (typeof state.worldUpdate === "function") state.worldUpdate(dt);
-
-    hud.textContent =
-      `SYNC OK ${BUILD}\n` +
-      `secure=${window.isSecureContext} xr=${!!navigator.xr}\n` +
-      `AndroidPanel=${isAndroid ? "ON" : "OFF"} HUD=${hudVisible}\n`;
+    // If you have real handData later, feed it here:
+    // GestureControl.update(handData);
 
     renderer.render(scene, camera);
   });
 
-  log("engine ready ✅");
-})();
+  // --- resize ---
+  window.addEventListener("resize", () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  log("ready ✅");
+}
+
+main().catch((e) => err("fatal boot error", e));

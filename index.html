@@ -39,38 +39,122 @@
       border-radius: 10px;
       background: rgba(0,0,0,0.45);
       border: 1px solid rgba(255,255,255,0.18);
-      max-width: 560px;
+      max-width: 680px;
       line-height: 1.25;
       white-space: pre-wrap;
     }
 
+    /* Ultimate diag panel */
     #diagPanel {
       position: fixed;
       right: 10px; top: 10px;
       z-index: 60;
       display:none;
-      width: 340px;
-      background: rgba(0,0,0,0.65);
-      border: 1px solid rgba(255,0,0,0.45);
-      border-radius: 12px;
-      padding: 10px;
+      width: 420px;
+      max-height: 80vh;
+      overflow: auto;
+      background: rgba(0,0,0,0.72);
+      border: 1px solid rgba(255,0,0,0.55);
+      border-radius: 14px;
+      padding: 12px;
     }
     #diagTitle {
-      font-weight: 700;
+      font-weight: 800;
       color: #ff5b5b;
-      margin-bottom: 8px;
+      margin-bottom: 10px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+    }
+    .section {
+      margin-top: 10px;
+      border-top: 1px solid rgba(255,255,255,0.12);
+      padding-top: 10px;
+    }
+    .section h3 {
+      margin: 0 0 8px 0;
+      font-size: 13px;
+      font-weight: 800;
+      opacity: 0.95;
     }
     #diagButtons { display:flex; flex-wrap:wrap; gap:8px; }
     .btnRed {
-      background: rgba(255,0,0,0.15);
-      border: 1px solid rgba(255,0,0,0.55);
+      background: rgba(255,0,0,0.18);
+      border: 1px solid rgba(255,0,0,0.6);
       color: #fff;
       padding:10px 12px;
       border-radius:10px;
       font-size:14px;
       cursor:pointer;
     }
-    .muted { opacity:0.85; font-size:12px; margin-top:8px; line-height:1.25; }
+    .btnTiny {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.18);
+      color:#fff;
+      padding:6px 8px;
+      border-radius:10px;
+      font-size:12px;
+      cursor:pointer;
+    }
+    pre {
+      margin: 0;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.10);
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 12px;
+      line-height: 1.25;
+    }
+    .muted { opacity:0.85; font-size:12px; line-height:1.25; }
+
+    /* Android touch controls */
+    #touchControls {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 40;
+      display: none;
+    }
+    .stick {
+      position: absolute;
+      width: 160px;
+      height: 160px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.18);
+      pointer-events: auto;
+      touch-action: none;
+    }
+    .stick .knob {
+      position: absolute;
+      left: 50%; top: 50%;
+      width: 66px; height: 66px;
+      border-radius: 999px;
+      transform: translate(-50%, -50%);
+      background: rgba(255,255,255,0.16);
+      border: 1px solid rgba(255,255,255,0.22);
+    }
+    #stickLeft { left: 18px; bottom: 18px; }
+    #stickRight { right: 18px; bottom: 18px; }
+    .touchBtn {
+      position: absolute;
+      right: 18px;
+      bottom: 200px;
+      width: 120px;
+      height: 54px;
+      border-radius: 14px;
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.22);
+      color:#fff;
+      font-family: inherit;
+      font-size: 14px;
+      pointer-events: auto;
+      touch-action: none;
+    }
+    #btnTouchTeleport { bottom: 200px; }
+    #btnTouchMenu { bottom: 262px; }
   </style>
 </head>
 
@@ -83,23 +167,61 @@
       <button class="btn" id="btnHideHud">Hide HUD</button>
       <button class="btn" id="btnTeleport">Teleport: OFF</button>
       <button class="btn" id="btnDiag">Diag</button>
+      <button class="btn" id="btnTouchToggle">Touch: OFF</button>
     </div>
     <div id="status">booting…</div>
   </div>
 
   <div id="diagPanel">
-    <div id="diagTitle">Scarlett Debug</div>
+    <div id="diagTitle">
+      <span>Scarlett Ultimate Diagnostics</span>
+      <button class="btnTiny" id="btnDiagClose">Close</button>
+    </div>
+
     <div id="diagButtons">
       <button class="btnRed" id="btnTestModules">Test Modules</button>
+      <button class="btnRed" id="btnSafeMode">SAFE MODE</button>
       <button class="btnRed" id="btnResetPlayer">Reset Player</button>
       <button class="btnRed" id="btnReload">Reload</button>
+      <button class="btnRed" id="btnCopyDiag">Copy Diag</button>
     </div>
-    <div class="muted">
-      Left <b>Y</b>: toggle panel • Right stick: move • Left stick: snap turn • Grip: teleport (when enabled)
+
+    <div class="section">
+      <h3>Runtime</h3>
+      <pre id="diagRuntime">…</pre>
+    </div>
+
+    <div class="section">
+      <h3>Input</h3>
+      <pre id="diagInput">…</pre>
+    </div>
+
+    <div class="section">
+      <h3>Modules</h3>
+      <pre id="diagModules">…</pre>
+    </div>
+
+    <div class="section">
+      <h3>Last Error</h3>
+      <pre id="diagError">none</pre>
+    </div>
+
+    <div class="section">
+      <h3>Controls</h3>
+      <div class="muted">
+        Left <b>Y</b>: toggle diag • Right stick: move • Left stick: snap turn • Grip: teleport (when enabled)<br/>
+        Touch mode: Left stick move • Right stick look • Touch Menu toggles diag • Touch Teleport toggles teleport
+      </div>
     </div>
   </div>
 
-  <!-- ✅ SINGLE ENTRY: boot loader only -->
+  <div id="touchControls">
+    <div class="stick" id="stickLeft"><div class="knob"></div></div>
+    <div class="stick" id="stickRight"><div class="knob"></div></div>
+    <button class="touchBtn" id="btnTouchMenu">Menu</button>
+    <button class="touchBtn" id="btnTouchTeleport">Teleport</button>
+  </div>
+
   <script type="module" src="./js/boot.js"></script>
 </body>
 </html>

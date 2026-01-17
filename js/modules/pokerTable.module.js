@@ -1,5 +1,5 @@
 // /js/modules/pokerTable.module.js
-// Poker table + seats + pot + dealer button + betting rings (FULL)
+// Poker table + seats + pot + dealer button + betting ring (FULL) 6-MAX
 
 export default {
   id: "pokerTable.module.js",
@@ -9,11 +9,11 @@ export default {
     g.name = "POKER_TABLE_GROUP";
     anchors.table.add(g);
 
-    // Place the table where your world expects it
+    // 6-max setup (center consistent with world)
     tableData.center.set(0, 0.78, -2);
     tableData.radius = 1.2;
     tableData.railRadius = 1.45;
-    tableData.seats = 9;
+    tableData.seats = 6;
 
     // Felt
     const felt = new THREE.Mesh(
@@ -21,6 +21,7 @@ export default {
       new THREE.MeshStandardMaterial({ color: 0x145a32, roughness: 0.9 })
     );
     felt.position.copy(tableData.center);
+    felt.name = "TABLE_FELT";
     g.add(felt);
 
     // Rail
@@ -30,15 +31,17 @@ export default {
     );
     rail.rotation.x = Math.PI / 2;
     rail.position.set(tableData.center.x, tableData.center.y + 0.06, tableData.center.z);
+    rail.name = "TABLE_RAIL";
     g.add(rail);
 
-    // Inner ring (bet line / pass line style)
+    // Betting ring
     const betRing = new THREE.Mesh(
       new THREE.TorusGeometry(0.85, 0.02, 12, 96),
       new THREE.MeshStandardMaterial({ color: 0xc9a23f, roughness: 0.6 })
     );
     betRing.rotation.x = Math.PI / 2;
     betRing.position.set(tableData.center.x, tableData.center.y + 0.07, tableData.center.z);
+    betRing.name = "BET_RING";
     g.add(betRing);
 
     // Pot marker
@@ -50,7 +53,7 @@ export default {
     pot.name = "POT_MARKER";
     g.add(pot);
 
-    // Dealer button (visual)
+    // Dealer button
     const dealer = new THREE.Mesh(
       new THREE.CylinderGeometry(0.05, 0.05, 0.01, 24),
       new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 })
@@ -59,7 +62,7 @@ export default {
     dealer.name = "DEALER_BUTTON";
     g.add(dealer);
 
-    // Seat markers
+    // Seat markers (6 max)
     const seatGroup = new THREE.Group();
     seatGroup.name = "SEATS";
     g.add(seatGroup);
@@ -71,7 +74,7 @@ export default {
       const t = (i / seatCount) * Math.PI * 2;
 
       const seat = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.10, 0.10, 0.02, 24),
+        new THREE.CylinderGeometry(0.11, 0.11, 0.02, 24),
         new THREE.MeshStandardMaterial({ color: 0x3a3f55, roughness: 0.9 })
       );
       seat.position.set(
@@ -83,19 +86,16 @@ export default {
       seatGroup.add(seat);
     }
 
-    // Re-sync GestureControl to the real table position/radius
     syncGestureToTable?.();
 
-    // Export helpful references
     window.SCARLETT = window.SCARLETT || {};
-    window.SCARLETT.table = { group: g, data: tableData };
+    window.SCARLETT.table = { group: g, data: tableData, dealerButton: dealer, potMarker: pot };
 
-    log?.("pokerTable.module ✅");
+    log?.("pokerTable.module ✅ (6-max)");
   },
 
   test() {
-    // just a cheap “exists” check
     const ok = !!window.SCARLETT?.table?.group;
-    return { ok, note: ok ? "table present" : "table missing" };
+    return { ok, note: ok ? "table present (6-max)" : "table missing" };
   }
 };

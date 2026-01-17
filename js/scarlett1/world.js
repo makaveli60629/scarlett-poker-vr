@@ -5,6 +5,13 @@
 export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG }) {
   const log = (s) => { try { window.__scarlettDiagWrite?.(String(s)); } catch (_) {} };
 
+  // One-time guard (prevents double world → double bots / too fast / duplicated UI)
+  if (window.__SCARLETT_BOOTWORLD_ONCE__) {
+    log('[world] bootWorld blocked (already ran)');
+    return window.__SCARLETT_BOOTWORLD_LAST__ || { update(){} };
+  }
+  window.__SCARLETT_BOOTWORLD_ONCE__ = true;
+
   log('[world] bootWorld… SCARLETT1_WORLD_FULL_v4_14_23MODULES');
 
   // anchors
@@ -47,21 +54,53 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   window.SCARLETT.engine = window.SCARLETT.engine || {};
   window.SCARLETT.engine.rig = rig;
 
-  // Controller nodes (if available)
+  // Controller nodes (handedness-safe; do NOT assume index order)
   try {
-    const rightGrip = renderer.xr.getControllerGrip(0);
-    const leftGrip  = renderer.xr.getControllerGrip(1);
-    rightGrip.name = 'RIGHT_GRIP';
-    leftGrip.name  = 'LEFT_GRIP';
-    rig.add(rightGrip);
-    rig.add(leftGrip);
-    window.SCARLETT.engine.rightGrip = rightGrip;
-    window.SCARLETT.engine.leftGrip = leftGrip;
+    const grip0 = renderer.xr.getControllerGrip(0);
+    const grip1 = renderer.xr.getControllerGrip(1);
+    grip0.name = 'GRIP_0';
+    grip1.name = 'GRIP_1';
+    rig.add(grip0);
+    rig.add(grip1);
 
-    const rightRay = renderer.xr.getController(0);
-    rightRay.name = 'RIGHT_RAY';
-    rig.add(rightRay);
-    window.SCARLETT.engine.rightRay = rightRay;
+    const ray0 = renderer.xr.getController(0);
+    const ray1 = renderer.xr.getController(1);
+    ray0.name = 'RAY_0';
+    ray1.name = 'RAY_1';
+    rig.add(ray0);
+    rig.add(ray1);
+
+    function tag(node, label) {
+      node.userData.handedness = 'unknown';
+      node.addEventListener('connected', (e) => {
+        node.userData.handedness = e?.data?.handedness || 'unknown';
+        log(`[world] ${label} connected handedness=${node.userData.handedness}`);
+      });
+      node.addEventListener('disconnected', () => {
+        node.userData.handedness = 'unknown';
+      });
+    }
+    tag(ray0, 'ray0');
+    tag(ray1, 'ray1');
+
+    function resolveHands() {
+      const rightRay = (ray0.userData.handedness === 'right') ? ray0
+                    : (ray1.userData.handedness === 'right') ? ray1
+                    : ray0;
+
+      const leftRay  = (ray0.userData.handedness === 'left') ? ray0
+                    : (ray1.userData.handedness === 'left') ? ray1
+                    : ray1;
+
+      window.SCARLETT.engine.rightRay = rightRay;
+      window.SCARLETT.engine.leftRay  = leftRay;
+      window.SCARLETT.engine.grip0 = grip0;
+      window.SCARLETT.engine.grip1 = grip1;
+    }
+
+    resolveHands();
+    try { renderer.xr.addEventListener?.('sessionstart', resolveHands); } catch (_) {}
+
   } catch (_) {}
 
   // ---- module orchestrator ----
@@ -161,11 +200,14 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   for (const p of MODULE_MANIFEST) await loadModule(p);
   log('[world] world: modules loaded ✅');
 
-  return {
+  const worldAPI = {
     update(dt) {
       for (const rec of modules) {
         try { rec.api.update?.(dt, { THREE, scene, rig, camera, renderer, anchors, HUD, DIAG }); } catch (_) {}
       }
     }
   };
+
+  window.__SCARLETT_BOOTWORLD_LAST__ = worldAPI;
+  return worldAPI;
 }

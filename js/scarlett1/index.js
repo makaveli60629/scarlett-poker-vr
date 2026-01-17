@@ -1,8 +1,8 @@
 // /js/scarlett1/index.js
 // SCARLETT1 — INDEX FRONT CONTROLLER (FULL • XR-SAFE WORLD RESOLVER + RIGHT-HAND GESTURE FEED)
-// Build: SCARLETT1_INDEX_FULL_v25_4_RIGHT_HAND_GESTURE
+// Build: SCARLETT1_INDEX_FULL_v25_5_WORLD_BOOTWORLD_RIG_HANDEDNESS
 
-const BUILD = "SCARLETT1_INDEX_FULL_v25_4_RIGHT_HAND_GESTURE";
+const BUILD = "SCARLETT1_INDEX_FULL_v25_5_WORLD_BOOTWORLD_RIG_HANDEDNESS";
 
 // ---- DIAG + CONSOLE fingerprint (must appear no matter what) ----
 const dwrite = (msg) => { try { window.__scarlettDiagWrite?.(String(msg)); } catch (_) {} };
@@ -136,8 +136,14 @@ async function main() {
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
   camera.position.set(0, 1.6, 0);
 
+  // XR rig (authoritative parent for camera + controllers)
+  const rig = new THREE.Group();
+  rig.name = "XR_RIG";
+  scene.add(rig);
+  rig.add(camera);
+
   const engine = window.SCARLETT.engine = Object.assign(window.SCARLETT.engine || {}, {
-    BUILD, THREE, scene, camera, renderer: null, world: null, errors: window.SCARLETT.engine?.errors || []
+    BUILD, THREE, scene, camera, rig, renderer: null, world: null, errors: window.SCARLETT.engine?.errors || []
   });
   window.__scarlettEngine = engine;
   window.__SCARLETT_ENGINE__ = engine;
@@ -163,50 +169,59 @@ async function main() {
     return;
   }
 
-  // --- Controllers (we will ONLY feed right-hand) ---
+  // --- Controllers (handedness-safe; do NOT assume indices) ---
   const ctrl0 = renderer.xr.getController(0);
   const ctrl1 = renderer.xr.getController(1);
   ctrl0.name = "XR_CONTROLLER_0";
   ctrl1.name = "XR_CONTROLLER_1";
-  scene.add(ctrl0);
-  scene.add(ctrl1);
+  rig.add(ctrl0);
+  rig.add(ctrl1);
+
+  function tagController(ctrl) {
+    ctrl.userData.handedness = "unknown";
+    ctrl.addEventListener("connected", (e) => {
+      ctrl.userData.handedness = e?.data?.handedness || "unknown";
+      log(`controller connected: ${ctrl.name} handedness=${ctrl.userData.handedness}`);
+    });
+    ctrl.addEventListener("disconnected", () => {
+      log(`controller disconnected: ${ctrl.name}`);
+      ctrl.userData.handedness = "unknown";
+    });
+  }
+  tagController(ctrl0);
+  tagController(ctrl1);
+
+  function getRightController() {
+    if (ctrl0.userData.handedness === "right") return ctrl0;
+    if (ctrl1.userData.handedness === "right") return ctrl1;
+    // fallback: Quest often reports ctrl1 as right, but do not hard rely.
+    return ctrl1 || ctrl0;
+  }
 
   const motion = {
     t: performance.now(),
-    last0: new THREE.Vector3(),
-    last1: new THREE.Vector3(),
-    init0: false,
-    init1: false
+    initRight: false,
+    lastRight: new THREE.Vector3()
   };
-
-  // Most Quests: controller(1) is right. We also pass handedness="right" so GestureControl enforces it.
-  const RIGHT_INDEX = 1;
 
   function feedRightHand(dt) {
     const GC = window.SCARLETT?.GestureControl;
     if (!GC || typeof GC.update !== "function") return;
 
-    const obj = (RIGHT_INDEX === 0) ? ctrl0 : ctrl1;
+    const obj = getRightController();
+    if (!obj) return;
 
     const p = new THREE.Vector3();
     obj.getWorldPosition(p);
 
-    if (RIGHT_INDEX === 0) {
-      if (!motion.init0) { motion.last0.copy(p); motion.init0 = true; return; }
-      const v = new THREE.Vector3().subVectors(p, motion.last0).multiplyScalar(1 / Math.max(dt, 1e-4));
-      motion.last0.copy(p);
-
-      GC.update({
-        handedness: "right",
-        position: { x: p.x, y: p.y, z: p.z },
-        velocity: { x: v.x, y: v.y, z: v.z }
-      });
+    if (!motion.initRight) {
+      motion.lastRight.copy(p);
+      motion.initRight = true;
       return;
     }
 
-    if (!motion.init1) { motion.last1.copy(p); motion.init1 = true; return; }
-    const v = new THREE.Vector3().subVectors(p, motion.last1).multiplyScalar(1 / Math.max(dt, 1e-4));
-    motion.last1.copy(p);
+    const v = new THREE.Vector3().subVectors(p, motion.lastRight).multiplyScalar(1 / Math.max(dt, 1e-4));
+    motion.lastRight.copy(p);
 
     GC.update({
       handedness: "right",
@@ -215,17 +230,23 @@ async function main() {
     });
   }
 
-  // World load
+  // World load (MUST call bootWorld)
+  if (window.__SCARLETT_WORLD_INIT__) {
+    warn("world init blocked (already initialized)");
+    return;
+  }
+  window.__SCARLETT_WORLD_INIT__ = true;
+
   const worldMod = await safeImportWorld(Date.now().toString());
   let WORLD;
 
   try {
-    const createWorld = worldMod?.createWorld || worldMod?.bootWorld || worldMod?.default;
-    if (typeof createWorld === "function") {
-      WORLD = await createWorld({ THREE, scene, renderer, camera, engine });
-      log("world boot ✅");
+    const boot = worldMod?.bootWorld || worldMod?.createWorld || worldMod?.default;
+    if (typeof boot === "function") {
+      WORLD = await boot({ THREE, scene, rig, camera, renderer, HUD: null, DIAG: null });
+      log("world boot ✅ (bootWorld)");
     } else {
-      warn("world missing createWorld/bootWorld/default — fallback");
+      warn("world missing bootWorld/createWorld/default — fallback");
       WORLD = buildFallbackWorld(scene);
     }
   } catch (e) {

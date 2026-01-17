@@ -41,6 +41,17 @@
     /* Hide */
     .hidden{ display:none !important; }
   </style>
+
+  <!-- Import map so Three.js example modules that use bare specifiers (e.g. `import ... from 'three'`)
+       work on static hosting (GitHub Pages) without a bundler. -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
 </head>
 <body>
   <div id="app"></div>

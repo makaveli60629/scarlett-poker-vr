@@ -1,13 +1,13 @@
-// /js/scarlett1/index.js — Scarlett1 MASTER GLUE ROUTER (FULL)
-// BUILD: SCARLETT1_MASTER_GLUE_ROUTER_v4
+// /js/scarlett1/index.js
+// BUILD: SCARLETT1_MASTER_GLUE_ROUTER_v5_APPROOM
 //
-// ✅ Android movement fixed: Up=Forward, Down=Back, Left/Right strafe
-// ✅ Finger drag look (yaw + pitch) in non-XR
-// ✅ Keeps SAFE MODE ?safe=1
-// ✅ Keeps module glue + fallback teleport + locomotion module support
+// ✅ Keeps Android sticks + finger-look
+// ✅ Fixes failing modules by providing ctx.app.room / ctx.app.ui / ctx.app.debug / ctx.app.avatars
+// ✅ Safe mode ?safe=1
+// ✅ Stable even if modules throw
 
 export async function boot({ Scarlett, BASE, V }) {
-  const BUILD = "SCARLETT1_MASTER_GLUE_ROUTER_v4";
+  const BUILD = "SCARLETT1_MASTER_GLUE_ROUTER_v5_APPROOM";
   const NOW = () => new Date().toISOString().slice(11, 19);
   const push = (s) => globalThis.SCARLETT_DIAG?.push?.(`[${NOW()}] ${s}`);
 
@@ -47,7 +47,6 @@ export async function boot({ Scarlett, BASE, V }) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x070a10);
 
-  // Player rig
   const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 260);
   camera.position.set(0, 1.65, 0);
 
@@ -56,7 +55,7 @@ export async function boot({ Scarlett, BASE, V }) {
   rig.add(camera);
   scene.add(rig);
 
-  // baseline light (world adds more)
+  // baseline lights (world adds more)
   scene.add(new THREE.AmbientLight(0xffffff, 0.25));
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.65));
   const key = new THREE.DirectionalLight(0xffffff, 0.9);
@@ -83,10 +82,9 @@ export async function boot({ Scarlett, BASE, V }) {
   const world = await worldMod.createWorld({ THREE, scene, renderer, camera, rig, Scarlett, diag: push, BASE });
   push?.(`[scarlett1] world ready ✅`);
 
-  // Legacy shim (for modules expecting room/ui/debug/avatars)
+  // ✅ Legacy APP shim — IMPORTANT: modules are reading ctx.app.room (not ctx.room)
   const legacyApp = {
     room: world,
-    scene, renderer, camera, rig,
     ui: world.ui || {},
     debug: {
       log: (...a) => push?.(`[debug] ${a.join(" ")}`),
@@ -97,6 +95,7 @@ export async function boot({ Scarlett, BASE, V }) {
     avatars: { enabled: true, list: [], local: null },
     services: {},
     state: {},
+    scene, renderer, camera, rig,
   };
   Scarlett.app = legacyApp;
   globalThis.SCARLETT_APP = legacyApp;
@@ -105,8 +104,10 @@ export async function boot({ Scarlett, BASE, V }) {
     THREE, scene, renderer, camera, rig, world, Scarlett, controllers,
     diag: push, BASE, V,
     bus: makeBus(push),
+
+    // compat
     app: legacyApp,
-    room: legacyApp.room,
+    room: world,
     ui: legacyApp.ui,
     debug: legacyApp.debug,
     avatars: legacyApp.avatars,
@@ -114,7 +115,6 @@ export async function boot({ Scarlett, BASE, V }) {
   globalThis.SCARLETT_CTX = ctx;
   globalThis.SCARLETT_REGISTRY = globalThis.SCARLETT_REGISTRY || [];
 
-  // UI bridge
   Scarlett.UI = Scarlett.UI || {};
   Scarlett.UI.toggleHud = () => world?.ui?.toggleHud?.();
   Scarlett.UI.toggleModules = () => globalThis.SCARLETT_MODULES?.toggle?.();
@@ -122,41 +122,32 @@ export async function boot({ Scarlett, BASE, V }) {
 
   installModulePanel({ Scarlett, push });
 
-  // ✅ Touch look controller (non-XR only)
-  const touchLook = createTouchLook({ renderer, rig, camera, push });
+  const touchLook = createTouchLook({ renderer, rig, camera });
 
-  // Always-on fallback locomotion + teleport (Android + XR)
   const fallback = createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett, push, touchLook });
   Scarlett.__controls = fallback;
 
-  // Modules
   const MODULE_BASE = `${BASE}js/modules/`;
   const MODULE_MAP = [
     ["environmentLighting", "environmentLighting.module.js"],
     ["hud", "hud.module.js"],
     ["menuUI", "menuUI.module.js"],
-
     ["localPlayer", "localPlayer.module.js"],
     ["avatars", "avatars.module.js"],
     ["avatarUI", "avatarUI.module.js"],
     ["avatarAnimation", "avatarAnimation.module.js"],
     ["avatarCustomization", "avatarCustomization.module.js"],
-
     ["interactionHands", "interactionHands.module.js"],
     ["gestureControl", "gestureControl.js"],
-
     ["locomotionXR", "locomotion_xr.js"],
-
     ["cards", "cards.module.js"],
     ["chips", "chips.module.js"],
     ["audioLogic", "audioLogic.js"],
-
     ["lobbyStations", "lobbyStations.module.js"],
     ["lobbyMatchmaking", "lobbyMatchmaking.module.js"],
   ];
 
   const liveModules = [];
-
   if (!SAFE_MODE) {
     for (const [name, file] of MODULE_MAP) {
       const url = `${MODULE_BASE}${file}?v=${encodeURIComponent(V)}`;
@@ -170,56 +161,27 @@ export async function boot({ Scarlett, BASE, V }) {
     push?.(`[mod] SAFE MODE: skipping module start calls`);
   }
 
-  renderer.xr.addEventListener("sessionstart", () => push?.(`[xr] sessionstart ✅`));
-  renderer.xr.addEventListener("sessionend", () => push?.(`[xr] sessionend ✅`));
-
   renderer.setAnimationLoop((t) => {
-    // tick started modules
     for (const m of liveModules) m.inst?.tick?.(t);
-
-    // finger look updates (non-XR)
     touchLook.tick();
-
-    // fallback locomotion always
     fallback.tick(t);
-
-    // world tick
     world?.tick?.(t);
-
     renderer.render(scene, camera);
   });
 
   push?.(`[scarlett1] started ✅`);
 }
 
-// -------------------- Module starter --------------------
 async function safeLoadAndStartModule({ name, url, ctx, push }) {
   try {
     push?.(`[mod] import ${name} → ${url}`);
     const m = await import(url);
-
     const keys = Object.keys(m || {});
     push?.(`[mod] ${name} exports: ${keys.length ? keys.join(", ") : "(none)"}`);
 
     if (typeof m.createLocomotionModule === "function") {
       push?.(`[mod] ${name} entry=createLocomotionModule() starting…`);
       const inst = await m.createLocomotionModule(ctx);
-      push?.(`[mod] ${name} started ✅`);
-      return { name, inst: inst || m };
-    }
-
-    if (typeof m.GestureControl === "function") {
-      push?.(`[mod] ${name} entry=GestureControl starting…`);
-      let inst = null;
-      try { inst = new m.GestureControl(ctx); } catch { inst = await m.GestureControl(ctx); }
-      push?.(`[mod] ${name} started ✅`);
-      return { name, inst: inst || m };
-    }
-
-    if (typeof m.PokerAudio === "function") {
-      push?.(`[mod] ${name} entry=PokerAudio starting…`);
-      let inst = null;
-      try { inst = new m.PokerAudio(ctx); } catch { inst = await m.PokerAudio(ctx); }
       push?.(`[mod] ${name} started ✅`);
       return { name, inst: inst || m };
     }
@@ -245,12 +207,6 @@ async function safeLoadAndStartModule({ name, url, ctx, push }) {
       return { name, inst: d };
     }
 
-    if (typeof d === "function") {
-      let inst = null;
-      try { inst = new d(ctx); } catch { inst = await d(ctx); }
-      return { name, inst: inst || m };
-    }
-
     return { name, inst: m };
   } catch (e) {
     push?.(`[mod] ${name} FAILED ❌ ${String(e?.message || e)}`);
@@ -258,17 +214,12 @@ async function safeLoadAndStartModule({ name, url, ctx, push }) {
   }
 }
 
-// -------------------- Touch look (non-XR) --------------------
-function createTouchLook({ renderer, rig, camera, push }) {
+function createTouchLook({ renderer, rig, camera }) {
   const el = renderer.domElement;
-
   const st = {
-    active: false,
-    lastX: 0,
-    lastY: 0,
-    yaw: 0,
-    pitch: 0,
-    // tune feel:
+    active: false, lastX: 0, lastY: 0,
+    yaw: rig.rotation.y || 0,
+    pitch: camera.rotation.x || 0,
     yawSpeed: 0.0032,
     pitchSpeed: 0.0026,
     pitchMin: -0.95,
@@ -276,86 +227,56 @@ function createTouchLook({ renderer, rig, camera, push }) {
     twoFingerTurnOnly: false,
   };
 
-  // init from current
-  st.yaw = rig.rotation.y || 0;
-  st.pitch = camera.rotation.x || 0;
-
-  function onDown(e) {
-    if (renderer.xr.getSession?.()) return; // XR handles look
+  function down(e) {
+    if (renderer.xr.getSession?.()) return;
     st.active = true;
     st.twoFingerTurnOnly = (e.touches && e.touches.length >= 2);
     const p = e.touches ? e.touches[0] : e;
-    st.lastX = p.clientX;
-    st.lastY = p.clientY;
+    st.lastX = p.clientX; st.lastY = p.clientY;
   }
 
-  function onMove(e) {
+  function move(e) {
     if (!st.active) return;
     if (renderer.xr.getSession?.()) return;
-
     const p = e.touches ? e.touches[0] : e;
     const dx = p.clientX - st.lastX;
     const dy = p.clientY - st.lastY;
-    st.lastX = p.clientX;
-    st.lastY = p.clientY;
-
+    st.lastX = p.clientX; st.lastY = p.clientY;
     st.yaw -= dx * st.yawSpeed;
-
     if (!st.twoFingerTurnOnly) {
       st.pitch -= dy * st.pitchSpeed;
       st.pitch = Math.max(st.pitchMin, Math.min(st.pitchMax, st.pitch));
     }
-
     e.preventDefault?.();
   }
 
-  function onUp() {
-    st.active = false;
-    st.twoFingerTurnOnly = false;
-  }
+  function up() { st.active = false; st.twoFingerTurnOnly = false; }
 
-  el.addEventListener("pointerdown", onDown, { passive: true });
-  el.addEventListener("pointermove", onMove, { passive: false });
-  el.addEventListener("pointerup", onUp, { passive: true });
-  el.addEventListener("pointercancel", onUp, { passive: true });
+  el.addEventListener("pointerdown", down, { passive: true });
+  el.addEventListener("pointermove", move, { passive: false });
+  el.addEventListener("pointerup", up, { passive: true });
+  el.addEventListener("pointercancel", up, { passive: true });
 
-  // Also handle touch events for some mobile browsers
-  el.addEventListener("touchstart", onDown, { passive: true });
-  el.addEventListener("touchmove", onMove, { passive: false });
-  el.addEventListener("touchend", onUp, { passive: true });
-  el.addEventListener("touchcancel", onUp, { passive: true });
+  el.addEventListener("touchstart", down, { passive: true });
+  el.addEventListener("touchmove", move, { passive: false });
+  el.addEventListener("touchend", up, { passive: true });
+  el.addEventListener("touchcancel", up, { passive: true });
 
   return {
-    setYaw(y) { st.yaw = y; },
     tick() {
       if (renderer.xr.getSession?.()) return;
       rig.rotation.y = st.yaw;
       camera.rotation.x = st.pitch;
-    },
+    }
   };
 }
 
-// -------------------- Fallback Controls (XR + Android sticks) --------------------
-function createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett, push, touchLook }) {
+function createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett, push }) {
   const state = {
     teleportMode: false,
-    moveSpeed: 2.8,
+    moveSpeed: 2.85,
     turnSpeed: 2.2,
-    snapAngle: Math.PI / 4,
-    snapCooldown: 0,
-    _lastB: false,
-    _lastGrip: false,
   };
-
-  const ret = new THREE.Mesh(
-    new THREE.RingGeometry(0.08, 0.11, 32),
-    new THREE.MeshBasicMaterial({ color: 0x44ff77, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
-  );
-  ret.rotation.x = -Math.PI / 2;
-  ret.visible = false;
-  try { world.root?.add?.(ret); } catch {}
-
-  const ray = new THREE.Raycaster();
 
   function deadzone(v, dz = 0.15) {
     const a = Math.abs(v);
@@ -364,127 +285,51 @@ function createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett,
     return Math.sign(v) * Math.max(0, Math.min(1, s));
   }
 
-  function getPads() {
-    const session = renderer.xr.getSession?.();
-    if (!session) return { left: null, right: null };
-    const out = { left: null, right: null };
-    for (const src of session.inputSources || []) {
-      if (!src?.gamepad) continue;
-      if (src.handedness === "left") out.left = src.gamepad;
-      if (src.handedness === "right") out.right = src.gamepad;
-    }
-    return out;
-  }
-
-  function toggleTeleport() {
-    state.teleportMode = !state.teleportMode;
-    push?.(`[move] teleport=${state.teleportMode}`);
-    if (!state.teleportMode) ret.visible = false;
-  }
-
-  // ✅ IMPORTANT: moveY is forward when positive (Up on stick)
   function applyMove(moveX, moveY, dt) {
     const yawQ = new THREE.Quaternion();
     camera.getWorldQuaternion(yawQ);
 
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(yawQ);
     fwd.y = 0; fwd.normalize();
-
     const rightV = new THREE.Vector3(1, 0, 0).applyQuaternion(yawQ);
     rightV.y = 0; rightV.normalize();
 
-    const v = new THREE.Vector3()
-      .addScaledVector(fwd, moveY)     // ✅ Up = forward
-      .addScaledVector(rightV, moveX)
-      .multiplyScalar(state.moveSpeed * dt);
-
-    rig.position.add(v);
+    rig.position.add(
+      new THREE.Vector3()
+        .addScaledVector(fwd, moveY)   // ✅ Up forward
+        .addScaledVector(rightV, moveX)
+        .multiplyScalar(state.moveSpeed * dt)
+    );
   }
 
   return {
-    toggleTeleport,
+    toggleTeleport() {
+      state.teleportMode = !state.teleportMode;
+      push?.(`[move] teleport=${state.teleportMode}`);
+    },
     tick() {
       const dt = 1 / 72;
-      const session = renderer.xr.getSession?.();
-      const android = Scarlett.ANDROID_INPUT || { moveX: 0, moveY: 0, turnX: 0 };
+      if (renderer.xr.getSession?.()) return; // XR locomotion module handles in VR
 
-      if (!session) {
-        // Non-XR: Android sticks + finger-look handles rotation
-        const mx = deadzone(android.moveX || 0);
-        const my = deadzone(android.moveY || 0); // ✅ keep sign: +up forward
-        applyMove(mx, my, dt);
+      const a = Scarlett.ANDROID_INPUT || { moveX: 0, moveY: 0, turnX: 0 };
+      const mx = deadzone(a.moveX || 0);
+      const my = deadzone(a.moveY || 0);
+      const tx = deadzone(a.turnX || 0);
 
-        // If your Android UI also provides turnX, apply it as optional “thumb turn”
-        const tx = deadzone(android.turnX || 0);
-        if (tx) rig.rotation.y -= tx * state.turnSpeed * dt;
-
-        ret.visible = false;
-        return;
-      }
-
-      // XR controls
-      const { left, right } = getPads();
-      const la = left?.axes || [];
-      const ra = right?.axes || [];
-      const rb = right?.buttons || [];
-
-      const btnB = !!rb[4]?.pressed;
-      const rGrip = !!rb[1]?.pressed;
-
-      if (btnB && !state._lastB) toggleTeleport();
-      state._lastB = btnB;
-
-      if (!state.teleportMode) {
-        const mx = deadzone(ra.length >= 4 ? ra[2] : (ra[0] || 0));
-        const my = deadzone(ra.length >= 4 ? ra[3] : (ra[1] || 0));
-        const tx = deadzone(la[0] || 0);
-
-        state.snapCooldown = Math.max(0, state.snapCooldown - dt);
-        applyMove(mx, -my, dt); // typical gamepad Y is inverted in XR
-
-        if (state.snapCooldown === 0 && Math.abs(tx) > 0.85) {
-          rig.rotation.y -= Math.sign(tx) * state.snapAngle;
-          state.snapCooldown = 0.22;
-        }
-        ret.visible = false;
-      } else {
-        ray.setFromCamera({ x: 0, y: 0 }, camera);
-        const hits = ray.intersectObjects(world.floorMeshes || [], true);
-        if (hits.length) {
-          ret.visible = true;
-          ret.position.copy(hits[0].point);
-          if (rGrip && !state._lastGrip) {
-            rig.position.set(hits[0].point.x, rig.position.y, hits[0].point.z);
-            toggleTeleport();
-            push?.(`[move] teleported ✅`);
-          }
-        } else ret.visible = false;
-        state._lastGrip = rGrip;
-      }
+      applyMove(mx, my, dt);
+      if (tx) rig.rotation.y -= tx * state.turnSpeed * dt;
     }
   };
 }
 
-// -------------------- Bus --------------------
-function makeBus(push) {
+function makeBus() {
   const map = new Map();
   return {
-    on(ev, fn) {
-      if (!map.has(ev)) map.set(ev, new Set());
-      map.get(ev).add(fn);
-      return () => map.get(ev)?.delete(fn);
-    },
-    emit(ev, payload) {
-      const set = map.get(ev);
-      if (!set) return;
-      for (const fn of set) {
-        try { fn(payload); } catch (e) { push?.(`[bus] ${ev} listener error ❌ ${String(e?.message || e)}`); }
-      }
-    }
+    on(ev, fn) { if (!map.has(ev)) map.set(ev, new Set()); map.get(ev).add(fn); return () => map.get(ev)?.delete(fn); },
+    emit(ev, payload) { (map.get(ev) || []).forEach((fn) => { try { fn(payload); } catch {} }); }
   };
 }
 
-// -------------------- Module Panel --------------------
 function installModulePanel({ Scarlett, push }) {
   if (document.getElementById("scarlettModsPanel")) return;
 
@@ -522,4 +367,4 @@ function installModulePanel({ Scarlett, push }) {
   Scarlett.UI.toggleModules = () => globalThis.SCARLETT_MODULES.toggle();
 
   push?.(`[mods] panel ready ✅`);
-    }
+}

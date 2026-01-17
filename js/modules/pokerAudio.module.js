@@ -1,5 +1,6 @@
 // /js/modules/pokerAudio.module.js
-// SCARLETT MODULE — Poker Audio (Procedural) wrapper
+// SCARLETT MODULE — Poker Audio (Procedural) wrapper (FULL)
+
 import { PokerAudio } from "/js/modules/audioLogic.js";
 import { GestureControl } from "/js/modules/gestureControl.js";
 
@@ -9,7 +10,6 @@ export default {
   async init({ DIAG }) {
     const log = (s) => DIAG?.write?.(String(s)) || console.log("[pokerAudio.module]", s);
 
-    // Install public API for your panel + game logic
     window.SCARLETT = window.SCARLETT || {};
 
     // Unlock audio on first gesture (Quest/Android requirement)
@@ -28,7 +28,7 @@ export default {
     window.addEventListener("pointerdown", unlockOnce, { passive: true });
     window.addEventListener("touchstart", unlockOnce, { passive: true });
 
-    // Panel-friendly triggers
+    // Panel + game hooks
     window.SCARLETT.audioTest = async () => {
       await PokerAudio.init({ volume: 0.55 });
       PokerAudio.playCardSlide();
@@ -49,7 +49,6 @@ export default {
   },
 
   async test() {
-    // Module Test calls this
     try {
       await PokerAudio.init({ volume: 0.55 });
       PokerAudio.playChipSingle();

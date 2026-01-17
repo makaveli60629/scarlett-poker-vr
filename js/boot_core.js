@@ -1,5 +1,24 @@
 const hud = document.getElementById("hud");
 
+let HUD_VISIBLE = true;
+const hudBtn = document.getElementById("hudToggle");
+
+function setHudVisible(v){
+  HUD_VISIBLE = !!v;
+  if(hud) hud.style.display = HUD_VISIBLE ? "block" : "none";
+  if(hudBtn) hudBtn.textContent = HUD_VISIBLE ? "HIDE HUD" : "SHOW HUD";
+}
+
+function toggleHud(){
+  setHudVisible(!HUD_VISIBLE);
+}
+
+// Button + keyboard + Android event
+if(hudBtn) hudBtn.addEventListener("click", (e)=>{ e.preventDefault(); toggleHud(); });
+window.addEventListener("keydown", (e)=>{ if((e.key||"").toLowerCase()==="h") toggleHud(); });
+window.addEventListener("scarlett_hud_toggle", ()=>toggleHud());
+
+
 const add = (m) => {
   const d = document.createElement("div");
   d.textContent = m;

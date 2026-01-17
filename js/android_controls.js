@@ -39,6 +39,20 @@ export function setupAndroidControls(ctx) {
     root);
   btnM.textContent = "MENU";
 
+  const btnHud = makeEl("button",
+    "position:absolute;right:18px;bottom:166px;width:74px;height:...px;border-radius:37px;border:1px solid rgba(255,255,255,.22);" +
+    "background:rgba(255,210,120,.14);color:#fff;font:700 14px system-ui;pointer-events:auto;",
+    root);
+  btnHud.textContent = "HUD";
+
+
+  // HUD toggle (Android) — fires global event listened by boot_core/ui
+  const fireHud = () => {
+    try { window.dispatchEvent(new CustomEvent("scarlett_hud_toggle")); } catch(e) {}
+  };
+  btnHud.addEventListener("click", (e)=>{ e.preventDefault(); fireHud(); });
+  btnHud.addEventListener("touchstart", (e)=>{ e.preventDefault(); fireHud(); }, {passive:false});
+
   let joyActive=false, joyId=null, joyCenter={x:0,y:0}, joyVec={x:0,y:0};
   let lookActive=false, lookId=null, lastLook={x:0,y:0};
   let yaw = rig.rotation.y, pitch=0;
@@ -110,7 +124,7 @@ export function setupAndroidControls(ctx) {
     const dt=Math.min(0.05,(now-lastT)/1000);
     lastT=now;
 
-    const forward = -joyVec.y;
+    const forward = joyVec.y; // FIX: forward/back was reversed on Android
     const strafe  = joyVec.x;
 
     if (forward!==0 || strafe!==0){

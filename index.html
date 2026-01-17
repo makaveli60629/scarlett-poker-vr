@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Scarlett Poker VR — MASTER AUTO-PATH (ADAPTER v3)</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="utf-8" />
+  <title>Scarlett Poker VR — MASTER v7 (Android + Apparel + Bots)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <script type="importmap">
   {
     "imports": {
@@ -13,17 +13,46 @@
   }
   </script>
   <style>
-    body{margin:0;overflow:hidden;background:#000}
+    html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:ui-monospace,monospace}
     #hud{
-      position:fixed;left:8px;top:8px;right:8px;max-height:52vh;overflow:auto;
+      position:fixed;left:8px;top:8px;right:8px;max-height:46vh;overflow:auto;
       color:#9f9;font:12px/1.25 ui-monospace,monospace;background:rgba(0,0,0,.62);
-      padding:10px;border-radius:10px;z-index:9999;white-space:pre-wrap
+      padding:10px;border-radius:10px;z-index:9999;white-space:pre-wrap;pointer-events:auto
     }
-    .err{color:#ff6b6b}.warn{color:#ffd166}.ok{color:#72ff72}
+    /* Store panel (desktop + android) */
+    #store-container{
+      position:fixed;top:10%;right:16px;width:260px;
+      background:rgba(0,20,30,0.85);border:2px solid #00ffff;box-shadow:0 0 15px #00ffff;
+      color:#00ffff;padding:16px;border-radius:14px;z-index:9998;display:none
+    }
+    #store-container.on{display:block}
+    .store-header{font-weight:800;border-bottom:1px solid #00ffff;margin-bottom:10px;padding-bottom:6px}
+    .item-card{background:rgba(0,255,255,0.08);padding:10px;margin-top:10px;border-radius:10px}
+    .equip-btn{
+      width:100%;background:#00ffff;color:#000;border:none;border-radius:10px;
+      padding:10px;font-weight:900;cursor:pointer;transition:.2s
+    }
+    .equip-btn:hover{background:#fff;box-shadow:0 0 10px #fff}
+    .tiny{opacity:.9;font-size:12px}
   </style>
 </head>
 <body>
   <div id="hud">BOOTING…</div>
+
+  <!-- Store UI -->
+  <div id="store-container">
+    <div class="store-header">SYSTEM STORE v4.0</div>
+    <div class="item-card">
+      <div><b>NEON GLITCH SHIRT</b></div>
+      <div class="tiny">Installs emissive pulse material on avatar torso.</div>
+      <button id="btn-equip-shirt" class="equip-btn">INSTALL MODULE</button>
+    </div>
+    <div class="item-card">
+      <div><b>TOGGLE STORE</b></div>
+      <div class="tiny">Press <b>M</b> (desktop) or Android <b>ACT</b> to toggle.</div>
+    </div>
+  </div>
+
   <script type="module" src="./boot.js"></script>
 </body>
 </html>

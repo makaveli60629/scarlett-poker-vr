@@ -1,60 +1,45 @@
-// /js/modules/pokerAudio.module.js
-// SCARLETT MODULE — Poker Audio (Procedural) wrapper (FULL)
+// /js/modules/gestureControl.js
+// SCARLETT VR POKER — Gesture ↔ Audio bridge (FULL) v1.2 PATH-SAFE
+// IMPORTANT: Uses relative import so it works on GitHub Pages project sites.
 
-import { PokerAudio } from "/js/modules/audioLogic.js";
-import { GestureControl } from "/js/modules/gestureControl.js";
+import { PokerAudio } from "./audioLogic.js";
 
-export default {
-  id: "pokerAudio.module.js",
+export const GestureControl = {
+  tableHeight: 0.8,
 
-  async init({ DIAG }) {
-    const log = (s) => DIAG?.write?.(String(s)) || console.log("[pokerAudio.module]", s);
+  knockSlack: 0.06,
+  knockVelocityY: -0.55,
+  knockDebounceMs: 420,
 
-    window.SCARLETT = window.SCARLETT || {};
+  _knockLock: false,
+  _vacuumLock: false,
 
-    // Unlock audio on first gesture (Quest/Android requirement)
-    const unlockOnce = async () => {
-      try {
-        await PokerAudio.init({ volume: 0.55 });
-        await PokerAudio.unlock?.();
-        log("PokerAudio unlocked ✅");
-      } catch (e) {
-        console.error("[pokerAudio.module] unlock failed", e);
-      } finally {
-        window.removeEventListener("pointerdown", unlockOnce);
-        window.removeEventListener("touchstart", unlockOnce);
-      }
-    };
-    window.addEventListener("pointerdown", unlockOnce, { passive: true });
-    window.addEventListener("touchstart", unlockOnce, { passive: true });
+  update(handData) {
+    if (!handData || !handData.position || !handData.velocity) return;
 
-    // Panel + game hooks
-    window.SCARLETT.audioTest = async () => {
-      await PokerAudio.init({ volume: 0.55 });
-      PokerAudio.playCardSlide();
-      setTimeout(() => PokerAudio.playChipSingle(), 120);
-      setTimeout(() => PokerAudio.playTableKnock(), 240);
-      setTimeout(() => PokerAudio.playPotVacuum({ duration: 1.2 }), 420);
-      return { ok: true, module: "pokerAudio.module.js" };
-    };
+    const y = handData.position.y;
+    const vy = handData.velocity.y;
 
-    window.SCARLETT.sfx = {
-      card: () => PokerAudio.playCardSlide(),
-      chip: () => PokerAudio.playChipSingle(),
-      knock: () => PokerAudio.playTableKnock(),
-      vacuum: () => GestureControl.triggerPotVacuum()
-    };
+    if (!this._knockLock &&
+        y < (this.tableHeight + this.knockSlack) &&
+        vy < this.knockVelocityY) {
 
-    log("Poker Audio module ready ✅");
+      PokerAudio.playTableKnock?.({ intensity: 1.0 });
+
+      this._knockLock = true;
+      setTimeout(() => (this._knockLock = false), this.knockDebounceMs);
+    }
   },
 
-  async test() {
-    try {
-      await PokerAudio.init({ volume: 0.55 });
-      PokerAudio.playChipSingle();
-      return { ok: true, note: "chip sound fired" };
-    } catch (e) {
-      return { ok: false, error: e?.message || String(e) };
-    }
+  triggerPotVacuum(opts = {}) {
+    if (this._vacuumLock) return;
+    this._vacuumLock = true;
+
+    PokerAudio.playPotVacuum?.({
+      duration: typeof opts.duration === "number" ? opts.duration : 1.6,
+      intensity: typeof opts.intensity === "number" ? opts.intensity : 1.0
+    });
+
+    setTimeout(() => (this._vacuumLock = false), 1800);
   }
 };

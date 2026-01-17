@@ -1,1 +1,2 @@
-(async()=>{try{await import('./js/boot.js')}catch(e){await import('./boot_fallback.js')}})();
+// Root boot: always loads the same core, which auto-detects whether you're hosted at / or /js/.
+import "./js/boot.js";

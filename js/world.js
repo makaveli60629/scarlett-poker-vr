@@ -1,122 +1,165 @@
+// js/world.js — Scarlett Orchestrated World v4.6 (Lobby + Pit + Table + Chairs + Rail + Store)
 import * as THREE from 'three';
 
-export const World = {
-  build(ctx){
-    const { scene } = ctx;
+export const World = (() => {
+  const floors = [];
 
-    const root = new THREE.Group();
-    root.name = 'WORLD_ROOT';
-    scene.add(root);
+  function build({ scene, playerRig, diag }) {
+    // Background / fog
+    scene.background = new THREE.Color(0x020205);
+    scene.fog = new THREE.Fog(0x020205, 2, 55);
 
     // Lighting
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 0.85);
-    root.add(hemi);
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x111122, 0.85);
+    scene.add(hemi);
 
-    const dir = new THREE.DirectionalLight(0xffffff, 0.75);
-    dir.position.set(4, 8, 2);
-    root.add(dir);
+    const key = new THREE.DirectionalLight(0xffffff, 1.1);
+    key.position.set(6, 10, 4);
+    key.castShadow = false;
+    scene.add(key);
 
-    // Lobby floor (teleport target)
-    const lobby = new THREE.Group();
-    lobby.name = 'LOBBY';
-    root.add(lobby);
+    // Player spawn (safe: away from table)
+    playerRig.position.set(0, 0, 4.2);
+    playerRig.rotation.set(0, 0, 0);
 
-    const floorGeo = new THREE.CircleGeometry(10, 64);
-    const floorMat = new THREE.MeshStandardMaterial({ color: 0x2b2f3a, roughness: 0.95, metalness: 0.0 });
-    const floor = new THREE.Mesh(floorGeo, floorMat);
+    // Floor base
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x083a1f, roughness: 0.95, metalness: 0.0 });
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(10.5, 64), floorMat);
     floor.rotation.x = -Math.PI/2;
-    floor.name = 'FLOOR_MAIN';
-    lobby.add(floor);
+    floor.position.y = 0;
+    scene.add(floor);
+    floors.push(floor);
 
-    // Wall + ceiling
-    const wall = new THREE.Mesh(
-      new THREE.CylinderGeometry(10, 10, 2.8, 96, 1, true),
-      new THREE.MeshStandardMaterial({ color: 0x1a1e27, roughness: 0.9, metalness: 0.05, side: THREE.DoubleSide })
+    // Lobby shell
+    const shellMat = new THREE.MeshStandardMaterial({ color: 0x2a2c35, roughness: 0.8 });
+    const shell = new THREE.Mesh(new THREE.CylinderGeometry(10.2, 10.2, 4.2, 64, 1, true), shellMat);
+    shell.position.y = 2.1;
+    scene.add(shell);
+
+    // Ceiling glow ring
+    const glow = new THREE.Mesh(
+      new THREE.TorusGeometry(9.2, 0.25, 12, 96),
+      new THREE.MeshStandardMaterial({ color: 0x0b0c14, emissive: 0x2222ff, emissiveIntensity: 0.22, roughness: 0.9 })
     );
-    wall.position.y = 1.4;
-    lobby.add(wall);
+    glow.rotation.x = Math.PI/2;
+    glow.position.y = 4.0;
+    scene.add(glow);
 
-    const ceiling = new THREE.Mesh(
-      new THREE.CircleGeometry(10, 64),
-      new THREE.MeshStandardMaterial({ color: 0x0b0e14, emissive: 0x111a33, emissiveIntensity: 0.35, roughness: 1 })
+    // Poker pit (slightly lowered circle)
+    const pitMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0f, roughness: 0.95 });
+    const pit = new THREE.Mesh(new THREE.CircleGeometry(6.2, 64), pitMat);
+    pit.rotation.x = -Math.PI/2;
+    pit.position.y = -0.08;
+    scene.add(pit);
+    floors.push(pit);
+
+    // Pit rim
+    const rim = new THREE.Mesh(
+      new THREE.TorusGeometry(6.2, 0.18, 10, 96),
+      new THREE.MeshStandardMaterial({ color: 0x3a3f4f, roughness: 0.6, metalness: 0.1 })
     );
-    ceiling.rotation.x = Math.PI/2;
-    ceiling.position.y = 3.2;
-    lobby.add(ceiling);
+    rim.rotation.x = Math.PI/2;
+    rim.position.y = 0.02;
+    scene.add(rim);
 
-    // Poker pit floor (teleport target)
-    const pit = new THREE.Group();
-    pit.name = 'POKER_PIT';
-    root.add(pit);
+    // Stairs ramp (simple)
+    const ramp = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.18, 1.4),
+      new THREE.MeshStandardMaterial({ color: 0x2a2c35, roughness: 0.85 }));
+    ramp.position.set(0, 0.02, 6.8);
+    scene.add(ramp);
+    floors.push(ramp);
 
-    const pitRing = new THREE.Mesh(
-      new THREE.CylinderGeometry(4.5, 4.8, 0.6, 64, 1, true),
-      new THREE.MeshStandardMaterial({ color: 0x141821, roughness: 0.85, metalness: 0.1, side: THREE.DoubleSide })
-    );
-    pitRing.position.y = 0.3;
-    pit.add(pitRing);
-
-    const pitFloor = new THREE.Mesh(
-      new THREE.CircleGeometry(4.5, 64),
-      new THREE.MeshStandardMaterial({ color: 0x3a3f4c, roughness: 0.95 })
-    );
-    pitFloor.rotation.x = -Math.PI/2;
-    pitFloor.position.y = 0.01;
-    pitFloor.name = 'FLOOR_PIT';
-    pit.add(pitFloor);
-
-    // Table at origin (spawn offset keeps you off-table)
-    const table = new THREE.Group();
-    table.name = 'TABLE';
-    root.add(table);
+    // Table (oval)
+    const tableGroup = new THREE.Group();
+    tableGroup.position.set(0, 0.12, 0);
+    scene.add(tableGroup);
 
     const tableTop = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.8, 1.8, 0.18, 48),
-      new THREE.MeshStandardMaterial({ color: 0x1d6b4b, roughness: 0.85 })
+      new THREE.CylinderGeometry(1.65, 1.65, 0.16, 48, 1, false),
+      new THREE.MeshStandardMaterial({ color: 0x0f6b3a, roughness: 0.9 })
     );
-    tableTop.position.set(0, 0.95, 0);
-    table.add(tableTop);
+    tableTop.scale.set(1.55, 1.0, 1.0);
+    tableTop.castShadow = false;
+    tableGroup.add(tableTop);
 
-    const tableBase = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.25, 0.35, 0.9, 24),
-      new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.7 })
+    const tableEdge = new THREE.Mesh(
+      new THREE.TorusGeometry(1.65, 0.16, 10, 72),
+      new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.7 })
     );
-    tableBase.position.set(0, 0.45, 0);
-    table.add(tableBase);
+    tableEdge.scale.set(1.55, 1.0, 1.0);
+    tableEdge.rotation.x = Math.PI/2;
+    tableEdge.position.y = 0.06;
+    tableGroup.add(tableEdge);
 
-    // Chairs
-    const chairs = new THREE.Group();
-    chairs.name = 'CHAIRS';
-    root.add(chairs);
+    const base = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.35, 0.55, 0.7, 24),
+      new THREE.MeshStandardMaterial({ color: 0x171821, roughness: 0.85 })
+    );
+    base.position.y = -0.42;
+    tableGroup.add(base);
 
-    const chairGeo = new THREE.BoxGeometry(0.35, 0.45, 0.35);
-    const chairMat = new THREE.MeshStandardMaterial({ color: 0x5b5f68, roughness: 0.9 });
+    // Chairs (6)
+    const chairMat = new THREE.MeshStandardMaterial({ color: 0x6a6e77, roughness: 0.95 });
+    const chairSeatGeo = new THREE.BoxGeometry(0.55, 0.08, 0.55);
+    const chairBackGeo = new THREE.BoxGeometry(0.55, 0.52, 0.08);
+    const chairLegGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.45, 10);
 
-    for(let i=0;i<6;i++){
-      const a = (i/6)*Math.PI*2;
-      const c = new THREE.Mesh(chairGeo, chairMat);
-      c.position.set(Math.cos(a)*2.6, 0.42, Math.sin(a)*2.6);
-      c.rotation.y = -a;
-      chairs.add(c);
+    const radius = 3.05;
+    for (let i = 0; i < 6; i++) {
+      const a = (i/6) * Math.PI*2;
+      const x = Math.cos(a) * radius;
+      const z = Math.sin(a) * radius;
+      const chair = new THREE.Group();
+      chair.position.set(x, 0.0, z);
+      chair.lookAt(0, 0, 0);
+
+      const seat = new THREE.Mesh(chairSeatGeo, chairMat);
+      seat.position.y = 0.42;
+      chair.add(seat);
+
+      const back = new THREE.Mesh(chairBackGeo, chairMat);
+      back.position.set(0, 0.70, -0.24);
+      chair.add(back);
+
+      const leg = new THREE.Mesh(chairLegGeo, new THREE.MeshStandardMaterial({ color: 0x2c2f39, roughness: 0.85 }));
+      leg.position.y = 0.22;
+      chair.add(leg);
+
+      scene.add(chair);
+      floors.push(seat); // allow teleport onto seat ring around table (optional)
     }
 
-    // Test ball at table center
-    const ball = new THREE.Mesh(
-      new THREE.SphereGeometry(0.12, 24, 24),
-      new THREE.MeshStandardMaterial({ color: 0xaa2222, roughness: 0.35 })
+    // Rail boundary
+    const rail = new THREE.Mesh(
+      new THREE.TorusGeometry(7.2, 0.14, 10, 96),
+      new THREE.MeshStandardMaterial({ color: 0x2b2f3b, roughness: 0.75 })
     );
-    ball.position.set(0, 1.2, 0);
-    root.add(ball);
+    rail.rotation.x = Math.PI/2;
+    rail.position.y = 0.85;
+    scene.add(rail);
 
-    const floors = [floor, pitFloor];
+    // Store pad (simple)
+    const storePad = new THREE.Mesh(new THREE.CircleGeometry(2.3, 48),
+      new THREE.MeshStandardMaterial({ color: 0x111217, roughness: 0.95 }));
+    storePad.rotation.x = -Math.PI/2;
+    storePad.position.set(-6.2, 0.01, -4.8);
+    scene.add(storePad);
+    floors.push(storePad);
 
-    function reset(){ /* spawn handled in main */ }
-    function update(dt){
-      const t = performance.now()*0.001;
-      hemi.intensity = 0.8 + Math.sin(t)*0.05;
-      void dt;
-    }
+    const storeWall = new THREE.Mesh(new THREE.BoxGeometry(0.18, 2.2, 5.2),
+      new THREE.MeshStandardMaterial({ color: 0x1d1f28, roughness: 0.9 }));
+    storeWall.position.set(-8.35, 1.1, -4.8);
+    scene.add(storeWall);
 
-    return { root, floors, update, reset };
+    const kiosk = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.1, 0.6),
+      new THREE.MeshStandardMaterial({ color: 0x0b0c14, emissive: 0x2233ff, emissiveIntensity: 0.12, roughness: 0.6 }));
+    kiosk.position.set(-6.1, 0.55, -3.6);
+    scene.add(kiosk);
+
+    // Final
+    diag && diag.log('[world] orchestrated build ready ✅');
+    return { floors };
   }
-};
+
+  return { build };
+})();

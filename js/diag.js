@@ -1,64 +1,60 @@
-export const Diag = {
-  create(APP_STATE){
-    const panel = document.getElementById('panel');
-    const logs = [];
-    let fps = 60, acc = 0, frames = 0;
+// js/diag.js — Scarlett Diagnostics v4.6
+export const Diag = (() => {
+  const panel = document.getElementById('diag');
+  const logs = [];
+  const maxLogs = 80;
 
-    function ts(){
-      const d = new Date();
-      return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
-    }
+  function ts() {
+    const d = new Date();
+    return d.toTimeString().slice(0,8);
+  }
 
-    function log(msg){
-      logs.push(`[${ts()}] ${msg}`);
-      if(logs.length > 120) logs.shift();
-      if(panel && panel.style.display === 'block'){
-        panel.textContent = render();
-      }
-    }
+  function log(msg) {
+    logs.push(`[${ts()}] ${msg}`);
+    if (logs.length > maxLogs) logs.shift();
+    if (panel && panel.style.display !== 'none') panel.textContent = render();
+  }
 
-    function tick(dt){
-      acc += dt; frames++;
-      if(acc >= 0.5){
-        fps = Math.round(frames / acc);
-        acc = 0; frames = 0;
-      }
-      if(panel && panel.style.display === 'block'){
-        panel.textContent = render();
-      }
-    }
-
-    function setModuleTest(){ log('[status] MODULE TEST ✅'); }
-
-    function render(){
-      const header =
+  function render(state) {
+    const s = state || window.APP_STATE || {};
+    const header =
 `MODULE TEST ✅
-three=${APP_STATE.three}
-xr=${APP_STATE.xr}
-renderer=${APP_STATE.renderer}
-world=${APP_STATE.world}
-floors=${(APP_STATE.floors?.length ?? 0)}
-inXR=${APP_STATE.inXR}
-touch=${APP_STATE.touchOn}
-build=${APP_STATE.build}
+three=${!!s.three}
+xr=${!!s.xr}
+renderer=${!!s.renderer}
+world=${!!s.world}
+floors=${s.floors ?? 0}
+inXR=${!!s.inXR}
+touch=${!!s.touchOn}
+build=${s.build || 'SCARLETT1_RUNTIME_ORCHESTRATED_v4_6'}
 
-XR BASELINE (v4.5)
-----------------------------
-BUILD=${APP_STATE.build}
-inXR=${APP_STATE.inXR}
-teleportEnabled=${APP_STATE.teleportEnabled}
-floors=${(APP_STATE.floors?.length ?? 0)}
+XR ORCHESTRATED (v4.6)
+----------------------
+BUILD=${s.build || 'SCARLETT1_RUNTIME_ORCHESTRATED_v4_6'}
+inXR=${!!s.inXR}
+teleportEnabled=${!!s.teleportEnabled}
+touchOn=${!!s.touchOn}
+floors=${s.floors ?? 0}
 
-[LEFT]  connected=${APP_STATE.left.connected} gamepad=${APP_STATE.left.gamepad}
-[RIGHT] connected=${APP_STATE.right.connected} gamepad=${APP_STATE.right.gamepad}
+[LEFT]  connected=${!!(s.left && s.left.connected)} gamepad=${!!(s.left && s.left.gamepad)}
+[RIGHT] connected=${!!(s.right && s.right.connected)} gamepad=${!!(s.right && s.right.gamepad)}
 
-FPS=${fps}
+FPS=${s.fps ?? 0}
 
 Logs
 `;
-      return header + logs.slice(-50).join('\n');
-    }
-
-    return { log, tick, render, setModuleTest };
+    return header + logs.slice(-50).join('\n');
   }
-};
+
+  function tick(state) {
+    if (panel && panel.style.display !== 'none') panel.textContent = render(state);
+  }
+
+  function toggle() {
+    if (!panel) return;
+    panel.style.display = (panel.style.display === 'none' || !panel.style.display) ? 'block' : 'none';
+    if (panel.style.display !== 'none') panel.textContent = render();
+  }
+
+  return { log, tick, toggle };
+})();

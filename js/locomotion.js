@@ -1,89 +1,54 @@
+// js/locomotion.js — Smooth move + snap turn + teleport integration hooks
 import * as THREE from 'three';
 
-export const Locomotion = {
-  create({ renderer, camera, APP_STATE, diag, playerRig }){
-    // Tuning
-    const SPEED = 1.6;        // meters/sec
-    const STRAFE = 1.4;       // meters/sec
-    const DEADZONE = 0.18;
-    const SNAP_DEG = 30 * Math.PI/180;
-    let snapCooldown = 0;
+export const Locomotion = (() => {
+  const SPEED = 1.7;        // m/s
+  const STRAFE = 1.5;       // m/s
+  const DEADZONE = 0.18;
+  const SNAP_DEG = 30 * Math.PI / 180;
+  const SNAP_COOLDOWN = 0.22;
 
-    const fwd = new THREE.Vector3();
-    const right = new THREE.Vector3();
-    const up = new THREE.Vector3(0,1,0);
+  function dz(v) { return Math.abs(v) < DEADZONE ? 0 : v; }
 
-    function reset(){
-      snapCooldown = 0;
-    }
+  function create({ camera, playerRig, xrInput, diag }) {
+    let snapT = 0;
 
-    function onSessionStart(){ diag.log('[Move] thumbstick locomotion enabled'); }
-    function onSessionEnd(){ reset(); }
+    function update(dt) {
+      if (!xrInput) return;
 
-    function update(dt){
-      if(!APP_STATE.inXR) return;
+      // Movement from left stick (if present)
+      const lx = dz(xrInput.axes.lx || 0);
+      const ly = dz(xrInput.axes.ly || 0);
 
-      const session = renderer.xr.getSession();
-      if(!session) return;
+      if (lx || ly) {
+        // Move relative to camera yaw
+        const yaw = getYaw(camera);
+        const forward = new THREE.Vector3(0,0,-1).applyAxisAngle(new THREE.Vector3(0,1,0), yaw);
+        const right = new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0), yaw);
 
-      // Find left + right gamepads
-      let leftGP = null;
-      let rightGP = null;
-      for(const s of session.inputSources){
-        if(!s || !s.gamepad) continue;
-        if(s.handedness === 'left') leftGP = s.gamepad;
-        if(s.handedness === 'right') rightGP = s.gamepad;
+        const move = new THREE.Vector3();
+        move.addScaledVector(forward, (-ly) * SPEED * dt);
+        move.addScaledVector(right, (lx) * STRAFE * dt);
+
+        playerRig.position.add(move);
       }
 
-      // Left stick move (axes 2/3 or 0/1 depending on device)
-      if(leftGP){
-        const ax0 = leftGP.axes?.[0] ?? 0;
-        const ay0 = leftGP.axes?.[1] ?? 0;
-        const ax2 = leftGP.axes?.[2] ?? 0;
-        const ay2 = leftGP.axes?.[3] ?? 0;
-
-        const sx = Math.abs(ax2) > Math.abs(ax0) ? ax2 : ax0;
-        const sy = Math.abs(ay2) > Math.abs(ay0) ? ay2 : ay0;
-
-        const dx = Math.abs(sx) < DEADZONE ? 0 : sx;
-        const dz = Math.abs(sy) < DEADZONE ? 0 : sy;
-
-        if(dx || dz){
-          // Camera forward on XZ
-          camera.getWorldDirection(fwd);
-          fwd.y = 0;
-          fwd.normalize();
-          right.copy(fwd).cross(up).normalize();
-
-          // Note: stick forward is typically negative Y
-          const forwardMove = -dz * SPEED * dt;
-          const strafeMove  = dx * STRAFE * dt;
-
-          playerRig.position.addScaledVector(fwd, forwardMove);
-          playerRig.position.addScaledVector(right, strafeMove);
-        }
-      }
-
-      // Right stick snap turn (X)
-      if(rightGP){
-        snapCooldown = Math.max(0, snapCooldown - dt);
-
-        const ax0 = rightGP.axes?.[0] ?? 0;
-        const ax2 = rightGP.axes?.[2] ?? 0;
-        const sx = Math.abs(ax2) > Math.abs(ax0) ? ax2 : ax0;
-
-        if(snapCooldown === 0){
-          if(sx > 0.75){
-            playerRig.rotation.y -= SNAP_DEG;
-            snapCooldown = 0.22;
-          } else if(sx < -0.75){
-            playerRig.rotation.y += SNAP_DEG;
-            snapCooldown = 0.22;
-          }
-        }
+      // Snap turn from right stick X
+      const rx = dz(xrInput.axes.rx || 0);
+      snapT -= dt;
+      if (snapT <= 0 && rx) {
+        playerRig.rotation.y += (rx > 0 ? -SNAP_DEG : SNAP_DEG);
+        snapT = SNAP_COOLDOWN;
       }
     }
 
-    return { update, reset, onSessionStart, onSessionEnd };
+    return { update };
   }
-};
+
+  function getYaw(camera) {
+    const e = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+    return e.y;
+  }
+
+  return { create };
+})();

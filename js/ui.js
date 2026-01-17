@@ -1,42 +1,30 @@
-export const UI = {
-  create(APP_STATE, diag){
+// js/ui.js — HUD bindings
+export const UI = (() => {
+  function bind({ onEnterVR, onToggleHud, onToggleTeleport, onToggleDiag }) {
+    const enterVrBtn = document.getElementById('enterVrBtn');
+    const hideHudBtn = document.getElementById('hideHudBtn');
+    const teleBtn = document.getElementById('teleBtn');
+    const diagBtn = document.getElementById('diagBtn');
     const hud = document.getElementById('hud');
-    const panel = document.getElementById('panel');
 
-    const btnEnterVR = document.getElementById('btnEnterVR');
-    const btnHUD = document.getElementById('btnHUD');
-    const btnTeleport = document.getElementById('btnTeleport');
-    const btnDiag = document.getElementById('btnDiag');
-
-    let handlers = {};
-
-    function bind(h){
-      handlers = h || {};
-      btnEnterVR.onclick = () => handlers.onEnterVR?.();
-      btnHUD.onclick = () => handlers.onToggleHUD?.();
-      btnTeleport.onclick = () => handlers.onToggleTeleport?.();
-      btnDiag.onclick = () => handlers.onToggleDiag?.();
-    }
-
-    function refreshButtons(){
-      btnTeleport.textContent = `Teleport: ${APP_STATE.teleportEnabled ? 'ON' : 'OFF'}`;
-      btnHUD.textContent = hud.style.display === 'none' ? 'Show HUD' : 'Hide HUD';
-    }
-
-    function toggleHUD(){
-      const isHidden = hud.style.display === 'none';
-      hud.style.display = isHidden ? 'flex' : 'none';
-      refreshButtons();
-    }
-
-    function toggleDiagPanel(){
-      panel.style.display = (panel.style.display === 'none' || !panel.style.display) ? 'block' : 'none';
-      if(panel.style.display === 'block') panel.textContent = diag.render();
-    }
-
-    function onSessionStart(){ diag.log('[UI] XR started'); refreshButtons(); }
-    function onSessionEnd(){ diag.log('[UI] XR ended'); refreshButtons(); }
-
-    return { bind, refreshButtons, toggleHUD, toggleDiagPanel, onSessionStart, onSessionEnd };
+    if (enterVrBtn) enterVrBtn.onclick = () => onEnterVR && onEnterVR();
+    if (hideHudBtn) hideHudBtn.onclick = () => {
+      if (!hud) return;
+      const visible = hud.style.display !== 'none';
+      hud.style.display = visible ? 'none' : 'flex';
+      onToggleHud && onToggleHud(!visible);
+    };
+    if (teleBtn) teleBtn.onclick = () => {
+      const enabled = onToggleTeleport ? onToggleTeleport() : false;
+      teleBtn.textContent = enabled ? 'Teleport: ON' : 'Teleport: OFF';
+    };
+    if (diagBtn) diagBtn.onclick = () => onToggleDiag && onToggleDiag();
   }
-};
+
+  function setTeleportButton(enabled) {
+    const teleBtn = document.getElementById('teleBtn');
+    if (teleBtn) teleBtn.textContent = enabled ? 'Teleport: ON' : 'Teleport: OFF';
+  }
+
+  return { bind, setTeleportButton };
+})();

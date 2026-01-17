@@ -1,162 +1,141 @@
+// js/main.js — Scarlett XR Orchestrated Runtime v4.6
 import * as THREE from 'three';
-
-import { World } from './world.js';
-import { UI } from './ui.js';
 import { Diag } from './diag.js';
+import { UI } from './ui.js';
 import { XRInput } from './xr_input.js';
 import { Teleport } from './teleport.js';
 import { Locomotion } from './locomotion.js';
-
-export const BUILD = 'SCARLETT1_RUNTIME_SURGICAL_v4_5';
+import { World } from './world.js';
 
 const APP_STATE = {
-  build: BUILD,
+  build: 'SCARLETT1_RUNTIME_ORCHESTRATED_v4_6',
   three: true,
-  xr: false,
+  xr: !!navigator.xr,
   renderer: false,
   world: false,
+  floors: 0,
   inXR: false,
   teleportEnabled: false,
   touchOn: false,
+  fps: 0,
   left: { connected:false, gamepad:false },
-  right:{ connected:false, gamepad:false },
-  floors: []
+  right: { connected:false, gamepad:false },
 };
-
 window.APP_STATE = APP_STATE;
-window.BUILD = BUILD;
 
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x05060a);
+let scene, camera, renderer, clock;
+let playerRig;
+let xrInput, teleport, locomotion;
+let floors = [];
 
-// Player rig: teleport & stick locomotion move THIS group.
-// In XR, the camera local pose is controlled by the headset; rig offsets set spawn.
-const playerRig = new THREE.Group();
-playerRig.name = "PLAYER_RIG";
-scene.add(playerRig);
+init();
 
-// Camera lives inside the rig.
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.05, 250);
-camera.position.set(0, 1.6, 0); // non-XR preview height
-playerRig.add(camera);
+function init() {
+  clock = new THREE.Clock();
 
-// Spawn offset (prevents spawning inside table in XR)
-playerRig.position.set(0, 0, 3.2);
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 120);
 
-const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.xr.enabled = true;
-APP_STATE.renderer = true;
-document.body.appendChild(renderer.domElement);
-
-const clock = new THREE.Clock();
-
-const diag = Diag.create(APP_STATE);
-const ui = UI.create(APP_STATE, diag);
-
-// Build world at origin (table at 0,0,0). Spawn is handled by rig offset above.
-const world = World.build({ scene, camera, renderer, APP_STATE, playerRig });
-APP_STATE.world = true;
-
-// XR input + controller rays
-const xrInput = XRInput.create({ scene, renderer, APP_STATE, diag, playerRig });
-
-// Teleport uses the RIGHT controller ray (falls back to left).
-const teleport = Teleport.create({
-  scene, renderer, camera, APP_STATE, diag,
-  playerRig,
-  getController: () => xrInput.ctrlRight || xrInput.ctrlLeft
-});
-
-// Stick locomotion (left stick = move; right stick X = snap turn)
-const locomotion = Locomotion.create({ renderer, camera, APP_STATE, diag, playerRig });
-
-// Floors for teleport raycast
-APP_STATE.floors = world.floors || [];
-teleport.setFloors(APP_STATE.floors);
-
-// XR session hooks
-APP_STATE.xr = !!navigator.xr;
-
-renderer.xr.addEventListener('sessionstart', () => {
-  APP_STATE.inXR = true;
-  diag.log('[XR] sessionstart ✅');
-  xrInput.onSessionStart();
-  teleport.onSessionStart();
-  locomotion.onSessionStart();
-  ui.onSessionStart();
-});
-
-renderer.xr.addEventListener('sessionend', () => {
-  APP_STATE.inXR = false;
-  APP_STATE.left.gamepad = false;
-  APP_STATE.right.gamepad = false;
-  diag.log('[XR] sessionend');
-  xrInput.onSessionEnd();
-  teleport.onSessionEnd();
-  locomotion.onSessionEnd();
-  ui.onSessionEnd();
-});
-
-ui.bind({
-  onEnterVR: async () => {
-    try {
-      if (!navigator.xr) { diag.log('[XR] navigator.xr missing'); return; }
-      const session = await navigator.xr.requestSession('immersive-vr', {
-        optionalFeatures: ['local-floor','bounded-floor','hand-tracking','layers']
-      });
-      await renderer.xr.setSession(session);
-      diag.log('[XR] requestSession ✅');
-    } catch (e) {
-      diag.log('[XR] requestSession FAILED: ' + (e?.message || e));
-    }
-  },
-  onToggleHUD: () => ui.toggleHUD(),
-  onToggleTeleport: () => {
-    APP_STATE.teleportEnabled = !APP_STATE.teleportEnabled;
-    ui.refreshButtons();
-    diag.log(`[teleport] ${APP_STATE.teleportEnabled ? 'ON' : 'OFF'}`);
-  },
-  onToggleDiag: () => ui.toggleDiagPanel(),
-  onPanic: () => {
-    diag.log('[PANIC] reset spawn');
-    playerRig.position.set(0, 0, 3.2);
-    playerRig.rotation.set(0, 0, 0);
-    teleport.reset();
-    locomotion.reset();
-  },
-  onTouch: () => {
-    APP_STATE.touchOn = !APP_STATE.touchOn;
-    ui.refreshButtons();
-    diag.log(`[touch] ${APP_STATE.touchOn ? 'ON' : 'OFF'}`);
-  }
-});
-
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth/window.innerHeight;
-  camera.updateProjectionMatrix();
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
-});
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
 
-function animate() {
-  const dt = Math.min(clock.getDelta(), 0.033);
+  APP_STATE.renderer = true;
+  Diag.log('[status] booting…');
+  Diag.log(`BUILD=${APP_STATE.build}`);
+  Diag.log('[status] renderer OK ✅');
 
-  xrInput.update(dt);
-  locomotion.update(dt);   // << movement
-  teleport.update(dt);
-  world.update(dt);
+  // Player rig (everything parents under this so teleport/move affects controllers & rays)
+  playerRig = new THREE.Group();
+  playerRig.position.set(0, 0, 0);
+  scene.add(playerRig);
 
-  diag.tick(dt);
+  // Camera sits under rig
+  playerRig.add(camera);
+
+  // Build world
+  Diag.log('[status] building world…');
+  const built = World.build({ scene, playerRig, diag: Diag });
+  floors = built.floors || [];
+  APP_STATE.world = true;
+  APP_STATE.floors = floors.length;
+  Diag.log('[status] world ready ✅');
+
+  // XR Input + locomotion + teleport
+  xrInput = XRInput.create({ renderer, scene, playerRig, diag: Diag });
+  locomotion = Locomotion.create({ camera, playerRig, xrInput, diag: Diag });
+  teleport = Teleport.create({ renderer, scene, camera, playerRig, floors, xrInput, diag: Diag });
+
+  // UI wiring
+  UI.bind({
+    onEnterVR: enterVR,
+    onToggleTeleport: () => {
+      const v = teleport.toggle();
+      APP_STATE.teleportEnabled = v;
+      xrInput.setRayVisible(v);
+      return v;
+    },
+    onToggleDiag: () => Diag.toggle(),
+  });
+
+  // Default: rays hidden until teleport enabled
+  xrInput.setRayVisible(false);
+
+  window.addEventListener('resize', onResize);
+
+  // Main loop
+  renderer.setAnimationLoop(loop);
+
+  Diag.log('[status] MODULE TEST ✅');
+}
+
+async function enterVR() {
+  try {
+    if (!navigator.xr) {
+      Diag.log('[XR] navigator.xr missing');
+      return;
+    }
+    const session = await navigator.xr.requestSession('immersive-vr', {
+      optionalFeatures: ['local-floor','bounded-floor','hand-tracking','layers']
+    });
+    await renderer.xr.setSession(session);
+    APP_STATE.inXR = true;
+    Diag.log('[XR] requestSession ✅');
+  } catch (e) {
+    Diag.log('[XR] requestSession FAILED: ' + (e?.message || e));
+  }
+}
+
+let fpsAcc = 0, fpsFrames = 0;
+function loop() {
+  const dt = clock.getDelta();
+  xrInput.update();
+
+  // Mirror controller state
+  APP_STATE.left.connected = xrInput.left.connected;
+  APP_STATE.left.gamepad = xrInput.left.gamepad;
+  APP_STATE.right.connected = xrInput.right.connected;
+  APP_STATE.right.gamepad = xrInput.right.gamepad;
+
+  // Update locomotion and teleport
+  locomotion.update(dt);
+  teleport.update();
+
+  // FPS
+  fpsAcc += dt; fpsFrames++;
+  if (fpsAcc >= 0.5) {
+    APP_STATE.fps = Math.round(fpsFrames / fpsAcc);
+    fpsAcc = 0; fpsFrames = 0;
+  }
+
+  Diag.tick(APP_STATE);
   renderer.render(scene, camera);
 }
-renderer.setAnimationLoop(animate);
 
-diag.log('[status] booting…');
-diag.log(`BUILD=${BUILD}`);
-diag.log('[status] renderer OK ✅');
-diag.log('[status] building world…');
-diag.log('[status] world ready ✅');
-ui.refreshButtons();
-diag.setModuleTest();
+function onResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}

@@ -1,72 +1,98 @@
+// js/xr_input.js — Controller + rays + axes
 import * as THREE from 'three';
-import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 
-export const XRInput = {
-  create({ scene, renderer, APP_STATE, diag, playerRig }){
-    const factory = new XRControllerModelFactory();
+export const XRInput = (() => {
+  function create({ renderer, scene, playerRig, diag }) {
+    const left = { connected:false, gamepad:false, grip:null, ray:null, controller:null };
+    const right = { connected:false, gamepad:false, grip:null, ray:null, controller:null };
 
-    // Controllers + grips
-    const ctrlLeft  = renderer.xr.getController(0);
-    const ctrlRight = renderer.xr.getController(1);
-    const gripLeft  = renderer.xr.getControllerGrip(0);
-    const gripRight = renderer.xr.getControllerGrip(1);
+    const axes = { lx:0, ly:0, rx:0, ry:0 };
+    const tempMat = new THREE.Matrix4();
+    const rayDir = new THREE.Vector3();
+    const rayOrigin = new THREE.Vector3();
 
-    gripLeft.add(factory.createControllerModel(gripLeft));
-    gripRight.add(factory.createControllerModel(gripRight));
-
-    // IMPORTANT:
-    // Parent controllers under the playerRig so when rig teleports, the rays/controllers move with you.
-    // This fixes the “laser stuck at the table” feeling.
-    playerRig.add(ctrlLeft);
-    playerRig.add(ctrlRight);
-    playerRig.add(gripLeft);
-    playerRig.add(gripRight);
-
-    // Visible rays
-    const rayMat = new THREE.LineBasicMaterial({ color: 0xffffff });
-    function addRay(ctrl){
-      const pts = [new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)];
-      const geo = new THREE.BufferGeometry().setFromPoints(pts);
-      const line = new THREE.Line(geo, rayMat);
-      line.name = "RAY";
+    function makeRay() {
+      const geo = new THREE.BufferGeometry().setFromPoints([ new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1) ]);
+      const mat = new THREE.LineBasicMaterial({ transparent:true, opacity:0.85 });
+      const line = new THREE.Line(geo, mat);
       line.scale.z = 6;
-      ctrl.add(line);
-    }
-    addRay(ctrlLeft);
-    addRay(ctrlRight);
-
-    function reset(){
-      APP_STATE.left.gamepad = false;
-      APP_STATE.right.gamepad = false;
+      return line;
     }
 
-    function onSessionStart(){ diag.log('[XRInput] session start'); }
-    function onSessionEnd(){ reset(); }
+    function hook(idx, target) {
+      const controller = renderer.xr.getController(idx);
+      const grip = renderer.xr.getControllerGrip(idx);
 
-    function pollGamepads(){
+      controller.addEventListener('connected', (e) => {
+        target.connected = true;
+        target.controller = controller;
+        target.grip = grip;
+        target.gamepad = !!e.data.gamepad;
+        diag && diag.log(`[XR] controller${idx} connected gamepad=${target.gamepad}`);
+      });
+
+      controller.addEventListener('disconnected', () => {
+        target.connected = false;
+        target.gamepad = false;
+        diag && diag.log(`[XR] controller${idx} disconnected`);
+      });
+
+      const ray = makeRay();
+      controller.add(ray);
+      target.ray = ray;
+
+      // Important: parent controllers under playerRig so teleport/move affects rays (prevents “stuck laser”)
+      playerRig.add(controller);
+      playerRig.add(grip);
+
+      return controller;
+    }
+
+    hook(0, left);
+    hook(1, right);
+
+    function update() {
+      // Read axes from XR session input sources
       const session = renderer.xr.getSession();
-      if(!session) return;
+      if (!session) return;
 
-      let leftGP = false, rightGP = false;
-      for(const s of session.inputSources){
-        if(!s || !s.gamepad) continue;
-        if(s.handedness === 'left') leftGP = true;
-        if(s.handedness === 'right') rightGP = true;
+      axes.lx = axes.ly = axes.rx = axes.ry = 0;
+
+      for (const src of session.inputSources) {
+        const gp = src.gamepad;
+        if (!gp) continue;
+        const a = gp.axes || [];
+        // Heuristic mapping:
+        // left hand: axes[2,3] sometimes; right hand: axes[2,3] too depending browser.
+        // We'll use handedness to map.
+        if (src.handedness === 'left') {
+          axes.lx = a[2] ?? a[0] ?? 0;
+          axes.ly = a[3] ?? a[1] ?? 0;
+        } else if (src.handedness === 'right') {
+          axes.rx = a[2] ?? a[0] ?? 0;
+          axes.ry = a[3] ?? a[1] ?? 0;
+        }
       }
-      APP_STATE.left.gamepad = leftGP;
-      APP_STATE.right.gamepad = rightGP;
     }
 
-    ctrlLeft.addEventListener('connected', () => { APP_STATE.left.connected = true; diag.log('[XR] LEFT connected ✅'); });
-    ctrlRight.addEventListener('connected', () => { APP_STATE.right.connected = true; diag.log('[XR] RIGHT connected ✅'); });
-    ctrlLeft.addEventListener('disconnected', () => { APP_STATE.left.connected = false; APP_STATE.left.gamepad = false; diag.log('[XR] LEFT disconnected'); });
-    ctrlRight.addEventListener('disconnected', () => { APP_STATE.right.connected = false; APP_STATE.right.gamepad = false; diag.log('[XR] RIGHT disconnected'); });
-
-    function update(dt){
-      pollGamepads();
-      void dt;
+    function setRayVisible(v) {
+      if (left.ray) left.ray.visible = v;
+      if (right.ray) right.ray.visible = v;
     }
 
-    return { update, reset, onSessionStart, onSessionEnd, ctrlLeft, ctrlRight, gripLeft, gripRight };
+    // Raycast helpers for teleport
+    function getRayFromRight(outRay) {
+      if (!right.controller) return false;
+      tempMat.identity().extractRotation(right.controller.matrixWorld);
+      rayOrigin.setFromMatrixPosition(right.controller.matrixWorld);
+      rayDir.set(0,0,-1).applyMatrix4(tempMat).normalize();
+      outRay.origin.copy(rayOrigin);
+      outRay.direction.copy(rayDir);
+      return true;
+    }
+
+    return { left, right, axes, update, setRayVisible, getRayFromRight };
   }
-};
+
+  return { create };
+})();

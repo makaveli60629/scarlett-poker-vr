@@ -1,6 +1,6 @@
 // /js/modules/audioLogic.js
-// ScarlettVR Poker — Poker Audio Module (Procedural)
-// ES Module — GitHub Pages safe imports (no bare specifiers)
+// SCARLETT VR POKER — Procedural Poker Audio (FULL)
+// GitHub Pages safe • WebXR safe • Quest safe
 
 export const PokerAudio = {
   ctx: null,
@@ -10,24 +10,21 @@ export const PokerAudio = {
   _noiseBuffer: null,
   _unlocked: false,
 
-  // Call on first user gesture (pointerdown/touchstart/controller select)
   async init({ volume = 0.55 } = {}) {
     if (this.ctx) return;
 
     const AC = window.AudioContext || window.webkitAudioContext;
     this.ctx = new AC();
 
-    // Master
     this.master = this.ctx.createGain();
     this.master.gain.value = volume;
 
-    // SFX bus + limiter (Quest-friendly)
     this.sfxBus = this.ctx.createGain();
     this.sfxBus.gain.value = 1.0;
 
-    // Soft limiter / compressor to prevent clipping
+    // Quest-friendly soft limiter
     this.limiter = this.ctx.createDynamicsCompressor();
-    this.limiter.threshold.value = -14; // dB
+    this.limiter.threshold.value = -14;
     this.limiter.knee.value = 18;
     this.limiter.ratio.value = 6;
     this.limiter.attack.value = 0.003;
@@ -37,7 +34,7 @@ export const PokerAudio = {
     this.limiter.connect(this.master);
     this.master.connect(this.ctx.destination);
 
-    this._noiseBuffer = this._makeNoiseBuffer(1.0); // 1s reusable
+    this._noiseBuffer = this._makeNoiseBuffer(1.0);
     await this.unlock();
   },
 
@@ -47,7 +44,7 @@ export const PokerAudio = {
       try { await this.ctx.resume(); } catch (_) {}
     }
 
-    // “Prime” audio graph with a silent click to satisfy some devices
+    // Prime graph once to satisfy mobile policies
     if (!this._unlocked) {
       const t = this.ctx.currentTime;
       const osc = this.ctx.createOscillator();
@@ -63,11 +60,14 @@ export const PokerAudio = {
   },
 
   setVolume(v) {
-    if (!this.master) return;
-    this.master.gain.setTargetAtTime(Math.max(0, Math.min(1, v)), this.ctx.currentTime, 0.02);
+    if (!this.master || !this.ctx) return;
+    const vv = Math.max(0, Math.min(1, v));
+    this.master.gain.setTargetAtTime(vv, this.ctx.currentTime, 0.02);
   },
 
-  // ---------- Helpers ----------
+  // ---------------- helpers ----------------
+  _rand(min, max) { return min + Math.random() * (max - min); },
+
   _makeNoiseBuffer(seconds = 1.0) {
     const sr = this.ctx.sampleRate;
     const len = Math.max(1, Math.floor(sr * seconds));
@@ -78,18 +78,13 @@ export const PokerAudio = {
   },
 
   _env(gainNode, t, a = 0.005, d = 0.12, peak = 0.3, end = 0.0008) {
-    // Click-safe envelope
     gainNode.gain.cancelScheduledValues(t);
     gainNode.gain.setValueAtTime(0.00001, t);
     gainNode.gain.linearRampToValueAtTime(peak, t + a);
     gainNode.gain.exponentialRampToValueAtTime(end, t + a + d);
   },
 
-  _rand(min, max) {
-    return min + Math.random() * (max - min);
-  },
-
-  // ---------- SFX ----------
+  // ---------------- SFX ----------------
   playCardSlide({ intensity = 1.0 } = {}) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
@@ -129,7 +124,6 @@ export const PokerAudio = {
     osc.type = "sine";
     const f = 2600 * this._rand(0.92, 1.12);
     osc.frequency.setValueAtTime(f, t);
-    // tiny pitch drop = “clink”
     osc.frequency.exponentialRampToValueAtTime(f * 0.72, t + 0.06);
 
     this._env(g, t, 0.002, 0.07, 0.18 * intensity, 0.001);
@@ -167,12 +161,11 @@ export const PokerAudio = {
     osc.stop(t + 0.16);
   },
 
-  // “Vacuum / Pot Win” — noise + sweeping bandpass + mild resonance
-  playPotVacuum({ duration = 1.5, intensity = 1.0 } = {}) {
+  // Vacuum / pot win: looped noise + sweeping bandpass + envelope
+  playPotVacuum({ duration = 1.6, intensity = 1.0 } = {}) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
 
-    // Reused noise buffer (loop)
     const src = this.ctx.createBufferSource();
     src.buffer = this._noiseBuffer;
     src.loop = true;
@@ -183,14 +176,12 @@ export const PokerAudio = {
 
     const g = this.ctx.createGain();
 
-    // Sweep feels more “suction” if it starts low-mid and rises
     const fStart = this._rand(160, 260);
     const fEnd = this._rand(1600, 2800);
 
     bp.frequency.setValueAtTime(fStart, t);
     bp.frequency.exponentialRampToValueAtTime(fEnd, t + duration);
 
-    // Envelope: smooth in, then tail out
     g.gain.setValueAtTime(0.00001, t);
     g.gain.linearRampToValueAtTime(0.26 * intensity, t + 0.08);
     g.gain.exponentialRampToValueAtTime(0.0008, t + duration);

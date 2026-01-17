@@ -1,8 +1,7 @@
 // /js/scarlett1/index.js — SCARLETT1 PRIME ENTRY (FULL)
-// BUILD: SCARLETT1_INDEX_FULL_v4_3
-// GitHub Pages safe: NO bare specifiers (no "three") — only absolute URLs.
-import { buildWorld } from "./world.js";
-const BUILD = "SCARLETT1_INDEX_FULL_v4_3";
+// BUILD: SCARLETT1_INDEX_FULL_v4_3_FOLDED
+
+const BUILD = "SCARLETT1_INDEX_FULL_v4_3_FOLDED";
 
 const log = (...a) => console.log("[scarlett1]", ...a);
 const warn = (...a) => console.warn("[scarlett1]", ...a);
@@ -25,27 +24,26 @@ const ui = {
 
 function setStatus(s) {
   if (ui.status) ui.status.textContent = s;
+  console.log("[status]", s);
 }
 
-// ---------- Imports (pinned) ----------
+// ---------- Imports (pinned, GitHub-safe) ----------
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
 import { XRControllerModelFactory } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/XRControllerModelFactory.js";
 
 import { buildWorld } from "./world.js";
+console.log("[scarlett1] world.js import OK ✅");
 
 // ---------- Core ----------
 let renderer, scene, camera, clock;
-let player;              // a group that we move
-let head;                // camera sits under this
-let world;               // world module
-let floorMeshes = [];    // teleport intersection targets
+let player, head;
+let world;
+let floorMeshes = [];
 
-// locomotion
 let teleportEnabled = false;
 let snapTurnCooldown = 0;
 
-// controllers
 const controllers = {
   left: null,
   right: null,
@@ -67,7 +65,7 @@ const state = {
 
 boot().catch((e) => {
   err("BOOT FAIL", e);
-  setStatus("BOOT FAIL ❌\n" + (e?.message || e));
+  setStatus("BOOT FAIL ❌\n" + (e?.stack || e?.message || String(e)));
 });
 
 async function boot() {
@@ -79,7 +77,7 @@ async function boot() {
   scene.background = new THREE.Color(0x000000);
 
   // Camera + player rig
-  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
   player = new THREE.Group();
   head = new THREE.Group();
   head.add(camera);
@@ -94,7 +92,10 @@ async function boot() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.xr.enabled = true;
-  document.getElementById("app").appendChild(renderer.domElement);
+
+  const app = document.getElementById("app");
+  app.innerHTML = "";
+  app.appendChild(renderer.domElement);
 
   clock = new THREE.Clock();
 
@@ -102,28 +103,38 @@ async function boot() {
   const vrBtn = VRButton.createButton(renderer);
   if (ui.vrMount) ui.vrMount.appendChild(vrBtn);
 
-  // UI hooks
+  // UI
   hookUI();
 
-  // World
-  world = await buildWorld({
-    THREE,
-    scene,
-    player,
-    renderer,
-    onRegisterFloors: (meshes) => {
-      floorMeshes = meshes || [];
-    },
-    onStatus: (s) => setStatus(s),
-    log,
-    warn,
-    err,
-  });
+  setStatus(`boot stage: renderer OK ✅\nBUILD=${BUILD}\nloading world…`);
+
+  // World (FOLDED: hard try/catch with on-screen error)
+  try {
+    console.log("[scarlett1] calling buildWorld()");
+    world = await buildWorld({
+      THREE,
+      scene,
+      player,
+      renderer,
+      onRegisterFloors: (meshes) => {
+        floorMeshes = meshes || [];
+      },
+      onStatus: (s) => setStatus(s),
+      log,
+      warn,
+      err,
+    });
+    console.log("[scarlett1] buildWorld() returned ✅");
+  } catch (e) {
+    err("WORLD BUILD FAIL", e);
+    setStatus("WORLD BUILD FAIL ❌\n" + (e?.stack || e?.message || String(e)));
+    // Keep running so you still get HUD + VR button
+    world = null;
+  }
 
   // Controllers
   initXRControllers();
 
-  // XR session events
   renderer.xr.addEventListener("sessionstart", () => {
     state.inXR = true;
     setStatus(`XR session started ✅\nBUILD=${BUILD}`);
@@ -133,13 +144,16 @@ async function boot() {
     setStatus(`XR session ended.\nBUILD=${BUILD}`);
   });
 
-  // Resize
   window.addEventListener("resize", onResize);
 
-  // Start loop
   renderer.setAnimationLoop(tick);
 
-  setStatus(`ready ✅\nBUILD=${BUILD}\nTeleport: OFF\nLeft Y: menu • Right stick move • Left stick snap`);
+  // Final ready status (even if world failed, you’ll see why above)
+  if (world) {
+    setStatus(
+      `ready ✅\nBUILD=${BUILD}\nTeleport: ${teleportEnabled ? "ON" : "OFF"}\nLeft Y: menu • Right stick move • Left stick snap`
+    );
+  }
 }
 
 function hookUI() {
@@ -157,7 +171,6 @@ function hookUI() {
   ui.btnDiag?.addEventListener("click", () => toggleDiag());
 
   ui.btnTestModules?.addEventListener("click", () => {
-    // "Module Test" style button: proves all key subsystems are alive
     const ok = {
       three: !!THREE,
       xr: !!navigator.xr,
@@ -176,7 +189,6 @@ function hookUI() {
   });
 
   ui.btnResetPlayer?.addEventListener("click", () => resetPlayer());
-
   ui.btnReload?.addEventListener("click", () => location.reload());
 }
 
@@ -186,8 +198,8 @@ function toggleDiag(force) {
 }
 
 function resetPlayer() {
-  player.position.set(0, 1.6, 6);
-  player.rotation.set(0, 0, 0);
+  player.position.set(0, 1.6, 10);
+  player.rotation.set(0, Math.PI, 0);
   setStatus(`player reset ✅\npos=${player.position.x.toFixed(2)},${player.position.y.toFixed(2)},${player.position.z.toFixed(2)}`);
 }
 
@@ -209,32 +221,23 @@ function initXRControllers() {
   scene.add(controllers.leftGrip);
   scene.add(controllers.rightGrip);
 
-  // Rays (lasers)
   controllers.leftRay = makeRay(true);
   controllers.rightRay = makeRay(false);
   controllers.left.add(controllers.leftRay);
   controllers.right.add(controllers.rightRay);
 
-  // Teleport marker
   controllers.teleportMarker = makeTeleportMarker();
   scene.add(controllers.teleportMarker);
 
-  // Events
   controllers.left.addEventListener("connected", (e) => onControllerConnected("left", e));
   controllers.right.addEventListener("connected", (e) => onControllerConnected("right", e));
   controllers.left.addEventListener("disconnected", () => (controllers.leftGamepad = null));
   controllers.right.addEventListener("disconnected", () => (controllers.rightGamepad = null));
 
-  // Teleport + interactions
-  controllers.left.addEventListener("selectstart", () => onSelectStart("left"));
-  controllers.right.addEventListener("selectstart", () => onSelectStart("right"));
-  controllers.left.addEventListener("selectend", () => onSelectEnd("left"));
-  controllers.right.addEventListener("selectend", () => onSelectEnd("right"));
-
-  controllers.left.addEventListener("squeezestart", () => onSqueezeStart("left"));
-  controllers.right.addEventListener("squeezestart", () => onSqueezeStart("right"));
-  controllers.left.addEventListener("squeezeend", () => onSqueezeEnd("left"));
-  controllers.right.addEventListener("squeezeend", () => onSqueezeEnd("right"));
+  controllers.left.addEventListener("squeezestart", () => onSqueezeStart());
+  controllers.right.addEventListener("squeezestart", () => onSqueezeStart());
+  controllers.left.addEventListener("squeezeend", () => onSqueezeEnd());
+  controllers.right.addEventListener("squeezeend", () => onSqueezeEnd());
 }
 
 function onControllerConnected(hand, e) {
@@ -243,7 +246,6 @@ function onControllerConnected(hand, e) {
   if (hand === "right") controllers.rightGamepad = gp;
   log(hand, "connected", { hasGamepad: !!gp, id: gp?.id });
 
-  // show status hints
   setStatus(
     `controller ${hand} connected ✅\n` +
     `Teleport: ${teleportEnabled ? "ON" : "OFF"}\n` +
@@ -251,43 +253,14 @@ function onControllerConnected(hand, e) {
   );
 }
 
-function onSelectStart(hand) {
-  // Select is typically trigger; we keep it open for future UI selection.
-}
-
-function onSelectEnd(hand) {
-  // future
-}
-
-let teleportAiming = false;
-function onSqueezeStart(hand) {
-  // Grip = teleport aim when enabled
-  if (!teleportEnabled) return;
-  teleportAiming = true;
-}
-function onSqueezeEnd(hand) {
-  if (!teleportEnabled) return;
-  // confirm teleport if we have target
-  teleportAiming = false;
-  if (controllers.teleportTarget) {
-    doTeleport(controllers.teleportTarget);
-    controllers.teleportTarget = null;
-  }
-  controllers.teleportMarker.visible = false;
-}
-
-// ---------- Helpers ----------
 function makeRay(isLeft) {
   const g = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(0, 0, 0),
     new THREE.Vector3(0, 0, -1),
   ]);
-  const m = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.9 });
+  const m = new THREE.LineBasicMaterial({ transparent: true, opacity: isLeft ? 0.9 : 0.35 });
   const line = new THREE.Line(g, m);
   line.scale.z = 10;
-  line.visible = true; // you wanted left laser to exist
-  // keep right laser subtle; still visible for debugging
-  if (!isLeft) line.material.opacity = 0.35;
   return line;
 }
 
@@ -300,11 +273,23 @@ function makeTeleportMarker() {
   return mesh;
 }
 
-function doTeleport(targetPos) {
-  // preserve player height
-  const y = player.position.y;
-  player.position.set(targetPos.x, y, targetPos.z);
-  setStatus(`teleport ✅\n${targetPos.x.toFixed(2)}, ${targetPos.z.toFixed(2)}`);
+let teleportAiming = false;
+
+function onSqueezeStart() {
+  if (!teleportEnabled) return;
+  teleportAiming = true;
+}
+
+function onSqueezeEnd() {
+  if (!teleportEnabled) return;
+  teleportAiming = false;
+  if (controllers.teleportTarget) {
+    const y = player.position.y;
+    player.position.set(controllers.teleportTarget.x, y, controllers.teleportTarget.z);
+    setStatus(`teleport ✅\n${controllers.teleportTarget.x.toFixed(2)}, ${controllers.teleportTarget.z.toFixed(2)}`);
+  }
+  controllers.teleportTarget = null;
+  controllers.teleportMarker.visible = false;
 }
 
 function onResize() {
@@ -321,80 +306,18 @@ const raycaster = new THREE.Raycaster();
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.033);
 
-  // update snap cooldown
   snapTurnCooldown = Math.max(0, snapTurnCooldown - dt);
 
-  // update gamepads
   pollGamepads(dt);
 
-  // teleport aim
-  if (teleportEnabled && teleportAiming) {
-    updateTeleportAim();
-  } else {
-    controllers.teleportMarker.visible = false;
-  }
+  if (teleportEnabled && teleportAiming) updateTeleportAim();
+  else if (controllers.teleportMarker) controllers.teleportMarker.visible = false;
 
-  // world update
   if (world?.update) world.update(dt);
 
   renderer.render(scene, camera);
 }
 
-function pollGamepads(dt) {
-  // Left Y toggles menu (common mapping: button 3 or 4 varies by device)
-  // We'll scan buttons with "pressed" edge detection for robustness.
-  const l = controllers.leftGamepad;
-  const r = controllers.rightGamepad;
-
-  // handle left menu toggle via Y (best-effort)
-  if (l?.buttons?.length) {
-    // Many Quest mappings:
-    // buttons[3] = Y, buttons[4] = X (varies). We do a small set + fallback scan.
-    handleEdgeButton(l, 3, () => toggleDiag()); // attempt Y
-    handleEdgeButton(l, 4, () => toggleDiag()); // fallback
-  }
-
-  // Smooth move: right stick
-  if (r?.axes?.length >= 2) {
-    const x = r.axes[2] ?? r.axes[0] ?? 0;
-    const y = r.axes[3] ?? r.axes[1] ?? 0;
-
-    // deadzone
-    const dz = 0.18;
-    const ax = Math.abs(x) > dz ? x : 0;
-    const ay = Math.abs(y) > dz ? y : 0;
-
-    if (ax || ay) {
-      // move in camera heading (horizontal)
-      camera.getWorldDirection(tmpDir);
-      tmpDir.y = 0;
-      tmpDir.normalize();
-
-      // right vector
-      tmpVec.copy(tmpDir).cross(new THREE.Vector3(0, 1, 0)).normalize();
-
-      const speed = 2.0; // m/s
-      const move = new THREE.Vector3();
-      move.addScaledVector(tmpDir, -ay * speed * dt);
-      move.addScaledVector(tmpVec, ax * speed * dt);
-
-      player.position.add(move);
-    }
-  }
-
-  // Snap turn: left stick X (45 degrees)
-  if (l?.axes?.length >= 2) {
-    const lx = l.axes[2] ?? l.axes[0] ?? 0;
-    const dz = 0.35;
-    if (snapTurnCooldown === 0 && Math.abs(lx) > dz) {
-      const dir = lx > 0 ? -1 : 1;
-      player.rotation.y += dir * (Math.PI / 4); // 45 degrees
-      snapTurnCooldown = 0.28;
-    }
-  }
-}
-
-// edge-detect buttons per gamepad instance
 const prevPressed = new WeakMap();
 function handleEdgeButton(gamepad, index, fn) {
   if (!gamepad?.buttons?.[index]) return;
@@ -406,8 +329,54 @@ function handleEdgeButton(gamepad, index, fn) {
   m[index] = now;
 }
 
+function pollGamepads(dt) {
+  const l = controllers.leftGamepad;
+  const r = controllers.rightGamepad;
+
+  // Left Y toggle (best effort)
+  if (l?.buttons?.length) {
+    handleEdgeButton(l, 3, () => toggleDiag()); // likely Y
+    handleEdgeButton(l, 4, () => toggleDiag()); // fallback
+  }
+
+  // Right stick move
+  if (r?.axes?.length >= 2) {
+    const x = r.axes[2] ?? r.axes[0] ?? 0;
+    const y = r.axes[3] ?? r.axes[1] ?? 0;
+
+    const dz = 0.18;
+    const ax = Math.abs(x) > dz ? x : 0;
+    const ay = Math.abs(y) > dz ? y : 0;
+
+    if (ax || ay) {
+      camera.getWorldDirection(tmpDir);
+      tmpDir.y = 0;
+      tmpDir.normalize();
+
+      tmpVec.copy(tmpDir).cross(new THREE.Vector3(0, 1, 0)).normalize();
+
+      const speed = 2.0;
+      const move = new THREE.Vector3();
+      move.addScaledVector(tmpDir, -ay * speed * dt);
+      move.addScaledVector(tmpVec, ax * speed * dt);
+
+      player.position.add(move);
+    }
+  }
+
+  // Left stick snap turn 45 degrees
+  if (l?.axes?.length >= 2) {
+    const lx = l.axes[2] ?? l.axes[0] ?? 0;
+    const dz = 0.35;
+    if (snapTurnCooldown === 0 && Math.abs(lx) > dz) {
+      const dir = lx > 0 ? -1 : 1;
+      player.rotation.y += dir * (Math.PI / 4);
+      snapTurnCooldown = 0.28;
+    }
+  }
+}
+
 function updateTeleportAim() {
-  // Aim from whichever controller is gripping (prefer right if available)
   const originObj = controllers.right || controllers.left;
   if (!originObj) return;
 
@@ -430,4 +399,4 @@ function updateTeleportAim() {
     controllers.teleportTarget = null;
     controllers.teleportMarker.visible = false;
   }
-                                      }
+}

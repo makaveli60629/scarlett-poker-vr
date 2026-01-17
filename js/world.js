@@ -1,3 +1,7 @@
+// js/world.js — Scarlett MASTER Adapter v4 (FULL)
+// Fixes RoomManager.init() "this" binding + supports exported objects like WorldBuilders.build()
+// Keeps safe fallback world if anything fails so you can still move.
+
 import * as THREE from "three";
 
 async function safeImport(rel, log) {
@@ -8,16 +12,18 @@ async function safeImport(rel, log) {
 function isFn(v){ return typeof v === "function"; }
 function isObj(v){ return v && typeof v === "object"; }
 
+// IMPORTANT: if a callable is inside an exported object (RoomManager.init),
+// we store thisArg so we can call with .call(thisArg, ctx)
 function listCallable(mod) {
   const out = [];
   if (!mod) return out;
-  // direct function exports
-  for (const [k,v] of Object.entries(mod)) {
-    if (isFn(v)) out.push({ path: k, fn: v });
-    // exported objects that contain functions (like WorldBuilders.build)
+
+  for (const [k, v] of Object.entries(mod)) {
+    if (isFn(v)) out.push({ path: k, fn: v, thisArg: null });
+
     if (isObj(v)) {
-      for (const [k2,v2] of Object.entries(v)) {
-        if (isFn(v2)) out.push({ path: `${k}.${k2}`, fn: v2 });
+      for (const [k2, v2] of Object.entries(v)) {
+        if (isFn(v2)) out.push({ path: `${k}.${k2}`, fn: v2, thisArg: v });
       }
     }
   }
@@ -38,19 +44,35 @@ function score(path) {
   return s;
 }
 
-function pickBest(mod, preferredPaths=[]) {
+function getPath(mod, path) {
+  const parts = path.split(".");
+  let cur = mod;
+  for (const part of parts) cur = cur?.[part];
+  return cur;
+}
+
+function pickBest(mod, preferredPaths = []) {
   if (!mod) return null;
-  // exact preferred paths first
+
+  // preferred exact paths first
   for (const p of preferredPaths) {
-    const parts = p.split(".");
-    let cur = mod;
-    for (const part of parts) cur = cur?.[part];
-    if (isFn(cur)) return { path: p, fn: cur };
+    const cur = getPath(mod, p);
+    if (isFn(cur)) {
+      // if it's in an object path, bind thisArg to that object
+      const parts = p.split(".");
+      if (parts.length >= 2) {
+        const objPath = parts.slice(0, -1).join(".");
+        const obj = getPath(mod, objPath);
+        return { path: p, fn: cur, thisArg: isObj(obj) ? obj : null };
+      }
+      return { path: p, fn: cur, thisArg: null };
+    }
   }
+
   const cands = listCallable(mod);
   if (cands.length === 0) return null;
-  // if only one callable, use it
   if (cands.length === 1) return cands[0];
+
   cands.sort((a,b) => score(b.path) - score(a.path));
   return cands[0];
 }
@@ -95,63 +117,58 @@ function ensureFallbackWorld({ scene, rig, log }) {
 
 export async function build(ctx) {
   const { scene, rig, log } = ctx;
-  log("[world] adapter v3 build starting…");
+  log("[world] adapter v4 build starting…");
 
-  // Many of your modules export OBJECTS (IIFEs), not functions.
-  // This v3 adapter discovers callable functions inside exported objects too.
-  const wb = await safeImport("./world_builders.js", log);
-  const rm = await safeImport("./room_manager.js", log);
-  const sp = await safeImport("./spawn_points.js", log);
-  const sw = await safeImport("./solid_walls.js", log);
-  const lt = await safeImport("./lighting.js", log);
-  const lp = await safeImport("./lights_pack.js", log);
-  const tx = await safeImport("./textures.js", log);
-  const deco = await safeImport("./lobby_decor.js", log);
-  const wf = await safeImport("./water_fountain.js", log);
-
-  // Context compat: your builders expect ctx.root + ctx.manifest sometimes
-  // so we map root -> scene by default, and provide a tiny manifest shim.
+  // Your builders sometimes expect ctx.root + ctx.manifest
   if (!ctx.root) ctx.root = scene;
   if (!ctx.manifest) {
     const map = new Map();
-    ctx.manifest = {
-      get: (k) => map.get(k),
-      set: (k,v) => map.set(k,v)
-    };
+    ctx.manifest = { get: (k) => map.get(k), set: (k,v) => map.set(k,v) };
   }
+
+  // Import your real modules (if they exist)
+  const wb   = await safeImport("./world_builders.js", log);
+  const rm   = await safeImport("./room_manager.js", log);
+  const sp   = await safeImport("./spawn_points.js", log);
+  const sw   = await safeImport("./solid_walls.js", log);
+  const lt   = await safeImport("./lighting.js", log);
+  const lp   = await safeImport("./lights_pack.js", log);
+  const tx   = await safeImport("./textures.js", log);
+  const deco = await safeImport("./lobby_decor.js", log);
+  const wf   = await safeImport("./water_fountain.js", log);
 
   const steps = [];
 
-  // Prefer the exact known shape from your snippet: WorldBuilders.lights + WorldBuilders.build
-  const lightsFn = pickBest(wb, ["WorldBuilders.lights","lights"]);
-  const buildFn  = pickBest(wb,  ["WorldBuilders.build","buildWorld","build","initWorld","createWorld","makeWorld"]);
+  // Known WorldBuilders object from your file
+  const lightsFn = pickBest(wb, ["WorldBuilders.lights", "lights"]);
+  const buildFn  = pickBest(wb, ["WorldBuilders.build", "buildWorld", "build", "initWorld", "createWorld", "makeWorld"]);
+  if (lightsFn) steps.push({ label: `world_builders.${lightsFn.path}()`, ...lightsFn });
+  if (buildFn)  steps.push({ label: `world_builders.${buildFn.path}()`, ...buildFn });
 
-  if (lightsFn) steps.push({ label: `world_builders.${lightsFn.path}()`, fn: lightsFn.fn });
-  if (buildFn)  steps.push({ label: `world_builders.${buildFn.path}()`, fn: buildFn.fn });
+  const swFn = pickBest(sw, ["SolidWalls.init", "SolidWalls.build", "buildSolidWalls", "build", "init", "apply"]);
+  if (swFn) steps.push({ label: `solid_walls.${swFn.path}()`, ...swFn });
 
-  const swFn = pickBest(sw, ["SolidWalls.build","SolidWalls.init","buildSolidWalls","build","init","apply"]);
-  if (swFn) steps.push({ label: `solid_walls.${swFn.path}()`, fn: swFn.fn });
+  const ltFn = pickBest(lt, ["applyLighting", "Lighting.apply", "setupLighting", "buildLighting", "initLighting", "build", "init"]);
+  if (ltFn) steps.push({ label: `lighting.${ltFn.path}()`, ...ltFn });
 
-  const ltFn = pickBest(lt, ["Lighting.setup","Lighting.init","setupLighting","buildLighting","initLighting","build","init"]);
-  if (ltFn) steps.push({ label: `lighting.${ltFn.path}()`, fn: ltFn.fn });
+  const lpFn = pickBest(lp, ["LightsPack.build", "setupLightsPack", "buildLightsPack", "init", "build"]);
+  if (lpFn) steps.push({ label: `lights_pack.${lpFn.path}()`, ...lpFn });
 
-  const lpFn = pickBest(lp, ["LightsPack.setup","setupLightsPack","buildLightsPack","init","build"]);
-  if (lpFn) steps.push({ label: `lights_pack.${lpFn.path}()`, fn: lpFn.fn });
+  const txFn = pickBest(tx, ["createTextureKit", "Textures.init", "initTextures", "setupTextures", "buildTextures", "init", "build"]);
+  if (txFn) steps.push({ label: `textures.${txFn.path}()`, ...txFn });
 
-  const txFn = pickBest(tx, ["Textures.init","initTextures","setupTextures","buildTextures","init","build"]);
-  if (txFn) steps.push({ label: `textures.${txFn.path}()`, fn: txFn.fn });
+  const decoFn = pickBest(deco, ["LobbyDecor.init", "buildLobbyDecor", "init", "build", "setup"]);
+  if (decoFn) steps.push({ label: `lobby_decor.${decoFn.path}()`, ...decoFn });
 
-  const decoFn = pickBest(deco, ["LobbyDecor.build","buildLobbyDecor","init","build","setup"]);
-  if (decoFn) steps.push({ label: `lobby_decor.${decoFn.path}()`, fn: decoFn.fn });
+  const wfFn = pickBest(wf, ["WaterFountain.build", "buildWaterFountain", "init", "build", "setup"]);
+  if (wfFn) steps.push({ label: `water_fountain.${wfFn.path}()`, ...wfFn });
 
-  const wfFn = pickBest(wf, ["WaterFountain.build","buildWaterFountain","init","build","setup"]);
-  if (wfFn) steps.push({ label: `water_fountain.${wfFn.path}()`, fn: wfFn.fn });
+  // This one was failing because of `this` — v4 binds it correctly
+  const rmFn = pickBest(rm, ["RoomManager.init", "RoomManager.initRooms", "initRooms", "init", "build", "setup", "start"]);
+  if (rmFn) steps.push({ label: `room_manager.${rmFn.path}()`, ...rmFn });
 
-  const rmFn = pickBest(rm, ["RoomManager.initRooms","initRooms","init","build","setup","start"]);
-  if (rmFn) steps.push({ label: `room_manager.${rmFn.path}()`, fn: rmFn.fn });
-
-  const spFn = pickBest(sp, ["SpawnPoints.build","initSpawnPoints","build","init","setup","apply"]);
-  if (spFn) steps.push({ label: `spawn_points.${spFn.path}()`, fn: spFn.fn });
+  const spFn = pickBest(sp, ["SpawnPoints.build", "initSpawnPoints", "build", "init", "setup", "apply"]);
+  if (spFn) steps.push({ label: `spawn_points.${spFn.path}()`, ...spFn });
 
   if (steps.length === 0) {
     log("[world] ⚠️ No callable functions found in your world modules. Using fallback world.");
@@ -162,8 +179,10 @@ export async function build(ctx) {
   for (const s of steps) {
     try {
       log(`[world] ▶ ${s.label}`);
-      const out = await s.fn(ctx);
-      // If your builder returns useful anchors, keep them
+
+      // KEY FIX: preserve `this` for object methods
+      const out = s.thisArg ? await s.fn.call(s.thisArg, ctx) : await s.fn(ctx);
+
       if (out && typeof out === "object") ctx.world_out = out;
       log(`[world] ✅ ${s.label}`);
     } catch (e) {
@@ -174,9 +193,8 @@ export async function build(ctx) {
     }
   }
 
-  // Mark floors if your builder created a ground plane called "GROUND"
   const ground = ctx.world_out?.ground || scene.getObjectByName?.("GROUND");
   if (ground) ground.userData.isFloor = true;
 
   log("[world] Scarlett world ready ✅");
-}
+                                                                   }

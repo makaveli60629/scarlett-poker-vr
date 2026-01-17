@@ -1,216 +1,200 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
-  <meta name="theme-color" content="#000000" />
-  <title>ScarlettVR Poker</title>
+<meta charset="utf-8" />
+<meta name="viewport"
+  content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
+<meta name="theme-color" content="#000000" />
+<title>ScarlettVR Poker</title>
 
-  <style>
-    html, body { margin:0; padding:0; width:100%; height:100%; background:#000; overflow:hidden; }
-    #app { position:fixed; inset:0; }
-    canvas { display:block; width:100%; height:100%; touch-action:none; }
+<style>
+html,body{
+  margin:0; padding:0; width:100%; height:100%;
+  background:#000; overflow:hidden;
+}
+#app{ position:fixed; inset:0; }
+canvas{ width:100%; height:100%; display:block; }
 
-    /* HUD */
-    #hud{
-      position:fixed; left:10px; top:10px; z-index:50;
-      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
-      color:#fff; user-select:none; -webkit-user-select:none;
-    }
-    #hudRow{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-    .btn{
-      background:rgba(0,0,0,0.55);
-      border:1px solid rgba(255,255,255,0.25);
-      color:#fff; padding:10px 12px; border-radius:10px; font-size:14px; cursor:pointer;
-    }
-    .btn:active{ transform:translateY(1px); }
-    #status{
-      margin-top:8px; padding:8px 10px; border-radius:10px;
-      background:rgba(0,0,0,0.45); border:1px solid rgba(255,255,255,0.18);
-      max-width:min(92vw, 640px); line-height:1.25; white-space:pre-wrap;
-    }
+/* HUD */
+#hud{
+  position:fixed; left:10px; top:10px; z-index:40;
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+  color:#fff;
+}
+#hudRow{ display:flex; gap:8px; flex-wrap:wrap; }
+.btn{
+  background:rgba(0,0,0,.55);
+  border:1px solid rgba(255,255,255,.25);
+  color:#fff;
+  padding:10px 12px;
+  border-radius:10px;
+  font-size:14px;
+}
+#status{
+  margin-top:8px;
+  padding:8px 10px;
+  border-radius:10px;
+  background:rgba(0,0,0,.45);
+  border:1px solid rgba(255,255,255,.18);
+  max-width:92vw;
+  white-space:pre-wrap;
+}
 
-    /* Mini Show HUD (never get stuck) */
-    #btnShowHudMini{
-      position:fixed; left:10px; top:10px; z-index:80; display:none;
-      background:rgba(0,0,0,0.55);
-      border:1px solid rgba(255,255,255,0.25);
-      color:#fff;
-      padding:10px 12px;
-      border-radius:10px;
-      font-size:14px;
-      cursor:pointer;
-    }
+/* Mini restore HUD */
+#btnShowHudMini{
+  position:fixed; left:10px; top:10px; z-index:90;
+  display:none;
+  background:rgba(0,0,0,.6);
+  border:1px solid rgba(255,255,255,.3);
+  color:#fff;
+  padding:10px 12px;
+  border-radius:10px;
+}
 
-    /* ✅ Ultimate diag panel (MOBILE OPTIMIZED, never traps you) */
-    #diagPanel{
-      position:fixed;
-      right:8px;
-      top:8px;
-      z-index:60;
-      display:none;
+/* 🔒 FINAL DIAG PANEL */
+#diagPanel{
+  position:fixed;
+  right:6px; top:6px;
+  z-index:70;
+  display:none;
 
-      width:min(88vw, 380px);
-      max-height:62vh;
+  width:min(86vw, 360px);
+  max-height:58vh;
 
-      overflow-y:auto;
-      overflow-x:hidden;
-      -webkit-overflow-scrolling:touch;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
 
-      background:rgba(0,0,0,0.60);
-      border:1px solid rgba(255,0,0,0.55);
-      border-radius:14px;
+  background:rgba(0,0,0,.55);
+  border:1px solid rgba(255,0,0,.55);
+  border-radius:14px;
+  padding:6px;
+}
 
-      padding:8px;
-      box-shadow:0 8px 24px rgba(0,0,0,0.35);
-    }
+/* Header */
+#diagHeader{
+  position:sticky; top:0;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  background:rgba(0,0,0,.55);
+  padding:6px 4px;
+}
+#diagTitle{
+  color:#ff5b5b;
+  font-weight:700;
+  font-size:15px;
+}
 
-    #diagHeader{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:8px;
+/* Buttons */
+.btnRed{
+  background:rgba(255,0,0,.12);
+  border:1px solid rgba(255,0,0,.55);
+  color:#fff;
+  padding:6px 8px;
+  border-radius:8px;
+  font-size:12px;
+}
 
-      position:sticky;
-      top:0;
+/* Sections (COLLAPSIBLE = key fix) */
+details{
+  margin-top:8px;
+  border-top:1px solid rgba(255,255,255,.12);
+  padding-top:6px;
+}
+summary{
+  cursor:pointer;
+  color:#ddd;
+  font-size:13px;
+}
+summary::marker{ color:#ff5b5b; }
 
-      padding:4px 0 6px 0;
-      background:rgba(0,0,0,0.60);
-      backdrop-filter: blur(4px);
-      z-index:2;
-    }
-    #diagTitle{
-      font-weight:700;
-      font-size:16px;
-      color:#ff5b5b;
-    }
+.mono{
+  margin-top:6px;
+  font-family:ui-monospace,monospace;
+  font-size:11px;
+  background:rgba(0,0,0,.25);
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:8px;
+  padding:6px;
+  white-space:pre-wrap;
+}
 
-    .row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0; }
-
-    .btnRed{
-      background:rgba(255,0,0,0.12);
-      border:1px solid rgba(255,0,0,0.55);
-      color:#fff;
-      padding:7px 9px;
-      border-radius:9px;
-      font-size:12px;
-      cursor:pointer;
-    }
-    .btnRed:active{ transform:translateY(1px); }
-
-    .section{
-      margin-top:10px;
-      border-top:1px solid rgba(255,255,255,0.12);
-      padding-top:10px;
-    }
-    .muted{ opacity:0.85; font-size:12px; line-height:1.25; }
-
-    .mono{
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-size:11px;
-      line-height:1.3;
-      white-space:pre-wrap;
-      word-break:break-word;
-      border:1px solid rgba(255,255,255,0.12);
-      background:rgba(0,0,0,0.25);
-      border-radius:8px;
-      padding:6px;
-    }
-
-    /* Touch controls (Android fallback) */
-    #touchControls{
-      position:fixed; left:0; right:0; bottom:0;
-      height:36vh;
-      z-index:55;
-      display:none;
-      pointer-events:none;
-    }
-    #touchLeft, #touchRight{
-      position:absolute;
-      bottom:4vh;
-      width:34vw; height:34vw;
-      max-width:180px; max-height:180px;
-      border:1px solid rgba(255,255,255,.25);
-      border-radius:999px;
-      background:rgba(0,0,0,.25);
-      pointer-events:auto;
-    }
-    #touchLeft{ left:4vw; }
-    #touchRight{ right:4vw; }
-  </style>
+/* Touch controls */
+#touchControls{
+  position:fixed; left:0; right:0; bottom:0;
+  height:36vh;
+  display:none;
+  pointer-events:none;
+}
+#touchLeft,#touchRight{
+  position:absolute;
+  bottom:4vh;
+  width:34vw; height:34vw;
+  max-width:170px; max-height:170px;
+  border:1px solid rgba(255,255,255,.25);
+  border-radius:50%;
+  background:rgba(0,0,0,.25);
+  pointer-events:auto;
+}
+#touchLeft{ left:4vw; }
+#touchRight{ right:4vw; }
+</style>
 </head>
 
 <body>
-  <div id="app"></div>
+<div id="app"></div>
 
-  <!-- HUD -->
-  <div id="hud">
-    <div id="hudRow">
-      <button class="btn" id="btnEnterVr">Enter VR</button>
-      <button class="btn" id="btnHideHud">Hide HUD</button>
-      <button class="btn" id="btnTeleport">Teleport: OFF</button>
-      <button class="btn" id="btnDiag">Diag</button>
-    </div>
-    <div id="status">booting…</div>
+<!-- HUD -->
+<div id="hud">
+  <div id="hudRow">
+    <button class="btn" id="btnEnterVr">Enter VR</button>
+    <button class="btn" id="btnHideHud">Hide HUD</button>
+    <button class="btn" id="btnTeleport">Teleport: OFF</button>
+    <button class="btn" id="btnDiag">Diag</button>
+  </div>
+  <div id="status">booting…</div>
+</div>
+
+<button id="btnShowHudMini">Show HUD</button>
+
+<!-- 🔥 FINAL DIAG -->
+<div id="diagPanel">
+  <div id="diagHeader">
+    <div id="diagTitle">Scarlett Debug</div>
+    <button class="btnRed" id="btnDiagClose">Close</button>
   </div>
 
-  <!-- Mini show HUD -->
-  <button id="btnShowHudMini">Show HUD</button>
-
-  <!-- Ultimate Diagnosis Panel -->
-  <div id="diagPanel">
-    <div id="diagHeader">
-      <div id="diagTitle">Scarlett Debug</div>
-      <div class="row" style="margin:0;">
-        <button class="btnRed" id="btnDiagClose">Close</button>
-      </div>
-    </div>
-
-    <div class="row">
-      <button class="btnRed" id="btnTestModules">Test Modules</button>
-      <button class="btnRed" id="btnResetPlayer">Reset Player</button>
-      <button class="btnRed" id="btnReload">Reload</button>
-    </div>
-
-    <div class="row">
-      <button class="btnRed" id="btnCopyLogs">Copy Logs</button>
-      <button class="btnRed" id="btnClearLogs">Clear Logs</button>
-      <button class="btnRed" id="btnPanicClose">PANIC CLOSE</button>
-    </div>
-
-    <div class="row">
-      <button class="btnRed" id="btnTouch">Touch: OFF</button>
-    </div>
-
-    <div class="section">
-      <div class="muted">
-        <b>Input Map</b>: Left Y = toggle diag • Right stick = move • Left stick = snap • Grip = teleport aim (when enabled)
-      </div>
-    </div>
-
-    <div class="section">
-      <div class="muted"><b>Controllers</b></div>
-      <div id="diagControllers" class="mono">loading…</div>
-    </div>
-
-    <div class="section">
-      <div class="muted"><b>Modules (runtime registry)</b></div>
-      <div id="diagModules" class="mono">waiting for world…</div>
-    </div>
-
-    <div class="section">
-      <div class="muted"><b>Recent logs</b></div>
-      <div id="diagLogs" class="mono">…</div>
-    </div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;">
+    <button class="btnRed" id="btnTestModules">Test</button>
+    <button class="btnRed" id="btnResetPlayer">Reset</button>
+    <button class="btnRed" id="btnReload">Reload</button>
+    <button class="btnRed" id="btnPanicClose">PANIC</button>
+    <button class="btnRed" id="btnTouch">Touch</button>
   </div>
 
-  <!-- Touch controls (Android fallback) -->
-  <div id="touchControls">
-    <div id="touchLeft" aria-label="Move stick"></div>
-    <div id="touchRight" aria-label="Turn stick"></div>
-  </div>
+  <details open>
+    <summary>Controllers</summary>
+    <div id="diagControllers" class="mono">loading…</div>
+  </details>
 
-  <!-- ✅ SINGLE ENTRY: boot loader only -->
-  <script type="module" src="./js/boot.js"></script>
+  <details>
+    <summary>Modules</summary>
+    <div id="diagModules" class="mono">waiting…</div>
+  </details>
+
+  <details>
+    <summary>Logs</summary>
+    <div id="diagLogs" class="mono">…</div>
+  </details>
+</div>
+
+<!-- Touch -->
+<div id="touchControls">
+  <div id="touchLeft"></div>
+  <div id="touchRight"></div>
+</div>
+
+<!-- SINGLE ENTRY -->
+<script type="module" src="./js/boot.js"></script>
 </body>
 </html>

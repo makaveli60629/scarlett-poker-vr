@@ -1,215 +1,306 @@
-// /js/scarlett1/index.js
-// SCARLETT1 — INDEX FULL (XR SAFE • ENGINE ATTACH FIRST • dt FIX • WORLD ORCH ACTIVE)
-// Build: SCARLETT1_INDEX_FULL_v26_0_WORLD_ACTIVATION_DT_FIX
+// /js/scarlett1/index.js — Scarlett1 Router (FULL RESTORE)
+// Responsibilities:
+// - import Three + XRButton safely via URL modules
+// - create renderer/scene/camera
+// - load /js/scarlett1/world.js
+// - load modules from /js/modules/ (safe order, won't crash if missing)
+// - restore XR + Android controls and toggles
 
-const BUILD = "SCARLETT1_INDEX_FULL_v26_0_WORLD_ACTIVATION_DT_FIX";
+export async function boot({ Scarlett, BASE, V }) {
+  const BUILD = "SCARLETT1_ROUTER_RESTORE_v1";
+  const NOW = () => new Date().toISOString().slice(11, 19);
+  const push = (s) => globalThis.SCARLETT_DIAG?.push?.(`[${NOW()}] ${s}`);
 
-// ---- DIAG + CONSOLE fingerprint (must appear no matter what) ----
-const dwrite = (msg) => { try { window.__scarlettDiagWrite?.(String(msg)); } catch (_) {} };
-const FP = `[scarlett1] LIVE_FINGERPRINT ✅ ${BUILD}`;
-console.log(FP);
-dwrite(FP);
+  Scarlett.BUILD = Scarlett.BUILD || {};
+  Scarlett.BUILD.router = BUILD;
 
-// ---- HARD attach flags (cover *all* likely panel checks) ----
-window.SCARLETT = window.SCARLETT || {};
-window.SCARLETT.BUILD = BUILD;
-window.SCARLETT.engineAttached = true;
-window.SCARLETT.attached = true;
-window.SCARLETT.ok = true;
+  push?.(`[scarlett1] build=${BUILD}`);
 
-window.__scarlettEngineAttached = true;
-window.__SCARLETT_ENGINE_ATTACHED__ = true;
-window.__scarlettAttached = true;
-window.__scarlettOK = true;
+  // --- Imports (NO bare specifiers) ---
+  const THREE_URL = "https://unpkg.com/three@0.158.0/build/three.module.js";
+  const VRBTN_URL = "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
 
-// Provide an engine object immediately (panel can point at this)
-window.SCARLETT.engine = window.SCARLETT.engine || { BUILD, startedAt: new Date().toISOString(), errors: [] };
-window.__scarlettEngine = window.SCARLETT.engine;
-window.__SCARLETT_ENGINE__ = window.SCARLETT.engine;
-
-// ---- AUTHORITATIVE PANEL OVERRIDE: module test endpoint (panel-proof) ----
-const forcedModuleTest = async () => {
-  // Prefer world orchestrator if available
-  if (typeof window.__scarlettRunModuleTest === "function") {
-    try {
-      const r = await window.__scarlettRunModuleTest();
-      return { ok: !!r.ok, source: "__scarlettRunModuleTest", ...r };
-    } catch (e) {
-      return { ok: false, source: "__scarlettRunModuleTest", error: e?.message || String(e) };
-    }
-  }
-
-  // Fallback report (always works)
-  const eng = window.SCARLETT?.engine;
-  return {
-    ok: true,
-    source: "forcedFallback",
-    time: new Date().toISOString(),
-    build: BUILD,
-    engineAttached: true,
-    enginePresent: !!eng,
-    renderer: !!eng?.renderer,
-    worldLoaded: !!eng?.world,
-    errors: eng?.errors || []
-  };
-};
-
-// Install in every likely name the panel might use
-window.SCARLETT.runModuleTest = forcedModuleTest;
-window.__scarlettRunModuleTest = window.__scarlettRunModuleTest || forcedModuleTest;
-window.__scarlettModuleTest = forcedModuleTest;
-window.__runModuleTest = forcedModuleTest;
-window.runModuleTest = forcedModuleTest;
-
-// Extra: some panels check these exact globals
-window.__scarlettEngineAttached = true;
-window.__scarlettEngine = window.SCARLETT.engine;
-
-// ---- Three.js + VR boot (GH pages safe) ----
-import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
-import { VRButton } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
-
-const log = (...a) => { console.log("[scarlett1]", ...a); dwrite(`[scarlett1] ${a.join(" ")}`); };
-const warn = (...a) => { console.warn("[scarlett1]", ...a); dwrite(`[scarlett1][warn] ${a.join(" ")}`); };
-const err  = (...a) => { console.error("[scarlett1]", ...a); dwrite(`[scarlett1][err] ${a.join(" ")}`); };
-
-// ✅ Preflight fetch check so we can see 404 vs JS error
-async function canFetch(url) {
+  let THREE, VRButton;
   try {
-    const r = await fetch(url, { method: "GET", cache: "no-store" });
-    return { ok: r.ok, status: r.status, ct: r.headers.get("content-type") || "" };
+    push?.(`[scarlett1] import three…`);
+    THREE = await import(THREE_URL);
+    push?.(`[scarlett1] three ✅ r${THREE.REVISION}`);
   } catch (e) {
-    return { ok: false, status: 0, ct: "", error: e?.message || String(e) };
+    push?.(`[scarlett1] three FAILED ❌ ${String(e?.message || e)}`);
+    throw e;
   }
-}
-
-// ✅ XR-SAFE world resolver:
-// Uses the real URL of the currently-running index.js and resolves world.js beside it.
-async function safeImportWorld(cacheTag = "") {
-  const base = new URL(import.meta.url);          // actual URL of /js/scarlett1/index.js
-  const worldURL = new URL("world.js", base);     // /js/scarlett1/world.js
-  if (cacheTag) worldURL.searchParams.set("v", cacheTag);
-
-  const url = worldURL.toString();
-
-  const check = await canFetch(url);
-  log(`world preflight: url=${url} ok=${check.ok} status=${check.status} ct=${check.ct}${check.error ? ` err=${check.error}` : ""}`);
-
-  if (!check.ok) return null;
 
   try {
-    const mod = await import(url);
-    log("world import ✅", url);
-    return mod;
+    push?.(`[scarlett1] import VRButton…`);
+    ({ VRButton } = await import(VRBTN_URL));
+    push?.(`[scarlett1] VRButton ✅`);
   } catch (e) {
-    err("world import FAILED ❌", url, e?.message || String(e));
-    return null;
+    push?.(`[scarlett1] VRButton FAILED ❌ ${String(e?.message || e)}`);
+    throw e;
   }
-}
 
-function buildFallbackWorld(scene) {
-  warn("USING FALLBACK WORLD");
+  // --- Renderer / Scene / Camera ---
+  const app = document.getElementById("app") || document.body;
 
-  scene.background = new THREE.Color(0x050509);
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.xr.enabled = true;
+  app.appendChild(renderer.domElement);
 
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x202040, 1.0);
-  scene.add(hemi);
-
-  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-  dir.position.set(2, 5, 2);
-  scene.add(dir);
-
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(40, 40),
-    new THREE.MeshStandardMaterial({ color: 0x1e1e1e, roughness: 1.0 })
-  );
-  floor.rotation.x = -Math.PI / 2;
-  scene.add(floor);
-
-  const table = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.05, 1.05, 0.16, 28),
-    new THREE.MeshStandardMaterial({ color: 0x0f5a2a, roughness: 0.9 })
-  );
-  table.position.set(0, 0.80, -1.25);
-  scene.add(table);
-
-  return { tableHeight: 0.80, table, update(){} };
-}
-
-async function main() {
-  log("booting…", BUILD);
+  const vrBtn = VRButton.createButton(renderer);
+  vrBtn.style.position = "fixed";
+  vrBtn.style.right = "10px";
+  vrBtn.style.bottom = "60px";
+  vrBtn.style.zIndex = "99999";
+  document.body.appendChild(vrBtn);
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
-  camera.position.set(0, 1.6, 0);
+  scene.background = new THREE.Color(0x050508);
+  scene.fog = new THREE.Fog(0x050508, 10, 70);
 
-  // Update engine object (still attached)
-  const engine = window.SCARLETT.engine = Object.assign(window.SCARLETT.engine || {}, {
-    BUILD, THREE, scene, camera, renderer: null, world: null, errors: window.SCARLETT.engine?.errors || []
+  const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 200);
+  camera.position.set(0, 1.65, 3.2);
+
+  // Player rig (move this, not the XR camera directly)
+  const rig = new THREE.Group();
+  rig.name = "playerRig";
+  rig.add(camera);
+  scene.add(rig);
+
+  // Lights (stable)
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.9));
+  const d = new THREE.DirectionalLight(0xffffff, 0.8);
+  d.position.set(6, 10, 4);
+  scene.add(d);
+
+  // Resize
+  addEventListener("resize", () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
   });
-  window.__scarlettEngine = engine;
-  window.__SCARLETT_ENGINE__ = engine;
 
-  let renderer;
-  try {
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.xr.enabled = true;
-
-    document.body.style.margin = "0";
-    document.body.style.overflow = "hidden";
-    document.body.appendChild(renderer.domElement);
-    document.body.appendChild(VRButton.createButton(renderer));
-
-    engine.renderer = renderer;
-    log("renderer + VRButton ✅");
-  } catch (e) {
-    const msg = e?.message || String(e);
-    engine.errors.push({ stage: "renderer", error: msg });
-    err("renderer init failed ❌", msg);
-    return;
+  // --- Load World (Scarlett1 world) ---
+  const worldUrl = `${BASE}js/scarlett1/world.js?v=${encodeURIComponent(V)}`;
+  push?.(`[scarlett1] importing world ${worldUrl}`);
+  const worldMod = await import(worldUrl);
+  if (typeof worldMod.createWorld !== "function") {
+    throw new Error("world.js missing createWorld()");
   }
 
-  // World load (XR-safe resolver)
-  const worldMod = await safeImportWorld(Date.now().toString());
-  let WORLD;
+  const world = await worldMod.createWorld({
+    THREE, scene, renderer, camera, rig, Scarlett,
+    diag: (msg) => push?.(msg),
+    BASE
+  });
+  push?.(`[scarlett1] world ready ✅`);
 
-  try {
-    const createWorld = worldMod?.createWorld || worldMod?.bootWorld || worldMod?.default;
-    if (typeof createWorld === "function") {
-      WORLD = await createWorld({ THREE, scene, renderer, camera, engine });
-      log("world boot ✅");
-    } else {
-      warn("world missing createWorld/bootWorld/default — fallback");
-      WORLD = buildFallbackWorld(scene);
+  // --- UI bridge for Android buttons ---
+  Scarlett.UI = Scarlett.UI || {};
+  Scarlett.UI.toggleHud = () => world?.ui?.toggleHud?.();
+  Scarlett.UI.toggleModules = () => world?.ui?.toggleModules?.();
+  Scarlett.UI.toggleTeleport = () => world?.ui?.toggleTeleport?.();
+
+  // --- Load Modules (safe, ordered, non-fatal) ---
+  // Put your real module filenames here. If you’re not sure: leave as-is; missing modules won’t crash.
+  const moduleList = [
+    // core input + hud
+    ["input", `${BASE}js/modules/input.js?v=${encodeURIComponent(V)}`],
+    ["hud", `${BASE}js/modules/hud.js?v=${encodeURIComponent(V)}`],
+    ["teleport", `${BASE}js/modules/teleport.js?v=${encodeURIComponent(V)}`],
+    // gameplay
+    ["poker", `${BASE}js/modules/poker.js?v=${encodeURIComponent(V)}`],
+    ["chips", `${BASE}js/modules/chips.js?v=${encodeURIComponent(V)}`],
+    ["cards", `${BASE}js/modules/cards.js?v=${encodeURIComponent(V)}`],
+    // extras
+    ["avatars", `${BASE}js/modules/avatars.js?v=${encodeURIComponent(V)}`],
+    ["store", `${BASE}js/modules/store.js?v=${encodeURIComponent(V)}`],
+  ];
+
+  const modules = [];
+  async function safeImport(name, url) {
+    try {
+      push?.(`[mod] import ${name}…`);
+      const m = await import(url);
+      push?.(`[mod] ${name} ✅`);
+      return m;
+    } catch (e) {
+      push?.(`[mod] ${name} ❌ ${String(e?.message || e)}`);
+      return null;
     }
-  } catch (e) {
-    const msg = e?.message || String(e);
-    engine.errors.push({ stage: "world", error: msg });
-    err("world boot crashed ❌", msg);
-    WORLD = buildFallbackWorld(scene);
   }
 
-  engine.world = WORLD;
-  window.SCARLETT.world = WORLD;
+  for (const [name, url] of moduleList) {
+    const m = await safeImport(name, url);
+    if (m && typeof m.enable === "function") {
+      try {
+        const inst = await m.enable({ THREE, scene, renderer, camera, rig, world, Scarlett });
+        modules.push({ name, inst });
+        push?.(`[mod] enabled ${name} ✅`);
+      } catch (e) {
+        push?.(`[mod] enable fail ${name} ❌ ${String(e?.message || e)}`);
+      }
+    }
+  }
 
-  // ✅ FIX: dt must be real (not 0)
-  const clock = new THREE.Clock();
+  // --- Minimal built-in controller/Android fallback (so controls still work even if module missing) ---
+  const fallback = createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett, push });
+  modules.push({ name: "__fallbackControls", inst: fallback });
 
-  renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.05); // clamp for Quest stability
-    try { WORLD?.update?.(dt); } catch (_) {}
+  // XR session logs
+  renderer.xr.addEventListener("sessionstart", () => push?.(`[xr] sessionstart ✅`));
+  renderer.xr.addEventListener("sessionend", () => push?.(`[xr] sessionend ✅`));
+
+  // Main loop
+  renderer.setAnimationLoop((t) => {
+    for (const m of modules) m.inst?.tick?.(t);
+    world?.tick?.(t);
     renderer.render(scene, camera);
   });
 
-  window.addEventListener("resize", () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-
-  log("ready ✅");
+  push?.(`[scarlett1] started ✅`);
 }
 
-main().catch((e) => err("fatal boot error", e?.message || String(e)));
+// --- Fallback controls (does not overload, but keeps you playable) ---
+function createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett, push }) {
+  const state = {
+    teleportMode: false,
+    snapCooldown: 0,
+    moveSpeed: 2.2,
+    snapAngle: Math.PI / 4,
+  };
+
+  // Simple “toggle” API for Android HUD
+  world.ui = world.ui || {};
+  world.ui.toggleTeleport = () => { state.teleportMode = !state.teleportMode; push?.(`[move] teleport=${state.teleportMode}`); };
+  world.ui.toggleHud = () => { world.ui.setHudVisible?.(!(world.ui._hudVisible = !world.ui._hudVisible)); };
+  world.ui.toggleModules = () => { Scarlett?.MODULES?.toggle?.(); };
+
+  // Teleport reticle
+  const ret = new THREE.Mesh(
+    new THREE.RingGeometry(0.08, 0.11, 32),
+    new THREE.MeshBasicMaterial({ color: 0x44ff77, transparent: true, opacity: 0.8, side: THREE.DoubleSide })
+  );
+  ret.rotation.x = -Math.PI / 2;
+  ret.visible = false;
+  renderer.scene?.add?.(ret);
+
+  const ray = new THREE.Raycaster();
+  const hit = new THREE.Vector3();
+
+  function getPads() {
+    const session = renderer.xr.getSession?.();
+    if (!session) return { left: null, right: null };
+    const out = { left: null, right: null };
+    for (const src of session.inputSources || []) {
+      if (!src?.gamepad) continue;
+      if (src.handedness === "left") out.left = src.gamepad;
+      if (src.handedness === "right") out.right = src.gamepad;
+    }
+    return out;
+  }
+
+  function deadzone(v, dz = 0.15) {
+    const av = Math.abs(v);
+    if (av < dz) return 0;
+    const s = (av - dz) / (1 - dz);
+    return Math.sign(v) * Math.max(0, Math.min(1, s));
+  }
+
+  return {
+    tick(t) {
+      const dt = 1 / 72;
+
+      // Desktop/Android non-XR touch fallback: nothing heavy here.
+      // XR pads:
+      const { left, right } = getPads();
+      const la = left?.axes || [];
+      const ra = right?.axes || [];
+      const lb = left?.buttons || [];
+      const rb = right?.buttons || [];
+
+      // Mapping (best-effort):
+      const btnY = !!lb[4]?.pressed;
+      const btnX = !!lb[3]?.pressed;
+      const btnB = !!rb[4]?.pressed;
+
+      // Y toggles DIAG (restored)
+      if (btnY && !state._lastY) {
+        globalThis.SCARLETT_DIAG?.toggle?.();
+      }
+      state._lastY = btnY;
+
+      // X toggles HUD
+      if (btnX && !state._lastX) {
+        world.ui?.toggleHud?.();
+      }
+      state._lastX = btnX;
+
+      // B toggles teleport mode
+      if (btnB && !state._lastB) {
+        state.teleportMode = !state.teleportMode;
+        push?.(`[move] teleport=${state.teleportMode}`);
+      }
+      state._lastB = btnB;
+
+      // Smooth move: right stick (or whatever exists)
+      const mx = deadzone(ra.length >= 4 ? ra[2] : ra[0] || 0);
+      const my = deadzone(ra.length >= 4 ? ra[3] : ra[1] || 0);
+
+      // Snap turn: left stick X
+      const tx = deadzone(la[0] || 0);
+
+      state.snapCooldown = Math.max(0, state.snapCooldown - dt);
+
+      if (!state.teleportMode) {
+        // Move in camera yaw on XZ
+        const yaw = new THREE.Quaternion();
+        camera.getWorldQuaternion(yaw);
+
+        const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(yaw);
+        fwd.y = 0; fwd.normalize();
+        const rightV = new THREE.Vector3(1, 0, 0).applyQuaternion(yaw);
+        rightV.y = 0; rightV.normalize();
+
+        const forward = -my;
+        const strafe = mx;
+
+        if (forward || strafe) {
+          const v = new THREE.Vector3()
+            .addScaledVector(fwd, forward)
+            .addScaledVector(rightV, strafe)
+            .multiplyScalar(state.moveSpeed * dt);
+          rig.position.add(v);
+        }
+
+        if (state.snapCooldown === 0 && Math.abs(tx) > 0.85) {
+          rig.rotation.y -= Math.sign(tx) * state.snapAngle;
+          state.snapCooldown = 0.22;
+        }
+
+        ret.visible = false;
+      } else {
+        // Teleport ray from camera center to floor meshes
+        ray.setFromCamera({ x: 0, y: 0 }, camera);
+        const hits = ray.intersectObjects(world.floorMeshes || [], true);
+        if (hits.length) {
+          ret.visible = true;
+          ret.position.copy(hits[0].point);
+          // Confirm teleport on right grip
+          const grip = !!rb[1]?.pressed;
+          if (grip && !state._lastGrip) {
+            rig.position.set(hits[0].point.x, rig.position.y, hits[0].point.z);
+            state.teleportMode = false;
+            ret.visible = false;
+            push?.(`[move] teleported ✅`);
+          }
+          state._lastGrip = grip;
+        } else {
+          ret.visible = false;
+        }
+      }
+    }
+  };
+    }

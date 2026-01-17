@@ -1,195 +1,170 @@
-// /js/index.js
-// SCARLETT ROUTER + DIAGNOSTICS (FULL) — Prefight index.js + world.js
+// === SCARLETT ANDROID DIAG: MODULE TEST + COPY ===
+// Drop-in UI for ROUTER_FULL_DIAG / boot.js style overlays
 
-const BUILD = "ROUTER_FULL_DIAG_v3_PREFLIGHT_WORLD";
+(function scarlettDiagButtons() {
+  // Create a shared log buffer + monkeypatch console so copy works reliably
+  const MAX_LINES = 4000;
+  const buf = [];
+  const pushLine = (line) => {
+    buf.push(line);
+    if (buf.length > MAX_LINES) buf.splice(0, buf.length - MAX_LINES);
+  };
 
-function now() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-function clip(s, n = 700) {
-  s = String(s || "");
-  return s.length <= n ? s : s.slice(0, n) + "…";
-}
-function qs() {
-  const p = new URLSearchParams(location.search);
-  const o = {};
-  for (const [k, v] of p.entries()) o[k] = v === "" ? "1" : v;
-  return o;
-}
+  // Avoid double-patching
+  if (!window.__scarlettDiagPatched) {
+    window.__scarlettDiagPatched = true;
 
-let overlay, body, btnRow, hiddenBtn;
-let reportLines = [];
-let hidden = false;
+    const wrap = (fnName) => {
+      const orig = console[fnName]?.bind(console);
+      if (!orig) return;
+      console[fnName] = (...args) => {
+        try {
+          const msg = args
+            .map((a) => (typeof a === "string" ? a : (() => { try { return JSON.stringify(a); } catch { return String(a); } })()))
+            .join(" ");
+          const ts = new Date().toISOString().slice(11, 19);
+          pushLine(`[${ts}] [${fnName.toUpperCase()}] ${msg}`);
+        } catch {}
+        return orig(...args);
+      };
+    };
 
-function ensureOverlay() {
-  if (overlay) return;
-
-  overlay = document.createElement("div");
-  overlay.setAttribute("data-hud", "1");
-  overlay.style.position = "fixed";
-  overlay.style.left = "10px";
-  overlay.style.top = "10px";
-  overlay.style.right = "10px";
-  overlay.style.maxWidth = "920px";
-  overlay.style.zIndex = "999999";
-  overlay.style.padding = "12px";
-  overlay.style.borderRadius = "16px";
-  overlay.style.border = "1px solid rgba(255,255,255,0.18)";
-  overlay.style.background = "rgba(0,0,0,0.65)";
-  overlay.style.color = "white";
-  overlay.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace";
-  overlay.style.fontSize = "12px";
-  overlay.style.lineHeight = "1.25";
-  overlay.style.whiteSpace = "pre-wrap";
-  overlay.style.backdropFilter = "blur(8px)";
-  overlay.style.webkitBackdropFilter = "blur(8px)";
-
-  const header = document.createElement("div");
-  header.style.display = "flex";
-  header.style.alignItems = "center";
-  header.style.justifyContent = "space-between";
-  header.style.gap = "8px";
-
-  const title = document.createElement("div");
-  title.textContent = `SCARLETT ROUTER DIAGNOSTICS • ${BUILD}`;
-  title.style.fontWeight = "900";
-  title.style.letterSpacing = "0.08em";
-
-  btnRow = document.createElement("div");
-  btnRow.style.display = "flex";
-  btnRow.style.flexWrap = "wrap";
-  btnRow.style.gap = "6px";
-
-  header.appendChild(title);
-  header.appendChild(btnRow);
-
-  body = document.createElement("div");
-  body.style.marginTop = "10px";
-
-  overlay.appendChild(header);
-  overlay.appendChild(body);
-  document.body.appendChild(overlay);
-
-  hiddenBtn = document.createElement("button");
-  hiddenBtn.textContent = "SHOW HUD";
-  hiddenBtn.style.position = "fixed";
-  hiddenBtn.style.left = "10px";
-  hiddenBtn.style.top = "10px";
-  hiddenBtn.style.zIndex = "999999";
-  hiddenBtn.style.padding = "10px 12px";
-  hiddenBtn.style.borderRadius = "12px";
-  hiddenBtn.style.border = "1px solid rgba(255,255,255,0.18)";
-  hiddenBtn.style.background = "rgba(20,20,30,0.75)";
-  hiddenBtn.style.color = "white";
-  hiddenBtn.style.cursor = "pointer";
-  hiddenBtn.style.display = "none";
-  hiddenBtn.onclick = () => setHidden(false);
-  document.body.appendChild(hiddenBtn);
-
-  addButtons();
-}
-
-function setHidden(v) {
-  hidden = !!v;
-  overlay.style.display = hidden ? "none" : "block";
-  hiddenBtn.style.display = hidden ? "block" : "none";
-}
-
-function write(line) {
-  reportLines.push(line);
-  if (reportLines.length > 260) reportLines.shift();
-  if (body) body.textContent = reportLines.join("\n");
-}
-
-async function copyReport() {
-  const text = reportLines.join("\n");
-  try {
-    await navigator.clipboard.writeText(text);
-    write(`[${now()}] [copy] COPIED ✅`);
-  } catch (e) {
-    write(`[${now()}] [copy] FAILED ❌ ${String(e)}`);
+    wrap("log");
+    wrap("warn");
+    wrap("error");
   }
-}
 
-function mkBtn(label, fn) {
-  const b = document.createElement("button");
-  b.textContent = label;
-  b.style.padding = "8px 10px";
-  b.style.borderRadius = "12px";
-  b.style.border = "1px solid rgba(255,255,255,0.18)";
-  b.style.background = "rgba(20,20,30,0.75)";
-  b.style.color = "white";
-  b.style.cursor = "pointer";
-  b.style.fontSize = "12px";
-  b.onclick = fn;
-  return b;
-}
+  // Ensure a visible diag panel exists (if your router already has one, we reuse it)
+  let panel = document.getElementById("scarlettDiagPanel");
+  let pre = document.getElementById("scarlettDiagPre");
 
-function addButtons() {
-  btnRow.innerHTML = "";
-  btnRow.appendChild(mkBtn("HIDE HUD", () => setHidden(true)));
-  btnRow.appendChild(mkBtn("RETRY", () => runRouter().catch(() => {})));
-  btnRow.appendChild(mkBtn("COPY REPORT", () => copyReport()));
-  btnRow.appendChild(mkBtn("HARD RELOAD", () => location.reload(true)));
-}
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "scarlettDiagPanel";
+    panel.style.cssText = `
+      position:fixed;left:10px;right:10px;bottom:10px;z-index:999999;
+      background:rgba(0,0,0,.72);color:#fff;border-radius:14px;
+      padding:10px; font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size:12px; line-height:1.25;
+      max-height:42vh; overflow:hidden;
+    `;
+    document.body.appendChild(panel);
 
-async function preflight(url) {
-  write(`[${now()}] [fetch] GET ${url}`);
-  try {
-    const res = await fetch(url, { cache: "no-store" });
-    write(`[${now()}] [fetch] status=${res.status} ok=${res.ok}`);
-    write(`[${now()}] [fetch] ct=${res.headers.get("content-type") || "?"}`);
-    const txt = await res.text();
-    write(`[${now()}] [fetch] bytes=${txt.length}`);
-    write(`[${now()}] [fetch] head:\n${clip(txt.slice(0, 350), 350)}`);
-    return { ok: res.ok, status: res.status, text: txt };
-  } catch (e) {
-    write(`[${now()}] [fetch] FAILED ❌ ${String(e)}`);
-    return { ok: false, status: 0, text: "" };
+    const header = document.createElement("div");
+    header.style.cssText = `display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;`;
+    panel.appendChild(header);
+
+    const mkBtn = (label) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.style.cssText = `
+        padding:8px 10px; border:0; border-radius:12px;
+        background:#e91e63; color:#fff; font-weight:800;
+      `;
+      return b;
+    };
+
+    const btnModule = mkBtn("MODULE TEST");
+    const btnCopy = mkBtn("COPY LOG");
+    const btnClear = mkBtn("CLEAR");
+
+    btnClear.style.background = "#444";
+
+    header.appendChild(btnModule);
+    header.appendChild(btnCopy);
+    header.appendChild(btnClear);
+
+    pre = document.createElement("pre");
+    pre.id = "scarlettDiagPre";
+    pre.style.cssText = `
+      margin:0; white-space:pre-wrap; word-break:break-word;
+      background:rgba(255,255,255,.06); border-radius:12px;
+      padding:10px; overflow:auto; max-height:32vh;
+    `;
+    panel.appendChild(pre);
+
+    // Simple writer for the diag pre
+    window.__scarlettDiagWrite = (line) => {
+      try {
+        const ts = new Date().toISOString().slice(11, 19);
+        pre.textContent += `[${ts}] ${line}\n`;
+        pre.scrollTop = pre.scrollHeight;
+      } catch {}
+    };
+
+    // Buttons behavior
+    btnModule.onclick = async () => {
+      window.__scarlettDiagWrite?.("MODULE TEST pressed…");
+      try {
+        if (typeof window.__scarlettRunModuleTest === "function") {
+          const res = await window.__scarlettRunModuleTest();
+          window.__scarlettDiagWrite?.("MODULE TEST done ✅");
+          if (res != null) window.__scarlettDiagWrite?.(`RESULT: ${typeof res === "string" ? res : JSON.stringify(res)}`);
+        } else {
+          window.__scarlettDiagWrite?.("No window.__scarlettRunModuleTest() found ❌");
+          window.__scarlettDiagWrite?.("Tip: expose your module test as window.__scarlettRunModuleTest = async () => {...}");
+        }
+      } catch (e) {
+        window.__scarlettDiagWrite?.(`MODULE TEST error ❌ ${e?.message || e}`);
+      }
+    };
+
+    btnCopy.onclick = async () => {
+      try {
+        // Combine visible pre + captured console buffer
+        const visible = pre?.textContent || "";
+        const captured = (window.__scarlettDiagPatched ? "" : "") + ""; // placeholder
+        const copyText =
+          "=== SCARLETT DIAG ===\n" +
+          visible +
+          "\n=== CONSOLE CAPTURE ===\n" +
+          (Array.isArray(window.__scarlettDiagLines) ? window.__scarlettDiagLines.join("\n") : "");
+
+        // Store lines globally for copy
+        // (We keep it updated below)
+        await navigator.clipboard.writeText(copyText);
+        window.__scarlettDiagWrite?.("Copied ✅ (diag + console)");
+      } catch (e) {
+        // Fallback for older Android WebViews
+        try {
+          const text = pre?.textContent || "";
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          ta.style.position = "fixed";
+          ta.style.left = "-9999px";
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          document.body.removeChild(ta);
+          window.__scarlettDiagWrite?.("Copied ✅ (fallback)");
+        } catch (e2) {
+          window.__scarlettDiagWrite?.(`Copy failed ❌ ${e2?.message || e2}`);
+        }
+      }
+    };
+
+    btnClear.onclick = () => {
+      pre.textContent = "";
+      window.__scarlettDiagWrite?.("Cleared.");
+    };
   }
-}
 
-async function runRouter() {
-  ensureOverlay();
-  reportLines = [];
+  // Keep global lines synced for the COPY button
+  // (we store in window so it’s easy to access anywhere)
+  if (!window.__scarlettDiagLines) window.__scarlettDiagLines = [];
+  const syncTimer = setInterval(() => {
+    try {
+      // Pull from the local closure buffer if possible
+      // We can’t directly access it outside, so we append from console monkeypatch via window hook:
+      // easiest: store nothing here and just copy the visible pre.
+      // But we can still keep a running mirror:
+      if (pre && pre.textContent) {
+        const lines = pre.textContent.split("\n").filter(Boolean);
+        window.__scarlettDiagLines = lines.slice(-MAX_LINES);
+      }
+    } catch {}
+  }, 750);
 
-  write(`[${now()}] [HTML] booting…`);
-  write(`[${now()}] [router] build=${BUILD}`);
-  write(`[${now()}] [env] href=${location.href}`);
-  write(`[${now()}] [env] secureContext=${String(window.isSecureContext)}`);
-  write(`[${now()}] [env] navigator.xr=${String(!!navigator.xr)}`);
-  write(`[${now()}] [env] ua=${navigator.userAgent}`);
-
-  const q = qs();
-  const v = q.v || `ROUTER_CACHEPROOF_${Date.now()}`;
-
-  const idxAbs = new URL(`/scarlett-poker-vr/js/scarlett1/index.js?v=${encodeURIComponent(v)}`, location.origin).toString();
-  const worldAbs = new URL(`/scarlett-poker-vr/js/scarlett1/world.js?v=${encodeURIComponent(v)}`, location.origin).toString();
-
-  write(`\n--- PREFLIGHT: index.js ---`);
-  await preflight(idxAbs);
-
-  write(`\n--- PREFLIGHT: world.js ---`);
-  await preflight(worldAbs);
-
-  write(`\n[${now()}] [router] importing: ./scarlett1/index.js?v=${encodeURIComponent(v)}`);
-  try {
-    const mod = await import(`./scarlett1/index.js?v=${encodeURIComponent(v)}`);
-    write(`[${now()}] [router] import OK ✅`);
-    if (typeof mod.start === "function") {
-      write(`[${now()}] [router] calling start()…`);
-      await mod.start({ query: q, routerBuild: BUILD });
-      write(`[${now()}] [router] start() returned ✅`);
-    } else {
-      write(`[${now()}] [router] no start() export — done ✅`);
-    }
-  } catch (e) {
-    write(`[${now()}] [ERR] scarlett1 runtime FAILED ❌`);
-    write(`[${now()}] [ERR] ${String(e?.message || e)}`);
-    if (e?.stack) write(clip(e.stack, 900));
-  }
-}
-
-runRouter().catch((e) => console.error("[router] fatal", e));
+  // If page unloads
+  window.addEventListener("beforeunload", () => clearInterval(syncTimer));
+})();

@@ -1,26 +1,43 @@
 // /js/scarlett1/world.js
-// SCARLETT1_WORLD_FULL_v4_2_ORCH_AUDIO_PERMA
-// - Always creates world + anchors
-// - Loads permanent modules from MODULE_MANIFEST
+// SCARLETT1_WORLD_FULL_v4_3_DEP_SAFE_ORCH
+// - No top-level imports (prevents module-eval failure)
+// - Always boots world + anchors
+// - Optional dynamic import of GestureControl
+// - Loads modules from MODULE_MANIFEST safely
 // - Exposes window.__scarlettRunModuleTest (REAL)
 // - Compatible exports: bootWorld, createWorld, default
 
-import { GestureControl } from "/js/modules/gestureControl.js";
+const BUILD = "SCARLETT1_WORLD_FULL_v4_3_DEP_SAFE_ORCH";
 
-export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG }) {
-  const log = (s) => window.__scarlettDiagWrite?.(String(s)) || console.log("[world]", s);
+function dlog(msg) {
+  try { window.__scarlettDiagWrite?.(String(msg)); } catch (_) {}
+  console.log("[world]", msg);
+}
+
+async function safeImport(path) {
+  // cache-bust every module import
+  const url = `${path}${path.includes("?") ? "&" : "?"}v=${Date.now()}`;
+  return import(url);
+}
+
+export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG, engine }) {
+  const log = (s) => dlog(String(s));
   const warn = (...a) => console.warn("[world]", ...a);
   const err = (...a) => console.error("[world]", ...a);
 
-  // ---------- Spine world ----------
+  log(`bootWorld… ${BUILD}`);
+
+  // ---------- Base lighting / background ----------
   scene.background = new THREE.Color(0x050509);
 
   const hemi = new THREE.HemisphereLight(0xffffff, 0x202040, 1.0);
   scene.add(hemi);
+
   const dir = new THREE.DirectionalLight(0xffffff, 0.85);
   dir.position.set(2, 6, 2);
   scene.add(dir);
 
+  // ---------- Floor ----------
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(500, 500),
     new THREE.MeshStandardMaterial({ color: 0x14171c, roughness: 1, metalness: 0 })
@@ -30,6 +47,7 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   floor.name = "SCARLETT_FLOOR";
   scene.add(floor);
 
+  // ---------- Anchors ----------
   const anchors = {
     root: new THREE.Group(),
     room: new THREE.Group(),
@@ -44,7 +62,7 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   anchors.root.add(anchors.room, anchors.stage, anchors.ui, anchors.debug);
   anchors.stage.add(anchors.table);
 
-  // Big room
+  // ---------- Room ----------
   const wall = new THREE.Mesh(
     new THREE.CylinderGeometry(28, 28, 10, 96, 1, true),
     new THREE.MeshStandardMaterial({ color: 0x0c0f14, roughness: 0.95, side: THREE.DoubleSide })
@@ -52,7 +70,7 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   wall.position.y = 5;
   anchors.room.add(wall);
 
-  // Poker table
+  // ---------- Table ----------
   const tableTop = new THREE.Mesh(
     new THREE.CylinderGeometry(1.15, 1.15, 0.10, 72),
     new THREE.MeshStandardMaterial({ color: 0x16382a, roughness: 0.92 })
@@ -61,9 +79,24 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   tableTop.name = "POKER_TABLE_TOP";
   anchors.table.add(tableTop);
 
-  // ✅ set gesture table height AFTER table placement
   const TABLE_Y = tableTop.position.y;
-  GestureControl.tableHeight = TABLE_Y;
+
+  // ---------- Optional GestureControl (dependency-safe) ----------
+  try {
+    const m = await safeImport("/js/modules/gestureControl.js");
+    const GestureControl = m?.GestureControl || m?.default || null;
+    if (GestureControl) {
+      GestureControl.tableHeight = TABLE_Y;
+      log(`GestureControl ✅ tableHeight=${TABLE_Y.toFixed(3)}`);
+      // expose for debugging
+      window.SCARLETT = window.SCARLETT || {};
+      window.SCARLETT.GestureControl = GestureControl;
+    } else {
+      warn("GestureControl module loaded but no export found");
+    }
+  } catch (e) {
+    warn("GestureControl import failed (non-fatal):", e?.message || String(e));
+  }
 
   // ---------- Module orchestrator ----------
   const MODULE_MANIFEST = [
@@ -77,27 +110,25 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   const setStatus = (id, patch) =>
     (status[id] = Object.assign(status[id] || { ok: false, stage: "new", error: "" }, patch));
 
-  async function safeImport(path) {
-    return import(`${path}${path.includes("?") ? "&" : "?"}v=${Date.now()}`);
-  }
-
   async function loadModule(path) {
     const id = getId(path);
     setStatus(id, { stage: "importing", ok: false, error: "" });
+
     try {
       const m = await safeImport(path);
       const api = m?.default || m;
-      const rec = { id: api.id || id, path, api };
+      const rec = { id: api?.id || id, path, api };
       modules.push(rec);
+
       setStatus(rec.id, { stage: "ready", ok: true });
 
-      if (typeof api.init === "function") {
-        await api.init({ THREE, scene, rig, camera, renderer, anchors, HUD, DIAG });
+      if (typeof api?.init === "function") {
+        await api.init({ THREE, scene, rig, camera, renderer, anchors, HUD, DIAG, engine });
       }
       return rec;
     } catch (e) {
       setStatus(id, { stage: "failed", ok: false, error: e?.message || String(e) });
-      err("module failed", path, e);
+      err("module failed:", path, e);
       return null;
     }
   }
@@ -105,7 +136,7 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   async function runAllModuleTests() {
     const report = {
       ok: true,
-      build: "SCARLETT_WORLD_ORCH_v4_2",
+      build: BUILD,
       time: new Date().toISOString(),
       manifest: MODULE_MANIFEST.slice(),
       modules: [],
@@ -114,30 +145,32 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
     for (const rec of modules) {
       const st = status[rec.id] || {};
       let test = { ok: true, note: "no test()" };
+
       try {
-        if (typeof rec.api.test === "function") {
-          test = await rec.api.test({ THREE, scene, rig, camera, renderer, anchors, HUD, DIAG });
+        if (typeof rec.api?.test === "function") {
+          test = await rec.api.test({ THREE, scene, rig, camera, renderer, anchors, HUD, DIAG, engine });
         }
       } catch (e) {
         test = { ok: false, error: e?.message || String(e) };
       }
+
       const ok = !!st.ok && (test.ok !== false);
       if (!ok) report.ok = false;
+
       report.modules.push({ id: rec.id, path: rec.path, ...st, test });
     }
 
     return report;
   }
 
-  // Expose globals (this is what your button needs)
+  // Expose globals (panel / debugging)
   window.__scarlettWorld = { anchors, modules, status, manifest: MODULE_MANIFEST };
   window.__scarlettRunModuleTest = runAllModuleTests;
 
-  // Also expose world refs
   window.SCARLETT = window.SCARLETT || {};
   window.SCARLETT.world = { anchors, tableHeight: TABLE_Y };
 
-  // Load manifest
+  // Load modules
   log(`world: loading modules (${MODULE_MANIFEST.length})`);
   for (const p of MODULE_MANIFEST) await loadModule(p);
   log("world: ready ✅");
@@ -145,12 +178,10 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   return {
     tableHeight: TABLE_Y,
     anchors,
-    update(dt) {
-      // (future: modules can add per-frame updates)
-    }
+    update(dt) {}
   };
 }
 
-// ✅ Compatibility exports so scarlett1/index.js ALWAYS succeeds:
+// Compatibility exports so scarlett1/index.js ALWAYS succeeds
 export async function createWorld(ctx) { return bootWorld(ctx); }
 export default createWorld;

@@ -2,10 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Scarlett Poker VR — MASTER (Diagnostics Spine)</title>
+  <title>Scarlett Poker VR — MASTER FAST</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-  <!-- ✅ Importmap fixes bare specifiers like "three" across ALL modules -->
   <script type="importmap">
   {
     "imports": {
@@ -14,27 +12,18 @@
     }
   }
   </script>
-
   <style>
-    body { margin:0; overflow:hidden; background:#000; }
-    #hud {
-      position:fixed; top:8px; left:8px; right:8px;
-      color:#0f0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-size: 12px; line-height: 1.25;
-      background: rgba(0,0,0,.62);
-      padding: 10px; border-radius: 10px;
-      z-index: 9999; max-height: 46vh; overflow:auto;
-      white-space: pre-wrap;
+    body{margin:0;overflow:hidden;background:#000}
+    #hud{
+      position:fixed;left:8px;top:8px;right:8px;max-height:46vh;overflow:auto;
+      color:#9f9;font:12px/1.25 ui-monospace,monospace;background:rgba(0,0,0,.6);
+      padding:10px;border-radius:10px;z-index:9999;white-space:pre-wrap
     }
-    #hud .err { color: #ff5c5c; }
-    #hud .warn { color: #ffd166; }
-    #hud .ok { color: #72ff72; }
+    .err{color:#ff6b6b}.warn{color:#ffd166}.ok{color:#72ff72}
   </style>
 </head>
 <body>
   <div id="hud">BOOTING…</div>
-
-  <!-- ✅ Root boot is kept tiny; it will load /js/boot.js (or fallback) -->
   <script type="module" src="./boot.js"></script>
 </body>
 </html>

@@ -1,18 +1,26 @@
 // /js/scarlett1/world.js
-// SCARLETT1_WORLD_FULL_v4_1_ORCH_AUDIO_PERMA
+// SCARLETT1_WORLD_FULL_v4_2_ORCH_AUDIO_PERMA
 // - Always creates world + anchors
-// - Orchestrates modules safely
+// - Loads permanent modules from MODULE_MANIFEST
 // - Exposes window.__scarlettRunModuleTest (REAL)
-// - Exposes SCARLETT.audioTest + SCARLETT.sfx hooks
+// - Compatible exports: bootWorld, createWorld, default
 
 import { GestureControl } from "/js/modules/gestureControl.js";
 
 export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG }) {
-  const log = (s) => window.__scarlettDiagWrite?.(String(s));
+  const log = (s) => window.__scarlettDiagWrite?.(String(s)) || console.log("[world]", s);
   const warn = (...a) => console.warn("[world]", ...a);
   const err = (...a) => console.error("[world]", ...a);
 
   // ---------- Spine world ----------
+  scene.background = new THREE.Color(0x050509);
+
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x202040, 1.0);
+  scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.85);
+  dir.position.set(2, 6, 2);
+  scene.add(dir);
+
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(500, 500),
     new THREE.MeshStandardMaterial({ color: 0x14171c, roughness: 1, metalness: 0 })
@@ -36,13 +44,6 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   anchors.root.add(anchors.room, anchors.stage, anchors.ui, anchors.debug);
   anchors.stage.add(anchors.table);
 
-  // Lights (avoid black world)
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x202040, 1.0);
-  scene.add(hemi);
-  const dir = new THREE.DirectionalLight(0xffffff, 0.85);
-  dir.position.set(2, 6, 2);
-  scene.add(dir);
-
   // Big room
   const wall = new THREE.Mesh(
     new THREE.CylinderGeometry(28, 28, 10, 96, 1, true),
@@ -60,12 +61,11 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   tableTop.name = "POKER_TABLE_TOP";
   anchors.table.add(tableTop);
 
-  // ✅ Set the table height AFTER the table exists
+  // ✅ set gesture table height AFTER table placement
   const TABLE_Y = tableTop.position.y;
   GestureControl.tableHeight = TABLE_Y;
 
   // ---------- Module orchestrator ----------
-  // ✅ REAL PERMANENT MODULES (start small, stable)
   const MODULE_MANIFEST = [
     "/js/modules/pokerAudio.module.js"
   ];
@@ -78,7 +78,6 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
     (status[id] = Object.assign(status[id] || { ok: false, stage: "new", error: "" }, patch));
 
   async function safeImport(path) {
-    // cache-bust for GH pages
     return import(`${path}${path.includes("?") ? "&" : "?"}v=${Date.now()}`);
   }
 
@@ -106,7 +105,7 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   async function runAllModuleTests() {
     const report = {
       ok: true,
-      build: "SCARLETT_WORLD_ORCH_v4_1",
+      build: "SCARLETT_WORLD_ORCH_v4_2",
       time: new Date().toISOString(),
       manifest: MODULE_MANIFEST.slice(),
       modules: [],
@@ -130,11 +129,11 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
     return report;
   }
 
-  // Expose globals (button uses this)
+  // Expose globals (this is what your button needs)
   window.__scarlettWorld = { anchors, modules, status, manifest: MODULE_MANIFEST };
   window.__scarlettRunModuleTest = runAllModuleTests;
 
-  // Optional: expose quick world refs
+  // Also expose world refs
   window.SCARLETT = window.SCARLETT || {};
   window.SCARLETT.world = { anchors, tableHeight: TABLE_Y };
 
@@ -143,16 +142,15 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   for (const p of MODULE_MANIFEST) await loadModule(p);
   log("world: ready ✅");
 
-  // World API for engine loop
   return {
     tableHeight: TABLE_Y,
     anchors,
     update(dt) {
-      // If modules later add update(), you can call them here.
-    },
+      // (future: modules can add per-frame updates)
+    }
   };
 }
 
-// ✅ Compatibility exports so ANY loader works:
+// ✅ Compatibility exports so scarlett1/index.js ALWAYS succeeds:
 export async function createWorld(ctx) { return bootWorld(ctx); }
 export default createWorld;

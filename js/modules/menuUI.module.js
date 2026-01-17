@@ -1,6 +1,5 @@
 // /js/modules/menuUI.module.js
 // Left Y toggles menu; right trigger presses buttons (FULL)
-// Adds: Pause/Step/Speed controls + pointer dot + UI press event for poke animation
 
 export default {
   id: "menuUI.module.js",
@@ -10,7 +9,6 @@ export default {
     root.name = "MENU_UI_ROOT";
     anchors.ui.add(root);
 
-    // Menu panel attached to left hand
     const panel = new THREE.Group();
     panel.name = "MENU_PANEL";
     panel.visible = false;
@@ -61,8 +59,6 @@ export default {
     };
 
     const buttons = [];
-
-    // Row layout
     buttons.push(mkButton("DEMO: RESTART",  0.125, () => window.SCARLETT?.poker?.startDemo?.()));
     buttons.push(mkButton("DEMO: PAUSE",    0.045, () => window.SCARLETT?.poker?.togglePause?.()));
     buttons.push(mkButton("DEMO: STEP",    -0.035, () => window.SCARLETT?.poker?.step?.()));
@@ -70,7 +66,6 @@ export default {
     buttons.push(mkButton("SPEED: 1.0x",   -0.195, () => window.SCARLETT?.poker?.setSpeed?.(1.0)));
     buttons.push(mkButton("SPEED: 2.0x",   -0.275, () => window.SCARLETT?.poker?.setSpeed?.(2.0)));
 
-    // Pointer dot (shows where the ray hits UI)
     const pointerDot = new THREE.Mesh(
       new THREE.SphereGeometry(0.008, 12, 10),
       new THREE.MeshBasicMaterial({ color: 0xffffff })
@@ -79,14 +74,11 @@ export default {
     pointerDot.visible = false;
     anchors.ui.add(pointerDot);
 
-    // Raycaster for UI
     const raycaster = new THREE.Raycaster();
     const tmpO = new THREE.Vector3();
     const tmpQ = new THREE.Quaternion();
     const tmpD = new THREE.Vector3();
-    const tmpP = new THREE.Vector3();
 
-    // Input state
     let lastLY = false;
     let lastRTrigger = false;
 
@@ -107,7 +99,7 @@ export default {
 
     log?.("menuUI.module ✅ (pause/step/speed + pointer dot)");
 
-    this._rt = { THREE, renderer, camera, rightRay, panel, buttons, raycaster, tmpO, tmpQ, tmpD, tmpP, getGamepad, lastLY, lastRTrigger, pointerDot };
+    this._rt = { THREE, renderer, camera, rightRay, panel, buttons, raycaster, tmpO, tmpQ, tmpD, getGamepad, lastLY, lastRTrigger, pointerDot };
   },
 
   update(dt, { renderer }) {
@@ -117,7 +109,6 @@ export default {
     const session = renderer.xr.getSession?.();
     if (!session) return;
 
-    // LEFT Y toggle (robust)
     const gpL = r.getGamepad(session, "left");
     if (gpL) {
       const b3 = gpL.buttons?.[3]?.pressed || false;
@@ -132,12 +123,10 @@ export default {
       return;
     }
 
-    // RIGHT trigger press
     const gpR = r.getGamepad(session, "right");
     const trig = gpR ? (gpR.buttons?.[0]?.value ?? 0) : 0;
     const trigDown = trig > 0.75;
 
-    // Cast ray
     r.rightRay.getWorldPosition(r.tmpO);
     r.rightRay.getWorldQuaternion(r.tmpQ);
     r.tmpD.set(0, 0, -1).applyQuaternion(r.tmpQ).normalize();
@@ -147,30 +136,22 @@ export default {
 
     const meshes = [];
     for (const b of r.buttons) meshes.push(b.userData.btnMesh);
-
     const hits = r.raycaster.intersectObjects(meshes, false);
 
-    // Reset colors
     for (const b of r.buttons) b.userData.btnMesh.material.color.setHex(0x1f2a3a);
-
     r.pointerDot.visible = false;
 
     if (hits.length) {
       const hit = hits[0];
       const hitMesh = hit.object;
       hitMesh.material.color.setHex(0xffd24a);
-
-      // place pointer dot on hit point
       r.pointerDot.visible = true;
       r.pointerDot.position.copy(hit.point);
 
-      // press rising edge
       if (trigDown && !r.lastRTrigger) {
         for (const b of r.buttons) {
           if (b.userData.btnMesh === hitMesh) {
             try { b.userData.onPress?.(); } catch (_) {}
-
-            // fire UI press event for hand poke animation
             try {
               window.dispatchEvent(new CustomEvent("SCARLETT_UI_PRESS", {
                 detail: { label: b.userData.label, point: { x: hit.point.x, y: hit.point.y, z: hit.point.z } }

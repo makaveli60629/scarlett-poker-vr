@@ -1,5 +1,5 @@
 // /js/modules/pokerTable.module.js
-// 6-max table + seats + pot + dealer button + chip anchors (FULL)
+// Poker table (6-max) + chip anchors + pot anchor (FULL)
 
 export default {
   id: "pokerTable.module.js",
@@ -14,7 +14,6 @@ export default {
     tableData.railRadius = 1.45;
     tableData.seats = 6;
 
-    // Felt
     const felt = new THREE.Mesh(
       new THREE.CylinderGeometry(tableData.radius, tableData.radius, 0.12, 64),
       new THREE.MeshStandardMaterial({ color: 0x145a32, roughness: 0.9 })
@@ -23,7 +22,6 @@ export default {
     felt.name = "TABLE_FELT";
     g.add(felt);
 
-    // Rail
     const rail = new THREE.Mesh(
       new THREE.TorusGeometry(tableData.railRadius, 0.09, 16, 96),
       new THREE.MeshStandardMaterial({ color: 0x2a1a12, roughness: 0.95 })
@@ -33,83 +31,83 @@ export default {
     rail.name = "TABLE_RAIL";
     g.add(rail);
 
-    // Betting ring
     const betRing = new THREE.Mesh(
       new THREE.TorusGeometry(0.85, 0.02, 12, 96),
       new THREE.MeshStandardMaterial({ color: 0xc9a23f, roughness: 0.6 })
     );
     betRing.rotation.x = Math.PI / 2;
     betRing.position.set(tableData.center.x, tableData.center.y + 0.07, tableData.center.z);
-    betRing.name = "BET_RING";
+    betRing.name = "TABLE_BET_RING";
     g.add(betRing);
 
-    // Pot marker
+    // pot anchor
+    const potAnchor = new THREE.Group();
+    potAnchor.name = "POT_ANCHOR";
+    potAnchor.position.set(tableData.center.x, tableData.center.y + 0.075, tableData.center.z);
+    g.add(potAnchor);
+
     const potMarker = new THREE.Mesh(
       new THREE.CylinderGeometry(0.18, 0.18, 0.01, 32),
       new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 })
     );
-    potMarker.position.set(tableData.center.x, tableData.center.y + 0.075, tableData.center.z);
+    potMarker.position.set(0, 0, 0);
     potMarker.name = "POT_MARKER";
-    g.add(potMarker);
+    potAnchor.add(potMarker);
 
-    // Dealer button
-    const dealerButton = new THREE.Mesh(
+    const dealer = new THREE.Mesh(
       new THREE.CylinderGeometry(0.05, 0.05, 0.01, 24),
       new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 })
     );
-    dealerButton.position.set(tableData.center.x + 0.35, tableData.center.y + 0.08, tableData.center.z + 0.2);
-    dealerButton.name = "DEALER_BUTTON";
-    g.add(dealerButton);
+    dealer.position.set(tableData.center.x + 0.35, tableData.center.y + 0.08, tableData.center.z + 0.2);
+    dealer.name = "DEALER_BUTTON";
+    g.add(dealer);
 
-    // Seats + chip anchors
-    const seatGroup = new THREE.Group();
-    seatGroup.name = "SEATS";
-    g.add(seatGroup);
-
+    // chip anchors per seat
     const chipAnchors = [];
-    const seatCount = tableData.seats;
     const seatRadius = tableData.railRadius + 0.55;
-
-    for (let i = 0; i < seatCount; i++) {
-      const t = (i / seatCount) * Math.PI * 2;
-
-      const sx = tableData.center.x + Math.cos(t) * seatRadius;
-      const sz = tableData.center.z + Math.sin(t) * seatRadius;
-
-      const seat = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.11, 0.11, 0.02, 24),
-        new THREE.MeshStandardMaterial({ color: 0x3a3f55, roughness: 0.9 })
+    for (let i = 0; i < tableData.seats; i++) {
+      const t = (i / tableData.seats) * Math.PI * 2;
+      const a = new THREE.Group();
+      a.name = `CHIP_ANCHOR_${i}`;
+      a.position.set(
+        tableData.center.x + Math.cos(t) * (seatRadius - 0.15),
+        tableData.center.y + 0.08,
+        tableData.center.z + Math.sin(t) * (seatRadius - 0.15)
       );
-      seat.position.set(sx, 0.01, sz);
-      seat.name = `SEAT_${i}`;
-      seatGroup.add(seat);
-
-      const chipAnchor = new THREE.Object3D();
-      chipAnchor.position.set(
-        tableData.center.x + Math.cos(t) * (tableData.radius + 0.35),
-        tableData.center.y + 0.085,
-        tableData.center.z + Math.sin(t) * (tableData.radius + 0.35)
-      );
-      chipAnchor.name = `CHIP_ANCHOR_${i}`;
-      g.add(chipAnchor);
-      chipAnchors.push(chipAnchor);
+      a.lookAt(tableData.center.x, tableData.center.y + 0.1, tableData.center.z);
+      g.add(a);
+      chipAnchors.push(a);
     }
 
-    const potAnchor = new THREE.Object3D();
-    potAnchor.position.set(tableData.center.x, tableData.center.y + 0.085, tableData.center.z);
-    potAnchor.name = "POT_ANCHOR";
-    g.add(potAnchor);
+    // seat markers
+    const seatsG = new THREE.Group();
+    seatsG.name = "SEATS";
+    g.add(seatsG);
+    for (let i = 0; i < tableData.seats; i++) {
+      const t = (i / tableData.seats) * Math.PI * 2;
+      const seat = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.10, 0.10, 0.02, 24),
+        new THREE.MeshStandardMaterial({ color: 0x3a3f55, roughness: 0.9 })
+      );
+      seat.position.set(
+        tableData.center.x + Math.cos(t) * (tableData.railRadius + 0.55),
+        0.01,
+        tableData.center.z + Math.sin(t) * (tableData.railRadius + 0.55)
+      );
+      seat.name = `SEAT_${i}`;
+      seatsG.add(seat);
+    }
 
     syncGestureToTable?.();
 
     window.SCARLETT = window.SCARLETT || {};
-    window.SCARLETT.table = { group: g, data: tableData, dealerButton, potMarker, chipAnchors, potAnchor };
+    window.SCARLETT.table = { group: g, data: tableData, chipAnchors, potAnchor };
 
     log?.("pokerTable.module ✅ (chips+anchors)");
   },
 
   test() {
-    const ok = !!window.SCARLETT?.table?.chipAnchors?.length;
-    return { ok, note: ok ? "table+chip anchors present" : "chip anchors missing" };
+    const ok = !!window.SCARLETT?.table?.group && !!window.SCARLETT?.table?.chipAnchors?.length;
+    return { ok, note: ok ? "table+chip anchors present" : "table missing" };
   }
 };

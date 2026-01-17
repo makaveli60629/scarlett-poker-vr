@@ -1,6 +1,8 @@
 // /js/scarlett1/world.js
-// SCARLETT1_WORLD_FULL_v3_0_ORCH_MODULE_MANIFEST_PERMA
-// Permanent orchestrator: safe module imports, enable/disable, reload, module test always available.
+// SCARLETT1_WORLD_FULL_v3_1_ORCH_MODULE_MANIFEST_PERMA
+// - Builds big room + stage divot + centerpiece + table + store pad
+// - Safe module imports (missing module shows ❌, does not crash world)
+// - Exposes: __scarlettWorld + __scarlettRunModuleTest + reload/enable/disable
 
 export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG }) {
   const log = (s) => (typeof HUD === "function" ? HUD(String(s)) : console.log("[world]", s));
@@ -9,8 +11,7 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
 
   log("world: start");
 
-  // ---------- SPINE WORLD (never black) ----------
-  // Floor
+  // Floor (real)
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(500, 500),
     new THREE.MeshStandardMaterial({ color: 0x14171c, roughness: 1, metalness: 0 })
@@ -20,7 +21,7 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   floor.name = "SCARLETT_FLOOR";
   scene.add(floor);
 
-  // Lights
+  // Lighting (real)
   const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 0.95);
   hemi.name = "LIGHT_HEMI";
   scene.add(hemi);
@@ -35,7 +36,7 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   fill.name = "LIGHT_FILL";
   scene.add(fill);
 
-  // Anchors
+  // Anchors (permanent attach points)
   const anchors = {
     root: new THREE.Group(),
     room: new THREE.Group(),
@@ -55,7 +56,7 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   anchors.centerpiece.add(anchors.table);
   anchors.store.add(anchors.mannequins);
 
-  // Big room
+  // Big room (bigger centerpiece area)
   const ROOM_R = 28;
   const WALL_H = 10;
 
@@ -76,7 +77,7 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   ceilingRing.name = "ROOM_CEILING_RING";
   anchors.room.add(ceilingRing);
 
-  // Center stage divot placeholder
+  // Stage divot placeholder
   const divot = new THREE.Mesh(
     new THREE.CylinderGeometry(8.5, 9.5, 0.9, 64),
     new THREE.MeshStandardMaterial({ color: 0x10141a, roughness: 1 })
@@ -137,63 +138,31 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   anchors.debug.add(axes);
 
   // ---------- MODULE ORCHESTRATOR ----------
-  // Your “audit” problem is always the same: missing module import crashes or silently fails.
-  // So: safe import, status map, and module test always exists.
-
-  // IMPORTANT: Put your real module filenames here.
-  // These paths are relative to /js/scarlett1/world.js
+  // Put your real module paths here (relative to /js/scarlett1/world.js).
+  // If the path is wrong, status will show ❌ but world will keep running.
   const MODULE_MANIFEST = [
-    // If you already have a module folder, add the real entries:
+    // EXAMPLE:
     // "./modules/world.module.js",
     // "./modules/store.module.js",
     // "./modules/mannequins.module.js",
-    // "./modules/chips.module.js",
-    // "./modules/dealerButton.module.js",
     // "./modules/cards.module.js",
-    // "./modules/hands.module.js",
   ];
 
-  // internal module records
-  const modules = []; // {id, path, api}
+  const modules = []; // loaded: {id, path, api}
   const status = {};  // id -> { ok, stage, error, info, enabled }
+
+  function getIdFromPath(p) {
+    return p.replace(/^.*\//, "").replace(/\?.*$/, "");
+  }
 
   function setStatus(id, patch) {
     status[id] = status[id] || { ok: false, stage: "new", error: "", info: "", enabled: true };
     Object.assign(status[id], patch);
   }
 
-  function getIdFromPath(p) {
-    return p.replace(/^.*\//, "").replace(/\?.*$/, "");
-  }
-
   async function safeImport(path) {
-    // Cache-bust import so updates always load
     const url = `${path}${path.includes("?") ? "&" : "?"}v=${Date.now()}`;
     return import(url);
-  }
-
-  async function loadModule(path) {
-    const id = getIdFromPath(path);
-    setStatus(id, { stage: "importing", error: "", info: "", ok: false });
-
-    try {
-      const mod = await safeImport(path);
-      const api = mod?.default || mod?.module || mod; // flexible
-      if (!api) throw new Error("module export missing (default or named)");
-
-      // Normalize module API
-      const rec = { id: api.id || id, path, api };
-      modules.push(rec);
-      setStatus(rec.id, { stage: "imported", enabled: true });
-
-      // init
-      await initModule(rec);
-      return rec;
-    } catch (e) {
-      setStatus(id, { stage: "failed", ok: false, error: e?.message || String(e), enabled: false });
-      err("module import failed", path, e);
-      return null;
-    }
   }
 
   async function initModule(rec) {
@@ -217,10 +186,33 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
     }
   }
 
-  async function testModule(rec) {
-    const id = rec.id;
+  async function loadModule(path) {
+    const rawId = getIdFromPath(path);
+    setStatus(rawId, { stage: "importing", ok: false, error: "", info: "", enabled: true });
+
     try {
-      if (typeof rec.api.test === "function") return await rec.api.test({ THREE, scene, rig, camera, renderer, anchors, HUD, DIAG });
+      const mod = await safeImport(path);
+      const api = mod?.default || mod?.module || mod;
+      if (!api) throw new Error("module export missing (default or named)");
+
+      const rec = { id: api.id || rawId, path, api };
+      modules.push(rec);
+      setStatus(rec.id, { stage: "imported", enabled: true });
+
+      await initModule(rec);
+      return rec;
+    } catch (e) {
+      setStatus(rawId, { stage: "failed", ok: false, error: e?.message || String(e), enabled: false });
+      err("module import failed", path, e);
+      return null;
+    }
+  }
+
+  async function testModule(rec) {
+    try {
+      if (typeof rec.api.test === "function") {
+        return await rec.api.test({ THREE, scene, rig, camera, renderer, anchors, HUD, DIAG });
+      }
       return { ok: true, note: "no test()" };
     } catch (e) {
       return { ok: false, error: e?.message || String(e) };
@@ -230,30 +222,35 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   async function runAllModuleTests() {
     const report = {
       ok: true,
-      build: "SCARLETT_WORLD_ORCH_v3_0",
+      build: "SCARLETT_WORLD_ORCH_v3_1",
       time: new Date().toISOString(),
       modules: [],
+      manifest: MODULE_MANIFEST.slice(),
     };
 
-    // Include manifest failures too
-    const knownIds = new Set(modules.map((m) => m.id));
+    // include manifest items (even if failed import)
     for (const p of MODULE_MANIFEST) {
       const id = getIdFromPath(p);
-      if (!knownIds.has(id) && status[id]) {
+      if (status[id] && status[id].stage === "failed") {
         report.ok = false;
-        report.modules.push({ id, path: p, ...status[id], test: { ok: false, error: status[id].error || "import failed" } });
+        report.modules.push({ id, path: p, ...status[id], test: { ok: false, error: status[id].error } });
       }
     }
 
     for (const rec of modules) {
       const st = status[rec.id] || {};
       const t = await testModule(rec);
-      const row = { id: rec.id, path: rec.path, ...st, test: t };
-      if (!st.ok || t?.ok === false) report.ok = false;
-      report.modules.push(row);
+      const ok = !!st.ok && (t?.ok !== false);
+      if (!ok) report.ok = false;
+
+      report.modules.push({
+        id: rec.id,
+        path: rec.path,
+        ...st,
+        test: t,
+      });
     }
 
-    // Print a compact summary to HUD
     log("MODULE TEST REPORT:");
     report.modules.forEach((m) => {
       const ok = (m.ok && (m.test?.ok !== false));
@@ -264,35 +261,32 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   }
 
   async function reloadModule(id) {
-    // Soft reload: mark old disabled; re-import same path from manifest if possible
     const rec = modules.find((m) => m.id === id);
     const path = rec?.path || MODULE_MANIFEST.find((p) => getIdFromPath(p) === id);
-    if (!path) throw new Error(`No path found for module ${id}`);
+    if (!path) throw new Error(`No path for module ${id}`);
 
-    // disable old
-    setStatus(id, { enabled: true, stage: "reloading", error: "", ok: false });
-
-    // Remove old module record entry (keep it simple)
+    // remove old
     for (let i = modules.length - 1; i >= 0; i--) {
       if (modules[i].id === id) modules.splice(i, 1);
     }
+    setStatus(id, { stage: "reloading", ok: false, error: "", enabled: true });
 
-    // Re-import and init
     const r = await loadModule(path);
+    rebuildUpdaters();
     return r;
   }
 
   function setEnabled(id, enabled) {
     enabled = !!enabled;
     setStatus(id, { enabled });
-    // If disabling, just mark; module should respect enabled in update if it has one.
-    if (!enabled) setStatus(id, { stage: "disabled", ok: false });
-    // If enabling, re-init if present
+    if (!enabled) {
+      setStatus(id, { stage: "disabled", ok: false });
+      return;
+    }
     const rec = modules.find((m) => m.id === id);
-    if (enabled && rec) initModule(rec);
+    if (rec) initModule(rec);
   }
 
-  // Update loop for modules
   const updaters = [];
   function rebuildUpdaters() {
     updaters.length = 0;
@@ -301,7 +295,7 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
     }
   }
 
-  // Expose EVERYTHING permanently
+  // Expose permanently (THIS is what your button needs)
   window.__scarlettWorld = {
     anchors,
     modules,
@@ -311,11 +305,9 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
     reloadModule,
     setEnabled,
   };
-
-  // Always set module test runner (this is what you’re missing right now)
   window.__scarlettRunModuleTest = runAllModuleTests;
 
-  // Load manifest modules (safe)
+  // Load manifest safely
   log(`world: loading manifest (${MODULE_MANIFEST.length})`);
   for (const p of MODULE_MANIFEST) {
     const id = getIdFromPath(p);
@@ -330,7 +322,6 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
   return {
     anchors,
     update(dt) {
-      // run module updaters only if enabled
       for (const rec of updaters) {
         const st = status[rec.id];
         if (st && st.enabled === false) continue;
@@ -339,4 +330,4 @@ export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG
       }
     },
   };
-    }
+                            }

@@ -1,101 +1,137 @@
-// /js/index.js — ScarlettVR Permanent Spine (FULL)
-// Single entry. Loads modules. Owns render loop. No duplicates.
+// /js/router.js — ScarlettVR Router + Diagnostics Spine
+// BUILD: ROUTER_FULL_DIAG_v1
+const BUILD = "ROUTER_FULL_DIAG_v1";
 
-const BUILD = "INDEX_FULL_WORLD_PIP_v1";
-const log = (...a) => console.log("[index]", ...a);
-const $ = (id) => document.getElementById(id);
+const log = (...a) => console.log("[router]", ...a);
+const warn = (...a) => console.warn("[router]", ...a);
+const err = (...a) => console.error("[router]", ...a);
 
-import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
-import { VRButton } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
+// --- Global Scarlett namespace (stable) ---
+const Scarlett = (globalThis.Scarlett = globalThis.Scarlett || {});
+Scarlett.build = BUILD;
+Scarlett.env = Scarlett.env || {};
+Scarlett.modules = Scarlett.modules || {};
+Scarlett.flags = Scarlett.flags || {};
+Scarlett.flags.showDiag = true;   // default ON (you can toggle in-world)
+Scarlett.flags.showHud = true;
 
-import { createWorldModule } from "./modules/world_full.js";
-import { createLocomotionModule } from "./modules/locomotion_xr.js";
-import { createPipModule } from "./modules/pip.js";
-import { createUiModule } from "./modules/ui_panel.js";
+// --- Diagnostics overlay (DOM, always available) ---
+function createDiagOverlay() {
+  const el = document.createElement("div");
+  el.id = "scarlett-diag";
+  el.style.cssText = `
+    position:fixed; left:10px; top:10px; z-index:99999;
+    max-width:min(520px, calc(100vw - 20px));
+    background:rgba(0,0,0,.55);
+    color:#ff4d4d;
+    font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    padding:10px 12px; border-radius:10px;
+    border:1px solid rgba(255,77,77,.35);
+    backdrop-filter: blur(6px);
+    user-select:text;
+    white-space:pre-wrap;
+  `;
+  document.body.appendChild(el);
 
-(async function boot() {
-  log("build=", BUILD);
-
-  const app = document.getElementById("app");
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.xr.enabled = true;
-  renderer.shadowMap.enabled = true;
-
-  app.appendChild(renderer.domElement);
-  document.body.appendChild(VRButton.createButton(renderer));
-
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x07090d);
-
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
-  camera.position.set(0, 1.6, 3.2);
-
-  // XR rig so movement is consistent
-  const rig = new THREE.Group();
-  rig.name = "XR_RIG";
-  rig.add(camera);
-  scene.add(rig);
-
-  // Controllers
-  const controller1 = renderer.xr.getController(0);
-  const controller2 = renderer.xr.getController(1);
-  controller1.name = "controller1";
-  controller2.name = "controller2";
-  rig.add(controller1);
-  rig.add(controller2);
-
-  const clock = new THREE.Clock();
-
-  const ctx = {
-    BUILD,
-    THREE,
-    scene,
-    camera,
-    renderer,
-    rig,
-    controller1,
-    controller2,
-    now: () => performance.now(),
-    dom: {
-      hud: $("hud"),
-      status: $("status"),
-      pipCanvas: $("pip"),
-      panel: $("panel"),
-      log: $("log"),
-      btnHUD: $("btnHUD"),
-      btnPIP: $("btnPIP"),
-      btnTestModules: $("btnTestModules"),
-      btnRespawn: $("btnRespawn"),
-      togglePanelKey: "KeyY", // desktop fallback
-    },
-    // a simple shared bus
-    bus: new EventTarget(),
+  const state = {
+    lines: [],
+    max: 28,
+    el,
+    enabled: true
   };
 
-  const MODULES = [
-    createUiModule(),
-    createWorldModule(),
-    createLocomotionModule({ teleportEnabled: true }),
-    createPipModule(),
-  ];
+  function write(line) {
+    state.lines.push(line);
+    if (state.lines.length > state.max) state.lines.shift();
+    state.el.textContent = state.lines.join("\n");
+  }
 
-  // init modules
-  for (const m of MODULES) await m.init(ctx);
+  function setEnabled(v) {
+    state.enabled = !!v;
+    state.el.style.display = state.enabled ? "block" : "none";
+  }
 
-  // resize
-  window.addEventListener("resize", () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
+  return { write, setEnabled, el, state };
+}
 
-  ctx.dom.status.textContent = "ready ✅";
+const diag = (Scarlett.diag = Scarlett.diag || createDiagOverlay());
+diag.setEnabled(!!Scarlett.flags.showDiag);
 
-  renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.05);
-    for (const m of MODULES) m.update?.(dt, ctx);
-    renderer.render(scene, camera);
-  });
+// --- Environment snapshot ---
+(function snapshotEnv() {
+  const href = location.href;
+  const ua = navigator.userAgent;
+  const secureContext = globalThis.isSecureContext;
+  const xr = !!navigator.xr;
+
+  Scarlett.env = { href, ua, secureContext, xr };
+  diag.write(`[HTML] booting…`);
+  diag.write(`[router] build=${BUILD}`);
+  diag.write(`[env] href=${href}`);
+  diag.write(`[env] secureContext=${secureContext}`);
+  diag.write(`[env] navigator.xr=${xr}`);
+  diag.write(`[env] ua=${ua}`);
 })();
+
+// --- Helper: safe dynamic import with status tracking ---
+async function loadModule(name, path) {
+  const t0 = performance.now();
+  try {
+    diag.write(`[mod] loading ${name}…`);
+    const mod = await import(path);
+    const ms = Math.round(performance.now() - t0);
+    Scarlett.modules[name] = { ok: true, path, ms };
+    diag.write(`[mod] ok ✅ ${name} (${ms}ms)`);
+    return mod;
+  } catch (e) {
+    const ms = Math.round(performance.now() - t0);
+    Scarlett.modules[name] = { ok: false, path, ms, error: String(e?.message || e) };
+    diag.write(`[mod] fail ❌ ${name} (${ms}ms)`);
+    diag.write(`      ${String(e?.message || e)}`);
+    warn(`Module failed: ${name}`, e);
+    return null;
+  }
+}
+
+// --- Optional modules list (won't break if missing) ---
+const OPTIONAL_MODULES = [
+  // Put your existing modules here (router will try; missing is OK)
+  ["hud", "./modules/hud.js"],
+  ["teleport", "./modules/teleport.js"],
+  ["avatars", "./modules/avatars.js"],
+  ["audio", "./modules/audio.js"],
+  ["poker", "./modules/poker.js"],
+];
+
+// --- Boot chain ---
+(async function boot() {
+  // Load optional modules (non-blocking sequential so diag stays readable)
+  for (const [name, path] of OPTIONAL_MODULES) {
+    await loadModule(name, path);
+  }
+
+  // Load main index (this is required)
+  const main = await loadModule("index", "./index.js");
+  if (!main || typeof main.boot !== "function") {
+    diag.write(`[fatal] index.js missing boot()`);
+    err("index.js did not export boot()");
+    return;
+  }
+
+  // Start
+  try {
+    await main.boot({ Scarlett, diag });
+    diag.write(`[router] started ✅`);
+  } catch (e) {
+    diag.write(`[fatal] boot crash: ${String(e?.message || e)}`);
+    err("Boot crash:", e);
+  }
+})();
+
+// Quick keyboard fallback (desktop):
+window.addEventListener("keydown", (ev) => {
+  if (ev.key === "`") { // toggle diagnostics with backtick
+    Scarlett.flags.showDiag = !Scarlett.flags.showDiag;
+    diag.setEnabled(Scarlett.flags.showDiag);
+  }
+});

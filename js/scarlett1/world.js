@@ -1,11 +1,9 @@
 // /js/scarlett1/world.js
-// SCARLETT1_WORLD_FULL_v4_11_LOCKED_CORE_ORCH_POKER_AVATARS
-// - Keeps the proven rig/laser/teleport/snap working core
-// - Parents controllers under rig (no detach)
-// - Laser aims with rightRay; hand box on rightGrip
-// - Knock table-gated via GestureControl
-// - Adds a safe module orchestrator for poker table + avatars
-// - Exposes __scarlettRunModuleTest and window.__scarlettWorld
+// SCARLETT1_WORLD_FULL_v4_12_ORCH_6MAX_GAMEPLAY_AVATARUI_SHOWCASE
+// - Locked core nav + rigged laser + teleport + snap
+// - Orchestrator loads: pokerTable, avatars, avatarUI, pokerGameplay
+// - 6-max default
+// - Avatar "showcase" near spawn for inspection
 
 import GestureControl from "../modules/gestureControl.js";
 
@@ -13,14 +11,13 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
   const dwrite = (s) => { try { window.__scarlettDiagWrite?.(String(s)); } catch (_) {} };
   const log = (...a) => { console.log("[world]", ...a); dwrite(`[world] ${a.join(" ")}`); };
 
-  log("bootWorld… SCARLETT1_WORLD_FULL_v4_11_LOCKED_CORE_ORCH_POKER_AVATARS");
+  log("bootWorld… SCARLETT1_WORLD_FULL_v4_12_ORCH_6MAX_GAMEPLAY_AVATARUI_SHOWCASE");
 
   // -------------------------
   // LIGHTING
   // -------------------------
   scene.background = new THREE.Color(0x0b0e14);
   scene.add(new THREE.HemisphereLight(0xffffff, 0x303050, 1.2));
-
   const sun = new THREE.DirectionalLight(0xffffff, 1.0);
   sun.position.set(6, 10, 4);
   scene.add(sun);
@@ -91,16 +88,9 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
   const rightGrip = renderer.xr.getControllerGrip(1);
   const leftGrip  = renderer.xr.getControllerGrip(0);
 
-  rightRay.name = "RIGHT_RAY";
-  leftRay.name = "LEFT_RAY";
-  rightGrip.name = "RIGHT_GRIP";
-  leftGrip.name = "LEFT_GRIP";
-
   rig.add(rightRay, leftRay, rightGrip, leftGrip);
 
-  // -------------------------
-  // Right hand visual (box)
-  // -------------------------
+  // Right-hand visual (box)
   const handBox = new THREE.Mesh(
     new THREE.BoxGeometry(0.06, 0.02, 0.10),
     new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 })
@@ -123,7 +113,6 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
     new THREE.Vector3(0, 0, -6)
   ]);
   const laser = new THREE.Line(laserGeom, new THREE.LineBasicMaterial({ color: 0xff3355 }));
-  laser.name = "RIGHT_LASER";
   rightRay.add(laser);
 
   const reticle = new THREE.Mesh(
@@ -132,7 +121,6 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
   );
   reticle.rotation.x = -Math.PI / 2;
   reticle.visible = false;
-  reticle.name = "TELEPORT_RETICLE";
   anchors.debug.add(reticle);
 
   const hitDot = new THREE.Mesh(
@@ -140,7 +128,6 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
     new THREE.MeshBasicMaterial({ color: 0xffffff })
   );
   hitDot.visible = false;
-  hitDot.name = "LASER_HIT_DOT";
   anchors.debug.add(hitDot);
 
   function setLaserLength(d) {
@@ -216,16 +203,15 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
   }
 
   // -------------------------
-  // BASE TABLE DATA (modules can override)
+  // TABLE DATA (6-max)
   // -------------------------
   const tableData = {
     center: new THREE.Vector3(0, 0.78, -2),
     radius: 1.2,
     railRadius: 1.45,
-    seats: 9
+    seats: 6
   };
 
-  // GestureControl table gating (updated after pokerTable module may move it)
   function syncGestureToTable() {
     GestureControl.tableHeight = tableData.center.y;
     GestureControl.tableCenter = { x: tableData.center.x, z: tableData.center.z };
@@ -241,10 +227,12 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
   const MODULE_MANIFEST = [
     "../modules/pokerTable.module.js",
     "../modules/avatars.module.js",
+    "../modules/avatarUI.module.js",
+    "../modules/pokerGameplay.module.js",
   ];
 
   const modules = [];
-  const status = {}; // id -> {ok, stage, error}
+  const status = {};
 
   const setStatus = (id, patch) => {
     status[id] = Object.assign(status[id] || { ok: false, stage: "new", error: "" }, patch);
@@ -285,7 +273,7 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
   async function runAllModuleTests() {
     const report = {
       ok: true,
-      build: "SCARLETT1_WORLD_FULL_v4_11_LOCKED_CORE_ORCH_POKER_AVATARS",
+      build: "SCARLETT1_WORLD_FULL_v4_12_ORCH_6MAX_GAMEPLAY_AVATARUI_SHOWCASE",
       time: new Date().toISOString(),
       manifest: MODULE_MANIFEST.slice(),
       modules: []
@@ -308,7 +296,6 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
     return report;
   }
 
-  // Expose orchestrator globals for your Android/Oculus panel
   window.__scarlettWorld = { anchors, modules, status, manifest: MODULE_MANIFEST, tableData };
   window.__scarlettRunModuleTest = runAllModuleTests;
 
@@ -317,7 +304,7 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
   log("world: modules loaded ✅");
 
   // -------------------------
-  // Knock velocity tracking (rightGrip world Y delta)
+  // Knock velocity tracking
   // -------------------------
   const lastGripPos = new THREE.Vector3();
   let lastGripInit = false;

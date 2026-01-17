@@ -1,11 +1,11 @@
 // /js/scarlett1/world.js — SCARLETT1 WORLD (FULL)
-// BUILD: WORLD_FULL_LOBBY_v4_3
-// Creates a full lobby: big circular room, floor, lighting, poker pit divot + stairs, store + mannequins placeholders.
+// BUILD: WORLD_FULL_LOBBY_v4_3_FOLDED
+// NOTE: CapsuleGeometry REMOVED for Quest/Android compatibility.
 
-const BUILD = "WORLD_FULL_LOBBY_v4_3";
+const BUILD = "WORLD_FULL_LOBBY_v4_3_FOLDED";
 
 export async function buildWorld(ctx) {
-  const { THREE, scene, player, onRegisterFloors, onStatus, log } = ctx;
+  const { THREE, scene, player, onRegisterFloors, onStatus } = ctx;
 
   onStatus?.(`building world…\n${BUILD}`);
 
@@ -13,21 +13,18 @@ export async function buildWorld(ctx) {
   world.name = "ScarlettWorld";
   scene.add(world);
 
-  // ---------- Lights ----------
+  // Lights
   const hemi = new THREE.HemisphereLight(0xffffff, 0x202030, 0.9);
   world.add(hemi);
 
   const dir = new THREE.DirectionalLight(0xffffff, 1.0);
   dir.position.set(8, 14, 6);
-  dir.castShadow = false;
   world.add(dir);
 
-  // ---------- Lobby (BIGGER circular room) ----------
-  // You asked: "circle room 2x as big" — so we go BIG.
-  const LOBBY_RADIUS = 18;         // ~2x feel compared to small room
+  // Lobby (2x bigger feel)
+  const LOBBY_RADIUS = 18;
   const LOBBY_HEIGHT = 7;
 
-  // Floor
   const floorGeo = new THREE.CircleGeometry(LOBBY_RADIUS, 96);
   const floorMat = new THREE.MeshStandardMaterial({ roughness: 0.95, metalness: 0.05 });
   const floor = new THREE.Mesh(floorGeo, floorMat);
@@ -36,7 +33,6 @@ export async function buildWorld(ctx) {
   floor.name = "LobbyFloor";
   world.add(floor);
 
-  // Walls (cylinder)
   const wallGeo = new THREE.CylinderGeometry(LOBBY_RADIUS, LOBBY_RADIUS, LOBBY_HEIGHT, 96, 1, true);
   const wallMat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0.05, side: THREE.DoubleSide });
   const wall = new THREE.Mesh(wallGeo, wallMat);
@@ -44,7 +40,6 @@ export async function buildWorld(ctx) {
   wall.name = "LobbyWall";
   world.add(wall);
 
-  // Ceiling ring / trim
   const ceilGeo = new THREE.RingGeometry(LOBBY_RADIUS - 0.5, LOBBY_RADIUS, 96);
   const ceilMat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0.08, side: THREE.DoubleSide });
   const ceil = new THREE.Mesh(ceilGeo, ceilMat);
@@ -53,7 +48,6 @@ export async function buildWorld(ctx) {
   ceil.name = "CeilingRing";
   world.add(ceil);
 
-  // Simple emissive “lobby glow”
   const glowGeo = new THREE.TorusGeometry(LOBBY_RADIUS - 1.4, 0.08, 16, 120);
   const glowMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.65 });
   const glow = new THREE.Mesh(glowGeo, glowMat);
@@ -62,16 +56,14 @@ export async function buildWorld(ctx) {
   glow.name = "LobbyGlow";
   world.add(glow);
 
-  // ---------- Poker Pit "Divot" + Stairs ----------
+  // Poker pit divot + stairs
   const pit = new THREE.Group();
   pit.name = "PokerPit";
   world.add(pit);
 
-  // Pit dimensions (bigger than table)
-  const PIT_RADIUS = 8.5;    // divot should be bigger than just the table
+  const PIT_RADIUS = 8.5;
   const PIT_DEPTH = 1.4;
 
-  // Pit floor (lowered)
   const pitFloorGeo = new THREE.CircleGeometry(PIT_RADIUS, 72);
   const pitFloorMat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0.03 });
   const pitFloor = new THREE.Mesh(pitFloorGeo, pitFloorMat);
@@ -80,7 +72,6 @@ export async function buildWorld(ctx) {
   pitFloor.name = "PitFloor";
   pit.add(pitFloor);
 
-  // Pit rim
   const rimGeo = new THREE.TorusGeometry(PIT_RADIUS, 0.12, 12, 120);
   const rimMat = new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0.15 });
   const rim = new THREE.Mesh(rimGeo, rimMat);
@@ -89,7 +80,6 @@ export async function buildWorld(ctx) {
   rim.name = "PitRim";
   pit.add(rim);
 
-  // Stairs (simple wedge steps)
   const stairs = new THREE.Group();
   stairs.name = "PitStairs";
   pit.add(stairs);
@@ -100,7 +90,6 @@ export async function buildWorld(ctx) {
   const stepD = 0.55;
   const stepMat = new THREE.MeshStandardMaterial({ roughness: 0.95, metalness: 0.02 });
 
-  // Place stairs at "south" side of pit (toward +Z by default)
   for (let i = 0; i < stepCount; i++) {
     const g = new THREE.BoxGeometry(stepW, stepH, stepD);
     const m = new THREE.Mesh(g, stepMat);
@@ -108,7 +97,7 @@ export async function buildWorld(ctx) {
     stairs.add(m);
   }
 
-  // ---------- Poker Table + Chairs (placeholders) ----------
+  // Table + chairs
   const table = buildPokerTable({ THREE });
   table.position.set(0, -PIT_DEPTH + 0.02, 0);
   pit.add(table);
@@ -117,12 +106,11 @@ export async function buildWorld(ctx) {
   chairs.position.set(0, -PIT_DEPTH + 0.02, 0);
   pit.add(chairs);
 
-  // ---------- Store Zone + Mannequins ----------
+  // Store zone + mannequins
   const store = new THREE.Group();
   store.name = "StoreZone";
   world.add(store);
 
-  // Put store on lobby edge
   store.position.set(-12, 0, -6);
 
   const storePadGeo = new THREE.PlaneGeometry(7, 5);
@@ -147,15 +135,13 @@ export async function buildWorld(ctx) {
   sign.name = "StoreSign";
   store.add(sign);
 
-  // Mannequins placeholders
   const manA = buildMannequin({ THREE });
   const manB = buildMannequin({ THREE });
   manA.position.set(-1.6, 0, -0.5);
   manB.position.set(1.6, 0, -0.5);
   store.add(manA, manB);
 
-  // ---------- Simple “lobby markers” ----------
-  // A few pillars so you can visually confirm scale/orientation.
+  // Pillars (scale markers)
   const pillars = new THREE.Group();
   pillars.name = "LobbyPillars";
   world.add(pillars);
@@ -169,12 +155,10 @@ export async function buildWorld(ctx) {
     pillars.add(p);
   }
 
-  // ---------- Teleport floors registration ----------
-  // Teleport should hit lobby floor + pit floor + store pad (and anything else you add later).
+  // Teleport floors
   onRegisterFloors?.([floor, pitFloor, storePad]);
 
-  // ---------- Player spawn hint ----------
-  // Put player near pit entrance
+  // Spawn
   player.position.set(0, 1.6, 10);
   player.rotation.set(0, Math.PI, 0);
 
@@ -182,7 +166,6 @@ export async function buildWorld(ctx) {
 
   return {
     update(dt) {
-      // subtle lobby animation to show it's alive
       glow.rotation.z += dt * 0.25;
     },
     dispose() {
@@ -191,7 +174,6 @@ export async function buildWorld(ctx) {
   };
 }
 
-// ---------- Builders ----------
 function buildPokerTable({ THREE }) {
   const g = new THREE.Group();
   g.name = "PokerTable";
@@ -214,16 +196,16 @@ function buildPokerTable({ THREE }) {
   base.position.y = 0.47;
   g.add(base);
 
-  // Dealer chip placeholder (flat on table)
+  // Dealer chip (flat)
   const chipGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.02, 24);
   const chipMat = new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.05 });
   const chip = new THREE.Mesh(chipGeo, chipMat);
   chip.position.set(0.0, 1.08, 0.9);
-  chip.rotation.x = Math.PI / 2; // flat
+  chip.rotation.x = Math.PI / 2;
   chip.name = "DealerChip";
   g.add(chip);
 
-  // Pass line marker placeholder (extra circle you requested)
+  // Pass line ring
   const ringGeo = new THREE.RingGeometry(1.85, 2.05, 64);
   const ringMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.35, side: THREE.DoubleSide });
   const ring = new THREE.Mesh(ringGeo, ringMat);
@@ -242,7 +224,6 @@ function buildChairs({ THREE, radius = 4, count = 6 }) {
   const seatGeo = new THREE.BoxGeometry(0.55, 0.08, 0.55);
   const backGeo = new THREE.BoxGeometry(0.55, 0.6, 0.08);
   const legGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.45, 10);
-
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0.05 });
 
   for (let i = 0; i < count; i++) {
@@ -279,7 +260,8 @@ function buildMannequin({ THREE }) {
 
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.1 });
 
-  const bodyGeo = new THREE.CapsuleGeometry(0.22, 0.7, 6, 14);
+  // FOLDED FIX: no CapsuleGeometry (Quest-safe)
+  const bodyGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.7, 16);
   const body = new THREE.Mesh(bodyGeo, mat);
   body.position.y = 1.1;
 
@@ -293,4 +275,4 @@ function buildMannequin({ THREE }) {
 
   g.add(base, body, head);
   return g;
-}
+                                          }

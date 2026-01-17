@@ -1,12 +1,11 @@
 // /js/modules/gestureControl.js
+// SCARLETT VR POKER — Gesture → Audio bridge (FULL)
+
 import { PokerAudio } from "/js/modules/audioLogic.js";
 
 export const GestureControl = {
-  // You should set this from world.js when the table is created:
-  // GestureControl.tableHeight = WORLD.tableHeight;
   tableHeight: 0.8,
 
-  // thresholds
   knockYSlack: 0.06,
   knockVelocityY: -0.55,
   knockDebounceMs: 420,
@@ -20,7 +19,6 @@ export const GestureControl = {
     const y = handData.position.y;
     const vy = handData.velocity.y;
 
-    // Knock: downward hand “hits” table plane
     if (!this._knockLock && y <= (this.tableHeight + this.knockYSlack) && vy < this.knockVelocityY) {
       PokerAudio.playTableKnock({ intensity: 1.0 });
       this._knockLock = true;

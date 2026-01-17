@@ -1,8 +1,8 @@
 // /js/scarlett1/index.js
-// SCARLETT1 — INDEX FRONT CONTROLLER (FULL • XR-SAFE WORLD RESOLVER + RIGHT-HAND GESTURE FEED)
-// Build: SCARLETT1_INDEX_FULL_v25_5_WORLD_BOOTWORLD_RIG_HANDEDNESS
+// SCARLETT1 — INDEX FULL (XR SAFE • ENGINE ATTACH FIRST • dt FIX • WORLD ORCH ACTIVE)
+// Build: SCARLETT1_INDEX_FULL_v26_0_WORLD_ACTIVATION_DT_FIX
 
-const BUILD = "SCARLETT1_INDEX_FULL_v25_5_WORLD_BOOTWORLD_RIG_HANDEDNESS";
+const BUILD = "SCARLETT1_INDEX_FULL_v26_0_WORLD_ACTIVATION_DT_FIX";
 
 // ---- DIAG + CONSOLE fingerprint (must appear no matter what) ----
 const dwrite = (msg) => { try { window.__scarlettDiagWrite?.(String(msg)); } catch (_) {} };
@@ -29,6 +29,7 @@ window.__SCARLETT_ENGINE__ = window.SCARLETT.engine;
 
 // ---- AUTHORITATIVE PANEL OVERRIDE: module test endpoint (panel-proof) ----
 const forcedModuleTest = async () => {
+  // Prefer world orchestrator if available
   if (typeof window.__scarlettRunModuleTest === "function") {
     try {
       const r = await window.__scarlettRunModuleTest();
@@ -38,6 +39,7 @@ const forcedModuleTest = async () => {
     }
   }
 
+  // Fallback report (always works)
   const eng = window.SCARLETT?.engine;
   return {
     ok: true,
@@ -52,12 +54,14 @@ const forcedModuleTest = async () => {
   };
 };
 
+// Install in every likely name the panel might use
 window.SCARLETT.runModuleTest = forcedModuleTest;
 window.__scarlettRunModuleTest = window.__scarlettRunModuleTest || forcedModuleTest;
 window.__scarlettModuleTest = forcedModuleTest;
 window.__runModuleTest = forcedModuleTest;
 window.runModuleTest = forcedModuleTest;
 
+// Extra: some panels check these exact globals
 window.__scarlettEngineAttached = true;
 window.__scarlettEngine = window.SCARLETT.engine;
 
@@ -69,6 +73,7 @@ const log = (...a) => { console.log("[scarlett1]", ...a); dwrite(`[scarlett1] ${
 const warn = (...a) => { console.warn("[scarlett1]", ...a); dwrite(`[scarlett1][warn] ${a.join(" ")}`); };
 const err  = (...a) => { console.error("[scarlett1]", ...a); dwrite(`[scarlett1][err] ${a.join(" ")}`); };
 
+// ✅ Preflight fetch check so we can see 404 vs JS error
 async function canFetch(url) {
   try {
     const r = await fetch(url, { method: "GET", cache: "no-store" });
@@ -78,9 +83,11 @@ async function canFetch(url) {
   }
 }
 
+// ✅ XR-SAFE world resolver:
+// Uses the real URL of the currently-running index.js and resolves world.js beside it.
 async function safeImportWorld(cacheTag = "") {
-  const base = new URL(import.meta.url);
-  const worldURL = new URL("world.js", base);
+  const base = new URL(import.meta.url);          // actual URL of /js/scarlett1/index.js
+  const worldURL = new URL("world.js", base);     // /js/scarlett1/world.js
   if (cacheTag) worldURL.searchParams.set("v", cacheTag);
 
   const url = worldURL.toString();
@@ -136,14 +143,9 @@ async function main() {
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
   camera.position.set(0, 1.6, 0);
 
-  // XR rig (authoritative parent for camera + controllers)
-  const rig = new THREE.Group();
-  rig.name = "XR_RIG";
-  scene.add(rig);
-  rig.add(camera);
-
+  // Update engine object (still attached)
   const engine = window.SCARLETT.engine = Object.assign(window.SCARLETT.engine || {}, {
-    BUILD, THREE, scene, camera, rig, renderer: null, world: null, errors: window.SCARLETT.engine?.errors || []
+    BUILD, THREE, scene, camera, renderer: null, world: null, errors: window.SCARLETT.engine?.errors || []
   });
   window.__scarlettEngine = engine;
   window.__SCARLETT_ENGINE__ = engine;
@@ -169,84 +171,17 @@ async function main() {
     return;
   }
 
-  // --- Controllers (handedness-safe; do NOT assume indices) ---
-  const ctrl0 = renderer.xr.getController(0);
-  const ctrl1 = renderer.xr.getController(1);
-  ctrl0.name = "XR_CONTROLLER_0";
-  ctrl1.name = "XR_CONTROLLER_1";
-  rig.add(ctrl0);
-  rig.add(ctrl1);
-
-  function tagController(ctrl) {
-    ctrl.userData.handedness = "unknown";
-    ctrl.addEventListener("connected", (e) => {
-      ctrl.userData.handedness = e?.data?.handedness || "unknown";
-      log(`controller connected: ${ctrl.name} handedness=${ctrl.userData.handedness}`);
-    });
-    ctrl.addEventListener("disconnected", () => {
-      log(`controller disconnected: ${ctrl.name}`);
-      ctrl.userData.handedness = "unknown";
-    });
-  }
-  tagController(ctrl0);
-  tagController(ctrl1);
-
-  function getRightController() {
-    if (ctrl0.userData.handedness === "right") return ctrl0;
-    if (ctrl1.userData.handedness === "right") return ctrl1;
-    // fallback: Quest often reports ctrl1 as right, but do not hard rely.
-    return ctrl1 || ctrl0;
-  }
-
-  const motion = {
-    t: performance.now(),
-    initRight: false,
-    lastRight: new THREE.Vector3()
-  };
-
-  function feedRightHand(dt) {
-    const GC = window.SCARLETT?.GestureControl;
-    if (!GC || typeof GC.update !== "function") return;
-
-    const obj = getRightController();
-    if (!obj) return;
-
-    const p = new THREE.Vector3();
-    obj.getWorldPosition(p);
-
-    if (!motion.initRight) {
-      motion.lastRight.copy(p);
-      motion.initRight = true;
-      return;
-    }
-
-    const v = new THREE.Vector3().subVectors(p, motion.lastRight).multiplyScalar(1 / Math.max(dt, 1e-4));
-    motion.lastRight.copy(p);
-
-    GC.update({
-      handedness: "right",
-      position: { x: p.x, y: p.y, z: p.z },
-      velocity: { x: v.x, y: v.y, z: v.z }
-    });
-  }
-
-  // World load (MUST call bootWorld)
-  if (window.__SCARLETT_WORLD_INIT__) {
-    warn("world init blocked (already initialized)");
-    return;
-  }
-  window.__SCARLETT_WORLD_INIT__ = true;
-
+  // World load (XR-safe resolver)
   const worldMod = await safeImportWorld(Date.now().toString());
   let WORLD;
 
   try {
-    const boot = worldMod?.bootWorld || worldMod?.createWorld || worldMod?.default;
-    if (typeof boot === "function") {
-      WORLD = await boot({ THREE, scene, rig, camera, renderer, HUD: null, DIAG: null });
-      log("world boot ✅ (bootWorld)");
+    const createWorld = worldMod?.createWorld || worldMod?.bootWorld || worldMod?.default;
+    if (typeof createWorld === "function") {
+      WORLD = await createWorld({ THREE, scene, renderer, camera, engine });
+      log("world boot ✅");
     } else {
-      warn("world missing bootWorld/createWorld/default — fallback");
+      warn("world missing createWorld/bootWorld/default — fallback");
       WORLD = buildFallbackWorld(scene);
     }
   } catch (e) {
@@ -259,18 +194,12 @@ async function main() {
   engine.world = WORLD;
   window.SCARLETT.world = WORLD;
 
+  // ✅ FIX: dt must be real (not 0)
+  const clock = new THREE.Clock();
+
   renderer.setAnimationLoop(() => {
-    const tNow = performance.now();
-    const dt = (tNow - motion.t) / 1000;
-    motion.t = tNow;
-
+    const dt = Math.min(clock.getDelta(), 0.05); // clamp for Quest stability
     try { WORLD?.update?.(dt); } catch (_) {}
-
-    // Only feed while XR is active
-    if (renderer.xr.isPresenting) {
-      feedRightHand(dt);
-    }
-
     renderer.render(scene, camera);
   });
 

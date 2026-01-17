@@ -1,8 +1,7 @@
-// /js/scarlett1/world.js — SCARLETT1 WORLD (FULL)
-// BUILD: WORLD_FULL_LOBBY_v4_3_FOLDED
-// NOTE: CapsuleGeometry REMOVED for Quest/Android compatibility.
+// /js/scarlett1/world.js — SCARLETT1 WORLD (FULL • SAFE)
+// BUILD: WORLD_FULL_LOBBY_SAFE_v4_3
 
-const BUILD = "WORLD_FULL_LOBBY_v4_3_FOLDED";
+const BUILD = "WORLD_FULL_LOBBY_SAFE_v4_3";
 
 export async function buildWorld(ctx) {
   const { THREE, scene, player, onRegisterFloors, onStatus } = ctx;
@@ -14,14 +13,14 @@ export async function buildWorld(ctx) {
   scene.add(world);
 
   // Lights
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x202030, 0.9);
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x202030, 0.95);
   world.add(hemi);
 
   const dir = new THREE.DirectionalLight(0xffffff, 1.0);
   dir.position.set(8, 14, 6);
   world.add(dir);
 
-  // Lobby (2x bigger feel)
+  // Lobby
   const LOBBY_RADIUS = 18;
   const LOBBY_HEIGHT = 7;
 
@@ -29,7 +28,6 @@ export async function buildWorld(ctx) {
   const floorMat = new THREE.MeshStandardMaterial({ roughness: 0.95, metalness: 0.05 });
   const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
   floor.name = "LobbyFloor";
   world.add(floor);
 
@@ -37,7 +35,6 @@ export async function buildWorld(ctx) {
   const wallMat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0.05, side: THREE.DoubleSide });
   const wall = new THREE.Mesh(wallGeo, wallMat);
   wall.position.y = LOBBY_HEIGHT / 2;
-  wall.name = "LobbyWall";
   world.add(wall);
 
   const ceilGeo = new THREE.RingGeometry(LOBBY_RADIUS - 0.5, LOBBY_RADIUS, 96);
@@ -45,7 +42,6 @@ export async function buildWorld(ctx) {
   const ceil = new THREE.Mesh(ceilGeo, ceilMat);
   ceil.rotation.x = Math.PI / 2;
   ceil.position.y = LOBBY_HEIGHT;
-  ceil.name = "CeilingRing";
   world.add(ceil);
 
   const glowGeo = new THREE.TorusGeometry(LOBBY_RADIUS - 1.4, 0.08, 16, 120);
@@ -53,12 +49,10 @@ export async function buildWorld(ctx) {
   const glow = new THREE.Mesh(glowGeo, glowMat);
   glow.rotation.x = Math.PI / 2;
   glow.position.y = LOBBY_HEIGHT - 0.2;
-  glow.name = "LobbyGlow";
   world.add(glow);
 
-  // Poker pit divot + stairs
+  // Poker pit divot
   const pit = new THREE.Group();
-  pit.name = "PokerPit";
   world.add(pit);
 
   const PIT_RADIUS = 8.5;
@@ -69,7 +63,6 @@ export async function buildWorld(ctx) {
   const pitFloor = new THREE.Mesh(pitFloorGeo, pitFloorMat);
   pitFloor.rotation.x = -Math.PI / 2;
   pitFloor.position.y = -PIT_DEPTH;
-  pitFloor.name = "PitFloor";
   pit.add(pitFloor);
 
   const rimGeo = new THREE.TorusGeometry(PIT_RADIUS, 0.12, 12, 120);
@@ -77,11 +70,10 @@ export async function buildWorld(ctx) {
   const rim = new THREE.Mesh(rimGeo, rimMat);
   rim.rotation.x = Math.PI / 2;
   rim.position.y = 0.02;
-  rim.name = "PitRim";
   pit.add(rim);
 
+  // Stairs
   const stairs = new THREE.Group();
-  stairs.name = "PitStairs";
   pit.add(stairs);
 
   const stepCount = 8;
@@ -102,38 +94,27 @@ export async function buildWorld(ctx) {
   table.position.set(0, -PIT_DEPTH + 0.02, 0);
   pit.add(table);
 
-  const chairs = buildChairs({ THREE, radius: 4.0, count: 6 });
+  const chairs = buildChairs({ THREE,  radius: 4.0, count: 6 });
   chairs.position.set(0, -PIT_DEPTH + 0.02, 0);
   pit.add(chairs);
 
-  // Store zone + mannequins
+  // Store + mannequins
   const store = new THREE.Group();
-  store.name = "StoreZone";
-  world.add(store);
-
   store.position.set(-12, 0, -6);
+  world.add(store);
 
   const storePadGeo = new THREE.PlaneGeometry(7, 5);
   const storePadMat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0.05 });
   const storePad = new THREE.Mesh(storePadGeo, storePadMat);
   storePad.rotation.x = -Math.PI / 2;
   storePad.position.y = 0.01;
-  storePad.name = "StorePad";
   store.add(storePad);
 
   const storeWallGeo = new THREE.BoxGeometry(7, 3, 0.2);
   const storeWallMat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.08 });
   const storeWall = new THREE.Mesh(storeWallGeo, storeWallMat);
   storeWall.position.set(0, 1.5, -2.4);
-  storeWall.name = "StoreBackWall";
   store.add(storeWall);
-
-  const signGeo = new THREE.BoxGeometry(4.2, 0.6, 0.15);
-  const signMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.85 });
-  const sign = new THREE.Mesh(signGeo, signMat);
-  sign.position.set(0, 2.6, -2.25);
-  sign.name = "StoreSign";
-  store.add(sign);
 
   const manA = buildMannequin({ THREE });
   const manB = buildMannequin({ THREE });
@@ -143,7 +124,6 @@ export async function buildWorld(ctx) {
 
   // Pillars (scale markers)
   const pillars = new THREE.Group();
-  pillars.name = "LobbyPillars";
   world.add(pillars);
 
   const pGeo = new THREE.CylinderGeometry(0.25, 0.25, 3.2, 18);
@@ -176,7 +156,6 @@ export async function buildWorld(ctx) {
 
 function buildPokerTable({ THREE }) {
   const g = new THREE.Group();
-  g.name = "PokerTable";
 
   const topGeo = new THREE.CylinderGeometry(2.6, 2.6, 0.18, 48);
   const topMat = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.08 });
@@ -202,7 +181,6 @@ function buildPokerTable({ THREE }) {
   const chip = new THREE.Mesh(chipGeo, chipMat);
   chip.position.set(0.0, 1.08, 0.9);
   chip.rotation.x = Math.PI / 2;
-  chip.name = "DealerChip";
   g.add(chip);
 
   // Pass line ring
@@ -211,7 +189,6 @@ function buildPokerTable({ THREE }) {
   const ring = new THREE.Mesh(ringGeo, ringMat);
   ring.rotation.x = -Math.PI / 2;
   ring.position.y = 1.07;
-  ring.name = "PassLineRing";
   g.add(ring);
 
   return g;
@@ -219,8 +196,6 @@ function buildPokerTable({ THREE }) {
 
 function buildChairs({ THREE, radius = 4, count = 6 }) {
   const g = new THREE.Group();
-  g.name = "Chairs";
-
   const seatGeo = new THREE.BoxGeometry(0.55, 0.08, 0.55);
   const backGeo = new THREE.BoxGeometry(0.55, 0.6, 0.08);
   const legGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.45, 10);
@@ -256,11 +231,8 @@ function buildChairs({ THREE, radius = 4, count = 6 }) {
 
 function buildMannequin({ THREE }) {
   const g = new THREE.Group();
-  g.name = "Mannequin";
-
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.1 });
 
-  // FOLDED FIX: no CapsuleGeometry (Quest-safe)
   const bodyGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.7, 16);
   const body = new THREE.Mesh(bodyGeo, mat);
   body.position.y = 1.1;
@@ -275,4 +247,4 @@ function buildMannequin({ THREE }) {
 
   g.add(base, body, head);
   return g;
-                                          }
+}

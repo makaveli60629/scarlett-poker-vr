@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 export const Teleport = {
-  create({ scene, renderer, camera, APP_STATE, diag, playerRig }){
+  create({ scene, renderer, APP_STATE, diag, playerRig, getController }){
     let floors = [];
     const raycaster = new THREE.Raycaster();
     const tempMat = new THREE.Matrix4();
@@ -29,16 +29,16 @@ export const Teleport = {
       return hits?.[0] || null;
     }
 
+    let triggerLatch = false;
+
     function update(){
       if(!APP_STATE.inXR || !APP_STATE.teleportEnabled){
         reticle.visible = false;
+        triggerLatch = false;
         return;
       }
 
-      const ctrlRight = renderer.xr.getController(1);
-      const ctrlLeft  = renderer.xr.getController(0);
-      const ctrl = ctrlRight || ctrlLeft;
-
+      const ctrl = getController?.();
       const hit = intersectFromController(ctrl);
       if(hit){
         reticle.visible = true;
@@ -50,18 +50,29 @@ export const Teleport = {
       const session = renderer.xr.getSession();
       if(!session) return;
 
+      // Right trigger teleports (button[0] usually trigger)
+      let trigPressed = false;
       for(const s of session.inputSources){
         if(!s || !s.gamepad) continue;
         if(s.handedness !== 'right') continue;
-
         const gp = s.gamepad;
         const trigger = gp.buttons?.[0];
-        if(trigger && trigger.pressed && hit){
-          // Move rig on XZ; keep Y (height)
-          playerRig.position.set(hit.point.x, playerRig.position.y, hit.point.z);
-          diag.log(`[teleport] -> (${hit.point.x.toFixed(2)}, ${hit.point.z.toFixed(2)})`);
-        }
+        trigPressed = !!(trigger && trigger.pressed);
       }
+
+      if(trigPressed && !triggerLatch && hit){
+        triggerLatch = true;
+
+        // Teleport rig to hit point on XZ, keep Y.
+        playerRig.position.set(hit.point.x, playerRig.position.y, hit.point.z);
+
+        // Hide reticle momentarily to avoid “stuck ring” feeling
+        reticle.visible = false;
+
+        diag.log(`[teleport] -> (${hit.point.x.toFixed(2)}, ${hit.point.z.toFixed(2)})`);
+      }
+
+      if(!trigPressed) triggerLatch = false;
     }
 
     return { setFloors, update, reset, onSessionStart, onSessionEnd };

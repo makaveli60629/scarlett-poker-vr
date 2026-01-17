@@ -11,7 +11,7 @@ export const Diag = {
 
     function log(msg){
       logs.push(`[${ts()}] ${msg}`);
-      if(logs.length > 100) logs.shift();
+      if(logs.length > 120) logs.shift();
       if(panel && panel.style.display === 'block'){
         panel.textContent = render();
       }
@@ -28,9 +28,7 @@ export const Diag = {
       }
     }
 
-    function setModuleTest(){
-      log('[status] MODULE TEST ✅');
-    }
+    function setModuleTest(){ log('[status] MODULE TEST ✅'); }
 
     function render(){
       const header =
@@ -44,21 +42,21 @@ inXR=${APP_STATE.inXR}
 touch=${APP_STATE.touchOn}
 build=${APP_STATE.build}
 
-XR BASELINE (no-confusion)
+XR BASELINE (v4.5)
 ----------------------------
 BUILD=${APP_STATE.build}
 inXR=${APP_STATE.inXR}
 teleportEnabled=${APP_STATE.teleportEnabled}
-touchOn=${APP_STATE.touchOn}
 floors=${(APP_STATE.floors?.length ?? 0)}
 
 [LEFT]  connected=${APP_STATE.left.connected} gamepad=${APP_STATE.left.gamepad}
 [RIGHT] connected=${APP_STATE.right.connected} gamepad=${APP_STATE.right.gamepad}
 
+FPS=${fps}
+
 Logs
 `;
-
-      return header + logs.slice(-40).join('\n');
+      return header + logs.slice(-50).join('\n');
     }
 
     return { log, tick, render, setModuleTest };

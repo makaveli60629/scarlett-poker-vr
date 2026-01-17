@@ -1,13 +1,10 @@
 // /js/modules/pokerAudio.module.js
-// SCARLETT MODULE — Poker Audio (Procedural) wrapper (FULL) v1.4 EXPORT-PROOF
-// - Works on GitHub Pages project sites
-// - Does NOT require gestureControl.js to have a named export
-// - Accepts: named export GestureControl OR default export
+// SCARLETT MODULE — Poker Audio (Procedural) wrapper (FULL) v1.5 NO-GESTURE-DEPENDENCY
+// - Zero dependency on gestureControl.js (prevents import failures)
+// - Exposes SCARLETT.audioTest + SCARLETT.sfx hooks
+// - Module Test will pass
 
 import { PokerAudio } from "./audioLogic.js";
-import GestureDefault, * as GestureNS from "./gestureControl.js";
-
-const GestureControl = GestureNS.GestureControl || GestureDefault || GestureNS.default;
 
 export default {
   id: "pokerAudio.module.js",
@@ -37,7 +34,7 @@ export default {
     window.addEventListener("pointerdown", unlockOnce, { passive: true });
     window.addEventListener("touchstart", unlockOnce, { passive: true });
 
-    // Panel / debug sound test
+    // Debug sound test
     window.SCARLETT.audioTest = async () => {
       PokerAudio.init({ volume: 0.55 });
       await PokerAudio.unlock?.();
@@ -49,17 +46,18 @@ export default {
 
       return { ok: true, module: "pokerAudio.module.js" };
     };
+
     window.__scarlettAudioTest = window.SCARLETT.audioTest;
 
-    // Hooks for game logic (gesture is optional)
+    // Game hooks (gesture module can call these)
     window.SCARLETT.sfx = {
       card: () => PokerAudio.playCardSlide?.(),
       chip: () => PokerAudio.playChipSingle?.(),
       knock: () => PokerAudio.playTableKnock?.(),
-      vacuum: () => GestureControl?.triggerPotVacuum?.()
+      vacuum: () => PokerAudio.playPotVacuum?.({ duration: 1.6 })
     };
 
-    write(`Poker Audio module ready ✅ (gesture=${!!GestureControl})`);
+    write("Poker Audio module ready ✅ (no gesture dependency)");
   },
 
   async test() {

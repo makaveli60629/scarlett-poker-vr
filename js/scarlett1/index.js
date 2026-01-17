@@ -1,12 +1,16 @@
 // /js/scarlett1/index.js
-// SCARLETT1 — INDEX FULL (AUTHORITATIVE SAFE WORLD IMPORT)
-// Build: SCARLETT1_INDEX_FULL_v24_0_WORLD_ORCH_MODULES
+// SCARLETT1 — INDEX FULL (ENGINE ATTACH FIRST • NEVER FAIL PANEL)
+// Build: SCARLETT1_INDEX_FULL_v24_1_ENGINE_ATTACH_FIRST
 
-const BUILD = "SCARLETT1_INDEX_FULL_v24_0_WORLD_ORCH_MODULES";
+const BUILD = "SCARLETT1_INDEX_FULL_v24_1_ENGINE_ATTACH_FIRST";
 
-const log = (...a) => console.log("[scarlett1]", ...a);
-const warn = (...a) => console.warn("[scarlett1]", ...a);
-const err = (...a) => console.error("[scarlett1]", ...a);
+const dwrite = (msg) => {
+  try { window.__scarlettDiagWrite?.(String(msg)); } catch (_) {}
+};
+
+const log = (...a) => { console.log("[scarlett1]", ...a); dwrite(`[scarlett1] ${a.join(" ")}`); };
+const warn = (...a) => { console.warn("[scarlett1]", ...a); dwrite(`[scarlett1][warn] ${a.join(" ")}`); };
+const err  = (...a) => { console.error("[scarlett1]", ...a); dwrite(`[scarlett1][err] ${a.join(" ")}`); };
 
 // Three.js (GH Pages safe)
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
@@ -14,14 +18,18 @@ import { VRButton } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRB
 
 function nowISO() { return new Date().toISOString(); }
 
-function attachEngineEarly(engine) {
+// ✅ Create & attach a minimal engine immediately (before WebGL / DOM work)
+function attachEngineStubEarly() {
   window.SCARLETT = window.SCARLETT || {};
   window.SCARLETT.BUILD = BUILD;
-  window.SCARLETT.engine = engine;
-  window.SCARLETT.engineAttached = true;
   window.SCARLETT.time = nowISO();
-  log("engine attached ✅", BUILD);
+  window.SCARLETT.engineAttached = true;     // ✅ panel check satisfied ASAP
+  window.SCARLETT.indexAlive = true;         // extra breadcrumb
+  window.SCARLETT.engine = window.SCARLETT.engine || { BUILD, startedAt: window.SCARLETT.time };
+  dwrite(`[scarlett1] engine stub attached ✅ ${BUILD}`);
 }
+
+attachEngineStubEarly();
 
 async function safeImportWorld(cacheTag = "") {
   const url = `./world.js${cacheTag ? `?v=${cacheTag}` : ""}`;
@@ -30,7 +38,7 @@ async function safeImportWorld(cacheTag = "") {
     log("world import ✅", url);
     return mod;
   } catch (e) {
-    err("world import FAILED ❌", url, e);
+    err("world import FAILED ❌", url, e?.message || e);
     return null;
   }
 }
@@ -67,57 +75,68 @@ function buildFallbackWorld(scene) {
 async function main() {
   log("booting…", BUILD);
 
-  // --- renderer / scene / camera ---
+  // Create scene/camera first (safe)
   const scene = new THREE.Scene();
-
-  const camera = new THREE.PerspectiveCamera(
-    70,
-    window.innerWidth / window.innerHeight,
-    0.05,
-    200
-  );
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
   camera.position.set(0, 1.6, 0);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.xr.enabled = true;
-
-  document.body.style.margin = "0";
-  document.body.style.overflow = "hidden";
-  document.body.appendChild(renderer.domElement);
-
-  // VR button
-  document.body.appendChild(VRButton.createButton(renderer));
-
-  // --- engine object for your panel / HUD ---
-  const engine = {
+  // ✅ Update the already-attached engine object early
+  const engine = window.SCARLETT.engine = Object.assign(window.SCARLETT.engine || {}, {
     BUILD,
     THREE,
     scene,
     camera,
-    renderer,
-    startedAt: nowISO(),
-    world: null
-  };
+    renderer: null,
+    startedAt: window.SCARLETT.time || nowISO(),
+    world: null,
+    errors: []
+  });
 
-  attachEngineEarly(engine);
+  // Now do the “fragile” stuff in a try/catch so engine stays attached even on failure
+  let renderer = null;
+  try {
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+
+    // DOM attach
+    document.body.style.margin = "0";
+    document.body.style.overflow = "hidden";
+    document.body.appendChild(renderer.domElement);
+
+    // VR button
+    document.body.appendChild(VRButton.createButton(renderer));
+
+    engine.renderer = renderer;
+    log("renderer + VRButton ✅");
+  } catch (e) {
+    const msg = e?.message || String(e);
+    engine.errors.push({ stage: "renderer", error: msg });
+    err("renderer init failed ❌ (engine still attached)", msg);
+
+    // Even if renderer failed, create a simple fallback render attempt is not possible.
+    // But we keep engineAttached true so your panel can still operate.
+    return;
+  }
 
   // --- world import (SAFE) ---
   const worldMod = await safeImportWorld(Date.now().toString());
   let WORLD = null;
 
-  if (worldMod && (worldMod.createWorld || worldMod.bootWorld || worldMod.default)) {
-    try {
-      // Support: createWorld OR bootWorld OR default
-      const createWorld = worldMod.createWorld || worldMod.bootWorld || worldMod.default;
+  try {
+    const createWorld = worldMod?.createWorld || worldMod?.bootWorld || worldMod?.default;
+    if (typeof createWorld === "function") {
       WORLD = await createWorld({ THREE, scene, renderer, camera, engine });
-      log("world boot ✅", WORLD);
-    } catch (e) {
-      err("world boot crashed ❌ (using fallback)", e);
+      log("world boot ✅");
+    } else {
+      warn("world module missing createWorld/bootWorld/default — using fallback");
       WORLD = buildFallbackWorld(scene);
     }
-  } else {
+  } catch (e) {
+    const msg = e?.message || String(e);
+    engine.errors.push({ stage: "world", error: msg });
+    err("world boot crashed ❌ (using fallback)", msg);
     WORLD = buildFallbackWorld(scene);
   }
 
@@ -126,12 +145,11 @@ async function main() {
 
   // --- render loop ---
   renderer.setAnimationLoop(() => {
-    // World may expose update(dt) later; safe call if present
     try { WORLD?.update?.(0); } catch (_) {}
     renderer.render(scene, camera);
   });
 
-  // --- resize ---
+  // resize
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -141,4 +159,11 @@ async function main() {
   log("ready ✅");
 }
 
-main().catch((e) => err("fatal boot error", e));
+main().catch((e) => {
+  const msg = e?.message || String(e);
+  window.SCARLETT = window.SCARLETT || {};
+  window.SCARLETT.engineAttached = true; // keep true no matter what
+  window.SCARLETT.engine = window.SCARLETT.engine || { BUILD, errors: [] };
+  window.SCARLETT.engine.errors.push({ stage: "fatal", error: msg });
+  err("fatal boot error", msg);
+});

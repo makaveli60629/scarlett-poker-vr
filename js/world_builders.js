@@ -1,183 +1,144 @@
-// /js/world_builders.js — Scarlett World Builders (FULL) v1.3
-// ✅ Bright readable palette (no gray void)
-// ✅ SAFE spawn room (open) + hallway into lobby ring
-// ✅ Lobby ring + pit + balcony + room pads
-// ✅ safeUnstuck() returns a guaranteed open location
+import * as THREE from "three";
 
-export const WorldBuilders = (() => {
+function mat(color, rough=0.9, metal=0.05, emissive=null, ei=0) {
+  return new THREE.MeshStandardMaterial({
+    color,
+    roughness: rough,
+    metalness: metal,
+    emissive: emissive ? new THREE.Color(emissive) : new THREE.Color(0x000000),
+    emissiveIntensity: ei
+  });
+}
 
-  function mat(THREE, color, rough=0.9, metal=0.05, emissive=null, ei=0) {
-    return new THREE.MeshStandardMaterial({
-      color,
-      roughness: rough,
-      metalness: metal,
-      emissive: emissive ? new THREE.Color(emissive) : new THREE.Color(0x000000),
-      emissiveIntensity: ei
-    });
-  }
-
-  function lights(ctx) {
-    const { THREE, scene, root, manifest } = ctx;
-    const safe = !!manifest.get("flags.safeMode");
-
-    const hemi = new THREE.HemisphereLight(0xeaf6ff, 0x101428, safe ? 1.0 : 1.25);
+export const WorldBuilders = {
+  lights(ctx) {
+    const { scene, root } = ctx;
+    const hemi = new THREE.HemisphereLight(0xeaf6ff, 0x101428, 1.15);
     hemi.position.set(0, 40, 0);
     scene.add(hemi);
 
-    const sun = new THREE.DirectionalLight(0xffffff, safe ? 0.85 : 1.2);
+    const sun = new THREE.DirectionalLight(0xffffff, 1.1);
     sun.position.set(25, 45, 25);
     scene.add(sun);
 
-    const fill = new THREE.PointLight(0x66ccff, safe ? 0.5 : 0.85, 80, 2);
+    const fill = new THREE.PointLight(0x66ccff, 0.8, 90, 2);
     fill.position.set(0, 6.0, 8);
-    root.add(fill);
+    (root || scene).add(fill);
 
-    const warm = new THREE.PointLight(0xffd36b, safe ? 0.35 : 0.55, 60, 2);
+    const warm = new THREE.PointLight(0xffd36b, 0.55, 70, 2);
     warm.position.set(-6, 4.5, 0);
-    root.add(warm);
-  }
+    (root || scene).add(warm);
+  },
 
-  function build(ctx) {
-    const { THREE, root } = ctx;
+  build(ctx) {
+    const { scene } = ctx;
+    const root = new THREE.Group();
+    root.name = "SCARLETT_ROOT";
+    scene.add(root);
+    ctx.root = root;
 
-    // --- Ground reference plane (helps vision) ---
+    // Ground
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(220, 220),
-      mat(THREE, 0x0b1220, 0.95, 0.02, 0x000000, 0)
+      new THREE.PlaneGeometry(240, 240),
+      mat(0x0b1220, 0.95, 0.02)
     );
     ground.rotation.x = -Math.PI/2;
     ground.position.y = 0;
     ground.name = "GROUND";
+    ground.userData.isFloor = true;
     root.add(ground);
 
-    // --- SPAWN ROOM (open, safe, no ceiling collision) ---
-    const spawnRoom = new THREE.Group();
-    spawnRoom.name = "SPAWN_ROOM";
-    spawnRoom.position.set(0, 0, 40);
-    root.add(spawnRoom);
-
-    const spawnFloor = new THREE.Mesh(
-      new THREE.CircleGeometry(7, 64),
-      mat(THREE, 0x111a28, 0.95, 0.04, 0x223cff, 0.10)
-    );
-    spawnFloor.rotation.x = -Math.PI/2;
-    spawnFloor.position.y = 0.01;
-    spawnRoom.add(spawnFloor);
-
-    // Spawn pad marker
+    // Spawn pad (near lobby entrance)
     const spawnPad = new THREE.Mesh(
-      new THREE.RingGeometry(0.45, 0.62, 48),
-      new THREE.MeshBasicMaterial({ color: 0x66ccff, transparent:true, opacity:0.8, side:THREE.DoubleSide })
+      new THREE.RingGeometry(0.45, 0.65, 48),
+      new THREE.MeshBasicMaterial({ color: 0x66ccff, transparent:true, opacity:0.85, side:THREE.DoubleSide })
     );
     spawnPad.rotation.x = -Math.PI/2;
-    spawnPad.position.y = 0.03;
-    spawnRoom.add(spawnPad);
+    spawnPad.position.set(0, 0.03, 3);
+    root.add(spawnPad);
 
-    // “Portal” frame toward lobby
-    const portal = new THREE.Mesh(
-      new THREE.TorusGeometry(1.1, 0.08, 12, 48),
-      mat(THREE, 0x66ccff, 0.35, 0.45, 0x66ccff, 0.55)
-    );
-    portal.position.set(0, 1.6, -4.6);
-    spawnRoom.add(portal);
-
-    // Hallway to lobby
-    const hall = new THREE.Mesh(
-      new THREE.BoxGeometry(6.0, 2.8, 22),
-      mat(THREE, 0x121c2c, 0.9, 0.06, 0x000000, 0)
-    );
-    hall.position.set(0, 1.4, 29);
-    root.add(hall);
-
-    const hallFloor = new THREE.Mesh(
-      new THREE.BoxGeometry(5.6, 0.06, 21.6),
-      mat(THREE, 0x10192a, 0.95, 0.02, 0x223cff, 0.08)
-    );
-    hallFloor.position.set(0, 0.03, 29);
-    root.add(hallFloor);
-
-    // --- LOBBY RING ---
+    // Lobby ring shell
     const shell = new THREE.Mesh(
       new THREE.CylinderGeometry(22, 22, 10, 72, 1, true),
-      mat(THREE, 0x0b1220, 0.9, 0.08, 0x223cff, 0.06)
+      mat(0x0b1220, 0.9, 0.08, 0x223cff, 0.06)
     );
     shell.material.side = THREE.DoubleSide;
     shell.material.transparent = true;
     shell.material.opacity = 0.55;
-    shell.position.set(0, 4.2, 0);
+    shell.position.set(0, 4.2, -8);
     root.add(shell);
 
     const lobbyFloor = new THREE.Mesh(
       new THREE.CylinderGeometry(18, 18, 0.35, 72),
-      mat(THREE, 0x121c2c, 0.95, 0.05, 0x000000, 0)
+      mat(0x121c2c, 0.95, 0.05)
     );
-    lobbyFloor.position.set(0, -0.175, 0);
+    lobbyFloor.position.set(0, -0.175, -8);
     root.add(lobbyFloor);
 
-    // Ceiling ring glow
+    // Ceiling glow ring
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(16.5, 0.14, 12, 96),
-      mat(THREE, 0x66ccff, 0.3, 0.6, 0x66ccff, 0.45)
+      mat(0x66ccff, 0.3, 0.6, 0x66ccff, 0.45)
     );
     ring.rotation.x = Math.PI/2;
-    ring.position.set(0, 8.8, 0);
+    ring.position.set(0, 8.8, -8);
     root.add(ring);
 
-    // --- PIT (divot) ---
-    const pitRadius = 7.1;
-    const pitDepth = 3.0;
-    const pitFloorY = -pitDepth;
-
-    const pitFloor = new THREE.Mesh(
-      new THREE.CylinderGeometry(pitRadius, pitRadius, 0.35, 64),
-      mat(THREE, 0x0c1220, 0.95, 0.04, 0x000000, 0)
+    // Poker pad
+    const pokerPad = new THREE.Mesh(
+      new THREE.CircleGeometry(4.2, 64),
+      mat(0x0e7c3a, 0.95, 0.05, 0x0e7c3a, 0.10)
     );
-    pitFloor.position.set(0, pitFloorY - 0.175, 0);
-    root.add(pitFloor);
+    pokerPad.rotation.x = -Math.PI/2;
+    pokerPad.position.set(0, 0.02, -14.2);
+    pokerPad.name = "POKER_PAD";
+    root.add(pokerPad);
 
-    const pitWall = new THREE.Mesh(
-      new THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 64, 1, true),
-      mat(THREE, 0x0a101e, 0.95, 0.04, 0x000000, 0)
+    // Store zone platform
+    const storePad = new THREE.Mesh(
+      new THREE.RoundedBoxGeometry(6.6, 0.22, 5.0, 8, 0.25),
+      mat(0x10192a, 0.95, 0.05, 0x223cff, 0.08)
     );
-    pitWall.material.side = THREE.DoubleSide;
-    pitWall.position.set(0, pitFloorY / 2, 0);
-    root.add(pitWall);
+    storePad.position.set(-12.5, 0.11, -8);
+    storePad.name = "STORE_PAD";
+    root.add(storePad);
 
-    // ramp entrance
-    const ramp = new THREE.Mesh(
-      new THREE.BoxGeometry(2.2, pitDepth, 8.4),
-      mat(THREE, 0x141b28, 0.95, 0.08, 0x000000, 0)
+    // Simple kiosk
+    const kiosk = new THREE.Mesh(
+      new THREE.BoxGeometry(1.4, 2.0, 0.6),
+      mat(0x0f1624, 0.75, 0.18, 0x66ccff, 0.18)
     );
-    ramp.position.set(0, pitFloorY / 2, pitRadius + 8.4 * 0.32);
-    ramp.rotation.x = -Math.atan2(pitDepth, 8.4);
-    root.add(ramp);
+    kiosk.position.set(-12.5, 1.0, -8);
+    root.add(kiosk);
 
-    // --- Balcony (spectate) ---
-    const balcony = new THREE.Mesh(
-      new THREE.RingGeometry(14.2, 16.8, 96),
-      mat(THREE, 0x10192a, 0.95, 0.05, 0x223cff, 0.05)
+    const kioskScreen = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.0, 0.7),
+      new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent:true, opacity:0.35 })
     );
-    balcony.rotation.x = -Math.PI/2;
-    balcony.position.y = 3.0;
-    root.add(balcony);
+    kioskScreen.position.set(-12.5, 1.35, -7.65);
+    root.add(kioskScreen);
 
-    // --- Anchors (SAFE) ---
-    const anchors = {
-      spawn:    { pos: new THREE.Vector3(0, 0, 40),  yaw: Math.PI },
-      lobby:    { pos: new THREE.Vector3(0, 0, 13.5), yaw: Math.PI },
-      poker:    { pos: new THREE.Vector3(0, 0, 6.0),  yaw: Math.PI },   // edge of pit entrance
-      store:    { pos: new THREE.Vector3(-26, 0, 0),  yaw: Math.PI/2 },
-      scorpion: { pos: new THREE.Vector3(26, 0, 0),   yaw: -Math.PI/2 },
-      spectate: { pos: new THREE.Vector3(0, 3.0, -14),yaw: 0 }
+    // Fountain (visual anchor)
+    const bowl = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.0, 1.2, 0.35, 48),
+      mat(0x0f1624, 0.75, 0.2, 0x223cff, 0.08)
+    );
+    bowl.position.set(0, 0.18, -8);
+    root.add(bowl);
+
+    const water = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.86, 1.02, 0.12, 48),
+      new THREE.MeshStandardMaterial({ color: 0x2aa8ff, transparent:true, opacity:0.45, roughness:0.25, metalness:0.05, emissive:new THREE.Color(0x2aa8ff), emissiveIntensity:0.08 })
+    );
+    water.position.set(0, 0.26, -8);
+    root.add(water);
+
+    ctx.anchors = {
+      lobby:    { x: 0, y: 0, z: 3 },
+      poker:    { x: 0, y: 0, z: -14.2 },
+      store:    { x: -12.5, y: 0, z: -6.5 },
     };
 
-    function safeUnstuck() {
-      // always in spawn room center
-      return anchors.spawn.pos.clone();
-    }
-
-    return { anchors, safeUnstuck, ground };
+    return { root, ground, anchors: ctx.anchors };
   }
-
-  return { lights, build };
-})();
+};

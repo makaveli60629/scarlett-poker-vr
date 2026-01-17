@@ -1,8 +1,7 @@
 const hud = document.getElementById("hud");
 
-const add = (m, cls="ok") => {
+const add = (m) => {
   const d = document.createElement("div");
-  d.className = cls;
   d.textContent = m;
   hud.appendChild(d);
   hud.scrollTop = hud.scrollHeight;
@@ -21,15 +20,15 @@ export const Boot = {
   start: async () => {
     hud.textContent = "";
     const v = Date.now();
-    add(`[BOOT] v=${v}`, "ok");
+    add(`[BOOT] v=${v}`);
 
     const prefix = detectBasePrefix();
     const absJS  = prefix + "js/";
     const absRoot = prefix;
     const basePaths = [absJS, absRoot, "./js/", "./"];
 
-    add(`[PATH] prefix=${prefix}`, "ok");
-    add(`[PATH] basePaths=${JSON.stringify(basePaths)}`, "ok");
+    add(`[PATH] prefix=${prefix}`);
+    add(`[PATH] basePaths=${JSON.stringify(basePaths)}`);
 
     const tryImport = async (name, rel) => {
       for (const b of basePaths) {
@@ -37,13 +36,13 @@ export const Boot = {
         try {
           add(`[Import] ${name}: ${p}`);
           const m = await import(p + `?v=${v}`);
-          add(`[OK] ${name}`, "ok");
+          add(`[OK] ${name}`);
           return m;
         } catch (e) {
-          add(`[TryFail] ${name}: ${p} → ${e.message}`, "warn");
+          add(`[TryFail] ${name}: ${p} → ${e.message}`);
         }
       }
-      add(`[ERROR] ${name}: could not load`, "err");
+      add(`[ERROR] ${name}: could not load`);
       return null;
     };
 
@@ -56,19 +55,21 @@ export const Boot = {
       controls: await tryImport("controls", "controls.js"),
       teleport: await tryImport("teleport", "teleport.js"),
       interactions: await tryImport("interactions", "interactions.js"),
+      bots: await tryImport("bots", "bots.js"),
+      apparel: await tryImport("apparel", "avatar_apparel.js"),
     };
 
     if (!mods.main?.start) {
-      add("❌ main.start missing", "err");
+      add("❌ main.start missing");
       return;
     }
 
-    add("▶ main.start()", "ok");
+    add("▶ main.start()");
     try {
       await mods.main.start({ modules: mods, log: add });
-      add("✅ main.start() returned", "ok");
+      add("✅ main.start() returned");
     } catch (e) {
-      add(`[FATAL] main.start crashed: ${e.message}`, "err");
+      add(`[FATAL] main.start crashed: ${e.message}`);
       console.error(e);
     }
   }

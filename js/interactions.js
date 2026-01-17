@@ -1,1 +1,1 @@
-export function setup(){ return true; }
+export async function setup(){ /* reserved */ }

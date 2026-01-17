@@ -1,30 +1,13 @@
 // /js/scarlett1/world.js
-// SCARLETT1_WORLD_FULL_v4_13_DO_ALL_AVATAR_TABLE_GAMEPLAY_LOBBY_MENUUI
-// - Keeps locked core rig/laser/teleport/snap/knock
-// - Loads 6 modules: table, avatars, avatarUI, gameplay, lobbyStations, menuUI
+// SCARLETT WORLD — Orchestrator (LOCKED) v4.14_23MODULES
+// Loads 23-module suite safely + provides __scarlettRunModuleTest
 
-import GestureControl from "../modules/gestureControl.js";
+export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG }) {
+  const log = (s) => { try { window.__scarlettDiagWrite?.(String(s)); } catch (_) {} };
 
-export async function bootWorld({ THREE, scene, renderer, camera }) {
-  const dwrite = (s) => { try { window.__scarlettDiagWrite?.(String(s)); } catch (_) {} };
-  const log = (...a) => { console.log("[world]", ...a); dwrite(`[world] ${a.join(" ")}`); };
+  log('[world] bootWorld… SCARLETT1_WORLD_FULL_v4_14_23MODULES');
 
-  log("bootWorld… SCARLETT1_WORLD_FULL_v4_13_DO_ALL_AVATAR_TABLE_GAMEPLAY_LOBBY_MENUUI");
-
-  // LIGHTING
-  scene.background = new THREE.Color(0x0b0e14);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x303050, 1.2));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-  sun.position.set(6, 10, 4);
-  scene.add(sun);
-
-  // RIG
-  const rig = new THREE.Group();
-  rig.name = "PLAYER_RIG";
-  scene.add(rig);
-  rig.add(camera);
-
-  // ANCHORS
+  // anchors
   const anchors = {
     root: new THREE.Group(),
     room: new THREE.Group(),
@@ -34,226 +17,114 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
     ui: new THREE.Group(),
     debug: new THREE.Group(),
   };
-  anchors.root.name = "ANCHORS_ROOT";
-  anchors.room.name = "ANCHOR_ROOM";
-  anchors.stage.name = "ANCHOR_STAGE";
-  anchors.table.name = "ANCHOR_TABLE";
-  anchors.avatars.name = "ANCHOR_AVATARS";
-  anchors.ui.name = "ANCHOR_UI";
-  anchors.debug.name = "ANCHOR_DEBUG";
+  anchors.root.name = 'ANCHORS_ROOT';
+  Object.entries(anchors).forEach(([k,g]) => g.name = `ANCHOR_${k.toUpperCase()}`);
 
   scene.add(anchors.root);
   anchors.root.add(anchors.room, anchors.stage, anchors.ui, anchors.debug);
   anchors.stage.add(anchors.table, anchors.avatars);
 
-  // FLOOR + GRID
+  // floor
   const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(300, 300),
-    new THREE.MeshStandardMaterial({ color: 0x1a1f2b, roughness: 1 })
+    new THREE.PlaneGeometry(500, 500),
+    new THREE.MeshStandardMaterial({ color: 0x14171c, roughness: 1, metalness: 0 })
   );
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = 0;
-  floor.name = "FLOOR";
-  anchors.room.add(floor);
+  floor.name = 'SCARLETT_FLOOR';
+  scene.add(floor);
 
-  const grid = new THREE.GridHelper(300, 300, 0x3a3f55, 0x23283a);
-  grid.position.y = 0.01;
-  anchors.room.add(grid);
-
-  // LOBBY SHELL
-  const lobbyWall = new THREE.Mesh(
-    new THREE.CylinderGeometry(18, 18, 8, 96, 1, true),
-    new THREE.MeshStandardMaterial({ color: 0x0f1420, roughness: 0.9, side: THREE.DoubleSide })
+  // room shell
+  const wall = new THREE.Mesh(
+    new THREE.CylinderGeometry(28, 28, 10, 96, 1, true),
+    new THREE.MeshStandardMaterial({ color: 0x0c0f14, roughness: 0.95, side: THREE.DoubleSide })
   );
-  lobbyWall.position.y = 4;
-  anchors.room.add(lobbyWall);
+  wall.position.y = 5;
+  anchors.room.add(wall);
 
-  // XR CONTROLLERS (parented to rig so they move with you)
-  const rightRay  = renderer.xr.getController(1);
-  const leftRay   = renderer.xr.getController(0);
-  const rightGrip = renderer.xr.getControllerGrip(1);
-  const leftGrip  = renderer.xr.getControllerGrip(0);
+  // Provide engine references for modules
+  window.SCARLETT = window.SCARLETT || {};
+  window.SCARLETT.engine = window.SCARLETT.engine || {};
+  window.SCARLETT.engine.rig = rig;
 
-  rightRay.name = "RIGHT_RAY"; leftRay.name = "LEFT_RAY";
-  rightGrip.name = "RIGHT_GRIP"; leftGrip.name = "LEFT_GRIP";
+  // Controller nodes (if available)
+  try {
+    const rightGrip = renderer.xr.getControllerGrip(0);
+    const leftGrip  = renderer.xr.getControllerGrip(1);
+    rightGrip.name = 'RIGHT_GRIP';
+    leftGrip.name  = 'LEFT_GRIP';
+    rig.add(rightGrip);
+    rig.add(leftGrip);
+    window.SCARLETT.engine.rightGrip = rightGrip;
+    window.SCARLETT.engine.leftGrip = leftGrip;
 
-  rig.add(rightRay, leftRay, rightGrip, leftGrip);
+    const rightRay = renderer.xr.getController(0);
+    rightRay.name = 'RIGHT_RAY';
+    rig.add(rightRay);
+    window.SCARLETT.engine.rightRay = rightRay;
+  } catch (_) {}
 
-  // Right-hand visual
-  const handBox = new THREE.Mesh(
-    new THREE.BoxGeometry(0.06, 0.02, 0.10),
-    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 })
-  );
-  handBox.position.set(0, -0.02, -0.05);
-  handBox.name = "RIGHT_HAND_BOX";
-  rightGrip.add(handBox);
-
-  // LASER + RETICLE (laser on rightRay)
-  const raycaster = new THREE.Raycaster();
-  const tmpO = new THREE.Vector3();
-  const tmpD = new THREE.Vector3();
-  const tmpQ = new THREE.Quaternion();
-  const tmpHit = new THREE.Vector3();
-
-  const laserGeom = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, 0, -6)
-  ]);
-  const laser = new THREE.Line(laserGeom, new THREE.LineBasicMaterial({ color: 0xff3355 }));
-  laser.name = "RIGHT_LASER";
-  rightRay.add(laser);
-
-  const reticle = new THREE.Mesh(
-    new THREE.RingGeometry(0.06, 0.085, 32),
-    new THREE.MeshBasicMaterial({ color: 0xff3355, side: THREE.DoubleSide })
-  );
-  reticle.rotation.x = -Math.PI / 2;
-  reticle.visible = false;
-  reticle.name = "TELEPORT_RETICLE";
-  anchors.debug.add(reticle);
-
-  const hitDot = new THREE.Mesh(
-    new THREE.SphereGeometry(0.02, 16, 12),
-    new THREE.MeshBasicMaterial({ color: 0xffffff })
-  );
-  hitDot.visible = false;
-  hitDot.name = "LASER_HIT_DOT";
-  anchors.debug.add(hitDot);
-
-  function setLaserLength(d) {
-    const a = laser.geometry.attributes.position.array;
-    a[5] = -d;
-    laser.geometry.attributes.position.needsUpdate = true;
-  }
-
-  function updateLaser() {
-    if (!renderer.xr.isPresenting) {
-      reticle.visible = false; hitDot.visible = false; laser.visible = false;
-      return null;
-    }
-    laser.visible = true;
-
-    rightRay.getWorldPosition(tmpO);
-    rightRay.getWorldQuaternion(tmpQ);
-    tmpD.set(0, 0, -1).applyQuaternion(tmpQ).normalize();
-
-    raycaster.set(tmpO, tmpD);
-    raycaster.far = 60;
-
-    const hits = raycaster.intersectObject(floor, false);
-    if (hits.length) {
-      tmpHit.copy(hits[0].point);
-      reticle.position.set(tmpHit.x, 0.02, tmpHit.z);
-      hitDot.position.set(tmpHit.x, 0.03, tmpHit.z);
-      reticle.visible = true;
-      hitDot.visible = true;
-      setLaserLength(tmpO.distanceTo(tmpHit));
-      return tmpHit.clone();
-    }
-
-    reticle.visible = false;
-    hitDot.visible = false;
-    setLaserLength(6);
-    return null;
-  }
-
-  // NAV
-  const move = { speed: 2.2, strafe: 2.0 };
-  const snap = { lock: false };
-  const tele = { lock: false };
-
-  function getGamepad(session, handedness) {
-    for (const src of session.inputSources) {
-      if (src?.handedness === handedness && src?.gamepad) return src.gamepad;
-    }
-    return null;
-  }
-
-  function snapTurn(x) {
-    if (snap.lock) return;
-    snap.lock = true;
-    rig.rotation.y += (x > 0 ? -1 : 1) * THREE.MathUtils.degToRad(45);
-    setTimeout(() => (snap.lock = false), 250);
-  }
-
-  function teleportTo(p) {
-    if (!p) return;
-    const head = new THREE.Vector3();
-    camera.getWorldPosition(head);
-    rig.position.x += p.x - head.x;
-    rig.position.z += p.z - head.z;
-  }
-
-  // TABLE DATA (6-max)
-  const tableData = {
-    center: new THREE.Vector3(0, 0.78, -2),
-    radius: 1.2,
-    railRadius: 1.45,
-    seats: 6,
-    dealerIndex: 0,
-    activeSeat: 0
-  };
-
-  function syncGestureToTable() {
-    GestureControl.tableHeight = tableData.center.y;
-    GestureControl.tableCenter = { x: tableData.center.x, z: tableData.center.z };
-    GestureControl.tableRadius = tableData.railRadius;
-    window.SCARLETT = window.SCARLETT || {};
-    window.SCARLETT.GestureControl = GestureControl;
-  }
-  syncGestureToTable();
-
-  // MODULE ORCHESTRATOR
+  // ---- module orchestrator ----
   const MODULE_MANIFEST = [
-    "../modules/pokerTable.module.js",
-    "../modules/avatars.module.js",
-    "../modules/avatarUI.module.js",
-    "../modules/pokerGameplay.module.js",
-    "../modules/lobbyStations.module.js",
-    "../modules/menuUI.module.js",
- "../modules/interactionHands.module.js",
-  "../modules/tableArt.module.js",
-  "../modules/localPlayer.module.js",
-  "../modules/slotsNet.module.js",
+    '../modules/environmentLighting.module.js',
+    '../modules/pokerTable.module.js',
+    '../modules/tableArt.module.js',
+    '../modules/lobbyStations.module.js',
+
+    '../modules/audioLogic.js',
+    '../modules/gestureControl.js',
+    '../modules/pokerAudio.module.js',
+
+    '../modules/avatars.module.js',
+    '../modules/avatarUI.module.js',
+    '../modules/avatarAnimation.module.js',
+    '../modules/avatarCustomization.module.js',
+
+    '../modules/localPlayer.module.js',
+    '../modules/interactionHands.module.js',
+
+    '../modules/cards.module.js',
+    '../modules/chips.module.js',
+    '../modules/rulesTexasHoldem.module.js',
+    '../modules/pokerGameplay.module.js',
+
+    '../modules/menuUI.module.js',
+    '../modules/hud.module.js',
+    '../modules/settings.module.js',
+
+    '../modules/slotsNet.module.js',
+    '../modules/netSync.module.js',
+    '../modules/lobbyMatchmaking.module.js'
   ];
-  
 
   const modules = [];
   const status = {};
 
+  const getId = (p) => p.replace(/^.*\//, '').replace(/\?.*$/, '');
   const setStatus = (id, patch) => {
-    status[id] = Object.assign(status[id] || { ok: false, stage: "new", error: "" }, patch);
+    status[id] = Object.assign(status[id] || { ok: false, stage: 'new', error: '' }, patch);
   };
 
   async function safeImport(path) {
-    const url = `${path}${path.includes("?") ? "&" : "?"}v=${Date.now()}`;
+    const url = `${path}${path.includes('?') ? '&' : '?'}v=${Date.now()}`;
     return import(url);
   }
 
   async function loadModule(path) {
-    const id = path.split("/").pop();
-    setStatus(id, { stage: "importing", ok: false, error: "" });
+    const id = getId(path);
+    setStatus(id, { stage: 'importing', ok: false, error: '' });
     try {
       const m = await safeImport(path);
       const api = m?.default || m;
       const rec = { id: api.id || id, path, api };
       modules.push(rec);
-      setStatus(rec.id, { stage: "ready", ok: true });
-
-      if (typeof api.init === "function") {
-        await api.init({
-          THREE, scene, renderer, camera,
-          rig, anchors,
-          floor,
-          rightRay, leftRay, rightGrip, leftGrip,
-          tableData,
-          syncGestureToTable,
-          log
-        });
+      setStatus(rec.id, { stage: 'ready', ok: true });
+      if (typeof api.init === 'function') {
+        await api.init({ THREE, scene, rig, camera, renderer, anchors, HUD, DIAG, log });
       }
       return rec;
     } catch (e) {
-      setStatus(id, { stage: "failed", ok: false, error: e?.message || String(e) });
+      setStatus(id, { stage: 'failed', ok: false, error: e?.message || String(e) });
       return null;
     }
   }
@@ -261,7 +132,7 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
   async function runAllModuleTests() {
     const report = {
       ok: true,
-      build: "SCARLETT1_WORLD_FULL_v4_13_DO_ALL_AVATAR_TABLE_GAMEPLAY_LOBBY_MENUUI",
+      build: 'SCARLETT1_WORLD_FULL_v4_14_23MODULES',
       time: new Date().toISOString(),
       manifest: MODULE_MANIFEST.slice(),
       modules: []
@@ -269,9 +140,9 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
 
     for (const rec of modules) {
       const st = status[rec.id] || {};
-      let test = { ok: true, note: "no test()" };
+      let test = { ok: true, note: 'no test()' };
       try {
-        if (typeof rec.api.test === "function") test = await rec.api.test({ THREE, scene, rig, anchors, tableData });
+        if (typeof rec.api.test === 'function') test = await rec.api.test({ THREE, scene, rig, camera, renderer, anchors, HUD, DIAG });
       } catch (e) {
         test = { ok: false, error: e?.message || String(e) };
       }
@@ -283,79 +154,18 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
     return report;
   }
 
-  window.__scarlettWorld = { anchors, modules, status, manifest: MODULE_MANIFEST, tableData };
+  window.__scarlettWorld = { anchors, modules, status, manifest: MODULE_MANIFEST };
   window.__scarlettRunModuleTest = runAllModuleTests;
 
-  log(`world: loading modules (${MODULE_MANIFEST.length})`);
+  log(`[world] world: loading modules (${MODULE_MANIFEST.length})`);
   for (const p of MODULE_MANIFEST) await loadModule(p);
-  log("world: modules loaded ✅");
-
-  // KNOCK velocity tracking
-  const lastGripPos = new THREE.Vector3();
-  let lastGripInit = false;
+  log('[world] world: modules loaded ✅');
 
   return {
-    rig,
-    tableHeight: tableData.center.y,
     update(dt) {
-      const session = renderer.xr.getSession?.();
-      if (!session) return;
-
-      const hitPoint = updateLaser();
-
-      // Right locomotion
-      const gpR = getGamepad(session, "right");
-      if (gpR) {
-        const axX = gpR.axes?.[2] ?? 0;
-        const axY = gpR.axes?.[3] ?? 0;
-        const trigger = gpR.buttons?.[0]?.value ?? 0;
-        const gripBtn = gpR.buttons?.[1]?.value ?? 0;
-
-        if (Math.abs(axX) > 0.6 && !snap.lock) snapTurn(axX);
-
-        const fwd = new THREE.Vector3();
-        camera.getWorldDirection(fwd);
-        fwd.y = 0; fwd.normalize();
-        const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0,1,0)).normalize();
-
-        rig.position.addScaledVector(fwd, -axY * move.speed * dt);
-        rig.position.addScaledVector(right, axX * move.strafe * dt);
-
-        const wantsTeleport = (trigger > 0.75) || (gripBtn > 0.75);
-        if (!wantsTeleport) tele.lock = false;
-
-        if (wantsTeleport && !tele.lock && hitPoint) {
-          tele.lock = true;
-          teleportTo(hitPoint);
-          setTimeout(() => (tele.lock = false), 180);
-        }
-      }
-
-      // Knock gesture (table gated inside GestureControl)
-      const gripWorld = new THREE.Vector3();
-      rightGrip.getWorldPosition(gripWorld);
-
-      if (!lastGripInit) {
-        lastGripPos.copy(gripWorld);
-        lastGripInit = true;
-      } else {
-        const vy = (gripWorld.y - lastGripPos.y) / Math.max(dt, 0.016);
-        lastGripPos.copy(gripWorld);
-
-        GestureControl.update({
-          handedness: "right",
-          position: { x: gripWorld.x, y: gripWorld.y, z: gripWorld.z },
-          velocity: { x: 0, y: vy, z: 0 }
-        });
-      }
-
-      // Module updates
       for (const rec of modules) {
-        try { rec.api.update?.(dt, { THREE, scene, renderer, camera, rig, anchors, tableData, rightRay, leftRay, rightGrip, leftGrip, floor }); } catch (_) {}
+        try { rec.api.update?.(dt, { THREE, scene, rig, camera, renderer, anchors, HUD, DIAG }); } catch (_) {}
       }
     }
   };
 }
-
-export async function createWorld(ctx) { return bootWorld(ctx); }
-export default createWorld;

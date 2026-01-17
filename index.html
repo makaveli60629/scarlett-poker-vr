@@ -1,67 +1,72 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Scarlett Poker VR — MASTER v7 (Android + Apparel + Bots)</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-    }
-  }
-  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <title>ScarlettVR Poker — Full Working</title>
   <style>
-    html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:ui-monospace,monospace}
-    #hud{
-      position:fixed;left:8px;top:8px;right:8px;max-height:46vh;overflow:auto;
-      color:#9f9;font:12px/1.25 ui-monospace,monospace;background:rgba(0,0,0,.62);
-      padding:10px;border-radius:10px;z-index:9999;white-space:pre-wrap;pointer-events:auto
-    }
-    /* Store panel (desktop + android) */
-    #store-container{
-      position:fixed;top:10%;right:16px;width:260px;
-      background:rgba(0,20,30,0.85);border:2px solid #00ffff;box-shadow:0 0 15px #00ffff;
-      color:#00ffff;padding:16px;border-radius:14px;z-index:9998;display:none
-    }
-    #store-container.on{display:block}
-    .store-header{font-weight:800;border-bottom:1px solid #00ffff;margin-bottom:10px;padding-bottom:6px}
-    .item-card{background:rgba(0,255,255,0.08);padding:10px;margin-top:10px;border-radius:10px}
-    .equip-btn{
-      width:100%;background:#00ffff;color:#000;border:none;border-radius:10px;
-      padding:10px;font-weight:900;cursor:pointer;transition:.2s
-    }
-    .equip-btn:hover{background:#fff;box-shadow:0 0 10px #fff}
-    .tiny{opacity:.9;font-size:12px}
-  
-    #hudToggle{
-      position:fixed;top:10px;right:10px;z-index:10000;
-      padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.22);
-      background:rgba(255,210,120,.12);color:#fff;font:700 12px system-ui;cursor:pointer;
-      user-select:none
-    }
+    :root{ --bg:#0b0f14; --fg:#e9eef5; --muted:#98a6b7; --accent:#ff2f6d; --good:#43f3a6; --warn:#ffd166; --bad:#ff5a5f; }
+    html,body{ margin:0; height:100%; background:var(--bg); color:var(--fg); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; overflow:hidden; }
+    #app{ position:fixed; inset:0; }
+    canvas{ display:block; width:100%; height:100%; }
 
+    /* HUD */
+    #hud{ position:fixed; left:12px; top:12px; right:12px; display:flex; gap:10px; align-items:flex-start; pointer-events:none; z-index:9999; }
+    #hud .panel{ pointer-events:auto; background:rgba(10,14,20,0.72); border:1px solid rgba(255,255,255,0.10); backdrop-filter: blur(8px);
+      border-radius:14px; box-shadow:0 10px 30px rgba(0,0,0,0.45); }
+    #hud .controls{ padding:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .hudBtn{ border:1px solid rgba(255,255,255,0.16); background:rgba(255,255,255,0.06); color:var(--fg);
+      border-radius:12px; padding:10px 12px; font-weight:700; letter-spacing:0.2px; cursor:pointer; }
+    .hudBtn:active{ transform: translateY(1px); }
+    .hudBtn.primary{ border-color: rgba(255,47,109,0.55); background:rgba(255,47,109,0.16); }
+    .hudBtn.good{ border-color: rgba(67,243,166,0.50); background:rgba(67,243,166,0.12); }
+
+    #diagHud{ width:min(680px, calc(100vw - 24px)); max-height:min(48vh, 520px); overflow:auto; padding:10px 12px; }
+    #diagHud pre{ margin:0; white-space:pre-wrap; font-size:12px; line-height:1.35; color:var(--fg); }
+
+    /* PIP */
+    #pipWrap{ position:fixed; right:12px; bottom:12px; width:min(240px, 40vw); aspect-ratio: 4/3; border-radius:14px;
+      overflow:hidden; border:1px solid rgba(255,255,255,0.12); background:rgba(10,14,20,0.66); z-index:9998; }
+    #pipTitle{ position:absolute; left:0; right:0; top:0; padding:6px 8px; font-size:12px; color:var(--muted);
+      background:linear-gradient(to bottom, rgba(10,14,20,0.92), rgba(10,14,20,0.0)); }
+    #pipCanvas{ width:100%; height:100%; display:block; }
+
+    /* Touch hint */
+    #hint{ position:fixed; left:12px; bottom:12px; padding:10px 12px; border-radius:14px; z-index:9997;
+      background:rgba(10,14,20,0.66); border:1px solid rgba(255,255,255,0.10); color:var(--muted);
+      font-size:12px; max-width:min(520px, calc(100vw - 24px)); }
+    #hint b{ color:var(--fg); }
+
+    /* Hide */
+    .hidden{ display:none !important; }
   </style>
 </head>
 <body>
-  <div id="hud">BOOTING…</div>
-  <button id="hudToggle" type="button">HIDE HUD</button>
+  <div id="app"></div>
 
-  <!-- Store UI -->
-  <div id="store-container">
-    <div class="store-header">SYSTEM STORE v4.0</div>
-    <div class="item-card">
-      <div><b>NEON GLITCH SHIRT</b></div>
-      <div class="tiny">Installs emissive pulse material on avatar torso.</div>
-      <button id="btn-equip-shirt" class="equip-btn">INSTALL MODULE</button>
+  <div id="hud">
+    <div class="panel controls">
+      <button id="btnEnterVR" class="hudBtn primary">Enter VR</button>
+      <button id="btnTeleport" class="hudBtn">Teleport: OFF</button>
+      <button id="btnDiag" class="hudBtn">Diag</button>
+      <button id="btnHideHUD" class="hudBtn">Hide HUD</button>
     </div>
-    <div class="item-card">
-      <div><b>TOGGLE STORE</b></div>
-      <div class="tiny">Press <b>M</b> (desktop) or Android <b>ACT</b> to toggle.</div>
+    <div id="diagHud" class="panel">
+      <pre id="diagText">booting…</pre>
     </div>
   </div>
 
-  <script type="module" src="./boot.js"></script>
+  <div id="pipWrap">
+    <div id="pipTitle">PIP — Table View</div>
+    <canvas id="pipCanvas"></canvas>
+  </div>
+
+  <div id="hint">
+    <b>Non‑VR:</b> drag to look • tap floor to move • two‑finger drag rotates.<br/>
+    <b>VR:</b> Enter VR → trigger to teleport (when Teleport is ON).
+  </div>
+
+  <script type="module" src="./js/boot.js"></script>
 </body>
 </html>

@@ -1,8 +1,8 @@
 // /js/scarlett1/index.js
-// SCARLETT1 — INDEX FULL (AUTHORITATIVE SAFE WORLD IMPORT + AUDIO MODULES)
-// Build: SCARLETT1_INDEX_FULL_v23_0_AUDIO_SAFE_WORLD
+// SCARLETT1 — INDEX FULL (AUTHORITATIVE SAFE WORLD IMPORT)
+// Build: SCARLETT1_INDEX_FULL_v24_0_WORLD_ORCH_MODULES
 
-const BUILD = "SCARLETT1_INDEX_FULL_v23_0_AUDIO_SAFE_WORLD";
+const BUILD = "SCARLETT1_INDEX_FULL_v24_0_WORLD_ORCH_MODULES";
 
 const log = (...a) => console.log("[scarlett1]", ...a);
 const warn = (...a) => console.warn("[scarlett1]", ...a);
@@ -11,10 +11,6 @@ const err = (...a) => console.error("[scarlett1]", ...a);
 // Three.js (GH Pages safe)
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
 import { VRButton } from "https://unpkg.com/three@0.158.0/examples/jsm/webxr/VRButton.js";
-
-// Poker Audio + Gesture
-import { PokerAudio } from "/js/modules/audioLogic.js";
-import { GestureControl } from "/js/modules/gestureControl.js";
 
 function nowISO() { return new Date().toISOString(); }
 
@@ -57,7 +53,6 @@ function buildFallbackWorld(scene) {
   const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = 0;
-  floor.receiveShadow = false;
   scene.add(floor);
 
   const tableGeo = new THREE.CylinderGeometry(1.05, 1.05, 0.16, 28);
@@ -66,53 +61,7 @@ function buildFallbackWorld(scene) {
   table.position.set(0, 0.80, -1.25);
   scene.add(table);
 
-  // simple marker ring
-  const ringGeo = new THREE.TorusGeometry(0.7, 0.03, 10, 48);
-  const ringMat = new THREE.MeshStandardMaterial({ color: 0xb59a3a, roughness: 0.6 });
-  const ring = new THREE.Mesh(ringGeo, ringMat);
-  ring.rotation.x = Math.PI / 2;
-  ring.position.set(0, 0.89, -1.25);
-  scene.add(ring);
-
   return { tableHeight: 0.80, table };
-}
-
-// Audio unlock (Quest/Android requirement)
-const unlockAudioOnce = async () => {
-  try {
-    await PokerAudio.init({ volume: 0.55 });
-    await PokerAudio.unlock?.();
-    log("audio unlocked ✅");
-  } catch (e) {
-    err("audio unlock failed", e);
-  } finally {
-    window.removeEventListener("pointerdown", unlockAudioOnce);
-    window.removeEventListener("touchstart", unlockAudioOnce);
-  }
-};
-window.addEventListener("pointerdown", unlockAudioOnce, { passive: true });
-window.addEventListener("touchstart", unlockAudioOnce, { passive: true });
-
-function installScarlettAPI() {
-  window.SCARLETT = window.SCARLETT || {};
-
-  // Simple sound triggers for UI / Android Panel
-  window.SCARLETT.audioTest = async () => {
-    await PokerAudio.init({ volume: 0.55 });
-    PokerAudio.playCardSlide();
-    setTimeout(() => PokerAudio.playChipSingle(), 120);
-    setTimeout(() => PokerAudio.playTableKnock(), 240);
-    setTimeout(() => PokerAudio.playPotVacuum({ duration: 1.2 }), 420);
-    return { ok: true, build: BUILD, time: nowISO() };
-  };
-
-  // Hooks you can call from your poker game logic later
-  window.SCARLETT.sfx = {
-    card: () => PokerAudio.playCardSlide(),
-    chip: () => PokerAudio.playChipSingle(),
-    knock: () => PokerAudio.playTableKnock(),
-    vacuum: () => GestureControl.triggerPotVacuum()
-  };
 }
 
 async function main() {
@@ -153,16 +102,15 @@ async function main() {
   };
 
   attachEngineEarly(engine);
-  installScarlettAPI();
 
   // --- world import (SAFE) ---
   const worldMod = await safeImportWorld(Date.now().toString());
   let WORLD = null;
 
-  if (worldMod && (worldMod.createWorld || worldMod.default)) {
+  if (worldMod && (worldMod.createWorld || worldMod.bootWorld || worldMod.default)) {
     try {
-      // support either named export createWorld or default export
-      const createWorld = worldMod.createWorld || worldMod.default;
+      // Support: createWorld OR bootWorld OR default
+      const createWorld = worldMod.createWorld || worldMod.bootWorld || worldMod.default;
       WORLD = await createWorld({ THREE, scene, renderer, camera, engine });
       log("world boot ✅", WORLD);
     } catch (e) {
@@ -176,14 +124,10 @@ async function main() {
   engine.world = WORLD;
   window.SCARLETT.world = WORLD;
 
-  // Set gesture table height from world
-  GestureControl.tableHeight = WORLD?.tableHeight ?? 0.8;
-
   // --- render loop ---
   renderer.setAnimationLoop(() => {
-    // If you have real handData later, feed it here:
-    // GestureControl.update(handData);
-
+    // World may expose update(dt) later; safe call if present
+    try { WORLD?.update?.(0); } catch (_) {}
     renderer.render(scene, camera);
   });
 

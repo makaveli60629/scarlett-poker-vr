@@ -1,9 +1,6 @@
 // /js/scarlett1/index.js
-// SCARLETT1 v18 — Global THREE (CDN chain) + XR + Controllers/Lasers + Right locomotion
-// + LEFT Y menu toggle (robust mapping) + Always-hit laser target plane
-// + Teleport (Left grip hold/release)
-// + HUD: Hide/Show + Module Test (red button) + Copy status
-const BUILD = "SCARLETT1_INDEX_FULL_v18_LEFT_FIX_MENU_TELEPORT_HUD";
+// SCARLETT1 v18.1 — FIX: installGuards defined
+const BUILD = "SCARLETT1_INDEX_FULL_v18_1_LEFT_FIX_MENU_TELEPORT_HUD";
 
 const err = (...a) => console.error("[scarlett1]", ...a);
 const proof = (s) => console.log("[router_proof]", s);
@@ -101,7 +98,6 @@ function ensureHud() {
   });
 
   const testBtn = btn("Module Test", "rgba(255,80,80,0.92)", () => {
-    // quick, visible module test results
     const xr = !!navigator.xr;
     const gl = !!document.getElementById("scarlettCanvas");
     const secure = !!window.isSecureContext;
@@ -130,6 +126,24 @@ function hudLine(s) {
   const fn = window.__scarlettHudLine;
   if (typeof fn === "function") fn(s);
   proof(s);
+}
+
+// ✅ FIX: this was missing
+function installGuards() {
+  if (window.__scarlettGuardsInstalled) return;
+  window.__scarlettGuardsInstalled = true;
+
+  window.addEventListener("error", (e) => {
+    const msg = String(e?.message || e);
+    err("window.error:", msg);
+    hudLine("❌ ERROR: " + msg);
+  });
+
+  window.addEventListener("unhandledrejection", (e) => {
+    const msg = String(e?.reason || e);
+    err("unhandledrejection:", msg);
+    hudLine("❌ REJECTION: " + msg);
+  });
 }
 
 function loadScript(src) {
@@ -201,7 +215,6 @@ async function boot() {
   const THREE = window.THREE;
   const app = document.getElementById("app") || document.body;
 
-  // Scene / Camera / Renderer
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0d0f12);
 
@@ -213,19 +226,16 @@ async function boot() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.xr.enabled = true;
 
-  // replace old canvas
   const old = document.getElementById("scarlettCanvas");
   if (old && old.parentNode) old.parentNode.removeChild(old);
   renderer.domElement.id = "scarlettCanvas";
   app.appendChild(renderer.domElement);
 
-  // Lights
   scene.add(new THREE.HemisphereLight(0xffffff, 0x222244, 0.9));
   const sun = new THREE.DirectionalLight(0xffffff, 0.9);
   sun.position.set(6, 10, 3);
   scene.add(sun);
 
-  // Floor (visible)
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(200, 200),
     new THREE.MeshStandardMaterial({ color: 0x1c2126, roughness: 1, metalness: 0 })
@@ -233,7 +243,6 @@ async function boot() {
   floor.rotation.x = -Math.PI / 2;
   scene.add(floor);
 
-  // Laser target plane (invisible, ALWAYS there so lasers always “hit” something)
   const laserTarget = new THREE.Mesh(
     new THREE.PlaneGeometry(200, 200),
     new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 })
@@ -242,7 +251,6 @@ async function boot() {
   laserTarget.position.y = 0.001;
   scene.add(laserTarget);
 
-  // Table (placeholder)
   const table = new THREE.Mesh(
     new THREE.CylinderGeometry(0.85, 0.95, 0.14, 48),
     new THREE.MeshStandardMaterial({ color: 0x2a7a5e, roughness: 0.95 })
@@ -250,15 +258,11 @@ async function boot() {
   table.position.set(0, 0.85, 0);
   scene.add(table);
 
-  // Rig
   const rig = new THREE.Group();
   rig.position.set(0, 0, 3.2);
   rig.add(camera);
   scene.add(rig);
 
-  camera.lookAt(0, 1.0, 0);
-
-  // Controllers
   const c0 = renderer.xr.getController(0);
   const c1 = renderer.xr.getController(1);
   rig.add(c0);
@@ -278,7 +282,7 @@ async function boot() {
   const ray = new THREE.Raycaster();
   const tmpMat = new THREE.Matrix4();
 
-  // Menu (minimal, toggle only)
+  // Menu (toggle only, minimal)
   const menu = new THREE.Group();
   menu.visible = false;
   scene.add(menu);
@@ -291,19 +295,12 @@ async function boot() {
   panel.position.set(0, 0, -1);
   menu.add(panel);
 
-  const frame = new THREE.Mesh(
-    new THREE.PlaneGeometry(panelW + 0.01, panelH + 0.01),
-    new THREE.MeshStandardMaterial({ color: 0x05070a, roughness: 1 })
-  );
-  frame.position.set(0, 0, -1.001);
-  menu.add(frame);
-
   function toggleMenu(force) {
     menu.visible = typeof force === "boolean" ? force : !menu.visible;
     hudLine(`menu: ${menu.visible ? "ON" : "OFF"} (Left Y)`);
   }
 
-  // Teleport visuals
+  // Teleport marker
   const teleportMarker = new THREE.Mesh(
     new THREE.RingGeometry(0.12, 0.16, 32),
     new THREE.MeshBasicMaterial({ color: 0x39b6ff, transparent: true, opacity: 0.9, side: THREE.DoubleSide })
@@ -331,13 +328,11 @@ async function boot() {
 
   function commitTeleport() {
     if (!teleportMarker.visible) return;
-    // Move rig to marker, keep camera height
     rig.position.x = teleportPoint.x;
     rig.position.z = teleportPoint.z;
     hudLine("teleport ✅");
   }
 
-  // XR enter
   async function enterVR() {
     if (!navigator.xr) return;
     const session = await navigator.xr.requestSession("immersive-vr", {
@@ -350,8 +345,6 @@ async function boot() {
   }
   if (navigator.xr) makeEnterVrButton(enterVR);
 
-  // Robust input mapping
-  // We DO NOT trust handedness alone; we fall back to controller indices.
   function classifyInputs(session) {
     let left = null, right = null;
     const sources = Array.from(session.inputSources || []).filter(s => s && s.gamepad);
@@ -360,15 +353,11 @@ async function boot() {
       if (s.handedness === "left") left = s;
       if (s.handedness === "right") right = s;
     }
-
-    // Fallback: if missing handedness, pick by index order
     if (!left && sources[0]) left = sources[0];
     if (!right && sources[1]) right = sources[1];
-
     return { left, right };
   }
 
-  // Locomotion (RIGHT ONLY)
   const moveState = { speed: 1.8, snap: Math.PI / 6, snapCooldown: 0 };
 
   function getStickPair(gp) {
@@ -385,27 +374,21 @@ async function boot() {
     if (!gp || !gp.axes) return 0;
     return gp.axes.length >= 3 ? (gp.axes[2] || 0) : (gp.axes[0] || 0);
   }
-
-  // Button mapping helpers (Quest can vary)
   function readYButton(gp) {
     if (!gp || !gp.buttons) return false;
-    // Common candidates for Y: 3 (typical), sometimes 4 depending on profile
-    const cands = [3, 4];
-    for (const i of cands) {
+    for (const i of [3, 4]) {
       if (gp.buttons[i]) return !!gp.buttons[i].pressed;
     }
     return false;
   }
   function readGrip(gp) {
     if (!gp || !gp.buttons) return false;
-    // Grip commonly button 1
     return gp.buttons[1] ? !!gp.buttons[1].pressed : false;
   }
 
   let yWas = false;
   let leftGripWas = false;
 
-  // Render loop
   let last = performance.now();
   renderer.setAnimationLoop((t) => {
     const dt = Math.min((t - last) / 1000, 0.05);
@@ -413,7 +396,6 @@ async function boot() {
 
     const session = renderer.xr.getSession && renderer.xr.getSession();
 
-    // Menu follow camera when visible
     if (menu.visible) {
       const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
       const pos = new THREE.Vector3().copy(camera.position).add(forward.multiplyScalar(1.0));
@@ -424,37 +406,28 @@ async function boot() {
     if (session) {
       const { left, right } = classifyInputs(session);
 
-      // --- Left Y toggles menu ---
       if (left && left.gamepad) {
         const y = readYButton(left.gamepad);
         if (y && !yWas) toggleMenu();
         yWas = y;
-      } else {
-        yWas = false;
-      }
 
-      // --- Teleport: LEFT GRIP hold/release ---
-      if (left && left.gamepad) {
         const grip = readGrip(left.gamepad);
         if (grip) {
           teleportActive = true;
-          updateTeleportFromController(c0); // c0 usually maps to left, but even if swapped it still works visually
+          updateTeleportFromController(c0);
         } else {
-          if (leftGripWas && teleportActive) {
-            // released
-            commitTeleport();
-          }
+          if (leftGripWas && teleportActive) commitTeleport();
           teleportActive = false;
           teleportMarker.visible = false;
         }
         leftGripWas = grip;
       } else {
-        teleportActive = false;
+        yWas = false;
         leftGripWas = false;
+        teleportActive = false;
         teleportMarker.visible = false;
       }
 
-      // --- Right locomotion only ---
       if (right && right.gamepad) {
         const gp = right.gamepad;
         const stick = getStickPair(gp);
@@ -478,7 +451,6 @@ async function boot() {
         }
       }
 
-      // --- Lasers always hit laserTarget (never “dead”) ---
       for (const c of [c0, c1]) {
         tmpMat.identity().extractRotation(c.matrixWorld);
         ray.ray.origin.setFromMatrixPosition(c.matrixWorld);
@@ -489,7 +461,6 @@ async function boot() {
         if (line) line.scale.z = dist;
       }
     } else {
-      // 2D mode: show lasers at default length (nice visual)
       for (const c of [c0, c1]) {
         const line = c.getObjectByName("laser");
         if (line) line.scale.z = 3;
@@ -512,8 +483,8 @@ async function boot() {
 
 export function start() {
   ensureRoot();
-  installGuards();
   ensureHud();
+  installGuards();
   hudLine(`SYNC OK ${BUILD}`);
 
   if (window.__scarlettRan) return true;

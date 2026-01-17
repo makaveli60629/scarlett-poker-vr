@@ -1,23 +1,22 @@
 /* /js/scarlett1/index.js
-   SCARLETT1_INDEX_FULL_v21_0_PERMA_ENGINE_ORCH_ANDROID_PANEL
-   - Always boots (no black screen): lights + fallback floor
-   - Safely imports ./world.js and exposes __scarlettRunModuleTest immediately
+   SCARLETT1_INDEX_FULL_v21_1_PERMA_ENGINE_ORCH_ANDROID_PANEL
+   - Always renders (fallback floor + marker)
+   - Boots world.js safely (cache-busted)
+   - Exposes __scarlettRunModuleTest + __scarlettWorld when world loads
    - Unified Android Panel: sticks + hide HUD + hide panel + module list + enable/disable + reload + module test + copy
-   - XR controls: Move = RIGHT stick (HMD-forward), Teleport = RIGHT grip, Action = RIGHT trigger, Menu = LEFT Y (auto-bind)
+   - XR: Move=Right stick (HMD-forward), Teleport=Right grip, Action=Right trigger, Menu=Left Y (auto-bind)
 */
 
 (() => {
-  const BUILD = "SCARLETT1_INDEX_FULL_v21_0_PERMA_ENGINE_ORCH_ANDROID_PANEL";
+  const BUILD = "SCARLETT1_INDEX_FULL_v21_1_PERMA_ENGINE_ORCH_ANDROID_PANEL";
   const log = (...a) => console.log(`[${BUILD}]`, ...a);
   const warn = (...a) => console.warn(`[${BUILD}]`, ...a);
   const err = (...a) => console.error(`[${BUILD}]`, ...a);
 
-  // THREE must be global (you’re loading three.min.js)
   const THREE = window.THREE;
-  if (!THREE) return err("THREE missing. Load three.min.js before /js/scarlett1/index.js");
+  if (!THREE) return err("THREE missing. Load three.min.js before this file.");
 
-  // ---------- Always-available globals (so module UI never breaks) ----------
-  // These exist even if world.js fails to import.
+  // Ensure always-available globals (so router module test never breaks)
   window.__scarlett = window.__scarlett || {};
   window.__scarlett.build = BUILD;
 
@@ -25,35 +24,26 @@
     window.__scarlettRunModuleTest ||
     (async () => ({
       ok: false,
-      build: BUILD,
-      reason: "world not ready / __scarlettWorld missing",
       time: new Date().toISOString(),
+      reason: "world not ready yet",
+      build: BUILD,
     }));
 
-  window.__scarlettToggleModulePanel =
-    window.__scarlettToggleModulePanel ||
-    (() => {
-      const p = document.getElementById("scarlettAndroidPanel");
-      if (p) p.style.display = p.style.display === "none" ? "block" : "none";
-    });
-
-  // ---------- Canvas / Renderer ----------
-  const canvas =
-    document.querySelector("canvas") ||
-    (() => {
-      const c = document.createElement("canvas");
-      document.body.style.margin = "0";
-      document.body.style.overflow = "hidden";
-      document.body.appendChild(c);
-      return c;
-    })();
+  // Canvas / Renderer
+  const canvas = document.querySelector("canvas") || (() => {
+    const c = document.createElement("canvas");
+    document.body.style.margin = "0";
+    document.body.style.overflow = "hidden";
+    document.body.appendChild(c);
+    return c;
+  })();
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
 
-  // ---------- Scene / Camera / Rig ----------
+  // Scene / Camera / Rig
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x07080a);
 
@@ -62,19 +52,16 @@
   rig.add(camera);
   scene.add(rig);
 
-  // ---------- Never-black fallback lighting + fallback floor ----------
-  // Even if world.js fails, you still see something.
+  // Fallback lights + floor so NEVER black
   const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 0.95);
-  hemi.name = "FALLBACK_HEMI";
   scene.add(hemi);
 
-  const key = new THREE.DirectionalLight(0xffffff, 0.8);
+  const key = new THREE.DirectionalLight(0xffffff, 0.85);
   key.position.set(6, 12, 4);
-  key.name = "FALLBACK_KEY";
   scene.add(key);
 
   const fallbackFloor = new THREE.Mesh(
-    new THREE.PlaneGeometry(200, 200),
+    new THREE.PlaneGeometry(240, 240),
     new THREE.MeshStandardMaterial({ color: 0x14171c, roughness: 1, metalness: 0 })
   );
   fallbackFloor.rotation.x = -Math.PI / 2;
@@ -82,32 +69,28 @@
   fallbackFloor.name = "SCARLETT_FLOOR_FALLBACK";
   scene.add(fallbackFloor);
 
-  // Center marker so you can instantly see “not black screen”
   const marker = new THREE.Mesh(
     new THREE.BoxGeometry(0.15, 0.15, 0.15),
     new THREE.MeshStandardMaterial({ color: 0xe91e63 })
   );
   marker.position.set(0, 1.2, -1.5);
-  marker.name = "FALLBACK_MARKER";
   scene.add(marker);
 
-  // ---------- HUD (desktop + quest + android) ----------
-  const hud =
-    document.getElementById("scarlettHud") ||
-    (() => {
-      const d = document.createElement("div");
-      d.id = "scarlettHud";
-      d.style.cssText = `
-        position:fixed;left:10px;top:10px;z-index:99999;
-        font-family:ui-monospace,Menlo,Consolas,monospace;
-        font-size:12px;line-height:1.3;
-        padding:8px 10px;border-radius:10px;
-        background:rgba(0,0,0,.55);color:#fff;
-        max-width: 420px; user-select:none; white-space:pre;
-      `;
-      document.body.appendChild(d);
-      return d;
-    })();
+  // HUD
+  const hud = document.getElementById("scarlettHud") || (() => {
+    const d = document.createElement("div");
+    d.id = "scarlettHud";
+    d.style.cssText = `
+      position:fixed;left:10px;top:10px;z-index:99999;
+      font-family:ui-monospace,Menlo,Consolas,monospace;
+      font-size:12px;line-height:1.3;
+      padding:8px 10px;border-radius:10px;
+      background:rgba(0,0,0,.55);color:#fff;
+      max-width: 420px; user-select:none; white-space:pre;
+    `;
+    document.body.appendChild(d);
+    return d;
+  })();
 
   let hudVisible = true;
   function setHudVisible(v) {
@@ -116,65 +99,61 @@
   }
 
   function HUD(line) {
-    // Keep last N lines
     const N = 16;
     const lines = (hud.textContent || "").split("\n").slice(-N);
     lines.push(String(line));
     hud.textContent = lines.join("\n");
   }
 
-  // ---------- ENTER VR ----------
-  const xrBtn =
-    document.getElementById("enterVrBtn") ||
-    (() => {
-      const b = document.createElement("button");
-      b.id = "enterVrBtn";
-      b.textContent = "ENTER VR";
-      b.style.cssText = `
-        position:fixed;right:12px;top:12px;z-index:99999;
-        padding:10px 14px;border-radius:12px;border:0;
-        font-weight:900; letter-spacing:.5px;
-        background:#e91e63;color:#fff;
-      `;
-      b.onclick = async () => {
-        try {
-          if (!navigator.xr) throw new Error("navigator.xr missing");
-          const supported = await navigator.xr.isSessionSupported("immersive-vr");
-          if (!supported) throw new Error("immersive-vr not supported");
-          const session = await navigator.xr.requestSession("immersive-vr", {
-            optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking", "layers"],
-          });
-          renderer.xr.setSession(session);
-          HUD("XR session started ✅");
-        } catch (e) {
-          err("ENTER VR failed:", e);
-          HUD(`ENTER VR failed ❌ ${e?.message || e}`);
-        }
-      };
-      document.body.appendChild(b);
-      return b;
-    })();
+  // ENTER VR
+  const xrBtn = document.getElementById("enterVrBtn") || (() => {
+    const b = document.createElement("button");
+    b.id = "enterVrBtn";
+    b.textContent = "ENTER VR";
+    b.style.cssText = `
+      position:fixed;right:12px;top:12px;z-index:99999;
+      padding:10px 14px;border-radius:12px;border:0;
+      font-weight:900; letter-spacing:.5px;
+      background:#e91e63;color:#fff;
+    `;
+    b.onclick = async () => {
+      try {
+        if (!navigator.xr) throw new Error("navigator.xr missing");
+        const supported = await navigator.xr.isSessionSupported("immersive-vr");
+        if (!supported) throw new Error("immersive-vr not supported");
+        const session = await navigator.xr.requestSession("immersive-vr", {
+          optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking", "layers"],
+        });
+        renderer.xr.setSession(session);
+        HUD("XR session started ✅");
+      } catch (e) {
+        err("ENTER VR failed:", e);
+        HUD(`ENTER VR failed ❌ ${e?.message || e}`);
+      }
+    };
+    document.body.appendChild(b);
+    return b;
+  })();
 
-  // ---------- Android Everything Panel (sticks + modules + diag) ----------
-  // This is PERMANENT. You always have it on Android.
+  // Android “Everything Panel”
   const isAndroid = /Android/i.test(navigator.userAgent);
 
   window.__scarlettAndroidInput = window.__scarlettAndroidInput || {
-    moveX: 0,
-    moveY: 0,
-    turnX: 0,
-    turnY: 0,
-    action: false,
-    teleport: false,
+    moveX: 0, moveY: 0, turnX: 0, turnY: 0,
+    action: false, teleport: false
   };
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+    }[c]));
+  }
 
   function makeAndroidPanel() {
     if (!isAndroid) return null;
+    if (document.getElementById("scarlettAndroidPanel")) return document.getElementById("scarlettAndroidPanel");
 
-    let panel = document.getElementById("scarlettAndroidPanel");
-    if (panel) return panel;
-
-    panel = document.createElement("div");
+    const panel = document.createElement("div");
     panel.id = "scarlettAndroidPanel";
     panel.style.cssText = `
       position:fixed;left:10px;right:10px;bottom:10px;z-index:999999;
@@ -182,7 +161,6 @@
       padding:10px;font-family:ui-monospace,Menlo,Consolas,monospace;
       font-size:12px;line-height:1.25;
     `;
-
     panel.innerHTML = `
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;align-items:center">
         <button id="ap_hideHud" style="padding:8px 10px;border:0;border-radius:12px;background:#444;color:#fff;font-weight:900">HIDE HUD</button>
@@ -210,7 +188,6 @@
 
       <pre id="ap_log" style="margin:10px 0 0 0;white-space:pre-wrap;word-break:break-word;background:rgba(255,255,255,.06);padding:10px;border-radius:12px;max-height:22vh;overflow:auto"></pre>
     `;
-
     document.body.appendChild(panel);
 
     const apLog = panel.querySelector("#ap_log");
@@ -220,11 +197,9 @@
       apLog.textContent = lines.join("\n");
       apLog.scrollTop = apLog.scrollHeight;
     };
-
     write(`ANDROID PANEL ✅ build=${BUILD}`);
     write(`ua=${navigator.userAgent}`);
 
-    // Buttons
     panel.querySelector("#ap_hideHud").onclick = () => {
       setHudVisible(!hudVisible);
       panel.querySelector("#ap_hideHud").textContent = hudVisible ? "HIDE HUD" : "SHOW HUD";
@@ -235,7 +210,7 @@
       window.__scarlettAndroidPanelHidden = true;
     };
 
-    // Allow user to show panel by tapping 3 times anywhere (emergency)
+    // Emergency triple-tap to show panel again
     let taps = 0;
     window.addEventListener("touchstart", () => {
       if (!window.__scarlettAndroidPanelHidden) return;
@@ -293,7 +268,7 @@
       }
     };
 
-    // Hold buttons: action + teleport
+    // Hold buttons
     const bindHold = (sel, key) => {
       const b = panel.querySelector(sel);
       const down = (ev) => { ev.preventDefault(); window.__scarlettAndroidInput[key] = true; };
@@ -323,7 +298,7 @@
         window.__scarlettAndroidInput[outXKey] = x;
         window.__scarlettAndroidInput[outYKey] = y;
         knob.style.left = `${50 + x * 35}%`;
-        knob.style.top = `${50 + y * 35}%`;
+        knob.style.top  = `${50 + y * 35}%`;
       };
 
       const start = (ev) => {
@@ -365,9 +340,8 @@
     makeJoystick(panel.querySelector("#ap_joyL"), "moveX", "moveY");
     makeJoystick(panel.querySelector("#ap_joyR"), "turnX", "turnY");
 
-    // Module list UI
+    // Module list renderer
     const modListEl = panel.querySelector("#ap_modList");
-
     function refreshModuleList() {
       const W = window.__scarlettWorld;
       if (!W || !W.modules) {
@@ -405,7 +379,6 @@
 
       modListEl.innerHTML = rows || `<div>No modules registered.</div>`;
 
-      // Bind actions
       modListEl.querySelectorAll("button[data-act]").forEach((b) => {
         b.onclick = async () => {
           const act = b.getAttribute("data-act");
@@ -426,27 +399,20 @@
       });
     }
 
-    // expose for other code
     window.__scarlettRefreshModuleList = refreshModuleList;
-
-    function escapeHtml(s) {
-      return String(s).replace(/[&<>"']/g, (c) => ({
-        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
-      }[c]));
-    }
-
     return panel;
   }
 
   const androidPanel = makeAndroidPanel();
 
-  // ---------- XR Controllers + Teleport visuals (RIGHT only) ----------
+  // Controllers (XR)
   const controllerL = renderer.xr.getController(0);
   const controllerR = renderer.xr.getController(1);
   rig.add(controllerL, controllerR);
 
+  // Teleport visuals RIGHT only
   const teleportRay = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]),
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]),
     new THREE.LineBasicMaterial({ color: 0x00e5ff })
   );
   teleportRay.scale.z = 12;
@@ -481,42 +447,25 @@
   const camPos = new THREE.Vector3();
 
   const state = {
-    // menu
     leftMenuIndex: 3,
     leftMenuBound: false,
-    // right
     rightGripIndex: 1,
     rightTriggerIndex: 0,
     prevButtonsL: [],
     prevButtonsR: [],
-    // teleport
     teleportAiming: false,
     teleportValid: false,
     teleportPoint: new THREE.Vector3(),
-    // movement
     moveSpeed: 2.0,
     deadzone: 0.18,
-    // world hooks
+    actionDown: false,
     worldUpdate: null,
     worldFloor: null,
-    // action
-    actionDown: false,
   };
 
   function inDeadzone(v, dz) { return Math.abs(v) < dz ? 0 : v; }
-
-  function getYawForward(out) {
-    camera.getWorldDirection(out);
-    out.y = 0;
-    out.normalize();
-    return out;
-  }
-  function getYawRight(out) {
-    getYawForward(out);
-    const x = out.x, z = out.z;
-    out.set(z, 0, -x).normalize();
-    return out;
-  }
+  function getYawForward(out) { camera.getWorldDirection(out); out.y = 0; out.normalize(); return out; }
+  function getYawRight(out) { getYawForward(out); const x = out.x, z = out.z; out.set(z,0,-x).normalize(); return out; }
 
   function pressedEdge(buttons, prevArr, index) {
     const b = buttons?.[index];
@@ -532,9 +481,8 @@
     prevArr[index] = now;
     return !now && prev;
   }
-
   function anyFaceButtonEdgeLeft(gp) {
-    const cands = [3, 2, 4, 5]; // prefer Y then X
+    const cands = [3,2,4,5];
     for (const idx of cands) {
       const b = gp.buttons[idx];
       const prev = state.prevButtonsL[idx] || false;
@@ -544,26 +492,18 @@
     }
     return null;
   }
-
-  function menuToggle() {
-    // In VR: toggle HUD. On Android: we already have panel, but keep consistent.
-    setHudVisible(!hudVisible);
-  }
+  function menuToggle() { setHudVisible(!hudVisible); }
 
   function onActionDown() { state.actionDown = true; }
   function onActionUp() { state.actionDown = false; }
 
   function computeTeleportHit() {
     const floor = state.worldFloor || fallbackFloor;
-    if (!floor) return false;
-
     tmpMat4.identity().extractRotation(controllerR.matrixWorld);
     tmpOrigin.setFromMatrixPosition(controllerR.matrixWorld);
-    tmpDir.set(0, 0, -1).applyMatrix4(tmpMat4).normalize();
-
+    tmpDir.set(0,0,-1).applyMatrix4(tmpMat4).normalize();
     raycaster.ray.origin.copy(tmpOrigin);
     raycaster.ray.direction.copy(tmpDir);
-
     const hits = raycaster.intersectObject(floor, false);
     if (hits && hits.length) {
       tmpHit.copy(hits[0].point);
@@ -578,87 +518,63 @@
     return false;
   }
 
-  function startTeleportAim() {
-    state.teleportAiming = true;
-    teleportRay.visible = true;
-    halo.visible = true;
-    computeTeleportHit();
-  }
-
+  function startTeleportAim() { state.teleportAiming = true; teleportRay.visible = true; halo.visible = true; computeTeleportHit(); }
   function stopTeleportAim(teleportIfValid = true) {
     state.teleportAiming = false;
     teleportRay.visible = false;
     halo.visible = false;
     teleportReticle.visible = false;
-
     if (teleportIfValid && state.teleportValid) {
       camera.getWorldPosition(camPos);
       const offset = new THREE.Vector3(camPos.x - rig.position.x, 0, camPos.z - rig.position.z);
-      rig.position.set(
-        state.teleportPoint.x - offset.x,
-        rig.position.y,
-        state.teleportPoint.z - offset.z
-      );
+      rig.position.set(state.teleportPoint.x - offset.x, rig.position.y, state.teleportPoint.z - offset.z);
     }
   }
 
-  // ---------- World boot (SAFE) ----------
+  // Boot world safely (cache-bust)
   async function bootWorldSafe() {
     HUD(`boot: ${BUILD}`);
     try {
-      // Cache-bust so you always get newest world.js
       const mod = await import(`./world.js?v=${Date.now()}`);
       if (typeof mod.bootWorld !== "function") throw new Error("world.js missing export bootWorld()");
       const world = await mod.bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG: log });
-
       state.worldUpdate = world?.update || null;
-      state.worldFloor = scene.getObjectByName("SCARLETT_FLOOR") || scene.getObjectByName("SCARLETT_FLOOR_FALLBACK") || null;
+      state.worldFloor = scene.getObjectByName("SCARLETT_FLOOR") || fallbackFloor;
 
-      // Expose reload for Android panel
-      window.__scarlettReloadWorld = async () => {
-        // Soft reset world by reloading page would be easiest, but you want in-place.
-        // We'll call world.reset if provided; else re-import and re-run (additive).
-        if (world?.reset) return world.reset();
-        return bootWorldSafe();
-      };
-
-      // Let panel refresh module list
-      if (typeof window.__scarlettRefreshModuleList === "function") window.__scarlettRefreshModuleList();
+      window.__scarlettReloadWorld = async () => bootWorldSafe();
 
       HUD("world: ready ✅");
       log("world orchestrator ready ✅");
+
+      if (typeof window.__scarlettRefreshModuleList === "function") window.__scarlettRefreshModuleList();
     } catch (e) {
       err("world boot failed ❌", e);
       HUD(`world boot failed ❌ ${e?.message || e}`);
-      // Keep fallback marker visible so you’re never blind.
+      // fallback world remains visible so never black
     }
   }
-
   bootWorldSafe();
 
-  // ---------- Resize ----------
+  // Resize
   window.addEventListener("resize", () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
   });
 
-  // ---------- Main loop ----------
+  // Main loop
   let lastT = performance.now();
-
   renderer.setAnimationLoop(() => {
     const now = performance.now();
     const dt = Math.min(0.05, (now - lastT) / 1000);
     lastT = now;
 
-    // world modules update
     if (typeof state.worldUpdate === "function") {
       try { state.worldUpdate(dt); } catch (e) { warn("world update error", e); }
     }
 
     const session = renderer.xr.getSession?.();
     const srcs = session?.inputSources || [];
-
     let leftGP = null, rightGP = null, leftSrc = null, rightSrc = null;
 
     for (const s of srcs) {
@@ -667,7 +583,7 @@
       if (s.handedness === "right") { rightSrc = s; rightGP = s.gamepad; }
     }
 
-    // Left Y menu toggle (auto bind)
+    // Left menu toggle
     if (leftGP?.buttons?.length) {
       if (state.leftMenuBound) {
         if (pressedEdge(leftGP.buttons, state.prevButtonsL, state.leftMenuIndex)) menuToggle();
@@ -687,7 +603,7 @@
       }
     }
 
-    // Right grip teleport + right trigger action
+    // Right grip teleport + trigger action
     if (rightGP?.buttons?.length) {
       if (pressedEdge(rightGP.buttons, state.prevButtonsR, state.rightGripIndex)) startTeleportAim();
       if (state.teleportAiming) computeTeleportHit();
@@ -697,8 +613,9 @@
       if (releasedEdge(rightGP.buttons, state.prevButtonsR, state.rightTriggerIndex)) onActionUp();
     }
 
-    // Android action/teleport (hold)
+    // Android action/teleport + movement
     const A = window.__scarlettAndroidInput;
+
     if (isAndroid && A) {
       if (A.action && !state.actionDown) onActionDown();
       if (!A.action && state.actionDown) onActionUp();
@@ -707,22 +624,18 @@
         if (!state.teleportAiming) startTeleportAim();
         if (state.teleportAiming) computeTeleportHit();
       } else {
-        // If aiming because of Android button, release teleports
         if (state.teleportAiming && !rightGP) stopTeleportAim(true);
       }
     }
 
-    // Movement: Android stick OR XR right stick
+    // Movement: Android stick OR XR stick
     let axX = 0, axY = 0;
-
     if (isAndroid && A && (Math.abs(A.moveX) > 0.01 || Math.abs(A.moveY) > 0.01)) {
       axX = A.moveX;
       axY = A.moveY;
     } else if (rightGP?.axes?.length >= 2) {
       axX = rightGP.axes[0] || 0;
       axY = rightGP.axes[1] || 0;
-
-      // Some profiles use axes[2,3]
       if (rightGP.axes.length >= 4) {
         const a0 = Math.abs(rightGP.axes[0]) + Math.abs(rightGP.axes[1]);
         const a1 = Math.abs(rightGP.axes[2]) + Math.abs(rightGP.axes[3]);
@@ -736,7 +649,7 @@
     getYawForward(vForward);
     getYawRight(vRight);
 
-    vMove.set(0, 0, 0);
+    vMove.set(0,0,0);
     if (axX || axY) {
       vMove.addScaledVector(vRight, axX);
       vMove.addScaledVector(vForward, -axY);
@@ -744,7 +657,7 @@
       rig.position.addScaledVector(vMove, state.moveSpeed * dt);
     }
 
-    // Basic HUD
+    // HUD
     hud.textContent =
       `SYNC OK ${BUILD}\n` +
       `secure=${window.isSecureContext} xr=${!!navigator.xr} canvas=${!!canvas}\n` +

@@ -10,6 +10,17 @@ function mat(color, rough=0.9, metal=0.05, emissive=null, ei=0) {
   });
 }
 
+  function roundedBoxGeometry(THREE, w, h, d, r=0.12, seg=6) {
+    // Prefer RoundedBoxGeometry if present (some builds don't include it)
+    try {
+      if (THREE && typeof THREE.RoundedBoxGeometry === "function") {
+        return roundedBoxGeometry(THREE, w, h, d, seg, r);
+      }
+    } catch (e) {}
+    // Fallback: plain BoxGeometry (still stable + lightweight)
+    return new THREE.BoxGeometry(w, h, d);
+  }
+
 export const WorldBuilders = {
   lights(ctx) {
     const { scene, root } = ctx;
@@ -96,7 +107,7 @@ export const WorldBuilders = {
 
     // Store zone platform
     const storePad = new THREE.Mesh(
-      new THREE.RoundedBoxGeometry(6.6, 0.22, 5.0, 8, 0.25),
+      roundedBoxGeometry(THREE, 6.6, 0.22, 5.0, 8, 0.25),
       mat(0x10192a, 0.95, 0.05, 0x223cff, 0.08)
     );
     storePad.position.set(-12.5, 0.11, -8);

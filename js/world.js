@@ -56,7 +56,7 @@ function ensureFallbackWorld({ scene, rig, log }) {
 
 export async function build(ctx) {
   const { scene, rig, log } = ctx;
-  log("[world] adapter v7 build starting…");
+  log("[world] adapter v9 build starting…");
 
   if (!ctx.root) ctx.root = scene;
   if (!ctx.manifest) {

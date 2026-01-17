@@ -40,7 +40,7 @@ export function setupAndroidControls(ctx) {
   btnM.textContent = "MENU";
 
   const btnHud = makeEl("button",
-    "position:absolute;right:18px;bottom:166px;width:74px;height:...px;border-radius:37px;border:1px solid rgba(255,255,255,.22);" +
+    "position:absolute;right:18px;bottom:166px;width:74px;height:74px;border-radius:37px;border:1px solid rgba(255,255,255,.22);" +
     "background:rgba(255,210,120,.14);color:#fff;font:700 14px system-ui;pointer-events:auto;",
     root);
   btnHud.textContent = "HUD";
@@ -136,6 +136,6 @@ export function setupAndroidControls(ctx) {
     rig.position.y = Math.max(0, rig.position.y);
   }
 
-  log?.("[android] touch controls ready ✓ (joystick + look + ACT/MENU)");
+  log?.("[android] touch controls ready ✓ (joystick + look + ACT/MENU/HUD)");
   return { tick, destroy:()=>root.remove() };
 }

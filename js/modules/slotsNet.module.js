@@ -2,10 +2,10 @@
 // Networking-ready seat map (FULL)
 
 export default {
-  id: "slotsNet.module.js",
+  id: 'slotsNet.module.js',
 
-  async init({ tableData, log }) {
-    const seatCount = tableData.seats || 6;
+  async init({ log }) {
+    const seatCount = window.SCARLETT?.table?.data?.seats || 6;
 
     const state = {
       seatCount,
@@ -31,11 +31,11 @@ export default {
         const s = state.seats[seat];
         if (s.playerId) return false;
         s.playerId = player.playerId;
-        s.name = player.name || `P${seat+1}`;
+        s.name = player.name || `P${seat + 1}`;
         s.isLocal = !!player.isLocal;
         s.connected = true;
         state.version++;
-        emit("SCARLETT_SEAT_JOIN", { seat, player: { ...s }, version: state.version });
+        emit('SCARLETT_SEAT_JOIN', { seat, player: { ...s }, version: state.version });
         return true;
       },
 
@@ -49,7 +49,7 @@ export default {
         s.isLocal = false;
         s.connected = false;
         state.version++;
-        emit("SCARLETT_SEAT_LEAVE", { seat, prev, version: state.version });
+        emit('SCARLETT_SEAT_LEAVE', { seat, prev, version: state.version });
         return true;
       },
 
@@ -64,7 +64,7 @@ export default {
           connected: !!x.connected
         }));
         state.version = (patch.version ?? state.version + 1);
-        emit("SCARLETT_SEAT_PATCH", { state: api.getState() });
+        emit('SCARLETT_SEAT_PATCH', { state: api.getState() });
         return true;
       }
     };
@@ -72,13 +72,14 @@ export default {
     window.SCARLETT = window.SCARLETT || {};
     window.SCARLETT.slots = api;
 
-    api.joinSeat(0, { playerId: "local", name: "YOU", isLocal: true });
+    // claim local seat 0 by default
+    api.joinSeat(0, { playerId: 'local', name: 'YOU', isLocal: true });
 
-    log?.("slotsNet.module ✅ (seat map ready)");
+    log?.('slotsNet.module ✅');
   },
 
   test() {
     const ok = !!window.SCARLETT?.slots?.getState;
-    return { ok, note: ok ? "slots ready" : "slots missing" };
+    return { ok, note: ok ? 'slots ready' : 'slots missing' };
   }
 };

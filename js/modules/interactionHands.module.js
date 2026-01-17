@@ -1,12 +1,12 @@
 // /js/modules/interactionHands.module.js
-// Right-hand proxy + poke animation on UI press (FULL)
+// Right hand proxy + poke animation on UI press (FULL)
 
 export default {
-  id: "interactionHands.module.js",
+  id: 'interactionHands.module.js',
 
   async init({ THREE, rightGrip, log }) {
     const hand = new THREE.Group();
-    hand.name = "RIGHT_HAND_PROXY";
+    hand.name = 'RIGHT_HAND_PROXY';
     rightGrip.add(hand);
 
     const palm = new THREE.Mesh(
@@ -22,22 +22,24 @@ export default {
     );
     finger.rotation.x = Math.PI / 2;
     finger.position.set(0.02, -0.01, -0.10);
-    finger.name = "INDEX_FINGER";
+    finger.name = 'INDEX_FINGER';
     hand.add(finger);
 
     let pokeT = 0;
     let poking = false;
 
     const onPress = () => { poking = true; pokeT = 0; };
-    window.addEventListener("SCARLETT_UI_PRESS", onPress);
+    window.addEventListener('SCARLETT_UI_PRESS', onPress);
 
-    this._rt = { finger, pokeT, poking };
-    log?.("interactionHands.module ✅ (poke animation)");
+    this._rt = { finger, get poking(){return poking;}, set poking(v){poking=v;}, pokeT, onPress };
+
+    log?.('interactionHands.module ✅');
   },
 
   update(dt) {
     const r = this._rt;
-    if (!r || !r.poking) return;
+    if (!r) return;
+    if (!r.poking) return;
 
     r.pokeT += dt;
     const p = Math.min(r.pokeT / 0.12, 1.0);
@@ -51,5 +53,5 @@ export default {
     }
   },
 
-  test() { return { ok: true, note: "hand proxy present" }; }
+  test() { return { ok: true, note: 'hand proxy present' }; }
 };

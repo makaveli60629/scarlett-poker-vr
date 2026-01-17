@@ -1,8 +1,8 @@
 // /js/scarlett1/index.js
-// SCARLETT1 — INDEX FRONT CONTROLLER (FULL)
-// Build: SCARLETT1_INDEX_FULL_v25_1_ABS_WORLD_PANEL_OVERRIDE
+// SCARLETT1 — INDEX FRONT CONTROLLER (FULL • XR-SAFE WORLD RESOLVER)
+// Build: SCARLETT1_INDEX_FULL_v25_2_METAURL_WORLD_RESOLVER
 
-const BUILD = "SCARLETT1_INDEX_FULL_v25_1_ABS_WORLD_PANEL_OVERRIDE";
+const BUILD = "SCARLETT1_INDEX_FULL_v25_2_METAURL_WORLD_RESOLVER";
 
 // ---- DIAG + CONSOLE fingerprint (must appear no matter what) ----
 const dwrite = (msg) => { try { window.__scarlettDiagWrite?.(String(msg)); } catch (_) {} };
@@ -83,9 +83,15 @@ async function canFetch(url) {
   }
 }
 
-// ✅ ABSOLUTE world import (no relative-base ambiguity)
+// ✅ XR-SAFE world resolver:
+// Uses the real URL of the currently-running index.js and resolves world.js beside it.
+// This defeats base-href/router rewriting issues completely.
 async function safeImportWorld(cacheTag = "") {
-  const url = `/js/scarlett1/world.js${cacheTag ? `?v=${cacheTag}` : ""}`;
+  const base = new URL(import.meta.url);          // actual URL of /js/scarlett1/index.js
+  const worldURL = new URL("world.js", base);     // /js/scarlett1/world.js
+  if (cacheTag) worldURL.searchParams.set("v", cacheTag);
+
+  const url = worldURL.toString();
 
   const check = await canFetch(url);
   log(`world preflight: url=${url} ok=${check.ok} status=${check.status} ct=${check.ct}${check.error ? ` err=${check.error}` : ""}`);
@@ -166,7 +172,7 @@ async function main() {
     return;
   }
 
-  // World load (absolute path)
+  // World load (XR-safe resolver)
   const worldMod = await safeImportWorld(Date.now().toString());
   let WORLD;
 

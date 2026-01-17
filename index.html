@@ -1,200 +1,54 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport"
-  content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
-<meta name="theme-color" content="#000000" />
-<title>ScarlettVR Poker</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>Scarlett VR — Surgical Runtime v4.4</title>
+  <style>
+    html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+    canvas{display:block;}
+    #hud{
+      position:fixed;top:10px;left:10px;right:10px;
+      display:flex;gap:10px;flex-wrap:wrap;z-index:10;
+      pointer-events:auto;
+    }
+    .btn{
+      background:rgba(0,0,0,.55);
+      border:1px solid rgba(255,255,255,.25);
+      color:#fff;padding:12px 16px;border-radius:14px;
+      font-size:16px;backdrop-filter: blur(6px);
+    }
+    .btn:active{transform:scale(.98)}
+    #panel{
+      position:fixed;top:72px;left:10px;right:10px;max-width:520px;
+      background:rgba(0,0,0,.6);
+      border:1px solid rgba(255,255,255,.18);
+      border-radius:16px;padding:14px;color:#fff;
+      z-index:10;display:none;
+      white-space:pre-wrap; font-size:14px; line-height:1.25;
+    }
+  </style>
 
-<style>
-html,body{
-  margin:0; padding:0; width:100%; height:100%;
-  background:#000; overflow:hidden;
-}
-#app{ position:fixed; inset:0; }
-canvas{ width:100%; height:100%; display:block; }
-
-/* HUD */
-#hud{
-  position:fixed; left:10px; top:10px; z-index:40;
-  font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
-  color:#fff;
-}
-#hudRow{ display:flex; gap:8px; flex-wrap:wrap; }
-.btn{
-  background:rgba(0,0,0,.55);
-  border:1px solid rgba(255,255,255,.25);
-  color:#fff;
-  padding:10px 12px;
-  border-radius:10px;
-  font-size:14px;
-}
-#status{
-  margin-top:8px;
-  padding:8px 10px;
-  border-radius:10px;
-  background:rgba(0,0,0,.45);
-  border:1px solid rgba(255,255,255,.18);
-  max-width:92vw;
-  white-space:pre-wrap;
-}
-
-/* Mini restore HUD */
-#btnShowHudMini{
-  position:fixed; left:10px; top:10px; z-index:90;
-  display:none;
-  background:rgba(0,0,0,.6);
-  border:1px solid rgba(255,255,255,.3);
-  color:#fff;
-  padding:10px 12px;
-  border-radius:10px;
-}
-
-/* 🔒 FINAL DIAG PANEL */
-#diagPanel{
-  position:fixed;
-  right:6px; top:6px;
-  z-index:70;
-  display:none;
-
-  width:min(86vw, 360px);
-  max-height:58vh;
-
-  overflow-y:auto;
-  -webkit-overflow-scrolling:touch;
-
-  background:rgba(0,0,0,.55);
-  border:1px solid rgba(255,0,0,.55);
-  border-radius:14px;
-  padding:6px;
-}
-
-/* Header */
-#diagHeader{
-  position:sticky; top:0;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  background:rgba(0,0,0,.55);
-  padding:6px 4px;
-}
-#diagTitle{
-  color:#ff5b5b;
-  font-weight:700;
-  font-size:15px;
-}
-
-/* Buttons */
-.btnRed{
-  background:rgba(255,0,0,.12);
-  border:1px solid rgba(255,0,0,.55);
-  color:#fff;
-  padding:6px 8px;
-  border-radius:8px;
-  font-size:12px;
-}
-
-/* Sections (COLLAPSIBLE = key fix) */
-details{
-  margin-top:8px;
-  border-top:1px solid rgba(255,255,255,.12);
-  padding-top:6px;
-}
-summary{
-  cursor:pointer;
-  color:#ddd;
-  font-size:13px;
-}
-summary::marker{ color:#ff5b5b; }
-
-.mono{
-  margin-top:6px;
-  font-family:ui-monospace,monospace;
-  font-size:11px;
-  background:rgba(0,0,0,.25);
-  border:1px solid rgba(255,255,255,.12);
-  border-radius:8px;
-  padding:6px;
-  white-space:pre-wrap;
-}
-
-/* Touch controls */
-#touchControls{
-  position:fixed; left:0; right:0; bottom:0;
-  height:36vh;
-  display:none;
-  pointer-events:none;
-}
-#touchLeft,#touchRight{
-  position:absolute;
-  bottom:4vh;
-  width:34vw; height:34vw;
-  max-width:170px; max-height:170px;
-  border:1px solid rgba(255,255,255,.25);
-  border-radius:50%;
-  background:rgba(0,0,0,.25);
-  pointer-events:auto;
-}
-#touchLeft{ left:4vw; }
-#touchRight{ right:4vw; }
-</style>
+  <!-- THREE + addons via importmap (CDN). Works on GitHub Pages. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
 </head>
-
 <body>
-<div id="app"></div>
-
-<!-- HUD -->
-<div id="hud">
-  <div id="hudRow">
-    <button class="btn" id="btnEnterVr">Enter VR</button>
-    <button class="btn" id="btnHideHud">Hide HUD</button>
+  <div id="hud">
+    <button class="btn" id="btnEnterVR">Enter VR</button>
+    <button class="btn" id="btnHUD">Hide HUD</button>
     <button class="btn" id="btnTeleport">Teleport: OFF</button>
     <button class="btn" id="btnDiag">Diag</button>
   </div>
-  <div id="status">booting…</div>
-</div>
 
-<button id="btnShowHudMini">Show HUD</button>
+  <div id="panel"></div>
 
-<!-- 🔥 FINAL DIAG -->
-<div id="diagPanel">
-  <div id="diagHeader">
-    <div id="diagTitle">Scarlett Debug</div>
-    <button class="btnRed" id="btnDiagClose">Close</button>
-  </div>
-
-  <div style="display:flex;gap:6px;flex-wrap:wrap;">
-    <button class="btnRed" id="btnTestModules">Test</button>
-    <button class="btnRed" id="btnResetPlayer">Reset</button>
-    <button class="btnRed" id="btnReload">Reload</button>
-    <button class="btnRed" id="btnPanicClose">PANIC</button>
-    <button class="btnRed" id="btnTouch">Touch</button>
-  </div>
-
-  <details open>
-    <summary>Controllers</summary>
-    <div id="diagControllers" class="mono">loading…</div>
-  </details>
-
-  <details>
-    <summary>Modules</summary>
-    <div id="diagModules" class="mono">waiting…</div>
-  </details>
-
-  <details>
-    <summary>Logs</summary>
-    <div id="diagLogs" class="mono">…</div>
-  </details>
-</div>
-
-<!-- Touch -->
-<div id="touchControls">
-  <div id="touchLeft"></div>
-  <div id="touchRight"></div>
-</div>
-
-<!-- SINGLE ENTRY -->
-<script type="module" src="./js/boot.js"></script>
+  <script type="module" src="./js/main.js"></script>
 </body>
 </html>

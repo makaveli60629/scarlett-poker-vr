@@ -1,8 +1,8 @@
 // /js/scarlett1/index.js
-// SCARLETT1 — INDEX FRONT CONTROLLER (ALWAYS ATTACH • ALWAYS DIAG • PANEL UNBREAKABLE)
-// Build: SCARLETT1_INDEX_FULL_v25_0_FRONT_CONTROLLER
+// SCARLETT1 — INDEX FRONT CONTROLLER (FULL)
+// Build: SCARLETT1_INDEX_FULL_v25_1_ABS_WORLD_PANEL_OVERRIDE
 
-const BUILD = "SCARLETT1_INDEX_FULL_v25_0_FRONT_CONTROLLER";
+const BUILD = "SCARLETT1_INDEX_FULL_v25_1_ABS_WORLD_PANEL_OVERRIDE";
 
 // ---- DIAG + CONSOLE fingerprint (must appear no matter what) ----
 const dwrite = (msg) => { try { window.__scarlettDiagWrite?.(String(msg)); } catch (_) {} };
@@ -27,24 +27,9 @@ window.SCARLETT.engine = window.SCARLETT.engine || { BUILD, startedAt: new Date(
 window.__scarlettEngine = window.SCARLETT.engine;
 window.__SCARLETT_ENGINE__ = window.SCARLETT.engine;
 
-// ---- AUTHORITATIVE MODULE TEST ENDPOINT (panel-proof) ----
-async function runModuleTestFallback() {
-  const eng = window.SCARLETT?.engine;
-  return {
-    ok: true,
-    time: new Date().toISOString(),
-    build: BUILD,
-    note: "Front-controller fallback test endpoint (works even if world fails).",
-    engineAttached: true,
-    enginePresent: !!eng,
-    renderer: !!eng?.renderer,
-    worldLoaded: !!eng?.world,
-    errors: eng?.errors || []
-  };
-}
-
-window.SCARLETT.runModuleTest = async () => {
-  // Prefer world orchestrator if it exists
+// ---- AUTHORITATIVE PANEL OVERRIDE: module test endpoint (panel-proof) ----
+const forcedModuleTest = async () => {
+  // Prefer world orchestrator if available
   if (typeof window.__scarlettRunModuleTest === "function") {
     try {
       const r = await window.__scarlettRunModuleTest();
@@ -53,13 +38,32 @@ window.SCARLETT.runModuleTest = async () => {
       return { ok: false, source: "__scarlettRunModuleTest", error: e?.message || String(e) };
     }
   }
-  return runModuleTestFallback();
+
+  // Fallback report (always works)
+  const eng = window.SCARLETT?.engine;
+  return {
+    ok: true,
+    source: "forcedFallback",
+    time: new Date().toISOString(),
+    build: BUILD,
+    engineAttached: true,
+    enginePresent: !!eng,
+    renderer: !!eng?.renderer,
+    worldLoaded: !!eng?.world,
+    errors: eng?.errors || []
+  };
 };
 
-// Aliases old panels might call
-window.__scarlettRunModuleTest = window.__scarlettRunModuleTest || window.SCARLETT.runModuleTest;
-window.__scarlettModuleTest = window.__scarlettModuleTest || window.SCARLETT.runModuleTest;
-window.runModuleTest = window.runModuleTest || window.SCARLETT.runModuleTest;
+// Install in every likely name the panel might use
+window.SCARLETT.runModuleTest = forcedModuleTest;
+window.__scarlettRunModuleTest = window.__scarlettRunModuleTest || forcedModuleTest;
+window.__scarlettModuleTest = forcedModuleTest;
+window.__runModuleTest = forcedModuleTest;
+window.runModuleTest = forcedModuleTest;
+
+// Extra: some panels check these exact globals
+window.__scarlettEngineAttached = true;
+window.__scarlettEngine = window.SCARLETT.engine;
 
 // ---- Three.js + VR boot (GH pages safe) ----
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
@@ -69,6 +73,7 @@ const log = (...a) => { console.log("[scarlett1]", ...a); dwrite(`[scarlett1] ${
 const warn = (...a) => { console.warn("[scarlett1]", ...a); dwrite(`[scarlett1][warn] ${a.join(" ")}`); };
 const err  = (...a) => { console.error("[scarlett1]", ...a); dwrite(`[scarlett1][err] ${a.join(" ")}`); };
 
+// ✅ Preflight fetch check so we can see 404 vs JS error
 async function canFetch(url) {
   try {
     const r = await fetch(url, { method: "GET", cache: "no-store" });
@@ -78,10 +83,13 @@ async function canFetch(url) {
   }
 }
 
+// ✅ ABSOLUTE world import (no relative-base ambiguity)
 async function safeImportWorld(cacheTag = "") {
-  const url = `./world.js${cacheTag ? `?v=${cacheTag}` : ""}`;
+  const url = `/js/scarlett1/world.js${cacheTag ? `?v=${cacheTag}` : ""}`;
+
   const check = await canFetch(url);
-  log(`world preflight: ok=${check.ok} status=${check.status} ct=${check.ct}${check.error ? ` err=${check.error}` : ""}`);
+  log(`world preflight: url=${url} ok=${check.ok} status=${check.status} ct=${check.ct}${check.error ? ` err=${check.error}` : ""}`);
+
   if (!check.ok) return null;
 
   try {
@@ -130,9 +138,9 @@ async function main() {
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
   camera.position.set(0, 1.6, 0);
 
-  // Update the engine object (still attached)
+  // Update engine object (still attached)
   const engine = window.SCARLETT.engine = Object.assign(window.SCARLETT.engine || {}, {
-    BUILD, THREE, scene, camera, renderer: null, world: null
+    BUILD, THREE, scene, camera, renderer: null, world: null, errors: window.SCARLETT.engine?.errors || []
   });
   window.__scarlettEngine = engine;
   window.__SCARLETT_ENGINE__ = engine;
@@ -153,13 +161,12 @@ async function main() {
     log("renderer + VRButton ✅");
   } catch (e) {
     const msg = e?.message || String(e);
-    engine.errors = engine.errors || [];
     engine.errors.push({ stage: "renderer", error: msg });
     err("renderer init failed ❌", msg);
     return;
   }
 
-  // Load world (now that we know it’s served)
+  // World load (absolute path)
   const worldMod = await safeImportWorld(Date.now().toString());
   let WORLD;
 
@@ -174,7 +181,6 @@ async function main() {
     }
   } catch (e) {
     const msg = e?.message || String(e);
-    engine.errors = engine.errors || [];
     engine.errors.push({ stage: "world", error: msg });
     err("world boot crashed ❌", msg);
     WORLD = buildFallbackWorld(scene);

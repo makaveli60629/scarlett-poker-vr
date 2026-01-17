@@ -1,11 +1,7 @@
-// /js/scarlett1/index.js — Scarlett Runtime Spine (ULTIMATE)
-// BUILD: SCARLETT_RUNTIME_ULTIMATE_v4_3
+// /js/scarlett1/index.js — SCARLETT1 RUNTIME (ULTIMATE DIAG)
+// BUILD: SCARLETT1_RUNTIME_ULT_DIAG_v4_3
 
-const BUILD = "SCARLETT_RUNTIME_ULTIMATE_v4_3";
-
-const log = (...a) => console.log("[scarlett]", ...a);
-const warn = (...a) => console.warn("[scarlett]", ...a);
-const err = (...a) => console.error("[scarlett]", ...a);
+const BUILD = "SCARLETT1_RUNTIME_ULT_DIAG_v4_3";
 
 const $ = (id) => document.getElementById(id);
 
@@ -16,25 +12,17 @@ const ui = {
   btnHideHud: $("btnHideHud"),
   btnTeleport: $("btnTeleport"),
   btnDiag: $("btnDiag"),
-  btnTouchToggle: $("btnTouchToggle"),
-
   diagPanel: $("diagPanel"),
   btnDiagClose: $("btnDiagClose"),
   btnTestModules: $("btnTestModules"),
-  btnSafeMode: $("btnSafeMode"),
   btnResetPlayer: $("btnResetPlayer"),
   btnReload: $("btnReload"),
-  btnCopyDiag: $("btnCopyDiag"),
-  diagRuntime: $("diagRuntime"),
-  diagInput: $("diagInput"),
+  btnCopyLogs: $("btnCopyLogs"),
+  btnClearLogs: $("btnClearLogs"),
+  btnPanicClose: $("btnPanicClose"),
+  diagControllers: $("diagControllers"),
   diagModules: $("diagModules"),
-  diagError: $("diagError"),
-
-  touchControls: $("touchControls"),
-  stickLeft: $("stickLeft"),
-  stickRight: $("stickRight"),
-  btnTouchMenu: $("btnTouchMenu"),
-  btnTouchTeleport: $("btnTouchTeleport"),
+  diagLogs: $("diagLogs"),
 };
 
 function setStatus(s) {
@@ -42,79 +30,81 @@ function setStatus(s) {
   console.log("[status]", s);
 }
 
-function setLastError(e) {
-  const txt = e?.stack || e?.message || String(e);
-  if (ui.diagError) ui.diagError.textContent = txt;
-  console.error("[LAST_ERROR]", e);
+// ----- log capture (surgical debugging) -----
+const LOG_MAX = 180;
+const logBuf = [];
+function pushLog(line) {
+  logBuf.push(line);
+  if (logBuf.length > LOG_MAX) logBuf.shift();
+  if (ui.diagLogs) ui.diagLogs.textContent = logBuf.join("\n");
+}
+(function patchConsole(){
+  const origLog = console.log.bind(console);
+  const origWarn = console.warn.bind(console);
+  const origErr = console.error.bind(console);
+
+  console.log = (...a) => { origLog(...a); pushLog(formatLine("LOG", a)); };
+  console.warn = (...a) => { origWarn(...a); pushLog(formatLine("WRN", a)); };
+  console.error = (...a) => { origErr(...a); pushLog(formatLine("ERR", a)); };
+})();
+function formatLine(tag, args) {
+  const t = new Date().toISOString().slice(11,19);
+  return `[${t}] ${tag} ${args.map(safeStr).join(" ")}`;
+}
+function safeStr(v) {
+  if (typeof v === "string") return v;
+  try { return JSON.stringify(v); } catch { return String(v); }
 }
 
-// Core three only (Quest/Android safe)
+// ----- imports -----
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
 import { buildWorld } from "./world.js";
 
-// -------------------- Engine State --------------------
+// ----- runtime state -----
 let renderer, scene, camera, clock;
 let player, head;
 let world = null;
 let floorMeshes = [];
+let teleportEnabled = false;
+let snapTurnCooldown = 0;
 
 const state = {
   inXR: false,
-  hudHidden: false,
   diagOpen: false,
-  teleportEnabled: false,
-  safeMode: false,
-  touchEnabled: false,
+  hudHidden: false,
 };
 
-let snapTurnCooldown = 0;
-
-// Controllers
+// Controller objects (Quest + Android + WebXR)
 const controllers = {
-  left: null, right: null,
-  leftGamepad: null, rightGamepad: null,
-  leftRay: null, rightRay: null,
+  left: null,
+  right: null,
+  leftGamepad: null,
+  rightGamepad: null,
+  leftRay: null,
+  rightRay: null,
   teleportMarker: null,
   teleportTarget: null,
 };
 
-let teleportAiming = false;
-
-// Touch virtual axes
-const touch = {
-  left: { active:false, id:null, x:0, y:0 },
-  right:{ active:false, id:null, x:0, y:0 },
-};
-
-// Module registry (edit in world.js via ctx.modules.enable/disable)
-const modules = {
-  list: [],          // { id, title, enabled, init, update, dispose, timingMs, error }
-  loaded: false,
-};
-
-// -------------------- Boot --------------------
 boot().catch((e) => {
-  err("BOOT FAIL", e);
-  setStatus("BOOT FAIL ❌\n" + (e?.stack || e?.message || String(e)));
-  setLastError(e);
+  console.error("RUNTIME BOOT FAIL", e);
+  setStatus("RUNTIME BOOT FAIL ❌\n" + (e?.stack || e?.message || String(e)));
 });
 
 async function boot() {
   setStatus(`booting…\nBUILD=${BUILD}`);
 
-  // Scene
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
 
-  // Rig
   camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 250);
+
   player = new THREE.Group();
   head = new THREE.Group();
   head.add(camera);
   player.add(head);
   scene.add(player);
 
-  // Renderer
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -130,67 +120,39 @@ async function boot() {
   hookUI();
   hookXR();
   initControllers();
-  initTouchControls();
 
   setStatus(`renderer OK ✅\nBUILD=${BUILD}\nbuilding world…`);
 
-  // Build world (also mounts modules)
   try {
-    world = await buildWorld(makeContext());
+    world = await buildWorld({
+      THREE,
+      scene,
+      player,
+      renderer,
+      onRegisterFloors: (meshes) => { floorMeshes = meshes || []; },
+      onStatus: (s) => setStatus(s),
+      log: (...a) => console.log("[world]", ...a),
+      warn: (...a) => console.warn("[world]", ...a),
+      err: (...a) => console.error("[world]", ...a),
+    });
   } catch (e) {
-    err("WORLD BUILD FAIL", e);
+    console.error("WORLD BUILD FAIL", e);
     setStatus("WORLD BUILD FAIL ❌\n" + (e?.stack || e?.message || String(e)));
-    setLastError(e);
     world = null;
   }
+
+  // Render initial module list
+  renderModuleList();
 
   window.addEventListener("resize", onResize);
   renderer.setAnimationLoop(tick);
 
-  setStatus(`ready ✅\nBUILD=${BUILD}\nTeleport: ${state.teleportEnabled ? "ON" : "OFF"}`);
+  setStatus(
+    `ready ✅\nBUILD=${BUILD}\nTeleport: ${teleportEnabled ? "ON" : "OFF"}\nEnter VR uses requestSession (no VRButton)`
+  );
 }
 
-function makeContext() {
-  return {
-    THREE,
-    scene,
-    player,
-    renderer,
-    log, warn, err,
-    onStatus: (s) => setStatus(s),
-    onRegisterFloors: (meshes) => { floorMeshes = meshes || []; },
-
-    // Ultimate diagnostics + module registry helpers
-    diag: {
-      setLastError,
-      mark: (label) => log("[MARK]", label),
-    },
-    modules: {
-      register(def) {
-        // def: { id, title, enabled?, init(ctx), update(dt), dispose() }
-        modules.list.push({
-          id: def.id,
-          title: def.title || def.id,
-          enabled: def.enabled !== false,
-          init: def.init,
-          update: def.update,
-          dispose: def.dispose,
-          timingMs: 0,
-          error: null,
-        });
-      },
-      enable(id, on = true) {
-        const m = modules.list.find(x => x.id === id);
-        if (m) m.enabled = !!on;
-      },
-      getAll() { return modules.list; },
-      clear() { modules.list = []; modules.loaded = false; },
-    },
-    state,
-  };
-}
-
-// -------------------- UI / Diag --------------------
+// ---------------- UI / DIAG ----------------
 function hookUI() {
   ui.btnHideHud?.addEventListener("click", () => {
     state.hudHidden = !state.hudHidden;
@@ -199,54 +161,52 @@ function hookUI() {
   });
 
   ui.btnTeleport?.addEventListener("click", () => {
-    state.teleportEnabled = !state.teleportEnabled;
-    ui.btnTeleport.textContent = state.teleportEnabled ? "Teleport: ON" : "Teleport: OFF";
+    teleportEnabled = !teleportEnabled;
+    ui.btnTeleport.textContent = teleportEnabled ? "Teleport: ON" : "Teleport: OFF";
   });
 
   ui.btnDiag?.addEventListener("click", () => toggleDiag());
   ui.btnDiagClose?.addEventListener("click", () => toggleDiag(false));
-
-  ui.btnTouchToggle?.addEventListener("click", () => {
-    state.touchEnabled = !state.touchEnabled;
-    ui.touchControls.style.display = state.touchEnabled ? "block" : "none";
-    ui.btnTouchToggle.textContent = state.touchEnabled ? "Touch: ON" : "Touch: OFF";
+  ui.btnPanicClose?.addEventListener("click", () => {
+    // hard close even if something weird happens
+    state.diagOpen = false;
+    if (ui.diagPanel) ui.diagPanel.style.display = "none";
   });
 
   ui.btnTestModules?.addEventListener("click", () => {
-    updateDiag(true);
-    setStatus("MODULE TEST ✅\n(see Diagnostics panel)");
-  });
-
-  ui.btnSafeMode?.addEventListener("click", async () => {
-    // SAFE MODE: disable all modules and rebuild world base
-    state.safeMode = !state.safeMode;
-    setStatus(`SAFE MODE ${state.safeMode ? "ON" : "OFF"}\nrebuilding world…`);
-
-    try {
-      // Dispose modules/world if present
-      try { if (world?.dispose) world.dispose(); } catch {}
-      world = await buildWorld(makeContext());
-      setStatus(`SAFE MODE ${state.safeMode ? "ON" : "OFF"} ✅\nBUILD=${BUILD}`);
-    } catch (e) {
-      setStatus(`SAFE MODE rebuild failed ❌\n${e?.message || String(e)}`);
-      setLastError(e);
-    }
+    const summary = {
+      three: !!THREE,
+      xr: !!navigator.xr,
+      renderer: !!renderer,
+      world: !!world,
+      floors: floorMeshes.length,
+      inXR: state.inXR,
+      build: BUILD,
+    };
+    setStatus("MODULE TEST ✅\n" + Object.entries(summary).map(([k,v]) => `${k}=${v}`).join("\n"));
+    renderModuleList();
   });
 
   ui.btnResetPlayer?.addEventListener("click", () => resetPlayer());
   ui.btnReload?.addEventListener("click", () => location.reload());
 
-  ui.btnCopyDiag?.addEventListener("click", async () => {
-    const txt = buildDiagDump();
+  ui.btnCopyLogs?.addEventListener("click", async () => {
+    const text = logBuf.join("\n");
     try {
-      await navigator.clipboard.writeText(txt);
-      setStatus("Diagnostics copied ✅");
+      await navigator.clipboard.writeText(text);
+      setStatus("logs copied ✅");
     } catch {
-      setStatus("Copy failed ❌ (clipboard blocked)");
+      // fallback: show in status
+      setStatus("copy failed ❌\n(clipboard blocked)");
     }
   });
 
-  // Manual Enter VR (no VRButton dependency)
+  ui.btnClearLogs?.addEventListener("click", () => {
+    logBuf.length = 0;
+    if (ui.diagLogs) ui.diagLogs.textContent = "";
+    setStatus("logs cleared ✅");
+  });
+
   ui.btnEnterVr?.addEventListener("click", async () => {
     try {
       if (!navigator.xr) { setStatus("WebXR not available ❌"); return; }
@@ -259,99 +219,80 @@ function hookUI() {
       await renderer.xr.setSession(session);
       setStatus("XR session requested ✅");
     } catch (e) {
+      console.error("Enter VR failed", e);
       setStatus("Enter VR failed ❌\n" + (e?.message || String(e)));
-      setLastError(e);
     }
   });
 }
 
 function toggleDiag(force) {
   state.diagOpen = typeof force === "boolean" ? force : !state.diagOpen;
-  ui.diagPanel.style.display = state.diagOpen ? "block" : "none";
-  if (state.diagOpen) updateDiag(true);
+  if (ui.diagPanel) ui.diagPanel.style.display = state.diagOpen ? "block" : "none";
+  if (state.diagOpen) {
+    renderControllersDiag();
+    renderModuleList();
+  }
 }
 
-function updateDiag(force = false) {
-  if (!state.diagOpen && !force) return;
+function renderControllersDiag() {
+  const l = controllers.leftGamepad;
+  const r = controllers.rightGamepad;
 
-  const rt = {
-    build: BUILD,
-    href: location.href,
-    secureContext: window.isSecureContext,
-    ua: navigator.userAgent,
-    xr: !!navigator.xr,
-    inXR: state.inXR,
-    teleport: state.teleportEnabled,
-    touch: state.touchEnabled,
-    safeMode: state.safeMode,
-    floors: floorMeshes.length,
-  };
-  ui.diagRuntime.textContent = JSON.stringify(rt, null, 2);
+  const lines = [];
+  lines.push(`BUILD=${BUILD}`);
+  lines.push(`inXR=${state.inXR}`);
+  lines.push(`teleportEnabled=${teleportEnabled}`);
+  lines.push("");
+  lines.push(`[LEFT] connected=${!!controllers.left} gamepad=${!!l}`);
+  if (l) {
+    lines.push(`buttons=${l.buttons?.length ?? 0} axes=${l.axes?.length ?? 0}`);
+    lines.push(`axes=${(l.axes||[]).map(n => (n??0).toFixed(2)).join(", ")}`);
+  }
+  lines.push("");
+  lines.push(`[RIGHT] connected=${!!controllers.right} gamepad=${!!r}`);
+  if (r) {
+    lines.push(`buttons=${r.buttons?.length ?? 0} axes=${r.axes?.length ?? 0}`);
+    lines.push(`axes=${(r.axes||[]).map(n => (n??0).toFixed(2)).join(", ")}`);
+  }
 
-  const input = {
-    left: gamepadSummary(controllers.leftGamepad),
-    right: gamepadSummary(controllers.rightGamepad),
-    touch: {
-      left: { x: touch.left.x, y: touch.left.y, active: touch.left.active },
-      right:{ x: touch.right.x, y: touch.right.y, active: touch.right.active },
-    },
-  };
-  ui.diagInput.textContent = JSON.stringify(input, null, 2);
-
-  const mod = modules.list.map(m => ({
-    id: m.id,
-    title: m.title,
-    enabled: m.enabled,
-    timingMs: Math.round(m.timingMs),
-    error: m.error ? (m.error.message || String(m.error)) : null,
-  }));
-  ui.diagModules.textContent = JSON.stringify(mod, null, 2);
+  if (ui.diagControllers) ui.diagControllers.textContent = lines.join("\n");
 }
 
-function buildDiagDump() {
-  return [
-    "SCARLETT DIAGNOSTICS",
-    `time=${new Date().toISOString()}`,
-    `build=${BUILD}`,
-    `href=${location.href}`,
-    `ua=${navigator.userAgent}`,
-    `secureContext=${window.isSecureContext}`,
-    `navigator.xr=${!!navigator.xr}`,
-    `inXR=${state.inXR}`,
-    `teleport=${state.teleportEnabled}`,
-    `touch=${state.touchEnabled}`,
-    `safeMode=${state.safeMode}`,
-    "",
-    "GAMEPADS:",
-    JSON.stringify({ left: gamepadSummary(controllers.leftGamepad), right: gamepadSummary(controllers.rightGamepad) }, null, 2),
-    "",
-    "MODULES:",
-    JSON.stringify(modules.list.map(m => ({
-      id: m.id, enabled: m.enabled, timingMs: m.timingMs, error: m.error ? (m.error.stack || m.error.message || String(m.error)) : null
-    })), null, 2),
-    "",
-    "LAST_ERROR:",
-    ui.diagError?.textContent || "none"
-  ].join("\n");
+function renderModuleList() {
+  const items = world?.registry?.items || [];
+  if (!ui.diagModules) return;
+
+  if (!world) {
+    ui.diagModules.textContent = "world not ready";
+    return;
+  }
+
+  if (!items.length) {
+    ui.diagModules.textContent =
+      "No registry found.\nTip: in world.js return { registry } and add registry.add(...) entries.";
+    return;
+  }
+
+  const out = [];
+  out.push(`WORLD REGISTRY (${items.length})`);
+  out.push("--------------------------------");
+  for (const m of items) {
+    const s = (m.status || "ok").toUpperCase();
+    out.push(`${s.padEnd(4)}  ${m.id} — ${m.desc}${m.extra ? " | " + m.extra : ""}`);
+  }
+  ui.diagModules.textContent = out.join("\n");
 }
 
-function gamepadSummary(gp) {
-  if (!gp) return null;
-  const buttons = gp.buttons?.map(b => ({ p: !!b.pressed, v: +b.value.toFixed(3) })) || [];
-  const axes = gp.axes?.map(a => +a.toFixed(3)) || [];
-  return { id: gp.id || "?", buttons, axes };
-}
-
-function resetPlayer() {
-  player.position.set(0, 1.6, 14);
-  player.rotation.set(0, 0, 0);
-  setStatus("player reset ✅");
-}
-
-// -------------------- XR + Controllers --------------------
+// ---------------- XR + Controllers ----------------
 function hookXR() {
-  renderer.xr.addEventListener("sessionstart", () => { state.inXR = true; updateDiag(true); });
-  renderer.xr.addEventListener("sessionend", () => { state.inXR = false; updateDiag(true); });
+  renderer.xr.addEventListener("sessionstart", () => {
+    state.inXR = true;
+    setStatus(`XR session started ✅\nBUILD=${BUILD}`);
+  });
+  renderer.xr.addEventListener("sessionend", () => {
+    state.inXR = false;
+    setStatus(`XR session ended.\nBUILD=${BUILD}`);
+  });
 }
 
 function initControllers() {
@@ -383,13 +324,19 @@ function onControllerConnected(hand, e) {
   const gp = e?.data?.gamepad || null;
   if (hand === "left") controllers.leftGamepad = gp;
   if (hand === "right") controllers.rightGamepad = gp;
-  updateDiag(true);
-  setStatus(`controller ${hand} connected ✅\n${gp?.id || ""}`);
+
+  setStatus(
+    `controller ${hand} connected ✅\n` +
+    `Teleport: ${teleportEnabled ? "ON" : "OFF"}\n` +
+    `Left Y: menu • Right stick move • Left stick snap`
+  );
+
+  renderControllersDiag();
 }
 
 function makeRay(isLeft) {
-  const g = new THREE.BufferGeometry().setFromPoints([ new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1) ]);
-  const m = new THREE.LineBasicMaterial({ transparent:true, opacity: isLeft ? 0.9 : 0.35 });
+  const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
+  const m = new THREE.LineBasicMaterial({ transparent: true, opacity: isLeft ? 0.9 : 0.35 });
   const line = new THREE.Line(g, m);
   line.scale.z = 10;
   return line;
@@ -397,142 +344,32 @@ function makeRay(isLeft) {
 
 function makeTeleportMarker() {
   const geo = new THREE.RingGeometry(0.15, 0.22, 32);
-  const mat = new THREE.MeshBasicMaterial({ transparent:true, opacity:0.9, side: THREE.DoubleSide });
+  const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.9, side: THREE.DoubleSide });
   const mesh = new THREE.Mesh(geo, mat);
-  mesh.rotation.x = -Math.PI/2;
+  mesh.rotation.x = -Math.PI / 2;
   mesh.visible = false;
   return mesh;
 }
 
-function onGripStart() {
-  if (!state.teleportEnabled) return;
-  teleportAiming = true;
-}
-
+let teleportAiming = false;
+function onGripStart() { if (teleportEnabled) teleportAiming = true; }
 function onGripEnd() {
-  if (!state.teleportEnabled) return;
+  if (!teleportEnabled) return;
   teleportAiming = false;
   if (controllers.teleportTarget) {
     const y = player.position.y;
     player.position.set(controllers.teleportTarget.x, y, controllers.teleportTarget.z);
+    setStatus(`teleport ✅\n${controllers.teleportTarget.x.toFixed(2)}, ${controllers.teleportTarget.z.toFixed(2)}`);
   }
   controllers.teleportTarget = null;
   controllers.teleportMarker.visible = false;
 }
 
-// -------------------- Touch Controls (Android) --------------------
-function initTouchControls() {
-  ui.touchControls.style.display = "none";
-
-  ui.btnTouchMenu.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    toggleDiag();
-  });
-
-  ui.btnTouchTeleport.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    state.teleportEnabled = !state.teleportEnabled;
-    ui.btnTeleport.textContent = state.teleportEnabled ? "Teleport: ON" : "Teleport: OFF";
-    updateDiag(true);
-  });
-
-  bindStick(ui.stickLeft, touch.left);
-  bindStick(ui.stickRight, touch.right);
-}
-
-function bindStick(el, stickState) {
-  const knob = el.querySelector(".knob");
-  const radius = 70;
-
-  const setKnob = (x, y) => {
-    knob.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
-  };
-
-  el.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    el.setPointerCapture(e.pointerId);
-    stickState.active = true;
-    stickState.id = e.pointerId;
-  });
-
-  el.addEventListener("pointermove", (e) => {
-    if (!stickState.active || stickState.id !== e.pointerId) return;
-    const rect = el.getBoundingClientRect();
-    const cx = rect.left + rect.width/2;
-    const cy = rect.top + rect.height/2;
-    let dx = e.clientX - cx;
-    let dy = e.clientY - cy;
-
-    const len = Math.hypot(dx, dy);
-    if (len > radius) {
-      dx = (dx / len) * radius;
-      dy = (dy / len) * radius;
-    }
-
-    stickState.x = +(dx / radius).toFixed(3);
-    stickState.y = +(dy / radius).toFixed(3);
-
-    setKnob(dx, dy);
-  });
-
-  const end = (e) => {
-    if (stickState.id !== e.pointerId) return;
-    stickState.active = false;
-    stickState.id = null;
-    stickState.x = 0; stickState.y = 0;
-    setKnob(0, 0);
-  };
-
-  el.addEventListener("pointerup", end);
-  el.addEventListener("pointercancel", end);
-}
-
-function onResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-}
-
-// -------------------- Main Loop --------------------
+// ---------------- Movement + Teleport ----------------
 const tmpDir = new THREE.Vector3();
 const tmpVec = new THREE.Vector3();
 const raycaster = new THREE.Raycaster();
 const prevPressed = new WeakMap();
-
-function tick() {
-  const dt = Math.min(clock.getDelta(), 0.033);
-  snapTurnCooldown = Math.max(0, snapTurnCooldown - dt);
-
-  pollInputs(dt);
-
-  if (state.teleportEnabled && teleportAiming) updateTeleportAim();
-  else if (controllers.teleportMarker) controllers.teleportMarker.visible = false;
-
-  // Update modules (isolated)
-  for (const m of modules.list) {
-    if (!m.enabled) continue;
-    if (!m.update) continue;
-    try {
-      const t0 = performance.now();
-      m.update(dt);
-      m.timingMs = (m.timingMs * 0.9) + ((performance.now() - t0) * 0.1);
-    } catch (e) {
-      m.enabled = false;
-      m.error = e;
-      setLastError(e);
-      warn("module disabled due to error:", m.id);
-    }
-  }
-
-  if (world?.update) {
-    try { world.update(dt); } catch (e) { setLastError(e); }
-  }
-
-  renderer.render(scene, camera);
-
-  // Slow refresh diag (~4fps) when open
-  if (state.diagOpen && (performance.now() % 250 < 16)) updateDiag();
-}
 
 function handleEdgeButton(gamepad, index, fn) {
   if (!gamepad?.buttons?.[index]) return;
@@ -544,61 +381,49 @@ function handleEdgeButton(gamepad, index, fn) {
   m[index] = now;
 }
 
-function pollInputs(dt) {
-  // Touch mode axes override (Android)
-  const touchMoveX = state.touchEnabled ? touch.left.x : 0;
-  const touchMoveY = state.touchEnabled ? touch.left.y : 0;
-  const touchLookX = state.touchEnabled ? touch.right.x : 0;
-
+function pollGamepads(dt) {
   const l = controllers.leftGamepad;
   const r = controllers.rightGamepad;
 
-  // Left Y toggles diag (best effort)
+  // Left Y toggles diag (best-effort)
   if (l?.buttons?.length) {
-    handleEdgeButton(l, 3, () => toggleDiag()); // often Y
+    handleEdgeButton(l, 3, () => toggleDiag()); // typical Y
     handleEdgeButton(l, 4, () => toggleDiag()); // fallback
   }
 
-  // Movement (right stick OR touch left stick)
-  let moveX = 0, moveY = 0;
+  // Right stick move
   if (r?.axes?.length >= 2) {
     const x = r.axes[2] ?? r.axes[0] ?? 0;
     const y = r.axes[3] ?? r.axes[1] ?? 0;
-    moveX = x; moveY = y;
-  } else if (state.touchEnabled) {
-    moveX = touchMoveX;
-    moveY = touchMoveY;
+
+    const dz = 0.18;
+    const ax = Math.abs(x) > dz ? x : 0;
+    const ay = Math.abs(y) > dz ? y : 0;
+
+    if (ax || ay) {
+      camera.getWorldDirection(tmpDir);
+      tmpDir.y = 0;
+      tmpDir.normalize();
+
+      tmpVec.copy(tmpDir).cross(new THREE.Vector3(0,1,0)).normalize();
+
+      const speed = 2.0;
+      const move = new THREE.Vector3();
+      move.addScaledVector(tmpDir, -ay * speed * dt);
+      move.addScaledVector(tmpVec, ax * speed * dt);
+      player.position.add(move);
+    }
   }
 
-  const dz = 0.18;
-  const ax = Math.abs(moveX) > dz ? moveX : 0;
-  const ay = Math.abs(moveY) > dz ? moveY : 0;
-
-  if (ax || ay) {
-    camera.getWorldDirection(tmpDir);
-    tmpDir.y = 0; tmpDir.normalize();
-    tmpVec.copy(tmpDir).cross(new THREE.Vector3(0,1,0)).normalize();
-
-    const speed = 2.0;
-    const move = new THREE.Vector3();
-    move.addScaledVector(tmpDir, -ay * speed * dt);
-    move.addScaledVector(tmpVec, ax * speed * dt);
-    player.position.add(move);
-  }
-
-  // Snap turn (left stick OR touch right stick)
-  let turnX = 0;
+  // Left stick snap turn 45
   if (l?.axes?.length >= 2) {
-    turnX = l.axes[2] ?? l.axes[0] ?? 0;
-  } else if (state.touchEnabled) {
-    turnX = touchLookX;
-  }
-
-  const dzTurn = 0.35;
-  if (snapTurnCooldown === 0 && Math.abs(turnX) > dzTurn) {
-    const dir = turnX > 0 ? -1 : 1;
-    player.rotation.y += dir * (Math.PI / 4);
-    snapTurnCooldown = 0.28;
+    const lx = l.axes[2] ?? l.axes[0] ?? 0;
+    const dz = 0.35;
+    if (snapTurnCooldown === 0 && Math.abs(lx) > dz) {
+      const dir = lx > 0 ? -1 : 1;
+      player.rotation.y += dir * (Math.PI / 4);
+      snapTurnCooldown = 0.28;
+    }
   }
 }
 
@@ -625,4 +450,33 @@ function updateTeleportAim() {
     controllers.teleportTarget = null;
     controllers.teleportMarker.visible = false;
   }
-          }
+}
+
+// ---------------- Frame loop ----------------
+function tick() {
+  const dt = Math.min(clock.getDelta(), 0.033);
+  snapTurnCooldown = Math.max(0, snapTurnCooldown - dt);
+
+  pollGamepads(dt);
+
+  if (teleportEnabled && teleportAiming) updateTeleportAim();
+  else if (controllers.teleportMarker) controllers.teleportMarker.visible = false;
+
+  if (world?.update) world.update(dt);
+
+  if (state.diagOpen) renderControllersDiag();
+
+  renderer.render(scene, camera);
+}
+
+// ---------------- misc ----------------
+function resetPlayer() {
+  player.position.set(0, 1.6, 14);
+  player.rotation.set(0, 0, 0);
+  setStatus("player reset ✅");
+}
+function onResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}

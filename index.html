@@ -2,52 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Scarlett Poker VR</title>
-
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-
-  <!-- Helpful on some browsers (not perfect, but helps) -->
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <meta http-equiv="Pragma" content="no-cache" />
-  <meta http-equiv="Expires" content="0" />
-
-  <!-- Import maps need shims on some mobile browsers -->
-  <script async src="https://unpkg.com/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
-
-  <!-- ✅ THE PERMANENT FIX: resolves any `import ... from "three"` -->
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.158.0/build/three.module.js"
-    }
-  }
-  </script>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
+  <title>Scarlett VR Poker</title>
 
   <style>
-    html, body {
-      margin: 0; padding: 0;
-      width: 100%; height: 100%;
-      overflow: hidden;
-      background: #000;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-    }
-    #app { width: 100%; height: 100%; }
-    canvas { display: block; }
+    html, body { margin:0; padding:0; width:100%; height:100%; background:#000; overflow:hidden; }
+    canvas { display:block; width:100%; height:100%; }
   </style>
 </head>
 
 <body>
-  <div id="app"></div>
+  <!-- Canvas is created if missing, but we include one so mobile browsers behave -->
+  <canvas id="app"></canvas>
 
-  <!-- ✅ HARD CACHE BUST for router boot -->
-  <script type="module">
-    const v = "HTML_FULL_v1_0_" + Date.now();
-    import(`./js/index.js?v=${v}`).catch(e => {
-      console.error("[HTML] boot import failed", e);
-      document.body.innerHTML = "<pre style='color:#fff;padding:12px'>BOOT FAILED:\n" + (e?.stack||e) + "</pre>";
-    });
-  </script>
+  <!-- AUTHORITATIVE BOOT: DO NOT LOAD ANY OTHER BOOT FILES -->
+  <script src="./js/boot.js?v=BOOT_PERMA"></script>
 </body>
 </html>

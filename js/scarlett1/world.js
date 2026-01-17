@@ -1,9 +1,7 @@
 // /js/scarlett1/world.js
-// SCARLETT1_WORLD_FULL_v4_12_ORCH_6MAX_GAMEPLAY_AVATARUI_SHOWCASE
-// - Locked core nav + rigged laser + teleport + snap
-// - Orchestrator loads: pokerTable, avatars, avatarUI, pokerGameplay
-// - 6-max default
-// - Avatar "showcase" near spawn for inspection
+// SCARLETT1_WORLD_FULL_v4_13_DO_ALL_AVATAR_TABLE_GAMEPLAY_LOBBY_MENUUI
+// - Keeps locked core rig/laser/teleport/snap/knock
+// - Loads 6 modules: table, avatars, avatarUI, gameplay, lobbyStations, menuUI
 
 import GestureControl from "../modules/gestureControl.js";
 
@@ -11,28 +9,22 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
   const dwrite = (s) => { try { window.__scarlettDiagWrite?.(String(s)); } catch (_) {} };
   const log = (...a) => { console.log("[world]", ...a); dwrite(`[world] ${a.join(" ")}`); };
 
-  log("bootWorld… SCARLETT1_WORLD_FULL_v4_12_ORCH_6MAX_GAMEPLAY_AVATARUI_SHOWCASE");
+  log("bootWorld… SCARLETT1_WORLD_FULL_v4_13_DO_ALL_AVATAR_TABLE_GAMEPLAY_LOBBY_MENUUI");
 
-  // -------------------------
   // LIGHTING
-  // -------------------------
   scene.background = new THREE.Color(0x0b0e14);
   scene.add(new THREE.HemisphereLight(0xffffff, 0x303050, 1.2));
   const sun = new THREE.DirectionalLight(0xffffff, 1.0);
   sun.position.set(6, 10, 4);
   scene.add(sun);
 
-  // -------------------------
-  // RIG (MOVE THIS)
-  // -------------------------
+  // RIG
   const rig = new THREE.Group();
   rig.name = "PLAYER_RIG";
   scene.add(rig);
   rig.add(camera);
 
-  // -------------------------
-  // ANCHORS (modules attach here)
-  // -------------------------
+  // ANCHORS
   const anchors = {
     root: new THREE.Group(),
     room: new THREE.Group(),
@@ -54,9 +46,7 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
   anchors.root.add(anchors.room, anchors.stage, anchors.ui, anchors.debug);
   anchors.stage.add(anchors.table, anchors.avatars);
 
-  // -------------------------
   // FLOOR + GRID
-  // -------------------------
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(300, 300),
     new THREE.MeshStandardMaterial({ color: 0x1a1f2b, roughness: 1 })
@@ -70,9 +60,7 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
   grid.position.y = 0.01;
   anchors.room.add(grid);
 
-  // -------------------------
-  // LOBBY SHELL (starter)
-  // -------------------------
+  // LOBBY SHELL
   const lobbyWall = new THREE.Mesh(
     new THREE.CylinderGeometry(18, 18, 8, 96, 1, true),
     new THREE.MeshStandardMaterial({ color: 0x0f1420, roughness: 0.9, side: THREE.DoubleSide })
@@ -80,17 +68,18 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
   lobbyWall.position.y = 4;
   anchors.room.add(lobbyWall);
 
-  // -------------------------
-  // XR CONTROLLERS (parent under rig so they move with you)
-  // -------------------------
+  // XR CONTROLLERS (parented to rig so they move with you)
   const rightRay  = renderer.xr.getController(1);
   const leftRay   = renderer.xr.getController(0);
   const rightGrip = renderer.xr.getControllerGrip(1);
   const leftGrip  = renderer.xr.getControllerGrip(0);
 
+  rightRay.name = "RIGHT_RAY"; leftRay.name = "LEFT_RAY";
+  rightGrip.name = "RIGHT_GRIP"; leftGrip.name = "LEFT_GRIP";
+
   rig.add(rightRay, leftRay, rightGrip, leftGrip);
 
-  // Right-hand visual (box)
+  // Right-hand visual
   const handBox = new THREE.Mesh(
     new THREE.BoxGeometry(0.06, 0.02, 0.10),
     new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 })
@@ -99,9 +88,7 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
   handBox.name = "RIGHT_HAND_BOX";
   rightGrip.add(handBox);
 
-  // -------------------------
-  // LASER + RETICLE (laser on rightRay so aim is correct)
-  // -------------------------
+  // LASER + RETICLE (laser on rightRay)
   const raycaster = new THREE.Raycaster();
   const tmpO = new THREE.Vector3();
   const tmpD = new THREE.Vector3();
@@ -113,6 +100,7 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
     new THREE.Vector3(0, 0, -6)
   ]);
   const laser = new THREE.Line(laserGeom, new THREE.LineBasicMaterial({ color: 0xff3355 }));
+  laser.name = "RIGHT_LASER";
   rightRay.add(laser);
 
   const reticle = new THREE.Mesh(
@@ -121,6 +109,7 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
   );
   reticle.rotation.x = -Math.PI / 2;
   reticle.visible = false;
+  reticle.name = "TELEPORT_RETICLE";
   anchors.debug.add(reticle);
 
   const hitDot = new THREE.Mesh(
@@ -128,6 +117,7 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
     new THREE.MeshBasicMaterial({ color: 0xffffff })
   );
   hitDot.visible = false;
+  hitDot.name = "LASER_HIT_DOT";
   anchors.debug.add(hitDot);
 
   function setLaserLength(d) {
@@ -138,12 +128,9 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
 
   function updateLaser() {
     if (!renderer.xr.isPresenting) {
-      reticle.visible = false;
-      hitDot.visible = false;
-      laser.visible = false;
+      reticle.visible = false; hitDot.visible = false; laser.visible = false;
       return null;
     }
-
     laser.visible = true;
 
     rightRay.getWorldPosition(tmpO);
@@ -156,13 +143,10 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
     const hits = raycaster.intersectObject(floor, false);
     if (hits.length) {
       tmpHit.copy(hits[0].point);
-
       reticle.position.set(tmpHit.x, 0.02, tmpHit.z);
-      reticle.visible = true;
-
       hitDot.position.set(tmpHit.x, 0.03, tmpHit.z);
+      reticle.visible = true;
       hitDot.visible = true;
-
       setLaserLength(tmpO.distanceTo(tmpHit));
       return tmpHit.clone();
     }
@@ -173,16 +157,14 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
     return null;
   }
 
-  // -------------------------
-  // NAV (right stick) + teleport
-  // -------------------------
+  // NAV
   const move = { speed: 2.2, strafe: 2.0 };
   const snap = { lock: false };
   const tele = { lock: false };
 
-  function getRightGamepad(session) {
+  function getGamepad(session, handedness) {
     for (const src of session.inputSources) {
-      if (src?.handedness === "right" && src?.gamepad) return src.gamepad;
+      if (src?.handedness === handedness && src?.gamepad) return src.gamepad;
     }
     return null;
   }
@@ -202,14 +184,14 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
     rig.position.z += p.z - head.z;
   }
 
-  // -------------------------
   // TABLE DATA (6-max)
-  // -------------------------
   const tableData = {
     center: new THREE.Vector3(0, 0.78, -2),
     radius: 1.2,
     railRadius: 1.45,
-    seats: 6
+    seats: 6,
+    dealerIndex: 0,
+    activeSeat: 0
   };
 
   function syncGestureToTable() {
@@ -221,14 +203,14 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
   }
   syncGestureToTable();
 
-  // -------------------------
-  // MODULE ORCHESTRATOR (safe)
-  // -------------------------
+  // MODULE ORCHESTRATOR
   const MODULE_MANIFEST = [
     "../modules/pokerTable.module.js",
     "../modules/avatars.module.js",
     "../modules/avatarUI.module.js",
     "../modules/pokerGameplay.module.js",
+    "../modules/lobbyStations.module.js",
+    "../modules/menuUI.module.js",
   ];
 
   const modules = [];
@@ -258,6 +240,7 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
           THREE, scene, renderer, camera,
           rig, anchors,
           floor,
+          rightRay, leftRay, rightGrip, leftGrip,
           tableData,
           syncGestureToTable,
           log
@@ -273,7 +256,7 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
   async function runAllModuleTests() {
     const report = {
       ok: true,
-      build: "SCARLETT1_WORLD_FULL_v4_12_ORCH_6MAX_GAMEPLAY_AVATARUI_SHOWCASE",
+      build: "SCARLETT1_WORLD_FULL_v4_13_DO_ALL_AVATAR_TABLE_GAMEPLAY_LOBBY_MENUUI",
       time: new Date().toISOString(),
       manifest: MODULE_MANIFEST.slice(),
       modules: []
@@ -289,7 +272,6 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
       }
       const ok = !!st.ok && (test.ok !== false);
       if (!ok) report.ok = false;
-
       report.modules.push({ id: rec.id, path: rec.path, ...st, test });
     }
 
@@ -303,9 +285,7 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
   for (const p of MODULE_MANIFEST) await loadModule(p);
   log("world: modules loaded ✅");
 
-  // -------------------------
-  // Knock velocity tracking
-  // -------------------------
+  // KNOCK velocity tracking
   const lastGripPos = new THREE.Vector3();
   let lastGripInit = false;
 
@@ -318,12 +298,13 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
 
       const hitPoint = updateLaser();
 
-      const gp = getRightGamepad(session);
-      if (gp) {
-        const axX = gp.axes?.[2] ?? 0;
-        const axY = gp.axes?.[3] ?? 0;
-        const trigger = gp.buttons?.[0]?.value ?? 0;
-        const gripBtn = gp.buttons?.[1]?.value ?? 0;
+      // Right locomotion
+      const gpR = getGamepad(session, "right");
+      if (gpR) {
+        const axX = gpR.axes?.[2] ?? 0;
+        const axY = gpR.axes?.[3] ?? 0;
+        const trigger = gpR.buttons?.[0]?.value ?? 0;
+        const gripBtn = gpR.buttons?.[1]?.value ?? 0;
 
         if (Math.abs(axX) > 0.6 && !snap.lock) snapTurn(axX);
 
@@ -365,7 +346,7 @@ export async function bootWorld({ THREE, scene, renderer, camera }) {
 
       // Module updates
       for (const rec of modules) {
-        try { rec.api.update?.(dt, { THREE, scene, renderer, camera, rig, anchors, tableData }); } catch (_) {}
+        try { rec.api.update?.(dt, { THREE, scene, renderer, camera, rig, anchors, tableData, rightRay, leftRay, rightGrip, leftGrip, floor }); } catch (_) {}
       }
     }
   };

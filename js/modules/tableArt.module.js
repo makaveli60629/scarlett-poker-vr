@@ -1,5 +1,5 @@
 // /js/modules/tableArt.module.js
-// Procedural table textures + cupholders + subtle glow accents (FULL)
+// Procedural table textures + cupholders + subtle glow (FULL)
 
 export default {
   id: "tableArt.module.js",
@@ -7,21 +7,17 @@ export default {
   async init({ THREE, log }) {
     const table = window.SCARLETT?.table;
     if (!table?.group) {
-      log?.("tableArt.module: table missing (will still pass, waiting for table)");
+      log?.("tableArt.module: table missing (waiting)");
       window.SCARLETT = window.SCARLETT || {};
       window.SCARLETT.tableArt = { ready: false };
       return;
     }
 
-    // Make felt texture
     const feltCanvas = document.createElement("canvas");
     feltCanvas.width = 512; feltCanvas.height = 512;
     const fctx = feltCanvas.getContext("2d");
-
     fctx.fillStyle = "#145a32";
     fctx.fillRect(0,0,512,512);
-
-    // speckle
     for (let i = 0; i < 8000; i++) {
       const x = (Math.random() * 512) | 0;
       const y = (Math.random() * 512) | 0;
@@ -29,8 +25,6 @@ export default {
       fctx.fillStyle = `rgba(255,255,255,${a})`;
       fctx.fillRect(x,y,1,1);
     }
-
-    // subtle radial vignette
     const grad = fctx.createRadialGradient(256,256,40,256,256,260);
     grad.addColorStop(0, "rgba(0,0,0,0.00)");
     grad.addColorStop(1, "rgba(0,0,0,0.20)");
@@ -41,17 +35,13 @@ export default {
     feltTex.wrapS = feltTex.wrapT = THREE.RepeatWrapping;
     feltTex.repeat.set(1.2, 1.2);
 
-    // Rail texture
     const railCanvas = document.createElement("canvas");
     railCanvas.width = 512; railCanvas.height = 128;
     const rctx = railCanvas.getContext("2d");
     rctx.fillStyle = "#2a1a12";
     rctx.fillRect(0,0,512,128);
-
-    // stitching lines
     rctx.fillStyle = "rgba(255,255,255,0.25)";
     for (let x = 10; x < 512; x += 18) rctx.fillRect(x, 18, 6, 2);
-
     rctx.fillStyle = "rgba(0,0,0,0.25)";
     rctx.fillRect(0, 0, 512, 10);
     rctx.fillRect(0, 118, 512, 10);
@@ -60,7 +50,6 @@ export default {
     railTex.wrapS = railTex.wrapT = THREE.RepeatWrapping;
     railTex.repeat.set(2.5, 1);
 
-    // Apply to meshes by name
     const felt = table.group.getObjectByName("TABLE_FELT");
     if (felt?.material) {
       felt.material.map = feltTex;
@@ -73,7 +62,6 @@ export default {
       rail.material.needsUpdate = true;
     }
 
-    // Cupholders around rail
     const holders = new THREE.Group();
     holders.name = "CUPHOLDERS";
     table.group.add(holders);
@@ -92,7 +80,6 @@ export default {
       holders.add(cup);
     }
 
-    // subtle glow ring
     const glow = new THREE.Mesh(
       new THREE.TorusGeometry(0.92, 0.01, 10, 96),
       new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0.10 })
@@ -107,8 +94,5 @@ export default {
     log?.("tableArt.module ✅ (procedural textures + cupholders)");
   },
 
-  test() {
-    const ok = true;
-    return { ok, note: "table art module loaded" };
-  }
+  test() { return { ok: true, note: "table art module loaded" }; }
 };

@@ -1,6 +1,5 @@
 // /js/modules/slotsNet.module.js
-// Networking-ready slot system (no networking yet) (FULL)
-// Seat map is authoritative + event-driven so WebRTC/WSS can plug in later.
+// Networking-ready seat map (FULL)
 
 export default {
   id: "slotsNet.module.js",
@@ -31,13 +30,11 @@ export default {
         if (seat < 0 || seat >= state.seatCount) return false;
         const s = state.seats[seat];
         if (s.playerId) return false;
-
         s.playerId = player.playerId;
         s.name = player.name || `P${seat+1}`;
         s.isLocal = !!player.isLocal;
         s.connected = true;
         state.version++;
-
         emit("SCARLETT_SEAT_JOIN", { seat, player: { ...s }, version: state.version });
         return true;
       },
@@ -46,23 +43,19 @@ export default {
         if (seat < 0 || seat >= state.seatCount) return false;
         const s = state.seats[seat];
         if (!s.playerId) return false;
-
         const prev = { ...s };
         s.playerId = null;
         s.name = null;
         s.isLocal = false;
         s.connected = false;
         state.version++;
-
         emit("SCARLETT_SEAT_LEAVE", { seat, prev, version: state.version });
         return true;
       },
 
-      // For future networking: apply remote patch
       applyPatch: (patch) => {
         if (!patch || !Array.isArray(patch.seats)) return false;
         if (patch.seats.length !== state.seatCount) return false;
-
         state.seats = patch.seats.map((x, i) => ({
           seat: i,
           playerId: x.playerId ?? null,
@@ -71,7 +64,6 @@ export default {
           connected: !!x.connected
         }));
         state.version = (patch.version ?? state.version + 1);
-
         emit("SCARLETT_SEAT_PATCH", { state: api.getState() });
         return true;
       }
@@ -80,7 +72,6 @@ export default {
     window.SCARLETT = window.SCARLETT || {};
     window.SCARLETT.slots = api;
 
-    // Auto: claim local seat 0 for now (can change later)
     api.joinSeat(0, { playerId: "local", name: "YOU", isLocal: true });
 
     log?.("slotsNet.module ✅ (seat map ready)");

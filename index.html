@@ -1,86 +1,190 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <!--
+    SCARLETTVR POKER — PERMANENT INDEX (DO NOT EDIT AGAIN)
+    Build: SCARLETT_PERMA_INDEX_v1_0
+
+    This file is designed to be "set and forget":
+    - Stable HUD button IDs (never change them)
+    - Touch-safe on Android/Quest (pointer/touch + no canvas touch stealing)
+    - Always-on Admin Diagnostics Panel (copyable report)
+    - Safe loader + error trapping so you always get a usable diag even if world breaks
+  -->
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <title>ScarlettVR Poker — Authoritative Full</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
+  <title>ScarlettVR Poker</title>
 
   <style>
-    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
-    #app { position:fixed; inset:0; }
+    :root {
+      --hud-z: 2147482000;
+      --diag-z: 2147483000;
+      --bg: #000;
+      --panel-bg: rgba(0,0,0,.78);
+      --border: rgba(255,255,255,.14);
+      --text: rgba(255,255,255,.95);
+      --muted: rgba(255,255,255,.72);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --ui: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
 
-    /* Canvas must NEVER block the HUD */
-    canvas { pointer-events: none !important; }
+    html, body {
+      margin: 0; padding: 0;
+      width: 100%; height: 100%;
+      background: var(--bg);
+      overflow: hidden;
+      touch-action: none;
+    }
 
-    /* HUD must ALWAYS receive touches */
-    #hud, #hud * { pointer-events: auto !important; }
+    /* App root for renderer */
+    #app {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      z-index: 0;
+    }
 
+    /* CRITICAL: Canvas must never steal touches from HUD on Android/Quest */
+    canvas {
+      pointer-events: none !important;
+      touch-action: none !important;
+    }
+
+    /* HUD container */
     #hud {
       position: fixed;
       left: 12px;
       top: 12px;
-      z-index: 999999;
       display: flex;
       gap: 10px;
       flex-wrap: wrap;
       max-width: calc(100vw - 24px);
+      z-index: var(--hud-z);
       user-select: none;
       -webkit-user-select: none;
-      touch-action: manipulation;
-    }
-
-    .btn {
-      padding: 12px 18px;
-      border-radius: 16px;
-      border: 1px solid rgba(255,255,255,0.22);
-      background: rgba(0,0,0,0.65);
-      color: #fff;
-      font: 600 14px/1.1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      letter-spacing: 0.2px;
-      cursor: pointer;
+      pointer-events: auto;
       touch-action: manipulation;
       -webkit-tap-highlight-color: rgba(0,0,0,0);
     }
-    .btn:active { transform: scale(0.98); }
 
-    #footer {
+    .hudBtn {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,0.60);
+      color: var(--text);
+      font: 800 14px/1.1 var(--ui);
+      letter-spacing: .2px;
+      padding: 12px 16px;
+      border-radius: 16px;
+      cursor: pointer;
+      pointer-events: auto;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: rgba(0,0,0,0);
+      box-shadow: 0 8px 24px rgba(0,0,0,.25);
+    }
+    .hudBtn:active { transform: scale(.985); }
+    .hudBtn[aria-pressed="true"] { border-color: rgba(0,255,0,.35); }
+
+    #footerHint {
       position: fixed;
       left: 0;
       right: 0;
       bottom: 10px;
       padding: 0 12px;
-      z-index: 999999;
-      color: rgba(255,255,255,0.75);
-      font: 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.75);
+      z-index: var(--hud-z);
+      color: var(--muted);
+      font: 13px/1.25 var(--ui);
+      text-shadow: 0 1px 2px rgba(0,0,0,.75);
       pointer-events: none;
     }
 
-    #diagPanel {
+    /* Admin Diag Panel */
+    #scarlettAdminDiag {
       position: fixed;
-      left: 12px;
-      top: 92px;
-      width: min(92vw, 560px);
-      height: 42vh;
-      background: rgba(0,0,0,0.78);
-      color: #0f0;
-      font: 12px/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      padding: 10px;
-      border: 1px solid rgba(0,255,0,0.35);
-      border-radius: 12px;
-      z-index: 999999;
-      white-space: pre-wrap;
-      overflow: auto;
+      left: 10px;
+      top: 86px;
+      width: min(94vw, 760px);
+      height: min(86vh, 780px);
+      z-index: var(--diag-z);
+      background: rgba(0,0,0,0.86);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      color: var(--text);
+      font: 12px/1.25 var(--mono);
       display: none;
+      overflow: hidden;
+      pointer-events: auto;
+      touch-action: manipulation;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 12px 34px rgba(0,0,0,.55);
     }
 
-    /* Kill any accidental fullscreen blockers */
+    #scarlettAdminDiagHeader {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 10px 10px 8px 10px;
+      border-bottom: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.03);
+    }
+
+    .diagTitle { font-weight: 900; letter-spacing: .3px; }
+    .diagBuild { opacity: .75; }
+
+    .diagBtns {
+      margin-left: auto;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .diagBtn {
+      appearance: none;
+      border: 1px solid rgba(255,255,255,.18);
+      background: rgba(0,0,0,.45);
+      color: var(--text);
+      font: 900 12px/1 var(--ui);
+      padding: 8px 10px;
+      border-radius: 12px;
+      cursor: pointer;
+      pointer-events: auto;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: rgba(0,0,0,0);
+    }
+    .diagBtn:active { transform: scale(.985); }
+
+    #scarlettAdminDiagBody {
+      height: calc(100% - 54px);
+      overflow: auto;
+      padding: 10px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+
+    .diagCard {
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 12px;
+      padding: 10px;
+      background: rgba(255,255,255,.04);
+    }
+    .diagCardTitle { font-weight: 900; margin-bottom: 6px; }
+    .diagCard pre { margin: 0; white-space: pre-wrap; }
+
+    /* Emergency: If your project accidentally adds fullscreen blockers, this protects the HUD/Diag */
+    #hud, #hud * , #scarlettAdminDiag, #scarlettAdminDiag * {
+      pointer-events: auto !important;
+    }
+
+    /* Keep common blockers from eating touches (best-effort) */
     #overlay, #blocker, #touchBlocker, .overlay, .blocker {
       pointer-events: none !important;
     }
   </style>
 
-  <!-- ESM import map for Three -->
+  <!-- Three.js import map (stable pin) -->
   <script type="importmap">
   {
     "imports": {
@@ -94,19 +198,514 @@
 <body>
   <div id="app"></div>
 
+  <!-- PERMANENT HUD (DO NOT CHANGE IDs) -->
   <div id="hud">
-    <button class="btn" id="btnEnterVR">Enter VR</button>
-    <button class="btn" id="btnHideHUD">Hide HUD</button>
-    <button class="btn" id="btnTeleport">Teleport: OFF</button>
-    <button class="btn" id="btnDiag">Diag</button>
+    <button class="hudBtn" id="btnEnterVR"   type="button">Enter VR</button>
+    <button class="hudBtn" id="btnHideHUD"   type="button">Hide HUD</button>
+    <button class="hudBtn" id="btnTeleport"  type="button">Teleport: OFF</button>
+    <button class="hudBtn" id="btnDiag"      type="button">Diag</button>
   </div>
 
-  <div id="diagPanel">DIAG READY</div>
-
-  <div id="footer">
-    Controls (Quest): Left stick = move/strafe • Right stick = snap turn • Trigger = teleport (when Teleport ON) • Menu = toggle HUD (if supported)
+  <div id="footerHint">
+    Controls: Left stick = move • Right stick = snap turn • Trigger = teleport (when ON)
   </div>
 
-  <script type="module" src="./js/scarlett1/index.js"></script>
+  <!-- PERMANENT ADMIN DIAGNOSTICS PANEL -->
+  <div id="scarlettAdminDiag" aria-hidden="true">
+    <div id="scarlettAdminDiagHeader">
+      <div class="diagTitle">SCARLETT • ADMIN DIAGNOSTICS</div>
+      <div class="diagBuild" id="admBuild">SCARLETT_PERMA_INDEX_v1_0</div>
+
+      <div class="diagBtns">
+        <button class="diagBtn" id="admRun"   type="button">RUN ALL</button>
+        <button class="diagBtn" id="admCopy"  type="button">COPY REPORT</button>
+        <button class="diagBtn" id="admFix"   type="button">FORCE TOUCH FIX</button>
+        <button class="diagBtn" id="admReload"type="button">RELOAD</button>
+        <button class="diagBtn" id="admHard"  type="button">HARD RELOAD</button>
+        <button class="diagBtn" id="admClose" type="button">CLOSE</button>
+      </div>
+    </div>
+
+    <div id="scarlettAdminDiagBody">
+      <div class="diagCard"><div class="diagCardTitle">Preflight / Environment</div><div id="admEnv"></div></div>
+      <div class="diagCard"><div class="diagCardTitle">HUD Buttons / Touch Blockers</div><div id="admHud"></div></div>
+      <div class="diagCard"><div class="diagCardTitle">XR / WebXR</div><div id="admXr"></div></div>
+      <div class="diagCard"><div class="diagCardTitle">Controllers / Gamepads</div><div id="admGp"></div></div>
+      <div class="diagCard"><div class="diagCardTitle">Renderer / Canvas</div><div id="admRend"></div></div>
+      <div class="diagCard"><div class="diagCardTitle">Module / File Checks (fetch)</div><div id="admMods"></div></div>
+      <div class="diagCard"><div class="diagCardTitle">Live Log</div><pre id="admLog"></pre></div>
+    </div>
+  </div>
+
+  <script type="module">
+    // ============================================================
+    // SCARLETT PERMANENT LOADER + ADMIN DIAGNOSTICS (ONE FILE)
+    // ============================================================
+
+    const BUILD = "SCARLETT_PERMA_INDEX_v1_0";
+    const startTs = Date.now();
+
+    // Expose stable diag writer for any other JS to call
+    window.__scarlettDiagWrite = window.__scarlettDiagWrite || function(msg){ try { console.log(String(msg)); } catch(_){} };
+
+    const $ = (id) => document.getElementById(id);
+    const ui = {
+      hud: $("hud"),
+      btnEnterVR: $("btnEnterVR"),
+      btnHideHUD: $("btnHideHUD"),
+      btnTeleport: $("btnTeleport"),
+      btnDiag: $("btnDiag"),
+      panel: $("scarlettAdminDiag"),
+      admBuild: $("admBuild"),
+      admRun: $("admRun"),
+      admCopy: $("admCopy"),
+      admFix: $("admFix"),
+      admReload: $("admReload"),
+      admHard: $("admHard"),
+      admClose: $("admClose"),
+      envEl: $("admEnv"),
+      hudEl: $("admHud"),
+      xrEl: $("admXr"),
+      gpEl: $("admGp"),
+      rendEl: $("admRend"),
+      modsEl: $("admMods"),
+      logEl: $("admLog"),
+    };
+
+    ui.admBuild.textContent = BUILD;
+
+    const state = {
+      logs: [],
+      lastReport: "",
+      teleportOn: false,
+      // IMPORTANT: Put your project modules here. This is the only list you maintain.
+      moduleChecks: [
+        { name: "js/scarlett1/index.js", url: "./js/scarlett1/index.js" },
+        { name: "js/world.js",          url: "./js/world.js" },
+        { name: "js/index.js",          url: "./js/index.js" },
+        { name: "js/main.js",           url: "./js/main.js" },
+        { name: "js/boot.js",           url: "./js/boot.js" },
+        { name: "js/scarlett1/boot.js", url: "./js/scarlett1/boot.js" },
+        { name: "js/scarlett1/boot1.js",url: "./js/scarlett1/boot1.js" }
+      ]
+    };
+
+    function dwrite(msg) {
+      const s = String(msg);
+      state.logs.push(s);
+      try { window.__scarlettDiagWrite(s); } catch (_) {}
+      try { console.log(s); } catch (_) {}
+      if (ui.logEl) {
+        ui.logEl.textContent += (ui.logEl.textContent ? "\n" : "") + s;
+        ui.logEl.scrollTop = ui.logEl.scrollHeight;
+      }
+    }
+
+    // Catch errors so diag always survives
+    window.addEventListener("error", (e) => {
+      dwrite(`[ERROR] ${e.message || e}`);
+    });
+    window.addEventListener("unhandledrejection", (e) => {
+      dwrite(`[PROMISE] ${e.reason?.message || e.reason || e}`);
+    });
+
+    // ----- Touch-safe binding helper (Android-proof) -----
+    function bind(el, fn) {
+      if (!el) return;
+      el.style.pointerEvents = "auto";
+      el.style.touchAction = "manipulation";
+      el.style.cursor = "pointer";
+
+      const handler = (e) => {
+        try { e.preventDefault(); e.stopPropagation(); } catch(_) {}
+        fn(e);
+      };
+
+      ["pointerdown","touchstart","click"].forEach(evt => {
+        el.addEventListener(evt, handler, { passive:false, capture:true });
+      });
+    }
+
+    // ----- HUD actions -----
+    function setTeleport(on) {
+      state.teleportOn = !!on;
+      ui.btnTeleport.textContent = `Teleport: ${state.teleportOn ? "ON" : "OFF"}`;
+      ui.btnTeleport.setAttribute("aria-pressed", state.teleportOn ? "true" : "false");
+      dwrite(`[HUD] teleport=${state.teleportOn}`);
+    }
+
+    function toggleHUD() {
+      const hidden = ui.hud.style.display === "none";
+      ui.hud.style.display = hidden ? "flex" : "none";
+      dwrite(`[HUD] visible=${hidden}`);
+    }
+
+    function openDiag() {
+      ui.panel.style.display = "block";
+      ui.panel.setAttribute("aria-hidden", "false");
+      dwrite("[ADMIN] panel open");
+    }
+    function closeDiag() {
+      ui.panel.style.display = "none";
+      ui.panel.setAttribute("aria-hidden", "true");
+      dwrite("[ADMIN] panel close");
+    }
+    function toggleDiag() {
+      if (ui.panel.style.display === "none" || !ui.panel.style.display) openDiag();
+      else closeDiag();
+    }
+
+    bind(ui.btnHideHUD, toggleHUD);
+    bind(ui.btnTeleport, () => setTeleport(!state.teleportOn));
+    bind(ui.btnDiag, toggleDiag);
+
+    // Enter VR: delegate to your engine if it provides a hook; otherwise try to start XR from your main code.
+    bind(ui.btnEnterVR, () => {
+      dwrite("[HUD] Enter VR pressed");
+      if (typeof window.__enterVR === "function") {
+        try { window.__enterVR(); } catch (e) { dwrite("[HUD] __enterVR error: " + (e?.message || e)); }
+        return;
+      }
+      dwrite("[HUD] __enterVR missing (your JS should define it).");
+      openDiag();
+    });
+
+    // ----- Admin panel buttons -----
+    bind(ui.admRun,   () => runAll());
+    bind(ui.admCopy,  () => copyReport());
+    bind(ui.admFix,   () => forceTouchFix());
+    bind(ui.admReload,() => location.reload());
+    bind(ui.admHard,  () => location.href = location.pathname + "?v=SCARLETT_HARD_" + Date.now());
+    bind(ui.admClose, () => closeDiag());
+
+    // Ensure panel can’t be blocked by scene events
+    ui.panel.addEventListener("pointerdown", (e) => { e.stopPropagation(); }, { capture: true });
+
+    // ----- Diagnostics core -----
+    async function runAll() {
+      dwrite(`[ADMIN] runAll()… build=${BUILD}`);
+      renderEnv();
+      renderHudTouch();
+      await renderXR();
+      renderGamepads();
+      renderRenderer();
+      await renderModules();
+      state.lastReport = makeReport();
+      dwrite("[ADMIN] runAll() ✅");
+    }
+
+    function renderEnv() {
+      const now = new Date().toISOString();
+      ui.envEl.innerHTML = `
+        <div>time=${now}</div>
+        <div>uptimeMs=${Math.floor(Date.now() - startTs)}</div>
+        <div>href=${escapeHtml(location.href)}</div>
+        <div>secureContext=${String(window.isSecureContext)}</div>
+        <div>visibility=${document.visibilityState}</div>
+        <div>touch=${"ontouchstart" in window} maxTouchPoints=${navigator.maxTouchPoints ?? "n/a"}</div>
+        <div>devicePixelRatio=${window.devicePixelRatio ?? "n/a"}</div>
+        <div>ua=${escapeHtml(navigator.userAgent)}</div>
+      `;
+    }
+
+    function renderHudTouch() {
+      const ids = ["btnEnterVR", "btnHideHUD", "btnTeleport", "btnDiag"];
+      const blocks = [];
+
+      const html = ids.map((id) => {
+        const el = $(id);
+        if (!el) return `<div>❌ <b>${id}</b>: missing</div>`;
+
+        const r = el.getBoundingClientRect();
+        const cx = clamp(Math.floor(r.left + r.width/2), 0, window.innerWidth - 1);
+        const cy = clamp(Math.floor(r.top + r.height/2), 0, window.innerHeight - 1);
+        const topEl = document.elementFromPoint(cx, cy);
+        const blocked = topEl && topEl !== el && !el.contains(topEl);
+
+        blocks.push(`[HUD] ${id} blocked=${blocked} top=${describeEl(topEl)}`);
+
+        return `
+          <div style="margin-bottom:8px;">
+            ${blocked ? "❌" : "✅"} <b>${id}</b>
+            <div style="opacity:.85;">rect=${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}</div>
+            <div style="opacity:.85;">elementFromPoint=${escapeHtml(describeEl(topEl))}</div>
+          </div>
+        `;
+      }).join("");
+
+      const blockers = findFullscreenBlockers();
+      const blkHtml = blockers.length
+        ? blockers.map(b => `<div>⚠️ blocker: ${escapeHtml(describeEl(b.el))} • z=${b.z} • pe=${escapeHtml(b.pe)}</div>`).join("")
+        : `<div>✅ no obvious fullscreen blockers</div>`;
+
+      ui.hudEl.innerHTML = `
+        <div style="margin-bottom:8px;opacity:.9;">Touch test checks whether something is sitting on top of the HUD buttons.</div>
+        ${html}
+        <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.12);padding-top:8px;">
+          <div style="font-weight:900;margin-bottom:6px;">Fullscreen Blocker Scan</div>
+          ${blkHtml}
+        </div>
+      `;
+
+      dwrite(blocks.join("\n"));
+    }
+
+    async function renderXR() {
+      if (!navigator.xr) {
+        ui.xrEl.innerHTML = `<div>❌ navigator.xr not available</div>`;
+        dwrite("[XR] navigator.xr=false");
+        return;
+      }
+      let immersive = "n/a";
+      let inline = "n/a";
+      try { immersive = await navigator.xr.isSessionSupported("immersive-vr"); } catch(_) { immersive = "error"; }
+      try { inline = await navigator.xr.isSessionSupported("inline"); } catch(_) { inline = "error"; }
+
+      ui.xrEl.innerHTML = `
+        <div>✅ navigator.xr available</div>
+        <div>isSessionSupported(immersive-vr)=${String(immersive)}</div>
+        <div>isSessionSupported(inline)=${String(inline)}</div>
+        <div>engineEnterVRHook=${typeof window.__enterVR === "function"}</div>
+      `;
+      dwrite(`[XR] immersive-vr=${immersive} inline=${inline}`);
+    }
+
+    function renderGamepads() {
+      const gps = navigator.getGamepads ? Array.from(navigator.getGamepads()).filter(Boolean) : [];
+      if (!gps.length) {
+        ui.gpEl.innerHTML = `<div>⚠️ no gamepads detected right now</div><div style="opacity:.85;">(In Quest VR, gamepads usually appear after XR session starts.)</div>`;
+        dwrite("[GP] count=0");
+        return;
+      }
+      ui.gpEl.innerHTML = gps.map((g,i) => {
+        const axes = g.axes ? g.axes.map(n => (Math.round(n*100)/100)).join(", ") : "";
+        return `
+          <div style="margin-bottom:10px;">
+            ✅ [${i}] ${escapeHtml(g.id || "gamepad")}
+            <div style="opacity:.85;">connected=${String(g.connected)} mapping=${escapeHtml(g.mapping || "n/a")}</div>
+            <div style="opacity:.85;">axes=[${axes}] buttons=${(g.buttons||[]).length}</div>
+          </div>
+        `;
+      }).join("");
+      dwrite(`[GP] count=${gps.length}`);
+    }
+
+    function renderRenderer() {
+      const canvases = Array.from(document.querySelectorAll("canvas"));
+      ui.rendEl.innerHTML = `
+        <div>canvasCount=${canvases.length}</div>
+        ${canvases.map((c,i) => {
+          const r = c.getBoundingClientRect();
+          const pe = getComputedStyle(c).pointerEvents;
+          return `<div style="opacity:.85;">canvas[${i}] ${Math.round(r.width)}x${Math.round(r.height)} pe=${escapeHtml(pe)}</div>`;
+        }).join("")}
+        <div style="margin-top:8px;opacity:.85;">If HUD taps fail and canvas pe!=none, canvas is stealing touches.</div>
+      `;
+      dwrite(`[RENDER] canvasCount=${canvases.length}`);
+    }
+
+    async function renderModules() {
+      const rows = [];
+      for (const c of state.moduleChecks) {
+        rows.push(await moduleFetchRow(c.name, c.url));
+      }
+      ui.modsEl.innerHTML = rows.join("");
+      dwrite(`[MOD] checks=${state.moduleChecks.length}`);
+    }
+
+    async function moduleFetchRow(name, url) {
+      const bust = (url.includes("?") ? "&" : "?") + "v=DIAG_" + Date.now();
+      let status = 0, ok = false, ct = "", bytes = 0, err = "", hint = "";
+      try {
+        const r = await fetch(url + bust, { cache: "no-store" });
+        status = r.status;
+        ok = r.ok;
+        ct = r.headers.get("content-type") || "";
+        const txt = await r.text();
+        bytes = txt.length;
+
+        if (txt.includes("import") && txt.includes("three")) hint += "three-import ";
+        if (txt.includes("setAnimationLoop")) hint += "xr-loop ";
+        if (txt.includes("requestSession")) hint += "requestSession ";
+        if (txt.includes("world") || txt.includes("buildWorld")) hint += "world ";
+        if (txt.toLowerCase().includes("scarlett")) hint += "scarlett ";
+      } catch (e) {
+        err = e?.message || String(e);
+      }
+
+      const badge = (ok && bytes > 0) ? "✅" : "❌";
+      return `
+        <div style="padding:8px;border:1px solid rgba(255,255,255,.10);border-radius:10px;margin-bottom:8px;">
+          <div>${badge} <b>${escapeHtml(name)}</b> <span style="opacity:.75;">(${escapeHtml(url)})</span></div>
+          <div style="opacity:.85;">status=${status} ct=${escapeHtml(ct)} bytes=${bytes}</div>
+          <div style="opacity:.85;">hint=${escapeHtml(hint || "—")}</div>
+          ${err ? `<div style="color:#ff9;opacity:.95;">err=${escapeHtml(err)}</div>` : ""}
+        </div>
+      `;
+    }
+
+    function forceTouchFix() {
+      // 1) Prevent canvases from stealing touches
+      document.querySelectorAll("canvas").forEach(c => { c.style.pointerEvents = "none"; });
+
+      // 2) Disable pointer events on any likely fullscreen blockers
+      findFullscreenBlockers().forEach(b => {
+        try { b.el.style.pointerEvents = "none"; } catch(_) {}
+      });
+
+      // 3) Force buttons to accept touches
+      ["btnEnterVR","btnHideHUD","btnTeleport","btnDiag"].forEach(id => {
+        const el = $(id);
+        if (!el) return;
+        el.style.pointerEvents = "auto";
+        el.style.touchAction = "manipulation";
+      });
+
+      dwrite("[ADMIN] FORCE TOUCH FIX applied ✅");
+      runAll();
+    }
+
+    async function copyReport() {
+      state.lastReport = makeReport();
+      try {
+        await navigator.clipboard.writeText(state.lastReport);
+        dwrite("[ADMIN] report copied ✅");
+      } catch (e) {
+        dwrite("[ADMIN] clipboard failed; report printed in Live Log (copy manually) ⚠️");
+        ui.logEl.textContent = state.lastReport;
+      }
+    }
+
+    function makeReport() {
+      const parts = [];
+      parts.push("=== SCARLETT ADMIN DIAG REPORT ===");
+      parts.push(`BUILD=${BUILD}`);
+      parts.push(`HREF=${location.href}`);
+      parts.push(`secureContext=${String(window.isSecureContext)}`);
+      parts.push(`ua=${navigator.userAgent}`);
+      parts.push(`touch=${"ontouchstart" in window} maxTouchPoints=${navigator.maxTouchPoints ?? "n/a"}`);
+      parts.push("");
+
+      parts.push("--- HUD / TOUCH ---");
+      ["btnEnterVR","btnHideHUD","btnTeleport","btnDiag"].forEach((id) => {
+        const el = $(id);
+        if (!el) { parts.push(`${id}=MISSING`); return; }
+        const r = el.getBoundingClientRect();
+        const cx = clamp(Math.floor(r.left + r.width/2), 0, window.innerWidth - 1);
+        const cy = clamp(Math.floor(r.top + r.height/2), 0, window.innerHeight - 1);
+        const topEl = document.elementFromPoint(cx, cy);
+        const blocked = topEl && topEl !== el && !el.contains(topEl);
+        parts.push(`${id}=OK blocked=${blocked} top=${describeEl(topEl)}`);
+      });
+
+      parts.push("");
+      parts.push("--- FULLSCREEN BLOCKERS ---");
+      const blks = findFullscreenBlockers();
+      if (!blks.length) parts.push("none");
+      blks.forEach(b => parts.push(`${describeEl(b.el)} z=${b.z} pe=${b.pe}`));
+
+      parts.push("");
+      parts.push("--- XR ---");
+      parts.push(`navigator.xr=${String(!!navigator.xr)}`);
+      parts.push(`engineEnterVRHook=${typeof window.__enterVR === "function"}`);
+
+      parts.push("");
+      parts.push("--- GAMEPADS ---");
+      const gps = navigator.getGamepads ? Array.from(navigator.getGamepads()).filter(Boolean) : [];
+      parts.push(`count=${gps.length}`);
+      gps.forEach((g,i) => parts.push(`[${i}] id=${g.id} mapping=${g.mapping} axes=${(g.axes||[]).length} buttons=${(g.buttons||[]).length}`));
+
+      parts.push("");
+      parts.push("--- CANVAS ---");
+      const canvases = Array.from(document.querySelectorAll("canvas"));
+      parts.push(`canvasCount=${canvases.length}`);
+      canvases.forEach((c,i) => {
+        const cs = getComputedStyle(c);
+        const r = c.getBoundingClientRect();
+        parts.push(`canvas[${i}] pe=${cs.pointerEvents} rect=${Math.round(r.width)}x${Math.round(r.height)}`);
+      });
+
+      parts.push("");
+      parts.push("--- MODULE FETCH CHECKS ---");
+      parts.push(ui.modsEl ? ui.modsEl.innerText : "n/a");
+
+      parts.push("");
+      parts.push("--- LOG TAIL ---");
+      parts.push(state.logs.slice(-160).join("\n"));
+
+      return parts.join("\n");
+    }
+
+    function findFullscreenBlockers() {
+      const els = Array.from(document.body.querySelectorAll("*"));
+      const out = [];
+      const vw = window.innerWidth, vh = window.innerHeight;
+
+      for (const el of els) {
+        if (!el || el === ui.panel || el === ui.hud || ui.panel.contains(el) || ui.hud.contains(el)) continue;
+        const cs = getComputedStyle(el);
+        if (cs.display === "none" || cs.visibility === "hidden") continue;
+        if (cs.pointerEvents === "none") continue;
+
+        const pos = cs.position;
+        if (pos !== "fixed" && pos !== "absolute") continue;
+
+        const r = el.getBoundingClientRect();
+        const covers = r.left <= 0 && r.top <= 0 && r.right >= vw - 1 && r.bottom >= vh - 1;
+        if (!covers) continue;
+
+        const z = parseInt(cs.zIndex || "0", 10);
+        out.push({ el, z, pe: cs.pointerEvents });
+      }
+
+      out.sort((a,b) => (b.z||0) - (a.z||0));
+      return out.slice(0, 12);
+    }
+
+    function describeEl(el) {
+      if (!el) return "null";
+      const id = el.id ? `#${el.id}` : "";
+      const cls = el.className ? `.${String(el.className).trim().split(/\s+/).slice(0,3).join(".")}` : "";
+      return `${el.tagName.toLowerCase()}${id}${cls}`;
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({
+        "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+      }[c]));
+    }
+
+    function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
+
+    // ----- Boot: Always bring up diagnostics quickly -----
+    dwrite(`[BOOT] ${BUILD}`);
+    dwrite(`[BOOT] href=${location.href}`);
+    dwrite(`[BOOT] secureContext=${String(window.isSecureContext)}`);
+    dwrite(`[BOOT] navigator.xr=${String(!!navigator.xr)}`);
+
+    // Open diag by default once (so you always see it), then you can close it.
+    ui.panel.style.display = "block";
+    ui.panel.setAttribute("aria-hidden", "false");
+
+    // Run diagnostics immediately
+    runAll();
+
+    // Expose a stable global API for your engine modules to use
+    window.SCARLETT = window.SCARLETT || {};
+    window.SCARLETT.BUILD = BUILD;
+    window.SCARLETT.adminDiag = { runAll, copyReport, forceTouchFix, openDiag, closeDiag, dwrite };
+
+    // OPTIONAL: auto-load your actual engine entrypoint (preferred)
+    // If you want this permanent HTML to always start your engine, keep this import.
+    // If your engine entry file name changes, ONLY update it here.
+    try {
+      // Change ONLY this line if your engine entrypoint changes:
+      await import("./js/scarlett1/index.js");
+      dwrite("[BOOT] imported ./js/scarlett1/index.js ✅");
+    } catch (e) {
+      dwrite("[BOOT] import engine failed ❌ " + (e?.message || e));
+      dwrite("[BOOT] Diagnostics still available. Use COPY REPORT and paste here.");
+    }
+  </script>
 </body>
 </html>

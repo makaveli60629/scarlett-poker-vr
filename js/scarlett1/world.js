@@ -3,7 +3,9 @@
 // - Always creates world + anchors
 // - Exposes window.__scarlettRunModuleTest (REAL)
 // - Safe module manifest (you will fill this list after stability)
-
+import { GestureControl } from "/js/modules/gestureControl.js";
+// after table is created / positioned:
+GestureControl.tableHeight = /* your table Y */ 0.8;
 export async function bootWorld({ THREE, scene, rig, camera, renderer, HUD, DIAG }) {
   const log = (s) => window.__scarlettDiagWrite?.(String(s));
 

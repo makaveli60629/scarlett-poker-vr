@@ -4,43 +4,83 @@ async function safeImport(rel, log) {
   try { return await import(rel); }
   catch (e) { log?.(`[controls] safeImport fail ${rel}: ${e.message}`); return null; }
 }
-function pickFn(mod, names) {
-  for (const n of names) {
-    const fn = mod?.[n];
-    if (typeof fn === "function") return { name: n, fn };
+function isFn(v){ return typeof v === "function"; }
+function isObj(v){ return v && typeof v === "object"; }
+
+function listCallable(mod) {
+  const out=[];
+  if (!mod) return out;
+  for (const [k,v] of Object.entries(mod)) {
+    if (isFn(v)) out.push({ path:k, fn:v });
+    if (isObj(v)) for (const [k2,v2] of Object.entries(v)) if (isFn(v2)) out.push({ path:`${k}.${k2}`, fn:v2 });
   }
-  return null;
+  return out;
+}
+function score(path) {
+  const n=path.toLowerCase();
+  let s=0;
+  if (n.includes("input")) s+=4;
+  if (n.includes("hub")) s+=3;
+  if (n.includes("xr")) s+=2;
+  if (n.includes("setup")) s+=2;
+  if (n.includes("init")) s+=2;
+  return s;
+}
+function pickBest(mod, prefer=[]) {
+  if (!mod) return null;
+  for (const p of prefer) {
+    const parts = p.split(".");
+    let cur = mod;
+    for (const part of parts) cur = cur?.[part];
+    if (isFn(cur)) return { path:p, fn:cur };
+  }
+  const f=listCallable(mod);
+  if (f.length===0) return null;
+  if (f.length===1) return f[0];
+  f.sort((a,b)=>score(b.path)-score(a.path));
+  return f[0];
 }
 
 export async function setupControls(ctx) {
   const { scene, renderer, log } = ctx;
 
-  // Try your higher-level input hub first
-  const xri = await safeImport("./xr_input.js", log);
   const hub = await safeImport("./input_hub.js", log);
+  const xri = await safeImport("./xr_input.js", log);
+  const inp = await safeImport("./input.js", log);
 
-  const hubFn = pickFn(hub, ["initInputHub","init","setup","start"]);
+  const hubFn = pickBest(hub, ["InputHub.init","initInputHub","init","setup","start"]);
   if (hubFn) {
     try {
-      log(`[controls] ▶ input_hub.${hubFn.name}()`);
+      log(`[controls] ▶ ${hubFn.path}()`);
       const out = await hubFn.fn(ctx);
-      log(`[controls] ✅ input_hub.${hubFn.name}()`);
-      // Provide a minimal tick wrapper if hub returns one
+      log(`[controls] ✅ ${hubFn.path}()`);
       return { controllers: out?.controllers, tick: out?.tick };
     } catch (e) {
-      log(`[controls] ❌ input_hub failed: ${e.message}`);
+      log(`[controls] ❌ ${hubFn.path} failed: ${e.message}`);
     }
   }
 
-  const xriFn = pickFn(xri, ["setupXRInput","initXRInput","init","setup"]);
+  const xriFn = pickBest(xri, ["XRInput.setup","setupXRInput","initXRInput","init","setup"]);
   if (xriFn) {
     try {
-      log(`[controls] ▶ xr_input.${xriFn.name}()`);
+      log(`[controls] ▶ ${xriFn.path}()`);
       const out = await xriFn.fn(ctx);
-      log(`[controls] ✅ xr_input.${xriFn.name}()`);
+      log(`[controls] ✅ ${xriFn.path}()`);
       return { controllers: out?.controllers, tick: out?.tick };
     } catch (e) {
-      log(`[controls] ❌ xr_input failed: ${e.message}`);
+      log(`[controls] ❌ ${xriFn.path} failed: ${e.message}`);
+    }
+  }
+
+  const inpFn = pickBest(inp, ["Input.init","initInput","setupInput","init","setup"]);
+  if (inpFn) {
+    try {
+      log(`[controls] ▶ ${inpFn.path}()`);
+      const out = await inpFn.fn(ctx);
+      log(`[controls] ✅ ${inpFn.path}()`);
+      return { controllers: out?.controllers, tick: out?.tick };
+    } catch (e) {
+      log(`[controls] ❌ ${inpFn.path} failed: ${e.message}`);
     }
   }
 
@@ -58,7 +98,6 @@ export async function setupControls(ctx) {
     scene.add(c);
     ctrls.push(c);
     c.add(makeRay());
-
     c.addEventListener("connected", (e) => {
       c.userData.gamepad = e.data.gamepad || null;
       log(`🎮 pad${i} connected`);

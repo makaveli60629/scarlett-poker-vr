@@ -12,7 +12,7 @@ const add = (m, cls="ok") => {
 function detectBasePrefix() {
   const p = window.location.pathname || "/";
   const idx = p.indexOf("/js/");
-  if (idx !== -1) return p.slice(0, idx + 1); // keep trailing "/"
+  if (idx !== -1) return p.slice(0, idx + 1);
   if (p.endsWith(".html")) return p.slice(0, p.lastIndexOf("/") + 1);
   return p.endsWith("/") ? p : (p + "/");
 }
@@ -23,9 +23,9 @@ export const Boot = {
     const v = Date.now();
     add(`[BOOT] v=${v}`, "ok");
 
-    const prefix = detectBasePrefix();             // e.g. "/scarlett-poker-vr/"
-    const absJS  = prefix + "js/";                 // e.g. "/scarlett-poker-vr/js/"
-    const absRoot = prefix;                        // e.g. "/scarlett-poker-vr/"
+    const prefix = detectBasePrefix();
+    const absJS  = prefix + "js/";
+    const absRoot = prefix;
     const basePaths = [absJS, absRoot, "./js/", "./"];
 
     add(`[PATH] prefix=${prefix}`, "ok");

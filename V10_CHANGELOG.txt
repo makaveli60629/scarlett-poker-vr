@@ -1,0 +1,4 @@
+V10 - Version stamp + HUD button CSS fix
+- world.js log now reports adapter v9 (easier verification)
+- android_controls HUD button CSS fixed (height:74px)
+- android_controls log now shows ACT/MENU/HUD

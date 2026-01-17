@@ -1,12 +1,11 @@
-// /js/boot.js — Scarlett Boot (FULL RESTORE)
-// Responsibilities: diagnostics overlay + import /js/index.js safely (no bare specifiers)
+// /js/boot.js — Scarlett Boot (FULL RESTORE, GREEN DIAG + HIDE ALL)
+// BUILD: BOOT_FULL_RESTORE_GREEN_v2
 
-const BUILD = "BOOT_FULL_RESTORE_v1";
+const BUILD = "BOOT_FULL_RESTORE_GREEN_v2";
 const NOW = () => new Date().toISOString().slice(11, 19);
 
 function getBasePath() {
   const parts = location.pathname.split("/").filter(Boolean);
-  // GitHub pages: /<repo>/
   if (parts.length === 0) return "/";
   return `/${parts[0]}/`;
 }
@@ -23,9 +22,9 @@ function ensureDiag() {
   box.style.cssText = `
     position:fixed; left:10px; top:10px; z-index:99999;
     max-width:min(560px, calc(100vw - 20px));
-    background:rgba(20,0,0,0.75);
-    color:#ff5a5a;
-    border:1px solid rgba(255,90,90,0.45);
+    background:rgba(0,10,0,0.70);
+    color:#56ff7a;
+    border:1px solid rgba(86,255,122,0.35);
     border-radius:12px;
     padding:10px;
     backdrop-filter: blur(6px);
@@ -36,10 +35,11 @@ function ensureDiag() {
   const row = document.createElement("div");
   row.style.cssText = `display:flex; gap:8px; justify-content:space-between; align-items:center; margin-bottom:6px;`;
   row.innerHTML = `
-    <div style="font-weight:700;">SCARLETT DIAG</div>
-    <div style="display:flex; gap:6px;">
-      <button id="diagHide" style="cursor:pointer;border-radius:10px;border:1px solid rgba(255,90,90,0.5);background:rgba(80,0,0,0.5);color:#ff8b8b;padding:3px 10px;">hide</button>
-      <button id="diagCopy" style="cursor:pointer;border-radius:10px;border:1px solid rgba(255,90,90,0.5);background:rgba(80,0,0,0.5);color:#ff8b8b;padding:3px 10px;">copy</button>
+    <div style="font-weight:800;">SCARLETT DIAG</div>
+    <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
+      <button id="diagHide" style="cursor:pointer;border-radius:10px;border:1px solid rgba(86,255,122,0.45);background:rgba(0,40,0,0.45);color:#a8ffbb;padding:4px 10px;">hide</button>
+      <button id="diagAll"  style="cursor:pointer;border-radius:10px;border:1px solid rgba(86,255,122,0.45);background:rgba(0,40,0,0.45);color:#a8ffbb;padding:4px 10px;">hide all</button>
+      <button id="diagCopy" style="cursor:pointer;border-radius:10px;border:1px solid rgba(86,255,122,0.45);background:rgba(0,40,0,0.45);color:#a8ffbb;padding:4px 10px;">copy</button>
     </div>
   `;
   box.appendChild(row);
@@ -66,7 +66,38 @@ function ensureDiag() {
     toggle() { box.style.display = (box.style.display === "none") ? "block" : "none"; }
   };
 
+  function hideAll() {
+    globalThis.SCARLETT_DIAG?.hide?.();
+    document.getElementById("androidHud")?.style && (document.getElementById("androidHud").style.display = "none");
+    document.getElementById("scarlettModsPanel")?.style && (document.getElementById("scarlettModsPanel").style.display = "none");
+    document.getElementById("scarlettRestoreChip")?.remove?.();
+    // give user a tiny restore chip
+    let chip = document.getElementById("scarlettRestoreChip");
+    if (!chip) {
+      chip = document.createElement("button");
+      chip.id = "scarlettRestoreChip";
+      chip.textContent = "SHOW UI";
+      chip.style.cssText = `
+        position:fixed; right:10px; top:10px; z-index:99999;
+        cursor:pointer; border-radius:999px;
+        border:1px solid rgba(86,255,122,0.45);
+        background:rgba(0,20,0,0.55);
+        color:#b6ffca;
+        padding:8px 12px;
+        font: 12px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;
+      `;
+      chip.onclick = () => {
+        globalThis.SCARLETT_DIAG?.show?.();
+        const hud = document.getElementById("androidHud");
+        if (hud) hud.style.display = "flex";
+        chip.remove();
+      };
+      document.body.appendChild(chip);
+    }
+  }
+
   document.getElementById("diagHide").onclick = () => globalThis.SCARLETT_DIAG.toggle();
+  document.getElementById("diagAll").onclick = () => hideAll();
   document.getElementById("diagCopy").onclick = async () => {
     try {
       await navigator.clipboard.writeText(lines.join("\n"));
@@ -75,6 +106,12 @@ function ensureDiag() {
       push(`[${NOW()}] [diag] copy failed ❌ ${String(e?.message || e)}`);
     }
   };
+
+  // keyboard fallback: ` toggles diag, \ toggles hide all (desktop)
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "`") globalThis.SCARLETT_DIAG?.toggle?.();
+    if (e.key === "\\") hideAll();
+  });
 
   return box;
 }

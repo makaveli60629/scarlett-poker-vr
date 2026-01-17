@@ -1,5 +1,5 @@
 // /js/modules/avatars.module.js
-// SOUPED placeholders: body + head + shoulders + forearms + hands + idle + showcase (FULL)
+// SOUPED placeholder avatars (6-max) + showcase avatar near spawn (FULL)
 
 export default {
   id: "avatars.module.js",
@@ -10,128 +10,98 @@ export default {
     anchors.avatars.add(root);
 
     const seatCount = tableData.seats || 6;
-    const seatRadius = (tableData.railRadius || 1.45) + 0.70;
+    const seatRadius = (tableData.railRadius || 1.45) + 0.65;
 
     const avatars = [];
 
-    const matBody = new THREE.MeshStandardMaterial({ color: 0x1f2a3a, roughness: 0.95 });
-    const matHead = new THREE.MeshStandardMaterial({ color: 0x3a3f55, roughness: 0.70 });
-    const matHand = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.40 });
-
-    function makeAvatar(name) {
+    function makeAvatar(i, colorHex) {
       const g = new THREE.Group();
-      g.name = `AVATAR_${name}`;
+      g.name = `AVATAR_${i}`;
 
-      // torso
-      const torso = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.16, 0.18, 0.60, 18),
-        matBody
-      );
-      torso.position.y = 1.05;
+      const bodyMat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.92 });
+      const skinMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55 });
+
+      const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.45, 6, 14), bodyMat);
+      torso.position.y = 1.10;
       torso.name = "TORSO";
       g.add(torso);
 
-      // shoulders
-      const shoulders = new THREE.Mesh(
-        new THREE.BoxGeometry(0.46, 0.14, 0.20),
-        matBody
-      );
-      shoulders.position.set(0, 1.32, 0.02);
-      shoulders.name = "SHOULDERS";
-      g.add(shoulders);
-
-      // head
-      const head = new THREE.Mesh(
-        new THREE.SphereGeometry(0.13, 20, 16),
-        matHead
-      );
-      head.position.y = 1.52;
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 18, 14), skinMat);
+      head.position.y = 1.55;
       head.name = "HEAD";
       g.add(head);
 
       // arms
-      const armGeo = new THREE.CylinderGeometry(0.035, 0.040, 0.34, 14);
-      const leftArm = new THREE.Mesh(armGeo, matBody);
-      const rightArm = new THREE.Mesh(armGeo, matBody);
+      const armGeo = new THREE.CapsuleGeometry(0.05, 0.22, 4, 10);
+      const la = new THREE.Mesh(armGeo, bodyMat);
+      la.position.set(-0.24, 1.18, 0.05);
+      la.rotation.z = 0.35;
+      la.name = "L_ARM";
+      g.add(la);
 
-      leftArm.position.set(-0.23, 1.18, 0.12);
-      rightArm.position.set(0.23, 1.18, 0.12);
-      leftArm.rotation.z = 0.45;
-      rightArm.rotation.z = -0.45;
-      leftArm.rotation.x = 0.65;
-      rightArm.rotation.x = 0.65;
-      leftArm.name = "LEFT_ARM";
-      rightArm.name = "RIGHT_ARM";
-      g.add(leftArm, rightArm);
+      const ra = new THREE.Mesh(armGeo, bodyMat);
+      ra.position.set(0.24, 1.18, 0.05);
+      ra.rotation.z = -0.35;
+      ra.name = "R_ARM";
+      g.add(ra);
 
-      // hands
-      const lh = new THREE.Mesh(new THREE.SphereGeometry(0.045, 16, 12), matHand);
-      const rh = new THREE.Mesh(new THREE.SphereGeometry(0.045, 16, 12), matHand);
-      lh.position.set(-0.34, 1.02, 0.30);
-      rh.position.set(0.34, 1.02, 0.30);
+      const handMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35 });
+      const lh = new THREE.Mesh(new THREE.SphereGeometry(0.045, 14, 10), handMat);
+      lh.position.set(-0.34, 1.05, 0.10);
       lh.name = "LEFT_HAND";
-      rh.name = "RIGHT_HAND";
-      g.add(lh, rh);
+      g.add(lh);
 
-      return { g, head, lh, rh, torso, leftArm, rightArm };
+      const rh = new THREE.Mesh(new THREE.SphereGeometry(0.045, 14, 10), handMat);
+      rh.position.set(0.34, 1.05, 0.10);
+      rh.name = "RIGHT_HAND";
+      g.add(rh);
+
+      g.userData = { head, lh, rh, baseY: 0 };
+      return { g, head, lh, rh };
     }
 
-    // Table avatars
+    const palette = [0x202738, 0x2a2f44, 0x2f3a55, 0x1f2a3a, 0x33425a, 0x26324a];
+
     for (let i = 0; i < seatCount; i++) {
       const t = (i / seatCount) * Math.PI * 2;
       const x = tableData.center.x + Math.cos(t) * seatRadius;
       const z = tableData.center.z + Math.sin(t) * seatRadius;
 
-      const av = makeAvatar(i);
+      const av = makeAvatar(i, palette[i % palette.length]);
       av.g.position.set(x, 0, z);
-
-      // seated lean
-      av.g.lookAt(tableData.center.x, 1.25, tableData.center.z);
-      av.g.rotateX(-0.08);
-
+      av.g.lookAt(tableData.center.x, 1.3, tableData.center.z);
       root.add(av.g);
       avatars.push(av);
     }
 
-    // Showcase avatar near spawn (bigger + closer)
-    const showcase = makeAvatar("SHOWCASE");
+    // Showcase avatar (bigger, closer)
+    const showcase = makeAvatar(999, 0x3a3f55);
     showcase.g.name = "AVATAR_SHOWCASE";
-    showcase.g.position.set(0.75, 0, -0.65);
-    showcase.g.scale.setScalar(1.25);
-    showcase.g.lookAt(0, 1.35, -2);
+    showcase.g.position.set(1.2, 0, -0.6);
+    showcase.g.scale.setScalar(1.35);
     root.add(showcase.g);
 
     window.SCARLETT = window.SCARLETT || {};
-    window.SCARLETT.avatars = { root, avatars, showcase };
+    window.SCARLETT.avatars = { root, avatars, showcase: showcase.g };
 
     log?.("avatars.module ✅ (SOUPED + showcase)");
   },
 
   update(dt, { tableData }) {
     const pack = window.SCARLETT?.avatars;
-    if (!pack) return;
+    if (!pack?.avatars) return;
 
     const t = performance.now() * 0.001;
-
-    // table avatars idle: breathe + subtle head movement
-    for (let i = 0; i < (pack.avatars?.length || 0); i++) {
+    for (let i = 0; i < pack.avatars.length; i++) {
       const av = pack.avatars[i];
-      if (!av) continue;
-
-      const breathe = 0.01 + Math.sin(t * 0.9 + i) * 0.01;
-      av.torso.scale.y = 1.0 + breathe * 0.2;
-      av.head.position.y = 1.52 + Math.sin(t * 0.8 + i) * 0.012;
-
-      // subtle hand rest wobble
-      av.lh.position.y = 1.02 + Math.sin(t * 1.3 + i) * 0.006;
-      av.rh.position.y = 1.02 + Math.sin(t * 1.2 + i + 1.7) * 0.006;
-
-      av.g.lookAt(tableData.center.x, 1.25, tableData.center.z);
+      if (!av?.head) continue;
+      av.head.position.y = 1.55 + Math.sin(t * 0.8 + i) * 0.012;
+      av.g.lookAt(tableData.center.x, 1.3, tableData.center.z);
     }
 
-    // showcase slow turn so you can inspect
-    const s = pack.showcase;
-    if (s?.g) s.g.rotation.y = Math.sin(t * 0.35) * 0.25;
+    if (pack.showcase) {
+      pack.showcase.rotation.y = Math.sin(t * 0.4) * 0.25 + Math.PI * 0.15;
+    }
   },
 
   test() {

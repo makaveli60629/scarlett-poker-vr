@@ -1,16 +1,18 @@
 // /js/scarlett1/index.js — Scarlett1 MASTER GLUE ROUTER (FULL)
-// BUILD: SCARLETT1_MASTER_GLUE_ROUTER_v1
+// BUILD: SCARLETT1_MASTER_GLUE_ROUTER_v2
 //
 // ✅ Boot chain unchanged
-// ✅ Loads MASTER world
-// ✅ Safe module integration (won’t destroy work if module fails)
-// ✅ Safe Mode: add ?safe=1 to URL
-// ✅ Movement always available (XR + Android sticks) via fallback controls
-// ✅ Module entry auto-detect: enable/init/boot/start/setup/mount/default
-// ✅ Also supports side-effect modules that self-register onto global registry
+// ✅ MASTER world
+// ✅ Safe Mode: ?safe=1
+// ✅ Movement always available (fallback XR + Android sticks)
+// ✅ Correct module glue for your repo:
+//    - default exports that are OBJECTS (with init/start/setup/mount/etc)
+//    - locomotion_xr.js => createLocomotionModule(ctx)
+//    - gestureControl.js => new GestureControl(ctx) or GestureControl factory
+//    - audioLogic.js => new PokerAudio(ctx)
 
 export async function boot({ Scarlett, BASE, V }) {
-  const BUILD = "SCARLETT1_MASTER_GLUE_ROUTER_v1";
+  const BUILD = "SCARLETT1_MASTER_GLUE_ROUTER_v2";
   const NOW = () => new Date().toISOString().slice(11, 19);
   const push = (s) => globalThis.SCARLETT_DIAG?.push?.(`[${NOW()}] ${s}`);
 
@@ -50,7 +52,7 @@ export async function boot({ Scarlett, BASE, V }) {
   document.body.appendChild(vrBtn);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x070a10); // not pure black
+  scene.background = new THREE.Color(0x070a10);
 
   const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 260);
   camera.position.set(0, 1.65, 0);
@@ -87,14 +89,14 @@ export async function boot({ Scarlett, BASE, V }) {
   const world = await worldMod.createWorld({ THREE, scene, renderer, camera, rig, Scarlett, diag: push, BASE });
   push?.(`[scarlett1] world ready ✅`);
 
-  // ---------- Context bus (modules + debugging) ----------
+  // ---------- Context bus ----------
   const ctx = {
     THREE, scene, renderer, camera, rig, world, Scarlett, controllers,
     diag: push, BASE, V,
-    // lightweight pub/sub so modules can listen without tight coupling
     bus: makeBus(push),
   };
   globalThis.SCARLETT_CTX = ctx;
+  globalThis.SCARLETT_REGISTRY = globalThis.SCARLETT_REGISTRY || [];
 
   // ---------- UI bridge ----------
   Scarlett.UI = Scarlett.UI || {};
@@ -104,12 +106,11 @@ export async function boot({ Scarlett, BASE, V }) {
 
   installModulePanel({ Scarlett, push });
 
-  // ---------- ALWAYS-ON fallback controls (movement + teleport) ----------
+  // ---------- Always-on fallback controls ----------
   const fallback = createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett, push });
   Scarlett.__controls = fallback;
 
   // ---------- Safe module integration ----------
-  // The modules you showed live in /js/modules/ with *.module.js naming + locomotion_xr.js
   const MODULE_BASE = `${BASE}js/modules/`;
   const MODULE_MAP = [
     ["environmentLighting", "environmentLighting.module.js"],
@@ -140,21 +141,18 @@ export async function boot({ Scarlett, BASE, V }) {
   if (!SAFE_MODE) {
     for (const [name, file] of MODULE_MAP) {
       const url = `${MODULE_BASE}${file}?v=${encodeURIComponent(V)}`;
-
-      // Each module is sandboxed: import + start is isolated
       const started = await safeLoadAndStartModule({ name, url, ctx, push });
       if (started) liveModules.push(started);
     }
 
-    // Also support modules that self-register after import (side-effect style):
-    // If any module does: globalThis.SCARLETT_REGISTRY.push({name, tick, ...})
-    const reg = (globalThis.SCARLETT_REGISTRY = globalThis.SCARLETT_REGISTRY || []);
-    for (const item of reg) liveModules.push({ name: item.name || "registry", inst: item });
+    // Also start any registry items that side-effect modules added
+    for (const item of (globalThis.SCARLETT_REGISTRY || [])) {
+      liveModules.push({ name: item.name || "registry", inst: item });
+    }
   } else {
     push?.(`[mod] SAFE MODE: skipping module start calls`);
   }
 
-  // session logs
   renderer.xr.addEventListener("sessionstart", () => push?.(`[xr] sessionstart ✅`));
   renderer.xr.addEventListener("sessionend", () => push?.(`[xr] sessionend ✅`));
 
@@ -163,7 +161,7 @@ export async function boot({ Scarlett, BASE, V }) {
     // tick started modules
     for (const m of liveModules) m.inst?.tick?.(t);
 
-    // fallback controls (movement always)
+    // fallback controls always
     fallback.tick(t);
 
     // world tick
@@ -178,7 +176,7 @@ export async function boot({ Scarlett, BASE, V }) {
   push?.(`[scarlett1] started ✅`);
 }
 
-// -------------------- Safe module loader / starter --------------------
+// -------------------- Safe module loader / starter (MATCHES YOUR EXPORTS) --------------------
 async function safeLoadAndStartModule({ name, url, ctx, push }) {
   try {
     push?.(`[mod] import ${name} → ${url}`);
@@ -187,7 +185,36 @@ async function safeLoadAndStartModule({ name, url, ctx, push }) {
     const keys = Object.keys(m || {});
     push?.(`[mod] ${name} exports: ${keys.length ? keys.join(", ") : "(none)"}`);
 
-    const entry =
+    // 1) Special-case locomotion_xr.js (your real entry)
+    if (typeof m.createLocomotionModule === "function") {
+      push?.(`[mod] ${name} entry=createLocomotionModule() starting…`);
+      const inst = await m.createLocomotionModule(ctx);
+      push?.(`[mod] ${name} started ✅`);
+      return { name, inst: inst || m };
+    }
+
+    // 2) Special-case gestureControl.js
+    if (typeof m.GestureControl === "function") {
+      push?.(`[mod] ${name} entry=GestureControl starting…`);
+      let inst = null;
+      try { inst = new m.GestureControl(ctx); }
+      catch { inst = await m.GestureControl(ctx); }
+      push?.(`[mod] ${name} started ✅`);
+      return { name, inst: inst || m };
+    }
+
+    // 3) Special-case audioLogic.js
+    if (typeof m.PokerAudio === "function") {
+      push?.(`[mod] ${name} entry=PokerAudio starting…`);
+      let inst = null;
+      try { inst = new m.PokerAudio(ctx); }
+      catch { inst = await m.PokerAudio(ctx); }
+      push?.(`[mod] ${name} started ✅`);
+      return { name, inst: inst || m };
+    }
+
+    // 4) Generic starters on named exports (if any exist later)
+    const direct =
       (typeof m.enable === "function" && { fn: m.enable, label: "enable" }) ||
       (typeof m.init === "function" && { fn: m.init, label: "init" }) ||
       (typeof m.boot === "function" && { fn: m.boot, label: "boot" }) ||
@@ -195,21 +222,63 @@ async function safeLoadAndStartModule({ name, url, ctx, push }) {
       (typeof m.setup === "function" && { fn: m.setup, label: "setup" }) ||
       (typeof m.mount === "function" && { fn: m.mount, label: "mount" }) ||
       (typeof m.create === "function" && { fn: m.create, label: "create" }) ||
-      (typeof m.default === "function" && { fn: m.default, label: "default" }) ||
       null;
 
-    let inst = null;
-
-    if (entry) {
-      push?.(`[mod] ${name} entry=${entry.label}() starting…`);
-      inst = await entry.fn(ctx);
+    if (direct) {
+      push?.(`[mod] ${name} entry=${direct.label}() starting…`);
+      const inst = await direct.fn(ctx);
       push?.(`[mod] ${name} started ✅`);
-    } else {
-      push?.(`[mod] ${name} loaded (side-effect/no entry) ✅`);
-      inst = null;
+      return { name, inst: inst || m };
     }
 
-    return { name, inst: inst || m };
+    // 5) Default export glue:
+    // - if default is a function/class => call/construct
+    // - if default is an object => call one of its lifecycle methods
+    const d = m.default;
+
+    if (typeof d === "function") {
+      push?.(`[mod] ${name} entry=default(function) starting…`);
+      let inst = null;
+      try { inst = new d(ctx); }
+      catch { inst = await d(ctx); }
+      push?.(`[mod] ${name} started ✅`);
+      return { name, inst: inst || m };
+    }
+
+    if (d && typeof d === "object") {
+      const objEntry =
+        (typeof d.enable === "function" && { fn: d.enable.bind(d), label: "default.enable" }) ||
+        (typeof d.init === "function" && { fn: d.init.bind(d), label: "default.init" }) ||
+        (typeof d.boot === "function" && { fn: d.boot.bind(d), label: "default.boot" }) ||
+        (typeof d.start === "function" && { fn: d.start.bind(d), label: "default.start" }) ||
+        (typeof d.setup === "function" && { fn: d.setup.bind(d), label: "default.setup" }) ||
+        (typeof d.mount === "function" && { fn: d.mount.bind(d), label: "default.mount" }) ||
+        (typeof d.create === "function" && { fn: d.create.bind(d), label: "default.create" }) ||
+        null;
+
+      if (objEntry) {
+        push?.(`[mod] ${name} entry=${objEntry.label}() starting…`);
+        const inst = await objEntry.fn(ctx);
+        push?.(`[mod] ${name} started ✅`);
+        return { name, inst: inst || d };
+      }
+
+      // Some modules expect ctx on a property or a register() call.
+      if (typeof d.register === "function") {
+        push?.(`[mod] ${name} entry=default.register() starting…`);
+        const inst = await d.register(ctx);
+        push?.(`[mod] ${name} started ✅`);
+        return { name, inst: inst || d };
+      }
+
+      // If no lifecycle method, treat as side-effect/config but still keep reference
+      push?.(`[mod] ${name} default is object (no lifecycle) — keeping reference ✅`);
+      return { name, inst: d };
+    }
+
+    // 6) Side-effect module fallback
+    push?.(`[mod] ${name} loaded (side-effect/no entry) ✅`);
+    return { name, inst: m };
 
   } catch (e) {
     push?.(`[mod] ${name} FAILED ❌ ${String(e?.message || e)}`);
@@ -254,15 +323,13 @@ function installModulePanel({ Scarlett, push }) {
     padding:10px;
     display:none;
   `;
-
   panel.innerHTML = `
     <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
       <div style="font-weight:900;">MODULES</div>
       <button id="modsClose" style="cursor:pointer;border-radius:10px;padding:6px 10px;border:1px solid rgba(255,255,255,0.18);background:rgba(0,0,0,0.25);color:#fff;">close</button>
     </div>
-    <div style="opacity:0.8;">If something breaks, use <b>?safe=1</b> to boot without modules.</div>
+    <div style="opacity:0.8;">If anything breaks, load <b>?safe=1</b> to boot world + movement only.</div>
   `;
-
   document.body.appendChild(panel);
   panel.querySelector("#modsClose").onclick = () => (panel.style.display = "none");
 
@@ -348,12 +415,10 @@ function createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett,
     toggleTeleport,
     tick() {
       const dt = 1 / 72;
-
       const session = renderer.xr.getSession?.();
       const android = Scarlett.ANDROID_INPUT || { moveX: 0, moveY: 0, turnX: 0 };
 
       if (!session) {
-        // Android/2D
         if (!state.teleportMode) {
           applyMoveTurn(android.moveX || 0, android.moveY || 0, android.turnX || 0, dt);
           ret.visible = false;
@@ -365,7 +430,6 @@ function createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett,
         return;
       }
 
-      // XR
       const { left, right } = getPads();
       const la = left?.axes || [];
       const ra = right?.axes || [];
@@ -406,4 +470,4 @@ function createFallbackControls({ THREE, renderer, camera, rig, world, Scarlett,
       }
     }
   };
-    }
+}

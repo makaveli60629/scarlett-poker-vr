@@ -2,11 +2,11 @@ import * as THREE from 'three';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 
 // /js/scarlett1/index.js
-// SCARLETT1 — RUNTIME (FULL WORKING v1.5 ALL)
+// SCARLETT1 — RUNTIME (FULL WORKING v1.5.1 ALL • audio redeclare fix)
 // Adds: join seat, smooth locomotion + snap turn, VIP room w/ 6-seat oval, ambient audio,
 // richer props (bar/store/display), and a simple poker dealing loop (unique hands + community).
 
-const BUILD = 'SCARLETT1_RUNTIME_FULL_WORKING_v1_5_ALL';
+const BUILD = 'SCARLETT1_RUNTIME_FULL_WORKING_v1_5_1_ALL_AUDIOFIX';
 
 const dwrite = (m)=>{ try{ window.__scarlettDiagWrite?.(String(m)); }catch(_){ } };
 const FP = `[scarlett1] LIVE_FINGERPRINT ✅ ${BUILD}`;
@@ -313,13 +313,7 @@ export async function start(){
   // Simple non‑VR look + move
   const nonVr = createNonVrControls(renderer.domElement, rig, camera);
 
-  // Audio (procedural ambience + SFX; starts on first user gesture)
-  const audio = createAudioSystem();
-  const armAudio = () => { try{ audio.resume(); }catch(_){ } };
-  // Arm audio on any primary HUD click
-  for (const id of ['btnEnterVR','btnTeleport','btnDiag']){
-    document.getElementById(id)?.addEventListener('pointerdown', armAudio, { passive:true });
-  }
+  // NOTE: audio system already created above (singleton). Do NOT redeclare.
 
   // Bots + table + pip target
   const tableCenter = new THREE.Vector3(0, 0.75, 0);

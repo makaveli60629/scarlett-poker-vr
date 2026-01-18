@@ -2,112 +2,39 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <title>SCARLETT VR POKER — Orchestra Recovery</title>
-  <link rel="stylesheet" href="./css/hud.css" />
-  <script>
-    // EARLY DIAG (runs even if modules fail)
-    (function(){
-      const lines = [];
-      function stamp(){ return new Date().toISOString().slice(11,19); }
-      function push(s){ lines.push("[" + stamp() + "] " + s); }
-      push("booting… (early diag)");
-      push("href=" + location.href);
-      push("secureContext=" + (window.isSecureContext ? "true":"false"));
-      push("ua=" + navigator.userAgent);
-      push("touch=" + (("ontouchstart" in window) ? "true":"false") + " maxTouchPoints=" + (navigator.maxTouchPoints||0));
-      push("navigator.xr=" + (!!navigator.xr));
-
-      window.__SCARLETT_EARLY_DIAG__ = {
-        lines,
-        write: (m)=>{ try{ push(String(m)); render(); }catch(e){} }
-      };
-
-      window.addEventListener("error", (e)=>{
-        try{ push("ERROR: " + (e.message||e.error||"unknown")); render(); }catch(_){}
-      });
-      window.addEventListener("unhandledrejection", (e)=>{
-        try{ push("PROMISE: " + (e.reason?.message || e.reason || "unknown")); render(); }catch(_){}
-      });
-
-      function render(){
-        const el = document.getElementById("diag");
-        if (!el) return;
-        el.textContent = lines.join("\n");
-        el.scrollTop = el.scrollHeight;
-      }
-
-      document.addEventListener("DOMContentLoaded", ()=>{
-        const btnHide = document.getElementById("btnHideHUD");
-        btnHide?.addEventListener("click", ()=>{
-          const root = document.getElementById("hudRoot");
-          if (!root) return;
-          root.classList.toggle("hidden");
-          if (root.classList.contains("hidden")){
-            let hot = document.getElementById("hudHotspot");
-            if (!hot){
-              hot = document.createElement("div");
-              hot.id = "hudHotspot";
-              hot.style.position = "fixed";
-              hot.style.left = "0px";
-              hot.style.top = "0px";
-              hot.style.width = "90px";
-              hot.style.height = "90px";
-              hot.style.zIndex = "99999";
-              hot.style.pointerEvents = "auto";
-              hot.style.background = "rgba(0,0,0,0)";
-              hot.addEventListener("click", ()=>{
-                document.getElementById("hudRoot")?.classList.remove("hidden");
-                hot.remove();
-              });
-              document.body.appendChild(hot);
-            }
-            push("[hud] hidden (tap top-left to restore)");
-          } else {
-            push("[hud] shown");
-          }
-          render();
-        });
-
-        render();
-      });
-    })();
-  </script>
-  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Scarlett VR — Jumbotron Streaming Demo (Update)</title>
+  <style>
+    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
+    #hud {
+      position: fixed; left: 10px; top: 10px; z-index: 10;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-size: 13px; line-height: 1.35;
+      color: #eaeaea; background: rgba(0,0,0,0.55);
+      padding: 10px 12px; border-radius: 10px; max-width: 520px;
+      user-select: none;
+    }
+    #hud b { color: #fff; }
+    #hud .ok { color: #9dff9d; }
+    #hud .warn { color: #ffd18a; }
+    #hud .err { color: #ff9d9d; }
+    #hud .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    #vrbtn { position: fixed; right: 10px; top: 10px; z-index: 11; }
+    canvas { display:block; }
+  </style>
+  <!-- HLS playback helper for .m3u8 streams -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 </head>
 <body>
-  <div id="hudRoot">
-    <div id="hudTop">
-      <button id="btnEnterVR" class="hudBtn">ENTER VR</button>
-      <button id="btnTeleport" class="hudBtn">TELEPORT</button>
-      <button id="btnDeal" class="hudBtn">DEAL</button>
-      <button id="btnNext" class="hudBtn">NEXT</button>
-      <button id="btnReset" class="hudBtn">RESET</button>
-      <button id="btnHideHUD" class="hudBtn">HIDE</button>
-    </div>
-    <div id="hudBottom">
-      <pre id="diag"></pre>
-    </div>
+  <div id="hud">
+    <div><b>Scarlett VR — Jumbotron Streaming Demo</b> <span class="mono" id="build"></span></div>
+    <div id="status">Booting…</div>
+    <hr style="border:0;border-top:1px solid rgba(255,255,255,.15);margin:8px 0;" />
+    <div><b>Desktop keys:</b> Space=start TV • M=mute active • N/P=next/prev channel • 1-4=audio screen</div>
+    <div><b>VR controllers:</b> Trigger = start TV • A/B = next/prev channel • Grip = mute • Thumbstick click = cycle audio screen</div>
+    <div class="mono" id="debug"></div>
   </div>
-
-  <a-scene
-    id="scene"
-    background="color: #0b0f14"
-    renderer="antialias: true; colorManagement: true; physicallyCorrectLights: true"
-    vr-mode-ui="enabled: true"
-    webxr="requiredFeatures: local-floor; optionalFeatures: hand-tracking"
-  >
-    <a-entity id="lightRig"></a-entity>
-    <a-entity id="playerRig" position="0 1.6 7">
-      <a-camera id="cam" wasd-controls-enabled="false"></a-camera>
-    </a-entity>
-
-    <a-entity id="leftHand" laser-controls="hand: left" raycaster="objects: .teleportable" line="opacity: 0.75"></a-entity>
-    <a-entity id="rightHand" laser-controls="hand: right" raycaster="objects: .teleportable" line="opacity: 0.75"></a-entity>
-
-    <a-entity id="worldRoot"></a-entity>
-    <a-entity id="uiRoot"></a-entity>
-  </a-scene>
+  <div id="vrbtn"></div>
 
   <script type="module" src="./js/main.js"></script>
 </body>

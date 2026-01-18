@@ -1,114 +1,182 @@
-// /js/world.js
-// Assembles the demo world modules (spawn pad, teleport arch, divot pit + rails, table, bots, cards, casino shell)
+// /js/scarlett1/world.js
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 
-import { createSpawnPad } from "./modules/spawn_pad.js?v=7a1";
-import { createTeleportArch } from "./modules/teleport_arch.js?v=7a1";
-import { createCasinoShell } from "./modules/casino_shell.js?v=7a1";
-import { createDivotTable } from "./modules/divot_table.js?v=7a1";
-import { createBotsAndCards } from "./modules/avatars_bots.js?v=7a1";
-import { installTeleportFX } from "./modules/teleport_fx.js?v=7a1";
-import { createEnvironmentExtras } from "./modules/environment_extras.js?v=7a1";
-import { installBotsIdle } from "./modules/bots_idle.js?v=7a1";
-import { installPokerDemo } from "./modules/poker_demo.js?v=7a1";
-import { createVIPRoom } from "./modules/vip_room.js?v=7a1";
-import { installSeatSystem } from "./modules/seat_system.js?v=7a1";
-import { installPokerInteraction } from "./modules/poker_interaction.js?v=7a1";
-import { applyAssets } from "./modules/asset_manager.js?v=7a1";
-import { installWorldDebug } from "./modules/world_debug.js?v=7a1";
-import { installPlayerAvatar } from "./modules/player_avatar.js?v=7a1";
+export function buildWorld(scene, dwrite = console.log) {
+  // Floor grid
+  const grid = new THREE.GridHelper(80, 80, 0x0aa7ff, 0x003344);
+  grid.position.y = 0;
+  scene.add(grid);
 
-export function buildWorld(ctx){
-  const { THREE, scene, rig, camera, renderer, dwrite } = ctx;
+  // Casino “shell”
+  const shell = new THREE.Group();
+  scene.add(shell);
 
-  dwrite("[world] buildWorld()");
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(60, 60),
+    new THREE.MeshStandardMaterial({ color: 0x071017, roughness: 0.9, metalness: 0.05 })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = 0;
+  shell.add(floor);
 
-  // Root group
-  const root = new THREE.Group();
-  root.name = "worldRoot";
-  scene.add(root);
+  // Soft walls (so you don’t get “empty void”)
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x0b1520, roughness: 1.0, metalness: 0.0 });
+  const mkWall = (w,h,d,x,y,z) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), wallMat);
+    m.position.set(x,y,z);
+    shell.add(m);
+  };
+  mkWall(60, 6, 1, 0, 3, -30);
+  mkWall(60, 6, 1, 0, 3, 30);
+  mkWall(1, 6, 60, -30, 3, 0);
+  mkWall(1, 6, 60, 30, 3, 0);
 
-  // Casino shell
-  const shell = createCasinoShell(ctx);
-  root.add(shell.group);
+  dwrite("[shell] casino shell ready");
 
-  const extras = createEnvironmentExtras(ctx);
-  root.add(extras.group);
+  // Divot pit
+  const pit = new THREE.Group();
+  pit.position.set(0, 0, 0);
+  scene.add(pit);
 
-  // Spawn pad (where you start)
-  const spawn = createSpawnPad(ctx, { position: new THREE.Vector3(0, 0, 8) });
-  root.add(spawn.group);
+  const pitFloor = new THREE.Mesh(
+    new THREE.CircleGeometry(9.5, 64),
+    new THREE.MeshStandardMaterial({ color: 0x04090f, roughness: 0.95, metalness: 0.0 })
+  );
+  pitFloor.rotation.x = -Math.PI / 2;
+  pitFloor.position.y = -0.55;
+  pit.add(pitFloor);
 
-  // Teleport arch machine near spawn
-  const arch = createTeleportArch(ctx, { position: new THREE.Vector3(0, 0, 5.5) });
-  root.add(arch.group);
+  // Rails ring
+  const rail = new THREE.Mesh(
+    new THREE.TorusGeometry(9.6, 0.12, 12, 96),
+    new THREE.MeshStandardMaterial({ color: 0x0b3a3a, roughness: 0.35, metalness: 0.2 })
+  );
+  rail.rotation.x = Math.PI / 2;
+  rail.position.y = -0.05;
+  pit.add(rail);
 
-  const tpfx = installTeleportFX(ctx, { archGroup: arch.group });
-  root.add(tpfx.group);
+  // Stairs “ramp”
+  const ramp = new THREE.Mesh(
+    new THREE.BoxGeometry(6, 0.3, 8),
+    new THREE.MeshStandardMaterial({ color: 0x061019, roughness: 0.9 })
+  );
+  ramp.position.set(0, -0.15, 8.5);
+  ramp.rotation.x = -0.10;
+  pit.add(ramp);
 
-  // Divot pit + rails + table
-  const divot = createDivotTable(ctx, { center: new THREE.Vector3(0, 0, 0) });
-  root.add(divot.group);
+  // Poker table (center)
+  const table = new THREE.Group();
+  table.position.set(0, -0.55, 0);
+  pit.add(table);
 
-  // Bots seated around table + cards (table + mirrored hover)
-  const bots = createBotsAndCards(ctx, { center: new THREE.Vector3(0, 0, 0) });
-  root.add(bots.group);
+  const felt = new THREE.Mesh(
+    new THREE.CylinderGeometry(3.2, 3.2, 0.16, 48),
+    new THREE.MeshStandardMaterial({ color: 0x0cc6c6, roughness: 0.55, metalness: 0.1 })
+  );
+  felt.position.y = 0.85;
+  table.add(felt);
 
-  // Collect bot groups for idle animation
-  const botGroups = [];
-  bots.group.traverse((o)=>{ if (o && o.name && o.name.startsWith('bot_')) botGroups.push(o); });
-  const idle = installBotsIdle(ctx, { botGroups });
-  root.add(idle.group);
+  const rim = new THREE.Mesh(
+    new THREE.TorusGeometry(3.25, 0.18, 16, 96),
+    new THREE.MeshStandardMaterial({ color: 0x101010, roughness: 0.4, metalness: 0.2 })
+  );
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = 0.85;
+  table.add(rim);
 
-  const poker = installPokerDemo(ctx, { center: new THREE.Vector3(0,0,0), tableY: -0.8 + 0.55 });
-  root.add(poker.group);
+  const pedestal = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.55, 0.75, 1.1, 24),
+    new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.7 })
+  );
+  pedestal.position.y = 0.3;
+  table.add(pedestal);
 
-  // VIP Room (no divot)
-  const vip = createVIPRoom(ctx, { center: new THREE.Vector3(-16, 0, -12) });
-  root.add(vip.group);
+  // Community cards placeholder (always visible)
+  const cardMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
+  const cards = new THREE.Group();
+  cards.position.set(0, 1.02, 0);
+  table.add(cards);
 
-  // Seat system: open VIP seat (angle 0)
-  const vipCenter = new THREE.Vector3(-16, 0, -12);
-  const seatRadius = 3.0;
-  const openSeatPos = new THREE.Vector3(vipCenter.x + Math.cos(0)*seatRadius, 0, vipCenter.z + Math.sin(0)*seatRadius);
-  const openSeatYaw = Math.PI; // face table center
-  const seatSys = installSeatSystem(ctx, { seats: [
-    { id:"VIP_OPEN", label:"VIP", position: openSeatPos, yaw: openSeatYaw, radius: 1.0 }
-  ]});
-  root.add(seatSys.group || new THREE.Group());
+  for (let i = 0; i < 5; i++) {
+    const c = new THREE.Mesh(new THREE.PlaneGeometry(0.32, 0.46), cardMat);
+    c.rotation.x = -Math.PI / 2;
+    c.position.set((i - 2) * 0.38, 0.001, 0);
+    cards.add(c);
+  }
 
-  // Debug helpers (optional: keeps things visible)
-  const dbg = installWorldDebug(ctx, { spawnPos: spawn.spawnPos });
-  root.add(dbg.group);
+  dwrite("[divot] pit + rails + table ready");
 
-  // Player avatar (visible body + hands)
-  const avatar = installPlayerAvatar(ctx);
+  // Bots placeholders (seated ring)
+  const bots = new THREE.Group();
+  bots.position.set(0, -0.55, 0);
+  pit.add(bots);
 
+  const botMat = new THREE.MeshStandardMaterial({ color: 0x2233ff, roughness: 0.85 });
+  const botGeo = new THREE.CapsuleGeometry(0.18, 0.55, 6, 10);
 
-  // Apply textures AFTER world build (Android-safe)
-  try{
-    applyAssets(ctx, { targets: {
-      tableMats: [divot.tableMatRef, vip.tableMatRef].filter(Boolean),
-      cardBackMats: [bots.cardBackMatRef].filter(Boolean),
-      chipMats: []
-    }});
-  }catch(_){}
+  const seatR = 4.6;
+  const seats = 6;
+  for (let i = 0; i < seats; i++) {
+    const a = (i / seats) * Math.PI * 2;
+    const x = Math.cos(a) * seatR;
+    const z = Math.sin(a) * seatR;
 
-  // Set initial rig position to spawn
-  rig.position.copy(spawn.spawnPos);
-  rig.rotation.set(0, 0, 0);
-  dwrite(`[spawn] rig set to (${spawn.spawnPos.x.toFixed(2)},${spawn.spawnPos.y.toFixed(2)},${spawn.spawnPos.z.toFixed(2)})`);
+    const b = new THREE.Mesh(botGeo, botMat);
+    b.position.set(x, 0.85, z);
+    b.rotation.y = -a + Math.PI; // face table
+    bots.add(b);
+
+    // Floating “hole cards” mirror
+    const hand = new THREE.Group();
+    hand.position.set(x * 0.82, 1.35, z * 0.82);
+    hand.lookAt(0, 1.15, 0);
+    pit.add(hand);
+
+    for (let k = 0; k < 2; k++) {
+      const hc = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.32), cardMat);
+      hc.position.set((k - 0.5) * 0.26, 0, 0);
+      hand.add(hc);
+    }
+  }
+
+  dwrite("[bots] bots seated + cards ready");
+
+  // VIP room placeholder
+  const vip = new THREE.Group();
+  vip.position.set(14, 0, -10);
+  scene.add(vip);
+
+  const vipFloor = new THREE.Mesh(
+    new THREE.CircleGeometry(5, 48),
+    new THREE.MeshStandardMaterial({ color: 0x0a0f14, roughness: 0.95 })
+  );
+  vipFloor.rotation.x = -Math.PI / 2;
+  vipFloor.position.y = 0.02;
+  vip.add(vipFloor);
+
+  const vipTable = new THREE.Mesh(
+    new THREE.CylinderGeometry(2.4, 2.4, 0.16, 48),
+    new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.7 })
+  );
+  vipTable.position.y = 0.85;
+  vip.add(vipTable);
+
+  dwrite("[vip] room ready ✅");
+
+  // Extras placeholder
+  const sign = new THREE.Mesh(
+    new THREE.BoxGeometry(5.2, 1.0, 0.12),
+    new THREE.MeshStandardMaterial({ color: 0x001a24, roughness: 0.4, metalness: 0.2 })
+  );
+  sign.position.set(0, 3.0, -8);
+  scene.add(sign);
+
+  dwrite("[env] extras ready");
 
   return {
-    update(){
-      tpfx.update?.();
-      avatar.update?.();
-      idle.update?.();
-      seatSys.update?.();
-      poker.update?.();
-      bots.update?.();
-    },
-    teleportFX: tpfx,
-    avatar,
-    spawnPos: spawn.spawnPos
+    tick(dt) {
+      // subtle animation so you know render loop is alive
+      sign.rotation.y += dt * 0.25;
+    }
   };
 }

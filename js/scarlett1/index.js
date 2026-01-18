@@ -1,8 +1,8 @@
 // /js/scarlett1/index.js
-// SCARLETT FULL SAFE DEMO (Quest + Android)
-// Build: SCARLETT_FULL_SAFE_v1
+// SCARLETT PATCH v4 (Fix spawn in XR, invert stick, add teleport toggle on controller buttons, reduce XR hood overlay)
+// Build: SCARLETT_PATCH_v4
 
-const BUILD = "SCARLETT_FULL_SAFE_v1";
+const BUILD = "SCARLETT_PATCH_v4";
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { buildWorld } from "../world.js";
@@ -25,7 +25,7 @@ const stamp = () => ((performance.now() - t0) / 1000).toFixed(3);
 function dwrite(msg){
   const s = `[${stamp()}] ${String(msg)}`;
   lines.push(s);
-  if (lines.length > 260) lines.shift();
+  if (lines.length > 380) lines.shift();
   if (diagText) diagText.textContent = lines.join("\n");
   console.log(s);
 }
@@ -37,8 +37,11 @@ dwrite(`secureContext=${String(window.isSecureContext)}`);
 dwrite(`ua=${navigator.userAgent}`);
 dwrite(`touch=${("ontouchstart" in window)} maxTouchPoints=${navigator.maxTouchPoints || 0}`);
 dwrite(`xr=${String(!!navigator.xr)}`);
+navigator.xr?.isSessionSupported?.("immersive-vr")
+  ?.then(v => dwrite(`xr immersive-vr supported=${v}`))
+  ?.catch(() => dwrite("xr immersive-vr supported=ERROR"));
 
-// ---- three ----
+// ---- Three ----
 const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
@@ -48,18 +51,18 @@ app.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x05070a);
 
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 300);
-camera.position.set(0, 1.6, 3.2);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 500);
 
+// Player rig
 const rig = new THREE.Group();
-rig.position.set(0, 0, 0);
-rig.add(camera);
 scene.add(rig);
+rig.add(camera);
 
-// lights
-scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-const dir = new THREE.DirectionalLight(0xffffff, 0.85);
-dir.position.set(4, 8, 3);
+// Brighter lighting
+scene.add(new THREE.AmbientLight(0xffffff, 0.72));
+scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 0.55));
+const dir = new THREE.DirectionalLight(0xffffff, 0.95);
+dir.position.set(9, 14, 7);
 scene.add(dir);
 
 window.addEventListener("resize", () => {
@@ -68,46 +71,56 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }, { passive:true });
 
-// ---- world ----
-dwrite("[world] buildWorld()");
-const world = buildWorld(scene, dwrite);
-
-// ---- HUD ----
-btnDiag?.addEventListener("click", () => {
-  const on = diagPanel.style.display !== "block";
-  diagPanel.style.display = on ? "block" : "none";
-});
-
-btnHideHUD?.addEventListener("click", () => {
-  const hidden = hud.style.display === "none";
-  hud.style.display = hidden ? "flex" : "none";
-});
-
-const SPAWN = new THREE.Vector3(0, 0, 3.2);
-
-btnReset?.addEventListener("click", () => {
-  rig.position.copy(SPAWN);
-  rig.rotation.set(0,0,0);
-  camera.rotation.set(0,0,0);
-  state.yaw = 0;
-  state.pitch = 0;
-  dwrite("[player] reset to spawn ✅");
-});
-
+// ---- State ----
 const state = {
   teleport: false,
   yaw: 0,
   pitch: 0,
   one: { active:false, x:0, y:0 },
   two: { active:false, ax:0, ay:0, bx:0, by:0, sx:0, sz:0 },
+  _tpTarget: null,
+  _btnLatch: new Map(),
 };
 
-btnTeleport?.addEventListener("click", () => {
-  state.teleport = !state.teleport;
+// ---- Spawn ----
+const SPAWN = new THREE.Vector3(0, 0, 24.0);
+function applySpawn(){
+  rig.position.copy(SPAWN);
+  rig.rotation.y = Math.PI;
+  state.yaw = Math.PI;
+  state.pitch = 0;
+  camera.position.set(0, 1.6, 0);
+  camera.rotation.set(0,0,0);
+}
+applySpawn();
+
+// ---- Build world ----
+dwrite("[world] buildWorld()");
+const world = buildWorld(scene, dwrite);
+
+// Extra point lights (table visibility)
+const p1 = new THREE.PointLight(0xffffff, 0.9, 25); p1.position.set(0, 6, 0); scene.add(p1);
+const p2 = new THREE.PointLight(0x88ffff, 0.8, 18); p2.position.set(-6, 4, -6); scene.add(p2);
+const p3 = new THREE.PointLight(0x88ffff, 0.8, 18); p3.position.set(6, 4, 6); scene.add(p3);
+
+// ---- HUD ----
+btnDiag?.addEventListener("click", () => {
+  diagPanel.style.display = (diagPanel.style.display === "block") ? "none" : "block";
+});
+btnHideHUD?.addEventListener("click", () => {
+  hud.style.display = (hud.style.display === "none") ? "flex" : "none";
+});
+btnReset?.addEventListener("click", () => {
+  applySpawn();
+  dwrite("[player] reset to spawn ✅");
+});
+function setTeleport(on){
+  state.teleport = !!on;
   btnTeleport.dataset.on = state.teleport ? "1" : "0";
   btnTeleport.textContent = `Teleport: ${state.teleport ? "ON" : "OFF"}`;
   dwrite(`[teleport] ${state.teleport ? "ON" : "OFF"}`);
-});
+}
+btnTeleport?.addEventListener("click", () => setTeleport(!state.teleport));
 
 // ---- Android touch controls ----
 const el = renderer.domElement;
@@ -162,15 +175,15 @@ el.addEventListener("touchmove", (e) => {
     const dx = (mx1 - mx0);
     const dy = (my1 - my0);
 
-    const moveScale = 0.008;
+    const moveScale = 0.010;
     const fwd = -dy * moveScale;
     const str = dx * moveScale;
 
     const yaw = rig.rotation.y;
     const cos = Math.cos(yaw), sin = Math.sin(yaw);
 
-    const vx = (str * cos) + (fwd * sin);
-    const vz = (fwd * cos) - (str * sin);
+    const vx = (str*cos) + (fwd*sin);
+    const vz = (fwd*cos) - (str*sin);
 
     rig.position.x = state.two.sx + vx;
     rig.position.z = state.two.sz + vz;
@@ -186,12 +199,12 @@ el.addEventListener("touchend", (e) => {
   if (e.touches.length===1) state.two.active = false;
 },{ passive:true });
 
-// ---- Desktop WASD fallback ----
+// ---- Desktop WASD ----
 const keys = new Set();
 window.addEventListener("keydown", (e)=>keys.add(e.key.toLowerCase()));
 window.addEventListener("keyup", (e)=>keys.delete(e.key.toLowerCase()));
 function applyWASD(dt){
-  const speed = 2.2;
+  const speed = 3.0;
   let f=0,s=0;
   if (keys.has("w")) f += 1;
   if (keys.has("s")) f -= 1;
@@ -207,7 +220,87 @@ function applyWASD(dt){
   rig.position.z += -vz * speed * dt;
 }
 
-// ---- VR entry (trusted gesture safe) ----
+// ---- VR controllers: laser + reticle + teleport ----
+const tmpMat4 = new THREE.Matrix4();
+const ctlR = renderer.xr.getController(0);
+scene.add(ctlR);
+
+const laserMat = new THREE.LineBasicMaterial({ color: 0x00ffff });
+const laserGeom = new THREE.BufferGeometry().setFromPoints([ new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1) ]);
+const laserLine = new THREE.Line(laserGeom, laserMat);
+laserLine.scale.z = 12;
+ctlR.add(laserLine);
+
+const reticle = new THREE.Mesh(
+  new THREE.RingGeometry(0.12, 0.17, 32),
+  new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent:true, opacity:0.9, side:THREE.DoubleSide })
+);
+reticle.rotation.x = -Math.PI/2;
+reticle.visible = false;
+scene.add(reticle);
+
+// Trigger (select) teleports in teleport mode
+ctlR.addEventListener("selectstart", () => {
+  if (!state.teleport) return;
+  const p = state._tpTarget;
+  if (!p) return;
+  rig.position.x = p.x;
+  rig.position.z = p.z;
+  dwrite(`[teleport] moved to x=${p.x.toFixed(2)} z=${p.z.toFixed(2)}`);
+});
+
+// Edge detection for controller buttons
+function edgeButton(key, pressed){
+  const prev = state._btnLatch.get(key) || false;
+  state._btnLatch.set(key, !!pressed);
+  return (!prev && !!pressed);
+}
+
+// XR move + teleport toggle
+function readXRMoveAndButtons(dt){
+  const session = renderer.xr.getSession?.();
+  if (!session) return;
+
+  for (const src of session.inputSources){
+    const gp = src?.gamepad;
+    if (!gp) continue;
+
+    // Toggle teleport on A/X or B/Y (buttons 4/5)
+    const b4 = gp.buttons?.[4]?.pressed;
+    const b5 = gp.buttons?.[5]?.pressed;
+    if (edgeButton(`${src.handedness}:b4`, b4) || edgeButton(`${src.handedness}:b5`, b5)){
+      setTeleport(!state.teleport);
+    }
+
+    // Use left hand stick for movement
+    if (src.handedness !== "left") continue;
+
+    const axX = gp.axes?.[2] ?? gp.axes?.[0] ?? 0;
+    const axY = gp.axes?.[3] ?? gp.axes?.[1] ?? 0;
+
+    const dead = 0.14;
+    const sx = Math.abs(axX) > dead ? axX : 0;
+    const sy = Math.abs(axY) > dead ? axY : 0;
+    if (!sx && !sy) continue;
+
+    if (state.teleport) continue;
+
+    // FIX: your report says forward/back are swapped -> invert
+    const fwd = -sy;
+    const str = sx;
+
+    const speed = 2.7;
+    const yaw = rig.rotation.y;
+    const cos = Math.cos(yaw), sin = Math.sin(yaw);
+    const vx = (str*cos) + (fwd*sin);
+    const vz = (fwd*cos) - (str*sin);
+
+    rig.position.x += vx * speed * dt;
+    rig.position.z += vz * speed * dt;
+  }
+}
+
+// Enter VR: hide DOM overlay to reduce hood effect
 async function canEnterVR(){
   if (!navigator.xr) return false;
   try { return await navigator.xr.isSessionSupported("immersive-vr"); }
@@ -224,7 +317,7 @@ btnEnterVR?.addEventListener("click", async () => {
 
   const ok = await canEnterVR();
   if (!ok){
-    alert("immersive-vr not supported here");
+    alert("immersive-vr not supported here (Android expected).");
     dwrite("XR immersive-vr NOT supported ❌");
     return;
   }
@@ -235,59 +328,85 @@ btnEnterVR?.addEventListener("click", async () => {
     });
     renderer.xr.setSession(session);
     dwrite("XR SESSION STARTED ✅");
-    session.addEventListener("end", ()=>dwrite("XR session ended."));
+
+    // Apply spawn AFTER XR starts (fix: headset origin starts at table)
+    applySpawn();
+
+    // Hide DOM overlay
+    try{
+      $("#hud").style.display = "none";
+      const hint = $("#hint"); if (hint) hint.style.display = "none";
+      const dp = $("#diagPanel"); if (dp) dp.style.display = "none";
+    } catch(_){}
+
+    session.addEventListener("end", () => {
+      dwrite("XR session ended.");
+      try{
+        $("#hud").style.display = "flex";
+        const hint = $("#hint"); if (hint) hint.style.display = "block";
+      } catch(_){}
+    });
   } catch(e){
     dwrite(`XR SESSION FAILED ❌ ${e?.message || e}`);
     alert("VR blocked by browser/device");
   }
 });
 
-// ---- Quest smooth locomotion via gamepad axes ----
-function readXRMove(dt){
-  const session = renderer.xr.getSession?.();
-  if (!session) return;
-
-  for (const src of session.inputSources){
-    const gp = src?.gamepad;
-    if (!gp) continue;
-
-    const axX = gp.axes?.[2] ?? gp.axes?.[0] ?? 0;
-    const axY = gp.axes?.[3] ?? gp.axes?.[1] ?? 0;
-
-    const dead = 0.14;
-    const sx = Math.abs(axX) > dead ? axX : 0;
-    const sy = Math.abs(axY) > dead ? axY : 0;
-    if (!sx && !sy) continue;
-
-    // Teleport ON = step forward; OFF = smooth move
-    if (state.teleport){
-      if ((-sy) > 0.85){
-        const step = 0.6;
-        const yaw = rig.rotation.y;
-        rig.position.x += Math.sin(yaw) * step;
-        rig.position.z += Math.cos(yaw) * step;
-      }
-      continue;
-    }
-
-    const speed = 2.0;
-    const yaw = rig.rotation.y;
-    const cos = Math.cos(yaw), sin = Math.sin(yaw);
-    const fwd = -sy;
-    const str = sx;
-    const vx = (str*cos) + (fwd*sin);
-    const vz = (fwd*cos) - (str*sin);
-    rig.position.x += vx * speed * dt;
-    rig.position.z += vz * speed * dt;
-  }
-}
-
-// ---- loop ----
+// ---- Loop ----
 const clock = new THREE.Clock();
+
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
+
   applyWASD(dt);
-  readXRMove(dt);
+
+  const session = renderer.xr.getSession?.();
+  const inXR = !!session;
+
+  if (inXR){
+    readXRMoveAndButtons(dt);
+
+    // Laser always visible in XR
+    laserLine.visible = true;
+
+    if (state.teleport){
+      // Teleport aim (intersect with y=0 plane)
+      tmpMat4.identity().extractRotation(ctlR.matrixWorld);
+      const dir = new THREE.Vector3(0,0,-1).applyMatrix4(tmpMat4).normalize();
+      const origin = new THREE.Vector3().setFromMatrixPosition(ctlR.matrixWorld);
+
+      const denom = dir.y;
+      if (Math.abs(denom) > 1e-4){
+        const tHit = (0 - origin.y) / denom;
+        if (Number.isFinite(tHit) && tHit > 0){
+          const hit = origin.clone().add(dir.multiplyScalar(tHit));
+          state._tpTarget = hit;
+
+          reticle.visible = true;
+          reticle.position.set(hit.x, 0.02, hit.z);
+
+          const dist = origin.distanceTo(hit);
+          laserLine.scale.z = Math.min(20, Math.max(2, dist));
+        } else {
+          reticle.visible = false;
+          state._tpTarget = null;
+          laserLine.scale.z = 12;
+        }
+      } else {
+        reticle.visible = false;
+        state._tpTarget = null;
+        laserLine.scale.z = 12;
+      }
+    } else {
+      reticle.visible = false;
+      state._tpTarget = null;
+      laserLine.scale.z = 12;
+    }
+  } else {
+    reticle.visible = false;
+    laserLine.visible = false;
+  }
+
   world?.tick?.(dt, { rig, camera });
   renderer.render(scene, camera);
 });

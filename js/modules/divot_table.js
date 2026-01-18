@@ -1,6 +1,4 @@
 // /js/modules/divot_table.js
-import { loadTextureSafe } from "./textures.js";
-
 export function createDivotTable({ THREE, dwrite }, { center }){
   const group = new THREE.Group();
   group.name = "divotPit";
@@ -47,9 +45,8 @@ export function createDivotTable({ THREE, dwrite }, { center }){
   group.add(rail2);
 
   // Table in pit
-  const feltTex = loadTextureSafe(THREE, "./assets/textures/felt.png");
-if (feltTex){ feltTex.repeat.set(2,2); }
-const tableMat = new THREE.MeshStandardMaterial({ color: 0x0b6b3a, roughness:0.85, metalness:0.05, map: feltTex || null });
+  if (feltTex){ feltTex.repeat.set(2,2); }
+const tableMat = new THREE.MeshStandardMaterial({ color: 0x0b6b3a, roughness:0.85, metalness:0.05,  });
   const table = new THREE.Mesh(new THREE.CylinderGeometry(2.35, 2.35, 0.25, 48), tableMat);
   table.position.set(center.x, center.y - pitDepth + 0.55, center.z);
   group.add(table);
@@ -67,5 +64,5 @@ const tableMat = new THREE.MeshStandardMaterial({ color: 0x0b6b3a, roughness:0.8
   group.add(dealer);
 
   dwrite?.("[divot] pit + rails + table ready");
-  return { group, pitRadius, pitDepth, table };
+  return { group, pitRadius, pitDepth, table, tableMatRef: table.material };
 }

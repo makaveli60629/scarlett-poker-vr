@@ -1,7 +1,5 @@
 // /js/modules/vip_room.js
 // VIP room: NO divot, oval table, 6 seats total (5 bots + 1 open seat)
-import { loadTextureSafe } from "./textures.js";
-
 export function createVIPRoom({ THREE, dwrite }, { center }){
   const group = new THREE.Group();
   group.name = "vipRoom";
@@ -16,12 +14,11 @@ export function createVIPRoom({ THREE, dwrite }, { center }){
   group.add(floor);
 
   // Oval table
-  const feltTex = loadTextureSafe(THREE, "./assets/textures/felt.png");
-if (feltTex){ feltTex.repeat.set(2,2); }
+  if (feltTex){ feltTex.repeat.set(2,2); }
 
   const table = new THREE.Mesh(
     new THREE.CylinderGeometry(2.2, 2.2, 0.28, 48, 1, false),
-    new THREE.MeshStandardMaterial({ color: 0x083f26, roughness:0.85, map: feltTex || null })
+    new THREE.MeshStandardMaterial({ color: 0x083f26, roughness:0.85,  })
   );
   table.scale.x = 1.35; // oval
   table.position.set(center.x, center.y + 0.65, center.z);
@@ -81,5 +78,5 @@ if (feltTex){ feltTex.repeat.set(2,2); }
   group.add(open);
 
   dwrite?.("[vip] room ready (6-seat oval, no divot)");
-  return { group, bots };
+  return { group, bots, tableMatRef: table.material };
 }

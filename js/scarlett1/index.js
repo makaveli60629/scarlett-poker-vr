@@ -1,7 +1,7 @@
 // SCARLETT1 — Runtime v2.0 (phase-ready) with v1.8 stability
-// BUILD: SCARLETT1_RUNTIME_v2_0_PHASE_A
+// BUILD: SCARLETT1_RUNTIME_v1_8_HOTFIX
 
-const BUILD = "SCARLETT1_RUNTIME_v2_0_PHASE_A";
+const BUILD = "SCARLETT1_RUNTIME_v1_8_HOTFIX";
 const dwrite = (m)=>{ try{ window.__scarlettDiagWrite?.(m);}catch(_){ console.log(m);} };
 
 dwrite(`[scarlett1] LIVE_FINGERPRINT ✅ ${BUILD}`);

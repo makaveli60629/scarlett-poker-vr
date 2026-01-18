@@ -1,4 +1,6 @@
 // /js/modules/avatars_bots.js
+import { loadTextureSafe } from "./textures.js";
+
 export function createBotsAndCards({ THREE, dwrite }, { center }){
   const group = new THREE.Group();
   group.name = "botsAndCards";
@@ -15,7 +17,8 @@ export function createBotsAndCards({ THREE, dwrite }, { center }){
   const headMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness:0.55, metalness:0.05 });
 
   const cardMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness:0.8 });
-  const cardBack = new THREE.MeshStandardMaterial({ color: 0x3333ff, roughness:0.7 });
+  const backTex = loadTextureSafe(THREE, "./assets/textures/card_back.png");
+const cardBack = new THREE.MeshStandardMaterial({ color: 0x3333ff, roughness:0.7, map: backTex || null });
   const hoverMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive:0x66aaff, emissiveIntensity:0.35, roughness:0.85 });
 
   function makeBot(i, angle){

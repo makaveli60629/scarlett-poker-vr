@@ -1,6 +1,7 @@
 // /js/modules/seat_system.js
 // Seat / Sit / Join logic (VIP open seat first). Reusable for other tables later.
 export function installSeatSystem({ THREE, rig, camera, renderer, dwrite }, { seats }){
+  window.__scarlettOnSeatChange = window.__scarlettOnSeatChange || [];
   const state = {
     seated: false,
     activeSeatId: null,
@@ -49,6 +50,7 @@ export function installSeatSystem({ THREE, rig, camera, renderer, dwrite }, { se
     btnLeave.style.display = "";
 
     try{ window.__scarlettAudioCues?.joinSeat?.(); }catch(_){ }
+    try{ for (const fn of window.__scarlettOnSeatChange) fn(true, seatId); }catch(_){ }
     dwrite?.(`[seat] joined ${seatId} ✅`);
 
     // Optional: disable teleport while seated
@@ -68,6 +70,7 @@ export function installSeatSystem({ THREE, rig, camera, renderer, dwrite }, { se
     btnLeave.style.display = "none";
 
     try{ window.__scarlettAudioCues?.standUp?.(); }catch(_){ }
+    try{ for (const fn of window.__scarlettOnSeatChange) fn(false, null); }catch(_){ }
     dwrite?.("[seat] stood up ✅");
     try{ window.__scarlettSeatSeated = false; }catch(_){}
   }

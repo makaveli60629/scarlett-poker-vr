@@ -6,30 +6,22 @@
   <meta name="color-scheme" content="dark light" />
   <title>SCARLETT • Poker VR</title>
   <style>
-    html, body {
-      margin:0; padding:0; width:100%; height:100%;
-      overflow:hidden; background:#000;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
-    }
+    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
 
-    /* Canvas layer */
     #app{ position:fixed; inset:0; z-index:0; }
     canvas{ display:block; width:100% !important; height:100% !important; }
 
-    /* HUD layer */
     #hud{
       position:fixed; top:10px; left:10px;
       display:flex; flex-direction:column; gap:8px;
-      z-index:2147483647;
-      pointer-events:auto;
+      z-index:2147483647; pointer-events:auto;
     }
     .hudRow{ display:flex; gap:8px; flex-wrap:wrap; }
     .hudBtn{
       appearance:none; border:0; border-radius:10px;
-      padding:10px 12px;
-      font-weight:900;
-      background:rgba(20,20,20,0.75);
-      color:#fff;
+      padding:10px 12px; font-weight:900;
+      background:rgba(20,20,20,0.75); color:#fff;
       backdrop-filter: blur(8px);
       box-shadow: 0 6px 18px rgba(0,0,0,0.35);
       cursor:pointer;
@@ -39,20 +31,19 @@
 
     #diagPanel{
       position:fixed; left:10px; bottom:10px;
-      width:min(640px, calc(100% - 20px));
-      max-height:45vh;
+      width:min(760px, calc(100% - 20px)); max-height:45vh;
       background:rgba(0,0,0,0.72);
       border:1px solid rgba(255,255,255,0.15);
-      border-radius:12px;
-      padding:10px;
-      overflow:auto;
-      display:none;
-      z-index:2147483647;
-      pointer-events:auto;
-      color:#fff;
+      border-radius:12px; padding:10px;
+      overflow:auto; display:none;
+      z-index:2147483647; pointer-events:auto; color:#fff;
     }
     #diagTitle{ font-weight:950; margin-bottom:8px; }
-    #diagText{ white-space:pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px; line-height:1.35; opacity:0.95; }
+    #diagText{
+      white-space:pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size:12px; line-height:1.35; opacity:0.95;
+    }
 
     #hint{
       position:fixed; right:10px; top:10px;
@@ -63,7 +54,7 @@
       color:#fff;
       z-index:2147483647;
       pointer-events:none;
-      max-width:min(420px, calc(100% - 20px));
+      max-width:min(560px, calc(100% - 20px));
       font-weight:750;
       opacity:0.9;
     }
@@ -87,7 +78,7 @@
     <div id="diagText"></div>
   </div>
 
-  <div id="hint">Touch-drag to look • Two-finger drag to move • WASD on desktop • Quest: stick to move</div>
+  <div id="hint">Quest: Left stick move • A/X toggles Teleport • Trigger teleports • Android: drag look + 2-finger move</div>
 
   <script type="module" src="./js/scarlett1/index.js"></script>
 </body>

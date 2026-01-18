@@ -1,112 +1,128 @@
-import * as THREE from "three";
+export function buildWorld(THREE, scene){
+  const room = new THREE.Mesh(
+    new THREE.BoxGeometry(22,6,22),
+    new THREE.MeshStandardMaterial({ color:0x0b0f14, side:THREE.BackSide })
+  );
+  room.position.set(0,3,0);
+  scene.add(room);
 
-async function safeImport(rel, log) {
-  try { return await import(rel); }
-  catch (e) { log?.(`[world] safeImport fail ${rel}: ${e.message}`); return null; }
-}
-function isFn(v){ return typeof v === "function"; }
-function isObj(v){ return v && typeof v === "object"; }
-
-function listCallable(mod) {
-  const out = [];
-  if (!mod) return out;
-  for (const [k, v] of Object.entries(mod)) {
-    if (isFn(v)) out.push({ path: k, fn: v, thisArg: null });
-    if (isObj(v)) {
-      for (const [k2, v2] of Object.entries(v)) if (isFn(v2)) out.push({ path:`${k}.${k2}`, fn:v2, thisArg:v });
-    }
-  }
-  return out;
-}
-function getPath(mod, path){ return path.split(".").reduce((a,k)=>a?.[k], mod); }
-function pickBest(mod, preferredPaths=[]) {
-  if (!mod) return null;
-  for (const p of preferredPaths) {
-    const cur = getPath(mod, p);
-    if (isFn(cur)) {
-      const parts = p.split(".");
-      if (parts.length >= 2) {
-        const obj = getPath(mod, parts.slice(0,-1).join("."));
-        return { path:p, fn:cur, thisArg:isObj(obj)?obj:null };
-      }
-      return { path:p, fn:cur, thisArg:null };
-    }
-  }
-  const c = listCallable(mod);
-  return c.length ? c[0] : null;
-}
-
-function ensureFallbackWorld({ scene, rig, log }) {
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(30,30), new THREE.MeshStandardMaterial({color:0x1d2430}));
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(40,40),
+    new THREE.MeshStandardMaterial({ color:0x103820 })
+  );
   floor.rotation.x = -Math.PI/2;
-  floor.userData.isFloor = true;
   scene.add(floor);
 
-  const grid = new THREE.GridHelper(30, 30, 0x2a3646, 0x16202b);
-  grid.position.y = 0.002;
-  scene.add(grid);
+  const tableTop = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.35,1.35,0.18,40),
+    new THREE.MeshStandardMaterial({ color:0x0c2b18 })
+  );
+  tableTop.position.set(0,0.92,0);
+  scene.add(tableTop);
 
-  const table = new THREE.Mesh(new THREE.CylinderGeometry(1.2,1.2,0.08,48), new THREE.MeshStandardMaterial({color:0x0e7c3a}));
-  table.position.set(0,0.95,-4.2);
-  scene.add(table);
+  const tableRim = new THREE.Mesh(
+    new THREE.TorusGeometry(1.35,0.08,16,48),
+    new THREE.MeshStandardMaterial({ color:0x2a1d12 })
+  );
+  tableRim.rotation.x = Math.PI/2;
+  tableRim.position.set(0,1.01,0);
+  scene.add(tableRim);
 
-  rig.position.set(0,0,0);
-  log?.("[world] fallback world ready ✓");
+  const pedestal = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.35,0.55,0.8,24),
+    new THREE.MeshStandardMaterial({ color:0x1a1a1a })
+  );
+  pedestal.position.set(0,0.4,0);
+  scene.add(pedestal);
+
+  const marker = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08,0.08,0.02,20),
+    new THREE.MeshStandardMaterial({ color:0x7b1b1b })
+  );
+  marker.position.set(0,1.02,0);
+  scene.add(marker);
+
+  const bots=[];
+  const seatCount=6;
+  for(let i=0;i<seatCount;i++){
+    const ang = (i/seatCount)*Math.PI*2 - Math.PI/2;
+    const px = Math.cos(ang)*2.2;
+    const pz = Math.sin(ang)*2.2;
+
+    const seat = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.22,0.22,0.06,18),
+      new THREE.MeshStandardMaterial({ color:0x1d1d1d })
+    );
+    seat.position.set(px,0.52,pz);
+    scene.add(seat);
+
+    const bot = makeBot(THREE);
+    bot.position.set(px,0.0,pz);
+    bot.lookAt(0,1.0,0);
+    scene.add(bot);
+    bots.push(bot);
+
+    // simple chip stack
+    const chips = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07,0.07,0.06,18),
+      new THREE.MeshStandardMaterial({ color:0x883333 })
+    );
+    chips.position.set(px*0.55, 1.02, pz*0.55);
+    scene.add(chips);
+  }
+
+  // cards (flat + hover) per seat
+  const cards=[];
+  for(let i=0;i<seatCount;i++){
+    const ang = (i/seatCount)*Math.PI*2 - Math.PI/2;
+    const px = Math.cos(ang)*1.05;
+    const pz = Math.sin(ang)*1.05;
+
+    const pair = makeCardPair(THREE);
+    pair.position.set(px, 1.03, pz);
+    pair.rotation.y = -ang;
+    scene.add(pair);
+
+    const hover = makeCardPair(THREE);
+    hover.position.set(px, 1.32, pz);
+    hover.rotation.y = -ang;
+    scene.add(hover);
+
+    cards.push(pair, hover);
+  }
+
+  return { floor:floor, tableTop:tableTop, bots:bots, cards:cards };
 }
 
-export async function build(ctx) {
-  const { scene, rig, log } = ctx;
-  log("[world] adapter v9 build starting…");
+function makeBot(THREE){
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.18,0.55,6,12),
+    new THREE.MeshStandardMaterial({ color:0x6b7a8f })
+  );
+  body.position.y = 1.0;
+  g.add(body);
 
-  if (!ctx.root) ctx.root = scene;
-  if (!ctx.manifest) {
-    const map = new Map();
-    ctx.manifest = { get:(k)=>map.get(k), set:(k,v)=>map.set(k,v) };
-  }
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.16,16,12),
+    new THREE.MeshStandardMaterial({ color:0xd2b48c })
+  );
+  head.position.y = 1.55;
+  g.add(head);
+  return g;
+}
 
-  // Your modular world pieces (these ship in this ZIP)
-  const wb   = await safeImport("./world_builders.js", log);
-  const rm   = await safeImport("./room_manager.js", log);
-  const sp   = await safeImport("./spawn_points.js", log);
+function makeCardPair(THREE){
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color:0xf2f2f2 });
+  const geo = new THREE.PlaneGeometry(0.22,0.30);
 
-  const steps = [];
-
-  const lightsFn = pickBest(wb, ["WorldBuilders.lights"]);
-  const buildFn  = pickBest(wb, ["WorldBuilders.build"]);
-  if (lightsFn) steps.push({ label:`world_builders.${lightsFn.path}()`, ...lightsFn });
-  if (buildFn)  steps.push({ label:`world_builders.${buildFn.path}()`, ...buildFn });
-
-  const rmFn = pickBest(rm, ["RoomManager.init"]);
-  if (rmFn) steps.push({ label:`room_manager.${rmFn.path}()`, ...rmFn });
-
-  const spFn = pickBest(sp, ["SpawnPoints.apply"]);
-  if (spFn) steps.push({ label:`spawn_points.${spFn.path}()`, ...spFn, _callWithCamera:true });
-
-  if (!steps.length) {
-    log("[world] ⚠️ No callable functions found. Using fallback world.");
-    ensureFallbackWorld({ scene, rig, log });
-    return;
-  }
-
-  for (const s of steps) {
-    try {
-      log(`[world] ▶ ${s.label}`);
-      let out;
-      if (s._callWithCamera) {
-        const cam = ctx.camera;
-        out = s.thisArg ? await s.fn.call(s.thisArg, cam) : await s.fn(cam);
-      } else {
-        out = s.thisArg ? await s.fn.call(s.thisArg, ctx) : await s.fn(ctx);
-      }
-      if (out && typeof out === "object") ctx.world_out = out;
-      log(`[world] ✅ ${s.label}`);
-    } catch (e) {
-      log(`[world] ❌ ${s.label} FAILED: ${e.message}`);
-      log("[world] Falling back to safe world (so you can keep moving).");
-      ensureFallbackWorld({ scene, rig, log });
-      return;
-    }
-  }
-
-  log("[world] Scarlett world ready ✅");
+  const c1 = new THREE.Mesh(geo, mat);
+  const c2 = new THREE.Mesh(geo, mat);
+  c1.position.set(-0.13,0,0);
+  c2.position.set( 0.13,0,0);
+  c1.rotation.x = -Math.PI/2;
+  c2.rotation.x = -Math.PI/2;
+  group.add(c1); group.add(c2);
+  return group;
 }

@@ -1,256 +1,252 @@
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js";
+// SCARLETT1 — DEMO RUNTIME (modular world + spawn pad + teleport arch + poker divot)
+// Build: SCARLETT1_DEMO_RUNTIME_v1_0
 
-export function startScarlettRuntime(){
-  const d = window.__scarlettDiagWrite || ((m)=>console.log(m));
-  d("[scarlett1] LIVE_FINGERPRINT ✅ SCARLETT1_v2_7_INPUT_LASER_FIX");
+const BUILD = "SCARLETT1_DEMO_RUNTIME_v1_0";
+const dwrite = (msg) => { try { window.__scarlettDiagWrite?.(String(msg)); } catch (_) {} };
+const toast = (msg, ms) => { try { window.__scarlettToast?.(String(msg), ms ?? 1600); } catch (_) {} };
 
-  const app = document.getElementById("app");
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x020308);
+// Hard attach flags (used by your diag HUD patterns)
+window.SCARLETT = window.SCARLETT || {};
+window.SCARLETT.BUILD = BUILD;
+window.SCARLETT.engineAttached = true;
+window.SCARLETT.attached = true;
+window.SCARLETT.ok = true;
+window.__scarlettEngineAttached = true;
+window.__SCARLETT_ENGINE_ATTACHED__ = true;
+window.__scarlettAttached = true;
 
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.05, 140);
+console.log(`[scarlett1] LIVE_FINGERPRINT ✅ ${BUILD}`);
+dwrite(`[scarlett1] booting… build=${BUILD}`);
 
-  const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.xr.enabled = true;
+// ---- imports (CDN) ----
+import * as THREE from "https://unpkg.com/three@0.161.0/build/three.module.js";
+import { XRControllerModelFactory } from "https://unpkg.com/three@0.161.0/examples/jsm/webxr/XRControllerModelFactory.js";
 
-  // IMPORTANT: canvas never steals input from HUD
-  renderer.domElement.style.pointerEvents = "none";
-  renderer.domElement.style.position = "fixed";
-  renderer.domElement.style.left = "0";
-  renderer.domElement.style.top = "0";
-  app.appendChild(renderer.domElement);
+import { buildWorld } from "../world.js";
+import { createUIBindings } from "../ui.js";
 
-  window.addEventListener("resize", ()=>{
-    camera.aspect = window.innerWidth/window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
+// ---- canvas + renderer ----
+const canvas = document.getElementById('c');
+if (!canvas) throw new Error('Missing <canvas id="c">');
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x111111, 1.15));
-  const spot = new THREE.SpotLight(0xffffff, 1.35, 50, Math.PI/7, 0.5, 1.0);
-  spot.position.set(4, 6.5, 4);
-  scene.add(spot);
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.setSize(window.innerWidth, window.innerHeight, false);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.xr.enabled = true;
+renderer.shadowMap.enabled = true;
 
-  // Rig (spawn away from table)
-  const rig = new THREE.Group();
-  rig.position.set(0,0,8.0);
-  rig.add(camera);
-  scene.add(rig);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0f14);
 
-  // ---- Floor ----
-  const floorMat = new THREE.MeshStandardMaterial({ color:0x103820 });
-  floorMat.polygonOffset = true;
-  floorMat.polygonOffsetFactor = 1;
-  floorMat.polygonOffsetUnits = 1;
+const rig = new THREE.Group();
+scene.add(rig);
 
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(60,60), floorMat);
-  floor.rotation.x = -Math.PI/2;
-  floor.position.y = 0;
-  scene.add(floor);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
+camera.position.set(0, 1.65, 0);
+rig.add(camera);
 
-  // Table quick
-  const table = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.55,1.55,0.20,48),
-    new THREE.MeshStandardMaterial({ color:0x0c2b18, roughness:0.9 })
-  );
-  table.position.set(0,0.92,0);
-  scene.add(table);
+// lighting
+const hemi = new THREE.HemisphereLight(0xffffff, 0x0b0f14, 0.9);
+scene.add(hemi);
+const key = new THREE.DirectionalLight(0xffffff, 1.1);
+key.position.set(5, 10, 3);
+key.castShadow = true;
+key.shadow.camera.near = 0.1;
+key.shadow.camera.far = 40;
+key.shadow.mapSize.set(1024, 1024);
+scene.add(key);
 
-  // ---- XR enter (keep your boot.js requestSession; this is a safe fallback) ----
-  window.__scarlettEnterVR = async ()=>{
-    if(!navigator.xr){ d("[xr] navigator.xr not available"); return; }
-    const session = await navigator.xr.requestSession("immersive-vr", { requiredFeatures:["local-floor"] });
-    await renderer.xr.setSession(session);
-    d("[xr] session started ✅");
-  };
-
-  // ---- Controllers (beam is ATTACHED to controller, not world center) ----
-  const raycaster = new THREE.Raycaster();
-  const tempMat = new THREE.Matrix4();
-
-  const reticle = new THREE.Mesh(
-    new THREE.RingGeometry(0.12,0.16,24),
-    new THREE.MeshStandardMaterial({ color:0x66ccff, side:THREE.DoubleSide })
-  );
-  reticle.rotation.x = -Math.PI/2;
-  reticle.visible = false;
-  scene.add(reticle);
-
-  function makeBeam(){
-    const mat = new THREE.LineBasicMaterial({ color:0x66ccff });
-    const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0,0,-1)]);
-    const line = new THREE.Line(geo, mat);
-    line.visible = false;
-    return line;
+// basic perf stats in diag
+const env = {
+  THREE,
+  renderer,
+  scene,
+  camera,
+  rig,
+  clock: new THREE.Clock(),
+  state: {
+    teleportMode: false,
+    spawned: false,
+    spawnPoint: new THREE.Vector3(0, 0, 0),
+    spawnYaw: 0,
+  },
+  input: {
+    keys: new Set(),
+    look: { yaw: 0, pitch: 0 },
+    move: { x: 0, z: 0 },
+    pointers: new Map(),
+  },
+  updateFns: [],
+  tmp: {
+    v3: new THREE.Vector3(),
+    v3b: new THREE.Vector3(),
+    quat: new THREE.Quaternion(),
+    mat4: new THREE.Matrix4(),
+    raycaster: new THREE.Raycaster(),
   }
+};
 
-  const controllers = [];
-  const input = {
-    left:  { gp:null, ctrl:null },
-    right: { gp:null, ctrl:null },
-  };
+// UI bindings (buttons)
+createUIBindings(env);
 
-  function setupController(i){
-    const c = renderer.xr.getController(i);
-    c.userData.i = i;
-    c.userData.beam = makeBeam();
-    c.userData.aiming = false;
-    c.userData.teleportPoint = null;
+// XR controllers
+const controllerModelFactory = new XRControllerModelFactory();
+const controllers = [];
+for (let i = 0; i < 2; i++) {
+  const c = renderer.xr.getController(i);
+  c.userData.index = i;
+  rig.add(c);
+  controllers.push(c);
 
-    c.add(c.userData.beam);
-    scene.add(c);
-    controllers.push(c);
+  const g = new THREE.BufferGeometry().setFromPoints([ new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1) ]);
+  const l = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x7c4dff }));
+  l.name = 'ray';
+  l.scale.z = 10;
+  c.add(l);
 
-    c.addEventListener("selectstart", ()=>{ c.userData.aiming = true; });
-    c.addEventListener("selectend", ()=>{
-      c.userData.aiming = false;
-      if(window.SCARLETT?.teleportOn && c.userData.teleportPoint){
-        rig.position.x = c.userData.teleportPoint.x;
-        rig.position.z = c.userData.teleportPoint.z;
-        c.userData.teleportPoint = null;
-      }
-    });
-  }
-  setupController(0);
-  setupController(1);
-
-  function updateInputSources(){
-    const session = renderer.xr.getSession?.();
-    input.left.gp = input.right.gp = null;
-    if(!session || !session.inputSources) return;
-
-    // Map gamepads by handedness FIRST
-    for(const src of session.inputSources){
-      if(!src || !src.gamepad) continue;
-      if(src.handedness === "left") input.left.gp = src.gamepad;
-      if(src.handedness === "right") input.right.gp = src.gamepad;
-    }
-
-    // Map controllers by index as fallback
-    input.left.ctrl = controllers[0] || null;
-    input.right.ctrl = controllers[1] || null;
-  }
-
-  function updateTeleport(){
-    if(!(window.SCARLETT?.teleportOn)){
-      reticle.visible = false;
-      for(const c of controllers){
-        c.userData.beam.visible = false;
-        c.userData.teleportPoint = null;
-      }
-      return;
-    }
-
-    // Pick the controller that is *currently aiming*; else prefer LEFT controller
-    let c = null;
-    for(const cc of controllers){ if(cc.userData.aiming){ c = cc; break; } }
-    if(!c) c = input.left.ctrl || controllers[0];
-
-    if(!c) return;
-
-    tempMat.identity().extractRotation(c.matrixWorld);
-    raycaster.ray.origin.setFromMatrixPosition(c.matrixWorld);
-    raycaster.ray.direction.set(0,0,-1).applyMatrix4(tempMat);
-
-    const hits = raycaster.intersectObject(floor, false);
-    if(hits && hits.length){
-      const p = hits[0].point;
-      reticle.position.set(p.x, 0.01, p.z);
-      reticle.visible = true;
-      c.userData.teleportPoint = p;
-
-      // beam endpoint in controller local space
-      c.userData.beam.visible = true;
-      const localEnd = c.worldToLocal(p.clone());
-      c.userData.beam.geometry.setFromPoints([new THREE.Vector3(0,0,0), localEnd]);
-      c.userData.beam.geometry.attributes.position.needsUpdate = true;
-    }else{
-      reticle.visible = false;
-      c.userData.teleportPoint = null;
-      c.userData.beam.visible = false;
-    }
-  }
-
-  // ---- Movement (fix forward/back swap) ----
-  const dz = (v)=> (Math.abs(v)<0.18)?0:v;
-  const readMove = (gp)=>{
-    if(!gp || !gp.axes) return {x:0,y:0};
-    let x = gp.axes[0] ?? 0;
-    let y = gp.axes[1] ?? 0;
-
-    // fallback pair
-    if(Math.abs(x)+Math.abs(y) < 0.05 && gp.axes.length>=4){
-      x = gp.axes[2]; y = gp.axes[3];
-    }
-
-    // FIX: invert Y so forward is forward (you reported it’s reversed)
-    y = -y;
-
-    return { x: dz(x), y: dz(y) };
-  };
-  const readTurn = (gp)=>{
-    if(!gp || !gp.axes) return 0;
-    let t = gp.axes.length>=3 ? gp.axes[2] : (gp.axes[0] ?? 0);
-    if(Math.abs(t) < 0.05) t = gp.axes[0] ?? 0;
-    return dz(t);
-  };
-
-  let snapCooldown = 0;
-  let logCooldown = 0;
-
-  function applyMovement(dt){
-    // XR sticks
-    let moveX=0, moveY=0, turnX=0;
-
-    if(window.SCARLETT?.sticksOn){
-      const mv = readMove(input.left.gp || input.right.gp);
-      moveX = mv.x; moveY = mv.y;
-      turnX = readTurn(input.right.gp || input.left.gp);
-
-      snapCooldown = Math.max(0, snapCooldown - dt);
-      if(snapCooldown === 0 && Math.abs(turnX) > 0.7){
-        rig.rotation.y -= Math.sign(turnX) * (Math.PI/4);
-        snapCooldown = 0.25;
-      }
-    }
-
-    const speed = 2.3;
-    const forward = new THREE.Vector3(0,0,-1).applyQuaternion(rig.quaternion);
-    const right = new THREE.Vector3(1,0,0).applyQuaternion(rig.quaternion);
-    forward.y=0; right.y=0; forward.normalize(); right.normalize();
-
-    rig.position.addScaledVector(right, moveX * speed * dt);
-    rig.position.addScaledVector(forward, moveY * speed * dt);
-
-    // light logging (for you to screenshot if diag works)
-    logCooldown = Math.max(0, logCooldown - dt);
-    if(logCooldown === 0){
-      logCooldown = 1.0;
-      try{
-        const la = input.left.gp?.axes ? input.left.gp.axes.slice(0,6) : null;
-        const ra = input.right.gp?.axes ? input.right.gp.axes.slice(0,6) : null;
-        d("[axes] left=" + (la?JSON.stringify(la):"null") + " right=" + (ra?JSON.stringify(ra):"null"));
-      }catch(_){}
-    }
-  }
-
-  // ---- Loop ----
-  let last = performance.now();
-  renderer.setAnimationLoop(()=>{
-    updateInputSources();
-
-    const now = performance.now();
-    const dt = Math.min(0.05, (now-last)/1000);
-    last = now;
-
-    updateTeleport();
-    applyMovement(dt);
-
-    renderer.render(scene, camera);
-  });
-
-  d("[status] renderer OK ✅");
-  d("[status] world ready ✅");
-  d("[status] ready ✅");
+  const grip = renderer.xr.getControllerGrip(i);
+  grip.add(controllerModelFactory.createControllerModel(grip));
+  rig.add(grip);
 }
+
+env.xr = { controllers };
+
+// build world (mods)
+dwrite('building world…');
+const world = await buildWorld(env);
+Object.assign(env, { world });
+
+dwrite('world ready ✅');
+toast('World ready ✅');
+
+// ensure we spawn on spawn pad once modules set spawnPoint
+function resetToSpawn() {
+  const p = env.state.spawnPoint.clone();
+  // keep camera height
+  rig.position.set(p.x, p.y, p.z);
+  env.input.look.yaw = env.state.spawnYaw;
+}
+window.__scarlettResetToSpawn = resetToSpawn;
+resetToSpawn();
+env.state.spawned = true;
+
+// desktop/mobile input
+window.addEventListener('keydown', (e) => env.input.keys.add(e.code));
+window.addEventListener('keyup', (e) => env.input.keys.delete(e.code));
+
+// pointer input: 1 finger = look; 2 fingers = move
+canvas.addEventListener('pointerdown', (e) => {
+  canvas.setPointerCapture(e.pointerId);
+  env.input.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+});
+canvas.addEventListener('pointerup', (e) => {
+  env.input.pointers.delete(e.pointerId);
+  env.input.move.x = 0;
+  env.input.move.z = 0;
+});
+canvas.addEventListener('pointermove', (e) => {
+  const p = env.input.pointers.get(e.pointerId);
+  if (!p) return;
+  const dx = e.clientX - p.x;
+  const dy = e.clientY - p.y;
+  p.x = e.clientX; p.y = e.clientY;
+
+  const count = env.input.pointers.size;
+  if (count === 1) {
+    env.input.look.yaw -= dx * 0.003;
+    env.input.look.pitch -= dy * 0.002;
+    env.input.look.pitch = Math.max(-1.15, Math.min(1.15, env.input.look.pitch));
+  } else if (count >= 2) {
+    env.input.move.x = Math.max(-1, Math.min(1, dx * 0.01));
+    env.input.move.z = Math.max(-1, Math.min(1, -dy * 0.01));
+  }
+});
+
+function applyNonVRMovement(dt) {
+  // yaw/pitch to camera
+  rig.rotation.y = env.input.look.yaw;
+  camera.rotation.x = env.input.look.pitch;
+
+  // WASD
+  let ax = 0, az = 0;
+  if (env.input.keys.has('KeyA') || env.input.keys.has('ArrowLeft')) ax -= 1;
+  if (env.input.keys.has('KeyD') || env.input.keys.has('ArrowRight')) ax += 1;
+  if (env.input.keys.has('KeyW') || env.input.keys.has('ArrowUp')) az -= 1;
+  if (env.input.keys.has('KeyS') || env.input.keys.has('ArrowDown')) az += 1;
+
+  // touch move (two-finger)
+  ax += env.input.move.x;
+  az += env.input.move.z;
+
+  const len = Math.hypot(ax, az);
+  if (len < 0.001) return;
+  ax /= Math.max(1, len);
+  az /= Math.max(1, len);
+
+  const speed = 2.0; // m/s
+  const forward = env.tmp.v3.set(0,0,-1).applyAxisAngle(new THREE.Vector3(0,1,0), rig.rotation.y);
+  const right = env.tmp.v3b.set(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0), rig.rotation.y);
+  rig.position.addScaledVector(right, ax * speed * dt);
+  rig.position.addScaledVector(forward, az * speed * dt);
+
+  // keep on ground
+  rig.position.y = 0;
+}
+
+function updateTeleportRay() {
+  const tp = env.world?.teleport;
+  if (!tp) return;
+  tp.setEnabled(env.state.teleportMode);
+}
+
+// XR select to teleport when teleport mode ON
+controllers.forEach((c) => {
+  c.addEventListener('selectstart', () => {
+    if (!env.state.teleportMode) return;
+    env.world?.teleport?.tryCommitTeleportFromController(c);
+  });
+});
+
+window.addEventListener('resize', () => {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+});
+
+let frames = 0;
+let lastFpsStamp = performance.now();
+let fps = 0;
+
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(0.05, env.clock.getDelta());
+
+  // non-VR movement only when not presenting
+  if (!renderer.xr.isPresenting) {
+    applyNonVRMovement(dt);
+  }
+
+  // module updates
+  for (const fn of env.updateFns) fn(dt, env);
+
+  updateTeleportRay();
+  renderer.render(scene, camera);
+
+  // FPS counter (cheap)
+  frames++;
+  const t = performance.now();
+  if (t - lastFpsStamp > 500) {
+    fps = Math.round((frames * 1000) / (t - lastFpsStamp));
+    frames = 0;
+    lastFpsStamp = t;
+    window.SCARLETT.fps = fps;
+  }
+});
+
+// final diag
+window.SCARLETT.three = true;
+window.SCARLETT.xr = !!navigator.xr;
+window.SCARLETT.renderer = true;
+window.SCARLETT.world = true;
+dwrite('ready ✅');

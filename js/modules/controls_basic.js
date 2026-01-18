@@ -57,7 +57,7 @@ export function installBasicControls({ THREE, renderer, rig, camera, dwrite }){
     if (renderer.xr.isPresenting) return;
     const hit = groundHitFromCamera();
     if (hit){
-      teleportTo(hit);
+      if (typeof window.__scarlettRequestTeleport === 'function') window.__scarlettRequestTeleport(hit); else teleportTo(hit);
       dwrite(`[teleport] click -> (${hit.x.toFixed(2)},${hit.z.toFixed(2)})`);
     }
   });
@@ -68,7 +68,7 @@ export function installBasicControls({ THREE, renderer, rig, camera, dwrite }){
     if (!state.teleportEnabled) return;
     const hit = groundHitFromCamera();
     if (hit){
-      teleportTo(hit);
+      if (typeof window.__scarlettRequestTeleport === 'function') window.__scarlettRequestTeleport(hit); else teleportTo(hit);
       dwrite(`[teleport] xr select -> (${hit.x.toFixed(2)},${hit.z.toFixed(2)})`);
     }
   });

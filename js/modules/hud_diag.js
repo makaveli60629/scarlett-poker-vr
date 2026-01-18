@@ -1,5 +1,5 @@
 // /js/modules/hud_diag.js
-export function installHud({ THREE, renderer, rig, camera, dwrite, getTeleportEnabled, setTeleportEnabled, resetToSpawn }){
+export function installHud({ THREE, renderer, rig, camera, dwrite, getTeleportEnabled, setTeleportEnabled, resetToSpawn, requestTeleport }){
   const hud = document.getElementById("hud");
   const diag = document.getElementById("diag");
   const btnEnterVR = document.getElementById("btnEnterVR");
@@ -47,4 +47,24 @@ export function installHud({ THREE, renderer, rig, camera, dwrite, getTeleportEn
       dwrite("[xr] requestSession failed: " + (err?.message || err));
     }
   });
+}
+
+
+// Fade helper (used by requestTeleport)
+function doFade(ms=120){
+  const f = document.getElementById('fade');
+  if (!f) return Promise.resolve();
+  f.classList.add('on');
+  return new Promise(res=>setTimeout(()=>{ f.classList.remove('on'); res(); }, ms));
+}
+
+// Expose a default teleport request if provided
+if (typeof requestTeleport === 'function'){
+  window.__scarlettRequestTeleport = async (hit)=>{
+    try{ document.getElementById('fade')?.classList.add('on'); }catch(_){ }
+    await new Promise(r=>setTimeout(r, 90));
+    requestTeleport(hit);
+    await new Promise(r=>setTimeout(r, 90));
+    try{ document.getElementById('fade')?.classList.remove('on'); }catch(_){ }
+  };
 }

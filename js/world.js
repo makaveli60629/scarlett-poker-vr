@@ -12,6 +12,7 @@ import { installBotsIdle } from "./modules/bots_idle.js";
 import { installPokerDemo } from "./modules/poker_demo.js";
 import { createVIPRoom } from "./modules/vip_room.js";
 import { installSeatSystem } from "./modules/seat_system.js";
+import { installPokerInteraction } from "./modules/poker_interaction.js";
 import { installWorldDebug } from "./modules/world_debug.js";
 import { installPlayerAvatar } from "./modules/player_avatar.js";
 

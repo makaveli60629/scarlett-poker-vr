@@ -1,21 +1,21 @@
 // /js/world.js
 // Assembles the demo world modules (spawn pad, teleport arch, divot pit + rails, table, bots, cards, casino shell)
 
-import { createSpawnPad } from "./modules/spawn_pad.js";
-import { createTeleportArch } from "./modules/teleport_arch.js";
-import { createCasinoShell } from "./modules/casino_shell.js";
-import { createDivotTable } from "./modules/divot_table.js";
-import { createBotsAndCards } from "./modules/avatars_bots.js";
-import { installTeleportFX } from "./modules/teleport_fx.js";
-import { createEnvironmentExtras } from "./modules/environment_extras.js";
-import { installBotsIdle } from "./modules/bots_idle.js";
-import { installPokerDemo } from "./modules/poker_demo.js";
-import { createVIPRoom } from "./modules/vip_room.js";
-import { installSeatSystem } from "./modules/seat_system.js";
-import { installPokerInteraction } from "./modules/poker_interaction.js";
-import { applyAssets } from "./modules/asset_manager.js";
-import { installWorldDebug } from "./modules/world_debug.js";
-import { installPlayerAvatar } from "./modules/player_avatar.js";
+import { createSpawnPad } from "./modules/spawn_pad.js?v=7a1";
+import { createTeleportArch } from "./modules/teleport_arch.js?v=7a1";
+import { createCasinoShell } from "./modules/casino_shell.js?v=7a1";
+import { createDivotTable } from "./modules/divot_table.js?v=7a1";
+import { createBotsAndCards } from "./modules/avatars_bots.js?v=7a1";
+import { installTeleportFX } from "./modules/teleport_fx.js?v=7a1";
+import { createEnvironmentExtras } from "./modules/environment_extras.js?v=7a1";
+import { installBotsIdle } from "./modules/bots_idle.js?v=7a1";
+import { installPokerDemo } from "./modules/poker_demo.js?v=7a1";
+import { createVIPRoom } from "./modules/vip_room.js?v=7a1";
+import { installSeatSystem } from "./modules/seat_system.js?v=7a1";
+import { installPokerInteraction } from "./modules/poker_interaction.js?v=7a1";
+import { applyAssets } from "./modules/asset_manager.js?v=7a1";
+import { installWorldDebug } from "./modules/world_debug.js?v=7a1";
+import { installPlayerAvatar } from "./modules/player_avatar.js?v=7a1";
 
 export function buildWorld(ctx){
   const { THREE, scene, rig, camera, renderer, dwrite } = ctx;

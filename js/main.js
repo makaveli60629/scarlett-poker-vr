@@ -1,12 +1,12 @@
 // /js/main.js
 // Build: SCARLETT_PERMA_DEMO_FIX_v1
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
-import { buildWorld } from "./world.js";
-import { installBasicControls } from "./modules/controls_basic.js";
-import { installHud } from "./modules/hud_diag.js";
-import { installAudioSystem } from "./modules/audio_system.js";
+import { buildWorld } from "./world.js?v=7a1";
+import { installBasicControls } from "./modules/controls_basic.js?v=7a1";
+import { installHud } from "./modules/hud_diag.js?v=7a1";
+import { installAudioSystem } from "./modules/audio_system.js?v=7a1";
 
-const BUILD = "SCARLETT_PERMA_DEMO_FIX_v7a_ANDROID_DEBUG_SAFE";
+const BUILD = "SCARLETT_PERMA_DEMO_FIX_v7a1_FULL_CACHEBUST";
 
 // ---- DIAG writer (global hook) ----
 const logEl = document.getElementById("log");

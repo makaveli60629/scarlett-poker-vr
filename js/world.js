@@ -1,59 +1,63 @@
-import { diagWrite } from "./diagnostics.js";
+// /js/world.js
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+import { JumbotronManager } from './jumbotron_manager.js';
 
-export const WORLD = { pitRadius: 8.5, pitDepth: 1.2, tableY: -1.05 };
+export async function buildWorld({ scene, log }) {
+  // Lights
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x202020, 1.1));
+  const dl = new THREE.DirectionalLight(0xffffff, 0.9);
+  dl.position.set(5, 8, 3);
+  scene.add(dl);
 
-export function buildWorld(){
-  diagWrite("[world] building…");
-  const root = document.getElementById("worldRoot");
-  root.innerHTML = "";
+  // Floor
+  const floor = new THREE.Mesh(
+    new THREE.CircleGeometry(9, 64),
+    new THREE.MeshStandardMaterial({ color: 0x0b0b0b, roughness: 1 })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = 0;
+  scene.add(floor);
 
-  const floor = document.createElement("a-ring");
-  floor.setAttribute("radius-inner", "0.1");
-  floor.setAttribute("radius-outer", "40");
-  floor.setAttribute("rotation", "-90 0 0");
-  floor.setAttribute("color", "#121922");
-  floor.classList.add("teleportable");
-  root.appendChild(floor);
+  // Simple "table" for reference
+  const table = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.35, 1.35, 0.15, 48),
+    new THREE.MeshStandardMaterial({ color: 0x0f6b3a, roughness: 0.75 })
+  );
+  table.position.set(0, 0.75, 0);
+  scene.add(table);
 
-  const pitFloor = document.createElement("a-circle");
-  pitFloor.setAttribute("radius", String(WORLD.pitRadius));
-  pitFloor.setAttribute("rotation", "-90 0 0");
-  pitFloor.setAttribute("position", `0 ${-WORLD.pitDepth} 0`);
-  pitFloor.setAttribute("color", "#0b1118");
-  pitFloor.classList.add("teleportable");
-  root.appendChild(pitFloor);
+  // Four jumbotrons around the lobby
+  const jumboMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0x111111, emissiveIntensity: 0.25 });
+  const jumboGeo = new THREE.PlaneGeometry(3.2, 1.8);
 
-  const pitWall = document.createElement("a-cylinder");
-  pitWall.setAttribute("radius", String(WORLD.pitRadius));
-  pitWall.setAttribute("height", String(WORLD.pitDepth));
-  pitWall.setAttribute("position", `0 ${-WORLD.pitDepth/2} 0`);
-  pitWall.setAttribute("open-ended", "true");
-  pitWall.setAttribute("color", "#1b2a3b");
-  root.appendChild(pitWall);
+  const mk = () => new THREE.Mesh(jumboGeo, jumboMat.clone());
+  const j1 = mk(); const j2 = mk(); const j3 = mk(); const j4 = mk();
 
-  const room = document.createElement("a-box");
-  room.setAttribute("width", "60");
-  room.setAttribute("height", "16");
-  room.setAttribute("depth", "60");
-  room.setAttribute("position", "0 7 0");
-  room.setAttribute("material", "color: #0e141d; side: back; roughness: 1; metalness: 0");
-  root.appendChild(room);
+  // Positions (a ring)
+  j1.position.set(0, 2.2, -6.4); j1.lookAt(0, 2.2, 0);
+  j2.position.set(6.4, 2.2, 0);  j2.lookAt(0, 2.2, 0);
+  j3.position.set(0, 2.2, 6.4);  j3.lookAt(0, 2.2, 0);
+  j4.position.set(-6.4, 2.2, 0); j4.lookAt(0, 2.2, 0);
 
-  const trim1 = document.createElement("a-ring");
-  trim1.setAttribute("radius-inner", "19.8");
-  trim1.setAttribute("radius-outer", "20.1");
-  trim1.setAttribute("rotation", "90 0 0");
-  trim1.setAttribute("position", "0 4.2 0");
-  trim1.setAttribute("material", "color: #2bdcff; emissive: #2bdcff; emissiveIntensity: 1.5; side: double");
-  root.appendChild(trim1);
+  scene.add(j1, j2, j3, j4);
 
-  const trim2 = document.createElement("a-ring");
-  trim2.setAttribute("radius-inner", "27.8");
-  trim2.setAttribute("radius-outer", "28.1");
-  trim2.setAttribute("rotation", "90 0 0");
-  trim2.setAttribute("position", "0 8.2 0");
-  trim2.setAttribute("material", "color: #ff2bbd; emissive: #ff2bbd; emissiveIntensity: 1.2; side: double");
-  root.appendChild(trim2);
+  // Frames
+  const frameGeo = new THREE.BoxGeometry(3.35, 1.95, 0.08);
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0x1d1d1d, roughness: 0.9 });
+  for (const j of [j1, j2, j3, j4]) {
+    const f = new THREE.Mesh(frameGeo, frameMat);
+    f.position.copy(j.position);
+    f.quaternion.copy(j.quaternion);
+    f.translateZ(-0.05);
+    scene.add(f);
+  }
 
-  diagWrite("[world] ready ✅");
+  // Streaming manager
+  const jumbos = new JumbotronManager({ channelsUrl: './streams/channels.json', log });
+  await jumbos.addScreen(j1, 0);
+  await jumbos.addScreen(j2, 1);
+  await jumbos.addScreen(j3, 2);
+  await jumbos.addScreen(j4, 3);
+
+  return { jumbos };
 }

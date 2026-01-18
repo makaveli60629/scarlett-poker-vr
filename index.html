@@ -1,61 +1,81 @@
 <!doctype html>
-<html lang="en">
+<html>
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Scarlett Poker VR</title>
-<style>
-  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000}
-  #app{position:fixed;inset:0;pointer-events:none}
-  canvas{display:block}
-
-  #hud{
-    position:fixed; top:12px; left:12px;
-    z-index:9999999;
-    display:flex; gap:8px; flex-wrap:wrap;
-    pointer-events:auto;
-    font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-  }
-  .hudBtn{
-    background:rgba(30,30,30,.88);
-    color:#fff;
-    border:1px solid rgba(255,255,255,.25);
-    border-radius:12px;
-    padding:10px 14px;
-    font-size:14px;
-    touch-action:manipulation;
-    -webkit-tap-highlight-color:transparent;
-    user-select:none;
-  }
-  .hudBtn.primary{border-color:rgba(120,200,255,.6)}
-
-  #diagPanel{
-    position:fixed; left:12px; right:12px; bottom:12px;
-    max-height:35vh; overflow:auto;
-    z-index:9999999;
-    background:rgba(0,0,0,.82);
-    border:1px solid rgba(255,255,255,.2);
-    border-radius:12px;
-    padding:10px;
-    color:#cfefff;
-    font-family:ui-monospace,monospace;
-    font-size:12px;
-    white-space:pre-wrap;
-    display:none;
-    pointer-events:auto;
-  }
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>SCARLETT • Avatar Packet v4.8</title>
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="./index.js"></script>
+  <script src="./world.js"></script>
 </head>
 <body>
-  <div id="app"></div>
+  <a-scene id="scene" xr-mode-ui="enabled: true" webxr="optionalFeatures: hand-tracking, passthrough" background="color: #111">
 
-  <div id="hud">
-    <button id="btnEnterVR" class="hudBtn primary">Enter VR</button>
-    <button id="btnDiag" class="hudBtn">Diag</button>
-  </div>
+    <a-assets>
+      <!-- Put your real texture at: assets/textures/hand_skin.png -->
+      <img id="handTexture" src="assets/textures/hand_skin.png" />
+    </a-assets>
 
-  <div id="diagPanel"></div>
+    <!-- CAMERA RIG (single source of truth; teleport moves ONLY this entity) -->
+    <a-entity id="cameraRig" position="0 0 0">
+      <a-entity id="head" camera look-controls position="0 1.6 0"></a-entity>
 
-  <script type="module" src="./js/boot.js"></script>
+      <a-entity id="left-hand" hand-tracking-controls="hand: left; modelStyle: mesh">
+        <!-- Wrist menu lives on the left hand so it never drifts -->
+        <a-entity id="wrist-menu" position="0.05 0.05 0" rotation="0 90 90" visible="false">
+          <a-plane id="menu-plane" width="0.25" height="0.42" color="#111" opacity="0.92" radius="0.02">
+            <a-text value="SYSTEM v4.8" align="center" position="0 0.18 0.01" width="1"></a-text>
+
+            <a-box id="btn-reset" class="interactable" position="0 0.05 0.02" scale="0.18 0.05 0.01" color="#FF9800">
+              <a-text value="RESET SCALE" align="center" position="0 0 0.6" width="0.8"></a-text>
+            </a-box>
+
+            <a-box id="btn-export" class="interactable" position="0 -0.03 0.02" scale="0.18 0.05 0.01" color="#2196F3">
+              <a-text value="EXPORT" align="center" position="0 0 0.6" width="0.8"></a-text>
+            </a-box>
+
+            <a-box id="btn-outfit" class="interactable" position="0 -0.11 0.02" scale="0.18 0.05 0.01" color="#9C27B0">
+              <a-text value="NEXT OUTFIT" align="center" position="0 0 0.6" width="0.8"></a-text>
+            </a-box>
+
+            <a-box id="btn-mr" class="interactable" position="0 -0.19 0.02" scale="0.18 0.05 0.01" color="#4CAF50">
+              <a-text value="TOGGLE MR" align="center" position="0 0 0.6" width="0.8"></a-text>
+            </a-box>
+          </a-plane>
+        </a-entity>
+      </a-entity>
+
+      <a-entity id="right-hand" hand-tracking-controls="hand: right; modelStyle: mesh"></a-entity>
+    </a-entity>
+
+    <!-- Teleport cursor -->
+    <a-ring id="teleport-cursor" color="#00FF00" radius-inner="0.10" radius-outer="0.14" rotation="-90 0 0" visible="false"></a-ring>
+
+    <!-- Mixed Reality portal (optional pinch target) -->
+    <a-entity id="mr-portal" position="2 1.5 -1" rotation="0 -45 0">
+      <a-ring color="#444" radius-inner="0.9" radius-outer="1.0">
+        <a-circle id="portal-lens" radius="0.9" class="interactable" material="color: #000; transparent: true; opacity: 0.12"></a-circle>
+      </a-ring>
+    </a-entity>
+
+    <!-- Floor -->
+    <a-box id="floor" position="0 -0.05 0" width="20" height="0.1" depth="20" color="#222" class="navmesh"></a-box>
+
+    <!-- Mirror stage: you will see a mirrored clone of your body here -->
+    <a-entity id="mirror-module" position="0 1.6 -3" rotation="0 0 0">
+      <a-plane id="mirror-surface" width="2" height="3" color="#EDEDED" material="metalness: 0.6; roughness: 0.2"></a-plane>
+      <a-text value="AVATAR MIRROR" align="center" position="0 1.55 0.01" width="2" color="#111"></a-text>
+      <a-entity id="mirror-clone" mirror-clone="target: #avatarBody; mirror: #mirror-surface"></a-entity>
+    </a-entity>
+
+    <!-- Your avatar body (attached to rig; always aligned; clothing is attached here) -->
+    <a-entity id="avatarBody" position="0 0 0" avatar-body></a-entity>
+
+    <!-- A test interactable button -->
+    <a-box id="test-button" class="interactable" position="0 1.4 -1.6" depth="0.08" height="0.18" width="0.30" color="#E91E63">
+      <a-text value="TEST" align="center" position="0 0 0.6" width="1"></a-text>
+    </a-box>
+
+  </a-scene>
 </body>
 </html>

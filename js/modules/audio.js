@@ -1,37 +1,27 @@
-// Scarlett Audio Module — lightweight, Quest-safe
 export function initAudio(dwrite){
-  const state = { ctx: null };
+  let ctx=null;
 
   function ensure(){
-    if (state.ctx) return state.ctx;
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtx) { dwrite?.("[audio] WebAudio not available"); return null; }
-    state.ctx = new AudioCtx();
-    return state.ctx;
+    if(ctx) return ctx;
+    const A=window.AudioContext||window.webkitAudioContext;
+    if(!A) return null;
+    ctx=new A();
+    return ctx;
   }
 
-  function tone(freq, dur, gain=0.03){
-    const ctx = ensure();
-    if (!ctx) return;
-    if (ctx.state === "suspended") ctx.resume().catch(()=>{});
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.type = "sine";
-    o.frequency.value = freq;
-    g.gain.value = gain;
+  window.__scarlettAudioPlay=function(){
+    if(window.SCARLETT && window.SCARLETT.audioOn===false) return;
+    const c=ensure();
+    if(!c) return;
+    const o=c.createOscillator();
+    const g=c.createGain();
+    o.frequency.value=600;
+    g.gain.value=0.03;
     o.connect(g);
-    g.connect(ctx.destination);
+    g.connect(c.destination);
     o.start();
-    o.stop(ctx.currentTime + dur);
-  }
-
-  window.__scarlettAudioPlay = (name)=>{
-    if (window.SCARLETT?.audioOn === false) return;
-    if (name === "click") tone(660, 0.05);
-    else if (name === "teleport") tone(520, 0.04), setTimeout(()=>tone(740,0.04), 60);
-    else if (name === "deal") { tone(520,0.04); setTimeout(()=>tone(740,0.04), 60); setTimeout(()=>tone(620,0.04), 120);} 
-    else tone(440, 0.04);
+    o.stop(c.currentTime+0.05);
   };
 
-  dwrite?.("[audio] ready ✅");
+  dwrite("[audio] ready");
 }

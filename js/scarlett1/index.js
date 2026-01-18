@@ -2,10 +2,11 @@ import * as THREE from 'three';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 
 // /js/scarlett1/index.js
-// SCARLETT1 — RUNTIME (FULL WORKING v1.2)
-// Player spawns on a pad facing the table, teleport + movement, unique bot cards, brighter lights.
+// SCARLETT1 — RUNTIME (FULL WORKING v1.5 ALL)
+// Adds: join seat, smooth locomotion + snap turn, VIP room w/ 6-seat oval, ambient audio,
+// richer props (bar/store/display), and a simple poker dealing loop (unique hands + community).
 
-const BUILD = 'SCARLETT1_RUNTIME_FULL_WORKING_v1_4_POKER_DEAL';
+const BUILD = 'SCARLETT1_RUNTIME_FULL_WORKING_v1_5_ALL';
 
 const dwrite = (m)=>{ try{ window.__scarlettDiagWrite?.(String(m)); }catch(_){ } };
 const FP = `[scarlett1] LIVE_FINGERPRINT ✅ ${BUILD}`;
@@ -95,6 +96,108 @@ function seededRand(seed){
   };
 }
 
+// ---------- audio (procedural ambience + SFX; no external assets) ----------
+function createAudioSystem(){
+  let ctx = null;
+  let master = null;
+  let ambience = null;
+  let started = false;
+
+  function ensure(){
+    if (ctx) return ctx;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    ctx = new AC();
+    master = ctx.createGain();
+    master.gain.value = 0.18;
+    master.connect(ctx.destination);
+    return ctx;
+  }
+
+  function startAmbience(){
+    const c = ensure();
+    if (!c || started) return;
+    started = true;
+
+    // Pink-ish noise bed (casino air)
+    const bufferSize = 2 * c.sampleRate;
+    const noiseBuffer = c.createBuffer(1, bufferSize, c.sampleRate);
+    const out = noiseBuffer.getChannelData(0);
+    let b0 = 0, b1 = 0, b2 = 0;
+    for (let i=0;i<bufferSize;i++){
+      const white = Math.random()*2-1;
+      b0 = 0.997*b0 + white*0.029;
+      b1 = 0.985*b1 + white*0.032;
+      b2 = 0.950*b2 + white*0.048;
+      out[i] = (b0 + b1 + b2) * 0.14;
+    }
+    const noise = c.createBufferSource();
+    noise.buffer = noiseBuffer;
+    noise.loop = true;
+
+    const lp = c.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 650;
+    lp.Q.value = 0.6;
+
+    const g = c.createGain();
+    g.gain.value = 0.22;
+
+    noise.connect(lp);
+    lp.connect(g);
+    g.connect(master);
+    noise.start();
+    ambience = { noise, lp, g };
+
+    // soft tone (neon hum)
+    const osc = c.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = 54;
+    const og = c.createGain();
+    og.gain.value = 0.035;
+    osc.connect(og);
+    og.connect(master);
+    osc.start();
+    ambience.osc = osc;
+    ambience.og = og;
+  }
+
+  function click(freq=680, dur=0.025, vol=0.12){
+    const c = ensure();
+    if (!c) return;
+    const t = c.currentTime;
+    const o = c.createOscillator();
+    const g = c.createGain();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g);
+    g.connect(master);
+    o.start(t);
+    o.stop(t + dur);
+  }
+
+  function chip(){
+    click(520 + Math.random()*180, 0.02, 0.10);
+    setTimeout(()=>click(320 + Math.random()*120, 0.02, 0.08), 18);
+  }
+
+  function card(){
+    click(1200 + Math.random()*220, 0.018, 0.09);
+  }
+
+  async function resume(){
+    const c = ensure();
+    if (!c) return;
+    if (c.state === 'suspended') await c.resume();
+    startAmbience();
+  }
+
+  return { ensure, resume, card, chip };
+}
+
+
 // ---------- core start ----------
 export async function start(){
   dwrite('[status] booting…');
@@ -154,6 +257,15 @@ export async function start(){
   // WORLD
   buildWorld(scene);
 
+  // Audio (starts on first user gesture)
+  const audio = createAudioSystem();
+  const resumeAudio = ()=>{ try{ audio.resume(); }catch(_){ } };
+  // Hook common HUD interactions
+  for (const id of ['btnEnterVR','btnTeleport','btnDiag','btnHideHUD']){
+    document.getElementById(id)?.addEventListener('pointerdown', resumeAudio, { passive:true });
+    document.getElementById(id)?.addEventListener('click', resumeAudio, { passive:true });
+  }
+
   // Teleport marker / target
   const teleportState = {
     enabled: false,
@@ -201,9 +313,17 @@ export async function start(){
   // Simple non‑VR look + move
   const nonVr = createNonVrControls(renderer.domElement, rig, camera);
 
+  // Audio (procedural ambience + SFX; starts on first user gesture)
+  const audio = createAudioSystem();
+  const armAudio = () => { try{ audio.resume(); }catch(_){ } };
+  // Arm audio on any primary HUD click
+  for (const id of ['btnEnterVR','btnTeleport','btnDiag']){
+    document.getElementById(id)?.addEventListener('pointerdown', armAudio, { passive:true });
+  }
+
   // Bots + table + pip target
   const tableCenter = new THREE.Vector3(0, 0.75, 0);
-  const { pipTarget } = buildTableAndBots(scene, tableCenter);
+  const { pipTarget, joinSeat, deal } = buildTableAndBots(scene, tableCenter);
 
   // PIP renderer
   const pipRenderer = new THREE.WebGLRenderer({ canvas: pipCanvas, antialias: true, alpha: true, preserveDrawingBuffer: false });
@@ -220,6 +340,22 @@ export async function start(){
   // HUD wiring
   wireHud(renderer, teleportState);
 
+  // Join seat / sit logic
+  const seatState = { seated:false };
+  function sitDown(){
+    if (!joinSeat) return;
+    // Put rig slightly back from seat center, facing table
+    rig.position.set(joinSeat.x, 0, joinSeat.z);
+    rig.rotation.set(0, joinSeat.yaw, 0);
+    seatState.seated = true;
+    try{ audio.ui(); }catch(_){ }
+  }
+  function standUp(){
+    seatState.seated = false;
+    try{ window.SCARLETT?.forceSpawn?.(); }catch(_){ }
+    try{ audio.ui(); }catch(_){ }
+  }
+
   // Teleport events
   const onSelect = ()=>{
     if (!teleportState.enabled || !teleportState.hit) return;
@@ -232,9 +368,12 @@ export async function start(){
 
   // Menu (Y) hint: map common "button 3" on left controller to toggle HUD
   const hud = document.getElementById('hud');
+  // Smooth locomotion + snap turn + join seat (A to sit, B to stand)
+  const locomotion = { yaw: 0, snapLock:false, sitLock:false };
   function pollGamepads(){
     const session = renderer.xr.getSession?.();
     if (!session) return;
+
     for (const src of session.inputSources || []){
       const gp = src.gamepad;
       if (!gp) continue;
@@ -244,6 +383,62 @@ export async function start(){
         pollGamepads._lock = true;
         hud.classList.toggle('hidden');
         setTimeout(()=>{ pollGamepads._lock = false; }, 250);
+      }
+
+      // A (0) to sit when near join seat; B (1) to stand
+      const aBtn = gp.buttons?.[0];
+      const bBtn = gp.buttons?.[1];
+      if (aBtn?.pressed && !locomotion.sitLock){
+        locomotion.sitLock = true;
+        // Near join seat? (within 1.2m)
+        if (!seatState.seated && joinSeat){
+          const dx = rig.position.x - joinSeat.x;
+          const dz = rig.position.z - joinSeat.z;
+          if ((dx*dx + dz*dz) < (1.2*1.2)) sitDown();
+        }
+        setTimeout(()=>{ locomotion.sitLock = false; }, 250);
+      }
+      if (bBtn?.pressed && seatState.seated && !locomotion.sitLock){
+        locomotion.sitLock = true;
+        standUp();
+        setTimeout(()=>{ locomotion.sitLock = false; }, 250);
+      }
+
+      // Locomotion axes
+      const ax = gp.axes || [];
+      // Heuristic: if >=4 axes, stick1=(0,1), stick2=(2,3). If only 2, use (0,1).
+      const lx = ax.length >= 2 ? ax[0] : 0;
+      const ly = ax.length >= 2 ? ax[1] : 0;
+      const rx = ax.length >= 4 ? ax[2] : 0;
+      const ry = ax.length >= 4 ? ax[3] : 0;
+
+      // Move with left stick (smooth). Turn with right stick X (snap).
+      if (!seatState.seated){
+        const dead = 0.18;
+        const mvx = Math.abs(lx) > dead ? lx : 0;
+        const mvy = Math.abs(ly) > dead ? ly : 0;
+        const speed = 2.1; // m/s
+        if (mvx || mvy){
+          // camera forward projected onto XZ
+          const fwd = new THREE.Vector3();
+          camera.getWorldDirection(fwd);
+          fwd.y = 0; fwd.normalize();
+          const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0,1,0)).normalize().multiplyScalar(-1);
+          const move = new THREE.Vector3();
+          move.addScaledVector(fwd, -mvy);
+          move.addScaledVector(right, mvx);
+          move.normalize().multiplyScalar(speed * pollGamepads._dt);
+          rig.position.add(move);
+        }
+      }
+
+      // Snap turn (right stick X)
+      const tdead = 0.55;
+      if (Math.abs(rx) > tdead && !locomotion.snapLock){
+        locomotion.snapLock = true;
+        const dir = rx > 0 ? -1 : 1;
+        rig.rotation.y += dir * (Math.PI/6); // 30deg
+        setTimeout(()=>{ locomotion.snapLock = false; }, 220);
       }
     }
   }
@@ -267,6 +462,7 @@ export async function start(){
   const clock = new THREE.Clock();
   renderer.setAnimationLoop(()=>{
     const dt = clamp(clock.getDelta(), 0, 0.05);
+    pollGamepads._dt = dt;
     nonVr.update(dt);
 
     // Teleport raycast
@@ -283,6 +479,9 @@ export async function start(){
     }
 
     pollGamepads();
+
+    // Poker deal loop tick
+    try{ deal?.tick?.(dt, audio); }catch(_){ }
 
     renderer.render(scene, camera);
 
@@ -427,11 +626,86 @@ function buildWorld(scene){
     stairs.add(step);
   }
   scene.add(stairs);
+
+  // ---------- Display cases (props) ----------
+  const caseMat = new THREE.MeshStandardMaterial({ color: 0x0c1118, roughness: 0.25, metalness: 0.15, transparent:true, opacity:0.9 });
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0x66ccff, roughness: 0.05, metalness: 0.0, transparent:true, opacity:0.18, emissive: 0x66ccff, emissiveIntensity: 0.10 });
+  for (let i=0;i<3;i++){
+    const c = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.9, 0.6), caseMat);
+    c.position.set(-4 + i*1.6, 0.45, -10);
+    c.castShadow = true;
+    c.receiveShadow = true;
+    scene.add(c);
+    const g = new THREE.Mesh(new THREE.BoxGeometry(1.16, 0.86, 0.56), glassMat);
+    g.position.copy(c.position);
+    scene.add(g);
+  }
+
+  // ---------- Simple slot machines (props) ----------
+  const slotMat = new THREE.MeshStandardMaterial({ color: 0x101826, roughness: 0.8 });
+  const screenMat = new THREE.MeshStandardMaterial({ color: 0x0b0f16, emissive: 0xff2f6d, emissiveIntensity: 0.65, roughness: 0.4 });
+  for (let i=0;i<4;i++){
+    const slot = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.5, 0.6), slotMat);
+    body.position.set(18.5, 0.75, -2 + i*1.8);
+    body.castShadow = true;
+    body.receiveShadow = true;
+    const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.55), screenMat);
+    screen.position.set(18.5, 1.05, -2 + i*1.8 + 0.31);
+    slot.add(body);
+    slot.add(screen);
+    scene.add(slot);
+  }
+
+  // ---------- VIP room (6-seat oval, no divot) ----------
+  const vip = new THREE.Group();
+  vip.name = 'vipRoom';
+  const vipCenter = new THREE.Vector3(16, 0, -28);
+  const vipFloor = new THREE.Mesh(new THREE.PlaneGeometry(14, 10), new THREE.MeshStandardMaterial({ color: 0x08100c, roughness: 1.0 }));
+  vipFloor.rotation.x = -Math.PI/2;
+  vipFloor.position.copy(vipCenter).add(new THREE.Vector3(-4, 0.01, 0));
+  vipFloor.receiveShadow = true;
+  vipFloor.userData.teleportSurface = true;
+  vip.add(vipFloor);
+
+  const vipWallMat = new THREE.MeshStandardMaterial({ color: 0x0b0f16, roughness: 0.9 });
+  const vipBack = new THREE.Mesh(new THREE.BoxGeometry(14, 5, 0.5), vipWallMat);
+  vipBack.position.set(vipFloor.position.x, 2.5, vipFloor.position.z - 4.8);
+  vip.add(vipBack);
+
+  const oval = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.3, 1.3, 0.14, 48),
+    new THREE.MeshStandardMaterial({ color: 0x0f3b2b, roughness: 1.0 })
+  );
+  oval.scale.set(1.45, 1, 1.0); // oval-ish
+  oval.position.set(vipFloor.position.x, 0.78, vipFloor.position.z - 1.0);
+  oval.castShadow = true;
+  oval.receiveShadow = true;
+  vip.add(oval);
+
+  const vipLight = new THREE.PointLight(0xffd166, 0.9, 16, 2.0);
+  vipLight.position.set(oval.position.x, 4.2, oval.position.z - 0.5);
+  vip.add(vipLight);
+
+  // 6 chairs around VIP oval
+  const vipChairMat = new THREE.MeshStandardMaterial({ color: 0x1a2433, roughness: 0.95, metalness: 0.05 });
+  for (let i=0;i<6;i++){
+    const a = (i/6) * Math.PI*2;
+    const cx = oval.position.x + Math.sin(a) * 2.2;
+    const cz = oval.position.z + Math.cos(a) * 1.7;
+    const ch = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 0.55), vipChairMat);
+    ch.position.set(cx, 0.275, cz);
+    ch.castShadow = true;
+    ch.receiveShadow = true;
+    vip.add(ch);
+  }
+
+  scene.add(vip);
 }
 
 
 function buildTableAndBots(scene, center){
-  // Table base
+  // ---------- Table ----------
   const base = new THREE.Mesh(
     new THREE.CylinderGeometry(1.35, 1.55, 0.55, 48),
     new THREE.MeshStandardMaterial({ color: 0x2c0f12, roughness: 0.9, metalness: 0.1 })
@@ -439,9 +713,9 @@ function buildTableAndBots(scene, center){
   base.position.set(center.x, 0.45, center.z);
   base.castShadow = true;
   base.receiveShadow = true;
+  base.name = 'pokerTable';
   scene.add(base);
 
-  // Felt top
   const felt = new THREE.Mesh(
     new THREE.CylinderGeometry(1.25, 1.25, 0.10, 48),
     new THREE.MeshStandardMaterial({ color: 0x0f3b2b, roughness: 1.0, metalness: 0.0 })
@@ -449,9 +723,9 @@ function buildTableAndBots(scene, center){
   felt.position.set(center.x, 0.72, center.z);
   felt.castShadow = true;
   felt.receiveShadow = true;
+  felt.name = 'pokerFelt';
   scene.add(felt);
 
-  // Center decal
   const decalTex = makeTextTexture('SCARLETT', { w:1024, h:256, size:120, glow:'rgba(67,243,166,0.85)', color:'#c8ffea', blur:18 });
   const decal = new THREE.Mesh(
     new THREE.PlaneGeometry(0.95, 0.24),
@@ -459,217 +733,296 @@ function buildTableAndBots(scene, center){
   );
   decal.position.set(center.x, 0.78, center.z);
   decal.rotation.x = -Math.PI/2;
+  decal.name = 'tableDecal';
   scene.add(decal);
 
-  // Spawn pad (behind the table)
+  // ---------- Spawn pad (behind table) ----------
+  const spawnPadZ = center.z + 7.5;
   const pad = new THREE.Mesh(
     new THREE.RingGeometry(0.30, 0.42, 48),
-    new THREE.MeshBasicMaterial({ transparent:true, opacity:0.85 })
+    new THREE.MeshBasicMaterial({ color: 0x43f3a6, transparent:true, opacity:0.85 })
   );
-  pad.position.set(center.x, 0.01, center.z + 6.0);
+  pad.position.set(center.x, 0.01, spawnPadZ);
   pad.rotation.x = -Math.PI/2;
+  pad.name = 'spawnPad';
   scene.add(pad);
 
-  const padLabelTex = makeTextTexture('SPAWN', { w:512, h:256, size:120, glow:'rgba(255,255,255,0.6)', color:'#e9eef5', blur:10 });
-  const padLabel = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.45), new THREE.MeshBasicMaterial({ map: padLabelTex, transparent:true, opacity:0.95 }));
-  padLabel.position.set(center.x, 0.35, center.z + 6.0);
-  padLabel.lookAt(new THREE.Vector3(center.x, 0.35, center.z));
-  scene.add(padLabel);
+  window.SCARLETT = window.SCARLETT || {};
+  window.SCARLETT.SPAWN_PAD = { x:center.x, y:0, z:spawnPadZ, yaw: Math.PI };
 
-  // Bots
-  const seats = 5;
-  const radius = 1.85; // keep OUTSIDE the table
+  // ---------- Deck + community area ----------
+  const deck = new THREE.Mesh(
+    new THREE.BoxGeometry(0.12, 0.03, 0.18),
+    new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 0.9, metalness: 0.0 })
+  );
+  deck.position.set(center.x + 0.55, 0.80, center.z + 0.10);
+  deck.castShadow = true;
+  deck.receiveShadow = true;
+  deck.name = 'deck';
+  scene.add(deck);
+
+  // ---------- Card textures ----------
+  const backTex = (()=>{
+    const w = 512, h = 712;
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d');
+    g.fillStyle = '#1a0b12';
+    g.fillRect(0,0,w,h);
+    g.strokeStyle = 'rgba(255,47,109,0.85)';
+    g.lineWidth = 18;
+    g.strokeRect(18,18,w-36,h-36);
+    g.strokeStyle = 'rgba(67,243,166,0.55)';
+    g.lineWidth = 10;
+    g.strokeRect(60,60,w-120,h-120);
+    g.globalAlpha = 0.35;
+    for (let y=90;y<h;y+=80){
+      for (let x=90;x<w;x+=80){
+        g.beginPath();
+        g.arc(x,y,18,0,Math.PI*2);
+        g.stroke();
+      }
+    }
+    g.globalAlpha = 1;
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  })();
+
+  function createCard(rank, suit){
+    const geom = new THREE.PlaneGeometry(0.10, 0.14);
+    const mat = new THREE.MeshStandardMaterial({ map: backTex, roughness: 0.9, metalness: 0.0 });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.castShadow = true;
+    mesh.userData.frontTex = makeCardTexture(rank, suit);
+    mesh.userData.isFaceUp = false;
+    return mesh;
+  }
+
+  function setFaceUp(card, up){
+    const want = !!up;
+    if (card.userData.isFaceUp === want) return;
+    card.userData.isFaceUp = want;
+    card.material.map = want ? card.userData.frontTex : backTex;
+    card.material.needsUpdate = true;
+  }
+
+  // ---------- Seats, chairs, bots ----------
+  const seatCount = 6;
+  const openSeatIndex = 0; // player join seat
+  const radius = 1.90;
   const ySeat = 0.42;
 
-  const rand = seededRand(1337);
+  const chairMat = new THREE.MeshStandardMaterial({ color: 0x1a2433, roughness: 0.95, metalness: 0.05 });
+
+  const bots = [];
+  const seats = [];
+  for (let i=0;i<seatCount;i++){
+    const a = (i / seatCount) * Math.PI*2;
+    const sx = center.x + Math.sin(a) * radius;
+    const sz = center.z + Math.cos(a) * radius;
+    const yawToCenter = Math.atan2(center.x - sx, center.z - sz);
+
+    // Chair
+    const chair = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 0.55), chairMat);
+    chair.position.set(sx, 0.275, sz);
+    chair.castShadow = true;
+    chair.receiveShadow = true;
+    chair.name = 'chair_' + i;
+    scene.add(chair);
+
+    seats.push({ i, a, x:sx, z:sz, yaw:yawToCenter });
+  }
+
+  // Join seat marker
+  const joinSeat = seats[openSeatIndex];
+  const joinRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.18, 0.26, 40),
+    new THREE.MeshBasicMaterial({ color: 0x43f3a6, transparent:true, opacity:0.78 })
+  );
+  joinRing.rotation.x = -Math.PI/2;
+  joinRing.position.set(joinSeat.x, 0.02, joinSeat.z);
+  joinRing.name = 'joinRing';
+  scene.add(joinRing);
+
+  const joinTex = makeTextTexture('JOIN', { w:512, h:256, size:140, glow:'rgba(67,243,166,0.85)', color:'#c8ffea', blur:16 });
+  const joinLabel = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.9, 0.45),
+    new THREE.MeshBasicMaterial({ map: joinTex, transparent:true, opacity:0.95 })
+  );
+  joinLabel.position.set(joinSeat.x, 0.55, joinSeat.z);
+  joinLabel.lookAt(new THREE.Vector3(center.x, 0.55, center.z));
+  joinLabel.name = 'joinLabel';
+  scene.add(joinLabel);
+
+  function makeBot(){
+    const g = new THREE.Group();
+    const matBody = new THREE.MeshStandardMaterial({ color: 0x2b3646, roughness: 0.85 });
+    const matAccent = new THREE.MeshStandardMaterial({ color: 0xff2f6d, roughness: 0.55, metalness: 0.15, emissive: 0xff2f6d, emissiveIntensity: 0.10 });
+    const matSkin = new THREE.MeshStandardMaterial({ color: 0xb58a6a, roughness: 0.9 });
+
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.35, 6, 12), matBody);
+    torso.position.y = 1.15;
+    g.add(torso);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.14, 20, 16), matSkin);
+    head.position.y = 1.55;
+    g.add(head);
+    const sh = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 12), matAccent);
+    sh.position.set(0.21, 1.33, 0);
+    g.add(sh);
+    const sh2 = sh.clone(); sh2.position.x = -0.21; g.add(sh2);
+    const hands = new THREE.Mesh(new THREE.SphereGeometry(0.055, 14, 10), matAccent);
+    hands.position.set(0.33, 1.05, 0.16);
+    g.add(hands);
+    const hands2 = hands.clone(); hands2.position.x = -0.33; g.add(hands2);
+    return g;
+  }
+
+  for (const s of seats){
+    if (s.i === openSeatIndex) continue;
+    const bot = makeBot();
+    bot.position.set(s.x, ySeat, s.z);
+    bot.rotation.y = s.yaw;
+    bot.name = 'bot_' + s.i;
+    scene.add(bot);
+    bots.push({ seat:s, bot });
+  }
+
+  // ---------- Card layout ----------
+  const rand = seededRand(20260118);
   const ranks = ['A','K','Q','J','10','9','8','7','6','5','4','3','2'];
   const suits = ['♠','♥','♦','♣'];
   const used = new Set();
-
   function nextCard(){
     for (let tries=0; tries<999; tries++){
       const r = ranks[Math.floor(rand()*ranks.length)];
       const s = suits[Math.floor(rand()*suits.length)];
-      const key = r+s;
-      if (!used.has(key)) { used.add(key); return {r,s}; }
+      const k = r+s;
+      if (!used.has(k)) { used.add(k); return {r,s}; }
     }
     return { r:'A', s:'♠' };
   }
 
-  for (let i=0; i<seats; i++){
-    const a = (i / seats) * Math.PI*2;
-    const px = center.x + Math.sin(a) * radius;
-    const pz = center.z + Math.cos(a) * radius;
-
-    const bot = new THREE.Group();
-    bot.position.set(px, ySeat, pz);
-    bot.lookAt(center.x, ySeat, center.z);
-
-    // Chair
-    const chair = new THREE.Mesh(
-      new THREE.BoxGeometry(0.55, 0.55, 0.55),
-      new THREE.MeshStandardMaterial({ color: 0x1a2433, roughness: 0.95, metalness: 0.05 })
-    );
-    chair.position.set(px, 0.275, pz);
-    chair.castShadow = true;
-    chair.receiveShadow = true;
-    scene.add(chair);
-
-    // Body
-    const body = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.18, 0.32, 6, 16),
-      new THREE.MeshStandardMaterial({ color: 0x223449, roughness: 0.95 })
-    );
-    body.position.set(0, 0.45, 0);
-    body.castShadow = true;
-    bot.add(body);
-
-    // Head
-    const head = new THREE.Mesh(
-      new THREE.SphereGeometry(0.14, 24, 16),
-      new THREE.MeshStandardMaterial({ color: 0x334a66, roughness: 0.8 })
-    );
-    head.position.set(0, 0.80, 0);
-    head.castShadow = true;
-    bot.add(head);
-
-    // "Hands" spheres (what you described)
-    const handMat = new THREE.MeshStandardMaterial({ color: 0x4bdfff, roughness: 0.2, metalness: 0.0, emissive: 0x103a44, emissiveIntensity: 0.8 });
-    const handL = new THREE.Mesh(new THREE.SphereGeometry(0.07, 18, 12), handMat);
-    const handR = handL.clone();
-    handL.position.set(-0.20, 0.55, -0.05);
-    handR.position.set( 0.20, 0.55, -0.05);
-    bot.add(handL);
-    bot.add(handR);
-
-    // Floating label "hands"
-    const labelTex = makeTextTexture('hands', { w:512, h:256, size:120, glow:'rgba(85,167,255,0.85)', color:'#cfe6ff', blur:16 });
-    const label = new THREE.Mesh(new THREE.PlaneGeometry(0.70, 0.35), new THREE.MeshBasicMaterial({ map: labelTex, transparent:true, opacity:0.95 }));
-    label.position.set(0, 1.15, 0);
-    label.lookAt(center.x, 1.15, center.z);
-    bot.add(label);
-
-    // Unique cards: 2 per bot
+  // Per-bot hole cards (flat + hover mirror)
+  const hole = [];
+  for (const b of bots){
     const c1 = nextCard();
     const c2 = nextCard();
 
-    // Flat on table (demo)
-    const flat1 = createCardMesh(c1.r, c1.s);
-    const flat2 = createCardMesh(c2.r, c2.s);
-    const towardCenter = new THREE.Vector3(center.x - px, 0, center.z - pz).normalize();
-    const basePos = new THREE.Vector3(px, 0.79, pz).add(towardCenter.clone().multiplyScalar(0.55));
+    const hand1 = createCard(c1.r, c1.s);
+    const hand2 = createCard(c2.r, c2.s);
+    const hover1 = createCard(c1.r, c1.s);
+    const hover2 = createCard(c2.r, c2.s);
 
-    flat1.position.copy(basePos).add(new THREE.Vector3(-0.06, 0, 0));
-    flat2.position.copy(basePos).add(new THREE.Vector3( 0.06, 0, 0));
-    flat1.rotation.x = -Math.PI/2;
-    flat2.rotation.x = -Math.PI/2;
-    flat1.rotation.z = a;
-    flat2.rotation.z = a;
-    scene.add(flat1);
-    scene.add(flat2);
+    // Flat position near seat edge
+    const nx = Math.sin(b.seat.a);
+    const nz = Math.cos(b.seat.a);
+    const tx = Math.cos(b.seat.a);
+    const tz = -Math.sin(b.seat.a);
 
-    // Hover mirror above bot hands
-    const hov1 = createCardMesh(c1.r, c1.s);
-    const hov2 = createCardMesh(c2.r, c2.s);
-    hov1.position.set(px - 0.07, 1.05, pz);
-    hov2.position.set(px + 0.07, 1.05, pz);
-    hov1.lookAt(center.x, 1.05, center.z);
-    hov2.lookAt(center.x, 1.05, center.z);
-    scene.add(hov1);
-    scene.add(hov2);
+    const edgeX = center.x + nx * 1.05;
+    const edgeZ = center.z + nz * 1.05;
 
-    scene.add(bot);
+    hand1.position.set(edgeX + tx * 0.06, 0.79, edgeZ + tz * 0.06);
+    hand2.position.set(edgeX - tx * 0.06, 0.79, edgeZ - tz * 0.06);
+    hand1.rotation.x = -Math.PI/2;
+    hand2.rotation.x = -Math.PI/2;
+    // Angle toward bot
+    hand1.rotation.z = b.seat.yaw;
+    hand2.rotation.z = b.seat.yaw;
+
+    // Hover cards: higher, face outward (teaching mirror)
+    hover1.position.set(edgeX + tx * 0.06, 1.28, edgeZ + tz * 0.06);
+    hover2.position.set(edgeX - tx * 0.06, 1.28, edgeZ - tz * 0.06);
+    hover1.rotation.y = b.seat.yaw + Math.PI;
+    hover2.rotation.y = b.seat.yaw + Math.PI;
+
+    scene.add(hand1);
+    scene.add(hand2);
+    scene.add(hover1);
+    scene.add(hover2);
+
+    hole.push({ flat:[hand1, hand2], hover:[hover1, hover2] });
   }
 
-  // pip look-at target
-  const pipTarget = new THREE.Vector3(center.x, 0.95, center.z);
-  return { pipTarget };
-}
+  // Community cards (5)
+  const community = [];
+  const commY = 0.79;
+  for (let i=0;i<5;i++){
+    const c = nextCard();
+    const m = createCard(c.r, c.s);
+    m.position.set(center.x - 0.24 + i*0.12, commY, center.z);
+    m.rotation.x = -Math.PI/2;
+    m.rotation.z = Math.PI; // face toward player spawn
+    scene.add(m);
+    community.push(m);
+  }
 
-function placePlayerAtSpawn(rig, tableCenter){
-  // Put the rig at spawn pad coordinates; keep well away from the table footprint.
-  const spawnZ = (tableCenter?.z ?? 0) + 6.0;
-  rig.position.set(tableCenter?.x ?? 0, 0, spawnZ);
+  // ---------- Simple deal loop ----------
+  const deal = {
+    phase: 0,
+    timer: 0,
+    tick(dt, audio){
+      this.timer += dt;
+      const step = 0.85;
+      // phases: 0 reset, 1 reveal hole, 2 flop, 3 turn, 4 river, 5 pause
+      if (this.phase === 0){
+        // reset: all face-down
+        for (const h of hole){ for (const m of [...h.flat, ...h.hover]) setFaceUp(m, false); }
+        for (const c of community) setFaceUp(c, false);
+        this.phase = 1;
+        this.timer = 0;
+        return;
+      }
 
-  // Face table
-  const to = new THREE.Vector3(tableCenter?.x ?? 0, 1.6, tableCenter?.z ?? 0);
-  const from = new THREE.Vector3(rig.position.x, 1.6, rig.position.z);
-  const dir = to.clone().sub(from);
-  const yaw = Math.atan2(dir.x, dir.z);
-  rig.rotation.set(0, yaw, 0);
+      if (this.timer < step) return;
+      this.timer = 0;
 
-  // Expose for other modules and for re-asserting after XR session start
-  window.SCARLETT = window.SCARLETT || {};
-  window.SCARLETT.playerRig = rig;
-  window.SCARLETT.spawn = { x: rig.position.x, y: rig.position.y, z: rig.position.z, yaw };
-}
+      if (this.phase === 1){
+        // reveal hole
+        for (const h of hole){
+          for (const m of [...h.flat, ...h.hover]) setFaceUp(m, true);
+          try{ audio?.card?.(); }catch(_){ }
+        }
+        this.phase = 2;
+        return;
+      }
 
+      if (this.phase === 2){
+        // flop
+        for (let i=0;i<3;i++){ setFaceUp(community[i], true); try{ audio?.card?.(); }catch(_){ } }
+        this.phase = 3;
+        return;
+      }
 
-// ---------- teleport ----------
-function getTeleportHit(controller, surfaces){
-  if (!controller) return null;
-  const tmpMat = new THREE.Matrix4();
-  tmpMat.identity().extractRotation(controller.matrixWorld);
-  const ray = new THREE.Raycaster();
-  ray.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-  ray.ray.direction.set(0,0,-1).applyMatrix4(tmpMat);
-  ray.far = 12;
-  const hits = ray.intersectObjects(surfaces, true);
-  return hits && hits.length ? hits[0] : null;
-}
+      if (this.phase === 3){
+        setFaceUp(community[3], true); try{ audio?.card?.(); }catch(_){ }
+        this.phase = 4;
+        return;
+      }
 
-// ---------- HUD ----------
-function wireHud(renderer, teleportState){
-  const btnEnterVR = document.getElementById('btnEnterVR');
-  const btnTeleport = document.getElementById('btnTeleport');
-  const btnHideHUD = document.getElementById('btnHideHUD');
-  const btnDiag = document.getElementById('btnDiag');
-  const diagHud = document.getElementById('diagHud');
-  const hud = document.getElementById('hud');
+      if (this.phase === 4){
+        setFaceUp(community[4], true); try{ audio?.card?.(); }catch(_){ }
+        this.phase = 5;
+        return;
+      }
 
-  const setTeleportLabel = ()=>{
-    btnTeleport.textContent = teleportState.enabled ? 'Teleport: ON' : 'Teleport: OFF';
-    btnTeleport.classList.toggle('good', teleportState.enabled);
-  };
-  setTeleportLabel();
-
-  btnTeleport?.addEventListener('click', ()=>{
-    teleportState.enabled = !teleportState.enabled;
-    setTeleportLabel();
-    dwrite(`[teleport] ${teleportState.enabled ? 'ON' : 'OFF'}`);
-  });
-
-  btnEnterVR?.addEventListener('click', async ()=>{
-    try{
-      if (!navigator.xr){ dwrite('navigator.xr missing'); return; }
-      const supported = await navigator.xr.isSessionSupported('immersive-vr');
-      if (!supported){ dwrite('immersive-vr not supported'); return; }
-      const session = await navigator.xr.requestSession('immersive-vr', {
-        requiredFeatures: ['local-floor'],
-        optionalFeatures: ['bounded-floor','hand-tracking','layers']
-      });
-      renderer.xr.setSession(session);
-      dwrite('[xr] session started ✅');
-      try{ setTimeout(()=>window.SCARLETT?.forceSpawn?.(), 200); }catch(_){ }
-      // XR can reset the reference space; re-assert spawn after session begins
-      setTimeout(()=>window.SCARLETT?.forceSpawn?.(), 200);
-      setTimeout(()=>window.SCARLETT?.forceSpawn?.(), 800);
-    }catch(e){
-      dwrite('[xr] session failed ❌');
-      dwrite(String(e?.stack||e));
+      if (this.phase === 5){
+        // pause a bit then reset
+        this.phase = 0;
+        return;
+      }
     }
-  });
+  };
 
-  btnHideHUD?.addEventListener('click', ()=>{
-    hud.classList.toggle('hidden');
-  });
-
-  btnDiag?.addEventListener('click', ()=>{
-    diagHud.classList.toggle('hidden');
-  });
+  const pipTarget = new THREE.Vector3(center.x, 0.78, center.z);
+  return {
+    pipTarget,
+    joinSeat: { x: joinSeat.x, z: joinSeat.z, yaw: joinSeat.yaw },
+    deal
+  };
 }
 
-// ---------- non‑VR controls ----------
 function createNonVrControls(dom, rig, camera){
   const state = {
     yaw: 0,

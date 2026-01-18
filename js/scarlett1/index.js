@@ -5,7 +5,7 @@ import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFa
 // SCARLETT1 — RUNTIME (FULL WORKING v1.2)
 // Player spawns on a pad facing the table, teleport + movement, unique bot cards, brighter lights.
 
-const BUILD = 'SCARLETT1_RUNTIME_FULL_WORKING_v1_3_FULL_LOBBY';
+const BUILD = 'SCARLETT1_RUNTIME_FULL_WORKING_v1_3_1_FULL_LOBBY_FIX';
 
 const dwrite = (m)=>{ try{ window.__scarlettDiagWrite?.(String(m)); }catch(_){ } };
 const FP = `[scarlett1] LIVE_FINGERPRINT ✅ ${BUILD}`;
@@ -127,56 +127,29 @@ export async function start(){
   rig.add(camera);
   scene.add(rig);
 
-  // --- HARD SPAWN (protect against later code resetting rig position) ---
-  const HARD_SPAWN = { x: 0, y: 0, z: 6.0, yaw: Math.PI };
-  const forceSpawn = ()=>{
-    // Prefer SPAWN_PAD published by world/table builder
-    const sp = window.SCARLETT?.SPAWN_PAD;
-    const x = (sp?.x ?? HARD_SPAWN.x);
-    const z = (sp?.z ?? HARD_SPAWN.z);
-    const yaw = (sp?.yaw ?? HARD_SPAWN.yaw);
-    rig.position.set(x, 0, z);
-    rig.rotation.set(0, yaw, 0);
-    rig.updateMatrixWorld(true);
+
+
+  // --- HARD SPAWN (single definition; safe pad in front of table) ---
+  const DEFAULT_SPAWN = { x: 0, y: 0, z: 7.5, yaw: Math.PI }; // farther so you never start on the table
+  const forceSpawn = () => {
+    try {
+      const sp = window.SCARLETT?.SPAWN_PAD;
+      const x = (sp?.x ?? DEFAULT_SPAWN.x);
+      const y = (sp?.y ?? DEFAULT_SPAWN.y);
+      const z = (sp?.z ?? DEFAULT_SPAWN.z);
+      const yaw = (sp?.yaw ?? DEFAULT_SPAWN.yaw);
+      rig.position.set(x, y, z);
+      rig.rotation.set(0, yaw, 0);
+      rig.updateMatrixWorld(true);
+    } catch (_) {}
   };
   window.SCARLETT = window.SCARLETT || {};
   window.SCARLETT.playerRig = rig;
   window.SCARLETT.forceSpawn = forceSpawn;
-
-
-  // --- HARD SPAWN OVERRIDE (re-assert after init/XR start) ---
-  const SPAWN = { x: 0, y: 1.6, z: 6.0, yaw: Math.PI };
-  const forceSpawn = ()=>{
-    try{
-      // if world published a spawn pad, use it
-      const sp = window.SCARLETT?.SPAWN_PAD;
-      const x = (sp?.x ?? SPAWN.x);
-      const z = (sp?.z ?? SPAWN.z);
-      const yaw = (sp?.yaw ?? SPAWN.yaw);
-      rig.position.set(x, 0, z);
-      rig.rotation.set(0, yaw, 0);
-      rig.updateMatrixWorld(true);
-    }catch(_){ }
-  };
-  window.SCARLETT.playerRig = rig;
-  window.SCARLETT.forceSpawn = forceSpawn;
-
-  // --- HARD SPAWN GUARD (prevents table-origin spawn) ---
-  const HARD_SPAWN = { x: 0, y: 0, z: 6.0, yaw: Math.PI };
-  const forceSpawn = ()=>{
-    try{
-      const sp = window.SCARLETT?.SPAWN_PAD;
-      const x = (sp?.x ?? HARD_SPAWN.x);
-      const z = (sp?.z ?? HARD_SPAWN.z);
-      rig.position.set(x, HARD_SPAWN.y, z);
-      const yaw = (sp?.yaw ?? HARD_SPAWN.yaw);
-      rig.rotation.set(0, yaw, 0);
-      rig.updateMatrixWorld(true);
-    }catch(_){ }
-  };
-  window.SCARLETT = window.SCARLETT || {};
-  window.SCARLETT.playerRig = rig;
-  window.SCARLETT.forceSpawn = forceSpawn;
+  // assert spawn a few times to defeat init/XR timing
+  forceSpawn();
+  setTimeout(forceSpawn, 250);
+  setTimeout(forceSpawn, 1000);
 
   // WORLD
   buildWorld(scene);
@@ -239,17 +212,10 @@ export async function start(){
   pipCam.position.set(0, 3.4, 2.8);
   pipCam.lookAt(pipTarget);
 
-  // Spawn: put player behind the table (safe distance) and keep it stable
-  const forceSpawn = ()=>{
-    placePlayerAtSpawn(rig, tableCenter);
-    nonVr.setYaw?.(rig.rotation.y);
-    rig.updateMatrixWorld(true);
-  };
-  window.SCARLETT = window.SCARLETT || {};
-  window.SCARLETT.forceSpawn = forceSpawn;
-  forceSpawn();
-  setTimeout(forceSpawn, 250);
-  setTimeout(forceSpawn, 1000);
+  // Spawn: assert (use the single global forceSpawn)
+  try{ window.SCARLETT?.forceSpawn?.(); }catch(_){ }
+  setTimeout(()=>{ try{ window.SCARLETT?.forceSpawn?.(); }catch(_){ } }, 250);
+  setTimeout(()=>{ try{ window.SCARLETT?.forceSpawn?.(); }catch(_){ } }, 1000);
 
   // HUD wiring
   wireHud(renderer, teleportState);

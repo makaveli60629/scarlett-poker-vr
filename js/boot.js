@@ -1,126 +1,117 @@
-// SCARLETT BOOT — v1.8 Hotfix (GitHub Pages relative paths + always-on diag)
-// BUILD: SCARLETT_BOOT_ULTIMATE_v1_8
+// SCARLETT BOOT — QuickWalk v2.0 (upload-ready)
+// Purpose: Always boot + show diag + load engine once.
 
-const BUILD = "SCARLETT_BOOT_ULTIMATE_v1_8";
+const BUILD = "SCARLETT_BOOT_QUICKWALK_v2_0";
 
 (function initDiag(){
   const panel = document.getElementById("diagPanel");
-  const lines = [];
-
-  function push(line){
-    lines.push(line);
-    // keep last 220 lines
-    while(lines.length > 220) lines.shift();
-    if (panel) panel.textContent = lines.join("\n");
-  }
-
   window.__scarlettDiagWrite = (msg) => {
     const line = `[${new Date().toLocaleTimeString()}] ${String(msg)}`;
     console.log(line);
-    push(line);
+    if (panel) panel.textContent += (panel.textContent ? "\n" : "") + line;
   };
 
   window.__scarlettDiag = () => {
-    const w = window.__scarlettDiagWrite;
-    w("=== SCARLETT ADMIN DIAG REPORT ===");
-    w(`BUILD=${BUILD}`);
-    w(`HREF=${location.href}`);
-    w(`secureContext=${String(window.isSecureContext)}`);
-    w(`ua=${navigator.userAgent}`);
-    w(`touch=${"ontouchstart" in window} maxTouchPoints=${navigator.maxTouchPoints || 0}`);
-
-    const ids = ["btnEnterVR","btnHideHUD","btnHideUI","btnTeleport","btnDiag","btnSticks","btnAudio"];
-    w("");
-    w("--- HUD / TOUCH ---");
-    for (const id of ids) {
+    const d = window.__scarlettDiagWrite;
+    d("=== SCARLETT ADMIN DIAG REPORT ===");
+    d(`BUILD=${BUILD}`);
+    d(`HREF=${location.href}`);
+    d(`secureContext=${String(window.isSecureContext)}`);
+    d(`ua=${navigator.userAgent}`);
+    d(`touch=${"ontouchstart" in window} maxTouchPoints=${navigator.maxTouchPoints||0}`);
+    d("");
+    d("--- HUD / TOUCH ---");
+    for (const id of ["btnEnterVR","btnHideHUD","btnHideUI","btnTeleport","btnDiag","btnSticks","btnAudio"]) {
       const el = document.getElementById(id);
-      if (!el) { w(`${id}=MISSING`); continue; }
+      if (!el) { d(`${id}=MISSING`); continue; }
       const r = el.getBoundingClientRect();
       const midX = r.left + r.width/2, midY = r.top + r.height/2;
       const top = document.elementFromPoint(midX, midY);
-      w(`${id}=OK blocked=${top!==el} top=${top ? (top.tagName.toLowerCase() + (top.id?('#'+top.id):'') + (top.className?('.'+String(top.className).trim().split(/\s+/).join('.')):'')) : 'null'}`);
+      d(`${id}=OK blocked=${top!==el} top=${top ? (top.tagName.toLowerCase() + (top.id?('#'+top.id):'')) : 'null'}`);
     }
   };
-
-  // show boot line immediately
-  window.__scarlettDiagWrite(`[status] booting…`);
 })();
 
-const dwrite = (m)=>{ try{ window.__scarlettDiagWrite?.(m);}catch(_){ console.log(m);} };
+const dwrite = (m)=>{ try{ window.__scarlettDiagWrite(m);}catch(_){ console.log(m);} };
 
 window.SCARLETT = window.SCARLETT || {};
 window.SCARLETT.BOOT_BUILD = BUILD;
+window.SCARLETT.teleportOn = true;
+window.SCARLETT.sticksOn = true;
+window.SCARLETT.audioOn = true;
 
-// ---- HUD wiring ----
 const $ = (id)=>document.getElementById(id);
-let teleportOn=false, sticksOn=true, audioOn=true, hudHidden=false, uiHidden=false;
+const setBtn = (id, text)=>{ const b=$(id); if (b) b.textContent = text; };
 
-function setBtn(id, text){ const b=$(id); if(b) b.textContent=text; }
+// HUD wiring
+let hudHidden = false;
+let uiHidden = false;
 
-$("btnDiag")?.addEventListener("click", ()=>window.__scarlettDiag?.());
-
-$("btnTeleport")?.addEventListener("click", ()=>{
-  teleportOn=!teleportOn;
-  window.SCARLETT.teleportOn=teleportOn;
-  setBtn("btnTeleport", `Teleport: ${teleportOn?"ON":"OFF"}`);
-  dwrite(`[ui] teleport=${teleportOn?"ON":"OFF"}`);
+$("btnDiag")?.addEventListener("click", () => {
+  const panel = $("diagPanel");
+  if (!panel) return;
+  panel.style.display = (panel.style.display === "none" || !panel.style.display) ? "block" : "none";
+  window.__scarlettDiag?.();
 });
 
-$("btnSticks")?.addEventListener("click", ()=>{
-  sticksOn=!sticksOn;
-  window.SCARLETT.sticksOn=sticksOn;
-  setBtn("btnSticks", `Sticks: ${sticksOn?"ON":"OFF"}`);
-  dwrite(`[ui] sticks=${sticksOn?"ON":"OFF"}`);
+$("btnTeleport")?.addEventListener("click", () => {
+  window.SCARLETT.teleportOn = !window.SCARLETT.teleportOn;
+  setBtn("btnTeleport", `Teleport: ${window.SCARLETT.teleportOn ? "ON" : "OFF"}`);
+  window.__scarlettAudioPlay?.("click");
 });
 
-$("btnAudio")?.addEventListener("click", ()=>{
-  audioOn=!audioOn;
-  window.SCARLETT.audioOn=audioOn;
-  setBtn("btnAudio", `Audio: ${audioOn?"ON":"OFF"}`);
-  dwrite(`[ui] audio=${audioOn?"ON":"OFF"}`);
-  try{ window.__scarlettAudioSetEnabled?.(audioOn); }catch(_){ }
+$("btnSticks")?.addEventListener("click", () => {
+  window.SCARLETT.sticksOn = !window.SCARLETT.sticksOn;
+  setBtn("btnSticks", `Sticks: ${window.SCARLETT.sticksOn ? "ON" : "OFF"}`);
+  window.__scarlettAudioPlay?.("click");
 });
 
-$("btnHideHUD")?.addEventListener("click", ()=>{
-  hudHidden=!hudHidden;
+$("btnAudio")?.addEventListener("click", () => {
+  window.SCARLETT.audioOn = !window.SCARLETT.audioOn;
+  setBtn("btnAudio", `Audio: ${window.SCARLETT.audioOn ? "ON" : "OFF"}`);
+  window.__scarlettAudioPlay?.("click");
+});
+
+$("btnHideHUD")?.addEventListener("click", () => {
+  hudHidden = !hudHidden;
   const hud = $("hud");
   if (hud) hud.style.display = hudHidden ? "none" : "flex";
 });
 
-$("btnHideUI")?.addEventListener("click", ()=>{
-  uiHidden=!uiHidden;
+$("btnHideUI")?.addEventListener("click", () => {
+  uiHidden = !uiHidden;
   const hint = $("pipHint");
   if (hint) hint.style.display = uiHidden ? "none" : "block";
 });
 
-$("btnEnterVR")?.addEventListener("click", async ()=>{
-  try{
+$("btnEnterVR")?.addEventListener("click", async () => {
+  try {
     if (window.__scarlettEnterVR) await window.__scarlettEnterVR();
     else dwrite("[xr] engine not ready yet");
-  }catch(e){
-    dwrite(`[xr] EnterVR failed: ${e?.message||e}`);
+  } catch (e) {
+    dwrite(`[xr] EnterVR failed: ${e?.message || e}`);
   }
 });
 
+// Boot
 (async function bootImport(){
-  try{
+  try {
+    dwrite("[status] booting…");
     dwrite("");
     dwrite("--- PREFLIGHT: index.js ---");
     dwrite("import ./scarlett1/index.js");
 
     if (window.__SCARLETT1_IMPORTED__) {
-      dwrite("[status] boot already imported — skipping");
+      dwrite("[boot] scarlett1 already imported — skipping");
       return;
     }
     window.__SCARLETT1_IMPORTED__ = true;
 
-    // IMPORTANT: relative import so GitHub Pages subpath works
     await import("./scarlett1/index.js");
-
     dwrite("[status] ready ✅");
-  }catch(e){
+  } catch (e) {
     dwrite("");
     dwrite("[status] BOOT FAILED ❌");
-    dwrite(String(e?.stack || e?.message || e));
+    dwrite(String(e?.stack || e));
   }
 })();

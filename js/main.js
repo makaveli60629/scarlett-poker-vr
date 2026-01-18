@@ -6,7 +6,7 @@ import { installBasicControls } from "./modules/controls_basic.js";
 import { installHud } from "./modules/hud_diag.js";
 import { installAudioSystem } from "./modules/audio_system.js";
 
-const BUILD = "SCARLETT_PERMA_DEMO_FIX_v7_ANDROID_QUEST_READY_POKER_ASSETS";
+const BUILD = "SCARLETT_PERMA_DEMO_FIX_v7a_ANDROID_DEBUG_SAFE";
 
 // ---- DIAG writer (global hook) ----
 const logEl = document.getElementById("log");

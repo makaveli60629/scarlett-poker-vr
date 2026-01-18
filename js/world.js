@@ -13,6 +13,7 @@ import { installPokerDemo } from "./modules/poker_demo.js";
 import { createVIPRoom } from "./modules/vip_room.js";
 import { installSeatSystem } from "./modules/seat_system.js";
 import { installPokerInteraction } from "./modules/poker_interaction.js";
+import { applyAssets } from "./modules/asset_manager.js";
 import { installWorldDebug } from "./modules/world_debug.js";
 import { installPlayerAvatar } from "./modules/player_avatar.js";
 
@@ -81,6 +82,16 @@ export function buildWorld(ctx){
 
   // Player avatar (visible body + hands)
   const avatar = installPlayerAvatar(ctx);
+
+
+  // Apply textures AFTER world build (Android-safe)
+  try{
+    applyAssets(ctx, { targets: {
+      tableMats: [divot.tableMatRef, vip.tableMatRef].filter(Boolean),
+      cardBackMats: [bots.cardBackMatRef].filter(Boolean),
+      chipMats: []
+    }});
+  }catch(_){}
 
   // Set initial rig position to spawn
   rig.position.copy(spawn.spawnPos);

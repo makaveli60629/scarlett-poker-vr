@@ -1,7 +1,7 @@
 // SCARLETT — BOOT ROUTER (XR-safe, cache-proof friendly)
-// Build: SCARLETT_BOOT_FULL_WORKING_v1_5_ALL
+// Build: SCARLETT_BOOT_FULL_WORKING_v1_5_1_ALL_AUDIOFIX
 
-const BUILD = 'SCARLETT_BOOT_FULL_WORKING_v1_5_ALL';
+const BUILD = 'SCARLETT_BOOT_FULL_WORKING_v1_5_1_ALL_AUDIOFIX';
 
 // ---- DIAG writer used by modules ----
 (function initDiag(){

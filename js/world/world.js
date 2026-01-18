@@ -109,7 +109,7 @@ export async function createWorld({ THREE, scene, rig, camera, renderer }){
   store.position.set(18, 0, 12);
   world.env.add(store);
 
-  dwrite('WORLD_ULTIMATE_FULL_v4_3_ULT (stubbed visuals)');
+  dwrite('WORLD_FULL_LOBBY_v1_4 (deal loop + unique cards)');
 
   return world;
 }

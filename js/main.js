@@ -5,7 +5,7 @@ import { buildWorld } from "./world.js";
 import { installBasicControls } from "./modules/controls_basic.js";
 import { installHud } from "./modules/hud_diag.js";
 
-const BUILD = "SCARLETT_PERMA_DEMO_FIX_v2_AVATAR";
+const BUILD = "SCARLETT_PERMA_DEMO_FIX_v3_WORLD_TELEPORT_POKER";
 
 // ---- DIAG writer (global hook) ----
 const logEl = document.getElementById("log");
@@ -67,9 +67,12 @@ const controls = installBasicControls({ THREE, renderer, rig, camera, dwrite });
 installHud({
   THREE, renderer, rig, camera, dwrite,
   getTeleportEnabled: () => controls.teleportEnabled,
-  setTeleportEnabled: (v) => controls.setTeleportEnabled(v),
-  teleportTo: (pos) => controls.teleportTo(pos),
+  setTeleportEnabled: (v) => {
+    controls.setTeleportEnabled(v);
+    try{ world.teleportFX?.setEnabled?.(v); }catch(_){ }
+  },
   resetToSpawn: () => controls.resetToSpawn(),
+  requestTeleport: (pos) => controls.teleportTo(pos),
 });
 
 // Resize

@@ -5,7 +5,7 @@ import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFa
 // SCARLETT1 — RUNTIME (FULL WORKING v1.2)
 // Player spawns on a pad facing the table, teleport + movement, unique bot cards, brighter lights.
 
-const BUILD = 'SCARLETT1_RUNTIME_FULL_WORKING_v1_3_1_FULL_LOBBY_FIX';
+const BUILD = 'SCARLETT1_RUNTIME_FULL_WORKING_v1_4_POKER_DEAL';
 
 const dwrite = (m)=>{ try{ window.__scarlettDiagWrite?.(String(m)); }catch(_){ } };
 const FP = `[scarlett1] LIVE_FINGERPRINT ✅ ${BUILD}`;

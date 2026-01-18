@@ -1,7 +1,7 @@
 // SCARLETT — BOOT ROUTER (XR-safe, cache-proof friendly)
-// Build: SCARLETT_BOOT_FULL_WORKING_v1_5_1_ALL_AUDIOFIX
+// Build: SCARLETT_BOOT_ULTIMATE_v1_7
 
-const BUILD = 'SCARLETT_BOOT_FULL_WORKING_v1_5_1_ALL_AUDIOFIX';
+const BUILD = 'SCARLETT_BOOT_ULTIMATE_v1_7';
 
 // ---- DIAG writer used by modules ----
 (function initDiag(){
@@ -45,7 +45,7 @@ dwrite(`touch=${('ontouchstart' in window)} maxTouchPoints=${navigator.maxTouchP
 
 // ---- HUD sanity ("button blocked" style checks) ----
 (function hudScan(){
-  const ids = ['btnEnterVR','btnHideHUD','btnTeleport','btnDiag'];
+  const ids = ['btnEnterVR','btnHideHUD','btnHideUI','btnTeleport','btnDiag','btnSticks','btnAudio'];
   dwrite('');
   dwrite('--- HUD / TOUCH ---');
   for (const id of ids){
@@ -68,7 +68,8 @@ dwrite(`touch=${('ontouchstart' in window)} maxTouchPoints=${navigator.maxTouchP
 
     const url = new URL('./scarlett1/index.js', import.meta.url);
     // cache-bust friendly: allow ?v=... on top-level, otherwise stable
-    const v = new URL(location.href).searchParams.get('v');
+    const sp = new URL(location.href).searchParams;
+    const v = sp.get('v') || sp.get('cb');
     if (v) url.searchParams.set('v', v);
 
     dwrite(`import ${url.toString()}`);

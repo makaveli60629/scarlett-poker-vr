@@ -1,126 +1,116 @@
 // /js/world.js
-// SCARLETT WORLD (FULL SAFE DEMO): shell + divot + table + bots + VIP
+// SCARLETT FULL WORLD (brighter + landmarks)
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 
 export function buildWorld(scene, dwrite = console.log){
-  // Floor grid
-  const grid = new THREE.GridHelper(80, 80, 0x0aa7ff, 0x003344);
-  grid.position.y = 0.001;
-  scene.add(grid);
+  const root = new THREE.Group();
+  root.name = "scarlettWorldRoot";
+  scene.add(root);
 
-  // Casino shell
-  const shell = new THREE.Group();
-  scene.add(shell);
+  const mat = (hex, rough=0.85, metal=0.05) =>
+    new THREE.MeshStandardMaterial({ color: hex, roughness: rough, metalness: metal });
 
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(70, 70),
-    new THREE.MeshStandardMaterial({ color: 0x071017, roughness: 0.95, metalness: 0.02 })
+  // Lobby floor
+  const lobby = new THREE.Group();
+  lobby.name = "lobby";
+  root.add(lobby);
+
+  const lobbyFloor = new THREE.Mesh(
+    new THREE.PlaneGeometry(140, 140),
+    mat(0x0a1720, 0.95, 0.02)
   );
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.y = 0;
-  shell.add(floor);
+  lobbyFloor.rotation.x = -Math.PI/2;
+  lobby.add(lobbyFloor);
 
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0x0b1520, roughness: 1.0, metalness: 0.0 });
-  const mkWall = (w,h,d,x,y,z) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), wallMat);
-    m.position.set(x,y,z);
-    shell.add(m);
-  };
-  mkWall(70, 7, 1, 0, 3.5, -35);
-  mkWall(70, 7, 1, 0, 3.5, 35);
-  mkWall(1, 7, 70, -35, 3.5, 0);
-  mkWall(1, 7, 70, 35, 3.5, 0);
+  const grid = new THREE.GridHelper(140, 140, 0x0aa7ff, 0x003344);
+  grid.position.y = 0.001;
+  lobby.add(grid);
 
-  dwrite("[shell] casino shell ready");
+  // Big neon sign
+  const sign = new THREE.Mesh(
+    new THREE.BoxGeometry(10.5, 1.9, 0.16),
+    mat(0x001a24, 0.45, 0.15)
+  );
+  sign.position.set(0, 6.0, -12);
+  sign.material.emissive = new THREE.Color(0x003a44);
+  sign.material.emissiveIntensity = 1.1;
+  lobby.add(sign);
 
-  // Divot pit
+  // Pit divot
   const pit = new THREE.Group();
-  pit.position.set(0, 0, 0);
-  scene.add(pit);
+  pit.name = "mainPit";
+  root.add(pit);
 
   const pitFloor = new THREE.Mesh(
-    new THREE.CircleGeometry(10.2, 64),
-    new THREE.MeshStandardMaterial({ color: 0x04090f, roughness: 0.98, metalness: 0.0 })
+    new THREE.CircleGeometry(14.2, 72),
+    mat(0x050b10, 0.98, 0.0)
   );
-  pitFloor.rotation.x = -Math.PI / 2;
-  pitFloor.position.y = -0.60;
+  pitFloor.rotation.x = -Math.PI/2;
+  pitFloor.position.y = -0.75;
   pit.add(pitFloor);
 
   const rail = new THREE.Mesh(
-    new THREE.TorusGeometry(10.25, 0.14, 14, 120),
-    new THREE.MeshStandardMaterial({ color: 0x0b3a3a, roughness: 0.35, metalness: 0.25 })
+    new THREE.TorusGeometry(14.25, 0.18, 14, 160),
+    mat(0x0b3a3a, 0.35, 0.25)
   );
-  rail.rotation.x = Math.PI / 2;
-  rail.position.y = -0.06;
+  rail.rotation.x = Math.PI/2;
+  rail.position.y = -0.07;
   pit.add(rail);
 
   const ramp = new THREE.Mesh(
-    new THREE.BoxGeometry(7.5, 0.28, 9.5),
-    new THREE.MeshStandardMaterial({ color: 0x061019, roughness: 0.95, metalness: 0.0 })
+    new THREE.BoxGeometry(12, 0.32, 14),
+    mat(0x061019, 0.95, 0.0)
   );
-  ramp.position.set(0, -0.18, 9.8);
-  ramp.rotation.x = -0.11;
+  ramp.position.set(0, -0.22, 15.6);
+  ramp.rotation.x = -0.12;
   pit.add(ramp);
 
-  dwrite("[divot] pit + rails ready");
+  dwrite("[divot] pit ready ✅");
 
-  // Poker table
+  // Teaching table center
   const table = new THREE.Group();
-  table.position.set(0, -0.60, 0);
+  table.position.set(0, -0.75, 0);
   pit.add(table);
 
   const felt = new THREE.Mesh(
-    new THREE.CylinderGeometry(3.35, 3.35, 0.18, 64),
-    new THREE.MeshStandardMaterial({ color: 0x0cc6c6, roughness: 0.55, metalness: 0.12 })
+    new THREE.CylinderGeometry(3.7, 3.7, 0.18, 72),
+    mat(0x0cc6c6, 0.55, 0.12)
   );
-  felt.position.y = 0.90;
+  felt.position.y = 0.98;
   table.add(felt);
 
   const rim = new THREE.Mesh(
-    new THREE.TorusGeometry(3.40, 0.19, 16, 120),
-    new THREE.MeshStandardMaterial({ color: 0x101010, roughness: 0.42, metalness: 0.22 })
+    new THREE.TorusGeometry(3.78, 0.20, 16, 140),
+    mat(0x101010, 0.42, 0.22)
   );
-  rim.rotation.x = Math.PI / 2;
-  rim.position.y = 0.90;
+  rim.rotation.x = Math.PI/2;
+  rim.position.y = 0.98;
   table.add(rim);
 
-  const pedestal = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.60, 0.85, 1.15, 28),
-    new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.78, metalness: 0.05 })
-  );
-  pedestal.position.y = 0.32;
-  table.add(pedestal);
+  // Community hover cards (emissive)
+  const community = new THREE.Group();
+  community.position.set(0, 1.35, 0);
+  table.add(community);
 
-  // Community cards
-  const cards = new THREE.Group();
-  cards.position.set(0, 1.06, 0);
-  table.add(cards);
+  const cardMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.25, metalness: 0.0 });
+  cardMat.emissive = new THREE.Color(0x111111);
+  cardMat.emissiveIntensity = 0.7;
 
-  const cardMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, metalness: 0.0 });
+  const cardGeo = new THREE.PlaneGeometry(0.32, 0.46);
   for (let i=0;i<5;i++){
-    const c = new THREE.Mesh(new THREE.PlaneGeometry(0.32, 0.46), cardMat);
+    const c = new THREE.Mesh(cardGeo, cardMat);
     c.rotation.x = -Math.PI/2;
-    c.position.set((i-2)*0.38, 0.01, 0);
-    cards.add(c);
+    c.position.set((i-2)*0.38, 0, 0);
+    community.add(c);
   }
 
-  dwrite("[divot] pit + rails + table ready");
-
-  // Bots + hole cards
-  const bots = new THREE.Group();
-  bots.position.set(0, -0.60, 0);
-  pit.add(bots);
-
-  const botMat = new THREE.MeshStandardMaterial({ color: 0x2233ff, roughness: 0.88, metalness: 0.02 });
+  // Bots + hole cards + action rings
+  const botMat = mat(0x2233ff, 0.88, 0.02);
   const botGeo = new THREE.CapsuleGeometry(0.19, 0.62, 6, 10);
 
-  const seats = 6;
-  const seatR = 4.85;
   const holeGroups = [];
-
-  function makeCard(w,h){
-    return new THREE.Mesh(new THREE.PlaneGeometry(w,h), cardMat);
-  }
+  const actionRings = [];
+  const seats = 6, seatR = 5.2;
 
   for (let i=0;i<seats;i++){
     const a = (i/seats)*Math.PI*2;
@@ -128,67 +118,70 @@ export function buildWorld(scene, dwrite = console.log){
     const z = Math.sin(a)*seatR;
 
     const b = new THREE.Mesh(botGeo, botMat);
-    b.position.set(x, 0.92, z);
+    b.position.set(x, 1.00, z);
     b.rotation.y = -a + Math.PI;
-    bots.add(b);
+    table.add(b);
 
     const hand = new THREE.Group();
-    hand.position.set(x*0.82, 1.42, z*0.82);
-    hand.lookAt(0, 1.15, 0);
+    hand.position.set(x*0.82, 1.65, z*0.82);
+    hand.lookAt(0, 1.3, 0);
     pit.add(hand);
     holeGroups.push(hand);
 
     for (let k=0;k<2;k++){
-      const hc = makeCard(0.22, 0.32);
+      const hc = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.32), cardMat);
       hc.position.set((k-0.5)*0.26, 0, 0);
       hand.add(hc);
     }
+
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.20, 0.28, 24),
+      new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent:true, opacity:0.55, side:THREE.DoubleSide })
+    );
+    ring.rotation.x = -Math.PI/2;
+    ring.position.set(x*0.62, 1.00, z*0.62);
+    table.add(ring);
+    actionRings.push(ring);
   }
 
-  dwrite("[bots] bots seated + cards ready");
+  // Landmarks pads (bar/store/vip)
+  function pad(w,d, x,z, labelColor){
+    const g = new THREE.Group();
+    g.position.set(x, 0, z);
+    root.add(g);
 
-  // VIP room (no divot)
-  const vip = new THREE.Group();
-  vip.position.set(14.5, 0, -10.5);
-  scene.add(vip);
+    const p = new THREE.Mesh(new THREE.BoxGeometry(w, 0.25, d), mat(0x0a121a, 0.9, 0.02));
+    p.position.y = 0.12;
+    g.add(p);
 
-  const vipFloor = new THREE.Mesh(
-    new THREE.CircleGeometry(5.4, 48),
-    new THREE.MeshStandardMaterial({ color: 0x0a0f14, roughness: 0.98, metalness: 0.0 })
-  );
-  vipFloor.rotation.x = -Math.PI/2;
-  vipFloor.position.y = 0.02;
-  vip.add(vipFloor);
+    const s = new THREE.Mesh(new THREE.BoxGeometry(Math.min(7,w*0.6), 1.2, 0.14), mat(0x001a24, 0.45, 0.15));
+    s.position.set(0, 2.8, -d*0.35);
+    s.material.emissive = new THREE.Color(labelColor);
+    s.material.emissiveIntensity = 1.0;
+    g.add(s);
 
-  const vipTable = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.55, 2.55, 0.18, 64),
-    new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.72, metalness: 0.10 })
-  );
-  vipTable.scale.z = 1.35;
-  vipTable.position.y = 0.88;
-  vip.add(vipTable);
+    return g;
+  }
 
-  dwrite("[vip] room ready ✅");
+  pad(18, 10, -34, -22, 0x003344);
+  pad(18, 12, -34,  20, 0x003355);
+  pad(16, 12,  36,  20, 0x003311);
 
-  // Extras sign
-  const sign = new THREE.Mesh(
-    new THREE.BoxGeometry(5.4, 1.1, 0.12),
-    new THREE.MeshStandardMaterial({ color: 0x001a24, roughness: 0.45, metalness: 0.15 })
-  );
-  sign.position.set(0, 3.2, -8.2);
-  sign.material.emissive = new THREE.Color(0x002a33);
-  sign.material.emissiveIntensity = 0.8;
-  scene.add(sign);
+  dwrite("[world] landmarks ready ✅");
 
-  dwrite("[env] extras ready");
-
-  let t=0;
+  // Tick
+  let t = 0;
   return {
     tick(dt){
       t += dt;
       sign.rotation.y = Math.sin(t*0.35)*0.18;
+
       const bob = Math.sin(t*1.8)*0.02;
-      for (const g of holeGroups) g.position.y = 1.42 + bob;
+      community.position.y = 1.35 + bob;
+      for (const g of holeGroups) g.position.y = 1.65 + bob;
+
+      const pulse = (Math.sin(t*2.5)*0.5 + 0.5);
+      for (const r of actionRings) r.material.opacity = 0.22 + pulse * 0.5;
     }
   };
 }

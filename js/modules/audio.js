@@ -1,43 +1,37 @@
-// Audio module (simple, safe, mobile-friendly)
-// Provides: window.__scarlettAudioPlay(name), window.__scarlettAudioSetEnabled(bool)
-
+// Scarlett Audio Module — lightweight, Quest-safe
 export function initAudio(dwrite){
-  let enabled = true;
-  let ctx = null;
+  const state = { ctx: null };
 
   function ensure(){
-    if (!enabled) return null;
-    if (ctx) return ctx;
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) { dwrite?.("[audio] AudioContext not available"); return null; }
-    ctx = new AC();
-    return ctx;
+    if (state.ctx) return state.ctx;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) { dwrite?.("[audio] WebAudio not available"); return null; }
+    state.ctx = new AudioCtx();
+    return state.ctx;
   }
 
-  function blip(freq=440, dur=0.06, type="sine"){
-    const c = ensure();
-    if (!c) return;
-    const o = c.createOscillator();
-    const g = c.createGain();
-    o.type = type;
+  function tone(freq, dur, gain=0.03){
+    const ctx = ensure();
+    if (!ctx) return;
+    if (ctx.state === "suspended") ctx.resume().catch(()=>{});
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = "sine";
     o.frequency.value = freq;
-    g.gain.value = 0.05;
+    g.gain.value = gain;
     o.connect(g);
-    g.connect(c.destination);
-    const t = c.currentTime;
-    o.start(t);
-    o.stop(t + dur);
+    g.connect(ctx.destination);
+    o.start();
+    o.stop(ctx.currentTime + dur);
   }
 
-  window.__scarlettAudioSetEnabled = (v)=>{ enabled = !!v; if(!enabled && ctx){ try{ctx.suspend();}catch(_){ } } else if(enabled && ctx){ try{ctx.resume();}catch(_){ } } };
   window.__scarlettAudioPlay = (name)=>{
-    if (!enabled) return;
-    if (ctx && ctx.state === "suspended") { ctx.resume?.().catch(()=>{}); }
-    if (name === "click") blip(520, 0.045, "square");
-    else if (name === "deal") blip(880, 0.06, "triangle");
-    else if (name === "chip") blip(330, 0.05, "sine");
-    else blip(440, 0.05, "sine");
+    if (window.SCARLETT?.audioOn === false) return;
+    if (name === "click") tone(660, 0.05);
+    else if (name === "teleport") tone(520, 0.04), setTimeout(()=>tone(740,0.04), 60);
+    else if (name === "deal") { tone(520,0.04); setTimeout(()=>tone(740,0.04), 60); setTimeout(()=>tone(620,0.04), 120);} 
+    else tone(440, 0.04);
   };
 
-  dwrite?.("[audio] module ready");
+  dwrite?.("[audio] ready ✅");
 }

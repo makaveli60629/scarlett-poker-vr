@@ -1,100 +1,67 @@
-export const module_divot_table = {
-  id: 'divot_table',
-  async init(env) {
-    const { THREE, scene } = env;
+// /js/modules/divot_table.js
+export function createDivotTable({ THREE, dwrite }, { center }){
+  const group = new THREE.Group();
+  group.name = "divotPit";
 
-    const g = new THREE.Group();
-    g.position.set(0, 0, 0);
+  const pitRadius = 6.2;
+  const pitDepth  = 0.8;
 
-    // divot parameters
-    const radius = 3.2;
-    const depth = 0.55;
+  // Outer floor ring (around pit)
+  const outer = new THREE.Mesh(
+    new THREE.RingGeometry(pitRadius, pitRadius+0.5, 64),
+    new THREE.MeshStandardMaterial({ color: 0x111118, roughness:0.95 })
+  );
+  outer.rotation.x = -Math.PI/2;
+  outer.position.set(center.x, center.y + 0.002, center.z);
+  group.add(outer);
 
-    // lower floor disc
-    const discGeo = new THREE.CircleGeometry(radius, 64);
-    const discMat = new THREE.MeshStandardMaterial({ color: 0x0f1720, roughness: 0.9, metalness: 0.05 });
-    const disc = new THREE.Mesh(discGeo, discMat);
-    disc.rotation.x = -Math.PI / 2;
-    disc.position.y = -depth;
-    disc.receiveShadow = true;
-    g.add(disc);
+  // Inner floor (lowered)
+  const inner = new THREE.Mesh(
+    new THREE.CircleGeometry(pitRadius-0.35, 64),
+    new THREE.MeshStandardMaterial({ color: 0x0a0a0f, roughness:0.98 })
+  );
+  inner.rotation.x = -Math.PI/2;
+  inner.position.set(center.x, center.y - pitDepth + 0.002, center.z);
+  group.add(inner);
 
-    // inner wall cylinder
-    const wallGeo = new THREE.CylinderGeometry(radius, radius, depth, 64, 1, true);
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x0b0f14, roughness: 0.95, metalness: 0.05 });
-    const wall = new THREE.Mesh(wallGeo, wallMat);
-    wall.position.y = -depth/2;
-    wall.receiveShadow = true;
-    g.add(wall);
+  // Pit wall (cylinder side)
+  const wall = new THREE.Mesh(
+    new THREE.CylinderGeometry(pitRadius, pitRadius, pitDepth, 72, 1, true),
+    new THREE.MeshStandardMaterial({ color: 0x171722, roughness:0.8, metalness:0.05, side:THREE.DoubleSide })
+  );
+  wall.position.set(center.x, center.y - pitDepth/2, center.z);
+  group.add(wall);
 
-    // rail ring
-    const railGeo = new THREE.TorusGeometry(radius + 0.15, 0.06, 18, 96);
-    const railMat = new THREE.MeshStandardMaterial({ color: 0x263445, roughness: 0.35, metalness: 0.55 });
-    const rail = new THREE.Mesh(railGeo, railMat);
-    rail.rotation.x = Math.PI / 2;
-    rail.position.y = 0.12;
-    rail.castShadow = true;
-    g.add(rail);
+  // Rails (top ring + inner rail)
+  const railMat = new THREE.MeshStandardMaterial({ color: 0x885533, roughness:0.55, metalness:0.08 });
+  const rail = new THREE.Mesh(new THREE.TorusGeometry(pitRadius+0.15, 0.12, 16, 80), railMat);
+  rail.rotation.x = Math.PI/2;
+  rail.position.set(center.x, center.y + 0.18, center.z);
+  group.add(rail);
 
-    // rail posts
-    for (let i=0;i<16;i++) {
-      const a = (i/16)*Math.PI*2;
-      const postGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.7, 10);
-      const postMat = railMat;
-      const post = new THREE.Mesh(postGeo, postMat);
-      post.position.set(Math.cos(a)*(radius+0.15), -0.23, Math.sin(a)*(radius+0.15));
-      post.castShadow = true;
-      g.add(post);
-    }
+  const rail2 = new THREE.Mesh(new THREE.TorusGeometry(pitRadius-0.55, 0.08, 16, 80), railMat);
+  rail2.rotation.x = Math.PI/2;
+  rail2.position.set(center.x, center.y - pitDepth + 0.18, center.z);
+  group.add(rail2);
 
-    // poker table (sunken)
-    const table = new THREE.Group();
-    table.position.set(0, -depth + 0.02, 0);
+  // Table in pit
+  const tableMat = new THREE.MeshStandardMaterial({ color: 0x0b6b3a, roughness:0.85, metalness:0.05 });
+  const table = new THREE.Mesh(new THREE.CylinderGeometry(2.35, 2.35, 0.25, 48), tableMat);
+  table.position.set(center.x, center.y - pitDepth + 0.55, center.z);
+  group.add(table);
 
-    const tableTopGeo = new THREE.CylinderGeometry(1.55, 1.75, 0.18, 64);
-    const tableTopMat = new THREE.MeshStandardMaterial({ color: 0x0c5a38, roughness: 0.9, metalness: 0.05 });
-    const tableTop = new THREE.Mesh(tableTopGeo, tableTopMat);
-    tableTop.position.y = 0.78;
-    tableTop.castShadow = true;
-    tableTop.receiveShadow = true;
-    table.add(tableTop);
+  // Table rim
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(2.35, 0.14, 16, 64), new THREE.MeshStandardMaterial({ color: 0x2b1b10, roughness:0.6 }));
+  rim.rotation.x = Math.PI/2;
+  rim.position.copy(table.position);
+  rim.position.y += 0.12;
+  group.add(rim);
 
-    const tableBandGeo = new THREE.CylinderGeometry(1.78, 1.78, 0.25, 64);
-    const tableBandMat = new THREE.MeshStandardMaterial({ color: 0x1a2430, roughness: 0.5, metalness: 0.2 });
-    const band = new THREE.Mesh(tableBandGeo, tableBandMat);
-    band.position.y = 0.62;
-    band.castShadow = true;
-    table.add(band);
+  // Dealer chip
+  const dealer = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.05, 20), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive:0xffffff, emissiveIntensity:0.3 }));
+  dealer.position.set(center.x, table.position.y + 0.14, center.z - 1.1);
+  group.add(dealer);
 
-    const pedestalGeo = new THREE.CylinderGeometry(0.28, 0.45, 0.7, 24);
-    const pedestalMat = new THREE.MeshStandardMaterial({ color: 0x1a2230, roughness: 0.65, metalness: 0.3 });
-    const ped = new THREE.Mesh(pedestalGeo, pedestalMat);
-    ped.position.y = 0.28;
-    ped.castShadow = true;
-    table.add(ped);
-
-    g.add(table);
-
-    // seat markers (6 total, one open seat reserved at angle 0)
-    const seats = [];
-    const seatCount = 6;
-    for (let i=0;i<seatCount;i++) {
-      const a = (i/seatCount)*Math.PI*2;
-      const isOpen = i === 0;
-      const sGeo = new THREE.BoxGeometry(0.55, 0.08, 0.55);
-      const sMat = new THREE.MeshStandardMaterial({ color: isOpen ? 0x4dd0ff : 0x101820, roughness: 0.9 });
-      const s = new THREE.Mesh(sGeo, sMat);
-      s.position.set(Math.cos(a)*2.5, -depth + 0.05, Math.sin(a)*2.5);
-      s.castShadow = true;
-      g.add(s);
-      seats.push({ mesh: s, angle: a, open: isOpen });
-    }
-
-    scene.add(g);
-    env.log?.('divot table ready ✅');
-
-    return {
-      handles: { table: { group: g, table, seats, radius, depth } },
-    };
-  }
-};
+  dwrite?.("[divot] pit + rails + table ready");
+  return { group, pitRadius, pitDepth, table };
+}

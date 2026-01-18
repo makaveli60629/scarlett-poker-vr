@@ -1,163 +1,121 @@
-function makeBot(env, color=0x8aa4ff) {
-  const { THREE } = env;
-  const g = new THREE.Group();
+// /js/modules/avatars_bots.js
+export function createBotsAndCards({ THREE, dwrite }, { center }){
+  const group = new THREE.Group();
+  group.name = "botsAndCards";
 
-  const torsoGeo = new THREE.CapsuleGeometry(0.18, 0.5, 6, 12);
-  const torsoMat = new THREE.MeshStandardMaterial({ color, roughness: 0.65, metalness: 0.05 });
-  const torso = new THREE.Mesh(torsoGeo, torsoMat);
-  torso.position.set(0, 1.05, 0);
-  torso.castShadow = true;
-  g.add(torso);
+  const bots = [];
+  const hoverCards = [];
+  const tableY = -0.8 + 0.55; // matches divot_table defaults
+  const seatRadius = 2.95;
+  const botCount = 5; // + 1 open seat marker
+  const cardW = 0.18, cardH = 0.26;
 
-  const headGeo = new THREE.SphereGeometry(0.16, 22, 16);
-  const headMat = new THREE.MeshStandardMaterial({ color: 0xf1d6c2, roughness: 0.85 });
-  const head = new THREE.Mesh(headGeo, headMat);
-  head.position.set(0, 1.55, 0);
-  head.castShadow = true;
-  g.add(head);
+  const botMat = new THREE.MeshStandardMaterial({ color: 0x7aa7ff, roughness:0.75 });
+  const botMat2 = new THREE.MeshStandardMaterial({ color: 0xffa76a, roughness:0.75 });
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness:0.55, metalness:0.05 });
 
-  const shoulderGeo = new THREE.SphereGeometry(0.09, 16, 12);
-  const limbGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.45, 12);
-  const limbMat = new THREE.MeshStandardMaterial({ color: 0x0f1a24, roughness: 0.8 });
+  const cardMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness:0.8 });
+  const cardBack = new THREE.MeshStandardMaterial({ color: 0x3333ff, roughness:0.7 });
+  const hoverMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive:0x66aaff, emissiveIntensity:0.35, roughness:0.85 });
 
-  const leftShoulder = new THREE.Mesh(shoulderGeo, limbMat);
-  leftShoulder.position.set(-0.22, 1.25, 0);
-  g.add(leftShoulder);
-  const rightShoulder = new THREE.Mesh(shoulderGeo, limbMat);
-  rightShoulder.position.set(0.22, 1.25, 0);
-  g.add(rightShoulder);
+  function makeBot(i, angle){
+    const g = new THREE.Group();
+    g.name = "bot_"+i;
 
-  const leftArm = new THREE.Mesh(limbGeo, limbMat);
-  leftArm.position.set(-0.3, 1.05, 0.05);
-  leftArm.rotation.z = 0.9;
-  g.add(leftArm);
-  const rightArm = new THREE.Mesh(limbGeo, limbMat);
-  rightArm.position.set(0.3, 1.05, 0.05);
-  rightArm.rotation.z = -0.9;
-  g.add(rightArm);
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.55, 6, 12), (i%2)?botMat:botMat2);
+    body.position.set(0, 0.65, 0);
+    g.add(body);
 
-  // little "butt" for debug
-  const hipGeo = new THREE.SphereGeometry(0.12, 16, 12);
-  const hip = new THREE.Mesh(hipGeo, limbMat);
-  hip.position.set(0, 0.78, -0.02);
-  g.add(hip);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 18, 14), headMat);
+    head.position.set(0, 1.08, 0.02);
+    g.add(head);
 
-  return { g, head, torso };
-}
+    const x = center.x + Math.cos(angle)*seatRadius;
+    const z = center.z + Math.sin(angle)*seatRadius;
+    g.position.set(x, tableY, z);
+    g.lookAt(center.x, tableY+0.2, center.z);
 
-function makeCardPair(env, baseY, hoverY) {
-  const { THREE } = env;
-  const cardW = 0.09;
-  const cardH = 0.13;
-  const geo = new THREE.PlaneGeometry(cardW, cardH);
-  const mat1 = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0.05 });
-  const mat2 = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0.05 });
+    // Simple "shoulders" bar
+    const shoulders = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.08, 0.18), headMat);
+    shoulders.position.set(0, 0.92, 0.02);
+    g.add(shoulders);
 
-  const c1 = new THREE.Mesh(geo, mat1);
-  const c2 = new THREE.Mesh(geo, mat2);
+    // Cards on table for this bot
+    const baseY = tableY + 0.14;
+    const offset = new THREE.Vector3(0,0,-1).applyAxisAngle(new THREE.Vector3(0,1,0), angle);
+    const cardCenter = new THREE.Vector3(center.x, baseY, center.z).add(offset.multiplyScalar(1.25));
 
-  // simple suit marks via emissive tint
-  c1.material.emissive.setHex(0x221111);
-  c2.material.emissive.setHex(0x112222);
+    const c1 = new THREE.Mesh(new THREE.PlaneGeometry(cardW, cardH), cardMat);
+    const c2 = new THREE.Mesh(new THREE.PlaneGeometry(cardW, cardH), cardMat);
+    c1.rotation.x = -Math.PI/2;
+    c2.rotation.x = -Math.PI/2;
+    c1.position.copy(cardCenter).add(new THREE.Vector3(-0.11, 0.001, 0));
+    c2.position.copy(cardCenter).add(new THREE.Vector3(0.11, 0.001, 0));
+    group.add(c1, c2);
 
-  c1.castShadow = true;
-  c2.castShadow = true;
+    // Hover mirrored cards (training mirror)
+    const h1 = new THREE.Mesh(new THREE.PlaneGeometry(cardW, cardH), hoverMat);
+    const h2 = new THREE.Mesh(new THREE.PlaneGeometry(cardW, cardH), hoverMat);
+    h1.position.copy(cardCenter).add(new THREE.Vector3(-0.11, 0.6, 0));
+    h2.position.copy(cardCenter).add(new THREE.Vector3(0.11, 0.6, 0));
+    // face camera-ish (updated in update())
+    group.add(h1, h2);
+    hoverCards.push(h1, h2);
 
-  const h1 = new THREE.Mesh(geo, mat1.clone());
-  const h2 = new THREE.Mesh(geo, mat2.clone());
-  h1.material.emissive.setHex(0x221111);
-  h2.material.emissive.setHex(0x112222);
-
-  h1.position.y = hoverY;
-  h2.position.y = hoverY;
-
-  return { table: [c1, c2], hover: [h1, h2] };
-}
-
-export const module_avatars_bots = {
-  id: 'avatars_bots',
-  async init(env) {
-    const { THREE, scene } = env;
-    const table = env.world?.table;
-    if (!table) {
-      env.log?.('avatars_bots skipped (no table)');
-      return {};
-    }
-
-    const bots = [];
-    const seats = table.seats.filter(s => !s.open);
-
-    for (let i=0;i<seats.length;i++) {
-      const seat = seats[i];
-      const bot = makeBot(env, [0x7c4dff, 0x4dd0ff, 0xffd54d, 0xff5c93, 0x7cff6b][i % 5]);
-
-      // sit position (slightly inward toward table)
-      const r = 2.15;
-      bot.g.position.set(Math.cos(seat.angle)*r, -table.depth, Math.sin(seat.angle)*r);
-      bot.g.rotation.y = -seat.angle + Math.PI;
-
-      // cards: flat on table, plus hover mirror above
-      const cards = makeCardPair(env, 0, 1.35);
-      const cardBase = new THREE.Group();
-      cardBase.position.set(Math.cos(seat.angle)*1.25, -table.depth + 0.82, Math.sin(seat.angle)*1.25);
-      cardBase.rotation.y = -seat.angle + Math.PI;
-
-      // table cards (flat)
-      cards.table[0].position.set(-0.06, 0.002, 0);
-      cards.table[1].position.set(0.06, 0.002, 0);
-      cards.table[0].rotation.x = -Math.PI/2;
-      cards.table[1].rotation.x = -Math.PI/2;
-      cardBase.add(cards.table[0], cards.table[1]);
-
-      // hovering mirror (upright, facing outward)
-      const hover = new THREE.Group();
-      hover.position.copy(cardBase.position);
-      hover.position.y += 0.95;
-      hover.rotation.y = cardBase.rotation.y;
-
-      cards.hover[0].position.set(-0.06, 0, 0);
-      cards.hover[1].position.set(0.06, 0, 0);
-      // face the lobby
-      cards.hover[0].rotation.y = Math.PI;
-      cards.hover[1].rotation.y = Math.PI;
-
-      hover.add(cards.hover[0], cards.hover[1]);
-
-      // subtle glow behind hover cards
-      const glowGeo = new THREE.PlaneGeometry(0.28, 0.18);
-      const glowMat = new THREE.MeshStandardMaterial({ color: 0x0b0f14, emissive: 0x4dd0ff, emissiveIntensity: 0.8, transparent: true, opacity: 0.45 });
-      const glow = new THREE.Mesh(glowGeo, glowMat);
-      glow.position.set(0, 0, -0.01);
-      hover.add(glow);
-
-      scene.add(bot.g);
-      scene.add(cardBase);
-      scene.add(hover);
-
-      bots.push({ bot, seat, cardBase, hover, glow });
-    }
-
-    env.world.bots = bots;
-    env.log?.(`bots ready ✅ count=${bots.length}`);
-
-    return {
-      handles: { bots },
-      update(dt) {
-        const t = performance.now() * 0.0015;
-        for (let i=0;i<bots.length;i++) {
-          const b = bots[i];
-          // idle head bob
-          b.bot.head.position.y = 1.55 + 0.02 * Math.sin(t + i);
-          // hover cards pulse
-          b.glow.material.emissiveIntensity = 0.6 + 0.25 * Math.sin(t*1.7 + i);
-          // keep hover cards facing camera (non-VR helpful)
-          if (!env.renderer.xr.isPresenting) {
-            b.hover.lookAt(env.camera.getWorldPosition(env.tmp.v3));
-            // rotate 180 so front faces camera
-            b.hover.rotateY(Math.PI);
-          }
-        }
-      }
-    };
+    // Add to group
+    group.add(g);
+    bots.push(g);
   }
-};
+
+  // Create 5 bots around table (leave one open seat)
+  const angles = [];
+  for (let k=0;k<6;k++) angles.push((k/6)*Math.PI*2 + Math.PI/6);
+  // skip seat 0 as open seat
+  let bi = 0;
+  for (let s=0;s<6;s++){
+    if (s===0) continue;
+    makeBot(bi++, angles[s]);
+  }
+
+  // Open seat marker
+  const openAngle = angles[0];
+  const openPos = new THREE.Vector3(center.x + Math.cos(openAngle)*seatRadius, tableY, center.z + Math.sin(openAngle)*seatRadius);
+  const marker = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.22, 0.22, 0.08, 20),
+    new THREE.MeshStandardMaterial({ color: 0x22ff22, emissive:0x22ff22, emissiveIntensity:0.35, roughness:0.65 })
+  );
+  marker.position.copy(openPos);
+  marker.position.y += 0.05;
+  group.add(marker);
+
+  // Community cards (center)
+  const commY = tableY + 0.14;
+  for (let i=0;i<5;i++){
+    const cc = new THREE.Mesh(new THREE.PlaneGeometry(cardW, cardH), cardBack);
+    cc.rotation.x = -Math.PI/2;
+    cc.position.set(center.x + (i-2)*0.22, commY+0.001, center.z);
+    group.add(cc);
+  }
+
+  dwrite?.("[bots] bots seated + cards ready");
+
+  // Update: hover cards face camera
+  const q = new THREE.Quaternion();
+  const up = new THREE.Vector3(0,1,0);
+  return {
+    group,
+    update(){
+      // cheap billboard
+      for (const hc of hoverCards){
+        hc.lookAt(0,0,0); // overwritten below
+      }
+      // real billboard to camera
+      // (avoid allocations in a simple loop)
+      for (let i=0;i<hoverCards.length;i++){
+        const hc = hoverCards[i];
+        hc.quaternion.copy(q);
+        hc.lookAt( (window.__scarlettCamPosX ?? 0), (window.__scarlettCamPosY ?? 1.6), (window.__scarlettCamPosZ ?? 0) );
+      }
+    }
+  };
+}

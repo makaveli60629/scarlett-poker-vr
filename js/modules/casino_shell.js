@@ -1,63 +1,46 @@
-export const module_casino_shell = {
-  id: 'casino_shell',
-  async init(env) {
-    const { THREE, scene } = env;
+// /js/modules/casino_shell.js
+export function createCasinoShell({ THREE, dwrite }){
+  const group = new THREE.Group();
+  group.name = "casinoShell";
 
-    // Big room walls (simple)
-    const room = new THREE.Group();
+  // Floor
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(70, 70),
+    new THREE.MeshStandardMaterial({ color: 0x1a1a1f, roughness:0.9, metalness:0.05 })
+  );
+  floor.rotation.x = -Math.PI/2;
+  floor.position.y = 0;
+  group.add(floor);
 
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x101820, roughness: 0.95 });
-    const wallGeo = new THREE.BoxGeometry(30, 8, 0.4);
+  // Subtle grid lines
+  const grid = new THREE.GridHelper(70, 70, 0x333344, 0x22222a);
+  grid.position.y = 0.001;
+  group.add(grid);
 
-    const back = new THREE.Mesh(wallGeo, wallMat);
-    back.position.set(0, 4, -10);
-    back.receiveShadow = true;
-    room.add(back);
+  // Walls (simple box room)
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x0d0d12, roughness:0.95, metalness:0.0 });
+  const room = new THREE.Mesh(new THREE.BoxGeometry(70, 16, 70), wallMat);
+  room.position.set(0, 8, 0);
+  room.material.side = THREE.BackSide;
+  group.add(room);
 
-    const front = new THREE.Mesh(wallGeo, wallMat);
-    front.position.set(0, 4, 14);
-    room.add(front);
+  // Ceiling glow panel
+  const ceiling = new THREE.Mesh(
+    new THREE.CircleGeometry(12, 48),
+    new THREE.MeshStandardMaterial({ color: 0x222233, emissive:0x222255, emissiveIntensity:0.55, roughness:0.9 })
+  );
+  ceiling.rotation.x = Math.PI/2;
+  ceiling.position.set(0, 15.8, 0);
+  group.add(ceiling);
 
-    const sideGeo = new THREE.BoxGeometry(0.4, 8, 24);
-    const left = new THREE.Mesh(sideGeo, wallMat);
-    left.position.set(-15, 4, 2);
-    room.add(left);
-    const right = new THREE.Mesh(sideGeo, wallMat);
-    right.position.set(15, 4, 2);
-    room.add(right);
+  // Neon sign block
+  const sign = new THREE.Mesh(
+    new THREE.BoxGeometry(10, 1.2, 0.3),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, emissive:0xff00aa, emissiveIntensity:1.2, roughness:0.3 })
+  );
+  sign.position.set(0, 4.5, -18);
+  group.add(sign);
 
-    // ceiling
-    const ceilGeo = new THREE.BoxGeometry(30, 0.4, 24);
-    const ceiling = new THREE.Mesh(ceilGeo, wallMat);
-    ceiling.position.set(0, 8.2, 2);
-    room.add(ceiling);
-
-    // glowing sign
-    const signGeo = new THREE.PlaneGeometry(6, 1.2);
-    const signMat = new THREE.MeshStandardMaterial({ color: 0x0b0f14, emissive: 0x7c4dff, emissiveIntensity: 1.2 });
-    const sign = new THREE.Mesh(signGeo, signMat);
-    sign.position.set(0, 5.6, -9.79);
-    room.add(sign);
-
-    // simple neon pillars
-    for (const x of [-12, 12]) {
-      const pGeo = new THREE.CylinderGeometry(0.18, 0.18, 6.5, 18);
-      const pMat = new THREE.MeshStandardMaterial({ color: 0x182433, emissive: 0x103a55, emissiveIntensity: 0.8, roughness: 0.35, metalness: 0.25 });
-      const p = new THREE.Mesh(pGeo, pMat);
-      p.position.set(x, 3.25, -7);
-      p.castShadow = true;
-      room.add(p);
-    }
-
-    scene.add(room);
-    env.log?.('casino shell ready ✅');
-
-    return {
-      handles: { room },
-      update() {
-        const t = performance.now() * 0.0015;
-        sign.material.emissiveIntensity = 1.0 + 0.25 * Math.sin(t);
-      }
-    };
-  }
-};
+  dwrite?.("[shell] casino shell ready");
+  return { group };
+}

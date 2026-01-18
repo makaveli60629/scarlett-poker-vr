@@ -1,39 +1,36 @@
-// WORLD ORCHESTRA — SINGLE SOURCE OF TRUTH
+import { initDiagnostics, diagWrite } from "./diagnostics.js";
+import { buildLighting } from "./lighting.js";
+import { buildWorld } from "./world.js";
+import { buildTable } from "./table.js";
+import { initMovement } from "./movement.js";
+import { buildTeleportMachine, initTeleportControls } from "./teleport_machine.js";
+import { initHands } from "./hands.js";
+import { initGestureEngine } from "./gesture_engine.js";
+import { spawnBots } from "./bots.js";
+import { initAvatars } from "./avatars.js";
+import { initPokerDemoUI } from "./poker_demo.js";
+import { initEnterVR } from "./vr.js";
 
-export async function startWorldOrchestra() {
-  console.log("🎼 World Orchestra starting…");
+export function startWorldOrchestra(){
+  initDiagnostics();
+  diagWrite("🎼 World Orchestra starting…");
 
-  // Diagnostics
-  await import("./diagnostics.js").catch(()=>{});
+  buildLighting();
+  buildWorld();
+  buildTable();
 
-  // Input & Movement
-  await import("./controls.js").catch(()=>{});
-  await import("./locomotion.js").catch(()=>{});
-  await import("./android_controls.js").catch(()=>{});
+  initEnterVR();
+  initMovement();
+  initTeleportControls();
+  buildTeleportMachine();
 
-  // XR & Hands
-  await import("./hands.js").catch(()=>{});
-  await import("./gesture_engine.js").catch(()=>{});
+  initHands();
+  initGestureEngine();
 
-  // World
-  await import("./world.js").catch(()=>{});
-  await import("./lighting.js").catch(()=>{});
-  await import("./solid_walls.js").catch(()=>{});
-  await import("./lobby_decor.js").catch(()=>{});
+  spawnBots();
+  initAvatars();
 
-  // Poker
-  await import("./table_factory.js").catch(()=>{});
-  await import("./poker_system.js").catch(()=>{});
-  await import("./cards.js").catch(()=>{});
-  await import("./chips.js").catch(()=>{});
+  initPokerDemoUI();
 
-  // Bots & Avatars
-  await import("./bots.js").catch(()=>{});
-  await import("./humanoid_factory.js").catch(()=>{});
-  await import("./avatar_system.js").catch(()=>{});
-
-  // Teleport LAST
-  await import("./teleport_machine.js").catch(()=>{});
-
-  console.log("✅ World Orchestra READY");
+  diagWrite("✅ World Orchestra READY");
 }

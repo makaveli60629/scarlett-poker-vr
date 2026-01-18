@@ -10,6 +10,8 @@ import { installTeleportFX } from "./modules/teleport_fx.js";
 import { createEnvironmentExtras } from "./modules/environment_extras.js";
 import { installBotsIdle } from "./modules/bots_idle.js";
 import { installPokerDemo } from "./modules/poker_demo.js";
+import { createVIPRoom } from "./modules/vip_room.js";
+import { installSeatSystem } from "./modules/seat_system.js";
 import { installWorldDebug } from "./modules/world_debug.js";
 import { installPlayerAvatar } from "./modules/player_avatar.js";
 
@@ -58,6 +60,20 @@ export function buildWorld(ctx){
   const poker = installPokerDemo(ctx, { center: new THREE.Vector3(0,0,0), tableY: -0.8 + 0.55 });
   root.add(poker.group);
 
+  // VIP Room (no divot)
+  const vip = createVIPRoom(ctx, { center: new THREE.Vector3(-16, 0, -12) });
+  root.add(vip.group);
+
+  // Seat system: open VIP seat (angle 0)
+  const vipCenter = new THREE.Vector3(-16, 0, -12);
+  const seatRadius = 3.0;
+  const openSeatPos = new THREE.Vector3(vipCenter.x + Math.cos(0)*seatRadius, 0, vipCenter.z + Math.sin(0)*seatRadius);
+  const openSeatYaw = Math.PI; // face table center
+  const seatSys = installSeatSystem(ctx, { seats: [
+    { id:"VIP_OPEN", label:"VIP", position: openSeatPos, yaw: openSeatYaw, radius: 1.0 }
+  ]});
+  root.add(seatSys.group || new THREE.Group());
+
   // Debug helpers (optional: keeps things visible)
   const dbg = installWorldDebug(ctx, { spawnPos: spawn.spawnPos });
   root.add(dbg.group);
@@ -75,10 +91,12 @@ export function buildWorld(ctx){
       tpfx.update?.();
       avatar.update?.();
       idle.update?.();
+      seatSys.update?.();
       poker.update?.();
       bots.update?.();
     },
     teleportFX: tpfx,
+    avatar,
     spawnPos: spawn.spawnPos
   };
 }

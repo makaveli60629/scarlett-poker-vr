@@ -3,7 +3,7 @@ import { buildWorld } from "../world.js";
 
 export function startScarlettRuntime(){
   const d = window.__scarlettDiagWrite || function(m){ console.log(m); };
-  d("[scarlett1] LIVE_FINGERPRINT ✅ SCARLETT1_FULL_RUNTIME_v2_2");
+  d("[scarlett1] LIVE_FINGERPRINT ✅ SCARLETT1_FULL_RUNTIME_v2_3_INPUTFIX");
 
   const app = document.getElementById("app");
 
@@ -16,6 +16,7 @@ export function startScarlettRuntime(){
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
 
+  // HUD clickable
   renderer.domElement.style.pointerEvents = "none";
   renderer.domElement.style.position = "fixed";
   renderer.domElement.style.left = "0";
@@ -29,13 +30,13 @@ export function startScarlettRuntime(){
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x1b1b1b, 1.1);
-  scene.add(hemi);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x1b1b1b, 1.1));
 
   const spot = new THREE.SpotLight(0xffffff, 1.2, 30, Math.PI/6, 0.4, 1.0);
   spot.position.set(3, 5.5, 3);
   scene.add(spot);
 
+  // player rig
   const rig = new THREE.Group();
   rig.position.set(0, 0, 5);
   rig.add(camera);
@@ -44,70 +45,23 @@ export function startScarlettRuntime(){
   const built = buildWorld(THREE, scene);
   const floor = built.floor;
 
-  // Non-VR: drag to look, tap floor to move
-  let isLook=false;
-  let lastX=0;
-  let yaw=0;
-
-  function pd(e){
-    isLook=true;
-    lastX = (e.clientX!=null)?e.clientX:((e.touches&&e.touches[0])?e.touches[0].clientX:0);
-  }
-  function pu(){ isLook=false; }
-  function pm(e){
-    if(!isLook) return;
-    const x = (e.clientX!=null)?e.clientX:((e.touches&&e.touches[0])?e.touches[0].clientX:0);
-    const dx = x-lastX;
-    lastX=x;
-    yaw += dx*0.005;
-    rig.rotation.y = yaw;
-  }
-
-  window.addEventListener("pointerdown", pd, {passive:true});
-  window.addEventListener("pointerup", pu, {passive:true});
-  window.addEventListener("pointermove", pm, {passive:true});
-  window.addEventListener("touchstart", pd, {passive:true});
-  window.addEventListener("touchend", pu, {passive:true});
-  window.addEventListener("touchmove", pm, {passive:true});
-
-  function clickMove(e){
-    const rect = renderer.domElement.getBoundingClientRect();
-    const mx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    const my = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
-    const ray = new THREE.Raycaster();
-    ray.setFromCamera(new THREE.Vector2(mx,my), camera);
-    const hits = ray.intersectObject(floor, false);
-    if(hits && hits.length){
-      const p = hits[0].point;
-      rig.position.x = p.x;
-      rig.position.z = p.z;
-    }
-  }
-  window.addEventListener("click", clickMove, {passive:true});
-
-  // XR: teleport + sticks
-  const controllers=[];
-  const tempMat=new THREE.Matrix4();
-  const raycaster=new THREE.Raycaster();
-
-  const reticle=new THREE.Mesh(
-    new THREE.RingGeometry(0.12,0.16,24),
-    new THREE.MeshStandardMaterial({ color:0x66ccff, side:THREE.DoubleSide })
-  );
-  reticle.rotation.x = -Math.PI/2;
-  reticle.visible=false;
-  scene.add(reticle);
+  // --- XR controllers
+  const controllers = [];
+  const raycaster = new THREE.Raycaster();
+  const tempMat = new THREE.Matrix4();
 
   function setupController(i){
     const c = renderer.xr.getController(i);
-    c.userData.teleportPoint=null;
+    c.userData.teleportPoint = null;
+    c.userData.isAiming = false;
 
+    c.addEventListener("selectstart", function(){ c.userData.isAiming = true; });
     c.addEventListener("selectend", function(){
+      c.userData.isAiming = false;
       if(window.SCARLETT && window.SCARLETT.teleportOn && c.userData.teleportPoint){
         rig.position.x = c.userData.teleportPoint.x;
         rig.position.z = c.userData.teleportPoint.z;
-        reticle.visible=false;
-        c.userData.teleportPoint=null;
+        c.userData.teleportPoint = null;
       }
     });
 
@@ -117,17 +71,41 @@ export function startScarlettRuntime(){
   setupController(0);
   setupController(1);
 
+  // Reticle + visible beam (so you can SEE the ray)
+  const reticle = new THREE.Mesh(
+    new THREE.RingGeometry(0.12,0.16,24),
+    new THREE.MeshStandardMaterial({ color:0x66ccff, side:THREE.DoubleSide })
+  );
+  reticle.rotation.x = -Math.PI/2;
+  reticle.visible = false;
+  scene.add(reticle);
+
+  const beamGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0,0,0),
+    new THREE.Vector3(0,0,-1)
+  ]);
+  const beamMat = new THREE.LineBasicMaterial({ color: 0x66ccff });
+  const beam = new THREE.Line(beamGeo, beamMat);
+  beam.visible = false;
+  scene.add(beam);
+
   function updateTeleport(){
     if(!(window.SCARLETT && window.SCARLETT.teleportOn)){
-      reticle.visible=false;
-      if(controllers[0]) controllers[0].userData.teleportPoint=null;
+      reticle.visible = false;
+      beam.visible = false;
+      for(let i=0;i<controllers.length;i++) controllers[i].userData.teleportPoint = null;
       return;
     }
-    const c = controllers[0];
+
+    // pick the controller that's currently aiming, otherwise use first
+    let c = null;
+    for(let i=0;i<controllers.length;i++){
+      if(controllers[i].userData.isAiming){ c = controllers[i]; break; }
+    }
+    if(!c) c = controllers[0];
     if(!c) return;
 
-    tempMat.identity();
-    tempMat.extractRotation(c.matrixWorld);
+    tempMat.identity().extractRotation(c.matrixWorld);
     raycaster.ray.origin.setFromMatrixPosition(c.matrixWorld);
     raycaster.ray.direction.set(0,0,-1).applyMatrix4(tempMat);
 
@@ -135,54 +113,97 @@ export function startScarlettRuntime(){
     if(hits && hits.length){
       const p = hits[0].point;
       reticle.position.set(p.x, 0.01, p.z);
-      reticle.visible=true;
-      c.userData.teleportPoint=p;
+      reticle.visible = true;
+      c.userData.teleportPoint = p;
+
+      // beam from controller to hit point
+      beam.visible = true;
+      const a = raycaster.ray.origin.clone();
+      const b = p.clone();
+      beam.geometry.setFromPoints([a, b]);
     }else{
-      reticle.visible=false;
-      c.userData.teleportPoint=null;
+      reticle.visible = false;
+      beam.visible = false;
+      c.userData.teleportPoint = null;
     }
   }
 
-  function dz(v){ return (Math.abs(v)<0.15)?0:v; }
+  // --- Stick input (AUTO-map)
+  function dz(v){ return (Math.abs(v)<0.18)?0:v; }
 
-  function applySticks(dt){
+  // snap turn (45 degrees)
+  let snapCooldown = 0;
+
+  function applyMovement(dt){
     if(!(window.SCARLETT && window.SCARLETT.sticksOn)) return;
+
     const session = renderer.xr.getSession ? renderer.xr.getSession() : null;
     if(!session || !session.inputSources) return;
 
-    let moveX=0, moveY=0, turnX=0;
-
+    // Gather all axes from all controllers
+    const axesList = [];
     for(let i=0;i<session.inputSources.length;i++){
       const src = session.inputSources[i];
       const gp = (src && src.gamepad) ? src.gamepad : null;
       if(!gp || !gp.axes) continue;
+      axesList.push(gp.axes);
+    }
+    if(!axesList.length) return;
 
-      if(i===0){
-        moveX = gp.axes.length>0 ? gp.axes[0] : 0;
-        moveY = gp.axes.length>1 ? gp.axes[1] : 0;
-      }else if(i===1){
-        turnX = gp.axes.length>2 ? gp.axes[2] : (gp.axes.length>0 ? gp.axes[0] : 0);
+    // Heuristic:
+    // - movement uses the first (x,y) pair that has magnitude
+    // - turn uses the first x-axis that has magnitude after movement is found
+    let moveX=0, moveY=0, turnX=0;
+
+    // find move
+    for(let a=0;a<axesList.length;a++){
+      const ax = axesList[a];
+      if(ax.length >= 2){
+        const x = dz(ax[0]);
+        const y = dz(ax[1]);
+        if(Math.abs(x) + Math.abs(y) > 0){
+          moveX = x; moveY = y;
+          break;
+        }
       }
     }
 
-    moveX=dz(moveX); moveY=dz(moveY); turnX=dz(turnX);
+    // find turn (try common axes: 2 or 0)
+    for(let a=0;a<axesList.length;a++){
+      const ax = axesList[a];
+      let cand = 0;
+      if(ax.length >= 4) cand = dz(ax[2]);
+      else if(ax.length >= 1) cand = dz(ax[0]);
+      // ignore if it equals moveX exactly (same stick)
+      if(Math.abs(cand) > 0 && Math.abs(cand - moveX) > 0.05){
+        turnX = cand;
+        break;
+      }
+    }
 
-    const speed=2.0;
-    const turnSpeed=1.6;
+    // movement speed
+    const speed = 2.0;
 
-    rig.rotation.y -= turnX * turnSpeed * dt;
-
+    // apply movement in rig space
     const forward = new THREE.Vector3(0,0,-1).applyQuaternion(rig.quaternion);
     const right = new THREE.Vector3(1,0,0).applyQuaternion(rig.quaternion);
-    forward.y=0; right.y=0;
+    forward.y = 0; right.y = 0;
     forward.normalize(); right.normalize();
 
     const delta = new THREE.Vector3();
     delta.addScaledVector(right, moveX * speed * dt);
     delta.addScaledVector(forward, moveY * speed * dt);
     rig.position.add(delta);
+
+    // snap turn
+    snapCooldown = Math.max(0, snapCooldown - dt);
+    if(snapCooldown === 0 && Math.abs(turnX) > 0.7){
+      rig.rotation.y -= Math.sign(turnX) * (Math.PI/4);
+      snapCooldown = 0.25;
+    }
   }
 
+  // Enter VR
   window.__scarlettEnterVR = async function(){
     if(!navigator.xr){ d("[xr] navigator.xr not available"); return; }
     const session = await navigator.xr.requestSession("immersive-vr", { requiredFeatures:["local-floor"] });
@@ -190,6 +211,7 @@ export function startScarlettRuntime(){
     d("[xr] session started ✅");
   };
 
+  // bots “playing” animation + cards hover
   let t=0;
   let last=performance.now();
   renderer.setAnimationLoop(function(){
@@ -198,21 +220,18 @@ export function startScarlettRuntime(){
     last=now;
 
     t += dt;
-    // bots bob + "playing" gesture (tiny)
     for(let i=0;i<built.bots.length;i++){
       built.bots[i].position.y = 0.02*Math.sin(t*1.3 + i);
       built.bots[i].rotation.y += 0.002*Math.sin(t*0.7+i);
     }
-
-    // cards gentle hover on the mirror layer
     for(let i=0;i<built.cards.length;i++){
-      if(i%2===1){ // hover layer
+      if(i%2===1){
         built.cards[i].position.y = 1.32 + 0.01*Math.sin(t*2.0 + i);
       }
     }
 
     updateTeleport();
-    applySticks(dt);
+    applyMovement(dt);
 
     renderer.render(scene, camera);
   });
@@ -220,4 +239,4 @@ export function startScarlettRuntime(){
   d("[status] renderer OK ✅");
   d("[status] world ready ✅");
   d("[status] bots playing ✅");
-}
+        }

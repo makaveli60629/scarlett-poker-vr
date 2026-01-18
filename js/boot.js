@@ -1,4 +1,4 @@
-const BUILD="SCARLETT_BOOT_FULL_v2_2";
+const BUILD="SCARLETT_BOOT_FULL_v2_5_NEXT";
 (function(){
   const panel=document.getElementById("diagPanel");
   window.__scarlettDiagWrite=function(msg){
@@ -19,6 +19,8 @@ d("touch="+(("ontouchstart" in window)?"true":"false")+" maxTouchPoints="+(navig
 window.SCARLETT=window.SCARLETT||{};
 window.SCARLETT.teleportOn=true;
 window.SCARLETT.sticksOn=true;
+window.SCARLETT.mobileMove={x:0,y:0};
+window.SCARLETT.spawnId=0;
 
 function $(id){return document.getElementById(id);}
 function bindPress(el, fn){
@@ -47,6 +49,12 @@ bindPress($("btnSticks"), function(){
   $("btnSticks").textContent="Sticks: "+(window.SCARLETT.sticksOn?"ON":"OFF");
 });
 
+bindPress($("btnRespawn"), function(){
+  window.SCARLETT.spawnId = (window.SCARLETT.spawnId+1)%3;
+  d("[spawn] cycling to pad "+window.SCARLETT.spawnId);
+  if(window.__scarlettRespawn) window.__scarlettRespawn(window.SCARLETT.spawnId);
+});
+
 bindPress($("btnHideHUD"), function(){
   const hud=$("hud");
   if(!hud) return;
@@ -65,16 +73,47 @@ bindPress($("btnEnterVR"), function(){
     window.__scarlettEnterVR().catch(function(e){
       d("[xr] Enter VR failed: "+(e&&e.message?e.message:String(e)));
     });
-  }else{
-    d("[ui] XR not ready yet");
-  }
+  }else d("[ui] XR not ready yet");
 });
+
+// Virtual joystick
+(function(){
+  const wrap=$("joyWrap"), stick=$("joyStick");
+  if(!wrap || !stick) return;
+  let active=false, pid=null, cx=0, cy=0;
+
+  function setStick(nx, ny){
+    window.SCARLETT.mobileMove.x = nx;
+    window.SCARLETT.mobileMove.y = ny;
+    stick.style.transform = "translate("+(nx*44)+"px,"+(ny*44)+"px)";
+  }
+  function center(){ active=false; pid=null; setStick(0,0); stick.style.transform="translate(0px,0px)"; }
+
+  wrap.addEventListener("pointerdown", function(e){
+    active=true; pid=e.pointerId;
+    const r=wrap.getBoundingClientRect();
+    cx=r.left + r.width/2; cy=r.top + r.height/2;
+    wrap.setPointerCapture(pid);
+    e.preventDefault();
+  }, {passive:false});
+
+  wrap.addEventListener("pointermove", function(e){
+    if(!active || e.pointerId!==pid) return;
+    const dx=e.clientX-cx, dy=e.clientY-cy;
+    const max=60;
+    const nx=Math.max(-1, Math.min(1, dx/max));
+    const ny=Math.max(-1, Math.min(1, dy/max));
+    setStick(nx, ny);
+    e.preventDefault();
+  }, {passive:false});
+
+  wrap.addEventListener("pointerup", function(e){ if(e.pointerId===pid) center(); }, {passive:true});
+  wrap.addEventListener("pointercancel", function(e){ if(e.pointerId===pid) center(); }, {passive:true});
+})();
 
 (async function(){
   try{
     d("--- PREFLIGHT: main.js ---");
-    if(window.__SCARLETT_MAIN_IMPORTED){ d("[boot] main already imported"); return; }
-    window.__SCARLETT_MAIN_IMPORTED=true;
     await import("./main.js");
     d("[status] ready ✅");
   }catch(e){

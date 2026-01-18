@@ -2,191 +2,77 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="color-scheme" content="dark" />
-  <title>ScarlettVR Poker — Full Working</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>Scarlett Poker VR</title>
   <style>
-    :root{ --bg:#0b0f14; --fg:#e9eef5; --muted:#98a6b7; --accent:#ff2f6d; --good:#43f3a6; --warn:#ffd166; --bad:#ff5a5f; }
-    html,body{ margin:0; height:100%; background:var(--bg); color:var(--fg); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; overflow:hidden; }
-    #app{ position:fixed; inset:0; }
-    canvas{ display:block; width:100%; height:100%; }
-
-    /* HUD */
-    #hud{ position:fixed; left:12px; top:12px; right:12px; display:flex; gap:10px; align-items:flex-start; pointer-events:none; z-index:9999; }
-    #hud .panel{ pointer-events:auto; background:rgba(10,14,20,0.72); border:1px solid rgba(255,255,255,0.10); backdrop-filter: blur(8px);
-      border-radius:14px; box-shadow:0 10px 30px rgba(0,0,0,0.45); }
-    #hud .controls{ padding:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .hudBtn{ border:1px solid rgba(255,255,255,0.16); background:rgba(255,255,255,0.06); color:var(--fg);
-      border-radius:12px; padding:10px 12px; font-weight:700; letter-spacing:0.2px; cursor:pointer; }
-    .hudBtn:active{ transform: translateY(1px); }
-    .hudBtn.primary{ border-color: rgba(255,47,109,0.55); background:rgba(255,47,109,0.16); }
-    .hudBtn.good{ border-color: rgba(67,243,166,0.50); background:rgba(67,243,166,0.12); }
-
-    #diagHud{ width:min(680px, calc(100vw - 24px)); max-height:min(48vh, 520px); overflow:auto; padding:10px 12px; }
-    #diagHud pre{ margin:0; white-space:pre-wrap; font-size:12px; line-height:1.35; color:var(--fg); }
-
-    /* PIP */
-    #pipWrap{ position:fixed; right:12px; bottom:12px; width:min(240px, 40vw); aspect-ratio: 4/3; border-radius:14px;
-      overflow:hidden; border:1px solid rgba(255,255,255,0.12); background:rgba(10,14,20,0.66); z-index:9998; }
-    #pipTitle{ position:absolute; left:0; right:0; top:0; padding:6px 8px; font-size:12px; color:var(--muted);
-      background:linear-gradient(to bottom, rgba(10,14,20,0.92), rgba(10,14,20,0.0)); }
-    #pipCanvas{ width:100%; height:100%; display:block; }
-
-    /* Touch hint */
-    #hint{ position:fixed; left:12px; bottom:12px; padding:10px 12px; border-radius:14px; z-index:9997;
-      background:rgba(10,14,20,0.66); border:1px solid rgba(255,255,255,0.10); color:var(--muted);
-      font-size:12px; max-width:min(520px, calc(100vw - 24px)); }
-    #hint b{ color:var(--fg); }
-
-    /* Hide */
-    .hidden{ display:none !important; }
-
-    /* Virtual sticks (Android) */
-    #sticks{ position:fixed; left:0; right:0; bottom:0; height:44vh; pointer-events:none; z-index:9996; }
-    .stickZone{ position:absolute; bottom:12px; width:44vw; max-width:220px; aspect-ratio:1/1; border-radius:999px; border:1px solid rgba(255,255,255,0.14); background:rgba(10,14,20,0.25); backdrop-filter: blur(6px); pointer-events:auto; touch-action:none; }
-    #stickLeft{ left:12px; }
-    #stickRight{ right:12px; }
-    .stickZone .knob{ position:absolute; left:50%; top:50%; width:34%; height:34%; transform:translate(-50%,-50%); border-radius:999px; background:rgba(255,255,255,0.10); border:1px solid rgba(255,255,255,0.18); }
-    #btnShowUI{ position:fixed; left:12px; top:12px; z-index:99999; pointer-events:auto; display:none; }
-
-
-
-
-    /* One-tap Show UI button */
-    
-
-  </style>
-
-  <!-- Import map so Three.js example modules that use bare specifiers (e.g. `import ... from 'three'`)
-       work on static hosting (GitHub Pages) without a bundler. -->
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-      }
+    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
+    #app { position:fixed; inset:0; }
+    canvas { display:block; width:100%; height:100%; }
+    #hud {
+      position: fixed; left: 12px; top: 12px; z-index: 9999;
+      display: flex; gap: 8px; flex-wrap: wrap; max-width: calc(100% - 24px);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      user-select:none;
     }
-  </script>
+    .hudBtn{
+      border: 1px solid rgba(255,255,255,.25);
+      background: rgba(30,30,30,.7);
+      color: #fff;
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 14px;
+      line-height: 1;
+      touch-action: manipulation;
+    }
+    .hudBtn.primary{ border-color: rgba(120,200,255,.55); }
+    #diagPanel{
+      position: fixed; left: 12px; right: 12px; bottom: 12px;
+      z-index: 9999;
+      background: rgba(0,0,0,.72);
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 12px;
+      padding: 10px;
+      color: #d9f2ff;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12px;
+      max-height: 35vh;
+      overflow: auto;
+      display: none;
+      white-space: pre-wrap;
+    }
+    #pipHint{
+      position: fixed; left: 12px; right: 12px; bottom: 60px;
+      z-index: 9998;
+      color: rgba(255,255,255,.85);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      font-size: 13px;
+      text-shadow: 0 2px 10px rgba(0,0,0,.8);
+      pointer-events:none;
+    }
+  </style>
 </head>
 <body>
   <div id="app"></div>
 
   <div id="hud">
-    <div class="panel controls">
-      <button id="btnEnterVR" class="hudBtn primary">Enter VR</button>
-      <button id="btnTeleport" class="hudBtn">Teleport: OFF</button>
-      <button id="btnDiag" class="hudBtn">Diag</button>
-      <button id="btnSticks" class="hudBtn">Sticks: ON</button>
-      <button id="btnAudio" class="hudBtn">Audio: ON</button>
-      <button id="btnHideHUD" class="hudBtn">Hide HUD</button>
-      <button id="btnHideUI" class="hudBtn">Hide UI</button>
-    </div>
-    <div id="diagHud" class="panel">
-      <pre id="diagText">booting…</pre>
-    </div>
+    <button id="btnEnterVR" class="hudBtn primary">Enter VR</button>
+    <button id="btnTeleport" class="hudBtn">Teleport: OFF</button>
+    <button id="btnDiag" class="hudBtn">Diag</button>
+    <button id="btnSticks" class="hudBtn">Sticks: ON</button>
+    <button id="btnAudio" class="hudBtn">Audio: ON</button>
+    <button id="btnHideHUD" class="hudBtn">Hide HUD</button>
+    <button id="btnHideUI" class="hudBtn">Hide UI</button>
   </div>
 
-  <div id="pipWrap">
-    <div id="pipTitle">PIP — Table View</div>
-    <canvas id="pipCanvas"></canvas>
+  <div id="pipHint">
+    PIP — Table View<br/>
+    Non-VR: drag to look • tap floor to move • two-finger drag rotates.<br/>
+    VR: Enter VR → trigger to teleport (when Teleport is ON).
   </div>
 
-  <div id="hint">
-    <b>Non‑VR:</b> drag to look • tap floor to move • two‑finger drag rotates.<br/>
-    <b>VR:</b> Enter VR → trigger to teleport (when Teleport is ON).
-  </div>
+  <div id="diagPanel"></div>
 
-  
-  <div id="sticks">
-    <div id="stickLeft" class="stickZone"><div class="knob"></div></div>
-    <div id="stickRight" class="stickZone"><div class="knob"></div></div>
-  </div>
-
-  <button id="btnShowUI" class="hudBtn good hidden">Show UI</button>
-
-  <script>
-    // Virtual stick state (read by runtime)
-    window.SCARLETT = window.SCARLETT || {};
-    window.SCARLETT.vaxes = window.SCARLETT.vaxes || { lx:0, ly:0, rx:0, ry:0 };
-
-    (function(){
-      const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-      function bindStick(zone, keyx, keyy){
-        const knob = zone.querySelector('.knob');
-        let active = false, pid = null, cx = 0, cy = 0, max = 0;
-        const setKnob = (dx, dy) => {
-          knob.style.transform = `translate(${dx}px, ${dy}px) translate(-50%, -50%)`;
-        };
-        const reset = () => {
-          window.SCARLETT.vaxes[keyx] = 0; window.SCARLETT.vaxes[keyy] = 0;
-          setKnob(0,0);
-        };
-        zone.addEventListener('pointerdown', (e)=>{
-          active = true; pid = e.pointerId; zone.setPointerCapture(pid);
-          const r = zone.getBoundingClientRect();
-          cx = r.left + r.width/2; cy = r.top + r.height/2; max = r.width*0.35;
-          move(e);
-        }, {passive:false});
-        function move(e){
-          if (!active || e.pointerId !== pid) return;
-          e.preventDefault();
-          const dx = e.clientX - cx;
-          const dy = e.clientY - cy;
-          const ndx = clamp(dx/max, -1, 1);
-          const ndy = clamp(dy/max, -1, 1);
-          window.SCARLETT.vaxes[keyx] = ndx;
-          window.SCARLETT.vaxes[keyy] = ndy;
-          setKnob(ndx*max, ndy*max);
-        }
-        zone.addEventListener('pointermove', move, {passive:false});
-        zone.addEventListener('pointerup', (e)=>{ if (e.pointerId!==pid) return; active=false; pid=null; reset(); }, {passive:false});
-        zone.addEventListener('pointercancel', ()=>{ active=false; pid=null; reset(); }, {passive:false});
-        reset();
-      }
-      bindStick(document.getElementById('stickLeft'), 'lx', 'ly');
-      bindStick(document.getElementById('stickRight'), 'rx', 'ry');
-
-      const btnSticks = document.getElementById('btnSticks');
-      const sticks = document.getElementById('sticks');
-      btnSticks?.addEventListener('click', ()=>{
-        const on = !sticks.classList.contains('hidden');
-        sticks.classList.toggle('hidden', on);
-        btnSticks.textContent = `Sticks: ${on ? 'OFF' : 'ON'}`;
-      });
-
-      const btnAudio = document.getElementById('btnAudio');
-      btnAudio?.addEventListener('click', ()=>{
-        window.SCARLETT.audioEnabled = !window.SCARLETT.audioEnabled;
-        if (window.SCARLETT.audioEnabled === undefined) window.SCARLETT.audioEnabled = true;
-        btnAudio.textContent = `Audio: ${window.SCARLETT.audioEnabled ? 'ON' : 'OFF'}`;
-      });
-
-      // Hide UI (hud + sticks + hint + pip). Show UI button remains.
-      const btnHideUI = document.getElementById('btnHideUI');
-      const btnShowUI = document.getElementById('btnShowUI');
-      const hud = document.getElementById('hud');
-      const hint = document.getElementById('hint');
-      const pip = document.getElementById('pipWrap');
-      btnHideUI?.addEventListener('click', ()=>{
-        hud?.classList.add('hidden');
-        sticks?.classList.add('hidden');
-        hint?.classList.add('hidden');
-        pip?.classList.add('hidden');
-        btnShowUI?.classList.remove('hidden');
-      });
-      btnShowUI?.addEventListener('click', ()=>{
-        hud?.classList.remove('hidden');
-        sticks?.classList.remove('hidden');
-        hint?.classList.remove('hidden');
-        pip?.classList.remove('hidden');
-        btnShowUI?.classList.add('hidden');
-      });
-
-      // Default audio enabled
-      if (window.SCARLETT.audioEnabled === undefined) window.SCARLETT.audioEnabled = true;
-    })();
-  </script>
-
-<script type="module" src="./js/boot.js"></script>
+  <!-- IMPORTANT: single boot entry. Do NOT also include scarlett1/index.js directly. -->
+  <script type="module" src="/js/boot.js"></script>
 </body>
 </html>

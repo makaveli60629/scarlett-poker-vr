@@ -1,4 +1,4 @@
-const BUILD="SCARLETT_BOOT_FULL_v2_5_NEXT";
+const BUILD="SCARLETT_BOOT_STABLE_XR_v2_6";
 (function(){
   const panel=document.getElementById("diagPanel");
   window.__scarlettDiagWrite=function(msg){
@@ -52,7 +52,7 @@ bindPress($("btnSticks"), function(){
 bindPress($("btnRespawn"), function(){
   window.SCARLETT.spawnId = (window.SCARLETT.spawnId+1)%3;
   d("[spawn] cycling to pad "+window.SCARLETT.spawnId);
-  if(window.__scarlettRespawn) window.__scarlettRespawn(window.SCARLETT.spawnId);
+  window.__scarlettRespawn?.(window.SCARLETT.spawnId);
 });
 
 bindPress($("btnHideHUD"), function(){
@@ -67,16 +67,13 @@ bindPress($("btnHideUI"), function(){
   ui.style.display=(ui.style.display==="none")?"block":"none";
 });
 
+// Important: click also, because Quest Browser sometimes needs 2 taps; we log both
 bindPress($("btnEnterVR"), function(){
   d("[ui] Enter VR pressed");
-  if(window.__scarlettEnterVR){
-    window.__scarlettEnterVR().catch(function(e){
-      d("[xr] Enter VR failed: "+(e&&e.message?e.message:String(e)));
-    });
-  }else d("[ui] XR not ready yet");
+  window.__scarlettEnterVR?.().catch((e)=>d("[xr] Enter VR failed: "+(e&&e.message?e.message:String(e))));
 });
 
-// Virtual joystick
+// Virtual joystick (Android)
 (function(){
   const wrap=$("joyWrap"), stick=$("joyStick");
   if(!wrap || !stick) return;

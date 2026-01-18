@@ -4,10 +4,9 @@ import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.m
 import { buildWorld } from "./world.js";
 import { installBasicControls } from "./modules/controls_basic.js";
 import { installHud } from "./modules/hud_diag.js";
-import { installXRHands } from "./modules/hand_tracking.js";
 import { installAudioSystem } from "./modules/audio_system.js";
 
-const BUILD = "SCARLETT_PERMA_DEMO_FIX_v6_QUEST_SEATS_HANDS_AUDIO_NEXT";
+const BUILD = "SCARLETT_PERMA_DEMO_FIX_v6a_ANDROID_SAFE";
 
 // ---- DIAG writer (global hook) ----
 const logEl = document.getElementById("log");

@@ -5,7 +5,7 @@ import { buildWorld } from "./world.js";
 import { installBasicControls } from "./modules/controls_basic.js";
 import { installHud } from "./modules/hud_diag.js";
 
-const BUILD = "SCARLETT_PERMA_DEMO_FIX_v1";
+const BUILD = "SCARLETT_PERMA_DEMO_FIX_v2_AVATAR";
 
 // ---- DIAG writer (global hook) ----
 const logEl = document.getElementById("log");

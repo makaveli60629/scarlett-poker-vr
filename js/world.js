@@ -7,6 +7,7 @@ import { createCasinoShell } from "./modules/casino_shell.js";
 import { createDivotTable } from "./modules/divot_table.js";
 import { createBotsAndCards } from "./modules/avatars_bots.js";
 import { installWorldDebug } from "./modules/world_debug.js";
+import { installPlayerAvatar } from "./modules/player_avatar.js";
 
 export function buildWorld(ctx){
   const { THREE, scene, rig, camera, renderer, dwrite } = ctx;
@@ -42,6 +43,9 @@ export function buildWorld(ctx){
   const dbg = installWorldDebug(ctx, { spawnPos: spawn.spawnPos });
   root.add(dbg.group);
 
+  // Player avatar (visible body + hands)
+  const avatar = installPlayerAvatar(ctx);
+
   // Set initial rig position to spawn
   rig.position.copy(spawn.spawnPos);
   rig.rotation.set(0, 0, 0);
@@ -49,6 +53,7 @@ export function buildWorld(ctx){
 
   return {
     update(){
+      avatar.update?.();
       bots.update?.();
     },
     spawnPos: spawn.spawnPos

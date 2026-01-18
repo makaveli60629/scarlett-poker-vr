@@ -15,6 +15,8 @@
     #diag pre{margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;white-space:pre-wrap;line-height:1.25}
     #tip{margin-top:6px;color:#000;font-size:18px;font-family:Georgia,serif}
     .hidden{display:none !important}
+    #fade{position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;z-index:999;transition:opacity 120ms linear}
+    #fade.on{opacity:1}
   </style>
 </head>
 <body>
@@ -32,6 +34,7 @@
     </div>
   </div>
 
+  <div id="fade"></div>
   <script type="module" src="./js/main.js"></script>
 </body>
 </html>

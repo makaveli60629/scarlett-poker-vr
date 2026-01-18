@@ -43,6 +43,7 @@ export function installHud({ THREE, renderer, rig, camera, dwrite, getTeleportEn
       renderer.xr.setReferenceSpaceType("local-floor");
       await renderer.xr.setSession(session);
       dwrite("[xr] session started ✅");
+      try{ await window.__scarlettStartXRHands?.(); }catch(_){ }
     }catch(err){
       dwrite("[xr] requestSession failed: " + (err?.message || err));
     }

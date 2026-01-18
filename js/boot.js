@@ -1,7 +1,7 @@
 // SCARLETT — BOOT ROUTER (XR-safe, cache-proof friendly)
-// Build: SCARLETT_BOOT_FULL_WORKING_v1_4_POKER_DEAL
+// Build: SCARLETT_BOOT_FULL_WORKING_v1_5_ALL
 
-const BUILD = 'SCARLETT_BOOT_FULL_WORKING_v1_4_POKER_DEAL';
+const BUILD = 'SCARLETT_BOOT_FULL_WORKING_v1_5_ALL';
 
 // ---- DIAG writer used by modules ----
 (function initDiag(){

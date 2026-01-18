@@ -1,4 +1,5 @@
 export function buildWorld(THREE, scene){
+  // room
   const room = new THREE.Mesh(
     new THREE.BoxGeometry(22,6,22),
     new THREE.MeshStandardMaterial({ color:0x0b0f14, side:THREE.BackSide })
@@ -6,13 +7,16 @@ export function buildWorld(THREE, scene){
   room.position.set(0,3,0);
   scene.add(room);
 
+  // ONE floor only (fix blink / z-fighting)
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(40,40),
     new THREE.MeshStandardMaterial({ color:0x103820 })
   );
   floor.rotation.x = -Math.PI/2;
+  floor.position.y = 0;
   scene.add(floor);
 
+  // table
   const tableTop = new THREE.Mesh(
     new THREE.CylinderGeometry(1.35,1.35,0.18,40),
     new THREE.MeshStandardMaterial({ color:0x0c2b18 })
@@ -35,6 +39,7 @@ export function buildWorld(THREE, scene){
   pedestal.position.set(0,0.4,0);
   scene.add(pedestal);
 
+  // center marker
   const marker = new THREE.Mesh(
     new THREE.CylinderGeometry(0.08,0.08,0.02,20),
     new THREE.MeshStandardMaterial({ color:0x7b1b1b })
@@ -42,13 +47,16 @@ export function buildWorld(THREE, scene){
   marker.position.set(0,1.02,0);
   scene.add(marker);
 
+  // bots + chips + cards
   const bots=[];
   const seatCount=6;
+
   for(let i=0;i<seatCount;i++){
     const ang = (i/seatCount)*Math.PI*2 - Math.PI/2;
     const px = Math.cos(ang)*2.2;
     const pz = Math.sin(ang)*2.2;
 
+    // seat
     const seat = new THREE.Mesh(
       new THREE.CylinderGeometry(0.22,0.22,0.06,18),
       new THREE.MeshStandardMaterial({ color:0x1d1d1d })
@@ -56,22 +64,22 @@ export function buildWorld(THREE, scene){
     seat.position.set(px,0.52,pz);
     scene.add(seat);
 
+    // bot
     const bot = makeBot(THREE);
     bot.position.set(px,0.0,pz);
     bot.lookAt(0,1.0,0);
     scene.add(bot);
     bots.push(bot);
 
-    // simple chip stack
+    // chips (smaller)
     const chips = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.07,0.07,0.06,18),
+      new THREE.CylinderGeometry(0.04,0.04,0.03,18),
       new THREE.MeshStandardMaterial({ color:0x883333 })
     );
     chips.position.set(px*0.55, 1.02, pz*0.55);
     scene.add(chips);
   }
 
-  // cards (flat + hover) per seat
   const cards=[];
   for(let i=0;i<seatCount;i++){
     const ang = (i/seatCount)*Math.PI*2 - Math.PI/2;
@@ -91,7 +99,7 @@ export function buildWorld(THREE, scene){
     cards.push(pair, hover);
   }
 
-  return { floor:floor, tableTop:tableTop, bots:bots, cards:cards };
+  return { floor, tableTop, bots, cards };
 }
 
 function makeBot(THREE){

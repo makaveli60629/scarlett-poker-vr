@@ -1,122 +1,62 @@
-export function buildWorld(THREE, scene){
-  // Room
-  const room = new THREE.Mesh(
-    new THREE.BoxGeometry(26,7,26),
-    new THREE.MeshStandardMaterial({ color:0x0b0f14, side:THREE.BackSide })
-  );
-  room.position.set(0,3.55,0);
-  scene.add(room);
+// World assembler: loads modules in order and returns world handles
 
-  // Floor (no blink)
-  const floorMat = new THREE.MeshStandardMaterial({ color:0x103820 });
-  floorMat.polygonOffset = true;
-  floorMat.polygonOffsetFactor = 1;
-  floorMat.polygonOffsetUnits = 1;
+import { module_spawn_pad } from "./modules/spawn_pad.js";
+import { module_teleport_arch } from "./modules/teleport_arch.js";
+import { module_casino_shell } from "./modules/casino_shell.js";
+import { module_divot_table } from "./modules/divot_table.js";
+import { module_avatars_bots } from "./modules/avatars_bots.js";
 
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(60,60), floorMat);
-  floor.rotation.x = -Math.PI/2;
-  floor.position.y = 0;
+export async function buildWorld(env) {
+  const { THREE, scene, rig } = env;
+
+  // base floor (large plane)
+  const floorGeo = new THREE.PlaneGeometry(120, 120);
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0x141b24, roughness: 0.95, metalness: 0.0 });
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
   scene.add(floor);
 
-  // Carpet ring
-  const carpet = new THREE.Mesh(
-    new THREE.RingGeometry(5.5, 10.0, 64),
-    new THREE.MeshStandardMaterial({ color:0x1b1f2a, side:THREE.DoubleSide })
-  );
-  carpet.rotation.x = -Math.PI/2;
-  carpet.position.y = 0.002;
-  scene.add(carpet);
+  // subtle grid (diagnostic friendly)
+  const grid = new THREE.GridHelper(120, 120, 0x233041, 0x1b2432);
+  grid.position.y = 0.001;
+  scene.add(grid);
 
-  // Table
-  const tableTop = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.55,1.55,0.20,48),
-    new THREE.MeshStandardMaterial({ color:0x0c2b18, roughness:0.9 })
-  );
-  tableTop.position.set(0,0.92,0);
-  scene.add(tableTop);
+  env.world = {
+    floor,
+    grid,
+    teleport: null,
+    spawnPad: null,
+    arch: null,
+    table: null,
+    bots: [],
+  };
 
-  const tableRim = new THREE.Mesh(
-    new THREE.TorusGeometry(1.55,0.10,16,72),
-    new THREE.MeshStandardMaterial({ color:0x2a1d12, roughness:0.8, metalness:0.1 })
-  );
-  tableRim.rotation.x = Math.PI/2;
-  tableRim.position.set(0,1.03,0);
-  scene.add(tableRim);
-
-  const pedestal = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.45,0.70,0.85,28),
-    new THREE.MeshStandardMaterial({ color:0x161616, roughness:0.9 })
-  );
-  pedestal.position.set(0,0.42,0);
-  scene.add(pedestal);
-
-  // Spawn pads
-  const padPositions = [
-    new THREE.Vector3(0,0,8.5),
-    new THREE.Vector3(-6.5,0,6.0),
-    new THREE.Vector3(6.5,0,6.0),
+  const modules = [
+    module_spawn_pad,
+    module_teleport_arch,
+    module_casino_shell,
+    module_divot_table,
+    module_avatars_bots,
   ];
-  const pads=[];
-  for(let i=0;i<padPositions.length;i++){
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.6, 0.8, 48),
-      new THREE.MeshStandardMaterial({ color:0x66ccff, emissive:0x114455, emissiveIntensity:1.0, side:THREE.DoubleSide })
-    );
-    ring.rotation.x = -Math.PI/2;
-    ring.position.copy(padPositions[i]);
-    ring.position.y = 0.01;
-    scene.add(ring);
-    pads.push(ring);
+
+  for (const mod of modules) {
+    try {
+      const res = await mod.init(env);
+      if (typeof res?.update === 'function') env.updateFns.push(res.update);
+      if (res?.handles) Object.assign(env.world, res.handles);
+    } catch (err) {
+      env?.log?.(`MODULE ERROR: ${mod?.id || 'unknown'} ${err?.message || err}`);
+      console.error(err);
+    }
   }
 
-  // Simple fountain
-  const fountainBase = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.4,1.6,0.35,40),
-    new THREE.MeshStandardMaterial({ color:0x2b2f36, roughness:0.8 })
-  );
-  fountainBase.position.set(-10.5,0.18,-10.5);
-  scene.add(fountainBase);
-
-  const water = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.15,1.15,0.05,32),
-    new THREE.MeshStandardMaterial({ color:0x224a66, emissive:0x112233, emissiveIntensity:0.6, roughness:0.2 })
-  );
-  water.position.set(-10.5,0.36,-10.5);
-  scene.add(water);
-
-  // Bots (simple)
-  const bots=[];
-  const seatCount=6;
-  for(let i=0;i<seatCount;i++){
-    const ang = (i/seatCount)*Math.PI*2 - Math.PI/2;
-    const px = Math.cos(ang)*2.55;
-    const pz = Math.sin(ang)*2.55;
-
-    const bot = makeBot(THREE);
-    bot.position.set(px,0.0,pz);
-    bot.lookAt(0,1.0,0);
-    scene.add(bot);
-    bots.push(bot);
+  // initial spawn (ensure we land on spawn pad)
+  if (!env.state.spawned) {
+    rig.position.set(env.state.spawnPoint.x, 0, env.state.spawnPoint.z);
+    rig.rotation.set(0, env.state.spawnYaw, 0);
+    env.state.spawned = true;
   }
 
-  return { floor, bots, padPositions, water };
-}
-
-function makeBot(THREE){
-  const g=new THREE.Group();
-  const body=new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.20,0.58,6,12),
-    new THREE.MeshStandardMaterial({ color:0x6b7a8f })
-  );
-  body.position.y=1.0;
-  g.add(body);
-
-  const head=new THREE.Mesh(
-    new THREE.SphereGeometry(0.17,16,12),
-    new THREE.MeshStandardMaterial({ color:0xd2b48c })
-  );
-  head.position.y=1.58;
-  g.add(head);
-
-  return g;
+  return env.world;
 }

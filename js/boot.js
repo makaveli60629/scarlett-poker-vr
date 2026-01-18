@@ -1,120 +1,60 @@
-const BUILD="SCARLETT_BOOT_STABLE_XR_v2_6";
-(function(){
-  const panel=document.getElementById("diagPanel");
-  window.__scarlettDiagWrite=function(msg){
-    const line="["+new Date().toLocaleTimeString()+"] "+String(msg);
-    console.log(line);
-    if(panel) panel.textContent+=(panel.textContent?"\n":"")+line;
+// SCARLETT PERMA BOOT (demo)
+(() => {
+  const BUILD = "SCARLETT_PERMA_DEMO_v1_0";
+  const $ = (s) => document.querySelector(s);
+  const diagEl = $("#diag");
+  const toastEl = $("#toast");
+
+  const now = () => new Date().toISOString().split('T')[1].replace('Z','');
+  const dwrite = (msg) => {
+    try {
+      if (!diagEl) return;
+      const line = `[${now()}] ${String(msg)}`;
+      diagEl.textContent += (diagEl.textContent ? "\n" : "") + line;
+    } catch (_) {}
   };
-})();
-const d=window.__scarlettDiagWrite;
+  window.__scarlettDiagWrite = dwrite;
 
-d("=== SCARLETT ADMIN DIAG REPORT ===");
-d("BUILD="+BUILD);
-d("HREF="+location.href);
-d("secureContext="+window.isSecureContext);
-d("ua="+navigator.userAgent);
-d("touch="+(("ontouchstart" in window)?"true":"false")+" maxTouchPoints="+(navigator.maxTouchPoints||0));
+  const toast = (msg, ms=1600) => {
+    if (!toastEl) return;
+    toastEl.textContent = String(msg);
+    toastEl.hidden = false;
+    clearTimeout(toastEl.__t);
+    toastEl.__t = setTimeout(() => (toastEl.hidden = true), ms);
+  };
+  window.__scarlettToast = toast;
 
-window.SCARLETT=window.SCARLETT||{};
-window.SCARLETT.teleportOn=true;
-window.SCARLETT.sticksOn=true;
-window.SCARLETT.mobileMove={x:0,y:0};
-window.SCARLETT.spawnId=0;
+  // quick environment fingerprint
+  dwrite(`booting… BUILD=${BUILD}`);
+  dwrite(`href=${location.href}`);
+  dwrite(`secureContext=${window.isSecureContext}`);
+  dwrite(`ua=${navigator.userAgent}`);
+  dwrite(`touch=${'ontouchstart' in window} maxTouchPoints=${navigator.maxTouchPoints||0}`);
 
-function $(id){return document.getElementById(id);}
-function bindPress(el, fn){
-  if(!el) return;
-  el.addEventListener("pointerdown", function(e){ try{e.preventDefault();}catch(_){ } fn(e); }, {passive:false});
-  el.addEventListener("touchstart", function(e){ try{e.preventDefault();}catch(_){ } fn(e); }, {passive:false});
-  el.addEventListener("click", fn);
-}
-
-bindPress($("btnDiag"), function(){
-  const p=$("diagPanel");
-  if(p) p.style.display=(p.style.display==="none"||!p.style.display)?"block":"none";
-  d("--- HUD/STATE ---");
-  d("teleportOn="+(window.SCARLETT.teleportOn?"true":"false"));
-  d("sticksOn="+(window.SCARLETT.sticksOn?"true":"false"));
-  d("xr="+(navigator.xr?"true":"false"));
-});
-
-bindPress($("btnTeleport"), function(){
-  window.SCARLETT.teleportOn=!window.SCARLETT.teleportOn;
-  $("btnTeleport").textContent="Teleport: "+(window.SCARLETT.teleportOn?"ON":"OFF");
-});
-
-bindPress($("btnSticks"), function(){
-  window.SCARLETT.sticksOn=!window.SCARLETT.sticksOn;
-  $("btnSticks").textContent="Sticks: "+(window.SCARLETT.sticksOn?"ON":"OFF");
-});
-
-bindPress($("btnRespawn"), function(){
-  window.SCARLETT.spawnId = (window.SCARLETT.spawnId+1)%3;
-  d("[spawn] cycling to pad "+window.SCARLETT.spawnId);
-  window.__scarlettRespawn?.(window.SCARLETT.spawnId);
-});
-
-bindPress($("btnHideHUD"), function(){
-  const hud=$("hud");
-  if(!hud) return;
-  hud.style.display=(hud.style.display==="none")?"flex":"none";
-});
-
-bindPress($("btnHideUI"), function(){
-  const ui=$("pipHint");
-  if(!ui) return;
-  ui.style.display=(ui.style.display==="none")?"block":"none";
-});
-
-// Important: click also, because Quest Browser sometimes needs 2 taps; we log both
-bindPress($("btnEnterVR"), function(){
-  d("[ui] Enter VR pressed");
-  window.__scarlettEnterVR?.().catch((e)=>d("[xr] Enter VR failed: "+(e&&e.message?e.message:String(e))));
-});
-
-// Virtual joystick (Android)
-(function(){
-  const wrap=$("joyWrap"), stick=$("joyStick");
-  if(!wrap || !stick) return;
-  let active=false, pid=null, cx=0, cy=0;
-
-  function setStick(nx, ny){
-    window.SCARLETT.mobileMove.x = nx;
-    window.SCARLETT.mobileMove.y = ny;
-    stick.style.transform = "translate("+(nx*44)+"px,"+(ny*44)+"px)";
+  // HUD buttons wiring (engine will also bind, but boot ensures they exist)
+  const btnHideHUD = $("#btnHideHUD");
+  if (btnHideHUD) {
+    btnHideHUD.addEventListener('click', () => {
+      const hud = $("#hud");
+      if (!hud) return;
+      const hidden = hud.classList.toggle('hidden');
+      toast(hidden ? 'HUD hidden' : 'HUD shown');
+    });
   }
-  function center(){ active=false; pid=null; setStick(0,0); stick.style.transform="translate(0px,0px)"; }
 
-  wrap.addEventListener("pointerdown", function(e){
-    active=true; pid=e.pointerId;
-    const r=wrap.getBoundingClientRect();
-    cx=r.left + r.width/2; cy=r.top + r.height/2;
-    wrap.setPointerCapture(pid);
-    e.preventDefault();
-  }, {passive:false});
-
-  wrap.addEventListener("pointermove", function(e){
-    if(!active || e.pointerId!==pid) return;
-    const dx=e.clientX-cx, dy=e.clientY-cy;
-    const max=60;
-    const nx=Math.max(-1, Math.min(1, dx/max));
-    const ny=Math.max(-1, Math.min(1, dy/max));
-    setStick(nx, ny);
-    e.preventDefault();
-  }, {passive:false});
-
-  wrap.addEventListener("pointerup", function(e){ if(e.pointerId===pid) center(); }, {passive:true});
-  wrap.addEventListener("pointercancel", function(e){ if(e.pointerId===pid) center(); }, {passive:true});
-})();
-
-(async function(){
-  try{
-    d("--- PREFLIGHT: main.js ---");
-    await import("./main.js");
-    d("[status] ready ✅");
-  }catch(e){
-    d("[status] BOOT FAILED ❌");
-    d(String(e&&e.stack?e.stack:e));
+  const btnDiag = $("#btnDiag");
+  if (btnDiag) {
+    btnDiag.addEventListener('click', () => {
+      if (!diagEl) return;
+      diagEl.hidden = !diagEl.hidden;
+      toast(diagEl.hidden ? 'Diagnostics hidden' : 'Diagnostics shown');
+    });
   }
+
+  // Load main runtime
+  const s = document.createElement('script');
+  s.type = 'module';
+  s.src = `./js/scarlett1/index.js?v=${encodeURIComponent(BUILD)}_${Date.now()}`;
+  s.onerror = () => dwrite('ERROR: failed to load ./js/scarlett1/index.js');
+  document.head.appendChild(s);
 })();

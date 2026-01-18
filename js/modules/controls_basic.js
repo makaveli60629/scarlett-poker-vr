@@ -54,9 +54,13 @@ export function installBasicControls({ THREE, renderer, rig, camera, dwrite }){
   // Click to teleport (non-xr)
   renderer.domElement.addEventListener("click", (ev)=>{
     if (!state.teleportEnabled) return;
+    if (window.__scarlettSeatSeated) return;
+    if (window.__scarlettSeatSeated) return;
     if (renderer.xr.isPresenting) return;
     const hit = groundHitFromCamera();
     if (hit){
+      try{ window.__scarlettAudioCues?.teleport?.(); }catch(_){ }
+      try{ window.__scarlettAudioCues?.teleport?.(); }catch(_){ }
       if (typeof window.__scarlettRequestTeleport === 'function') window.__scarlettRequestTeleport(hit); else teleportTo(hit);
       dwrite(`[teleport] click -> (${hit.x.toFixed(2)},${hit.z.toFixed(2)})`);
     }
@@ -66,8 +70,10 @@ export function installBasicControls({ THREE, renderer, rig, camera, dwrite }){
   const c0 = renderer.xr.getController(0);
   c0.addEventListener("select", ()=>{
     if (!state.teleportEnabled) return;
+    if (window.__scarlettSeatSeated) return;
     const hit = groundHitFromCamera();
     if (hit){
+      try{ window.__scarlettAudioCues?.teleport?.(); }catch(_){ }
       if (typeof window.__scarlettRequestTeleport === 'function') window.__scarlettRequestTeleport(hit); else teleportTo(hit);
       dwrite(`[teleport] xr select -> (${hit.x.toFixed(2)},${hit.z.toFixed(2)})`);
     }
@@ -110,6 +116,7 @@ export function installBasicControls({ THREE, renderer, rig, camera, dwrite }){
       euler.x = Math.max(-1.2, Math.min(1.2, euler.x));
       camera.quaternion.setFromEuler(euler);
     } else if (state.move.active && e.touches.length >= 2){
+      if (window.__scarlettSeatSeated) return;
       const t0 = e.touches[0], t1 = e.touches[1];
       const mx = (t0.clientX+t1.clientX)/2;
       const my = (t0.clientY+t1.clientY)/2;
@@ -150,6 +157,7 @@ export function installBasicControls({ THREE, renderer, rig, camera, dwrite }){
   window.addEventListener("keyup", (e)=>{ state.keys[e.code]=false; });
 
   function update(){
+    if (window.__scarlettSeatSeated) return;
     if (renderer.xr.isPresenting) return; // keep it simple in XR for now
     const forward = (state.keys["KeyW"]?1:0) - (state.keys["KeyS"]?1:0);
     const strafe  = (state.keys["KeyD"]?1:0) - (state.keys["KeyA"]?1:0);

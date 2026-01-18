@@ -57,6 +57,13 @@ export function installPlayerAvatar({ THREE, rig, camera, dwrite }){
   const tmpPos = new THREE.Vector3();
   const tmpQuat = new THREE.Quaternion();
 
+  function setHandsVisible(v){
+    leftHand.visible = !!v;
+    rightHand.visible = !!v;
+    leftCuff.visible = !!v;
+    rightCuff.visible = !!v;
+  }
+
   function update(){
     // Place hands relative to camera orientation (so looking down shows them naturally)
     camera.getWorldQuaternion(tmpQuat);
@@ -94,5 +101,5 @@ export function installPlayerAvatar({ THREE, rig, camera, dwrite }){
   }
 
   dwrite?.("[avatar] player body attached ✅ (look down)");
-  return { group, update };
+  return { group, update, setHandsVisible };
 }

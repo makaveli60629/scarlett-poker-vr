@@ -2,12 +2,13 @@
 // Picture-in-Picture: mini render of the table from a fixed camera into a canvas.
 
 export function installPIP(ctx){
-  const { THREE, renderer, scene, world } = ctx;
+  const { THREE, scene, world } = ctx;
   const dwrite = (m)=>{ try{ window.__scarlettDiagWrite?.(m); }catch(_){ } };
 
   // Build table + cards + hover cards (teaching mirror)
   const table = buildTable(THREE);
-  world.tableAnchor.add(table);
+  world.tableSystem = table;
+  world.tableAnchor.add(table.group);
 
   // Offscreen renderer
   const pipCanvas = document.getElementById('pipCanvas');
@@ -50,8 +51,17 @@ export function installPIP(ctx){
   dwrite('[status] MODULE PIP ✅');
 }
 
+
 function buildTable(THREE){
   const g = new THREE.Group();
+  const out = {
+    group: g,
+    cards: {
+      community: { flat: [], hover: [] },
+      seats: [] // seats[seatIndex(1..5)] -> { flat:[2], hover:[2] }
+    },
+    redeal: null,
+  };
 
   // Table base
   const base = new THREE.Mesh(
@@ -78,7 +88,7 @@ function buildTable(THREE){
   rim.rotation.x = Math.PI/2;
   g.add(rim);
 
-  // Dealer chip stack
+  // Dealer chip
   const chip = new THREE.Mesh(
     new THREE.CylinderGeometry(0.11, 0.11, 0.12, 24),
     new THREE.MeshStandardMaterial({ color: 0xff2f6d, roughness: 0.4, metalness: 0.1, emissive: 0xff2f6d, emissiveIntensity: 0.1 })
@@ -86,28 +96,34 @@ function buildTable(THREE){
   chip.position.set(0, 0.70, -0.55);
   g.add(chip);
 
-  // Cards: flat on table + hovering mirror
-  const cardTex = makeCardTexture();
-  const cardMat = new THREE.MeshStandardMaterial({ map: cardTex, roughness: 0.75, metalness: 0.0 });
-
   const w = 0.22, h = 0.32;
   const flatY = 0.62;
   const hoverY = 1.15;
 
-  // Community cards
+  const backTex = makeCardBackTexture(THREE);
+
+  const makeCardMesh = () => {
+    const m = new THREE.MeshStandardMaterial({ map: backTex, roughness: 0.75, metalness: 0.0 });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), m);
+    return mesh;
+  };
+
+  // Community cards (5)
   for (let i=0;i<5;i++){
-    const card = new THREE.Mesh(new THREE.PlaneGeometry(w, h), cardMat);
+    const card = makeCardMesh();
     card.rotation.x = -Math.PI/2;
     card.position.set(-0.52 + i*0.26, flatY, 0);
     g.add(card);
+    out.cards.community.flat.push(card);
 
-    const hover = new THREE.Mesh(new THREE.PlaneGeometry(w, h), cardMat);
+    const hover = makeCardMesh();
     hover.position.set(card.position.x, hoverY, card.position.z);
-    hover.rotation.y = Math.PI; // face outward
+    hover.rotation.y = Math.PI;
     g.add(hover);
+    out.cards.community.hover.push(hover);
   }
 
-  // Player hands (5 bots)
+  // Player hands (5 bots) around 6-seat table (seat 0 reserved for player)
   const seats = 6;
   const radius = 1.65;
   for (let i=1;i<seats;i++){
@@ -115,25 +131,120 @@ function buildTable(THREE){
     const px = Math.cos(ang)*radius;
     const pz = Math.sin(ang)*radius;
 
+    const seat = { flat: [], hover: [] };
+
     for (let c=0;c<2;c++){
-      const card = new THREE.Mesh(new THREE.PlaneGeometry(w, h), cardMat);
+      const card = makeCardMesh();
       card.rotation.x = -Math.PI/2;
       card.position.set(px + (c-0.5)*0.12, flatY, pz);
       card.rotation.z = ang + (c-0.5)*0.12;
       g.add(card);
+      seat.flat.push(card);
 
-      const hover = new THREE.Mesh(new THREE.PlaneGeometry(w, h), cardMat);
+      const hover = makeCardMesh();
       hover.position.set(px + (c-0.5)*0.12, hoverY, pz);
       hover.rotation.y = Math.PI;
       hover.rotation.z = -ang + (c-0.5)*0.12;
       g.add(hover);
+      seat.hover.push(hover);
     }
+
+    out.cards.seats.push(seat);
   }
 
-  return g;
+  // --- Deal loop: retexture the existing meshes with a shuffled deck ---
+  const ranks = ['A','K','Q','J','T','9','8','7','6','5','4','3','2'];
+  const suits = ['♠','♥','♦','♣'];
+
+  function shuffle(arr){
+    for (let i=arr.length-1;i>0;i--){
+      const j = (Math.random()*(i+1))|0;
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  function setCard(mesh, card){
+    const tex = makeCardTexture(THREE, card.r, card.s);
+    mesh.material.map = tex;
+    mesh.material.needsUpdate = true;
+  }
+
+  function setBack(mesh){
+    mesh.material.map = backTex;
+    mesh.material.needsUpdate = true;
+  }
+
+  function redeal(){
+    const deck = [];
+    for (const r of ranks){ for (const s of suits){ deck.push({r,s}); } }
+    shuffle(deck);
+
+    // Deal 5 seats x2 (seat index 0..4 in out.cards.seats)
+    for (let si=0; si<out.cards.seats.length; si++){
+      const seat = out.cards.seats[si];
+      const c1 = deck.pop();
+      const c2 = deck.pop();
+      // flat (bot-facing)
+      setCard(seat.flat[0], c1);
+      setCard(seat.flat[1], c2);
+      // hover (spectator mirror)
+      setCard(seat.hover[0], c1);
+      setCard(seat.hover[1], c2);
+    }
+
+    // Community: show backs first, then reveal in phases
+    for (let i=0;i<5;i++){
+      setBack(out.cards.community.flat[i]);
+      setBack(out.cards.community.hover[i]);
+    }
+
+    const comm = [deck.pop(), deck.pop(), deck.pop(), deck.pop(), deck.pop()];
+
+    const reveal = (idx) => {
+      setCard(out.cards.community.flat[idx], comm[idx]);
+      setCard(out.cards.community.hover[idx], comm[idx]);
+    };
+
+    // timing (ms)
+    setTimeout(() => { reveal(0); reveal(1); reveal(2); }, 1200);
+    setTimeout(() => { reveal(3); }, 2400);
+    setTimeout(() => { reveal(4); }, 3600);
+  }
+
+  out.redeal = redeal;
+  redeal();
+  setInterval(redeal, 9000);
+
+  return out;
 }
 
-function makeCardTexture(){
+function makeCardBackTexture(THREE){
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 384;
+  const x = c.getContext('2d');
+
+  x.fillStyle = '#0b1220';
+  x.fillRect(0,0,c.width,c.height);
+
+  x.strokeStyle = 'rgba(255,47,109,0.9)';
+  x.lineWidth = 10;
+  x.strokeRect(12,12,c.width-24,c.height-24);
+
+  x.fillStyle = 'rgba(255,47,109,0.85)';
+  x.font = '900 62px system-ui, Arial';
+  x.textAlign='center';
+  x.textBaseline='middle';
+  x.fillText('SCARLETT', 128, 160);
+
+  x.fillStyle = 'rgba(248,250,252,0.9)';
+  x.font = '800 44px system-ui, Arial';
+  x.fillText('POKER', 128, 220);
+
+  return new THREE.CanvasTexture(c);
+}
+
+function makeCardTexture(THREE, rank, suit){
   const c = document.createElement('canvas');
   c.width = 256; c.height = 384;
   const x = c.getContext('2d');
@@ -144,17 +255,29 @@ function makeCardTexture(){
   x.lineWidth = 10;
   x.strokeRect(12,12,c.width-24,c.height-24);
 
-  x.fillStyle = 'rgba(255,47,109,0.92)';
+  const isRed = (suit === '♥' || suit === '♦');
+
+  x.fillStyle = isRed ? 'rgba(239,68,68,0.95)' : 'rgba(15,23,42,0.92)';
   x.font = '900 110px system-ui, Arial';
   x.textAlign='center';
   x.textBaseline='middle';
-  x.fillText('A', 128, 170);
+  x.fillText(String(rank), 128, 165);
 
-  x.fillStyle = 'rgba(15,23,42,0.85)';
-  x.font = '800 44px system-ui, Arial';
-  x.fillText('♠', 128, 250);
+  x.fillStyle = isRed ? 'rgba(239,68,68,0.92)' : 'rgba(15,23,42,0.85)';
+  x.font = '900 72px system-ui, Arial';
+  x.fillText(String(suit), 128, 250);
 
-  const THREE = window.THREE;
-  const tex = new THREE.CanvasTexture(c);
-  return tex;
+  // corner pips
+  x.font = '800 42px system-ui, Arial';
+  x.textAlign='left';
+  x.textBaseline='top';
+  x.fillText(String(rank), 28, 20);
+  x.fillText(String(suit), 28, 62);
+
+  x.textAlign='right';
+  x.textBaseline='bottom';
+  x.fillText(String(rank), 228, 362);
+  x.fillText(String(suit), 228, 320);
+
+  return new THREE.CanvasTexture(c);
 }

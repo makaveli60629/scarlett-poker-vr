@@ -1,95 +1,41 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-  <title>Scarlett Poker VR</title>
-
-  <style>
-    html,body{
-      margin:0;
-      padding:0;
-      width:100%;
-      height:100%;
-      overflow:hidden;
-      background:#000;
-      font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-    }
-    #app{position:fixed;inset:0;}
-    canvas{display:block;width:100%;height:100%}
-
-    #hud{
-      position:fixed;
-      top:12px;
-      left:12px;
-      z-index:9999;
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-    }
-    .hudBtn{
-      background:rgba(30,30,30,.75);
-      color:#fff;
-      border:1px solid rgba(255,255,255,.25);
-      border-radius:12px;
-      padding:10px 14px;
-      font-size:14px;
-    }
-    .primary{border-color:rgba(120,200,255,.6)}
-
-    #diagPanel{
-      position:fixed;
-      left:12px;
-      right:12px;
-      bottom:12px;
-      max-height:35vh;
-      overflow:auto;
-      z-index:9999;
-      background:rgba(0,0,0,.8);
-      border:1px solid rgba(255,255,255,.2);
-      border-radius:12px;
-      padding:10px;
-      color:#cfefff;
-      font-family:ui-monospace,monospace;
-      font-size:12px;
-      white-space:pre-wrap;
-    }
-
-    #pipHint{
-      position:fixed;
-      left:12px;
-      right:12px;
-      bottom:60px;
-      color:rgba(255,255,255,.85);
-      font-size:13px;
-      z-index:9998;
-      pointer-events:none;
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Scarlett Poker VR</title>
+<style>
+html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000}
+#app{position:fixed;inset:0}
+canvas{display:block}
+#hud{position:fixed;top:12px;left:12px;z-index:9999;display:flex;gap:8px;flex-wrap:wrap}
+.hudBtn{background:rgba(30,30,30,.75);color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:12px;padding:10px 14px;font-size:14px}
+.primary{border-color:rgba(120,200,255,.6)}
+#diagPanel{position:fixed;left:12px;right:12px;bottom:12px;max-height:35vh;overflow:auto;z-index:9999;
+background:rgba(0,0,0,.8);border:1px solid rgba(255,255,255,.2);border-radius:12px;padding:10px;
+color:#cfefff;font-family:ui-monospace,monospace;font-size:12px;white-space:pre-wrap}
+#pipHint{position:fixed;left:12px;right:12px;bottom:60px;color:rgba(255,255,255,.85);font-size:13px;z-index:9998}
+</style>
 </head>
-
 <body>
-  <div id="app"></div>
+<div id="app"></div>
 
-  <div id="hud">
-    <button id="btnEnterVR" class="hudBtn primary">Enter VR</button>
-    <button id="btnTeleport" class="hudBtn">Teleport: OFF</button>
-    <button id="btnDiag" class="hudBtn">Diag</button>
-    <button id="btnSticks" class="hudBtn">Sticks: ON</button>
-    <button id="btnAudio" class="hudBtn">Audio: ON</button>
-    <button id="btnHideHUD" class="hudBtn">Hide HUD</button>
-    <button id="btnHideUI" class="hudBtn">Hide UI</button>
-  </div>
+<div id="hud">
+<button id="btnEnterVR" class="hudBtn primary">Enter VR</button>
+<button id="btnTeleport" class="hudBtn">Teleport: OFF</button>
+<button id="btnDiag" class="hudBtn">Diag</button>
+<button id="btnSticks" class="hudBtn">Sticks: ON</button>
+<button id="btnAudio" class="hudBtn">Audio: ON</button>
+<button id="btnHideHUD" class="hudBtn">Hide HUD</button>
+<button id="btnHideUI" class="hudBtn">Hide UI</button>
+</div>
 
-  <div id="pipHint">
-    PIP — Table View<br>
-    Non-VR: drag to look • tap floor to move • two-finger drag rotates.<br>
-    VR: Enter VR → trigger to teleport (Teleport ON).  
-    Left stick moves, right stick turns (Sticks ON).
-  </div>
+<div id="pipHint">
+VR: Enter VR → trigger to teleport (Teleport ON). Left stick moves, right stick turns.
+</div>
 
-  <div id="diagPanel"></div>
+<div id="diagPanel"></div>
 
-  <script type="module" src="./js/boot.js"></script>
+<script type="module" src="./js/boot.js"></script>
 </body>
 </html>

@@ -1,0 +1,7 @@
+html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; touch-action:none; }
+#hudRoot { position: fixed; left:0; right:0; top:0; bottom:0; pointer-events:none; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+#hudTop { position:absolute; left:8px; top:8px; display:flex; gap:8px; flex-wrap:wrap; pointer-events:auto; z-index: 9999; }
+.hudBtn { padding:10px 12px; border:1px solid rgba(255,255,255,.25); background:rgba(0,0,0,.55); color:#fff; border-radius:10px; font-size:14px; }
+#hudBottom { position:absolute; left:8px; right:8px; bottom:8px; pointer-events:none; }
+#diag { margin:0; padding:10px; border-radius:12px; background:rgba(0,0,0,.55); color:#b9d6ff; font-size:12px; max-height:42vh; overflow:auto; white-space:pre-wrap; border:1px solid rgba(255,255,255,.15); }
+.hidden { display:none !important; }

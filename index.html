@@ -1,41 +1,13 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"/>
-<title>Scarlett VR Poker — v8 Monolith</title>
-<style>
-  html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
-  #hud{position:fixed;top:10px;left:10px;z-index:50;pointer-events:auto}
-  #hud .row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
-  .hudBtn{padding:14px 16px;border-radius:12px;border:1px solid #222;background:#fff;color:#000;font-size:16px}
-  #diag{width:min(92vw,760px);max-height:45vh;overflow:auto;background:#fff;color:#000;border-radius:14px;border:1px solid #222;padding:10px;white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace}
-  #help{margin-top:8px;background:#fff;color:#000;border-radius:14px;border:1px solid #222;padding:10px;font-family:Georgia,serif}
-  #fade{position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;z-index:999;transition:opacity 120ms linear}
-  #fade.on{opacity:1}
-  canvas{display:block}
-</style>
-</head>
-<body>
-  <div id="hud">
-    <div class="row">
-      <button id="btnEnterVR" class="hudBtn">Enter VR</button>
-      <button id="btnTeleport" class="hudBtn">Teleport: OFF</button>
-      <button id="btnReset" class="hudBtn">Reset to Spawn</button>
-    </div>
-    <div class="row">
-      <button id="btnHide" class="hudBtn">Hide HUD</button>
-      <button id="btnDiag" class="hudBtn">Diagnostics</button>
-      <button id="btnJoinSeat" class="hudBtn" style="display:none">Join Seat</button>
-      <button id="btnLeaveSeat" class="hudBtn" style="display:none">Stand Up</button>
-    </div>
-    <div id="diag"></div>
-    <div id="help">Touch-drag to look • Two-finger drag to move • WASD on desktop</div>
-  </div>
-  <div id="fade"></div>
-
-  <!-- Global THREE (no ES module graph; Android-safe) -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-  <script src="./js/main.bundle.js?v=v8"></script>
+<html>
+<head><meta charset="utf-8"><title>SCARLETT VR</title></head>
+<body style="margin:0;overflow:hidden;background:black">
+<div id="app"></div>
+<div id="hud">
+<button id="btnEnterVR">Enter VR</button>
+<button id="btnDiag">Diagnostics</button>
+</div>
+<div id="diagPanel" style="display:none"><pre id="diagText"></pre></div>
+<script type="module" src="./js/scarlett1/index.js"></script>
 </body>
 </html>

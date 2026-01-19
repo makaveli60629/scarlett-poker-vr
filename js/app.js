@@ -1,12 +1,12 @@
-/* SCARLETTVR Demo v11
-   - Full lobby shell (floor, walls, neon, table, chairs, bot placeholders)
-   - Working Diagnostics button (opens panel)
-   - Working Jumbotron playback with a safe playlist (and text fallback)
-   - Teleport: Quest controllers trigger; Android tap floor to teleport
+/* v12
+   Adds:
+   - In-world jumbotron buttons (laser-friendly) + keeps HUD buttons
+   - Seat snapping: click a chair to sit; click RESET to stand back at spawn
+   Notes:
+   - xr=false on Android is normal if browser/device doesn't expose WebXR. Quest should show xr=true.
 */
 (function () {
   const $ = (sel) => document.querySelector(sel);
-  const hud = $("#hud");
   const panel = $("#panel");
   const logEl = $("#log");
   const statusEl = $("#status");
@@ -18,7 +18,6 @@
   const screenText = $("#screenText");
   const video = $("#screenVideo");
 
-  // Playlist: keep it simple, public, and CORS-friendly (may still be blocked by some browsers)
   const PLAYLIST = [
     "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
     "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/river.mp4",
@@ -30,6 +29,10 @@
   let teleportEnabled = true;
   let lastHit = null;
 
+  const STAND_SPAWN = { x: 0, y: 0, z: 6 };
+  const STAND_EYE = 1.65;
+  const SIT_EYE = 1.15; // seated camera height
+
   function t() { return (performance.now()/1000).toFixed(3); }
 
   function log(msg) {
@@ -37,7 +40,7 @@
     if (logEl) {
       logEl.textContent = (logEl.textContent ? (logEl.textContent + "\n") : "") + line;
       const lines = logEl.textContent.split("\n");
-      if (lines.length > 120) logEl.textContent = lines.slice(-120).join("\n");
+      if (lines.length > 140) logEl.textContent = lines.slice(-140).join("\n");
       logEl.scrollTop = logEl.scrollHeight;
     }
     if (diag3d) diag3d.setAttribute("value", msg);
@@ -56,7 +59,6 @@
     setStatus(`secure=${secure} xr=${xr} touch=${touch} session=${sessionState}`);
   }
 
-  // Global error hooks
   window.addEventListener("error", (e) => log(`window.error: ${e.message || e}`));
   window.addEventListener("unhandledrejection", (e) => log(`promise: ${e.reason?.message || e.reason}`));
 
@@ -77,12 +79,6 @@
     }
   }
 
-  function resetRig() {
-    rig.object3D.position.set(0, 0, 6);
-    rig.object3D.rotation.set(0, 0, 0);
-    log("reset rig");
-  }
-
   function setTeleport(on) {
     teleportEnabled = !!on;
     const btn = $("#btnTeleport");
@@ -94,7 +90,20 @@
     }
   }
 
-  // Jumbotron controls (video)
+  function setEyeHeight(h) {
+    const cam = $("#cam");
+    if (!cam) return;
+    cam.setAttribute("position", `0 ${h} 0`);
+  }
+
+  function standReset() {
+    rig.object3D.position.set(STAND_SPAWN.x, STAND_SPAWN.y, STAND_SPAWN.z);
+    rig.object3D.rotation.set(0, 0, 0);
+    setEyeHeight(STAND_EYE);
+    log("stand reset");
+  }
+
+  // Jumbotron controls
   function screenMsg(m) {
     if (screenText) screenText.setAttribute("value", m);
   }
@@ -102,12 +111,10 @@
   function loadVideo(i) {
     idx = (i ?? idx) % PLAYLIST.length;
     const url = PLAYLIST[idx];
-    try {
-      video.pause();
-    } catch {}
+    try { video.pause(); } catch {}
     video.crossOrigin = "anonymous";
     video.playsInline = true;
-    video.muted = true; // start muted to satisfy autoplay policies
+    video.muted = true;
     video.src = url;
     video.load();
     screenMsg(`LOADED ${idx+1}/${PLAYLIST.length}`);
@@ -117,12 +124,11 @@
   async function playVideo() {
     if (!video.src) loadVideo(idx);
     try {
-      video.muted = false; // user gesture should allow audio, but fallback if blocked
+      video.muted = false;
       await video.play();
       screenMsg("PLAYING ✅");
       log("video playing");
     } catch (e) {
-      // fallback: muted play
       log(`video play blocked: ${e?.message || e}`);
       try {
         video.muted = true;
@@ -148,30 +154,25 @@
     playVideo();
   }
 
-  // A-Frame components
+  // Components
   AFRAME.registerComponent("rig-locomotion", {
     init: function () {
-      // Tap-to-teleport on mobile: use scene click, raycast from camera
-      const cam = $("#cam");
       const floor = $("#floor");
-
       const raycaster = new THREE.Raycaster();
       const ndc = new THREE.Vector2();
 
       const onPointer = (clientX, clientY) => {
         if (!teleportEnabled) return;
-        if (!cam || !floor) return;
-        // ignore clicks on HUD
-        // (HUD is in DOM; if pointer is on HUD, event won't reach canvas in most browsers)
+        if (!floor) return;
         const rect = scene.canvas?.getBoundingClientRect?.();
         if (!rect) return;
         ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
         ndc.y = -(((clientY - rect.top) / rect.height) * 2 - 1);
 
         const camera3 = scene.camera;
+        if (!camera3) return;
         raycaster.setFromCamera(ndc, camera3);
-        const floorObj = floor.object3D;
-        const hits = raycaster.intersectObject(floorObj, true);
+        const hits = raycaster.intersectObject(floor.object3D, true);
         if (hits && hits.length) {
           const p = hits[0].point;
           rig.object3D.position.set(p.x, 0, p.z);
@@ -179,7 +180,6 @@
         }
       };
 
-      // canvas events
       scene.addEventListener("renderstart", () => {
         if (!scene.canvas) return;
         scene.canvas.addEventListener("pointerup", (e) => onPointer(e.clientX, e.clientY), { passive: true });
@@ -190,19 +190,17 @@
   AFRAME.registerComponent("controller-ui", {
     init: function () {
       const ray = this.el.components.raycaster;
+
       const emitClick = () => {
         const hits = ray && ray.intersections;
         if (!hits || !hits.length) return;
-        const hit = hits[0];
-        const hitEl = hit.object && hit.object.el;
+        const hitEl = hits[0].object && hits[0].object.el;
         if (hitEl && hitEl.classList && hitEl.classList.contains("clickable")) {
           hitEl.emit("ui-click");
-          return;
         }
       };
       this.el.addEventListener("triggerdown", emitClick);
 
-      // Teleport aim
       const onIntersection = (evt) => {
         if (!teleportEnabled) return;
         const isects = evt.detail && evt.detail.intersections;
@@ -222,7 +220,6 @@
       this.el.addEventListener("raycaster-intersection", onIntersection);
       this.el.addEventListener("raycaster-intersection-cleared", onCleared);
 
-      // Teleport action
       this.el.addEventListener("triggerup", () => {
         if (!teleportEnabled) return;
         if (!lastHit) return;
@@ -235,6 +232,34 @@
     }
   });
 
+  AFRAME.registerComponent("ui-button", {
+    schema: { label: {type:"string"}, action: {type:"string"} },
+    init: function () {
+      const el = this.el;
+      el.classList.add("clickable");
+      el.setAttribute("geometry", "primitive: plane; width: 1.35; height: 0.5;");
+      el.setAttribute("material", "color:#1b2a3a; roughness:1; metalness:0; opacity:0.98");
+      el.setAttribute("text", `value: ${this.data.label}; align: center; color: #e8f1ff; width: 3.0;`);
+
+      const border = document.createElement("a-plane");
+      border.setAttribute("width", "1.42");
+      border.setAttribute("height", "0.58");
+      border.setAttribute("position", "0 0 -0.01");
+      border.setAttribute("material", "color:#0a0f16; opacity:0.9");
+      el.appendChild(border);
+
+      const hoverOn = () => el.setAttribute("material", "color:#24405a; roughness:1; metalness:0; opacity:0.98");
+      const hoverOff = () => el.setAttribute("material", "color:#1b2a3a; roughness:1; metalness:0; opacity:0.98");
+      el.addEventListener("mouseenter", hoverOn);
+      el.addEventListener("mouseleave", hoverOff);
+
+      const fire = () => el.emit("scarlett-action", { action: this.data.action });
+      el.addEventListener("ui-click", noteUserGesture(fire));
+      el.addEventListener("click", noteUserGesture(fire));
+    }
+  });
+
+  // Chairs + bots
   AFRAME.registerComponent("chair", {
     init: function () {
       const root = this.el;
@@ -263,11 +288,27 @@
     }
   });
 
+  AFRAME.registerComponent("seat-spot", {
+    init: function () {
+      // Clicking a chair snaps you to that seat and lowers camera height.
+      this.el.addEventListener("ui-click", noteUserGesture(() => {
+        const p = this.el.object3D.getWorldPosition(new THREE.Vector3());
+        // Push slightly back so you're "in" the chair and facing table
+        const forward = new THREE.Vector3(0, 0, -1);
+        forward.applyQuaternion(this.el.object3D.getWorldQuaternion(new THREE.Quaternion()));
+        const seatPos = p.clone().add(forward.multiplyScalar(0.18));
+        rig.object3D.position.set(seatPos.x, 0, seatPos.z);
+        setEyeHeight(SIT_EYE);
+        log(`sit -> ${seatPos.x.toFixed(2)}, ${seatPos.z.toFixed(2)}`);
+      }));
+      this.el.addEventListener("click", noteUserGesture(() => this.el.emit("ui-click")));
+    }
+  });
+
   AFRAME.registerComponent("bot", {
     schema: { name: { type: "string", default: "BOT" } },
     init: function () {
       const root = this.el;
-
       const body = document.createElement("a-cylinder");
       body.setAttribute("radius", "0.16");
       body.setAttribute("height", "1.35");
@@ -291,18 +332,27 @@
     }
   });
 
-  // Wire DOM buttons (reliable on Android)
-  $("#btnEnter")?.addEventListener("click", () => { enterVR(); });
-  $("#btnDiag")?.addEventListener("click", () => { openDiag(); });
-  $("#btnReset")?.addEventListener("click", () => { resetRig(); });
-  $("#btnTeleport")?.addEventListener("click", () => { setTeleport(!teleportEnabled); });
+  // Guarantee a user gesture flag for video play (mobile policies)
+  let hadGesture = false;
+  function noteUserGesture(fn) {
+    return () => {
+      hadGesture = true;
+      fn();
+    };
+  }
 
-  $("#btnLoad")?.addEventListener("click", () => { loadVideo(idx); });
-  $("#btnPlay")?.addEventListener("click", () => { playVideo(); });
-  $("#btnPause")?.addEventListener("click", () => { pauseVideo(); });
-  $("#btnNext")?.addEventListener("click", () => { nextVideo(); });
+  // Wire HUD buttons
+  $("#btnEnter")?.addEventListener("click", noteUserGesture(enterVR));
+  $("#btnDiag")?.addEventListener("click", noteUserGesture(() => openDiag()));
+  $("#btnReset")?.addEventListener("click", noteUserGesture(standReset));
+  $("#btnTeleport")?.addEventListener("click", noteUserGesture(() => setTeleport(!teleportEnabled)));
 
-  // Also allow in-world laser buttons later (events)
+  $("#btnLoad")?.addEventListener("click", noteUserGesture(() => loadVideo(idx)));
+  $("#btnPlay")?.addEventListener("click", noteUserGesture(() => playVideo()));
+  $("#btnPause")?.addEventListener("click", noteUserGesture(() => pauseVideo()));
+  $("#btnNext")?.addEventListener("click", noteUserGesture(() => nextVideo()));
+
+  // In-world button events
   scene.addEventListener("scarlett-action", (evt) => {
     const action = evt.detail && evt.detail.action;
     if (action === "load") loadVideo(idx);
@@ -317,7 +367,6 @@
     log("scene loaded ✅");
     updateStatus();
     setInterval(updateStatus, 900);
-    // Prime video with first load (no play yet)
     loadVideo(0);
     screenMsg("JUMBOTRON READY (press PLAY)");
   });

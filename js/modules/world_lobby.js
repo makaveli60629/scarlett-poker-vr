@@ -6,6 +6,16 @@ export function WorldLobbyModule() {
     init(engine) {
       const s = engine.scene;
 
+      // Lighting (kept simple + performant for Quest/Android)
+      const ambient = new THREE.AmbientLight(0x8aa0ff, 0.35);
+      s.add(ambient);
+      const key = new THREE.DirectionalLight(0xffffff, 0.55);
+      key.position.set(8, 12, 6);
+      s.add(key);
+      const rim = new THREE.PointLight(0x00d0ff, 0.9, 40);
+      rim.position.set(0, 5.5, -18);
+      s.add(rim);
+
       // Ground
       const groundMat = new THREE.MeshStandardMaterial({ color: 0x0b1220, roughness: 0.95, metalness: 0.05 });
       const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), groundMat);
@@ -23,6 +33,18 @@ export function WorldLobbyModule() {
       pit.position.set(0, -0.2, 0);
       s.add(pit);
 
+      // Simple stairs down into the pit (promo-friendly navigation)
+      const stairMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9, metalness: 0.1 });
+      const stairRoot = new THREE.Group();
+      stairRoot.position.set(0, 0, -7.5);
+      s.add(stairRoot);
+      for (let i = 0; i < 8; i++) {
+        const step = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.18, 0.6), stairMat);
+        step.position.set(0, -i*0.06, i*0.62);
+        stairRoot.add(step);
+        engine.addTeleportTarget(step);
+      }
+
       // Ring neon
       const ring = new THREE.Mesh(
         new THREE.TorusGeometry(10.8, 0.06, 16, 128),
@@ -31,6 +53,15 @@ export function WorldLobbyModule() {
       ring.rotation.x = Math.PI / 2;
       ring.position.set(0, 0.02, 0);
       s.add(ring);
+
+      // Ceiling (dark, with subtle emissive trim)
+      const ceiling = new THREE.Mesh(
+        new THREE.PlaneGeometry(120, 120),
+        new THREE.MeshStandardMaterial({ color: 0x020409, roughness: 1.0, metalness: 0.0, emissive: 0x000611, emissiveIntensity: 0.25 })
+      );
+      ceiling.position.set(0, 12, 0);
+      ceiling.rotation.x = Math.PI / 2;
+      s.add(ceiling);
 
       // Simple walls
       const wallMat = new THREE.MeshStandardMaterial({ color: 0x05070a, roughness: 0.9, metalness: 0.05 });
@@ -66,10 +97,10 @@ export function WorldLobbyModule() {
       [-8, 8].forEach(x => mkPole(x, -18));
       [-12, 12].forEach(x => mkPole(x, 10));
 
-      // Ambient signage planes (placeholders)
-      const signMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x2233ff, emissiveIntensity: 0.75, roughness: 0.6, metalness: 0.0 });
-      const sign = new THREE.Mesh(new THREE.PlaneGeometry(10, 2.2), signMat);
-      sign.position.set(0, 3.4, -22.6);
+      // Back wall sign (kept smaller so it doesn't fight the jumbotron)
+      const signMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x2233ff, emissiveIntensity: 0.55, roughness: 0.6, metalness: 0.0 });
+      const sign = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 1.6), signMat);
+      sign.position.set(0, 6.8, -24.6);
       s.add(sign);
     },
   };

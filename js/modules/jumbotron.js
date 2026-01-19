@@ -30,7 +30,8 @@ export function JumbotronModule() {
       // Create screen mesh
       const s = engine.scene;
       const root = new THREE.Group();
-      root.position.set(0, 3.4, -23.9);
+      // Bring the screen closer so it's visible immediately in promo mode.
+      root.position.set(0, 4.1, -20.5);
       root.rotation.y = 0;
       s.add(root);
 
@@ -41,9 +42,17 @@ export function JumbotronModule() {
 
       const screen = new THREE.Mesh(
         new THREE.PlaneGeometry(14.5, 8.2),
-        new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveIntensity: 0.55, roughness: 0.4, metalness: 0.0 })
+        new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveIntensity: 0.95, roughness: 0.4, metalness: 0.0 })
       );
       root.add(screen);
+
+      // Dark backing to improve contrast
+      const back = new THREE.Mesh(
+        new THREE.PlaneGeometry(15.0, 8.6),
+        new THREE.MeshStandardMaterial({ color: 0x05070b, roughness: 1.0, metalness: 0.0 })
+      );
+      back.position.z = -0.02;
+      root.add(back);
 
       const frame = new THREE.Mesh(
         new THREE.BoxGeometry(15.2, 8.8, 0.25),

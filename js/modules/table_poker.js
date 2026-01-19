@@ -61,14 +61,19 @@ export function TablePokerModule() {
       rail.rotation.x = Math.PI / 2;
       root.add(rail);
 
-      // Community cards (raised high enough)
+      // Community cards (hover higher + upright, always facing the local player)
+      const commGroup = new THREE.Group();
+      commGroup.name = 'communityCards';
+      commGroup.position.set(0, 1.55, 0.95);
+      root.add(commGroup);
+
       const cardGeo = new THREE.PlaneGeometry(0.55, 0.78);
-      const cardMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, metalness: 0.05 });
+      const cardMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, metalness: 0.05, side: THREE.DoubleSide });
       for (let i = 0; i < 5; i++) {
         const card = new THREE.Mesh(cardGeo, cardMat.clone());
-        card.position.set(-1.35 + i*0.68, 1.12, 0);
-        card.rotation.x = -Math.PI/2;
-        root.add(card);
+        card.position.set(-1.35 + i*0.68, 0, 0);
+        // upright (we'll billboard the whole group in update)
+        commGroup.add(card);
       }
 
       // Seat positions (6)
@@ -133,7 +138,7 @@ export function TablePokerModule() {
       const players = root.userData.players || [];
       for (const p of players) {
         p.t += dt;
-        if (p.t > 2.4 + (p.idx*0.08)) {
+        if (p.t > 4.0 + (p.idx*0.15)) {
           p.t = 0;
           p.phase = (p.phase + 1) % 4;
           const label = ['CHECK', 'BET', 'FOLD', 'RAISE'][p.phase];
@@ -158,6 +163,14 @@ export function TablePokerModule() {
           mat.emissiveIntensity = (p.phase === 1 || p.phase === 3) ? 1.35 : 0.25;
           mat.emissive.setHex((p.phase === 2) ? 0xff3355 : 0x1bff9a);
         }
+      }
+
+      // Billboard community cards toward the player's camera (always readable)
+      const comm = root.getObjectByName('communityCards');
+      if (comm) {
+        const camPos = new THREE.Vector3();
+        engine.camera.getWorldPosition(camPos);
+        comm.lookAt(camPos);
       }
     },
   };

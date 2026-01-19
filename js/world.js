@@ -137,9 +137,9 @@ export function buildWorld(scene, dwrite = console.log){
   rim.position.y = 0.98;
   table.add(rim);
 
-  // Community hover cards (emissive)
+  // Community hover cards (emissive) — higher + always faces player
   const community = new THREE.Group();
-  community.position.set(0, 1.35, 0);
+  community.position.set(0, 1.85, 0);
   table.add(community);
 
   const cardMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.25, metalness: 0.0 });
@@ -147,11 +147,13 @@ export function buildWorld(scene, dwrite = console.log){
   cardMat.emissiveIntensity = 0.7;
 
   const cardGeo = new THREE.PlaneGeometry(0.32, 0.46);
+  const communityCards = [];
   for (let i=0;i<5;i++){
     const c = new THREE.Mesh(cardGeo, cardMat);
-    c.rotation.x = -Math.PI/2;
+    // Keep upright; we'll face the player each tick.
     c.position.set((i-2)*0.38, 0, 0);
     community.add(c);
+    communityCards.push(c);
   }
 
   // Bots + hole cards + action rings
@@ -173,8 +175,8 @@ export function buildWorld(scene, dwrite = console.log){
     table.add(b);
 
     const hand = new THREE.Group();
-    hand.position.set(x*0.82, 1.65, z*0.82);
-    hand.lookAt(0, 1.3, 0);
+    // Higher so you can read every hand (teaching mode)
+    hand.position.set(x*0.82, 2.05, z*0.82);
     pit.add(hand);
     holeGroups.push(hand);
 
@@ -219,16 +221,59 @@ export function buildWorld(scene, dwrite = console.log){
 
   dwrite("[world] landmarks ready ✅");
 
+  // ---- Jumbotron screen (optional video) ----
+  const jumbo = new THREE.Group();
+  jumbo.name = "jumbotron";
+  jumbo.position.set(-18, 6.0, -18);
+  jumbo.rotation.y = Math.PI * 0.25;
+  root.add(jumbo);
+
+  const jumboFrame = new THREE.Mesh(
+    new THREE.BoxGeometry(10.2, 5.8, 0.25),
+    mat(0x061019, 0.85, 0.05)
+  );
+  jumboFrame.position.set(0, 0, 0);
+  jumbo.add(jumboFrame);
+
+  const jumboMat = new THREE.MeshBasicMaterial({ color: 0x050505 });
+  const jumboScreen = new THREE.Mesh(new THREE.PlaneGeometry(9.6, 5.2), jumboMat);
+  jumboScreen.position.set(0, 0, 0.14);
+  jumbo.add(jumboScreen);
+
   // Tick
   let t = 0;
   return {
-    tick(dt){
+    setJumbotronVideo(videoEl){
+      try{
+        const tex = new THREE.VideoTexture(videoEl);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.minFilter = THREE.LinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.generateMipmaps = false;
+        jumboMat.map = tex;
+        jumboMat.needsUpdate = true;
+        dwrite("[jumbotron] texture attached ✅");
+      } catch(e){
+        dwrite(`[jumbotron] attach failed: ${e?.message || e}`);
+      }
+    },
+    tick(dt, ctx = {}){
       t += dt;
       sign.rotation.y = Math.sin(t*0.35)*0.18;
 
       const bob = Math.sin(t*1.8)*0.02;
-      community.position.y = 1.35 + bob;
-      for (const g of holeGroups) g.position.y = 1.65 + bob;
+      community.position.y = 1.85 + bob;
+      for (const g of holeGroups) g.position.y = 2.05 + bob;
+
+      // Face cards toward the player camera (teaching mode)
+      const cam = ctx?.camera;
+      if (cam){
+        const camPos = new THREE.Vector3();
+        cam.getWorldPosition(camPos);
+        community.lookAt(camPos.x, community.position.y, camPos.z);
+        for (const c of communityCards) c.lookAt(camPos);
+        for (const g of holeGroups) g.lookAt(camPos);
+      }
 
       const pulse = (Math.sin(t*2.5)*0.5 + 0.5);
       for (const r of actionRings) r.material.opacity = 0.22 + pulse * 0.5;

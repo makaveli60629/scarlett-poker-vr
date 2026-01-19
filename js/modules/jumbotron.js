@@ -40,11 +40,19 @@ export function JumbotronModule() {
       tex.minFilter = THREE.LinearFilter;
       tex.magFilter = THREE.LinearFilter;
 
-      const screen = new THREE.Mesh(
-        new THREE.PlaneGeometry(14.5, 8.2),
-        // TV-like look: darker, not blown out. Let the video provide the brightness.
-        new THREE.MeshStandardMaterial({ map: tex, emissive: 0x000000, emissiveIntensity: 0.15, roughness: 0.55, metalness: 0.0 })
-      );
+      // TV-like look: keep it dark and contrasty on Quest/Android.
+      // (Some headsets show video textures washed-out unless we keep emissive very low.)
+      const screenMat = new THREE.MeshStandardMaterial({
+        map: tex,
+        emissive: 0x000000,
+        emissiveIntensity: 0.05,
+        roughness: 0.6,
+        metalness: 0.0,
+      });
+      // Prevent tone-mapping from brightening the video.
+      screenMat.toneMapped = false;
+
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(14.5, 8.2), screenMat);
       root.add(screen);
 
       // Dark backing to improve contrast

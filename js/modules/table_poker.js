@@ -194,28 +194,29 @@ export function TablePokerModule() {
       root.userData.chipStacks = [];
       for (const p of root.userData.players) {
         if (p.idx === 0) continue;
+
         const stack = new THREE.Group();
         stack.name = `chipStack_${p.idx}`;
+
         // place stack between seat and table center
-        const toward = new THREE.Vector3(0, 0, 0).sub(new THREE.Vector3(p.label.position.x, 0, p.label.position.z)).normalize();
-        const pos = new THREE.Vector3(p.label.position.x, 0.93, p.label.position.z).add(toward.multiplyScalar(2.35));
+        const toward = new THREE.Vector3(0, 0, 0)
+          .sub(new THREE.Vector3(p.label.position.x, 0, p.label.position.z))
+          .normalize();
+        const pos = new THREE.Vector3(p.label.position.x, 0.93, p.label.position.z)
+          .add(toward.multiplyScalar(2.35));
         stack.position.copy(pos);
         root.add(stack);
 
         const chips = [];
-        const layers = 10;
+        // Give each bot a visible stack they can "pay" from.
+        const layers = 16;
         for (let i = 0; i < layers; i++) {
           const chip = new THREE.Mesh(chipGeo, chipMat);
           chip.position.set((Math.random() - 0.5) * 0.06, i * 0.024, (Math.random() - 0.5) * 0.06);
-          chip.userData._home = chip.position.clone();
           stack.add(chip);
-                    chips.push(chip);
-          p.chipStack = stack;
-        p.chipMeshes = chips;
-        root.userData.chipStacks.push(stack);
-      }
+          chips.push(chip);
+        }
 
-        // python can't append in JS; build string after
         p.chipStack = stack;
         p.chipMeshes = chips;
         root.userData.chipStacks.push(stack);
@@ -250,13 +251,40 @@ export function TablePokerModule() {
       turnGlow.position.set(0, 0.93, 4.15);
       root.add(turnGlow);
 
-      // Deck box on table
-      const box = new THREE.Mesh(
-        new THREE.BoxGeometry(0.7, 0.18, 1.05),
-        new THREE.MeshStandardMaterial({ color: 0x0b1220, roughness: 0.6, metalness: 0.2, emissive: 0x00131a, emissiveIntensity: 0.45 })
-      );
-      box.position.set(2.2, 0.98, -0.6);
-      root.add(box);
+      // Deck box on table (nicer: label + rim)
+      const deckBox = new THREE.Group();
+      deckBox.position.set(2.2, 0.98, -0.6);
+      root.add(deckBox);
+
+      const boxMat = new THREE.MeshStandardMaterial({ color: 0x0b1220, roughness: 0.55, metalness: 0.25, emissive: 0x00131a, emissiveIntensity: 0.35 });
+      const lidMat = new THREE.MeshStandardMaterial({ color: 0x070a12, roughness: 0.5, metalness: 0.3, emissive: 0x00131a, emissiveIntensity: 0.25 });
+      const boxBody = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.22, 1.12), boxMat);
+      boxBody.position.y = 0.11;
+      deckBox.add(boxBody);
+      const lid = new THREE.Mesh(new THREE.BoxGeometry(0.77, 0.06, 1.14), lidMat);
+      lid.position.y = 0.25;
+      deckBox.add(lid);
+
+      // Label texture
+      const c = document.createElement('canvas');
+      c.width = 512; c.height = 256;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#05070b';
+      ctx.fillRect(0,0,c.width,c.height);
+      ctx.strokeStyle = 'rgba(0, 208, 255, 0.55)';
+      ctx.lineWidth = 10;
+      ctx.strokeRect(18, 18, c.width - 36, c.height - 36);
+      ctx.font = '900 64px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+      ctx.fillStyle = '#d7f3ff';
+      ctx.fillText('SCARLETT', 64, 118);
+      ctx.font = '800 42px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+      ctx.fillStyle = '#a8d8ff';
+      ctx.fillText('DECK • 52 CARDS', 64, 174);
+      const labelTex = new THREE.CanvasTexture(c);
+      labelTex.colorSpace = THREE.SRGBColorSpace;
+      const label = new THREE.Mesh(new THREE.PlaneGeometry(0.70, 0.36), new THREE.MeshBasicMaterial({ map: labelTex }));
+      label.position.set(0, 0.17, 0.565);
+      deckBox.add(label);
 
       // --- Card game demo state (deal → flop → turn → river → reset) ---
       root.userData.game = {
@@ -324,27 +352,40 @@ export function TablePokerModule() {
         g._chipAnim.push({ chip, from: from.clone(), to: to.clone(), t: 0, dur });
       };
 
-      const moveChipToPot = (player) => {
+      const moveChipToPot = (player, amount = 25) => {
         if (!player?.chipMeshes?.length || !pot) return;
-        // find a visible chip from player's stack
-        const chip = player.chipMeshes.find(m => m.visible);
-        if (!chip) return;
-        chip.visible = false; // hide in stack immediately
 
-        // spawn a flying chip
-        const flying = new THREE.Mesh(root.userData.chipGeo, root.userData.chipMat);
-        root.add(flying);
+        // Convert amount into a small number of visible chips (promo-friendly).
+        // We treat each chip as $25 and cap count for performance.
+        const unit = 25;
+        let need = Math.max(1, Math.round(amount / unit));
+        need = Math.min(8, need);
 
-        const from = player.chipStack.getWorldPosition(new THREE.Vector3());
-        from.y += 0.25;
-        const to = pot.getWorldPosition(new THREE.Vector3());
-        to.x += (Math.random() - 0.5) * 0.22;
-        to.z += (Math.random() - 0.5) * 0.22;
-        to.y += 0.25 + Math.random() * 0.15;
+        const fromBase = player.chipStack.getWorldPosition(new THREE.Vector3());
+        fromBase.y += 0.25;
 
-        flying.position.copy(from);
-        startChipAnim(flying, from, to, 0.38);
-        g._potValue += 25;
+        for (let k = 0; k < need; k++) {
+          // consume one chip from the player's stack (hide it)
+          const chip = player.chipMeshes.find(m => m.visible);
+          if (chip) chip.visible = false;
+
+          // spawn a flying chip
+          const flying = new THREE.Mesh(root.userData.chipGeo, root.userData.chipMat);
+          root.add(flying);
+
+          const from = fromBase.clone();
+          from.x += (Math.random() - 0.5) * 0.08;
+          from.z += (Math.random() - 0.5) * 0.08;
+
+          const to = pot.getWorldPosition(new THREE.Vector3());
+          to.x += (Math.random() - 0.5) * 0.22;
+          to.z += (Math.random() - 0.5) * 0.22;
+          to.y += 0.25 + Math.random() * 0.15;
+
+          flying.position.copy(from);
+          startChipAnim(flying, from, to, 0.36 + Math.random() * 0.08);
+          g._potValue += unit;
+        }
       };
 
       const movePotToWinner = (winner) => {

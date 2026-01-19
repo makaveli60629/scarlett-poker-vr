@@ -30,16 +30,37 @@ try {
   const engine = new Engine({ container: app });
   window.SCARLETT.engine = engine;
 
-  // World modules (order matters)
-  engine.addModule(SpawnModule());
-  engine.addModule(WorldLobbyModule());
-  engine.addModule(ArchTeleporterModule());
-  engine.addModule(JumbotronModule());
-  engine.addModule(TablePokerModule());
-  engine.addModule(AvatarsBotsModule());
+  // World modules (order matters). Each module is isolated so a single failure never deadlocks boot.
+  const safeAdd = (name, fn) => {
+    try {
+      engine.addModule(fn());
+      log(`[module] ${name} ✅`);
+    } catch (e) {
+      log(`[module] ${name} ❌ ` + (e?.message || String(e)));
+      console.error(e);
+    }
+  };
+  safeAdd('spawn', SpawnModule);
+  safeAdd('world_lobby', WorldLobbyModule);
+  safeAdd('arch_teleporter', ArchTeleporterModule);
+  safeAdd('jumbotron', JumbotronModule);
+  safeAdd('table_poker', TablePokerModule);
+  safeAdd('avatars_bots', AvatarsBotsModule);
 
   wireHUD(engine);
   engine.start();
+
+  // Safety: if status ever stays on "booting…" due to external script issues, force-update hint.
+  setTimeout(() => {
+    try {
+      const el = document.getElementById('hudStatus');
+      if (el && /booting/i.test(el.textContent || '')) {
+        setStatus('ready ✅');
+        setHint('Recovered from slow boot (cache). If world is still black, hard reload once.');
+        log('[router] forced READY after timeout');
+      }
+    } catch (_) {}
+  }, 2200);
 
   log('modules loaded ✅');
 } catch (err) {

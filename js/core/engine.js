@@ -112,9 +112,18 @@ export class Engine {
   }
 
   resetPlayer() {
-    this.rig.position.set(0, 0, 0);
-    this.rig.rotation.set(0, 0, 0);
-    this.camera.position.set(0, 1.65, 3.2);
+    // Reset to spawn pad if present
+    const pad = this.scene.getObjectByName('spawnPad');
+    if (pad) {
+      const p = new THREE.Vector3();
+      pad.getWorldPosition(p);
+      this.rig.position.set(p.x, 0, p.z);
+      this.rig.rotation.set(0, Math.PI, 0);
+    } else {
+      this.rig.position.set(0, 0, -7.2);
+      this.rig.rotation.set(0, Math.PI, 0);
+    }
+    this.camera.position.set(0, 1.65, 0);
   }
 
   onResize() {

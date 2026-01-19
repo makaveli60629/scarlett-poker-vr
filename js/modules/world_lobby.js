@@ -244,6 +244,63 @@ export function WorldLobbyModule() {
       makePod(Math.PI * 0.25, 'AVATAR SHOP');
       makePod(Math.PI * 0.55, 'VIP ROOM');
       makePod(Math.PI * 0.85, 'TABLES');
+
+
+      // Premium doors / portals (placeholders for future rooms)
+      const doorFrameMat = new THREE.MeshStandardMaterial({ color: 0x0b0f16, roughness: 0.55, metalness: 0.25, emissive: 0x00131a, emissiveIntensity: 0.65 });
+      const doorGlowMat = new THREE.MeshStandardMaterial({ color: 0x00d0ff, emissive: 0x00c8ff, emissiveIntensity: 1.15, roughness: 0.25, metalness: 0.1 });
+
+      const makeDoor = (angle, title) => {
+        const g = new THREE.Group();
+        const x = Math.cos(angle) * (roomRadius - 6.5);
+        const z = Math.sin(angle) * (roomRadius - 6.5);
+        g.position.set(x, 0, z);
+        g.rotation.y = -angle + Math.PI;
+
+        // frame
+        const frame = new THREE.Mesh(new THREE.BoxGeometry(6.2, 8.5, 0.55), doorFrameMat);
+        frame.position.y = 4.25;
+        g.add(frame);
+
+        // inner panel
+        const panel = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 7.6), new THREE.MeshStandardMaterial({ color: 0x020409, roughness: 0.9, metalness: 0.05, emissive: 0x000a12, emissiveIntensity: 0.55 }));
+        panel.position.set(0, 4.2, 0.29);
+        g.add(panel);
+
+        // neon outline
+        const outline = new THREE.Mesh(new THREE.TorusGeometry(3.0, 0.07, 10, 120, Math.PI * 2), doorGlowMat);
+        outline.rotation.x = Math.PI / 2;
+        outline.position.set(0, 8.55, 0.0);
+        outline.scale.set(1.05, 1.0, 1.0);
+        g.add(outline);
+
+        // sign text
+        const c = document.createElement('canvas');
+        c.width = 1024; c.height = 256;
+        const ctx = c.getContext('2d');
+        ctx.clearRect(0,0,c.width,c.height);
+        ctx.font = '900 96px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = '#d7f3ff';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(title, 48, 128);
+        const tex = new THREE.CanvasTexture(c);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        const sign = new THREE.Mesh(new THREE.PlaneGeometry(5.8, 1.2), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+        sign.position.set(0, 7.8, 0.31);
+        g.add(sign);
+
+        // teleport pad in front (so you can jump close to the door)
+        const pad = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 0.12, 32), new THREE.MeshStandardMaterial({ color: 0x0b1220, roughness: 0.7, metalness: 0.15, emissive: 0x00131a, emissiveIntensity: 0.75 }));
+        pad.position.set(0, 0.06, 2.6);
+        g.add(pad);
+        engine.addTeleportTarget(pad);
+
+        s.add(g);
+      };
+
+      makeDoor(Math.PI * 0.10, 'VIP');
+      makeDoor(Math.PI * 0.40, 'AVATAR STORE');
+      makeDoor(Math.PI * 0.70, 'TABLES');
     },
   };
 }

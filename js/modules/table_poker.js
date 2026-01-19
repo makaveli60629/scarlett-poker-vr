@@ -190,8 +190,65 @@ export function TablePokerModule() {
         pot.add(chip);
       }
 
+      // Chip stacks per player (for visible chip movement)
+      root.userData.chipStacks = [];
+      for (const p of root.userData.players) {
+        if (p.idx === 0) continue;
+        const stack = new THREE.Group();
+        stack.name = `chipStack_${p.idx}`;
+        // place stack between seat and table center
+        const toward = new THREE.Vector3(0, 0, 0).sub(new THREE.Vector3(p.label.position.x, 0, p.label.position.z)).normalize();
+        const pos = new THREE.Vector3(p.label.position.x, 0.93, p.label.position.z).add(toward.multiplyScalar(2.35));
+        stack.position.copy(pos);
+        root.add(stack);
+
+        const chips = [];
+        const layers = 10;
+        for (let i = 0; i < layers; i++) {
+          const chip = new THREE.Mesh(chipGeo, chipMat);
+          chip.position.set((Math.random() - 0.5) * 0.06, i * 0.024, (Math.random() - 0.5) * 0.06);
+          chip.userData._home = chip.position.clone();
+          stack.add(chip);
+                    chips.push(chip);
+          p.chipStack = stack;
+        p.chipMeshes = chips;
+        root.userData.chipStacks.push(stack);
+      }
+
+        // python can't append in JS; build string after
+        p.chipStack = stack;
+        p.chipMeshes = chips;
+        root.userData.chipStacks.push(stack);
+      }
       root.userData.chipGeo = chipGeo;
       root.userData.chipMat = chipMat;
+
+      // Table sign (promo readable)
+      const tableSign = makeTextSprite('SCARLETT VR POKER • DEMO TABLE', { scale: 1.15, color: '#d7f3ff' });
+      tableSign.position.set(0, 3.25, -2.9);
+      root.add(tableSign);
+
+      const tableSub = makeTextSprite('SCORPION PIT • TEXAS HOLD'EM', { scale: 0.9, color: '#a8d8ff' });
+      tableSub.position.set(0, 2.75, -2.9);
+      root.add(tableSub);
+
+      // Dealer button + turn pointer (moves to acting bot)
+      const dealerButton = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18, 0.18, 0.04, 28),
+        new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, metalness: 0.05, emissive: 0x114477, emissiveIntensity: 0.9 })
+      );
+      dealerButton.name = 'dealerButton';
+      dealerButton.position.set(0, 0.96, 4.15);
+      root.add(dealerButton);
+
+      const turnGlow = new THREE.Mesh(
+        new THREE.RingGeometry(0.18, 0.34, 40),
+        new THREE.MeshStandardMaterial({ color: 0x0b1220, roughness: 0.6, metalness: 0.0, emissive: 0x00d0ff, emissiveIntensity: 0.95, side: THREE.DoubleSide })
+      );
+      turnGlow.name = 'turnGlow';
+      turnGlow.rotation.x = -Math.PI / 2;
+      turnGlow.position.set(0, 0.93, 4.15);
+      root.add(turnGlow);
 
       // Deck box on table
       const box = new THREE.Mesh(
@@ -252,6 +309,66 @@ export function TablePokerModule() {
         mesh.material.needsUpdate = true;
       };
 
+      const pot = root.getObjectByName('pot');
+      const potChips = pot ? pot.children : [];
+
+      const ensureGameRuntime = () => {
+        g._chipAnim = g._chipAnim || [];
+        g._lastChipAt = g._lastChipAt || 0;
+        g._potValue = g._potValue || 0;
+      };
+
+      ensureGameRuntime();
+
+      const startChipAnim = (chip, from, to, dur=0.35) => {
+        g._chipAnim.push({ chip, from: from.clone(), to: to.clone(), t: 0, dur });
+      };
+
+      const moveChipToPot = (player) => {
+        if (!player?.chipMeshes?.length || !pot) return;
+        // find a visible chip from player's stack
+        const chip = player.chipMeshes.find(m => m.visible);
+        if (!chip) return;
+        chip.visible = false; // hide in stack immediately
+
+        // spawn a flying chip
+        const flying = new THREE.Mesh(root.userData.chipGeo, root.userData.chipMat);
+        root.add(flying);
+
+        const from = player.chipStack.getWorldPosition(new THREE.Vector3());
+        from.y += 0.25;
+        const to = pot.getWorldPosition(new THREE.Vector3());
+        to.x += (Math.random() - 0.5) * 0.22;
+        to.z += (Math.random() - 0.5) * 0.22;
+        to.y += 0.25 + Math.random() * 0.15;
+
+        flying.position.copy(from);
+        startChipAnim(flying, from, to, 0.38);
+        g._potValue += 25;
+      };
+
+      const movePotToWinner = (winner) => {
+        if (!pot || !winner?.chipStack) return;
+        // animate a few chips from pot to winner stack
+        const fromBase = pot.getWorldPosition(new THREE.Vector3());
+        const toBase = winner.chipStack.getWorldPosition(new THREE.Vector3());
+        const count = Math.min(10, potChips.length);
+        for (let i = 0; i < count; i++) {
+          const src = potChips[potChips.length - 1 - i];
+          if (!src) continue;
+          const flying = new THREE.Mesh(root.userData.chipGeo, root.userData.chipMat);
+          root.add(flying);
+          const from = fromBase.clone();
+          from.y += 0.25 + i * 0.01;
+          const to = toBase.clone();
+          to.x += (Math.random() - 0.5) * 0.08;
+          to.z += (Math.random() - 0.5) * 0.08;
+          to.y += 0.25 + (Math.random() * 0.1);
+          flying.position.copy(from);
+          startChipAnim(flying, from, to, 0.55);
+        }
+      };
+
       const resetCardsToBack = () => {
         // community
         const comm = root.getObjectByName('communityCards');
@@ -307,9 +424,12 @@ export function TablePokerModule() {
       if (g.phase === 'shuffle') {
         resetCardsToBack();
         shuffleAndDeal();
+        g._payoutDone = false;
+        g._lastActLabel = {};
         g.t = 0;
         g.phase = 'deal_hole';
         g.acting = 1;
+        g._paidOut = false;
       }
 
       if (g.phase === 'deal_hole' && g.t > 0.6) {
@@ -317,28 +437,53 @@ export function TablePokerModule() {
         g.t = 0;
         g.phase = 'preflop';
       }
-
       const actionCycle = (labels) => {
         // highlight a single acting player (bots only)
         const act = players.find(p => p.idx === g.acting);
+
+        // dealer button + turn pointer positioned near acting seat
+        const btn = root.getObjectByName('dealerButton');
+        const glow = root.getObjectByName('turnGlow');
+        if (act && btn && glow) {
+          const pos = new THREE.Vector3(act.chair.position.x, 0.96, act.chair.position.z);
+          const towardCenter = new THREE.Vector3(0, 0, 0).sub(new THREE.Vector3(act.chair.position.x, 0, act.chair.position.z)).normalize();
+          pos.add(towardCenter.multiplyScalar(1.95));
+          btn.position.copy(pos);
+          glow.position.set(pos.x, 0.93, pos.z);
+        }
+
+        // choose label for the acting bot; keep it stable long enough to animate chips
+        const step = Math.floor((g.t * 1.05) % labels.length);
+        const actLabel = labels[step];
+
         for (const p of players) {
           if (p.idx === 0) {
             setActionText(p, 'OPEN', false, false);
             continue;
           }
           const isAct = p.idx === g.acting;
-          const label = isAct ? labels[Math.floor((g.t * 1.3) % labels.length)] : 'WAIT';
+          const label = isAct ? actLabel : 'WAIT';
           const isFold = (label === 'FOLD');
           setActionText(p, label, isAct, isFold);
         }
-        if (g.t > 3.2) {
+
+        // chip motion trigger (once per new actLabel)
+        g._lastActLabel = g._lastActLabel || {};
+        if (act && (g._lastActLabel[act.idx] != actLabel)) {
+          g._lastActLabel[act.idx] = actLabel;
+          if (actLabel === 'BET' || actLabel === 'RAISE') {
+            moveChipToPot(act, actLabel === 'RAISE' ? 50 : 25);
+          }
+        }
+
+        if (g.t > 3.0) {
           g.t = 0;
           // next bot
           g.acting++;
           if (g.acting > 5) g.acting = 1;
-          return true;
+          return true
         }
-        return false;
+        return false
       };
 
       if (g.phase === 'preflop') {
@@ -367,14 +512,47 @@ export function TablePokerModule() {
       }
 
       if (g.phase === 'showdown') {
-        // quick pot motion to "winner" (for now: BOT_1)
+        // pot motion to "winner" (for promo we pick BOT_1)
         const winner = players.find(p => p.idx === 1);
         if (winner) {
           setActionText(winner, 'WIN', true, false);
+          if (!g._payoutDone) {
+            g._payoutDone = true;
+            movePotToWinner(winner);
+          }
         }
-        if (g.t > 2.2) {
+        if (g.t > 2.6) {
           g.t = 0;
+          g._payoutDone = false;
           g.phase = 'shuffle';
+        }
+      }
+
+      // chip animation update
+      if (g._chipAnim && g._chipAnim.length) {
+        for (let i = g._chipAnim.length - 1; i >= 0; i--) {
+          const a = g._chipAnim[i];
+          a.t += dt;
+          const u = Math.min(1, a.t / a.dur);
+          // ease
+          const uu = u < 0.5 ? 2*u*u : 1 - Math.pow(-2*u + 2, 2)/2;
+          a.chip.position.lerpVectors(a.from, a.to, uu);
+          // tiny arc
+          a.chip.position.y += Math.sin(u * Math.PI) * 0.08;
+          if (u >= 1) {
+            // drop: leave a chip in the pot area if it's close to pot
+            const pot = root.getObjectByName('pot');
+            if (pot) {
+              const d = a.chip.position.distanceTo(pot.getWorldPosition(new THREE.Vector3()));
+              if (d < 1.2) {
+                const landed = new THREE.Mesh(root.userData.chipGeo, root.userData.chipMat);
+                landed.position.set((Math.random()-0.5)*0.22, pot.children.length*0.02, (Math.random()-0.5)*0.22);
+                pot.add(landed);
+              }
+            }
+            root.remove(a.chip);
+            g._chipAnim.splice(i, 1);
+          }
         }
       }
 

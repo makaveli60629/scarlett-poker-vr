@@ -2,144 +2,60 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <meta name="color-scheme" content="dark light" />
-  <title>SCARLETT • Poker VR (DEMO v0.1)</title>
-  <style>
-    html, body {
-      margin:0;
-      padding:0;
-      width:100%;
-      height:100%;
-      overflow:hidden;
-      background:#000;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
-    }
-
-    #app{ position:fixed; inset:0; z-index:0; }
-    canvas{ display:block; width:100% !important; height:100% !important; }
-
-    #hud{
-      position:fixed; top:10px; left:10px;
-      display:flex; flex-direction:column; gap:8px;
-      z-index:2147483647; pointer-events:auto;
-    }
-    .hudRow{ display:flex; gap:8px; flex-wrap:wrap; }
-    .hudBtn{
-      appearance:none; border:0; border-radius:10px;
-      padding:10px 12px; font-weight:900;
-      background:rgba(20,20,20,0.75); color:#fff;
-      backdrop-filter: blur(8px);
-      box-shadow: 0 6px 18px rgba(0,0,0,0.35);
-      cursor:pointer;
-    }
-    .hudBtn:active{ transform: translateY(1px); }
-    .hudBtn[data-on="1"]{ outline:2px solid rgba(0,255,255,0.65); }
-
-    #diagPanel{
-      position:fixed; left:10px; bottom:10px;
-      width:min(760px, calc(100% - 20px)); max-height:45vh;
-      background:rgba(0,0,0,0.72);
-      border:1px solid rgba(255,255,255,0.15);
-      border-radius:12px; padding:10px;
-      overflow:auto; display:none;
-      z-index:2147483647; pointer-events:auto; color:#fff;
-    }
-    #diagTitle{ font-weight:950; margin-bottom:8px; }
-    #diagText{
-      white-space:pre-wrap;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size:12px; line-height:1.35; opacity:0.95;
-    }
-
-    #hint{
-      position:fixed; right:10px; top:10px;
-      background:rgba(0,0,0,0.55);
-      border:1px solid rgba(255,255,255,0.12);
-      border-radius:12px;
-      padding:10px 12px;
-      color:#fff;
-      z-index:2147483647;
-      pointer-events:none;
-      max-width:min(560px, calc(100% - 20px));
-      font-weight:750;
-      opacity:0.9;
-    }
-
-    /* Android sticks */
-    #sticks{
-      position:fixed;
-      left:0; right:0; bottom:0;
-      height:45vh;
-      z-index:2147483646;
-      pointer-events:none;
-      display:block;
-    }
-    .stick{
-      position:absolute;
-      width:160px;
-      height:160px;
-      border-radius:999px;
-      background:rgba(0,0,0,0.28);
-      border:1px solid rgba(255,255,255,0.14);
-      backdrop-filter: blur(8px);
-      pointer-events:auto;
-      touch-action:none;
-      user-select:none;
-    }
-    #stickL{ left:18px; bottom:18px; }
-    #stickR{ right:18px; bottom:18px; }
-    .stick .base{
-      position:absolute; inset:0;
-      border-radius:999px;
-    }
-    .stick .stickKnob{
-      position:absolute;
-      width:68px; height:68px;
-      left:50%; top:50%;
-      transform: translate(-50%,-50%);
-      border-radius:999px;
-      background:rgba(0,255,255,0.16);
-      border:1px solid rgba(0,255,255,0.25);
-      box-shadow: 0 10px 22px rgba(0,0,0,0.35);
-    }
-
-    @media (pointer:fine) {
-      #sticks{ display:none; }
-    }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <title>SCARLETTVR • Poker Demo</title>
+  <link rel="stylesheet" href="./css/style.css" />
 </head>
 <body>
-  <div id="app"></div>
-
-  <div id="hud">
+  <!-- Overlay HUD (touch-safe) -->
+  <div id="hud" class="hud">
     <div class="hudRow">
-      <button id="btnEnterVR" class="hudBtn">Enter VR</button>
-      <button id="btnTeleport" class="hudBtn" data-on="0">Teleport: OFF</button>
-      <button id="btnReset" class="hudBtn">Reset to Spawn</button>
-      <button id="btnHideHUD" class="hudBtn">Hide HUD</button>
-      <button id="btnDiag" class="hudBtn">Diagnostics</button>
+      <div class="brand">
+        <div class="brandTitle">SCARLETTVR</div>
+        <div class="brandSub">Poker Demo • Modules + Jumbotron</div>
+      </div>
+      <div class="hudButtons">
+        <button id="btnEnterVR" class="hudBtn">ENTER VR</button>
+        <button id="btnTeleport" class="hudBtn">TELEPORT: OFF</button>
+        <button id="btnDiag" class="hudBtn">DIAG</button>
+        <button id="btnHideHUD" class="hudBtn">HIDE HUD</button>
+        <button id="btnReset" class="hudBtn">RESET</button>
+      </div>
+    </div>
+    <div class="hudRow hudRow2">
+      <div id="hudStatus" class="hudStatus">booting…</div>
+      <div id="hudHint" class="hudHint">Android: use joysticks. Quest: thumbsticks + trigger teleport.</div>
+    </div>
+    <div id="diagPanel" class="diagPanel hidden">
+      <div class="diagHeader">
+        <div class="diagTitle">SCARLETT DIAGNOSTICS</div>
+        <div class="diagActions">
+          <button id="btnCopyDiag" class="hudBtn">COPY REPORT</button>
+          <button id="btnHardReload" class="hudBtn">HARD RELOAD</button>
+        </div>
+      </div>
+      <pre id="diagText" class="diagText">(no report yet)</pre>
     </div>
   </div>
 
-  <div id="diagPanel">
-    <div id="diagTitle">SCARLETT DIAGNOSTICS</div>
-    <div id="diagText"></div>
+  <!-- Touch joysticks (Android / mobile debugging) -->
+  <div id="touchControls" class="touchControls">
+    <div id="joyLeft" class="joystick left">
+      <div class="stick"></div>
+    </div>
+    <div id="joyRight" class="joystick right">
+      <div class="stick"></div>
+    </div>
+    <button id="btnTouchJump" class="touchBtn">UP</button>
   </div>
 
-  <div id="hint">Quest: Left stick move • A/X toggles Teleport • Trigger teleports • Android: left stick move • right stick turn</div>
+  <!-- Video used as Jumbotron texture (muted until user interaction) -->
+  <video id="abcVideo" class="hidden" playsinline webkit-playsinline muted></video>
 
-  <div id="sticks">
-    <div id="stickMove" class="stick" aria-label="Move stick">
-      <div class="base"></div>
-      <div class="stickKnob"></div>
-    </div>
-    <div id="stickTurn" class="stick" aria-label="Turn stick">
-      <div class="base"></div>
-      <div class="stickKnob"></div>
-    </div>
-  </div>
+  <!-- Three.js canvas goes here -->
+  <div id="app" class="app"></div>
 
-  <script type="module" src="./js/scarlett1/index.js"></script>
+  <script type="module" src="./js/core/router.js"></script>
 </body>
 </html>

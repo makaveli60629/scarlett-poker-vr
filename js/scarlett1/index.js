@@ -1,8 +1,9 @@
 // /js/scarlett1/index.js
-// SCARLETT PATCH v4 (Fix spawn in XR, invert stick, add teleport toggle on controller buttons, reduce XR hood overlay)
-// Build: SCARLETT_PATCH_v4
+// SCARLETT DEMO v0.1 (LOCKED)
+// Goals: deterministic boot, deterministic spawn, Android sticks, XR-ready teleport.
 
-const BUILD = "SCARLETT_PATCH_v4";
+const BUILD = "SCARLETT_DEMO_v0_1_LOCKED";
+const DEMO_LOCKED = true;
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { buildWorld } from "../world.js";
@@ -17,15 +18,20 @@ const btnDiag = $("#btnDiag");
 const hud = $("#hud");
 const diagPanel = $("#diagPanel");
 const diagText = $("#diagText");
+const hint = $("#hint");
+const sticks = $("#sticks");
+const stickMove = $("#stickMove");
+const stickTurn = $("#stickTurn");
 const app = $("#app");
 
+// ---- Diagnostics (must always work) ----
 const t0 = performance.now();
 const lines = [];
 const stamp = () => ((performance.now() - t0) / 1000).toFixed(3);
 function dwrite(msg){
   const s = `[${stamp()}] ${String(msg)}`;
   lines.push(s);
-  if (lines.length > 380) lines.shift();
+  if (lines.length > 420) lines.shift();
   if (diagText) diagText.textContent = lines.join("\n");
   console.log(s);
 }
@@ -37,6 +43,7 @@ dwrite(`secureContext=${String(window.isSecureContext)}`);
 dwrite(`ua=${navigator.userAgent}`);
 dwrite(`touch=${("ontouchstart" in window)} maxTouchPoints=${navigator.maxTouchPoints || 0}`);
 dwrite(`xr=${String(!!navigator.xr)}`);
+
 navigator.xr?.isSessionSupported?.("immersive-vr")
   ?.then(v => dwrite(`xr immersive-vr supported=${v}`))
   ?.catch(() => dwrite("xr immersive-vr supported=ERROR"));
@@ -74,19 +81,22 @@ window.addEventListener("resize", () => {
 // ---- State ----
 const state = {
   teleport: false,
-  yaw: 0,
+  yaw: Math.PI,
   pitch: 0,
-  one: { active:false, x:0, y:0 },
-  two: { active:false, ax:0, ay:0, bx:0, by:0, sx:0, sz:0 },
   _tpTarget: null,
   _btnLatch: new Map(),
+  // Virtual sticks
+  vm: { active:false, id:null, cx:0, cy:0, x:0, y:0 },
+  vt: { active:false, id:null, cx:0, cy:0, x:0, y:0 },
+  // Android drag-look (optional)
+  look: { active:false, id:null, x:0, y:0 },
 };
 
-// ---- Spawn ----
+// ---- Spawn (authoritative) ----
 const SPAWN = new THREE.Vector3(0, 0, 24.0);
 function applySpawn(){
   rig.position.copy(SPAWN);
-  rig.rotation.y = Math.PI;
+  rig.rotation.set(0, Math.PI, 0);
   state.yaw = Math.PI;
   state.pitch = 0;
   camera.position.set(0, 1.6, 0);
@@ -101,14 +111,18 @@ const world = buildWorld(scene, dwrite);
 // Extra point lights (table visibility)
 const p1 = new THREE.PointLight(0xffffff, 0.9, 25); p1.position.set(0, 6, 0); scene.add(p1);
 const p2 = new THREE.PointLight(0x88ffff, 0.8, 18); p2.position.set(-6, 4, -6); scene.add(p2);
-const p3 = new THREE.PointLight(0x88ffff, 0.8, 18); p3.position.set(6, 4, 6); scene.add(p3);
+const p3 = new THREE.PointLight(0x88ffff, 0.8, 18); p3.position.set( 6, 4,  6); scene.add(p3);
 
 // ---- HUD ----
 btnDiag?.addEventListener("click", () => {
   diagPanel.style.display = (diagPanel.style.display === "block") ? "none" : "block";
 });
 btnHideHUD?.addEventListener("click", () => {
-  hud.style.display = (hud.style.display === "none") ? "flex" : "none";
+  const on = hud.style.display !== "none";
+  hud.style.display = on ? "none" : "flex";
+  if (sticks) sticks.style.display = on ? "none" : "block";
+  if (hint) hint.style.display = on ? "none" : "block";
+  if (!on) diagPanel.style.display = "none";
 });
 btnReset?.addEventListener("click", () => {
   applySpawn();
@@ -122,103 +136,94 @@ function setTeleport(on){
 }
 btnTeleport?.addEventListener("click", () => setTeleport(!state.teleport));
 
-// ---- Android touch controls ----
-const el = renderer.domElement;
+// ---- Virtual Sticks (Android) ----
 const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
 
-el.addEventListener("touchstart", (e) => {
-  if (!e.touches || e.touches.length===0) return;
+function attachStick(el, key){
+  if (!el) return;
+  const knob = el.querySelector(".stickKnob");
 
-  if (e.touches.length===1){
-    const t = e.touches[0];
-    state.one.active = true;
-    state.one.x = t.clientX;
-    state.one.y = t.clientY;
-    return;
-  }
-  if (e.touches.length===2){
-    const a = e.touches[0], b = e.touches[1];
-    state.two.active = true;
-    state.two.ax = a.clientX; state.two.ay = a.clientY;
-    state.two.bx = b.clientX; state.two.by = b.clientY;
-    state.two.sx = rig.position.x; state.two.sz = rig.position.z;
-  }
-},{ passive:true });
+  const onDown = (e) => {
+    if (!e.isPrimary && e.pointerType !== "touch") return;
+    el.setPointerCapture?.(e.pointerId);
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width*0.5;
+    const cy = r.top + r.height*0.5;
+    state[key].active = true;
+    state[key].id = e.pointerId;
+    state[key].cx = cx;
+    state[key].cy = cy;
+    state[key].x = 0;
+    state[key].y = 0;
+    if (knob) knob.style.transition = "none";
+  };
 
-el.addEventListener("touchmove", (e) => {
-  if (!e.touches) return;
+  const onMove = (e) => {
+    if (!state[key].active || state[key].id !== e.pointerId) return;
+    const r = el.getBoundingClientRect();
+    const radius = Math.min(r.width, r.height) * 0.35;
+    const dx = e.clientX - state[key].cx;
+    const dy = e.clientY - state[key].cy;
+    const nx = clamp(dx / radius, -1, 1);
+    const ny = clamp(dy / radius, -1, 1);
+    state[key].x = nx;
+    state[key].y = ny;
+    if (knob){
+      knob.style.transform = `translate3d(${(nx*radius)*0.55}px, ${(ny*radius)*0.55}px, 0)`;
+    }
+  };
 
-  if (state.one.active && e.touches.length===1){
-    const t = e.touches[0];
-    const dx = t.clientX - state.one.x;
-    const dy = t.clientY - state.one.y;
-    state.one.x = t.clientX;
-    state.one.y = t.clientY;
+  const onUp = (e) => {
+    if (!state[key].active || state[key].id !== e.pointerId) return;
+    state[key].active = false;
+    state[key].id = null;
+    state[key].x = 0;
+    state[key].y = 0;
+    if (knob){
+      knob.style.transition = "transform 120ms ease";
+      knob.style.transform = "translate3d(0,0,0)";
+    }
+  };
 
-    const S = 0.0022;
-    state.yaw -= dx * S;
-    state.pitch -= dy * S;
-    state.pitch = clamp(state.pitch, -1.1, 1.1);
-
-    rig.rotation.y = state.yaw;
-    camera.rotation.x = state.pitch;
-    return;
-  }
-
-  if (state.two.active && e.touches.length===2){
-    const a = e.touches[0], b = e.touches[1];
-    const mx0 = (state.two.ax + state.two.bx)*0.5;
-    const my0 = (state.two.ay + state.two.by)*0.5;
-    const mx1 = (a.clientX + b.clientX)*0.5;
-    const my1 = (a.clientY + b.clientY)*0.5;
-
-    const dx = (mx1 - mx0);
-    const dy = (my1 - my0);
-
-    const moveScale = 0.010;
-    const fwd = -dy * moveScale;
-    const str = dx * moveScale;
-
-    const yaw = rig.rotation.y;
-    const cos = Math.cos(yaw), sin = Math.sin(yaw);
-
-    const vx = (str*cos) + (fwd*sin);
-    const vz = (fwd*cos) - (str*sin);
-
-    rig.position.x = state.two.sx + vx;
-    rig.position.z = state.two.sz + vz;
-  }
-},{ passive:true });
-
-el.addEventListener("touchend", (e) => {
-  if (!e.touches) return;
-  if (e.touches.length===0){
-    state.one.active = false;
-    state.two.active = false;
-  }
-  if (e.touches.length===1) state.two.active = false;
-},{ passive:true });
-
-// ---- Desktop WASD ----
-const keys = new Set();
-window.addEventListener("keydown", (e)=>keys.add(e.key.toLowerCase()));
-window.addEventListener("keyup", (e)=>keys.delete(e.key.toLowerCase()));
-function applyWASD(dt){
-  const speed = 3.0;
-  let f=0,s=0;
-  if (keys.has("w")) f += 1;
-  if (keys.has("s")) f -= 1;
-  if (keys.has("a")) s -= 1;
-  if (keys.has("d")) s += 1;
-  if (!f && !s) return;
-
-  const yaw = rig.rotation.y;
-  const cos = Math.cos(yaw), sin = Math.sin(yaw);
-  const vx = (s*cos) + (f*sin);
-  const vz = (f*cos) - (s*sin);
-  rig.position.x += vx * speed * dt;
-  rig.position.z += -vz * speed * dt;
+  el.addEventListener("pointerdown", onDown, { passive:true });
+  window.addEventListener("pointermove", onMove, { passive:true });
+  window.addEventListener("pointerup", onUp, { passive:true });
+  window.addEventListener("pointercancel", onUp, { passive:true });
 }
+attachStick(stickMove, "vm");
+attachStick(stickTurn, "vt");
+
+// Optional drag-look (only when NOT touching stick zones)
+const elCanvas = renderer.domElement;
+elCanvas.addEventListener("pointerdown", (e) => {
+  if (e.pointerType !== "touch") return;
+  const t = e.target;
+  if (t === stickMove || stickMove?.contains(t) || t === stickTurn || stickTurn?.contains(t)) return;
+  state.look.active = true;
+  state.look.id = e.pointerId;
+  state.look.x = e.clientX;
+  state.look.y = e.clientY;
+}, { passive:true });
+window.addEventListener("pointermove", (e) => {
+  if (!state.look.active || state.look.id !== e.pointerId) return;
+  const dx = e.clientX - state.look.x;
+  const dy = e.clientY - state.look.y;
+  state.look.x = e.clientX;
+  state.look.y = e.clientY;
+
+  const S = 0.0020;
+  state.yaw -= dx * S;
+  state.pitch -= dy * S;
+  state.pitch = clamp(state.pitch, -1.1, 1.1);
+
+  rig.rotation.y = state.yaw;
+  camera.rotation.x = state.pitch;
+}, { passive:true });
+window.addEventListener("pointerup", (e) => {
+  if (state.look.id !== e.pointerId) return;
+  state.look.active = false;
+  state.look.id = null;
+}, { passive:true });
 
 // ---- VR controllers: laser + reticle + teleport ----
 const tmpMat4 = new THREE.Matrix4();
@@ -239,7 +244,6 @@ reticle.rotation.x = -Math.PI/2;
 reticle.visible = false;
 scene.add(reticle);
 
-// Trigger (select) teleports in teleport mode
 ctlR.addEventListener("selectstart", () => {
   if (!state.teleport) return;
   const p = state._tpTarget;
@@ -249,14 +253,12 @@ ctlR.addEventListener("selectstart", () => {
   dwrite(`[teleport] moved to x=${p.x.toFixed(2)} z=${p.z.toFixed(2)}`);
 });
 
-// Edge detection for controller buttons
 function edgeButton(key, pressed){
   const prev = state._btnLatch.get(key) || false;
   state._btnLatch.set(key, !!pressed);
   return (!prev && !!pressed);
 }
 
-// XR move + teleport toggle
 function readXRMoveAndButtons(dt){
   const session = renderer.xr.getSession?.();
   if (!session) return;
@@ -272,7 +274,7 @@ function readXRMoveAndButtons(dt){
       setTeleport(!state.teleport);
     }
 
-    // Use left hand stick for movement
+    // Left stick movement
     if (src.handedness !== "left") continue;
 
     const axX = gp.axes?.[2] ?? gp.axes?.[0] ?? 0;
@@ -285,8 +287,7 @@ function readXRMoveAndButtons(dt){
 
     if (state.teleport) continue;
 
-    // FIX: your report says forward/back are swapped -> invert
-    const fwd = -sy;
+    const fwd = -sy; // forward correct
     const str = sx;
 
     const speed = 2.7;
@@ -300,11 +301,27 @@ function readXRMoveAndButtons(dt){
   }
 }
 
-// Enter VR: hide DOM overlay to reduce hood effect
+// ---- Enter VR (hard-hide DOM to avoid hood overlay) ----
 async function canEnterVR(){
   if (!navigator.xr) return false;
   try { return await navigator.xr.isSessionSupported("immersive-vr"); }
   catch { return false; }
+}
+
+function hideAllDomForXR(){
+  try{
+    if (hud) hud.style.display = "none";
+    if (hint) hint.style.display = "none";
+    if (sticks) sticks.style.display = "none";
+    if (diagPanel) diagPanel.style.display = "none";
+  } catch(_){ }
+}
+function showDomAfterXR(){
+  try{
+    if (hud) hud.style.display = "flex";
+    if (hint) hint.style.display = "block";
+    if (sticks && ("ontouchstart" in window)) sticks.style.display = "block";
+  } catch(_){ }
 }
 
 btnEnterVR?.addEventListener("click", async () => {
@@ -317,7 +334,7 @@ btnEnterVR?.addEventListener("click", async () => {
 
   const ok = await canEnterVR();
   if (!ok){
-    alert("immersive-vr not supported here (Android expected).");
+    alert("immersive-vr not supported here.");
     dwrite("XR immersive-vr NOT supported ❌");
     return;
   }
@@ -329,22 +346,14 @@ btnEnterVR?.addEventListener("click", async () => {
     renderer.xr.setSession(session);
     dwrite("XR SESSION STARTED ✅");
 
-    // Apply spawn AFTER XR starts (fix: headset origin starts at table)
+    // Apply spawn AFTER XR starts (authoritative)
     applySpawn();
 
-    // Hide DOM overlay
-    try{
-      $("#hud").style.display = "none";
-      const hint = $("#hint"); if (hint) hint.style.display = "none";
-      const dp = $("#diagPanel"); if (dp) dp.style.display = "none";
-    } catch(_){}
+    hideAllDomForXR();
 
     session.addEventListener("end", () => {
       dwrite("XR session ended.");
-      try{
-        $("#hud").style.display = "flex";
-        const hint = $("#hint"); if (hint) hint.style.display = "block";
-      } catch(_){}
+      showDomAfterXR();
     });
   } catch(e){
     dwrite(`XR SESSION FAILED ❌ ${e?.message || e}`);
@@ -352,13 +361,46 @@ btnEnterVR?.addEventListener("click", async () => {
   }
 });
 
-// ---- Loop ----
+// ---- Main loop ----
 const clock = new THREE.Clock();
+
+function applyAndroidSticks(dt){
+  // Only when not in XR
+  if (renderer.xr.getSession?.()) return;
+
+  // Turn (right stick)
+  const turn = state.vt.x;
+  if (Math.abs(turn) > 0.08){
+    state.yaw -= turn * 2.4 * dt; // rad/s
+    rig.rotation.y = state.yaw;
+  }
+
+  // Move (left stick)
+  const mx = state.vm.x;
+  const my = state.vm.y;
+
+  const dead = 0.10;
+  const sx = Math.abs(mx) > dead ? mx : 0;
+  const sy = Math.abs(my) > dead ? my : 0;
+  if (!sx && !sy) return;
+
+  if (state.teleport) return;
+
+  const fwd = -sy;
+  const str = sx;
+
+  const speed = 3.1;
+  const yaw = rig.rotation.y;
+  const cos = Math.cos(yaw), sin = Math.sin(yaw);
+  const vx = (str*cos) + (fwd*sin);
+  const vz = (fwd*cos) - (str*sin);
+
+  rig.position.x += vx * speed * dt;
+  rig.position.z += vz * speed * dt;
+}
 
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
-
-  applyWASD(dt);
 
   const session = renderer.xr.getSession?.();
   const inXR = !!session;
@@ -403,10 +445,12 @@ renderer.setAnimationLoop(() => {
       laserLine.scale.z = 12;
     }
   } else {
+    // DEMO LOCK: Android sticks are the official locomotion
+    applyAndroidSticks(dt);
     reticle.visible = false;
     laserLine.visible = false;
   }
 
-  world?.tick?.(dt, { rig, camera });
+  world?.tick?.(dt);
   renderer.render(scene, camera);
 });

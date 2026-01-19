@@ -2,9 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <title>SCARLETT VR Poker Demo V14B (Module Audit + Movement FIX)</title>
+  <title>SCARLETT Avatar System v1 (Polished)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
-  <meta name="mobile-web-app-capable" content="yes">
   <style>
     html, body { margin:0; padding:0; width:100%; height:100%; background:#000; overflow:hidden; }
     #hud {
@@ -15,27 +14,13 @@
       backdrop-filter: blur(6px);
       pointer-events: auto;
     }
-    #hud * { pointer-events: auto; }
     #hud .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-    #hud button {
+    #hud button, #hud select, #hud input {
       background:#14202b; color:#e8f7ff; border:1px solid rgba(120,200,220,0.25);
-      border-radius: 12px; padding: 10px 12px; font-weight: 750; letter-spacing: 0.2px;
+      border-radius: 12px; padding: 10px 12px; font-weight: 700;
     }
-    #hud button:active { transform: scale(0.98); }
-    #status { opacity:.9; margin-left:auto; }
-    #panel { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(120,200,220,0.15); display:none; }
-    #log { white-space: pre-wrap; word-break: break-word; max-height: 34vh; overflow:auto; color: #bfefff; }
-    #joy {
-      position: fixed; left: 14px; bottom: 14px; width: 140px; height: 140px; z-index: 9999;
-      display:none;
-      background: rgba(0,0,0,0.35); border: 1px solid rgba(120,200,220,0.25);
-      border-radius: 18px; backdrop-filter: blur(6px);
-      touch-action: none;
-    }
-    #joyDot { position:absolute; left:50%; top:50%; width:44px; height:44px; border-radius:22px;
-      transform: translate(-50%,-50%);
-      background: rgba(191,239,255,0.25); border: 1px solid rgba(191,239,255,0.45);
-    }
+    #log { margin-top:10px; padding-top:10px; border-top:1px solid rgba(120,200,220,0.15);
+      white-space: pre-wrap; max-height: 32vh; overflow:auto; color:#bfefff; display:none; }
   </style>
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 </head>
@@ -44,20 +29,21 @@
     <div class="row">
       <button id="btnEnter">ENTER VR</button>
       <button id="btnDiag">DIAG</button>
-      <button id="btnReset">RESET</button>
-      <button id="btnJoy">MOBILE JOY</button>
-      <span id="status">booting…</span>
+      <label style="display:flex;align-items:center;gap:8px">
+        Avatar
+        <select id="avatarSelect">
+          <option value="primitives">Primitives (Fallback)</option>
+          <option value="glbA">GLB Slot A</option>
+          <option value="glbB">GLB Slot B</option>
+        </select>
+      </label>
+      <label style="display:flex;align-items:center;gap:8px">
+        Name <input id="nameInput" value="PLAYER" style="width:140px"/>
+      </label>
+      <span id="status" style="margin-left:auto;opacity:.9">booting…</span>
     </div>
-    <div id="panel">
-      <div style="opacity:.9;margin-bottom:6px">
-        <b>V14B Module Audit:</b> attempts to load modules listed in <code>js/module-manifest.js</code> and reports OK/FAIL.<br/>
-        <b>Quest movement:</b> left stick moves, right stick snap-turn. If sticks still don't move, the diag will show gamepad axes.
-      </div>
-      <div id="log">Loading…</div>
-    </div>
+    <div id="log">Loading…</div>
   </div>
-
-  <div id="joy"><div id="joyDot"></div></div>
 
   <a-scene id="scene"
     embedded
@@ -67,77 +53,48 @@
     background="color: #050a10">
 
     <a-assets>
-      <canvas id="tvCanvas" width="1024" height="576"></canvas>
-      <audio id="amb" preload="auto" src="https://cdn.jsdelivr.net/gh/mdn/webaudio-examples/AudioContext-basics/audio/techno.wav"></audio>
+      <!-- Add your models like:
+      <a-asset-item id="avatarA" src="assets/avatarA.glb"></a-asset-item>
+      <a-asset-item id="avatarB" src="assets/avatarB.glb"></a-asset-item>
+      -->
     </a-assets>
 
-    <!-- Rig -->
-    <a-entity id="rig" position="0 0 6" locomotion-xr>
-      <a-entity id="cam" camera position="0 1.65 0" look-controls="pointerLockEnabled: false" wasd-controls="acceleration: 22"></a-entity>
+    <a-entity light="type: ambient; intensity: 0.7"></a-entity>
+    <a-entity light="type: directional; intensity: 1.0" position="2 6 3"></a-entity>
+    <a-entity light="type: point; intensity: 0.9; distance: 20" position="-2 3 -2"></a-entity>
 
-      <!-- Cursor for Android / desktop -->
-      <a-entity id="cursor"
-        cursor="rayOrigin: mouse; fuse: false"
-        raycaster="objects: .clickable, .teleportable; far: 40">
-      </a-entity>
+    <a-plane rotation="-90 0 0" width="30" height="30" material="color:#0f1a24; roughness:1"></a-plane>
+    <a-ring rotation="-90 0 0" radius-inner="5.5" radius-outer="6.2" material="color:#0b131b; opacity:0.95"></a-ring>
 
-      <!-- Quest controllers (use explicit touch-controls for better gamepad access) -->
+    <a-entity id="rig" position="0 0 3" avatar-rig>
+      <a-entity id="camera" camera position="0 1.65 0" look-controls="pointerLockEnabled:false" wasd-controls="acceleration:22"></a-entity>
+
+      <a-entity cursor="rayOrigin: mouse; fuse: false"
+        raycaster="objects: .clickable; far: 25"></a-entity>
+
       <a-entity id="leftHand"
         oculus-touch-controls="hand: left"
         laser-controls="hand: left"
-        raycaster="objects: .clickable, .teleportable; far: 40"
+        raycaster="objects: .clickable; far: 25"
         line="opacity: 0.9"
-        controller-ui></a-entity>
+        avatar-hand="hand:left"></a-entity>
 
       <a-entity id="rightHand"
         oculus-touch-controls="hand: right"
         laser-controls="hand: right"
-        raycaster="objects: .clickable, .teleportable; far: 40"
+        raycaster="objects: .clickable; far: 25"
         line="opacity: 0.9"
-        controller-ui></a-entity>
+        avatar-hand="hand:right"></a-entity>
+
+      <a-entity id="avatarRoot" avatar-manager position="0 0 0"></a-entity>
     </a-entity>
 
-    <!-- LIGHTS -->
-    <a-entity light="type: ambient; intensity: 0.65"></a-entity>
-    <a-entity light="type: directional; intensity: 1.0" position="2 6 3"></a-entity>
-    <a-entity light="type: point; intensity: 1.2; distance: 24" position="0 4 -4"></a-entity>
-
-    <!-- LOBBY (simple but solid) -->
-    <a-plane id="floor" class="teleportable" rotation="-90 0 0" width="40" height="40"
-      material="color:#111a23; roughness:1; metalness:0"></a-plane>
-    <a-circle rotation="-90 0 0" radius="9.5" material="color:#0f1a24; opacity:0.95"></a-circle>
-    <a-ring rotation="-90 0 0" radius-inner="9.3" radius-outer="9.55" material="color:#0b131b; opacity:0.95"></a-ring>
-
-    <!-- Table placeholder -->
-    <a-entity id="tableArea" position="0 0 -2">
-      <a-cylinder position="0 0.78 0" radius="1.45" height="0.14" material="color:#7a0011; roughness:0.9"></a-cylinder>
-      <a-cylinder position="0 0.42 0" radius="0.2" height="0.86" material="color:#2b2b2b; roughness:1"></a-cylinder>
+    <a-entity position="0 1.6 -2.5">
+      <a-plane class="clickable" width="1.2" height="0.5" material="color:#1b2a3a; opacity:0.95" ui-button="label: WAVE"></a-plane>
+      <a-text value="Click WAVE" position="0 0.55 0" align="center" width="3" color="#bfefff"></a-text>
     </a-entity>
 
-    <!-- Jumbotron (canvas TV) -->
-    <a-entity id="jumbotron" position="0 2.7 -10.5">
-      <a-plane id="screen" width="7.2" height="4.05" radius="0.06"
-        material="shader: flat; src: #tvCanvas; color: #101820"></a-plane>
-      <a-plane width="7.5" height="4.35" position="0 0 -0.02" material="color:#000; opacity:0.75"></a-plane>
-
-      <a-entity id="jwPanel" position="0 -2.6 0.02">
-        <a-plane width="7.2" height="0.9" radius="0.06" material="color:#0e1620; opacity:0.92"></a-plane>
-        <a-entity position="-2.4 0 0.02" ui-button="label: CH 1; action: ch1"></a-entity>
-        <a-entity position="-0.8 0 0.02" ui-button="label: CH 2; action: ch2"></a-entity>
-        <a-entity position="0.8 0 0.02" ui-button="label: CH 3; action: ch3"></a-entity>
-        <a-entity position="2.4 0 0.02" ui-button="label: CH 4; action: ch4"></a-entity>
-      </a-entity>
-
-      <a-text id="screenText" value="SCARLETT TV (Canvas)" position="0 2.35 0.01" align="center" width="10" color="#dfefff"></a-text>
-    </a-entity>
-
-    <!-- 3D diag -->
-    <a-entity position="0 1.65 -0.9" rotation="-10 0 0">
-      <a-plane width="1.6" height="0.64" material="color:#000; opacity:0.55"></a-plane>
-      <a-text id="diagText3d" value="booting…" position="0 0 0.01" align="center" width="2.0" color="#b6f7ff"></a-text>
-    </a-entity>
-
-    <script type="module" src="js/main.js"></script>
+    <script type="module" src="js/avatar-system.js"></script>
   </a-scene>
 </body>
 </html>

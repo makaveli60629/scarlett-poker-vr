@@ -1,161 +1,65 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
-  <title>SCARLETT • Waiting Hub</title>
-
-  <!-- A-Frame -->
-  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-
-  <!-- A-Frame Extras (movement-controls) -->
-  <script src="https://cdn.jsdelivr.net/npm/aframe-extras@6.1.1/dist/aframe-extras.min.js"></script>
-
-  <style>
-    html, body { margin:0; height:100%; background:#05060a; }
-    .hud {
-      position: fixed; left: 10px; right: 10px; bottom: 10px;
-      font: 12px system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      color: #cfd6ff; opacity: .9;
-      background: rgba(0,0,0,.35); padding: 10px 12px; border-radius: 10px;
-      pointer-events: none;
-    }
-    .hud b { color:#fff; }
-  </style>
-
-  <script>
-    // Ultra-light neon pulse (no heavy shaders)
-    AFRAME.registerComponent("neon-pulse", {
-      schema: { speed: {default: 1.2}, min: {default: 0.25}, max: {default: 0.9} },
-      init() {
-        this.t = 0;
-        this.mat = null;
-        const tryGet = () => {
-          const mesh = this.el.getObject3D("mesh");
-          if (mesh && mesh.material) this.mat = mesh.material;
-        };
-        this.el.addEventListener("object3dset", tryGet);
-        tryGet();
-      },
-      tick(time, dt) {
-        if (!this.mat) return;
-        this.t += (dt / 1000) * this.data.speed;
-        const s = (Math.sin(this.t) + 1) * 0.5;
-        const v = this.data.min + (this.data.max - this.data.min) * s;
-        if (typeof this.mat.emissiveIntensity === "number") this.mat.emissiveIntensity = v;
-      }
-    });
-
-    // Force sane facing direction once
-    AFRAME.registerComponent("face-forward-once", {
-      init() {
-        setTimeout(() => {
-          this.el.object3D.rotation.set(0, 0, 0);
-        }, 100);
-      }
-    });
-  </script>
+<meta charset="utf-8"/>
+<title>SCARLETT VR Poker Demo V14A</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+<style>
+html,body{margin:0;height:100%;background:#000;}
+#hud{position:fixed;top:10px;left:10px;right:10px;
+background:rgba(0,0,0,.6);color:#bfefff;
+font:13px system-ui;padding:10px;border-radius:12px;z-index:10}
+button{margin-right:6px}
+</style>
 </head>
-
 <body>
-  <div class="hud">
-    <b>Move:</b> Left stick / WASD • <b>Snap Turn:</b> Right stick • <b>Laser:</b> Trigger • <b>Enter VR:</b> VR button
-  </div>
 
-  <a-scene
-    renderer="antialias:true; colorManagement:true"
-    background="color:#05060a"
-    xr-mode-ui="enabled:true"
-    webxr="requiredFeatures: local-floor; optionalFeatures: bounded-floor, hand-tracking"
-  >
-    <!-- LIGHTING (fixes “dark room”) -->
-    <a-entity light="type:ambient; intensity:0.7; color:#88aaff"></a-entity>
-    <a-entity light="type:directional; intensity:1.0; color:#ffffff" position="2 6 3"></a-entity>
-    <a-entity light="type:point; intensity:1.2; distance:22; color:#55ddff" position="0 5 0"></a-entity>
-    <a-entity light="type:point; intensity:0.9; distance:18; color:#ff55dd" position="7 3 -7"></a-entity>
+<div id="hud">
+<b>SCARLETT V14A</b>
+<button onclick="enterVR()">ENTER VR</button>
+<button onclick="toggleDiag()">DIAG</button>
+<span id="status">booting…</span>
+<div id="diag" style="display:none;margin-top:8px"></div>
+</div>
 
-    <!-- SKY -->
-    <a-sky color="#070814"></a-sky>
+<a-scene id="scene"
+renderer="antialias:true"
+webxr="requiredFeatures: local-floor"
+background="color:#050a10">
 
-    <!-- FLOOR -->
-    <a-circle id="floor" radius="18" rotation="-90 0 0"
-      material="color:#0b0f1c; roughness:1; metalness:0"
-      shadow="receive:true">
-    </a-circle>
+<a-assets>
+<canvas id="tvCanvas" width="1024" height="576"></canvas>
+</a-assets>
 
-    <!-- NEON RINGS -->
-    <a-ring radius-inner="5.4" radius-outer="5.6" rotation="-90 0 0"
-      material="color:#34f6ff; emissive:#34f6ff; emissiveIntensity:0.6; opacity:0.9"
-      neon-pulse="speed:1.2; min:0.35; max:0.95">
-    </a-ring>
+<a-entity id="rig" position="0 0 6" thumbstick-move>
+<a-camera id="cam" position="0 1.65 0"></a-camera>
 
-    <a-ring radius-inner="11.4" radius-outer="11.6" rotation="-90 0 0"
-      material="color:#ff3ef0; emissive:#ff3ef0; emissiveIntensity:0.55; opacity:0.85"
-      neon-pulse="speed:1.0; min:0.25; max:0.85">
-    </a-ring>
+<a-entity laser-controls="hand:left"
+raycaster="objects:.clickable,.teleportable"></a-entity>
+<a-entity laser-controls="hand:right"
+raycaster="objects:.clickable,.teleportable"></a-entity>
+</a-entity>
 
-    <!-- COMFORT RAIL -->
-    <a-torus radius="17.6" radius-tubular="0.08" rotation="90 0 0" position="0 0.6 0"
-      material="color:#1a1f33; emissive:#1a1f33; emissiveIntensity:0.25">
-    </a-torus>
+<a-entity light="type:ambient;intensity:0.7"></a-entity>
+<a-entity light="type:directional;intensity:1" position="2 6 3"></a-entity>
 
-    <!-- KIOSKS -->
-    <a-entity id="kiosks">
-      <a-box position="7 1 -7" depth="1" height="2" width="1"
-        material="color:#12182b; emissive:#12182b; emissiveIntensity:0.2"></a-box>
-      <a-box position="-7 1 -7" depth="1" height="2" width="1"
-        material="color:#12182b; emissive:#12182b; emissiveIntensity:0.2"></a-box>
-      <a-box position="7 1 7" depth="1" height="2" width="1"
-        material="color:#12182b; emissive:#12182b; emissiveIntensity:0.2"></a-box>
-      <a-box position="-7 1 7" depth="1" height="2" width="1"
-        material="color:#12182b; emissive:#12182b; emissiveIntensity:0.2"></a-box>
+<a-plane class="teleportable" rotation="-90 0 0" width="40" height="40"
+color="#0f1a24"></a-plane>
 
-      <a-text value="POKER ROOM (LOCKED)" position="7 2.4 -7" align="center" width="6" color="#cfe8ff"></a-text>
-      <a-text value="AVATAR LAB (SOON)" position="-7 2.4 -7" align="center" width="6" color="#ffd5fb"></a-text>
-      <a-text value="CASINO FLOOR (LOADING…)" position="7 2.4 7" align="center" width="7" color="#cfe8ff"></a-text>
-      <a-text value="THEATER (SOON)" position="-7 2.4 7" align="center" width="6" color="#ffd5fb"></a-text>
-    </a-entity>
+<a-circle rotation="-90 0 0" radius="9" color="#0b131b"></a-circle>
 
-    <!-- CENTER HOLOGRAM -->
-    <a-cylinder position="0 0.15 0" radius="1.2" height="0.3"
-      material="color:#10162a; emissive:#10162a; emissiveIntensity:0.25"></a-cylinder>
+<a-cylinder position="0 .75 -2" radius="1.4" height=".15" color="#7a0011"></a-cylinder>
+<a-cylinder position="0 .38 -2" radius=".18" height=".76" color="#2b2b2b"></a-cylinder>
 
-    <a-entity position="0 1.8 0">
-      <a-torus-knot radius="0.55" radius-tubular="0.09" p="2" q="3"
-        material="color:#34f6ff; emissive:#34f6ff; emissiveIntensity:0.7; opacity:0.9"
-        neon-pulse="speed:1.6; min:0.35; max:1.1">
-      </a-torus-knot>
-      <a-text value="SCARLETT • WAITING HUB" position="0 -1.1 0" align="center" width="8" color="#ffffff"></a-text>
-      <a-text value="Walk around while updates load." position="0 -1.45 0" align="center" width="8" color="#bcd2ff"></a-text>
-    </a-entity>
+<a-entity position="0 2.7 -10.5">
+<a-plane id="screen" width="7.2" height="4.05"
+material="shader:flat;src:#tvCanvas"></a-plane>
+<a-text value="SCARLETT POKER TV"
+position="0 2.3 0.01" align="center" width="10"></a-text>
+</a-entity>
 
-    <!-- SIMPLE JUMBOTRON PLACEHOLDER -->
-    <a-plane position="0 3.2 -12" width="8.5" height="4.6"
-      material="color:#0b1022; emissive:#0b1022; emissiveIntensity:0.35"></a-plane>
-    <a-plane position="0 3.2 -11.99" width="8.1" height="4.2"
-      material="color:#101a3a; emissive:#101a3a; emissiveIntensity:0.55; opacity:0.9"
-      neon-pulse="speed:0.8; min:0.25; max:0.7"></a-plane>
-    <a-text value="JUMBOTRON (IDLE)" position="0 5.8 -12" align="center" width="10" color="#cfe8ff"></a-text>
-
-    <!-- PLAYER RIG -->
-    <a-entity id="rig" position="0 1.65 10" face-forward-once>
-      <a-entity id="player" movement-controls="speed:0.16; fly:false">
-        <a-entity id="camera" camera look-controls position="0 0 0"></a-entity>
-
-        <!-- Left -->
-        <a-entity id="leftHand"
-          laser-controls="hand:left"
-          raycaster="far:20; objects: .ui"
-          line="opacity:0.55"></a-entity>
-
-        <!-- Right -->
-        <a-entity id="rightHand"
-          laser-controls="hand:right"
-          raycaster="far:20; objects: .ui"
-          line="opacity:0.55"></a-entity>
-      </a-entity>
-    </a-entity>
-
-  </a-scene>
+<script src="js/app.js"></script>
+</a-scene>
 </body>
 </html>

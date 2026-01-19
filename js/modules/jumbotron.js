@@ -42,7 +42,8 @@ export function JumbotronModule() {
 
       const screen = new THREE.Mesh(
         new THREE.PlaneGeometry(14.5, 8.2),
-        new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveIntensity: 0.95, roughness: 0.4, metalness: 0.0 })
+        // TV-like look: darker, not blown out. Let the video provide the brightness.
+        new THREE.MeshStandardMaterial({ map: tex, emissive: 0x000000, emissiveIntensity: 0.15, roughness: 0.55, metalness: 0.0 })
       );
       root.add(screen);
 
@@ -61,6 +62,10 @@ export function JumbotronModule() {
       frame.position.z = -0.15;
       root.add(frame);
 
+      // Spatial audio (starts when video starts)
+      let listener = null;
+      let posAudio = null;
+
       // Start video after a user gesture
       let armed = false;
       const arm = () => {
@@ -75,9 +80,16 @@ export function JumbotronModule() {
         try {
           video.setAttribute('playsinline', '');
           video.setAttribute('webkit-playsinline', '');
-          video.muted = true;
+          // Try unmuted for "TV in the room" effect; if blocked, we fall back.
+          video.muted = false;
           video.loop = true;
           video.crossOrigin = 'anonymous';
+
+          // Make sure we have an audio listener on the camera
+          if (!listener) {
+            listener = new THREE.AudioListener();
+            engine.camera.add(listener);
+          }
 
           if (isHls) {
             // Use hls.js if needed
@@ -106,16 +118,44 @@ export function JumbotronModule() {
             await video.play();
             log(`[jumbotron] MP4: ${stream}`);
           }
+
+          // Build positional audio once playback succeeds
+          if (!posAudio && listener) {
+            posAudio = new THREE.PositionalAudio(listener);
+            try {
+              posAudio.setMediaElementSource(video);
+              posAudio.setRefDistance(6);
+              posAudio.setRolloffFactor(1.25);
+              posAudio.setDistanceModel('linear');
+              posAudio.setDirectionalCone(180, 230, 0.15);
+              // Attach to root so it feels like the TV is the sound source.
+              root.add(posAudio);
+            } catch (e) {
+              // Some browsers disallow this; silently ignore.
+            }
+          }
+
           setHint('Jumbotron playing ✅');
         } catch (e) {
           log('[jumbotron] video start failed: ' + (e?.message || e));
           setHint('Jumbotron: tap again to start (autoplay blocked).');
+          // Fallback to muted autoplay-friendly
+          try {
+            video.muted = true;
+            await video.play();
+            setHint('Jumbotron playing (muted) ✅');
+          } catch (_) {}
         }
       };
 
-      // first gesture starts
+      // First gesture starts
       const startOnGesture = () => start();
       window.addEventListener('pointerdown', startOnGesture);
+
+      // Attempt auto-start on XR session start (still may require a gesture; we show hint if blocked)
+      engine.onXRSessionStart?.(() => {
+        start();
+      });
 
       // Expose helper
       window.SCARLETT = window.SCARLETT || {};

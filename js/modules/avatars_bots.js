@@ -13,7 +13,29 @@ function makeBot({ color=0x3b82f6, seated=false }={}) {
     new THREE.MeshStandardMaterial({ color: 0xf3f4f6, roughness: 0.8, metalness: 0.0 })
   );
   head.position.y = seated ? 1.28 : 1.65;
-  g.add(body, head);
+
+  // Simple arms (for promo clarity)
+  const armMat = new THREE.MeshStandardMaterial({ color: 0xf3f4f6, roughness: 0.8, metalness: 0.0 });
+  const upperGeo = new THREE.CylinderGeometry(0.05, 0.06, 0.42, 10);
+  const foreGeo = new THREE.CylinderGeometry(0.045, 0.05, 0.38, 10);
+  const handGeo = new THREE.SphereGeometry(0.06, 10, 10);
+
+  const mkArm = (side=1) => {
+    const a = new THREE.Group();
+    const upper = new THREE.Mesh(upperGeo, armMat);
+    const fore = new THREE.Mesh(foreGeo, armMat);
+    const hand = new THREE.Mesh(handGeo, armMat);
+    upper.position.y = -0.02;
+    fore.position.y = -0.32;
+    hand.position.y = -0.55;
+    a.add(upper, fore, hand);
+    a.position.set(0.22 * side, seated ? 1.02 : 1.3, seated ? -0.08 : 0.02);
+    a.rotation.z = 0.45 * side;
+    a.rotation.x = seated ? 0.65 : 0.2;
+    return a;
+  };
+
+  g.add(body, head, mkArm(1), mkArm(-1));
   return g;
 }
 
@@ -23,15 +45,17 @@ export function AvatarsBotsModule() {
     init(engine) {
       const s = engine.scene;
 
+      const pitY = -1.22; // match table height in the divot
+
       // Guard at pit edge
       const guard = makeBot({ color: 0x111827 });
-      guard.position.set(-6.5, 0, -2.0);
+      guard.position.set(-6.5, pitY, -2.0);
       guard.rotation.y = Math.PI / 2;
       s.add(guard);
 
       // Spectator
       const spec = makeBot({ color: 0x16a34a });
-      spec.position.set(6.5, 0, -2.5);
+      spec.position.set(6.5, pitY, -2.5);
       spec.rotation.y = -Math.PI / 2;
       s.add(spec);
 
@@ -50,7 +74,7 @@ export function AvatarsBotsModule() {
       for (let i = 0; i < 6; i++) {
         if (i === 0) continue; // open seat
         const bot = makeBot({ color: [0xef4444,0xf59e0b,0x3b82f6,0xa855f7,0x06b6d4][(i-1)%5], seated: true });
-        bot.position.set(seats[i].x, 0, seats[i].z);
+        bot.position.set(seats[i].x, pitY, seats[i].z);
         bot.rotation.y = seats[i].r;
         s.add(bot);
       }

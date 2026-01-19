@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <title>SCARLETTVR Demo v10 FIX</title>
+  <title>SCARLETTVR Demo v11 Lobby + Jumbotron</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -15,18 +15,28 @@
       background: rgba(0,0,0,0.60); border: 1px solid rgba(120,200,220,0.25);
       border-radius: 14px; padding: 10px 12px;
       backdrop-filter: blur(6px);
+      pointer-events: auto;
     }
+    #hud * { pointer-events: auto; }
     #hud .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
     #hud button {
       background:#14202b; color:#e8f7ff; border:1px solid rgba(120,200,220,0.25);
-      border-radius: 12px; padding: 10px 12px; font-weight: 650; letter-spacing: 0.2px;
+      border-radius: 12px; padding: 10px 12px; font-weight: 750; letter-spacing: 0.2px;
     }
     #hud button:active { transform: scale(0.98); }
+    #status { opacity:.9; margin-left:auto; }
+    #panel {
+      margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(120,200,220,0.15);
+      display:none;
+    }
     #log {
-      margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(120,200,220,0.15);
-      white-space: pre-wrap; word-break: break-word; max-height: 30vh; overflow:auto;
+      white-space: pre-wrap; word-break: break-word; max-height: 32vh; overflow:auto;
       color: #bfefff;
     }
+    #help {
+      margin-top: 8px; color:#d7eaff; opacity:0.9;
+    }
+    #help code { color:#9fe; }
   </style>
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 </head>
@@ -34,11 +44,24 @@
   <div id="hud">
     <div class="row">
       <button id="btnEnter">ENTER VR</button>
+      <button id="btnTeleport">TELEPORT: ON</button>
       <button id="btnDiag">DIAG</button>
       <button id="btnReset">RESET</button>
-      <span id="status" style="opacity:.9">booting…</span>
+      <span id="status">booting…</span>
     </div>
-    <div id="log">Loading engine…</div>
+    <div class="row" style="margin-top:10px">
+      <button id="btnLoad">LOAD</button>
+      <button id="btnPlay">PLAY</button>
+      <button id="btnPause">PAUSE</button>
+      <button id="btnNext">NEXT</button>
+    </div>
+    <div id="panel">
+      <div id="help">
+        Android: drag to look, tap floor to teleport. Quest: trigger to click + teleport.<br/>
+        If video is blocked, it will show a text status on the screen.
+      </div>
+      <div id="log">Loading engine…</div>
+    </div>
   </div>
 
   <a-scene id="scene"
@@ -46,85 +69,119 @@
     renderer="antialias: true; colorManagement: true"
     xr-mode-ui="enabled: false"
     webxr="requiredFeatures: local-floor; optionalFeatures: bounded-floor, hand-tracking"
-    background="color: #081018">
+    background="color: #050a10">
 
-    <!-- Camera Rig -->
-    <a-entity id="rig" position="0 0 4">
+    <a-assets>
+      <!-- CC0 sample playlist for testing -->
+      <video id="screenVideo" crossorigin="anonymous" playsinline webkit-playsinline></video>
+    </a-assets>
+
+    <!-- Rig -->
+    <a-entity id="rig" position="0 0 6" rig-locomotion>
       <a-entity id="cam" camera position="0 1.65 0" look-controls="pointerLockEnabled: false"></a-entity>
 
-      <!-- Mobile / Desktop cursor so we NEVER go black from missing controllers -->
+      <!-- Mouse/touch cursor so Android always works -->
       <a-entity id="cursor"
         cursor="rayOrigin: mouse; fuse: false"
-        raycaster="objects: .clickable, .teleportable; far: 30">
+        raycaster="objects: .clickable, .teleportable; far: 40">
       </a-entity>
 
-      <!-- Quest controllers (created but safe if missing) -->
+      <!-- Quest controllers (safe if missing) -->
       <a-entity id="leftHand" laser-controls="hand: left"
-        raycaster="objects: .clickable, .teleportable; far: 30"
+        raycaster="objects: .clickable, .teleportable; far: 40"
         line="opacity: 0.9"
-        controller-ui>
-      </a-entity>
+        controller-ui></a-entity>
+
       <a-entity id="rightHand" laser-controls="hand: right"
-        raycaster="objects: .clickable, .teleportable; far: 30"
+        raycaster="objects: .clickable, .teleportable; far: 40"
         line="opacity: 0.9"
-        controller-ui>
-      </a-entity>
+        controller-ui></a-entity>
     </a-entity>
 
-    <!-- LIGHTS (if lights are missing you get black; keep these always-on) -->
-    <a-entity light="type: ambient; intensity: 0.75"></a-entity>
-    <a-entity light="type: directional; intensity: 1.0" position="2 5 3"></a-entity>
-    <a-entity light="type: point; intensity: 0.8; distance: 16" position="-2 3 -2"></a-entity>
+    <!-- LIGHTS -->
+    <a-entity light="type: ambient; intensity: 0.65"></a-entity>
+    <a-entity light="type: directional; intensity: 1.0" position="2 6 3"></a-entity>
+    <a-entity light="type: point; intensity: 1.2; distance: 24" position="0 4 -4"></a-entity>
+    <a-entity light="type: point; intensity: 0.8; distance: 18" position="-6 3 2"></a-entity>
 
-    <!-- WORLD -->
-    <a-plane id="floor" class="teleportable"
-      rotation="-90 0 0" width="40" height="40"
-      material="color:#1a2430; roughness:1; metalness:0"></a-plane>
+    <!-- LOBBY ROOM -->
+    <a-entity id="lobby">
+      <!-- floor -->
+      <a-plane id="floor" class="teleportable"
+        rotation="-90 0 0" width="40" height="40"
+        material="color:#111a23; roughness:1; metalness:0"></a-plane>
 
-    <a-ring rotation="-90 0 0" radius-inner="4.2" radius-outer="6.4"
-      material="color:#16202b; roughness:1; metalness:0; opacity:0.98"></a-ring>
+      <!-- carpet -->
+      <a-circle rotation="-90 0 0" radius="9.5"
+        material="color:#0f1a24; opacity:0.95"></a-circle>
+      <a-ring rotation="-90 0 0" radius-inner="9.3" radius-outer="9.55"
+        material="color:#0b131b; opacity:0.95"></a-ring>
 
+      <!-- walls (simple box shell) -->
+      <a-box position="0 2 -12" width="40" height="6" depth="0.4" material="color:#070b10; roughness:1"></a-box>
+      <a-box position="0 2 12"  width="40" height="6" depth="0.4" material="color:#070b10; roughness:1"></a-box>
+      <a-box position="-20 2 0" width="0.4" height="6" depth="24.4" material="color:#070b10; roughness:1"></a-box>
+      <a-box position="20 2 0"  width="0.4" height="6" depth="24.4" material="color:#070b10; roughness:1"></a-box>
+
+      <!-- ceiling -->
+      <a-plane position="0 6 0" rotation="90 0 0" width="40" height="24"
+        material="color:#04070b; roughness:1"></a-plane>
+
+      <!-- neon strips -->
+      <a-box position="0 5.8 -11.8" width="18" height="0.08" depth="0.08"
+        material="color:#00d2ff; emissive:#00d2ff; emissiveIntensity:1.2"></a-box>
+      <a-box position="0 5.8 11.8" width="18" height="0.08" depth="0.08"
+        material="color:#ff2bd6; emissive:#ff2bd6; emissiveIntensity:1.2"></a-box>
+    </a-entity>
+
+    <!-- Teleport ring -->
     <a-ring id="tpRing" rotation="-90 0 0" radius-inner="0.18" radius-outer="0.24"
-      material="color:#00d2ff; emissive:#00d2ff; emissiveIntensity:0.9; opacity:0.95"
+      material="color:#00d2ff; emissive:#00d2ff; emissiveIntensity:0.95; opacity:0.95"
       visible="false"></a-ring>
 
-    <!-- Table placeholder (always present even if JS fails) -->
-    <a-cylinder position="0 0.75 -2" radius="1.2" height="0.12"
-      material="color:#7a0011; roughness:0.9; metalness:0.1"></a-cylinder>
-    <a-cylinder position="0 0.38 -2" radius="0.18" height="0.76"
-      material="color:#2b2b2b; roughness:1; metalness:0"></a-cylinder>
+    <!-- POKER TABLE + CHAIRS -->
+    <a-entity id="tableArea" position="0 0 -2">
+      <a-cylinder position="0 0.78 0" radius="1.45" height="0.14"
+        material="color:#7a0011; roughness:0.9; metalness:0.1"></a-cylinder>
+      <a-cylinder position="0 0.42 0" radius="0.2" height="0.86"
+        material="color:#2b2b2b; roughness:1; metalness:0"></a-cylinder>
 
-    <!-- Jumbotron (no video by default to avoid CORS/autoplay issues) -->
-    <a-entity id="jumbotron" position="0 2.2 -6">
-      <a-plane id="screen" width="5.2" height="2.9" radius="0.06"
-        material="color:#0d141c; shader: flat"></a-plane>
-      <a-plane width="5.4" height="3.1" position="0 0 -0.02"
-        material="color:#000; opacity:0.65"></a-plane>
-
-      <a-text id="screenText" value="JUMBOTRON READY"
-        position="0 0 0.01" align="center" width="6.2" color="#dfefff"></a-text>
-
-      <!-- Button panel under screen -->
-      <a-entity id="buttonPanel" position="0 -2.15 0">
-        <a-plane width="5.2" height="0.8" radius="0.06"
-          material="color:#0e1620; opacity:0.92"></a-plane>
-
-        <a-entity position="-1.65 0 0.02" ui-button="label: LOAD; action: load"></a-entity>
-        <a-entity position="-0.55 0 0.02" ui-button="label: PLAY; action: play"></a-entity>
-        <a-entity position="0.55 0 0.02" ui-button="label: PAUSE; action: pause"></a-entity>
-        <a-entity position="1.65 0 0.02" ui-button="label: NEXT; action: next"></a-entity>
+      <!-- chairs -->
+      <a-entity id="chairs">
+        <a-entity chair position="0 0 2.35" rotation="0 180 0"></a-entity>
+        <a-entity chair position="2.05 0 1.05" rotation="0 -125 0"></a-entity>
+        <a-entity chair position="2.05 0 -1.05" rotation="0 -55 0"></a-entity>
+        <a-entity chair position="0 0 -2.35" rotation="0 0 0"></a-entity>
+        <a-entity chair position="-2.05 0 -1.05" rotation="0 55 0"></a-entity>
+        <a-entity chair position="-2.05 0 1.05" rotation="0 125 0"></a-entity>
       </a-entity>
+
+      <!-- simple bot placeholders (not AI yet) -->
+      <a-entity bot position="0 0 3.05" rotation="0 180 0" bot="name: BOT_1"></a-entity>
+      <a-entity bot position="2.55 0 1.15" rotation="0 -125 0" bot="name: BOT_2"></a-entity>
+      <a-entity bot position="2.55 0 -1.15" rotation="0 -55 0" bot="name: BOT_3"></a-entity>
+      <a-entity bot position="0 0 -3.05" rotation="0 0 0" bot="name: BOT_4"></a-entity>
+      <a-entity bot position="-2.55 0 -1.15" rotation="0 55 0" bot="name: BOT_5"></a-entity>
+      <a-entity bot position="-2.55 0 1.15" rotation="0 125 0" bot="name: BOT_6"></a-entity>
     </a-entity>
 
-    <!-- In-world diag text (if DOM HUD hidden) -->
-    <a-entity position="0 1.65 -1.2" rotation="-10 0 0">
-      <a-plane width="1.35" height="0.6" material="color:#000; opacity:0.55"></a-plane>
-      <a-text id="diagText3d" value="booting…" position="0 0 0.01" align="center" width="1.7" color="#b6f7ff"></a-text>
+    <!-- JUMBOTRON -->
+    <a-entity id="jumbotron" position="0 2.6 -10.5">
+      <a-plane id="screen" width="7.2" height="4.05" radius="0.06"
+        material="shader: flat; src: #screenVideo; color: #101820"></a-plane>
+      <a-plane width="7.5" height="4.35" position="0 0 -0.02"
+        material="color:#000; opacity:0.75"></a-plane>
+      <a-text id="screenText" value="JUMBOTRON READY"
+        position="0 -2.35 0.01" align="center" width="10" color="#dfefff"></a-text>
     </a-entity>
 
-    <a-sky color="#050a10"></a-sky>
+    <!-- 3D Diagnostics -->
+    <a-entity position="0 1.65 -0.9" rotation="-10 0 0">
+      <a-plane width="1.5" height="0.62" material="color:#000; opacity:0.55"></a-plane>
+      <a-text id="diagText3d" value="booting…" position="0 0 0.01" align="center" width="1.9" color="#b6f7ff"></a-text>
+    </a-entity>
 
-    <script src="js/boot.js"></script>
+    <script src="js/app.js"></script>
   </a-scene>
 </body>
 </html>

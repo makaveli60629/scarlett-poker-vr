@@ -1,61 +1,29 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="color-scheme" content="dark" />
-  <title>SCARLETTVR • Poker Demo (V8)</title>
-  <link rel="stylesheet" href="./css/style.css" />
+  <meta charset="utf-8"/>
+  <title>SCARLETT VR Poker Demo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 </head>
 <body>
-  <!-- Overlay HUD (touch-safe) -->
-  <div id="hud" class="hud">
-    <div class="hudRow">
-      <div class="brand">
-        <div class="brandTitle">SCARLETTVR</div>
-        <div class="brandSub">Poker Demo • Modules + Jumbotron</div>
-      </div>
-      <div class="hudButtons">
-        <button id="btnEnterVR" class="hudBtn">ENTER VR</button>
-        <button id="btnTeleport" class="hudBtn">TELEPORT: OFF</button>
-        <button id="btnDiag" class="hudBtn">DIAG</button>
-        <button id="btnHideHUD" class="hudBtn">HIDE HUD</button>
-        <button id="btnReset" class="hudBtn">RESET</button>
-      </div>
-    </div>
-    <div class="hudRow hudRow2">
-      <div id="hudStatus" class="hudStatus">booting…</div>
-      <div id="hudHint" class="hudHint">Android: use joysticks. Quest: thumbsticks + trigger teleport.</div>
-    </div>
-    <div id="diagPanel" class="diagPanel hidden">
-      <div class="diagHeader">
-        <div class="diagTitle">SCARLETT DIAGNOSTICS</div>
-        <div class="diagActions">
-          <button id="btnCopyDiag" class="hudBtn">COPY REPORT</button>
-          <button id="btnHardReload" class="hudBtn">HARD RELOAD</button>
-        </div>
-      </div>
-      <pre id="diagText" class="diagText">(no report yet)</pre>
-    </div>
-  </div>
+<a-scene xr-mode-ui="enabled: true"
+         webxr="requiredFeatures: local-floor"
+         background="color: #111">
 
-  <!-- Touch joysticks (Android / mobile debugging) -->
-  <div id="touchControls" class="touchControls">
-    <div id="joyLeft" class="joystick left">
-      <div class="stick"></div>
-    </div>
-    <div id="joyRight" class="joystick right">
-      <div class="stick"></div>
-    </div>
-    <button id="btnTouchJump" class="touchBtn">UP</button>
-  </div>
+  <a-entity id="rig" position="0 1.6 3">
+    <a-camera wasd-controls look-controls></a-camera>
+  </a-entity>
 
-  <!-- Video used as Jumbotron texture (muted until user interaction) -->
-  <video id="abcVideo" class="hidden" playsinline webkit-playsinline muted></video>
+  <a-plane rotation="-90 0 0" width="20" height="20" color="#222"></a-plane>
 
-  <!-- Three.js canvas goes here -->
-  <div id="app" class="app"></div>
+  <a-box position="0 1 -3" depth="1" height="0.5" width="2" color="#8b0000"></a-box>
 
-  <script type="module" src="./js/core/router.js"></script>
+  <a-text value="SCARLETT VR POKER DEMO"
+          position="0 2 -3"
+          align="center"
+          color="#fff"></a-text>
+
+</a-scene>
 </body>
 </html>

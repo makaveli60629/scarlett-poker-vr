@@ -2,7 +2,7 @@
 // SCARLETT DEMO v0.1 (LOCKED)
 // Goals: deterministic boot, deterministic spawn, Android sticks, XR-ready teleport.
 
-const BUILD = "SCARLETT_DEMO_v0_1_LOCKED";
+const BUILD = "SCARLETT_DEMO_v0_1_HOTFIX2";
 const DEMO_LOCKED = true;
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
@@ -80,8 +80,8 @@ window.addEventListener("resize", () => {
 
 // ---- State ----
 const state = {
-  teleport: false,
-  yaw: Math.PI,
+  teleport: true,
+  yaw: 0,
   pitch: 0,
   _tpTarget: null,
   _btnLatch: new Map(),
@@ -94,7 +94,8 @@ const state = {
 
 // ---- Spawn (authoritative) ----
 // Spawn should face the teaching table (table is centered at z=0).
-const SPAWN = new THREE.Vector3(0, 0, 22.0);
+// Closer spawn for Android (you should be able to immediately walk into the pit)
+const SPAWN = new THREE.Vector3(0, 0, 10.0);
 function applySpawn(){
   rig.position.copy(SPAWN);
   // IMPORTANT: yaw=0 means camera looks toward -Z (toward the table).
@@ -109,6 +110,38 @@ applySpawn();
 // ---- Build world ----
 dwrite("[world] buildWorld()");
 const world = buildWorld(scene, dwrite);
+
+// ---- Jumbotron (optional) ----
+// Put your stream URL here. It must allow cross-origin video for WebGL (CORS headers).
+// If empty or blocked, the screen stays dark (no popups).
+const JUMBOTRON_URL = "";
+
+function initJumbotron(){
+  if (!world || typeof world.setJumbotronVideo !== "function") return;
+  if (!JUMBOTRON_URL) {
+    dwrite("[jumbotron] URL not set (screen idle)");
+    return;
+  }
+
+  const v = document.createElement("video");
+  v.src = JUMBOTRON_URL;
+  v.crossOrigin = "anonymous";
+  v.muted = true;
+  v.playsInline = true;
+  v.loop = true;
+  v.autoplay = true;
+
+  const tryPlay = () => v.play?.().catch(() => {});
+  v.addEventListener("canplay", () => {
+    dwrite("[jumbotron] canplay ✅");
+    world.setJumbotronVideo(v);
+    tryPlay();
+  });
+  v.addEventListener("error", () => dwrite("[jumbotron] video error (CORS/format?)"));
+  // Kick off
+  tryPlay();
+}
+initJumbotron();
 
 // Extra point lights (table visibility)
 const p1 = new THREE.PointLight(0xffffff, 0.9, 25); p1.position.set(0, 6, 0); scene.add(p1);
@@ -137,6 +170,9 @@ function setTeleport(on){
   dwrite(`[teleport] ${state.teleport ? "ON" : "OFF"}`);
 }
 btnTeleport?.addEventListener("click", () => setTeleport(!state.teleport));
+
+// Default teleport ON for promo/demo so you always have it available.
+setTeleport(true);
 
 // ---- Virtual Sticks (Android) ----
 const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
@@ -240,7 +276,12 @@ const laserGeom = new THREE.BufferGeometry().setFromPoints([
 function makeController(i){
   const c = renderer.xr.getController(i);
   c.userData.connected = false;
-  c.addEventListener("connected", () => { c.userData.connected = true; dwrite(`[xr] controller${i} connected ✅`); });
+  c.addEventListener("connected", (e) => {
+    c.userData.connected = true;
+    c.userData.inputSource = e?.data || null;
+    c.userData.handedness = e?.data?.handedness || "unknown";
+    dwrite(`[xr] controller${i} connected ✅ handedness=${c.userData.handedness}`);
+  });
   c.addEventListener("disconnected", () => { c.userData.connected = false; dwrite(`[xr] controller${i} disconnected`); });
   const line = new THREE.Line(laserGeom, laserMat);
   line.scale.z = 12;
@@ -304,32 +345,39 @@ function readXRMoveAndButtons(dt){
       setTeleport(!state.teleport);
     }
 
-    // Axes mapping varies by browser:
-    // - Per-controller sticks often come in as [0],[1] for THAT controller.
-    // - Some combined mappings expose a "right stick" at [2],[3].
-    const lx = gp.axes?.[0] ?? 0;
-    const ly = gp.axes?.[1] ?? 0;
-    const turnAxis = (src.handedness === "right")
-      ? (gp.axes?.[0] ?? 0)                 // right controller stick X
-      : (gp.axes?.[2] ?? gp.axes?.[0] ?? 0); // combined right-stick X OR fallback
+    // Axes mapping varies a lot across Quest/Oculus browsers.
+    // Some report sticks on [0,1]; others use [2,3]; some expose both.
+    const axes = gp.axes || [];
+    const mag01 = Math.hypot(axes[0] || 0, axes[1] || 0);
+    const mag23 = Math.hypot(axes[2] || 0, axes[3] || 0);
 
     const dead = 0.14;
-    const Lx = Math.abs(lx) > dead ? lx : 0;
-    const Ly = Math.abs(ly) > dead ? ly : 0;
-    const Rx = Math.abs(turnAxis) > dead ? turnAxis : 0;
 
-    // Turn: right hand preferred, but some browsers only report one gamepad.
-    if (!state.teleport && Math.abs(Rx) > 0){
-      state.yaw -= Rx * 2.4 * dt;
-      rig.rotation.y = state.yaw;
+    // If we have 4 axes, treat 0/1 as left-stick and 2/3 as right-stick (common combined mapping).
+    const hasCombined = axes.length >= 4;
+
+    const leftX = hasCombined ? (axes[0] || 0) : (mag23 > mag01 ? (axes[2] || 0) : (axes[0] || 0));
+    const leftY = hasCombined ? (axes[1] || 0) : (mag23 > mag01 ? (axes[3] || 0) : (axes[1] || 0));
+    const rightX = hasCombined ? (axes[2] || 0) : (mag01 > mag23 ? (axes[0] || 0) : (axes[2] || 0));
+
+    const Lx = Math.abs(leftX) > dead ? leftX : 0;
+    const Ly = Math.abs(leftY) > dead ? leftY : 0;
+    const Rx = Math.abs(rightX) > dead ? rightX : 0;
+
+    // Turn: prefer right-handed inputSource when possible.
+    if (!state.teleport && Rx){
+      if (src.handedness === "right" || src.handedness === "none" || src.handedness === "" || src.handedness === "unknown"){
+        state.yaw -= Rx * 2.6 * dt;
+        rig.rotation.y = state.yaw;
+      }
     }
 
     // Move: prefer left-handed inputSource, but fall back if handedness is unknown.
     if (state.teleport) continue;
-    if (src.handedness !== "left" && src.handedness !== "none" && src.handedness !== "") continue;
+    if (src.handedness !== "left" && src.handedness !== "none" && src.handedness !== "" && src.handedness !== "unknown") continue;
 
     if (!Lx && !Ly) continue;
-    const fwd = -Ly; // FIX: up=forward on Quest
+    const fwd = -Ly; // up=forward
     const str = Lx;
 
     const speed = 2.7;
@@ -451,7 +499,11 @@ renderer.setAnimationLoop(() => {
     readXRMoveAndButtons(dt);
 
     // Pick an aiming controller: prefer a connected right-hand controller.
-    const aim = (ctl1.userData.connected ? ctl1 : (ctl0.userData.connected ? ctl0 : null));
+    const aim = (
+      (ctl0.userData.connected && ctl0.userData.handedness === "right") ? ctl0 :
+      (ctl1.userData.connected && ctl1.userData.handedness === "right") ? ctl1 :
+      (ctl0.userData.connected ? ctl0 : (ctl1.userData.connected ? ctl1 : null))
+    );
 
     // Only show lasers when controllers are actually connected/tracked.
     if (ctl0.userData.laserLine) ctl0.userData.laserLine.visible = !!ctl0.userData.connected && state.teleport;
@@ -499,6 +551,6 @@ renderer.setAnimationLoop(() => {
     if (ctl1.userData.laserLine) ctl1.userData.laserLine.visible = false;
   }
 
-  world?.tick?.(dt);
+  world?.tick?.(dt, { rig, camera, inXR });
   renderer.render(scene, camera);
 });

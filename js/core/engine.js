@@ -61,6 +61,10 @@ export class Engine {
     // module registry
     this.modules = [];
 
+    // XR hooks
+    this._xrStartHandlers = [];
+    this._xrEndHandlers = [];
+
 
     // VR button
     this.vrButton = VRButton.createButton(this.renderer);
@@ -76,11 +80,25 @@ export class Engine {
     this.renderer.xr.addEventListener('sessionstart', () => {
       log('[xr] sessionstart');
       setHint('Quest: thumbsticks move/turn • Trigger teleports when Teleport is ON');
+      for (const fn of this._xrStartHandlers) {
+        try { fn(); } catch (_) {}
+      }
     });
     this.renderer.xr.addEventListener('sessionend', () => {
       log('[xr] sessionend');
       setHint('Android: use joysticks • Non-VR: WASD + mouse');
+      for (const fn of this._xrEndHandlers) {
+        try { fn(); } catch (_) {}
+      }
     });
+  }
+
+  onXRSessionStart(fn) {
+    if (typeof fn === 'function') this._xrStartHandlers.push(fn);
+  }
+
+  onXRSessionEnd(fn) {
+    if (typeof fn === 'function') this._xrEndHandlers.push(fn);
   }
 
   addModule(mod) {

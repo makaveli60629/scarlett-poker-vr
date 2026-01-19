@@ -93,11 +93,13 @@ const state = {
 };
 
 // ---- Spawn (authoritative) ----
-const SPAWN = new THREE.Vector3(0, 0, 24.0);
+// Spawn should face the teaching table (table is centered at z=0).
+const SPAWN = new THREE.Vector3(0, 0, 22.0);
 function applySpawn(){
   rig.position.copy(SPAWN);
-  rig.rotation.set(0, Math.PI, 0);
-  state.yaw = Math.PI;
+  // IMPORTANT: yaw=0 means camera looks toward -Z (toward the table).
+  rig.rotation.set(0, 0, 0);
+  state.yaw = 0;
   state.pitch = 0;
   camera.position.set(0, 1.6, 0);
   camera.rotation.set(0,0,0);
@@ -226,15 +228,31 @@ window.addEventListener("pointerup", (e) => {
 }, { passive:true });
 
 // ---- VR controllers: laser + reticle + teleport ----
+// NOTE: Some headsets report controller(0) as LEFT; others as RIGHT.
+// We create both controllers and only show lasers when the controller is actually connected/tracked.
 const tmpMat4 = new THREE.Matrix4();
-const ctlR = renderer.xr.getController(0);
-scene.add(ctlR);
-
 const laserMat = new THREE.LineBasicMaterial({ color: 0x00ffff });
-const laserGeom = new THREE.BufferGeometry().setFromPoints([ new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1) ]);
-const laserLine = new THREE.Line(laserGeom, laserMat);
-laserLine.scale.z = 12;
-ctlR.add(laserLine);
+const laserGeom = new THREE.BufferGeometry().setFromPoints([
+  new THREE.Vector3(0,0,0),
+  new THREE.Vector3(0,0,-1)
+]);
+
+function makeController(i){
+  const c = renderer.xr.getController(i);
+  c.userData.connected = false;
+  c.addEventListener("connected", () => { c.userData.connected = true; dwrite(`[xr] controller${i} connected ✅`); });
+  c.addEventListener("disconnected", () => { c.userData.connected = false; dwrite(`[xr] controller${i} disconnected`); });
+  const line = new THREE.Line(laserGeom, laserMat);
+  line.scale.z = 12;
+  line.visible = false;
+  c.add(line);
+  c.userData.laserLine = line;
+  scene.add(c);
+  return c;
+}
+
+const ctl0 = makeController(0);
+const ctl1 = makeController(1);
 
 const reticle = new THREE.Mesh(
   new THREE.RingGeometry(0.12, 0.17, 32),
@@ -244,14 +262,17 @@ reticle.rotation.x = -Math.PI/2;
 reticle.visible = false;
 scene.add(reticle);
 
-ctlR.addEventListener("selectstart", () => {
+function tryTeleport(){
   if (!state.teleport) return;
   const p = state._tpTarget;
   if (!p) return;
   rig.position.x = p.x;
   rig.position.z = p.z;
   dwrite(`[teleport] moved to x=${p.x.toFixed(2)} z=${p.z.toFixed(2)}`);
-});
+}
+
+ctl0.addEventListener("selectstart", tryTeleport);
+ctl1.addEventListener("selectstart", tryTeleport);
 
 function edgeButton(key, pressed){
   const prev = state._btnLatch.get(key) || false;
@@ -267,28 +288,49 @@ function readXRMoveAndButtons(dt){
     const gp = src?.gamepad;
     if (!gp) continue;
 
-    // Toggle teleport on A/X or B/Y (buttons 4/5)
-    const b4 = gp.buttons?.[4]?.pressed;
-    const b5 = gp.buttons?.[5]?.pressed;
-    if (edgeButton(`${src.handedness}:b4`, b4) || edgeButton(`${src.handedness}:b5`, b5)){
+    // Buttons: make teleport toggle reliable across Quest/Oculus mappings.
+    const b0 = gp.buttons?.[0]?.pressed; // A / X
+    const b1 = gp.buttons?.[1]?.pressed; // B / Y
+    const b3 = gp.buttons?.[3]?.pressed; // stick press (often)
+    const b4 = gp.buttons?.[4]?.pressed; // (sometimes) X/Y
+    const b5 = gp.buttons?.[5]?.pressed; // (sometimes) A/B
+    if (
+      edgeButton(`${src.handedness}:b0`, b0) ||
+      edgeButton(`${src.handedness}:b1`, b1) ||
+      edgeButton(`${src.handedness}:b3`, b3) ||
+      edgeButton(`${src.handedness}:b4`, b4) ||
+      edgeButton(`${src.handedness}:b5`, b5)
+    ){
       setTeleport(!state.teleport);
     }
 
-    // Left stick movement
-    if (src.handedness !== "left") continue;
-
-    const axX = gp.axes?.[2] ?? gp.axes?.[0] ?? 0;
-    const axY = gp.axes?.[3] ?? gp.axes?.[1] ?? 0;
+    // Axes mapping varies by browser:
+    // - Per-controller sticks often come in as [0],[1] for THAT controller.
+    // - Some combined mappings expose a "right stick" at [2],[3].
+    const lx = gp.axes?.[0] ?? 0;
+    const ly = gp.axes?.[1] ?? 0;
+    const turnAxis = (src.handedness === "right")
+      ? (gp.axes?.[0] ?? 0)                 // right controller stick X
+      : (gp.axes?.[2] ?? gp.axes?.[0] ?? 0); // combined right-stick X OR fallback
 
     const dead = 0.14;
-    const sx = Math.abs(axX) > dead ? axX : 0;
-    const sy = Math.abs(axY) > dead ? axY : 0;
-    if (!sx && !sy) continue;
+    const Lx = Math.abs(lx) > dead ? lx : 0;
+    const Ly = Math.abs(ly) > dead ? ly : 0;
+    const Rx = Math.abs(turnAxis) > dead ? turnAxis : 0;
 
+    // Turn: right hand preferred, but some browsers only report one gamepad.
+    if (!state.teleport && Math.abs(Rx) > 0){
+      state.yaw -= Rx * 2.4 * dt;
+      rig.rotation.y = state.yaw;
+    }
+
+    // Move: prefer left-handed inputSource, but fall back if handedness is unknown.
     if (state.teleport) continue;
+    if (src.handedness !== "left" && src.handedness !== "none" && src.handedness !== "") continue;
 
-    const fwd = -sy; // forward correct
-    const str = sx;
+    if (!Lx && !Ly) continue;
+    const fwd = -Ly; // FIX: up=forward on Quest
+    const str = Lx;
 
     const speed = 2.7;
     const yaw = rig.rotation.y;
@@ -408,14 +450,18 @@ renderer.setAnimationLoop(() => {
   if (inXR){
     readXRMoveAndButtons(dt);
 
-    // Laser always visible in XR
-    laserLine.visible = true;
+    // Pick an aiming controller: prefer a connected right-hand controller.
+    const aim = (ctl1.userData.connected ? ctl1 : (ctl0.userData.connected ? ctl0 : null));
 
-    if (state.teleport){
+    // Only show lasers when controllers are actually connected/tracked.
+    if (ctl0.userData.laserLine) ctl0.userData.laserLine.visible = !!ctl0.userData.connected && state.teleport;
+    if (ctl1.userData.laserLine) ctl1.userData.laserLine.visible = !!ctl1.userData.connected && state.teleport;
+
+    if (state.teleport && aim){
       // Teleport aim (intersect with y=0 plane)
-      tmpMat4.identity().extractRotation(ctlR.matrixWorld);
+      tmpMat4.identity().extractRotation(aim.matrixWorld);
       const dir = new THREE.Vector3(0,0,-1).applyMatrix4(tmpMat4).normalize();
-      const origin = new THREE.Vector3().setFromMatrixPosition(ctlR.matrixWorld);
+      const origin = new THREE.Vector3().setFromMatrixPosition(aim.matrixWorld);
 
       const denom = dir.y;
       if (Math.abs(denom) > 1e-4){
@@ -428,27 +474,29 @@ renderer.setAnimationLoop(() => {
           reticle.position.set(hit.x, 0.02, hit.z);
 
           const dist = origin.distanceTo(hit);
-          laserLine.scale.z = Math.min(20, Math.max(2, dist));
+          if (aim.userData.laserLine) aim.userData.laserLine.scale.z = Math.min(20, Math.max(2, dist));
         } else {
           reticle.visible = false;
           state._tpTarget = null;
-          laserLine.scale.z = 12;
+          if (aim.userData.laserLine) aim.userData.laserLine.scale.z = 12;
         }
       } else {
         reticle.visible = false;
         state._tpTarget = null;
-        laserLine.scale.z = 12;
+        if (aim.userData.laserLine) aim.userData.laserLine.scale.z = 12;
       }
     } else {
       reticle.visible = false;
       state._tpTarget = null;
-      laserLine.scale.z = 12;
+      if (ctl0.userData.laserLine) ctl0.userData.laserLine.scale.z = 12;
+      if (ctl1.userData.laserLine) ctl1.userData.laserLine.scale.z = 12;
     }
   } else {
     // DEMO LOCK: Android sticks are the official locomotion
     applyAndroidSticks(dt);
     reticle.visible = false;
-    laserLine.visible = false;
+    if (ctl0.userData.laserLine) ctl0.userData.laserLine.visible = false;
+    if (ctl1.userData.laserLine) ctl1.userData.laserLine.visible = false;
   }
 
   world?.tick?.(dt);

@@ -13,4 +13,12 @@ export function initWorld({ diag }) {
   }
   requestAnimationFrame(step);
   diag.write("[world] community card animation ✅");
+
+  const logLoaded = (id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener("model-loaded", () => diag.write(`[glb] ${id} model-loaded ✅`));
+    el.addEventListener("model-error", (e) => diag.write(`[glb] ${id} model-error ❌ ${e?.detail?.message||""}`));
+  };
+  ["mannequin","walker","bot1","bot2"].forEach(logLoaded);
 }

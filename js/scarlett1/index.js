@@ -1,4 +1,4 @@
-const BUILD = "SCARLETT_UPDATE_20_FULL_GH";
+const BUILD = "SCARLETT_UPDATE_21_FULL_GH";
 import { createDiag, hookDiagUI } from "../modules/diag.js";
 import { initWorld } from "../world.js";
 import { installTeleport } from "../modules/teleport.js";

@@ -1,60 +1,41 @@
-// js/diag.js — Scarlett Diagnostics v4.6
-export const Diag = (() => {
-  const panel = document.getElementById('diag');
-  const logs = [];
-  const maxLogs = 80;
+// /js/diag.js — minimal in-page diagnostics (no dependencies)
+let diagTextEl = null;
 
-  function ts() {
-    const d = new Date();
-    return d.toTimeString().slice(0,8);
-  }
+export function diagInit(build){
+  diagTextEl = document.getElementById("diagText");
+  writeLine(`=== SCARLETT DIAGNOSTICS ===`);
+  writeLine(`BUILD=${build}`);
+}
 
-  function log(msg) {
-    logs.push(`[${ts()}] ${msg}`);
-    if (logs.length > maxLogs) logs.shift();
-    if (panel && panel.style.display !== 'none') panel.textContent = render();
-  }
+function writeLine(line){
+  try{
+    if (!diagTextEl) return;
+    const now = performance.now();
+    diagTextEl.textContent += `\n[${(now/1000).toFixed(3)}] ${line}`;
+    // keep last ~5000 chars
+    if (diagTextEl.textContent.length > 5000){
+      diagTextEl.textContent = diagTextEl.textContent.slice(-5000);
+    }
+  } catch (_) {}
+}
 
-  function render(state) {
-    const s = state || window.APP_STATE || {};
-    const header =
-`MODULE TEST ✅
-three=${!!s.three}
-xr=${!!s.xr}
-renderer=${!!s.renderer}
-world=${!!s.world}
-floors=${s.floors ?? 0}
-inXR=${!!s.inXR}
-touch=${!!s.touchOn}
-build=${s.build || 'SCARLETT1_RUNTIME_ORCHESTRATED_v4_6'}
+export function diagWrite(msg){ writeLine(String(msg)); }
 
-XR ORCHESTRATED (v4.6)
-----------------------
-BUILD=${s.build || 'SCARLETT1_RUNTIME_ORCHESTRATED_v4_6'}
-inXR=${!!s.inXR}
-teleportEnabled=${!!s.teleportEnabled}
-touchOn=${!!s.touchOn}
-floors=${s.floors ?? 0}
+export function diagSetKV(key, val){
+  writeLine(`${key}=${val}`);
+}
 
-[LEFT]  connected=${!!(s.left && s.left.connected)} gamepad=${!!(s.left && s.left.gamepad)}
-[RIGHT] connected=${!!(s.right && s.right.connected)} gamepad=${!!(s.right && s.right.gamepad)}
+export function diagDumpEnv(){
+  const href = location.href;
+  const secureContext = window.isSecureContext;
+  const ua = navigator.userAgent;
+  const touch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
+  const maxTouchPoints = navigator.maxTouchPoints || 0;
+  const xr = !!navigator.xr;
 
-FPS=${s.fps ?? 0}
-
-Logs
-`;
-    return header + logs.slice(-50).join('\n');
-  }
-
-  function tick(state) {
-    if (panel && panel.style.display !== 'none') panel.textContent = render(state);
-  }
-
-  function toggle() {
-    if (!panel) return;
-    panel.style.display = (panel.style.display === 'none' || !panel.style.display) ? 'block' : 'none';
-    if (panel.style.display !== 'none') panel.textContent = render();
-  }
-
-  return { log, tick, toggle };
-})();
+  diagWrite(`href=${href}`);
+  diagWrite(`secureContext=${secureContext}`);
+  diagWrite(`ua=${ua}`);
+  diagWrite(`touch=${touch} maxTouchPoints=${maxTouchPoints}`);
+  diagWrite(`xr=${xr}`);
+}

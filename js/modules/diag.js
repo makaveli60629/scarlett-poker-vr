@@ -38,7 +38,6 @@ export function hookDiagUI(diag) {
       diag.write("[diag] copied to clipboard ✅");
     } catch (e) {
       diag.write("[diag] copy failed ❌ " + (e?.message || e));
-      // fallback select
       const el = document.getElementById("diagText");
       if (el) {
         const r = document.createRange();

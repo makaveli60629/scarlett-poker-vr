@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-  <title>SCARLETT VR Poker — Update 21 (Avatars GLB)</title>
+  <title>SCARLETT VR Poker — Update 22 (Quest Movement Fix + Avatars)</title>
   <link rel="stylesheet" href="./css/hud.css"/>
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/aframe-extras@6.1.1/dist/aframe-extras.min.js"></script>
@@ -16,8 +16,10 @@
       <button id="btnTeleport" class="hudBtn">Teleport: ON</button>
       <button id="btnMove" class="hudBtn">Move: ON</button>
       <button id="btnDiag" class="hudBtn">Diagnostics</button>
+      <button id="btnCopyDiag" class="hudBtn">Copy Diag</button>
       <button id="btnHideHUD" class="hudBtn">Hide HUD</button>
     </div>
+
     <div id="diagPanel" class="diag hidden">
       <div class="diagHeader">
         <div class="diagTitle">SCARLETT DIAGNOSTICS</div>
@@ -44,6 +46,7 @@
       <a-plane rotation="-90 0 0" width="70" height="70" color="#1b2430"></a-plane>
       <a-ring position="0 0.01 -2" rotation="-90 0 0" radius-inner="7" radius-outer="11" color="#16202b"></a-ring>
 
+      <!-- Table -->
       <a-entity id="tableZone" position="0 0 -8">
         <a-cylinder position="0 -0.22 0" radius="6.3" height="0.45" color="#0a1018"></a-cylinder>
         <a-cylinder position="0 0.6 0" radius="3.1" height="0.35" color="#0b1220"></a-cylinder>
@@ -56,11 +59,11 @@
           <a-plane class="card" position="0.75 0 0" rotation="-90 0 0" width="0.36" height="0.52" color="#e5e7eb"></a-plane>
         </a-entity>
 
-        <!-- 2 seated bots playing -->
-        <a-entity id="bot1" gltf-model="#glbChar" position="-2.0 0.0 1.9" rotation="0 25 0" scale="1 1 1"></a-entity>
-        <a-entity id="bot2" gltf-model="#glbChar" position="2.0 0.0 1.9" rotation="0 -25 0" scale="1 1 1"></a-entity>
-        <a-cylinder position="-2.0 0.25 2.6" radius="0.35" height="0.5" color="#111827"></a-cylinder>
-        <a-cylinder position="2.0 0.25 2.6" radius="0.35" height="0.5" color="#111827"></a-cylinder>
+        <!-- 2 seated bots -->
+        <a-entity id="bot1" gltf-model="#glbChar" position="-2.15 0.0 2.05" rotation="0 25 0" scale="1 1 1"></a-entity>
+        <a-entity id="bot2" gltf-model="#glbChar" position="2.15 0.0 2.05" rotation="0 -25 0" scale="1 1 1"></a-entity>
+        <a-cylinder position="-2.15 0.25 2.75" radius="0.35" height="0.5" color="#111827"></a-cylinder>
+        <a-cylinder position="2.15 0.25 2.75" radius="0.35" height="0.5" color="#111827"></a-cylinder>
       </a-entity>
 
       <!-- mannequin display -->
@@ -68,9 +71,9 @@
       <a-cylinder position="-6 0.05 -14" radius="0.7" height="0.1" color="#0f172a"></a-cylinder>
       <a-text value="AVATAR DISPLAY" position="-6 1.9 -14" rotation="0 90 0" align="center" width="6" color="#e5e7eb"></a-text>
 
-      <!-- walking bot -->
+      <!-- walking bot (smoothed) -->
       <a-entity id="walker" gltf-model="#glbAnim" animation-mixer="clip: *; loop: repeat"
-        scarlett-walk-loop="radius: 6.3; speed: 0.35; y: 0" scale="1 1 1"></a-entity>
+        scarlett-walk-loop="radius: 6.3; speed: 0.22; y: 0; smooth: 10" scale="1 1 1"></a-entity>
 
       <!-- teleport pads -->
       <a-entity id="teleTargets">
@@ -80,6 +83,7 @@
       </a-entity>
     </a-entity>
 
+    <!-- Player rig -->
     <a-entity id="rig" position="0 0 0" rotation="0 0 0">
       <a-entity id="camera" camera look-controls position="0 1.65 0"></a-entity>
 

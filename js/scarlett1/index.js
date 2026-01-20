@@ -1,5 +1,4 @@
-// /js/scarlett1/index.js
-const BUILD = "SCARLETT_UPDATE_17_FULL_GH";
+const BUILD = "SCARLETT_UPDATE_18_FULL_GH";
 window.SCARLETT = window.SCARLETT || {};
 window.SCARLETT.BUILD = BUILD;
 window.SCARLETT.engineAttached = true;
@@ -12,9 +11,17 @@ import { installMovement } from "../modules/movement.js";
 
 function qs(id){ return document.getElementById(id); }
 
+function setVrDiagVisible(v) {
+  const vr = qs("vrDiag");
+  if (vr) vr.setAttribute("visible", !!v);
+  const btn = qs("btnVrDiag");
+  if (btn) btn.textContent = `VR Diag: ${v ? "ON" : "OFF"}`;
+}
+
 async function installEnterVR(scene, diag){
   const btn = qs("btnEnterVR");
   if (!btn) return;
+
   btn.addEventListener("click", async () => {
     try{
       diag.write("[xr] Enter VR clicked…");
@@ -31,7 +38,9 @@ async function installEnterVR(scene, diag){
       const renderer = scene.renderer;
       renderer.xr.setReferenceSpaceType("local-floor");
       await renderer.xr.setSession(session);
+
       diag.write("[xr] session started ✅");
+      setVrDiagVisible(false);
     } catch(e){
       diag.write("[xr] start failed ❌ " + (e?.message || e));
     }
@@ -39,10 +48,32 @@ async function installEnterVR(scene, diag){
 }
 
 function safeSpawn(rig, diag){
-  // Spawn at teleSpawn pad (0,0,0) facing -Z where the table is at z=-8.
   rig.object3D.position.set(0, 0, 0);
   rig.object3D.rotation.set(0, 0, 0);
   diag.write("[spawn] rig=(0,0,0) facing -Z ✅");
+}
+
+function bindVrDiagToggles(diag){
+  let on = false;
+  const btn = qs("btnVrDiag");
+  btn?.addEventListener("click", () => {
+    on = !on;
+    setVrDiagVisible(on);
+    diag.write(`[vr-diag] ${on ? "ON" : "OFF"}`);
+  });
+
+  const left = qs("leftHand");
+  const right = qs("rightHand");
+  const toggle = () => {
+    on = !on;
+    setVrDiagVisible(on);
+    diag.write(`[vr-diag] ${on ? "ON" : "OFF"} (controller)`);
+  };
+
+  left?.addEventListener("xbuttondown", toggle);
+  left?.addEventListener("ybuttondown", toggle);
+  right?.addEventListener("abuttondown", toggle);
+  right?.addEventListener("bbuttondown", toggle);
 }
 
 async function main(){
@@ -73,9 +104,12 @@ async function main(){
 
   safeSpawn(rig, diag);
 
+  setVrDiagVisible(false);
+  bindVrDiagToggles(diag);
+
   try { initWorld({ diag }); } catch(e){ diag.write("[world] failed ❌ " + (e?.message || e)); }
   try { installTeleport({ scene, rig, diag }); } catch(e){ diag.write("[teleport] failed ❌ " + (e?.message || e)); }
-  try { installMovement({ scene, rig, camera, diag }); } catch(e){ diag.write("[move] failed ❌ " + (e?.message || e)); }
+  try { installMovement({ rig, camera, diag }); } catch(e){ diag.write("[move] failed ❌ " + (e?.message || e)); }
   await installEnterVR(scene, diag);
 
   diag.write("[ready] ✅");

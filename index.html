@@ -3,18 +3,17 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-  <title>SCARLETT VR Poker — Update 18 (Full GH)</title>
+  <title>SCARLETT VR Poker — Update 19 (Full GH)</title>
   <link rel="stylesheet" href="./css/hud.css"/>
-  <script>window.__SCARLETT_NO_AUTO_VR__=true;</script>
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 </head>
 <body>
+  <!-- 2D HUD (browser/Android). Oculus immersive may hide DOM overlays; that's OK. -->
   <div id="hud">
     <div class="row">
       <button id="btnEnterVR" class="hudBtn">Enter VR</button>
       <button id="btnTeleport" class="hudBtn">Teleport: ON</button>
       <button id="btnMove" class="hudBtn">Move: ON</button>
-      <button id="btnVrDiag" class="hudBtn">VR Diag: OFF</button>
       <button id="btnDiag" class="hudBtn">Diagnostics</button>
       <button id="btnHideHUD" class="hudBtn">Hide HUD</button>
     </div>
@@ -33,10 +32,12 @@
     renderer="antialias: true; colorManagement: true; physicallyCorrectLights: true;"
     background="color: #0b0f14">
 
+    <!-- Lighting -->
     <a-entity light="type: ambient; intensity: 0.65"></a-entity>
     <a-entity light="type: directional; intensity: 0.95" position="3 7 2"></a-entity>
     <a-entity light="type: point; intensity: 1.1; distance: 45" position="0 6 0"></a-entity>
 
+    <!-- Environment -->
     <a-entity id="env">
       <a-plane id="floor" rotation="-90 0 0" width="70" height="70" color="#1b2430"></a-plane>
       <a-ring position="0 0.01 -2" rotation="-90 0 0" radius-inner="7" radius-outer="11" color="#16202b"></a-ring>
@@ -109,13 +110,17 @@
     <a-entity id="rig" position="0 0 0" rotation="0 0 0">
       <a-entity id="camera" camera look-controls position="0 1.65 0"></a-entity>
 
-      <a-entity id="vrDiag" position="0.55 1.55 -2.0" visible="false">
-        <a-plane width="1.38" height="0.65" color="#000" opacity="0.65"></a-plane>
-        <a-text id="vrDiagText" value="booting…" width="1.28" align="left" position="-0.64 0.27 0.01" color="#7CFC90"></a-text>
-      </a-entity>
+      <a-entity id="leftHand"
+        laser-controls="hand: left"
+        raycaster="objects: .teleTarget; far: 30"
+        cursor="rayOrigin: entity; fuse: false"
+        line="opacity: 0.9"></a-entity>
 
-      <a-entity id="leftHand" laser-controls="hand: left" raycaster="objects: .teleTarget; far: 30" cursor="rayOrigin: entity; fuse: false" line="opacity: 0.9"></a-entity>
-      <a-entity id="rightHand" laser-controls="hand: right" raycaster="objects: .teleTarget; far: 30" cursor="rayOrigin: entity; fuse: false" line="opacity: 0.9"></a-entity>
+      <a-entity id="rightHand"
+        laser-controls="hand: right"
+        raycaster="objects: .teleTarget; far: 30"
+        cursor="rayOrigin: entity; fuse: false"
+        line="opacity: 0.9"></a-entity>
     </a-entity>
 
     <script type="module" src="./js/scarlett1/index.js"></script>

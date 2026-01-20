@@ -1,60 +1,59 @@
-// Simple teleport using controller raycaster hits on .teleTarget
-
-export class Teleport {
-  constructor({ rig, scene, diag }) {
-    this.rig = rig;
-    this.scene = scene;
-    this.diag = diag || (() => {});
-    this.enabled = true;
-
-    this._onClick = this._onClick.bind(this);
+// js/modules/teleport.js
+function intersectPad(controllerEl) {
+  const rc = controllerEl?.components?.raycaster;
+  const ints = rc?.intersections || [];
+  if (!ints.length) return null;
+  // choose nearest with a teleTarget class
+  for (const hit of ints) {
+    const el = hit?.object?.el;
+    if (el?.classList?.contains("teleTarget")) return el;
   }
+  return null;
+}
 
-  install() {
-    // Listen for A-Frame raycaster intersections via controller trigger.
-    // laser-controls emit "triggerdown" on many controllers.
-    const left = document.getElementById("leftHand");
-    const right = document.getElementById("rightHand");
+export function installTeleport({ scene, rig, diag }) {
+  let enabled = true;
+  const btnTeleport = document.getElementById("btnTeleport");
+  const setBtn = () => btnTeleport && (btnTeleport.textContent = `Teleport: ${enabled ? "ON" : "OFF"}`);
+  setBtn();
 
-    left?.addEventListener("triggerdown", this._onClick);
-    right?.addEventListener("triggerdown", this._onClick);
+  btnTeleport?.addEventListener("click", () => {
+    enabled = !enabled;
+    setBtn();
+    diag.write(`[teleport] ${enabled ? "ON" : "OFF"}`);
+  });
 
-    // Also allow mouse click on teleport pads (desktop testing)
-    this.scene?.addEventListener("click", (e) => {
-      if (!this.enabled) return;
-      const target = e?.target;
-      if (target && target.classList && target.classList.contains("teleTarget")) {
-        const p = target.getAttribute("position");
-        this._teleportTo(p);
-      }
-    });
+  const doTeleportTo = (padEl) => {
+    if (!padEl) return;
+    const p = padEl.object3D.position;
+    rig.object3D.position.set(p.x, 0, p.z);
+    diag.write(`[teleport] -> ${padEl.id || "pad"} x=${p.x.toFixed(2)} z=${p.z.toFixed(2)}`);
+  };
 
-    this.diag("[teleport] module installed ✅");
-  }
+  // Click path (desktop / some mobile)
+  scene.addEventListener("click", (evt) => {
+    if (!enabled) return;
+    const el = evt?.detail?.intersectedEl || evt?.target;
+    if (el?.classList?.contains("teleTarget")) doTeleportTo(el);
+  });
 
-  setEnabled(v) {
-    this.enabled = !!v;
-  }
+  // Trigger path (Quest): teleport to whatever the raycaster is hitting
+  const left = document.getElementById("leftHand");
+  const right = document.getElementById("rightHand");
 
-  _onClick(e) {
-    if (!this.enabled) return;
-    const hand = e?.target;
-    if (!hand) return;
+  const onTrigger = (hand) => () => {
+    if (!enabled) return;
+    const pad = intersectPad(hand);
+    if (pad) doTeleportTo(pad);
+  };
 
-    const ray = hand.components?.raycaster;
-    const inter = ray?.intersections?.[0];
-    const hitEl = inter?.object?.el;
+  left?.addEventListener("triggerdown", onTrigger(left));
+  right?.addEventListener("triggerdown", onTrigger(right));
 
-    if (hitEl && hitEl.classList.contains("teleTarget")) {
-      const p = hitEl.getAttribute("position");
-      this._teleportTo(p);
-    }
-  }
+  // Bind pads directly too
+  scene.querySelectorAll(".teleTarget").forEach(pad => {
+    pad.addEventListener("click", () => enabled && doTeleportTo(pad));
+  });
 
-  _teleportTo(p) {
-    if (!p) return;
-    // maintain y=0 for rig base, camera height is inside rig
-    this.rig.setAttribute("position", `${p.x} 0 ${p.z}`);
-    this.diag(`[teleport] to (${p.x.toFixed(2)}, ${p.z.toFixed(2)}) ✅`);
-  }
+  diag.write("[teleport] installed ✅ (triggerdown + click)");
 }

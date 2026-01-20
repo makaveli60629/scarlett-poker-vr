@@ -13,5 +13,4 @@ export function initWorld({ diag }) {
   }
   requestAnimationFrame(step);
   diag.write("[world] community card animation ✅");
-  return { ok: true };
 }

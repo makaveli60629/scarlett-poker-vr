@@ -1,2 +1,1 @@
-import { diagWrite } from "./diagnostics.js";
-export function initAvatars(){ diagWrite("[avatars] placeholder ✔"); }
+export function registerAvatars(e){e.onReady(()=>{["ai_girl.glb","male_mesh.glb","base_male_body_meshy.glb"].forEach((a,i)=>{const v=document.createElement("a-entity");v.setAttribute("gltf-model","url(./assets/avatars/"+a+")");v.setAttribute("position",`${Math.cos(i)*1.2} 0.9 ${Math.sin(i)*1.2}`);e.scene.appendChild(v);});});}

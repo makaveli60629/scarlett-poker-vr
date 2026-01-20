@@ -1,0 +1,1 @@
+export function registerPokerDemo(e){e.onReady(()=>console.log("Poker demo running"));}

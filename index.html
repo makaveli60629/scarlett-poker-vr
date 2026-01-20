@@ -3,9 +3,11 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-  <title>SCARLETT VR Poker — Update 20 (Full GH)</title>
+  <title>SCARLETT VR Poker — Update 21 (Avatars GLB)</title>
   <link rel="stylesheet" href="./css/hud.css"/>
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/aframe-extras@6.1.1/dist/aframe-extras.min.js"></script>
+  <script src="./js/modules/walker.js"></script>
 </head>
 <body>
   <div id="hud">
@@ -29,6 +31,11 @@
     renderer="antialias: true; colorManagement: true; physicallyCorrectLights: true;"
     background="color: #0b0f14">
 
+    <a-assets timeout="120000">
+      <a-asset-item id="glbChar" src="./assets/models/Character_output.glb"></a-asset-item>
+      <a-asset-item id="glbAnim" src="./assets/models/Meshy_Merged_Animations.glb"></a-asset-item>
+    </a-assets>
+
     <a-entity light="type: ambient; intensity: 0.65"></a-entity>
     <a-entity light="type: directional; intensity: 0.95" position="3 7 2"></a-entity>
     <a-entity light="type: point; intensity: 1.1; distance: 45" position="0 6 0"></a-entity>
@@ -36,14 +43,11 @@
     <a-entity id="env">
       <a-plane rotation="-90 0 0" width="70" height="70" color="#1b2430"></a-plane>
       <a-ring position="0 0.01 -2" rotation="-90 0 0" radius-inner="7" radius-outer="11" color="#16202b"></a-ring>
-      <a-box position="0 2 -32" width="70" height="4" depth="1" color="#111827"></a-box>
-      <a-box position="0 2 32" width="70" height="4" depth="1" color="#111827"></a-box>
-      <a-box position="-32 2 0" width="1" height="4" depth="70" color="#0f172a"></a-box>
-      <a-box position="32 2 0" width="1" height="4" depth="70" color="#0f172a"></a-box>
 
       <a-entity id="tableZone" position="0 0 -8">
         <a-cylinder position="0 -0.22 0" radius="6.3" height="0.45" color="#0a1018"></a-cylinder>
         <a-cylinder position="0 0.6 0" radius="3.1" height="0.35" color="#0b1220"></a-cylinder>
+
         <a-entity id="community" position="0 0.92 -0.35">
           <a-plane class="card" position="-0.75 0 0" rotation="-90 0 0" width="0.36" height="0.52" color="#e5e7eb"></a-plane>
           <a-plane class="card" position="-0.38 0 0" rotation="-90 0 0" width="0.36" height="0.52" color="#e5e7eb"></a-plane>
@@ -51,28 +55,39 @@
           <a-plane class="card" position="0.38 0 0" rotation="-90 0 0" width="0.36" height="0.52" color="#e5e7eb"></a-plane>
           <a-plane class="card" position="0.75 0 0" rotation="-90 0 0" width="0.36" height="0.52" color="#e5e7eb"></a-plane>
         </a-entity>
+
+        <!-- 2 seated bots playing -->
+        <a-entity id="bot1" gltf-model="#glbChar" position="-2.0 0.0 1.9" rotation="0 25 0" scale="1 1 1"></a-entity>
+        <a-entity id="bot2" gltf-model="#glbChar" position="2.0 0.0 1.9" rotation="0 -25 0" scale="1 1 1"></a-entity>
+        <a-cylinder position="-2.0 0.25 2.6" radius="0.35" height="0.5" color="#111827"></a-cylinder>
+        <a-cylinder position="2.0 0.25 2.6" radius="0.35" height="0.5" color="#111827"></a-cylinder>
       </a-entity>
 
+      <!-- mannequin display -->
+      <a-entity id="mannequin" gltf-model="#glbChar" position="-6 0 -14" rotation="0 90 0" scale="1.15 1.15 1.15"></a-entity>
+      <a-cylinder position="-6 0.05 -14" radius="0.7" height="0.1" color="#0f172a"></a-cylinder>
+      <a-text value="AVATAR DISPLAY" position="-6 1.9 -14" rotation="0 90 0" align="center" width="6" color="#e5e7eb"></a-text>
+
+      <!-- walking bot -->
+      <a-entity id="walker" gltf-model="#glbAnim" animation-mixer="clip: *; loop: repeat"
+        scarlett-walk-loop="radius: 6.3; speed: 0.35; y: 0" scale="1 1 1"></a-entity>
+
+      <!-- teleport pads -->
       <a-entity id="teleTargets">
         <a-ring class="teleTarget" id="teleSpawn" position="0 0.02 0" rotation="-90 0 0" radius-inner="0.35" radius-outer="0.55" color="#f59e0b"></a-ring>
         <a-ring class="teleTarget" id="teleTable" position="0 0.02 -8" rotation="-90 0 0" radius-inner="0.35" radius-outer="0.55" color="#22c55e"></a-ring>
-        <a-ring class="teleTarget" id="teleArch" position="0 0.02 -18" rotation="-90 0 0" radius-inner="0.35" radius-outer="0.55" color="#60a5fa"></a-ring>
+        <a-ring class="teleTarget" id="teleDisplay" position="-6 0.02 -14" rotation="-90 0 0" radius-inner="0.35" radius-outer="0.55" color="#60a5fa"></a-ring>
       </a-entity>
     </a-entity>
 
     <a-entity id="rig" position="0 0 0" rotation="0 0 0">
       <a-entity id="camera" camera look-controls position="0 1.65 0"></a-entity>
 
-      <!-- Quest controllers: more reliable than laser-controls in Meta Browser -->
-      <a-entity id="leftHand"
-        oculus-touch-controls="hand: left"
-        raycaster="objects: .teleTarget; far: 30"
-        line="opacity: 0.9"></a-entity>
+      <a-entity id="leftHand" oculus-touch-controls="hand: left"
+        raycaster="objects: .teleTarget; far: 30" line="opacity: 0.9"></a-entity>
 
-      <a-entity id="rightHand"
-        oculus-touch-controls="hand: right"
-        raycaster="objects: .teleTarget; far: 30"
-        line="opacity: 0.9"></a-entity>
+      <a-entity id="rightHand" oculus-touch-controls="hand: right"
+        raycaster="objects: .teleTarget; far: 30" line="opacity: 0.9"></a-entity>
     </a-entity>
 
     <script type="module" src="./js/scarlett1/index.js"></script>

@@ -1,100 +1,100 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <title>SCARLETT Avatar System v1 (Polished)</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
-  <style>
-    html, body { margin:0; padding:0; width:100%; height:100%; background:#000; overflow:hidden; }
-    #hud {
-      position: fixed; left: 12px; right: 12px; top: 12px; z-index: 9999;
-      color: #dff; font: 13px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      background: rgba(0,0,0,0.62); border: 1px solid rgba(120,200,220,0.25);
-      border-radius: 14px; padding: 10px 12px;
-      backdrop-filter: blur(6px);
-      pointer-events: auto;
-    }
-    #hud .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-    #hud button, #hud select, #hud input {
-      background:#14202b; color:#e8f7ff; border:1px solid rgba(120,200,220,0.25);
-      border-radius: 12px; padding: 10px 12px; font-weight: 700;
-    }
-    #log { margin-top:10px; padding-top:10px; border-top:1px solid rgba(120,200,220,0.15);
-      white-space: pre-wrap; max-height: 32vh; overflow:auto; color:#bfefff; display:none; }
-  </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>SCARLETT VR Poker — Update 15</title>
+  <meta name="description" content="ScarlettVR Poker demo (Update 15)" />
+  <link rel="stylesheet" href="./css/hud.css" />
+  <!-- A-Frame (no build step; GitHub Pages friendly) -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 </head>
 <body>
-  <div id="hud">
-    <div class="row">
-      <button id="btnEnter">ENTER VR</button>
-      <button id="btnDiag">DIAG</button>
-      <label style="display:flex;align-items:center;gap:8px">
-        Avatar
-        <select id="avatarSelect">
-          <option value="primitives">Primitives (Fallback)</option>
-          <option value="glbA">GLB Slot A</option>
-          <option value="glbB">GLB Slot B</option>
-        </select>
-      </label>
-      <label style="display:flex;align-items:center;gap:8px">
-        Name <input id="nameInput" value="PLAYER" style="width:140px"/>
-      </label>
-      <span id="status" style="margin-left:auto;opacity:.9">booting…</span>
+  <!-- HUD Overlay -->
+  <div id="hud" class="hud">
+    <div class="hudRow">
+      <button id="btnEnterVR" class="hudBtn">Enter VR</button>
+      <button id="btnTeleport" class="hudBtn">Teleport: ON</button>
+      <button id="btnReset" class="hudBtn">Reset to Spawn</button>
+      <button id="btnHideHUD" class="hudBtn">Hide HUD</button>
+      <button id="btnDiag" class="hudBtn">Diagnostics</button>
     </div>
-    <div id="log">Loading…</div>
+
+    <div id="diagPanel" class="diag hidden">
+      <div class="diagHeader">
+        <div class="diagTitle">SCARLETT DIAGNOSTICS</div>
+        <button id="btnDiagClose" class="diagClose">✕</button>
+      </div>
+      <pre id="diagText" class="diagText">booting…</pre>
+    </div>
+
+    <!-- Mobile joystick (Android) -->
+    <div id="joystick" class="joy">
+      <div id="joyBase" class="joyBase">
+        <div id="joyKnob" class="joyKnob"></div>
+      </div>
+      <div class="joyHint">Move</div>
+    </div>
   </div>
 
-  <a-scene id="scene"
-    embedded
+  <!-- A-Frame Scene -->
+  <a-scene
+    id="scene"
     renderer="antialias: true; colorManagement: true"
-    xr-mode-ui="enabled: false"
-    webxr="requiredFeatures: local-floor; optionalFeatures: bounded-floor, hand-tracking"
-    background="color: #050a10">
+    background="color: #0b0e12"
+    xr-mode-ui="enabled: true"
+    webxr="requiredFeatures: local-floor; optionalFeatures: hand-tracking"
+    embedded
+  >
+    <!-- Camera Rig (spawn-safe) -->
+    <a-entity id="rig" position="0 0 3" rotation="0 180 0">
+      <a-entity
+        id="playerCam"
+        camera
+        position="0 1.6 0"
+        look-controls
+        wasd-controls="enabled: false"
+      ></a-entity>
 
-    <a-assets>
-      <!-- Add your models like:
-      <a-asset-item id="avatarA" src="assets/avatarA.glb"></a-asset-item>
-      <a-asset-item id="avatarB" src="assets/avatarB.glb"></a-asset-item>
-      -->
-    </a-assets>
-
-    <a-entity light="type: ambient; intensity: 0.7"></a-entity>
-    <a-entity light="type: directional; intensity: 1.0" position="2 6 3"></a-entity>
-    <a-entity light="type: point; intensity: 0.9; distance: 20" position="-2 3 -2"></a-entity>
-
-    <a-plane rotation="-90 0 0" width="30" height="30" material="color:#0f1a24; roughness:1"></a-plane>
-    <a-ring rotation="-90 0 0" radius-inner="5.5" radius-outer="6.2" material="color:#0b131b; opacity:0.95"></a-ring>
-
-    <a-entity id="rig" position="0 0 3" avatar-rig>
-      <a-entity id="camera" camera position="0 1.65 0" look-controls="pointerLockEnabled:false" wasd-controls="acceleration:22"></a-entity>
-
-      <a-entity cursor="rayOrigin: mouse; fuse: false"
-        raycaster="objects: .clickable; far: 25"></a-entity>
-
-      <a-entity id="leftHand"
-        oculus-touch-controls="hand: left"
-        laser-controls="hand: left"
-        raycaster="objects: .clickable; far: 25"
-        line="opacity: 0.9"
-        avatar-hand="hand:left"></a-entity>
-
-      <a-entity id="rightHand"
-        oculus-touch-controls="hand: right"
-        laser-controls="hand: right"
-        raycaster="objects: .clickable; far: 25"
-        line="opacity: 0.9"
-        avatar-hand="hand:right"></a-entity>
-
-      <a-entity id="avatarRoot" avatar-manager position="0 0 0"></a-entity>
+      <!-- Controller lasers (Quest) -->
+      <a-entity id="leftHand" laser-controls="hand: left" raycaster="objects: .teleTarget" line="opacity: 0.85"></a-entity>
+      <a-entity id="rightHand" laser-controls="hand: right" raycaster="objects: .teleTarget" line="opacity: 0.85"></a-entity>
     </a-entity>
 
-    <a-entity position="0 1.6 -2.5">
-      <a-plane class="clickable" width="1.2" height="0.5" material="color:#1b2a3a; opacity:0.95" ui-button="label: WAVE"></a-plane>
-      <a-text value="Click WAVE" position="0 0.55 0" align="center" width="3" color="#bfefff"></a-text>
+    <!-- Lights -->
+    <a-entity light="type: ambient; intensity: 0.6"></a-entity>
+    <a-entity light="type: directional; intensity: 0.9" position="2 5 3"></a-entity>
+    <a-entity light="type: point; intensity: 0.7; distance: 18" position="0 4 0"></a-entity>
+
+    <!-- World Root -->
+    <a-entity id="world"></a-entity>
+
+    <!-- Ground (solid) -->
+    <a-plane id="floor" rotation="-90 0 0" width="60" height="60" color="#1b1f29" shadow="receive: true"></a-plane>
+
+    <!-- Teleport targets (safe zone) -->
+    <a-entity id="spawnPad" class="teleTarget" geometry="primitive: circle; radius: 0.4" material="color: #2a9d8f; opacity: 0.9" rotation="-90 0 0" position="0 0.01 3"></a-entity>
+    <a-entity id="telePad" class="teleTarget" geometry="primitive: ring; radiusInner: 0.25; radiusOuter: 0.35" material="color: #ffd166; opacity: 0.9" rotation="-90 0 0" position="0 0.01 0"></a-entity>
+
+    <!-- Simple room bounds -->
+    <a-box position="0 1 -10" width="60" height="4" depth="0.2" color="#121623"></a-box>
+    <a-box position="-30 1 0" width="0.2" height="4" depth="60" color="#121623"></a-box>
+    <a-box position="30 1 0" width="0.2" height="4" depth="60" color="#121623"></a-box>
+    <a-box position="0 1 30" width="60" height="4" depth="0.2" color="#121623"></a-box>
+
+    <!-- Poker table placeholder (solid) -->
+    <a-entity id="table" position="0 0 0">
+      <a-cylinder radius="1.6" height="0.15" color="#0c6b4d" position="0 0.78 0" shadow></a-cylinder>
+      <a-cylinder radius="1.65" height="0.05" color="#111" position="0 0.86 0" shadow></a-cylinder>
+      <a-cylinder radius="0.25" height="0.8" color="#2b2b2b" position="0 0.4 0" shadow></a-cylinder>
+      <a-ring radius-inner="0.65" radius-outer="0.85" rotation="-90 0 0" position="0 0.88 0" material="color:#0f1726; opacity:0.55"></a-ring>
     </a-entity>
 
-    <script type="module" src="js/avatar-system.js"></script>
+    <!-- Seat marker (you won't spawn on the table) -->
+    <a-entity id="seatMarker" geometry="primitive: box; width: 0.4; height: 0.02; depth: 0.4" material="color: #3a86ff; opacity: 0.8" position="0 0.02 2.1"></a-entity>
+
   </a-scene>
+
+  <script type="module" src="./js/scarlett1/index.js"></script>
 </body>
 </html>

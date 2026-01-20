@@ -1,100 +1,152 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>SCARLETT VR Poker — Update 15</title>
-  <meta name="description" content="ScarlettVR Poker demo (Update 15)" />
-  <link rel="stylesheet" href="./css/hud.css" />
-  <!-- A-Frame (no build step; GitHub Pages friendly) -->
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <title>SCARLETT VR Poker — Update 17 (Full GH)</title>
+  <link rel="stylesheet" href="./css/hud.css"/>
+  <script>window.__SCARLETT_NO_AUTO_VR__=true;</script>
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 </head>
 <body>
-  <!-- HUD Overlay -->
-  <div id="hud" class="hud">
-    <div class="hudRow">
+  <!-- HUD (2D overlay) -->
+  <div id="hud">
+    <div class="row">
       <button id="btnEnterVR" class="hudBtn">Enter VR</button>
       <button id="btnTeleport" class="hudBtn">Teleport: ON</button>
-      <button id="btnReset" class="hudBtn">Reset to Spawn</button>
-      <button id="btnHideHUD" class="hudBtn">Hide HUD</button>
+      <button id="btnMove" class="hudBtn">Move: ON</button>
       <button id="btnDiag" class="hudBtn">Diagnostics</button>
+      <button id="btnHideHUD" class="hudBtn">Hide HUD</button>
     </div>
 
     <div id="diagPanel" class="diag hidden">
       <div class="diagHeader">
         <div class="diagTitle">SCARLETT DIAGNOSTICS</div>
-        <button id="btnDiagClose" class="diagClose">✕</button>
+        <button id="btnDiagClose" class="hudBtn small">Close</button>
       </div>
-      <pre id="diagText" class="diagText">booting…</pre>
-    </div>
-
-    <!-- Mobile joystick (Android) -->
-    <div id="joystick" class="joy">
-      <div id="joyBase" class="joyBase">
-        <div id="joyKnob" class="joyKnob"></div>
-      </div>
-      <div class="joyHint">Move</div>
+      <pre id="diagText">booting…</pre>
     </div>
   </div>
 
-  <!-- A-Frame Scene -->
-  <a-scene
-    id="scene"
-    renderer="antialias: true; colorManagement: true"
-    background="color: #0b0e12"
-    xr-mode-ui="enabled: true"
-    webxr="requiredFeatures: local-floor; optionalFeatures: hand-tracking"
-    embedded
-  >
-    <!-- Camera Rig (spawn-safe) -->
-    <a-entity id="rig" position="0 0 3" rotation="0 180 0">
-      <a-entity
-        id="playerCam"
-        camera
-        position="0 1.6 0"
-        look-controls
-        wasd-controls="enabled: false"
-      ></a-entity>
+  <a-scene id="scene"
+    xr-mode-ui="enabled: false"
+    renderer="antialias: true; colorManagement: true; physicallyCorrectLights: true;"
+    background="color: #0b0f14">
 
-      <!-- Controller lasers (Quest) -->
-      <a-entity id="leftHand" laser-controls="hand: left" raycaster="objects: .teleTarget" line="opacity: 0.85"></a-entity>
-      <a-entity id="rightHand" laser-controls="hand: right" raycaster="objects: .teleTarget" line="opacity: 0.85"></a-entity>
+    <!-- Lighting -->
+    <a-entity light="type: ambient; intensity: 0.65"></a-entity>
+    <a-entity light="type: directional; intensity: 0.95" position="3 7 2"></a-entity>
+    <a-entity light="type: point; intensity: 1.1; distance: 45" position="0 6 0"></a-entity>
+
+    <!-- Environment -->
+    <a-entity id="env">
+      <!-- Floor -->
+      <a-plane id="floor" rotation="-90 0 0" width="70" height="70" color="#1b2430"></a-plane>
+      <!-- Carpet inlay -->
+      <a-ring position="0 0.01 -2" rotation="-90 0 0" radius-inner="7" radius-outer="11" color="#16202b"></a-ring>
+
+      <!-- Walls -->
+      <a-box position="0 2 -32" width="70" height="4" depth="1" color="#111827"></a-box>
+      <a-box position="0 2 32"  width="70" height="4" depth="1" color="#111827"></a-box>
+      <a-box position="-32 2 0" width="1" height="4" depth="70" color="#0f172a"></a-box>
+      <a-box position="32 2 0"  width="1" height="4" depth="70" color="#0f172a"></a-box>
+
+      <!-- Entrance arch (front) -->
+      <a-entity position="0 0 -18">
+        <a-box position="-3 2 0" width="1" height="4" depth="1" color="#0b1220"></a-box>
+        <a-box position="3 2 0"  width="1" height="4" depth="1" color="#0b1220"></a-box>
+        <a-box position="0 4 0"  width="7" height="1" depth="1" color="#0b1220"></a-box>
+        <a-text value="SCARLETT LOBBY" position="0 4.9 0.5" align="center" width="12" color="#e5e7eb"></a-text>
+      </a-entity>
+
+      <!-- Table zone moved IN FRONT of camera (negative Z) -->
+      <a-entity id="tableZone" position="0 0 -8">
+        <!-- divot -->
+        <a-cylinder position="0 -0.22 0" radius="6.3" height="0.45" color="#0a1018"></a-cylinder>
+        <a-ring position="0 0.01 0" rotation="-90 0 0" radius-inner="6.15" radius-outer="6.55" color="#0f172a"></a-ring>
+
+        <!-- Table -->
+        <a-cylinder position="0 0.6 0" radius="2.7" height="0.35" color="#0b1220"></a-cylinder>
+        <a-cylinder position="0 0.78 0" radius="2.5" height="0.08" color="#0ea5e9"></a-cylinder>
+        <a-cylinder position="0 0.82 0" radius="2.25" height="0.06" color="#0b1220"></a-cylinder>
+
+        <!-- Community cards (simple animated demo) -->
+        <a-entity id="community" position="0 0.92 -0.35">
+          <a-plane class="card" position="-0.6 0 0" rotation="-90 0 0" width="0.32" height="0.46" color="#e5e7eb"></a-plane>
+          <a-plane class="card" position="-0.3 0 0" rotation="-90 0 0" width="0.32" height="0.46" color="#e5e7eb"></a-plane>
+          <a-plane class="card" position="0 0 0" rotation="-90 0 0" width="0.32" height="0.46" color="#e5e7eb"></a-plane>
+          <a-plane class="card" position="0.3 0 0" rotation="-90 0 0" width="0.32" height="0.46" color="#e5e7eb"></a-plane>
+          <a-plane class="card" position="0.6 0 0" rotation="-90 0 0" width="0.32" height="0.46" color="#e5e7eb"></a-plane>
+        </a-entity>
+
+        <a-text value="COMMUNITY" position="0 1.18 -0.95" align="center" width="6" color="#e5e7eb"></a-text>
+
+        <!-- Bots placeholders (6) -->
+        <a-entity id="bots" position="0 0 0">
+          <a-entity position="0 0 3.8">
+            <a-cylinder radius="0.25" height="1.2" position="0 0.6 0" color="#334155"></a-cylinder>
+            <a-text value="BOT 1" position="0 1.65 0" align="center" width="3" color="#e5e7eb"></a-text>
+          </a-entity>
+          <a-entity position="3.3 0 1.9" rotation="0 -60 0">
+            <a-cylinder radius="0.25" height="1.2" position="0 0.6 0" color="#334155"></a-cylinder>
+            <a-text value="BOT 2" position="0 1.65 0" align="center" width="3" color="#e5e7eb"></a-text>
+          </a-entity>
+          <a-entity position="3.3 0 -1.9" rotation="0 -120 0">
+            <a-cylinder radius="0.25" height="1.2" position="0 0.6 0" color="#334155"></a-cylinder>
+            <a-text value="BOT 3" position="0 1.65 0" align="center" width="3" color="#e5e7eb"></a-text>
+          </a-entity>
+          <a-entity position="0 0 -3.8" rotation="0 180 0">
+            <a-cylinder radius="0.25" height="1.2" position="0 0.6 0" color="#334155"></a-cylinder>
+            <a-text value="BOT 4" position="0 1.65 0" align="center" width="3" color="#e5e7eb"></a-text>
+          </a-entity>
+          <a-entity position="-3.3 0 -1.9" rotation="0 120 0">
+            <a-cylinder radius="0.25" height="1.2" position="0 0.6 0" color="#334155"></a-cylinder>
+            <a-text value="BOT 5" position="0 1.65 0" align="center" width="3" color="#e5e7eb"></a-text>
+          </a-entity>
+          <a-entity position="-3.3 0 1.9" rotation="0 60 0">
+            <a-cylinder radius="0.25" height="1.2" position="0 0.6 0" color="#334155"></a-cylinder>
+            <a-text value="BOT 6" position="0 1.65 0" align="center" width="3" color="#e5e7eb"></a-text>
+          </a-entity>
+        </a-entity>
+      </a-entity>
+
+      <!-- Teleport pads (in front as well) -->
+      <a-entity id="teleTargets">
+        <a-ring class="teleTarget" id="teleSpawn" position="0 0.02 0" rotation="-90 0 0"
+          radius-inner="0.35" radius-outer="0.55" color="#f59e0b"></a-ring>
+        <a-ring class="teleTarget" id="teleTable" position="0 0.02 -8" rotation="-90 0 0"
+          radius-inner="0.35" radius-outer="0.55" color="#22c55e"></a-ring>
+        <a-ring class="teleTarget" id="teleArch" position="0 0.02 -18" rotation="-90 0 0"
+          radius-inner="0.35" radius-outer="0.55" color="#60a5fa"></a-ring>
+      </a-entity>
     </a-entity>
 
-    <!-- Lights -->
-    <a-entity light="type: ambient; intensity: 0.6"></a-entity>
-    <a-entity light="type: directional; intensity: 0.9" position="2 5 3"></a-entity>
-    <a-entity light="type: point; intensity: 0.7; distance: 18" position="0 4 0"></a-entity>
+    <!-- Player rig -->
+    <a-entity id="rig" position="0 0 0" rotation="0 0 0">
+      <a-entity id="camera" camera look-controls position="0 1.65 0"></a-entity>
 
-    <!-- World Root -->
-    <a-entity id="world"></a-entity>
+      <!-- VR diagnostics always visible -->
+      <a-entity id="vrDiag" position="0 1.35 -1.2" visible="true">
+        <a-plane width="1.38" height="0.65" color="#000" opacity="0.65"></a-plane>
+        <a-text id="vrDiagText" value="booting…" width="1.28" align="left"
+          position="-0.64 0.27 0.01" color="#7CFC90"></a-text>
+      </a-entity>
 
-    <!-- Ground (solid) -->
-    <a-plane id="floor" rotation="-90 0 0" width="60" height="60" color="#1b1f29" shadow="receive: true"></a-plane>
+      <!-- Hands -->
+      <a-entity id="leftHand"
+        laser-controls="hand: left"
+        raycaster="objects: .teleTarget; far: 30"
+        cursor="rayOrigin: entity; fuse: false"
+        line="opacity: 0.9"></a-entity>
 
-    <!-- Teleport targets (safe zone) -->
-    <a-entity id="spawnPad" class="teleTarget" geometry="primitive: circle; radius: 0.4" material="color: #2a9d8f; opacity: 0.9" rotation="-90 0 0" position="0 0.01 3"></a-entity>
-    <a-entity id="telePad" class="teleTarget" geometry="primitive: ring; radiusInner: 0.25; radiusOuter: 0.35" material="color: #ffd166; opacity: 0.9" rotation="-90 0 0" position="0 0.01 0"></a-entity>
-
-    <!-- Simple room bounds -->
-    <a-box position="0 1 -10" width="60" height="4" depth="0.2" color="#121623"></a-box>
-    <a-box position="-30 1 0" width="0.2" height="4" depth="60" color="#121623"></a-box>
-    <a-box position="30 1 0" width="0.2" height="4" depth="60" color="#121623"></a-box>
-    <a-box position="0 1 30" width="60" height="4" depth="0.2" color="#121623"></a-box>
-
-    <!-- Poker table placeholder (solid) -->
-    <a-entity id="table" position="0 0 0">
-      <a-cylinder radius="1.6" height="0.15" color="#0c6b4d" position="0 0.78 0" shadow></a-cylinder>
-      <a-cylinder radius="1.65" height="0.05" color="#111" position="0 0.86 0" shadow></a-cylinder>
-      <a-cylinder radius="0.25" height="0.8" color="#2b2b2b" position="0 0.4 0" shadow></a-cylinder>
-      <a-ring radius-inner="0.65" radius-outer="0.85" rotation="-90 0 0" position="0 0.88 0" material="color:#0f1726; opacity:0.55"></a-ring>
+      <a-entity id="rightHand"
+        laser-controls="hand: right"
+        raycaster="objects: .teleTarget; far: 30"
+        cursor="rayOrigin: entity; fuse: false"
+        line="opacity: 0.9"></a-entity>
     </a-entity>
 
-    <!-- Seat marker (you won't spawn on the table) -->
-    <a-entity id="seatMarker" geometry="primitive: box; width: 0.4; height: 0.02; depth: 0.4" material="color: #3a86ff; opacity: 0.8" position="0 0.02 2.1"></a-entity>
-
+    <script type="module" src="./js/scarlett1/index.js"></script>
   </a-scene>
-
-  <script type="module" src="./js/scarlett1/index.js"></script>
 </body>
 </html>

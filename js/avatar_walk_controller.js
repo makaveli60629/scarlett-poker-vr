@@ -1,0 +1,1 @@
+// avatar walk controller placeholder

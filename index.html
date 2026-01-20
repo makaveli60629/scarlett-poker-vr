@@ -3,12 +3,11 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-  <title>SCARLETT VR Poker — Update 19 (Full GH)</title>
+  <title>SCARLETT VR Poker — Update 20 (Full GH)</title>
   <link rel="stylesheet" href="./css/hud.css"/>
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 </head>
 <body>
-  <!-- 2D HUD (browser/Android). Oculus immersive may hide DOM overlays; that's OK. -->
   <div id="hud">
     <div class="row">
       <button id="btnEnterVR" class="hudBtn">Enter VR</button>
@@ -17,7 +16,6 @@
       <button id="btnDiag" class="hudBtn">Diagnostics</button>
       <button id="btnHideHUD" class="hudBtn">Hide HUD</button>
     </div>
-
     <div id="diagPanel" class="diag hidden">
       <div class="diagHeader">
         <div class="diagTitle">SCARLETT DIAGNOSTICS</div>
@@ -27,76 +25,31 @@
     </div>
   </div>
 
-  <a-scene id="scene"
-    xr-mode-ui="enabled: false"
+  <a-scene id="scene" xr-mode-ui="enabled: false"
     renderer="antialias: true; colorManagement: true; physicallyCorrectLights: true;"
     background="color: #0b0f14">
 
-    <!-- Lighting -->
     <a-entity light="type: ambient; intensity: 0.65"></a-entity>
     <a-entity light="type: directional; intensity: 0.95" position="3 7 2"></a-entity>
     <a-entity light="type: point; intensity: 1.1; distance: 45" position="0 6 0"></a-entity>
 
-    <!-- Environment -->
     <a-entity id="env">
-      <a-plane id="floor" rotation="-90 0 0" width="70" height="70" color="#1b2430"></a-plane>
+      <a-plane rotation="-90 0 0" width="70" height="70" color="#1b2430"></a-plane>
       <a-ring position="0 0.01 -2" rotation="-90 0 0" radius-inner="7" radius-outer="11" color="#16202b"></a-ring>
-
       <a-box position="0 2 -32" width="70" height="4" depth="1" color="#111827"></a-box>
-      <a-box position="0 2 32"  width="70" height="4" depth="1" color="#111827"></a-box>
+      <a-box position="0 2 32" width="70" height="4" depth="1" color="#111827"></a-box>
       <a-box position="-32 2 0" width="1" height="4" depth="70" color="#0f172a"></a-box>
-      <a-box position="32 2 0"  width="1" height="4" depth="70" color="#0f172a"></a-box>
-
-      <a-entity position="0 0 -18">
-        <a-box position="-3 2 0" width="1" height="4" depth="1" color="#0b1220"></a-box>
-        <a-box position="3 2 0"  width="1" height="4" depth="1" color="#0b1220"></a-box>
-        <a-box position="0 4 0"  width="7" height="1" depth="1" color="#0b1220"></a-box>
-        <a-text value="SCARLETT LOBBY" position="0 4.9 0.5" align="center" width="12" color="#e5e7eb"></a-text>
-      </a-entity>
+      <a-box position="32 2 0" width="1" height="4" depth="70" color="#0f172a"></a-box>
 
       <a-entity id="tableZone" position="0 0 -8">
         <a-cylinder position="0 -0.22 0" radius="6.3" height="0.45" color="#0a1018"></a-cylinder>
-        <a-ring position="0 0.01 0" rotation="-90 0 0" radius-inner="6.15" radius-outer="6.55" color="#0f172a"></a-ring>
-
         <a-cylinder position="0 0.6 0" radius="3.1" height="0.35" color="#0b1220"></a-cylinder>
-        <a-cylinder position="0 0.78 0" radius="2.9" height="0.08" color="#0ea5e9"></a-cylinder>
-        <a-cylinder position="0 0.82 0" radius="2.6" height="0.06" color="#0b1220"></a-cylinder>
-
         <a-entity id="community" position="0 0.92 -0.35">
           <a-plane class="card" position="-0.75 0 0" rotation="-90 0 0" width="0.36" height="0.52" color="#e5e7eb"></a-plane>
           <a-plane class="card" position="-0.38 0 0" rotation="-90 0 0" width="0.36" height="0.52" color="#e5e7eb"></a-plane>
           <a-plane class="card" position="0 0 0" rotation="-90 0 0" width="0.36" height="0.52" color="#e5e7eb"></a-plane>
           <a-plane class="card" position="0.38 0 0" rotation="-90 0 0" width="0.36" height="0.52" color="#e5e7eb"></a-plane>
           <a-plane class="card" position="0.75 0 0" rotation="-90 0 0" width="0.36" height="0.52" color="#e5e7eb"></a-plane>
-        </a-entity>
-
-        <a-text value="COMMUNITY" position="0 1.2 -1.05" align="center" width="6" color="#e5e7eb"></a-text>
-
-        <a-entity id="bots">
-          <a-entity position="0 0 4.3">
-            <a-cylinder radius="0.25" height="1.2" position="0 0.6 0" color="#334155"></a-cylinder>
-            <a-text value="BOT 1" position="0 1.65 0" align="center" width="3" color="#e5e7eb"></a-text>
-          </a-entity>
-          <a-entity position="3.7 0 2.15" rotation="0 -60 0">
-            <a-cylinder radius="0.25" height="1.2" position="0 0.6 0" color="#334155"></a-cylinder>
-            <a-text value="BOT 2" position="0 1.65 0" align="center" width="3" color="#e5e7eb"></a-text>
-          </a-entity>
-          <a-entity position="3.7 0 -2.15" rotation="0 -120 0">
-            <a-cylinder radius="0.25" height="1.2" position="0 0.6 0" color="#334155"></a-cylinder>
-            <a-text value="BOT 3" position="0 1.65 0" align="center" width="3" color="#e5e7eb"></a-text>
-          </a-entity>
-          <a-entity position="0 0 -4.3" rotation="0 180 0">
-            <a-cylinder radius="0.25" height="1.2" position="0 0.6 0" color="#334155"></a-cylinder>
-            <a-text value="BOT 4" position="0 1.65 0" align="center" width="3" color="#e5e7eb"></a-text>
-          </a-entity>
-          <a-entity position="-3.7 0 -2.15" rotation="0 120 0">
-            <a-cylinder radius="0.25" height="1.2" position="0 0.6 0" color="#334155"></a-cylinder>
-            <a-text value="BOT 5" position="0 1.65 0" align="center" width="3" color="#e5e7eb"></a-text>
-          </a-entity>
-          <a-entity position="-3.7 0 2.15" rotation="0 60 0">
-            <a-cylinder radius="0.25" height="1.2" position="0 0.6 0" color="#334155"></a-cylinder>
-            <a-text value="BOT 6" position="0 1.65 0" align="center" width="3" color="#e5e7eb"></a-text>
-          </a-entity>
         </a-entity>
       </a-entity>
 
@@ -110,16 +63,15 @@
     <a-entity id="rig" position="0 0 0" rotation="0 0 0">
       <a-entity id="camera" camera look-controls position="0 1.65 0"></a-entity>
 
+      <!-- Quest controllers: more reliable than laser-controls in Meta Browser -->
       <a-entity id="leftHand"
-        laser-controls="hand: left"
+        oculus-touch-controls="hand: left"
         raycaster="objects: .teleTarget; far: 30"
-        cursor="rayOrigin: entity; fuse: false"
         line="opacity: 0.9"></a-entity>
 
       <a-entity id="rightHand"
-        laser-controls="hand: right"
+        oculus-touch-controls="hand: right"
         raycaster="objects: .teleTarget; far: 30"
-        cursor="rayOrigin: entity; fuse: false"
         line="opacity: 0.9"></a-entity>
     </a-entity>
 

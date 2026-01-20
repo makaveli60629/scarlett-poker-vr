@@ -1,4 +1,5 @@
 export function initWorld({ diag }) {
+  // Animate community cards
   const cards = document.querySelectorAll("#community .card");
   let t = 0;
   function step(){
@@ -14,6 +15,7 @@ export function initWorld({ diag }) {
   requestAnimationFrame(step);
   diag.write("[world] community card animation ✅");
 
+  // GLB load logging
   const logLoaded = (id) => {
     const el = document.getElementById(id);
     if (!el) return;

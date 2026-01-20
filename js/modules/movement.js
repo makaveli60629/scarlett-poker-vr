@@ -3,6 +3,7 @@ export function installMovement({ rig, camera, diag }) {
   const btnMove = document.getElementById("btnMove");
   const setBtn = () => btnMove && (btnMove.textContent = `Move: ${enabled ? "ON" : "OFF"}`);
   setBtn();
+
   btnMove?.addEventListener("click", () => {
     enabled = !enabled;
     setBtn();
@@ -13,7 +14,6 @@ export function installMovement({ rig, camera, diag }) {
   const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
   let jdx=0, jdy=0, jactive=false, sx=0, sy=0;
   let joy=null, style=null;
-
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 
   if (isTouch) {
@@ -51,7 +51,7 @@ export function installMovement({ rig, camera, diag }) {
     diag.write("[move] mobile joystick installed ✅");
   }
 
-  // Thumbstick events (Quest reliable)
+  // Quest thumbstick events
   const left = document.getElementById("leftHand");
   const right = document.getElementById("rightHand");
   let evX = 0, evY = 0;

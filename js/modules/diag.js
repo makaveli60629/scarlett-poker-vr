@@ -2,7 +2,6 @@ export function createDiag() {
   const lines = [];
   const maxLines = 260;
   const diagText = document.getElementById("diagText");
-  const vrDiagText = document.getElementById("vrDiagText");
 
   const write = (msg) => {
     const s = String(msg);
@@ -10,7 +9,6 @@ export function createDiag() {
     while (lines.length > maxLines) lines.shift();
     const out = lines.join("\n");
     if (diagText) diagText.textContent = out;
-    if (vrDiagText) vrDiagText.setAttribute("value", out);
     try { console.log(s); } catch (_) {}
   };
 

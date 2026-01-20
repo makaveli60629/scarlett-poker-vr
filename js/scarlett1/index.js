@@ -1,104 +1,84 @@
 // /js/scarlett1/index.js
-// SCARLETT — Update 15 (GitHub Pages full)
-// Goal: spawn-safe, solid world, Android joystick move, Quest lasers + teleport, diagnostics always-on.
-
-import { Diag } from "../modules/diag.js";
-import { JoystickMove } from "../modules/joystickMove.js";
-import { Teleport } from "../modules/teleport.js";
-
-const BUILD = "SCARLETT_UPDATE_15_FULL";
-
-// ---- HARD attach flags (cover likely panel checks) ----
+const BUILD = "SCARLETT_UPDATE_17_FULL_GH";
 window.SCARLETT = window.SCARLETT || {};
 window.SCARLETT.BUILD = BUILD;
 window.SCARLETT.engineAttached = true;
-window.SCARLETT.attached = true;
-window.SCARLETT.ok = true;
 window.__scarlettEngineAttached = true;
-window.__SCARLETT_ENGINE_ATTACHED__ = true;
-window.__scarlettAttached = true;
 
-// ---- Diagnostics writer (used everywhere) ----
-const diag = new Diag({ build: BUILD });
-window.__scarlettDiagWrite = (msg) => diag.write(String(msg));
-const dwrite = (msg) => diag.write(msg);
+import { createDiag, hookDiagUI } from "../modules/diag.js";
+import { initWorld } from "../world.js";
+import { installTeleport } from "../modules/teleport.js";
+import { installMovement } from "../modules/movement.js";
 
-console.log(`[scarlett] LIVE_FINGERPRINT ✅ ${BUILD}`);
+function qs(id){ return document.getElementById(id); }
 
-dwrite(`[0.000] booting… BUILD=${BUILD}`);
-dwrite(`[0.002] href=${location.href}`);
-dwrite(`[0.002] secureContext=${String(window.isSecureContext)}`);
-dwrite(`[0.003] ua=${navigator.userAgent}`);
-dwrite(`[0.005] touch=${("ontouchstart" in window)} maxTouchPoints=${navigator.maxTouchPoints || 0}`);
+async function installEnterVR(scene, diag){
+  const btn = qs("btnEnterVR");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    try{
+      diag.write("[xr] Enter VR clicked…");
+      if (!navigator.xr) { diag.write("[xr] navigator.xr missing ❌"); return; }
+      const supported = await navigator.xr.isSessionSupported("immersive-vr");
+      diag.write(`[xr] immersive-vr supported=${supported}`);
+      if (!supported) return;
 
-const scene = document.querySelector("#scene");
-const rig = document.querySelector("#rig");
+      const session = await navigator.xr.requestSession("immersive-vr", {
+        requiredFeatures: ["local-floor"],
+        optionalFeatures: ["hand-tracking"]
+      });
 
-function el(id) { return document.getElementById(id); }
+      const renderer = scene.renderer;
+      renderer.xr.setReferenceSpaceType("local-floor");
+      await renderer.xr.setSession(session);
+      diag.write("[xr] session started ✅");
+    } catch(e){
+      diag.write("[xr] start failed ❌ " + (e?.message || e));
+    }
+  });
+}
 
-// HUD wiring
-const hud = el("hud");
-const btnEnterVR = el("btnEnterVR");
-const btnTeleport = el("btnTeleport");
-const btnReset = el("btnReset");
-const btnHideHUD = el("btnHideHUD");
-const btnDiag = el("btnDiag");
-const diagPanel = el("diagPanel");
-const btnDiagClose = el("btnDiagClose");
+function safeSpawn(rig, diag){
+  // Spawn at teleSpawn pad (0,0,0) facing -Z where the table is at z=-8.
+  rig.object3D.position.set(0, 0, 0);
+  rig.object3D.rotation.set(0, 0, 0);
+  diag.write("[spawn] rig=(0,0,0) facing -Z ✅");
+}
 
-btnDiag.addEventListener("click", () => diagPanel.classList.toggle("hidden"));
-btnDiagClose.addEventListener("click", () => diagPanel.classList.add("hidden"));
+async function main(){
+  const diag = createDiag();
+  hookDiagUI(diag);
 
-btnHideHUD.addEventListener("click", () => {
-  const hidden = hud.classList.toggle("hudHidden");
-  // Keep pointer events off for hidden state; but we still show/hide
-  hud.style.display = hidden ? "none" : "block";
-});
+  diag.write(`[0.000] booting… BUILD=${BUILD}`);
+  diag.write(`[0.001] href=${location.href}`);
+  diag.write(`[0.002] secureContext=${window.isSecureContext}`);
+  diag.write(`[0.003] ua=${navigator.userAgent}`);
+  diag.write(`[0.004] touch=${("ontouchstart" in window)} maxTouchPoints=${navigator.maxTouchPoints||0}`);
+  diag.write(`[0.005] xr=${!!navigator.xr}`);
 
-btnEnterVR.addEventListener("click", async () => {
-  try {
-    dwrite(`[vr] request enter…`);
-    // A-Frame provides enterVR() on the scene
-    scene.enterVR();
-  } catch (e) {
-    dwrite(`[vr] enter failed: ${e?.message || e}`);
+  const scene = document.querySelector("a-scene");
+  const rig = qs("rig");
+  const camera = qs("camera");
+
+  if (!scene || !rig || !camera) {
+    diag.write("[fatal] missing scene/rig/camera ❌");
+    return;
   }
-});
 
-const spawn = { x: 0, y: 0, z: 3, ry: 180 };
-btnReset.addEventListener("click", () => {
-  rig.setAttribute("position", `${spawn.x} ${spawn.y} ${spawn.z}`);
-  rig.setAttribute("rotation", `0 ${spawn.ry} 0`);
-  dwrite(`[spawn] reset to safe pad ✅ (${spawn.x},${spawn.y},${spawn.z})`);
-});
+  await new Promise((res) => {
+    if (scene.renderer) return res();
+    scene.addEventListener("renderstart", () => res(), { once: true });
+  });
+  diag.write("[scene] renderstart ✅");
 
-// Modules
-const joystick = new JoystickMove({ rig, diag: dwrite });
-const teleport = new Teleport({ rig, scene, diag: dwrite });
+  safeSpawn(rig, diag);
 
-let teleOn = true;
-btnTeleport.addEventListener("click", () => {
-  teleOn = !teleOn;
-  teleport.setEnabled(teleOn);
-  btnTeleport.textContent = `Teleport: ${teleOn ? "ON" : "OFF"}`;
-  dwrite(`[teleport] ${teleOn ? "ON" : "OFF"}`);
-});
+  try { initWorld({ diag }); } catch(e){ diag.write("[world] failed ❌ " + (e?.message || e)); }
+  try { installTeleport({ scene, rig, diag }); } catch(e){ diag.write("[teleport] failed ❌ " + (e?.message || e)); }
+  try { installMovement({ scene, rig, camera, diag }); } catch(e){ diag.write("[move] failed ❌ " + (e?.message || e)); }
+  await installEnterVR(scene, diag);
 
-// Scene lifecycle
-scene.addEventListener("loaded", () => {
-  dwrite(`[0.180] [world] scene loaded ✅`);
-  dwrite(`[0.210] [world] spawn safe ✅`);
-  // Ensure we never spawn on the table
-  rig.setAttribute("position", `${spawn.x} ${spawn.y} ${spawn.z}`);
-  rig.setAttribute("rotation", `0 ${spawn.ry} 0`);
+  diag.write("[ready] ✅");
+}
 
-  joystick.install();
-  teleport.install();
-
-  dwrite(`[0.222] [teleport] ${teleOn ? "ON" : "OFF"}`);
-  dwrite(`[0.750] xr immersive-vr supported=${String(!!navigator.xr)}`);
-  dwrite(`[ready] ✅`);
-});
-
-// Keep camera standing height unless you explicitly set seated in future modules.
-// (Update 15 keeps standing baseline. Seat logic comes later.)
+main().catch(e => { try { window.__scarlettDiagWrite?.("[fatal] " + (e?.message || e)); } catch(_){} });

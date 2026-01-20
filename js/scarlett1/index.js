@@ -1,4 +1,4 @@
-const BUILD = "SCARLETT_UPDATE_22_FULL_GH";
+const BUILD = "SCARLETT_UPDATE_24_FULL_GH";
 import { createDiag, hookDiagUI } from "../modules/diag.js";
 import { initWorld } from "../world.js";
 import { installXRInput } from "../modules/xr_input.js";
@@ -21,8 +21,6 @@ async function main(){
   const leftHand = qs("leftHand");
   const rightHand = qs("rightHand");
 
-  if (!scene || !rig || !camera) { diag.write("[fatal] missing scene/rig/camera ❌"); return; }
-
   await new Promise((res)=>{ if(scene.renderer) return res(); scene.addEventListener("renderstart", ()=>res(), {once:true}); });
   diag.write("[scene] renderstart ✅");
 
@@ -31,19 +29,13 @@ async function main(){
   diag.write("[spawn] rig=(0,0,0) facing -Z ✅");
 
   initWorld({ diag });
-
-  // Install Quest-proof input (works in VR even when A-Frame events don't fire)
   installXRInput({ scene, rig, camera, leftHand, rightHand, diag });
 
-  // Enter VR
   qs("btnEnterVR")?.addEventListener("click", async ()=>{
     try{ diag.write("[xr] Enter VR clicked…"); await scene.enterVR(); diag.write("[xr] enterVR ✅"); }
     catch(e){ diag.write("[xr] enterVR failed ❌ "+(e?.message||e)); }
   });
 
-  scene.addEventListener("enter-vr", ()=>diag.write("[xr] enter-vr event ✅"));
-  scene.addEventListener("exit-vr", ()=>diag.write("[xr] exit-vr event"));
-
   diag.write("[ready] ✅");
 }
-main().catch(e=>{ try{ window.__scarlettDiagWrite?.("[fatal] "+(e?.message||e)); }catch(_){} });
+main().catch(e=>{ try { window.__scarlettDiagWrite?.("[fatal] "+(e?.message||e)); } catch(_){} });

@@ -1,139 +1,39 @@
-:root {
-  --bg: rgba(10, 12, 18, 0.68);
-  --bg2: rgba(0, 0, 0, 0.72);
-  --fg: #e8eefc;
-  --muted: rgba(232, 238, 252, 0.7);
-  --line: rgba(255, 255, 255, 0.14);
+html, body { margin:0; padding:0; width:100%; height:100%; background:#000; overflow:hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+#hud{
+  position:fixed; left:0; right:0; top:0;
+  display:flex; flex-direction:column; gap:10px;
+  padding:10px;
+  z-index:10000;
+  pointer-events:auto; /* IMPORTANT: allow taps/clicks over canvas */
 }
-
-html, body {
-  margin: 0;
-  padding: 0;
-  height: 100%;
-  background: #0b0e12;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-  overflow: hidden;
+#hud .row{ display:flex; gap:10px; flex-wrap:wrap; }
+.hudBtn{
+  background:#111827;
+  color:#e5e7eb;
+  border:1px solid rgba(255,255,255,0.15);
+  border-radius:10px;
+  padding:10px 12px;
+  font-size:14px;
 }
-
-.hud {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
+.hudBtn:active{ transform:translateY(1px); }
+.hudBtn.small{ padding:6px 10px; font-size:12px; border-radius:8px; }
+.diag{
+  max-width:min(920px, 96vw);
+  background:rgba(0,0,0,0.78);
+  border:1px solid rgba(255,255,255,0.15);
+  border-radius:12px;
+  padding:10px;
 }
-
-.hudRow {
-  position: fixed;
-  top: env(safe-area-inset-top, 10px);
-  left: 10px;
-  right: 10px;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-start;
-  pointer-events: none;
-}
-
-.hudBtn {
-  pointer-events: auto;
-  border: 1px solid var(--line);
-  background: var(--bg);
-  color: var(--fg);
-  padding: 10px 12px;
-  border-radius: 10px;
-  font-weight: 650;
-  letter-spacing: 0.2px;
-}
-
-.hudBtn:active { transform: scale(0.99); }
-
-.diag {
-  position: fixed;
-  left: 10px;
-  right: 10px;
-  top: 70px;
-  max-height: 52vh;
-  background: var(--bg2);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 10px;
-  pointer-events: auto;
-}
-
-.hidden { display: none; }
-
-.diagHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-}
-
-.diagTitle {
-  color: var(--fg);
-  font-weight: 800;
-}
-
-.diagClose {
-  border: 1px solid var(--line);
-  background: rgba(255,255,255,0.08);
-  color: var(--fg);
-  border-radius: 10px;
-  padding: 6px 10px;
-}
-
-.diagText {
-  margin: 8px 0 0;
-  color: var(--fg);
-  font-size: 12px;
-  line-height: 1.35;
-  white-space: pre-wrap;
-}
-
-/* Mobile joystick */
-.joy {
-  position: fixed;
-  left: 18px;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
-  width: 140px;
-  height: 140px;
-  pointer-events: none;
-}
-
-.joyBase {
-  width: 120px;
-  height: 120px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.2);
-  background: rgba(0,0,0,0.35);
-  backdrop-filter: blur(6px);
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  pointer-events: auto;
-  touch-action: none;
-}
-
-.joyKnob {
-  width: 54px;
-  height: 54px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.18);
-  border: 1px solid rgba(255,255,255,0.25);
-  position: absolute;
-  left: 33px;
-  top: 33px;
-}
-
-.joyHint {
-  position: absolute;
-  left: 0;
-  bottom: 122px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  /* Hide joystick on desktop */
-  #joystick { display: none; }
+.diag.hidden{ display:none; }
+.diagHeader{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+.diagTitle{ font-weight:700; letter-spacing:0.5px; }
+#diagText{
+  margin:0;
+  white-space:pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size:12px;
+  line-height:1.25rem;
+  color:#7CFC90;
+  max-height:45vh;
+  overflow:auto;
 }

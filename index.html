@@ -1,2 +1,91 @@
-<!-- SCARLETT UPDATE 25 FULL SAFE -->
-<html><body>Loader Active</body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>SCARLETT VR Poker — V26 Safe Boot</title>
+  <meta name="color-scheme" content="dark light" />
+  <style>
+    html, body { margin:0; padding:0; height:100%; background:#0b0f14; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    #hud { position:fixed; left:0; top:0; right:0; z-index:9999; pointer-events:none; padding:10px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; }
+    .btn { pointer-events:auto; border:1px solid rgba(255,255,255,.14); background:rgba(10,14,20,.65); color:#fff; padding:10px 12px; border-radius:12px; font-size:14px; }
+    .btn:active { transform: translateY(1px); }
+    #diagPanel { pointer-events:auto; margin-top:10px; padding:10px; border-radius:14px; border:1px solid rgba(255,255,255,.14); background:rgba(0,0,0,.55); max-width: 900px; display:none; }
+    #diagPanel pre { margin:0; white-space:pre-wrap; word-break:break-word; font-size:12px; line-height:1.35; }
+    #loader {
+      position:fixed; inset:0; z-index:9998; display:flex; align-items:center; justify-content:center;
+      background: radial-gradient(1200px 800px at 50% 40%, rgba(30,40,60,.55), rgba(0,0,0,.82));
+      color:#fff;
+    }
+    #loaderCard { border:1px solid rgba(255,255,255,.14); background:rgba(0,0,0,.45); padding:16px 18px; border-radius:16px; width:min(520px, 92vw); }
+    #loaderTitle { font-weight:700; font-size:16px; margin-bottom:6px; }
+    #loaderSub { opacity:.85; font-size:13px; }
+    #loaderErr { margin-top:10px; color:#ffb4b4; font-size:12px; display:none; }
+    #hint { opacity:.8; margin-top:10px; font-size:12px; }
+  </style>
+
+  <!-- A-Frame -->
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+
+  <!-- Scarlett Modules (V26) -->
+  <script type="module" src="./js/app.js?v=26"></script>
+</head>
+<body>
+  <div id="hud" aria-hidden="false">
+    <div class="row">
+      <button id="btnEnterVR" class="btn" type="button">Enter VR</button>
+      <button id="btnTeleport" class="btn" type="button">Teleport: ON</button>
+      <button id="btnReset" class="btn" type="button">Reset to Spawn</button>
+      <button id="btnDiag" class="btn" type="button">Diagnostics</button>
+      <button id="btnHideHUD" class="btn" type="button">Hide HUD</button>
+    </div>
+
+    <div id="diagPanel">
+      <pre id="diagText">booting…</pre>
+    </div>
+  </div>
+
+  <div id="loader">
+    <div id="loaderCard">
+      <div id="loaderTitle">loader active</div>
+      <div id="loaderSub">SCARLETT_V26_FULL_SAFE_BOOT — starting world…</div>
+      <div id="loaderErr"></div>
+      <div id="hint">If this hangs, open Diagnostics. Errors will appear here too.</div>
+    </div>
+  </div>
+
+  <!-- Scene -->
+  <a-scene id="scene"
+    renderer="antialias:true; physicallyCorrectLights:true; colorManagement:true"
+    background="color: #0b0f14"
+    xr-mode-ui="enabled: false"
+    webxr="requiredFeatures: local-floor; optionalFeatures: bounded-floor, hand-tracking"
+  >
+    <!-- Rig (the player) -->
+    <a-entity id="rig" position="0 0 3">
+      <a-entity id="head" camera position="0 1.65 0" look-controls="pointerLockEnabled: true"></a-entity>
+
+      <!-- Left & Right controllers -->
+      <a-entity id="leftHand"
+        laser-controls="hand: left"
+        raycaster="objects: .teleportable; far: 30"
+        teleport-ray
+      ></a-entity>
+
+      <a-entity id="rightHand"
+        laser-controls="hand: right"
+        raycaster="objects: .teleportable; far: 30"
+        teleport-ray
+      ></a-entity>
+
+      <!-- Smooth locomotion (thumbsticks) -->
+      <a-entity smooth-locomotion></a-entity>
+    </a-entity>
+
+    <!-- Fallback light so you never get black screen -->
+    <a-entity light="type: ambient; intensity: 0.55; color: #cfe3ff"></a-entity>
+    <a-entity light="type: directional; intensity: 0.65; color: #ffffff" position="2 6 4"></a-entity>
+  </a-scene>
+</body>
+</html>

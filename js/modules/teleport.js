@@ -1,9 +1,6 @@
-// js/modules/teleport.js
 function intersectPad(controllerEl) {
   const rc = controllerEl?.components?.raycaster;
   const ints = rc?.intersections || [];
-  if (!ints.length) return null;
-  // choose nearest with a teleTarget class
   for (const hit of ints) {
     const el = hit?.object?.el;
     if (el?.classList?.contains("teleTarget")) return el;
@@ -30,30 +27,17 @@ export function installTeleport({ scene, rig, diag }) {
     diag.write(`[teleport] -> ${padEl.id || "pad"} x=${p.x.toFixed(2)} z=${p.z.toFixed(2)}`);
   };
 
-  // Click path (desktop / some mobile)
   scene.addEventListener("click", (evt) => {
     if (!enabled) return;
     const el = evt?.detail?.intersectedEl || evt?.target;
     if (el?.classList?.contains("teleTarget")) doTeleportTo(el);
   });
 
-  // Trigger path (Quest): teleport to whatever the raycaster is hitting
   const left = document.getElementById("leftHand");
   const right = document.getElementById("rightHand");
-
-  const onTrigger = (hand) => () => {
-    if (!enabled) return;
-    const pad = intersectPad(hand);
-    if (pad) doTeleportTo(pad);
-  };
-
+  const onTrigger = (hand) => () => enabled && doTeleportTo(intersectPad(hand));
   left?.addEventListener("triggerdown", onTrigger(left));
   right?.addEventListener("triggerdown", onTrigger(right));
-
-  // Bind pads directly too
-  scene.querySelectorAll(".teleTarget").forEach(pad => {
-    pad.addEventListener("click", () => enabled && doTeleportTo(pad));
-  });
 
   diag.write("[teleport] installed ✅ (triggerdown + click)");
 }

@@ -5,7 +5,7 @@ import { auditModules } from "./module_loader.js";
 import "./teleport.js";
 import "./move.js";
 
-const BUILD = "SCARLETT_V26_1_SAFE_BOOT_PLUS_AUDIT_v26_1";
+const BUILD = "SCARLETT_V26_1_1_SAFE_BOOT_AUDIT_FIX_v26_1_1";
 
 function $(id){ return document.getElementById(id); }
 

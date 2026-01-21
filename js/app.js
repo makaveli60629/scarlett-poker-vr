@@ -9,7 +9,7 @@ import { loadModules, safeSet, scarlett1Set, autoStage2, autoStage3 } from "./mo
 import "./teleport.js";
 import "./move.js";
 
-const BUILD = "SCARLETT_V27_1_AUTO_STAGE_LOADER_v27_1";
+const BUILD = "SCARLETT_V27_1_1_MOVEFIX_STAGE_LOADER_v27_1_1";
 
 function $(id){ return document.getElementById(id); }
 

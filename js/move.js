@@ -14,6 +14,7 @@ AFRAME.registerComponent("smooth-locomotion", {
     this.leftEnt = document.getElementById("leftHand");
     this.rightEnt = document.getElementById("rightHand");
     this.lastSnap = 0;
+    this._forwardYSign = null;
   },
 
   tick(t, dt) {
@@ -48,12 +49,25 @@ AFRAME.registerComponent("smooth-locomotion", {
       return;
     }
 
-    // stick up (negative my) => forward
-    const fwd = -my;
+    // Determine which sign means "forward" on this controller (Quest can differ).
+    // We learn it from the first strong Y input we see.
+    if (this._forwardYSign == null && Math.abs(my) > 0.4 && Math.abs(my) >= Math.abs(mx)) {
+      this._forwardYSign = (my >= 0) ? 1 : -1;
+      // diag helper (optional)
+      try { window.__scarlettDiagWrite?.(`[move] learned forwardYSign=${this._forwardYSign}`); } catch(_) {}
+    }
+    const sign = (this._forwardYSign == null) ? -1 : this._forwardYSign; // default assumes "up is negative"
+    const fwd = my * sign; // forward is positive
 
-    const yaw = this.head ? this.head.object3D.rotation.y : this.rig.object3D.rotation.y;
-    const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-    const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    // Move relative to where the HMD/camera is facing (world yaw), not just local rotation.
+    // This fixes "after teleport/turn, forward moves sideways".
+    const dir = new THREE.Vector3();
+    this.head.object3D.getWorldDirection(dir); // points forward (-Z)
+    dir.y = 0;
+    if (dir.lengthSq() < 1e-6) dir.set(0, 0, -1);
+    dir.normalize();
+
+    const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), dir).normalize();
 
     const v = new THREE.Vector3();
     v.addScaledVector(forward, fwd * this.data.speed * delta);

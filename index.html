@@ -23,10 +23,19 @@
     #loaderSub { opacity:.85; font-size:13px; }
     #loaderErr { margin-top:10px; color:#ffb4b4; font-size:12px; display:none; }
     #hint { opacity:.8; margin-top:10px; font-size:12px; }
+  
+    /* Android pads */
+    #androidPads{ position:fixed; inset:0; z-index:9997; pointer-events:none; display:none; }
+    .pad{ position:absolute; width:160px; height:160px; border-radius:999px; border:1px solid rgba(255,255,255,.18);
+          background:rgba(10,14,20,.25); backdrop-filter: blur(6px); pointer-events:auto; touch-action:none; }
+    .knob{ position:absolute; left:50%; top:50%; width:70px; height:70px; margin-left:-35px; margin-top:-35px;
+           border-radius:999px; border:1px solid rgba(255,255,255,.25); background:rgba(255,255,255,.08); }
+    #padMove{ left:18px; bottom:18px; }
+    #padTurn{ right:18px; bottom:18px; }
   </style>
 
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-  <script type="module" src="./js/app.js?v=26.1.4"></script>
+  <script type="module" src="./js/app.js?v=26.1.5"></script>
 </head>
 <body>
   <div id="hud" aria-hidden="false">
@@ -47,13 +56,18 @@
   <div id="loader">
     <div id="loaderCard">
       <div id="loaderTitle">loader active</div>
-      <div id="loaderSub">SCARLETT_V26_1_4_SPAWN_AND_MODULE_BOOT — starting world…</div>
+      <div id="loaderSub">SCARLETT_V26_1_5_SPAWN_MOVE_ANDROIDPADS — starting world…</div>
       <div id="loaderErr"></div>
       <div id="hint">Tip: teleport shows a floor reticle when your laser hits something teleportable.</div>
     </div>
   </div>
 
-  <a-scene id="scene"
+    <div id="androidPads" aria-hidden="true">
+    <div id="padMove" class="pad"><div id="knobMove" class="knob"></div></div>
+    <div id="padTurn" class="pad"><div id="knobTurn" class="knob"></div></div>
+  </div>
+
+<a-scene id="scene"
     renderer="antialias:true; physicallyCorrectLights:true; colorManagement:true"
     background="color: #0b0f14"
     xr-mode-ui="enabled: false"

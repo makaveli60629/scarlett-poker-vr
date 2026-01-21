@@ -4,10 +4,12 @@ import { buildWorld } from "./world.js";
 import { applySpawn, armRespawnOnEnterVR } from "./spawn.js";
 import { initAndroidPads } from "./android_pads.js";
 import { auditModules } from "./module_loader.js";
+import { scanRepo } from "./repo_scanner.js";
+import { loadModules, safeSet, scarlett1Set } from "./module_manager.js";
 import "./teleport.js";
 import "./move.js";
 
-const BUILD = "SCARLETT_V26_1_5_SPAWN_MOVE_ANDROIDPADS_v26_1_5";
+const BUILD = "SCARLETT_V27_PERMA_STAGE_LOADER_v27_0";
 
 function $(id){ return document.getElementById(id); }
 
@@ -66,6 +68,32 @@ async function boot(){
     btnTeleport.textContent = `Teleport: ${teleportEnabled ? "ON" : "OFF"}`;
     diagSetKV("teleport", teleportEnabled ? "ON" : "OFF");
   });
+  const btnScanRepo = $("btnScanRepo");
+  btnScanRepo?.addEventListener("click", async () => {
+    diagSection("REPO SCAN (GitHub API)");
+    const rep = await scanRepo({ diagWrite });
+    window.SCARLETT.repoScan = rep;
+    diagWrite(`[scan] candidates=${rep.candidates.length} present=${rep.present.length} missing=${rep.missing.length}`);
+  });
+
+  const btnLoadSafe = $("btnLoadSafe");
+  btnLoadSafe?.addEventListener("click", async () => {
+    diagSection("LOAD SAFE SET");
+    const ctx = { scene, rig };
+    const rep = await loadModules(safeSet(), { diagWrite, ctx });
+    window.SCARLETT.loadSafe = rep;
+    diagWrite(`[load] safe ok=${rep.ok.length} fail=${rep.fail.length}`);
+  });
+
+  const btnLoadScarlett1 = $("btnLoadScarlett1");
+  btnLoadScarlett1?.addEventListener("click", async () => {
+    diagSection("LOAD SCARLETT1");
+    const ctx = { scene, rig };
+    const rep = await loadModules(scarlett1Set(), { diagWrite, ctx });
+    window.SCARLETT.loadScarlett1 = rep;
+    diagWrite(`[load] scarlett1 ok=${rep.ok.length} fail=${rep.fail.length}`);
+  });
+
 
   btnReset?.addEventListener("click", () => {
     try{

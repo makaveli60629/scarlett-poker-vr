@@ -123,6 +123,7 @@ async function boot(){
 
   // Build world
   safe(() => buildWorld(scene), "buildWorld()");
+  window.__scarlettWorldBuilt = true;
   diagWrite("[world] buildWorld() ✅");
 
   const floor = document.querySelector(".teleportable");

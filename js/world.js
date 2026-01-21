@@ -1,4 +1,5 @@
 // /js/world.js — builds a safe, bright, walkable lobby with spawn-safe placement
+
 export function buildWorld(scene){
   // Basic room + floor
   const floor = document.createElement("a-plane");
@@ -149,4 +150,9 @@ export function buildWorld(scene){
   screenText.setAttribute("width", "8");
   screenText.setAttribute("color", "#b7c9e8");
   scene.appendChild(screenText);
+}
+
+// Back-compat for scarlett1 loader (expects named export initWorld)
+export function initWorld(scene){
+  return buildWorld(scene);
 }

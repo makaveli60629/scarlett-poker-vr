@@ -1,5 +1,4 @@
-// /js/move.js — Quest-correct locomotion: left stick moves, right stick turns.
-// Fixes the common issue where only the first gamepad is read (often right controller), causing "no movement".
+// /js/move.js — Quest + Mobile locomotion (V26.1.5)
 AFRAME.registerComponent("smooth-locomotion", {
   schema: {
     speed: { type: "number", default: 2.2 },
@@ -18,41 +17,50 @@ AFRAME.registerComponent("smooth-locomotion", {
   },
 
   tick(t, dt) {
-    if (!this.rig) return;
+    if (!this.rig || !window.THREE) return;
     const delta = (dt || 16) / 1000;
 
-    const leftGP = this._gpFromEntity(this.leftEnt);
-    const rightGP = this._gpFromEntity(this.rightEnt);
+    const ta = window.SCARLETT?.touchAxes;
+    const hasTouch = ta && (Math.abs(ta.mx) + Math.abs(ta.my) + Math.abs(ta.tx) > 0.0001);
 
-    // If XR isn't providing controller gamepads, fall back to any pads
-    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    const any = (pads && pads.length) ? pads.find(p => p && p.axes && p.axes.length >= 2) : null;
+    const leftGP = hasTouch ? null : this._gpFromEntity(this.leftEnt);
+    const rightGP = hasTouch ? null : this._gpFromEntity(this.rightEnt);
+
+    const pads = (!hasTouch && navigator.getGamepads) ? navigator.getGamepads() : [];
+    const any = (!hasTouch && pads && pads.length) ? pads.find(p => p && p.axes && p.axes.length >= 2) : null;
 
     const moveGP = leftGP || any;
     const turnGP = rightGP || any;
-    if (!moveGP && !turnGP) return;
 
-    // Standard Oculus Touch: axes[2,3] = thumbstick on that controller (varies by browser),
-    // but in practice Quest Browser provides axes[2,3] for stick.
-    const mz = this.data.deadzone;
+    const dz = this.data.deadzone;
 
-    const mx = this._dead(this._axis(moveGP, 2) ?? this._axis(moveGP, 0), mz);
-    const my = this._dead(this._axis(moveGP, 3) ?? this._axis(moveGP, 1), mz);
+    let mx = 0, my = 0, tx = 0;
 
-    const tx = this._dead(this._axis(turnGP, 2) ?? this._axis(turnGP, 0), mz);
+    if (hasTouch) {
+      mx = this._dead(ta.mx, dz);
+      my = this._dead(ta.my, dz);
+      tx = this._dead(ta.tx, dz);
+    } else if (moveGP || turnGP) {
+      mx = this._dead((this._axis(moveGP, 2) || this._axis(moveGP, 0)), dz);
+      my = this._dead((this._axis(moveGP, 3) || this._axis(moveGP, 1)), dz);
+      tx = this._dead((this._axis(turnGP, 2) || this._axis(turnGP, 0)), dz);
+    } else {
+      return;
+    }
 
-    // Move in head yaw direction
+    // stick up (negative my) => forward
+    const fwd = -my;
+
     const yaw = this.head ? this.head.object3D.rotation.y : this.rig.object3D.rotation.y;
-    const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-    const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+    const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
 
     const v = new THREE.Vector3();
-    v.addScaledVector(forward, -my * this.data.speed * delta);
+    v.addScaledVector(forward, fwd * this.data.speed * delta);
     v.addScaledVector(right, mx * this.data.speed * delta);
 
     this.rig.object3D.position.add(v);
 
-    // Turn (snap or smooth)
     if (this.data.snapTurn) {
       const now = t || performance.now();
       if (Math.abs(tx) > 0.6 && (now - this.lastSnap) > 250) {
@@ -65,10 +73,7 @@ AFRAME.registerComponent("smooth-locomotion", {
     }
   },
 
-  _dead(v, dz){
-    if (!Number.isFinite(v)) return 0;
-    return Math.abs(v) > dz ? v : 0;
-  },
+  _dead(v, dz){ return (Number.isFinite(v) && Math.abs(v) > dz) ? v : 0; },
 
   _axis(gp, idx) {
     if (!gp?.axes || gp.axes.length <= idx) return 0;
@@ -79,23 +84,17 @@ AFRAME.registerComponent("smooth-locomotion", {
   _gpFromEntity(ent){
     try{
       if (!ent) return null;
-
-      // laser-controls usually creates tracked-controls internally
-      // 1) tracked-controls
       const tc = ent.components["tracked-controls"];
       const gp1 = tc?.controller?.gamepad;
       if (gp1) return gp1;
 
-      // 2) oculus-touch-controls
       const oc = ent.components["oculus-touch-controls"];
       const gp2 = oc?.controller?.gamepad;
       if (gp2) return gp2;
 
-      // 3) generic gamepad-controls
       const gc = ent.components["gamepad-controls"];
       const gp3 = gc?.controller?.gamepad;
       if (gp3) return gp3;
-
     } catch(_) {}
     return null;
   }

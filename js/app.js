@@ -1,12 +1,13 @@
 // SCARLETT V26.1 — SAFE BOOT + MODULE AUDIT + BETTER MOVEMENT
 import { diagInit, diagWrite, diagSetKV, diagDumpEnv, diagSection } from "./diag.js";
 import { buildWorld } from "./world.js";
-import { applySpawn } from "./spawn.js";
+import { applySpawn, armRespawnOnEnterVR } from "./spawn.js";
+import { initAndroidPads } from "./android_pads.js";
 import { auditModules } from "./module_loader.js";
 import "./teleport.js";
 import "./move.js";
 
-const BUILD = "SCARLETT_V26_1_4_SPAWN_AND_MODULE_BOOT_v26_1_4";
+const BUILD = "SCARLETT_V26_1_5_SPAWN_MOVE_ANDROIDPADS_v26_1_5";
 
 function $(id){ return document.getElementById(id); }
 
@@ -67,9 +68,10 @@ async function boot(){
   });
 
   btnReset?.addEventListener("click", () => {
-    rig?.setAttribute("position", "0 0 3");
-    rig?.setAttribute("rotation", "0 0 0");
-    diagWrite("[ui] reset to spawn");
+    try{
+      const ok = applySpawn({ standingHeight: 1.65 });
+      diagWrite(ok ? "[ui] reset to spawn ✅" : "[ui] reset failed");
+    } catch(e){ diagWrite(`[ui] reset error: ${e?.message || e}`); }
   });
 
   btnAudit?.addEventListener("click", async () => {
@@ -115,6 +117,9 @@ async function boot(){
     scene?.addEventListener("loaded", () => resolve(), { once: true });
   });
   diagWrite("[scene] loaded ✅");
+  try { initAndroidPads(); diagWrite("[androidPads] armed ✅"); } catch(e){ diagWrite(`[androidPads] error: ${e?.message || e}`); }
+  try { armRespawnOnEnterVR({ standingHeight: 1.65 }); diagWrite("[spawn] reapply on enter-vr armed ✅"); } catch(e){ diagWrite(`[spawn] arm error: ${e?.message || e}`); }
+
 
   // Auto-audit at boot (won't crash if missing)
   diagSection("MODULE AUDIT (auto)");

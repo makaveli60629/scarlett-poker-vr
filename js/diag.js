@@ -12,18 +12,15 @@ function writeLine(line){
     if (!diagTextEl) return;
     const now = performance.now();
     diagTextEl.textContent += `\n[${(now/1000).toFixed(3)}] ${line}`;
-    // keep last ~5000 chars
-    if (diagTextEl.textContent.length > 5000){
-      diagTextEl.textContent = diagTextEl.textContent.slice(-5000);
+    if (diagTextEl.textContent.length > 9000){
+      diagTextEl.textContent = diagTextEl.textContent.slice(-9000);
     }
   } catch (_) {}
 }
 
 export function diagWrite(msg){ writeLine(String(msg)); }
-
-export function diagSetKV(key, val){
-  writeLine(`${key}=${val}`);
-}
+export function diagSetKV(key, val){ writeLine(`${key}=${val}`); }
+export function diagSection(title){ writeLine(`\n--- ${title} ---`); }
 
 export function diagDumpEnv(){
   const href = location.href;
@@ -32,7 +29,6 @@ export function diagDumpEnv(){
   const touch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
   const maxTouchPoints = navigator.maxTouchPoints || 0;
   const xr = !!navigator.xr;
-
   diagWrite(`href=${href}`);
   diagWrite(`secureContext=${secureContext}`);
   diagWrite(`ua=${ua}`);

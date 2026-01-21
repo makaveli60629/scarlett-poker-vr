@@ -1,13 +1,11 @@
-// SCARLETT V26 — FULL SAFE BOOT (A-Frame)
-// Goal: never hang on "loader active"; always either show world or show a concrete error.
-//
-// File: /js/app.js
-import { diagInit, diagWrite, diagSetKV, diagDumpEnv } from "./diag.js";
+// SCARLETT V26.1 — SAFE BOOT + MODULE AUDIT + BETTER MOVEMENT
+import { diagInit, diagWrite, diagSetKV, diagDumpEnv, diagSection } from "./diag.js";
 import { buildWorld } from "./world.js";
+import { auditModules } from "./module_loader.js";
 import "./teleport.js";
 import "./move.js";
 
-const BUILD = "SCARLETT_V26_FULL_SAFE_BOOT_v26_0";
+const BUILD = "SCARLETT_V26_1_SAFE_BOOT_PLUS_AUDIT_v26_1";
 
 function $(id){ return document.getElementById(id); }
 
@@ -16,16 +14,8 @@ function showLoaderError(msg){
   el.style.display = "block";
   el.textContent = String(msg);
 }
-
-function hideLoader(){
-  const el = $("loader");
-  if (el) el.style.display = "none";
-}
-
-function showLoader(){
-  const el = $("loader");
-  if (el) el.style.display = "flex";
-}
+function hideLoader(){ const el = $("loader"); if (el) el.style.display = "none"; }
+function showLoader(){ const el = $("loader"); if (el) el.style.display = "flex"; }
 
 function safe(fn, label){
   try { return fn(); }
@@ -44,7 +34,6 @@ window.addEventListener("error", (ev) => {
   diagWrite(`[window.error] ${msg}`);
   showLoaderError(msg);
 });
-
 window.addEventListener("unhandledrejection", (ev) => {
   const msg = ev?.reason?.stack || ev?.reason?.message || String(ev?.reason || "Unhandled rejection");
   diagWrite(`[unhandledrejection] ${msg}`);
@@ -59,10 +48,11 @@ async function boot(){
   const scene = $("scene");
   const rig = $("rig");
 
-  // UI wires
+  // UI
   const btnEnterVR = $("btnEnterVR");
   const btnTeleport = $("btnTeleport");
   const btnReset = $("btnReset");
+  const btnAudit = $("btnAudit");
   const btnDiag = $("btnDiag");
   const btnHideHUD = $("btnHideHUD");
   const diagPanel = $("diagPanel");
@@ -81,6 +71,13 @@ async function boot(){
     diagWrite("[ui] reset to spawn");
   });
 
+  btnAudit?.addEventListener("click", async () => {
+    diagSection("MODULE AUDIT (manual)");
+    const report = await auditModules({ diagWrite });
+    window.SCARLETT.moduleReport = report;
+    diagWrite(`[audit] done — ok=${report.ok.length} missing=${report.missing.length} error=${report.error.length}`);
+  });
+
   btnDiag?.addEventListener("click", () => {
     const show = diagPanel.style.display !== "block";
     diagPanel.style.display = show ? "block" : "none";
@@ -92,10 +89,8 @@ async function boot(){
     hud.style.display = hidden ? "block" : "none";
   });
 
-  // Enter VR (explicit button for Quest reliability)
   btnEnterVR?.addEventListener("click", async () => {
     try {
-      // A-Frame uses scene.enterVR()
       scene?.enterVR?.();
       diagWrite("[xr] enterVR requested");
     } catch (e) {
@@ -104,41 +99,40 @@ async function boot(){
     }
   });
 
-  // Global flags the components read
   window.SCARLETT.teleportEnabled = true;
 
-  // Hard timeout: loader must never hang forever
+  // Watchdog
   const HANG_MS = 12000;
   const hangTimer = setTimeout(() => {
     diagWrite(`[watchdog] world attach timeout after ${HANG_MS}ms`);
     showLoaderError("World attach timeout. Open Diagnostics for details.");
-    // Keep loader visible, but show error.
   }, HANG_MS);
 
-  // Wait for scene ready (A-Frame lifecycle)
+  // Wait for A-Frame ready
   await new Promise((resolve) => {
     if (scene?.hasLoaded) return resolve();
     scene?.addEventListener("loaded", () => resolve(), { once: true });
   });
   diagWrite("[scene] loaded ✅");
 
-  // Build world (must not throw silently)
+  // Auto-audit at boot (won't crash if missing)
+  diagSection("MODULE AUDIT (auto)");
+  const report = await auditModules({ diagWrite });
+  window.SCARLETT.moduleReport = report;
+  diagWrite(`[audit] auto done — ok=${report.ok.length} missing=${report.missing.length} error=${report.error.length}`);
+
+  // Build world
   safe(() => buildWorld(scene), "buildWorld()");
   diagWrite("[world] buildWorld() ✅");
 
-  // Ensure there's always something teleportable
   const floor = document.querySelector(".teleportable");
   diagSetKV("teleportableFloor", floor ? "OK" : "MISSING");
 
-  // When first frame is rendered, hide loader
-  // A-Frame emits 'renderstart' when renderer begins
+  // Hide loader after renderstart
   await new Promise((resolve) => {
     const done = () => resolve();
     scene?.addEventListener("renderstart", done, { once: true });
-    // If renderstart already happened
-    if (scene?.renderer && scene?.renderStarted) resolve();
-    // Fallback: hide after a short delay once world exists
-    setTimeout(done, 400);
+    setTimeout(done, 450);
   });
 
   clearTimeout(hangTimer);
@@ -147,7 +141,4 @@ async function boot(){
 }
 
 showLoader();
-boot().catch((e) => {
-  // If boot fails, keep loader and show error
-  showLoaderError(e?.stack || e?.message || String(e));
-});
+boot().catch((e) => showLoaderError(e?.stack || e?.message || String(e)));

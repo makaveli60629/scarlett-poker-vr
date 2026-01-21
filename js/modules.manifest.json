@@ -1,0 +1,28 @@
+{
+  "modules": [
+    {
+      "label": "scarlett1/index",
+      "path": "./js/scarlett1/index.js"
+    },
+    {
+      "label": "pip/jumbotron",
+      "path": "./js/modules/jumbotron.js"
+    },
+    {
+      "label": "audio",
+      "path": "./js/modules/audio.js"
+    },
+    {
+      "label": "bots",
+      "path": "./js/modules/bots.js"
+    },
+    {
+      "label": "cards",
+      "path": "./js/modules/cards.js"
+    },
+    {
+      "label": "chips",
+      "path": "./js/modules/chips.js"
+    }
+  ]
+}

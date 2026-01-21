@@ -1,68 +1,69 @@
-export function createSafeModuleLoader({ log }) {
-  const state = {
-    modules: new Map(),
-    statuses: new Map(),
-    updates: [],
-  };
+// /js/module_loader.js — crash-proof optional module import + audit
+// Put your real module paths in /js/modules.manifest.json (or window.SCARLETT_MODULES).
+//
+// This never throws to the boot path. It reports ok/missing/error so we can clean the folder safely.
+async function fetchManifest(){
+  // 1) runtime override
+  if (Array.isArray(window.SCARLETT_MODULES) && window.SCARLETT_MODULES.length) return window.SCARLETT_MODULES;
 
-  function setStatus(name, status, msg = "") {
-    state.statuses.set(name, { status, msg });
-    log?.(status === "fail" ? "error" : status === "warn" ? "warn" : "log",
-      `[mod] ${name}: ${status.toUpperCase()}${msg ? " — " + msg : ""}`);
-  }
+  // 2) manifest file
+  try {
+    const res = await fetch("./js/modules.manifest.json", { cache: "no-store" });
+    if (!res.ok) return defaultModules();
+    const data = await res.json();
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.modules)) return data.modules;
+  } catch (_) {}
+  return defaultModules();
+}
 
-  async function loadOne(entry, ctx) {
-    const { name, url, required } = entry;
-    try {
-      const mod = await import(url);
+function defaultModules(){
+  // Safe placeholders. Replace with your real list.
+  return [
+    { label: "scarlett1/index", path: "./js/scarlett1/index.js" },
+    { label: "pip/jumbotron", path: "./js/modules/jumbotron.js" },
+    { label: "audio", path: "./js/modules/audio.js" },
+    { label: "bots", path: "./js/modules/bots.js" },
+    { label: "cards", path: "./js/modules/cards.js" },
+    { label: "chips", path: "./js/modules/chips.js" }
+  ];
+}
 
-      if (typeof mod.init === "function") {
-        try { await mod.init(ctx); }
-        catch (e) {
-          const msg = (e?.stack || e?.message || String(e));
-          setStatus(name, required ? "fail" : "warn", `init() crashed${required ? " (required)" : ""}: ${msg}`);
-          return null;
-        }
+async function safeImport(path){
+  // IMPORTANT: dynamic import must get a *static-ish* string to work with bundlers,
+  // but in plain browser modules it’s fine.
+  return import(path);
+}
+
+export async function auditModules({ diagWrite } = {}){
+  const modules = await fetchManifest();
+  const report = { ok: [], missing: [], error: [] };
+
+  for (const m of modules){
+    const label = m?.label || m?.path || "module";
+    const path = m?.path;
+    if (!path){
+      report.missing.push({ label, path: null, reason: "no path" });
+      diagWrite?.(`[audit] MISSING (no path): ${label}`);
+      continue;
+    }
+
+    try{
+      await safeImport(path);
+      report.ok.push({ label, path });
+      diagWrite?.(`[audit] OK: ${label} -> ${path}`);
+    } catch (e){
+      const msg = e?.message || String(e);
+      // Try to classify "missing file" vs runtime error
+      const missing = /failed to fetch|cannot find module|404/i.test(msg);
+      if (missing){
+        report.missing.push({ label, path, reason: msg });
+        diagWrite?.(`[audit] MISSING: ${label} -> ${path} (${msg})`);
+      } else {
+        report.error.push({ label, path, reason: msg });
+        diagWrite?.(`[audit] ERROR: ${label} -> ${path} (${msg})`);
       }
-
-      if (typeof mod.update === "function") {
-        state.updates.push({ name, fn: mod.update });
-      }
-
-      state.modules.set(name, mod);
-      setStatus(name, "ok", "loaded");
-      return mod;
-
-    } catch (e) {
-      const msg = (e?.message || String(e));
-      setStatus(name, required ? "fail" : "warn", `missing/broken${required ? " (required)" : ""}: ${msg}`);
-      return null;
     }
   }
-
-  async function loadAll(entries, ctx) {
-    for (const entry of entries) await loadOne(entry, ctx);
-    return getReport();
-  }
-
-  function updateAll(dt, ctx) {
-    for (const u of state.updates) {
-      try { u.fn(dt, ctx); }
-      catch (e) { setStatus(u.name, "warn", `update() crashed: ${e?.message || e}`); }
-    }
-  }
-
-  function getReport() {
-    const report = [];
-    for (const [name, s] of state.statuses.entries()) report.push({ name, ...s });
-    report.sort((a, b) => a.name.localeCompare(b.name));
-    return report;
-  }
-
-  return {
-    loadAll,
-    updateAll,
-    getReport,
-    get: (name) => state.modules.get(name) || null
-  };
+  return report;
 }

@@ -1,11 +1,12 @@
 // SCARLETT V26.1 — SAFE BOOT + MODULE AUDIT + BETTER MOVEMENT
 import { diagInit, diagWrite, diagSetKV, diagDumpEnv, diagSection } from "./diag.js";
 import { buildWorld } from "./world.js";
+import { applySpawn } from "./spawn.js";
 import { auditModules } from "./module_loader.js";
 import "./teleport.js";
 import "./move.js";
 
-const BUILD = "SCARLETT_V26_1_2_SAFE_BOOT_AUDIT_GHPAGES_FIX_v26_1_2";
+const BUILD = "SCARLETT_V26_1_4_SPAWN_AND_MODULE_BOOT_v26_1_4";
 
 function $(id){ return document.getElementById(id); }
 
@@ -123,8 +124,39 @@ async function boot(){
 
   // Build world
   safe(() => buildWorld(scene), "buildWorld()");
-  window.__scarlettWorldBuilt = true;
   diagWrite("[world] buildWorld() ✅");
+  // Apply authoritative spawn AFTER world exists (spawnPad is created in world.js)
+  try {
+    const ok = applySpawn({ standingHeight: 1.65 });
+    diagWrite(ok ? "[spawn] applied ✅" : "[spawn] failed (rig missing)");
+  } catch (e) {
+    diagWrite(`[spawn] error: ${e?.message || e}`);
+  }
+
+  // Boot optional modules in a safe order (won't crash the main loop)
+  diagSection("MODULE BOOT (safe init)");
+  const bootList = [
+    { label: "pip/jumbotron", path: "./js/modules/jumbotron.js" },
+    { label: "audio", path: "./js/modules/audio.js" },
+    { label: "bots", path: "./js/modules/bots.js" },
+    { label: "cards", path: "./js/modules/cards.js" },
+    { label: "chips", path: "./js/modules/chips.js" }
+  ];
+
+  for (const m of bootList) {
+    try {
+      const mod = await import(new URL(m.path, window.location.href).href);
+      if (typeof mod.init === "function") {
+        await mod.init({ scene, rig });
+        diagWrite(`[boot] init OK: ${m.label}`);
+      } else {
+        diagWrite(`[boot] loaded (no init): ${m.label}`);
+      }
+    } catch (e) {
+      diagWrite(`[boot] init FAIL: ${m.label} (${e?.message || e})`);
+    }
+  }
+
 
   const floor = document.querySelector(".teleportable");
   diagSetKV("teleportableFloor", floor ? "OK" : "MISSING");

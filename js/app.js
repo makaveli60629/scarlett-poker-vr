@@ -5,11 +5,11 @@ import { applySpawn, armRespawnOnEnterVR } from "./spawn.js";
 import { initAndroidPads } from "./android_pads.js";
 import { auditModules } from "./module_loader.js";
 import { scanRepo } from "./repo_scanner.js";
-import { loadModules, safeSet, scarlett1Set } from "./module_manager.js";
+import { loadModules, safeSet, scarlett1Set, autoStage2, autoStage3 } from "./module_manager.js";
 import "./teleport.js";
 import "./move.js";
 
-const BUILD = "SCARLETT_V27_PERMA_STAGE_LOADER_v27_0";
+const BUILD = "SCARLETT_V27_1_AUTO_STAGE_LOADER_v27_1";
 
 function $(id){ return document.getElementById(id); }
 
@@ -93,6 +93,41 @@ async function boot(){
     window.SCARLETT.loadScarlett1 = rep;
     diagWrite(`[load] scarlett1 ok=${rep.ok.length} fail=${rep.fail.length}`);
   });
+  const btnLoadStage2 = $("btnLoadStage2");
+  btnLoadStage2?.addEventListener("click", async () => {
+    diagSection("LOAD STAGE 2 (auto)");
+    const ctx = { scene, rig };
+    const list = autoStage2();
+    diagWrite(`[stage2] candidates=${list.length} (run Scan Repo first)`);
+    const rep = await loadModules(list, { diagWrite, ctx });
+    window.SCARLETT.loadStage2 = rep;
+    diagWrite(`[stage2] ok=${rep.ok.length} loaded=${rep.loaded.length} skipped=${rep.skipped.length} fail=${rep.fail.length}`);
+  });
+
+  const btnLoadStage3 = $("btnLoadStage3");
+  btnLoadStage3?.addEventListener("click", async () => {
+    diagSection("LOAD STAGE 3 (auto)");
+    const ctx = { scene, rig };
+    const list = autoStage3();
+    diagWrite(`[stage3] candidates=${list.length} (run Scan Repo first)`);
+    const rep = await loadModules(list, { diagWrite, ctx });
+    window.SCARLETT.loadStage3 = rep;
+    diagWrite(`[stage3] ok=${rep.ok.length} loaded=${rep.loaded.length} skipped=${rep.skipped.length} fail=${rep.fail.length}`);
+  });
+
+  const btnLoadAll = $("btnLoadAll");
+  btnLoadAll?.addEventListener("click", async () => {
+    diagSection("LOAD ALL (Safe→Stage2→Stage3)");
+    const ctx = { scene, rig };
+    const rep1 = await loadModules(safeSet(), { diagWrite, ctx });
+    const rep2 = await loadModules(autoStage2(), { diagWrite, ctx });
+    const rep3 = await loadModules(autoStage3(), { diagWrite, ctx });
+    window.SCARLETT.loadAll = { rep1, rep2, rep3 };
+    diagWrite(`[all] safe ok=${rep1.ok.length} fail=${rep1.fail.length}`);
+    diagWrite(`[all] stage2 ok=${rep2.ok.length} fail=${rep2.fail.length}`);
+    diagWrite(`[all] stage3 ok=${rep3.ok.length} fail=${rep3.fail.length}`);
+  });
+
 
 
   btnReset?.addEventListener("click", () => {

@@ -1,71 +1,56 @@
 // js/name_tag_focus.js
-// Show a bot's name tag only when the player is looking at that bot.
-// (Delayed init to avoid Quest/Android early-THREE issues)
 (function(){
-  function ready(){
-    return window.THREE && document.getElementById("scene") && document.getElementById("scene").hasLoaded;
-  }
+  const D = window.SCARLETT_DIAG || { log: () => {} };
 
-  function init(){
-    const D = window.SCARLETT_DIAG;
+  function getCamera(){ return document.getElementById("camera"); }
+  function getBots(){ return document.querySelectorAll(".bot"); }
 
-    const ray = new THREE.Raycaster();
-    const dir = new THREE.Vector3();
-    const origin = new THREE.Vector3();
-
-    function setVisible(bot, v){
-      const tag = bot.querySelector(".nameTag");
-      if(tag) tag.setAttribute("visible", v ? "true" : "false");
-    }
-
-    function tick(){
-      const camEl = document.getElementById("camera");
-      if(!camEl || !camEl.object3D) return;
-
-      const bots = Array.from(document.querySelectorAll(".bot"));
-      if(!bots.length) return;
-
-      camEl.object3D.getWorldPosition(origin);
-      camEl.object3D.getWorldDirection(dir);
-      ray.set(origin, dir);
-
-      const meshes = [];
-      const meshToBot = new Map();
-      bots.forEach(bot=>{
-        bot.object3D.traverse(n=>{
-          if(n && n.isMesh){
-            meshes.push(n);
-            meshToBot.set(n, bot);
-          }
-        });
-      });
-
-      let hitBot = null;
-      const hits = ray.intersectObjects(meshes, true);
-      if(hits && hits.length){
-        for(const h of hits){
-          const b = meshToBot.get(h.object);
-          if(b){ hitBot = b; break; }
-        }
-      }
-      bots.forEach(b=>setVisible(b, b === hitBot));
-    }
-
-    setInterval(tick, 120);
-    D && D.log && D.log("[focus] name tags: look-to-show ✅");
-  }
-
-  const scene = document.getElementById("scene");
-  if(scene){
-    scene.addEventListener("loaded", ()=>{
-      const t0 = performance.now();
-      (function wait(){
-        if(ready()) return init();
-        if(performance.now() - t0 < 4000) return setTimeout(wait, 50);
-      })();
+  function hideAll(){
+    getBots().forEach(b=>{
+      const t = b.querySelector(".nameTag");
+      if (t) t.setAttribute("visible","false");
     });
-  } else {
-    // fallback
-    setTimeout(()=>{ if(window.THREE) init(); }, 800);
   }
+
+  function tick(){
+    const cam = getCamera();
+    if(!cam || !cam.object3D) return;
+
+    const bots = [...getBots()];
+    if(!bots.length) return;
+
+    const camPos = new THREE.Vector3();
+    cam.object3D.getWorldPosition(camPos);
+
+    const camDir = new THREE.Vector3(0,0,-1).applyQuaternion(cam.object3D.quaternion).normalize();
+
+    let best = null;
+    let bestScore = -1;
+
+    for(const b of bots){
+      const p = new THREE.Vector3();
+      b.object3D.getWorldPosition(p);
+      const v = p.clone().sub(camPos);
+      const dist = v.length();
+      if (dist > 8) continue;
+      v.normalize();
+      const dot = camDir.dot(v);
+      const score = dot - dist*0.06;
+      if(score > bestScore){
+        bestScore = score;
+        best = b;
+      }
+    }
+
+    hideAll();
+    if(best && bestScore > 0.55){
+      const t = best.querySelector(".nameTag");
+      if(t) t.setAttribute("visible","true");
+    }
+  }
+
+  window.addEventListener("DOMContentLoaded", ()=>{
+    D.log("[focus] name tags: look-to-show ✅");
+    setInterval(tick, 120);
+  });
 })();

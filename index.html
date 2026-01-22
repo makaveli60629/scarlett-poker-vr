@@ -6,7 +6,7 @@
     name="viewport"
     content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
   />
-  <title>ScarlettVR Poker — Full 1.10</title>
+  <title>ScarlettVR Poker — Full 1.11</title>
 
   <!-- A-Frame -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
@@ -105,15 +105,15 @@
     exposure: 1.6;
   "
   xr-mode-ui="enabled: false"
-  webxr="optionalFeatures: local-floor, bounded-floor, hand-tracking"
+  webxr="requiredFeatures: local-floor; optionalFeatures: bounded-floor, hand-tracking"
 >
 
-  <a-entity id="rig" position="0 0 16" rotation="0 180 0">
+  <a-entity id="rig" position="0 0 28" rotation="0 180 0">
     <a-entity
       id="camera"
       camera
       look-controls
-      position="0 1.6 0" rotation="0 180 0"></a-entity>
+      position="0 1.6 0"></a-entity>
 
     <a-entity
       id="gazeCursor"
@@ -127,6 +127,10 @@
   </a-entity>
 
   <a-entity id="world"></a-entity>
+
+  <a-plane id="globalFloor" class="teleportable" rotation="-90 0 0" width="120" height="120"
+    material="color:#0b121c; roughness:1; metalness:0.0; opacity:1"></a-plane>
+
 
   <!-- Bright light rig -->
   <a-entity id="lightRig">

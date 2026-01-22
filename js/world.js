@@ -1,192 +1,157 @@
-// js/world.js  (BIG LOBBY + SAFE SPAWN ZONE)
+// js/world.js
 (function(){
-  const D = window.SCARLETT_DIAG || { log: console.log };
+  const D = window.SCARLETT_DIAG || { log: ()=>{} };
   const world = document.getElementById("world");
-
-  // ====== CONFIG ======
-  // Bigger lobby so you never spawn outside
-  const LOBBY_RADIUS = 40;        // was ~24
-  const WALL_RADIUS  = 39.5;
-  const CEIL_RADIUS  = 39.0;
-  const LOBBY_HEIGHT = 14.0;
-
-  // Safe spawn inside the room with nothing around it
-  const SPAWN_POS = { x: 0, y: 0, z: 18 };
-  const SAFE_SPAWN_CLEAR_RADIUS = 10; // nothing within 10m of spawn
-
-  // Table area is far away from spawn so spawn is always clean
-  const TABLE_CENTER = { x: 0, y: 0, z: 0 };
 
   function el(tag, attrs){
     const e = document.createElement(tag);
-    if(attrs){
-      for(const k in attrs) e.setAttribute(k, attrs[k]);
-    }
+    if (attrs) for (const k in attrs) e.setAttribute(k, attrs[k]);
     return e;
   }
-
-  function clear(){
-    while(world.firstChild) world.removeChild(world.firstChild);
+  function clear(){ while(world.firstChild) world.removeChild(world.firstChild); }
+  function txt(parent, value, pos, width, color){
+    const t = el("a-text", {value, position:pos||"0 0 0", align:"center", width:String(width||2.5), color:color||"#eaf2ff", baseline:"center"});
+    parent.appendChild(t); return t;
   }
 
   function buildLobby(){
-    // Floor (teleportable)
-    world.appendChild(el("a-circle",{
-      class:"teleportable",
-      rotation:"-90 0 0",
-      radius:String(LOBBY_RADIUS),
-      material:"color:#0c1118; roughness:1; metalness:0"
-    }));
-
-    // Walls
-    world.appendChild(el("a-cylinder",{
-      radius:String(WALL_RADIUS),
-      height:String(LOBBY_HEIGHT),
-      position:`0 ${(LOBBY_HEIGHT/2).toFixed(2)} 0`,
-      material:"color:#070c12; roughness:0.96; metalness:0.06; side:double; opacity:0.99"
-    }));
-
-    // Ceiling
-    world.appendChild(el("a-circle",{
-      rotation:"90 0 0",
-      radius:String(CEIL_RADIUS),
-      position:`0 ${LOBBY_HEIGHT.toFixed(2)} 0`,
-      material:"color:#05080d; opacity:0.98"
-    }));
-
-    // Neon rings high up (luxury vibe)
-    world.appendChild(el("a-torus",{
-      position:`0 ${(LOBBY_HEIGHT-0.3).toFixed(2)} 0`,
-      radius:String(CEIL_RADIUS-10),
-      radiusTubular:"0.18",
-      rotation:"90 0 0",
-      material:"color:#10314a; emissive:#4aa6ff; emissiveIntensity:1.2; roughness:0.6"
-    }));
-
-    world.appendChild(el("a-torus",{
-      position:`0 ${(LOBBY_HEIGHT-0.7).toFixed(2)} 0`,
-      radius:String(CEIL_RADIUS-0.5),
-      radiusTubular:"0.10",
-      rotation:"90 0 0",
-      material:"color:#0b2b44; emissive:#4aa6ff; emissiveIntensity:1.1; opacity:0.92"
-    }));
+    world.appendChild(el("a-circle",{class:"teleportable", rotation:"-90 0 0", radius:"40", material:"color:#0a111b; roughness:1; metalness:0"}));
+    world.appendChild(el("a-cylinder",{radius:"39.6", height:"14", position:"0 7 0", material:"color:#050a12; side:double; roughness:0.95; metalness:0.06; opacity:0.995"}));
+    world.appendChild(el("a-circle",{rotation:"90 0 0", radius:"39.2", position:"0 14 0", material:"color:#03060b; opacity:0.985"}));
+    world.appendChild(el("a-torus",{position:"0 13.0 0", radius:"39.15", radiusTubular:"0.09", rotation:"90 0 0",
+      material:"color:#0b2b44; emissive:#4aa6ff; emissiveIntensity:1.0; opacity:0.85"}));
+    const sign = el("a-entity",{position:"0 4.2 24", rotation:"0 180 0"});
+    sign.appendChild(el("a-plane",{width:"10.2", height:"2.9", material:"color:#091425; opacity:0.74"}));
+    txt(sign,"WELCOME TO VIP • SCARLETT","0 0.55 0.01",8.4,"#d7eaff");
+    txt(sign,"LEGENDS • TROPHIES • HIGH STAKES","0 -0.35 0.01",6.6,"#b8d3ff");
+    world.appendChild(sign);
   }
 
-  function buildSafeSpawnPad(){
-    // Visible spawn ring + text, but NO geometry near it
-    const s = el("a-entity",{ id:"spawnPad", position:`${SPAWN_POS.x} ${SPAWN_POS.y} ${SPAWN_POS.z}` });
+  function buildDoorsAndJumbos(){
+    const spots = [
+      {x:0, z:-36, ry:0, door:"MAIN EVENTS"},
+      {x:36, z:0, ry:-90, door:"SCORPION ROOM"},
+      {x:0, z:36, ry:180, door:"VIP WELCOME"},
+      {x:-36, z:0, ry:90, door:"STORE"},
+    ];
+    spots.forEach((s, idx)=>{
+      const d = el("a-entity",{position:`${s.x} 0 ${s.z}`, rotation:`0 ${s.ry} 0`});
+      d.appendChild(el("a-box",{width:"7", height:"5.6", depth:"0.45", position:"0 2.8 0", material:"color:#0f1723; roughness:0.9"}));
+      d.appendChild(el("a-box",{width:"5.8", height:"4.6", depth:"0.25", position:"0 2.7 0.13", material:"color:#071018; roughness:1; opacity:0.98"}));
+      const lbl = el("a-entity",{position:"0 5.75 0.30"});
+      txt(lbl, s.door, "0 0 0", 7.0, "#cfe7ff");
+      d.appendChild(lbl);
+      world.appendChild(d);
 
-    s.appendChild(el("a-ring",{
-      rotation:"-90 0 0",
-      radiusInner:"0.75",
-      radiusOuter:"1.25",
-      material:"color:#0a2636; emissive:#4aa6ff; emissiveIntensity:0.9; opacity:0.98"
-    }));
+      const j = el("a-entity",{position:`${s.x} 10.6 ${s.z}`, rotation:`0 ${s.ry} 0`});
+      j.appendChild(el("a-box",{width:"9.6", height:"5.2", depth:"0.24", material:"color:#0c131d; roughness:0.9"}));
+      j.appendChild(el("a-plane",{id:`jumboScreen_${idx}`, class:"jumboScreen uiTarget", width:"9.0", height:"4.6", position:"0 0 0.13",
+        material:"color:#0a0f18; emissive:#0a0f18; emissiveIntensity:0.45"}));
+      world.appendChild(j);
 
-    s.appendChild(el("a-text",{
-      value:"SAFE SPAWN",
-      align:"center",
-      color:"#cfe7ff",
-      width:"6",
-      position:"0 0.05 0"
-    }));
-
-    // Safety “bubble” visual (faint)
-    s.appendChild(el("a-circle",{
-      rotation:"-90 0 0",
-      radius:String(SAFE_SPAWN_CLEAR_RADIUS),
-      material:"color:#4aa6ff; opacity:0.03"
-    }));
-
-    world.appendChild(s);
+      const rank = el("a-entity",{position:`${s.x} 8.05 ${s.z}`, rotation:`0 ${s.ry} 0`});
+      rank.appendChild(el("a-plane",{width:"7.8", height:"0.65", material:"color:#091425; opacity:0.82"}));
+      txt(rank, "RANKED • VIP", "0 0 0.01", 7.0, "#bfe1ff");
+      world.appendChild(rank);
+    });
   }
 
-  function buildTableFarFromSpawn(){
-    // Put table at center, spawn is at z=18, safe bubble radius=10 => clean
-    // Divot + rail at center
-    const pit = el("a-entity",{ id:"pit", position:`${TABLE_CENTER.x} 0 ${TABLE_CENTER.z}` });
+  function buildSpawn(){
+    const spawn = el("a-entity",{id:"spawnPad", position:"0 0 26"});
+    spawn.appendChild(el("a-ring",{rotation:"-90 0 0", radiusInner:"0.65", radiusOuter:"1.10",
+      material:"color:#0a2636; emissive:#4aa6ff; emissiveIntensity:0.85; opacity:0.98"}));
+    txt(spawn,"SPAWN","0 0.02 0",3.6,"#cfe7ff");
+    world.appendChild(spawn);
+  }
 
-    // Outer ring (walkable around)
-    pit.appendChild(el("a-ring",{
-      rotation:"-90 0 0",
-      radiusInner:"6.8",
-      radiusOuter:"12.5",
-      material:"color:#0c1118; roughness:1; metalness:0"
-    }));
-
-    // Pit "hole" (sunken)
-    pit.appendChild(el("a-cylinder",{
-      radius:"6.8",
-      height:"1.4",
-      position:"0 -0.7 0",
-      material:"color:#05080d; roughness:0.95; metalness:0.08; side:double"
-    }));
-
-    // Bottom floor of pit
-    pit.appendChild(el("a-circle",{
-      rotation:"-90 0 0",
-      radius:"6.6",
-      position:"0 -1.4 0",
-      material:"color:#0a0f18; roughness:0.98; metalness:0.02"
-    }));
-
-    // Top rail (lux)
-    pit.appendChild(el("a-torus",{
-      radius:"12.2",
-      radiusTubular:"0.22",
-      rotation:"90 0 0",
-      position:"0 0.95 0",
-      material:"color:#2a1f18; roughness:0.9; metalness:0.05"
-    }));
-
-    // Neon halo
-    pit.appendChild(el("a-torus",{
-      radius:"12.45",
-      radiusTubular:"0.08",
-      rotation:"90 0 0",
-      position:"0 0.12 0",
-      material:"color:#0b2b44; emissive:#4aa6ff; emissiveIntensity:1.25; opacity:0.95"
-    }));
-
+  function buildPitAndTable(){
+    const pit = el("a-entity",{id:"pit"});
+    pit.appendChild(el("a-ring",{rotation:"-90 0 0", radiusInner:"5.2", radiusOuter:"10.4", material:"color:#070c12; roughness:1"}));
+    pit.appendChild(el("a-cylinder",{radius:"5.2", height:"2.2", position:"0 -1.1 0", material:"color:#03060b; side:double; roughness:0.95"}));
+    pit.appendChild(el("a-circle",{rotation:"-90 0 0", radius:"5.12", position:"0 -2.2 0", material:"color:#060b12; roughness:0.98"}));
+    pit.appendChild(el("a-torus",{radius:"10.0", radiusTubular:"0.18", rotation:"90 0 0", position:"0 1.05 0", material:"color:#2a1f18; roughness:0.9"}));
+    pit.appendChild(el("a-torus",{radius:"10.2", radiusTubular:"0.08", rotation:"90 0 0", position:"0 0.25 0",
+      material:"color:#0b2b44; emissive:#4aa6ff; emissiveIntensity:1.25; opacity:0.92"}));
     world.appendChild(pit);
 
-    // Table (inside pit, low)
-    const table = el("a-entity",{ id:"mainTable", position:"0 -1.15 0" });
+    const table = el("a-entity",{id:"mainTable", position:"0 -1.95 0"});
+    table.appendChild(el("a-cylinder",{radius:"4.2", height:"0.58", position:"0 0.29 0", material:"color:#0f141c; roughness:0.85; metalness:0.12"}));
+    table.appendChild(el("a-torus",{radius:"3.95", radiusTubular:"0.18", position:"0 0.72 0", rotation:"90 0 0", material:"color:#2a1f18; roughness:0.95"}));
+    table.appendChild(el("a-cylinder",{radius:"3.80", height:"0.16", position:"0 0.90 0", material:"color:#0f7a60; roughness:1"}));
 
-    table.appendChild(el("a-cylinder",{
-      radius:"3.6",
-      height:"0.55",
-      position:"0 0.28 0",
-      material:"color:#0f141c; roughness:0.85; metalness:0.12"
-    }));
+    const comm = el("a-entity",{id:"communityFrame", position:"0 1.85 -1.50"});
+    comm.appendChild(el("a-plane",{width:"3.00", height:"1.00", material:"color:#061019; opacity:0.62"}));
+    txt(comm,"COMMUNITY","0 0.38 0.02",3.8,"#cfe7ff");
 
-    table.appendChild(el("a-torus",{
-      radius:"3.25",
-      radiusTubular:"0.18",
-      position:"0 0.72 0",
-      rotation:"90 0 0",
-      material:"color:#2a1f18; roughness:0.95; metalness:0.05"
-    }));
+    const cards = el("a-entity",{id:"communityCards", position:"0 -0.10 0.03"});
+    for(let i=0;i<5;i++){
+      cards.appendChild(el("a-plane",{class:"communityCard", width:"0.52", height:"0.72", position:`${(i-2)*0.60} -0.10 0`, material:"color:#ffffff; opacity:0.12"}));
+      cards.appendChild(el("a-text",{class:"cardLabel", value:"", position:`${(i-2)*0.60} -0.10 0.01`, align:"center", width:"1.6", color:"#eaf2ff"}));
+    }
+    comm.appendChild(cards);
 
-    table.appendChild(el("a-cylinder",{
-      radius:"3.10",
-      height:"0.18",
-      position:"0 0.88 0",
-      material:"color:#0f7a60; roughness:1; metalness:0"
-    }));
+    const actionHud = el("a-entity",{id:"actionHud", position:"0 0.66 0.03"});
+    actionHud.appendChild(el("a-plane",{width:"2.75", height:"0.36", material:"color:#091425; opacity:0.76"}));
+    actionHud.appendChild(el("a-text",{id:"actionHudText", value:"Waiting…", position:"-1.28 0 0.02", align:"left", width:"5.0", color:"#d7eaff"}));
+    comm.appendChild(actionHud);
+
+    table.appendChild(comm);
+
+    const pot = el("a-entity",{id:"potHud", position:"0 1.30 0.70"});
+    pot.appendChild(el("a-plane",{width:"1.35", height:"0.30", material:"color:#071018; opacity:0.66"}));
+    pot.appendChild(el("a-text",{id:"potText", value:"POT $0", position:"0 0 0.01", align:"center", width:"3.8", color:"#d7eaff"}));
+    table.appendChild(pot);
+
+    for(let i=0;i<6;i++){
+      const ang=(i/6)*Math.PI*2;
+      const x=Math.sin(ang)*4.95, z=Math.cos(ang)*4.95;
+      const yaw=(Math.atan2(x,z)*180/Math.PI)+180;
+      const chair=el("a-entity",{class:"chair", position:`${x.toFixed(2)} 0 ${z.toFixed(2)}`, rotation:`0 ${yaw.toFixed(1)} 0`});
+      chair.appendChild(el("a-cylinder",{radius:"0.52", height:"0.10", position:"0 0.05 0", material:"color:#141b25"}));
+      chair.appendChild(el("a-box",{width:"0.96", height:"0.78", depth:"0.16", position:"0 0.70 -0.48", material:"color:#121a24"}));
+      chair.appendChild(el("a-entity",{class:"SeatAnchor", position:"0 0.62 0.62"}));
+      table.appendChild(chair);
+    }
 
     world.appendChild(table);
+  }
+
+  function buildBots(){
+    const bots = el("a-entity",{id:"bots"});
+    for(let i=0;i<6;i++){
+      const ang=(i/6)*Math.PI*2;
+      const x=Math.sin(ang)*4.55, z=Math.cos(ang)*4.55;
+      const yaw=(Math.atan2(x,z)*180/Math.PI)+180;
+      const bot = el("a-entity",{class:"bot", "data-seat": String(i+1), position:`${x.toFixed(2)} -1.95 ${z.toFixed(2)}`, rotation:`0 ${yaw.toFixed(1)} 0`});
+      bot.appendChild(el("a-cylinder",{radius:"0.28", height:"1.08", position:"0 1.02 0", material:"color:#1a2330"}));
+      bot.appendChild(el("a-sphere",{radius:"0.23", position:"0 1.74 0", material:"color:#2a3a52"}));
+      const act=el("a-entity",{class:"actionPanel", position:"0 0.10 1.10", rotation:"-90 0 0"});
+      act.appendChild(el("a-plane",{width:"0.82", height:"0.28", material:"color:#071018; opacity:0.58"}));
+      act.appendChild(el("a-text",{class:"actionText", value:"WAIT", position:"0 0 0.01", align:"center", width:"2.8", color:"#d7eaff"}));
+      bot.appendChild(act);
+      const hc=el("a-entity",{class:"holeCards", position:"0 2.25 0"});
+      for(let c=0;c<2;c++){
+        hc.appendChild(el("a-plane",{class:"holeCard", width:"0.44", height:"0.62", position:`${c==0?-0.25:0.25} 0 0`, material:"color:#ffffff; opacity:0.12"}));
+        hc.appendChild(el("a-text",{class:"cardLabel", value:"", position:`${c==0?-0.25:0.25} 0 0.01`, align:"center", width:"1.6", color:"#eaf2ff"}));
+      }
+      bot.appendChild(hc);
+      const tag=el("a-entity",{class:"nameTag", position:"0 2.90 0", visible:"false"});
+      txt(tag, `Bot_${i+1}\n$10,000`, "0 0 0", 3.0, "#eaf2ff");
+      bot.appendChild(tag);
+      bots.appendChild(bot);
+    }
+    world.appendChild(bots);
   }
 
   function build(){
     clear();
     buildLobby();
-    buildSafeSpawnPad();
-    buildTableFarFromSpawn();
-    D.log("[world] BIG lobby + SAFE spawn bubble + table far ✅");
+    buildDoorsAndJumbos();
+    buildSpawn();
+    buildPitAndTable();
+    buildBots();
+    D.log("[world] lobby + divot + doors + store display ✅");
   }
 
-  // Export + auto build
   window.SCARLETT_WORLD = { build };
-  build();
 })();

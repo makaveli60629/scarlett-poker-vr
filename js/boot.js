@@ -1,108 +1,107 @@
 // js/boot.js
-(function () {
-  const BUILD = "SCARLETT_FULL_1_11_BOOTSAFE";
-
+(function(){
   const diagPanel = document.getElementById("diagPanel");
-  const btnDiag = document.getElementById("btnDiag");
-  const btnHideHUD = document.getElementById("btnHideHUD");
-  const btnTeleport = document.getElementById("btnTeleport");
-  const btnReset = document.getElementById("btnReset");
-  const btnEnterVR = document.getElementById("btnEnterVR");
 
-  const SCARLETT_DIAG = {
-    log(line) {
-      const t = performance.now() / 1000;
-      const msg = `[${t.toFixed(3)}] ${line}`;
-      console.log(msg);
-      if (diagPanel) {
-        diagPanel.textContent += msg + "\n";
-        diagPanel.scrollTop = diagPanel.scrollHeight;
-      }
+  const D = window.SCARLETT_DIAG = {
+    t0: performance.now(),
+    lines: [],
+    log(msg){
+      const t = ((performance.now()-D.t0)/1000).toFixed(3);
+      const line = `[${t}] ${msg}`;
+      D.lines.push(line);
+      if (D.lines.length > 220) D.lines.shift();
+      if (diagPanel) diagPanel.textContent = D.lines.join("\n");
+      try{ console.log(line); }catch(e){}
     }
   };
 
-  window.SCARLETT_DIAG = SCARLETT_DIAG;
+  D.log("booting…");
+  D.log("BUILD=SCARLETT_FULL_2_0_BOOTSAFE");
 
-  SCARLETT_DIAG.log("booting…");
-  SCARLETT_DIAG.log(`BUILD=${BUILD}`);
+  const btnEnterVR = document.getElementById("btnEnterVR");
+  const btnTeleport = document.getElementById("btnTeleport");
+  const btnReset = document.getElementById("btnReset");
+  const btnHideHUD = document.getElementById("btnHideHUD");
+  const btnDiag = document.getElementById("btnDiag");
+  const btnDemo = document.getElementById("btnDemo");
+  const hud = document.getElementById("hud");
 
-  // Diagnostics toggle
-  if (btnDiag && diagPanel) {
-    btnDiag.addEventListener("click", () => {
-      const on = diagPanel.style.display !== "block";
-      diagPanel.style.display = on ? "block" : "none";
-    });
-  }
+  window.SCARLETT_FLAGS = { teleport: true, demo: true };
 
-  // Hide HUD
-  if (btnHideHUD) {
-    btnHideHUD.addEventListener("click", () => {
-      const hud = document.getElementById("hud");
-      if (!hud) return;
-      hud.style.display = hud.style.display === "none" ? "block" : "none";
-    });
-  }
-
-  // Teleport toggle (flag only; teleport system can read this later)
-  window.SCARLETT_FLAGS = window.SCARLETT_FLAGS || {};
-  window.SCARLETT_FLAGS.teleport = true;
-
-  if (btnTeleport) {
-    btnTeleport.addEventListener("click", () => {
-      window.SCARLETT_FLAGS.teleport = !window.SCARLETT_FLAGS.teleport;
-      btnTeleport.setAttribute("aria-pressed", window.SCARLETT_FLAGS.teleport ? "true" : "false");
-      btnTeleport.textContent = window.SCARLETT_FLAGS.teleport ? "Teleport: ON" : "Teleport: OFF";
-      SCARLETT_DIAG.log(`[teleport] ${window.SCARLETT_FLAGS.teleport ? "ON" : "OFF"}`);
-    });
-  }
-
-  // Reset
-  if (btnReset) {
-    btnReset.addEventListener("click", () => {
-      const rig = document.getElementById("rig");
-      if (!rig) return;
-      // Safe spawn: far from table + always standing
-      rig.object3D.position.set(0, 0, 28);
-      rig.object3D.rotation.set(0, Math.PI, 0);
-      SCARLETT_DIAG.log("[spawn] reset to SAFE 0,0,28 facing lobby");
-      // If XR is active, also try to re-center to local-floor reference space
-      const scene = document.getElementById("scene");
-      try { scene && scene.emit && scene.emit("scarlett-reset"); } catch(e) {}
-    });
-    }
-
-  // Enter VR
-  if (btnEnterVR) {
-    btnEnterVR.addEventListener("click", async () => {
-      try {
-        const scene = document.getElementById("scene");
-        if (!scene) return;
-        SCARLETT_DIAG.log("[vr] enter requested…");
-        await scene.enterVR();
-        SCARLETT_DIAG.log("[vr] enterVR ✅");
-      } catch (e) {
-        SCARLETT_DIAG.log("[vr] enterVR failed ❌");
-      }
-    });
-  }
-
-  // Scene loaded
-  window.addEventListener("DOMContentLoaded", () => {
-    const scene = document.getElementById("scene");
-    if (!scene) return;
-    scene.addEventListener("loaded", () => {
-      SCARLETT_DIAG.log("[scene] loaded ✅");
-      // If world exists, build now (then index.html failsafe also runs)
-      if (window.SCARLETT_WORLD && typeof window.SCARLETT_WORLD.build === "function") {
-        try {
-          window.SCARLETT_WORLD.build();
-          SCARLETT_DIAG.log("[world] buildWorld() ✅");
-        } catch (e) {
-          SCARLETT_DIAG.log("[world] build threw ❌");
-        }
-      } else {
-        SCARLETT_DIAG.log("[world] waiting for SCARLETT_WORLD.build…");
-      }
-    });
+  btnTeleport?.addEventListener("click", ()=>{
+    window.SCARLETT_FLAGS.teleport = !window.SCARLETT_FLAGS.teleport;
+    btnTeleport.setAttribute("aria-pressed", window.SCARLETT_FLAGS.teleport ? "true":"false");
+    btnTeleport.textContent = window.SCARLETT_FLAGS.teleport ? "Teleport: ON" : "Teleport: OFF";
+    D.log(`[teleport] ${window.SCARLETT_FLAGS.teleport ? "ON" : "OFF"}`);
   });
+
+  btnDemo?.addEventListener("click", ()=>{
+    window.SCARLETT_FLAGS.demo = !window.SCARLETT_FLAGS.demo;
+    btnDemo.setAttribute("aria-pressed", window.SCARLETT_FLAGS.demo ? "true":"false");
+    btnDemo.textContent = window.SCARLETT_FLAGS.demo ? "Demo: ON" : "Demo: OFF";
+    D.log(`[demo] ${window.SCARLETT_FLAGS.demo ? "ON" : "OFF"}`);
+  });
+
+  btnDiag?.addEventListener("click", ()=>{
+    diagPanel.style.display = (diagPanel.style.display === "block") ? "none" : "block";
+  });
+
+  btnHideHUD?.addEventListener("click", ()=>{
+    const isHidden = hud.style.display === "none";
+    hud.style.display = isHidden ? "block" : "none";
+    const pads = document.getElementById("pads");
+    if (pads) pads.style.display = "block";
+  });
+
+  function resetToSpawn(){
+    const rig = document.getElementById("rig");
+    if (!rig) return;
+    rig.setAttribute("position", "0 0 18");
+    rig.setAttribute("rotation", "0 180 0");
+    D.log("[spawn] reset to safe spawn ✅");
+  }
+  btnReset?.addEventListener("click", resetToSpawn);
+
+  btnEnterVR?.addEventListener("click", async ()=>{
+    const scene = document.querySelector("a-scene");
+    if (!scene) return;
+    try{
+      D.log("[vr] enter requested…");
+      await scene.enterVR();
+      D.log("[vr] enterVR ✅");
+    }catch(e){
+      D.log("[vr] enterVR FAILED: " + (e && e.message ? e.message : e));
+    }
+  });
+
+  const scene = document.getElementById("scene");
+  scene.addEventListener("loaded", ()=>{
+    D.log("[scene] loaded ✅");
+    try{
+      if (window.SCARLETT_WORLD && typeof window.SCARLETT_WORLD.build === "function") {
+        window.SCARLETT_WORLD.build();
+        D.log("[world] buildWorld() ✅");
+      } else {
+        D.log("[world] ERROR: SCARLETT_WORLD.build missing");
+      }
+    }catch(e){
+      D.log("[world] build exception: " + (e && e.message ? e.message : e));
+    }
+  });
+
+  // Failsafe build retry for slower mobiles
+  let tries = 0;
+  const iv = setInterval(()=>{
+    tries++;
+    if (window.SCARLETT_WORLD && typeof window.SCARLETT_WORLD.build === "function") {
+      try{
+        window.SCARLETT_WORLD.build();
+        D.log("[world] auto-build executed ✅");
+        clearInterval(iv);
+      }catch(e){}
+    }
+    if (tries > 120) clearInterval(iv);
+  }, 120);
+
+  try{ D.log("xr=" + !!navigator.xr); }catch(e){}
 })();

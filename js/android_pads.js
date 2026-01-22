@@ -1,49 +1,64 @@
-function clamp(v,min,max){ return Math.max(min, Math.min(max,v)); }
+// js/android_pads.js
+(function(){
+  const D = window.SCARLETT_DIAG || { log: ()=>{} };
+  const pads = document.getElementById("pads");
+  const padL = document.getElementById("padL");
+  const padR = document.getElementById("padR");
+  if (!pads || !padL || !padR){ return; }
 
-export function initAndroidPads(){
-  const pads = document.getElementById("androidPads");
-  const move = document.getElementById("padMove");
-  const turn = document.getElementById("padTurn");
-  const knobMove = document.getElementById("knobMove");
-  const knobTurn = document.getElementById("knobTurn");
-  if (!pads || !move || !turn || !knobMove || !knobTurn) return;
+  const state = window.SCARLETT_PADS = { moveX:0, moveY:0, turnX:0, activeL:false, activeR:false };
 
-  const touch = ("ontouchstart" in window) || (navigator.maxTouchPoints||0)>0;
-  pads.style.display = touch ? "block" : "none";
+  function bindPad(padEl, type){
+    const stick = padEl.querySelector(".stick");
+    let pid = null, cx=0, cy=0;
 
-  const state = window.SCARLETT = window.SCARLETT || {};
-  state.pads = state.pads || { move:{x:0,y:0}, turn:{x:0,y:0} };
+    function setStick(nx, ny){
+      const max = 70;
+      const x = Math.max(-1, Math.min(1, nx)) * max;
+      const y = Math.max(-1, Math.min(1, ny)) * max;
+      stick.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+    }
 
-  function bindPad(el, knob, key){
-    let center = null;
-    el.addEventListener("pointerdown", (e) => {
-      el.setPointerCapture(e.pointerId);
-      const r = el.getBoundingClientRect();
-      center = { x: r.left + r.width/2, y: r.top + r.height/2, rad: Math.min(r.width,r.height)/2 - 24 };
-    });
-    el.addEventListener("pointermove", (e) => {
-      if (!center) return;
-      const dx = e.clientX - center.x;
-      const dy = e.clientY - center.y;
-      const mag = (dx*dx + dy*dy) ** 0.5;
-      const m = mag > center.rad ? center.rad / mag : 1.0;
-      const x = clamp((dx*m) / center.rad,-1,1);
-      const y = clamp((dy*m) / center.rad,-1,1);
-      state.pads[key] = { x, y };
-      knob.style.left = `${50 + x*35}%`;
-      knob.style.top  = `${50 + y*35}%`;
-    });
-    const up = () => {
-      center = null;
-      state.pads[key] = { x:0, y:0 };
-      knob.style.left = "50%";
-      knob.style.top = "50%";
-    };
-    el.addEventListener("pointerup", up);
-    el.addEventListener("pointercancel", up);
-    el.addEventListener("lostpointercapture", up);
+    padEl.addEventListener("pointerdown", (e)=>{
+      padEl.setPointerCapture(e.pointerId);
+      pid = e.pointerId;
+      const r = padEl.getBoundingClientRect();
+      cx = r.left + r.width/2;
+      cy = r.top + r.height/2;
+      if (type==="L") state.activeL=true;
+      if (type==="R") state.activeR=true;
+      setStick(0,0);
+      e.preventDefault();
+    }, {passive:false});
+
+    padEl.addEventListener("pointermove", (e)=>{
+      if (pid !== e.pointerId) return;
+      const dx = e.clientX - cx, dy = e.clientY - cy;
+      const max = 80;
+      const nx = Math.max(-1, Math.min(1, dx / max));
+      const ny = Math.max(-1, Math.min(1, dy / max));
+      if (type==="L"){ state.moveX = nx; state.moveY = ny; setStick(nx, ny); }
+      else { state.turnX = nx; setStick(nx, 0); }
+      e.preventDefault();
+    }, {passive:false});
+
+    function end(e){
+      if (pid !== e.pointerId) return;
+      pid = null;
+      if (type==="L"){ state.activeL=false; state.moveX=0; state.moveY=0; }
+      else { state.activeR=false; state.turnX=0; }
+      setStick(0,0);
+      e.preventDefault();
+    }
+    padEl.addEventListener("pointerup", end, {passive:false});
+    padEl.addEventListener("pointercancel", end, {passive:false});
   }
 
-  bindPad(move, knobMove, "move");
-  bindPad(turn, knobTurn, "turn");
-}
+  bindPad(padL, "L");
+  bindPad(padR, "R");
+  D.log("[androidPads] armed ✅");
+
+  const scene = document.getElementById("scene");
+  scene.addEventListener("enter-vr", ()=>{ pads.style.display="none"; });
+  scene.addEventListener("exit-vr", ()=>{ pads.style.display="block"; });
+})();

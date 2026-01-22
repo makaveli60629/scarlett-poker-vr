@@ -1,201 +1,94 @@
 // js/locomotion.js
-(function () {
-  const D = window.SCARLETT_DIAG || { log: () => {} };
+(function(){
+  const D = window.SCARLETT_DIAG || { log: ()=>{} };
+  const rig = document.getElementById("rig");
+  const scene = document.getElementById("scene");
+  if (!rig || !scene) return;
 
-  const SPEED = 2.2;
-  const DEADZONE = 0.12;
-  const SMOOTH = 0.18;
+  const keys = {};
+  window.addEventListener("keydown", (e)=>{ keys[e.key.toLowerCase()] = true; });
+  window.addEventListener("keyup",   (e)=>{ keys[e.key.toLowerCase()] = false; });
 
-  let rig, cam;
-  let joy = { x: 0, y: 0, active: false };
-  let joySm = { x: 0, y: 0 };
+  let inVR = false;
+  scene.addEventListener("enter-vr", ()=>{ inVR = true; });
+  scene.addEventListener("exit-vr",  ()=>{ inVR = false; });
 
-  function $(id) { return document.getElementById(id); }
-
-  function ensureRig() {
-    rig = rig || $("rig");
-    cam = cam || $("camera");
-    return !!(rig && cam);
+  function getVec(el, name){
+    const v = el.getAttribute(name);
+    return (typeof v === "string") ? AFRAME.utils.coordinates.parse(v) : (v||{x:0,y:0,z:0});
   }
 
-  function installTouchJoystick() {
-    let base = document.getElementById("touchJoyBase");
-    if (!base) {
-      base = document.createElement("div");
-      base.id = "touchJoyBase";
-      base.style.cssText = `
-        position: fixed; left: 18px; bottom: 28px;
-        width: 170px; height: 170px;
-        border-radius: 999px;
-        background: rgba(255,255,255,0.06);
-        border: 1px solid rgba(255,255,255,0.16);
-        z-index: 19;
-        touch-action: none;
-        pointer-events: auto;
-      `;
-      document.body.appendChild(base);
+  const LOBBY_R = 36.0;
+  function clampToLobby(p){
+    const r = Math.hypot(p.x, p.z);
+    const max = LOBBY_R - 2.0;
+    if (r > max){
+      const s = max / r;
+      p.x *= s; p.z *= s;
     }
-
-    let knob = document.getElementById("touchJoyKnob");
-    if (!knob) {
-      knob = document.createElement("div");
-      knob.id = "touchJoyKnob";
-      knob.style.cssText = `
-        position: absolute; left: 50%; top: 50%;
-        width: 82px; height: 82px;
-        margin-left: -41px; margin-top: -41px;
-        border-radius: 999px;
-        background: rgba(255,255,255,0.10);
-        border: 1px solid rgba(255,255,255,0.22);
-      `;
-      base.appendChild(knob);
-    }
-
-    let pid = null;
-
-    function setKnob(nx, ny) {
-      const r = 62;
-      knob.style.transform = `translate(${nx * r}px, ${ny * r}px)`;
-      joy.x = nx;
-      joy.y = ny;
-    }
-
-    function resetKnob() {
-      knob.style.transform = "translate(0px, 0px)";
-      joy.x = 0; joy.y = 0;
-      joy.active = false;
-    }
-
-    base.addEventListener("pointerdown", (e) => {
-      pid = e.pointerId;
-      base.setPointerCapture(pid);
-      joy.active = true;
-
-      const rect = base.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-
-      const dx = e.clientX - cx;
-      const dy = e.clientY - cy;
-
-      const max = rect.width * 0.35;
-      const nx = Math.max(-1, Math.min(1, dx / max));
-      const ny = Math.max(-1, Math.min(1, dy / max));
-
-      setKnob(nx, ny);
-    });
-
-    base.addEventListener("pointermove", (e) => {
-      if (!joy.active || e.pointerId !== pid) return;
-
-      const rect = base.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-
-      const dx = e.clientX - cx;
-      const dy = e.clientY - cy;
-
-      const max = rect.width * 0.35;
-      const nx = Math.max(-1, Math.min(1, dx / max));
-      const ny = Math.max(-1, Math.min(1, dy / max));
-
-      setKnob(nx, ny);
-    });
-
-    base.addEventListener("pointerup", (e) => {
-      if (e.pointerId !== pid) return;
-      pid = null;
-      resetKnob();
-    });
-
-    base.addEventListener("pointercancel", () => {
-      pid = null;
-      resetKnob();
-    });
-
-    D.log("[androidPads] armed ✅");
+    return p;
   }
 
-  function readXRThumbstick() {
-    const scene = $("scene");
-    if (!scene || !scene.renderer || !scene.renderer.xr) return null;
-    const session = scene.renderer.xr.getSession?.();
-    if (!session) return null;
+  let last = performance.now();
+  function tick(){
+    const now = performance.now();
+    const dt = Math.min(0.05, (now-last)/1000);
+    last = now;
 
-    let axX = 0, axY = 0;
-    for (const src of session.inputSources) {
-      if (!src || !src.gamepad) continue;
-      const gp = src.gamepad;
+    const pos = getVec(rig, "position");
+    const rot = getVec(rig, "rotation");
+    const yaw = (rot.y||0) * Math.PI/180;
+    const fwd = {x:-Math.sin(yaw), z:-Math.cos(yaw)};
+    const right = {x:fwd.z, z:-fwd.x};
 
-      const a0 = gp.axes?.[0] ?? 0;
-      const a1 = gp.axes?.[1] ?? 0;
-      const a2 = gp.axes?.[2] ?? 0;
-      const a3 = gp.axes?.[3] ?? 0;
+    let mx=0, mz=0, turn=0;
+    if (keys["w"]||keys["arrowup"]) mz += 1;
+    if (keys["s"]||keys["arrowdown"]) mz -= 1;
+    if (keys["a"]||keys["arrowleft"]) mx -= 1;
+    if (keys["d"]||keys["arrowright"]) mx += 1;
+    if (keys["q"]) turn -= 1;
+    if (keys["e"]) turn += 1;
 
-      const m1 = Math.abs(a0) + Math.abs(a1);
-      const m2 = Math.abs(a2) + Math.abs(a3);
-
-      if (m1 >= m2) { axX = a0; axY = a1; }
-      else { axX = a2; axY = a3; }
-
-      if (Math.abs(axX) + Math.abs(axY) > 0.02) break;
-    }
-    return { x: axX, y: axY };
-  }
-
-  function deadzone(v) {
-    return Math.abs(v) < DEADZONE ? 0 : v;
-  }
-
-  function tick(dt) {
-    if (!ensureRig()) return;
-
-    const xr = readXRThumbstick();
-    let x = 0, y = 0;
-
-    if (xr) {
-      x = deadzone(xr.x);
-      y = deadzone(xr.y);
-    } else {
-      x = deadzone(joy.x);
-      y = deadzone(joy.y);
+    const pads = window.SCARLETT_PADS;
+    if (pads){
+      mx += pads.moveX || 0;
+      mz += -(pads.moveY || 0);
+      turn += (pads.turnX || 0);
     }
 
-    joySm.x += (x - joySm.x) * SMOOTH;
-    joySm.y += (y - joySm.y) * SMOOTH;
-
-    if (Math.abs(joySm.x) + Math.abs(joySm.y) < 0.001) return;
-
-    const camObj = cam.object3D;
-    const rigObj = rig.object3D;
-
-    const yaw = camObj.rotation.y;
-    const forward = { x: -Math.sin(yaw), z: -Math.cos(yaw) };
-    const right = { x: Math.cos(yaw), z: -Math.sin(yaw) };
-
-    const vx = (right.x * joySm.x + forward.x * (-joySm.y)) * SPEED;
-    const vz = (right.z * joySm.x + forward.z * (-joySm.y)) * SPEED;
-
-    rigObj.position.x += vx * dt;
-    rigObj.position.z += vz * dt;
-  }
-
-  function startLoop() {
-    let last = performance.now();
-    function loop() {
-      const now = performance.now();
-      const dt = Math.min(0.05, (now - last) / 1000);
-      last = now;
-      tick(dt);
-      requestAnimationFrame(loop);
+    if (inVR && scene.renderer && scene.renderer.xr){
+      const session = scene.renderer.xr.getSession?.();
+      if (session){
+        for (const src of session.inputSources){
+          const gp = src.gamepad;
+          if (!gp || !gp.axes) continue;
+          mx += gp.axes[0] || 0;
+          mz += -(gp.axes[1] || 0);
+          turn += gp.axes[2] || 0;
+          break;
+        }
+      }
     }
-    requestAnimationFrame(loop);
-  }
 
-  window.addEventListener("DOMContentLoaded", () => {
-    ensureRig();
-    installTouchJoystick();
-    startLoop();
-    D.log("[locomotion] ready ✅");
-  });
+    const len = Math.hypot(mx, mz);
+    if (len>1){ mx/=len; mz/=len; }
+
+    const speed = inVR ? 2.2 : 3.4;
+    const turnSpeed = inVR ? 55 : 85;
+
+    pos.x += (right.x*mx + fwd.x*mz) * speed * dt;
+    pos.z += (right.z*mx + fwd.z*mz) * speed * dt;
+    pos.y = 0;
+
+    rot.y = (rot.y||0) + turn * turnSpeed * dt;
+
+    clampToLobby(pos);
+
+    rig.setAttribute("position", `${pos.x} ${pos.y} ${pos.z}`);
+    rig.setAttribute("rotation", `${rot.x||0} ${rot.y} ${rot.z||0}`);
+
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+  D.log("[locomotion] ready ✅");
 })();

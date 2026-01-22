@@ -118,7 +118,12 @@
   xr-mode-ui="enabled: false"
   webxr="optionalFeatures: local-floor, bounded-floor, hand-tracking"
 >
-  <a-assets timeout="120000"></a-assets>
+  <a-assets timeout="120000">
+    <!-- Avatar / NPC assets (local) -->
+    <a-asset-item id="npc_ninja" src="assets/avatars/ninja.glb"></a-asset-item>
+    <a-asset-item id="av_male" src="assets/avatars/male.glb"></a-asset-item>
+    <a-asset-item id="av_female" src="assets/avatars/female.glb"></a-asset-item>
+  </a-assets>
   <a-sky color="#050a12"></a-sky>
 
   <a-entity id="rig" position="0 0 24" rotation="0 180 0">
@@ -175,12 +180,14 @@
 </script>
 
 <script src="./js/boot.js"></script>
+<script src="./js/walkers.js"></script>
 <script src="./js/world.js"></script>
 <script src="./js/android_pads.js"></script>
 <script src="./js/locomotion.js"></script>
 <script src="./js/name_tag_focus.js"></script>
 <script src="./js/radio.js"></script>
 <script src="./js/wrist_menu.js"></script>
+<script src="./js/walkers.js"></script>
 <script src="./js/avatar_loader.js"></script>
 <script src="./js/poker_demo.js"></script>
 

@@ -18,7 +18,7 @@
   const STATE = window.SCARLETT_STATE = {
     teleportEnabled: true,
     demoEnabled: true,
-    spawn: { x: 0, y: 0, z: 6, rotY: 0 },
+    spawn: { x: 0, y: 0, z: 10, rotY: 0 },
     seated: false
   };
 

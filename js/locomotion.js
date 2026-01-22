@@ -3,58 +3,49 @@
   const D = window.SCARLETT_DIAG;
   const rig = document.getElementById("rig");
   const cam = document.getElementById("camera");
-  if(!rig){ console.warn("locomotion: #rig missing"); return; }
+  if(!rig || !cam) return;
 
-  if(!rig.hasAttribute("wasd-controls")){
-    rig.setAttribute("wasd-controls", "acceleration: 30");
-  }
+  const dead = 0.15;
+  let lastTurn = 0;
 
-  let enabled = true;
-  let speed = 1.6; // m/s
-  let lastT = performance.now();
-
-  function getGamepad(){
+  function pads(){
     const gps = (navigator.getGamepads && navigator.getGamepads()) || [];
-    for(const g of gps){ if(g && g.connected) return g; }
-    return null;
+    return Array.from(gps).filter(g=>g && g.connected && g.axes && g.axes.length);
   }
 
   function tick(){
-    const now = performance.now();
-    const dt = Math.min(0.05, (now - lastT)/1000);
-    lastT = now;
+    const ps = pads();
+    if(!ps.length) return;
 
-    if(enabled){
-      const g = getGamepad();
-      if(g && g.axes && g.axes.length >= 2){
-        const x = g.axes[0] || 0;
-        const y = g.axes[1] || 0;
-        const dz = 0.18;
-        const ax = Math.abs(x) < dz ? 0 : x;
-        const ay = Math.abs(y) < dz ? 0 : y;
-
-        if(ax || ay){
-          const camObj = cam && cam.object3D ? cam.object3D : rig.object3D;
-          const yaw = camObj.rotation.y;
-
-          const forward = -ay;
-          const strafe = ax;
-
-          const vx = (Math.sin(yaw) * forward + Math.cos(yaw) * strafe) * speed * dt;
-          const vz = (Math.cos(yaw) * forward - Math.sin(yaw) * strafe) * speed * dt;
-
-          rig.object3D.position.x += vx;
-          rig.object3D.position.z += vz;
-        }
-      }
+    let left = ps[0], right = ps[1] || ps[0];
+    for(const p of ps){
+      if(p.hand === "left") left = p;
+      if(p.hand === "right") right = p;
     }
-    requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
 
-  window.SCARLETT_LOCOMOTION = {
-    setEnabled(v){ enabled = !!v; D && D.toast && D.toast("Move: " + (enabled?"ON":"OFF")); },
-    setSpeed(v){ speed = Math.max(0.2, Number(v)||1.6); }
-  };
-  D && D.log && D.log("[locomotion] thumbstick + WASD enabled ✅");
+    const ax = left.axes[2] ?? left.axes[0] ?? 0;
+    const ay = left.axes[3] ?? left.axes[1] ?? 0;
+
+    const mx = Math.abs(ax) > dead ? ax : 0;
+    const my = Math.abs(ay) > dead ? ay : 0;
+
+    if(mx || my){
+      const spd = 0.035;
+      const yaw = cam.object3D.rotation.y;
+      const dx = (-mx * Math.cos(yaw) + -my * Math.sin(yaw)) * spd;
+      const dz = (-my * Math.cos(yaw) +  mx * Math.sin(yaw)) * spd;
+      rig.object3D.position.x += dx;
+      rig.object3D.position.z += dz;
+    }
+
+    const rx = right.axes[2] ?? right.axes[0] ?? 0;
+    const now = performance.now();
+    if(Math.abs(rx) > 0.65 && (now - lastTurn) > 300){
+      rig.object3D.rotation.y += (rx > 0 ? -1 : 1) * (Math.PI/6);
+      lastTurn = now;
+    }
+  }
+
+  setInterval(tick, 16);
+  D && D.log && D.log("[locomotion] thumbstick move + snap turn ✅");
 })();

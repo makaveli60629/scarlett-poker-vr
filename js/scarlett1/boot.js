@@ -1,1 +1,3 @@
-export function scarlett1BootMarker(){return true;}
+export async function init({ diagWrite } = {}){
+  (diagWrite || window.__scarlettDiagWrite)?.("[scarlett1] boot.js loaded ✅");
+}

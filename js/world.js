@@ -1,277 +1,362 @@
 // js/world.js
-(function(){
-  const D = window.SCARLETT_DIAG || { log: ()=>{} };
-  const world = document.getElementById("world");
+import * as THREE from "three";
 
-  function el(tag, attrs){
-    const e = document.createElement(tag);
-    if (attrs) for (const k in attrs) e.setAttribute(k, attrs[k]);
-    return e;
-  }
-  function clear(){ while(world.firstChild) world.removeChild(world.firstChild); }
-  function txt(parent, value, pos, width, color){
-    const t = el("a-text", {value, position:pos||"0 0 0", align:"center", width:String(width||2.5), color:color||"#eaf2ff", baseline:"center"});
-    parent.appendChild(t); return t;
-  }
+const TABLE_Y = -0.8;          // table group local base within pit
+const PIT_DEPTH = -1.2;        // lobby floor is y=0, pit bottom at -1.2
+const FELT_Y = 0.41;           // cards/chips sit on felt plane
+const PASSLINE_R = 1.8;        // betting boundary
+const CHIP_GRAB_R = 0.10;      // fingertip proximity to “push” chip
+const CARD_PEEK_R = 0.15;      // fingertip proximity to “peek” card
+const PEEK_ANGLE = THREE.MathUtils.degToRad(30);
 
-  function buildLobby(){
-    world.appendChild(el("a-circle",{class:"teleportable", rotation:"-90 0 0", radius:"40", material:"color:#0a111b; roughness:1; metalness:0"}));
-    world.appendChild(el("a-cylinder",{radius:"39.6", height:"14", position:"0 7 0", material:"color:#050a12; side:double; roughness:0.95; metalness:0.06; opacity:0.995"}));
-    world.appendChild(el("a-circle",{rotation:"90 0 0", radius:"39.2", position:"0 14 0", material:"color:#03060b; opacity:0.985"}));
-    world.appendChild(el("a-torus",{position:"0 13.0 0", radius:"39.15", radiusTubular:"0.09", rotation:"90 0 0",
-      material:"color:#0b2b44; emissive:#4aa6ff; emissiveIntensity:1.0; opacity:0.85"}));
-    const sign = el("a-entity",{position:"0 4.2 24", rotation:"0 180 0"});
-    sign.appendChild(el("a-plane",{width:"10.2", height:"2.9", material:"color:#091425; opacity:0.74"}));
-    txt(sign,"WELCOME TO VIP • SCARLETT","0 0.55 0.01",8.4,"#d7eaff");
-    txt(sign,"LEGENDS • TROPHIES • HIGH STAKES","0 -0.35 0.01",6.6,"#b8d3ff");
-    world.appendChild(sign);
-  }
+function makeMat(color, opts = {}) {
+  return new THREE.MeshStandardMaterial({
+    color,
+    roughness: opts.roughness ?? 0.8,
+    metalness: opts.metalness ?? 0.0,
+    side: opts.side ?? THREE.FrontSide,
+    map: opts.map ?? null,
+    transparent: opts.transparent ?? false,
+    opacity: opts.opacity ?? 1.0,
+    emissive: opts.emissive ?? 0x000000,
+    emissiveIntensity: opts.emissiveIntensity ?? 1.0,
+  });
+}
 
-  function buildDoorsAndJumbos(){
-    const spots = [
-      {x:0, z:-36, ry:0, door:"MAIN EVENTS"},
-      {x:36, z:0, ry:-90, door:"SCORPION ROOM"},
-      {x:0, z:36, ry:180, door:"VIP WELCOME"},
-      {x:-36, z:0, ry:90, door:"STORE"},
-    ];
-    spots.forEach((s, idx)=>{
-      const d = el("a-entity",{position:`${s.x} 0 ${s.z}`, rotation:`0 ${s.ry} 0`});
-      d.appendChild(el("a-box",{width:"7", height:"5.6", depth:"0.45", position:"0 2.8 0", material:"color:#0f1723; roughness:0.9"}));
-      d.appendChild(el("a-box",{width:"5.8", height:"4.6", depth:"0.25", position:"0 2.7 0.13", material:"color:#071018; roughness:1; opacity:0.98"}));
-      const lbl = el("a-entity",{position:"0 5.75 0.30"});
-      txt(lbl, s.door, "0 0 0", 7.0, "#cfe7ff");
-      d.appendChild(lbl);
-      world.appendChild(d);
+/**
+ * UPDATE 4.0 — Sunken Poker Centerpiece
+ * Single parent THREE.Group: "Sunken_Poker_System"
+ */
+export function createSunkenPokerSystem({
+  scene,
+  renderer,
+  textureLoader,
+  assets = null, // optional: preloaded textures { feltTex, cardTex[52] }
+}) {
+  if (!scene) throw new Error("createSunkenPokerSystem: scene required");
+  if (!renderer) throw new Error("createSunkenPokerSystem: renderer required");
 
-      const j = el("a-entity",{position:`${s.x} 10.6 ${s.z}`, rotation:`0 ${s.ry} 0`});
-      j.appendChild(el("a-box",{width:"9.6", height:"5.2", depth:"0.24", material:"color:#0c131d; roughness:0.9"}));
-      j.appendChild(el("a-plane",{id:`jumboScreen_${idx}`, class:"jumboScreen uiTarget", width:"9.0", height:"4.6", position:"0 0 0.13",
-        material:"color:#0a0f18; emissive:#0a0f18; emissiveIntensity:0.45"}));
-      world.appendChild(j);
+  const main = new THREE.Group();
+  main.name = "Sunken_Poker_System";
 
-      const rank = el("a-entity",{position:`${s.x} 8.05 ${s.z}`, rotation:`0 ${s.ry} 0`});
-      rank.appendChild(el("a-plane",{width:"7.8", height:"0.65", material:"color:#091425; opacity:0.82"}));
-      txt(rank, "RANKED • VIP", "0 0 0.01", 7.0, "#bfe1ff");
-      world.appendChild(rank);
+  // --- PIT (visual excavation ring + floor) ---
+  const pitWall = new THREE.Mesh(
+    new THREE.CylinderGeometry(6.2, 6.2, 1.25, 48, 1, true),
+    makeMat(0x101010, { roughness: 1.0, side: THREE.DoubleSide })
+  );
+  pitWall.position.y = PIT_DEPTH / 2; // center wall between 0 and -1.2
+  main.add(pitWall);
+
+  const pitFloor = new THREE.Mesh(
+    new THREE.CylinderGeometry(6.1, 6.1, 0.05, 48),
+    makeMat(0x0b0b0b, { roughness: 1.0 })
+  );
+  pitFloor.position.y = PIT_DEPTH - 0.025;
+  pitFloor.receiveShadow = true;
+  main.add(pitFloor);
+
+  // --- PEDESTAL ---
+  const pedestal = new THREE.Mesh(
+    new THREE.CylinderGeometry(5.8, 6.0, 0.4, 48),
+    makeMat(0x1a1a1a, { roughness: 0.9 })
+  );
+  pedestal.position.y = PIT_DEPTH;
+  pedestal.receiveShadow = true;
+  main.add(pedestal);
+
+  // --- TABLE GROUP ---
+  const tableGroup = new THREE.Group();
+  tableGroup.position.y = TABLE_Y; // still within the pit world-space once main is at (0,0,0)
+
+  // Felt texture
+  const feltTex =
+    assets?.feltTex ??
+    (textureLoader
+      ? textureLoader.load("assets/textures/poker_felt_passline.jpg")
+      : null);
+
+  const pokerSurface = new THREE.Mesh(
+    new THREE.CylinderGeometry(2.5, 2.5, 0.1, 64),
+    makeMat(0xffffff, {
+      map: feltTex,
+      roughness: 0.95,
+    })
+  );
+  pokerSurface.position.y = FELT_Y;
+  pokerSurface.name = "Poker_Surface";
+  pokerSurface.receiveShadow = true;
+  tableGroup.add(pokerSurface);
+
+  // Rail (arm rest)
+  const rail = new THREE.Mesh(
+    new THREE.TorusGeometry(2.6, 0.15, 20, 64),
+    makeMat(0x111111, { roughness: 0.6 })
+  );
+  rail.rotation.x = Math.PI / 2;
+  rail.position.y = 0.48;
+  rail.castShadow = true;
+  tableGroup.add(rail);
+
+  // Dealer shoe (physical trigger box)
+  const dealerShoe = new THREE.Mesh(
+    new THREE.BoxGeometry(0.3, 0.2, 0.5),
+    makeMat(0x000000, { metalness: 1.0, roughness: 0.2 })
+  );
+  dealerShoe.position.set(0, 0.55, 1.8);
+  dealerShoe.name = "Dealer_Shoe_Box";
+  dealerShoe.castShadow = true;
+  tableGroup.add(dealerShoe);
+
+  // Add table group to main
+  main.add(tableGroup);
+
+  // --- 8 CHAIRS + SEAT ANCHORS ---
+  const seats = [];
+  for (let i = 0; i < 8; i++) {
+    const chair = new THREE.Group();
+    chair.name = `Chair_${i}`;
+
+    const mat = makeMat(0x8b0000, { roughness: 0.85 });
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.8), mat);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.0, 0.1), mat);
+    back.position.set(0, 0.5, -0.4);
+    chair.add(seat, back);
+
+    const angle = (i / 8) * Math.PI * 2;
+    const x = Math.cos(angle) * 3.8;
+    const z = Math.sin(angle) * 3.8;
+    chair.position.set(x, TABLE_Y, z);
+    chair.lookAt(0, TABLE_Y, 0);
+
+    // Seat anchor (hips/eyes reference)
+    const seatAnchor = new THREE.Object3D();
+    seatAnchor.name = "SeatAnchor";
+    seatAnchor.position.set(0, 0.35, 0.35); // local offset: tweak if needed
+    chair.add(seatAnchor);
+
+    main.add(chair);
+
+    seats.push({
+      index: i,
+      chair,
+      seatAnchor,
+      worldPos: new THREE.Vector3(),
     });
   }
 
-  function buildSpawn(){
-    const spawn = el("a-entity",{id:"spawnPad", position:"0 0 26"});
-    spawn.appendChild(el("a-ring",{rotation:"-90 0 0", radiusInner:"0.65", radiusOuter:"1.10",
-      material:"color:#0a2636; emissive:#4aa6ff; emissiveIntensity:0.85; opacity:0.98"}));
-    txt(spawn,"SPAWN","0 0.02 0",3.6,"#cfe7ff");
-    world.appendChild(spawn);
+  // --- STAIRS (lobby -> pit) ---
+  const stairs = new THREE.Group();
+  stairs.name = "Pit_Stairs";
+  for (let i = 0; i < 6; i++) {
+    const step = new THREE.Mesh(
+      new THREE.BoxGeometry(3.5, 0.2, 0.5),
+      makeMat(0x333333, { roughness: 1.0 })
+    );
+    step.position.set(0, (PIT_DEPTH / 6) * i, 6.5 + i * 0.45);
+    step.receiveShadow = true;
+    stairs.add(step);
+  }
+  main.add(stairs);
+
+  // --- 52 CARDS (flat, hidden until dealt) ---
+  const cards = [];
+  const cardGeo = new THREE.PlaneGeometry(0.15, 0.22);
+  for (let i = 0; i < 52; i++) {
+    const cardTex =
+      assets?.cardTex?.[i] ??
+      (textureLoader
+        ? textureLoader.load(`assets/textures/cards/card_${i}.jpg`)
+        : null);
+
+    const card = new THREE.Mesh(
+      cardGeo,
+      makeMat(0xffffff, {
+        map: cardTex,
+        roughness: 0.85,
+        side: THREE.DoubleSide,
+      })
+    );
+    card.name = `Card_${i}`;
+    card.rotation.x = -Math.PI / 2;
+    card.position.set(0, FELT_Y, 0);
+    card.visible = false;
+    card.userData.isPeeked = false;
+    tableGroup.add(card);
+    cards.push(card);
   }
 
-  function buildPitAndTable(){
-    const pit = el("a-entity",{id:"pit"});
-    // Pit rim at lobby floor (Y=0), pit floor at Y=-3.0 (PERMANENT LOCK)
-    pit.appendChild(el("a-ring",{rotation:"-90 0 0", radiusInner:"5.2", radiusOuter:"10.6",
-      material:"color:#070c12; roughness:1"}));
-    // Pit walls (visible), height = 3.0
-    pit.appendChild(el("a-cylinder",{radius:"5.25", height:"3.00", position:"0 -1.50 0",
-      material:"color:#04070d; side:double; roughness:0.95; metalness:0.05"}));
-    // Pit floor collider/visual
-    pit.appendChild(el("a-circle",{class:"teleportable", rotation:"-90 0 0", radius:"5.18", position:"0 -3.00 0",
-      material:"color:#060b12; roughness:0.98; metalness:0.05"}));
-
-    // Rail ring + neon strip
-    pit.appendChild(el("a-torus",{radius:"10.0", radiusTubular:"0.16", rotation:"90 0 0", position:"0 0.10 0",
-      material:"color:#2a1f18; roughness:0.9"}));
-    pit.appendChild(el("a-torus",{radius:"10.2", radiusTubular:"0.06", rotation:"90 0 0", position:"0 0.22 0",
-      material:"color:#0b2b44; emissive:#4aa6ff; emissiveIntensity:1.65; opacity:0.95"}));
-
-    // Octagonal pedestal silhouette (visual), anchored to pit floor
-    const pedestal = el("a-cylinder",{radius:"4.9", height:"0.14", position:"0 -2.92 0",
-      material:"color:#0b1018; roughness:0.85; metalness:0.12"});
-    pit.appendChild(pedestal);
-
-    world.appendChild(pit);
-
-    // Main table anchored to pit floor (y=-3.0)
-    const table = el("a-entity",{id:"mainTable", position:"0 -3.00 0"});
-    // Pedestal from pit floor up to table top
-    table.appendChild(el("a-cylinder",{radius:"0.60", height:"1.85", position:"0 0.93 0",
-      material:"color:#0b1018; roughness:0.75; metalness:0.15"}));
-    // Table body + rail + felt
-    table.appendChild(el("a-cylinder",{radius:"4.25", height:"0.60", position:"0 1.55 0",
-      material:"color:#101722; roughness:0.85; metalness:0.10"}));
-    table.appendChild(el("a-torus",{radius:"3.98", radiusTubular:"0.18", position:"0 1.92 0", rotation:"90 0 0",
-      material:"color:#2a1f18; roughness:0.95"}));
-    table.appendChild(el("a-cylinder",{radius:"3.82", height:"0.16", position:"0 2.10 0",
-      material:"color:#0f7a60; roughness:1; metalness:0"}));
-
-    // Betting line (pass line) per packet: radius 1.8m
-    table.appendChild(el("a-ring",{rotation:"-90 0 0", radiusInner:"1.78", radiusOuter:"1.82", position:"0 2.19 0",
-      material:"color:#eaf2ff; opacity:0.28; shader:standard; roughness:1"}));
-
-    // Community frame + HUD above felt (readable)
-    const comm = el("a-entity",{id:"communityFrame", position:"0 2.75 -1.25"});
-    comm.appendChild(el("a-plane",{width:"1.70", height:"0.62", material:"color:#061019; opacity:0.72"}));
-    txt(comm,"COMMUNITY","0 0.23 0.02",3.2,"#cfe7ff");
-
-    // Community cards: 2x normal size, facing player
-    const cards = el("a-entity",{id:"communityCards", position:"0 -0.05 0.05"});
-    for(let i=0;i<5;i++) {
-      cards.appendChild(el("a-plane",{class:"communityCard", width:"0.30", height:"0.44", position:`${(i-2)*0.34} 0.00 0`,
-        material:"color:#ffffff; opacity:0.98; side:double; roughness:0.9; metalness:0.0"}));
-      cards.appendChild(el("a-text",{class:"cardLabel", value:"", position:`${(i-2)*0.34} 0.00 0.01`, align:"center",
-        width:"1.6", color:"#0b0f14"}));
-    }
-    comm.appendChild(cards);
-    table.appendChild(comm);
-
-    // Table HUD (framed, above community)
-    const hud = el("a-entity",{id:"tableHud", position:"0 3.50 -1.25"});
-    hud.appendChild(el("a-plane",{width:"2.10", height:"0.60", material:"color:#061019; opacity:0.70"}));
-    hud.appendChild(el("a-plane",{width:"2.14", height:"0.64", position:"0 0 -0.01", material:"color:#0b2b44; opacity:0.30"}));
-    txt(hud,"TURN: —\nPOT: $0\nTO CALL: $0\nLAST: —","0 0 0.02",3.2,"#eaf2ff").setAttribute("id","actionHudText");
-    table.appendChild(hud);
-
-    // Chips (visible stacks + pot)
-    const chips = el("a-entity",{id:"chips", position:"0 2.20 0"});
-    function stack(x,z,color){
-      const g = el("a-entity",{position:`${x} 0 ${z}`});
-      for(let i=0;i<10;i++) g.appendChild(el("a-cylinder",{radius:"0.045", height:"0.010", position:`0 ${i*0.011} 0`,
-        material:`color:${color}; roughness:0.55; metalness:0.15`}));
-      chips.appendChild(g);
-    }
-    stack(-0.30,0.35,"#d12d2d");
-    stack(-0.12,0.40,"#2d6bd1");
-    stack(0.06,0.42,"#2dd16b");
-    stack(0.24,0.38,"#d1c22d");
-    const potStack = el("a-entity",{id:"potStack", position:"0 0 -0.30"});
-    for(let i=0;i<18;i++) potStack.appendChild(el("a-cylinder",{radius:"0.050", height:"0.010", position:`0 ${i*0.011} 0`,
-      material:"color:#e6e6e6; roughness:0.5; metalness:0.2"}));
-    chips.appendChild(potStack);
-    table.appendChild(chips);
-
-    world.appendChild(table);
+  // --- Basic chips (you can replace with your real chip meshes later) ---
+  const chips = [];
+  const chipGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.02, 24);
+  for (let i = 0; i < 20; i++) {
+    const chip = new THREE.Mesh(
+      chipGeo,
+      makeMat(0xe0e0e0, { roughness: 0.4, metalness: 0.1, emissive: 0x000000 })
+    );
+    chip.name = `Chip_${i}`;
+    chip.rotation.x = Math.PI / 2;
+    chip.position.set(
+      (Math.random() - 0.5) * 0.8,
+      FELT_Y,
+      (Math.random() - 0.5) * 0.8
+    );
+    chip.userData.isBet = false;
+    tableGroup.add(chip);
+    chips.push(chip);
   }
-    comm.appendChild(cards);
 
-    const actionHud = el("a-entity",{id:"actionHud", position:"0 1.35 0.03"});
-    actionHud.appendChild(el("a-plane",{width:"2.75", height:"0.36", material:"color:#091425; opacity:0.76"}));
-    actionHud.appendChild(el("a-text",{id:"actionHudText", value:"Waiting…", position:"-1.28 0 0.02", align:"left", width:"9.0", color:"#d7eaff"}));
-    comm.appendChild(actionHud);
+  // --- HANDS-ONLY INTERACTION (chip push + card peek + shoe trigger) ---
+  const hand0 = renderer.xr.getHand(0);
+  const hand1 = renderer.xr.getHand(1);
 
-    table.appendChild(comm);
+  const tmpV = new THREE.Vector3();
+  const tmpW = new THREE.Vector3();
+  const lastTouch = new Map(); // object.uuid -> bool (edge detection)
 
-    const pot = el("a-entity",{id:"potHud", position:"0 1.65 0.70"});
-    pot.appendChild(el("a-plane",{width:"1.35", height:"0.30", material:"color:#071018; opacity:0.66"}));
-    pot.appendChild(el("a-text",{id:"potText", value:"POT $0", position:"0 0 0.01", align:"center", width:"3.8", color:"#d7eaff"}));
-    table.appendChild(pot);
+  function getIndexTipWorld(hand) {
+    // WebXR joint names vary by runtime; these are common:
+    const tip =
+      hand.getObjectByName("index-finger-tip") ||
+      hand.getObjectByName("index_tip") ||
+      hand.getObjectByName("index-finger-phalanx-tip");
 
-    for(let i=0;i<6;i++){
-      const ang=(i/6)*Math.PI*2;
-      const x=Math.sin(ang)*4.95, z=Math.cos(ang)*4.95;
-      const yaw=(Math.atan2(x,z)*180/Math.PI)+180;
-      const chair=el("a-entity",{class:"chair", position:`${x.toFixed(2)} -1.15 ${z.toFixed(2)}`, rotation:`0 ${yaw.toFixed(1)} 0`});
-      chair.appendChild(el("a-cylinder",{radius:"0.52", height:"0.10", position:"0 0.05 0", material:"color:#141b25"}));
-      // chair legs down to pit floor (visible) — deeper divot needs longer legs
-      const legH = 1.20; // visual leg length
-      const legY = -0.65;
-      const legPos = [
-        {x:0.34,z:0.34},{x:-0.34,z:0.34},{x:0.34,z:-0.34},{x:-0.34,z:-0.34}
-      ];
-      legPos.forEach(p=>{
-        chair.appendChild(el("a-cylinder",{radius:"0.04", height:String(legH), position:`${p.x} ${legY} ${p.z}`, material:"color:#0b1018; roughness:0.9"}));
-      });
-      chair.appendChild(el("a-box",{width:"0.96", height:"0.78", depth:"0.16", position:"0 0.70 -0.48", material:"color:#121a24"}));
-      chair.appendChild(el("a-entity",{class:"SeatAnchor", position:"0 0.62 0.62"}));
-      table.appendChild(chair);
+    if (!tip) return null;
+    tip.getWorldPosition(tmpW);
+    return tmpW;
+  }
+
+  function setChipBetState(chip, isBet) {
+    chip.userData.isBet = isBet;
+    const mat = chip.material;
+    if (mat && mat.emissive) {
+      mat.emissive.setHex(isBet ? 0x00ff00 : 0x000000);
     }
+  }
 
-    
-    // Chips on table (visual stacks + pot)
-    const chips = el("a-entity",{id:"tableChips", position:"0 1.15 0.35"});
-    function stack(x,z,color){
-      const g = el("a-entity",{position:`${x} 0 ${z}`});
-      for(let i=0;i<10;i++){
-        g.appendChild(el("a-cylinder",{radius:"0.07", height:"0.012", position:`0 ${i*0.013} 0`,
-          material:`color:${color}; roughness:0.6; metalness:0.1`}));
+  function insidePassLine(objWorldPos) {
+    // compute relative to table center in world
+    pokerSurface.getWorldPosition(tmpV);
+    const dx = objWorldPos.x - tmpV.x;
+    const dz = objWorldPos.z - tmpV.z;
+    return Math.sqrt(dx * dx + dz * dz) < PASSLINE_R;
+  }
+
+  function updateInteractions() {
+    const hands = [hand0, hand1];
+
+    for (const hand of hands) {
+      if (!hand || !hand.visible) continue;
+      const tipWorld = getIndexTipWorld(hand);
+      if (!tipWorld) continue;
+
+      // ---- CHIPS ----
+      for (const chip of chips) {
+        chip.getWorldPosition(tmpV);
+        const d = tipWorld.distanceTo(tmpV);
+
+        const touching = d < CHIP_GRAB_R;
+        const wasTouching = lastTouch.get(chip.uuid) || false;
+
+        if (touching) {
+          // slide chip along felt plane: move in world then convert to local tableGroup
+          const newWorld = new THREE.Vector3(tipWorld.x, tipWorld.y, tipWorld.z);
+
+          // clamp Y to felt in world:
+          // get felt world y by sampling pokerSurface world pos
+          pokerSurface.getWorldPosition(tmpW);
+          newWorld.y = tmpW.y; // keep flat on felt
+
+          // convert world -> tableGroup local
+          tableGroup.worldToLocal(newWorld);
+          chip.position.set(newWorld.x, FELT_Y, newWorld.z);
+
+          // bet check
+          chip.getWorldPosition(tmpV);
+          setChipBetState(chip, insidePassLine(tmpV));
+        }
+
+        lastTouch.set(chip.uuid, touching);
+
+        // optional edge trigger: if (!wasTouching && touching) play sound here
       }
-      chips.appendChild(g);
-    }
-    stack(-0.45,0.05,"#d12d2d");
-    stack(-0.25,0.10,"#2d6bd1");
-    stack(-0.05,0.12,"#2dd16b");
-    stack(0.15,0.10,"#d1c22d");
-    stack(0.35,0.05,"#c12dd1");
-    // Pot stack
-    const potStack = el("a-entity",{id:"potStack", position:"0 0 -0.28"});
-    for(let i=0;i<18;i++){
-      potStack.appendChild(el("a-cylinder",{radius:"0.085", height:"0.012", position:`0 ${i*0.013} 0`,
-        material:`color:#e6e6e6; roughness:0.5; metalness:0.2`}));
-    }
-    chips.appendChild(potStack);
-    table.appendChild(chips);
 
-    world.appendChild(table);
-  }
+      // ---- CARDS (peek) ----
+      for (const card of cards) {
+        if (!card.visible) continue;
+        card.getWorldPosition(tmpV);
+        const d = tipWorld.distanceTo(tmpV);
 
-  function buildBots(){
-    const table = document.getElementById("mainTable");
-    const root = el("a-entity",{id:"bots"});
-    // 8 seats around the table
-    const names = ["Mike","Jason","Alex","Chris","Daniel","Brian","Kevin","Nick"];
-    for(let i=0;i<8;i++){
-      const ang=(i/8)*Math.PI*2;
-      const x=Math.sin(ang)*4.35, z=Math.cos(ang)*4.35;
-      const yaw=(Math.atan2(x,z)*180/Math.PI)+180;
+        if (d < CARD_PEEK_R) {
+          card.userData.isPeeked = true;
+        } else {
+          card.userData.isPeeked = false;
+        }
 
-      const bot = el("a-entity",{class:"bot","data-seat":String(i+1), position:`${x.toFixed(2)} 0 ${z.toFixed(2)}`, rotation:`0 ${yaw.toFixed(1)} 0`});
-
-      // Seat height: bots live in table-space (table is already at pit floor). Use local Y to sit on chairs.
-      // Placeholder body kept hidden once GLB loads.
-      bot.appendChild(el("a-cylinder",{radius:"0.26", height:"0.85", position:"0 0.55 0", material:"color:#1a2330"}));
-      bot.appendChild(el("a-sphere",{radius:"0.21", position:"0 1.10 0", material:"color:#2a3a52"}));
-
-      // Action panel near felt edge facing inward
-      const act=el("a-entity",{class:"actionPanel", position:"0 1.70 0.95", rotation:"-20 0 0"});
-      act.appendChild(el("a-plane",{width:"0.78", height:"0.26", material:"color:#071018; opacity:0.58"}));
-      act.appendChild(el("a-text",{class:"actionText", value:"WAIT", position:"0 0 0.01", align:"center", width:"2.6", color:"#d7eaff"}));
-      bot.appendChild(act);
-
-      // Hole cards hover above nameplate (raised)
-      const hc=el("a-entity",{class:"holeCards", position:"0 2.10 0"});
-      for(let c=0;c<2;c++){
-        hc.appendChild(el("a-plane",{class:"holeCard", width:"0.15", height:"0.22", position:`${c==0?-0.08:0.08} 0 0`, material:"color:#ffffff; opacity:0.98; side:double"}));
-        hc.appendChild(el("a-text",{class:"cardLabel", value:"", position:`${c==0?-0.08:0.08} 0 0.01`, align:"center", width:"0.8", color:"#0b0f14"}));
+        // Smooth peek animation (no physics engine needed)
+        const target = card.userData.isPeeked ? (-Math.PI / 2 + PEEK_ANGLE) : -Math.PI / 2;
+        card.rotation.x = THREE.MathUtils.lerp(card.rotation.x, target, 0.15);
       }
-      bot.appendChild(hc);
 
-      // Name tag (always on by default)
-      const tag=el("a-entity",{class:"nameTag", position:"0 1.85 0", visible:"true"});
-      txt(tag, `${names[i]}\n$10,000`, "0 0 0", 2.6, "#eaf2ff");
-      bot.appendChild(tag);
-
-      root.appendChild(bot);
+      // ---- DEALER SHOE TRIGGER (touch to deal) ----
+      dealerShoe.getWorldPosition(tmpV);
+      const shoeTouch = tipWorld.distanceTo(tmpV) < 0.12;
+      const shoeWas = lastTouch.get(dealerShoe.uuid) || false;
+      if (shoeTouch && !shoeWas) {
+        // Hook: emit event to your poker logic
+        window.dispatchEvent(new CustomEvent("scarlett:shoe_touch"));
+      }
+      lastTouch.set(dealerShoe.uuid, shoeTouch);
     }
-    // Attach bots under table so seat positions track pit/table permanently.
-    if (table) table.appendChild(root);
-    else world.appendChild(root);
-  }
-      bot.appendChild(hc);
-      const tag=el("a-entity",{class:"nameTag", position:"0 2.90 0", visible:"false"});
-      txt(tag, `Bot_${i+1}\n$10,000`, "0 0 0", 3.0, "#eaf2ff");
-      bot.appendChild(tag);
-      bots.appendChild(bot);
-    }
-    world.appendChild(bots);
   }
 
-  function build(){
-    clear();
-    buildLobby();
-    buildDoorsAndJumbos();
-    buildSpawn();
-    buildPitAndTable();
-    buildBots();
-    try{ const scene=document.getElementById("scene"); if(scene){ scene.emit && scene.emit("scarlett-world-built"); scene.dispatchEvent && scene.dispatchEvent(new Event("scarlett-world-built")); } }catch(_){ }
-    D.log("[world] lobby + pit + table + bots ✅");
+  // --- Minimal dealing helpers (you can wire this to your real state machine) ---
+  function dealTwoToSeat(seatIndex) {
+    const seat = seats[seatIndex];
+    if (!seat) return;
+
+    seat.seatAnchor.getWorldPosition(tmpV);
+    // place 2 visible cards in front of that seat, on felt:
+    const a = cards.find(c => !c.visible);
+    const b = cards.find(c => !c.visible && c !== a);
+    if (!a || !b) return;
+
+    const center = new THREE.Vector3();
+    pokerSurface.getWorldPosition(center);
+
+    // direction from center to seat
+    const dir = new THREE.Vector3().subVectors(tmpV, center).normalize();
+    const right = new THREE.Vector3(-dir.z, 0, dir.x);
+
+    const p1 = center.clone().add(dir.clone().multiplyScalar(0.9)).add(right.clone().multiplyScalar(-0.10));
+    const p2 = center.clone().add(dir.clone().multiplyScalar(0.9)).add(right.clone().multiplyScalar(+0.10));
+
+    // set world positions -> local
+    const place = (card, wp) => {
+      card.visible = true;
+      const lp = wp.clone();
+      tableGroup.worldToLocal(lp);
+      card.position.set(lp.x, FELT_Y, lp.z);
+      // face the seat (rotate in Y so long edge points to player)
+      card.rotation.set(-Math.PI / 2, Math.atan2(dir.x, dir.z) + Math.PI, 0);
+    };
+
+    place(a, p1);
+    place(b, p2);
   }
 
-  window.SCARLETT_WORLD = { build };
-})();
+  // Put it in the scene
+  scene.add(main);
+
+  // Return system API (clean modular unity)
+  return {
+    group: main,
+    tableGroup,
+    pokerSurface,
+    dealerShoe,
+    cards,
+    chips,
+    seats,
+    update: updateInteractions,
+    debug: { dealTwoToSeat },
+  };
+}

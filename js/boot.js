@@ -18,13 +18,39 @@
   const STATE = window.SCARLETT_STATE = {
     teleportEnabled: true,
     demoEnabled: true,
-    spawn: { x: 0, y: 0, z: 6, rotY: 180 },
+    spawn: { x: 0, y: 0, z: 6, rotY: 0 },
     seated: false
   };
 
   function setPressed(btn, pressed){
     if(!btn) return;
     btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+  }
+
+
+  function hasGamepad(){
+    const gps = (navigator.getGamepads && navigator.getGamepads()) || [];
+    for (const g of gps){ if(g && g.connected) return true; }
+    return false;
+  }
+
+  function updateHandsMode(){
+    const left = document.getElementById('leftHand');
+    const right = document.getElementById('rightHand');
+    const gaze = document.getElementById('gazeCursor');
+    const anyPad = hasGamepad();
+
+    if(left){
+      left.setAttribute('visible', anyPad ? 'true' : 'false');
+      left.setAttribute('laser-controls', anyPad ? 'hand: left' : 'hand: left; model: false');
+    }
+    if(right){
+      right.setAttribute('visible', anyPad ? 'true' : 'false');
+      right.setAttribute('laser-controls', anyPad ? 'hand: right' : 'hand: right; model: false');
+    }
+    if(gaze){ gaze.setAttribute('visible', anyPad ? 'false' : 'true'); }
+
+    D.log(anyPad ? '[input] controllers detected ✅' : '[input] NO controllers — gaze UI enabled ✅');
   }
 
   function enterVR(){
@@ -116,6 +142,9 @@
   }
 
   scene.addEventListener("loaded", onSceneLoaded);
+
+  updateHandsMode();
+  setInterval(updateHandsMode, 1200);
 
   // Controller hook: allow A button / trigger to toggle teleport or click UI
   scene.addEventListener("enter-vr", ()=>{ D.log("[xr] enter-vr"); });

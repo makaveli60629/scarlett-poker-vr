@@ -44,6 +44,15 @@
   }
   const sleep = (ms)=>new Promise(r=>setTimeout(r, ms));
 
+  async function countdown(seat, seconds, label){
+    for (let t=seconds; t>=0; t--){
+      setAction(seat, `${label} ${t}s`);
+      setText("actionHudText", `Seat ${seat} • ${label} ${t}s`);
+      await sleep(1000);
+    }
+  }
+
+
   async function run(){
     while(true){
       if (!window.SCARLETT_FLAGS || !window.SCARLETT_FLAGS.demo){
@@ -56,20 +65,23 @@
       setText("potText", `POT $${pot}`);
       setText("actionHudText", "New hand… shuffling");
 
-      for (let seat=1; seat<=6; seat++){
+      for (let seat=1; seat<=8; seat++){
         setHole(seat,0,deck.pop());
         setHole(seat,1,deck.pop());
         setText("actionHudText", `Dealing Seat ${seat}`);
         await sleep(600);
       }
 
-      for (let seat=1; seat<=6; seat++){
-        const action = (Math.random()<0.55) ? "CHECK" : (Math.random()<0.5 ? "BET $200" : "FOLD");
+      for (let seat=1; seat<=8; seat++){
+        await countdown(seat, 15, "TURN");
+        // Decide action at timeout (demo): check if possible else bet/fold mix
+        const roll = Math.random();
+        const action = (roll < 0.60) ? "CHECK" : (roll < 0.88 ? "BET $200" : "FOLD");
         setAction(seat, action);
         if (action.startsWith("BET")) pot += 200;
         setText("potText", `POT $${pot}`);
         setText("actionHudText", `Seat ${seat} ${action} • Pot $${pot}`);
-        await sleep(750);
+        await sleep(650);
       }
 
       const streets = [{name:"FLOP", n:3},{name:"TURN", n:1},{name:"RIVER", n:1}];
@@ -79,20 +91,22 @@
         await sleep(650);
         for(let i=0;i<st.n;i++) setCommunity(ci++, deck.pop());
         await sleep(550);
-        for (let seat=1; seat<=6; seat++){
-          const action = (Math.random()<0.6) ? "CHECK" : (Math.random()<0.6 ? "BET $300" : "FOLD");
+        for (let seat=1; seat<=8; seat++){
+          await countdown(seat, 15, "TURN");
+          const roll = Math.random();
+          const action = (roll < 0.62) ? "CHECK" : (roll < 0.90 ? "BET $300" : "FOLD");
           setAction(seat, action);
           if (action.startsWith("BET")) pot += 300;
           setText("potText", `POT $${pot}`);
           setText("actionHudText", `${st.name}: Seat ${seat} ${action} • Pot $${pot}`);
-          await sleep(650);
+          await sleep(550);
         }
       }
 
-      const winner = 1 + Math.floor(Math.random()*6);
+      const winner = 1 + Math.floor(Math.random()*8);
       setText("actionHudText", `Seat ${winner} WINS $${pot}!`);
       await sleep(1800);
-      for (let seat=1; seat<=6; seat++) setAction(seat, "WAIT");
+      for (let seat=1; seat<=8; seat++) setAction(seat, "WAIT");
       await sleep(900);
     }
   }

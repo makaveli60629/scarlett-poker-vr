@@ -66,32 +66,89 @@
 
   function buildPitAndTable(){
     const pit = el("a-entity",{id:"pit"});
-    pit.appendChild(el("a-ring",{rotation:"-90 0 0", radiusInner:"5.2", radiusOuter:"10.4", material:"color:#070c12; roughness:1"}));
-    // Deepen divot (pit) so chair legs + pedestal are fully visible.
-    // Target pit floor Y = -10.0 (lobby floor/rim at Y=0).
-    pit.appendChild(el("a-cylinder",{radius:"5.2", height:"10.0", position:"0 -5.0 0", material:"color:#03060b; side:double; roughness:0.95"}));
-    pit.appendChild(el("a-circle",{rotation:"-90 0 0", radius:"5.12", position:"0 -10.0 0", material:"color:#060b12; roughness:0.98"}));
-    pit.appendChild(el("a-torus",{radius:"10.0", radiusTubular:"0.18", rotation:"90 0 0", position:"0 1.05 0", material:"color:#2a1f18; roughness:0.9"}));
-    pit.appendChild(el("a-torus",{radius:"10.2", radiusTubular:"0.08", rotation:"90 0 0", position:"0 0.25 0",
-      material:"color:#0b2b44; emissive:#4aa6ff; emissiveIntensity:1.25; opacity:0.92"}));
+    // Pit rim at lobby floor (Y=0), pit floor at Y=-3.0 (PERMANENT LOCK)
+    pit.appendChild(el("a-ring",{rotation:"-90 0 0", radiusInner:"5.2", radiusOuter:"10.6",
+      material:"color:#070c12; roughness:1"}));
+    // Pit walls (visible), height = 3.0
+    pit.appendChild(el("a-cylinder",{radius:"5.25", height:"3.00", position:"0 -1.50 0",
+      material:"color:#04070d; side:double; roughness:0.95; metalness:0.05"}));
+    // Pit floor collider/visual
+    pit.appendChild(el("a-circle",{class:"teleportable", rotation:"-90 0 0", radius:"5.18", position:"0 -3.00 0",
+      material:"color:#060b12; roughness:0.98; metalness:0.05"}));
+
+    // Rail ring + neon strip
+    pit.appendChild(el("a-torus",{radius:"10.0", radiusTubular:"0.16", rotation:"90 0 0", position:"0 0.10 0",
+      material:"color:#2a1f18; roughness:0.9"}));
+    pit.appendChild(el("a-torus",{radius:"10.2", radiusTubular:"0.06", rotation:"90 0 0", position:"0 0.22 0",
+      material:"color:#0b2b44; emissive:#4aa6ff; emissiveIntensity:1.65; opacity:0.95"}));
+
+    // Octagonal pedestal silhouette (visual), anchored to pit floor
+    const pedestal = el("a-cylinder",{radius:"4.9", height:"0.14", position:"0 -2.92 0",
+      material:"color:#0b1018; roughness:0.85; metalness:0.12"});
+    pit.appendChild(pedestal);
+
     world.appendChild(pit);
 
-    const table = el("a-entity",{id:"mainTable", position:"0 -9.10 0"});
-    // Central pedestal down to pit floor (pit floor is -10.0; tabletop is ~-8.2)
-    table.appendChild(el("a-cylinder",{radius:"0.55", height:"1.80", position:"0 0.00 0", material:"color:#0b1018; roughness:0.75; metalness:0.15"}));
-    table.appendChild(el("a-cylinder",{radius:"4.2", height:"0.58", position:"0 0.29 0", material:"color:#0f141c; roughness:0.85; metalness:0.12"}));
-    table.appendChild(el("a-torus",{radius:"3.95", radiusTubular:"0.18", position:"0 0.72 0", rotation:"90 0 0", material:"color:#2a1f18; roughness:0.95"}));
-    table.appendChild(el("a-cylinder",{radius:"3.80", height:"0.16", position:"0 0.90 0", material:"color:#0f7a60; roughness:1"}));
+    // Main table anchored to pit floor (y=-3.0)
+    const table = el("a-entity",{id:"mainTable", position:"0 -3.00 0"});
+    // Pedestal from pit floor up to table top
+    table.appendChild(el("a-cylinder",{radius:"0.60", height:"1.85", position:"0 0.93 0",
+      material:"color:#0b1018; roughness:0.75; metalness:0.15"}));
+    // Table body + rail + felt
+    table.appendChild(el("a-cylinder",{radius:"4.25", height:"0.60", position:"0 1.55 0",
+      material:"color:#101722; roughness:0.85; metalness:0.10"}));
+    table.appendChild(el("a-torus",{radius:"3.98", radiusTubular:"0.18", position:"0 1.92 0", rotation:"90 0 0",
+      material:"color:#2a1f18; roughness:0.95"}));
+    table.appendChild(el("a-cylinder",{radius:"3.82", height:"0.16", position:"0 2.10 0",
+      material:"color:#0f7a60; roughness:1; metalness:0"}));
 
-    const comm = el("a-entity",{id:"communityFrame", position:"0 3.35 -1.45"});
-    comm.appendChild(el("a-plane",{width:"3.00", height:"1.00", material:"color:#061019; opacity:0.62"}));
-    txt(comm,"COMMUNITY","0 0.38 0.02",3.8,"#cfe7ff");
+    // Betting line (pass line) per packet: radius 1.8m
+    table.appendChild(el("a-ring",{rotation:"-90 0 0", radiusInner:"1.78", radiusOuter:"1.82", position:"0 2.19 0",
+      material:"color:#eaf2ff; opacity:0.28; shader:standard; roughness:1"}));
 
-    const cards = el("a-entity",{id:"communityCards", position:"0 0.10 0.05"});
-    for(let i=0;i<5;i++){
-      cards.appendChild(el("a-plane",{class:"communityCard", width:"2.08", height:"2.88", position:`${(i-2)*2.35} 0.00 0`, material:"color:#ffffff; opacity:0.95; side:double; roughness:0.8; metalness:0.0"}));
-      cards.appendChild(el("a-text",{class:"cardLabel", value:"", position:`${(i-2)*2.35} 0.00 0.04`, align:"center", width:"9.0", color:"#0b0f14"}));
+    // Community frame + HUD above felt (readable)
+    const comm = el("a-entity",{id:"communityFrame", position:"0 2.75 -1.25"});
+    comm.appendChild(el("a-plane",{width:"1.70", height:"0.62", material:"color:#061019; opacity:0.72"}));
+    txt(comm,"COMMUNITY","0 0.23 0.02",3.2,"#cfe7ff");
+
+    // Community cards: 2x normal size, facing player
+    const cards = el("a-entity",{id:"communityCards", position:"0 -0.05 0.05"});
+    for(let i=0;i<5;i++) {
+      cards.appendChild(el("a-plane",{class:"communityCard", width:"0.30", height:"0.44", position:`${(i-2)*0.34} 0.00 0`,
+        material:"color:#ffffff; opacity:0.98; side:double; roughness:0.9; metalness:0.0"}));
+      cards.appendChild(el("a-text",{class:"cardLabel", value:"", position:`${(i-2)*0.34} 0.00 0.01`, align:"center",
+        width:"1.6", color:"#0b0f14"}));
     }
+    comm.appendChild(cards);
+    table.appendChild(comm);
+
+    // Table HUD (framed, above community)
+    const hud = el("a-entity",{id:"tableHud", position:"0 3.50 -1.25"});
+    hud.appendChild(el("a-plane",{width:"2.10", height:"0.60", material:"color:#061019; opacity:0.70"}));
+    hud.appendChild(el("a-plane",{width:"2.14", height:"0.64", position:"0 0 -0.01", material:"color:#0b2b44; opacity:0.30"}));
+    txt(hud,"TURN: —\nPOT: $0\nTO CALL: $0\nLAST: —","0 0 0.02",3.2,"#eaf2ff").setAttribute("id","actionHudText");
+    table.appendChild(hud);
+
+    // Chips (visible stacks + pot)
+    const chips = el("a-entity",{id:"chips", position:"0 2.20 0"});
+    function stack(x,z,color){
+      const g = el("a-entity",{position:`${x} 0 ${z}`});
+      for(let i=0;i<10;i++) g.appendChild(el("a-cylinder",{radius:"0.045", height:"0.010", position:`0 ${i*0.011} 0`,
+        material:`color:${color}; roughness:0.55; metalness:0.15`}));
+      chips.appendChild(g);
+    }
+    stack(-0.30,0.35,"#d12d2d");
+    stack(-0.12,0.40,"#2d6bd1");
+    stack(0.06,0.42,"#2dd16b");
+    stack(0.24,0.38,"#d1c22d");
+    const potStack = el("a-entity",{id:"potStack", position:"0 0 -0.30"});
+    for(let i=0;i<18;i++) potStack.appendChild(el("a-cylinder",{radius:"0.050", height:"0.010", position:`0 ${i*0.011} 0`,
+      material:"color:#e6e6e6; roughness:0.5; metalness:0.2"}));
+    chips.appendChild(potStack);
+    table.appendChild(chips);
+
+    world.appendChild(table);
+  }
     comm.appendChild(cards);
 
     const actionHud = el("a-entity",{id:"actionHud", position:"0 1.35 0.03"});
@@ -155,25 +212,47 @@
   }
 
   function buildBots(){
-    const bots = el("a-entity",{id:"bots"});
-    for(let i=0;i<6;i++){
-      const ang=(i/6)*Math.PI*2;
-      const x=Math.sin(ang)*4.55, z=Math.cos(ang)*4.55;
+    const table = document.getElementById("mainTable");
+    const root = el("a-entity",{id:"bots"});
+    // 8 seats around the table
+    const names = ["Mike","Jason","Alex","Chris","Daniel","Brian","Kevin","Nick"];
+    for(let i=0;i<8;i++){
+      const ang=(i/8)*Math.PI*2;
+      const x=Math.sin(ang)*4.35, z=Math.cos(ang)*4.35;
       const yaw=(Math.atan2(x,z)*180/Math.PI)+180;
-      const bot = el("a-entity",{class:"bot", "data-seat": String(i+1), position:`${x.toFixed(2)} 0 ${z.toFixed(2)}`, rotation:`0 ${yaw.toFixed(1)} 0`});
-      bot.setAttribute("animation__bob", `property: position; dir: alternate; dur: 2200; loop: true; easing: easeInOutSine; to: ${x.toFixed(2)} 0.04 ${z.toFixed(2)}`);
-      bot.setAttribute("animation__turn", `property: rotation; dir: alternate; dur: 4800; loop: true; easing: easeInOutSine; to: 0 ${(yaw+8).toFixed(1)} 0`);
-      bot.appendChild(el("a-cylinder",{radius:"0.28", height:"1.08", position:"0 1.02 0", material:"color:#1a2330"}));
-      bot.appendChild(el("a-sphere",{radius:"0.23", position:"0 1.74 0", material:"color:#2a3a52"}));
-      const act=el("a-entity",{class:"actionPanel", position:"0 0.10 1.10", rotation:"-90 0 0"});
-      act.appendChild(el("a-plane",{width:"0.82", height:"0.28", material:"color:#071018; opacity:0.58"}));
-      act.appendChild(el("a-text",{class:"actionText", value:"WAIT", position:"0 0 0.01", align:"center", width:"2.8", color:"#d7eaff"}));
+
+      const bot = el("a-entity",{class:"bot","data-seat":String(i+1), position:`${x.toFixed(2)} 0 ${z.toFixed(2)}`, rotation:`0 ${yaw.toFixed(1)} 0`});
+
+      // Seat height: bots live in table-space (table is already at pit floor). Use local Y to sit on chairs.
+      // Placeholder body kept hidden once GLB loads.
+      bot.appendChild(el("a-cylinder",{radius:"0.26", height:"0.85", position:"0 0.55 0", material:"color:#1a2330"}));
+      bot.appendChild(el("a-sphere",{radius:"0.21", position:"0 1.10 0", material:"color:#2a3a52"}));
+
+      // Action panel near felt edge facing inward
+      const act=el("a-entity",{class:"actionPanel", position:"0 1.70 0.95", rotation:"-20 0 0"});
+      act.appendChild(el("a-plane",{width:"0.78", height:"0.26", material:"color:#071018; opacity:0.58"}));
+      act.appendChild(el("a-text",{class:"actionText", value:"WAIT", position:"0 0 0.01", align:"center", width:"2.6", color:"#d7eaff"}));
       bot.appendChild(act);
-      const hc=el("a-entity",{class:"holeCards", position:"0 3.25 0"});
+
+      // Hole cards hover above nameplate (raised)
+      const hc=el("a-entity",{class:"holeCards", position:"0 2.10 0"});
       for(let c=0;c<2;c++){
-        hc.appendChild(el("a-plane",{class:"holeCard", width:"0.60", height:"0.86", position:`${c==0?-0.25:0.25} 0 0`, material:"color:#ffffff; opacity:0.95; side:double"}));
-        hc.appendChild(el("a-text",{class:"cardLabel", value:"", position:`${c==0?-0.25:0.25} 0 0.01`, align:"center", width:"1.6", color:"#0b0f14"}));
+        hc.appendChild(el("a-plane",{class:"holeCard", width:"0.15", height:"0.22", position:`${c==0?-0.08:0.08} 0 0`, material:"color:#ffffff; opacity:0.98; side:double"}));
+        hc.appendChild(el("a-text",{class:"cardLabel", value:"", position:`${c==0?-0.08:0.08} 0 0.01`, align:"center", width:"0.8", color:"#0b0f14"}));
       }
+      bot.appendChild(hc);
+
+      // Name tag (always on by default)
+      const tag=el("a-entity",{class:"nameTag", position:"0 1.85 0", visible:"true"});
+      txt(tag, `${names[i]}\n$10,000`, "0 0 0", 2.6, "#eaf2ff");
+      bot.appendChild(tag);
+
+      root.appendChild(bot);
+    }
+    // Attach bots under table so seat positions track pit/table permanently.
+    if (table) table.appendChild(root);
+    else world.appendChild(root);
+  }
       bot.appendChild(hc);
       const tag=el("a-entity",{class:"nameTag", position:"0 2.90 0", visible:"false"});
       txt(tag, `Bot_${i+1}\n$10,000`, "0 0 0", 3.0, "#eaf2ff");
@@ -190,7 +269,8 @@
     buildSpawn();
     buildPitAndTable();
     buildBots();
-    D.log("[world] lobby + divot + doors + store display ✅");
+    try{ const scene=document.getElementById("scene"); if(scene){ scene.emit && scene.emit("scarlett-world-built"); scene.dispatchEvent && scene.dispatchEvent(new Event("scarlett-world-built")); } }catch(_){ }
+    D.log("[world] lobby + pit + table + bots ✅");
   }
 
   window.SCARLETT_WORLD = { build };

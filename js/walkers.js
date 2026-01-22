@@ -51,20 +51,16 @@
     const assets = scene.querySelector('a-assets');
     if (!assets) return;
 
-    const manifest = safeParseJSON('avatarManifest') || [];
-    const urls = manifest.length ? manifest : ["assets/avatars/ninja.glb"]; 
+    const urls = ["assets/avatars/ninja.glb","assets/avatars/male.glb"]; 
 
-    // Prefer ninja + then reuse other uploaded GLBs as ambient walkers.
-    const walkerUrls = [];
-    const ninja = urls.find(u => /ninja\.glb$/i.test(u));
-    if (ninja) walkerUrls.push(ninja);
-    urls.forEach(u => { if (walkerUrls.length < 4 && u !== ninja) walkerUrls.push(u); });
+    // Walker set (locked)
+    const walkerUrls = urls.slice(0);(u => { if (walkerUrls.length < 4 && u !== ninja) walkerUrls.push(u); });
 
     const root = document.createElement('a-entity');
     root.setAttribute('id', 'walkers');
     scene.appendChild(root);
 
-    const count = Math.min(4, walkerUrls.length);
+    const count = Math.min(2, walkerUrls.length);
     for (let i=0;i<count;i++){
       const src = walkerUrls[i];
       const id = 'walkerAsset_' + i;

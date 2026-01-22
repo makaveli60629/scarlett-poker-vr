@@ -34,9 +34,9 @@
       const holder = document.createElement("a-entity");
       holder.setAttribute("gltf-model", "#"+itemId);
       // Many GLBs are not authored with feet at Y=0. Lift slightly for visibility.
-      holder.setAttribute("position", "0 0.05 0");
+      holder.setAttribute("position", "0 0.00 0");
       holder.setAttribute("rotation", "0 180 0");
-      holder.setAttribute("scale", "1.15 1.15 1.15");
+      holder.setAttribute("scale", "0.95 0.95 0.95");
 
       // If the project includes the animation-mixer component, enable it.
       // (Safe: if not present, A-Frame ignores unknown components.)

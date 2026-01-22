@@ -1,188 +1,162 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>ScarlettVR Poker — FULL 2.0 (Android + Quest)</title>
 
-  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-  <script>window.THREE = window.THREE || (window.AFRAME && AFRAME.THREE);</script>
+// js/boot.js
+// Scarlett boot + HUD + Diagnostics. (A-Frame)
+// HARDENED: ensures init always runs + buttons respond on Android (pointer/touch/click).
+(function(){
+  const t0 = performance.now();
 
-  <style>
-    html, body { width:100%; height:100%; margin:0; padding:0; overflow:hidden; background:#050a12; }
-    a-scene { position:fixed !important; inset:0 !important; width:100% !important; height:100% !important; }
-
-    #hud {
-      position: fixed; top: 12px; left: 12px; right: 12px;
-      z-index: 20; pointer-events: auto;
-      display:block;
+  const diag = {
+    lines: [],
+    enabled: false,
+    log(msg){
+      const dt = ((performance.now()-t0)/1000).toFixed(3);
+      const line = `[${dt}] ${msg}`;
+      this.lines.push(line);
+      const panel = document.getElementById('diagPanel');
+      if (panel && this.enabled) panel.textContent = this.lines.join('\n');
+      try { console.log(line); } catch(_){}
+    },
+    toggle(){
+      this.enabled = !this.enabled;
+      const panel = document.getElementById('diagPanel');
+      if (!panel) return;
+      panel.style.display = this.enabled ? 'block' : 'none';
+      if (this.enabled) panel.textContent = this.lines.join('\n');
     }
-    .hudRow { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; }
-    .hudBtn {
-      background: linear-gradient(180deg, #1b2a3f, #0f1a2a);
-      color: #eaf2ff;
-      border: 1px solid rgba(255,255,255,.18);
-      border-radius: 14px;
-      padding: 10px 16px;
-      font-size: 14px;
-      cursor: pointer;
-      user-select:none;
-      -webkit-tap-highlight-color: transparent;
+  };
+  window.SCARLETT_DIAG = diag;
+
+  function $(id){ return document.getElementById(id); }
+
+  function onPress(el, fn){
+    if (!el) return;
+    const handler = (ev)=>{ 
+      try { ev.preventDefault?.(); } catch(_){}
+      try { fn(ev); } catch(e){ diag.log('[ui] handler error: ' + (e && e.message ? e.message : e)); }
+    };
+    // Pointer first (covers mouse + touch on modern browsers)
+    el.addEventListener('pointerup', handler, { passive:false });
+    // Touch fallback
+    el.addEventListener('touchend', handler, { passive:false });
+    // Click fallback
+    el.addEventListener('click', handler, { passive:false });
+  }
+
+  function setPressed(btn, pressed){
+    if (!btn) return;
+    btn.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+  }
+
+  function enterVR(){
+    const scene = $('scene');
+    if (!scene) return;
+    try { scene.enterVR(); }
+    catch(e){ diag.log('[vr] enterVR failed: ' + (e && e.message ? e.message : e)); }
+  }
+
+  function resetToSpawn(){
+    const rig = $('rig');
+    if (!rig) return;
+    rig.setAttribute('position', '0 0 26');
+    rig.setAttribute('rotation', '0 180 0');
+    diag.log('[ui] reset spawn');
+  }
+
+  function toggleHUD(){
+    const hud = $('hud');
+    if (!hud) return;
+    hud.style.display = (hud.style.display === 'none') ? 'block' : 'none';
+    diag.log('[ui] toggle hud -> ' + hud.style.display);
+  }
+
+  function openJumboButtons(){
+    // Emit event consumed by jumbotron module or show a simple alert fallback
+    const scene = $('scene');
+    if (scene) scene.emit('scarlett-jumbo-buttons');
+    else alert('Jumbotron buttons not ready');
+  }
+
+  function buildWorld(){
+    try {
+      if (window.SCARLETT_WORLD && typeof window.SCARLETT_WORLD.build === 'function') {
+        window.SCARLETT_WORLD.build();
+        const scene = $('scene');
+        if (scene) scene.emit('scarlett-world-built');
+        diag.log('[boot] world built ✅');
+      } else {
+        diag.log('[boot] SCARLETT_WORLD.build missing ❌');
+      }
+    } catch(e){
+      diag.log('[boot] world build error ❌ ' + (e && e.stack ? e.stack : e));
     }
-    .hudBtn[aria-pressed="true"] { background: linear-gradient(180deg, #2f5fa3, #1b3f6f); }
-    #diagPanel {
-      display:none;
-      margin-top:8px;
-      background: rgba(0,0,0,.78);
-      border: 1px solid rgba(255,255,255,.18);
-      border-radius: 14px;
-      padding: 12px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-size: 12px;
-      line-height: 1.35;
-      white-space: pre-wrap;
-      max-height: 46vh;
-      overflow:auto;
-      color: #eaf2ff;
-      text-shadow: 0 1px 1px rgba(0,0,0,.75);
-    }
+  }
 
-    /* Android pads (touch) */
-    #pads {
-      position: fixed; left:0; right:0; bottom:0;
-      height: 46vh;
-      pointer-events:none;
-      z-index: 19;
-      display:block;
-    }
-    .pad {
-      position:absolute; bottom: 18px;
-      width: 210px; height: 210px;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.10);
-      pointer-events:auto;
-      touch-action:none;
-    }
-    #padL { left: 18px; }
-    #padR { right: 18px; }
-    .stick {
-      position:absolute; left:50%; top:50%;
-      width: 90px; height: 90px;
-      border-radius: 999px;
-      transform: translate(-50%, -50%);
-      background: rgba(255,255,255,0.14);
-      border: 1px solid rgba(255,255,255,0.18);
-    }
-    .padLabel{
-      position:absolute; left:50%; top:-26px;
-      transform:translateX(-50%);
-      font: 12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      color: rgba(234,242,255,0.75);
-      text-shadow: 0 1px 1px rgba(0,0,0,0.7);
-      pointer-events:none;
-    }
-  </style>
-</head>
-<body>
+  let inited = false;
+  function init(){
+    if (inited) return;
+    inited = true;
 
-<div id="hud">
-  <div class="hudRow">
-    <button id="btnEnterVR" class="hudBtn">Enter VR</button>
-    <button id="btnTeleport" class="hudBtn" aria-pressed="true">Teleport: ON</button>
-    <button id="btnReset" class="hudBtn">Reset to Spawn</button>
-  </div>
-  <div class="hudRow">
-    <button id="btnHideHUD" class="hudBtn">Hide HUD</button>
-    <button id="btnDiag" class="hudBtn">Diagnostics</button>
-    <button id="btnDemo" class="hudBtn" aria-pressed="true">Demo: ON</button>
-    <button id="btnJumbo" class="hudBtn">Jumbotron Buttons</button>
-  </div>
-  <div id="diagPanel"></div>
-</div>
+    diag.log('=== SCARLETT DIAGNOSTICS ===');
+    diag.log('booting…');
+    diag.log('href=' + location.href);
+    diag.log('secureContext=' + (window.isSecureContext === true));
+    diag.log('ua=' + navigator.userAgent);
+    diag.log('touch=' + ('ontouchstart' in window) + ' maxTouchPoints=' + (navigator.maxTouchPoints || 0));
+    diag.log('xr=' + (!!navigator.xr));
 
-<div id="pads" aria-hidden="true">
-  <div id="padL" class="pad">
-    <div class="padLabel">MOVE</div>
-    <div class="stick"></div>
-  </div>
-  <div id="padR" class="pad">
-    <div class="padLabel">TURN</div>
-    <div class="stick"></div>
-  </div>
-</div>
+    const btnEnterVR = $('btnEnterVR');
+    const btnTeleport = $('btnTeleport');
+    const btnReset = $('btnReset');
+    const btnHideHUD = $('btnHideHUD');
+    const btnDiag = $('btnDiag');
+    const btnDemo = $('btnDemo');
+    const btnJumbo = $('btnJumbo');
 
-<a-scene id="scene"
-  background="color: #050a12"
-  renderer="antialias: true; alpha: false; physicallyCorrectLights: false; colorManagement: true; exposure: 2.6;"
-  xr-mode-ui="enabled: false"
-  webxr="optionalFeatures: local-floor, bounded-floor, hand-tracking"
->
-  <a-assets timeout="120000"></a-assets>
-  <a-sky color="#050a12"></a-sky>
+    onPress(btnEnterVR, enterVR);
+    onPress(btnReset, resetToSpawn);
+    onPress(btnHideHUD, toggleHUD);
+    onPress(btnDiag, ()=>diag.toggle());
+    onPress(btnJumbo, openJumboButtons);
 
-  <a-entity id="rig" position="0 0 24" rotation="0 180 0">
-    <a-entity id="camera" camera look-controls position="0 1.65 0"></a-entity>
-    <!-- XR Hands / Controllers -->
-    <a-entity id="leftHand"
-      hand-tracking-controls="hand: left"
-      oculus-touch-controls="hand: left"
-      raycaster="objects: .uiTarget, .teleportable, .bot; far: 30"
-      line="color: #9fd4ff; opacity: 0.9"
-    >
-      <a-entity id="wristMenu" wrist-menu position="0 0.02 -0.05" rotation="-35 0 0"></a-entity>
-    </a-entity>
+    // Teleport flag consumed by other modules
+    window.SCARLETT_FLAGS = window.SCARLETT_FLAGS || {};
+    window.SCARLETT_FLAGS.teleport = true;
+    setPressed(btnTeleport, true);
+    if (btnTeleport) btnTeleport.textContent = 'Teleport: ON';
+    onPress(btnTeleport, ()=>{
+      window.SCARLETT_FLAGS.teleport = !window.SCARLETT_FLAGS.teleport;
+      setPressed(btnTeleport, window.SCARLETT_FLAGS.teleport);
+      btnTeleport.textContent = 'Teleport: ' + (window.SCARLETT_FLAGS.teleport ? 'ON' : 'OFF');
+      diag.log('[ui] teleport -> ' + (window.SCARLETT_FLAGS.teleport ? 'ON' : 'OFF'));
+    });
 
-    <a-entity id="rightHand"
-      hand-tracking-controls="hand: right"
-      oculus-touch-controls="hand: right"
-      raycaster="objects: .uiTarget, .teleportable, .bot; far: 30"
-      line="color: #9fd4ff; opacity: 0.9"
-    ></a-entity>
+    window.SCARLETT_FLAGS.demo = true;
+    setPressed(btnDemo, true);
+    if (btnDemo) btnDemo.textContent = 'Demo: ON';
+    onPress(btnDemo, ()=>{
+      window.SCARLETT_FLAGS.demo = !window.SCARLETT_FLAGS.demo;
+      setPressed(btnDemo, window.SCARLETT_FLAGS.demo);
+      btnDemo.textContent = 'Demo: ' + (window.SCARLETT_FLAGS.demo ? 'ON' : 'OFF');
+      const scene = $('scene');
+      if (scene) scene.emit('scarlett-demo-toggle', { enabled: window.SCARLETT_FLAGS.demo });
+      diag.log('[ui] demo -> ' + (window.SCARLETT_FLAGS.demo ? 'ON' : 'OFF'));
+    });
 
+    const scene = $('scene');
+    if (!scene) { diag.log('[boot] scene missing ❌'); return; }
+    if (scene.hasLoaded) buildWorld();
+    else scene.addEventListener('loaded', buildWorld, { once:true });
 
-    <a-entity id="gazeCursor"
-      cursor="fuse: true; fuseTimeout: 700"
-      raycaster="objects: .uiTarget, .teleportable, .bot"
-      position="0 0 -1"
-      geometry="primitive: ring; radiusInner: 0.01; radiusOuter: 0.02"
-      material="color: #9fd4ff; shader: flat"
-      visible="true">
-    </a-entity>
-  </a-entity>
+    // Quick visual marker: add attribute so you can verify JS ran
+    document.documentElement.setAttribute('data-scarlett-boot', '1');
+  }
 
-  <a-entity id="world"></a-entity>
-
-  <a-entity id="lightRig">
-    <a-entity light="type: ambient; intensity: 2.4; color: #ffffff"></a-entity>
-    <a-entity light="type: hemisphere; intensity: 1.8; color: #eaf2ff; groundColor: #06101a"></a-entity>
-    <a-entity light="type: directional; intensity: 1.9" position="6 14 8"></a-entity>
-    <a-entity light="type: directional; intensity: 1.3" position="-8 12 -6"></a-entity>
-    <a-entity light="type: point; intensity: 1.4; distance: 80" position="18 8 18"></a-entity>
-    <a-entity light="type: point; intensity: 1.4; distance: 80" position="-18 8 18"></a-entity>
-    <a-entity light="type: point; intensity: 1.2; distance: 80" position="18 8 -18"></a-entity>
-    <a-entity light="type: point; intensity: 1.2; distance: 80" position="-18 8 -18"></a-entity>
-  </a-entity>
-
-</a-scene>
-
-<script id="avatarManifest" type="application/json">
-[
-  "assets/avatars/ninja.glb",
-  "assets/avatars/male.glb",
-  "assets/avatars/female.glb"
-]
-</script>
-
-<script src="./js/boot.js"></script>
-<script src="./js/world.js"></script>
-<script src="./js/android_pads.js"></script>
-<script src="./js/locomotion.js"></script>
-<script src="./js/name_tag_focus.js"></script>
-<script src="./js/radio.js"></script>
-<script src="./js/wrist_menu.js"></script>
-<script src="./js/avatar_loader.js"></script>
-<script src="./js/poker_demo.js"></script>
-
-</body>
-</html>
+  // Run init ASAP + multiple fallbacks (covers weird mobile timing)
+  try { queueMicrotask(init); } catch(_){}
+  try { setTimeout(init, 0); } catch(_){}
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once:true });
+  } else {
+    init();
+  }
+})();

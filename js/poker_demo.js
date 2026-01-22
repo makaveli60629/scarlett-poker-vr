@@ -5,6 +5,8 @@
   const SUITS = ["♠","♥","♦","♣"];
   const RANKS = ["A","K","Q","J","10","9","8","7","6","5","4","3","2"];
 
+  function suitColor(s){ return (s==="♥"||s==="♦") ? "#ff4a4a" : "#0b0f14"; }
+
   function makeDeck(){
     const deck = [];
     for (const s of SUITS) for (const r of RANKS) deck.push({r,s});
@@ -27,13 +29,13 @@
   function setHole(seat, idx, card){
     const bot = document.querySelector(`.bot[data-seat="${seat}"]`);
     const labels = bot && bot.querySelectorAll(".holeCards .cardLabel");
-    if (labels && labels[idx]) labels[idx].setAttribute("value", `${card.r}${card.s}`);
+    if (labels && labels[idx]) { labels[idx].setAttribute("value", `${card.r}${card.s}`); labels[idx].setAttribute("color", suitColor(card.s)); }
   }
   function setCommunity(idx, card){
     const comm = document.getElementById("communityCards");
     if (!comm) return;
     const labels = comm.querySelectorAll(".cardLabel");
-    if (labels && labels[idx]) labels[idx].setAttribute("value", `${card.r}${card.s}`);
+    if (labels && labels[idx]) { labels[idx].setAttribute("value", `${card.r}${card.s}`); labels[idx].setAttribute("color", suitColor(card.s)); }
   }
   function clearCards(){
     document.querySelectorAll(".holeCards .cardLabel").forEach(l=>l.setAttribute("value",""));

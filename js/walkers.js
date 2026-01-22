@@ -75,7 +75,7 @@
       w.setAttribute('gltf-model', '#'+id);
       w.setAttribute('position', '0 0 0');
       w.setAttribute('rotation', '0 0 0');
-      w.setAttribute('scale', '1.1 1.1 1.1');
+      w.setAttribute('scale', '0.9 0.9 0.9');
       w.setAttribute('animation-mixer', 'clip:*; timeScale:1.0');
 
       // Stagger phases so they don't overlap.

@@ -1,6 +1,6 @@
 // js/boot.js
 (function () {
-  const BUILD = "SCARLETT_FULL_1_10_BOOTSAFE";
+  const BUILD = "SCARLETT_FULL_1_11_BOOTSAFE";
 
   const diagPanel = document.getElementById("diagPanel");
   const btnDiag = document.getElementById("btnDiag");
@@ -61,11 +61,15 @@
     btnReset.addEventListener("click", () => {
       const rig = document.getElementById("rig");
       if (!rig) return;
-      rig.object3D.position.set(0, 0, 10);
-      rig.object3D.rotation.set(0, 0, 0);
-      SCARLETT_DIAG.log("[spawn] reset to 0,0,10");
+      // Safe spawn: far from table + always standing
+      rig.object3D.position.set(0, 0, 28);
+      rig.object3D.rotation.set(0, Math.PI, 0);
+      SCARLETT_DIAG.log("[spawn] reset to SAFE 0,0,28 facing lobby");
+      // If XR is active, also try to re-center to local-floor reference space
+      const scene = document.getElementById("scene");
+      try { scene && scene.emit && scene.emit("scarlett-reset"); } catch(e) {}
     });
-  }
+    }
 
   // Enter VR
   if (btnEnterVR) {

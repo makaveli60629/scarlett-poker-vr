@@ -144,11 +144,12 @@
 
   function buildDivotAndTable(world) {
     const pit = el("a-entity", { id: "pit" });
-    pit.appendChild(el("a-ring", { rotation: "-90 0 0", radiusInner: "3.5", radiusOuter: "7.6", material: "color:#0c1118; roughness:1; metalness:0" }));
+    pit.appendChild(el("a-ring",{class:"teleportable", , { rotation: "-90 0 0", radiusInner: "3.5", radiusOuter: "7.6", material: "color:#0c1118; roughness:1; metalness:0" }));
     pit.appendChild(el("a-cylinder", { radius: "3.5", height: "1.0", position: "0 -0.5 0", material: "color:#05080d; roughness:0.95; metalness:0.08; side:double" }));
     pit.appendChild(el("a-circle", { rotation: "-90 0 0", radius: "3.45", position: "0 -1.0 0", material: "color:#0a0f18; roughness:0.98; metalness:0.02" }));
     pit.appendChild(el("a-torus", { radius: "7.25", radiusTubular: "0.14", rotation: "90 0 0", position: "0 0.95 0", material: "color:#2a1f18; roughness:0.9; metalness:0.05" }));
     pit.appendChild(el("a-torus", { radius: "7.45", radiusTubular: "0.06", rotation: "90 0 0", position: "0 0.12 0", material: "color:#0b2b44; emissive:#4aa6ff; emissiveIntensity:1.2; opacity:0.95" }));
+    pit.appendChild(el("a-torus",{id:"pitRailLip", radius:"7.55", radiusTubular:"0.10", rotation:"90 0 0", position:"0 0.95 0", material:"color:#2a1f18; roughness:0.9; metalness:0.08"}));
     world.appendChild(pit);
 
     const table = el("a-entity", { id: "mainTable", position: "0 -0.85 0" });

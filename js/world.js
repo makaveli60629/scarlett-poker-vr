@@ -67,14 +67,14 @@
   function buildPitAndTable(){
     const pit = el("a-entity",{id:"pit"});
     pit.appendChild(el("a-ring",{rotation:"-90 0 0", radiusInner:"5.2", radiusOuter:"10.4", material:"color:#070c12; roughness:1"}));
-    pit.appendChild(el("a-cylinder",{radius:"5.2", height:"2.2", position:"0 -1.1 0", material:"color:#03060b; side:double; roughness:0.95"}));
-    pit.appendChild(el("a-circle",{rotation:"-90 0 0", radius:"5.12", position:"0 -2.2 0", material:"color:#060b12; roughness:0.98"}));
+    pit.appendChild(el("a-cylinder",{radius:"5.2", height:"1.4", position:"0 -0.7 0", material:"color:#03060b; side:double; roughness:0.95"}));
+    pit.appendChild(el("a-circle",{rotation:"-90 0 0", radius:"5.12", position:"0 -1.4 0", material:"color:#060b12; roughness:0.98"}));
     pit.appendChild(el("a-torus",{radius:"10.0", radiusTubular:"0.18", rotation:"90 0 0", position:"0 1.05 0", material:"color:#2a1f18; roughness:0.9"}));
     pit.appendChild(el("a-torus",{radius:"10.2", radiusTubular:"0.08", rotation:"90 0 0", position:"0 0.25 0",
       material:"color:#0b2b44; emissive:#4aa6ff; emissiveIntensity:1.25; opacity:0.92"}));
     world.appendChild(pit);
 
-    const table = el("a-entity",{id:"mainTable", position:"0 -1.95 0"});
+    const table = el("a-entity",{id:"mainTable", position:"0 -0.85 0"});
     table.appendChild(el("a-cylinder",{radius:"4.2", height:"0.58", position:"0 0.29 0", material:"color:#0f141c; roughness:0.85; metalness:0.12"}));
     table.appendChild(el("a-torus",{radius:"3.95", radiusTubular:"0.18", position:"0 0.72 0", rotation:"90 0 0", material:"color:#2a1f18; roughness:0.95"}));
     table.appendChild(el("a-cylinder",{radius:"3.80", height:"0.16", position:"0 0.90 0", material:"color:#0f7a60; roughness:1"}));
@@ -122,7 +122,7 @@
       const ang=(i/6)*Math.PI*2;
       const x=Math.sin(ang)*4.55, z=Math.cos(ang)*4.55;
       const yaw=(Math.atan2(x,z)*180/Math.PI)+180;
-      const bot = el("a-entity",{class:"bot", "data-seat": String(i+1), position:`${x.toFixed(2)} -1.95 ${z.toFixed(2)}`, rotation:`0 ${yaw.toFixed(1)} 0`});
+      const bot = el("a-entity",{class:"bot", "data-seat": String(i+1), position:`${x.toFixed(2)} -0.85 ${z.toFixed(2)}`, rotation:`0 ${yaw.toFixed(1)} 0`});
       bot.appendChild(el("a-cylinder",{radius:"0.28", height:"1.08", position:"0 1.02 0", material:"color:#1a2330"}));
       bot.appendChild(el("a-sphere",{radius:"0.23", position:"0 1.74 0", material:"color:#2a3a52"}));
       const act=el("a-entity",{class:"actionPanel", position:"0 0.10 1.10", rotation:"-90 0 0"});

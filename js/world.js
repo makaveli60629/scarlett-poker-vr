@@ -24,10 +24,10 @@
     world.appendChild(el("a-circle",{rotation:"90 0 0", radius:"23.2", position:"0 10.5 0", material:"color:#05080d; opacity:0.98"}));
 
     world.appendChild(el("a-torus",{position:"0 10.2 0", radius:"14.5", radiusTubular:"0.14", rotation:"90 0 0",
-      material:"color:#10314a; emissive:#4aa6ff; emissiveIntensity:0.55; roughness:0.6"}));
+      material:"color:#10314a; emissive:#4aa6ff; emissiveIntensity:1.15; roughness:0.6"}));
 
     world.appendChild(el("a-torus",{position:"0 9.9 0", radius:"23.15", radiusTubular:"0.08", rotation:"90 0 0",
-      material:"color:#0b2b44; emissive:#4aa6ff; emissiveIntensity:0.85; opacity:0.92"}));
+      material:"color:#0b2b44; emissive:#4aa6ff; emissiveIntensity:1.15; opacity:0.92"}));
 
     const sign = el("a-entity",{position:"0 3.1 14.2", rotation:"0 180 0"});
     sign.appendChild(el("a-plane",{width:"8.2", height:"2.4", material:"color:#091425; opacity:0.7"}));
@@ -102,7 +102,7 @@
     pit.appendChild(el("a-cylinder",{radius:"3.5", height:"1.0", position:"0 -0.5 0", material:"color:#05080d; roughness:0.95; metalness:0.08; side:double"}));
     pit.appendChild(el("a-circle",{rotation:"-90 0 0", radius:"3.45", position:"0 -1.0 0", material:"color:#0a0f18; roughness:0.98; metalness:0.02"}));
     pit.appendChild(el("a-torus",{radius:"7.25", radiusTubular:"0.14", rotation:"90 0 0", position:"0 0.95 0", material:"color:#2a1f18; roughness:0.9; metalness:0.05"}));
-    pit.appendChild(el("a-torus",{radius:"7.45", radiusTubular:"0.06", rotation:"90 0 0", position:"0 0.12 0", material:"color:#0b2b44; emissive:#4aa6ff; emissiveIntensity:0.9; opacity:0.95"}));
+    pit.appendChild(el("a-torus",{radius:"7.45", radiusTubular:"0.06", rotation:"90 0 0", position:"0 0.12 0", material:"color:#0b2b44; emissive:#4aa6ff; emissiveIntensity:1.2; opacity:0.95"}));
     world.appendChild(pit);
 
     const table = el("a-entity",{id:"mainTable", position:"0 -0.85 0"});

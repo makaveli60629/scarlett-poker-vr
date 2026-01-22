@@ -1,100 +1,145 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>SCARLETT VR Poker — Update 3.0</title>
-  <meta name="color-scheme" content="dark light" />
-  <style>
-    html, body { margin:0; padding:0; height:100%; background:#0b0f14; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-    #hud { position:fixed; left:0; top:0; right:0; z-index:9999; pointer-events:none; padding:10px; }
-    .row { display:flex; gap:8px; flex-wrap:wrap; }
-    .btn { pointer-events:auto; border:1px solid rgba(255,255,255,.14); background:rgba(10,14,20,.65); color:#fff; padding:10px 12px; border-radius:12px; font-size:14px; }
-    .btn:active { transform: translateY(1px); }
-    #diagPanel { pointer-events:auto; margin-top:10px; padding:10px; border-radius:14px; border:1px solid rgba(255,255,255,.14); background:rgba(0,0,0,.55); max-width: 980px; display:none; }
-    #diagPanel pre { margin:0; white-space:pre-wrap; word-break:break-word; font-size:12px; line-height:1.35; }
-    #loader {
-      position:fixed; inset:0; z-index:9998; display:flex; align-items:center; justify-content:center;
-      background: radial-gradient(1200px 800px at 50% 40%, rgba(30,40,60,.55), rgba(0,0,0,.82));
-      color:#fff;
-    }
-    #loaderCard { border:1px solid rgba(255,255,255,.14); background:rgba(0,0,0,.45); padding:16px 18px; border-radius:16px; width:min(560px, 92vw); }
-    #loaderTitle { font-weight:700; font-size:16px; margin-bottom:6px; }
-    #loaderSub { opacity:.85; font-size:13px; }
-    #loaderErr { margin-top:10px; color:#ffb4b4; font-size:12px; display:none; }
-    #hint { opacity:.8; margin-top:10px; font-size:12px; }
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <title>ScarlettVR Poker — Full 1.0</title>
 
-    /* Android pads */
-    #androidPads{ position:fixed; inset:0; z-index:9997; pointer-events:none; display:none; }
-    .pad{ position:absolute; width:160px; height:160px; border-radius:999px; border:1px solid rgba(255,255,255,.18);
-          background:rgba(10,14,20,.25); backdrop-filter: blur(6px); pointer-events:auto; touch-action:none; }
-    .knob{ position:absolute; left:50%; top:50%; width:70px; height:70px; margin-left:-35px; margin-top:-35px;
-           border-radius:999px; border:1px solid rgba(255,255,255,.25); background:rgba(255,255,255,.08); }
-    #padMove{ left:18px; bottom:18px; }
-    #padTurn{ right:18px; bottom:18px; }
-  </style>
-
+  <!-- A-Frame (stable) -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-  <script type="module" src="./js/app.js?v=update3_0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/aframe-extras@6.1.1/dist/aframe-extras.min.js"></script>
+
+  <link rel="preconnect" href="https://aframe.io">
+  <style>
+    html,body { margin:0; padding:0; width:100%; height:100%; background:#0b0f14; overflow:hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;}
+    #hud {
+      position: fixed; left: 12px; top: 12px; z-index: 9999;
+      display:flex; flex-direction:column; gap:8px;
+      background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.12);
+      border-radius: 12px; padding: 10px; backdrop-filter: blur(6px);
+      max-width: min(420px, calc(100vw - 24px));
+    }
+    .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    button.hudBtn {
+      appearance:none; border:1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.06); color:#e9eef5;
+      padding: 10px 12px; border-radius: 10px; font-weight: 600;
+      cursor:pointer; user-select:none;
+    }
+    button.hudBtn:active { transform: translateY(1px); }
+    button.hudBtn[aria-pressed="true"] { background: rgba(120,180,255,.16); border-color: rgba(120,180,255,.35); }
+    #diagPanel {
+      display:none;
+      margin-top: 8px;
+      background: rgba(0,0,0,.45);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 12px;
+      padding: 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      line-height: 1.35;
+      white-space: pre-wrap;
+      max-height: 44vh;
+      overflow:auto;
+    }
+    #stickLayer {
+      position: fixed; inset:0; z-index: 9998; pointer-events:none;
+    }
+    .stick {
+      position:absolute; width:150px; height:150px; border-radius: 999px;
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.10);
+      pointer-events:auto;
+      touch-action:none;
+      display:none;
+    }
+    .nub {
+      position:absolute; left:50%; top:50%; width:64px; height:64px; border-radius:999px;
+      transform: translate(-50%,-50%);
+      background: rgba(255,255,255,.12);
+      border: 1px solid rgba(255,255,255,.18);
+    }
+    #leftStick { left: 18px; bottom: 18px; }
+    #rightStick { right: 18px; bottom: 18px; }
+    #toast {
+      position:fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+      z-index: 9999; padding: 10px 12px; border-radius: 999px;
+      background: rgba(0,0,0,.55); border:1px solid rgba(255,255,255,.12);
+      color:#eef6ff; font-weight:600; display:none;
+    }
+    a-scene { width:100%; height:100%; }
+  </style>
 </head>
 <body>
-  <div id="hud" aria-hidden="false">
+  <div id="hud">
     <div class="row">
-      <button id="btnEnterVR" class="btn" type="button">Enter VR</button>
-      <button id="btnTeleport" class="btn" type="button">Teleport: ON</button>
-      <button id="btnReset" class="btn" type="button">Reset to Spawn</button>
-      <button id="btnAudit" class="btn" type="button">Audit Modules</button>
-      <button id="btnDiag" class="btn" type="button">Diagnostics</button>
-      <button id="btnHideHUD" class="btn" type="button">Hide HUD</button>
+      <button id="btnEnterVR" class="hudBtn">Enter VR</button>
+      <button id="btnTeleport" class="hudBtn" aria-pressed="true">Teleport: ON</button>
+      <button id="btnReset" class="hudBtn">Reset to Spawn</button>
+      <button id="btnHideHUD" class="hudBtn">Hide HUD</button>
+      <button id="btnDiag" class="hudBtn">Diagnostics</button>
     </div>
-
-    <div id="diagPanel">
-      <pre id="diagText">booting…</pre>
+    <div class="row">
+      <button id="btnDemo" class="hudBtn" aria-pressed="true">Demo: ON</button>
+      <button id="btnJumbo" class="hudBtn">Jumbotron Buttons</button>
     </div>
+    <div id="diagPanel">booting…</div>
   </div>
 
-  <div id="loader">
-    <div id="loaderCard">
-      <div id="loaderTitle">loader active</div>
-      <div id="loaderSub">SCARLETT Update 3.0 — starting world…</div>
-      <div id="loaderErr"></div>
-      <div id="hint">Tip: teleport shows a floor reticle when your laser hits something teleportable.</div>
-    </div>
+  <div id="stickLayer">
+    <div id="leftStick" class="stick"><div class="nub"></div></div>
+    <div id="rightStick" class="stick"><div class="nub"></div></div>
   </div>
-
-  <div id="androidPads" aria-hidden="true">
-    <div id="padMove" class="pad"><div id="knobMove" class="knob"></div></div>
-    <div id="padTurn" class="pad"><div id="knobTurn" class="knob"></div></div>
-  </div>
+  <div id="toast"></div>
 
   <a-scene id="scene"
-    renderer="antialias:true; physicallyCorrectLights:true; colorManagement:true"
-    background="color: #0b0f14"
+    renderer="antialias: true; alpha: false; physicallyCorrectLights: true"
+    background="color: #06090d"
     xr-mode-ui="enabled: false"
-    webxr="requiredFeatures: local-floor; optionalFeatures: bounded-floor, hand-tracking"
+    embedded
   >
-    <a-entity id="rig" position="0 0 3">
-      <a-entity id="head" camera position="0 1.65 0" look-controls="pointerLockEnabled: true; touchEnabled: true"></a-entity>
+    <!-- Camera Rig -->
+    <a-entity id="rig" position="0 0 0">
+      <a-entity id="camera" camera look-controls="pointerLockEnabled: false" position="0 1.65 0"></a-entity>
 
-      <a-entity id="leftHand"
-        laser-controls="hand: left"
-        raycaster="objects: .teleportable; far: 30"
-        teleport-ray="hand: left"
-      ></a-entity>
-
-      <a-entity id="rightHand"
-        laser-controls="hand: right"
-        raycaster="objects: .teleportable; far: 30"
-        teleport-ray="hand: right"
-      ></a-entity>
-
-      <a-entity smooth-locomotion></a-entity>
+      <!-- Center reticle -->
+      <a-entity id="reticle"
+        position="0 0 -1"
+        geometry="primitive: ring; radiusInner: 0.005; radiusOuter: 0.01"
+        material="color: #a7c7ff; shader: flat; opacity: 0.95"
+        visible="true">
+      </a-entity>
     </a-entity>
 
-    <a-entity light="type: ambient; intensity: 0.55; color: #cfe3ff"></a-entity>
-    <a-entity light="type: directional; intensity: 0.65; color: #ffffff" position="2 6 4"></a-entity>
+    <!-- Controller lasers (Quest) -->
+    <a-entity id="leftHand" laser-controls="hand: left" raycaster="objects: .teleportable, .uiTarget" line="opacity: 0.85"></a-entity>
+    <a-entity id="rightHand" laser-controls="hand: right" raycaster="objects: .teleportable, .uiTarget" line="opacity: 0.85"></a-entity>
 
-    <a-entity id="diagText3d" position="0 1.55 -1.2" text="value: ; width: 2.6; align:center; color:#d9e6ff;" visible="false"></a-entity>
+    <!-- Lighting -->
+    <a-entity light="type: ambient; intensity: 0.55"></a-entity>
+    <a-entity light="type: directional; intensity: 0.95" position="2 6 4"></a-entity>
+    <a-entity light="type: spot; intensity: 0.9; angle: 45; penumbra: 0.6; distance: 18" position="0 8 0" rotation="-90 0 0"></a-entity>
+
+    <!-- World root -->
+    <a-entity id="world"></a-entity>
+
+    <!-- Simple UI plane in-world for "Jumbotron buttons" (laser target) -->
+    <a-entity id="jumboButtons" position="0 1.4 -3.2" visible="false">
+      <a-plane width="1.2" height="0.45" material="color: #0a0f18; opacity: 0.85" class="uiTarget"></a-plane>
+      <a-text value="Jumbotron Controls" position="0 0.18 0.01" align="center" width="2.4"></a-text>
+      <a-entity id="btnPrev" class="uiTarget" position="-0.35 -0.05 0.01" geometry="primitive: plane; width:0.28; height:0.16" material="color:#1a2536; opacity:0.95"></a-entity>
+      <a-text value="Prev" position="-0.35 -0.05 0.02" align="center" width="1"></a-text>
+      <a-entity id="btnNext" class="uiTarget" position="0.35 -0.05 0.01" geometry="primitive: plane; width:0.28; height:0.16" material="color:#1a2536; opacity:0.95"></a-entity>
+      <a-text value="Next" position="0.35 -0.05 0.02" align="center" width="1"></a-text>
+    </a-entity>
   </a-scene>
+
+  <script src="./js/diag.js"></script>
+  <script src="./js/boot.js"></script>
+  <script src="./js/world.js"></script>
+  <script src="./js/controls_android.js"></script>
+  <script src="./js/teleport.js"></script>
+  <script src="./js/seating_controller.js"></script>
+  <script src="./js/poker_demo.js"></script>
 </body>
 </html>

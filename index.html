@@ -2,40 +2,88 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-  <title>ScarlettVR Poker — FULL (Big Lobby + Safe Spawn)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>ScarlettVR Poker — FULL 2.0 (Android + Quest)</title>
 
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script>window.THREE = window.THREE || (window.AFRAME && AFRAME.THREE);</script>
 
   <style>
-    body { margin:0; overflow:hidden; background:#0b1420; font-family:system-ui; }
-    #hud { position:fixed; top:12px; left:12px; right:12px; z-index:20; pointer-events:auto; }
-    .hudRow { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; }
-    .hudBtn{
-      background:linear-gradient(180deg,#1b2a3f,#0f1a2a);
-      color:#eaf2ff; border:1px solid rgba(255,255,255,.18);
-      border-radius:14px; padding:10px 16px; font-size:14px; cursor:pointer;
-    }
-    .hudBtn[aria-pressed="true"]{ background:linear-gradient(180deg,#2f5fa3,#1b3f6f); }
-    #diagPanel{
+    html, body { width:100%; height:100%; margin:0; padding:0; overflow:hidden; background:#050a12; }
+    a-scene { position:fixed !important; inset:0 !important; width:100% !important; height:100% !important; }
+
+    #hud {
+      position: fixed; top: 12px; left: 12px; right: 12px;
+      z-index: 20; pointer-events: auto;
       display:block;
+    }
+    .hudRow { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; }
+    .hudBtn {
+      background: linear-gradient(180deg, #1b2a3f, #0f1a2a);
+      color: #eaf2ff;
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: 14px;
+      padding: 10px 16px;
+      font-size: 14px;
+      cursor: pointer;
+      user-select:none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .hudBtn[aria-pressed="true"] { background: linear-gradient(180deg, #2f5fa3, #1b3f6f); }
+    #diagPanel {
+      display:none;
       margin-top:8px;
-      background:rgba(0,0,0,.72);
-      border:1px solid rgba(255,255,255,.18);
-      border-radius:14px;
-      padding:12px;
-      font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-size:12px;
-      line-height:1.35;
-      white-space:pre-wrap;
-      max-height:44vh;
+      background: rgba(0,0,0,.78);
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: 14px;
+      padding: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      line-height: 1.35;
+      white-space: pre-wrap;
+      max-height: 46vh;
       overflow:auto;
-      color:#eaf2ff;
-      text-shadow:0 1px 1px rgba(0,0,0,.6);
+      color: #eaf2ff;
+      text-shadow: 0 1px 1px rgba(0,0,0,.75);
+    }
+
+    /* Android pads (touch) */
+    #pads {
+      position: fixed; left:0; right:0; bottom:0;
+      height: 46vh;
+      pointer-events:none;
+      z-index: 19;
+      display:block;
+    }
+    .pad {
+      position:absolute; bottom: 18px;
+      width: 210px; height: 210px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.10);
+      pointer-events:auto;
+      touch-action:none;
+    }
+    #padL { left: 18px; }
+    #padR { right: 18px; }
+    .stick {
+      position:absolute; left:50%; top:50%;
+      width: 90px; height: 90px;
+      border-radius: 999px;
+      transform: translate(-50%, -50%);
+      background: rgba(255,255,255,0.14);
+      border: 1px solid rgba(255,255,255,0.18);
+    }
+    .padLabel{
+      position:absolute; left:50%; top:-26px;
+      transform:translateX(-50%);
+      font: 12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      color: rgba(234,242,255,0.75);
+      text-shadow: 0 1px 1px rgba(0,0,0,0.7);
+      pointer-events:none;
     }
   </style>
 </head>
-
 <body>
 
 <div id="hud">
@@ -53,91 +101,68 @@
   <div id="diagPanel"></div>
 </div>
 
-<a-scene
-  id="scene"
-  embedded
-  background="color:#0b1420"
-  renderer="antialias:true; alpha:false; physicallyCorrectLights:true; colorManagement:true; exposure:1.75;"
-  xr-mode-ui="enabled:false"
+<div id="pads" aria-hidden="true">
+  <div id="padL" class="pad">
+    <div class="padLabel">MOVE</div>
+    <div class="stick"></div>
+  </div>
+  <div id="padR" class="pad">
+    <div class="padLabel">TURN</div>
+    <div class="stick"></div>
+  </div>
+</div>
+
+<a-scene id="scene"
+  background="color: #050a12"
+  renderer="antialias: true; alpha: false; physicallyCorrectLights: true; colorManagement: true; exposure: 1.9;"
+  xr-mode-ui="enabled: false"
   webxr="optionalFeatures: local-floor, bounded-floor, hand-tracking"
 >
+  <a-assets timeout="120000"></a-assets>
 
-  <!-- IMPORTANT: Rig spawns INSIDE (z=18), facing center -->
   <a-entity id="rig" position="0 0 18" rotation="0 180 0">
-    <a-entity
-      id="camera"
-      camera
-      look-controls
-      wasd-controls="enabled:true; acceleration:22"
-      position="0 1.6 0">
-    </a-entity>
+    <a-entity id="camera" camera look-controls position="0 1.65 0"></a-entity>
 
-    <a-entity
-      id="gazeCursor"
-      cursor="fuse:true; fuseTimeout:800"
-      raycaster="objects: .uiTarget, .teleportable"
+    <a-entity id="gazeCursor"
+      cursor="fuse: true; fuseTimeout: 700"
+      raycaster="objects: .uiTarget, .teleportable, .bot"
       position="0 0 -1"
-      geometry="primitive:ring; radiusInner:0.01; radiusOuter:0.02"
-      material="color:#9fd4ff; shader:flat"
-      visible="false">
+      geometry="primitive: ring; radiusInner: 0.01; radiusOuter: 0.02"
+      material="color: #9fd4ff; shader: flat"
+      visible="true">
     </a-entity>
   </a-entity>
 
   <a-entity id="world"></a-entity>
 
-  <!-- BRIGHT LIGHT RIG -->
   <a-entity id="lightRig">
-    <a-entity light="type:ambient; intensity:1.45; color:#ffffff"></a-entity>
-    <a-entity light="type:hemisphere; intensity:1.15; color:#eaf2ff; groundColor:#0a1018"></a-entity>
-    <a-entity light="type:directional; intensity:1.8" position="6 10 6"></a-entity>
-    <a-entity light="type:directional; intensity:1.2" position="-7 9 -6"></a-entity>
-    <a-entity light="type:point; intensity:1.2; distance:80" position="18 6 18"></a-entity>
-    <a-entity light="type:point; intensity:1.2; distance:80" position="-18 6 18"></a-entity>
-    <a-entity light="type:point; intensity:1.0; distance:80" position="18 6 -18"></a-entity>
-    <a-entity light="type:point; intensity:1.0; distance:80" position="-18 6 -18"></a-entity>
+    <a-entity light="type: ambient; intensity: 1.6; color: #ffffff"></a-entity>
+    <a-entity light="type: hemisphere; intensity: 1.2; color: #eaf2ff; groundColor: #06101a"></a-entity>
+    <a-entity light="type: directional; intensity: 1.9" position="6 14 8"></a-entity>
+    <a-entity light="type: directional; intensity: 1.3" position="-8 12 -6"></a-entity>
+    <a-entity light="type: point; intensity: 1.4; distance: 80" position="18 8 18"></a-entity>
+    <a-entity light="type: point; intensity: 1.4; distance: 80" position="-18 8 18"></a-entity>
+    <a-entity light="type: point; intensity: 1.2; distance: 80" position="18 8 -18"></a-entity>
+    <a-entity light="type: point; intensity: 1.2; distance: 80" position="-18 8 -18"></a-entity>
   </a-entity>
 
 </a-scene>
 
-<script>
-  // Simple HUD diag writer (works even if other modules fail)
-  const diagPanel = document.getElementById("diagPanel");
-  const t0 = performance.now();
-  function log(msg){
-    const dt = ((performance.now()-t0)/1000).toFixed(3);
-    diagPanel.textContent += `[${dt}] ${msg}\n`;
-    diagPanel.scrollTop = diagPanel.scrollHeight;
-  }
-  window.SCARLETT_DIAG = { log };
-
-  log("booting… BUILD=SCARLETT_BIG_LOBBY_SAFE_SPAWN");
-
-  // Buttons
-  document.getElementById("btnEnterVR").onclick = () => {
-    const scene = document.querySelector("a-scene");
-    log("[vr] enter requested…");
-    scene.enterVR();
-  };
-
-  document.getElementById("btnReset").onclick = () => {
-    const rig = document.getElementById("rig");
-    rig.setAttribute("position","0 0 18");
-    rig.setAttribute("rotation","0 180 0");
-    log("[spawn] reset to SAFE");
-  };
-
-  document.getElementById("btnDiag").onclick = () => {
-    diagPanel.style.display = (diagPanel.style.display === "none") ? "block" : "none";
-  };
-
-  document.getElementById("btnHideHUD").onclick = () => {
-    const hud = document.getElementById("hud");
-    hud.style.display = (hud.style.display === "none") ? "block" : "none";
-  };
+<script id="avatarManifest" type="application/json">
+[
+  "assets/avatars/ninja.glb",
+  "assets/avatars/male.glb",
+  "assets/avatars/female.glb"
+]
 </script>
 
-<!-- Your world builder -->
+<script src="./js/boot.js"></script>
 <script src="./js/world.js"></script>
+<script src="./js/android_pads.js"></script>
+<script src="./js/locomotion.js"></script>
+<script src="./js/name_tag_focus.js"></script>
+<script src="./js/avatar_loader.js"></script>
+<script src="./js/poker_demo.js"></script>
 
 </body>
 </html>

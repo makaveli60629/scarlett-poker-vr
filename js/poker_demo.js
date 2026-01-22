@@ -1,97 +1,152 @@
-import { diagWrite } from "./diagnostics.js";
-import { TABLE } from "./table.js";
-import { WORLD } from "./world.js";
+// js/poker_demo.js
+(function(){
+  const D = window.SCARLETT_DIAG;
+  const ranks = ["A","K","Q","J","10","9","8","7","6","5","4","3","2"];
+  const suits = ["♠","♥","♦","♣"];
 
-const RANKS=["A","K","Q","J","10","9","8","7","6","5","4","3","2"];
-const SUITS=["♠","♥","♦","♣"];
+  const state = { enabled: true, t: 0, idx: 0, timer: null };
 
-let deck=[], community=[], hands=[], street=0, cardEntities=[];
-
-function buildDeck(){
-  const d=[];
-  for (const s of SUITS) for (const r of RANKS) d.push({r,s});
-  for (let i=d.length-1;i>0;i--){
-    const j=Math.floor(Math.random()*(i+1));
-    [d[i],d[j]]=[d[j],d[i]];
-  }
-  return d;
-}
-const lab=(c)=>`${c.r}${c.s}`;
-
-function clearCards(){ for (const e of cardEntities) e.remove(); cardEntities=[]; }
-
-function addCard(pos, rot, label, color){
-  const root=document.getElementById("worldRoot");
-  const card=document.createElement("a-plane");
-  card.setAttribute("width","0.32");
-  card.setAttribute("height","0.46");
-  card.setAttribute("position",pos);
-  card.setAttribute("rotation",rot);
-  card.setAttribute("material","color:#0f141c; roughness:1; metalness:0; side: double");
-  const t=document.createElement("a-text");
-  t.setAttribute("value",label);
-  t.setAttribute("align","center");
-  t.setAttribute("color",color||"#e8f3ff");
-  t.setAttribute("width","3");
-  t.setAttribute("position","0 0 0.01");
-  card.appendChild(t);
-  root.appendChild(card);
-  cardEntities.push(card);
-}
-
-function seatPos(i){
-  const a=(i/TABLE.seats)*Math.PI*2;
-  return {a, x:Math.cos(a)*(TABLE.seatRadius-0.25), z:Math.sin(a)*(TABLE.seatRadius-0.25)};
-}
-
-function render(){
-  clearCards();
-  const y=WORLD.tableY+0.965;
-
-  const startX=-0.7;
-  for (let i=0;i<community.length;i++){
-    addCard(`${startX+i*0.35} ${y} 0`, "-90 0 0", lab(community[i]));
+  function pickCard(){
+    const r = ranks[Math.floor(Math.random()*ranks.length)];
+    const s = suits[Math.floor(Math.random()*suits.length)];
+    return `${r}${s}`;
   }
 
-  for (let i=0;i<TABLE.seats;i++){
-    const hp=hands[i]||[];
-    const {a,x,z}=seatPos(i);
-    const rotY=(-a*180/Math.PI)+90;
+  function setCardPlane(plane, text){
+    // build a tiny canvas texture (no external assets)
+    const canvas = document.createElement("canvas");
+    canvas.width = 256; canvas.height = 356;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#f8fbff";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.strokeStyle = "#0c1118";
+    ctx.lineWidth = 10;
+    ctx.strokeRect(10,10,canvas.width-20,canvas.height-20);
 
-    const fx=x*0.72, fz=z*0.72;
-    if (hp[0]) addCard(`${fx-0.10} ${y} ${fz}`, `-90 ${rotY} 0`, lab(hp[0]));
-    if (hp[1]) addCard(`${fx+0.10} ${y} ${fz}`, `-90 ${rotY} 0`, lab(hp[1]));
+    ctx.fillStyle = "#0c1118";
+    ctx.font = "bold 72px system-ui, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(text, 28, 92);
 
-    const hx=x*1.05, hz=z*1.05, hy=WORLD.tableY+1.55;
-    const label=hp.length===2?`${lab(hp[0])}  ${lab(hp[1])}`:"— —";
-    addCard(`${hx} ${hy} ${hz}`, `0 ${rotY} 0`, label, (i===5)?"#2bdcff":"#ffb3e6");
+    ctx.font = "bold 160px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(text.slice(-1), canvas.width/2, 240);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.anisotropy = 4;
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85, metalness: 0.0 });
+    const mesh = plane.getObject3D("mesh");
+    if(mesh) {
+      // plane primitive makes a mesh with material array sometimes
+      mesh.material = mat;
+      mesh.material.needsUpdate = true;
+    }
+    plane.setAttribute("material", "opacity: 1");
   }
-}
 
-export function initPokerDemoUI(){
-  document.getElementById("btnDeal")?.addEventListener("click", dealNewHand);
-  document.getElementById("btnNext")?.addEventListener("click", nextStreet);
-  document.getElementById("btnReset")?.addEventListener("click", reset);
-  reset();
-}
+  function updateCommunityCards(){
+    const cc = Array.from(document.querySelectorAll(".communityCard"));
+    if(!cc.length) return;
+    // reveal progressively
+    const reveal = (state.idx % 6); // 0..5
+    for(let i=0;i<cc.length;i++){
+      if(i < reveal){
+        setCardPlane(cc[i], pickCard());
+      } else {
+        cc[i].setAttribute("material", "color: #ffffff; opacity: 0.12");
+      }
+    }
+  }
 
-export function reset(){
-  deck=buildDeck(); community=[]; hands=Array.from({length:TABLE.seats}, ()=>[]); street=0;
-  render(); diagWrite("[poker] reset ✅");
-}
+  function updateBotActions(){
+    const rings = Array.from(document.querySelectorAll(".actionRing"));
+    const actions = ["CHECK","BET","FOLD","CALL","RAISE","WAIT"];
+    for (let i=0;i<rings.length;i++){
+      const a = actions[(state.idx + i) % actions.length];
+      // encode action by emissive intensity (simple, stable)
+      const intensity = (a==="BET"||a==="RAISE") ? 0.75 : (a==="FOLD") ? 0.15 : 0.35;
+      rings[i].setAttribute("material", `color:#2b3b52; opacity:0.55; emissive:#4aa6ff; emissiveIntensity:${intensity}`);
+      // floating action text near felt
+      const bot = rings[i].closest(".bot");
+      if(bot){
+        let txt = bot.querySelector(".actionText");
+        if(!txt){
+          txt = document.createElement("a-text");
+          txt.classList.add("actionText");
+          txt.setAttribute("position","0 0.18 0.70");
+          txt.setAttribute("rotation","-90 0 0");
+          txt.setAttribute("align","center");
+          txt.setAttribute("width","2.4");
+          bot.appendChild(txt);
+        }
+        txt.setAttribute("value", a);
+        txt.setAttribute("color", (a==="FOLD") ? "#a0a7b2" : "#d7e6ff");
+      }
+    }
+  }
 
-export function dealNewHand(){
-  if (deck.length<20) deck=buildDeck();
-  community=[]; hands=Array.from({length:TABLE.seats}, ()=>[]); street=0;
-  for (let r=0;r<2;r++) for (let i=0;i<TABLE.seats;i++) hands[i].push(deck.pop());
-  render(); diagWrite("[poker] dealt ✅");
-}
+  function step(){
+    if(!state.enabled) return;
+    state.idx = (state.idx + 1) % 6;
+    updateCommunityCards();
+    updateBotActions();
+  }
 
-export function nextStreet(){
-  if ((hands[0]||[]).length!==2){ diagWrite("[poker] deal first"); return; }
-  if (street===0){ community=[deck.pop(),deck.pop(),deck.pop()]; street=1; }
-  else if (street===1){ community.push(deck.pop()); street=2; }
-  else if (street===2){ community.push(deck.pop()); street=3; }
-  else { diagWrite("[poker] complete (reset/deal)"); }
-  render(); diagWrite(`[poker] street=${street} community=${community.length}`);
-}
+  function start(){
+    if(state.timer) return;
+    step();
+    state.timer = setInterval(step, 1800);
+    D.log("[pokerDemo] started ✅");
+  }
+
+  function stop(){
+    if(!state.timer) return;
+    clearInterval(state.timer);
+    state.timer = null;
+    D.log("[pokerDemo] stopped");
+  }
+
+  function setEnabled(v){
+    state.enabled = !!v;
+    if(state.enabled) start(); else stop();
+  }
+
+  // UI button hits on in-world jumbotron
+  function wireJumbo(){
+    const prev = document.getElementById("btnPrev");
+    const next = document.getElementById("btnNext");
+    const screen = document.getElementById("jumboScreen");
+    if(!prev || !next || !screen) return;
+
+    const channels = [
+      { title: "Table Cam", color:"#0a0f18" },
+      { title: "VIP Room", color:"#0b1623" },
+      { title: "Store Preview", color:"#101a26" },
+      { title: "Tourney Board", color:"#0e1420" },
+    ];
+    let c = 0;
+
+    function apply(){
+      const ch = channels[c];
+      screen.setAttribute("material", `color:${ch.color}; emissive:${ch.color}; emissiveIntensity:0.35`);
+      D.toast("Jumbotron: " + ch.title);
+    }
+    function hitPrev(){ c = (c - 1 + channels.length) % channels.length; apply(); }
+    function hitNext(){ c = (c + 1) % channels.length; apply(); }
+
+    prev.addEventListener("click", hitPrev);
+    next.addEventListener("click", hitNext);
+
+    // allow controller ray "click"
+    prev.addEventListener("mousedown", hitPrev);
+    next.addEventListener("mousedown", hitNext);
+
+    apply();
+    D.log("[jumbotron] buttons wired ✅");
+  }
+
+  wireJumbo();
+  start();
+
+  window.SCARLETT_POKER_DEMO = { setEnabled };
+})();

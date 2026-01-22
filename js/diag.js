@@ -1,41 +1,64 @@
-const $ = (id) => document.getElementById(id);
-let t0 = performance.now();
-let buildName = "SCARLETT";
+// js/diag.js
+(function(){
+  const start = performance.now();
+  const panel = () => document.getElementById('diagPanel');
+  const toastEl = () => document.getElementById('toast');
+  const state = {
+    build: "SCARLETT_FULL_1_0",
+    logs: [],
+    visible: false
+  };
 
-export function diagInit(build){
-  buildName = build || buildName;
-  t0 = performance.now();
-  const el = $("diagText");
-  if (el) el.textContent = "booting…\n";
-  diagWrite(`=== SCARLETT DIAGNOSTICS ===`);
-  diagWrite(`BUILD=${buildName}`);
-}
+  function now() { return ((performance.now()-start)/1000).toFixed(3); }
 
-export function diagWrite(msg){
-  const line = `[${((performance.now()-t0)/1000).toFixed(3)}] ${msg}`;
-  const el = $("diagText");
-  if (el){
-    el.textContent = (el.textContent ? (el.textContent + "\n") : "") + line;
-    const lines = el.textContent.split("\n");
-    if (lines.length > 220) el.textContent = lines.slice(-220).join("\n");
+  function log(line){
+    const msg = `[${now()}] ${line}`;
+    state.logs.push(msg);
+    const p = panel();
+    if (p) p.textContent = state.logs.join("\n");
+    // also console
+    try { console.log(msg); } catch(e){}
   }
-  const d3 = $("diagText3d");
-  if (d3){
-    d3.setAttribute("text", "value", msg);
+
+  function setVisible(v){
+    state.visible = v;
+    const p = panel();
+    if (p) p.style.display = v ? "block" : "none";
   }
-  console.log(line);
-}
-export function diagSection(title){ diagWrite(""); diagWrite(`--- ${title} ---`); }
-export function diagSetKV(k,v){ diagWrite(`${k}=${v}`); }
-export function diagDumpEnv(){
-  try{
-    diagWrite(`href=${location.href}`);
-    diagWrite(`secureContext=${!!window.isSecureContext}`);
-    diagWrite(`ua=${navigator.userAgent}`);
-    diagWrite(`touch=${("ontouchstart" in window) || (navigator.maxTouchPoints||0)>0} maxTouchPoints=${navigator.maxTouchPoints||0}`);
-    diagWrite(`xr=${!!navigator.xr}`);
-  }catch(e){
-    diagWrite(`env error: ${e?.message||e}`);
+
+  function toast(text, ms=1400){
+    const t = toastEl();
+    if(!t) return;
+    t.textContent = text;
+    t.style.display = "block";
+    clearTimeout(t.__t);
+    t.__t = setTimeout(()=>{ t.style.display="none"; }, ms);
   }
-}
-window.__scarlettDiagWrite = diagWrite;
+
+  function envDump(){
+    const href = location.href;
+    const ua = navigator.userAgent;
+    const secure = window.isSecureContext;
+    const touch = ('ontouchstart' in window) || (navigator.maxTouchPoints||0) > 0;
+    const maxTP = navigator.maxTouchPoints || 0;
+    const xr = !!navigator.xr;
+    return {
+      build: state.build,
+      href, secureContext: secure,
+      ua, touch, maxTouchPoints: maxTP,
+      xr
+    };
+  }
+
+  window.SCARLETT_DIAG = { log, setVisible, toast, envDump };
+
+  // initial
+  const e = envDump();
+  log("=== SCARLETT DIAGNOSTICS ===");
+  log(`BUILD=${e.build}`);
+  log(`href=${e.href}`);
+  log(`secureContext=${e.secureContext}`);
+  log(`ua=${e.ua}`);
+  log(`touch=${e.touch} maxTouchPoints=${e.maxTouchPoints}`);
+  log(`xr=${e.xr}`);
+})();

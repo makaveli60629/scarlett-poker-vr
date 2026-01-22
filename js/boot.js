@@ -1,6 +1,6 @@
 // js/boot.js
 (function () {
-  const BUILD = "SCARLETT_FULL_1_8_BOOTSAFE";
+  const BUILD = "SCARLETT_FULL_1_9_BOOTSAFE";
 
   const diagPanel = document.getElementById("diagPanel");
   const btnDiag = document.getElementById("btnDiag");

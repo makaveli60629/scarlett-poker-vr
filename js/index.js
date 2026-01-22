@@ -1,51 +1,48 @@
-// js/index.js
-import * as THREE from "three";
-import { createSunkenPokerSystem } from "./world.js";
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+import { createSunkenPokerSystem } from './world.js';
 
-let pokerSystem = null;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0f18);
 
-function boot({ scene, camera, renderer }) {
-  // Optional loader (recommended)
-  const loadingManager = new THREE.LoadingManager();
-  const textureLoader = new THREE.TextureLoader(loadingManager);
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 200);
+camera.position.set(0,1.6,8);
 
-  // You can preload felt + 52 cards here if you want a clean “no pop-in” boot.
-  // If you don’t preload, world.js will load lazily via textureLoader anyway.
-  const assets = { feltTex: null, cardTex: [] };
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
 
-  assets.feltTex = textureLoader.load("assets/textures/poker_felt_passline.jpg");
-  for (let i = 0; i < 52; i++) {
-    assets.cardTex[i] = textureLoader.load(`assets/textures/cards/card_${i}.jpg`);
-  }
+// lights
+scene.add(new THREE.HemisphereLight(0xffffff,0x223344,1.2));
+const d = new THREE.DirectionalLight(0xffffff,1.4);
+d.position.set(5,10,6);
+scene.add(d);
 
-  loadingManager.onLoad = () => {
-    // Build ONE unified object
-    pokerSystem = createSunkenPokerSystem({
-      scene,
-      renderer,
-      textureLoader,
-      assets,
-    });
+// helpers
+scene.add(new THREE.GridHelper(40,40));
+scene.add(new THREE.AxesHelper(2));
 
-    // If you want to move the whole pit later:
-    // pokerSystem.group.position.set(0, 0, 0);
+const textureLoader = new THREE.TextureLoader();
 
-    // Example: shoe touch deals 2 cards to seat 0 (wire to real state machine later)
-    window.addEventListener("scarlett:shoe_touch", () => {
-      pokerSystem.debug.dealTwoToSeat(0);
-      console.log("[poker] shoe touched -> test deal");
-    });
-  };
+const pokerSystem = createSunkenPokerSystem({
+  scene,
+  renderer,
+  textureLoader
+});
 
-  // Animation loop
-  const clock = new THREE.Clock();
-  renderer.setAnimationLoop(() => {
-    const dt = clock.getDelta();
-
-    if (pokerSystem) pokerSystem.update(dt);
-
-    renderer.render(scene, camera);
-  });
+function resetSpawn(){
+  camera.position.set(0,1.6,8);
+  camera.lookAt(0,1.2,0);
 }
+document.getElementById('reset').onclick = resetSpawn;
 
-export { boot };
+window.addEventListener('resize',()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(()=>{
+  pokerSystem.update(clock.getDelta());
+  renderer.render(scene,camera);
+});

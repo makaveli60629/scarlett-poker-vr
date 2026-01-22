@@ -124,7 +124,11 @@
   }
 
   if (document.readyState === 'loading') {
+    if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init, { once: true });
+  } else {
+    try { init(); } catch(e){ console.warn(e); }
+  }
   } else {
     init();
   }

@@ -1,3 +1,4 @@
+<!-- index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6,7 +7,7 @@
     name="viewport"
     content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
   />
-  <title>ScarlettVR Poker — Full 1.11</title>
+  <title>ScarlettVR Poker — Full COPYPASTE</title>
 
   <!-- A-Frame -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
@@ -108,12 +109,15 @@
   webxr="requiredFeatures: local-floor; optionalFeatures: bounded-floor, hand-tracking"
 >
 
+  <!-- SAFE SPAWN FAR FROM TABLE -->
   <a-entity id="rig" position="0 0 28" rotation="0 180 0">
     <a-entity
       id="camera"
       camera
       look-controls
-      position="0 1.6 0"></a-entity>
+      wasd-controls="acceleration: 20"
+      position="0 1.6 0"
+    ></a-entity>
 
     <a-entity
       id="gazeCursor"
@@ -128,9 +132,13 @@
 
   <a-entity id="world"></a-entity>
 
-  <a-plane id="globalFloor" class="teleportable" rotation="-90 0 0" width="120" height="120"
-    material="color:#0b121c; roughness:1; metalness:0.0; opacity:1"></a-plane>
+  <!-- GLOBAL FLOOR (prevents “void” on browser/android) -->
+  <a-plane id="globalFloor" class="teleportable"
+    rotation="-90 0 0" width="120" height="120"
+    material="color:#0b121c; roughness:1; metalness:0.0; opacity:1">
+  </a-plane>
 
+  <a-sky color="#101a28"></a-sky>
 
   <!-- Bright light rig -->
   <a-entity id="lightRig">
@@ -140,13 +148,11 @@
     <a-entity light="type: directional; intensity: 1.8" position="4 10 6"></a-entity>
     <a-entity light="type: directional; intensity: 1.2" position="-6 9 -4"></a-entity>
 
-    <a-entity light="type: point; intensity: 1.4; distance: 45" position="10 6 10"></a-entity>
-    <a-entity light="type: point; intensity: 1.4; distance: 45" position="-10 6 10"></a-entity>
-    <a-entity light="type: point; intensity: 1.2; distance: 45" position="10 6 -10"></a-entity>
-    <a-entity light="type: point; intensity: 1.2; distance: 45" position="-10 6 -10"></a-entity>
+    <a-entity light="type: point; intensity: 1.4; distance: 65" position="10 8 10"></a-entity>
+    <a-entity light="type: point; intensity: 1.4; distance: 65" position="-10 8 10"></a-entity>
+    <a-entity light="type: point; intensity: 1.2; distance: 65" position="10 8 -10"></a-entity>
+    <a-entity light="type: point; intensity: 1.2; distance: 65" position="-10 8 -10"></a-entity>
   </a-entity>
-
-  <a-sky color="#101a28"></a-sky>
 
 </a-scene>
 
@@ -166,12 +172,12 @@
 <script src="./js/avatar_loader.js"></script>
 <script src="./js/poker_demo.js"></script>
 
-<!-- FORCE BUILD FAILSAFE -->
+<!-- FORCE BUILD FAILSAFE (prevents “waiting for build” hang) -->
 <script>
 (function(){
   function forceBuild(){
     if (window.SCARLETT_WORLD && typeof window.SCARLETT_WORLD.build === "function") {
-      try { window.SCARLETT_WORLD.build(); } catch(e) {}
+      try { window.SCARLETT_WORLD.build(); } catch(e) { console.error(e); }
       return true;
     }
     return false;

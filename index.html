@@ -69,6 +69,7 @@
     }
     a-scene { width:100%; height:100%; }
   </style>
+  <script id="avatarManifest" type="application/json">["assets/avatars/ninja.glb", "assets/avatars/male.glb", "assets/avatars/female.glb"]</script>
 </head>
 <body>
   <div id="hud">
@@ -100,8 +101,8 @@
     embedded
   >
     <!-- Camera Rig -->
-    <a-entity id="rig" position="0 0 0">
-      <a-entity id="camera" camera look-controls="pointerLockEnabled: false" position="0 1.65 0"></a-entity>
+    <a-entity id="rig" position="0 0 0" movement-controls="speed: 0.18; fly: false">
+      <a-entity id="camera" camera look-controls="pointerLockEnabled: false" position="0 1.65 0" wasd-controls="acceleration: 20"></a-entity>
 
       <!-- Center reticle -->
       <a-entity id="reticle"
@@ -147,6 +148,7 @@
   <script src="./js/teleport.js"></script>
   <script src="./js/seating_controller.js"></script>
   <script src="./js/avatar_loader.js"></script>
+  <script src="./js/name_tag_focus.js"></script>
   <script src="./js/locomotion.js"></script>
   <script src="./js/poker_demo.js"></script>
 </body>

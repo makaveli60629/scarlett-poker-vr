@@ -1,78 +1,26 @@
-<!-- index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
-  />
-  <title>ScarlettVR Poker — Full COPYPASTE</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+  <title>ScarlettVR Poker — FULL STABLE</title>
 
-  <!-- A-Frame -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
-  <!-- THREE safety -->
-  <script>
-    window.THREE = window.THREE || (window.AFRAME && AFRAME.THREE);
-  </script>
-
   <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background: #0b1420;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-        Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue",
-        sans-serif;
-    }
-
-    #hud {
-      position: fixed;
-      top: 12px;
-      left: 12px;
-      right: 12px;
-      pointer-events: auto;
-      z-index: 20;
-    }
-
-    .hudRow {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-bottom: 10px;
-    }
-
+    body { margin:0; background:#0b1420; font-family:system-ui; overflow:hidden; }
+    #hud { position:fixed; top:10px; left:10px; right:10px; z-index:10; }
+    .hudRow { display:flex; gap:10px; margin-bottom:8px; flex-wrap:wrap; }
     .hudBtn {
-      background: linear-gradient(180deg, #1b2a3f, #0f1a2a);
-      color: #eaf2ff;
-      border: 1px solid rgba(255,255,255,.18);
-      border-radius: 14px;
-      padding: 10px 16px;
-      font-size: 14px;
-      cursor: pointer;
+      background:linear-gradient(180deg,#1b2a3f,#0f1a2a);
+      color:#eaf2ff; border:1px solid rgba(255,255,255,.2);
+      border-radius:14px; padding:10px 16px; font-size:14px;
     }
-
-    .hudBtn[aria-pressed="true"] {
-      background: linear-gradient(180deg, #2f5fa3, #1b3f6f);
-    }
-
     #diagPanel {
-      display: none;
-      margin-top: 8px;
-      background: rgba(0,0,0,.72);
-      border: 1px solid rgba(255,255,255,.18);
-      border-radius: 14px;
-      padding: 12px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-        "Liberation Mono", monospace;
-      font-size: 12px;
-      line-height: 1.35;
-      white-space: pre-wrap;
-      max-height: 44vh;
-      overflow: auto;
-      color: #eaf2ff;
-      text-shadow: 0 1px 1px rgba(0,0,0,.6);
+      background:rgba(0,0,0,.75);
+      color:#eaf2ff; padding:12px;
+      border-radius:14px; font-family:monospace;
+      white-space:pre-wrap; max-height:45vh; overflow:auto;
     }
   </style>
 </head>
@@ -81,118 +29,62 @@
 
 <div id="hud">
   <div class="hudRow">
-    <button id="btnEnterVR" class="hudBtn">Enter VR</button>
-    <button id="btnTeleport" class="hudBtn" aria-pressed="true">Teleport: ON</button>
-    <button id="btnReset" class="hudBtn">Reset to Spawn</button>
-  </div>
-  <div class="hudRow">
-    <button id="btnHideHUD" class="hudBtn">Hide HUD</button>
-    <button id="btnDiag" class="hudBtn">Diagnostics</button>
-    <button id="btnDemo" class="hudBtn" aria-pressed="true">Demo: ON</button>
-    <button id="btnJumbo" class="hudBtn">Jumbotron Buttons</button>
+    <button class="hudBtn" onclick="enterVR()">Enter VR</button>
+    <button class="hudBtn" onclick="resetSpawn()">Reset to Spawn</button>
   </div>
   <div id="diagPanel"></div>
 </div>
 
 <a-scene
-  id="scene"
   embedded
-  background="color: #0b1420"
-  renderer="
-    antialias: true;
-    alpha: false;
-    physicallyCorrectLights: true;
-    colorManagement: true;
-    exposure: 1.6;
-  "
-  xr-mode-ui="enabled: false"
-  webxr="requiredFeatures: local-floor; optionalFeatures: bounded-floor, hand-tracking"
+  renderer="antialias:true; physicallyCorrectLights:true"
+  webxr="optionalFeatures: local-floor, bounded-floor"
+  background="color:#0b1420"
 >
 
-  <!-- SAFE SPAWN FAR FROM TABLE -->
-  <a-entity id="rig" position="0 0 28" rotation="0 180 0">
+  <!-- PLAYER RIG (CORRECT + SAFE) -->
+  <a-entity id="rig" position="0 0 18" rotation="0 180 0">
     <a-entity
       id="camera"
       camera
-      look-controls
-      wasd-controls="acceleration: 20"
       position="0 1.6 0"
-    ></a-entity>
-
-    <a-entity
-      id="gazeCursor"
-      cursor="fuse: true; fuseTimeout: 800"
-      raycaster="objects: .uiTarget, .teleportable"
-      position="0 0 -1"
-      geometry="primitive: ring; radiusInner: 0.01; radiusOuter: 0.02"
-      material="color: #9fd4ff; shader: flat"
-      visible="false"
-    ></a-entity>
+      look-controls
+      wasd-controls="acceleration:18">
+    </a-entity>
   </a-entity>
 
+  <!-- WORLD ROOT -->
   <a-entity id="world"></a-entity>
 
-  <!-- GLOBAL FLOOR (prevents “void” on browser/android) -->
-  <a-plane id="globalFloor" class="teleportable"
-    rotation="-90 0 0" width="120" height="120"
-    material="color:#0b121c; roughness:1; metalness:0.0; opacity:1">
-  </a-plane>
-
-  <a-sky color="#101a28"></a-sky>
-
-  <!-- Bright light rig -->
-  <a-entity id="lightRig">
-    <a-entity light="type: ambient; intensity: 1.35; color: #ffffff"></a-entity>
-    <a-entity light="type: hemisphere; intensity: 1.0; color: #eaf2ff; groundColor: #0a1018"></a-entity>
-
-    <a-entity light="type: directional; intensity: 1.8" position="4 10 6"></a-entity>
-    <a-entity light="type: directional; intensity: 1.2" position="-6 9 -4"></a-entity>
-
-    <a-entity light="type: point; intensity: 1.4; distance: 65" position="10 8 10"></a-entity>
-    <a-entity light="type: point; intensity: 1.4; distance: 65" position="-10 8 10"></a-entity>
-    <a-entity light="type: point; intensity: 1.2; distance: 65" position="10 8 -10"></a-entity>
-    <a-entity light="type: point; intensity: 1.2; distance: 65" position="-10 8 -10"></a-entity>
-  </a-entity>
+  <!-- LIGHTING (BRIGHT ON ANDROID) -->
+  <a-entity light="type:ambient; intensity:1.4"></a-entity>
+  <a-entity light="type:hemisphere; intensity:1.1; color:#ffffff; groundColor:#0a1018"></a-entity>
+  <a-entity light="type:directional; intensity:1.6" position="5 10 6"></a-entity>
+  <a-entity light="type:directional; intensity:1.2" position="-6 8 -5"></a-entity>
 
 </a-scene>
 
-<script id="avatarManifest" type="application/json">
-[
-  "assets/avatars/ninja.glb",
-  "assets/avatars/male.glb",
-  "assets/avatars/female.glb"
-]
-</script>
-
-<!-- Modules -->
-<script src="./js/boot.js"></script>
-<script src="./js/world.js"></script>
-<script src="./js/locomotion.js"></script>
-<script src="./js/name_tag_focus.js"></script>
-<script src="./js/avatar_loader.js"></script>
-<script src="./js/poker_demo.js"></script>
-
-<!-- FORCE BUILD FAILSAFE (prevents “waiting for build” hang) -->
 <script>
-(function(){
-  function forceBuild(){
-    if (window.SCARLETT_WORLD && typeof window.SCARLETT_WORLD.build === "function") {
-      try { window.SCARLETT_WORLD.build(); } catch(e) { console.error(e); }
-      return true;
-    }
-    return false;
-  }
+const diag = document.getElementById("diagPanel");
+function log(t){ diag.textContent += t + "\n"; }
 
-  if (forceBuild()) return;
+log("[boot] starting…");
 
-  let tries = 0;
-  const iv = setInterval(() => {
-    tries++;
-    if (forceBuild()) clearInterval(iv);
-    if (tries > 120) clearInterval(iv);
-  }, 50);
-})();
+function enterVR(){
+  const scene = document.querySelector("a-scene");
+  scene.enterVR();
+  log("[vr] enter requested");
+}
+
+function resetSpawn(){
+  const rig = document.getElementById("rig");
+  rig.setAttribute("position","0 0 18");
+  rig.setAttribute("rotation","0 180 0");
+  log("[spawn] reset");
+}
 </script>
+
+<script src="./js/world.js"></script>
 
 </body>
 </html>

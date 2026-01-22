@@ -131,6 +131,7 @@
 
   function buildSpawn(world) {
     const spawn = el("a-entity", { id: "spawnPad", position: "0 0 12" });
+    spawn.appendChild(el("a-cone",{id:"spawnArrow", radiusBottom:"0.22", radiusTop:"0.02", height:"0.45", position:"0 0.25 -0.85", material:"color:#4aa6ff; emissive:#4aa6ff; emissiveIntensity:0.8"}));
     spawn.appendChild(el("a-ring", {
       rotation: "-90 0 0",
       radiusInner: "0.55",

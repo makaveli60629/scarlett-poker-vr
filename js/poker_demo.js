@@ -1,6 +1,24 @@
 // js/poker_demo.js
 (function(){
-  const D = window.SCARLETT_DIAG;
+  function ready(){
+    return window.THREE && document.getElementById("scene") && document.getElementById("scene").hasLoaded;
+  }
+  function startWhenReady(startFn){
+    const scene = document.getElementById("scene");
+    const go = ()=>{
+      const t0 = performance.now();
+      (function wait(){
+        if(ready()) return startFn();
+        if(performance.now()-t0 < 6000) return setTimeout(wait, 50);
+        startFn();
+      })();
+    };
+    if(scene) scene.addEventListener("loaded", go);
+    else setTimeout(go, 800);
+  }
+
+  startWhenReady(function(){
+const D = window.SCARLETT_DIAG;
 
   const suits = ["♠","♥","♦","♣"];
   const ranks = ["A","K","Q","J","10","9","8","7","6","5","4","3","2"];
@@ -307,4 +325,6 @@
 
   start();
   window.SCARLETT_POKER_DEMO = { start, stop };
+
+  });
 })();

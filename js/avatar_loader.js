@@ -1,6 +1,17 @@
 // js/avatar_loader.js
 (function(){
-  const D = window.SCARLETT_DIAG;
+  function ready(){
+    return document.getElementById("scene") && document.getElementById("scene").hasLoaded;
+  }
+  function startWhenReady(fn){
+    const scene = document.getElementById("scene");
+    const go = ()=>setTimeout(fn, 50);
+    if(scene) scene.addEventListener("loaded", go);
+    else setTimeout(go, 800);
+  }
+
+  startWhenReady(function(){
+const D = window.SCARLETT_DIAG;
 
   function stripPlaceholders(bot){
     Array.from(bot.children).forEach(ch=>{
@@ -79,4 +90,6 @@
     });
   }
   setTimeout(wireStore, 1200);
+
+  });
 })();

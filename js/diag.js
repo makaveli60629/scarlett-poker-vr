@@ -1,37 +1,41 @@
-// /js/diag.js — minimal in-page diagnostics (no dependencies)
-let diagTextEl = null;
+const $ = (id) => document.getElementById(id);
+let t0 = performance.now();
+let buildName = "SCARLETT";
 
 export function diagInit(build){
-  diagTextEl = document.getElementById("diagText");
-  writeLine(`=== SCARLETT DIAGNOSTICS ===`);
-  writeLine(`BUILD=${build}`);
+  buildName = build || buildName;
+  t0 = performance.now();
+  const el = $("diagText");
+  if (el) el.textContent = "booting…\n";
+  diagWrite(`=== SCARLETT DIAGNOSTICS ===`);
+  diagWrite(`BUILD=${buildName}`);
 }
 
-function writeLine(line){
-  try{
-    if (!diagTextEl) return;
-    const now = performance.now();
-    diagTextEl.textContent += `\n[${(now/1000).toFixed(3)}] ${line}`;
-    if (diagTextEl.textContent.length > 9000){
-      diagTextEl.textContent = diagTextEl.textContent.slice(-9000);
-    }
-  } catch (_) {}
+export function diagWrite(msg){
+  const line = `[${((performance.now()-t0)/1000).toFixed(3)}] ${msg}`;
+  const el = $("diagText");
+  if (el){
+    el.textContent = (el.textContent ? (el.textContent + "\n") : "") + line;
+    const lines = el.textContent.split("\n");
+    if (lines.length > 220) el.textContent = lines.slice(-220).join("\n");
+  }
+  const d3 = $("diagText3d");
+  if (d3){
+    d3.setAttribute("text", "value", msg);
+  }
+  console.log(line);
 }
-
-export function diagWrite(msg){ writeLine(String(msg)); }
-export function diagSetKV(key, val){ writeLine(`${key}=${val}`); }
-export function diagSection(title){ writeLine(`\n--- ${title} ---`); }
-
+export function diagSection(title){ diagWrite(""); diagWrite(`--- ${title} ---`); }
+export function diagSetKV(k,v){ diagWrite(`${k}=${v}`); }
 export function diagDumpEnv(){
-  const href = location.href;
-  const secureContext = window.isSecureContext;
-  const ua = navigator.userAgent;
-  const touch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
-  const maxTouchPoints = navigator.maxTouchPoints || 0;
-  const xr = !!navigator.xr;
-  diagWrite(`href=${href}`);
-  diagWrite(`secureContext=${secureContext}`);
-  diagWrite(`ua=${ua}`);
-  diagWrite(`touch=${touch} maxTouchPoints=${maxTouchPoints}`);
-  diagWrite(`xr=${xr}`);
+  try{
+    diagWrite(`href=${location.href}`);
+    diagWrite(`secureContext=${!!window.isSecureContext}`);
+    diagWrite(`ua=${navigator.userAgent}`);
+    diagWrite(`touch=${("ontouchstart" in window) || (navigator.maxTouchPoints||0)>0} maxTouchPoints=${navigator.maxTouchPoints||0}`);
+    diagWrite(`xr=${!!navigator.xr}`);
+  }catch(e){
+    diagWrite(`env error: ${e?.message||e}`);
+  }
 }
+window.__scarlettDiagWrite = diagWrite;

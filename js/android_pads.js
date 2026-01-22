@@ -1,75 +1,49 @@
-// /js/android_pads.js — dual virtual sticks (movement + turn) for mobile browsers
-function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+function clamp(v,min,max){ return Math.max(min, Math.min(max,v)); }
 
 export function initAndroidPads(){
-  const touch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
-  if (!touch) return false;
-
   const pads = document.getElementById("androidPads");
-  if (!pads) return false;
+  const move = document.getElementById("padMove");
+  const turn = document.getElementById("padTurn");
+  const knobMove = document.getElementById("knobMove");
+  const knobTurn = document.getElementById("knobTurn");
+  if (!pads || !move || !turn || !knobMove || !knobTurn) return;
 
-  const scene = document.getElementById("scene");
-  const updateVis = () => {
-    const inVR = !!scene?.is?.("vr-mode");
-    pads.style.display = inVR ? "none" : "block";
-  };
-  scene?.addEventListener?.("enter-vr", updateVis);
-  scene?.addEventListener?.("exit-vr", updateVis);
-  updateVis();
+  const touch = ("ontouchstart" in window) || (navigator.maxTouchPoints||0)>0;
+  pads.style.display = touch ? "block" : "none";
 
-  const state = { mx:0, my:0, tx:0 };
-  window.SCARLETT = window.SCARLETT || {};
-  window.SCARLETT.touchAxes = state;
+  const state = window.SCARLETT = window.SCARLETT || {};
+  state.pads = state.pads || { move:{x:0,y:0}, turn:{x:0,y:0} };
 
-  function makeStick(rootId, knobId, out){
-    const root = document.getElementById(rootId);
-    const knob = document.getElementById(knobId);
-    if (!root || !knob) return;
-
-    let activeId = null;
-    let cx=0, cy=0, r=1;
-
-    function layout(){
-      const rect = root.getBoundingClientRect();
-      cx = rect.left + rect.width/2;
-      cy = rect.top + rect.height/2;
-      r = Math.min(rect.width, rect.height) * 0.35;
-    }
-    window.addEventListener("resize", layout);
-    layout();
-
-    function setKnob(dx, dy){
-      const nx = clamp(dx / r, -1, 1);
-      const ny = clamp(dy / r, -1, 1);
-      knob.style.transform = `translate(${nx*r}px, ${ny*r}px)`;
-      out(nx, ny);
-    }
-    function reset(){
-      knob.style.transform = "translate(0px, 0px)";
-      out(0, 0);
-    }
-
-    root.addEventListener("pointerdown", (e) => {
-      activeId = e.pointerId;
-      root.setPointerCapture(activeId);
-      layout();
-      setKnob(e.clientX - cx, e.clientY - cy);
+  function bindPad(el, knob, key){
+    let center = null;
+    el.addEventListener("pointerdown", (e) => {
+      el.setPointerCapture(e.pointerId);
+      const r = el.getBoundingClientRect();
+      center = { x: r.left + r.width/2, y: r.top + r.height/2, rad: Math.min(r.width,r.height)/2 - 24 };
     });
-    root.addEventListener("pointermove", (e) => {
-      if (activeId !== e.pointerId) return;
-      setKnob(e.clientX - cx, e.clientY - cy);
+    el.addEventListener("pointermove", (e) => {
+      if (!center) return;
+      const dx = e.clientX - center.x;
+      const dy = e.clientY - center.y;
+      const mag = (dx*dx + dy*dy) ** 0.5;
+      const m = mag > center.rad ? center.rad / mag : 1.0;
+      const x = clamp((dx*m) / center.rad,-1,1);
+      const y = clamp((dy*m) / center.rad,-1,1);
+      state.pads[key] = { x, y };
+      knob.style.left = `${50 + x*35}%`;
+      knob.style.top  = `${50 + y*35}%`;
     });
-    root.addEventListener("pointerup", (e) => {
-      if (activeId !== e.pointerId) return;
-      activeId = null;
-      reset();
-    });
-    root.addEventListener("pointercancel", () => { activeId = null; reset(); });
-    root.addEventListener("lostpointercapture", () => { activeId = null; reset(); });
+    const up = () => {
+      center = null;
+      state.pads[key] = { x:0, y:0 };
+      knob.style.left = "50%";
+      knob.style.top = "50%";
+    };
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+    el.addEventListener("lostpointercapture", up);
   }
 
-  makeStick("padMove", "knobMove", (x,y)=>{ state.mx = x; state.my = y; });
-  makeStick("padTurn", "knobTurn", (x,y)=>{ state.tx = x; });
-
-  return true;
+  bindPad(move, knobMove, "move");
+  bindPad(turn, knobTurn, "turn");
 }

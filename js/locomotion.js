@@ -1,54 +1,60 @@
-// js/locomotion.js — Smooth move + snap turn + teleport integration hooks
-import * as THREE from 'three';
+// js/locomotion.js
+(function(){
+  const D = window.SCARLETT_DIAG;
+  const rig = document.getElementById("rig");
+  const cam = document.getElementById("camera");
+  if(!rig){ console.warn("locomotion: #rig missing"); return; }
 
-export const Locomotion = (() => {
-  const SPEED = 1.7;        // m/s
-  const STRAFE = 1.5;       // m/s
-  const DEADZONE = 0.18;
-  const SNAP_DEG = 30 * Math.PI / 180;
-  const SNAP_COOLDOWN = 0.22;
+  if(!rig.hasAttribute("wasd-controls")){
+    rig.setAttribute("wasd-controls", "acceleration: 30");
+  }
 
-  function dz(v) { return Math.abs(v) < DEADZONE ? 0 : v; }
+  let enabled = true;
+  let speed = 1.6; // m/s
+  let lastT = performance.now();
 
-  function create({ camera, playerRig, xrInput, diag }) {
-    let snapT = 0;
+  function getGamepad(){
+    const gps = (navigator.getGamepads && navigator.getGamepads()) || [];
+    for(const g of gps){ if(g && g.connected) return g; }
+    return null;
+  }
 
-    function update(dt) {
-      if (!xrInput) return;
+  function tick(){
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - lastT)/1000);
+    lastT = now;
 
-      // Movement from left stick (if present)
-      const lx = dz(xrInput.axes.lx || 0);
-      const ly = dz(xrInput.axes.ly || 0);
+    if(enabled){
+      const g = getGamepad();
+      if(g && g.axes && g.axes.length >= 2){
+        const x = g.axes[0] || 0;
+        const y = g.axes[1] || 0;
+        const dz = 0.18;
+        const ax = Math.abs(x) < dz ? 0 : x;
+        const ay = Math.abs(y) < dz ? 0 : y;
 
-      if (lx || ly) {
-        // Move relative to camera yaw
-        const yaw = getYaw(camera);
-        const forward = new THREE.Vector3(0,0,-1).applyAxisAngle(new THREE.Vector3(0,1,0), yaw);
-        const right = new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0), yaw);
+        if(ax || ay){
+          const camObj = cam && cam.object3D ? cam.object3D : rig.object3D;
+          const yaw = camObj.rotation.y;
 
-        const move = new THREE.Vector3();
-        move.addScaledVector(forward, (-ly) * SPEED * dt);
-        move.addScaledVector(right, (lx) * STRAFE * dt);
+          const forward = -ay;
+          const strafe = ax;
 
-        playerRig.position.add(move);
-      }
+          const vx = (Math.sin(yaw) * forward + Math.cos(yaw) * strafe) * speed * dt;
+          const vz = (Math.cos(yaw) * forward - Math.sin(yaw) * strafe) * speed * dt;
 
-      // Snap turn from right stick X
-      const rx = dz(xrInput.axes.rx || 0);
-      snapT -= dt;
-      if (snapT <= 0 && rx) {
-        playerRig.rotation.y += (rx > 0 ? -SNAP_DEG : SNAP_DEG);
-        snapT = SNAP_COOLDOWN;
+          rig.object3D.position.x += vx;
+          rig.object3D.position.z += vz;
+        }
       }
     }
-
-    return { update };
+    requestAnimationFrame(tick);
   }
+  requestAnimationFrame(tick);
 
-  function getYaw(camera) {
-    const e = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
-    return e.y;
-  }
-
-  return { create };
+  window.SCARLETT_LOCOMOTION = {
+    setEnabled(v){ enabled = !!v; D && D.toast && D.toast("Move: " + (enabled?"ON":"OFF")); },
+    setSpeed(v){ speed = Math.max(0.2, Number(v)||1.6); }
+  };
+  D && D.log && D.log("[locomotion] thumbstick + WASD enabled ✅");
 })();

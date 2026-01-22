@@ -13,6 +13,14 @@
     timer: null
   };
 
+  const hudLines = [];
+  function pushHud(line){
+    hudLines.unshift(line);
+    while(hudLines.length > 3) hudLines.pop();
+    const hudText = document.getElementById("hudText");
+    if(hudText) hudText.setAttribute("value", hudLines.join("\n"));
+  }
+
   function pickCard(){ return ranks[(Math.random()*ranks.length)|0] + suits[(Math.random()*suits.length)|0]; }
 
   function setCardPlane(plane, text){
@@ -25,7 +33,7 @@
     ctx.font = "bold 160px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.fillText(text.slice(-1), canvas.width/2, 240);
 
     const tex = new THREE.CanvasTexture(canvas);
-    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.88, metalness: 0.0 });
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.88, metalness: 0.0, transparent: true });
     const mesh = plane.getObject3D("mesh");
     if(mesh){ mesh.material = mat; mesh.material.needsUpdate = true; }
     plane.setAttribute("material", "opacity: 1");
@@ -54,9 +62,51 @@
       const cards = Array.from(bot.querySelectorAll(".holeCard"));
       if(!cards.length) return;
       if(!game.active[i]){ cards.forEach(c=>c.setAttribute("material","color:#ffffff; opacity:0.05")); return; }
-      setCardPlane(cards[0], pickCard()); setCardPlane(cards[1], pickCard());
+      setCardPlane(cards[0], pickCard());
+      setCardPlane(cards[1], pickCard());
       const hc = bot.querySelector(".holeCards"); if(hc) billboardToCamera(hc);
     });
+  }
+
+  function dealToBots(){
+    const table = document.getElementById("mainTable");
+    if(!table) { updateHoleCards(); return; }
+
+    const bots = Array.from(document.querySelectorAll(".bot"));
+    bots.forEach((bot, i)=>{
+      if(!game.active[i]) return;
+
+      const start = new THREE.Vector3(0, 0.95, 0.0);
+      const botPos = bot.object3D.position.clone(); botPos.y = 0.95;
+      const dir = botPos.clone().sub(start).normalize();
+      const mid = start.clone().add(dir.multiplyScalar(1.35)); mid.y = 1.05;
+
+      for(let c=0;c<2;c++){
+        const card = document.createElement("a-plane");
+        card.setAttribute("width","0.28");
+        card.setAttribute("height","0.40");
+        card.setAttribute("material","color:#ffffff; opacity:0.25");
+        card.object3D.position.copy(start);
+        card.object3D.position.x += (c===0?-0.10:0.10);
+        card.object3D.position.z += 0.05;
+        table.appendChild(card);
+
+        const t0 = performance.now();
+        const dur = 600 + c*120;
+        const from = card.object3D.position.clone();
+        const to = mid.clone(); to.x += (c===0?-0.10:0.10);
+
+        (function anim(){
+          const p = Math.min(1,(performance.now()-t0)/dur);
+          card.object3D.position.lerpVectors(from,to,p);
+          card.object3D.rotation.y = bot.object3D.rotation.y + Math.PI;
+          if(p<1) requestAnimationFrame(anim);
+          else setTimeout(()=>{ if(card.parentNode) card.parentNode.removeChild(card); }, 150);
+        })();
+      }
+    });
+
+    setTimeout(updateHoleCards, 750);
   }
 
   function setAction(i, action){
@@ -64,17 +114,15 @@
     const bot = document.querySelector(`.bot[data-seat="${i+1}"]`);
     if(!bot) return;
     const t = bot.querySelector(".actionText");
-    if(t){ t.setAttribute("value", action); }
+    if(t) t.setAttribute("value", action);
   }
 
   function updateNameTags(){
     const bots = Array.from(document.querySelectorAll(".bot"));
     bots.forEach((bot, i)=>{
-      const tag = bot.querySelector(".nameTag a-text");
-      if(tag) tag.setAttribute("value", `Bot_${i+1}\n$${game.stacks[i].toLocaleString()}`);
-      const nt = bot.querySelector(".nameTag"); if(nt) billboardToCamera(nt);
+      const tagText = bot.querySelector(".nameTag a-text");
+      if(tagText) tagText.setAttribute("value", `Bot_${i+1}\n$${game.stacks[i].toLocaleString()}`);
     });
-    Array.from(document.querySelectorAll(".seatLabel")).forEach(lbl=>billboardToCamera(lbl));
   }
 
   function updatePotHud(){
@@ -90,28 +138,12 @@
     dealer.setAttribute("material", `color:#f7fbff; opacity:${on?0.95:0.55}`);
   }
 
-  function updateBoard(){
-    const bt = document.getElementById("boardText");
-    const board = document.getElementById("tableBoard");
-    if(board) billboardToCamera(board);
-    if(!bt) return;
-    const alive = game.active.map((a,i)=>a?i+1:null).filter(Boolean);
-    const lines = [];
-    lines.push(`HAND ${game.hand} • TURN ${game.turn}/4 • DEALER: Seat ${game.dealer+1}`);
-    lines.push(`ALIVE: ${alive.join(", ")}`);
-    lines.push("");
-    for(let i=0;i<6;i++){
-      lines.push(`Seat ${i+1} ${game.active[i]?'IN ':'OUT'}  $${game.stacks[i].toLocaleString()}  ${game.lastAction[i]}`);
-    }
-    bt.setAttribute("value", lines.join("\n"));
-  }
-
-  function movePotHud(){
-    const potHud = document.getElementById("potHud");
-    if(!potHud) return;
-    const t = performance.now()/1000;
-    potHud.object3D.position.x = Math.sin(t*1.6)*0.04;
-    potHud.object3D.position.z = 0.55 + Math.cos(t*1.2)*0.03;
+  function updateBillboards(){
+    ["communityBoard","potHud","tableHud"].forEach(id=>{
+      const e = document.getElementById(id);
+      if(e) billboardToCamera(e);
+    });
+    Array.from(document.querySelectorAll(".holeCards")).forEach(billboardToCamera);
   }
 
   function eliminateOne(){
@@ -120,31 +152,42 @@
     let worst = alive[0];
     for(const i of alive){ if(game.stacks[i] < game.stacks[worst]) worst = i; }
     game.active[worst]=false;
+
     const bot = document.querySelector(`.bot[data-seat="${worst+1}"]`);
     if(bot){
       const start = bot.object3D.position.clone();
-      const out = start.clone().multiplyScalar(2.2); out.y=0;
-      const dur = 2500, t0 = performance.now();
+      const out = start.clone().multiplyScalar(1.55); out.y=0;
+      const dur = 2200, t0 = performance.now();
       (function anim(){
         const p = Math.min(1,(performance.now()-t0)/dur);
         bot.object3D.position.lerpVectors(start,out,p);
         if(p<1) requestAnimationFrame(anim);
       })();
     }
+    pushHud(`Seat ${worst+1} eliminated.`);
   }
 
   function crownWinner(i){
     const bot = document.querySelector(`.bot[data-seat="${i+1}"]`);
     if(!bot) return;
+
+    Array.from(bot.children).forEach(ch=>{
+      if(ch && ch.classList && ch.classList.contains("winnerMarker")) bot.removeChild(ch);
+    });
+
     const crown = document.createElement("a-torus");
+    crown.classList.add("winnerMarker");
     crown.setAttribute("radius","0.18");
     crown.setAttribute("radiusTubular","0.05");
     crown.setAttribute("rotation","90 0 0");
     crown.setAttribute("position","0 2.95 0");
     crown.setAttribute("material","color:#d5b45b; metalness:0.8; roughness:0.35; emissive:#d5b45b; emissiveIntensity:0.25");
     bot.appendChild(crown);
+
     D.toast(`Winner: Bot_${i+1} 👑`);
-    const r=4.6, t0=performance.now(), dur=60000;
+    pushHud(`Winner: Seat ${i+1}.`);
+
+    const r=5.2, t0=performance.now(), dur=60000;
     (function walk(){
       const t=performance.now()-t0; const a=(t/1000)*0.9;
       bot.object3D.position.set(Math.sin(a)*r,0,Math.cos(a)*r);
@@ -158,6 +201,7 @@
     if(alive.length<=1){ crownWinner(alive[0]||0); stop(); return; }
 
     game.turn = (game.turn % 4) + 1;
+
     const reveal = (game.turn===2)?3 : (game.turn===3)?4 : (game.turn===4)?5 : 0;
     updateCommunity(reveal);
 
@@ -167,9 +211,13 @@
       if(game.turn<=2 && Math.random()<0.55) a="CHECK";
       if(game.turn===1 && Math.random()<0.25) a="CALL";
       setAction(i,a);
+
       if(a==="BET"||a==="RAISE"){
         const amt = Math.max(50, Math.floor((Math.random()*0.06 + 0.02) * game.stacks[i]));
         game.stacks[i]-=amt; game.pot+=amt;
+        pushHud(`Seat ${i+1} ${a.toLowerCase()}s $${amt}.  Pot $${game.pot}.`);
+      } else {
+        pushHud(`Seat ${i+1} ${a.toLowerCase()}.  Pot $${game.pot}.`);
       }
     });
 
@@ -179,25 +227,77 @@
       const w = alive[(Math.random()*alive.length)|0];
       game.stacks[w] += game.pot;
       D.toast(`Hand ${game.hand} winner: Seat ${w+1} (+$${game.pot.toLocaleString()})`);
+      pushHud(`Hand ends. Seat ${w+1} wins pot $${game.pot}.`);
       game.pot=0;
+
       if(game.hand % 2 === 0) eliminateOne();
       for(let i=0;i<6;i++) if(game.active[i]) setAction(i,"WAIT");
-      updateHoleCards();
+
+      dealToBots();
     }
 
-    updatePotHud(); updateNameTags(); updateBoard();
+    updatePotHud(); updateNameTags(); updateBillboards();
   }
 
-  function start(){
-    updateHoleCards(); updateCommunity(0); updatePotHud(); updateNameTags(); updateBoard();
-    if(game.timer) return;
-    game.timer = setInterval(step, 1800);
-    (function raf(){ updateDealerBlink(); movePotHud(); requestAnimationFrame(raf); })();
-    D.log("[pokerDemo] started ✅");
-  }
   function stop(){ if(game.timer){ clearInterval(game.timer); game.timer=null; } }
 
-  // Sync all wall jumbotrons to the HUD prev/next buttons if present
+  function start(){
+    hudLines.length = 0;
+    pushHud("VIP Table HUD");
+    pushHud("Peeking mode: all cards visible.");
+    pushHud("New hand starting…");
+
+    updateCommunity(0);
+    dealToBots();
+    updatePotHud();
+    updateNameTags();
+    updateBillboards();
+
+    if(!game.timer){
+      game.timer = setInterval(step, 1900);
+      (function raf(){ updateDealerBlink(); updateBillboards(); requestAnimationFrame(raf); })();
+      D.log("[pokerDemo] started v1.2 ✅");
+    }
+  }
+
+  // Name tags appear only when you look at a player
+  function setupGazeNameTags(){
+    const cam = document.getElementById("camera");
+    if(!cam || !cam.object3D) return;
+    const dir = new THREE.Vector3();
+    const origin = new THREE.Vector3();
+    const tmp = new THREE.Vector3();
+
+    function tick(){
+      const bots = Array.from(document.querySelectorAll(".bot"));
+      cam.object3D.getWorldPosition(origin);
+      cam.object3D.getWorldDirection(dir);
+
+      let closest = null;
+      let minD = Infinity;
+      bots.forEach(bot=>{
+        const pos = bot.object3D.getWorldPosition(tmp);
+        const d = origin.distanceTo(pos);
+        if(d < minD){ minD = d; closest = bot; }
+      });
+
+      bots.forEach(bot=>{
+        const tag = bot.querySelector(".nameTag");
+        if(!tag) return;
+        const pos = bot.object3D.getWorldPosition(tmp);
+        const to = tmp.clone().sub(origin).normalize();
+        const dot = dir.dot(to);
+        const should = (bot === closest) && dot > 0.985 && minD < 9.5;
+        tag.setAttribute("visible", should ? "true" : "false");
+        if(should) billboardToCamera(tag);
+      });
+
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  // Wall jumbotrons: keep in sync with HUD prev/next
   function wireJumbos(){
     const prev = document.getElementById("btnPrev");
     const next = document.getElementById("btnNext");
@@ -212,7 +312,7 @@
     let c=0;
     function apply(){
       const ch=channels[c];
-      screens.forEach(s=>s.setAttribute("material", `color:${ch.color}; emissive:${ch.color}; emissiveIntensity:0.4`));
+      screens.forEach(s=>s.setAttribute("material", `color:${ch.color}; emissive:${ch.color}; emissiveIntensity:0.45`));
       D.toast("Jumbotrons: " + ch.title);
     }
     prev.addEventListener("click", ()=>{ c=(c-1+channels.length)%channels.length; apply(); });
@@ -221,6 +321,8 @@
   }
 
   wireJumbos();
+  setupGazeNameTags();
   start();
+
   window.SCARLETT_POKER_DEMO = { start, stop };
 })();

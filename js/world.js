@@ -67,18 +67,14 @@
   function buildPitAndTable(){
     const pit = el("a-entity",{id:"pit"});
     pit.appendChild(el("a-ring",{rotation:"-90 0 0", radiusInner:"5.2", radiusOuter:"10.4", material:"color:#070c12; roughness:1"}));
-    // Deepen divot (pit) so chair legs + pedestal are fully visible.
-    // Target pit floor Y = -3.75 (lobby floor/rim at Y=0).
-    pit.appendChild(el("a-cylinder",{radius:"5.2", height:"3.75", position:"0 -1.875 0", material:"color:#03060b; side:double; roughness:0.95"}));
-    pit.appendChild(el("a-circle",{rotation:"-90 0 0", radius:"5.12", position:"0 -3.75 0", material:"color:#060b12; roughness:0.98"}));
+    pit.appendChild(el("a-cylinder",{radius:"5.2", height:"2.6", position:"0 -1.3 0", material:"color:#03060b; side:double; roughness:0.95"}));
+    pit.appendChild(el("a-circle",{rotation:"-90 0 0", radius:"5.12", position:"0 -2.6 0", material:"color:#060b12; roughness:0.98"}));
     pit.appendChild(el("a-torus",{radius:"10.0", radiusTubular:"0.18", rotation:"90 0 0", position:"0 1.05 0", material:"color:#2a1f18; roughness:0.9"}));
     pit.appendChild(el("a-torus",{radius:"10.2", radiusTubular:"0.08", rotation:"90 0 0", position:"0 0.25 0",
       material:"color:#0b2b44; emissive:#4aa6ff; emissiveIntensity:1.25; opacity:0.92"}));
     world.appendChild(pit);
 
     const table = el("a-entity",{id:"mainTable", position:"0 -1.55 0"});
-    // Central pedestal down to pit floor (pit floor is -3.75; tabletop is ~-0.65)
-    table.appendChild(el("a-cylinder",{radius:"0.55", height:"3.10", position:"0 -0.65 0", material:"color:#0b1018; roughness:0.75; metalness:0.15"}));
     table.appendChild(el("a-cylinder",{radius:"4.2", height:"0.58", position:"0 0.29 0", material:"color:#0f141c; roughness:0.85; metalness:0.12"}));
     table.appendChild(el("a-torus",{radius:"3.95", radiusTubular:"0.18", position:"0 0.72 0", rotation:"90 0 0", material:"color:#2a1f18; roughness:0.95"}));
     table.appendChild(el("a-cylinder",{radius:"3.80", height:"0.16", position:"0 0.90 0", material:"color:#0f7a60; roughness:1"}));
@@ -112,9 +108,9 @@
       const yaw=(Math.atan2(x,z)*180/Math.PI)+180;
       const chair=el("a-entity",{class:"chair", position:`${x.toFixed(2)} 0 ${z.toFixed(2)}`, rotation:`0 ${yaw.toFixed(1)} 0`});
       chair.appendChild(el("a-cylinder",{radius:"0.52", height:"0.10", position:"0 0.05 0", material:"color:#141b25"}));
-      // chair legs down to pit floor (visible) — deeper divot needs longer legs
-      const legH = 2.35; // visual leg length
-      const legY = -1.05;
+      // chair legs down to pit floor (visible)
+      const legH = 0.95; // visual leg length
+      const legY = -0.45;
       const legPos = [
         {x:0.34,z:0.34},{x:-0.34,z:0.34},{x:0.34,z:-0.34},{x:-0.34,z:-0.34}
       ];

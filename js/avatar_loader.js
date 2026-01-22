@@ -14,13 +14,8 @@
   if (!list.length){ D.log("[avatars] no manifest found (ok)"); return; }
 
   const scene = document.getElementById("scene");
-
-  function apply(){
+  scene.addEventListener("loaded", ()=>{
     const bots = Array.from(document.querySelectorAll(".bot"));
-    if (!bots.length){
-      D.log("[avatars] no .bot entities found yet (ok)");
-      return;
-    }
     bots.forEach((bot, i)=>{
       const url = list[i % list.length];
       const assets = scene.querySelector("a-assets");
@@ -33,33 +28,18 @@
       }
       const holder = document.createElement("a-entity");
       holder.setAttribute("gltf-model", "#"+itemId);
-      // Many GLBs are not authored with feet at Y=0. Lift slightly for visibility.
-      holder.setAttribute("position", "0 0.05 0");
+      holder.setAttribute("position", "0 0 0");
       holder.setAttribute("rotation", "0 180 0");
-      holder.setAttribute("scale", "1.15 1.15 1.15");
+      holder.setAttribute("scale", "0.9 0.9 0.9");
 
-      // If the project includes the animation-mixer component, enable it.
-      // (Safe: if not present, A-Frame ignores unknown components.)
-      holder.setAttribute("animation-mixer", "clip: *; timeScale: 1.0");
-
-      // Keep interaction/callouts/name tags and keep the old placeholder body as a fallback.
-      // Hide placeholder geometry instead of removing, so a failed GLB load is still visible.
       Array.from(bot.children).forEach(ch=>{
         if (ch.classList && (ch.classList.contains("actionPanel") || ch.classList.contains("holeCards") || ch.classList.contains("nameTag"))) return;
-        if (ch.tagName === "A-CYLINDER" || ch.tagName === "A-SPHERE") ch.setAttribute("visible", "false");
+        if (ch.tagName === "A-CYLINDER" || ch.tagName === "A-SPHERE") bot.removeChild(ch);
       });
       bot.appendChild(holder);
     });
 
     D.log("[avatars] applied list ✅");
     D.log(list.join(",\n"));
-  }
-
-  // Run on scene load + whenever the world rebuilds.
-  if (scene) {
-    scene.addEventListener("loaded", apply);
-    scene.addEventListener("scarlett-world-built", apply);
-    // If scene is already loaded by the time this file executes, apply on next tick.
-    if (scene.hasLoaded) setTimeout(apply, 0);
-  }
+  });
 })();

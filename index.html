@@ -11,12 +11,11 @@
   <!-- A-Frame -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
-  <!-- THREE extras safety -->
+  <!-- THREE safety -->
   <script>
-    window.THREE = window.THREE || AFRAME.THREE;
+    window.THREE = window.THREE || (window.AFRAME && AFRAME.THREE);
   </script>
 
-  <!-- UI / HUD styles -->
   <style>
     body {
       margin: 0;
@@ -79,7 +78,6 @@
 
 <body>
 
-<!-- ================= HUD ================= -->
 <div id="hud">
   <div class="hudRow">
     <button id="btnEnterVR" class="hudBtn">Enter VR</button>
@@ -95,7 +93,6 @@
   <div id="diagPanel"></div>
 </div>
 
-<!-- ================= SCENE ================= -->
 <a-scene
   id="scene"
   embedded
@@ -111,7 +108,6 @@
   webxr="optionalFeatures: local-floor, bounded-floor, hand-tracking"
 >
 
-  <!-- Player rig -->
   <a-entity id="rig" position="0 0 10">
     <a-entity
       id="camera"
@@ -121,7 +117,6 @@
       position="0 1.6 0"
     ></a-entity>
 
-    <!-- Gaze cursor (no controllers) -->
     <a-entity
       id="gazeCursor"
       cursor="fuse: true; fuseTimeout: 800"
@@ -133,10 +128,9 @@
     ></a-entity>
   </a-entity>
 
-  <!-- World root -->
   <a-entity id="world"></a-entity>
 
-  <!-- ===== BRIGHT LIGHT RIG (ANDROID / QUEST SAFE) ===== -->
+  <!-- Bright light rig -->
   <a-entity id="lightRig">
     <a-entity light="type: ambient; intensity: 1.35; color: #ffffff"></a-entity>
     <a-entity light="type: hemisphere; intensity: 1.0; color: #eaf2ff; groundColor: #0a1018"></a-entity>
@@ -152,7 +146,6 @@
 
 </a-scene>
 
-<!-- ================= AVATAR MANIFEST ================= -->
 <script id="avatarManifest" type="application/json">
 [
   "assets/avatars/ninja.glb",
@@ -161,13 +154,35 @@
 ]
 </script>
 
-<!-- ================= CORE MODULES ================= -->
+<!-- Modules -->
 <script src="./js/boot.js"></script>
 <script src="./js/world.js"></script>
 <script src="./js/locomotion.js"></script>
 <script src="./js/name_tag_focus.js"></script>
 <script src="./js/avatar_loader.js"></script>
 <script src="./js/poker_demo.js"></script>
+
+<!-- FORCE BUILD FAILSAFE -->
+<script>
+(function(){
+  function forceBuild(){
+    if (window.SCARLETT_WORLD && typeof window.SCARLETT_WORLD.build === "function") {
+      try { window.SCARLETT_WORLD.build(); } catch(e) {}
+      return true;
+    }
+    return false;
+  }
+
+  if (forceBuild()) return;
+
+  let tries = 0;
+  const iv = setInterval(() => {
+    tries++;
+    if (forceBuild()) clearInterval(iv);
+    if (tries > 120) clearInterval(iv);
+  }, 50);
+})();
+</script>
 
 </body>
 </html>

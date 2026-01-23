@@ -1,169 +1,241 @@
-import { diagInit, diagWrite, diagSetKV, diagDumpEnv, diagSection } from "./diag.js";
-import { buildWorld } from "./world.js";
-import { applySpawn, armRespawnOnEnterVR } from "./spawn.js";
-import { initAndroidPads } from "./android_pads.js";
-import { auditModules } from "./module_loader.js";
-import "./teleport.js";
-import "./move.js";
+import * as THREE from 'three';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { buildWorld } from './world.js';
+import { createDiag } from './diag.js';
+import { createTouchStick } from './touch.js';
 
-const BUILD = "SCARLETT_UPDATE_3_0_FULL_RECOVERY";
+const BUILD = 'SCARLETT_BOOT_FIX_v1';
+const t0 = performance.now();
 
-function $(id){ return document.getElementById(id); }
+const ui = {
+  enterVR: document.getElementById('btnEnterVR'),
+  teleport: document.getElementById('btnTeleport'),
+  reset: document.getElementById('btnReset'),
+  sit: document.getElementById('btnSit'),
+  diag: document.getElementById('btnDiag'),
+  deal: document.getElementById('btnDeal'),
+  scorpion: document.getElementById('btnScorpion'),
+  hide: document.getElementById('btnHide'),
+};
 
-function showLoaderError(msg){
-  const el = $("loaderErr");
-  if (!el) return;
-  el.style.display = "block";
-  el.textContent = String(msg);
+const diag = createDiag(BUILD);
+
+// --- Renderer (this is the usual black-screen culprit) ---
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+
+// Make canvas fill screen and sit behind HUD
+renderer.domElement.style.position = 'fixed';
+renderer.domElement.style.inset = '0';
+renderer.domElement.style.width = '100%';
+renderer.domElement.style.height = '100%';
+renderer.domElement.style.zIndex = '0';
+renderer.domElement.style.background = 'transparent';
+document.body.appendChild(renderer.domElement);
+
+// --- Scene ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0f1a);
+
+// Camera + player rig
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.05, 2000);
+const player = new THREE.Group();
+player.name = 'PlayerRoot';
+player.position.set(0, 0, 3);
+player.add(camera);
+camera.position.set(0, 1.65, 0);
+scene.add(player);
+
+// Simple light so you never see black due to lighting
+scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.0));
+const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+dir.position.set(5, 10, 7);
+scene.add(dir);
+
+// Debug sanity helpers (small & safe)
+const axes = new THREE.AxesHelper(2);
+axes.position.set(0, 0.01, 0);
+scene.add(axes);
+
+// Build world
+const world = buildWorld({ THREE, scene, player, camera, diag });
+
+// Controls state
+let teleportOn = true;
+let seated = false;
+
+const touch = createTouchStick({
+  baseEl: document.getElementById('stickBase'),
+  knobEl: document.getElementById('stickKnob'),
+});
+
+// Look control (drag anywhere not on joystick)
+let looking = false;
+let lastX = 0, lastY = 0;
+let yaw = 0, pitch = 0;
+const lookSpeed = 0.003;
+
+function onPointerDown(e){
+  const target = e.target;
+  if (target && (target.id === 'stickBase' || target.id === 'stickKnob')) return;
+  looking = true;
+  lastX = e.clientX ?? (e.touches && e.touches[0]?.clientX) ?? 0;
+  lastY = e.clientY ?? (e.touches && e.touches[0]?.clientY) ?? 0;
 }
-function hideLoader(){ const el = $("loader"); if (el) el.style.display = "none"; }
-function showLoader(){ const el = $("loader"); if (el) el.style.display = "flex"; }
+function onPointerMove(e){
+  if (!looking) return;
+  const x = e.clientX ?? (e.touches && e.touches[0]?.clientX) ?? lastX;
+  const y = e.clientY ?? (e.touches && e.touches[0]?.clientY) ?? lastY;
+  const dx = x - lastX;
+  const dy = y - lastY;
+  lastX = x; lastY = y;
+  yaw -= dx * lookSpeed;
+  pitch -= dy * lookSpeed;
+  pitch = Math.max(-1.2, Math.min(1.2, pitch));
+}
+function onPointerUp(){ looking = false; }
 
-window.SCARLETT = window.SCARLETT || {};
-window.SCARLETT.BUILD = BUILD;
+window.addEventListener('pointerdown', onPointerDown, { passive:true });
+window.addEventListener('pointermove', onPointerMove, { passive:true });
+window.addEventListener('pointerup', onPointerUp, { passive:true });
+window.addEventListener('touchstart', onPointerDown, { passive:true });
+window.addEventListener('touchmove', onPointerMove, { passive:true });
+window.addEventListener('touchend', onPointerUp, { passive:true });
 
-window.addEventListener("error", (ev) => {
-  const msg = ev?.error?.stack || ev?.message || "Unknown error";
-  diagWrite(`[window.error] ${msg}`);
-  showLoaderError(msg);
-});
-window.addEventListener("unhandledrejection", (ev) => {
-  const msg = ev?.reason?.stack || ev?.reason?.message || String(ev?.reason || "Unhandled rejection");
-  diagWrite(`[unhandledrejection] ${msg}`);
-  showLoaderError(msg);
-});
+// Keyboard for desktop debug
+const keys = new Set();
+window.addEventListener('keydown', (e)=>keys.add(e.key.toLowerCase()));
+window.addEventListener('keyup', (e)=>keys.delete(e.key.toLowerCase()));
 
-async function boot(){
-  diagInit(BUILD);
-  diagWrite(`[0.000] booting… BUILD=${BUILD}`);
-  diagDumpEnv();
-
-  const scene = $("scene");
-  const rig = $("rig");
-
-  const btnEnterVR = $("btnEnterVR");
-  const btnTeleport = $("btnTeleport");
-  const btnReset = $("btnReset");
-  const btnAudit = $("btnAudit");
-  const btnDiag = $("btnDiag");
-  const btnHideHUD = $("btnHideHUD");
-  const diagPanel = $("diagPanel");
-  const diagText3d = $("diagText3d");
-
-  let teleportEnabled = true;
-  window.SCARLETT.teleportEnabled = true;
-
-  btnTeleport?.addEventListener("click", () => {
-    teleportEnabled = !teleportEnabled;
-    window.SCARLETT.teleportEnabled = teleportEnabled;
-    btnTeleport.textContent = `Teleport: ${teleportEnabled ? "ON" : "OFF"}`;
-    diagSetKV("teleport", teleportEnabled ? "ON" : "OFF");
-  });
-
-  btnReset?.addEventListener("click", () => {
-    try{
-      const ok = applySpawn({ standingHeight: 1.65 });
-      diagWrite(ok ? "[ui] reset to spawn ✅" : "[ui] reset failed");
-    } catch(e){ diagWrite(`[ui] reset error: ${e?.message || e}`); }
-  });
-
-  btnAudit?.addEventListener("click", async () => {
-    diagSection("MODULE AUDIT (manual)");
-    const report = await auditModules({ diagWrite });
-    window.SCARLETT.moduleReport = report;
-    diagWrite(`[audit] done — ok=${report.ok.length} missing=${report.missing.length} error=${report.error.length}`);
-  });
-
-  btnDiag?.addEventListener("click", () => {
-    const show = diagPanel.style.display !== "block";
-    diagPanel.style.display = show ? "block" : "none";
-    if (diagText3d) diagText3d.setAttribute("visible", show ? "true" : "false");
-  });
-
-  btnHideHUD?.addEventListener("click", () => {
-    const hud = document.getElementById("hud");
-    const hidden = hud.style.display === "none";
-    hud.style.display = hidden ? "block" : "none";
-  });
-
-  btnEnterVR?.addEventListener("click", async () => {
-    try {
-      scene?.enterVR?.();
-      diagWrite("[xr] enterVR requested");
-    } catch (e) {
-      diagWrite(`[xr] enterVR failed: ${e?.message || e}`);
-      showLoaderError(`enterVR failed: ${e?.message || e}`);
-    }
-  });
-
-  const HANG_MS = 12000;
-  const hangTimer = setTimeout(() => {
-    diagWrite(`[watchdog] world attach timeout after ${HANG_MS}ms`);
-    showLoaderError("World attach timeout. Open Diagnostics for details.");
-  }, HANG_MS);
-
-  await new Promise((resolve) => {
-    if (scene?.hasLoaded) return resolve();
-    scene?.addEventListener("loaded", () => resolve(), { once: true });
-  });
-  diagWrite("[scene] loaded ✅");
-
-  try { initAndroidPads(); diagWrite("[androidPads] armed ✅"); } catch(e){ diagWrite(`[androidPads] error: ${e?.message || e}`); }
-  try { armRespawnOnEnterVR({ standingHeight: 1.65 }); diagWrite("[spawn] reapply on enter-vr armed ✅"); } catch(e){ diagWrite(`[spawn] arm error: ${e?.message || e}`); }
-
-  diagSection("MODULE AUDIT (auto)");
-  const report = await auditModules({ diagWrite });
-  window.SCARLETT.moduleReport = report;
-  diagWrite(`[audit] auto done — ok=${report.ok.length} missing=${report.missing.length} error=${report.error.length}`);
-
-  buildWorld(scene);
-  diagWrite("[world] buildWorld() ✅");
-
-  try {
-    const ok = applySpawn({ standingHeight: 1.65 });
-    diagWrite(ok ? "[spawn] applied ✅" : "[spawn] failed (rig missing)");
-  } catch (e) {
-    diagWrite(`[spawn] error: ${e?.message || e}`);
-  }
-
-  diagSection("MODULE BOOT (safe init)");
-  const bootList = [
-    { label: "pip/jumbotron", path: "./js/modules/jumbotron.js" },
-    { label: "audio", path: "./js/modules/audio.js" },
-    { label: "bots", path: "./js/modules/bots.js" },
-    { label: "cards", path: "./js/modules/cards.js" },
-    { label: "chips", path: "./js/modules/chips.js" },
-    { label: "scarlett1/index", path: "./js/scarlett1/index.js" },
-    { label: "scarlett1/boot", path: "./js/scarlett1/boot.js" }
-  ];
-
-  for (const m of bootList) {
-    try {
-      const mod = await import(new URL(m.path, window.location.href).href);
-      if (typeof mod.init === "function") {
-        await mod.init({ scene, rig, diagWrite });
-        diagWrite(`[boot] init OK: ${m.label}`);
-      } else {
-        diagWrite(`[boot] loaded (no init): ${m.label}`);
-      }
-    } catch (e) {
-      diagWrite(`[boot] init FAIL: ${m.label} (${e?.message || e})`);
-    }
-  }
-
-  const floor = document.querySelector(".teleportable");
-  diagSetKV("teleportableFloor", floor ? "OK" : "MISSING");
-
-  await new Promise((resolve) => {
-    const done = () => resolve();
-    scene?.addEventListener("renderstart", done, { once: true });
-    setTimeout(done, 450);
-  });
-
-  clearTimeout(hangTimer);
-  hideLoader();
-  diagWrite("[status] ready ✅");
+function setTeleport(on){
+  teleportOn = !!on;
+  ui.teleport.textContent = `Teleport: ${teleportOn ? 'ON' : 'OFF'}`;
 }
 
-showLoader();
-boot().catch((e) => showLoaderError(e?.stack || e?.message || String(e)));
+function setSeated(on){
+  seated = !!on;
+  // Standing camera height 1.65, seated 1.15
+  camera.position.y = seated ? 1.15 : 1.65;
+  ui.sit.textContent = seated ? 'Stand' : 'Sit';
+}
+
+function resetToSpawn(){
+  player.position.set(0, 0, 3);
+  yaw = 0; pitch = 0;
+}
+
+ui.hide.addEventListener('click', ()=>{
+  const hud = document.getElementById('hud');
+  const hidden = hud.style.display === 'none';
+  hud.style.display = hidden ? '' : 'none';
+});
+
+ui.teleport.addEventListener('click', ()=> setTeleport(!teleportOn));
+ui.reset.addEventListener('click', resetToSpawn);
+ui.sit.addEventListener('click', ()=> setSeated(!seated));
+ui.diag.addEventListener('click', ()=> diag.toggle());
+ui.deal.addEventListener('click', ()=> world.demoDeal());
+ui.scorpion.addEventListener('click', ()=> world.gotoScorpion());
+
+// Enter VR
+let vrButtonAttached = false;
+function ensureVRButton(){
+  if (vrButtonAttached) return;
+  try{
+    const b = VRButton.createButton(renderer);
+    b.style.position = 'fixed';
+    b.style.left = '-9999px'; // hide default button; we use our HUD button
+    document.body.appendChild(b);
+    vrButtonAttached = true;
+  }catch(err){
+    diag.log(`[xr] VRButton failed: ${err?.message || err}`);
+  }
+}
+ensureVRButton();
+
+ui.enterVR.addEventListener('click', async ()=>{
+  if (!navigator.xr){
+    diag.log('[xr] navigator.xr not available (non-XR browser)');
+    diag.open();
+    return;
+  }
+  try{
+    const supported = await navigator.xr.isSessionSupported('immersive-vr');
+    diag.log(`[xr] immersive-vr supported=${supported}`);
+    if (!supported){ diag.open(); return; }
+    // VRButton hooks the renderer to start session when button clicked.
+    // We request directly so it works on mobile.
+    const session = await navigator.xr.requestSession('immersive-vr', {
+      requiredFeatures: ['local-floor'],
+      optionalFeatures: ['bounded-floor','hand-tracking','layers']
+    });
+    renderer.xr.setSession(session);
+  }catch(err){
+    diag.log(`[xr] requestSession error: ${err?.message || err}`);
+    diag.open();
+  }
+});
+
+// Resize
+window.addEventListener('resize', ()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// Render loop
+const clock = new THREE.Clock();
+
+function step(){
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  // Apply look
+  player.rotation.y = yaw;
+  camera.rotation.x = pitch;
+
+  // Movement
+  let mx = 0, mz = 0;
+
+  // touch stick (left)
+  mx += touch.x;
+  mz += touch.y;
+
+  // keyboard
+  if (keys.has('a') || keys.has('arrowleft')) mx -= 1;
+  if (keys.has('d') || keys.has('arrowright')) mx += 1;
+  if (keys.has('w') || keys.has('arrowup')) mz -= 1;
+  if (keys.has('s') || keys.has('arrowdown')) mz += 1;
+
+  const speed = seated ? 0.0 : 2.2;
+  if (speed > 0){
+    const v = new THREE.Vector3(mx, 0, mz);
+    if (v.lengthSq() > 0.001){
+      v.normalize().multiplyScalar(speed * dt);
+      // Move relative to yaw
+      const fwd = new THREE.Vector3(0,0,-1).applyAxisAngle(new THREE.Vector3(0,1,0), yaw);
+      const right = new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0), yaw);
+      player.position.addScaledVector(right, v.x);
+      player.position.addScaledVector(fwd, -v.z);
+    }
+  }
+
+  world.update(dt);
+
+  renderer.render(scene, camera);
+}
+
+renderer.setAnimationLoop(step);
+
+// Initial diag snapshot
+diag.setMeta({
+  href: location.href,
+  secureContext: window.isSecureContext,
+  ua: navigator.userAgent,
+  touch: ('ontouchstart' in window),
+  xr: !!navigator.xr,
+});
+diag.log(`[0.000] booting… BUILD=${BUILD}`);
+diag.log(`[${((performance.now()-t0)/1000).toFixed(3)}] renderer attached ✅`);
+diag.log(`[${((performance.now()-t0)/1000).toFixed(3)}] world built ✅`);

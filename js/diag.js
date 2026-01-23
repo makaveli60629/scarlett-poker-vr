@@ -1,64 +1,34 @@
-// js/diag.js
-(function(){
-  const start = performance.now();
-  const panel = () => document.getElementById('diagPanel');
-  const toastEl = () => document.getElementById('toast');
-  const state = {
-    build: "SCARLETT_FULL_1_0",
-    logs: [],
-    visible: false
-  };
+export function createDiag(buildName){
+  const panel = document.getElementById('diagPanel');
+  const textEl = document.getElementById('diagText');
+  const metaEl = document.getElementById('diagMeta');
+  const closeBtn = document.getElementById('btnCloseDiag');
 
-  function now() { return ((performance.now()-start)/1000).toFixed(3); }
+  const lines = [];
+  let meta = {};
 
-  function log(line){
-    const msg = `[${now()}] ${line}`;
-    state.logs.push(msg);
-    const p = panel();
-    if (p) p.textContent = state.logs.join("\n");
-    // also console
-    try { console.log(msg); } catch(e){}
+  function render(){
+    metaEl.textContent =
+      `BUILD=${buildName} | secure=${meta.secureContext} | xr=${meta.xr} | touch=${meta.touch}\n` +
+      `${meta.href || ''}\n${meta.ua || ''}`;
+    textEl.textContent = lines.join('\n');
   }
 
-  function setVisible(v){
-    state.visible = v;
-    const p = panel();
-    if (p) p.style.display = v ? "block" : "none";
+  function log(s){
+    lines.push(String(s));
+    if (lines.length > 400) lines.splice(0, lines.length-400);
+    render();
   }
 
-  function toast(text, ms=1400){
-    const t = toastEl();
-    if(!t) return;
-    t.textContent = text;
-    t.style.display = "block";
-    clearTimeout(t.__t);
-    t.__t = setTimeout(()=>{ t.style.display="none"; }, ms);
-  }
+  function open(){ panel.classList.remove('hidden'); }
+  function close(){ panel.classList.add('hidden'); }
+  function toggle(){ panel.classList.toggle('hidden'); }
+  function setMeta(m){ meta = { ...meta, ...m }; render(); }
 
-  function envDump(){
-    const href = location.href;
-    const ua = navigator.userAgent;
-    const secure = window.isSecureContext;
-    const touch = ('ontouchstart' in window) || (navigator.maxTouchPoints||0) > 0;
-    const maxTP = navigator.maxTouchPoints || 0;
-    const xr = !!navigator.xr;
-    return {
-      build: state.build,
-      href, secureContext: secure,
-      ua, touch, maxTouchPoints: maxTP,
-      xr
-    };
-  }
+  closeBtn.addEventListener('click', close);
 
-  window.SCARLETT_DIAG = { log, setVisible, toast, envDump };
+  // expose for quick debugging
+  window.SCARLETT_DIAG = { log, open, close, toggle, setMeta };
 
-  // initial
-  const e = envDump();
-  log("=== SCARLETT DIAGNOSTICS ===");
-  log(`BUILD=${e.build}`);
-  log(`href=${e.href}`);
-  log(`secureContext=${e.secureContext}`);
-  log(`ua=${e.ua}`);
-  log(`touch=${e.touch} maxTouchPoints=${e.maxTouchPoints}`);
-  log(`xr=${e.xr}`);
-})();
+  return { log, open, close, toggle, setMeta };
+}

@@ -1,0 +1,38 @@
+body{margin:0;overflow:hidden;background:#05070d;color:#00ffcc;font-family:system-ui}
+/* HUD */
+.watchRoot{position:fixed;bottom:16px;right:16px;z-index:5}
+.ticker{position:fixed;bottom:0;width:100%;padding:8px;background:#001;text-align:center;z-index:4;font-size:14px}
+.goldenTicket{position:fixed;top:40%;left:45%;font-size:4rem;animation:pulse 1.5s infinite;z-index:6;cursor:pointer}
+.hidden{display:none}
+@keyframes pulse{0%{opacity:.4}50%{opacity:1}100%{opacity:.4}}
+
+/* Hologram panels */
+.overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.65);z-index:10}
+.panel{width:min(980px,92vw);padding:18px 18px 16px;border-radius:14px}
+.hologram{
+  background: rgba(0,255,204,0.10);
+  border: 2px solid #00ffcc;
+  box-shadow: 0 0 15px #00ffcc;
+  backdrop-filter: blur(8px);
+  color: #00ffcc;
+  text-shadow: 0 0 10px rgba(0,255,204,.55);
+}
+@keyframes scan { 0%{opacity:.95} 50%{opacity:.85} 100%{opacity:.95} }
+.scan{ animation: scan 2.2s infinite; }
+.sub{opacity:.85;margin-top:-6px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:12px 0 10px}
+.col h3{margin:6px 0}
+ul{margin:8px 0 0 18px}
+li{margin:6px 0}
+.actions{display:flex;justify-content:flex-end;gap:10px;margin-top:12px}
+.btn{border:2px solid #00ffcc;background:transparent;color:#00ffcc;padding:10px 14px;border-radius:12px;font-size:16px}
+.btn.ok{background:rgba(0,255,204,.12)}
+.btn.ghost{opacity:.85}
+.btn:hover{filter:brightness(1.12);cursor:pointer}
+.row{display:flex;gap:10px;align-items:center;margin-top:14px}
+.codeInput{flex:1;padding:12px 14px;border-radius:12px;border:2px solid #00ffcc;background:rgba(0,255,204,.05);color:#00ffcc;font-size:18px}
+.hint{opacity:.75;margin-top:10px;font-size:13px}
+
+/* Mobile joystick zone */
+.joystickZone{position:fixed;left:12px;bottom:18px;width:140px;height:140px;z-index:7;opacity:0.95}
+@media (max-width: 760px){.cols{grid-template-columns:1fr}.ticker{font-size:13px}}

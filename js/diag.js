@@ -16,7 +16,7 @@ export function createDiag(buildName){
 
   function log(s){
     lines.push(String(s));
-    if (lines.length > 400) lines.splice(0, lines.length-400);
+    if (lines.length > 600) lines.splice(0, lines.length-600);
     render();
   }
 
@@ -26,8 +26,6 @@ export function createDiag(buildName){
   function setMeta(m){ meta = { ...meta, ...m }; render(); }
 
   closeBtn.addEventListener('click', close);
-
-  // expose for quick debugging
   window.SCARLETT_DIAG = { log, open, close, toggle, setMeta };
 
   return { log, open, close, toggle, setMeta };

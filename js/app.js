@@ -3,8 +3,11 @@ import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { buildWorld } from './world.js';
 import { createDiag } from './diag.js';
 import { createTouchStick } from './touch.js';
+import { StoreCatalog } from './store/catalog.js';
+import { PlayerProfile } from './store/profile.js';
+import { StoreUI } from './store/ui.js';
 
-const BUILD = 'SCARLETT_BOOT_FIX_v1';
+const BUILD = 'SCARLETT_UPDATE_1_1_STORE_READY';
 const t0 = performance.now();
 
 const ui = {
@@ -15,18 +18,19 @@ const ui = {
   diag: document.getElementById('btnDiag'),
   deal: document.getElementById('btnDeal'),
   scorpion: document.getElementById('btnScorpion'),
+  store: document.getElementById('btnStore'),
   hide: document.getElementById('btnHide'),
+  coinCount: document.getElementById('coinCount'),
 };
 
 const diag = createDiag(BUILD);
 
-// --- Renderer (this is the usual black-screen culprit) ---
+// --- Renderer (black-screen hard fix) ---
 const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
 
-// Make canvas fill screen and sit behind HUD
 renderer.domElement.style.position = 'fixed';
 renderer.domElement.style.inset = '0';
 renderer.domElement.style.width = '100%';
@@ -48,19 +52,33 @@ player.add(camera);
 camera.position.set(0, 1.65, 0);
 scene.add(player);
 
-// Simple light so you never see black due to lighting
+// Light
 scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.0));
 const dir = new THREE.DirectionalLight(0xffffff, 0.8);
 dir.position.set(5, 10, 7);
 scene.add(dir);
 
-// Debug sanity helpers (small & safe)
+// Debug sanity helpers
 const axes = new THREE.AxesHelper(2);
 axes.position.set(0, 0.01, 0);
 scene.add(axes);
 
-// Build world
-const world = buildWorld({ THREE, scene, player, camera, diag });
+// Store systems
+const catalog = StoreCatalog.createDefault();
+const profile = PlayerProfile.loadOrCreate();
+ui.coinCount.textContent = String(profile.coins);
+
+// Store UI (HTML overlay) + hooks
+const storeUI = new StoreUI({
+  catalog,
+  profile,
+  onProfileChanged: () => {
+    ui.coinCount.textContent = String(profile.coins);
+  }
+});
+
+// Build world + store kiosk
+const world = buildWorld({ THREE, scene, player, camera, diag, catalog, profile, storeUI });
 
 // Controls state
 let teleportOn = true;
@@ -80,6 +98,8 @@ const lookSpeed = 0.003;
 function onPointerDown(e){
   const target = e.target;
   if (target && (target.id === 'stickBase' || target.id === 'stickKnob')) return;
+  // if store panel open, don't capture drags
+  if (storeUI.isOpen()) return;
   looking = true;
   lastX = e.clientX ?? (e.touches && e.touches[0]?.clientX) ?? 0;
   lastY = e.clientY ?? (e.touches && e.touches[0]?.clientY) ?? 0;
@@ -113,19 +133,15 @@ function setTeleport(on){
   teleportOn = !!on;
   ui.teleport.textContent = `Teleport: ${teleportOn ? 'ON' : 'OFF'}`;
 }
-
 function setSeated(on){
   seated = !!on;
-  // Standing camera height 1.65, seated 1.15
   camera.position.y = seated ? 1.15 : 1.65;
-  ui.sit.textContent = seated ? 'Stand' : 'Sit';
+  ui.sit.textContent = seated ? 'Stand' : 'Sit/Stand';
 }
-
 function resetToSpawn(){
   player.position.set(0, 0, 3);
   yaw = 0; pitch = 0;
 }
-
 ui.hide.addEventListener('click', ()=>{
   const hud = document.getElementById('hud');
   const hidden = hud.style.display === 'none';
@@ -138,6 +154,10 @@ ui.sit.addEventListener('click', ()=> setSeated(!seated));
 ui.diag.addEventListener('click', ()=> diag.toggle());
 ui.deal.addEventListener('click', ()=> world.demoDeal());
 ui.scorpion.addEventListener('click', ()=> world.gotoScorpion());
+ui.store.addEventListener('click', ()=> {
+  storeUI.open();
+  diag.log('[store] opened store overlay (mobile/desktop)');
+});
 
 // Enter VR
 let vrButtonAttached = false;
@@ -146,7 +166,7 @@ function ensureVRButton(){
   try{
     const b = VRButton.createButton(renderer);
     b.style.position = 'fixed';
-    b.style.left = '-9999px'; // hide default button; we use our HUD button
+    b.style.left = '-9999px';
     document.body.appendChild(b);
     vrButtonAttached = true;
   }catch(err){
@@ -165,13 +185,12 @@ ui.enterVR.addEventListener('click', async ()=>{
     const supported = await navigator.xr.isSessionSupported('immersive-vr');
     diag.log(`[xr] immersive-vr supported=${supported}`);
     if (!supported){ diag.open(); return; }
-    // VRButton hooks the renderer to start session when button clicked.
-    // We request directly so it works on mobile.
     const session = await navigator.xr.requestSession('immersive-vr', {
       requiredFeatures: ['local-floor'],
       optionalFeatures: ['bounded-floor','hand-tracking','layers']
     });
     renderer.xr.setSession(session);
+    diag.log('[xr] session started ✅');
   }catch(err){
     diag.log(`[xr] requestSession error: ${err?.message || err}`);
     diag.open();
@@ -197,12 +216,9 @@ function step(){
 
   // Movement
   let mx = 0, mz = 0;
-
-  // touch stick (left)
   mx += touch.x;
   mz += touch.y;
 
-  // keyboard
   if (keys.has('a') || keys.has('arrowleft')) mx -= 1;
   if (keys.has('d') || keys.has('arrowright')) mx += 1;
   if (keys.has('w') || keys.has('arrowup')) mz -= 1;
@@ -213,7 +229,6 @@ function step(){
     const v = new THREE.Vector3(mx, 0, mz);
     if (v.lengthSq() > 0.001){
       v.normalize().multiplyScalar(speed * dt);
-      // Move relative to yaw
       const fwd = new THREE.Vector3(0,0,-1).applyAxisAngle(new THREE.Vector3(0,1,0), yaw);
       const right = new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0), yaw);
       player.position.addScaledVector(right, v.x);
@@ -239,3 +254,4 @@ diag.setMeta({
 diag.log(`[0.000] booting… BUILD=${BUILD}`);
 diag.log(`[${((performance.now()-t0)/1000).toFixed(3)}] renderer attached ✅`);
 diag.log(`[${((performance.now()-t0)/1000).toFixed(3)}] world built ✅`);
+diag.log(`[store] catalog items=${catalog.items.length} | coins=${profile.coins}`);

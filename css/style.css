@@ -1,176 +1,79 @@
-html, body {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-  background: #05070a;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-  overflow: hidden;
+/* ScarlettVR Poker — Boot Fix v1 */
+:root{
+  --bg:#0b0f1a;
+  --btn:#2f4b86;
+  --btn2:#244070;
+  --txt:#e9f2ff;
+}
+html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
+/* Ensure no fullscreen overlay blocks WebGL */
+#app,#overlay{display:none !important;}
+
+canvas{display:block;}
+
+/* HUD */
+#hud{
+  position:fixed; top:22px; left:0; right:0;
+  display:flex; flex-direction:column; gap:16px;
+  align-items:center; z-index:10; pointer-events:auto;
+}
+.row{display:flex; gap:18px; flex-wrap:wrap; justify-content:center;}
+.hudBtn{
+  min-width:210px;
+  padding:14px 18px;
+  border:0;
+  border-radius:28px;
+  color:var(--txt);
+  background:linear-gradient(180deg,var(--btn),var(--btn2));
+  box-shadow:0 8px 18px rgba(0,0,0,.35);
+  font-size:16px;
+}
+.hudBtn:active{transform:scale(.98);}
+
+/* Diagnostics panel */
+.panel{
+  position:fixed; left:12px; right:12px; top:12px; bottom:12px;
+  background:rgba(10,14,24,.92);
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:18px;
+  z-index:50;
+  display:flex; flex-direction:column;
+}
+.hidden{display:none !important;}
+.panelHeader{
+  display:flex; justify-content:space-between; align-items:center;
+  padding:12px 14px; border-bottom:1px solid rgba(255,255,255,.10);
+}
+.panelTitle{color:var(--txt); font-weight:700; letter-spacing:.4px;}
+.panelMeta{color:rgba(233,242,255,.75); font-size:12px; margin-top:2px;}
+.panelBody{
+  margin:0; padding:12px 14px; overflow:auto; color:#bfe0ff; font-size:12px; line-height:1.45;
+  white-space:pre-wrap;
+}
+.miniBtn{
+  padding:10px 12px; border:0; border-radius:14px;
+  background:rgba(255,255,255,.12); color:var(--txt);
 }
 
-.app {
-  position: fixed;
-  inset: 0;
+/* Touch joystick */
+#touchControls{
+  position:fixed; left:0; right:0; bottom:0; height:42%;
+  pointer-events:none; z-index:20;
 }
-
-canvas {
-  display: block;
-  width: 100% !important;
-  height: 100% !important;
+#stickBase{
+  position:absolute; left:22px; bottom:26px;
+  width:130px; height:130px;
+  border-radius:999px;
+  background:rgba(255,255,255,.08);
+  border:1px solid rgba(255,255,255,.10);
+  pointer-events:auto;
+  touch-action:none;
 }
-
-.hidden { display: none !important; }
-
-.hud {
-  position: fixed;
-  left: 8px;
-  right: 8px;
-  top: 8px;
-  z-index: 999;
-  pointer-events: auto;
-}
-
-.hudRow {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  justify-content: space-between;
-  background: rgba(0,0,0,0.55);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 12px;
-  padding: 10px;
-  backdrop-filter: blur(8px);
-}
-
-.hudRow2 {
-  margin-top: 8px;
-  justify-content: space-between;
-}
-
-.brandTitle {
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  font-size: 14px;
-}
-
-.brandSub {
-  opacity: 0.75;
-  font-size: 12px;
-}
-
-.hudButtons {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.hudBtn {
-  border: 1px solid rgba(255,255,255,0.15);
-  background: rgba(20,20,28,0.85);
-  color: #fff;
-  border-radius: 10px;
-  padding: 8px 10px;
-  font-weight: 700;
-  font-size: 12px;
-}
-
-.hudBtn:active { transform: translateY(1px); }
-
-.hudStatus {
-  font-size: 12px;
-  opacity: 0.9;
-}
-
-.hudHint {
-  font-size: 12px;
-  opacity: 0.7;
-  text-align: right;
-}
-
-.diagPanel {
-  margin-top: 8px;
-  background: rgba(0,0,0,0.75);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 12px;
-  padding: 10px;
-  max-height: 50vh;
-  overflow: auto;
-}
-
-.diagHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.diagTitle {
-  font-weight: 900;
-  font-size: 12px;
-  letter-spacing: 0.06em;
-}
-
-.diagText {
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin: 10px 0 0;
-  font-size: 11px;
-  line-height: 1.35;
-}
-
-.touchControls {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 45vh;
-  pointer-events: none;
-  z-index: 998;
-}
-
-.joystick {
-  position: absolute;
-  bottom: 16px;
-  width: 120px;
-  height: 120px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.18);
-  background: rgba(0,0,0,0.35);
-  pointer-events: auto;
-  touch-action: none;
-}
-
-.joystick .stick {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 48px;
-  height: 48px;
-  margin-left: -24px;
-  margin-top: -24px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.12);
-  border: 1px solid rgba(255,255,255,0.2);
-}
-
-.joystick.left { left: 16px; }
-.joystick.right { right: 16px; }
-
-.touchBtn {
-  position: absolute;
-  right: 160px;
-  bottom: 26px;
-  pointer-events: auto;
-  border: 1px solid rgba(255,255,255,0.15);
-  background: rgba(20,20,28,0.85);
-  color: #fff;
-  border-radius: 999px;
-  padding: 14px 16px;
-  font-weight: 900;
-  font-size: 12px;
-}
-
-@media (min-width: 900px) {
-  .touchControls { display: none; }
+#stickKnob{
+  position:absolute; left:50%; top:50%;
+  width:62px; height:62px;
+  transform:translate(-50%,-50%);
+  border-radius:999px;
+  background:rgba(255,255,255,.20);
+  border:1px solid rgba(255,255,255,.16);
 }

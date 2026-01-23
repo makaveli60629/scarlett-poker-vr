@@ -1,71 +1,12 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>The Coliseum — Private Club Build (V4.9)</title>
-<link rel="stylesheet" href="css/hologram.css"/>
+<meta charset="UTF-8" />
+<title>Scarlet VR 1.04 – Coliseum Private Club</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 </head>
 <body>
-
-<!-- Watch / HUD -->
-<div id="watch-root"></div>
-
-<!-- Live ticker -->
-<div id="live-ticker"></div>
-
-<!-- Golden Ticket -->
-<div id="golden-ticket" class="hidden" aria-label="Golden Ticket">🎟️</div>
-
-<!-- First-time Compliance Popup -->
-<div id="compliance-overlay" class="overlay hidden" role="dialog" aria-modal="true">
-  <div class="panel hologram-ui scan">
-    <h2>⚖️ Player Compliance & Privacy</h2>
-    <p class="sub">Private member association • Hands-only • Event Chips are entertainment only</p>
-
-    <div class="cols">
-      <div class="col">
-        <h3>Community Conduct</h3>
-        <ul>
-          <li>No harassment or hate speech in spatial audio.</li>
-          <li>Ninja Admins may freeze tables or remove disruptive players.</li>
-          <li>No controller emulators / auto-clickers. Violations may result in bans.</li>
-        </ul>
-      </div>
-      <div class="col">
-        <h3>Economy & Data</h3>
-        <ul>
-          <li>Event Chips have no real-world cash value.</li>
-          <li>Prestige item sales are final once equipped.</li>
-          <li>We do not record your room; only avatar pose data is synced for multiplayer.</li>
-          <li>Voice is processed in real time; private pods are not stored.</li>
-        </ul>
-      </div>
-    </div>
-
-    <div class="actions">
-      <button id="btnDecline" class="btn ghost">Leave</button>
-      <button id="btnAccept" class="btn ok">Accept</button>
-    </div>
-  </div>
-</div>
-
-<!-- Member Gatekeeper (Antechamber) -->
-<div id="gate-overlay" class="overlay hidden" role="dialog" aria-modal="true">
-  <div class="panel hologram-ui scan">
-    <h2>🗝️ Member Entrance</h2>
-    <p class="sub">Enter your invite code to access the Arena</p>
-
-    <div class="row">
-      <input id="memberCode" inputmode="numeric" autocomplete="one-time-code" maxlength="12"
-             placeholder="Enter code" class="codeInput"/>
-      <button id="btnEnter" class="btn ok">Enter</button>
-    </div>
-
-    <p class="hint">Tip: Your acceptance + membership are saved on this device.</p>
-  </div>
-</div>
-
-<script type="module" src="js/app.js"></script>
+<h1>Scarlet VR – Coliseum Private Club</h1>
+<script type="module" src="./js/main.js"></script>
 </body>
 </html>

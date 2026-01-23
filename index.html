@@ -3,13 +3,18 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-  <title>ScarlettVR Poker — Boot Fix v1</title>
-  <link rel="stylesheet" href="./css/style.css?v=1"/>
+  <title>ScarlettVR Poker — Update 1.1 (Store Ready)</title>
+  <link rel="stylesheet" href="./css/style.css?v=1.1"/>
   <meta name="theme-color" content="#0b0f1a"/>
 </head>
 <body>
   <!-- WebGL goes behind HUD -->
   <div id="hud">
+    <div id="topBar">
+      <div class="brand">SCARLETT</div>
+      <div class="wallet"><span class="coin">◎</span><span id="coinCount">0</span></div>
+    </div>
+
     <div class="row">
       <button id="btnEnterVR" class="hudBtn">Enter VR</button>
       <button id="btnTeleport" class="hudBtn">Teleport: ON</button>
@@ -21,6 +26,7 @@
       <button id="btnDeal" class="hudBtn">Demo Deal</button>
     </div>
     <div class="row">
+      <button id="btnStore" class="hudBtn">Store</button>
       <button id="btnScorpion" class="hudBtn">Scorpion Room</button>
       <button id="btnHide" class="hudBtn">Hide HUD</button>
     </div>
@@ -38,6 +44,48 @@
     <pre id="diagText" class="panelBody"></pre>
   </div>
 
+  <!-- Store overlay (mobile + desktop). In VR you use the in-world kiosk. -->
+  <div id="storePanel" class="panel hidden">
+    <div class="panelHeader">
+      <div>
+        <div class="panelTitle">STORE</div>
+        <div id="storeMeta" class="panelMeta">Tap an item to preview. Buy or Equip.</div>
+      </div>
+      <div class="headerBtns">
+        <button id="btnGrant" class="miniBtn">+100</button>
+        <button id="btnResetProfile" class="miniBtn">Reset</button>
+        <button id="btnCloseStore" class="miniBtn">Close</button>
+      </div>
+    </div>
+
+    <div class="storeBody">
+      <div class="storeLeft">
+        <div id="storeTabs" class="tabs"></div>
+        <div id="storeGrid" class="grid"></div>
+      </div>
+
+      <div class="storeRight">
+        <div class="previewTitle" id="previewTitle">Select an item</div>
+        <div class="previewCard">
+          <div id="previewThumb" class="thumb">Preview</div>
+          <div class="previewInfo">
+            <div class="kv"><span>Type</span><b id="previewType">—</b></div>
+            <div class="kv"><span>Price</span><b id="previewPrice">—</b></div>
+            <div class="kv"><span>Status</span><b id="previewStatus">—</b></div>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="btnBuy" class="hudBtn wide">Buy</button>
+          <button id="btnEquip" class="hudBtn wide">Equip</button>
+        </div>
+
+        <div class="hint">
+          VR tip: Walk to the <b>STORE</b> kiosk in the world and use your controller laser + trigger to select items.
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Mobile joystick -->
   <div id="touchControls">
     <div id="stickBase"><div id="stickKnob"></div></div>
@@ -53,6 +101,6 @@
     }
   </script>
 
-  <script type="module" src="./js/app.js?v=1"></script>
+  <script type="module" src="./js/app.js?v=1.1"></script>
 </body>
 </html>
